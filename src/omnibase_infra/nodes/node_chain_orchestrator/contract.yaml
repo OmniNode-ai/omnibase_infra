@@ -29,6 +29,11 @@ event_bus:
   publish_topics:
     - "onex.evt.omnibase-infra.chain-learn-complete.v1"
     - "onex.evt.omnibase-infra.chain-learn-failed.v1"
+  # OMN-13852: DLQ destination for unroutable inbound messages; matches the
+  # engine-derived NO_DISPATCHER topic for the "omnibase-infra" event_type domain
+  # so the dead-letter escape hatch targets a provisioned topic.
+  dlq_topics:
+    - "onex.dlq.omnibase-infra.omnibase-infra.v1"
 input_model:
   name: "ModelChainLearnCommand"
   module: "omnibase_infra.nodes.node_chain_orchestrator.models.model_chain_learn_command"
@@ -43,6 +48,11 @@ handler_routing:
     - event_model:
         name: "ModelChainLearnCommand"
         module: "omnibase_infra.nodes.node_chain_orchestrator.models.model_chain_learn_command"
+      # OMN-13852: per-handler event_type disambiguates the owned subscribe topic
+      # so routes register (previously the multi-handler ambiguity guard registered
+      # zero routes and every inbound message fell through to NO_DISPATCHER).
+      event_type: "omnibase-infra.chain-learn"
+      message_category: "COMMAND"
       handler:
         name: "HandlerChainLearnInitiate"
         module: "omnibase_infra.nodes.node_chain_orchestrator.handlers.handler_chain_learn_initiate"
@@ -51,6 +61,8 @@ handler_routing:
     - event_model:
         name: "ModelChainRetrievalResult"
         module: "omnibase_infra.nodes.node_chain_orchestrator.models.model_chain_retrieval_result"
+      event_type: "omnibase-infra.chain-retrieval-result"
+      message_category: "EVENT"
       handler:
         name: "HandlerChainRetrievalComplete"
         module: "omnibase_infra.nodes.node_chain_orchestrator.handlers.handler_chain_retrieval_complete"
@@ -59,6 +71,8 @@ handler_routing:
     - event_model:
         name: "ModelChainReplayResult"
         module: "omnibase_infra.nodes.node_chain_orchestrator.models.model_chain_replay_result"
+      event_type: "omnibase-infra.chain-replay-result"
+      message_category: "EVENT"
       handler:
         name: "HandlerChainReplayComplete"
         module: "omnibase_infra.nodes.node_chain_orchestrator.handlers.handler_chain_replay_complete"
@@ -67,6 +81,8 @@ handler_routing:
     - event_model:
         name: "ModelChainStoreResult"
         module: "omnibase_infra.nodes.node_chain_orchestrator.models.model_chain_store_result"
+      event_type: "omnibase-infra.chain-stored"
+      message_category: "EVENT"
       handler:
         name: "HandlerChainStoreComplete"
         module: "omnibase_infra.nodes.node_chain_orchestrator.handlers.handler_chain_store_complete"

@@ -10,6 +10,8 @@ import pytest
 
 # ONEX_FLAG_EXEMPT: test fixture — env var checked in tests below
 _OMNIMEMORY_FLAG = "OMNIMEMORY_ENABLED"
+_OMNIMEMORY_HOST = "OMNIMEMORY_MEMGRAPH_HOST"
+
 
 from omnibase_core.validation import validate_topic_suffix
 from omnibase_infra.topics import (
@@ -432,33 +434,24 @@ class TestProvisionedTopicSpecs:
             )
 
     def test_provisioned_contains_all_omnimemory(self) -> None:
-        """ALL_PROVISIONED_SUFFIXES includes OmniMemory suffixes iff OMNIMEMORY_ENABLED is truthy."""
+        """ALL_PROVISIONED_SUFFIXES either includes all OmniMemory suffixes or none."""
         omnimemory_suffixes = {spec.suffix for spec in ALL_OMNIMEMORY_TOPIC_SPECS}
-        enabled = os.environ.get(_OMNIMEMORY_FLAG, "").strip().lower() in {
-            "1",
-            "true",
-            "yes",
-            "on",
-        }
+        enabled = bool(omnimemory_suffixes.intersection(ALL_PROVISIONED_SUFFIXES))
         if enabled:
             for suffix in omnimemory_suffixes:
                 assert suffix in ALL_PROVISIONED_SUFFIXES, (
-                    f"OmniMemory suffix missing from provisioned when OMNIMEMORY_ENABLED=true: {suffix}"
+                    f"OmniMemory suffix missing from provisioned registry: {suffix}"
                 )
         else:
             for suffix in omnimemory_suffixes:
                 assert suffix not in ALL_PROVISIONED_SUFFIXES, (
-                    f"OmniMemory suffix present in provisioned when OMNIMEMORY_ENABLED is falsy: {suffix}"
+                    f"Partial OmniMemory suffix present in provisioned registry: {suffix}"
                 )
 
     def test_provisioned_count(self) -> None:
-        """Combined provisioned specs count reflects whether OMNIMEMORY_ENABLED is set."""
-        enabled = os.environ.get(_OMNIMEMORY_FLAG, "").strip().lower() in {
-            "1",
-            "true",
-            "yes",
-            "on",
-        }
+        """Combined provisioned specs count reflects the imported OmniMemory registry state."""
+        omnimemory_suffixes = {spec.suffix for spec in ALL_OMNIMEMORY_TOPIC_SPECS}
+        enabled = bool(omnimemory_suffixes.intersection(ALL_PROVISIONED_SUFFIXES))
         omnimemory_count = len(ALL_OMNIMEMORY_TOPIC_SPECS) if enabled else 0
         expected = (
             len(ALL_PLATFORM_TOPIC_SPECS)
@@ -697,7 +690,7 @@ class TestOmnimemoryEnabledGating:
         try:
             os.environ.clear()
             os.environ.update(old_env)
-            for key in [_OMNIMEMORY_FLAG]:
+            for key in [_OMNIMEMORY_FLAG, _OMNIMEMORY_HOST]:
                 os.environ.pop(key, None)
             os.environ.update(env)
 

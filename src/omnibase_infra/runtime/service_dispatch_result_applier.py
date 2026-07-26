@@ -62,7 +62,7 @@ from omnibase_infra.models.errors.model_infra_error_context import (
 )
 from omnibase_infra.topics import topic_keys
 from omnibase_infra.topics.service_topic_registry import ServiceTopicRegistry
-from omnibase_infra.utils import sanitize_error_message
+from omnibase_infra.utils import derive_event_type_from_topic, sanitize_error_message
 
 if TYPE_CHECKING:
     from omnibase_core.models.projectors.model_projection_intent import (
@@ -93,6 +93,23 @@ _DELEGATION_INTENT_TOPIC_BY_CLASS: dict[str, str] = {
     "ModelInvocationCommand": EnumOmnibaseInfraTopic.CMD_REMOTE_AGENT_INVOKE_V1.value,
     "ModelQualityGateIntent": _TOPIC_REGISTRY.resolve(
         topic_keys.DELEGATION_QUALITY_GATE_REQUEST
+    ),
+    # OMN-14794: the routing reducer's OUTPUT (ModelRoutingDecision) must resolve
+    # to routing-decision.v1 through ANY applier, not just the reducer's own
+    # auto-wired applier. When the decision is applied through an applier whose
+    # per-node allowed topics do NOT include routing-decision.v1 (e.g. the
+    # delegation orchestrator's plugin-managed applier, whose fallback
+    # ``output_topic`` is the delegation terminal), a ModelRoutingDecision with no
+    # class-name mapping silently fell back to that terminal topic — leaving
+    # routing-decision.v1 with zero records, so the orchestrator's
+    # handle_routing_decision never fired and the FSM stalled at RECEIVED and
+    # redelivered every session-timeout. Mapping the class here routes it to its
+    # canonical topic regardless of which applier publishes it (and adds
+    # routing-decision.v1 to ``_allowed_output_topics``). The reducer's own
+    # applier already resolved it via output_topic_map; this closes the gap for
+    # the generic/plugin-managed path.
+    "ModelRoutingDecision": _TOPIC_REGISTRY.resolve(
+        topic_keys.DELEGATION_ROUTING_DECISION
     ),
     "ModelRoutingIntent": _TOPIC_REGISTRY.resolve(
         topic_keys.DELEGATION_ROUTING_REQUEST
@@ -261,7 +278,17 @@ class DispatchResultApplier:
         the bus and downstream consumers expect. Publishing the carrier verbatim
         would double-nest it (``ModelEventEnvelope(payload=ModelEventEnvelope(...))``),
         so a ``ModelEventEnvelope`` output event is always unwrapped to its inner
-        payload — mirroring the ``ModelDelegationEventEnvelope`` unwrap (OMN-13247).
+        payload (OMN-13247).
+
+        OMN-14600: the delegation orchestrator now emits the canonical
+        ``ModelEventEnvelope`` directly rather than the bespoke
+        ``ModelDelegationEventEnvelope`` carrier — but pre-fix in-flight rows
+        and any as-yet-unredeployed producer can still legitimately emit the
+        old shape, and the core class itself has NOT been deleted (a separate
+        cleanup PR owns that, to avoid a cross-repo release-ordering break).
+        KEEPING the special case here is deliberate: dropping it before the
+        old shape is provably gone from every live producer + every stored
+        row is a gratuitous skew risk for zero benefit this PR.
         """
         if type(event).__name__ in (
             "ModelEventEnvelope",
@@ -361,33 +388,15 @@ class DispatchResultApplier:
     def _derive_event_type_from_topic(topic: str) -> str | None:
         """Derive the event_type routing key from an ONEX topic name.
 
-        ONEX topics follow the convention::
+        Thin delegation to the shared ``derive_event_type_from_topic`` helper so
+        this applier and the state_io in-row outbox publish path
+        (``_publish_outbox_batch``) stamp ``event_type`` from ONE canonical
+        derivation and cannot diverge (OMN-14743 — the outbox previously omitted
+        the stamp entirely, leaving ``event_type=None`` and stalling delegation).
 
-            onex.{kind}.{producer}.{event-name}.v{n}
-
-        This method extracts ``{producer}.{event-name}`` as a dot-path routing
-        key suitable for ``ModelEventEnvelope.event_type``, which is the alias
-        format used by dispatcher registration (e.g.
-        ``omnimarket.swarm-endpoint-health-completed``).
-
-        Args:
-            topic: Full topic name following ONEX naming convention
-                (e.g., ``'onex.evt.omnimarket.swarm-endpoint-health-completed.v1'``).
-
-        Returns:
-            Derived event_type as ``'{producer}.{event-name}'``
-            (e.g., ``'omnimarket.swarm-endpoint-health-completed'``), or ``None``
-            if the topic does not follow the expected ONEX format.
-
-        .. versionadded:: 0.41.0 (OMN-12116)
+        .. versionadded:: 0.41.0 (OMN-12116); lifted to shared helper OMN-14743.
         """
-        parts = topic.split(".")
-        if len(parts) >= 5 and parts[0] == "onex":
-            # onex.{kind}.{producer}.{event-name}.v{n}
-            producer = parts[2]
-            event_name = parts[3]
-            return f"{producer}.{event_name}"
-        return None
+        return derive_event_type_from_topic(topic)
 
     def _execute_projection(
         self,

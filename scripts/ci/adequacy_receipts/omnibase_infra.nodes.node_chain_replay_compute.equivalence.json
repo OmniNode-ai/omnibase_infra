@@ -1,0 +1,17 @@
+{
+  "node_id": "omnibase_infra.nodes.node_chain_replay_compute",
+  "provenance": {
+    "authored_by": "proof-author@omninode.local",
+    "base_ref_exec_sha": "f5ce7aa07fb5ec745f8775e4aa06ebf68e0ef21e",
+    "def_b_commit": "a74d206bac2b3f028416fc63adca252fb380ac86"
+  },
+  "replayed_through": "omnibase_infra.nodes.node_chain_replay_compute.handlers.handler_chain_replay:HandlerChainReplay.handle",
+  "selected_input_hashes": [
+    "sha256:daf0e4fc9087e2a877b19aff0ec5c66a7c4d8de667ffffdae41d053868f520b1",
+    "sha256:f09fa6d0549a9dc9ae55f644dec13c02558bc38e2f24c77156e0142cbd6a7aa7"
+  ],
+  "status": "pass",
+  "test_ids": [
+    "tests/unit/nodes/node_chain_replay_compute/test_node_chain_replay_compute_golden_equivalence.py::TestChainReplayGoldenEquivalence::test_def_b_reproduces_def_a_golden"
+  ]
+}

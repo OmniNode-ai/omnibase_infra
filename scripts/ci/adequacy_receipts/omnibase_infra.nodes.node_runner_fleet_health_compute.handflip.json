@@ -1,0 +1,35 @@
+{
+  "node_id": "omnibase_infra.nodes.node_runner_fleet_health_compute",
+  "receipt_schema": "handflip_proof.v1",
+  "canonical_handler_module": "omnibase_infra.nodes.node_runner_fleet_health_compute.handlers.handler_runner_fleet_health_evaluate",
+  "legacy_handler_module": "omnibase_infra.nodes.node_runner_fleet_health_compute.handlers.handler_runner_fleet_health_evaluate",
+  "base_ref": "426b92b2e8d414eb7be21b43d780181417cbf7df",
+  "preserved_symbols": [
+    "_classify_runner",
+    "_annotate_indeterminate",
+    "_recommend_for_assessment"
+  ],
+  "parity": {
+    "status": "pass",
+    "test_ids": [
+      "tests/unit/nodes/node_runner_fleet_maintain/test_runner_fleet_health_dispatch_entrypoint_omn14830.py::test_handler_handle_is_single_request_adaptable",
+      "tests/unit/nodes/node_runner_fleet_maintain/test_runner_fleet_health_dispatch_entrypoint_omn14830.py::test_real_dispatch_callback_returns_verdict[healthy]",
+      "tests/unit/nodes/node_runner_fleet_maintain/test_runner_fleet_health_dispatch_entrypoint_omn14830.py::test_real_dispatch_callback_returns_verdict[saturated]",
+      "tests/unit/nodes/node_runner_fleet_maintain/test_runner_fleet_health_dispatch_entrypoint_omn14830.py::test_real_dispatch_callback_returns_verdict[crashloop_and_zombie]",
+      "tests/unit/nodes/node_runner_fleet_maintain/test_runner_fleet_health_dispatch_entrypoint_omn14830.py::test_real_dispatch_callback_returns_verdict[wedged]",
+      "tests/unit/nodes/node_runner_fleet_maintain/test_runner_fleet_health_dispatch_entrypoint_omn14830.py::test_multipositional_handle_breaks_dispatch_is_the_red",
+      "tests/unit/nodes/node_runner_fleet_maintain/test_runner_fleet_health_dispatch_entrypoint_omn14830.py::test_dispatched_verdict_classifies_saturated_incident"
+    ],
+    "selected_input_hashes": [
+      "sha256:417282720dab4036ac8ebd1f8366cafa152ec9b2018e2330eb13153e7ccde972",
+      "sha256:df52a84157445fab2d0bc621c6469e04c6717911aaed04afced80bcf320b0f61",
+      "sha256:9448a3ffc5de0e9ea71bf310f7bfdf160d4fa9b2747359608c624f9babd72903",
+      "sha256:9283b33ea2d37421bb39d2b80e545c21f36f738418d7dcbca9d639666416781c",
+      "sha256:253c682105a45d8380c31de8eeb0981e3090416f566197daa95e85f453c85ff8",
+      "sha256:9abadaa2b1d881f14b2c561e53e96f3453f4a4447ddccede6043b1c450143c64",
+      "sha256:83864536efebbf49db80ec91ed4e335de940c8650b8b3012561d84b1a3a1454f",
+      "sha256:578f43255f6fd6db46693d3748374c1739515d3fb949df10789aa337b817a2a7",
+      "sha256:fda1e6b3995c79834845b7a97a547bda0afcf69671c118e61cce44bce8766dec"
+    ]
+  }
+}

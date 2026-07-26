@@ -10,6 +10,7 @@ instead of the deploy-agent rebuild command with a hardcoded origin/main.
 
 from __future__ import annotations
 
+import os
 import subprocess
 import sys
 from pathlib import Path
@@ -17,9 +18,30 @@ from unittest.mock import MagicMock, patch
 
 import pytest
 
-SCRIPT_PATH = (
-    Path(__file__).resolve().parents[3] / "scripts" / "trigger_rebuild_on_merge.py"
-)
+REPO_ROOT = Path(__file__).resolve().parents[3]
+SCRIPT_PATH = REPO_ROOT / "scripts" / "trigger_rebuild_on_merge.py"
+
+
+def _script_env() -> dict[str, str]:
+    """Subprocess env with hostile ambient ``PYTHONPATH`` replaced (OMN-14744).
+
+    The ``TestRedeployStartCLI`` cases spawn ``trigger_rebuild_on_merge.py`` via
+    ``sys.executable``, which must resolve ``omnibase_infra`` from THIS worktree
+    (its editable install) so dev-only modules like
+    ``omnibase_infra.utils.util_producer_effect_assertion`` are importable. But
+    ``scripts/monitor_logs.py`` (imported by the ``test_monitor_*`` suites earlier
+    in the session) runs ``_load_omnibase_env()`` at import, copying the
+    ``PYTHONPATH`` line from ``~/.omnibase/.env`` -- which points at the CANONICAL
+    ``$OMNI_HOME/omnibase_infra/src`` clone (frequently behind ``dev``) -- into the
+    global ``os.environ`` when it is not already set. That entry lands ahead of the
+    editable ``.pth`` and shadows the worktree, so the child import resolves the
+    wrong checkout. Replacing ``PYTHONPATH`` with this worktree's ``src`` directory
+    makes the child resolve the checked-out package deterministically, independent
+    of collection order.
+    """
+    env = {k: v for k, v in os.environ.items() if k != "PYTHONPATH"}
+    env["PYTHONPATH"] = str(REPO_ROOT / "src")
+    return env
 
 
 def _import_trigger_module():
@@ -194,6 +216,7 @@ class TestRedeployStartCLI:
             text=True,
             timeout=30,
             check=False,
+            env=_script_env(),
         )
         assert result.returncode == 0, f"stderr: {result.stderr}"
         assert "no rebuild trigger" in result.stdout.lower()
@@ -218,6 +241,7 @@ class TestRedeployStartCLI:
             text=True,
             timeout=30,
             check=False,
+            env=_script_env(),
         )
         assert result.returncode == 0, f"stderr: {result.stderr}"
         assert "runtime_lane=dev" in result.stdout
@@ -243,6 +267,7 @@ class TestRedeployStartCLI:
             text=True,
             timeout=30,
             check=False,
+            env=_script_env(),
         )
         assert result.returncode == 0, f"stderr: {result.stderr}"
         assert "runtime_lane=stability-test" in result.stdout
@@ -268,6 +293,7 @@ class TestRedeployStartCLI:
             text=True,
             timeout=30,
             check=False,
+            env=_script_env(),
         )
         assert result.returncode != 0
         assert "release" in (result.stdout + result.stderr)

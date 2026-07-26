@@ -1,0 +1,19 @@
+{
+  "golden_version": "compute_golden.v1",
+  "input": {
+    "correlation_id": "33333333-3333-4333-8333-333333333333",
+    "prs": [],
+    "require_approval": true
+  },
+  "input_type": "ModelClassifyInput",
+  "output": {
+    "correlation_id": "33333333-3333-4333-8333-333333333333",
+    "skipped": [],
+    "total_classified": 0,
+    "track_a": [],
+    "track_b": []
+  },
+  "output_type": "ModelClassifyResult",
+  "scenario": "empty",
+  "volatile_mask": []
+}

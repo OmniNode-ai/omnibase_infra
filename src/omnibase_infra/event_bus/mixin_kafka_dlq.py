@@ -54,6 +54,7 @@ from omnibase_infra.event_bus.models import (
     ModelEventHeaders,
     ModelEventMessage,
 )
+from omnibase_infra.event_bus.topic_constants import get_dlq_topic_for_original
 from omnibase_infra.topics import SUFFIX_PLATFORM_DLQ_MESSAGE
 from omnibase_infra.utils import sanitize_error_message
 
@@ -229,6 +230,8 @@ class MixinKafkaDlq:
         *,
         consumer_group: str,
         dlq_topic: str | None = None,
+        failure_class: str | None = None,
+        validation_detail: str | None = None,
     ) -> None:
         """Publish failed message to dead letter queue with metrics and alerting.
 
@@ -253,6 +256,10 @@ class MixinKafkaDlq:
                 Required for DLQ traceability.
             dlq_topic: Optional category-specific DLQ topic. Explicit
                 ``dead_letter_topic`` config takes precedence when present.
+            failure_class: Optional OMN-14492 classification threaded into the
+                DLQ envelope's structured fields (see ``_publish_raw_to_dlq``).
+            validation_detail: Optional real pydantic ``ValidationError``
+                detail (OMN-14492) for the ``publisher_malformed`` case.
 
         Note:
             This method logs errors if DLQ publishing fails but does not raise
@@ -301,7 +308,7 @@ class MixinKafkaDlq:
             value_str = "<decode_failed>"
 
         # Build DLQ message with failure metadata
-        dlq_payload = {
+        dlq_payload: dict[str, object] = {
             "original_topic": original_topic,
             "original_message": {
                 "key": key_str,
@@ -315,6 +322,12 @@ class MixinKafkaDlq:
             "retry_count": failed_message.headers.retry_count,
             "error_type": error_type,
         }
+        # OMN-14492: structured classification fields — only present when the
+        # caller supplied them.
+        if failure_class:
+            dlq_payload["failure_class"] = failure_class
+        if validation_detail:
+            dlq_payload["validation_detail"] = validation_detail
 
         # Create DLQ headers with failure metadata
         dlq_headers = ModelEventHeaders(
@@ -397,6 +410,10 @@ class MixinKafkaDlq:
                             ),
                         ]
                     )
+                    if failure_class:
+                        kafka_headers.append(
+                            ("failure_class", failure_class.encode("utf-8"))
+                        )
                     producer = self._producer
 
             # Send and wait for completion with timeout (outside producer lock)
@@ -430,6 +447,88 @@ class MixinKafkaDlq:
                     "message_partition": failed_message.partition,
                 },
             )
+
+        # OMN-14936/OMN-15031: see the matching fallback in
+        # _publish_raw_to_dlq for the full rationale -- a caller-supplied
+        # dlq_topic derived from a flat, un-namespaced event_type can name a
+        # topic that was never provisioned on the broker. Fall back once to
+        # the realm-agnostic, already-provisioned category topic derived
+        # from original_topic instead of letting the record be lost.
+        if not success:
+            fallback_dlq_topic = get_dlq_topic_for_original(original_topic)
+            if fallback_dlq_topic and fallback_dlq_topic != resolved_dlq_topic:
+                try:
+                    async with self._producer_lock:
+                        fallback_producer = self._producer
+                    if fallback_producer is not None:
+                        fallback_headers = self._model_headers_to_kafka(dlq_headers)
+                        fallback_headers.extend(
+                            [
+                                (
+                                    "original_topic",
+                                    original_topic.encode("utf-8"),
+                                ),
+                                (
+                                    "dlq_topic",
+                                    fallback_dlq_topic.encode("utf-8"),
+                                ),
+                                (
+                                    "dlq_topic_fallback_from",
+                                    resolved_dlq_topic.encode("utf-8"),
+                                ),
+                                (
+                                    "failure_reason",
+                                    sanitized_failure_reason.encode("utf-8"),
+                                ),
+                                (
+                                    "failure_timestamp",
+                                    start_time.isoformat().encode("utf-8"),
+                                ),
+                            ]
+                        )
+                        if failure_class:
+                            fallback_headers.append(
+                                ("failure_class", failure_class.encode("utf-8"))
+                            )
+                        await asyncio.wait_for(
+                            fallback_producer.send_and_wait(
+                                fallback_dlq_topic,
+                                value=dlq_value,
+                                key=failed_message.key,
+                                headers=fallback_headers,
+                            ),
+                            timeout=self._timeout_seconds,
+                        )
+                        logger.warning(
+                            "DLQ publish fell back to category topic after "
+                            "named topic was unroutable",
+                            extra={
+                                "original_topic": original_topic,
+                                "primary_dlq_topic": resolved_dlq_topic,
+                                "fallback_dlq_topic": fallback_dlq_topic,
+                                "correlation_id": str(correlation_id),
+                                "primary_dlq_error_type": dlq_error_type,
+                                "primary_dlq_error_message": dlq_error_message,
+                            },
+                        )
+                        success = True
+                        dlq_error_type = None
+                        dlq_error_message = None
+                        resolved_dlq_topic = fallback_dlq_topic
+                except Exception as fallback_error:
+                    logger.exception(
+                        "DLQ fallback publish also failed: message may be lost",
+                        extra={
+                            "original_topic": original_topic,
+                            "primary_dlq_topic": resolved_dlq_topic,
+                            "fallback_dlq_topic": fallback_dlq_topic,
+                            "correlation_id": str(correlation_id),
+                            "fallback_error_type": type(fallback_error).__name__,
+                            "fallback_error_message": sanitize_error_message(
+                                fallback_error
+                            ),
+                        },
+                    )
 
         # Calculate duration for metrics
         end_time = datetime.now(UTC)
@@ -567,7 +666,9 @@ class MixinKafkaDlq:
         *,
         consumer_group: str,
         dlq_topic: str | None = None,
-    ) -> None:
+        failure_class: str | None = None,
+        validation_detail: str | None = None,
+    ) -> bool:
         """Publish raw Kafka message to DLQ when deserialization fails.
 
         Cases where message conversion fails before we have
@@ -585,10 +686,30 @@ class MixinKafkaDlq:
                 Required for DLQ traceability.
             dlq_topic: Optional category-specific DLQ topic. Explicit
                 ``dead_letter_topic`` config takes precedence when present.
+            failure_class: Optional OMN-14492 classification (e.g.
+                ``"publisher_malformed"`` / ``"no_dispatcher"`` /
+                ``"valid_unrouted"`` / ``"consumer_error"``) — carried as a
+                top-level structured field on the DLQ envelope so a reader
+                does not have to parse ``failure_reason`` prose to know
+                whether the fix is the producer or the wiring.
+            validation_detail: Optional real pydantic ``ValidationError``
+                detail (OMN-14492) for the ``publisher_malformed`` case,
+                carried as its own structured field.
+
+        Returns:
+            ``True`` if the DLQ message was actually published (producer
+            send acked within timeout), ``False`` otherwise (rejected
+            input, producer unavailable, or the send itself failed/timed
+            out). Callers that gate an offset commit on durable DLQ
+            persistence (OMN-14936) MUST check this return value instead
+            of assuming the write succeeded just because no exception
+            escaped this method.
 
         Note:
             This method logs errors if DLQ publishing fails but does not raise
-            exceptions to prevent cascading failures in the consumer loop.
+            exceptions to prevent cascading failures in the consumer loop. The
+            boolean return value is the only signal of actual persistence
+            success.
         """
         # Validate original_topic - reject whitespace-only values
         if not original_topic or not original_topic.strip():
@@ -600,7 +721,7 @@ class MixinKafkaDlq:
                     "failure_type": failure_type,
                 },
             )
-            return
+            return False
 
         # Track timing for metrics
         start_time = datetime.now(UTC)
@@ -641,7 +762,7 @@ class MixinKafkaDlq:
             value_str = "<decode_failed>"
 
         # Build DLQ message with failure metadata
-        dlq_payload = {
+        dlq_payload: dict[str, object] = {
             "original_topic": original_topic,
             "original_message": {
                 "key": key_str,
@@ -656,6 +777,13 @@ class MixinKafkaDlq:
             "retry_count": 0,
             "error_type": error_type,
         }
+        # OMN-14492: structured classification fields — only present when the
+        # caller supplied them, so an unclassified DLQ record (legacy callers)
+        # is unchanged.
+        if failure_class:
+            dlq_payload["failure_class"] = failure_class
+        if validation_detail:
+            dlq_payload["validation_detail"] = validation_detail
 
         # Create DLQ headers
         dlq_headers = ModelEventHeaders(
@@ -742,6 +870,10 @@ class MixinKafkaDlq:
                             ),
                         ]
                     )
+                    if failure_class:
+                        kafka_headers.append(
+                            ("failure_class", failure_class.encode("utf-8"))
+                        )
                     producer = self._producer
 
             # Send and wait for completion with timeout (outside producer lock)
@@ -775,6 +907,93 @@ class MixinKafkaDlq:
                     "message_partition": raw_partition,
                 },
             )
+
+        # OMN-14936/OMN-15031: a caller-supplied dlq_topic derived from a
+        # flat, un-namespaced event_type (e.g. a per-message-type name like
+        # "delegation-inference-request") can name a topic that was never
+        # provisioned on the broker and is never auto-created. Rather than
+        # let that unroutable target eat the record, fall back once to the
+        # realm-agnostic, already-provisioned category topic derived from
+        # original_topic (e.g. "onex.dlq.omnibase-infra.commands.v1").
+        if not success:
+            fallback_dlq_topic = get_dlq_topic_for_original(original_topic)
+            if fallback_dlq_topic and fallback_dlq_topic != resolved_dlq_topic:
+                try:
+                    async with self._producer_lock:
+                        fallback_producer = self._producer
+                    if fallback_producer is not None:
+                        fallback_headers = self._model_headers_to_kafka(dlq_headers)
+                        fallback_headers.extend(
+                            [
+                                (
+                                    "original_topic",
+                                    original_topic.encode("utf-8"),
+                                ),
+                                (
+                                    "dlq_topic",
+                                    fallback_dlq_topic.encode("utf-8"),
+                                ),
+                                (
+                                    "dlq_topic_fallback_from",
+                                    resolved_dlq_topic.encode("utf-8"),
+                                ),
+                                ("failure_type", failure_type.encode("utf-8")),
+                                (
+                                    "failure_reason",
+                                    sanitized_failure_reason.encode("utf-8"),
+                                ),
+                                (
+                                    "failure_timestamp",
+                                    start_time.isoformat().encode("utf-8"),
+                                ),
+                            ]
+                        )
+                        if failure_class:
+                            fallback_headers.append(
+                                ("failure_class", failure_class.encode("utf-8"))
+                            )
+                        await asyncio.wait_for(
+                            fallback_producer.send_and_wait(
+                                fallback_dlq_topic,
+                                value=dlq_value,
+                                key=dlq_key,
+                                headers=fallback_headers,
+                            ),
+                            timeout=self._timeout_seconds,
+                        )
+                        logger.warning(
+                            "DLQ publish for raw message fell back to category "
+                            "topic after named topic was unroutable",
+                            extra={
+                                "original_topic": original_topic,
+                                "primary_dlq_topic": resolved_dlq_topic,
+                                "fallback_dlq_topic": fallback_dlq_topic,
+                                "correlation_id": str(correlation_id),
+                                "failure_type": failure_type,
+                                "primary_dlq_error_type": dlq_error_type,
+                                "primary_dlq_error_message": dlq_error_message,
+                            },
+                        )
+                        success = True
+                        dlq_error_type = None
+                        dlq_error_message = None
+                        resolved_dlq_topic = fallback_dlq_topic
+                except Exception as fallback_error:
+                    logger.exception(
+                        "DLQ fallback publish for raw message also failed: "
+                        "message may be lost",
+                        extra={
+                            "original_topic": original_topic,
+                            "primary_dlq_topic": resolved_dlq_topic,
+                            "fallback_dlq_topic": fallback_dlq_topic,
+                            "correlation_id": str(correlation_id),
+                            "failure_type": failure_type,
+                            "fallback_error_type": type(fallback_error).__name__,
+                            "fallback_error_message": sanitize_error_message(
+                                fallback_error
+                            ),
+                        },
+                    )
 
         # Calculate duration for metrics
         end_time = datetime.now(UTC)
@@ -827,6 +1046,8 @@ class MixinKafkaDlq:
 
         # Invoke DLQ callbacks
         await self._invoke_dlq_callbacks(dlq_event)
+
+        return success
 
 
 __all__: list[str] = ["MixinKafkaDlq", "DlqCallbackType"]

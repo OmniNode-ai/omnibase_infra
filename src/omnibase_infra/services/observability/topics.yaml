@@ -18,3 +18,21 @@ topics:
   - onex.evt.omniclaude.manifest-injection-started.v1
   # Skill lifecycle consumer
   - onex.evt.omniclaude.skill-lifecycle-dlq.v1
+  # Context audit consumer (OMN-14842, defect class OMN-7114)
+  # Produced by the omniclaude context audit pipeline (OMN-5234), which does
+  # NOT run on the runtime lane; consumed by ContextAuditConsumer
+  # (omnibase_infra.services.observability.context_audit). The broker
+  # auto-creates topics only on PRODUCE, never on subscribe, and since
+  # OMN-13238 the contract-first TopicProvisioner has no fallback to the
+  # Python registry (platform_topic_suffixes.py) where these suffixes are
+  # declared — so without explicit entries here the topics are never created
+  # and the consumer crash-loops on "topic not found in cluster metadata"
+  # (observed live on the dev lane, OMN-14842). All five consumer-subscribed
+  # audit topics are registered; the DLQ sibling
+  # (onex.evt.omniclaude.context-audit-dlq.v1) is already covered by the
+  # node_context_audit_dlq_effect contract (OMN-7114).
+  - onex.evt.omniclaude.audit-dispatch-validated.v1
+  - onex.evt.omniclaude.audit-scope-violation.v1
+  - onex.evt.omniclaude.audit-context-budget-exceeded.v1
+  - onex.evt.omniclaude.audit-return-bounded.v1
+  - onex.evt.omniclaude.audit-compression-triggered.v1

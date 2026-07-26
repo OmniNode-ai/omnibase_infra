@@ -84,6 +84,15 @@ entries:
     owner_ticket: OMN-13493
     accepted_rationale: 'Thin (90L) decision handler evaluating an RSD data-fetch-complete result and emitting the next step. The node declares an execution_graph, so traversal is executor-bound rather than handler-driven; no decorative FSM and no handler-side _transition. Accepted as baseline.'
   - repo: omnibase_infra
+    node: node_runner_fleet_maintain_orchestrator
+    max_handler_path: src/omnibase_infra/nodes/node_runner_fleet_maintain_orchestrator/handlers/handler_runner_fleet_health_verdict_complete.py
+    line_count: 65
+    risk_score: 2
+    finding_codes:
+      - H2
+    owner_ticket: OMN-13942
+    accepted_rationale: 'Thin (65L) decision handler evaluating a classified health verdict and emitting the terminal runner-fleet-maintain-completed event; no decorative FSM and no handler-driven _transition. Increment 1 (detection-only) has 3 payload/event hops (start, snapshot-complete, verdict-complete) with no mutation on any path. Accepted as baseline.'
+  - repo: omnibase_infra
     node: node_scope_workflow_orchestrator
     max_handler_path: src/omnibase_infra/nodes/node_scope_workflow_orchestrator/handlers/handler_scope_file_read_complete.py
     line_count: 73

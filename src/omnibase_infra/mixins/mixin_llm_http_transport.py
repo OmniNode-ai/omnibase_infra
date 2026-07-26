@@ -69,6 +69,7 @@ import logging
 import math
 import os
 import socket
+import time
 from ipaddress import IPv4Address, IPv4Network, ip_address
 from json import JSONDecodeError
 from typing import TYPE_CHECKING, ClassVar, cast
@@ -736,8 +737,31 @@ class MixinLlmHttpTransport(MixinAsyncCircuitBreaker, MixinRetryExecution):
                 "omninode.target": self._llm_target_name,
             },
         ) as _span:
+            _loop_started_at = time.monotonic()
             while retry_state.is_retriable():
                 try:
+                    # OMN-15066: emit a visible per-attempt marker BEFORE the
+                    # blocking POST. Retry-loop stalls on a slow-but-alive
+                    # endpoint were previously invisible for the entire
+                    # attempt duration (nothing logged between "start" and
+                    # "final failure/success"), which is indistinguishable
+                    # from a hang in any caller that doesn't wire a
+                    # DEBUG-level handler. This is INFO (not DEBUG) precisely
+                    # so it survives default logging configs.
+                    logger.info(
+                        "Starting LLM HTTP attempt",
+                        extra={
+                            "attempt": retry_state.attempt + 1,
+                            "max_attempts": retry_state.max_attempts,
+                            "target": self._llm_target_name,
+                            "url": url,
+                            "effective_timeout_seconds": effective_timeout,
+                            "elapsed_seconds": round(
+                                time.monotonic() - _loop_started_at, 3
+                            ),
+                            "correlation_id": str(correlation_id),
+                        },
+                    )
                     # Check circuit breaker
                     await self._check_circuit_if_enabled(operation, correlation_id)
 
@@ -761,7 +785,7 @@ class MixinLlmHttpTransport(MixinAsyncCircuitBreaker, MixinRetryExecution):
                                 error_message=f"Rate limited (429), retry after {retry_after}s",
                             )
                             if next_state.is_retriable():
-                                logger.debug(
+                                logger.info(
                                     "Rate limited, waiting before retry",
                                     extra={
                                         "retry_after_seconds": retry_after,
@@ -769,6 +793,9 @@ class MixinLlmHttpTransport(MixinAsyncCircuitBreaker, MixinRetryExecution):
                                         "max_attempts": next_state.max_attempts,
                                         "correlation_id": str(correlation_id),
                                         "target": self._llm_target_name,
+                                        "elapsed_seconds": round(
+                                            time.monotonic() - _loop_started_at, 3
+                                        ),
                                     },
                                 )
                                 await asyncio.sleep(retry_after)
@@ -786,7 +813,7 @@ class MixinLlmHttpTransport(MixinAsyncCircuitBreaker, MixinRetryExecution):
                         )
                         if classification.should_retry and next_state.is_retriable():
                             retry_state = next_state
-                            logger.debug(
+                            logger.info(
                                 "Retrying after HTTP error",
                                 extra={
                                     "status_code": response.status_code,
@@ -795,6 +822,9 @@ class MixinLlmHttpTransport(MixinAsyncCircuitBreaker, MixinRetryExecution):
                                     "delay_seconds": retry_state.delay_seconds,
                                     "correlation_id": str(correlation_id),
                                     "target": self._llm_target_name,
+                                    "elapsed_seconds": round(
+                                        time.monotonic() - _loop_started_at, 3
+                                    ),
                                 },
                             )
                             await asyncio.sleep(retry_state.delay_seconds)
@@ -869,7 +899,7 @@ class MixinLlmHttpTransport(MixinAsyncCircuitBreaker, MixinRetryExecution):
                     )
                     if next_state.is_retriable():
                         retry_state = next_state
-                        logger.debug(
+                        logger.info(
                             "Retrying after connection error",
                             extra={
                                 "attempt": retry_state.attempt,
@@ -877,6 +907,9 @@ class MixinLlmHttpTransport(MixinAsyncCircuitBreaker, MixinRetryExecution):
                                 "delay_seconds": retry_state.delay_seconds,
                                 "correlation_id": str(correlation_id),
                                 "target": self._llm_target_name,
+                                "elapsed_seconds": round(
+                                    time.monotonic() - _loop_started_at, 3
+                                ),
                             },
                         )
                         await asyncio.sleep(retry_state.delay_seconds)
@@ -899,7 +932,7 @@ class MixinLlmHttpTransport(MixinAsyncCircuitBreaker, MixinRetryExecution):
                     )
                     if next_state.is_retriable():
                         retry_state = next_state
-                        logger.debug(
+                        logger.info(
                             "Retrying after timeout",
                             extra={
                                 "attempt": retry_state.attempt,
@@ -908,6 +941,9 @@ class MixinLlmHttpTransport(MixinAsyncCircuitBreaker, MixinRetryExecution):
                                 "timeout_seconds": effective_timeout,
                                 "correlation_id": str(correlation_id),
                                 "target": self._llm_target_name,
+                                "elapsed_seconds": round(
+                                    time.monotonic() - _loop_started_at, 3
+                                ),
                             },
                         )
                         await asyncio.sleep(retry_state.delay_seconds)

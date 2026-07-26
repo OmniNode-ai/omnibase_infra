@@ -1,0 +1,461 @@
+# SPDX-FileCopyrightText: 2026 OmniNode.ai Inc.
+# SPDX-License-Identifier: MIT
+---
+# hostile-reviewer.yml
+#
+# Adversarial multi-model code review gate on every pull request (OMN-8468).
+#
+# Invokes omniintelligence.review_pairing.cli_review (node-based path via
+# HandlerLlmCliSubprocess / adapter_ai_reviewer) with the two currently-live
+# local models (qwen3-review on the 5090, qwen3-review-b on the 4090 --
+# OMN-14176; deepseek-r1 no longer serves on the local fleet). Codex is
+# excluded from the initial pilot -- add --model codex once non-interactive
+# OAuth auth is confirmed on the omnibase-ci runner (OMN-8524).
+#
+# Gate semantics (pilot phase, mirrors omnimarket/omniclaude OMN-8524 rollout):
+#   blocked  — critical/error findings from at least one succeeded model → exit 1
+#   degraded — all models failed (infra unavailable) → exit 0 (informational, pilot)
+#   passed   — no critical/error findings → exit 0
+#
+# Required status check name added by this workflow: "Hostile Review Gate".
+#
+# Reference: OMN-8468 (W6.1 mandatory CI gate), OMN-8524 (pilot rollout), OMN-14176 (model fix)
+
+name: Hostile Reviewer
+
+on:
+  pull_request:
+    branches: [main, dev]
+    types: [opened, synchronize, reopened]
+
+permissions:
+  pull-requests: write
+  contents: read
+
+jobs:
+  occ-preflight:
+    # self-gating-ok: centralized OCC preflight reusable is the canonical cross-repo gate for non-OCC repositories.
+    # omnibase_infra has no local occ-preflight.yml (unlike omnibase_core, which
+    # hosts the reusable) -- reference it remotely, matching the pinned SHA
+    # already used by this repo's own call-occ-preflight.yml / auto-merge.yml.
+    uses: OmniNode-ai/omnibase_core/.github/workflows/occ-preflight.yml@79c620f904526f773f6b92eb98743b011fe2eb12
+    permissions:
+      contents: read
+      pull-requests: read
+    with:
+      contracts-dir: contracts
+      receipts-dir: drift/dod_receipts
+      core-ref: 8a47e092002dd1338599fa0733feda469436acbf
+
+  hostile-review:
+    needs: occ-preflight
+    name: Hostile Reviewer (adversarial gate)
+    # self-hosted runner on .201 required -- qwen3-review(-b) are LAN-only  # onex-allow-internal-ip
+    runs-on: >-
+      ${{
+        (github.event_name == 'pull_request' &&
+         (github.event.pull_request.head.repo.full_name != github.repository ||
+          github.event.pull_request.base.ref == 'dev'))
+        && fromJSON(vars.OMNI_PUBLIC_PR_RUNS_ON_JSON || '["ubuntu-latest"]')
+        || fromJSON(vars.OMNI_TRUSTED_CI_RUNS_ON_JSON || '["self-hosted","omnibase-ci"]')
+      }}
+    timeout-minutes: 35
+
+    steps:
+      - name: Checkout PR branch
+        uses: actions/checkout@v7
+        with:
+          fetch-depth: 1
+
+      - name: Clean stale dependency clones
+        working-directory: ${{ github.workspace }}
+        run: rm -rf ../omniintelligence ../omnibase_core_dep ../omnibase_compat
+
+      - name: Clone omniintelligence
+        working-directory: ${{ github.workspace }}
+        run: |
+          for attempt in {1..4}; do
+            rm -rf ../omniintelligence
+            if git clone --depth=1 --filter=blob:none --branch dev \
+              https://github.com/OmniNode-ai/omniintelligence.git ../omniintelligence; then
+              exit 0
+            fi
+            sleep $((attempt * 10))
+          done
+          exit 1
+
+      - name: Clone omnibase_core (omniintelligence dependency)
+        working-directory: ${{ github.workspace }}
+        run: |
+          for attempt in {1..4}; do
+            rm -rf ../omnibase_core_dep
+            if git clone --depth=1 --filter=blob:none --branch dev \
+              https://github.com/OmniNode-ai/omnibase_core.git ../omnibase_core_dep; then
+              exit 0
+            fi
+            sleep $((attempt * 10))
+          done
+          exit 1
+
+      - name: Clone omnibase_compat
+        working-directory: ${{ github.workspace }}
+        run: |
+          for attempt in {1..4}; do
+            rm -rf ../omnibase_compat
+            if git clone --depth=1 --filter=blob:none --branch dev \
+              https://github.com/OmniNode-ai/omnibase_compat.git ../omnibase_compat; then
+              exit 0
+            fi
+            sleep $((attempt * 10))
+          done
+          exit 1
+
+      - name: Install uv
+        uses: astral-sh/setup-uv@v7
+        with:
+          version: "latest"
+
+      - name: Set up Python 3.12
+        working-directory: ${{ github.workspace }}
+        run: uv python install 3.12
+
+      - name: Preflight — probe review endpoint reachability
+        id: preflight
+        working-directory: ../omniintelligence
+        env:
+          # Resolve the SAME registry the reviewer loads (model_registry_loader)
+          # for the SAME models the review step runs
+          # (`--model qwen3-review --model qwen3-review-b`). We flip
+          # reachable=false ONLY when EVERY requested model is unreachable AND the
+          # codex api-fallback is unavailable — the exact condition under which the
+          # reviewer itself yields verdict=degraded + exit 0.
+          REVIEW_MODEL_KEYS: "qwen3-review qwen3-review-b"
+          REGISTRY_PATH: "src/omniintelligence/review_pairing/model_registry.yaml"
+          # Wired from a GitHub Actions secret (mirrors OMN-14176): the LLM HTTP
+          # transport HMAC-signs every call with LOCAL_LLM_SHARED_SECRET and
+          # fail-closes if it is absent.
+          LOCAL_LLM_SHARED_SECRET: ${{ secrets.LOCAL_LLM_SHARED_SECRET }}
+          LLM_ENDPOINT_CIDR_ALLOWLIST: "192.168.86.0/24"  # onex-allow-internal-ip OMN-8468 reason="LAN subnet allowlist for the review LLM endpoint host 192.168.86.201"
+        run: |
+          # -e is intentionally OMITTED: this probe must NEVER fail the job. Every
+          # uncertain/ambiguous outcome FAILS OPEN to the full install + review.
+          set -o pipefail
+
+          PROBE_TARGETS="$(uv run --no-project --with pyyaml python - <<'PYEOF'
+          import os
+          import shutil
+          import urllib.parse
+
+          import yaml
+
+          registry_path = os.environ["REGISTRY_PATH"]
+          model_keys = os.environ["REVIEW_MODEL_KEYS"].split()
+          with open(registry_path, encoding="utf-8") as fh:
+              registry = yaml.safe_load(fh)
+
+
+          def _codex_resolvable() -> bool:
+              env_override = os.environ.get("CODEX_BINARY")
+              if (
+                  env_override
+                  and os.path.isfile(env_override)
+                  and os.access(env_override, os.X_OK)
+              ):
+                  return True
+              if shutil.which("codex") is not None:
+                  return True
+              for directory in (
+                  "/opt/homebrew/bin",
+                  "/usr/local/bin",
+                  os.path.expanduser("~/.local/bin"),
+              ):
+                  candidate = os.path.join(directory, "codex")
+                  if os.path.isfile(candidate) and os.access(candidate, os.X_OK):
+                      return True
+              return False
+
+
+          fallback_keys = list(registry.get("api_fallback_keys", []))
+          if not fallback_keys:
+              fallback_blocks = False
+          elif any(k != "codex" for k in fallback_keys):
+              fallback_blocks = True
+          else:
+              fallback_blocks = _codex_resolvable()
+
+          print(f"FALLBACK|{'true' if fallback_blocks else 'false'}")
+
+          for model_key in model_keys:
+              cfg = registry["models"].get(model_key)
+              if not cfg:
+                  continue
+              url = os.environ.get(cfg["env_var"], cfg["default_url"]).strip()
+              parsed = urllib.parse.urlparse(url)
+              host = parsed.hostname or ""
+              port = parsed.port or 80
+              if url and host:
+                  print(f"TARGET|{host}|{port}|{url}")
+          PYEOF
+          )"
+
+          FALLBACK_BLOCKS="$(printf '%s\n' "$PROBE_TARGETS" | sed -n 's/^FALLBACK|//p' | head -n1)"
+          TARGETS="$(printf '%s\n' "$PROBE_TARGETS" | grep '^TARGET' || true)"
+
+          if [ -z "$TARGETS" ]; then
+            echo "Could not statically resolve any of [${REVIEW_MODEL_KEYS}]; proceeding with full review (fail-open)."
+            echo "reachable=true" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+
+          UNREACHABLE=""
+          while IFS='|' read -r _tag HOST PORT URL; do
+            [ "$_tag" = "TARGET" ] || continue
+            model_reachable="false"
+            for attempt in 1 2 3; do
+              if timeout 5 bash -c "exec 3<>/dev/tcp/${HOST}/${PORT}" 2>/dev/null; then
+                echo "TCP connect to ${HOST}:${PORT} (${URL}) succeeded (attempt ${attempt})."
+                model_reachable="true"
+                break
+              fi
+              echo "TCP connect to ${HOST}:${PORT} (${URL}) failed (attempt ${attempt}/3)."
+              [ "$attempt" -lt 3 ] && sleep 2
+            done
+            if [ "$model_reachable" = "true" ]; then
+              echo "At least one review endpoint is reachable; proceeding with full review."
+              echo "reachable=true" >> "$GITHUB_OUTPUT"
+              exit 0
+            fi
+            UNREACHABLE="${UNREACHABLE}${HOST}:${PORT} "
+          done < <(printf '%s\n' "$TARGETS")
+
+          if [ "$FALLBACK_BLOCKS" = "true" ]; then
+            echo "All review endpoints unreachable, but the codex api-fallback may be available; proceeding to the full review (reviewer decides)."
+            echo "reachable=true" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+
+          echo "::warning::All review endpoints [${UNREACHABLE}] unreachable after 3 attempts and no codex api-fallback available; short-circuiting to DEGRADED and skipping the heavy install + review."
+          {
+            echo "reachable=false"
+            echo "verdict=degraded"
+            echo "blocking_count=0"
+            echo "total_findings=0"
+            echo "models_succeeded="
+            echo "error=all review endpoints [${UNREACHABLE}] unreachable — preflight short-circuit (no models available)"
+          } >> "$GITHUB_OUTPUT"
+          exit 0
+
+      - name: Install omniintelligence dependencies
+        if: steps.preflight.outputs.reachable != 'false'
+        id: install-omniintelligence
+        continue-on-error: true
+        working-directory: ../omniintelligence
+        env:
+          UV_CONCURRENT_DOWNLOADS: "1"
+          UV_HTTP_TIMEOUT: "600"
+          UV_SYNC_ATTEMPTS: "5"
+          UV_SYNC_RETRY_DELAY_SECONDS: "10"
+          UV_TORCH_BACKEND: "cpu"
+        run: |
+          set -euo pipefail
+
+          attempt=1
+          until uv sync --locked --all-extras; do
+            status=$?
+            if [ "$attempt" -ge "$UV_SYNC_ATTEMPTS" ]; then
+              echo "::error::uv sync failed after ${attempt} attempt(s)"
+              exit "$status"
+            fi
+
+            sleep_seconds=$((UV_SYNC_RETRY_DELAY_SECONDS * attempt))
+            echo "::warning::uv sync attempt ${attempt}/${UV_SYNC_ATTEMPTS} failed with exit ${status}; retrying in ${sleep_seconds}s"
+            sleep "$sleep_seconds"
+            attempt=$((attempt + 1))
+          done
+
+      - name: Run adversarial review
+        if: steps.preflight.outputs.reachable != 'false'
+        id: review
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          PR_NUMBER: ${{ github.event.pull_request.number }}
+          REPO: ${{ github.repository }}
+          LOCAL_LLM_SHARED_SECRET: ${{ secrets.LOCAL_LLM_SHARED_SECRET }}
+          LLM_ENDPOINT_CIDR_ALLOWLIST: "192.168.86.0/24"  # onex-allow-internal-ip OMN-8468 reason="LAN subnet allowlist for the review LLM endpoint host 192.168.86.201; transport fail-closes if unset"
+        working-directory: ../omniintelligence
+        run: |
+          set -euo pipefail
+
+          # Two models (mirrors OMN-14176): qwen3-review (5090 :8000) + qwen3-review-b
+          # (4090 :8001). Running >=2 models makes cli_review exit 0 ("at least 2
+          # succeeded") reachable — avoids the single-model exit-2 collapse where a
+          # successful review is misreported as "all models failed".
+          REVIEW_JSON=$(uv run python -m omniintelligence.review_pairing.cli_review \
+            --pr "$PR_NUMBER" \
+            --repo "$REPO" \
+            --model qwen3-review \
+            --model qwen3-review-b \
+            2> >(tee hostile-reviewer-stderr.log >&2)) || REVIEW_EXIT=$?
+
+          if [ "${REVIEW_EXIT:-0}" -ne 0 ]; then
+            {
+              echo "verdict=degraded"
+              echo "blocking_count=0"
+              echo "total_findings=0"
+              echo "models_succeeded="
+              echo "error=cli_review exited non-zero (fewer than 2 models succeeded — partial/total outage — or binary error)"
+            } >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+
+          VERDICT_DATA=$(REVIEW_JSON="$REVIEW_JSON" python3 - <<'PYEOF'
+          import json, os
+
+          data = json.loads(os.environ["REVIEW_JSON"])
+          models_succeeded = list(data.get("models_succeeded", []))
+          total_findings = data.get("total_input_findings", 0)
+
+          blocking = 0
+          for f in data.get("merged_findings", []):
+              if f.get("severity") == "critical":
+                  blocking += 1
+
+          if not models_succeeded:
+              verdict = "degraded"
+          elif blocking > 0:
+              verdict = "blocked"
+          else:
+              verdict = "passed"
+
+          print(f"verdict={verdict}")
+          print(f"blocking_count={blocking}")
+          print(f"total_findings={total_findings}")
+          print(f"models_succeeded={','.join(models_succeeded)}")
+          PYEOF
+          )
+
+          echo "$VERDICT_DATA" >> "$GITHUB_OUTPUT"
+          echo "error=" >> "$GITHUB_OUTPUT"
+
+          VERDICT=$(echo "$VERDICT_DATA" | grep '^verdict=' | cut -d= -f2)
+          if [ "$VERDICT" = "blocked" ]; then
+            exit 1
+          fi
+
+      - name: Post review summary as PR comment
+        if: always()
+        uses: actions/github-script@v9
+        env:
+          REVIEW_VERDICT: ${{ steps.review.outputs.verdict || steps.preflight.outputs.verdict }}
+          REVIEW_BLOCKING: ${{ steps.review.outputs.blocking_count || steps.preflight.outputs.blocking_count }}
+          REVIEW_TOTAL: ${{ steps.review.outputs.total_findings || steps.preflight.outputs.total_findings }}
+          REVIEW_MODELS: ${{ steps.review.outputs.models_succeeded || steps.preflight.outputs.models_succeeded }}
+          REVIEW_ERROR: ${{ steps.review.outputs.error || steps.preflight.outputs.error }}
+        with:
+          github-token: ${{ secrets.GITHUB_TOKEN }}
+          script: |
+            const verdict = process.env.REVIEW_VERDICT || 'unknown';
+            const blocking = parseInt(process.env.REVIEW_BLOCKING || '0');
+            const total = parseInt(process.env.REVIEW_TOTAL || '0');
+            const models = process.env.REVIEW_MODELS || '';
+            const error = process.env.REVIEW_ERROR || '';
+
+            const icon = {
+              passed: '✅',
+              blocked: '🚫',
+              degraded: '⚠️',
+            }[verdict] || '❓';
+
+            const label = {
+              passed: 'PASSED',
+              blocked: 'BLOCKED',
+              degraded: 'DEGRADED (informational)',
+            }[verdict] || verdict.toUpperCase();
+
+            let note = '';
+            if (verdict === 'degraded') {
+              note = '\n\n> **Note**: All reviewer models failed or were unavailable. ' +
+                'Degraded results are informational during the pilot phase (OMN-8468/OMN-8524) and do not block merge.';
+              if (error) note += ` Error: \`${error}\``;
+            } else if (verdict === 'blocked') {
+              note = '\n\n> **Action required**: Resolve CRITICAL findings before merge.';
+            }
+
+            const body = [
+              `## ${icon} Hostile Reviewer — ${label}`,
+              '',
+              `**Blocking findings** (critical): ${blocking}  `,
+              `**Total findings**: ${total}  `,
+              `**Models succeeded**: ${models || 'none'}`,
+              note,
+              '',
+              '---',
+              '',
+              '**Gate semantics (pilot phase)**',
+              '',
+              '| Verdict | Meaning | Blocks merge? |',
+              '|---------|---------|---------------|',
+              '| `passed` | No critical findings | No |',
+              '| `blocked` | CRITICAL findings found | **Yes** |',
+              '| `degraded` | All models unavailable (infra) | No (pilot) |',
+              '',
+              '_Powered by [omniintelligence.review_pairing.cli_review](https://github.com/OmniNode-ai/omniintelligence) — node-based adversarial review via HandlerLlmCliSubprocess (OMN-8468/OMN-8524)_',
+            ].join('\n');
+
+            const { data: comments } = await github.rest.issues.listComments({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              issue_number: context.issue.number,
+            });
+
+            const existing = comments.find(c =>
+              c.body.includes('Hostile Reviewer')
+            );
+
+            if (existing) {
+              await github.rest.issues.updateComment({
+                owner: context.repo.owner,
+                repo: context.repo.repo,
+                comment_id: existing.id,
+                body,
+              });
+            } else {
+              await github.rest.issues.createComment({
+                owner: context.repo.owner,
+                repo: context.repo.repo,
+                issue_number: context.issue.number,
+                body,
+              });
+            }
+
+  hostile-review-gate:
+    name: Hostile Review Gate
+    runs-on: >-
+      ${{
+        (github.event_name == 'pull_request' &&
+         (github.event.pull_request.head.repo.full_name != github.repository ||
+          github.event.pull_request.base.ref == 'dev'))
+        && fromJSON(vars.OMNI_PUBLIC_PR_RUNS_ON_JSON || '["ubuntu-latest"]')
+        || fromJSON(vars.OMNI_TRUSTED_CI_RUNS_ON_JSON || '["self-hosted","omnibase-ci"]')
+      }}
+    needs: [occ-preflight, hostile-review]
+    if: always()
+    steps:
+      - name: Evaluate gate
+        working-directory: ${{ github.workspace }}
+        run: |
+          echo "=== Hostile Review Gate ==="
+          PREFLIGHT="${{ needs.occ-preflight.result }}"
+          RESULT="${{ needs.hostile-review.result }}"
+          echo "occ-preflight: $PREFLIGHT"
+          echo "hostile-review: $RESULT"
+
+          if [ "$PREFLIGHT" != "success" ]; then
+            echo "::error::OCC preflight failed or did not complete (result: $PREFLIGHT)."
+            exit 1
+          fi
+          if [ "$RESULT" = "failure" ]; then
+            echo "::error::Hostile reviewer found CRITICAL findings — resolve before merge."
+            exit 1
+          fi
+          echo "Hostile Review Gate PASSED"

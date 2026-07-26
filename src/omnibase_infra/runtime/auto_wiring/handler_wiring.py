@@ -27,12 +27,14 @@ import concurrent.futures
 import hashlib
 import importlib
 import inspect
+import json
 import logging
 import math
 import os
 import re
+import time
 from collections import defaultdict
-from collections.abc import Awaitable, Callable, Mapping
+from collections.abc import Awaitable, Callable, Mapping, Sequence
 from dataclasses import dataclass, field
 from datetime import UTC, datetime
 from pathlib import Path
@@ -44,12 +46,15 @@ from typing import (
     get_origin,
     runtime_checkable,
 )
+from uuid import UUID, uuid4
 
-from pydantic import BaseModel
+from pydantic import BaseModel, ValidationError
 
+from omnibase_core.enums.enum_core_error_code import EnumCoreErrorCode
 from omnibase_core.enums.enum_handler_resolution_outcome import (
     EnumHandlerResolutionOutcome,
 )
+from omnibase_core.enums.enum_node_kind import EnumNodeKind
 from omnibase_core.models.errors import ModelOnexError
 from omnibase_core.models.resolver.model_handler_resolver_context import (
     ModelHandlerResolverContext,
@@ -57,6 +62,7 @@ from omnibase_core.models.resolver.model_handler_resolver_context import (
 from omnibase_core.protocols.event_bus.protocol_event_bus_subscriber import (
     ProtocolEventBusSubscriber,
 )
+from omnibase_core.runtime.runtime_fanout_resolver import resolve_published_topic
 from omnibase_core.services.service_handler_resolver import ServiceHandlerResolver
 from omnibase_core.services.service_local_handler_ownership_query import (
     ServiceLocalHandlerOwnershipQuery,
@@ -86,6 +92,11 @@ from omnibase_infra.protocols.protocol_topic_provisioner import (
 from omnibase_infra.runtime.auto_wiring.enum_quarantine_reason import (
     EnumQuarantineReason,
 )
+from omnibase_infra.runtime.auto_wiring.fanout_seam import (
+    check_fanout_publish_coverage,
+    is_fanout_sequence,
+    normalize_fanout_sequence,
+)
 from omnibase_infra.runtime.auto_wiring.models import (
     ModelAutoWiringManifest,
     ModelDiscoveredContract,
@@ -101,6 +112,68 @@ from omnibase_infra.runtime.auto_wiring.report import (
     ModelSkippedEntry,
     ModelWiringOutcome,
 )
+from omnibase_infra.runtime.models.model_postgres_pool_config import (
+    ModelPostgresPoolConfig,
+)
+from omnibase_infra.runtime.providers.provider_postgres_pool import ProviderPostgresPool
+from omnibase_infra.runtime.state_io.state_store_adapter import (
+    CONTEXTVAR_STATE_IO_ROWS,
+    StateIoUnconfiguredError,
+    StateStoreAdapter,
+)
+from omnibase_infra.shared.tenant_stamp import stamp_verified_tenant_slug
+from omnibase_infra.utils.util_retry_optimistic import (
+    OptimisticConflictError,
+    retry_on_optimistic_conflict,
+)
+from omnibase_infra.utils.util_topic_event_type import derive_event_type_from_topic
+
+
+class BoundaryPublishError(Exception):
+    """Marks a result-applier (publish) failure the outbox boundary must PROPAGATE.
+
+    OMN-14403 §4.3: on the state_io / in-row-outbox path, a publish failure at
+    the RESULT-APPLIER layer (the no-bus / external-applier shape) must NOT be
+    log-and-discarded. The auto-wired boundary (`_make_event_bus_callback`)
+    tags an applier failure with this type ONLY when
+    `propagate_publish_failures` is set (state_io contracts), so the outer
+    handler re-raises it instead of swallowing. Non-outbox contracts never set
+    the flag → behavior is unchanged.
+
+    OMN-14600 CORRECTION: this type is distinct from a conflict-retry
+    exhaustion (`OptimisticConflictError`) raised INSIDE the state_io
+    dispatcher itself — that exception is absorbed by
+    `MessageDispatchEngine.dispatch()`'s per-dispatcher catch-all before it
+    ever reaches this boundary at all, so it does NOT redeliver on this
+    runtime (see the detailed note at `_make_event_bus_callback`'s
+    `except (OptimisticConflictError, BoundaryPublishError)` clause). The
+    state_io in_flight-lock branch self-heals inline for that reason instead
+    of depending on redelivery.
+    """
+
+
+class HandlerDispatchFailureError(Exception):
+    """A handler/coercion failure the engine reported as a FAILED dispatch RESULT.
+
+    OMN-14716. ``MessageDispatchEngine.dispatch()`` wraps every dispatcher call in
+    a catch-all (``except Exception``) that records the error and RETURNS a
+    ``HANDLER_ERROR`` result instead of re-raising. A def-B handler crash (or a
+    boundary coercion failure) therefore never propagates to the consume boundary
+    as an exception — it arrives as a FAILED result, and
+    ``DispatchResultApplier.apply()`` silently skips a non-SUCCESS result that
+    carries no applicable output. The message then vanishes at HWM=0 with nothing
+    terminalized (the .201 finding-aggregator incident).
+
+    ``_raise_if_silent_dispatch_failure`` raises this from
+    ``_dispatch_with_bounded_retry`` for exactly that shape so the failure flows
+    into the SAME ``_route_swallowed_exception`` path a raised handler exception
+    would take (loud structured metric log + best-effort DLQ under
+    ``ONEX_BOUNDARY_DLQ_ENABLED``). It is classified non-retryable at that
+    boundary: the FAILED result is deterministic, so retrying only burns the
+    backoff budget.
+    """
+
+
 from omnibase_spi.protocols.runtime.protocol_handler_ownership_query import (
     ProtocolHandlerOwnershipQuery,
 )
@@ -108,12 +181,12 @@ from omnibase_spi.protocols.runtime.protocol_handler_ownership_query import (
 if TYPE_CHECKING:
     from omnibase_core.models.dispatch.model_dispatch_route import ModelDispatchRoute
     from omnibase_core.models.events.model_event_envelope import ModelEventEnvelope
+    from omnibase_core.models.projectors.model_projection_intent import (
+        ModelProjectionIntent,
+    )
     from omnibase_infra.enums import EnumMessageCategory
     from omnibase_infra.models.dispatch.model_dispatch_result import (
         ModelDispatchResult,
-    )
-    from omnibase_infra.protocols.protocol_dispatch_engine import (
-        ProtocolDispatchEngine,
     )
     from omnibase_infra.protocols.protocol_pattern_b_broker_transport import (
         ProtocolPatternBBrokerTransport,
@@ -121,6 +194,7 @@ if TYPE_CHECKING:
     from omnibase_infra.runtime.service_terminal_event_consumer import (
         TerminalEventConsumer,
     )
+    from omnibase_spi.protocols.runtime import ProtocolDispatchEngine
 
 logger = logging.getLogger(__name__)
 
@@ -130,10 +204,146 @@ _SENSITIVE_PATTERN = re.compile(
     re.IGNORECASE,
 )
 _STRICT_DISPATCHER_COVERAGE_ENV = "ONEX_STRICT_DISPATCHER_COVERAGE"
+# OMN-14507: staged rollout for the auto-wired consume boundary DLQ fix.
+# DEFAULT OFF (warn-first) -- see _boundary_dlq_enabled() below.
+_BOUNDARY_DLQ_ENV = "ONEX_BOUNDARY_DLQ_ENABLED"
+_BOUNDARY_DLQ_MAX_ATTEMPTS = 3
+_BOUNDARY_DLQ_RETRY_BACKOFF_SECONDS: tuple[float, ...] = (0.1, 0.4)
+
+# OMN-14498 / OMN-15029: strong references to the detached DLQ-routing tasks
+# `_make_sync_event_publisher` schedules for a failed fire-and-forget publish
+# (see `_route_sync_publisher_failure`). Without this, the Task object has no
+# other referrer once `_log_publish_failure`'s local `dlq_task` variable goes
+# out of scope, which is a documented footgun for tasks scheduled via
+# `loop.create_task` outside of a structured-concurrency context (asyncio may
+# garbage-collect a task with no external references before it completes).
+# Discarded via its own done_callback once it finishes.
+_DLQ_ROUTING_TASKS: set[asyncio.Task[None]] = set()
+
+# OMN-14551: alertable counter for the boundary's one true loss window --
+# retry budget exhausted AND the best-effort DLQ publish itself also failed
+# (the ``message_lost=true`` branch of ``_route_swallowed_exception`` below).
+# Prior to this, that path was a structured-but-unalertable ``logger.error``
+# line only (forbid-verify residual ask: "a greppable log won't [page]").
+# Emitted through the same process-global default Prometheus registry the
+# runtime's existing metrics surface (``SinkMetricsPrometheus`` /
+# ``HandlerMetricsPrometheus``'s ``/metrics`` scrape endpoint, OMN-9121
+# observability profile) already exports -- mirrors the established
+# module-level ``prometheus_client.Counter`` idiom in ``handler_db.py``
+# (OMN-1366) rather than inventing a new observability surface. Scoped to
+# this one loss-path emission only -- not a refactor of the boundary's
+# other logging.
+try:
+    from prometheus_client import Counter as _PrometheusCounter
+
+    _BOUNDARY_MESSAGE_LOST_COUNTER: _PrometheusCounter | None = _PrometheusCounter(
+        "onex_boundary_message_lost_total",
+        "Count of auto-wiring boundary messages genuinely lost: handler "
+        "exception survived the bounded retry AND the best-effort DLQ "
+        "publish itself also failed. MUST page -- unlike "
+        "boundary_swallow_prevented (DLQ-routed, the success path), this "
+        "counter incrementing means the message is gone.",
+        ["topic", "error_type"],
+    )
+except (ImportError, ValueError):
+    # ImportError: prometheus_client not installed (graceful degradation,
+    # matches handler_db.py). ValueError: duplicate registration under
+    # pytest-xdist/module-reimport -- idempotent fallback, not fatal.
+    _BOUNDARY_MESSAGE_LOST_COUNTER = None
+# OMN-14600: the state_io outbox recovery sweep (re-publish + finalize any row
+# whose batch is committed but never finalized) originally ran exactly once
+# per adapter lifetime (first live dispatch only) -- a row stranded later in a
+# long-lived process's life was NOT re-scanned until the next boot/redeploy.
+# Gating on elapsed wall-clock time instead of a boolean makes the sweep
+# periodic: it re-runs opportunistically on the next dispatch once this many
+# seconds have passed since the last run. select_recoverable_batches() is a
+# cheap empty partial-index scan in steady state (docstring above), so a
+# 30s interval costs nothing while bounding the self-heal window.
+_STATE_IO_RECOVERY_SWEEP_INTERVAL_SECONDS = 30.0
+# OMN-14721: terminal FSM states for the state_io emission-completeness guard.
+# Mirrors the adapter's give-up sweep predicate (state_store_adapter.py
+# recover_stale_rows: ``state NOT IN ('COMPLETED', 'FAILED')``) and migration
+# 090's partial staleness index. A fresh seed into any NON-terminal state MUST
+# carry a durable emission (a pending_emissions batch OR an in_flight marker) —
+# a fresh non-terminal row committed with neither is structurally unrecoverable
+# by ``select_recoverable_batches`` and silently strands the workflow.
+_STATE_IO_TERMINAL_STATE_NAMES = frozenset({"COMPLETED", "FAILED"})
 _TOPIC_MIGRATION_EXECUTOR_DEPS = frozenset({"provisioner", "drain_proof_gate"})
 _DELEGATION_INFERENCE_INTENT_MODULE = "omnibase_core.models.delegation.wire"
 _DELEGATION_INFERENCE_INTENT_NAME = "ModelInferenceIntent"
 _DELEGATION_INFERENCE_INTENT_DISCRIMINATOR = "llm_inference"
+_LEDGER_DB_DSN_ENV_VARS: tuple[str, ...] = ("OMNIBASE_INFRA_DB_URL", "DATABASE_URL")
+# OMN-14600: pre-fix rows committed by the delegation orchestrator's OLD
+# bespoke terminal carrier. Those entries recorded the CARRIER's own
+# module/class_name (never the "topic" entry key -- that field did not exist
+# yet) and stored its own dump verbatim: {"topic": <str>, "payload":
+# {...ModelDelegationResult fields...}}. ModelDelegationEventEnvelope was the
+# ONLY payload type this carrier ever wrapped in this codebase (the
+# delegation orchestrator's single terminal-emit site), so the inner class is
+# hardcoded here rather than re-derived generically -- there is no other
+# legacy-shaped carrier to generalize for.
+_LEGACY_DELEGATION_ENVELOPE_CLASS_NAME = "ModelDelegationEventEnvelope"
+_LEGACY_DELEGATION_RESULT_MODULE = (
+    "omnibase_core.models.delegation.wire.model_delegation_result"
+)
+_LEGACY_DELEGATION_RESULT_NAME = "ModelDelegationResult"
+
+
+def _legacy_delegation_envelope_unwrap(
+    entry: dict[str, object],
+) -> tuple[str, dict[str, object]] | None:
+    """Detect + unwrap a pre-fix ``ModelDelegationEventEnvelope`` outbox entry.
+
+    Returns ``(topic, inner_payload_dict)`` when ``entry`` is the legacy
+    shape (see module comment above), else ``None``. A row healed once by
+    this path is re-persisted with the NEW shape by its own
+    ``_finalize_outbox_row`` call, so this is a one-time migration read, not
+    a permanent dual-shape burden.
+    """
+    if entry.get("class_name") != _LEGACY_DELEGATION_ENVELOPE_CLASS_NAME:
+        return None
+    if entry.get("topic"):
+        # Already carries the new-shape topic key -- not the legacy shape.
+        return None
+    stored_payload = entry.get("payload")
+    if not isinstance(stored_payload, dict):
+        return None
+    topic = stored_payload.get("topic")
+    inner = stored_payload.get("payload")
+    if isinstance(topic, str) and topic and isinstance(inner, dict):
+        return topic, inner
+    return None
+
+
+# OMN-14403 P3a §6ii — the def-B multi-event (fan-out) publish seam. Default OFF;
+# flipped in a separate PR once every wired fan-out handler is coverage-clean (repo
+# rule: a gate that tightens acceptance ships behind an env flag, default OFF). A
+# Sequence[BaseModel] return stops being silently dropped to output_events=[] /
+# SUCCESS and becomes the published batch. This is the ONE env read for the seam
+# (the OMN-11069 env-read gate approves this module); the pure logic + the mirror
+# read on the RuntimeLocal path (LocalRuntimeBusAdapter) both gate on this same
+# flag so the two runtimes agree. NOTE: this PR is §6ii ONLY — the §8.1
+# causation/tenant carry (seam_apply_context) is a separate lane.
+ENV_MULTI_EVENT_PUBLISH_SEAM = "ONEX_MULTI_EVENT_PUBLISH_SEAM"
+
+
+def multi_event_seam_enabled() -> bool:
+    """Return True when the def-B fan-out publish seam is enabled (default: False)."""
+    return os.environ.get(ENV_MULTI_EVENT_PUBLISH_SEAM, "").strip().lower() in (
+        "1",
+        "true",
+        "yes",
+        "on",
+    )
+
+
+def _check_fanout_publish_coverage(contract: ModelDiscoveredContract) -> None:
+    """Prove fan-out handlers' emittable classes are contract-declared (§2C)."""
+    check_fanout_publish_coverage(
+        contract,
+        seam_enabled=multi_event_seam_enabled(),
+        env_flag=ENV_MULTI_EVENT_PUBLISH_SEAM,
+    )
 
 
 def _sanitize_exc(exc: BaseException) -> str:
@@ -399,6 +609,8 @@ async def _skip_dispatcher(
 def _make_dispatch_callback(
     handler_instance: ProtocolHandleable,
     event_model: ModelHandlerRef | None = None,
+    handler_node_kind: EnumNodeKind | None = None,
+    published_event_names: frozenset[str] | None = None,
 ) -> DispatcherFunc:
     """Create a dispatch callback wrapping a handler instance.
 
@@ -406,6 +618,20 @@ def _make_dispatch_callback(
     handlers receive a validated payload model and may be sync or async. Handlers
     that declare an envelope-shaped signature keep receiving a typed envelope
     even when their contract declares ``event_model``.
+
+    ``handler_node_kind`` carries the contract's declared archetype (from
+    ``contract.node_type``). It is consulted only by ``_normalize_handler_result``
+    to classify a REDUCER's bare typed / Sequence return as ``projection_intents``
+    rather than events (OMN-14598); ``None`` preserves the archetype-agnostic
+    classification for every other caller.
+
+    ``published_event_names`` carries the short-name keys of the contract's
+    ``published_events`` map (OMN-14794). It refines the OMN-14598 REDUCER
+    classification: a REDUCER return whose model class IS a declared published
+    event is emitted as an EVENT (``output_events``) instead of being captured as
+    a projection — the live delegation-routing drop that stalled the FSM at
+    RECEIVED. ``None`` (non-REDUCER, or a REDUCER declaring no published events)
+    leaves the projection classification unchanged.
 
     When a handler exposes ``handle_async`` in addition to ``handle``, the async
     variant is preferred for dispatch.  This allows orchestrator handlers that
@@ -457,7 +683,61 @@ def _make_dispatch_callback(
                 ModelDispatchResult,
             )
 
-            raw_result_obj = handle_method(envelope)
+            # OMN-14716: an operation_match def-B handler declares no contract
+            # ``event_model``, so the typed-coercion path below never runs and the
+            # engine hands the dispatcher the raw materialized wire dict. Passing
+            # that dict straight to ``handle(request: ModelX)`` crashes on the
+            # first attribute access (``'dict' object has no attribute ...`` — the
+            # .201 finding-aggregator incident). Reach parity with runtime_local's
+            # def-B coercion (``_coercion_target_model_type``, OMN-8724): when the
+            # handler is a bare typed def-B handler (not an envelope handler),
+            # validate the extracted domain payload into its declared input model
+            # at THIS adapter boundary — never inside the handler, never by
+            # wrapping the payload in a ModelEventEnvelope.
+            #
+            # OMN-15181 Finding 4: an operation_match handler whose ``handle()``
+            # declares a CONCRETE ``ModelEventEnvelope`` annotation (e.g.
+            # ``HandlerRedeployOrchestrator.handle(self, envelope:
+            # ModelEventEnvelope[Any])``) was left OUT of the coercion above —
+            # ``dispatch_arg`` stayed the raw materialized dict
+            # (``{"payload": ..., "__bindings": {...}, "__debug_trace": {...}}``
+            # from ``MessageDispatchEngine._materialize_envelope_with_bindings``),
+            # never a ``ModelEventEnvelope`` instance. Only the sibling
+            # ``event_model is not None`` (payload_type_match) branch below
+            # called ``_materialize_typed_event_envelope`` /
+            # ``_materialize_raw_event_envelope`` before invoking an
+            # envelope-accepting handler. The live incident: a real,
+            # grant-authorized prod redeploy dispatch crashed on
+            # ``envelope.event_type`` — ``AttributeError: 'dict' object has no
+            # attribute 'event_type'`` — before the orchestrator ever emitted its
+            # first bus command. Materialize the same way here so both routing
+            # strategies hand an envelope-annotated handler a real
+            # ``ModelEventEnvelope``.
+            #
+            # Deliberately narrower than ``_handler_accepts_event_envelope``
+            # (which also matches on the bare parameter name ``envelope``
+            # regardless of annotation, to preserve untyped legacy handlers
+            # such as ``handle(self, envelope: object)`` that intentionally
+            # receive whatever raw object the engine handed them unchanged —
+            # ``test_standard_callback_calls_async_handle``). Only a
+            # CONCRETE ``ModelEventEnvelope`` annotation triggers
+            # materialization here.
+            dispatch_arg: object = envelope
+            if _handler_declares_typed_event_envelope(handle_method):
+                raw_payload = _extract_dispatch_payload(envelope)
+                dispatch_arg = _materialize_raw_event_envelope(
+                    envelope, raw_payload, fallback_event_type="unknown"
+                )
+            else:
+                target_model = _resolve_def_b_input_model_type(handle_method)
+                if target_model is not None:
+                    payload = _extract_dispatch_payload(envelope)
+                    if isinstance(payload, target_model):
+                        dispatch_arg = payload
+                    elif isinstance(payload, Mapping):
+                        dispatch_arg = target_model.model_validate(payload)
+
+            raw_result_obj = handle_method(dispatch_arg)
             raw_result = (
                 await cast("Awaitable[object]", raw_result_obj)
                 if asyncio.iscoroutine(raw_result_obj)
@@ -465,9 +745,24 @@ def _make_dispatch_callback(
             )
             if raw_result is None or isinstance(raw_result, ModelDispatchResult):
                 return raw_result
-            if isinstance(raw_result, str | list):
+            if isinstance(raw_result, str):
                 return cast("ModelDispatchResult | None", raw_result)
-            return _normalize_handler_result(raw_result, envelope, None)
+            if is_fanout_sequence(raw_result) and not any(
+                isinstance(element, BaseModel)
+                for element in cast("Sequence[object]", raw_result)
+            ):
+                # Legacy no-bus/state_io handlers use [] as a no-op fold and may
+                # return list[str] intent markers. OMN-14403 only normalizes
+                # actual BaseModel fan-out batches here.
+                return cast("ModelDispatchResult | None", raw_result)
+            # OMN-14403 §2A. A bare list/sequence used to be cast straight through
+            # AS IF it were a ModelDispatchResult — strictly worse than the sibling
+            # silent drop, since the applier then reads .output_events/.status off a
+            # list and finds neither. Route it through the one fan-out coercion so it
+            # either becomes a validated batch (seam ON) or is dropped LOUDLY (OFF).
+            return _normalize_handler_result(
+                raw_result, envelope, None, handler_node_kind, published_event_names
+            )
 
         payload = _extract_dispatch_payload(envelope)
         handler_takes_envelope = _handler_accepts_event_envelope(
@@ -499,7 +794,11 @@ def _make_dispatch_callback(
                 if asyncio.iscoroutine(fallback_result):
                     fallback_result = await cast("Awaitable[object]", fallback_result)
                 return _normalize_handler_result(
-                    fallback_result, envelope, event_model.name
+                    fallback_result,
+                    envelope,
+                    event_model.name,
+                    handler_node_kind,
+                    published_event_names,
                 )
             failure_result = _build_inference_intent_validation_failure_result(
                 event_model=event_model,
@@ -520,15 +819,105 @@ def _make_dispatch_callback(
             if asyncio.iscoroutine(envelope_result):
                 envelope_result = await cast("Awaitable[object]", envelope_result)
             return _normalize_handler_result(
-                envelope_result, envelope, event_model.name
+                envelope_result,
+                envelope,
+                event_model.name,
+                handler_node_kind,
+                published_event_names,
             )
 
         typed_result = handle_method(typed_payload)
         if asyncio.iscoroutine(typed_result):
             typed_result = await cast("Awaitable[object]", typed_result)
-        return _normalize_handler_result(typed_result, envelope, event_model.name)
+        return _normalize_handler_result(
+            typed_result,
+            envelope,
+            event_model.name,
+            handler_node_kind,
+            published_event_names,
+        )
 
     return _callback
+
+
+def _format_validation_error_detail(exc: BaseException) -> str:
+    """Render a real, actionable detail string from a payload-validation failure.
+
+    A pydantic ``ValidationError`` carries structured per-field errors
+    (``loc``/``msg``/``type``); we flatten those into a compact
+    ``field: message`` list so the detail is useful in a log line or a DLQ
+    envelope without requiring the reader to re-run validation themselves.
+    Non-pydantic exceptions (e.g. a raising custom validator) fall back to
+    ``str(exc)``. Never raises.
+    """
+    errors = getattr(exc, "errors", None)
+    if callable(errors):
+        try:
+            structured = errors()
+        except Exception:  # noqa: BLE001 — best-effort detail formatting only
+            structured = None
+        if structured:
+            parts = [
+                f"{'.'.join(str(loc) for loc in err.get('loc', ()))}: {err.get('msg', '')}"
+                for err in structured
+            ]
+            return "; ".join(parts) if parts else str(exc)
+    return str(exc)
+
+
+class PayloadTypeMatcher:
+    """Callable payload-type predicate that records the real validation failure.
+
+    Built from a contract-declared ``event_model`` (OMN-12416). Answers "does
+    this payload match the handler's declared event_model?" — True when the
+    payload is already an instance of the model, or when it validates against
+    the model (e.g. a dict / raw envelope payload). Used by the dispatch
+    engine to type-scope routing so a multi-handler contract delivers each
+    message only to the handler whose event_model matches the payload.
+
+    OMN-14492: unlike a plain predicate function, a rejecting call leaves the
+    real pydantic ``ValidationError`` detail on ``last_validation_detail`` so
+    the dispatch engine can distinguish "payload failed THIS handler's
+    event_model validation" (publisher_malformed) from "no dispatcher was
+    ever a candidate" (no_dispatcher) instead of collapsing both into the
+    same unclassifiable "No dispatcher found" log line.
+
+    The event_model class is imported lazily on first call and then cached, so
+    wiring stays consistent with ``_make_dispatch_callback`` (which also defers
+    the event_model import to the per-message path) and a declared-but-not-yet-
+    importable model does not change failure timing. A payload that does not
+    validate yields False (not an exception): "not this handler's type".
+    """
+
+    def __init__(self, event_model: ModelHandlerRef) -> None:
+        self._event_model = event_model
+        self._cached_model_cls: type[BaseModel] | None = None
+        self.last_validation_detail: str | None = None
+
+    def __call__(self, payload: object) -> bool:
+        self.last_validation_detail = None
+        if self._cached_model_cls is None:
+            try:
+                self._cached_model_cls = _import_event_model_class(self._event_model)
+            except Exception:
+                if _is_delegation_inference_intent_ref(
+                    self._event_model
+                ) and _payload_claims_delegation_inference_intent(payload):
+                    return True
+                raise
+        model_cls = self._cached_model_cls
+        if isinstance(payload, model_cls):
+            return True
+        try:
+            model_cls.model_validate(payload)
+        except ValidationError as exc:
+            if _is_delegation_inference_intent_ref(
+                self._event_model
+            ) and _payload_claims_delegation_inference_intent(payload):
+                return True
+            self.last_validation_detail = _format_validation_error_detail(exc)
+            return False
+        return True
 
 
 def _make_payload_type_matcher(
@@ -536,45 +925,11 @@ def _make_payload_type_matcher(
 ) -> Callable[[object], bool]:
     """Build a payload-type predicate from a contract-declared ``event_model``.
 
-    The returned predicate answers "does this payload match the handler's
-    declared event_model?" — True when the payload is already an instance of
-    the model, or when it validates against the model (e.g. a dict / raw
-    envelope payload). It is used by the dispatch engine to type-scope routing
-    so a multi-handler contract delivers each message only to the handler whose
-    event_model matches the payload (OMN-12416).
-
-    The event_model class is imported lazily on first match and then cached, so
-    wiring stays consistent with ``_make_dispatch_callback`` (which also defers
-    the event_model import to the per-message path) and a declared-but-not-yet-
-    importable model does not change failure timing. A payload that does not
-    validate yields False (not an exception): "not this handler's type".
+    Returns a ``PayloadTypeMatcher`` — a callable object satisfying
+    ``Callable[[object], bool]`` that additionally exposes
+    ``last_validation_detail`` (OMN-14492) after a rejecting call.
     """
-    cached_model_cls: list[type[BaseModel]] = []
-
-    def _matches(payload: object) -> bool:
-        if not cached_model_cls:
-            try:
-                cached_model_cls.append(_import_event_model_class(event_model))
-            except Exception:
-                if _is_delegation_inference_intent_ref(
-                    event_model
-                ) and _payload_claims_delegation_inference_intent(payload):
-                    return True
-                raise
-        model_cls = cached_model_cls[0]
-        if isinstance(payload, model_cls):
-            return True
-        try:
-            model_cls.model_validate(payload)
-        except Exception:  # noqa: BLE001 — validation failure means "not my type"
-            if _is_delegation_inference_intent_ref(
-                event_model
-            ) and _payload_claims_delegation_inference_intent(payload):
-                return True
-            return False
-        return True
-
-    return _matches
+    return PayloadTypeMatcher(event_model)
 
 
 def _build_inference_intent_validation_failure_result(
@@ -670,6 +1025,40 @@ def _handler_accepts_event_envelope(handle_method: object) -> bool:
     return False
 
 
+def _handler_declares_typed_event_envelope(handle_method: object) -> bool:
+    """Return true only when a handler's first parameter is CONCRETELY annotated
+    ``ModelEventEnvelope`` — narrower than ``_handler_accepts_event_envelope``.
+
+    ``_handler_accepts_event_envelope`` also matches on the bare parameter name
+    ``envelope`` regardless of its annotation (a legacy heuristic preserved for
+    untyped handlers like ``handle(self, envelope: object)`` that intentionally
+    receive whatever raw object the engine handed them, unchanged). This
+    stricter predicate drives ONLY the OMN-15181 Finding 4 materialization
+    decision in the ``event_model is None`` (operation_match) dispatch branch:
+    a handler must actually declare ``ModelEventEnvelope`` (or a
+    ``ModelEventEnvelope[...]`` generic alias) to receive a materialized
+    envelope instance there — a same-named-but-untyped parameter keeps
+    receiving the raw dispatch input unchanged, matching its pre-existing,
+    tested behavior.
+    """
+    try:
+        signature = inspect.signature(cast("Callable[..., object]", handle_method))
+    except (TypeError, ValueError):
+        return False
+
+    for parameter in signature.parameters.values():
+        if parameter.name == "self":
+            continue
+        if parameter.kind not in {
+            inspect.Parameter.POSITIONAL_ONLY,
+            inspect.Parameter.POSITIONAL_OR_KEYWORD,
+            inspect.Parameter.KEYWORD_ONLY,
+        }:
+            continue
+        return _annotation_mentions_event_envelope(parameter.annotation)
+    return False
+
+
 def _annotation_mentions_event_envelope(annotation: object) -> bool:
     if annotation is inspect.Signature.empty:
         return False
@@ -681,6 +1070,59 @@ def _annotation_mentions_event_envelope(annotation: object) -> bool:
     if getattr(origin, "__name__", "") == "ModelEventEnvelope":
         return True
     return any(_annotation_mentions_event_envelope(arg) for arg in get_args(annotation))
+
+
+def _resolve_def_b_input_model_type(handle_method: object) -> type[BaseModel] | None:
+    """Resolve a def-B handler's declared input model from its ``handle()`` signature.
+
+    Mirrors runtime_local's ``_coercion_target_model_type`` (OMN-8724 /
+    ``omnibase_core.runtime.runtime_local_adapter``): a canonical def-B handler
+    ``handle(self, request: ModelX) -> ModelY`` reached via ``operation_match``
+    (no contract-declared ``event_model``) must receive a validated ``ModelX``
+    instance, not the raw materialized wire dict the engine hands the dispatcher.
+    The Kafka boundary has no ``event_model`` to read for such a handler, so it
+    recovers the target model the same way runtime_local does — by introspecting
+    the single positional parameter's annotation.
+
+    Returns that annotation when it is a concrete ``BaseModel`` subclass other
+    than ``ModelEventEnvelope``; ``None`` otherwise (envelope handlers, ``**kwargs``
+    handlers, multi-positional or unannotated params — every legacy shape keeps
+    receiving the raw envelope dict unchanged). ``eval_str=True`` resolves the
+    PEP 563 string annotation every node handler carries via
+    ``from __future__ import annotations`` (without it the annotation is the
+    literal string and the BaseModel check never matches — the OMN-8724 root
+    cause), with a fall back to unevaluated annotations if resolution raises.
+    """
+    try:
+        signature = inspect.signature(
+            cast("Callable[..., object]", handle_method), eval_str=True
+        )
+    except (TypeError, ValueError, NameError):
+        try:
+            signature = inspect.signature(cast("Callable[..., object]", handle_method))
+        except (TypeError, ValueError):
+            return None
+
+    positional = [
+        parameter
+        for parameter in signature.parameters.values()
+        if parameter.name != "self"
+        and parameter.kind
+        in (
+            inspect.Parameter.POSITIONAL_ONLY,
+            inspect.Parameter.POSITIONAL_OR_KEYWORD,
+        )
+    ]
+    if len(positional) != 1:
+        return None
+    annotation = positional[0].annotation
+    if (
+        isinstance(annotation, type)
+        and issubclass(annotation, BaseModel)
+        and annotation.__name__ != "ModelEventEnvelope"
+    ):
+        return annotation
+    return None
 
 
 def _coerce_uuid_or_none(value: object) -> object | None:
@@ -904,6 +1346,8 @@ def _normalize_handler_result(
     result: object,
     envelope: object,
     message_type: str | None,
+    handler_node_kind: EnumNodeKind | None = None,
+    published_event_names: frozenset[str] | None = None,
 ) -> ModelDispatchResult | None:
     from datetime import UTC, datetime
     from uuid import UUID, uuid4
@@ -931,6 +1375,21 @@ def _normalize_handler_result(
 
     output_events: list[BaseModel] = []
     output_intents: tuple[object, ...] = ()
+    projection_intents: tuple[ModelProjectionIntent, ...] = ()
+
+    # OMN-14598: a def-B REDUCER (contract node_type REDUCER_GENERIC) that returns
+    # a bare typed projection model OR a Sequence of projection models must be
+    # classified as projections — a reducer emits projections[] ONLY (core handler-
+    # output contract). Computed BEFORE the isinstance/fan-out branches below so a
+    # reducer's return is never misrouted to output_events or a fan-out event batch.
+    reducer_projection_models: tuple[BaseModel, ...] = ()
+    if (
+        handler_node_kind is EnumNodeKind.REDUCER
+        and not isinstance(result, ModelHandlerOutput)
+        and not _is_declared_published_event_model(result, published_event_names)
+    ):
+        reducer_projection_models = _coerce_projection_models(result)
+
     if isinstance(result, ModelHandlerOutput):
         output_events = [
             event for event in result.events if isinstance(event, BaseModel)
@@ -940,8 +1399,36 @@ def _normalize_handler_result(
             output_intents = output_intents + (result.result,)
         elif isinstance(result.result, BaseModel):
             output_events.append(result.result)
+        if result.projections:
+            # OMN-14598: a ModelHandlerOutput carries projections[] only for a
+            # REDUCER (validator-enforced on ModelHandlerOutput). Route them to
+            # projection_intents so DispatchResultApplier's synchronous projection
+            # sink fires; before this branch projections were read by NEITHER the
+            # events/intents/result path and were silently dropped (e.g.
+            # HandlerCodingAgentFsm's two ``for_reducer`` projections per fold).
+            projection_intents = _build_projection_intents(
+                result.projections, correlation_id, message_type
+            )
+    elif reducer_projection_models:
+        projection_intents = _build_projection_intents(
+            reducer_projection_models, correlation_id, message_type
+        )
     elif isinstance(result, BaseModel):
         output_events = [result]
+    elif is_fanout_sequence(result):
+        # OMN-14403 §2A — the def-B fan-out entry. Before this branch existed a
+        # Sequence return matched NEITHER branch above and fell through to
+        # output_events=[] / SUCCESS: the handler's N events were dropped and the
+        # dispatch reported success. That silent drop IS the defect. The applier
+        # resolves each element's topic via published_events (same short-name
+        # resolution the shared core resolver uses); the boot coverage gate keeps
+        # that fail-closed.
+        output_events = normalize_fanout_sequence(
+            cast("Sequence[object]", result),
+            message_type,
+            seam_enabled=multi_event_seam_enabled(),
+            env_flag=ENV_MULTI_EVENT_PUBLISH_SEAM,
+        )
 
     return ModelDispatchResult(
         status=EnumDispatchStatus.SUCCESS,
@@ -949,12 +1436,120 @@ def _normalize_handler_result(
         message_type=message_type,
         started_at=datetime.now(UTC),
         completed_at=datetime.now(UTC),
-        output_count=len(output_events) + len(output_intents),
+        output_count=len(output_events) + len(output_intents) + len(projection_intents),
         output_events=output_events,
         # Why: Runtime wiring validates and narrows this payload shape before use.
         output_intents=output_intents,  # type: ignore[arg-type]
+        projection_intents=projection_intents,
         correlation_id=correlation_id,
     )
+
+
+def _is_declared_published_event_model(
+    result: object,
+    published_event_names: frozenset[str] | None,
+) -> bool:
+    """True when *result* is a single typed model the contract declares as a
+    published event (OMN-14794).
+
+    OMN-14598 classifies EVERY bare-model / ``Sequence`` return from a REDUCER
+    (``node_type: REDUCER_GENERIC``) as ``projections[]``. That is correct for a
+    pure FSM fold, but a REDUCER that ALSO declares a ``published_events`` entry
+    for the model it returns emits that model as an EVENT — e.g.
+    ``node_delegation_routing_reducer`` returns ``ModelRoutingDecision``, which its
+    contract maps (``event_type: RoutingDecision``) to
+    ``onex.evt.omnibase-infra.routing-decision.v1``. Without this exception the
+    decision was captured into ``projection_intents`` and NEVER published as an
+    event, so the delegation orchestrator's ``handle_routing_decision`` never fired
+    and the workflow stalled at RECEIVED (routing-decision.v1 high-watermark flat).
+    That live drop was hotpatch-validated on the stability-test runtime: excluding
+    the declared-event return from the REDUCER->projection branch advanced the FSM
+    RECEIVED->ROUTED->COMPLETED and moved the routing-decision.v1 HW by exactly one.
+
+    Membership mirrors the applier's own topic resolver (``_outbox_topic_for`` /
+    ``resolve_published_topic``): the class name with a leading ``Model`` stripped
+    (the canonical ``event_type`` short-name), then the full class name.
+    ``published_event_names`` is the key set of the contract's ``published_events``
+    map (``load_published_events_map``). A ``None`` / empty set — every non-REDUCER
+    caller, and any REDUCER that declares no published events — preserves the
+    OMN-14598 projection classification unchanged.
+    """
+    if not published_event_names or not isinstance(result, BaseModel):
+        return False
+    class_name = type(result).__name__
+    return (
+        class_name.removeprefix("Model") in published_event_names
+        or class_name in published_event_names
+    )
+
+
+def _coerce_projection_models(result: object) -> tuple[BaseModel, ...]:
+    """Coerce a def-B REDUCER return into its projection models (OMN-14598).
+
+    A reducer's canonical def-B return is either a single typed projection model
+    or a Sequence of projection models — the multi-projection case, e.g.
+    ``node_coding_agent_fsm_reducer`` folding to ``(advanced_state,
+    trace_projection)``. A non-model / non-Sequence return yields ``()`` so the
+    caller records an empty (no-op fold) dispatch result rather than
+    misclassifying it as an event.
+    """
+    if isinstance(result, BaseModel):
+        return (result,)
+    if is_fanout_sequence(result):
+        return tuple(
+            element
+            for element in cast("Sequence[object]", result)
+            if isinstance(element, BaseModel)
+        )
+    return ()
+
+
+def _derive_projector_key(model: BaseModel) -> str:
+    """Derive a deterministic projector-registry key from a projection model.
+
+    Canonical convention (OMN-14598): strip a leading ``Model`` from the class
+    name and convert the remaining CamelCase to snake_case, e.g.
+    ``ModelCodingAgentTraceProjection`` -> ``coding_agent_trace_projection``.
+    Deterministic and self-describing so a projector can register under the same
+    key without the reducer carrying routing metadata on its return value.
+    """
+    class_name = type(model).__name__
+    stem = class_name.removeprefix("Model") or class_name
+    snake = re.sub(r"(?<!^)(?=[A-Z])", "_", stem).lower()
+    return snake or class_name.lower()
+
+
+def _build_projection_intents(
+    models: Sequence[object],
+    correlation_id: UUID,
+    message_type: str | None,
+) -> tuple[ModelProjectionIntent, ...]:
+    """Build ModelProjectionIntent entries from a reducer's projection models.
+
+    OMN-14598: converts each projection model into a ``ModelProjectionIntent`` so
+    ``ModelDispatchResult.projection_intents`` is populated (consumed by
+    ``DispatchResultApplier``'s synchronous projection sink). ``projector_key`` is
+    derived from the model type; ``event_type`` is the inbound message type (the
+    event the reducer folded), falling back to the projection model's class name
+    when the dispatch path carries no ``message_type``.
+    """
+    from omnibase_core.models.projectors.model_projection_intent import (
+        ModelProjectionIntent,
+    )
+
+    intents: list[ModelProjectionIntent] = []
+    for model in models:
+        if not isinstance(model, BaseModel):
+            continue
+        intents.append(
+            ModelProjectionIntent(
+                projector_key=_derive_projector_key(model),
+                event_type=message_type or type(model).__name__,
+                envelope=model,
+                correlation_id=correlation_id,
+            )
+        )
+    return tuple(intents)
 
 
 _TABLE_NAME_RE = re.compile(r"^[a-zA-Z_][a-zA-Z0-9_]*$")
@@ -968,7 +1563,49 @@ _TABLE_NAME_RE = re.compile(r"^[a-zA-Z_][a-zA-Z0-9_]*$")
 # must NOT include genuine Postgres text[] ARRAY columns (e.g.
 # swarm_runs.models_used / machines_used), which are correctly passed as raw
 # lists.
-_JSONB_LIST_COLUMNS: frozenset[str] = frozenset({"corpus_errors"})
+# OMN-14487: recent_responses is the same defect class as corpus_errors — a JSONB
+# array column (projection_delegation_inference_response_text, declared
+# ``JSONB NOT NULL DEFAULT '[]'::jsonb CHECK (jsonb_typeof(...) = 'array')``)
+# holding a list of objects, with no _json/_jsonb suffix. HandlerProjectionDelegation-
+# InferenceResponse handed the raw list[dict] to this adapter; psycopg2 could not
+# adapt the inner dicts (``can't adapt type 'dict'``), the inference-response
+# projection write crashed, and — with no dlq_topics declared on that node's
+# contract — the erroring event was silently dropped.
+_JSONB_LIST_COLUMNS: frozenset[str] = frozenset({"corpus_errors", "recent_responses"})
+
+
+def _should_jsonb_wrap_list(key: str, value: list[object]) -> bool:
+    """Decide whether a ``list`` row value must be JSON-wrapped for psycopg2.
+
+    Three independent rules; any one triggers wrapping:
+
+    1. Column-name suffix convention (``_json`` / ``_jsonb``).
+    2. The ``_JSONB_LIST_COLUMNS`` allowlist -- legacy unsuffixed JSONB list
+       columns (``corpus_errors``, ``recent_responses``) that predate rule 3
+       and that the structural rule below does not cover on its own (e.g. a
+       JSONB column holding ``list[str]``, which is structurally
+       indistinguishable from a genuine ``text[]`` ARRAY).
+    3. STRUCTURAL heuristic (OMN-14494): any element of the list is itself a
+       ``dict``/``list``. A genuine Postgres scalar ARRAY (``text[]``,
+       ``int[]``, ...) can only ever hold scalars, so an element that is
+       itself a dict/list can NEVER be a valid ARRAY member -- this case is
+       unambiguously a JSONB list-of-objects/list-of-lists column. This rule
+       needs no allowlist maintenance and auto-covers every future
+       unsuffixed JSONB list-of-objects column, closing the recurring defect
+       class behind OMN-13350 and OMN-14487 (both required a manual
+       allowlist edit before this fix).
+
+    A flat scalar list (``list[str]`` / ``list[int]`` with no dict/list
+    elements) that matches none of the three rules returns ``False`` here
+    and is passed raw by the caller, preserving genuine ``text[]``/``int[]``
+    ARRAY semantics (e.g. ``swarm_runs.models_used`` / ``machines_used``).
+    """
+    if str(key).endswith(("_json", "_jsonb")):
+        return True
+    if str(key) in _JSONB_LIST_COLUMNS:
+        return True
+    return any(isinstance(item, (dict, list)) for item in value)
+
 
 # Authoritative source: docs/patterns/db_url_contract.md "Per-Service Database
 # URL Contract" — each OmniNode service owns its own PostgreSQL database and a
@@ -1143,6 +1780,43 @@ def _contract_declares_db_io(contract: ModelDiscoveredContract) -> bool:
     return bool(_read_db_io_tables(contract.contract_path))
 
 
+def _read_state_io(contract_path: Path) -> dict[str, object]:
+    """Read the top-level ``state_io`` block from a contract YAML.
+
+    Returns ``{}`` if ``state_io`` is absent. Raises on YAML parse errors or
+    unexpected file I/O failures — same fail-loud contract as
+    ``_read_db_io_tables`` — so a malformed contract is surfaced as a broken
+    contract rather than silently treated as "no state_io".
+
+    Shape (OMN-14208 opt-in runtime dispatch seam)::
+
+        state_io:
+          database: omnibase_infra   # _DB_URL_ENV_MAP key
+          table: delegation_workflow_state
+          key: correlation_id        # documented; correlation_id is the
+                                      # only supported read key today
+          codec:
+            module: <dotted module path resolved via importlib>
+            name: <class name>
+    """
+    try:
+        # Why: Optional integration dependency is validated at runtime but ships incomplete typing.
+        import yaml  # type: ignore[import-untyped]
+
+        with open(contract_path) as f:
+            raw = yaml.safe_load(f)
+    except FileNotFoundError:
+        return {}
+    if not isinstance(raw, dict):
+        return {}
+    state_io = raw.get("state_io") or {}
+    return state_io if isinstance(state_io, dict) else {}
+
+
+def _contract_declares_state_io(contract: ModelDiscoveredContract) -> bool:
+    return bool(_read_state_io(contract.contract_path))
+
+
 def _build_sync_db_adapter(db_url: str) -> object:
     """Build a synchronous psycopg2-backed DatabaseAdapter from a DSN.
 
@@ -1199,24 +1873,18 @@ def _build_sync_db_adapter(db_url: str) -> object:
             )
             conflict_columns = ", ".join(f'"{key}"' for key in conflict_keys)
             # JSONB adaptation: a dict is always JSON-adapted. A list is
-            # JSON-adapted for a JSONB column (suffix _json/_jsonb, or the
-            # _JSONB_LIST_COLUMNS allowlist for unsuffixed JSONB list columns such
-            # as corpus_errors, OMN-13350) and otherwise passed raw so genuine
-            # Postgres text[] ARRAY columns (e.g. swarm_runs.models_used /
-            # machines_used) keep their array semantics. A JSONB list sent as a
-            # Postgres ARRAY literal fails the INSERT — which is what
-            # silently dropped node-generation-completed events before this fix.
+            # JSON-adapted per _should_jsonb_wrap_list (suffix convention,
+            # allowlist, or the OMN-14494 structural any-element-is-dict/list
+            # heuristic) and otherwise passed raw so genuine Postgres text[]
+            # ARRAY columns (e.g. swarm_runs.models_used / machines_used)
+            # keep their array semantics. A JSONB list sent as a Postgres
+            # ARRAY literal fails the INSERT — which is what silently
+            # dropped node-generation-completed events before this fix.
             adapted_row = {
                 key: (
                     psycopg2.extras.Json(value)
                     if isinstance(value, dict)
-                    or (
-                        isinstance(value, list)
-                        and (
-                            str(key).endswith(("_json", "_jsonb"))
-                            or str(key) in _JSONB_LIST_COLUMNS
-                        )
-                    )
+                    or (isinstance(value, list) and _should_jsonb_wrap_list(key, value))
                     else value
                 )
                 for key, value in row.items()
@@ -1312,7 +1980,7 @@ async def _route_projection_error_to_dlq(
     handler_name: str,
     failure_reason: str,
 ) -> bool:
-    """Publish a malformed/erroring projection event to its contract DLQ topic.
+    """Publish a malformed/erroring projection event to a DLQ/quarantine sink.
 
     OMN-13548 (D-03): when a projection handler raises (most commonly a
     ``ValidationError`` because the inbound event is missing a required field),
@@ -1324,37 +1992,53 @@ async def _route_projection_error_to_dlq(
     (hoisted to the top level so the failure is recoverable by correlation even
     when the payload itself is unparseable).
 
+    OMN-14492 (OMN-14487-class silent drop): when the contract declares NO
+    ``event_bus.dlq_topics``, this previously logged at ERROR and returned
+    ``False`` — the event never reached any topic, only a container log line.
+    That is the exact "quiet death" class OMN-14487 hit for
+    ``HandlerProjectionDelegationInferenceResponse``. This now falls back to
+    the platform-wide quarantine sink (``build_dlq_topic("quarantine")``) so
+    every drop reaches a declared, durable topic even when the contract has no
+    DLQ topic of its own.
+
     Generic for ALL projection handlers, not delegation-only. Best-effort:
-    returns ``True`` when the DLQ envelope was published, ``False`` when no DLQ
-    topic is declared, no publishable event bus is available, or the publish
-    itself fails (each logged at ERROR). A DLQ publish failure never propagates,
-    so it cannot wedge the consumer.
+    returns ``True`` when the DLQ/quarantine envelope was published, ``False``
+    when no publishable event bus is available or the publish itself fails
+    (each logged at ERROR). A DLQ publish failure never propagates, so it
+    cannot wedge the consumer.
     """
     import json
     from datetime import UTC, datetime
 
-    if not dlq_topics:
+    from omnibase_infra.enums import EnumDlqFailureClass
+    from omnibase_infra.event_bus.topic_constants import build_dlq_topic
+
+    used_quarantine_fallback = not dlq_topics
+    if used_quarantine_fallback:
+        dlq_topic = build_dlq_topic("quarantine")
         logger.error(
-            "Projection handler %s dropped a malformed/erroring event with NO DLQ "
-            "topic declared in contract.event_bus.dlq_topics: %s",
+            "Projection handler %s has NO DLQ topic declared in "
+            "contract.event_bus.dlq_topics — routing malformed/erroring event "
+            "to the platform quarantine sink %s instead of dropping it: %s",
             handler_name,
+            dlq_topic,
             failure_reason,
         )
-        return False
+    else:
+        dlq_topic = dlq_topics[0]
     if event_bus is None or not hasattr(event_bus, "publish"):
         logger.error(
             "Projection handler %s would route malformed/erroring event to DLQ %s "
             "but no publishable event bus is bound: %s",
             handler_name,
-            dlq_topics[0],
+            dlq_topic,
             failure_reason,
         )
         return False
 
-    dlq_topic = dlq_topics[0]
     payload = _extract_dispatch_payload(envelope)
     correlation = _extract_dispatch_correlation_id(envelope, payload)
-    correlation_id = str(correlation) if correlation is not None else ""
+    correlation_id = str(correlation) if correlation is not None else str(uuid4())
     original_message: object
     model_dump = getattr(payload, "model_dump", None)
     if isinstance(payload, Mapping):
@@ -1366,10 +2050,12 @@ async def _route_projection_error_to_dlq(
     dlq_envelope = {
         "original_message": original_message,
         "failure_reason": failure_reason,
+        "failure_class": EnumDlqFailureClass.CONSUMER_ERROR.value,
         "correlation_id": correlation_id,
         "retry_count": 0,
         "failed_at": datetime.now(UTC).isoformat(),
         "handler": handler_name,
+        "quarantine_fallback": used_quarantine_fallback,
     }
     raw = json.dumps(dlq_envelope, default=str).encode("utf-8")
     publish = getattr(event_bus, "publish", None)
@@ -1433,7 +2119,12 @@ def _make_projection_dispatch_callback(
     """Create a dispatch callback for projection handlers (db_io.db_tables declared).
 
     Builds a synchronous psycopg2 DatabaseAdapter per call and injects it into
-    input_data alongside _event_type derived from the topic name.
+    input_data alongside _event_type and _topic derived from the dispatched
+    envelope (OMN-13992: _topic was computed locally for logging but never
+    injected, so any strict projection handler that requires
+    input_data['_topic'] — e.g. HandlerProjectionLiveEvents — raised a
+    ValueError on every dispatch and the event was dropped, non-fatally but
+    silently, with no DLQ topic declared to catch it).
 
     ``sinks`` carries the bus-side outputs. When ``sinks.event_bus`` and
     ``sinks.terminal_event`` are set, a terminal event envelope is emitted to
@@ -1507,6 +2198,7 @@ def _make_projection_dispatch_callback(
                 input_data = payload.model_dump(mode="json")  # type: ignore[union-attr]
             input_data["_db"] = adapter
             input_data["_event_type"] = event_type
+            input_data["_topic"] = topic
 
             def _invoke_projection_handler() -> object:
                 _connect_projection_runner_db_if_needed(handler_instance)
@@ -1638,16 +2330,904 @@ async def _emit_projection_terminal_event(
         )
 
 
+@dataclass(
+    frozen=True
+)  # internal-dataclass-ok: plain scalar extraction result, no runtime state
+class StateIoMetadata:
+    """Denormalized top-level columns extracted from an opaque state_io payload."""
+
+    tenant_id: str
+    state: str
+    in_flight: bool
+
+
+def _extract_state_io_metadata(payload_json: str) -> StateIoMetadata:
+    """Extract the 3 denormalized top-level columns from an opaque state_io payload.
+
+    omnibase_infra never decodes a state_io payload's business shape, but the
+    contract-level convention (OMN-14208) is that every state_io payload
+    exposes ``tenant_id`` / ``state`` / ``in_flight`` as well-known top-level
+    JSON keys so this seam can populate the durable row's indexed columns
+    (used by staleness sweeps) without understanding anything else about the
+    payload. Missing/malformed keys degrade to safe defaults rather than
+    raising — validating the payload's full business shape is the
+    omnimarket-side codec's job, not a reason to fail the whole dispatch.
+    """
+    try:
+        parsed = json.loads(payload_json)
+    except (TypeError, ValueError):
+        parsed = {}
+    if not isinstance(parsed, dict):
+        parsed = {}
+    return StateIoMetadata(
+        tenant_id=str(parsed.get("tenant_id") or ""),
+        state=str(parsed.get("state") or ""),
+        in_flight=bool(parsed.get("in_flight", False)),
+    )
+
+
+def _make_stateful_dispatch_callback(
+    handler_instance: ProtocolHandleable,
+    event_model: ModelHandlerRef | None,
+    state_io: dict[str, object],
+    *,
+    event_bus: object | None = None,
+    output_topic_map: dict[str, str] | None = None,
+) -> DispatcherFunc:
+    """Create a dispatch callback for contracts that declare ``state_io``.
+
+    WRAPS (never replaces) :func:`_make_dispatch_callback` — this is a
+    load-before / CAS-persist-after boundary hook around the exact same
+    callback a non-stateful contract would get, preserving the OMN-13247
+    envelope-coercion fallback and the ``payload_type_matcher`` scoping that
+    multi-leg orchestrator contracts depend on untouched (OMN-14208).
+
+    In-row outbox (OMN-14493 / OMN-14403 §4). When ``event_bus`` +
+    ``output_topic_map`` are supplied, this wrapper is also the publish-from-row
+    author for the state_io path: a leg's emitted events are persisted into the
+    row's ``pending_emissions`` column WITHIN the same CAS that advances the FSM
+    (commit-with-intent, ``in_flight=True``); the CAS winner then publishes those
+    events FROM the committed row and CAS-finalizes (``in_flight=False``, batch
+    cleared) all within the leg. This closes the CAS-retry result-selection race
+    that stranded delegation rows at ``INFERENCE_COMPLETED`` — a losing/retried
+    attempt can no longer lose an already-emitted intent, because the committed
+    row (not the in-memory return of a possibly-losing attempt) is the publish
+    source. Finalizing within the leg is load-bearing: a leg that leaves
+    ``in_flight`` set would deadlock the next leg's CAS-retry forever. When no
+    ``event_bus`` is supplied (the legacy/no-outbox path), the wrapper commits
+    with intent and returns the result for the external applier to publish.
+
+    Per-dispatch sequence:
+
+    1. Load the correlation_id's current ``(payload_json, version)`` — ``None``
+       if no row exists yet (e.g. this is the workflow's first leg).
+    2. Set :data:`CONTEXTVAR_STATE_IO_ROWS` to ``{cid: (payload_json, version)}``
+       UNCONDITIONALLY — a ``None`` payload_json for a missing row is still a
+       *set* value, distinguishing "state_io active, no row yet" from
+       "state_io inactive" for the ContextVar's cross-repo consumer (the
+       omnimarket-side workflow-state proxy).
+    3. Run the inner (unwrapped) dispatch callback — identical to what a
+       non-stateful contract's dispatch would do.
+    4. Call ``codec.flush(cid)`` on the contract-resolved codec instance — the
+       explicit bridge to whatever the handler-side proxy decoded and mutated
+       during step 3 (OMN-14208 pair-verify M1). ``None`` means the proxy
+       never touched this correlation_id this dispatch (nothing to persist);
+       a real payload means it did. This replaced an earlier implementation
+       that expected the proxy to write its mutated payload back into
+       :data:`CONTEXTVAR_STATE_IO_ROWS` itself — the ContextVar is a
+       load-time input only, never a write-back channel.
+    5. Persist the flushed payload: ``seed()`` if no row existed yet, else
+       ``cas_update()``. A no-op dispatch (payload unchanged, or never
+       populated) skips persistence entirely.
+    6. The whole load -> handle -> persist unit is wrapped in
+       ``retry_on_optimistic_conflict`` so a losing CAS/seed reloads the
+       winning row and re-runs ``handle()`` against it — replay-safe because
+       the FSM's synchronous in-flight dedup guard observes the freshly
+       persisted flag on the retried attempt and folds without re-emitting.
+
+    An exhausted retry raises ``OptimisticConflictError`` — never swallowed —
+    so a resolvable-but-unresolved race is never reported as a successful
+    dispatch. OMN-14600 CORRECTION: earlier revisions of this docstring
+    claimed the raise "propagates — no offset commit, message redelivers".
+    That is FALSE on this runtime: ``MessageDispatchEngine.dispatch()``
+    catches every exception a wired dispatcher raises and converts it to a
+    returned ``HANDLER_ERROR`` status rather than re-raising, and
+    ``EventBusSubcontractWiring``'s consume callback has no status branch for
+    ``HANDLER_ERROR`` — it commits the Kafka offset unconditionally once
+    ``dispatch()`` returns. The raise here is still valuable (it surfaces the
+    conflict loudly in logs/metrics and, for a caller that inspects the
+    return value directly rather than going through the engine, genuinely
+    propagates), but it is NOT a redelivery mechanism on the production
+    consume path. The state_io in_flight-lock branch below (``_load_handle_
+    persist``) therefore self-heals a stuck row INLINE rather than depending
+    on this exception to trigger redelivery.
+    """
+    inner_callback = _make_dispatch_callback(handler_instance, event_model)
+
+    database = str(state_io.get("database") or "omnibase_infra")
+    table = str(state_io.get("table") or "")
+    codec_ref = state_io.get("codec")
+    if not table:
+        raise ModelOnexError(
+            "handler_wiring: state_io.table is required when a contract "
+            "declares state_io."
+        )
+    if (
+        not isinstance(codec_ref, dict)
+        or not codec_ref.get("module")
+        or not codec_ref.get("name")
+    ):
+        raise ModelOnexError(
+            "handler_wiring: state_io.codec must declare {module, name} — "
+            f"got {codec_ref!r}."
+        )
+    if database not in _DB_URL_ENV_MAP:
+        raise ModelOnexError(
+            f"handler_wiring: state_io.database {database!r} is unknown — "
+            f"must be one of {sorted(_DB_URL_ENV_MAP)!r}."
+        )
+    db_url_env = _DB_URL_ENV_MAP[database]
+    db_url = os.environ.get(db_url_env, "")
+    if not db_url:
+        raise StateIoUnconfiguredError(
+            f"handler_wiring: contract declares state_io (table={table!r}) "
+            f"but {db_url_env} is unset. state_io is a REQUIRED durability "
+            "seam (OMN-14208) — unlike the optional db_io projection path, "
+            "it fails closed at wiring time rather than degrading silently."
+        )
+    # Resolved once, at wiring time, not on every dispatch — mirrors the
+    # fail-fast intent of every other _import_handler_class call in this
+    # module. Unlike the handler class (imported but never used directly),
+    # the codec IS used directly here: instantiated and called as the
+    # explicit post-handle bridge (``codec.flush``) to whatever the
+    # omnimarket-side ContextVar-backed workflow-state proxy decoded and
+    # mutated during ``inner_callback`` (OMN-14208 pair-verify M0/M1).
+    codec_cls = _import_handler_class(str(codec_ref["module"]), str(codec_ref["name"]))
+    codec = codec_cls()
+
+    pool_config = ModelPostgresPoolConfig.from_dsn(db_url, min_size=1, max_size=5)
+    pool_provider = ProviderPostgresPool(pool_config)
+    adapter = StateStoreAdapter(
+        db_url,
+        table=table,
+        pool_factory=pool_provider.create,
+    )
+    from uuid import UUID, uuid5
+
+    publish_topic_map: dict[str, str] = dict(output_topic_map or {})
+    # 0.0 sentinel means "never run" -- always due on the first dispatch.
+    _recovery_last_run_monotonic = 0.0
+    _recovery_lock = asyncio.Lock()
+
+    def _outbox_topic_for(class_name: str) -> str | None:
+        """Resolve an outbox entry's Kafka topic from the published_events map.
+
+        The contract's ``published_events`` map is authoritative (short name with
+        the ``Model`` prefix stripped, then the full class name). A class with no
+        mapping returns ``None`` — ``_publish_outbox_batch`` then raises rather
+        than misrouting a fan-out element to a fallback topic (spec §2 Amendment C).
+        """
+        short = class_name.removeprefix("Model")
+        return publish_topic_map.get(short) or publish_topic_map.get(class_name)
+
+    def _build_outbox_entries(
+        result: ModelDispatchResult | None,
+        causation_envelope_id: str,
+        cid: str,
+        tenant_id: str,
+    ) -> list[dict[str, object]]:
+        """Serialize a leg's emitted events into row-storable outbox entries.
+
+        Each entry carries exactly what recovery needs to rebuild the emitted
+        envelope WITHOUT re-running the handler (spec §12): the event class'
+        module+name, its own JSON payload, its index, and the causation /
+        correlation / tenant scope for the deterministic id + tenant stamp.
+
+        OMN-14600: the delegation terminal (the only state_io node today) is a
+        BARE class emit — ``ModelDelegationCompleted`` / ``ModelDelegationFailed``,
+        two distinct classes with no embedded topic field — resolved purely by
+        class name via ``_outbox_topic_for`` / the contract's
+        ``published_events`` map, same as every other emitted event. An
+        earlier revision of this function detected an embedded-topic carrier
+        (a ``ModelEventEnvelope`` or a typed payload's own ``.topic`` field)
+        and fail-closed-validated it against ``allowed_output_topics`` —
+        removed: dead code for delegation (its terminal carries no topic of
+        its own to embed), and no other state_io node exists yet to need it.
+        Add it back if a future state_io node genuinely needs an embedded,
+        per-instance topic — don't carry speculative capability for a
+        hypothetical node.
+        """
+        # A non-ModelDispatchResult return (e.g. the event_model=None cast-through
+        # can hand back a raw list on clean dev — P3a's normalize coerces it) has
+        # no output_events to store; the outbox only stores a real dispatch result.
+        output_events = getattr(result, "output_events", None)
+        if not output_events:
+            return []
+        entries: list[dict[str, object]] = []
+        for idx, event in enumerate(output_events):
+            if not isinstance(event, BaseModel):
+                # OMN-14721: fail closed on a non-model element rather than the
+                # prior silent ``continue``. A non-BaseModel in output_events
+                # cannot be durably captured into a recoverable outbox entry;
+                # dropping it silently shrinks the batch (K returned > K
+                # captured) — the exact silent-emission-loss class this seam
+                # exists to eliminate. Upstream ``_normalize_handler_result``
+                # only ever hands BaseModel events here, so this is a fail-
+                # closed invariant assertion, not a live filter.
+                raise ModelOnexError(
+                    message=(
+                        "handler_wiring: state_io outbox capture received a "
+                        f"non-BaseModel fan-out element {type(event).__name__!r} "
+                        f"at index {idx} for correlation_id={cid} — cannot "
+                        "durably capture the emission; failing closed rather "
+                        "than silently shrinking the batch (OMN-14721)."
+                    ),
+                    error_code=EnumCoreErrorCode.HANDLER_EXECUTION_ERROR,
+                )
+            if publish_topic_map:
+                # OMN-14721: resolve every captured emission's publish topic
+                # through the SHARED core fan-out resolver at CAPTURE time
+                # (the same resolver LocalRuntimeBusAdapter and the publish-
+                # from-row path use). This fail-closes an unmapped emitted
+                # class HERE, on the commit path, instead of seeding an
+                # unpublishable batch the recovery sweep can never heal — it
+                # mirrors ``_publish_outbox_batch``'s publish-time topic check,
+                # moved one step earlier so capture and publish cannot diverge.
+                resolve_published_topic(
+                    publish_topic_map,
+                    event,
+                    message_type=type(event).__name__,
+                )
+            entries.append(
+                {
+                    "module": type(event).__module__,
+                    "class_name": type(event).__name__,
+                    "payload": event.model_dump(mode="json"),
+                    "index": idx,
+                    "causation_envelope_id": causation_envelope_id,
+                    "correlation_id": cid,
+                    "tenant_id": tenant_id,
+                }
+            )
+        return entries
+
+    def _rebuild_outbox_event(entry: dict[str, object]) -> BaseModel:
+        """Rebuild the typed event model from a stored outbox entry.
+
+        Stamps tenant_id + causation_id onto the payload FROM THE ROW (the
+        applier does not, and in a fresh recovery process the input envelope is
+        gone — the row is the ONLY source, spec §5 tenant-trap).
+
+        Imports the event class via ``importlib`` (not ``_import_handler_class``)
+        so the module/class recorded at commit time from an event WE emitted is
+        rebuilt directly — the handler-class loader's namespace allowlist is for
+        untrusted contract refs, not for a self-recorded outbox entry.
+
+        OMN-14600: a pre-fix legacy-shaped entry (``_legacy_delegation_envelope_
+        unwrap``) rebuilds the INNER ``ModelDelegationResult`` from the nested
+        payload dict instead of the recorded carrier class — reconstructing the
+        carrier itself would republish the double-nested bespoke shape no
+        current consumer expects.
+        """
+        import importlib
+
+        legacy = _legacy_delegation_envelope_unwrap(entry)
+        if legacy is not None:
+            _legacy_topic, inner_payload = legacy
+            module = importlib.import_module(_LEGACY_DELEGATION_RESULT_MODULE)
+            cls = getattr(module, _LEGACY_DELEGATION_RESULT_NAME)
+            model = cls.model_validate(inner_payload)
+        else:
+            module = importlib.import_module(str(entry["module"]))
+            cls = getattr(module, str(entry["class_name"]))
+            model = cls.model_validate(entry["payload"])
+        updates: dict[str, object] = {}
+        fields = type(model).model_fields
+        tenant_id = entry.get("tenant_id")
+        if (
+            tenant_id
+            and "tenant_id" in fields
+            and not getattr(model, "tenant_id", None)
+        ):
+            updates["tenant_id"] = tenant_id
+        causation = entry.get("causation_envelope_id")
+        if (
+            causation
+            and "causation_id" in fields
+            and not getattr(model, "causation_id", None)
+        ):
+            updates["causation_id"] = UUID(str(causation))
+        return model.model_copy(update=updates) if updates else model
+
+    async def _publish_outbox_batch(entries: list[dict[str, object]]) -> int:
+        """Publish a persisted outbox batch FROM THE ROW (recovery / resume).
+
+        Rebuilds each envelope with the causation-scoped deterministic id (spec
+        §8.1) + tenant, resolves its topic, and publishes via the bus.
+        Idempotent: row-derived ids collapse against the original at the
+        consume-path dedupe, so a duplicate re-publish is benign.
+
+        Topic resolution: the contract's ``published_events`` class-name map
+        (``_outbox_topic_for``) is authoritative — every current emit is a
+        bare, un-carried class (OMN-14600). The ONE exception is
+        ``_legacy_delegation_envelope_unwrap``: a pre-fix row committed by the
+        old bespoke ``ModelDelegationEventEnvelope`` carrier, whose OWN nested
+        dump is the only place that topic survived (the row predates the
+        ``published_events`` split into completed/failed entries) — checked
+        first so those specific stuck rows still resolve and self-heal.
+        """
+        from omnibase_core.models.events.model_event_envelope import (
+            ModelEventEnvelope as _Envelope,
+        )
+
+        if event_bus is None or not hasattr(event_bus, "publish_envelope"):
+            return 0
+        published = 0
+        for entry in entries:
+            class_name = str(entry["class_name"])
+            legacy = _legacy_delegation_envelope_unwrap(entry)
+            topic = legacy[0] if legacy is not None else _outbox_topic_for(class_name)
+            if topic is None:
+                raise ModelOnexError(
+                    "handler_wiring: outbox recovery cannot resolve a topic for "
+                    f"fan-out class {class_name!r} — no published_events mapping."
+                )
+            cid_uuid = UUID(str(entry["correlation_id"]))
+            causation = UUID(str(entry["causation_envelope_id"]))
+            idx = int(cast("int", entry["index"]))
+            envelope_id = uuid5(cid_uuid, f"{causation}:{class_name}:{idx}")
+            payload = _rebuild_outbox_event(entry)
+            # OMN-14743: stamp event_type from the resolved topic using the SAME
+            # derivation the external applier uses (shared
+            # ``derive_event_type_from_topic``). Without this the outbox emitted
+            # ``event_type=None`` — this path bypasses the applier's OMN-12116
+            # stamp (the state_io winner branch returns ``(1, None)``) — so the
+            # routing reducer's type-scoped dispatcher (OMN-12294) dropped the
+            # emission and delegation stalled at RECEIVED. A non-ONEX topic
+            # derives ``None`` (the field default), so this is safe for every
+            # topic shape the outbox can resolve.
+            event_type = derive_event_type_from_topic(topic)
+            out_envelope: _Envelope[BaseModel] = _Envelope(
+                envelope_id=envelope_id,
+                payload=payload,
+                correlation_id=cid_uuid,
+                event_type=event_type,
+            )
+            key: bytes | None = None
+            for attr in ("entity_id", "node_id", "session_id", "correlation_id"):
+                value = getattr(payload, attr, None)
+                if value is not None:
+                    key = str(value).encode("utf-8")
+                    break
+            await event_bus.publish_envelope(  # type: ignore[attr-defined]
+                envelope=out_envelope, topic=topic, key=key
+            )
+            published += 1
+        return published
+
+    async def _finalize_outbox_row(
+        cid: str,
+        tenant_id: str,
+        state: str,
+        payload_json: str,
+        expected_version: int,
+    ) -> int:
+        """CAS-finalize a published outbox row: in_flight=False + clear the batch.
+
+        A CAS (not an unconditional UPDATE, spec §4.1 D1) so a concurrent
+        recovery/leg that already finalized this row cannot be silently
+        overwritten; a lost finalize means another path owns terminal state.
+        """
+        return await adapter.cas_update(
+            cid,
+            tenant_id=tenant_id,
+            state=state,
+            in_flight=False,
+            payload_json=payload_json,
+            expected_version=expected_version,
+            pending_emissions=None,
+        )
+
+    async def _recover_outbox_batches(skip_cid: str | None = None) -> None:
+        """Boot/redeploy re-publish of any in-flight row carrying a live batch.
+
+        The adapter surfaces the recoverable rows (it has no bus); THIS wrapper
+        publishes them (it does) with the same row-derived deterministic ids and
+        CAS-finalizes — spec §4.1 D2 layering. Runs BEFORE recover_stale_rows so
+        a recoverable row is re-emitted, not blind-FAILed (spec §4.2 R1).
+
+        ``skip_cid`` is the correlation of the dispatch that TRIGGERED this boot
+        sweep: that row is owned by the triggering leg's own in_flight-lock /
+        resume path (which keys the resume on envelope_id), so the boot sweep
+        must not race it — otherwise a redelivery of the crashed input would
+        find its batch already recovered and needlessly re-run + fold the handler.
+
+        OMN-14600 (Fable-gate correction): each row is recovered in its OWN
+        try/except. Before this, one row that fails to recover (e.g. a stale
+        pre-fix legacy-shaped entry the running code cannot resolve a topic
+        for) raised out of the whole sweep — ``_ensure_stale_rows_recovered``
+        never reached its ``_recovery_last_run_monotonic`` update, so the
+        interval gate stayed permanently due and EVERY subsequent dispatch
+        re-entered this same failing sweep and re-raised, silently dropping
+        every triggering leg's own input. A row that fails here is logged and
+        skipped; the sweep still completes, the timer still advances, and the
+        failing row gets another attempt on the next interval (or self-heals
+        via ``_legacy_delegation_envelope_unwrap`` if that was the cause).
+        """
+        if event_bus is None or not hasattr(adapter, "select_recoverable_batches"):
+            return
+        for row in await adapter.select_recoverable_batches():
+            row_cid = str(row["correlation_id"])
+            if skip_cid is not None and row_cid == skip_cid:
+                continue
+            entries = list(
+                cast("list[dict[str, object]]", row.get("pending_emissions") or [])
+            )
+            if not entries:
+                continue
+            try:
+                await _publish_outbox_batch(entries)
+                await _finalize_outbox_row(
+                    row_cid,
+                    str(row["tenant_id"]),
+                    str(row["state"]),
+                    str(row["payload_json"]),
+                    int(cast("int", row["version"])),
+                )
+            except Exception as exc:  # noqa: BLE001 — per-row isolation, see docstring
+                logger.error(
+                    "state_io recovery sweep: failed to recover row cid=%s (%s) "
+                    "— skipping this row so the sweep completes and the "
+                    "interval timer still advances (OMN-14600); retried on "
+                    "the next sweep interval.",
+                    row_cid,
+                    _sanitize_exc(exc),
+                )
+
+    async def _ensure_stale_rows_recovered(skip_cid: str | None = None) -> None:
+        """Run outbox re-publish + the give-up sweep, at most once per interval.
+
+        Wiring is synchronous, so this cannot run at wiring time; the first live
+        dispatch is the deterministic async point. Outbox re-publish runs FIRST
+        so a recoverable in-flight batch is re-emitted before the give-up sweep
+        (which fail-closes genuinely-abandoned rows) can touch it (OMN-14208 G1,
+        OMN-14403 §4.1/§4.2 R1). Lock-guarded against concurrent same-tick runs.
+
+        OMN-14600: this used to run EXACTLY ONCE per adapter lifetime (boot-time
+        only, gated by a bool). A row whose winning leg crashes or otherwise
+        never finalizes (e.g. a retry-storm cascade exhausting the in_flight-
+        lock defer's own retries) stayed stranded until the next boot/redeploy
+        -- a live, long-running process had no way to self-heal it. Gating on
+        elapsed time instead makes this periodic: any dispatch that lands more
+        than ``_STATE_IO_RECOVERY_SWEEP_INTERVAL_SECONDS`` after the last run
+        re-triggers it, bounding how long a stranded row can survive in a busy
+        process without requiring a dedicated background task.
+        """
+        nonlocal _recovery_last_run_monotonic
+        now = time.monotonic()
+        if (
+            now - _recovery_last_run_monotonic
+            < _STATE_IO_RECOVERY_SWEEP_INTERVAL_SECONDS
+        ):
+            return
+        async with _recovery_lock:
+            now = time.monotonic()
+            if (
+                now - _recovery_last_run_monotonic
+                < _STATE_IO_RECOVERY_SWEEP_INTERVAL_SECONDS
+            ):
+                return
+            await _recover_outbox_batches(skip_cid=skip_cid)
+            await adapter.recover_stale_rows()
+            _recovery_last_run_monotonic = time.monotonic()
+
+    async def _find_recoverable_row(cid: str) -> dict[str, object] | None:
+        """Return this cid's in-flight-with-live-batch row, if one exists.
+
+        Backward-compatible: an adapter without ``select_recoverable_batches``
+        (a legacy fake, or any non-outbox state store) has no in-row outbox, so
+        the in_flight-lock is skipped and dispatch behaves exactly as pre-P3b.
+        In steady state the partial index (``in_flight AND pending_emissions``)
+        returns zero rows, so the per-dispatch check is a cheap empty index scan.
+        """
+        if not hasattr(adapter, "select_recoverable_batches"):
+            return None
+        for row in await adapter.select_recoverable_batches():
+            if str(row["correlation_id"]) == cid:
+                return row
+        return None
+
+    def _dispatch_result_from_entries(
+        entries: list[dict[str, object]], cid: str
+    ) -> ModelDispatchResult:
+        """Rebuild a ModelDispatchResult carrying a row's batch (no-bus resume)."""
+        from datetime import UTC, datetime
+
+        from omnibase_infra.enums import EnumDispatchStatus
+        from omnibase_infra.models.dispatch.model_dispatch_result import (
+            ModelDispatchResult as _Result,
+        )
+
+        events = [_rebuild_outbox_event(e) for e in entries]
+        return _Result(
+            status=EnumDispatchStatus.SUCCESS,
+            topic="",
+            started_at=datetime.now(UTC),
+            completed_at=datetime.now(UTC),
+            output_count=len(events),
+            output_events=events,
+            correlation_id=UUID(cid),
+        )
+
+    async def _load_handle_persist(
+        envelope: ModelEventEnvelope[object],
+        cid: str,
+    ) -> tuple[int, ModelDispatchResult | None]:
+        # in_flight-lock (spec §4.1 D1): a row with a live, un-finalized outbox
+        # batch MUST NOT run the handler — a concurrent leg would clobber the
+        # winner's un-published intent. Resume-from-row if THIS input is the one
+        # that created the batch (a redelivery: envelope_id == causation); else
+        # defer without running the handler (branch b) so the winner's intent is
+        # preserved. The resume predicate keys on envelope_id, NOT causation_id
+        # (spec §4.1 E1 — a redelivered input keeps its envelope_id; its own
+        # causation_id is the grandparent and would never match).
+        incoming_envelope_id = getattr(envelope, "envelope_id", None)
+        locked = await _find_recoverable_row(cid)
+        if locked is not None:
+            entries = list(
+                cast("list[dict[str, object]]", locked.get("pending_emissions") or [])
+            )
+            causation = str(entries[0]["causation_envelope_id"]) if entries else None
+            is_redelivery = (
+                incoming_envelope_id is not None
+                and causation is not None
+                and str(incoming_envelope_id) == causation
+            )
+            if is_redelivery and entries:
+                # Resume: re-publish the SAME batch from the row (idempotent, same
+                # ids) + CAS-finalize. Handler NOT re-run (spec §4.1 E1/E2).
+                if event_bus is not None:
+                    await _publish_outbox_batch(entries)
+                    await _finalize_outbox_row(
+                        cid,
+                        str(locked["tenant_id"]),
+                        str(locked["state"]),
+                        str(locked["payload_json"]),
+                        int(cast("int", locked["version"])),
+                    )
+                    return 1, None
+                # No bus: hand the batch back for the external applier + finalize.
+                await _finalize_outbox_row(
+                    cid,
+                    str(locked["tenant_id"]),
+                    str(locked["state"]),
+                    str(locked["payload_json"]),
+                    int(cast("int", locked["version"])),
+                )
+                return 1, _dispatch_result_from_entries(entries, cid)
+            # A DIFFERENT input arrived while the batch is un-finalized. Do NOT
+            # run the handler (would clobber the winner's un-published intent).
+            #
+            # OMN-14600 (Fable-gate correction, superseding the original
+            # WIP): this branch used to return (1, None) -- a REPORTED SUCCESS
+            # that commits the Kafka offset without ever running the handler
+            # for THIS leg. The first fix attempt reported a conflict
+            # (row_count=0) instead, relying on retry_on_optimistic_conflict's
+            # in-process retries to exhaust and raise OptimisticConflictError
+            # so the caller would redeliver. THAT DOES NOT WORK ON THIS
+            # RUNTIME: MessageDispatchEngine.dispatch() catches every
+            # exception a dispatcher raises (message_dispatch_engine.py's
+            # per-dispatcher invocation loop) and converts it to a returned
+            # HANDLER_ERROR status instead of re-raising; EventBusSubcontract
+            # Wiring's consume callback has NO status branch for
+            # HANDLER_ERROR and commits the Kafka offset unconditionally once
+            # dispatch() returns. So a raised exception here NEVER triggers
+            # redelivery -- it is silently absorbed and the message is gone.
+            #
+            # Fix: INLINE-RECOVER the winner's own batch right here instead of
+            # depending on redelivery. This leg already holds the locked row +
+            # its persisted entries -- publish them (idempotent: deterministic
+            # uuid5 ids collapse a duplicate re-publish) and CAS-finalize using
+            # the SAME helpers the is_redelivery resume branch above uses, so
+            # the winner's stalled/crashed leg is completed deterministically.
+            # Then report a conflict (row_count=0) so retry_on_optimistic_
+            # conflict re-attempts THIS leg in-process against the now-cleared
+            # lock -- it either runs the handler fresh or (if a genuinely
+            # concurrent third leg raced in) defers again, never depending on
+            # bus/engine redelivery semantics. No bus wired (test-only /
+            # legacy-adapter path; production always passes one, see the
+            # wiring call site) means we cannot publish from here -- the
+            # winner's finalize is left to the external applier or the
+            # periodic recovery sweep, unchanged from before.
+            if event_bus is not None:
+                await _publish_outbox_batch(entries)
+                await _finalize_outbox_row(
+                    cid,
+                    str(locked["tenant_id"]),
+                    str(locked["state"]),
+                    str(locked["payload_json"]),
+                    int(cast("int", locked["version"])),
+                )
+            logger.warning(
+                "state_io in_flight-lock: deferring leg (cid=%s) as a conflict "
+                "— a prior leg's outbox batch was committed but not yet "
+                "finalized; inline-recovered (published + finalized) the "
+                "winner's batch instead of relying on redelivery (OMN-14600 — "
+                "redelivery is a dead path on this runtime, see comment "
+                "above). Reported as row_count=0 so the caller retries this "
+                "leg against the now-cleared lock.",
+                cid,
+            )
+            return 0, None
+
+        loaded = await adapter.load(cid)
+        payload_json, version = loaded if loaded is not None else (None, 0)
+        token = CONTEXTVAR_STATE_IO_ROWS.set({cid: (payload_json, version)})
+        try:
+            result = await inner_callback(envelope)
+            flushed_payload_json = codec.flush(cid)
+            new_payload_json = (
+                flushed_payload_json
+                if flushed_payload_json is not None
+                else payload_json
+            )
+        finally:
+            CONTEXTVAR_STATE_IO_ROWS.reset(token)
+
+        if new_payload_json is None or (
+            loaded is not None and new_payload_json == payload_json
+        ):
+            # Nothing changed (a no-op leg, e.g. the in-flight dedup guard
+            # rejecting a duplicate without touching state) — skip
+            # persistence entirely rather than bump version on a byte-
+            # identical write. Reported as a successful (non-conflict) attempt.
+            return 1, result
+
+        metadata = _extract_state_io_metadata(new_payload_json)
+        causation_envelope_id = (
+            str(incoming_envelope_id) if incoming_envelope_id is not None else cid
+        )
+        # The in-row outbox is active only when the adapter supports it. A legacy
+        # adapter (or a non-outbox state store) whose seed/cas_update have no
+        # pending_emissions kwarg keeps the pre-P3b commit-then-return behavior
+        # exactly (no batch persisted, no publish-from-row) — fully backward-compat.
+        outbox_supported = hasattr(adapter, "select_recoverable_batches")
+        entries = (
+            _build_outbox_entries(
+                result, causation_envelope_id, cid, metadata.tenant_id
+            )
+            if outbox_supported
+            else []
+        )
+        # Commit-with-intent (spec §4.1): persist the advanced FSM state AND the
+        # intended emissions in ONE CAS. in_flight=True marks "batch committed,
+        # awaiting publish+finalize" so a crash between here and publish is
+        # recoverable from the row alone.
+        commit_in_flight = bool(entries) or metadata.in_flight
+        # Pass pending_emissions only to an outbox-capable adapter; a legacy
+        # adapter's seed/cas_update have no such kwarg (backward-compat).
+        pending = entries or None
+
+        # OMN-14721: fail-closed emission-completeness guard. A leg that NEWLY
+        # seeds a fresh workflow (``loaded is None``) into a NON-terminal FSM
+        # state MUST carry a durable emission — either a committed outbox batch
+        # (``pending_emissions``) or an ``in_flight`` marker awaiting a follow-up
+        # leg. A fresh, non-terminal row committed with in_flight=False AND an
+        # empty batch (``not commit_in_flight``) is STRUCTURALLY unrecoverable:
+        # ``select_recoverable_batches`` only re-publishes rows that are
+        # ``in_flight AND jsonb_array_length(pending_emissions) > 0``, and
+        # ``recover_stale_rows`` only give-up-FAILs it after the stale TTL — so
+        # the emission the handler was supposed to produce to progress the
+        # workflow is silently dropped forever and the row stalls (the OMN-14721
+        # delegation routing-intent regression: RECEIVED / in_flight=false /
+        # pending=∅). Convert that silent permanent drop into a LOUD dispatch
+        # failure so it is surfaced + DLQ'd (via the OMN-14716 silent-dispatch-
+        # failure guard) and can never recur unobserved.
+        if (
+            loaded is None
+            and outbox_supported
+            and not commit_in_flight
+            and metadata.state not in _STATE_IO_TERMINAL_STATE_NAMES
+        ):
+            raise ModelOnexError(
+                message=(
+                    "handler_wiring: state_io refused to seed an unrecoverable "
+                    f"dead row for correlation_id={cid} — a fresh workflow "
+                    f"committing NON-terminal state={metadata.state!r} with "
+                    "in_flight=False and an EMPTY outbox batch can never be "
+                    "re-published by the recovery sweep "
+                    "(select_recoverable_batches requires in_flight AND a "
+                    "non-empty pending_emissions batch). The handler captured no "
+                    "durable emission for a state that must emit to progress; "
+                    "failing closed so the drop is surfaced and DLQ'd rather "
+                    "than silently stranding the workflow (OMN-14721)."
+                ),
+                error_code=EnumCoreErrorCode.HANDLER_EXECUTION_ERROR,
+            )
+
+        if loaded is None:
+            if outbox_supported:
+                won = await adapter.seed(
+                    cid,
+                    tenant_id=metadata.tenant_id,
+                    state=metadata.state,
+                    in_flight=commit_in_flight,
+                    payload_json=new_payload_json,
+                    pending_emissions=pending,
+                )
+            else:
+                won = await adapter.seed(
+                    cid,
+                    tenant_id=metadata.tenant_id,
+                    state=metadata.state,
+                    in_flight=commit_in_flight,
+                    payload_json=new_payload_json,
+                )
+            row_count = 1 if won else 0
+            committed_version = 0
+        elif outbox_supported:
+            row_count = await adapter.cas_update(
+                cid,
+                tenant_id=metadata.tenant_id,
+                state=metadata.state,
+                in_flight=commit_in_flight,
+                payload_json=new_payload_json,
+                expected_version=version,
+                pending_emissions=pending,
+            )
+            committed_version = version + 1
+        else:
+            row_count = await adapter.cas_update(
+                cid,
+                tenant_id=metadata.tenant_id,
+                state=metadata.state,
+                in_flight=commit_in_flight,
+                payload_json=new_payload_json,
+                expected_version=version,
+            )
+            committed_version = version + 1
+
+        if row_count == 0:
+            # Lost the CAS — a concurrent winner advanced the row. Retry reloads
+            # against the winner (which committed + publishes ITS own intent), so
+            # this attempt's events are correctly dropped, never lost.
+            return 0, result
+
+        # Winner. If the wrapper owns a bus AND emitted a batch, publish-from-row
+        # + CAS-finalize WITHIN this leg — leaving the row in_flight would deadlock
+        # the next leg's CAS-retry (the stuck-at-INFERENCE_COMPLETED symptom).
+        # Return None so the external applier does NOT re-publish the same batch
+        # (no double-publish — OMN-14403 §7 decision 1).
+        if entries and event_bus is not None:
+            try:
+                await _publish_outbox_batch(entries)
+            except Exception as exc:
+                raise BoundaryPublishError(
+                    "handler_wiring: state_io outbox publish-from-row failed"
+                ) from exc
+            await _finalize_outbox_row(
+                cid,
+                metadata.tenant_id,
+                metadata.state,
+                new_payload_json,
+                committed_version,
+            )
+            return 1, None
+
+        # No-bus path (test commit / non-emitting leg): hand the result back for
+        # the external applier to publish; the row keeps its committed intent.
+        return 1, result
+
+    async def _callback(
+        envelope: ModelEventEnvelope[object],
+    ) -> ModelDispatchResult | None:
+        payload = _extract_dispatch_payload(envelope)
+        correlation_id = _coerce_uuid_or_none(
+            _extract_dispatch_correlation_id(envelope, payload)
+        )
+        if correlation_id is None:
+            raise ModelOnexError(
+                "handler_wiring: state_io dispatch requires a correlation_id "
+                "on every leg — got none. Legs 2-5 of a multi-leg "
+                "orchestrator carry no tenant_id on the wire but MUST carry "
+                "correlation_id (the state_io read key)."
+            )
+        cid = str(correlation_id)
+
+        await _ensure_stale_rows_recovered(skip_cid=cid)
+
+        _row_count, result = await retry_on_optimistic_conflict(
+            lambda: _load_handle_persist(envelope, cid),
+            check_conflict=lambda outcome: outcome[0] == 0,
+            correlation_id=cast("UUID", correlation_id),
+        )
+        return result
+
+    return _callback
+
+
+def _raise_if_silent_dispatch_failure(
+    result: object,
+    topic: str,
+) -> None:
+    """Raise ``HandlerDispatchFailureError`` for a FAILED dispatch result that
+    would otherwise vanish silently (OMN-14716).
+
+    ``MessageDispatchEngine.dispatch()`` converts a dispatcher crash (a def-B
+    handler AttributeError, a boundary coercion ``ValidationError``, ...) into a
+    ``HANDLER_ERROR``/``INTERNAL_ERROR`` result rather than re-raising, and
+    ``DispatchResultApplier.apply()`` silently skips a non-SUCCESS result that
+    carries no applicable output. That combination is the exact
+    "handler crashed, both terminal topics stayed HWM=0, nothing surfaced"
+    incident shape. Detect only that shape — an error status with NO
+    output_events / output_intents / projection_intents — and raise so the
+    boundary routes it through ``_route_swallowed_exception`` (loud metric log +
+    best-effort DLQ).
+
+    A partial-success ``HANDLER_ERROR`` (one sibling handler failed but another
+    produced output the applier publishes) is intentionally NOT surfaced here —
+    it is not a silent drop. Non-error statuses (SUCCESS/NO_DISPATCHER/... — the
+    latter has its own engine-side DLQ routing) are left untouched. Guarded on a
+    real ``ModelDispatchResult`` instance so a ``MagicMock`` result in a test
+    never trips it.
+    """
+    from omnibase_infra.enums import EnumDispatchStatus
+    from omnibase_infra.models.dispatch.model_dispatch_result import (
+        ModelDispatchResult,
+    )
+
+    if not isinstance(result, ModelDispatchResult):
+        return
+    if result.status not in (
+        EnumDispatchStatus.HANDLER_ERROR,
+        EnumDispatchStatus.INTERNAL_ERROR,
+    ):
+        return
+    has_applicable_output = bool(
+        result.output_events or result.output_intents or result.projection_intents
+    )
+    if has_applicable_output:
+        return
+    raise HandlerDispatchFailureError(
+        f"dispatch to topic={topic} returned status={result.status.value} with no "
+        f"terminal output (dispatcher_id={result.dispatcher_id}): "
+        f"{result.error_message or 'handler/coercion failure'}"
+    )
+
+
 def _make_event_bus_callback(
     topic: str,
     dispatch_engine: ProtocolDispatchEngine,
     result_applier: ProtocolDispatchResultApplier | None = None,
+    *,
+    tenant_scoped: bool = False,
+    event_bus: object | None = None,
+    propagate_publish_failures: bool = False,
 ) -> Callable[..., Awaitable[None]]:
     """Create a Kafka on_message callback that deserializes and dispatches to engine.
 
     Mirrors EventBusSubcontractWiring._create_dispatch_callback but stripped of
     DLQ/idempotency concerns. When a result applier is supplied, dispatcher
     outputs are applied on the same auto-wired path that owns the subscription.
+
+    ``tenant_scoped`` (OMN-14349, OMN-14208 Path A): when True, derives a
+    verified tenant_id from this topic's ``tenant-<slug>.`` wire prefix and
+    stamps it into the payload before ``dispatch_engine.dispatch()`` is ever
+    called -- overwriting any client-supplied value. This is the layer where
+    ``topic`` is genuinely in scope with the envelope still mutable (proven:
+    it already derives ``event_type`` from ``topic`` below); the per-handler
+    dispatch callback further downstream (``_make_dispatch_callback``) never
+    sees ``topic`` at all, so the stamp cannot happen there. A topic with no
+    ``tenant-<slug>.`` prefix is left completely unstamped -- never given a
+    defaulted or guessed tenant (Stage-1 warn semantics, OMN-14208 §5.1).
+
+    ``event_bus`` (OMN-14507): optional handle to the bus this topic was
+    subscribed on. Duck-typed for a ``_publish_raw_to_dlq`` method exactly
+    like ``EventBusSubcontractWiring._publish_to_dlq`` -- when present AND
+    ``_boundary_dlq_enabled()`` is True, a handler exception that survives
+    the bounded retry is routed there instead of vanishing. ``None`` (the
+    default) preserves the historical no-DLQ callback shape for any
+    caller/test that does not pass one.
     """
     import json
 
@@ -1659,7 +3239,263 @@ def _make_event_bus_callback(
             return f"{parts[2]}.{parts[3]}"
         return None
 
+    async def _dispatch_with_bounded_retry(
+        envelope: ModelEventEnvelope[object],
+    ) -> None:
+        """Dispatch + apply, retrying a bounded number of times on failure.
+
+        A single attempt (no retry, no sleep) when the boundary-DLQ flag is
+        off -- matches the pre-OMN-14507 call shape exactly (dispatch once,
+        apply once). Only the dispatch/apply step is retried: a deserialize
+        failure above this point is a content error (malformed JSON/schema)
+        that retrying can never fix.
+
+        Non-retryable classification (OMN-14507 review, gap G2): a Pydantic
+        ``ValidationError`` or ``ProtocolConfigurationError`` raised BY the
+        dispatch/apply step is itself a content/config error -- e.g. a
+        handler-level wire-model rejecting an unknown field under
+        ``extra="forbid"`` (the exact §7 death signal this boundary exists to
+        carry), or ``ProtocolConfigurationError`` from a missing dispatcher.
+        Both are deterministic: retrying burns the full backoff budget for a
+        guaranteed-identical failure. These break out of the loop on the
+        FIRST occurrence and go straight to the caller's DLQ/log handling,
+        matching the sibling classifier's (``EventBusSubcontractWiring``)
+        non-retryable treatment of content errors. Everything else (network
+        blips, transient infra errors) is retried up to
+        ``_BOUNDARY_DLQ_MAX_ATTEMPTS`` times.
+
+        Idempotency note (gap G4): a handler that performs a side effect
+        before raising will have that side effect repeated on each retry
+        attempt within a single delivery (in addition to Kafka's own
+        at-least-once redelivery). Handlers on this boundary are expected to
+        be idempotent already for that reason; this does not introduce a new
+        assumption, only a higher chance of exercising it within one message.
+        """
+        from pydantic import ValidationError as PydanticValidationError
+
+        from omnibase_infra.errors import ProtocolConfigurationError
+
+        attempts = _BOUNDARY_DLQ_MAX_ATTEMPTS if _boundary_dlq_enabled() else 1
+        last_exc: Exception | None = None
+        for attempt in range(attempts):
+            try:
+                if not await _wait_for_dispatch_engine_freeze(topic, dispatch_engine):
+                    return
+                result = await dispatch_engine.dispatch(topic, envelope)
+                if result_applier is not None and result is not None:
+                    try:
+                        await result_applier.apply(result, envelope.correlation_id)
+                    except Exception as apply_exc:
+                        # OMN-14403 §4.3: on the outbox path a publish failure
+                        # must PROPAGATE (redeliver), never be retried-then-
+                        # swallowed. Tag it so the loop breaks and the outer
+                        # handler re-raises. Off the outbox path this is a no-op:
+                        # the original exception rides the generic retry arm.
+                        if propagate_publish_failures:
+                            raise BoundaryPublishError(
+                                "outbox publish failed"
+                            ) from apply_exc
+                        raise
+                # OMN-14716: the engine catch-all converts a dispatcher crash (a
+                # def-B handler AttributeError, a boundary coercion failure) into a
+                # FAILED result instead of re-raising, and the applier silently
+                # skips a non-SUCCESS result with no output. Surface that shape so
+                # it is logged + best-effort-DLQ'd here instead of vanishing at
+                # HWM=0 -- routed through the same _route_swallowed_exception path
+                # a raised handler exception takes.
+                _raise_if_silent_dispatch_failure(result, topic)
+                return
+            except (
+                PydanticValidationError,
+                ProtocolConfigurationError,
+                BoundaryPublishError,
+                HandlerDispatchFailureError,
+            ) as exc:
+                # Non-retryable: deterministic content/config error, an outbox
+                # publish failure that must propagate (not retry), or a FAILED
+                # dispatch result the engine already produced deterministically
+                # (OMN-14716). No backoff, no further attempts -- see docstring
+                # gap G2 + OMN-14403 §4.3.
+                last_exc = exc
+                break
+            except Exception as exc:  # noqa: BLE001 — bounded-retry loop; re-raised below on exhaustion
+                last_exc = exc
+                if attempt < attempts - 1:
+                    backoff = _BOUNDARY_DLQ_RETRY_BACKOFF_SECONDS[
+                        min(attempt, len(_BOUNDARY_DLQ_RETRY_BACKOFF_SECONDS) - 1)
+                    ]
+                    logger.warning(
+                        "Auto-wiring callback retry: topic=%s attempt=%d/%d "
+                        "error_type=%s error=%s backoff_s=%.2f",
+                        topic,
+                        attempt + 1,
+                        attempts,
+                        type(exc).__name__,
+                        _sanitize_exc(exc),
+                        backoff,
+                    )
+                    await asyncio.sleep(backoff)
+        assert last_exc is not None
+        raise last_exc
+
+    async def _route_swallowed_exception(
+        exc: Exception,
+        message: object,
+        correlation_id: UUID,
+    ) -> None:
+        """Handle a handler exception that survived dispatch (OMN-14507).
+
+        flag OFF (default): identical swallow-and-ACK semantics to the
+        pre-fix behavior -- one ``logger.error`` -- plus a structured
+        metric-shaped log line so the swallow is at least observable (the
+        DEFAULT-OFF, warn-first stage of the rollout).
+
+        flag ON: additionally attempts to durably preserve the message in
+        the topic's DLQ via the same duck-typed ``_publish_raw_to_dlq``
+        contract ``EventBusSubcontractWiring._publish_to_dlq`` already
+        depends on. If no ``event_bus`` was supplied, the bus does not
+        expose that method, or the DLQ publish itself raises, this degrades
+        to the same loud-log-only path -- it never raises and never blocks
+        the boundary from returning.
+
+        Honesty note (OMN-14507 review, gap G1): this is BEST-EFFORT DLQ
+        delivery, not true at-least-once. The offset always advances (no
+        nack/redelivery here) -- if the retry budget is exhausted AND the
+        DLQ publish itself fails, the message IS lost, just loudly instead of
+        silently. Strictly better than the pre-fix 100% swallow, but callers
+        must not read "flag ON" as a guarantee that no message can ever be
+        lost; that would require true nack/redelivery, deliberately deferred
+        to a follow-up (see G1 in the PR review).
+
+        Metric naming (gap G3): only the case that ACTUALLY prevented loss
+        (``dlq_routed=true``) is logged as ``boundary_swallow_prevented``. The
+        flag-off path and the DLQ-unavailable/DLQ-publish-failed paths are
+        logged as ``boundary_swallow_observed`` -- nothing was prevented
+        there, only observed; conflating the two would mislead an operator
+        alerting on the "prevented" counter into believing the message survived.
+        """
+        from omnibase_infra.enums import EnumInfraTransportType
+        from omnibase_infra.errors import ModelInfraErrorContext
+        from omnibase_infra.utils.util_error_sanitization import (
+            sanitize_error_message,
+        )
+
+        sanitized = sanitize_error_message(exc)
+        logger.error(
+            "Auto-wiring callback error: topic=%s error_type=%s error=%s "
+            "correlation_id=%s",
+            topic,
+            type(exc).__name__,
+            sanitized,
+            correlation_id,
+        )
+        dlq_enabled = _boundary_dlq_enabled()
+        publish_dlq_fn = (
+            getattr(event_bus, "_publish_raw_to_dlq", None)
+            if dlq_enabled and event_bus is not None
+            else None
+        )
+        if publish_dlq_fn is None or not callable(publish_dlq_fn):
+            # metric surface: a structured, greppable log line stands in for a
+            # counter emission in this DRAFT (see PR body for the follow-up).
+            # Nothing was prevented here -- see gap G3 above.
+            logger.error(
+                "metric_name=boundary_swallow_observed dlq_routed=false "
+                "dlq_enabled=%s topic=%s error_type=%s correlation_id=%s",
+                dlq_enabled,
+                topic,
+                type(exc).__name__,
+                correlation_id,
+            )
+            return
+
+        def _increment_message_lost_counter() -> None:
+            # OMN-14551: this IS the alertable signal -- the log line at each
+            # call site is greppable but not pageable. Never let metric
+            # emission itself become a new swallow site.
+            if _BOUNDARY_MESSAGE_LOST_COUNTER is None:
+                return
+            try:
+                _BOUNDARY_MESSAGE_LOST_COUNTER.labels(
+                    topic=topic, error_type=type(exc).__name__
+                ).inc()
+            except Exception as metric_exc:  # noqa: BLE001 — metric emission must never crash the consumer
+                context = ModelInfraErrorContext.with_correlation(
+                    correlation_id=correlation_id,
+                    transport_type=EnumInfraTransportType.KAFKA,
+                    operation="increment_message_lost_counter",
+                    target_name=topic,
+                    original_error_type=type(metric_exc).__name__,
+                )
+                logger.warning(
+                    "Failed to increment onex_boundary_message_lost_total "
+                    "metric for topic=%s (message loss above is still "
+                    "authoritative): context=%s",
+                    topic,
+                    context.model_dump(mode="json", exclude_none=True),
+                )
+
+        try:
+            from omnibase_infra.event_bus.topic_constants import (
+                get_dlq_topic_for_original,
+            )
+
+            dlq_persisted = await publish_dlq_fn(
+                original_topic=topic,
+                raw_msg=message,
+                error=exc,
+                correlation_id=correlation_id,
+                failure_type="handler_exception",
+                consumer_group="auto-wiring",
+                dlq_topic=get_dlq_topic_for_original(topic),
+            )
+            if dlq_persisted:
+                logger.error(
+                    "metric_name=boundary_swallow_prevented dlq_routed=true "
+                    "dlq_enabled=%s topic=%s error_type=%s correlation_id=%s",
+                    dlq_enabled,
+                    topic,
+                    type(exc).__name__,
+                    correlation_id,
+                )
+            else:
+                # OMN-14936: a False return means the publish did NOT
+                # durably persist (rejected input, producer unavailable, or
+                # the send itself failed/timed out) WITHOUT raising -- the
+                # message is lost exactly like the except-branch below, just
+                # signaled through the return value instead of an exception.
+                # Reusing "dlq_publish_failed=true" here (rather than a new
+                # token) keeps this the same alertable shape as the
+                # exception path for any existing log-based consumer.
+                logger.error(
+                    "metric_name=boundary_swallow_observed dlq_routed=false "
+                    "dlq_enabled=%s dlq_publish_failed=true message_lost=true "
+                    "topic=%s error_type=%s correlation_id=%s",
+                    dlq_enabled,
+                    topic,
+                    type(exc).__name__,
+                    correlation_id,
+                )
+                _increment_message_lost_counter()
+        except Exception as dlq_exc:  # noqa: BLE001 — DLQ publish is itself a boundary; never let it crash the consumer
+            # Best-effort DLQ failed too -- the message IS lost here (gap G1).
+            # Loud, not silent, but not prevented -- see gap G3 above.
+            logger.error(
+                "metric_name=boundary_swallow_observed dlq_routed=false "
+                "dlq_enabled=%s dlq_publish_failed=true message_lost=true "
+                "topic=%s error_type=%s dlq_error=%s correlation_id=%s",
+                dlq_enabled,
+                topic,
+                type(exc).__name__,
+                sanitize_error_message(dlq_exc),
+                correlation_id,
+            )
+            _increment_message_lost_counter()
+
     async def callback(message: object) -> None:
+        from uuid import uuid4
+
+        correlation_id: UUID = uuid4()
         try:
             raw = getattr(message, "value", None)
             if raw is not None:
@@ -1675,7 +3511,6 @@ def _make_event_bus_callback(
                 except PydanticValidationError:
                     # Raw command payload (no envelope wrapper) — synthesize one.
                     from datetime import UTC, datetime
-                    from uuid import uuid4
 
                     raw_corr = (
                         data.get("correlation_id") if isinstance(data, dict) else None
@@ -1702,6 +3537,8 @@ def _make_event_bus_callback(
                         envelope = envelope.model_copy(
                             update={"event_type": derived_event_type}
                         )
+                if tenant_scoped:
+                    envelope = _stamp_tenant_id_from_topic_prefix(topic, envelope)
             else:
                 if not isinstance(message, ModelEventEnvelope):
                     logger.warning(
@@ -1712,20 +3549,63 @@ def _make_event_bus_callback(
                     )
                     return
                 envelope = message
-            if not await _wait_for_dispatch_engine_freeze(topic, dispatch_engine):
-                return
-            result = await dispatch_engine.dispatch(topic, envelope)
-            if result_applier is not None and result is not None:
-                await result_applier.apply(result, envelope.correlation_id)
-        except Exception as exc:  # noqa: BLE001 — boundary: log and discard; unsubscribe unavailable here
-            logger.error(
-                "Auto-wiring callback error: topic=%s error_type=%s error=%s",
-                topic,
-                type(exc).__name__,
-                exc,
-            )
+            if envelope.correlation_id is not None:
+                correlation_id = envelope.correlation_id
+            await _dispatch_with_bounded_retry(envelope)
+        except (OptimisticConflictError, BoundaryPublishError) as exc:
+            # OMN-14403 §4.3, OMN-14600 CORRECTION: this except-tuple's
+            # OptimisticConflictError arm is effectively DEAD for a dispatcher
+            # registered on MessageDispatchEngine (the state_io stateful
+            # callback IS such a dispatcher) — dispatch_engine.dispatch()
+            # catches every exception its per-dispatcher invocation loop sees
+            # and returns a HANDLER_ERROR status instead of re-raising, so an
+            # OptimisticConflictError raised inside _load_handle_persist's
+            # retry_on_optimistic_conflict call never survives to reach here.
+            # BoundaryPublishError IS live: it is raised by
+            # _dispatch_with_bounded_retry AFTER dispatch_engine.dispatch()
+            # already returned (from result_applier.apply() failing), which is
+            # outside that catch-all, so it genuinely propagates from this
+            # callback to its caller (no offset commit here). Whether that
+            # caller's non-commit actually produces a Kafka redelivery is a
+            # property of the OUTER consumer wiring, not verified at this
+            # layer — do not assume it without checking that caller.
+            if propagate_publish_failures:
+                if isinstance(exc, BoundaryPublishError) and exc.__cause__:
+                    raise exc.__cause__
+                raise
+            await _route_swallowed_exception(exc, message, correlation_id)
+        except Exception as exc:  # noqa: BLE001 — boundary: never unsubscribe; route to _route_swallowed_exception
+            await _route_swallowed_exception(exc, message, correlation_id)
 
     return callback
+
+
+_TENANT_WIRE_PREFIX_RE = re.compile(r"^tenant-([a-z][a-z0-9-]{1,61}[a-z0-9])\.")
+
+
+def _stamp_tenant_id_from_topic_prefix(
+    topic: str,
+    envelope: ModelEventEnvelope[object],
+) -> ModelEventEnvelope[object]:
+    """Overwrite payload["tenant_id"] with the slug from a tenant-<slug>. wire prefix.
+
+    OMN-14349 (OMN-14208 Path A). The config-bound identity always wins: this
+    overwrites any client-supplied ``tenant_id``, it never merges-if-absent
+    and never falls back to one. A topic with no matching prefix leaves the
+    payload completely untouched -- never a defaulted or guessed tenant
+    (Stage-1 warn semantics; a missing/self-reported value is handled by the
+    existing OMN-14058 flow downstream, not masked here).
+    """
+    match = _TENANT_WIRE_PREFIX_RE.match(topic)
+    if match is None:
+        return envelope
+    if not isinstance(envelope.payload, dict):
+        return envelope
+    slug = match.group(1)
+    # OMN-14367: route through the single canonical stamp so this producer and
+    # the gateway forwarder's consume_inbound cannot diverge on the shape again.
+    stamped_payload = stamp_verified_tenant_slug(envelope.payload, slug)
+    return envelope.model_copy(update={"payload": stamped_payload})
 
 
 def _make_raw_event_projection_callback(
@@ -1858,19 +3738,36 @@ def _derive_dispatcher_id(contract_name: str, handler_key: str) -> str:
 def _derive_handler_entry_key(entry: ModelHandlerRoutingEntry) -> str:
     """Return the stable per-entry handler key used for pre-resolution and IDs.
 
-    The key preserves the legacy plain handler name when ``operation`` is
-    absent. When operation is present, it appends a sanitized operation label
-    plus a short digest, preventing collisions when a contract uses the same
-    handler class for multiple operations.
+    The key preserves the legacy plain handler name when neither ``operation``
+    nor ``topic`` is present. When ``operation`` is present, it appends a
+    sanitized operation label plus a short digest, preventing collisions when
+    a contract uses the same handler class for multiple operations.
+
+    OMN-14580: a ``topic_match`` contract can legitimately route the SAME
+    operation to the SAME handler from several distinct topics (e.g. one
+    reducer operation invoked from N event sources, each with its own
+    ``event_model`` — see ``node_swarm_subtask_state_reducer``) — operation
+    alone no longer disambiguates that shape and produced a dispatcher-ID
+    collision (ONEX_CORE_064_DUPLICATE_REGISTRATION) on cold boot. When the
+    entry declares its own ``topic``, it is folded into the digest (not the
+    human-readable label, to avoid re-duplicating the topic that
+    ``_derive_route_id`` already appends) so each topic still gets its own
+    key.
     """
     handler_name = entry.handler.name
-    operation = entry.operation
+    operation = entry.operation or ""
+    topic = entry.topic.strip() if entry.topic else ""
+    if not operation and not topic:
+        return handler_name
+
+    normalized_op = ""
     if operation:
-        normalized = re.sub(r"[^A-Za-z0-9_]+", "_", operation.strip()).strip("_")
-        digest = hashlib.sha1(operation.encode()).hexdigest()[:8]
-        safe_op = f"{normalized}_{digest}" if normalized else digest
-        return f"{handler_name}.{safe_op}"
-    return handler_name
+        normalized_op = re.sub(r"[^A-Za-z0-9_]+", "_", operation.strip()).strip("_")
+
+    digest_source = f"{operation}|{topic}" if topic else operation
+    digest = hashlib.sha1(digest_source.encode()).hexdigest()[:8]
+    safe_op = f"{normalized_op}_{digest}" if normalized_op else digest
+    return f"{handler_name}.{safe_op}"
 
 
 def _required_handler_init_params(handler_cls: type) -> frozenset[str]:
@@ -1912,6 +3809,110 @@ def _should_skip_sync_container_resolution(handler_cls: type) -> bool:
 
 async def _await_event_bus_publish(awaitable: Awaitable[object]) -> None:
     await awaitable
+
+
+async def _route_sync_publisher_failure(
+    exc: Exception,
+    *,
+    event_bus: object,
+    handler_name: str,
+    topic: str,
+    payload: bytes,
+) -> None:
+    """Best-effort DLQ routing for a sync-handler's fire-and-forget publish
+    failure (OMN-14498 / OMN-15029).
+
+    ``_make_sync_event_publisher``'s ``_publish`` schedules the actual
+    downstream publish as a detached asyncio Task/Future and only logged its
+    failure via ``_log_publish_failure``'s ``add_done_callback`` — no DLQ, no
+    metric, no durable trace that the event ever existed. Confirmed still
+    live on ``origin/dev`` by the OMN-15029 false-Done reopen. There is
+    nothing to re-raise into here: the sync handler that issued the publish
+    has already returned by the time this callback runs, so propagating the
+    exception synchronously is not possible.
+
+    Mirrors the ``_make_event_bus_callback._route_swallowed_exception`` idiom
+    (OMN-14507) for the consume boundary: when the event bus exposes the
+    duck-typed ``_publish_raw_to_dlq`` contract, the payload that failed to
+    publish is durably preserved on that topic's DLQ instead of vanishing
+    with nothing but a log line. Unlike the consume-boundary version this is
+    UNCONDITIONAL — not gated behind ``ONEX_BOUNDARY_DLQ_ENABLED``: this is a
+    pure best-effort recovery channel layered on top of the EXISTING
+    fire-and-forget publish (no new retry, no change to offset/delivery
+    semantics, no control-flow change on success), so there is no
+    staged-rollout risk to hold behind a flag — leaving it flag-gated would
+    reproduce the exact live-off, still-swallowing state OMN-15029 exists to
+    close.
+
+    Never raises: a failure in the DLQ path itself is logged loudly
+    (``message_lost=true``) rather than crashing the kernel loop's task
+    processing.
+    """
+    from uuid import uuid4
+
+    from omnibase_infra.event_bus.topic_constants import get_dlq_topic_for_original
+
+    correlation_id = uuid4()
+    publish_dlq_fn = getattr(event_bus, "_publish_raw_to_dlq", None)
+    if publish_dlq_fn is None or not callable(publish_dlq_fn):
+        logger.error(
+            "metric_name=boundary_swallow_observed dlq_routed=false "
+            "message_lost=true handler=%s topic=%s error_type=%s "
+            "correlation_id=%s",
+            handler_name,
+            topic,
+            type(exc).__name__,
+            correlation_id,
+        )
+        return
+
+    from types import SimpleNamespace
+
+    raw_msg = SimpleNamespace(value=payload, key=None, offset=None, partition=None)
+    try:
+        dlq_persisted = await publish_dlq_fn(
+            original_topic=topic,
+            raw_msg=raw_msg,
+            error=exc,
+            correlation_id=correlation_id,
+            failure_type="sync_publisher_publish_failed",
+            consumer_group="auto-wiring-sync-publisher",
+            dlq_topic=get_dlq_topic_for_original(topic),
+        )
+        if dlq_persisted:
+            logger.error(
+                "metric_name=boundary_swallow_prevented dlq_routed=true "
+                "handler=%s topic=%s error_type=%s correlation_id=%s",
+                handler_name,
+                topic,
+                type(exc).__name__,
+                correlation_id,
+            )
+            return
+        # A False return means the DLQ publish did NOT durably persist
+        # (rejected input, producer unavailable, or the send itself
+        # failed/timed out) WITHOUT raising -- the message is lost exactly
+        # like the except-branch below, just signaled via the return value.
+        logger.error(
+            "metric_name=boundary_swallow_observed dlq_routed=false "
+            "dlq_publish_failed=true message_lost=true handler=%s topic=%s "
+            "error_type=%s correlation_id=%s",
+            handler_name,
+            topic,
+            type(exc).__name__,
+            correlation_id,
+        )
+    except Exception as dlq_exc:  # noqa: BLE001 — DLQ publish is itself a boundary; never let it crash the kernel loop
+        logger.error(
+            "metric_name=boundary_swallow_observed dlq_routed=false "
+            "dlq_publish_failed=true message_lost=true handler=%s topic=%s "
+            "error_type=%s dlq_error=%s correlation_id=%s",
+            handler_name,
+            topic,
+            type(exc).__name__,
+            _sanitize_exc(dlq_exc),
+            correlation_id,
+        )
 
 
 def _make_sync_event_publisher(
@@ -1975,6 +3976,29 @@ def _make_sync_event_publisher(
                     type(exc).__name__,
                     exc,
                 )
+                # OMN-14498 / OMN-15029: previously the failure vanished here
+                # -- logged, never routed anywhere durable. This callback is
+                # sync (it cannot itself await), so the best-effort DLQ
+                # routing is scheduled as a task on the kernel loop instead.
+                # Safe to call unconditionally: `_log_publish_failure` always
+                # executes on `kernel_loop`'s own thread, whether it was
+                # registered on an asyncio Task (the same-loop branch below)
+                # or chained from `run_coroutine_threadsafe` (the
+                # cross-thread branch) -- `_chain_future` resolves the
+                # `concurrent.futures.Future` from inside the loop's own
+                # callback dispatch, which is also where that Future invokes
+                # its done-callbacks.
+                dlq_task = kernel_loop.create_task(
+                    _route_sync_publisher_failure(
+                        exc,
+                        event_bus=event_bus,
+                        handler_name=handler_name,
+                        topic=topic,
+                        payload=payload,
+                    )
+                )
+                _DLQ_ROUTING_TASKS.add(dlq_task)
+                dlq_task.add_done_callback(_DLQ_ROUTING_TASKS.discard)
 
         try:
             running_loop: asyncio.AbstractEventLoop | None = asyncio.get_running_loop()
@@ -2055,6 +4079,7 @@ def _build_topic_migration_executor_dependencies() -> dict[str, object]:
     from aiokafka import AIOKafkaConsumer
     from aiokafka.admin import AIOKafkaAdminClient
 
+    from omnibase_infra.event_bus.kafka_auth import build_aiokafka_auth_kwargs_from_env
     from omnibase_infra.event_bus.service_topic_manager import TopicProvisioner
     from omnibase_infra.migration.adapter_kafka_admin_lag import AdapterKafkaAdminLag
     from omnibase_infra.migration.service_consumer_lag_observer import (
@@ -2063,8 +4088,9 @@ def _build_topic_migration_executor_dependencies() -> dict[str, object]:
     from omnibase_infra.migration.service_drain_proof_gate import ServiceDrainProofGate
 
     bootstrap_servers = os.environ["KAFKA_BOOTSTRAP_SERVERS"]  # ONEX_EXCLUDE: env
-    admin = AIOKafkaAdminClient(bootstrap_servers=bootstrap_servers)
-    consumer = AIOKafkaConsumer(bootstrap_servers=bootstrap_servers)
+    auth_kwargs = build_aiokafka_auth_kwargs_from_env()
+    admin = AIOKafkaAdminClient(bootstrap_servers=bootstrap_servers, **auth_kwargs)
+    consumer = AIOKafkaConsumer(bootstrap_servers=bootstrap_servers, **auth_kwargs)
     lag_admin = AdapterKafkaAdminLag(admin, consumer)
     observer = ServiceConsumerLagObserver(lag_admin)
     return {
@@ -2185,6 +4211,21 @@ def _materialize_known_handler_dependencies(
         handler_dependencies.setdefault(name, available[name])
     if "dispatch_port" in constructor_params and "dispatch_port" in available:
         handler_dependencies.setdefault("dispatch_port", available["dispatch_port"])
+    if "db_dsn" in constructor_params:
+        from omnibase_infra.runtime.overlay.contract_env_ref import (
+            expand_contract_env_refs,
+        )
+
+        db_dsn = next(
+            (
+                resolved.strip()
+                for name in _LEDGER_DB_DSN_ENV_VARS
+                if (resolved := expand_contract_env_refs(f"${{env.{name}:}}").strip())
+            ),
+            "",
+        )
+        if db_dsn:
+            handler_dependencies.setdefault("db_dsn", db_dsn)
     if requires_event_publisher and "event_publisher" in available:
         handler_dependencies.setdefault("event_publisher", available["event_publisher"])
     if requires_event_consumer and "event_consumer" in available:
@@ -2231,6 +4272,27 @@ def _derive_message_category(topic: str) -> str:
     return "event"
 
 
+def _node_kind_from_node_type(node_type: str | None) -> EnumNodeKind | None:
+    """Map a contract ``node_type`` (e.g. ``REDUCER_GENERIC``) to EnumNodeKind.
+
+    Only the archetype prefix matters. Returns ``None`` for an unrecognized or
+    empty node_type so the dispatch adapter keeps its archetype-agnostic
+    classification (events / intents / fan-out). Used to tell
+    ``_normalize_handler_result`` that a bare/Sequence return from a REDUCER is a
+    projection, not an event (OMN-14598).
+    """
+    prefix = (node_type or "").strip().upper()
+    if prefix.startswith("REDUCER"):
+        return EnumNodeKind.REDUCER
+    if prefix.startswith("EFFECT"):
+        return EnumNodeKind.EFFECT
+    if prefix.startswith("COMPUTE"):
+        return EnumNodeKind.COMPUTE
+    if prefix.startswith("ORCHESTRATOR"):
+        return EnumNodeKind.ORCHESTRATOR
+    return None
+
+
 def _derive_event_type_alias_from_topic(topic: str) -> str | None:
     """Derive the dispatch-engine event_type alias from an ONEX topic."""
     parts = topic.split(".")
@@ -2248,6 +4310,20 @@ def _topics_for_handler_entry(
         return ()
 
     topics = contract.event_bus.subscribe_topics
+
+    # OMN-13825: honor a contract-declared per-handler topic (topic_match
+    # strategy). When a handler entry names its own subscribe topic, that
+    # entry deterministically owns exactly that topic — the reducer's
+    # topic_match contract (e.g. node_projection_swarm, two handlers each
+    # declaring one of two subscribe topics) previously fell through to the
+    # multi-handler ambiguity guard (return ()) and registered ZERO dispatch
+    # routes, orphaning the dispatcher ("No dispatcher found"). An entry_topic
+    # that is not an actual subscribe topic returns () so a real contract
+    # error surfaces rather than silently mis-routing.
+    entry_topic = entry.topic.strip() if entry.topic else ""
+    if entry_topic:
+        return (entry_topic,) if entry_topic in topics else ()
+
     event_type_alias = entry.event_type.strip() if entry.event_type else ""
     if event_type_alias:
         matched = tuple(
@@ -2307,6 +4383,40 @@ def _wiring_strict_mode_enabled() -> bool:
     single source defines strict semantics.
     """
     return os.environ.get("ONEX_WIRING_STRICT_MODE", "").lower() in ("1", "true")
+
+
+def _boundary_dlq_enabled() -> bool:
+    """Return True when the auto-wired consume boundary must not silently
+    discard a handler exception (OMN-14507).
+
+    ``_make_event_bus_callback`` catches every exception raised while
+    dispatching a consumed message and, historically, only logged it -- the
+    message itself (and any evidence it ever arrived) then vanished: no DLQ,
+    no redelivery, no metric. That is the root mechanism behind this
+    session's silent-death theme (reference_autowired_boundary_swallows_no_redelivery).
+
+    DEFAULT OFF (staged, warn-first rollout -- CLAUDE.md's rule that a
+    strict-tightening gate ships behind a default-off flag until downstream
+    compliance is proven): when unset/false, the boundary keeps its exact
+    historical swallow-and-ACK behavior, with one addition -- a structured
+    metric-shaped log line so the swallow is at least observable. When
+    enabled, an exception that survives the bounded retry is routed to the
+    topic's DLQ on a BEST-EFFORT basis (reusing the same
+    ``EventBusKafka._publish_raw_to_dlq`` / ``get_dlq_topic_for_original``
+    machinery ``EventBusSubcontractWiring._publish_to_dlq`` already uses)
+    instead of only being logged. This is NOT true at-least-once: the
+    consumer offset always advances regardless (no nack/redelivery), so if
+    the DLQ publish itself fails the message is still lost -- loudly
+    (``message_lost=true`` in the log) rather than silently. See
+    ``_route_swallowed_exception``'s docstring for the full gap (OMN-14507
+    review, G1).
+    """
+    return os.environ.get(_BOUNDARY_DLQ_ENV, "").lower() in (
+        "1",
+        "true",
+        "yes",
+        "on",
+    )
 
 
 def _is_orchestrator_contract(contract: ModelDiscoveredContract) -> bool:
@@ -2559,6 +4669,13 @@ async def wire_from_manifest(
             # demoted to a collectable failure. Propagate unchanged so the
             # kernel crashes loudly at boot.
             raise
+        except StateIoUnconfiguredError:
+            # OMN-14484 invariant: a REQUIRED state_io seam without its DSN is a
+            # startup-FATAL config error (OMN-14208) — never a per-contract
+            # failure to collect under non-strict mode. Propagate so boot crashes
+            # loudly instead of booting "healthy" with the orchestrator silently
+            # dead and every one of its messages routed to the DLQ.
+            raise
         except Exception as exc:  # noqa: BLE001 — collect per-contract, raise after scan
             exc_summary = _sanitize_exc(exc)
             logger.error(
@@ -2699,6 +4816,8 @@ async def subscribe_wired_contract_topics(
     provisioner: ProtocolTopicProvisioner | None = None,
     readiness_config: ModelTopicReadinessConfig | None = None,
     attach_results_out: list[ModelContractAttachResult] | None = None,
+    core_runtime_topics: frozenset[str] = frozenset(),
+    core_runtime_owners: Mapping[str, str] | None = None,
 ) -> dict[str, tuple[str, ...]]:
     """Subscribe Kafka topics for contracts that already wired successfully.
 
@@ -2770,6 +4889,8 @@ async def subscribe_wired_contract_topics(
                 result_applier=(result_appliers_by_contract or {}).get(name),
                 provisioner=provisioner,
                 readiness_config=knobs,
+                core_runtime_topics=core_runtime_topics,
+                core_runtime_owners=core_runtime_owners,
             )
 
     attach_results = await asyncio.gather(
@@ -2796,6 +4917,8 @@ async def _interleave_contract(
     result_applier: ProtocolDispatchResultApplier | None,
     provisioner: ProtocolTopicProvisioner | None,
     readiness_config: ModelTopicReadinessConfig,
+    core_runtime_topics: frozenset[str] = frozenset(),
+    core_runtime_owners: Mapping[str, str] | None = None,
 ) -> ModelContractAttachResult:
     """Provision -> confirm-ready -> attach for ONE contract (§3.2, OMN-13237).
 
@@ -2859,6 +4982,8 @@ async def _interleave_contract(
             event_bus=event_bus,
             environment=environment,
             result_applier=result_applier,
+            core_runtime_topics=core_runtime_topics,
+            core_runtime_owners=core_runtime_owners,
         )
     except Exception as exc:  # noqa: BLE001 — boundary: per-contract, never fatal
         logger.warning(
@@ -2963,6 +5088,28 @@ def _prepare_contract_wiring(
         contract
     ) and not _raw_event_projection_enabled(contract, result_appliers_by_contract):
         consumer_purpose = (contract.event_bus.consumer_purpose or "").strip().lower()
+        # OMN-14516/OMN-14530: a contract that DECLARES consumer_purpose=audit|
+        # projection AND subscribe_topics is asserting it must consume and persist.
+        # Reaching this branch means no result applier is wired for it — a kernel
+        # MISCONFIGURATION, not a valid opt-out. It is FAILED, never SKIPPED.
+        #
+        # SKIPPED is not counted by total_failed, so the runtime booted GREEN with
+        # the contract silently unwired: zero handlers, zero subscriptions, class
+        # never constructed. node_ledger_projection_compute died exactly this way —
+        # event_ledger held ZERO rows while 1,028,463 events flowed past, on
+        # stability-test AND prod, because nobody hand-added its name to the
+        # kernel's result-applier allowlist. That allowlist is now DELETED: an
+        # audit/projection consumer wires itself by declaring
+        # intent_consumption.intent_routing_table (the kernel DERIVES the applier).
+        # If it reaches here it declared neither an applier nor a resolvable routing
+        # table, so FAILED makes the gap loud and lets ONEX_WIRING_STRICT_MODE catch
+        # it (the strict assert reads total_failed, which SKIPPED sailed past).
+        #
+        # Same fail-closed reasoning as the StateIoUnconfiguredError seam
+        # (OMN-14484): a declared-but-unconfigured durability seam is a startup
+        # error, not a per-contract shrug. Do NOT soften this back to SKIPPED to
+        # make a boot go green — declare the routing table (kernel derivation wires
+        # it) or remove consumer_purpose from the contract.
         return PreparedContractWiring(
             contract=contract,
             prepared_wirings=[],
@@ -2971,13 +5118,23 @@ def _prepare_contract_wiring(
             skip_result=ModelContractWiringResult(
                 contract_name=contract.name,
                 package_name=contract.package_name,
-                outcome=EnumWiringOutcome.SKIPPED,
+                outcome=EnumWiringOutcome.FAILED,
                 reason=(
-                    f"consumer_purpose={consumer_purpose!r} requires dedicated "
-                    "raw event projection wiring"
+                    f"consumer_purpose={consumer_purpose!r} declares a raw event "
+                    f"projection but no result applier is wired for contract "
+                    f"{contract.name!r} — it would consume offsets and drop every "
+                    f"intent. Declare intent_consumption.intent_routing_table so the "
+                    f"kernel derives a DispatchResultApplier, or remove "
+                    f"consumer_purpose."
                 ),
             ),
         )
+
+    # OMN-14403 §2C: prove every fan-out handler's emittable classes are declared
+    # in this contract's published_events BEFORE registering any dispatch route —
+    # an unmapped fan-out element would fall back to the single output_topic and
+    # silently misroute. Warn-only while the seam is OFF; fail-closed once ON.
+    _check_fanout_publish_coverage(contract)
 
     prepared_wirings: list[PreparedWiring] = []
     for entry in contract.handler_routing.handlers:
@@ -2997,6 +5154,17 @@ def _prepare_contract_wiring(
         except TypeError:
             # OMN-8735 invariant: resolver Step 6 exhaustion must NOT be
             # wrapped. Propagate unchanged so the kernel crashes loudly.
+            raise
+        except StateIoUnconfiguredError:
+            # OMN-14484 invariant: an unconfigured REQUIRED state_io durability
+            # seam is a startup-FATAL configuration error (OMN-14208), not a
+            # per-handler wiring bug to wrap-and-collect. Propagate UNWRAPPED so
+            # wire_from_manifest re-raises it and boot fails loudly. Wrapping it
+            # into a generic ModelOnexError + collecting it under non-strict mode
+            # turned this fail-CLOSED seam into fail-SILENT: it dropped every
+            # dispatcher of the contract while the runtime booted "healthy", so
+            # node_delegation_orchestrator (the only state_io contract) DLQ'd
+            # 100% of its command/event traffic on any lane missing the DSN.
             raise
         except Exception as exc:
             exc_summary = _sanitize_exc(exc)
@@ -3096,6 +5264,40 @@ async def _commit_contract_wiring(
             )
         )
 
+    # Fail-closed phantom-wiring guard (OMN-14141). A contract that declares
+    # subscribe topics but registered ZERO dispatchers — and quarantined /
+    # resolver-skipped NOTHING — is a silent phantom-wire: the topic would be
+    # consumed and its Kafka offsets committed with no handler ever running.
+    # This is the wiring-side backstop for the flat-schema silent-zero-parse
+    # defect (the parse guard in discovery._parse_handler_routing is the first
+    # line). When all four hold, pcw.prepared_wirings was empty — handler_routing
+    # produced no parseable handlers. Legacy top-level ``handler:`` fallbacks and
+    # resolver-ownership skips always leave a dispatcher, a skipped_handler, or a
+    # quarantine, so this never fires on them. Returned as FAILED (not WIRED) so
+    # total_failed is accurate and ONEX_WIRING_STRICT_MODE crashes boot loudly;
+    # the topic is NOT subscribed either way.
+    if (
+        pcw.subscription_topics
+        and not dispatchers_registered
+        and not skipped_handlers
+        and not quarantined
+    ):
+        return ModelContractWiringResult(
+            contract_name=contract.name,
+            package_name=contract.package_name,
+            outcome=EnumWiringOutcome.FAILED,
+            reason=(
+                "phantom wiring: contract declares "
+                f"{len(pcw.subscription_topics)} subscribe topic(s) but "
+                "registered zero dispatchers (handler_routing produced no "
+                "parseable handlers). Convert flat handler_class/handler_module "
+                "entries to nested handler:{name,module} (OMN-14141)."
+            ),
+            wirings=tuple(wirings),
+            skipped_handlers=tuple(skipped_handlers),
+            quarantined_handlers=tuple(quarantined),
+        )
+
     if subscribe_immediately and event_bus is not None and pcw.subscription_topics:
         topics_subscribed.extend(
             await _subscribe_contract_topics(
@@ -3151,8 +5353,25 @@ async def _subscribe_contract_topics(
     event_bus: object,
     environment: str,
     result_applier: ProtocolDispatchResultApplier | None = None,
+    core_runtime_topics: frozenset[str] = frozenset(),
+    core_runtime_owners: Mapping[str, str] | None = None,
 ) -> list[str]:
-    """Subscribe all declared event-bus topics for a wired contract."""
+    """Subscribe all declared event-bus topics for a wired contract.
+
+    OMN-14758 (S6): topics in ``core_runtime_topics`` are owned by the ONE core
+    ``RuntimeDispatch`` loop, not the legacy push path. The legacy callback is NOT
+    built/subscribed for those topics — this split is the mechanism that makes the
+    ``RuntimeDispatch ⟂ legacy`` single-owner assertion hold. Default EMPTY ⇒ every
+    topic is subscribed by the legacy path exactly as before (zero behavior change).
+
+    OMN-14771 (S8 §D1=4b): ``core_runtime_owners`` maps an allowlisted topic to the ONE
+    contract whose consumption MOVED to the core runtime. For a genuine fan-out topic the
+    legacy callback is skipped ONLY for the OWNER; the topic's OTHER subscribers stay
+    legacy fan-out consumers on their own distinct consumer groups. When a topic has no
+    owner entry (a single-owner allowlist topic, or owners unavailable), the S6 behavior
+    is preserved: the sole subscriber's legacy callback is skipped.
+    """
+    owner_by_topic = dict(core_runtime_owners or {})
     if contract.event_bus is None or not contract.event_bus.subscribe_topics:
         return []
 
@@ -3211,6 +5430,30 @@ async def _subscribe_contract_topics(
     # Build callbacks for all topics first (synchronous, no I/O).
     topic_callbacks: list[tuple[str, Callable[..., Awaitable[None]]]] = []
     for topic in contract.event_bus.subscribe_topics:
+        # OMN-14758 (S6) / OMN-14771 (S8 §D1=4b): the ONE core RuntimeDispatch owns this
+        # topic's OWNER route. Skip the legacy push callback for the OWNER only, so
+        # ownership is disjoint (single-owner invariant §c.3). A designated-but-different
+        # owner means this contract is a legacy fan-out consumer that KEEPS its
+        # subscription on its own distinct consumer group. No owner entry ⇒ S6 behavior
+        # (skip the sole subscriber).
+        if topic in core_runtime_topics:
+            owner = owner_by_topic.get(topic)
+            if owner is None or owner == contract.name:
+                logger.info(
+                    "Auto-wiring: skipping legacy subscription for topic=%s node=%s "
+                    "(ownership=core-runtime, OMN-14758/OMN-14771)",
+                    topic,
+                    contract.name,
+                )
+                continue
+            logger.info(
+                "Auto-wiring: keeping legacy fan-out subscription for topic=%s node=%s "
+                "(core-runtime owner=%s, non-owner stays legacy on its own group, "
+                "OMN-14771 §4b)",
+                topic,
+                contract.name,
+                owner,
+            )
         if _is_raw_event_projection_contract(contract):
             if effective_result_applier is None:
                 raise ModelOnexError(
@@ -3229,6 +5472,15 @@ async def _subscribe_contract_topics(
                 # Why: Runtime wiring validates and narrows this payload shape before use.
                 dispatch_engine,  # type: ignore[arg-type]
                 result_applier=effective_result_applier,
+                tenant_scoped=contract.event_bus.tenant_scoped_ingress,
+                # OMN-14507: gives the boundary a DLQ target (duck-typed
+                # _publish_raw_to_dlq) when ONEX_BOUNDARY_DLQ_ENABLED is set.
+                event_bus=typed_bus,
+                # OMN-14493 §4.3: on the state_io / in-row-outbox path ONLY, a
+                # publish-from-row failure + conflict-retry exhaustion PROPAGATE
+                # (redeliver) instead of being log-and-discarded. Non-state_io
+                # contracts keep the historical swallow behavior unchanged.
+                propagate_publish_failures=_contract_declares_state_io(contract),
             )
         topic_callbacks.append((topic, callback))
 
@@ -3576,10 +5828,22 @@ def _prepare_handler_wiring(
     # a constructed handler.
     handler_instance = cast("ProtocolHandleable", resolution.handler_instance)
 
-    # Use projection callback when contract declares db_io.db_tables.
-    # Projection handlers implement handle(input_data: dict) with _db injected
-    # rather than the standard async handle(envelope) protocol.
+    # Use projection callback when contract declares db_io.db_tables, or the
+    # opt-in stateful callback when it declares state_io (OMN-14208). These
+    # two wiring arms are disjoint by construction: db_io projection handlers
+    # own their own persistence and terminal-event emission, while state_io
+    # wraps the standard dispatch callback with a load-before/CAS-persist-
+    # after boundary hook and returns a normal ModelDispatchResult through
+    # the standard result-applier path. A contract declaring both is a
+    # wiring-time contract defect, not a case to silently prioritize one arm.
     db_tables = _read_db_io_tables(contract.contract_path)
+    state_io = _read_state_io(contract.contract_path)
+    if db_tables and state_io:
+        raise ModelOnexError(
+            f"handler_wiring: contract {contract.name!r} declares BOTH "
+            "db_io and state_io — these are disjoint wiring arms "
+            "(OMN-14208); a contract must declare exactly one."
+        )
     if db_tables:
         subscribe_topics = (
             contract.event_bus.subscribe_topics if contract.event_bus else ()
@@ -3617,8 +5881,73 @@ def _prepare_handler_wiring(
         # Projection handlers route by topic/db_io, not event_model; leave
         # them untyped so the projection dispatch path is unchanged.
         payload_type_matcher: Callable[[object], bool] | None = None
+    elif state_io:
+        # OMN-14493 in-row outbox: give the stateful wrapper the bus + the
+        # contract's published_events (class -> topic) map so it can publish-from-
+        # row + CAS-finalize WITHIN the leg (production has-bus path) and re-publish
+        # a crash-recovered batch on boot. Without these the wrapper falls back to
+        # commit-then-return (external applier publishes) — which is the exact
+        # CAS-retry loss OMN-14493 fixes, so production MUST pass them.
+        from omnibase_infra.runtime.event_bus_subcontract_wiring import (
+            load_published_events_map,
+        )
+
+        _outbox_topic_map = (
+            load_published_events_map(contract.contract_path)
+            if contract.event_bus is not None
+            else None
+        )
+        callback = _make_stateful_dispatch_callback(
+            handler_instance,
+            entry.event_model,
+            state_io,
+            event_bus=event_bus,
+            output_topic_map=_outbox_topic_map,
+        )
+        logger.info(
+            "Auto-wired stateful handler with state_io in-row outbox "
+            "(publish-from-row + CAS-finalize): handler=%s table=%s "
+            "outbox_topics=%d",
+            handler_ref.name,
+            state_io.get("table"),
+            len(_outbox_topic_map or {}),
+        )
+        # state_io wraps the standard dispatch callback, so the same
+        # event_model type-scoping applies as the non-stateful path
+        # (OMN-12416) — a multi-leg orchestrator's sibling handler entries
+        # still route by their own declared event_model.
+        payload_type_matcher = (
+            _make_payload_type_matcher(entry.event_model)
+            if entry.event_model is not None
+            else None
+        )
     else:
-        callback = _make_dispatch_callback(handler_instance, entry.event_model)
+        _handler_node_kind = _node_kind_from_node_type(contract.node_type)
+        # OMN-14794: a REDUCER that DECLARES a published event and returns that
+        # event model must emit it as an EVENT, not a projection. Thread the
+        # contract's published_events short-names so _normalize_handler_result
+        # routes a declared-event return to output_events instead of the
+        # OMN-14598 REDUCER->projection capture (live delegation-routing drop that
+        # stalled the FSM at RECEIVED). Only loaded for REDUCERs — the sole
+        # archetype whose projection classification the set can refine.
+        _published_event_names: frozenset[str] | None = None
+        if (
+            _handler_node_kind is EnumNodeKind.REDUCER
+            and contract.event_bus is not None
+        ):
+            from omnibase_infra.runtime.event_bus_subcontract_wiring import (
+                load_published_events_map,
+            )
+
+            _published_event_names = frozenset(
+                load_published_events_map(contract.contract_path)
+            )
+        callback = _make_dispatch_callback(
+            handler_instance,
+            entry.event_model,
+            handler_node_kind=_handler_node_kind,
+            published_event_names=_published_event_names,
+        )
         # Type-scope the dispatcher on its declared event_model so a
         # multi-handler contract routes each message to the single handler
         # whose event_model matches the payload (OMN-12416). Untyped

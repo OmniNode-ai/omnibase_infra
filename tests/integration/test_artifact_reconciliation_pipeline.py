@@ -62,6 +62,9 @@ from omnibase_infra.nodes.node_artifact_reconciliation_orchestrator.models.model
 from omnibase_infra.nodes.node_impact_analyzer_compute.handlers.handler_impact_analysis import (
     HandlerImpactAnalysis,
 )
+from omnibase_infra.nodes.node_impact_analyzer_compute.models.model_impact_analysis_request import (
+    ModelImpactAnalysisRequest,
+)
 from omnibase_infra.nodes.node_impact_analyzer_compute.models.model_impact_analysis_result import (
     ModelImpactAnalysisResult,
 )
@@ -76,6 +79,22 @@ from omnibase_infra.registry.models.model_artifact_registry_entry import (
     ModelArtifactRegistryEntry,
 )
 from omnibase_infra.registry.models.model_source_trigger import ModelSourceTrigger
+
+
+def _impact(
+    impact_handler: HandlerImpactAnalysis,
+    trigger: ModelUpdateTrigger,
+    registry: ModelArtifactRegistry,
+) -> ModelImpactAnalysisResult:
+    """Drive the canonical def-B ``handle`` entrypoint (OMN-14817 flip).
+
+    Replaces the removed two-arg ``analyze(trigger, registry)`` op-method; the
+    scoring logic is byte-identical, so pipeline behavior is unchanged.
+    """
+    return impact_handler.handle(
+        ModelImpactAnalysisRequest(trigger=trigger, registry=registry)
+    )
+
 
 # ---------------------------------------------------------------------------
 # Fixtures
@@ -195,7 +214,7 @@ class TestArtifactReconciliationPipeline:
         impact_handler: HandlerImpactAnalysis,
     ) -> None:
         """Fire ModelUpdateTrigger and assert ModelImpactAnalysisResult is produced."""
-        result = impact_handler.analyze(pr_trigger, test_registry)
+        result = _impact(impact_handler, pr_trigger, test_registry)
 
         assert isinstance(result, ModelImpactAnalysisResult)
         assert result.source_trigger_id == pr_trigger.trigger_id
@@ -212,7 +231,7 @@ class TestArtifactReconciliationPipeline:
         plan_handler: HandlerCreatePlan,
     ) -> None:
         """Assert ModelUpdatePlan is created from ModelImpactAnalysisResult."""
-        result = impact_handler.analyze(pr_trigger, test_registry)
+        result = _impact(impact_handler, pr_trigger, test_registry)
         plan = plan_handler.create_plan(
             result=result,
             source_entity_ref="pr/OmniNode-ai/omnibase_infra/123",
@@ -237,7 +256,7 @@ class TestArtifactReconciliationPipeline:
         plan_handler: HandlerCreatePlan,
     ) -> None:
         """Assert PR comment event is emitted with correct markdown for PR trigger."""
-        result = impact_handler.analyze(pr_trigger, test_registry)
+        result = _impact(impact_handler, pr_trigger, test_registry)
         plan = plan_handler.create_plan(
             result=result,
             source_entity_ref="pr/OmniNode-ai/omnibase_infra/123",
@@ -295,7 +314,7 @@ class TestArtifactReconciliationPipeline:
         plan_handler: HandlerCreatePlan,
     ) -> None:
         """Assert PR comment handler skips non-PR trigger types."""
-        result = impact_handler.analyze(manual_trigger, test_registry)
+        result = _impact(impact_handler, manual_trigger, test_registry)
         plan = plan_handler.create_plan(
             result=result,
             source_entity_ref="manual/omnibase_infra",
@@ -322,7 +341,7 @@ class TestArtifactReconciliationPipeline:
         plan_handler: HandlerCreatePlan,
     ) -> None:
         """Assert handler updates existing comment when anchor is found (idempotent)."""
-        result = impact_handler.analyze(pr_trigger, test_registry)
+        result = _impact(impact_handler, pr_trigger, test_registry)
         plan = plan_handler.create_plan(
             result=result,
             source_entity_ref="pr/OmniNode-ai/omnibase_infra/123",
@@ -374,7 +393,7 @@ class TestArtifactReconciliationPipeline:
         yaml_handler: HandlerPlanToYaml,
     ) -> None:
         """Assert YAML event is emitted with correct payload and topic."""
-        result = impact_handler.analyze(pr_trigger, test_registry)
+        result = _impact(impact_handler, pr_trigger, test_registry)
         plan = plan_handler.create_plan(
             result=result,
             source_entity_ref="pr/OmniNode-ai/omnibase_infra/123",
@@ -415,7 +434,7 @@ class TestArtifactReconciliationPipeline:
         4. ModelUpdatePlan -> HandlerPlanToYaml -> ModelYamlEmitResult
         """
         # Stage 1: Impact analysis
-        impact_result = impact_handler.analyze(pr_trigger, test_registry)
+        impact_result = _impact(impact_handler, pr_trigger, test_registry)
         assert isinstance(impact_result, ModelImpactAnalysisResult)
         assert impact_result.source_trigger_id == pr_trigger.trigger_id
         assert len(impact_result.impacted_artifacts) == 2

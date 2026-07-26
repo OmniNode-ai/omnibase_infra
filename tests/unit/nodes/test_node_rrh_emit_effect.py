@@ -28,6 +28,9 @@ from omnibase_infra.nodes.node_rrh_emit_effect.handlers.handler_runtime_target_c
 from omnibase_infra.nodes.node_rrh_emit_effect.handlers.handler_toolchain_collect import (
     HandlerToolchainCollect,
 )
+from omnibase_infra.nodes.node_rrh_emit_effect.models.model_runtime_target_collect_request import (
+    ModelRuntimeTargetCollectRequest,
+)
 from omnibase_infra.nodes.node_rrh_emit_effect.node import NodeRRHEmitEffect
 
 pytestmark = [pytest.mark.unit]
@@ -192,9 +195,11 @@ class TestHandlerRuntimeTargetCollect:
     @pytest.mark.anyio
     async def test_uses_overrides(self, handler: HandlerRuntimeTargetCollect) -> None:
         result = await handler.handle(
-            environment="staging",
-            kafka_broker="kafka:9092",
-            kubernetes_context="prod",
+            ModelRuntimeTargetCollectRequest(
+                environment="staging",
+                kafka_broker="kafka:9092",
+                kubernetes_context="prod",
+            )
         )
         assert isinstance(result, ModelRRHRuntimeTarget)
         assert result.environment == "staging"
@@ -206,8 +211,15 @@ class TestHandlerRuntimeTargetCollect:
         self, handler: HandlerRuntimeTargetCollect
     ) -> None:
         with patch.dict("os.environ", {"ONEX_ENVIRONMENT": "ci"}, clear=False):
-            result = await handler.handle()
+            result = await handler.handle(ModelRuntimeTargetCollectRequest())
         assert result.environment == "ci"
+
+    @pytest.mark.anyio
+    async def test_rejects_unknown_field(
+        self, handler: HandlerRuntimeTargetCollect
+    ) -> None:
+        with pytest.raises(Exception, match="extra"):
+            ModelRuntimeTargetCollectRequest(bogus_field="nope")  # type: ignore[call-arg]
 
 
 # ---------------------------------------------------------------

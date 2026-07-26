@@ -1,7 +1,7 @@
 # SPDX-FileCopyrightText: 2025 OmniNode.ai Inc.
 # SPDX-License-Identifier: MIT
 
-"""Integration regression proof for OMN-9741 health-server startup ordering."""
+"""Integration regression proof for OMN-9741/OMN-13768 health-server startup ordering."""
 
 from __future__ import annotations
 
@@ -22,18 +22,34 @@ def _read_service_kernel_source() -> str:
 
 @pytest.mark.integration
 def test_health_server_starts_before_kafka_subscription_bootstrap() -> None:
-    """Kernel must bind /health before long effects Kafka subscription work."""
+    """Kernel must bind /health before long effects Kafka subscription work.
+
+    OMN-13768: RuntimeHostProcess is now created, registered, and attached to
+    the health server immediately after ``health_server.start()`` and BEFORE
+    ``subscribe_wired_contract_topics``/plugin consumer start (previously the
+    opposite order, which left ``ServiceHealth._runtime`` as ``None`` for the
+    entire — potentially 10+ minute, per this module's docstring — Kafka
+    subscription window, so ``GET /ready`` raised
+    ``ProtocolConfigurationError [ONEX_CORE_041]`` the whole time even though
+    the runtime was already processing events via the auto-wired consumers).
+    """
     source = _read_service_kernel_source()
 
     freeze_idx = source.index("dispatch_engine.freeze()")
     health_start_idx = source.index("await health_server.start()")
-    subscribe_idx = source.index("await subscribe_wired_contract_topics(")
-    plugin_consumers_idx = source.index("await plugin.start_consumers(plugin_config)")
     runtime_create_idx = source.index("runtime = RuntimeHostProcess(")
     runtime_attach_idx = source.index("health_server.attach_runtime(runtime)")
+    subscribe_idx = source.index("await subscribe_wired_contract_topics(")
+    plugin_consumers_idx = source.index("await plugin.start_consumers(plugin_config)")
 
-    assert freeze_idx < health_start_idx < subscribe_idx < plugin_consumers_idx
-    assert subscribe_idx < runtime_create_idx < runtime_attach_idx
+    assert (
+        freeze_idx
+        < health_start_idx
+        < runtime_create_idx
+        < runtime_attach_idx
+        < subscribe_idx
+        < plugin_consumers_idx
+    )
 
 
 @pytest.mark.integration

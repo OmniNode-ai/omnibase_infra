@@ -1,0 +1,13 @@
+{
+  "node_id": "omnibase_infra.nodes.node_coding_agent_invoke_effect",
+  "selected_input_hashes": [
+    "sha256:1bedb29403a0a828f8d903902e1a94102686bf31005047c9cee0e554bfd31084",
+    "sha256:5ae0698614b3a0847a9b13ff9526f9d95128257033ddb3ec4c6915b39bf572c3",
+    "sha256:c20789185f7a76b13b0de89e0709522962d5be4aba1af4c1e46e62d47e3f9d6f",
+    "sha256:ff120f7dbd138724e2badcbb16e3b4d3b315daea7af523fe62b8922951b1653b",
+    "sha256:62f451ed6170a409cbe2e2187489e32c51a7a782862f030c0e95f3d55ee146d0",
+    "sha256:aaf6396c2ddf123194f6a4960f9be6d6e2b21d1ac6d3e118b5d839911afda9f1",
+    "sha256:475e5acffb4ff3aff5f4dd357af278b8f2812d84aebb0d51e68f0cfd93697dc6"
+  ],
+  "status": "pass"
+}

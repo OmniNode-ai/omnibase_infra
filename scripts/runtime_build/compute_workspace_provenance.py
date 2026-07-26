@@ -6,6 +6,9 @@
 Run during Docker build (workspace mode only) to:
   - Hash each staged sibling repo tree under /workspace/sibling-repos/
   - Verify that the installed package content matches the recorded digest
+  - Verify that the INSTALLED package directory in site-packages is
+    byte-for-byte identical to the staged source package directory
+    (OMN-14631 content-parity gate — see below)
   - Enforce that every staged sibling honors the consuming repo's uv.lock pin
     (fail-fast on a version regression below the pin — the 2026-06-11
     stability-crash condition, OMN-12989)
@@ -13,10 +16,30 @@ Run during Docker build (workspace mode only) to:
     expected-vs-actual pin comparison block
   - Print a human-readable provenance summary to stdout
 
+OMN-14631 content-parity gate:
+  Before this gate existed, "verified" only meant the package's
+  direct_url.json recorded a `file://.../workspace/sibling-repos/<repo>`
+  source — i.e. that *some* local-path install happened. It did NOT prove
+  the installed file CONTENT under site-packages actually matched the
+  staged source tree. A 2026-07-14 live incident (OMN-14626/OMN-14625
+  readback) found exactly that gap: a workspace rebuild correctly vendored
+  a branch's Python source (import behavior matched the branch) while the
+  package's non-.py data files (omnimarket's configs/*.yaml routing/task
+  contracts) were STALE pre-fix content in the installed venv, despite the
+  staged source on disk being byte-identical to the branch. Root cause of
+  the underlying staleness was not conclusively pinned (packaging config,
+  uv's reinstall semantics, and Docker COPY layer caching were each
+  independently reproduced as behaving correctly with the pinned uv/Docker
+  versions) — this gate closes the PROOF gap regardless of mechanism: it
+  hashes every file under the staged `src/<pkg>` tree and the corresponding
+  installed site-packages tree and hard-fails the build on any mismatch, so
+  a stale install can never again ship silently.
+
 Exit codes:
   0  all proofs passed
-  1  digest mismatch (installed content != recorded workspace digest) OR a
-     sibling regressed below its uv.lock pin
+  1  digest mismatch (installed content != recorded workspace digest), an
+     installed-vs-staged package CONTENT mismatch (OMN-14631), OR a sibling
+     regressed below its uv.lock pin
   2  missing sibling repo (expected path not found)
   3  missing installed package (venv does not contain the expected dist)
 """
@@ -25,6 +48,7 @@ from __future__ import annotations
 
 import hashlib
 import importlib.metadata
+import importlib.util
 import json
 import os
 import sys
@@ -78,22 +102,92 @@ WORKSPACE_PACKAGES: dict[str, str] = {
 }
 
 
-def _hash_tree(root: Path) -> str:
-    """Return a SHA-256 digest of every file under root, sorted by path."""
-    h = hashlib.sha256()
+_TREE_EXCLUDE_PARTS = (".git", "__pycache__", ".venv")
+_TREE_EXCLUDE_SUFFIXES = (".egg-info",)
+
+
+def _is_excluded_part(part: str) -> bool:
+    """Return True if a single path component names a transient artefact."""
+    return part in _TREE_EXCLUDE_PARTS or any(
+        part.endswith(suffix) for suffix in _TREE_EXCLUDE_SUFFIXES
+    )
+
+
+def _tracked_files(root: Path) -> dict[str, bytes]:
+    """Return {relative_path: content} for every real file under root.
+
+    Shared by `_hash_tree` (single combined digest) and the OMN-14631
+    content-parity check (per-file diff so a mismatch is debuggable, not
+    just a single opaque hex string).
+
+    OMN-14635: the exclusion check MUST be evaluated against the path
+    RELATIVE TO `root`, never the absolute path. The installed package
+    directory resolved by `_installed_package_dir()` is always nested under
+    an ancestor literally named `.venv` (e.g.
+    `/app/.venv/lib/python3.12/site-packages/<pkg>`) -- that ancestor is not
+    a transient artefact *inside* the tree being hashed, it's part of the
+    root's own absolute location. Matching on `path.parts` (absolute)
+    excluded every file under every installed package unconditionally,
+    collapsing every installed-tree digest to `sha256(b"")` and hard-failing
+    the OMN-14631 content-parity gate on 100% of workspace builds. Matching
+    on `path.relative_to(root).parts` still correctly skips a `.venv`/
+    `.git`/`__pycache__` directory nested *inside* the staged source tree,
+    while no longer treating the root's own ancestors as exclusions.
+    """
+    out: dict[str, bytes] = {}
     for path in sorted(root.rglob("*")):
         if not path.is_file():
             continue
+        rel = path.relative_to(root)
         # Skip common transient artefacts so the digest is stable.
-        if any(
-            part in path.parts
-            for part in (".git", "__pycache__", ".venv", "*.egg-info")
-        ):
+        if any(_is_excluded_part(part) for part in rel.parts):
             continue
-        rel = str(path.relative_to(root))
+        out[str(rel)] = path.read_bytes()
+    return out
+
+
+def _hash_tree(root: Path) -> str:
+    """Return a SHA-256 digest of every file under root, sorted by path."""
+    h = hashlib.sha256()
+    for rel, content in _tracked_files(root).items():
         h.update(rel.encode())
-        h.update(path.read_bytes())
+        h.update(content)
     return h.hexdigest()
+
+
+def _installed_package_dir(import_name: str) -> Path | None:
+    """Return the installed package's top-level directory in site-packages.
+
+    Resolved via `importlib.util.find_spec` so it reflects wherever the
+    interpreter actually resolves the package from — the same resolution
+    a runtime import would use — rather than assuming a fixed site-packages
+    layout. Returns None if the package cannot be located as a regular
+    (non-namespace) package with resolvable submodule search locations.
+    """
+    try:
+        spec = importlib.util.find_spec(import_name)
+    except (ImportError, ValueError):
+        return None
+    if spec is None or not spec.submodule_search_locations:
+        return None
+    return Path(next(iter(spec.submodule_search_locations)))
+
+
+def _content_parity_diff(staged_root: Path, installed_root: Path) -> list[str]:
+    """Return relative paths that differ (missing, extra, or changed content).
+
+    Compares the staged source package directory against the installed
+    site-packages package directory file-by-file. An empty list means the
+    installed content is byte-for-byte identical to the vendored source.
+    """
+    staged = _tracked_files(staged_root)
+    installed = _tracked_files(installed_root)
+    diffs = (
+        (set(staged) - set(installed))
+        | (set(installed) - set(staged))
+        | {rel for rel in set(staged) & set(installed) if staged[rel] != installed[rel]}
+    )
+    return sorted(diffs)
 
 
 def _installed_direct_url(dist_name: str) -> dict[str, object] | None:
@@ -237,6 +331,82 @@ def main() -> int:
             )
             continue
 
+        # OMN-14631: prove the INSTALLED site-packages content is
+        # byte-for-byte identical to the staged source's package directory.
+        # direct_url.json above only proves the install *requested* this
+        # local path -- it does not prove the resulting files match. This is
+        # the check that would have caught the 2026-07-14 stale-config
+        # incident (installed omnimarket/configs/*.yaml differed from the
+        # correctly-vendored staged source despite a correct direct_url).
+        package_src_dir = repo_path / "src" / repo_dir_name
+        installed_dir = _installed_package_dir(repo_dir_name)
+        if not package_src_dir.is_dir():
+            errors.append(
+                f"Cannot content-verify '{pkg_name}': expected staged package "
+                f"directory {package_src_dir} does not exist (OMN-14631)."
+            )
+            proofs.append(
+                {
+                    "repo": repo_dir_name,
+                    "package": pkg_name,
+                    "source_root": str(repo_path),
+                    "workspace_digest": workspace_digest,
+                    "install_url": install_url,
+                    "status": "content_check_unresolvable",
+                }
+            )
+            continue
+        if installed_dir is None:
+            errors.append(
+                f"Cannot content-verify '{pkg_name}': could not resolve the "
+                f"installed package directory for import name '{repo_dir_name}' "
+                "via importlib.util.find_spec (OMN-14631)."
+            )
+            proofs.append(
+                {
+                    "repo": repo_dir_name,
+                    "package": pkg_name,
+                    "source_root": str(repo_path),
+                    "workspace_digest": workspace_digest,
+                    "install_url": install_url,
+                    "status": "content_check_unresolvable",
+                }
+            )
+            continue
+
+        staged_pkg_digest = _hash_tree(package_src_dir)
+        installed_pkg_digest = _hash_tree(installed_dir)
+        content_diff = (
+            []
+            if staged_pkg_digest == installed_pkg_digest
+            else _content_parity_diff(package_src_dir, installed_dir)
+        )
+        if content_diff:
+            errors.append(
+                f"INSTALLED CONTENT DRIFT for '{pkg_name}' (OMN-14631): the "
+                f"installed package at {installed_dir} does NOT match the "
+                f"vendored source at {package_src_dir} -- "
+                f"staged_digest={staged_pkg_digest[:16]}... "
+                f"installed_digest={installed_pkg_digest[:16]}... "
+                f"differing files ({len(content_diff)} total): "
+                f"{content_diff[:10]}"
+            )
+            proofs.append(
+                {
+                    "repo": repo_dir_name,
+                    "package": pkg_name,
+                    "source_root": str(repo_path),
+                    "workspace_digest": workspace_digest,
+                    "install_url": install_url,
+                    "installed_dir": str(installed_dir),
+                    "staged_package_digest": staged_pkg_digest,
+                    "installed_package_digest": installed_pkg_digest,
+                    "content_diff_files": content_diff,
+                    "status": "content_mismatch",
+                }
+            )
+            continue
+
         proofs.append(
             {
                 "repo": repo_dir_name,
@@ -244,13 +414,17 @@ def main() -> int:
                 "source_root": str(repo_path),
                 "workspace_digest": workspace_digest,
                 "install_url": install_url,
+                "installed_dir": str(installed_dir),
+                "staged_package_digest": staged_pkg_digest,
+                "installed_package_digest": installed_pkg_digest,
                 "status": "verified",
             }
         )
         print(
             f"  workspace provenance OK: {repo_dir_name} "
             f"digest={workspace_digest[:16]}... "
-            f"install={install_url}"
+            f"install={install_url} "
+            f"content_parity={staged_pkg_digest[:16]}... (match)"
         )
 
     # OMN-12989: compare every staged sibling against the consuming repo's

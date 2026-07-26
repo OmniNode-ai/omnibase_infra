@@ -1,0 +1,139 @@
+# SPDX-FileCopyrightText: 2025 OmniNode.ai Inc.
+# SPDX-License-Identifier: MIT
+# Overseer-Tick Ledger Projector Contract
+#
+# Declarative ModelProjectorContract for the RAW overseer-tick ledger projection
+# (WS-L slice 1 — the receiving end of the overseer-tick flat-file migration).
+#
+# This is a reuse-and-wire artifact: the generic ProjectorShell
+# (omnibase_infra/runtime/projector_shell.py) materializes
+# onex.evt.omnimarket.overseer-tick.v1 events into the append-only
+# overseer_tick_ledger table (migration 088) with NO bespoke node or class
+# (CLAUDE.md rule 7a). Reference pattern: registration_projector.yaml + the
+# decision_store DB ledger (migration 046).
+#
+# The overseer-tick ledger is currently written to the flat file
+# .onex_state/overseer-ticks.jsonl by
+# omnimarket/.../node_overnight/handlers/overseer_tick.py::append_tick_log. Each
+# line is the tick PAYLOAD (a topic-tagged snapshot from build_tick_snapshot),
+# not a full ModelEventEnvelope — so the projector extracts the domain fields
+# from payload.* and the envelope-level identity from the envelope itself.
+#
+# Ordering authority: single_partition (plan §2.4). The overseer-tick topic is
+# low-volume and single-writer, so the per-partition offset is the monotonic
+# cursor. envelope_id is the idempotency key (append mode = plain INSERT; a
+# duplicate envelope_id raises a unique violation the capture consumer treats as
+# already-ingested, mirroring event_ledger / 044).
+#
+# Related:
+#   - OMN-13996 (this slice) / OMN-13989 (epic)
+#   - docs/plans/2026-07-05-ledger-learning-substrate-plan.md (§2.5, §6 Phase 2)
+#   - Migration: 088_create_overseer_tick_ledger.sql
+#
+# DEFERRED (follow-up children of OMN-13989, gated):
+#   - Live bus dual-write from the omnimarket tick writer behind a flag — gated
+#     on the proven Python->MSK SASL-IAM path (plan §6 Phase 2; bus-dependent,
+#     NOT local-first). Do NOT wire live emit until that gate is proven.
+#   - Golden-chain replay-equivalence required gate per ledger (plan T15).
+#   - Cutover: remove the flat-file writer once the projection is proven.
+projector_kind: materialized_view
+projector_id: overseer-tick-ledger-projector
+name: Overseer Tick Ledger Projector
+version: "1.0.0"
+aggregate_type: overseer_tick
+# Single raw ledger event TYPE. Resolved from envelope.metadata.tags['event_type']
+# (see ProjectorShell._get_event_type). NOTE: the event-type identifier is
+# validated against ModelProjectorContract's pattern (lowercase dotted segments,
+# underscores allowed, HYPHENS NOT), so it uses `overseer_tick` (underscore).
+# This is DISTINCT from the Kafka TOPIC string, which is the hyphenated
+# `onex.evt.omnimarket.overseer-tick.v1` (contract-declared in
+# node_overnight/handlers/overseer_tick.py and carried as payload.topic). The
+# emit-side slice sets metadata.tags['event_type'] to this underscore form while
+# publishing to the hyphenated topic.
+consumed_events:
+  - onex.evt.omnimarket.overseer_tick.v1
+projection_schema:
+  table: overseer_tick_ledger
+  # envelope_id is the idempotency key and table primary key.
+  primary_key: envelope_id
+  columns:
+    # ==========================================================================
+    # ENVELOPE IDENTITY
+    # ==========================================================================
+    - name: envelope_id
+      type: UUID
+      source: envelope_id
+      # Envelope idempotency key — primary key of the raw ledger.
+    - name: correlation_id
+      type: UUID
+      source: correlation_id
+      # Correlation id for distributed tracing across the overnight pipeline.
+    # ==========================================================================
+    # TICK PAYLOAD (from build_tick_snapshot)
+    # ==========================================================================
+    - name: topic
+      type: TEXT
+      source: payload.topic
+      # Contract-declared topic tag carried on the on-disk snapshot.
+    - name: session_id
+      type: TEXT
+      source: payload.session_id
+      # Overnight session identifier (contract.session_id).
+    - name: current_phase
+      type: TEXT
+      source: payload.current_phase
+      # Active phase of the overnight loop FSM at emit time.
+    - name: phase_progress
+      type: NUMERIC
+      source: payload.phase_progress
+      default: "0"
+      # Fractional progress [0..1] of the current phase.
+    - name: phase_outcomes
+      type: JSONB
+      source: payload.phase_outcomes
+      default: "{}"
+      # Map of required-outcome name -> satisfied bool for the current phase.
+    - name: next_required_outcome
+      type: TEXT
+      source: payload.next_required_outcome
+      # First unsatisfied required outcome, or NULL when all satisfied.
+    - name: approaching_halt_conditions
+      type: JSONB
+      source: payload.approaching_halt_conditions
+      default: "[]"
+      # Halt conditions in view with proximity/routing metadata.
+    - name: accumulated_cost
+      type: NUMERIC
+      source: payload.accumulated_cost
+      default: "0"
+      # USD accumulated by the pipeline at emit time (cost-ceiling tracking).
+    - name: started_at
+      type: TIMESTAMPTZ
+      source: payload.started_at
+      # Logical start time of the pipeline (ISO8601 in the snapshot).
+    - name: emitted_at
+      type: TIMESTAMPTZ
+      source: payload.emitted_at
+      # Logical emit time of this tick (ISO8601 in the snapshot).
+  indexes:
+    - name: idx_overseer_tick_ledger_session_emitted
+      columns:
+        - session_id
+        - emitted_at
+      type: btree
+    - name: idx_overseer_tick_ledger_emitted_at
+      columns:
+        - emitted_at
+      type: btree
+    - name: idx_overseer_tick_ledger_correlation
+      columns:
+        - correlation_id
+      type: btree
+# ==============================================================================
+# BEHAVIOR: append-only raw ledger (plan §2.5).
+# Plain INSERT; a duplicate envelope_id raises a unique violation the capture
+# consumer treats as already-ingested (idempotent replay, event_ledger-style).
+# History is never mutated (no ON CONFLICT DO UPDATE).
+# ==============================================================================
+behavior:
+  mode: append

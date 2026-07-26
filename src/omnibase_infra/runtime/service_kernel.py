@@ -2200,47 +2200,24 @@ async def bootstrap() -> int:
                 correlation_id,
             )
 
+        # DB DSN shared by every omnibase_infra durable-projection consumer
+        # (event_ledger, build_loop_runs, pr_state — all live in the same
+        # omnibase_infra Postgres instance). Consumed by the audit/projection
+        # result-applier DERIVATION below (which runs after the manifest is
+        # loaded), NOT by a per-node hand-maintained block.
         build_loop_dsn = (os.getenv("OMNIBASE_INFRA_DB_URL") or "").strip()
-        if event_bus is not None and build_loop_dsn:
-            from omnibase_infra.handlers.handler_db import HandlerDb
-            from omnibase_infra.nodes.node_build_loop_write_effect.handlers import (
-                HandlerBuildLoopAppend,
-            )
-            from omnibase_infra.runtime.intent_effects import (
-                IntentEffectBuildLoopAppend,
-            )
-            from omnibase_infra.runtime.service_intent_executor import IntentExecutor
 
-            build_loop_db_handler = HandlerDb(container)
-            await build_loop_db_handler.initialize({"dsn": build_loop_dsn})
-            build_loop_append_handler = HandlerBuildLoopAppend(
-                container,
-                build_loop_db_handler,
-            )
-            await build_loop_append_handler.initialize({})
-            build_loop_intent_executor = IntentExecutor(container=container)
-            build_loop_intent_executor.register_handler(
-                "build_loop.append",
-                IntentEffectBuildLoopAppend(build_loop_append_handler),
-            )
-            auto_wiring_result_appliers["node_build_loop_projection_compute"] = (
-                DispatchResultApplier(
-                    event_bus=event_bus,
-                    output_topic=config.output_topic,
-                    intent_executor=build_loop_intent_executor,
-                )
-            )
-            logger.info(
-                "Build-loop raw projection result applier registered "
-                "(contract=node_build_loop_projection_compute, correlation_id=%s)",
-                correlation_id,
-            )
-        elif event_bus is not None:
-            logger.warning(
-                "Build-loop raw projection result applier not registered: "
-                "OMNIBASE_INFRA_DB_URL is not set (correlation_id=%s)",
-                correlation_id,
-            )
+        # NOTE (OMN-14516): the former per-node result-applier registrations for
+        # node_build_loop_projection_compute / node_pr_state_projection_compute /
+        # node_ledger_projection_compute lived HERE as a hand-maintained by-NAME
+        # allowlist. That allowlist is DELETED. Any audit/projection consumer that
+        # declares an ``intent_consumption.intent_routing_table`` now has its
+        # result applier DERIVED generically from the manifest (see the derivation
+        # loop after the manifest is filtered, below). A new such consumer wires
+        # itself by declaring the routing table — no kernel edit, no name lookup.
+        # node_ledger_projection_compute died precisely because nobody remembered
+        # to hand-add it here: handler_wiring SKIPPED it and event_ledger held zero
+        # rows while 1M+ events flowed. Derivation removes that failure mode.
 
         # --- Kernel-native: ServiceRegistration lifecycle (OMN-7115) ---
         # ServiceRegistration runs its lifecycle directly, not through the
@@ -2664,6 +2641,148 @@ async def bootstrap() -> int:
                             correlation_id,
                         )
 
+                    # OMN-14516: DERIVE result appliers for audit/projection
+                    # consumers that emit intents to a durable write effect. This
+                    # is the generic replacement for the DELETED per-node by-NAME
+                    # result-applier allowlist. Any COMPUTE contract declaring
+                    # consumer_purpose=audit|projection AND an
+                    # ``intent_consumption.intent_routing_table`` gets a
+                    # DispatchResultApplier with an IntentExecutor derived FROM THE
+                    # CONTRACT: for each ``intent_type -> effect_node`` entry, the
+                    # effect handler is resolved from the effect node's OWN contract
+                    # (matched by ``operation == intent_type``), wrapped in the
+                    # single generic IntentEffectDispatchBridge, and registered under
+                    # intent_type. No name lookup, no bespoke per-node class.
+                    #
+                    # A consumer with a routing table but no DB DSN, or whose effect
+                    # node/handler cannot be resolved, is left UNWIRED so
+                    # handler_wiring FAILS it (fail-closed, OMN-14530) rather than
+                    # letting it consume offsets and silently drop every intent —
+                    # the exact failure that kept event_ledger empty (OMN-14516).
+                    if build_loop_dsn:
+                        from omnibase_infra.runtime.auto_wiring.handler_wiring import (
+                            _import_handler_class,
+                            _is_raw_event_projection_contract,
+                        )
+                        from omnibase_infra.runtime.intent_effects import (
+                            IntentEffectDispatchBridge,
+                        )
+                        from omnibase_infra.runtime.service_intent_executor import (
+                            IntentExecutor,
+                        )
+                        from omnibase_infra.runtime.service_intent_routing_loader import (
+                            load_intent_routing_table,
+                        )
+
+                        # OMN-14517: resolve effect-node targets from the FULL
+                        # discovery manifest, not the runtime-profile-filtered
+                        # one. `filtered_manifest` only contains contracts OWNED
+                        # by this process's runtime_profile (main/effects/...),
+                        # but an audit/projection consumer's intent_routing_table
+                        # may legitimately name an effect node that lives in a
+                        # DIFFERENT profile (e.g. node_pr_state_write_effect
+                        # declares runtime_profiles: [effects] so it also runs
+                        # as its own standalone command consumer there). This
+                        # derivation only needs the effect contract's STATIC
+                        # handler_routing metadata to import + construct its
+                        # handler in-process -- it does not claim ownership of
+                        # that contract's Kafka subscription, so profile
+                        # ownership is the wrong filter to apply here. Using the
+                        # profile-filtered manifest for this lookup made a
+                        # correctly-declared cross-profile route look "absent
+                        # from the manifest" and crashed cold boot with
+                        # ONEX_CORE_081 (confirmed live on a genuinely cold
+                        # `--profile runtime` bring-up; masked on warm restarts
+                        # that recreate only a targeted service subset).
+                        _effect_lookup_manifest = (
+                            auto_wiring_manifest_discovered or filtered_manifest
+                        )
+                        _contracts_by_name = {
+                            _c.name: _c for _c in _effect_lookup_manifest.contracts
+                        }
+                        for _contract in filtered_manifest.contracts:
+                            if _contract.name in auto_wiring_result_appliers:
+                                continue
+                            if not _is_raw_event_projection_contract(_contract):
+                                continue
+                            _routing = load_intent_routing_table(
+                                Path(_contract.contract_path),
+                                logger_override=logger,
+                            )
+                            if not _routing:
+                                # Audit/projection consumer with no declared effect
+                                # path — intentionally left unwired so handler_wiring
+                                # FAILS it (fail-closed) instead of silently skipping.
+                                continue
+                            _executor = IntentExecutor(container=container)
+                            for _intent_type, _effect_node in _routing.items():
+                                _effect_contract = _contracts_by_name.get(_effect_node)
+                                if (
+                                    _effect_contract is None
+                                    or _effect_contract.handler_routing is None
+                                ):
+                                    raise RuntimeHostError(
+                                        f"intent_routing_table on {_contract.name!r} "
+                                        f"routes {_intent_type!r} to effect node "
+                                        f"{_effect_node!r}, which is absent from the "
+                                        f"manifest or declares no handler_routing — "
+                                        f"cannot derive its result applier."
+                                    )
+                                _handler_ref = next(
+                                    (
+                                        _e.handler
+                                        for _e in _effect_contract.handler_routing.handlers
+                                        if _e.operation == _intent_type
+                                    ),
+                                    None,
+                                )
+                                if _handler_ref is None and (
+                                    len(_effect_contract.handler_routing.handlers) == 1
+                                ):
+                                    _handler_ref = (
+                                        _effect_contract.handler_routing.handlers[
+                                            0
+                                        ].handler
+                                    )
+                                if _handler_ref is None:
+                                    raise RuntimeHostError(
+                                        f"effect node {_effect_node!r} exposes no "
+                                        f"handler whose operation matches intent_type "
+                                        f"{_intent_type!r} (declared by "
+                                        f"{_contract.name!r}) — cannot derive applier."
+                                    )
+                                _effect_cls = _import_handler_class(
+                                    _handler_ref.module, _handler_ref.name
+                                )
+                                _effect_handler = _effect_cls(container, build_loop_dsn)
+                                await _effect_handler.initialize({})
+                                _executor.register_handler(
+                                    _intent_type,
+                                    IntentEffectDispatchBridge(_effect_handler),
+                                )
+                            auto_wiring_result_appliers[_contract.name] = (
+                                DispatchResultApplier(
+                                    event_bus=event_bus,
+                                    output_topic=config.output_topic,
+                                    intent_executor=_executor,
+                                )
+                            )
+                            logger.info(
+                                "Derived result applier for audit/projection consumer "
+                                "(contract=%s, intents=%s, correlation_id=%s)",
+                                _contract.name,
+                                sorted(_routing),
+                                correlation_id,
+                            )
+                    else:
+                        logger.warning(
+                            "OMNIBASE_INFRA_DB_URL is not set — audit/projection "
+                            "result appliers cannot be derived; any consumer "
+                            "declaring an intent_routing_table will FAIL wiring "
+                            "(fail-closed) (correlation_id=%s)",
+                            correlation_id,
+                        )
+
                 runtime_handler_dependencies = _build_runtime_handler_dependencies(
                     registration_service.postgres_pool,
                     kafka_bootstrap_servers if use_kafka else None,
@@ -2742,7 +2861,9 @@ async def bootstrap() -> int:
 
         # Start HTTP health server before long Kafka subscription work. At this
         # point RuntimeHostProcess does not exist yet, so ServiceHealth serves
-        # startup liveness with runtime_attached=false and attaches runtime later.
+        # startup liveness with runtime_attached=false. RuntimeHostProcess is
+        # created and attached immediately below (OMN-13768), still before the
+        # long-running Kafka subscription work further down.
         http_port_str = os.getenv("ONEX_HTTP_PORT", str(DEFAULT_HTTP_PORT))
         try:
             http_port = int(http_port_str)
@@ -2784,179 +2905,20 @@ async def bootstrap() -> int:
             },
         )
 
-        if (
-            auto_wiring_report is not None
-            and auto_wiring_manifest_for_subscriptions is not None
-        ):
-            # OMN-13237: interleave provision -> confirm-ready -> attach per
-            # wired contract by passing the runtime provisioner. A not-ready
-            # contract is recorded and SKIPPED for attach; it never recycles the
-            # process. The aggregate tri-state is logged for operator visibility.
-            from typing import cast as _cast
-
-            from omnibase_infra.event_bus.model_contract_attach_result import (
-                ModelContractAttachResult,
-            )
-            from omnibase_infra.event_bus.model_runtime_attach_readiness import (
-                ModelRuntimeAttachReadiness,
-            )
-            from omnibase_infra.protocols.protocol_topic_provisioner import (
-                ProtocolTopicProvisioner,
-            )
-
-            _attach_results: list[ModelContractAttachResult] = []
-            auto_wired_subscriptions = await subscribe_wired_contract_topics(
-                manifest=auto_wiring_manifest_for_subscriptions,
-                report=auto_wiring_report,
-                dispatch_engine=dispatch_engine,
-                event_bus=event_bus,
-                environment=environment,
-                result_appliers_by_contract=auto_wiring_result_appliers,
-                provisioner=_cast("ProtocolTopicProvisioner | None", topic_provisioner),
-                readiness_config=resolve_topic_readiness_config(),
-                attach_results_out=_attach_results,
-            )
-            _attach_readiness = ModelRuntimeAttachReadiness.from_results(
-                tuple(_attach_results)
-            )
-            logger.info(
-                "Per-contract boot interleave: state=%s attached=%d/%d "
-                "(OMN-13237) (correlation_id=%s)",
-                _attach_readiness.state.value,
-                _attach_readiness.attached_contracts,
-                _attach_readiness.required_contracts,
-                correlation_id,
-            )
-            for contract_name, topics in auto_wired_subscriptions.items():
-                for topic in topics:
-                    for pattern in claimed_topic_patterns:
-                        if _topic_matches_pattern(topic, pattern):
-                            logger.warning(
-                                "Topic collision: auto-wired topic '%s' "
-                                "(contract=%s) overlaps with explicit "
-                                "plugin route pattern '%s' "
-                                "(correlation_id=%s)",
-                                topic,
-                                contract_name,
-                                pattern,
-                                correlation_id,
-                            )
-
-        # --- Pass 2: Start consumers for ready plugins only ---
-        # ready_plugins is a subset of activated_plugins: only plugins that
-        # completed wire_handlers() successfully. This prevents starting
-        # consumers for plugins with no handlers/dispatchers wired.
-        for plugin in ready_plugins:
-            plugin_id = plugin.plugin_id
-            try:
-                consumer_result = await plugin.start_consumers(plugin_config)
-                if consumer_result and consumer_result.unsubscribe_callbacks:
-                    plugin_unsubscribe_callbacks.extend(
-                        consumer_result.unsubscribe_callbacks
-                    )
-                logger.info(
-                    "Plugin '%s' consumers started (correlation_id=%s)",
-                    plugin_id,
-                    correlation_id,
-                )
-            except Exception:  # noqa: BLE001 — boundary: logs warning and degrades
-                logger.warning(
-                    "Plugin '%s' failed to start consumers (correlation_id=%s)",
-                    plugin_id,
-                    correlation_id,
-                    exc_info=True,
-                )
-
-        plugin_activation_duration = time.time() - plugin_activation_start
-        logger.info(
-            "Plugin activation completed in %.3fs: %d/%d plugins activated "
-            "(correlation_id=%s)",
-            plugin_activation_duration,
-            len(activated_plugins),
-            len(plugin_registry),
-            correlation_id,
-            extra={
-                "activated_plugins": [p.plugin_id for p in activated_plugins],
-                "duration_seconds": plugin_activation_duration,
-            },
-        )
-
-        # 4.9. Wire ContractRegistrationEventRouter if contract_registry.enabled
-        # This router subscribes to contract lifecycle events (registration,
-        # deregistration, heartbeat) and routes them to the ContractRegistryReducer.
-        # The router also runs an internal tick timer for staleness computation.
-        # Uses postgres_pool from the registration plugin.
-        postgres_pool = registration_service.postgres_pool
-        if config.contract_registry.enabled and postgres_pool is not None:
-            # Import postgres handlers for contract persistence
-            # Deferred import to avoid loading heavy dependencies when not needed
-            from omnibase_infra.nodes.node_contract_persistence_effect.handlers import (
-                HandlerPostgresCleanupTopics,
-                HandlerPostgresContractUpsert,
-                HandlerPostgresDeactivate,
-                HandlerPostgresHeartbeat,
-                HandlerPostgresMarkStale,
-                HandlerPostgresTopicUpdate,
-            )
-
-            # Create effect handlers keyed by intent_type
-            # These handlers execute PostgreSQL operations for intents from the reducer
-            # Note: Handlers implement ProtocolIntentEffect duck-typing style with
-            # more specific payload types. Cast tells mypy they satisfy the protocol.
-            contract_effect_handlers: dict[str, ProtocolIntentEffect] = {
-                "postgres.upsert_contract": cast(
-                    "ProtocolIntentEffect",
-                    HandlerPostgresContractUpsert(postgres_pool),
-                ),
-                "postgres.update_topic": cast(
-                    "ProtocolIntentEffect",
-                    HandlerPostgresTopicUpdate(postgres_pool),
-                ),
-                "postgres.mark_stale": cast(
-                    "ProtocolIntentEffect",
-                    HandlerPostgresMarkStale(postgres_pool),
-                ),
-                "postgres.update_heartbeat": cast(
-                    "ProtocolIntentEffect",
-                    HandlerPostgresHeartbeat(postgres_pool),
-                ),
-                "postgres.deactivate_contract": cast(
-                    "ProtocolIntentEffect",
-                    HandlerPostgresDeactivate(postgres_pool),
-                ),
-                "postgres.cleanup_topic_references": cast(
-                    "ProtocolIntentEffect",
-                    HandlerPostgresCleanupTopics(postgres_pool),
-                ),
-            }
-
-            # Create reducer and router
-            contract_reducer = ContractRegistryReducer()
-            contract_router = ContractRegistrationEventRouter(
-                container=container,
-                reducer=contract_reducer,
-                effect_handlers=contract_effect_handlers,
-                event_bus=event_bus,
-                tick_interval_seconds=config.contract_registry.tick_interval_seconds,
-            )
-
-            logger.info(
-                "ContractRegistrationEventRouter created (correlation_id=%s)",
-                correlation_id,
-                extra={
-                    "tick_interval_seconds": config.contract_registry.tick_interval_seconds,
-                    "handler_count": len(contract_effect_handlers),
-                },
-            )
-        else:
-            logger.debug(
-                "Contract registry disabled or no postgres_pool (correlation_id=%s)",
-                correlation_id,
-                extra={
-                    "contract_registry_enabled": config.contract_registry.enabled,
-                    "postgres_pool_available": postgres_pool is not None,
-                },
-            )
+        # OMN-13768: RuntimeHostProcess is created, registered in the container,
+        # and attached to the health server HERE — before the long-running Kafka
+        # subscription work below (subscribe_wired_contract_topics/plugin consumer
+        # start/ContractRegistrationEventRouter wiring, which the module docstring
+        # notes "may take 10+ min"). Previously this block ran *after* that work,
+        # so ServiceHealth._runtime stayed None for the whole subscription window
+        # and GET /ready raised ProtocolConfigurationError [ONEX_CORE_041]
+        # ("RuntimeHostProcess not available") even though the auto-wired
+        # consumers below were already processing events. None of the
+        # RegistryProtocolBinding/RuntimeHostProcess construction inputs
+        # (container, event_bus, dispatch_engine, node_graph_config,
+        # kernel_profile, contracts_dir, auto_wiring_manifest_for_subscriptions)
+        # depend on the subscription work that used to precede this block, so
+        # the reorder is dependency-safe. See docs/handoffs/2026-07-01 write-up.
 
         # 5. Resolve RegistryProtocolBinding from container or create new instance
         # NOTE: Fallback to creating new instance is intentional degraded mode behavior.
@@ -3162,6 +3124,259 @@ async def bootstrap() -> int:
         )
         if _introspection_manifest is not None:
             health_server.attach_manifest(_introspection_manifest)
+
+        # OMN-13768: the long-running Kafka subscription work (per-contract
+        # boot interleave, plugin consumer start, ContractRegistrationEventRouter
+        # wiring) now runs AFTER RuntimeHostProcess is created/registered/attached
+        # above, so GET /ready reflects real event-bus readiness (via
+        # RuntimeHostProcess.readiness_check() -> event_bus.get_readiness_status())
+        # instead of raising ProtocolConfigurationError [ONEX_CORE_041] for the
+        # entire duration of this section.
+        if (
+            auto_wiring_report is not None
+            and auto_wiring_manifest_for_subscriptions is not None
+        ):
+            # OMN-13237: interleave provision -> confirm-ready -> attach per
+            # wired contract by passing the runtime provisioner. A not-ready
+            # contract is recorded and SKIPPED for attach; it never recycles the
+            # process. The aggregate tri-state is logged for operator visibility.
+            from typing import cast as _cast
+
+            from omnibase_infra.event_bus.model_contract_attach_result import (
+                ModelContractAttachResult,
+            )
+            from omnibase_infra.event_bus.model_runtime_attach_readiness import (
+                ModelRuntimeAttachReadiness,
+            )
+            from omnibase_infra.protocols.protocol_topic_provisioner import (
+                ProtocolTopicProvisioner,
+            )
+            from omnibase_infra.runtime.core_runtime.composition import (
+                parse_core_runtime_topic_owners,
+                parse_core_runtime_topics,
+                resolve_core_runtime_owners,
+            )
+
+            # OMN-14758 (S6): the ONEX_CORE_RUNTIME_TOPICS allowlist (default EMPTY ⇒
+            # zero behavior change). Threaded into the legacy subscribe path so the
+            # legacy push callback is NOT built for a core-runtime topic's OWNER
+            # (single-owner split, §c.4). The core RuntimeDispatch loop is built +
+            # started below only when the allowlist is non-empty.
+            core_runtime_topics = parse_core_runtime_topics(os.environ)
+            # OMN-14771 (S8 §D1=4b): resolve the ONE owning contract per allowlist topic.
+            # A single-subscriber topic auto-owns; a genuine fan-out topic requires an
+            # explicit ONEX_CORE_RUNTIME_TOPIC_OWNERS designation (fail-closed). The map
+            # is passed to BOTH the legacy skip (skip only the owner's subscription) and
+            # the core-runtime build (route + single-owner gate). Empty when the allowlist
+            # is empty ⇒ zero behavior change.
+            core_runtime_owners = (
+                resolve_core_runtime_owners(
+                    auto_wiring_manifest_for_subscriptions.contracts,
+                    core_runtime_topics,
+                    designated_owners=parse_core_runtime_topic_owners(os.environ),
+                )
+                if core_runtime_topics
+                else {}
+            )
+
+            _attach_results: list[ModelContractAttachResult] = []
+            auto_wired_subscriptions = await subscribe_wired_contract_topics(
+                manifest=auto_wiring_manifest_for_subscriptions,
+                report=auto_wiring_report,
+                dispatch_engine=dispatch_engine,
+                event_bus=event_bus,
+                environment=environment,
+                result_appliers_by_contract=auto_wiring_result_appliers,
+                provisioner=_cast("ProtocolTopicProvisioner | None", topic_provisioner),
+                readiness_config=resolve_topic_readiness_config(),
+                attach_results_out=_attach_results,
+                core_runtime_topics=core_runtime_topics,
+                core_runtime_owners=core_runtime_owners,
+            )
+            _attach_readiness = ModelRuntimeAttachReadiness.from_results(
+                tuple(_attach_results)
+            )
+            logger.info(
+                "Per-contract boot interleave: state=%s attached=%d/%d "
+                "(OMN-13237) (correlation_id=%s)",
+                _attach_readiness.state.value,
+                _attach_readiness.attached_contracts,
+                _attach_readiness.required_contracts,
+                correlation_id,
+            )
+            for contract_name, topics in auto_wired_subscriptions.items():
+                for topic in topics:
+                    for pattern in claimed_topic_patterns:
+                        if _topic_matches_pattern(topic, pattern):
+                            logger.warning(
+                                "Topic collision: auto-wired topic '%s' "
+                                "(contract=%s) overlaps with explicit "
+                                "plugin route pattern '%s' "
+                                "(correlation_id=%s)",
+                                topic,
+                                contract_name,
+                                pattern,
+                                correlation_id,
+                            )
+
+            # OMN-14758 (S6): build + start the ONE core RuntimeDispatch loop for the
+            # allowlisted delegation command topics. Dormant unless the allowlist is
+            # non-empty; the legacy subscribe path above already skipped these topics so
+            # ownership is disjoint (single-owner split, §c). The loop is registered for
+            # clean shutdown alongside the plugin unsubscribe callbacks.
+            if core_runtime_topics:
+                from omnibase_infra.runtime.core_runtime.kernel_glue import (
+                    build_and_start_core_runtime,
+                )
+
+                _legacy_subscribed = frozenset(
+                    topic
+                    for topics in auto_wired_subscriptions.values()
+                    for topic in topics
+                )
+                _core_runtime_handle = await build_and_start_core_runtime(
+                    core_runtime_topics=core_runtime_topics,
+                    contracts=auto_wiring_manifest_for_subscriptions.contracts,
+                    legacy_subscribed_topics=_legacy_subscribed,
+                    owners=core_runtime_owners,
+                    use_kafka=use_kafka,
+                    kafka_bootstrap_servers=(
+                        kafka_bootstrap_servers if use_kafka else None
+                    ),
+                    environment=environment,
+                    container=container,
+                    # R-6: DLQ topics are provisioned via the boot provisioner before the
+                    # loop starts; §c.5/§d: fold loop-health + phantom alarm into /ready.
+                    provisioner=_cast(
+                        "ProtocolTopicProvisioner | None", topic_provisioner
+                    ),
+                    runtime=runtime,
+                    correlation_id=correlation_id,
+                )
+                plugin_unsubscribe_callbacks.append(_core_runtime_handle.stop)
+                logger.info(
+                    "S6 core runtime loop active: topics=%s dlq_provision=%s "
+                    "(correlation_id=%s)",
+                    sorted(core_runtime_topics),
+                    sorted(_core_runtime_handle.dlq_provision_topics),
+                    correlation_id,
+                )
+
+        # --- Pass 2: Start consumers for ready plugins only ---
+        # ready_plugins is a subset of activated_plugins: only plugins that
+        # completed wire_handlers() successfully. This prevents starting
+        # consumers for plugins with no handlers/dispatchers wired.
+        for plugin in ready_plugins:
+            plugin_id = plugin.plugin_id
+            try:
+                consumer_result = await plugin.start_consumers(plugin_config)
+                if consumer_result and consumer_result.unsubscribe_callbacks:
+                    plugin_unsubscribe_callbacks.extend(
+                        consumer_result.unsubscribe_callbacks
+                    )
+                logger.info(
+                    "Plugin '%s' consumers started (correlation_id=%s)",
+                    plugin_id,
+                    correlation_id,
+                )
+            except Exception:  # noqa: BLE001 — boundary: logs warning and degrades
+                logger.warning(
+                    "Plugin '%s' failed to start consumers (correlation_id=%s)",
+                    plugin_id,
+                    correlation_id,
+                    exc_info=True,
+                )
+
+        plugin_activation_duration = time.time() - plugin_activation_start
+        logger.info(
+            "Plugin activation completed in %.3fs: %d/%d plugins activated "
+            "(correlation_id=%s)",
+            plugin_activation_duration,
+            len(activated_plugins),
+            len(plugin_registry),
+            correlation_id,
+            extra={
+                "activated_plugins": [p.plugin_id for p in activated_plugins],
+                "duration_seconds": plugin_activation_duration,
+            },
+        )
+
+        # 4.9. Wire ContractRegistrationEventRouter if contract_registry.enabled
+        # This router subscribes to contract lifecycle events (registration,
+        # deregistration, heartbeat) and routes them to the ContractRegistryReducer.
+        # The router also runs an internal tick timer for staleness computation.
+        # Uses postgres_pool from the registration plugin.
+        postgres_pool = registration_service.postgres_pool
+        if config.contract_registry.enabled and postgres_pool is not None:
+            # Import postgres handlers for contract persistence
+            # Deferred import to avoid loading heavy dependencies when not needed
+            from omnibase_infra.nodes.node_contract_persistence_effect.handlers import (
+                HandlerPostgresCleanupTopics,
+                HandlerPostgresContractUpsert,
+                HandlerPostgresDeactivate,
+                HandlerPostgresHeartbeat,
+                HandlerPostgresMarkStale,
+                HandlerPostgresTopicUpdate,
+            )
+
+            # Create effect handlers keyed by intent_type
+            # These handlers execute PostgreSQL operations for intents from the reducer
+            # Note: Handlers implement ProtocolIntentEffect duck-typing style with
+            # more specific payload types. Cast tells mypy they satisfy the protocol.
+            contract_effect_handlers: dict[str, ProtocolIntentEffect] = {
+                "postgres.upsert_contract": cast(
+                    "ProtocolIntentEffect",
+                    HandlerPostgresContractUpsert(postgres_pool),
+                ),
+                "postgres.update_topic": cast(
+                    "ProtocolIntentEffect",
+                    HandlerPostgresTopicUpdate(postgres_pool),
+                ),
+                "postgres.mark_stale": cast(
+                    "ProtocolIntentEffect",
+                    HandlerPostgresMarkStale(postgres_pool),
+                ),
+                "postgres.update_heartbeat": cast(
+                    "ProtocolIntentEffect",
+                    HandlerPostgresHeartbeat(postgres_pool),
+                ),
+                "postgres.deactivate_contract": cast(
+                    "ProtocolIntentEffect",
+                    HandlerPostgresDeactivate(postgres_pool),
+                ),
+                "postgres.cleanup_topic_references": cast(
+                    "ProtocolIntentEffect",
+                    HandlerPostgresCleanupTopics(postgres_pool),
+                ),
+            }
+
+            # Create reducer and router
+            contract_reducer = ContractRegistryReducer()
+            contract_router = ContractRegistrationEventRouter(
+                container=container,
+                reducer=contract_reducer,
+                effect_handlers=contract_effect_handlers,
+                event_bus=event_bus,
+                tick_interval_seconds=config.contract_registry.tick_interval_seconds,
+            )
+
+            logger.info(
+                "ContractRegistrationEventRouter created (correlation_id=%s)",
+                correlation_id,
+                extra={
+                    "tick_interval_seconds": config.contract_registry.tick_interval_seconds,
+                    "handler_count": len(contract_effect_handlers),
+                },
+            )
+        else:
+            logger.debug(
+                "Contract registry disabled or no postgres_pool (correlation_id=%s)",
+                correlation_id,
+                extra={
+                    "contract_registry_enabled": config.contract_registry.enabled,
+                    "postgres_pool_available": postgres_pool is not None,
+                },
+            )
 
         # 7. Setup graceful shutdown
         shutdown_event = asyncio.Event()

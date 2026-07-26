@@ -1,0 +1,261 @@
+{
+  "golden_version": "compute_golden.v1",
+  "input": {
+    "correlation_id": "11111111-1111-4111-8111-111111111111",
+    "prs": [
+      {
+        "author": "",
+        "base_ref": "main",
+        "ci_status": "SUCCESS",
+        "has_auto_merge": false,
+        "head_ref": "",
+        "is_draft": false,
+        "labels": [],
+        "mergeable": "MERGEABLE",
+        "number": 1,
+        "repo": "OmniNode-ai/test",
+        "review_decision": "APPROVED",
+        "title": "test PR",
+        "updated_at": ""
+      },
+      {
+        "author": "",
+        "base_ref": "main",
+        "ci_status": "FAILURE",
+        "has_auto_merge": false,
+        "head_ref": "",
+        "is_draft": false,
+        "labels": [],
+        "mergeable": "MERGEABLE",
+        "number": 2,
+        "repo": "OmniNode-ai/test",
+        "review_decision": "APPROVED",
+        "title": "test PR",
+        "updated_at": ""
+      },
+      {
+        "author": "",
+        "base_ref": "main",
+        "ci_status": "SUCCESS",
+        "has_auto_merge": false,
+        "head_ref": "",
+        "is_draft": false,
+        "labels": [],
+        "mergeable": "MERGEABLE",
+        "number": 3,
+        "repo": "OmniNode-ai/test",
+        "review_decision": "CHANGES_REQUESTED",
+        "title": "test PR",
+        "updated_at": ""
+      },
+      {
+        "author": "",
+        "base_ref": "main",
+        "ci_status": "SUCCESS",
+        "has_auto_merge": false,
+        "head_ref": "",
+        "is_draft": false,
+        "labels": [],
+        "mergeable": "CONFLICTING",
+        "number": 4,
+        "repo": "OmniNode-ai/test",
+        "review_decision": "APPROVED",
+        "title": "test PR",
+        "updated_at": ""
+      },
+      {
+        "author": "",
+        "base_ref": "main",
+        "ci_status": "SUCCESS",
+        "has_auto_merge": false,
+        "head_ref": "",
+        "is_draft": true,
+        "labels": [],
+        "mergeable": "MERGEABLE",
+        "number": 5,
+        "repo": "OmniNode-ai/test",
+        "review_decision": "APPROVED",
+        "title": "test PR",
+        "updated_at": ""
+      },
+      {
+        "author": "",
+        "base_ref": "main",
+        "ci_status": "SUCCESS",
+        "has_auto_merge": true,
+        "head_ref": "",
+        "is_draft": false,
+        "labels": [],
+        "mergeable": "MERGEABLE",
+        "number": 6,
+        "repo": "OmniNode-ai/test",
+        "review_decision": "APPROVED",
+        "title": "test PR",
+        "updated_at": ""
+      },
+      {
+        "author": "",
+        "base_ref": "main",
+        "ci_status": "SUCCESS",
+        "has_auto_merge": false,
+        "head_ref": "",
+        "is_draft": false,
+        "labels": [],
+        "mergeable": "MERGEABLE",
+        "number": 8,
+        "repo": "OmniNode-ai/test",
+        "review_decision": "",
+        "title": "test PR",
+        "updated_at": ""
+      }
+    ],
+    "require_approval": true
+  },
+  "input_type": "ModelClassifyInput",
+  "output": {
+    "correlation_id": "11111111-1111-4111-8111-111111111111",
+    "skipped": [
+      {
+        "pr": {
+          "author": "",
+          "base_ref": "main",
+          "ci_status": "SUCCESS",
+          "has_auto_merge": false,
+          "head_ref": "",
+          "is_draft": true,
+          "labels": [],
+          "mergeable": "MERGEABLE",
+          "number": 5,
+          "repo": "OmniNode-ai/test",
+          "review_decision": "APPROVED",
+          "title": "test PR",
+          "updated_at": ""
+        },
+        "reason": "Draft PR",
+        "track": "SKIP"
+      },
+      {
+        "pr": {
+          "author": "",
+          "base_ref": "main",
+          "ci_status": "SUCCESS",
+          "has_auto_merge": true,
+          "head_ref": "",
+          "is_draft": false,
+          "labels": [],
+          "mergeable": "MERGEABLE",
+          "number": 6,
+          "repo": "OmniNode-ai/test",
+          "review_decision": "APPROVED",
+          "title": "test PR",
+          "updated_at": ""
+        },
+        "reason": "Auto-merge already enabled",
+        "track": "SKIP"
+      }
+    ],
+    "total_classified": 7,
+    "track_a": [
+      {
+        "pr": {
+          "author": "",
+          "base_ref": "main",
+          "ci_status": "SUCCESS",
+          "has_auto_merge": false,
+          "head_ref": "",
+          "is_draft": false,
+          "labels": [],
+          "mergeable": "MERGEABLE",
+          "number": 1,
+          "repo": "OmniNode-ai/test",
+          "review_decision": "APPROVED",
+          "title": "test PR",
+          "updated_at": ""
+        },
+        "reason": "CI green, approved, mergeable",
+        "track": "A"
+      }
+    ],
+    "track_b": [
+      {
+        "pr": {
+          "author": "",
+          "base_ref": "main",
+          "ci_status": "FAILURE",
+          "has_auto_merge": false,
+          "head_ref": "",
+          "is_draft": false,
+          "labels": [],
+          "mergeable": "MERGEABLE",
+          "number": 2,
+          "repo": "OmniNode-ai/test",
+          "review_decision": "APPROVED",
+          "title": "test PR",
+          "updated_at": ""
+        },
+        "reason": "CI FAILURE",
+        "track": "B"
+      },
+      {
+        "pr": {
+          "author": "",
+          "base_ref": "main",
+          "ci_status": "SUCCESS",
+          "has_auto_merge": false,
+          "head_ref": "",
+          "is_draft": false,
+          "labels": [],
+          "mergeable": "MERGEABLE",
+          "number": 3,
+          "repo": "OmniNode-ai/test",
+          "review_decision": "CHANGES_REQUESTED",
+          "title": "test PR",
+          "updated_at": ""
+        },
+        "reason": "review CHANGES_REQUESTED",
+        "track": "B"
+      },
+      {
+        "pr": {
+          "author": "",
+          "base_ref": "main",
+          "ci_status": "SUCCESS",
+          "has_auto_merge": false,
+          "head_ref": "",
+          "is_draft": false,
+          "labels": [],
+          "mergeable": "CONFLICTING",
+          "number": 4,
+          "repo": "OmniNode-ai/test",
+          "review_decision": "APPROVED",
+          "title": "test PR",
+          "updated_at": ""
+        },
+        "reason": "mergeable=CONFLICTING",
+        "track": "B"
+      },
+      {
+        "pr": {
+          "author": "",
+          "base_ref": "main",
+          "ci_status": "SUCCESS",
+          "has_auto_merge": false,
+          "head_ref": "",
+          "is_draft": false,
+          "labels": [],
+          "mergeable": "MERGEABLE",
+          "number": 8,
+          "repo": "OmniNode-ai/test",
+          "review_decision": "",
+          "title": "test PR",
+          "updated_at": ""
+        },
+        "reason": "review NONE",
+        "track": "B"
+      }
+    ]
+  },
+  "output_type": "ModelClassifyResult",
+  "scenario": "mixed_require_approval",
+  "volatile_mask": []
+}

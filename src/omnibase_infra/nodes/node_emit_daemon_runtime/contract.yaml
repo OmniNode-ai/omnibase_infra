@@ -11,7 +11,7 @@ node_version:
   patch: 0
 node_type: "EFFECT_GENERIC"
 description: >
-  Runtime emit daemon topic contract. The producer lives in omniclaude hooks, but omnibase_infra consumes these topics and provisions them during runtime startup until producer-side omniclaude contracts own them directly.
+  Runtime emit daemon topic marker. The producer lives in omniclaude hooks; this contract documents the topic surface for provisioning continuity until producer-side omniclaude contracts own it directly. The topics are plugin-managed, not dispatched to an omnibase_infra handler.
 
 input_model:
   name: "ModelEmitDaemonRuntimeInput"
@@ -22,6 +22,7 @@ output_model:
   module: "omnibase_infra.runtime.emit_daemon"
   description: "Runtime emit daemon topic-consumption contract output marker."
 event_bus:
+  plugin_managed: true
   subscribe_topics:
     - "onex.evt.omniclaude.phase-metrics.v1"
     - "onex.evt.omniclaude.notification-blocked.v1"
@@ -44,7 +45,7 @@ metadata:
   owner: "omnibase_infra"
   ticket: "OMN-13700"
   description: >
-    Consumes emit-daemon lifecycle topics produced by omniclaude hooks so omnibase_infra can provision and monitor the runtime topic surface.
+    Documents emit-daemon lifecycle topics produced by omniclaude hooks so omnibase_infra can provision and monitor the runtime topic surface without creating handler-owned Kafka subscriptions.
 
   tags:
     - runtime

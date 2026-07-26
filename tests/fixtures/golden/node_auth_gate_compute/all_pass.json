@@ -1,0 +1,39 @@
+{
+  "golden_version": "compute_golden.v1",
+  "input": {
+    "authorization": {
+      "allowed_paths": [
+        "src/**/*.py"
+      ],
+      "allowed_tools": [
+        "Edit",
+        "Write"
+      ],
+      "expires_at": "2026-02-10T16:00:00Z",
+      "reason": "test",
+      "repo_scopes": [
+        "omnibase_infra"
+      ],
+      "run_id": "11111111-1111-1111-1111-111111111111",
+      "source": "explicit"
+    },
+    "emergency_override_active": false,
+    "emergency_override_reason": "",
+    "now": "2026-02-10T12:00:00Z",
+    "run_id": "11111111-1111-1111-1111-111111111111",
+    "target_path": "src/pkg/m.py",
+    "target_repo": "omnibase_infra",
+    "tool_name": "Edit"
+  },
+  "input_type": "ModelAuthGateRequest",
+  "output": {
+    "banner": "",
+    "decision": "allow",
+    "reason": "All authorization checks passed.",
+    "reason_code": "all_checks_passed",
+    "step": 10
+  },
+  "output_type": "ModelAuthGateDecision",
+  "scenario": "all_pass",
+  "volatile_mask": []
+}

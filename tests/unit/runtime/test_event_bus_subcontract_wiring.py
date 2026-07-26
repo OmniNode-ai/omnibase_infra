@@ -555,6 +555,54 @@ class TestDispatchCallback:
         assert call_kwargs["dlq_topic"] == "onex.dlq.omnibase-infra.events.v1"
 
     @pytest.mark.asyncio
+    async def test_content_error_dlq_write_failure_blocks_commit(
+        self,
+        mock_event_bus: AsyncMock,
+        mock_dispatch_engine: AsyncMock,
+    ) -> None:
+        """OMN-14936: content-error DLQ persist failure must NOT commit.
+
+        Same seeded-failure acceptance criterion as the no_dispatcher case,
+        applied to the content-error (invalid JSON) branch: if the DLQ write
+        is not confirmed, the offset must not advance.
+        """
+        from omnibase_infra.models.event_bus import ModelDlqConfig
+
+        mock_event_bus._publish_raw_to_dlq = AsyncMock(return_value=False)
+        mock_event_bus.commit_offset = AsyncMock()
+
+        wiring = EventBusSubcontractWiring(
+            event_bus=mock_event_bus,
+            dispatch_engine=mock_dispatch_engine,
+            environment="dev",
+            node_name="test-handler",
+            service="test-service",
+            version="v1",
+            dlq_config=ModelDlqConfig(enabled=True, on_content_error="dlq_and_commit"),
+        )
+
+        callback = wiring._create_dispatch_callback(
+            "onex.evt.test.v1", "dev.test-handler"
+        )
+
+        invalid_message = ModelEventMessage(
+            topic="onex.evt.test.v1",
+            key=b"key",
+            value=b"not valid json",
+            headers=ModelEventHeaders(
+                source="test",
+                event_type="test",
+                timestamp=datetime.now(UTC),
+            ),
+        )
+
+        # Should NOT raise -- failure surfaces via logging, not exception.
+        await callback(invalid_message)
+
+        mock_event_bus._publish_raw_to_dlq.assert_called_once()
+        mock_event_bus.commit_offset.assert_not_called()
+
+    @pytest.mark.asyncio
     async def test_dispatch_callback_routes_no_dispatcher_result_to_derived_dlq(
         self,
         mock_event_bus: AsyncMock,
@@ -599,6 +647,61 @@ class TestDispatchCallback:
         assert call_kwargs["dlq_topic"] == "onex.dlq.omnibase-infra.events.v1"
         assert call_kwargs["consumer_group"] == "dev.test-handler"
         mock_event_bus.commit_offset.assert_called_once_with(sample_event_message)
+        result_applier.apply.assert_not_called()
+
+    @pytest.mark.asyncio
+    async def test_no_dispatcher_dlq_publish_failure_blocks_commit(
+        self,
+        mock_event_bus: AsyncMock,
+        mock_dispatch_engine: AsyncMock,
+        sample_event_message: ModelEventMessage,
+    ) -> None:
+        """OMN-14936: NO_DISPATCHER + failed DLQ persist must NOT commit.
+
+        Reproduces the live-proven defect: ``service_kernel``'s no_dispatcher
+        path logged a DLQ topic name that was never created, then committed
+        the offset anyway -- a silent, unrecoverable drop. The DLQ publish
+        returning ``False`` (e.g. the underlying Kafka ``send_and_wait``
+        raised ``UnknownTopicOrPartitionError``) must withhold the commit.
+        """
+        from omnibase_infra.models.event_bus import ModelDlqConfig
+
+        # Simulate a DLQ write that did NOT persist (e.g. broker rejected
+        # the send because the DLQ topic doesn't exist).
+        mock_event_bus._publish_raw_to_dlq = AsyncMock(return_value=False)
+        mock_event_bus.commit_offset = AsyncMock()
+        result_applier = AsyncMock()
+        correlation_id = uuid4()
+        mock_dispatch_engine.dispatch.return_value = ModelDispatchResult(
+            status=EnumDispatchStatus.NO_DISPATCHER,
+            topic="onex.evt.test.v1",
+            started_at=datetime.now(UTC),
+            correlation_id=correlation_id,
+            error_message="No dispatcher found for test.event",
+            dlq_topic="onex.dlq.omnibase-infra.events.v1",
+        )
+
+        wiring = EventBusSubcontractWiring(
+            event_bus=mock_event_bus,
+            dispatch_engine=mock_dispatch_engine,
+            environment="dev",
+            node_name="test-handler",
+            service="test-service",
+            version="v1",
+            result_applier=result_applier,
+            dlq_config=ModelDlqConfig(enabled=True, on_content_error="dlq_and_commit"),
+        )
+
+        callback = wiring._create_dispatch_callback(
+            "onex.evt.test.v1", "dev.test-handler"
+        )
+
+        # Should NOT raise -- the failure is surfaced via logging, not an
+        # exception -- but the offset must NOT be committed.
+        await callback(sample_event_message)
+
+        mock_event_bus._publish_raw_to_dlq.assert_called_once()
+        mock_event_bus.commit_offset.assert_not_called()
         result_applier.apply.assert_not_called()
 
     @pytest.mark.asyncio
@@ -1612,6 +1715,72 @@ class TestErrorClassification:
         mock_event_bus._publish_raw_to_dlq.assert_called_once()
         call_kwargs = mock_event_bus._publish_raw_to_dlq.call_args.kwargs
         assert call_kwargs["failure_type"] == "infra_error"
+
+    @pytest.mark.asyncio
+    async def test_retry_exhausted_dlq_write_failure_blocks_commit_and_retry_clear(
+        self,
+        mock_event_bus: AsyncMock,
+        mock_dispatch_engine: AsyncMock,
+    ) -> None:
+        """OMN-14936: retry-exhausted + failed DLQ persist must NOT commit.
+
+        Acceptance (seeded failure variant): DLQ write blocked -> offset NOT
+        committed, and the retry count is NOT cleared either -- the next
+        redelivery must still see the message as retry-exhausted so it
+        retries the DLQ write instead of silently losing the message.
+        """
+        from omnibase_infra.models.event_bus import (
+            ModelConsumerRetryConfig,
+            ModelDlqConfig,
+        )
+
+        mock_dispatch_engine.dispatch.side_effect = RuntimeHostError("Service down")
+        # DLQ write never persists (e.g. broker rejects the DLQ topic).
+        mock_event_bus._publish_raw_to_dlq = AsyncMock(return_value=False)
+        mock_event_bus.commit_offset = AsyncMock()
+
+        valid_message = ModelEventMessage(
+            topic="onex.evt.test.v1",
+            key=b"key",
+            value=json.dumps(
+                {
+                    "event_type": "test.event",
+                    "correlation_id": str(uuid4()),
+                    "payload": {"key": "value"},
+                }
+            ).encode("utf-8"),
+            headers=ModelEventHeaders(
+                source="test",
+                event_type="test",
+                timestamp=datetime.now(UTC),
+            ),
+        )
+
+        wiring = EventBusSubcontractWiring(
+            event_bus=mock_event_bus,
+            dispatch_engine=mock_dispatch_engine,
+            environment="dev",
+            node_name="test-handler",
+            service="test-service",
+            version="v1",
+            dlq_config=ModelDlqConfig(
+                enabled=True,
+                on_infra_exhausted="dlq_and_commit",
+            ),
+            retry_config=ModelConsumerRetryConfig(max_attempts=1),
+        )
+
+        callback = wiring._create_dispatch_callback(
+            "onex.evt.test.v1", "dev.test-handler"
+        )
+
+        # First attempt exhausts the retry budget (max_attempts=1) and
+        # attempts DLQ + commit -- DLQ write fails, so commit must be
+        # withheld and the retry count must NOT be cleared.
+        await callback(valid_message)  # Should NOT raise
+
+        mock_event_bus._publish_raw_to_dlq.assert_called_once()
+        mock_event_bus.commit_offset.assert_not_called()
 
     @pytest.mark.asyncio
     async def test_content_error_fail_fast_raises_protocol_error(

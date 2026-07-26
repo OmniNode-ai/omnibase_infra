@@ -9,8 +9,8 @@ node_type: "REDUCER_GENERIC"
 contract_version:
   major: 1
   minor: 0
-  patch: 0
-node_version: "1.0.0"
+  patch: 1
+node_version: "1.0.1"
 description: >
   FSM-based state tracking for the chain learning workflow. Tracks the verification lifecycle: pending, retrieving, replaying/exploring, verifying, complete/fallback/failed.
 
@@ -132,9 +132,12 @@ handler_routing:
         description: "Reducer input containing workflow event."
 metadata:
   description: "FSM reducer for chain learning verification state tracking"
+  invariant_notes:
+    - "The static transition table is read-only configuration, not per-request accumulated reducer state (OMN-14222)."
   author: "OmniNode Team"
   created: "2026-04-02"
   tags:
     - "reducer"
     - "fsm"
     - "chain-learning"
+    - "state-invariant"

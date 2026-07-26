@@ -16,6 +16,12 @@ pytestmark = pytest.mark.unit
 REPO_ROOT = Path(__file__).resolve().parents[2]
 CI_WORKFLOW = REPO_ROOT / ".github" / "workflows" / "ci.yml"
 DOCKER_BUILD_WORKFLOW = REPO_ROOT / ".github" / "workflows" / "docker-build.yml"
+REJECT_SKIP_CALLER_WORKFLOW = (
+    REPO_ROOT / ".github" / "workflows" / "call-reject-skip.yml"
+)
+FRESH_DEPLOY_FITNESS_WORKFLOW = (
+    REPO_ROOT / ".github" / "workflows" / "fresh-deploy-fitness.yml"
+)
 RUNTIME_DOCKERFILE = REPO_ROOT / "docker" / "Dockerfile.runtime"
 ENV_PARITY_WORKFLOW = REPO_ROOT / ".github" / "workflows" / "env-parity.yml"
 ARTIFACT_RECONCILIATION_WEBHOOK_WORKFLOW = (
@@ -39,6 +45,7 @@ SETUP_PYTHON_UV_ACTION = (
 )
 CHECKOUT_V7_SHA = "9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0"
 CODEQL_V4_SHA = "dc73d59c2d7bd4f8194098a91219eeee6d8a1719"
+OMNICLAUDE_REJECT_SKIP_NO_CHECKOUT_SHA = "ff230264ac3300d7ced43564dc921f44558110fe"
 
 
 def _load_yaml(path: Path) -> dict[str, Any]:
@@ -194,6 +201,57 @@ def test_docker_integration_build_timeout_matches_workflow_budget() -> None:
 
     assert step["env"]["OMNI_DOCKER_BUILD_TIMEOUT_SECONDS"] == "1200"
     assert '--timeout="${OMNI_DOCKER_BUILD_TIMEOUT_SECONDS}"' in step["run"]
+
+
+def test_docker_integration_tests_do_not_run_on_pull_requests() -> None:
+    workflow = _load_yaml(DOCKER_BUILD_WORKFLOW)
+    job = workflow["jobs"]["docker-integration-tests"]
+
+    assert "github.event_name != 'pull_request'" in job["if"]
+    assert "github.event.inputs.run_full_tests != 'false'" in job["if"]
+    assert job["continue-on-error"] is True
+
+
+def test_short_dependency_gates_have_checkout_budget() -> None:
+    docker_workflow = _load_yaml(DOCKER_BUILD_WORKFLOW)
+    freshness_workflow = _load_yaml(FRESH_DEPLOY_FITNESS_WORKFLOW)
+
+    docker_pin_job = docker_workflow["jobs"]["dockerfile-pin-check"]
+    sibling_lock_job = freshness_workflow["jobs"]["sibling-lock-pins"]
+
+    assert docker_pin_job["timeout-minutes"] >= 15
+    assert sibling_lock_job["timeout-minutes"] >= 20
+
+
+def test_reject_skip_token_gate_uses_no_checkout_reusable() -> None:
+    workflow = _load_yaml(REJECT_SKIP_CALLER_WORKFLOW)
+    job = workflow["jobs"]["call-reject-skip-token"]
+
+    assert (
+        job["uses"]
+        == "OmniNode-ai/omniclaude/.github/workflows/reject-deploy-gate-skip.yml"
+        f"@{OMNICLAUDE_REJECT_SKIP_NO_CHECKOUT_SHA}"
+    )
+
+
+def test_runtime_boot_smoke_is_not_run_on_pull_requests() -> None:
+    workflow = _load_yaml(CI_WORKFLOW)
+    job = workflow["jobs"]["runtime-boot-smoke"]
+    summary = workflow["jobs"]["ci-summary"]
+
+    assert "github.event_name != 'pull_request'" in job["if"]
+    assert "needs.tests-gate.result == 'success'" in job["if"]
+    # ci-summary is a NO-`needs` fail-closed poller (OMN-14127); regardless of
+    # whether it declares `needs`, runtime-boot-smoke must never be a dependency
+    # of it (a PR-skipped advisory job must not wedge the required summary gate).
+    assert "runtime-boot-smoke" not in summary.get("needs", [])
+
+
+def test_compose_required_env_gate_has_checkout_budget() -> None:
+    workflow = _load_yaml(CI_WORKFLOW)
+    job = workflow["jobs"]["compose-required-env-coverage"]
+
+    assert job["timeout-minutes"] >= 20
 
 
 def test_docker_integration_installs_compose_plugin_before_tests() -> None:
@@ -772,14 +830,22 @@ def test_webhook_workflows_use_ci_python_environment() -> None:
 
     for workflow_path in workflow_paths:
         workflow = _load_yaml(workflow_path)
-        for job in workflow["jobs"].values():
+        for job_name, job in workflow["jobs"].items():
+            if "uses" in job:
+                assert job["uses"].endswith(
+                    "occ-preflight.yml@789d175d78a7a802f4f0f4aa2af7083bdfd312c2"
+                )
+                continue
+
             steps = job["steps"]
             setup_steps = [
                 step
                 for step in steps
                 if step.get("uses") == "./.github/actions/setup-python-uv"
             ]
-            assert setup_steps, f"{workflow_path.name} must use setup-python-uv"
+            assert setup_steps, (
+                f"{workflow_path.name}:{job_name} must use setup-python-uv"
+            )
             assert all(
                 step["with"]["install-args"] == "--frozen" for step in setup_steps
             )

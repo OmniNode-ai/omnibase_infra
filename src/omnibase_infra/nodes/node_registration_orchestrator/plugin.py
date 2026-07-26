@@ -828,6 +828,9 @@ class ServiceRegistration:
         try:
             from aiokafka import AIOKafkaProducer
 
+            from omnibase_infra.event_bus.kafka_auth import (
+                build_aiokafka_auth_kwargs_from_env,
+            )
             from omnibase_infra.models.projection import ModelSnapshotTopicConfig
             from omnibase_infra.projectors.snapshot_publisher_registration import (
                 SnapshotPublisherRegistration,
@@ -836,6 +839,7 @@ class ServiceRegistration:
             snapshot_config = ModelSnapshotTopicConfig.default()
             snapshot_producer = AIOKafkaProducer(
                 bootstrap_servers=kafka_bootstrap_servers,
+                **build_aiokafka_auth_kwargs_from_env(),
             )
             self._snapshot_publisher = SnapshotPublisherRegistration(
                 snapshot_producer,

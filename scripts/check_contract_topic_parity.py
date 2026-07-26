@@ -260,11 +260,11 @@ _LEGACY_ALLOWLIST: dict[str, str] = {
     "onex.evt.omniclaude.agent-actions-dlq.v1": "DLQ topic, no contract.yaml yet; needs omniclaude node contract | owner: jonah | expiry: 2026-06-01",
     "onex.evt.omniclaude.agent-observability-dlq.v1": "DLQ topic, no contract.yaml yet; needs omniclaude node contract | owner: jonah | expiry: 2026-06-01",
     "onex.evt.omniclaude.skill-lifecycle-dlq.v1": "DLQ topic for skill-lifecycle consumer (OMN-5445); provisioned in platform_topic_suffixes; needs omniclaude node contract | owner: jonah | expiry: 2026-06-01",
-    "onex.evt.omniclaude.audit-compression-triggered.v1": "context audit topic [OMN-5240]; produced by omniclaude, needs contract.yaml | owner: jonah | expiry: 2026-06-01",
-    "onex.evt.omniclaude.audit-context-budget-exceeded.v1": "context audit topic [OMN-5240]; produced by omniclaude, needs contract.yaml | owner: jonah | expiry: 2026-06-01",
-    "onex.evt.omniclaude.audit-dispatch-validated.v1": "context audit topic [OMN-5240]; produced by omniclaude, needs contract.yaml | owner: jonah | expiry: 2026-06-01",
-    "onex.evt.omniclaude.audit-return-bounded.v1": "context audit topic [OMN-5240]; produced by omniclaude, needs contract.yaml | owner: jonah | expiry: 2026-06-01",
-    "onex.evt.omniclaude.audit-scope-violation.v1": "context audit topic [OMN-5240]; produced by omniclaude, needs contract.yaml | owner: jonah | expiry: 2026-06-01",
+    # OMN-14842: the five onex.evt.omniclaude.audit-*.v1 context-audit topics
+    # were removed from this allowlist — they are now provisioned via
+    # services/observability/topics.yaml (counted as coverage by
+    # _load_contract_suffixes, which scans the same manifest roots the
+    # runtime TopicProvisioner does).
     # OMN-7114: contract.yaml added in node_context_audit_dlq_effect
     "onex.evt.omniclaude.fix-transition.v1": "lifecycle transition topic added in OMN-4572; needs contract.yaml | owner: jonah | expiry: 2026-06-01",
     "onex.evt.omniclaude.skill-completed.v1": "global skill lifecycle topic [OMN-2934]; needs contract.yaml | owner: jonah | expiry: 2026-06-01",
@@ -459,7 +459,14 @@ def _load_provisioned_suffixes() -> tuple[str, ...]:
 
 
 def _load_contract_suffixes(contracts_root: Path) -> frozenset[str]:
-    """Scan all contract.yaml files under contracts_root and collect declared topics."""
+    """Collect topics declared on the TopicProvisioner's discovery surfaces.
+
+    Mirrors the runtime provisioner (``service_kernel`` → ``TopicProvisioner``):
+    contract.yaml files under *contracts_root* PLUS the standalone
+    ``topics.yaml`` manifests under ``src/omnibase_infra/{cli,services}``
+    that the kernel scans unconditionally on every lane (OMN-14842). A topic
+    declared in either surface IS provisioned, so both count as coverage.
+    """
     repo_root = _repo_root()
     src_path = repo_root / "src"
     if str(src_path) not in sys.path:
@@ -467,8 +474,19 @@ def _load_contract_suffixes(contracts_root: Path) -> frozenset[str]:
 
     from omnibase_infra.tools.contract_topic_extractor import ContractTopicExtractor
 
+    # Same manifest roots service_kernel wires into TopicProvisioner
+    # (cli/topics.yaml, services/topics.yaml).
+    manifest_roots = [
+        candidate
+        for subdir in ("cli", "services")
+        if (candidate := src_path / "omnibase_infra" / subdir).is_dir()
+    ]
+
     extractor = ContractTopicExtractor()
-    entries = extractor.extract(contracts_root)
+    entries = extractor.extract_all(
+        contracts_root=contracts_root,
+        skill_manifests_roots=manifest_roots,
+    )
     return frozenset(e.topic for e in entries)
 
 

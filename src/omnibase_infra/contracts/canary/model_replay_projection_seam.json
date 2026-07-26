@@ -1,0 +1,121 @@
+{
+  "$schema_version": "1.0.0",
+  "description": "Field-by-field seam mapping between the B12 canary landing-table DDL (delivery_replay_canary_projection, docker/migrations/canary/forward/001_create_delivery_replay_canary_projection.sql) and the B6 omnimarket replay-projection contract (ModelReplayProjection / ModelReplayCursor / ModelDeliveryPosition, node_delivery_replay_projection_compute). Consumed by both sides of the seam: tests/unit/docker/test_canary_ddl_seam_fingerprint.py (this repo, parses the real DDL text) and the omnimarket-side model-fingerprint assertion test (imports this JSON as installed package data). Any edit to this file must be justified by a real DDL or model change in the same PR -- it is not a free-standing spec.",
+  "ticket": "OMN-14779",
+  "ddl_table": "delivery_replay_canary_projection",
+  "ddl_source": "docker/migrations/canary/forward/001_create_delivery_replay_canary_projection.sql",
+  "fields": [
+    {
+      "ddl_column": "correlation_id",
+      "ddl_type": "UUID",
+      "ddl_nullable": false,
+      "ddl_primary_key": true,
+      "source_field_path": "ModelReplayProjection.correlation_id",
+      "source_type": "UUID | None",
+      "source_nullable": true,
+      "source_has_default": true,
+      "narrowing": true,
+      "narrowing_reason": "The pure-compute model treats correlation_id as an optional echo field (default=None) because the compute node itself has no delivery context to require it. The landing contract is different: the canary readback is correlation-linked (it is the only key the delegation legs carry on the wire), so the DDL intentionally narrows correlation_id to NOT NULL PRIMARY KEY -- a null-correlation_id row must never land. This is a deliberate, enforced narrowing (CHECK: NOT NULL + PK constraint rejects any null insert), not a silent null-acceptance hole."
+    },
+    {
+      "ddl_column": "projection_checksum",
+      "ddl_type": "TEXT",
+      "ddl_nullable": false,
+      "ddl_primary_key": false,
+      "source_field_path": "ModelReplayProjection.projection_checksum",
+      "source_type": "str",
+      "source_nullable": false,
+      "source_has_default": false,
+      "narrowing": false,
+      "narrowing_reason": "Model requires min_length=1 (non-empty); DDL enforces NOT NULL + CHECK char_length > 0. Equivalent constraint, not a narrowing."
+    },
+    {
+      "ddl_column": "cursor_token",
+      "ddl_type": "TEXT",
+      "ddl_nullable": false,
+      "ddl_primary_key": false,
+      "source_field_path": "ModelReplayCursor.token",
+      "source_type": "str",
+      "source_nullable": false,
+      "source_has_default": false,
+      "narrowing": false,
+      "narrowing_reason": "Model requires min_length=1 (non-empty); DDL enforces NOT NULL + CHECK char_length > 0. Equivalent constraint, not a narrowing."
+    },
+    {
+      "ddl_column": "cursor_positions",
+      "ddl_type": "JSONB",
+      "ddl_nullable": false,
+      "ddl_primary_key": false,
+      "source_field_path": "ModelReplayCursor.positions",
+      "source_type": "tuple[ModelDeliveryPosition, ...]",
+      "source_nullable": false,
+      "source_has_default": true,
+      "narrowing": false,
+      "narrowing_reason": "Model default is an empty tuple (never null); DDL is NOT NULL DEFAULT '[]'::jsonb, materializing the nested tuple as a JSON array of {topic, partition, offset} objects. Equivalent, not a narrowing."
+    },
+    {
+      "ddl_column": "cursor_event_count",
+      "ddl_type": "BIGINT",
+      "ddl_nullable": false,
+      "ddl_primary_key": false,
+      "source_field_path": "ModelReplayCursor.event_count",
+      "source_type": "int",
+      "source_nullable": false,
+      "source_has_default": true,
+      "narrowing": false,
+      "narrowing_reason": "Model has ge=0, default=0; DDL is NOT NULL DEFAULT 0 with a CHECK cursor_event_count >= 0. Equivalent constraint, not a narrowing."
+    },
+    {
+      "ddl_column": "event_count",
+      "ddl_type": "BIGINT",
+      "ddl_nullable": false,
+      "ddl_primary_key": false,
+      "source_field_path": "ModelReplayProjection.event_count",
+      "source_type": "int",
+      "source_nullable": false,
+      "source_has_default": true,
+      "narrowing": false,
+      "narrowing_reason": "Model has ge=0, default=0; DDL is NOT NULL DEFAULT 0 with a CHECK event_count >= 0. Equivalent constraint, not a narrowing."
+    },
+    {
+      "ddl_column": "compared",
+      "ddl_type": "BOOLEAN",
+      "ddl_nullable": false,
+      "ddl_primary_key": false,
+      "source_field_path": "ModelReplayProjection.compared",
+      "source_type": "bool",
+      "source_nullable": false,
+      "source_has_default": true,
+      "narrowing": false,
+      "narrowing_reason": "Model default=False; DDL is NOT NULL DEFAULT FALSE. Equivalent, not a narrowing."
+    },
+    {
+      "ddl_column": "diverged",
+      "ddl_type": "BOOLEAN",
+      "ddl_nullable": false,
+      "ddl_primary_key": false,
+      "source_field_path": "ModelReplayProjection.diverged",
+      "source_type": "bool",
+      "source_nullable": false,
+      "source_has_default": true,
+      "narrowing": false,
+      "narrowing_reason": "Model default=False; DDL is NOT NULL DEFAULT FALSE. Equivalent, not a narrowing."
+    },
+    {
+      "ddl_column": "divergence_reasons",
+      "ddl_type": "JSONB",
+      "ddl_nullable": false,
+      "ddl_primary_key": false,
+      "source_field_path": "ModelReplayProjection.divergence_reasons",
+      "source_type": "tuple[str, ...]",
+      "source_nullable": false,
+      "source_has_default": true,
+      "narrowing": false,
+      "narrowing_reason": "Model default is an empty tuple (never null); DDL is NOT NULL DEFAULT '[]'::jsonb, materializing the tuple of signal labels as a JSON string array. Equivalent, not a narrowing."
+    }
+  ],
+  "operational_only_ddl_columns": [
+    "created_at",
+    "updated_at"
+  ]
+}

@@ -22,6 +22,10 @@ output_model:
   name: "ModelHandlerOutput"
   module: "omnibase_core.models.dispatch.model_handler_output"
 handler_routing:
+  version:
+    major: 1
+    minor: 0
+    patch: 0
   routing_strategy: "operation_match"
   handlers:
     - handler_type: "http"

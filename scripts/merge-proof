@@ -1,0 +1,161 @@
+#!/usr/bin/env bash
+# SPDX-FileCopyrightText: 2025 OmniNode.ai Inc.
+# SPDX-License-Identifier: MIT
+#
+# merge-proof — Resolve the environment that omnibase_infra local proof gates
+# need, then run (or hand off to) that proof. Fails fast with the exact `export`
+# lines to run when the environment cannot be resolved — it never proceeds on a
+# silent wrong path. (OMN-14462 / F-20)
+#
+# Why: several local hooks (duplication sweep, node-migration-sync, sibling
+# compat) resolve sibling repos (omnimarket, omniintelligence, omnimemory) from
+# $OMNI_HOME. Under the mandated worktree layout
+# ($OMNI_HOME/omni_worktrees/<ticket>/omnibase_infra) the parent directory holds
+# no siblings, so a correct change fails locally until the hidden environment is
+# reconstructed by hand (2026-07-17 friction: omnibase_infra#2325 hooks failed
+# unless OMNI_HOME was exported). This wrapper resolves that environment
+# deterministically from its own on-disk location (rule #8) and, when it cannot,
+# prints the exact `export` line to run rather than failing on a wrong path.
+#
+# Usage:
+#   scripts/merge-proof [--check | --print-env | -- CMD [ARGS...]]
+#
+#   (no args)          Resolve+export env, then run the local topic-lint proof.
+#   --check            Resolve env, verify the sibling repo exists, print
+#                      resolved paths, exit 0. Exit non-zero with guidance if
+#                      unresolved.
+#   --print-env        Print eval-able `export` lines for the resolved env.
+#   -- CMD [ARGS...]   Resolve+export env, then exec CMD with that env (e.g.
+#                      `scripts/merge-proof -- pre-commit run --files X`).
+#
+# Environment (auto-resolved from this script's location; export to override):
+#   OMNI_HOME           omni_home checkout root (anchor for sibling resolution)
+#   SIBLING_REPOS_DIR   parent dir holding sibling checkouts (defaults OMNI_HOME)
+#   OMNIMARKET_PATH     sibling omnimarket checkout
+set -euo pipefail
+
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" >/dev/null 2>&1 && pwd)"
+REPO_ROOT="$(cd "${SCRIPT_DIR}/.." >/dev/null 2>&1 && pwd)"
+
+RESOLVED_OMNI_HOME=""
+
+_is_dir() { [ -n "${1:-}" ] && [ -d "${1}" ]; }
+
+usage() {
+  sed -n '19,41p' "${BASH_SOURCE[0]}" | sed 's/^# \{0,1\}//'
+}
+
+# Derive the omni_home anchor from this checkout's location. Deterministic
+# Path-relative resolution (rule #8), never a hardcoded default. Only accept a
+# candidate that actually holds the sibling omnimarket checkout.
+derive_omni_home() {
+  if _is_dir "${OMNI_HOME:-}" && _is_dir "${OMNI_HOME}/omnimarket"; then
+    printf '%s\n' "$(cd "${OMNI_HOME}" && pwd)"
+    return 0
+  fi
+  local candidate=""
+  case "${REPO_ROOT}" in
+    */omni_worktrees/*)
+      candidate="${REPO_ROOT%%/omni_worktrees/*}"
+      ;;
+    *)
+      candidate="$(cd "${REPO_ROOT}/.." >/dev/null 2>&1 && pwd)"
+      ;;
+  esac
+  if _is_dir "${candidate}" && _is_dir "${candidate}/omnimarket"; then
+    printf '%s\n' "${candidate}"
+    return 0
+  fi
+  return 1
+}
+
+resolve_env() {
+  if RESOLVED_OMNI_HOME="$(derive_omni_home)"; then
+    :
+  else
+    RESOLVED_OMNI_HOME=""
+  fi
+}
+
+guidance_and_die() {
+  {
+    echo "error: merge-proof could not resolve the environment omnibase_infra proof gates need."
+    echo
+    echo "Local hooks (duplication sweep, node-migration-sync, sibling compat) resolve"
+    echo "sibling repos from \$OMNI_HOME. Set the environment explicitly, then re-run:"
+    echo
+    echo "  export OMNI_HOME=/path/to/omni_home"
+    echo "  export SIBLING_REPOS_DIR=\"\$OMNI_HOME\""
+    echo
+    echo "Then re-run: scripts/merge-proof --check"
+  } >&2
+  exit 3
+}
+
+main() {
+  local mode="run"
+  local -a passthrough=()
+  case "${1:-}" in
+    --check) mode="check" ;;
+    --print-env) mode="print-env" ;;
+    -h | --help)
+      usage
+      exit 0
+      ;;
+    --)
+      mode="exec"
+      shift
+      passthrough=("$@")
+      ;;
+    "") mode="run" ;;
+    *)
+      echo "merge-proof: unknown option: ${1}" >&2
+      usage >&2
+      exit 2
+      ;;
+  esac
+
+  resolve_env
+
+  # OMNI_HOME (with a real sibling omnimarket) is the load-bearing anchor; without
+  # it the sibling-resolving hooks silently degrade or fail.
+  if [ -z "${RESOLVED_OMNI_HOME}" ]; then
+    guidance_and_die
+  fi
+
+  export OMNI_HOME="${RESOLVED_OMNI_HOME}"
+  export SIBLING_REPOS_DIR="${SIBLING_REPOS_DIR:-${RESOLVED_OMNI_HOME}}"
+  export OMNIMARKET_PATH="${OMNIMARKET_PATH:-${RESOLVED_OMNI_HOME}/omnimarket}"
+
+  case "${mode}" in
+    check)
+      echo "merge-proof: OMNI_HOME=${OMNI_HOME}"
+      echo "merge-proof: SIBLING_REPOS_DIR=${SIBLING_REPOS_DIR}"
+      echo "merge-proof: OMNIMARKET_PATH=${OMNIMARKET_PATH}"
+      if [ ! -d "${OMNIMARKET_PATH}" ]; then
+        echo "error: sibling omnimarket not found at ${OMNIMARKET_PATH}" >&2
+        echo "  (is OMNI_HOME pointing at a real omni_home checkout?)" >&2
+        exit 4
+      fi
+      echo "merge-proof: environment OK"
+      ;;
+    print-env)
+      echo "export OMNI_HOME=${OMNI_HOME}"
+      echo "export SIBLING_REPOS_DIR=${SIBLING_REPOS_DIR}"
+      echo "export OMNIMARKET_PATH=${OMNIMARKET_PATH}"
+      ;;
+    exec)
+      if [ "${#passthrough[@]}" -eq 0 ]; then
+        echo "merge-proof: -- requires a command to run" >&2
+        exit 2
+      fi
+      exec "${passthrough[@]}"
+      ;;
+    run)
+      cd "${REPO_ROOT}"
+      exec bash "${REPO_ROOT}/scripts/validation/run_topic_lint.sh"
+      ;;
+  esac
+}
+
+main "$@"

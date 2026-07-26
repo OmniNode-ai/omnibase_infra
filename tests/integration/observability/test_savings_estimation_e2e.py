@@ -44,7 +44,7 @@ from omnibase_infra.topics.service_topic_registry import ServiceTopicRegistry
 TOPIC_LLM_CALL = "onex.evt.omniintelligence.llm-call-completed.v1"
 TOPIC_DISPATCH_OUTCOME = "onex.evt.omniintelligence.dispatch-outcome-evaluated.v1"
 TOPIC_SESSION_OUTCOME = "onex.evt.omniclaude.session-outcome.v1"
-TOPIC_HOOK_INJECTION = "onex.evt.omniclaude.hook-context-injected.v1"
+TOPIC_HOOK_INJECTION = "onex.evt.omniclaude.context-injected.v1"
 TOPIC_VALIDATOR_CATCH = "onex.evt.omniclaude.validator-catch.v1"
 TOPIC_PATTERN_ENFORCEMENT = "onex.evt.omniclaude.pattern-enforcement.v1"
 

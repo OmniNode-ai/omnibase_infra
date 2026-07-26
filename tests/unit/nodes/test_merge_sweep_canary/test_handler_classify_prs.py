@@ -1,6 +1,10 @@
 # SPDX-FileCopyrightText: 2025 OmniNode.ai Inc.
 # SPDX-License-Identifier: MIT
-"""Unit tests for HandlerClassifyPRs — pure compute, no I/O."""
+"""Unit tests for HandlerClassifyPRs — pure compute, no I/O.
+
+Canonical definition B: the handler entrypoint is
+``handle(request: ModelClassifyInput) -> ModelClassifyResult`` (OMN-14824).
+"""
 
 from __future__ import annotations
 
@@ -10,6 +14,9 @@ import pytest
 
 from omnibase_infra.nodes.node_merge_sweep_classify_compute.handlers.handler_classify_prs import (
     HandlerClassifyPRs,
+)
+from omnibase_infra.nodes.node_merge_sweep_classify_compute.models.model_classify_input import (
+    ModelClassifyInput,
 )
 from omnibase_infra.nodes.node_merge_sweep_pr_list_effect.models.model_pr_info import (
     ModelPRInfo,
@@ -44,7 +51,9 @@ class TestHandlerClassifyPRs:
     async def test_track_a_merge_ready(self, handler: HandlerClassifyPRs):
         """PR with green CI, approved, mergeable goes to Track A."""
         pr = _make_pr()
-        result = await handler.handle(prs=(pr,), correlation_id=uuid4())
+        result = await handler.handle(
+            ModelClassifyInput(prs=(pr,), correlation_id=uuid4())
+        )
 
         assert len(result.track_a) == 1
         assert result.track_a[0].track == "A"
@@ -54,7 +63,9 @@ class TestHandlerClassifyPRs:
     async def test_track_b_ci_failure(self, handler: HandlerClassifyPRs):
         """PR with CI failure goes to Track B."""
         pr = _make_pr(ci_status="FAILURE")
-        result = await handler.handle(prs=(pr,), correlation_id=uuid4())
+        result = await handler.handle(
+            ModelClassifyInput(prs=(pr,), correlation_id=uuid4())
+        )
 
         assert len(result.track_a) == 0
         assert len(result.track_b) == 1
@@ -64,7 +75,9 @@ class TestHandlerClassifyPRs:
     async def test_track_b_changes_requested(self, handler: HandlerClassifyPRs):
         """PR with changes requested goes to Track B."""
         pr = _make_pr(review_decision="CHANGES_REQUESTED")
-        result = await handler.handle(prs=(pr,), correlation_id=uuid4())
+        result = await handler.handle(
+            ModelClassifyInput(prs=(pr,), correlation_id=uuid4())
+        )
 
         assert len(result.track_b) == 1
         assert "CHANGES_REQUESTED" in result.track_b[0].reason
@@ -73,7 +86,9 @@ class TestHandlerClassifyPRs:
     async def test_track_b_conflicting(self, handler: HandlerClassifyPRs):
         """PR with merge conflicts goes to Track B."""
         pr = _make_pr(mergeable="CONFLICTING")
-        result = await handler.handle(prs=(pr,), correlation_id=uuid4())
+        result = await handler.handle(
+            ModelClassifyInput(prs=(pr,), correlation_id=uuid4())
+        )
 
         assert len(result.track_b) == 1
 
@@ -81,7 +96,9 @@ class TestHandlerClassifyPRs:
     async def test_skip_draft(self, handler: HandlerClassifyPRs):
         """Draft PR is skipped."""
         pr = _make_pr(is_draft=True)
-        result = await handler.handle(prs=(pr,), correlation_id=uuid4())
+        result = await handler.handle(
+            ModelClassifyInput(prs=(pr,), correlation_id=uuid4())
+        )
 
         assert len(result.skipped) == 1
         assert result.skipped[0].track == "SKIP"
@@ -91,7 +108,9 @@ class TestHandlerClassifyPRs:
     async def test_skip_auto_merge_enabled(self, handler: HandlerClassifyPRs):
         """PR with auto-merge already enabled is skipped."""
         pr = _make_pr(has_auto_merge=True)
-        result = await handler.handle(prs=(pr,), correlation_id=uuid4())
+        result = await handler.handle(
+            ModelClassifyInput(prs=(pr,), correlation_id=uuid4())
+        )
 
         assert len(result.skipped) == 1
         assert "Auto-merge already" in result.skipped[0].reason
@@ -101,7 +120,9 @@ class TestHandlerClassifyPRs:
         """Track A with require_approval=False ignores review status."""
         pr = _make_pr(review_decision="")
         result = await handler.handle(
-            prs=(pr,), correlation_id=uuid4(), require_approval=False
+            ModelClassifyInput(
+                prs=(pr,), correlation_id=uuid4(), require_approval=False
+            )
         )
 
         assert len(result.track_a) == 1
@@ -116,7 +137,9 @@ class TestHandlerClassifyPRs:
             _make_pr(number=4, mergeable="CONFLICTING"),  # Track B
             _make_pr(number=5, has_auto_merge=True),  # SKIP
         )
-        result = await handler.handle(prs=prs, correlation_id=uuid4())
+        result = await handler.handle(
+            ModelClassifyInput(prs=prs, correlation_id=uuid4())
+        )
 
         assert result.total_classified == 5
         assert len(result.track_a) == 1
@@ -126,7 +149,9 @@ class TestHandlerClassifyPRs:
     @pytest.mark.asyncio
     async def test_empty_input(self, handler: HandlerClassifyPRs):
         """Empty PR list produces empty result."""
-        result = await handler.handle(prs=(), correlation_id=uuid4())
+        result = await handler.handle(
+            ModelClassifyInput(prs=(), correlation_id=uuid4())
+        )
 
         assert result.total_classified == 0
         assert len(result.track_a) == 0
@@ -135,5 +160,5 @@ class TestHandlerClassifyPRs:
     async def test_correlation_id_preserved(self, handler: HandlerClassifyPRs):
         """Correlation ID is preserved in result."""
         cid = uuid4()
-        result = await handler.handle(prs=(), correlation_id=cid)
+        result = await handler.handle(ModelClassifyInput(prs=(), correlation_id=cid))
         assert result.correlation_id == cid

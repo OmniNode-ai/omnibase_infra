@@ -1,0 +1,22 @@
+{
+  "golden_version": "compute_golden.v1",
+  "input": {
+    "allowed_roots": [
+      "/onex-golden-fixture-root"
+    ],
+    "correlation_id": "55555555-5555-5555-5555-555555555555",
+    "prompt": "do the thing",
+    "sandbox": "read_only",
+    "workspace_path": ""
+  },
+  "input_type": "ModelWorkspaceValidateCommand",
+  "output": {
+    "correlation_id": "55555555-5555-5555-5555-555555555555",
+    "rejection_reason": "empty workspace_path",
+    "resolved_path": "",
+    "valid": false
+  },
+  "output_type": "ModelWorkspaceValidateResult",
+  "scenario": "empty_workspace_path",
+  "volatile_mask": []
+}

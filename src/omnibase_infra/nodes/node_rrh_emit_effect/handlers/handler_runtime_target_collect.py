@@ -12,6 +12,9 @@ import os
 
 from omnibase_infra.enums import EnumHandlerType, EnumHandlerTypeCategory
 from omnibase_infra.models.rrh.model_rrh_runtime_target import ModelRRHRuntimeTarget
+from omnibase_infra.nodes.node_rrh_emit_effect.models.model_runtime_target_collect_request import (
+    ModelRuntimeTargetCollectRequest,
+)
 
 
 class HandlerRuntimeTargetCollect:
@@ -34,22 +37,20 @@ class HandlerRuntimeTargetCollect:
         return EnumHandlerTypeCategory.EFFECT
 
     async def handle(
-        self,
-        *,
-        environment: str = "",
-        kafka_broker: str = "",
-        kubernetes_context: str = "",
+        self, payload: ModelRuntimeTargetCollectRequest
     ) -> ModelRRHRuntimeTarget:
         """Collect runtime target from overrides or environment.
 
         Args:
-            environment: Target environment override.
-            kafka_broker: Kafka bootstrap server override.
-            kubernetes_context: kubectl context override.
+            payload: Optional environment/Kafka/Kubernetes overrides. Any
+                empty field falls back to its corresponding env var.
 
         Returns:
             Populated ``ModelRRHRuntimeTarget``.
         """
+        environment = payload.environment
+        kafka_broker = payload.kafka_broker
+        kubernetes_context = payload.kubernetes_context
         return ModelRRHRuntimeTarget(
             environment=environment or os.environ.get("ONEX_ENVIRONMENT", "local"),
             kafka_broker=kafka_broker or os.environ.get("KAFKA_BOOTSTRAP_SERVERS", ""),

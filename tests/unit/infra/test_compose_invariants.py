@@ -41,3 +41,21 @@ def test_container_internal_addresses_are_hardcoded() -> None:
         assert "${" not in str(actual), (
             f"{var} must be a hardcoded literal, got: {actual}"
         )
+
+
+@pytest.mark.unit
+def test_hot_runtime_services_have_expanded_memory_limits() -> None:
+    """Services observed near 256M cgroup limits must render larger caps."""
+    with open(COMPOSE_FILE) as f:
+        compose = yaml.safe_load(f)
+
+    expected = {
+        "agent-actions-consumer": ("512M", "128M"),
+        "skill-lifecycle-consumer": ("512M", "128M"),
+        "intelligence-api": ("768M", "128M"),
+    }
+
+    for service_name, (limit, reservation) in expected.items():
+        resources = compose["services"][service_name]["deploy"]["resources"]
+        assert resources["limits"]["memory"] == limit
+        assert resources["reservations"]["memory"] == reservation

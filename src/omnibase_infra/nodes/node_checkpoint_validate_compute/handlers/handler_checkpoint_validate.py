@@ -27,6 +27,9 @@ from omnibase_infra.models.checkpoint.model_checkpoint import (
     CHECKPOINT_SCHEMA_VERSION,
     ModelCheckpoint,
 )
+from omnibase_infra.nodes.node_checkpoint_validate_compute.models.model_checkpoint_validate_input import (
+    ModelCheckpointValidateInput,
+)
 from omnibase_infra.nodes.node_checkpoint_validate_compute.models.model_checkpoint_validate_output import (
     ModelCheckpointValidateOutput,
 )
@@ -68,6 +71,28 @@ class HandlerCheckpointValidate:
         """Shutdown the handler."""
         self._initialized = False
         logger.info("HandlerCheckpointValidate shutdown")
+
+    async def handle(
+        self,
+        request: ModelCheckpointValidateInput,
+    ) -> ModelHandlerOutput[ModelCheckpointValidateOutput]:
+        """Canonical def-B dispatch entrypoint (OMN-14820).
+
+        The shared runtime adapter validates the wire payload into the
+        contract-declared ``ModelCheckpointValidateInput`` and hands it here —
+        the envelope boundary lives in the runtime adapter, not in this core
+        (definition B, OMN-14355). The structural validation logic in
+        ``validate`` is preserved byte-identical across the flip; the pre-typed
+        ``request.checkpoint`` means the ``execute`` deserialize/guard branches
+        are handled by the adapter instead of this entrypoint.
+        """
+        result = self.validate(request.checkpoint, request.correlation_id)
+        return ModelHandlerOutput.for_compute(
+            input_envelope_id=uuid4(),
+            correlation_id=request.correlation_id,
+            handler_id="handler-checkpoint-validate",
+            result=result,
+        )
 
     async def execute(
         self,

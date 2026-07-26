@@ -17,7 +17,7 @@ from omnibase_infra.services.observability.savings_estimation.consumer import (
 )
 
 TOPIC_LLM_CALL = "onex.evt.omniintelligence.llm-call-completed.v1"
-TOPIC_HOOK_INJECTION = "onex.evt.omniclaude.hook-context-injected.v1"
+TOPIC_HOOK_INJECTION = "onex.evt.omniclaude.context-injected.v1"
 TOPIC_SESSION_OUTCOME = "onex.evt.omniclaude.session-outcome.v1"
 
 

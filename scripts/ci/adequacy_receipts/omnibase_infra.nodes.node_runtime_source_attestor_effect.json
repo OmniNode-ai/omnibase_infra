@@ -1,0 +1,24 @@
+{
+  "branch_coverage_pct": 32.99,
+  "candidate_count": 4,
+  "coverage_target": 80.0,
+  "handler_module": "omnibase_infra.nodes.node_runtime_source_attestor_effect.handlers.handler_source_attestation",
+  "handler_module_sha256": "sha256:40bdcfecddd2174664c080200f9fbdcea76a9c0255de8f53c1f433ffbfd9a31e",
+  "meets_target": false,
+  "node_id": "omnibase_infra.nodes.node_runtime_source_attestor_effect",
+  "receipt_schema": "adequacy_receipt.v1",
+  "recorded_at": "2026-07-19T20:36:35.356171+00:00",
+  "recorder_schema": "adequacy_receipt.v1",
+  "selected_count": 4,
+  "selected_input_hashes": [
+    "sha256:e551051a5d5b40aa7a54eb153e1a7a1e1fd8b512fe72b8ad47d52acdf023a8e9",
+    "sha256:a39a0f788872a5665a550ddc3bc403b5973a6c342133a40d2107f798c5c44192",
+    "sha256:37565c5c53459cd075ec418c7d0de9d0c2f873b76d0870c8aaf82e47c034f5ce",
+    "sha256:6f3d1722908892f86208e3b56947dfdd5326254be6bf18277983496e18487bfb"
+  ],
+  "uncovered_waiver": {
+    "reason": "OMN-14805 hand-flips node_runtime_source_attestor_effect to canonical def-B via a PURE RENAME attest->handle (OMN-14781 path): the attestation body is preserved byte-identically and the business-logic helpers (_resolve_main_head/_compute_distance/_emit_friction) are re-derived byte-identical base_ref<->HEAD by the ratchet from git. Equivalence is proven by that git-verbatim preservation plus the green runtime-dispatch parity tests over the selected input corpus, not by a broad branch-coverage claim over the legacy handler body; the git-subprocess branches inside the preserved helpers are network-dependent and covered by the existing patched unit suite, so they are stubbed in the deterministic dispatch corpus.",
+    "uncovered_branch_count": 7
+  },
+  "volatile_mask": []
+}

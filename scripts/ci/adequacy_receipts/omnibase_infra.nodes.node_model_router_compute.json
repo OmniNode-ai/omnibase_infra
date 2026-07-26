@@ -1,0 +1,29 @@
+{
+  "branch_coverage_pct": 74.13,
+  "candidate_count": 11,
+  "coverage_target": 80.0,
+  "handler_module": "omnibase_infra.nodes.node_model_router_compute.handlers.handler_score_models",
+  "handler_module_sha256": "sha256:01fb59552d3a6854d3600b8f3175f7deb2ff8ce518a9b2524034935ee1c2d7af",
+  "meets_target": false,
+  "node_id": "omnibase_infra.nodes.node_model_router_compute",
+  "receipt_schema": "adequacy_receipt.v1",
+  "recorded_at": "2026-07-20T05:22:00.905592+00:00",
+  "recorder_schema": "adequacy_receipt.v1",
+  "selected_count": 9,
+  "selected_input_hashes": [
+    "sha256:1fafe196504d954c7a2ceb4189e4c9ff9e943fd9508229435d403194b03d7d4b",
+    "sha256:95a94c4db487c77e3b6f8dac94d2237f6ba8e28257140e02b834eaad064e7f5b",
+    "sha256:69d42fd7417f1162362a63da06aa892156715e4fa6e2a2f38d3e61d747d5c043",
+    "sha256:eda6bf7ca95e765816dc81059d90033b86049cfb89652b2f1f2f5bde5b7467a8",
+    "sha256:b1b7f8d27abb387363e8d0410ab19e0f3ac795bff2bf58882a0cb43f99aa29ff",
+    "sha256:3307bfa257f8eb127f2b1e808778c660166132767b8631ebcaf6c39638220cdd",
+    "sha256:80038766312f579f667536cc061c1e3817257ba52fad6fa8dfc61e5c478c5776",
+    "sha256:45e9ecd1e409c4929e6d0f4c843d379c12419ff4d759fdb9ea391d677209a087",
+    "sha256:fded21763b6bee5d0dad438ff1db32f6591743fe5edd29a57f111ffec57dccf0"
+  ],
+  "uncovered_waiver": {
+    "reason": "OMN-14825 hand-flips node_model_router_compute to canonical def-B via a PURE RENAME score_candidates->handle (OMN-14781 path). The scoring body and every module-level scoring helper (_capability_match/_effective_cost_per_1k/_passes_hard_constraints/_compute_score/ScoringContext) are byte-identical base_ref<->HEAD, re-derived from git by the ratchet; equivalence is proven by that git-verbatim preservation plus the green legacy-vs-def-B golden parity over the selected input corpus, not by a broad branch-coverage claim.",
+    "uncovered_branch_count": 0
+  },
+  "volatile_mask": []
+}

@@ -32,3 +32,16 @@ class ModelEventBusWiring(BaseModel):
             "(e.g. result_applier). Auto-wiring still registers dispatch routes."
         ),
     )
+    tenant_scoped_ingress: bool = Field(
+        default=False,
+        description=(
+            "OMN-14349 (OMN-14208 Path A): when True, this contract's "
+            "subscribe_topics are tenant-<slug>. wire-prefixed variants. "
+            "Auto-wiring derives tenant_id from the matched prefix and stamps "
+            "it into the payload before dispatch -- overwriting any "
+            "client-supplied value, never falling back to one. A topic with no "
+            "tenant-<slug>. prefix is left unstamped (Stage-1 warn), never "
+            "given a defaulted or guessed tenant. Off by default; zero "
+            "behavior change for every non-opted-in contract."
+        ),
+    )

@@ -54,7 +54,7 @@ from omnibase_infra.dlq import (
 # DLQ integration tests. See tests/infrastructure_config.py for full
 # documentation on environment variable overrides and CI/CD graceful skip behavior.
 # =============================================================================
-from tests.helpers.util_postgres import PostgresConfig
+from tests.helpers.util_postgres import PostgresConfig, check_postgres_reachable
 
 # Use shared PostgresConfig for consistent configuration management
 _postgres_config = PostgresConfig.from_env()
@@ -77,8 +77,12 @@ if not _postgres_config.is_configured:
         stacklevel=1,
     )
 
-# Check if PostgreSQL is available using the shared config
-POSTGRES_AVAILABLE = _postgres_config.is_configured
+# Check if PostgreSQL is configured and reachable using the shared config.
+# Env vars can point at localhost in CI even when the service is not running.
+POSTGRES_AVAILABLE = _postgres_config.is_configured and check_postgres_reachable(
+    _postgres_config,
+    timeout=1.0,
+)
 
 
 def _build_postgres_dsn() -> str:

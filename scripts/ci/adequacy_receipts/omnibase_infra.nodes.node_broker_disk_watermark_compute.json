@@ -1,0 +1,25 @@
+{
+  "branch_coverage_pct": 42.86,
+  "candidate_count": 6,
+  "coverage_target": 80.0,
+  "handler_module": "omnibase_infra.nodes.node_broker_disk_watermark_compute.handlers.handler_broker_disk_watermark",
+  "handler_module_sha256": "sha256:a1d3f32eaac23f505ea084a87218f8480f2ba6430bcfc674d83d4c413353a48e",
+  "meets_target": false,
+  "node_id": "omnibase_infra.nodes.node_broker_disk_watermark_compute",
+  "receipt_schema": "adequacy_receipt.v1",
+  "recorded_at": "2026-07-20T02:51:57.262774+00:00",
+  "recorder_schema": "adequacy_receipt.v1",
+  "selected_count": 5,
+  "selected_input_hashes": [
+    "sha256:a717499da9403e40025b12891003a8849b9106e79d6cec5e8c20757852d2a2d2",
+    "sha256:5e6f7ee2fa56cbec23c8dc73be4019b28cb43c129f47828518da9ca6503cffb8",
+    "sha256:170122f07cbb1949c0a230f71ec3facd9847f5d2b4e33e9cb5c8e550209dc836",
+    "sha256:a60cefb436747aca50e48a192df8f4d5002c6a2bbefdd5279324f8c0c9cb1b55",
+    "sha256:3f29ef12329a6a7d1e6d25ef5e5d669465f12ce2fc7ae11f87aa4390b903350a"
+  ],
+  "uncovered_waiver": {
+    "reason": "OMN-14816 hand-flips node_broker_disk_watermark_compute to canonical def-B via a PURE RENAME probe_disk_watermark->handle (OMN-14781 path): the probe body is preserved byte-identically and the business-logic helpers (_classify / _probe_path / _real_docker_info / _real_disk_usage / _resolve_volume_mountpoint) are re-derived byte-identical base_ref<->HEAD by the ratchet from git. Equivalence is proven by that git-verbatim preservation plus the green runtime-dispatch parity tests over the selected input corpus, not by a broad branch-coverage claim over the legacy handler body; the real docker/shutil subprocess helpers (_real_docker_info / _real_disk_usage / _resolve_volume_mountpoint) are network/daemon-dependent and are exercised by the existing patched unit suite, so they are stubbed in the deterministic dispatch corpus.",
+    "uncovered_branch_count": 9
+  },
+  "volatile_mask": []
+}

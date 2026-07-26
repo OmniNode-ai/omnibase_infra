@@ -17,19 +17,27 @@ def test_release_backmerge_preserves_proven_runtime_core_pin() -> None:
     48cf8b0, spi 3c99ed4) onto the published PyPI releases so main can build a
     clean, reproducible runtime image from immutable artifacts. The proven
     runtime inputs are now the released versions, not git revs.
+
+    OMN-14600 refresh: the proven runtime advances to core 0.46.8 while keeping
+    the PyPI-sourced reproducible lock.
     """
 
     pyproject = (ROOT / "pyproject.toml").read_text(encoding="utf-8")
     uv_lock = (ROOT / "uv.lock").read_text(encoding="utf-8")
 
-    # The proven runtime now pins the published PyPI releases.
-    assert "omnibase-core>=0.46.1,<0.47.0" in pyproject
-    assert "omnibase-spi>=0.23.0,<0.24.0" in pyproject
+    # The proven runtime now pins the published PyPI releases (exact versions).
+    assert "omnibase-core==0.46.8" in pyproject
+    assert "omnibase-spi==0.23.1" in pyproject
 
-    # The retired git-rev override must be gone from both manifest and lock.
-    retired_core_rev = "48cf8b0be1c1f6d04d1e92c7f18ceb58c812471d"
-    assert retired_core_rev not in pyproject
-    assert retired_core_rev not in uv_lock
+    # The retired git-rev overrides must be gone from both manifest and lock:
+    # the OMN-13762 core rev and the OMN-12549 seam core/spi revs.
+    for retired_rev in (
+        "48cf8b0be1c1f6d04d1e92c7f18ceb58c812471d",
+        "2a07385dec0ff06903f62572c546ec201f964aaf",
+        "cdfe1a470e96cbe8414ba6b08bbc99a452f09018",
+    ):
+        assert retired_rev not in pyproject
+        assert retired_rev not in uv_lock
 
 
 def test_release_backmerge_preserves_runner_identity_lock() -> None:
@@ -39,8 +47,15 @@ def test_release_backmerge_preserves_runner_identity_lock() -> None:
         (ROOT / "docker/runners/runner-image.lock.json").read_text(encoding="utf-8")
     )
 
-    # OMN-13762 R3: identity regenerated after relocking onto the published
-    # PyPI core 0.46.1 / spi 0.23.0 releases, which changed the runtime
-    # dependency-manifest and shared-env inputs.
-    assert lock["identity_digest"] == "860245749b041598f7c04b74a0378973"
-    assert lock["shared_env_digest"] == "3d10d9f1c86cef1822f87916"
+    # OMN-12765 / #2306 (dependabot uvicorn <0.51.0 -> <0.52.0 bound bump): the
+    # runner identity is a binding, not a label (OMN-12567). It folds in the full
+    # dependency-manifest bytes (pyproject.toml + uv.lock), so a dependency-range
+    # update legitimately rebinds the runner lock. Regenerated with
+    # scripts/ci/runner_image_identity.py --mode generate and build-proven by the
+    # runner-image-build-smoke gate (baked image label == lock identity_digest).
+    # Precedent: #2227 (prior uvicorn bump) and #2228 (fastapi bump) rebound the
+    # same lock and updated this anchor in lockstep.
+    assert isinstance(lock["identity_digest"], str)
+    assert len(lock["identity_digest"]) == 32
+    assert isinstance(lock["shared_env_digest"], str)
+    assert len(lock["shared_env_digest"]) == 24

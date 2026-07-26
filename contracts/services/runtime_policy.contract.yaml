@@ -14,6 +14,12 @@ bifrost_vertex_gemini_endpoint_url: https://us-central1-aiplatform.googleapis.co
 google_cloud_project: gen-lang-client-0084338881
 google_cloud_location: us-central1
 omnimemory_memgraph_port: 7687
+# OMN-14297: bolt URI for node_architecture_graph_{populate,query}_effect.
+# Currently only reachable from the dev lane (omnibase-infra-network) —
+# the omnimemory-memgraph container is not attached to the stability-test/
+# judge/prod lane networks. This is the in-network alias; the Tailscale
+# host address (bolt://100.109.203.94:7687) is the cross-lane fallback.
+arch_graph_bolt_uri: "bolt://omnibase-infra-memgraph:7687"
 auxiliary_services_omnimemory_enabled: false
 profiles:
   dev:
@@ -21,6 +27,11 @@ profiles:
     main_port: 8085
     effects_port: 8086
     topic_provisioner_max_partitions: 0
+    # OMN-14551: boundary DLQ routing (auto-wired consume boundary,
+    # ONEX_BOUNDARY_DLQ_ENABLED) stays OFF here. This lane is currently cold;
+    # flip only after a dedicated dev-lane live proof, not bundled with the
+    # stability-test G6 proof this contract change lands.
+    boundary_dlq_enabled: false
     secret_resolver_config_path: /app/data/delegation/secret_resolver.yaml
     secret_resolver_mappings:
       - logical_name: llm.openrouter.api_key
@@ -96,6 +107,13 @@ profiles:
     main_port: 18085
     effects_port: 18086
     topic_provisioner_max_partitions: 1
+    # OMN-14551 G6: flip ON for the live DLQ readback proof on this lane only.
+    # See _boundary_dlq_enabled() in
+    # src/omnibase_infra/runtime/auto_wiring/handler_wiring.py for behavior.
+    # Best-effort DLQ delivery (no nack/redelivery) per the forbid-verify
+    # ruling on OMN-14507/OMN-14548 -- G1 stays deferred, this is scoped
+    # strictly to the stability-test lane's live-proof requirement.
+    boundary_dlq_enabled: true
     secret_resolver_config_path: /app/data/delegation/secret_resolver.yaml
     secret_resolver_mappings:
       - logical_name: llm.openrouter.api_key
@@ -169,6 +187,9 @@ profiles:
     main_port: 48085
     effects_port: 48086
     topic_provisioner_max_partitions: 1
+    # OMN-14551: judge lane is read-only by lane boundary; not in scope for
+    # this flip. OFF until an explicit judge-lane authorization.
+    boundary_dlq_enabled: false
     secret_resolver_config_path: /app/data/delegation/secret_resolver.yaml
     secret_resolver_mappings:
       - logical_name: llm.openrouter.api_key
@@ -242,6 +263,11 @@ profiles:
     main_port: 28085
     effects_port: 28086
     topic_provisioner_max_partitions: 0
+    # OMN-14551: prod flip requires the alertable message_lost counter (still
+    # open per the ticket -- see _route_swallowed_exception's "metric surface"
+    # note in handler_wiring.py) AND a fresh prod-promotion grant (rule 2a/12).
+    # Neither exists yet. OFF.
+    boundary_dlq_enabled: false
     services:
       main:
         runtime_id: prod-main

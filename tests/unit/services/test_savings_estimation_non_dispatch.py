@@ -50,7 +50,7 @@ async def test_non_dispatch_projection_fields_are_populated() -> None:
             },
         )
         service.ingest_event(
-            "onex.evt.omniclaude.hook-context-injected.v1",
+            "onex.evt.omniclaude.context-injected.v1",
             {
                 "session_id": "session-unit-non-dispatch",
                 "tokens_injected": 120,

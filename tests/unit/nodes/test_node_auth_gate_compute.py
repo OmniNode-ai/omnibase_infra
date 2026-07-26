@@ -35,7 +35,6 @@ import yaml
 from omnibase_infra.enums import EnumHandlerType, EnumHandlerTypeCategory
 from omnibase_infra.enums.enum_auth_decision import EnumAuthDecision
 from omnibase_infra.enums.enum_auth_source import EnumAuthSource
-from omnibase_infra.errors.error_infra import RuntimeHostError
 from omnibase_infra.nodes.node_auth_gate_compute import (
     HandlerAuthGate,
     NodeAuthGateCompute,
@@ -128,7 +127,7 @@ class TestStep1WhitelistedPaths:
             tool_name="Edit",
             target_path="/workspace/my_feature.plan.md",
         )
-        decision = handler.evaluate(request)
+        decision = handler.handle(request)
 
         assert decision.decision == EnumAuthDecision.ALLOW
         assert decision.step == 1
@@ -140,7 +139,7 @@ class TestStep1WhitelistedPaths:
             tool_name="Write",
             target_path="/home/user/.claude/memory/notes.md",
         )
-        decision = handler.evaluate(request)
+        decision = handler.handle(request)
 
         assert decision.decision == EnumAuthDecision.ALLOW
         assert decision.step == 1
@@ -151,7 +150,7 @@ class TestStep1WhitelistedPaths:
             tool_name="Write",
             target_path="/home/user/.claude/projects/my-proj/memory/MEMORY.md",
         )
-        decision = handler.evaluate(request)
+        decision = handler.handle(request)
 
         assert decision.decision == EnumAuthDecision.ALLOW
         assert decision.step == 1
@@ -162,7 +161,7 @@ class TestStep1WhitelistedPaths:
             tool_name="Edit",
             target_path="/workspace/.claude/projects/test/memory/MEMORY.md",
         )
-        decision = handler.evaluate(request)
+        decision = handler.handle(request)
 
         assert decision.decision == EnumAuthDecision.ALLOW
         assert decision.step == 1
@@ -173,7 +172,7 @@ class TestStep1WhitelistedPaths:
             tool_name="Edit",
             target_path="src/main.py",
         )
-        decision = handler.evaluate(request)
+        decision = handler.handle(request)
 
         assert decision.step != 1
 
@@ -183,7 +182,7 @@ class TestStep1WhitelistedPaths:
             tool_name="Bash",
             target_path="",
         )
-        decision = handler.evaluate(request)
+        decision = handler.handle(request)
 
         assert decision.step != 1
 
@@ -193,7 +192,7 @@ class TestStep1WhitelistedPaths:
             tool_name="Edit",
             target_path="/a/.claude/memory/../../../../etc/passwd",
         )
-        decision = handler.evaluate(request)
+        decision = handler.handle(request)
 
         # Should NOT be whitelisted after normalization resolves to /etc/passwd
         assert decision.step != 1
@@ -217,7 +216,7 @@ class TestStep2EmergencyOverride:
             emergency_override_active=True,
             emergency_override_reason="",
         )
-        decision = handler.evaluate(request)
+        decision = handler.handle(request)
 
         assert decision.decision == EnumAuthDecision.DENY
         assert decision.step == 2
@@ -234,7 +233,7 @@ class TestStep2EmergencyOverride:
             emergency_override_active=True,
             emergency_override_reason="Hotfix for critical production bug",
         )
-        decision = handler.evaluate(request)
+        decision = handler.handle(request)
 
         assert decision.decision == EnumAuthDecision.SOFT_DENY
         assert decision.step == 2
@@ -253,7 +252,7 @@ class TestStep2EmergencyOverride:
             emergency_override_active=True,
             emergency_override_reason="Hotfix",
         )
-        decision = handler.evaluate(request)
+        decision = handler.handle(request)
 
         assert "/authorize" in decision.banner
 
@@ -267,7 +266,7 @@ class TestStep2EmergencyOverride:
             emergency_override_active=True,
             emergency_override_reason="Hotfix",
         )
-        decision = handler.evaluate(request)
+        decision = handler.handle(request)
 
         assert decision.decision.is_permitted()
         assert bool(decision) is True
@@ -281,7 +280,7 @@ class TestStep2EmergencyOverride:
             target_path="src/main.py",
             emergency_override_active=False,
         )
-        decision = handler.evaluate(request)
+        decision = handler.handle(request)
 
         assert decision.step >= 3
 
@@ -301,7 +300,7 @@ class TestStep3NoRunId:
             target_path="src/main.py",
             run_id=None,
         )
-        decision = handler.evaluate(request)
+        decision = handler.handle(request)
 
         assert decision.decision == EnumAuthDecision.DENY
         assert decision.step == 3
@@ -324,7 +323,7 @@ class TestStep4NoAuthorization:
             run_id=uuid4(),
             authorization=None,
         )
-        decision = handler.evaluate(request)
+        decision = handler.handle(request)
 
         assert decision.decision == EnumAuthDecision.DENY
         assert decision.step == 4
@@ -354,7 +353,7 @@ class TestStep5RunIdMismatch:
             authorization=valid_auth,
             now=now,
         )
-        decision = handler.evaluate(request)
+        decision = handler.handle(request)
 
         assert decision.decision == EnumAuthDecision.DENY
         assert decision.step == 5
@@ -384,7 +383,7 @@ class TestStep6ToolNotAllowed:
             authorization=valid_auth,
             now=now,
         )
-        decision = handler.evaluate(request)
+        decision = handler.handle(request)
 
         assert decision.decision == EnumAuthDecision.DENY
         assert decision.step == 6
@@ -416,7 +415,7 @@ class TestStep6ToolNotAllowed:
             authorization=auth,
             now=now,
         )
-        decision = handler.evaluate(request)
+        decision = handler.handle(request)
 
         assert decision.decision == EnumAuthDecision.DENY
         assert decision.step == 6
@@ -437,7 +436,7 @@ class TestStep6ToolNotAllowed:
             authorization=valid_auth,
             now=now,
         )
-        decision = handler.evaluate(request)
+        decision = handler.handle(request)
 
         assert decision.step >= 7 or decision.decision == EnumAuthDecision.ALLOW
 
@@ -465,7 +464,7 @@ class TestStep7PathNotAllowed:
             authorization=valid_auth,
             now=now,
         )
-        decision = handler.evaluate(request)
+        decision = handler.handle(request)
 
         assert decision.decision == EnumAuthDecision.DENY
         assert decision.step == 7
@@ -486,7 +485,7 @@ class TestStep7PathNotAllowed:
             authorization=valid_auth,
             now=now,
         )
-        decision = handler.evaluate(request)
+        decision = handler.handle(request)
 
         assert decision.step >= 8 or decision.decision == EnumAuthDecision.ALLOW
 
@@ -512,7 +511,7 @@ class TestStep7PathNotAllowed:
             authorization=auth,
             now=now,
         )
-        decision = handler.evaluate(request)
+        decision = handler.handle(request)
 
         assert decision.decision == EnumAuthDecision.DENY
         assert decision.step == 7
@@ -540,7 +539,7 @@ class TestStep7PathNotAllowed:
             authorization=auth,
             now=now,
         )
-        decision = handler.evaluate(request)
+        decision = handler.handle(request)
 
         # Non-file tool with empty path should not be denied at step 7
         assert decision.step != 7 or decision.decision != EnumAuthDecision.DENY
@@ -569,7 +568,7 @@ class TestStep7PathNotAllowed:
                 authorization=auth,
                 now=now,
             )
-            decision = handler.evaluate(request)
+            decision = handler.handle(request)
 
             assert decision.decision == EnumAuthDecision.DENY, (
                 f"Expected DENY for {tool_name} with empty path"
@@ -606,7 +605,7 @@ class TestStep8RepoNotInScope:
             authorization=valid_auth,
             now=now,
         )
-        decision = handler.evaluate(request)
+        decision = handler.handle(request)
 
         assert decision.decision == EnumAuthDecision.DENY
         assert decision.step == 8
@@ -628,7 +627,7 @@ class TestStep8RepoNotInScope:
             authorization=valid_auth,
             now=now,
         )
-        decision = handler.evaluate(request)
+        decision = handler.handle(request)
 
         assert decision.step >= 9 or decision.decision == EnumAuthDecision.ALLOW
 
@@ -648,7 +647,7 @@ class TestStep8RepoNotInScope:
             authorization=valid_auth,
             now=now,
         )
-        decision = handler.evaluate(request)
+        decision = handler.handle(request)
 
         assert decision.step != 8 or decision.decision != EnumAuthDecision.DENY
 
@@ -675,7 +674,7 @@ class TestStep8RepoNotInScope:
             authorization=auth,
             now=now,
         )
-        decision = handler.evaluate(request)
+        decision = handler.handle(request)
 
         # Should pass step 8 (empty repo_scopes means no restriction)
         assert decision.step != 8 or decision.decision != EnumAuthDecision.DENY
@@ -711,7 +710,7 @@ class TestStep9AuthExpired:
             authorization=auth,
             now=now,
         )
-        decision = handler.evaluate(request)
+        decision = handler.handle(request)
 
         assert decision.decision == EnumAuthDecision.DENY
         assert decision.step == 9
@@ -739,7 +738,7 @@ class TestStep9AuthExpired:
             authorization=auth,
             now=now,
         )
-        decision = handler.evaluate(request)
+        decision = handler.handle(request)
 
         assert decision.decision == EnumAuthDecision.DENY
         assert decision.step == 9
@@ -766,7 +765,7 @@ class TestStep9AuthExpired:
             authorization=auth,
             now=now,
         )
-        decision = handler.evaluate(request)
+        decision = handler.handle(request)
 
         assert decision.step == 10
 
@@ -801,7 +800,7 @@ class TestStep10AllChecksPassed:
             authorization=auth,
             now=now,
         )
-        decision = handler.evaluate(request)
+        decision = handler.handle(request)
 
         assert decision.decision == EnumAuthDecision.ALLOW
         assert decision.step == 10
@@ -834,7 +833,7 @@ class TestStep10AllChecksPassed:
             authorization=auth,
             now=now,
         )
-        decision = handler.evaluate(request)
+        decision = handler.handle(request)
 
         assert decision.decision == EnumAuthDecision.ALLOW
         assert decision.step == 10
@@ -961,122 +960,6 @@ class TestEnumAuthDecision:
         assert str(EnumAuthDecision.ALLOW) == "allow"
         assert str(EnumAuthDecision.DENY) == "deny"
         assert str(EnumAuthDecision.SOFT_DENY) == "soft_deny"
-
-
-# =============================================================================
-# TestHandlerExecute
-# =============================================================================
-
-
-class TestHandlerExecute:
-    """Test the execute() envelope interface."""
-
-    @pytest.mark.anyio
-    async def test_execute_with_dict_payload(self, handler: HandlerAuthGate) -> None:
-        """execute() accepts dict payload and returns ModelHandlerOutput."""
-        request = ModelAuthGateRequest(
-            tool_name="Edit",
-            target_path="src/main.py",
-        )
-        envelope: dict[str, object] = {
-            "operation": "auth_gate.evaluate",
-            "payload": request.model_dump(mode="json"),
-            "correlation_id": str(uuid4()),
-        }
-        result = await handler.execute(envelope)
-
-        assert result.result is not None
-        assert isinstance(result.result, ModelAuthGateDecision)
-
-    @pytest.mark.anyio
-    async def test_execute_with_model_payload(self, handler: HandlerAuthGate) -> None:
-        """execute() accepts model instance payload."""
-        request = ModelAuthGateRequest(
-            tool_name="Edit",
-            target_path="/workspace/my_feature.plan.md",
-        )
-        envelope: dict[str, object] = {
-            "operation": "auth_gate.evaluate",
-            "payload": request,
-        }
-        result = await handler.execute(envelope)
-
-        assert result.result is not None
-        assert result.result.decision == EnumAuthDecision.ALLOW
-        assert result.result.step == 1
-
-    @pytest.mark.anyio
-    async def test_execute_missing_payload_raises(
-        self, handler: HandlerAuthGate
-    ) -> None:
-        """execute() raises RuntimeHostError when envelope has no payload."""
-        envelope: dict[str, object] = {
-            "operation": "auth_gate.evaluate",
-        }
-        with pytest.raises(RuntimeHostError, match="missing required 'payload'"):
-            await handler.execute(envelope)
-
-    @pytest.mark.anyio
-    async def test_execute_invalid_correlation_id_falls_back(
-        self, handler: HandlerAuthGate
-    ) -> None:
-        """execute() falls back to uuid4() for invalid correlation_id."""
-        request = ModelAuthGateRequest(
-            tool_name="Edit",
-            target_path="/workspace/my_feature.plan.md",
-        )
-        envelope: dict[str, object] = {
-            "operation": "auth_gate.evaluate",
-            "payload": request,
-            "correlation_id": "not-a-uuid",
-        }
-        result = await handler.execute(envelope)
-
-        assert result.result is not None
-        assert result.correlation_id is not None
-
-    @pytest.mark.anyio
-    async def test_execute_wrong_operation_raises(
-        self, handler: HandlerAuthGate
-    ) -> None:
-        """execute() raises RuntimeHostError for unsupported operation."""
-        request = ModelAuthGateRequest(
-            tool_name="Edit",
-            target_path="src/main.py",
-        )
-        envelope: dict[str, object] = {
-            "operation": "auth_gate.unknown",
-            "payload": request,
-        }
-        with pytest.raises(RuntimeHostError, match="Unsupported operation"):
-            await handler.execute(envelope)
-
-    @pytest.mark.anyio
-    async def test_execute_missing_operation_raises(
-        self, handler: HandlerAuthGate
-    ) -> None:
-        """execute() raises RuntimeHostError when envelope has no operation."""
-        request = ModelAuthGateRequest(
-            tool_name="Edit",
-            target_path="src/main.py",
-        )
-        envelope: dict[str, object] = {
-            "payload": request,
-        }
-        with pytest.raises(RuntimeHostError, match="Unsupported operation"):
-            await handler.execute(envelope)
-
-    @pytest.mark.anyio
-    async def test_execute_invalid_payload_wraps_validation_error(
-        self, handler: HandlerAuthGate
-    ) -> None:
-        """execute() wraps ValidationError as RuntimeHostError for malformed payloads."""
-        envelope: dict[str, object] = {
-            "operation": "auth_gate.evaluate",
-            "payload": {"tool_name": 123},  # wrong type triggers ValidationError
-        }
-        with pytest.raises(RuntimeHostError, match="validation error"):
-            await handler.execute(envelope)
 
 
 # =============================================================================

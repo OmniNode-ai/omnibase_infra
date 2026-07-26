@@ -703,6 +703,70 @@ def run_orchestration_monoliths(
     return True
 
 
+def run_orchestrator_reducer_state(
+    verbose: bool = False, files: list[str] | None = None
+) -> bool:
+    """Run the ARCH-005 orchestrator/reducer handler state-invariant gate (OMN-14222).
+
+    DISTINCT from ARCH-004 Signal A/B (imperative-orchestrator / orchestration-
+    monolith): this rule targets BOTH orchestrators AND reducers (Signal A/B
+    exempt reducers) and has ZERO ratchet baseline -- the live repo carries no
+    unexempted violations, so any finding fails the gate outright, whether run
+    in changed-node mode (pre-commit) or full-repo mode (CI).
+
+    Detects a ``ClassVar[<mutable container>]`` or module-level mutable
+    container (``dict``/``list``/``set``/``OrderedDict``/``defaultdict``/
+    ``Counter``) inside a ``handlers/*.py`` file belonging to a
+    ``node_type: ORCHESTRATOR*`` or ``*REDUCER*`` contract. Cleared per-finding
+    with an inline ``# orchestrator-reducer-state-ok: <reason>`` comment, never
+    a baseline entry -- "this container is safe" is a reviewed engineering
+    judgment call, not accepted debt.
+
+    Args:
+        verbose: Enable verbose output.
+        files: Optional list of changed files (from pre-commit). If provided,
+            only the node directories containing those files are scanned.
+            Without files, every ORCHESTRATOR*/REDUCER* node dir is scanned.
+    """
+    try:
+        from omnibase_infra.nodes.node_architecture_validator.validators.scanner_orchestrator_reducer_state_invariant import (
+            discover_node_dirs,
+            node_dirs_for_changed_files,
+            scan_node_dirs_for_state_violations,
+            target_node_dirs,
+        )
+    except ImportError as e:
+        print(f"Skipping orchestrator/reducer state-invariant gate: {e}")
+        return True
+
+    from pathlib import Path as _Path
+
+    repo_root = _Path.cwd()
+    repo_name = repo_root.name
+
+    if files:
+        node_dirs = node_dirs_for_changed_files(repo_root, files)
+    else:
+        node_dirs = discover_node_dirs(repo_root)
+
+    node_dirs = target_node_dirs(node_dirs)
+    result = scan_node_dirs_for_state_violations(
+        repo_name, node_dirs, repo_root=repo_root
+    )
+    passed = not result.findings
+
+    if verbose or not passed:
+        print(
+            f"Orchestrator/Reducer State Invariant (ARCH-005): {'PASS' if passed else 'FAIL'}"
+        )
+        print(
+            f"  Target node dirs scanned: {len(node_dirs)}, findings: {len(result.findings)}"
+        )
+        for finding in result.findings:
+            print(f"  - {finding.format()}")
+    return passed
+
+
 def run_io_audit(verbose: bool = False) -> bool:
     """Run I/O purity audit for REDUCER and COMPUTE nodes.
 
@@ -1244,6 +1308,7 @@ def main() -> int:
             "declarative_nodes",
             "imperative_orchestrators",
             "orchestration_monoliths",
+            "orchestrator_reducer_state",
             "io_audit",
             "imports",
             "markdown_links",
@@ -1256,7 +1321,8 @@ def main() -> int:
         nargs="*",
         help=(
             "Optional list of files to validate (for declarative_nodes, "
-            "imperative_orchestrators, orchestration_monoliths, or markdown_links)"
+            "imperative_orchestrators, orchestration_monoliths, "
+            "orchestrator_reducer_state, or markdown_links)"
         ),
     )
     parser.add_argument("--verbose", "-v", action="store_true", help="Verbose output")
@@ -1280,6 +1346,7 @@ def main() -> int:
         "declarative_nodes": run_declarative_nodes,
         "imperative_orchestrators": run_imperative_orchestrators,
         "orchestration_monoliths": run_orchestration_monoliths,
+        "orchestrator_reducer_state": run_orchestrator_reducer_state,
         "io_audit": run_io_audit,
         "imports": run_imports,
         "markdown_links": run_markdown_links,
@@ -1306,6 +1373,12 @@ def main() -> int:
         # files this runs the full non-blocking report (ARCH-004 Signal B).
         files = args.files if args.files else None
         success = run_orchestration_monoliths(args.verbose, files=files)
+    elif args.validator == "orchestrator_reducer_state":
+        # Pass changed files for the changed-node scan (pre-commit); without
+        # files this runs the full-repo scan (ARCH-005, OMN-14222). Both modes
+        # are BLOCKING -- zero ratchet baseline.
+        files = args.files if args.files else None
+        success = run_orchestrator_reducer_state(args.verbose, files=files)
     else:
         success = validator_map[args.validator](args.verbose)
 

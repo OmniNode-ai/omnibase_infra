@@ -162,6 +162,34 @@ class HandlerLedgerProjection:
             payload=payload,
         )
 
+    async def handle(
+        self,
+        request: ModelEventMessage,
+    ) -> ModelHandlerOutput[ModelIntent]:
+        """Canonical definition-B dispatch entrypoint (OMN-14355 / OMN-14823).
+
+        The shared runtime adapter materializes the contract-declared
+        ``event_model`` (``ModelEventMessage``) from the wire and hands this
+        handler the typed domain model directly, so the core receives a
+        domain-typed ``request`` — never a transport envelope. The result stays
+        a ``ModelHandlerOutput`` carrying the ``ledger.append`` intent in
+        ``result`` so ``_normalize_handler_result`` routes it to
+        ``output_intents`` (the ``intent_routing_table`` that reaches
+        ``node_ledger_write_effect``); a bare ``ModelIntent`` return would be
+        reclassified as an output event and silently skip the ledger write.
+
+        The audit ledger must never drop an event over a missing trace ID, so a
+        header ``correlation_id`` of ``None`` falls back to a fresh UUID.
+        """
+        intent = self.project(request)
+        correlation_id = request.headers.correlation_id
+        return ModelHandlerOutput.for_compute(
+            input_envelope_id=uuid4(),
+            correlation_id=correlation_id if correlation_id is not None else uuid4(),
+            handler_id=HANDLER_ID_LEDGER_PROJECTION,
+            result=intent,
+        )
+
     async def execute(
         self,
         envelope: dict[str, object],

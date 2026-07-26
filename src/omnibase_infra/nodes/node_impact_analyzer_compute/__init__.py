@@ -15,6 +15,7 @@ Capabilities:
 Available Exports:
     - NodeImpactAnalyzerCompute: The declarative compute node
     - HandlerImpactAnalysis: Handler implementing the scoring logic
+    - ModelImpactAnalysisRequest: Typed def-B request payload
     - ModelImpactedArtifact: Per-artifact impact model
     - ModelImpactAnalysisResult: Aggregated result model
     - RegistryInfraImpactAnalyzer: DI registry
@@ -26,6 +27,9 @@ Tracking:
 
 from omnibase_infra.nodes.node_impact_analyzer_compute.handlers import (
     HandlerImpactAnalysis,
+)
+from omnibase_infra.nodes.node_impact_analyzer_compute.models.model_impact_analysis_request import (
+    ModelImpactAnalysisRequest,
 )
 from omnibase_infra.nodes.node_impact_analyzer_compute.models.model_impact_analysis_result import (
     ModelImpactAnalysisResult,
@@ -46,6 +50,7 @@ __all__: list[str] = [
     # Handlers
     "HandlerImpactAnalysis",
     # Models
+    "ModelImpactAnalysisRequest",
     "ModelImpactedArtifact",
     "ModelImpactAnalysisResult",
     # Registry

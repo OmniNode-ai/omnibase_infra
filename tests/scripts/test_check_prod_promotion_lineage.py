@@ -22,6 +22,7 @@ lineage checks are exercised against real `git` behavior:
 from __future__ import annotations
 
 import importlib.util
+import os
 import shutil
 import subprocess
 import sys
@@ -51,6 +52,24 @@ _mod = _load_module()
 
 _GIT = shutil.which("git")
 pytestmark = pytest.mark.skipif(_GIT is None, reason="git binary not available")
+
+
+@pytest.fixture(autouse=True)
+def _hermetic_git_env(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Strip inherited ``GIT_*`` env so every git call targets only the temp repos.
+
+    This suite runs as the ``prod-promotion-lineage-guard`` pre-commit hook
+    (it fires whenever ``scripts/deploy-runtime.sh`` or the guard changes).
+    During a real ``git commit`` git exports ``GIT_DIR`` / ``GIT_INDEX_FILE`` /
+    ``GIT_WORK_TREE`` to hook subprocesses. Without scrubbing, a nested
+    ``git add`` in a temp repo writes to the OUTER repo's leaked index —
+    corrupting the in-progress commit and making the temp-repo commits fail
+    (exit 1). Scrubbing keeps every git call in these tests hermetic, both the
+    ``_git`` helper below and the guard's own subprocess git calls (which
+    inherit ``os.environ``). [OMN-14469]
+    """
+    for var in [key for key in os.environ if key.startswith("GIT_")]:
+        monkeypatch.delenv(var, raising=False)
 
 
 def _git(repo: Path, *args: str) -> str:

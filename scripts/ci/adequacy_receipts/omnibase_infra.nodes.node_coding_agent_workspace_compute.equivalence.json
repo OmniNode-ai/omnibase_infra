@@ -1,0 +1,11 @@
+{
+  "node_id": "omnibase_infra.nodes.node_coding_agent_workspace_compute",
+  "selected_input_hashes": [
+    "sha256:271f5a9ebf040a1aeea6e3347bba4c570e3a4505b6ca3c2aae6de07dda35acf4",
+    "sha256:9d3daf7b76fe28c5ef695d5717d98821617af259906d0225819b4881ad4a3fc2",
+    "sha256:bd4043ad4f06a2d754ce13336c17239ccc7367a2ef88354b12b068fe592d2ff0",
+    "sha256:e6b3cd0d2ef1ce181da7605e97b203d81377dd7b560380af6ec9f784cfaa89e4",
+    "sha256:ea762702dd00fbf4ffaa8ad2ce7f1353eee00a00d79a8d0d1fbd7efe903a4245"
+  ],
+  "status": "pass"
+}

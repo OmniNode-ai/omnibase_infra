@@ -15,6 +15,29 @@
 # Related Tickets:
 #   - OMN-1646: Event Ledger Schema and Models
 #   - OMN-1647: Ledger Write Effect Node
+#   - OMN-14134: HandlerLedgerAppend gained a handle() auto-wiring adapter so
+#     the operation_match dispatch path (no event_model) can reach append()
+#     instead of binding the _missing_handle sentinel.
+#   - OMN-14139: handler_routing.handlers[] used the flat handler_class:/
+#     handler_module: fields, which ModelHandlerRoutingEntry does not parse
+#     (it requires a nested handler: {name, module} block) -- both entries
+#     silently dropped, wiring ZERO handlers. Fixed to the nested schema, plus
+#     an explicit topic: per entry so the two operation_match handlers don't
+#     hit the multi-handler topic-assignment ambiguity guard (which also
+#     resolves to zero assigned topics when more than one handler entry
+#     competes for the contract's subscribe_topics without disambiguation).
+#   - OMN-14140: HandlerLedgerAppend/HandlerLedgerQuery required a db_handler
+#     constructor argument that the auto-wiring resolver cannot supply, so
+#     even with the routing fixed above the handlers were unconstructable
+#     (quarantined). Both handlers now compose HandlerDb internally from
+#     `container`; the `handler_db` dependency entry below is documentation
+#     only -- it has no runtime effect on wiring. HandlerLedgerQuery also
+#     gained a handle() adapter mirroring OMN-14134's fix for Append, since
+#     it has the same operation_match/no-event_model dispatch shape. Both
+#     handle() implementations were also fixed to accept the DICT-shaped
+#     envelope MessageDispatchEngine._materialize_envelope_with_bindings
+#     actually delivers on the live dispatch path (the OMN-14134 getattr()-only
+#     extraction silently no-op'd on dict envelopes and mis-validated).
 # Contract identifiers
 name: "node_ledger_write_effect"
 contract_name: "node_ledger_write_effect"
@@ -22,11 +45,11 @@ node_name: "node_ledger_write_effect"
 contract_version:
   major: 0
   minor: 1
-  patch: 1
+  patch: 4
 node_version:
   major: 0
   minor: 1
-  patch: 1
+  patch: 4
 # Node type
 node_type: "EFFECT_GENERIC"
 # Description
@@ -135,16 +158,30 @@ io_operations:
     idempotent: true
 # Handler routing for ledger operations
 # Handlers compose with HandlerDb for PostgreSQL operations
+#
+# NOTE (OMN-14139): the handler reference MUST use the nested `handler:
+# {name, module}` block -- ModelHandlerRoutingEntry has no handler_class/
+# handler_module fields, so a flat entry silently parses to zero handlers
+# (discovery._parse_handler_routing skips any entry where h.get("handler")
+# is not a dict). `topic:` is likewise required here: with two operation_match
+# handler entries and neither declaring event_model/event_type, the topic
+# ambiguity guard in handler_wiring._topics_for_handler_entry assigns ZERO
+# topics to either entry once more than one handler competes for the
+# contract's subscribe_topics.
 handler_routing:
   routing_strategy: "operation_match"
   handlers:
     - operation: "ledger.append"
-      handler_class: "HandlerLedgerAppend"
-      handler_module: "omnibase_infra.nodes.node_ledger_write_effect.handlers.handler_ledger_append"
+      handler:
+        name: "HandlerLedgerAppend"
+        module: "omnibase_infra.nodes.node_ledger_write_effect.handlers.handler_ledger_append"
+      topic: "onex.cmd.platform.ledger-append.v1"
       description: "Idempotent append to event ledger with duplicate detection"
     - operation: "ledger.query"
-      handler_class: "HandlerLedgerQuery"
-      handler_module: "omnibase_infra.nodes.node_ledger_write_effect.handlers.handler_ledger_query"
+      handler:
+        name: "HandlerLedgerQuery"
+        module: "omnibase_infra.nodes.node_ledger_write_effect.handlers.handler_ledger_query"
+      topic: "onex.cmd.platform.ledger-query.v1"
       description: "Query ledger by correlation_id, time_range, event_type, topic"
 # Dependencies (protocols this node requires)
 # Note: Ledger handlers compose with HandlerDb internally

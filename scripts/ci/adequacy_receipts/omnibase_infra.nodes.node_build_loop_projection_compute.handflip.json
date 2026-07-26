@@ -1,0 +1,31 @@
+{
+  "node_id": "omnibase_infra.nodes.node_build_loop_projection_compute",
+  "receipt_schema": "handflip_proof.v1",
+  "canonical_handler_module": "omnibase_infra.nodes.node_build_loop_projection_compute.handlers.handler_build_loop_projection",
+  "legacy_handler_module": "omnibase_infra.nodes.node_build_loop_projection_compute.handlers.handler_build_loop_projection",
+  "base_ref": "71ab1bf6deb4252edd9593f547dd5a4b4e60939b",
+  "preserved_symbols": [
+    "HandlerBuildLoopProjection.project",
+    "HandlerBuildLoopProjection._extract_payload",
+    "HandlerBuildLoopProjection._first_str",
+    "HandlerBuildLoopProjection._extract_timestamp",
+    "HandlerBuildLoopProjection._extract_correlation_id",
+    "HandlerBuildLoopProjection._coerce_event_message"
+  ],
+  "parity": {
+    "status": "pass",
+    "test_ids": [
+      "tests/unit/nodes/node_build_loop_projection_compute/test_build_loop_projection_dispatch_entrypoint_omn14821.py::test_handle_is_canonical_def_b_typed_entrypoint",
+      "tests/unit/nodes/node_build_loop_projection_compute/test_build_loop_projection_dispatch_entrypoint_omn14821.py::test_real_dispatch_callback_projects_intent[C1_full]",
+      "tests/unit/nodes/node_build_loop_projection_compute/test_build_loop_projection_dispatch_entrypoint_omn14821.py::test_real_dispatch_callback_projects_intent[C2_envelope_wrapped]",
+      "tests/unit/nodes/node_build_loop_projection_compute/test_build_loop_projection_dispatch_entrypoint_omn14821.py::test_real_dispatch_callback_projects_intent[C3_missing_fields]",
+      "tests/unit/nodes/node_build_loop_projection_compute/test_build_loop_projection_dispatch_entrypoint_omn14821.py::test_real_dispatch_callback_projects_intent[C4_alt_keys]"
+    ],
+    "selected_input_hashes": [
+      "sha256:1f43a0fada4a2ab5e23f7c594663ece57217a0fc9c1fe0b68101c85f8cafa2d7",
+      "sha256:f8dccfc4a7000ed058cdeb43f5b92b44c303d196f561f14bce643809baf981aa",
+      "sha256:c3150ab885d99667ca978220c43563d54ccef76d26c916d0fcd7bea8ce66c9da",
+      "sha256:0afb18b72db2fda457905bdd526d9ee552d29c100d9ed67fcb873cb97d036bfc"
+    ]
+  }
+}

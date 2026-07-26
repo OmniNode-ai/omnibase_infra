@@ -3427,12 +3427,43 @@ handler_routing:
             await process.stop()
 
 
+class TestRuntimeHostProcessSupplementalReadiness:
+    """OMN-14758 (S6): supplemental readiness probes fold into ``/ready``."""
+
+    async def test_probes_are_evaluated_and_reported(self) -> None:
+        process = RuntimeHostProcess(config=make_runtime_config())
+        process.register_readiness_probe(
+            "ok_probe", lambda: (True, {"loop_healthy": True})
+        )
+        process.register_readiness_probe(
+            "bad_probe", lambda: (False, {"phantom_subscription_topics": ["t"]})
+        )
+
+        def _raiser() -> tuple[bool, dict[str, object]]:
+            raise RuntimeError("boom")
+
+        process.register_readiness_probe("raising_probe", _raiser)
+
+        result = await process.readiness_check()
+        supplemental = result["supplemental_readiness"]
+        assert isinstance(supplemental, dict)
+        assert supplemental["ok_probe"]["ready"] is True
+        # A False probe flips overall readiness FAIL.
+        assert supplemental["bad_probe"]["ready"] is False
+        assert supplemental["bad_probe"]["phantom_subscription_topics"] == ["t"]
+        # A raising probe fails closed (not-ready) and captures the error.
+        assert supplemental["raising_probe"]["ready"] is False
+        assert "error" in supplemental["raising_probe"]
+        assert result["ready"] is False
+
+
 # =============================================================================
 # Module Exports
 # =============================================================================
 
 
 __all__: list[str] = [
+    "TestRuntimeHostProcessSupplementalReadiness",
     "TestRuntimeHostProcessInitialization",
     "TestRuntimeHostProcessTimeoutValidation",
     "TestRuntimeHostProcessDrainTimeoutValidation",

@@ -1120,6 +1120,10 @@ output_model: "omnimarket.nodes.node_aislop_sweep.handlers.handler_aislop_sweep.
     if routing_module is not None or routing_class is not None:
         yaml_content += """
 handler_routing:
+  version:
+    major: 1
+    minor: 0
+    patch: 0
   routing_strategy: "operation_match"
   handlers:
     - operation: "sweep"

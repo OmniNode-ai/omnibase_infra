@@ -1,0 +1,86 @@
+{
+  "input": {
+    "cached_chain": {
+      "chain_id": "22222222-2222-4222-8222-222222222222",
+      "chain_steps": [
+        {
+          "duration_ms": 100,
+          "event_topic": "onex.evt.test.v1",
+          "input_hash": "in_0",
+          "node_ref": "node_0",
+          "operation": "read_$A",
+          "output_hash": "out_0",
+          "step_index": 0
+        },
+        {
+          "duration_ms": 101,
+          "event_topic": "onex.evt.test.v1",
+          "input_hash": "in_1",
+          "node_ref": "node_1",
+          "operation": "write_$B",
+          "output_hash": "out_1",
+          "step_index": 1
+        },
+        {
+          "duration_ms": 102,
+          "event_topic": "onex.evt.test.v1",
+          "input_hash": "in_2",
+          "node_ref": "node_2",
+          "operation": "log_$A",
+          "output_hash": "out_2",
+          "step_index": 2
+        }
+      ],
+      "contract_hash": "contract_sha",
+      "metadata": {},
+      "prompt_hash": "prompt_sha",
+      "prompt_text": "original prompt",
+      "similarity_threshold": 0.85,
+      "success_timestamp": "2026-01-01T00:00:00Z",
+      "workflow_ref": "wf_test"
+    },
+    "correlation_id": "11111111-1111-4111-8111-111111111111",
+    "new_context": {
+      "$A": "alpha",
+      "$B": "beta"
+    },
+    "new_prompt_text": "new"
+  },
+  "input_hash": "sha256:f09fa6d0549a9dc9ae55f644dec13c02558bc38e2f24c77156e0142cbd6a7aa7",
+  "name": "multi_substitution",
+  "output": {
+    "adaptation_summary": "Adapted 3 steps: step[0]: substituted $A; step[1]: substituted $B; step[2]: substituted $A",
+    "adapted_steps": [
+      {
+        "duration_ms": 100,
+        "event_topic": "onex.evt.test.v1",
+        "input_hash": "in_0",
+        "node_ref": "node_0",
+        "operation": "read_alpha",
+        "output_hash": "out_0",
+        "step_index": 0
+      },
+      {
+        "duration_ms": 101,
+        "event_topic": "onex.evt.test.v1",
+        "input_hash": "in_1",
+        "node_ref": "node_1",
+        "operation": "write_beta",
+        "output_hash": "out_1",
+        "step_index": 1
+      },
+      {
+        "duration_ms": 102,
+        "event_topic": "onex.evt.test.v1",
+        "input_hash": "in_2",
+        "node_ref": "node_2",
+        "operation": "log_alpha",
+        "output_hash": "out_2",
+        "step_index": 2
+      }
+    ],
+    "confidence": 0.7999999999999999,
+    "correlation_id": "11111111-1111-4111-8111-111111111111"
+  },
+  "recorded_against": "def-A base handler (multi-positional handle) at origin/dev"
+}

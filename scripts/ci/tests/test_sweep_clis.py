@@ -248,6 +248,86 @@ class TestDuplicationSweep:
         result = main(["--omni-home", "/nonexistent/omni_home"])
         assert result == 2
 
+    # -----------------------------------------------------------------
+    # OMN-14086: --changed-files trigger-narrowing. The comparison logic
+    # stays whole-tree (DUPLICATION_REPO always carries both fixture
+    # violations); only whether a check RUNS AT ALL should change.
+    # -----------------------------------------------------------------
+
+    def test_no_changed_files_flag_runs_unconditionally(self):
+        """Omitting --changed-files entirely preserves today's behavior."""
+        from run_duplication_sweep import main
+
+        result = main(["--omni-home", str(DUPLICATION_REPO), "--checks", "D1,D2"])
+        assert result == 1  # both fixture violations still fire
+
+    def test_changed_files_with_no_relevant_paths_skips_both_checks(self):
+        from run_duplication_sweep import main
+
+        result = main(
+            [
+                "--omni-home",
+                str(DUPLICATION_REPO),
+                "--checks",
+                "D1,D2",
+                "--changed-files",
+                "some/unrelated/file.py",
+            ]
+        )
+        assert result == 0  # narrowed out — the real violations never ran
+
+    def test_changed_files_with_d1_relevant_path_still_fires_d1(self):
+        from run_duplication_sweep import main
+
+        result = main(
+            [
+                "--omni-home",
+                str(DUPLICATION_REPO),
+                "--checks",
+                "D1,D2",
+                "--changed-files",
+                "omnidash/shared/schema-a.ts",
+            ]
+        )
+        assert result == 1  # D1's real duplicate-table violation still fires
+
+    def test_changed_files_json_marks_narrowed_out_checks_as_skip(self, capsys):
+        import json as json_mod
+
+        from run_duplication_sweep import main
+
+        main(
+            [
+                "--omni-home",
+                str(DUPLICATION_REPO),
+                "--checks",
+                "D1,D2",
+                "--changed-files",
+                "some/unrelated/file.py",
+                "--json",
+            ]
+        )
+        data = json_mod.loads(capsys.readouterr().out)
+        statuses = {r["check_id"]: r["status"] for r in data["results"]}
+        assert statuses == {"D1": "SKIP", "D2": "SKIP"}
+        assert data["status"] == "PASS"
+        assert data["blocking_count"] == 0
+
+    def test_changed_files_empty_list_skips_everything(self):
+        """An explicit empty list (narrowing requested, nothing changed) still narrows."""
+        from run_duplication_sweep import main
+
+        result = main(
+            [
+                "--omni-home",
+                str(DUPLICATION_REPO),
+                "--checks",
+                "D1,D2",
+                "--changed-files",
+            ]
+        )
+        assert result == 0
+
 
 # ---------------------------------------------------------------------------
 # contract sweep tests

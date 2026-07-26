@@ -33,7 +33,13 @@ def real_gh(args: list[str]) -> tuple[int, str]:
 
 
 def cmd_audit(args: argparse.Namespace) -> int:
-    result = audit_repo(args.owner, args.repo, real_gh, commits_to_scan=args.commits)
+    result = audit_repo(
+        args.owner,
+        args.repo,
+        real_gh,
+        commits_to_scan=args.commits,
+        branch=args.branch,
+    )
     print(json.dumps(result))
     return 0
 
@@ -52,6 +58,15 @@ def main() -> int:
     p_audit.add_argument("--owner", required=True)
     p_audit.add_argument("--repo", required=True)
     p_audit.add_argument("--commits", type=int, default=5)
+    p_audit.add_argument(
+        "--branch",
+        default="main",
+        help=(
+            "Branch to audit (default: main). READ/AUDIT only for any non-main "
+            "branch — the audit returns no protection_json off main, so --fix "
+            "cannot mutate it."
+        ),
+    )
     p_audit.set_defaults(func=cmd_audit)
 
     p_fix = sub.add_parser("fix-payload", help="Build the PUT payload for --fix")

@@ -18,6 +18,8 @@ class EnumOmnimarketTopic(str, Enum):
     All values are raw topic strings as declared in contract.yaml.
     Members are sorted by (kind, event_name, version).
     """
+    CMD_REDEPLOY_START_V1 = "onex.cmd.omnimarket.redeploy-start.v1"  # onex.cmd.omnimarket.redeploy-start.v1
     EVT_BUILD_LOOP_ORCHESTRATOR_COMPLETED_V1 = "onex.evt.omnimarket.build-loop-orchestrator-completed.v1"  # onex.evt.omnimarket.build-loop-orchestrator-completed.v1
     EVT_DELEGATE_SKILL_COMPLETED_V1 = "onex.evt.omnimarket.delegate-skill-completed.v1"  # onex.evt.omnimarket.delegate-skill-completed.v1
     EVT_DELEGATE_SKILL_FAILED_V1 = "onex.evt.omnimarket.delegate-skill-failed.v1"  # onex.evt.omnimarket.delegate-skill-failed.v1
+    EVT_RUNTIME_DEPLOYMENT_PROOF_V1 = "onex.evt.omnimarket.runtime-deployment-proof.v1"  # onex.evt.omnimarket.runtime-deployment-proof.v1

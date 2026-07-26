@@ -39,6 +39,10 @@ def test_kafka_contract_source_materializes_default_handler_shorthand() -> None:
             - onex.evt.test.default-handler-completed.v1
           consumer_purpose: consume
         handler_routing:
+          version:
+            major: 1
+            minor: 0
+            patch: 0
           default_handler: tests.fixtures.handler_proof_noop:HandlerProofNoop
         """
     )

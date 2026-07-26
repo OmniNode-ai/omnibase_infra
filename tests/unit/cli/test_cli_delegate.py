@@ -27,28 +27,54 @@ receipt envelope are all real.
 from __future__ import annotations
 
 import json
+import logging
+import signal
 import tempfile
+import time
+import uuid
 from pathlib import Path
+from typing import get_args
 
 import pytest
 from click.testing import CliRunner
 
 from omnibase_core.models.dispatch.model_skill_result import ModelSkillResult
+from omnibase_infra.backends.enum_probe_state import EnumProbeState
+from omnibase_infra.backends.model_probe_result import ModelProbeResult
 from omnibase_infra.cli import cli_delegate
 from omnibase_infra.cli.cli_delegate import (
     BUS_CHOICES,
     DEFAULT_BUS,
     DEFAULT_TASK_TYPE,
     DELEGATE_SOURCE,
+    DELEGATE_SOURCE_CHOICES,
+    DelegateTimeoutExceededError,
     build_backend_overrides,
     classify_task_type,
     delegate_command,
+    resolve_default_bus,
     run_delegate,
 )
 
 pytestmark = pytest.mark.unit
 
 KAFKA_BOOTSTRAP_ARG = "$KAFKA_BOOTSTRAP_SERVERS"
+
+
+@pytest.fixture(autouse=True)
+def _clear_kafka_bootstrap_by_default(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Unit tests must not depend on ambient ``KAFKA_BOOTSTRAP_SERVERS`` (OMN-14376).
+
+    When ``--bus`` is omitted, ``run_delegate`` now probes
+    ``KAFKA_BOOTSTRAP_SERVERS`` to auto-resolve the default bus. Tests that
+    don't care about bus selection (payload shape, task classification,
+    single-receipt-on-stdout, etc.) must stay deterministic regardless of what
+    the developer's shell / ``~/.omnibase/.env`` happens to export — clear the
+    var by default here; ``TestBusSelection`` / ``TestResolveDefaultBus`` tests
+    that DO want to exercise the configured-broker path set it explicitly.
+    """
+    monkeypatch.delenv("KAFKA_BOOTSTRAP_SERVERS", raising=False)
+
 
 # A proof contract that runs a deterministic in-process handler — no vLLM, no
 # network. It stands in for the delegate node so the CLI wiring (payload write,
@@ -161,11 +187,13 @@ class TestPayloadScratch:
         payload = json.loads(payload_path.read_text(encoding="utf-8"))
         # With an EXPLICIT --max-tokens override the payload carries exactly the
         # fields the delegate node's input model (ModelDelegateSkillRequest)
-        # requires from a consumer: prompt, task_type, source, max_tokens.
-        # omnibase_infra does NOT depend on omnimarket (layering), so the node
-        # owns model validation at dispatch; the CLI's contract here is the
-        # payload shape. (When no override is supplied, max_tokens is omitted —
-        # see test_payload_written_under_state_root_tmp_not_slash_tmp, OMN-13161.)
+        # requires from a consumer: prompt, task_type, source, correlation_id,
+        # max_tokens. omnibase_infra does NOT depend on omnimarket (layering),
+        # so the node owns model validation at dispatch; the CLI's contract
+        # here is the payload shape. (When no override is supplied, max_tokens
+        # is omitted — see test_payload_written_under_state_root_tmp_not_slash_tmp,
+        # OMN-13161. ``correlation_id`` is always present — OMN-14397.)
+        assert uuid.UUID(str(payload.pop("correlation_id")))
         assert payload == {
             "prompt": "refactor the loop",
             "task_type": "refactor",
@@ -199,6 +227,217 @@ class TestPayloadScratch:
         payload_path = next((state_root / "tmp").glob("delegate-input-*.json"))
         payload = json.loads(payload_path.read_text(encoding="utf-8"))
         assert payload["task_type"] == "research"
+
+
+class TestSourceFlag:
+    """OMN-15185: ``--source`` threads a registered adapter source into the
+    delegation payload's ``source`` field, closed to
+    :data:`DELEGATE_SOURCE_CHOICES` (mirroring the wire model's
+    ``ModelDelegateSkillRequest.source`` Literal). Omitting the flag must
+    preserve pre-OMN-15185 behavior exactly (``DELEGATE_SOURCE``,
+    ``"claude-code"``).
+    """
+
+    def test_default_omitted_flag_uses_delegate_source_constant(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        contract_path = tmp_path / "contract.yaml"
+        contract_path.write_text(_PROOF_NOOP_CONTRACT, encoding="utf-8")
+        monkeypatch.setattr(
+            cli_delegate,
+            "_resolve_packaged_contract",
+            lambda _name: contract_path,
+        )
+        monkeypatch.setenv("ONEX_ARTIFACT_STORE_ROOT", str(tmp_path / "artifacts"))
+        state_root = tmp_path / "state"
+
+        # No --source / source= override at all -- the regression case: a
+        # pre-OMN-15185 caller must see byte-identical payload["source"].
+        run_delegate(
+            prompt="research the routing architecture",
+            task_type=None,
+            max_tokens=None,
+            state_root=state_root,
+            timeout=60,
+            verbose=False,
+            emit_socket=tmp_path / "no-daemon.sock",
+        )
+        payload_path = next((state_root / "tmp").glob("delegate-input-*.json"))
+        payload = json.loads(payload_path.read_text(encoding="utf-8"))
+        assert payload["source"] == DELEGATE_SOURCE == "claude-code"
+
+    @pytest.mark.parametrize("source_choice", DELEGATE_SOURCE_CHOICES)
+    def test_each_choice_lands_in_payload(
+        self,
+        source_choice: str,
+        tmp_path: Path,
+        monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
+        contract_path = tmp_path / "contract.yaml"
+        contract_path.write_text(_PROOF_NOOP_CONTRACT, encoding="utf-8")
+        monkeypatch.setattr(
+            cli_delegate,
+            "_resolve_packaged_contract",
+            lambda _name: contract_path,
+        )
+        monkeypatch.setenv("ONEX_ARTIFACT_STORE_ROOT", str(tmp_path / "artifacts"))
+        state_root = tmp_path / "state"
+
+        run_delegate(
+            prompt="research the routing architecture",
+            task_type=None,
+            max_tokens=None,
+            source=source_choice,
+            state_root=state_root,
+            timeout=60,
+            verbose=False,
+            emit_socket=tmp_path / "no-daemon.sock",
+        )
+        payload_path = next((state_root / "tmp").glob("delegate-input-*.json"))
+        payload = json.loads(payload_path.read_text(encoding="utf-8"))
+        assert payload["source"] == source_choice
+
+    @pytest.mark.parametrize("source_choice", DELEGATE_SOURCE_CHOICES)
+    def test_cli_flag_each_choice_reaches_overrides(
+        self,
+        source_choice: str,
+        tmp_path: Path,
+        monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
+        # End-to-end through the click CLI flag, not just the function call.
+        captured: dict[str, object] = {}
+
+        def _fake_run_receipt_mode(**kwargs: object) -> int:
+            payload = json.loads(
+                Path(str(kwargs["input_path"])).read_text(encoding="utf-8")
+            )
+            captured["source"] = payload["source"]
+            return 0
+
+        monkeypatch.setattr(
+            cli_delegate,
+            "_resolve_packaged_contract",
+            lambda _name: tmp_path / "contract.yaml",
+        )
+        monkeypatch.setattr(cli_delegate, "run_receipt_mode", _fake_run_receipt_mode)
+
+        runner = CliRunner()
+        result = runner.invoke(
+            delegate_command,
+            [
+                "research the routing architecture",
+                "--source",
+                source_choice,
+                "--state-root",
+                str(tmp_path / "state"),
+                "--emit-socket",
+                str(tmp_path / "no-daemon.sock"),
+            ],
+            catch_exceptions=False,
+        )
+
+        assert result.exit_code == 0, result.output
+        assert captured["source"] == source_choice
+
+    def test_cli_flag_omitted_defaults_to_claude_code(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        captured: dict[str, object] = {}
+
+        def _fake_run_receipt_mode(**kwargs: object) -> int:
+            payload = json.loads(
+                Path(str(kwargs["input_path"])).read_text(encoding="utf-8")
+            )
+            captured["source"] = payload["source"]
+            return 0
+
+        monkeypatch.setattr(
+            cli_delegate,
+            "_resolve_packaged_contract",
+            lambda _name: tmp_path / "contract.yaml",
+        )
+        monkeypatch.setattr(cli_delegate, "run_receipt_mode", _fake_run_receipt_mode)
+
+        runner = CliRunner()
+        result = runner.invoke(
+            delegate_command,
+            [
+                "research the routing architecture",
+                "--state-root",
+                str(tmp_path / "state"),
+                "--emit-socket",
+                str(tmp_path / "no-daemon.sock"),
+            ],
+            catch_exceptions=False,
+        )
+
+        assert result.exit_code == 0, result.output
+        assert captured["source"] == "claude-code"
+
+    def test_cli_invalid_source_rejected_by_parser(self, tmp_path: Path) -> None:
+        runner = CliRunner()
+        result = runner.invoke(
+            delegate_command,
+            [
+                "research the routing architecture",
+                "--source",
+                "not-a-real-source",
+                "--state-root",
+                str(tmp_path / "state"),
+                "--emit-socket",
+                str(tmp_path / "no-daemon.sock"),
+            ],
+            catch_exceptions=False,
+        )
+
+        assert result.exit_code != 0
+        assert "Error" in result.output
+        assert "not-a-real-source" in result.output
+
+
+class TestSourceFlagDriftGuard:
+    """``DELEGATE_SOURCE_CHOICES`` duplicates omnimarket's wire model Literal
+    (``ModelDelegateSkillRequest.source``) because omnibase_infra does not
+    depend on omnimarket -- repo layering runs compat -> core -> spi -> infra,
+    and separately omnimarket depends on omnibase-infra, never the reverse
+    (importing omnimarket here would be circular/wrong-direction). This is
+    exactly OMN-15175's duplicate-alias failure class: a hand-rolled Literal
+    silently fell out of sync with this same wire model after it was widened.
+
+    When omnimarket IS importable in the test env, assert the tuple matches
+    the LIVE Literal args exactly. It normally is NOT importable in
+    omnibase_infra's own test env (no omnimarket dependency); in that case,
+    assert against the documented value list stated in the
+    ``DELEGATE_SOURCE_CHOICES`` docstring/comment in ``cli_delegate.py``, so a
+    silent edit that changes one without the other still fails this test.
+    """
+
+    # Mirrors the value list documented in cli_delegate.py's
+    # DELEGATE_SOURCE_CHOICES comment -- update BOTH together.
+    _DOCUMENTED_CHOICES = ("claude-code", "codex", "external-client")
+
+    def test_choices_match_wire_model_or_documented_fallback(self) -> None:
+        try:
+            from omnimarket.models.delegation.wire.model_delegate_skill_request import (
+                ModelDelegateSkillRequest,
+            )
+        except ImportError:
+            assert set(DELEGATE_SOURCE_CHOICES) == set(self._DOCUMENTED_CHOICES), (
+                "DELEGATE_SOURCE_CHOICES drifted from its own documented "
+                "value list (OMN-15175 duplicate-alias failure class) -- "
+                "omnimarket is not importable in this test env to check "
+                "against the live wire model directly, so verify by hand "
+                "against omnimarket's "
+                "model_delegate_skill_request.py:ModelDelegateSkillRequest"
+                ".source Literal."
+            )
+            return
+        source_field = ModelDelegateSkillRequest.model_fields["source"]
+        live_choices = get_args(source_field.annotation)
+        assert set(DELEGATE_SOURCE_CHOICES) == set(live_choices), (
+            f"DELEGATE_SOURCE_CHOICES {DELEGATE_SOURCE_CHOICES} drifted from "
+            f"the live ModelDelegateSkillRequest.source Literal {live_choices}"
+        )
 
 
 class TestSingleReceiptOnStdout:
@@ -268,12 +507,19 @@ class TestSingleReceiptOnStdout:
 
 
 class TestBusSelection:
-    """The CLI can target the live bus (OMN-13532 / OMN-13408 re-proof).
+    """The CLI targets the live bus BY DEFAULT (OMN-13532 / OMN-14376).
 
-    ``run_delegate`` no longer hardcodes the in-memory bus: ``--bus`` /
-    ``--kafka-bootstrap`` flow through ``backend_overrides`` to ``RuntimeLocal``
-    so the typed delegate-skill command can be published to the live broker
-    where a deployed consumer dispatches it (``feedback_bus_is_the_transport``).
+    ``run_delegate`` no longer hardcodes the in-memory bus, and no longer
+    requires an explicit ``--bus kafka`` to reach the shared platform
+    substrate: when ``--bus`` is omitted, :func:`resolve_default_bus` probes
+    ``KAFKA_BOOTSTRAP_SERVERS`` and auto-selects ``kafka`` when it is
+    configured and healthy — the SAME bus the rest of the system is
+    configured with — falling back to ``inmemory`` (with a clear WARNING
+    signal) when it is unset or unhealthy (e.g. the OMN-14380 off-box
+    advertised-listener gap), so a stale broker degrades gracefully instead of
+    hanging the CLI. An explicit ``--bus`` / ``--kafka-bootstrap`` is never
+    second-guessed and flows through ``backend_overrides`` to ``RuntimeLocal``
+    unchanged (``feedback_bus_is_the_transport``).
     """
 
     def test_choices_mirror_runtime_supported_values(self) -> None:
@@ -282,6 +528,8 @@ class TestBusSelection:
         from omnibase_core.runtime.runtime_local import SUPPORTED_EVENT_BUS_VALUES
 
         assert set(BUS_CHOICES) == set(SUPPORTED_EVENT_BUS_VALUES)
+        # The safe fallback floor auto-resolution always lands on when the
+        # shared bus is not provably reachable (see TestResolveDefaultBus).
         assert DEFAULT_BUS == "inmemory"
 
     def test_default_overrides_are_inmemory(self) -> None:
@@ -352,6 +600,10 @@ class TestBusSelection:
     def test_run_delegate_defaults_to_inmemory_overrides(
         self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
     ) -> None:
+        # No KAFKA_BOOTSTRAP_SERVERS configured -> resolve_default_bus
+        # short-circuits to inmemory with no network probe attempted (see
+        # TestResolveDefaultBus.test_no_bootstrap_short_circuits_to_inmemory).
+        monkeypatch.delenv("KAFKA_BOOTSTRAP_SERVERS", raising=False)
         captured: dict[str, object] = {}
 
         def _fake_run_receipt_mode(**kwargs: object) -> int:
@@ -376,6 +628,109 @@ class TestBusSelection:
         )
 
         assert captured["backend_overrides"] == {"event_bus": "inmemory"}
+
+    def test_run_delegate_auto_resolves_kafka_when_broker_healthy(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        # OMN-14376: a configured, healthy broker is selected WITHOUT an
+        # explicit --bus kafka flag — delegation reaches the shared bus by
+        # default, no flag required.
+        monkeypatch.setenv("KAFKA_BOOTSTRAP_SERVERS", "broker.example:9092")
+        monkeypatch.setattr(
+            cli_delegate,
+            "probe_kafka",
+            lambda *, bootstrap_servers: ModelProbeResult(
+                state=EnumProbeState.AUTHORITATIVE,
+                reason="stub healthy",
+                backend_label="event_bus_kafka",
+            ),
+        )
+        captured: dict[str, object] = {}
+
+        def _fake_run_receipt_mode(**kwargs: object) -> int:
+            captured.update(kwargs)
+            return 0
+
+        monkeypatch.setattr(
+            cli_delegate,
+            "_resolve_packaged_contract",
+            lambda _name: tmp_path / "contract.yaml",
+        )
+        monkeypatch.setattr(cli_delegate, "run_receipt_mode", _fake_run_receipt_mode)
+
+        run_delegate(
+            prompt="research the routing architecture",
+            task_type=None,
+            max_tokens=None,
+            state_root=tmp_path / "state",
+            timeout=60,
+            verbose=False,
+            emit_socket=tmp_path / "no-daemon.sock",
+        )
+
+        # No explicit --kafka-bootstrap was passed, so the override map omits
+        # it — the Kafka bus resolves its own bootstrap from
+        # KAFKA_BOOTSTRAP_SERVERS at RuntimeLocal construction time.
+        assert captured["backend_overrides"] == {"event_bus": "kafka"}
+
+    def test_run_delegate_falls_back_to_inmemory_when_broker_unhealthy(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        # OMN-14376/OMN-14380: a configured but unreachable/unhealthy broker
+        # (e.g. an off-box caller hitting an advertised-listener gap) must
+        # degrade gracefully to inmemory, never hang the CLI on a broken
+        # default.
+        monkeypatch.setenv("KAFKA_BOOTSTRAP_SERVERS", "unreachable.example:9092")
+        monkeypatch.setattr(
+            cli_delegate,
+            "probe_kafka",
+            lambda *, bootstrap_servers: ModelProbeResult(
+                state=EnumProbeState.DISCOVERED,
+                reason="TCP connect to unreachable.example:9092 failed",
+                backend_label="event_bus_kafka",
+            ),
+        )
+        captured: dict[str, object] = {}
+
+        def _fake_run_receipt_mode(**kwargs: object) -> int:
+            captured.update(kwargs)
+            return 0
+
+        monkeypatch.setattr(
+            cli_delegate,
+            "_resolve_packaged_contract",
+            lambda _name: tmp_path / "contract.yaml",
+        )
+        monkeypatch.setattr(cli_delegate, "run_receipt_mode", _fake_run_receipt_mode)
+
+        run_delegate(
+            prompt="research the routing architecture",
+            task_type=None,
+            max_tokens=None,
+            state_root=tmp_path / "state",
+            timeout=60,
+            verbose=False,
+            emit_socket=tmp_path / "no-daemon.sock",
+        )
+
+        assert captured["backend_overrides"] == {"event_bus": "inmemory"}
+
+    def test_run_delegate_bootstrap_without_explicit_bus_is_value_error(
+        self, tmp_path: Path
+    ) -> None:
+        # A bare --kafka-bootstrap (no --bus) is never silently absorbed into
+        # the auto-resolved default — the caller must say --bus kafka too.
+        with pytest.raises(ValueError, match="only valid with --bus kafka"):
+            run_delegate(
+                prompt="document the router",
+                task_type="document",
+                max_tokens=None,
+                kafka_bootstrap=KAFKA_BOOTSTRAP_ARG,
+                state_root=tmp_path / "state",
+                timeout=60,
+                verbose=False,
+                emit_socket=tmp_path / "no-daemon.sock",
+            )
 
     def test_cli_flag_bus_kafka_reaches_overrides(
         self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
@@ -447,3 +802,270 @@ class TestBusSelection:
         assert result.exit_code != 0
         assert "Error:" in result.output
         assert "only valid with --bus kafka" in result.output
+
+
+class TestCorrelationId:
+    """OMN-14397: correlation_id must be fresh per invocation, never reused.
+
+    Two consecutive ``onex delegate`` calls from the same working
+    directory/state-root previously returned the SAME ``correlation_id`` (and
+    stale response content) on the second call. The CLI now mints and writes
+    ``correlation_id`` explicitly per invocation instead of leaving it to an
+    implicit downstream default.
+    """
+
+    def test_two_runs_get_distinct_correlation_ids(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        captured: list[str] = []
+
+        def _fake_run_receipt_mode(**kwargs: object) -> int:
+            payload = json.loads(
+                Path(str(kwargs["input_path"])).read_text(encoding="utf-8")
+            )
+            captured.append(payload["correlation_id"])
+            return 0
+
+        monkeypatch.setattr(
+            cli_delegate,
+            "_resolve_packaged_contract",
+            lambda _name: tmp_path / "contract.yaml",
+        )
+        monkeypatch.setattr(cli_delegate, "run_receipt_mode", _fake_run_receipt_mode)
+
+        # Same working directory / state-root for both runs — the exact
+        # OMN-14397 reproduction shape.
+        for _ in range(2):
+            run_delegate(
+                prompt="research the routing architecture",
+                task_type=None,
+                max_tokens=None,
+                state_root=tmp_path / "state",
+                timeout=60,
+                verbose=False,
+                emit_socket=tmp_path / "no-daemon.sock",
+            )
+
+        assert len(captured) == 2
+        # Each is a real UUID and the two are distinct.
+        for raw in captured:
+            uuid.UUID(raw)
+        assert captured[0] != captured[1]
+
+
+class TestHardTimeoutBackstop:
+    """OMN-14397: ``--timeout`` must abort a hung call, not just RuntimeLocal's
+    cooperative ``asyncio.wait_for``.
+
+    ``RuntimeLocal``'s internal timeout only preempts at an ``await`` point; a
+    call stuck in synchronous, non-cooperative blocking I/O never yields
+    control back, so that timeout silently never fires — the defect that left
+    an orphaned process on ``.201`` requiring a manual ``kill``. These tests
+    drive a genuinely blocking stub (``time.sleep``, not an
+    asyncio-cancelable coroutine) to prove the ``SIGALRM``-based hard backstop
+    aborts it anyway.
+    """
+
+    @pytest.mark.skipif(not hasattr(signal, "SIGALRM"), reason="SIGALRM is POSIX-only")
+    def test_hard_timeout_aborts_blocking_call(self) -> None:
+        started = time.monotonic()
+        with pytest.raises(DelegateTimeoutExceededError):
+            with cli_delegate._hard_timeout(1):
+                # Real blocking sleep, not asyncio-cooperative — proves
+                # SIGALRM preempts even non-cooperative blocking I/O.
+                time.sleep(5)
+        elapsed = time.monotonic() - started
+        assert elapsed < 3, f"hard timeout did not abort promptly: {elapsed}s"
+
+    @pytest.mark.skipif(not hasattr(signal, "SIGALRM"), reason="SIGALRM is POSIX-only")
+    def test_hard_timeout_cancels_alarm_on_clean_exit(self) -> None:
+        # A call that finishes well inside the window must not leave a
+        # dangling SIGALRM armed for later, unrelated code to trip over.
+        with cli_delegate._hard_timeout(5):
+            pass
+        # signal.alarm(0) returns the seconds remaining on any previously
+        # scheduled alarm (0 if none is armed).
+        assert signal.alarm(0) == 0
+
+    @pytest.mark.skipif(not hasattr(signal, "SIGALRM"), reason="SIGALRM is POSIX-only")
+    def test_run_delegate_aborts_hung_dispatch_despite_receipt_mode_broad_except(
+        self,
+        tmp_path: Path,
+        monkeypatch: pytest.MonkeyPatch,
+        capsys: pytest.CaptureFixture[str],
+    ) -> None:
+        """OMN-14397 round 2: the real ``run_receipt_mode`` wraps the exact
+        call that hangs (``RuntimeLocal(...); runtime.run()``) in a broad
+        ``except Exception as exc:`` that logs and continues rather than
+        re-raising (``receipt_mode.py`` ~509-526). A plain ``time.sleep``
+        stub with no surrounding except does not replicate that collaborator
+        shape and proves nothing beyond what
+        ``test_hard_timeout_aborts_blocking_call`` already proves in
+        isolation — this stub reproduces the real try/except-Exception shape
+        so the test proves the timeout signal survives it and still reaches
+        ``run_delegate``'s own handler (clear stderr message, not just an
+        accidental exit code from the swallowed exception).
+        """
+
+        def _swallowing_run_receipt_mode(**_kwargs: object) -> int:
+            exit_code = 1  # pre-initialized, exactly like receipt_mode.py:505
+            try:
+                time.sleep(10)  # stands in for the hanging runtime.run() call
+                exit_code = 0  # pragma: no cover - never reached within the bound
+            except Exception:
+                # Mirrors receipt_mode.py's real shape exactly (including the
+                # logger.exception call): logs and continues rather than
+                # re-raising. A RuntimeError-based timeout signal would die
+                # right here, silently.
+                logging.getLogger(__name__).exception("receipt_mode: runtime raised")
+            return exit_code
+
+        monkeypatch.setattr(
+            cli_delegate,
+            "_resolve_packaged_contract",
+            lambda _name: tmp_path / "contract.yaml",
+        )
+        monkeypatch.setattr(
+            cli_delegate, "run_receipt_mode", _swallowing_run_receipt_mode
+        )
+        # Shrink the grace window so the test doesn't wait out the full sleep.
+        monkeypatch.setattr(cli_delegate, "_HARD_TIMEOUT_GRACE_SECONDS", 1)
+
+        started = time.monotonic()
+        exit_code = run_delegate(
+            prompt="research the routing architecture",
+            task_type=None,
+            max_tokens=None,
+            state_root=tmp_path / "state",
+            timeout=1,
+            verbose=False,
+            emit_socket=tmp_path / "no-daemon.sock",
+        )
+        elapsed = time.monotonic() - started
+        captured = capsys.readouterr()
+
+        assert exit_code == 1
+        assert elapsed < 5, f"hung call was not aborted within bound: {elapsed}s"
+        # The clear-error contract must fire from run_delegate's own
+        # DelegateTimeoutExceededError handler — not an accidental exit code
+        # falling out of the stub's own pre-initialized `exit_code = 1` after
+        # the exception was silently swallowed by its broad except.
+        assert "exceeded hard timeout" in captured.err, (
+            f"timeout signal did not survive the broad except — stderr: {captured.err!r}"
+        )
+
+
+class TestResolveDefaultBus:
+    """Direct unit coverage of the OMN-14376 probe-then-select seam.
+
+    ``resolve_default_bus`` is the function ``run_delegate`` calls whenever
+    ``--bus`` is omitted; these tests exercise it in isolation from the rest
+    of the CLI wiring. ``resolve_default_bus`` never reads
+    ``KAFKA_BOOTSTRAP_SERVERS`` itself — it delegates entirely to
+    :func:`omnibase_infra.backends.backend_probe.probe_kafka` (the existing,
+    already-approved boundary for that env lookup; ``cli_delegate.py`` is not
+    on the ``check-env-reads`` allowlist). Tests that exercise the
+    configured-broker path stub ``probe_kafka`` so no real network call is
+    made from the unit suite; the "nothing configured" test calls the REAL
+    ``probe_kafka`` because its own short-circuit (no env, no override) never
+    touches the network either.
+    """
+
+    def test_no_bootstrap_short_circuits_to_inmemory(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        # No stub: probe_kafka's own "no bootstrap configured" branch
+        # short-circuits before any socket call, so this stays a fast,
+        # deterministic unit test against the real function.
+        monkeypatch.delenv("KAFKA_BOOTSTRAP_SERVERS", raising=False)
+
+        bus, reason = resolve_default_bus()
+
+        assert bus == "inmemory"
+        assert "not set" in reason
+
+    def test_healthy_broker_resolves_kafka(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        monkeypatch.setenv("KAFKA_BOOTSTRAP_SERVERS", "broker.example:9092")
+        monkeypatch.setattr(
+            cli_delegate,
+            "probe_kafka",
+            lambda *, bootstrap_servers: ModelProbeResult(
+                state=EnumProbeState.HEALTHY,
+                reason="stub healthy",
+                backend_label="event_bus_kafka",
+            ),
+        )
+
+        bus, reason = resolve_default_bus()
+
+        assert bus == "kafka"
+        assert reason == "stub healthy"
+
+    def test_authoritative_broker_resolves_kafka(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        monkeypatch.setenv("KAFKA_BOOTSTRAP_SERVERS", "broker.example:9092")
+        monkeypatch.setattr(
+            cli_delegate,
+            "probe_kafka",
+            lambda *, bootstrap_servers: ModelProbeResult(
+                state=EnumProbeState.AUTHORITATIVE,
+                reason="stub authoritative",
+                backend_label="event_bus_kafka",
+            ),
+        )
+
+        bus, _reason = resolve_default_bus()
+
+        assert bus == "kafka"
+
+    @pytest.mark.parametrize(
+        "state", [EnumProbeState.DISCOVERED, EnumProbeState.REACHABLE]
+    )
+    def test_unhealthy_broker_falls_back_to_inmemory(
+        self, state: EnumProbeState, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        # DISCOVERED (TCP failed) and REACHABLE (TCP ok, but e.g. topic list
+        # failed — the OMN-14380 advertised-listener symptom) both must
+        # gracefully degrade rather than select a bus that cannot actually
+        # carry traffic. Bootstrap passed explicitly (not via env) so the
+        # stub receives it directly — resolve_default_bus forwards whatever
+        # it's given straight to probe_kafka without touching the env itself.
+        monkeypatch.setattr(
+            cli_delegate,
+            "probe_kafka",
+            lambda *, bootstrap_servers: ModelProbeResult(
+                state=state,
+                reason=f"TCP reachable but topic list failed for {bootstrap_servers}",
+                backend_label="event_bus_kafka",
+            ),
+        )
+
+        bus, reason = resolve_default_bus(kafka_bootstrap="broker.example:9092")
+
+        assert bus == "inmemory"
+        assert state.name in reason
+        assert "broker.example:9092" in reason
+
+    def test_explicit_kafka_bootstrap_override_takes_precedence_over_env(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        monkeypatch.setenv("KAFKA_BOOTSTRAP_SERVERS", "env-broker.example:9092")
+        seen: dict[str, str] = {}
+
+        def _probe(*, bootstrap_servers: str) -> ModelProbeResult:
+            seen["bootstrap_servers"] = bootstrap_servers
+            return ModelProbeResult(
+                state=EnumProbeState.HEALTHY,
+                reason="stub healthy",
+                backend_label="event_bus_kafka",
+            )
+
+        monkeypatch.setattr(cli_delegate, "probe_kafka", _probe)
+
+        bus, _reason = resolve_default_bus(kafka_bootstrap="override.example:9092")
+
+        assert bus == "kafka"
+        assert seen["bootstrap_servers"] == "override.example:9092"

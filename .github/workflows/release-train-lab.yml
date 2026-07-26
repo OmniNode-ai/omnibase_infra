@@ -1,0 +1,276 @@
+---
+# SPDX-FileCopyrightText: 2025 OmniNode.ai Inc.
+# SPDX-License-Identifier: MIT
+
+# release-train-lab.yml (OMN-14889)
+#
+# WHY THIS EXISTS
+#   Runtime updates go through release trains; deploying to a dev/stability
+#   lab lane is "push a git tag" (operator directive, 2026-07-20). This
+#   workflow is the two halves of that mechanism:
+#
+#     cut-tag  (workflow_dispatch) -- cuts + pushes a
+#              lab/<lane>/<utc>-<shortsha> tag via cut_release_train_tag.sh
+#              (extracted from cut-lab-ref.sh's tag logic, OMN-14438).
+#     deploy   -- calls refresh_stability_lane.sh (OMN-14873) for a
+#              stability tag, or refresh_dev_lane.sh (OMN-14889) for a dev
+#              tag. Fires on EITHER of two paths:
+#                (a) CHAINED, same run (needs: cut-tag): after an
+#                    execute-mode cut-tag, keyed off its `tag` output. This
+#                    is the ONLY path a runner-cut tag can take -- refs
+#                    created with the job's own GITHUB_TOKEN do NOT deliver
+#                    `push` events (GitHub's documented anti-recursion
+#                    suppression; OMN-14957, OMN-9426 class), so `push:
+#                    tags:` can NEVER fire from the cut-tag job's own gh-api
+#                    ref creation. A previous revision of this file claimed
+#                    otherwise; run 29977781670 disproved it live.
+#                (b) push: tags: lab/dev/**, lab/stability/** -- still fires
+#                    for tags pushed with NON-GITHUB_TOKEN credentials (an
+#                    operator workstation push, or a delete+recreate of the
+#                    ref with a personal credential).
+#
+#   Both jobs run on the DEDICATED omnibase-deploy runner (see
+#   docker/docker-compose.runners.yml `omninode-deploy-runner`), never the
+#   shared omnibase-ci fleet -- those scripts need real host-path git access
+#   to the $OMNI_HOME sibling clones, which the shared fleet deliberately
+#   does not have (OMN-14889 Fork 1).
+#
+#   PROD IS NOT TOUCHED HERE. A `v*` tag drives release.yml -> PyPI publish
+#   (Train 2) on a completely separate path; promoting that digest to the
+#   .201 prod lane still routes through node_redeploy_orchestrator's
+#   prod-promotion gate (CLAUDE.md Rules 2a/12) -- nothing in this workflow
+#   can satisfy or bypass that gate. This workflow only ever triggers on
+#   `lab/dev/**` / `lab/stability/**` tag names, which is a disjoint
+#   namespace from `v*`.
+#
+# PROVISIONING STATUS (OMN-14889, verified live 2026-07-21): the runner IS
+# registered and ONLINE. `gh api repos/OmniNode-ai/omnibase_infra/actions/
+# runners` returns omninode-deploy-runner status=online carrying labels
+# [self-hosted, Linux, X64, omnibase-deploy] -- the exact label set both jobs
+# below target. Note it is registered at the REPOSITORY level, not the org
+# level (the runbook's original org-scoped provisioning recipe predates this).
+#
+# THIS MECHANISM IS LIVE, NOT DORMANT. Pushing a `lab/dev/**` or
+# `lab/stability/**` tag DOES dispatch the `deploy` job onto that runner and
+# DOES run the lane refresh in execute mode against the real .201 lane. That
+# is the intended design (dev + stability lanes are pre-authorized), but do
+# NOT treat a lab tag push as a no-op or a rehearsal -- it is a real deploy.
+# Note also that the trigger only requires this workflow file to exist at the
+# TAGGED COMMIT; a tag cut from a feature branch fires it just as a tag on
+# dev would.
+#
+# HOST-SIDE GIT ACCESS (OMN-14900). Five runs on 2026-07-21T03:59-04:19Z all
+# failed in the `Refresh stability lane` step against the then-mounted SHARED
+# /data/omninode/omni_home clones (dubious ownership 128, FETCH_HEAD EACCES
+# 255, `'dev' is already checked out at .../runtime-sync-worktrees/...` 128)
+# -- all before any container action, so no lane was mutated. The committed
+# fix gives the deploy runner a PRIVATE OMNI_HOME (DEPLOY_RUNNER_OMNI_HOME
+# in docker/docker-compose.runners.yml -- dedicated runner-uid-owned clones,
+# identical container path, shared mount REMOVED) plus scoped
+# `git -c safe.directory=<clone>` on every git invocation in the
+# runtime_build scripts, plus automatic clone provisioning
+# (ensure_runner_clones.sh). NOTE: the compose-side half only takes effect
+# when the runner container is RECREATED from the committed compose file --
+# an operator-gated action (the live container also carries the OMN-13915
+# zombie). Until that recreate, the live container still runs its old
+# hand-edited config. See docker/docker-compose.runners.yml and
+# docs/runbooks/release-train-lab.md.
+#
+# The cut-tag job creates the GitHub tag ref via `gh api` with the job's own
+# GITHUB_TOKEN (job-level `permissions: contents: write`) -- the runner's
+# private clones are anonymous public checkouts with no push credentials, so
+# `git push` from a clone is not a supported tag source (OMN-14900).
+
+name: release-train-lab
+
+on:
+  workflow_dispatch:
+    inputs:
+      lane:
+        description: "Lab lane to cut a release-train tag for"
+        required: true
+        type: choice
+        options:
+          - dev
+          - stability
+      ref:
+        description: "Ref to tag (branch|tag|sha); defaults to origin/dev"
+        required: false
+        default: origin/dev
+      execute:
+        description: "Actually cut + push the tag (false = dry-run plan only)"
+        required: false
+        type: boolean
+        default: false
+  push:
+    tags:
+      - "lab/dev/**"
+      - "lab/stability/**"
+
+permissions:
+  contents: read
+
+concurrency:
+  # One release-train action per lane at a time -- a second cut/deploy for
+  # the same lane while one is in flight is never safe to run concurrently
+  # (both mutate the same OMNI_HOME sibling clones + lane containers).
+  group: release-train-lab-${{ github.event.inputs.lane || (contains(github.ref_name, 'lab/dev/') && 'dev' || 'stability') }}
+  cancel-in-progress: false
+
+jobs:
+  cut-tag:
+    name: Cut + push release-train tag
+    if: github.event_name == 'workflow_dispatch'
+    runs-on: [self-hosted, omnibase-deploy]
+    timeout-minutes: 5
+    # OMN-14957: the cut tag name is surfaced as a job output so the deploy
+    # job can chain off it in this same run -- the GITHUB_TOKEN-created ref
+    # delivers no push event, so in-run chaining is the only trigger path
+    # for a runner-cut tag.
+    outputs:
+      tag: ${{ steps.cut.outputs.tag }}
+    # OMN-14900: the GitHub tag ref is created via `gh api` with this job's
+    # token (the private runner clones carry no push credentials). Job-level
+    # override of the workflow's top-level `contents: read`.
+    permissions:
+      contents: write
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+
+      - name: Cut + push tag
+        id: cut
+        env:
+          LANE: ${{ inputs.lane }}
+          REF: ${{ inputs.ref }}
+          EXECUTE: ${{ inputs.execute }}
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          : "${OMNI_HOME:?OMNI_HOME must be set in the omnibase-deploy runner environment}"
+          args=(--lane "${LANE}" --ref "${REF}")
+          if [[ "${EXECUTE}" == "true" ]]; then
+            args+=(--execute)
+          fi
+          # In execute mode the script appends `tag=<TAG>` to $GITHUB_OUTPUT
+          # itself (cut_release_train_tag.sh, OMN-14957).
+          bash scripts/runtime_build/cut_release_train_tag.sh "${args[@]}"
+
+  deploy:
+    name: Deploy triggering tag to its lane
+    # Two trigger paths (see header): a real tag push (non-GITHUB_TOKEN
+    # credentials only), or chained in-run after an execute-mode cut-tag.
+    # `!cancelled()` is required: on a push event cut-tag is SKIPPED, and
+    # without it the implicit success() dependency would skip this job too.
+    needs: [cut-tag]
+    if: >-
+      !cancelled() && (
+        github.event_name == 'push' ||
+        (github.event_name == 'workflow_dispatch' &&
+         inputs.execute &&
+         needs.cut-tag.result == 'success' &&
+         needs.cut-tag.outputs.tag != '')
+      )
+    runs-on: [self-hosted, omnibase-deploy]
+    timeout-minutes: 60
+    env:
+      # Single resolution point for the triggering tag: the pushed ref on a
+      # push event, the freshly cut tag on the chained path.
+      TRIGGERING_TAG: ${{ github.event_name == 'push' && github.ref_name || needs.cut-tag.outputs.tag }}
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+        with:
+          # Run the deploy scripts AT THE TAGGED COMMIT on both trigger
+          # paths (a push checkout does this implicitly; the chained path
+          # must ask for the tag explicitly).
+          ref: ${{ github.event_name == 'push' && github.ref || format('refs/tags/{0}', needs.cut-tag.outputs.tag) }}
+
+      - name: Determine lane from tag
+        id: lane
+        env:
+          TAG: ${{ env.TRIGGERING_TAG }}
+        run: |
+          set -euo pipefail
+          case "${TAG}" in
+            lab/dev/*)
+              echo "lane=dev" >> "${GITHUB_OUTPUT}" ;;
+            lab/stability/*)
+              echo "lane=stability" >> "${GITHUB_OUTPUT}" ;;
+            *)
+              echo "::error::unrecognized release-train tag pattern: ${TAG}"
+              exit 1 ;;
+          esac
+
+      - name: Refresh stability lane
+        if: steps.lane.outputs.lane == 'stability'
+        env:
+          TAG: ${{ env.TRIGGERING_TAG }}
+        run: |
+          set -euo pipefail
+          : "${OMNI_HOME:?OMNI_HOME must be set in the omnibase-deploy runner environment}"
+          set +e
+          bash scripts/runtime_build/refresh_stability_lane.sh --ref "${TAG}" --execute
+          echo "REFRESH_EXIT=$?" >> "${GITHUB_ENV}"
+          set -e
+
+      - name: Refresh dev lane
+        if: steps.lane.outputs.lane == 'dev'
+        env:
+          TAG: ${{ env.TRIGGERING_TAG }}
+        run: |
+          set -euo pipefail
+          : "${OMNI_HOME:?OMNI_HOME must be set in the omnibase-deploy runner environment}"
+          set +e
+          bash scripts/runtime_build/refresh_dev_lane.sh --ref "${TAG}" --triggering-tag "${TAG}" --execute
+          echo "REFRESH_EXIT=$?" >> "${GITHUB_ENV}"
+          set -e
+
+      - name: Publish receipt to job summary
+        if: always()
+        env:
+          LANE: ${{ steps.lane.outputs.lane }}
+          TAG: ${{ env.TRIGGERING_TAG }}
+        run: |
+          set -euo pipefail
+          if [[ "${LANE}" == "stability" ]]; then
+            state_dir="${HOME}/.omnibase/state/stability_lane_refresh"
+          elif [[ "${LANE}" == "dev" ]]; then
+            state_dir="${HOME}/.omnibase/state/dev_lane_refresh"
+          else
+            state_dir=""
+          fi
+          receipt="${state_dir}/latest.json"
+          {
+            echo "## Release-train deploy receipt"
+            echo
+            echo "- triggering tag: \`${TAG}\`"
+            echo "- lane: \`${LANE}\`"
+            echo "- refresh exit code: \`${REFRESH_EXIT:-unknown}\`"
+            echo
+            if [[ -z "${state_dir}" ]]; then
+              echo "No receipt is associated with an unrecognized release-train lane."
+            elif [[ -f "${receipt}" ]]; then
+              echo '```json'
+              # Augment (never mutate) the receipt with triggering_tag/lane for
+              # the summary view -- refresh_stability_lane.sh is reused
+              # VERBATIM (OMN-14889 design decision) and does not itself know
+              # about the tag that triggered it.
+              jq --arg tag "${TAG}" --arg lane "${LANE}" \
+                '. + {triggering_tag: (.triggering_tag // $tag), lane: (.lane // $lane)}' \
+                "${receipt}"
+              echo '```'
+            else
+              echo "_no receipt found at ${receipt}_"
+            fi
+          } >> "${GITHUB_STEP_SUMMARY}"
+
+      - name: Fail the job if the refresh did not succeed
+        if: always()
+        run: |
+          set -euo pipefail
+          exit_code="${REFRESH_EXIT:-2}"
+          if [[ "${exit_code}" != "0" ]]; then
+            echo "::error::release-train deploy did not succeed (refresh script exit ${exit_code}); see job summary for the receipt."
+            exit 1
+          fi

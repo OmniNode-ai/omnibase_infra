@@ -1,11 +1,17 @@
 # SPDX-FileCopyrightText: 2025 OmniNode.ai Inc.
 # SPDX-License-Identifier: MIT
-"""Unit tests for scripts/audit_branch_protection_lib.py (OMN-9034).
+"""Unit tests for scripts/audit_branch_protection_lib.py (OMN-9034, OMN-14696).
 
-Tests validate Check A / Check B / fix-payload logic by importing the lib
-directly and injecting a fake `gh` callable that returns canned JSON.
-No subprocess/bash/gh invocations happen at unit-test time — that's the
-whole point of the lib extraction (OMN-9034 thread 8).
+Tests validate Check A (reviews, via GraphQL) / Check B (orphans) / fix-payload
+logic by importing the lib directly and injecting a fake `gh` callable that
+returns canned JSON. No subprocess/bash/gh invocations happen at unit-test time
+— that's the whole point of the lib extraction (OMN-9034 thread 8).
+
+OMN-14696 extends the audit to the `dev` branch (per-branch attribution) and
+adds the load-bearing SAFETY invariant that a non-`main` audit is strictly
+READ-ONLY: it never returns a fix-eligible `protection_json`, never reads
+default-branch check-runs (Check B), and therefore can never drive a PUT to a
+dev branch's protection.
 """
 
 from __future__ import annotations
@@ -59,16 +65,46 @@ def _check_runs_payload(names: list[str]) -> str:
     )
 
 
+def _graphql_payload(rules: list[tuple[str, bool]]) -> str:
+    """Build a GraphQL branchProtectionRules response.
+
+    `rules` is a list of `(pattern, requires_approving_reviews)` tuples.
+    """
+    return json.dumps(
+        {
+            "data": {
+                "repository": {
+                    "branchProtectionRules": {
+                        "nodes": [
+                            {"pattern": p, "requiresApprovingReviews": r}
+                            for p, r in rules
+                        ]
+                    }
+                }
+            }
+        }
+    )
+
+
 def _fake_gh(
     protection_json: str,
     commits: list[str],
     check_runs_by_sha: dict[str, list[str]],
+    graphql_json: str | None = None,
 ) -> tuple[lib.GhCaller, list[list[str]]]:
-    """Build a fake `gh` callable and a call-log list for assertion."""
+    """Build a fake `gh` callable and a call-log list for assertion.
+
+    `graphql_json` is returned for the `gh api graphql ...` review-enforcement
+    query. When None, the GraphQL call fails (rc=1) to simulate an unreachable
+    repo (e.g. no CROSS_REPO_PAT).
+    """
     calls: list[list[str]] = []
 
     def gh(args: list[str]) -> tuple[int, str]:
         calls.append(args)
+        # Review-enforcement GraphQL query (checked first — has no URL path).
+        if "graphql" in args:
+            return (0, graphql_json) if graphql_json is not None else (1, "")
         url = next((a for a in args if "/" in a and not a.startswith("-")), "")
         if url.endswith("/branches/main/protection"):
             return 0, protection_json
@@ -85,26 +121,69 @@ def _fake_gh(
 
 
 # ---------------------------------------------------------------------------
-# parse_required_approving_review_count
+# parse_requires_approving_reviews — GraphQL review-enforcement signal (Check A)
 # ---------------------------------------------------------------------------
 
 
-class TestParseRac:
-    def test_zero_when_field_absent(self) -> None:
-        assert lib.parse_required_approving_review_count("{}") == 0
+class TestParseRequiresApprovingReviews:
+    def test_true_when_enforced(self) -> None:
+        payload = _graphql_payload([("main", True)])
+        assert lib.parse_requires_approving_reviews(payload, "main") is True
 
-    def test_zero_when_value_zero(self) -> None:
-        assert (
-            lib.parse_required_approving_review_count(_protection_payload(rac=0)) == 0
+    def test_false_when_not_enforced(self) -> None:
+        payload = _graphql_payload([("main", False)])
+        assert lib.parse_requires_approving_reviews(payload, "main") is False
+
+    def test_selects_the_requested_branch(self) -> None:
+        """The dev rule (False) must be returned for `dev`, not the main rule."""
+        payload = _graphql_payload([("main", True), ("dev", False)])
+        assert lib.parse_requires_approving_reviews(payload, "dev") is False
+        assert lib.parse_requires_approving_reviews(payload, "main") is True
+
+    def test_none_when_no_matching_branch(self) -> None:
+        """No rule for `dev` → None (unknown), NOT an inferred enforcement."""
+        payload = _graphql_payload([("main", True)])
+        assert lib.parse_requires_approving_reviews(payload, "dev") is None
+
+    def test_none_on_malformed_json(self) -> None:
+        assert lib.parse_requires_approving_reviews("not json", "main") is None
+
+    def test_none_when_nodes_absent(self) -> None:
+        assert lib.parse_requires_approving_reviews("{}", "main") is None
+
+    def test_does_not_use_rest_count(self) -> None:
+        """Guard against regression to the phantom REST count: a REST-shaped
+        payload (with required_approving_review_count) carries no GraphQL nodes,
+        so the parser returns None rather than reading the phantom count.
+        """
+        rest_like = _protection_payload(rac=1)
+        assert lib.parse_requires_approving_reviews(rest_like, "main") is None
+
+
+class TestFetchRequiresApprovingReviews:
+    def test_reachable_and_enforced(self) -> None:
+        gh, _ = _fake_gh("", [], {}, graphql_json=_graphql_payload([("main", True)]))
+        reachable, enforced = lib.fetch_requires_approving_reviews(
+            OWNER, REPO, "main", gh
         )
+        assert reachable is True
+        assert enforced is True
 
-    def test_extracts_positive_value(self) -> None:
-        assert (
-            lib.parse_required_approving_review_count(_protection_payload(rac=3)) == 3
+    def test_unreachable_when_gh_fails(self) -> None:
+        gh, _ = _fake_gh("", [], {}, graphql_json=None)  # graphql rc=1
+        reachable, enforced = lib.fetch_requires_approving_reviews(
+            OWNER, REPO, "dev", gh
         )
+        assert reachable is False
+        assert enforced is None
 
-    def test_malformed_json_returns_zero(self) -> None:
-        assert lib.parse_required_approving_review_count("not json") == 0
+    def test_reachable_but_no_rule_for_branch(self) -> None:
+        gh, _ = _fake_gh("", [], {}, graphql_json=_graphql_payload([("main", False)]))
+        reachable, enforced = lib.fetch_requires_approving_reviews(
+            OWNER, REPO, "dev", gh
+        )
+        assert reachable is True
+        assert enforced is None
 
 
 # ---------------------------------------------------------------------------
@@ -274,41 +353,46 @@ class TestCollectSeen:
 
 
 # ---------------------------------------------------------------------------
-# audit_repo — end-to-end (still injected, no real gh)
+# audit_repo — MAIN branch, end-to-end (still injected, no real gh)
 # ---------------------------------------------------------------------------
 
 
-class TestAuditRepo:
+class TestAuditRepoMain:
     def test_clean_repo_returns_ok(self) -> None:
         gh, _ = _fake_gh(
-            _protection_payload(rac=0, contexts=["ci / build"]),
+            _protection_payload(contexts=["ci / build"]),
             ["sha1"],
             {"sha1": ["ci / build", "ci / lint"]},
+            graphql_json=_graphql_payload([("main", False)]),
         )
         result = lib.audit_repo(OWNER, REPO, gh)
         assert result["status"] == "ok"
-        assert result["rac"] == 0
+        assert result["branch"] == "main"
+        assert result["review_enforced"] is False
         assert result["orphan_contexts"] == []
-        # Explicit behavioral assertion — not returncode-in-(0,1) smoke test
+        # Explicit behavioral assertion — not a returncode-in-(0,1) smoke test
         assert REPO in result["message"]
+        assert "main" in result["message"]
 
-    def test_rac_violation_is_flagged(self) -> None:
+    def test_reviews_enforced_is_flagged(self) -> None:
         gh, _ = _fake_gh(
-            _protection_payload(rac=1, contexts=[]),
+            _protection_payload(contexts=[]),
             ["sha1"],
             {"sha1": []},
+            graphql_json=_graphql_payload([("main", True)]),
         )
         result = lib.audit_repo(OWNER, REPO, gh)
         assert result["status"] == "violation"
-        assert result["rac"] == 1
+        assert result["review_enforced"] is True
         assert "Check A" in result["message"]
-        assert "must be 0" in result["message"]
+        assert "requiresApprovingReviews=true" in result["message"]
 
     def test_orphan_context_is_flagged(self) -> None:
         gh, _ = _fake_gh(
-            _protection_payload(rac=0, contexts=["ci / old-job"]),
+            _protection_payload(contexts=["ci / old-job"]),
             ["sha1", "sha2"],
             {"sha1": ["ci / new-job"], "sha2": ["ci / lint"]},
+            graphql_json=_graphql_payload([("main", False)]),
         )
         result = lib.audit_repo(OWNER, REPO, gh)
         assert result["status"] == "violation"
@@ -318,24 +402,133 @@ class TestAuditRepo:
 
     def test_inaccessible_protection_returns_skip(self) -> None:
         def gh(args: list[str]) -> tuple[int, str]:
-            return 1, ""  # gh api call fails
+            return 1, ""  # every gh call (incl. graphql) fails
 
         result = lib.audit_repo(OWNER, REPO, gh)
         assert result["status"] == "skip"
+        assert result["protection_json"] == ""
         assert REPO in result["message"]
 
     def test_both_checks_fail_accumulates_messages(self) -> None:
         gh, _ = _fake_gh(
-            _protection_payload(rac=2, contexts=["ci / missing"]),
+            _protection_payload(contexts=["ci / missing"]),
             ["sha1"],
             {"sha1": ["ci / present"]},
+            graphql_json=_graphql_payload([("main", True)]),
         )
         result = lib.audit_repo(OWNER, REPO, gh)
         assert result["status"] == "violation"
-        assert result["rac"] == 2
+        assert result["review_enforced"] is True
         assert result["orphan_contexts"] == ["ci / missing"]
         assert "Check A" in result["message"]
         assert "Check B" in result["message"]
+
+    def test_main_violation_returns_fix_eligible_payload(self) -> None:
+        """On a MAIN violation the raw protection payload IS returned so the
+        main-only --fix path can build a PUT body. (Contrast with dev, below.)
+        """
+        gh, _ = _fake_gh(
+            _protection_payload(contexts=[]),
+            ["sha1"],
+            {"sha1": []},
+            graphql_json=_graphql_payload([("main", True)]),
+        )
+        result = lib.audit_repo(OWNER, REPO, gh)
+        assert result["status"] == "violation"
+        assert result["protection_json"] != ""
+        # And the fix payload is buildable from it.
+        payload = lib.build_fix_payload(result["protection_json"])
+        assert payload["required_pull_request_reviews"] is None
+
+
+# ---------------------------------------------------------------------------
+# audit_repo — DEV branch: READ-ONLY, GraphQL-only, never fix-eligible (OMN-14696)
+# ---------------------------------------------------------------------------
+
+
+class TestAuditRepoDev:
+    def test_dev_reviews_not_enforced_is_ok(self) -> None:
+        gh, _ = _fake_gh(
+            "", [], {}, graphql_json=_graphql_payload([("main", False), ("dev", False)])
+        )
+        result = lib.audit_repo(OWNER, REPO, gh, branch="dev")
+        assert result["status"] == "ok"
+        assert result["branch"] == "dev"
+        assert result["review_enforced"] is False
+        assert "dev" in result["message"]
+
+    def test_dev_reviews_enforced_is_violation(self) -> None:
+        gh, _ = _fake_gh(
+            "", [], {}, graphql_json=_graphql_payload([("main", False), ("dev", True)])
+        )
+        result = lib.audit_repo(OWNER, REPO, gh, branch="dev")
+        assert result["status"] == "violation"
+        assert result["review_enforced"] is True
+        assert "Check A" in result["message"]
+        assert "dev" in result["message"]
+
+    def test_dev_graphql_unreachable_returns_skip(self) -> None:
+        gh, _ = _fake_gh("", [], {}, graphql_json=None)  # graphql rc=1
+        result = lib.audit_repo(OWNER, REPO, gh, branch="dev")
+        assert result["status"] == "skip"
+        assert "dev" in result["message"]
+
+    def test_dev_no_matching_rule_is_ok_not_violation(self) -> None:
+        """A protected repo whose GraphQL has no `dev` rule → unknown → NON-failing
+        (never inferred as enforced)."""
+        gh, _ = _fake_gh("", [], {}, graphql_json=_graphql_payload([("main", False)]))
+        result = lib.audit_repo(OWNER, REPO, gh, branch="dev")
+        assert result["status"] == "ok"
+        assert result["review_enforced"] is None
+
+    def test_dev_audit_never_returns_fix_eligible_payload(self) -> None:
+        """SAFETY INVARIANT: a non-main audit ALWAYS returns an empty
+        protection_json — on ok and on violation — so the --fix path can never
+        build/PUT a payload for a dev branch's protection.
+        """
+        for rule, expected_status in [
+            (("dev", False), "ok"),
+            (("dev", True), "violation"),
+        ]:
+            gh, _ = _fake_gh("", [], {}, graphql_json=_graphql_payload([rule]))
+            result = lib.audit_repo(OWNER, REPO, gh, branch="dev")
+            assert result["status"] == expected_status
+            assert result["protection_json"] == "", (
+                f"dev audit ({expected_status}) leaked a fix-eligible payload"
+            )
+
+    def test_dev_audit_never_reads_main_protection_or_check_runs(self) -> None:
+        """SAFETY INVARIANT: a dev audit performs ONLY the GraphQL review query.
+        It must NOT fetch REST `branches/main/protection` (Check B's default-branch
+        read + the fix payload source) nor any `check-runs` — those are main-scoped.
+        """
+        gh, calls = _fake_gh(
+            _protection_payload(contexts=["ci / would-be-orphan"]),
+            ["sha1"],
+            {"sha1": []},
+            graphql_json=_graphql_payload([("dev", False)]),
+        )
+        result = lib.audit_repo(OWNER, REPO, gh, branch="dev")
+        assert result["status"] == "ok"
+        assert result["orphan_contexts"] == []  # Check B did not run
+        flat = [" ".join(c) for c in calls]
+        assert all("graphql" in c for c in calls), (
+            f"dev audit issued a non-GraphQL gh call: {flat}"
+        )
+        assert not any("/branches/main/protection" in c for c in flat)
+        assert not any("/check-runs" in c for c in flat)
+
+
+# ---------------------------------------------------------------------------
+# DEV_EXEMPT_REPOS — must match onex_change_control#4281 / OMN-14683
+# ---------------------------------------------------------------------------
+
+
+def test_dev_exempt_repos_matches_sibling_guard() -> None:
+    """The dev-exempt set must match onex_change_control#4281's DEV_EXEMPT_REPOS
+    so dev-unprotected repos don't false-fail (OMN-14683 / OMN-14696)."""
+    assert frozenset({"omnistream", "omniweb"}) == lib.DEV_EXEMPT_REPOS
+    assert isinstance(lib.DEV_EXEMPT_REPOS, frozenset)
 
 
 # ---------------------------------------------------------------------------

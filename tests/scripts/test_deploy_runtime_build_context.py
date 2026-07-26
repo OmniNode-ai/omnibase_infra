@@ -286,6 +286,8 @@ def test_stage_workspace_emits_build_sha_marker() -> None:
 
     # OMN-13030 refactored the SHA capture to a variable (reused for the
     # per-repo VCS provenance manifest), so assert the marker is still written
-    # from the resolved HEAD SHA.
-    assert 'git -C "${src}" rev-parse HEAD' in stage_script
+    # from the resolved HEAD SHA. OMN-14900 scoped the probe with
+    # `-c safe.directory=${src}` so a uid-mismatched invoker (the deploy
+    # runner container) is never rejected with "dubious ownership".
+    assert 'git -c "safe.directory=${src}" -C "${src}" rev-parse HEAD' in stage_script
     assert 'echo "${vcs_ref}" > "${dst}/.build-sha"' in stage_script

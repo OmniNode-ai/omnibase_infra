@@ -151,6 +151,9 @@ ALLOWED_ROOT_DIRECTORIES: frozenset[str] = frozenset(
         "workspace",
         # Pre-commit hook scripts directory
         ".pre-commit-hooks",
+        # OMN-14350: frozen ratchet-allowlist baselines (non-canonical-class, etc.)
+        # consumed by the omnibase_core remote pre-commit hooks + CI ratchet gates.
+        ".onex_ratchets",
         # Hidden directories (generally allowed)
         ".git",
         ".github",

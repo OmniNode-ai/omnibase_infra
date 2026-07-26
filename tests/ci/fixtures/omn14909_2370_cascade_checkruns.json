@@ -1,0 +1,744 @@
+{
+  "_provenance": {
+    "pr": "OmniNode-ai/omnibase_infra#2370",
+    "head_sha": "e5404e36f22affb4b86f142e6ab8f6b1a5fc06bc",
+    "captured_at": "2026-07-21",
+    "captured_via": "gh api repos/OmniNode-ai/omnibase_infra/commits/<sha>/check-runs --paginate",
+    "note": "Real blocked pre-merge head of #2370 exhibiting the CI-01 upstream-failure-explosion cascade (missing Evidence-Source -> occ-preflight eligibility red). Fields reduced to name/status/conclusion/run_id."
+  },
+  "head_sha": "e5404e36f22affb4b86f142e6ab8f6b1a5fc06bc",
+  "check_runs": [
+    {
+      "name": "AI-Slop Pattern Check (strict, PR diff)",
+      "status": "completed",
+      "conclusion": "skipped",
+      "run_id": "29793546352"
+    },
+    {
+      "name": "Arch Invariants (OMN-3343)",
+      "status": "completed",
+      "conclusion": "skipped",
+      "run_id": "29793546352"
+    },
+    {
+      "name": "CI Naming Convention",
+      "status": "completed",
+      "conclusion": "skipped",
+      "run_id": "29793546357"
+    },
+    {
+      "name": "CI Summary",
+      "status": "completed",
+      "conclusion": "failure",
+      "run_id": "29793546352"
+    },
+    {
+      "name": "CI Tests Gate",
+      "status": "completed",
+      "conclusion": "skipped",
+      "run_id": "29793546352"
+    },
+    {
+      "name": "Canonical Inference Gate",
+      "status": "completed",
+      "conclusion": "skipped",
+      "run_id": "29793546424"
+    },
+    {
+      "name": "Check architecture handshake",
+      "status": "completed",
+      "conclusion": "skipped",
+      "run_id": "29793546420"
+    },
+    {
+      "name": "CodeQL",
+      "status": "completed",
+      "conclusion": "skipped",
+      "run_id": "29793546344"
+    },
+    {
+      "name": "Compose Required-Env Coverage (OMN-5439)",
+      "status": "completed",
+      "conclusion": "skipped",
+      "run_id": "29793546352"
+    },
+    {
+      "name": "Contract Compliance",
+      "status": "completed",
+      "conclusion": "skipped",
+      "run_id": "29793546352"
+    },
+    {
+      "name": "Contract Compliance Check",
+      "status": "completed",
+      "conclusion": "skipped",
+      "run_id": "29793546352"
+    },
+    {
+      "name": "Contract Path Pre-Flight",
+      "status": "completed",
+      "conclusion": "skipped",
+      "run_id": "29793546352"
+    },
+    {
+      "name": "Contract Sync Gate (Wave C) [OMN-8915]",
+      "status": "completed",
+      "conclusion": "skipped",
+      "run_id": "29793546352"
+    },
+    {
+      "name": "Cross-Repo Migration Conflicts",
+      "status": "completed",
+      "conclusion": "skipped",
+      "run_id": "29793546352"
+    },
+    {
+      "name": "Demo Loop Gate",
+      "status": "completed",
+      "conclusion": "skipped",
+      "run_id": "29793546352"
+    },
+    {
+      "name": "Dep Provenance Gate",
+      "status": "completed",
+      "conclusion": "skipped",
+      "run_id": "29793546439"
+    },
+    {
+      "name": "Detect Changes",
+      "status": "completed",
+      "conclusion": "skipped",
+      "run_id": "29793546352"
+    },
+    {
+      "name": "Duplication Sweep",
+      "status": "completed",
+      "conclusion": "skipped",
+      "run_id": "29793546330"
+    },
+    {
+      "name": "Effect-Assertion Gate (RT-5)",
+      "status": "completed",
+      "conclusion": "skipped",
+      "run_id": "29793546352"
+    },
+    {
+      "name": "Enforce clean + promoted build source",
+      "status": "completed",
+      "conclusion": "skipped",
+      "run_id": "29793546326"
+    },
+    {
+      "name": "Enforce validator-requirements.yaml (OMN-13291)",
+      "status": "completed",
+      "conclusion": "skipped",
+      "run_id": "29793546309"
+    },
+    {
+      "name": "Fingerprint Check",
+      "status": "completed",
+      "conclusion": "skipped",
+      "run_id": "29793546352"
+    },
+    {
+      "name": "Handler Contract Compliance",
+      "status": "completed",
+      "conclusion": "skipped",
+      "run_id": "29793546357"
+    },
+    {
+      "name": "Infra Node Handler Ownership",
+      "status": "completed",
+      "conclusion": "skipped",
+      "run_id": "29793546352"
+    },
+    {
+      "name": "Integration Silent-Skip Guard (OMN-14172)",
+      "status": "completed",
+      "conclusion": "skipped",
+      "run_id": "29793546352"
+    },
+    {
+      "name": "Integration Test Coverage",
+      "status": "completed",
+      "conclusion": "skipped",
+      "run_id": "29793546306"
+    },
+    {
+      "name": "Integration Test Removal Gate",
+      "status": "completed",
+      "conclusion": "skipped",
+      "run_id": "29793546306"
+    },
+    {
+      "name": "Kafka Boundary Compat (OMN-3256)",
+      "status": "completed",
+      "conclusion": "skipped",
+      "run_id": "29793546352"
+    },
+    {
+      "name": "Kafka Schema Handshake (OMN-3411)",
+      "status": "completed",
+      "conclusion": "skipped",
+      "run_id": "29793546352"
+    },
+    {
+      "name": "Lint",
+      "status": "completed",
+      "conclusion": "skipped",
+      "run_id": "29793546352"
+    },
+    {
+      "name": "Migration Freeze Check",
+      "status": "completed",
+      "conclusion": "skipped",
+      "run_id": "29793546352"
+    },
+    {
+      "name": "Migration Integration Test",
+      "status": "completed",
+      "conclusion": "skipped",
+      "run_id": "29793546352"
+    },
+    {
+      "name": "No bare compose teardown",
+      "status": "completed",
+      "conclusion": "skipped",
+      "run_id": "29793546317"
+    },
+    {
+      "name": "ONEX Validators",
+      "status": "completed",
+      "conclusion": "skipped",
+      "run_id": "29793546352"
+    },
+    {
+      "name": "Omni Standards Gate",
+      "status": "completed",
+      "conclusion": "skipped",
+      "run_id": "29793546357"
+    },
+    {
+      "name": "PEP 604 Type Union Check (UP007)",
+      "status": "completed",
+      "conclusion": "skipped",
+      "run_id": "29793546357"
+    },
+    {
+      "name": "Plugin ENV->Service Completeness (OMN-4313)",
+      "status": "completed",
+      "conclusion": "skipped",
+      "run_id": "29793546352"
+    },
+    {
+      "name": "Precommit Parity Gate",
+      "status": "completed",
+      "conclusion": "success",
+      "run_id": "29793546153"
+    },
+    {
+      "name": "Prod promotion-lineage guard tests",
+      "status": "completed",
+      "conclusion": "skipped",
+      "run_id": "29793546326"
+    },
+    {
+      "name": "Publish PR Webhook Event",
+      "status": "completed",
+      "conclusion": "skipped",
+      "run_id": "29793546461"
+    },
+    {
+      "name": "Runner Disk Preflight",
+      "status": "completed",
+      "conclusion": "skipped",
+      "run_id": "29793546307"
+    },
+    {
+      "name": "Runtime Boot Smoke (compose)",
+      "status": "completed",
+      "conclusion": "skipped",
+      "run_id": "29793546352"
+    },
+    {
+      "name": "Seed Provenance Advisory Check",
+      "status": "completed",
+      "conclusion": "success",
+      "run_id": "29793544626"
+    },
+    {
+      "name": "Seed Provenance Advisory Check",
+      "status": "completed",
+      "conclusion": "skipped",
+      "run_id": "29793546334"
+    },
+    {
+      "name": "Seed Provenance Advisory Check",
+      "status": "completed",
+      "conclusion": "success",
+      "run_id": "29798163609"
+    },
+    {
+      "name": "Stale TODO Gate",
+      "status": "completed",
+      "conclusion": "skipped",
+      "run_id": "29793546445"
+    },
+    {
+      "name": "Test-Failure Ratchet Gate",
+      "status": "completed",
+      "conclusion": "skipped",
+      "run_id": "29793546352"
+    },
+    {
+      "name": "Tests (Split ${{ matrix.split }}/${{ needs.detect-changes.outputs.split_count }})",
+      "status": "completed",
+      "conclusion": "skipped",
+      "run_id": "29793546352"
+    },
+    {
+      "name": "Topic Drift Check",
+      "status": "completed",
+      "conclusion": "skipped",
+      "run_id": "29793546352"
+    },
+    {
+      "name": "Topic Enum Drift Check",
+      "status": "completed",
+      "conclusion": "skipped",
+      "run_id": "29793546352"
+    },
+    {
+      "name": "Topic Naming Lint",
+      "status": "completed",
+      "conclusion": "skipped",
+      "run_id": "29793546352"
+    },
+    {
+      "name": "Type Safety Validation",
+      "status": "completed",
+      "conclusion": "skipped",
+      "run_id": "29793546357"
+    },
+    {
+      "name": "URL Authority Gate",
+      "status": "completed",
+      "conclusion": "skipped",
+      "run_id": "29793546396"
+    },
+    {
+      "name": "Version Pin Compliance",
+      "status": "completed",
+      "conclusion": "skipped",
+      "run_id": "29793546352"
+    },
+    {
+      "name": "Writer-Migration Coupling Check",
+      "status": "completed",
+      "conclusion": "skipped",
+      "run_id": "29793546352"
+    },
+    {
+      "name": "call",
+      "status": "completed",
+      "conclusion": "skipped",
+      "run_id": "29793546342"
+    },
+    {
+      "name": "call-reject-skip-token",
+      "status": "completed",
+      "conclusion": "skipped",
+      "run_id": "29793546615"
+    },
+    {
+      "name": "context-field-presence",
+      "status": "completed",
+      "conclusion": "skipped",
+      "run_id": "29793546438"
+    },
+    {
+      "name": "contract-validation",
+      "status": "completed",
+      "conclusion": "skipped",
+      "run_id": "29793546405"
+    },
+    {
+      "name": "deploy-gate",
+      "status": "completed",
+      "conclusion": "skipped",
+      "run_id": "29793546332"
+    },
+    {
+      "name": "deployed-migration-tree-sync-logic",
+      "status": "completed",
+      "conclusion": "skipped",
+      "run_id": "29793546403"
+    },
+    {
+      "name": "dispatcher-route-coverage",
+      "status": "completed",
+      "conclusion": "skipped",
+      "run_id": "29793546361"
+    },
+    {
+      "name": "gate",
+      "status": "completed",
+      "conclusion": "skipped",
+      "run_id": "29793546364"
+    },
+    {
+      "name": "imperative-contract-guard",
+      "status": "completed",
+      "conclusion": "skipped",
+      "run_id": "29793546408"
+    },
+    {
+      "name": "lint (shadow)",
+      "status": "completed",
+      "conclusion": "success",
+      "run_id": "29793546148"
+    },
+    {
+      "name": "main-target-guard",
+      "status": "completed",
+      "conclusion": "skipped",
+      "run_id": "29793546337"
+    },
+    {
+      "name": "no-noncanonical-lifecycle-classes",
+      "status": "completed",
+      "conclusion": "success",
+      "run_id": "29793546352"
+    },
+    {
+      "name": "node-migration-sync",
+      "status": "completed",
+      "conclusion": "skipped",
+      "run_id": "29793546403"
+    },
+    {
+      "name": "non-dev-base-guard",
+      "status": "completed",
+      "conclusion": "skipped",
+      "run_id": "29793546390"
+    },
+    {
+      "name": "occ-preflight / eligibility",
+      "status": "completed",
+      "conclusion": "success",
+      "run_id": "29793544626"
+    },
+    {
+      "name": "occ-preflight / eligibility",
+      "status": "completed",
+      "conclusion": "failure",
+      "run_id": "29793546306"
+    },
+    {
+      "name": "occ-preflight / eligibility",
+      "status": "completed",
+      "conclusion": "failure",
+      "run_id": "29793546307"
+    },
+    {
+      "name": "occ-preflight / eligibility",
+      "status": "completed",
+      "conclusion": "failure",
+      "run_id": "29793546309"
+    },
+    {
+      "name": "occ-preflight / eligibility",
+      "status": "completed",
+      "conclusion": "failure",
+      "run_id": "29793546317"
+    },
+    {
+      "name": "occ-preflight / eligibility",
+      "status": "completed",
+      "conclusion": "failure",
+      "run_id": "29793546326"
+    },
+    {
+      "name": "occ-preflight / eligibility",
+      "status": "completed",
+      "conclusion": "failure",
+      "run_id": "29793546330"
+    },
+    {
+      "name": "occ-preflight / eligibility",
+      "status": "completed",
+      "conclusion": "failure",
+      "run_id": "29793546332"
+    },
+    {
+      "name": "occ-preflight / eligibility",
+      "status": "completed",
+      "conclusion": "failure",
+      "run_id": "29793546334"
+    },
+    {
+      "name": "occ-preflight / eligibility",
+      "status": "completed",
+      "conclusion": "failure",
+      "run_id": "29793546337"
+    },
+    {
+      "name": "occ-preflight / eligibility",
+      "status": "completed",
+      "conclusion": "failure",
+      "run_id": "29793546342"
+    },
+    {
+      "name": "occ-preflight / eligibility",
+      "status": "completed",
+      "conclusion": "failure",
+      "run_id": "29793546344"
+    },
+    {
+      "name": "occ-preflight / eligibility",
+      "status": "completed",
+      "conclusion": "failure",
+      "run_id": "29793546346"
+    },
+    {
+      "name": "occ-preflight / eligibility",
+      "status": "completed",
+      "conclusion": "failure",
+      "run_id": "29793546352"
+    },
+    {
+      "name": "occ-preflight / eligibility",
+      "status": "completed",
+      "conclusion": "failure",
+      "run_id": "29793546357"
+    },
+    {
+      "name": "occ-preflight / eligibility",
+      "status": "completed",
+      "conclusion": "failure",
+      "run_id": "29793546361"
+    },
+    {
+      "name": "occ-preflight / eligibility",
+      "status": "completed",
+      "conclusion": "failure",
+      "run_id": "29793546364"
+    },
+    {
+      "name": "occ-preflight / eligibility",
+      "status": "completed",
+      "conclusion": "failure",
+      "run_id": "29793546371"
+    },
+    {
+      "name": "occ-preflight / eligibility",
+      "status": "completed",
+      "conclusion": "failure",
+      "run_id": "29793546372"
+    },
+    {
+      "name": "occ-preflight / eligibility",
+      "status": "completed",
+      "conclusion": "failure",
+      "run_id": "29793546389"
+    },
+    {
+      "name": "occ-preflight / eligibility",
+      "status": "completed",
+      "conclusion": "failure",
+      "run_id": "29793546390"
+    },
+    {
+      "name": "occ-preflight / eligibility",
+      "status": "completed",
+      "conclusion": "failure",
+      "run_id": "29793546396"
+    },
+    {
+      "name": "occ-preflight / eligibility",
+      "status": "completed",
+      "conclusion": "failure",
+      "run_id": "29793546400"
+    },
+    {
+      "name": "occ-preflight / eligibility",
+      "status": "completed",
+      "conclusion": "failure",
+      "run_id": "29793546403"
+    },
+    {
+      "name": "occ-preflight / eligibility",
+      "status": "completed",
+      "conclusion": "failure",
+      "run_id": "29793546405"
+    },
+    {
+      "name": "occ-preflight / eligibility",
+      "status": "completed",
+      "conclusion": "failure",
+      "run_id": "29793546408"
+    },
+    {
+      "name": "occ-preflight / eligibility",
+      "status": "completed",
+      "conclusion": "failure",
+      "run_id": "29793546409"
+    },
+    {
+      "name": "occ-preflight / eligibility",
+      "status": "completed",
+      "conclusion": "failure",
+      "run_id": "29793546420"
+    },
+    {
+      "name": "occ-preflight / eligibility",
+      "status": "completed",
+      "conclusion": "failure",
+      "run_id": "29793546424"
+    },
+    {
+      "name": "occ-preflight / eligibility",
+      "status": "completed",
+      "conclusion": "failure",
+      "run_id": "29793546427"
+    },
+    {
+      "name": "occ-preflight / eligibility",
+      "status": "completed",
+      "conclusion": "failure",
+      "run_id": "29793546438"
+    },
+    {
+      "name": "occ-preflight / eligibility",
+      "status": "completed",
+      "conclusion": "failure",
+      "run_id": "29793546439"
+    },
+    {
+      "name": "occ-preflight / eligibility",
+      "status": "completed",
+      "conclusion": "failure",
+      "run_id": "29793546445"
+    },
+    {
+      "name": "occ-preflight / eligibility",
+      "status": "completed",
+      "conclusion": "failure",
+      "run_id": "29793546453"
+    },
+    {
+      "name": "occ-preflight / eligibility",
+      "status": "completed",
+      "conclusion": "failure",
+      "run_id": "29793546461"
+    },
+    {
+      "name": "occ-preflight / eligibility",
+      "status": "completed",
+      "conclusion": "failure",
+      "run_id": "29793546615"
+    },
+    {
+      "name": "occ-preflight / eligibility",
+      "status": "completed",
+      "conclusion": "success",
+      "run_id": "29798163609"
+    },
+    {
+      "name": "pinned-wheel-skew",
+      "status": "completed",
+      "conclusion": "skipped",
+      "run_id": "29793546438"
+    },
+    {
+      "name": "pr-title",
+      "status": "completed",
+      "conclusion": "skipped",
+      "run_id": "29793546372"
+    },
+    {
+      "name": "reason-graph",
+      "status": "completed",
+      "conclusion": "success",
+      "run_id": "29793546148"
+    },
+    {
+      "name": "receipt-honesty",
+      "status": "completed",
+      "conclusion": "skipped",
+      "run_id": "29793546453"
+    },
+    {
+      "name": "release-identity",
+      "status": "completed",
+      "conclusion": "skipped",
+      "run_id": "29793546438"
+    },
+    {
+      "name": "required-check-skip-guard / check-skip-vectors",
+      "status": "completed",
+      "conclusion": "success",
+      "run_id": "29793546389"
+    },
+    {
+      "name": "shell-hygiene",
+      "status": "completed",
+      "conclusion": "success",
+      "run_id": "29793546165"
+    },
+    {
+      "name": "sibling-lock-pins",
+      "status": "completed",
+      "conclusion": "skipped",
+      "run_id": "29793546438"
+    },
+    {
+      "name": "skill-node-mapping-sync",
+      "status": "completed",
+      "conclusion": "skipped",
+      "run_id": "29793546400"
+    },
+    {
+      "name": "terminal-cost-completeness",
+      "status": "completed",
+      "conclusion": "skipped",
+      "run_id": "29793546438"
+    },
+    {
+      "name": "tests+coverage (shadow)",
+      "status": "completed",
+      "conclusion": "success",
+      "run_id": "29793546148"
+    },
+    {
+      "name": "typecheck (shadow)",
+      "status": "completed",
+      "conclusion": "success",
+      "run_id": "29793546148"
+    },
+    {
+      "name": "validate",
+      "status": "completed",
+      "conclusion": "skipped",
+      "run_id": "29793546409"
+    },
+    {
+      "name": "verify",
+      "status": "completed",
+      "conclusion": "skipped",
+      "run_id": "29793546346"
+    },
+    {
+      "name": "verify",
+      "status": "completed",
+      "conclusion": "skipped",
+      "run_id": "29793546427"
+    },
+    {
+      "name": "zone-filter",
+      "status": "completed",
+      "conclusion": "skipped",
+      "run_id": "29793546352"
+    }
+  ]
+}

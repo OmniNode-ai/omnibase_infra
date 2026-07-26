@@ -204,6 +204,23 @@ class TestLlmEndpointsContract:
         assert ep["role_env_alias"] == "LLM_REASONING_FAST_URL"
         assert ep["role"] == "reasoning_fast"
 
+    def test_embeddings_201_endpoint_reconciled_to_8002(self) -> None:
+        """LLM_EMBEDDING_URL slot resolves to :8002, not the dead :8100.
+
+        The .201 embedding backend moved from :8100 to :8002 (vllm-embeddings)
+        per OMN-13664/OMN-13807. The legacy :8100 process is down, so the
+        canonical LLM_EMBEDDING_URL slot must point at :8002.
+        """
+        by_slot = {ep["slot_id"]: ep for ep in _load_endpoints()}
+        ep = by_slot.get("embeddings-201")
+        assert ep is not None, "Missing required slot 'embeddings-201'"
+        assert ep["url_env_var"] == "LLM_EMBEDDING_URL"
+        assert ep["port"] == 8002, (
+            "embeddings-201 must resolve to :8002 (not dead :8100)"
+        )
+        assert ep["endpoint_url"] == "http://192.168.86.201:8002"
+        assert ep["role"] == "embedding"
+
     def test_runtime_required_env_vars_are_owned_by_running_slots(self) -> None:
         """Runtime-required URL env vars must point at running canonical slots."""
         by_env = {

@@ -153,6 +153,7 @@ async def test_github_api_poll_golden_chain(
                 "pr_number": 1709,
                 "triage_state": "ready_to_merge",
                 "title": "Register GitHub API poller",
+                "is_draft": False,
                 "partition_key": f"{_REPO}:1709",
             }
         ]

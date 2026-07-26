@@ -15,20 +15,27 @@
 #
 # Related Tickets:
 #   - OMN-1908: Cross-Repo Validation Ledger Persistence
+#   - OMN-14524: validation_event_ledger had 0 rows -- this contract now
+#     declares intent_consumption.intent_routing_table so the kernel's
+#     generic intent-routing derivation (OMN-14516) wires a real result
+#     applier with NO by-name allowlist entry.
+#   - OMN-14831: HandlerValidationLedgerProjection exposes the canonical
+#     def-B ModelEventMessage handle(request) entrypoint while preserving
+#     validation_ledger.append intent projection semantics.
 # Contract identifiers
 name: "node_validation_ledger_projection_compute"
 contract_name: "node_validation_ledger_projection_compute"
 node_name: "node_validation_ledger_projection_compute"
 contract_version:
   major: 1
-  minor: 0
-  patch: 0
-node_version: "0.1.0"
+  minor: 1
+  patch: 1
+node_version: "0.2.1"
 # Node type - COMPUTE for event projection logic
 node_type: "COMPUTE_GENERIC"
 # Description
 description: >
-  COMPUTE node that subscribes to 3 cross-repo validation event topics for validation ledger persistence. Projects validation events into the validation_event_ledger for deterministic replay. Uses consumer_purpose="projection" and auto_offset_reset="earliest" to capture all historical validation events.
+  COMPUTE node that subscribes to 3 cross-repo validation event topics for validation ledger persistence. Projects validation events into the validation_event_ledger for deterministic replay. Uses consumer_purpose="projection" and auto_offset_reset="earliest" to capture all historical validation events. Contract patch 1 records the OMN-14831 canonical def-B ModelEventMessage handle(request) entrypoint while preserving validation_ledger.append intent routing.
 
 # Event bus configuration
 event_bus:
@@ -58,22 +65,48 @@ input_model:
     Kafka event message containing raw bytes payload and headers. The compute node processes events from all 3 subscribed validation topics.
 
 output_model:
-  name: "ModelValidationLedgerEntry"
-  module: "omnibase_infra.models.validation_ledger.model_validation_ledger_entry"
+  name: "ModelIntent"
+  module: "omnibase_core.models.reducer.model_intent"
   description: >
-    Validation ledger entry containing extracted metadata, base64-encoded envelope bytes, and SHA-256 hash for deterministic replay.
+    ModelIntent wrapping ModelPayloadValidationLedgerAppend to be passed to NodeValidationLedgerWriteEffect. Contains the validation event data with Kafka position for idempotent writes.
 
 # Handler routing - delegates compute logic to handler
+#
+# OMN-14594: event_model is REQUIRED here, not decorative — same disease as
+# node_ledger_projection_compute. All 3 of these validation topics are ALSO
+# reachable via the SHARED, process-wide MessageDispatchEngine's topic-keyed
+# fan-out (dispatch() selects every registered route for a topic regardless
+# of which subscriber's consume loop triggered the call); without a
+# payload_type_matcher (OMN-12416) this dispatcher has no way to reject a
+# non-ModelEventMessage-shaped envelope before crashing inside
+# HandlerValidationLedgerProjection. All 3 subscribe_topics here share ONE
+# category (event), so — unlike node_ledger_projection_compute — a single
+# entry is sufficient once event_model is declared.
 handler_routing:
   routing_strategy: "operation_match"
   handlers:
     - operation: validation_ledger.project
       handler_type: "validation_ledger_projection"
+      event_model:
+        name: "ModelEventMessage"
+        module: "omnibase_infra.event_bus.models.model_event_message"
       handler:
         name: "HandlerValidationLedgerProjection"
         module: "omnibase_infra.nodes.node_validation_ledger_projection_compute.handlers.handler_validation_ledger_projection"
       supported_operations:
         - "validation_ledger.project"
+# Intent consumption (OMN-14524): the projection emits a
+# `validation_ledger.append` intent per consumed validation event. This table
+# is the SOURCE OF TRUTH the kernel uses to DERIVE a result applier for this
+# contract -- it names the effect node whose canonical handle() persists the
+# intent (node_validation_ledger_write_effect -> HandlerValidationLedgerAppend,
+# keyed by the write-effect's `validation_ledger.append` operation). Without
+# this declaration the kernel has no wired effect path, handler_wiring FAILS
+# the contract (fail-closed), and validation_event_ledger stays empty. There
+# is no by-name kernel allowlist -- declare the routing here, get wired.
+intent_consumption:
+  intent_routing_table:
+    "validation_ledger.append": "node_validation_ledger_write_effect"
 # Capabilities provided by this node
 capabilities:
   - name: "validation_ledger.projection"
@@ -85,18 +118,23 @@ capabilities:
     description: "Support deterministic replay via base64 envelope storage and SHA-256 hashing"
 # Dependencies (protocols this node requires)
 dependencies:
+  - name: "node_validation_ledger_write_effect"
+    type: "node"
+    class_name: "NodeValidationLedgerWriteEffect"
+    module: "omnibase_infra.nodes.node_validation_ledger_write_effect"
+    description: "Effect node for writing validation events to the PostgreSQL validation ledger"
   - name: "protocol_event_envelope"
     type: "protocol"
     description: "Protocol for parsing and handling event envelopes"
     optional: false
 # Metadata
 metadata:
-  description: "Subscribes to 3 cross-repo validation event topics for validation ledger persistence, projecting validation events for deterministic replay"
+  description: "Subscribes to 3 cross-repo validation event topics for validation ledger persistence, projecting validation events for deterministic replay through the canonical def-B typed ModelEventMessage handler entrypoint"
   author: "OmniNode Team"
   license: "MIT"
   created: "2026-02-06"
-  updated: "2026-04-24"
-  ticket: "OMN-1908"
+  updated: "2026-07-13"
+  ticket: "OMN-14831"
   tags:
     - compute
     - validation-ledger
@@ -106,3 +144,5 @@ metadata:
   related_tickets:
     - "OMN-1908"
     - "OMN-9151"
+    - "OMN-14524"
+    - "OMN-14831"

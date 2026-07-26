@@ -71,6 +71,7 @@ async def test_handle_uses_github_http_client_adapter() -> None:
             "pr_number": 42,
             "triage_state": "ready_to_merge",
             "title": "Ready PR",
+            "is_draft": False,
             "partition_key": "OmniNode-ai/omnimarket:42",
         }
     ]
@@ -80,6 +81,55 @@ async def test_handle_uses_github_http_client_adapter() -> None:
         "timeout": 5.0,
     }
     assert created_clients[0].repos == ["OmniNode-ai/omnimarket"]
+
+
+class _FakeDraftGitHubClient(_FakeGitHubClient):
+    """PR fixture with draft=True (OMN-14394 seam gap regression coverage)."""
+
+    def fetch_open_prs_for_triage(self, repo: str) -> list[dict[str, object]]:
+        self.repos.append(repo)
+        return [
+            {
+                "number": 7,
+                "title": "WIP PR",
+                "draft": True,
+                "labels": [],
+                "updated_at": datetime.now(tz=UTC).isoformat(),
+                "combined_status": "pending",
+                "review_states": [],
+            }
+        ]
+
+
+@pytest.mark.asyncio
+@pytest.mark.unit
+async def test_handle_publishes_is_draft_true_for_draft_pr() -> None:
+    """OMN-14394: is_draft must round-trip pr['draft'] onto the published event
+    -- this is the field the pr_state projection (OMN-14375) and the
+    OMN-14374 read skill's ModelOpenPrSummary.is_draft depend on."""
+
+    def factory(**kwargs: Any) -> _FakeDraftGitHubClient:
+        return _FakeDraftGitHubClient(**kwargs)
+
+    handler = HandlerGitHubApiPoll(github_client_factory=factory)
+    config = ModelGitHubPollerConfig(
+        repos=["OmniNode-ai/omnimarket"],
+        poll_interval_seconds=10,
+    )
+
+    result = await handler.handle(config)
+
+    assert result.pending_events == [
+        {
+            "event_type": "onex.evt.github.pr-status.v1",
+            "repo": "OmniNode-ai/omnimarket",
+            "pr_number": 7,
+            "triage_state": "draft",
+            "title": "WIP PR",
+            "is_draft": True,
+            "partition_key": "OmniNode-ai/omnimarket:7",
+        }
+    ]
 
 
 @pytest.mark.asyncio

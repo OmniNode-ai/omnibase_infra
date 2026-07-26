@@ -30,20 +30,21 @@ import subprocess
 import time
 from datetime import UTC
 from enum import Enum
-from typing import TYPE_CHECKING
+from uuid import uuid4
 
+from omnibase_core.models.dispatch.model_handler_output import ModelHandlerOutput
 from omnibase_infra.enums import (
     EnumHandlerType,
     EnumHandlerTypeCategory,
+    EnumInfraTransportType,
 )
-
-if TYPE_CHECKING:
-    from omnibase_infra.models.llm.model_llm_inference_request import (
-        ModelLlmInferenceRequest,
-    )
-    from omnibase_infra.models.llm.model_llm_inference_response import (
-        ModelLlmInferenceResponse,
-    )
+from omnibase_infra.errors import InfraUnavailableError, ModelInfraErrorContext
+from omnibase_infra.models.llm.model_llm_inference_request import (
+    ModelLlmInferenceRequest,
+)
+from omnibase_infra.models.llm.model_llm_inference_response import (
+    ModelLlmInferenceResponse,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -85,11 +86,16 @@ class HandlerLlmCliSubprocess:
     passes the user prompt, captures stdout as the response, and wraps it
     in a ModelLlmInferenceResponse.
 
-    The handler returns a tuple of (response, status, detail) to preserve
-    structured failure information for fallback routing and metrics.
+    ``handle`` is the canonical def-B dispatch entrypoint the auto-wired runtime
+    binds; it returns the response as a ``ModelHandlerOutput`` effect event or
+    fails fast on a non-SUCCESS backend status. ``execute_cli_inference`` exposes
+    the same owned core as the ``(response, status, detail)`` triple, preserving
+    the structured ``EnumCliBackendStatus`` classification for fallback routing and
+    metrics callers.
 
     Example:
         >>> handler = HandlerLlmCliSubprocess(cli="gemini", cli_args=["-p"])
+        >>> output = await handler.handle(request)  # canonical dispatch entrypoint
         >>> response, status, detail = handler.execute_cli_inference(request)
         >>> if status == EnumCliBackendStatus.SUCCESS:
         ...     print(response.generated_text)
@@ -120,20 +126,78 @@ class HandlerLlmCliSubprocess:
         """Behavioral classification."""
         return EnumHandlerTypeCategory.EFFECT
 
+    async def handle(
+        self,
+        request: ModelLlmInferenceRequest,
+    ) -> ModelHandlerOutput[None]:
+        """Canonical dispatch entrypoint (def B) for the auto-wired runtime.
+
+        OMN-14804 (child of OMN-14510 missing-handle burn-down): before this
+        method existed, ``HandlerLlmCliSubprocess`` was contract-declared on three
+        CLI operations (``inference.gemini_cli`` / ``inference.claude_cli`` /
+        ``inference.opencode_cli``) yet exposed only ``execute_cli_inference()``.
+        Auto-wiring's ``_make_dispatch_callback`` then bound ``_missing_handle``,
+        which raised ``ModelOnexError`` on the FIRST dispatch while the contract
+        validated, the node booted, and CI stayed green.
+
+        ``handle`` owns the runtime dispatch contract for this EFFECT node: it runs
+        CLI-subprocess inference through the owned ``_run_cli_inference`` core and
+        returns the produced ``ModelLlmInferenceResponse`` as the node's output
+        event, or fails fast with ``InfraUnavailableError`` when the CLI backend
+        cannot produce a usable response (mirroring the fail-fast transport error in
+        the OMN-14489 reference ``HandlerA2ATask.submit``). The structured
+        ``(response, status, detail)`` triple — carrying the ``EnumCliBackendStatus``
+        classification for fallback-routing callers — stays available via
+        ``execute_cli_inference``; both public methods consume the same core.
+        """
+        response, status, detail = self._run_cli_inference(request)
+        if response is None or status is not EnumCliBackendStatus.SUCCESS:
+            raise InfraUnavailableError(
+                f"CLI inference produced no usable response [{status.value}]: {detail}",
+                context=ModelInfraErrorContext.with_correlation(
+                    correlation_id=request.correlation_id,
+                    transport_type=EnumInfraTransportType.RUNTIME,
+                    operation="cli_inference",
+                ),
+            )
+        return ModelHandlerOutput.for_effect(
+            input_envelope_id=uuid4(),
+            correlation_id=response.correlation_id,
+            handler_id=type(self).__name__,
+            events=(response,),
+            processing_time_ms=response.latency_ms,
+        )
+
     def execute_cli_inference(
         self,
         request: ModelLlmInferenceRequest,
     ) -> tuple[ModelLlmInferenceResponse | None, EnumCliBackendStatus, str]:
-        """Execute inference via CLI subprocess.
+        """Structured-status view over the owned CLI-subprocess inference core.
+
+        Returns the ``(response, status, detail)`` triple so fallback-routing and
+        metrics callers can branch on the ``EnumCliBackendStatus`` classification.
+        ``handle`` is the canonical auto-wired dispatch entrypoint; this method and
+        ``handle`` both delegate to the same ``_run_cli_inference`` core, so their
+        behavior can never diverge.
 
         Returns:
             Tuple of (response, status, detail). Status is always set even
             on failure, preserving structured failure information.
         """
-        from omnibase_infra.models.llm.model_llm_inference_response import (
-            ModelLlmInferenceResponse,
-        )
+        return self._run_cli_inference(request)
 
+    def _run_cli_inference(
+        self,
+        request: ModelLlmInferenceRequest,
+    ) -> tuple[ModelLlmInferenceResponse | None, EnumCliBackendStatus, str]:
+        """Owned CLI-subprocess inference core (spawn + structured classification).
+
+        Resolves the CLI backend from the handler config or the request model,
+        spawns the subprocess, and classifies the outcome into one of the
+        ``EnumCliBackendStatus`` failure classes or SUCCESS. Consumed by both
+        ``handle`` (dispatch entrypoint) and ``execute_cli_inference``
+        (structured-status accessor).
+        """
         cli = self._cli
         cli_args = self._cli_args
         if cli is None:
@@ -199,7 +263,6 @@ class HandlerLlmCliSubprocess:
 
             # Build response with all required fields
             from datetime import datetime
-            from uuid import uuid4
 
             from omnibase_infra.enums import (
                 EnumLlmFinishReason,

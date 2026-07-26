@@ -131,7 +131,7 @@ class TestUnknownHash:
         event = _make_event(runtime_source_hash=bad_hash)
 
         with patch.object(handler, "_resolve_main_head", return_value=None):
-            result = handler.attest(event)
+            result = handler.handle(event)
 
         assert result.verdict == "unknown_hash"
         assert result.friction_path is not None
@@ -150,7 +150,7 @@ class TestUnknownHash:
             handler, "_resolve_main_head", side_effect=AssertionError("should not call")
         ):
             # The handler short-circuits before calling _resolve_main_head
-            result = handler.attest(event)
+            result = handler.handle(event)
 
         assert result.verdict == "unknown_hash"
 
@@ -168,7 +168,7 @@ class TestCompliantHash:
 
         with patch.object(handler, "_resolve_main_head", return_value=_FAKE_MAIN_HEAD):
             with patch.object(handler, "_compute_distance", return_value=0):
-                result = handler.attest(event)
+                result = handler.handle(event)
 
         assert result.verdict == "compliant"
         assert result.friction_path is None
@@ -179,7 +179,7 @@ class TestCompliantHash:
 
         with patch.object(handler, "_resolve_main_head", return_value=_FAKE_MAIN_HEAD):
             with patch.object(handler, "_compute_distance", return_value=0):
-                result = handler.attest(event)
+                result = handler.handle(event)
 
         assert result.verdict == "compliant"
 
@@ -189,7 +189,7 @@ class TestCompliantHash:
 
         with patch.object(handler, "_resolve_main_head", return_value=_FAKE_MAIN_HEAD):
             with patch.object(handler, "_compute_distance", return_value=3):
-                result = handler.attest(event)
+                result = handler.handle(event)
 
         assert result.verdict == "compliant"
         assert result.commit_distance == 3
@@ -202,7 +202,7 @@ class TestCompliantHash:
 
         with patch.object(handler, "_resolve_main_head", return_value=_FAKE_MAIN_HEAD):
             with patch.object(handler, "_compute_distance", return_value=-1):
-                result = handler.attest(event)
+                result = handler.handle(event)
 
         assert result.verdict == "drifted"
         assert result.friction_path is not None
@@ -220,7 +220,7 @@ class TestDriftedHash:
 
         with patch.object(handler, "_resolve_main_head", return_value=_FAKE_MAIN_HEAD):
             with patch.object(handler, "_compute_distance", return_value=10):
-                result = handler.attest(event)
+                result = handler.handle(event)
 
         assert result.verdict == "drifted"
         assert result.commit_distance == 10
@@ -238,7 +238,7 @@ class TestDriftedHash:
 
         with patch.object(handler, "_resolve_main_head", return_value=_FAKE_MAIN_HEAD):
             with patch.object(handler, "_compute_distance", return_value=-1):
-                result = handler.attest(event)
+                result = handler.handle(event)
 
         assert result.verdict == "drifted"
         assert result.commit_distance == -1
@@ -254,7 +254,7 @@ class TestDriftedHash:
 
         with patch.object(handler, "_resolve_main_head", return_value=_FAKE_MAIN_HEAD):
             with patch.object(handler, "_compute_distance", return_value=99):
-                result = handler.attest(event)
+                result = handler.handle(event)
 
         assert result.friction_path is not None
         assert "/" not in Path(result.friction_path).name
@@ -268,7 +268,7 @@ class TestDriftedHash:
         event = _make_event(runtime_source_hash=_FAKE_OLD_HASH)
 
         with patch.object(handler, "_resolve_main_head", return_value=None):
-            result = handler.attest(event)
+            result = handler.handle(event)
 
         assert result.verdict == "drifted"
         assert result.friction_path is not None

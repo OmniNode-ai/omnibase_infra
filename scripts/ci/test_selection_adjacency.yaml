@@ -119,6 +119,9 @@ adjacency:
   gateways: {reverse_deps: []}
   hooks: {reverse_deps: []}
   infrastructure: {reverse_deps: []}
+  # learning: node_model_router_compute (part of `nodes`) imports RoutingGate
+  # from here (OMN-7404); changing learning must also re-run nodes tests.
+  learning: {reverse_deps: [nodes]}
   migrations: {reverse_deps: []}
   resources: {reverse_deps: []}
   schemas: {reverse_deps: []}

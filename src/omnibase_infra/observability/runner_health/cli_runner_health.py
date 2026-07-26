@@ -250,6 +250,9 @@ async def _emit_to_kafka(
     try:
         from aiokafka import AIOKafkaProducer
 
+        from omnibase_infra.event_bus.kafka_auth import (
+            build_aiokafka_auth_kwargs_from_env,
+        )
         from omnibase_infra.topics.platform_topic_suffixes import (
             SUFFIX_RUNNER_HEALTH_SNAPSHOT,
         )
@@ -262,6 +265,7 @@ async def _emit_to_kafka(
         producer = AIOKafkaProducer(
             bootstrap_servers=bootstrap,
             value_serializer=lambda v: json.dumps(v).encode(),
+            **build_aiokafka_auth_kwargs_from_env(),
         )
         await producer.start()
         try:

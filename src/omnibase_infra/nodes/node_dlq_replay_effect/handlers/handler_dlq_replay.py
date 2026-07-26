@@ -18,6 +18,7 @@ Truthfulness invariants:
 from __future__ import annotations
 
 import logging
+from collections.abc import Mapping
 from datetime import UTC, datetime
 from typing import TYPE_CHECKING
 from uuid import UUID, uuid4
@@ -93,11 +94,48 @@ class HandlerDlqReplay:
         The envelope carries the correlation context for the run. The payload
         type is the run result for causality typing; the run itself is driven
         by the injected engine and ``self._config``.
+
+        OMN-15021: ``envelope`` is NOT guaranteed to be a ``ModelEventEnvelope``
+        instance at runtime despite the type hint. Because this method's first
+        parameter is literally named ``envelope``,
+        ``handler_wiring._handler_accepts_event_envelope`` classifies this
+        handler as envelope-accepting and the auto-wiring dispatch callback
+        (``_make_dispatch_callback``, ``event_model is None`` / operation_match
+        branch) hands it the RAW materialized dispatch dict
+        (``{"payload": ..., "__bindings": ..., "__debug_trace": ...}`` --
+        ``ModelMaterializedDispatch``) unchanged, never a hydrated envelope. A
+        bare ``envelope.correlation_id`` attribute access previously crashed
+        with ``AttributeError: 'dict' object has no attribute 'correlation_id'``
+        on every dispatch delivered this way -- observed live 2026-07-24 when
+        ``onex.dlq.omnibase-infra.events.v1`` took its first real traffic under
+        ``ONEX_BOUNDARY_DLQ_ENABLED``. Extraction below tolerates both shapes
+        and NEVER raises; a genuinely undecodable envelope still produces a
+        working ``handle()`` (fresh generated ids) with a loud WARNING log --
+        never a silent swallow. This does not affect DLQ record fidelity: the
+        actual per-message decode is ``run()``'s own typed Kafka consumption
+        via ``ModelDlqMessage.from_kafka_message``, which is independently
+        defensive and unaffected by this entry point's id extraction.
         """
-        correlation_id = envelope.correlation_id or uuid4()
+        correlation_id = _extract_envelope_correlation_id(envelope)
+        envelope_id = _extract_envelope_id(envelope)
+        if correlation_id is None or envelope_id is None:
+            generated_id = uuid4()
+            logger.warning(
+                "HandlerDlqReplay.handle() received a dispatch envelope that is "
+                "not a hydrated ModelEventEnvelope (type=%s) -- this is the "
+                "runtime auto-wiring boundary's materialized dispatch-dict shape "
+                "(OMN-15021), not malformed DLQ content. Falling back to a "
+                "generated id for the missing field(s) instead of crashing; the "
+                "DLQ drain itself is unaffected.",
+                type(envelope).__name__,
+            )
+            if correlation_id is None:
+                correlation_id = generated_id
+            if envelope_id is None:
+                envelope_id = generated_id
         run_result = await self.run()
         return ModelHandlerOutput.for_compute(
-            input_envelope_id=envelope.envelope_id,
+            input_envelope_id=envelope_id,
             correlation_id=correlation_id,
             handler_id=HANDLER_ID_DLQ_REPLAY,
             result=run_result,
@@ -293,6 +331,53 @@ class HandlerDlqReplay:
             dry_run=self._config.dry_run,
             results=tuple(results),
         )
+
+
+def _extract_envelope_correlation_id(envelope: object) -> UUID | None:
+    """Best-effort ``correlation_id`` extraction tolerant of both a real
+    ``ModelEventEnvelope`` and the runtime's materialized dispatch-dict shape
+    (OMN-15021). Returns ``None`` (never raises) when no usable value is
+    present so the caller can decide the fallback + logging policy.
+    """
+    if isinstance(envelope, ModelEventEnvelope):
+        return envelope.correlation_id
+    if isinstance(envelope, Mapping):
+        candidate: object = envelope.get("correlation_id")
+        if candidate is None:
+            debug_trace = envelope.get("__debug_trace")
+            if isinstance(debug_trace, Mapping):
+                candidate = debug_trace.get("correlation_id")
+        if candidate is None:
+            payload = envelope.get("payload")
+            if isinstance(payload, Mapping):
+                candidate = payload.get("correlation_id")
+        return _coerce_uuid(candidate)
+    return _coerce_uuid(getattr(envelope, "correlation_id", None))
+
+
+def _extract_envelope_id(envelope: object) -> UUID | None:
+    """Best-effort ``envelope_id`` extraction (OMN-15021).
+
+    Only a real ``ModelEventEnvelope`` instance carries an ``envelope_id`` --
+    the materialized dispatch dict (``ModelMaterializedDispatch``) never does,
+    so a dict/mapping input always yields ``None`` here (by design, not a bug).
+    """
+    if isinstance(envelope, ModelEventEnvelope):
+        return envelope.envelope_id
+    if isinstance(envelope, Mapping):
+        return None
+    return _coerce_uuid(getattr(envelope, "envelope_id", None))
+
+
+def _coerce_uuid(value: object) -> UUID | None:
+    if isinstance(value, UUID):
+        return value
+    if isinstance(value, str) and value:
+        try:
+            return UUID(value)
+        except ValueError:
+            return None
+    return None
 
 
 __all__ = ["HandlerDlqReplay", "HANDLER_ID_DLQ_REPLAY"]

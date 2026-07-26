@@ -204,10 +204,14 @@ jobs:
           PUSH_BACKOFF_FACTOR: '2'
         run: |
           echo "Trivy scan passed — pushing image to ECR..."
-          # OMN-13687: wrap `docker push` in a bounded retry loop to absorb the
-          # transient network EOF on a blob HEAD seen on the .201 self-hosted
-          # runner -> ECR path. Additive only: image tags and digest
-          # computation are unchanged; this only retries the network push.
+          # OMN-14196: back-port the OMN-13687 bounded push-retry that lived on
+          # main only. dev never received it (OMN-13687 was a main-only emergency
+          # hotfix; dev's last change to this file was OMN-13747's hosted-runner
+          # move). Restoring it here reconciles dev with the proven-green main
+          # version so a dev->main promotion cannot regress the push hardening
+          # under any merge mechanic. Additive only: image tags and digest
+          # computation are unchanged; this only retries the network push to
+          # absorb the transient blob-HEAD EOF on the runner -> ECR path.
           push_with_retry() {
             local tag="$1"
             local delay="$PUSH_INITIAL_DELAY"

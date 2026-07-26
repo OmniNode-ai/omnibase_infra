@@ -196,7 +196,7 @@ class TransitionNotificationPublisher(MixinAsyncCircuitBreaker):
             topic: Target topic for transition notifications. Required.
                 This should be configured in the projector's contract or
                 notification config rather than hardcoded. Example topics:
-                - "onex.fsm.state.transitions.v1"
+                - ``onex.fsm.state.transitions.v1``
                 - "registration.state.transitions.v1"
             publisher_id: Optional unique identifier for this publisher instance.
                 If not provided, a UUID will be generated.
@@ -213,7 +213,7 @@ class TransitionNotificationPublisher(MixinAsyncCircuitBreaker):
         Example:
             >>> publisher = TransitionNotificationPublisher(
             ...     event_bus=kafka_event_bus,
-            ...     topic="onex.fsm.state.transitions.v1",
+            ...     topic=``onex.fsm.state.transitions.v1``,
             ...     circuit_breaker_threshold=3,
             ...     circuit_breaker_reset_timeout=30.0,
             ...     max_tracked_failures=200,  # Tune for large batches

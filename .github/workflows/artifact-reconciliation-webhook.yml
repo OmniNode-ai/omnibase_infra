@@ -26,21 +26,40 @@ jobs:
     name: Publish PR Webhook Event
     runs-on: >-
       ${{
-        (github.event_name == 'pull_request' &&
-         github.event.pull_request.head.repo.full_name != github.repository)
+        ((github.event_name == 'pull_request' && github.base_ref == 'dev') ||
+         (github.event_name == 'pull_request' &&
+          github.event.pull_request.head.repo.full_name != github.repository))
         && fromJSON(vars.OMNI_PUBLIC_PR_RUNS_ON_JSON || '["ubuntu-latest"]')
         || fromJSON(vars.OMNI_TRUSTED_CI_RUNS_ON_JSON || '["self-hosted","omnibase-ci"]')
       }}
-    timeout-minutes: 5
+    # OMN-14017: shared CI env creation can legitimately spend several minutes
+    # retrying git/PyPI fetches during fleet egress saturation.
+    timeout-minutes: 20
     permissions:
       contents: read
       pull-requests: read
 
     steps:
+      - name: Check webhook credentials
+        id: webhook-credentials
+        env:
+          KAFKA_BOOTSTRAP_SERVERS: ${{ secrets.KAFKA_BOOTSTRAP_SERVERS }}
+          KAFKA_SASL_USERNAME: ${{ secrets.KAFKA_SASL_USERNAME }}
+          KAFKA_SASL_PASSWORD: ${{ secrets.KAFKA_SASL_PASSWORD }}
+        run: |
+          if [[ -z "${KAFKA_BOOTSTRAP_SERVERS:-}" || -z "${KAFKA_SASL_USERNAME:-}" || -z "${KAFKA_SASL_PASSWORD:-}" ]]; then
+            echo "enabled=false" >> "$GITHUB_OUTPUT"
+            echo "::notice title=PR webhook not published::Kafka webhook secrets are unavailable on this runner/event; skipping non-authoritative PR webhook publication."
+            exit 0
+          fi
+          echo "enabled=true" >> "$GITHUB_OUTPUT"
+
       - name: Checkout code
+        if: ${{ steps.webhook-credentials.outputs.enabled == 'true' }}
         uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
 
       - name: Get changed files
+        if: ${{ steps.webhook-credentials.outputs.enabled == 'true' }}
         id: changed-files
         env:
           GH_TOKEN: ${{ github.token }}
@@ -48,8 +67,11 @@ jobs:
           PR_REPO: ${{ github.repository }}
         run: |
           python3 - <<'PY'
+          import http.client
           import json
           import os
+          import time
+          import urllib.error
           import urllib.request
 
           repo = os.environ["PR_REPO"]
@@ -58,6 +80,19 @@ jobs:
           output_path = os.environ["GITHUB_OUTPUT"]
           files = []
           page = 1
+
+          def load_json_with_retry(request):
+              last_error = None
+              for attempt in range(1, 4):
+                  try:
+                      with urllib.request.urlopen(request, timeout=30) as response:
+                          return json.load(response)
+                  except (TimeoutError, http.client.IncompleteRead, urllib.error.URLError) as error:
+                      last_error = error
+                      if attempt == 3:
+                          break
+                      time.sleep(attempt * 2)
+              raise RuntimeError(f"GitHub PR files request failed after retries: {last_error}") from last_error
 
           while True:
               url = (
@@ -72,8 +107,7 @@ jobs:
                       "X-GitHub-Api-Version": "2022-11-28",
                   },
               )
-              with urllib.request.urlopen(request, timeout=30) as response:
-                  payload = json.load(response)
+              payload = load_json_with_retry(request)
               if not payload:
                   break
               files.extend(item["filename"] for item in payload)
@@ -84,7 +118,7 @@ jobs:
           PY
 
       - name: Set up CI Python environment
-        if: ${{ github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository }}
+        if: ${{ steps.webhook-credentials.outputs.enabled == 'true' }}
         uses: ./.github/actions/setup-python-uv
         with:
           python-version: "3.12"
@@ -94,7 +128,7 @@ jobs:
           shared-env-enabled: "true"
 
       - name: Publish PR webhook event
-        if: ${{ github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository }}
+        if: ${{ steps.webhook-credentials.outputs.enabled == 'true' }}
         # All potentially attacker-controlled inputs (head_ref, actor) are passed
         # through environment variables, not interpolated directly into the run
         # command, to prevent shell injection.

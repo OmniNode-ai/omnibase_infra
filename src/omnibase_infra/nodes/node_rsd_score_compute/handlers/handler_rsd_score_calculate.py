@@ -9,8 +9,7 @@ Ported from Archive/omnibase_5/rsd-priority-engine CalculatorRSDPriority.
 from __future__ import annotations
 
 import logging
-from datetime import UTC, datetime, timezone
-from uuid import UUID
+from datetime import UTC, datetime
 
 from omnibase_infra.enums import EnumHandlerType, EnumHandlerTypeCategory
 from omnibase_infra.nodes.node_rsd_data_fetch_effect.models.model_agent_request_data import (
@@ -28,8 +27,8 @@ from omnibase_infra.nodes.node_rsd_data_fetch_effect.models.model_ticket_data im
 from omnibase_infra.nodes.node_rsd_score_compute.models.model_rsd_factor_score import (
     ModelRsdFactorScore,
 )
-from omnibase_infra.nodes.node_rsd_score_compute.models.model_rsd_factor_weights import (
-    ModelRsdFactorWeights,
+from omnibase_infra.nodes.node_rsd_score_compute.models.model_rsd_score_input import (
+    ModelRsdScoreInput,
 )
 from omnibase_infra.nodes.node_rsd_score_compute.models.model_rsd_score_result import (
     ModelRsdScoreResult,
@@ -60,28 +59,31 @@ class HandlerRsdScoreCalculate:
     def handler_category(self) -> EnumHandlerTypeCategory:
         return EnumHandlerTypeCategory.COMPUTE
 
-    async def handle(
-        self,
-        correlation_id: UUID,
-        tickets: tuple[ModelTicketData, ...],
-        dependency_edges: tuple[ModelDependencyEdge, ...],
-        agent_requests: tuple[ModelAgentRequestData, ...],
-        plan_overrides: tuple[ModelPlanOverrideData, ...],
-        weights: ModelRsdFactorWeights,
-    ) -> ModelRsdScoreResult:
+    async def handle(self, request: ModelRsdScoreInput) -> ModelRsdScoreResult:
         """Calculate RSD priority scores for all tickets.
 
+        Canonical definition-B entrypoint (OMN-14828 / OMN-14355): the shared
+        runtime adapter validates the dispatched payload into
+        ``ModelRsdScoreInput`` and hands it here as the single typed ``request``.
+        The 5-factor scoring body below is byte-identical to the pre-flip
+        multi-parameter form — the fields are unpacked from ``request`` and the
+        remainder is unchanged (hand-flip, OMN-14781 path).
+
         Args:
-            correlation_id: Workflow correlation ID.
-            tickets: Ticket data to score.
-            dependency_edges: Dependency graph edges.
-            agent_requests: Agent requests per ticket.
-            plan_overrides: Plan overrides per ticket.
-            weights: Factor weights for the algorithm.
+            request: All data needed for scoring — correlation id, tickets,
+                dependency edges, agent requests, plan overrides, and factor
+                weights.
 
         Returns:
             ModelRsdScoreResult with scores and ranked order.
         """
+        correlation_id = request.correlation_id
+        tickets = request.tickets
+        dependency_edges = request.dependency_edges
+        agent_requests = request.agent_requests
+        plan_overrides = request.plan_overrides
+        weights = request.weights
+
         logger.info(
             "Calculating RSD scores for %d tickets (correlation_id=%s)",
             len(tickets),

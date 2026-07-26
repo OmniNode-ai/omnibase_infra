@@ -8,24 +8,28 @@ on:
   merge_group:
   workflow_dispatch:
 
-# OMN-6488: cancel-in-progress for merge_group events only — re-enqueue should
-# cancel the previous run.  Regular PR pushes keep cancel-in-progress: false so
-# in-flight tests aren't killed when a new commit is pushed.
+# OMN-6488 / OMN-13949: cancel superseded runs on both PR pushes and merge_group
+# re-enqueues. Superseded runs were holding saturated self-hosted runners; the
+# fleet-load fix (OMN-13932 §5.2) makes killing them the default. The group keys
+# on PR number (falling back to github.ref), and merge_group entries carry a
+# unique github.ref so distinct queue entries never cross-cancel.
 concurrency:
   group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}
-  cancel-in-progress: ${{ github.event_name == 'merge_group' }}
+  cancel-in-progress: true
 
 env:
   UV_VERSION: "0.6.14"
   PYTHON_VERSION: "3.12"
   CACHE_VERSION: "0.6.0"
+  SHELLCHECK_VERSION: "v0.10.0"
   # OMN-12564 canary: trusted self-hosted CI reuses an immutable host-local
   # dependency environment keyed by uv.lock/tool versions instead of resolving
   # dependencies independently in every job. Public fork PRs keep isolated setup.
   OMNI_CI_SHARED_ENV_ENABLED: >-
     ${{
       (github.event_name == 'pull_request' &&
-       github.event.pull_request.head.repo.full_name != github.repository)
+       (github.event.pull_request.head.repo.full_name != github.repository ||
+        github.event.pull_request.base.ref == 'dev'))
       && 'false'
       || 'true'
     }}
@@ -51,6 +55,19 @@ env:
   LLM_ENDPOINT_CIDR_ALLOWLIST: "10.0.0.0/8"
 
 jobs:
+  # OCC preflight is the first non-OCC CI dependency. If central OCC
+  # evidence is missing or red, no runner-heavy validation jobs fan out.
+  occ-preflight:
+    # self-gating-ok: target is in omnibase_core, not a required check on omnibase_infra main
+    uses: OmniNode-ai/omnibase_core/.github/workflows/occ-preflight.yml@789d175d78a7a802f4f0f4aa2af7083bdfd312c2
+    permissions:
+      contents: read
+      pull-requests: read
+    with:
+      contracts-dir: contracts
+      receipts-dir: drift/dod_receipts
+      core-ref: 8a47e092002dd1338599fa0733feda469436acbf
+
   # =============================================================================
   # Phase 0 - Zone filter (OMN-10475)
   # =============================================================================
@@ -59,6 +76,7 @@ jobs:
   # .evidence/), heavy jobs (test-parallel, migration-integration) skip, while
   # lint, validators, contract gates, and receipt-gate callers still run.
   zone-filter:
+    needs: occ-preflight
     uses: OmniNode-ai/omnibase_core/.github/workflows/zone-filter.yml@35fce1b6ae16a8fefec8996e26c1d66a3fb693c2
     with:
       python-version: "3.12"
@@ -72,16 +90,18 @@ jobs:
   # =============================================================================
 
   lint:
+    needs: occ-preflight
     name: Lint
     # OMNI_RUNNER_SELECTOR_V1 — trusted CI defaults to self-hosted omnibase-ci; public forks default to ubuntu-latest
     runs-on: >-
       ${{
-        (github.event_name == 'pull_request' &&
-         github.event.pull_request.head.repo.full_name != github.repository)
+        ((github.event_name == 'pull_request' && github.base_ref == 'dev') ||
+         (github.event_name == 'pull_request' &&
+          github.event.pull_request.head.repo.full_name != github.repository))
         && fromJSON(vars.OMNI_PUBLIC_PR_RUNS_ON_JSON || '["ubuntu-latest"]')
         || fromJSON((github.event_name == 'merge_group' && vars.OMNI_REQUIRED_CI_RUNS_ON_JSON) || vars.OMNI_TRUSTED_CI_RUNS_ON_JSON || '["self-hosted","omnibase-ci"]')
       }}
-    timeout-minutes: 10
+    timeout-minutes: 30
 
     steps:
       - name: Checkout code
@@ -142,8 +162,60 @@ jobs:
       - name: operation_match operation-field gate (OMN-13530)
         run: uv run python -m omnibase_core.validators.operation_match_requires_operation src/omnibase_infra
 
+      # OMN-14141: every handler_routing.handlers[] entry must carry a nested
+      # 'handler: {name, module}' mapping. The flat 'handler_class'/
+      # 'handler_module' schema silently parses to ZERO dispatchers and then
+      # phantom-wires the subscribed topic (WIRED with no live handler, offsets
+      # still committed) — the WI-14 root cause (OMN-14139/OMN-14135). Fail-closed
+      # gate paired with the runtime parse guard in
+      # auto_wiring/discovery._parse_handler_routing. SYNC with pre-commit hook
+      # 'handler-routing-schema-gate'.
+      - name: handler_routing flat-schema gate (OMN-14141)
+        run: PYTHONPATH=src uv run python -m omnibase_infra.validators.handler_routing_schema src/omnibase_infra
+
+      # OMN-14360 (OMN-14208 Path A): fail-closed gate on the
+      # event_bus.tenant_scoped_ingress opt-in. A flag-true contract must bind
+      # at least one tenant-<slug>.-prefixed subscribe_topic, and every other
+      # subscribe_topic must be prefixed (so the OMN-14349 stamp covers it — a
+      # bare/mixed topic lets a client tenant_id survive unverified) OR be an
+      # allowlisted, producer-free trusted_internal topic (OMN-14482 carve-out),
+      # AND the contract must be named in
+      # config/validation/tenant_scoped_ingress_allowlist.yaml with a proving
+      # seam test (no opt-in flip until a real cross-boundary test exists — the
+      # OMN-14208 silent-no-op near-miss). SYNC with pre-commit hook
+      # 'tenant-scoped-ingress-gate'. Placed alongside the handler_routing gate
+      # (not contract-validation.yml, which validates ticket contracts via a
+      # reusable action with no uv setup) so it runs in this already-required
+      # lint job against the pinned toolchain.
+      - name: tenant_scoped_ingress opt-in gate (OMN-14360)
+        run: PYTHONPATH=src uv run python -m omnibase_infra.validators.tenant_scoped_ingress_schema src/omnibase_infra
+
       - name: Check handler Any signature gate (OMN-10820)
         run: PYTHONPATH=src uv run python -m omnibase_infra.validators.handler_any_signature --max-violations 0 src/omnibase_infra
+
+      # OMN-14135: a contract-declared handler exposing NEITHER handle() nor
+      # handle_async() is bound by auto-wiring to _missing_handle, which raises on
+      # EVERY dispatch — while the contract validates, the node boots, and CI stays
+      # green (HandlerA2ATask shipped exactly this way). Registration and routing do
+      # NOT imply executability, so the OMN-14488 route-coverage gates cannot see it.
+      # Runs here (unconditional, already-required lint job) rather than relying on
+      # the pytest copy, which the change-aware selector could narrow away on the very
+      # PR that adds a bad handler. Ratchet is frozen in
+      # config/validation/handler_dispatch_entrypoint_baseline.yaml and is shrink-only.
+      # SYNC with pre-commit hook 'handler-dispatch-entrypoint'.
+      - name: Check handler dispatch-entrypoint gate (OMN-14135)
+        run: PYTHONPATH=src uv run python -m omnibase_infra.validators.handler_dispatch_entrypoint src/omnibase_infra
+
+      # OMN-14605: a handler_routing entry whose _topics_for_handler_entry-assigned
+      # topics span >1 real category (.cmd/.evt/.intent) gets ONE category stamped on
+      # every route by handler_wiring, so the off-category topics are permanent
+      # NO_DISPATCHER (silent DLQ/drop) while the node boots green — the OMN-14606
+      # (node_swarm_fanout_orchestrator) live defect. MixinNodeDispatch (OMN-12549)
+      # hard-rejects the same shape at registration; this gate flags it at CI time.
+      # Ratchet frozen in config/validation/mixed_category_routing_baseline.yaml
+      # (shrink-only). SYNC with pre-commit hook 'mixed-category-routing'.
+      - name: Check mixed-category routing gate (OMN-14605)
+        run: PYTHONPATH=src uv run python -m omnibase_infra.validators.mixed_category_routing src/omnibase_infra
 
       - name: Check type-ignore budget gate (OMN-10822)
         run: PYTHONPATH=src uv run python -m omnibase_infra.validators.type_ignore_budget --max-violations 74 src/omnibase_infra
@@ -173,17 +245,115 @@ jobs:
             --baseline config/validation/transport_mock_baseline.yaml \
             tests/
 
+      # Canonical handler-shape GROWTH RATCHET fan-out (OMN-14355/OMN-14368/OMN-14587).
+      # compliance_sweep checks handler hygiene but is blind to handler SHAPE, so a
+      # non-canonical handler passes green CI. This classifies each omnibase_infra
+      # node's contract-declared handler (definition B: typed-payload handle(request)
+      # -> response, adapted by the shared runtime, no envelope in the core), WARNs
+      # the committed baseline's debt (scripts/ci/canonical_handler_shape_baseline.py,
+      # OMN-14587: 92 non-canonical / 115 scanned), and HARD-FAILS a NEW non-canonical
+      # node or baseline-count growth. Sourced from the sibling omnibase_core checkout
+      # above (.ci/omnibase_core, already cloned for Transport-mock lint) since the
+      # classifier lives at omnibase_core's repo-root scripts/ci/, not the installed
+      # package. Runs --full (not the default --scope changed): the classifier's
+      # diff-scoped git-diff runs with cwd = the classifier's OWN repo
+      # (omnibase_core parents[2]), wrong for a fan-out invocation against this
+      # sibling checkout — --full is cheap here (~115 nodes, sub-second).
+      # No pre-commit mirror yet: same infeasibility already verified for the
+      # omnimarket fan-out (OMN-14372) — pre-commit's language:python remote-hook
+      # install only ships the installed src/omnibase_core/ package (classifier
+      # isn't importable that way) and language:script has no dependency isolation
+      # (needs pydantic/pyyaml); real fix is OMN-14563 (relocate the classifier into
+      # an installed omnibase_core module). CI-only matches the omnimarket precedent.
+      # --receipts-dir is mandatory here (OMN-14633 fix): the classifier's default
+      # for a non-core --package is a directory NEXT TO ITS OWN __file__ (i.e.
+      # inside the ephemeral .ci/omnibase_core sibling checkout above), which
+      # never contains this repo's committed receipts. Without this flag every
+      # proven flip (adequacy receipt + equivalence artifact committed under
+      # THIS repo's scripts/ci/adequacy_receipts/) reports as unproven and
+      # HARD-FAILS CI, defeating the whole flip-gate — caught while proving
+      # node_coding_agent_workspace_compute's first flip against this baseline.
+      - name: Canonical handler-shape ratchet (OMN-14355 fan-out, OMN-14587)
+        run: |
+          uv run python .ci/omnibase_core/scripts/ci/canonical_handler_shape.py \
+            --package omnibase_infra --src-root src \
+            --baseline scripts/ci/canonical_handler_shape_baseline.py \
+            --receipts-dir scripts/ci/adequacy_receipts \
+            --full
+
       - name: Run mypy type checking
         run: uv run mypy src/omnibase_infra
 
+  # RT-5 (OMN-14467): the deploy-trigger producer must fail closed on zero
+  # output. Its RED-on-zero acceptance test and the anti-regression policy gate
+  # live in tests/scripts/, which the change-aware selector does NOT pick for a
+  # scripts/ change (empty reverse_deps) — so "CI Tests Gate" would green WITHOUT
+  # running them, leaving enforcement only at the dev->main full suite. This
+  # dedicated gate runs them IN-PR whenever the producer or the shared assertion
+  # changes. It is registered in scripts/ci/ci_summary_gate.py STRICT_GATE_JOBS,
+  # so a red result fails the required "CI Summary" context (fail-closed, in-PR).
+  # The job always runs (present+success) to satisfy the strict completeness
+  # anchor; the expensive setup+pytest runs only when the guarded files change
+  # (or on non-PR events), keeping the everyday-PR cost near zero.
+  effect-assertion-gate:
+    needs: occ-preflight
+    name: "Effect-Assertion Gate (RT-5)"
+    # OMNI_RUNNER_SELECTOR_V1 — trusted CI defaults to self-hosted omnibase-ci; public forks default to ubuntu-latest
+    runs-on: >-
+      ${{
+        ((github.event_name == 'pull_request' && github.base_ref == 'dev') ||
+         (github.event_name == 'pull_request' &&
+          github.event.pull_request.head.repo.full_name != github.repository))
+        && fromJSON(vars.OMNI_PUBLIC_PR_RUNS_ON_JSON || '["ubuntu-latest"]')
+        || fromJSON((github.event_name == 'merge_group' && vars.OMNI_REQUIRED_CI_RUNS_ON_JSON) || vars.OMNI_TRUSTED_CI_RUNS_ON_JSON || '["self-hosted","omnibase-ci"]')
+      }}
+    timeout-minutes: 15
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+
+      - name: Detect deploy-trigger / effect-assertion changes
+        id: changed
+        uses: tj-actions/changed-files@v47
+        with:
+          files: |
+            scripts/trigger_rebuild_on_merge.py
+            src/omnibase_infra/utils/util_producer_effect_assertion.py
+            tests/scripts/test_trigger_producer_effect_assertion.py
+            tests/unit/utils/test_util_producer_effect_assertion.py
+
+      - name: Setup Python and uv
+        if: steps.changed.outputs.any_changed == 'true' || github.event_name != 'pull_request'
+        uses: ./.github/actions/setup-python-uv
+        with:
+          python-version: ${{ env.PYTHON_VERSION }}
+          uv-version: ${{ env.UV_VERSION }}
+          cache-version: ${{ env.CACHE_VERSION }}
+          cache-enabled: "false"
+
+      - name: Run RT-5 effect-assertion acceptance + policy tests
+        if: steps.changed.outputs.any_changed == 'true' || github.event_name != 'pull_request'
+        run: |
+          uv run pytest \
+            tests/scripts/test_trigger_producer_effect_assertion.py \
+            tests/unit/utils/test_util_producer_effect_assertion.py \
+            -v --tb=short
+
+      - name: RT-5 gate not exercised (no producer/assertion change)
+        if: steps.changed.outputs.any_changed != 'true' && github.event_name == 'pull_request'
+        run: echo "No change to the deploy-trigger producer or the shared effect-assertion; RT-5 gate not exercised (present+green)."
+
   # ONEX validation - Infrastructure-specific validators
   onex-validation:
+    needs: occ-preflight
     name: ONEX Validators
     # OMNI_RUNNER_SELECTOR_V1 — trusted CI defaults to self-hosted omnibase-ci; public forks default to ubuntu-latest
     runs-on: >-
       ${{
-        (github.event_name == 'pull_request' &&
-         github.event.pull_request.head.repo.full_name != github.repository)
+        ((github.event_name == 'pull_request' && github.base_ref == 'dev') ||
+         (github.event_name == 'pull_request' &&
+          github.event.pull_request.head.repo.full_name != github.repository))
         && fromJSON(vars.OMNI_PUBLIC_PR_RUNS_ON_JSON || '["ubuntu-latest"]')
         || fromJSON((github.event_name == 'merge_group' && vars.OMNI_REQUIRED_CI_RUNS_ON_JSON) || vars.OMNI_TRUSTED_CI_RUNS_ON_JSON || '["self-hosted","omnibase-ci"]')
       }}
@@ -250,6 +420,18 @@ jobs:
           echo "================================================================"
           uv run python scripts/validate.py orchestration_monoliths --verbose
 
+      # ARCH-005 orchestrator/reducer handler state-invariant (OMN-14222).
+      # Full-repo scan, BLOCKING (no continue-on-error): unlike ARCH-004
+      # Signal A/B, this rule has ZERO ratchet baseline -- the repo carries
+      # no unexempted violations, so a finding here is always a fresh
+      # regression, not pre-existing debt working down to threshold.
+      - name: Run orchestrator/reducer state-invariant gate (ARCH-005)
+        run: |
+          echo "================================================================"
+          echo "Orchestrator/Reducer State Invariant (ARCH-005, OMN-14222)"
+          echo "================================================================"
+          uv run python scripts/validate.py orchestrator_reducer_state --verbose
+
       - name: Run markdown link validation
         run: |
           echo "================================================================"
@@ -286,15 +468,11 @@ jobs:
           uv run python scripts/batch_validate_node_contracts.py --verbose
 
   infra-node-handler-ownership:
+    needs: occ-preflight
     name: Infra Node Handler Ownership
-    # OMNI_RUNNER_SELECTOR_V1 — trusted CI defaults to self-hosted omnibase-ci; public forks default to ubuntu-latest
-    runs-on: >-
-      ${{
-        (github.event_name == 'pull_request' &&
-         github.event.pull_request.head.repo.full_name != github.repository)
-        && fromJSON(vars.OMNI_PUBLIC_PR_RUNS_ON_JSON || '["ubuntu-latest"]')
-        || fromJSON((github.event_name == 'merge_group' && vars.OMNI_REQUIRED_CI_RUNS_ON_JSON) || vars.OMNI_TRUSTED_CI_RUNS_ON_JSON || '["self-hosted","omnibase-ci"]')
-      }}
+    # Pure repository ownership lint. Keep it hosted so self-hosted saturation
+    # cannot cancel this short job and falsely fail CI Summary.
+    runs-on: ubuntu-latest
     timeout-minutes: 5
 
     steps:
@@ -307,12 +485,14 @@ jobs:
   # Fingerprint drift detection -- CI twins for runtime assertions B2 and B3
   # Prevents stale fingerprint artifacts from being merged (OMN-2149)
   fingerprint-check:
+    needs: occ-preflight
     name: Fingerprint Check
     # OMNI_RUNNER_SELECTOR_V1 — trusted CI defaults to self-hosted omnibase-ci; public forks default to ubuntu-latest
     runs-on: >-
       ${{
-        (github.event_name == 'pull_request' &&
-         github.event.pull_request.head.repo.full_name != github.repository)
+        ((github.event_name == 'pull_request' && github.base_ref == 'dev') ||
+         (github.event_name == 'pull_request' &&
+          github.event.pull_request.head.repo.full_name != github.repository))
         && fromJSON(vars.OMNI_PUBLIC_PR_RUNS_ON_JSON || '["ubuntu-latest"]')
         || fromJSON((github.event_name == 'merge_group' && vars.OMNI_REQUIRED_CI_RUNS_ON_JSON) || vars.OMNI_TRUSTED_CI_RUNS_ON_JSON || '["self-hosted","omnibase-ci"]')
       }}
@@ -339,12 +519,14 @@ jobs:
   # Demo loop assertion gate -- validates canonical event pipeline (OMN-2297)
   # Runs in CI mode (skips live infra checks) as pre-deploy validation
   demo-loop-gate:
+    needs: occ-preflight
     name: Demo Loop Gate
     # OMNI_RUNNER_SELECTOR_V1 — trusted CI defaults to self-hosted omnibase-ci; public forks default to ubuntu-latest
     runs-on: >-
       ${{
-        (github.event_name == 'pull_request' &&
-         github.event.pull_request.head.repo.full_name != github.repository)
+        ((github.event_name == 'pull_request' && github.base_ref == 'dev') ||
+         (github.event_name == 'pull_request' &&
+          github.event.pull_request.head.repo.full_name != github.repository))
         && fromJSON(vars.OMNI_PUBLIC_PR_RUNS_ON_JSON || '["ubuntu-latest"]')
         || fromJSON((github.event_name == 'merge_group' && vars.OMNI_REQUIRED_CI_RUNS_ON_JSON) || vars.OMNI_TRUSTED_CI_RUNS_ON_JSON || '["self-hosted","omnibase-ci"]')
       }}
@@ -372,12 +554,14 @@ jobs:
   # Migration freeze enforcement - blocks new migrations when .migration_freeze exists
   # Part of DB-per-repo refactor (OMN-2055), tracking: OMN-2071
   migration-freeze:
+    needs: occ-preflight
     name: Migration Freeze Check
     # OMNI_RUNNER_SELECTOR_V1 — trusted CI defaults to self-hosted omnibase-ci; public forks default to ubuntu-latest
     runs-on: >-
       ${{
-        (github.event_name == 'pull_request' &&
-         github.event.pull_request.head.repo.full_name != github.repository)
+        ((github.event_name == 'pull_request' && github.base_ref == 'dev') ||
+         (github.event_name == 'pull_request' &&
+          github.event.pull_request.head.repo.full_name != github.repository))
         && fromJSON(vars.OMNI_PUBLIC_PR_RUNS_ON_JSON || '["ubuntu-latest"]')
         || fromJSON((github.event_name == 'merge_group' && vars.OMNI_REQUIRED_CI_RUNS_ON_JSON) || vars.OMNI_TRUSTED_CI_RUNS_ON_JSON || '["self-hosted","omnibase-ci"]')
       }}
@@ -400,12 +584,15 @@ jobs:
   # Topic enum drift check -- CI gate for contract-driven topic enum pipeline (OMN-3187)
   # Ensures generated enum files stay in sync with contract.yaml definitions
   topic-enum-drift:
+    needs: occ-preflight
+    if: always()
     name: Topic Enum Drift Check
     # OMNI_RUNNER_SELECTOR_V1 — trusted CI defaults to self-hosted omnibase-ci; public forks default to ubuntu-latest
     runs-on: >-
       ${{
-        (github.event_name == 'pull_request' &&
-         github.event.pull_request.head.repo.full_name != github.repository)
+        ((github.event_name == 'pull_request' && github.base_ref == 'dev') ||
+         (github.event_name == 'pull_request' &&
+          github.event.pull_request.head.repo.full_name != github.repository))
         && fromJSON(vars.OMNI_PUBLIC_PR_RUNS_ON_JSON || '["ubuntu-latest"]')
         || fromJSON((github.event_name == 'merge_group' && vars.OMNI_REQUIRED_CI_RUNS_ON_JSON) || vars.OMNI_TRUSTED_CI_RUNS_ON_JSON || '["self-hosted","omnibase-ci"]')
       }}
@@ -433,12 +620,15 @@ jobs:
   # Topic naming lint -- CI gate for ONEX topic naming convention (OMN-3188)
   # Validates onex.{kind}.{producer}.{event}.v{n} format in all contract.yaml files
   topic-naming-lint:
+    needs: occ-preflight
+    if: always()
     name: Topic Naming Lint
     # OMNI_RUNNER_SELECTOR_V1 — trusted CI defaults to self-hosted omnibase-ci; public forks default to ubuntu-latest
     runs-on: >-
       ${{
-        (github.event_name == 'pull_request' &&
-         github.event.pull_request.head.repo.full_name != github.repository)
+        ((github.event_name == 'pull_request' && github.base_ref == 'dev') ||
+         (github.event_name == 'pull_request' &&
+          github.event.pull_request.head.repo.full_name != github.repository))
         && fromJSON(vars.OMNI_PUBLIC_PR_RUNS_ON_JSON || '["ubuntu-latest"]')
         || fromJSON((github.event_name == 'merge_group' && vars.OMNI_REQUIRED_CI_RUNS_ON_JSON) || vars.OMNI_TRUSTED_CI_RUNS_ON_JSON || '["self-hosted","omnibase-ci"]')
       }}
@@ -477,12 +667,15 @@ jobs:
   # Ensures static topic constants stay in sync with contract.yaml topic declarations.
   # Cross-repo scanning (OMN-5258): checks out sibling repos to resolve topic references.
   topic-drift-check:
+    needs: occ-preflight
+    if: always()
     name: Topic Drift Check
     # OMNI_RUNNER_SELECTOR_V1 — trusted CI defaults to self-hosted omnibase-ci; public forks default to ubuntu-latest
     runs-on: >-
       ${{
-        (github.event_name == 'pull_request' &&
-         github.event.pull_request.head.repo.full_name != github.repository)
+        ((github.event_name == 'pull_request' && github.base_ref == 'dev') ||
+         (github.event_name == 'pull_request' &&
+          github.event.pull_request.head.repo.full_name != github.repository))
         && fromJSON(vars.OMNI_PUBLIC_PR_RUNS_ON_JSON || '["ubuntu-latest"]')
         || fromJSON((github.event_name == 'merge_group' && vars.OMNI_REQUIRED_CI_RUNS_ON_JSON) || vars.OMNI_TRUSTED_CI_RUNS_ON_JSON || '["self-hosted","omnibase-ci"]')
       }}
@@ -547,12 +740,14 @@ jobs:
   # Uses --changed-only in CI: only checks pairs whose models were touched by the PR.
   # Requires sibling repos omniintelligence + omnimemory to be checked out.
   schema-handshake:
+    needs: occ-preflight
     name: Kafka Schema Handshake (OMN-3411)
     # OMNI_RUNNER_SELECTOR_V1 — trusted CI defaults to self-hosted omnibase-ci; public forks default to ubuntu-latest
     runs-on: >-
       ${{
-        (github.event_name == 'pull_request' &&
-         github.event.pull_request.head.repo.full_name != github.repository)
+        ((github.event_name == 'pull_request' && github.base_ref == 'dev') ||
+         (github.event_name == 'pull_request' &&
+          github.event.pull_request.head.repo.full_name != github.repository))
         && fromJSON(vars.OMNI_PUBLIC_PR_RUNS_ON_JSON || '["ubuntu-latest"]')
         || fromJSON((github.event_name == 'merge_group' && vars.OMNI_REQUIRED_CI_RUNS_ON_JSON) || vars.OMNI_TRUSTED_CI_RUNS_ON_JSON || '["self-hosted","omnibase-ci"]')
       }}
@@ -659,12 +854,14 @@ jobs:
   # Scans src/**/*.py for onex.(evt|cmd).* string literals outside canonical
   # topic definition files. Pre-existing violations are suppressed via baseline.
   arch-invariants:
+    needs: occ-preflight
     name: Arch Invariants (OMN-3343)
     # OMNI_RUNNER_SELECTOR_V1 — trusted CI defaults to self-hosted omnibase-ci; public forks default to ubuntu-latest
     runs-on: >-
       ${{
-        (github.event_name == 'pull_request' &&
-         github.event.pull_request.head.repo.full_name != github.repository)
+        ((github.event_name == 'pull_request' && github.base_ref == 'dev') ||
+         (github.event_name == 'pull_request' &&
+          github.event.pull_request.head.repo.full_name != github.repository))
         && fromJSON(vars.OMNI_PUBLIC_PR_RUNS_ON_JSON || '["ubuntu-latest"]')
         || fromJSON((github.event_name == 'merge_group' && vars.OMNI_REQUIRED_CI_RUNS_ON_JSON) || vars.OMNI_TRUSTED_CI_RUNS_ON_JSON || '["self-hosted","omnibase-ci"]')
       }}
@@ -691,12 +888,14 @@ jobs:
             --baseline scripts/validation/topic_literal_baseline.txt
 
   plugin-env-service-completeness:
+    needs: occ-preflight
     name: "Plugin ENV->Service Completeness (OMN-4313)"
     # OMNI_RUNNER_SELECTOR_V1 — trusted CI defaults to self-hosted omnibase-ci; public forks default to ubuntu-latest
     runs-on: >-
       ${{
-        (github.event_name == 'pull_request' &&
-         github.event.pull_request.head.repo.full_name != github.repository)
+        ((github.event_name == 'pull_request' && github.base_ref == 'dev') ||
+         (github.event_name == 'pull_request' &&
+          github.event.pull_request.head.repo.full_name != github.repository))
         && fromJSON(vars.OMNI_PUBLIC_PR_RUNS_ON_JSON || '["ubuntu-latest"]')
         || fromJSON((github.event_name == 'merge_group' && vars.OMNI_REQUIRED_CI_RUNS_ON_JSON) || vars.OMNI_TRUSTED_CI_RUNS_ON_JSON || '["self-hosted","omnibase-ci"]')
       }}
@@ -722,17 +921,57 @@ jobs:
           echo "================================================================"
           uv run pytest tests/ci/test_plugin_env_service_completeness.py -v
 
-  compose-required-env-coverage:
-    name: "Compose Required-Env Coverage (OMN-5439)"
-    # OMNI_RUNNER_SELECTOR_V1 — trusted CI defaults to self-hosted omnibase-ci; public forks default to ubuntu-latest
+  occ-born-path-trigger-coverage:
+    needs: occ-preflight
+    name: "OCC Born-Path Trigger Coverage (OMN-14987)"
+    # OMNI_RUNNER_SELECTOR_V1 -- trusted CI defaults to self-hosted omnibase-ci; public forks default to ubuntu-latest
     runs-on: >-
       ${{
-        (github.event_name == 'pull_request' &&
-         github.event.pull_request.head.repo.full_name != github.repository)
+        ((github.event_name == 'pull_request' && github.base_ref == 'dev') ||
+         (github.event_name == 'pull_request' &&
+          github.event.pull_request.head.repo.full_name != github.repository))
         && fromJSON(vars.OMNI_PUBLIC_PR_RUNS_ON_JSON || '["ubuntu-latest"]')
         || fromJSON((github.event_name == 'merge_group' && vars.OMNI_REQUIRED_CI_RUNS_ON_JSON) || vars.OMNI_TRUSTED_CI_RUNS_ON_JSON || '["self-hosted","omnibase-ci"]')
       }}
     timeout-minutes: 10
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+
+      - name: Setup Python and uv
+        uses: ./.github/actions/setup-python-uv
+        with:
+          python-version: ${{ env.PYTHON_VERSION }}
+          uv-version: ${{ env.UV_VERSION }}
+          cache-version: ${{ env.CACHE_VERSION }}
+          cache-enabled: "false"
+
+      - name: OCC born-path trigger coverage check
+        run: |
+          echo "================================================================"
+          echo "Guardrail (OMN-14987): call-occ-autobind.yml and"
+          echo "call-occ-companion-effect.yml must listen for the full set of"
+          echo "PR events that can make a PR mint-eligible (opened, synchronize,"
+          echo "reopened, ready_for_review). A missing trigger type is silent --"
+          echo "no run fires, nothing goes red -- so this is a structural gate,"
+          echo "not a behavioral one."
+          echo "================================================================"
+          uv run pytest tests/ci/test_occ_born_path_trigger_coverage.py -v
+
+  compose-required-env-coverage:
+    needs: occ-preflight
+    name: "Compose Required-Env Coverage (OMN-5439)"
+    # OMNI_RUNNER_SELECTOR_V1 — trusted CI defaults to self-hosted omnibase-ci; public forks default to ubuntu-latest
+    runs-on: >-
+      ${{
+        ((github.event_name == 'pull_request' && github.base_ref == 'dev') ||
+         (github.event_name == 'pull_request' &&
+          github.event.pull_request.head.repo.full_name != github.repository))
+        && fromJSON(vars.OMNI_PUBLIC_PR_RUNS_ON_JSON || '["ubuntu-latest"]')
+        || fromJSON((github.event_name == 'merge_group' && vars.OMNI_REQUIRED_CI_RUNS_ON_JSON) || vars.OMNI_TRUSTED_CI_RUNS_ON_JSON || '["self-hosted","omnibase-ci"]')
+      }}
+    timeout-minutes: 20
 
     steps:
       - name: Checkout code
@@ -756,11 +995,14 @@ jobs:
 
   # Contract path pre-flight: verify all referenced module paths exist before expensive test splits (F8/OMN-6478)
   contract-path-preflight:
+    needs: occ-preflight
+    timeout-minutes: 30
     name: Contract Path Pre-Flight
     runs-on: >-
       ${{
-        (github.event_name == 'pull_request' &&
-         github.event.pull_request.head.repo.full_name != github.repository)
+        ((github.event_name == 'pull_request' && github.base_ref == 'dev') ||
+         (github.event_name == 'pull_request' &&
+          github.event.pull_request.head.repo.full_name != github.repository))
         && fromJSON(vars.OMNI_PUBLIC_PR_RUNS_ON_JSON || '["ubuntu-latest"]')
         || fromJSON((github.event_name == 'merge_group' && vars.OMNI_REQUIRED_CI_RUNS_ON_JSON) || vars.OMNI_TRUSTED_CI_RUNS_ON_JSON || '["self-hosted","omnibase-ci"]')
       }}
@@ -802,15 +1044,18 @@ jobs:
           fi
 
   contract-sync-gate:
+    needs: occ-preflight
+    timeout-minutes: 30
     name: Contract Sync Gate (Wave C) [OMN-8915]
     runs-on: >-
       ${{
-        (github.event_name == 'pull_request' &&
-         github.event.pull_request.head.repo.full_name != github.repository)
+        ((github.event_name == 'pull_request' && github.base_ref == 'dev') ||
+         (github.event_name == 'pull_request' &&
+          github.event.pull_request.head.repo.full_name != github.repository))
         && fromJSON(vars.OMNI_PUBLIC_PR_RUNS_ON_JSON || '["ubuntu-latest"]')
         || fromJSON((github.event_name == 'merge_group' && vars.OMNI_REQUIRED_CI_RUNS_ON_JSON) || vars.OMNI_TRUSTED_CI_RUNS_ON_JSON || '["self-hosted","omnibase-ci"]')
       }}
-    if: github.event_name == 'pull_request' || github.event_name == 'merge_group'
+    if: needs.occ-preflight.result == 'success' && (github.event_name == 'pull_request' || github.event_name == 'merge_group')
     steps:
       - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
 
@@ -839,13 +1084,15 @@ jobs:
   # and selected_paths, activating the smart-selection pytest step instead.
 
   detect-changes:
+    timeout-minutes: 30
     name: Detect Changes
-    needs: [lint, onex-validation, infra-node-handler-ownership, migration-freeze, fingerprint-check, demo-loop-gate, topic-enum-drift, topic-naming-lint, topic-drift-check, arch-invariants, schema-handshake, plugin-env-service-completeness, compose-required-env-coverage, contract-path-preflight, contract-compliance, contract-sync-gate]
+    needs: [occ-preflight, lint, onex-validation, infra-node-handler-ownership, migration-freeze, fingerprint-check, demo-loop-gate, topic-enum-drift, topic-naming-lint, topic-drift-check, arch-invariants, schema-handshake, plugin-env-service-completeness, compose-required-env-coverage, contract-path-preflight, contract-sync-gate]
     # OMNI_RUNNER_SELECTOR_V1 — trusted CI defaults to self-hosted omnibase-ci; public forks default to ubuntu-latest
     runs-on: >-
       ${{
-        (github.event_name == 'pull_request' &&
-         github.event.pull_request.head.repo.full_name != github.repository)
+        ((github.event_name == 'pull_request' && github.base_ref == 'dev') ||
+         (github.event_name == 'pull_request' &&
+          github.event.pull_request.head.repo.full_name != github.repository))
         && fromJSON(vars.OMNI_PUBLIC_PR_RUNS_ON_JSON || '["ubuntu-latest"]')
         || fromJSON((github.event_name == 'merge_group' && vars.OMNI_REQUIRED_CI_RUNS_ON_JSON) || vars.OMNI_TRUSTED_CI_RUNS_ON_JSON || '["self-hosted","omnibase-ci"]')
       }}
@@ -923,13 +1170,14 @@ jobs:
   # Reduced from 10 splits + -n auto after repeated xdist OOM crashes on shard 3
   test-parallel:
     name: Tests (Split ${{ matrix.split }}/${{ needs.detect-changes.outputs.split_count }})
-    needs: [zone-filter, lint, onex-validation, migration-freeze, fingerprint-check, demo-loop-gate, topic-enum-drift, topic-naming-lint, topic-drift-check, arch-invariants, schema-handshake, plugin-env-service-completeness, compose-required-env-coverage, contract-path-preflight, contract-compliance, contract-sync-gate, detect-changes]
-    if: needs.zone-filter.outputs.docs_only != 'true'
+    needs: [occ-preflight, zone-filter, lint, onex-validation, migration-freeze, fingerprint-check, demo-loop-gate, topic-enum-drift, topic-naming-lint, topic-drift-check, arch-invariants, schema-handshake, plugin-env-service-completeness, compose-required-env-coverage, contract-path-preflight, contract-sync-gate, detect-changes]
+    if: needs.occ-preflight.result == 'success' && (needs.zone-filter.outputs.docs_only != 'true')
     # OMNI_RUNNER_SELECTOR_V1 — trusted CI defaults to self-hosted omnibase-ci; public forks default to ubuntu-latest
     runs-on: >-
       ${{
-        (github.event_name == 'pull_request' &&
-         github.event.pull_request.head.repo.full_name != github.repository)
+        ((github.event_name == 'pull_request' && github.base_ref == 'dev') ||
+         (github.event_name == 'pull_request' &&
+          github.event.pull_request.head.repo.full_name != github.repository))
         && fromJSON(vars.OMNI_PUBLIC_PR_RUNS_ON_JSON || '["ubuntu-latest"]')
         || fromJSON((github.event_name == 'merge_group' && vars.OMNI_REQUIRED_CI_RUNS_ON_JSON) || vars.OMNI_TRUSTED_CI_RUNS_ON_JSON || '["self-hosted","omnibase-ci"]')
       }}
@@ -953,10 +1201,45 @@ jobs:
           cache-version: ${{ env.CACHE_VERSION }}
           cache-enabled: "false"
 
+      - name: Ensure shellcheck is installed
+        run: |
+          set -euo pipefail
+          if command -v shellcheck >/dev/null 2>&1; then
+            shellcheck --version
+            exit 0
+          fi
+          case "$(uname -m)" in
+            x86_64 | amd64) sc_arch="x86_64" ;;
+            aarch64 | arm64) sc_arch="aarch64" ;;
+            *) echo "unsupported arch $(uname -m) for shellcheck install" >&2; exit 2 ;;
+          esac
+          echo "shellcheck not found; installing ${SHELLCHECK_VERSION} (${sc_arch}) to ~/.local/bin"
+          mkdir -p "${HOME}/.local/bin"
+          url="https://github.com/koalaman/shellcheck/releases/download/${SHELLCHECK_VERSION}/shellcheck-${SHELLCHECK_VERSION}.linux.${sc_arch}.tar.xz"
+          curl -fsSL "${url}" -o /tmp/shellcheck.tar.xz
+          python3 -c "import tarfile; tarfile.open('/tmp/shellcheck.tar.xz','r:xz').extractall('/tmp')"
+          cp "/tmp/shellcheck-${SHELLCHECK_VERSION}/shellcheck" "${HOME}/.local/bin/shellcheck"
+          chmod +x "${HOME}/.local/bin/shellcheck"
+          echo "${HOME}/.local/bin" >> "${GITHUB_PATH}"
+          "${HOME}/.local/bin/shellcheck" --version
+
       - name: Run pytest (smart selection)
         if: vars.ENABLE_SMART_TESTS == 'true' && needs.detect-changes.outputs.is_full_suite == 'false'
         run: |
           paths=$(echo '${{ needs.detect-changes.outputs.selected_paths }}' | jq -r '.[]')
+          if [ -z "$paths" ]; then
+            # OMN-14753: an empty selection (e.g. the docs-only exemption) is a
+            # legitimate "provably zero impact" result, not an error. Without
+            # this guard, passing no positional paths to pytest falls back to
+            # `testpaths = ["tests"]` from pyproject.toml -- i.e. close to the
+            # full suite -- silently defeating the selector.
+            echo "No impacted tests for this change set; nothing to run."
+            cat > "junit-${{ matrix.split }}.xml" << 'JUNIT_EOF'
+          <?xml version="1.0" encoding="utf-8"?>
+          <testsuites><testsuite name="pytest" errors="0" failures="0" skipped="0" tests="0" time="0"></testsuite></testsuites>
+          JUNIT_EOF
+            exit 0
+          fi
           uv run pytest $paths \
             --ignore=tests/integration/docker \
             -m "not slow and not chaos and not kafka and not performance" \
@@ -1008,12 +1291,14 @@ jobs:
   # version matrix defined in omni_home/standards/version-matrix.yaml.
   # Depends on OMN-4803 (check_version_pins.py must exist in omni_home main).
   version-pin-check:
+    needs: occ-preflight
     name: Version Pin Compliance
     # OMNI_RUNNER_SELECTOR_V1 — trusted CI defaults to self-hosted omnibase-ci; public forks default to ubuntu-latest
     runs-on: >-
       ${{
-        (github.event_name == 'pull_request' &&
-         github.event.pull_request.head.repo.full_name != github.repository)
+        ((github.event_name == 'pull_request' && github.base_ref == 'dev') ||
+         (github.event_name == 'pull_request' &&
+          github.event.pull_request.head.repo.full_name != github.repository))
         && fromJSON(vars.OMNI_PUBLIC_PR_RUNS_ON_JSON || '["ubuntu-latest"]')
         || fromJSON((github.event_name == 'merge_group' && vars.OMNI_REQUIRED_CI_RUNS_ON_JSON) || vars.OMNI_TRUSTED_CI_RUNS_ON_JSON || '["self-hosted","omnibase-ci"]')
       }}
@@ -1077,12 +1362,14 @@ jobs:
   # Conditional: only runs if the `onex compliance` command is available.
   # ============================================================================
   compliance:
+    needs: occ-preflight
     name: Contract Compliance
     # OMNI_RUNNER_SELECTOR_V1 — trusted CI defaults to self-hosted omnibase-ci; public forks default to ubuntu-latest
     runs-on: >-
       ${{
-        (github.event_name == 'pull_request' &&
-         github.event.pull_request.head.repo.full_name != github.repository)
+        ((github.event_name == 'pull_request' && github.base_ref == 'dev') ||
+         (github.event_name == 'pull_request' &&
+          github.event.pull_request.head.repo.full_name != github.repository))
         && fromJSON(vars.OMNI_PUBLIC_PR_RUNS_ON_JSON || '["ubuntu-latest"]')
         || fromJSON((github.event_name == 'merge_group' && vars.OMNI_REQUIRED_CI_RUNS_ON_JSON) || vars.OMNI_TRUSTED_CI_RUNS_ON_JSON || '["self-hosted","omnibase-ci"]')
       }}
@@ -1136,17 +1423,19 @@ jobs:
   # branch protection AND .github/required-checks.yaml
   # ============================================================================
   tests-gate:
+    timeout-minutes: 30
     name: CI Tests Gate
     # OMNI_RUNNER_SELECTOR_V1 — trusted CI defaults to self-hosted omnibase-ci; public forks default to ubuntu-latest
     runs-on: >-
       ${{
-        (github.event_name == 'pull_request' &&
-         github.event.pull_request.head.repo.full_name != github.repository)
+        ((github.event_name == 'pull_request' && github.base_ref == 'dev') ||
+         (github.event_name == 'pull_request' &&
+          github.event.pull_request.head.repo.full_name != github.repository))
         && fromJSON(vars.OMNI_PUBLIC_PR_RUNS_ON_JSON || '["ubuntu-latest"]')
         || fromJSON((github.event_name == 'merge_group' && vars.OMNI_REQUIRED_CI_RUNS_ON_JSON) || vars.OMNI_TRUSTED_CI_RUNS_ON_JSON || '["self-hosted","omnibase-ci"]')
       }}
-    needs: [test-parallel, detect-changes]
-    if: always()
+    needs: [occ-preflight, test-parallel, detect-changes]
+    if:  needs.occ-preflight.result == 'success' && (always())
     steps:
       - name: Check test matrix results
         env:
@@ -1169,11 +1458,14 @@ jobs:
   # ============================================================================
 
   migration-conflict-check:
+    needs: occ-preflight
+    timeout-minutes: 30
     name: Cross-Repo Migration Conflicts
     runs-on: >-
       ${{
-        (github.event_name == 'pull_request' &&
-         github.event.pull_request.head.repo.full_name != github.repository)
+        ((github.event_name == 'pull_request' && github.base_ref == 'dev') ||
+         (github.event_name == 'pull_request' &&
+          github.event.pull_request.head.repo.full_name != github.repository))
         && fromJSON(vars.OMNI_PUBLIC_PR_RUNS_ON_JSON || '["ubuntu-latest"]')
         || fromJSON((github.event_name == 'merge_group' && vars.OMNI_REQUIRED_CI_RUNS_ON_JSON) || vars.OMNI_TRUSTED_CI_RUNS_ON_JSON || '["self-hosted","omnibase-ci"]')
       }}
@@ -1189,22 +1481,29 @@ jobs:
 
 
   contract-compliance:
+    needs: occ-preflight
     name: Contract Compliance Check
     runs-on: >-
       ${{
-        (github.event_name == 'pull_request' &&
-         github.event.pull_request.head.repo.full_name != github.repository)
+        ((github.event_name == 'pull_request' && github.base_ref == 'dev') ||
+         (github.event_name == 'pull_request' &&
+          github.event.pull_request.head.repo.full_name != github.repository))
         && fromJSON(vars.OMNI_PUBLIC_PR_RUNS_ON_JSON || '["ubuntu-latest"]')
         || fromJSON((github.event_name == 'merge_group' && vars.OMNI_REQUIRED_CI_RUNS_ON_JSON) || vars.OMNI_TRUSTED_CI_RUNS_ON_JSON || '["self-hosted","omnibase-ci"]')
       }}
     timeout-minutes: 20
-    if: github.event_name == 'pull_request' || github.event_name == 'merge_group' || github.event_name == 'push'
+    if: needs.occ-preflight.result == 'success' && (github.event_name == 'pull_request' || github.event_name == 'merge_group' || github.event_name == 'push')
     steps:
       - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
       - name: Checkout onex_change_control
         uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
         with:
           repository: OmniNode-ai/onex_change_control
+          # OMN-14436: PINNED. The unpinned default-branch clone is what caused the
+          # original incident (the executor was "missing" only because the repo's
+          # default branch lagged behind the branch that had it). An unpinned OCC
+          # checkout makes this gate a function of whatever OCC's dev happens to be.
+          ref: 7352cb2dc634a7223877bfbbf3498303c9662700
           path: onex_change_control
           token: ${{ secrets.CROSS_REPO_PAT || github.token }}
 
@@ -1231,43 +1530,65 @@ jobs:
             attempt=$((attempt + 1))
           done
 
-      - name: Validate contract YAML files
+      # OMN-14436: EXECUTE the DoD check_values against the PRODUCT tree.
+      #
+      # What was here before -- `uv run validate-yaml $CONTRACTS` -- never ran a single
+      # check_value. It only parsed OCC's YAML, so a green "Contract Compliance Check"
+      # meant exactly "OCC's 6,900 files are valid YAML" and nothing about this PR.
+      # The DoD gate has been dead platform-wide for ~3 months behind that green check.
+      #
+      # --workspace is the load-bearing argument. It must be the PRODUCT checkout
+      # ($GITHUB_WORKSPACE), not the OCC clone. Pointing it at OCC is the original
+      # defect: a check_value's cwd became the receipt store, so the only file an author
+      # could reach was their own receipt -- which is why ~32% of the corpus greps itself.
+      - name: Run DoD contract compliance against the product tree (OMN-14436)
         working-directory: onex_change_control
         run: |
-          CONTRACTS=$(find "$GITHUB_WORKSPACE/onex_change_control/contracts" -name "OMN-*.yaml" 2>/dev/null)
-          if [ -z "$CONTRACTS" ]; then
-            echo "No contract YAML files found — skipping validation"
+          set -euo pipefail
+          if [ -z "${PR_NUMBER:-}" ]; then
+            echo "::notice::No PR number (event=${{ github.event_name }}); DoD check_values are PR-scoped. Skipping."
             exit 0
           fi
-          uv run validate-yaml $CONTRACTS
+          uv run python scripts/ci/run_contract_compliance_check.py \
+            --pr "$PR_NUMBER" \
+            --repo "${{ github.repository }}" \
+            --contracts-dir "$GITHUB_WORKSPACE/onex_change_control/contracts" \
+            --workspace "$GITHUB_WORKSPACE" \
+            --legacy-allowlist "$GITHUB_WORKSPACE/onex_change_control/scripts/ci/dod_runner_legacy_allowlist.txt"
         env:
           GH_TOKEN: ${{ github.token }}
+          PR_NUMBER: ${{ github.event.pull_request.number }}
 
   # ============================================================================
   # Test-Failure Ratchet Gate (OMN-13027, retro A-8)
   #
   # After the test matrix finishes, download all JUnit XML shards, merge them,
   # and compare against the dev-branch baseline.  Any failure cluster NOT in the
-  # baseline causes this job to fail, blocking the PR.
+  # baseline surfaces here as a ratchet regression.
   #
   # The baseline is updated nightly by the dev-baseline-publisher workflow.
   # Expired entries (> 7 days old) also fail the gate to force renewal.
-  # Required status check name: "test-failure-ratchet / Test-Failure Ratchet Gate"
+  #
+  # ADVISORY (OMN-13867): this gate is NOT a required status check and is
+  # intentionally excluded from the CI Summary pass/fail condition. Real test
+  # pass/fail is strictly enforced by the CI Tests Gate (`tests-gate`). A ratchet
+  # hiccup or a transient JUnit-artifact download flake must not block merges.
   # ============================================================================
   test-failure-ratchet:
     name: Test-Failure Ratchet Gate
     # OMNI_RUNNER_SELECTOR_V1 — trusted CI defaults to self-hosted omnibase-ci; public forks default to ubuntu-latest
     runs-on: >-
       ${{
-        (github.event_name == 'pull_request' &&
-         github.event.pull_request.head.repo.full_name != github.repository)
+        ((github.event_name == 'pull_request' && github.base_ref == 'dev') ||
+         (github.event_name == 'pull_request' &&
+          github.event.pull_request.head.repo.full_name != github.repository))
         && fromJSON(vars.OMNI_PUBLIC_PR_RUNS_ON_JSON || '["ubuntu-latest"]')
         || fromJSON((github.event_name == 'merge_group' && vars.OMNI_REQUIRED_CI_RUNS_ON_JSON) || vars.OMNI_TRUSTED_CI_RUNS_ON_JSON || '["self-hosted","omnibase-ci"]')
       }}
-    needs: [test-parallel, detect-changes]
+    needs: [occ-preflight, test-parallel, detect-changes]
     # Run on PRs and merge_group events whenever there were actual test runs.
     # Also run when docs-only so we detect ratchet-baseline staleness.
-    if: always() && (github.event_name == 'pull_request' || github.event_name == 'merge_group')
+    if:  needs.occ-preflight.result == 'success' && (always() && (github.event_name == 'pull_request' || github.event_name == 'merge_group'))
     timeout-minutes: 10
 
     steps:
@@ -1298,16 +1619,84 @@ jobs:
       - name: Install PyYAML (minimal dep for ratchet script)
         run: python3 -m pip install --quiet --user pyyaml
 
-      - name: Download all JUnit XML shards
+      # ------------------------------------------------------------------
+      # Artifact download resilience (OMN-13867)
+      #
+      # The JUnit-shard download reaches artifact/blob storage and can fail
+      # with a transient network error (observed: `ECONNRESET` from
+      # GetSignedArtifactURL on Azure blob) even though every test passed.
+      # That is an INFRA/download flake, NOT a test-ratchet regression, so:
+      #   1. Retry the download with backoff (3 attempts).
+      #   2. If all attempts still fail, treat it as a non-fatal infra skip
+      #      (see "Skip ratchet" step below) rather than reporting a false
+      #      ratchet failure. Test pass/fail is independently and strictly
+      #      enforced by the CI Tests Gate, so skipping the advisory ratchet
+      #      on a download flake does not weaken any real gate.
+      # ------------------------------------------------------------------
+      - name: Download all JUnit XML shards (attempt 1)
+        id: dl_shards_1
         if: needs.test-parallel.result == 'success' || needs.test-parallel.result == 'failure'
+        continue-on-error: true
         uses: actions/download-artifact@v8
         with:
           pattern: test-results-attempt-${{ github.run_attempt }}-*
           path: junit-shards
           merge-multiple: false
 
-      - name: Merge JUnit shards into single XML
+      - name: Backoff before shard download retry 2
+        if: |
+          (needs.test-parallel.result == 'success' || needs.test-parallel.result == 'failure')
+          && steps.dl_shards_1.outcome == 'failure'
+        run: sleep 10
+
+      - name: Download all JUnit XML shards (attempt 2)
+        id: dl_shards_2
+        if: |
+          (needs.test-parallel.result == 'success' || needs.test-parallel.result == 'failure')
+          && steps.dl_shards_1.outcome == 'failure'
+        continue-on-error: true
+        uses: actions/download-artifact@v8
+        with:
+          pattern: test-results-attempt-${{ github.run_attempt }}-*
+          path: junit-shards
+          merge-multiple: false
+
+      - name: Backoff before shard download retry 3
+        if: |
+          (needs.test-parallel.result == 'success' || needs.test-parallel.result == 'failure')
+          && steps.dl_shards_1.outcome == 'failure'
+          && steps.dl_shards_2.outcome == 'failure'
+        run: sleep 30
+
+      - name: Download all JUnit XML shards (attempt 3)
+        id: dl_shards_3
+        if: |
+          (needs.test-parallel.result == 'success' || needs.test-parallel.result == 'failure')
+          && steps.dl_shards_1.outcome == 'failure'
+          && steps.dl_shards_2.outcome == 'failure'
+        continue-on-error: true
+        uses: actions/download-artifact@v8
+        with:
+          pattern: test-results-attempt-${{ github.run_attempt }}-*
+          path: junit-shards
+          merge-multiple: false
+
+      - name: Determine JUnit shard availability
+        id: shard_status
         if: needs.test-parallel.result == 'success' || needs.test-parallel.result == 'failure'
+        run: |
+          if find junit-shards -name '*.xml' -type f 2>/dev/null | grep -q .; then
+            echo "downloaded=true" >> "${GITHUB_OUTPUT}"
+            echo "JUnit shards downloaded successfully."
+          else
+            echo "downloaded=false" >> "${GITHUB_OUTPUT}"
+            echo "::warning::No JUnit XML shards present after 3 download attempts (transient infra/network error)."
+          fi
+
+      - name: Merge JUnit shards into single XML
+        if: |
+          (needs.test-parallel.result == 'success' || needs.test-parallel.result == 'failure')
+          && steps.shard_status.outputs.downloaded == 'true'
         run: |
           python3 - <<'PYEOF'
           import os
@@ -1353,7 +1742,25 @@ jobs:
           print('Test matrix was skipped (docs-only diff) — empty JUnit written.')
           "
 
+      - name: Skip ratchet — JUnit artifact download failed (infra, non-fatal)
+        if: |
+          (needs.test-parallel.result == 'success' || needs.test-parallel.result == 'failure')
+          && steps.shard_status.outputs.downloaded != 'true'
+        run: |
+          echo "::warning::JUnit shard artifact download failed after 3 attempts (transient infra/network error, e.g. ECONNRESET from artifact storage). Skipping the Test-Failure Ratchet check as non-fatal — test pass/fail is independently enforced by the CI Tests Gate. See OMN-13867."
+          {
+            echo "## Test-Failure Ratchet Gate (OMN-13027)"
+            echo ""
+            echo ":warning: **Skipped (non-fatal)** — JUnit shard artifact download failed after 3 retries due to a transient infra/network error (e.g. \`ECONNRESET\` from artifact storage). This is an infrastructure flake, not a test-ratchet regression. Test pass/fail is independently enforced by the CI Tests Gate. See OMN-13867."
+          } >> "${GITHUB_STEP_SUMMARY}"
+
       - name: Run test-failure ratchet check
+        if: |
+          needs.test-parallel.result == 'skipped'
+          || (
+            (needs.test-parallel.result == 'success' || needs.test-parallel.result == 'failure')
+            && steps.shard_status.outputs.downloaded == 'true'
+          )
         run: |
           python3 pr-head/scripts/check_test_failure_ratchet.py \
             --junit-xml merged-junit.xml \
@@ -1385,110 +1792,293 @@ jobs:
   # ============================================================================
   runtime-boot-smoke:
     name: Runtime Boot Smoke (compose)
-    needs: [tests-gate]
-    if: needs.tests-gate.result == 'success'
+    needs: [occ-preflight, tests-gate]
+    if: github.event_name != 'pull_request' && needs.occ-preflight.result == 'success' && needs.tests-gate.result == 'success'
     uses: ./.github/workflows/reusable-runtime-boot.yml
     with:
       mode: compose
 
-  ci-summary:
-    name: CI Summary
-    # OMNI_RUNNER_SELECTOR_V1 — trusted CI defaults to self-hosted omnibase-ci; public forks default to ubuntu-latest
+  # ===========================================================================
+  # OMN-15108 fan-out of OMN-14877 (omnibase_core#1478 pattern) / OMN-14430
+  # ---------------------------------------------------------------------------
+  # Both standalone workflows below triggered on push/pull_request with their
+  # OWN github.run_id, making them structurally invisible to this ci-summary
+  # job's poll of `actions/runs/${RUN_ID}/jobs` (the exact OMN-14430 mechanism,
+  # confirmed live here: omnibase_infra/dev's ONLY required_status_checks
+  # context is "CI Summary" — neither standalone workflow was ever a required
+  # context, so a red run never blocked a merge). Ported here as unconditional
+  # jobs (no `if:`/`needs:`) under the required "CI Summary" default-deny
+  # rollup (ci_summary_gate.py's sweep fails on ANY non-allowlisted job
+  # failure, so no allowlist edit is needed). Both standalone files are
+  # retired to workflow_dispatch-only in this same PR.
+  # ===========================================================================
+  # Migrated from validate-validator-requirements.yml (OMN-15108, OMN-14877
+  # pattern). Enforces architecture-handshakes/validator-requirements.yaml
+  # (OMN-13291 fleet gate) against this repo's own baseline.
+  validate-validator-requirements:
+    name: Enforce validator-requirements.yaml (OMN-13291)
+    # OMNI_RUNNER_SELECTOR_V1 — runners are resolved from centralized selector variables.
     runs-on: >-
       ${{
-        (github.event_name == 'pull_request' &&
-         github.event.pull_request.head.repo.full_name != github.repository)
+        ((github.event_name == 'pull_request' && github.base_ref == 'dev') ||
+         (github.event_name == 'pull_request' &&
+          github.event.pull_request.head.repo.full_name != github.repository))
         && fromJSON(vars.OMNI_PUBLIC_PR_RUNS_ON_JSON || '["ubuntu-latest"]')
         || fromJSON((github.event_name == 'merge_group' && vars.OMNI_REQUIRED_CI_RUNS_ON_JSON) || vars.OMNI_TRUSTED_CI_RUNS_ON_JSON || '["self-hosted","omnibase-ci"]')
       }}
-    # OMN-9120: runtime-boot-smoke runs as an advisory check during the compose-mode
-    # boot stabilization period. It is intentionally NOT in `needs` so a smoke-test
-    # failure does not block CI Summary. A follow-up ticket promotes it to a hard
-    # gate once compose-mode boot is consistently green on main. See CLAUDE.md
-    # "Strict-mode invariants land AFTER all downstream consumers are compliant".
-    needs: [zone-filter, tests-gate, test-failure-ratchet, lint, onex-validation, infra-node-handler-ownership, migration-freeze, fingerprint-check, demo-loop-gate, topic-enum-drift, topic-naming-lint, topic-drift-check, arch-invariants, schema-handshake, migration-integration, migration-required-check, version-pin-check, compliance, contract-sync-gate]
-    if: always()
+    # OMN-14017: sibling checkout plus uv sync can consume the default budget
+    # while retrying transient GitHub/PyPI fetch failures.
+    timeout-minutes: 20
 
     steps:
-      - name: Check test results
-        run: |
-          gate="${{ needs.tests-gate.result }}"
-          ratchet="${{ needs.test-failure-ratchet.result }}"
-          lint="${{ needs.lint.result }}"
-          onex="${{ needs.onex-validation.result }}"
-          infrahnd="${{ needs.infra-node-handler-ownership.result }}"
-          migrationfreeze="${{ needs.migration-freeze.result }}"
-          fingerprint="${{ needs.fingerprint-check.result }}"
-          demoloop="${{ needs.demo-loop-gate.result }}"
-          topicenumdrift="${{ needs.topic-enum-drift.result }}"
-          topicnaminglint="${{ needs.topic-naming-lint.result }}"
-          topicdriftcheck="${{ needs.topic-drift-check.result }}"
-          archinvariants="${{ needs.arch-invariants.result }}"
-          schemahandshake="${{ needs.schema-handshake.result }}"
-          migrationintegration="${{ needs.migration-integration.result }}"
-          migrationrequiredcheck="${{ needs.migration-required-check.result }}"
-          compliance="${{ needs.compliance.result }}"
-          contractsync="${{ needs.contract-sync-gate.result }}"
+      - name: Checkout repo
+        uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
 
-          if [[ "$gate" == "success" ]] && \
-             [[ "$ratchet" == "success" || "$ratchet" == "skipped" ]] && \
-             [[ "$lint" == "success" ]] && \
-             [[ "$onex" == "success" ]] && \
-             [[ "$infrahnd" == "success" ]] && \
-             [[ "$migrationfreeze" == "success" ]] && \
-             [[ "$fingerprint" == "success" ]] && \
-             [[ "$demoloop" == "success" ]] && \
-             [[ "$topicenumdrift" == "success" ]] && \
-             [[ "$topicnaminglint" == "success" ]] && \
-             [[ "$topicdriftcheck" == "success" ]] && \
-             [[ "$archinvariants" == "success" ]] && \
-             [[ "$schemahandshake" == "success" ]] && \
-             [[ "$migrationintegration" == "success" || "$migrationintegration" == "skipped" ]] && \
-             [[ "$migrationrequiredcheck" == "success" ]] && \
-             [[ "$compliance" == "success" || "$compliance" == "skipped" ]] && \
-             [[ "$contractsync" == "success" || "$contractsync" == "skipped" ]]; then
-            echo "All checks passed successfully"
-            echo "CI Tests Gate (15 splits): Passed"
-            echo "Test-Failure Ratchet Gate: $ratchet"
-            echo "Code Quality: Passed"
-            echo "ONEX Validators: Passed"
-            echo "Infra Node Handler Ownership: Passed"
-            echo "Migration Freeze: Passed"
-            echo "Fingerprint Check: Passed"
-            echo "Demo Loop Gate: Passed"
-            echo "Topic Enum Drift Check: Passed"
-            echo "Topic Naming Lint: Passed"
-            echo "Topic Drift Check: Passed"
-            echo "Arch Invariants: Passed"
-            echo "Kafka Schema Handshake: Passed"
-            echo "Migration Integration: Passed"
-            echo "Writer-Migration Coupling Check: Passed"
-            echo "Contract Compliance: $compliance"
-            echo "Contract Sync Gate (Wave C): $contractsync"
-            echo "Runtime Boot Smoke: advisory (see runtime-boot-smoke job output)"
+      - name: Checkout omnibase_core
+        uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+        with:
+          repository: OmniNode-ai/omnibase_core
+          # Pinned to the commit that exports the validate-validator-requirements hook (OMN-13291).
+          # Update by running: gh api repos/OmniNode-ai/omnibase_core/commits/dev --jq '.sha'
+          ref: d163312724489f10f58ffdf8115ba1fa9d5783e8
+          path: omnibase_core
+          token: ${{ secrets.OMNIBASE_CORE_TOKEN || secrets.GITHUB_TOKEN }}
+
+      - name: Install uv
+        uses: astral-sh/setup-uv@v7
+
+      - name: Enforce validator-requirements.yaml
+        run: |
+          cd omnibase_core
+          for attempt in 1 2 3; do
+            uv sync --all-extras && break
+            if [ "$attempt" = "3" ]; then
+              exit 1
+            fi
+            sleep "$((attempt * 10))"
+          done
+          uv run python -m omnibase_core.validation.validator_requirements_consumer \
+            --repo omnibase_infra \
+            --repo-root .. \
+            --spec ../architecture-handshakes/validator-requirements.yaml \
+            --baseline ../architecture-handshakes/validator-requirements-baseline.yaml
+
+  # Migrated from validator-runtime-profiles.yml (OMN-15108, OMN-14877
+  # pattern). Enforces runtime_profiles on command-consuming contracts
+  # (OMN-9886 / OMN-12957) against the frozen allowlist.
+  runtime-profiles-validator:
+    name: Runtime Profiles / validate
+    # OMNI_RUNNER_SELECTOR_V1 - trusted events default to self-hosted omnibase-ci; pull_request defaults to ubuntu-latest
+    runs-on: >-
+      ${{
+        github.event_name == 'pull_request'
+        && fromJSON(vars.OMNI_PUBLIC_PR_RUNS_ON_JSON || '["ubuntu-latest"]')
+        || fromJSON((github.event_name == 'merge_group' && vars.OMNI_REQUIRED_CI_RUNS_ON_JSON) || vars.OMNI_TRUSTED_CI_RUNS_ON_JSON || '["self-hosted","omnibase-ci"]')
+      }}
+    timeout-minutes: 10
+
+    steps:
+      - name: Checkout omnibase_infra
+        uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+
+      - name: Set up Python
+        uses: actions/setup-python@v6
+        with:
+          python-version: ${{ env.PYTHON_VERSION }}
+
+      - name: Install uv
+        uses: astral-sh/setup-uv@v7
+        with:
+          version: "0.8.3"
+
+      - name: Install dependencies
+        run: |
+          for attempt in 1 2 3; do
+            uv sync --all-extras && break
+            if [ "$attempt" = "3" ]; then
+              exit 1
+            fi
+            sleep "$((attempt * 10))"
+          done
+
+      - name: Validate runtime_profiles on omnibase_infra contracts
+        run: |
+          uv run python - <<'PY'
+          from pathlib import Path
+
+          from omnibase_core.validation.validator_runtime_profiles import (
+              ValidatorRuntimeProfiles,
+          )
+
+          result = ValidatorRuntimeProfiles(
+              allowlist_path=Path("config/validation/runtime_profiles_allowlist.yaml")
+          ).validate(Path("src"))
+          for issue in result.issues:
+              print(f"[{issue.severity.value}] {issue.file_path}:{issue.line_number}: {issue.message}")
+          raise SystemExit(0 if result.is_valid else 1)
+          PY
+
+  no-noncanonical-lifecycle-classes:
+    name: no-noncanonical-lifecycle-classes
+    # OMN-14350: non-canonical lifecycle-class ratchet — a STRICT CI Summary gate
+    # (registered in scripts/ci/ci_summary_gate.py STRICT_GATE_JOBS). Unconditional
+    # (no needs/if) so CI Summary always WAITS for it and requires success — a red
+    # ratchet fails the required "CI Summary" check (no default-deny race). Installs
+    # the omnibase_core validator from the pinned core dev SHA and ratchets
+    # src/omnibase_infra's frozen allowlist DOWN toward zero.
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+      - name: Set up Python
+        uses: actions/setup-python@ece7cb06caefa5fff74198d8649806c4678c61a1 # v6
+        with:
+          python-version: "3.12"
+      - name: Install uv
+        uses: astral-sh/setup-uv@37802adc94f370d6bfd71619e3f0bf239e1f3b78 # v7
+        with:
+          version: "0.8.3"
+      - name: Ratchet non-canonical lifecycle-word classes against frozen allowlist (OMN-14350)
+        run: |
+          uv run --no-project \
+            --with 'omnibase-core @ git+https://github.com/OmniNode-ai/omnibase_core@63635097705d832e0ee9c4811093efb31349105c' \
+            python -m omnibase_core.validators.no_noncanonical_lifecycle_classes \
+            --check-stale \
+            --allowlist .onex_ratchets/noncanonical_class_allowlist.yaml \
+            src/omnibase_infra
+
+  ci-summary:
+    name: CI Summary
+    # OMN-14127: REQUIRED branch-protection context — the single umbrella gate for
+    # omnibase_infra (OMN-4497), implemented as a NO-`needs`, GitHub-hosted,
+    # FAIL-CLOSED poller. A `needs`-gated job gets no check-run until its `needs`
+    # terminalize, so under self-hosted fleet saturation the old needs-based CI
+    # Summary was ABSENT forever and the PR wedged BLOCKED with 0 failing / 0
+    # pending checks and no auto-recovery. With NO `needs` this job's check-run
+    # instantiates immediately (the required context can never be absent); it
+    # polls the current run's job conclusions and posts a terminal
+    # success/failure within a bounded deadline.
+    #
+    # DEFAULT-DENY, FAIL-CLOSED: green ONLY when every strict + skippable
+    # aggregate gate is present+good AND no non-allowlisted job failed. The
+    # auditable gating set + soft-allowlist live in scripts/ci/ci_summary_gate.py
+    # (unit-tested in tests/ci/test_ci_summary_gate.py); it reproduces the exact
+    # strictness of the old needs-based condition (13 strict `== success` gates,
+    # 4 `success||skipped` gates) and adds a strictly-stronger default-deny sweep.
+    # Pure hosted GitHub-API polling: ZERO self-hosted/LAN dependency, so it is
+    # immune to fleet saturation. This also supersedes the (unset, no-op)
+    # OMNI_REQUIRED_CI_RUNS_ON_JSON merge_group runner-override that used to sit on
+    # this job's runs-on selector.
+    #
+    # DO NOT rename — the job name IS the required context; a rename re-wedges
+    # every PR.
+    runs-on: ubuntu-latest
+    if: always()
+    permissions:
+      actions: read
+      contents: read
+      # OMN-14909 (CI-01): read the head SHA's cross-workflow check-runs for the
+      # REPORT-ONLY cascade projection step below. Read scope only — no verdict
+      # authority; the poll step above owns pass/fail.
+      checks: read
+    # Hard backstop above the internal poll deadline (DEADLINE_MINUTES below).
+    # Kept under any run-cancellation window so the required context ALWAYS posts
+    # a terminal state first, and comfortably above the tests-gate 30m budget plus
+    # self-hosted queueing so a slow-but-valid matrix is not failed prematurely.
+    timeout-minutes: 100
+    steps:
+      - name: Checkout (gate script)
+        uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+      - name: Poll run jobs and compute fail-closed CI Summary verdict
+        working-directory: ${{ github.workspace }}
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+          RUN_ID: ${{ github.run_id }}
+          RUN_ATTEMPT: ${{ github.run_attempt }}
+          # Bounded poll window (minutes) — kept under the run-cancel window so
+          # the required context always reaches a terminal state first.
+          DEADLINE_MINUTES: "90"
+          POLL_INTERVAL_SECONDS: "45"
+        run: |
+          # GitHub invokes this step as `bash -e {0}`; disable errexit because the
+          # gate script's non-zero exit codes are handled explicitly below
+          # (2 = PENDING must NOT terminate the poll loop).
+          set +e
+          set -uo pipefail
+          deadline=$(( $(date +%s) + DEADLINE_MINUTES * 60 ))
+          attempt=0
+          while true; do
+            if [ "$(date +%s)" -ge "${deadline}" ]; then
+              echo "::error::CI Summary poll deadline (${DEADLINE_MINUTES}m) reached with gating jobs still pending or the jobs API unreachable — failing closed"
+              python3 scripts/ci/ci_summary_gate.py --jobs-file jobs.json --run-attempt "${RUN_ATTEMPT}" --report-only 2>/dev/null || true
+              exit 1
+            fi
+            attempt=$((attempt + 1))
+            if ! gh api --paginate \
+                "repos/${GH_REPO}/actions/runs/${RUN_ID}/jobs?filter=all&per_page=100" \
+                --jq '.jobs[]' | jq -s '.' > jobs.json; then
+              echo "gh api fetch failed (attempt ${attempt}); retrying after ${POLL_INTERVAL_SECONDS}s"
+              sleep "${POLL_INTERVAL_SECONDS}"
+              continue
+            fi
+            python3 scripts/ci/ci_summary_gate.py --jobs-file jobs.json --run-attempt "${RUN_ATTEMPT}"
+            rc=$?
+            case "${rc}" in
+              0) echo "::notice::CI Summary = SUCCESS (all gating jobs provably passed)"; exit 0 ;;
+              1) echo "::error::CI Summary = FAILURE (fail-closed: a gating job failed/cancelled)"; exit 1 ;;
+              2) : ;;  # PENDING — gating jobs still running; keep polling
+              *) echo "::error::ci_summary_gate.py returned unexpected code ${rc}; failing closed"; exit 1 ;;
+            esac
+            sleep "${POLL_INTERVAL_SECONDS}"
+          done
+
+      # OMN-14909 (CI-01, plan §3.C5) — REPORT-ONLY cascade reason-graph.
+      # Collapses the head SHA's full cross-workflow check-run list into ONE
+      # typed root + BLOCKED_UPSTREAM dependents so a single upstream defect
+      # (e.g. a missing Evidence-Source making occ-preflight red) is presented
+      # as ONE rerunnable root instead of the ~37 independently-rerunnable red
+      # checks that provoke the rerun reflex. This step:
+      #   * runs `if: always()` so it renders even when the poll above FAILED,
+      #   * is `continue-on-error: true` and ends every command with `|| true`,
+      #     so it can NEVER change the CI Summary verdict — the poll step above
+      #     is the sole pass/fail authority (gate not weakened), and
+      #   * writes only to $GITHUB_STEP_SUMMARY.
+      - name: CI cascade reason-graph (report-only, counts roots not checks)
+        if: always()
+        continue-on-error: true
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+          HEAD_SHA: >-
+            ${{ github.event.pull_request.head.sha
+              || github.event.merge_group.head_sha
+              || github.sha }}
+        run: |
+          set +e
+          set -uo pipefail
+          if [ -z "${HEAD_SHA:-}" ]; then
+            echo "cascade reason-graph: no head SHA resolved; skipping report" >&2
             exit 0
-          else
-            echo "Checks failed"
-            echo "CI Tests Gate: $gate"
-            echo "Test-Failure Ratchet Gate: $ratchet"
-            echo "Lint: $lint"
-            echo "ONEX Validators: $onex"
-            echo "Infra Node Handler Ownership: $infrahnd"
-            echo "Migration Freeze: $migrationfreeze"
-            echo "Fingerprint Check: $fingerprint"
-            echo "Demo Loop Gate: $demoloop"
-            echo "Topic Enum Drift Check: $topicenumdrift"
-            echo "Topic Naming Lint: $topicnaminglint"
-            echo "Topic Drift Check: $topicdriftcheck"
-            echo "Arch Invariants: $archinvariants"
-            echo "Kafka Schema Handshake: $schemahandshake"
-            echo "Migration Integration: $migrationintegration"
-            echo "Writer-Migration Coupling Check: $migrationrequiredcheck"
-            echo "Contract Compliance: $compliance"
-            echo "Contract Sync Gate (Wave C): $contractsync"
-            echo "Runtime Boot Smoke: advisory (see runtime-boot-smoke job output)"
-            exit 1
           fi
+          # Cross-workflow check-runs for the exact head (NDJSON, one per line).
+          gh api --paginate \
+            "repos/${GH_REPO}/commits/${HEAD_SHA}/check-runs?per_page=100" \
+            --jq '.check_runs[] | {name, status, conclusion, html_url}' \
+            > cascade_check_runs.ndjson || true
+          if [ ! -s cascade_check_runs.ndjson ]; then
+            echo "cascade reason-graph: no check-runs fetched (report-only, non-fatal)" >&2
+            exit 0
+          fi
+          # Invoke via `-m` from the repo root (working-directory default) so the
+          # `scripts.ci.*` package imports resolve, matching product-readiness-
+          # shadow.yml's `python -m scripts.ci.product_reason_graph`.
+          python3 -m scripts.ci.ci_cascade_graph classify \
+            --check-runs-file cascade_check_runs.ndjson \
+            --head-sha "${HEAD_SHA}" \
+            --summary 1>/dev/null 2>>"${GITHUB_STEP_SUMMARY}" || true
+          exit 0
 
   # Cross-repo Kafka boundary compatibility test (OMN-3256)
   # Verifies that producer and consumer Pydantic models can round-trip across
@@ -1496,12 +2086,14 @@ jobs:
   # Pairs with known drift are marked xfail — they pass as XFAIL until the
   # upstream fix (e.g. OMN-3248) lands, at which point xfail is removed.
   kafka-boundary-compat:
+    needs: occ-preflight
     name: Kafka Boundary Compat (OMN-3256)
     # OMNI_RUNNER_SELECTOR_V1 — trusted CI defaults to self-hosted omnibase-ci; public forks default to ubuntu-latest
     runs-on: >-
       ${{
-        (github.event_name == 'pull_request' &&
-         github.event.pull_request.head.repo.full_name != github.repository)
+        ((github.event_name == 'pull_request' && github.base_ref == 'dev') ||
+         (github.event_name == 'pull_request' &&
+          github.event.pull_request.head.repo.full_name != github.repository))
         && fromJSON(vars.OMNI_PUBLIC_PR_RUNS_ON_JSON || '["ubuntu-latest"]')
         || fromJSON((github.event_name == 'merge_group' && vars.OMNI_REQUIRED_CI_RUNS_ON_JSON) || vars.OMNI_TRUSTED_CI_RUNS_ON_JSON || '["self-hosted","omnibase-ci"]')
       }}
@@ -1600,11 +2192,14 @@ jobs:
   # Writer-migration coupling check -- ensures any PR touching writer_postgres.py
   # or handler_*_postgres.py includes a migration file or explicit bypass comment (OMN-3530)
   migration-required-check:
+    needs: occ-preflight
+    timeout-minutes: 30
     name: Writer-Migration Coupling Check
     runs-on: >-
       ${{
-        (github.event_name == 'pull_request' &&
-         github.event.pull_request.head.repo.full_name != github.repository)
+        ((github.event_name == 'pull_request' && github.base_ref == 'dev') ||
+         (github.event_name == 'pull_request' &&
+          github.event.pull_request.head.repo.full_name != github.repository))
         && fromJSON(vars.OMNI_PUBLIC_PR_RUNS_ON_JSON || '["ubuntu-latest"]')
         || fromJSON((github.event_name == 'merge_group' && vars.OMNI_REQUIRED_CI_RUNS_ON_JSON) || vars.OMNI_TRUSTED_CI_RUNS_ON_JSON || '["self-hosted","omnibase-ci"]')
       }}
@@ -1629,12 +2224,13 @@ jobs:
   # and asserts every manifest table exists (OMN-3529)
   migration-integration:
     name: Migration Integration Test
-    needs: zone-filter
-    if: needs.zone-filter.outputs.docs_only != 'true'
+    needs: [occ-preflight, zone-filter]
+    if: needs.occ-preflight.result == 'success' && (needs.zone-filter.outputs.docs_only != 'true')
     runs-on: >-
       ${{
-        (github.event_name == 'pull_request' &&
-         github.event.pull_request.head.repo.full_name != github.repository)
+        ((github.event_name == 'pull_request' && github.base_ref == 'dev') ||
+         (github.event_name == 'pull_request' &&
+          github.event.pull_request.head.repo.full_name != github.repository))
         && fromJSON(vars.OMNI_PUBLIC_PR_RUNS_ON_JSON || '["ubuntu-latest"]')
         || fromJSON((github.event_name == 'merge_group' && vars.OMNI_REQUIRED_CI_RUNS_ON_JSON) || vars.OMNI_TRUSTED_CI_RUNS_ON_JSON || '["self-hosted","omnibase-ci"]')
       }}
@@ -1795,13 +2391,181 @@ jobs:
           PY
           echo "All 24 tables present."
 
+  # ============================================================================
+  # Integration Silent-Skip Guard (OMN-14172)
+  # An @pytest.mark.integration real-DB test that self-skips because Postgres
+  # looks absent is a FALSE-GREEN: the required Tests job goes green while the
+  # real-DB assertion never ran (the exact class of gap that let the omnimarket
+  # OMN-14058 missing-column defect and the OMN-9041 UUID-cast crash reach dev
+  # via a silent skip). Detection-only sweeps get ignored, so this ships as a
+  # mechanical CI gate + pre-commit hook in the same PR (Operating Rule #5).
+  #
+  # This job PROVISIONS Postgres (mirroring migration-integration), applies all
+  # migrations, exports the connection env, and runs a CURATED set of
+  # Postgres-only integration proofs, then asserts via check_integration_skips.py
+  # that (1) none skipped citing a *provisioned* service's absence and (2) at
+  # least one integration test actually executed (zero-collection is itself a
+  # false-green). Legitimately-optional skips (Kafka/Redpanda broker not
+  # provisioned by design, live-LLM opt-in flags, catalog-data conditions) remain
+  # allowed — the gate is keyed to the services this job actually provisions
+  # (scripts/ci/integration_skip_guard.yaml).
+  #
+  # Wired as BLOCKING via the CI Summary umbrella context: this job's display
+  # name is in ci_summary_gate.py SKIPPABLE_GATE_JOBS (present + success/skipped
+  # required, same tier as migration-integration) AND the default-deny sweep
+  # fails CI Summary on any non-success/skipped conclusion. No NEW
+  # branch-protection required context is registered here — that is deferred to
+  # the operator/Codex once the job proves green on real PRs.
+  # SYNC: scripts/ci/check_integration_skips.py + pre-commit hook
+  # 'integration-skip-guard'. Update both when the config changes.
+  # ============================================================================
+  integration-guard:
+    name: Integration Silent-Skip Guard (OMN-14172)
+    needs: [occ-preflight, zone-filter]
+    if: needs.occ-preflight.result == 'success' && (needs.zone-filter.outputs.docs_only != 'true')
+    runs-on: >-
+      ${{
+        ((github.event_name == 'pull_request' && github.base_ref == 'dev') ||
+         (github.event_name == 'pull_request' &&
+          github.event.pull_request.head.repo.full_name != github.repository))
+        && fromJSON(vars.OMNI_PUBLIC_PR_RUNS_ON_JSON || '["ubuntu-latest"]')
+        || fromJSON((github.event_name == 'merge_group' && vars.OMNI_REQUIRED_CI_RUNS_ON_JSON) || vars.OMNI_TRUSTED_CI_RUNS_ON_JSON || '["self-hosted","omnibase-ci"]')
+      }}
+    timeout-minutes: 15
+    # Same Postgres service block as migration-integration: a real DB so the
+    # @pytest.mark.integration real-DB proofs EXECUTE instead of self-skipping.
+    services:
+      postgres:
+        image: postgres:16-alpine
+        env:
+          POSTGRES_PASSWORD: test_password
+          POSTGRES_DB: omnibase_infra
+        ports:
+          - 5432/tcp
+        options: >-
+          --health-cmd pg_isready
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 10
+
+    steps:
+      - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+
+      - name: Setup Python and uv
+        uses: ./.github/actions/setup-python-uv
+        with:
+          python-version: ${{ env.PYTHON_VERSION }}
+          uv-version: ${{ env.UV_VERSION }}
+          cache-version: ${{ env.CACHE_VERSION }}
+          cache-enabled: "false"
+          install-args: '--reinstall-package omnibase-core --reinstall-package omnibase-spi --frozen'
+
+      - name: Resolve Postgres service host
+        id: postgres_host
+        env:
+          POSTGRES_PORT: ${{ job.services.postgres.ports['5432'] }}
+        run: |
+          python - <<'PY' >> "$GITHUB_OUTPUT"
+          import os
+          import socket
+
+          port = int(os.environ["POSTGRES_PORT"])
+
+          def can_connect(host: str) -> bool:
+              try:
+                  with socket.create_connection((host, port), timeout=1.0):
+                      return True
+              except OSError:
+                  return False
+
+          if can_connect("127.0.0.1"):
+              print("host=127.0.0.1")
+              raise SystemExit(0)
+
+          with open("/proc/net/route", encoding="utf-8") as routes:
+              for line in routes.readlines()[1:]:
+                  fields = line.split()
+                  if len(fields) >= 3 and fields[1] == "00000000":
+                      gateway_hex = fields[2]
+                      gateway = ".".join(
+                          str(int(gateway_hex[i : i + 2], 16))
+                          for i in (6, 4, 2, 0)
+                      )
+                      if can_connect(gateway):
+                          print(f"host={gateway}")
+                          raise SystemExit(0)
+
+          raise SystemExit(
+              f"could not reach Postgres service on localhost or default gateway port {port}"
+          )
+          PY
+
+      - name: Apply all migrations
+        env:
+          OMNIBASE_INFRA_DB_URL: postgresql://postgres:test_password@${{ steps.postgres_host.outputs.host }}:${{ job.services.postgres.ports['5432'] }}/omnibase_infra
+        run: |
+          uv run python scripts/run-migrations.py
+
+      # Export the connection env the curated integration proofs read. The
+      # canonical PostgresConfig.from_env() reads ONLY OMNIBASE_INFRA_DB_URL (a
+      # full DSN, no POSTGRES_* fallback), so that var is what flips the curated
+      # proofs from "skipped" to "executed"; the POSTGRES_* set is exported too so
+      # the guard stays correct if the curated set broadens to tests that read
+      # discrete vars.
+      - name: Export integration Postgres env
+        env:
+          RESOLVED_HOST: ${{ steps.postgres_host.outputs.host }}
+          RESOLVED_PORT: ${{ job.services.postgres.ports['5432'] }}
+        run: |
+          {
+            echo "OMNIBASE_INFRA_DB_URL=postgresql://postgres:test_password@${RESOLVED_HOST}:${RESOLVED_PORT}/omnibase_infra"
+            echo "POSTGRES_HOST=${RESOLVED_HOST}"
+            echo "POSTGRES_PORT=${RESOLVED_PORT}"
+            echo "POSTGRES_USER=postgres"
+            echo "POSTGRES_PASSWORD=test_password"
+            echo "POSTGRES_DB=omnibase_infra"
+            echo "POSTGRES_DATABASE=omnibase_infra"
+          } >> "$GITHUB_ENV"
+          echo "Exported integration Postgres env (host=${RESOLVED_HOST} port=${RESOLVED_PORT})"
+
+      # Run ONLY the curated Postgres-only integration proofs (kept in sync with
+      # integration_skip_guard.yaml curated_test_paths). The selected proof is
+      # Postgres-only and self-contained against the freshly-migrated DB. Real integration
+      # FAILURES fail this step directly; the silent-skip enforcement below runs
+      # regardless (if: always()).
+      - name: Run curated Postgres integration proofs (Postgres provisioned)
+        run: |
+          uv run pytest \
+            tests/integration/handlers/test_registration_storage_postgres_uuid_cast.py::TestRegistrationStoragePostgresUuidCast::test_query_round_trip_produces_stdlib_uuid \
+            -rs -v --tb=short \
+            --junitxml=integration-guard.xml
+
+      # Fail-closed silent-skip enforcement. RED if any integration test skipped
+      # citing a provisioned service's absence, or if zero integration tests ran.
+      - name: Enforce no missing-service silent-skips (OMN-14172)
+        if: always()
+        run: |
+          uv run python scripts/ci/check_integration_skips.py \
+            --junit integration-guard.xml
+
+      - name: Upload integration-guard results
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: integration-guard-results
+          path: integration-guard.xml
+          retention-days: 7
+
   ai-slop-check:
+    needs: occ-preflight
+    timeout-minutes: 30
     name: AI-Slop Pattern Check (strict, PR diff)
     # OMNI_RUNNER_SELECTOR_V1 — trusted CI defaults to self-hosted omnibase-ci; public forks default to ubuntu-latest
     runs-on: >-
       ${{
-        (github.event_name == 'pull_request' &&
-         github.event.pull_request.head.repo.full_name != github.repository)
+        ((github.event_name == 'pull_request' && github.base_ref == 'dev') ||
+         (github.event_name == 'pull_request' &&
+          github.event.pull_request.head.repo.full_name != github.repository))
         && fromJSON(vars.OMNI_PUBLIC_PR_RUNS_ON_JSON || '["ubuntu-latest"]')
         || fromJSON((github.event_name == 'merge_group' && vars.OMNI_REQUIRED_CI_RUNS_ON_JSON) || vars.OMNI_TRUSTED_CI_RUNS_ON_JSON || '["self-hosted","omnibase-ci"]')
       }}

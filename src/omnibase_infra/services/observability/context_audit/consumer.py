@@ -65,6 +65,7 @@ from aiohttp import web
 from aiokafka import AIOKafkaConsumer, AIOKafkaProducer, TopicPartition
 from aiokafka.errors import KafkaError
 
+from omnibase_infra.event_bus.kafka_auth import build_aiokafka_auth_kwargs_from_env
 from omnibase_infra.services.observability.context_audit.config import (
     ConfigContextAuditConsumer,
 )
@@ -327,6 +328,7 @@ class ContextAuditConsumer:
             heartbeat_interval_ms=self.config.heartbeat_interval_ms,
             max_poll_interval_ms=self.config.max_poll_interval_ms,
             value_deserializer=lambda v: v,
+            **build_aiokafka_auth_kwargs_from_env(),
         )
         await self._consumer.start()
 
@@ -335,6 +337,7 @@ class ContextAuditConsumer:
             self._producer = AIOKafkaProducer(
                 bootstrap_servers=self.config.kafka_bootstrap_servers,
                 value_serializer=lambda v: v,
+                **build_aiokafka_auth_kwargs_from_env(),
             )
             await self._producer.start()
 

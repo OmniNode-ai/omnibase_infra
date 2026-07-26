@@ -1269,6 +1269,20 @@ class KafkaContractSource(MixinTypedContractEvents, ProtocolContractSource):
                         operation=handler_item.get("operation"),
                         event_type=handler_item.get("event_type"),
                         message_category=handler_item.get("message_category"),
+                        # OMN-15188: without this, a topic_match contract with
+                        # several handler_routing entries sharing the same
+                        # operation + handler across distinct topics (a
+                        # legitimate shape, e.g. node_codegen_outcome_reducer)
+                        # loses per-entry topic disambiguation on this
+                        # materialization path. _derive_handler_entry_key folds
+                        # topic into the dispatcher-ID digest only when it is
+                        # present (OMN-14580); every entry here would otherwise
+                        # collapse to the SAME operation-only key and crash
+                        # bootstrap with ONEX_CORE_064_DUPLICATE_REGISTRATION on
+                        # the 2nd handler_routing entry. Keep in parity with
+                        # discovery.py's _parse_handler_routing (OMN-13825),
+                        # which already threads this field through.
+                        topic=handler_item.get("topic"),
                     )
                 )
 
@@ -1395,9 +1409,7 @@ class KafkaContractSource(MixinTypedContractEvents, ProtocolContractSource):
         from omnibase_infra.runtime.auto_wiring.report import EnumWiringOutcome
 
         try:
-            from omnibase_infra.protocols.protocol_dispatch_engine import (
-                ProtocolDispatchEngine,
-            )
+            from omnibase_spi.protocols.runtime import ProtocolDispatchEngine
 
             result = await _wire_single_contract(
                 contract=contract,

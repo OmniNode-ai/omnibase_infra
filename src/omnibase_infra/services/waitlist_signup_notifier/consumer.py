@@ -32,6 +32,7 @@ from uuid import uuid4
 from aiohttp import web
 from aiokafka import AIOKafkaConsumer
 
+from omnibase_infra.event_bus.kafka_auth import build_aiokafka_auth_kwargs_from_env
 from omnibase_infra.handlers.handler_slack_webhook import HandlerSlackWebhook
 from omnibase_infra.handlers.models.model_slack_alert import (
     EnumAlertSeverity,
@@ -69,6 +70,7 @@ class WaitlistSignupNotifier:
             auto_offset_reset="latest",
             enable_auto_commit=True,
             value_deserializer=lambda v: json.loads(v.decode("utf-8")),
+            **build_aiokafka_auth_kwargs_from_env(),
         )
         await self._consumer.start()
         self._healthy = True

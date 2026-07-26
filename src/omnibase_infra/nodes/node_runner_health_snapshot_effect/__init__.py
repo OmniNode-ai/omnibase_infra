@@ -1,16 +1,18 @@
 # SPDX-FileCopyrightText: 2025 OmniNode.ai Inc.
 # SPDX-License-Identifier: MIT
-"""Runner health snapshot effect — contract stub for topic provisioning."""
+"""Runner health snapshot effect -- completed OMN-13942 (was a contract stub
+for topic provisioning since OMN-6091)."""
 
-from pydantic import BaseModel
+from omnibase_infra.nodes.node_runner_health_snapshot_effect.models import (
+    ModelRunnerFleetRunnerFact,
+    ModelRunnerFleetSnapshot,
+    ModelRunnerFleetSnapshotGatherCommand,
+    ModelZombieRunCandidate,
+)
 
-
-class ModelRunnerHealthSnapshotInput(BaseModel):
-    """Stub input model for runner health snapshot emission."""
-
-
-class ModelRunnerHealthSnapshotOutput(BaseModel):
-    """Stub output model for runner health snapshot emission."""
-
-
-__all__ = ["ModelRunnerHealthSnapshotInput", "ModelRunnerHealthSnapshotOutput"]
+__all__ = [
+    "ModelRunnerFleetRunnerFact",
+    "ModelRunnerFleetSnapshot",
+    "ModelRunnerFleetSnapshotGatherCommand",
+    "ModelZombieRunCandidate",
+]

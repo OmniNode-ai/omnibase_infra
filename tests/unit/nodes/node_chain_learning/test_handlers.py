@@ -25,6 +25,7 @@ from omnibase_infra.nodes.node_chain_orchestrator.models import (
     EnumChainVerifyState,
     ModelChainEntry,
     ModelChainMatch,
+    ModelChainReplayInput,
     ModelChainReplayResult,
     ModelChainRetrievalResult,
     ModelChainStep,
@@ -175,9 +176,11 @@ class TestHandlerChainReplay:
         handler = HandlerChainReplay()
         entry = _make_entry()
         result = await handler.handle(
-            cached_chain=entry,
-            new_prompt_text="new prompt",
-            correlation_id=uuid4(),
+            ModelChainReplayInput(
+                correlation_id=uuid4(),
+                cached_chain=entry,
+                new_prompt_text="new prompt",
+            )
         )
         assert result.confidence == 0.95
         assert len(result.adapted_steps) == len(entry.chain_steps)
@@ -204,10 +207,12 @@ class TestHandlerChainReplay:
             workflow_ref="w",
         )
         result = await handler.handle(
-            cached_chain=entry,
-            new_prompt_text="new",
-            correlation_id=uuid4(),
-            new_context={"$FILE": "readme.md"},
+            ModelChainReplayInput(
+                correlation_id=uuid4(),
+                cached_chain=entry,
+                new_prompt_text="new",
+                new_context={"$FILE": "readme.md"},
+            )
         )
         assert result.confidence < 0.95
         assert "readme.md" in result.adapted_steps[0].operation

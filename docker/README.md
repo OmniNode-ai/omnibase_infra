@@ -585,7 +585,7 @@ docker volume inspect omninode-runtime-logs
 docker run --rm -v omninode-runtime-logs:/logs alpine ls -la /logs
 
 # Remove all volumes (WARNING: destroys data)
-docker compose -f docker-compose.infra.yml down -v
+docker compose -f docker-compose.infra.yml down -v --remove-orphans
 ```
 
 ### Bind Mounts
@@ -833,7 +833,7 @@ docker compose -f docker-compose.infra.yml logs -f
 curl http://localhost:8085/health
 
 # 5. Stop when done
-docker compose -f docker-compose.infra.yml down
+docker compose -f docker-compose.infra.yml down --remove-orphans
 ```
 
 ### Running Tests in Container

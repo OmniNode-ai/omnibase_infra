@@ -53,6 +53,12 @@ from datetime import UTC, datetime
 
 import click
 
+from omnibase_infra.utils.util_producer_effect_assertion import (
+    ProducerZeroOutputError,
+    assert_producer_emitted,
+    require_producer_preconditions,
+)
+
 # CI publishes the node_redeploy_orchestrator start command; the orchestrator's
 # deploy publish-monitor effect is the sole emitter of the deploy-agent rebuild
 # command downstream.
@@ -120,8 +126,13 @@ def publish_redeploy_start_event(
     source_sha: str,
     correlation_id: str,
     requested_by: str,
-) -> None:
-    """Publish a signed redeploy-start command to node_redeploy_orchestrator via SASL_SSL."""
+) -> int:
+    """Publish a signed redeploy-start command to node_redeploy_orchestrator via SASL_SSL.
+
+    Returns the number of commands delivered (``1`` on success). Raises on any
+    delivery failure so the caller can assert a non-zero emit count — a producer
+    that delivers nothing must fail closed, never report success.
+    """
     from confluent_kafka import Producer
 
     envelope = {
@@ -166,6 +177,9 @@ def publish_redeploy_start_event(
 
     if delivery_error is not None:
         raise RuntimeError(f"Kafka delivery failed: {delivery_error}") from None
+
+    # Exactly one redeploy-start command was delivered; the caller asserts N>0.
+    return 1
 
 
 @click.command()
@@ -254,18 +268,30 @@ def main(
     password = os.environ.get("KAFKA_SASL_PASSWORD", "")
     hmac_secret = os.environ.get("DEPLOY_AGENT_HMAC_SECRET", "")
 
-    if not bootstrap_servers:
-        click.echo("KAFKA_BOOTSTRAP_SERVERS is not set -- skipping publish")
-        sys.exit(0)
-    if not username or not password:
-        click.echo("KAFKA_SASL_USERNAME and KAFKA_SASL_PASSWORD must be set", err=True)
-        sys.exit(1)
-    if not hmac_secret:
-        click.echo("DEPLOY_AGENT_HMAC_SECRET must be set", err=True)
+    # A runtime change was detected and this is not a dry run, so the job's
+    # PURPOSE is now to publish exactly one redeploy-start command. If any
+    # precondition for publishing is absent (broker, SASL creds, HMAC secret),
+    # this producer CANNOT emit — that is zero output and MUST fail closed
+    # (RT-5 / OMN-14467), never "skip publish" green. The dead-producer bug this
+    # replaces printed "KAFKA_BOOTSTRAP_SERVERS is not set -- skipping publish"
+    # and exited 0, so the deploy trigger was green-but-silent on every merge —
+    # it had never published once (run 29189239291).
+    try:
+        require_producer_preconditions(
+            artifact=TOPIC,
+            preconditions={
+                "KAFKA_BOOTSTRAP_SERVERS": bootstrap_servers,
+                "KAFKA_SASL_USERNAME": username,
+                "KAFKA_SASL_PASSWORD": password,
+                "DEPLOY_AGENT_HMAC_SECRET": hmac_secret,
+            },
+        )
+    except ProducerZeroOutputError as exc:
+        click.echo(str(exc), err=True)
         sys.exit(1)
 
     try:
-        publish_redeploy_start_event(
+        delivered = publish_redeploy_start_event(
             bootstrap_servers=bootstrap_servers,
             username=username,
             password=password,
@@ -280,7 +306,20 @@ def main(
         click.echo(f"Delivery error: {exc}", err=True)
         sys.exit(1)
 
-    click.echo(f"Published redeploy-start to {TOPIC} (correlation_id={corr_id})")
+    # "Produced N>0, and here it is": a completed publish that delivered zero
+    # commands is a silent-producer failure and must go red, not report success.
+    try:
+        assert_producer_emitted(
+            delivered, artifact=TOPIC, detail=f"correlation_id={corr_id}"
+        )
+    except ProducerZeroOutputError as exc:
+        click.echo(str(exc), err=True)
+        sys.exit(1)
+
+    click.echo(
+        f"Published redeploy-start to {TOPIC} "
+        f"(correlation_id={corr_id}, delivered={delivered})"
+    )
 
 
 if __name__ == "__main__":

@@ -163,12 +163,29 @@ def _row_to_entry(row: Mapping[str, object]) -> ModelDecisionStoreEntry:
         "list[object]", json.loads(_sup) if isinstance(_sup, str) else _sup
     )
 
+    # NOTE (OMN-14529): "title" and "epic_id" are real decision_store columns
+    # (see migration 046) but ModelDecisionStoreEntry (omnibase_core) declares
+    # neither field and uses extra="forbid" — passing them here raised a
+    # ValidationError on every non-empty result set, so this handler had never
+    # successfully returned a queried row. Dropped until omnibase_core grows
+    # the fields; tracked as a follow-up, not fixed here to avoid a
+    # cross-repo model change inside a routing-wiring ticket.
+    #
+    # decision_type is lowercased before validation: omnibase_core's
+    # EnumDecisionType uses lowercase values ("tech_stack_choice"), but the
+    # decision_store TEXT column stores whatever case the writer used —
+    # every known writer (the omnimarket orchestrator's own EnumDecisionType)
+    # uses uppercase ("TECH_STACK_CHOICE"). Without this, ANY query against a
+    # domain/layer scope with an existing row raised a ValidationError,
+    # discovered when the OMN-14529 full-CLI-seam-proof (onex skill
+    # decision_store record) drove the conflict-detection query path live —
+    # the bare-handler proof never exercised query_active_decisions_raw
+    # against a non-empty result set.
     return ModelDecisionStoreEntry.model_validate(
         {
             "decision_id": row["decision_id"],
             "correlation_id": row["correlation_id"],
-            "title": row["title"],
-            "decision_type": row["decision_type"],
+            "decision_type": str(row["decision_type"]).lower(),
             "status": row["status"],
             "scope_domain": row["scope_domain"],
             "scope_services": tuple(scope_services_list),
@@ -176,7 +193,6 @@ def _row_to_entry(row: Mapping[str, object]) -> ModelDecisionStoreEntry:
             "rationale": row["rationale"],
             "alternatives": alternatives_list,
             "tags": tuple(tags_list),
-            "epic_id": row["epic_id"],
             "supersedes": tuple(UUID(str(s)) for s in supersedes_list),
             "superseded_by": row["superseded_by"],
             "source": row["source"],

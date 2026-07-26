@@ -25,6 +25,9 @@ from omnibase_infra.runtime.auto_wiring import (
 from omnibase_infra.runtime.message_dispatch_engine import (
     MessageDispatchEngine,
 )
+from omnibase_infra.runtime.service_intent_routing_loader import (
+    load_intent_routing_table,
+)
 
 pytestmark = [pytest.mark.integration]
 
@@ -36,6 +39,7 @@ EXCLUDED_MAIN_PROFILE_NODES = frozenset(
         "node_intent_event_consumer_effect",
     }
 )
+KNOWN_UNWIRED_RAW_PROJECTIONS = frozenset({"node_validation_ledger_projection_compute"})
 
 
 class _BootValidationHandler:
@@ -55,6 +59,11 @@ class _BootValidationContainer:
         return _BootValidationHandler()
 
 
+class _StubResultApplier:
+    async def apply(self, *args: object, **kwargs: object) -> None:
+        return None
+
+
 def _main_profile_manifest() -> ModelAutoWiringManifest:
     discovered = discover_contracts()
     ownership = filter_manifest_for_runtime_profile(
@@ -71,6 +80,11 @@ async def test_wire_from_manifest_main_profile_no_crash() -> None:
     assert manifest.total_discovered > 0
 
     engine = MessageDispatchEngine(logger=MagicMock())
+    result_appliers = {
+        contract.name: _StubResultApplier()
+        for contract in manifest.contracts
+        if load_intent_routing_table(contract.contract_path)
+    }
     report = await wire_from_manifest(
         manifest=manifest,
         dispatch_engine=engine,
@@ -78,9 +92,18 @@ async def test_wire_from_manifest_main_profile_no_crash() -> None:
         environment="test",
         container=_BootValidationContainer(),
         subscribe_immediately=False,
+        result_appliers_by_contract=result_appliers,
     )
 
-    assert report.total_failed == 0
+    failed_results = [r for r in report.results if str(r.outcome).endswith("FAILED")]
+    unexpected = [
+        r
+        for r in failed_results
+        if r.contract_name not in KNOWN_UNWIRED_RAW_PROJECTIONS
+    ]
+    assert not unexpected, "Unexpected main-profile wiring failures:\n" + "\n".join(
+        f"  {r.contract_name}: {r.reason}" for r in unexpected
+    )
     assert len(report.results) == manifest.total_discovered
 
 

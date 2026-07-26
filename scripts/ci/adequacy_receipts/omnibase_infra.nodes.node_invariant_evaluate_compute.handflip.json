@@ -1,0 +1,30 @@
+{
+  "node_id": "omnibase_infra.nodes.node_invariant_evaluate_compute",
+  "receipt_schema": "handflip_proof.v1",
+  "canonical_handler_module": "omnibase_infra.nodes.node_invariant_evaluate_compute.handlers.handler_invariant_evaluate",
+  "legacy_handler_module": "omnibase_infra.nodes.node_invariant_evaluate_compute.handlers.handler_invariant_evaluate",
+  "base_ref": "71ab1bf6deb4252edd9593f547dd5a4b4e60939b",
+  "preserved_symbols": [
+    "_new_evaluator",
+    "HandlerInvariantEvaluate.handler_type",
+    "HandlerInvariantEvaluate.handler_category"
+  ],
+  "parity": {
+    "status": "pass",
+    "test_ids": [
+      "tests/unit/nodes/node_invariant_evaluate_compute/test_invariant_evaluate_dispatch_entrypoint_omn14822.py::test_handlers_expose_handle_entrypoint_and_no_legacy_shim",
+      "tests/unit/nodes/node_invariant_evaluate_compute/test_invariant_evaluate_dispatch_entrypoint_omn14822.py::test_real_dispatch_callback_reaches_handle[E1_field_pass]",
+      "tests/unit/nodes/node_invariant_evaluate_compute/test_invariant_evaluate_dispatch_entrypoint_omn14822.py::test_real_dispatch_callback_reaches_handle[E2_field_fail]",
+      "tests/unit/nodes/node_invariant_evaluate_compute/test_invariant_evaluate_dispatch_entrypoint_omn14822.py::test_real_dispatch_callback_reaches_handle[E3_threshold_pass]",
+      "tests/unit/nodes/node_invariant_evaluate_compute/test_invariant_evaluate_dispatch_entrypoint_omn14822.py::test_selected_corpus_behavior_equivalence"
+    ],
+    "selected_input_hashes": [
+      "sha256:9e2e2ac7be0837d02bc93096520f8f912d09a57ef63079feb44b2358ff08d22c",
+      "sha256:6b70bb828f605f1ff532a3d428c125f0a423eaf18a466f3496c4c055f4a5b73e",
+      "sha256:81c9ecb1241b362df1f81ddbd81cd5d67b83fac78750ff66d64a011a4f39374e",
+      "sha256:06d62d280f141d26dff4989272c6c03a365a6d7e91cbca813263e3230cc56184",
+      "sha256:67994ba911698033ed2b8e4c2d56fa6ad17f443066327e4b7f836a8beb611603",
+      "sha256:a8158baa3a5f43e7ae66b76a3f26c5536df615030617cb53965ca20f01297ec1"
+    ]
+  }
+}

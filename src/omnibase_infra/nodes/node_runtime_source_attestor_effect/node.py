@@ -60,7 +60,7 @@ class NodeRuntimeSourceAttestorEffect(NodeEffect):
         node = NodeRuntimeSourceAttestorEffect(container)
 
         handler = HandlerSourceAttestation()
-        result = handler.attest(booted_event)
+        result = handler.handle(booted_event)
     """
 
     def __init__(self, container: ModelONEXContainer) -> None:

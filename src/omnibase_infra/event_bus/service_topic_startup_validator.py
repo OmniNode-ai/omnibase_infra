@@ -27,6 +27,7 @@ from uuid import UUID, uuid4
 from omnibase_infra.event_bus.enum_topic_validation_status import (
     EnumTopicValidationStatus,
 )
+from omnibase_infra.event_bus.kafka_auth import build_aiokafka_auth_kwargs_from_env
 from omnibase_infra.event_bus.model_topic_validation_result import (
     ModelTopicValidationResult,
 )
@@ -151,9 +152,11 @@ class TopicStartupValidator:
         # Guard: broker unreachable
         admin: AIOKafkaAdminClient | None = None
         try:
+            auth_kwargs = build_aiokafka_auth_kwargs_from_env()
             admin = AIOKafkaAdminClient(
                 bootstrap_servers=self._bootstrap_servers,
                 request_timeout_ms=self._request_timeout_ms,
+                **auth_kwargs,
             )
             await admin.start()
 

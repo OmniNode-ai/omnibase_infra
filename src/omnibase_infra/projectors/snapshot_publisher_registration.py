@@ -906,6 +906,10 @@ class SnapshotPublisherRegistration(MixinAsyncCircuitBreaker):
             from aiokafka import AIOKafkaConsumer
             from pydantic import ValidationError
 
+            from omnibase_infra.event_bus.kafka_auth import (
+                build_aiokafka_auth_kwargs_from_env,
+            )
+
             # Create consumer with unique group ID for this publisher instance
             # Using a unique group ensures we get our own offset tracking
             consumer_group = f"snapshot-reader-{self._config.topic}-{uuid4()!s}"
@@ -918,6 +922,7 @@ class SnapshotPublisherRegistration(MixinAsyncCircuitBreaker):
                 session_timeout_ms=_KAFKA_SESSION_TIMEOUT_MS,
                 heartbeat_interval_ms=_KAFKA_HEARTBEAT_INTERVAL_MS,
                 max_poll_interval_ms=_KAFKA_MAX_POLL_INTERVAL_MS,
+                **build_aiokafka_auth_kwargs_from_env(),
             )
 
             try:

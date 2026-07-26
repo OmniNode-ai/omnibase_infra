@@ -32,6 +32,26 @@ The ``prefetch_policy`` field governs ``ConfigPrefetcher`` wiring:
 Profile data is built at module import time (``_PROFILES``).  New profiles
 can be registered by constructing a ``ModelRuntimeProfile`` and inserting it
 into ``_PROFILES``; the ``load_runtime_profile()`` helper handles fallback.
+
+Lane-scoped secret-policy override (OMN-14951):
+    ``RUNTIME_PROFILE`` encodes topic-ownership ROLE identity (main / effects /
+    workers / projection-api / canary) and consumers depend on that identity
+    for routing decisions -- it must never be repurposed to also carry
+    secret-gating semantics (see the "Runtime lane profiles must preserve
+    identity" comment on ``_PROFILES`` below). Because every role-based
+    profile above hardcodes ``prefetch_policy="disabled"``, ``"required"`` is
+    structurally unreachable in any deployed lane today: dev/stability/judge/
+    prod are all generated from the same role manifests, and the
+    ``"production"``/``"staging"`` profile names are never referenced by any
+    docker-catalog service manifest.
+
+    ``ONEX_SECRET_POLICY`` is a second, independent env var -- lane-scoped,
+    not role-scoped -- that overrides the resolved profile's
+    ``prefetch_policy`` without touching ``RUNTIME_PROFILE`` or its role
+    identity. Set it once per lane (e.g. in the lane's
+    ``docker/runtime-policy.env`` block), not per role, so every role running
+    in a ``required`` lane inherits the fail-loud policy regardless of which
+    role-named ``RUNTIME_PROFILE`` it boots with.
 """
 
 from __future__ import annotations
@@ -43,6 +63,12 @@ from typing import Literal
 from pydantic import BaseModel, ConfigDict, Field
 
 logger = logging.getLogger(__name__)
+
+# OMN-14951: lane-scoped override, independent of RUNTIME_PROFILE. See module
+# docstring "Lane-scoped secret-policy override" section for why this must
+# stay a separate env var rather than reusing/extending RUNTIME_PROFILE.
+_SECRET_POLICY_ENV_VAR = "ONEX_SECRET_POLICY"
+_VALID_PREFETCH_POLICIES = frozenset({"disabled", "best_effort", "required"})
 
 
 class ModelRuntimeProfile(BaseModel):
@@ -145,10 +171,56 @@ def load_runtime_profile(profile_name: str | None = None) -> ModelRuntimeProfile
             list(_PROFILES),
         )
         profile = _PROFILES["default"]
+
+    # OMN-14951: ONEX_SECRET_POLICY is a lane-scoped override, independent of
+    # RUNTIME_PROFILE's role identity. See module docstring.
+    override_raw = os.getenv(_SECRET_POLICY_ENV_VAR)
+    if override_raw:
+        override = override_raw.strip().lower()
+        if override in _VALID_PREFETCH_POLICIES:
+            if override != profile.prefetch_policy:
+                logger.info(
+                    "%s=%s overrides profile %r prefetch_policy=%r "
+                    "(role identity unchanged)",
+                    _SECRET_POLICY_ENV_VAR,
+                    override,
+                    profile.name,
+                    profile.prefetch_policy,
+                )
+                profile = profile.model_copy(update={"prefetch_policy": override})
+        else:
+            logger.warning(
+                "Invalid %s=%r (expected one of %s) — ignoring override, using "
+                "profile %r prefetch_policy=%r",
+                _SECRET_POLICY_ENV_VAR,
+                override_raw,
+                sorted(_VALID_PREFETCH_POLICIES),
+                profile.name,
+                profile.prefetch_policy,
+            )
     return profile
+
+
+def resolve_secret_resolver_config_path() -> str:
+    """Resolve ``ONEX_SECRET_RESOLVER_CONFIG_PATH`` (OMN-14951).
+
+    This module is the config-resolution boundary
+    (``scripts/check-env-reads.sh``'s allowlist) for lane-scoped runtime
+    policy env vars -- ``RUNTIME_PROFILE`` and ``ONEX_SECRET_POLICY`` are
+    already read here. The rendered secret-resolver config path is the same
+    class of read (a deploy-time-rendered artifact path,
+    ``render_secret_resolver_config.py``'s output), so it belongs at this
+    same boundary rather than as a new raw ``os.environ`` read scattered into
+    ``runtime_host_process.py``.
+
+    Returns:
+        The configured path (stripped), or ``""`` if unset/blank.
+    """
+    return os.environ.get("ONEX_SECRET_RESOLVER_CONFIG_PATH", "").strip()
 
 
 __all__ = [
     "ModelRuntimeProfile",
     "load_runtime_profile",
+    "resolve_secret_resolver_config_path",
 ]

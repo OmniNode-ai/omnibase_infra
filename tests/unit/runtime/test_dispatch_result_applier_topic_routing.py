@@ -91,6 +91,18 @@ class ModelBaselineIntent(BaseModel):
     intent: str = "baseline_comparison"
 
 
+class ModelRoutingDecision(BaseModel):
+    """Stub delegation routing decision — the routing reducer's OUTPUT.
+
+    OMN-14794: the applier routes by ``type(event).__name__``, so this stub
+    exercises the same ``_DELEGATION_INTENT_TOPIC_BY_CLASS`` lookup the real
+    ``omnimarket`` ``ModelRoutingDecision`` hits at runtime.
+    """
+
+    correlation_id: str = "cid-routed"
+    selected_model: str = "Qwen"
+
+
 class ModelDelegationResult(BaseModel):
     """Stub terminal delegation result payload."""
 
@@ -99,7 +111,16 @@ class ModelDelegationResult(BaseModel):
 
 
 class ModelDelegationEventEnvelope(BaseModel):
-    """Stub topic-bearing delegation event envelope."""
+    """Stub of the (now-legacy) bespoke topic-bearing delegation envelope.
+
+    OMN-14600 (Fable-gate correction): the delegation orchestrator no longer
+    emits this shape, but the applier's special case for it was DELIBERATELY
+    KEPT (see ``_publish_payload_for_output_event``) — pre-fix in-flight rows
+    and the core class itself are still real, and dropping the special case
+    before every producer + every stored row is provably clear of the old
+    shape is a gratuitous skew risk. This stub pins that the special case
+    still works.
+    """
 
     topic: str
     payload: ModelDelegationResult
@@ -233,6 +254,37 @@ class TestResolveOutputTopic:
         )
         event = TopicCarryingEvent(topic="onex.evt.example.failed.v1")
         assert applier._resolve_output_topic(event) == "mapped-topic"
+
+    def test_routing_decision_resolves_to_routing_decision_topic_not_terminal(
+        self,
+    ) -> None:
+        """OMN-14794: ModelRoutingDecision must resolve to routing-decision.v1
+        through an applier whose fallback ``output_topic`` is the delegation
+        terminal and whose per-node allowed topics DO NOT include
+        routing-decision.v1 — the exact shape of the orchestrator's
+        plugin-managed applier.
+
+        Pre-fix this EXISTS-but-WRONG: the class had no mapping in
+        ``_DELEGATION_INTENT_TOPIC_BY_CLASS`` so it silently fell back to the
+        terminal ``output_topic`` (delegation-completed.v1), leaving
+        routing-decision.v1 empty and the FSM stalled at RECEIVED. The mapping
+        must win over the terminal fallback AND the topic must be allowed.
+        """
+        routing_decision_topic = "onex.evt.omnibase-infra.routing-decision.v1"
+        completed_topic = "onex.evt.omnibase-infra.delegation-completed.v1"
+        applier = DispatchResultApplier(
+            event_bus=AsyncMock(spec=ProtocolEventBusLike),
+            output_topic=completed_topic,
+            # Orchestrator-shaped allowlist: routing-decision.v1 is a SUBSCRIBE
+            # topic for the orchestrator, never one of its publish topics.
+            allowed_output_topics={
+                completed_topic,
+                "onex.evt.omnibase-infra.delegation-failed.v1",
+            },
+        )
+        decision = ModelRoutingDecision()
+        assert applier._resolve_output_topic(decision) == routing_decision_topic
+        assert routing_decision_topic in applier._allowed_output_topics()
 
 
 # ---------------------------------------------------------------------------
@@ -485,6 +537,37 @@ class TestDelegationIntentTopicRouting:
         assert completed_topic not in topics
 
     @pytest.mark.asyncio
+    async def test_routing_decision_publishes_to_routing_decision_topic_not_terminal(
+        self,
+    ) -> None:
+        """OMN-14794 end-to-end publish proof: a ModelRoutingDecision emitted
+        through the orchestrator-shaped applier (fallback ``output_topic`` = the
+        delegation terminal, no output_topic_map) publishes to
+        routing-decision.v1, NOT the terminal.
+
+        This reproduces the live-lane stall: routing-decision.v1 had zero records
+        because the decision was misrouted to the terminal topic, so the
+        orchestrator's ``handle_routing_decision`` never fired and the workflow
+        never left RECEIVED. After the fix the decision lands on the topic the
+        orchestrator subscribes to, so the FSM can advance RECEIVED -> ROUTED.
+        """
+        mock_bus = AsyncMock(spec=ProtocolEventBusLike)
+        completed_topic = "onex.evt.omnibase-infra.delegation-completed.v1"
+        routing_decision_topic = "onex.evt.omnibase-infra.routing-decision.v1"
+        applier = DispatchResultApplier(
+            event_bus=mock_bus,
+            output_topic=completed_topic,
+        )
+        result = _make_result(output_events=[ModelRoutingDecision()])
+
+        await applier.apply(result)
+
+        mock_bus.publish_envelope.assert_called_once()
+        call_kwargs = mock_bus.publish_envelope.call_args.kwargs
+        assert call_kwargs["topic"] == routing_decision_topic
+        assert call_kwargs["topic"] != completed_topic
+
+    @pytest.mark.asyncio
     async def test_delegation_terminal_topic_keeps_terminal_payload_only(self) -> None:
         mock_bus = AsyncMock(spec=ProtocolEventBusLike)
         completed_topic = "onex.evt.omnibase-infra.delegation-completed.v1"
@@ -505,6 +588,14 @@ class TestDelegationIntentTopicRouting:
     async def test_delegation_topic_envelope_publishes_inner_terminal_payload(
         self,
     ) -> None:
+        """OMN-14600: the delegation orchestrator emits the canonical
+        ``ModelEventEnvelope`` directly (no bespoke ``ModelDelegationEventEnvelope``
+        carrier) -- the applier's generic ``ModelEventEnvelope`` unwrap
+        (``_publish_payload_for_output_event`` / ``_resolve_embedded_output_topic``,
+        OMN-13247) must still resolve the embedded ``event_type`` as the topic and
+        publish the UNWRAPPED inner ``ModelDelegationResult``, never a
+        double-nested envelope-in-envelope.
+        """
         mock_bus = AsyncMock(spec=ProtocolEventBusLike)
         completed_topic = "onex.evt.omnibase-infra.delegation-completed.v1"
         applier = DispatchResultApplier(
@@ -512,6 +603,39 @@ class TestDelegationIntentTopicRouting:
             output_topic=completed_topic,
         )
         terminal_payload = ModelDelegationResult(correlation_id="cid-456")
+        result = _make_result(
+            output_events=[
+                ModelEventEnvelope(
+                    event_type=completed_topic,
+                    payload=terminal_payload,
+                )
+            ],
+        )
+
+        await applier.apply(result)
+
+        mock_bus.publish_envelope.assert_called_once()
+        call_kwargs = mock_bus.publish_envelope.call_args.kwargs
+        assert call_kwargs["topic"] == completed_topic
+        assert call_kwargs["envelope"].payload == terminal_payload
+
+    @pytest.mark.asyncio
+    async def test_legacy_delegation_envelope_still_unwraps_omn14600(self) -> None:
+        """OMN-14600 (Fable-gate correction, Priority 5): the applier's special
+        case for the (now-legacy) bespoke ``ModelDelegationEventEnvelope`` carrier
+        was DELIBERATELY KEPT — pre-fix in-flight rows and any as-yet-
+        unredeployed producer can still emit this shape, and the core class
+        itself has not been deleted. Dropping the special case in this PR would
+        be a gratuitous skew risk for zero benefit. This pins that it still
+        unwraps to the inner payload exactly as before.
+        """
+        mock_bus = AsyncMock(spec=ProtocolEventBusLike)
+        completed_topic = "onex.evt.omnibase-infra.delegation-completed.v1"
+        applier = DispatchResultApplier(
+            event_bus=mock_bus,
+            output_topic=completed_topic,
+        )
+        terminal_payload = ModelDelegationResult(correlation_id="cid-789")
         result = _make_result(
             output_events=[
                 ModelDelegationEventEnvelope(
@@ -579,12 +703,18 @@ class TestDelegationTopicRegistryNoDrift:
         ),
     }
 
-    # The 4 topics the infra applier actually resolves, mapped to the owning
-    # publisher contract that declares them.
+    # The topics the infra applier's _DELEGATION_INTENT_TOPIC_BY_CLASS resolves,
+    # each anchored to a contract that declares the topic string. The four command
+    # intents are declared as PUBLISH topics on the orchestrator contract;
+    # DELEGATION_ROUTING_DECISION (OMN-14794 — the routing reducer's OUTPUT) is the
+    # event the orchestrator SUBSCRIBES to (routing-decision.v1 appears in the
+    # orchestrator contract's subscribe_topics + handler_routing), so the same
+    # grep-anchor holds.
     _APPLIER_KEYS: tuple[str, ...] = (
         "DELEGATION_BASELINE_COMPARISON",
         "DELEGATION_INFERENCE_REQUEST",
         "DELEGATION_QUALITY_GATE_REQUEST",
+        "DELEGATION_ROUTING_DECISION",
         "DELEGATION_ROUTING_REQUEST",
     )
 
@@ -603,11 +733,13 @@ class TestDelegationTopicRegistryNoDrift:
             )
 
     def test_applier_resolved_topics_match_owning_contract(self) -> None:
-        """The 4 applier topics equal the strings declared in the publisher contract.
+        """Each applier topic equals a string declared in the orchestrator contract.
 
-        The delegation orchestrator (omnimarket node_delegation_orchestrator) is the
-        publisher that declares all four command topics in its contract.yaml. This
-        anchors the registry value to a contract source, not just a Python constant.
+        The delegation orchestrator (omnimarket node_delegation_orchestrator)
+        declares the four command intent topics as publish_topics and consumes
+        routing-decision.v1 (subscribe_topics + handler_routing) in its
+        contract.yaml. This anchors each registry value to a contract source, not
+        just a Python constant.
         """
         from pathlib import Path
 

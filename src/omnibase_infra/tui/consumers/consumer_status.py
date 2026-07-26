@@ -32,6 +32,7 @@ from textual.message import Message
 if TYPE_CHECKING:
     from omnibase_core.types import JsonType
 
+from omnibase_infra.event_bus.kafka_auth import build_aiokafka_auth_kwargs_from_env
 from omnibase_infra.topics.platform_topic_suffixes import (
     SUFFIX_GIT_HOOK,
     SUFFIX_GITHUB_PR_STATUS,
@@ -127,6 +128,7 @@ async def consume_all(app: object) -> None:
             value_deserializer=lambda v: v,  # raw bytes; we JSON-decode below
             request_timeout_ms=5000,
             connections_max_idle_ms=10000,
+            **build_aiokafka_auth_kwargs_from_env(),
         )
         await consumer.start()
         logger.info("TUI consumer started. Topics: %s.", _ALL_TOPICS)

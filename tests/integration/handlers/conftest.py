@@ -174,12 +174,17 @@ def _safe_int_env(name: str, default: int) -> int:
 # implementation (OMNIBASE_INFRA_DB_URL primary, POSTGRES_* fallback).
 # =============================================================================
 
-from tests.helpers.util_postgres import PostgresConfig
+from tests.helpers.util_postgres import PostgresConfig, check_postgres_reachable
 
 _postgres_config = PostgresConfig.from_env()
 
-# Export availability flag for module-level pytestmark skip conditions
-POSTGRES_AVAILABLE = _postgres_config.is_configured
+# Export availability flag for module-level pytestmark skip conditions.
+# Configuration alone is not enough: CI can set a localhost DSN without a
+# reachable database service.
+POSTGRES_AVAILABLE = _postgres_config.is_configured and check_postgres_reachable(
+    _postgres_config,
+    timeout=1.0,
+)
 
 
 def _build_postgres_dsn() -> str:

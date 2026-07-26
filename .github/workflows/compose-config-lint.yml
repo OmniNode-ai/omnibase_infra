@@ -18,12 +18,11 @@ on:
       - "scripts/lint_compose_dangling_deps.py"
       - "tests/scripts/test_lint_compose_dangling_deps.py"
       - ".github/workflows/compose-config-lint.yml"
-  merge_group:
   workflow_dispatch:
 
 concurrency:
   group: ${{ github.workflow }}-${{ github.ref }}
-  cancel-in-progress: false
+  cancel-in-progress: true
 
 env:
   UV_VERSION: "0.6.14"

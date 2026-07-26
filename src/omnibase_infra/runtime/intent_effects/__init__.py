@@ -22,8 +22,8 @@ Related:
 .. versionadded:: 0.7.0
 """
 
-from omnibase_infra.runtime.intent_effects.intent_effect_build_loop_append import (
-    IntentEffectBuildLoopAppend,
+from omnibase_infra.runtime.intent_effects.intent_effect_dispatch_bridge import (
+    IntentEffectDispatchBridge,
 )
 from omnibase_infra.runtime.intent_effects.intent_effect_postgres_update import (
     IntentEffectPostgresUpdate,
@@ -33,7 +33,7 @@ from omnibase_infra.runtime.intent_effects.intent_effect_postgres_upsert import 
 )
 
 __all__: list[str] = [
-    "IntentEffectBuildLoopAppend",
+    "IntentEffectDispatchBridge",
     "IntentEffectPostgresUpdate",
     "IntentEffectPostgresUpsert",
 ]

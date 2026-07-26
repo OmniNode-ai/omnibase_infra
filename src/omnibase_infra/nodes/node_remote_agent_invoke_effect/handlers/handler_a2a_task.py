@@ -348,6 +348,34 @@ class HandlerA2ATask:
     def handler_category(self) -> EnumHandlerTypeCategory:
         return EnumHandlerTypeCategory.EFFECT
 
+    async def handle(
+        self, request: ModelInvocationCommand
+    ) -> ModelAgentTaskLifecycleEvent:
+        """Canonical dispatch entrypoint (def B) for the auto-wired runtime.
+
+        Auto-wiring binds ``handle``/``handle_async`` at wiring time; a handler
+        exposing neither is bound to ``_missing_handle``, which raises on EVERY
+        dispatch. Without this method the node passed ingress validation and then
+        died before any A2A work ran (OMN-14489).
+
+        The RETURN value is the node's only publish path on the auto-wired
+        runtime: zero-arg runtime discovery constructs this handler with a
+        ``NoopLifecycleEventSink``, so the lifecycle events written by ``submit``
+        are dropped, and only the event returned here reaches
+        ``onex.evt.omnibase-infra.agent-task-lifecycle.v1``. ``watch`` is NOT
+        driven from here — it reads the submitted row back, which the zero-arg
+        ``NoopRemoteTaskStateRepository`` cannot serve.
+        """
+        response = await self.submit(request)
+        return ModelAgentTaskLifecycleEvent(
+            task_id=request.task_id,
+            correlation_id=request.correlation_id,
+            lifecycle_type=EnumAgentTaskLifecycleType.SUBMITTED,
+            remote_task_handle=response.remote_task_handle,
+            occurred_at=self._clock(),
+            remote_status=_remote_status_value(response.status),
+        )
+
     async def submit(self, command: ModelInvocationCommand) -> ModelA2ATaskResponse:
         """Submit a command to a remote A2A peer and persist the returned handle."""
         target = self._resolve_target(command.target_ref)

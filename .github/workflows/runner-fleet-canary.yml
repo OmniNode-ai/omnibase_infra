@@ -1,0 +1,48 @@
+# runner-fleet-canary.yml — scheduled fleet-status canary (OMN-13915)
+#
+# Compares GitHub's org self-hosted runner registry (authoritative) against the
+# expected fleet size in config/runner_fleet.yaml every 15 minutes and fails
+# the run when the offline count crosses the threshold. This catches the
+# silent-zombie fleet mode (37/48 listeners dead-in-container while every
+# Docker healthcheck stayed green, 2026-07-03) BEFORE queued CI piles up.
+#
+# HARD REQUIREMENT: this job runs on GitHub-hosted compute (ubuntu-latest),
+# NEVER on self-hosted — the canary must not share fate with the fleet it
+# watches. Do not change runs-on.
+name: runner-fleet-canary
+
+on:
+  schedule:
+    - cron: "*/15 * * * *"
+  workflow_dispatch: {}
+
+permissions:
+  contents: read
+
+jobs:
+  fleet-status:
+    name: fleet-status
+    # Canary MUST NOT depend on the self-hosted fleet it monitors.
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - name: Checkout (fleet config + canary script)
+        uses: actions/checkout@v4
+        with:
+          # No git operations after checkout — do not leave the Actions token
+          # in local git config (zizmor artipacked).
+          persist-credentials: false
+
+      - name: Compare org runner registry vs expected fleet size
+        env:
+          # Preferred: dedicated secret with org self-hosted-runner read scope.
+          # Fallback: CROSS_REPO_PAT (org-wide PAT already used by CI).
+          # The script fails loudly if neither is present or the scope is
+          # insufficient — a canary that cannot see the fleet is a red run,
+          # never a silent skip (fail-closed).
+          RUNNER_FLEET_STATUS_TOKEN: ${{ secrets.RUNNER_FLEET_STATUS_TOKEN }}
+          CROSS_REPO_PAT: ${{ secrets.CROSS_REPO_PAT }}
+          SLACK_BOT_TOKEN: ${{ secrets.SLACK_BOT_TOKEN }}
+          SLACK_CHANNEL_ID: ${{ secrets.SLACK_CHANNEL_ID }}
+          RUNNER_CANARY_MAX_OFFLINE: "5"
+        run: bash scripts/ci/runner_fleet_canary.sh

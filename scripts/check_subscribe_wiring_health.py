@@ -60,7 +60,7 @@ _EXTERNAL_PUBLISHER_ALLOWLIST: dict[str, str] = {
     "onex.evt.omniclaude.session-outcome.v1": "Published by omniclaude SessionEnd hook outcome processing, not contract-declared | owner: jonah | expiry: 2026-12-01",
     "onex.evt.omniclaude.prompt-submitted.v1": "Published by omniclaude hooks, not contract-declared | owner: jonah | expiry: 2026-12-01",
     "onex.evt.omniclaude.tool-executed.v1": "Published by omniclaude hooks, not contract-declared | owner: jonah | expiry: 2026-12-01",
-    "onex.evt.omniclaude.hook-context-injected.v1": "Published by omniclaude hook context injection, not contract-declared | owner: jonah | expiry: 2026-12-01",
+    "onex.evt.omniclaude.context-injected.v1": "Published by omniclaude hook context injection (renamed from the never-published hook-context-injected.v1, OMN-14986), not contract-declared | owner: jonah | expiry: 2026-12-01",
     "onex.evt.omniclaude.validator-catch.v1": "Published by omniclaude validator hooks, not contract-declared | owner: jonah | expiry: 2026-12-01",
     "onex.evt.omniclaude.pattern-enforcement.v1": "Published by omniclaude pattern enforcement hooks, not contract-declared | owner: jonah | expiry: 2026-12-01",
     "onex.evt.omniclaude.phase-metrics.v1": "Published by omniclaude emit-daemon hooks, not contract-declared | owner: jonah | expiry: 2026-12-01",
@@ -87,6 +87,28 @@ _EXTERNAL_PUBLISHER_ALLOWLIST: dict[str, str] = {
     # not a contract-declared node publisher. The script publishes to this topic to trigger the
     # node_baselines_batch_compute effect node. (OMN-11177)
     "onex.cmd.omnibase-infra.baselines-batch-compute.v1": "Published by scripts/run_baselines_batch_compute.py CLI trigger, not a contract-declared node | owner: jonah | expiry: 2026-12-01",
+    # Runner-fleet-maintain tick — triggered by the reused OMN-13915
+    # runner-fleet-canary 15-min GitHub-hosted schedule (OMN-13942 Increment 1),
+    # not a contract-declared Kafka publisher.
+    "onex.cmd.omnibase-infra.runner-fleet-maintain-start.v1": "Triggered by the reused OMN-13915 runner-fleet-canary GHA schedule, not Kafka | owner: jonah | expiry: 2026-12-01",
+    # OMN-15006: node_ledger_projection_compute widened subscribe_topics to
+    # OCC governance + omnimarket-redeploy topics whose canonical publisher
+    # contracts live in onex_change_control / omnimarket (cross-repo, not
+    # visible to this scan). Topic strings are onex_change_control's own
+    # GovernanceTopic registry (OMN-8635).
+    "onex.evt.occ.nightly-promotion.v1": "Published by onex_change_control nightly dev-to-main promotion pipeline (GovernanceTopic.NIGHTLY_PROMOTION), cross-repo | owner: jonah | expiry: 2026-12-01",
+    "onex.evt.onex-change-control.governance-check-completed.v1": "Published by onex_change_control governance check pipeline (GovernanceTopic.GOVERNANCE_CHECK_COMPLETED), cross-repo | owner: jonah | expiry: 2026-12-01",
+    "onex.evt.onex-change-control.contract-drift-detected.v1": "Published by onex_change_control drift detection (GovernanceTopic.CONTRACT_DRIFT_DETECTED), cross-repo | owner: jonah | expiry: 2026-12-01",
+    "onex.evt.onex-change-control.cosmetic-compliance-scored.v1": "Published by onex_change_control cosmetic lint tooling (GovernanceTopic.COSMETIC_COMPLIANCE_SCORED), cross-repo | owner: jonah | expiry: 2026-12-01",
+    "onex.cmd.omnimarket.redeploy-start.v1": "Published by onex_change_control promotion tooling, consumed by omnimarket node_redeploy (GovernanceTopic.RUNTIME_DEPLOYMENT_REQUEST, OMN-12576), cross-repo | owner: jonah | expiry: 2026-12-01",
+    "onex.evt.omnimarket.runtime-deployment-proof.v1": "Published by omnimarket node_redeploy per-lane probe (GovernanceTopic.RUNTIME_DEPLOYMENT_PROOF, OMN-12576), cross-repo | owner: jonah | expiry: 2026-12-01",
+    # OMN-15168 (epic OMN-15154): node_ledger_projection_compute widened
+    # subscribe_topics to steel_onslaught's forwarded terminal-match topic
+    # whose canonical publisher lives in the private steel_onslaught repo
+    # (cross-repo, not visible to this scan; infra ↛ steel forbids importing
+    # it). Topic string is steel_onslaught's own STEEL_MATCH_TERMINAL_TOPIC
+    # (kafka_forwarder.py, OMN-15167, merged f378cd48).
+    "onex.evt.steel-onslaught.match-terminal.v1": "Published by steel_onslaught's KafkaTerminalEventForwarder (STEEL_MATCH_TERMINAL_TOPIC, OMN-15167), cross-repo (private personal repo) | owner: jonah | expiry: 2026-12-01",
 }
 
 # ---------------------------------------------------------------------------
@@ -108,6 +130,8 @@ _BASELINE_DEAD_LETTER_ALLOWLIST: dict[str, str] = {
     # Build loop cmd topics — triggered by CLI (claude -p), not Kafka publisher
     "onex.cmd.omnibase-infra.build-loop-start.v1": "Triggered by cron-buildloop.sh via claude -p, not Kafka | owner: jonah | expiry: 2026-12-01",
     "onex.cmd.omnibase-infra.build-loop-append.v1": "Routed via intent from node_build_loop_projection_compute, not Kafka publish | owner: jonah | expiry: 2026-09-01",
+    "onex.cmd.omnibase-infra.pr-state-upsert.v1": "Routed via intent from node_pr_state_projection_compute, not Kafka publish | owner: jonah | expiry: 2026-09-01",
+    "onex.cmd.omnibase-infra.validation-ledger-append.v1": "Routed via intent from node_validation_ledger_projection_compute, not Kafka publish | owner: jonah | expiry: 2026-12-01",
     # Chain learning — publisher nodes not yet implemented
     "onex.cmd.omnibase-infra.chain-learn.v1": "Chain learning publisher not yet wired | owner: jonah | expiry: 2026-09-01",
     # Topic migration — command issued by operator/runtime, not a contract-declared publisher (OMN-12623)

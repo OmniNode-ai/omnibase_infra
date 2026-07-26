@@ -13,6 +13,7 @@ error classification, and connection-pool management.
 
 from __future__ import annotations
 
+import asyncio
 import json
 import logging
 from typing import TYPE_CHECKING
@@ -25,6 +26,7 @@ from omnibase_infra.enums import (
     EnumInfraTransportType,
 )
 from omnibase_infra.errors import ModelInfraErrorContext, RuntimeHostError
+from omnibase_infra.handlers.handler_db import HandlerDb
 from omnibase_infra.nodes.node_build_loop_projection_compute.models import (
     ModelPayloadBuildLoopAppend,
 )
@@ -34,7 +36,6 @@ from omnibase_infra.nodes.node_build_loop_write_effect.models import (
 
 if TYPE_CHECKING:
     from omnibase_core.container import ModelONEXContainer
-    from omnibase_infra.handlers.handler_db import HandlerDb
 
 logger = logging.getLogger(__name__)
 
@@ -60,12 +61,14 @@ class HandlerBuildLoopAppend:
 
     def __init__(
         self,
-        container: ModelONEXContainer,
-        db_handler: HandlerDb,
+        container: ModelONEXContainer | None = None,
+        db_dsn: str | None = None,
     ) -> None:
         self._container = container
-        self._db_handler = db_handler
+        self._db_handler = HandlerDb(container) if container is not None else None
+        self._db_dsn = db_dsn.strip() if db_dsn else ""
         self._initialized: bool = False
+        self._db_init_lock = asyncio.Lock()
 
     @property
     def handler_type(self) -> EnumHandlerType:
@@ -76,16 +79,10 @@ class HandlerBuildLoopAppend:
         return EnumHandlerTypeCategory.EFFECT
 
     async def initialize(self, config: dict[str, object]) -> None:
-        if not getattr(self._db_handler, "_initialized", False):
-            ctx = ModelInfraErrorContext.with_correlation(
-                transport_type=EnumInfraTransportType.DATABASE,
-                operation="initialize",
-            )
-            raise RuntimeHostError(
-                "HandlerDb must be initialized before HandlerBuildLoopAppend",
-                context=ctx,
-            )
-        self._initialized = True
+        config_dsn = config.get("dsn")
+        if isinstance(config_dsn, str) and config_dsn.strip():
+            self._db_dsn = config_dsn.strip()
+        await self._ensure_db_ready()
         logger.info(
             "%s initialized successfully",
             self.__class__.__name__,
@@ -93,8 +90,40 @@ class HandlerBuildLoopAppend:
         )
 
     async def shutdown(self) -> None:
+        if self._initialized and self._db_handler is not None:
+            await self._db_handler.shutdown()
         self._initialized = False
         logger.info("HandlerBuildLoopAppend shutdown complete")
+
+    async def _ensure_db_ready(self) -> None:
+        if self._initialized:
+            return
+        async with self._db_init_lock:
+            if self._initialized:
+                return
+            dsn = self._db_dsn
+            if self._container is None or self._db_handler is None:
+                ctx = ModelInfraErrorContext.with_correlation(
+                    transport_type=EnumInfraTransportType.DATABASE,
+                    operation="build_loop.append.connect",
+                )
+                raise RuntimeHostError(
+                    "Missing ONEX container for build_loop persistence -- provide "
+                    "container at construction",
+                    context=ctx,
+                )
+            if not dsn:
+                ctx = ModelInfraErrorContext.with_correlation(
+                    transport_type=EnumInfraTransportType.DATABASE,
+                    operation="build_loop.append.connect",
+                )
+                raise RuntimeHostError(
+                    "Missing PostgreSQL DSN for build_loop persistence -- provide "
+                    "db_dsn at construction or initialize({'dsn': ...})",
+                    context=ctx,
+                )
+            await self._db_handler.initialize({"dsn": dsn})
+            self._initialized = True
 
     async def append(
         self,
@@ -110,16 +139,7 @@ class HandlerBuildLoopAppend:
         """
         correlation_id = correlation_id or payload.correlation_id or uuid4()
 
-        if not self._initialized:
-            ctx = ModelInfraErrorContext.with_correlation(
-                correlation_id=correlation_id,
-                transport_type=EnumInfraTransportType.DATABASE,
-                operation="build_loop.append",
-            )
-            raise RuntimeHostError(
-                "HandlerBuildLoopAppend not initialized. Call initialize() first.",
-                context=ctx,
-            )
+        await self._ensure_db_ready()
 
         payload_json = json.dumps(payload.payload)
         parameters: list[object] = [
@@ -150,6 +170,14 @@ class HandlerBuildLoopAppend:
             },
         )
 
+        if self._db_handler is None:
+            ctx = ModelInfraErrorContext.with_correlation(
+                correlation_id=correlation_id,
+                transport_type=EnumInfraTransportType.DATABASE,
+                operation="build_loop.append",
+            )
+            raise RuntimeHostError("Database handler is not available", context=ctx)
+
         db_result = await self._db_handler.execute(envelope)
 
         if db_result.result is None:
@@ -179,6 +207,35 @@ class HandlerBuildLoopAppend:
             workflow_name=payload.workflow_name,
         )
 
+    async def handle(
+        self,
+        envelope: object,
+    ) -> ModelHandlerOutput[ModelBuildLoopAppendResult]:
+        """Contract-routed operation_match entry point."""
+        payload_raw = self._extract_envelope_field(envelope, "payload")
+        if payload_raw is None:
+            payload_raw = envelope
+        payload = (
+            payload_raw
+            if isinstance(payload_raw, ModelPayloadBuildLoopAppend)
+            else ModelPayloadBuildLoopAppend.model_validate(payload_raw)
+        )
+
+        envelope_correlation_id = self._extract_envelope_field(
+            envelope, "correlation_id"
+        )
+        correlation_id = self._safe_correlation_id(
+            envelope_correlation_id or payload.correlation_id
+        )
+        result = await self.append(payload, correlation_id=correlation_id)
+
+        return ModelHandlerOutput.for_compute(
+            input_envelope_id=uuid4(),
+            correlation_id=correlation_id,
+            handler_id=HANDLER_ID_BUILD_LOOP_APPEND,
+            result=result,
+        )
+
     async def execute(
         self,
         envelope: dict[str, object],
@@ -200,7 +257,7 @@ class HandlerBuildLoopAppend:
             )
 
         payload = ModelPayloadBuildLoopAppend.model_validate(payload_raw)
-        result = await self.append(payload)
+        result = await self.append(payload, correlation_id=correlation_id)
 
         return ModelHandlerOutput.for_compute(
             input_envelope_id=input_envelope_id,
@@ -208,6 +265,12 @@ class HandlerBuildLoopAppend:
             handler_id=HANDLER_ID_BUILD_LOOP_APPEND,
             result=result,
         )
+
+    @staticmethod
+    def _extract_envelope_field(envelope: object, key: str) -> object:
+        if isinstance(envelope, dict):
+            return envelope.get(key)
+        return getattr(envelope, key, None)
 
     @staticmethod
     def _safe_correlation_id(raw: object) -> UUID:

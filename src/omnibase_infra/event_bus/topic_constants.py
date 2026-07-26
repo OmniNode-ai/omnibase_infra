@@ -390,17 +390,17 @@ def derive_dlq_topic_for_event_type(
     Example:
         >>> derive_dlq_topic_for_event_type(
         ...     "intelligence.code-analysis-completed.v1",
-        ...     "onex.evt.intelligence.code-analysis.v1",
+        ...     ``onex.evt.intelligence.code-analysis.v1``,
         ... )
         'onex.dlq.omnibase-infra.intelligence.v1'
         >>> derive_dlq_topic_for_event_type(
         ...     "platform.node-registered.v1",
-        ...     "onex.evt.platform.node-registration.v1",
+        ...     ``onex.evt.platform.node-registration.v1``,
         ... )
         'onex.dlq.omnibase-infra.platform.v1'
         >>> derive_dlq_topic_for_event_type(
         ...     None,
-        ...     "onex.evt.platform.node-registration.v1",
+        ...     ``onex.evt.platform.node-registration.v1``,
         ... )
         'onex.dlq.omnibase-infra.events.v1'
 

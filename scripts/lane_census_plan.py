@@ -25,6 +25,11 @@ Drift kinds (named exactly so the auto-ticket says precisely what is wrong):
   network_detached     — the lane's declared network does not exist
   oneshot_failed       — a run-to-completion container Exited non-zero
   oneshot_stuck        — a run-to-completion container is still Running
+                         (kind `keepalive` is exempt: a healthcheck sentinel
+                         such as migration-gate is a long-running keepalive BY
+                         DESIGN — `while true; do sleep 3600; done` + a
+                         continuous healthcheck — so Running is its healthy
+                         steady state, not drift; OMN-13772)
   image_tag_mismatch   — a running container's image tag fails the lane pattern
   unexpected_container — a container labeled for the lane that the manifest does
                          not declare
@@ -184,12 +189,17 @@ def reconcile_lane(
         kind = svc.get("kind", "service")
         actual = actual_by_name.get(name)
 
-        if kind == "oneshot":
+        if kind in ("oneshot", "keepalive"):
             # Run-to-completion container. Absence (compose removed it) is fine.
             if actual is None:
                 continue
             status = actual.get("Status", "")
             if _running(actual.get("State", ""), status):
+                if kind == "keepalive":
+                    # Healthcheck sentinel (e.g. migration-gate): a long-running
+                    # keepalive BY DESIGN. Running is its healthy steady state,
+                    # never oneshot_stuck (OMN-13772 census false-positive).
+                    continue
                 findings.append(
                     _finding(
                         lane_name,

@@ -35,6 +35,9 @@ from omnibase_infra.observability.runner_health.model_network_pool_alert import 
 from omnibase_infra.observability.runner_health.model_network_pool_status import (
     ModelNetworkPoolStatus,
 )
+from omnibase_infra.observability.runner_health.model_pypi_cache_config import (
+    ModelPyPICacheConfig,
+)
 from omnibase_infra.observability.runner_health.model_runner_fleet_config import (
     ModelRunnerFleetConfig,
     load_runner_fleet_config,
@@ -61,6 +64,7 @@ __all__ = [
     "ModelNetworkOwnershipRule",
     "ModelNetworkPoolAlert",
     "ModelNetworkPoolStatus",
+    "ModelPyPICacheConfig",
     "ModelRunnerFleetConfig",
     "ModelRunnerHealthAlert",
     "ModelRunnerHealthSnapshot",

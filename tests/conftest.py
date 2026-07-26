@@ -102,11 +102,50 @@ for _key, _val in _TEST_ENV_DEFAULTS.items():
     if _key not in os.environ:
         os.environ[_key] = _val
 
+import omnibase_infra
 from omnibase_infra.models import ModelNodeIdentity
 from omnibase_infra.utils import sanitize_error_message
 
 # Module-level logger for test cleanup diagnostics
 logger = logging.getLogger(__name__)
+
+
+# =============================================================================
+# Hermetic import guard (OMN-15019 / OMN-14420)
+# =============================================================================
+# An ambient PYTHONPATH exported by the parent shell/session (see OMN-14420:
+# "Ambient PYTHONPATH makes worktree test runs silently execute
+# canonical-clone source") can place a stale sibling canonical clone of
+# omnibase_infra ahead of this repo's own checkout (worktree src/ or the
+# installed venv copy) on sys.path. When that happens, `import omnibase_infra`
+# silently resolves to a *different*, possibly out-of-date copy of the
+# package than the one physically checked out here, so local test runs can
+# exercise the wrong source tree -- a false-green (a real bug looks fixed) or
+# a false-red (a real fix looks broken), and pre-push gates can fail with a
+# confusing ModuleNotFoundError/AttributeError pointing at code that isn't
+# even the code under test.
+#
+# OMN-15019 was exactly this: `ModuleNotFoundError: No module named
+# 'omnibase_infra.contracts.canary'` was diagnosed as an omnibase_infra
+# packaging gap, but reproduced identically with a fully clean `.venv`
+# rebuild -- because the failure was never about packaging. It was ambient
+# PYTHONPATH redirecting the import to a stale canonical clone that predated
+# the commit which added `contracts/canary/`. `env -u PYTHONPATH` made the
+# failure disappear immediately; a plain `uv sync` did not.
+#
+# Fail fast at collection time with the exact remediation, instead of letting
+# this surface many tests later as an unrelated-looking error.
+_REPO_ROOT = Path(__file__).resolve().parent.parent
+_resolved_infra_path = Path(omnibase_infra.__file__).resolve()
+if _REPO_ROOT not in _resolved_infra_path.parents:
+    raise RuntimeError(
+        "Hermetic import guard failed: `omnibase_infra` resolved OUTSIDE this "
+        f"repo checkout ({_REPO_ROOT}); got {_resolved_infra_path} instead. "
+        "This almost always means an ambient PYTHONPATH in your shell is "
+        "shadowing this checkout with a different (possibly stale) copy of "
+        "omnibase_infra -- see OMN-14420. Re-run with 'env -u PYTHONPATH' "
+        "prefixed on your command."
+    )
 
 
 # =============================================================================

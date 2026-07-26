@@ -1,7 +1,7 @@
 {
   "schema_version": "1.0.0",
   "package_version": "0.38.4",
-  "protocol_count": 23,
+  "protocol_count": 22,
   "protocols": {
     "ProtocolAutoWiringManifestLike": {
       "runtime_checkable": false,
@@ -317,52 +317,6 @@
             }
           ],
           "return_annotation": "None"
-        }
-      }
-    },
-    "ProtocolDispatchEngine": {
-      "runtime_checkable": true,
-      "method_count": 2,
-      "methods": {
-        "dispatch": {
-          "parameters": [
-            {
-              "name": "topic",
-              "kind": "POSITIONAL_OR_KEYWORD",
-              "annotation": "str",
-              "default": null
-            },
-            {
-              "name": "envelope",
-              "kind": "POSITIONAL_OR_KEYWORD",
-              "annotation": "ModelEventEnvelope[object]",
-              "default": null
-            }
-          ],
-          "return_annotation": "ModelDispatchResult | None"
-        },
-        "dispatch_with_transaction": {
-          "parameters": [
-            {
-              "name": "topic",
-              "kind": "KEYWORD_ONLY",
-              "annotation": "str",
-              "default": null
-            },
-            {
-              "name": "envelope",
-              "kind": "KEYWORD_ONLY",
-              "annotation": "ModelEventEnvelope[object]",
-              "default": null
-            },
-            {
-              "name": "tx",
-              "kind": "KEYWORD_ONLY",
-              "annotation": "object",
-              "default": null
-            }
-          ],
-          "return_annotation": "ModelDispatchResult | None"
         }
       }
     },

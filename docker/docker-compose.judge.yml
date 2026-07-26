@@ -5,6 +5,17 @@
 # development compose file. Docker Compose interpolates every input file before
 # merge, so a pure overlay would still inherit dev-only .env requirements.
 #
+# HOWEVER: deploy-runtime.sh (resolve_compose_file_args, OMN-13581) layers this
+# file ON TOP of docker-compose.infra.yml on the .201 host. Compose merges plain
+# `networks:` / `ports:` lists by UNION with the base file, which attached every
+# judge service to BOTH the judge and dev networks (cross-lane isolation hole,
+# ambiguous postgres/valkey/redpanda DNS) and double-published dev+judge host
+# ports (valkey collided on dev 16379). Every `networks:` and `ports:` key below
+# therefore carries the `!override` tag (OMN-13772), matching the established
+# docker-compose.stability-test.yml pattern. Requires Docker Compose v2.24.4+
+# for !override merge semantics. The tag is a no-op when this file is used
+# standalone.
+#
 # Validation:
 #   docker compose --env-file docker/runtime-policy.env \
 #     --env-file docker/judge.env.example \
@@ -43,7 +54,7 @@ x-runtime-base: &runtime-base
       BUILD_SOURCE: "${BUILD_SOURCE:-release}"
       EXPECTED_BUILD_SOURCE: "${EXPECTED_BUILD_SOURCE:-release}"
   profiles: ["judge"]
-  networks:
+  networks: !override
     - omnibase-infra-judge-network
   logging: *logging-defaults
   restart: unless-stopped
@@ -132,12 +143,12 @@ services:
       POSTGRES_USER: ${POSTGRES_USER:-postgres}
       POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?POSTGRES_PASSWORD required}
       POSTGRES_DB: omnibase_infra
-    ports:
+    ports: !override
       - "${JUDGE_POSTGRES_EXTERNAL_PORT:-35436}:5432"
     volumes:
       - judge_postgres_data:/var/lib/postgresql/data
       - ./migrations/forward:/docker-entrypoint-initdb.d:ro
-    networks:
+    networks: !override
       - omnibase-infra-judge-network
     healthcheck:
       !!merge <<: *healthcheck-defaults
@@ -178,12 +189,12 @@ services:
       - --default-log-level=warn
       - --set
       - topic_partitions_per_shard=7000
-    ports:
+    ports: !override
       - *judge_redpanda_kafka_port_publish
       - *judge_redpanda_admin_port_publish
     volumes:
       - judge_redpanda_data:/var/lib/redpanda/data
-    networks:
+    networks: !override
       - omnibase-infra-judge-network
     healthcheck:
       !!merge <<: *healthcheck-defaults
@@ -204,7 +215,7 @@ services:
     depends_on:
       redpanda:
         condition: service_healthy
-    networks:
+    networks: !override
       - omnibase-infra-judge-network
     restart: "no"
   valkey:
@@ -215,11 +226,11 @@ services:
       sh -c 'valkey-server --appendonly yes --maxmemory 256mb --maxmemory-policy allkeys-lru --requirepass "$$VALKEY_PASSWORD"'
     environment:
       VALKEY_PASSWORD: ${VALKEY_PASSWORD:?VALKEY_PASSWORD required}
-    ports:
+    ports: !override
       - "${JUDGE_VALKEY_EXTERNAL_PORT:-56379}:6379"
     volumes:
       - judge_valkey_data:/data
-    networks:
+    networks: !override
       - omnibase-infra-judge-network
     healthcheck:
       !!merge <<: *healthcheck-defaults
@@ -245,7 +256,7 @@ services:
       - ../scripts/run-forward-migrations.sh:/run-forward-migrations.sh:ro
       - ../docker/migrations/forward:/migrations/forward:ro
     entrypoint: ["sh", "/run-forward-migrations.sh"]
-    networks:
+    networks: !override
       - omnibase-infra-judge-network
     restart: "no"
     logging: *logging-defaults
@@ -269,7 +280,7 @@ services:
     entrypoint: ["sh", "-c", "while true; do sleep 3600; done"]
     volumes:
       - ../scripts/check_migrations_complete.sh:/check_migrations_complete.sh:ro
-    networks:
+    networks: !override
       - omnibase-infra-judge-network
     healthcheck:
       test: ["CMD-SHELL", "sh /check_migrations_complete.sh"]
@@ -296,7 +307,7 @@ services:
       - ../scripts/run-intelligence-migrations.sh:/run-intelligence-migrations.sh:ro
       - ../docker/migrations/intelligence:/migrations/intelligence:ro
     entrypoint: ["sh", "/run-intelligence-migrations.sh"]
-    networks:
+    networks: !override
       - omnibase-infra-judge-network
     restart: "no"
     logging: *logging-defaults
@@ -327,7 +338,7 @@ services:
       ONEX_GROUP_ID: onex-judge-runtime-main
       KAFKA_INSTANCE_ID: judge-main
       OMNIINTELLIGENCE_PUBLISH_INTROSPECTION: ${JUDGE_RUNTIME_MAIN_PUBLISH_INTROSPECTION:?runtime policy contract must set JUDGE_RUNTIME_MAIN_PUBLISH_INTROSPECTION}
-    ports:
+    ports: !override
       - "${JUDGE_RUNTIME_MAIN_PORT:?runtime policy contract must set JUDGE_RUNTIME_MAIN_PORT}:8085"
     stop_grace_period: 90s
     volumes:
@@ -371,7 +382,7 @@ services:
       ONEX_GROUP_ID: onex-judge-runtime-effects
       KAFKA_INSTANCE_ID: judge-effects
       OMNIBASE_INFRA_SAVINGS_KAFKA_BOOTSTRAP_SERVERS: "redpanda:9092"
-    ports:
+    ports: !override
       - "${JUDGE_RUNTIME_EFFECTS_PORT:?runtime policy contract must set JUDGE_RUNTIME_EFFECTS_PORT}:8085"
     stop_grace_period: 90s
     volumes:
@@ -406,7 +417,7 @@ services:
       RUNTIME_PROFILE: projection-api
       OTEL_SERVICE_NAME: omnimarket-judge-projection-api
       BIFROST_CONTRACT_PATH: ""
-    ports:
+    ports: !override
       - "${JUDGE_PROJECTION_API_PORT:-43002}:3002"
     volumes:
       - ../contracts:/app/contracts:ro
@@ -421,6 +432,19 @@ services:
       - "com.omninode.lane=judge"
       - "com.omninode.ticket=OMN-12924"
       - "com.omninode.service=projection-api"
+  # OMN-13772: the base infra compose defines keycloak and infisical with NO
+  # compose profile, so the layered deploy render (`-f docker-compose.infra.yml
+  # -f docker-compose.judge.yml --profile judge`, see deploy-runtime.sh
+  # resolve_compose_file_args) activates them attached to the DEV network with
+  # dev container names — the OMN-13581 cross-lane displacement class. The judge
+  # lane runs neither (lane manifest + EXPECTED_RENDERED_SERVICES agree), so
+  # force them behind a never-enabled profile, mirroring the
+  # docker-compose.stability-test.yml disabled-stub pattern. Inactive-profile
+  # stubs are dropped from a standalone render, so this is a no-op standalone.
+  keycloak:
+    profiles: !override ["judge-disabled"]
+  infisical:
+    profiles: !override ["judge-disabled"]
 networks:
   omnibase-infra-judge-network:
     name: omnibase-infra-judge-network

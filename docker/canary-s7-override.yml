@@ -1,0 +1,57 @@
+# docker/canary-s7-override.yml
+#
+# OMN-15046 (epic OMN-14717, S6/S7/S9): committed form of the S7 delegation
+# canary compose override.
+#
+# WHY THIS FILE EXISTS
+#
+# S7 (OMN-14770) flipped ONEX_CORE_RUNTIME_TOPICS on the `.201` stability-test
+# lane on 2026-07-18 by applying this exact override through the compose `-f`
+# chain ("FLIP: ... (main only, via canary-s7-override.yml)" per
+# docs/evidence/2026-07-18-s7-delegation-canary/00_SUMMARY.txt) and proved the
+# routing-reducer dispatch phantom (OMN-14755) dead. The override file itself
+# was never committed to git — it existed only as prose inside evidence and
+# handoff docs. A later lane rebuild silently dropped it (no override file on
+# disk, no flag, no record of removal), which produced an orphaned
+# `onex.core-runtime.delegation` consumer group that triggered a false
+# "delegation is dead" investigation (OMN-14843) a week later. See OMN-15040
+# (residue check) and OMN-15046 (general defect: ad-hoc lane overrides are
+# never committed and get silently lost on rebuild).
+#
+# This file is committed so a re-flip of the SAME proven canary is a
+# `git checkout` + compose `-f` addition, not a reconstruction from prose.
+#
+# CURRENT LIVE STATE (verified 2026-07-24, do not assume otherwise without
+# re-checking): NOT applied. `onex.core-runtime.delegation` is absent from
+# `rpk group list` on the stability-test lane. Applying this file requires a
+# deliberate operator-approved redeploy — it is not wired into
+# scripts/deploy-runtime.sh and does not apply itself.
+#
+# USAGE (stability-test lane ONLY — never prod, never judge):
+#   docker compose -p omnibase-infra-stability-test \
+#     -f docker/docker-compose.infra.yml \
+#     -f docker/docker-compose.stability-test.yml \
+#     -f docker/canary-s7-override.yml \
+#     --profile runtime up -d --no-deps --force-recreate omninode-runtime
+#
+# Rollback is the same one lever documented in the S7 runbook: drop the `-f
+# docker/canary-s7-override.yml` argument and recreate, or explicitly set
+# ONEX_CORE_RUNTIME_TOPICS= (empty) for the omninode-runtime service.
+#
+# Runbook: docs/runbooks/2026-07-18-s7-delegation-canary-runbook.md
+# Evidence: docs/evidence/2026-07-18-s7-delegation-canary/00_SUMMARY.txt
+# Tickets: OMN-14770 (S7 canary, proven) | OMN-15045 (S9, needs the FULL
+#   topic set flipped and proven, not just this one canary topic) | OMN-15046
+#   (this commit; general uncommitted-override defect)
+name: omnibase-infra-stability-test
+services:
+  omninode-runtime:
+    environment:
+      # R-4 (OMN-14770 precondition P0): the core-runtime consumer group's
+      # auto_offset_reset MUST be "latest" for this canary — confirmed at
+      # KafkaTransport(... auto_offset_reset="latest") in kernel_glue.py.
+      # "earliest" would replay a stale queued command and re-fire an LLM
+      # call. This override does not set that value directly (it is a
+      # compile-time default in kernel_glue.py, not an env var); re-confirm
+      # it in the running image before trusting a re-flip, per the runbook.
+      ONEX_CORE_RUNTIME_TOPICS: onex.cmd.omnibase-infra.delegation-routing-request.v1

@@ -1,0 +1,32 @@
+{
+  "base_ref": "b86c3a1e5df346929b3c20ebbc501ce1587a9a94",
+  "canonical_handler_module": "omnibase_infra.nodes.node_checkpoint_validate_compute.handlers.handler_checkpoint_validate",
+  "legacy_handler_module": "omnibase_infra.nodes.node_checkpoint_validate_compute.handlers.handler_checkpoint_validate",
+  "node_id": "omnibase_infra.nodes.node_checkpoint_validate_compute",
+  "parity": {
+    "selected_input_hashes": [
+      "sha256:b99816f92facec9dfd5386973cb13fb6a2a7e5ca12cf89ada3bebdd987d1d1ef",
+      "sha256:c59556b0e8b87671c5b9a361f51697ab491c153debd5421234cf6b7e17deb2f0"
+    ],
+    "status": "pass",
+    "test_ids": [
+      "tests/unit/nodes/test_node_checkpoint_validate_compute/test_checkpoint_validate_dispatch_entrypoint_omn14820.py::TestCanonicalDefBShape::test_handle_is_canonical_def_b_typed_entrypoint",
+      "tests/unit/nodes/test_node_checkpoint_validate_compute/test_checkpoint_validate_dispatch_entrypoint_omn14820.py::TestCanonicalDefBShape::test_handle_is_not_envelope_shaped",
+      "tests/unit/nodes/test_node_checkpoint_validate_compute/test_checkpoint_validate_dispatch_entrypoint_omn14820.py::TestCanonicalDefBShape::test_handler_core_has_no_event_envelope_reference",
+      "tests/unit/nodes/test_node_checkpoint_validate_compute/test_checkpoint_validate_dispatch_entrypoint_omn14820.py::TestDispatchEquivalence::test_defb_handle_output_equals_pure_validate[C1_implement_clean]",
+      "tests/unit/nodes/test_node_checkpoint_validate_compute/test_checkpoint_validate_dispatch_entrypoint_omn14820.py::TestDispatchEquivalence::test_defb_handle_output_equals_legacy_execute[C1_implement_clean]",
+      "tests/unit/nodes/test_node_checkpoint_validate_compute/test_checkpoint_validate_dispatch_entrypoint_omn14820.py::TestDispatchEquivalence::test_defb_handle_output_equals_pure_validate[C2_schema_warning]",
+      "tests/unit/nodes/test_node_checkpoint_validate_compute/test_checkpoint_validate_dispatch_entrypoint_omn14820.py::TestDispatchEquivalence::test_defb_handle_output_equals_legacy_execute[C2_schema_warning]",
+      "tests/unit/nodes/test_node_checkpoint_validate_compute/test_checkpoint_validate_dispatch_entrypoint_omn14820.py::TestDispatchEquivalence::test_defb_handle_output_equals_pure_validate[C3_multi_repo_paths]",
+      "tests/unit/nodes/test_node_checkpoint_validate_compute/test_checkpoint_validate_dispatch_entrypoint_omn14820.py::TestDispatchEquivalence::test_defb_handle_output_equals_legacy_execute[C3_multi_repo_paths]",
+      "tests/unit/nodes/test_node_checkpoint_validate_compute/test_checkpoint_validate_dispatch_entrypoint_omn14820.py::TestDispatchEquivalence::test_defb_handle_output_equals_pure_validate[C4_local_review_phase]",
+      "tests/unit/nodes/test_node_checkpoint_validate_compute/test_checkpoint_validate_dispatch_entrypoint_omn14820.py::TestDispatchEquivalence::test_defb_handle_output_equals_legacy_execute[C4_local_review_phase]",
+      "tests/unit/nodes/test_node_checkpoint_validate_compute/test_checkpoint_validate_dispatch_entrypoint_omn14820.py::TestDispatchEquivalence::test_defb_handle_output_equals_pure_validate[C5_future_timestamp]",
+      "tests/unit/nodes/test_node_checkpoint_validate_compute/test_checkpoint_validate_dispatch_entrypoint_omn14820.py::TestDispatchEquivalence::test_defb_handle_output_equals_legacy_execute[C5_future_timestamp]"
+    ]
+  },
+  "preserved_symbols": [
+    "HandlerCheckpointValidate.validate"
+  ],
+  "receipt_schema": "handflip_proof.v1"
+}

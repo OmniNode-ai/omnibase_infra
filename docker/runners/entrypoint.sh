@@ -65,13 +65,67 @@ fi
 : "${RUNNER_LABELS:?RUNNER_LABELS must be set}"
 : "${GITHUB_ORG_URL:?GITHUB_ORG_URL must be set}"
 
-RUNNER_GROUP="${RUNNER_GROUP:-omnibase-ci}"
+# OMN-14900: no-colon default -- an EXPLICITLY EMPTY RUNNER_GROUP is the
+# opt-out signal for repository-scoped registration (config.sh hard-fails on
+# --runnergroup at repo scope, which would brick re-registration after a
+# container recreate). Unset still defaults to the org fleet group.
+RUNNER_GROUP="${RUNNER_GROUP-omnibase-ci}"
 RUNNER_WORK_DIR="${RUNNER_WORK_DIR:-_work}"
 
 MAX_RETRIES=3
 BACKOFF_SECONDS=(20 40 80)
 CRED_CACHE_DIR="/home/runner/.runner-creds"
-LOG_FILE="/tmp/runner-listener.log"
+LOG_FILE="${LOG_FILE:-/tmp/runner-listener.log}"
+
+# ---------------------------------------------------------------------------
+# Listener watchdog (OMN-13915)
+# ---------------------------------------------------------------------------
+# Incident: Runner.Listener died inside 37/48 containers while the run.sh
+# wrapper tree stayed alive, so the entrypoint never saw an exit code and the
+# container sat "Up (healthy)" for four days. The watchdog closes that gap:
+# while run.sh is running, assert a bin/Runner.Listener process exists. After
+# LISTENER_SUPERVISE_MISSES consecutive misses (the grace window covers runner
+# self-update, which briefly restarts the listener), kill the wrapper tree so
+# the main loop restarts the runner with the cached in-place credentials.
+# Bounded by LISTENER_RESTART_MAX to surface a genuinely crash-looping
+# listener as a container exit (compose restart policy + runner-monitor alert)
+# instead of hiding it behind unbounded silent restarts.
+LISTENER_SUPERVISE_INTERVAL="${LISTENER_SUPERVISE_INTERVAL:-60}"
+LISTENER_SUPERVISE_MISSES="${LISTENER_SUPERVISE_MISSES:-5}"
+LISTENER_RESTART_MAX="${LISTENER_RESTART_MAX:-50}"
+# LISTENER_PGREP_PATTERN is derived from RUNNER_HOME below (after RUNNER_HOME
+# is resolved) so it matches THIS runner home's listener binary only.
+
+# ---------------------------------------------------------------------------
+# Hung-listener heartbeat watchdog (OMN-14564)
+# ---------------------------------------------------------------------------
+# Incident (2026-07-16..23): 11/64 runners went GitHub-offline for ~6 days
+# with the Runner.Listener process STILL ALIVE — deadlocked inside the
+# AAD/OAuth token-refresh HTTP call while acknowledging a broker job
+# assignment (terminal _diag line: "AAD Correlation ID for this token
+# request: Unknown"). A hung listener passes the OMN-13915 process-existence
+# watchdog forever, never exits (so run.sh never respawns it), and only the
+# Docker healthcheck's _diag heartbeat layer flagged it — with nothing acting
+# on the signal. This watchdog turns that same detection into remediation:
+# when the listener process exists but the newest _diag *.log is older than
+# LISTENER_HEARTBEAT_MAX_AGE_SECONDS (same find-mmin condition as
+# healthcheck.sh layer 2) for LISTENER_HEARTBEAT_MISSES consecutive supervise
+# ticks, kill the listener explicitly and recycle the wrapper tree. The
+# recycle NEVER fires while a Runner.Worker is executing a job.
+#
+# The KILL threshold is deliberately DECOUPLED from the healthcheck's ALERT
+# threshold (RUNNER_HEALTH_MAX_DIAG_AGE_SECONDS, 900s). Live readback
+# 2026-07-23T05:25-06:02Z: a fleet-wide broker-quiet window silenced _diag on
+# 53/64 listeners for 35-50 min while GitHub kept every one of them online
+# and docker-"unhealthy" runners were actively EXECUTING jobs (runners 4 and
+# 40 busy while heartbeat-stale); runner-2 and runner-45 both resumed on
+# their own after ~37 min blocked in the same token-refresh path that hangs
+# the true zombies forever. Killing at 900s would have mass-recycled ~50
+# healthy-but-quiet listeners mid-window. 3600s clears the observed benign
+# ceiling (~50 min) with margin while still recovering a true AAD-deadlock
+# zombie in ~1h instead of the 6 days the 2026-07-16..23 incident took.
+LISTENER_HEARTBEAT_MAX_AGE_SECONDS="${LISTENER_HEARTBEAT_MAX_AGE_SECONDS:-3600}"
+LISTENER_HEARTBEAT_MISSES="${LISTENER_HEARTBEAT_MISSES:-3}"
 
 # ---------------------------------------------------------------------------
 # Credential cache helpers
@@ -178,17 +232,26 @@ _as_runner() {
 
 _register() {
     echo "[entrypoint] Registering runner: ${RUNNER_NAME} @ ${GITHUB_ORG_URL}"
-    echo "[entrypoint] Labels: ${RUNNER_LABELS} | Group: ${RUNNER_GROUP}"
+    echo "[entrypoint] Labels: ${RUNNER_LABELS} | Group: ${RUNNER_GROUP:-<none: repo-scoped>}"
 
-    _as_runner "${RUNNER_HOME}/config.sh" \
-        --url "${GITHUB_ORG_URL}" \
-        --token "${RUNNER_TOKEN}" \
-        --name "${RUNNER_NAME}" \
-        --labels "${RUNNER_LABELS}" \
-        --runnergroup "${RUNNER_GROUP}" \
-        --work "${RUNNER_WORK_DIR}" \
-        --unattended \
+    local config_args=(
+        --url "${GITHUB_ORG_URL}"
+        --token "${RUNNER_TOKEN}"
+        --name "${RUNNER_NAME}"
+        --labels "${RUNNER_LABELS}"
+        --work "${RUNNER_WORK_DIR}"
+        --unattended
+        --disableupdate
         --replace
+    )
+    # OMN-14900: --runnergroup only when a group is actually set. Repo-scoped
+    # registration (GITHUB_ORG_URL pointing at a repository, as the deploy
+    # runner does) rejects --runnergroup outright.
+    if [[ -n "${RUNNER_GROUP}" ]]; then
+        config_args+=(--runnergroup "${RUNNER_GROUP}")
+    fi
+
+    _as_runner "${RUNNER_HOME}/config.sh" "${config_args[@]}"
 }
 
 _deregister() {
@@ -206,6 +269,52 @@ _deregister() {
 
 RUNNER_HOME="${RUNNER_HOME:-/home/runner/actions-runner}"
 cd "${RUNNER_HOME}"
+
+shutdown_requested=0
+_request_shutdown() {
+    shutdown_requested=1
+    echo "[entrypoint] Shutdown requested; runner listener will not be relaunched."
+}
+trap _request_shutdown TERM INT
+
+# Watchdog pattern (OMN-13915): match THIS runner home's listener binary path.
+# Dots escaped for pgrep's ERE matching.
+LISTENER_PGREP_PATTERN="${LISTENER_PGREP_PATTERN:-${RUNNER_HOME//./\\.}/bin/Runner\.Listener}"
+# Worker pattern (OMN-14564): a Runner.Worker process means a job is executing
+# — the heartbeat watchdog must NEVER recycle mid-job.
+WORKER_PGREP_PATTERN="${WORKER_PGREP_PATTERN:-${RUNNER_HOME//./\\.}/bin/Runner\.Worker}"
+
+# OMN-14564: same find-mmin condition as healthcheck.sh layer 2 — returns 0
+# (stale) when no _diag *.log was modified within
+# LISTENER_HEARTBEAT_MAX_AGE_SECONDS (the kill threshold; the healthcheck
+# alerts earlier at RUNNER_HEALTH_MAX_DIAG_AGE_SECONDS — see the decoupling
+# rationale above). A missing _diag directory under a "live" listener is the
+# same divergence and also reads as stale; the LISTENER_HEARTBEAT_MISSES
+# grace window covers first-registration startup before the listener writes
+# its first log.
+_listener_heartbeat_stale() {
+    local diag_dir="${RUNNER_HOME}/_diag"
+    local max_age_minutes=$(( (LISTENER_HEARTBEAT_MAX_AGE_SECONDS + 59) / 60 ))
+    local fresh_file
+    fresh_file=$(find "${diag_dir}" -type f -name '*.log' -mmin "-${max_age_minutes}" -print 2>/dev/null | head -n 1)
+    [[ -z "${fresh_file}" ]]
+}
+
+# Kill the wrapper tree AND the listener binary itself (TERM, grace, KILL).
+# The explicit listener pkill is load-bearing for OMN-14564: a listener
+# deadlocked in its token-refresh HTTP call ignores the wrapper-tree TERM,
+# and a surviving hung listener would collide with the respawned listener's
+# broker session.
+_recycle_runner_tree() {
+    local pid="${1}"
+    kill -TERM "${pid}" 2>/dev/null || true
+    pkill -TERM -f "run-helper" 2>/dev/null || true
+    pkill -TERM -f "${LISTENER_PGREP_PATTERN}" 2>/dev/null || true
+    sleep 10
+    kill -KILL "${pid}" 2>/dev/null || true
+    pkill -KILL -f "run-helper" 2>/dev/null || true
+    pkill -KILL -f "${LISTENER_PGREP_PATTERN}" 2>/dev/null || true
+}
 
 # Check for credentials in priority order:
 # 1. In-place (container restart — files already in RUNNER_HOME)
@@ -229,14 +338,78 @@ else
 fi
 
 attempt=0
+listener_restarts=0
 while true; do
     echo "[entrypoint] Starting runner (attempt $((attempt + 1)))"
     set +e
-    _as_runner "${RUNNER_HOME}/run.sh" 2>&1 | tee "${LOG_FILE}"
-    exit_code=${PIPESTATUS[0]}
+    _as_runner "${RUNNER_HOME}/run.sh" > >(tee "${LOG_FILE}") 2>&1 &
+    runner_pid=$!
+
+    # Watchdog: run.sh alive but no Runner.Listener process = the OMN-13915
+    # zombie mode. Recycle the wrapper tree so this loop restarts the runner.
+    # Listener process alive but _diag heartbeat stale (and no job running)
+    # = the OMN-14564 hung-listener mode; same recycle, plus an explicit
+    # listener kill because a hung listener never exits on its own.
+    supervised_kill=0
+    misses=0
+    hb_misses=0
+    while kill -0 "${runner_pid}" 2>/dev/null; do
+        sleep "${LISTENER_SUPERVISE_INTERVAL}"
+        kill -0 "${runner_pid}" 2>/dev/null || break
+        if pgrep -f "${LISTENER_PGREP_PATTERN}" >/dev/null 2>&1; then
+            misses=0
+            # OMN-14564: process existence is NOT liveness. A worker process
+            # means a job is executing — never recycle mid-job, whatever the
+            # heartbeat says (the Docker healthcheck still surfaces it).
+            if pgrep -f "${WORKER_PGREP_PATTERN}" >/dev/null 2>&1; then
+                hb_misses=0
+                continue
+            fi
+            if _listener_heartbeat_stale; then
+                hb_misses=$((hb_misses + 1))
+                echo "[entrypoint] WATCHDOG: listener process alive but no _diag heartbeat within ${LISTENER_HEARTBEAT_MAX_AGE_SECONDS}s (miss ${hb_misses}/${LISTENER_HEARTBEAT_MISSES}) — OMN-14564 hung-listener mode"
+                if [[ ${hb_misses} -ge ${LISTENER_HEARTBEAT_MISSES} ]]; then
+                    echo "[entrypoint] WATCHDOG: listener hung (alive but silent) — killing listener and recycling runner wrapper tree (OMN-14564)"
+                    supervised_kill=1
+                    _recycle_runner_tree "${runner_pid}"
+                    break
+                fi
+            else
+                hb_misses=0
+            fi
+            continue
+        fi
+        misses=$((misses + 1))
+        echo "[entrypoint] WATCHDOG: run.sh alive (pid ${runner_pid}) but no Runner.Listener process (miss ${misses}/${LISTENER_SUPERVISE_MISSES})"
+        if [[ ${misses} -ge ${LISTENER_SUPERVISE_MISSES} ]]; then
+            echo "[entrypoint] WATCHDOG: listener dead-in-container — recycling runner wrapper tree (OMN-13915)"
+            supervised_kill=1
+            _recycle_runner_tree "${runner_pid}"
+            break
+        fi
+    done
+
+    wait "${runner_pid}"
+    exit_code=$?
     set -e
 
     log_content=$(cat "${LOG_FILE}" 2>/dev/null || echo "")
+
+    if [[ ${shutdown_requested} -eq 1 ]]; then
+        echo "[entrypoint] Runner exited during shutdown; stopping entrypoint loop."
+        exit 0
+    fi
+
+    if [[ ${supervised_kill} -eq 1 ]]; then
+        listener_restarts=$((listener_restarts + 1))
+        if [[ ${listener_restarts} -gt ${LISTENER_RESTART_MAX} ]]; then
+            echo "[entrypoint] WATCHDOG: listener died ${listener_restarts} times (> ${LISTENER_RESTART_MAX}). Exiting so the container restart policy + runner-monitor surface it."
+            exit 1
+        fi
+        echo "[entrypoint] WATCHDOG: restarting runner after listener death (restart ${listener_restarts}/${LISTENER_RESTART_MAX})"
+        sleep 10
+        continue
+    fi
 
     if [[ ${exit_code} -eq 0 ]]; then
         # GitHub runner exits 0 even when registration is server-side deleted
@@ -254,8 +427,10 @@ while true; do
             fi
             # Fall through to the registration retry loop below
         else
-            echo "[entrypoint] Runner exited cleanly (exit 0). Exiting."
-            break
+            echo "[entrypoint] Runner exited cleanly (exit 0). Relaunching listener after short backoff."
+            sleep 5
+            attempt=0
+            continue
         fi
     fi
 

@@ -1,0 +1,22 @@
+{
+  "branch_coverage_pct": 100.0,
+  "candidate_count": 6,
+  "coverage_target": 80.0,
+  "handler_module": "omnibase_infra.nodes.node_coding_agent_workspace_compute.handlers.handler_workspace_validate",
+  "handler_module_sha256": "sha256:417c9d266c53f2615a3e5d2d96ffd1fefb870134f61148072026b9a3caee82e5",
+  "meets_target": true,
+  "node_id": "omnibase_infra.nodes.node_coding_agent_workspace_compute",
+  "receipt_schema": "adequacy_receipt.v1",
+  "recorded_at": "2026-07-14T20:57:41.909169+00:00",
+  "recorder_schema": "adequacy_receipt.v1",
+  "selected_count": 5,
+  "selected_input_hashes": [
+    "sha256:271f5a9ebf040a1aeea6e3347bba4c570e3a4505b6ca3c2aae6de07dda35acf4",
+    "sha256:9d3daf7b76fe28c5ef695d5717d98821617af259906d0225819b4881ad4a3fc2",
+    "sha256:ea762702dd00fbf4ffaa8ad2ce7f1353eee00a00d79a8d0d1fbd7efe903a4245",
+    "sha256:bd4043ad4f06a2d754ce13336c17239ccc7367a2ef88354b12b068fe592d2ff0",
+    "sha256:e6b3cd0d2ef1ce181da7605e97b203d81377dd7b560380af6ec9f784cfaa89e4"
+  ],
+  "uncovered_waiver": null,
+  "volatile_mask": []
+}
