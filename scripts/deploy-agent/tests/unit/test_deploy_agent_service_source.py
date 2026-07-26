@@ -60,3 +60,40 @@ def test_override_drop_in_disables_watchdog() -> None:
     override = _DEPLOY_DIR / "deploy-agent.service.d" / "override.conf"
     text = override.read_text()
     assert "WatchdogSec=0" in text
+
+
+def test_override_drop_in_is_wired_to_prod_broker() -> None:
+    """OMN-15181 Finding 3: the single live deploy-agent must consume prod.
+
+    Live /proc/<pid>/environ readback (2026-07-26) showed the only running
+    deploy-agent process wired to KAFKA_BOOTSTRAP_SERVERS=127.0.0.1:39092 /
+    KAFKA_ENVIRONMENT=stability-test -- zero consumer presence on the prod
+    broker, so a real gated prod redeploy command would sit unconsumed even
+    after the network (Finding 1) and resolver (Finding 2) gaps are fixed.
+    This locks the repoint to the prod broker's host-mapped external
+    listener (docker/docker-compose.prod.yml,
+    ${PROD_REDPANDA_EXTERNAL_PORT:-49092}:19092, advertised externally as
+    192.168.86.201:49092 -- reachable from omninode-pc itself) so a future
+    edit can't silently drift the only live instance back to stability-test
+    (or leave it there) without failing this test.
+    """
+    override = _DEPLOY_DIR / "deploy-agent.service.d" / "override.conf"
+    text = override.read_text()
+
+    exec_start_lines = [
+        line for line in text.splitlines() if line.startswith("ExecStart=/usr/bin/env")
+    ]
+    assert exec_start_lines, "override.conf must declare an ExecStart override"
+    exec_start = exec_start_lines[0]
+
+    assert "KAFKA_BOOTSTRAP_SERVERS=192.168.86.201:49092" in exec_start
+    assert "KAFKA_ENVIRONMENT=prod" in exec_start
+    assert "127.0.0.1:39092" not in exec_start
+    assert "stability-test" not in exec_start
+
+    env_lines = [
+        line.strip()
+        for line in text.splitlines()
+        if line.strip().startswith("Environment=KAFKA_ENVIRONMENT=")
+    ]
+    assert env_lines == ["Environment=KAFKA_ENVIRONMENT=prod"]
