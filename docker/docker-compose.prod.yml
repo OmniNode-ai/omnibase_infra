@@ -106,6 +106,21 @@ services:
       - "com.omninode.layer=infrastructure"
   omninode-runtime:
     container_name: omninode-prod-runtime
+    # OMN-15181 round 3 (Finding 9): this service only carried `build:` (via
+    # the shared x-runtime-base anchor) with no `image:` key, so compose
+    # auto-derived the tag `omnibase-infra-prod-omninode-runtime:latest` at
+    # `up` time -- a name with no relationship to any digest pinned by a
+    # deploy-agent prod dispatch. `_pull_pinned_image()` only proves the
+    # pinned digest exists SOMEWHERE in the local docker store; nothing
+    # repointed this service's resolved tag at it, so `up -d --force-recreate
+    # --pull never` always recreated from the stale auto-derived tag
+    # regardless of what was pinned. The env var below lets the deploy-agent
+    # repoint this service at an already-locally-present tag (e.g. the
+    # stability-proven build) declaratively, with zero docker-tag/retag
+    # commands. Default resolves to the exact pre-existing auto-derived name
+    # -- a no-op for every caller that does not set it (dev/stability-test
+    # builds are untouched; only prod dispatches with a pinned digest set it).
+    image: ${PROD_OMNINODE_RUNTIME_IMAGE:-omnibase-infra-prod-omninode-runtime:latest}
     restart: unless-stopped
     depends_on:
       migration-gate:
@@ -143,6 +158,9 @@ services:
       - "com.omninode.runtime.id=prod-main"
   runtime-effects:
     container_name: omninode-prod-runtime-effects
+    # OMN-15181 round 3 (Finding 9): same gap as omninode-runtime above --
+    # see that comment for the full rationale. Default is a no-op.
+    image: ${PROD_RUNTIME_EFFECTS_IMAGE:-omnibase-infra-prod-runtime-effects:latest}
     restart: unless-stopped
     depends_on:
       migration-gate:
