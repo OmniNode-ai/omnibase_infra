@@ -62,9 +62,11 @@ class TestLaneConfig:
         # overlay must be layered on top of the base infra compose file
         assert cfg.compose_files[0] == COMPOSE_FILE
         assert any("docker-compose.stability-test.yml" in f for f in cfg.compose_files)
+        # OMN-15181: must match the container_name: override in
+        # docker-compose.stability-test.yml, not the dev-lane bare name.
         assert cfg.runtime_health_targets == (
-            ("omninode-runtime", 18085),
-            ("runtime-effects", 18086),
+            ("omninode-stability-test-runtime", 18085),
+            ("omninode-stability-test-runtime-effects", 18086),
         )
 
     def test_prod_lane_config(self) -> None:
@@ -73,9 +75,12 @@ class TestLaneConfig:
         assert cfg.postgres_container == "omnibase-infra-prod-postgres"
         assert cfg.compose_files[0] == COMPOSE_FILE
         assert any("docker-compose.prod.yml" in f for f in cfg.compose_files)
+        # OMN-15181: must match the container_name: override in
+        # docker-compose.prod.yml, not the dev-lane bare name — the live
+        # defect was docker-inspecting a name that exists on no real lane.
         assert cfg.runtime_health_targets == (
-            ("omninode-runtime", 28085),
-            ("runtime-effects", 28086),
+            ("omninode-prod-runtime", 28085),
+            ("omninode-prod-runtime-effects", 28086),
         )
 
 

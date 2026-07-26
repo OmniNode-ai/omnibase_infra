@@ -23,7 +23,11 @@ from deploy_agent.events import (
     PhaseStatus,
     Scope,
 )
-from deploy_agent.executor import SCOPE_BUNDLES, DeployExecutor
+from deploy_agent.executor import (
+    SCOPE_BUNDLES,
+    DeployExecutor,
+    assert_prod_request_has_stability_digest,
+)
 from deploy_agent.health import create_health_app
 from deploy_agent.job_state import JobStore
 from deploy_agent.kafka_config import load_deploy_agent_kafka_config_from_env
@@ -156,6 +160,19 @@ class DeployAgent:
             self.job_store.update_phase(cid, phase, status)
 
         try:
+            # OMN-15181: boundary-level guard — a prod request may only
+            # deploy a digest already proven in stability-test. Must run
+            # before ANY deploy effect (preflight included), not just before
+            # health checks. Previously implemented
+            # (assert_prod_request_has_stability_digest) but never called
+            # from the live consume/execute path — dead code, unit-tested in
+            # isolation only.
+            if cmd.runtime_lane == EnumRuntimeLane.PROD:
+                stability_digest = self.executor.resolve_stability_ready_digest()
+                assert_prod_request_has_stability_digest(
+                    cmd, stability_ready_digest=stability_digest
+                )
+
             # Preflight
             self.executor.preflight(on_phase_update=on_phase_update)
 
