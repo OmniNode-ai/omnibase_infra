@@ -102,9 +102,13 @@ from uuid import UUID, uuid5
 import pytest
 from pydantic import BaseModel, ConfigDict
 
-from omnibase_core.models.delegation.wire.model_delegation_result import (
+from omnibase_core.models.delegation.wire.model_delegation_completed import (
     ModelDelegationCompleted,
+)
+from omnibase_core.models.delegation.wire.model_delegation_failed import (
     ModelDelegationFailed,
+)
+from omnibase_core.models.delegation.wire.model_delegation_result import (
     ModelDelegationResult,
 )
 from omnibase_core.models.dispatch.model_handler_output import ModelHandlerOutput
