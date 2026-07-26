@@ -34,7 +34,9 @@ class _FakeExecutor:
         self.calls: list[str] = []
         self._stability_ready_digest = stability_ready_digest
 
-    def resolve_stability_ready_digest(self) -> str | None:
+    def resolve_stability_ready_digest(
+        self, service: str = "omninode-runtime"
+    ) -> str | None:
         self.calls.append("resolve_stability_ready_digest")
         return self._stability_ready_digest
 

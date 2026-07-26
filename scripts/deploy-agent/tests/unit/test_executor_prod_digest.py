@@ -170,7 +170,12 @@ class TestRunningDigestVerification:
         executor = DeployExecutor()
         order: list[str] = []
 
-        def fake_verify_digest(*, lane: EnumRuntimeLane, expected_digest: str) -> None:
+        def fake_verify_digest(
+            *,
+            lane: EnumRuntimeLane,
+            expected_digest: str,
+            service: str = "omninode-runtime",
+        ) -> None:
             order.append("verify_digest")
             raise DigestMismatchError(
                 f"running digest != requested digest ({expected_digest})"

@@ -27,6 +27,7 @@ from deploy_agent.executor import (
     SCOPE_BUNDLES,
     DeployExecutor,
     assert_prod_request_has_stability_digest,
+    resolve_prod_target_service,
 )
 from deploy_agent.health import create_health_app
 from deploy_agent.job_state import JobStore
@@ -167,8 +168,20 @@ class DeployAgent:
             # (assert_prod_request_has_stability_digest) but never called
             # from the live consume/execute path — dead code, unit-tested in
             # isolation only.
+            #
+            # Round 4 (Finding 11): the guard is resolved PER-SERVICE, not
+            # per-lane — a runtime-effects request must be compared against
+            # the effects stability container, not the runtime one
+            # (resolve_prod_target_service / resolve_stability_ready_digest).
+            # Previously every prod request was compared against the RUNTIME
+            # stability digest unconditionally, wrongly rejecting a
+            # runtime-effects command carrying its own stability-proven
+            # digest.
             if cmd.runtime_lane == EnumRuntimeLane.PROD:
-                stability_digest = self.executor.resolve_stability_ready_digest()
+                target_service = resolve_prod_target_service(cmd)
+                stability_digest = self.executor.resolve_stability_ready_digest(
+                    target_service
+                )
                 assert_prod_request_has_stability_digest(
                     cmd, stability_ready_digest=stability_digest
                 )
@@ -216,6 +229,7 @@ class DeployAgent:
                     lane=cmd.runtime_lane,
                     expected_digest=cmd.image_digest,
                     on_phase_update=on_phase_update,
+                    service=resolve_prod_target_service(cmd),
                 )
             else:
                 health_checks = self.executor.verify(

@@ -58,7 +58,9 @@ class _FakeExecutorRealDeployAndVerify:
         self.calls: list[str] = []
         self._real = DeployExecutor()
 
-    def resolve_stability_ready_digest(self) -> str | None:
+    def resolve_stability_ready_digest(
+        self, service: str = "omninode-runtime"
+    ) -> str | None:
         self.calls.append("resolve_stability_ready_digest")
         return _DIGEST
 
