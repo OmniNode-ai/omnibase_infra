@@ -7,6 +7,190 @@ per-lane refresh mechanics (health-gate, rollback, receipt shape), see
 `docs/runbooks/stability-lane-refresh.md` (stability) — the dev-lane analog
 is documented inline in `scripts/runtime_build/refresh_dev_lane.sh`.
 
+**2026-07-26 update (OMN-15151):** the mechanism below is no longer
+theoretical — it went end-to-end SUCCESS on
+[run 30180376657](https://github.com/OmniNode-ai/omnibase_infra/actions/runs/30180376657)
+after a six-iteration hardening chain under parent
+OMN-14900. This
+update adds the operator-facing procedure (§ "Operational procedure"),
+the preflight catalog (§ "What the preflights catch"), the T0/T1 readback +
+rollback discipline (§ "Readback and rollback discipline"), dev-lane gotchas,
+and a hard prod pointer. Nothing below supersedes the architecture sections
+that already existed (Two-train architecture / mechanism / runner
+provisioning) — those stand unchanged.
+
+## Operational procedure: cut a stability tagged deploy
+
+This is the exact sequence proven live 2026-07-26 (run 30180376657, tag
+`lab/stability/20260725T235956Z-87ec5b3165ce`, `overall: PASS`). Run from an
+operator workstation with `gh` authenticated against `OmniNode-ai`.
+
+**Step 1 — confirm dev tip and cut the tag.**
+
+```bash
+gh api repos/OmniNode-ai/omnibase_infra/commits/dev --jq '.sha'
+# -> 87ec5b3165ce631ef4692edc6b00b3874a4d5446   (the commit you are about to tag)
+
+gh workflow run release-train-lab.yml \
+  --repo OmniNode-ai/omnibase_infra \
+  -f lane=stability -f ref=origin/dev -f execute=true
+```
+
+> **WARNING — tag content, never a parked tag.** The tag's content is
+> whatever commit `--ref` resolves to **at cut time**, not a name you can
+> reuse. `cut_release_train_tag.sh` computes `lab/<lane>/<utc>-<shortsha>` —
+> the timestamp+shortsha in the tag name is generated fresh every cut, so
+> there is no "reuse tag X" path; re-running the same command against a
+> moved `dev` produces a **new** tag object pointing at the new tip. Never
+> hand-construct or reuse a `lab/stability/*` tag string — always let the
+> cut step mint it, and always confirm the `dev` SHA immediately before
+> cutting (a stale local clone silently tags an old tree — see
+> `reference_stale_canonical_clone_phantom_behavior`).
+
+**Step 2 — watch the run.**
+
+```bash
+gh run list --repo OmniNode-ai/omnibase_infra --workflow release-train-lab.yml --limit 1
+gh run watch <run-id> --repo OmniNode-ai/omnibase_infra --exit-status
+```
+
+Expected job sequence (both jobs on the `omnibase-deploy` runner):
+
+```
+✓ Cut + push release-train tag   (~15s: checkout, cut+push tag)
+✓ Deploy triggering tag to its lane
+    ✓ Determine lane from tag
+    ✓ Refresh stability lane      (~9 min: preflights, build, restart, health-gate)
+    - Refresh dev lane            (skipped — lane=stability)
+    ✓ Publish receipt to job summary
+    ✓ Fail the job if the refresh did not succeed
+```
+
+Terminal proof line in the job log (`Refresh stability lane` step):
+
+```
+[refresh-stability-lane] === SUCCESS: health-gate PASS, ancestry OK ===
+[refresh-stability-lane] === Receipt written: /home/runner/.omnibase/state/stability_lane_refresh/history/<ts>-<sha>.json ===
+[refresh-stability-lane] result: SUCCESS
+```
+
+If the run instead fails inside `Refresh stability lane`, do not re-run
+blind — read the failing preflight name from the log first and match it
+against the table below; most failures as of 2026-07-26 are one of these
+six known classes, not a new defect.
+
+## What the preflights catch
+
+Six preflight/environment classes were closed across the OMN-14900 chain
+before run 30180376657 went green. Each is now a **hard gate inside
+`deploy-runtime.sh` / `refresh_stability_lane.sh`** — a regression in any of
+them fails the deploy loudly at the named step, before any container
+mutation, rather than producing a silently-wrong build.
+
+| # | Preflight | What it catches | Failure signature (pre-fix) | Fix PR |
+|---|---|---|---|---|
+| 1 | Sibling clone manifest | A sibling repo (e.g. `omnibase_spi`) missing from the runner's private clone tree — `ensure_runner_clones.sh` only knew about the 5 `TAG_REPOS`, not every transitive dependency | `ModuleNotFoundError` / sibling-lock-pin preflight abort citing an unresolvable path | `#2450` (OMN-15137) |
+| 2 | Interpreter resolution (lock-pin check) | `stage_workspace.sh` invoking `check_sibling_lock_pins.py` with an interpreter lacking `pydantic` | `ModuleNotFoundError: No module named 'pydantic'` mid-preflight | `#2446` (OMN-15131) |
+| 2b | Interpreter resolution (contracts path) | `deploy-runtime.sh` step 3b resolving `omnibase_core` runtime contracts from the wrong (installed vs. workspace) path | `[deploy] ERROR: Could not locate omnibase_core runtime contracts` — abort before any build | `#2444` (OMN-15122) |
+| 3 | `buildx` plugin | Runner image missing the Docker BuildKit `buildx` plugin needed for `--mount` cache builds | Build step fails with an unrecognized `docker buildx` invocation / cache-mount syntax error | `#2452` (OMN-15141) |
+| 4 | `rsync` | `deploy-runtime.sh`'s "Syncing runtime build context..." step (`rsync -a --delete scripts/runtime_build/ -> deployed`) needs `rsync` in the runner image | `rsync: command not found` | `#2434` (OMN-15103) |
+| 5 | Root-owned workspace debris | A prior run leaving root-owned `.venv`/build artifacts in the runner's Actions workspace, which the `runner-job-started.sh` cleanup hook cannot remove as uid 1001 — traced to a `docker exec ... -u root` step inside an earlier build leaving files it didn't clean up | `[runner-job-started] Resetting workspace` hangs/fails; `Set up runner` step never completes | `#2448` (OMN-15134) |
+
+> **WARNING — these are the *known* classes, not an exhaustive list.** A
+> seventh gap (`ensure_runner_clones.sh` never provisioning
+> `omnibase_spi` transitively for `omnimarket`'s own dependency) was found
+> and fixed as part of #2450/OMN-15137 in the same chain — if a *new*
+> preflight failure appears that doesn't match this table, file a ticket
+> under the OMN-14900 epic rather than hand-patching the runner
+> out-of-band (the OMN-14900 root-cause section above explains why hand
+> patches to the container are **not durable evidence** — they vanish on
+> the next `--force-recreate`).
+
+## Readback and rollback discipline
+
+Every stability refresh (whether run via the tag workflow above or the
+manual canary) captures **T0** (pre-state) before mutating anything and
+**T1** (post-state) after the health-gate, and only reports `SUCCESS` if T1
+proves forward progress. This is `refresh_stability_lane.sh` +
+`verify_stability_refresh.py` (see `docs/runbooks/stability-lane-refresh.md`
+for the full mechanism) — this section is the reading guide for the run
+30180376657 evidence specifically.
+
+**T0 (captured at the top of the `Refresh stability lane` step):**
+
+```
+[refresh-stability-lane] omninode-runtime: pre_image_id=sha256:f06b0bf7d216...
+[refresh-stability-lane] runtime-effects:  pre_image_id=sha256:40ea65b5ceaf...
+[refresh-stability-lane] runtime-worker:   pre_image_id=sha256:bac8f35eb93f...
+[refresh-stability-lane] projection-api:   pre_image_id=sha256:22a2ce853570...
+[refresh-stability-lane]   omnibase_infra prior HEAD: 49c886a56697
+```
+
+Preflight rollback anchors are tagged from these same pre-images
+immediately after capture (`<project>-<service>:latest ->
+<project>-<service>:preflight-<UTC>`) — this is the retag the OMN-14796
+gap was about; confirm the four `tagged ... -> ...preflight-<UTC>` lines
+appear in the log before trusting any rollback path for this run.
+
+**T1 (the health-gate block, written after build+restart):**
+
+```json
+{
+  "manifest_count": 292, "manifest_floor": 288, "manifest_ok": true,
+  "health_ok": true, "health_detail": "status=healthy",
+  "cluster_healthy": true,
+  "consumer_groups_stable": true,
+  "revision_readback_ok": true,
+  "overall": "PASS"
+}
+```
+
+Read these five fields in this order — each one is a necessary, not
+sufficient, condition for trusting the deploy:
+
+1. **`http://192.168.86.201:18085/health`** and **`:18086`** (effects port)
+   both healthy — the log line `[deploy] Health check passed.` confirms
+   18085; 18086 is asserted inside the same health-gate pass (not shown
+   separately in this run's log — verify with a direct probe if in doubt:
+   `curl -sf http://192.168.86.201:18086/health`).
+2. **Contract count** (`manifest_count`) — 292 ≥ floor 288. Never trust a
+   PASS if this number is at or below the floor from the *previous* known
+   run; a flat or falling contract count on a merge that should have added
+   nodes is a silent regression the floor alone won't catch.
+3. **`discovery_errors` baseline** — not surfaced as a top-level health-gate
+   field in this receipt shape; read it from the manifest endpoint directly
+   post-deploy: `curl -s http://192.168.86.201:18085/v1/introspection/manifest | jq '.discovery_errors // empty'`.
+   Treat any non-empty result as a regression even if `overall: PASS`.
+4. **Consumer groups** — every declared group in
+   `consumer_groups_stability.yaml` reads `Stable` or an expected `Empty`
+   (no active traffic on that lane's synthetic path yet); this run shows 2
+   `Stable` + 4 `Empty`, all expected for the stability lane's current
+   traffic profile.
+5. **`vcs_ref` / revision ancestry** — `revision_readback_ok: true` plus the
+   per-service `revision_match: true` entries confirm every one of the 4
+   core containers' `org.opencontainers.image.revision` label equals the
+   tagged commit (`87ec5b3165ce`), and the pre-refresh `git merge-base
+   --is-ancestor <prior> <new>` assertion (logged as `RT-1: manifest
+   assertion passed`) proves the deploy moved the lane **forward**, not
+   sideways or backward.
+
+**Rollback discipline.** If `overall` had been `FAIL`, the script rolls
+back all 4 core services to their `preflight-<UTC>` tag and re-runs the
+health-gate with `--no-require-digest-change` (the rolled-back image is
+deliberately old). The receipt records exactly one of:
+
+- `SUCCESS` — this run's outcome.
+- `FAILED_ROLLED_BACK` — refresh failed, rollback restored a healthy lane.
+  **This is the discipline to insist on in any report**: `FAILED_ROLLED_BACK`
+  with a T1 readback that equals T0 (same image IDs, same revision label) is
+  the proof the rollback actually worked, not just that the script claimed
+  it did. Diff T1's `post_image_id`/`revision_label` fields against T0's
+  `pre_image_id`/prior HEAD by hand if the receipt doesn't make the equality
+  obvious.
+- `FAILED` — rollback ALSO unhealthy. STOP AND REPORT; this is a human
+  escalation per `feedback_auto_file_tickets_on_breakage`, never a
+  retry-until-green loop.
+
 ## Two-train architecture (context)
 
 - **Train 1 (lab lanes: dev, stability)** — git-ref deploys, no PyPI
@@ -221,6 +405,56 @@ scripts/runtime_build/cut_release_train_tag.sh --lane stability --ref origin/dev
 scripts/runtime_build/refresh_stability_lane.sh --ref lab/stability/<ts>-<sha> --execute
 ```
 
+## Dev-lane refresh: known gotchas
+
+The dev lane uses `refresh_dev_lane.sh` (same tag-trigger mechanism, `lab/dev/*`
+namespace) instead of `refresh_stability_lane.sh`. It is **cold-aware** (see
+the script's own header) because the dev lane is ephemeral — it is routinely
+GC/idle-reclaimed to zero containers between uses, unlike the always-warm
+stability lane. Two gotchas are load-bearing enough to call out here rather
+than leaving them buried in script comments:
+
+> **WARNING — workspace builds ship stale `configs/*.yaml`, even when the
+> revision label is correct.** On `.201` `BUILD_SOURCE=workspace` builds, a
+> config-only change (e.g. a routing YAML) can silently NOT propagate into
+> the installed package tree even though `.py` code and the image's
+> `org.opencontainers.image.revision` label both show the new SHA — verified
+> live 2026-07-14 (OMN-14626/14625 readback): the staged source was
+> byte-identical to the branch worktree, but the *installed*
+> `routing_tiers.yaml` still had the old content. **Do not trust the
+> revision label alone for a config-only change.** `md5sum` the installed
+> config inside the container against the branch source before declaring a
+> config-only deploy proven:
+> ```bash
+> docker exec <container> md5sum /app/.venv/lib/python3.12/site-packages/omnimarket/configs/<file>.yaml
+> md5sum omnimarket/src/omnimarket/configs/<file>.yaml   # compare against this
+> ```
+> A content-parity gate exists to catch this class in CI (OMN-14631), but its
+> first implementation had a false-fail bug (OMN-14635) — treat CI green on
+> this gate as necessary, not sufficient, until you've confirmed it's been
+> re-verified live since. Full history: memory
+> `reference_workspace_build_ships_stale_config_yaml`.
+
+> **WARNING — the dev-lane health-gate can report `FAILED` on a fully
+> healthy deploy (OMN-14968, open as of 2026-07-26).** `refresh_dev_lane.sh`'s
+> health-gate expects a `runtime-worker` container that has **no container
+> in any state** on the dev lane, before or after the deploy — a
+> pre-existing lane-composition gap (the dev lane's compose overlay never
+> provisions `runtime-worker`), not a regression from your deploy. If a dev
+> refresh reports `FAILED`/exit 2 but `omninode-runtime` / `runtime-effects`
+> / `projection-api` are all healthy at the correct revision and
+> `:8085/health` is healthy, treat that as a **false FAILED** from this known
+> gap, not a real rollback trigger — verify the 3 real services directly
+> before escalating.
+
+**Cold vs. warm bring-up.** If the dev lane's core containers are entirely
+absent (fully torn down, not just stale), `refresh_dev_lane.sh` alone is not
+enough — you need the full cold bring-up procedure, which is **documented
+separately and not duplicated here**: see
+`docs/runbooks/cold-lane-full-bringup.md` for the `--profile runtime`
+requirement, the `BUILD_SOURCE=workspace` forcing, and the deps + migration
+one-shot sequencing a cold lane needs that a warm refresh does not.
+
 ## Deliberately broken health-gate (rollback proof)
 
 `--min-contracts 999999` on either refresh script forces the manifest-floor
@@ -229,17 +463,83 @@ rollback-and-reverify path without needing a genuinely bad deploy. The
 receipt records `FAILED_ROLLED_BACK` (rollback restored health) or `FAILED`
 (rollback also unhealthy — STOP AND REPORT, never masked as success).
 
-## Prod is out of scope
+## Prod: pointer only — this runbook does not cover prod promotion
 
-No file in this ticket's diff creates, wires, or implies an autonomous
-tag→prod path. `omninode-deploy-runner` has no prod-lane access beyond what
-any host process already has via `OMNI_HOME`; the prod-promotion gate is
-enforced at the `node_redeploy_orchestrator` layer, which this workflow
-never calls.
+**Nothing in this document authorizes, arms, or performs a prod mutation.**
+This is a hard pointer-only section, not a procedure to follow here.
 
-This remains true now that the runner is online. The workflow triggers only
-on `lab/dev/**` and `lab/stability/**`, a namespace disjoint from the `v*`
-tags that drive `release.yml` → PyPI publish (Train 2). Promoting any digest
-to the `.201` prod lane still requires a fresh, CODEOWNERS-approved
-`ModelProdPromotionGrant` through `node_redeploy_orchestrator`'s gate
-(CLAUDE.md Rules 2a/12) — nothing here can satisfy or bypass it.
+- No file in this ticket's diff creates, wires, or implies an autonomous
+  tag→prod path. `omninode-deploy-runner` has no prod-lane access beyond
+  what any host process already has via `OMNI_HOME`; the prod-promotion gate
+  is enforced at the `node_redeploy_orchestrator` layer, which this workflow
+  never calls.
+- This remains true now that the runner is online. The workflow triggers
+  only on `lab/dev/**` and `lab/stability/**`, a namespace disjoint from the
+  `v*` tags that drive `release.yml` → PyPI publish (Train 2).
+- Promoting any digest to the `.201` prod lane requires a **fresh**,
+  `@main`-resolved, digest-scoped `ModelProdPromotionGrant` — see CLAUDE.md
+  Rules 2a and 12 for the full gate (health-conditional waiver, standing/
+  overnight grants excluded, raw-bypass CI gate). A standing or overnight
+  autonomy grant, or a prior stability-lane SUCCESS like run 30180376657
+  above, **does not** open prod on its own — it is only ever the
+  *prerequisite artifact* a fresh grant PR cites.
+- **The correct pattern for referencing a proven stability artifact in a
+  grant is prep-only, never self-arming.** See `onex_change_control#4892`
+  — a real grant-prep PR that cites this exact run
+  (30180376657 / tag `lab/stability/20260725T235956Z-87ec5b3165ce` / digest
+  readback cross-checked against live `docker inspect` on `.201`) and is
+  explicit that it is "background-lane prep, not an active grant... becomes
+  effective only when a human operator explicitly approves and lands it on
+  `main`" with no auto-merge armed. Model any future grant PR on that
+  shape, not on a self-merging or auto-arming one.
+- **Raw docker mutation against the prod lane is forbidden, full stop** —
+  no `docker tag`/`docker commit` retag, no direct `docker compose -p
+  omnibase-infra-prod ... up --force-recreate`/`up -d`. The
+  `no-raw-prod-bypass` CI gate
+  (`.github/workflows/no-raw-prod-bypass.yml` →
+  `tests/test_no_raw_prod_bypass_policy.py`) rejects any committed recipe of
+  that shape unless the line carries a `# raw-prod-bypass-ok: <reason>`
+  annotation reserved for forensic/illustrative quotes — never for an actual
+  un-gated promotion. All real prod mutation routes through
+  `redeploy-start → prod-promotion gate → deploy-agent`.
+
+## Verification checklist
+
+You are done with a stability tagged-deploy when **all** of the following
+read back true — not when the workflow run shows green alone:
+
+- [ ] `gh run view <run-id> --repo OmniNode-ai/omnibase_infra --json conclusion --jq .conclusion` == `success`
+- [ ] The `Refresh stability lane` step log contains
+      `=== SUCCESS: health-gate PASS, ancestry OK ===`
+- [ ] The health-gate JSON block shows `"overall": "PASS"`, `"manifest_ok": true`,
+      `"consumer_groups_stable": true`, `"revision_readback_ok": true`
+- [ ] `manifest_count` is ≥ the floor (288) **and** ≥ the previous known-good
+      run's count (a flat/falling count is a silent regression even at PASS)
+- [ ] `curl -sf http://192.168.86.201:18085/health` and
+      `curl -sf http://192.168.86.201:18086/health` both return healthy
+- [ ] `curl -s http://192.168.86.201:18085/v1/introspection/manifest | jq '.discovery_errors // empty'`
+      is empty
+- [ ] Every service's `revision_label` in the health-gate JSON equals the
+      cut commit SHA (`git rev-parse <ref>` at cut time)
+- [ ] The receipt file exists and its `result` field is exactly `SUCCESS`
+      (not `FAILED_ROLLED_BACK`, not `FAILED`):
+      `ssh omni-201-ts 'cat ~/.omnibase/state/stability_lane_refresh/latest.json' | jq .result`
+
+## Rollback
+
+If any checklist item above fails post-hoc (e.g. you discover a regression
+after the workflow already reported SUCCESS), the automatic rollback inside
+`refresh_stability_lane.sh` has already run and reported its own terminal
+`FAILED_ROLLED_BACK`/`FAILED` state in the same run — re-read that run's log
+first; do not assume you need to hand-roll a recovery.
+
+If the automated path is unavailable (script itself broken, or you need to
+roll back a SUCCESS that later proved bad), use the manual preflight-tag
+restore documented in `docs/runbooks/stability-lane-refresh.md` ("Manual
+rollback (if the script itself is unavailable)") — it retags the 4 core
+services back to their `preflight-<UTC>` anchor and force-recreates them.
+Locate the correct anchor timestamp from the T0 log block (`=== Tag
+preflight rollback anchor (<UTC>) ===`) or from
+`docker images --format '{{.Repository}}:{{.Tag}}' | grep 'omnibase-infra-stability-test-.*:preflight-'`.
+After a manual rollback, re-run the health-gate readback checklist above
+against the rolled-back state before declaring the lane recovered.
