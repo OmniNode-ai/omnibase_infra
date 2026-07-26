@@ -21,7 +21,7 @@ concurrency:
 
 jobs:
   deploy-gate:
-    uses: OmniNode-ai/omniclaude/.github/workflows/deploy-gate-reusable.yml@fcbc85f56a7a2b1fd058eb53d80f1cbd5669e8e9
+    uses: OmniNode-ai/omniclaude/.github/workflows/deploy-gate-reusable.yml@fcbc85f5642f07e15fe1d6b1c168c96883d16ac3
     secrets: inherit
     with:
       contracts-dir: contracts
