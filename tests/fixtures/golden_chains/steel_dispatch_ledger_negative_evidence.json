@@ -1,0 +1,17 @@
+{
+  "ticket": "OMN-15169",
+  "precedent": "OMN-15002",
+  "claim": "event_ledger had zero rows for the steel topic while the deployed stability-test contract predated the OMN-15168 paired allowlist diff, proving the allowlist gate (not automatic-for-all-bus-traffic dispatch).",
+  "topic": "onex.evt.steel-onslaught.match-terminal.v1",
+  "lane": "stability-test",
+  "verified_date": "2026-07-26",
+  "verified_before_refresh_ran_at_utc": "2026-07-26T21:45:00Z",
+  "verified_via": "ssh omni-201-ts + docker exec omninode-stability-test-runtime-effects cat contract.yaml (deployed contract_version 1.1.0, no steel topic present) + psql -h 100.109.203.94 -p 15436 -U postgres -d omnibase_infra -c \"SELECT count(*) FROM event_ledger WHERE topic = 'onex.evt.steel-onslaught.match-terminal.v1'\"",
+  "deployed_contract_version_before_refresh": {"major": 1, "minor": 1, "patch": 0},
+  "steel_topic_present_in_deployed_contract_before_refresh": false,
+  "event_ledger_row_count_before_refresh": 0,
+  "topic_high_watermark_at_check_time": 14,
+  "offsets_present_on_topic_with_zero_ledger_rows": [0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13],
+  "offsets_source": "steel_onslaught's own OMN-15170 live-driver test runs (a separate repo/ticket) produced these offsets; this ticket did not publish them and only observed the resulting absence of ledger rows",
+  "narrative_evidence": "full verbatim command transcript recorded in this PR's body (OMN-15169), not duplicated here to avoid an unfollowable cross-repo doc pointer for PR reviewers"
+}
