@@ -40,10 +40,26 @@ jobs:
       pull-requests: read
 
     steps:
+      - name: Check webhook credentials
+        id: webhook-credentials
+        env:
+          KAFKA_BOOTSTRAP_SERVERS: ${{ secrets.KAFKA_BOOTSTRAP_SERVERS }}
+          KAFKA_SASL_USERNAME: ${{ secrets.KAFKA_SASL_USERNAME }}
+          KAFKA_SASL_PASSWORD: ${{ secrets.KAFKA_SASL_PASSWORD }}
+        run: |
+          if [[ -z "${KAFKA_BOOTSTRAP_SERVERS:-}" || -z "${KAFKA_SASL_USERNAME:-}" || -z "${KAFKA_SASL_PASSWORD:-}" ]]; then
+            echo "enabled=false" >> "$GITHUB_OUTPUT"
+            echo "::notice title=PR webhook not published::Kafka webhook secrets are unavailable on this runner/event; skipping non-authoritative PR webhook publication."
+            exit 0
+          fi
+          echo "enabled=true" >> "$GITHUB_OUTPUT"
+
       - name: Checkout code
+        if: ${{ steps.webhook-credentials.outputs.enabled == 'true' }}
         uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
 
       - name: Get changed files
+        if: ${{ steps.webhook-credentials.outputs.enabled == 'true' }}
         id: changed-files
         env:
           GH_TOKEN: ${{ github.token }}
@@ -100,20 +116,6 @@ jobs:
           with open(output_path, "a", encoding="utf-8") as output:
               output.write(f"all_changed_files={','.join(files)}\n")
           PY
-
-      - name: Check webhook credentials
-        id: webhook-credentials
-        env:
-          KAFKA_BOOTSTRAP_SERVERS: ${{ secrets.KAFKA_BOOTSTRAP_SERVERS }}
-          KAFKA_SASL_USERNAME: ${{ secrets.KAFKA_SASL_USERNAME }}
-          KAFKA_SASL_PASSWORD: ${{ secrets.KAFKA_SASL_PASSWORD }}
-        run: |
-          if [[ -z "${KAFKA_BOOTSTRAP_SERVERS:-}" || -z "${KAFKA_SASL_USERNAME:-}" || -z "${KAFKA_SASL_PASSWORD:-}" ]]; then
-            echo "enabled=false" >> "$GITHUB_OUTPUT"
-            echo "::notice title=PR webhook not published::Kafka webhook secrets are unavailable on this runner/event; skipping non-authoritative PR webhook publication."
-            exit 0
-          fi
-          echo "enabled=true" >> "$GITHUB_OUTPUT"
 
       - name: Set up CI Python environment
         if: ${{ steps.webhook-credentials.outputs.enabled == 'true' }}
