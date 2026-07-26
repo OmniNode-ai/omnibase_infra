@@ -43,6 +43,9 @@ from omnibase_infra.cli.omnimarket_drift_guard import (
     OmnimarketDriftError,
     check_omnimarket_drift,
 )
+from omnibase_infra.cli.prod_dispatch_locality_guard import (
+    enforce_prod_dispatch_locality,
+)
 from omnibase_infra.cli.receipt_mode import (
     default_emit_socket_path,
     run_receipt_mode,
@@ -294,6 +297,7 @@ def run_skill_by_name(
 
     payload = _parse_skill_args(mapping, skill_args)
     _apply_classifiers(mapping, payload)
+    enforce_prod_dispatch_locality(mapping.node_name, payload)
 
     contract_path = _resolve_packaged_contract(mapping.node_name)
     payload_path = _write_payload(state_root, skill_name, payload)
