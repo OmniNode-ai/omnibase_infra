@@ -150,6 +150,7 @@ from omnibase_core.models.events.model_event_envelope import ModelEventEnvelope
 from omnibase_core.types import JsonType, PrimitiveValue
 from omnibase_infra.enums import (
     EnumDispatchStatus,
+    EnumDlqFailureClass,
     EnumInfraTransportType,
     EnumMessageCategory,
 )
@@ -182,6 +183,16 @@ from omnibase_infra.runtime._enum_coercion import coerce_message_category
 from omnibase_infra.runtime.binding_resolver import OperationBindingResolver
 from omnibase_infra.runtime.dispatch_context_enforcer import DispatchContextEnforcer
 from omnibase_infra.utils import sanitize_error_message
+
+_VALIDATION_DETAIL_MAX_LENGTH = 500
+
+
+def _sanitize_validation_detail(detail: str) -> str:
+    """Sanitize validation detail before it reaches logs, results, or DLQ metadata."""
+    return sanitize_error_message(
+        ValueError(detail), max_length=_VALIDATION_DETAIL_MAX_LENGTH
+    )
+
 
 if TYPE_CHECKING:
     from pydantic import BaseModel
@@ -416,6 +427,29 @@ class DispatchEntryInternal:
         )
         # None means "not type-scoped" — legacy string-only matching applies.
         self.payload_type_matcher = payload_type_matcher
+
+
+class PayloadScopingOutcomeInternal:
+    """Outcome of the OMN-12416 type-scoping pass over candidate dispatchers.
+
+    Distinguishes, for the "no matching dispatchers" case, whether ZERO
+    dispatchers were ever candidates for this topic+category+message_type
+    (a true wiring gap — ``EnumDlqFailureClass.NO_DISPATCHER``) from whether
+    at least one type-scoped dispatcher WAS a candidate but its
+    ``event_model.model_validate`` rejected the payload
+    (``EnumDlqFailureClass.PUBLISHER_MALFORMED``, OMN-14492). Internal,
+    dispatch()-local; not part of the public API.
+    """
+
+    __slots__ = ("type_scoped_candidate_rejected", "validation_detail")
+
+    def __init__(
+        self,
+        type_scoped_candidate_rejected: bool = False,
+        validation_detail: str | None = None,
+    ) -> None:
+        self.type_scoped_candidate_rejected = type_scoped_candidate_rejected
+        self.validation_detail = validation_detail
 
 
 class MessageDispatchEngine:
@@ -1249,7 +1283,7 @@ class MessageDispatchEngine:
         # only when the payload matches their contract-declared event_model — a
         # multi-handler contract routes each message to the single matching
         # handler instead of fanning out to every sibling (OMN-12416).
-        matching_dispatchers = self._find_matching_dispatchers(
+        matching_dispatchers, scoping_outcome = self._find_matching_dispatchers(
             topic=topic,
             category=topic_category,
             message_type=message_type,
@@ -1296,12 +1330,44 @@ class MessageDispatchEngine:
                 original_topic=topic,
             )
 
-            # Log warning with DLQ routing info
+            # OMN-14492: classify WHY no dispatcher matched instead of
+            # collapsing every empty-result case into the same unclassifiable
+            # "No dispatcher found" signal. When the type-scoping pass (OMN-12416)
+            # rejected at least one real candidate, a dispatcher IS registered
+            # for this event_type — the payload just failed that dispatcher's
+            # event_model validation. That is a publisher/producer defect, not
+            # a wiring gap, and gets the real pydantic ValidationError detail
+            # attached instead of a generic message.
+            if scoping_outcome.type_scoped_candidate_rejected:
+                failure_class = EnumDlqFailureClass.PUBLISHER_MALFORMED
+                error_code = EnumCoreErrorCode.ENVELOPE_VALIDATION_FAILED
+                validation_detail = _sanitize_validation_detail(
+                    scoping_outcome.validation_detail or "validation detail unavailable"
+                )
+                error_message = (
+                    f"Publisher-malformed payload for message type '{message_type}' "
+                    f"on topic '{topic}': a dispatcher IS registered for this "
+                    f"event_model, but the payload failed model_validate: "
+                    f"{validation_detail}"
+                )
+            else:
+                failure_class = EnumDlqFailureClass.NO_DISPATCHER
+                error_code = EnumCoreErrorCode.ITEM_NOT_REGISTERED
+                validation_detail = None
+                error_message = (
+                    f"No dispatcher registered for category '{topic_category}' "
+                    f"and message type '{message_type}' matching topic '{topic}'."
+                )
+
+            # Log warning with DLQ routing info + real classification/detail
             self._logger.warning(
-                "No dispatcher found for category '%s' and message type '%s'%s",
+                "No dispatcher found for category '%s' and message type '%s'%s "
+                "(failure_class=%s%s)",
                 topic_category,
                 message_type,
                 f"; routing to DLQ topic '{dlq_topic}'" if dlq_topic else "",
+                failure_class.value,
+                f"; validation_error={validation_detail}" if validation_detail else "",
                 extra=self._build_log_context(
                     topic=topic,
                     category=topic_category,
@@ -1310,9 +1376,13 @@ class MessageDispatchEngine:
                     duration_ms=duration_ms,
                     correlation_id=correlation_id,
                     trace_id=trace_id,
-                    error_code=EnumCoreErrorCode.ITEM_NOT_REGISTERED,
+                    error_code=error_code,
                 ),
             )
+
+            error_details: dict[str, object] = {"failure_class": failure_class.value}
+            if validation_detail:
+                error_details["validation_detail"] = validation_detail
 
             return ModelDispatchResult(
                 dispatch_id=dispatch_id,
@@ -1324,9 +1394,9 @@ class MessageDispatchEngine:
                 completed_at=completed_at,
                 duration_ms=duration_ms,
                 dlq_topic=dlq_topic,
-                error_message=f"No dispatcher registered for category '{topic_category}' "
-                f"and message type '{message_type}' matching topic '{topic}'.",
-                error_code=EnumCoreErrorCode.ITEM_NOT_REGISTERED,
+                error_message=error_message,
+                error_code=error_code,
+                error_details=error_details,
                 correlation_id=correlation_id,
                 output_events=[],
             )
@@ -1807,7 +1877,7 @@ class MessageDispatchEngine:
         category: EnumMessageCategory,
         message_type: str,
         payload: object | None = None,
-    ) -> list[DispatchEntryInternal]:
+    ) -> tuple[list[DispatchEntryInternal], PayloadScopingOutcomeInternal]:
         """
         Find all dispatchers that match the given criteria.
 
@@ -1836,10 +1906,16 @@ class MessageDispatchEngine:
                 is skipped and string-only matching applies.
 
         Returns:
-            List of matching dispatcher entries (may be empty)
+            Tuple of (matching dispatcher entries (may be empty), scoping
+            outcome). The scoping outcome (OMN-14492) records whether the
+            empty-result case is a true wiring gap (no candidate was ever
+            found) or a publisher-malformed payload (a type-scoped candidate
+            existed but its event_model rejected the payload), plus the real
+            validation detail for the latter.
         """
         matching_dispatchers: list[DispatchEntryInternal] = []
         seen_dispatcher_ids: set[str] = set()
+        scoping_outcome = PayloadScopingOutcomeInternal()
 
         # Find all routes that match this topic and category
         for route in self._routes.values():
@@ -1882,45 +1958,67 @@ class MessageDispatchEngine:
             # dispatcher from the candidate set — it never receives a non-matching
             # payload, so sibling handlers on a multi-handler contract no longer
             # all fire for one message.
-            if (
-                payload is not None
-                and entry.payload_type_matcher is not None
-                and not self._payload_matches_dispatcher(entry, payload)
-            ):
-                self._logger.debug(
-                    "Type-scoping: dispatcher '%s' skipped — payload type %s does "
-                    "not match its declared event_model (message_type=%s)",
-                    dispatcher_id,
-                    type(payload).__name__,
-                    message_type,
+            if payload is not None and entry.payload_type_matcher is not None:
+                matched, validation_detail = self._payload_matches_dispatcher(
+                    entry, payload
                 )
-                continue
+                if not matched:
+                    # OMN-14492: a dispatcher WAS a real routing candidate (it
+                    # declared an event_model for this message_type) but got
+                    # rejected by type-scoping — this is publisher_malformed
+                    # territory, not a wiring gap. Record it (and the first
+                    # real validation detail seen) so dispatch() can classify
+                    # the empty-result case correctly instead of collapsing
+                    # it into an unclassifiable "No dispatcher found".
+                    scoping_outcome.type_scoped_candidate_rejected = True
+                    if validation_detail and scoping_outcome.validation_detail is None:
+                        scoping_outcome.validation_detail = validation_detail
+                    self._logger.debug(
+                        "Type-scoping: dispatcher '%s' skipped — payload type %s does "
+                        "not match its declared event_model (message_type=%s, "
+                        "validation_detail=%s)",
+                        dispatcher_id,
+                        type(payload).__name__,
+                        message_type,
+                        validation_detail or "unavailable",
+                    )
+                    continue
 
             matching_dispatchers.append(entry)
             seen_dispatcher_ids.add(dispatcher_id)
 
-        return matching_dispatchers
+        return matching_dispatchers, scoping_outcome
 
     def _payload_matches_dispatcher(
         self,
         entry: DispatchEntryInternal,
         payload: object,
-    ) -> bool:
-        """Return True when ``payload`` matches a type-scoped dispatcher's event_model.
+    ) -> tuple[bool, str | None]:
+        """Return (matched, validation_detail) for a type-scoped dispatcher.
 
         The matcher validates the payload against the dispatcher's
-        contract-declared ``event_model``. A matcher that raises is treated as a
-        non-match (the payload does not conform to this dispatcher's model), so a
-        malformed or wrong-type payload never selects a type-scoped dispatcher.
+        contract-declared ``event_model``. Genuine validation rejects return
+        ``False`` and expose ``last_validation_detail``. Unexpected matcher
+        exceptions are not converted into publisher_malformed; they propagate as
+        runtime failures.
         Callers MUST only invoke this when ``entry.payload_type_matcher`` is set.
+
+        When the matcher is a ``_PayloadTypeMatcher`` (built via
+        ``_make_payload_type_matcher``, OMN-12416), a rejecting call leaves the
+        real pydantic ``ValidationError`` detail on its
+        ``last_validation_detail`` attribute (OMN-14492); this is surfaced as
+        the second tuple element so a "no dispatcher" outcome can be
+        classified as publisher_malformed with real detail instead of a
+        generic, unclassifiable message. Legacy plain-callable matchers (e.g.
+        a bare ``lambda``) have no such attribute and yield ``None``.
         """
         matcher = entry.payload_type_matcher
         if matcher is None:
-            return True
-        try:
-            return bool(matcher(payload))
-        except Exception:  # noqa: BLE001 — a raising matcher means "not my type"
-            return False
+            return True, None
+        matched = bool(matcher(payload))
+        if matched:
+            return True, None
+        return False, getattr(matcher, "last_validation_detail", None)
 
     async def _execute_dispatcher(
         self,

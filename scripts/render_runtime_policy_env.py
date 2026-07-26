@@ -74,6 +74,7 @@ def render_env(contract: ModelRuntimePolicyContract) -> dict[str, str]:
         "GOOGLE_CLOUD_PROJECT": contract.google_cloud_project,
         "GOOGLE_CLOUD_LOCATION": contract.google_cloud_location,
         "OMNIMEMORY_MEMGRAPH_PORT": str(contract.omnimemory_memgraph_port),
+        "ARCH_GRAPH_BOLT_URI": contract.arch_graph_bolt_uri,
     }
 
     dev_main = contract.profiles["dev"].processes["main"]
@@ -94,6 +95,9 @@ def render_env(contract: ModelRuntimePolicyContract) -> dict[str, str]:
         env[f"{profile_prefix}_RUNTIME_EFFECTS_PORT"] = str(profile.effects_port)
         env[f"{profile_prefix}_TOPIC_PROVISIONER_MAX_PARTITIONS"] = str(
             profile.topic_provisioner_max_partitions
+        )
+        env[f"{profile_prefix}_BOUNDARY_DLQ_ENABLED"] = _bool_text(
+            profile.boundary_dlq_enabled
         )
         secret_resolver_config_json = ""
         if profile.secret_resolver_mappings:

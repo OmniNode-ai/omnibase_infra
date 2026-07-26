@@ -8,11 +8,10 @@ This is a COMPUTE handler -- pure transformation, no I/O.
 from __future__ import annotations
 
 import logging
-from uuid import UUID
 
 from omnibase_infra.enums import EnumHandlerType, EnumHandlerTypeCategory
 from omnibase_infra.nodes.node_chain_orchestrator.models import (
-    ModelChainEntry,
+    ModelChainReplayInput,
     ModelChainReplayResult,
     ModelChainStep,
 )
@@ -31,30 +30,26 @@ class HandlerChainReplay:
     def handler_category(self) -> EnumHandlerTypeCategory:
         return EnumHandlerTypeCategory.COMPUTE
 
-    async def handle(
-        self,
-        cached_chain: ModelChainEntry,
-        new_prompt_text: str,
-        correlation_id: UUID,
-        new_context: dict[str, str] | None = None,
-    ) -> ModelChainReplayResult:
+    async def handle(self, request: ModelChainReplayInput) -> ModelChainReplayResult:
         """Adapt cached chain steps to new context.
 
+        Canonical definition-B entrypoint: a single typed request (the contract
+        ``input_model`` ``ModelChainReplayInput``) adapted by the shared runtime.
         The adaptation is conservative: chain steps are preserved as-is since
         they represent verified node executions. The confidence score reflects
         how similar the new prompt is to the original (passed through from the
         retrieval similarity score via orchestrator context).
 
         Args:
-            cached_chain: The cached chain to adapt.
-            new_prompt_text: The new prompt text.
-            correlation_id: Workflow correlation ID.
-            new_context: Optional context variables for adaptation.
+            request: Cached chain, new prompt text, correlation id, and optional
+                context variables for adaptation.
 
         Returns:
             ModelChainReplayResult with adapted steps and confidence.
         """
-        context = new_context or {}
+        cached_chain = request.cached_chain
+        correlation_id = request.correlation_id
+        context = request.new_context or {}
 
         logger.info(
             "Replaying chain %s for new prompt (correlation_id=%s, steps=%d)",

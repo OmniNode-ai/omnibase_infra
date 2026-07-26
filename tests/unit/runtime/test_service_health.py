@@ -407,6 +407,149 @@ class TestServiceHealthEndpoints:
 
 
 @pytest.mark.unit
+class TestServiceHealthReadinessEndpoint:
+    """Tests for GET /ready (_handle_readiness) — OMN-13768 regression coverage.
+
+    Prior to OMN-13768, ``_handle_readiness`` had no explicit "runtime not yet
+    attached" branch (unlike ``_handle_health``), so it fell through to the
+    ``self.runtime`` property, which raises ``ProtocolConfigurationError``
+    [ONEX_CORE_041]. The generic ``except Exception`` handler caught that and
+    returned 503, but with an unstructured error/exception body instead of the
+    graceful ``startup_phase: runtime_pending`` shape ``_handle_health`` uses.
+    These tests pin the graceful branch and the pre-existing ready/not-ready
+    behavior once a runtime is attached.
+    """
+
+    @pytest.mark.asyncio
+    async def test_readiness_endpoint_graceful_when_runtime_not_attached(
+        self,
+    ) -> None:
+        """Test /ready returns a structured runtime_pending 503, not a raw error.
+
+        Regression test for OMN-13768: before the fix, this scenario surfaced
+        ProtocolConfigurationError [ONEX_CORE_041] ("RuntimeHostProcess not
+        available...") in the response body. The fix mirrors _handle_health's
+        graceful degraded/pending branch instead.
+        """
+        mock_container = MagicMock()
+        mock_container.service_registry = None
+        server = ServiceHealth(container=mock_container, version="1.0.0")
+        mock_request = MagicMock(spec=web.Request)
+        mock_request.headers = {}
+
+        response = await server._handle_readiness(mock_request)
+
+        assert response.status == 503
+        assert response.content_type == "application/json"
+        response_text = response.text
+        assert response_text is not None
+        assert '"startup_phase":"runtime_pending"' in response_text
+        assert '"runtime_attached":false' in response_text
+        assert '"ready":false' in response_text
+        # The old failure mode leaked the raw ONEX_CORE_041 error text into
+        # the response body — assert it is gone.
+        assert "ONEX_CORE_041" not in response_text
+        assert "RuntimeHostProcess not available" not in response_text
+
+    @pytest.mark.asyncio
+    async def test_readiness_endpoint_logs_runtime_pending_transition(self) -> None:
+        """Test /ready logs the same pending-state transition as /health."""
+        mock_container = MagicMock()
+        mock_container.service_registry = None
+        server = ServiceHealth(container=mock_container)
+        mock_request = MagicMock(spec=web.Request)
+        mock_request.headers = {}
+
+        with patch("omnibase_infra.services.health_checker.logger.info") as mock_info:
+            await server._handle_readiness(mock_request)
+
+        transition_logs = [
+            call
+            for call in mock_info.call_args_list
+            if call.args and call.args[0] == "ServiceHealth health probe state changed"
+        ]
+        assert len(transition_logs) == 1
+        assert transition_logs[0].kwargs["extra"]["runtime_attached"] is False
+        assert transition_logs[0].kwargs["extra"]["startup_in_progress"] is True
+
+    @pytest.mark.asyncio
+    async def test_readiness_endpoint_ready_true_returns_200(self) -> None:
+        """Test /ready returns 200 once the attached runtime reports ready."""
+        mock_runtime = MagicMock()
+        mock_runtime.readiness_check = AsyncMock(
+            return_value={
+                "ready": True,
+                "is_running": True,
+                "is_draining": False,
+                "event_bus_readiness": {"is_ready": True},
+            }
+        )
+        server = ServiceHealth(runtime=mock_runtime, version="1.0.0")
+        mock_request = MagicMock(spec=web.Request)
+        mock_request.headers = {}
+
+        response = await server._handle_readiness(mock_request)
+
+        assert response.status == 200
+        response_text = response.text
+        assert response_text is not None
+        assert '"status":"healthy"' in response_text
+        assert '"ready":true' in response_text
+
+    @pytest.mark.asyncio
+    async def test_readiness_endpoint_not_ready_returns_503_when_attached(
+        self,
+    ) -> None:
+        """Test /ready returns 503 when runtime is attached but not yet ready.
+
+        Distinguishes the "attached but not ready" 503 (event bus still
+        joining partitions) from the "not attached at all" runtime_pending
+        503 covered above — both are graceful, non-exception 503s.
+        """
+        mock_runtime = MagicMock()
+        mock_runtime.readiness_check = AsyncMock(
+            return_value={
+                "ready": False,
+                "is_running": True,
+                "is_draining": False,
+                "event_bus_readiness": {"is_ready": False},
+            }
+        )
+        server = ServiceHealth(runtime=mock_runtime, version="1.0.0")
+        mock_request = MagicMock(spec=web.Request)
+        mock_request.headers = {}
+
+        response = await server._handle_readiness(mock_request)
+
+        assert response.status == 503
+        response_text = response.text
+        assert response_text is not None
+        assert '"status":"unhealthy"' in response_text
+        assert '"ready":false' in response_text
+        # This is the attached-but-not-ready path, not the runtime_pending path.
+        assert "runtime_pending" not in response_text
+
+    @pytest.mark.asyncio
+    async def test_readiness_endpoint_exception_still_returns_503(self) -> None:
+        """Test /ready falls back to the generic exception 503 for real errors."""
+        mock_runtime = MagicMock()
+        mock_runtime.readiness_check = AsyncMock(
+            side_effect=RuntimeError("event bus readiness probe exploded")
+        )
+        server = ServiceHealth(runtime=mock_runtime, version="1.0.0")
+        mock_request = MagicMock(spec=web.Request)
+        mock_request.headers = {}
+
+        response = await server._handle_readiness(mock_request)
+
+        assert response.status == 503
+        response_text = response.text
+        assert response_text is not None
+        assert '"status":"unhealthy"' in response_text
+        assert "event bus readiness probe exploded" in response_text
+
+
+@pytest.mark.unit
 class TestServiceHealthIntegration:
     """Integration tests for ServiceHealth with real HTTP requests."""
 

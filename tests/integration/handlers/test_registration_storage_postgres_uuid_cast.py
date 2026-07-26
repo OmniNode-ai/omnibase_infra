@@ -90,6 +90,7 @@ class TestRegistrationStoragePostgresUuidCast:
             database=pg["database"],
             user=pg["user"],
             password=pg["password"],
+            auto_create_schema=True,
         )
         yield handler
         await handler.shutdown()

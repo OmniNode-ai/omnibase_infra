@@ -6,10 +6,16 @@ name: PR Title Check
 
 on:
   pull_request:
-    types: [opened, edited]
+    types: [opened, edited, synchronize, reopened]
+
+concurrency:
+  # OMN-13949: cancel superseded PR runs to free saturated runners. merge_group
+  # entries carry a unique github.ref, so queue entries never cross-cancel.
+  group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
 
 jobs:
   pr-title:
-    uses: OmniNode-ai/onex_change_control/.github/workflows/pr-title-check-reusable.yml@main
+    uses: OmniNode-ai/onex_change_control/.github/workflows/pr-title-check-reusable.yml@df0e348bebfb893fdebf74189bc0c782b624b02f
     permissions:
       pull-requests: read

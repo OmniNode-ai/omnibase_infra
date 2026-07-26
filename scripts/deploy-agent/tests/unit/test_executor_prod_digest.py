@@ -69,14 +69,24 @@ class TestProdDeployPullsDigestNotRebuild:
         executor._pull_pinned_image = fake_pull  # type: ignore[method-assign]
         executor._compose_up = fake_up  # type: ignore[method-assign]
 
-        executor.rebuild_scope(
-            Scope.RUNTIME,
-            [],
-            _noop_phase_update,
-            git_sha="",
-            lane=EnumRuntimeLane.PROD,
-            image_digest=_DIGEST,
-        )
+        # OMN-15181 round 3: rebuild_scope's prod branch now also resolves the
+        # pinned digest to a locally-present repository:tag reference (to
+        # repoint the compose image: field) between _pull_pinned_image and
+        # _compose_up. Mock it so this test stays a pure effect-boundary test
+        # (no real docker subprocess call).
+        with patch.object(
+            DeployExecutor,
+            "_resolve_local_image_reference",
+            return_value="omnibase-infra-stability-test-omninode-runtime:latest",
+        ):
+            executor.rebuild_scope(
+                Scope.RUNTIME,
+                [],
+                _noop_phase_update,
+                git_sha="",
+                lane=EnumRuntimeLane.PROD,
+                image_digest=_DIGEST,
+            )
 
         assert pull_calls == [_DIGEST], "prod must pull the pinned digest"
         assert build_calls == [], "prod must NOT rebuild from a ref"
@@ -113,10 +123,12 @@ class TestProdDeployPullsDigestNotRebuild:
 class TestRunningDigestVerification:
     def test_running_digest_match_passes(self) -> None:
         executor = DeployExecutor()
+        captured_cmds: list[list[str]] = []
 
         def fake_run(
             cmd: list[str], timeout: int, **kwargs: object
         ) -> subprocess.CompletedProcess:
+            captured_cmds.append(cmd)
             # docker inspect of the running runtime container returns its image digest
             return _ok(stdout=_DIGEST + "\n")
 
@@ -125,6 +137,17 @@ class TestRunningDigestVerification:
             executor.verify_running_image_digest(
                 lane=EnumRuntimeLane.PROD, expected_digest=_DIGEST
             )
+
+        # OMN-15181: a mock that never inspects the docker-inspect ARGUMENT is
+        # a vacuous green — this exact gap let the bare-name defect ship
+        # (docker inspect omninode-runtime, which exists on no real lane).
+        inspect_cmd = next(
+            cmd for cmd in captured_cmds if cmd[:2] == ["docker", "inspect"]
+        )
+        assert inspect_cmd[-1] == "omninode-prod-runtime", (
+            "must inspect the lane-qualified prod container name, not a bare "
+            f"generic name; got {inspect_cmd[-1]!r}"
+        )
 
     def test_running_digest_mismatch_fails_closed(self) -> None:
         executor = DeployExecutor()
@@ -147,7 +170,12 @@ class TestRunningDigestVerification:
         executor = DeployExecutor()
         order: list[str] = []
 
-        def fake_verify_digest(*, lane: EnumRuntimeLane, expected_digest: str) -> None:
+        def fake_verify_digest(
+            *,
+            lane: EnumRuntimeLane,
+            expected_digest: str,
+            service: str = "omninode-runtime",
+        ) -> None:
             order.append("verify_digest")
             raise DigestMismatchError(
                 f"running digest != requested digest ({expected_digest})"

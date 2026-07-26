@@ -26,6 +26,7 @@ Related:
     - tests/conftest.py: Global test fixtures
 """
 
+import os
 from collections.abc import Generator
 from unittest.mock import AsyncMock, patch
 
@@ -74,6 +75,34 @@ def pytest_collection_modifyitems(
 # Scoped to tests/unit/ only. Integration tests that need this mock should
 # define their own local fixture.
 # =============================================================================
+
+
+@pytest.fixture(autouse=True)
+def _strip_leaked_git_env(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Remove inherited ``GIT_*`` environment variables for every unit test.
+
+    When this suite runs from a ``git push`` pre-push hook (the OMN-13973
+    governed full-suite escalation that fires on any
+    ``src/omnibase_infra/topics/`` change), git exports ``GIT_DIR`` /
+    ``GIT_INDEX_FILE`` / ``GIT_WORK_TREE`` / ``GIT_PREFIX`` into the hook's
+    environment. Those variables take precedence over both a child ``git``
+    process's ``cwd=`` argument AND ``git -C`` (verified: with ``GIT_DIR`` set,
+    ``git -C <tmp> init`` re-inits the surrounding repo and ignores ``-C``). So
+    any unit test that shells out to ``git`` against a throwaway ``tmp_path``
+    repo -- e.g. ``test_pull_all``, ``test_subprocess_runner_and_git_probes``,
+    ``test_omnimarket_drift_guard`` -- would instead operate on the REAL
+    surrounding worktree, rewriting its HEAD to a ``t@t`` "init" commit and
+    dropping its tracked files. Stripping every ``GIT_*`` var makes each child
+    git resolve its repository purely from its target directory.
+
+    This is a NO-OP in a normal ``uv run pytest`` / CI run (no ``GIT_*`` vars are
+    set there), so it cannot change the behavior of any currently-passing test --
+    it only neutralizes the leaked pre-push-hook environment and removes the
+    leaked ``GIT_*`` state that made the git-shelling tests order-dependent under
+    xdist. (OMN-14744 / OMN-14745)
+    """
+    for key in [k for k in os.environ if k.startswith("GIT_")]:
+        monkeypatch.delenv(key, raising=False)
 
 
 @pytest.fixture(autouse=True)

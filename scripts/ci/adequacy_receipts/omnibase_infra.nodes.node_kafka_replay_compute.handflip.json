@@ -1,0 +1,30 @@
+{
+  "base_ref": "71ab1bf6deb4252edd9593f547dd5a4b4e60939b",
+  "canonical_handler_module": "omnibase_infra.nodes.node_kafka_replay_compute.handlers.handler_replay",
+  "legacy_handler_module": "omnibase_infra.nodes.node_kafka_replay_compute.handlers.handler_replay",
+  "node_id": "omnibase_infra.nodes.node_kafka_replay_compute",
+  "parity": {
+    "selected_input_hashes": [
+      "sha256:6e5c2c099fba583618105941e8d09bd6dbfecd79a1dc11fe1303adf8e240b49d",
+      "sha256:ee4de11e480eddf2e85fc7454c64df3c391e27fcd65364ce06b543e612f04510",
+      "sha256:4652a74e33b7f19bda6b2f665d10b0280b50ddba6e1fcef73b8313f4ed101d33",
+      "sha256:aea24eefc50a33893d361f8aa0c8d869e263bfe3003401c5aa706fa72c7ca3e5",
+      "sha256:ddb0820b6bf77609c130d4e336c9b836bdc2cc1ba82b8b3d0854bd104a4a2308",
+      "sha256:dd398c6fa3711111fe275c062e96dbd01d7a945c1acc402a90778271d80f935e",
+      "sha256:9a567789da7147c33bae71cb58b96cb3f53827b6c29b503e661e7d8dc20d0bfa"
+    ],
+    "status": "pass",
+    "test_ids": [
+      "tests/unit/nodes/node_kafka_replay_compute/test_kafka_replay_defb_omn14819.py::test_defb_parity",
+      "tests/unit/nodes/node_kafka_replay_compute/test_kafka_replay_defb_omn14819.py::test_handler_core_is_ccore_clean"
+    ]
+  },
+  "preserved_symbols": [
+    "HandlerKafkaReplay.handle",
+    "HandlerKafkaReplay._resolve_topic_partitions",
+    "HandlerKafkaReplay._resolve_bounds",
+    "HandlerKafkaReplay._emit_progress",
+    "HandlerKafkaReplay._sequence_key"
+  ],
+  "receipt_schema": "handflip_proof.v1"
+}

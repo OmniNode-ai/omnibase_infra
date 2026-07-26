@@ -3,6 +3,16 @@
 # Copyright (c) 2026 OmniNode Team
 """HandlerBrokerDiskWatermark — probes docker data-root + broker volumes.
 
+Canonical definition-B handler (OMN-14355 / OMN-14816): the dispatch entrypoint
+is the single ``handle(request) -> response`` method that auto-wiring's
+``_make_dispatch_callback`` binds. It takes the typed ``ModelBrokerDiskWatermarkInput``
+and returns ``ModelBrokerDiskWatermarkOutput`` — no event-envelope import, no
+``Plugin*`` base, stateless/deterministic compute. This is a behavior-preserving
+hand-flip (OMN-14781) of the former ``probe_disk_watermark`` op-method: the method
+was renamed to ``handle`` with its body and every business-logic helper
+(``_classify`` / ``_probe_path`` / ``_real_docker_info`` / ``_real_disk_usage`` /
+``_resolve_volume_mountpoint``) preserved byte-identically.
+
 Algorithm
 ---------
 1. Resolve docker data-root via ``docker info --format '{{json .}}'`` →
@@ -23,6 +33,7 @@ Ticket: OMN-13009
 
 from __future__ import annotations
 
+import asyncio
 import json
 import logging
 import shutil
@@ -164,10 +175,13 @@ class HandlerBrokerDiskWatermark:
         """Behavioral classification: pure compute (no external I/O side-effects)."""
         return EnumHandlerTypeCategory.COMPUTE
 
-    def probe_disk_watermark(
+    def handle(
         self, inp: ModelBrokerDiskWatermarkInput
     ) -> ModelBrokerDiskWatermarkOutput:
         """Probe docker data-root + broker volumes and classify severity.
+
+        Canonical def-B dispatch entrypoint (renamed from ``probe_disk_watermark``
+        with the body preserved byte-identically; OMN-14816 hand-flip).
 
         Args:
             inp: Watermark probe configuration.
@@ -290,6 +304,18 @@ class HandlerBrokerDiskWatermark:
             min_free_bytes_floor=min_free_bytes_floor,
             below_min_free_floor=below_floor,
         )
+
+    async def handle_async(
+        self, inp: ModelBrokerDiskWatermarkInput
+    ) -> ModelBrokerDiskWatermarkOutput:
+        """Run the blocking probe implementation off the event loop.
+
+        Auto-wiring prefers ``handle_async`` over ``handle`` when both exist, so
+        runtime dispatch avoids executing docker subprocess and disk-usage calls
+        inline on the event loop while preserving the synchronous handler
+        contract for direct callers and tests.
+        """
+        return await asyncio.to_thread(self.handle, inp)
 
 
 __all__ = ["HandlerBrokerDiskWatermark"]

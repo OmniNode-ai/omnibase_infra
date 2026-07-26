@@ -29,6 +29,11 @@ event_bus:
   publish_topics:
     - "onex.evt.router.routing-complete.v1"
     - "onex.evt.router.routing-failed.v1"
+  # OMN-13852: DLQ destination for unroutable inbound messages; matches the
+  # engine-derived NO_DISPATCHER topic for the "router" event_type domain so
+  # the dead-letter escape hatch targets a provisioned topic.
+  dlq_topics:
+    - "onex.dlq.omnibase-infra.router.v1"
 input_model:
   name: "ModelRoutingCommand"
   module: "omnibase_infra.nodes.node_routing_orchestrator.models.model_routing_command"
@@ -43,6 +48,11 @@ handler_routing:
     - event_model:
         name: "ModelRoutingCommand"
         module: "omnibase_infra.nodes.node_routing_orchestrator.models.model_routing_command"
+      # OMN-13852: per-handler event_type disambiguates the owned subscribe topic
+      # so routes register (previously the multi-handler ambiguity guard registered
+      # zero routes and every inbound message fell through to NO_DISPATCHER).
+      event_type: "router.route-request"
+      message_category: "COMMAND"
       handler:
         name: "HandlerRoutingInitiate"
         module: "omnibase_infra.nodes.node_routing_orchestrator.handlers.handler_routing_initiate"
@@ -51,6 +61,8 @@ handler_routing:
     - event_model:
         name: "ModelHealthSnapshot"
         module: "omnibase_infra.nodes.node_model_health_effect.models.model_health_snapshot"
+      event_type: "router.health-snapshot"
+      message_category: "EVENT"
       handler:
         name: "HandlerHealthComplete"
         module: "omnibase_infra.nodes.node_routing_orchestrator.handlers.handler_health_complete"
@@ -59,6 +71,8 @@ handler_routing:
     - event_model:
         name: "ModelRoutingDecision"
         module: "omnibase_infra.nodes.node_model_router_compute.models.model_routing_decision"
+      event_type: "router.scoring-decision"
+      message_category: "EVENT"
       handler:
         name: "HandlerScoringComplete"
         module: "omnibase_infra.nodes.node_routing_orchestrator.handlers.handler_scoring_complete"

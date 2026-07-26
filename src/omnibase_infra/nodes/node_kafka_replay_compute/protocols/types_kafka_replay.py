@@ -6,7 +6,6 @@ from __future__ import annotations
 
 from collections.abc import Awaitable, Callable
 
-from omnibase_core.models.events.model_event_envelope import ModelEventEnvelope
 from omnibase_infra.nodes.node_kafka_replay_compute.models import (
     ModelKafkaReplayInput,
     ModelKafkaReplayProgress,
@@ -14,10 +13,13 @@ from omnibase_infra.nodes.node_kafka_replay_compute.models import (
 from omnibase_infra.nodes.node_kafka_replay_compute.protocols.protocol_kafka_replay_consumer import (
     ProtocolKafkaReplayConsumer,
 )
+from omnibase_infra.nodes.node_kafka_replay_compute.protocols.protocol_replay_envelope import (
+    ProtocolReplayEnvelope,
+)
 
 ConsumerFactory = Callable[[ModelKafkaReplayInput], ProtocolKafkaReplayConsumer]
 ProgressCallback = Callable[[ModelKafkaReplayProgress], Awaitable[None] | None]
-EnvelopeDeserializer = Callable[[bytes], ModelEventEnvelope[object]]
+EnvelopeDeserializer = Callable[[bytes], ProtocolReplayEnvelope]
 
 
 __all__ = ["ConsumerFactory", "EnvelopeDeserializer", "ProgressCallback"]

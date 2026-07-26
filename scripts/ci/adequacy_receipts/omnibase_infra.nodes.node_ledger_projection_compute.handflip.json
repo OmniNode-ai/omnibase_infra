@@ -1,0 +1,29 @@
+{
+  "receipt_schema": "handflip_proof.v1",
+  "node_id": "omnibase_infra.nodes.node_ledger_projection_compute",
+  "canonical_handler_module": "omnibase_infra.nodes.node_ledger_projection_compute.handlers.handler_ledger_projection",
+  "legacy_handler_module": "omnibase_infra.nodes.node_ledger_projection_compute.handlers.handler_ledger_projection",
+  "base_ref": "108e7a9efb2f11209f1bb88e2483acac0a293eda",
+  "preserved_symbols": [
+    "HandlerLedgerProjection.project",
+    "HandlerLedgerProjection._extract_ledger_metadata",
+    "HandlerLedgerProjection._b64",
+    "HandlerLedgerProjection._normalize_headers",
+    "HandlerLedgerProjection._parse_offset"
+  ],
+  "parity": {
+    "status": "pass",
+    "test_ids": [
+      "tests/unit/nodes/test_node_ledger_projection_compute_defb_omn14823.py::TestDispatchEquivalence::test_dispatch_routes_ledger_append_intent_to_output_intents",
+      "tests/unit/nodes/test_node_ledger_projection_compute_defb_omn14823.py::TestDispatchEquivalence::test_defb_handle_output_equals_pure_project",
+      "tests/unit/nodes/test_node_ledger_projection_compute_defb_omn14823.py::TestCanonicalDefBShape::test_handle_single_positional_is_typed_event_message"
+    ],
+    "selected_input_hashes": [
+      "sha256:0fb51e75c55ba1e136beda48c19caba87c9f5ce8e6d36f14043f756d00b4eaf4",
+      "sha256:19b117df4ad80be9d92db48acad358ed239bad72fb6be0128420c1e09544e940",
+      "sha256:688a6047c8ddf4392dee9631f3a15e525218919ac872adfe25db69004545eb0a",
+      "sha256:0efb529770391718986b1c093cca48cfcc724ef6afc86475150a45f2aaaa401d",
+      "sha256:41175742f2d6b9c63d3f5f89246cd21017df32d565605e72b93b5a939ab2b0e0"
+    ]
+  }
+}

@@ -5,14 +5,18 @@
 # Canary: skill-to-node migration — merge-sweep.
 # Classifies PRs into Track A (merge-ready) vs Track B (needs polish).
 #
+# Related Tickets:
+#   - OMN-14824: HandlerClassifyPRs exposes the canonical def-B handle()
+#     dispatch entrypoint while preserving Track A/B/SKIP classification.
+#
 name: "node_merge_sweep_classify_compute"
 node_type: "COMPUTE_GENERIC"
 contract_version:
   major: 1
   minor: 0
-  patch: 0
-node_version: "1.0.0"
-description: "Classifies PRs into Track A (auto-merge ready) and Track B (needs polish)."
+  patch: 1
+node_version: "1.0.1"
+description: "Classifies PRs into Track A (auto-merge ready), Track B (needs polish), and SKIP buckets. Contract patch 1 records the OMN-14824 canonical def-B handler entrypoint flip while preserving classification semantics."
 input_model:
   name: "ModelClassifyInput"
   module: "omnibase_infra.nodes.node_merge_sweep_classify_compute.models.model_classify_input"

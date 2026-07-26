@@ -34,6 +34,7 @@ EXPECTED_OWNER_TICKETS: dict[str, str] = {
     "node_routing_orchestrator": "OMN-13492",
     "node_rsd_orchestrator": "OMN-13493",
     "node_scope_workflow_orchestrator": "OMN-13494",
+    "node_runner_fleet_maintain_orchestrator": "OMN-13942",
 }
 
 # Repo root = five parents up from the scanner module; the test file is deeper,
@@ -94,8 +95,9 @@ def test_live_baseline_owner_tickets_repointed() -> None:
 def test_live_baseline_risk2_entries_carry_accepted_rationale() -> None:
     baseline = _load_live_baseline()
     risk2 = [e for e in baseline.values() if e.risk_score == 2]
-    # There are exactly six risk-2 thin handlers accepted as baseline.
-    assert len(risk2) == 6
+    # There are exactly seven risk-2 thin handlers accepted as baseline
+    # (six from OMN-13485 plus node_runner_fleet_maintain_orchestrator, OMN-13942).
+    assert len(risk2) == 7
     for entry in risk2:
         assert entry.accepted_rationale, (
             f"{entry.node}: risk-2 baseline entry must carry an accepted_rationale"

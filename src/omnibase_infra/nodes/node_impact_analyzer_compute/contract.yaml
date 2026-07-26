@@ -11,25 +11,27 @@
 # Related Tickets:
 #   - OMN-3935: Task 3 - Impact Analyzer COMPUTE Node
 #   - OMN-3925: Artifact Reconciliation + Update Planning MVP
+#   - OMN-14817: HandlerImpactAnalysis flipped to canonical def-B
+#     handle(request) via a hand-flip; scoring helpers preserved verbatim.
 name: "node_impact_analyzer_compute"
 contract_name: "node_impact_analyzer_compute"
 node_name: "node_impact_analyzer_compute"
 contract_version:
   major: 0
   minor: 1
-  patch: 0
+  patch: 1
 node_version:
   major: 0
   minor: 1
-  patch: 0
+  patch: 1
 node_type: "COMPUTE_GENERIC"
 description: >
   Pure compute node for artifact impact analysis. Takes a ModelUpdateTrigger and an artifact registry, matches changed files against source trigger patterns using fnmatch, applies the OMN-3925 scoring table (scope multiplier, policy floor, threshold-based action assignment), and returns a ModelImpactAnalysisResult with per-artifact scores and the highest merge policy. No external I/O.
 
 input_model:
-  name: "ModelUpdateTrigger"
-  module: "omnibase_infra.nodes.node_artifact_change_detector_effect.models.model_update_trigger"
-  description: "Change trigger with trigger type, source repo, and changed file list."
+  name: "ModelImpactAnalysisRequest"
+  module: "omnibase_infra.nodes.node_impact_analyzer_compute.models.model_impact_analysis_request"
+  description: "Typed def-B request binding the change trigger and the artifact registry to score against."
 output_model:
   name: "ModelImpactAnalysisResult"
   module: "omnibase_infra.nodes.node_impact_analyzer_compute.models.model_impact_analysis_result"
@@ -51,9 +53,9 @@ handler_routing:
         module: "omnibase_infra.nodes.node_impact_analyzer_compute.handlers.handler_impact_analysis"
       description: "Score artifacts against changed files using the OMN-3925 scoring table"
       input_model:
-        name: "ModelUpdateTrigger"
-        module: "omnibase_infra.nodes.node_artifact_change_detector_effect.models.model_update_trigger"
-        description: "Change trigger for impact scoring"
+        name: "ModelImpactAnalysisRequest"
+        module: "omnibase_infra.nodes.node_impact_analyzer_compute.models.model_impact_analysis_request"
+        description: "Typed def-B request for impact scoring"
 error_handling:
   retry_policy:
     max_retries: 0
@@ -78,7 +80,7 @@ metadata:
   author: "OmniNode Team"
   license: "MIT"
   created: "2026-03-08"
-  updated: "2026-05-22"
+  updated: "2026-07-20"
   tags:
     - compute
     - artifact
@@ -88,3 +90,4 @@ metadata:
   related_tickets:
     - "OMN-3935"
     - "OMN-3925"
+    - "OMN-14817"

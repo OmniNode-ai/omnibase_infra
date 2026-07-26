@@ -1,7 +1,7 @@
 # SPDX-FileCopyrightText: 2025 OmniNode.ai Inc.
 # SPDX-License-Identifier: MIT
 
-"""Runtime handler for contract validation compute."""
+"""Runtime handler for contract validation compute (canonical definition B)."""
 
 from __future__ import annotations
 
@@ -16,7 +16,7 @@ from omnibase_infra.nodes.node_contract_validate_compute.models import (
 
 
 class HandlerContractValidate:
-    """Handler descriptor for deterministic contract validation operations."""
+    """Canonical def-B handler for deterministic contract validation."""
 
     @property
     def handler_type(self) -> EnumHandlerType:
@@ -26,29 +26,28 @@ class HandlerContractValidate:
     def handler_category(self) -> EnumHandlerTypeCategory:
         return EnumHandlerTypeCategory.COMPUTE
 
-
-async def handle_contract_validate(
-    input_data: ModelContractValidateInput,
-) -> ModelContractValidationResult:
-    """Validate a contract through the runtime compute-node boundary."""
-    validator = ServiceContractValidator()
-    if input_data.model_code is not None:
-        assert input_data.contract_content is not None
-        return validator.validate_model_compliance(
-            input_data.model_code,
-            input_data.contract_content,
+    async def handle(
+        self, request: ModelContractValidateInput
+    ) -> ModelContractValidationResult:
+        """Validate a contract through the runtime compute-node boundary."""
+        validator = ServiceContractValidator()
+        if request.model_code is not None:
+            assert request.contract_content is not None
+            return validator.validate_model_compliance(
+                request.model_code,
+                request.contract_content,
+            )
+        if request.file_path is not None:
+            return validator.validate_contract_file(
+                request.file_path,
+                request.contract_type,
+                request.base_dir,
+            )
+        assert request.contract_content is not None
+        return validator.validate_contract_yaml(
+            request.contract_content,
+            request.contract_type,
         )
-    if input_data.file_path is not None:
-        return validator.validate_contract_file(
-            input_data.file_path,
-            input_data.contract_type,
-            input_data.base_dir,
-        )
-    assert input_data.contract_content is not None
-    return validator.validate_contract_yaml(
-        input_data.contract_content,
-        input_data.contract_type,
-    )
 
 
-__all__ = ["HandlerContractValidate", "handle_contract_validate"]
+__all__ = ["HandlerContractValidate"]

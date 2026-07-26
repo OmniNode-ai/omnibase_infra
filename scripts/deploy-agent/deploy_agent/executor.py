@@ -169,6 +169,15 @@ class ModelLaneConfig(BaseModel):
 _STABILITY_OVERLAY = f"{REPO_DIR}/docker/docker-compose.stability-test.yml"
 _PROD_OVERLAY = f"{REPO_DIR}/docker/docker-compose.prod.yml"
 
+# OMN-15181 round 3 (Finding 9): maps each prod runtime service to the compose
+# env var that repoints its `image:` field (docker-compose.prod.yml). This is
+# the single source mapping consumed by ``_resolve_prod_image_env`` -- no
+# forked second copy of the service->env-var relationship.
+PROD_IMAGE_ENV_VAR_FOR_SERVICE: dict[str, str] = {
+    "omninode-runtime": "PROD_OMNINODE_RUNTIME_IMAGE",
+    "runtime-effects": "PROD_RUNTIME_EFFECTS_IMAGE",
+}
+
 _LANE_CONFIGS: dict[EnumRuntimeLane, ModelLaneConfig] = {
     EnumRuntimeLane.DEV: ModelLaneConfig(
         lane=EnumRuntimeLane.DEV,
@@ -182,9 +191,12 @@ _LANE_CONFIGS: dict[EnumRuntimeLane, ModelLaneConfig] = {
         compose_files=(COMPOSE_FILE, _STABILITY_OVERLAY),
         compose_project="omnibase-infra-stability-test",
         postgres_container="omnibase-infra-stability-test-postgres",
+        # OMN-15181: must match the container_name: override in
+        # docker-compose.stability-test.yml, never the dev-lane bare name —
+        # docker inspect on the bare name returns "no such object" for this lane.
         runtime_health_targets=(
-            ("omninode-runtime", 18085),
-            ("runtime-effects", 18086),
+            ("omninode-stability-test-runtime", 18085),
+            ("omninode-stability-test-runtime-effects", 18086),
         ),
     ),
     EnumRuntimeLane.PROD: ModelLaneConfig(
@@ -192,9 +204,15 @@ _LANE_CONFIGS: dict[EnumRuntimeLane, ModelLaneConfig] = {
         compose_files=(COMPOSE_FILE, _PROD_OVERLAY),
         compose_project="omnibase-infra-prod",
         postgres_container="omnibase-infra-prod-postgres",
+        # OMN-15181: must match the container_name: override in
+        # docker-compose.prod.yml, never the dev-lane bare name — the live
+        # PREFLIGHT-STOP defect was verify_running_image_digest inspecting
+        # the bare "omninode-runtime"/"runtime-effects" names, which exist on
+        # no real lane, so every prod deploy raised DigestMismatchError
+        # unconditionally regardless of actual outcome.
         runtime_health_targets=(
-            ("omninode-runtime", 28085),
-            ("runtime-effects", 28086),
+            ("omninode-prod-runtime", 28085),
+            ("omninode-prod-runtime-effects", 28086),
         ),
     ),
 }
@@ -203,6 +221,57 @@ _LANE_CONFIGS: dict[EnumRuntimeLane, ModelLaneConfig] = {
 def lane_config_for(lane: EnumRuntimeLane) -> ModelLaneConfig:
     """Return the compose/project/health configuration for a runtime lane."""
     return _LANE_CONFIGS[lane]
+
+
+# OMN-15181 round 4 (Finding 11): single shared source mapping a canonical
+# requested service name to its position in every lane's ``runtime_health_targets``
+# tuple (see ``_LANE_CONFIGS`` above -- each lane orders its targets
+# (runtime, runtime-effects)). Consumed by both ``resolve_stability_ready_digest``
+# and ``verify_running_image_digest`` so per-service digest resolution never
+# forks a second, independently-drifting copy of "which index is which
+# service" -- the same discipline ``PROD_IMAGE_ENV_VAR_FOR_SERVICE`` already
+# established for the compose image-env override.
+SERVICE_HEALTH_TARGET_INDEX: dict[str, int] = {
+    "omninode-runtime": 0,
+    "runtime-effects": 1,
+}
+
+
+def _health_target_container(lane: EnumRuntimeLane, service: str) -> str:
+    """Return the lane-qualified container name for a canonical service name.
+
+    Fails loud (``RuntimeError``) on an unknown service rather than silently
+    defaulting to index 0 -- the exact live defect this fix closes: every
+    prod stability-digest check was comparing against the RUNTIME container
+    regardless of which service the request actually targeted, wrongly
+    rejecting a runtime-effects command carrying its own (genuinely
+    stability-proven) effects digest.
+    """
+    index = SERVICE_HEALTH_TARGET_INDEX.get(service)
+    if index is None:
+        raise RuntimeError(
+            f"no runtime_health_targets mapping for service {service!r}; known "
+            f"services: {sorted(SERVICE_HEALTH_TARGET_INDEX)}"
+        )
+    container_name, _ = lane_config_for(lane).runtime_health_targets[index]
+    return container_name
+
+
+def resolve_prod_target_service(cmd: ModelRebuildRequested) -> str:
+    """Return the single image-bearing service a prod request targets.
+
+    Mirrors ``_resolve_prod_image_env``'s target-service resolution so the
+    stability-digest guard and post-deploy verification check the SAME
+    service the deploy actually touches. Falls back to the pre-round-4
+    default (``"omninode-runtime"``) when the request does not name exactly
+    one image-bearing service (e.g. an empty-``services`` full-scope
+    deploy) -- disambiguating a single shared digest across multiple
+    services is out of scope for this fix.
+    """
+    candidates = [s for s in cmd.services if s in PROD_IMAGE_ENV_VAR_FOR_SERVICE]
+    if len(candidates) == 1:
+        return candidates[0]
+    return "omninode-runtime"
 
 
 def _compose_file_args(lane: EnumRuntimeLane) -> list[str]:
@@ -344,7 +413,7 @@ def _parse_runtime_policy_env_value(value: str) -> str:
     return tokens[0].split("=", 1)[1]
 
 
-def _compose_env() -> dict[str, str]:
+def _compose_env(extra_env: Mapping[str, str] | None = None) -> dict[str, str]:
     env = dict(os.environ)
     for key, value in _load_runtime_policy_env().items():
         env.setdefault(key, value)
@@ -363,6 +432,12 @@ def _compose_env() -> dict[str, str]:
     }
     for key, value in defaults.items():
         env.setdefault(key, value)
+    # OMN-15181 round 3: prod-lane image repoint overrides (PROD_*_IMAGE) win
+    # over any ambient os.environ value -- this is the one call site allowed
+    # to override rather than setdefault, since it carries the caller's
+    # explicit per-dispatch pinned-image resolution.
+    if extra_env:
+        env.update(extra_env)
     return env
 
 
@@ -449,6 +524,43 @@ def _compose_service_states(
             exit_code if isinstance(exit_code, int) else None,
         )
     return states
+
+
+def _container_image_id(container_name: str) -> str | None:
+    """Return the image id (``sha256:...``) a running container was created from.
+
+    Uses ``docker inspect --format {{.Image}} <container>`` — a
+    CONTAINER-inspect field. ``.RepoDigests`` exists only on IMAGE-inspect
+    objects (and is empty for locally-built images that were never pushed to
+    a registry, which is the normal case for the stability-test artifact) —
+    running a ``.RepoDigests``-based format against a container always fails
+    with "map has no entry for key RepoDigests" (OMN-15181 round-2 defect,
+    live-reproduced on omninode-pc). Both digest-verification call sites
+    (``resolve_stability_ready_digest``, ``verify_running_image_digest``)
+    share this one helper — no forked second implementation.
+
+    Returns ``None`` (fail-closed via the caller) when the container cannot
+    be inspected.
+    """
+    result = _run(
+        ["docker", "inspect", "--format", "{{.Image}}", container_name],
+        timeout=PHASE_TIMEOUTS[Phase.VERIFICATION],
+    )
+    if result.returncode != 0:
+        logger.warning(
+            "_container_image_id: could not inspect %s: %s",
+            container_name,
+            result.stderr.strip() or result.stdout.strip(),
+        )
+        return None
+    observed = result.stdout.strip()
+    if not observed:
+        logger.warning(
+            "_container_image_id: empty image id for %s",
+            container_name,
+        )
+        return None
+    return observed
 
 
 def _service_satisfied(state: str, exit_code: int | None) -> bool:
@@ -878,12 +990,28 @@ class DeployExecutor:
             self._pull_pinned_image(image_digest, lane)
             if scope == Scope.FULL:
                 self._compose_up(Phase.CORE, Scope.CORE, [], on_phase_update, lane=lane)
+                runtime_services = services_for_scope(Scope.RUNTIME)
                 self._compose_up(
-                    Phase.RUNTIME, Scope.RUNTIME, [], on_phase_update, lane=lane
+                    Phase.RUNTIME,
+                    Scope.RUNTIME,
+                    [],
+                    on_phase_update,
+                    lane=lane,
+                    extra_env=self._resolve_prod_image_env(
+                        image_digest, runtime_services
+                    ),
                 )
                 return services_for_scope(Scope.FULL)
-            self._compose_up(phase, scope, services, on_phase_update, lane=lane)
-            return services if services else services_for_scope(scope)
+            target_services = services if services else services_for_scope(scope)
+            prod_env = (
+                {}
+                if scope == Scope.CORE
+                else self._resolve_prod_image_env(image_digest, target_services)
+            )
+            self._compose_up(
+                phase, scope, services, on_phase_update, lane=lane, extra_env=prod_env
+            )
+            return target_services
 
         if scope == Scope.FULL:
             # Build images first (both scopes), then bring them up.
@@ -906,65 +1034,204 @@ class DeployExecutor:
         return services if services else services_for_scope(scope)
 
     def _pull_pinned_image(self, image_digest: str, lane: EnumRuntimeLane) -> None:
-        """Pull the exact stability-proven image digest for a prod deploy.
+        """Resolve the exact stability-proven image digest for a prod deploy.
 
-        Production never rebuilds from a ref; it resolves and pulls the pinned
-        digest so the artifact is byte-identical to the one proven in
-        stability-test.
+        Local-presence-first (OMN-15181 round 2): the granted ``image_digest``
+        is a bare image ID (``sha256:...``), not a registry reference, and the
+        stability-proven artifact is normally a ``docker compose build``
+        output that was never pushed to any registry — a literal
+        ``docker pull <sha256:...>`` is an invalid reference on its own and
+        always fails (live-reproduced 2026-07-26 on omninode-pc: "pull access
+        denied for sha256, repository does not exist").
+
+        Resolution order:
+
+        1. Local presence — ``docker image inspect <image_digest>``. If the
+           image already exists on this host, use it as-is; no pull, no
+           registry required. This is the normal case.
+        2. Registry fallback — only attempted when
+           ``DEPLOY_AGENT_PROD_IMAGE_REGISTRY_REF`` names a real
+           ``repo:tag``/``repo@sha256:...`` reference; pulls that reference,
+           then re-inspects locally to confirm the pulled image actually
+           matches ``image_digest``.
+        3. Fail loud — neither locally present nor a registry reference
+           configured: raise ``RuntimeError`` naming the gap. Never silently
+           proceeds with a possibly-wrong image.
         """
-        result = _run(
-            ["docker", "pull", image_digest],
+        inspect_result = _run(
+            ["docker", "image", "inspect", image_digest],
             timeout=PHASE_TIMEOUTS[Phase.RUNTIME],
         )
-        if result.returncode != 0:
+        if inspect_result.returncode == 0:
+            logger.info(
+                "_pull_pinned_image: digest %s already present locally for lane "
+                "%s (compose-built artifact, no registry pull needed)",
+                image_digest,
+                lane.value,
+            )
+            return
+
+        registry_ref = os.environ.get(
+            "DEPLOY_AGENT_PROD_IMAGE_REGISTRY_REF", ""
+        ).strip()
+        if not registry_ref:
             raise RuntimeError(
-                f"docker pull {image_digest} failed for lane {lane.value}: "
-                f"{result.stderr.strip() or result.stdout.strip()}"
+                f"pinned image digest {image_digest} is not present locally for "
+                f"lane {lane.value}, and no registry reference is configured "
+                "(DEPLOY_AGENT_PROD_IMAGE_REGISTRY_REF) to pull it from; a "
+                "docker-compose-build-only artifact must already exist locally "
+                f"on this host: {inspect_result.stderr.strip() or inspect_result.stdout.strip()}"
+            )
+
+        pull_result = _run(
+            ["docker", "pull", registry_ref],
+            timeout=PHASE_TIMEOUTS[Phase.RUNTIME],
+        )
+        if pull_result.returncode != 0:
+            raise RuntimeError(
+                f"docker pull {registry_ref} failed for lane {lane.value}: "
+                f"{pull_result.stderr.strip() or pull_result.stdout.strip()}"
+            )
+
+        verify_result = _run(
+            ["docker", "image", "inspect", image_digest],
+            timeout=PHASE_TIMEOUTS[Phase.RUNTIME],
+        )
+        if verify_result.returncode != 0:
+            raise RuntimeError(
+                f"pulled {registry_ref} for lane {lane.value} but the resulting "
+                f"local image does not match pinned digest {image_digest}: "
+                f"{verify_result.stderr.strip() or verify_result.stdout.strip()}"
             )
         logger.info(
-            "_pull_pinned_image: pulled pinned digest %s for lane %s",
+            "_pull_pinned_image: pulled %s and verified digest %s for lane %s",
+            registry_ref,
             image_digest,
             lane.value,
         )
 
-    def verify_running_image_digest(
-        self, *, lane: EnumRuntimeLane, expected_digest: str
-    ) -> None:
-        """Verify the running runtime container's image digest == requested.
+    def _resolve_local_image_reference(self, image_digest: str) -> str:
+        """Return a locally-present ``repository:tag`` reference for a pinned digest.
 
-        FAILS CLOSED (raises ``DigestMismatchError``) on any mismatch. Must run
-        before health checks so a lane is never marked healthy while serving an
-        artifact that does not match the pinned digest.
+        OMN-15181 round 3 (Finding 9): the granted ``image_digest`` is a bare
+        image id (``sha256:...``), which is never a valid value for a compose
+        ``image:`` field or a ``docker pull``/``docker run`` reference on its
+        own. ``_pull_pinned_image`` only proves the id is present somewhere in
+        the local docker store (normally under the stability-test tag, since
+        that is where the artifact was built); this method resolves an actual
+        ``RepoTags`` entry for that id so the caller can repoint the prod
+        compose ``image:`` field at it declaratively — no ``docker tag``/retag
+        command, no mutation of the local docker store.
+
+        Raises ``RuntimeError`` (fail loud) when the id cannot be inspected or
+        carries no usable repository:tag reference (e.g. a dangling image)
+        rather than silently proceeding with an unresolvable pin.
         """
-        config = lane_config_for(lane)
-        runtime_container, _ = config.runtime_health_targets[0]
         result = _run(
             [
                 "docker",
+                "image",
                 "inspect",
                 "--format",
-                "{{index .Image}}{{range .RepoDigests}} {{.}}{{end}}",
-                runtime_container,
+                '{{join .RepoTags ","}}',
+                image_digest,
             ],
-            timeout=PHASE_TIMEOUTS[Phase.VERIFICATION],
+            timeout=PHASE_TIMEOUTS[Phase.RUNTIME],
         )
         if result.returncode != 0:
-            raise DigestMismatchError(
-                f"could not inspect running image digest for {runtime_container} "
-                f"(lane {lane.value}): {result.stderr.strip() or result.stdout.strip()}"
+            raise RuntimeError(
+                f"could not resolve a local repository:tag reference for pinned "
+                f"digest {image_digest}: "
+                f"{result.stderr.strip() or result.stdout.strip()}"
             )
-        observed = result.stdout.strip()
-        if expected_digest not in observed:
+        tags = [
+            tag
+            for tag in result.stdout.strip().split(",")
+            if tag and tag != "<none>:<none>"
+        ]
+        if not tags:
+            raise RuntimeError(
+                f"pinned digest {image_digest} is present locally but carries no "
+                "usable repository:tag reference (RepoTags empty/dangling) — "
+                "cannot repoint the prod compose image field at it"
+            )
+        return str(tags[0])
+
+    def _resolve_prod_image_env(
+        self, image_digest: str, services: list[str]
+    ) -> dict[str, str]:
+        """Return the prod compose env-var overrides for the given services.
+
+        Only services present in ``PROD_IMAGE_ENV_VAR_FOR_SERVICE`` (the prod
+        runtime services with a parameterized ``image:`` field) get an
+        override; other services (e.g. core infra) are untouched. Returns an
+        empty dict — no pinned-image resolution attempted — when no target
+        service needs one, so a core-only scope never requires the digest to
+        carry a usable local tag.
+        """
+        targets = [s for s in services if s in PROD_IMAGE_ENV_VAR_FOR_SERVICE]
+        if not targets:
+            return {}
+        reference = self._resolve_local_image_reference(image_digest)
+        return {
+            PROD_IMAGE_ENV_VAR_FOR_SERVICE[service]: reference for service in targets
+        }
+
+    def resolve_stability_ready_digest(
+        self, service: str = "omninode-runtime"
+    ) -> str | None:
+        """Return the image id currently serving ``service`` in stability-test.
+
+        This is the boundary-level source of truth for "stability-proven"
+        consumed by ``assert_prod_request_has_stability_digest``: a digest
+        counts as READY exactly when it is the image id currently running in
+        stability-test for the REQUESTED service — resolved per-service
+        (OMN-15181 round 4, Finding 11) via the single shared
+        ``_health_target_container`` mapping, no second hardcoded map.
+        Defaults to ``"omninode-runtime"`` (the pre-round-4 behavior) when no
+        service is given. Returns ``None`` (fail-closed via the caller) when
+        the stability-test container for that service cannot be inspected.
+        """
+        container = _health_target_container(EnumRuntimeLane.STABILITY_TEST, service)
+        return _container_image_id(container)
+
+    def verify_running_image_digest(
+        self,
+        *,
+        lane: EnumRuntimeLane,
+        expected_digest: str,
+        service: str = "omninode-runtime",
+    ) -> None:
+        """Verify the running ``service`` container's image id == requested.
+
+        FAILS CLOSED (raises ``DigestMismatchError``) on any mismatch. Must run
+        before health checks so a lane is never marked healthy while serving an
+        artifact that does not match the pinned digest. Resolved per-service
+        (OMN-15181 round 4, Finding 11) so a targeted runtime-effects deploy is
+        verified against its own container, not the runtime container by
+        default (``service`` defaults to ``"omninode-runtime"``, the
+        pre-round-4 behavior, when the caller does not name one).
+        """
+        container = _health_target_container(lane, service)
+        observed = _container_image_id(container)
+        if observed is None:
             raise DigestMismatchError(
-                f"running container {runtime_container} image digest {observed!r} "
-                f"does not contain requested digest {expected_digest!r} "
-                f"(lane {lane.value}); failing closed"
+                f"could not inspect running image id for {container} "
+                f"(lane {lane.value}, service {service!r}); failing closed"
+            )
+        if observed != expected_digest:
+            raise DigestMismatchError(
+                f"running container {container} image id {observed!r} "
+                f"does not match requested digest {expected_digest!r} "
+                f"(lane {lane.value}, service {service!r}); failing closed"
             )
         logger.info(
-            "verify_running_image_digest: %s matches requested digest %s (lane %s)",
-            runtime_container,
+            "verify_running_image_digest: %s matches requested digest %s "
+            "(lane %s, service %s)",
+            container,
             expected_digest,
             lane.value,
+            service,
         )
 
     def deploy_and_verify(
@@ -973,14 +1240,35 @@ class DeployExecutor:
         lane: EnumRuntimeLane,
         expected_digest: str,
         on_phase_update: PhaseCallback,
+        service: str = "omninode-runtime",
     ) -> list[ModelHealthCheck]:
         """Verify the running digest, then run health checks.
 
         Digest verification runs first and fails closed: a mismatch aborts
         before any health check, so a lane serving the wrong artifact can never
-        be reported healthy.
+        be reported healthy. ``service`` (OMN-15181 round 4, Finding 11)
+        selects which container is checked — a targeted runtime-effects
+        deploy must verify the effects container, not the runtime container
+        by default.
+
+        OMN-15181: a digest-mismatch abort must mark ``Phase.VERIFICATION``
+        FAILED (not leave it untouched/absent from ``phase_results``) so the
+        published completion event carries a truthful status — a swallowed
+        verification phase with all other phases SUCCESS would otherwise let
+        ``ModelRebuildCompleted.status`` compute "success" for a deploy that
+        actually failed verification (job.errors also carries the real error,
+        but phase_results must not contradict it). No rollback/recreate is
+        attempted here or anywhere in this module on a verify failure — the
+        job is reported failed, never silently retried or half-recreated.
         """
-        self.verify_running_image_digest(lane=lane, expected_digest=expected_digest)
+        on_phase_update(Phase.VERIFICATION, PhaseStatus.IN_PROGRESS)
+        try:
+            self.verify_running_image_digest(
+                lane=lane, expected_digest=expected_digest, service=service
+            )
+        except DigestMismatchError:
+            on_phase_update(Phase.VERIFICATION, PhaseStatus.FAILED)
+            raise
         return self.verify(on_phase_update=on_phase_update, lane=lane)
 
     @staticmethod
@@ -1151,6 +1439,7 @@ class DeployExecutor:
         on_phase_update: PhaseCallback,
         *,
         lane: EnumRuntimeLane = EnumRuntimeLane.DEV,
+        extra_env: Mapping[str, str] | None = None,
     ) -> None:
         on_phase_update(phase, PhaseStatus.IN_PROGRESS)
         timeout = PHASE_TIMEOUTS.get(phase, 300)
@@ -1182,7 +1471,7 @@ class DeployExecutor:
         if requested_services:
             cmd.extend(requested_services)
 
-        result = _run(cmd, timeout=timeout, env=_compose_env())
+        result = _run(cmd, timeout=timeout, env=_compose_env(extra_env))
         compose_up_error = result.stderr.strip() if result.returncode != 0 else ""
         if compose_up_error:
             logger.warning(
@@ -1225,7 +1514,7 @@ class DeployExecutor:
                     capture_output=True,
                     text=True,
                     check=False,
-                    env=_compose_env(),
+                    env=_compose_env(extra_env),
                 )
                 if start_result.returncode == 0:
                     logger.info("docker start %s: ok", name)
@@ -1407,7 +1696,7 @@ class DeployExecutor:
                     "-sS",
                     "--max-time",
                     "10",
-                    f"http://localhost:{port}/health",
+                    f"http://localhost:{port}/health",  # url-authority-ok: pre-existing host-loopback health check, deploy-agent curls its own host's lane-scoped port already resolved from lane_config_for; out of scope for OMN-15181 round-2 digest fix
                 ],
                 timeout=10,
             )
@@ -1415,7 +1704,7 @@ class DeployExecutor:
             checks.append(
                 ModelHealthCheck(
                     service=service,
-                    endpoint=f"http://localhost:{port}/health",
+                    endpoint=f"http://localhost:{port}/health",  # url-authority-ok: see loopback rationale above
                     status="pass" if _runtime_health_passed(result) else "fail",
                     latency_ms=latency,
                 )

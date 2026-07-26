@@ -430,6 +430,10 @@ class HandlerGitHubApiPoll:
                     "pr_number": pr_number,
                     "triage_state": triage,
                     "title": str(pr.get("title", "")),
+                    # is_draft mirrors the pr["draft"] read already used by
+                    # compute_triage_state above -- OMN-14394 seam gap fix,
+                    # matches ModelOpenPrSummary.is_draft (omnimarket reader).
+                    "is_draft": pr.get("draft") is True,
                     "partition_key": f"{repo}:{pr_number}",
                 }
                 pr_events.append(event_payload)

@@ -41,6 +41,16 @@
 #   declares a projection surface, its schema migration must be eligible for the
 #   same deploy-time materialization path as every other marketplace node.
 #
+# RECURRING DRIFT (OMN-14975, 6th occurrence — see OMN-14556, OMN-14555,
+# OMN-13805, OMN-13746, OMN-13020, OMN-13401): this script and its --check
+# mode only run on the omnibase_infra side, so drift is always DISCOVERED
+# here (by whichever unrelated omnibase_infra commit happens next) but was
+# never PREVENTED at its source. The structural fix is
+# omnimarket's `.github/workflows/node-migration-vendor-parity-gate.yml`,
+# which fails an omnimarket PR touching migrations/*.sql unless the vendored
+# copy already exists here at dev tip — so a new drift-causing merge can no
+# longer land in omnimarket in the first place.
+#
 # USAGE
 #   scripts/sync-node-migrations.sh            # vendor (writes files)
 #   scripts/sync-node-migrations.sh --check    # CI mode: fail if drift exists
@@ -105,7 +115,7 @@ if [ -z "${OMK_RESOLVED}" ]; then
     # this check via SYNC_NODE_MIGRATIONS_SKIP_UNRESOLVABLE=1.
     if [ "${SYNC_NODE_MIGRATIONS_SKIP_UNRESOLVABLE:-0}" = "1" ]; then
       echo "[sync-node-migrations] SYNC_NODE_MIGRATIONS_SKIP_UNRESOLVABLE=1 — skipping unresolvable-source error." >&2
-      exit 0
+      exit 0 # fail-loud-ok: OMN-13062 reviewed operator escape hatch; the default path is exit 2 (fail-closed), this exit 0 only fires on an explicit SYNC_NODE_MIGRATIONS_SKIP_UNRESOLVABLE=1 opt-in that logs to stderr — not a silent bypass.
     fi
     exit 2
   fi

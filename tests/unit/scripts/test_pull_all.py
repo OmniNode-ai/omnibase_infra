@@ -5,6 +5,7 @@
 from __future__ import annotations
 
 import os
+import shutil
 import subprocess
 import tempfile
 from pathlib import Path
@@ -15,6 +16,50 @@ SCRIPTS_DIR = Path(__file__).resolve().parents[3] / "scripts"
 PULL_ALL = SCRIPTS_DIR / "pull-all.sh"
 PLIST = SCRIPTS_DIR / "ai.omninode.bare-clone-sync.plist"
 INSTALL_SCRIPT = SCRIPTS_DIR / "install-bare-clone-sync.sh"
+
+
+def _hermetic_git_env() -> dict[str, str]:
+    """Environment for child ``git`` calls, hermetic against a pre-push hook.
+
+    A ``git push`` pre-push hook (the OMN-13973 governed full-suite escalation
+    that runs this suite when ``src/omnibase_infra/topics/`` changes) exports
+    ``GIT_DIR`` / ``GIT_INDEX_FILE`` / ``GIT_WORK_TREE`` into its environment.
+    Those variables take precedence over BOTH the ``cwd=`` argument and
+    ``git -C``, so an inherited ``GIT_DIR`` would silently redirect every
+    ``git init``/``add``/``commit`` in these fixtures onto the REAL surrounding
+    worktree -- rewriting its HEAD to a ``t@t`` "init" commit and dropping its
+    tracked files. Stripping every ``GIT_*`` var makes each child git resolve its
+    repository purely from its target directory. The tests/unit autouse fixture
+    strips these globally too; this keeps the fixture self-contained. (OMN-14744)
+    """
+    return {k: v for k, v in os.environ.items() if not k.startswith("GIT_")}
+
+
+def _assert_under_tmp(path: Path) -> Path:
+    """Guard: refuse any git op whose target is not under the pytest tmp sandbox.
+
+    Belt-and-suspenders companion to :func:`_hermetic_git_env`. Runs BEFORE the
+    destructive ``add``/``commit`` (``git init`` is first and creates ``.git`` in
+    the target), so if the env strip ever regresses this fails loud and CLOSED
+    instead of corrupting the surrounding worktree. (OMN-14744)
+    """
+    resolved = path.resolve()
+    tmp_root = Path(tempfile.gettempdir()).resolve()
+    assert resolved == tmp_root or tmp_root in resolved.parents, (
+        f"OMN-14744 guard: refusing git op on {resolved} outside tmp sandbox "
+        f"{tmp_root} -- a leaked GIT_DIR/GIT_WORK_TREE would corrupt the real repo"
+    )
+    return resolved
+
+
+def _git(args: list[str], *, cwd: Path) -> None:
+    """Run ``git`` hermetically inside ``cwd`` (asserted under the tmp sandbox)."""
+    target = _assert_under_tmp(cwd)
+    subprocess.run(
+        ["git", "-C", str(target), *args],
+        check=True,
+        env=_hermetic_git_env(),
+    )
 
 
 def _make_omniclaude_source(
@@ -46,47 +91,33 @@ def _make_omniclaude_source(
     # Initialize as a git repo so `git archive HEAD` works. Also set up a
     # bare upstream so `git pull --ff-only` succeeds (otherwise pull-all.sh
     # reports the repo as FAILED and exits 1, which is unrelated to the
-    # cache-refresh logic we are testing).
-    subprocess.run(
-        ["git", "init", "-q", "--initial-branch=main"], cwd=omniclaude, check=True
+    # cache-refresh logic we are testing). All git ops run hermetically inside
+    # tmp (see _git / _hermetic_git_env) so a pre-push-hook GIT_DIR leak can
+    # never redirect them onto the surrounding worktree. (OMN-14744)
+    _git(["init", "-q", "--initial-branch=main"], cwd=omniclaude)
+    # Fail CLOSED if the repo did not actually land in tmp: `git init` above must
+    # have created omniclaude/.git. If a leaked GIT_DIR ever redirected init, no
+    # .git exists here and we abort BEFORE the destructive add/commit.
+    assert (omniclaude / ".git").is_dir(), (
+        f"OMN-14744 guard: `git init` did not create {omniclaude / '.git'} -- a "
+        "leaked GIT_DIR redirected it onto another repository"
     )
-    subprocess.run(
-        ["git", "-c", "user.email=t@t", "-c", "user.name=t", "add", "."],
+    _git(["-c", "user.email=t@t", "-c", "user.name=t", "add", "."], cwd=omniclaude)
+    _git(
+        ["-c", "user.email=t@t", "-c", "user.name=t", "commit", "-q", "-m", "init"],
         cwd=omniclaude,
-        check=True,
-    )
-    subprocess.run(
-        [
-            "git",
-            "-c",
-            "user.email=t@t",
-            "-c",
-            "user.name=t",
-            "commit",
-            "-q",
-            "-m",
-            "init",
-        ],
-        cwd=omniclaude,
-        check=True,
     )
 
     upstream = root / "omniclaude.git"
-    subprocess.run(
-        ["git", "init", "-q", "--bare", "--initial-branch=main", str(upstream)],
-        check=True,
+    _git(
+        ["init", "-q", "--bare", "--initial-branch=main", str(upstream)],
+        cwd=root,
     )
-    subprocess.run(
-        ["git", "remote", "add", "origin", str(upstream)], cwd=omniclaude, check=True
-    )
-    subprocess.run(
-        ["git", "push", "-q", "-u", "origin", "main"], cwd=omniclaude, check=True
-    )
-    subprocess.run(["git", "switch", "-q", "-c", "dev"], cwd=omniclaude, check=True)
-    subprocess.run(
-        ["git", "push", "-q", "-u", "origin", "dev"], cwd=omniclaude, check=True
-    )
-    subprocess.run(["git", "switch", "-q", "main"], cwd=omniclaude, check=True)
+    _git(["remote", "add", "origin", str(upstream)], cwd=omniclaude)
+    _git(["push", "-q", "-u", "origin", "main"], cwd=omniclaude)
+    _git(["switch", "-q", "-c", "dev"], cwd=omniclaude)
+    _git(["push", "-q", "-u", "origin", "dev"], cwd=omniclaude)
+    _git(["switch", "-q", "main"], cwd=omniclaude)
     return omniclaude
 
 
@@ -94,21 +125,10 @@ def _commit_file(repo: Path, rel_path: str, contents: str, message: str) -> None
     path = repo / rel_path
     path.parent.mkdir(parents=True, exist_ok=True)
     path.write_text(contents)
-    subprocess.run(["git", "add", rel_path], cwd=repo, check=True)
-    subprocess.run(
-        [
-            "git",
-            "-c",
-            "user.email=t@t",
-            "-c",
-            "user.name=t",
-            "commit",
-            "-q",
-            "-m",
-            message,
-        ],
+    _git(["add", rel_path], cwd=repo)
+    _git(
+        ["-c", "user.email=t@t", "-c", "user.name=t", "commit", "-q", "-m", message],
         cwd=repo,
-        check=True,
     )
 
 
@@ -136,8 +156,11 @@ def _run_pull_all(
     omni_home: Path, fake_home: Path, repos: list[str] | None = None
 ) -> subprocess.CompletedProcess[str]:
     """Invoke pull-all.sh with controlled OMNI_HOME and HOME."""
+    # Build from the hermetic (GIT_*-stripped) env: pull-all.sh shells out to git
+    # on repos under OMNI_HOME, so an inherited GIT_DIR from a pre-push hook would
+    # likewise redirect its git ops onto the real worktree. (OMN-14744)
     env = {
-        **os.environ,
+        **_hermetic_git_env(),
         "OMNI_HOME": str(omni_home),
         "HOME": str(fake_home),
         "LANG": "C",
@@ -189,13 +212,13 @@ class TestPullAllScript:
         omniclaude = _make_omniclaude_source(omni_home)
         upstream = omni_home / "omniclaude.git"
         writer = tmp_path / "writer"
-        subprocess.run(["git", "clone", "-q", str(upstream), str(writer)], check=True)
+        _git(["clone", "-q", str(upstream), str(writer)], cwd=tmp_path)
 
         _commit_file(writer, "main-only.txt", "main\n", "main update")
-        subprocess.run(["git", "push", "-q", "origin", "main"], cwd=writer, check=True)
-        subprocess.run(["git", "switch", "-q", "dev"], cwd=writer, check=True)
+        _git(["push", "-q", "origin", "main"], cwd=writer)
+        _git(["switch", "-q", "dev"], cwd=writer)
         _commit_file(writer, "dev-only.txt", "dev\n", "dev update")
-        subprocess.run(["git", "push", "-q", "origin", "dev"], cwd=writer, check=True)
+        _git(["push", "-q", "origin", "dev"], cwd=writer)
 
         result = _run_pull_all(omni_home, fake_home)
 
@@ -251,7 +274,7 @@ class TestPullAllScript:
                 ["bash", str(PULL_ALL), "nonexistent_repo_xyz"],
                 capture_output=True,
                 text=True,
-                env={**os.environ, "OMNI_HOME": tmpdir},
+                env={**_hermetic_git_env(), "OMNI_HOME": tmpdir},
                 check=False,
             )
             assert result.returncode == 0, (
@@ -313,13 +336,14 @@ class TestPullAllScript:
                 ["git", "init", "--bare", str(repo_path)],
                 capture_output=True,
                 check=True,
+                env=_hermetic_git_env(),
             )
 
             result = subprocess.run(
                 ["bash", str(PULL_ALL), repo_name],
                 capture_output=True,
                 text=True,
-                env={**os.environ, "OMNI_HOME": tmpdir},
+                env={**_hermetic_git_env(), "OMNI_HOME": tmpdir},
                 check=False,
             )
             # Script should complete (exit 0 or 1) without crashing.
@@ -496,3 +520,97 @@ class TestInstallScript:
     def test_install_script_uses_launchctl(self) -> None:
         content = INSTALL_SCRIPT.read_text()
         assert "launchctl" in content
+
+
+# Minimal, hermetic pre-commit config: a single `repo: local` hook with
+# `language: system` needs no network and no environment build, so
+# `pre-commit install-hooks` is effectively a no-op in tests.
+_PRECOMMIT_CONFIG = """repos:
+  - repo: local
+    hooks:
+      - id: noop
+        name: noop
+        entry: "true"
+        language: system
+        pass_filenames: false
+"""
+
+
+@pytest.mark.unit
+class TestPreCommitHookInstall:
+    """pull-all.sh installs the pre-commit git hook in repos that ship a config.
+
+    Regression guard for the OMN-14099 bypass leak: the hook was never installed
+    in canonical clones, so every .pre-commit-config.yaml was decoration and CI
+    became the first (most expensive) catch layer.
+    """
+
+    @pytest.fixture(autouse=True)
+    def _require_precommit(self) -> None:
+        if shutil.which("pre-commit") is None:
+            pytest.skip("pre-commit binary not on PATH")
+
+    @staticmethod
+    def _hook_path(repo: Path) -> Path:
+        return repo / ".git" / "hooks" / "pre-commit"
+
+    def test_installs_hook_when_config_present(self, tmp_path: Path) -> None:
+        """A repo with a .pre-commit-config.yaml gets a pre-commit-managed hook."""
+        omni_home = tmp_path / "omni_home"
+        omni_home.mkdir()
+        fake_home = tmp_path / "home"
+        fake_home.mkdir()
+
+        omniclaude = _make_omniclaude_source(
+            omni_home,
+            file_contents={".pre-commit-config.yaml": _PRECOMMIT_CONFIG},
+        )
+        # No hook before the run.
+        assert not self._hook_path(omniclaude).exists()
+
+        result = _run_pull_all(omni_home, fake_home)
+        assert result.returncode == 0, (
+            f"stdout={result.stdout!r} stderr={result.stderr!r}"
+        )
+        assert "HOOK     omniclaude" in result.stdout, result.stdout
+
+        hook = self._hook_path(omniclaude)
+        assert hook.exists(), "pre-commit hook was not written"
+        assert "File generated by pre-commit" in hook.read_text(), (
+            "hook file is not pre-commit-managed"
+        )
+
+    def test_second_run_is_idempotent_noop(self, tmp_path: Path) -> None:
+        """Once installed, a subsequent pull-all does not reinstall the hook."""
+        omni_home = tmp_path / "omni_home"
+        omni_home.mkdir()
+        fake_home = tmp_path / "home"
+        fake_home.mkdir()
+
+        _make_omniclaude_source(
+            omni_home,
+            file_contents={".pre-commit-config.yaml": _PRECOMMIT_CONFIG},
+        )
+
+        first = _run_pull_all(omni_home, fake_home)
+        assert first.returncode == 0
+        assert "HOOK     omniclaude" in first.stdout
+
+        second = _run_pull_all(omni_home, fake_home)
+        assert second.returncode == 0
+        # Already pre-commit-managed -> the install branch is skipped entirely.
+        assert "HOOK     omniclaude" not in second.stdout, second.stdout
+
+    def test_no_config_means_no_hook(self, tmp_path: Path) -> None:
+        """A repo without a .pre-commit-config.yaml is left untouched."""
+        omni_home = tmp_path / "omni_home"
+        omni_home.mkdir()
+        fake_home = tmp_path / "home"
+        fake_home.mkdir()
+
+        omniclaude = _make_omniclaude_source(omni_home)  # defaults: no config
+
+        result = _run_pull_all(omni_home, fake_home)
+        assert result.returncode == 0
+        assert "HOOK     omniclaude" not in result.stdout
+        assert not self._hook_path(omniclaude).exists()

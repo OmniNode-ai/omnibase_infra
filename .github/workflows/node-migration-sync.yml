@@ -14,8 +14,9 @@
 #   redeploy and the golden-chain pattern_learning chain only passed via a live
 #   hot-fix (golden-chain sweep run12 Finding). This gate is the enforcement
 #   layer: every infra PR (and merge_group) re-runs the vendor --check against
-#   the current omnimarket dev tip, so an un-vendored or drifted node migration
-#   fails CI before merge.
+#   the current omnimarket dev tip, or an explicitly declared paired omnimarket
+#   PR branch, so an un-vendored or drifted node migration fails CI before
+#   merge without deadlocking market/infra cross-repo migration pairs.
 
 name: node-migration-sync
 
@@ -24,7 +25,12 @@ on:
     branches: [main, dev]
   push:
     branches: [main]
-  merge_group:
+
+concurrency:
+  # OMN-13949: cancel superseded PR runs to free saturated runners. merge_group
+  # entries carry a unique github.ref, so queue entries never cross-cancel.
+  group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
 
 permissions:
   contents: read
@@ -34,12 +40,15 @@ jobs:
     name: node-migration-sync
     runs-on: >-
       ${{
-        (github.event_name == 'pull_request' &&
-         github.event.pull_request.head.repo.full_name != github.repository)
+        ((github.event_name == 'pull_request' && github.base_ref == 'dev') ||
+         (github.event_name == 'pull_request' &&
+          github.event.pull_request.head.repo.full_name != github.repository))
         && fromJSON(vars.OMNI_PUBLIC_PR_RUNS_ON_JSON || '["ubuntu-latest"]')
         || fromJSON(vars.OMNI_TRUSTED_CI_RUNS_ON_JSON || '["self-hosted","omnibase-ci"]')
       }}
-    timeout-minutes: 5
+    # OMN-14017: sparse sibling checkouts can be slow when GitHub fetches stall
+    # under fleet egress saturation; keep the gate strict but allow retries.
+    timeout-minutes: 15
 
     steps:
       - name: Checkout omnibase_infra
@@ -47,11 +56,16 @@ jobs:
         with:
           fetch-depth: 1
 
+      - name: Resolve omnimarket migration source ref
+        id: resolve-omnimarket-ref
+        shell: bash
+        run: python3 scripts/resolve_node_migration_source_ref.py
+
       - name: Checkout omnimarket (sibling — node migration source of truth)
         uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
         with:
           repository: OmniNode-ai/omnimarket
-          ref: dev
+          ref: ${{ steps.resolve-omnimarket-ref.outputs.ref }}
           path: omnimarket-src
           token: ${{ secrets.OMNI_GITHUB_TOKEN || github.token }}
           # Sparse checkout: only the node tree carrying migrations/*.sql.
@@ -64,15 +78,15 @@ jobs:
         env:
           # The script's resolution order prefers OMNIMARKET_SRC (a repo root that
           # contains src/omnimarket/nodes). Point it at the sibling checkout so the
-          # gate compares the vendored tree against the omnimarket dev tip and never
-          # silently passes on an unresolvable source.
+          # gate compares the vendored tree against the resolved omnimarket source
+          # ref and never silently passes on an unresolvable source.
           OMNIMARKET_SRC: ${{ github.workspace }}/omnimarket-src
         run: |
           set -euo pipefail
           echo "::group::node migration vendor sync --check"
           if bash scripts/sync-node-migrations.sh --check; then
             echo "::endgroup::"
-            echo "::notice::node migration vendor tree is in sync with omnimarket dev tip."
+            echo "::notice::node migration vendor tree is in sync with omnimarket ref ${{ steps.resolve-omnimarket-ref.outputs.ref }}."
           else
             rc=$?
             echo "::endgroup::"
@@ -98,12 +112,15 @@ jobs:
     name: deployed-migration-tree-sync-logic
     runs-on: >-
       ${{
-        (github.event_name == 'pull_request' &&
-         github.event.pull_request.head.repo.full_name != github.repository)
+        ((github.event_name == 'pull_request' && github.base_ref == 'dev') ||
+         (github.event_name == 'pull_request' &&
+          github.event.pull_request.head.repo.full_name != github.repository))
         && fromJSON(vars.OMNI_PUBLIC_PR_RUNS_ON_JSON || '["ubuntu-latest"]')
         || fromJSON(vars.OMNI_TRUSTED_CI_RUNS_ON_JSON || '["self-hosted","omnibase-ci"]')
       }}
-    timeout-minutes: 15
+    # OMN-14017: setup-python-uv may recover after a transient git dependency
+    # fetch failure, then still need time to finish sync and run the logic tests.
+    timeout-minutes: 30
     steps:
       - name: Checkout omnibase_infra
         uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0

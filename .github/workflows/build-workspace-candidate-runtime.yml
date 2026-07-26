@@ -110,16 +110,28 @@ jobs:
           # The consuming repo (omnibase_infra) is itself a sibling for the
           # lock-pin preflight; symlink the checked-out tree in.
           ln -s "${GITHUB_WORKSPACE}" "${WORKSPACE_ROOT}/omnibase_infra"
-          # omnibase_spi is referenced by the lock-pin preflight too.
+          # omnibase_spi is referenced by the lock-pin preflight too. Keep the
+          # complete commit graph so ancestry checks can distinguish a valid
+          # clone-ahead state from unrelated SHA drift.
           for repo in omnibase_spi ${SIBLING_REPOS}; do
             echo "::group::clone ${repo}@${SIBLING_REF}"
-            git clone --depth 50 --branch "${SIBLING_REF}" \
+            git clone --filter=blob:none --branch "${SIBLING_REF}" \
               "https://github.com/OmniNode-ai/${repo}.git" \
               "${WORKSPACE_ROOT}/${repo}"
             echo "  ${repo} HEAD: $(git -C "${WORKSPACE_ROOT}/${repo}" rev-parse HEAD)"
             echo "::endgroup::"
           done
           echo "workspace_root=${WORKSPACE_ROOT}" >> "$GITHUB_OUTPUT"
+
+      # stage_workspace.sh runs the OMN-12977 sibling-lock-pin preflight
+      # (scripts/runtime_build/check_sibling_lock_pins.py), which imports pydantic
+      # (BaseModel/ConfigDict/Field). The actions/setup-python interpreter carries
+      # no project deps, so without this install the preflight dies with
+      # ModuleNotFoundError: No module named 'pydantic' and stage_workspace.sh
+      # exits 3 before the docker build ever runs (OMN-13985). Everything else the
+      # script imports is stdlib.
+      - name: Install sibling-lock-pin preflight deps (pydantic)
+        run: python3 -m pip install --upgrade 'pydantic>=2'
 
       - name: Stage workspace sibling trees into the build context
         env:

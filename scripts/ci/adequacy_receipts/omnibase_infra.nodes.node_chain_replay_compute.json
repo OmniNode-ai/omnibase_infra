@@ -1,0 +1,19 @@
+{
+  "branch_coverage_pct": 95.12,
+  "candidate_count": 6,
+  "coverage_target": 80.0,
+  "handler_module": "omnibase_infra.nodes.node_chain_replay_compute.handlers.handler_chain_replay",
+  "handler_module_sha256": "sha256:3023db4d7e45f38f27d8bf5b6f1656b38255b7e1500a1a933f4a7862b654487b",
+  "meets_target": true,
+  "node_id": "omnibase_infra.nodes.node_chain_replay_compute",
+  "receipt_schema": "adequacy_receipt.v1",
+  "recorded_at": "2026-07-20T02:44:56.372329+00:00",
+  "recorder_schema": "adequacy_receipt.v1",
+  "selected_count": 2,
+  "selected_input_hashes": [
+    "sha256:daf0e4fc9087e2a877b19aff0ec5c66a7c4d8de667ffffdae41d053868f520b1",
+    "sha256:f09fa6d0549a9dc9ae55f644dec13c02558bc38e2f24c77156e0142cbd6a7aa7"
+  ],
+  "uncovered_waiver": null,
+  "volatile_mask": []
+}

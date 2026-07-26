@@ -42,7 +42,12 @@ ExecStart=/bin/bash %h/Code/omni_home/omnibase_infra/scripts/worktree-gc.sh --ex
 # 2. Conservative docker/disk GC honoring the versioned keep-list.
 ExecStart=/bin/bash %h/Code/omni_home/omnibase_infra/scripts/disk-gc.sh --execute
 
-# 3. Watermark alert ratchet (non-zero exit on breach is expected; do not fail the unit).
+# 3. Conservative volume GC. Only unused anonymous volumes and unused ephemeral
+#    boot Redpanda volumes are removable; linked lane/runtime Redpanda volumes
+#    are never removed by this pass.
+ExecStart=/bin/bash %h/Code/omni_home/omnibase_infra/scripts/docker-volume-gc.sh --execute
+
+# 4. Watermark alert ratchet (non-zero exit on breach is expected; do not fail the unit).
 ExecStart=-/bin/bash %h/Code/omni_home/omnibase_infra/scripts/disk-watermark-check.sh --mount /data
 
 StandardOutput=journal

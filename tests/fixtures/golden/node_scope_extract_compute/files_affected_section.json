@@ -1,0 +1,31 @@
+{
+  "golden_version": "compute_golden.v1",
+  "input": {
+    "content": "# Plan\n\nFiles affected:\n- `src/handler.py`\n- `tests/test_handler.py`\n- `plugins/onex/skills/`\n",
+    "correlation_id": "00000000-0000-0000-0000-000000000006",
+    "output_path": "~/.claude/scope-manifest.json",
+    "plan_file_path": "plan_section.md"
+  },
+  "input_hash": "sha256:0bbfadfaf5bb36fccb7abee57fb967a9c3b1bbe28f39e6d5dcb73844c9b671b6",
+  "input_type": "ModelScopeExtractInput",
+  "output": {
+    "adjacent_files": [],
+    "correlation_id": "00000000-0000-0000-0000-000000000006",
+    "directories": [
+      "plugins/onex/skills/"
+    ],
+    "files": [
+      "src/handler.py",
+      "tests/test_handler.py"
+    ],
+    "output_path": "~/.claude/scope-manifest.json",
+    "plan_file_path": "plan_section.md",
+    "repos": [],
+    "systems": [
+      "skills"
+    ]
+  },
+  "output_type": "ModelScopeExtracted",
+  "scenario": "files_affected_section",
+  "volatile_mask": []
+}

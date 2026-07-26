@@ -11,13 +11,16 @@
 # Related Tickets:
 #   - OMN-9139: Deployed-artifact source-hash attestation
 #   - OMN-9122: runtime_sweep (consumes this signal)
+#   - OMN-14805: HandlerSourceAttestation now exposes canonical handle()
+#     dispatch entrypoint via a hand-flip from attest(), with helper behavior
+#     preserved by the canonical-shape flip proof.
 name: "node_runtime_source_attestor_effect"
 contract_name: "node_runtime_source_attestor_effect"
 node_name: "node_runtime_source_attestor_effect"
 contract_version:
   major: 1
   minor: 0
-  patch: 0
+  patch: 1
 node_version:
   major: 1
   minor: 0
@@ -117,7 +120,7 @@ metadata:
   author: "OmniNode Team"
   license: "MIT"
   created: "2026-05-19"
-  updated: "2026-05-19"
+  updated: "2026-07-19"
   tags:
     - effect
     - attestation

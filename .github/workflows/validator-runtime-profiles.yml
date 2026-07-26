@@ -15,21 +15,30 @@
 # config/validation/runtime_profiles_allowlist.yaml (drain tracked by OMN-12982); the
 # workflow passes that repo-local path explicitly. The gate blocks NEW orphans.
 #
-# Required status check context: "Runtime Profiles / validate".
+# MIGRATED INTO ci.yml (OMN-15108, OMN-14877/OMN-14430 fast-follow pattern):
+# the "Required status check context" comment above was aspirational, not
+# live — verified 2026-07-25 via `gh api .../branches/dev/protection/required_status_checks`
+# that omnibase_infra/dev's ONLY required context is "CI Summary"; this
+# workflow (its own github.run_id) was structurally invisible to that job's
+# poll of `actions/runs/${RUN_ID}/jobs`, so it never gated a merge. Its validate
+# step now runs UNCONDITIONALLY inside ci.yml (job: runtime-profiles-validator)
+# under the required "CI Summary" rollup. This file is retained
+# workflow_dispatch-only for manual/ad-hoc invocation.
 
 name: Runtime Profiles
 
 on:
-  push:
-    branches: [main, develop, dev, "hotfix/**"]
-  pull_request:
-    branches: [main, develop, dev]
-  merge_group:
-    branches: [main, develop, dev]
+  workflow_dispatch: {}
 
 env:
   PYTHON_VERSION: "3.12"
   UV_VERSION: "0.8.3"
+  # OMN-14017: this workflow runs a raw `uv sync` (not the hardened
+  # setup-python-uv composite), which otherwise inherits uv's 30s default and
+  # fails HARD on the first PyPI timeout under fleet egress saturation (WS-F).
+  # Match the composite's 600s so downloads ride out contention. Propagates to
+  # every uv invocation in the job.
+  UV_HTTP_TIMEOUT: "600"
 
 concurrency:
   group: runtime-profiles-${{ github.ref }}
@@ -41,9 +50,9 @@ jobs:
     # OMNI_RUNNER_SELECTOR_V1 - trusted events default to self-hosted omnibase-ci; pull_request defaults to ubuntu-latest
     runs-on: >-
       ${{
-        github.event_name != 'pull_request'
-        && fromJSON(vars.OMNI_TRUSTED_CI_RUNS_ON_JSON || '["self-hosted","omnibase-ci"]')
-        || fromJSON(vars.OMNI_PUBLIC_PR_RUNS_ON_JSON || '["ubuntu-latest"]')
+        github.event_name == 'pull_request'
+        && fromJSON(vars.OMNI_PUBLIC_PR_RUNS_ON_JSON || '["ubuntu-latest"]')
+        || fromJSON((github.event_name == 'merge_group' && vars.OMNI_REQUIRED_CI_RUNS_ON_JSON) || vars.OMNI_TRUSTED_CI_RUNS_ON_JSON || '["self-hosted","omnibase-ci"]')
       }}
     timeout-minutes: 10
 
@@ -62,7 +71,14 @@ jobs:
           version: ${{ env.UV_VERSION }}
 
       - name: Install dependencies
-        run: uv sync --all-extras
+        run: |
+          for attempt in 1 2 3; do
+            uv sync --all-extras && break
+            if [ "$attempt" = "3" ]; then
+              exit 1
+            fi
+            sleep "$((attempt * 10))"
+          done
 
       - name: Validate runtime_profiles on omnibase_infra contracts
         run: |

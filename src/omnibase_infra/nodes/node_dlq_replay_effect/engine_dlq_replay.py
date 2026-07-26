@@ -30,6 +30,7 @@ from aiokafka.errors import KafkaConnectionError, KafkaError
 from pydantic import BaseModel, ConfigDict, Field, field_validator
 
 from omnibase_infra.enums import EnumNonRetryableErrorCategory
+from omnibase_infra.event_bus.kafka_auth import build_aiokafka_auth_kwargs_from_env
 from omnibase_infra.event_bus.topic_constants import build_dlq_topic
 from omnibase_infra.nodes.node_dlq_replay_effect.models.enum_dlq_replay_filter_type import (
     EnumDlqReplayFilterType,
@@ -216,6 +217,7 @@ class DLQConsumer:
                 enable_auto_commit=False,
                 group_id=self.config.consumer_group,
                 consumer_timeout_ms=5000,
+                **build_aiokafka_auth_kwargs_from_env(),
             )
             await self._consumer.start()
             self._started = True
@@ -291,6 +293,7 @@ class DLQProducer:
                 enable_idempotence=True,
                 max_request_size=self.config.max_request_size,
                 request_timeout_ms=self.config.request_timeout_ms,
+                **build_aiokafka_auth_kwargs_from_env(),
             )
             await self._producer.start()
             self._started = True
@@ -370,6 +373,7 @@ class DLQQuarantineProducer:
                 enable_idempotence=True,
                 max_request_size=self.config.max_request_size,
                 request_timeout_ms=self.config.request_timeout_ms,
+                **build_aiokafka_auth_kwargs_from_env(),
             )
             await self._producer.start()
             self._started = True

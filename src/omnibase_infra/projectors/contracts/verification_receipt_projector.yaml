@@ -1,0 +1,128 @@
+# SPDX-FileCopyrightText: 2025 OmniNode.ai Inc.
+# SPDX-License-Identifier: MIT
+# Verification-Receipt Ledger Projector Contract
+#
+# Declarative ModelProjectorContract for the RAW verification-receipt ledger
+# projection (WS-L slice 2 — the receiving end of the verification-receipts
+# flat-file migration, the doctrine §1 fix).
+#
+# Reuse-and-wire: the generic ProjectorShell materializes
+# onex.evt.omniclaude.verification_receipt.v1 events into the append-only
+# verification_receipt_ledger table (migration 089) with NO bespoke node or class
+# (CLAUDE.md rule 7a). Reference pattern: registration_projector.yaml,
+# overseer_tick_projector.yaml (088), and the decision_store DB ledger (046).
+#
+# The verification-receipt ledger is currently written to
+# .onex_state/verification-receipts/*.yaml by the omniclaude verification_sweep /
+# epic_team skills. Verified on-disk reality (reconciled against the plan's
+# claims):
+#   - Each file is the receipt PAYLOAD (a sweep-receipt dict), not a full
+#     ModelEventEnvelope — so the projector extracts core fields from payload.*
+#     and the envelope-level identity from the envelope itself.
+#   - The shapes are HETEROGENEOUS: standard ticket receipts and
+#     overseer-verify-tick receipts share a core (sweep_timestamp + overall_status
+#     always; ticket_id / phases / idempotent on the standard shape;
+#     overseer_verdict only on tick receipts), and one legacy `type: baseline`
+#     snapshot omits ticket_id/phases. The queryable core is projected into
+#     NULLABLE typed columns; the FULL raw payload is captured losslessly in
+#     receipt_body (JSONB) so no shape is dropped.
+#   - The plan §6 proposes topic onex.evt.omniclaude.verification-receipt.v1
+#     (hyphen). The existing node_verification_receipt_generator publishes a
+#     DIFFERENT topic (onex.evt.omnimarket.verification-receipt-completed.v1) —
+#     that node verifies task-completed claims and is NOT this skill-written
+#     flat-file ledger. The event-TYPE below uses an underscore
+#     (verification_receipt) to satisfy ModelProjectorContract's event-name
+#     pattern (lowercase dotted, hyphens NOT allowed); the emit-side slice sets
+#     metadata.tags['event_type'] to this underscore form.
+#
+# Ordering authority: single_partition (plan §2.4). envelope_id is the
+# idempotency key (append mode = plain INSERT; duplicate envelope_id raises a
+# unique violation the capture consumer treats as already-ingested).
+#
+# Related:
+#   - OMN-13997 (this slice) / OMN-13989 (epic)
+#   - docs/plans/2026-07-05-ledger-learning-substrate-plan.md (§2.5, §6 Phase 1)
+#   - Migration: 089_create_verification_receipt_ledger.sql
+#
+# DEFERRED (follow-up children of OMN-13989, gated):
+#   - Emit-side dual-write from the omniclaude verification_sweep / epic_team
+#     skills — belongs to the WS-6 MSK SASL-IAM cutover, NOT this lane.
+#   - Golden-chain replay-equivalence required gate per ledger (plan T15).
+#   - Cutover: migrate the receipt-gate reader onto this projection, then remove
+#     the flat-file writer.
+projector_kind: materialized_view
+projector_id: verification-receipt-ledger-projector
+name: Verification Receipt Ledger Projector
+version: "1.0.0"
+aggregate_type: verification_receipt
+consumed_events:
+  - onex.evt.omniclaude.verification_receipt.v1
+projection_schema:
+  table: verification_receipt_ledger
+  primary_key: envelope_id
+  columns:
+    # ==========================================================================
+    # ENVELOPE IDENTITY
+    # ==========================================================================
+    - name: envelope_id
+      type: UUID
+      source: envelope_id
+    - name: correlation_id
+      type: UUID
+      source: correlation_id
+    # ==========================================================================
+    # RECEIPT CORE (queryable; nullable where the shape omits the field)
+    # ==========================================================================
+    - name: ticket_id
+      type: TEXT
+      source: payload.ticket_id
+      # Nullable: the legacy baseline snapshot shape omits it.
+    - name: sweep_timestamp
+      type: TIMESTAMPTZ
+      source: payload.sweep_timestamp
+    - name: overall_status
+      type: TEXT
+      source: payload.overall_status
+    - name: overseer_verdict
+      type: TEXT
+      source: payload.overseer_verdict
+      # Nullable: present only on overseer-verify-tick receipts.
+    - name: idempotent
+      type: BOOLEAN
+      source: payload.idempotent
+    - name: phases
+      type: JSONB
+      source: payload.phases
+      # Per-dimension results (dashboard / database / dod_evidence). Nullable.
+    # ==========================================================================
+    # FULL-FIDELITY CAPTURE (lossless; every heterogeneous shape)
+    # ==========================================================================
+    - name: receipt_body
+      type: JSONB
+      source: payload.receipt_body
+      # The entire raw receipt payload, so no on-disk shape is dropped.
+  indexes:
+    - name: idx_verification_receipt_ledger_ticket_swept
+      columns:
+        - ticket_id
+        - sweep_timestamp
+      type: btree
+    - name: idx_verification_receipt_ledger_swept
+      columns:
+        - sweep_timestamp
+      type: btree
+    - name: idx_verification_receipt_ledger_status
+      columns:
+        - overall_status
+      type: btree
+    - name: idx_verification_receipt_ledger_correlation
+      columns:
+        - correlation_id
+      type: btree
+# ==============================================================================
+# BEHAVIOR: append-only raw ledger (plan §2.5).
+# Plain INSERT; a duplicate envelope_id raises a unique violation the capture
+# consumer treats as already-ingested. History is never mutated.
+# ==============================================================================
+behavior:
+  mode: append

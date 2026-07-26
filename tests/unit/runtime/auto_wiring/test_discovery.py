@@ -149,6 +149,46 @@ class TestParseContract:
         assert entry.event_model.name == "ModelLedgerTickCommand"
 
     @pytest.mark.unit
+    def test_parses_package_relative_default_handler(self, tmp_path: Path) -> None:
+        package_dir = tmp_path / "omnibase_core"
+        node_dir = package_dir / "nodes" / "node_compliance_orchestrator"
+        node_dir.mkdir(parents=True)
+        (package_dir / "__init__.py").write_text("")
+        (package_dir / "nodes" / "__init__.py").write_text("")
+        (node_dir / "__init__.py").write_text("")
+        (node_dir / "handler.py").write_text(
+            "class NodeComplianceOrchestrator:\n    pass\n"
+        )
+        path = node_dir / "contract.yaml"
+        path.write_text(
+            dedent("""\
+                name: compliance_orchestrator
+                node_type: orchestrator
+                handler_routing:
+                  default_handler: handler:NodeComplianceOrchestrator
+                event_bus:
+                  subscribe_topics:
+                    - onex.cmd.core.compliance-scan-requested.v1
+            """)
+        )
+
+        result = _parse_contract(
+            contract_path=path,
+            entry_point_name="node_compliance_orchestrator",
+            package_name="omnibase-core",
+            package_version="0.46.5",
+        )
+
+        assert result.handler_routing is not None
+        assert len(result.handler_routing.handlers) == 1
+        entry = result.handler_routing.handlers[0]
+        assert entry.handler.name == "NodeComplianceOrchestrator"
+        assert (
+            entry.handler.module
+            == "omnibase_core.nodes.node_compliance_orchestrator.handler"
+        )
+
+    @pytest.mark.unit
     def test_raises_on_non_dict_yaml(self, tmp_path: Path) -> None:
         path = tmp_path / "contract.yaml"
         path.write_text("- just a list")

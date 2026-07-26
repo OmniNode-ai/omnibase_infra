@@ -1,0 +1,29 @@
+{
+  "branch_coverage_pct": 52.23,
+  "candidate_count": 4,
+  "coverage_target": 80.0,
+  "handler_module": "omnibase_infra.nodes.node_validation_ledger_projection_compute.handlers.handler_validation_ledger_projection",
+  "handler_module_sha256": "sha256:b3e1accfd1cff507dc6cd1677eede40f1f5c090f88e9b4176933f1667cf1ee7e",
+  "meets_target": false,
+  "node_id": "omnibase_infra.nodes.node_validation_ledger_projection_compute",
+  "receipt_schema": "adequacy_receipt.v1",
+  "recorded_at": "2026-07-20T05:36:15.576122+00:00",
+  "recorder_schema": "adequacy_receipt.v1",
+  "selected_count": 4,
+  "selected_input_hashes": [
+    "sha256:8c908fe9190b92f4f2104b4d9dd1018ac350f1d26a8e090615593929e84d6dc9",
+    "sha256:373fd00ae6785241a722ecc9e74632773002fccb540e28ba88de3e1ac3460461",
+    "sha256:b9ffae8a4aaad01e947f08bb5e75dd6687b9dc9fb1207cc2a175a8ebf2ad3f40",
+    "sha256:8bc0e42c8f5016701509da3c9105decb0d2ec9734e88080264dd79839a78d989"
+  ],
+  "uncovered_waiver": {
+    "reason": "OMN-14831 hand-flips node_validation_ledger_projection_compute to canonical def-B via a SIGNATURE-ONLY rename (handle(self, message: object) -> handle(self, request: ModelEventMessage)) plus removal of the ModelEventEnvelope docstring reference (OMN-14781 path). The entire extraction pipeline (project / _extract_metadata / _extract_uuid / _extract_timestamp / _extract_version_from_topic / _extract_header_correlation_id / _parse_offset) is preserved byte-identically and re-derived byte-identical base_ref<->HEAD by the ratchet from git. Equivalence is proven by that git-verbatim preservation plus the green runtime-dispatch parity tests over the selected corpus, not by a broad branch-coverage claim; the SHA-256/base64/uuid-fallback and error-context branches inside the preserved helpers are covered by the existing 24-case unit suite and only partially by the deterministic dispatch corpus.",
+    "uncovered_branch_count": 0
+  },
+  "volatile_mask": [
+    "run_id",
+    "occurred_at",
+    "correlation_id",
+    "input_envelope_id"
+  ]
+}

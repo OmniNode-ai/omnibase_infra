@@ -18,6 +18,7 @@ import json
 import os
 import tomllib
 from pathlib import Path
+from uuid import uuid4
 
 import pytest
 from click.testing import CliRunner
@@ -56,6 +57,10 @@ _EXPECTED_SKILLS = frozenset(
         "doc_freshness_sweep",
         "dod_verify",
         "duplication_sweep",
+        # OMN-13995: node_dep_cascade_dedup_orchestrator was in the omnimarket
+        # catalog but absent from skill_mapping.yaml, so
+        # `onex skill dep_cascade_dedup` returned "Unknown skill".
+        "dep_cascade_dedup",
         "gap",
         "hostile_reviewer",
         "linear_housekeeping",
@@ -88,6 +93,24 @@ _EXPECTED_SKILLS = frozenset(
 def _clear_registry_cache() -> None:
     """The registry loader is lru_cached; clear it per test for isolation."""
     load_skill_registry.cache_clear()
+
+
+@pytest.fixture(autouse=True)
+def _no_omnimarket_drift_guard(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Neutralize the omnimarket pre-flight drift guard for this file.
+
+    OMN-14531 wired ``--omni-home`` to the ``$OMNI_HOME`` envvar so the guard
+    actually fires in normal usage. Without this fixture, any test in this
+    file that invokes ``run_skill_by_name`` via ``CliRunner`` would become
+    non-hermetic: it would pass or fail depending on the ambient developer
+    shell's ``$OMNI_HOME`` and whether THIS test venv happens to have
+    omnimarket co-installed (the drift-guard-specific behavior belongs to
+    ``test_omnimarket_drift_guard.py``, not here). Delete the envvar and stub
+    the guard so command-wiring tests stay deterministic regardless of the
+    environment they run in.
+    """
+    monkeypatch.delenv("OMNI_HOME", raising=False)
+    monkeypatch.setattr(cli_skill, "check_omnimarket_drift", lambda **_: None)
 
 
 def test_registry_loads_and_validates() -> None:
@@ -267,6 +290,11 @@ _NODE_BACKED_DOGFOOD_SKILLS: dict[str, str] = {
     "database_sweep": "node_database_sweep",
     "dod_sweep": "node_dod_sweep_orchestrator",
     "coverage_sweep": "node_coverage_sweep",
+    # OMN-13995: post-release dep-bump dedup sweep — node existed, unregistered.
+    "dep_cascade_dedup": "node_dep_cascade_dedup_orchestrator",
+    # OMN-14552: post-orchestration false-Done verifier — node existed but was
+    # never mapped, so `onex skill verification_sweep` returned "Unknown skill".
+    "verification_sweep": "node_verification_sweep_orchestrator",
 }
 
 
@@ -330,7 +358,9 @@ def test_every_node_backed_sweep_skill_is_registered() -> None:
 # --------------------------------------------------------------------------- #
 _OMN_13712_WIRE_MAP_SKILLS: dict[str, str] = {
     "agent_healthcheck": "node_worker_stall_recovery",
-    "env_parity": "node_env_parity_compute",
+    # OMN-13925: env_parity re-wired from the pure compute primitive (which
+    # only ever saw a static sample payload) to the live collection EFFECT.
+    "env_parity": "node_env_parity_collect_effect",
     "bus_audit": "node_bus_audit_compute",
     "plan_audit": "node_plan_audit_compute",
     "recall": "node_recall_compute",
@@ -395,6 +425,40 @@ def test_omn_13712_wire_map_nodes_resolve_in_catalog() -> None:
     assert not unresolved, (
         "OMN-13712 skill(s) reference node_name(s) absent from the canonical "
         f"omnimarket onex.nodes catalog: {unresolved}"
+    )
+
+
+def test_env_parity_mapping_has_no_static_lane_snapshot() -> None:
+    """OMN-13925 recurrence guard: env_parity must execute LIVE collection.
+
+    The defect class: the mapping carried a static two-lane ``env_by_lane``
+    sample in ``static_payload``, so ``onex skill env_parity`` emitted a
+    sample-data verdict (status=success over zero live entities) masquerading
+    as live lane parity. The skill must dispatch the live collection EFFECT
+    and the mapping must never bake an env snapshot into the payload again —
+    snapshots are collected at run time or the node fails fast stating that
+    no live collection input was provided.
+    """
+    registry = load_skill_registry()
+    mapping = next((s for s in registry.skills if s.skill_name == "env_parity"), None)
+    assert mapping is not None, "env_parity missing from skill_mapping.yaml"
+    assert mapping.node_name == "node_env_parity_collect_effect", (
+        f"env_parity must dispatch the live collection effect, got "
+        f"{mapping.node_name!r}"
+    )
+    assert "env_by_lane" not in mapping.static_payload, (
+        "env_parity static_payload smuggles a static env_by_lane snapshot — "
+        "the OMN-13925 sample-data defect has recurred"
+    )
+    assert not any(
+        isinstance(value, dict) for value in mapping.static_payload.values()
+    ), (
+        "env_parity static_payload carries a nested mapping; env snapshots "
+        "must be collected live, never baked into the dispatch mapping"
+    )
+    assert "ModelEnvParityCollectResult" in mapping.result_model, (
+        "env_parity result_model must be the collect receipt (provenance + "
+        f"parity), got {mapping.result_model!r}"
     )
 
 
@@ -903,6 +967,118 @@ def test_skill_functional_audit_payload_validates_against_request_model() -> Non
     assert request.skills_filter == ["merge_sweep", "gap"]
 
 
+# --------------------------------------------------------------------------- #
+# OMN-13918: `redeploy` was documented (docs/) but had no skill_mapping.yaml
+# entry — `onex skill redeploy` returned "Unknown skill" and the .201 runtime
+# redeploy path had no executable CLI surface or explicit lane targeting.
+# --------------------------------------------------------------------------- #
+
+
+def test_redeploy_registered_with_no_default_lane() -> None:
+    """`redeploy` is mapped to the real orchestrator node.
+
+    The `lane` arg spec must declare NO default (`default is None` means the
+    arg is omitted entirely when unset, letting the node-input model's own
+    "dev" default apply) — the mapping itself must never be able to resolve
+    the lane to "prod" when the caller omits `--lane`.
+    """
+    registry = load_skill_registry()
+    redeploy = registry.get("redeploy")
+    assert redeploy is not None
+    assert redeploy.node_name == "node_redeploy_orchestrator"
+
+    lane_spec = next(
+        spec for spec in redeploy.args if spec.payload_field == "runtime_lane"
+    )
+    assert lane_spec.default is None
+    assert lane_spec.required is False
+
+
+def test_redeploy_payload_validates_against_request_model() -> None:
+    """The OMN-13918 redeploy mapping builds a payload the command model accepts.
+
+    ``ModelRedeployStartCommand`` is ``extra="forbid"`` — every CLI arg the
+    mapping surfaces must be a real field on that model. ``correlation_id`` is
+    a required field the mapping intentionally does NOT expose as a CLI arg
+    (RuntimeLocal auto-injects it, OMN-13591); the test supplies one directly
+    to validate the rest of the CLI-constructed payload.
+    """
+    command_module = pytest.importorskip(
+        "omnimarket.nodes.node_redeploy_orchestrator.models."
+        "model_redeploy_start_command"
+    )
+    ModelRedeployStartCommand = command_module.ModelRedeployStartCommand
+
+    registry = load_skill_registry()
+    redeploy = registry.get("redeploy")
+    assert redeploy is not None
+    payload = _parse_skill_args(
+        redeploy,
+        ("--lane", "dev", "--scope", "full", "--git-ref", "origin/main", "--dry-run"),
+    )
+    assert "correlation_id" not in payload
+    payload["correlation_id"] = str(uuid4())
+
+    request = ModelRedeployStartCommand.model_validate(payload)
+    assert request.runtime_lane.value == "dev"
+    assert request.scope.value == "full"
+    assert request.git_ref == "origin/main"
+    assert request.dry_run is True
+
+
+def test_redeploy_lane_omitted_defaults_to_dev_never_prod() -> None:
+    """Omitting `--lane` must never silently resolve to prod (OMN-13918 DoD).
+
+    The mapping sets no default for `lane`, so the payload field is absent
+    entirely; ``ModelRedeployStartCommand.runtime_lane`` then applies its own
+    "dev" default. Prod is reachable ONLY via an explicit ``--lane prod``.
+    """
+    command_module = pytest.importorskip(
+        "omnimarket.nodes.node_redeploy_orchestrator.models."
+        "model_redeploy_start_command"
+    )
+    ModelRedeployStartCommand = command_module.ModelRedeployStartCommand
+
+    registry = load_skill_registry()
+    redeploy = registry.get("redeploy")
+    assert redeploy is not None
+    payload = _parse_skill_args(redeploy, ())
+    assert "runtime_lane" not in payload
+    payload["correlation_id"] = str(uuid4())
+
+    request = ModelRedeployStartCommand.model_validate(payload)
+    assert request.runtime_lane.value == "dev"
+
+
+def test_redeploy_prod_lane_is_explicit_and_still_requires_the_gate() -> None:
+    """`--lane prod` is honored explicitly but never bypasses the promotion gate.
+
+    This proves only the mapping/payload layer: the CLI faithfully forwards an
+    explicit `--lane prod` request unmodified. The orchestrator itself (tested
+    in omnimarket) always routes a prod ``ModelRedeployStartCommand`` through
+    the out-of-band grant-resolve -> gate-evaluate chain and never trusts a
+    caller-attached grant — dry-run included, which reports BLOCKED rather
+    than fabricating a passing gate decision.
+    """
+    command_module = pytest.importorskip(
+        "omnimarket.nodes.node_redeploy_orchestrator.models."
+        "model_redeploy_start_command"
+    )
+    ModelRedeployStartCommand = command_module.ModelRedeployStartCommand
+
+    registry = load_skill_registry()
+    redeploy = registry.get("redeploy")
+    assert redeploy is not None
+    payload = _parse_skill_args(redeploy, ("--lane", "prod", "--dry-run"))
+    payload["correlation_id"] = str(uuid4())
+
+    request = ModelRedeployStartCommand.model_validate(payload)
+    assert request.runtime_lane.value == "prod"
+    # promotion_grant is not a CLI-exposed field — a caller cannot self-grant.
+    assert "promotion_grant" not in payload
+    assert request.promotion_grant is None
+
+
 def test_command_writes_payload_under_state_root_not_tmp(
     monkeypatch: pytest.MonkeyPatch, tmp_path: Path
 ) -> None:
@@ -956,3 +1132,395 @@ def test_plan_to_tickets_plan_path_is_named_not_positional() -> None:
         "positional CLI arg and causes `--plan-path <file>` to be rejected as "
         "'No such option: --plan-path' (OMN-13718 regression)"
     )
+
+
+# --------------------------------------------------------------------------- #
+# OMN-13995: `dep_cascade_dedup` was documented as a skill and had a real
+# omnimarket backing node (node_dep_cascade_dedup_orchestrator) with request +
+# result models, but skill_mapping.yaml carried no entry, so
+# `onex skill dep_cascade_dedup` returned "Unknown skill" and the post-release
+# dep-bump dedup sweep was unrunnable headless from the canonical infra venv.
+# Same regression class as OMN-13511 / OMN-13712 (node exists, skill unmapped).
+# --------------------------------------------------------------------------- #
+
+
+def test_dep_cascade_dedup_registered_and_wired() -> None:
+    """`dep_cascade_dedup` resolves to the real orchestrator node + result model.
+
+    Reproducing assertion: before this mapping entry existed,
+    ``onex skill dep_cascade_dedup`` returned "Unknown skill". This pins the
+    skill to ``node_dep_cascade_dedup_orchestrator`` and its typed result model
+    so a future rename/removal of either surfaces here at CI time instead of at
+    dispatch time.
+    """
+    registry = load_skill_registry()
+    mapping = registry.get("dep_cascade_dedup")
+    assert mapping is not None, "dep_cascade_dedup absent from skill_mapping.yaml"
+    assert mapping.node_name == "node_dep_cascade_dedup_orchestrator"
+    assert mapping.result_model == (
+        "omnimarket.nodes.node_dep_cascade_dedup_orchestrator.models."
+        "model_dep_cascade_dedup_result.ModelDepCascadeDedupResult"
+    )
+
+
+def test_dep_cascade_dedup_payload_validates_against_request_model() -> None:
+    """The OMN-13995 mapping builds a payload ModelDepCascadeDedupRequest accepts.
+
+    ``ModelDepCascadeDedupRequest`` is ``extra="forbid"``, so every CLI arg the
+    mapping surfaces must be a real request-model field. This proves the sweep
+    resolves its roots/repos (``--repos`` → the ``repos`` field it scans), not
+    merely that the skill name is registered. omnimarket is the backing-node
+    package and is not a hard test dependency of omnibase_infra; skip when it is
+    not installed (CI parity with the other omnimarket-optional tests here).
+    """
+    request_module = pytest.importorskip(
+        "omnimarket.nodes.node_dep_cascade_dedup_orchestrator.models."
+        "model_dep_cascade_dedup_request"
+    )
+    ModelDepCascadeDedupRequest = request_module.ModelDepCascadeDedupRequest
+
+    registry = load_skill_registry()
+    dedup = registry.get("dep_cascade_dedup")
+    assert dedup is not None
+    assert dedup.node_name == "node_dep_cascade_dedup_orchestrator"
+    payload = _parse_skill_args(
+        dedup,
+        (
+            "--repos",
+            "omnibase_core,omnibase_infra",
+            "--dependency-type",
+            "python",
+            "--label",
+            "dependencies",
+            "--dry-run",
+        ),
+    )
+    request = ModelDepCascadeDedupRequest.model_validate(payload)
+    # repos = the sweep's roots/repos it scans for superseded dep-bump PRs.
+    assert request.repos == ("omnibase_core", "omnibase_infra")
+    assert request.dependency_type == "python"
+    assert request.label == "dependencies"
+    assert request.dry_run is True
+
+
+def test_dep_cascade_dedup_dry_run_omitted_defaults_false() -> None:
+    """Omitting ``--dry-run`` yields a wet-run payload the model accepts.
+
+    Guards the boolean-default wiring: the mapping declares ``dry-run`` with
+    ``default: false`` so an omitted flag produces ``dry_run=False`` rather than
+    dropping the field.
+    """
+    request_module = pytest.importorskip(
+        "omnimarket.nodes.node_dep_cascade_dedup_orchestrator.models."
+        "model_dep_cascade_dedup_request"
+    )
+    ModelDepCascadeDedupRequest = request_module.ModelDepCascadeDedupRequest
+
+    registry = load_skill_registry()
+    dedup = registry.get("dep_cascade_dedup")
+    assert dedup is not None
+    payload = _parse_skill_args(dedup, ())
+    assert payload["dry_run"] is False
+    request = ModelDepCascadeDedupRequest.model_validate(payload)
+    assert request.dry_run is False
+    # repos defaults to the empty tuple → node discovers all OmniNode-ai repos.
+    assert request.repos == ()
+
+
+# --------------------------------------------------------------------------- #
+# OMN-13995 / CLAUDE.md rule #8: the sweep-repo-fallback must FAIL FAST.
+#
+# The dogfood sweeps that resolve a repo-registry root from the environment
+# (integration_sweep, dod_sweep) share a ``_resolve_root`` fallback: when no
+# explicit root is passed AND the repo-registry env var is unset, they must
+# RAISE — never silently default to a wrong path (rule #8: "Fail-fast on
+# missing env, not silent fallback"). This is the exact anti-pattern the rule
+# exists to prevent (a silent default produces cross-machine breakage). We pin
+# BOTH sweeps so a future refactor that swaps the raise for an
+# ``os.environ.get(..., <default>)`` silent fallback is caught here.
+# --------------------------------------------------------------------------- #
+
+
+@pytest.mark.parametrize(
+    ("handler_import", "handler_attr"),
+    [
+        (
+            "omnimarket.nodes.node_integration_sweep_orchestrator.handlers."
+            "handler_integration_sweep_orchestrator",
+            "HandlerIntegrationSweepOrchestrator",
+        ),
+        (
+            "omnimarket.nodes.node_dod_sweep_orchestrator.handlers."
+            "handler_dod_sweep_orchestrator",
+            "HandlerDodSweepOrchestrator",
+        ),
+    ],
+)
+def test_sweep_repo_fallback_fails_fast_without_env(
+    monkeypatch: pytest.MonkeyPatch, handler_import: str, handler_attr: str
+) -> None:
+    """`_resolve_root('')` raises when the repo-registry env is unset (rule #8).
+
+    Both integration_sweep and dod_sweep fall back to the ``ONEX_CC_REPO_PATH``
+    repo-registry env when no explicit root is supplied. With it unset and no
+    explicit path, resolution MUST raise rather than silently default — this is
+    the CLAUDE.md rule #8 fail-fast discipline the dep_cascade_dedup work must
+    preserve, not weaken.
+    """
+    module = pytest.importorskip(handler_import)
+    handler_cls = getattr(module, handler_attr)
+
+    # Ensure the fallback env is absent so the no-explicit-root path is exercised.
+    monkeypatch.delenv("ONEX_CC_REPO_PATH", raising=False)
+
+    with pytest.raises(RuntimeError, match="ONEX_CC_REPO_PATH is not set"):
+        handler_cls._resolve_root("")
+
+
+def test_pr_state_payload_validates_against_request_model() -> None:
+    """OMN-14374: the pr_state mapping builds a payload node_github_repo_gateway_effect accepts.
+
+    Wires the EXISTING read-only status reader (OMN-14307) so `onex skill
+    pr_state` returns one small typed row per operation instead of a raw
+    `gh pr view/checks --json ...` dump. --pr is required only for the 5
+    PR-scoped operations; the request model's own validator enforces that
+    (not the CLI mapping), so this proves both the scoped and unscoped shape.
+    """
+    request_module = pytest.importorskip(
+        "omnimarket.nodes.node_github_repo_gateway_effect.models.model_gateway_io"
+    )
+    ModelGithubGatewayRequest = request_module.ModelGithubGatewayRequest
+
+    registry = load_skill_registry()
+    pr_state = registry.get("pr_state")
+    assert pr_state is not None
+    assert pr_state.node_name == "node_github_repo_gateway_effect"
+
+    # PR-scoped operation.
+    payload = _parse_skill_args(
+        pr_state,
+        (
+            "--operation",
+            "pr_status",
+            "--repo",
+            "OmniNode-ai/omnimarket",
+            "--pr",
+            "1704",
+        ),
+    )
+    request = ModelGithubGatewayRequest.model_validate(payload)
+    assert request.operation.value == "pr_status"
+    assert request.repo == "OmniNode-ai/omnimarket"
+    assert request.pr_number == 1704
+
+    # Repo-scoped operation — --pr omitted, still validates.
+    payload = _parse_skill_args(
+        pr_state, ("--operation", "open_prs_list", "--repo", "OmniNode-ai/omnimarket")
+    )
+    request = ModelGithubGatewayRequest.model_validate(payload)
+    assert request.operation.value == "open_prs_list"
+    assert request.pr_number is None
+
+
+def test_json_arg_type_coerces_object() -> None:
+    """OMN-14529: the ``json`` arg_type parses a raw CLI string into a dict.
+
+    Generic escape hatch for a backing node's input model with a nested
+    field — decision_store is the first (and, at introduction, only) user.
+    """
+    spec = ModelSkillArgSpec(
+        name="entry",
+        payload_field="entry",
+        arg_type=EnumSkillArgType.JSON,
+    )
+    coerced = cli_skill._coerce_value(spec, '{"domain": "api", "limit": 3}')
+    assert coerced == {"domain": "api", "limit": 3}
+
+
+def test_json_arg_type_rejects_invalid_json() -> None:
+    spec = ModelSkillArgSpec(
+        name="entry",
+        payload_field="entry",
+        arg_type=EnumSkillArgType.JSON,
+    )
+    with pytest.raises(Exception, match="expects valid JSON"):
+        cli_skill._coerce_value(spec, "{not valid json")
+
+
+def test_decision_store_registered_and_wired() -> None:
+    """OMN-14529: decision_store had a SKILL.md but zero backing dispatch —
+    no skill_mapping.yaml entry, so `onex skill decision_store` returned
+    "Unknown skill" and the skill had recorded 0 rows in its entire
+    existence. This pins the mapping itself.
+    """
+    registry = load_skill_registry()
+    decision_store = registry.get("decision_store")
+    assert decision_store is not None
+    assert decision_store.node_name == "node_decision_store_orchestrator"
+
+
+def test_decision_store_record_payload_validates_against_request_model() -> None:
+    """The decision_store `record` mapping builds a payload the orchestrator's
+    ModelDecisionStoreRequest accepts, including the nested `entry` object
+    built from the `json` arg_type (OMN-14529).
+    """
+    request_module = pytest.importorskip(
+        "omnimarket.nodes.node_decision_store_orchestrator.models.model_decision_store_request"
+    )
+    ModelDecisionStoreRequest = request_module.ModelDecisionStoreRequest
+
+    registry = load_skill_registry()
+    decision_store = registry.get("decision_store")
+    assert decision_store is not None
+
+    entry_json = json.dumps(
+        {
+            "decision_type": "TECH_STACK_CHOICE",
+            "domain": "api",
+            "layer": "architecture",
+            "summary": "Use Kafka for all inter-service transport",
+            "rationale": "Replay, ordering, and backpressure guarantees.",
+        }
+    )
+    payload = _parse_skill_args(
+        decision_store, ("--action", "record", "--entry", entry_json)
+    )
+    request = ModelDecisionStoreRequest.model_validate(payload)
+    assert request.action.value == "record"
+    assert request.entry is not None
+    assert request.entry.domain == "api"
+    assert request.dry_run is False
+
+
+def test_decision_store_query_payload_validates_against_request_model() -> None:
+    """The decision_store `query` mapping builds a valid nested query_filter."""
+    request_module = pytest.importorskip(
+        "omnimarket.nodes.node_decision_store_orchestrator.models.model_decision_store_request"
+    )
+    ModelDecisionStoreRequest = request_module.ModelDecisionStoreRequest
+
+    registry = load_skill_registry()
+    decision_store = registry.get("decision_store")
+    assert decision_store is not None
+
+    query_filter_json = json.dumps({"domain": "api", "limit": 5})
+    payload = _parse_skill_args(
+        decision_store,
+        ("--action", "query", "--query-filter", query_filter_json),
+    )
+    request = ModelDecisionStoreRequest.model_validate(payload)
+    assert request.action.value == "query"
+    assert request.query_filter is not None
+    assert request.query_filter.domain == "api"
+    assert request.query_filter.limit == 5
+
+
+# --------------------------------------------------------------------------- #
+# OMN-15181: dispatch-locality guard wiring. A prod-lane `redeploy` dispatch
+# must be refused BEFORE run_receipt_mode is ever invoked when the CLI is not
+# running on omninode-pc -- prod redpanda's advertised listener is raw-LAN-only
+# (live-verified 2026-07-26). Dev/stability-test lanes must be unaffected.
+# --------------------------------------------------------------------------- #
+
+
+def test_redeploy_prod_lane_blocked_off_omninode_pc(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    """`onex skill redeploy --lane prod` off-box fails closed before dispatch."""
+
+    def _explode(**_kwargs: object) -> int:
+        raise AssertionError(
+            "run_receipt_mode must not be reached for an off-box prod dispatch"
+        )
+
+    monkeypatch.setattr(cli_skill, "run_receipt_mode", _explode)
+    monkeypatch.setattr(
+        "omnibase_infra.cli.prod_dispatch_locality_guard.socket.gethostname",
+        lambda: "some-other-host.local",
+    )
+
+    runner = CliRunner()
+    result = runner.invoke(
+        run_skill_by_name,
+        [
+            "redeploy",
+            "--state-root",
+            str(tmp_path / "state"),
+            "--lane",
+            "prod",
+            "--dry-run",
+        ],
+    )
+    assert result.exit_code != 0
+    assert "omninode-pc" in result.output
+    assert "OMN-15181" in result.output
+
+
+def test_redeploy_prod_lane_allowed_on_omninode_pc(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    """`onex skill redeploy --lane prod` on omninode-pc reaches dispatch."""
+    captured: dict[str, object] = {}
+
+    def _fake_receipt_mode(**kwargs: object) -> int:
+        captured.update(kwargs)
+        return 0
+
+    monkeypatch.setattr(cli_skill, "run_receipt_mode", _fake_receipt_mode)
+    monkeypatch.setattr(
+        cli_skill, "_resolve_packaged_contract", lambda n: tmp_path / "c.yaml"
+    )
+    monkeypatch.setattr(
+        "omnibase_infra.cli.prod_dispatch_locality_guard.socket.gethostname",
+        lambda: "omninode-pc",
+    )
+
+    runner = CliRunner()
+    result = runner.invoke(
+        run_skill_by_name,
+        [
+            "redeploy",
+            "--state-root",
+            str(tmp_path / "state"),
+            "--lane",
+            "prod",
+            "--dry-run",
+        ],
+    )
+    assert result.exit_code == 0, result.output
+    assert captured["node_name"] == "node_redeploy_orchestrator"
+
+
+def test_redeploy_dev_lane_unaffected_off_omninode_pc(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    """Dev-lane redeploy dispatch is never blocked by the prod locality guard."""
+    captured: dict[str, object] = {}
+
+    def _fake_receipt_mode(**kwargs: object) -> int:
+        captured.update(kwargs)
+        return 0
+
+    monkeypatch.setattr(cli_skill, "run_receipt_mode", _fake_receipt_mode)
+    monkeypatch.setattr(
+        cli_skill, "_resolve_packaged_contract", lambda n: tmp_path / "c.yaml"
+    )
+    monkeypatch.setattr(
+        "omnibase_infra.cli.prod_dispatch_locality_guard.socket.gethostname",
+        lambda: "some-other-host.local",
+    )
+
+    runner = CliRunner()
+    result = runner.invoke(
+        run_skill_by_name,
+        [
+            "redeploy",
+            "--state-root",
+            str(tmp_path / "state"),
+            "--lane",
+            "dev",
+            "--dry-run",
+        ],
+    )
+    assert result.exit_code == 0, result.output
+    assert captured["node_name"] == "node_redeploy_orchestrator"

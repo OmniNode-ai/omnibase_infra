@@ -1,0 +1,1062 @@
+{
+  "cases": [
+    {
+      "expected": {
+        "correlation_id": "00000000-0000-0000-0000-000000000001",
+        "error_message": "",
+        "estimated_cost": 0.0,
+        "estimated_latency_ms": 4096000,
+        "fallback_model_key": "deepseek-r1-32b",
+        "rationale": "Selected qwen3-coder-30b (score=0.500); task_type=code_generation; tier=local",
+        "scores": {
+          "claude-sonnet": 0.275,
+          "deepseek-r1-32b": 0.42,
+          "qwen3-coder-30b": 0.5
+        },
+        "selected_endpoint_env": "LLM_CODER_URL",
+        "selected_model_key": "qwen3-coder-30b",
+        "success": true
+      },
+      "input": {
+        "chain_hit": false,
+        "chain_hit_model_key": null,
+        "constraints": {
+          "max_cost_per_1k": 0.1,
+          "max_latency_ms": 30000,
+          "min_context_window": 4096,
+          "min_quality_score": 0.0,
+          "needs_computer_use": false,
+          "needs_tool_use": false,
+          "needs_vision": false,
+          "prefer_local": true
+        },
+        "context_length_estimate": 4096,
+        "correlation_id": "00000000-0000-0000-0000-000000000001",
+        "health": [],
+        "live_metrics": [],
+        "registry": [
+          {
+            "api_key_env": "",
+            "base_url_env": "LLM_CODER_URL",
+            "capabilities": [
+              "code_generation",
+              "refactoring"
+            ],
+            "concurrency_limit": null,
+            "context_window": 65536,
+            "model_key": "qwen3-coder-30b",
+            "provider": "local",
+            "tier": "local",
+            "transport": "http"
+          },
+          {
+            "api_key_env": "",
+            "base_url_env": "",
+            "capabilities": [
+              "code_generation",
+              "reasoning",
+              "vision"
+            ],
+            "concurrency_limit": null,
+            "context_window": 200000,
+            "model_key": "claude-sonnet",
+            "provider": "anthropic",
+            "tier": "frontier_api",
+            "transport": "oauth"
+          },
+          {
+            "api_key_env": "",
+            "base_url_env": "LLM_DEEPSEEK_R1_URL",
+            "capabilities": [
+              "deep_reasoning",
+              "code_review"
+            ],
+            "concurrency_limit": null,
+            "context_window": 32768,
+            "model_key": "deepseek-r1-32b",
+            "provider": "local",
+            "tier": "local",
+            "transport": "http"
+          }
+        ],
+        "scoring_weights": {
+          "chain_bonus": 0.1,
+          "cost": 0.3,
+          "quality": 0.4,
+          "speed": 0.2
+        },
+        "task_description": "",
+        "task_type": "code_generation"
+      },
+      "scenario": "prefer_local_code_gen"
+    },
+    {
+      "expected": {
+        "correlation_id": "00000000-0000-0000-0000-000000000002",
+        "error_message": "",
+        "estimated_cost": 0.06144,
+        "estimated_latency_ms": 4096000,
+        "fallback_model_key": null,
+        "rationale": "Selected claude-sonnet (score=0.275); task_type=vision; tier=frontier_api",
+        "scores": {
+          "claude-sonnet": 0.275
+        },
+        "selected_endpoint_env": "",
+        "selected_model_key": "claude-sonnet",
+        "success": true
+      },
+      "input": {
+        "chain_hit": false,
+        "chain_hit_model_key": null,
+        "constraints": {
+          "max_cost_per_1k": 0.1,
+          "max_latency_ms": 30000,
+          "min_context_window": 4096,
+          "min_quality_score": 0.0,
+          "needs_computer_use": false,
+          "needs_tool_use": false,
+          "needs_vision": true,
+          "prefer_local": true
+        },
+        "context_length_estimate": 4096,
+        "correlation_id": "00000000-0000-0000-0000-000000000002",
+        "health": [],
+        "live_metrics": [],
+        "registry": [
+          {
+            "api_key_env": "",
+            "base_url_env": "LLM_CODER_URL",
+            "capabilities": [
+              "code_generation",
+              "refactoring"
+            ],
+            "concurrency_limit": null,
+            "context_window": 65536,
+            "model_key": "qwen3-coder-30b",
+            "provider": "local",
+            "tier": "local",
+            "transport": "http"
+          },
+          {
+            "api_key_env": "",
+            "base_url_env": "",
+            "capabilities": [
+              "code_generation",
+              "reasoning",
+              "vision"
+            ],
+            "concurrency_limit": null,
+            "context_window": 200000,
+            "model_key": "claude-sonnet",
+            "provider": "anthropic",
+            "tier": "frontier_api",
+            "transport": "oauth"
+          },
+          {
+            "api_key_env": "",
+            "base_url_env": "LLM_DEEPSEEK_R1_URL",
+            "capabilities": [
+              "deep_reasoning",
+              "code_review"
+            ],
+            "concurrency_limit": null,
+            "context_window": 32768,
+            "model_key": "deepseek-r1-32b",
+            "provider": "local",
+            "tier": "local",
+            "transport": "http"
+          }
+        ],
+        "scoring_weights": {
+          "chain_bonus": 0.1,
+          "cost": 0.3,
+          "quality": 0.4,
+          "speed": 0.2
+        },
+        "task_description": "",
+        "task_type": "vision"
+      },
+      "scenario": "needs_vision"
+    },
+    {
+      "expected": {
+        "correlation_id": "00000000-0000-0000-0000-000000000003",
+        "error_message": "No eligible models after constraint filtering.",
+        "estimated_cost": 0.0,
+        "estimated_latency_ms": 0,
+        "fallback_model_key": null,
+        "rationale": "No models pass hard constraints.",
+        "scores": {},
+        "selected_endpoint_env": "",
+        "selected_model_key": "",
+        "success": false
+      },
+      "input": {
+        "chain_hit": false,
+        "chain_hit_model_key": null,
+        "constraints": {
+          "max_cost_per_1k": 0.1,
+          "max_latency_ms": 30000,
+          "min_context_window": 4096,
+          "min_quality_score": 0.0,
+          "needs_computer_use": true,
+          "needs_tool_use": false,
+          "needs_vision": false,
+          "prefer_local": true
+        },
+        "context_length_estimate": 4096,
+        "correlation_id": "00000000-0000-0000-0000-000000000003",
+        "health": [],
+        "live_metrics": [],
+        "registry": [
+          {
+            "api_key_env": "",
+            "base_url_env": "LLM_CODER_URL",
+            "capabilities": [
+              "code_generation",
+              "refactoring"
+            ],
+            "concurrency_limit": null,
+            "context_window": 65536,
+            "model_key": "qwen3-coder-30b",
+            "provider": "local",
+            "tier": "local",
+            "transport": "http"
+          },
+          {
+            "api_key_env": "",
+            "base_url_env": "",
+            "capabilities": [
+              "code_generation",
+              "reasoning",
+              "vision"
+            ],
+            "concurrency_limit": null,
+            "context_window": 200000,
+            "model_key": "claude-sonnet",
+            "provider": "anthropic",
+            "tier": "frontier_api",
+            "transport": "oauth"
+          },
+          {
+            "api_key_env": "",
+            "base_url_env": "LLM_DEEPSEEK_R1_URL",
+            "capabilities": [
+              "deep_reasoning",
+              "code_review"
+            ],
+            "concurrency_limit": null,
+            "context_window": 32768,
+            "model_key": "deepseek-r1-32b",
+            "provider": "local",
+            "tier": "local",
+            "transport": "http"
+          }
+        ],
+        "scoring_weights": {
+          "chain_bonus": 0.1,
+          "cost": 0.3,
+          "quality": 0.4,
+          "speed": 0.2
+        },
+        "task_description": "",
+        "task_type": "code_generation"
+      },
+      "scenario": "no_candidates_computer_use"
+    },
+    {
+      "expected": {
+        "correlation_id": "00000000-0000-0000-0000-000000000004",
+        "error_message": "",
+        "estimated_cost": 0.0,
+        "estimated_latency_ms": 4096000,
+        "fallback_model_key": "claude-sonnet",
+        "rationale": "Selected deepseek-r1-32b (score=0.420); task_type=code_generation; tier=local",
+        "scores": {
+          "claude-sonnet": 0.275,
+          "deepseek-r1-32b": 0.42
+        },
+        "selected_endpoint_env": "LLM_DEEPSEEK_R1_URL",
+        "selected_model_key": "deepseek-r1-32b",
+        "success": true
+      },
+      "input": {
+        "chain_hit": false,
+        "chain_hit_model_key": null,
+        "constraints": {
+          "max_cost_per_1k": 0.1,
+          "max_latency_ms": 30000,
+          "min_context_window": 4096,
+          "min_quality_score": 0.0,
+          "needs_computer_use": false,
+          "needs_tool_use": false,
+          "needs_vision": false,
+          "prefer_local": true
+        },
+        "context_length_estimate": 4096,
+        "correlation_id": "00000000-0000-0000-0000-000000000004",
+        "health": [
+          {
+            "error_message": "timeout",
+            "healthy": false,
+            "latency_ms": 0,
+            "model_key": "qwen3-coder-30b",
+            "queue_depth": 0
+          },
+          {
+            "error_message": "",
+            "healthy": true,
+            "latency_ms": 0,
+            "model_key": "claude-sonnet",
+            "queue_depth": 0
+          },
+          {
+            "error_message": "",
+            "healthy": true,
+            "latency_ms": 0,
+            "model_key": "deepseek-r1-32b",
+            "queue_depth": 0
+          }
+        ],
+        "live_metrics": [],
+        "registry": [
+          {
+            "api_key_env": "",
+            "base_url_env": "LLM_CODER_URL",
+            "capabilities": [
+              "code_generation",
+              "refactoring"
+            ],
+            "concurrency_limit": null,
+            "context_window": 65536,
+            "model_key": "qwen3-coder-30b",
+            "provider": "local",
+            "tier": "local",
+            "transport": "http"
+          },
+          {
+            "api_key_env": "",
+            "base_url_env": "",
+            "capabilities": [
+              "code_generation",
+              "reasoning",
+              "vision"
+            ],
+            "concurrency_limit": null,
+            "context_window": 200000,
+            "model_key": "claude-sonnet",
+            "provider": "anthropic",
+            "tier": "frontier_api",
+            "transport": "oauth"
+          },
+          {
+            "api_key_env": "",
+            "base_url_env": "LLM_DEEPSEEK_R1_URL",
+            "capabilities": [
+              "deep_reasoning",
+              "code_review"
+            ],
+            "concurrency_limit": null,
+            "context_window": 32768,
+            "model_key": "deepseek-r1-32b",
+            "provider": "local",
+            "tier": "local",
+            "transport": "http"
+          }
+        ],
+        "scoring_weights": {
+          "chain_bonus": 0.1,
+          "cost": 0.3,
+          "quality": 0.4,
+          "speed": 0.2
+        },
+        "task_description": "",
+        "task_type": "code_generation"
+      },
+      "scenario": "unhealthy_excluded"
+    },
+    {
+      "expected": {
+        "correlation_id": "00000000-0000-0000-0000-000000000005",
+        "error_message": "",
+        "estimated_cost": 0.0,
+        "estimated_latency_ms": 4096000,
+        "fallback_model_key": "qwen3-coder-30b",
+        "rationale": "Selected deepseek-r1-32b (score=0.520); task_type=code_generation; tier=local; chain_hit_bonus_applied",
+        "scores": {
+          "claude-sonnet": 0.275,
+          "deepseek-r1-32b": 0.52,
+          "qwen3-coder-30b": 0.5
+        },
+        "selected_endpoint_env": "LLM_DEEPSEEK_R1_URL",
+        "selected_model_key": "deepseek-r1-32b",
+        "success": true
+      },
+      "input": {
+        "chain_hit": true,
+        "chain_hit_model_key": "deepseek-r1-32b",
+        "constraints": {
+          "max_cost_per_1k": 0.1,
+          "max_latency_ms": 30000,
+          "min_context_window": 4096,
+          "min_quality_score": 0.0,
+          "needs_computer_use": false,
+          "needs_tool_use": false,
+          "needs_vision": false,
+          "prefer_local": true
+        },
+        "context_length_estimate": 4096,
+        "correlation_id": "00000000-0000-0000-0000-000000000005",
+        "health": [],
+        "live_metrics": [],
+        "registry": [
+          {
+            "api_key_env": "",
+            "base_url_env": "LLM_CODER_URL",
+            "capabilities": [
+              "code_generation",
+              "refactoring"
+            ],
+            "concurrency_limit": null,
+            "context_window": 65536,
+            "model_key": "qwen3-coder-30b",
+            "provider": "local",
+            "tier": "local",
+            "transport": "http"
+          },
+          {
+            "api_key_env": "",
+            "base_url_env": "",
+            "capabilities": [
+              "code_generation",
+              "reasoning",
+              "vision"
+            ],
+            "concurrency_limit": null,
+            "context_window": 200000,
+            "model_key": "claude-sonnet",
+            "provider": "anthropic",
+            "tier": "frontier_api",
+            "transport": "oauth"
+          },
+          {
+            "api_key_env": "",
+            "base_url_env": "LLM_DEEPSEEK_R1_URL",
+            "capabilities": [
+              "deep_reasoning",
+              "code_review"
+            ],
+            "concurrency_limit": null,
+            "context_window": 32768,
+            "model_key": "deepseek-r1-32b",
+            "provider": "local",
+            "tier": "local",
+            "transport": "http"
+          }
+        ],
+        "scoring_weights": {
+          "chain_bonus": 0.1,
+          "cost": 0.3,
+          "quality": 0.4,
+          "speed": 0.2
+        },
+        "task_description": "",
+        "task_type": "code_generation"
+      },
+      "scenario": "chain_hit_bonus"
+    },
+    {
+      "expected": {
+        "correlation_id": "00000000-0000-0000-0000-000000000006",
+        "error_message": "",
+        "estimated_cost": 0.0,
+        "estimated_latency_ms": 4096000,
+        "fallback_model_key": "deepseek-r1-32b",
+        "rationale": "Selected qwen3-coder-30b (score=0.500); task_type=code_generation; tier=local",
+        "scores": {
+          "deepseek-r1-32b": 0.42,
+          "qwen3-coder-30b": 0.5
+        },
+        "selected_endpoint_env": "LLM_CODER_URL",
+        "selected_model_key": "qwen3-coder-30b",
+        "success": true
+      },
+      "input": {
+        "chain_hit": false,
+        "chain_hit_model_key": null,
+        "constraints": {
+          "max_cost_per_1k": 0.0,
+          "max_latency_ms": 30000,
+          "min_context_window": 4096,
+          "min_quality_score": 0.0,
+          "needs_computer_use": false,
+          "needs_tool_use": false,
+          "needs_vision": false,
+          "prefer_local": true
+        },
+        "context_length_estimate": 4096,
+        "correlation_id": "00000000-0000-0000-0000-000000000006",
+        "health": [],
+        "live_metrics": [],
+        "registry": [
+          {
+            "api_key_env": "",
+            "base_url_env": "LLM_CODER_URL",
+            "capabilities": [
+              "code_generation",
+              "refactoring"
+            ],
+            "concurrency_limit": null,
+            "context_window": 65536,
+            "model_key": "qwen3-coder-30b",
+            "provider": "local",
+            "tier": "local",
+            "transport": "http"
+          },
+          {
+            "api_key_env": "",
+            "base_url_env": "",
+            "capabilities": [
+              "code_generation",
+              "reasoning",
+              "vision"
+            ],
+            "concurrency_limit": null,
+            "context_window": 200000,
+            "model_key": "claude-sonnet",
+            "provider": "anthropic",
+            "tier": "frontier_api",
+            "transport": "oauth"
+          },
+          {
+            "api_key_env": "",
+            "base_url_env": "LLM_DEEPSEEK_R1_URL",
+            "capabilities": [
+              "deep_reasoning",
+              "code_review"
+            ],
+            "concurrency_limit": null,
+            "context_window": 32768,
+            "model_key": "deepseek-r1-32b",
+            "provider": "local",
+            "tier": "local",
+            "transport": "http"
+          }
+        ],
+        "scoring_weights": {
+          "chain_bonus": 0.1,
+          "cost": 0.3,
+          "quality": 0.4,
+          "speed": 0.2
+        },
+        "task_description": "",
+        "task_type": "code_generation"
+      },
+      "scenario": "cost_cap_filters_frontier"
+    },
+    {
+      "expected": {
+        "correlation_id": "00000000-0000-0000-0000-000000000007",
+        "error_message": "",
+        "estimated_cost": 0.0,
+        "estimated_latency_ms": 409600,
+        "fallback_model_key": "qwen3-coder-30b",
+        "rationale": "Selected deepseek-r1-32b (score=0.708); task_type=code_generation; tier=local",
+        "scores": {
+          "claude-sonnet": 0.275,
+          "deepseek-r1-32b": 0.708,
+          "qwen3-coder-30b": 0.5
+        },
+        "selected_endpoint_env": "LLM_DEEPSEEK_R1_URL",
+        "selected_model_key": "deepseek-r1-32b",
+        "success": true
+      },
+      "input": {
+        "chain_hit": false,
+        "chain_hit_model_key": null,
+        "constraints": {
+          "max_cost_per_1k": 0.1,
+          "max_latency_ms": 30000,
+          "min_context_window": 4096,
+          "min_quality_score": 0.0,
+          "needs_computer_use": false,
+          "needs_tool_use": false,
+          "needs_vision": false,
+          "prefer_local": true
+        },
+        "context_length_estimate": 4096,
+        "correlation_id": "00000000-0000-0000-0000-000000000007",
+        "health": [],
+        "live_metrics": [
+          {
+            "avg_latency_ms": 500,
+            "avg_tokens_per_sec": 10.0,
+            "graduated": true,
+            "model_key": "deepseek-r1-32b",
+            "sample_count": 30,
+            "success_rate": 0.95,
+            "task_type": "code_generation"
+          }
+        ],
+        "registry": [
+          {
+            "api_key_env": "",
+            "base_url_env": "LLM_CODER_URL",
+            "capabilities": [
+              "code_generation",
+              "refactoring"
+            ],
+            "concurrency_limit": null,
+            "context_window": 65536,
+            "model_key": "qwen3-coder-30b",
+            "provider": "local",
+            "tier": "local",
+            "transport": "http"
+          },
+          {
+            "api_key_env": "",
+            "base_url_env": "",
+            "capabilities": [
+              "code_generation",
+              "reasoning",
+              "vision"
+            ],
+            "concurrency_limit": null,
+            "context_window": 200000,
+            "model_key": "claude-sonnet",
+            "provider": "anthropic",
+            "tier": "frontier_api",
+            "transport": "oauth"
+          },
+          {
+            "api_key_env": "",
+            "base_url_env": "LLM_DEEPSEEK_R1_URL",
+            "capabilities": [
+              "deep_reasoning",
+              "code_review"
+            ],
+            "concurrency_limit": null,
+            "context_window": 32768,
+            "model_key": "deepseek-r1-32b",
+            "provider": "local",
+            "tier": "local",
+            "transport": "http"
+          }
+        ],
+        "scoring_weights": {
+          "chain_bonus": 0.1,
+          "cost": 0.3,
+          "quality": 0.4,
+          "speed": 0.2
+        },
+        "task_description": "",
+        "task_type": "code_generation"
+      },
+      "scenario": "live_metrics_graduated"
+    },
+    {
+      "expected": {
+        "correlation_id": "00000000-0000-0000-0000-000000000008",
+        "error_message": "",
+        "estimated_cost": 0.0,
+        "estimated_latency_ms": 27306,
+        "fallback_model_key": "deepseek-r1-32b",
+        "rationale": "Selected qwen3-coder-30b (score=0.780); task_type=code_generation; tier=local",
+        "scores": {
+          "claude-sonnet": 0.275,
+          "deepseek-r1-32b": 0.42,
+          "qwen3-coder-30b": 0.78
+        },
+        "selected_endpoint_env": "LLM_CODER_URL",
+        "selected_model_key": "qwen3-coder-30b",
+        "success": true
+      },
+      "input": {
+        "chain_hit": false,
+        "chain_hit_model_key": null,
+        "constraints": {
+          "max_cost_per_1k": 0.1,
+          "max_latency_ms": 30000,
+          "min_context_window": 4096,
+          "min_quality_score": 0.0,
+          "needs_computer_use": false,
+          "needs_tool_use": false,
+          "needs_vision": false,
+          "prefer_local": true
+        },
+        "context_length_estimate": 4096,
+        "correlation_id": "00000000-0000-0000-0000-000000000008",
+        "health": [],
+        "live_metrics": [
+          {
+            "avg_latency_ms": 200,
+            "avg_tokens_per_sec": 150.0,
+            "graduated": false,
+            "model_key": "qwen3-coder-30b",
+            "sample_count": 25,
+            "success_rate": 0.9,
+            "task_type": "code_generation"
+          }
+        ],
+        "registry": [
+          {
+            "api_key_env": "",
+            "base_url_env": "LLM_CODER_URL",
+            "capabilities": [
+              "code_generation",
+              "refactoring"
+            ],
+            "concurrency_limit": null,
+            "context_window": 65536,
+            "model_key": "qwen3-coder-30b",
+            "provider": "local",
+            "tier": "local",
+            "transport": "http"
+          },
+          {
+            "api_key_env": "",
+            "base_url_env": "",
+            "capabilities": [
+              "code_generation",
+              "reasoning",
+              "vision"
+            ],
+            "concurrency_limit": null,
+            "context_window": 200000,
+            "model_key": "claude-sonnet",
+            "provider": "anthropic",
+            "tier": "frontier_api",
+            "transport": "oauth"
+          },
+          {
+            "api_key_env": "",
+            "base_url_env": "LLM_DEEPSEEK_R1_URL",
+            "capabilities": [
+              "deep_reasoning",
+              "code_review"
+            ],
+            "concurrency_limit": null,
+            "context_window": 32768,
+            "model_key": "deepseek-r1-32b",
+            "provider": "local",
+            "tier": "local",
+            "transport": "http"
+          }
+        ],
+        "scoring_weights": {
+          "chain_bonus": 0.1,
+          "cost": 0.3,
+          "quality": 0.4,
+          "speed": 0.2
+        },
+        "task_description": "",
+        "task_type": "code_generation"
+      },
+      "scenario": "live_metrics_measured_speed"
+    },
+    {
+      "expected": {
+        "correlation_id": "00000000-0000-0000-0000-000000000009",
+        "error_message": "",
+        "estimated_cost": 1.2,
+        "estimated_latency_ms": 80000000,
+        "fallback_model_key": null,
+        "rationale": "Selected claude-sonnet (score=0.275); task_type=code_generation; tier=frontier_api",
+        "scores": {
+          "claude-sonnet": 0.275
+        },
+        "selected_endpoint_env": "",
+        "selected_model_key": "claude-sonnet",
+        "success": true
+      },
+      "input": {
+        "chain_hit": false,
+        "chain_hit_model_key": null,
+        "constraints": {
+          "max_cost_per_1k": 0.1,
+          "max_latency_ms": 30000,
+          "min_context_window": 100000,
+          "min_quality_score": 0.0,
+          "needs_computer_use": false,
+          "needs_tool_use": false,
+          "needs_vision": false,
+          "prefer_local": true
+        },
+        "context_length_estimate": 80000,
+        "correlation_id": "00000000-0000-0000-0000-000000000009",
+        "health": [],
+        "live_metrics": [],
+        "registry": [
+          {
+            "api_key_env": "",
+            "base_url_env": "LLM_CODER_URL",
+            "capabilities": [
+              "code_generation",
+              "refactoring"
+            ],
+            "concurrency_limit": null,
+            "context_window": 65536,
+            "model_key": "qwen3-coder-30b",
+            "provider": "local",
+            "tier": "local",
+            "transport": "http"
+          },
+          {
+            "api_key_env": "",
+            "base_url_env": "",
+            "capabilities": [
+              "code_generation",
+              "reasoning",
+              "vision"
+            ],
+            "concurrency_limit": null,
+            "context_window": 200000,
+            "model_key": "claude-sonnet",
+            "provider": "anthropic",
+            "tier": "frontier_api",
+            "transport": "oauth"
+          },
+          {
+            "api_key_env": "",
+            "base_url_env": "LLM_DEEPSEEK_R1_URL",
+            "capabilities": [
+              "deep_reasoning",
+              "code_review"
+            ],
+            "concurrency_limit": null,
+            "context_window": 32768,
+            "model_key": "deepseek-r1-32b",
+            "provider": "local",
+            "tier": "local",
+            "transport": "http"
+          }
+        ],
+        "scoring_weights": {
+          "chain_bonus": 0.1,
+          "cost": 0.3,
+          "quality": 0.4,
+          "speed": 0.2
+        },
+        "task_description": "",
+        "task_type": "code_generation"
+      },
+      "scenario": "min_context_window"
+    },
+    {
+      "expected": {
+        "correlation_id": "00000000-0000-0000-0000-00000000000a",
+        "error_message": "",
+        "estimated_cost": 0.0,
+        "estimated_latency_ms": 102400,
+        "fallback_model_key": "qwen3-coder-30b",
+        "rationale": "Selected deepseek-r1-32b (score=0.502); task_type=code_generation; tier=local",
+        "scores": {
+          "claude-sonnet": 0.275,
+          "deepseek-r1-32b": 0.502,
+          "qwen3-coder-30b": 0.5
+        },
+        "selected_endpoint_env": "LLM_DEEPSEEK_R1_URL",
+        "selected_model_key": "deepseek-r1-32b",
+        "success": true
+      },
+      "input": {
+        "chain_hit": false,
+        "chain_hit_model_key": null,
+        "constraints": {
+          "max_cost_per_1k": 0.1,
+          "max_latency_ms": 30000,
+          "min_context_window": 4096,
+          "min_quality_score": 0.0,
+          "needs_computer_use": false,
+          "needs_tool_use": false,
+          "needs_vision": false,
+          "prefer_local": true
+        },
+        "context_length_estimate": 4096,
+        "correlation_id": "00000000-0000-0000-0000-00000000000a",
+        "health": [],
+        "live_metrics": [
+          {
+            "avg_latency_ms": 300,
+            "avg_tokens_per_sec": 40.0,
+            "graduated": false,
+            "model_key": "deepseek-r1-32b",
+            "sample_count": 5,
+            "success_rate": 0.8,
+            "task_type": "code_generation"
+          }
+        ],
+        "registry": [
+          {
+            "api_key_env": "",
+            "base_url_env": "LLM_CODER_URL",
+            "capabilities": [
+              "code_generation",
+              "refactoring"
+            ],
+            "concurrency_limit": null,
+            "context_window": 65536,
+            "model_key": "qwen3-coder-30b",
+            "provider": "local",
+            "tier": "local",
+            "transport": "http"
+          },
+          {
+            "api_key_env": "",
+            "base_url_env": "",
+            "capabilities": [
+              "code_generation",
+              "reasoning",
+              "vision"
+            ],
+            "concurrency_limit": null,
+            "context_window": 200000,
+            "model_key": "claude-sonnet",
+            "provider": "anthropic",
+            "tier": "frontier_api",
+            "transport": "oauth"
+          },
+          {
+            "api_key_env": "",
+            "base_url_env": "LLM_DEEPSEEK_R1_URL",
+            "capabilities": [
+              "deep_reasoning",
+              "code_review"
+            ],
+            "concurrency_limit": null,
+            "context_window": 32768,
+            "model_key": "deepseek-r1-32b",
+            "provider": "local",
+            "tier": "local",
+            "transport": "http"
+          }
+        ],
+        "scoring_weights": {
+          "chain_bonus": 0.1,
+          "cost": 0.3,
+          "quality": 0.4,
+          "speed": 0.2
+        },
+        "task_description": "",
+        "task_type": "code_generation"
+      },
+      "scenario": "live_metrics_partial"
+    },
+    {
+      "expected": {
+        "correlation_id": "00000000-0000-0000-0000-00000000000b",
+        "error_message": "",
+        "estimated_cost": 0.0,
+        "estimated_latency_ms": 4096000,
+        "fallback_model_key": "deepseek-r1-32b",
+        "rationale": "Selected qwen3-coder-30b (score=0.000); task_type=code_generation; tier=local",
+        "scores": {
+          "claude-sonnet": 0.0,
+          "deepseek-r1-32b": 0.0,
+          "qwen3-coder-30b": 0.0
+        },
+        "selected_endpoint_env": "LLM_CODER_URL",
+        "selected_model_key": "qwen3-coder-30b",
+        "success": true
+      },
+      "input": {
+        "chain_hit": false,
+        "chain_hit_model_key": null,
+        "constraints": {
+          "max_cost_per_1k": 0.1,
+          "max_latency_ms": 30000,
+          "min_context_window": 4096,
+          "min_quality_score": 0.0,
+          "needs_computer_use": false,
+          "needs_tool_use": false,
+          "needs_vision": false,
+          "prefer_local": true
+        },
+        "context_length_estimate": 4096,
+        "correlation_id": "00000000-0000-0000-0000-00000000000b",
+        "health": [
+          {
+            "error_message": "",
+            "healthy": true,
+            "latency_ms": 0,
+            "model_key": "qwen3-coder-30b",
+            "queue_depth": 60
+          },
+          {
+            "error_message": "",
+            "healthy": true,
+            "latency_ms": 0,
+            "model_key": "claude-sonnet",
+            "queue_depth": 60
+          },
+          {
+            "error_message": "",
+            "healthy": true,
+            "latency_ms": 0,
+            "model_key": "deepseek-r1-32b",
+            "queue_depth": 60
+          }
+        ],
+        "live_metrics": [],
+        "registry": [
+          {
+            "api_key_env": "",
+            "base_url_env": "LLM_CODER_URL",
+            "capabilities": [
+              "code_generation",
+              "refactoring"
+            ],
+            "concurrency_limit": null,
+            "context_window": 65536,
+            "model_key": "qwen3-coder-30b",
+            "provider": "local",
+            "tier": "local",
+            "transport": "http"
+          },
+          {
+            "api_key_env": "",
+            "base_url_env": "",
+            "capabilities": [
+              "code_generation",
+              "reasoning",
+              "vision"
+            ],
+            "concurrency_limit": null,
+            "context_window": 200000,
+            "model_key": "claude-sonnet",
+            "provider": "anthropic",
+            "tier": "frontier_api",
+            "transport": "oauth"
+          },
+          {
+            "api_key_env": "",
+            "base_url_env": "LLM_DEEPSEEK_R1_URL",
+            "capabilities": [
+              "deep_reasoning",
+              "code_review"
+            ],
+            "concurrency_limit": null,
+            "context_window": 32768,
+            "model_key": "deepseek-r1-32b",
+            "provider": "local",
+            "tier": "local",
+            "transport": "http"
+          }
+        ],
+        "scoring_weights": {
+          "chain_bonus": 0.1,
+          "cost": 0.3,
+          "quality": 0.4,
+          "speed": 0.2
+        },
+        "task_description": "",
+        "task_type": "code_generation"
+      },
+      "scenario": "queue_depth_unavailable"
+    }
+  ],
+  "golden_version": "compute_golden.v1",
+  "handler_module": "omnibase_infra.nodes.node_model_router_compute.handlers.handler_score_models",
+  "node_id": "omnibase_infra.nodes.node_model_router_compute",
+  "recorded_from_base_ref": "a87e5057f1b930c31bbad5e1e5fa215f962629d4"
+}

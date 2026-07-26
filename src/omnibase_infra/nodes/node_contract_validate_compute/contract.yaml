@@ -30,9 +30,7 @@ handler_routing:
     - operation: "validate_contract"
       handler:
         name: "HandlerContractValidate"
-        function: "handle_contract_validate"
         module: "omnibase_infra.nodes.node_contract_validate_compute.handlers.handler_contract_validate"
-        type: "async"
       description: "Validate contract YAML, contract files, or model compliance inputs."
 io_operations:
   - operation: "validate_contract"

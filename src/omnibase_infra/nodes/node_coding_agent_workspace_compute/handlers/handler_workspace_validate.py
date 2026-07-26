@@ -6,7 +6,9 @@ Pure pre-flight workspace safety. Deterministic, no I/O beyond pure path
 resolution math (``Path.resolve`` strict=False does not touch the filesystem for
 the components it normalizes here — the EFFECT owns git/clean-tree reads). The
 handler folds a ``ModelWorkspaceValidateCommand`` into a
-``ModelWorkspaceValidateResult`` and returns it via ``for_compute``.
+``ModelWorkspaceValidateResult`` and returns it directly (def-B, OMN-14355) —
+the shared runtime adapter supplies the typed command and folds the bare
+result into ``output_events``.
 
 Checks (all must pass to be valid):
   1. allowed-root resolution — the resolved path lives under an allowed root.
@@ -20,13 +22,8 @@ Checks (all must pass to be valid):
 
 from __future__ import annotations
 
-from collections.abc import Mapping
 from pathlib import Path
-from typing import TypeVar
-from uuid import uuid4
 
-from omnibase_core.models.dispatch.model_handler_output import ModelHandlerOutput
-from omnibase_core.models.events.model_event_envelope import ModelEventEnvelope
 from omnibase_infra.enums import EnumHandlerType, EnumHandlerTypeCategory
 from omnibase_infra.models.coding_agent.model_workspace_validate_command import (
     ModelWorkspaceValidateCommand,
@@ -36,10 +33,6 @@ from omnibase_infra.models.coding_agent.model_workspace_validate_result import (
 )
 
 HANDLER_ID = "coding-agent-workspace-compute"
-
-# Dispatch payloads are coerced at runtime; the protocol entry is generic over the
-# envelope payload type (ProtocolMessageHandler.handle(ModelEventEnvelope[T])).
-T = TypeVar("T")
 
 
 def validate_workspace(
@@ -105,35 +98,17 @@ class HandlerWorkspaceValidate:
         return EnumHandlerTypeCategory.COMPUTE
 
     async def handle(
-        self, envelope: ModelEventEnvelope[T]
-    ) -> ModelHandlerOutput[ModelWorkspaceValidateResult]:
-        """Validate the workspace and return the verdict as a compute result."""
-        command = _coerce_command(envelope.payload)
-        result = validate_workspace(command)
-        return ModelHandlerOutput.for_compute(
-            input_envelope_id=envelope.envelope_id,
-            correlation_id=(
-                envelope.correlation_id or command.correlation_id or uuid4()
-            ),
-            handler_id=HANDLER_ID,
-            result=result,
-        )
+        self, command: ModelWorkspaceValidateCommand
+    ) -> ModelWorkspaceValidateResult:
+        """Validate the workspace and return the verdict directly (def-B).
 
-
-def _coerce_command(payload: object) -> ModelWorkspaceValidateCommand:
-    """Coerce the dispatched payload into a ``ModelWorkspaceValidateCommand``."""
-    if isinstance(payload, ModelWorkspaceValidateCommand):
-        return payload
-    if isinstance(payload, Mapping):
-        return ModelWorkspaceValidateCommand.model_validate(dict(payload))
-    if hasattr(payload, "model_dump"):
-        return ModelWorkspaceValidateCommand.model_validate(
-            payload.model_dump(mode="json")
-        )
-    raise TypeError(
-        "workspace-validate payload must be ModelWorkspaceValidateCommand or a "
-        f"mapping; got {type(payload).__name__}"
-    )
+        The shared runtime adapter (``omnibase_infra.runtime.auto_wiring
+        .handler_wiring``) supplies the already-validated typed command and
+        folds the bare ``ModelWorkspaceValidateResult`` return into
+        ``output_events`` itself — no envelope wrapping/unwrapping happens in
+        the handler (OMN-14355 canonical shape, definition B).
+        """
+        return validate_workspace(command)
 
 
 __all__: list[str] = [

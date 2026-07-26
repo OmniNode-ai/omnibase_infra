@@ -1,0 +1,14 @@
+{
+  "node_id": "omnibase_infra.nodes.node_scope_extract_compute",
+  "provenance": {
+    "authored_by": "proof-author@omninode.local",
+    "base_ref_exec_sha": "8fc8d927ef3d15e65129b21e14568a17a3d8ed91",
+    "def_b_commit": "c6cb046fb7dffc47619a6c33924f6cbf0d416456"
+  },
+  "selected_input_hashes": [
+    "sha256:0bbfadfaf5bb36fccb7abee57fb967a9c3b1bbe28f39e6d5dcb73844c9b671b6",
+    "sha256:4af8ef1643b9c2e6bdcbc159ee96da3b72307fd3ddaf5770cff049ae224bc279",
+    "sha256:3287dfd1c617d457604b4069e1bac6eb82723a63119116b379de8b3aa6c2fa4c"
+  ],
+  "status": "pass"
+}

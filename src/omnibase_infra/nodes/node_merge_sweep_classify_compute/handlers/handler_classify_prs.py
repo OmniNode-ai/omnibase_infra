@@ -2,15 +2,20 @@
 # SPDX-License-Identifier: MIT
 """Handler that classifies PRs into Track A (merge-ready) vs Track B (needs polish).
 
-This is a COMPUTE handler - pure transformation, no I/O.
+This is a COMPUTE handler - pure transformation, no I/O. Canonical definition B:
+``handle(request: ModelClassifyInput) -> ModelClassifyResult`` — a single
+typed-request entrypoint the shared runtime adapter drives, with no runtime
+envelope type in the core.
 """
 
 from __future__ import annotations
 
 import logging
-from uuid import UUID
 
 from omnibase_infra.enums import EnumHandlerType, EnumHandlerTypeCategory
+from omnibase_infra.nodes.node_merge_sweep_classify_compute.models.model_classify_input import (
+    ModelClassifyInput,
+)
 from omnibase_infra.nodes.node_merge_sweep_classify_compute.models.model_classify_result import (
     ModelClassifyResult,
 )
@@ -69,22 +74,20 @@ class HandlerClassifyPRs:
     def handler_category(self) -> EnumHandlerTypeCategory:
         return EnumHandlerTypeCategory.COMPUTE
 
-    async def handle(
-        self,
-        prs: tuple[ModelPRInfo, ...],
-        correlation_id: UUID,
-        require_approval: bool = True,
-    ) -> ModelClassifyResult:
+    async def handle(self, request: ModelClassifyInput) -> ModelClassifyResult:
         """Classify all PRs into Track A / Track B / SKIP.
 
         Args:
-            prs: PRs to classify.
-            correlation_id: Workflow correlation ID.
-            require_approval: Whether review approval is required for Track A.
+            request: Classification input carrying the PRs, correlation id, and
+                whether review approval is required for Track A.
 
         Returns:
             ModelClassifyResult with classified PRs.
         """
+        prs = request.prs
+        correlation_id = request.correlation_id
+        require_approval = request.require_approval
+
         logger.info(
             "Classifying %d PRs (require_approval=%s, correlation_id=%s)",
             len(prs),

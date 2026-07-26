@@ -18,7 +18,7 @@ contract_version:
 node_version:
   major: 1
   minor: 0
-  patch: 0
+  patch: 1
 node_type: "EFFECT_GENERIC"
 description: >
   EFFECT node wrapping the Registry Discovery API. Provides contract-driven configuration for the FastAPI service that exposes node registrations for dashboard consumption. Discovery is projection-based (PostgreSQL); Consul instance discovery was removed (OMN-9545). All operational limits, paths, and behaviour are defined here rather than as hardcoded constants.

@@ -1,0 +1,28 @@
+{
+  "golden_version": "compute_golden.v1",
+  "input": {
+    "content": "Touch the package `src/omniclaude` root during the migration.",
+    "correlation_id": "00000000-0000-0000-0000-000000000003",
+    "output_path": "~/.claude/scope-manifest.json",
+    "plan_file_path": "plan_pathlike.md"
+  },
+  "input_hash": "sha256:4af8ef1643b9c2e6bdcbc159ee96da3b72307fd3ddaf5770cff049ae224bc279",
+  "input_type": "ModelScopeExtractInput",
+  "output": {
+    "adjacent_files": [],
+    "correlation_id": "00000000-0000-0000-0000-000000000003",
+    "directories": [
+      "src/omniclaude"
+    ],
+    "files": [],
+    "output_path": "~/.claude/scope-manifest.json",
+    "plan_file_path": "plan_pathlike.md",
+    "repos": [
+      "omniclaude"
+    ],
+    "systems": []
+  },
+  "output_type": "ModelScopeExtracted",
+  "scenario": "backtick_pathlike_no_extension",
+  "volatile_mask": []
+}

@@ -1,0 +1,25 @@
+{
+  "branch_coverage_pct": 74.81,
+  "candidate_count": 12,
+  "coverage_target": 80.0,
+  "handler_module": "omnibase_infra.nodes.node_impact_analyzer_compute.handlers.handler_impact_analysis",
+  "handler_module_sha256": "sha256:45404e4efac57263a0e5980d4dacab997517af55f0f395683091ff3b83e14acd",
+  "meets_target": false,
+  "node_id": "omnibase_infra.nodes.node_impact_analyzer_compute",
+  "receipt_schema": "adequacy_receipt.v1",
+  "recorded_at": "2026-07-20T02:50:14.923814+00:00",
+  "recorder_schema": "adequacy_receipt.v1",
+  "selected_count": 5,
+  "selected_input_hashes": [
+    "sha256:3b1bda30a3276e6810c3cc65246f2536bf0046737255dd1a55cdbf1dffe1852b",
+    "sha256:c822fdcc32fb4b68780faf1a4e760a5b679536acf51cc6d2d08ea28142ac9bbd",
+    "sha256:3c17ce76a6412aea628027dfa2234519b5c97fffcbe61553ca0b538ce3a0fc67",
+    "sha256:0278acfbdac15d10db5476bb4fecc2e52325688c941d8c937f20bf3e6823fde1",
+    "sha256:e2e95f086a3deeb7d112573f8d5b4c766835c03fa2234a2ade9fd6b4dae897c8"
+  ],
+  "uncovered_waiver": {
+    "reason": "OMN-14817 hand-flips node_impact_analyzer_compute to canonical def-B (handle(request), OMN-14781 path): the two-arg analyze(trigger, registry) op-method is replaced by handle() over a single ModelImpactAnalysisRequest, and the OMN-3925 scoring helpers (_score_artifact/_count_matches/_assign_action/_level_to_policy/_pattern_to_reason_code) are preserved byte-identically base_ref<->HEAD, re-derived from git by the canonical-shape ratchet (.handflip.json). Equivalence is proven by that git-verbatim preservation plus the green parity tests over the corpus, NOT by branch coverage. The measured branch_coverage_pct is deflated because adequacy recording traces an already-imported handler module, so its import + class/method-definition block registers as uncovered; the sole missing reachable branch arc is the unreachable _level_to_policy fallback (the numeric policy level is always 0-3, which always matches inside the loop).",
+    "uncovered_branch_count": 1
+  },
+  "volatile_mask": []
+}

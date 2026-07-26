@@ -47,6 +47,7 @@ from omnibase_infra.models.coding_agent import (
     ModelCodingAgentEvent,
     ModelCodingAgentFsmState,
     ModelCodingAgentInvokeCommand,
+    ModelCodingAgentResult,
     ModelWorkspaceValidateCommand,
     ModelWorkspaceValidateResult,
 )
@@ -169,12 +170,9 @@ class TestWorkspaceComputeDispatch:
             sandbox=EnumAgentSandbox.WORKSPACE_WRITE,
             prompt="do the thing",
         )
-        envelope: ModelEventEnvelope[ModelWorkspaceValidateCommand] = (
-            ModelEventEnvelope(payload=command, correlation_id=command.correlation_id)
-        )
-        output = await handler.handle(envelope)
-        assert output.node_kind == EnumNodeKind.COMPUTE
-        verdict = output.result
+        # def-B (OMN-14355/OMN-14587 wave 1): handle() takes the typed command
+        # directly and returns the verdict directly — no envelope wrapping.
+        verdict = await handler.handle(command)
         assert isinstance(verdict, ModelWorkspaceValidateResult)
         assert verdict.valid is True
 
@@ -194,11 +192,7 @@ class TestWorkspaceComputeDispatch:
             sandbox=EnumAgentSandbox.READ_ONLY,
             prompt="do the thing",
         )
-        envelope: ModelEventEnvelope[ModelWorkspaceValidateCommand] = (
-            ModelEventEnvelope(payload=command, correlation_id=command.correlation_id)
-        )
-        output = await handler.handle(envelope)
-        verdict = output.result
+        verdict = await handler.handle(command)
         assert isinstance(verdict, ModelWorkspaceValidateResult)
         assert verdict.valid is False
         assert verdict.rejection_reason is not None
@@ -212,11 +206,7 @@ class TestWorkspaceComputeDispatch:
             sandbox=EnumAgentSandbox.READ_ONLY,
             prompt="do the thing",
         )
-        envelope: ModelEventEnvelope[ModelWorkspaceValidateCommand] = (
-            ModelEventEnvelope(payload=command, correlation_id=command.correlation_id)
-        )
-        output = await handler.handle(envelope)
-        verdict = output.result
+        verdict = await handler.handle(command)
         assert isinstance(verdict, ModelWorkspaceValidateResult)
         assert verdict.valid is False
 
@@ -510,13 +500,10 @@ class TestInvokeEffectDispatch:
             agent_credential_home=_CRED_HOME,
         )
         command = _invoke_command(workspace_path=str(tmp_path))
-        envelope: ModelEventEnvelope[ModelCodingAgentInvokeCommand] = (
-            ModelEventEnvelope(payload=command, correlation_id=command.correlation_id)
-        )
-        output = await handler.handle(envelope)
-        assert output.node_kind == EnumNodeKind.EFFECT
-        assert len(output.events) == 1
-        result = output.events[0].payload
+        # def-B (OMN-14589): handle() takes the typed command directly — no
+        # envelope wrapping/unwrapping happens in the handler itself anymore.
+        result = await handler.handle(command)
+        assert isinstance(result, ModelCodingAgentResult)
         assert result.status == EnumAgentStatus.COMPLETED
         # files_changed/diff are git-derived (system), not agent-reported.
         assert result.files_changed == ("foo.py",)
@@ -701,10 +688,7 @@ class TestEndToEndCredentialIndependentChain:
             sandbox=command.sandbox,
             prompt=command.prompt,
         )
-        verdict_out = await compute.handle(
-            ModelEventEnvelope(payload=validate_command, correlation_id=corr)
-        )
-        verdict = verdict_out.result
+        verdict = await compute.handle(validate_command)
         assert verdict.valid is False
 
         # ORCHESTRATOR routes the rejection to the FSM advance (not invoke).

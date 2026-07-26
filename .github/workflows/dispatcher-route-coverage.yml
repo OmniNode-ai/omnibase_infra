@@ -45,6 +45,12 @@ on:
     branches: [main]
   merge_group:
 
+concurrency:
+  # OMN-13949: cancel superseded PR runs to free saturated runners. merge_group
+  # entries carry a unique github.ref, so queue entries never cross-cancel.
+  group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
+
 permissions:
   contents: read
 
@@ -53,18 +59,22 @@ jobs:
     name: dispatcher-route-coverage
     runs-on: >-
       ${{
-        (github.event_name == 'pull_request' &&
-         github.event.pull_request.head.repo.full_name != github.repository)
+        ((github.event_name == 'pull_request' && github.base_ref == 'dev') ||
+         (github.event_name == 'pull_request' &&
+          github.event.pull_request.head.repo.full_name != github.repository))
         && fromJSON(vars.OMNI_PUBLIC_PR_RUNS_ON_JSON || '["ubuntu-latest"]')
         || fromJSON(vars.OMNI_TRUSTED_CI_RUNS_ON_JSON || '["self-hosted","omnibase-ci"]')
       }}
-    timeout-minutes: 15
+    # OMN-14017: sparse omnimarket checkout can spend most of the old 15-minute
+    # budget retrying partial-clone fetches during fleet egress saturation.
+    timeout-minutes: 30
 
     steps:
       - name: Checkout omnibase_infra
         uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
         with:
           fetch-depth: 0
+          persist-credentials: false
 
       - name: Checkout omnimarket (sibling)
         uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
@@ -73,6 +83,7 @@ jobs:
           ref: dev
           path: omnimarket
           token: ${{ secrets.OMNI_GITHUB_TOKEN || github.token }}
+          persist-credentials: false
           # Sparse checkout: only the contract files needed for coverage analysis
           sparse-checkout: |
             src/omnimarket/nodes

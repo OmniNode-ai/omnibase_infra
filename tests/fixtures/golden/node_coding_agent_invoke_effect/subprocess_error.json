@@ -1,0 +1,34 @@
+{
+  "golden_version": "compute_golden.v1",
+  "input": {
+    "agent": "claude",
+    "allow_dirty_tree": false,
+    "correlation_id": "d1cd00a3-04ad-4b82-8cd3-f2752f060ac2",
+    "model": null,
+    "network": false,
+    "prompt": "add a docstring to foo.py",
+    "sandbox": "read_only",
+    "timeout_ms": 60000,
+    "workspace_path": "/workspace/demo"
+  },
+  "input_type": "ModelCodingAgentInvokeCommand",
+  "output": {
+    "correlation_id": "d1cd00a3-04ad-4b82-8cd3-f2752f060ac2",
+    "diff": "",
+    "diff_hash": "",
+    "duration_ms": 0.053209001634968445,
+    "error_class": "subprocess_error",
+    "exit_code": 1,
+    "files_changed": [],
+    "output": "exit 1: boom",
+    "starting_head_sha": null,
+    "status": "failed",
+    "timed_out": false,
+    "usage": {}
+  },
+  "output_type": "ModelCodingAgentResult",
+  "scenario": "subprocess_error",
+  "volatile_mask": [
+    "duration_ms"
+  ]
+}

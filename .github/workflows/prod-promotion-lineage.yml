@@ -60,7 +60,7 @@ jobs:
   guard-tests:
     name: Prod promotion-lineage guard tests
     # Run on PRs and pushes; skipped for the reusable workflow_call path.
-    if: ${{ github.event_name != 'workflow_call' }}
+    if: github.event_name != 'workflow_call'
     runs-on: >-
       ${{
         (github.event_name == 'pull_request' &&
@@ -93,7 +93,7 @@ jobs:
   lineage-check:
     name: Enforce clean + promoted build source
     # Only runs when invoked by the prod build (workflow_call with enforce).
-    if: ${{ github.event_name == 'workflow_call' && inputs.enforce_lineage }}
+    if: github.event_name == 'workflow_call' && inputs.enforce_lineage
     runs-on: >-
       ${{ fromJSON(vars.OMNI_TRUSTED_CI_RUNS_ON_JSON || '["self-hosted","omnibase-ci"]') }}
     timeout-minutes: 5

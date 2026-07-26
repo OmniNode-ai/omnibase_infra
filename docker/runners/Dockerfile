@@ -55,6 +55,28 @@ ENV OMNI_RUNNER_IMAGE_VERSION=${OMNI_RUNNER_IMAGE_VERSION}
 ENV OMNI_CI_ENV_ROOT=${OMNI_CI_ENV_ROOT}
 
 # Install system dependencies
+# libatomic1 (OMN-13946): the GitHub Actions bundled node runtime (used by
+# node-based actions, e.g. pyright) dlopens libatomic.so.1 at load time.
+# Ubuntu 22.04 does not pull it in transitively; without it every node-based
+# action fails with "node: libatomic.so.1: cannot open shared object file".
+# rsync (OMN-15103): the omnibase-deploy runner (omninode-deploy-runner,
+# see docker-compose.runners.yml) invokes scripts/deploy-runtime.sh's
+# BUILD_SOURCE=workspace path, whose sync_files() stages the deploy target
+# via ~10 `rsync -a --delete` calls. The shared omnibase-ci fleet's jobs
+# (build/test) never exercise that path, so the gap went unnoticed until
+# the first live release-train-lab deploy run reached it and died at
+# "Validate Prerequisites" with 'rsync is required but not found in PATH'.
+# sudo (OMN-15134): the workspace-reset hook (runner-job-started.sh) runs as
+# the unprivileged `runner` user (matching every job step's execution
+# identity) and normally suffices for `rm -rf` on its own workspace tree. It
+# needs a narrowly scoped escalation ONLY as a fail-loud-then-clean fallback
+# for root-owned debris left by an out-of-band root-privileged mutation of
+# this container (e.g. a manual `docker exec` without `-u runner` -- this
+# image's own ENTRYPOINT legitimately starts as root for the docker-socket
+# GID fix / OMNI_HOME chown, so the container's default exec identity IS
+# root, and any ad hoc bare `docker exec` inherits it). See the sudoers rule
+# below: NOPASSWD, one command, one argument pattern, confined under this
+# runner's own `_work` tree -- never a general root shell.
 RUN apt-get update && apt-get install -y --no-install-recommends \
     ca-certificates \
     curl \
@@ -62,6 +84,9 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     jq \
     tar \
     unzip \
+    rsync \
+    sudo \
+    libatomic1 \
     libicu-dev \
     libkrb5-3 \
     zlib1g \
@@ -72,58 +97,23 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     software-properties-common \
     && rm -rf /var/lib/apt/lists/*
 
+# OMN-15134: scoped NOPASSWD sudo rule -- `runner` may run exactly
+# `rm -rf -- <path under RUNNER_HOME>/_work/...>` as root, nothing else. This
+# is the fallback path runner-job-started.sh uses ONLY after a plain `rm -rf`
+# fails with root-owned debris in the way; it never grants a shell, another
+# binary, or an unbounded path. `visudo -c` validates the file at build time
+# so a syntax error fails the image build, not a live job.
+RUN echo 'runner ALL=(root) NOPASSWD: /bin/rm -rf -- /home/runner/actions-runner/_work/*' \
+        > /etc/sudoers.d/runner-workspace-reset \
+    && chmod 0440 /etc/sudoers.d/runner-workspace-reset \
+    && visudo -c
+
 # Bounded external binary downloads. The runner image build-smoke runs in CI,
 # so one-shot curl calls make the image contract depend on transient CDN/TLS
 # behavior. Force HTTP/1.1 and retry connection/protocol resets with a cap.
 SHELL ["/bin/bash", "-o", "pipefail", "-c"]
-RUN cat >/usr/local/bin/omni-curl <<'EOF' \
-    && chmod +x /usr/local/bin/omni-curl
-#!/usr/bin/env bash
-set -euo pipefail
-output_file=""
-args=("$@")
-for ((i = 0; i < ${#args[@]}; i++)); do
-  case "${args[$i]}" in
-    -o|--output)
-      if ((i + 1 < ${#args[@]})); then
-        output_file="${args[$((i + 1))]}"
-      fi
-      ;;
-    -o*)
-      output_file="${args[$i]#-o}"
-      ;;
-    --output=*)
-      output_file="${args[$i]#--output=}"
-      ;;
-  esac
-done
-
-for attempt in 1 2 3; do
-  if curl \
-    --http1.1 \
-    --fail \
-    --show-error \
-    --location \
-    --retry 5 \
-    --retry-delay 5 \
-    --retry-max-time 300 \
-    --retry-connrefused \
-    --retry-all-errors \
-    "$@"; then
-    if [[ -z "${output_file}" || -s "${output_file}" ]]; then
-      exit 0
-    fi
-    echo "omni-curl: curl succeeded but output file is missing or empty: ${output_file}" >&2
-  fi
-  if [[ -n "${output_file}" ]]; then
-    rm -f "${output_file}"
-  fi
-  sleep $((attempt * 5))
-done
-
-echo "omni-curl: failed after retries: $*" >&2
-exit 1
-EOF
+COPY omni-curl /usr/local/bin/omni-curl
+RUN chmod +x /usr/local/bin/omni-curl
 
 # Install Python 3.12 via deadsnakes PPA
 RUN add-apt-repository ppa:deadsnakes/ppa -y \
@@ -147,7 +137,22 @@ RUN tmp_dir="$(mktemp -d)" \
     && rm -rf "${tmp_dir}" \
     && chmod +x /usr/local/bin/uv
 
-# Install Docker CLI (no daemon — socket mounted at runtime)
+# Install Docker CLI + Compose v2 + Buildx plugins (no daemon — socket mounted at runtime)
+# OMN-14966: docker-compose-plugin provides `docker compose` v2 (installed at
+# /usr/libexec/docker/cli-plugins/docker-compose). Without it, `docker compose`
+# resolves to nothing inside this runner and every compose-based recreate path
+# dies with `docker: unknown command: docker compose` (exit 125) -- the exact
+# failure that broke both the deploy targeted-recreate AND the rollback
+# targeted-recreate in refresh_stability_lane.sh / refresh_dev_lane.sh from
+# inside the omninode-deploy-runner (deploy run 29977968728).
+# OMN-15141: docker-buildx-plugin provides the BuildKit backend `docker compose
+# build` / `docker build` route through. Without it, `docker compose build`
+# falls back to the legacy builder, which cannot execute BuildKit-only syntax
+# like `RUN --mount=type=cache,...` (used by docker/Dockerfile.runtime) and
+# dies with "the --mount option requires BuildKit" -- the failure that broke
+# the release-train stability deploy hop at iteration N+4 (deploy run
+# 30178195370). Both plugins ship from the same Docker apt repo configured
+# just above, so this is a package add only.
 RUN install -m 0755 -d /etc/apt/keyrings \
     && omni-curl https://download.docker.com/linux/ubuntu/gpg \
         | gpg --dearmor -o /etc/apt/keyrings/docker.gpg \
@@ -156,7 +161,7 @@ RUN install -m 0755 -d /etc/apt/keyrings \
         https://download.docker.com/linux/ubuntu $(. /etc/os-release && echo $VERSION_CODENAME) stable" \
         > /etc/apt/sources.list.d/docker.list \
     && apt-get update \
-    && apt-get install -y --no-install-recommends docker-ce-cli \
+    && apt-get install -y --no-install-recommends docker-ce-cli docker-compose-plugin docker-buildx-plugin \
     && rm -rf /var/lib/apt/lists/*
 
 # Install gh CLI

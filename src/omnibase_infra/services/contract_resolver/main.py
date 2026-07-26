@@ -55,7 +55,7 @@ Kafka round-trip.
 ## Design
 
 This is a **transitional** bridge (OMN-2756). It wraps
-``NodeContractResolveCompute.resolve()`` exactly — no bespoke API surface.
+``NodeContractResolveCompute.handle()`` exactly — no bespoke API surface.
 When the real ONEX node runner supports HTTP invocation, only the execution
 path changes; the Express proxy code and contract registry entry are unchanged.
 

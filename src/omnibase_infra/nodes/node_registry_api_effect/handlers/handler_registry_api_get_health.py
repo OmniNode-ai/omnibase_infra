@@ -12,6 +12,7 @@ Ticket: OMN-4482
 
 from __future__ import annotations
 
+import asyncio
 import logging
 from uuid import UUID
 
@@ -77,21 +78,33 @@ class HandlerRegistryApiGetHealth:
             components["db"] = "unhealthy"
 
         # Kafka health check
+        admin = None
         try:
             import os
 
             from aiokafka.admin import AIOKafkaAdminClient
 
+            from omnibase_infra.event_bus.kafka_auth import (
+                build_aiokafka_auth_kwargs_from_env,
+            )
+
             _kafka = os.environ["KAFKA_BOOTSTRAP_SERVERS"]  # ONEX_EXCLUDE  # fmt: skip
             admin = AIOKafkaAdminClient(
-                bootstrap_servers=_kafka, request_timeout_ms=2000
+                bootstrap_servers=_kafka,
+                request_timeout_ms=2000,
+                **build_aiokafka_auth_kwargs_from_env(),
             )
-            await admin.start()
-            await admin.close()
+            await asyncio.wait_for(admin.start(), timeout=30.0)
             components["kafka"] = "healthy"
         except Exception as exc:  # noqa: BLE001 — boundary: logs warning and degrades
             logger.warning("Health check: Kafka unavailable — %s", exc)
             components["kafka"] = "unhealthy"
+        finally:
+            if admin is not None:
+                try:
+                    await asyncio.wait_for(admin.close(), timeout=10.0)
+                except Exception as exc:  # noqa: BLE001 — best-effort cleanup
+                    logger.warning("Health check: Kafka close failed — %s", exc)
 
         # Qdrant health check
         try:

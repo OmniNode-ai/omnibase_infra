@@ -11,29 +11,19 @@
 set -euo pipefail
 
 SCRIPT_NAME="$(basename "$0")"
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 OMNI_HOME="${OMNI_HOME:?OMNI_HOME must be set}"
 SNAPSHOT_DIR="${OMNI_HOME}/.onex_state/merge-sweep"
 SNAPSHOT_FILE="${SNAPSHOT_DIR}/pr-snapshot-$(date +%Y%m%d-%H%M%S).json"
 
 # =============================================================================
-# Registry (mirrors pull-all.sh)
+# Registry — single source of truth is scripts/lib/merge_sweep_common.sh, which
+# provides the canonical REPOS[] array (F-22 / OMN-14761). Replaces the former
+# inline copy that had to be kept in sync with pull-all.sh by hand.
 # =============================================================================
 
-REPOS=(
-    omniclaude
-    omnibase_compat
-    omnibase_core
-    omnibase_infra
-    omnibase_spi
-    omnidash
-    omnigemini
-    omniintelligence
-    omnimarket
-    omnimemory
-    omninode_infra
-    omniweb
-    onex_change_control
-)
+# shellcheck source=scripts/lib/merge_sweep_common.sh
+source "${SCRIPT_DIR}/lib/merge_sweep_common.sh"
 
 # =============================================================================
 # Defaults

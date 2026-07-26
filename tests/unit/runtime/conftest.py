@@ -18,6 +18,7 @@ Functions:
 
 from __future__ import annotations
 
+import threading
 from typing import TYPE_CHECKING
 from unittest.mock import AsyncMock, MagicMock, patch
 
@@ -38,6 +39,63 @@ __all__ = ["seed_mock_handlers"]
 
 if TYPE_CHECKING:
     from collections.abc import Generator
+
+
+_TERMINAL_CORRELATOR_THREAD_PREFIX = "terminal-correlator-"
+
+
+@pytest.fixture(autouse=True)
+def reap_terminal_correlator_threads() -> Generator[None, None, None]:
+    """Reap leaked terminal-event correlator daemon threads after each test (OMN-14708).
+
+    Tests that construct the terminal-event consumer -- directly as
+    ``LongLivedTerminalCorrelator`` or through the auto-wiring path that builds a
+    ``TerminalEventConsumer`` (which owns a correlator) -- start a daemon thread
+    named ``terminal-correlator-<handler>`` running a dedicated asyncio event
+    loop for the process lifetime. When such a test does not close the consumer,
+    that thread survives into later tests in the shared single-process slice and,
+    under CI load, starves the event loop that
+    ``test_bootstrap_uses_config_grace_period`` depends on, pushing it past its
+    60s timeout (a nondeterministic hang that greens on a clean dev slice).
+
+    This autouse fixture tracks every correlator constructed during the test,
+    closes each at teardown (``close()`` is idempotent, so a test that already
+    closed its own consumer is unaffected), then fails the test if any
+    ``terminal-correlator`` daemon thread survives -- turning a silent
+    cross-test leak into a deterministic, locally-attributable failure.
+    """
+    import omnibase_infra.runtime.service_terminal_event_consumer as _stec
+
+    correlator_cls = _stec.LongLivedTerminalCorrelator
+    created: list[object] = []
+    original_init = correlator_cls.__init__
+
+    def _tracking_init(self: object, *args: object, **kwargs: object) -> None:
+        original_init(self, *args, **kwargs)  # type: ignore[arg-type]
+        created.append(self)
+
+    with patch.object(correlator_cls, "__init__", _tracking_init):
+        yield
+
+    for correlator in created:
+        close = getattr(correlator, "close", None)
+        if callable(close):
+            try:
+                close()
+            except Exception:  # noqa: BLE001 - best-effort teardown
+                pass
+
+    survivors = sorted(
+        thread.name
+        for thread in threading.enumerate()
+        if thread.name.startswith(_TERMINAL_CORRELATOR_THREAD_PREFIX)
+    )
+    assert not survivors, (
+        "terminal-event correlator daemon threads survived teardown: "
+        f"{survivors}. A test constructed the terminal-event consumer without "
+        "closing it; the leaked thread starves later tests in the shared slice "
+        "(OMN-14708 test-isolation leak)."
+    )
 
 
 @pytest.fixture

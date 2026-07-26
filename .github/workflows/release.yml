@@ -20,6 +20,7 @@ concurrency:
 
 jobs:
   release:
+    timeout-minutes: 30
     runs-on: >-
       ${{ fromJSON(vars.OMNI_TRUSTED_CI_RUNS_ON_JSON || '["self-hosted","omnibase-ci"]') }}
     outputs:
@@ -89,9 +90,30 @@ jobs:
             exit 1
           }
 
-      - name: Publish to PyPI
+      - name: Verify PyPI dependency-pin resolvability (OMN-14070)
+        # omnimarket 0.4.6 was published pinning a nonexistent
+        # omnibase-compat==0.5.1 (OMN-14064) because nothing anywhere resolved
+        # a package's declared [project.dependencies] pins against the real
+        # PyPI index -- local/CI resolution is silently short-circuited by
+        # [tool.uv.sources] git-rev overrides, which `uv build` bakes past
+        # unverified into the wheel's real Requires-Dist metadata. This step
+        # installs the just-built wheel with `uv pip install` (never
+        # `uv sync`/`uv add`, so [tool.uv.sources] is structurally
+        # unreachable) into a bare scratch venv with no project config, so a
+        # broken pin fails the release *before* `uv publish` runs.
         run: |
-          uv publish --token "$UV_PUBLISH_TOKEN" dist/*.whl dist/*.tar.gz
+          python3 scripts/ci/verify_pypi_pin_resolvability.py dist/
+
+      - name: Publish to PyPI (retry on transient 5xx, idempotent on re-publish)
+        # v0.37.2 died here on a bare PyPI HTTP 500 with no retry, stalling PyPI
+        # at 0.36.1 for six weeks. publish_with_retry.py retries transient
+        # 5xx/429/network failures with exponential backoff and treats an
+        # already-present artifact as success (--check-url skips uploaded files),
+        # so a re-run of the release is idempotent. The token is read from
+        # UV_PUBLISH_TOKEN by uv itself — never placed on the command line.
+        # See OMN-14468.
+        run: |
+          python3 scripts/ci/publish_with_retry.py dist/*.whl dist/*.tar.gz
         env:
           UV_PUBLISH_TOKEN: ${{ secrets.PYPI_TOKEN }}
 
@@ -122,6 +144,7 @@ jobs:
   # Post-release: advisory checks that must NOT block publish (OMN-3833)
   # ---------------------------------------------------------------------------
   post-release-checks:
+    timeout-minutes: 30
     name: Post-Release Checks
     needs: release
     if: always() && needs.release.result == 'success'
@@ -161,6 +184,7 @@ jobs:
   # If CROSS_REPO_PAT is absent the dispatch step is skipped with a warning so
   # that the release itself is not marked as failed.
   trigger-runtime-rebuild:
+    timeout-minutes: 30
     name: Trigger Runtime Image Rebuild
     needs: release
     if: ${{ !contains(needs.release.outputs.version, 'rc') }}

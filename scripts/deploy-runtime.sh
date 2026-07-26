@@ -28,14 +28,54 @@ set -euo pipefail
 # Source contract-rendered runtime policy first, then operator env overrides, so
 # all ${VAR} references in docker-compose.infra.yml resolve from exported shell
 # environment without making Compose the owner of activation policy.
-# shellcheck source=/dev/null
+#
+# OMN-14958: the operator env file path is parameterized via
+# OMNIBASE_OPERATOR_ENV_FILE (default: ${HOME}/.omnibase/.env) so execution
+# contexts whose $HOME does not carry the operator env -- the containerized
+# omninode-deploy-runner is the live case -- can point at a provisioned
+# mount instead (docker-compose.runners.yml binds the host operator env at
+# /run/omnibase-operator.env). A MISSING file is a NAMED, actionable
+# precondition failure (exit 64), never bash's bare
+# "source: .../.omnibase/.env: No such file or directory" crash that killed
+# deploy run 29977968728 before any build/compose action.
 SCRIPT_DIR_FOR_ENV="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 REPO_ROOT_FOR_ENV="$(cd "${SCRIPT_DIR_FOR_ENV}/.." && pwd)"
 OPERATOR_OMNI_HOME="${OMNI_HOME:-}"
 OPERATOR_HEALTH_CHECK_URL="${HEALTH_CHECK_URL:-}"
+OMNIBASE_OPERATOR_ENV_FILE="${OMNIBASE_OPERATOR_ENV_FILE:-${HOME}/.omnibase/.env}"
+if [[ ! -e "${OMNIBASE_OPERATOR_ENV_FILE}" ]]; then
+    {
+        echo "[deploy-runtime] ERROR: OPERATOR_ENV_MISSING -- operator env file not found:"
+        echo "  ${OMNIBASE_OPERATOR_ENV_FILE}"
+        echo "  deploy-runtime.sh requires the operator env (POSTGRES_PASSWORD etc.) for"
+        echo "  docker compose \${VAR} interpolation. Either provision it at"
+        echo "  \${HOME}/.omnibase/.env, or set OMNIBASE_OPERATOR_ENV_FILE to a readable"
+        echo "  env file. In the containerized deploy runner this is the read-only bind"
+        echo "  mount at /run/omnibase-operator.env wired by DEPLOY_RUNNER_OPERATOR_ENV_FILE"
+        echo "  in docker/docker-compose.runners.yml (OMN-14958)."
+    } >&2
+    exit 64
+fi
+# OMN-14983: existence does not prove readability. Distinguish "missing"
+# from "present but unreadable" explicitly so a permissions problem never
+# reaches a raw `source` crash or masquerades as a different failure.
+if [[ ! -r "${OMNIBASE_OPERATOR_ENV_FILE}" ]]; then
+    {
+        echo "[deploy-runtime] ERROR: OPERATOR_ENV_UNREADABLE -- operator env file exists but this process cannot read it:"
+        echo "  ${OMNIBASE_OPERATOR_ENV_FILE}"
+        echo "  effective uid=$(id -u) ($(id -un 2>/dev/null || echo unknown))"
+        echo "  Check the file's ownership/permissions. In the containerized deploy"
+        echo "  runner, OMNIBASE_OPERATOR_ENV_FILE should point at the root-phase-init"
+        echo "  copy in the runner-owned deploy-runner-creds volume, not directly at the"
+        echo "  raw /run/omnibase-operator.env read-only mount (OMN-14983)."
+    } >&2
+    exit 64
+fi
 set -a
+# shellcheck source=/dev/null
 source "${REPO_ROOT_FOR_ENV}/docker/runtime-policy.env"
-source "${HOME}/.omnibase/.env"
+# shellcheck source=/dev/null
+source "${OMNIBASE_OPERATOR_ENV_FILE}"
 set +a
 if [[ -n "${OPERATOR_OMNI_HOME}" ]]; then
     export OMNI_HOME="${OPERATOR_OMNI_HOME}"
@@ -77,6 +117,28 @@ readonly RUNTIME_SERVICES=(
     intelligence-api
     omninode-contract-resolver
 )
+
+# OMN-14873: optional scoped-build/restart override. When RUNTIME_BUILD_SERVICES_OVERRIDE
+# is set (a space-separated service-name list), build_images() and restart_services()
+# operate on ONLY that subset instead of the full RUNTIME_SERVICES fan-out. Unset (the
+# default) leaves every existing caller -- prod, dev, cut-lab-ref.sh, the cold bring-up --
+# byte-for-byte unchanged (RUNTIME_BUILD_SERVICES == RUNTIME_SERVICES).
+#
+# scripts/runtime_build/refresh_stability_lane.sh sets this to the 4 known-good core
+# services (omninode-runtime runtime-effects runtime-worker projection-api) so a
+# workspace-mode build never attempts the 4 release-only services with the still-open
+# BUILD_SOURCE selector-mismatch defect (OMN-14262 residual: agent-actions-consumer,
+# skill-lifecycle-consumer, intelligence-api, omninode-contract-resolver). This makes the
+# scoping a controlled decision, not a side effect of a partial `docker compose build`
+# failure leaving only the good images tagged by accident.
+if [[ -n "${RUNTIME_BUILD_SERVICES_OVERRIDE:-}" ]]; then
+    # shellcheck disable=SC2206  # intentional word-splitting of an operator-provided
+    # space-separated service list (not a glob; no IFS surprises expected here)
+    RUNTIME_BUILD_SERVICES=(${RUNTIME_BUILD_SERVICES_OVERRIDE})
+else
+    RUNTIME_BUILD_SERVICES=("${RUNTIME_SERVICES[@]}")
+fi
+readonly RUNTIME_BUILD_SERVICES
 # Migration services refreshed (one-shot) before the --no-deps runtime restart.
 # Order matters: forward-migration applies the omnibase_infra schema, then
 # intelligence-migration applies the omniintelligence schema, then migration-gate
@@ -493,6 +555,44 @@ resolve_compose_file_args() {
     fi
 }
 
+resolve_lane_runtime_container_name() {
+    # Echo the lane-scoped `container_name` of the omninode-runtime main container
+    # for a compose project. Each lane overlay prefixes the runtime container_name
+    # with its lane (the compose *service* key stays "omninode-runtime" in every
+    # overlay -- only container_name changes):
+    #   omnibase-infra                -> omninode-runtime               (dev, no prefix)
+    #   omnibase-infra-stability-test -> omninode-stability-test-runtime
+    #   omnibase-infra-prod           -> omninode-prod-runtime
+    #   omnibase-infra-judge          -> omninode-judge-runtime
+    #
+    # verify_deployment must probe THIS name, not the hardcoded dev name: the dev
+    # `omninode-runtime` container commonly runs alongside a non-dev lane on the
+    # same host, so an anchored `name=^/omninode-runtime$` filter would resolve the
+    # wrong (dev) container and emit a false image-label mismatch (OMN-13826).
+    #
+    # Fails closed on an unknown non-dev lane, using the same whitelist as
+    # resolve_lane_overlay_filename, so a typo'd project can't silently probe dev.
+    local compose_project="$1"
+
+    local lane="${compose_project#omnibase-infra}"
+    lane="${lane#-}"
+
+    case "${lane}" in
+        "")
+            echo "omninode-runtime"
+            ;;
+        stability-test|prod|judge)
+            echo "omninode-${lane}-runtime"
+            ;;
+        *)
+            log_error "Unknown lane '${lane}' derived from compose project '${compose_project}'."
+            log_error "  deploy-runtime.sh only knows the dev / stability-test / prod / judge lanes."
+            log_error "  Refusing to resolve a runtime container name for an unknown lane (OMN-13826)."
+            exit 1
+            ;;
+    esac
+}
+
 # =============================================================================
 # Prerequisites
 # =============================================================================
@@ -836,6 +936,11 @@ check_sibling_lock_pins() {
     # the build vendors), and --output (where to write the comparison JSON).
     # The consuming repo's uv.lock (omnimarket) is the pin authority.
     local lock_path="${omni_home}/omnimarket/uv.lock"
+    # --build-source workspace: this preflight only runs on the workspace path
+    # (stage_workspace_if_needed short-circuits unless BUILD_SOURCE=workspace), so
+    # a registry-sourced sibling whose clone is FORWARD of the lock (the OMN-13929
+    # disarm-bump steady state) is non-fatal (OMN-13902). Backward / git-sourced
+    # drift stays fatal.
     local guard_args=(
         --lock "${lock_path}"
         --repo "omnibase-infra=${omni_home}/omnibase_infra"
@@ -844,6 +949,7 @@ check_sibling_lock_pins() {
         --repo "omnibase-compat=${omni_home}/omnibase_compat"
         --repo "onex-change-control=${omni_home}/onex_change_control"
         --output "${provenance_out}"
+        --build-source workspace
     )
     # Operator override (OMN-12977): ALLOW_SIBLING_PIN_DRIFT=1 records drift in
     # the provenance artifact and proceeds instead of aborting. Never the default.
@@ -1488,6 +1594,90 @@ show_preview() {
 # Sync -- rsync repository to deployment target
 # =============================================================================
 
+resolve_core_contracts_dir() {
+    # Resolve the omnibase_core runtime contracts directory (OMN-6698 / OMN-15122).
+    #
+    # Populates two caller-provided variables, both passed by name (never via
+    # command substitution -- a `$(...)` wrapper forks a subshell, and a `local -n`
+    # array populated inside that subshell would NOT propagate back to the
+    # caller): the first receives every path probed, in probe order; the second
+    # receives the resolved directory on success (left empty on failure).
+    #
+    # Usage:
+    #   local -a probed=()
+    #   local resolved=""
+    #   if resolve_core_contracts_dir probed resolved; then ...
+    #
+    # Primary: filesystem resolution from the OMNI_HOME sibling clone/checkout
+    # -- src/omnibase_core/contracts/runtime_data relative to the omnibase_core
+    # repo root. This is the deploy source of truth (the same pinned sibling
+    # clone the rest of the workspace build vendors from) and it works even
+    # when omnibase_core is not pip-installed on the deploy runner at all --
+    # the OMN-15122 failure: `importlib.util.find_spec('omnibase_core')`
+    # returned None on the runner's python3, and the previous editable-install
+    # fallback assumed a site-packages-shaped layout
+    # (`<pkg_dir>/../.. /contracts/runtime_data`) that does not match the real
+    # source-tree layout (`<repo>/src/omnibase_core/contracts/runtime_data`).
+    #
+    # Secondary: python import resolution, kept for hosts where omnibase_core
+    # IS installed (e.g. a developer workstation running this script directly
+    # against a pip/editable install with no OMNI_HOME sibling clone).
+    #
+    # Fails closed: leaves the resolved-dir output empty and returns 1 if
+    # neither probe resolves.
+    # NOTE: internal locals below are deliberately prefixed `_resolve_ccd_*`
+    # (never `resolved`/`probed`) -- a `local -n` nameref breaks silently if a
+    # plain local variable inside this function shares the caller-chosen target
+    # name (e.g. caller passes a variable literally named "resolved"), aliasing
+    # the nameref to itself instead of the caller's variable. Verified via a
+    # standalone bash harness during development: an earlier draft using
+    # `local resolved=""` here produced an empty resolved-dir output AND
+    # incorrectly returned success on the fail-closed case once the caller's
+    # own variable was also named "resolved".
+    local -n _out_probed="$1"
+    local -n _out_resolved="$2"
+    _out_resolved=""
+    local _resolve_ccd_dir=""
+
+    if [[ -n "${OMNI_HOME:-}" ]]; then
+        local fs_candidate="${OMNI_HOME}/omnibase_core/src/omnibase_core/contracts/runtime_data"
+        _out_probed+=("${fs_candidate}")
+        if [[ -d "${fs_candidate}" ]]; then
+            _resolve_ccd_dir="${fs_candidate}"
+        fi
+    else
+        _out_probed+=("<OMNI_HOME unset -- cannot probe the sibling clone filesystem path>")
+    fi
+
+    if [[ -z "${_resolve_ccd_dir}" ]]; then
+        local py_candidate
+        py_candidate="$(python3 -c "
+import importlib.util, pathlib
+spec = importlib.util.find_spec('omnibase_core')
+if spec and spec.origin:
+    pkg_dir = pathlib.Path(spec.origin).parent
+    runtime_data = pkg_dir / 'contracts' / 'runtime_data'
+    if not runtime_data.is_dir():
+        # Fallback: check sibling contracts/runtime_data directory (editable installs)
+        runtime_data = pkg_dir.parent.parent / 'contracts' / 'runtime_data'
+    if runtime_data.is_dir():
+        print(runtime_data)
+" 2>/dev/null || true)"
+        if [[ -n "${py_candidate}" ]]; then
+            _out_probed+=("${py_candidate} (python find_spec('omnibase_core') resolution)")
+            _resolve_ccd_dir="${py_candidate}"
+        else
+            _out_probed+=("<python find_spec('omnibase_core') returned no importable spec/origin>")
+        fi
+    fi
+
+    if [[ -n "${_resolve_ccd_dir}" ]]; then
+        _out_resolved="${_resolve_ccd_dir}"
+        return 0
+    fi
+    return 1
+}
+
 sync_files() {
     # Rsync repository files to the versioned deployment target directory.
     local repo_root="$1"
@@ -1534,20 +1724,16 @@ sync_files() {
     # from the installed omnibase_core package (contracts/runtime_data/), but
     # the bind-mount hides them. We must copy them into the deployed contracts/
     # directory so they survive the bind-mount override.
+    #
+    # OMN-15122: resolution is delegated to resolve_core_contracts_dir(), which
+    # probes the OMNI_HOME sibling clone's real source-tree path FIRST (the
+    # deploy runner has no omnibase_core installed at all, so the prior
+    # python-only resolution always failed there) and falls back to python
+    # import resolution second.
     check_command python3 "locating omnibase_core runtime contracts"
-    local core_contracts_dir
-    core_contracts_dir="$(python3 -c "
-import importlib.util, pathlib
-spec = importlib.util.find_spec('omnibase_core')
-if spec and spec.origin:
-    pkg_dir = pathlib.Path(spec.origin).parent
-    runtime_data = pkg_dir / 'contracts' / 'runtime_data'
-    if not runtime_data.is_dir():
-        # Fallback: check sibling contracts/runtime_data directory (editable installs)
-        runtime_data = pkg_dir.parent.parent / 'contracts' / 'runtime_data'
-    if runtime_data.is_dir():
-        print(runtime_data)
-" 2>/dev/null || true)"
+    local -a core_contracts_probed=()
+    local core_contracts_dir=""
+    resolve_core_contracts_dir core_contracts_probed core_contracts_dir || true
 
     if [[ -n "${core_contracts_dir}" && -d "${core_contracts_dir}" ]]; then
         log_info "Copying omnibase_core runtime contracts from ${core_contracts_dir}..."
@@ -1568,8 +1754,14 @@ if spec and spec.origin:
         log_info "Copied ${yaml_count} runtime contract YAMLs from omnibase_core."
     else
         log_error "Could not locate omnibase_core runtime contracts."
+        log_error "Probed the following paths:"
+        for probed_path in "${core_contracts_probed[@]}"; do
+            log_error "  - ${probed_path}"
+        done
         log_error "Aborting deployment to avoid runtime startup failure."
-        log_error "Ensure omnibase_core is installed: uv pip install omnibase-core"
+        log_error "Ensure OMNI_HOME points at a clone containing omnibase_core (with"
+        log_error "src/omnibase_core/contracts/runtime_data), or that omnibase_core is"
+        log_error "installed: uv pip install omnibase-core"
         exit 1
     fi
 
@@ -1923,9 +2115,13 @@ build_images() {
         --build-arg "OMNIBASE_COMPAT_REF=${compat_ref}"
         --build-arg "OMNIMARKET_REF=${omnimarket_ref}"
         --build-arg "ONEX_CHANGE_CONTROL_REF=${occ_ref}"
+        # OMN-14873: scope the build to RUNTIME_BUILD_SERVICES (defaults to the full
+        # RUNTIME_SERVICES fan-out; see the override comment above its declaration).
+        "${RUNTIME_BUILD_SERVICES[@]}"
     )
 
     log_info "Building images with VCS_REF=${git_sha} RUNTIME_VERSION=${runtime_version} RUNTIME_SOURCE_HASH=${git_sha} COMPOSE_PROJECT=${compose_project}..."
+    log_info "Build scope: ${RUNTIME_BUILD_SERVICES[*]}"
     log_info "Build source: BUILD_SOURCE=${build_source} EXPECTED_BUILD_SOURCE=${expected_build_source} PROMOTION_CLASS=${promotion_class} NON_MAIN_LINEAGE=${non_main_lineage} OMNI_HOME=${omni_home}"
     log_info "Plugin refs: OMNIBASE_COMPAT_REF=${compat_ref} OMNIMARKET_REF=${omnimarket_ref} ONEX_CHANGE_CONTROL_REF=${occ_ref}"
     log_info "Build timeout: ${build_timeout}s (set DOCKER_BUILD_TIMEOUT_SECONDS to override)"
@@ -2255,10 +2451,10 @@ restart_services() {
         "${compose_args[@]}"
         --profile "${COMPOSE_PROFILE}"
         up -d --no-deps --force-recreate
-        "${RUNTIME_SERVICES[@]}"
+        "${RUNTIME_BUILD_SERVICES[@]}"
     )
 
-    log_info "Restarting services: ${RUNTIME_SERVICES[*]}"
+    log_info "Restarting services: ${RUNTIME_BUILD_SERVICES[*]}"
     log_cmd "${cmd[*]}"
 
     "${cmd[@]}"
@@ -2276,6 +2472,11 @@ verify_deployment() {
     local compose_project="$2"
 
     log_step "Verify Deployment"
+
+    # Resolve the lane-scoped runtime container name so every probe below targets
+    # THIS lane's container, not the hardcoded dev `omninode-runtime` (OMN-13826).
+    local runtime_container_name
+    runtime_container_name="$(resolve_lane_runtime_container_name "${compose_project}")"
 
     # 1. Health endpoint
     log_info "Checking health endpoint (${HEALTH_CHECK_URL})..."
@@ -2297,15 +2498,18 @@ verify_deployment() {
     else
         log_error "Health check FAILED after ${HEALTH_CHECK_RETRIES} attempts."
         log_error "Service is not responding at ${HEALTH_CHECK_URL}"
-        log_error "Check container logs: docker logs omninode-runtime"
+        log_error "Check container logs: docker logs ${runtime_container_name}"
         exit 1
     fi
 
-    # 2. Resolve runtime container ID. Prefer the fixed runtime container name
-    # used by docker-compose.infra.yml, then fall back to a compose label lookup.
+    # 2. Resolve runtime container ID. Prefer the lane-scoped runtime container
+    # name (docker-compose.<lane>.yml prefixes container_name per lane), then fall
+    # back to a compose label lookup. The label fallback filters by the lane's
+    # compose project AND the compose service key -- which stays "omninode-runtime"
+    # in every overlay -- so the project filter is what disambiguates the lane.
     log_info "Checking image labels for VCS_REF..."
     local container_id
-    container_id="$(docker ps -q --filter "name=^/omninode-runtime$" | head -1)"
+    container_id="$(docker ps -q --filter "name=^/${runtime_container_name}$" | head -1)"
     if [[ -z "${container_id}" ]]; then
         container_id="$(
             docker ps -q \
@@ -2316,7 +2520,7 @@ verify_deployment() {
     fi
 
     if [[ -z "${container_id}" ]]; then
-        log_warn "Could not resolve container ID for omninode-runtime; skipping label/log checks."
+        log_warn "Could not resolve container ID for ${runtime_container_name}; skipping label/log checks."
         return 0
     fi
 
@@ -2332,8 +2536,10 @@ verify_deployment() {
         log_warn "  Expected: ${git_sha}"
         log_warn "  Found:    ${label}"
         log_warn "The running container may be from a previous build."
+        log_warn "The fail-closed deploy readback (RT-6) below will reject this deploy."
     else
         log_warn "Could not read image label (container may not exist yet)."
+        log_warn "The fail-closed deploy readback (RT-6) below will reject this deploy."
     fi
 
     # OMN-12965: verify org.opencontainers.image.version is a real version, not
@@ -2361,6 +2567,90 @@ verify_deployment() {
         log_warn "Sentinel not found: 'Schema fingerprint stamped'"
         log_warn "The entrypoint may not have completed yet."
     fi
+}
+
+# =============================================================================
+# Deploy readback -- RT-6 (OMN-14469): fail-closed Class-3 mechanism
+# =============================================================================
+
+readback_deployed_ref() {
+    # TERMINAL deploy readback: read a fact only the freshly-built image could
+    # carry off the RUNNING container and assert it equals the intended ref
+    # (docs/plans/2026-07-12-mechanical-release-trains.md §4, RT-6).
+    #
+    # The fact is the org.opencontainers.image.revision label, stamped from
+    # VCS_REF at build time (docker/Dockerfile.runtime). verify_deployment()
+    # above reads the same label but only *warns* on a mismatch and returns 0 --
+    # so a stale / mis-targeted container (deployed code != intended ref) passes
+    # today. This step makes that FAIL-CLOSED: it delegates to the previously
+    # dead scripts/verify_deployed_versions.py (OMN-5608), which reads the label
+    # (and, when release versions are declared, the installed package versions)
+    # and exits non-zero on any mismatch. It is NOT an optional flag -- it runs
+    # unconditionally after every restart / cold bring-up. Without it,
+    # "deployed" / "live-readback" proof classes are unfalsifiable.
+    local git_sha="$1"
+    local version="$2"
+    local compose_project="$3"
+    local repo_root="$4"
+
+    log_step "Deploy Readback (RT-6, fail-closed) [OMN-14469]"
+
+    # An unresolvable intended SHA means a stale-image readback cannot be proven.
+    # Fail closed rather than certify a deploy whose target ref is 'unknown'.
+    if [[ "${git_sha}" == "unknown" ]]; then
+        log_error "Cannot read back deploy identity: intended git SHA is 'unknown'."
+        log_error "A stale-image readback is unprovable without the intended ref. Refusing to certify (RT-6)."
+        exit 1
+    fi
+
+    local runtime_container_name
+    runtime_container_name="$(resolve_lane_runtime_container_name "${compose_project}")"
+
+    # The readback script lives next to this script (sync_files does NOT copy
+    # scripts/ into the deploy target), so resolve it from the repo root.
+    local readback="${repo_root}/scripts/verify_deployed_versions.py"
+    if [[ ! -f "${readback}" ]]; then
+        log_error "Deploy readback script not found: ${readback}"
+        log_error "Cannot certify the deploy without the readback. Aborting (RT-6)."
+        exit 1
+    fi
+
+    # verify_deployed_versions.py is pure-stdlib; prefer the repo venv, then a
+    # bare python3. (No uv needed -- keep the terminal step fast and dep-free.)
+    local python_bin=""
+    if [[ -x "${repo_root}/.venv/bin/python" ]]; then
+        python_bin="${repo_root}/.venv/bin/python"
+    elif command -v python3 &>/dev/null; then
+        python_bin="python3"
+    else
+        log_error "No Python interpreter available to run the deploy readback."
+        exit 1
+    fi
+
+    # Always assert the running container's revision == the intended git SHA.
+    # Also assert the runtime package version inside the container matches the
+    # built version (always true on every lane); operators can declare extra
+    # sibling versions to assert via READBACK_EXPECTED_VERSIONS.
+    local expected_versions="omnibase-infra=${version}"
+    if [[ -n "${READBACK_EXPECTED_VERSIONS:-}" ]]; then
+        expected_versions="${expected_versions},${READBACK_EXPECTED_VERSIONS}"
+    fi
+
+    local readback_args=(
+        --container "${runtime_container_name}"
+        --expected-revision "${git_sha}"
+        --versions "${expected_versions}"
+    )
+
+    log_cmd "${python_bin} ${readback} ${readback_args[*]}"
+    if ! "${python_bin}" "${readback}" "${readback_args[@]}"; then
+        log_error "Deploy readback FAILED (RT-6): the running container is NOT the intended ref ${git_sha}."
+        log_error "Deployed code != intended ref (stale / mis-targeted image, or version drift)."
+        log_error "Refusing to certify this deploy. Rebuild + recreate the lane's runtime and re-run."
+        exit 1
+    fi
+
+    log_info "Deploy readback passed: ${runtime_container_name} revision == ${git_sha}, runtime version == ${version} (RT-6)."
 }
 
 # =============================================================================
@@ -2429,7 +2719,7 @@ print_compose_commands() {
     log_info "    ${compose_f} \\"
     log_info "    --profile ${COMPOSE_PROFILE} \\"
     log_info "    up -d --no-deps --force-recreate \\"
-    log_info "    ${RUNTIME_SERVICES[*]}"
+    log_info "    ${RUNTIME_BUILD_SERVICES[*]}"
     log_info ""
     log_info "Full stack up (infra + runtime):"
     log_info "  docker compose \\"
@@ -2702,6 +2992,11 @@ main() {
     # Phase 12: Verify (after a cold bring-up or a warm --restart)
     if [[ "${COLD_FULL_BRINGUP}" == true || "${RESTART}" == true ]]; then
         verify_deployment "${git_sha}" "${compose_project}"
+        # Phase 12b: TERMINAL fail-closed deploy readback (RT-6, OMN-14469). Runs
+        # only when this invocation actually started containers (there is nothing
+        # to read back otherwise). A stale / mis-targeted running container is
+        # rejected here instead of passing with only verify_deployment's warning.
+        readback_deployed_ref "${git_sha}" "${version}" "${compose_project}" "${repo_root}"
     fi
 
     # All phases completed successfully. Mark deployment as complete so that

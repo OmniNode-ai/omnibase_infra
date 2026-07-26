@@ -33,6 +33,7 @@ from omnibase_infra.runtime.auto_wiring.models import (
 )
 from omnibase_infra.utils.util_runtime_packages import (
     get_active_runtime_packages,
+    is_gateway_cloud_mirroring_enabled,
     is_runtime_package_active,
     is_runtime_topic_active,
 )
@@ -63,6 +64,45 @@ def _contract_targets_active_runtime_packages(
         or topic in compatibility_publish_topics
         for topic in contract.event_bus.publish_topics
     )
+
+
+def _contract_requires_cloud_gateway(raw: dict) -> bool:
+    """Return True when a contract declares a cloud gateway forwarding leg.
+
+    Detected structurally via ``config.gateway_forwarder.cloud_leg`` rather than
+    by node name, so any node that mirrors between the local bus and a hosted
+    cloud Kafka edge is treated uniformly. Such a node must only be wired on
+    lanes where the cloud leg is provisioned (OMN-13809).
+    """
+    config = raw.get("config")
+    if not isinstance(config, dict):
+        return False
+    forwarder = config.get("gateway_forwarder")
+    if not isinstance(forwarder, dict):
+        return False
+    return isinstance(forwarder.get("cloud_leg"), dict)
+
+
+def _skip_dormant_cloud_gateway(contract: ModelDiscoveredContract) -> bool:
+    """Return True when a cloud-gateway contract must be skipped on this lane.
+
+    A contract that declares a cloud gateway leg is dormant unless cloud
+    mirroring is explicitly enabled. Skipping it prevents the runtime from
+    subscribing its ``ModelGatewayEnvelope`` handlers to bare domain topics
+    whose real payloads are domain models — the ``ValidationError``-on-every-
+    delegation failure fixed in OMN-13809.
+    """
+    if not contract.requires_cloud_gateway:
+        return False
+    if is_gateway_cloud_mirroring_enabled():
+        return False
+    logger.info(
+        "Skipping contract '%s' because it declares a cloud gateway leg but "
+        "cloud mirroring is not enabled on this lane (set %s to enable)",
+        contract.name,
+        "ONEX_GATEWAY_CLOUD_MIRRORING_ENABLED",
+    )
+    return True
 
 
 def discover_contracts() -> ModelAutoWiringManifest:
@@ -170,6 +210,9 @@ def discover_contracts() -> ModelAutoWiringManifest:
             )
             continue
 
+        if _skip_dormant_cloud_gateway(contract):
+            continue
+
         # Duplicate contract name guard (OMN-11958): two packages shipping a
         # contract with the same ``name`` field would produce identical dispatcher
         # IDs and crash with ONEX_CORE_064_DUPLICATE_REGISTRATION.  Surface the
@@ -261,6 +304,8 @@ def discover_contracts_from_paths(
                 contract.name,
                 path,
             )
+            continue
+        if _skip_dormant_cloud_gateway(contract):
             continue
         contracts.append(contract)
 
@@ -371,6 +416,9 @@ def _parse_contract(
             publish_topics=tuple(eb_raw.get("publish_topics", [])),
             consumer_purpose=eb_raw.get("consumer_purpose"),
             plugin_managed=_parse_bool_field(eb_raw, "plugin_managed", False),
+            tenant_scoped_ingress=_parse_bool_field(
+                eb_raw, "tenant_scoped_ingress", False
+            ),
         )
 
     # Extract handler routing — new format (handler_routing:) or legacy (handler:)
@@ -378,7 +426,11 @@ def _parse_contract(
     hr_raw = raw.get("handler_routing")
     h_raw = raw.get("handler")
     if isinstance(hr_raw, dict):
-        handler_routing = _parse_handler_routing(hr_raw)
+        handler_routing = _parse_handler_routing(
+            hr_raw,
+            contract_path=contract_path,
+            parse_default_handler=not isinstance(h_raw, dict),
+        )
         if not handler_routing.handlers and isinstance(h_raw, dict):
             handler_routing = _parse_legacy_handler(h_raw)
     elif isinstance(h_raw, dict):
@@ -399,6 +451,7 @@ def _parse_contract(
         runtime_profiles=runtime_profiles,
         compatibility_publish_topics=raw.get("compatibility_publish_topics"),
         terminal_event=raw.get("terminal_event"),
+        requires_cloud_gateway=_contract_requires_cloud_gateway(raw),
         event_bus=event_bus,
         handler_routing=handler_routing,
     )
@@ -436,15 +489,70 @@ def _extract_runtime_profiles(raw: dict) -> tuple[str, ...]:
     return tuple(dict.fromkeys(profiles))
 
 
-def _parse_handler_routing(hr_raw: dict) -> ModelHandlerRouting:
-    """Parse the handler_routing section from a contract YAML dict."""
+def _parse_handler_routing(
+    hr_raw: dict,
+    *,
+    contract_path: Path | None = None,
+    parse_default_handler: bool = True,
+) -> ModelHandlerRouting:
+    """Parse the handler_routing section from a contract YAML dict.
+
+    Fail-closed (OMN-14141): a ``handlers[]`` entry that cannot be parsed into a
+    dispatcher raises ``ValueError`` instead of being silently skipped. The
+    historical FLAT ``handler_class:`` / ``handler_module:`` string schema — which
+    ``ModelHandlerRoutingEntry`` does not understand — previously fell through the
+    ``continue`` here and produced ``handlers=()`` with NO error. Auto-wiring
+    then reported ``EnumWiringOutcome.WIRED`` with zero dispatchers while still
+    subscribing to and committing Kafka offsets on the topic: silent
+    phantom-wiring (the WI-14 root cause, OMN-14139/OMN-14135). Every routed
+    handler MUST carry a nested ``handler: {name, module}`` mapping.
+
+    The legacy top-level ``handler: {module, class}`` fallback in
+    ``_parse_contract`` is unaffected: those contracts declare an EMPTY / ABSENT
+    ``handlers`` list, so this loop never runs and never raises — the zero-length
+    parse still triggers the fallback.
+    """
     entries: list[ModelHandlerRoutingEntry] = []
-    for h in hr_raw.get("handlers", []):
+    handlers_raw = hr_raw.get("handlers")
+    if parse_default_handler and not isinstance(handlers_raw, list):
+        default_handler = hr_raw.get("default_handler")
+        if (
+            isinstance(default_handler, str)
+            and default_handler
+            and ":" in default_handler
+        ):
+            module_ref, class_name = default_handler.rsplit(":", 1)
+            entries.append(
+                ModelHandlerRoutingEntry(
+                    handler=ModelHandlerRef(
+                        name=class_name.strip(),
+                        module=_resolve_default_handler_module(
+                            module_ref.strip(), contract_path
+                        ),
+                    ),
+                )
+            )
+    handlers_iter = handlers_raw if isinstance(handlers_raw, list) else []
+    for index, h in enumerate(handlers_iter):
         if not isinstance(h, dict):
-            continue
+            raise ValueError(
+                f"handler_routing.handlers[{index}] must be a mapping, got "
+                f"{type(h).__name__} — cannot be parsed into a dispatcher "
+                "(OMN-14141)."
+            )
         handler_ref_raw = h.get("handler")
         if not isinstance(handler_ref_raw, dict):
-            continue
+            raise ValueError(
+                f"handler_routing.handlers[{index}] is missing a nested "
+                "'handler: {name, module}' mapping (found keys: "
+                f"{sorted(h.keys())}). The flat 'handler_class'/'handler_module' "
+                "schema is not parseable and silently produces zero dispatchers, "
+                "which then phantom-wires the subscribed topic with no live "
+                "handler (OMN-14141). Use the nested shape:\n"
+                "    handler:\n"
+                "      name: <HandlerClassName>\n"
+                "      module: <module.path>"
+            )
         handler_ref = ModelHandlerRef(
             name=handler_ref_raw.get("name", ""),
             module=handler_ref_raw.get("module", ""),
@@ -463,12 +571,33 @@ def _parse_handler_routing(hr_raw: dict) -> ModelHandlerRouting:
                 operation=h.get("operation"),
                 event_type=h.get("event_type"),
                 message_category=h.get("message_category"),
+                topic=h.get("topic"),
             )
         )
     return ModelHandlerRouting(
         routing_strategy=hr_raw.get("routing_strategy", "unknown"),
         handlers=tuple(entries),
     )
+
+
+def _resolve_default_handler_module(module_ref: str, contract_path: Path | None) -> str:
+    """Resolve ``default_handler`` module shorthand for package-discovered contracts."""
+    if not module_ref or "." in module_ref or contract_path is None:
+        return module_ref
+
+    contract_dir = contract_path.parent
+    if not (contract_dir / f"{module_ref}.py").exists():
+        return module_ref
+
+    package_parts: list[str] = []
+    current = contract_dir
+    while (current / "__init__.py").exists():
+        package_parts.append(current.name)
+        current = current.parent
+    package_parts.reverse()
+    if not package_parts:
+        return module_ref
+    return ".".join((*package_parts, module_ref))
 
 
 def _parse_legacy_handler(h_raw: dict) -> ModelHandlerRouting | None:

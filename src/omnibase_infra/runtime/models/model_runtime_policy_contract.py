@@ -28,6 +28,12 @@ class ModelRuntimePolicyContract(BaseModel):
     google_cloud_project: str = Field(min_length=1)
     google_cloud_location: str = Field(min_length=1)
     omnimemory_memgraph_port: int = Field(ge=1, le=65535)
+    # OMN-14297: arch-graph query/populate EFFECT nodes read a single flat
+    # ${env.ARCH_GRAPH_BOLT_URI} (no per-lane prefix — see contract.yaml of
+    # node_architecture_graph_{populate,query}_effect), so this is rendered
+    # as one top-level var, matching omnimemory_memgraph_port's pattern
+    # rather than the per-profile omnimemory_memgraph_host pattern.
+    arch_graph_bolt_uri: str = Field(min_length=1)
     auxiliary_services_omnimemory_enabled: bool
     profiles: dict[RuntimeProfileName, ModelRuntimeProfilePolicy]
 

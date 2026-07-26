@@ -14,6 +14,7 @@ Tests validate:
 
 from __future__ import annotations
 
+import base64
 import hashlib
 import json
 from datetime import UTC, datetime
@@ -23,7 +24,13 @@ import pytest
 
 pytestmark = [pytest.mark.unit]
 
+from omnibase_core.models.reducer.model_intent import ModelIntent
 from omnibase_infra.enums import EnumHandlerType, EnumHandlerTypeCategory
+from omnibase_infra.event_bus.models.model_event_headers import ModelEventHeaders
+from omnibase_infra.event_bus.models.model_event_message import ModelEventMessage
+from omnibase_infra.models.validation_ledger import (
+    ModelPayloadValidationLedgerAppend,
+)
 from omnibase_infra.nodes.node_validation_ledger_projection_compute.handlers.handler_validation_ledger_projection import (
     HandlerValidationLedgerProjection,
 )
@@ -511,3 +518,118 @@ class TestTimestampEdgeCases:
 
         # Should still be a valid UUID (generated fallback)
         assert isinstance(result["run_id"], UUID)
+
+
+# ===========================================================================
+# handle() -- OMN-14524 dispatch entrypoint
+# ===========================================================================
+
+
+class TestHandleEmitsValidationLedgerAppendIntent:
+    """Tests for handle(), the contract-typed auto-wiring entry point.
+
+    Mirrors HandlerLedgerProjection's equivalent coverage
+    (test_handle_projects_dict_envelope_to_ledger_append_intent) -- these
+    tests exist because a green ``project()`` suite gave zero signal that
+    validation_event_ledger was structurally unable to receive rows (OMN-14524):
+    project() was never reachable from the live dispatch path at all.
+    """
+
+    @pytest.mark.asyncio
+    async def test_handle_projects_dict_envelope_to_intent(
+        self, handler: HandlerValidationLedgerProjection
+    ) -> None:
+        """Drive handle() with the DICT envelope the live dispatch path delivers.
+
+        ``MessageDispatchEngine._materialize_envelope_with_bindings`` hands the
+        handler a dict, not an attribute-bearing envelope -- the OMN-14140 trap.
+        """
+        correlation_id = uuid4()
+        raw_value = json.dumps(
+            {
+                "run_id": "8e6a1f0e-2222-4444-8888-000000000001",
+                "repo_id": "omnibase_core",
+                "event_type": "onex.evt.validation.cross-repo-run-started.v1",
+            }
+        ).encode()
+        message = ModelEventMessage(
+            topic="onex.evt.validation.cross-repo-run-started.v1",
+            value=raw_value,
+            headers=ModelEventHeaders(
+                correlation_id=correlation_id,
+                timestamp=datetime.now(UTC),
+                source="test-producer",
+                event_type="ValidationRunStarted",
+            ),
+            partition=2,
+            offset="17",
+        )
+
+        output = await handler.handle({"payload": message.model_dump()})
+
+        intent = output.result
+        assert isinstance(intent, ModelIntent)
+        assert isinstance(intent.payload, ModelPayloadValidationLedgerAppend)
+        # intent_type is the routing key the kernel's IntentExecutor dispatches
+        # on -- it must match node_validation_ledger_write_effect's
+        # "validation_ledger.append" operation exactly, or the intent is
+        # produced and then dropped on the floor.
+        assert intent.payload.intent_type == "validation_ledger.append"
+        assert intent.payload.kafka_topic == (
+            "onex.evt.validation.cross-repo-run-started.v1"
+        )
+        assert intent.payload.kafka_partition == 2
+        assert intent.payload.kafka_offset == 17
+        assert intent.payload.correlation_id == correlation_id
+        assert str(intent.payload.run_id) == "8e6a1f0e-2222-4444-8888-000000000001"
+        assert intent.payload.repo_id == "omnibase_core"
+        # envelope_bytes is base64-encoded at this boundary -- bytes cannot
+        # safely cross intent boundaries; the Effect layer decodes it.
+        assert intent.payload.envelope_bytes == base64.b64encode(raw_value).decode(
+            "ascii"
+        )
+        assert intent.payload.envelope_hash == hashlib.sha256(raw_value).hexdigest()
+
+    @pytest.mark.asyncio
+    async def test_handle_uses_header_correlation_id_for_output_and_payload(
+        self, handler: HandlerValidationLedgerProjection
+    ) -> None:
+        """output.correlation_id and payload.correlation_id must be the SAME id.
+
+        ModelEventHeaders.correlation_id always defaults to a fresh UUID
+        (default_factory=uuid4) -- it is never None on a real envelope -- so
+        this asserts the one degradation path that IS reachable: the header's
+        id is threaded through consistently to both the handler output and
+        the emitted intent payload, never silently regenerated in one place
+        and not the other.
+        """
+        message = ModelEventMessage(
+            topic="onex.evt.validation.cross-repo-run-completed.v1",
+            value=b"{}",
+            headers=ModelEventHeaders(
+                timestamp=datetime.now(UTC),
+                source="test-producer",
+                event_type="ValidationRunCompleted",
+            ),
+            partition=0,
+            offset="0",
+        )
+
+        output = await handler.handle({"payload": message.model_dump()})
+
+        assert isinstance(output.result, ModelIntent)
+        assert output.correlation_id == output.result.payload.correlation_id
+
+    def test_handler_exposes_dispatch_entrypoint(self) -> None:
+        """Without handle(), auto-wiring binds _missing_handle and every event raises.
+
+        Mirrors HandlerLedgerProjection's equivalent pin -- absence here is an
+        unambiguous defect (OMN-14524).
+        """
+        assert callable(getattr(HandlerValidationLedgerProjection, "handle", None)), (
+            "HandlerValidationLedgerProjection must expose a handle() dispatch "
+            "entrypoint; without it handler_wiring binds the _missing_handle "
+            "sentinel, which raises on every dispatched event and is then "
+            "swallowed by the consume boundary (events acked, "
+            "validation_event_ledger empty, nothing surfaced)."
+        )

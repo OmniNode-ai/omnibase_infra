@@ -28,6 +28,11 @@ event_bus:
   publish_topics:
     - "onex.evt.skill.merge-sweep-complete.v1"
     - "onex.evt.skill.merge-sweep-failed.v1"
+  # OMN-13852: DLQ destination for unroutable inbound messages; matches the
+  # engine-derived NO_DISPATCHER topic for the "skill" event_type domain so
+  # the dead-letter escape hatch targets a provisioned topic.
+  dlq_topics:
+    - "onex.dlq.omnibase-infra.skill.v1"
 input_model:
   name: "ModelMergeSweepCommand"
   module: "omnibase_infra.nodes.node_merge_sweep_workflow_orchestrator.models.model_merge_sweep_command"
@@ -42,6 +47,11 @@ handler_routing:
     - event_model:
         name: "ModelMergeSweepCommand"
         module: "omnibase_infra.nodes.node_merge_sweep_workflow_orchestrator.models.model_merge_sweep_command"
+      # OMN-13852: per-handler event_type disambiguates the owned subscribe topic
+      # so routes register (previously the multi-handler ambiguity guard registered
+      # zero routes and every inbound message fell through to NO_DISPATCHER).
+      event_type: "skill.merge-sweep"
+      message_category: "COMMAND"
       handler:
         name: "HandlerMergeSweepInitiate"
         module: "omnibase_infra.nodes.node_merge_sweep_workflow_orchestrator.handlers.handler_merge_sweep_initiate"
@@ -50,6 +60,8 @@ handler_routing:
     - event_model:
         name: "ModelPRListResult"
         module: "omnibase_infra.nodes.node_merge_sweep_pr_list_effect.models.model_pr_list_result"
+      event_type: "skill.merge-sweep-pr-list"
+      message_category: "EVENT"
       handler:
         name: "HandlerPRListComplete"
         module: "omnibase_infra.nodes.node_merge_sweep_workflow_orchestrator.handlers.handler_pr_list_complete"
@@ -58,6 +70,8 @@ handler_routing:
     - event_model:
         name: "ModelClassifyResult"
         module: "omnibase_infra.nodes.node_merge_sweep_classify_compute.models.model_classify_result"
+      event_type: "skill.merge-sweep-classified"
+      message_category: "EVENT"
       handler:
         name: "HandlerClassifyComplete"
         module: "omnibase_infra.nodes.node_merge_sweep_workflow_orchestrator.handlers.handler_classify_complete"
@@ -66,6 +80,8 @@ handler_routing:
     - event_model:
         name: "ModelAutoMergeResult"
         module: "omnibase_infra.nodes.node_merge_sweep_auto_merge_effect.models.model_auto_merge_result"
+      event_type: "skill.merge-sweep-auto-merged"
+      message_category: "EVENT"
       handler:
         name: "HandlerAutoMergeComplete"
         module: "omnibase_infra.nodes.node_merge_sweep_workflow_orchestrator.handlers.handler_auto_merge_complete"

@@ -162,6 +162,10 @@ CONFIGMAP_DEBT_KEYS: frozenset[str] = frozenset(
         "OMNIMEMORY_DB_URL",
         "OMNIMEMORY_MEMGRAPH_HOST",
         "OMNIMEMORY_MEMGRAPH_PORT",
+        # arch-graph query/populate EFFECT bolt URI — same Memgraph instance as
+        # OMNIMEMORY_MEMGRAPH_*, only reachable from the dev lane today; not
+        # yet in k8s ConfigMap (tracked: OMN-14297)
+        "ARCH_GRAPH_BOLT_URI",
         # Qdrant vector store connection — not yet in k8s ConfigMap (tracked: OMN-4307)
         "QDRANT_HOST",
         "QDRANT_PORT",

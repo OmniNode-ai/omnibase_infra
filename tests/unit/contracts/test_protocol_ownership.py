@@ -50,7 +50,7 @@ KNOWN_INFRA_PROTOCOLS: dict[str, str] = {
     "ProtocolCapabilityProjection": "protocols/protocol_capability_projection.py",
     "ProtocolCapabilityQuery": "protocols/protocol_capability_query.py",
     "ProtocolContainerAware": "protocols/protocol_container_aware.py",
-    "ProtocolDispatchEngine": "protocols/protocol_dispatch_engine.py",
+    # ProtocolDispatchEngine relocated to omnibase_spi.protocols.runtime (OMN-12549).
     "ProtocolEventBusLike": "protocols/protocol_event_bus_like.py",
     "ProtocolEventProjector": "protocols/protocol_event_projector.py",
     "ProtocolIdempotencyStore": "protocols/protocol_idempotency_store.py",
@@ -72,6 +72,9 @@ KNOWN_INFRA_PROTOCOLS: dict[str, str] = {
     "ProtocolValidationLedgerRepository": "protocols/protocol_validation_ledger_repository.py",
     "ProtocolPatternBBrokerTransport": "protocols/protocol_pattern_b_broker_transport.py",  # [RUNTIME] OMN-10204 Pattern B broker transport boundary
     "ProtocolTopicProvisioner": "protocols/protocol_topic_provisioner.py",  # [RUNTIME] OMN-13237 per-contract boot interleave provisioner boundary (provision+readiness); fake-swappable for the no-global-gather regression test
+    "DispatchTarget": "runtime/intent_effects/intent_effect_dispatch_bridge.py",  # [RUNTIME] OMN-14516 local bridge target for contract-derived projection intent dispatch
+    "CoreTransport": "runtime/core_runtime/composition.py",  # [DI] OMN-14758 S6 combined consumer+producer transport face injected into the ONE core RuntimeDispatch
+    "DefBTarget": "runtime/core_runtime/routing_map_builder.py",  # [DI] OMN-14758 S6 def-B handler target (handle(request)->response) returned by the injected handler resolver
     # === [DI] Dependency injection boundaries ===
     # ProtocolConsulClient removed in OMN-3540 (Consul removal)
     "ProtocolEffectIdempotencyStore": "nodes/node_registry_effect/protocols/protocol_effect_idempotency_store.py",
@@ -86,6 +89,10 @@ KNOWN_INFRA_PROTOCOLS: dict[str, str] = {
     "RowLookup": "services/cost_api/handlers.py",  # [DI] OMN-10334 narrow row adapter for asyncpg.Record/test rows
     # [DI] Publisher callable boundary for HandlerBaselinesBatchCompute (OMN-3039)
     "ProtocolPublisher": "nodes/node_baselines_batch_compute/handlers/handler_baselines_batch_compute.py",
+    # [DI] OMN-7404 narrow duck-typed classifier interface injected into RoutingGate
+    # (predict_proba(features) -> float); no ML-library dependency, no Task 7
+    # RoutingClassifier artifact required to exist.
+    "ProtocolRoutingClassifier": "learning/routing/gate.py",
     # === [MIXIN] Mixin host contracts ===
     "ProtocolCircuitBreakerAware": "mixins/protocol_circuit_breaker_aware.py",
     "ProtocolKafkaDlqHost": "event_bus/mixin_kafka_dlq.py",
@@ -162,6 +169,9 @@ KNOWN_INFRA_PROTOCOLS: dict[str, str] = {
     "ProtocolKafkaReplayConsumer": "nodes/node_kafka_replay_compute/protocols/protocol_kafka_replay_consumer.py",
     "ProtocolOffsetAndTimestamp": "nodes/node_kafka_replay_compute/protocols/protocol_offset_and_timestamp.py",
     "ProtocolTopicPartition": "nodes/node_kafka_replay_compute/protocols/protocol_topic_partition.py",
+    # [NODE] OMN-14819 narrow correlation_id envelope view; keeps the def-B replay
+    # handler core free of ModelEventEnvelope (canonical handler-shape C-core).
+    "ProtocolReplayEnvelope": "nodes/node_kafka_replay_compute/protocols/protocol_replay_envelope.py",
     # [RUNTIME] OMN-12632 narrows the AIOKafkaConsumer.end_offsets surface so
     # AdapterKafkaAdminLag can serve log-end offsets the pinned aiokafka 0.13.0
     # admin omits, without a hard aiokafka import at parse time.

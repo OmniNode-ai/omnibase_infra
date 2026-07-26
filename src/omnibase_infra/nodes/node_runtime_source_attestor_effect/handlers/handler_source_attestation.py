@@ -114,7 +114,7 @@ class HandlerSourceAttestation:
     # Public API
     # ------------------------------------------------------------------
 
-    def attest(self, event: ModelRuntimeBootedEvent) -> ModelSourceAttestationResult:
+    def handle(self, event: ModelRuntimeBootedEvent) -> ModelSourceAttestationResult:
         """Attest the source hash in *event* and return the verdict.
 
         This is a synchronous handler — git ls-remote is a short-lived

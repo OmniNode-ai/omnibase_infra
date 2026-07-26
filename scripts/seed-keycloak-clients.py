@@ -117,12 +117,14 @@ def _die(_msg: str) -> NoReturn:
 # ---------------------------------------------------------------------------
 
 BASE_FIELDS = {
+    "attributes",
     "publicClient",
     "bearerOnly",
     "serviceAccountsEnabled",
     "standardFlowEnabled",
     "directAccessGrantsEnabled",
     "redirectUris",
+    "webOrigins",
     "defaultClientScopes",
 }
 
@@ -138,6 +140,40 @@ def _resolve_client_secret(client_spec: dict[str, Any]) -> str | None:
             f"but it is not set or empty."
         )
     return val
+
+
+# Maps each realmSettings.smtpServer.<key>Env field to the Keycloak realm
+# representation's smtpServer.<key> field it resolves into.
+_SMTP_FIELD_MAP = {
+    "hostEnv": "host",
+    "portEnv": "port",
+    "fromEnv": "from",
+    "fromDisplayNameEnv": "fromDisplayName",
+    "starttlsEnv": "starttls",
+    "authEnv": "auth",
+    "userEnv": "user",
+    "passwordEnv": "password",
+}
+
+
+def _resolve_realm_smtp_settings(smtp_spec: dict[str, Any]) -> dict[str, str]:
+    """Resolve realmSettings.smtpServer's *Env indirections against the live
+    environment. Fail-closed: every declared field is a required env var, no
+    default is ever substituted (this is the direct guard against the
+    OMN-14938 optional:true-on-a-required-key anti-pattern)."""
+    resolved: dict[str, str] = {}
+    for spec_field, realm_field in _SMTP_FIELD_MAP.items():
+        env_var = smtp_spec.get(spec_field)
+        if not env_var:
+            continue
+        val = os.environ.get(env_var)
+        if not val:
+            _die(
+                f"Realm SMTP setting '{realm_field}' requires env var "
+                f"'{env_var}' but it is not set or empty."
+            )
+        resolved[realm_field] = val
+    return resolved
 
 
 def _get_existing_client(
@@ -163,6 +199,8 @@ def _build_create_payload(spec: dict[str, Any], secret: str | None) -> dict[str,
         "standardFlowEnabled",
         "directAccessGrantsEnabled",
         "redirectUris",
+        "webOrigins",
+        "attributes",
     ):
         if field in spec:
             payload[field] = spec[field]
@@ -380,6 +418,65 @@ def _reconcile_client(
 
 
 # ---------------------------------------------------------------------------
+# Realm-level settings (verify-email + SMTP + action-token lifespan)
+# ---------------------------------------------------------------------------
+
+# Top-level realm representation fields this reconciler owns (drift-detected
+# and, if any drifts, carried forward verbatim on the full-representation PUT
+# — Keycloak's realm update contract replaces the whole object, same as the
+# existing per-client PUT above).
+_REALM_BASE_FIELDS = {"verifyEmail", "registrationAllowed"}
+
+
+def _reconcile_realm_settings(
+    kc_url: str,
+    realm: str,
+    token: str,
+    spec: dict[str, Any],
+) -> None:
+    """Reconcile realm-level verify-email / SMTP / action-token-lifespan
+    settings against a running realm. Full-representation GET/diff/PUT,
+    matching the per-client reconciler's update shape."""
+    smtp_server = _resolve_realm_smtp_settings(spec.get("smtpServer", {}))
+    desired_attributes = dict(spec.get("attributes", {}))
+
+    url = f"{kc_url}/admin/realms/{realm}"
+    status, existing = _request("GET", url, token=token)
+    if status != 200 or existing is None:
+        _die(f"Failed to fetch realm '{realm}': HTTP {status}")
+
+    drift_fields: list[str] = []
+    for field in _REALM_BASE_FIELDS:
+        if field in spec and existing.get(field) != spec[field]:
+            drift_fields.append(field)
+
+    merged_attributes = {**existing.get("attributes", {}), **desired_attributes}
+    if merged_attributes != existing.get("attributes", {}):
+        drift_fields.append("attributes")
+
+    if smtp_server and existing.get("smtpServer", {}) != smtp_server:
+        drift_fields.append("smtpServer")
+
+    if not drift_fields:
+        _log("unchanged", f"realm:{realm}")
+        return
+
+    update_payload = {**existing}
+    for field in _REALM_BASE_FIELDS:
+        if field in spec:
+            update_payload[field] = spec[field]
+    update_payload["attributes"] = merged_attributes
+    if smtp_server:
+        update_payload["smtpServer"] = smtp_server
+
+    status, _ = _request("PUT", url, token=token, payload=update_payload)
+    if status not in (200, 201, 204):
+        _die(f"Failed to update realm '{realm}' settings: HTTP {status}")
+
+    _log("updated", f"realm:{realm}", drift_fields)
+
+
+# ---------------------------------------------------------------------------
 # Bootstrap admin reset
 # ---------------------------------------------------------------------------
 
@@ -462,6 +559,11 @@ def main() -> None:
         _die("No clients found in config file")
 
     token = _get_token(args.kc_url, args.admin_username, args.admin_password)
+
+    if config.get("realmSettings"):
+        _reconcile_realm_settings(
+            args.kc_url, args.realm, token, config["realmSettings"]
+        )
 
     for client_spec in clients:
         _reconcile_client(args.kc_url, args.realm, token, client_spec)

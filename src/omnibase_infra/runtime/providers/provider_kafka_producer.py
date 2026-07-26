@@ -15,6 +15,7 @@ import asyncio
 import logging
 from typing import TYPE_CHECKING
 
+from omnibase_infra.event_bus.kafka_auth import build_aiokafka_auth_kwargs_from_env
 from omnibase_infra.runtime.models.model_kafka_producer_config import (
     ModelKafkaProducerConfig,
 )
@@ -67,6 +68,7 @@ class ProviderKafkaProducer:
             bootstrap_servers=self._config.bootstrap_servers,
             acks=self._config.acks.to_aiokafka(),
             max_request_size=self._config.max_request_size,
+            **build_aiokafka_auth_kwargs_from_env(),
         )
 
         try:

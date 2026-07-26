@@ -7,10 +7,10 @@ node_type: "COMPUTE_GENERIC"
 contract_version:
   major: 1
   minor: 0
-  patch: 1
-node_version: "1.0.1"
+  patch: 2
+node_version: "1.0.2"
 description: >
-  Pure computation: calculates RSD 5-factor priority scores. Factors: dependency distance (40%), failure surface (25%), time decay (15%), agent utility (10%), user weighting (10%). Time decay normalizes naive created_at timestamps to UTC before age arithmetic. No I/O - all data provided as input.
+  Pure computation: calculates RSD 5-factor priority scores from the canonical def-B single typed request. Factors: dependency distance (40%), failure surface (25%), time decay (15%), agent utility (10%), user weighting (10%). Time decay normalizes naive created_at timestamps to UTC before age arithmetic. No I/O - all data provided as input.
 
 input_model:
   name: "ModelRsdScoreInput"
@@ -28,9 +28,11 @@ handler_routing:
         name: "HandlerRsdScoreCalculate"
         module: "omnibase_infra.nodes.node_rsd_score_compute.handlers.handler_rsd_score_calculate"
 metadata:
-  description: "Pure RSD 5-factor priority scoring compute node"
+  description: "Pure RSD 5-factor priority scoring compute node; OMN-14828 preserves scoring logic behind the canonical def-B single-request handler."
   author: "OmniNode Team"
   created: "2026-04-01"
+  updated: "2026-07-20"
+  ticket: "OMN-14828"
   tags:
     - "compute"
     - "rsd"

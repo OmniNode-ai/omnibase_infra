@@ -47,6 +47,9 @@ from omnibase_infra.services.observability.agent_actions.models.model_routing_de
 from omnibase_infra.services.observability.agent_actions.models.model_routing_decision_ingest import (
     ModelRoutingDecisionIngest,
 )
+from omnibase_infra.topics.platform_topic_suffixes import (
+    SUFFIX_OMNICLAUDE_ROUTING_DECISION,
+)
 
 # Path to the contract YAML — used by integrity tests
 _CONTRACT_PATH = Path(__file__).parent.parent / "contracts" / "routing_decision_v1.yaml"
@@ -149,9 +152,7 @@ class TestContractYamlIntegrity:
     @pytest.mark.unit
     def test_contract_declares_topic(self, contract_yaml: dict[str, object]) -> None:
         """Contract must declare the canonical Kafka topic name."""
-        assert (
-            contract_yaml.get("topic") == "onex.evt.omniclaude.routing-decision.v1"
-        ), (
+        assert contract_yaml.get("topic") == SUFFIX_OMNICLAUDE_ROUTING_DECISION, (
             f"Contract topic mismatch: {contract_yaml.get('topic')}\n"
             "Expected: onex.evt.omniclaude.routing-decision.v1"
         )

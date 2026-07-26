@@ -234,6 +234,52 @@ class TestTopicProvisioner:
         assert len(result["created"]) > 0
         assert len(result["failed"]) == 0
 
+    async def test_ensure_provisioned_topics_passes_msk_iam_auth_kwargs(
+        self,
+        contracts_root: Path,
+        monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
+        """Topic provisioning uses the same MSK IAM auth kwargs as EventBusKafka."""
+        monkeypatch.setenv("KAFKA_BOOTSTRAP_SERVERS", "b-1.example:9098")
+        monkeypatch.setenv("KAFKA_SECURITY_PROTOCOL", "SASL_SSL")
+        monkeypatch.setenv("KAFKA_SASL_MECHANISM", "AWS_MSK_IAM")
+        monkeypatch.setenv("KAFKA_MSK_REGION", "us-east-1")
+        manager = _make_provisioner(
+            contracts_root, bootstrap_servers="b-1.example:9098"
+        )
+
+        mock_admin_cls = MagicMock()
+        mock_admin_instance = AsyncMock()
+        mock_admin_instance.start = AsyncMock()
+        mock_admin_instance.close = AsyncMock()
+        mock_admin_instance.create_topics = AsyncMock()
+        mock_admin_cls.return_value = mock_admin_instance
+
+        with patch.dict(
+            "sys.modules",
+            {
+                "aiokafka": MagicMock(),
+                "aiokafka.admin": MagicMock(
+                    AIOKafkaAdminClient=mock_admin_cls,
+                    NewTopic=MagicMock(),
+                ),
+                "aiokafka.errors": MagicMock(
+                    TopicAlreadyExistsError=type(
+                        "TopicAlreadyExistsError", (Exception,), {}
+                    ),
+                ),
+            },
+        ):
+            result = await manager.ensure_provisioned_topics_exist()
+
+        from omnibase_infra.event_bus.kafka_auth import MSKTokenProvider
+
+        assert result["status"] == "success"
+        admin_kwargs = mock_admin_cls.call_args.kwargs
+        assert admin_kwargs["security_protocol"] == "SASL_SSL"
+        assert admin_kwargs["sasl_mechanism"] == "OAUTHBEARER"
+        assert isinstance(admin_kwargs["sasl_oauth_token_provider"], MSKTokenProvider)
+
     async def test_ensure_provisioned_topics_connection_failure(
         self, contracts_root: Path
     ) -> None:

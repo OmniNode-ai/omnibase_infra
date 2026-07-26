@@ -36,6 +36,10 @@ get_installed_version = _mod.get_installed_version
 parse_versions_string = _mod.parse_versions_string
 format_report_text = _mod.format_report_text
 main = _mod.main
+# RT-6 (OMN-14469): image-revision readback surface.
+RevisionCheckResult = _mod.RevisionCheckResult
+get_image_revision = _mod.get_image_revision
+verify_revision = _mod.verify_revision
 
 
 # ─── Helpers ───────────────────────────────────────────────────────────────
@@ -328,3 +332,161 @@ class TestVerificationReportSerialization:
         assert d["container"] == "test"
         assert d["all_match"] is False
         assert len(d["results"]) == 2  # type: ignore[arg-type]
+
+
+# ─── Tests: image-revision readback (RT-6 OMN-14469) ───────────────────────
+
+
+_REVISION_LABEL = "org.opencontainers.image.revision"
+
+
+def _make_inspect_runner(
+    revision: str,
+    returncode: int = 0,
+) -> Any:
+    """Mock runner emulating ``docker inspect --format '{{...revision}}'``.
+
+    ``revision`` is what the running container's revision label would print
+    (Go template prints a trailing newline, which the parser strips).
+    """
+
+    def runner(cmd: list[str], **kwargs: Any) -> subprocess.CompletedProcess[str]:
+        # cmd is: docker inspect <container> --format {{index .Config.Labels "..."}}
+        return subprocess.CompletedProcess(
+            args=cmd,
+            returncode=returncode,
+            stdout=f"{revision}\n",
+            stderr="" if returncode == 0 else "No such container",
+        )
+
+    return runner
+
+
+class TestGetImageRevision:
+    def test_success(self) -> None:
+        runner = _make_inspect_runner("abc123def456")
+        revision, error = get_image_revision("omninode-runtime", runner=runner)
+        assert revision == "abc123def456"
+        assert error is None
+
+    def test_container_down(self) -> None:
+        runner = _make_inspect_runner("", returncode=1)
+        revision, error = get_image_revision("omninode-runtime", runner=runner)
+        assert revision is None
+        assert error is not None
+        assert "docker inspect failed" in error
+
+    def test_missing_label_no_value(self) -> None:
+        """Go prints '<no value>' when the label key is absent -> fail-closed."""
+        runner = _make_inspect_runner("<no value>")
+        revision, error = get_image_revision("omninode-runtime", runner=runner)
+        assert revision is None
+        assert error is not None
+        assert _REVISION_LABEL in error
+
+    def test_missing_label_empty(self) -> None:
+        runner = _make_inspect_runner("")
+        revision, error = get_image_revision("omninode-runtime", runner=runner)
+        assert revision is None
+        assert error is not None
+
+    def test_docker_not_found(self) -> None:
+        def missing_docker(cmd: list[str], **kwargs: Any) -> None:
+            raise FileNotFoundError("docker")
+
+        revision, error = get_image_revision("c", runner=missing_docker)
+        assert revision is None
+        assert error is not None
+        assert "docker command not found" in error
+
+
+class TestVerifyRevision:
+    def test_exact_match(self) -> None:
+        runner = _make_inspect_runner("abc123def456")
+        result = verify_revision("omninode-runtime", "abc123def456", runner=runner)
+        assert result.match is True
+        assert result.actual == "abc123def456"
+        assert result.error is None
+
+    def test_short_vs_full_sha_prefix_match(self) -> None:
+        """A --short=12 label must match a full-40 intended SHA (and vice versa)."""
+        full = "abc123def456789012345678901234567890abcd"
+        runner = _make_inspect_runner("abc123def456")  # short label
+        result = verify_revision("omninode-runtime", full, runner=runner)
+        assert result.match is True
+
+    def test_stale_container_goes_red(self) -> None:
+        """ACCEPTANCE (RT-6, exists-but-WRONG): a stale running container whose
+        image revision label != the intended git SHA must FAIL. Before this
+        wiring, deploy-runtime.sh only warned and returned 0 -- this is the
+        exact silent-pass the readback closes."""
+        stale = "0000stale0000deadbeefcafef00dbaadf00dbaad"
+        intended = "abc123def456"
+        runner = _make_inspect_runner(stale)
+        result = verify_revision("omninode-runtime", intended, runner=runner)
+        assert result.match is False
+        assert result.error is None  # a genuine mismatch, not an infra error
+        assert result.actual == stale
+
+    def test_container_down_is_infra_error(self) -> None:
+        runner = _make_inspect_runner("", returncode=1)
+        result = verify_revision("omninode-runtime", "abc123def456", runner=runner)
+        assert result.match is False
+        assert result.error is not None
+
+
+class TestMainCLIRevision:
+    """main() exit contract for the image-revision readback path.
+
+    main() -> verify_revision() -> get_image_revision(): patching the module-level
+    ``get_image_revision`` to inject a mock docker-inspect runner exercises the
+    real verify_revision + exit-code aggregation without a Docker daemon.
+    """
+
+    @staticmethod
+    def _patch_revision(monkeypatch: pytest.MonkeyPatch, runner: Any) -> None:
+        monkeypatch.setattr(
+            _mod,
+            "get_image_revision",
+            lambda container, **_kw: get_image_revision(container, runner=runner),
+        )
+
+    def test_exit_0_on_revision_match(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        self._patch_revision(monkeypatch, _make_inspect_runner("abc123def456"))
+        assert main(["--expected-revision", "abc123def456"]) == 0
+
+    def test_exit_1_on_stale_revision(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        """RED-on-stale at the CLI boundary -- the deploy readback exit contract."""
+        self._patch_revision(monkeypatch, _make_inspect_runner("0000stale0000deadbeef"))
+        assert main(["--expected-revision", "abc123def456"]) == 1
+
+    def test_exit_2_on_container_down(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        self._patch_revision(monkeypatch, _make_inspect_runner("", returncode=1))
+        assert main(["--expected-revision", "abc123def456"]) == 2
+
+    def test_exit_2_when_nothing_requested(self) -> None:
+        """No --versions and no --expected-revision is a no-op readback -> refuse."""
+        assert main([]) == 2
+
+    def test_both_dimensions_must_pass(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        """A matching version but a stale revision must still fail (RED)."""
+        version_runner = _make_runner(
+            {"omnibase-infra": _pip_show_output("omnibase-infra", "0.38.4")}
+        )
+        monkeypatch.setattr(
+            _mod,
+            "verify_versions",
+            lambda container, expected, **_kw: verify_versions(
+                container, expected, runner=version_runner
+            ),
+        )
+        self._patch_revision(monkeypatch, _make_inspect_runner("0000stale0000"))
+        exit_code = main(
+            [
+                "--versions",
+                "omnibase-infra=0.38.4",
+                "--expected-revision",
+                "abc123def456",
+            ]
+        )
+        assert exit_code == 1

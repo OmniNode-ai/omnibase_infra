@@ -30,6 +30,7 @@ import shutil
 import stat
 import subprocess
 import textwrap
+import time
 from pathlib import Path
 
 import pytest
@@ -194,6 +195,7 @@ JSON
 {_queued_jobs_json(created_at=queued_job_created_at)}
 JSON
         elif [[ "${{url}}" == *"slack.com"* ]]; then
+          echo "slack $*" >> "${{MOCK_SLACK_CALLLOG:-/dev/null}}"
           echo '{{"ok":true}}'
         else
           echo ""
@@ -201,12 +203,32 @@ JSON
         """,
     )
 
-    # --- gh mock: token mint (only used by auto-bounce, which stays OFF here)
+    # --- gh mock: runner status / queued work APIs + token mint.
     _write_exec(
         bindir / "gh",
-        """\
+        f"""\
         set -euo pipefail
-        echo "mock-registration-token"
+        path=""
+        for a in "$@"; do
+          if [[ "${{a}}" == /* ]]; then path="${{a}}"; fi
+        done
+        if [[ "$*" == *"registration-token"* ]]; then
+          echo "mock-registration-token"
+        elif [[ "${{path}}" == *"/actions/runners?"* ]]; then
+          cat <<'JSON'
+{runners_json}
+JSON
+        elif [[ "${{path}}" == *"/actions/runs?status=queued"* ]]; then
+          cat <<'JSON'
+{_queued_runs_json(queued_run_id)}
+JSON
+        elif [[ "${{path}}" == *"/actions/runs/"*"/jobs"* ]]; then
+          cat <<'JSON'
+{_queued_jobs_json(created_at=queued_job_created_at)}
+JSON
+        else
+          echo '{{}}'
+        fi
         """,
     )
 
@@ -231,18 +253,31 @@ JSON
         """,
     )
 
+    _write_exec(
+        bindir / "timeout",
+        """\
+        set -euo pipefail
+        shift
+        exec "$@"
+        """,
+    )
+
 
 def _run_monitor(
     tmp_path: Path,
     bindir: Path,
     *,
     extra_env: dict[str, str] | None = None,
+    previous_state: dict[str, object] | None = None,
 ) -> dict[str, object]:
     """Run the real monitor script with the mock PATH; return parsed state file."""
     state_file = tmp_path / "runner-monitor-state.json"
     fleet_config = tmp_path / "runner_fleet.yaml"
     _write_fleet_config(fleet_config)
     call_log = tmp_path / "docker-calls.log"
+    slack_log = tmp_path / "slack-calls.log"
+    if previous_state is not None:
+        state_file.write_text(json.dumps(previous_state), encoding="utf-8")
 
     env = {
         # Keep jq + bash real; everything else comes from the mock bindir first.
@@ -254,6 +289,7 @@ def _run_monitor(
         "SLACK_CHANNEL_ID": "C-test",
         "RUNNER_GITHUB_TOKEN": "ghp-test",
         "MOCK_DOCKER_CALLLOG": str(call_log),
+        "MOCK_SLACK_CALLLOG": str(slack_log),
         # Wedge threshold low enough that the controlled queued-age trips it.
         "WEDGE_QUEUE_AGE_SECONDS": "600",
         "WEDGE_WATCH_REPOS": "OmniNode-ai/omnibase_infra",
@@ -262,6 +298,7 @@ def _run_monitor(
         # Auto-bounce MUST stay off — these tests prove detection only and must
         # never mutate anything.
         "MONITOR_AUTO_BOUNCE": "0",
+        "AUTO_BOUNCE_LOCKFILE": str(tmp_path / "runner-monitor-bounce.lock"),
     }
     if extra_env:
         env.update(extra_env)
@@ -302,6 +339,9 @@ def _run_monitor(
     # Attach the call log so callers can assert on bounce behavior.
     state["_docker_calls"] = (
         call_log.read_text(encoding="utf-8") if call_log.exists() else ""
+    )
+    state["_slack_calls"] = (
+        slack_log.read_text(encoding="utf-8") if slack_log.exists() else ""
     )
     return state
 
@@ -493,6 +533,237 @@ def test_monitor_never_runs_docker_restart_or_empty_bounce(tmp_path: Path) -> No
     assert "compose" not in calls, (
         f"auto-bounce ran a compose recreate while MONITOR_AUTO_BOUNCE=0: {calls}"
     )
+
+
+def test_offline_idle_runner_renders_named_safe_bounce_without_auto_run(
+    tmp_path: Path,
+) -> None:
+    """Docker healthy + GitHub offline is the recurring live failure mode. The
+    monitor must include the named services in the safe remediation path, while
+    preserving the default observe-and-alert behavior."""
+    _require_tools()
+    bindir = tmp_path / "bin"
+    _scenario_bin(
+        bindir,
+        status="offline",
+        busy=False,
+        docker_status="Up 6 hours (healthy)",
+        restart_count=0,
+        queued=False,
+    )
+    state = _run_monitor(tmp_path, bindir)
+
+    assert _int(state, "unhealthy_count") == TEST_FLEET_COUNT, state
+    assert "OFFLINE-IDLE" in str(state["offline_idle_bounce_names"]), state
+    calls = str(state["_docker_calls"])
+    assert "restart" not in calls, f"forbidden `docker restart` invoked: {calls}"
+    assert "compose" not in calls, (
+        f"auto-bounce ran a compose recreate while MONITOR_AUTO_BOUNCE=0: {calls}"
+    )
+
+
+def test_offline_idle_runner_does_not_auto_bounce_even_when_enabled(
+    tmp_path: Path,
+) -> None:
+    """GitHub can report offline/idle while the local listener is still working.
+
+    Even with auto-bounce enabled, this ambiguous class must remain alert-only;
+    automatic mutation is reserved for crash-loop and silent-wedge findings.
+    """
+    _require_tools()
+    bindir = tmp_path / "bin"
+    _scenario_bin(
+        bindir,
+        status="offline",
+        busy=False,
+        docker_status="Up 6 hours (healthy)",
+        restart_count=0,
+        queued=False,
+    )
+    state = _run_monitor(
+        tmp_path,
+        bindir,
+        extra_env={"MONITOR_AUTO_BOUNCE": "1"},
+    )
+
+    assert _int(state, "unhealthy_count") == TEST_FLEET_COUNT, state
+    assert "OFFLINE-IDLE" in str(state["offline_idle_bounce_names"]), state
+    calls = str(state["_docker_calls"])
+    assert "compose" not in calls, (
+        f"offline-idle runners must not be auto-bounced: {calls}"
+    )
+
+
+def test_github_offline_with_local_listener_evidence_is_not_unhealthy(
+    tmp_path: Path,
+) -> None:
+    """GitHub runner status can flap offline while the local listener is alive.
+
+    Host-local evidence wins for alerting: Docker healthy plus listener logs
+    means the monitor records a GitHub-degraded note without incrementing the
+    unhealthy count or rendering bounce targets.
+    """
+    _require_tools()
+    bindir = tmp_path / "bin"
+    _scenario_bin(
+        bindir,
+        status="offline",
+        busy=True,
+        docker_status="Up 6 hours (healthy)",
+        restart_count=0,
+        docker_logs="2026-07-06T17:48:56Z: Listening for Jobs",
+        queued=False,
+    )
+    state = _run_monitor(tmp_path, bindir)
+
+    assert _int(state, "unhealthy_count") == 0, state
+    assert "GitHub offline ignored" in str(state["github_degraded_names"]), state
+    assert "OFFLINE-IDLE" not in str(state["offline_idle_bounce_names"]), state
+
+
+def test_docker_unhealthy_with_local_listener_evidence_is_degraded_not_alerted(
+    tmp_path: Path,
+) -> None:
+    """Docker health can lag while the runner listener is still processing jobs.
+
+    A locally live listener is degraded evidence, not an actionable fleet page.
+    """
+    _require_tools()
+    bindir = tmp_path / "bin"
+    _scenario_bin(
+        bindir,
+        status="online",
+        busy=True,
+        docker_status="Up 6 hours (unhealthy)",
+        restart_count=0,
+        docker_logs="2026-07-09T16:20:28Z: Running job: still-active",
+        queued=False,
+    )
+    state = _run_monitor(tmp_path, bindir)
+
+    assert _int(state, "unhealthy_count") == 0, state
+    assert _int(state, "alert_count") == 0, state
+    assert "Docker health Up 6 hours (unhealthy) ignored" in str(
+        state["github_degraded_names"]
+    ), state
+    assert state["_slack_calls"] == "", state
+
+
+def test_raw_github_offline_churn_does_not_send_slack_without_actionable_target(
+    tmp_path: Path,
+) -> None:
+    """Raw unhealthy count can churn when GitHub reports offline-idle runners.
+
+    The monitor should keep recording the drift while suppressing Slack until a
+    runner becomes an actionable remediation target.
+    """
+    _require_tools()
+    bindir = tmp_path / "bin"
+    _scenario_bin(
+        bindir,
+        status="offline",
+        busy=False,
+        docker_status="Up 6 hours (healthy)",
+        restart_count=0,
+        queued=False,
+    )
+    state = _run_monitor(
+        tmp_path,
+        bindir,
+        previous_state={
+            "unhealthy_count": 1,
+            "alert_count": 0,
+            "offline_first_seen": {},
+        },
+    )
+
+    assert _int(state, "unhealthy_count") == TEST_FLEET_COUNT, state
+    assert _int(state, "alert_count") == 0, state
+    assert "OFFLINE-IDLE" in str(state["offline_idle_bounce_names"]), state
+    assert state["_slack_calls"] == "", state
+
+
+def test_persistent_offline_idle_runner_auto_bounces_when_locally_idle(
+    tmp_path: Path,
+) -> None:
+    """After the grace period, an offline-idle runner with no active local job
+    becomes a named auto-bounce target."""
+    _require_tools()
+    bindir = tmp_path / "bin"
+    _scenario_bin(
+        bindir,
+        status="offline",
+        busy=False,
+        docker_status="Up 6 hours (healthy)",
+        restart_count=0,
+        docker_logs=(
+            "2026-07-03T00:00:00Z: Running job: old\n"
+            "2026-07-03T00:05:00Z: Job old completed with result: Succeeded"
+        ),
+        queued=False,
+    )
+    state = _run_monitor(
+        tmp_path,
+        bindir,
+        extra_env={
+            "MONITOR_AUTO_BOUNCE": "1",
+            "OFFLINE_IDLE_RECREATE_AGE_SECONDS": "600",
+        },
+        previous_state={
+            "unhealthy_count": TEST_FLEET_COUNT,
+            "offline_first_seen": {
+                f"{PREFIX}-{i}": NOW - 1200 for i in range(1, TEST_FLEET_COUNT + 1)
+            },
+        },
+    )
+
+    assert "OFFLINE-IDLE-RECREATE" in str(state["offline_idle_recreate_names"]), state
+    call_log = tmp_path / "docker-calls.log"
+    for _ in range(100):
+        if call_log.exists() and "compose" in call_log.read_text(encoding="utf-8"):
+            break
+        time.sleep(0.1)
+    calls = call_log.read_text(encoding="utf-8") if call_log.exists() else ""
+    assert "compose" in calls, (
+        f"persistent offline-idle runners were not recreated: {calls}"
+    )
+    assert "--force-recreate" in calls, calls
+
+
+def test_persistent_offline_idle_runner_with_active_local_job_does_not_bounce(
+    tmp_path: Path,
+) -> None:
+    """A local active job beats GitHub's offline/idle signal."""
+    _require_tools()
+    bindir = tmp_path / "bin"
+    _scenario_bin(
+        bindir,
+        status="offline",
+        busy=False,
+        docker_status="Up 6 hours (healthy)",
+        restart_count=0,
+        docker_logs="2026-07-03T00:00:00Z: Running job: still-active",
+        queued=False,
+    )
+    state = _run_monitor(
+        tmp_path,
+        bindir,
+        extra_env={
+            "MONITOR_AUTO_BOUNCE": "1",
+            "OFFLINE_IDLE_RECREATE_AGE_SECONDS": "600",
+        },
+        previous_state={
+            "unhealthy_count": TEST_FLEET_COUNT,
+            "offline_first_seen": {
+                f"{PREFIX}-{i}": NOW - 1200 for i in range(1, TEST_FLEET_COUNT + 1)
+            },
+        },
+    )
+
+    assert _int(state, "unhealthy_count") == 0, state
+    assert "GitHub offline ignored" in str(state["github_degraded_names"]), state
+    calls = str(state["_docker_calls"])
+    assert "compose" not in calls, f"active-job runner was incorrectly bounced: {calls}"
 
 
 def test_script_documents_safe_bounce_and_forbids_docker_restart() -> None:

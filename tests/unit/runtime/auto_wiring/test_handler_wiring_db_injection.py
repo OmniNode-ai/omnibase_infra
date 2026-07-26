@@ -19,6 +19,7 @@ from omnibase_infra.runtime.auto_wiring.handler_wiring import (
     _make_projection_dispatch_callback,
     _read_db_io_tables,
     _read_dlq_topics,
+    _should_jsonb_wrap_list,
 )
 
 _PATCH_BUILD_ADAPTER = (
@@ -88,7 +89,7 @@ def test_standard_callback_calls_async_handle() -> None:
 
 @pytest.mark.unit
 def test_projection_callback_injects_db_and_event_type() -> None:
-    """Handler receives a dict with _db and _event_type injected."""
+    """Handler receives a dict with _db, _event_type, and _topic injected."""
     received: list[dict] = []
 
     class FakeHandler:
@@ -118,6 +119,47 @@ def test_projection_callback_injects_db_and_event_type() -> None:
     assert len(received) == 1
     assert received[0]["_event_type"] == "heartbeat"
     assert received[0]["_db"] is fake_adapter
+    assert received[0]["_topic"] == "onex.evt.platform.node-heartbeat.v1"
+
+
+@pytest.mark.unit
+def test_projection_callback_injects_topic_for_strict_handlers() -> None:
+    """OMN-13992 regression: a handler that requires a non-empty input_data['_topic']
+    (mirrors HandlerProjectionLiveEvents.handle()) must not raise ValueError.
+
+    Before the fix, ``_make_projection_dispatch_callback`` computed ``topic``
+    locally (for logging only) but never injected it into ``input_data``, so
+    any handler popping ``_topic`` with a required non-empty check raised on
+    every real dispatch and the event was dropped with no DLQ topic declared.
+    """
+
+    class StrictTopicHandler:
+        def handle(self, input_data: dict) -> dict:
+            topic = input_data.pop("_topic", "")
+            if not isinstance(topic, str) or not topic.strip():
+                raise ValueError(
+                    "handle() requires input_data['_topic'] as a non-empty string"
+                )
+            return {"rows_upserted": 1}
+
+    db_tables = [{"name": "live_events", "database": "omnidash_analytics"}]
+    callback = _make_projection_dispatch_callback(
+        StrictTopicHandler(), db_tables, ("onex.evt.platform.node-heartbeat.v1",)
+    )
+
+    envelope = MagicMock()
+    envelope.topic = "onex.evt.platform.node-heartbeat.v1"
+    envelope.payload = {"service_name": "svc-a", "health_status": "healthy"}
+
+    with patch(
+        _PATCH_ENVIRON_GET,
+        return_value="postgresql://user:pass@host:5432/omnidash_analytics",
+    ):
+        with patch(_PATCH_BUILD_ADAPTER, return_value=MagicMock()):
+            # Must not raise: _topic is now injected alongside _db/_event_type.
+            result = asyncio.run(callback(envelope))
+
+    assert result is None
 
 
 @pytest.mark.unit
@@ -473,6 +515,189 @@ def test_sync_db_adapter_json_adapts_unsuffixed_jsonb_list_column() -> None:
     assert params["corpus_passed"] is False
 
 
+@pytest.mark.unit
+def test_sync_db_adapter_json_adapts_recent_responses_list_of_objects() -> None:
+    """OMN-14487: recent_responses (JSONB array of objects) must be JSON-adapted.
+
+    projection_delegation_inference_response_text.recent_responses is a JSONB
+    column (``CHECK (jsonb_typeof(recent_responses) = 'array')``) named without the
+    _json/_jsonb suffix, holding a list of objects. Before this fix the adapter
+    only wrapped a list for a suffixed key or a _JSONB_LIST_COLUMNS allowlist
+    member, so HandlerProjectionDelegationInferenceResponse's raw list[dict] was
+    sent to psycopg2 un-wrapped — psycopg2 tried to adapt the inner dicts and
+    raised ``ProgrammingError: can't adapt type 'dict'``, crashing the
+    inference-response projection write (live cid a7edc49a on the stability lane).
+    recent_responses is now in _JSONB_LIST_COLUMNS and is JSON-adapted.
+    """
+    import psycopg2  # type: ignore[import-untyped]
+    import psycopg2.extensions  # type: ignore[import-untyped]
+    import psycopg2.extras
+
+    recent_responses = [
+        {
+            "correlation_id": "a7edc49a-6eda-41a3-b14c-dfeb7e0483f7",
+            "model_name": "Qwen3.6-27B-MT",
+            "task_type": "test",
+            "generated_text": "ok",
+            "prompt_tokens": 10,
+            "completion_tokens": 3,
+            "latency_ms": 42,
+            "captured_at": "2026-07-12T22:00:00+00:00",
+        }
+    ]
+
+    # The exact live failure mode: a raw list-of-objects cannot be adapted by
+    # psycopg2 (this is the ``can't adapt type 'dict'`` crash the un-wrapped path
+    # produced). Wrapping in Json is what makes the write succeed.
+    with pytest.raises(psycopg2.Error):
+        psycopg2.extensions.adapt(recent_responses).getquoted()
+
+    cursor = MagicMock()
+    cursor_context = MagicMock()
+    cursor_context.__enter__.return_value = cursor
+    conn = MagicMock()
+    conn.closed = False
+    conn.cursor.return_value = cursor_context
+
+    with patch("psycopg2.connect", return_value=conn):
+        adapter = _build_sync_db_adapter("postgresql://user:pass@host/db")
+        result = adapter.upsert(
+            "projection_delegation_inference_response_text",
+            "singleton_key",
+            {
+                "singleton_key": "inference_response_singleton",
+                "latest_correlation_id": "a7edc49a-6eda-41a3-b14c-dfeb7e0483f7",
+                "latest_model_name": "Qwen3.6-27B-MT",
+                "provisioned": True,
+                "recent_responses": recent_responses,
+            },
+        )
+
+    assert result is True
+    params = cursor.execute.call_args.args[1]
+    # GREEN: the JSONB array-of-objects is wrapped in Json (RED before the fix:
+    # the raw list would be sent un-wrapped and crash on the inner dicts).
+    assert isinstance(params["recent_responses"], psycopg2.extras.Json)
+    # Scalar columns pass through unchanged.
+    assert params["provisioned"] is True
+    assert params["latest_model_name"] == "Qwen3.6-27B-MT"
+
+
+# ---------------------------------------------------------------------------
+# Tests: _should_jsonb_wrap_list (OMN-14494 structural heuristic)
+# ---------------------------------------------------------------------------
+#
+# OMN-14494: _JSONB_LIST_COLUMNS is a hardcoded allowlist that has already
+# bitten twice (OMN-13350 corpus_errors, OMN-14487 recent_responses) -- every
+# NEW unsuffixed JSONB list-of-objects column crashes with
+# ``can't adapt type 'dict'`` until someone manually adds it to the
+# allowlist. These tests prove the structural heuristic (any list element is
+# itself a dict/list) covers a brand-new, never-allowlisted column WITHOUT an
+# allowlist edit, while still preserving flat text[]/int[] passthrough. The
+# chosen column name below (``audit_findings``) is deliberately absent from
+# both the ``_json``/``_jsonb`` suffix convention and ``_JSONB_LIST_COLUMNS``
+# -- against the pre-OMN-14494 allowlist-only implementation this exact
+# scenario reproduces the OMN-14487 crash class (RED); the structural rule
+# added in this ticket makes it GREEN without touching the allowlist.
+
+
+@pytest.mark.unit
+def test_should_jsonb_wrap_list_structural_heuristic_new_unsuffixed_column() -> None:
+    """A never-allowlisted, unsuffixed column with list[dict] must wrap (structural rule)."""
+    assert (
+        _should_jsonb_wrap_list(
+            "audit_findings",
+            [{"rule": "no-hardcoded-topics", "severity": "high"}],
+        )
+        is True
+    )
+
+
+@pytest.mark.unit
+def test_should_jsonb_wrap_list_structural_heuristic_list_of_lists() -> None:
+    """A never-allowlisted column with list[list] must also wrap (structural rule)."""
+    assert _should_jsonb_wrap_list("audit_findings", [["a", "b"], ["c"]]) is True
+
+
+@pytest.mark.unit
+def test_should_jsonb_wrap_list_preserves_flat_scalar_list() -> None:
+    """A flat list[str] under an unsuffixed, non-allowlisted column stays raw (ARRAY)."""
+    assert _should_jsonb_wrap_list("machines_used", ["worker-a", "worker-b"]) is False
+
+
+@pytest.mark.unit
+def test_should_jsonb_wrap_list_preserves_empty_list() -> None:
+    """An empty list has no structurally-JSON element and is left for the caller as raw."""
+    assert _should_jsonb_wrap_list("audit_findings", []) is False
+
+
+@pytest.mark.unit
+def test_should_jsonb_wrap_list_suffix_convention_still_wraps() -> None:
+    """The pre-existing _json/_jsonb suffix convention keeps working unchanged."""
+    assert _should_jsonb_wrap_list("quality_gates_checked_jsonb", ["x"]) is True
+
+
+@pytest.mark.unit
+def test_should_jsonb_wrap_list_allowlist_still_wraps() -> None:
+    """The pre-existing allowlist (for flat list[str] JSONB columns) keeps working."""
+    assert (
+        _should_jsonb_wrap_list("corpus_errors", ["missed violation_fixture v3"])
+        is True
+    )
+
+
+@pytest.mark.unit
+def test_sync_db_adapter_json_adapts_new_unsuffixed_unallowlisted_list_of_dicts_column() -> (
+    None
+):
+    """OMN-14494: a brand-new unsuffixed, non-allowlisted list[dict] column must be
+    JSON-adapted through the full upsert path, not just the pure-function unit test above.
+
+    Before this fix (allowlist-only), a raw list[dict] under a column name that
+    is neither suffixed nor in _JSONB_LIST_COLUMNS was passed straight to
+    psycopg2, which cannot adapt the inner dicts -- this reproduces the exact
+    ``can't adapt type 'dict'`` crash class from OMN-13350/OMN-14487 for any
+    FUTURE column, without requiring an allowlist edit first.
+    """
+    import psycopg2  # type: ignore[import-untyped]
+    import psycopg2.extensions  # type: ignore[import-untyped]
+    import psycopg2.extras
+
+    audit_findings = [{"rule": "no-hardcoded-topics", "severity": "high"}]
+
+    # Exists-but-wrong proof, independent of the wrapping decision: an
+    # un-wrapped list[dict] is unconditionally un-adaptable by psycopg2 -- this
+    # is the exact crash the old allowlist-only adapter produced for any
+    # never-allowlisted column before this fix.
+    with pytest.raises(psycopg2.Error):
+        psycopg2.extensions.adapt(audit_findings).getquoted()
+
+    cursor = MagicMock()
+    cursor_context = MagicMock()
+    cursor_context.__enter__.return_value = cursor
+    conn = MagicMock()
+    conn.closed = False
+    conn.cursor.return_value = cursor_context
+
+    with patch("psycopg2.connect", return_value=conn):
+        adapter = _build_sync_db_adapter("postgresql://user:pass@host/db")
+        result = adapter.upsert(
+            "compliance_scan_results",
+            "scan_id",
+            {
+                "scan_id": "scan-1",
+                "scan_passed": False,
+                "audit_findings": audit_findings,
+            },
+        )
+
+    assert result is True
+    params = cursor.execute.call_args.args[1]
+    # GREEN: the structural heuristic wraps a never-allowlisted list[dict] column.
+    assert isinstance(params["audit_findings"], psycopg2.extras.Json)
+    assert params["scan_passed"] is False
+
+
 # ---------------------------------------------------------------------------
 # Tests: terminal event emission (OMN-11187)
 # ---------------------------------------------------------------------------
@@ -636,7 +861,16 @@ def test_projection_callback_emits_terminal_event_from_materialized_dict() -> No
 
 @pytest.mark.unit
 def test_projection_callback_does_not_emit_terminal_event_on_handler_error() -> None:
-    """When handler raises, no terminal event is emitted."""
+    """When handler raises, no terminal event is emitted.
+
+    OMN-14492: with no contract ``dlq_topics`` declared, the offending event
+    is no longer silently dropped (that was the OMN-14487-class quiet-death
+    bug) — it is routed to the platform quarantine sink instead. This test
+    now asserts the NEGATIVE half (no publish to the terminal topic) plus the
+    POSITIVE half (exactly one quarantine publish, not zero).
+    """
+    from omnibase_infra.event_bus.topic_constants import build_dlq_topic
+
     published: list[tuple] = []
 
     class FailingHandler:
@@ -674,7 +908,12 @@ def test_projection_callback_does_not_emit_terminal_event_on_handler_error() -> 
         with patch(_PATCH_BUILD_ADAPTER, return_value=fake_adapter):
             asyncio.run(callback(envelope))
 
-    assert len(published) == 0
+    # No terminal (success) event — the handler errored.
+    assert not any(topic == terminal_topic for topic, _key, _value in published)
+    # The error is durably captured on the quarantine sink, not dropped.
+    assert len(published) == 1
+    dlq_topic, _key, _value = published[0]
+    assert dlq_topic == build_dlq_topic("quarantine")
 
 
 @pytest.mark.unit
@@ -945,6 +1184,8 @@ def test_projection_callback_routes_validation_error_to_dlq() -> None:
     assert dlq["handler"] == "_ValidatingHandler"
     assert "ValidationError" in dlq["failure_reason"]
     assert dlq["original_message"]["delegated_to"] == "glm"
+    assert dlq["failure_class"] == "consumer_error"
+    assert dlq["quarantine_fallback"] is False
 
 
 @pytest.mark.unit
@@ -973,10 +1214,19 @@ def test_projection_callback_no_dlq_publish_on_success() -> None:
 
 
 @pytest.mark.unit
-def test_projection_callback_logs_error_when_no_dlq_topic_declared(
+def test_projection_callback_routes_to_quarantine_when_no_dlq_topic_declared(
     caplog: pytest.LogCaptureFixture,
 ) -> None:
-    """With no DLQ topic declared, the error is logged loudly (no silent drop)."""
+    """OMN-14492 (OMN-14487-class silent drop): with no contract DLQ topic
+    declared, the event is no longer silently dropped — it is durably routed
+    to the platform quarantine sink, loudly logged, and carries a structured
+    ``failure_class``. Before this fix, ``bus.published`` stayed empty and
+    only a container ERROR log line existed (the exact quiet-death class that
+    hid OMN-14487 for a full arc)."""
+    import json
+
+    from omnibase_infra.event_bus.topic_constants import build_dlq_topic
+
     bus = _CapturingEventBus()
     callback = _make_projection_dispatch_callback(
         _raising_validation_handler(),
@@ -997,5 +1247,16 @@ def test_projection_callback_logs_error_when_no_dlq_topic_declared(
             with patch(_PATCH_BUILD_ADAPTER, return_value=MagicMock()):
                 asyncio.run(callback(envelope))
 
-    assert bus.published == []
     assert any("NO DLQ topic declared" in r.message for r in caplog.records)
+
+    # The event must reach a durable topic — never dropped silently.
+    assert len(bus.published) == 1, (
+        "a malformed event with no contract DLQ topic must still reach the "
+        "platform quarantine sink, not be dropped"
+    )
+    topic, _key, value = bus.published[0]
+    assert topic == build_dlq_topic("quarantine")
+    dlq = json.loads(value.decode("utf-8"))
+    assert dlq["correlation_id"] == "corr-nodlq-1"
+    assert dlq["failure_class"] == "consumer_error"
+    assert dlq["quarantine_fallback"] is True

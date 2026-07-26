@@ -29,8 +29,14 @@ dependencies = [
     #   omnibase-core = { git = "https://github.com/org/omnibase_core.git", rev = "SHA" }
     # Remember to switch back to PyPI versions before merging to main.
     #
-    "omnibase-core>=0.46.1,<0.47.0",
-    "omnibase-spi>=0.23.0,<0.24.0",
+    # OMN-14600: bumped 0.46.7 -> 0.46.8; the [tool.uv.sources] git-rev override
+    # below pulls the merged core #1439 (terminal delegation classes) AND the
+    # merged core #1440 (runtime_fanout_resolver, OMN-14403) pre-release --
+    # #1440 is a strict descendant of #1439 on core dev.
+    "omnibase-core==0.46.8",
+    "omnibase-spi==0.23.1",
+    # OMN-14190: canonical OCC stamp schema lives in omnibase_compat (OMN-14223).
+    "omnibase-compat==0.5.6",
     # ============================================================================
     # External Dependency Security Guidance
     # ============================================================================
@@ -49,8 +55,8 @@ dependencies = [
     #   - SHAs provide audit trail and tamper-evidence
     # Core dependencies
     "pydantic>=2.11.7,<3.0.0",
-    "fastapi>=0.120.1,<0.139.0",
-    "uvicorn>=0.32.0,<0.50.0",
+    "fastapi>=0.120.1,<0.140.0",
+    "uvicorn>=0.32.0,<0.52.0",
     "pyyaml>=6.0.2,<7.0.0",
     "aiohttp>=3.9.0,<4.0.0",
     # Database dependencies (for PostgreSQL connection manager)
@@ -59,6 +65,7 @@ dependencies = [
     # Service integration dependencies (for the actual tools we're migrating)
     "redis>=6.0.0,<9.0.0", # For Redis/Valkey integration (redis-py 6.x required by omnibase_core)
     "aiokafka>=0.11.0,<0.15.0", # For Kafka tools (async Python client)
+    "aws-msk-iam-sasl-signer-python>=1.0.2,<2.0.0", # For MSK IAM OAUTHBEARER token generation
     "confluent-kafka>=2.12.0,<3.0.0", # For Kafka integration (C-based high-performance client)
     "infisicalsdk>=1.0.15,<2.0.0", # For Infisical secret management (OMN-2286)
     # Vector and graph database dependencies (for Qdrant and Memgraph handlers)
@@ -77,6 +84,10 @@ dependencies = [
     # See docs/decisions/adr-cryptography-upgrade-46.md for full rationale.
     "cryptography>=46.0.3,<50.0.0",
     "sigstore>=4.0.0,<5.0.0",
+    # packaging: PEP 440 version parsing/comparison for the release-identity
+    # fitness node (node_release_identity_compute, OMN-14471). Previously a
+    # transitive dependency; now a direct src import, so it is declared here.
+    "packaging>=23.0,<27.0",
     "jinja2>=3.1.6,<4.0.0",
     "aiofiles>=23.2.1,<26.0.0",
     "dependency-injector>=4.48.1,<5.0.0", # Enhanced dependency injection
@@ -87,12 +98,12 @@ dependencies = [
     "opentelemetry-api>=1.27.0,<2.0.0", # OpenTelemetry API
     "opentelemetry-sdk>=1.27.0,<2.0.0", # OpenTelemetry SDK
     "opentelemetry-exporter-otlp-proto-http>=1.27.0,<2.0.0", # OTLP HTTP exporter (Phoenix uses HTTP, not gRPC)
-    "opentelemetry-instrumentation>=0.48b0,<0.64", # Base instrumentation
+    "opentelemetry-instrumentation>=0.48b0,<0.66", # Base instrumentation
     "opentelemetry-instrumentation-fastapi>=0.48b0,<0.64", # FastAPI tracing
-    "opentelemetry-instrumentation-asyncpg>=0.48b0,<0.64", # AsyncPG tracing
-    "opentelemetry-instrumentation-aiohttp-client>=0.48b0,<0.64", # AIOHTTP tracing
-    "opentelemetry-instrumentation-kafka-python>=0.48b0,<0.64", # Kafka tracing
-    "opentelemetry-instrumentation-redis>=0.48b0,<0.64", # Redis tracing
+    "opentelemetry-instrumentation-asyncpg>=0.48b0,<0.66", # AsyncPG tracing
+    "opentelemetry-instrumentation-aiohttp-client>=0.48b0,<0.66", # AIOHTTP tracing
+    "opentelemetry-instrumentation-kafka-python>=0.48b0,<0.66", # Kafka tracing
+    "opentelemetry-instrumentation-redis>=0.48b0,<0.66", # Redis tracing
     # MCP (Model Context Protocol) integration
     "mcp>=1.25.0,<2.0.0", # Anthropic MCP SDK for streamable HTTP transport
     # Additional infrastructure dependencies
@@ -132,6 +143,7 @@ verify-container-manifest = "omnibase_infra.scripts.verify_container_manifest:ma
 delegate = "omnibase_infra.cli.cli_delegate:delegate_command"
 kafka = "omnibase_infra.cli.cli_kafka:kafka"
 node = "omnibase_infra.cli.cli_node:run_node_by_name"
+occ = "omnibase_infra.cli.cli_occ:occ"
 run = "omnibase_infra.cli.cli_node:run_node_by_name"
 skill = "omnibase_infra.cli.cli_skill:run_skill_by_name"
 
@@ -173,8 +185,9 @@ dev = [
 
 [tool.uv]
 override-dependencies = [
-    "omnibase-core>=0.46.1,<0.47.0",
-    "omnibase-spi>=0.23.0,<0.24.0",
+    "omnibase-core==0.46.8",
+    "omnibase-spi==0.23.1",
+    "omnibase-compat==0.5.6",
 ]
 
 [tool.uv.sources]
@@ -183,6 +196,35 @@ override-dependencies = [
 # omnibase-spi git-rev overrides DELETED — resolved from PyPI once 0.46.1 /
 # 0.23.0 are published.
 onex-change-control = { git = "https://github.com/OmniNode-ai/onex_change_control.git", rev = "2dd26ade7caaa7131e532473ec9d8a207d0e77ab" }
+# OMN-12549 CLOSED: the cross-repo seam is now on PyPI (omnibase-core 0.46.3,
+# omnibase-spi 0.23.1). The temporary immutable-rev git overrides for
+# omnibase-core/omnibase-spi were DELETED here and the version pins bumped to
+# the released exact versions, restoring a fully PyPI-sourced reproducible lock.
+#
+# OMN-14758 (epic OMN-14717, S6): TEMPORARY dev-build pin advanced from S3's
+# aca32f24 to core dev HEAD (a2562165), a strict descendant (verified
+# `git merge-base --is-ancestor`). S6 wires the delegation command spine onto
+# S4 RuntimeDispatch, which is DEV-ONLY / UNRELEASED (latest core release is
+# 0.46.7). This pin carries S1 transport protocols + ModelTransportMessage
+# (#1463), S2 InMemoryTransport + TransportConformanceSuite (#1464), S4
+# RuntimeDispatch + DispatchRoute + runtime_envelope_router + EnumDeliveryDisposition
+# (#1466), and S3 conformance (#1467). a2562165 is version 0.46.8, so the
+# ==0.46.8 pins above stay consistent. Not on PyPI.
+#
+# OMN-15186: bumped a2562165 -> 3f2998b3 (core dev tip at bump time), a strict
+# descendant (verified `git merge-base --is-ancestor`). a2562165 predates core
+# commit 9449083a, which adds
+# omnibase_core/models/delegation/wire/model_delegation_completed.py; the
+# co-installed omnimarket node-skill package imports that module, so any
+# omnibase_infra venv pinned at a2562165 hard-crashes with ModuleNotFoundError
+# on `onex node node_delegate_skill_orchestrator` before the handler even
+# constructs (blocks OMN-15170's live delegation driver). 3f2998b3 is still
+# version 0.46.8 (core has not cut a new release across this range), so the
+# ==0.46.8 pins above stay consistent. Not on PyPI.
+# REMOVE WHEN RELEASED: once core publishes a version containing S1/S2/S4, delete
+# this override and `uv lock`.
+omnibase-core = { git = "https://github.com/OmniNode-ai/omnibase_core.git", rev = "3f2998b3337e4050b4758e0dd2a0fe1061ce0d98" }  # raw-override-ok: OMN-14758
+
 [tool.ruff]
 target-version = "py312"
 line-length = 88
@@ -327,6 +369,8 @@ ignore = [
 # ARCH-004 imperative-orchestrator ratchet CLI (OMN-13472): intentional CLI/report stdout.
 "src/omnibase_infra/nodes/node_architecture_validator/validators/scanner_imperative_orchestrator_ratchet.py" = ["T201"]
 "src/omnibase_infra/nodes/node_architecture_validator/validators/scanner_orchestration_monolith_ratchet.py" = ["T201"]
+# ARCH-005 orchestrator/reducer state-invariant gate CLI (OMN-14222): intentional CLI/report stdout.
+"src/omnibase_infra/nodes/node_architecture_validator/validators/scanner_orchestrator_reducer_state_invariant.py" = ["T201"]
 
 [tool.ruff.lint.isort]
 # Ensure consistent import sorting between local and CI
@@ -527,11 +571,14 @@ node_model_router_compute = "omnibase_infra.nodes.node_model_router_compute"
 node_node_graph_reducer = "omnibase_infra.nodes.node_node_graph_reducer"
 node_onboarding_orchestrator = "omnibase_infra.nodes.node_onboarding_orchestrator"
 node_pattern_lifecycle_effect = "omnibase_infra.nodes.node_pattern_lifecycle_effect"
+node_pr_state_projection_compute = "omnibase_infra.nodes.node_pr_state_projection_compute"
+node_pr_state_write_effect = "omnibase_infra.nodes.node_pr_state_write_effect"
 node_registration_orchestrator = "omnibase_infra.nodes.node_registration_orchestrator"
 node_registration_reducer = "omnibase_infra.nodes.node_registration_reducer"
 node_registration_storage_effect = "omnibase_infra.nodes.node_registration_storage_effect"
 node_registry_api_effect = "omnibase_infra.nodes.node_registry_api_effect"
 node_registry_effect = "omnibase_infra.nodes.node_registry_effect"
+node_release_identity_compute = "omnibase_infra.nodes.node_release_identity_compute"
 node_remote_agent_invoke_effect = "omnibase_infra.nodes.node_remote_agent_invoke_effect"
 node_reward_binder_effect = "omnibase_infra.nodes.node_reward_binder_effect"
 node_routing_orchestrator = "omnibase_infra.nodes.node_routing_orchestrator"
@@ -544,6 +591,8 @@ node_rsd_data_fetch_effect = "omnibase_infra.nodes.node_rsd_data_fetch_effect"
 node_rsd_orchestrator = "omnibase_infra.nodes.node_rsd_orchestrator"
 node_rsd_score_compute = "omnibase_infra.nodes.node_rsd_score_compute"
 node_rsd_state_reducer = "omnibase_infra.nodes.node_rsd_state_reducer"
+node_runner_fleet_health_compute = "omnibase_infra.nodes.node_runner_fleet_health_compute"
+node_runner_fleet_maintain_orchestrator = "omnibase_infra.nodes.node_runner_fleet_maintain_orchestrator"
 node_runner_health_snapshot_effect = "omnibase_infra.nodes.node_runner_health_snapshot_effect"
 node_runner_usage_effect = "omnibase_infra.nodes.node_runner_usage_effect"
 node_runtime_error_triage_effect = "omnibase_infra.nodes.node_runtime_error_triage_effect"
@@ -571,6 +620,7 @@ node_update_plan_reducer = "omnibase_infra.nodes.node_update_plan_reducer"
 node_validation_adjudicator = "omnibase_infra.nodes.node_validation_adjudicator"
 node_validation_executor = "omnibase_infra.nodes.node_validation_executor"
 node_validation_ledger_projection_compute = "omnibase_infra.nodes.node_validation_ledger_projection_compute"
+node_validation_ledger_write_effect = "omnibase_infra.nodes.node_validation_ledger_write_effect"
 node_validation_orchestrator = "omnibase_infra.nodes.node_validation_orchestrator"
 node_vector_store_effect = "omnibase_infra.nodes.node_vector_store_effect"
 node_waste_detection_compute = "omnibase_infra.nodes.node_waste_detection_compute"

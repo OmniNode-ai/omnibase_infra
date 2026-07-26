@@ -7,12 +7,19 @@ Container-layer hot-patches (``.prepatch`` sibling discipline) silently revert
 on any image rebuild or ``compose up --force-recreate``. This gate refuses to
 rebuild a container when:
 
-1. any hot-patch ledger row for the target container/lane has a source PR
-   merge commit that is NOT an ancestor of the build ref for that repo
+1. any hot-patch ledger row for the target container/lane has NO source PR
+   merge commit that is an ancestor of the build ref for that repo
    (``git merge-base --is-ancestor``), or
 2. the running container carries ``.prepatch`` files that are NOT recorded in
    the ledger (unledgered patches would be silently destroyed), or
 3. with ``--post-rebuild``: any ``.prepatch`` file survives the rebuild.
+
+A row's ``merge_commit`` may be a single commit string (legacy single-lineage
+format) or a list of commit strings. Under dev->main squash promotion the same
+patch content lives in two non-linear lineages (a dev merge commit and a main
+promotion commit that are NOT ancestors of one another), so a list lets one
+ledger row satisfy either a dev-ref or a main-ref rebuild. A row passes when
+ANY candidate commit is known in the clone AND is an ancestor of the build ref.
 
 The canonical ledger lives at ``/data/omninode/hotpatch-ledger/ledger.yaml``
 on the runtime host (override with ``--ledger`` or ``HOTPATCH_LEDGER_PATH``).
@@ -142,6 +149,29 @@ def is_ancestor(clone: Path, commit: str, build_ref: str) -> bool:
     )
 
 
+def candidate_commits(value: Any) -> list[str]:
+    """Normalize a ledger row's ``merge_commit`` to a list of commit strings.
+
+    Accepts either a scalar string (legacy single-lineage format) or a list of
+    strings. Under dev->main squash promotion the same patch content lives in
+    two non-linear lineages, so a row may carry both candidates. Raises
+    ValueError for any other shape so a malformed ledger fails loudly.
+    """
+    if isinstance(value, str):
+        return [value]
+    if isinstance(value, list):
+        if not value or not all(isinstance(item, str) for item in value):
+            raise ValueError(
+                "ledger row 'merge_commit' list must be a non-empty list of "
+                f"commit strings, got {value!r}"
+            )
+        return list(value)
+    raise ValueError(
+        "ledger row 'merge_commit' must be a string or list of strings, got "
+        f"{type(value).__name__}"
+    )
+
+
 def tripwire_prepatch_files(container: str, docker_cmd: str) -> list[str]:
     """Return every ``.prepatch`` path found inside the running container."""
     find_cmd = " ".join(
@@ -221,7 +251,10 @@ def run_preflight(args: argparse.Namespace) -> int:
 
     for row in rows:
         repo = row["source_repo"]
-        commit = row["merge_commit"]
+        try:
+            candidates = candidate_commits(row["merge_commit"])
+        except ValueError as exc:
+            return fail(str(exc), code=2)
         clone = clones_root / repo
         if repo not in resolved_refs:
             try:
@@ -232,28 +265,48 @@ def run_preflight(args: argparse.Namespace) -> int:
                 return fail(str(exc), code=2)
             print(f"HOTPATCH-PREFLIGHT: build ref {repo}={resolved_refs[repo]}")
         build_ref = resolved_refs[repo]
-        if not commit_known(clone, commit):
+
+        # A row passes when ANY candidate commit is known in the clone AND is an
+        # ancestor of the build ref. Under dev->main squash promotion the dev
+        # and main lineage commits are not ancestors of one another, so only one
+        # candidate is expected to satisfy a given build ref.
+        known_candidates: list[str] = []
+        matched: str | None = None
+        for candidate in candidates:
+            if not commit_known(clone, candidate):
+                continue
+            known_candidates.append(candidate)
+            try:
+                if is_ancestor(clone, candidate, build_ref):
+                    matched = candidate
+                    break
+            except ValueError as exc:
+                return fail(str(exc), code=2)
+
+        joined = ", ".join(candidates)
+        if not known_candidates:
+            # No candidate exists in the clone at all — stale or wrong clone.
             return fail(
-                f"merge commit {commit} ({row['source_pr']}) is unknown in "
+                f"merge commit(s) {joined} ({row['source_pr']}) unknown in "
                 f"clone {clone} — the clone is stale or wrong; "
                 "run 'git fetch' on the build host first.",
                 code=2,
             )
-        try:
-            merged = is_ancestor(clone, commit, build_ref)
-        except ValueError as exc:
-            return fail(str(exc), code=2)
-        marker = "ancestor-of-build-ref" if merged else "NOT in build ref"
-        print(
-            f"HOTPATCH-PREFLIGHT: {row['container']} {row['file']} "
-            f"<- {row['source_pr']} ({commit[:12]}): {marker}"
-        )
-        if not merged:
+        if matched is not None:
+            print(
+                f"HOTPATCH-PREFLIGHT: {row['container']} {row['file']} "
+                f"<- {row['source_pr']} ({matched[:12]}): ancestor-of-build-ref"
+            )
+        else:
+            print(
+                f"HOTPATCH-PREFLIGHT: {row['container']} {row['file']} "
+                f"<- {row['source_pr']} ({joined}): NOT in build ref"
+            )
             failures.append(
                 f"{row['file']} in {row['container']} is hot-patched from "
-                f"{row['source_pr']} (merge commit {commit}) which is NOT "
-                f"merged into build ref {build_ref} for repo {repo}; "
-                "rebuilding would silently destroy this patch."
+                f"{row['source_pr']} (candidate merge commit(s): {joined}), "
+                f"none of which is merged into build ref {build_ref} for repo "
+                f"{repo}; rebuilding would silently destroy this patch."
             )
 
     if not args.skip_tripwire:

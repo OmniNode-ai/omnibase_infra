@@ -1,0 +1,29 @@
+{
+  "base_ref": "71ab1bf6deb4252edd9593f547dd5a4b4e60939b",
+  "canonical_handler_module": "omnibase_infra.nodes.node_broker_disk_watermark_compute.handlers.handler_broker_disk_watermark",
+  "legacy_handler_module": "omnibase_infra.nodes.node_broker_disk_watermark_compute.handlers.handler_broker_disk_watermark",
+  "node_id": "omnibase_infra.nodes.node_broker_disk_watermark_compute",
+  "parity": {
+    "selected_input_hashes": [
+      "sha256:a717499da9403e40025b12891003a8849b9106e79d6cec5e8c20757852d2a2d2",
+      "sha256:5e6f7ee2fa56cbec23c8dc73be4019b28cb43c129f47828518da9ca6503cffb8",
+      "sha256:170122f07cbb1949c0a230f71ec3facd9847f5d2b4e33e9cb5c8e550209dc836",
+      "sha256:a60cefb436747aca50e48a192df8f4d5002c6a2bbefdd5279324f8c0c9cb1b55",
+      "sha256:3f29ef12329a6a7d1e6d25ef5e5d669465f12ce2fc7ae11f87aa4390b903350a"
+    ],
+    "status": "pass",
+    "test_ids": [
+      "tests/unit/nodes/test_broker_disk_watermark_dispatch_entrypoint_omn14816.py::test_handler_exposes_handle_entrypoint",
+      "tests/unit/nodes/test_broker_disk_watermark_dispatch_entrypoint_omn14816.py::test_real_dispatch_callback_returns_p0_output",
+      "tests/unit/nodes/test_broker_disk_watermark_dispatch_entrypoint_omn14816.py::test_real_dispatch_callback_returns_clean_output"
+    ]
+  },
+  "preserved_symbols": [
+    "_classify",
+    "_real_docker_info",
+    "_real_disk_usage",
+    "_resolve_volume_mountpoint",
+    "HandlerBrokerDiskWatermark._probe_path"
+  ],
+  "receipt_schema": "handflip_proof.v1"
+}

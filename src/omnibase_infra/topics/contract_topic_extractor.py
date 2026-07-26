@@ -18,20 +18,20 @@ Schema A (flat lists)::
 
     event_bus:
       subscribe_topics:
-        - "onex.evt.platform.node-registration.v1"
+        - ``onex.evt.platform.node-registration.v1``
       publish_topics:
-        - "onex.evt.platform.node-registered.v1"
+        - ``onex.evt.platform.node-registered.v1``
 
 Schema B (structured dicts)::
 
     event_bus:
       subscribe_topics:
-        - topic: "onex.evt.github.pr-webhook.v1"
+        - topic: ``onex.evt.github.pr-webhook.v1``
           operation: "ingest"
       publish_topics:
-        - topic: "onex.evt.artifact.change-detected.v1"
-          success_topic: "onex.evt.artifact.change-detected-success.v1"
-          failure_topic: "onex.evt.artifact.change-detected-failed.v1"
+        - topic: ``onex.evt.artifact.change-detected.v1``
+          success_topic: ``onex.evt.artifact.change-detected-success.v1``
+          failure_topic: ``onex.evt.artifact.change-detected-failed.v1``
 
 Additionally extracts topics from ``input_subscriptions`` blocks.
 
@@ -67,7 +67,7 @@ class ExtractedTopic:
     """A single topic extracted from a contract YAML.
 
     Attributes:
-        topic: Full ONEX topic string (e.g., "onex.evt.platform.node-registration.v1").
+        topic: Full ONEX topic string (e.g., ``onex.evt.platform.node-registration.v1``).
         direction: Either "subscribe" or "publish".
         node_name: Name of the node that declares this topic.
         contract_path: Path to the contract.yaml file.

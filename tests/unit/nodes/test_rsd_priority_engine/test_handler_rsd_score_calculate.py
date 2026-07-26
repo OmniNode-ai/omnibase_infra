@@ -32,6 +32,9 @@ from omnibase_infra.nodes.node_rsd_score_compute.handlers.handler_rsd_score_calc
 from omnibase_infra.nodes.node_rsd_score_compute.models.model_rsd_factor_weights import (
     ModelRsdFactorWeights,
 )
+from omnibase_infra.nodes.node_rsd_score_compute.models.model_rsd_score_input import (
+    ModelRsdScoreInput,
+)
 
 
 @pytest.mark.unit
@@ -50,12 +53,14 @@ class TestHandlerRsdScoreCalculate:
     async def test_empty_tickets(self, handler: HandlerRsdScoreCalculate):
         """Empty ticket list returns empty result."""
         result = await handler.handle(
-            correlation_id=uuid4(),
-            tickets=(),
-            dependency_edges=(),
-            agent_requests=(),
-            plan_overrides=(),
-            weights=ModelRsdFactorWeights(),
+            ModelRsdScoreInput(
+                correlation_id=uuid4(),
+                tickets=(),
+                dependency_edges=(),
+                agent_requests=(),
+                plan_overrides=(),
+                weights=ModelRsdFactorWeights(),
+            )
         )
         assert result.ticket_scores == ()
         assert result.ranked_ticket_ids == ()
@@ -72,12 +77,14 @@ class TestHandlerRsdScoreCalculate:
             created_at=datetime.now() - timedelta(days=14),
         )
         result = await handler.handle(
-            correlation_id=uuid4(),
-            tickets=(ticket,),
-            dependency_edges=(),
-            agent_requests=(),
-            plan_overrides=(),
-            weights=ModelRsdFactorWeights(),
+            ModelRsdScoreInput(
+                correlation_id=uuid4(),
+                tickets=(ticket,),
+                dependency_edges=(),
+                agent_requests=(),
+                plan_overrides=(),
+                weights=ModelRsdFactorWeights(),
+            )
         )
         assert len(result.ticket_scores) == 1
         score = result.ticket_scores[0]
@@ -103,12 +110,14 @@ class TestHandlerRsdScoreCalculate:
             ),
         )
         result = await handler.handle(
-            correlation_id=uuid4(),
-            tickets=tickets,
-            dependency_edges=(),
-            agent_requests=(),
-            plan_overrides=(),
-            weights=ModelRsdFactorWeights(),
+            ModelRsdScoreInput(
+                correlation_id=uuid4(),
+                tickets=tickets,
+                dependency_edges=(),
+                agent_requests=(),
+                plan_overrides=(),
+                weights=ModelRsdFactorWeights(),
+            )
         )
         assert result.ranked_ticket_ids[0] == "critical"
         assert result.ranked_ticket_ids[1] == "low"
@@ -120,12 +129,14 @@ class TestHandlerRsdScoreCalculate:
             ticket_id="T-1", priority="medium", created_at=datetime.now()
         )
         result = await handler.handle(
-            correlation_id=uuid4(),
-            tickets=(ticket,),
-            dependency_edges=(),
-            agent_requests=(),
-            plan_overrides=(),
-            weights=ModelRsdFactorWeights(),
+            ModelRsdScoreInput(
+                correlation_id=uuid4(),
+                tickets=(ticket,),
+                dependency_edges=(),
+                agent_requests=(),
+                plan_overrides=(),
+                weights=ModelRsdFactorWeights(),
+            )
         )
         score = result.ticket_scores[0]
         factor_sum = sum(f.weighted_score for f in score.factors)
@@ -142,12 +153,14 @@ class TestHandlerRsdScoreCalculate:
             ModelDependencyEdge(source_id="blocker", target_id="T-4"),
         )
         result = await handler.handle(
-            correlation_id=uuid4(),
-            tickets=(blocker, blocked),
-            dependency_edges=edges,
-            agent_requests=(),
-            plan_overrides=(),
-            weights=ModelRsdFactorWeights(),
+            ModelRsdScoreInput(
+                correlation_id=uuid4(),
+                tickets=(blocker, blocked),
+                dependency_edges=edges,
+                agent_requests=(),
+                plan_overrides=(),
+                weights=ModelRsdFactorWeights(),
+            )
         )
         scores = {s.ticket_id: s for s in result.ticket_scores}
         blocker_dep = next(

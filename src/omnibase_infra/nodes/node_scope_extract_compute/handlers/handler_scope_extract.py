@@ -9,9 +9,11 @@ from __future__ import annotations
 
 import logging
 import re
-from uuid import UUID
 
 from omnibase_infra.enums import EnumHandlerType, EnumHandlerTypeCategory
+from omnibase_infra.nodes.node_scope_extract_compute.models.model_scope_extract_input import (
+    ModelScopeExtractInput,
+)
 from omnibase_infra.nodes.node_scope_extract_compute.models.model_scope_extracted import (
     ModelScopeExtracted,
 )
@@ -47,14 +49,15 @@ class HandlerScopeExtract:
     def handler_category(self) -> EnumHandlerTypeCategory:
         return EnumHandlerTypeCategory.COMPUTE
 
-    async def handle(
-        self,
-        content: str,
-        plan_file_path: str,
-        correlation_id: UUID,
-        output_path: str = "~/.claude/scope-manifest.json",
-    ) -> ModelScopeExtracted:
-        """Extract scope items from plan content.
+    async def handle(self, request: ModelScopeExtractInput) -> ModelScopeExtracted:
+        """Extract scope items from plan content (canonical definition B).
+
+        The shared runtime adapter validates the wire payload into the
+        contract-declared ``ModelScopeExtractInput`` and hands it here — the
+        envelope boundary lives in the runtime adapter, not in this compute core
+        (definition B, OMN-14355). The regex extraction body below is preserved
+        behaviorally identical to the pre-flip multi-positional handler; only the
+        entry signature is unpacked from the request model.
 
         Extraction heuristics:
             - File paths in backticks (e.g., `src/foo.py`)
@@ -63,14 +66,18 @@ class HandlerScopeExtract:
             - Directory paths ending in /
 
         Args:
-            content: Plan file content.
-            plan_file_path: Original plan file path.
-            correlation_id: Workflow correlation ID.
-            output_path: Caller-specified output path to carry forward.
+            request: Validated scope-extract input carrying the plan file
+                content, original plan file path, workflow correlation ID, and
+                the caller-specified output path to carry forward.
 
         Returns:
             ModelScopeExtracted with extracted scope items.
         """
+        content = request.content
+        plan_file_path = request.plan_file_path
+        correlation_id = request.correlation_id
+        output_path = request.output_path
+
         logger.info(
             "Extracting scope from plan file (correlation_id=%s)",
             correlation_id,

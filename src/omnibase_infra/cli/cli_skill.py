@@ -28,6 +28,7 @@ import logging
 import uuid
 from functools import lru_cache
 from pathlib import Path
+from typing import cast
 
 import click
 import yaml
@@ -38,6 +39,13 @@ from omnibase_infra.cli.enum_skill_arg_type import EnumSkillArgType
 from omnibase_infra.cli.model_skill_arg_spec import ModelSkillArgSpec
 from omnibase_infra.cli.model_skill_mapping import ModelSkillMapping
 from omnibase_infra.cli.model_skill_mapping_registry import ModelSkillMappingRegistry
+from omnibase_infra.cli.omnimarket_drift_guard import (
+    OmnimarketDriftError,
+    check_omnimarket_drift,
+)
+from omnibase_infra.cli.prod_dispatch_locality_guard import (
+    enforce_prod_dispatch_locality,
+)
 from omnibase_infra.cli.receipt_mode import (
     default_emit_socket_path,
     run_receipt_mode,
@@ -91,6 +99,13 @@ def _coerce_value(spec: ModelSkillArgSpec, raw: str) -> JsonValue:
             ) from exc
     if spec.arg_type is EnumSkillArgType.STRING_LIST:
         return [item.strip() for item in raw.split(",") if item.strip()]
+    if spec.arg_type is EnumSkillArgType.JSON:
+        try:
+            return cast("JsonValue", json.loads(raw))
+        except json.JSONDecodeError as exc:
+            raise click.ClickException(
+                f"--{spec.name} expects valid JSON, got {raw!r}: {exc}"
+            ) from exc
     # BOOLEAN is a presence flag and never reaches value coercion.
     raise click.ClickException(
         f"--{spec.name}: value coercion not supported for {spec.arg_type}"
@@ -228,6 +243,20 @@ def _write_payload(
     default=None,
     help="Unix socket of the emit daemon (default: ~/.claude/emit.sock).",
 )
+@click.option(
+    "--omni-home",
+    type=click.Path(path_type=Path),
+    envvar="OMNI_HOME",
+    default=None,
+    help=(
+        "Canonical omni_home workspace root for the local omnimarket drift "
+        "check. Defaults to the $OMNI_HOME environment variable (OMN-14531) "
+        "-- without this binding the drift guard silently receives "
+        "omni_home=None and never fires in normal usage, even when "
+        "$OMNI_HOME is exported, because callers never pass this flag "
+        "explicitly."
+    ),
+)
 @click.argument("skill_args", nargs=-1, type=click.UNPROCESSED)
 def run_skill_by_name(
     skill_name: str,
@@ -235,6 +264,7 @@ def run_skill_by_name(
     timeout: int | None,
     verbose: bool,
     emit_socket: Path | None,
+    omni_home: Path | None,
     skill_args: tuple[str, ...],
 ) -> None:
     """Dispatch a skill to its backing node and print one typed result.
@@ -252,6 +282,11 @@ def run_skill_by_name(
         onex skill dod_verify OMN-1234
         onex skill delegate "summarize this paragraph" --task-type document
     """
+    try:
+        check_omnimarket_drift(omni_home=str(omni_home) if omni_home else None)
+    except OmnimarketDriftError as exc:
+        raise click.ClickException(str(exc)) from exc
+
     registry = load_skill_registry()
     mapping = registry.get(skill_name)
     if mapping is None:
@@ -262,6 +297,7 @@ def run_skill_by_name(
 
     payload = _parse_skill_args(mapping, skill_args)
     _apply_classifiers(mapping, payload)
+    enforce_prod_dispatch_locality(mapping.node_name, payload)
 
     contract_path = _resolve_packaged_contract(mapping.node_name)
     payload_path = _write_payload(state_root, skill_name, payload)

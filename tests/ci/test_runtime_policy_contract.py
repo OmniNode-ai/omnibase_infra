@@ -228,3 +228,52 @@ def test_runtime_worker_replicas_are_fail_fast_not_silent_default() -> None:
         "prod worker replicas must be fail-fast on the ledgered policy value"
     )
     assert "${PROD_WORKER_REPLICAS:-" not in prod_text
+
+
+def test_boundary_dlq_enabled_declared_explicitly_for_every_lane() -> None:
+    """OMN-14551: every lane declares an explicit boundary-DLQ stance.
+
+    No-invisible-env-config doctrine -- the field is required (no default), so
+    a lane cannot silently inherit an implicit off; each profile must name its
+    position in the contract.
+    """
+    contract = _load_contract()
+
+    assert contract.profiles["dev"].boundary_dlq_enabled is False
+    assert contract.profiles["stability-test"].boundary_dlq_enabled is True
+    assert contract.profiles["judge"].boundary_dlq_enabled is False
+    assert contract.profiles["prod"].boundary_dlq_enabled is False
+
+
+def test_boundary_dlq_enabled_rendered_into_policy_env_for_every_lane() -> None:
+    """OMN-14551: the renderer emits ``{PROFILE}_BOUNDARY_DLQ_ENABLED`` per lane."""
+    env = _load_dotenv(POLICY_ENV_PATH)
+
+    assert env["DEV_BOUNDARY_DLQ_ENABLED"] == "false"
+    assert env["STABILITY_TEST_BOUNDARY_DLQ_ENABLED"] == "true"
+    assert env["JUDGE_BOUNDARY_DLQ_ENABLED"] == "false"
+    assert env["PROD_BOUNDARY_DLQ_ENABLED"] == "false"
+
+
+def test_stability_test_boundary_dlq_wired_fail_fast_prod_and_judge_untouched() -> None:
+    """OMN-14551 G6: stability-test's runtime containers reference the ledgered
+    ``STABILITY_TEST_BOUNDARY_DLQ_ENABLED`` value fail-fast (``:?``, no silent
+    ``:-false`` default). Prod and judge compose files carry no
+    ``ONEX_BOUNDARY_DLQ_ENABLED`` reference at all -- this PR's flip is scoped
+    strictly to the stability-test lane.
+    """
+    stability_text = STABILITY_COMPOSE_PATH.read_text(encoding="utf-8")
+    prod_text = PROD_COMPOSE_PATH.read_text(encoding="utf-8")
+    judge_text = (ROOT / "docker" / "docker-compose.judge.yml").read_text(
+        encoding="utf-8"
+    )
+
+    assert (
+        stability_text.count(
+            "ONEX_BOUNDARY_DLQ_ENABLED: ${STABILITY_TEST_BOUNDARY_DLQ_ENABLED:?"
+        )
+        == 3
+    ), "expected the flag wired on main, effects, and worker"
+    assert "${STABILITY_TEST_BOUNDARY_DLQ_ENABLED:-" not in stability_text
+    assert "ONEX_BOUNDARY_DLQ_ENABLED" not in prod_text
+    assert "ONEX_BOUNDARY_DLQ_ENABLED" not in judge_text

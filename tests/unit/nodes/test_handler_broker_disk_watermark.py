@@ -203,7 +203,7 @@ class TestHandlerBrokerDiskWatermark:
             docker_info_runner=lambda: _DEMO_DAY_INFO,
             disk_usage_runner=_healthy_disk_usage,
         )
-        out = handler.probe_disk_watermark(inp)
+        out = handler.handle(inp)
         assert isinstance(out, ModelBrokerDiskWatermarkOutput)
         assert out.max_severity == EnumDiskSeverity.CLEAN
         assert out.p0_labels == ()
@@ -224,7 +224,7 @@ class TestHandlerBrokerDiskWatermark:
             docker_info_runner=lambda: _DEMO_DAY_INFO,
             disk_usage_runner=_warn_disk_usage,
         )
-        out = handler.probe_disk_watermark(inp)
+        out = handler.handle(inp)
         assert out.max_severity == EnumDiskSeverity.WARN
         assert "docker-data-root" in out.warn_labels
         assert out.p0_labels == ()
@@ -239,7 +239,7 @@ class TestHandlerBrokerDiskWatermark:
             docker_info_runner=lambda: _DEMO_DAY_INFO,
             disk_usage_runner=_p0_disk_usage,
         )
-        out = handler.probe_disk_watermark(inp)
+        out = handler.handle(inp)
         assert out.max_severity == EnumDiskSeverity.P0
         assert "docker-data-root" in out.p0_labels
 
@@ -254,7 +254,7 @@ class TestHandlerBrokerDiskWatermark:
             docker_info_runner=lambda: _DEMO_DAY_INFO,
             disk_usage_runner=_demo_day_disk_usage,
         )
-        out = handler.probe_disk_watermark(inp)
+        out = handler.handle(inp)
         assert out.max_severity == EnumDiskSeverity.P0
         assert out.checks[0].below_min_free_floor
         assert out.checks[0].free_bytes == 0
@@ -272,7 +272,7 @@ class TestHandlerBrokerDiskWatermark:
             docker_info_runner=failing_docker_info,
             disk_usage_runner=_healthy_disk_usage,
         )
-        out = handler.probe_disk_watermark(inp)
+        out = handler.handle(inp)
         assert out.probe_error != ""
         assert "docker not available" in out.probe_error
         assert out.docker_root_dir == ""
@@ -303,7 +303,7 @@ class TestHandlerBrokerDiskWatermark:
                 docker_info_runner=lambda: _DEMO_DAY_INFO,
                 disk_usage_runner=fake_disk_usage,
             )
-            out = handler.probe_disk_watermark(inp)
+            out = handler.handle(inp)
 
         assert len(out.checks) == 2
         volume_check = next(
@@ -327,7 +327,7 @@ class TestHandlerBrokerDiskWatermark:
                 docker_info_runner=lambda: _DEMO_DAY_INFO,
                 disk_usage_runner=_healthy_disk_usage,
             )
-            out = handler.probe_disk_watermark(inp)
+            out = handler.handle(inp)
 
         # Only data-root check present
         assert len(out.checks) == 1
@@ -358,7 +358,7 @@ class TestHandlerBrokerDiskWatermark:
                 docker_info_runner=lambda: _DEMO_DAY_INFO,
                 disk_usage_runner=mixed_usage,
             )
-            out = handler.probe_disk_watermark(inp)
+            out = handler.handle(inp)
 
         assert out.max_severity == EnumDiskSeverity.P0
 
@@ -372,7 +372,7 @@ class TestHandlerBrokerDiskWatermark:
             docker_info_runner=lambda: _DEMO_DAY_INFO,
             disk_usage_runner=_healthy_disk_usage,
         )
-        out = handler.probe_disk_watermark(inp)
+        out = handler.handle(inp)
         assert isinstance(out.correlation_id, UUID)
         assert out.correlation_id == inp.correlation_id
 
@@ -386,6 +386,6 @@ class TestHandlerBrokerDiskWatermark:
             docker_info_runner=lambda: _DEMO_DAY_INFO,
             disk_usage_runner=_healthy_disk_usage,
         )
-        out = handler.probe_disk_watermark(inp)
+        out = handler.handle(inp)
         assert len(out.checks) == 1
         assert out.checks[0].label == "docker-data-root"

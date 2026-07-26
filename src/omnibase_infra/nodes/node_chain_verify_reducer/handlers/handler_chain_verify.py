@@ -16,6 +16,8 @@ from omnibase_infra.nodes.node_chain_orchestrator.models import EnumChainVerifyS
 logger = logging.getLogger(__name__)
 
 # Valid transitions: (from_state, trigger) -> to_state
+# orchestrator-reducer-state-ok: static FSM transition table, read-only,
+# never mutated at runtime -- not per-request accumulated state (OMN-14222).
 _TRANSITIONS: dict[tuple[str, str], EnumChainVerifyState] = {
     ("pending", "cmd_received"): EnumChainVerifyState.RETRIEVING,
     ("retrieving", "retrieval_hit"): EnumChainVerifyState.REPLAYING,

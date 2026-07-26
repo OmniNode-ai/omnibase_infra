@@ -1,0 +1,28 @@
+{
+  "node_id": "omnibase_infra.nodes.node_runtime_source_attestor_effect",
+  "receipt_schema": "handflip_proof.v1",
+  "canonical_handler_module": "omnibase_infra.nodes.node_runtime_source_attestor_effect.handlers.handler_source_attestation",
+  "legacy_handler_module": "omnibase_infra.nodes.node_runtime_source_attestor_effect.handlers.handler_source_attestation",
+  "base_ref": "71ab1bf6deb4252edd9593f547dd5a4b4e60939b",
+  "preserved_symbols": [
+    "HandlerSourceAttestation._resolve_main_head",
+    "HandlerSourceAttestation._compute_distance",
+    "HandlerSourceAttestation._emit_friction"
+  ],
+  "parity": {
+    "status": "pass",
+    "test_ids": [
+      "tests/unit/nodes/node_runtime_source_attestor_effect/test_source_attestation_dispatch_entrypoint_omn14805.py::test_handler_exposes_handle_entrypoint",
+      "tests/unit/nodes/node_runtime_source_attestor_effect/test_source_attestation_dispatch_entrypoint_omn14805.py::test_real_dispatch_callback_returns_success[E1_unknown]",
+      "tests/unit/nodes/node_runtime_source_attestor_effect/test_source_attestation_dispatch_entrypoint_omn14805.py::test_real_dispatch_callback_returns_success[E2_empty]",
+      "tests/unit/nodes/node_runtime_source_attestor_effect/test_source_attestation_dispatch_entrypoint_omn14805.py::test_real_dispatch_callback_returns_success[E3_compliant]",
+      "tests/unit/nodes/node_runtime_source_attestor_effect/test_source_attestation_dispatch_entrypoint_omn14805.py::test_real_dispatch_callback_returns_success[E4_drifted]"
+    ],
+    "selected_input_hashes": [
+      "sha256:e551051a5d5b40aa7a54eb153e1a7a1e1fd8b512fe72b8ad47d52acdf023a8e9",
+      "sha256:a39a0f788872a5665a550ddc3bc403b5973a6c342133a40d2107f798c5c44192",
+      "sha256:37565c5c53459cd075ec418c7d0de9d0c2f873b76d0870c8aaf82e47c034f5ce",
+      "sha256:6f3d1722908892f86208e3b56947dfdd5326254be6bf18277983496e18487bfb"
+    ]
+  }
+}

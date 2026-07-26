@@ -1,0 +1,26 @@
+{
+  "golden_version": "compute_golden.v1",
+  "input": {
+    "content": "Run `config.yaml`; ignore `foo bar`, `x = 1`, `func(y)`, and `plainword`.",
+    "correlation_id": "00000000-0000-0000-0000-000000000004",
+    "output_path": "~/.claude/scope-manifest.json",
+    "plan_file_path": "plan_bare.md"
+  },
+  "input_hash": "sha256:3287dfd1c617d457604b4069e1bac6eb82723a63119116b379de8b3aa6c2fa4c",
+  "input_type": "ModelScopeExtractInput",
+  "output": {
+    "adjacent_files": [],
+    "correlation_id": "00000000-0000-0000-0000-000000000004",
+    "directories": [],
+    "files": [
+      "config.yaml"
+    ],
+    "output_path": "~/.claude/scope-manifest.json",
+    "plan_file_path": "plan_bare.md",
+    "repos": [],
+    "systems": []
+  },
+  "output_type": "ModelScopeExtracted",
+  "scenario": "backtick_bare_dotted_and_skips",
+  "volatile_mask": []
+}

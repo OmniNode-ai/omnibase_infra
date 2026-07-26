@@ -196,7 +196,7 @@ COPY uv.lock ./
 # - Uses BuildKit cache mount for uv cache directory (shared across builds)
 # - Installs only main dependencies (no dev dependencies)
 # - --no-install-project flag installs dependencies without installing the package itself
-RUN --mount=type=cache,target=/root/.cache/uv \
+RUN --mount=type=cache,target=/root/.cache/uv,sharing=locked \
     uv-with-retry sync --no-dev --no-install-project
 
 # ARG GIT_SHA placed immediately before COPY src/ so that passing
@@ -212,12 +212,12 @@ COPY src/ ./src/
 
 # Install the root package itself (now that source code is available)
 # This is a separate step to maximize cache reuse
-RUN --mount=type=cache,target=/root/.cache/uv \
+RUN --mount=type=cache,target=/root/.cache/uv,sharing=locked \
     uv-with-retry sync --no-dev
 
 # Pre-install torch CPU-only (~200MB) to prevent CUDA torch (~2.5GB) from being
 # pulled by adaptive-classifier. Must come BEFORE plugin installs.
-RUN --mount=type=cache,target=/root/.cache/uv \
+RUN --mount=type=cache,target=/root/.cache/uv,sharing=locked \
     uv-with-retry pip install torch --index-url https://download.pytorch.org/whl/cpu
 
 # Install ONEX plugin composition-layer dependencies.
@@ -239,7 +239,7 @@ RUN --mount=type=cache,target=/root/.cache/uv \
 # Exact pins (==) cause CI failures when new versions are published before
 # the Dockerfile is updated (OMN-5474). Range pins stay valid across releases.
 # Run `scripts/check_dockerfile_pins.py` to validate ranges against PyPI.
-RUN --mount=type=cache,target=/root/.cache/uv \
+RUN --mount=type=cache,target=/root/.cache/uv,sharing=locked \
     uv-with-retry pip install --no-deps \
     "omninode-claude>=0.9.0,<2.0.0" \
     "omninode-memory>=0.9.0,<2.0.0" \
@@ -331,8 +331,40 @@ ARG OMNIMARKET_REF=dev
 # cache for all other packages. The result: every rebuild always installs the
 # current HEAD of the tracked branch. omnibase_compat is a SHA-pinned immutable
 # tarball, so it needs no refresh.
-
-RUN --mount=type=cache,target=/root/.cache/uv \
+#
+# OMN-14262: compat / onex_change_control / omnimarket workspace installs ALSO use
+# the forced `uv pip uninstall` + `--no-cache --reinstall-package "<pkg> @ file://…"`
+# form (mirroring core above). A bare `uv pip install --no-deps <path>` no-ops
+# ("Audited 1 package") whenever the staged dev-tree version already equals the
+# version `uv sync` installed from omnimarket/uv.lock — so no file:// direct_url is
+# recorded and compute_workspace_provenance.py rejects the build ("Package '<pkg>'
+# not found in installed distributions. Expected a local-path install"). This is a
+# convergence-triggered failure (OMN-13403 same-version family): it only fires once
+# the staged version and the lock pin coincide. The forced reinstall always records
+# the local-path direct_url regardless of version equality.
+#
+# OMN-14631: every `--mount=type=cache,target=/root/.cache/uv` in this file now
+# carries `sharing=locked` (previously the BuildKit default `shared`, unlike the
+# apt cache mounts above which were already `sharing=locked`). `docker compose
+# build` builds this Dockerfile's targets for MULTIPLE services concurrently
+# (omninode-runtime, runtime-effects, runtime-worker, projection-api, and the
+# 3 release-only services), all sharing this ONE mutable uv cache directory.
+# An unlocked shared mount permits concurrent reads/writes to the same cache
+# entries from parallel builds with no BuildKit-enforced ordering guarantee.
+# This RUN step in particular reinstalls `omnimarket` (and the other three
+# workspace siblings) from a local `file://` source with `--no-cache`
+# (bypassing uv's OWN cache for the read side), but the WRITE side of a
+# concurrent sibling build populating this same mount is not inherently
+# serialized without `sharing=locked`. This was identified via code audit as
+# a plausible contributor to the 2026-07-14 stale-config incident
+# (OMN-14631) -- it could not be conclusively reproduced as the sole
+# mechanism (packaging config, uv's reinstall semantics with the pinned uv
+# version, and Docker's own COPY layer-cache invalidation were each
+# independently reproduced as behaving correctly), so this is defense-in-depth
+# alongside the content-parity gate in compute_workspace_provenance.py, which
+# hard-fails the build on ANY installed-vs-staged content drift regardless of
+# mechanism.
+RUN --mount=type=cache,target=/root/.cache/uv,sharing=locked \
     set -eu; \
     if [ "${BUILD_SOURCE}" = "workspace" ]; then \
         for repo in omnibase_core omnibase_compat onex_change_control omnimarket; do \
@@ -345,9 +377,18 @@ RUN --mount=type=cache,target=/root/.cache/uv \
         ( cd / && VIRTUAL_ENV=/app/.venv uv-with-retry pip install --python /app/.venv/bin/python \
             --no-deps --no-sources --no-cache --reinstall-package omnibase-core \
             "omnibase-core @ file:///workspace/sibling-repos/omnibase_core" ); \
-        uv-with-retry pip install --no-deps /workspace/sibling-repos/omnibase_compat; \
-        uv-with-retry pip install --no-deps /workspace/sibling-repos/onex_change_control; \
-        uv-with-retry pip install --no-deps /workspace/sibling-repos/omnimarket; \
+        uv-with-retry pip uninstall omnibase-compat; \
+        ( cd / && VIRTUAL_ENV=/app/.venv uv-with-retry pip install --python /app/.venv/bin/python \
+            --no-deps --no-sources --no-cache --reinstall-package omnibase-compat \
+            "omnibase-compat @ file:///workspace/sibling-repos/omnibase_compat" ); \
+        uv-with-retry pip uninstall onex-change-control; \
+        ( cd / && VIRTUAL_ENV=/app/.venv uv-with-retry pip install --python /app/.venv/bin/python \
+            --no-deps --no-sources --no-cache --reinstall-package onex-change-control \
+            "onex-change-control @ file:///workspace/sibling-repos/onex_change_control" ); \
+        uv-with-retry pip uninstall omnimarket; \
+        ( cd / && VIRTUAL_ENV=/app/.venv uv-with-retry pip install --python /app/.venv/bin/python \
+            --no-deps --no-sources --no-cache --reinstall-package omnimarket \
+            "omnimarket @ file:///workspace/sibling-repos/omnimarket" ); \
     else \
         uv-with-retry pip install --no-deps \
             "https://github.com/OmniNode-ai/omnibase_compat/archive/${OMNIBASE_COMPAT_REF}.tar.gz"; \
@@ -378,13 +419,13 @@ RUN /app/.venv/bin/python -m omnibase_infra.runtime.strip_runtime_entry_points
 # satisfied by omnibase_infra's uv sync above) and keeps the install
 # consistent with the plugin-pin pattern enforced by check_dockerfile_pins.py.
 # --index-url ensures only CPU-only wheels are considered.
-RUN --mount=type=cache,target=/root/.cache/uv \
+RUN --mount=type=cache,target=/root/.cache/uv,sharing=locked \
     uv-with-retry pip install --no-deps "torch>=2.6.0,<3.0.0" --index-url https://download.pytorch.org/whl/cpu
 
 # Install external (non-ONEX) deps required by the plugins above.
 # Most are already satisfied by omnibase_infra's own transitive deps.
 # Only plugin-specific additions are listed here.
-RUN --mount=type=cache,target=/root/.cache/uv \
+RUN --mount=type=cache,target=/root/.cache/uv,sharing=locked \
     uv-with-retry pip install \
     "tiktoken>=0.5.0" \
     "adaptive-classifier>=0.1.2" \
@@ -408,14 +449,20 @@ RUN --mount=type=cache,target=/root/.cache/uv \
 # Security: upgrade protobuf to clear CVE-2026-0994 (HIGH, DoS, fixed in >=5.29.6).
 # protobuf 4.25.8 (from transitive deps) is flagged by Trivy scan (ignore-unfixed: true).
 # Force upgrade here after all plugin installs to ensure the patched version is present.
-RUN --mount=type=cache,target=/root/.cache/uv \
+RUN --mount=type=cache,target=/root/.cache/uv,sharing=locked \
     uv-with-retry pip install "protobuf>=5.29.6"
 
 # Security: upgrade setuptools to clear CVE-2025-47273 (HIGH, path traversal, fixed in >=78.1.1).
 # setuptools ships with python:3.12-slim base image at an older version flagged by Trivy.
 # Force upgrade here after all other installs to ensure the patched version is present.
-RUN --mount=type=cache,target=/root/.cache/uv \
+RUN --mount=type=cache,target=/root/.cache/uv,sharing=locked \
     uv-with-retry pip install "setuptools>=78.1.1"
+
+# Security: upgrade cryptography to clear GHSA-537c-gmf6-5ccf (HIGH, fixed in >=48.0.1).
+# cryptography 46.0.7 (from transitive deps) is flagged by Trivy scan (ignore-unfixed: true).
+# Force upgrade here after all plugin installs to ensure the patched version is present.
+RUN --mount=type=cache,target=/root/.cache/uv,sharing=locked \
+    uv-with-retry pip install "cryptography>=48.0.1"
 
 # OMN-15147: upgrade pyasn1 to clear CVE-2026-59885/CVE-2026-59886 (DoS via
 # crafted ASN.1 OBJECT IDENTIFIER / REAL values, fixed in >=0.6.4) and
@@ -428,14 +475,9 @@ RUN --mount=type=cache,target=/root/.cache/uv \
 # from 2026-07-01 (last green) through 2026-07-25 (last red attempt),
 # including the one needed to ship node_push_validation_effect (added to
 # omnimarket dev on 2026-07-22, so no build since has picked it up).
-RUN --mount=type=cache,target=/root/.cache/uv \
+RUN --mount=type=cache,target=/root/.cache/uv,sharing=locked \
     uv-with-retry pip install "pyasn1>=0.6.4" "transformers>=5.5.0"
 
-# Security: upgrade cryptography to clear GHSA-537c-gmf6-5ccf (HIGH, fixed in >=48.0.1).
-# cryptography 46.0.7 (from transitive deps) is flagged by Trivy scan (ignore-unfixed: true).
-# Force upgrade here after all plugin installs to ensure the patched version is present.
-RUN --mount=type=cache,target=/root/.cache/uv \
-    uv-with-retry pip install "cryptography>=48.0.1"
 
 # Verify torch is CPU-only (torch.version.cuda must be None, no nvidia packages)
 RUN /app/.venv/bin/python -c "\
@@ -658,12 +700,39 @@ RUN --mount=type=cache,target=/var/cache/apt,sharing=locked \
 # Install the coding-agent CLIs at the exact Phase 0-proven versions.
 # Exact `@version` pins (NOT ranges) — required for a reproducible runtime image
 # and enforced by scripts/check_dockerfile_pins.py.
+#
+# OMN-13886: the platform-native binary packages are arch-specific. Hardcoding
+# the -linux-x64 variants broke every linux/arm64 build (local Apple Silicon
+# dev lane): npm fails with "notsup Actual cpu: arm64", so the local runtime
+# image could never be rebuilt past OMN-13248 and went stale against the
+# runtime_config schema. Select the platform package via BuildKit TARGETARCH
+# (amd64 → -linux-x64, arm64 → -linux-arm64); versions stay exact pins.
+ARG TARGETARCH
 RUN set -eu; \
-    npm install -g \
-        @openai/codex@0.141.0 \
-        @openai/codex-linux-x64@npm:@openai/codex@0.141.0-linux-x64 \
-        @anthropic-ai/claude-code@2.1.181 \
-        @anthropic-ai/claude-code-linux-x64@2.1.181; \
+    case "${TARGETARCH}" in \
+      amd64) \
+        CODEX_PLATFORM_SPEC="@openai/codex-linux-x64@npm:@openai/codex@0.141.0-linux-x64"; \
+        CLAUDE_PLATFORM_SPEC="@anthropic-ai/claude-code-linux-x64@2.1.181" ;; \
+      arm64) \
+        CODEX_PLATFORM_SPEC="@openai/codex-linux-arm64@npm:@openai/codex@0.141.0-linux-arm64"; \
+        CLAUDE_PLATFORM_SPEC="@anthropic-ai/claude-code-linux-arm64@2.1.181" ;; \
+      *) echo "Unsupported TARGETARCH='${TARGETARCH}' for coding-agent CLIs (expected amd64 or arm64)" >&2; exit 64 ;; \
+    esac; \
+    npm config set fetch-retries 5; \
+    npm config set fetch-retry-mintimeout 20000; \
+    npm config set fetch-retry-maxtimeout 120000; \
+    npm config set fetch-timeout 300000; \
+    for attempt in 1 2 3; do \
+        npm install -g \
+            @openai/codex@0.141.0 \
+            "${CODEX_PLATFORM_SPEC}" \
+            @anthropic-ai/claude-code@2.1.181 \
+            "${CLAUDE_PLATFORM_SPEC}" && break; \
+        status="$?"; \
+        echo "npm install attempt ${attempt}/3 failed with exit ${status}" >&2; \
+        if [ "$attempt" = "3" ]; then exit "$status"; fi; \
+        sleep "$((attempt * 20))"; \
+    done; \
     npm cache clean --force
 
 # ============================================================================

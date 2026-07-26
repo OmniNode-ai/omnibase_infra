@@ -13,12 +13,11 @@ on:
     paths:
       - "docker/docker-compose*.yml"
       - "tests/ci/test_env_parity.py"
-  merge_group:
   workflow_dispatch:
 
 concurrency:
   group: ${{ github.workflow }}-${{ github.ref }}
-  cancel-in-progress: false
+  cancel-in-progress: true
 
 env:
   UV_VERSION: "0.6.14"

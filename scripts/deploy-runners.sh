@@ -37,6 +37,38 @@
 #
 # See also: docker/runners/Dockerfile, docker/docker-compose.runners.yml,
 # scripts/ci/build_runner_image.sh
+#
+# Trap for on-host operators (OMN-15142): this script is written to run from
+# an OPERATOR WORKSTATION that SSHes into the runner host (see run_ssh/
+# run_local below). It cannot be run directly ON the runner host targeting
+# itself via its own Tailscale MagicDNS hostname -- self-ssh fails "Host key
+# verification failed" (no known_hosts entry for the box's own hostname).
+# Run the rsync/build/compose steps directly on-host instead in that case.
+#
+# CONSOLIDATED REQUIRED ENV VARS for docker-compose.runners.yml's
+# omninode-deploy-runner service (OMN-15142 -- previously undocumented in one
+# place; compose interpolates the ENTIRE file before selecting services, so
+# ANY `docker compose -f docker-compose.runners.yml ...` invocation --
+# including one scoped to the shared omninode-runner-N fleet -- fails
+# closed if these are unset). This script does NOT set any of them; it only
+# handles RUNNER_TOKEN for the shared fleet. Anyone standing up
+# omninode-deploy-runner fresh (or running any compose command against this
+# file at all) must export all three first:
+#   - DEPLOY_RUNNER_OMNI_HOME       Private, runner-uid-owned OMNI_HOME clone
+#                                   tree (e.g. /data/omninode/runner_omni_home).
+#                                   Fail-fast `:?` in compose.
+#   - DEPLOY_RUNNER_TOKEN           Repo registration token for
+#                                   OmniNode-ai/omnibase_infra (mint via
+#                                   `gh api -X POST repos/OmniNode-ai/omnibase_infra/actions/runners/registration-token`,
+#                                   valid 1h). NOT `:?`-guarded in compose --
+#                                   an unset value silently becomes an empty
+#                                   RUNNER_TOKEN and fails later at container
+#                                   registration, not at `up -d` interpolation
+#                                   time like the other two.
+#   - DEPLOY_RUNNER_OPERATOR_ENV_FILE  Host path of the operator env file
+#                                   (e.g. /home/<operator>/.omnibase/.env).
+#                                   Fail-fast `:?` in compose.
+# See docs/runbooks/release-train-lab.md for the full recreate procedure.
 
 set -euo pipefail
 
@@ -80,7 +112,19 @@ COMPOSE_FILE="docker/docker-compose.runners.yml"
 POLL_MAX_SECONDS=300
 POLL_INTERVAL_SECONDS=15
 
-# Artifacts to sync to the host (relative to repo root)
+# Artifacts to sync to the host (relative to repo root).
+#
+# NOTE (OMN-15114 follow-up): scripts/ci/check_runner_host_artifact_freshness.py
+# is deliberately NOT in this list. That checker's whole job is to diff a
+# local (assumed-current) repo checkout against its rsynced copy on the
+# runner host over ssh -- it is installed as a LOCAL cron on the
+# operator/dev machine (see install_host_artifact_freshness_cron below,
+# "same model as step 10/11") and never executes on the runner host itself.
+# Adding it here made the checker report its own absence as drift on every
+# host that had not yet received it -- a self-referential false positive
+# fixed by removal, not by syncing it. scripts/ci/check_runner_fleet_image_drift.py
+# is different and correctly stays synced: it docker-execs into containers
+# running ON the host, so it must exist there.
 SYNC_PATHS=(
     "${RUNNER_FLEET_CONFIG}"
     ".github/actions/setup-python-uv/action.yml"
@@ -92,11 +136,18 @@ SYNC_PATHS=(
     "docker/runners/runner-job-started.sh"
     "docker/runners/runner-monitor.sh"
     "docker/runners/healthcheck.sh"
+    # OMN-15142: docker/runners/Dockerfile does `COPY omni-curl
+    # /usr/local/bin/omni-curl` -- both the built binary shim and its source
+    # script must be synced or a rebuild against a fresh/empty deployment dir
+    # fails with "/omni-curl": not found at the COPY layer.
+    "docker/runners/omni-curl"
+    "docker/runners/omni-curl.sh"
     "docker/docker-compose.runners.yml"
     "scripts/ci/build_runner_image.sh"
     "scripts/ci/ci_env_digest.py"
     "scripts/ci/ensure_ci_env.sh"
     "scripts/ci/runner_image_identity.py"
+    "scripts/ci/check_runner_fleet_image_drift.py"
 )
 
 # ---------------------------------------------------------------------------
@@ -218,6 +269,8 @@ rsync_artifacts() {
         "${REPO_ROOT}/docker/runners/runner-job-started.sh" \
         "${REPO_ROOT}/docker/runners/runner-monitor.sh" \
         "${REPO_ROOT}/docker/runners/healthcheck.sh" \
+        "${REPO_ROOT}/docker/runners/omni-curl" \
+        "${REPO_ROOT}/docker/runners/omni-curl.sh" \
         "${RUNNER_HOST}:${RUNNER_HOST_DIR}/docker/runners/"
 
     rsync -av --checksum \
@@ -273,19 +326,9 @@ deploy_runners() {
 # ---------------------------------------------------------------------------
 
 install_prune_cron() {
-    log "Installing docker prune cron on ${RUNNER_HOST} (idempotent tee, not append)..."
-
-    # Two weekly prune jobs (Sunday):
-    #   03:00 — Build cache prune, only when disk > 70%, retain 14 days (336h)
-    #   04:00 — Untagged image prune, retain 14 days (336h)
-    # Weekly (not twice-weekly) to avoid cache thrash from Docker builds.
-    local cron_content
-    cron_content='# Build cache prune (Sunday 03:00) — only when disk > 70%, retain 14 days
-0 3 * * 0 root USAGE=$(df --output=pcent /var/lib/docker | tail -1 | tr -d '"'"' %'"'"'); [ "${USAGE:-0}" -ge 70 ] && docker builder prune -f --filter '"'"'until=336h'"'"'
-# Untagged image prune (Sunday 04:00) — retain 14 days
-0 4 * * 0 root docker image prune -f --filter '"'"'until=336h'"'"''
-
-    run_ssh "echo '${cron_content}' | sudo tee /etc/cron.d/docker-prune > /dev/null && echo '[deploy-runners] Prune cron installed (idempotent).'"
+    log "Skipping legacy docker-prune cron install."
+    log "Host cleanup is owned by deploy/disk-gc/install-host-maintenance.sh."
+    log "Run that installer on ${RUNNER_HOST} to install onex-disk-gc and onex-worktree-reaper timers."
 }
 
 # ---------------------------------------------------------------------------
@@ -345,17 +388,22 @@ ENVEOF
         ssh "${RUNNER_HOST}" "chmod 600 ${RUNNER_HOST_DIR}/.monitor-env"
     fi
 
-    # Install cron idempotently: replace any existing runner-monitor line
+    # Install cron idempotently: replace any existing runner monitor/repair line
     local monitor_script="${RUNNER_HOST_DIR}/docker/runners/runner-monitor.sh"
     local monitor_env="${RUNNER_HOST_DIR}/.monitor-env"
-    local cron_line="*/3 * * * * set -a && source ${monitor_env} && set +a && ${monitor_script} >> /tmp/runner-monitor.log 2>&1"
+    # Cron uses /bin/sh by default on the runner host; bare `source` fails there
+    # before credentials load, silently disabling Slack alerts when no MTA exists.
+    # Force bash and redirect the whole monitor invocation so setup failures are
+    # visible in /tmp/runner-monitor.log.
+    local monitor_cron_line="*/3 * * * * /bin/bash -lc 'set -a; source ${monitor_env}; set +a; ${monitor_script}' >> /tmp/runner-monitor.log 2>&1 # runner-monitor-alert"
+    local repair_cron_line="*/10 * * * * /bin/bash -lc 'set -a; source ${monitor_env}; set +a; MONITOR_AUTO_BOUNCE=1 OFFLINE_IDLE_RECREATE_AGE_SECONDS=600 ${monitor_script}' >> /tmp/runner-repair.log 2>&1 # runner-repair-check"
 
     run_ssh "
         EXISTING=\$(crontab -l 2>/dev/null || true)
-        echo \"\${EXISTING}\" | grep -v 'runner-monitor' | { cat; echo '${cron_line}'; } | crontab -
+        echo \"\${EXISTING}\" | grep -Ev 'runner-monitor|runner-repair-check' | { cat; echo '${monitor_cron_line}'; echo '${repair_cron_line}'; } | crontab -
     "
 
-    log "Runner health monitor cron installed (every 3 minutes)."
+    log "Runner health monitor cron installed (alerts every 3 minutes, repair every 10 minutes)."
 }
 
 # ---------------------------------------------------------------------------
@@ -463,6 +511,7 @@ deploy_with_retry() {
         install_monitor_cron
         install_health_cron
         install_network_janitor_cron
+        install_host_artifact_freshness_cron
 
         if poll_runners_online; then
             log "Deploy succeeded on attempt ${attempt}."
@@ -606,6 +655,48 @@ install_network_janitor_cron() {
     echo "${existing}" | grep -v 'network-janitor-check' | { cat; echo "${cron_line}"; } | crontab -
 
     log "Network janitor cron installed locally (every 15 minutes, dry-run)."
+}
+
+# ---------------------------------------------------------------------------
+# Step 12: Install local runner host artifact-freshness cron (OMN-15114)
+# ---------------------------------------------------------------------------
+# Installs a LOCAL cron (on this dev machine, same model as step 10/11) that
+# runs scripts/ci/check_runner_host_artifact_freshness.py every 30 minutes.
+# That script diffs every SYNC_PATHS entry (sha256) between this repo
+# checkout and RUNNER_HOST's rsynced copy under RUNNER_HOST_DIR, and reports
+# any path that has drifted.
+#
+# Root cause this closes: the SYNC_PATHS rsync above only runs as part of
+# this script's full (disruptive, force-recreate-all) pipeline, which
+# operators routinely avoid for a small fix by rebuilding the image and
+# recreating containers directly on the host instead. That leaves the
+# host-staged checkout free to drift indefinitely with zero signal -- the
+# checked-in runner-image.lock.json sat at image_version 5 on the host for
+# 19 days after origin/dev moved to image_version 6 (OMN-15114) before
+# anything noticed, exactly the "merged fix silently never lands on the
+# artifact that matters" defect class OMN-15104 exists to close, one layer
+# further out (host checkout, not container).
+#
+# Marker-based idempotence via '# runner-host-artifact-freshness-check'.
+
+install_host_artifact_freshness_cron() {
+    log "Installing LOCAL runner host artifact-freshness cron..."
+
+    if "${DRY_RUN}"; then
+        log "[DRY RUN] Would install local runner-host-artifact-freshness-check cron (every 30 min)."
+        return 0
+    fi
+
+    local repo_root
+    repo_root="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+
+    local cron_line="*/30 * * * * cd ${repo_root} && uv run python scripts/ci/check_runner_host_artifact_freshness.py --runner-host ${RUNNER_HOST} --runner-host-dir ${RUNNER_HOST_DIR} >> /tmp/runner-host-artifact-freshness.log 2>&1 # runner-host-artifact-freshness-check"
+
+    local existing
+    existing=$(crontab -l 2>/dev/null || true)
+    echo "${existing}" | grep -v 'runner-host-artifact-freshness-check' | { cat; echo "${cron_line}"; } | crontab -
+
+    log "Runner host artifact-freshness cron installed locally (every 30 minutes)."
 }
 
 # ---------------------------------------------------------------------------

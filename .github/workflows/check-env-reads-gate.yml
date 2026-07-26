@@ -1,0 +1,81 @@
+# SPDX-FileCopyrightText: 2026 OmniNode.ai Inc.
+# SPDX-License-Identifier: MIT
+#
+# Check-Env-Reads Gate (OMN-14951 gap 2, 2026-07-23 hardening).
+#
+# CI mirror of the local `check-env-reads` pre-commit hook
+# (scripts/check-env-reads.sh, OMN-11069 + OMN-14951 gap 2). Prior to this
+# workflow, the hook only ran locally on `git commit` -- a PR whose commits
+# were made without local hooks running (or via any path that skips them)
+# reached CI with zero enforcement of either check the script performs:
+#
+#   1. New os.environ[...]/os.getenv(...) reads outside the approved
+#      overlay-resolution boundary modules (OMN-11069).
+#   2. Undeclared secret-ish-named reads (os.environ[...]/os.environ.get(...)/
+#      os.getenv(...)/get_secret(...)) in those same boundary modules -- a
+#      name not on the finite bootstrap allowlist and not self-declared as a
+#      required_secrets/bootstrap_secrets list element (OMN-14951 gap 2).
+#
+# Runs `scripts/check-env-reads.sh --base <base_sha>` against the PR/queue
+# diff, exactly mirroring the pre-commit hook's logic (same script, same
+# checks) rather than a second parallel scanner.
+#
+# Queue-safety: triggers on BOTH pull_request and merge_group, same pattern
+# as receipt-honesty.yml, so a later promotion to required status check
+# cannot wedge the merge queue on a PR that never triggered it.
+#
+# Required-status-check name (once added to branch protection -- not done by
+# this PR; flagged as a branch-protection follow-up): `check-env-reads-gate / check-env-reads-gate`
+
+name: check-env-reads-gate
+
+on:
+  pull_request:
+    branches: [main, dev]
+  merge_group:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: check-env-reads-gate-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  check-env-reads-gate:
+    timeout-minutes: 10
+    # OMNI_RUNNER_SELECTOR_V1 - trusted CI defaults to self-hosted omnibase-ci; public forks default to ubuntu-latest.
+    runs-on: >-
+      ${{
+        ((github.event_name == 'pull_request' && github.base_ref == 'dev') ||
+         (github.event_name == 'pull_request' &&
+          github.event.pull_request.head.repo.full_name != github.repository))
+        && fromJSON(vars.OMNI_PUBLIC_PR_RUNS_ON_JSON || '["ubuntu-latest"]')
+        || fromJSON(vars.OMNI_TRUSTED_CI_RUNS_ON_JSON || '["self-hosted","omnibase-ci"]')
+      }}
+    steps:
+      - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+        with:
+          fetch-depth: 0
+
+      - name: Resolve base/head SHAs
+        id: refs
+        run: |
+          set -euo pipefail
+          if [ "${{ github.event_name }}" = "pull_request" ]; then
+            base_sha="${{ github.event.pull_request.base.sha }}"
+            head_sha="${{ github.event.pull_request.head.sha }}"
+          else
+            # merge_group: compare against the base of the queued group
+            base_sha="${{ github.event.merge_group.base_sha }}"
+            head_sha="${{ github.event.merge_group.head_sha }}"
+          fi
+          # Ensure both endpoints are present locally (base may be unfetched
+          # under a shallow ref set even with fetch-depth: 0 on some events).
+          git fetch --no-tags --depth=1 origin "$base_sha" 2>/dev/null || true
+          git fetch --no-tags --depth=1 origin "$head_sha" 2>/dev/null || true
+          echo "base_sha=$base_sha" >> "$GITHUB_OUTPUT"
+
+      - name: Run check-env-reads.sh --base (SYNC with pre-commit hook 'check-env-reads')
+        run: |
+          bash scripts/check-env-reads.sh --base "${{ steps.refs.outputs.base_sha }}"

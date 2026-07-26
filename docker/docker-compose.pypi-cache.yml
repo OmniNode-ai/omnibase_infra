@@ -1,0 +1,64 @@
+# docker-compose.pypi-cache.yml
+# OMN-14027 C1 — PyPI pull-through cache (devpi-server) for the self-hosted runner fleet.
+# Parent: OMN-13932 | Sibling of the §3.19 Docker Hub pull-through mirror (images
+# vs wheels; same host, same non-disruptive rollback discipline).
+#
+# STATUS: SHOVEL-READY / INERT. This service is NOT part of the runner fleet
+# (docker/docker-compose.runners.yml) and is NOT started by any default deploy
+# path. It is stood up SEPARATELY, at rollout, ONLY after the OMN-14027 execution
+# soak-gate trips (the ticket is DESIGN-ONLY until then). This is a NEW service —
+# bringing it up does not mutate any prod daemon or the runner containers.
+#
+# Why it exists: 64 runners NAT through one home uplink and each cold-downloads the
+# same PyPI wheels under concurrent merge_group full-suite load, saturating egress
+# and tripping `uv sync` download timeouts (OMN-14017). devpi's built-in root/pypi
+# index is an on-demand pull-through mirror: the first fetch of a wheel hits PyPI
+# once, then all 64 runners pull from the LAN cache. This is the independent-
+# throughput lever (fewer bytes across the uplink), complementing the C3 stampede
+# cap in docker/docker-compose.runners.yml.
+#
+# Index URL exposed to runners once wired (see config/runner_fleet.yaml + the
+# INERT UV_DEFAULT_INDEX block in docker-compose.runners.yml):
+#   http://omninode-pc.tail75df5e.ts.net:3141/root/pypi/+simple/
+#
+# Rollout / rollback (do NOT run now): docs/runbooks/pypi-cache-egress-rollout.md
+#   Bring up:  docker compose -f docker/docker-compose.pypi-cache.yml up -d --build
+#   Tear down: docker compose -f docker/docker-compose.pypi-cache.yml down
+services:
+  omninode-pypi-cache:
+    build:
+      context: ./pypi-cache
+    image: omninode-pypi-cache:latest
+    container_name: omninode-pypi-cache
+    restart: unless-stopped
+    # LAN-exposed on the runner host so every fleet runner shares one cache. The
+    # runner containers reach it via the host Tailscale MagicDNS name + this port.
+    ports:
+      - "3141:3141"
+    environment:
+      DEVPI_SERVERDIR: /devpi/server
+      DEVPI_HOST: 0.0.0.0
+      DEVPI_PORT: "3141"
+    volumes:
+      # Named volume persists the wheel cache across container restarts so a
+      # recreate does not cold-refetch the warmed corpus.
+      - pypi-cache-data:/devpi
+    mem_limit: 2g
+    pids_limit: 1024
+    healthcheck:
+      # root/pypi/+simple/ returns 200 only once devpi is serving the pull-through
+      # index — proves the cache is actually queryable, not just that the process
+      # is up.
+      test: ["CMD-SHELL", "curl -fsS http://localhost:3141/root/pypi/+simple/ >/dev/null || exit 1"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 60s
+    logging:
+      driver: json-file
+      options:
+        max-size: "10m"
+        max-file: "3"
+volumes:
+  pypi-cache-data:
+    name: omninode-pypi-cache-data

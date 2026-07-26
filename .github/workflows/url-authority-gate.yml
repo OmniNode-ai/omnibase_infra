@@ -29,13 +29,38 @@ on:
     branches: [main, dev]
   merge_group:
 
+concurrency:
+  # OMN-13949: cancel superseded PR runs to free saturated runners. merge_group
+  # entries carry a unique github.ref, so queue entries never cross-cancel.
+  group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
+
 permissions:
   contents: read
 
+env:
+  UV_HTTP_TIMEOUT: "600"
+
 jobs:
   url-authority-gate:
+    timeout-minutes: 30
     name: URL Authority Gate
-    runs-on: ubuntu-latest
+    # OMNI_RUNNER_SELECTOR_V1 - trusted CI defaults to self-hosted omnibase-ci; public forks default to ubuntu-latest.
+    runs-on: >-
+      ${{
+        (github.event_name == 'pull_request' && github.base_ref == 'dev')
+        && fromJSON(vars.OMNI_PUBLIC_PR_RUNS_ON_JSON || '["ubuntu-latest"]')
+        || (
+        (github.event_name == 'pull_request' &&
+         github.event.pull_request.head.repo.full_name != github.repository)
+        )
+        && fromJSON(vars.OMNI_PUBLIC_PR_RUNS_ON_JSON || '["ubuntu-latest"]')
+        || fromJSON(vars.OMNI_TRUSTED_CI_RUNS_ON_JSON || '["self-hosted","omnibase-ci"]')
+      }}
+    env:
+      # Avoid reusing a corrupted self-hosted uv wheel cache; this gate has hit
+      # repeat grpcio hash mismatches from runner-local cache state.
+      UV_NO_CACHE: "1"
     steps:
       - name: Checkout
         uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
@@ -46,17 +71,42 @@ jobs:
         uses: astral-sh/setup-uv@v7
 
       - name: Install dependencies
-        run: uv sync --all-extras
+        env:
+          UV_HTTP_TIMEOUT: "900"
+          UV_CONCURRENT_DOWNLOADS: "1"
+          UV_CONCURRENT_BUILDS: "1"
+          UV_CONCURRENT_INSTALLS: "1"
+          UV_TORCH_BACKEND: "cpu"
+        run: |
+          set -euo pipefail
+          for attempt in 1 2 3; do
+            if uv sync --all-extras; then
+              exit 0
+            fi
+            if [ "$attempt" -eq 3 ]; then
+              echo "::error::uv sync --all-extras failed after ${attempt} attempts"
+              exit 1
+            fi
+            echo "::warning::uv sync --all-extras failed on attempt ${attempt}; retrying"
+            sleep $((attempt * 15))
+          done
 
       - name: Run url-authority gate (full-repo, against frozen baseline)
         run: |
-          uv run --with "omnibase-core @ git+https://github.com/OmniNode-ai/omnibase_core.git@8a53a063bd28f643d08b4cbbc6dd5c7c9f6435df" \
-            python -m omnibase_core.validation.validator_url_authority \
-            --all --repo omnibase_infra --repo-root .
+          for attempt in 1 2 3; do
+            uv run --with "omnibase-core @ git+https://github.com/OmniNode-ai/omnibase_core.git@8a53a063bd28f643d08b4cbbc6dd5c7c9f6435df" \
+              python -m omnibase_core.validation.validator_url_authority \
+              --all --repo omnibase_infra --repo-root . && break
+            status=$?
+            if [ "$attempt" = "3" ]; then
+              exit "$status"
+            fi
+            sleep "$((attempt * 15))"
+          done
 
       - name: Assert baseline did not grow (anti-gaming)
         run: |
-          uv run --with "omnibase-core @ git+https://github.com/OmniNode-ai/omnibase_core.git@8a53a063bd28f643d08b4cbbc6dd5c7c9f6435df" python - <<'PY'
+          cat > /tmp/url_authority_baseline_check.py <<'PY'
           import json
           import subprocess
           import sys
@@ -105,3 +155,12 @@ jobs:
               f"omnibase_infra subset {len(head_repo)} (<= prior {len(prior_repo)})."
           )
           PY
+          for attempt in 1 2 3; do
+            uv run --with "omnibase-core @ git+https://github.com/OmniNode-ai/omnibase_core.git@8a53a063bd28f643d08b4cbbc6dd5c7c9f6435df" \
+              python /tmp/url_authority_baseline_check.py && break
+            status=$?
+            if [ "$attempt" = "3" ]; then
+              exit "$status"
+            fi
+            sleep "$((attempt * 15))"
+          done

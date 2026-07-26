@@ -25,6 +25,7 @@ from __future__ import annotations
 
 import json
 import os
+import shutil
 import subprocess
 import time
 import uuid
@@ -68,6 +69,9 @@ def _publish_kafka_event(topic: str, event: dict[str, object]) -> None:
 
 def _get_consumer_group_for_topic(topic: str) -> str | None:
     """Find the consumer group subscribed to a given topic via rpk group list."""
+    if shutil.which("docker") is None:
+        pytest.skip("docker is required to inspect Redpanda consumer groups")
+
     result = subprocess.run(
         ["docker", "exec", "omnibase-infra-redpanda", "rpk", "group", "list"],
         capture_output=True,
@@ -91,6 +95,9 @@ def _get_consumer_group_for_topic(topic: str) -> str | None:
 
 def _get_consumer_lag(group: str, topic: str) -> int | None:
     """Return total LAG for a consumer group on a specific topic, or None on error."""
+    if shutil.which("docker") is None:
+        pytest.skip("docker is required to inspect Redpanda consumer lag")
+
     result = subprocess.run(
         [
             "docker",
@@ -123,6 +130,9 @@ def _get_consumer_lag(group: str, topic: str) -> int | None:
 
 def _query_postgres(query: str) -> str:
     """Run a psql query and return the output."""
+    if shutil.which("psql") is None:
+        pytest.skip("psql is required to query registration projection tables")
+
     password = os.environ.get("POSTGRES_PASSWORD", "")
     env = {**os.environ, "PGPASSWORD": password} if password else dict(os.environ)
     result = subprocess.run(
@@ -236,6 +246,9 @@ class TestDispatchRoundtrip:
         Verifies that the runtime has active consumer groups in Redpanda,
         proving it is connected to the event bus and consuming events.
         """
+        if shutil.which("docker") is None:
+            pytest.skip("docker is required to inspect Redpanda consumer groups")
+
         result = subprocess.run(
             ["docker", "exec", "omnibase-infra-redpanda", "rpk", "group", "list"],
             capture_output=True,

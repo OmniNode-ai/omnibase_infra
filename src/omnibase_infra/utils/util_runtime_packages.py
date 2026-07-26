@@ -12,9 +12,11 @@ from __future__ import annotations
 import os
 
 ENV_ACTIVE_RUNTIME_PACKAGES = "ONEX_ACTIVE_RUNTIME_PACKAGES"
+ENV_GATEWAY_CLOUD_MIRRORING_ENABLED = "ONEX_GATEWAY_CLOUD_MIRRORING_ENABLED"
 _CONDITIONALLY_OWNED_TOPIC_PRODUCERS = frozenset(
     {"omniclaude", "omniintelligence", "omnimemory"}
 )
+_TRUTHY_VALUES = frozenset({"1", "true", "yes", "on"})
 
 
 def normalize_runtime_package_name(name: str) -> str:
@@ -73,9 +75,37 @@ def is_runtime_topic_active(
     return is_runtime_package_active(producer, active_packages)
 
 
+def is_gateway_cloud_mirroring_enabled(raw_value: str | None = None) -> bool:
+    """Return True when cloud gateway bus mirroring is explicitly enabled.
+
+    The bus forwarder node (``node_bus_forwarder_effect``) mirrors
+    contract-declared tenant topics between the local runtime bus and a hosted
+    cloud Kafka edge. That cloud leg only exists on lanes provisioned with cloud
+    broker credentials (``gateway.cloud.kafka.*``). On single-lane deployments —
+    e.g. the ``.201`` compose lanes, which have no hosted cloud edge — there is
+    nothing to forward to, so the forwarder must stay dormant. Wiring it there
+    subscribes its ``ModelGatewayEnvelope`` handlers to bare domain topics such
+    as ``onex.cmd.omnibase-infra.delegation-inference-request.v1`` whose real
+    payloads are domain models (e.g. ``ModelInferenceIntent``), raising a
+    ``ValidationError`` on every delegation message (OMN-13809).
+
+    Fail-safe default is OFF: absent an explicit opt-in, mirroring is disabled
+    and the forwarder is not wired. Flip
+    ``ONEX_GATEWAY_CLOUD_MIRRORING_ENABLED`` to a truthy value on lanes where a
+    cloud gateway leg is actually provisioned.
+    """
+    if raw_value is None:
+        raw_value = os.environ.get(ENV_GATEWAY_CLOUD_MIRRORING_ENABLED)
+    if raw_value is None:
+        return False
+    return raw_value.strip().lower() in _TRUTHY_VALUES
+
+
 __all__ = [
     "ENV_ACTIVE_RUNTIME_PACKAGES",
+    "ENV_GATEWAY_CLOUD_MIRRORING_ENABLED",
     "get_active_runtime_packages",
+    "is_gateway_cloud_mirroring_enabled",
     "is_runtime_package_active",
     "is_runtime_topic_active",
     "normalize_runtime_package_name",

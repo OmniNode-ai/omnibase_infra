@@ -16,7 +16,7 @@ from unittest.mock import AsyncMock, MagicMock, patch
 from uuid import UUID, uuid4
 
 import pytest
-from aiokafka.errors import KafkaError
+from aiokafka.errors import KafkaError, UnknownTopicOrPartitionError
 from pydantic import BaseModel
 
 from omnibase_infra.errors import (
@@ -2745,6 +2745,199 @@ class TestKafkaEventBusDLQRouting:
 
             await event_bus.close()
 
+    @pytest.mark.asyncio
+    async def test_raw_dlq_returns_true_on_confirmed_persist(
+        self, mock_producer: AsyncMock, dlq_config: ModelKafkaEventBusConfig
+    ) -> None:
+        """OMN-14936: ``_publish_raw_to_dlq`` returns True when the DLQ send acks.
+
+        Callers upstream (``EventBusSubcontractWiring._publish_to_dlq``) gate
+        an offset commit on this return value -- it must be a real bool, not
+        an implicit ``None`` that could be misread as failure or success.
+        """
+        with patch(
+            "omnibase_infra.event_bus.event_bus_kafka.AIOKafkaProducer",
+            return_value=mock_producer,
+        ):
+            event_bus = EventBusKafka(config=dlq_config)
+            await event_bus.start()
+
+            mock_raw_msg = MagicMock()
+            mock_raw_msg.key = b"test-key"
+            mock_raw_msg.value = b"test-value"
+            mock_raw_msg.offset = 200
+            mock_raw_msg.partition = 0
+
+            from uuid import uuid4
+
+            correlation_id = uuid4()
+            error = ValueError("no dispatcher for this message type")
+
+            result = await event_bus._publish_raw_to_dlq(
+                original_topic="source-topic",
+                raw_msg=mock_raw_msg,
+                error=error,
+                correlation_id=correlation_id,
+                failure_type="no_dispatcher",
+                consumer_group="test.test-service.dlq-test.consume.v1",
+            )
+
+            assert result is True
+
+            await event_bus.close()
+
+    @pytest.mark.asyncio
+    async def test_raw_dlq_returns_false_when_dlq_topic_does_not_exist(
+        self, mock_producer: AsyncMock, dlq_config: ModelKafkaEventBusConfig
+    ) -> None:
+        """OMN-14936: reproduce the live-proven defect at the mixin boundary.
+
+        ``service_kernel``'s no_dispatcher path logged a DLQ topic name that
+        was never created on the broker (``UnknownTopicOrPartitionError`` on
+        ``send_and_wait``), yet the caller committed the offset anyway --  a
+        silent, unrecoverable drop. ``_publish_raw_to_dlq`` must return
+        ``False`` in this scenario so the caller can withhold the commit.
+        """
+
+        async def raise_unknown_topic(*args: object, **kwargs: object) -> MagicMock:
+            raise UnknownTopicOrPartitionError(
+                "DLQ topic 'onex.dlq.omnibase-infra."
+                "delegation-inference-request.v1' does not exist"
+            )
+
+        mock_producer.send_and_wait = AsyncMock(side_effect=raise_unknown_topic)
+
+        with patch(
+            "omnibase_infra.event_bus.event_bus_kafka.AIOKafkaProducer",
+            return_value=mock_producer,
+        ):
+            event_bus = EventBusKafka(config=dlq_config)
+            await event_bus.start()
+
+            mock_raw_msg = MagicMock()
+            mock_raw_msg.key = b"test-key"
+            mock_raw_msg.value = b"test-value"
+            mock_raw_msg.offset = 201
+            mock_raw_msg.partition = 0
+
+            from uuid import uuid4
+
+            correlation_id = uuid4()
+            error = ValueError("no dispatcher for this message type")
+
+            result = await event_bus._publish_raw_to_dlq(
+                original_topic="source-topic",
+                raw_msg=mock_raw_msg,
+                error=error,
+                correlation_id=correlation_id,
+                failure_type="no_dispatcher",
+                consumer_group="test.test-service.dlq-test.consume.v1",
+            )
+
+            assert result is False
+
+            final_metrics = event_bus.dlq_metrics
+            assert final_metrics.failed_publishes == 1, (
+                "DLQ failed_publishes should be incremented when the send fails"
+            )
+            assert final_metrics.successful_publishes == 0
+
+            await event_bus.close()
+
+    @pytest.mark.asyncio
+    async def test_raw_dlq_falls_back_to_generic_category_topic_when_named_topic_missing(
+        self,
+        mock_producer: AsyncMock,
+    ) -> None:
+        """OMN-14936/OMN-15031: a never-provisioned per-message-type DLQ topic
+        must not eat the record.
+
+        ``MessageDispatchEngine`` derives a per-event_type DLQ topic name
+        (``onex.dlq.omnibase-infra.delegation-inference-request.v1`` for a
+        flat, un-namespaced ``event_type``) that is never created on the
+        broker and never auto-created. ``_publish_raw_to_dlq`` must fall
+        back to the realm-agnostic, already-provisioned category topic
+        (derived from ``original_topic`` -- ``onex.dlq.omnibase-infra.commands.v1``
+        for a ``onex.cmd.*`` original topic) instead of returning ``False``
+        and letting the caller withhold the commit forever.
+
+        Uses a config with NO explicit ``dead_letter_topic`` so the
+        caller-supplied ``dlq_topic`` (the never-provisioned name) actually
+        reaches the resolution path instead of being short-circuited by
+        explicit bus configuration.
+        """
+        never_provisioned_topic = (
+            "onex.dlq.omnibase-infra.delegation-inference-request.v1"
+        )
+        fallback_category_topic = "onex.dlq.omnibase-infra.commands.v1"
+
+        mock_record_metadata = MagicMock()
+        mock_record_metadata.partition = 0
+        mock_record_metadata.offset = 7
+
+        async def send_and_wait_side_effect(
+            topic: str, *args: object, **kwargs: object
+        ) -> MagicMock:
+            if topic == never_provisioned_topic:
+                raise UnknownTopicOrPartitionError(
+                    f"DLQ topic '{never_provisioned_topic}' does not exist"
+                )
+            if topic == fallback_category_topic:
+                return mock_record_metadata
+            raise AssertionError(f"unexpected DLQ send target: {topic}")
+
+        mock_producer.send_and_wait = AsyncMock(side_effect=send_and_wait_side_effect)
+
+        no_explicit_dlq_config = ModelKafkaEventBusConfig(
+            bootstrap_servers="localhost:9092",
+            environment="dev",
+        )
+
+        with patch(
+            "omnibase_infra.event_bus.event_bus_kafka.AIOKafkaProducer",
+            return_value=mock_producer,
+        ):
+            event_bus = EventBusKafka(config=no_explicit_dlq_config)
+            await event_bus.start()
+
+            mock_raw_msg = MagicMock()
+            mock_raw_msg.key = b"test-key"
+            mock_raw_msg.value = b"test-value"
+            mock_raw_msg.offset = 4
+            mock_raw_msg.partition = 0
+
+            correlation_id = uuid4()
+            error = ValueError("no dispatcher for this message type")
+
+            result = await event_bus._publish_raw_to_dlq(
+                original_topic="onex.cmd.omnibase-infra.delegation-inference-request.v1",
+                raw_msg=mock_raw_msg,
+                error=error,
+                correlation_id=correlation_id,
+                failure_type="no_dispatcher",
+                consumer_group="test.test-service.dlq-test.consume.v1",
+                dlq_topic=never_provisioned_topic,
+            )
+
+            assert result is True, (
+                "a never-provisioned per-event_type DLQ topic must not "
+                "swallow the record -- the mixin must fall back to the "
+                "realm-agnostic category topic and still persist it"
+            )
+
+            send_targets = [
+                call.args[0] for call in mock_producer.send_and_wait.await_args_list
+            ]
+            assert send_targets == [never_provisioned_topic, fallback_category_topic], (
+                "expected exactly one failed attempt at the named topic "
+                "followed by one successful attempt at the category fallback"
+            )
+
+            final_metrics = event_bus.dlq_metrics
+            assert final_metrics.successful_publishes == 1
+
+            await event_bus.close()
+
 
 class TestKafkaEventBusTopicValidation:
     """Test suite for topic name validation.
@@ -3277,3 +3470,99 @@ class TestKafkaAuthConfig:
         assert token_provider._client_secret == "my-client-secret"
 
         await bus.close()
+
+    @pytest.mark.unit
+    def test_kafka_config_accepts_aws_msk_iam_without_oauth_fields(self) -> None:
+        """AWS_MSK_IAM uses the AWS credential chain, not OAuth client fields."""
+        config = ModelKafkaEventBusConfig(
+            bootstrap_servers=TEST_BOOTSTRAP_SERVERS,
+            environment=TEST_ENVIRONMENT,
+            security_protocol="SASL_SSL",
+            sasl_mechanism="AWS_MSK_IAM",
+            msk_region="us-east-1",
+        )
+
+        assert config.sasl_mechanism == "AWS_MSK_IAM"
+        assert config.msk_region == "us-east-1"
+
+    @pytest.mark.unit
+    def test_kafka_config_aws_msk_iam_requires_sasl_ssl(self) -> None:
+        """AWS_MSK_IAM must not be used without TLS."""
+        with pytest.raises(ProtocolConfigurationError) as exc_info:
+            ModelKafkaEventBusConfig(
+                bootstrap_servers=TEST_BOOTSTRAP_SERVERS,
+                environment=TEST_ENVIRONMENT,
+                security_protocol="SASL_PLAINTEXT",
+                sasl_mechanism="AWS_MSK_IAM",
+            )
+
+        assert "AWS_MSK_IAM" in str(exc_info.value)
+        assert "SASL_SSL" in str(exc_info.value)
+
+    @pytest.mark.unit
+    def test_kafka_config_aws_msk_iam_rejects_blank_region(self) -> None:
+        """AWS_MSK_IAM must fail fast when KAFKA_MSK_REGION is blank."""
+        with pytest.raises(ProtocolConfigurationError) as exc_info:
+            ModelKafkaEventBusConfig(
+                bootstrap_servers=TEST_BOOTSTRAP_SERVERS,
+                environment=TEST_ENVIRONMENT,
+                security_protocol="SASL_SSL",
+                sasl_mechanism="AWS_MSK_IAM",
+                msk_region="  ",
+            )
+
+        assert "msk_region" in str(exc_info.value)
+
+    @pytest.mark.unit
+    async def test_event_bus_kafka_passes_aws_msk_iam_token_provider(self) -> None:
+        """AWS_MSK_IAM is exposed to aiokafka as OAUTHBEARER with an MSK token provider."""
+        config = ModelKafkaEventBusConfig(
+            bootstrap_servers=TEST_BOOTSTRAP_SERVERS,
+            environment=TEST_ENVIRONMENT,
+            security_protocol="SASL_SSL",
+            sasl_mechanism="AWS_MSK_IAM",
+            msk_region="us-east-1",
+        )
+
+        captured_kwargs: dict[str, object] = {}
+
+        mock_producer = AsyncMock()
+        mock_producer.start = AsyncMock()
+        mock_producer.stop = AsyncMock()
+        mock_producer.send = AsyncMock()
+        mock_producer._closed = False
+
+        def capture_producer(**kwargs: object) -> AsyncMock:
+            captured_kwargs.update(kwargs)
+            return mock_producer
+
+        with patch(
+            "omnibase_infra.event_bus.event_bus_kafka.AIOKafkaProducer",
+            side_effect=capture_producer,
+        ):
+            bus = EventBusKafka(config=config)
+            await bus.start()
+
+        assert captured_kwargs.get("security_protocol") == "SASL_SSL"
+        assert captured_kwargs.get("sasl_mechanism") == "OAUTHBEARER"
+
+        from omnibase_infra.event_bus.event_bus_kafka import MSKTokenProvider
+
+        token_provider = captured_kwargs.get("sasl_oauth_token_provider")
+        assert isinstance(token_provider, MSKTokenProvider)
+        assert token_provider._region == "us-east-1"
+
+        await bus.close()
+
+    @pytest.mark.unit
+    async def test_msk_token_provider_returns_aiokafka_token_string(self) -> None:
+        """aiokafka AbstractTokenProvider.token must return only the token string."""
+        from omnibase_infra.event_bus.event_bus_kafka import MSKTokenProvider
+
+        with patch(
+            "aws_msk_iam_sasl_signer.MSKAuthTokenProvider.generate_auth_token",
+            return_value=("signed-token", 1920000000000),
+        ):
+            token = await MSKTokenProvider(region="us-east-1").token()
+
+        assert token == "signed-token"

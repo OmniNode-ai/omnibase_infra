@@ -84,6 +84,25 @@ _KNOWN_PRODUCERS: frozenset[str] = frozenset(
         "github",
         "platform",
         "ui",
+        # onex_change_control (OMN-15006): the repo's own canonical topic
+        # registry (onex_change_control/src/onex_change_control/kafka/topics.py
+        # GovernanceTopic, OMN-8635) emits governance events under the full
+        # repo-name producer "onex-change-control" (3 topics) AND the
+        # abbreviated "occ" (NIGHTLY_PROMOTION only) — both are real,
+        # already-live production topic strings, not typos. Added when
+        # node_ledger_projection_compute first subscribed to OCC governance
+        # events; previously omnibase_infra never referenced an OCC topic.
+        "onex-change-control",
+        "occ",
+        # steel_onslaught (OMN-15168, epic OMN-15154): private personal repo,
+        # not an OmniNode-ai org repo — infra cannot import its code (infra ↛
+        # steel), but its forwarded terminal-match topic is a real, live
+        # production topic string declared as STEEL_MATCH_TERMINAL_TOPIC in
+        # steel_onslaught/src/steel_onslaught/bus/kafka_forwarder.py
+        # (OMN-15167, merged f378cd48). Added when
+        # node_ledger_projection_compute first subscribed to a steel_onslaught
+        # topic; previously omnibase_infra never referenced one.
+        "steel-onslaught",
     }
 )
 _KNOWN_SNAPSHOT_PRODUCERS: frozenset[str] = frozenset({"platform", "projection"})

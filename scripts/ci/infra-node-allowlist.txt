@@ -106,6 +106,8 @@ src/omnibase_infra/nodes/node_ledger_projection_compute/handlers/handler_ledger_
 src/omnibase_infra/nodes/node_ledger_write_effect/handlers/__init__.py  # approved existing infra handler path; new business-domain handlers belong in omnimarket.
 src/omnibase_infra/nodes/node_ledger_write_effect/handlers/handler_ledger_append.py  # approved existing infra handler path; new business-domain handlers belong in omnimarket.
 src/omnibase_infra/nodes/node_ledger_write_effect/handlers/handler_ledger_query.py  # approved existing infra handler path; new business-domain handlers belong in omnimarket.
+src/omnibase_infra/nodes/node_validation_ledger_write_effect/handlers/__init__.py  # OMN-14524: validation-ledger persistence is platform/audit infra (same class as node_ledger_write_effect above), not a business-domain workflow.
+src/omnibase_infra/nodes/node_validation_ledger_write_effect/handlers/handler_validation_ledger_append.py  # OMN-14524: validation-ledger persistence is platform/audit infra (same class as node_ledger_write_effect above), not a business-domain workflow.
 src/omnibase_infra/nodes/node_llm_completion_effect/handlers/__init__.py  # approved existing infra handler path; new business-domain handlers belong in omnimarket.
 src/omnibase_infra/nodes/node_llm_completion_effect/handlers/handler_llm_completion.py  # approved existing infra handler path; new business-domain handlers belong in omnimarket.
 src/omnibase_infra/nodes/node_llm_embedding_effect/handlers/__init__.py  # approved existing infra handler path; new business-domain handlers belong in omnimarket.
@@ -166,6 +168,8 @@ src/omnibase_infra/nodes/node_registry_effect/handlers/__init__.py  # approved e
 src/omnibase_infra/nodes/node_registry_effect/handlers/handler_partial_retry.py  # approved existing infra handler path; new business-domain handlers belong in omnimarket.
 src/omnibase_infra/nodes/node_registry_effect/handlers/handler_postgres_deactivate.py  # approved existing infra handler path; new business-domain handlers belong in omnimarket.
 src/omnibase_infra/nodes/node_registry_effect/handlers/handler_postgres_upsert.py  # approved existing infra handler path; new business-domain handlers belong in omnimarket.
+src/omnibase_infra/nodes/node_release_identity_compute/handlers/__init__.py  # infra-owned release-identity fresh-deploy fitness gate (refactored from scripts/check_release_identity.py, OMN-14471); infra's own CI gate cannot import an omnimarket node.
+src/omnibase_infra/nodes/node_release_identity_compute/handlers/handler_release_identity.py  # infra-owned release-identity fresh-deploy fitness gate (refactored from scripts/check_release_identity.py, OMN-14471); infra's own CI gate cannot import an omnimarket node.
 src/omnibase_infra/nodes/node_remote_agent_invoke_effect/handlers/__init__.py  # approved existing infra handler path; new business-domain handlers belong in omnimarket.
 src/omnibase_infra/nodes/node_remote_agent_invoke_effect/handlers/handler_a2a_task.py  # approved existing infra handler path; new business-domain handlers belong in omnimarket.
 src/omnibase_infra/nodes/node_reward_binder_effect/handlers/__init__.py  # approved existing infra handler path; new business-domain handlers belong in omnimarket.
@@ -192,6 +196,14 @@ src/omnibase_infra/nodes/node_rsd_orchestrator/handlers/handler_rsd_initiate.py 
 src/omnibase_infra/nodes/node_rsd_orchestrator/handlers/handler_rsd_score_complete.py  # approved existing infra handler path; new business-domain handlers belong in omnimarket.
 src/omnibase_infra/nodes/node_rsd_score_compute/handlers/__init__.py  # approved existing infra handler path; new business-domain handlers belong in omnimarket.
 src/omnibase_infra/nodes/node_rsd_score_compute/handlers/handler_rsd_score_calculate.py  # approved existing infra handler path; new business-domain handlers belong in omnimarket.
+src/omnibase_infra/nodes/node_runner_fleet_health_compute/handlers/__init__.py  # OMN-13942: runner fleet is an infra domain object (CI runner maintenance), not a market business workflow.
+src/omnibase_infra/nodes/node_runner_fleet_health_compute/handlers/handler_runner_fleet_health_evaluate.py  # OMN-13942: runner fleet is an infra domain object (CI runner maintenance), not a market business workflow.
+src/omnibase_infra/nodes/node_runner_fleet_maintain_orchestrator/handlers/__init__.py  # OMN-13942: runner fleet is an infra domain object (CI runner maintenance), not a market business workflow.
+src/omnibase_infra/nodes/node_runner_fleet_maintain_orchestrator/handlers/handler_runner_fleet_health_verdict_complete.py  # OMN-13942: runner fleet is an infra domain object (CI runner maintenance), not a market business workflow.
+src/omnibase_infra/nodes/node_runner_fleet_maintain_orchestrator/handlers/handler_runner_fleet_maintain_start.py  # OMN-13942: runner fleet is an infra domain object (CI runner maintenance), not a market business workflow.
+src/omnibase_infra/nodes/node_runner_fleet_maintain_orchestrator/handlers/handler_runner_fleet_snapshot_complete.py  # OMN-13942: runner fleet is an infra domain object (CI runner maintenance), not a market business workflow.
+src/omnibase_infra/nodes/node_runner_health_snapshot_effect/handlers/__init__.py  # OMN-13942: runner fleet is an infra domain object (CI runner maintenance), not a market business workflow.
+src/omnibase_infra/nodes/node_runner_health_snapshot_effect/handlers/handler_runner_fleet_snapshot.py  # OMN-13942: runner fleet is an infra domain object (CI runner maintenance), not a market business workflow.
 src/omnibase_infra/nodes/node_runner_usage_effect/handlers/__init__.py  # approved existing infra handler path; new business-domain handlers belong in omnimarket.
 src/omnibase_infra/nodes/node_runner_usage_effect/handlers/handler_runner_usage_savings.py  # approved existing infra handler path; new business-domain handlers belong in omnimarket.
 src/omnibase_infra/nodes/node_runtime_error_triage_effect/handlers/__init__.py  # approved existing infra handler path; new business-domain handlers belong in omnimarket.
@@ -250,3 +262,7 @@ src/omnibase_infra/nodes/node_topic_migration_executor_effect/handlers/__init__.
 src/omnibase_infra/nodes/node_topic_migration_executor_effect/handlers/handler_topic_migration_executor.py  # infra-only topic-migration executor (Kafka topic provisioning + drain-proof gating), not business-domain.
 src/omnibase_infra/nodes/node_topic_migration_projection/handlers/__init__.py  # infra-only topic-migration FSM projection handler, not business-domain.
 src/omnibase_infra/nodes/node_topic_migration_projection/handlers/handler_topic_migration_projection.py  # infra-only topic-migration FSM projection handler, not business-domain.
+src/omnibase_infra/nodes/node_pr_state_projection_compute/handlers/__init__.py  # OMN-14375: GitHub-state projection is platform/WS-L infra (same class as node_build_loop_projection_compute/node_ledger_projection_compute above), not a business-domain workflow.
+src/omnibase_infra/nodes/node_pr_state_projection_compute/handlers/handler_pr_state_projection.py  # OMN-14375: GitHub-state projection is platform/WS-L infra (same class as node_build_loop_projection_compute/node_ledger_projection_compute above), not a business-domain workflow.
+src/omnibase_infra/nodes/node_pr_state_write_effect/handlers/__init__.py  # OMN-14375: GitHub-state projection is platform/WS-L infra (same class as node_build_loop_write_effect/node_ledger_write_effect above), not a business-domain workflow.
+src/omnibase_infra/nodes/node_pr_state_write_effect/handlers/handler_pr_state_upsert.py  # OMN-14375: GitHub-state projection is platform/WS-L infra (same class as node_build_loop_write_effect/node_ledger_write_effect above), not a business-domain workflow.

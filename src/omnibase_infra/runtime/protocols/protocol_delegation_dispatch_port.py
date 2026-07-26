@@ -25,6 +25,7 @@ class ProtocolDelegationDispatchPort(Protocol):
         wait: bool,
         quality_contract_mode: str,
         acceptance_criteria: tuple[str, ...],
+        tenant_id: str | None = None,
     ) -> dict[str, object]: ...
 
 
