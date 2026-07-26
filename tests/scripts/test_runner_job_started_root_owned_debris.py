@@ -33,9 +33,9 @@ internal functions) against a scratch HOME to prove:
    cannot fabricate genuine root ownership) makes the plain `rm -rf` fail,
    and the hook responds by (a) logging the failure loudly with the
    offending path, (b) attempting the scoped sudo self-heal fallback, and
-   (c) exiting non-zero with an explicit manual-remediation instruction when
-   that fallback is also unavailable -- never silently succeeding and never
-   hanging.
+   (c) either healing successfully when the CI sudoers rule exists or exiting
+   non-zero with an explicit manual-remediation instruction when that
+   fallback is unavailable -- never silently succeeding and never hanging.
 """
 
 from __future__ import annotations
@@ -121,14 +121,16 @@ def test_happy_path_resets_workspace_owned_by_invoking_user(tmp_path: Path) -> N
     assert not (workspace / "stale_from_prior_job.txt").exists()
 
 
-def test_undeletable_file_fails_loud_with_manual_remediation(tmp_path: Path) -> None:
+def test_undeletable_file_fails_loud_then_self_heals_or_manuals(
+    tmp_path: Path,
+) -> None:
     """Simulate the OMN-15134 condition: the hook's own user cannot delete a
     file under the workspace (here: via a read-only parent directory, the
     closest same-uid analog to genuine root-owned debris a non-root test
     process can fabricate). The hook must NOT silently succeed or hang -- it
     must fail loud, name the offending path, attempt the sudo fallback, and
     exit non-zero with a manual-remediation instruction when that fallback
-    is unavailable (no sudoers rule exists in the test environment)."""
+    is unavailable."""
     runner_home = tmp_path / "actions-runner"
     workspace = runner_home / "_work" / "omnibase_infra" / "omnibase_infra"
     locked_dir = workspace / "locked"
@@ -143,20 +145,24 @@ def test_undeletable_file_fails_loud_with_manual_remediation(tmp_path: Path) -> 
     try:
         result = _run_hook(runner_home, workspace)
 
-        assert result.returncode != 0, (
-            "hook must fail loud on undeletable debris, not silently succeed: "
-            f"stdout={result.stdout!r} stderr={result.stderr!r}"
-        )
         assert "ERROR: rm -rf failed" in result.stderr
         assert "Attempting scoped root cleanup fallback" in result.stderr
-        assert "Refusing to run the job against an unreset workspace" in result.stderr
-        assert (
-            "Manual remediation: docker exec -u root omninode-deploy-runner"
-            in result.stderr
-        )
+        if result.returncode == 0:
+            assert "Root-owned debris removed via scoped sudo fallback" in result.stderr
+            assert workspace.is_dir()
+            assert not (workspace / "locked" / "debris.txt").exists()
+        else:
+            assert (
+                "Refusing to run the job against an unreset workspace" in result.stderr
+            )
+            assert (
+                "Manual remediation: docker exec -u root omninode-deploy-runner"
+                in result.stderr
+            )
     finally:
         # Restore permissions so pytest's own tmp_path cleanup can remove it.
-        locked_dir.chmod(0o755)
+        if locked_dir.exists():
+            locked_dir.chmod(0o755)
 
 
 def test_refuses_workspace_outside_work_root(tmp_path: Path) -> None:

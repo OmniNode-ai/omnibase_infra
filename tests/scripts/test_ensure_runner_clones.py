@@ -86,6 +86,7 @@ def _make_bare_upstream(upstream_root: Path, repo: str) -> None:
     )
     _git("remote", "add", "origin", str(bare), cwd=work)
     _git("push", "-q", "origin", "HEAD:refs/heads/main", cwd=work)
+    _git("symbolic-ref", "HEAD", "refs/heads/main", cwd=bare)
 
 
 def _run_ensure_clones(
