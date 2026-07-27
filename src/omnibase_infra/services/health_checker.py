@@ -83,6 +83,11 @@ from omnibase_infra.errors import (
     ProtocolConfigurationError,
     RuntimeHostError,
 )
+from omnibase_infra.runtime.health.runtime_health_block import (
+    RUNTIME_HEALTH_DETAIL_KEY,
+    build_runtime_health_block,
+    fold_runtime_verdict_into_status,
+)
 from omnibase_infra.runtime.models.model_component_health import ModelComponentHealth
 from omnibase_infra.runtime.models.model_detailed_health_response import (
     ModelDetailedHealthResponse,
@@ -96,7 +101,12 @@ from omnibase_infra.runtime.models.model_local_runtime_ingress_request import (
 from omnibase_infra.utils.correlation import generate_correlation_id
 
 if TYPE_CHECKING:
+    from collections.abc import Callable
+
     from omnibase_core.container import ModelONEXContainer
+    from omnibase_infra.models.health.model_runtime_health_check_event import (
+        ModelRuntimeHealthCheckEvent,
+    )
     from omnibase_infra.runtime.auto_wiring.models.model_auto_wiring_manifest import (
         ModelAutoWiringManifest,
     )
@@ -143,6 +153,27 @@ def _get_port_from_env(default: int) -> int:
             e,
         )
         return default
+
+
+def _read_runtime_health_verdict(
+    provider: Callable[[], ModelRuntimeHealthCheckEvent | None] | None,
+) -> ModelRuntimeHealthCheckEvent | None:
+    """Read the latest monitor verdict, never raising into a health probe.
+
+    A best-effort verdict source must not be able to take liveness down with it:
+    a raising provider is reported as "no verdict", which consumers treat as
+    unknown (OMN-15217).
+    """
+    if provider is None:
+        return None
+    try:
+        return provider()
+    except Exception:  # noqa: BLE001 — boundary: verdict is best-effort
+        logger.warning(
+            "Runtime health verdict provider raised; reporting verdict as absent",
+            exc_info=True,
+        )
+        return None
 
 
 class ServiceHealth:
@@ -310,6 +341,14 @@ class ServiceHealth:
 
         # OMN-11198: Manifest attached after startup for introspection endpoint
         self._manifest: ModelAutoWiringManifest | None = None
+
+        # OMN-15217: provider for the ServiceRuntimeHealthMonitor verdict. Set by
+        # the kernel via set_runtime_health_provider(). Without it /health can
+        # only report process liveness, which is how a runtime logging
+        # status=DEGRADED served status=healthy for hours.
+        self._runtime_health_provider: (
+            Callable[[], ModelRuntimeHealthCheckEvent | None] | None
+        ) = None
 
         # OMN-519: Track last successful health check timestamps per component
         self._last_healthy_timestamps: dict[str, str] = {}
@@ -861,6 +900,24 @@ class ServiceHealth:
             correlation_id,
         )
 
+    def set_runtime_health_provider(
+        self,
+        provider: Callable[[], ModelRuntimeHealthCheckEvent | None] | None,
+    ) -> None:
+        """Attach the runtime health monitor verdict source (OMN-15217).
+
+        Args:
+            provider: Zero-arg callable returning the monitor's latest
+                ``ModelRuntimeHealthCheckEvent``, or ``None`` when no cycle has
+                completed. Pass ``None`` to detach.
+
+        Notes:
+            The provider is called on every ``/health`` request, so it must be
+            cheap and non-blocking — it reads a cached event, it does not run a
+            health check.
+        """
+        self._runtime_health_provider = provider
+
     async def _handle_health(self, request: web.Request) -> web.Response:
         """Handle GET /health requests (liveness probe).
 
@@ -987,6 +1044,11 @@ class ServiceHealth:
                             "is_running": False,
                             "runtime_attached": False,
                             "startup_phase": "runtime_pending",
+                            # OMN-15217: the verdict key is always present in the
+                            # payload — explicitly null while unknown — so a
+                            # consumer can distinguish "no verdict yet" from
+                            # "this build does not publish verdicts at all".
+                            RUNTIME_HEALTH_DETAIL_KEY: None,
                         },
                     ),
                 )
@@ -1054,6 +1116,27 @@ class ServiceHealth:
                 status = "unhealthy"
                 http_status = 503
 
+            # OMN-15217: join the ServiceRuntimeHealthMonitor verdict (contract
+            # discovery, consumer-group coverage, topic coverage) onto this
+            # payload. RuntimeHostProcess.health_check() only sees process-local
+            # state, so without this fold a runtime with four contracts failing
+            # to load reports healthy=true/degraded=false — verified on the
+            # stability lane 2026-07-27T12:58Z while the monitor logged
+            # status=DEGRADED every five minutes.
+            #
+            # The HTTP status code is deliberately NOT folded. /health is also
+            # the liveness probe watched by autoheal, and a semantic degradation
+            # is typically restart-immune (a contract that fails to import will
+            # fail to import again), so flipping the code here would convert a
+            # visible degradation into a restart loop. The body carries the
+            # truth; strict container health is a per-lane opt-in via
+            # omnibase_infra.runtime.health.container_healthcheck.
+            verdict = _read_runtime_health_verdict(self._runtime_health_provider)
+            runtime_health_block = build_runtime_health_block(verdict)
+            status = fold_runtime_verdict_into_status(
+                status, verdict.status if verdict is not None else None
+            )
+
             self._log_health_transition(
                 status=status,
                 runtime_attached=runtime_attached,
@@ -1065,7 +1148,10 @@ class ServiceHealth:
             # OMN-519: Add component breakdown to health response details
             components = self._build_component_health(health_details)
             enriched_details = dict(health_details)
-            enriched_details["degraded"] = is_degraded
+            enriched_details["degraded"] = is_degraded or status == "degraded"
+            enriched_details[RUNTIME_HEALTH_DETAIL_KEY] = cast(
+                "JsonType", runtime_health_block
+            )
             enriched_details["startup_in_progress"] = startup_in_progress
             enriched_details["runtime_attached"] = runtime_attached
             enriched_details["components"] = {
