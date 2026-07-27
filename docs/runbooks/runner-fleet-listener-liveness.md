@@ -59,7 +59,7 @@ Readiness is a **conjunction** over six independently-probed signals; a runner i
 | `diag_heartbeat` | newest `_diag/*.log` age ≤ `RUNNER_HEALTH_MAX_DIAG_AGE_SECONDS` (**4500s**, brackets the ~50-min token-refresh cycle — OMN-15233) |
 | `listener_topology` | exactly one `Runner.Listener`, zero at PPID 1 |
 | `container_stability` | `RestartCount` ≤ `CRASHLOOP_RESTART_THRESHOLD` (5) |
-| `disk_capacity` | runner-host disk used < `RUNNER_READINESS_MAX_DISK_USED_PERCENT` (90) |
+| `disk_capacity` | runner-host disk used < 90% (module constant, deliberately not a new env read — see OMN-15234) |
 
 Read the verdict, not the individual surfaces:
 

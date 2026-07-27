@@ -37,9 +37,11 @@
 #     (CRASH_LOOPING 0.9 / LISTENER_ZOMBIE 0.85 / OFFLINE_IDLE 0.6 / WEDGED 0.5) are
 #     DELETED. Readiness fails CLOSED (UNKNOWN is not READY); the bounce gate fails
 #     SAFE (no mutation on indeterminate sources, never a busy runner, never for a
-#     cause a force-recreate cannot fix). Reads RUNNER_READINESS_MAX_DISK_USED_PERCENT
-#     (default 90) alongside the pre-existing runner-health thresholds. Still no
-#     mutation reachable from this node.
+#     cause a force-recreate cannot fix). The disk ceiling (90%) is a module
+#     constant, NOT a new env read -- adding a fourth env-var name to this file
+#     is exactly what scripts/check-env-reads.sh exists to stop (rule 10: narrow
+#     the matcher, do not widen the allowlist; OMN-15234 owns that narrowing).
+#     Still no mutation reachable from this node.
 name: "node_runner_fleet_health_compute"
 contract_version:
   major: 1

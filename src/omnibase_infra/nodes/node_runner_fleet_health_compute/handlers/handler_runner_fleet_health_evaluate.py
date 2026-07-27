@@ -110,9 +110,16 @@ _WEDGE_QUEUE_AGE_SECONDS = int(os.environ.get("WEDGE_QUEUE_AGE_SECONDS", "600"))
 # OMN-15255: ceiling on runner-host disk usage. A host past this is out of
 # space for checkouts/caches; every container on it is unfit for work even
 # though each one still registers online and reports a fresh heartbeat.
-_RUNNER_READINESS_MAX_DISK_USED_PERCENT = float(
-    os.environ.get("RUNNER_READINESS_MAX_DISK_USED_PERCENT", "90")
-)
+#
+# Deliberately a plain constant, NOT an env read. The three thresholds above
+# are grandfathered pre-gate reads in this file; adding a fourth would be a
+# NEW env-var name, which `scripts/check-env-reads.sh` exists to stop and
+# which OMN-15234 (PR #2502) narrows the matcher to catch by name rather than
+# by file allowlist. Rule 10 says fix the underlying issue instead of widening
+# an allowlist, so this value stays a constant until the runner-health
+# thresholds get a typed config surface. Tunability is not lost silently --
+# it was never granted.
+_RUNNER_READINESS_MAX_DISK_USED_PERCENT = 90.0
 
 _EnumState = EnumRunnerFleetHealthState
 _EnumSignal = EnumRunnerReadinessSignal
