@@ -359,9 +359,17 @@ services:
       - redpanda
       - start
       - --kafka-addr internal://0.0.0.0:9092,external://0.0.0.0:19092
-      - --advertise-kafka-addr internal://redpanda:9092,external://${DEV_REDPANDA_ADVERTISE_HOST:-localhost}:${REDPANDA_EXTERNAL_PORT:-19092}
+      # OMN-15173: DEV_REDPANDA_ADVERTISE_HOST has NO silent default. A silent
+      # ${VAR:-localhost} default rendered a broker address unreachable by any
+      # off-host client (CI runner, another machine) whenever the operator
+      # forgot to export the var — the client-side symptom (connection refused
+      # / timeout against a "localhost" the client cannot resolve to the actual
+      # host) surfaces far from this file. Fail fast instead: set it explicitly
+      # to localhost for pure single-host dev, or to the reachable host/IP for
+      # off-host clients.
+      - --advertise-kafka-addr internal://redpanda:9092,external://${DEV_REDPANDA_ADVERTISE_HOST:?DEV_REDPANDA_ADVERTISE_HOST is required - use localhost for single-host dev or the reachable host/IP for off-host clients}:${REDPANDA_EXTERNAL_PORT:-19092}
       - --pandaproxy-addr internal://0.0.0.0:8082,external://0.0.0.0:18082
-      - --advertise-pandaproxy-addr internal://redpanda:8082,external://${DEV_REDPANDA_ADVERTISE_HOST:-localhost}:${REDPANDA_PANDAPROXY_PORT:-18082}
+      - --advertise-pandaproxy-addr internal://redpanda:8082,external://${DEV_REDPANDA_ADVERTISE_HOST:?DEV_REDPANDA_ADVERTISE_HOST is required - use localhost for single-host dev or the reachable host/IP for off-host clients}:${REDPANDA_PANDAPROXY_PORT:-18082}
       - --schema-registry-addr internal://0.0.0.0:8081,external://0.0.0.0:18081
       - --rpc-addr redpanda:33145
       - --advertise-rpc-addr redpanda:33145
