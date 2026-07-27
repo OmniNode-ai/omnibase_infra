@@ -5007,6 +5007,203 @@ async def _interleave_contract(
     )
 
 
+# Bounded background NOT_READY reconciliation (OMN-15215, OMN-13237 follow-up).
+DEFAULT_NOT_READY_RETRY_INITIAL_DELAY_SECONDS: float = 30.0
+DEFAULT_NOT_READY_RETRY_BACKOFF_SECONDS: float = 30.0
+DEFAULT_NOT_READY_RETRY_MAX_ATTEMPTS: int = 5
+
+
+async def reattach_not_ready_contracts(
+    manifest: ModelAutoWiringManifest,
+    not_ready_results: Sequence[ModelContractAttachResult],
+    dispatch_engine: ProtocolDispatchEngine,
+    event_bus: object | None,
+    environment: str = "dev",
+    result_appliers_by_contract: Mapping[str, ProtocolDispatchResultApplier]
+    | None = None,
+    *,
+    provisioner: ProtocolTopicProvisioner | None = None,
+    readiness_config: ModelTopicReadinessConfig | None = None,
+    core_runtime_topics: frozenset[str] = frozenset(),
+    core_runtime_owners: Mapping[str, str] | None = None,
+) -> tuple[dict[str, tuple[str, ...]], tuple[ModelContractAttachResult, ...]]:
+    """Re-attempt provision -> confirm-ready -> attach for contracts still NOT_READY.
+
+    OMN-15215 (CONFIRMED root cause): ``subscribe_wired_contract_topics`` makes
+    exactly ONE provision->confirm->attach attempt per contract via
+    ``_interleave_contract``. A contract whose topic metadata has not converged
+    within the bounded readiness poll (``ModelTopicReadinessConfig``, 30s/60
+    attempts by default) is recorded NOT_READY and its consumer attach is
+    skipped — PERMANENTLY, for the rest of the process lifetime, because
+    nothing ever calls ``_interleave_contract`` for it again. For a
+    wide-topic-count contract (e.g. ``node_ledger_projection_compute``'s 26
+    topics, OMN-15006/OMN-15168) a transient cold-broker topic-creation race on
+    a handful of just-provisioned topics starves the ENTIRE contract's
+    consumer: since ``_subscribe_contract_topics`` subscribes a contract's
+    topics as one all-or-nothing unit, zero of its 26 topics ever get a Kafka
+    consumer group — not even the ones unrelated to the race. Live evidence
+    (fresh stability-test boot, 2026-07-27): ``NOT-READY: topic metadata did
+    not converge (status=not_ready failures=[4 OCC governance topics])``
+    logged exactly once at boot, followed by a ZERO count of "Auto-wired
+    subscription ... node=node_ledger_projection_compute" log lines across the
+    container's entire observed lifetime (3 separate contract-discovery
+    passes, ~11 minutes) — the OMN-13237 "runtime stays live" framing implies
+    eventual recoverability that was never actually implemented.
+
+    This is NOT the ``handler_routing_loader`` "Unknown routing_strategy
+    'topic_match'" fallback warning (that code path is a separate, informational
+    ``RuntimeContractConfigLoader`` boot-summary pass — its output is never
+    consumed by ``auto_wiring``'s wire/attach decision, confirmed by a real,
+    unmocked repro: the current ``discovery.py`` + ``handler_wiring.py`` path
+    already wires and attaches 26/26 topic_match entries for
+    ``node_ledger_projection_compute`` via the topic-folded dispatcher-ID
+    derivation from OMN-14580/OMN-13825). Fixing the loader's
+    ``VALID_ROUTING_STRATEGIES`` alone would NOT have unblocked OMN-15169 —
+    only closing this NOT_READY-has-no-retry gap does.
+
+    Re-runs the SAME provision->confirm->attach interleave
+    (``_interleave_contract``) for each contract still in NOT_READY status,
+    returning newly-attached topics and updated per-contract results. Callers
+    invoke this repeatedly (bounded, with backoff — see
+    ``run_not_ready_reconciliation_loop``) until every contract attaches or a
+    bounded retry budget is exhausted.
+    """
+    if event_bus is None:
+        return {}, ()
+
+    contract_by_name = {contract.name: contract for contract in manifest.contracts}
+    still_not_ready_names = tuple(
+        r.contract_name
+        for r in not_ready_results
+        if r.status is EnumContractAttachStatus.NOT_READY
+    )
+    if not still_not_ready_names:
+        return {}, ()
+
+    knobs = readiness_config or ModelTopicReadinessConfig()
+    semaphore = asyncio.Semaphore(knobs.max_concurrent_contract_attach)
+
+    async def _retry_one(name: str) -> ModelContractAttachResult | None:
+        contract = contract_by_name.get(name)
+        if contract is None:
+            return None
+        async with semaphore:
+            return await _interleave_contract(
+                name=name,
+                contract=contract,
+                dispatch_engine=dispatch_engine,
+                event_bus=event_bus,
+                environment=environment,
+                result_applier=(result_appliers_by_contract or {}).get(name),
+                provisioner=provisioner,
+                readiness_config=knobs,
+                core_runtime_topics=core_runtime_topics,
+                core_runtime_owners=core_runtime_owners,
+            )
+
+    retried = await asyncio.gather(
+        *(_retry_one(name) for name in still_not_ready_names)
+    )
+    results = tuple(r for r in retried if r is not None)
+
+    newly_subscribed: dict[str, tuple[str, ...]] = {
+        r.contract_name: r.topics_subscribed
+        for r in results
+        if r.status is EnumContractAttachStatus.ATTACHED
+    }
+    return newly_subscribed, results
+
+
+async def run_not_ready_reconciliation_loop(
+    manifest: ModelAutoWiringManifest,
+    initial_not_ready: Sequence[ModelContractAttachResult],
+    dispatch_engine: ProtocolDispatchEngine,
+    event_bus: object | None,
+    environment: str = "dev",
+    result_appliers_by_contract: Mapping[str, ProtocolDispatchResultApplier]
+    | None = None,
+    *,
+    provisioner: ProtocolTopicProvisioner | None = None,
+    readiness_config: ModelTopicReadinessConfig | None = None,
+    core_runtime_topics: frozenset[str] = frozenset(),
+    core_runtime_owners: Mapping[str, str] | None = None,
+    initial_delay_seconds: float = DEFAULT_NOT_READY_RETRY_INITIAL_DELAY_SECONDS,
+    backoff_seconds: float = DEFAULT_NOT_READY_RETRY_BACKOFF_SECONDS,
+    max_attempts: int = DEFAULT_NOT_READY_RETRY_MAX_ATTEMPTS,
+    on_attempt: Callable[
+        [dict[str, tuple[str, ...]], tuple[ModelContractAttachResult, ...]], None
+    ]
+    | None = None,
+    sleep: Callable[[float], Awaitable[None]] = asyncio.sleep,
+) -> tuple[ModelContractAttachResult, ...]:
+    """Bounded background retry of NOT_READY contracts (OMN-15215).
+
+    Sleeps ``initial_delay_seconds``, then re-attempts every still-NOT_READY
+    contract via ``reattach_not_ready_contracts``, up to ``max_attempts`` times
+    with ``backoff_seconds`` between attempts. Stops early once every contract
+    has attached. Never raises on a still-NOT_READY outcome — this preserves
+    the OMN-13237 fail-open boot contract (a contract that never converges
+    stays degraded, not crash-looping); this loop makes "runtime stays live"
+    actually recoverable instead of a permanent skip. ``on_attempt`` is an
+    optional caller hook (e.g. to fold newly-subscribed topics into shared
+    boot-time bookkeeping such as topic-collision detection) invoked after
+    each attempt with ``(newly_subscribed, results)``. ``sleep`` is injectable
+    so tests can drive the loop without real wall-clock delay.
+    """
+    pending: dict[str, ModelContractAttachResult] = {
+        r.contract_name: r
+        for r in initial_not_ready
+        if r.status is EnumContractAttachStatus.NOT_READY
+    }
+    if not pending:
+        return ()
+
+    await sleep(initial_delay_seconds)
+    latest: dict[str, ModelContractAttachResult] = {}
+    for attempt in range(1, max_attempts + 1):
+        if not pending:
+            break
+        newly_subscribed, results = await reattach_not_ready_contracts(
+            manifest,
+            tuple(pending.values()),
+            dispatch_engine,
+            event_bus,
+            environment,
+            result_appliers_by_contract,
+            provisioner=provisioner,
+            readiness_config=readiness_config,
+            core_runtime_topics=core_runtime_topics,
+            core_runtime_owners=core_runtime_owners,
+        )
+        for result in results:
+            latest[result.contract_name] = result
+            if result.status is EnumContractAttachStatus.ATTACHED:
+                pending.pop(result.contract_name, None)
+            else:
+                pending[result.contract_name] = result
+        if on_attempt is not None:
+            on_attempt(newly_subscribed, results)
+        logger.info(
+            "NOT_READY reconciliation attempt %d/%d: resolved=%d remaining=%d "
+            "(OMN-15215)",
+            attempt,
+            max_attempts,
+            len(newly_subscribed),
+            len(pending),
+        )
+        if pending and attempt < max_attempts:
+            await sleep(backoff_seconds)
+
+    if pending:
+        logger.warning(
+            "NOT_READY reconciliation exhausted after %d attempts, still "
+            "not-ready: %s (OMN-15215/OMN-13237, runtime stays live degraded)",
+            max_attempts,
+            sorted(pending),
+        )
+    return tuple(latest.values())
+
+
 def _prioritize_subscription_results(
     report: ModelAutoWiringReport,
     result_appliers_by_contract: Mapping[str, ProtocolDispatchResultApplier]

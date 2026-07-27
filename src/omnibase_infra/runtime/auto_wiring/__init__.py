@@ -19,6 +19,8 @@ from omnibase_infra.runtime.auto_wiring.enum_quarantine_reason import (
     EnumQuarantineReason,
 )
 from omnibase_infra.runtime.auto_wiring.handler_wiring import (
+    reattach_not_ready_contracts,
+    run_not_ready_reconciliation_loop,
     subscribe_wired_contract_topics,
     wire_from_manifest,
 )
@@ -78,6 +80,8 @@ __all__ = [
     "discover_contracts",
     "discover_contracts_from_paths",
     "filter_manifest_for_runtime_profile",
+    "reattach_not_ready_contracts",
+    "run_not_ready_reconciliation_loop",
     "subscribe_wired_contract_topics",
     "wire_from_manifest",
 ]

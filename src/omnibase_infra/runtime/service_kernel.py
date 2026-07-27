@@ -857,6 +857,7 @@ async def bootstrap() -> int:
     llm_health_service: ServiceLlmEndpointHealth | None = None
     wiring_health_checker: WiringHealthChecker | None = None
     wiring_health_task: asyncio.Task[None] | None = None
+    not_ready_reconciliation_task: asyncio.Task[None] | None = None
     triage_unsub: Callable[[], Awaitable[None]] | None = None
     build_loop_db_handler = None  # HandlerDb | None, assigned inside try block
     baselines_task: asyncio.Task[None] | None = None
@@ -3142,6 +3143,9 @@ async def bootstrap() -> int:
             # process. The aggregate tri-state is logged for operator visibility.
             from typing import cast as _cast
 
+            from omnibase_infra.event_bus.enum_contract_attach_status import (
+                EnumContractAttachStatus,
+            )
             from omnibase_infra.event_bus.model_contract_attach_result import (
                 ModelContractAttachResult,
             )
@@ -3259,6 +3263,63 @@ async def bootstrap() -> int:
                     "(correlation_id=%s)",
                     sorted(core_runtime_topics),
                     sorted(_core_runtime_handle.dlq_provision_topics),
+                    correlation_id,
+                )
+
+            # OMN-15215: the boot interleave above makes exactly ONE
+            # provision->confirm->attach attempt per contract; a contract left
+            # NOT_READY (transient broker topic-metadata-convergence race,
+            # OMN-13237) is otherwise skipped for the rest of the process
+            # lifetime — no consumer group is ever created for it. Schedule a
+            # bounded background retry so "runtime stays live" is actually
+            # recoverable instead of a permanent skip.
+            _not_ready_at_boot = tuple(
+                r
+                for r in _attach_results
+                if r.status is EnumContractAttachStatus.NOT_READY
+            )
+            if _not_ready_at_boot:
+                from omnibase_infra.runtime.auto_wiring.handler_wiring import (
+                    run_not_ready_reconciliation_loop,
+                )
+
+                async def _reconcile_not_ready_contracts() -> None:
+                    assert auto_wiring_manifest_for_subscriptions is not None
+                    try:
+                        await run_not_ready_reconciliation_loop(
+                            auto_wiring_manifest_for_subscriptions,
+                            _not_ready_at_boot,
+                            dispatch_engine,
+                            event_bus,
+                            environment,
+                            auto_wiring_result_appliers,
+                            provisioner=_cast(
+                                "ProtocolTopicProvisioner | None",
+                                topic_provisioner,
+                            ),
+                            readiness_config=resolve_topic_readiness_config(),
+                            core_runtime_topics=core_runtime_topics,
+                            core_runtime_owners=core_runtime_owners,
+                        )
+                    except asyncio.CancelledError:
+                        raise
+                    except Exception:  # noqa: BLE001 — boundary: background reconciliation must never crash boot
+                        logger.warning(
+                            "NOT_READY reconciliation loop raised, giving up "
+                            "for this boot (correlation_id=%s)",
+                            correlation_id,
+                            exc_info=True,
+                        )
+
+                not_ready_reconciliation_task = asyncio.create_task(
+                    _reconcile_not_ready_contracts(),
+                    name="not-ready-contract-reconciliation",
+                )
+                logger.info(
+                    "NOT_READY reconciliation scheduled for %d contract(s): "
+                    "%s (OMN-15215, correlation_id=%s)",
+                    len(_not_ready_at_boot),
+                    sorted(r.contract_name for r in _not_ready_at_boot),
                     correlation_id,
                 )
 
@@ -4003,6 +4064,19 @@ async def bootstrap() -> int:
             )
             wiring_health_task = None
 
+        # Stop NOT_READY contract reconciliation loop (OMN-15215)
+        if not_ready_reconciliation_task is not None:
+            not_ready_reconciliation_task.cancel()
+            try:
+                await not_ready_reconciliation_task
+            except asyncio.CancelledError:
+                pass
+            logger.debug(
+                "NOT_READY reconciliation loop stopped (correlation_id=%s)",
+                correlation_id,
+            )
+            not_ready_reconciliation_task = None
+
         # Stop baselines batch compute loop and close its pool
         if baselines_task is not None:
             baselines_task.cancel()
@@ -4257,6 +4331,14 @@ async def bootstrap() -> int:
             wiring_health_task.cancel()
             try:
                 await wiring_health_task
+            except (asyncio.CancelledError, Exception):  # noqa: BLE001
+                pass
+
+        # Cleanup NOT_READY contract reconciliation loop (OMN-15215)
+        if not_ready_reconciliation_task is not None:
+            not_ready_reconciliation_task.cancel()
+            try:
+                await not_ready_reconciliation_task
             except (asyncio.CancelledError, Exception):  # noqa: BLE001
                 pass
 
