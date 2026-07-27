@@ -191,16 +191,56 @@ IS_FULL="$(read_sel is_full_suite)" \
          "the selector emitted non-JSON; inspect $SELECTION_FILE"
 REASON="$(read_sel full_suite_reason 2> /dev/null || true)"
 
-PATHS=()
-PATHS_STR=""
+# OMN-15245 SEAM: the selector now emits changed tests/integration/ paths -- a
+# changed test module is never dropped by narrowing (fail-closed invariant).
+# This hook is unit-scoped by design and passes --ignore=tests/integration to
+# pytest below: handing pytest a path it also ignores collects nothing from it,
+# and when it is the ONLY path pytest exits 5 ("no tests ran") and blocks the
+# push. Filter those out here, visibly -- they are deferred to CI, which runs
+# them. Keep this function self-contained (no globals): it is extracted and
+# EXECUTED by tests/unit/scripts/test_prepush_smart_tests_seam.py.
+filter_prepush_runnable_paths() {
+  local p
+  while IFS= read -r p; do
+    [ -n "$p" ] || continue
+    case "$p" in
+      tests/integration/*) continue ;;
+    esac
+    printf '%s\n' "$p"
+  done
+}
+
+ALL_PATHS=()
 while IFS= read -r p; do
   if [ -n "$p" ]; then
-    PATHS+=("$p")
-    PATHS_STR="${PATHS_STR}${p} "
+    ALL_PATHS+=("$p")
   fi
 done < <(read_sel selected_paths)
 
+PATHS=()
+PATHS_STR=""
+DEFERRED_STR=""
+# Guard the array expansions: bash 3.2 (macOS system bash) errors on
+# "${arr[@]}" for an empty array under `set -u`.
+if [ "${#ALL_PATHS[@]}" -gt 0 ]; then
+  while IFS= read -r p; do
+    if [ -n "$p" ]; then
+      PATHS+=("$p")
+      PATHS_STR="${PATHS_STR}${p} "
+    fi
+  done < <(printf '%s\n' "${ALL_PATHS[@]}" | filter_prepush_runnable_paths)
+  for p in "${ALL_PATHS[@]}"; do
+    case " $PATHS_STR " in
+      *" $p "*) ;;
+      *) DEFERRED_STR="${DEFERRED_STR}${p} " ;;
+    esac
+  done
+fi
+
 log "selection: is_full_suite=${IS_FULL} reason=${REASON:-none} paths=[ ${PATHS_STR}] (feature-flag=${FLAG})"
+if [ -n "$DEFERRED_STR" ]; then
+  log "deferred to CI (integration needs live services; this hook is unit-scoped): [ ${DEFERRED_STR}]"
+fi
 
 # Assemble the pytest target set. tests/integration is always ignored -- it needs
 # real services and stays a CI-only concern. On a fail-closed escalation we run

@@ -18,6 +18,11 @@ class EnumFullSuiteReason(StrEnum):
     MERGE_GROUP = "merge_group"
     SCHEDULED = "scheduled"
     FEATURE_FLAG_OFF = "feature_flag_off"
+    # OMN-15245: a changed test path that cannot be narrowed below `tests/`
+    # itself (a test module living directly in the tests/ root). Emitting
+    # "tests/" as a smart selection would run the whole suite on the smart
+    # step's split count; escalate to the real full suite instead.
+    CHANGED_TEST_UNNARROWABLE = "changed_test_unnarrowable"
 
 
 TestPath = Annotated[

@@ -24,10 +24,32 @@ SRC_PREFIX = "src/omnibase_infra/"
 REPO_ROOT = Path(__file__).resolve().parents[2]
 TEST_UNIT_PREFIX = "tests/unit/"
 TEST_INTEGRATION_PREFIX = "tests/integration/"
+TESTS_PREFIX = "tests/"
+SCRIPTS_PREFIX = "scripts/"
+# The two directories that actually exercise `scripts/`: the hermetic script
+# tests (tests/scripts/) and the unit-tree mirror (tests/unit/scripts/).
+SCRIPTS_TEST_PREFIXES = ("tests/scripts/", "tests/unit/scripts/")
 CI_PROCESS_TEST_PATHS = (
     ".github/workflows/",
     "scripts/ci/",
     "config/runner_routing_policy.yaml",
+)
+
+# Test families the change-aware pytest job structurally cannot run, so
+# selecting one can never make it execute -- it would only make pytest exit 5
+# ("no tests ran") when it is the sole selected path, reddening the gate without
+# running anything. This is NOT a narrowing carve-out: the FULL suite excludes
+# these identically, and each has its own dedicated gate.
+#   * tests/integration/docker/ -- `--ignore`d by BOTH pytest steps in
+#     .github/workflows/ci.yml; covered by docker-build.yml, whose paths filter
+#     includes tests/integration/docker/**.
+#   * tests/chaos/ and tests/performance/ -- deselected by the job's marker
+#     expression (-m "not slow and not chaos and not kafka and not performance"),
+#     which applies to the full suite too.
+UNRUNNABLE_TEST_PREFIXES = (
+    "tests/integration/docker/",
+    "tests/chaos/",
+    "tests/performance/",
 )
 
 # Positive-evidence documentation classification (OMN-14753). A path matching
@@ -45,6 +67,62 @@ def _is_docs_only_path(path: str) -> bool:
     return path.endswith(DOCS_ONLY_SUFFIXES) or path.startswith(DOCS_ONLY_PREFIXES)
 
 
+def _is_covered_by(selected: set[str] | list[str], path: str) -> bool:
+    """True when pytest, given `selected`, would collect `path`."""
+    return any(path.startswith(prefix) for prefix in selected)
+
+
+def _changed_test_paths(changed_files: list[str]) -> list[str]:
+    """Changed paths under tests/ that the selector is obliged to cover.
+
+    Excludes documentation (provably inert, OMN-14753) and the families the
+    pytest job structurally cannot run (`UNRUNNABLE_TEST_PREFIXES`).
+    """
+    return [
+        path
+        for path in changed_files
+        if path.startswith(TESTS_PREFIX)
+        and not _is_docs_only_path(path)
+        and not path.startswith(UNRUNNABLE_TEST_PREFIXES)
+    ]
+
+
+def _requires_unnarrowable_full_suite(changed_files: list[str]) -> bool:
+    """True when a changed test path cannot be narrowed below `tests/` itself.
+
+    A test module sitting directly in the tests/ root (no subdirectory) has no
+    containing directory other than `tests/`. Emitting `tests/` as a *smart*
+    selection would run the whole suite under the smart step's split count and
+    timeouts; the honest answer is the real full-suite escalation.
+    """
+    return any(
+        path.count("/") == 1 and path.endswith(".py")
+        for path in _changed_test_paths(changed_files)
+    )
+
+
+def _uncovered_changed_test_dirs(
+    changed_files: list[str],
+    selected: set[str],
+) -> set[str]:
+    """Directories that must be added so every changed test path is collected.
+
+    Additive only: a changed test path already covered by an existing selection
+    contributes nothing. Root-level test modules are handled by the
+    `_requires_unnarrowable_full_suite` escalation in `compute_selection`, so
+    they are skipped here rather than emitting `tests/` as a smart selection.
+    """
+    extra: set[str] = set()
+    for path in _changed_test_paths(changed_files):
+        parent = path.rsplit("/", 1)[0] + "/"
+        if parent == TESTS_PREFIX:
+            continue
+        if _is_covered_by(selected | extra, path):
+            continue
+        extra.add(parent)
+    return extra
+
+
 FULL_SUITE_BRANCHES = {"main"}
 
 # Full suite uses 15 splits (infra CI split count)
@@ -55,14 +133,17 @@ def resolve_test_paths(
     changed_files: list[str],
     adjacency_path: Path,
 ) -> list[str]:
-    """Map changed file paths to deterministic UNIT test directories.
+    """Map changed file paths to deterministic test directories.
 
     Behavior:
       - Source changes under src/omnibase_infra/<module>: include
         tests/unit/<module>/.
-      - Test-only changes under tests/unit/: include the changed unit-test directory.
-      - Test-only changes under tests/integration/: ignored (integration runs always).
-      - Files outside src/ and tests/unit/: no contribution; caller decides
+      - Changes under scripts/: include tests/scripts/ + tests/unit/scripts/
+        (scripts/ci/ additionally keeps its tests/ci/ CI-process mapping).
+      - ANY changed path under tests/ is covered by the returned selection --
+        its own directory at minimum (OMN-15245). Narrowing may add tests; it
+        may never drop a test file the diff itself touched.
+      - Files outside src/, scripts/ and tests/: no contribution; caller decides
         whether to escalate to full suite.
 
     Adjacency expansion maps each changed module to its reverse dependents,
@@ -95,12 +176,27 @@ def _resolve(
         ):
             selected.add("tests/ci/")
 
+        if path.startswith(SCRIPTS_PREFIX):
+            # OMN-15245: scripts/ holds deploy-path and governance-guard code
+            # whose tests live in tests/scripts/ and tests/unit/scripts/. Before
+            # this mapping a scripts/ change reached neither: it produced no
+            # selection at all and fell through to the blanket tests/unit/
+            # fallback, which exercises none of it (recorded live on OMN-15218 /
+            # omnibase_infra#2493). Note this is an `if`, not an `elif`:
+            # scripts/ci/ keeps its tests/ci/ CI-process mapping AND gains these.
+            selected.update(SCRIPTS_TEST_PREFIXES)
+
     expanded: set[str] = set(direct_modules)
     for module in direct_modules:
         expanded.update(config.adjacency[module].reverse_deps)
 
     for module in expanded:
         selected.add(f"{TEST_UNIT_PREFIX}{module}/")
+
+    # OMN-15245 fail-closed invariant, applied LAST so it sees everything the
+    # mappings above already cover: every CHANGED path under tests/ must be
+    # collected by the emitted selection.
+    selected.update(_uncovered_changed_test_dirs(changed_files, selected))
 
     # Drop selected directories that do not exist on disk. A module in the
     # adjacency map (e.g. `dlq`) may have source under src/ but no
@@ -139,6 +235,11 @@ def compute_selection(
             for infra in config.test_infrastructure_paths
         ):
             return _full_suite(EnumFullSuiteReason.TEST_INFRASTRUCTURE)
+
+    # 2b. Unnarrowable changed test (OMN-15245): a changed test module directly
+    # under tests/ has no containing directory below `tests/` itself.
+    if _requires_unnarrowable_full_suite(changed_files):
+        return _full_suite(EnumFullSuiteReason.CHANGED_TEST_UNNARROWABLE)
 
     # 3. Shared module escalation.
     changed_modules = {
