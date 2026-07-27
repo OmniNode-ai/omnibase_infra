@@ -124,7 +124,7 @@ class TestRunnerFleetHealthComputeDegraded:
             expected_count=3,
             runners=(
                 _fact("omninode-runner-1", docker_restart_count=9),
-                _fact("omninode-runner-2", diag_heartbeat_age_seconds=1200.0),
+                _fact("omninode-runner-2", diag_heartbeat_age_seconds=5400.0),
                 _fact("omninode-runner-3", github_busy=False),
             ),
         )
