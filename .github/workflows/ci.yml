@@ -2460,8 +2460,9 @@ jobs:
   # via a silent skip). Detection-only sweeps get ignored, so this ships as a
   # mechanical CI gate + pre-commit hook in the same PR (Operating Rule #5).
   #
-  # This job PROVISIONS Postgres (mirroring migration-integration), applies all
-  # migrations, exports the connection env, and runs a CURATED set of
+  # This job PROVISIONS Postgres (explicit pull + run steps — see OMN-15249 note
+  # on the job below for why NOT a `services:` block), applies all migrations,
+  # exports the connection env, and runs a CURATED set of
   # Postgres-only integration proofs, then asserts via check_integration_skips.py
   # that (1) none skipped citing a *provisioned* service's absence and (2) at
   # least one integration test actually executed (zero-collection is itself a
@@ -2492,23 +2493,98 @@ jobs:
         || fromJSON((github.event_name == 'merge_group' && vars.OMNI_REQUIRED_CI_RUNS_ON_JSON) || vars.OMNI_TRUSTED_CI_RUNS_ON_JSON || '["self-hosted","omnibase-ci"]')
       }}
     timeout-minutes: 15
-    # Same Postgres service block as migration-integration: a real DB so the
-    # @pytest.mark.integration real-DB proofs EXECUTE instead of self-skipping.
-    services:
-      postgres:
-        image: postgres:16-alpine
-        env:
-          POSTGRES_PASSWORD: test_password
-          POSTGRES_DB: omnibase_infra
-        ports:
-          - 5432/tcp
-        options: >-
-          --health-cmd pg_isready
-          --health-interval 5s
-          --health-timeout 5s
-          --health-retries 10
+    # OMN-15249: Postgres is provisioned by EXPLICIT steps below, NOT a
+    # GitHub-managed `services:` block. On #2492 (heads 1729c7c3 / dbfc0c98) the
+    # services image pull timed out against registry-1.docker.io; that pull runs
+    # inside GitHub's own "Initialize containers" step, which this repo cannot
+    # name, cannot bound, and — critically — which steps carrying `if: always()`
+    # still run past. The job therefore reached the silent-skip enforcement step
+    # with no toolchain installed and terminated on `uv: command not found` /
+    # `exit 127`, several steps removed from the registry timeout that caused it.
+    # Owning the pull makes the failure fatal AT the pull, with the registry,
+    # image, and timeout named in the annotation.
+    # Proof: tests/ci/test_integration_guard_pull_fatality.py.
+    env:
+      GUARD_PG_IMAGE: postgres:16-alpine
+      GUARD_PG_REGISTRY: registry-1.docker.io
+      GUARD_PG_PULL_ATTEMPTS: "3"
+      GUARD_PG_PULL_TIMEOUT_SECONDS: "120"
+      GUARD_PG_PULL_BACKOFF_SECONDS: "8"
+      GUARD_PG_READY_TIMEOUT_SECONDS: "120"
+      GUARD_PG_CONTAINER: omn14172-guard-pg-${{ github.run_id }}-${{ github.run_attempt }}
 
     steps:
+      # FIRST step by design: nothing after a failed image pull can be trusted,
+      # so the pull runs before checkout/toolchain setup are even attempted.
+      # Bounded retry, fail-closed on exhaustion — never fall through.
+      - name: Pull Postgres image (fail-closed, OMN-15249)
+        id: pull_postgres
+        run: |
+          set -euo pipefail
+
+          attempt=0
+          while [ "${attempt}" -lt "${GUARD_PG_PULL_ATTEMPTS}" ]; do
+            attempt=$((attempt + 1))
+            echo "Pull attempt ${attempt}/${GUARD_PG_PULL_ATTEMPTS}: ${GUARD_PG_IMAGE} from ${GUARD_PG_REGISTRY} (per-attempt timeout ${GUARD_PG_PULL_TIMEOUT_SECONDS}s)"
+            if timeout "${GUARD_PG_PULL_TIMEOUT_SECONDS}" docker pull "${GUARD_PG_IMAGE}"; then
+              echo "Pulled ${GUARD_PG_IMAGE} on attempt ${attempt}/${GUARD_PG_PULL_ATTEMPTS}."
+              exit 0
+            fi
+            echo "Attempt ${attempt}/${GUARD_PG_PULL_ATTEMPTS} failed."
+            if [ "${attempt}" -lt "${GUARD_PG_PULL_ATTEMPTS}" ]; then
+              sleep $((attempt * GUARD_PG_PULL_BACKOFF_SECONDS))
+            fi
+          done
+
+          echo "::error title=Postgres image pull failed (OMN-15249)::Could not pull image ${GUARD_PG_IMAGE} from registry ${GUARD_PG_REGISTRY} after ${GUARD_PG_PULL_ATTEMPTS} bounded attempts (per-attempt timeout ${GUARD_PG_PULL_TIMEOUT_SECONDS}s). Failing closed AT the pull: the Integration Silent-Skip Guard emits no verdict for a run whose Postgres container never materialized. This is a registry/network failure, not a missing binary and not a test failure."
+          exit 1
+
+      # Replaces the `services:` health/port wiring: same image, same health
+      # probe, same ephemeral published port. Fails closed if the container never
+      # reports healthy, again with a named annotation.
+      - name: Start Postgres container (fail-closed, OMN-15249)
+        id: start_postgres
+        run: |
+          set -euo pipefail
+
+          docker rm -f "${GUARD_PG_CONTAINER}" >/dev/null 2>&1 || true
+          docker run --detach \
+            --name "${GUARD_PG_CONTAINER}" \
+            --env POSTGRES_PASSWORD=test_password \
+            --env POSTGRES_DB=omnibase_infra \
+            --health-cmd pg_isready \
+            --health-interval 5s \
+            --health-timeout 5s \
+            --health-retries 10 \
+            --publish 5432 \
+            "${GUARD_PG_IMAGE}"
+
+          deadline=$(( $(date +%s) + GUARD_PG_READY_TIMEOUT_SECONDS ))
+          while true; do
+            status="$(docker inspect -f '{{.State.Health.Status}}' "${GUARD_PG_CONTAINER}" 2>/dev/null || echo unknown)"
+            if [ "${status}" = "healthy" ]; then
+              break
+            fi
+            if [ "$(date +%s)" -ge "${deadline}" ]; then
+              echo "::error title=Postgres container never became healthy (OMN-15249)::Container ${GUARD_PG_CONTAINER} (${GUARD_PG_IMAGE}) was still '${status}' after ${GUARD_PG_READY_TIMEOUT_SECONDS}s. Failing closed: no guard verdict is emitted without a provisioned Postgres."
+              docker logs "${GUARD_PG_CONTAINER}" || true
+              exit 1
+            fi
+            sleep 2
+          done
+
+          # Docker publishes 5432 on an ephemeral host port, exactly as the
+          # `services:` block did; the next step resolves which interface the
+          # runner can actually reach it on.
+          published="$(docker port "${GUARD_PG_CONTAINER}" 5432/tcp | head -n 1)"
+          port="${published##*:}"
+          if [ -z "${port}" ]; then
+            echo "::error title=Postgres port unresolved (OMN-15249)::docker port ${GUARD_PG_CONTAINER} 5432/tcp returned '${published}'."
+            exit 1
+          fi
+          echo "port=${port}" >> "$GITHUB_OUTPUT"
+          echo "Postgres healthy on published host port ${port}."
+
       - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
 
       - name: Setup Python and uv
@@ -2523,7 +2599,7 @@ jobs:
       - name: Resolve Postgres service host
         id: postgres_host
         env:
-          POSTGRES_PORT: ${{ job.services.postgres.ports['5432'] }}
+          POSTGRES_PORT: ${{ steps.start_postgres.outputs.port }}
         run: |
           python - <<'PY' >> "$GITHUB_OUTPUT"
           import os
@@ -2561,8 +2637,9 @@ jobs:
           PY
 
       - name: Apply all migrations
+        id: apply_migrations
         env:
-          OMNIBASE_INFRA_DB_URL: postgresql://postgres:test_password@${{ steps.postgres_host.outputs.host }}:${{ job.services.postgres.ports['5432'] }}/omnibase_infra
+          OMNIBASE_INFRA_DB_URL: postgresql://postgres:test_password@${{ steps.postgres_host.outputs.host }}:${{ steps.start_postgres.outputs.port }}/omnibase_infra
         run: |
           uv run python scripts/run-migrations.py
 
@@ -2573,9 +2650,10 @@ jobs:
       # the guard stays correct if the curated set broadens to tests that read
       # discrete vars.
       - name: Export integration Postgres env
+        id: export_pg_env
         env:
           RESOLVED_HOST: ${{ steps.postgres_host.outputs.host }}
-          RESOLVED_PORT: ${{ job.services.postgres.ports['5432'] }}
+          RESOLVED_PORT: ${{ steps.start_postgres.outputs.port }}
         run: |
           {
             echo "OMNIBASE_INFRA_DB_URL=postgresql://postgres:test_password@${RESOLVED_HOST}:${RESOLVED_PORT}/omnibase_infra"
@@ -2591,9 +2669,10 @@ jobs:
       # Run ONLY the curated Postgres-only integration proofs (kept in sync with
       # integration_skip_guard.yaml curated_test_paths). The selected proof is
       # Postgres-only and self-contained against the freshly-migrated DB. Real integration
-      # FAILURES fail this step directly; the silent-skip enforcement below runs
-      # regardless (if: always()).
+      # FAILURES fail this step directly; the silent-skip enforcement below still
+      # runs on that path (that is the whole point of the guard).
       - name: Run curated Postgres integration proofs (Postgres provisioned)
+        id: run_curated_proofs
         run: |
           uv run pytest \
             tests/integration/handlers/test_registration_storage_postgres_uuid_cast.py::TestRegistrationStoragePostgresUuidCast::test_query_round_trip_produces_stdlib_uuid \
@@ -2602,19 +2681,37 @@ jobs:
 
       # Fail-closed silent-skip enforcement. RED if any integration test skipped
       # citing a provisioned service's absence, or if zero integration tests ran.
+      #
+      # OMN-15249: deliberately NOT a bare `if: always()`. This step must fire when
+      # the curated proofs RAN (success or failure) and must NOT fire when they were
+      # never reached — a verdict about silent skips is meaningless for a run whose
+      # Postgres container never materialized, and on #2492 the bare always() form
+      # ran with no toolchain installed and surfaced `exit 127` as the job's terminal
+      # error, hiding the registry pull timeout that actually caused the failure.
       - name: Enforce no missing-service silent-skips (OMN-14172)
-        if: always()
+        id: enforce_no_silent_skips
+        if: always() && steps.run_curated_proofs.conclusion != 'skipped'
         run: |
           uv run python scripts/ci/check_integration_skips.py \
             --junit integration-guard.xml
 
       - name: Upload integration-guard results
-        if: always()
+        id: upload_guard_results
+        if: always() && steps.run_curated_proofs.conclusion != 'skipped'
         uses: actions/upload-artifact@v4
         with:
           name: integration-guard-results
           path: integration-guard.xml
           retention-days: 7
+
+      # Unconditional: a container started before a later step failed must never
+      # be leaked onto a self-hosted runner. `|| true` keeps teardown from
+      # inventing a second, misattributed failure on an already-failing job.
+      - name: Stop Postgres container
+        id: stop_postgres
+        if: always()
+        run: |
+          docker rm --force "${GUARD_PG_CONTAINER}" >/dev/null 2>&1 || true
 
   ai-slop-check:
     needs: occ-preflight
