@@ -480,19 +480,71 @@ def test_stability_lane_runtime_services_define_session_health_contract() -> Non
 
 
 @pytest.mark.unit
-def test_stability_lane_runtime_healthchecks_fail_on_http_503() -> None:
-    """Stability lane inherits curl --fail probes from runtime compose services."""
+def test_stability_lane_runtime_healthchecks_are_semantic_not_shallow() -> None:
+    """Every runtime container on the proof lane must override the shallow probe.
+
+    OMN-15217. The base compose probe is ``curl -sf http://localhost:8085/health``,
+    which asserts one property: HTTP status < 400. ``/health`` returns 200 for a
+    running-but-DEGRADED runtime *by design* (degraded containers stay in rotation
+    rather than triggering cascading restarts), so the base probe is a liveness
+    check wearing a health check's name. Live proof of the mask on this lane,
+    2026-07-27: all three runtime containers read ``Up 4 hours (healthy)`` while
+    their monitors logged ``status=DEGRADED``.
+
+    This lane's Docker health is what gets cited as stability-proof for prod
+    promotion (OMN-13418), so the assertion is *replacement*, not addition: an
+    overlay that merely appended a strict probe alongside the inherited one, or
+    that covered two of three containers, would leave the lane able to lie.
+    """
     base = _load_base_compose()
     overlay = _load_overlay()
 
     for service_name in RUNTIME_SERVICES:
-        assert "healthcheck" not in overlay["services"][service_name]
+        # The mask this override exists to close is still the base default —
+        # dev/prod keep the shallow probe pending this lane's canary.
         assert base["services"][service_name]["healthcheck"]["test"] == [
             "CMD",
             "curl",
             "-sf",
             "http://localhost:8085/health",
-        ]
+        ], f"{service_name}: base probe changed; re-derive what this lane overrides"
+
+        healthcheck = overlay["services"][service_name]["healthcheck"]
+
+        # Exact list, not a substring/`in` check: the probe is what Docker
+        # executes, so a partial match would accept an extra shallow fallback.
+        assert healthcheck["test"] == [
+            "CMD",
+            "python",
+            "/usr/local/bin/onex-container-healthcheck",
+            "--degraded-policy",
+            "fail",
+        ], f"{service_name}: proof lane must run the strict semantic check"
+
+        # The override must actually displace the inherited probe. Compose
+        # replaces `healthcheck` wholesale, so curl surviving anywhere in the
+        # resolved probe would mean the override was authored wrong.
+        assert "curl" not in healthcheck["test"], (
+            f"{service_name}: shallow curl probe survived the strict override"
+        )
+
+        # --degraded-policy fail is the load-bearing flag: without it the check
+        # degrades to the same pass-on-DEGRADED semantics as curl -sf.
+        assert healthcheck["test"][-2:] == ["--degraded-policy", "fail"], (
+            f"{service_name}: strict policy flag missing — probe would pass DEGRADED"
+        )
+
+        # Flap budget. The monitor's first verdict lands ~one
+        # RUNTIME_HEALTH_CHECK_INTERVAL (300s) after boot; retries must outlast
+        # a single missed interval, and start_period must not shrink below the
+        # base service's own budget or boot would flap on an absent verdict.
+        assert healthcheck["interval"] == "30s"
+        assert healthcheck["timeout"] == "10s"
+        assert healthcheck["retries"] == 5
+        assert (
+            healthcheck["start_period"]
+            == base["services"][service_name]["healthcheck"]["start_period"]
+        ), f"{service_name}: strict probe must keep the base start_period budget"
 
 
 @pytest.mark.unit

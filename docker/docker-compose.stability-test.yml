@@ -162,7 +162,43 @@ services:
       - runtime_data:/app/data
       - ${OMNICLAUDE_SKILLS_DIR:-./skills}:/app/skills:ro
       - "${OMNI_HOME:?OMNI_HOME required for stability session health probes}:${OMNI_HOME:?OMNI_HOME required for stability session health probes}:ro"
-    labels:
+    # OMN-15217: strict semantic healthcheck — this lane's green is cited as
+    # stability-proof for prod promotion (OMN-13418), so it must not be able to
+    # report healthy while the runtime reports DEGRADED. Verified mask on
+    # 2026-07-27T12:58Z: `Up 3 hours (healthy)` alongside
+    # `Runtime health check: status=DEGRADED contracts=296 errors=4`.
+    #
+    # --degraded-policy fail flips Docker health when the runtime's own monitor
+    # reports DEGRADED/CRITICAL. Timings are inherited from the base service
+    # (interval 30s / timeout 10s / retries 5 / start_period 1800s) and restated
+    # here so the flap budget is readable at the strict call site: the monitor's
+    # first verdict lands ~one RUNTIME_HEALTH_CHECK_INTERVAL (300s) after boot
+    # and an absent verdict passes, so startup cannot flap on it.
+    #
+    # Fail-closed on image skew is intentional: if the container runs an image
+    # built before this check existed, the interpreter exits non-zero and the
+    # container reads unhealthy. A stability lane whose image predates the
+    # honest check must not be citable as proof.
+    healthcheck:
+      test:
+        - CMD
+        - python
+        - /usr/local/bin/onex-container-healthcheck
+        - --degraded-policy
+        - fail
+      interval: 30s
+      timeout: 10s
+      retries: 5
+      start_period: 1800s
+    # OMN-15217: autoheal is deliberately NOT enabled on this lane's runtime
+    # containers. Compose appends label sequences, so the base service's
+    # `autoheal=true` would survive this block without `!override`. With the
+    # strict healthcheck above, "unhealthy" now means "semantically degraded",
+    # and semantic degradation is usually restart-immune — four contracts that
+    # fail to import will fail to import again — so leaving autoheal armed would
+    # convert an honest signal into a restart loop and destroy the forensic
+    # state this lane exists to preserve. Restore by removing `!override`.
+    labels: !override
       - "com.omninode.lane=stability-test"
       - "com.omninode.ticket=OMN-10281"
       - "com.omninode.runtime.address=runtime://omninode-pc/stability-test/main"
@@ -205,7 +241,43 @@ services:
       - effects_data:/app/data
       - ${OMNICLAUDE_SKILLS_DIR:-./skills}:/app/skills:ro
       - "${OMNI_HOME:?OMNI_HOME required for stability session health probes}:${OMNI_HOME:?OMNI_HOME required for stability session health probes}:ro"
-    labels:
+    # OMN-15217: strict semantic healthcheck — this lane's green is cited as
+    # stability-proof for prod promotion (OMN-13418), so it must not be able to
+    # report healthy while the runtime reports DEGRADED. Verified mask on
+    # 2026-07-27T12:58Z: `Up 3 hours (healthy)` alongside
+    # `Runtime health check: status=DEGRADED contracts=296 errors=4`.
+    #
+    # --degraded-policy fail flips Docker health when the runtime's own monitor
+    # reports DEGRADED/CRITICAL. Timings are inherited from the base service
+    # (interval 30s / timeout 10s / retries 5 / start_period 1800s) and restated
+    # here so the flap budget is readable at the strict call site: the monitor's
+    # first verdict lands ~one RUNTIME_HEALTH_CHECK_INTERVAL (300s) after boot
+    # and an absent verdict passes, so startup cannot flap on it.
+    #
+    # Fail-closed on image skew is intentional: if the container runs an image
+    # built before this check existed, the interpreter exits non-zero and the
+    # container reads unhealthy. A stability lane whose image predates the
+    # honest check must not be citable as proof.
+    healthcheck:
+      test:
+        - CMD
+        - python
+        - /usr/local/bin/onex-container-healthcheck
+        - --degraded-policy
+        - fail
+      interval: 30s
+      timeout: 10s
+      retries: 5
+      start_period: 1800s
+    # OMN-15217: autoheal is deliberately NOT enabled on this lane's runtime
+    # containers. Compose appends label sequences, so the base service's
+    # `autoheal=true` would survive this block without `!override`. With the
+    # strict healthcheck above, "unhealthy" now means "semantically degraded",
+    # and semantic degradation is usually restart-immune — four contracts that
+    # fail to import will fail to import again — so leaving autoheal armed would
+    # convert an honest signal into a restart loop and destroy the forensic
+    # state this lane exists to preserve. Restore by removing `!override`.
+    labels: !override
       - "com.omninode.lane=stability-test"
       - "com.omninode.ticket=OMN-10281"
       - "com.omninode.runtime.address=runtime://omninode-pc/stability-test/effects"
@@ -259,7 +331,36 @@ services:
       - stability_test_worker_data:/app/data
       - ${OMNICLAUDE_SKILLS_DIR:-./skills}:/app/skills:ro
       - "${OMNI_HOME:?OMNI_HOME required for stability session health probes}:${OMNI_HOME:?OMNI_HOME required for stability session health probes}:ro"
-    labels:
+    # OMN-15217: strict semantic healthcheck — see omninode-runtime above for the
+    # full rationale. The worker is not an afterthought here: it reproduces the
+    # masking defect independently. Verified live 2026-07-27T14:18Z on this lane,
+    # `omninode-stability-test-runtime-worker`: `Up 4 hours (healthy)` with
+    # healthcheck `["CMD","curl","-sf","http://localhost:8085/health"]` while its
+    # own monitor logged `Runtime health check: status=DEGRADED contracts=5
+    # errors=4`. Leaving one of the lane's three runtime containers on the
+    # shallow probe would leave the lane able to lie by exactly the mechanism
+    # this ticket closes.
+    #
+    # Base runtime-worker inherits interval 30s / timeout 10s / retries 5, but
+    # start_period 1200s (not 1800s) — restated here so the flap budget is
+    # readable at the strict call site rather than inferred from the base.
+    healthcheck:
+      test:
+        - CMD
+        - python
+        - /usr/local/bin/onex-container-healthcheck
+        - --degraded-policy
+        - fail
+      interval: 30s
+      timeout: 10s
+      retries: 5
+      start_period: 1200s
+    # OMN-15217: autoheal off for the same reason as the other two runtime
+    # containers. `autoheal=true` was confirmed live on this container's
+    # resolved label set (docker inspect, 2026-07-27T14:18Z), so a plain
+    # `labels:` block here would keep it armed — compose appends label
+    # sequences. Restore by removing `!override`.
+    labels: !override
       - "com.omninode.lane=stability-test"
       - "com.omninode.ticket=OMN-10281"
       - "com.omninode.runtime.address=runtime://omninode-pc/stability-test/worker"

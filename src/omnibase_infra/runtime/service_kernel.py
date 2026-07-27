@@ -2904,6 +2904,21 @@ async def bootstrap() -> int:
             port=http_port,
             version=KERNEL_VERSION,
         )
+        # OMN-15217: publish the runtime health monitor's verdict on /health.
+        # The monitor is started above (step 3) and owns the semantic view of
+        # runtime health — contract discovery errors, consumer-group coverage,
+        # topic coverage. Without this line that verdict never leaves the
+        # container logs and /health reports a DEGRADED runtime as healthy.
+        # When the monitor did not start (non-Kafka profiles, startup failure)
+        # the provider is left unset and the payload carries a null verdict.
+        if runtime_health_monitor is not None:
+            health_server.set_runtime_health_provider(
+                lambda: (
+                    runtime_health_monitor.latest_event
+                    if runtime_health_monitor is not None
+                    else None
+                )
+            )
         health_start_time = time.time()
         await health_server.start()
         health_start_duration = time.time() - health_start_time
