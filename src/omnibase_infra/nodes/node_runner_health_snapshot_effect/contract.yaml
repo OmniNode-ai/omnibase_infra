@@ -26,18 +26,25 @@
 #     whose raw facts this node now gathers (classification lives in
 #     node_runner_fleet_health_compute)
 #   - OMN-13932: motivating gap (buildx/codeload blind spots)
+#   - OMN-15255 (friction F-04): gathers the three facts the composite readiness
+#     signals need and that no prior probe collected -- container Docker health
+#     status, Runner.Listener process/orphan (PPID 1) topology, and runner-host
+#     disk used-percent. All three are read-only inspects/ps/df. Unknowns are
+#     reported as unknown (empty health, None counts, None disk) and are never
+#     defaulted to a passing value, so a failed probe becomes an UNKNOWN readiness
+#     signal downstream rather than a fabricated PASS.
 name: "node_runner_health_snapshot_effect"
 contract_version:
   major: 1
-  minor: 0
+  minor: 1
   patch: 0
 node_version:
   major: 1
-  minor: 0
+  minor: 1
   patch: 0
 node_type: "EFFECT_GENERIC"
 description: >
-  Effect node for runner-fleet snapshot gathering. Publishes read-only, facts-only health snapshots from GitHub Actions runners + Docker inspection via the event bus. Completed for OMN-13942 (was a contract stub since OMN-6091).
+  Effect node for runner-fleet snapshot gathering. Publishes read-only, facts-only health snapshots from GitHub Actions runners + Docker inspection via the event bus, including container health status, Runner.Listener process/orphan topology, and runner-host disk usage (OMN-15255). Completed for OMN-13942 (was a contract stub since OMN-6091).
 
 input_model:
   name: "ModelRunnerFleetSnapshotGatherCommand"
@@ -46,7 +53,7 @@ input_model:
 output_model:
   name: "ModelRunnerFleetSnapshot"
   module: "omnibase_infra.nodes.node_runner_health_snapshot_effect.models.model_runner_fleet_snapshot"
-  description: "Facts-only runner-fleet snapshot (no classification)."
+  description: "Facts-only runner-fleet snapshot (no classification), incl. OMN-15255 readiness facts: per-runner docker_health / listener_process_count / orphaned_listener_count and snapshot-level host_disk_used_percent."
 handler_routing:
   routing_strategy: "payload_type_match"
   handlers:
@@ -96,6 +103,8 @@ metadata:
   author: "OmniNode Team"
   license: "MIT"
   created: "2026-03-31"
+  updated: "2026-07-27"
+  ticket: "OMN-15255"
   tags:
     - effect
     - health

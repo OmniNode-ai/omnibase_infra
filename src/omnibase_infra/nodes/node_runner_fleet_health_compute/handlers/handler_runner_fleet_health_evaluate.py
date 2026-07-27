@@ -29,6 +29,28 @@ collapsing ``None`` into ``False``, so a downstream remediation gate can fail
 CLOSED on indeterminate health instead of treating a source outage as
 verified-healthy. No gate/executor logic is added here -- it is precondition
 data only.
+
+OMN-15255 (friction F-04) adds the composite readiness surface alongside the
+precedence classification. Two things are true at once and must not be
+conflated:
+
+  - ``state`` answers "what is the single most severe thing wrong with this
+    runner" by precedence. First match wins; later signals are not evaluated.
+  - ``readiness`` answers "may this runner be routed governed work" by
+    conjunction over six independently-probed signals. Every signal is
+    evaluated every tick, including the passing ones.
+
+They legitimately disagree. A GitHub-online runner with a fresh heartbeat, an
+unhealthy container and two Runner.Listener processes is ``state=HEALTHY``
+(neither container health nor listener topology is an input to the precedence
+chain) and ``readiness=NOT_READY``. That gap is the F-04 finding: at one
+closeout GitHub reported 64/64 online while 53 of 64 containers read
+docker-unhealthy, and nothing in the system adjudicated.
+
+The quarantine/bounce split fixes the other half -- the false-positive
+restart storm. A stale-looking heartbeat alone can no longer produce a
+restart recommendation: a bounce needs a determinate source, an idle runner,
+and a failing signal a force-recreate can actually fix.
 """
 
 from __future__ import annotations
@@ -38,11 +60,23 @@ import os
 from datetime import UTC, datetime
 
 from omnibase_infra.enums import EnumHandlerType, EnumHandlerTypeCategory
+from omnibase_infra.nodes.node_runner_fleet_health_compute.models.enum_readiness_signal_outcome import (
+    EnumReadinessSignalOutcome,
+)
 from omnibase_infra.nodes.node_runner_fleet_health_compute.models.enum_recommended_action_type import (
     EnumRecommendedActionType,
 )
 from omnibase_infra.nodes.node_runner_fleet_health_compute.models.enum_runner_fleet_health_state import (
     EnumRunnerFleetHealthState,
+)
+from omnibase_infra.nodes.node_runner_fleet_health_compute.models.enum_runner_readiness_signal import (
+    EnumRunnerReadinessSignal,
+)
+from omnibase_infra.nodes.node_runner_fleet_health_compute.models.enum_runner_readiness_state import (
+    EnumRunnerReadinessState,
+)
+from omnibase_infra.nodes.node_runner_fleet_health_compute.models.model_readiness_signal_rollup import (
+    ModelReadinessSignalRollup,
 )
 from omnibase_infra.nodes.node_runner_fleet_health_compute.models.model_recommended_action import (
     ModelRecommendedAction,
@@ -55,6 +89,9 @@ from omnibase_infra.nodes.node_runner_fleet_health_compute.models.model_runner_f
 )
 from omnibase_infra.nodes.node_runner_fleet_health_compute.models.model_runner_health_assessment import (
     ModelRunnerHealthAssessment,
+)
+from omnibase_infra.nodes.node_runner_fleet_health_compute.models.model_runner_readiness_signal import (
+    ModelRunnerReadinessSignal,
 )
 from omnibase_infra.nodes.node_runner_health_snapshot_effect.models.model_runner_fleet_runner_fact import (
     ModelRunnerFleetRunnerFact,
@@ -70,8 +107,42 @@ _RUNNER_HEALTH_MAX_DIAG_AGE_SECONDS = int(
     os.environ.get("RUNNER_HEALTH_MAX_DIAG_AGE_SECONDS", "4500")
 )
 _WEDGE_QUEUE_AGE_SECONDS = int(os.environ.get("WEDGE_QUEUE_AGE_SECONDS", "600"))
+# OMN-15255: ceiling on runner-host disk usage. A host past this is out of
+# space for checkouts/caches; every container on it is unfit for work even
+# though each one still registers online and reports a fresh heartbeat.
+#
+# Deliberately a plain constant, NOT an env read. The three thresholds above
+# are grandfathered pre-gate reads in this file; adding a fourth would be a
+# NEW env-var name, which `scripts/check-env-reads.sh` exists to stop and
+# which OMN-15234 (PR #2502) narrows the matcher to catch by name rather than
+# by file allowlist. Rule 10 says fix the underlying issue instead of widening
+# an allowlist, so this value stays a constant until the runner-health
+# thresholds get a typed config surface. Tunability is not lost silently --
+# it was never granted.
+_RUNNER_READINESS_MAX_DISK_USED_PERCENT = 90.0
 
 _EnumState = EnumRunnerFleetHealthState
+_EnumSignal = EnumRunnerReadinessSignal
+_EnumOutcome = EnumReadinessSignalOutcome
+
+# Docker health values that mean "the container itself is fit". ``none`` is a
+# PASS, not a gap: it means the image declares no healthcheck, so this signal
+# has nothing to assert and the other five carry the verdict.
+_HEALTHY_DOCKER_HEALTH_VALUES = frozenset({"healthy", "none"})
+
+# Signals a force-recreate can plausibly fix. DISK_CAPACITY is deliberately
+# absent -- recreating a container frees no host disk, so bouncing on a full
+# disk is pure churn. GITHUB_REGISTRATION is absent as a *standalone* trigger
+# per OMN-14057 (raw GitHub offline over-reports under status lag); it only
+# contributes when a local signal corroborates it.
+_BOUNCE_REMEDIABLE_SIGNALS = frozenset(
+    {
+        _EnumSignal.DOCKER_HEALTH,
+        _EnumSignal.DIAG_HEARTBEAT,
+        _EnumSignal.LISTENER_TOPOLOGY,
+        _EnumSignal.CONTAINER_STABILITY,
+    }
+)
 
 
 def _classify_runner(
@@ -121,6 +192,238 @@ def _classify_runner(
     return _EnumState.HEALTHY, ""
 
 
+def _signal(
+    signal: EnumRunnerReadinessSignal,
+    outcome: EnumReadinessSignalOutcome,
+    detail: str = "",
+) -> ModelRunnerReadinessSignal:
+    return ModelRunnerReadinessSignal(signal=signal, outcome=outcome, detail=detail)
+
+
+def _github_registration_signal(
+    fact: ModelRunnerFleetRunnerFact, *, github_source_ok: bool
+) -> ModelRunnerReadinessSignal:
+    if not github_source_ok:
+        return _signal(
+            _EnumSignal.GITHUB_REGISTRATION,
+            _EnumOutcome.UNKNOWN,
+            "GitHub runners API source failed this tick",
+        )
+    if fact.github_status == "online":
+        return _signal(_EnumSignal.GITHUB_REGISTRATION, _EnumOutcome.PASS)
+    return _signal(
+        _EnumSignal.GITHUB_REGISTRATION,
+        _EnumOutcome.FAIL,
+        f"GitHub reports status={fact.github_status!r}, not 'online'",
+    )
+
+
+def _docker_health_signal(
+    fact: ModelRunnerFleetRunnerFact, *, docker_source_ok: bool
+) -> ModelRunnerReadinessSignal:
+    """The signal the legacy precedence classifier never evaluated at all."""
+    if not docker_source_ok:
+        return _signal(
+            _EnumSignal.DOCKER_HEALTH,
+            _EnumOutcome.UNKNOWN,
+            "SSH/Docker source failed this tick",
+        )
+    if fact.docker_status and fact.docker_status != "running":
+        return _signal(
+            _EnumSignal.DOCKER_HEALTH,
+            _EnumOutcome.FAIL,
+            f"container state={fact.docker_status!r}, not 'running'",
+        )
+    if not fact.docker_health:
+        return _signal(
+            _EnumSignal.DOCKER_HEALTH,
+            _EnumOutcome.UNKNOWN,
+            "container health not reported by the probe",
+        )
+    if fact.docker_health in _HEALTHY_DOCKER_HEALTH_VALUES:
+        return _signal(_EnumSignal.DOCKER_HEALTH, _EnumOutcome.PASS)
+    if fact.docker_health == "starting":
+        return _signal(
+            _EnumSignal.DOCKER_HEALTH,
+            _EnumOutcome.UNKNOWN,
+            "healthcheck still in start_period (starting)",
+        )
+    return _signal(
+        _EnumSignal.DOCKER_HEALTH,
+        _EnumOutcome.FAIL,
+        f"container health={fact.docker_health!r}",
+    )
+
+
+def _diag_heartbeat_signal(
+    fact: ModelRunnerFleetRunnerFact, *, docker_source_ok: bool
+) -> ModelRunnerReadinessSignal:
+    """OMN-15233: the threshold must bracket a full token-refresh cycle.
+
+    A live idle runner writes ``_diag`` on the listener's token-refresh
+    cadence, measured at ~50-53 minutes on 2026-07-27. The retired 900s
+    default therefore read a perfectly healthy idle runner as stale for ~35 of
+    every 50 minutes -- the false-positive that drove the restart storm this
+    signal exists to stop.
+    """
+    if fact.diag_heartbeat_age_seconds is None:
+        return _signal(
+            _EnumSignal.DIAG_HEARTBEAT,
+            _EnumOutcome.UNKNOWN,
+            (
+                "SSH/Docker source failed this tick"
+                if not docker_source_ok
+                else "no _diag heartbeat age observed"
+            ),
+        )
+    if fact.diag_heartbeat_age_seconds <= _RUNNER_HEALTH_MAX_DIAG_AGE_SECONDS:
+        return _signal(_EnumSignal.DIAG_HEARTBEAT, _EnumOutcome.PASS)
+    return _signal(
+        _EnumSignal.DIAG_HEARTBEAT,
+        _EnumOutcome.FAIL,
+        (
+            f"_diag heartbeat age={fact.diag_heartbeat_age_seconds:.0f}s > "
+            f"threshold={_RUNNER_HEALTH_MAX_DIAG_AGE_SECONDS}s"
+        ),
+    )
+
+
+def _listener_topology_signal(
+    fact: ModelRunnerFleetRunnerFact,
+) -> ModelRunnerReadinessSignal:
+    if fact.listener_process_count is None or fact.orphaned_listener_count is None:
+        return _signal(
+            _EnumSignal.LISTENER_TOPOLOGY,
+            _EnumOutcome.UNKNOWN,
+            "listener process topology not observed",
+        )
+    if fact.orphaned_listener_count > 0:
+        return _signal(
+            _EnumSignal.LISTENER_TOPOLOGY,
+            _EnumOutcome.FAIL,
+            f"{fact.orphaned_listener_count} Runner.Listener process(es) at PPID 1",
+        )
+    if fact.listener_process_count != 1:
+        return _signal(
+            _EnumSignal.LISTENER_TOPOLOGY,
+            _EnumOutcome.FAIL,
+            f"{fact.listener_process_count} Runner.Listener process(es), expected exactly 1",
+        )
+    return _signal(_EnumSignal.LISTENER_TOPOLOGY, _EnumOutcome.PASS)
+
+
+def _container_stability_signal(
+    fact: ModelRunnerFleetRunnerFact, *, docker_source_ok: bool
+) -> ModelRunnerReadinessSignal:
+    if not docker_source_ok:
+        return _signal(
+            _EnumSignal.CONTAINER_STABILITY,
+            _EnumOutcome.UNKNOWN,
+            "SSH/Docker source failed this tick",
+        )
+    if fact.docker_restart_count > _CRASHLOOP_RESTART_THRESHOLD:
+        return _signal(
+            _EnumSignal.CONTAINER_STABILITY,
+            _EnumOutcome.FAIL,
+            (
+                f"RestartCount={fact.docker_restart_count} > "
+                f"threshold={_CRASHLOOP_RESTART_THRESHOLD}"
+            ),
+        )
+    return _signal(_EnumSignal.CONTAINER_STABILITY, _EnumOutcome.PASS)
+
+
+def _disk_capacity_signal(
+    host_disk_used_percent: float | None,
+) -> ModelRunnerReadinessSignal:
+    if host_disk_used_percent is None:
+        return _signal(
+            _EnumSignal.DISK_CAPACITY,
+            _EnumOutcome.UNKNOWN,
+            "runner-host disk usage not observed",
+        )
+    if host_disk_used_percent < _RUNNER_READINESS_MAX_DISK_USED_PERCENT:
+        return _signal(_EnumSignal.DISK_CAPACITY, _EnumOutcome.PASS)
+    return _signal(
+        _EnumSignal.DISK_CAPACITY,
+        _EnumOutcome.FAIL,
+        (
+            f"runner-host disk used={host_disk_used_percent:.1f}% >= "
+            f"ceiling={_RUNNER_READINESS_MAX_DISK_USED_PERCENT:.1f}%"
+        ),
+    )
+
+
+def _evaluate_readiness_signals(
+    fact: ModelRunnerFleetRunnerFact,
+    *,
+    github_source_ok: bool,
+    docker_source_ok: bool,
+    host_disk_used_percent: float | None,
+) -> tuple[ModelRunnerReadinessSignal, ...]:
+    """Evaluate every readiness signal for one runner. Pure, no short-circuit.
+
+    Every signal is evaluated even when an earlier one already FAILed. That is
+    the difference from ``_classify_runner``: a precedence chain stops at the
+    first match and therefore cannot report that a runner failed three
+    different ways.
+    """
+    return (
+        _github_registration_signal(fact, github_source_ok=github_source_ok),
+        _docker_health_signal(fact, docker_source_ok=docker_source_ok),
+        _diag_heartbeat_signal(fact, docker_source_ok=docker_source_ok),
+        _listener_topology_signal(fact),
+        _container_stability_signal(fact, docker_source_ok=docker_source_ok),
+        _disk_capacity_signal(host_disk_used_percent),
+    )
+
+
+def _readiness_state(
+    signals: tuple[ModelRunnerReadinessSignal, ...],
+) -> EnumRunnerReadinessState:
+    """Conjunction: READY only when every signal PASSes."""
+    if any(s.outcome == _EnumOutcome.FAIL for s in signals):
+        return EnumRunnerReadinessState.NOT_READY
+    if any(s.outcome == _EnumOutcome.UNKNOWN for s in signals):
+        return EnumRunnerReadinessState.UNKNOWN
+    return EnumRunnerReadinessState.READY
+
+
+def _quarantine_reason(signals: tuple[ModelRunnerReadinessSignal, ...]) -> str:
+    return "; ".join(
+        f"{s.signal.value}: {s.detail}"
+        for s in signals
+        if s.outcome == _EnumOutcome.FAIL
+    )
+
+
+def _is_bounce_eligible(
+    fact: ModelRunnerFleetRunnerFact,
+    signals: tuple[ModelRunnerReadinessSignal, ...],
+    *,
+    readiness: EnumRunnerReadinessState,
+    is_determinate: bool,
+) -> bool:
+    """Decide whether a force-recreate is a defensible remedy for this runner.
+
+    Readiness fails CLOSED (UNKNOWN is not READY, so an unprobeable runner is
+    not counted as capacity). This gate fails SAFE in the opposite direction:
+    it mutates nothing on indeterminate evidence, never interrupts a job in
+    flight, and never bounces for a cause a bounce cannot fix. The asymmetry
+    is deliberate -- the cost of not routing to a good runner is one idle
+    runner; the cost of recreating a busy or misread runner is a cancelled CI
+    job plus the restart storm this ticket exists to stop.
+    """
+    if readiness != EnumRunnerReadinessState.NOT_READY:
+        return False
+    if not is_determinate:
+        return False
+    if fact.github_busy:
+        return False
+    failing = {s.signal for s in signals if s.outcome == _EnumOutcome.FAIL}
+    return bool(failing & _BOUNCE_REMEDIABLE_SIGNALS)
+
+
 def _annotate_indeterminate(
     detail: str, *, github_source_ok: bool, docker_source_ok: bool
 ) -> str:
@@ -145,34 +448,36 @@ def _annotate_indeterminate(
 def _recommend_for_assessment(
     assessment: ModelRunnerHealthAssessment,
 ) -> ModelRecommendedAction | None:
-    """Map a per-runner assessment to a recommended (never-executed) action."""
-    if assessment.state == _EnumState.CRASH_LOOPING:
+    """Map a per-runner assessment to a recommended (never-executed) action.
+
+    OMN-15255 replaced four state-keyed ``RESTART_RUNNER`` branches
+    (``CRASH_LOOPING`` 0.9 / ``LISTENER_ZOMBIE`` 0.85 / ``OFFLINE_IDLE`` 0.6 /
+    ``WEDGED`` 0.5) with one rule: a restart is recommended exactly when the
+    runner is bounce-eligible. Four independently-tunable confidence
+    heuristics over the same underlying facts is how a single misread
+    threshold (the 900s heartbeat window) turned into a fleet-wide restart
+    storm -- there was no second condition anywhere that could veto it.
+
+    Quarantined-but-not-bounce-eligible still surfaces, as ``NONE`` with the
+    failing signals as the reason: it is an operator item (host disk, GitHub
+    status lag), not a restart.
+    """
+    if assessment.bounce_eligible:
         return ModelRecommendedAction(
             action_type=EnumRecommendedActionType.RESTART_RUNNER,
             target_id=assessment.name,
-            reason=assessment.detail,
+            reason=assessment.quarantine_reason or assessment.detail,
             confidence=0.9,
         )
-    if assessment.state == _EnumState.LISTENER_ZOMBIE:
+    if assessment.quarantined:
         return ModelRecommendedAction(
-            action_type=EnumRecommendedActionType.RESTART_RUNNER,
+            action_type=EnumRecommendedActionType.NONE,
             target_id=assessment.name,
-            reason=assessment.detail,
-            confidence=0.85,
-        )
-    if assessment.state == _EnumState.OFFLINE_IDLE:
-        return ModelRecommendedAction(
-            action_type=EnumRecommendedActionType.RESTART_RUNNER,
-            target_id=assessment.name,
-            reason=assessment.detail,
-            confidence=0.6,
-        )
-    if assessment.state == _EnumState.WEDGED:
-        return ModelRecommendedAction(
-            action_type=EnumRecommendedActionType.RESTART_RUNNER,
-            target_id=assessment.name,
-            reason=assessment.detail,
-            confidence=0.5,
+            reason=(
+                "quarantined; no failing signal a force-recreate can fix -- "
+                f"{assessment.quarantine_reason}"
+            ),
+            confidence=0.0,
         )
     if assessment.state == _EnumState.SATURATED:
         return ModelRecommendedAction(
@@ -276,6 +581,14 @@ class HandlerRunnerFleetHealthEvaluate:
                 buildx_available=snapshot.buildx_available,
                 codeload_throttled=codeload_throttled,
             )
+            signals = _evaluate_readiness_signals(
+                fact,
+                github_source_ok=snapshot.github_source_ok,
+                docker_source_ok=snapshot.docker_source_ok,
+                host_disk_used_percent=snapshot.host_disk_used_percent,
+            )
+            readiness = _readiness_state(signals)
+            quarantined = readiness == EnumRunnerReadinessState.NOT_READY
             assessment = ModelRunnerHealthAssessment(
                 name=fact.name,
                 state=state,
@@ -287,6 +600,16 @@ class HandlerRunnerFleetHealthEvaluate:
                 is_determinate=is_determinate,
                 docker_restart_count=fact.docker_restart_count,
                 diag_heartbeat_age_seconds=fact.diag_heartbeat_age_seconds,
+                readiness=readiness,
+                signals=signals,
+                quarantined=quarantined,
+                quarantine_reason=_quarantine_reason(signals) if quarantined else "",
+                bounce_eligible=_is_bounce_eligible(
+                    fact,
+                    signals,
+                    readiness=readiness,
+                    is_determinate=is_determinate,
+                ),
             )
             assessments.append(assessment)
             if state == _EnumState.CRASH_LOOPING:
@@ -313,10 +636,47 @@ class HandlerRunnerFleetHealthEvaluate:
                 )
             )
 
+        ready_count = sum(
+            1 for a in assessments if a.readiness == EnumRunnerReadinessState.READY
+        )
+        not_ready_count = sum(
+            1 for a in assessments if a.readiness == EnumRunnerReadinessState.NOT_READY
+        )
+        readiness_unknown_count = sum(
+            1 for a in assessments if a.readiness == EnumRunnerReadinessState.UNKNOWN
+        )
+        signal_rollups = tuple(
+            ModelReadinessSignalRollup(
+                signal=signal,
+                fail_count=sum(
+                    1
+                    for a in assessments
+                    for s in a.signals
+                    if s.signal == signal and s.outcome == _EnumOutcome.FAIL
+                ),
+                unknown_count=sum(
+                    1
+                    for a in assessments
+                    for s in a.signals
+                    if s.signal == signal and s.outcome == _EnumOutcome.UNKNOWN
+                ),
+            )
+            for signal in EnumRunnerReadinessSignal
+        )
+
         verdict = ModelRunnerFleetHealthVerdict(
             correlation_id=correlation_id,
             evaluated_at=datetime.now(tz=UTC),
             assessments=tuple(assessments),
+            ready_count=ready_count,
+            not_ready_count=not_ready_count,
+            readiness_unknown_count=readiness_unknown_count,
+            fleet_ready=ready_count > 0 and not_ready_count == 0,
+            quarantined_runners=tuple(a.name for a in assessments if a.quarantined),
+            bounce_eligible_runners=tuple(
+                a.name for a in assessments if a.bounce_eligible
+            ),
+            readiness_signal_rollups=signal_rollups,
             expected_count=snapshot.expected_count,
             observed_count=len(snapshot.runners),
             online_count=online_count,
@@ -336,10 +696,16 @@ class HandlerRunnerFleetHealthEvaluate:
             docker_source_ok=snapshot.docker_source_ok,
         )
         logger.info(
-            "Runner-fleet health verdict: %d/%d online, saturation=%.2f, %d recommended "
+            "Runner-fleet verdict: %d/%d online, %d READY / %d NOT_READY / %d UNKNOWN, "
+            "%d quarantined (%d bounce-eligible), saturation=%.2f, %d recommended "
             "actions (correlation_id=%s)",
             online_count,
             snapshot.expected_count,
+            ready_count,
+            not_ready_count,
+            readiness_unknown_count,
+            len(verdict.quarantined_runners),
+            len(verdict.bounce_eligible_runners),
             saturation_ratio,
             len(recommended_actions),
             correlation_id,
