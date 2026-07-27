@@ -534,6 +534,15 @@ def _recommend_for_assessment(
     status lag), not a restart.
     """
     if assessment.bounce_eligible:
+        if assessment.state == _EnumState.LISTENER_ZOMBIE:
+            corroboration = _zombie_restart_corroboration(assessment)
+            if corroboration is not None:
+                return ModelRecommendedAction(
+                    action_type=EnumRecommendedActionType.RESTART_RUNNER,
+                    target_id=assessment.name,
+                    reason=f"{assessment.detail}; corroborated by {corroboration}",
+                    confidence=0.85,
+                )
         return ModelRecommendedAction(
             action_type=EnumRecommendedActionType.RESTART_RUNNER,
             target_id=assessment.name,
@@ -541,6 +550,22 @@ def _recommend_for_assessment(
             confidence=0.9,
         )
     if assessment.quarantined:
+        if assessment.state == _EnumState.LISTENER_ZOMBIE:
+            return ModelRecommendedAction(
+                action_type=EnumRecommendedActionType.NONE,
+                target_id=assessment.name,
+                reason=(
+                    "stale _diag heartbeat is not corroborated (registry "
+                    f"status={assessment.github_status!r}, busy="
+                    f"{assessment.github_busy}, docker_status="
+                    f"{assessment.docker_status!r}, restarts="
+                    f"{assessment.docker_restart_count}, determinate="
+                    f"{assessment.is_determinate}) -- an idle listener writes "
+                    "_diag only on its ~50-min token refresh, so this is not "
+                    "evidence for a bounce (OMN-15234)"
+                ),
+                confidence=0.0,
+            )
         return ModelRecommendedAction(
             action_type=EnumRecommendedActionType.NONE,
             target_id=assessment.name,
