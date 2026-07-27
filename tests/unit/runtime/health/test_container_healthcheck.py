@@ -454,9 +454,12 @@ class TestDeploymentSeams:
             r"/usr/local/bin/onex-container-healthcheck\s*\n\s*-\s*--degraded-policy\s*\n\s*-\s*fail",
             compose,
         )
-        assert len(strict_blocks) == 2, (
-            "both omninode-runtime and runtime-effects must run the strict check "
-            f"on the stability lane; found {len(strict_blocks)}"
+        assert len(strict_blocks) == 3, (
+            "all three runtime containers (omninode-runtime, runtime-effects, "
+            "runtime-worker) must run the strict check on the stability lane; "
+            f"found {len(strict_blocks)}. Leaving one on `curl -sf` leaves the "
+            "lane able to report healthy while that runtime is DEGRADED — "
+            "verified live on runtime-worker 2026-07-27T14:18Z."
         )
 
     def test_stability_lane_runtime_containers_are_not_autohealed(self) -> None:
@@ -466,11 +469,11 @@ class TestDeploymentSeams:
         ).read_text(encoding="utf-8")
 
         override_count = len(re.findall(r"^\s*labels: !override$", compose, re.M))
-        assert override_count == 2, (
-            "omninode-runtime and runtime-effects must !override labels on the "
-            "stability lane — compose appends label sequences, so the base "
-            f"service's autoheal=true survives a plain `labels:` block; found "
-            f"{override_count} override block(s)"
+        assert override_count == 3, (
+            "omninode-runtime, runtime-effects and runtime-worker must !override "
+            "labels on the stability lane — compose appends label sequences, so "
+            f"the base service's autoheal=true survives a plain `labels:` block; "
+            f"found {override_count} override block(s)"
         )
 
         # No label list in this overlay may re-arm autoheal (comments explaining

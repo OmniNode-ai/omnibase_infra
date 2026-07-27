@@ -482,17 +482,51 @@ def test_stability_projection_api_has_separate_infra_and_analytics_dsns() -> Non
 
 
 @pytest.mark.integration
-def test_stability_lane_render_inherits_failing_runtime_healthcheck() -> None:
+def test_stability_lane_render_resolves_strict_semantic_healthcheck() -> None:
+    """The *rendered* lane must run the semantic probe with autoheal disarmed.
+
+    OMN-15217. The unit test reads the overlay file; this reads what compose
+    actually resolves after merging base + overlay, which is the only surface
+    that can catch a merge-semantics mistake. Two merge behaviours make that
+    distinction load-bearing:
+
+    * ``healthcheck`` is replaced wholesale, so a mis-authored override shows up
+      here as the inherited ``curl -sf`` probe rather than as a file diff.
+    * ``labels`` are *appended*, so the base service's ``autoheal=true`` survives
+      a plain ``labels:`` block. Only ``labels: !override`` disarms it, and the
+      overlay file alone cannot prove that — the parsed overlay looks identical
+      either way.
+
+    Strict health plus autoheal is the harmful combination: semantic degradation
+    is typically restart-immune (contracts that fail to import will fail again),
+    so an armed autoheal would convert an honest unhealthy signal into a restart
+    loop and destroy the forensic state this lane exists to preserve.
+    """
     rendered_config = _compose_config_json()
     services = rendered_config["services"]
 
     for service_name in REQUIRED_RUNTIME_SERVICES:
-        assert services[service_name]["healthcheck"]["test"] == [
+        healthcheck = services[service_name]["healthcheck"]
+
+        assert healthcheck["test"] == [
             "CMD",
-            "curl",
-            "-sf",
-            "http://localhost:8085/health",
-        ]
+            "python",
+            "/usr/local/bin/onex-container-healthcheck",
+            "--degraded-policy",
+            "fail",
+        ], (
+            f"{service_name}: rendered lane must run the strict semantic check; "
+            "the shallow curl probe passes a DEGRADED runtime (200 by design)"
+        )
+
+        assert _label_value(services[service_name], "autoheal") is None, (
+            f"{service_name}: autoheal survived into the rendered lane — compose "
+            "appends label sequences, so `labels:` must be `labels: !override`. "
+            "Strict health + autoheal restart-loops a restart-immune defect."
+        )
+        assert _label_value(services[service_name], "com.omninode.lane") == (
+            "stability-test"
+        )
 
 
 @pytest.mark.integration
