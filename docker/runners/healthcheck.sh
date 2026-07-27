@@ -29,7 +29,9 @@
 # Tunables (env, defaults chosen for the 64-runner .201 fleet):
 #   RUNNER_HEALTH_MAX_DIAG_AGE_SECONDS      heartbeat staleness threshold (4500)
 #   RUNNER_HEALTH_MAX_LOG_STARTS_PER_HOUR   listener starts/hour before the
-#                                           crash-loop layer fails (6)
+#                                           crash-loop layer fails (6). A RATE,
+#                                           normalized to the window below — not
+#                                           a raw count of files in the window.
 #   RUNNER_HEALTH_LOG_RATE_WINDOW_MINUTES   crash-loop rate window (60)
 #   RUNNER_HEALTH_EGRESS_CHECK              set to 0 to skip the github.com egress
 #                                           probe (used by offline CI tests only;
@@ -129,10 +131,30 @@ fi
 #    appended to while its listener process lives, so a closed log's mtime is
 #    within seconds of that listener's death and an active log's mtime is now.
 #    -maxdepth 1 keeps the per-job page logs under _diag/pages/ out of the count.
+#
+#    NORMALIZATION (the two tunables are in DIFFERENT units): the count is taken
+#    over RUNNER_HEALTH_LOG_RATE_WINDOW_MINUTES but the threshold is expressed
+#    PER HOUR, so comparing them directly is only correct at the 60-minute
+#    default. A 30m window would silently halve the effective threshold (6/hour
+#    enforced as 6-per-30m = 12/hour) and a 120m window would double it
+#    (6-per-120m = 3/hour). The per-hour budget is therefore scaled to the window
+#    actually measured before the comparison. Integer arithmetic only (no bc in
+#    the runner image): the +59 numerator rounds the allowance UP, so a
+#    fractional budget (6/hour over a 5m window = 0.5) never floors to 0 — a
+#    zero allowance would fail on the first legitimate listener start.
 window_minutes="${RUNNER_HEALTH_LOG_RATE_WINDOW_MINUTES}"
+if ! [[ "${window_minutes}" =~ ^[0-9]+$ ]] || [[ "${window_minutes}" -lt 1 ]]; then
+  echo "unhealthy: RUNNER_HEALTH_LOG_RATE_WINDOW_MINUTES='${window_minutes}' is not a positive integer — refusing to guess a crash-loop window (fail closed)"
+  exit 1
+fi
+if ! [[ "${RUNNER_HEALTH_MAX_LOG_STARTS_PER_HOUR}" =~ ^[0-9]+$ ]]; then
+  echo "unhealthy: RUNNER_HEALTH_MAX_LOG_STARTS_PER_HOUR='${RUNNER_HEALTH_MAX_LOG_STARTS_PER_HOUR}' is not a non-negative integer — refusing to guess a crash-loop threshold (fail closed)"
+  exit 1
+fi
+max_starts_in_window=$(( (RUNNER_HEALTH_MAX_LOG_STARTS_PER_HOUR * window_minutes + 59) / 60 ))
 recent_starts=$(find "${diag_dir}" -maxdepth 1 -type f -name 'Runner_*.log' -mmin "-${window_minutes}" -print 2>/dev/null | wc -l | tr -d '[:space:]')
-if [[ "${recent_starts}" -gt "${RUNNER_HEALTH_MAX_LOG_STARTS_PER_HOUR}" ]]; then
-  echo "unhealthy: ${recent_starts} listener starts in the last ${window_minutes}m (> ${RUNNER_HEALTH_MAX_LOG_STARTS_PER_HOUR}/hour) — listener crash-looping (OMN-15233 crash-loop rate)"
+if [[ "${recent_starts}" -gt "${max_starts_in_window}" ]]; then
+  echo "unhealthy: ${recent_starts} listener starts in the last ${window_minutes}m (> ${max_starts_in_window} allowed — ${RUNNER_HEALTH_MAX_LOG_STARTS_PER_HOUR}/hour normalized to a ${window_minutes}m window) — listener crash-looping (OMN-15233 crash-loop rate)"
   exit 1
 fi
 
@@ -148,5 +170,5 @@ if [[ "${RUNNER_HEALTH_EGRESS_CHECK}" != "0" ]]; then
   fi
 fi
 
-echo "healthy: single non-orphaned listener, heartbeat fresh, ${recent_starts} start(s) in ${window_minutes}m, github.com reachable"
+echo "healthy: single non-orphaned listener, heartbeat fresh, ${recent_starts}/${max_starts_in_window} allowed start(s) in ${window_minutes}m, github.com reachable"
 exit 0

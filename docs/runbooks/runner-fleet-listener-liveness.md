@@ -109,7 +109,11 @@ Three fixes, all in `docker/runners/`:
 2. **Rate-based crash-loop signal** — `healthcheck.sh` counts `Runner_*.log`
    files touched inside `RUNNER_HEALTH_LOG_RATE_WINDOW_MINUTES` (60) and fails
    above `RUNNER_HEALTH_MAX_LOG_STARTS_PER_HOUR` (6). A ~5-min crash cadence is
-   ~12/hour. **This is deliberately NOT cumulative:** a cumulative count grows
+   ~12/hour. The threshold is a **rate**, normalized to the window before the
+   comparison (`ceil(per_hour × window_minutes / 60)`), so retuning the window
+   alone does not silently retune the threshold — a 30m window allows 3 starts,
+   not 6. Both tunables fail closed if set to anything but a non-negative
+   integer. **This is deliberately NOT cumulative:** a cumulative count grows
    monotonically with container uptime, so any long-lived healthy container
    would eventually red-line forever, and a permanently-red check is a disabled
    check.

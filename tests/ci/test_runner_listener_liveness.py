@@ -53,22 +53,31 @@ RUNBOOK = REPO_ROOT / "docs" / "runbooks" / "runner-fleet-listener-liveness.md"
 
 
 def _run_healthcheck(
-    runner_home: Path, max_diag_age: str | None = "900"
+    runner_home: Path,
+    max_diag_age: str | None = "900",
+    window_minutes: str | None = None,
+    max_starts_per_hour: str | None = None,
 ) -> subprocess.CompletedProcess[str]:
     """Run healthcheck.sh against ``runner_home``.
 
-    ``max_diag_age=None`` leaves ``RUNNER_HEALTH_MAX_DIAG_AGE_SECONDS`` UNSET so
-    the script's own default is what gets exercised (OMN-15233 — the default is
-    the thing that was miscalibrated; a test that always pins the threshold can
-    never catch that).
+    Any tunable passed as ``None`` is left UNSET so the script's own default is
+    what gets exercised (OMN-15233 — the defaults are the thing that was
+    miscalibrated; a test that always pins a threshold can never catch that).
+    Ambient values are actively popped, so an operator env on the test host
+    cannot silently change what is being asserted.
     """
     env = dict(os.environ)
     env["RUNNER_HOME"] = str(runner_home)
     env["RUNNER_HEALTH_EGRESS_CHECK"] = "0"  # offline determinism
-    if max_diag_age is None:
-        env.pop("RUNNER_HEALTH_MAX_DIAG_AGE_SECONDS", None)
-    else:
-        env["RUNNER_HEALTH_MAX_DIAG_AGE_SECONDS"] = max_diag_age
+    for name, value in (
+        ("RUNNER_HEALTH_MAX_DIAG_AGE_SECONDS", max_diag_age),
+        ("RUNNER_HEALTH_LOG_RATE_WINDOW_MINUTES", window_minutes),
+        ("RUNNER_HEALTH_MAX_LOG_STARTS_PER_HOUR", max_starts_per_hour),
+    ):
+        if value is None:
+            env.pop(name, None)
+        else:
+            env[name] = value
     return subprocess.run(
         ["bash", str(HEALTHCHECK)],
         check=False,
@@ -267,19 +276,51 @@ class TestHealthcheckIdleThresholdRecalibration:
         finally:
             proc.kill()
 
-    def test_default_threshold_clears_idle_cadence_and_is_justified(self) -> None:
-        content = HEALTHCHECK.read_text(encoding="utf-8")
-        match = re.search(r"RUNNER_HEALTH_MAX_DIAG_AGE_SECONDS:-(\d+)", content)
-        assert match, "RUNNER_HEALTH_MAX_DIAG_AGE_SECONDS default missing"
-        assert int(match.group(1)) >= 3600, (
-            "alert threshold must exceed the ~50-min idle OAuth-refresh cadence "
-            f"(>= 3600s), got {match.group(1)}s"
-        )
-        assert "idle" in content.lower(), (
-            "the threshold must carry an inline justification against the idle "
-            "_diag cadence — an unexplained magic number invites the next "
-            "well-meaning tightening back to 900s"
-        )
+    @pytest.mark.parametrize(
+        ("idle_minutes", "expect_healthy"),
+        [
+            (16, True),  # just past the old 900s default — must no longer flag
+            (50, True),  # the observed idle OAuth/AAD refresh cadence ceiling
+            (70, True),  # still inside the recalibrated window
+            (80, False),  # past it — recalibration did not disarm the layer
+        ],
+    )
+    def test_default_threshold_brackets_the_idle_cadence(
+        self,
+        synthetic_runner_home: Path,
+        idle_minutes: int,
+        expect_healthy: bool,
+    ) -> None:
+        """Behavioral bracket of the SHIPPED default (nothing pinned).
+
+        Replaces a source-text assertion on the literal ``4500`` that a
+        comment-only edit could satisfy. Driving the real script with the
+        threshold unset means the calibration itself is what is under test: at
+        a 900s default the 16/50/70-minute cases all fail, and any "clear the
+        idle cadence by disabling the check" regression fails the 80-minute
+        case.
+        """
+        listener = synthetic_runner_home / "bin" / "Runner.Listener"
+        proc = subprocess.Popen([str(listener)])
+        try:
+            time.sleep(0.5)
+            diag_log = (
+                synthetic_runner_home / "_diag" / "Runner_20260703-000000-utc.log"
+            )
+            aged = time.time() - idle_minutes * 60
+            os.utime(diag_log, (aged, aged))
+
+            result = _run_healthcheck(synthetic_runner_home, max_diag_age=None)
+            expected_rc = 0 if expect_healthy else 1
+            assert result.returncode == expected_rc, (
+                f"{idle_minutes} min of idle _diag silence must read "
+                f"{'HEALTHY' if expect_healthy else 'UNHEALTHY'} on the script "
+                f"default: rc={result.returncode} out={result.stdout}"
+            )
+            if not expect_healthy:
+                assert "heartbeat" in result.stdout
+        finally:
+            proc.kill()
 
 
 class TestHealthcheckOrphanInversion:
@@ -383,15 +424,142 @@ class TestHealthcheckCrashLoopRate:
         finally:
             proc.kill()
 
-    def test_crash_loop_signal_is_documented_as_rate_not_cumulative(self) -> None:
-        content = HEALTHCHECK.read_text(encoding="utf-8")
-        assert "RUNNER_HEALTH_MAX_LOG_STARTS_PER_HOUR" in content
-        assert "RUNNER_HEALTH_LOG_RATE_WINDOW_MINUTES" in content
-        assert "NOT CUMULATIVE" in content, (
-            "the rate-vs-cumulative choice is the whole point of the layer and "
-            "must be stated where the next editor will read it"
-        )
-        assert "-mmin" in content
+    def test_identical_logs_flip_the_verdict_purely_by_window_membership(
+        self, synthetic_runner_home: Path
+    ) -> None:
+        """Rate, not cumulative — proven behaviorally on the SAME files.
+
+        Replaces a grep for the string ``NOT CUMULATIVE``. The file set is held
+        constant and only its mtime moves: 12 logs aged past the window read
+        healthy, the same 12 touched into the window read unhealthy. A
+        cumulative implementation cannot produce the first verdict.
+        """
+        listener = synthetic_runner_home / "bin" / "Runner.Listener"
+        proc = subprocess.Popen([str(listener)])
+        diag = synthetic_runner_home / "_diag"
+        try:
+            time.sleep(0.5)
+            crash_logs = []
+            outside = time.time() - 45 * 60  # outside a 30m window
+            for i in range(12):
+                path = diag / f"Runner_20260727-{i:06d}-utc.log"
+                path.write_text("crash\n", encoding="utf-8")
+                os.utime(path, (outside, outside))
+                crash_logs.append(path)
+
+            result = _run_healthcheck(
+                synthetic_runner_home, max_diag_age=None, window_minutes="30"
+            )
+            assert result.returncode == 0, (
+                "12 listener starts that all fall OUTSIDE the rate window must "
+                f"read HEALTHY: rc={result.returncode} out={result.stdout}"
+            )
+
+            now = time.time()
+            for path in crash_logs:
+                os.utime(path, (now, now))
+            result = _run_healthcheck(
+                synthetic_runner_home, max_diag_age=None, window_minutes="30"
+            )
+            assert result.returncode == 1, (
+                "the same 12 logs touched INSIDE the window must read "
+                f"UNHEALTHY: rc={result.returncode} out={result.stdout}"
+            )
+            assert "crash-looping" in result.stdout
+        finally:
+            proc.kill()
+
+    @pytest.mark.parametrize(
+        ("window_minutes", "extra_fresh_logs", "expect_healthy"),
+        [
+            # Default 6/hour. Allowance = ceil(6 * window / 60).
+            ("30", 2, True),  # 3 starts in 30m == 6/hour — at the allowance
+            ("30", 3, False),  # 4 starts in 30m == 8/hour — over it
+            ("120", 11, True),  # 12 starts in 120m == 6/hour — at the allowance
+            ("120", 12, False),  # 13 starts in 120m — over it
+        ],
+    )
+    def test_threshold_is_normalized_to_the_rate_window(
+        self,
+        synthetic_runner_home: Path,
+        window_minutes: str,
+        extra_fresh_logs: int,
+        expect_healthy: bool,
+    ) -> None:
+        """A per-HOUR threshold must be scaled to the window it is counted over.
+
+        The pre-remediation code compared a window-scoped count directly against
+        the per-hour threshold, which is only correct at the 60m default: a 30m
+        window enforced 6-per-30m (= 12/hour, double the intended budget) and a
+        120m window enforced 6-per-120m (= 3/hour, half of it). Every case here
+        is a RED against that arithmetic — ``("30", 3, False)`` reads healthy
+        unnormalized (4 > 6 is false) and ``("120", 11, True)`` reads unhealthy
+        unnormalized (12 > 6 is true).
+
+        The fixture already ships one fresh ``Runner_*.log``, so the total start
+        count is ``extra_fresh_logs + 1``.
+        """
+        listener = synthetic_runner_home / "bin" / "Runner.Listener"
+        proc = subprocess.Popen([str(listener)])
+        diag = synthetic_runner_home / "_diag"
+        try:
+            time.sleep(0.5)
+            for i in range(extra_fresh_logs):
+                (diag / f"Runner_20260727-{i:06d}-utc.log").write_text(
+                    "start\n", encoding="utf-8"
+                )
+
+            result = _run_healthcheck(
+                synthetic_runner_home,
+                max_diag_age=None,
+                window_minutes=window_minutes,
+            )
+            expected_rc = 0 if expect_healthy else 1
+            assert result.returncode == expected_rc, (
+                f"{extra_fresh_logs + 1} starts in a {window_minutes}m window "
+                f"must read {'HEALTHY' if expect_healthy else 'UNHEALTHY'} "
+                f"against the default 6/hour budget: rc={result.returncode} "
+                f"out={result.stdout}"
+            )
+            if not expect_healthy:
+                assert "crash-looping" in result.stdout
+        finally:
+            proc.kill()
+
+    @pytest.mark.parametrize(
+        ("window_minutes", "max_starts_per_hour"),
+        [("0", None), ("abc", None), (None, "-1"), (None, "six")],
+    )
+    def test_unusable_rate_tunables_fail_closed(
+        self,
+        synthetic_runner_home: Path,
+        window_minutes: str | None,
+        max_starts_per_hour: str | None,
+    ) -> None:
+        """A window/threshold the script cannot normalize must not read healthy.
+
+        Integer normalization on unvalidated input is how a check silently
+        stops checking: a zero or non-numeric window would otherwise produce a
+        zero-or-garbage allowance and a permanently green (or permanently red)
+        layer.
+        """
+        listener = synthetic_runner_home / "bin" / "Runner.Listener"
+        proc = subprocess.Popen([str(listener)])
+        try:
+            time.sleep(0.5)
+            result = _run_healthcheck(
+                synthetic_runner_home,
+                max_diag_age=None,
+                window_minutes=window_minutes,
+                max_starts_per_hour=max_starts_per_hour,
+            )
+            assert result.returncode == 1, (
+                "an unusable crash-loop tunable must fail closed: "
+                f"rc={result.returncode} out={result.stdout} err={result.stderr}"
+            )
+            assert "fail closed" in result.stdout
+        finally:
+            proc.kill()
 
 
 class TestEntrypointWatchdog:
@@ -665,19 +833,15 @@ class TestEntrypointOrphanReap:
     in the first place: the orphaned listener still owns the session, so every
     replacement dies within ~5 min and mints a fresh ``Runner_*.log`` that keeps
     the ``_diag`` heartbeat looking healthy.
-    """
 
-    def test_reap_precedes_the_run_sh_spawn(self) -> None:
-        """Static: the reap call must sit ABOVE the spawn in the loop body."""
-        content = ENTRYPOINT.read_text(encoding="utf-8")
-        assert "_reap_orphaned_listeners" in content
-        assert "OMN-15233" in content
-        reap_call = content.index("if ! _reap_orphaned_listeners; then")
-        spawn = content.index('_as_runner "${RUNNER_HOME}/run.sh"')
-        assert reap_call < spawn, (
-            "the reap must run before run.sh is spawned; reaping afterwards "
-            "cannot prevent the session conflict"
-        )
+    Reap-BEFORE-spawn ordering is asserted behaviorally, not by source position:
+    ``test_entrypoint_reaps_orphan_and_replacement_sees_no_session_conflict``
+    starts the entrypoint with an orphan already holding the session against a
+    ``run.sh`` that fails with ``TaskAgentSessionConflictException`` whenever a
+    listener is alive at spawn time. Spawning first is therefore observable in
+    ``LOG_FILE``; a source-order grep (which a comment-only edit could satisfy)
+    would prove strictly less and has been removed rather than kept.
+    """
 
     def test_reap_escalates_term_to_kill(self) -> None:
         """A listener deadlocked in token refresh ignores TERM (OMN-14564)."""
