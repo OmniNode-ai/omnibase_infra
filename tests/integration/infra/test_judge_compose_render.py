@@ -23,6 +23,10 @@ JUDGE_NETWORK = "omnibase-infra-judge-network"
 # surfaces its `:?`-required vars even for services excluded from the judge
 # profile. These values are never used to run containers — `config` only.
 LAYERED_RENDER_DUMMY_ENV = {
+    # OMN-15263: `:?`-required in the base infra file since OMN-15173. The judge
+    # profile excludes the dev redpanda service, but compose still interpolates
+    # its `command:` block during the layered render.
+    "DEV_REDPANDA_ADVERTISE_HOST": "localhost",  # kafka-fallback-ok — test fixture
     "GITHUB_TOKEN": "layered-render-dummy",
     "LINEAR_API_KEY": "layered-render-dummy",
     "ONEX_REGISTRATION_AUTO_ACK": "false",

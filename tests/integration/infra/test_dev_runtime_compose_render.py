@@ -31,12 +31,17 @@ COMPOSE_FILE = REPO_ROOT / "docker" / "docker-compose.infra.yml"
 # `docker compose config` render interpolates every service's env block
 # regardless of --profile, so every other :?-required var in the file must
 # still be supplied here even though this suite only cares about
-# DEV_REDPANDA_ADVERTISE_HOST. Kept in sync with the fixture in
-# tests/integration/docker/test_docker_integration.py::test_compose_config_valid
-# by the tests/ci/test_compose_required_env_coverage.py CI gate (every :?
-# var in compose must appear in that fixture; this module mirrors it rather
-# than importing it, matching the existing per-file convention used by
-# test_prod_runtime_compose_render.py / test_stability_test_runtime_compose_render.py).
+# DEV_REDPANDA_ADVERTISE_HOST. Kept in sync by the
+# tests/ci/test_compose_required_env_coverage.py CI gate, which since OMN-15263
+# checks EVERY registered compose-render fixture (not just the one in
+# tests/integration/docker/test_docker_integration.py). This module mirrors that
+# fixture rather than importing it, matching the existing per-file convention
+# used by test_prod_runtime_compose_render.py /
+# test_stability_test_runtime_compose_render.py.
+#
+# DEV_REDPANDA_ADVERTISE_HOST is deliberately absent below and is registered in
+# that gate as `intentionally_unset` for this module: supplying it here would
+# make test_dev_redpanda_advertise_host_fails_fast_when_unset vacuous.
 _PG_DSN = "postgresql://postgres:test@postgres:5432/omnibase_infra"
 _INTEL_DSN = "postgresql://postgres:test@postgres:5432/omniintelligence"
 _LOCAL_LAN_CIDR = ".".join(("192", "168", "86", "0")) + "/24"

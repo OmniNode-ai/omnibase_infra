@@ -61,6 +61,12 @@ COMPOSE_RENDER_ENV = {
     "ONEX_REGISTRATION_AUTO_ACK": "false",
     "ONEX_SERVICE_CLIENT_SECRET": "render-only-client-secret",
     "POSTGRES_PASSWORD": "postgres",
+    # OMN-15263: the base infra file's dev-lane advertise host is `:?`-required
+    # (OMN-15173) and compose interpolates it during this layered render even
+    # though the prod overlay replaces redpanda's `command:` wholesale. Render
+    # input only — `localhost` keeps the "did the overlay actually override?"
+    # leak detector below meaningful.
+    "DEV_REDPANDA_ADVERTISE_HOST": "localhost",  # kafka-fallback-ok — test fixture
     "REDPANDA_ADVERTISE_HOST": "100.109.203.94",
     "PROD_REDPANDA_ADVERTISE_HOST": "192.168.86.201",
     "PROD_POSTGRES_EXTERNAL_PORT": "25436",
