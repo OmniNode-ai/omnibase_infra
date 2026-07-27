@@ -6,6 +6,7 @@ from __future__ import annotations
 
 import json
 import os
+import re
 import shutil
 import subprocess
 import sys
@@ -19,6 +20,11 @@ COMPOSE_FILES = (
     "docker/docker-compose.infra.yml",
     "docker/docker-compose.stability-test.yml",
 )
+# OMN-14013: kept in sync with STABILITY_TEST_TOPIC_PARTITIONS_PER_SHARD in
+# tests/unit/infra/test_stability_test_runtime_lane.py -- see that constant's
+# docstring for why the durable committed value is raised above the base
+# redpanda.yaml default (7000).
+STABILITY_TEST_TOPIC_PARTITIONS_PER_SHARD = 15000
 REQUIRED_RUNTIME_SERVICES = {
     "omninode-runtime",
     "runtime-effects",
@@ -534,12 +540,35 @@ def test_stability_lane_render_does_not_expose_production_ports_or_services() ->
     assert "localhost:19092" not in redpanda_command
     assert "STABILITY_TEST_REDPANDA_ADVERTISE_HOST" not in redpanda_command
     assert "REDPANDA_ADVERTISE_HOST" not in redpanda_command
+    # OMN-14013: belt #2 (redpanda's own startup flag) must be present (this
+    # lane's `command: !override` previously dropped it entirely) and agree
+    # numerically with belt #3 below -- a substring check alone is not
+    # sufficient here since the rendered command string also carries this
+    # lane's own commented history of prior/stopgap cap values.
+    redpanda_set_flag_match = re.search(
+        r"topic_partitions_per_shard=(\d+)", redpanda_command
+    )
+    assert redpanda_set_flag_match is not None, redpanda_command
+    assert int(redpanda_set_flag_match.group(1)) == (
+        STABILITY_TEST_TOPIC_PARTITIONS_PER_SHARD
+    )
 
     partition_cap_command = "\n".join(services["redpanda-partition-cap"]["command"])
     assert "/usr/bin/rpk -X brokers=redpanda:9092" in partition_cap_command
     assert "admin.hosts=redpanda:9644" in partition_cap_command
     assert "topic_partitions_per_shard" in partition_cap_command
-    assert "7000" in partition_cap_command
+    # Extract the literal value passed to `rpk cluster config set`, not a bare
+    # substring match (this rendered command string also contains this lane's
+    # own comment mentioning superseded values -- see docker-compose.stability-
+    # test.yml's OMN-14013 comment block).
+    partition_cap_match = re.search(
+        r"cluster config set topic_partitions_per_shard\s+(\d+)",
+        partition_cap_command,
+    )
+    assert partition_cap_match is not None, partition_cap_command
+    assert int(partition_cap_match.group(1)) == (
+        STABILITY_TEST_TOPIC_PARTITIONS_PER_SHARD
+    )
     assert "topic_memory_per_partition" in partition_cap_command
     assert "1048576" in partition_cap_command
 

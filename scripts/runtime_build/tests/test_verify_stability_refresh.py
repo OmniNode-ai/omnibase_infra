@@ -30,14 +30,26 @@ _spec.loader.exec_module(_mod)
 check_manifest_count = _mod.check_manifest_count
 check_health = _mod.check_health
 check_cluster_health = _mod.check_cluster_health
+check_partition_headroom = _mod.check_partition_headroom
 check_consumer_group = _mod.check_consumer_group
 check_consumer_group_with_retry = _mod.check_consumer_group_with_retry
 check_service_digest = _mod.check_service_digest
 run_health_gate = _mod.run_health_gate
 build_receipt = _mod.build_receipt
 HealthGateReport = _mod.HealthGateReport
+PartitionHeadroomCheck = _mod.PartitionHeadroomCheck
 CORE_SERVICES = _mod.CORE_SERVICES
 DEFAULT_MIN_CONTRACTS = _mod.DEFAULT_MIN_CONTRACTS
+DEFAULT_PARTITION_WARN_THRESHOLD = _mod.DEFAULT_PARTITION_WARN_THRESHOLD
+
+
+def _topic_list_output(partitions: list[int]) -> str:
+    """Fixed-width `rpk topic list` output -- NAME / PARTITIONS / REPLICAS."""
+    header = "NAME                  PARTITIONS   REPLICAS"
+    rows = [
+        f"topic-{i:04d}          {p}            1" for i, p in enumerate(partitions)
+    ]
+    return "\n".join([header, *rows]) + "\n"
 
 
 # ─── helpers ─────────────────────────────────────────────────────────────────
@@ -193,6 +205,111 @@ def test_cluster_health_not_ok_nonzero_exit():
     assert ok is False
 
 
+# ─── partition headroom [OMN-14013] ─────────────────────────────────────────
+#
+# `rpk cluster health` never surfaces partition-allocation headroom -- these
+# checks prove the NEW dedicated probe does, and that it distinguishes
+# "healthy headroom" / "crossed the visibility warn threshold" / "at or over
+# cap (the literal live incident: 7046/7000, `rpk cluster health` green
+# throughout)" as three genuinely different states.
+
+
+def test_partition_headroom_ok_well_below_threshold():
+    runner = MagicMock(
+        side_effect=[
+            _completed(stdout="15000\n"),  # cluster config get
+            _completed(stdout=_topic_list_output([1] * 1529)),  # topic list
+        ]
+    )
+    result = check_partition_headroom("redpanda-container", runner=runner)
+    assert result.cap == 15000
+    assert result.total_partitions == 1529
+    assert result.at_or_over_cap is False
+    assert result.crossed_warn_threshold is False
+    assert result.error is None
+
+
+def test_partition_headroom_crosses_warn_threshold_but_not_at_cap():
+    runner = MagicMock(
+        side_effect=[
+            _completed(stdout="8000\n"),
+            _completed(stdout=_topic_list_output([1] * 7047)),
+        ]
+    )
+    result = check_partition_headroom(
+        "redpanda-container", runner=runner, warn_threshold=0.8
+    )
+    assert result.usage_ratio is not None
+    assert result.usage_ratio > 0.8
+    assert result.crossed_warn_threshold is True
+    assert result.at_or_over_cap is False
+
+
+def test_partition_headroom_at_or_over_cap_is_a_real_failure():
+    """The literal OMN-14013 live incident: 7046/7000, `rpk cluster health`
+    reported Healthy: true throughout. This check must call it a failure."""
+    runner = MagicMock(
+        side_effect=[
+            _completed(stdout="7000\n"),
+            _completed(stdout=_topic_list_output([1] * 7046)),
+        ]
+    )
+    result = check_partition_headroom("redpanda-container", runner=runner)
+    assert result.at_or_over_cap is True
+    assert "AT OR OVER CAP" in result.detail
+
+
+def test_partition_headroom_exactly_at_cap_is_at_or_over():
+    runner = MagicMock(
+        side_effect=[
+            _completed(stdout="7000\n"),
+            _completed(stdout=_topic_list_output([1] * 7000)),
+        ]
+    )
+    result = check_partition_headroom("redpanda-container", runner=runner)
+    assert result.at_or_over_cap is True
+
+
+def test_partition_headroom_cap_probe_failure_is_not_silently_ok():
+    runner = MagicMock(
+        side_effect=[
+            _completed(returncode=1, stderr="no such config"),
+            _completed(stdout=_topic_list_output([1] * 100)),
+        ]
+    )
+    result = check_partition_headroom("redpanda-container", runner=runner)
+    assert result.cap is None
+    assert result.at_or_over_cap is False  # unknown, not silently healthy
+    assert result.error is not None
+
+
+def test_partition_headroom_topic_list_probe_failure_is_not_silently_ok():
+    runner = MagicMock(
+        side_effect=[
+            _completed(stdout="15000\n"),
+            _completed(returncode=1, stderr="connection refused"),
+        ]
+    )
+    result = check_partition_headroom("redpanda-container", runner=runner)
+    assert result.total_partitions is None
+    assert result.error is not None
+
+
+def test_partition_headroom_parses_partitions_column_by_header_not_position():
+    """The PARTITIONS column must be located by its header label, not a
+    hardcoded index -- a reordered rpk table (NAME / REPLICAS / PARTITIONS)
+    must still sum the right column."""
+    reordered = "NAME       REPLICAS   PARTITIONS\ntopic-a    1          3\ntopic-b    1          4\n"
+    runner = MagicMock(
+        side_effect=[
+            _completed(stdout="100\n"),
+            _completed(stdout=reordered),
+        ]
+    )
+    result = check_partition_headroom("redpanda-container", runner=runner)
+    assert result.total_partitions == 7
+
+
 def _group_describe_output(state: str) -> str:
     """rpk group describe has NO -f json mode -- fixed-width plain text."""
     return (
@@ -299,6 +416,10 @@ def _full_pass_runner():
             if "Image" in fmt:
                 return _completed(stdout="sha256:new-image")
             return _completed(stdout="newrevision1234")
+        if "config" in cmd and "get" in cmd:
+            return _completed(stdout="15000\n")
+        if "topic" in cmd and "list" in cmd:
+            return _completed(stdout=_topic_list_output([1] * 1529))
         if cmd[:3] == ["docker", "exec", "redpanda-container"] and "cluster" in cmd:
             return _completed(stdout="Healthy:                          true\n")
         if "group" in cmd and "describe" in cmd:
@@ -345,6 +466,10 @@ def test_health_gate_overall_fail_when_a_group_is_dead():
             if "Image" in fmt:
                 return _completed(stdout="sha256:new-image")
             return _completed(stdout="newrevision1234")
+        if "config" in cmd and "get" in cmd:
+            return _completed(stdout="15000\n")
+        if "topic" in cmd and "list" in cmd:
+            return _completed(stdout=_topic_list_output([1] * 1529))
         if "cluster" in cmd:
             return _completed(stdout="Healthy:                          true\n")
         if "group" in cmd and "describe" in cmd:
@@ -375,6 +500,101 @@ def test_health_gate_overall_fail_when_a_group_is_dead():
     )
     assert report.overall == "FAIL"
     assert report.groups_stable is False
+
+
+def test_health_gate_overall_fail_when_partition_cap_reached():
+    """OMN-14013: everything else passes, but the broker is AT its partition
+    cap -- overall must be FAIL (a real, checked defect `rpk cluster health`
+    alone would have missed)."""
+    pre_image_ids = dict.fromkeys(CORE_SERVICES, "sha256:old-image")
+
+    def runner(cmd, capture_output=True, text=True, timeout=30, check=False):
+        if cmd[:2] == ["docker", "inspect"]:
+            fmt = cmd[-1]
+            if "Image" in fmt:
+                return _completed(stdout="sha256:new-image")
+            return _completed(stdout="newrevision1234")
+        if "config" in cmd and "get" in cmd:
+            return _completed(stdout="7000\n")
+        if "topic" in cmd and "list" in cmd:
+            return _completed(stdout=_topic_list_output([1] * 7046))
+        if "cluster" in cmd:
+            return _completed(stdout="Healthy:                          true\n")
+        if "group" in cmd and "describe" in cmd:
+            return _completed(stdout=_group_describe_output("Stable"))
+        raise AssertionError(f"unexpected command: {cmd}")
+
+    def opener(url, timeout=10):
+        if "manifest" in url:
+            return _FakeHTTPResponse(
+                json.dumps({"contracts": list(range(DEFAULT_MIN_CONTRACTS))}).encode()
+            )
+        return _FakeHTTPResponse(json.dumps({"status": "healthy"}).encode())
+
+    report = run_health_gate(
+        lane="stability-test",
+        pre_image_ids=pre_image_ids,
+        expected_revision="newrevision1234",
+        manifest_url="http://x/manifest",
+        health_url="http://x/health",
+        broker_container="redpanda-container",
+        min_contracts=DEFAULT_MIN_CONTRACTS,
+        consumer_groups=["group.a"],
+        runner=runner,
+        opener=opener,
+        sleep_fn=lambda _s: None,
+    )
+    assert report.overall == "FAIL"
+    assert report.partition_headroom is not None
+    assert report.partition_headroom.at_or_over_cap is True
+    assert report.partition_headroom_ok is False
+
+
+def test_health_gate_overall_pass_when_partition_headroom_only_crosses_warn():
+    """OMN-14013: crossing the warn threshold (but not the cap) is visibility
+    only -- it must NOT retroactively fail an otherwise-healthy refresh."""
+    pre_image_ids = dict.fromkeys(CORE_SERVICES, "sha256:old-image")
+
+    def runner(cmd, capture_output=True, text=True, timeout=30, check=False):
+        if cmd[:2] == ["docker", "inspect"]:
+            fmt = cmd[-1]
+            if "Image" in fmt:
+                return _completed(stdout="sha256:new-image")
+            return _completed(stdout="newrevision1234")
+        if "config" in cmd and "get" in cmd:
+            return _completed(stdout="8000\n")
+        if "topic" in cmd and "list" in cmd:
+            return _completed(stdout=_topic_list_output([1] * 7047))  # ~88%
+        if "cluster" in cmd:
+            return _completed(stdout="Healthy:                          true\n")
+        if "group" in cmd and "describe" in cmd:
+            return _completed(stdout=_group_describe_output("Stable"))
+        raise AssertionError(f"unexpected command: {cmd}")
+
+    def opener(url, timeout=10):
+        if "manifest" in url:
+            return _FakeHTTPResponse(
+                json.dumps({"contracts": list(range(DEFAULT_MIN_CONTRACTS))}).encode()
+            )
+        return _FakeHTTPResponse(json.dumps({"status": "healthy"}).encode())
+
+    report = run_health_gate(
+        lane="stability-test",
+        pre_image_ids=pre_image_ids,
+        expected_revision="newrevision1234",
+        manifest_url="http://x/manifest",
+        health_url="http://x/health",
+        broker_container="redpanda-container",
+        min_contracts=DEFAULT_MIN_CONTRACTS,
+        consumer_groups=["group.a"],
+        runner=runner,
+        opener=opener,
+        sleep_fn=lambda _s: None,
+    )
+    assert report.overall == "PASS"
+    assert report.partition_headroom is not None
+    assert report.partition_headroom.crossed_warn_threshold is True
+    assert report.partition_headroom.at_or_over_cap is False
 
 
 # ─── receipt: ancestry true/false + rollback re-verification ───────────────
