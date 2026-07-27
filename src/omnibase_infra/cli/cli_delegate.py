@@ -86,6 +86,11 @@ import click
 from omnibase_infra.backends.backend_probe import probe_kafka
 from omnibase_infra.backends.enum_probe_state import EnumProbeState
 from omnibase_infra.cli.cli_node import _resolve_packaged_contract
+from omnibase_infra.cli.omnimarket_drift_guard import (
+    DRIFT_OVERRIDE_ENV,
+    OmnimarketDriftError,
+    check_omnimarket_drift,
+)
 from omnibase_infra.cli.receipt_mode import (
     default_emit_socket_path,
     run_receipt_mode,
@@ -487,6 +492,33 @@ def _hard_timeout(seconds: int) -> Iterator[None]:
         "<state-root>/emit_spool/ for later replay."
     ),
 )
+@click.option(
+    "--omni-home",
+    type=click.Path(path_type=Path),
+    envvar="OMNI_HOME",
+    default=None,
+    help=(
+        "Canonical omni_home workspace root for the local omnimarket drift "
+        "check (OMN-13930). Defaults to the $OMNI_HOME environment variable "
+        "-- the envvar binding is load-bearing: without it the guard "
+        "silently receives omni_home=None and never fires, because callers "
+        "never pass this flag explicitly."
+    ),
+)
+@click.option(
+    "--allow-omnimarket-drift",
+    "allow_omnimarket_drift",
+    is_flag=True,
+    envvar=DRIFT_OVERRIDE_ENV,
+    default=False,
+    help=(
+        "Dispatch even when the omnimarket co-install has drifted from the "
+        "canonical clone (OMN-13930). Refusal is the DEFAULT; this is the "
+        "only supported way past it, and it is named in the refusal message. "
+        f"Bound to ${DRIFT_OVERRIDE_ENV}. Results produced under an override "
+        "come from an UNVERIFIED build and are not evidence."
+    ),
+)
 def delegate_command(
     prompt: str,
     task_type: str | None,
@@ -498,6 +530,8 @@ def delegate_command(
     timeout: int,
     verbose: bool,
     emit_socket: Path | None,
+    omni_home: Path | None,
+    allow_omnimarket_drift: bool,
 ) -> None:
     """Delegate PROMPT to a local LLM and print exactly one typed result.
 
@@ -527,6 +561,8 @@ def delegate_command(
             timeout=timeout,
             verbose=verbose,
             emit_socket=emit_socket,
+            omni_home=omni_home,
+            allow_drift=allow_omnimarket_drift,
         )
     except ValueError as exc:
         raise click.UsageError(str(exc)) from exc
@@ -545,6 +581,8 @@ def run_delegate(
     timeout: int,
     verbose: bool,
     emit_socket: Path | None,
+    omni_home: Path | None = None,
+    allow_drift: bool = False,
 ) -> int:
     """Build the payload, resolve the contract, and dispatch in receipt mode.
 
@@ -579,6 +617,21 @@ def run_delegate(
     backstop trip returns exit code 1 with a clear stderr message instead of
     hanging indefinitely.
     """
+    # OMN-13930: ``DELEGATE_NODE_NAME`` is an omnimarket-provided node, so
+    # this surface carries the same stale/absent co-install exposure as
+    # ``onex skill`` and ``onex node`` -- it was simply the one of the three
+    # never wired to the guard, and a drifted venv surfaced here as a bare
+    # contract-resolution failure with no pointer to the repair command.
+    # Runs FIRST, before any bus probe or payload write, so a drifted venv
+    # never produces a receipt that could be mistaken for evidence.
+    try:
+        check_omnimarket_drift(
+            omni_home=str(omni_home) if omni_home else None,
+            allow_drift=allow_drift,
+        )
+    except OmnimarketDriftError as exc:
+        raise click.ClickException(str(exc)) from exc
+
     resolved_task_type = task_type or classify_task_type(prompt)
     resolved_source = source or DELEGATE_SOURCE
     if bus is None:

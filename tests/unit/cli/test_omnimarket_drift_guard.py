@@ -13,6 +13,7 @@ resolver is exercised against a REAL throwaway git repo (not mocked) so the
 from __future__ import annotations
 
 import json
+import logging
 import subprocess
 from importlib.metadata import PackageNotFoundError
 from pathlib import Path
@@ -21,6 +22,7 @@ from unittest.mock import MagicMock, patch
 import pytest
 
 from omnibase_infra.cli.omnimarket_drift_guard import (
+    DRIFT_OVERRIDE_ENV,
     OmnimarketDriftError,
     canonical_local_omnimarket_commit,
     check_omnimarket_drift,
@@ -234,3 +236,102 @@ def test_drift_check_raises_on_mismatch_with_actionable_message() -> None:
     assert _FAKE_SHA_A[:12] in message
     assert _FAKE_SHA_B[:12] in message
     assert "check-omnimarket-venv-drift.sh --repair" in message
+
+
+# ---------------------------------------------------------------------------
+# Default-ON refusal + the named override escape hatch (OMN-13930)
+# ---------------------------------------------------------------------------
+#
+# The guard shipped fail-closed with NO escape hatch and NO env named in its
+# message: an operator who hit it in a legitimate edge case (deliberately
+# testing an unmerged omnimarket branch, a detached canonical clone mid-
+# rebase) had no supported way past it and no string to search for. The
+# unsupported workarounds are worse than the drift -- unsetting $OMNI_HOME
+# silently disables the guard EVERYWHERE with no warning, and editing the
+# guard source is untracked. These tests pin the contract: refusal stays the
+# default, the override is opt-in, and its name is printed in the refusal
+# itself so the escape hatch is discoverable from the failure alone.
+#
+# The env var is READ at the CLI boundary (click ``envvar=``), never here --
+# this module stays a pure function of its arguments. The env-to-argument
+# binding is proven at the CLI seam in ``test_cli_skill.py``; an unbound
+# option would be exactly the OMN-14531 silent-no-op trap.
+
+
+def _patch_drift(monkeypatch: pytest.MonkeyPatch, installed: str | None) -> None:
+    """Force a determinable drift state: canonical present, installed as given."""
+    monkeypatch.setattr(
+        "omnibase_infra.cli.omnimarket_drift_guard.installed_omnimarket_commit",
+        lambda: installed,
+    )
+    monkeypatch.setattr(
+        "omnibase_infra.cli.omnimarket_drift_guard.canonical_local_omnimarket_commit",
+        lambda omni_home=None: _FAKE_SHA_B,
+    )
+
+
+@pytest.mark.parametrize("installed", [None, _FAKE_SHA_A])
+def test_refusal_message_names_the_override_env(
+    monkeypatch: pytest.MonkeyPatch, installed: str | None
+) -> None:
+    """BOTH refusal paths (absent install, stale install) name the override env.
+
+    An escape hatch nobody can find is not an escape hatch. Asserting on the
+    exported constant rather than a copied literal keeps the message and the
+    binding from drifting apart.
+    """
+    _patch_drift(monkeypatch, installed)
+    with pytest.raises(OmnimarketDriftError) as exc_info:
+        check_omnimarket_drift()
+    assert DRIFT_OVERRIDE_ENV in str(exc_info.value)
+
+
+@pytest.mark.parametrize("installed", [None, _FAKE_SHA_A])
+def test_refusal_is_default_on_when_override_not_requested(
+    monkeypatch: pytest.MonkeyPatch, installed: str | None
+) -> None:
+    """Refusal is the DEFAULT: ``allow_drift`` defaults False at every call site.
+
+    Keyword-only with a False default means a call site added later that
+    forgets the argument fails CLOSED rather than silently disabling the
+    guard.
+    """
+    _patch_drift(monkeypatch, installed)
+    with pytest.raises(OmnimarketDriftError):
+        check_omnimarket_drift()
+
+
+@pytest.mark.parametrize("installed", [None, _FAKE_SHA_A])
+def test_override_downgrades_refusal_to_a_loud_warning(
+    monkeypatch: pytest.MonkeyPatch,
+    caplog: pytest.LogCaptureFixture,
+    installed: str | None,
+) -> None:
+    """An explicit override dispatches, but never silently.
+
+    The warning is the point: a silent bypass would reintroduce the exact
+    invisible-drift failure mode this guard exists to end, so the override
+    must be LOUD on every dispatch and must still name the variable that
+    caused it.
+    """
+    _patch_drift(monkeypatch, installed)
+    with caplog.at_level(logging.WARNING):
+        check_omnimarket_drift(allow_drift=True)  # must not raise
+    combined = " ".join(record.getMessage() for record in caplog.records)
+    assert DRIFT_OVERRIDE_ENV in combined
+    assert _FAKE_SHA_B[:12] in combined
+
+
+def test_override_does_not_warn_when_there_is_no_drift(
+    monkeypatch: pytest.MonkeyPatch, caplog: pytest.LogCaptureFixture
+) -> None:
+    """With the override set but NO drift present, nothing is warned.
+
+    Guards against an implementation that warns on the override's mere
+    presence: that would train operators to ignore the warning, defeating it
+    for the run where drift is real.
+    """
+    _patch_drift(monkeypatch, _FAKE_SHA_B)  # installed == canonical
+    with caplog.at_level(logging.WARNING):
+        check_omnimarket_drift(allow_drift=True)
+    assert not [r for r in caplog.records if DRIFT_OVERRIDE_ENV in r.getMessage()]

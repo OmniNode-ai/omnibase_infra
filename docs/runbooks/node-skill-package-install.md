@@ -114,7 +114,7 @@ Fact (1) is a separate release-pipeline lane (OMN-14064). This runbook covers
 the venv-side guard for fact (2), split detect/repair per CLAUDE.md's
 "enforcement, not detection" rule:
 
-- **Pre-flight (hot path, every `onex skill` dispatch):**
+- **Pre-flight (hot path, every dispatch):**
   `src/omnibase_infra/cli/omnimarket_drift_guard.py` — cheap and LOCAL ONLY
   (compares the current interpreter's installed omnimarket commit against the
   already-checked-out `$OMNI_HOME/omnimarket` clone's HEAD; no network). Fails
@@ -123,6 +123,15 @@ the venv-side guard for fact (2), split detect/repair per CLAUDE.md's
   the `$OMNI_HOME` convention doesn't apply. On a real mismatch it raises a
   `click.ClickException` naming both commits and pointing at the repair
   command below — it never re-installs anything itself.
+
+  Wired on **all three** dispatch surfaces that can reach an omnimarket-provided
+  node: `onex skill` (OMN-14531), `onex node` / `onex run` (OMN-14560), and
+  `onex delegate` (OMN-13930 — `node_delegate_skill_orchestrator` is
+  omnimarket-provided, and this surface previously had no guard at all, so a
+  drifted venv surfaced as a bare contract-resolution failure). Each surface
+  binds `--omni-home` to the `$OMNI_HOME` envvar; that binding is load-bearing,
+  since nothing passes the flag explicitly and an unbound guard silently
+  receives `omni_home=None` and never fires.
 - **Repair (session/cron tick, or run by hand):**
   `scripts/check-omnimarket-venv-drift.sh [--repair] [PYTHON]` — refreshes the
   canonical clone from `origin/dev` (network), compares against the target
@@ -140,3 +149,35 @@ scripts/check-omnimarket-venv-drift.sh --repair /path/to/venv/bin/python
 
 Wire the repair invocation to a session/cron tick so drift self-heals instead
 of waiting on the next operator to hit the pre-flight error.
+
+`--repair` re-runs `install-node-skill-package.sh`, whose step 3 is the
+post-sync smoke: it asserts the mapped operator-skill nodes
+(`node_pr_lifecycle_orchestrator`, `node_session_orchestrator`, plus
+`node_aislop_sweep` as a broad canary) actually resolve from the `onex.nodes`
+entry points afterward. A repair that installs but leaves nodes unresolvable
+exits non-zero rather than reporting success.
+
+### Overriding the refusal (`ONEX_ALLOW_OMNIMARKET_DRIFT`)
+
+Refusal is default-ON and fail-closed. The one supported way past it is:
+
+```bash
+ONEX_ALLOW_OMNIMARKET_DRIFT=1 onex skill <name> ...
+```
+
+The variable is named in every refusal message, so the escape hatch is
+discoverable from the failure itself. Semantics:
+
+- Only explicit affirmatives (`1`, `true`, `yes`, `on`, case-insensitive)
+  override. Empty, `0`, `false`, and anything unrecognized still refuse —
+  ambiguity fails closed, and a variable left exported from a previous session
+  must not silently disable the guard.
+- An override that actually suppresses a refusal logs a WARNING on every
+  dispatch. A silent bypass would recreate the invisible-drift failure the
+  guard exists to end.
+- Output produced under an override comes from an unverified omnimarket build
+  and is **not** evidence. Repair, don't override, for anything that will be
+  cited.
+
+Do not "work around" the guard by unsetting `$OMNI_HOME`: that disables it
+globally and silently on every surface, with no warning and no record.
