@@ -308,3 +308,354 @@ class TestCheckEnvReadsSecretNameDeclarationGate:
             {"tests/unit/test_something.py": ('x = os.environ.get("SOME_API_KEY")\n')},
         )
         assert code == 0
+
+
+# ---------------------------------------------------------------------------
+# OMN-15234: per-name grandfathering regression matrix
+# ---------------------------------------------------------------------------
+# The pre-OMN-15234 matcher was `grep -qE "^\+.*(os\.environ|...)"` -- it fired
+# on ANY added line containing an env read. Editing the default value of a
+# pre-existing, already-grandfathered read re-adds that line, so maintenance of
+# an existing read was indistinguishable from introducing a new one. Every test
+# below drives the REAL script as a bash subprocess against a REAL two-commit
+# git repo; none of them inspects the script's source text.
+
+
+def _init_repo(tmp_path: Path) -> dict[str, str]:
+    git_env = _hermetic_git_env()
+    for args in (
+        ["git", "init", "-b", "base"],
+        ["git", "config", "user.email", "test@example.com"],
+        ["git", "config", "user.name", "Test"],
+    ):
+        subprocess.run(args, cwd=tmp_path, check=True, capture_output=True, env=git_env)
+    return git_env
+
+
+def _write(tmp_path: Path, files: dict[str, str]) -> None:
+    for rel_path, content in files.items():
+        full_path = tmp_path / rel_path
+        full_path.parent.mkdir(parents=True, exist_ok=True)
+        full_path.write_text(content)
+
+
+def _run_change(
+    tmp_path: Path,
+    base_files: dict[str, str],
+    changed_files: dict[str, str],
+    *,
+    deleted: tuple[str, ...] = (),
+    mode: str = "--staged",
+) -> tuple[int, str]:
+    """Commit ``base_files``, apply ``changed_files``, run the gate.
+
+    ``mode="--staged"`` mirrors the pre-commit hook (change staged, uncommitted).
+    ``mode="--base"`` mirrors the CI workflow (change committed on top of the
+    base commit, gate run against that base SHA) -- the same script, the same
+    checks, the other endpoint pair.
+    """
+    git_env = _init_repo(tmp_path)
+    _write(tmp_path, base_files)
+    subprocess.run(
+        ["git", "add", "-A"], cwd=tmp_path, check=True, capture_output=True, env=git_env
+    )
+    subprocess.run(
+        ["git", "commit", "-m", "base"],
+        cwd=tmp_path,
+        check=True,
+        capture_output=True,
+        env=git_env,
+    )
+    base_sha = subprocess.run(
+        ["git", "rev-parse", "HEAD"],
+        cwd=tmp_path,
+        check=True,
+        capture_output=True,
+        text=True,
+        env=git_env,
+    ).stdout.strip()
+
+    _write(tmp_path, changed_files)
+    for rel_path in deleted:
+        (tmp_path / rel_path).unlink()
+    subprocess.run(
+        ["git", "add", "-A"], cwd=tmp_path, check=True, capture_output=True, env=git_env
+    )
+
+    argv = [str(SCRIPT), mode]
+    if mode == "--base":
+        subprocess.run(
+            ["git", "commit", "-m", "change"],
+            cwd=tmp_path,
+            check=True,
+            capture_output=True,
+            env=git_env,
+        )
+        argv.append(base_sha)
+
+    result = subprocess.run(
+        ["bash", *argv],
+        cwd=tmp_path,
+        capture_output=True,
+        text=True,
+        check=False,
+        env=git_env,
+    )
+    return result.returncode, result.stdout + result.stderr
+
+
+# The exact file and read OMN-15233 could not edit without an allowlist entry.
+HANDLER = (
+    "src/omnibase_infra/nodes/node_runner_fleet_health_compute/handlers/"
+    "handler_runner_fleet_health_evaluate.py"
+)
+HANDLER_AT_900 = (
+    "import os\n"
+    "_RUNNER_HEALTH_MAX_DIAG_AGE_SECONDS = int(\n"
+    '    os.environ.get("RUNNER_HEALTH_MAX_DIAG_AGE_SECONDS", "900")\n'
+    ")\n"
+)
+HANDLER_AT_4500 = HANDLER_AT_900.replace('"900"', '"4500"')
+
+
+@pytest.mark.unit
+class TestCheckEnvReadsGrandfatheredReadEdits:
+    """OMN-15234 four-case matrix, plus the cases that must stay blocked."""
+
+    def test_default_value_edit_on_grandfathered_read_is_allowed(
+        self, tmp_path: Path
+    ) -> None:
+        """THE regression: 900 -> 4500 on a read that already exists in this file."""
+        code, output = _run_change(
+            tmp_path,
+            {HANDLER: HANDLER_AT_900},
+            {HANDLER: HANDLER_AT_4500},
+        )
+        assert code == 0, output
+
+    def test_new_name_in_the_same_handler_file_is_still_blocked(
+        self, tmp_path: Path
+    ) -> None:
+        """Bidirectional proof that the ALLOW above is narrowing, not an allowlist.
+
+        This is the same path as the test above. If ``handler_runner_fleet_
+        health_evaluate.py`` were still in ``APPROVED_INFIX_PATTERNS`` (the
+        OMN-15233 entry this ticket removed), a brand-new env name here would
+        pass -- so this test fails the moment the allowlist entry comes back.
+        """
+        code, output = _run_change(
+            tmp_path,
+            {HANDLER: HANDLER_AT_900},
+            {
+                HANDLER: HANDLER_AT_900
+                + '_NEW = os.environ.get("RUNNER_HEALTH_BRAND_NEW_KNOB", "1")\n'
+            },
+        )
+        assert code == 1
+        assert "BLOCKED" in output
+        assert "RUNNER_HEALTH_BRAND_NEW_KNOB" in output
+        # The grandfathered name must NOT be reported.
+        assert "'RUNNER_HEALTH_MAX_DIAG_AGE_SECONDS' is not read" not in output
+
+    def test_default_value_edit_on_a_never_allowlisted_file_is_allowed(
+        self, tmp_path: Path
+    ) -> None:
+        """The same edit on a path that was never on any allowlist.
+
+        ``HANDLER`` was allowlisted at OMN-15233, so an ALLOW there could in
+        principle come from the allowlist rather than the narrowed matcher.
+        ``src/mod.py`` never was, so this isolates the narrowing itself.
+        """
+        code, output = _run_change(
+            tmp_path,
+            {"src/mod.py": 'import os\nA = os.environ.get("EXISTING_NAME", "900")\n'},
+            {"src/mod.py": 'import os\nA = os.environ.get("EXISTING_NAME", "4500")\n'},
+        )
+        assert code == 0, output
+
+    def test_new_name_in_an_existing_file_is_blocked(self, tmp_path: Path) -> None:
+        code, output = _run_change(
+            tmp_path,
+            {"src/mod.py": 'import os\nA = os.environ.get("EXISTING_NAME")\n'},
+            {
+                "src/mod.py": (
+                    "import os\n"
+                    'A = os.environ.get("EXISTING_NAME")\n'
+                    'B = os.environ["A_BRAND_NEW_NAME"]\n'
+                )
+            },
+        )
+        assert code == 1
+        assert "A_BRAND_NEW_NAME" in output
+
+    def test_new_name_in_a_new_file_is_blocked(self, tmp_path: Path) -> None:
+        code, output = _run_change(
+            tmp_path,
+            {"src/mod.py": 'import os\nA = os.environ.get("EXISTING_NAME")\n'},
+            {"src/other.py": 'import os\nB = os.environ.get("A_BRAND_NEW_NAME")\n'},
+        )
+        assert code == 1
+        assert "src/other.py" in output
+        assert "A_BRAND_NEW_NAME" in output
+
+    def test_existing_read_moved_to_a_different_file_is_blocked(
+        self, tmp_path: Path
+    ) -> None:
+        """The boundary moved: the destination file's base has no such read.
+
+        Grandfathering is per (file, name) -- otherwise the gate could be
+        defeated by relocating a read into any module.
+        """
+        code, output = _run_change(
+            tmp_path,
+            {
+                "src/mod.py": 'import os\nA = os.environ.get("EXISTING_NAME")\n',
+                "src/other.py": "VALUE = 1\n",
+            },
+            {
+                "src/mod.py": "import os\n",
+                "src/other.py": 'import os\nA = os.environ.get("EXISTING_NAME")\n',
+            },
+        )
+        assert code == 1
+        assert "src/other.py" in output
+        assert "EXISTING_NAME" in output
+
+    def test_existing_read_relocated_within_the_same_file_is_allowed(
+        self, tmp_path: Path
+    ) -> None:
+        """Same file, same name -- the read moved lines, not boundaries."""
+        code, output = _run_change(
+            tmp_path,
+            {
+                "src/mod.py": (
+                    "import os\n"
+                    'A = os.environ.get("EXISTING_NAME")\n'
+                    "\n\ndef f():\n    return A\n"
+                )
+            },
+            {
+                "src/mod.py": (
+                    "import os\n"
+                    "\n\ndef f():\n"
+                    '    return os.environ.get("EXISTING_NAME")\n'
+                )
+            },
+        )
+        assert code == 0, output
+
+    def test_removing_a_read_is_allowed(self, tmp_path: Path) -> None:
+        code, output = _run_change(
+            tmp_path,
+            {"src/mod.py": ('import os\nA = os.environ.get("EXISTING_NAME")\nB = 2\n')},
+            {"src/mod.py": "B = 2\n"},
+        )
+        assert code == 0, output
+
+    def test_deleting_the_whole_file_is_allowed(self, tmp_path: Path) -> None:
+        code, output = _run_change(
+            tmp_path,
+            {
+                "src/mod.py": 'import os\nA = os.environ.get("EXISTING_NAME")\n',
+                "src/keep.py": "B = 2\n",
+            },
+            {"src/keep.py": "B = 3\n"},
+            deleted=("src/mod.py",),
+        )
+        assert code == 0, output
+
+    def test_dynamic_read_of_a_grandfathered_name_is_blocked(
+        self, tmp_path: Path
+    ) -> None:
+        """Fail closed: no literal name means nothing to grandfather against."""
+        code, output = _run_change(
+            tmp_path,
+            {"src/mod.py": 'import os\nA = os.environ.get("EXISTING_NAME")\n'},
+            {
+                "src/mod.py": (
+                    "import os\n"
+                    'A = os.environ.get("EXISTING_NAME")\n'
+                    'NAME = "EXISTING_NAME"\n'
+                    "B = os.environ.get(NAME)\n"
+                )
+            },
+        )
+        assert code == 1
+        assert "BLOCKED" in output
+
+    def test_bare_from_os_import_environ_stays_blocked_in_an_env_reading_file(
+        self, tmp_path: Path
+    ) -> None:
+        code, output = _run_change(
+            tmp_path,
+            {"src/mod.py": 'import os\nA = os.environ.get("EXISTING_NAME")\n'},
+            {
+                "src/mod.py": (
+                    "import os\n"
+                    "from os import environ\n"
+                    'A = os.environ.get("EXISTING_NAME")\n'
+                )
+            },
+        )
+        assert code == 1
+        assert "BLOCKED" in output
+
+    def test_a_second_name_added_alongside_a_grandfathered_one_on_one_line(
+        self, tmp_path: Path
+    ) -> None:
+        """One added line can carry both a grandfathered and a new name."""
+        code, output = _run_change(
+            tmp_path,
+            {"src/mod.py": 'import os\nA = os.environ.get("EXISTING_NAME")\n'},
+            {
+                "src/mod.py": (
+                    "import os\n"
+                    'A = os.environ.get("EXISTING_NAME") or os.environ.get("NEW_NAME")\n'
+                )
+            },
+        )
+        assert code == 1
+        assert "NEW_NAME" in output
+
+
+@pytest.mark.unit
+class TestCheckEnvReadsBaseModeParity:
+    """The CI surface (`--base <sha>`), not just the pre-commit surface.
+
+    check-env-reads-gate.yml runs `scripts/check-env-reads.sh --base <base_sha>`.
+    Grandfathering resolves the base blob from a DIFFERENT endpoint in that
+    mode (merge-base of the ref and HEAD, matching the `REF...HEAD` three-dot
+    diff), so both endpoints get their own proof.
+    """
+
+    def test_default_value_edit_is_allowed_in_base_mode(self, tmp_path: Path) -> None:
+        code, output = _run_change(
+            tmp_path,
+            {HANDLER: HANDLER_AT_900},
+            {HANDLER: HANDLER_AT_4500},
+            mode="--base",
+        )
+        assert code == 0, output
+
+    def test_new_name_is_blocked_in_base_mode(self, tmp_path: Path) -> None:
+        code, output = _run_change(
+            tmp_path,
+            {HANDLER: HANDLER_AT_900},
+            {
+                HANDLER: HANDLER_AT_900
+                + '_NEW = os.environ.get("RUNNER_HEALTH_BRAND_NEW_KNOB", "1")\n'
+            },
+            mode="--base",
+        )
+        assert code == 1
+        assert "RUNNER_HEALTH_BRAND_NEW_KNOB" in output
+
+    def test_new_file_is_blocked_in_base_mode(self, tmp_path: Path) -> None:
+        code, output = _run_change(
+            tmp_path,
+            {"src/mod.py": "VALUE = 1\n"},
+            {"src/other.py": 'import os\nB = os.getenv("A_BRAND_NEW_NAME")\n'},
+            mode="--base",
+        )
+        assert code == 1
+        assert "A_BRAND_NEW_NAME" in output

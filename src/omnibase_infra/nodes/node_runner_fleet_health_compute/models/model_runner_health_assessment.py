@@ -14,6 +14,10 @@ legitimately disagree -- a GitHub-online runner with a fresh heartbeat, an
 unhealthy container and two listeners is ``state=HEALTHY`` and
 ``readiness=NOT_READY``, because container health and listener topology are
 not inputs to the precedence chain at all.
+
+OMN-15234 carries GitHub/Docker corroboration facts on the assessment so a
+LISTENER_ZOMBIE restart recommendation cannot be derived from stale heartbeat
+text alone.
 """
 
 from __future__ import annotations
@@ -70,6 +74,33 @@ class ModelRunnerHealthAssessment(BaseModel):
             "Typed re-arm signal for LISTENER_ZOMBIE (ModelRunnerFleetRunnerFact."
             "diag_heartbeat_age_seconds at classification time). None if the "
             "probe could not determine an age."
+        ),
+    )
+    github_status: str = Field(
+        ...,
+        description=(
+            "GitHub registry status at classification time ('online'/'offline'/"
+            "'not_registered'). OMN-15234: this is the registry cross-check the "
+            "LISTENER_ZOMBIE restart recommendation is corroborated against -- "
+            "'if the registry says online, the stale-heartbeat flag is the bug' "
+            "(OMN-15233 runbook rule). Typed, not parsed out of `detail`."
+        ),
+    )
+    github_busy: bool = Field(
+        ...,
+        description=(
+            "Whether GitHub reported a job in flight at classification time. "
+            "OMN-15234: a busy runner is never recommended for restart on "
+            "heartbeat staleness -- restarting it would kill a live job."
+        ),
+    )
+    docker_status: str = Field(
+        default="",
+        description=(
+            "Docker container state at classification time (running/restarting/"
+            "not_found/...). Empty when the docker probe reported none. "
+            "OMN-15234: corroborating evidence for the LISTENER_ZOMBIE restart "
+            "recommendation."
         ),
     )
     readiness: EnumRunnerReadinessState = Field(

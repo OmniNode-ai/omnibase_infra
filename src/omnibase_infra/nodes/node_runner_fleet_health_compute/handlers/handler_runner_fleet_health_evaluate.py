@@ -51,6 +51,12 @@ The quarantine/bounce split fixes the other half -- the false-positive
 restart storm. A stale-looking heartbeat alone can no longer produce a
 restart recommendation: a bounce needs a determinate source, an idle runner,
 and a failing signal a force-recreate can actually fix.
+
+OMN-15234: LISTENER_ZOMBIE no longer maps to RESTART_RUNNER on the staleness
+flag alone. The classification threshold (4500s, held equal to
+``docker/runners/healthcheck.sh``) is a heuristic over the idle ``_diag``
+token-refresh cadence, so the restart *recommendation* additionally requires
+composite corroborating evidence -- see ``_zombie_restart_corroboration``.
 """
 
 from __future__ import annotations
@@ -103,6 +109,12 @@ logger = logging.getLogger(__name__)
 # (runner-monitor.sh, healthcheck.sh) so all three surfaces agree on
 # thresholds during the trust-building period (OMN-13109/OMN-13912/OMN-13915/OMN-15233).
 _CRASHLOOP_RESTART_THRESHOLD = int(os.environ.get("CRASHLOOP_RESTART_THRESHOLD", "5"))
+# 4500s (75 min) matches docker/runners/healthcheck.sh exactly (OMN-15233). An
+# IDLE runner writes _diag only on its ~50-minute OAuth/AAD token refresh, so
+# the previous 900s default sat below the healthy idle cadence and classified
+# idle-but-healthy runners as LISTENER_ZOMBIE for ~35 of every 50 minutes.
+# Keep this value equal to healthcheck.sh's -- a divergence means the node
+# verdict and the container healthcheck disagree about what "stale" means.
 _RUNNER_HEALTH_MAX_DIAG_AGE_SECONDS = int(
     os.environ.get("RUNNER_HEALTH_MAX_DIAG_AGE_SECONDS", "4500")
 )
@@ -421,7 +433,16 @@ def _is_bounce_eligible(
     if fact.github_busy:
         return False
     failing = {s.signal for s in signals if s.outcome == _EnumOutcome.FAIL}
-    return bool(failing & _BOUNCE_REMEDIABLE_SIGNALS)
+    remediable = failing & _BOUNCE_REMEDIABLE_SIGNALS
+    if not remediable:
+        return False
+    if remediable == {_EnumSignal.DIAG_HEARTBEAT}:
+        return (
+            fact.github_status != "online"
+            or fact.docker_status not in ("", "running")
+            or fact.docker_restart_count > 0
+        )
+    return True
 
 
 def _annotate_indeterminate(
@@ -443,6 +464,56 @@ def _annotate_indeterminate(
         return detail
     note = f"INDETERMINATE ({', '.join(failed)}): classification unreliable"
     return f"{detail}; {note}" if detail else note
+
+
+def _zombie_restart_corroboration(
+    assessment: ModelRunnerHealthAssessment,
+) -> str | None:
+    """Corroborating evidence for a LISTENER_ZOMBIE restart, or None (OMN-15234).
+
+    A stale ``_diag`` heartbeat is a *single* signal, and on an idle runner it
+    is an expected one: an idle listener writes ``_diag`` only on its ~50-minute
+    OAuth/AAD token refresh. OMN-15233's live canary measured exactly that --
+    on the old 900s threshold, control runners flipped unhealthy at diag ages
+    of 1120-1237s while the GitHub registry reported 64/64 ONLINE, busy=0 and
+    every container had ``RestartCount=0``. Raising the threshold to 4500s
+    shrinks that window; it does not make the flag alone sufficient evidence to
+    restart a runner, because the threshold is a heuristic over a cadence that
+    varies with token-refresh timing.
+
+    So the RESTART_RUNNER recommendation now requires the staleness flag PLUS
+    at least one independent fact that the runner is actually not serving, and
+    requires that neither probe source failed. The runbook rule this encodes
+    (docs/runbooks/runner-fleet-listener-liveness.md, OMN-15233): *cross-check
+    the GitHub runner registry before ANY restart sweep -- if the runner is
+    online, the flag is the bug.*
+
+    Returns the evidence string when a restart is warranted, or None when the
+    only thing observed is a stale heartbeat on an otherwise-serving runner.
+    """
+    if not assessment.is_determinate:
+        # Fail closed (OMN-14228 Slice A): a failed GitHub/Docker probe is not
+        # evidence of a zombie, and "indeterminate" must never read as "restart".
+        return None
+    if assessment.github_busy:
+        # Restarting a runner mid-job destroys the job. A busy runner writing no
+        # _diag contradicts itself; the contradiction is not restart evidence.
+        return None
+    if assessment.github_status != "online":
+        return (
+            f"github_status={assessment.github_status!r}: the registry does not "
+            "report this runner online"
+        )
+    if assessment.docker_status not in ("", "running"):
+        return (
+            f"docker_status={assessment.docker_status!r}: the container is not running"
+        )
+    if assessment.docker_restart_count > 0:
+        return (
+            f"docker_restart_count={assessment.docker_restart_count}: the container "
+            "has restarted at least once"
+        )
+    return None
 
 
 def _recommend_for_assessment(
@@ -600,6 +671,13 @@ class HandlerRunnerFleetHealthEvaluate:
                 is_determinate=is_determinate,
                 docker_restart_count=fact.docker_restart_count,
                 diag_heartbeat_age_seconds=fact.diag_heartbeat_age_seconds,
+                # OMN-15234: typed corroboration facts the LISTENER_ZOMBIE
+                # restart recommendation is derived from. Carried on the
+                # assessment (not read behind the recommender's back) so the
+                # published verdict shows the evidence the recommendation used.
+                github_status=fact.github_status,
+                github_busy=fact.github_busy,
+                docker_status=fact.docker_status,
                 readiness=readiness,
                 signals=signals,
                 quarantined=quarantined,
