@@ -7,7 +7,7 @@
 
 > **"All runner containers are `Up (healthy)`" is NOT sufficient evidence that the fleet is serving jobs.**
 > The GitHub org runner registry (`GET /orgs/OmniNode-ai/actions/runners`) is the authoritative signal, and the `runner-fleet-canary` scheduled workflow is the enforced surface that watches it.
-
+>
 > **The converse is equally true (OMN-15233): "Docker says unhealthy" is NOT sufficient evidence that a runner is degraded.**
 > **Cross-check the GitHub runner registry before ANY restart sweep. If the runners are online, the flag is the bug — do not restart.**
 > ```bash
