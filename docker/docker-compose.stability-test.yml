@@ -58,6 +58,16 @@ services:
       - redpanda:33145
       - --advertise-rpc-addr
       - redpanda:33145
+      # OMN-14013: this lane's `command:` fully replaces the base redpanda.yaml
+      # command (Compose Docker merge semantics for a scalar-list key), which
+      # silently dropped the base's `--set topic_partitions_per_shard=7000`
+      # startup flag for this lane -- belt #2 of the base's documented 3-belt
+      # partition-cap design (redpanda/.bootstrap.yaml) was never actually
+      # applied here. Restore it explicitly, pinned to the lane's raised cap so
+      # a cold start (fresh volume, before redpanda-partition-cap's post-start
+      # rpk call completes) never bootstraps at the un-raised 7000 default.
+      - --set
+      - topic_partitions_per_shard=15000
     ports: !override
       - *stability_test_redpanda_kafka_port_publish
       - *stability_test_redpanda_admin_port_publish
@@ -68,7 +78,20 @@ services:
     command:
       - |
         set -eu
-        /usr/bin/rpk -X brokers=redpanda:9092 -X admin.hosts=redpanda:9644 cluster config set topic_partitions_per_shard 7000
+        # OMN-14013: this is the belt that ACTUALLY governs the durable cap for
+        # this lane. warm_broker_topic_provisioning() in deploy-runtime.sh
+        # force-recreates this one-shot service on EVERY redeploy of the lane
+        # (refresh_stability_lane.sh -> deploy-runtime.sh --restart), including
+        # a restart-only deploy that never touches the volume. A raised cap
+        # applied only via a live `rpk cluster config set` (not committed here)
+        # is therefore NOT durable -- the next redeploy silently resets it back
+        # to whatever literal value is hardcoded on this line. Confirmed live
+        # regression: 2026-07-06 raised to 15000 dynamically -> reset to 7000
+        # by a later redeploy -> re-raised to 8000 dynamically on 2026-07-26 as
+        # a stopgap (see OMN-14013 ticket comments). Pin the value HERE so it
+        # survives every redeploy; edit this value (and the --set flag on the
+        # `redpanda` service's command above) together if it must change again.
+        /usr/bin/rpk -X brokers=redpanda:9092 -X admin.hosts=redpanda:9644 cluster config set topic_partitions_per_shard 15000
         /usr/bin/rpk -X brokers=redpanda:9092 -X admin.hosts=redpanda:9644 cluster config set topic_memory_per_partition 1048576
     depends_on:
       redpanda:
