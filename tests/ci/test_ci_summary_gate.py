@@ -205,3 +205,22 @@ class TestCiSummaryGate:
         code, report = evaluate(jobs)
         assert code == EXIT_FAILURE
         assert "Effect-Assertion Gate (RT-5)" in report
+
+    def test_occ_companion_merged_gate_is_strict_and_fails_closed(self) -> None:
+        # OMN-15214: the companion-merged gate makes the 2026-07-26 hygiene-sweep
+        # trigger state (OPEN companion + MERGED product PR) unreachable via the
+        # merge path. It must be STRICT so a red/absent result fails the required
+        # "CI Summary" context — folding into the umbrella instead of adding a
+        # new top-level required context avoids the never-reports wedge.
+        gate = "OCC Companion Merged Gate (OMN-15214)"
+        assert gate in STRICT_GATE_JOBS
+        jobs = [j for j in _all_gates("success") if j["name"] != gate]
+        jobs.append(_job(gate, "failure"))
+        code, report = evaluate(jobs)
+        assert code == EXIT_FAILURE
+        assert gate in report
+        # A skip must also fail closed — the job is unconditional in ci.yml.
+        jobs = [j for j in _all_gates("success") if j["name"] != gate]
+        jobs.append(_job(gate, "skipped"))
+        code, _ = evaluate(jobs)
+        assert code == EXIT_FAILURE

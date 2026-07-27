@@ -90,6 +90,7 @@ STRICT_GATE_JOBS: tuple[str, ...] = (
     "Writer-Migration Coupling Check",  # migration-required-check
     "no-noncanonical-lifecycle-classes",  # OMN-14350 non-canonical lifecycle-class ratchet
     "Effect-Assertion Gate (RT-5)",  # OMN-14467 deploy-trigger fails closed on zero output
+    "OCC Companion Merged Gate (OMN-15214)",  # occ-companion-merged — cited OCC evidence must be MERGED before product merge
 )
 
 # Gates the old ci-summary accepted as ``success`` OR ``skipped``. Each carries
