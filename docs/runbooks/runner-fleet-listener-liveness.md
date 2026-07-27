@@ -1,7 +1,7 @@
 # Runner fleet listener liveness (OMN-13915)
 
 **Status:** active runbook
-**Ticket:** OMN-13915 (incident 2026-07-03) — related: OMN-12433 (egress healthcheck), OMN-13109 (silent wedge / crash loop monitor), OMN-15233 (2026-07-27 threshold recalibration + orphan/crash-loop detection)
+**Ticket:** OMN-13915 (incident 2026-07-03) — related: OMN-12433 (egress healthcheck), OMN-13109 (silent wedge / crash loop monitor), OMN-15233 (2026-07-27 threshold recalibration + orphan/crash-loop detection), OMN-15255 (composite readiness + quarantine gate)
 
 ## The rule that changed
 
@@ -39,6 +39,66 @@ A point-in-time process/container check cannot prove a runner is serving jobs:
 | 2 | `docker/runners/entrypoint.sh` watchdog | listener process exists while `run.sh` runs; recycles the wrapper tree after 5×60s consecutive misses (bounded by `LISTENER_RESTART_MAX=50`, then container exit → restart policy). **OMN-14564:** also recycles (with an explicit listener kill) when the listener process is alive but its `_diag` heartbeat is older than `LISTENER_HEARTBEAT_MAX_AGE_SECONDS` (3600s) for `LISTENER_HEARTBEAT_MISSES` (3) consecutive 60s ticks — never while a `Runner.Worker` job is executing. **OMN-15233:** reaps any surviving listener (TERM → KILL after `LISTENER_REAP_TIMEOUT_SECONDS`) BEFORE spawning a replacement | ≤ ~6 min (dead) / ≤ ~63 min (hung: 3600s staleness + 3×60s) |
 | 3 | `runner-monitor.sh` cron on `.201` (OMN-13109) | Docker vs GitHub divergence, silent wedge, crash loop → Slack | 3 min cadence, shares fate with host |
 | 4 | **`runner-fleet-canary` GHA workflow (authoritative)** | GitHub org registry online count vs `config/runner_fleet.yaml` `expected_count`; fails the run when offline+missing > `RUNNER_CANARY_MAX_OFFLINE` (5) | 15 min cadence, GitHub-hosted — survives total `.201` loss |
+
+## Composite readiness — the adjudicating surface (OMN-15255)
+
+Layers 1–4 above each answer one question and none of them adjudicates when two
+disagree. On 2026-07-27T16:40Z the registry read `{total: 64, online: 64, busy: 0}`
+while **53 of 64 containers read docker-unhealthy**. Deciding which surface was
+right meant a human diffing three outputs by hand — `gh api .../actions/runners`,
+`docker ps`, and per-container `_diag` mtimes.
+
+`node_runner_fleet_health_compute` now emits one composite verdict per runner.
+Readiness is a **conjunction** over six independently-probed signals; a runner is
+`READY` only when every one PASSes:
+
+| Signal | PASS when |
+|---|---|
+| `github_registration` | registry reports `online` |
+| `docker_health` | container state `running` and health `healthy` (or `none` — image declares no healthcheck) |
+| `diag_heartbeat` | newest `_diag/*.log` age ≤ `RUNNER_HEALTH_MAX_DIAG_AGE_SECONDS` (**4500s**, brackets the ~50-min token-refresh cycle — OMN-15233) |
+| `listener_topology` | exactly one `Runner.Listener`, zero at PPID 1 |
+| `container_stability` | `RestartCount` ≤ `CRASHLOOP_RESTART_THRESHOLD` (5) |
+| `disk_capacity` | runner-host disk used < `RUNNER_READINESS_MAX_DISK_USED_PERCENT` (90) |
+
+Read the verdict, not the individual surfaces:
+
+- `ready_count` — usable capacity. **This, not `online_count`.**
+- `quarantined_runners` — a signal was probed and FAILed.
+- `bounce_eligible_runners` — the strict subset a force-recreate can actually fix.
+- `readiness_signal_rollups` — which surface disagrees, and about how many runners.
+
+**Two fail directions, on purpose.** Readiness fails CLOSED: `UNKNOWN` is not
+`READY`, so an unprobeable runner is not counted as capacity. The bounce gate
+fails SAFE: no restart on an indeterminate source, never on a busy runner, and
+never for a cause a recreate cannot fix. Concretely — a GitHub-offline runner
+whose local listener is single and non-orphaned with a fresh heartbeat is
+quarantined but **never bounced** (OMN-14057 status-lag corroboration), and a
+full host disk is quarantined but never bounced (a recreate frees no disk).
+
+`state` (the precedence classification) and `readiness` legitimately disagree, and
+neither is wrong: `state` answers "what is the most severe single thing wrong",
+first-match-wins; `readiness` answers "may this runner take work". A runner that
+is GitHub-online with a fresh heartbeat, an unhealthy container and two listeners
+is `state=HEALTHY` and `readiness=NOT_READY`.
+
+**Retired by this:** the four state-keyed `RESTART_RUNNER` branches
+(`CRASH_LOOPING` 0.9 / `LISTENER_ZOMBIE` 0.85 / `OFFLINE_IDLE` 0.6 / `WEDGED` 0.5)
+are **deleted** — bounce-eligibility is now the single producer of a restart
+recommendation. Four independently-tunable confidence heuristics over the same
+facts is how one misread threshold (the retired 900s heartbeat window) became a
+fleet-wide restart storm with nothing able to veto it.
+
+**Not yet retired — rollout-gated.** The manual three-surface cross-check in
+"The rule that changed" above remains the operator procedure until the extended
+probe is deployed: `docker_health`, listener topology and host disk are gathered
+by `node_runner_health_snapshot_effect`, and until that runs against the fleet
+those signals report `UNKNOWN`. UNKNOWN quarantines nothing and bounces nothing,
+so the code is inert before rollout by construction — verify `ready_count` is
+non-zero before trusting the view.
+
+Coverage: `tests/unit/nodes/node_runner_fleet_maintain/test_runner_readiness_composite_omn15255.py`
+and `..._facts_effect_omn15255.py`.
 
 ## Hung-listener mode (OMN-14564, incident 2026-07-16..23)
 

@@ -35,6 +35,34 @@ class ModelRunnerFleetRunnerFact(BaseModel):
     docker_restart_count: int = Field(
         default=0, ge=0, description="Docker RestartCount (crash-loop signal)."
     )
+    docker_health: str = Field(
+        default="",
+        description=(
+            "Docker healthcheck status (OMN-15255): 'healthy', 'unhealthy', "
+            "'starting', or 'none' when the image declares no healthcheck. "
+            "Empty string means the probe did not report a value -- UNKNOWN, "
+            "NOT healthy. This is the surface that read unhealthy on 53 of 64 "
+            "containers while the GitHub registry reported 64/64 online."
+        ),
+    )
+    listener_process_count: int | None = Field(
+        default=None,
+        ge=0,
+        description=(
+            "Count of live Runner.Listener processes inside the container "
+            "(OMN-15255). Exactly 1 is correct; 0 is a dead listener and >1 is "
+            "the duplicate-listener mode that raises "
+            "TaskAgentSessionConflictException. None means undetermined."
+        ),
+    )
+    orphaned_listener_count: int | None = Field(
+        default=None,
+        ge=0,
+        description=(
+            "Count of Runner.Listener processes reparented to PPID 1 "
+            "(OMN-15233 orphan mode). None means undetermined."
+        ),
+    )
     diag_heartbeat_age_seconds: float | None = Field(
         default=None,
         description=(
