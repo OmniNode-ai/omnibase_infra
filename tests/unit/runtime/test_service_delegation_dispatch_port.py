@@ -312,6 +312,42 @@ async def test_runtime_delegation_dispatch_port_defaults_quality_contract_kwargs
     assert payloads[0]["acceptance_criteria"] == []
 
 
+@pytest.mark.asyncio
+async def test_runtime_delegation_dispatch_port_accepts_absent_optional_bus_features(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Handler compatibility kwargs must not break the existing bus route."""
+    _, payloads, _, _ = await _dispatch_with_fake_broker(
+        monkeypatch,
+        backend_id=None,
+        response_contract=None,
+    )
+
+    assert "backend_id" not in payloads[0]
+    assert "response_contract" not in payloads[0]
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    ("dispatch_kwargs", "unsupported_feature"),
+    [
+        ({"backend_id": "local-coder-mlx"}, "backend_id"),
+        (
+            {"response_contract": {"type": "object"}},
+            "response_contract",
+        ),
+    ],
+)
+async def test_runtime_delegation_dispatch_port_rejects_unsupported_bus_features(
+    monkeypatch: pytest.MonkeyPatch,
+    dispatch_kwargs: dict[str, object],
+    unsupported_feature: str,
+) -> None:
+    """Explicit bus-only feature requests fail closed instead of being dropped."""
+    with pytest.raises(NotImplementedError, match=unsupported_feature):
+        await _dispatch_with_fake_broker(monkeypatch, **dispatch_kwargs)
+
+
 def test_normalize_result_payload_flattens_delegation_event_shape() -> None:
     payload = {
         "topic": "onex.evt.omnibase-infra.delegation-completed.v1",
