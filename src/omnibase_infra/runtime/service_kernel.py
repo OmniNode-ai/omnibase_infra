@@ -3343,7 +3343,17 @@ async def bootstrap() -> int:
             plugin_id = plugin.plugin_id
             try:
                 consumer_result = await plugin.start_consumers(plugin_config)
-                if consumer_result and consumer_result.unsubscribe_callbacks:
+                if not consumer_result.success:
+                    logger.warning(
+                        "Plugin '%s' failed to start consumers: %s (correlation_id=%s)",
+                        plugin_id,
+                        consumer_result.get_error_message_or_default(
+                            consumer_result.message or "unknown"
+                        ),
+                        correlation_id,
+                    )
+                    continue
+                if consumer_result.unsubscribe_callbacks:
                     plugin_unsubscribe_callbacks.extend(
                         consumer_result.unsubscribe_callbacks
                     )

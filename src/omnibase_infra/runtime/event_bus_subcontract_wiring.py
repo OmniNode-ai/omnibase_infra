@@ -132,6 +132,20 @@ if TYPE_CHECKING:
     )
 
 
+# Contract ownership metadata is consumed by auto-wiring before this loader runs.
+# It is intentionally not part of ``ModelEventBusSubcontract``, which models the
+# transport behavior used by ``EventBusSubcontractWiring``. Preserve strict
+# validation for every other key while removing only the explicitly supported
+# ownership fields at this adapter boundary.
+_EVENT_BUS_WIRING_METADATA_FIELDS = frozenset(
+    {
+        "consumer_purpose",
+        "plugin_managed",
+        "tenant_scoped_ingress",
+    }
+)
+
+
 def validate_topic(topic: str, deny_patterns: tuple[str, ...] = ()) -> None:
     """Validate a topic name against contract-declared deny patterns [OMN-6342].
 
@@ -1299,7 +1313,32 @@ def load_event_bus_subcontract(
             )
             return None
 
-        return ModelEventBusSubcontract.model_validate(event_bus_data)
+        if not isinstance(event_bus_data, dict):
+            _logger.warning(
+                "event_bus section is not a dict in %s: got %s",
+                contract_path,
+                type(event_bus_data).__name__,
+            )
+            return None
+
+        supported_fields = set(ModelEventBusSubcontract.model_fields)
+        unknown_fields = (
+            set(event_bus_data) - supported_fields - _EVENT_BUS_WIRING_METADATA_FIELDS
+        )
+        if unknown_fields:
+            _logger.warning(
+                "Invalid event_bus subcontract in %s: unsupported fields: %s",
+                contract_path,
+                sorted(unknown_fields),
+            )
+            return None
+
+        subcontract_data = {
+            key: value
+            for key, value in event_bus_data.items()
+            if key in supported_fields
+        }
+        return ModelEventBusSubcontract.model_validate(subcontract_data)
 
     except yaml.YAMLError as e:
         _logger.warning(

@@ -858,6 +858,47 @@ event_bus:
         assert len(result.subscribe_topics) == 3
         assert len(result.publish_topics) == 2
 
+    def test_loads_contract_with_auto_wiring_ownership_metadata(
+        self, tmp_path: Path
+    ) -> None:
+        """Ownership metadata must not invalidate the transport subcontract."""
+        contract_content = """
+event_bus:
+  version:
+    major: 1
+    minor: 0
+    patch: 0
+  plugin_managed: true
+  consumer_purpose: orchestration
+  tenant_scoped_ingress: false
+  subscribe_topics:
+    - "onex.cmd.test-service.test-command.v1"
+  publish_topics:
+    - "onex.evt.test-service.test-completed.v1"
+"""
+        contract_file = tmp_path / "contract.yaml"
+        contract_file.write_text(contract_content)
+
+        result = load_event_bus_subcontract(contract_file)
+
+        assert result is not None
+        assert result.subscribe_topics == ["onex.cmd.test-service.test-command.v1"]
+        assert result.publish_topics == ["onex.evt.test-service.test-completed.v1"]
+
+    def test_unknown_event_bus_metadata_remains_invalid(self, tmp_path: Path) -> None:
+        """The adapter allowlist must not weaken strict contract validation."""
+        contract_content = """
+event_bus:
+  version: {major: 1, minor: 0, patch: 0}
+  plugin_manged: true
+  subscribe_topics:
+    - "onex.cmd.test-service.test-command.v1"
+"""
+        contract_file = tmp_path / "contract.yaml"
+        contract_file.write_text(contract_content)
+
+        assert load_event_bus_subcontract(contract_file) is None
+
     def test_returns_none_for_missing_event_bus_section(self, tmp_path: Path) -> None:
         """Test returns None when no event_bus section."""
         contract_content = """
