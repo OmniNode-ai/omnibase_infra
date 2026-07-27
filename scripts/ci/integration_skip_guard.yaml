@@ -23,7 +23,8 @@
 # -------------------------------
 # The gate is keyed to the services the merge-gating guard job actually
 # PROVISIONS (see `required_services`). The `integration-guard` job in ci.yml
-# provisions Postgres (postgres:16-alpine), applies all migrations, exports the
+# provisions Postgres (postgres:16-alpine, pulled and started by explicit
+# fail-closed steps per OMN-15249), applies all migrations, exports the
 # connection env, and runs a CURATED set of Postgres-only integration proofs
 # (see `curated_test_paths`). A skip only fails the gate when its reason names a
 # *provisioned* service's absence — i.e. Postgres is right there and the test
@@ -51,7 +52,11 @@ require_executed_min: 1
 # (grepped from tests/) so the gate stays correct if the curated set broadens.
 required_services:
   postgres:
-    provisioned_by: "ci.yml `integration-guard` job (postgres:16-alpine service, migrations applied, OMNIBASE_INFRA_DB_URL + POSTGRES_* exported)"
+    # OMN-15249: provisioning is explicit pull + `docker run` steps, NOT a
+    # GitHub-managed `services:` block — a services-block pull failure is not
+    # addressable from the workflow and let the verdict step fire past a
+    # container that never materialized (surfacing as a misattributed exit 127).
+    provisioned_by: "ci.yml `integration-guard` job (explicit fail-closed `docker pull`/`docker run` of postgres:16-alpine, migrations applied, OMNIBASE_INFRA_DB_URL + POSTGRES_* exported)"
     missing_skip_patterns:
       # test_postgres_repository_runtime_integration.py db_pool fixture
       - "PostgreSQL integration tests skipped"
