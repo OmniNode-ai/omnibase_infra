@@ -169,7 +169,7 @@ class RuntimeDelegationDispatchPort:
         prompt: str,
         task_type: str,
         correlation_id: UUID,
-        max_tokens: int,
+        max_tokens: int | None,
         source_file_path: str | None,
         source_session_id: str | None,
         wait: bool,
@@ -177,8 +177,25 @@ class RuntimeDelegationDispatchPort:
         quality_contract_mode: str = "extend_task_class",
         acceptance_criteria: tuple[str, ...] = (),
         tenant_id: str | None = None,
+        backend_id: str | None = None,
+        response_contract: dict[str, object] | None = None,
     ) -> dict[str, object]:
         """Dispatch a delegation request and return the terminal result payload."""
+
+        # OmniMarket's consumer-facing handler always supplies these optional
+        # arguments.  The deployed bus model does not expose either field yet,
+        # so None preserves the existing route while explicit requests fail
+        # closed instead of being silently dropped at this boundary.
+        if backend_id is not None:
+            raise NotImplementedError(
+                "backend_id pin is not yet supported on the deployed bus "
+                "dispatch path (RuntimeDelegationDispatchPort)"
+            )
+        if response_contract is not None:
+            raise NotImplementedError(
+                "response_contract is not yet supported on the deployed bus "
+                "dispatch path (RuntimeDelegationDispatchPort)"
+            )
 
         routes = self._resolved_routes()
         selected = _select_delegation_route(routes)
