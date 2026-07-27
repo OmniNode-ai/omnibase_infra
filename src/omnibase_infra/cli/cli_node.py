@@ -27,6 +27,7 @@ from omnibase_core.enums.enum_workflow_result import EnumWorkflowResult
 from omnibase_core.models.errors.model_onex_error import ModelOnexError
 from omnibase_core.runtime.runtime_local import RuntimeLocal, parse_backend_overrides
 from omnibase_infra.cli.omnimarket_drift_guard import (
+    DRIFT_OVERRIDE_ENV,
     OmnimarketDriftError,
     check_omnimarket_drift,
 )
@@ -197,6 +198,20 @@ def _entry_point_module(value: str) -> str:
         "drift guard silently receives omni_home=None and never fires."
     ),
 )
+@click.option(
+    "--allow-omnimarket-drift",
+    "allow_omnimarket_drift",
+    is_flag=True,
+    envvar=DRIFT_OVERRIDE_ENV,
+    default=False,
+    help=(
+        "Dispatch even when the omnimarket co-install has drifted from the "
+        "canonical clone (OMN-13930). Refusal is the DEFAULT; this is the "
+        "only supported way past it, and it is named in the refusal message. "
+        f"Bound to ${DRIFT_OVERRIDE_ENV}. Results produced under an override "
+        "come from an UNVERIFIED build and are not evidence."
+    ),
+)
 def run_node_by_name(
     node_name: str,
     contract_path: Path | None,
@@ -208,6 +223,7 @@ def run_node_by_name(
     output_mode: str,
     emit_socket: Path | None,
     omni_home: Path | None,
+    allow_omnimarket_drift: bool,
 ) -> None:
     """Run a packaged ONEX node on the local runtime, resolved by NAME.
 
@@ -228,7 +244,10 @@ def run_node_by_name(
         onex node merge_sweep --output receipt   # one typed result JSON on stdout
     """
     try:
-        check_omnimarket_drift(omni_home=str(omni_home) if omni_home else None)
+        check_omnimarket_drift(
+            omni_home=str(omni_home) if omni_home else None,
+            allow_drift=allow_omnimarket_drift,
+        )
     except OmnimarketDriftError as exc:
         raise click.ClickException(str(exc)) from exc
 

@@ -40,6 +40,7 @@ from omnibase_infra.cli.model_skill_arg_spec import ModelSkillArgSpec
 from omnibase_infra.cli.model_skill_mapping import ModelSkillMapping
 from omnibase_infra.cli.model_skill_mapping_registry import ModelSkillMappingRegistry
 from omnibase_infra.cli.omnimarket_drift_guard import (
+    DRIFT_OVERRIDE_ENV,
     OmnimarketDriftError,
     check_omnimarket_drift,
 )
@@ -257,6 +258,20 @@ def _write_payload(
         "explicitly."
     ),
 )
+@click.option(
+    "--allow-omnimarket-drift",
+    "allow_omnimarket_drift",
+    is_flag=True,
+    envvar=DRIFT_OVERRIDE_ENV,
+    default=False,
+    help=(
+        "Dispatch even when the omnimarket co-install has drifted from the "
+        "canonical clone (OMN-13930). Refusal is the DEFAULT; this is the "
+        "only supported way past it, and it is named in the refusal message. "
+        "Bound to $" + DRIFT_OVERRIDE_ENV + ". Results produced under an "
+        "override come from an UNVERIFIED build and are not evidence."
+    ),
+)
 @click.argument("skill_args", nargs=-1, type=click.UNPROCESSED)
 def run_skill_by_name(
     skill_name: str,
@@ -265,6 +280,7 @@ def run_skill_by_name(
     verbose: bool,
     emit_socket: Path | None,
     omni_home: Path | None,
+    allow_omnimarket_drift: bool,
     skill_args: tuple[str, ...],
 ) -> None:
     """Dispatch a skill to its backing node and print one typed result.
@@ -283,7 +299,10 @@ def run_skill_by_name(
         onex skill delegate "summarize this paragraph" --task-type document
     """
     try:
-        check_omnimarket_drift(omni_home=str(omni_home) if omni_home else None)
+        check_omnimarket_drift(
+            omni_home=str(omni_home) if omni_home else None,
+            allow_drift=allow_omnimarket_drift,
+        )
     except OmnimarketDriftError as exc:
         raise click.ClickException(str(exc)) from exc
 
