@@ -332,13 +332,14 @@ class TestQuarantineStopsTheFalsePositiveRestartStorm:
         assert _restart_targets(verdict) == []
 
     @pytest.mark.asyncio
-    async def test_the_retired_900s_threshold_reproduces_the_storm(
+    async def test_the_retired_900s_threshold_quarantines_without_bounce(
         self, monkeypatch: pytest.MonkeyPatch
     ):
-        """Pin the old threshold and the same healthy fleet bounces -- 8 for 8.
+        """Pin the old threshold and the same healthy fleet is quarantined.
 
-        This is the falsifiability half: the test above is only meaningful if
-        the identical fixture flips when the one retired value is restored.
+        OMN-15234 adds a second guard after OMN-15255: a lone stale heartbeat
+        can make a runner NOT_READY, but it still cannot produce a bounce
+        without independent corroboration.
         """
         monkeypatch.setattr(evaluate_module, "_RUNNER_HEALTH_MAX_DIAG_AGE_SECONDS", 900)
         verdict = await _evaluate(
@@ -350,13 +351,18 @@ class TestQuarantineStopsTheFalsePositiveRestartStorm:
             )
         )
         assert verdict.ready_count == 0
-        assert len(verdict.bounce_eligible_runners) == 8
-        assert len(_restart_targets(verdict)) == 8
+        assert len(verdict.quarantined_runners) == 8
+        assert verdict.bounce_eligible_runners == ()
+        assert _restart_targets(verdict) == []
 
     @pytest.mark.asyncio
     async def test_a_genuinely_dead_listener_still_bounces(self):
         """The fix must not have disarmed the check it recalibrated."""
-        verdict = await _evaluate(_snapshot(_fact(diag_heartbeat_age_seconds=9000.0)))
+        verdict = await _evaluate(
+            _snapshot(
+                _fact(diag_heartbeat_age_seconds=9000.0, listener_process_count=0)
+            )
+        )
         assert verdict.assessments[0].readiness == EnumRunnerReadinessState.NOT_READY
         assert verdict.assessments[0].bounce_eligible is True
         assert _restart_targets(verdict) == ["omninode-runner-1"]

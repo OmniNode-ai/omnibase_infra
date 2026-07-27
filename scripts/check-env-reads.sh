@@ -48,14 +48,23 @@ APPROVED_INFIX_PATTERNS=(
     # env-var read for the same factory, not a new pattern introduced
     # elsewhere.
     "/runtime/models/model_postgres_pool_config.py"
-    # OMN-15233: runner_fleet_health_evaluate.py already owns pre-gate
-    # runner-health threshold env reads (CRASHLOOP_RESTART_THRESHOLD,
-    # RUNNER_HEALTH_MAX_DIAG_AGE_SECONDS, WEDGE_QUEUE_AGE_SECONDS). Updating
-    # the default threshold must not create a second env-resolution surface.
-    "/nodes/node_runner_fleet_health_compute/handlers/handler_runner_fleet_health_evaluate.py"
+    # OMN-15234: the OMN-15233 entry for
+    # /nodes/node_runner_fleet_health_compute/handlers/handler_runner_fleet_health_evaluate.py
+    # was REMOVED here. It existed only because the old matcher could not tell
+    # "edit the default of a pre-existing read" from "introduce a new read";
+    # the per-name grandfathering below handles that case on its own, so the
+    # allowlist no longer has to be widened to maintain an existing read.
+    # Rule 10: narrow the matcher, do not allowlist past it.
 )
 
 ENV_READ_PATTERNS='os\.environ\[|os\.environ\.get|os\.getenv|from os import environ|from os import getenv'
+
+# OMN-15234: name-extracting form of the patterns above. Only the literal
+# forms carry an env-var name; `from os import environ` and any dynamic read
+# (`os.environ.get(name_var)`) deliberately do NOT match, so they fall through
+# to the fail-closed branch instead of being silently grandfathered.
+_Q='["'"'"']'
+ENV_NAME_READ_PATTERN="(os\.environ\[|os\.environ\.get\(|os\.getenv\()[[:space:]]*${_Q}[A-Za-z_][A-Za-z0-9_]*${_Q}"
 
 is_approved() {
     local file="$1"
@@ -97,6 +106,111 @@ get_diff() {
         --staged) git diff --cached -- "$file" ;;
         --base)   git diff "$BASE_REF"...HEAD -- "$file" ;;
     esac
+}
+
+# OMN-15234: the commit the diff above is computed against. This is what
+# "already read in this file before the change" is resolved from, so it MUST
+# match get_diff's endpoints exactly:
+#   --staged -> HEAD (the commit the index sits on top of)
+#   --base   -> merge-base(BASE_REF, HEAD), because get_diff uses the
+#               three-dot `BASE_REF...HEAD` form.
+# Empty (unborn HEAD, unfetched base) means "no base to grandfather from" and
+# every added read is treated as new -- fail closed.
+BASE_COMMIT=""
+BASE_LABEL=""
+resolve_base_commit() {
+    case "$MODE" in
+        --staged)
+            BASE_COMMIT="$(git rev-parse --verify --quiet HEAD || true)"
+            BASE_LABEL="HEAD"
+            ;;
+        --base)
+            BASE_COMMIT="$(git merge-base "$BASE_REF" HEAD 2>/dev/null || true)"
+            BASE_LABEL="merge-base($BASE_REF, HEAD)"
+            ;;
+    esac
+}
+
+# OMN-15234: env-var names read from a blob of Python source on stdin.
+# Deliberately literal-only -- see ENV_NAME_READ_PATTERN.
+extract_env_names() {
+    grep -oE "$ENV_NAME_READ_PATTERN" \
+        | grep -oE "${_Q}[A-Za-z_][A-Za-z0-9_]*${_Q}" \
+        | tr -d "\"'" \
+        | sort -u
+}
+
+report_block() {
+    local file="$1" reason="$2"
+    echo "BLOCKED: $file introduces new os.environ/os.getenv read -- $reason"
+    echo "  Use overlay-resolved config instead."
+    echo "  Approved top-level dirs: ${APPROVED_PREFIX_PATTERNS[*]}"
+    echo "  Approved path segments: ${APPROVED_INFIX_PATTERNS[*]}"
+}
+
+# OMN-15234: the policy this gate enforces is "no NEW env read", but the
+# pre-OMN-15234 matcher fired on ANY added line containing os.environ. Because
+# a one-character edit to a read's default re-adds that whole line, editing a
+# pre-existing, already-grandfathered read was indistinguishable from
+# introducing a new one -- there is no formulation of "change 900 to 4500"
+# that avoids re-adding the line. That made every grandfathered read's default
+# permanently unmaintainable outside the allowlist, which is how the OMN-15233
+# allowlist entry (removed above) got added.
+#
+# Narrowed rule: an added read is allowed ONLY when the SAME env-var name is
+# already read in the SAME file's base version. Consequences, all intended:
+#   - new name in an existing file           -> BLOCK (name absent from base)
+#   - new file (base blob does not exist)    -> BLOCK
+#   - read moved to a DIFFERENT file         -> BLOCK (that file's base has no
+#                                               such read; the boundary moved)
+#   - read relocated within the same file    -> ALLOW (same file, same name)
+#   - default/whitespace/format edit on an
+#     existing read                          -> ALLOW  <- the OMN-15234 case
+#   - read deleted                           -> ALLOW (no added read at all)
+#   - non-literal or unnamed read form       -> BLOCK (nothing to match on)
+check_new_env_reads() {
+    local file="$1"
+    local added_reads base_names names name blocked=0
+
+    added_reads="$(get_diff "$file" \
+        | grep -E "^\+" \
+        | grep -v "^+++" \
+        | grep -E "($ENV_READ_PATTERNS)" || true)"
+    [ -z "$added_reads" ] && return 0
+
+    base_names=""
+    if [ -n "$BASE_COMMIT" ]; then
+        base_names="$(git show "$BASE_COMMIT:$file" 2>/dev/null | extract_env_names || true)"
+    fi
+
+    while IFS= read -r line; do
+        [ -z "$line" ] && continue
+        names="$(printf '%s\n' "$line" | extract_env_names || true)"
+        if [ -z "$names" ]; then
+            report_block "$file" \
+                "added read has no literal env-var name to match against $BASE_LABEL (dynamic name, or a bare 'from os import environ/getenv' import)"
+            blocked=1
+            continue
+        fi
+        while IFS= read -r name; do
+            [ -z "$name" ] && continue
+            if printf '%s\n' "$base_names" | grep -qx -- "$name"; then
+                # Grandfathered: this exact name is already read in this exact
+                # file at the base commit. Editing it is maintenance, not a new
+                # env-resolution surface.
+                continue
+            fi
+            report_block "$file" \
+                "env-var name '$name' is not read in this file at $BASE_LABEL"
+            blocked=1
+        done <<EOF
+$names
+EOF
+    done <<EOF
+$added_reads
+EOF
+
+    return $blocked
 }
 
 # OMN-14951 gap 2: statically scan os.environ[...]/os.environ.get(...)/
@@ -224,16 +338,14 @@ PYEOF
     return $rc
 }
 
+resolve_base_commit
+
 FAILED=0
 while IFS= read -r file; do
     [ -z "$file" ] && continue
     is_approved "$file" && continue
 
-    if get_diff "$file" | grep -qE "^\+.*($ENV_READ_PATTERNS)"; then
-        echo "BLOCKED: $file introduces new os.environ/os.getenv read"
-        echo "  Use overlay-resolved config instead."
-        echo "  Approved top-level dirs: ${APPROVED_PREFIX_PATTERNS[*]}"
-        echo "  Approved path segments: ${APPROVED_INFIX_PATTERNS[*]}"
+    if ! check_new_env_reads "$file"; then
         FAILED=1
     fi
 done < <(get_changed_files)
