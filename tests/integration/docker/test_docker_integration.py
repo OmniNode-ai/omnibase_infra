@@ -1102,6 +1102,9 @@ class TestDockerComposeProfiles:
                 # OMN-3299: Redpanda removed from local compose; KAFKA_BOOTSTRAP_SERVERS
                 # now uses :? fail-fast — must be set explicitly for config validation.
                 "KAFKA_BOOTSTRAP_SERVERS": "localhost:19092",  # kafka-fallback-ok — test fixture
+                # OMN-15173: dev-lane Redpanda advertise host now uses :? fail-fast
+                # (previously silently defaulted to localhost, breaking off-host clients).
+                "DEV_REDPANDA_ADVERTISE_HOST": "localhost",  # kafka-fallback-ok — test fixture
                 "ARCH_GRAPH_BOLT_URI": "bolt://omnibase-infra-memgraph:7687",
                 # OMN-5439: Keycloak / ONEX service auth vars added with :? fail-fast
                 "ONEX_REGISTRATION_AUTO_ACK": "true",
