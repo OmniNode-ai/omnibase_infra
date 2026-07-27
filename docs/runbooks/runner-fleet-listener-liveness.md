@@ -1,12 +1,20 @@
 # Runner fleet listener liveness (OMN-13915)
 
 **Status:** active runbook
-**Ticket:** OMN-13915 (incident 2026-07-03) — related: OMN-12433 (egress healthcheck), OMN-13109 (silent wedge / crash loop monitor)
+**Ticket:** OMN-13915 (incident 2026-07-03) — related: OMN-12433 (egress healthcheck), OMN-13109 (silent wedge / crash loop monitor), OMN-15233 (2026-07-27 threshold recalibration + orphan/crash-loop detection)
 
 ## The rule that changed
 
 > **"All runner containers are `Up (healthy)`" is NOT sufficient evidence that the fleet is serving jobs.**
 > The GitHub org runner registry (`GET /orgs/OmniNode-ai/actions/runners`) is the authoritative signal, and the `runner-fleet-canary` scheduled workflow is the enforced surface that watches it.
+>
+> **The converse is equally true (OMN-15233): "Docker says unhealthy" is NOT sufficient evidence that a runner is degraded.**
+> **Cross-check the GitHub runner registry before ANY restart sweep. If the runners are online, the flag is the bug — do not restart.**
+> ```bash
+> gh api /orgs/OmniNode-ai/actions/runners --jq \
+>   '[.runners[]|select(.status=="online")]|length'
+> ```
+> Never restart-sweep off the Docker-unhealthy flag alone. On 2026-07-27 that count went 13 → 37 → 59 while the registry reported **64/64 online throughout**; 59 → 4 resolved with only 8 restarts and the untouched control group self-healed. The "growth" was measurement phase, not fleet degradation.
 
 ## Incident summary (2026-07-03)
 
@@ -27,8 +35,8 @@ A point-in-time process/container check cannot prove a runner is serving jobs:
 
 | Layer | Surface | What it proves | Latency |
 |-------|---------|----------------|---------|
-| 1 | `docker/runners/healthcheck.sh` (in-container) | `bin/Runner.Listener` process alive AND `_diag` heartbeat fresh (`RUNNER_HEALTH_MAX_DIAG_AGE_SECONDS`, default 900s) AND github.com egress | ≤ ~17 min (staleness + 3×30s retries) |
-| 2 | `docker/runners/entrypoint.sh` watchdog | listener process exists while `run.sh` runs; recycles the wrapper tree after 5×60s consecutive misses (bounded by `LISTENER_RESTART_MAX=50`, then container exit → restart policy). **OMN-14564:** also recycles (with an explicit listener kill) when the listener process is alive but its `_diag` heartbeat is older than `LISTENER_HEARTBEAT_MAX_AGE_SECONDS` (3600s) for `LISTENER_HEARTBEAT_MISSES` (3) consecutive 60s ticks — never while a `Runner.Worker` job is executing | ≤ ~6 min (dead) / ≤ ~63 min (hung: 3600s staleness + 3×60s) |
+| 1 | `docker/runners/healthcheck.sh` (in-container) | `bin/Runner.Listener` process alive AND exactly one listener with a non-1 PPID (OMN-15233) AND `_diag` heartbeat fresh (`RUNNER_HEALTH_MAX_DIAG_AGE_SECONDS`, default **4500s** since OMN-15233) AND ≤ `RUNNER_HEALTH_MAX_LOG_STARTS_PER_HOUR` (6) listener starts in the last hour AND github.com egress | ≤ ~77 min (staleness + 3×30s retries); orphan/crash-loop layers fire in ≤ ~2 min |
+| 2 | `docker/runners/entrypoint.sh` watchdog | listener process exists while `run.sh` runs; recycles the wrapper tree after 5×60s consecutive misses (bounded by `LISTENER_RESTART_MAX=50`, then container exit → restart policy). **OMN-14564:** also recycles (with an explicit listener kill) when the listener process is alive but its `_diag` heartbeat is older than `LISTENER_HEARTBEAT_MAX_AGE_SECONDS` (3600s) for `LISTENER_HEARTBEAT_MISSES` (3) consecutive 60s ticks — never while a `Runner.Worker` job is executing. **OMN-15233:** reaps any surviving listener (TERM → KILL after `LISTENER_REAP_TIMEOUT_SECONDS`) BEFORE spawning a replacement | ≤ ~6 min (dead) / ≤ ~63 min (hung: 3600s staleness + 3×60s) |
 | 3 | `runner-monitor.sh` cron on `.201` (OMN-13109) | Docker vs GitHub divergence, silent wedge, crash loop → Slack | 3 min cadence, shares fate with host |
 | 4 | **`runner-fleet-canary` GHA workflow (authoritative)** | GitHub org registry online count vs `config/runner_fleet.yaml` `expected_count`; fails the run when offline+missing > `RUNNER_CANARY_MAX_OFFLINE` (5) | 15 min cadence, GitHub-hosted — survives total `.201` loss |
 
@@ -52,8 +60,10 @@ listener ignores the wrapper-tree TERM and would collide with the respawned
 listener's session). Restarts remain bounded by `LISTENER_RESTART_MAX`.
 
 **The kill threshold (`LISTENER_HEARTBEAT_MAX_AGE_SECONDS`, 3600s) is
-deliberately HIGHER than the healthcheck alert threshold
-(`RUNNER_HEALTH_MAX_DIAG_AGE_SECONDS`, 900s).** Live readback
+deliberately DECOUPLED from the healthcheck alert threshold
+(`RUNNER_HEALTH_MAX_DIAG_AGE_SECONDS`, 900s at the time of this readback; 4500s
+since OMN-15233 — see the orphan section below, which explains why the alert
+threshold now sits ABOVE the kill threshold).** Live readback
 2026-07-23T05:25–06:02Z: a fleet-wide broker-quiet window silenced `_diag` on
 53/64 listeners for 35–50 min while GitHub kept all of them online — two
 docker-"unhealthy" runners were actively executing jobs, and runners 2 and 45
@@ -63,6 +73,60 @@ window is expected and benign (alerting stays sensitive); the watchdog only
 kills once staleness clears the observed benign ceiling with margin, which
 still recovers a true AAD-deadlock zombie in ~1 h instead of the 6 days the
 2026-07-16..23 incident took.
+
+## Orphan / session-conflict mode (OMN-15233, incident 2026-07-27)
+
+The zombie shape the layer-1 heartbeat check was built to catch was **scoring
+HEALTHY**, and the same check was **manufacturing false unhealthy on idle
+runners**. Both defects were in the same layer.
+
+**(a) False positive by arithmetic.** `RUNNER_HEALTH_MAX_DIAG_AGE_SECONDS=900`
+sat far below the **~50-minute IDLE `_diag` write cadence** — when a runner has
+no job, only the OAuth/AAD token refresh writes `_diag`; the minutes-scale
+cadence holds only while jobs run. An idle runner therefore read unhealthy for
+**~35 of every 50 minutes** with nothing degraded. The threshold is now **4500s**
+(75 min), which clears the observed idle cadence with 50% margin and is
+justified inline in `healthcheck.sh`. The watchdog KILL threshold
+(`LISTENER_HEARTBEAT_MAX_AGE_SECONDS`, 3600s) stays decoupled and is now BELOW
+the alert threshold — remediation is bounded by `LISTENER_HEARTBEAT_MISSES`
+(3×60s) and guarded by the `Runner.Worker` job check, so it is the narrower,
+better-guarded signal.
+
+**(b) Inversion.** An orphaned `Runner.Listener` reparented to **PPID 1** keeps
+holding the GitHub broker session. The watchdog spawns a replacement, which
+crash-loops every ~5 min on `TaskAgentSessionConflictException` because the
+orphan still owns the session — and **every crash mints a fresh
+`Runner_*.log`**, which keeps the `_diag` mtime fresh, so the check read HEALTHY
+forever. Four such zombies (runners **1, 43, 55, 57**; **88–234** `Runner_*.log`
+files vs **3–7** on normal runners) were found only by process scan.
+
+Three fixes, all in `docker/runners/`:
+
+1. **Process topology** — `healthcheck.sh` fails on **duplicate**
+   `Runner.Listener` processes and on any listener with **PPID 1**. A healthy
+   listener's chain is `entrypoint.sh(PID 1) → run.sh → run-helper.sh →
+   Runner.Listener`, so PPID 1 is unambiguously an orphan.
+2. **Rate-based crash-loop signal** — `healthcheck.sh` counts `Runner_*.log`
+   files touched inside `RUNNER_HEALTH_LOG_RATE_WINDOW_MINUTES` (60) and fails
+   above `RUNNER_HEALTH_MAX_LOG_STARTS_PER_HOUR` (6). A ~5-min crash cadence is
+   ~12/hour. The threshold is a **rate**, normalized to the window before the
+   comparison (`ceil(per_hour × window_minutes / 60)`), so retuning the window
+   alone does not silently retune the threshold — a 30m window allows 3 starts,
+   not 6. Both tunables fail closed if set to anything but a non-negative
+   integer. **This is deliberately NOT cumulative:** a cumulative count grows
+   monotonically with container uptime, so any long-lived healthy container
+   would eventually red-line forever, and a permanently-red check is a disabled
+   check.
+3. **Reap before respawn** — `entrypoint.sh` kills any surviving listener
+   (TERM, then KILL after `LISTENER_REAP_TIMEOUT_SECONDS`) and confirms it is
+   gone before spawning a replacement. Spawn-without-reap is what manufactures
+   the `TaskAgentSessionConflictException` in the first place; if a listener
+   survives SIGKILL the entrypoint exits so the restart policy replaces the whole
+   PID namespace rather than looping silently.
+
+Coverage: `tests/ci/test_runner_listener_liveness.py` —
+`TestHealthcheckIdleThresholdRecalibration`, `TestHealthcheckOrphanInversion`,
+`TestHealthcheckCrashLoopRate`, `TestEntrypointOrphanReap`.
 
 ## Operator response to a canary failure
 

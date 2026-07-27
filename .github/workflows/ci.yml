@@ -1225,6 +1225,18 @@ jobs:
 
       - name: Run pytest (smart selection)
         if: vars.ENABLE_SMART_TESTS == 'true' && needs.detect-changes.outputs.is_full_suite == 'false'
+        # OMN-15233: tests/integration/ci/test_workflow_uses_refs_resolve_live.py
+        # resolves every cross-repo `uses:` pin against the GitHub contents API
+        # and FAILS CLOSED when a pin is unverifiable. Without a token those
+        # requests are unauthenticated and share the runner egress IP's 60/hr
+        # budget, so they return HTTP 403 "API rate limit exceeded" and the
+        # whole split goes red for a reason that has nothing to do with the
+        # pins. The test's own failure message prescribes this fix ("thread
+        # GH_TOKEN into the test step"); it reads GH_TOKEN or GITHUB_TOKEN. No
+        # test in this suite skips on token presence, so this only authenticates
+        # existing requests — it does not activate new ones.
+        env:
+          GH_TOKEN: ${{ github.token }}
         run: |
           paths=$(echo '${{ needs.detect-changes.outputs.selected_paths }}' | jq -r '.[]')
           if [ -z "$paths" ]; then
@@ -1253,6 +1265,11 @@ jobs:
 
       - name: Run pytest (full suite)
         if: vars.ENABLE_SMART_TESTS != 'true' || needs.detect-changes.outputs.is_full_suite == 'true'
+        # OMN-15233: see the smart-selection step above — the live `uses:` pin
+        # resolution test needs an authenticated token or it fails closed on
+        # HTTP 403 rate limiting. This step is the one that surfaced it.
+        env:
+          GH_TOKEN: ${{ github.token }}
         run: |
           uv run pytest tests/ \
             --ignore=tests/integration/docker \

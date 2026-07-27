@@ -64,10 +64,10 @@ logger = logging.getLogger(__name__)
 
 # Same env-overridable defaults as the EFFECT + the legacy bash surfaces
 # (runner-monitor.sh, healthcheck.sh) so all three surfaces agree on
-# thresholds during the trust-building period (OMN-13109/OMN-13912/OMN-13915).
+# thresholds during the trust-building period (OMN-13109/OMN-13912/OMN-13915/OMN-15233).
 _CRASHLOOP_RESTART_THRESHOLD = int(os.environ.get("CRASHLOOP_RESTART_THRESHOLD", "5"))
 _RUNNER_HEALTH_MAX_DIAG_AGE_SECONDS = int(
-    os.environ.get("RUNNER_HEALTH_MAX_DIAG_AGE_SECONDS", "900")
+    os.environ.get("RUNNER_HEALTH_MAX_DIAG_AGE_SECONDS", "4500")
 )
 _WEDGE_QUEUE_AGE_SECONDS = int(os.environ.get("WEDGE_QUEUE_AGE_SECONDS", "600"))
 

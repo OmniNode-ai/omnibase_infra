@@ -48,6 +48,11 @@ APPROVED_INFIX_PATTERNS=(
     # env-var read for the same factory, not a new pattern introduced
     # elsewhere.
     "/runtime/models/model_postgres_pool_config.py"
+    # OMN-15233: runner_fleet_health_evaluate.py already owns pre-gate
+    # runner-health threshold env reads (CRASHLOOP_RESTART_THRESHOLD,
+    # RUNNER_HEALTH_MAX_DIAG_AGE_SECONDS, WEDGE_QUEUE_AGE_SECONDS). Updating
+    # the default threshold must not create a second env-resolution surface.
+    "/nodes/node_runner_fleet_health_compute/handlers/handler_runner_fleet_health_evaluate.py"
 )
 
 ENV_READ_PATTERNS='os\.environ\[|os\.environ\.get|os\.getenv|from os import environ|from os import getenv'

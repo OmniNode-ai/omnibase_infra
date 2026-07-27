@@ -30,11 +30,11 @@ name: "node_runner_fleet_health_compute"
 contract_version:
   major: 1
   minor: 0
-  patch: 1
-node_version: "1.0.1"
+  patch: 2
+node_version: "1.0.2"
 node_type: "COMPUTE_GENERIC"
 description: >
-  Pure, deterministic classifier of a runner-fleet snapshot into a typed health verdict: per-runner state, fleet aggregates, and recorded (never executed) recommended actions. Uses the canonical def-B typed ModelRunnerFleetHealthEvaluateCommand handler entrypoint.
+  Pure, deterministic classifier of a runner-fleet snapshot into a typed health verdict: per-runner state, fleet aggregates, and recorded (never executed) recommended actions. Uses the canonical def-B typed ModelRunnerFleetHealthEvaluateCommand handler entrypoint. Heartbeat-staleness classification threshold (RUNNER_HEALTH_MAX_DIAG_AGE_SECONDS, env-overridable) defaults to 4500s as of OMN-15233 (1.0.2), raised from 900s. 900s sat below the ~50-minute IDLE _diag write cadence, so this classifier emitted LISTENER_ZOMBIE -> RESTART_RUNNER at confidence 0.85 for idle-but-healthy runners. The default is held identical to docker/runners/healthcheck.sh and runner-monitor.sh so all three surfaces agree on what "stale" means.
 
 input_model:
   name: "ModelRunnerFleetHealthEvaluateCommand"
