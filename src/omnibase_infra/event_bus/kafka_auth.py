@@ -135,7 +135,7 @@ def build_aiokafka_auth_kwargs(config: ModelKafkaEventBusConfig) -> dict[str, ob
         kwargs["sasl_mechanism"] = "OAUTHBEARER"
         kwargs["sasl_oauth_token_provider"] = MSKTokenProvider(region=config.msk_region)
 
-    if config.ssl_ca_file is not None:
+    if config.security_protocol in ("SSL", "SASL_SSL"):
         kwargs["ssl_context"] = ssl.create_default_context(cafile=config.ssl_ca_file)
 
     return kwargs

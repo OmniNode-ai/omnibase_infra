@@ -82,6 +82,23 @@ def test_ssl_ca_file_builds_aiokafka_ssl_context() -> None:
     create_context.assert_called_once_with(cafile="/etc/ssl/certs/custom-ca.pem")
 
 
+def test_msk_iam_builds_default_aiokafka_ssl_context() -> None:
+    with patch("ssl.create_default_context") as create_context:
+        context = object()
+        create_context.return_value = context
+        config = ModelKafkaEventBusConfig(
+            bootstrap_servers="b-1.example:9098",
+            security_protocol="SASL_SSL",
+            sasl_mechanism="AWS_MSK_IAM",
+            msk_region="us-east-1",
+        )
+
+        kwargs = build_aiokafka_auth_kwargs(config)
+
+    assert kwargs["ssl_context"] is context
+    create_context.assert_called_once_with(cafile=None)
+
+
 @pytest.mark.asyncio
 async def test_provider_kafka_producer_passes_msk_auth_kwargs() -> None:
     auth_kwargs = {"security_protocol": "SASL_SSL", "sasl_mechanism": "OAUTHBEARER"}
