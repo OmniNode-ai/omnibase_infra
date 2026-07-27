@@ -1000,6 +1000,105 @@ class TestDockerResourceLimits:
 # =============================================================================
 
 
+_PG_DSN = "postgresql://postgres:test@postgres:5432/omnibase_infra"
+_INTEL_DSN = "postgresql://postgres:test@postgres:5432/omniintelligence"
+_LOCAL_LAN_CIDR = ".".join(("192", "168", "86", "0")) + "/24"
+_SECRET_RESOLVER_CONFIG_JSON = (
+    '{"enable_convention_fallback":false,"mappings":['
+    '{"logical_name":"llm.openrouter.api_key",'
+    '"source":{"source_path":"OPEN_ROUTER_API_KEY","source_type":"env"}},'
+    '{"logical_name":"llm.glm.api_key",'
+    '"source":{"source_path":"LLM_GLM_API_KEY","source_type":"env"}},'
+    '{"logical_name":"llm.gemini.api_key",'
+    '"source":{"source_path":"GEMINI_API_KEY","source_type":"env"}}]}'
+)
+_SECRET_RESOLVER_CONFIG_PATH = "/app/data/delegation/secret_resolver.yaml"
+
+# OMN-15263: module-level so tests/ci/test_compose_required_env_coverage.py can
+# extract this render fixture's env keys statically, the same way it extracts the
+# other compose-render fixtures. Keep every `:?`-required var in
+# docker/docker-compose.infra.yml represented here.
+COMPOSE_CONFIG_RENDER_ENV: dict[str, str] = {
+    "POSTGRES_PASSWORD": "test",
+    "VALKEY_PASSWORD": "test",
+    "INFISICAL_ENCRYPTION_KEY": "0" * 64,
+    "INFISICAL_AUTH_SECRET": "test-auth-secret",
+    "OMNIBASE_INFRA_DB_URL": _PG_DSN,
+    "OMNIINTELLIGENCE_DB_URL": _INTEL_DSN,
+    "INFISICAL_DB_CONNECTION_URI": "postgresql://postgres:test@postgres:5432/infisical_db",
+    "INFISICAL_REDIS_URL": "redis://:test@valkey:6379",
+    "OMNIBASE_INFRA_AGENT_ACTIONS_POSTGRES_DSN": _PG_DSN,
+    "OMNIBASE_INFRA_SKILL_LIFECYCLE_POSTGRES_DSN": _PG_DSN,
+    # OMN-5240: context-audit-consumer requires its own DSN
+    "OMNIBASE_INFRA_CONTEXT_AUDIT_POSTGRES_DSN": _PG_DSN,
+    # OMN-3299: Redpanda removed from local compose; KAFKA_BOOTSTRAP_SERVERS
+    # now uses :? fail-fast — must be set explicitly for config validation.
+    "KAFKA_BOOTSTRAP_SERVERS": "localhost:19092",  # kafka-fallback-ok — test fixture
+    # OMN-15173: dev-lane Redpanda advertise host now uses :? fail-fast
+    # (previously silently defaulted to localhost, breaking off-host clients).
+    "DEV_REDPANDA_ADVERTISE_HOST": "localhost",  # kafka-fallback-ok — test fixture
+    "ARCH_GRAPH_BOLT_URI": "bolt://omnibase-infra-memgraph:7687",
+    # OMN-5439: Keycloak / ONEX service auth vars added with :? fail-fast
+    "ONEX_REGISTRATION_AUTO_ACK": "true",
+    "ONEX_SERVICE_CLIENT_SECRET": "test-service-secret",
+    "LINEAR_API_KEY": "test-linear-api-key",
+    "GITHUB_TOKEN": "test-github-token",
+    # OMN-7979: LLM endpoint URLs added with :? fail-fast to
+    # activate PluginLlm in runtime containers.
+    "LLM_CODER_URL": "http://llm-coder.test:8000",
+    "LLM_CODER_FAST_URL": "http://llm-coder-fast.test:8001",
+    "LLM_EMBEDDING_URL": "http://llm-embed.test:8100",
+    "LLM_DEEPSEEK_R1_URL": "http://llm-r1.test:8101",
+    "BIFROST_LOCAL_CODER_ENDPOINT_URL": (
+        "http://llm-coder.test:8000/v1/chat/completions"
+    ),
+    "BIFROST_LOCAL_REASONER_ENDPOINT_URL": (
+        "http://llm-coder-fast.test:8001/v1/chat/completions"
+    ),
+    "BIFROST_LOCAL_EMBEDDING_ENDPOINT_URL": (
+        "http://llm-embed.test:8100/v1/chat/completions"
+    ),
+    "BIFROST_LOCAL_DS_V4_FLASH_ENDPOINT_URL": (
+        "http://llm-r1.test:8101/v1/chat/completions"
+    ),
+    "LLM_GLM_URL": "http://llm-glm.test:8102",
+    "LLM_GLM_MODEL_NAME": "glm-4.5",
+    "LLM_GLM_API_KEY": "render-only-glm-api-key",
+    "GEMINI_API_KEY": "render-only-gemini-api-key",
+    "GOOGLE_API_KEY": "render-only-google-api-key",
+    "BIFROST_VERTEX_GEMINI_ENDPOINT_URL": (
+        "https://us-central1-aiplatform.googleapis.com/v1beta1/projects/"
+        "gen-lang-client-0084338881/locations/us-central1/endpoints/openapi/chat/completions"
+    ),
+    "GOOGLE_CLOUD_PROJECT": "gen-lang-client-0084338881",
+    "GOOGLE_CLOUD_LOCATION": "us-central1",
+    # OMN-10943: HTTP request signing and CIDR allowlist for the
+    # local LLM HTTP transport added with :? fail-fast.
+    "LOCAL_LLM_SHARED_SECRET": "render-only-local-llm-secret",
+    "LLM_ENDPOINT_CIDR_ALLOWLIST": _LOCAL_LAN_CIDR,
+    "LLM_CLOUD_ENDPOINT_HOST_ALLOWLIST": "generativelanguage.googleapis.com,api.z.ai",
+    # OMN-11673: runtime policy contract vars are required by
+    # compose even when docker/runtime-policy.env is also loaded.
+    "AUXILIARY_SERVICES_OMNIMEMORY_ENABLED": "false",
+    "BIFROST_VERIFY_ENDPOINTS": "1",
+    "DEV_RUNTIME_EFFECTS_CAPABILITIES": "effects.consumer,market.skill-proof,runtime.effects",
+    "DEV_RUNTIME_EFFECTS_PORT": "8086",
+    "DEV_RUNTIME_EFFECTS_SECRET_RESOLVER_CONFIG_JSON": _SECRET_RESOLVER_CONFIG_JSON,
+    "DEV_RUNTIME_EFFECTS_SECRET_RESOLVER_CONFIG_PATH": _SECRET_RESOLVER_CONFIG_PATH,
+    "DEV_RUNTIME_MAIN_CAPABILITIES": "market.skill-proof,workflow.orchestration,runtime.main",
+    "DEV_RUNTIME_MAIN_PORT": "8085",
+    "DEV_RUNTIME_MAIN_PUBLISH_INTROSPECTION": "true",
+    "DEV_RUNTIME_MAIN_SECRET_RESOLVER_CONFIG_JSON": _SECRET_RESOLVER_CONFIG_JSON,
+    "DEV_RUNTIME_MAIN_SECRET_RESOLVER_CONFIG_PATH": _SECRET_RESOLVER_CONFIG_PATH,
+    "DEV_RUNTIME_WORKER_CAPABILITIES": "workflow.dispatch,contract.update,runtime.worker",
+    "DEV_RUNTIME_WORKER_SECRET_RESOLVER_CONFIG_JSON": _SECRET_RESOLVER_CONFIG_JSON,
+    "DEV_RUNTIME_WORKER_SECRET_RESOLVER_CONFIG_PATH": _SECRET_RESOLVER_CONFIG_PATH,
+    "OMNIMEMORY_ENABLED": "false",
+    "OMNIMEMORY_MEMGRAPH_PORT": "7687",
+    "ONEX_ACTIVE_RUNTIME_PACKAGES": "omnibase_infra,omnimarket",
+}
+
+
 @pytest.mark.integration
 class TestDockerComposeProfiles:
     """Tests for docker-compose profile configurations.
@@ -1071,101 +1170,8 @@ class TestDockerComposeProfiles:
         # All :? required vars must be set even for config validation; the PR
         # that removed nested expansion (OMN-3266) moved DSN/URL construction
         # out of compose into ~/.omnibase/.env, so these now use :? fail-fast.
-        _pg_dsn = "postgresql://postgres:test@postgres:5432/omnibase_infra"
-        _intel_dsn = "postgresql://postgres:test@postgres:5432/omniintelligence"
-        _local_lan_cidr = ".".join(("192", "168", "86", "0")) + "/24"
-        _secret_resolver_config_json = (
-            '{"enable_convention_fallback":false,"mappings":['
-            '{"logical_name":"llm.openrouter.api_key",'
-            '"source":{"source_path":"OPEN_ROUTER_API_KEY","source_type":"env"}},'
-            '{"logical_name":"llm.glm.api_key",'
-            '"source":{"source_path":"LLM_GLM_API_KEY","source_type":"env"}},'
-            '{"logical_name":"llm.gemini.api_key",'
-            '"source":{"source_path":"GEMINI_API_KEY","source_type":"env"}}]}'
-        )
-        _secret_resolver_config_path = "/app/data/delegation/secret_resolver.yaml"
         env = os.environ.copy()
-        env.update(
-            {
-                "POSTGRES_PASSWORD": "test",
-                "VALKEY_PASSWORD": "test",
-                "INFISICAL_ENCRYPTION_KEY": "0" * 64,
-                "INFISICAL_AUTH_SECRET": "test-auth-secret",
-                "OMNIBASE_INFRA_DB_URL": _pg_dsn,
-                "OMNIINTELLIGENCE_DB_URL": _intel_dsn,
-                "INFISICAL_DB_CONNECTION_URI": "postgresql://postgres:test@postgres:5432/infisical_db",
-                "INFISICAL_REDIS_URL": "redis://:test@valkey:6379",
-                "OMNIBASE_INFRA_AGENT_ACTIONS_POSTGRES_DSN": _pg_dsn,
-                "OMNIBASE_INFRA_SKILL_LIFECYCLE_POSTGRES_DSN": _pg_dsn,
-                # OMN-5240: context-audit-consumer requires its own DSN
-                "OMNIBASE_INFRA_CONTEXT_AUDIT_POSTGRES_DSN": _pg_dsn,
-                # OMN-3299: Redpanda removed from local compose; KAFKA_BOOTSTRAP_SERVERS
-                # now uses :? fail-fast — must be set explicitly for config validation.
-                "KAFKA_BOOTSTRAP_SERVERS": "localhost:19092",  # kafka-fallback-ok — test fixture
-                # OMN-15173: dev-lane Redpanda advertise host now uses :? fail-fast
-                # (previously silently defaulted to localhost, breaking off-host clients).
-                "DEV_REDPANDA_ADVERTISE_HOST": "localhost",  # kafka-fallback-ok — test fixture
-                "ARCH_GRAPH_BOLT_URI": "bolt://omnibase-infra-memgraph:7687",
-                # OMN-5439: Keycloak / ONEX service auth vars added with :? fail-fast
-                "ONEX_REGISTRATION_AUTO_ACK": "true",
-                "ONEX_SERVICE_CLIENT_SECRET": "test-service-secret",
-                "LINEAR_API_KEY": "test-linear-api-key",
-                "GITHUB_TOKEN": "test-github-token",
-                # OMN-7979: LLM endpoint URLs added with :? fail-fast to
-                # activate PluginLlm in runtime containers.
-                "LLM_CODER_URL": "http://llm-coder.test:8000",
-                "LLM_CODER_FAST_URL": "http://llm-coder-fast.test:8001",
-                "LLM_EMBEDDING_URL": "http://llm-embed.test:8100",
-                "LLM_DEEPSEEK_R1_URL": "http://llm-r1.test:8101",
-                "BIFROST_LOCAL_CODER_ENDPOINT_URL": (
-                    "http://llm-coder.test:8000/v1/chat/completions"
-                ),
-                "BIFROST_LOCAL_REASONER_ENDPOINT_URL": (
-                    "http://llm-coder-fast.test:8001/v1/chat/completions"
-                ),
-                "BIFROST_LOCAL_EMBEDDING_ENDPOINT_URL": (
-                    "http://llm-embed.test:8100/v1/chat/completions"
-                ),
-                "BIFROST_LOCAL_DS_V4_FLASH_ENDPOINT_URL": (
-                    "http://llm-r1.test:8101/v1/chat/completions"
-                ),
-                "LLM_GLM_URL": "http://llm-glm.test:8102",
-                "LLM_GLM_MODEL_NAME": "glm-4.5",
-                "LLM_GLM_API_KEY": "render-only-glm-api-key",
-                "GEMINI_API_KEY": "render-only-gemini-api-key",
-                "GOOGLE_API_KEY": "render-only-google-api-key",
-                "BIFROST_VERTEX_GEMINI_ENDPOINT_URL": (
-                    "https://us-central1-aiplatform.googleapis.com/v1beta1/projects/"
-                    "gen-lang-client-0084338881/locations/us-central1/endpoints/openapi/chat/completions"
-                ),
-                "GOOGLE_CLOUD_PROJECT": "gen-lang-client-0084338881",
-                "GOOGLE_CLOUD_LOCATION": "us-central1",
-                # OMN-10943: HTTP request signing and CIDR allowlist for the
-                # local LLM HTTP transport added with :? fail-fast.
-                "LOCAL_LLM_SHARED_SECRET": "render-only-local-llm-secret",
-                "LLM_ENDPOINT_CIDR_ALLOWLIST": _local_lan_cidr,
-                "LLM_CLOUD_ENDPOINT_HOST_ALLOWLIST": "generativelanguage.googleapis.com,api.z.ai",
-                # OMN-11673: runtime policy contract vars are required by
-                # compose even when docker/runtime-policy.env is also loaded.
-                "AUXILIARY_SERVICES_OMNIMEMORY_ENABLED": "false",
-                "BIFROST_VERIFY_ENDPOINTS": "1",
-                "DEV_RUNTIME_EFFECTS_CAPABILITIES": "effects.consumer,market.skill-proof,runtime.effects",
-                "DEV_RUNTIME_EFFECTS_PORT": "8086",
-                "DEV_RUNTIME_EFFECTS_SECRET_RESOLVER_CONFIG_JSON": _secret_resolver_config_json,
-                "DEV_RUNTIME_EFFECTS_SECRET_RESOLVER_CONFIG_PATH": _secret_resolver_config_path,
-                "DEV_RUNTIME_MAIN_CAPABILITIES": "market.skill-proof,workflow.orchestration,runtime.main",
-                "DEV_RUNTIME_MAIN_PORT": "8085",
-                "DEV_RUNTIME_MAIN_PUBLISH_INTROSPECTION": "true",
-                "DEV_RUNTIME_MAIN_SECRET_RESOLVER_CONFIG_JSON": _secret_resolver_config_json,
-                "DEV_RUNTIME_MAIN_SECRET_RESOLVER_CONFIG_PATH": _secret_resolver_config_path,
-                "DEV_RUNTIME_WORKER_CAPABILITIES": "workflow.dispatch,contract.update,runtime.worker",
-                "DEV_RUNTIME_WORKER_SECRET_RESOLVER_CONFIG_JSON": _secret_resolver_config_json,
-                "DEV_RUNTIME_WORKER_SECRET_RESOLVER_CONFIG_PATH": _secret_resolver_config_path,
-                "OMNIMEMORY_ENABLED": "false",
-                "OMNIMEMORY_MEMGRAPH_PORT": "7687",
-                "ONEX_ACTIVE_RUNTIME_PACKAGES": "omnibase_infra,omnimarket",
-            }
-        )
+        env.update(COMPOSE_CONFIG_RENDER_ENV)
 
         result = subprocess.run(
             [

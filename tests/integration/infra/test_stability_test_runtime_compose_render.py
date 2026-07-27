@@ -156,6 +156,12 @@ COMPOSE_RENDER_ENV = {
         "postgresql://postgres:postgres@postgres:5432/omnidash_analytics"
     ),
     "POSTGRES_PASSWORD": "postgres",
+    # OMN-15263: `:?`-required in the base infra file (OMN-15173) and
+    # interpolated by this layered render even though the stability overlay
+    # replaces redpanda's `command:`. `localhost` is deliberate: it keeps the
+    # `"localhost:19092" not in redpanda_command` overlay-leak assertion below
+    # able to catch a base command that stops being overridden.
+    "DEV_REDPANDA_ADVERTISE_HOST": "localhost",  # kafka-fallback-ok — test fixture
     "REDPANDA_ADVERTISE_HOST": "192.168.86.201",
     "STABILITY_TEST_POSTGRES_EXTERNAL_PORT": "15436",
     "STABILITY_TEST_VALKEY_EXTERNAL_PORT": "26379",
