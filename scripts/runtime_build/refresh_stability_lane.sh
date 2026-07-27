@@ -40,6 +40,20 @@
 # the canonical omnibase_infra clone, the same way deploy-runtime.sh and
 # cut-lab-ref.sh already do -- NOT from a worktree, NOT over ssh wrapping.
 #
+# Required environment (OMN-15218 lane-deploy attribution + grant interlock):
+#   ONEX_DEPLOY_REASON      MANDATORY. Why this refresh is happening (a real
+#                           justification, ideally naming a ticket). Recorded with
+#                           the actor (user/uid/host/ssh peer/parent command) in
+#                           ~/.omnibase/infra/deploy-log.jsonl and in this script's
+#                           own receipt. Two unattributed stability rebuilds in two
+#                           days (2026-07-26, 2026-07-27) are why this is required.
+#   ONEX_DEPLOY_GRANT_ACK   Comma-separated grant ids. This refresh is REFUSED
+#                           while unconsumed, unexpired prod-promotion grants at
+#                           onex_change_control@main pin the lane's proof —
+#                           refreshing invalidates the stability-proven premise
+#                           those grants rest on. Proceeding requires naming EVERY
+#                           live grant id (the acknowledgement is recorded).
+#
 # Usage:
 #   refresh_stability_lane.sh [--ref <ref>] [--min-contracts <n>] [--execute]
 #
@@ -178,7 +192,7 @@ HEALTH_URL="http://${LANE_PROBE_HOST}:${STABILITY_TEST_RUNTIME_MAIN_PORT}/health
 MODE="plan"
 
 usage() {
-    sed -n '4,52p' "${BASH_SOURCE[0]}" | sed 's/^# \{0,1\}//'
+    sed -n '4,65p' "${BASH_SOURCE[0]}" | sed 's/^# \{0,1\}//'
     exit "${1:-0}"
 }
 
@@ -298,6 +312,53 @@ log "ref             : ${REF}"
 log "min contracts   : ${MIN_CONTRACTS}"
 log "core services   : ${CORE_SERVICES[*]}"
 log "mode            : ${MODE}"
+
+# =============================================================================
+# 0a. Lane-deploy ATTRIBUTION + live-grant INTERLOCK (OMN-15218)
+#
+# Runs BEFORE the ambient-clone checkout, the preflight image tags, and the
+# build — i.e. before this script's FIRST mutation, not just before
+# deploy-runtime.sh's. deploy-runtime.sh runs the same preflight itself, but
+# steps 2 and 3 below (docker tag / git checkout --force) happen earlier and
+# would otherwise be unattributed and un-interlocked.
+#
+# Refuses when ONEX_DEPLOY_REASON is absent/placeholder, or when unconsumed,
+# unexpired prod-promotion grants at onex_change_control@main pin this lane's
+# proof (acknowledge each grant id via ONEX_DEPLOY_GRANT_ACK to proceed on the
+# record). Fails closed when grant state cannot be resolved.
+# =============================================================================
+ATTRIBUTION_PREFLIGHT="${REPO_ROOT}/scripts/preflight_lane_deploy_attribution.py"
+ATTRIBUTION_RECORD_JSON="null"
+if [[ ! -f "${ATTRIBUTION_PREFLIGHT}" ]]; then
+    err "lane-deploy attribution preflight not found: ${ATTRIBUTION_PREFLIGHT}"
+    err "  Refusing to refresh ${LANE} with no attribution mechanism (OMN-15218)."
+    exit 64
+fi
+ATTRIBUTION_ARGS=(
+    --lane "${LANE}"
+    --compose-project "${COMPOSE_PROJECT}"
+    --source "refresh_stability_lane.sh"
+    --invoking-command "refresh_stability_lane.sh --ref ${REF} (mode=${MODE})"
+)
+if [[ "${MODE}" != "execute" ]]; then
+    ATTRIBUTION_ARGS+=(--check-only)
+fi
+ATTRIBUTION_EXIT=0
+if [[ "${PYTHON_BIN}" == "uv-run" ]]; then
+    ATTRIBUTION_RECORD_JSON="$(uv run --project "${REPO_ROOT}" python "${ATTRIBUTION_PREFLIGHT}" \
+        "${ATTRIBUTION_ARGS[@]}")" || ATTRIBUTION_EXIT=$?
+else
+    ATTRIBUTION_RECORD_JSON="$("${PYTHON_BIN}" "${ATTRIBUTION_PREFLIGHT}" \
+        "${ATTRIBUTION_ARGS[@]}")" || ATTRIBUTION_EXIT=$?
+fi
+if [[ "${ATTRIBUTION_EXIT}" -ne 0 ]]; then
+    err "lane-deploy attribution preflight REFUSED this refresh (exit ${ATTRIBUTION_EXIT})."
+    err "  Nothing was tagged, checked out, built, or restarted."
+    exit 64
+fi
+if ! jq -e . >/dev/null 2>&1 <<<"${ATTRIBUTION_RECORD_JSON}"; then
+    ATTRIBUTION_RECORD_JSON="null"
+fi
 
 if [[ "${MODE}" != "execute" ]]; then
     log "dry-run: no fetch/checkout/build/restart performed. Re-run with --execute."
@@ -590,6 +651,7 @@ jq -n \
     --slurpfile health_gate "${GATE1_JSON}" \
     --argjson rollback_triggered "${ROLLBACK_TRIGGERED}" \
     --argjson rollback_gate "${ROLLBACK_GATE_JSON}" \
+    --argjson attribution "${ATTRIBUTION_RECORD_JSON}" \
     --arg result "${RESULT}" \
     '{
         ts_utc: $ts,
@@ -600,6 +662,7 @@ jq -n \
         build_scope: $build_scope,
         health_gate: $health_gate[0],
         rollback: {triggered: $rollback_triggered, gate: $rollback_gate},
+        attribution: $attribution,
         result: $result
     }' > "${RECEIPT_PATH}"
 
