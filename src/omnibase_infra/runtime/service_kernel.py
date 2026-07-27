@@ -355,6 +355,15 @@ def _get_contracts_dir() -> Path:
     return Path(DEFAULT_CONTRACTS_DIR)
 
 
+def _should_auto_create_missing_topics(
+    *,
+    validation_is_valid: bool,
+    universe_warm_enabled: bool,
+) -> bool:
+    """Keep the universe-wide auto-create retry behind the universe-warm gate."""
+    return universe_warm_enabled and not validation_is_valid
+
+
 def resolve_topic_readiness_config() -> ModelTopicReadinessConfig:
     """Resolve the per-contract boot-interleave readiness knobs (OMN-13237).
 
@@ -1232,6 +1241,9 @@ async def bootstrap() -> int:
         # per-contract confirm carries all owned consumers (W2 evidence). The
         # provisioner instance is reused by the Phase B interleave.
         topic_provisioner: object | None = None
+        _universe_warm_enabled = (
+            os.environ.get("ONEX_BOOT_UNIVERSE_PROVISION", "1") != "0"
+        )
         if use_kafka:
             _contracts_root = _get_contracts_dir()
             _skill_manifests_root: Path | None = None
@@ -1276,9 +1288,6 @@ async def bootstrap() -> int:
                 )
                 # OMN-13237: universe warm is best-effort and demoted; the
                 # per-contract confirm (Phase B) gates consumer attach.
-                _universe_warm_enabled = (
-                    os.environ.get("ONEX_BOOT_UNIVERSE_PROVISION", "1") != "0"
-                )
                 if not _universe_warm_enabled:
                     logger.info(
                         "Topic provisioning: universe warm DISABLED "
@@ -1337,7 +1346,10 @@ async def bootstrap() -> int:
                     correlation_id=correlation_id,
                     log_missing=False,
                 )
-                if not validation_result.is_valid:
+                if _should_auto_create_missing_topics(
+                    validation_is_valid=validation_result.is_valid,
+                    universe_warm_enabled=_universe_warm_enabled,
+                ):
                     # OMN-7810: Auto-create missing topics before failing strict
                     # validation. This handles topics that were added to the
                     # provisioning registry but not yet created on the broker
@@ -1384,17 +1396,17 @@ async def bootstrap() -> int:
                             exc_info=True,
                         )
 
-                    if strict_topic_validation:
-                        raise RuntimeError(
-                            f"Missing topics: {validation_result.missing_topics}"
-                        )
-                    if not validation_result.is_valid:
-                        logger.warning(
-                            "Topic validation: %d missing (non-blocking) "
-                            "(correlation_id=%s)",
-                            len(validation_result.missing_topics),
-                            correlation_id,
-                        )
+                if strict_topic_validation and not validation_result.is_valid:
+                    raise RuntimeError(
+                        f"Missing topics: {validation_result.missing_topics}"
+                    )
+                if not validation_result.is_valid:
+                    logger.warning(
+                        "Topic validation: %d missing (non-blocking) "
+                        "(correlation_id=%s)",
+                        len(validation_result.missing_topics),
+                        correlation_id,
+                    )
             except RuntimeError:
                 raise
             except Exception:  # noqa: BLE001 — boundary: logs warning and degrades
