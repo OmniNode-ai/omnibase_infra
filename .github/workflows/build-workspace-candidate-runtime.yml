@@ -59,9 +59,10 @@ jobs:
     permissions:
       id-token: write
       contents: read
-    # OMNI_RUNNER_SELECTOR_V1 — trusted Docker job on self-hosted omnibase-ci.
-    runs-on: >-
-      ${{ fromJSON(vars.OMNI_TRUSTED_CI_RUNS_ON_JSON || '["self-hosted","omnibase-ci"]') }}
+    # OMN-14974: use clean cloud egress for ECR. The .201 self-hosted Docker
+    # daemon is a proven-unreliable push lane (the clean-main runtime workflow
+    # moved off it in OMN-13747 for the same EOF/stalled-upload failure mode).
+    runs-on: ubuntu-latest
     timeout-minutes: 75
 
     outputs:

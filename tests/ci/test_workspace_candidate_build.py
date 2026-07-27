@@ -84,6 +84,18 @@ class TestWorkspaceCandidateWorkflow:
         assert isinstance(on, dict)
         assert set(on.keys()) == {"workflow_dispatch"}
 
+    def test_workflow_uses_clean_cloud_egress_for_ecr_push(
+        self, workflow: dict[object, object]
+    ) -> None:
+        jobs = workflow.get("jobs")
+        assert isinstance(jobs, dict)
+        build_job = jobs.get("build-workspace-candidate")
+        assert isinstance(build_job, dict)
+        assert build_job.get("runs-on") == "ubuntu-latest", (
+            "workspace candidate builds must use hosted clean-cloud egress; "
+            "the .201 self-hosted Docker daemon is a known unreliable ECR push lane"
+        )
+
     def test_workflow_builds_workspace_mode_with_candidate_stamp(
         self, workflow_text: str
     ) -> None:
