@@ -101,6 +101,12 @@ readonly DEPLOY_ROOT="${HOME}/.omnibase/infra"
 readonly REGISTRY_FILE="${DEPLOY_ROOT}/registry.json"
 readonly LOCK_DIR="${DEPLOY_ROOT}/.deploy.lock"
 
+# OMN-15218: env-var NAMES the lane-deploy attribution preflight reads. Held as
+# names (not values) so the guard's error text and the Python preflight can never
+# drift into naming two different knobs.
+readonly ONEX_DEPLOY_REASON_VAR="ONEX_DEPLOY_REASON"
+readonly ONEX_DEPLOY_GRANT_ACK_VAR="ONEX_DEPLOY_GRANT_ACK"
+
 # Maximum number of deployed versions to retain. Older deployments are pruned
 # after each successful deployment. The currently active deployment (tracked in
 # registry.json) is never removed regardless of age.
@@ -211,6 +217,14 @@ readonly HEALTH_CHECK_INTERVAL=4
 MODE="dry-run"           # dry-run | execute
 FORCE=false
 RESTART=false
+# OMN-15218: the raw argv this invocation was called with, captured before
+# parse_args consumes it, so the attribution record names the exact command that
+# mutated the lane instead of a reconstruction.
+DEPLOY_INVOCATION_ARGS=()
+# OMN-15218: the attribution record emitted by the lane-deploy preflight, folded
+# into registry.json by write_registry() so "who/what/why" is readable from the
+# same file that already answers "what version is deployed".
+LANE_ATTRIBUTION_RECORD_JSON=""
 # Set after rsync to enable automatic cleanup of orphaned deployment directories
 # on failure. If this is non-empty and the deployment directory is NOT the active
 # deployment in registry.json, the trap handler will remove it.
@@ -328,10 +342,28 @@ OPTIONS
                         origin/main. Also honored via ONEX_DEPLOY_LANE=prod.
     --help              Show this help message and exit.
 
+ATTRIBUTION + GRANT INTERLOCK (OMN-15218)
+    ONEX_DEPLOY_REASON      REQUIRED for the governed lanes (stability-test, prod,
+                            judge). A real justification, ideally naming a ticket;
+                            placeholders are rejected. Recorded durably with the
+                            actor (user/uid/host/ssh peer/parent command) and the
+                            invoking command line.
+    ONEX_DEPLOY_TICKET      Optional explicit OMN-#### (otherwise parsed from the
+                            reason).
+    ONEX_DEPLOY_GRANT_ACK   Comma-separated grant ids. A stability-test deploy is
+                            REFUSED while unconsumed, unexpired prod-promotion
+                            grants exist at onex_change_control@main; proceeding
+                            requires naming EVERY live grant id here (or the token
+                            'unreadable-grant-state' when grant state cannot be
+                            resolved — which also fails closed). The
+                            acknowledgement is written into the record.
+
 DEPLOYMENT ROOT
     ~/.omnibase/infra/
     +-- .deploy.lock/                       mkdir-based concurrency guard
     +-- registry.json                       tracks active deployment
+    +-- deploy-log.jsonl                    append-only lane-deploy attribution log
+    +-- deploy-attribution/                 per-run attribution records
     +-- deployed/
         +-- {version}/                      build directory
             +-- pyproject.toml
@@ -496,6 +528,26 @@ resolve_compose_project() {
 # scripts/deploy-agent/deploy_agent/executor.py (_LANE_CONFIGS): stability-test
 # layers docker-compose.stability-test.yml, prod layers docker-compose.prod.yml,
 # judge layers docker-compose.judge.yml. The dev project gets no overlay.
+resolve_lane_name() {
+    # Echo the LANE name derived from a compose project (OMN-15218).
+    #   omnibase-infra                -> dev
+    #   omnibase-infra-stability-test -> stability-test
+    #   omnibase-infra-prod           -> prod
+    #   omnibase-infra-judge          -> judge
+    # Single derivation shared by the hot-patch preflight and the lane-deploy
+    # attribution guard, so one deploy can never be recorded under two different
+    # lane names. Unknown suffixes echo through unchanged; the callers that must
+    # fail closed on an unknown lane (resolve_lane_overlay_filename) do their own
+    # allowlist check.
+    local compose_project="$1"
+    local lane="${compose_project#omnibase-infra}"
+    lane="${lane#-}"
+    if [[ -z "${lane}" ]]; then
+        lane="dev"
+    fi
+    echo "${lane}"
+}
+
 resolve_lane_overlay_filename() {
     # Echo the overlay compose FILENAME (relative to docker/) for a compose
     # project, or nothing for the bare dev project. Fails closed: an unknown
@@ -1043,6 +1095,85 @@ guard_prod_promotion_lineage() {
     log_info "Prod promotion-lineage guard passed: source clean + promoted."
 }
 
+guard_lane_deploy_attribution() {
+    # Lane-deploy ATTRIBUTION + live-grant INTERLOCK preflight (OMN-15218).
+    #
+    # Runs BEFORE any mutation (and in dry-run, so an operator sees the refusal
+    # during preview rather than after a build starts). Delegates every rule to
+    # scripts/preflight_lane_deploy_attribution.py — one tested source of truth
+    # for: mandatory ONEX_DEPLOY_REASON on governed lanes (stability-test / prod
+    # / judge), durable actor+command+ticket capture, and the refuse-by-default
+    # interlock when live, unconsumed prod-promotion grants at
+    # onex_change_control@main pin the stability lane's proof.
+    #
+    # The preflight prints its human summary on stderr and the JSON attribution
+    # record on stdout; the record is captured here and folded into registry.json
+    # by write_registry().
+    local repo_root="$1"
+    local compose_project="$2"
+
+    local lane
+    lane="$(resolve_lane_name "${compose_project}")"
+
+    log_step "Lane Deploy Attribution + Grant Interlock (OMN-15218)"
+
+    local preflight="${repo_root}/scripts/preflight_lane_deploy_attribution.py"
+    if [[ ! -f "${preflight}" ]]; then
+        log_error "Lane-deploy attribution preflight not found: ${preflight}"
+        log_error "Refusing to deploy lane '${lane}' with no attribution mechanism."
+        log_error "  Two unattributed stability rebuilds in two days (2026-07-26, 2026-07-27)"
+        log_error "  are exactly what this preflight exists to make impossible (OMN-15218)."
+        exit 1
+    fi
+
+    local python_bin=""
+    if [[ -x "${repo_root}/.venv/bin/python" ]]; then
+        python_bin="${repo_root}/.venv/bin/python"
+    elif command -v uv &>/dev/null; then
+        python_bin="uv-run"
+    elif command -v python3 &>/dev/null; then
+        python_bin="python3"
+    else
+        log_error "No Python interpreter available to run the lane-deploy attribution preflight."
+        exit 1
+    fi
+
+    local preflight_args=(
+        --lane "${lane}"
+        --compose-project "${compose_project}"
+        --source "deploy-runtime.sh"
+        --invoking-command "${SCRIPT_NAME} ${DEPLOY_INVOCATION_ARGS[*]}"
+    )
+    # Dry-run evaluates and reports but writes no durable record — nothing was
+    # deployed, so nothing is attributed; the verdict is still shown.
+    if [[ "${MODE}" != "execute" ]]; then
+        preflight_args+=(--check-only)
+    fi
+
+    log_cmd "${preflight} ${preflight_args[*]}"
+
+    local preflight_exit=0
+    if [[ "${python_bin}" == "uv-run" ]]; then
+        LANE_ATTRIBUTION_RECORD_JSON="$(uv run --project "${repo_root}" python "${preflight}" \
+            "${preflight_args[@]}")" || preflight_exit=$?
+    else
+        LANE_ATTRIBUTION_RECORD_JSON="$("${python_bin}" "${preflight}" \
+            "${preflight_args[@]}")" || preflight_exit=$?
+    fi
+
+    if [[ "${preflight_exit}" -ne 0 ]]; then
+        log_error "Lane-deploy attribution preflight REFUSED this deploy (exit ${preflight_exit})."
+        log_error "  Lane: ${lane} (${compose_project})"
+        log_error "  Set ${ONEX_DEPLOY_REASON_VAR} to a real justification, and — when live"
+        log_error "  prod-promotion grants pin this lane — acknowledge each grant id via"
+        log_error "  ${ONEX_DEPLOY_GRANT_ACK_VAR}. Both are recorded in the attribution record."
+        log_error "  Never route around this by calling docker compose directly (OMN-15218)."
+        exit 1
+    fi
+
+    log_info "Lane-deploy attribution recorded; grant interlock clear."
+}
+
 guard_hotpatch_ledger() {
     # Hot-patch ledger rebuild preflight (OMN-13014, retro B-1).
     #
@@ -1075,11 +1206,8 @@ guard_hotpatch_ledger() {
 
     # Lane = compose project suffix (omnibase-infra-stability-test -> stability-test);
     # the bare dev project (omnibase-infra) maps to lane 'dev'.
-    local lane="${compose_project#omnibase-infra}"
-    lane="${lane#-}"
-    if [[ -z "${lane}" ]]; then
-        lane="dev"
-    fi
+    local lane
+    lane="$(resolve_lane_name "${compose_project}")"
 
     # Workspace builds vendor sibling repos from OMNI_HOME clones; the gate
     # resolves each ledger row's repo build ref (clone HEAD unless overridden
@@ -2013,6 +2141,19 @@ write_registry() {
     old_umask="$(umask)"
     umask 077
 
+    # OMN-15218: carry the attribution record (actor, reason, ticket, invoking
+    # command, grant-interlock verdict + any acknowledgement) into registry.json.
+    # Before this, registry.json answered "what is deployed" but nothing on the
+    # box answered "who deployed it and why" — the exact gap that made two
+    # stability rebuilds unattributable. Defensive: if the record is missing or
+    # not valid JSON, write `null` rather than corrupting the registry (the
+    # preflight already hard-failed the deploy if it could not produce one).
+    local attribution_json="null"
+    if [[ -n "${LANE_ATTRIBUTION_RECORD_JSON}" ]] \
+        && jq -e . >/dev/null 2>&1 <<<"${LANE_ATTRIBUTION_RECORD_JSON}"; then
+        attribution_json="${LANE_ATTRIBUTION_RECORD_JSON}"
+    fi
+
     jq -n \
         --arg active_version "${version}" \
         --arg git_sha "${git_sha}" \
@@ -2021,6 +2162,7 @@ write_registry() {
         --arg deployed_at "${deployed_at}" \
         --arg compose_project "${compose_project}" \
         --arg profile "${COMPOSE_PROFILE}" \
+        --argjson attribution "${attribution_json}" \
         '{
             active_version: $active_version,
             git_sha: $git_sha,
@@ -2028,7 +2170,8 @@ write_registry() {
             source_repo: $source_repo,
             deployed_at: $deployed_at,
             compose_project: $compose_project,
-            profile: $profile
+            profile: $profile,
+            attribution: $attribution
         }' > "${tmp_file}"
 
     # Restore original umask before continuing
@@ -2042,6 +2185,11 @@ write_registry() {
     log_info "  git_sha:         ${git_sha}"
     log_info "  deployed_at:     ${deployed_at}"
     log_info "  compose_project: ${compose_project}"
+    if [[ "${attribution_json}" != "null" ]]; then
+        log_info "  actor:           $(jq -r '.actor.identity // "unknown"' <<<"${attribution_json}")"
+        log_info "  reason:          $(jq -r '.reason // ""' <<<"${attribution_json}")"
+        log_info "  grant verdict:   $(jq -r '.grant_guard.verdict // "unknown"' <<<"${attribution_json}")"
+    fi
 }
 
 # =============================================================================
@@ -2805,6 +2953,9 @@ show_summary() {
 
 main() {
     # Orchestrate the full deployment workflow from validation through verification.
+    # OMN-15218: capture raw argv before parse_args consumes it so the attribution
+    # record carries the literal command that touched the lane.
+    DEPLOY_INVOCATION_ARGS=("$@")
     parse_args "$@"
 
     # Phase 1: Validate prerequisites
@@ -2856,15 +3007,17 @@ main() {
     # during preview, not after a build starts (OMN-12626, R1).
     guard_prod_promotion_lineage "${repo_root}"
 
-    # Prod lane: hard-fail on dirty/non-promoted source before any build/deploy.
-    # Runs in both dry-run and execute modes so operators see the rejection
-    # during preview, not after a build starts (OMN-12626, R1).
-    guard_prod_promotion_lineage "${repo_root}"
-
     # Compute paths
     local deploy_target="${DEPLOY_ROOT}/deployed/${version}"
     local compose_project
     compose_project="$(resolve_compose_project)"
+
+    # Lane-deploy attribution + live-grant interlock (OMN-15218). FIRST gate that
+    # runs once the target lane is known and BEFORE anything is built, recreated,
+    # or restarted: an unattributed deploy must not get as far as touching an
+    # image, and a stability refresh must not silently erode the stability-proven
+    # premise of a live prod-promotion grant.
+    guard_lane_deploy_attribution "${repo_root}" "${compose_project}"
 
     # Hot-patch ledger preflight: refuse to rebuild over live in-container
     # hot-patches whose source PRs are not merged into the build ref.
