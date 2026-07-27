@@ -232,7 +232,7 @@ class MixinKafkaDlq:
         dlq_topic: str | None = None,
         failure_class: str | None = None,
         validation_detail: str | None = None,
-    ) -> None:
+    ) -> bool:
         """Publish failed message to dead letter queue with metrics and alerting.
 
         This method publishes messages that failed processing to the configured
@@ -261,9 +261,21 @@ class MixinKafkaDlq:
             validation_detail: Optional real pydantic ``ValidationError``
                 detail (OMN-14492) for the ``publisher_malformed`` case.
 
+        Returns:
+            ``True`` if the DLQ message was actually published (producer send
+            acked within timeout, either on the resolved topic or the category
+            fallback), ``False`` otherwise (rejected input, producer
+            unavailable, or every send failed/timed out). Mirrors the
+            ``_publish_raw_to_dlq`` contract added under OMN-14936: callers
+            that gate offset advancement on durable DLQ persistence
+            (OMN-15232) MUST check this return value instead of assuming the
+            write succeeded just because no exception escaped this method.
+
         Note:
             This method logs errors if DLQ publishing fails but does not raise
-            exceptions to prevent cascading failures in the consumer loop.
+            exceptions to prevent cascading failures in the consumer loop. The
+            boolean return value is the only signal of actual persistence
+            success.
         """
         # Validate original_topic - reject whitespace-only values
         if not original_topic or not original_topic.strip():
@@ -274,7 +286,7 @@ class MixinKafkaDlq:
                     "error_type": type(error).__name__,
                 },
             )
-            return
+            return False
 
         # Track timing for metrics
         start_time = datetime.now(UTC)
@@ -624,6 +636,12 @@ class MixinKafkaDlq:
 
         # Invoke DLQ callbacks for custom alerting
         await self._invoke_dlq_callbacks(dlq_event)
+
+        # OMN-15232: surface the real persistence outcome so callers can gate
+        # offset advancement on it. ``success`` is True only when a
+        # send_and_wait ack came back within the timeout, on either the
+        # resolved topic or the category fallback.
+        return success
 
     async def _invoke_dlq_callbacks(self, event: ModelDlqEvent) -> None:
         """Invoke registered DLQ callbacks with error isolation.
