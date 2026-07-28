@@ -39,7 +39,7 @@ jobs:
         with:
           # git ls-files (used by the scanner) needs the full tracked index.
           fetch-depth: 0
-      - uses: actions/setup-python@v5
+      - uses: actions/setup-python@v7
         with:
           python-version: '3.12'
       # pytest is imported by the module (for the @pytest.mark decorators), but
