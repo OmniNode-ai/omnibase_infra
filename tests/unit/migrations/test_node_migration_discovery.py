@@ -392,7 +392,25 @@ class TestNamespacedDiscoveryWiring:
         bin_dir = tmp_path / "bin"
         bin_dir.mkdir()
         psql = bin_dir / "psql"
-        psql.write_text("#!/bin/sh\nexit 0\n", encoding="utf-8")
+        # The stub must model the OMN-15291 advisory-lock contract, not just
+        # exit 0: the runner now refuses to touch migrations unless it can prove
+        # it holds the lock, so a psql that answers nothing is (correctly)
+        # treated as "lock not acquired" and aborts before directive validation.
+        psql.write_text(
+            "#!/bin/sh\n"
+            "# Held-ness probe: report the advisory lock as granted to us.\n"
+            'case "$*" in\n'
+            "  *pg_locks*) echo 1; exit 0;;\n"
+            "esac\n"
+            "# Lock-holder session: stay alive until killed. `exec` is\n"
+            "# load-bearing -- without it the stub shell is what gets killed\n"
+            "# and its `cat` child survives holding the runner's stdout open.\n"
+            'case "${PGAPPNAME:-}" in\n'
+            "  forward-migration-lock-*) exec cat >/dev/null;;\n"
+            "esac\n"
+            "exit 0\n",
+            encoding="utf-8",
+        )
         psql.chmod(0o755)
 
         result = subprocess.run(
