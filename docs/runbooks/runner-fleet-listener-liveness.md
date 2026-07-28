@@ -222,10 +222,28 @@ projection of the same fact:
 - the session is **broken** when the **last** session marker in that log is an
   error (`Runner connect error`, `TaskAgentSessionConflictException`,
   `A session for this runner already exists`, `Unable to connect to the server`,
-  `Failed to create session`, `SocketException`) with **no** re-establish
+  `Failed to create session`) with **no** re-establish
   (`Listening for Jobs`, `Runner reconnected`, `Job message received`) after it.
   Marker **order**, not presence — a healthy long-lived runner has connect errors
   somewhere in its log, and a presence check would red-line the fleet.
+- **`SocketException` is deliberately NOT a broken marker** (removed 2026-07-28,
+  adversarial fleet probe). `BrokerServer` writes
+  `System.Net.Sockets.SocketException (125): Operation canceled` ~45–150x per
+  listener log as ordinary long-poll cancellation, immediately followed by
+  `Get messages has been cancelled using local token source. Continue to get
+  messages with new status.` — the session is still up. Ordering does **not**
+  rescue this one, because the connected markers only fire at session
+  establishment / job assignment, so on any runner idle >15 min the retry noise
+  is the last marker. Measured across all 64 live listeners on `omninode-pc`
+  (all `Up (healthy)`, all registry-**online**): with `SocketException` in the
+  set, **64/64** classified broken; without it, **0/64**. Shipping it would have
+  flipped the whole fleet Docker-unhealthy 15 min after the bind-mount swap —
+  a permanently-red check is a disabled check.
+  `tests/ci/fixtures/runner_diag_real_tail.log.gz` (a byte-faithful contiguous
+  tail of `omninode-runner-10`'s live `Runner_20260727-170542-utc.log`, captured
+  2026-07-28: last connected marker at line 9, 45 `SocketException` lines after
+  it) pins the vocabulary against real data — the synthetic 3-line fixtures
+  exercise the artifact that runs but not the input distribution that runs.
 - reconnects are routine and fast, so the layer gates on **persistence**:
   `${RUNNER_HOME}/_diag/.session_broken_since` is stamped on first observation
   and the check only fails once that stamp is older than

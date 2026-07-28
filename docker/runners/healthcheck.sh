@@ -181,8 +181,22 @@ if [[ "${RUNNER_HEALTH_SESSION_STATE_CHECK}" != "0" ]]; then
   # Markers the runner itself writes. CONNECTED means the broker session is
   # established and the runner is reachable for job assignment; BROKEN means the
   # session was lost, refused, or is contested.
+  #
+  # SocketException is DELIBERATELY ABSENT from the broken set (removed
+  # 2026-07-28 by adversarial fleet probe, OMN-15311). BrokerServer emits
+  # "System.Net.Sockets.SocketException (125): Operation canceled" ~45-150x per
+  # listener log as ORDINARY long-poll cancellation - the very next line is
+  # "Get messages has been cancelled using local token source. Continue to get
+  # messages with new status." and the session is still up. Ordering does not
+  # rescue it: the connected markers only fire at session establishment / job
+  # assignment, so on any runner idle for >15 min that retry noise IS the last
+  # marker. Measured against all 64 live listeners on omninode-pc, every one of
+  # them Up-healthy and registry-online: WITH SocketException 64/64 classified
+  # broken; WITHOUT it 0/64. A permanently-red check is a disabled check - the
+  # same reasoning as the rate-vs-cumulative note in layer 4 below.
+  # tests/ci/fixtures/runner_diag_real_tail.log.gz pins this to a real log tail.
   session_connected_patterns='Listening for Jobs|Runner reconnected|Job message received'
-  session_broken_patterns='Runner connect error|TaskAgentSessionConflictException|A session for this runner already exists|Unable to connect to the server|Failed to create session|SocketException'
+  session_broken_patterns='Runner connect error|TaskAgentSessionConflictException|A session for this runner already exists|Unable to connect to the server|Failed to create session'
 
   # SC2012: `ls -t` is the portable newest-first ordering here; find -printf
   # '%T@' is GNU-only and this script must also run under the BSD find on the

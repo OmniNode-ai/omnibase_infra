@@ -22,6 +22,7 @@ Ticket: OMN-13915
 
 from __future__ import annotations
 
+import gzip
 import http.server
 import json
 import os
@@ -50,6 +51,16 @@ CANARY_SCRIPT = REPO_ROOT / "scripts" / "ci" / "runner_fleet_canary.sh"
 CANARY_WORKFLOW = REPO_ROOT / ".github" / "workflows" / "runner-fleet-canary.yml"
 FLEET_CONFIG = REPO_ROOT / "config" / "runner_fleet.yaml"
 RUNBOOK = REPO_ROOT / "docs" / "runbooks" / "runner-fleet-listener-liveness.md"
+
+# A byte-faithful contiguous tail of a REAL production listener log:
+# omninode-runner-10's Runner_20260727-170542-utc.log on omninode-pc, captured
+# 2026-07-28 while the container was `Up (healthy)` and the runner was
+# registry-ONLINE. Committed gzipped (163 KB -> 8.8 KB) and never edited --
+# the point of the fixture is that it is the input distribution the artifact
+# actually sees, not a hand-written approximation of it.
+REAL_LISTENER_TAIL = (
+    REPO_ROOT / "tests" / "ci" / "fixtures" / "runner_diag_real_tail.log.gz"
+)
 
 
 def _run_healthcheck(
@@ -902,6 +913,110 @@ class TestHealthcheckBrokerSessionState:
             )
         finally:
             proc.kill()
+
+
+class TestHealthcheckAgainstARealListenerLog:
+    """OMN-15311 regression: the marker VOCABULARY, pinned to real fleet data.
+
+    The synthetic session fixtures above are 3-4 hand-written lines each. They
+    exercise the artifact that runs; they do not exercise the input distribution
+    that runs, and that gap shipped a fleet-wide false positive: `SocketException`
+    was in ``session_broken_patterns``, but `BrokerServer` emits
+    ``System.Net.Sockets.SocketException (125): Operation canceled`` ~45-150x per
+    log as ordinary long-poll cancellation, while the connected markers only fire
+    at session establishment / job assignment. On any runner idle for >15 min the
+    retry noise is therefore the LAST marker, so marker ORDERING -- the design's
+    whole defence against a false positive -- did not help. Measured over all 64
+    live listeners on omninode-pc, every one Up-healthy and registry-online:
+    64/64 classified broken with `SocketException` in the set, 0/64 without it.
+
+    These tests are RED against that vocabulary and GREEN against the corrected
+    one. Every future marker-vocabulary change has to survive a real log.
+    """
+
+    def test_real_healthy_listener_log_reads_healthy(
+        self, synthetic_runner_home: Path
+    ) -> None:
+        """THE regression. A real log from a healthy, registry-ONLINE runner.
+
+        RED with `SocketException` in ``session_broken_patterns`` (the whole
+        64-runner fleet flips Docker-unhealthy 15 min after the OMN-15233
+        bind-mount swap); GREEN without it.
+        """
+        body = gzip.decompress(REAL_LISTENER_TAIL.read_bytes()).decode("utf-8")
+        listener = synthetic_runner_home / "bin" / "Runner.Listener"
+        proc = subprocess.Popen([str(listener)])
+        try:
+            time.sleep(0.5)
+            _write_session_log(synthetic_runner_home, body)
+            # Aged well past the 900s grace: if the layer classifies this log as
+            # broken at all, the grace cannot mask it.
+            _age_stamp(synthetic_runner_home, 3600)
+
+            result = _run_healthcheck(synthetic_runner_home, max_diag_age=None)
+            assert result.returncode == 0, (
+                "a real listener log from a healthy, registry-ONLINE runner must "
+                "read HEALTHY -- a marker set that fails this red-lines all 64 "
+                f"runners on the next healthcheck swap: rc={result.returncode} "
+                f"out={result.stdout}"
+            )
+        finally:
+            proc.kill()
+
+    def test_the_real_log_fixture_is_not_vacuous(self) -> None:
+        """The fixture only proves anything if it CONTAINS the retry noise.
+
+        Guards against someone quietly swapping in a clean log and keeping the
+        test green: the last connect-class line must come AFTER the last
+        connected marker, which is exactly the shape that produced the 64/64
+        false positive.
+        """
+        lines = (
+            gzip.decompress(REAL_LISTENER_TAIL.read_bytes())
+            .decode("utf-8")
+            .splitlines()
+        )
+        connected = re.compile(
+            r"Listening for Jobs|Runner reconnected|Job message received"
+        )
+        last_connected = max(
+            (i for i, line in enumerate(lines) if connected.search(line)),
+            default=None,
+        )
+        assert last_connected is not None, (
+            "the fixture must contain a session-established marker, or it proves "
+            "nothing about ordering"
+        )
+        noise_after = [
+            i
+            for i, line in enumerate(lines)
+            if "SocketException" in line and i > last_connected
+        ]
+        assert len(noise_after) >= 10, (
+            "the fixture must carry the long-poll SocketException churn AFTER "
+            "the last connected marker -- that ordering is the false positive "
+            f"under test; found {len(noise_after)} such lines"
+        )
+
+    def test_socketexception_is_not_a_broken_session_marker(self) -> None:
+        """Vocabulary guard with the measurement attached, so it cannot re-land.
+
+        The execution test above is the real proof; this one names the offender
+        so a future edit that re-adds it fails with the reason rather than with
+        an opaque real-log diff.
+        """
+        content = HEALTHCHECK.read_text(encoding="utf-8")
+        match = re.search(r"^\s*session_broken_patterns='([^']*)'", content, re.M)
+        assert match is not None, "session_broken_patterns must be assigned literally"
+        patterns = match.group(1).split("|")
+        assert "SocketException" not in patterns, (
+            "SocketException is ordinary BrokerServer long-poll cancellation and "
+            "is the LAST marker on every idle runner: it classified 64/64 live "
+            "healthy registry-online listeners as broken (OMN-15311)"
+        )
+        # The genuinely-broken markers must survive the narrowing.
+        assert "Runner connect error" in patterns
+        assert "TaskAgentSessionConflictException" in patterns
 
 
 class TestEntrypointWatchdog:
