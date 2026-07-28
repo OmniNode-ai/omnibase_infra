@@ -57,6 +57,8 @@ def _run_healthcheck(
     max_diag_age: str | None = "900",
     window_minutes: str | None = None,
     max_starts_per_hour: str | None = None,
+    max_session_broken: str | None = None,
+    session_state_check: str | None = None,
 ) -> subprocess.CompletedProcess[str]:
     """Run healthcheck.sh against ``runner_home``.
 
@@ -73,6 +75,8 @@ def _run_healthcheck(
         ("RUNNER_HEALTH_MAX_DIAG_AGE_SECONDS", max_diag_age),
         ("RUNNER_HEALTH_LOG_RATE_WINDOW_MINUTES", window_minutes),
         ("RUNNER_HEALTH_MAX_LOG_STARTS_PER_HOUR", max_starts_per_hour),
+        ("RUNNER_HEALTH_MAX_SESSION_BROKEN_SECONDS", max_session_broken),
+        ("RUNNER_HEALTH_SESSION_STATE_CHECK", session_state_check),
     ):
         if value is None:
             env.pop(name, None)
@@ -558,6 +562,344 @@ class TestHealthcheckCrashLoopRate:
                 f"rc={result.returncode} out={result.stdout} err={result.stderr}"
             )
             assert "fail closed" in result.stdout
+        finally:
+            proc.kill()
+
+
+SESSION_STAMP_NAME = ".session_broken_since"
+
+_CONNECT_ERROR_LINES = (
+    "[2026-07-27 17:26:03Z ERR  GitHubActionsRunner] Runner connect error: "
+    "The HTTP request timed out. Retrying until reconnected.\n"
+    "[2026-07-27 17:26:24Z ERR  GitHubActionsRunner] "
+    "System.Net.Sockets.SocketException (125): Operation canceled\n"
+)
+_RECONNECT_LINE = (
+    "[2026-07-27 17:31:11Z INFO GitHubActionsRunner] Runner reconnected.\n"
+)
+_LISTENING_LINE = "[2026-07-27 15:14:35Z INFO GitHubActionsRunner] Listening for Jobs\n"
+
+
+def _write_session_log(
+    runner_home: Path,
+    body: str,
+    name: str = "Runner_20260727-170000-utc.log",
+) -> Path:
+    """Write a Runner_*.log and make it the NEWEST one in _diag.
+
+    The layer reads the newest listener log, so the fixture's own
+    ``Runner_20260703-000000-utc.log`` is aged back to keep the ordering
+    unambiguous rather than relying on same-second mtime ties.
+    """
+    diag = runner_home / "_diag"
+    older = time.time() - 600
+    for existing in diag.glob("Runner_*.log"):
+        os.utime(existing, (older, older))
+    path = diag / name
+    path.write_text(body, encoding="utf-8")
+    return path
+
+
+def _age_stamp(runner_home: Path, seconds: float) -> Path:
+    stamp = runner_home / "_diag" / SESSION_STAMP_NAME
+    stamp.write_text("", encoding="utf-8")
+    aged = time.time() - seconds
+    os.utime(stamp, (aged, aged))
+    return stamp
+
+
+class TestHealthcheckBrokerSessionState:
+    """OMN-15311: the FOURTH state — broker session broken, everything else fine.
+
+    Measured live 2026-07-27 during the OMN-15233 fan-out. A transient
+    host<->GitHub network fault left runners 36/38/56 registry-OFFLINE for ~20
+    minutes while the container read exit 0 on every existing layer: one live
+    non-orphaned listener, ``_diag`` kept FRESH by the listener's own reconnect
+    RETRY traffic, normal listener start rate, ``github.com`` reachable. Docker
+    counted them as capacity and ``runner-monitor.sh`` suppressed auto-bounce on
+    local-listener evidence, so they absorbed zero jobs until restarted.
+
+    Layers 1-5 assert that a listener exists, is singular, is parented, is
+    writing, and has egress. None of them assert that it HOLDS A LIVE BROKER
+    SESSION, which is the only property that makes a runner able to take a job.
+    """
+
+    def test_persistently_broken_session_reads_unhealthy(
+        self, synthetic_runner_home: Path
+    ) -> None:
+        """THE reproduction. RED against origin/dev, which exits 0 on this input.
+
+        Every input here satisfies every pre-OMN-15311 layer: single live
+        non-orphaned listener, fresh ``_diag``, one listener start, egress
+        skipped. The only thing wrong is that the listener's last session marker
+        is a connect error with no re-establish after it, and it has been that
+        way past the grace window.
+        """
+        listener = synthetic_runner_home / "bin" / "Runner.Listener"
+        proc = subprocess.Popen([str(listener)])
+        try:
+            time.sleep(0.5)
+            _write_session_log(
+                synthetic_runner_home, _LISTENING_LINE + _CONNECT_ERROR_LINES
+            )
+            _age_stamp(synthetic_runner_home, 1800)
+
+            result = _run_healthcheck(synthetic_runner_home, max_diag_age=None)
+            assert result.returncode == 1, (
+                "a listener whose broker session has been broken for 30 min "
+                "must read UNHEALTHY even though the process, heartbeat, start "
+                f"rate and egress layers all pass: rc={result.returncode} "
+                f"out={result.stdout}"
+            )
+            assert "broker session" in result.stdout.lower()
+        finally:
+            proc.kill()
+
+    def test_transient_drop_inside_the_grace_reads_healthy(
+        self, synthetic_runner_home: Path
+    ) -> None:
+        """A blip must not flap 64 runners; the first observation only stamps.
+
+        Reconnects are routine and fast. If a single observation of a dropped
+        session failed the check, every ordinary network hiccup would red-line
+        the fleet — the exact false-positive class OMN-15233 spent a rollout
+        removing.
+        """
+        listener = synthetic_runner_home / "bin" / "Runner.Listener"
+        proc = subprocess.Popen([str(listener)])
+        stamp = synthetic_runner_home / "_diag" / SESSION_STAMP_NAME
+        try:
+            time.sleep(0.5)
+            _write_session_log(
+                synthetic_runner_home, _LISTENING_LINE + _CONNECT_ERROR_LINES
+            )
+            assert not stamp.exists()
+
+            # First observation: nothing has been measured yet.
+            result = _run_healthcheck(synthetic_runner_home, max_diag_age=None)
+            assert result.returncode == 0, (
+                "the FIRST observation of a broken session must not fail — the "
+                f"grace has not elapsed: rc={result.returncode} out={result.stdout}"
+            )
+            assert stamp.exists(), (
+                "a broken session must be stamped on first observation, or the "
+                "grace window can never elapse and the layer never fires"
+            )
+
+            # Still inside the grace on a later check.
+            _age_stamp(synthetic_runner_home, 60)
+            result = _run_healthcheck(synthetic_runner_home, max_diag_age=None)
+            assert result.returncode == 0, (
+                f"60s of broken session is inside the 900s grace: {result.stdout}"
+            )
+        finally:
+            proc.kill()
+
+    def test_recovery_clears_the_stamp(self, synthetic_runner_home: Path) -> None:
+        """Recovery must reset the clock, not leave an ancient stamp armed.
+
+        Without the clear, the next unrelated blip would inherit a stamp older
+        than the grace and fail on its FIRST observation — turning the
+        persistence gate into the instant check it exists to avoid.
+        """
+        listener = synthetic_runner_home / "bin" / "Runner.Listener"
+        proc = subprocess.Popen([str(listener)])
+        stamp = synthetic_runner_home / "_diag" / SESSION_STAMP_NAME
+        try:
+            time.sleep(0.5)
+            _write_session_log(
+                synthetic_runner_home,
+                _LISTENING_LINE + _CONNECT_ERROR_LINES + _RECONNECT_LINE,
+            )
+            _age_stamp(synthetic_runner_home, 1800)
+
+            result = _run_healthcheck(synthetic_runner_home, max_diag_age=None)
+            assert result.returncode == 0, (
+                "a session that RECONNECTED after the errors is healthy however "
+                f"old the stamp is: rc={result.returncode} out={result.stdout}"
+            )
+            assert not stamp.exists(), (
+                "recovery must delete the stamp so the grace clock restarts "
+                "from the next drop"
+            )
+        finally:
+            proc.kill()
+
+    @pytest.mark.parametrize(
+        ("body", "expect_healthy", "case"),
+        [
+            (
+                _LISTENING_LINE + _CONNECT_ERROR_LINES + _RECONNECT_LINE,
+                True,
+                "errors then reconnect — session is up",
+            ),
+            (
+                _LISTENING_LINE + _RECONNECT_LINE + _CONNECT_ERROR_LINES,
+                False,
+                "reconnect then errors — session is down",
+            ),
+        ],
+    )
+    def test_verdict_follows_marker_ORDER_not_presence(
+        self,
+        synthetic_runner_home: Path,
+        body: str,
+        expect_healthy: bool,
+        case: str,
+    ) -> None:
+        """The same lines, reordered, must flip the verdict.
+
+        This is what separates a session-STATE signal from "grep the log for an
+        error string". Essentially every long-lived healthy runner has connect
+        errors somewhere in its log; a presence check would red-line the fleet.
+        Both parametrizations carry an identical multiset of lines, so any
+        implementation that keys on presence returns the same verdict for both
+        and fails one of them.
+        """
+        listener = synthetic_runner_home / "bin" / "Runner.Listener"
+        proc = subprocess.Popen([str(listener)])
+        try:
+            time.sleep(0.5)
+            _write_session_log(synthetic_runner_home, body)
+            _age_stamp(synthetic_runner_home, 1800)
+
+            result = _run_healthcheck(synthetic_runner_home, max_diag_age=None)
+            expected_rc = 0 if expect_healthy else 1
+            assert result.returncode == expected_rc, (
+                f"{case}: expected "
+                f"{'HEALTHY' if expect_healthy else 'UNHEALTHY'}, got "
+                f"rc={result.returncode} out={result.stdout}"
+            )
+        finally:
+            proc.kill()
+
+    def test_marker_free_log_reads_healthy(self, synthetic_runner_home: Path) -> None:
+        """No session markers at all is not evidence of a broken session.
+
+        Absence of a BROKEN marker is the healthy case; the fail-closed posture
+        applies to a probe that could not run (no listener log at all — see
+        below), not to a log that simply has not logged a session transition
+        inside its retained content.
+        """
+        listener = synthetic_runner_home / "bin" / "Runner.Listener"
+        proc = subprocess.Popen([str(listener)])
+        try:
+            time.sleep(0.5)
+            _write_session_log(synthetic_runner_home, "polling\npolling\n")
+            result = _run_healthcheck(synthetic_runner_home, max_diag_age=None)
+            assert result.returncode == 0, (
+                f"a marker-free listener log must read HEALTHY: {result.stdout}"
+            )
+        finally:
+            proc.kill()
+
+    def test_no_listener_log_fails_closed(self, synthetic_runner_home: Path) -> None:
+        """A live listener with zero Runner_*.log files is unreadable, not fine.
+
+        A registered listener always mints ``Runner_<timestamp>-utc.log`` at
+        start, so its absence means the matched process never registered — the
+        same divergence class the missing-``_diag`` branch already fails on.
+        ``_diag`` keeps a non-listener log so the heartbeat layer still passes
+        and this layer is what produces the verdict.
+        """
+        listener = synthetic_runner_home / "bin" / "Runner.Listener"
+        proc = subprocess.Popen([str(listener)])
+        diag = synthetic_runner_home / "_diag"
+        try:
+            time.sleep(0.5)
+            for existing in diag.glob("Runner_*.log"):
+                existing.unlink()
+            (diag / "Worker_20260727-170000-utc.log").write_text(
+                "worker\n", encoding="utf-8"
+            )
+            result = _run_healthcheck(synthetic_runner_home, max_diag_age=None)
+            assert result.returncode == 1, (
+                "a live listener with no Runner_*.log must fail closed: "
+                f"rc={result.returncode} out={result.stdout}"
+            )
+            assert "Runner_*.log" in result.stdout
+        finally:
+            proc.kill()
+
+    def test_kill_switch_disables_the_layer(self, synthetic_runner_home: Path) -> None:
+        """The layer must be disarmable by env without a fleet file swap.
+
+        ``healthcheck.sh`` reaches the 64-runner fleet through a bind mount, so
+        a misfiring layer would otherwise need a file rollout to disarm. The
+        input here is the exact one that fails in the first test.
+        """
+        listener = synthetic_runner_home / "bin" / "Runner.Listener"
+        proc = subprocess.Popen([str(listener)])
+        try:
+            time.sleep(0.5)
+            _write_session_log(
+                synthetic_runner_home, _LISTENING_LINE + _CONNECT_ERROR_LINES
+            )
+            _age_stamp(synthetic_runner_home, 1800)
+
+            result = _run_healthcheck(
+                synthetic_runner_home,
+                max_diag_age=None,
+                session_state_check="0",
+            )
+            assert result.returncode == 0, (
+                "RUNNER_HEALTH_SESSION_STATE_CHECK=0 must skip the layer: "
+                f"rc={result.returncode} out={result.stdout}"
+            )
+        finally:
+            proc.kill()
+
+    @pytest.mark.parametrize("grace", ["0", "abc", "-1"])
+    def test_unusable_grace_fails_closed(
+        self, synthetic_runner_home: Path, grace: str
+    ) -> None:
+        """A grace the script cannot normalize must not read healthy."""
+        listener = synthetic_runner_home / "bin" / "Runner.Listener"
+        proc = subprocess.Popen([str(listener)])
+        try:
+            time.sleep(0.5)
+            result = _run_healthcheck(
+                synthetic_runner_home,
+                max_diag_age=None,
+                max_session_broken=grace,
+            )
+            assert result.returncode == 1, (
+                "an unusable broker-session grace must fail closed: "
+                f"rc={result.returncode} out={result.stdout} err={result.stderr}"
+            )
+            assert "fail closed" in result.stdout
+        finally:
+            proc.kill()
+
+    def test_default_grace_brackets_the_observed_recovery_window(
+        self, synthetic_runner_home: Path
+    ) -> None:
+        """Behavioral bracket of the SHIPPED default — nothing pinned.
+
+        The 2026-07-27 fault's recoverable drops cleared inside a single poll;
+        the unrecovered cohort held ~20 min. The default must therefore read
+        healthy at 10 min of broken session and unhealthy at 20.
+        """
+        listener = synthetic_runner_home / "bin" / "Runner.Listener"
+        proc = subprocess.Popen([str(listener)])
+        try:
+            time.sleep(0.5)
+            _write_session_log(
+                synthetic_runner_home, _LISTENING_LINE + _CONNECT_ERROR_LINES
+            )
+
+            _age_stamp(synthetic_runner_home, 600)
+            result = _run_healthcheck(synthetic_runner_home, max_diag_age=None)
+            assert result.returncode == 0, (
+                f"10 min broken must be inside the default grace: {result.stdout}"
+            )
+
+            _age_stamp(synthetic_runner_home, 1200)
+            result = _run_healthcheck(synthetic_runner_home, max_diag_age=None)
+            assert result.returncode == 1, (
+                "20 min broken — the observed unrecovered cohort's dwell — must "
+                f"be outside the default grace: {result.stdout}"
+            )
         finally:
             proc.kill()
 

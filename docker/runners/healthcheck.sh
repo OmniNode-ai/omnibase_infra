@@ -2,7 +2,7 @@
 # Docker healthcheck for the GitHub Actions runner container.
 # Tickets: OMN-12433 (egress), OMN-13915 (listener liveness + heartbeat
 #          freshness), OMN-15233 (threshold recalibration + orphan/crash-loop
-#          detection).
+#          detection), OMN-15311 (broker session state — the fourth state).
 #
 # History of what each layer catches:
 #   - The original check only asserted container liveness — 37/48 runners sat
@@ -25,6 +25,18 @@
 #           TaskAgentSessionConflictException every ~5 min, and each crash mints
 #           a fresh Runner_*.log — which keeps _diag "fresh" forever. Layers 2
 #           (process topology) and 4 (crash-loop rate) catch that shape.
+#   - OMN-15311 adds a BROKER SESSION STATE check (layer 3b) for the FOURTH
+#     state, measured live on 2026-07-27 during the OMN-15233 fan-out: runners
+#     36, 38 and 56 sat GitHub-registry-OFFLINE for ~20 minutes while every
+#     local layer above passed — one live non-orphaned listener, _diag kept
+#     FRESH by the listener's own reconnect RETRY traffic, normal start rate,
+#     github.com reachable. The layers above assert that a listener process
+#     exists, is singular, is parented, is writing, and can reach github.com.
+#     None of them assert the thing that actually matters: that the listener
+#     HOLDS A LIVE BROKER SESSION and can therefore be handed a job. A
+#     state-4 runner is counted as capacity by Docker and is suppressed from
+#     auto-bounce by runner-monitor.sh's local-listener evidence rule, so it
+#     silently absorbs zero jobs until something else restarts it.
 #
 # Tunables (env, defaults chosen for the 64-runner .201 fleet):
 #   RUNNER_HEALTH_MAX_DIAG_AGE_SECONDS      heartbeat staleness threshold (4500)
@@ -33,6 +45,13 @@
 #                                           normalized to the window below — not
 #                                           a raw count of files in the window.
 #   RUNNER_HEALTH_LOG_RATE_WINDOW_MINUTES   crash-loop rate window (60)
+#   RUNNER_HEALTH_MAX_SESSION_BROKEN_SECONDS how long the broker session may stay
+#                                           broken before the runner fails (900).
+#                                           A GRACE, not a threshold on a
+#                                           measurement — see layer 3b.
+#   RUNNER_HEALTH_SESSION_STATE_CHECK       set to 0 to skip the broker-session
+#                                           layer entirely (fleet-wide kill
+#                                           switch by env, no file swap needed)
 #   RUNNER_HEALTH_EGRESS_CHECK              set to 0 to skip the github.com egress
 #                                           probe (used by offline CI tests only;
 #                                           production compose leaves it enabled)
@@ -54,6 +73,15 @@ RUNNER_HOME="${RUNNER_HOME:-/home/runner/actions-runner}"
 RUNNER_HEALTH_MAX_DIAG_AGE_SECONDS="${RUNNER_HEALTH_MAX_DIAG_AGE_SECONDS:-4500}"
 RUNNER_HEALTH_MAX_LOG_STARTS_PER_HOUR="${RUNNER_HEALTH_MAX_LOG_STARTS_PER_HOUR:-6}"
 RUNNER_HEALTH_LOG_RATE_WINDOW_MINUTES="${RUNNER_HEALTH_LOG_RATE_WINDOW_MINUTES:-60}"
+# OMN-15311: 900s (15 min). This is a GRACE on a state that is already known to
+# be bad, not a threshold on a noisy measurement. A listener that loses its
+# broker session normally re-establishes it in well under a minute (the
+# 2026-07-27 network fault's registry-offline spike mostly self-healed within
+# one poll); the cohort that did NOT recover held the broken state for ~20 min
+# and only cleared on restart. 900s therefore sits above every recovery
+# observed and below the shortest unrecovered case.
+RUNNER_HEALTH_MAX_SESSION_BROKEN_SECONDS="${RUNNER_HEALTH_MAX_SESSION_BROKEN_SECONDS:-900}"
+RUNNER_HEALTH_SESSION_STATE_CHECK="${RUNNER_HEALTH_SESSION_STATE_CHECK:-1}"
 RUNNER_HEALTH_EGRESS_CHECK="${RUNNER_HEALTH_EGRESS_CHECK:-1}"
 
 # 1. Listener process must be alive. Match THIS runner home's listener BINARY
@@ -113,6 +141,100 @@ if [[ -z "${fresh_file}" ]]; then
   exit 1
 fi
 
+# 3b. Broker SESSION state must be CONNECTED (OMN-15311 — the FOURTH state).
+#
+#     Every layer above is satisfied by a runner that GitHub considers OFFLINE.
+#     That is not hypothetical: on 2026-07-27 a transient host<->GitHub network
+#     fault left runners 36/38/56 registry-offline for ~20 min with a single
+#     non-orphaned live listener, a FRESH _diag (the reconnect retries are
+#     themselves _diag writes), a normal listener start rate, and github.com
+#     reachable. Exit 0 on all five layers; zero jobs accepted.
+#
+#     The registry is the authoritative liveness surface, but the container has
+#     no GitHub credential to query it (and an unauthenticated poll from 64
+#     containers would rate-limit itself). The listener's OWN log is the local
+#     projection of that same fact: it records when the broker session is
+#     established and when it drops.
+#
+#     STATE, NOT PRESENCE. What matters is which marker class appears LAST in
+#     the newest Runner_*.log. "A connect error appears somewhere in the log" is
+#     true of essentially every long-lived healthy runner and would be a
+#     fleet-wide false positive; "the last session marker is an error, with no
+#     re-establish after it" is the actual broken state.
+#
+#     PERSISTENCE, NOT INSTANT. Reconnects are normal and fast. A single check
+#     that fails the moment a drop is observed would flap the whole fleet on
+#     every blip. The broken state is therefore stamped on first observation and
+#     only fails once the stamp is older than the grace window; recovery deletes
+#     the stamp, so a later blip restarts the clock instead of inheriting an
+#     ancient one. Age is measured with find -mmin — the same idiom layers 3/4
+#     already use — deliberately NOT by parsing the log's "[YYYY-MM-DD HH:MM:SSZ]"
+#     prefix, which needs GNU `date -d` and would make the layer unexercisable
+#     on the BSD-date gate host.
+if [[ "${RUNNER_HEALTH_SESSION_STATE_CHECK}" != "0" ]]; then
+  if ! [[ "${RUNNER_HEALTH_MAX_SESSION_BROKEN_SECONDS}" =~ ^[0-9]+$ ]] ||
+    [[ "${RUNNER_HEALTH_MAX_SESSION_BROKEN_SECONDS}" -lt 1 ]]; then
+    echo "unhealthy: RUNNER_HEALTH_MAX_SESSION_BROKEN_SECONDS='${RUNNER_HEALTH_MAX_SESSION_BROKEN_SECONDS}' is not a positive integer — refusing to guess a broker-session grace (fail closed)"
+    exit 1
+  fi
+
+  # Markers the runner itself writes. CONNECTED means the broker session is
+  # established and the runner is reachable for job assignment; BROKEN means the
+  # session was lost, refused, or is contested.
+  session_connected_patterns='Listening for Jobs|Runner reconnected|Job message received'
+  session_broken_patterns='Runner connect error|TaskAgentSessionConflictException|A session for this runner already exists|Unable to connect to the server|Failed to create session|SocketException'
+
+  # SC2012: `ls -t` is the portable newest-first ordering here; find -printf
+  # '%T@' is GNU-only and this script must also run under the BSD find on the
+  # gate host. Runner_*.log names are runner-generated and contain no spaces.
+  # shellcheck disable=SC2012
+  newest_runner_log=$(ls -1t "${diag_dir}"/Runner_*.log 2>/dev/null | head -n 1)
+  if [[ -z "${newest_runner_log}" ]]; then
+    # Same divergence class as a missing _diag directory: a live listener always
+    # mints a Runner_<timestamp>-utc.log at start, so its absence means the
+    # process we matched is not a listener that ever registered. Fail closed.
+    echo "unhealthy: listener process present but no ${diag_dir}/Runner_*.log exists — broker session state is unreadable (OMN-15311 fail-closed)"
+    exit 1
+  fi
+
+  session_stamp="${diag_dir}/.session_broken_since"
+  last_connected_line=$(grep -nE "${session_connected_patterns}" "${newest_runner_log}" 2>/dev/null | tail -n 1 | cut -d: -f1)
+  last_broken_line=$(grep -nE "${session_broken_patterns}" "${newest_runner_log}" 2>/dev/null | tail -n 1 | cut -d: -f1)
+
+  session_is_broken=0
+  if [[ -n "${last_broken_line}" ]]; then
+    if [[ -z "${last_connected_line}" ]] || [[ "${last_broken_line}" -gt "${last_connected_line}" ]]; then
+      session_is_broken=1
+    fi
+  fi
+
+  if [[ "${session_is_broken}" -eq 1 ]]; then
+    if [[ ! -e "${session_stamp}" ]]; then
+      if ! : >"${session_stamp}" 2>/dev/null; then
+        # Without the stamp the grace cannot be measured, so "transient" and
+        # "stuck for an hour" become indistinguishable. Indeterminate is not
+        # health — and a non-writable _diag is itself a real fault, since the
+        # listener writes there continuously.
+        echo "unhealthy: broker session is broken and ${session_stamp} is not writable — cannot measure how long it has been broken (OMN-15311 fail-closed)"
+        exit 1
+      fi
+    fi
+    session_grace_minutes=$(((RUNNER_HEALTH_MAX_SESSION_BROKEN_SECONDS + 59) / 60))
+    if [[ -z "$(find "${session_stamp}" -mmin "-${session_grace_minutes}" -print 2>/dev/null)" ]]; then
+      echo "unhealthy: GitHub broker session broken for more than ${RUNNER_HEALTH_MAX_SESSION_BROKEN_SECONDS}s — listener alive and writing _diag, but its last session marker in $(basename "${newest_runner_log}") is an error with no re-establish after it (OMN-15311 broken-session mode; GitHub reports this runner OFFLINE)"
+      exit 1
+    fi
+    session_state="reconnecting (broken, inside the ${RUNNER_HEALTH_MAX_SESSION_BROKEN_SECONDS}s grace)"
+  else
+    # Recovered (or never broken): drop the stamp so the grace clock restarts
+    # from the NEXT drop rather than from an old one.
+    rm -f "${session_stamp}" 2>/dev/null || true
+    session_state="connected"
+  fi
+else
+  session_state="unchecked"
+fi
+
 # 4. Listener restart RATE must be sane (OMN-15233 b). The runner mints one
 #    Runner_<timestamp>-utc.log per listener process start, so listener starts
 #    inside a bounded window are directly countable. A replacement listener
@@ -170,5 +292,5 @@ if [[ "${RUNNER_HEALTH_EGRESS_CHECK}" != "0" ]]; then
   fi
 fi
 
-echo "healthy: single non-orphaned listener, heartbeat fresh, ${recent_starts}/${max_starts_in_window} allowed start(s) in ${window_minutes}m, github.com reachable"
+echo "healthy: single non-orphaned listener, heartbeat fresh, broker session ${session_state}, ${recent_starts}/${max_starts_in_window} allowed start(s) in ${window_minutes}m, github.com reachable"
 exit 0
