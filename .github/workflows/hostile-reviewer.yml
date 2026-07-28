@@ -38,7 +38,7 @@ jobs:
     # omnibase_infra has no local occ-preflight.yml (unlike omnibase_core, which
     # hosts the reusable) -- reference it remotely, matching the pinned SHA
     # already used by this repo's own call-occ-preflight.yml / auto-merge.yml.
-    uses: OmniNode-ai/omnibase_core/.github/workflows/occ-preflight.yml@79c620f904526f773f6b92eb98743b011fe2eb12
+    uses: OmniNode-ai/omnibase_core/.github/workflows/occ-preflight.yml@de01ec0964a2e666d739835b02957ae0f06d6a25
     permissions:
       contents: read
       pull-requests: read
