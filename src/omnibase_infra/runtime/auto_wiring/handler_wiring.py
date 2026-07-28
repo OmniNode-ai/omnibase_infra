@@ -4912,18 +4912,52 @@ async def wire_from_manifest(
 
 
 def _contract_provision_topics(contract: ModelDiscoveredContract) -> tuple[str, ...]:
-    """Return the topic set this contract owns at boot (OMN-13237, §3.6).
+    """Return the topic set this contract owns at boot (OMN-13237 §3.6, OMN-15330).
 
     Subscribe topics (the consumers that attach) UNION the contract's owned
-    publish topics it must guarantee exist. Names come from the contract's
-    ``event_bus`` declarations only — never a Python literal. DLQ topics are
-    handled by the best-effort universe warm (covered across runtimes per §3.6).
+    publish topics UNION its declared ``event_bus.dlq_topics``. Names come from
+    the contract's own declarations only — never a Python literal.
+
+    OMN-15330 — DLQ topics used to be excluded here and left to the best-effort
+    universe warm. That delegation broke the moment the warm was switched off:
+    ``ONEX_BOOT_UNIVERSE_PROVISION=0`` is the standing onex-dev setting (added
+    after the 2026-07-27 >1000-topic broker near-meltdown), and with the warm
+    off NOTHING created the declared DLQ topics. The first malformed event then
+    hit ``[ONEX_CORE_041_INVALID_CONFIGURATION] Topic '<dlq>' not found on
+    broker`` inside ``_route_projection_error_to_dlq`` and the record was
+    dropped — observed live on onex-dev 2026-07-28T16:29Z for
+    ``onex.dlq.omnimarket.projection-delegation-inference-response-malformed.v1``
+    and four siblings.
+
+    The DLQ names are read with ``_read_dlq_topics`` — the SAME reader the
+    projection auto-wiring uses to build ``ModelProjectionSinks.dlq_topics`` —
+    so the provisioned string is byte-identical to the routing target by
+    construction, rather than by a second parser that can drift. DLQ topics
+    enter the readiness confirm alongside the rest: attaching a consumer whose
+    dead-letter sink is not ready guarantees silent loss on the first malformed
+    event, so this fails closed (a NOT_READY contract is retried by the
+    OMN-15215 reconciliation loop).
     """
     if contract.event_bus is None:
         return ()
     ordered = list(contract.event_bus.subscribe_topics)
     ordered.extend(contract.event_bus.publish_topics)
-    return tuple(dict.fromkeys(ordered))
+    try:
+        ordered.extend(_read_dlq_topics(contract.contract_path))
+    except Exception:  # noqa: BLE001 — boundary: per-contract, never fatal at boot
+        # ``_interleave_contract`` runs under ``asyncio.gather(...)`` with no
+        # ``return_exceptions=True``, so a raise here would abort the ENTIRE
+        # boot subscribe pass for every contract. Degrading this one contract
+        # to its pre-OMN-15330 behaviour (no DLQ provisioning) is strictly less
+        # bad, and the warning names the contract that needs fixing.
+        logger.warning(
+            "Could not read event_bus.dlq_topics for contract '%s' from %s — "
+            "its DLQ topics will NOT be provisioned at boot (OMN-15330)",
+            contract.name,
+            contract.contract_path,
+            exc_info=True,
+        )
+    return tuple(dict.fromkeys(t for t in ordered if t and t.strip()))
 
 
 async def subscribe_wired_contract_topics(
