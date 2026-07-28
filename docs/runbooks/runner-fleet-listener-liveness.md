@@ -35,7 +35,7 @@ A point-in-time process/container check cannot prove a runner is serving jobs:
 
 | Layer | Surface | What it proves | Latency |
 |-------|---------|----------------|---------|
-| 1 | `docker/runners/healthcheck.sh` (in-container) | `bin/Runner.Listener` process alive AND exactly one listener with a non-1 PPID (OMN-15233) AND `_diag` heartbeat fresh (`RUNNER_HEALTH_MAX_DIAG_AGE_SECONDS`, default **4500s** since OMN-15233) AND ≤ `RUNNER_HEALTH_MAX_LOG_STARTS_PER_HOUR` (6) listener starts in the last hour AND github.com egress | ≤ ~77 min (staleness + 3×30s retries); orphan/crash-loop layers fire in ≤ ~2 min |
+| 1 | `docker/runners/healthcheck.sh` (in-container) | `bin/Runner.Listener` process alive AND exactly one listener with a non-1 PPID (OMN-15233) AND `_diag` heartbeat fresh (`RUNNER_HEALTH_MAX_DIAG_AGE_SECONDS`, default **4500s** since OMN-15233) AND ≤ `RUNNER_HEALTH_MAX_LOG_STARTS_PER_HOUR` (6) listener starts in the last hour AND the GitHub **broker session** is not persistently broken (`RUNNER_HEALTH_MAX_SESSION_BROKEN_SECONDS`, default **900s** since OMN-15311) AND github.com egress | ≤ ~77 min (staleness + 3×30s retries); orphan/crash-loop layers fire in ≤ ~2 min; broken-session layer in ≤ ~17 min |
 | 2 | `docker/runners/entrypoint.sh` watchdog | listener process exists while `run.sh` runs; recycles the wrapper tree after 5×60s consecutive misses (bounded by `LISTENER_RESTART_MAX=50`, then container exit → restart policy). **OMN-14564:** also recycles (with an explicit listener kill) when the listener process is alive but its `_diag` heartbeat is older than `LISTENER_HEARTBEAT_MAX_AGE_SECONDS` (3600s) for `LISTENER_HEARTBEAT_MISSES` (3) consecutive 60s ticks — never while a `Runner.Worker` job is executing. **OMN-15233:** reaps any surviving listener (TERM → KILL after `LISTENER_REAP_TIMEOUT_SECONDS`) BEFORE spawning a replacement | ≤ ~6 min (dead) / ≤ ~63 min (hung: 3600s staleness + 3×60s) |
 | 3 | `runner-monitor.sh` cron on `.201` (OMN-13109) | Docker vs GitHub divergence, silent wedge, crash loop → Slack | 3 min cadence, shares fate with host |
 | 4 | **`runner-fleet-canary` GHA workflow (authoritative)** | GitHub org registry online count vs `config/runner_fleet.yaml` `expected_count`; fails the run when offline+missing > `RUNNER_CANARY_MAX_OFFLINE` (5) | 15 min cadence, GitHub-hosted — survives total `.201` loss |
@@ -187,6 +187,66 @@ Three fixes, all in `docker/runners/`:
 Coverage: `tests/ci/test_runner_listener_liveness.py` —
 `TestHealthcheckIdleThresholdRecalibration`, `TestHealthcheckOrphanInversion`,
 `TestHealthcheckCrashLoopRate`, `TestEntrypointOrphanReap`.
+
+## Broken broker session — the FOURTH state (OMN-15311, measured 2026-07-27)
+
+Three container-local failure states were already modelled: **listener dead**
+(layer 1 `pgrep`), **PPID-1 orphan / duplicate listener** (OMN-15233 topology),
+**listener permanently silent** (heartbeat staleness). During the OMN-15233
+fan-out a fourth appeared, and every existing surface called it healthy.
+
+A transient host↔GitHub network fault hit at ~17:26Z. The registry-offline spike
+mostly self-healed, but runners **36, 38 and 56 stayed registry-OFFLINE for ~20
+minutes** with, at the same time:
+
+- a single, non-orphaned, live `Runner.Listener` (PPID chain intact);
+- `_diag` **fresh** — the listener's own reconnect **retry traffic** is itself a
+  `_diag` write, so staleness never accrues;
+- a normal listener start rate;
+- `github.com` reachable;
+- and `healthcheck.sh` returning **exit 0**.
+
+The layers above assert that a listener exists, is singular, is parented, is
+writing, and has egress. None of them asserts the property that actually decides
+whether a runner can take work: **that it holds a live GitHub broker session.**
+A state-4 runner is counted as capacity by Docker *and* is suppressed from
+`runner-monitor.sh` auto-bounce by the local-listener evidence rule, so it
+silently absorbs zero jobs until something else restarts it. All three cleared on
+restart.
+
+**Detection (layer 3b in `healthcheck.sh`).** The container has no GitHub
+credential to query the registry, and 64 unauthenticated pollers would
+rate-limit themselves. The listener's own newest `Runner_*.log` is the local
+projection of the same fact:
+
+- the session is **broken** when the **last** session marker in that log is an
+  error (`Runner connect error`, `TaskAgentSessionConflictException`,
+  `A session for this runner already exists`, `Unable to connect to the server`,
+  `Failed to create session`, `SocketException`) with **no** re-establish
+  (`Listening for Jobs`, `Runner reconnected`, `Job message received`) after it.
+  Marker **order**, not presence — a healthy long-lived runner has connect errors
+  somewhere in its log, and a presence check would red-line the fleet.
+- reconnects are routine and fast, so the layer gates on **persistence**:
+  `${RUNNER_HOME}/_diag/.session_broken_since` is stamped on first observation
+  and the check only fails once that stamp is older than
+  `RUNNER_HEALTH_MAX_SESSION_BROKEN_SECONDS` (**900s**). Recovery deletes the
+  stamp, so a later blip restarts the clock instead of inheriting an old one.
+  900s sits above every recovery observed in the fault and below the ~20-minute
+  dwell of the cohort that never recovered.
+- a live listener with **no** `Runner_*.log` at all fails closed (a registered
+  listener always mints one) — same class as the missing-`_diag` branch.
+- `RUNNER_HEALTH_SESSION_STATE_CHECK=0` disarms the layer fleet-wide by env,
+  without a bind-mount file swap, if it ever misfires.
+
+**Operator reading.** `unhealthy: GitHub broker session broken for more than …`
+means the registry almost certainly reports this runner OFFLINE while the
+container looks fine. This is the one docker-unhealthy signature that is **not**
+covered by the OMN-15233 interim rule ("if the registry says online, the flag is
+the bug") — here the flag and the registry agree. A bounce is the known
+remediation; all three affected runners cleared on restart.
+
+Coverage: `tests/ci/test_runner_listener_liveness.py` —
+`TestHealthcheckBrokerSessionState`.
 
 ## Operator response to a canary failure
 
