@@ -232,9 +232,18 @@ assert_migration_lock_still_held() {
   fi
 }
 
-# Trap set BEFORE acquisition so a partially-started holder is still reaped on
+# Traps set BEFORE acquisition so a partially-started holder is still reaped on
 # set -e failures and signals.
-trap 'release_migration_lock' EXIT HUP INT TERM
+#
+# EXIT and the signals are deliberately SEPARATE traps. In POSIX sh only the
+# EXIT trap is terminal: a HUP/INT/TERM handler that returns normally RESUMES
+# the script, so a single combined trap would release the lock mid-run and then
+# keep applying migrations unserialized until the final held-ness assertion
+# noticed. The signal handler therefore exits non-zero itself; the EXIT trap
+# then re-runs release_migration_lock, which is idempotent (it returns
+# immediately once MIGRATION_LOCK_OWNER_PID is cleared).
+trap 'release_migration_lock' EXIT
+trap 'release_migration_lock; echo "[forward-migration] FATAL: terminated by signal before completion" >&2; exit 1' HUP INT TERM
 acquire_migration_lock
 # ---- END canonical forward-migration advisory lock (OMN-15291) ----
 

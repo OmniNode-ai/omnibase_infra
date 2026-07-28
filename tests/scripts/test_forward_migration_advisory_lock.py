@@ -35,6 +35,7 @@ from __future__ import annotations
 import os
 import re
 import shutil
+import signal
 import socket
 import subprocess
 import tempfile
@@ -244,11 +245,18 @@ def _find_pg_binary(name: str) -> str | None:
     found = shutil.which(name)
     if found:
         return found
-    for pattern in ("/opt/homebrew/opt/postgresql@*/bin", "/usr/lib/postgresql/*/bin"):
-        root = Path(pattern).parent
-        if not root.exists():
+    # (root, glob) split deliberately: the wildcard sits in a PARENT component,
+    # so Path(<full pattern>).parent would itself contain a literal "*" and
+    # never exist -- the fallback would silently never fire and the live suite
+    # would skip on any host without psql already on PATH.
+    for root, pattern in (
+        ("/opt/homebrew/opt", "postgresql@*/bin"),
+        ("/usr/lib/postgresql", "*/bin"),
+    ):
+        base = Path(root)
+        if not base.exists():
             continue
-        for candidate in sorted(root.glob(Path(pattern).name)):
+        for candidate in sorted(base.glob(pattern)):
             binary = candidate / name
             if binary.exists():
                 return str(binary)
@@ -572,4 +580,122 @@ def test_contended_lock_fails_loud_instead_of_proceeding(
     )
     assert "apply 001_race_target.sql" not in out, (
         f"the runner applied migrations without holding the lock: {out}"
+    )
+
+
+# --------------------------------------------------------------------------
+# Signal handling: a terminated runner must STOP, not resume unserialized.
+# --------------------------------------------------------------------------
+
+# The shipped form. In POSIX sh only the EXIT trap is terminal, so a combined
+# `trap ... EXIT HUP INT TERM` handler that returns normally RESUMES the script
+# -- releasing the lock and then continuing to apply migrations unserialized.
+SHIPPED_SIGNAL_TRAP = "trap 'release_migration_lock' EXIT\n"
+COMBINED_SIGNAL_TRAP = "trap 'release_migration_lock' EXIT HUP INT TERM\n"
+
+
+def _resuming_signal_variant(text: str) -> str:
+    """The pre-fix trap shape: one combined handler that resumes on signal."""
+    lines = text.splitlines(keepends=True)
+    out = []
+    for line in lines:
+        if line == SHIPPED_SIGNAL_TRAP:
+            out.append(COMBINED_SIGNAL_TRAP)
+        elif line.startswith("trap 'release_migration_lock; echo"):
+            continue  # the terminating signal handler is what we are removing
+        else:
+            out.append(line)
+    return "".join(out)
+
+
+def test_signal_and_exit_traps_are_separate() -> None:
+    """Static ratchet for the shape CodeRabbit flagged."""
+    text = _runner_text()
+    assert SHIPPED_SIGNAL_TRAP in text, (
+        "EXIT must have its own trap; a combined EXIT+signal trap resumes the "
+        "script after a signal in POSIX sh"
+    )
+    assert COMBINED_SIGNAL_TRAP not in text
+    signal_traps = [
+        ln
+        for ln in text.splitlines()
+        if ln.startswith("trap ") and "HUP INT TERM" in ln
+    ]
+    assert len(signal_traps) == 1 and "exit 1" in signal_traps[0], (
+        "the HUP/INT/TERM handler must exit non-zero itself, otherwise the "
+        f"runner resumes with its lock released: {signal_traps}"
+    )
+
+
+@pytest.fixture
+def two_migrations_dir(tmp_path: Path) -> Path:
+    forward = tmp_path / "migrations" / "forward"
+    forward.mkdir(parents=True)
+    (forward / "001_race_target.sql").write_text(RACE_MIGRATION_SQL)
+    (forward / "002_after_signal.sql").write_text(
+        "INSERT INTO public.apply_probe (label, phase) VALUES ('second', 'applied');\n"
+    )
+    return forward
+
+
+def _run_until_signalled(
+    runner: Path, target: PgTarget, migrations: Path
+) -> subprocess.Popen[str]:
+    proc = _spawn(runner, target, migrations, "signalled")
+    # Signal only once the runner is demonstrably inside migration 001.
+    deadline = time.time() + 60
+    while time.time() < deadline:
+        if _psql(target, "SELECT count(*) FROM public.apply_probe") != "0":
+            break
+        time.sleep(0.1)
+    else:  # pragma: no cover - environment failure
+        proc.kill()
+        pytest.fail("runner never entered the first migration")
+    proc.send_signal(signal.SIGTERM)
+    return proc
+
+
+@pytest.mark.integration
+def test_resuming_signal_trap_keeps_applying_migrations(
+    pg_target: PgTarget, two_migrations_dir: Path, tmp_path: Path
+) -> None:
+    """RED control for the signal fix: the combined trap resumes and applies 002."""
+    legacy = tmp_path / "run-forward-migrations.combined-trap.sh"
+    legacy.write_text(_resuming_signal_variant(_runner_text()))
+
+    proc = _run_until_signalled(legacy, pg_target, two_migrations_dir)
+    out, _ = proc.communicate(timeout=120)
+
+    applied_after = _psql(
+        pg_target,
+        "SELECT count(*) FROM public.apply_probe WHERE label = 'second'",
+    )
+    assert applied_after == "1", (
+        "the combined-trap runner was expected to resume after SIGTERM and apply "
+        f"migration 002 with its lock released, but did not: {out}"
+    )
+
+
+@pytest.mark.integration
+def test_shipped_signal_trap_stops_the_run(
+    pg_target: PgTarget, two_migrations_dir: Path
+) -> None:
+    """GREEN: SIGTERM aborts the run instead of continuing unserialized."""
+    proc = _run_until_signalled(RUNNER, pg_target, two_migrations_dir)
+    out, _ = proc.communicate(timeout=120)
+
+    assert proc.returncode != 0, f"a signalled runner exited 0: {out}"
+    applied_after = _psql(
+        pg_target,
+        "SELECT count(*) FROM public.apply_probe WHERE label = 'second'",
+    )
+    assert applied_after == "0", (
+        "migration 002 was applied AFTER the runner was signalled and its lock "
+        f"released -- the signal handler resumed instead of terminating: {out}"
+    )
+    sentinel = _psql(
+        pg_target, "SELECT migrations_complete FROM public.db_metadata WHERE id"
+    )
+    assert sentinel == "f", (
+        f"a signalled run left the migration gate sentinel TRUE: {out}"
     )
