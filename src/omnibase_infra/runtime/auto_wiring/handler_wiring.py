@@ -24,6 +24,7 @@ from __future__ import annotations
 
 import asyncio
 import concurrent.futures
+import contextlib
 import hashlib
 import importlib
 import inspect
@@ -34,7 +35,7 @@ import os
 import re
 import time
 from collections import defaultdict
-from collections.abc import Awaitable, Callable, Mapping, Sequence
+from collections.abc import Awaitable, Callable, Iterator, Mapping, Sequence
 from dataclasses import dataclass, field
 from datetime import UTC, datetime
 from pathlib import Path
@@ -1817,10 +1818,92 @@ def _contract_declares_state_io(contract: ModelDiscoveredContract) -> bool:
     return bool(_read_state_io(contract.contract_path))
 
 
+# OMN-15301: tenant-scoped projection tables carry an RLS policy comparing
+# ``tenant_id`` against this GUC (omnimarket migration 0023 and siblings):
+#   USING/WITH CHECK (tenant_id = current_setting('app.tenant_id', true))
+# The GUC name is shared with the two existing reader seams (onex-api
+# ``analytics_db.run_query`` and omnidash ``postgres-projection-reader``); it is
+# a cross-repo contract, not a local choice.
+_TENANT_GUC = "app.tenant_id"
+
+# The DEFAULT carried by every landed tenant_id column (omnimarket 0019/0022,
+# savings 080). When an event resolves no tenant, the row takes this default, so
+# the GUC must be set to the SAME value or the policy's WITH CHECK rejects the
+# write it would otherwise have accepted.
+_INTERIM_DEFAULT_TENANT = "omninode"
+
+_TRUTHY_ENV = frozenset({"1", "true", "yes", "on"})
+
+
+def _tenant_isolation_enforced() -> bool:
+    """Whether a tenant-less projection write must be refused outright.
+
+    Mirrors omnimarket's ``Settings.enforce_tenant_isolation`` (OMN-14898) as a
+    shared env-var contract. It is deliberately OFF by default: every lane runs
+    the OMN-14058 operator-accepted single-tenant interim today, and an
+    unconditional reject would take down the whole projection write path for no
+    isolation benefit.
+    """
+    return os.environ.get("ENFORCE_TENANT_ISOLATION", "").strip().lower() in _TRUTHY_ENV
+
+
+def _resolve_write_tenant(tenant_value: object, *, table: str) -> str:
+    """Resolve the tenant a projection WRITE runs under.
+
+    The GUC must equal the value the database will actually store, or the
+    policy's WITH CHECK rejects a write it would otherwise accept. So the only
+    authorities are the row itself and, when the row omits ``tenant_id``, the
+    column DEFAULT that Postgres will then apply.
+
+    Deliberately does NOT consult ``ONEX_TENANT_ID``: tenant resolution from the
+    environment belongs to the handler (which stamps ``row["tenant_id"]`` when
+    it resolves one), not here. Reading it a second time at this boundary would
+    set the session to a tenant the row does not carry -- proven to fail against
+    a real policy by ``test_lane_tenant_env_does_not_override_the_column_default``.
+    """
+    # Imported lazily, matching this module's convention for omnibase_infra.errors.
+    from omnibase_infra.errors.error_projection import ProjectionTenantContextError
+
+    if isinstance(tenant_value, str) and tenant_value.strip():
+        return tenant_value.strip()
+    if _tenant_isolation_enforced():
+        raise ProjectionTenantContextError(
+            f"{table} write refused: no tenant_id resolved and "
+            "ENFORCE_TENANT_ISOLATION is set (OMN-15301) — refusing to write "
+            "under the shared tenant default.",
+            projection_type=table,
+        )
+    return _INTERIM_DEFAULT_TENANT
+
+
+def _resolve_read_tenant(tenant_value: object) -> str:
+    """Resolve the tenant a projection READ runs under.
+
+    A read must find what the writer stored, so this mirrors the HANDLER's
+    resolution order (explicit filter, then the lane's ``ONEX_TENANT_ID``, then
+    the interim default) rather than the write path's column-default rule: on a
+    lane where ``ONEX_TENANT_ID`` is set, the handler stamped that tenant onto
+    the rows, so that is where the existing-row probes must look.
+
+    Never raises. An unresolvable read tenant already fails closed at the policy
+    (zero rows visible, no leak), and raising here would break the probes that
+    guard against evidence clobbering.
+    """
+    if isinstance(tenant_value, str) and tenant_value.strip():
+        return tenant_value.strip()
+    return os.environ.get("ONEX_TENANT_ID", "").strip() or _INTERIM_DEFAULT_TENANT
+
+
 def _build_sync_db_adapter(db_url: str) -> object:
     """Build a synchronous psycopg2-backed DatabaseAdapter from a DSN.
 
     Separated from _make_projection_dispatch_callback to allow test patching.
+
+    OMN-15301: every statement runs inside an explicit transaction that first
+    sets the ``app.tenant_id`` GUC, so RLS-covered tables accept the write. The
+    connection is otherwise in autocommit, under which a bare ``SET LOCAL``
+    would be a no-op -- each statement would be its own implicit transaction and
+    the GUC would evaporate before the INSERT ran.
     """
     # Why: Optional integration dependency is validated at runtime but ships incomplete typing.
     import psycopg2  # type: ignore[import-untyped]
@@ -1842,9 +1925,41 @@ def _build_sync_db_adapter(db_url: str) -> object:
                 self._conn = conn
             return self._conn
 
+        @contextlib.contextmanager
+        def _tenant_scoped(self, conn: object, tenant: str) -> Iterator[None]:
+            """Run the enclosed statements in one tenant-scoped transaction.
+
+            ``set_config(..., is_local => true)`` is the parameterized,
+            transaction-scoped form of ``SET LOCAL`` (``SET LOCAL`` itself
+            cannot take a bind parameter, so a tenant value would have to be
+            interpolated into the SQL text). It is the same mechanism the
+            onex-api reader seam uses, so both sides of the policy agree.
+
+            Autocommit is dropped only for the duration of the statement and
+            always restored, so the GUC cannot outlive the transaction and leak
+            one event's tenant onto the next write over this cached connection.
+            """
+            # Why: Control flow narrows this union at runtime before the attribute access.
+            conn.autocommit = False  # type: ignore[attr-defined]
+            try:
+                with conn.cursor() as cur:  # type: ignore[attr-defined]
+                    cur.execute(
+                        "SELECT set_config(%s, %s, true)", (_TENANT_GUC, tenant)
+                    )
+                yield
+                conn.commit()  # type: ignore[attr-defined]
+            except BaseException:
+                conn.rollback()  # type: ignore[attr-defined]
+                raise
+            finally:
+                conn.autocommit = True  # type: ignore[attr-defined]
+
         def upsert(self, table: str, conflict_key: str, row: dict[str, object]) -> bool:
             if not _TABLE_NAME_RE.match(table):
                 raise ValueError(f"Invalid table name: {table!r}")
+            # OMN-15301: resolved before any connection or SQL, so an enforced
+            # refusal cannot leave a partially-written row.
+            tenant = _resolve_write_tenant(row.get("tenant_id"), table=table)
             conflict_keys = [
                 key.strip() for key in conflict_key.split(",") if key.strip()
             ]
@@ -1896,9 +2011,10 @@ def _build_sync_db_adapter(db_url: str) -> object:
                 f"ON CONFLICT ({conflict_columns}) DO UPDATE SET {updates}",
             ]
             insert_sql = " ".join(parts)
-            # Why: Control flow narrows this union at runtime before the attribute access.
-            with conn.cursor() as cur:  # type: ignore[union-attr, attr-defined]
-                cur.execute(insert_sql, adapted_row)
+            with self._tenant_scoped(conn, tenant):
+                # Why: Control flow narrows this union at runtime before the attribute access.
+                with conn.cursor() as cur:  # type: ignore[union-attr, attr-defined]
+                    cur.execute(insert_sql, adapted_row)
             return True
 
         def query(
@@ -1917,10 +2033,16 @@ def _build_sync_db_adapter(db_url: str) -> object:
                 clauses = [f'"{k}" = %s' for k in filters]
                 select_sql += " WHERE " + " AND ".join(clauses)
                 params = list(filters.values())
-            # Why: Control flow narrows this union at runtime before the attribute access.
-            with conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor) as cur:  # type: ignore[union-attr, attr-defined]
-                cur.execute(select_sql, params or None)
-                return [dict(r) for r in cur.fetchall()]
+            # OMN-15301: reads need the GUC too. Without it an RLS-covered table
+            # returns ZERO rows rather than erroring, so the existing-row probes
+            # (_preserve_existing_evidence, the judge-verdict tenant join) would
+            # silently conclude no prior row exists and clobber real evidence.
+            tenant = _resolve_read_tenant((filters or {}).get("tenant_id"))
+            with self._tenant_scoped(conn, tenant):
+                # Why: Control flow narrows this union at runtime before the attribute access.
+                with conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor) as cur:  # type: ignore[union-attr, attr-defined]
+                    cur.execute(select_sql, params or None)
+                    return [dict(r) for r in cur.fetchall()]
 
     return SyncPsycopg2Adapter(db_url)
 
