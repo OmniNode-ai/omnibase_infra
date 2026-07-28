@@ -62,6 +62,8 @@
 #   NODE_MIGRATIONS_DIR (default: ${MIGRATIONS_DIR}/nodes)
 #   NODE_POSTGRES_DB  (default: POSTGRES_DB; compose sets omnidash_analytics)
 #   PG_WAIT_RETRIES   (default: 30 — number of 2s waits for postgres ready)
+#   FORWARD_MIGRATION_LOCK_ID      (default: 100010 — advisory lock id, OMN-15291)
+#   MIGRATION_LOCK_WAIT_SECONDS    (default: 300 — bounded wait for that lock)
 
 set -e
 
@@ -115,6 +117,135 @@ until psql -h "$PGHOST" -p "$PGPORT" -U "$PGUSER" -d "$PGDB" -c "SELECT 1" >/dev
   sleep 2
 done
 echo "[forward-migration] Postgres is ready."
+
+# ---- BEGIN canonical forward-migration advisory lock (OMN-15291) ----
+# Port of the OMN-15254 single-session lock to this runner, in POSIX sh (this
+# script is #!/bin/sh and runs under busybox ash in the migration container --
+# no `local`, no arrays, no bashisms).
+#
+# What was wrong: this runner had NO lock of any kind. Every migration was
+# applied through an unsynchronized check-then-act (SELECT from
+# schema_migrations -> psql -f -> INSERT ... ON CONFLICT DO NOTHING), so two
+# concurrent runners both read "not applied" and both executed the same file.
+# Non-idempotent DDL then errored in the loser, and the ON CONFLICT hid the
+# double-apply so schema_migrations still looked clean afterwards.
+#
+# Why this shape: pg_advisory_lock() is SESSION-scoped. Acquiring it with a
+# one-shot `psql -c` releases it the instant psql exits, and a later
+# pg_advisory_unlock() from a different session returns false without ever
+# having held anything. The lock is therefore held by ONE dedicated psql
+# session that stays alive for the whole run; release is that session ending,
+# never a cross-session unlock.
+#
+# Scope: advisory locks are per-DATABASE. This lock is taken in ${PGDB} and
+# held across BOTH the infra phase (${PGDB}) and the node phase (${NODE_PGDB}),
+# so two instances of THIS runner are fully serialized against each other. It
+# does not serialize against unrelated writers of ${NODE_PGDB}.
+#
+# Lock id 100010 is deliberately outside omninode_infra's k8s Job registry
+# (100001-100006, see omninode_infra/scripts/run-migrations.sh) so the two
+# runners never contend on a shared id by accident.
+FORWARD_MIGRATION_LOCK_ID="${FORWARD_MIGRATION_LOCK_ID:-100010}"
+MIGRATION_LOCK_WAIT_SECONDS="${MIGRATION_LOCK_WAIT_SECONDS:-300}"
+MIGRATION_LOCK_TAG="forward-migration-lock-${FORWARD_MIGRATION_LOCK_ID}-$$"
+MIGRATION_LOCK_OWNER_PID=""
+
+# True only when the lock is granted to OUR holder session. Matching on
+# application_name is what makes this specific: "somebody holds it" is not
+# proof that WE hold it. A psql error is reported as not-held.
+migration_lock_held() {
+  _mlh_granted="$(psql -h "$PGHOST" -p "$PGPORT" -U "$PGUSER" -d "$PGDB" -tAc \
+    "SELECT count(*) FROM pg_locks l JOIN pg_stat_activity a ON a.pid = l.pid
+       WHERE l.locktype = 'advisory' AND l.granted AND l.objsubid = 1
+         AND l.classid::bigint * 4294967296 + l.objid::bigint = ${FORWARD_MIGRATION_LOCK_ID}
+         AND a.application_name = '${MIGRATION_LOCK_TAG}';" 2>/dev/null)" || return 1
+  [ "$_mlh_granted" = "1" ]
+}
+
+# Release by ending the holder session: Postgres drops session-level advisory
+# locks on disconnect. No cross-session unlock call anywhere. Confirmation
+# polls the lock itself instead of using `wait`: the holder is a background
+# PIPELINE, and `wait` on it blocks until every member exits -- a deadlock
+# when this runs from the EXIT trap.
+release_migration_lock() {
+  [ -n "$MIGRATION_LOCK_OWNER_PID" ] || return 0
+  kill "$MIGRATION_LOCK_OWNER_PID" 2>/dev/null || true
+  MIGRATION_LOCK_OWNER_PID=""
+  _rml_waited=0
+  while migration_lock_held && [ "$_rml_waited" -lt 10 ]; do
+    sleep 1
+    _rml_waited=$((_rml_waited + 1))
+  done
+}
+
+acquire_migration_lock() {
+  echo "[forward-migration] Acquiring advisory lock ${FORWARD_MIGRATION_LOCK_ID} (single session, bounded wait ${MIGRATION_LOCK_WAIT_SECONDS}s)..."
+  {
+    # statement_timeout bounds the blocking acquire IN THE SERVER, so a
+    # contended lock fails loud instead of hanging until the deploy times out.
+    echo "SET statement_timeout = '${MIGRATION_LOCK_WAIT_SECONDS}s';"
+    echo "SELECT pg_advisory_lock(${FORWARD_MIGRATION_LOCK_ID});"
+    echo "SET statement_timeout = 0;"
+    # Hold this session's stdin -- and therefore the session, and therefore the
+    # lock -- open for the rest of the run. The payload is a SQL comment: psql
+    # reads and discards it with no server round trip, but the write fails with
+    # EPIPE the moment the holder session is gone, which is how this loop
+    # learns to stop. The tick cap is a backstop so an orphaned keepalive can
+    # never outlive the day.
+    _aml_ticks=0
+    while [ "$_aml_ticks" -lt 86400 ]; do
+      sleep 1
+      echo "-- forward migration advisory lock keepalive" || break
+      _aml_ticks=$((_aml_ticks + 1))
+    done
+  # 2>/dev/null is load-bearing: this group must not inherit the runner's
+  # stderr. It can outlive the runner by up to a second, and any parent reading
+  # the runner's output to EOF would otherwise block on the inherited pipe.
+  } 2>/dev/null | PGAPPNAME="$MIGRATION_LOCK_TAG" psql -h "$PGHOST" -p "$PGPORT" \
+        -U "$PGUSER" -d "$PGDB" -v ON_ERROR_STOP=1 -q -o /dev/null &
+  MIGRATION_LOCK_OWNER_PID=$!
+
+  _aml_deadline=$(( $(date +%s) + MIGRATION_LOCK_WAIT_SECONDS + 5 ))
+  until migration_lock_held; do
+    if ! kill -0 "$MIGRATION_LOCK_OWNER_PID" 2>/dev/null; then
+      MIGRATION_LOCK_OWNER_PID=""
+      echo "[forward-migration] FATAL: could not acquire advisory lock ${FORWARD_MIGRATION_LOCK_ID} -- holder session exited before the lock was granted (another forward-migration run likely holds it, or the ${MIGRATION_LOCK_WAIT_SECONDS}s statement_timeout fired)" >&2
+      exit 1
+    fi
+    if [ "$(date +%s)" -ge "$_aml_deadline" ]; then
+      echo "[forward-migration] FATAL: could not acquire advisory lock ${FORWARD_MIGRATION_LOCK_ID} within ${MIGRATION_LOCK_WAIT_SECONDS}s -- refusing to apply migrations unserialized" >&2
+      release_migration_lock
+      exit 1
+    fi
+    sleep 1
+  done
+  echo "[forward-migration] Advisory lock ${FORWARD_MIGRATION_LOCK_ID} acquired; held by session '${MIGRATION_LOCK_TAG}' for the whole run."
+}
+
+# Called as the last act before the sentinel is set TRUE: a holder session that
+# died mid-run means the migrations above may have run unserialized, so
+# reporting success (and flipping the migration gate HEALTHY) would be a lie.
+assert_migration_lock_still_held() {
+  if ! kill -0 "$MIGRATION_LOCK_OWNER_PID" 2>/dev/null || ! migration_lock_held; then
+    echo "[forward-migration] FATAL: advisory lock ${FORWARD_MIGRATION_LOCK_ID} was NOT held for the whole run -- the holder session died mid-run and migrations above may have run unserialized" >&2
+    exit 1
+  fi
+}
+
+# Traps set BEFORE acquisition so a partially-started holder is still reaped on
+# set -e failures and signals.
+#
+# EXIT and the signals are deliberately SEPARATE traps. In POSIX sh only the
+# EXIT trap is terminal: a HUP/INT/TERM handler that returns normally RESUMES
+# the script, so a single combined trap would release the lock mid-run and then
+# keep applying migrations unserialized until the final held-ness assertion
+# noticed. The signal handler therefore exits non-zero itself; the EXIT trap
+# then re-runs release_migration_lock, which is idempotent (it returns
+# immediately once MIGRATION_LOCK_OWNER_PID is cleared).
+trap 'release_migration_lock' EXIT
+trap 'release_migration_lock; echo "[forward-migration] FATAL: terminated by signal before completion" >&2; exit 1' HUP INT TERM
+acquire_migration_lock
+# ---- END canonical forward-migration advisory lock (OMN-15291) ----
 
 validate_database_identifier() {
   database="$1"
@@ -307,6 +438,11 @@ echo "[forward-migration] Complete: ${APPLIED} infra applied, ${SKIPPED} infra s
 # ---------------------------------------------------------------------------
 # This is the FINAL act. Any earlier failure leaves migrations_complete=FALSE.
 # runner_completed_at records the timestamp of this successful completion.
+#
+# The lock must still be ours at this point (OMN-15291): flipping the gate
+# HEALTHY after a run that may have been unserialized is exactly the false
+# green this lock exists to prevent.
+assert_migration_lock_still_held
 echo "[forward-migration] All migrations complete. Setting sentinel TRUE..."
 psql -h "$PGHOST" -p "$PGPORT" -U "$PGUSER" -d "$PGDB" -v ON_ERROR_STOP=1 -c "
 UPDATE public.db_metadata
