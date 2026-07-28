@@ -152,6 +152,75 @@ def _make_versioned_cache(
     return cache
 
 
+def _make_simple_repo_source(root: Path, name: str) -> Path:
+    """Create a minimal `<root>/<name>` repo with main+dev branches and a bare
+    `<root>/<name>.git` upstream, so pull-all.sh can fetch+fast-forward it and
+    report "OK". No plugins/onex scaffolding -- used for repos other than
+    omniclaude where the plugin-cache-refresh content is irrelevant.
+    """
+    repo = root / name
+    repo.mkdir(parents=True)
+    (repo / "README.md").write_text(f"# {name}\n")
+
+    _git(["init", "-q", "--initial-branch=main"], cwd=repo)
+    assert (repo / ".git").is_dir(), (
+        f"OMN-14744 guard: `git init` did not create {repo / '.git'}"
+    )
+    _git(["-c", "user.email=t@t", "-c", "user.name=t", "add", "."], cwd=repo)
+    _git(
+        ["-c", "user.email=t@t", "-c", "user.name=t", "commit", "-q", "-m", "init"],
+        cwd=repo,
+    )
+
+    upstream = root / f"{name}.git"
+    _git(["init", "-q", "--bare", "--initial-branch=main", str(upstream)], cwd=root)
+    _git(["remote", "add", "origin", str(upstream)], cwd=repo)
+    _git(["push", "-q", "-u", "origin", "main"], cwd=repo)
+    _git(["switch", "-q", "-c", "dev"], cwd=repo)
+    _git(["push", "-q", "-u", "origin", "dev"], cwd=repo)
+    _git(["switch", "-q", "main"], cwd=repo)
+    return repo
+
+
+def _make_fake_infra_with_drift_stub(
+    omni_home: Path, *, behavior: str = "ok", with_venv: bool = True
+) -> tuple[Path, Path]:
+    """Create `$OMNI_HOME/omnibase_infra/scripts/check-omnimarket-venv-drift.sh`
+    as a recording stub (never the real script -- the real script's own
+    detect/repair logic is covered by tests/scripts/test_check_omnimarket_venv_drift.py;
+    this only proves pull-all.sh's WIRING: does it invoke the drift script at
+    the right time, with the right args, and handle failure without aborting).
+
+    `behavior`: "ok" -> stub exits 0; "fail" -> stub exits 1.
+    `with_venv`: when False, no `.venv/bin/python` is created (skip-guard case).
+
+    Returns (infra_dir, calls_log) -- calls_log records one line per
+    invocation ("<args> | OMNI_HOME=<value>") so tests can assert whether/how
+    the stub fired without depending on real venv or network state.
+    """
+    infra_dir = omni_home / "omnibase_infra"
+    scripts_dir = infra_dir / "scripts"
+    scripts_dir.mkdir(parents=True)
+    calls_log = infra_dir / ".drift-repair-calls.log"
+
+    exit_code = 0 if behavior == "ok" else 1
+    stub = scripts_dir / "check-omnimarket-venv-drift.sh"
+    stub.write_text(
+        "#!/usr/bin/env bash\n"
+        f'echo "$@ | OMNI_HOME=$OMNI_HOME" >> "{calls_log}"\n'
+        f"exit {exit_code}\n"
+    )
+    stub.chmod(0o755)
+
+    if with_venv:
+        venv_python = infra_dir / ".venv" / "bin" / "python"
+        venv_python.parent.mkdir(parents=True)
+        venv_python.write_text("#!/usr/bin/env bash\nexit 0\n")
+        venv_python.chmod(0o755)
+
+    return infra_dir, calls_log
+
+
 def _run_pull_all(
     omni_home: Path, fake_home: Path, repos: list[str] | None = None
 ) -> subprocess.CompletedProcess[str]:
@@ -614,3 +683,155 @@ class TestPreCommitHookInstall:
         assert result.returncode == 0
         assert "HOOK     omniclaude" not in result.stdout
         assert not self._hook_path(omniclaude).exists()
+
+
+@pytest.mark.unit
+class TestOmnimarketDriftRepair:
+    """pull-all.sh wires check-omnimarket-venv-drift.sh --repair after an
+    omnimarket pull (OMN-15242).
+
+    Root cause this closes: the OMN-14060 pre-flight guard detects venv drift
+    against the canonical omnibase_infra venv but never repairs it, and the
+    canonical `git pull` on omnimarket IS the event that creates the drift.
+    Two same-day 2026-07-27 incidents bricked every onex CLI consumer on this
+    Mac until a human ran the repair by hand. Scope: interactive/session path
+    only -- preregistered battery runs use the frozen-environment mechanism
+    (OMN-15265) and must never be auto-repaired mid-run; this hook lives only
+    in pull-all.sh, never in a battery driver.
+
+    Every fixture here stubs check-omnimarket-venv-drift.sh (see
+    `_make_fake_infra_with_drift_stub`) rather than using the real script --
+    the real script's detect/repair correctness is covered by
+    tests/scripts/test_check_omnimarket_venv_drift.py. These tests only prove
+    pull-all.sh's wiring: invoked at the right time, with the right args, and
+    fail-loud-but-not-fatal on repair failure.
+    """
+
+    def test_repairs_omnimarket_venv_drift_after_successful_pull(
+        self, tmp_path: Path
+    ) -> None:
+        """A successful omnimarket pull triggers --repair against the
+        canonical omnibase_infra venv, and the invocation is logged/attributable.
+        """
+        omni_home = tmp_path / "omni_home"
+        omni_home.mkdir()
+        fake_home = tmp_path / "home"
+        fake_home.mkdir()
+
+        _make_simple_repo_source(omni_home, "omnimarket")
+        infra_dir, calls_log = _make_fake_infra_with_drift_stub(omni_home)
+
+        result = _run_pull_all(omni_home, fake_home, repos=["omnimarket"])
+
+        assert result.returncode == 0, (
+            f"stdout={result.stdout!r} stderr={result.stderr!r}"
+        )
+        assert calls_log.exists(), (
+            "check-omnimarket-venv-drift.sh was never invoked after the "
+            f"omnimarket pull; stdout={result.stdout!r}"
+        )
+        call = calls_log.read_text()
+        assert "--repair" in call
+        assert str(infra_dir / ".venv" / "bin" / "python") in call
+        assert f"OMNI_HOME={omni_home}" in call
+        # Attributable: pull-all.sh's own stdout names the action.
+        assert "omnimarket venv drift" in result.stdout.lower()
+
+    def test_repair_failure_prints_loud_banner_but_is_not_fatal(
+        self, tmp_path: Path
+    ) -> None:
+        """A repair failure prints an unmissable banner naming the manual
+        command and the ticket, but does not abort pull-all.sh (the
+        omnimarket pull itself still succeeded).
+        """
+        omni_home = tmp_path / "omni_home"
+        omni_home.mkdir()
+        fake_home = tmp_path / "home"
+        fake_home.mkdir()
+
+        _make_simple_repo_source(omni_home, "omnimarket")
+        _make_fake_infra_with_drift_stub(omni_home, behavior="fail")
+
+        result = _run_pull_all(omni_home, fake_home, repos=["omnimarket"])
+
+        assert result.returncode == 0, (
+            "a drift-repair failure must not abort pull-all.sh; "
+            f"stdout={result.stdout!r} stderr={result.stderr!r}"
+        )
+        assert "OMN-15242" in result.stdout
+        assert "check-omnimarket-venv-drift.sh --repair" in result.stdout
+        assert "OK       omnimarket" in result.stdout
+
+    def test_skip_guard_when_omnibase_infra_absent(self, tmp_path: Path) -> None:
+        """No local omnibase_infra clone at all -- clean no-op, no crash."""
+        omni_home = tmp_path / "omni_home"
+        omni_home.mkdir()
+        fake_home = tmp_path / "home"
+        fake_home.mkdir()
+
+        _make_simple_repo_source(omni_home, "omnimarket")
+        # No omnibase_infra directory created at all.
+
+        result = _run_pull_all(omni_home, fake_home, repos=["omnimarket"])
+
+        assert result.returncode == 0, (
+            f"stdout={result.stdout!r} stderr={result.stderr!r}"
+        )
+        assert not (omni_home / "omnibase_infra").exists()
+
+    def test_skip_guard_when_infra_venv_absent(self, tmp_path: Path) -> None:
+        """omnibase_infra clone present but no canonical venv -- skip, no crash."""
+        omni_home = tmp_path / "omni_home"
+        omni_home.mkdir()
+        fake_home = tmp_path / "home"
+        fake_home.mkdir()
+
+        _make_simple_repo_source(omni_home, "omnimarket")
+        _infra_dir, calls_log = _make_fake_infra_with_drift_stub(
+            omni_home, with_venv=False
+        )
+
+        result = _run_pull_all(omni_home, fake_home, repos=["omnimarket"])
+
+        assert result.returncode == 0, (
+            f"stdout={result.stdout!r} stderr={result.stderr!r}"
+        )
+        assert not calls_log.exists(), (
+            "drift script must not be invoked when the canonical venv is absent"
+        )
+
+    def test_no_repair_when_omnimarket_not_in_this_run(self, tmp_path: Path) -> None:
+        """omnimarket absent from the requested repo list -- never triggers,
+        even though a fully-wired omnibase_infra + venv is present."""
+        omni_home = tmp_path / "omni_home"
+        omni_home.mkdir()
+        fake_home = tmp_path / "home"
+        fake_home.mkdir()
+
+        _make_omniclaude_source(omni_home)
+        _infra_dir, calls_log = _make_fake_infra_with_drift_stub(omni_home)
+
+        result = _run_pull_all(omni_home, fake_home, repos=["omniclaude"])
+
+        assert result.returncode == 0, (
+            f"stdout={result.stdout!r} stderr={result.stderr!r}"
+        )
+        assert not calls_log.exists()
+
+    def test_no_repair_when_omnimarket_pull_fails(self, tmp_path: Path) -> None:
+        """A dirty (FAILED) omnimarket pull must not trigger a repair -- there
+        is no fresh canonical SHA to repair against."""
+        omni_home = tmp_path / "omni_home"
+        omni_home.mkdir()
+        fake_home = tmp_path / "home"
+        fake_home.mkdir()
+
+        omnimarket = _make_simple_repo_source(omni_home, "omnimarket")
+        (omnimarket / "dirty.txt").write_text("uncommitted\n")
+        _infra_dir, calls_log = _make_fake_infra_with_drift_stub(omni_home)
+
+        result = _run_pull_all(omni_home, fake_home, repos=["omnimarket"])
+
+        assert result.returncode != 0
+        assert "dirty worktree" in result.stdout
+        assert not calls_log.exists()

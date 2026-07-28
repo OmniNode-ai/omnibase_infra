@@ -200,6 +200,71 @@ for repo in "${REPOS[@]}"; do
   fi
 done
 
+# === Omnimarket venv drift auto-repair (OMN-15242) ===
+# The OMN-14060 pre-flight guard (src/omnibase_infra/cli/omnimarket_drift_guard.py)
+# detects when the canonical omnibase_infra venv's installed omnimarket has
+# fallen behind the just-advanced $OMNI_HOME/omnimarket clone -- but it only
+# detects and instructs, it never repairs. A canonical omnimarket pull (right
+# here, above) is the EXACT event that creates that drift. Two same-day
+# 2026-07-27 incidents (13:04Z and 19:23Z) bricked every onex CLI/skill
+# dispatch on this Mac until a human ran the repair by hand.
+#
+# INTERACTIVE-SESSION SCOPE ONLY. Preregistered battery runs use the frozen
+# execution-environment mechanism (OMN-15265) and must NEVER be auto-repaired
+# mid-run -- that would change the delegation stack version between seeds and
+# contaminate the run. This hook lives only in pull-all.sh (the interactive/
+# session sync entrypoint), never in a battery driver, so that boundary holds
+# structurally rather than by convention.
+#
+# Design guarantees:
+#   * Only triggers when omnimarket was part of THIS run and its pull result
+#     was OK -- a FAILED/MISSING/SKIPPED/not-requested omnimarket is untouched.
+#   * Skip-guarded -- a missing local omnibase_infra clone, missing drift
+#     script, or missing canonical venv is a clean no-op (nothing to repair
+#     against).
+#   * Fail-LOUD-but-not-fatal -- a repair failure prints an unmissable banner
+#     naming the manual repair command and the ticket, but never aborts
+#     pull-all.sh or flips its exit code (matches the plugin-cache-refresh and
+#     pre-commit-hook-install sections below: convenience layers, not the
+#     sync's core job).
+#   * Attributable -- the check/repair invocation and outcome are echoed
+#     inline in pull-all.sh's own stdout, the same log surface as every other
+#     step here.
+_omnimarket_result_file="$RESULTS_DIR/omnimarket"
+if [[ -f "$_omnimarket_result_file" && "$(cat "$_omnimarket_result_file")" == "OK" ]]; then
+  _infra_dir="$OMNI_HOME/omnibase_infra"
+  _drift_script="$_infra_dir/scripts/check-omnimarket-venv-drift.sh"
+  _infra_venv_python="$_infra_dir/.venv/bin/python"
+
+  if [[ ! -d "$_infra_dir" || ! -x "$_drift_script" ]]; then
+    : # skip guard -- no local omnibase_infra clone (or drift script) to repair with
+  elif [[ ! -x "$_infra_venv_python" ]]; then
+    : # skip guard -- no canonical omnibase_infra venv to repair
+  else
+    echo ""
+    echo "== checking omnimarket venv drift against canonical omnibase_infra venv =="
+    if OMNI_HOME="$OMNI_HOME" bash "$_drift_script" --repair "$_infra_venv_python"; then
+      echo "  DRIFT-REPAIR omnimarket venv OK (canonical omnibase_infra venv)"
+    else
+      echo ""
+      echo "############################################################"
+      echo "# OMN-15242: omnimarket venv drift-repair FAILED"
+      echo "#"
+      echo "# pull-all.sh just advanced the canonical omnimarket clone, but"
+      echo "# could not repair the canonical omnibase_infra venv against it."
+      echo "# Every onex CLI / skill dispatch command is now at risk of the"
+      echo "# OMN-14060 OmnimarketDriftError until this is fixed BY HAND:"
+      echo "#"
+      echo "#   OMNI_HOME=$OMNI_HOME bash $_drift_script --repair $_infra_venv_python"
+      echo "#"
+      echo "# See OMN-15242 / OMN-14060 for context."
+      echo "############################################################"
+      echo ""
+    fi
+  fi
+fi
+# === End omnimarket venv drift auto-repair ===
+
 # === Plugin cache refresh (Layer 2, OMN-7369) ===
 # When omniclaude was updated, refresh the Claude Code plugin cache.
 #
