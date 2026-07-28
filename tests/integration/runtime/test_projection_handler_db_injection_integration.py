@@ -439,6 +439,15 @@ def test_sync_psycopg2_adapter_preserves_text_array_lists(
         def cursor(self, *args: object, **kwargs: object) -> FakeCursor:
             return FakeCursor()
 
+        # OMN-15301: the adapter now runs each statement inside an explicit
+        # tenant-scoped transaction, so the double must model the transaction
+        # control every real psycopg2 connection has.
+        def commit(self) -> None:
+            captured_execute["committed"] = True
+
+        def rollback(self) -> None:
+            captured_execute["rolled_back"] = True
+
     fake_extras = types.SimpleNamespace(Json=FakeJson, RealDictCursor=object)
     fake_psycopg2 = types.SimpleNamespace(
         connect=lambda dsn: FakeConnection(),
@@ -467,3 +476,9 @@ def test_sync_psycopg2_adapter_preserves_text_array_lists(
     assert params["machines_used"] == ["worker-a", "worker-b"]
     assert isinstance(params["metadata"], FakeJson)
     assert params["metadata"].value == {"source": "integration-test"}
+    # OMN-15301: the write committed its tenant-scoped transaction rather than
+    # rolling back. A table with no tenant_id column still runs under the
+    # interim default context — harmless where no policy exists, required where
+    # one does.
+    assert captured_execute.get("committed") is True
+    assert "rolled_back" not in captured_execute

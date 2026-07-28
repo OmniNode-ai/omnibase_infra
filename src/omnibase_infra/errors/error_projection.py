@@ -98,4 +98,21 @@ class ProjectionError(RuntimeHostError):
         self.projection_type = projection_type
 
 
-__all__ = ["ProjectionError"]
+class ProjectionTenantContextError(ProjectionError):
+    """Raised when a projection write resolves no tenant and enforcement is on.
+
+    OMN-15301. Tenant-scoped projection tables carry an RLS policy comparing
+    ``tenant_id`` against the ``app.tenant_id`` GUC, so a write with no
+    resolved tenant has no honest row to produce: it would either be rejected
+    by the policy or absorbed by the shared column default. With
+    ``ENFORCE_TENANT_ISOLATION`` set, the writer refuses BEFORE issuing any
+    SQL, so a refused write leaves zero rows -- never a partially-written row
+    and never one silently attributed to the shared default tenant.
+
+    Distinct from the generic :class:`ProjectionError` so callers and operators
+    can tell a tenant-attribution refusal apart from a connection or schema
+    failure; the two have completely different remediations.
+    """
+
+
+__all__ = ["ProjectionError", "ProjectionTenantContextError"]
