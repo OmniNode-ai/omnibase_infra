@@ -1,0 +1,88 @@
+# SPDX-FileCopyrightText: 2025 OmniNode.ai Inc.
+# SPDX-License-Identifier: MIT
+
+schema_version: "1.0"
+ticket: OMN-15423
+database_ref: application
+physical_seed_database: omnidash_analytics
+ownership_authority: distributed node contract.yaml -> db_io.db_tables
+inventory_projection: generated; never an ownership allowlist
+completion_status: blocked_pending_live_catalog_and_activity_evidence
+relation_counts:
+  table: 1
+  view: 1
+  materialized_view: 0
+  function: 1
+  sequence: 1
+  extension: 1
+relations:
+  - name: delegation_events
+    kind: table
+    target_schema: tenant
+    domain: TENANT
+    owner_declaration: node:node_projection_delegation
+    producer: node_projection_delegation
+    classification_evidence: owning node migration
+    classification_status: classified
+    migration_root: src/omnimarket/nodes
+    migration_stream: omnimarket_node_migrations
+  - name: delegation_summary
+    kind: view
+    target_schema: tenant
+    domain: TENANT
+    owner_declaration: node:node_projection_delegation
+    producer: node_projection_delegation
+    classification_evidence: owning view migration
+    classification_status: classified
+    migration_root: src/omnimarket/nodes
+    migration_stream: omnimarket_node_migrations
+  - name: resolve_delegation
+    kind: function
+    target_schema: platform_catalog
+    domain: PLATFORM_CATALOG
+    owner_declaration: node:node_projection_delegation
+    producer: node_projection_delegation
+    classification_evidence: owning function migration
+    classification_status: classified
+    migration_root: src/omnimarket/nodes
+    migration_stream: omnimarket_node_migrations
+  - name: delegation_events_id_seq
+    kind: sequence
+    target_schema: tenant
+    domain: TENANT
+    owner_declaration: node:node_projection_delegation
+    producer: node_projection_delegation
+    classification_evidence: table-owned sequence
+    classification_status: classified
+    migration_root: src/omnimarket/nodes
+    migration_stream: omnimarket_node_migrations
+  - name: pgcrypto
+    kind: extension
+    target_schema: platform_catalog
+    domain: PLATFORM_CATALOG
+    owner_declaration: omnimarket_node_migration_stream
+    producer: omnimarket_node_migration_stream
+    classification_evidence: migration extension dependency
+    classification_status: classified
+    migration_root: src/omnimarket/nodes
+    migration_stream: omnimarket_node_migrations
+blocked_relations:
+  - name: delegation_judge_verdict_events
+    kind: table
+    reason: schema 'unresolved' does not resolve through deployment topology
+retained_live_census:
+  observed_base_tables: 86
+  observed_views_and_materialized_views: 9
+  parity_status: blocked
+  reason: fresh authorized catalog read required
+runtime_evidence:
+  dsn_key_provenance:
+    OMNIDASH_ANALYTICS_DB_URL:
+      - src/omnimarket/projection/runner.py
+  full_day_datname_usename_activity:
+    status: blocked
+    reason: live database access was outside this build lane's authorization
+    credentials_captured: false
+  live_catalog_parity:
+    status: blocked
+    reason: current parity is not proven

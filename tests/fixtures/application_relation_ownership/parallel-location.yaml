@@ -1,0 +1,16 @@
+# SPDX-FileCopyrightText: 2025 OmniNode.ai Inc.
+# SPDX-License-Identifier: MIT
+
+schema_version: "1.0"
+service: invalid_parallel_location
+owner_declaration: service:invalid_parallel_location
+target_database_ref: application
+db_io:
+  db_tables:
+    - name: schema_migrations
+      database: omnidash_analytics
+      database_ref: application
+      schema: omninode_internal
+      migration: run-migrations.py
+      access: read_write
+      role: migration_ledger

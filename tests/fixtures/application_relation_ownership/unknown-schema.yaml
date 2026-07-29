@@ -1,0 +1,13 @@
+# SPDX-FileCopyrightText: 2025 OmniNode.ai Inc.
+# SPDX-License-Identifier: MIT
+
+name: node_unknown_schema
+node_type: EFFECT_GENERIC
+db_io:
+  db_tables:
+    - name: unknown_schema_table
+      database_ref: application
+      schema: not_declared
+      migration: unknown.sql
+      access: read_write
+      role: unknown_schema

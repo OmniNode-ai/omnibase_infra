@@ -1,0 +1,6 @@
+# SPDX-FileCopyrightText: 2025 OmniNode.ai Inc.
+# SPDX-License-Identifier: MIT
+
+schema_version: "1.0"
+relations:
+  - {name: unknown_schema_table, database_ref: application, schema: not_declared, kind: table, purpose: data}

@@ -116,6 +116,9 @@ from omnibase_infra.runtime.models.model_dynamic_materialization import (
 )
 
 if TYPE_CHECKING:
+    from omnibase_core.models.core.model_deployment_topology import (
+        ModelDeploymentTopology,
+    )
     from omnibase_infra.runtime.auto_wiring.models import ModelDiscoveredContract
     from omnibase_infra.runtime.auto_wiring.models.model_event_bus_wiring import (
         ModelEventBusWiring,
@@ -264,8 +267,26 @@ class ContractYamlParser:  # ai-slop-ok: pre-existing
         if not contract_data:
             raise ValueError("Contract YAML is empty or invalid")
 
+        # Validate the canonical handler contract without discarding typed node
+        # extensions retained in ``contract_config``. Core deliberately forbids
+        # unknown root fields, including the retired top-level ``handler`` shape.
+        # ``db_io`` is the sole extension removed here because it is validated
+        # independently through the exact typed subcontract introduced by OMN-15418.
+        validation_data = contract_data
+        if isinstance(contract_data, dict):
+            from omnibase_core.models.contracts.subcontracts.model_db_ownership_subcontract import (
+                ModelDbOwnershipSubcontract,
+            )
+
+            db_io_raw = contract_data.get("db_io")
+            if db_io_raw is not None:
+                ModelDbOwnershipSubcontract.model_validate(db_io_raw)
+            validation_data = {
+                key: value for key, value in contract_data.items() if key != "db_io"
+            }
+
         # Validate against ModelHandlerContract
-        contract = ModelHandlerContract.model_validate(contract_data)
+        contract = ModelHandlerContract.model_validate(validation_data)
 
         # Extract handler_class from metadata section
         # NOTE: handler_class is read from metadata for handler-shaped contracts
@@ -1289,6 +1310,9 @@ class KafkaContractSource(MixinTypedContractEvents, ProtocolContractSource):
         descriptor: ModelHandlerDescriptor,
         environment: str | None,
     ) -> ModelDiscoveredContract:
+        from omnibase_core.models.contracts.subcontracts.model_db_ownership_subcontract import (
+            ModelDbOwnershipSubcontract,
+        )
         from omnibase_infra.runtime.auto_wiring.models import ModelDiscoveredContract
         from omnibase_infra.runtime.auto_wiring.models.model_contract_version import (
             ModelContractVersion,
@@ -1297,6 +1321,12 @@ class KafkaContractSource(MixinTypedContractEvents, ProtocolContractSource):
         ver = descriptor.version
         effective_env = environment or self._environment
         config = descriptor.contract_config or {}
+        db_io_raw = config.get("db_io")
+        db_io = (
+            ModelDbOwnershipSubcontract.model_validate(db_io_raw)
+            if db_io_raw is not None
+            else None
+        )
         return ModelDiscoveredContract(
             name=node_name,
             node_type=descriptor.handler_kind,
@@ -1312,6 +1342,7 @@ class KafkaContractSource(MixinTypedContractEvents, ProtocolContractSource):
             package_name="dynamic",
             event_bus=self._build_event_bus_wiring(config),
             handler_routing=self._build_handler_routing(config),
+            db_io=db_io,
         )
 
     async def materialize_cached_contract(
@@ -1321,6 +1352,7 @@ class KafkaContractSource(MixinTypedContractEvents, ProtocolContractSource):
         event_bus: object | None = None,
         environment: str | None = None,
         container: object | None = None,
+        topology: ModelDeploymentTopology | None = None,
     ) -> ModelDynamicMaterializationResult:
         """Materialize a cached contract descriptor into the live dispatch engine.
 
@@ -1342,6 +1374,8 @@ class KafkaContractSource(MixinTypedContractEvents, ProtocolContractSource):
             event_bus: Optional event bus for Kafka subscriptions.
             environment: Override environment (defaults to self._environment).
             container: Optional DI container for handler resolution.
+            topology: Checked-in deployment topology. Required when the
+                dynamically registered contract declares ``db_io``.
 
         Returns:
             ModelDynamicMaterializationResult with enum status and topology data.
@@ -1409,6 +1443,7 @@ class KafkaContractSource(MixinTypedContractEvents, ProtocolContractSource):
                 event_bus=event_bus,
                 environment=effective_env,
                 container=container,
+                topology=topology,
             )
 
             if result.outcome == EnumWiringOutcome.WIRED:

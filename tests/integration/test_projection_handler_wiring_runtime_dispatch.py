@@ -13,6 +13,7 @@ import pytest
 from omnibase_infra.runtime.auto_wiring.handler_wiring import (
     _make_projection_dispatch_callback,
 )
+from tests.helpers.application_db_topology import projection_database_target
 
 _PATCH_BUILD_ADAPTER = (
     "omnibase_infra.runtime.auto_wiring.handler_wiring._build_sync_db_adapter"
@@ -41,7 +42,7 @@ def test_runtime_projection_dispatch_skips_standalone_runner_classes() -> None:
     handler = DelegationProjectionRunner()
     callback = _make_projection_dispatch_callback(
         handler,
-        [{"name": "delegation_events", "database": "omnidash_analytics"}],
+        projection_database_target("delegation_events"),
         ("onex.evt.omniclaude.task-delegated.v1",),
     )
 
@@ -71,7 +72,7 @@ def test_runtime_projection_dispatch_runs_sync_handler_off_event_loop() -> None:
 
     callback = _make_projection_dispatch_callback(
         HandlerProjectionDelegation(),
-        [{"name": "delegation_events", "database": "omnidash_analytics"}],
+        projection_database_target("delegation_events"),
         ("onex.evt.omniclaude.task-delegated.v1",),
     )
 

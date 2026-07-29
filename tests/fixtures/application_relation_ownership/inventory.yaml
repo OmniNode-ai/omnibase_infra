@@ -1,0 +1,10 @@
+# SPDX-FileCopyrightText: 2025 OmniNode.ai Inc.
+# SPDX-License-Identifier: MIT
+
+schema_version: "1.0"
+relations:
+  - {name: delegation_events, database_ref: application, schema: tenant, kind: table, purpose: data}
+  - {name: schema_migrations, database_ref: application, schema: omninode_internal, kind: table, purpose: migration_ledger}
+  - {name: projection_delegation_summary, database_ref: application, schema: tenant, kind: view, purpose: data}
+  - {name: projection_delegation_rollup, database_ref: application, schema: omninode_internal, kind: materialized_view, purpose: data}
+  - {name: resolve_delegation_state, database_ref: application, schema: platform_catalog, kind: function, purpose: data}

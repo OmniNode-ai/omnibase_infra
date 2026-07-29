@@ -1,0 +1,26 @@
+# SPDX-FileCopyrightText: 2025 OmniNode.ai Inc.
+# SPDX-License-Identifier: MIT
+
+schema_version: "1.0"
+service: blocked_migration_runner
+owner_declaration: service:blocked_migration_runner
+target_database_ref: application
+completion_status: blocked_pending_live_catalog_and_activity_evidence
+db_io:
+  db_tables:
+    - name: schema_migrations
+      database_ref: application
+      schema: omninode_internal
+      migration: run-migrations.py
+      access: read_write
+      role: canonical_migration_ledger
+relation_evidence:
+  - name: schema_migrations
+    kind: table
+    domain: OMNINODE_INTERNAL
+    owner_declaration: service:blocked_migration_runner
+    readers: []
+blocked_relations:
+  - name: unresolved_live_relation
+    kind: table
+    reason: no authoritative repository DDL or current owner declaration was found
