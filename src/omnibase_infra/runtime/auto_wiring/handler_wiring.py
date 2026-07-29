@@ -1704,6 +1704,16 @@ def _extract_projection_payload(envelope: object) -> object:
     return getattr(envelope, "payload", None)
 
 
+def _extract_projection_envelope_id(envelope: object) -> object | None:
+    """Return the typed, stable identity of the dispatched event envelope."""
+    value = (
+        envelope.get("envelope_id")
+        if isinstance(envelope, dict)
+        else getattr(envelope, "envelope_id", None)
+    )
+    return _coerce_uuid_or_none(value)
+
+
 def _is_raw_event_projection_contract(contract: ModelDiscoveredContract) -> bool:
     if contract.event_bus is None:
         return False
@@ -2321,6 +2331,12 @@ def _make_projection_dispatch_callback(
             input_data["_db"] = adapter
             input_data["_event_type"] = event_type
             input_data["_topic"] = topic
+            envelope_id = _extract_projection_envelope_id(envelope)
+            if envelope_id is not None:
+                # Preserve the UUID at the transport boundary. Projection
+                # handlers may use it as their durable idempotency key instead
+                # of inventing a fresh identity for every Kafka redelivery.
+                input_data["_envelope_id"] = envelope_id
 
             def _invoke_projection_handler() -> object:
                 _connect_projection_runner_db_if_needed(handler_instance)
