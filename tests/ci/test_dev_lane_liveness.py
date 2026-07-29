@@ -42,6 +42,7 @@ pytestmark = pytest.mark.ci
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
 HEALTH_GATE = REPO_ROOT / "scripts" / "system_health_check.sh"
+LANE_WORKFLOW = REPO_ROOT / ".github" / "workflows" / "dev-lane-liveness.yml"
 CANARY_WORKFLOW = REPO_ROOT / ".github" / "workflows" / "runner-fleet-canary.yml"
 
 # A container census in the exact `docker ps --format '{{.Names}}|{{.State}}|
@@ -442,8 +443,8 @@ def test_missing_runtime_containers_are_advisory_without_keepalive(
 # ---------------------------------------------------------------------------
 
 
-def test_lane_probe_is_wired_into_the_scheduled_canary() -> None:
-    workflow = yaml.safe_load(CANARY_WORKFLOW.read_text())
+def test_lane_probe_is_wired_to_a_firing_surface() -> None:
+    workflow = yaml.safe_load(LANE_WORKFLOW.read_text())
     jobs = workflow["jobs"]
 
     assert "dev-lane-liveness" in jobs, (
@@ -451,31 +452,52 @@ def test_lane_probe_is_wired_into_the_scheduled_canary() -> None:
         "is exactly the OMN-15190 pre-state"
     )
     lane_job = jobs["dev-lane-liveness"]
+    probe_step = next(
+        step
+        for step in lane_job["steps"]
+        if "system_health_check.sh" in step.get("run", "")
+    )
 
-    steps_text = yaml.safe_dump(lane_job)
-    assert "system_health_check.sh --lane" in steps_text
-    assert lane_job["steps"][1]["env"]["LANE_PROBE_HOST"] == "host.docker.internal", (
+    assert "--lane" in probe_step["run"]
+    assert probe_step["env"]["LANE_PROBE_HOST"] == "host.docker.internal", (
         "inside the deploy-runner container localhost is the container itself; "
         "an unset probe host manufactures a false RED (OMN-14958)"
     )
-    assert str(lane_job["steps"][1]["env"]["ONEX_LANE_KEEPALIVE"]) == "1"
+    assert str(probe_step["env"]["ONEX_LANE_KEEPALIVE"]) == "1"
 
     # `on` parses as the boolean True in YAML 1.1 unless quoted.
     triggers = workflow.get("on", workflow.get(True))
     assert "schedule" in triggers, "the probe must run on a schedule, not on demand"
 
 
-def test_fleet_status_job_stays_github_hosted() -> None:
-    """Guard the OMN-13915 hard requirement while adding a self-hosted job.
+def test_lane_probe_runs_where_the_lane_is_reachable() -> None:
+    """The lane job is self-hosted BY DESIGN, and only on the deploy runner.
 
-    The runner canary must never share fate with the fleet it watches. The
-    lane job added by OMN-15190 is self-hosted BY DESIGN (it watches a
-    different compose project and must probe from the tailnet), so this
-    assertion keeps the two runs-on values from being conflated later.
+    `omnibase-deploy` is the one runner carrying both docker.sock and the
+    host-gateway alias, so it is the only place either half of the probe
+    (compose-project membership, lane host-port reachability) is observable.
+    The lane's broker host-port is on the tailnet — GitHub-hosted compute
+    could only ever assert "I cannot see it."
     """
-    workflow = yaml.safe_load(CANARY_WORKFLOW.read_text())
-    assert workflow["jobs"]["fleet-status"]["runs-on"] == "ubuntu-latest"
+    workflow = yaml.safe_load(LANE_WORKFLOW.read_text())
     assert workflow["jobs"]["dev-lane-liveness"]["runs-on"] == [
         "self-hosted",
         "omnibase-deploy",
     ]
+
+
+def test_fleet_canary_is_not_borrowed_for_the_lane_probe() -> None:
+    """The OMN-13915 fate boundary stays intact and unshared.
+
+    The lane probe deliberately does NOT live in runner-fleet-canary.yml: that
+    workflow asserts every one of its jobs is GitHub-hosted, because a canary
+    sharing fate with the fleet it watches proves nothing. Folding a
+    self-hosted job in would have required narrowing that guard. This pins the
+    separation so a later consolidation cannot silently weaken it.
+    """
+    canary = yaml.safe_load(CANARY_WORKFLOW.read_text())
+    assert list(canary["jobs"]) == ["fleet-status"], (
+        "runner-fleet-canary.yml must stay single-job and GitHub-hosted; put "
+        "lane/host-scoped probes in dev-lane-liveness.yml instead"
+    )
+    assert canary["jobs"]["fleet-status"]["runs-on"] == "ubuntu-latest"
