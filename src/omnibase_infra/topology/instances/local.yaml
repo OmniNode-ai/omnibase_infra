@@ -1,0 +1,115 @@
+# SPDX-FileCopyrightText: 2025 OmniNode.ai Inc.
+# SPDX-License-Identifier: MIT
+active_preset: application-local
+databases:
+  application:
+    bindings:
+      app_dashboard:
+        database_ref: application
+        dsn_env: OMNIDASH_ANALYTICS_DB_URL
+        principal: app_dashboard
+      omninode_runtime_service:
+        database_ref: application
+        dsn_env: OMNINODE_INTERNAL_DB_URL
+        principal: omninode_runtime
+      onex_api:
+        database_ref: application
+        dsn_env: OMNINODE_CLOUD_DB_URL
+        principal: onex_api
+      tenant_projection:
+        database_ref: application
+        dsn_env: OMNIDASH_ANALYTICS_DB_URL
+        principal: tenant_projection_writer
+    checksum_ledger: canonical
+    checksum_ledgers:
+      canonical:
+        checksum_column: checksum
+        domain_column: domain
+        relation: schema_migrations
+        schema: platform_catalog
+        stream_column: migration_stream
+        version_column: version
+    migration_stream: omnibase_infra.application
+    owners:
+      owner_omninode_internal:
+        login: false
+      owner_onex_tenant:
+        login: false
+      owner_platform_catalog:
+        login: false
+    physical_name: omnidash_analytics
+    principals:
+      app_dashboard:
+        bypass_rls: false
+        grants:
+          - object_type: DATABASE
+            privileges: [CONNECT]
+          - object_type: SCHEMA
+            privileges: [USAGE]
+            schema: tenant
+          - object_type: SCHEMA
+            privileges: [USAGE]
+            schema: platform_catalog
+        login: true
+      omninode_runtime:
+        bypass_rls: false
+        grants:
+          - object_type: DATABASE
+            privileges: [CONNECT]
+          - object_type: SCHEMA
+            privileges: [USAGE]
+            schema: omninode_internal
+        login: true
+      onex_api:
+        bypass_rls: false
+        grants:
+          - object_type: DATABASE
+            privileges: [CONNECT]
+          - object_type: SCHEMA
+            privileges: [USAGE]
+            schema: tenant
+          - object_type: SCHEMA
+            privileges: [USAGE]
+            schema: platform_catalog
+        login: true
+      tenant_projection_writer:
+        bypass_rls: false
+        grants:
+          - object_type: DATABASE
+            privileges: [CONNECT]
+          - object_type: SCHEMA
+            privileges: [USAGE]
+            schema: tenant
+        login: true
+    schemas:
+      omninode_internal:
+        domain: OMNINODE_INTERNAL
+        owner: owner_omninode_internal
+      platform_catalog:
+        domain: PLATFORM_CATALOG
+        owner: owner_platform_catalog
+      tenant:
+        domain: TENANT
+        owner: owner_onex_tenant
+presets:
+  application-local:
+    - postgres
+    - omnidash
+    - omninode_runtime
+schema_version: "2.0"
+services:
+  omnidash:
+    local:
+      compose_service: omnidash
+      host_port: 3000
+    mode: LOCAL
+  omninode_runtime:
+    local:
+      compose_service: omninode-runtime
+      host_port: 8085
+    mode: LOCAL
+  postgres:
+    local:
+      compose_service: omnibase-infra-postgres
+      host_port: 5436
+    mode: LOCAL
