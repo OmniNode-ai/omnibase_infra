@@ -60,6 +60,9 @@ import os
 
 from omnibase_core.errors import OnexError
 from omnibase_core.validation import validate_topic_suffix
+from omnibase_infra.topics.model_topic_provisioning_policy import (
+    MANAGED_MINIMUM_REPLICATION_FACTOR,
+)
 from omnibase_infra.topics.model_topic_spec import ModelTopicSpec
 from omnibase_infra.utils.util_runtime_packages import is_runtime_package_active
 
@@ -1041,6 +1044,7 @@ ALL_OMNIBASE_INFRA_TOPIC_SPECS: tuple[ModelTopicSpec, ...] = (
     ModelTopicSpec(
         suffix=SUFFIX_RUNNER_HEALTH_SNAPSHOT,
         partitions=1,
+        replication_factor=MANAGED_MINIMUM_REPLICATION_FACTOR,
         kafka_config={
             "retention.ms": "604800000",
             "cleanup.policy": "delete",
@@ -1050,6 +1054,7 @@ ALL_OMNIBASE_INFRA_TOPIC_SPECS: tuple[ModelTopicSpec, ...] = (
     ModelTopicSpec(
         suffix=SUFFIX_NETWORK_POOL_STATUS,
         partitions=1,
+        replication_factor=MANAGED_MINIMUM_REPLICATION_FACTOR,
         kafka_config={
             "retention.ms": "604800000",
             "cleanup.policy": "delete",
@@ -1059,6 +1064,7 @@ ALL_OMNIBASE_INFRA_TOPIC_SPECS: tuple[ModelTopicSpec, ...] = (
     ModelTopicSpec(
         suffix=SUFFIX_ROW_COUNT_DIAGNOSTIC,
         partitions=1,
+        replication_factor=MANAGED_MINIMUM_REPLICATION_FACTOR,
         kafka_config={
             "retention.ms": "604800000",
             "cleanup.policy": "delete",
@@ -1113,6 +1119,7 @@ ALL_OMNIBASE_INFRA_TOPIC_SPECS: tuple[ModelTopicSpec, ...] = (
     ModelTopicSpec(
         suffix=SUFFIX_LLM_CALL_COMPLETED_INFRA,
         partitions=3,
+        replication_factor=MANAGED_MINIMUM_REPLICATION_FACTOR,
         kafka_config={
             "retention.ms": "604800000",
             "cleanup.policy": "delete",
@@ -1326,11 +1333,13 @@ ALL_OMNIBASE_INFRA_TOPIC_SPECS: tuple[ModelTopicSpec, ...] = (
     ModelTopicSpec(
         suffix=SUFFIX_DELEGATION_AGENT_TASK_LIFECYCLE,
         partitions=3,
+        replication_factor=MANAGED_MINIMUM_REPLICATION_FACTOR,
         kafka_config={"retention.ms": "604800000", "cleanup.policy": "delete"},
     ),
     ModelTopicSpec(
         suffix=SUFFIX_DELEGATION_INFERENCE_RESPONSE,
         partitions=3,
+        replication_factor=MANAGED_MINIMUM_REPLICATION_FACTOR,
         kafka_config={"retention.ms": "604800000", "cleanup.policy": "delete"},
     ),
     ModelTopicSpec(
@@ -2134,11 +2143,13 @@ ALL_PLATFORM_TOPIC_SPECS: tuple[ModelTopicSpec, ...] = (
     ModelTopicSpec(
         suffix=SUFFIX_TOPIC_CATALOG_RESPONSE,
         partitions=1,
+        replication_factor=MANAGED_MINIMUM_REPLICATION_FACTOR,
         kafka_config={"retention.ms": "3600000", "cleanup.policy": "delete"},
     ),
     ModelTopicSpec(
         suffix=SUFFIX_TOPIC_CATALOG_CHANGED,
         partitions=1,
+        replication_factor=MANAGED_MINIMUM_REPLICATION_FACTOR,
         kafka_config={"retention.ms": "604800000", "cleanup.policy": "delete"},
     ),
     # DLQ aggregation topic (OMN-6136) — consumed by omnidash /dlq dashboard
@@ -2171,7 +2182,11 @@ ALL_INTELLIGENCE_TOPIC_SPECS: tuple[ModelTopicSpec, ...] = (
         suffix=SUFFIX_INTELLIGENCE_PATTERN_LIFECYCLE_TRANSITIONED, partitions=3
     ),
     ModelTopicSpec(suffix=SUFFIX_INTELLIGENCE_PATTERN_DISCOVERED, partitions=3),
-    ModelTopicSpec(suffix=SUFFIX_INTELLIGENCE_LLM_CALL_COMPLETED, partitions=3),
+    ModelTopicSpec(
+        suffix=SUFFIX_INTELLIGENCE_LLM_CALL_COMPLETED,
+        partitions=3,
+        replication_factor=MANAGED_MINIMUM_REPLICATION_FACTOR,
+    ),
     ModelTopicSpec(suffix=SUFFIX_INTELLIGENCE_DISPATCH_OUTCOME_EVALUATED, partitions=3),
     # Decision recording topics (OMN-2943 — previously unprovisioned gap)
     ModelTopicSpec(suffix=SUFFIX_INTELLIGENCE_DECISION_RECORDED_EVT, partitions=3),
