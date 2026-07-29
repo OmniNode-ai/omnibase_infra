@@ -326,6 +326,17 @@ repos:
         pass_filenames: false
         always_run: false
         stages: [pre-commit]
+      # OMN-15378: fail closed on any new `tests/` directory pytest can never
+      # collect (scripts/deploy-agent/tests/ sat uncollected + RED for ~5
+      # weeks with zero CI signal). always_run — a new stray root can appear
+      # anywhere in the tree, not just under files already staged.
+      - id: onex-validate-test-root-collection
+        name: ONEX Uncollected Test Root Check (OMN-15378)
+        entry: uv run --frozen python scripts/validation/validate_test_root_collection.py
+        language: system
+        pass_filenames: false
+        always_run: true
+        stages: [pre-commit]
       # OMN-12559 / OMN-13124: vendored omnimarket node migrations must stay in
       # sync with source. MUST always_run — the prior files:-scoped trigger only
       # fired when a file under docker/migrations/forward/nodes/ (or the sync
