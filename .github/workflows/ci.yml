@@ -2856,6 +2856,24 @@ jobs:
             tests/integration/migrations/test_node_migration_shape_drift_omn15376.py \
             -v --tb=short -p no:randomly
 
+      # OMN-15422: the fixture is itself built into three images so this required
+      # path proves PostgreSQL 16 init, catalog behavior, and the actual migration
+      # runner from immutable build inputs. No live database or host port is used.
+      - name: Sanitized legacy-RDS Docker proof
+        run: |
+          docker compose \
+            --project-name "omn15422-${GITHUB_RUN_ID}-${GITHUB_RUN_ATTEMPT}" \
+            -f docker/legacy-rds-fixture/compose.yml \
+            up --build --abort-on-container-exit --exit-code-from proof
+
+      - name: Clean sanitized legacy-RDS Docker proof
+        if: always()
+        run: |
+          docker compose \
+            --project-name "omn15422-${GITHUB_RUN_ID}-${GITHUB_RUN_ATTEMPT}" \
+            -f docker/legacy-rds-fixture/compose.yml \
+            down --volumes --remove-orphans
+
       - name: Assert manifest tables exist
         env:
           POSTGRES_HOST: ${{ steps.postgres_host.outputs.host }}
