@@ -103,6 +103,15 @@ _DUMMY_BOOTSTRAP_ENV: dict[str, str] = dict.fromkeys(
         "INFISICAL_ENCRYPTION_KEY",
         "INFISICAL_AUTH_SECRET",
         "PROD_REDPANDA_ADVERTISE_HOST",
+        # OMN-15378: docker-compose.infra.yml (merged as the base file for
+        # EVERY lane, including prod) hard-requires DEV_REDPANDA_ADVERTISE_HOST
+        # with no default (OMN-15173's deliberate no-silent-default design).
+        # The original 2026-07-26 enumeration missed it because the author's
+        # shell already had it set via a sourced ~/.omnibase/.env -- these
+        # tests never ran anywhere else (this uncollected-tests-root ticket)
+        # until now, so a CI runner's clean shell was the first environment to
+        # expose the gap.
+        "DEV_REDPANDA_ADVERTISE_HOST",
     ),
     "dummy-placeholder-value",
 )
