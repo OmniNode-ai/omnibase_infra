@@ -212,19 +212,14 @@ onex-change-control = { git = "https://github.com/OmniNode-ai/onex_change_contro
 # (#1466), and S3 conformance (#1467). a2562165 is version 0.46.8, so the
 # ==0.46.8 pins above stay consistent. Not on PyPI.
 #
-# OMN-15186: bumped a2562165 -> 3f2998b3 (core dev tip at bump time), a strict
-# descendant (verified `git merge-base --is-ancestor`). a2562165 predates core
-# commit 9449083a, which adds
-# omnibase_core/models/delegation/wire/model_delegation_completed.py; the
-# co-installed omnimarket node-skill package imports that module, so any
-# omnibase_infra venv pinned at a2562165 hard-crashes with ModuleNotFoundError
-# on `onex node node_delegate_skill_orchestrator` before the handler even
-# constructs (blocks OMN-15170's live delegation driver). 3f2998b3 is still
-# version 0.46.8 (core has not cut a new release across this range), so the
-# ==0.46.8 pins above stay consistent. Not on PyPI.
+# OMN-15414: bumped 3f2998b3 -> 1f4549d7, the exact dependency head from
+# omnibase_core#1529. That change adds the frozen application-database topology
+# models consumed by the checked-in instances below. The OMN-15414 PR remains
+# draft and landing-blocked until #1529 merges. 1f4549d7 is still version 0.46.8,
+# so the ==0.46.8 pins above stay consistent. Not on PyPI.
 # REMOVE WHEN RELEASED: once core publishes a version containing S1/S2/S4, delete
 # this override and `uv lock`.
-omnibase-core = { git = "https://github.com/OmniNode-ai/omnibase_core.git", rev = "3f2998b3337e4050b4758e0dd2a0fe1061ce0d98" }  # raw-override-ok: OMN-14758
+omnibase-core = { git = "https://github.com/OmniNode-ai/omnibase_core.git", rev = "1f4549d71d4d39560ac5a162ac1d39e54d86e688" }  # raw-override-ok: OMN-15414
 
 [tool.ruff]
 target-version = "py312"
