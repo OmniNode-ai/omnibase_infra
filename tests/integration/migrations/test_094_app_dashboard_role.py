@@ -11,6 +11,7 @@ security-critical properties so a later edit cannot silently weaken them.
 
 from __future__ import annotations
 
+import re
 import shutil
 import subprocess
 import tempfile
@@ -56,12 +57,56 @@ def test_094_enforces_flags_on_preexisting_role() -> None:
     """ALTER ROLE must re-assert the flags — presence is not the property."""
     sql = MIGRATION_FILE.read_text()
 
-    assert "ALTER ROLE app_dashboard" in sql
-    # The ALTER block (after the guarded CREATE) must carry both
-    # security-critical negations.
-    alter_block = sql.split("ALTER ROLE app_dashboard", 1)[1]
-    assert "NOSUPERUSER" in alter_block
-    assert "NOBYPASSRLS" in alter_block
+    assert "ALTER ROLE app_dashboard NOSUPERUSER NOBYPASSRLS NOREPLICATION" in sql, (
+        "the security-critical negations must still be issued when pg_roles "
+        "shows an actual escalation"
+    )
+
+
+@pytest.mark.integration
+def test_094_never_revokes_the_deployment_owned_login_attach() -> None:
+    """OMN-15343: LOGIN is create-time only, never re-asserted.
+
+    The LOGIN + password attach is a deployment-owned, operator-gated step
+    (AWS Secrets Manager, OMN-14899). On the cloud instance app_dashboard
+    already carries LOGIN (live readback 2026-07-29: rolcanlogin = t), so a
+    blanket ``ALTER ROLE app_dashboard NOLOGIN`` would break the dashboard's
+    runtime connection as a side effect of recording a migration.
+    """
+    sql = MIGRATION_FILE.read_text()
+    executable = "\n".join(
+        line for line in sql.splitlines() if not line.lstrip().startswith("--")
+    )
+    for statement in re.findall(r"ALTER ROLE app_dashboard[^';]*", executable):
+        assert "NOLOGIN" not in statement, (
+            "NOLOGIN belongs to CREATE ROLE only; re-asserting it on a "
+            f"pre-existing role revokes a deployment-owned attach: {statement!r}"
+        )
+
+
+@pytest.mark.integration
+def test_094_gates_every_privileged_statement_on_an_observed_divergence() -> None:
+    """No unconditional ALTER ROLE may survive.
+
+    An unconditional ALTER is a privilege demand made on every apply, which is
+    why 094 could not run under the RDS-shaped master (OMN-14899 follow-up) and
+    then could not run at all under the ordinary service role the k8s Job uses
+    on the managed instance (OMN-15343). Every ALTER must live inside a DO
+    block that first read pg_roles.
+    """
+    sql = MIGRATION_FILE.read_text()
+    executable = [
+        line for line in sql.splitlines() if not line.lstrip().startswith("--")
+    ]
+    for line in executable:
+        stripped = line.strip()
+        if stripped.startswith("ALTER ROLE"):
+            msg = (
+                "top-level (ungated) ALTER ROLE found; it must be inside a DO "
+                f"block gated on a pg_roles read: {stripped!r}"
+            )
+            raise AssertionError(msg)
+    assert executable  # the file is not empty
 
 
 @pytest.mark.integration
@@ -305,6 +350,173 @@ def test_094_alter_role_succeeds_under_rds_shaped_master_role(
     assert rolcreatedb is False
     assert rolcreaterole is False
     assert rolcanlogin is False
+
+
+# -----------------------------------------------------------------------------
+# OMN-15343 — the ordinary-service-role apply path (the live cloud case)
+#
+# The k8s migration Job (omninode_infra k8s/migrations/omnibase-infra-migrate
+# .yaml) escalated role DDL to `-U postgres`. The managed RDS instance has no
+# such role, so deploy run 30406741279 died at connect time on THIS file, at the
+# last flat migration, before the node loop ran. The runner now resolves the
+# execution identity per POSTGRES_TARGET and on RDS uses the ordinary
+# per-database role — which holds no CREATEROLE. This file must therefore be a
+# true no-op under that role when app_dashboard is already in the required
+# state, or it can never be recorded and every migration behind it stays
+# blocked.
+#
+# `app_dashboard` on the live instance carries LOGIN (readback 2026-07-29:
+# rolcanlogin = t) with every other flag already correct, so that is the exact
+# state reproduced below.
+# -----------------------------------------------------------------------------
+
+ORDINARY_ROLE = "omn15343_ordinary"
+
+
+def _seed_live_cloud_role_state(pg: _EphemeralPostgres) -> None:
+    """app_dashboard as it exists on the managed instance, plus a service role
+    shaped like the one the Job connects as (LOGIN, no CREATEROLE)."""
+    bootstrap = pg.connect()
+    bootstrap.autocommit = True
+    with bootstrap.cursor() as cur:
+        cur.execute(
+            "CREATE ROLE app_dashboard WITH LOGIN NOSUPERUSER NOBYPASSRLS "
+            "NOCREATEDB NOCREATEROLE NOREPLICATION"
+        )
+        cur.execute(
+            f"CREATE ROLE {ORDINARY_ROLE} WITH LOGIN NOSUPERUSER NOBYPASSRLS "
+            "NOCREATEDB NOCREATEROLE NOREPLICATION"
+        )
+    bootstrap.close()
+
+
+def _login_flag(pg: _EphemeralPostgres) -> bool:
+    conn = pg.connect()
+    conn.autocommit = True
+    with conn.cursor() as cur:
+        cur.execute("SELECT rolcanlogin FROM pg_roles WHERE rolname = 'app_dashboard'")
+        row = cur.fetchone()
+    conn.close()
+    assert row is not None
+    return bool(row[0])
+
+
+@pytest.mark.integration
+@pytest.mark.postgres
+def test_094_applies_under_an_ordinary_role_when_the_role_already_exists(
+    ephemeral_postgres: _EphemeralPostgres,
+) -> None:
+    """GREEN: the live cloud state, applied by the identity the Job actually
+    connects as. Must exit 0 so the runner records it legitimately."""
+    _seed_live_cloud_role_state(ephemeral_postgres)
+
+    result = ephemeral_postgres.psql(
+        "-v", "ON_ERROR_STOP=1", "-f", str(MIGRATION_FILE), user=ORDINARY_ROLE
+    )
+
+    assert result.returncode == 0, (
+        "094 must be a true no-op under a non-CREATEROLE role when "
+        "app_dashboard is already in the required state, or the k8s Job can "
+        f"never record it on RDS (OMN-15343).\npsql stderr:\n{result.stderr}"
+    )
+    assert _login_flag(ephemeral_postgres) is True, (
+        "the deployment-owned LOGIN attach must survive the apply"
+    )
+
+
+@pytest.mark.integration
+@pytest.mark.postgres
+def test_094_pre_fix_shape_fails_under_an_ordinary_role(
+    ephemeral_postgres: _EphemeralPostgres,
+) -> None:
+    """RED baseline: the pre-OMN-15343 shape of this file — an unconditional
+    CREATE plus an unconditional ALTER — is refused by the same role in the same
+    state, so the GREEN above is not vacuous.
+
+    Derived as the minimal pre-fix statements rather than a copy of the old
+    file: what is under test is that UNGATED role DDL cannot run here at all.
+    """
+    _seed_live_cloud_role_state(ephemeral_postgres)
+
+    for statement in (
+        "CREATE ROLE app_dashboard WITH NOLOGIN NOSUPERUSER NOBYPASSRLS",
+        "ALTER ROLE app_dashboard NOLOGIN NOCREATEDB NOCREATEROLE",
+    ):
+        refused = ephemeral_postgres.psql(
+            "-v", "ON_ERROR_STOP=1", "-c", statement, user=ORDINARY_ROLE
+        )
+        assert refused.returncode != 0, (
+            f"expected {statement!r} to be refused for a non-CREATEROLE role"
+        )
+        assert "permission denied" in refused.stderr.lower(), refused.stderr
+
+    assert _login_flag(ephemeral_postgres) is True
+
+
+@pytest.mark.integration
+@pytest.mark.postgres
+def test_094_still_refuses_when_the_role_is_absent_and_cannot_be_created(
+    ephemeral_postgres: _EphemeralPostgres,
+) -> None:
+    """Fail-closed: "no-op when already correct" must not become "succeed when
+    the role is missing". A migration that did not achieve its effect must not
+    exit 0, because the runner records anything that exits 0.
+    """
+    bootstrap = ephemeral_postgres.connect()
+    bootstrap.autocommit = True
+    with bootstrap.cursor() as cur:
+        cur.execute(
+            f"CREATE ROLE {ORDINARY_ROLE} WITH LOGIN NOSUPERUSER NOBYPASSRLS "
+            "NOCREATEDB NOCREATEROLE NOREPLICATION"
+        )
+    bootstrap.close()
+
+    result = ephemeral_postgres.psql(
+        "-v", "ON_ERROR_STOP=1", "-f", str(MIGRATION_FILE), user=ORDINARY_ROLE
+    )
+
+    assert result.returncode != 0, (
+        "with app_dashboard absent and no CREATEROLE, 094 must fail loudly:\n"
+        + result.stdout
+    )
+    assert "permission denied to create role" in result.stderr, result.stderr
+
+    verify = ephemeral_postgres.connect()
+    verify.autocommit = True
+    with verify.cursor() as cur:
+        cur.execute("SELECT count(*) FROM pg_roles WHERE rolname = 'app_dashboard'")
+        (count,) = cur.fetchone()
+    verify.close()
+    assert count == 0
+
+
+@pytest.mark.integration
+@pytest.mark.postgres
+def test_094_still_corrects_an_escalated_preexisting_role(
+    ephemeral_postgres: _EphemeralPostgres,
+) -> None:
+    """Gating on divergence must not weaken the security invariant: a role that
+    actually carries BYPASSRLS is still corrected when the executing identity
+    can do it."""
+    bootstrap = ephemeral_postgres.connect()
+    bootstrap.autocommit = True
+    with bootstrap.cursor() as cur:
+        cur.execute("CREATE ROLE app_dashboard WITH LOGIN BYPASSRLS")
+    bootstrap.close()
+
+    result = ephemeral_postgres.psql("-v", "ON_ERROR_STOP=1", "-f", str(MIGRATION_FILE))
+    assert result.returncode == 0, result.stderr
+
+    verify = ephemeral_postgres.connect()
+    verify.autocommit = True
+    with verify.cursor() as cur:
+        cur.execute(
+            "SELECT rolbypassrls, rolsuper, rolreplication FROM pg_roles "
+            "WHERE rolname = 'app_dashboard'"
+        )
+        row = cur.fetchone()
+    verify.close()
+    assert row == (False, False, False), row
 
 
 @pytest.mark.integration
