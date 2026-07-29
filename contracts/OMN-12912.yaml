@@ -8,7 +8,7 @@ interface_change: true
 interfaces_touched:
   - "events"
   - "protocols"
-  - "configuration"
+  - "topics"
 evidence_requirements:
   - kind: "tests"
     description: "Gateway config, transform, service, runtime, and topic-gate tests pass."
