@@ -604,6 +604,17 @@ resolve_compose_file_args() {
     overlay_filename="$(resolve_lane_overlay_filename "${compose_project}")"
     if [[ -n "${overlay_filename}" ]]; then
         _out_args+=("-f" "${docker_dir}/${overlay_filename}")
+    else
+        # Dev/lab lane (bare omnibase-infra project). OMN-15379: layer the
+        # dev-lane overlay, whose ONLY content is ONEX_MIGRATION_LANE=dev for
+        # forward-migration — the lane indicator that releases the
+        # node_projection_registration trio (operator ruling 15, lab lane is the
+        # FORCE proving ground). It is a separate file precisely so no non-dev
+        # lane can inherit it from the base: see the header of
+        # docker/docker-compose.dev-lane.yml. Unset indicator = FULL fence, so
+        # omitting this file degrades safely (the lane comes up without
+        # node_service_registry) rather than dangerously.
+        _out_args+=("-f" "${docker_dir}/docker-compose.dev-lane.yml")
     fi
 }
 

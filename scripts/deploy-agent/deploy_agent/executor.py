@@ -168,6 +168,18 @@ class ModelLaneConfig(BaseModel):
 
 _STABILITY_OVERLAY = f"{REPO_DIR}/docker/docker-compose.stability-test.yml"
 _PROD_OVERLAY = f"{REPO_DIR}/docker/docker-compose.prod.yml"
+# OMN-15379: the dev/lab lane's own overlay. Its only content is
+# ``ONEX_MIGRATION_LANE=dev`` on forward-migration -- the lane indicator that
+# releases the node_projection_registration trio (0000/0001/0002, CREATE +
+# heartbeat + ENABLE/FORCE ROW LEVEL SECURITY) from the operator fence, per
+# operator ruling 15 which makes the lab the FORCE proving ground. It is a
+# SEPARATE file, not a line in the base compose, so that no non-dev lane can
+# inherit it: every lane overlay merges the base, and stability-test's
+# forward-migration override inherits the base ``environment:`` block wholesale.
+# Unset indicator = FULL fence, so this list is fail-closed on omission.
+# Must stay matched with ``resolve_compose_file_args`` in
+# ``scripts/deploy-runtime.sh``.
+_DEV_LANE_OVERLAY = f"{REPO_DIR}/docker/docker-compose.dev-lane.yml"
 
 # OMN-15181 round 3 (Finding 9): maps each prod runtime service to the compose
 # env var that repoints its `image:` field (docker-compose.prod.yml). This is
@@ -181,7 +193,7 @@ PROD_IMAGE_ENV_VAR_FOR_SERVICE: dict[str, str] = {
 _LANE_CONFIGS: dict[EnumRuntimeLane, ModelLaneConfig] = {
     EnumRuntimeLane.DEV: ModelLaneConfig(
         lane=EnumRuntimeLane.DEV,
-        compose_files=(COMPOSE_FILE,),
+        compose_files=(COMPOSE_FILE, _DEV_LANE_OVERLAY),
         compose_project=COMPOSE_PROJECT,
         postgres_container="omnibase-infra-postgres",
         runtime_health_targets=RUNTIME_HEALTH_TARGETS,
