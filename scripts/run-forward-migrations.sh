@@ -75,6 +75,13 @@
 #   PG_WAIT_RETRIES   (default: 30 — number of 2s waits for postgres ready)
 #   FORWARD_MIGRATION_LOCK_ID      (default: 100010 — advisory lock id, OMN-15291)
 #   MIGRATION_LOCK_WAIT_SECONDS    (default: 300 — bounded wait for that lock)
+#   ONEX_MIGRATION_LANE (default: unset = FULL operator fence, OMN-15379).
+#     Lane indicator for the lane-scoped fence release. The ONLY recognised
+#     value is `dev` (the lab compose lane); unset or unknown means every fenced
+#     node migration is skipped. Set by docker/docker-compose.dev-lane.yml,
+#     which only the dev/lab project loads — deliberately NOT set in
+#     docker-compose.infra.yml, which every lane overlay merges. See the
+#     LANE-SCOPED FENCE RELEASE block below.
 
 set -e
 
@@ -143,11 +150,11 @@ is_skipped_by_manifest() {
 #   delegation 0023-0026 — OMN-14974/OMN-15313. They put tenant-isolation RLS
 #     on live, actively-written delegation tables; un-gate only in a change that
 #     also proves the writer sets app.tenant_id per connection.
-#   registration 0000/0001 — OMN-15335/OMN-15088. Both must ALTER
-#     node_service_registry, which carries RLS ENABLEd but not FORCEd, so the
-#     ownership transfer that would unblock them also makes the owner exempt
-#     from that table's isolation policy. HELD pending the operator ruling on
-#     whether node_service_registry gets FORCE ROW LEVEL SECURITY.
+#   registration 0000/0001/0002 — OMN-15335/OMN-15088/OMN-15343. All three must
+#     ALTER node_service_registry, and 0002 is itself the migration that applies
+#     ALTER TABLE node_service_registry FORCE ROW LEVEL SECURITY — i.e. it would
+#     land the posture change unattended from a deploy path. HELD pending the
+#     operator ruling on whether node_service_registry gets FORCE.
 #
 # SEAM (cross-repo, drift-prone by construction): this list must equal
 # omninode_infra@dev's FENCED_NODE_MIGRATION_IDS array element-for-element and
@@ -156,17 +163,94 @@ is_skipped_by_manifest() {
 # diffs this list against the live k8s manifest. There is no single source of
 # truth for the list today; adding one is a cross-repo architecture change
 # (follow-up filed, see the test module docstring).
+#
+# OMN-15379: registration 0002 is added here. It was in the k8s list from the
+# start and was MISSING from this one, which is not a cosmetic gap: with 0000
+# fenced and 0002 unfenced, every cold compose lane ran 0002 against a
+# node_service_registry that had never been created and died with
+#   0002_node_service_registry_tenant_rls.sql:41 ERROR: relation
+#   "node_service_registry" does not exist
+# taking the whole forward-migration one-shot to exit 3 and the lane with it
+# (measured on .201 2026-07-29). A fence that gates the CREATE but not the
+# dependent ALTER is worse than no fence.
 FENCED_NODE_MIGRATION_IDS="\
 node:node_projection_delegation:0023_delegation_rls_tenant_isolation.sql
 node:node_projection_delegation:0024_drop_unwired_routing_columns.sql
 node:node_projection_delegation:0025_delegation_judge_verdict_events_tenant_id.sql
 node:node_projection_delegation:0026_delegation_judge_verdict_events_rls_tenant_isolation.sql
 node:node_projection_registration:0000_create_node_service_registry.sql
-node:node_projection_registration:0001_add_heartbeat_columns.sql"
+node:node_projection_registration:0001_add_heartbeat_columns.sql
+node:node_projection_registration:0002_node_service_registry_tenant_rls.sql"
 
 is_fenced_node_migration() {
   candidate="$1"
   printf '%s\n' "${FENCED_NODE_MIGRATION_IDS}" | grep -Fxq "${candidate}"
+}
+
+# --- LANE-SCOPED FENCE RELEASE (OMN-15379 — operator ruling 15, 2026-07-29) ---
+# Operator ruling 15: node_service_registry FORCE ROW LEVEL SECURITY extends to
+# the LAB LANE ONLY. The lab (compose dev lane, project `omnibase-infra`) applies
+# the registration trio IN FULL — CREATE + heartbeat columns + ENABLE/FORCE RLS —
+# as the proving ground that generates the evidence the staging un-fence is
+# waiting on. The staging k8s fence is UNCHANGED and stays at all seven ids.
+#
+# FAIL-CLOSED BY CONSTRUCTION. Three independent properties, each tested:
+#
+#   1. DEFAULT IS FULLY FENCED. ${ONEX_MIGRATION_LANE} unset -> empty release set
+#      -> every one of the seven ids is skipped, exactly as before this change.
+#      An UNKNOWN value is treated the same as unset (and warns). There is no
+#      value that widens the fence relative to today; a lane can only ever
+#      release a SUBSET of it.
+#   2. THE RELEASE SET IS COMMITTED, NOT SUPPLIED. The env var selects among
+#      policies that are literal in this file; it never carries ids. No env
+#      value can release an id that is not written below, and the release is
+#      only ever consulted for an id that is already fenced (see the node loop),
+#      so a lane cannot "release" something the fence does not cover.
+#   3. NOT INHERITABLE. The indicator is NOT set in docker-compose.infra.yml.
+#      Every non-dev lane overlay (stability-test / prod / judge) MERGES that
+#      base file, so anything set there would be inherited by all of them —
+#      fail-OPEN, and silently so for any lane added later. It is instead set by
+#      docker/docker-compose.dev-lane.yml, an overlay that ONLY the dev/lab
+#      project loads. A lane that does not load that file — stability-test,
+#      prod, judge, CI, a raw `docker compose -f docker-compose.infra.yml up` on
+#      a fresh volume, and any future lane — gets no indicator and the full
+#      fence. Asserted over the RENDERED compose config in
+#      tests/scripts/test_node_migration_fence_parity.py.
+#
+# HONEST LIMIT: a deliberate `-e ONEX_MIGRATION_LANE=dev` on another lane's
+# forward-migration container would release the trio there. That is an explicit
+# operator act on the same footing as editing the fence list itself, and it is
+# not defended against — the container has no un-forgeable lane fact available
+# to corroborate against (compose does not inject the project name, and the
+# service's own container_name is not readable from inside it).
+#
+# Delegation 0023-0026 are NOT releasable on ANY lane. Ruling 15 is scoped to
+# node_service_registry; the delegation tenant-RLS hold is a separate ruling
+# still pending, and no case arm below names those ids.
+ONEX_MIGRATION_LANE="${ONEX_MIGRATION_LANE:-}"
+case "${ONEX_MIGRATION_LANE}" in
+  dev)
+    # The lab/dev compose lane. Ruling 15 proving ground.
+    LANE_RELEASED_NODE_MIGRATION_IDS="\
+node:node_projection_registration:0000_create_node_service_registry.sql
+node:node_projection_registration:0001_add_heartbeat_columns.sql
+node:node_projection_registration:0002_node_service_registry_tenant_rls.sql"
+    ;;
+  "")
+    LANE_RELEASED_NODE_MIGRATION_IDS=""
+    ;;
+  *)
+    echo "[forward-migration] WARNING: unknown ONEX_MIGRATION_LANE='${ONEX_MIGRATION_LANE}' — applying the FULL operator fence (fail-closed)." >&2
+    LANE_RELEASED_NODE_MIGRATION_IDS=""
+    ;;
+esac
+
+is_lane_released_node_migration() {
+  candidate="$1"
+  if [ -z "${LANE_RELEASED_NODE_MIGRATION_IDS}" ]; then
+    return 1
+  fi
+  printf '%s\n' "${LANE_RELEASED_NODE_MIGRATION_IDS}" | grep -Fxq "${candidate}"
 }
 # ---- END operator fence — node migration ids (OMN-15336) ----
 
@@ -475,10 +559,20 @@ CREATE TABLE IF NOT EXISTS public.schema_migrations (
       # ---- BEGIN fenced-id skip (OMN-15336) ----
       # FIRST, ahead of the ledger probe and the apply. Skip and count it;
       # never apply it, never record it in schema_migrations.
+      #
+      # OMN-15379: the lane-scoped release is checked INSIDE the fenced branch,
+      # never beside it. An id that is not fenced never consults the release
+      # set, and the release set can therefore only ever un-gate a strict subset
+      # of the fence — it can never gate or un-gate anything else.
       if is_fenced_node_migration "${migration_id}"; then
-        echo "[forward-migration]   SKIP (operator-gated, see OMN-14974/OMN-15313/OMN-15335): ${migration_id}"
-        NODE_SKIPPED=$((NODE_SKIPPED + 1))
-        continue
+        if is_lane_released_node_migration "${migration_id}"; then
+          echo "[forward-migration]   RELEASED on lane '${ONEX_MIGRATION_LANE}' (operator ruling 15, OMN-15379): ${migration_id}"
+          # Fall through to the normal already-applied probe + apply + record.
+        else
+          echo "[forward-migration]   SKIP (operator-gated, see OMN-14974/OMN-15313/OMN-15335/OMN-15343): ${migration_id}"
+          NODE_SKIPPED=$((NODE_SKIPPED + 1))
+          continue
+        fi
       fi
       # ---- END fenced-id skip (OMN-15336) ----
 

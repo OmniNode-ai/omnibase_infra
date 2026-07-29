@@ -42,8 +42,8 @@ Each field is stated as ``<field>: k8s Job -> compose runner``.
 * id grammar: ``node:${node_name}:$(basename "$sql_file")`` ->
   ``node:${node_name}:${filename}`` — identical strings.
 * list contents AND order: ``FENCED_NODE_MIGRATION_IDS=( ... )`` (bash array) ->
-  ``FENCED_NODE_MIGRATION_IDS="..."`` (newline-delimited string); same six ids,
-  same order.
+  ``FENCED_NODE_MIGRATION_IDS="..."`` (newline-delimited string); same seven
+  ids, same order.
 * match: exact string equality per element -> ``grep -Fxq`` (exact whole-line).
 * position in loop: before the already-applied probe -> before the
   already-applied probe.
@@ -96,6 +96,50 @@ Database selection matches the sibling OMN-15291 module: external
 ephemeral ``initdb``/``pg_ctl`` cluster, else skip — unless
 ``REQUIRE_MIGRATION_LOCK_DB`` is set, in which case fail. A check that silently
 skips is a check that does not exist.
+
+OMN-15379 — LANE-SCOPED RELEASE (operator ruling 15, 2026-07-29)
+----------------------------------------------------------------
+Two changes land on top of the above.
+
+1. ``node:node_projection_registration:0002_node_service_registry_tenant_rls.sql``
+   joins the fence. It was in the k8s list from the start and missing from this
+   one. That was not cosmetic: with 0000 (the CREATE) fenced and 0002 (the
+   dependent ALTER) not, every COLD compose lane ran 0002 against a table that
+   had never been created and died —
+   ``0002_node_service_registry_tenant_rls.sql:41 ERROR: relation
+   "node_service_registry" does not exist`` — taking the forward-migration
+   one-shot to exit 3 and the whole lane with it (measured on ``.201``,
+   2026-07-29). A fence that gates a CREATE but not its dependent ALTER is worse
+   than no fence. This also makes the two lists identical again at SEVEN ids.
+
+2. Operator ruling 15 extends node_service_registry FORCE ROW LEVEL SECURITY to
+   the LAB LANE ONLY, so the compose runner gains a lane-scoped release: with
+   ``ONEX_MIGRATION_LANE=dev`` the registration TRIO (0000/0001/0002) applies in
+   full — CREATE, heartbeat columns, ENABLE + FORCE RLS — making the lab the
+   proving ground that generates the evidence the staging un-fence is waiting
+   on. The omninode_infra k8s fence is UNCHANGED.
+
+The release is fail-closed on three independent axes, one test each:
+
+* ``ONEX_MIGRATION_LANE`` unset -> release nothing. An UNKNOWN value -> release
+  nothing, and say so on stderr.
+* The release SET is committed in the runner. The env var selects among literal
+  policies; it never carries ids, and the release is only consulted for ids the
+  fence already covers, so a lane can only ever un-gate a SUBSET of the fence.
+* The indicator is NOT in ``docker-compose.infra.yml``. Every lane overlay
+  MERGES that base (stability-test's forward-migration override is a lone
+  ``container_name:`` line — it inherits the base ``environment:`` wholesale),
+  so a value there would be inherited by stability-test, prod, judge and any
+  future lane. It lives in ``docker/docker-compose.dev-lane.yml``, which only
+  the dev/lab project loads.
+
+The live half drives the shipped runner over the REAL vendored registration SQL
+BOTH WAYS against one Postgres — dev lane applies the trio and
+``pg_class.relforcerowsecurity`` reads true; default lane skips it and
+``node_service_registry`` does not exist. Neither leg can pass vacuously: a
+runner that ignored the indicator would fail one of them whichever way it
+defaulted. A fenced delegation id rides along in the same run as the negative
+control, since ruling 15 released the registration trio and nothing else.
 """
 
 from __future__ import annotations
@@ -108,6 +152,7 @@ from pathlib import Path
 from typing import TYPE_CHECKING
 
 import pytest
+import yaml
 
 # Bound by assignment rather than `from ... import`: the OMN-15291 module owns
 # the scratch-Postgres harness, and re-exporting its `pg_target` fixture as an
@@ -139,15 +184,45 @@ FENCED_DELEGATION_IDS = (
     "node:node_projection_delegation:"
     "0026_delegation_judge_verdict_events_rls_tenant_isolation.sql",
 )
-# The OMN-15335 registration pair, held pending the node_service_registry FORCE
-# ruling.
+# The OMN-15335/OMN-15343 registration TRIO. 0002 was in the k8s list from the
+# start and missing here until OMN-15379 — a fence that gated the CREATE (0000)
+# but not the dependent ALTER (0002) took every cold compose lane to exit 3 with
+# `relation "node_service_registry" does not exist`.
 FENCED_REGISTRATION_IDS = (
     "node:node_projection_registration:0000_create_node_service_registry.sql",
     "node:node_projection_registration:0001_add_heartbeat_columns.sql",
+    "node:node_projection_registration:0002_node_service_registry_tenant_rls.sql",
 )
-# Source of truth at authoring time: omninode_infra@dev commit f436ca6,
+# Source of truth at authoring time: omninode_infra@dev commit 966463a,
 # k8s/migrations/omnibase-infra-migrate.yaml, FENCED_NODE_MIGRATION_IDS.
 EXPECTED_FENCE = FENCED_DELEGATION_IDS + FENCED_REGISTRATION_IDS
+
+# --- OMN-15379 lane-scoped release (operator ruling 15, 2026-07-29) ----------
+# Ruling 15: node_service_registry FORCE ROW LEVEL SECURITY extends to the LAB
+# LANE ONLY. The lab (compose dev lane, project `omnibase-infra`) applies the
+# registration trio in full as the proving ground; the omninode_infra k8s fence
+# is unchanged at all seven ids.
+LANE_INDICATOR_ENV = "ONEX_MIGRATION_LANE"
+DEV_LANE_VALUE = "dev"
+# Spelled out rather than aliased to FENCED_REGISTRATION_IDS: if the two are
+# meant to be equal, that equality is an assertion, not a definition. Aliasing
+# would let a change to one silently move the other.
+LANE_RELEASED_IDS = (
+    "node:node_projection_registration:0000_create_node_service_registry.sql",
+    "node:node_projection_registration:0001_add_heartbeat_columns.sql",
+    "node:node_projection_registration:0002_node_service_registry_tenant_rls.sql",
+)
+
+BASE_COMPOSE_RELPATH = "docker/docker-compose.infra.yml"
+DEV_LANE_OVERLAY_RELPATH = "docker/docker-compose.dev-lane.yml"
+CATALOG_SERVICE_RELPATH = "docker/catalog/services/forward-migration.yaml"
+# Every lane that MERGES the base compose file. The lane indicator must not be
+# reachable from any of them.
+NON_DEV_OVERLAY_RELPATHS = (
+    "docker/docker-compose.stability-test.yml",
+    "docker/docker-compose.prod.yml",
+    "docker/docker-compose.judge.yml",
+)
 
 # An id that is NOT fenced, used by the live proofs as the discriminator: if the
 # node loop applied nothing at all, the fenced-ids-absent assertion would pass
@@ -220,6 +295,47 @@ def parse_shell_fence_list(block: str) -> tuple[str, ...]:
     )
 
 
+def parse_lane_release_policies(block: str) -> dict[str, tuple[str, ...]]:
+    """Parse the OMN-15379 ``case "${ONEX_MIGRATION_LANE}" in ... esac`` policy.
+
+    Returns ``{case-label: released ids}``. A label whose arm assigns the empty
+    string maps to ``()`` — i.e. FULLY FENCED. A label whose arm makes no
+    assignment at all maps to ``None``, which every caller treats as a defect:
+    an un-assigned arm would inherit whatever the previous arm left behind.
+    """
+    case_match = re.search(
+        r'case\s+"\$\{ONEX_MIGRATION_LANE\}"\s+in\n(?P<body>.*?)\nesac',
+        block,
+        re.DOTALL,
+    )
+    assert case_match is not None, (
+        'the lane-release policy must be a `case "${ONEX_MIGRATION_LANE}" in '
+        "... esac` over COMMITTED arms. If the shape moved, fix this parser — "
+        "do not restate the policy here."
+    )
+    policies: dict[str, tuple[str, ...] | None] = {}
+    for arm in case_match.group("body").split(";;"):
+        label_match = re.match(r"\s*(?P<label>[^\s)]+)\)", arm)
+        if label_match is None:
+            continue
+        label = label_match.group("label").strip('"')
+        assign = re.search(
+            r'LANE_RELEASED_NODE_MIGRATION_IDS="\\?\n?(?P<body>[^"]*)"',
+            arm,
+            re.DOTALL,
+        )
+        policies[label] = (
+            None
+            if assign is None
+            else tuple(
+                line.strip()
+                for line in assign.group("body").splitlines()
+                if line.strip()
+            )
+        )
+    return policies  # type: ignore[return-value]
+
+
 # --------------------------------------------------------------------------
 # Static assertions — no database required, so they gate every PR.
 # --------------------------------------------------------------------------
@@ -253,7 +369,7 @@ def test_fence_is_exactly_the_expected_ids_in_order() -> None:
         "the OMN-14974 delegation fence was disturbed"
     )
     assert found[len(FENCED_DELEGATION_IDS) :] == FENCED_REGISTRATION_IDS, (
-        "the OMN-15335 registration hold is not the exact expected pair"
+        "the OMN-15335/OMN-15343 registration hold is not the exact expected trio"
     )
 
 
@@ -335,6 +451,268 @@ def test_fence_predicate_is_posix_sh() -> None:
         "bash arrays do not exist in busybox ash; the fence is a newline-"
         "delimited string matched with grep -Fxq"
     )
+
+
+# --------------------------------------------------------------------------
+# OMN-15379 — lane-scoped fence release. Static half.
+#
+# Three independent properties, one test each, so a failure names WHICH one
+# broke:
+#   1. the default and unknown lanes are FULLY fenced (fail-closed),
+#   2. the release set is COMMITTED and is a strict subset of the fence,
+#   3. the lane indicator is NOT reachable from the base compose file, so no
+#      non-dev lane can inherit it.
+# --------------------------------------------------------------------------
+
+
+def test_lane_release_arms_are_exactly_dev_default_and_unknown() -> None:
+    """Every arm must ASSIGN. An arm that falls through inherits the last value.
+
+    ``case`` in POSIX sh does not reset the variable between arms, so an arm
+    that matches but assigns nothing would silently carry whatever the previous
+    arm set. That is the shape of a fail-open bug, so the arm set is pinned.
+    """
+    policies = parse_lane_release_policies(extract_fence_block())
+    assert set(policies) == {DEV_LANE_VALUE, "", "*"}, (
+        "the lane-release policy must have exactly three arms — the dev/lab "
+        f"lane, the unset default, and the unknown-value catch-all. Found: "
+        f"{sorted(policies)}"
+    )
+    unassigned = [label for label, ids in policies.items() if ids is None]
+    assert not unassigned, (
+        "these case arms match but never assign "
+        f"LANE_RELEASED_NODE_MIGRATION_IDS, so they inherit the preceding "
+        f"arm's value: {unassigned}"
+    )
+
+
+def test_unset_and_unknown_lane_are_fully_fenced() -> None:
+    """THE fail-closed property, asserted statically as well as live below."""
+    policies = parse_lane_release_policies(extract_fence_block())
+    assert policies[""] == (), (
+        "an unset ONEX_MIGRATION_LANE must release NOTHING — the full operator "
+        f"fence applies. Found: {policies['']}"
+    )
+    assert policies["*"] == (), (
+        "an UNKNOWN ONEX_MIGRATION_LANE must fail closed to the full fence, not "
+        f"be treated as dev. Found: {policies['*']}"
+    )
+
+
+def test_dev_lane_releases_exactly_the_registration_trio() -> None:
+    """Ruling 15 is scoped to node_service_registry and to nothing else."""
+    policies = parse_lane_release_policies(extract_fence_block())
+    assert policies[DEV_LANE_VALUE] == LANE_RELEASED_IDS, (
+        "the dev/lab lane release set changed. Operator ruling 15 releases "
+        "exactly the node_projection_registration trio:\n  "
+        + "\n  ".join(LANE_RELEASED_IDS)
+        + "\nFound:\n  "
+        + "\n  ".join(policies[DEV_LANE_VALUE])
+    )
+    # The equality that the two constants are DEFINED separately to express.
+    assert LANE_RELEASED_IDS == FENCED_REGISTRATION_IDS, (
+        "the released trio and the fenced registration trio have diverged"
+    )
+
+
+def test_no_lane_can_release_anything_outside_the_fence() -> None:
+    """A release is only ever consulted for an already-fenced id.
+
+    Asserted at the list level too, so the invariant is legible without reading
+    the node loop: an id in a release arm but not in the fence would be dead
+    weight at best and a mis-stated policy at worst.
+    """
+    fence = set(parse_shell_fence_list(extract_fence_block()))
+    for label, released in parse_lane_release_policies(extract_fence_block()).items():
+        stray = sorted(set(released or ()) - fence)
+        assert not stray, (
+            f"lane '{label}' claims to release ids that the fence does not "
+            f"cover: {stray}"
+        )
+
+
+def test_delegation_ids_are_not_releasable_on_any_lane() -> None:
+    """Ruling 15 did not touch the delegation tenant-RLS hold.
+
+    Those four gate live, actively-written tables and their un-gate is a
+    separate, still-pending ruling. No lane may release them.
+    """
+    for label, released in parse_lane_release_policies(extract_fence_block()).items():
+        leaked = sorted(set(released or ()) & set(FENCED_DELEGATION_IDS))
+        assert not leaked, (
+            f"lane '{label}' releases OMN-14974/OMN-15313 delegation migrations, "
+            f"which no operator ruling has un-gated: {leaked}"
+        )
+
+
+def test_lane_release_set_is_not_supplied_by_environment() -> None:
+    """The env var selects a COMMITTED policy; it never carries ids.
+
+    Same rule as the fence list and the skip-manifest. A
+    ``LANE_RELEASED_NODE_MIGRATION_IDS="${SOMETHING}"`` form would let an
+    operator env var release arbitrary fenced migrations on any lane.
+    """
+    block = extract_fence_block()
+    offenders = [
+        ln
+        for ln in block.splitlines()
+        if re.search(r'LANE_RELEASED_NODE_MIGRATION_IDS="?\$', ln)
+    ]
+    assert not offenders, (
+        "the release set must be assigned from literals inside the committed "
+        f"case arms, never interpolated from the environment: {offenders}"
+    )
+
+
+def test_release_is_checked_inside_the_fenced_branch_not_beside_it() -> None:
+    """Structural: the release may only ever narrow the fence.
+
+    If ``is_lane_released_node_migration`` were called at the top of the loop
+    instead of inside ``if is_fenced_node_migration``, it would become an
+    independent gate over the whole node corpus rather than a carve-out of the
+    fence, and its blast radius would no longer be bounded by the fence list.
+    """
+    branch = extract_skip_branch()
+    assert "is_lane_released_node_migration" in branch, (
+        "the lane-release check must live inside the fenced-id skip branch"
+    )
+    text = _runner_text()
+    node_loop = text[text.index("Auto-discover and apply node-owned migrations") :]
+    assert node_loop.count("is_lane_released_node_migration") == 1, (
+        "the release predicate is called more than once in the node loop; the "
+        "only sanctioned call site is inside the fenced-id branch"
+    )
+    fence_call = node_loop.index('if is_fenced_node_migration "${migration_id}"')
+    release_call = node_loop.index(
+        'if is_lane_released_node_migration "${migration_id}"'
+    )
+    assert fence_call < release_call, (
+        "the release check must be nested INSIDE the fence check "
+        f"(offsets: fence={fence_call} release={release_call})"
+    )
+
+
+def _forward_migration_environment(relpath: str) -> dict[str, str] | None:
+    """The ``forward-migration`` service's ``environment:`` in one compose file.
+
+    ``None`` when the file does not define that service at all — which is a
+    meaningfully different statement from "defines it with no environment".
+    """
+    doc = yaml.safe_load((REPO_ROOT / relpath).read_text(encoding="utf-8"))
+    service = (doc.get("services") or {}).get("forward-migration")
+    if service is None:
+        return None
+    env = service.get("environment") or {}
+    if isinstance(env, list):
+        pairs = [item.split("=", 1) for item in env]
+        return {k: (v[0] if v else "") for k, *v in pairs}
+    return {str(k): str(v) for k, v in env.items()}
+
+
+def test_lane_indicator_is_absent_from_the_base_compose_file() -> None:
+    """THE fail-closed mechanism, asserted at the compose seam.
+
+    Compose merges a lane overlay's ``environment:`` ON TOP of the base's — it
+    is a union with the overlay winning per key. So the merged value of
+    ``ONEX_MIGRATION_LANE`` is absent for a lane iff it is absent from BOTH the
+    base and that lane's overlay. Every non-dev lane overlay merges
+    ``docker-compose.infra.yml`` (stability-test's forward-migration override is
+    a single ``container_name:`` line — it inherits the base ``environment:``
+    block wholesale), so the indicator sitting in the base would be inherited by
+    stability-test, prod, judge, and by any lane added later. That is fail-OPEN.
+
+    This assertion plus ``test_only_the_dev_lane_overlay_carries_the_indicator``
+    below are jointly the proof that no non-dev lane can reach it.
+    """
+    env = _forward_migration_environment(BASE_COMPOSE_RELPATH)
+    assert env is not None, (
+        f"{BASE_COMPOSE_RELPATH} no longer defines forward-migration — this "
+        "check's premise moved"
+    )
+    assert LANE_INDICATOR_ENV not in env, (
+        f"{LANE_INDICATOR_ENV} is set in {BASE_COMPOSE_RELPATH}. Every lane "
+        "overlay merges that file, so this releases the fenced registration "
+        "migrations on stability-test, prod, judge and every future lane. It "
+        f"belongs in {DEV_LANE_OVERLAY_RELPATH}, which only the dev/lab project "
+        "loads."
+    )
+    # The catalog manifest GENERATES the base compose service, so the same
+    # statement has to hold one level up or a regenerate reintroduces it.
+    catalog = yaml.safe_load(
+        (REPO_ROOT / CATALOG_SERVICE_RELPATH).read_text(encoding="utf-8")
+    )
+    for field in ("hardcoded_env", "operational_defaults", "required_env"):
+        block = catalog.get(field) or {}
+        keys = block if isinstance(block, list) else list(block)
+        assert LANE_INDICATOR_ENV not in keys, (
+            f"{LANE_INDICATOR_ENV} is declared in {CATALOG_SERVICE_RELPATH} "
+            f"under {field}; regenerating the compose catalog would put it back "
+            "into the base file that every lane merges"
+        )
+
+
+def test_only_the_dev_lane_overlay_carries_the_indicator() -> None:
+    """The dev overlay sets it to exactly ``dev``; no other overlay mentions it."""
+    dev_env = _forward_migration_environment(DEV_LANE_OVERLAY_RELPATH)
+    assert dev_env is not None, (
+        f"{DEV_LANE_OVERLAY_RELPATH} must define the forward-migration service"
+    )
+    assert dev_env.get(LANE_INDICATOR_ENV) == DEV_LANE_VALUE, (
+        f"{DEV_LANE_OVERLAY_RELPATH} must set "
+        f"{LANE_INDICATOR_ENV}={DEV_LANE_VALUE}; found {dev_env!r}"
+    )
+
+    for relpath in NON_DEV_OVERLAY_RELPATHS:
+        text = (REPO_ROOT / relpath).read_text(encoding="utf-8")
+        assert LANE_INDICATOR_ENV not in text, (
+            f"{relpath} mentions {LANE_INDICATOR_ENV}. Non-dev lanes must carry "
+            "no lane indicator at all — the runner's fail-closed default is what "
+            "keeps them fenced, and a value here (even a benign-looking one) is "
+            "a release waiting on a typo."
+        )
+
+
+def test_dev_lane_overlay_is_wired_into_both_lane_mappings() -> None:
+    """Two files own lane -> compose-file mapping; both must layer the overlay.
+
+    ``scripts/deploy-runtime.sh`` is what actually brings the ``.201`` lab lane
+    up, and ``deploy_agent.executor._LANE_CONFIGS`` is the tested mapping the
+    deploy agent uses. They are already required to agree (the comment in
+    ``resolve_compose_file_args`` says so); a release wired into only one of
+    them would apply the trio through one path and not the other.
+    """
+    overlay_filename = Path(DEV_LANE_OVERLAY_RELPATH).name
+
+    deploy_runtime = (REPO_ROOT / "scripts" / "deploy-runtime.sh").read_text(
+        encoding="utf-8"
+    )
+    resolver = re.search(
+        r"^resolve_compose_file_args\s*\(\)\s*\{.*?\n\}",
+        deploy_runtime,
+        re.DOTALL | re.MULTILINE,
+    )
+    assert resolver is not None, "resolve_compose_file_args() not found"
+    assert overlay_filename in resolver.group(0), (
+        f"resolve_compose_file_args() does not layer {overlay_filename} for the "
+        "dev lane, so `deploy-runtime.sh` brings the lab lane up with no lane "
+        "indicator and the registration trio stays fenced there"
+    )
+
+    executor = (
+        REPO_ROOT / "scripts" / "deploy-agent" / "deploy_agent" / "executor.py"
+    ).read_text(encoding="utf-8")
+    dev_config = re.search(
+        r"EnumRuntimeLane\.DEV:\s*ModelLaneConfig\((?P<body>.*?)\n    \),",
+        executor,
+        re.DOTALL,
+    )
+    assert dev_config is not None, "_LANE_CONFIGS[EnumRuntimeLane.DEV] not found"
+    assert "_DEV_LANE_OVERLAY" in dev_config.group("body"), (
+        "_LANE_CONFIGS[DEV].compose_files does not include _DEV_LANE_OVERLAY"
+    )
+    assert re.search(
+        rf'_DEV_LANE_OVERLAY\s*=\s*f?"[^"]*{re.escape(overlay_filename)}"', executor
+    ), f"_DEV_LANE_OVERLAY does not point at {overlay_filename}"
 
 
 K8S_MANIFEST_RELPATH = "k8s/migrations/omnibase-infra-migrate.yaml"
@@ -498,10 +876,13 @@ def node_db(pg_target: PgTarget) -> Iterator[str]:
 
 
 def _runner_env(
-    target: PgTarget, migrations: Path, node_db_name: str
+    target: PgTarget,
+    migrations: Path,
+    node_db_name: str,
+    lane: str | None = None,
 ) -> dict[str, str]:
     psql_dir = str(Path(_find_pg_binary("psql") or "psql").parent)
-    return {
+    env = {
         **os.environ,
         "PATH": f"{psql_dir}{os.pathsep}{os.environ.get('PATH', '')}",
         "POSTGRES_USER": target.user,
@@ -514,10 +895,24 @@ def _runner_env(
         "NODE_MIGRATIONS_DIR": str(migrations / "nodes"),
         "MIGRATION_LOCK_WAIT_SECONDS": "60",
     }
+    # OMN-15379: `lane is None` means the variable is genuinely ABSENT, which is
+    # the state every non-dev lane is in. Popping it rather than setting "" also
+    # stops an ambient ONEX_MIGRATION_LANE on the test host from leaking in
+    # through the `**os.environ` splat and silently un-fencing the default-lane
+    # proof — the exact way a fail-closed check turns vacuous.
+    if lane is None:
+        env.pop(LANE_INDICATOR_ENV, None)
+    else:
+        env[LANE_INDICATOR_ENV] = lane
+    return env
 
 
 def _run(
-    runner: Path, target: PgTarget, migrations: Path, node_db_name: str
+    runner: Path,
+    target: PgTarget,
+    migrations: Path,
+    node_db_name: str,
+    lane: str | None = None,
 ) -> subprocess.CompletedProcess[str]:
     return subprocess.run(
         ["/bin/sh", str(runner)],
@@ -525,7 +920,7 @@ def _run(
         capture_output=True,
         text=True,
         timeout=180,
-        env=_runner_env(target, migrations, node_db_name),
+        env=_runner_env(target, migrations, node_db_name, lane),
     )
 
 
@@ -632,4 +1027,249 @@ def test_fence_free_runner_applies_the_fenced_migration(
     )
     assert "operator-gated" not in result.stdout, (
         "the fence block was not actually stripped from the RED control"
+    )
+
+
+# --------------------------------------------------------------------------
+# OMN-15379 — lane-scoped fence release. Live half.
+#
+# These drive the SHIPPED runner against a real Postgres, over the REAL
+# vendored registration SQL (not marker stubs), and answer the question from
+# the database: does node_service_registry exist, and is FORCE ROW LEVEL
+# SECURITY actually on it?
+#
+# The pair is the discriminator. A runner that ignored the lane indicator
+# entirely would fail one of the two legs whichever way it defaulted, so
+# neither leg can pass vacuously:
+#   * dev lane      -> the trio is APPLIED and relforcerowsecurity is true
+#   * default lane  -> the trio is SKIPPED and the table does not exist
+# --------------------------------------------------------------------------
+
+REGISTRATION_NODE = "node_projection_registration"
+REGISTRY_TABLE = "node_service_registry"
+VENDORED_NODES = REPO_ROOT / "docker" / "migrations" / "forward" / "nodes"
+
+
+@pytest.fixture
+def real_registration_tree(tmp_path: Path) -> Path:
+    """A migrations tree carrying the REAL vendored registration trio.
+
+    Marker stubs would prove the runner reached the file; they would not prove
+    FORCE ROW LEVEL SECURITY landed, which is the whole point of ruling 15. The
+    files are copied verbatim from ``docker/migrations/forward/nodes`` so this
+    can never drift from what the lab lane actually executes.
+
+    The flat migration creates the ``app_dashboard`` role, reproducing the real
+    dependency: node 0002 opens with a DO block that RAISEs unless that role
+    exists (it is created by flat migration 094 in the real corpus). Keeping the
+    dependency real means this proof also fails if that ordering breaks.
+    """
+    forward = tmp_path / "migrations" / "forward"
+    forward.mkdir(parents=True)
+    (forward / "001_create_app_dashboard_role.sql").write_text(
+        "DO $$\n"
+        "BEGIN\n"
+        "  IF NOT EXISTS (SELECT 1 FROM pg_roles WHERE rolname = 'app_dashboard') "
+        "THEN\n"
+        "    CREATE ROLE app_dashboard NOLOGIN;\n"
+        "  END IF;\n"
+        "END;\n"
+        "$$;\n"
+    )
+
+    node_dir = forward / "nodes" / REGISTRATION_NODE
+    node_dir.mkdir(parents=True)
+    copied = []
+    for released in LANE_RELEASED_IDS:
+        _, node_name, filename = released.split(":", 2)
+        source = VENDORED_NODES / node_name / filename
+        assert source.is_file(), (
+            f"vendored migration {source} is missing; the released id names "
+            "nothing and this proof would be vacuous"
+        )
+        (node_dir / filename).write_text(source.read_text(encoding="utf-8"))
+        copied.append(filename)
+    assert len(copied) == 3, copied
+
+    # One fenced DELEGATION id in the same run, as the negative control: ruling
+    # 15 released the registration trio and nothing else, so this must still be
+    # skipped even on the dev lane.
+    delegation_id = FENCED_DELEGATION_IDS[0]
+    _, del_node, del_file = delegation_id.split(":", 2)
+    del_dir = forward / "nodes" / del_node
+    del_dir.mkdir(parents=True, exist_ok=True)
+    (del_dir / del_file).write_text(
+        f"CREATE TABLE public.{_marker_for(delegation_id)} (id INT);\n"
+    )
+    return forward
+
+
+def _relrowsecurity(target: PgTarget, dbname: str, table: str) -> tuple[bool, bool]:
+    """``(relrowsecurity, relforcerowsecurity)`` straight from ``pg_class``.
+
+    The catalog, not the migration text — "the SQL says FORCE" is not evidence
+    that FORCE is in force.
+    """
+    scoped = PgTarget(
+        host=target.host,
+        port=target.port,
+        user=target.user,
+        password=target.password,
+        dbname=dbname,
+    )
+    row = _psql(
+        scoped,
+        # S608 is suppressed on all three catalog reads in this module: the
+        # interpolated name is a module constant (REGISTRY_TABLE), never
+        # external input, and SQL has no bind-parameter form for an identifier.
+        "SELECT relrowsecurity, relforcerowsecurity FROM pg_class "  # noqa: S608
+        f"WHERE oid = to_regclass('public.{table}')",
+    )
+    enabled, forced = row.split("|")
+    return enabled == "t", forced == "t"
+
+
+@pytest.mark.integration
+def test_dev_lane_applies_the_registration_trio_with_force_rls(
+    pg_target: PgTarget,
+    real_registration_tree: Path,
+    node_db: str,
+) -> None:
+    """ONEX_MIGRATION_LANE=dev: the trio applies and FORCE is LIVE.
+
+    This is the acceptance for operator ruling 15 at the runner boundary — the
+    same assertion the ``.201`` lab-lane readback makes, run here against an
+    ephemeral cluster so it gates every PR rather than one machine.
+    """
+    result = _run(
+        RUNNER, pg_target, real_registration_tree, node_db, lane=DEV_LANE_VALUE
+    )
+    assert result.returncode == 0, result.stdout + result.stderr
+
+    for released in LANE_RELEASED_IDS:
+        assert (
+            "RELEASED on lane 'dev'" in result.stdout and released in result.stdout
+        ), f"{released} was not reported as released on the dev lane:\n{result.stdout}"
+
+    assert _table_exists(pg_target, node_db, REGISTRY_TABLE), (
+        f"{REGISTRY_TABLE} does not exist — 0000 did not apply, so every "
+        "assertion below would be about a table that was never created"
+    )
+    enabled, forced = _relrowsecurity(pg_target, node_db, REGISTRY_TABLE)
+    assert enabled, f"{REGISTRY_TABLE}.relrowsecurity is false — 0002 did not apply"
+    assert forced, (
+        f"{REGISTRY_TABLE}.relforcerowsecurity is FALSE. Operator ruling 15 "
+        "makes the lab lane the FORCE proving ground; without FORCE the table "
+        "owner is exempt from the tenant policy and the lane proves nothing"
+    )
+
+    ledger = _ledger_ids(pg_target, node_db)
+    assert set(LANE_RELEASED_IDS) <= ledger, (
+        "the released ids were applied but not RECORDED, so the next run would "
+        f"re-apply them: {sorted(set(LANE_RELEASED_IDS) - ledger)}"
+    )
+
+    # 0001's heartbeat column and 0002's tenant column both landed — proof the
+    # whole trio ran, not just the CREATE.
+    scoped = PgTarget(
+        host=pg_target.host,
+        port=pg_target.port,
+        user=pg_target.user,
+        password=pg_target.password,
+        dbname=node_db,
+    )
+    columns = set(
+        _psql(
+            scoped,
+            "SELECT column_name FROM information_schema.columns "  # noqa: S608
+            f"WHERE table_schema='public' AND table_name='{REGISTRY_TABLE}'",
+        ).splitlines()
+    )
+    assert {"last_heartbeat_at", "uptime_seconds"} <= columns, (
+        f"0001 did not apply — heartbeat columns absent: {sorted(columns)}"
+    )
+    assert "tenant_id" in columns, f"0002 did not apply — no tenant_id: {columns}"
+    policies = _psql(
+        scoped,
+        "SELECT polname FROM pg_policy "  # noqa: S608
+        f"WHERE polrelid = to_regclass('public.{REGISTRY_TABLE}')",
+    )
+    assert "tenant_isolation" in policies, (
+        f"0002's tenant_isolation policy is absent: {policies!r}"
+    )
+
+    # NEGATIVE CONTROL: ruling 15 is registration-scoped. The delegation id in
+    # the same run must still be fenced ON the dev lane.
+    delegation_id = FENCED_DELEGATION_IDS[0]
+    assert not _table_exists(pg_target, node_db, _marker_for(delegation_id)), (
+        f"FENCE BREACH: the dev-lane release leaked to {delegation_id}, which "
+        "no operator ruling has un-gated"
+    )
+    assert delegation_id not in ledger, (
+        f"{delegation_id} was recorded on the dev lane; the release set is not "
+        "scoped to the registration trio"
+    )
+
+
+@pytest.mark.integration
+def test_default_lane_skips_the_trio_and_the_registry_table_is_absent(
+    pg_target: PgTarget,
+    real_registration_tree: Path,
+    node_db: str,
+) -> None:
+    """No lane indicator: FULL fence. Same tree, same runner, opposite outcome.
+
+    This is the half that makes the pair a proof rather than a demonstration.
+    ``lane=None`` unsets the variable entirely, which is the state of
+    stability-test, prod, judge, CI, and a fresh-volume
+    ``docker compose -f docker-compose.infra.yml up``.
+    """
+    result = _run(RUNNER, pg_target, real_registration_tree, node_db, lane=None)
+    assert result.returncode == 0, result.stdout + result.stderr
+
+    assert "RELEASED on lane" not in result.stdout, (
+        f"a lane release fired with no lane indicator set:\n{result.stdout}"
+    )
+    for released in LANE_RELEASED_IDS:
+        assert "SKIP (operator-gated" in result.stdout and released in result.stdout, (
+            f"{released} was not reported as operator-gated:\n{result.stdout}"
+        )
+
+    assert not _table_exists(pg_target, node_db, REGISTRY_TABLE), (
+        f"FENCE BREACH: {REGISTRY_TABLE} EXISTS on a lane with no indicator — "
+        "0000 applied unfenced"
+    )
+    ledger = _ledger_ids(pg_target, node_db)
+    assert not (ledger & set(LANE_RELEASED_IDS)), (
+        "a fenced id was recorded on the default lane, which would make the "
+        f"eventual un-fence a silent no-op: {sorted(ledger & set(LANE_RELEASED_IDS))}"
+    )
+
+
+@pytest.mark.integration
+def test_unknown_lane_value_fails_closed_to_the_full_fence(
+    pg_target: PgTarget,
+    real_registration_tree: Path,
+    node_db: str,
+) -> None:
+    """An unrecognised lane is fenced, loudly — not silently treated as dev.
+
+    ``stability-test`` is used as the value deliberately: it is a real lane
+    name, so a runner that pattern-matched loosely (prefix, glob, "any non-empty
+    value means release") would betray itself here rather than on an obviously
+    bogus string.
+    """
+    result = _run(
+        RUNNER, pg_target, real_registration_tree, node_db, lane="stability-test"
+    )
+    assert result.returncode == 0, result.stdout + result.stderr
+
+    assert not _table_exists(pg_target, node_db, REGISTRY_TABLE), (
+        f"FENCE BREACH: an UNKNOWN lane value released the trio — "
+        f"{REGISTRY_TABLE} exists"
+    )
+    assert "RELEASED on lane" not in result.stdout, result.stdout
+    assert "unknown ONEX_MIGRATION_LANE" in result.stderr, (
+        "failing closed silently is still a silent failure — the runner must "
+        f"say it did not recognise the lane:\n{result.stderr}"
     )
