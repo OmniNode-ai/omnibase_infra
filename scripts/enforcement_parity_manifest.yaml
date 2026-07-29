@@ -82,6 +82,10 @@ repos:
           coverage: direct
           rule: >-
             OMN-14556: node-migration-sync.yml is its OWN workflow file (separate run_id from ci.yml), so ci_summary_gate.py's poll of actions/runs/${RUN_ID}/jobs structurally cannot observe it -- a needs_child declaration would be a false COVERED. Confirmed live on PR #2288 (2026-07-13): node-migration-sync=FAIL, CI Summary=PASS, different run_ids. Absent from required_status_checks today (MISSING) -- this entry makes the report-only ratchet flag it until the branch-protection PUT lands.
+        - context: "deploy-agent-tests"
+          coverage: direct
+          rule: >-
+            OMN-15378: deploy-agent-tests.yml is its OWN workflow file (separate run_id from ci.yml, path-triggered on scripts/deploy-agent/**), so ci_summary_gate.py's poll of actions/runs/${RUN_ID}/jobs structurally cannot observe it -- same class as node-migration-sync (OMN-14556) above. Wiring the tests to RUN on PR (this ticket's fix) does not make them GATE merge: a red deploy-agent-tests run today leaves CI Summary (the sole required context on this branch) green, so the exact "test exists but doesn't block anything" failure mode the ticket was filed to close is only partially closed -- visibility yes, enforcement no. Absent from required_status_checks today (MISSING) -- this entry makes the report-only ratchet flag it until the branch-protection PUT lands.
   # --- The two repos the audit CONFIRMED are missing the gates (M1-M4) ---
   omnimarket:
     dev:
