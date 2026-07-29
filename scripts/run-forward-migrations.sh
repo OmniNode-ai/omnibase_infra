@@ -52,6 +52,17 @@
 # migration numbered e.g. 076 NEVER collides with infra's flat 076 file —
 # the renumber-as-operational-pattern is eliminated.
 #
+# ---------------------------------------------------------------------------
+# Operator fence for node migrations (OMN-15336 — parity with the k8s runner)
+# ---------------------------------------------------------------------------
+# The node-migration id space above is SHARED with omninode_infra's k8s Job
+# runner (k8s/migrations/omnibase-infra-migrate.yaml): both walk the same
+# vendored nodes/<node>/*.sql tree and both mint the id
+# node:<node>:<filename>. Until OMN-15336 only the k8s runner carried the
+# operator fence, so the two sanctioned paths disagreed about what is gated and
+# every compose lane applied the gated migrations unattended. See
+# FENCED_NODE_MIGRATION_IDS below for the semantics and the seam.
+#
 # Environment:
 #   POSTGRES_USER     (default: postgres)
 #   POSTGRES_PASSWORD (required)
@@ -101,6 +112,63 @@ is_skipped_by_manifest() {
   fi
   echo "${SKIPPED_IDS}" | grep -Fxq "${migration_id}"
 }
+
+# ---- BEGIN operator fence — node migration ids (OMN-15336) ----
+# PARITY PORT of omninode_infra/k8s/migrations/omnibase-infra-migrate.yaml's
+# FENCED_NODE_MIGRATION_IDS. The two runners share one id space
+# (node:<node>:<filename>) over one vendored SQL tree, so a fence in only one of
+# them is not a fence: OMN-15336 found the .201 dev lane and the stability-test
+# lane had applied all of the gated ids and were running FORCE ROW LEVEL
+# SECURITY on six tables, while the cloud RDS copy the k8s runner drives was
+# clean. Semantics matched field-by-field with the k8s runner:
+#
+#   * EXACT-STRING match on the full namespaced id — no prefix, no glob.
+#   * Checked FIRST, before the already-applied ledger probe and before any
+#     psql -f, so a fenced id cannot be applied by any path through this loop
+#     (in particular it cannot be reached by a ledger probe that fails open).
+#   * SKIP + RECORD-THE-SKIP: the id is counted into NODE_SKIPPED and named on
+#     stdout. It is deliberately NOT written to schema_migrations. Recording it
+#     would make the eventual un-fencing a silent no-op — the runner would read
+#     the row, call it already applied, and the migration would never run. The
+#     k8s runner has the same shape for the same reason.
+#   * NEVER applied. This runner has no un-gate path; the fence is lifted by
+#     removing an id here in a change that also lands the operator ruling, in
+#     lockstep with the k8s list.
+#
+# Assigned unconditionally, NOT `${FENCED_NODE_MIGRATION_IDS:-...}`: only a
+# COMMITTED fence is honoured, exactly as with the skip-manifest above. An
+# operator env var must not be able to empty this list.
+#
+# WHY these ids (verbatim from the k8s runner's rationale):
+#   delegation 0023-0026 — OMN-14974/OMN-15313. They put tenant-isolation RLS
+#     on live, actively-written delegation tables; un-gate only in a change that
+#     also proves the writer sets app.tenant_id per connection.
+#   registration 0000/0001 — OMN-15335/OMN-15088. Both must ALTER
+#     node_service_registry, which carries RLS ENABLEd but not FORCEd, so the
+#     ownership transfer that would unblock them also makes the owner exempt
+#     from that table's isolation policy. HELD pending the operator ruling on
+#     whether node_service_registry gets FORCE ROW LEVEL SECURITY.
+#
+# SEAM (cross-repo, drift-prone by construction): this list must equal
+# omninode_infra@dev's FENCED_NODE_MIGRATION_IDS array element-for-element and
+# in order. Enforced by tests/scripts/test_node_migration_fence_parity.py, which
+# pins the expected tuple and — when an omninode_infra checkout is reachable —
+# diffs this list against the live k8s manifest. There is no single source of
+# truth for the list today; adding one is a cross-repo architecture change
+# (follow-up filed, see the test module docstring).
+FENCED_NODE_MIGRATION_IDS="\
+node:node_projection_delegation:0023_delegation_rls_tenant_isolation.sql
+node:node_projection_delegation:0024_drop_unwired_routing_columns.sql
+node:node_projection_delegation:0025_delegation_judge_verdict_events_tenant_id.sql
+node:node_projection_delegation:0026_delegation_judge_verdict_events_rls_tenant_isolation.sql
+node:node_projection_registration:0000_create_node_service_registry.sql
+node:node_projection_registration:0001_add_heartbeat_columns.sql"
+
+is_fenced_node_migration() {
+  candidate="$1"
+  printf '%s\n' "${FENCED_NODE_MIGRATION_IDS}" | grep -Fxq "${candidate}"
+}
+# ---- END operator fence — node migration ids (OMN-15336) ----
 
 # ---------------------------------------------------------------------------
 # 0. Wait for Postgres to be ready (first-boot initdb race guard, OMN-13062)
@@ -403,6 +471,16 @@ CREATE TABLE IF NOT EXISTS public.schema_migrations (
     for migration_file in $(ls "${node_dir}"*.sql | sort); do
       filename=$(basename "$migration_file")
       migration_id="node:${node_name}:${filename}"
+
+      # ---- BEGIN fenced-id skip (OMN-15336) ----
+      # FIRST, ahead of the ledger probe and the apply. Skip and count it;
+      # never apply it, never record it in schema_migrations.
+      if is_fenced_node_migration "${migration_id}"; then
+        echo "[forward-migration]   SKIP (operator-gated, see OMN-14974/OMN-15313/OMN-15335): ${migration_id}"
+        NODE_SKIPPED=$((NODE_SKIPPED + 1))
+        continue
+      fi
+      # ---- END fenced-id skip (OMN-15336) ----
 
       already_applied=$(psql -h "$PGHOST" -p "$PGPORT" -U "$PGUSER" -d "$NODE_PGDB" \
         -tAc "SELECT 1 FROM public.schema_migrations WHERE migration_id = '${migration_id}'" 2>/dev/null || true)
