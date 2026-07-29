@@ -20,7 +20,7 @@ DOCKERFILE = FIXTURE_ROOT / "Dockerfile"
 MANIFEST = FIXTURE_ROOT / "fixture-manifest.json"
 LEGACY_SEED = FIXTURE_ROOT / "legacy-seed.sql"
 PROOF = FIXTURE_ROOT / "prove.sh"
-CI_WORKFLOW = REPO_ROOT / ".github" / "workflows" / "ci.yml"
+CI_WORKFLOW = REPO_ROOT / ".github" / "workflows" / "legacy-rds-fixture-proof.yml"
 
 REQUIRED_CASES = {
     "mapping_ambiguity",
@@ -137,7 +137,10 @@ def test_proof_runs_real_migrations_twice_and_pins_the_blocked_upgrade() -> None
 
 def test_required_ci_executes_rebuilt_fixture_and_always_cleans_it() -> None:
     workflow = yaml.safe_load(CI_WORKFLOW.read_text(encoding="utf-8"))
-    steps = workflow["jobs"]["migration-integration"]["steps"]
+    job = workflow["jobs"]["fixture-proof"]
+    assert "needs" not in job
+    assert job["runs-on"] == "ubuntu-latest"
+    steps = job["steps"]
     proof = next(
         step
         for step in steps

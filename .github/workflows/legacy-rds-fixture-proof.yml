@@ -1,0 +1,53 @@
+name: Sanitized Legacy RDS Fixture Proof
+
+on:
+  pull_request:
+    branches: [main, dev]
+    paths:
+      - ".github/workflows/legacy-rds-fixture-proof.yml"
+      - "docker/legacy-rds-fixture/**"
+      - "docker/migrations/**"
+      - "scripts/run-forward-migrations.sh"
+  push:
+    branches: [main]
+    paths:
+      - ".github/workflows/legacy-rds-fixture-proof.yml"
+      - "docker/legacy-rds-fixture/**"
+      - "docker/migrations/**"
+      - "scripts/run-forward-migrations.sh"
+  workflow_dispatch:
+
+concurrency:
+  group: legacy-rds-fixture-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+jobs:
+  fixture-proof:
+    name: PostgreSQL 16 Fresh + Legacy Fixture
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+
+      # This proof is intentionally independent of OCC preflight. It validates
+      # sanitized fixture behavior on draft PRs; it grants no release or merge
+      # authorization, and the repository's OCC gates remain fail-closed.
+      - name: Sanitized legacy-RDS Docker proof
+        run: |
+          docker compose \
+            --project-name "omn15422-${GITHUB_RUN_ID}-${GITHUB_RUN_ATTEMPT}" \
+            -f docker/legacy-rds-fixture/compose.yml \
+            up --build --abort-on-container-exit --exit-code-from proof
+
+      - name: Clean sanitized legacy-RDS Docker proof
+        if: always()
+        run: |
+          docker compose \
+            --project-name "omn15422-${GITHUB_RUN_ID}-${GITHUB_RUN_ATTEMPT}" \
+            -f docker/legacy-rds-fixture/compose.yml \
+            down --volumes --remove-orphans
