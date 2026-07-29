@@ -2409,6 +2409,55 @@ jobs:
         run: |
           uv run python scripts/run-migrations.py
 
+      # OMN-15376: node-migration shape drift. Runs HERE, in the one job that
+      # already owns a real Postgres, because the class is only observable by
+      # EXECUTING the SQL against a pre-existing table of the wrong shape --
+      # a CREATE TABLE IF NOT EXISTS silently no-ops and the next
+      # column-dependent statement kills the deploy. The suite creates and drops
+      # its own throwaway databases on this service; it never touches
+      # omnibase_infra. The static half of the gate runs in the main test job.
+      #
+      # psql is required because the proof must use the SAME invocation the
+      # deploy runners use (psql -v ON_ERROR_STOP=1 -f). Container runners may
+      # lack it and may lack sudo (same constraint reusable-runtime-boot.yml
+      # documents), so the client install is best-effort and the pytest step is
+      # gated on the result -- an unobtainable psql degrades this to the static
+      # gate rather than wedging a required job on a missing package.
+      - name: Ensure psql client (best effort)
+        id: ensure_psql
+        shell: bash
+        run: |
+          set -uo pipefail
+          if ! command -v psql >/dev/null 2>&1; then
+            if command -v sudo >/dev/null 2>&1; then
+              sudo apt-get update -qq \
+                && sudo apt-get install -y -qq --no-install-recommends postgresql-client \
+                || true
+            elif command -v apt-get >/dev/null 2>&1; then
+              apt-get update -qq \
+                && apt-get install -y -qq --no-install-recommends postgresql-client \
+                || true
+            fi
+          fi
+          if command -v psql >/dev/null 2>&1 || ls /opt/homebrew/opt/postgresql@*/bin/psql >/dev/null 2>&1; then
+            echo "available=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "::warning::psql client unavailable — the OMN-15376 shape-drift EXECUTION proof cannot run on this runner; the static gate in tests/ci/test_node_migration_shape_reconciliation.py still applies."
+            echo "available=false" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Node migration shape-drift proof (RED/GREEN + convergence)
+        if: steps.ensure_psql.outputs.available == 'true'
+        env:
+          OMNIBASE_INFRA_DB_URL: postgresql://postgres:test_password@${{ steps.postgres_host.outputs.host }}:${{ job.services.postgres.ports['5432'] }}/omnibase_infra
+          # Fail-closed inside the suite: with a Postgres in hand, a SKIP is a
+          # vacuous green and is treated as an error.
+          OMN15376_REQUIRE_PG: "1"
+        run: |
+          uv run pytest \
+            tests/integration/migrations/test_node_migration_shape_drift_omn15376.py \
+            -v --tb=short -p no:randomly
+
       - name: Assert manifest tables exist
         env:
           POSTGRES_HOST: ${{ steps.postgres_host.outputs.host }}
