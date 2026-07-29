@@ -146,21 +146,20 @@ def _resolve_handler_class_from_routing(
 
     Market node contracts do not declare ``metadata.handler_class`` (the form
     ModelHandlerContract reads). Instead they declare the handler module under
-    ``handler_routing.handlers[].handler.module`` and/or a top-level
-    ``handler.module``, with the class name under ``.name`` (routing form) or
-    ``.class`` (top-level form). This helper joins module + class into the
-    ``module.ClassName`` path the live materializer imports.
+    ``handler_routing.handlers[].handler.module``, with the class name under
+    ``.name``. This helper joins module + class into the ``module.ClassName``
+    path the live materializer imports.
 
-    The routing form is preferred over the top-level form because routing is the
-    canonical dispatch surface; the top-level ``handler`` block is a convenience
-    declaration.
+    A legacy top-level ``handler`` block is intentionally not accepted. The
+    canonical ``ModelHandlerContract`` rejects undeclared fields, so accepting
+    that block here would bypass the typed contract boundary.
 
     Args:
         contract_data: Parsed contract YAML as a mapping.
 
     Returns:
-        Fully qualified ``module.ClassName`` path, or None when neither the
-        routing nor the top-level handler block carries a resolvable module.
+        Fully qualified ``module.ClassName`` path, or None when the routing
+        declaration does not carry a resolvable module.
     """
 
     def _join(module: object, class_name: object) -> str | None:
@@ -185,13 +184,6 @@ def _resolve_handler_class_from_routing(
                     resolved = _join(handler.get("module"), handler.get("name"))
                     if resolved is not None:
                         return resolved
-
-    # Fall back to the top-level form: handler.{module,class}
-    top_level = contract_data.get("handler")
-    if isinstance(top_level, dict):
-        resolved = _join(top_level.get("module"), top_level.get("class"))
-        if resolved is not None:
-            return resolved
 
     return None
 
@@ -285,9 +277,9 @@ class ContractYamlParser:  # ai-slop-ok: pre-existing
                 handler_class = metadata.get("handler_class")
 
         # Fallback for node-shaped (market) contracts: these declare the handler
-        # module under handler_routing.handlers[].handler.module (and/or a
-        # top-level handler.module) rather than metadata.handler_class. Join
-        # module + class into the fully qualified path the materializer imports.
+        # module under handler_routing.handlers[].handler.module rather than
+        # metadata.handler_class. Join module + class into the fully qualified
+        # path the materializer imports.
         if handler_class is None and isinstance(contract_data, dict):
             handler_class = _resolve_handler_class_from_routing(contract_data)
 
