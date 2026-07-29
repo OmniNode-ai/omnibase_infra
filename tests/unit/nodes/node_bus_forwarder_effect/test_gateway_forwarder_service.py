@@ -11,11 +11,12 @@ from uuid import UUID, uuid4
 
 import pytest
 
+from omnibase_core.models.core.model_envelope_metadata import ModelEnvelopeMetadata
 from omnibase_core.models.delegation.wire import ModelDelegationRequest
 from omnibase_core.models.events.model_event_envelope import ModelEventEnvelope
+from omnibase_infra.errors import InfraUnavailableError
 from omnibase_infra.nodes.node_bus_forwarder_effect.models import (
     ModelGatewayCloudBusConfig,
-    ModelGatewayEnvelope,
     ModelGatewayForwarderConfig,
     ModelGatewayMirrorTopics,
     ModelGatewayTenantIdentity,
@@ -28,10 +29,11 @@ pytestmark = pytest.mark.asyncio
 
 TENANT_ID = UUID("11111111-1111-1111-1111-111111111111")
 BROKER_PROVIDER_ID = UUID("22222222-2222-2222-2222-222222222222")
-PRINCIPAL_ID = UUID("33333333-3333-3333-3333-333333333333")
+PRINCIPAL_ID = "t-33333333333333333333333333333333"
 CORRELATION_ID = UUID("44444444-4444-4444-4444-444444444444")
 INBOUND_TOPIC = "onex.cmd.omnibase-infra.delegation-inference-request.v1"
 OUTBOUND_TOPIC = "onex.evt.omnibase-infra.inference-response.v1"
+HEARTBEAT_TOPIC = "onex.evt.omnibase-infra.gateway-heartbeat.v1"
 WIRE_INBOUND_TOPIC = f"tenant-acme.{INBOUND_TOPIC}"
 WIRE_OUTBOUND_TOPIC = f"tenant-acme.{OUTBOUND_TOPIC}"
 # OMN-14346: the command topic that actually starts the delegation FSM
@@ -87,7 +89,11 @@ class _MockGatewayBus:
     ) -> None:
         self.published.append(_Message(topic, key, value, headers))
 
-    async def emit(self, topic: str, envelope: ModelGatewayEnvelope) -> None:
+    async def emit(
+        self,
+        topic: str,
+        envelope: ModelEventEnvelope[dict[str, object]],
+    ) -> None:
         await self.subscriptions[topic](
             _Message(
                 topic=topic,
@@ -96,6 +102,24 @@ class _MockGatewayBus:
                 headers={"trace": "preserved"},
             )
         )
+
+
+class _FlakyGatewayBus(_MockGatewayBus):
+    def __init__(self, failures: int) -> None:
+        super().__init__()
+        self.failures_remaining = failures
+
+    async def publish(
+        self,
+        topic: str,
+        key: bytes | None,
+        value: bytes,
+        headers: object | None = None,
+    ) -> None:
+        if self.failures_remaining:
+            self.failures_remaining -= 1
+            raise InfraUnavailableError("temporary destination outage")
+        await super().publish(topic, key, value, headers)
 
 
 def _config() -> ModelGatewayForwarderConfig:
@@ -121,21 +145,21 @@ def _config() -> ModelGatewayForwarderConfig:
     )
 
 
-def _envelope(**overrides: object) -> ModelGatewayEnvelope:
+def _envelope(**overrides: object) -> ModelEventEnvelope[dict[str, object]]:
     values = {
-        "tenant_id": TENANT_ID,
-        "tenant_slug": "acme",
         "envelope_id": uuid4(),
         "correlation_id": CORRELATION_ID,
-        "causation_id": "cause-1",
         "event_type": "LlmInferenceResponse",
-        "source_topic": OUTBOUND_TOPIC,
-        "wire_topic": "",
-        "canonical_topic": OUTBOUND_TOPIC,
         "payload": {"ok": True},
+        "metadata": ModelEnvelopeMetadata(
+            tags={
+                "source_tenant_id": str(TENANT_ID),
+                "source_tenant_principal_id": PRINCIPAL_ID,
+            }
+        ),
     }
     values.update(overrides)
-    return ModelGatewayEnvelope(**values)
+    return ModelEventEnvelope[dict[str, object]](**values)
 
 
 async def test_start_subscribes_declared_topics_only() -> None:
@@ -172,9 +196,11 @@ async def test_outbound_local_message_is_published_to_cloud_wire_topic() -> None
     assert published.topic == WIRE_OUTBOUND_TOPIC
     assert published.key == b"key-1"
     assert published.headers == {"trace": "preserved"}
-    forwarded = ModelGatewayEnvelope.model_validate_json(published.value)
-    assert forwarded.wire_topic == WIRE_OUTBOUND_TOPIC
-    assert forwarded.canonical_topic == OUTBOUND_TOPIC
+    forwarded = ModelEventEnvelope[dict[str, object]].model_validate_json(
+        published.value
+    )
+    assert forwarded.metadata.tags["gateway_wire_topic"] == WIRE_OUTBOUND_TOPIC
+    assert forwarded.metadata.tags["gateway_canonical_topic"] == OUTBOUND_TOPIC
     assert forwarded.correlation_id == CORRELATION_ID
     assert forwarded.event_type == "LlmInferenceResponse"
 
@@ -193,20 +219,72 @@ async def test_inbound_cloud_message_is_published_to_local_canonical_topic() -> 
         WIRE_INBOUND_TOPIC,
         _envelope(
             event_type="DelegationInferenceRequest",
-            source_topic=WIRE_INBOUND_TOPIC,
-            wire_topic=WIRE_INBOUND_TOPIC,
-            canonical_topic=INBOUND_TOPIC,
         ),
     )
 
     assert len(local_bus.published) == 1
     published = local_bus.published[0]
     assert published.topic == INBOUND_TOPIC
-    forwarded = ModelGatewayEnvelope.model_validate_json(published.value)
-    assert forwarded.source_topic == WIRE_INBOUND_TOPIC
-    assert forwarded.canonical_topic == INBOUND_TOPIC
+    forwarded = ModelEventEnvelope[dict[str, object]].model_validate_json(
+        published.value
+    )
+    assert forwarded.metadata.tags["gateway_wire_topic"] == WIRE_INBOUND_TOPIC
+    assert forwarded.metadata.tags["gateway_canonical_topic"] == INBOUND_TOPIC
     assert forwarded.correlation_id == CORRELATION_ID
     assert forwarded.event_type == "DelegationInferenceRequest"
+
+
+async def test_destination_outage_retries_without_returning_source_callback() -> None:
+    local_bus = _MockGatewayBus()
+    cloud_bus = _FlakyGatewayBus(failures=2)
+    slept: list[float] = []
+
+    async def record_sleep(delay: float) -> None:
+        slept.append(delay)
+
+    service = ServiceGatewayForwarder(
+        config=_config(),
+        local_bus=local_bus,
+        cloud_bus=cloud_bus,
+        retry_sleep=record_sleep,
+    )
+    await service.start()
+
+    await local_bus.emit(OUTBOUND_TOPIC, _envelope())
+
+    assert slept == [1.0, 2.0]
+    assert len(cloud_bus.published) == 1
+    assert cloud_bus.published[0].topic == WIRE_OUTBOUND_TOPIC
+
+
+async def test_heartbeat_is_tenant_bound_and_published_to_cloud_wire_topic() -> None:
+    local_bus = _MockGatewayBus()
+    cloud_bus = _MockGatewayBus()
+    config = _config().model_copy(
+        update={
+            "mirror_topics": ModelGatewayMirrorTopics(
+                inbound=(INBOUND_TOPIC,),
+                outbound=(OUTBOUND_TOPIC, HEARTBEAT_TOPIC),
+            )
+        }
+    )
+    service = ServiceGatewayForwarder(
+        config=config,
+        local_bus=local_bus,
+        cloud_bus=cloud_bus,
+    )
+
+    await service.publish_heartbeat()
+
+    assert len(cloud_bus.published) == 1
+    message = cloud_bus.published[0]
+    assert message.topic == f"tenant-acme.{HEARTBEAT_TOPIC}"
+    envelope = ModelEventEnvelope[dict[str, object]].model_validate_json(message.value)
+    assert envelope.event_type == "omnibase-infra.gateway-heartbeat"
+    assert envelope.payload["tenant_id"] == "acme"
+    assert envelope.payload["principal_id"] == PRINCIPAL_ID
+    assert envelope.payload["status"] == "active"
+    assert envelope.metadata.tags["gateway_direction"] == "local-to-cloud"
 
 
 async def test_inbound_payload_gets_verified_tenant_slug_not_forged_or_missing() -> (
@@ -261,9 +339,6 @@ async def test_inbound_payload_gets_verified_tenant_slug_not_forged_or_missing()
         WIRE_INBOUND_TOPIC,
         _envelope(
             event_type="DelegationInferenceRequest",
-            source_topic=WIRE_INBOUND_TOPIC,
-            wire_topic=WIRE_INBOUND_TOPIC,
-            canonical_topic=INBOUND_TOPIC,
             payload=forged_payload,
         ),
     )
@@ -308,9 +383,6 @@ async def test_inbound_payload_stamp_carries_no_separate_tenant_slug_key() -> No
         WIRE_INBOUND_TOPIC,
         _envelope(
             event_type="DelegationInferenceRequest",
-            source_topic=WIRE_INBOUND_TOPIC,
-            wire_topic=WIRE_INBOUND_TOPIC,
-            canonical_topic=INBOUND_TOPIC,
             payload={"prompt": "hi"},
         ),
     )
@@ -345,12 +417,14 @@ async def test_inbound_cross_tenant_forged_envelope_is_rejected_not_republished(
         await cloud_bus.emit(
             WIRE_INBOUND_TOPIC,
             _envelope(
-                tenant_id=other_tenant_id,
                 event_type="DelegationInferenceRequest",
-                source_topic=WIRE_INBOUND_TOPIC,
-                wire_topic=WIRE_INBOUND_TOPIC,
-                canonical_topic=INBOUND_TOPIC,
                 payload={"prompt": "cross-tenant forgery"},
+                metadata=ModelEnvelopeMetadata(
+                    tags={
+                        "source_tenant_id": str(other_tenant_id),
+                        "source_tenant_principal_id": PRINCIPAL_ID,
+                    }
+                ),
             ),
         )
 
@@ -367,10 +441,14 @@ async def test_outbound_rejects_undeclared_topic_before_cloud_publish() -> None:
     )
     await service.start()
 
+    undeclared_topic = "onex.evt.omnibase-infra.not-declared.v1"
     with pytest.raises(ValueError, match="not declared"):
-        await local_bus.emit(
-            OUTBOUND_TOPIC,
-            _envelope(canonical_topic="onex.evt.omnibase-infra.not-declared.v1"),
+        await service._forward_outbound_message(
+            _Message(
+                topic=undeclared_topic,
+                key=b"key-1",
+                value=_envelope().model_dump_json().encode("utf-8"),
+            )
         )
 
     assert cloud_bus.published == []
@@ -463,9 +541,6 @@ async def test_delegation_request_payload_stamp_survives_real_model_round_trip()
         _envelope(
             event_type="DelegationRequest",
             correlation_id=request_correlation_id,
-            source_topic=WIRE_DELEGATION_REQUEST_TOPIC,
-            wire_topic=WIRE_DELEGATION_REQUEST_TOPIC,
-            canonical_topic=DELEGATION_REQUEST_TOPIC,
             payload=delegation_request.model_dump(mode="json"),
         ),
     )

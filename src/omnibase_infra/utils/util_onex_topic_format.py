@@ -8,8 +8,9 @@ Validates that Kafka topic names conform to the canonical ONEX 5-segment format:
 
 where kind is one of: evt, cmd, intent, dlq.
 
-Legacy DLQ topics matching ``<prefix>.dlq.<name>.v<N>`` are accepted with a
-distinct result code so callers can distinguish them from fully canonical names.
+Tenant gateway wire topics matching ``tenant-<slug>.<canonical-onex-topic>``
+and legacy DLQ topics matching ``<prefix>.dlq.<name>.v<N>`` are accepted with
+distinct result codes so callers can distinguish them from bare canonical names.
 
 Kafka-internal topics (prefixed with ``__``) are silently skipped.
 """
@@ -25,6 +26,11 @@ _RE_ONEX_TOPIC = re.compile(
 
 _RE_LEGACY_DLQ = re.compile(r"^[a-z][a-z0-9-]*\.dlq\.[a-z0-9-]+\.v[1-9]\d*$")
 
+_RE_TENANT_WIRE_TOPIC = re.compile(
+    r"^tenant-([a-z][a-z0-9-]{1,61}[a-z0-9])\."
+    r"(onex\.(?:evt|cmd|intent|dlq)\.[a-z0-9-]+\.[a-z0-9._-]+\.v[1-9]\d*)$"
+)
+
 _KAFKA_INTERNAL_PREFIX = "__"
 
 
@@ -32,6 +38,7 @@ class TopicValidationResult(StrEnum):
     """Outcome of validating a topic name against the ONEX format."""
 
     VALID = "valid"
+    VALID_TENANT_WIRE = "valid_tenant_wire"
     VALID_LEGACY_DLQ = "valid_legacy_dlq"
     INVALID = "invalid"
     SKIPPED_INTERNAL = "skipped_internal"
@@ -47,10 +54,14 @@ def validate_onex_topic_format(topic: str) -> tuple[TopicValidationResult, str]:
         return (TopicValidationResult.SKIPPED_INTERNAL, "")
     if _RE_ONEX_TOPIC.match(topic):
         return (TopicValidationResult.VALID, "")
+    tenant_wire_match = _RE_TENANT_WIRE_TOPIC.match(topic)
+    if tenant_wire_match and "--" not in tenant_wire_match.group(1):
+        return (TopicValidationResult.VALID_TENANT_WIRE, "")
     if _RE_LEGACY_DLQ.match(topic):
         return (TopicValidationResult.VALID_LEGACY_DLQ, "legacy DLQ format")
     return (
         TopicValidationResult.INVALID,
         f"Topic '{topic}' does not match ONEX format: "
-        "onex.(evt|cmd|intent|dlq).<producer>.<event-name>.v<N>",
+        "onex.(evt|cmd|intent|dlq).<producer>.<event-name>.v<N> or "
+        "tenant-<slug>.<canonical-onex-topic>",
     )

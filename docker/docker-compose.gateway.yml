@@ -1,0 +1,48 @@
+# Standalone operator-edge gateway overlay. This process connects outbound to
+# staging MSK and to the .201 local Redpanda listener; it opens no inbound port.
+services:
+  gateway-forwarder:
+    build:
+      context: ..
+      dockerfile: docker/Dockerfile.runtime
+      args:
+        BUILD_SOURCE: "${BUILD_SOURCE:-release}"
+        EXPECTED_BUILD_SOURCE: "${EXPECTED_BUILD_SOURCE:-release}"
+    container_name: omninode-gateway-forwarder
+    command:
+      - onex-gateway-forwarder
+      - --config
+      - /app/config/gateway-forwarder.yaml
+      - --ready-file
+      - /tmp/gateway-forwarder-ready
+    environment:
+      AWS_PROFILE: "${GATEWAY_AWS_PROFILE:-default}"
+      AWS_SHARED_CREDENTIALS_FILE: "/run/secrets/aws_credentials"
+      AWS_REGION: "us-east-1"
+      AWS_DEFAULT_REGION: "us-east-1"
+      AWS_SDK_LOAD_CONFIG: "1"
+      ONEX_TOPIC_ENFORCEMENT_MODE: "reject"
+    volumes:
+      - ./gateway/beta-gateway-canary.yaml:/app/config/gateway-forwarder.yaml:ro
+      - ${GATEWAY_AWS_CREDENTIALS_FILE:?GATEWAY_AWS_CREDENTIALS_FILE is required}:/run/secrets/aws_credentials:ro
+    networks:
+      - gateway-runtime
+    extra_hosts:
+      - "b-1.omninodedevmsk.7ozyd3.c14.kafka.us-east-1.amazonaws.com:100.53.215.198"
+      - "b-2.omninodedevmsk.7ozyd3.c14.kafka.us-east-1.amazonaws.com:100.53.215.198"
+    restart: unless-stopped
+    stop_grace_period: 30s
+    healthcheck:
+      test: ["CMD", "test", "-f", "/tmp/gateway-forwarder-ready"]
+      interval: 15s
+      timeout: 3s
+      retries: 4
+      start_period: 90s
+    labels:
+      - "com.omninode.service=gateway-forwarder"
+      - "com.omninode.layer=gateway"
+      - "com.omninode.ticket=OMN-12912"
+networks:
+  gateway-runtime:
+    external: true
+    name: omnibase-infra-network

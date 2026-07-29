@@ -3789,6 +3789,27 @@ pattern_exemptions:
       target_id is polymorphic across recommendation types: a runner name string (RESTART_RUNNER) or a GitHub Actions run id rendered as str (CANCEL_RUN). Neither is a UUID.
 
     ticket: OMN-13942
+  # ==========================================================================
+  # Hybrid gateway wire identity exemptions (OMN-12912)
+  # ==========================================================================
+  - file_pattern: 'model_gateway_tenant_identity\.py'
+    violation_pattern: "Field 'principal_id' should use UUID"
+    reason: >
+      principal_id is the canonical MSK tenant principal t-<tenant UUID hex>, whose t- prefix makes UUID an invalid representation. The underlying tenant_id remains strongly typed as UUID.
+
+    ticket: OMN-12912
+  - file_pattern: 'model_gateway_heartbeat\.py'
+    violation_pattern: "Field 'tenant_id' should use UUID"
+    reason: >
+      The heartbeat crosses the tenant-prefixed wire boundary and therefore carries the validated DNS-safe tenant slug used in Kafka topic names.
+
+    ticket: OMN-12912
+  - file_pattern: 'model_gateway_heartbeat\.py'
+    violation_pattern: "Field 'principal_id' should use UUID"
+    reason: >
+      principal_id is the canonical MSK tenant principal t-<tenant UUID hex>, whose t- prefix makes UUID an invalid representation.
+
+    ticket: OMN-12912
 # These handle one-model-per-file violations for domain-grouped protocols
 architecture_exemptions:
   # ==========================================================================

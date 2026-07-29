@@ -1,0 +1,39 @@
+schema_version: "1.0.0"
+ticket_id: "OMN-12912"
+title: "Run the Hybrid Gateway as a real two-broker edge process"
+summary: >-
+  Replaces the dormant/private-envelope gateway prototype with a dedicated tenant-scoped process over canonical ModelEventEnvelope records, separate local and cloud Kafka configurations, fixed topic mirroring, tenant-bound admission, liveness heartbeats, and source-retaining destination retries.
+is_seam_ticket: true
+interface_change: true
+interfaces_touched:
+  - "events"
+  - "protocols"
+  - "topics"
+evidence_requirements:
+  - kind: "tests"
+    description: "Gateway config, transform, service, runtime, and topic-gate tests pass."
+    command: >-
+      uv run pytest tests/unit/nodes/node_bus_forwarder_effect tests/unit/runtime/test_gateway_forwarder_runtime.py tests/unit/event_bus/test_event_bus_kafka_topic_gate.py tests/integration/gateway/test_bus_forwarder_contract_integration.py -q
+  - kind: "tests"
+    description: "The forwarder node contract and the complete infra contract set validate."
+    command: >-
+      uv run --frozen python scripts/batch_validate_node_contracts.py --directory src/omnibase_infra/nodes/node_bus_forwarder_effect --verbose && uv run --frozen python scripts/validate.py contracts
+emergency_bypass:
+  enabled: false
+  justification: ""
+  follow_up_ticket_id: ""
+dod_evidence:
+  - id: "dod-gateway-focused-suite"
+    description: "The complete changed gateway test surface passes."
+    source: "manual"
+    checks:
+      - check_type: "command"
+        check_value: >-
+          uv run pytest tests/unit/nodes/node_bus_forwarder_effect tests/unit/runtime/test_gateway_forwarder_runtime.py tests/unit/event_bus/test_event_bus_kafka_topic_gate.py tests/integration/gateway/test_bus_forwarder_contract_integration.py -q
+  - id: "dod-gateway-contract-validation"
+    description: "The forwarder and full infrastructure contract sets validate."
+    source: "manual"
+    checks:
+      - check_type: "command"
+        check_value: >-
+          uv run --frozen python scripts/batch_validate_node_contracts.py --directory src/omnibase_infra/nodes/node_bus_forwarder_effect --verbose && uv run --frozen python scripts/validate.py contracts

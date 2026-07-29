@@ -1,17 +1,15 @@
 # SPDX-FileCopyrightText: 2025 OmniNode.ai Inc.
 # SPDX-License-Identifier: MIT
-"""Regression coverage for the dormant cloud-gateway discovery gate (OMN-13809).
+"""Regression coverage for the cloud-gateway discovery gate (OMN-13809).
 
-The bus forwarder node (``node_bus_forwarder_effect``) subscribes to
-``onex.cmd.omnibase-infra.delegation-inference-request.v1``, whose real payload
-is ``ModelInferenceIntent`` — a domain model, not the ``ModelGatewayEnvelope``
-the forwarder handlers expect. On lanes with no hosted cloud Kafka edge (e.g.
-the ``.201`` compose lanes) the forwarder has nothing to forward to, so wiring
-it only produces a ``ValidationError`` on every delegation message.
+The bus forwarder now runs as a dedicated two-broker process. Its contract
+declares the fixed mirror set under ``config.gateway_forwarder`` but deliberately
+does not declare generic ``event_bus`` subscriptions: auto-wiring those handlers
+would consume ordinary delegation payloads as ``ModelGatewayEnvelope`` and would
+also race the dedicated process.
 
-These tests prove the forwarder contract is *skipped* by contract discovery
-unless cloud mirroring is explicitly enabled, while remaining fully wired when
-it is — without perturbing ordinary (non-gateway) contracts.
+These tests prove the contract remains cloud-gateway-gated in discovery while
+the generic runtime cannot claim its broker subscriptions.
 """
 
 from __future__ import annotations
@@ -35,7 +33,6 @@ from omnibase_infra.utils.util_runtime_packages import (
 pytestmark = pytest.mark.unit
 
 _BUS_FORWARDER_CONTRACT = Path(bus_forwarder_pkg.__file__).parent / "contract.yaml"
-_DELEGATION_TOPIC = "onex.cmd.omnibase-infra.delegation-inference-request.v1"
 
 
 def _write_plain_contract(tmp_path: Path) -> Path:
@@ -87,10 +84,9 @@ class TestContractRequiresCloudGatewayDetection:
             package_version="0.0.0",
         )
         assert contract.requires_cloud_gateway is True
-        # Sanity: the forwarder really does subscribe to the delegation topic
-        # whose payload collides with ModelGatewayEnvelope (the OMN-13809 bug).
-        assert contract.event_bus is not None
-        assert _DELEGATION_TOPIC in contract.event_bus.subscribe_topics
+        # The standalone gateway owns both consumer legs. The generic runtime
+        # must never auto-wire a second consumer from this node contract.
+        assert contract.event_bus is None
 
     def test_plain_contract_does_not_require_cloud_gateway(
         self, tmp_path: Path
@@ -141,7 +137,7 @@ class TestDiscoveryGate:
         assert "node_plain_effect" in discovered
         assert manifest.errors == ()
 
-    def test_bus_forwarder_wired_when_mirroring_enabled(
+    def test_bus_forwarder_discoverable_when_mirroring_enabled(
         self, monkeypatch: pytest.MonkeyPatch
     ) -> None:
         monkeypatch.setenv(ENV_GATEWAY_CLOUD_MIRRORING_ENABLED, "true")

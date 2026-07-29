@@ -2784,6 +2784,7 @@ class EventBusKafka(
         result, reason = validate_onex_topic_format(topic)
         if result in (
             TopicValidationResult.VALID,
+            TopicValidationResult.VALID_TENANT_WIRE,
             TopicValidationResult.VALID_LEGACY_DLQ,
             TopicValidationResult.SKIPPED_INTERNAL,
         ):
