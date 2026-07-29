@@ -120,6 +120,8 @@ class TestVendoredViewMigrations:
             "heartbeat writes cannot fail against a drifted warm database"
         )
         sql = REGISTRATION_OBSERVABILITY_RECONCILE.read_text(encoding="utf-8")
+        assert "to_regclass('public.node_service_registry') IS NOT NULL" in sql
+        assert "heartbeat reconciliation is a no-op" in sql
         assert "ADD COLUMN IF NOT EXISTS last_heartbeat_at" in sql
         assert "ADD COLUMN IF NOT EXISTS uptime_seconds" in sql
         assert "idx_node_service_registry_last_heartbeat_at" in sql
