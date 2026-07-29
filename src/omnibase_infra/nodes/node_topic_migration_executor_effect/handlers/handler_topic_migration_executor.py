@@ -121,7 +121,12 @@ class HandlerTopicMigrationExecutor:
                 partitions=command.new_topic_partitions,
                 replication_factor=command.new_topic_replication_factor,
             )
-            new_provisioned = await self._provisioner.ensure_topic_exists(spec.suffix)
+            # OMN-15395 (c): thread the built spec through — dropping it here
+            # meant the new topic was created at the provisioner's bare default
+            # replication factor rather than the migration's declared one.
+            new_provisioned = await self._provisioner.ensure_topic_exists(
+                spec.suffix, spec=spec
+            )
             detail = (
                 f"provisioned new topic {new_topic!r} "
                 f"(partitions={command.new_topic_partitions}); "

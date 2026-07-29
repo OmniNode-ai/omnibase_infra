@@ -156,6 +156,9 @@ from omnibase_infra.errors.error_schema_fingerprint import (
     SchemaFingerprintMismatchError,
     SchemaFingerprintMissingError,
 )
+from omnibase_infra.errors.error_topic_provisioning import (
+    TopicReplicationPolicyError,
+)
 from omnibase_infra.errors.repository import (
     RepositoryContractError,
     RepositoryError,
@@ -230,6 +233,8 @@ __all__: list[str] = [
     "ServiceRegistrationError",
     "ServiceRegistryUnavailableError",
     "ServiceResolutionError",
+    # Topic provisioning policy errors (OMN-15395)
+    "TopicReplicationPolicyError",
     "UnknownHandlerTypeError",
     # Error catalog lookup (OMN-518)
     "get_resolution",

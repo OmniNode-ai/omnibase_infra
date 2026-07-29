@@ -19,7 +19,17 @@ Exports:
     TopicResolutionError: Error raised when topic resolution fails
 """
 
+from omnibase_infra.topics.enum_topic_provisioning_profile import (
+    EnumTopicProvisioningProfile,
+)
 from omnibase_infra.topics.model_bus_descriptor import ModelBusDescriptor
+from omnibase_infra.topics.model_topic_provisioning_diff import (
+    ModelTopicProvisioningDiff,
+    build_provisioning_diff,
+)
+from omnibase_infra.topics.model_topic_provisioning_policy import (
+    ModelTopicProvisioningPolicy,
+)
 from omnibase_infra.topics.model_topic_spec import ModelTopicSpec
 from omnibase_infra.topics.platform_topic_suffixes import (
     ALL_INTELLIGENCE_TOPIC_SPECS,
@@ -426,6 +436,11 @@ __all__: list[str] = [
     "ALL_PROVISIONED_TOPIC_SPECS",
     # Topic spec model
     "ModelTopicSpec",
+    # Topic provisioning policy + diff (OMN-15395)
+    "EnumTopicProvisioningProfile",
+    "ModelTopicProvisioningDiff",
+    "ModelTopicProvisioningPolicy",
+    "build_provisioning_diff",
     # Bus descriptor model (Phase 5 - OMN-2894)
     "ModelBusDescriptor",
     # Topic resolution
