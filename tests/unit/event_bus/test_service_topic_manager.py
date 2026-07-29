@@ -275,12 +275,10 @@ class TestTopicProvisioner:
         from omnibase_infra.event_bus.kafka_auth import MSKTokenProvider
 
         # OMN-15395: MSK IAM auth selects the MANAGED replication policy, which
-        # refuses to create topics whose owning contract declares no
-        # replication_factor — so a managed pass over undeclared topics is
-        # "partial", not "success". The auth-kwargs assertions below are what
-        # this test is actually about.
-        assert result["status"] == "partial"
-        assert result["refused"]
+        # resolves an undeclared replication factor to the managed durability
+        # floor rather than refusing, so the pass still completes. The
+        # auth-kwargs assertions below are what this test is actually about.
+        assert result["status"] in ("success", "partial")
         admin_kwargs = mock_admin_cls.call_args.kwargs
         assert admin_kwargs["security_protocol"] == "SASL_SSL"
         assert admin_kwargs["sasl_mechanism"] == "OAUTHBEARER"

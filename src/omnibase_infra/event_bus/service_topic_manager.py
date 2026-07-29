@@ -159,8 +159,9 @@ class TopicProvisioner:
                 the singular root is prepended to the list.
             policy: Replication policy for the target broker (OMN-15395).
                 Defaults to the policy derived from the live Kafka client
-                configuration, so a managed (MSK) target rejects RF1 and
-                refuses undeclared replication factors.
+                configuration, so a managed (MSK) target rejects a declared RF1
+                fail-closed and resolves an undeclared replication factor to the
+                managed durability floor rather than to 1.
 
         Raises:
             FileNotFoundError: If *contracts_root* does not point to an
@@ -188,9 +189,14 @@ class TopicProvisioner:
         self._spec_by_name: dict[str, ModelTopicSpec] = {
             spec.suffix: spec for spec in self._topic_specs
         }
-        # OMN-15395 (d): live broker snapshot, fetched at most once per
-        # provisioner instance, so a pass over an already-provisioned cluster
-        # issues zero CreateTopics instead of ~1,280 blind authorizations.
+        # OMN-15395 (d): live broker snapshot, so a pass over an
+        # already-provisioned cluster issues zero CreateTopics instead of
+        # ~1,280 blind authorizations. Lifecycle: re-fetched at the top of every
+        # ``ensure_provisioned_topics_exist`` pass, fetched lazily once for the
+        # ``ensure_topic_exists`` path, and folded forward on each create. It is
+        # deliberately not invalidated on a timer — the only staleness a
+        # provisioner instance can observe is a topic deleted out-of-band, and
+        # the cost there is a skipped create that the next full pass repairs.
         self._existing_topics: frozenset[str] | None = None
         # OMN-15395 (c): resolved specs of topics THIS provisioner created, used
         # as the readiness expectation so a freshly created topic is confirmed
@@ -220,37 +226,30 @@ class TopicProvisioner:
         self,
         specs: Sequence[ModelTopicSpec],
         correlation_id: UUID,
-    ) -> tuple[tuple[ModelTopicSpec, ...], tuple[str, ...]]:
+    ) -> tuple[ModelTopicSpec, ...]:
         """Resolve every spec BEFORE any ``CreateTopics`` is issued (OMN-15395 a/b).
 
-        Two distinct fail-closed outcomes, deliberately at different
-        granularities:
-
-        * **Declared RF below the environment floor** (the RF1-on-MSK case) is a
-          code defect in a contract we own. It raises, aborting the whole pass
-          with ZERO creates issued — not a warning, not a clamp-and-continue.
-          All such violations are collected first so one boot surfaces every
-          offending contract.
-        * **Undeclared RF** where the policy has no default is refused
-          per-topic: that topic is not created (it never inherits a
-          module-level constant), while compliant sibling topics still get
-          provisioned. Aborting the batch here would mean one un-migrated
-          third-party contract blocks provisioning for every compliant topic.
+        Fail-closed and batch-scoped: a single spec that violates the
+        environment replication policy — the RF1-on-MSK case — aborts the whole
+        pass with ZERO creates issued. Not a warning, not a clamp-and-continue,
+        and not a per-topic skip that lets the rest of the pass proceed while a
+        durability defect sits unfixed in a contract we own. Every violation is
+        collected first so one boot surfaces every offending contract instead of
+        one per redeploy.
 
         Returns:
-            ``(resolved_specs, refused_topic_names)``.
+            The resolved specs, each carrying an explicit replication factor.
+
+        Raises:
+            TopicReplicationPolicyError: Any spec violates the policy.
         """
         resolved: list[ModelTopicSpec] = []
-        refused: list[str] = []
         violations: list[str] = []
         for spec in specs:
             try:
                 resolved.append(self._resolve_spec(spec))
             except TopicReplicationPolicyError as exc:
-                if spec.replication_factor is None:
-                    refused.append(spec.suffix)
-                else:
-                    violations.append(str(exc))
+                violations.append(str(exc))
         if violations:
             shown = violations[:10]
             suffix = (
@@ -258,24 +257,19 @@ class TopicProvisioner:
                 if len(violations) > len(shown)
                 else ""
             )
+            logger.error(
+                "Refusing to provision %d topic(s) under the %s replication "
+                "policy; no CreateTopics issued (correlation_id=%s)",
+                len(violations),
+                self._policy.profile.value,
+                correlation_id,
+            )
             raise TopicReplicationPolicyError(
                 f"Refusing to provision {len(violations)} topic(s) under the "
                 f"{self._policy.profile.value} replication policy; no "
                 f"CreateTopics was issued. Violations: " + " | ".join(shown) + suffix
             )
-        if refused:
-            logger.warning(
-                "Refusing to create %d topic(s) with no contract-declared "
-                "replication_factor under the %s policy — declare "
-                "topic_config.replication_factor >= %d in the owning contract "
-                "(OMN-15395): %s (correlation_id=%s)",
-                len(refused),
-                self._policy.profile.value,
-                self._policy.minimum_replication_factor,
-                sorted(refused)[:10],
-                correlation_id,
-            )
-        return tuple(resolved), tuple(sorted(refused))
+        return tuple(resolved)
 
     async def _fetch_broker_topic_metadata(
         self,
@@ -326,10 +320,6 @@ class TopicProvisioner:
             self._existing_topics = self._existing_topics.union({topic_name})
         if spec is not None:
             self._created_specs[topic_name] = spec
-
-    def refresh_existing_topics(self) -> None:
-        """Drop the cached broker snapshot so the next pass re-reads metadata."""
-        self._existing_topics = None
 
     def _report_spec_drift(
         self,
@@ -480,7 +470,6 @@ class TopicProvisioner:
         created: list[str] = []
         existing: list[str] = []
         failed: list[str] = []
-        refused: list[str] = []
         drift: list[str] = []
 
         try:
@@ -498,7 +487,6 @@ class TopicProvisioner:
                 "created": created,
                 "existing": existing,
                 "failed": [s.suffix for s in self._topic_specs],
-                "refused": refused,
                 "drift": drift,
                 "status": "unavailable",
             }
@@ -544,10 +532,9 @@ class TopicProvisioner:
             # (a)/(b) Resolve every missing spec's replication factor BEFORE the
             # first CreateTopics. A floor violation raises out of this method —
             # it is deliberately outside the best-effort boundary below.
-            resolved_specs, refused_specs = self._resolve_specs_for_creation(
+            resolved_specs = self._resolve_specs_for_creation(
                 missing_specs, correlation_id
             )
-            refused.extend(refused_specs)
 
             for spec in resolved_specs:
                 try:
@@ -628,7 +615,6 @@ class TopicProvisioner:
                 "created": created,
                 "existing": existing,
                 "failed": failed + not_attempted,
-                "refused": refused,
                 "drift": drift,
                 "status": interrupted_status,
             }
@@ -640,12 +626,10 @@ class TopicProvisioner:
                 except Exception:  # noqa: BLE001 — boundary: catch-all for resilience
                     pass  # Best-effort cleanup
 
-        # A refusal means the broker WAS reachable and we declined to create —
-        # that is a partial pass, never "unavailable" (which means no broker).
         status = (
             "success"
-            if not failed and not refused
-            else ("partial" if created or existing or refused else "unavailable")
+            if not failed
+            else ("partial" if created or existing else "unavailable")
         )
 
         logger.info(
@@ -654,7 +638,6 @@ class TopicProvisioner:
                 "created_count": len(created),
                 "existing_count": len(existing),
                 "failed_count": len(failed),
-                "refused_count": len(refused),
                 "drift_count": len(drift),
                 "status": status,
                 "correlation_id": str(correlation_id),
@@ -665,7 +648,6 @@ class TopicProvisioner:
             "created": created,
             "existing": existing,
             "failed": failed,
-            "refused": refused,
             "drift": drift,
             "status": status,
         }
@@ -751,15 +733,24 @@ class TopicProvisioner:
             created_spec: ModelTopicSpec | None = None
             if config is not None:
                 # Snapshot-topic config carries its own replication factor; it
-                # is still subject to the environment durability floor.
-                self._policy.resolve_replication_factor(
+                # is still resolved through the SAME policy as every other
+                # creation site, and it is the RESOLVER'S OUTPUT that reaches
+                # NewTopic — not the raw declared value. "There is one resolver"
+                # only holds if every creation site uses what it returns.
+                resolved_rf = self._policy.resolve_replication_factor(
                     topic=topic_name, declared=config.replication_factor
                 )
                 new_topic = NewTopic(
                     name=topic_name,
                     num_partitions=config.partition_count,
-                    replication_factor=config.replication_factor,
+                    replication_factor=resolved_rf,
                     topic_configs=config.to_kafka_config(),
+                )
+                created_spec = ModelTopicSpec(
+                    suffix=topic_name,
+                    partitions=config.partition_count,
+                    replication_factor=resolved_rf,
+                    kafka_config=config.to_kafka_config(),
                 )
             else:
                 # (c) Caller-supplied spec wins; otherwise use the topic's own

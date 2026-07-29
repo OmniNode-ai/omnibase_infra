@@ -121,6 +121,7 @@ published_events:
     description: "Terminal event for one runner-fleet-maintain tick (health report only, no mutation)"
     topic_config:
       partitions: 1
+      replication_factor: 2
       kafka_config:
         "retention.ms": "604800000"
         "cleanup.policy": "delete"

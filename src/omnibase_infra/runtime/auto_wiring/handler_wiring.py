@@ -68,6 +68,7 @@ from omnibase_core.services.service_handler_resolver import ServiceHandlerResolv
 from omnibase_core.services.service_local_handler_ownership_query import (
     ServiceLocalHandlerOwnershipQuery,
 )
+from omnibase_infra.errors import TopicReplicationPolicyError
 from omnibase_infra.event_bus.enum_contract_attach_status import (
     EnumContractAttachStatus,
 )
@@ -5105,6 +5106,13 @@ async def _interleave_contract(
         for topic in provision_topics:
             try:
                 await provisioner.ensure_topic_exists(topic_name=topic)
+            except TopicReplicationPolicyError:
+                # OMN-15395: a durability-policy violation is fail-closed and
+                # must escape this best-effort boundary. Attaching a consumer to
+                # a contract whose topics were silently skipped because one of
+                # them declares RF1 on MSK is the exact outcome the policy
+                # exists to prevent.
+                raise
             except Exception:  # noqa: BLE001 — boundary: per-contract, never fatal
                 logger.warning(
                     "Topic provisioning failed for contract '%s' topic '%s' "

@@ -47,8 +47,12 @@ class TestProfileDerivation:
         assert policy.profile is EnumTopicProvisioningProfile.MANAGED
         assert policy.is_managed
         assert policy.minimum_replication_factor == MANAGED_MINIMUM_REPLICATION_FACTOR
-        # No implicit default: undeclared RF must fail closed, not inherit.
-        assert policy.default_replication_factor is None
+        # An undeclared RF resolves to the managed durability floor — the
+        # cluster's own broker default — never to the old module constant of 1.
+        assert policy.default_replication_factor == MANAGED_MINIMUM_REPLICATION_FACTOR
+        assert policy.default_replication_factor != 1
+        # No capacity ceiling on a real multi-broker cluster.
+        assert policy.capacity_replication_factor is None
 
     def test_plaintext_broker_derives_self_hosted_profile(self) -> None:
         config = ModelKafkaEventBusConfig(bootstrap_servers="redpanda:9092")
@@ -56,6 +60,8 @@ class TestProfileDerivation:
         assert policy.profile is EnumTopicProvisioningProfile.SELF_HOSTED
         assert not policy.is_managed
         assert policy.default_replication_factor == 1
+        # Single-node broker: it cannot host more replicas than it has nodes.
+        assert policy.capacity_replication_factor == 1
 
     def test_from_env_reads_the_runtime_kafka_configuration(
         self, monkeypatch: pytest.MonkeyPatch
@@ -68,7 +74,7 @@ class TestProfileDerivation:
 
 
 class TestManagedPolicyResolution:
-    """Managed staging: RF1 rejected, undeclared refused, RF>=2 untouched."""
+    """Managed staging: RF1 rejected, undeclared floored, RF>=2 untouched."""
 
     def test_rf1_is_rejected(self) -> None:
         policy = ModelTopicProvisioningPolicy.managed()
@@ -76,8 +82,32 @@ class TestManagedPolicyResolution:
             policy.resolve_replication_factor(topic=TOPIC, declared=1)
         assert "replication_factor=1" in str(excinfo.value)
 
-    def test_undeclared_is_refused_not_defaulted(self) -> None:
+    def test_undeclared_resolves_to_the_floor_never_to_one(self) -> None:
+        """The defect was a module constant of 1, not "a default exists".
+
+        Refusing outright was tried and measured: 168 of 168 production topics
+        declare no replication factor and 75 have no producing contract in this
+        repo at all, so refusal made provisioning a permanent no-op on MSK.
+        Resolving to the floor keeps provisioning working and still makes an
+        RF1 topic unreachable through this path.
+        """
         policy = ModelTopicProvisioningPolicy.managed()
+        resolved = policy.resolve_replication_factor(topic=TOPIC, declared=None)
+        assert resolved == MANAGED_MINIMUM_REPLICATION_FACTOR
+        assert resolved != 1
+
+    def test_a_policy_with_no_default_still_refuses(self) -> None:
+        """The refuse-on-undeclared branch is still reachable and still works.
+
+        The managed profile chooses to carry a default; the mechanism that
+        refuses when a profile declares none is retained and tested, so a future
+        strict profile is a constructor argument rather than a code change.
+        """
+        policy = ModelTopicProvisioningPolicy(
+            profile=EnumTopicProvisioningProfile.MANAGED,
+            minimum_replication_factor=MANAGED_MINIMUM_REPLICATION_FACTOR,
+            default_replication_factor=None,
+        )
         with pytest.raises(TopicReplicationPolicyError) as excinfo:
             policy.resolve_replication_factor(topic=TOPIC, declared=None)
         assert "no replication_factor declared" in str(excinfo.value)
@@ -113,13 +143,29 @@ class TestSelfHostedPolicyResolution:
         policy = ModelTopicProvisioningPolicy.self_hosted()
         assert policy.resolve_replication_factor(topic=TOPIC, declared=1) == 1
 
-    def test_declared_rf3_is_passed_through(self) -> None:
+    def test_declared_rf_above_capacity_is_reduced_not_rejected(self) -> None:
+        """A single-node broker cannot host RF3; reduce rather than fail create.
+
+        This is what lets the contract tree declare the production-durable RF2
+        while local Redpanda, CI, and the ``.201`` lanes keep provisioning.
+        """
         policy = ModelTopicProvisioningPolicy.self_hosted()
-        assert policy.resolve_replication_factor(topic=TOPIC, declared=3) == 3
+        assert policy.resolve_replication_factor(topic=TOPIC, declared=3) == 1
+        assert policy.resolve_replication_factor(topic=TOPIC, declared=2) == 1
+
+    def test_reduction_is_one_way(self) -> None:
+        """Capacity never RAISES a declared value; it only ever reduces."""
+        policy = ModelTopicProvisioningPolicy(
+            profile=EnumTopicProvisioningProfile.SELF_HOSTED,
+            minimum_replication_factor=1,
+            default_replication_factor=1,
+            capacity_replication_factor=3,
+        )
+        assert policy.resolve_replication_factor(topic=TOPIC, declared=1) == 1
 
 
 class TestPolicyValidation:
-    """A policy cannot declare a default it would itself reject."""
+    """A policy cannot declare bounds that contradict each other."""
 
     def test_default_below_floor_is_rejected(self) -> None:
         with pytest.raises(ValidationError, match="below"):
@@ -127,6 +173,30 @@ class TestPolicyValidation:
                 profile=EnumTopicProvisioningProfile.MANAGED,
                 minimum_replication_factor=2,
                 default_replication_factor=1,
+            )
+
+    def test_capacity_ceiling_may_not_undercut_the_durability_floor(self) -> None:
+        """Otherwise a capacity reduction would silently mint RF1 on MSK.
+
+        The reduction happens before the floor check, so a ceiling below the
+        floor would be a bypass of the entire RF1 rejection. It is refused at
+        construction time instead.
+        """
+        with pytest.raises(ValidationError, match="may never undercut"):
+            ModelTopicProvisioningPolicy(
+                profile=EnumTopicProvisioningProfile.MANAGED,
+                minimum_replication_factor=2,
+                default_replication_factor=2,
+                capacity_replication_factor=1,
+            )
+
+    def test_default_above_capacity_is_rejected(self) -> None:
+        with pytest.raises(ValidationError, match="cannot default to a value"):
+            ModelTopicProvisioningPolicy(
+                profile=EnumTopicProvisioningProfile.SELF_HOSTED,
+                minimum_replication_factor=1,
+                default_replication_factor=3,
+                capacity_replication_factor=2,
             )
 
 

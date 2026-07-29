@@ -96,6 +96,7 @@ from omnibase_infra.errors import (
     SchemaFingerprintMismatchError,
     SchemaFingerprintMissingError,
     ServiceResolutionError,
+    TopicReplicationPolicyError,
 )
 
 # OMN-7077: EventBusInmemory is migrating to omnibase_core.
@@ -1318,6 +1319,11 @@ async def bootstrap() -> int:
                         provisioning_result["failed"] or "none",
                         correlation_id,
                     )
+            except TopicReplicationPolicyError:
+                # OMN-15395: a durability-policy violation is fail-closed and
+                # must escape this best-effort boundary — the whole point of the
+                # distinct error class is that it is not degradable to a warning.
+                raise
             except Exception:  # noqa: BLE001 — boundary: logs warning and degrades
                 logger.warning(
                     "Topic provisioning failed (best-effort, non-blocking) "
@@ -1388,6 +1394,9 @@ async def bootstrap() -> int:
                                 "(correlation_id=%s)",
                                 correlation_id,
                             )
+                    except TopicReplicationPolicyError:
+                        # OMN-15395: fail-closed past the best-effort boundary.
+                        raise
                     except Exception:  # noqa: BLE001
                         logger.warning(
                             "Auto-create missing topics failed (best-effort) "

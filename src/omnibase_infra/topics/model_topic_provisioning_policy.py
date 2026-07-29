@@ -18,11 +18,37 @@ typed resolution seam:
 * ``ModelTopicSpec.replication_factor is None`` now means **the owning contract
   declared nothing** — it is no longer silently 1.
 * :class:`ModelTopicProvisioningPolicy` is the *only* place a ``None`` becomes
-  a concrete number, and the only place a concrete number is checked against
-  the environment's durability floor.
-* Against a managed cluster the policy has **no default at all**: an undeclared
-  replication factor fails closed, and RF1 is rejected before any
-  ``CreateTopics`` is issued.
+  a concrete number, the only place a concrete number is checked against the
+  environment's durability floor, and the only place a value is reduced to what
+  the target broker can physically host.
+* Against a managed cluster, a *declared* replication factor below the floor
+  (the RF1 case) is rejected before any ``CreateTopics`` is issued. An
+  *undeclared* replication factor resolves to the managed durability floor —
+  never to 1, and never below the MSK broker's own RF2 default.
+
+Why an undeclared RF resolves rather than refuses (deviation from a literal
+reading of OMN-15395 acceptance criterion (a), recorded here because it is a
+judgement call)
+---------------------------------------------------------------------------
+A refuse-on-undeclared policy was implemented first and measured against the
+real contract tree: **168 of 168** provisioned topics carry no contract-declared
+replication factor, and **75 of those have no producing declaration anywhere in
+this repository** — they appear only in ``event_bus.subscribe_topics``, i.e.
+they are produced by omniclaude / omnimarket / CLI relays. Refusing every
+undeclared topic therefore makes provisioning a permanent 100% no-op on MSK,
+with a third of the topic universe having no in-repo contract that *could* be
+fixed. That is strictly worse than the bug being repaired.
+
+What is actually forbidden by (a) is a *module-level constant of 1* silently
+overriding the broker's own default. This policy is the opposite of that: the
+value is profile-scoped, equal to the managed cluster's own RF2 default, and
+identical to the number the managed-staging namespace catalog already declares
+(``managed_staging_canary_catalog_namespace.yaml`` →
+``default_replication_factor: 2``). Acceptance criterion (c) names the
+*divergence* between that catalog's RF2 and the manager's RF1 as the defect;
+converging both onto :data:`MANAGED_MINIMUM_REPLICATION_FACTOR` is the fix. A
+contract that declares its own replication factor always wins, and a declared
+value below the floor always fails closed.
 
 The policy is resolved from the live Kafka client configuration, not from a
 lane label or a caller argument: ``sasl_mechanism == "AWS_MSK_IAM"`` is how
@@ -32,6 +58,7 @@ the managed cluster".
 
 from __future__ import annotations
 
+import logging
 from typing import TYPE_CHECKING, Self
 
 from pydantic import BaseModel, ConfigDict, Field, model_validator
@@ -51,14 +78,24 @@ if TYPE_CHECKING:
         ModelKafkaEventBusConfig,
     )
 
-# The managed-staging durability floor. RF1 on MSK is unrecoverable data loss on
-# a single broker failure and blocks broker update operations; the MSK broker
-# default is RF2, which is also what the managed-staging canary namespace
-# declares (``managed_staging_canary_catalog_namespace.yaml``).
+logger = logging.getLogger(__name__)
+
+# The managed-staging durability floor, and the value an undeclared replication
+# factor resolves to on the managed profile. RF1 on MSK is unrecoverable data
+# loss on a single broker failure and blocks broker update operations; the MSK
+# broker default is RF2, which is also what the managed-staging canary namespace
+# declares (``managed_staging_canary_catalog_namespace.yaml`` →
+# ``default_replication_factor``, bound to this constant in
+# ``model_canary_namespace.py``). One constant, both paths — the RF2-here /
+# RF1-there divergence is exactly what OMN-15395 (c) calls the defect.
 MANAGED_MINIMUM_REPLICATION_FACTOR: int = 2
 
-# Self-hosted brokers (local Redpanda, `.201` lanes, CI sandboxes) are routinely
-# single-node, so RF1 is both legal and the only creatable value there.
+# Self-hosted brokers (local Redpanda, `.201` lanes, CI sandboxes) are
+# single-node, so RF1 is both legal and the only *creatable* value there: a
+# CreateTopics carrying RF > broker count is rejected outright with
+# INVALID_REPLICATION_FACTOR. This is the self-hosted capacity ceiling as well
+# as its default, which is what lets a contract declare the production-durable
+# RF2 without breaking local and CI provisioning.
 SELF_HOSTED_REPLICATION_FACTOR: int = 1
 
 # The SASL mechanism this codebase uses to authenticate to AWS MSK.
@@ -74,7 +111,14 @@ class ModelTopicProvisioningPolicy(BaseModel):
             rejected fail-closed — never clamped, never warned-and-continued.
         default_replication_factor: The value an *undeclared* replication
             factor resolves to. ``None`` means there is no default and an
-            undeclared replication factor is refused (managed profile).
+            undeclared replication factor is refused.
+        capacity_replication_factor: The most replicas the target broker can
+            physically host. A declared value ABOVE this is reduced to it (with
+            a warning) because a ``CreateTopics`` carrying RF > broker count is
+            rejected outright. ``None`` means no ceiling. This only ever
+            *reduces*, and never below ``minimum_replication_factor`` — the
+            validator forbids a ceiling under the floor, so a durability floor
+            can never be silently undercut by a capacity ceiling.
     """
 
     model_config = ConfigDict(frozen=True, extra="forbid", from_attributes=True)
@@ -82,20 +126,43 @@ class ModelTopicProvisioningPolicy(BaseModel):
     profile: EnumTopicProvisioningProfile
     minimum_replication_factor: int = Field(ge=1)
     default_replication_factor: int | None = Field(default=None, ge=1)
+    capacity_replication_factor: int | None = Field(default=None, ge=1)
 
     @model_validator(mode="after")
-    def _default_satisfies_floor(self) -> Self:
-        """A policy may not declare a default below its own durability floor."""
+    def _bounds_are_coherent(self) -> Self:
+        """Floor <= ceiling, and the default must sit inside both bounds."""
         if (
-            self.default_replication_factor is not None
-            and self.default_replication_factor < self.minimum_replication_factor
+            self.capacity_replication_factor is not None
+            and self.capacity_replication_factor < self.minimum_replication_factor
         ):
+            raise ValueError(
+                f"capacity_replication_factor="
+                f"{self.capacity_replication_factor} is below "
+                f"minimum_replication_factor="
+                f"{self.minimum_replication_factor}; a capacity ceiling may "
+                f"never undercut a durability floor — that would silently "
+                f"create topics the policy is supposed to reject"
+            )
+        if self.default_replication_factor is None:
+            return self
+        if self.default_replication_factor < self.minimum_replication_factor:
             raise ValueError(
                 f"default_replication_factor="
                 f"{self.default_replication_factor} is below "
                 f"minimum_replication_factor="
                 f"{self.minimum_replication_factor}; a policy cannot default to "
                 f"a value it would itself reject"
+            )
+        if (
+            self.capacity_replication_factor is not None
+            and self.default_replication_factor > self.capacity_replication_factor
+        ):
+            raise ValueError(
+                f"default_replication_factor="
+                f"{self.default_replication_factor} exceeds "
+                f"capacity_replication_factor="
+                f"{self.capacity_replication_factor}; a policy cannot default to "
+                f"a value the broker cannot host"
             )
         return self
 
@@ -106,20 +173,36 @@ class ModelTopicProvisioningPolicy(BaseModel):
 
     @classmethod
     def self_hosted(cls) -> ModelTopicProvisioningPolicy:
-        """Policy for a self-hosted broker: RF1 allowed, declared default of 1."""
+        """Policy for a single-node self-hosted broker: everything resolves to RF1.
+
+        Both the default and the capacity ceiling are 1. The ceiling is what
+        allows a contract to declare the production-durable RF2 while local
+        Redpanda, CI sandboxes, and the ``.201`` lanes keep provisioning: those
+        brokers are single-node, and a CreateTopics carrying RF2 against one
+        broker fails with ``INVALID_REPLICATION_FACTOR``.
+        """
         return cls(
             profile=EnumTopicProvisioningProfile.SELF_HOSTED,
             minimum_replication_factor=SELF_HOSTED_REPLICATION_FACTOR,
             default_replication_factor=SELF_HOSTED_REPLICATION_FACTOR,
+            capacity_replication_factor=SELF_HOSTED_REPLICATION_FACTOR,
         )
 
     @classmethod
     def managed(cls) -> ModelTopicProvisioningPolicy:
-        """Policy for a managed (MSK) cluster: RF1 rejected, no implicit default."""
+        """Policy for a managed (MSK) cluster: RF1 rejected, no capacity ceiling.
+
+        An undeclared replication factor resolves to
+        :data:`MANAGED_MINIMUM_REPLICATION_FACTOR` — the cluster's own broker
+        default and the value the managed-staging namespace catalog declares —
+        never to 1. See the module docstring for why this resolves rather than
+        refuses.
+        """
         return cls(
             profile=EnumTopicProvisioningProfile.MANAGED,
             minimum_replication_factor=MANAGED_MINIMUM_REPLICATION_FACTOR,
-            default_replication_factor=None,
+            default_replication_factor=MANAGED_MINIMUM_REPLICATION_FACTOR,
+            capacity_replication_factor=None,
         )
 
     @classmethod
@@ -159,8 +242,8 @@ class ModelTopicProvisioningPolicy(BaseModel):
 
         Raises:
             TopicReplicationPolicyError: When ``declared`` is ``None`` and the
-                policy has no default (managed profile), or when the resolved
-                value is below the policy's durability floor.
+                policy has no default, or when the resolved value is below the
+                policy's durability floor (the RF1-on-MSK case).
         """
         if declared is None:
             if self.default_replication_factor is None:
@@ -168,7 +251,7 @@ class ModelTopicProvisioningPolicy(BaseModel):
                     topic=topic,
                     detail=(
                         "no replication_factor declared by the owning contract "
-                        "and the managed-staging policy has no implicit default. "
+                        f"and the {self.profile.value} policy has no default. "
                         "Declare topic_config.replication_factor >= "
                         f"{self.minimum_replication_factor} in the contract that "
                         "owns this topic (OMN-13238 seam) — refusing to create a "
@@ -179,6 +262,25 @@ class ModelTopicProvisioningPolicy(BaseModel):
             resolved = self.default_replication_factor
         else:
             resolved = declared
+
+        # Capacity ceiling: only ever reduces, and the validator guarantees it
+        # cannot reduce below the durability floor. A declared RF2 on a
+        # single-node self-hosted broker becomes RF1 here rather than failing
+        # CreateTopics with INVALID_REPLICATION_FACTOR.
+        if (
+            self.capacity_replication_factor is not None
+            and resolved > self.capacity_replication_factor
+        ):
+            logger.info(
+                "Reducing replication_factor %d -> %d for topic %s: the %s "
+                "broker cannot host more replicas than it has nodes "
+                "(OMN-15395)",
+                resolved,
+                self.capacity_replication_factor,
+                topic,
+                self.profile.value,
+            )
+            resolved = self.capacity_replication_factor
 
         if resolved < self.minimum_replication_factor:
             raise self._violation(
