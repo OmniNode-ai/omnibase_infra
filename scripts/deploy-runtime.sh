@@ -267,6 +267,20 @@ MIGRATION_TREE_SNAPSHOT_DIR=""
 # Set to true only when ALL deployment phases complete successfully.
 # Used by cleanup_on_exit to determine if the --force backup can be safely removed.
 DEPLOYMENT_COMPLETE=false
+# OMN-15352: path to a file recording each RUNTIME_BUILD_SERVICES image's
+# pre-build `:latest` id (or empty if none existed), taken by
+# snapshot_latest_image_tags() right before build_images() runs. On a failed
+# deploy, cleanup_on_exit() restores every snapshotted tag (or removes an
+# unverified tag that had no prior state) so a later `docker compose up -d`
+# without --build can never silently resolve an untested image (F3). Empty
+# until the snapshot is taken; the snapshot file is removed on exit.
+LATEST_TAG_SNAPSHOT_FILE=""
+# OMN-15352: compose project name, mirrored into a global right after
+# resolve_compose_project() resolves it in main(). cleanup_on_exit() is an
+# EXIT-trap handler with no arguments, so it cannot receive compose_project as
+# a parameter -- it reads this global to resolve the same image names
+# snapshot_latest_image_tags() recorded them under.
+DEPLOY_COMPOSE_PROJECT=""
 
 # =============================================================================
 # Logging
@@ -1432,8 +1446,12 @@ cleanup_on_exit() {
                 # backup's stale snapshot (which dropped a forward migration in
                 # the 2026-06-19 stability redeploy).
                 restore_migration_tree_after_revert "${original_dir}"
-                log_warn "NOTE: registry.json may contain stale metadata (git_sha, deployed_at)"
-                log_warn "from the failed deployment. Verify or re-deploy to restore consistency."
+                # OMN-15352: registry.json is no longer stale here. write_registry()
+                # is now commit-on-success -- it only runs after every phase that
+                # can fail has passed, so on any non-success exit (including this
+                # restore branch) it never ran this invocation, and registry.json
+                # still holds whatever it held before this deploy started.
+                log_info "registry.json is unaffected by this restore (written only on full deploy success, OMN-15352)."
             fi
         else
             # Full deployment succeeded -- backup is stale, clean it up.
@@ -1442,6 +1460,19 @@ cleanup_on_exit() {
         fi
         FORCE_BACKUP_DIR=""
     fi
+
+    # OMN-15352 F3: restore every RUNTIME_BUILD_SERVICES `:latest` tag to its
+    # pre-build state on any non-success exit. This is independent of whether a
+    # --force backup exists -- a build/restart/verify/readback failure can leave
+    # `:latest` pointed at an unverified image even on a first-ever (non-force)
+    # deploy, so it is not covered by the FORCE_BACKUP_DIR branch above.
+    if [[ "${DEPLOYMENT_COMPLETE}" != "true" ]]; then
+        restore_latest_image_tags
+    fi
+    if [[ -n "${LATEST_TAG_SNAPSHOT_FILE}" && -f "${LATEST_TAG_SNAPSHOT_FILE}" ]]; then
+        rm -f "${LATEST_TAG_SNAPSHOT_FILE}" 2>/dev/null || true
+    fi
+    LATEST_TAG_SNAPSHOT_FILE=""
 
     # OMN-13364: remove the migration-tree snapshot taken after sync_files.
     if [[ -n "${MIGRATION_TREE_SNAPSHOT_DIR}" && -d "${MIGRATION_TREE_SNAPSHOT_DIR}" ]]; then
@@ -2201,6 +2232,72 @@ write_registry() {
         log_info "  reason:          $(jq -r '.reason // ""' <<<"${attribution_json}")"
         log_info "  grant verdict:   $(jq -r '.grant_guard.verdict // "unknown"' <<<"${attribution_json}")"
     fi
+}
+
+# =============================================================================
+# Image tag snapshot -- protect `:latest` from a failed build (OMN-15352 F3)
+# =============================================================================
+
+snapshot_latest_image_tags() {
+    # Record the pre-build `:latest` image id for every RUNTIME_BUILD_SERVICES
+    # member, so a failed deploy can restore each tag to what it resolved to
+    # before this invocation (or remove a tag that had no prior state). Runs
+    # unconditionally right before build_images(): `docker compose build` only
+    # (re)tags `:latest` on a SUCCESSFUL build, so whatever we capture here is
+    # always a correct pre-image of the tag regardless of how this run ends.
+    local compose_project="$1"
+
+    local snapshot_file
+    snapshot_file="$(mktemp "${DEPLOY_ROOT}/.latest-tag-snapshot.XXXXXX" 2>/dev/null || true)"
+    if [[ -z "${snapshot_file}" ]]; then
+        log_warn "Could not create :latest tag snapshot file; :latest rollback protection is disabled for this run."
+        return 0
+    fi
+
+    local service image_name prior_id
+    for service in "${RUNTIME_BUILD_SERVICES[@]}"; do
+        image_name="${compose_project}-${service}"
+        prior_id="$(docker image inspect "${image_name}:latest" --format '{{.Id}}' 2>/dev/null || true)"
+        printf '%s\t%s\n' "${service}" "${prior_id}" >>"${snapshot_file}"
+    done
+
+    LATEST_TAG_SNAPSHOT_FILE="${snapshot_file}"
+    log_info "Snapshotted pre-build :latest image ids for ${#RUNTIME_BUILD_SERVICES[@]} service(s) (rollback safety)."
+}
+
+restore_latest_image_tags() {
+    # Restore every RUNTIME_BUILD_SERVICES `:latest` tag to its pre-build state
+    # (OMN-15352 F3). Called only from cleanup_on_exit() on a non-success exit.
+    # A service that had no prior `:latest` image (recorded as an empty id by
+    # snapshot_latest_image_tags()) has its now-unverified tag removed instead
+    # of being left resolvable by a later `docker compose up -d` without
+    # --build.
+    if [[ -z "${LATEST_TAG_SNAPSHOT_FILE}" || ! -f "${LATEST_TAG_SNAPSHOT_FILE}" ]]; then
+        return 0
+    fi
+    if [[ -z "${DEPLOY_COMPOSE_PROJECT}" ]]; then
+        log_warn "DEPLOY_COMPOSE_PROJECT is unset; cannot restore :latest image tags."
+        return 0
+    fi
+
+    local service prior_id image_name
+    while IFS=$'\t' read -r service prior_id; do
+        [[ -n "${service}" ]] || continue
+        image_name="${DEPLOY_COMPOSE_PROJECT}-${service}"
+        if [[ -n "${prior_id}" ]]; then
+            if docker tag "${prior_id}" "${image_name}:latest" 2>/dev/null; then
+                log_warn "Restored ${image_name}:latest to its pre-build image ${prior_id}."
+            else
+                log_error "Failed to restore ${image_name}:latest to pre-build image ${prior_id}."
+                log_error "Manual recovery: docker tag ${prior_id} ${image_name}:latest"
+            fi
+        else
+            # No prior :latest existed for this service -- remove the tag this
+            # failed run may have created rather than leave it pointing at an
+            # image that was never proven to deploy.
+            docker rmi "${image_name}:latest" 2>/dev/null || true
+        fi
+    done <"${LATEST_TAG_SNAPSHOT_FILE}"
 }
 
 # =============================================================================
@@ -3071,6 +3168,9 @@ main() {
     local deploy_target="${DEPLOY_ROOT}/deployed/${version}"
     local compose_project
     compose_project="$(resolve_compose_project)"
+    # OMN-15352: mirror into the global cleanup_on_exit() (a no-argument EXIT
+    # trap handler) reads to resolve :latest image names on a failed deploy.
+    DEPLOY_COMPOSE_PROJECT="${compose_project}"
 
     # Lane-deploy attribution + live-grant interlock (OMN-15218). FIRST gate that
     # runs once the target lane is known and BEFORE anything is built, recreated,
@@ -3136,9 +3236,11 @@ main() {
     # deployed migrations to the backup's stale, pre-build snapshot.
     snapshot_migration_tree "${deploy_target}"
 
-    # Mark deployment directory for cleanup on failure. If registry write or
-    # build fails after rsync, cleanup_on_exit() will remove this orphaned
-    # directory (unless registry.json already points to it).
+    # Mark deployment directory for cleanup on failure. If the build or any
+    # later phase fails, cleanup_on_exit() will remove this orphaned directory
+    # (unless registry.json already points to it). OMN-15352: stays armed for
+    # the whole deploy now that the registry write is commit-on-success -- there
+    # is no longer an early point at which disarming it would be safe.
     DEPLOY_DIR_TO_CLEANUP="${deploy_target}"
 
     # Phase 7: Env setup -- REMOVED (F65 / OMN-6910)
@@ -3147,11 +3249,16 @@ main() {
     # Phase 8: Sanity check
     sanity_check "${deploy_target}" "${compose_project}"
 
-    # Phase 9: Registry
-    write_registry "${version}" "${git_sha}" "${deploy_target}" "${repo_root}" "${compose_project}"
+    # Phase 9: Registry write is DEFERRED to commit-on-success, after Phase 12
+    # (OMN-15352). Everything that can actually fail -- build, migration
+    # preflight, restart, readback -- runs first; registry.json is written only
+    # once none of it failed, so a failed deploy never leaves the registry
+    # asserting a version that was never running. See the write_registry() call
+    # near the deployment-complete marker below.
 
-    # Registry now points to this deployment -- disable partial cleanup
-    DEPLOY_DIR_TO_CLEANUP=""
+    # Snapshot the pre-build `:latest` image id for every service this build
+    # will retag, so a failed deploy can restore it (OMN-15352 F3).
+    snapshot_latest_image_tags "${compose_project}"
 
     # Phase 10: Build
     build_images "${deploy_target}" "${compose_project}" "${git_sha}"
@@ -3211,6 +3318,16 @@ main() {
         # rejected here instead of passing with only verify_deployment's warning.
         readback_deployed_ref "${git_sha}" "${version}" "${compose_project}" "${repo_root}" "${deploy_target}"
     fi
+
+    # Phase 9 (commit-on-success, OMN-15352): every phase that can fail --
+    # build, migration preflight, restart, readback -- has now passed. Write
+    # the registry only now, closing the write-ahead window that let a failed
+    # deploy leave registry.json asserting a version that was never actually
+    # running.
+    write_registry "${version}" "${git_sha}" "${deploy_target}" "${repo_root}" "${compose_project}"
+
+    # Registry now points to this deployment -- disable partial cleanup.
+    DEPLOY_DIR_TO_CLEANUP=""
 
     # All phases completed successfully. Mark deployment as complete so that
     # cleanup_on_exit knows the backup can be safely removed rather than restored.
