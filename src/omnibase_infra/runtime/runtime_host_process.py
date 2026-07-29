@@ -84,6 +84,7 @@ from omnibase_infra.errors import (
     ProtocolConfigurationError,
     RuntimeHostError,
     SecretResolutionError,
+    TopicReplicationPolicyError,
     UnknownHandlerTypeError,
 )
 
@@ -3694,6 +3695,10 @@ class RuntimeHostProcess:
                     for _topic in subcontract.subscribe_topics:
                         try:
                             await _provisioner.ensure_topic_exists(topic_name=_topic)
+                        except TopicReplicationPolicyError:
+                            # OMN-15395: durability violations are fail-closed
+                            # and must escape this best-effort boundary.
+                            raise
                         except Exception:  # noqa: BLE001 — boundary: best-effort
                             logger.warning(
                                 "Topic pre-provisioning failed for live contract "

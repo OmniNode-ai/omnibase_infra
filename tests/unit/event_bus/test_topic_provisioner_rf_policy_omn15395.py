@@ -13,18 +13,35 @@ Each test's environment is selected the way production selects it — MSK IAM au
 in the Kafka config means "managed cluster" — not by injecting a policy object,
 so the suite exercises the same discrimination the runtime performs.
 
-RED-before / GREEN-after (OMN-15395 f). Nine of these fail against the pre-fix
-tree (verified by replaying this file on the pre-fix commit with the post-fix
-symbols stubbed out, so the ASSERTIONS fail rather than the imports):
+RED-before / GREEN-after (OMN-15395 f), against two distinct baselines.
 
-* the three ``TestManagedStagingRejectsRf1`` cases — the old provisioner created
-  the RF1 topic and raised nothing, and silently applied
-  ``DEFAULT_EVENT_TOPIC_REPLICATION_FACTOR = 1`` when nothing was declared;
-* ``test_ensure_topic_exists_uses_contract_declared_replication_factor`` — the
-  old bare-name path created at RF1 regardless of the owning contract;
+Against ``dev`` (the pre-fix runtime):
+
+* ``TestManagedStagingRejectsRf1`` — the old provisioner created the RF1 topic
+  and raised nothing;
+* ``test_managed_staging_resolves_undeclared_rf_to_the_floor_not_one`` and
+  ``test_ensure_topic_exists_uses_contract_declared_replication_factor`` — the
+  old paths silently applied ``DEFAULT_EVENT_TOPIC_REPLICATION_FACTOR = 1``;
 * the five ``TestDiffBeforeCreate`` cases — the old provisioner issued one
   ``CreateTopics`` per known topic on every pass and used
   ``TopicAlreadyExistsError`` as flow control (~1,280 blind authorizations).
+
+Against the FIRST revision of this fix (the refuse-on-undeclared policy that
+adversarial review rejected) — these are the remediation guards:
+
+* ``TestRealContractUniverseStaysProvisionable`` — that revision resolved 0 of
+  168 production topics on managed staging, i.e. provisioning was a total
+  no-op. The managed case fails hard there.
+* ``TestDerivedTopicsWithNoContractSpec`` — derived DLQ topics are absent from
+  the contract-derived registry, so ``kernel_glue._provision_dlq_topics`` (which
+  has no ``try``/``except``) raised out of ``build_and_start_core_runtime`` and
+  refused to start the S6 dispatch loop.
+* ``TestPolicyErrorsEscapeBestEffortBoundaries`` — every external call site
+  caught bare ``Exception``, so the fail-closed signal died at the module
+  boundary; the static guard enumerated four offenders.
+* ``test_self_hosted_reduces_declared_rf2_to_broker_capacity`` — without the
+  capacity ceiling, a contract-declared RF2 fails ``CreateTopics`` on every
+  single-broker broker.
 
 The remaining cases are deliberate regression guards on behaviour that was
 already correct (a declared RF2 reaching the broker unmutated, self-hosted RF1
@@ -47,9 +64,23 @@ import pytest
 from aiokafka.admin import NewTopic
 
 from omnibase_infra.errors import TopicReplicationPolicyError
+from omnibase_infra.event_bus.model_topic_readiness_config import (
+    ModelTopicReadinessConfig,
+)
 from omnibase_infra.event_bus.service_topic_manager import TopicProvisioner
+from omnibase_infra.topics.model_topic_provisioning_policy import (
+    MANAGED_MINIMUM_REPLICATION_FACTOR,
+    ModelTopicProvisioningPolicy,
+)
 
-pytestmark = [pytest.mark.asyncio, pytest.mark.unit]
+# ``asyncio_mode = "auto"`` (pyproject) marks the async cases; an explicit
+# module-level asyncio mark would warn on the synchronous guards below.
+pytestmark = [pytest.mark.unit]
+
+#: The real contract tree the runtime kernel provisions from at boot.
+PRODUCTION_CONTRACTS_ROOT = (
+    Path(__file__).resolve().parents[3] / "src" / "omnibase_infra" / "nodes"
+)
 
 TOPIC = "onex.evt.test-producer.example-event.v1"  # onex-topic-allow: unit fixture
 OTHER_TOPIC = "onex.evt.test-producer.other-event.v1"  # onex-topic-allow: unit fixture
@@ -230,16 +261,18 @@ class TestManagedStagingRejectsRf1:
         # Fail-closed: not a warning, not a clamp-and-continue.
         assert recorder.created == []
 
-    async def test_managed_staging_rejects_undeclared_replication_factor(
+    async def test_managed_staging_resolves_undeclared_rf_to_the_floor_not_one(
         self,
         tmp_path: Path,
         monkeypatch: pytest.MonkeyPatch,
     ) -> None:
-        """No declared RF means refuse to create, not inherit a module constant.
+        """An undeclared RF resolves to the managed floor — never to 1.
 
-        Refusal is per-topic rather than batch-aborting: an un-migrated contract
-        must not be able to block provisioning for compliant sibling topics. The
-        topic is still NOT created — nothing inherits a default.
+        This is the RED-before assertion for the module-level default: the
+        pre-fix provisioner applied ``DEFAULT_EVENT_TOPIC_REPLICATION_FACTOR = 1``
+        here, which is how 519 RF1 topics reached MSK. The post-fix value is the
+        managed durability floor (the cluster's own broker default), so the
+        topic is still created and it is created durably.
         """
         _use_managed_staging(monkeypatch)
         _write_contract(tmp_path, replication_factor=None)
@@ -249,9 +282,10 @@ class TestManagedStagingRejectsRf1:
         with _patched_admin(recorder):
             result = await provisioner.ensure_provisioned_topics_exist()
 
-        assert TOPIC in result["refused"]
-        assert TOPIC not in recorder.created_names
-        assert result["status"] != "success"
+        assert TOPIC in result["created"]
+        created = recorder.created_spec(TOPIC)
+        assert created.replication_factor == MANAGED_MINIMUM_REPLICATION_FACTOR
+        assert created.replication_factor != 1
 
     async def test_single_topic_path_rejects_rf1_in_managed_staging(
         self,
@@ -292,7 +326,27 @@ class TestExplicitReplicationPassesThroughUnmutated:
         created = recorder.created_spec(TOPIC)
         assert created.replication_factor == 2
         assert created.num_partitions == 3
-        assert TOPIC not in result["refused"]
+        assert result["status"] == "success"
+
+    async def test_declared_rf_above_the_floor_is_not_clamped_down(
+        self,
+        tmp_path: Path,
+        monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
+        """A contract asking for MORE durability than the floor keeps it.
+
+        The managed profile has no capacity ceiling, so the resolver is a floor
+        check, not a normaliser: RF3 reaches ``CreateTopics`` as RF3.
+        """
+        _use_managed_staging(monkeypatch)
+        _write_contract(tmp_path, replication_factor=3)
+        provisioner = _provisioner(tmp_path)
+        recorder = _AdminRecorder()
+
+        with _patched_admin(recorder):
+            await provisioner.ensure_provisioned_topics_exist()
+
+        assert recorder.created_spec(TOPIC).replication_factor == 3
 
     async def test_ensure_topic_exists_uses_contract_declared_replication_factor(
         self,
@@ -333,7 +387,31 @@ class TestExplicitReplicationPassesThroughUnmutated:
             result = await provisioner.ensure_provisioned_topics_exist()
 
         assert result["status"] == "success"
-        assert result["refused"] == []
+        assert recorder.created_spec(TOPIC).replication_factor == 1
+
+    async def test_self_hosted_reduces_declared_rf2_to_broker_capacity(
+        self,
+        tmp_path: Path,
+        monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
+        """A contract-declared RF2 still provisions on a single-broker Redpanda.
+
+        This is what makes contract-declared RF2 landable at all: without the
+        capacity ceiling, every one of the eleven RF2 declarations restored to
+        the contract tree would fail ``CreateTopics`` with
+        ``INVALID_REPLICATION_FACTOR`` on local dev, CI, and the ``.201`` lanes.
+        The reduction is one-way — capacity never raises a value, and the
+        validator forbids a ceiling below the profile's durability floor.
+        """
+        _use_self_hosted(monkeypatch)
+        _write_contract(tmp_path, replication_factor=2)
+        provisioner = _provisioner(tmp_path)
+        recorder = _AdminRecorder()
+
+        with _patched_admin(recorder):
+            result = await provisioner.ensure_provisioned_topics_exist()
+
+        assert result["status"] == "success"
         assert recorder.created_spec(TOPIC).replication_factor == 1
 
 
@@ -355,7 +433,9 @@ class TestDiffBeforeCreate:
             result = await provisioner.ensure_provisioned_topics_exist()
 
         # Zero CreateTopics REQUESTS — not merely zero successful creations.
-        assert recorder.attempted == []
+        # Scoped to the fixture topic: the provisioner also extracts the real
+        # installed-package contract universe, which is production behaviour.
+        assert recorder.attempted_under_test() == []
         assert recorder.describe_calls == 1
         assert TOPIC not in result["created"]
         assert TOPIC in result["existing"]
@@ -450,10 +530,244 @@ class TestDiffBeforeCreate:
         with _patched_admin(recorder):
             result = await provisioner.ensure_provisioned_topics_exist()
 
-        assert recorder.attempted == []
+        assert recorder.attempted_under_test() == []
         drift = result["drift"]
         assert isinstance(drift, list)
         assert any("partition" in entry.lower() for entry in drift)
+
+
+class TestRealContractUniverseStaysProvisionable:
+    """The whole point: the policy must not make provisioning a no-op.
+
+    A durability policy that refuses every topic is fail-closed in the same
+    sense that unplugging the cluster is fail-closed. These drive the REAL
+    production contract tree — the same ``contracts_root`` the kernel passes at
+    boot (``service_kernel`` §3.5) — through the REAL policy, and assert the
+    resolver produces a usable plan rather than an empty one.
+    """
+
+    def test_every_production_topic_resolves_under_the_managed_policy(self) -> None:
+        """Zero topics may be unprovisionable on managed staging.
+
+        RED-before: at the previous revision the managed policy had no default,
+        no contract in the tree declared a replication factor, and this resolved
+        0 of 168 topics — provisioning against MSK was a 100% no-op, which is
+        strictly worse than the RF1 bug it replaced.
+        """
+        from uuid import uuid4
+
+        provisioner = TopicProvisioner(
+            bootstrap_servers="broker:9092",
+            contracts_root=PRODUCTION_CONTRACTS_ROOT,
+            policy=ModelTopicProvisioningPolicy.managed(),
+        )
+        specs = provisioner._topic_specs
+        assert len(specs) > 100, (
+            f"expected the full production topic universe, extracted {len(specs)} "
+            "— an empty-ish extraction would make this guard vacuous"
+        )
+
+        resolved = provisioner._resolve_specs_for_creation(specs, uuid4())
+
+        assert len(resolved) == len(specs), (
+            f"{len(specs) - len(resolved)} of {len(specs)} production topics are "
+            "unprovisionable under the managed policy"
+        )
+        under_replicated = [
+            spec.suffix
+            for spec in resolved
+            if spec.replication_factor is None
+            or spec.replication_factor < MANAGED_MINIMUM_REPLICATION_FACTOR
+        ]
+        assert not under_replicated, (
+            "resolved specs must all carry an explicit RF at or above the "
+            f"managed floor; offenders: {under_replicated[:10]}"
+        )
+
+    def test_every_production_topic_resolves_under_the_self_hosted_policy(
+        self,
+    ) -> None:
+        """The same tree still provisions at RF1 on a single-broker broker."""
+        from uuid import uuid4
+
+        provisioner = TopicProvisioner(
+            bootstrap_servers="broker:9092",
+            contracts_root=PRODUCTION_CONTRACTS_ROOT,
+            policy=ModelTopicProvisioningPolicy.self_hosted(),
+        )
+        specs = provisioner._topic_specs
+
+        resolved = provisioner._resolve_specs_for_creation(specs, uuid4())
+
+        assert len(resolved) == len(specs)
+        # Every declared RF2 is reduced to what one broker can host, so a
+        # contract-declared RF2 never breaks local/CI provisioning.
+        assert {spec.replication_factor for spec in resolved} == {1}
+
+
+class TestDerivedTopicsWithNoContractSpec:
+    """Topics the provisioner creates that no contract declares (DLQ family).
+
+    ``kernel_glue._provision_dlq_topics`` calls ``ensure_topic_exists`` for
+    every resolved dead-letter target with NO try/except, and derived DLQ names
+    (``derive_canonical_dlq_topic``) are frequently absent from the
+    contract-derived spec registry. A managed policy without a default therefore
+    raised out of ``build_and_start_core_runtime`` and refused to start the S6
+    dispatch loop for any DLQ topic not already on the broker.
+    """
+
+    async def test_derived_dlq_topic_is_created_not_refused(
+        self,
+        tmp_path: Path,
+        monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
+        """RED-before: this raised TopicReplicationPolicyError and wedged boot."""
+        from omnibase_infra.runtime.core_runtime.dlq_resolver import (
+            derive_canonical_dlq_topic,
+        )
+
+        _use_managed_staging(monkeypatch)
+        _write_contract(tmp_path, replication_factor=2)
+        dlq_topic = derive_canonical_dlq_topic(TOPIC)
+        provisioner = _provisioner(tmp_path)
+        assert dlq_topic not in provisioner._spec_by_name, (
+            "fixture invalid: the derived DLQ topic must be absent from the "
+            "contract-derived registry for this to exercise the real gap"
+        )
+        recorder = _AdminRecorder()
+
+        with _patched_admin(recorder):
+            created = await provisioner.ensure_topic_exists(topic_name=dlq_topic)
+
+        assert created is True
+        assert recorder.created_spec(dlq_topic).replication_factor == (
+            MANAGED_MINIMUM_REPLICATION_FACTOR
+        )
+
+    async def test_dlq_boot_gate_starts_the_loop(
+        self,
+        tmp_path: Path,
+        monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
+        """Drive the real boot helper, not a surrogate: it must not raise."""
+        from omnibase_infra.runtime.core_runtime.dlq_resolver import (
+            derive_canonical_dlq_topic,
+        )
+        from omnibase_infra.runtime.core_runtime.kernel_glue import (
+            _provision_dlq_topics,
+        )
+
+        _use_managed_staging(monkeypatch)
+        _write_contract(tmp_path, replication_factor=2)
+        dlq_topic = derive_canonical_dlq_topic(TOPIC)
+        provisioner = _provisioner(tmp_path)
+        recorder = _AdminRecorder()
+
+        with _patched_admin(recorder):
+            await _provision_dlq_topics(
+                frozenset({dlq_topic}),
+                provisioner=provisioner,
+                correlation_id=None,
+            )
+
+        assert dlq_topic in recorder.created_names
+
+
+class TestPolicyErrorsEscapeBestEffortBoundaries:
+    """(b) The fail-closed signal must survive the call sites' ``except Exception``.
+
+    The distinct error class only buys anything if the boot call sites re-raise
+    it. Previously every external call site caught bare ``Exception`` and
+    degraded a durability violation to a warning, so the fail-closed property
+    stopped at the module boundary.
+    """
+
+    async def test_per_contract_interleave_reraises_policy_error(
+        self,
+        tmp_path: Path,
+        monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
+        """``_interleave_contract`` is the per-contract boot call shape."""
+        from omnibase_infra.protocols.protocol_event_bus_like import (
+            ProtocolEventBusLike,
+        )
+        from omnibase_infra.runtime.auto_wiring.handler_wiring import (
+            _interleave_contract,
+        )
+        from omnibase_spi.protocols.runtime import ProtocolDispatchEngine
+
+        _use_managed_staging(monkeypatch)
+        # A contract declaring RF1 against managed staging: the violation the
+        # policy exists to stop.
+        _write_contract(tmp_path, replication_factor=1)
+        provisioner = _provisioner(tmp_path)
+
+        class _EventBus:
+            subscribe_topics = (TOPIC,)
+            publish_topics: tuple[str, ...] = ()
+
+        class _Contract:
+            name = "node_example"
+            contract_path = tmp_path / "node_example" / "contract.yaml"
+            event_bus = _EventBus()
+
+        recorder = _AdminRecorder()
+        with _patched_admin(recorder):
+            with pytest.raises(TopicReplicationPolicyError):
+                await _interleave_contract(
+                    name="node_example",
+                    contract=_Contract(),  # type: ignore[arg-type]
+                    dispatch_engine=MagicMock(spec=ProtocolDispatchEngine),
+                    event_bus=MagicMock(spec=ProtocolEventBusLike),
+                    environment="test",
+                    result_applier=None,
+                    provisioner=provisioner,
+                    readiness_config=ModelTopicReadinessConfig(),
+                )
+
+        assert recorder.created == []
+
+    def test_every_provisioning_call_site_reraises_the_policy_error(self) -> None:
+        """Static guard: no ``ensure_topic_exists``/``ensure_provisioned`` call
+        site may sit behind a bare ``except Exception`` without first
+        re-raising ``TopicReplicationPolicyError``.
+
+        A prose docstring promising this is not a mechanism; this is. It reads
+        the shipped source so a NEW best-effort call site cannot silently
+        reintroduce the swallow.
+        """
+        import re
+
+        src_root = Path(__file__).resolve().parents[3] / "src" / "omnibase_infra"
+        call_re = re.compile(
+            r"await\s+_?\w*provisioner\w*\.(ensure_topic_exists|"
+            r"ensure_provisioned_topics_exist)\("
+        )
+        offenders: list[str] = []
+        for path in sorted(src_root.rglob("*.py")):
+            if path.name == "service_topic_manager.py":
+                continue  # the module that raises; its own handlers are tested above
+            lines = path.read_text(encoding="utf-8").splitlines()
+            for index, line in enumerate(lines):
+                if not call_re.search(line):
+                    continue
+                # Walk forward to the first except clause of the enclosing try.
+                window = lines[index : index + 40]
+                excepts = [
+                    entry.strip()
+                    for entry in window
+                    if entry.strip().startswith("except ")
+                ]
+                if not excepts:
+                    continue  # no boundary here; the error propagates by default
+                if not excepts[0].startswith("except TopicReplicationPolicyError"):
+                    offenders.append(f"{path.relative_to(src_root)}:{index + 1}")
+        assert not offenders, (
+            "provisioning call sites that swallow a durability violation into "
+            f"a best-effort boundary: {offenders}. Add "
+            "`except TopicReplicationPolicyError: raise` ahead of the bare "
+            "`except Exception`."
+        )
 
 
 class TestReadinessSpecPassThrough:

@@ -72,6 +72,7 @@ published_events:
     description: "Remote-agent lifecycle event emitted by protocol handlers."
     topic_config:
       partitions: 3
+      replication_factor: 2
       kafka_config:
         "retention.ms": "604800000"
         "cleanup.policy": "delete"
