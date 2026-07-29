@@ -40,6 +40,11 @@ DELEGATION_VIEW = (
     / "node_projection_delegation"
     / "0010_create_delegation_dashboard_projection_views.sql"
 )
+DELEGATION_OBSERVABILITY_RECONCILE = (
+    NODES_DIR
+    / "node_projection_delegation"
+    / "0028_reconcile_delegation_observability_views.sql"
+)
 SAVINGS_VIEW = (
     NODES_DIR
     / "node_projection_savings"
@@ -56,6 +61,11 @@ REGISTRATION_CREATE = (
 )
 REGISTRATION_HEARTBEAT = (
     NODES_DIR / "node_projection_registration" / "0001_add_heartbeat_columns.sql"
+)
+REGISTRATION_OBSERVABILITY_RECONCILE = (
+    NODES_DIR
+    / "node_projection_registration"
+    / "0003_reconcile_heartbeat_observability.sql"
 )
 DEPLOYMENT_EVIDENCE_CREATE = (
     NODES_DIR
@@ -88,6 +98,33 @@ class TestVendoredViewMigrations:
         # Authoritative dashboard read views from PR #1005 / OMN-12489.
         assert "CREATE OR REPLACE VIEW projection_delegation_summary" in sql
         assert "CREATE OR REPLACE VIEW projection_delegation_model_routing" in sql
+
+    def test_delegation_observability_reconciliation_vendored(self) -> None:
+        assert DELEGATION_OBSERVABILITY_RECONCILE.is_file(), (
+            "the forward-only delegation observability reconciliation must be "
+            "vendored for warm databases whose migration ledger drifted ahead "
+            "of their materialized view shape"
+        )
+        sql = DELEGATION_OBSERVABILITY_RECONCILE.read_text(encoding="utf-8")
+        for view in (
+            "projection_delegation_summary",
+            "projection_delegation_model_routing",
+            "projection_delegation_quality_gate",
+            "projection_delegation_token_usage",
+        ):
+            assert f"CREATE OR REPLACE VIEW {view}" in sql
+
+    def test_registration_observability_reconciliation_vendored(self) -> None:
+        assert REGISTRATION_OBSERVABILITY_RECONCILE.is_file(), (
+            "the forward-only registration reconciliation must be vendored so "
+            "heartbeat writes cannot fail against a drifted warm database"
+        )
+        sql = REGISTRATION_OBSERVABILITY_RECONCILE.read_text(encoding="utf-8")
+        assert "to_regclass('public.node_service_registry') IS NOT NULL" in sql
+        assert "heartbeat reconciliation is a no-op" in sql
+        assert "ADD COLUMN IF NOT EXISTS last_heartbeat_at" in sql
+        assert "ADD COLUMN IF NOT EXISTS uptime_seconds" in sql
+        assert "idx_node_service_registry_last_heartbeat_at" in sql
 
     def test_savings_projection_view_vendored(self) -> None:
         assert SAVINGS_VIEW.is_file(), (
