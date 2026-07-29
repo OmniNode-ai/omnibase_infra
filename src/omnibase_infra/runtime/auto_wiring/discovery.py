@@ -21,6 +21,9 @@ from pathlib import Path
 
 import yaml
 
+from omnibase_core.models.contracts.subcontracts.model_db_ownership_subcontract import (
+    ModelDbOwnershipSubcontract,
+)
 from omnibase_infra.runtime.auto_wiring.models import (
     ModelAutoWiringManifest,
     ModelContractVersion,
@@ -437,6 +440,12 @@ def _parse_contract(
         handler_routing = _parse_legacy_handler(h_raw)
 
     runtime_profiles = _extract_runtime_profiles(raw)
+    db_io_raw = raw.get("db_io")
+    db_io = (
+        ModelDbOwnershipSubcontract.model_validate(db_io_raw)
+        if db_io_raw is not None
+        else None
+    )
 
     return ModelDiscoveredContract(
         name=raw.get("name", entry_point_name),
@@ -454,6 +463,7 @@ def _parse_contract(
         requires_cloud_gateway=_contract_requires_cloud_gateway(raw),
         event_bus=event_bus,
         handler_routing=handler_routing,
+        db_io=db_io,
     )
 
 

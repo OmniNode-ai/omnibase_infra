@@ -1,0 +1,13 @@
+# SPDX-FileCopyrightText: 2025 OmniNode.ai Inc.
+# SPDX-License-Identifier: MIT
+
+name: node_projection_delegation
+node_type: EFFECT_GENERIC
+db_io:
+  db_tables:
+    - name: delegation_events
+      database_ref: application
+      schema: tenant
+      migration: nodes/node_projection_delegation/0001.sql
+      access: read_write
+      role: events

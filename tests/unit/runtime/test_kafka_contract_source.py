@@ -1187,3 +1187,55 @@ class TestMarketNodeHandlerResolution:
         descriptor = parser.parse("node_aislop_sweep", contract_yaml, uuid4())
 
         assert descriptor.handler_class is None
+
+    def test_materialization_preserves_typed_db_io(self) -> None:
+        """Kafka registration validates and materializes strict table locations."""
+        contract_yaml = _market_contract_yaml(
+            routing_module=self._MODULE,
+            routing_class=self._CLASS,
+        )
+        contract_yaml += """
+db_io:
+  db_tables:
+    - name: delegation_events
+      database_ref: application
+      schema: tenant
+      migration: nodes/node_projection_delegation/0001.sql
+      access: read_write
+      role: events
+"""
+        parser = ContractYamlParser(environment="dev")
+        descriptor = parser.parse("node_aislop_sweep", contract_yaml, uuid4())
+        source = KafkaContractSource(environment="dev", graceful_mode=False)
+
+        contract = source._build_materialization_contract(
+            node_name="node_aislop_sweep",
+            descriptor=descriptor,
+            environment="dev",
+        )
+
+        assert contract.db_io is not None
+        assert contract.db_io.db_tables[0].database_ref == "application"
+        assert contract.db_io.db_tables[0].schema == "tenant"
+
+    def test_kafka_registration_rejects_parallel_database_location(self) -> None:
+        contract_yaml = _market_contract_yaml(
+            routing_module=self._MODULE,
+            routing_class=self._CLASS,
+        )
+        contract_yaml += """
+db_io:
+  db_tables:
+    - name: delegation_events
+      database: omnidash_analytics
+      database_ref: application
+      schema: tenant
+      migration: nodes/node_projection_delegation/0001.sql
+      access: read_write
+      role: events
+"""
+
+        with pytest.raises(ValidationError, match="database"):
+            ContractYamlParser(environment="dev").parse(
+                "node_aislop_sweep", contract_yaml, uuid4()
+            )

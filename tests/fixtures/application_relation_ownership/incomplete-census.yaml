@@ -1,0 +1,26 @@
+# SPDX-FileCopyrightText: 2025 OmniNode.ai Inc.
+# SPDX-License-Identifier: MIT
+
+schema_version: "1.0"
+service: incomplete_census_runner
+owner_declaration: service:incomplete_census_runner
+target_database_ref: application
+db_io:
+  db_tables:
+    - name: schema_migrations
+      database_ref: application
+      schema: omninode_internal
+      migration: run-migrations.py
+      access: read_write
+      role: canonical_migration_ledger
+retained_live_census:
+  observed_base_tables: 3
+  observed_views_and_materialized_views: 2
+  parity_status: blocked
+  reason: two retained live table names and two view names remain unresolved
+relation_evidence:
+  - name: schema_migrations
+    kind: table
+    domain: OMNINODE_INTERNAL
+    owner_declaration: service:incomplete_census_runner
+    readers: []

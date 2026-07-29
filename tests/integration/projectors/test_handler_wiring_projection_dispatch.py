@@ -17,6 +17,7 @@ import pytest
 from omnibase_infra.runtime.auto_wiring.handler_wiring import (
     _make_projection_dispatch_callback,
 )
+from tests.helpers.application_db_topology import projection_database_target
 
 _PATCH_BUILD_ADAPTER = (
     "omnibase_infra.runtime.auto_wiring.handler_wiring._build_sync_db_adapter"
@@ -39,7 +40,7 @@ def test_projection_dispatch_bridge_injects_db_and_event_type() -> None:
             received.append(dict(input_data))
             return {"rows_upserted": 1}
 
-    db_tables = [{"name": "node_service_registry", "database": "omnidash_analytics"}]
+    db_tables = projection_database_target("node_service_registry")
     handler = FakeProjectionHandler()
     callback = _make_projection_dispatch_callback(
         handler, db_tables, ("onex.evt.platform.node-heartbeat.v1",)
@@ -86,7 +87,7 @@ def test_projection_dispatch_bridge_non_platform_topic_passes_raw_event_type() -
             received.append(dict(input_data))
             return {"rows_upserted": 1}
 
-    db_tables = [{"name": "delegation_events", "database": "omnidash_analytics"}]
+    db_tables = projection_database_target("delegation_events")
     handler = FakeDelegationHandler()
     callback = _make_projection_dispatch_callback(
         handler, db_tables, ("onex.evt.omniclaude.task-delegated.v1",)
@@ -131,7 +132,7 @@ def test_projection_dispatch_bridge_no_call_when_db_url_missing() -> None:
             call_count[0] += 1
             return {}
 
-    db_tables = [{"name": "node_service_registry", "database": "omnidash_analytics"}]
+    db_tables = projection_database_target("node_service_registry")
     handler = FakeProjectionHandler()
     callback = _make_projection_dispatch_callback(handler, db_tables, ())
 

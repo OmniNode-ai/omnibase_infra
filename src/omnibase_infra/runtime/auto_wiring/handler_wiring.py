@@ -52,10 +52,18 @@ from uuid import UUID, uuid4
 from pydantic import BaseModel, ValidationError
 
 from omnibase_core.enums.enum_core_error_code import EnumCoreErrorCode
+from omnibase_core.enums.enum_database_schema_domain import EnumDatabaseSchemaDomain
 from omnibase_core.enums.enum_handler_resolution_outcome import (
     EnumHandlerResolutionOutcome,
 )
 from omnibase_core.enums.enum_node_kind import EnumNodeKind
+from omnibase_core.models.contracts.subcontracts.model_db_table_declaration import (
+    ModelDbTableDeclaration,
+)
+from omnibase_core.models.core.model_deployment_topology import ModelDeploymentTopology
+from omnibase_core.models.core.model_deployment_topology_database import (
+    ModelDeploymentTopologyDatabase,
+)
 from omnibase_core.models.errors import ModelOnexError
 from omnibase_core.models.resolver.model_handler_resolver_context import (
     ModelHandlerResolverContext,
@@ -1626,6 +1634,120 @@ _DB_URL_ENV_MAP: dict[str, str] = {
 
 _OPTIONAL_PROJECTION_DATABASES: frozenset[str] = frozenset({"omnidash_analytics"})
 
+
+@dataclass(frozen=True)
+class ProjectionTableTarget:
+    """Topology-resolved location for one typed table declaration."""
+
+    table: ModelDbTableDeclaration
+    database_ref: str
+    physical_database: str
+    schema: str
+    domain: EnumDatabaseSchemaDomain
+
+
+@dataclass(frozen=True)
+class ProjectionDatabaseTarget:
+    """Topology-resolved connection target for one projection handler.
+
+    A projection callback currently injects one physical connection, but a node
+    contract may legitimately declare tables in more than one schema/domain of
+    that database. Per-table locations remain attached so the adapter-split lane
+    can select a typed operation without re-reading YAML or inferring a domain
+    from row contents. Different physical databases still fail closed because a
+    single ``_db`` injection cannot serve them safely.
+    """
+
+    tables: tuple[ModelDbTableDeclaration, ...]
+    table_targets: tuple[ProjectionTableTarget, ...]
+    physical_database: str
+    db_url_env: str
+
+    @property
+    def database_refs(self) -> tuple[str, ...]:
+        """Return the declared logical database references in stable order."""
+        return tuple(sorted({target.database_ref for target in self.table_targets}))
+
+    @property
+    def schemas(self) -> tuple[str, ...]:
+        """Return the declared schemas in stable order."""
+        return tuple(sorted({target.schema for target in self.table_targets}))
+
+    @property
+    def domains(self) -> tuple[EnumDatabaseSchemaDomain, ...]:
+        """Return the topology-derived domains in stable enum-value order."""
+        return tuple(
+            sorted(
+                {target.domain for target in self.table_targets},
+                key=lambda domain: domain.value,
+            )
+        )
+
+
+def _resolve_projection_database_target(
+    db_tables: Sequence[ModelDbTableDeclaration],
+    topology: ModelDeploymentTopology,
+) -> ProjectionDatabaseTarget:
+    """Resolve typed table declarations through the authoritative topology."""
+    tables = tuple(db_tables)
+    if not tables:
+        raise ValueError("Projection database target requires at least one db_table")
+
+    names = [table.name for table in tables]
+    duplicates = sorted({name for name in names if names.count(name) > 1})
+    if duplicates:
+        raise ValueError(f"Duplicate db_table declarations: {duplicates!r}")
+
+    table_targets: list[ProjectionTableTarget] = []
+    databases_by_physical_name: dict[str, ModelDeploymentTopologyDatabase] = {}
+    for table in tables:
+        database = topology.databases.get(table.database_ref)
+        if database is None:
+            raise ValueError(f"Unknown database_ref '{table.database_ref}'")
+        domain = topology.schema_domain(table.database_ref, table.schema)
+        physical_database = database.physical_name
+        databases_by_physical_name[physical_database] = database
+        table_targets.append(
+            ProjectionTableTarget(
+                table=table,
+                database_ref=table.database_ref,
+                physical_database=physical_database,
+                schema=table.schema,
+                domain=domain,
+            )
+        )
+
+    physical_databases = tuple(sorted(databases_by_physical_name))
+    if len(physical_databases) != 1:
+        raise ValueError(
+            "Projection handler db_tables require more than one physical database "
+            f"connection, got {physical_databases!r}; split the handler or provide "
+            "an explicit multi-adapter boundary"
+        )
+    physical_database = physical_databases[0]
+    if physical_database not in _DB_URL_ENV_MAP:
+        raise ValueError(
+            "Typed db_table declarations resolve to unknown physical "
+            f"database {physical_database!r}; expected runtime catalog parity with "
+            f"one of {sorted(_DB_URL_ENV_MAP)!r}"
+        )
+    db_url_env = _DB_URL_ENV_MAP[physical_database]
+    database = databases_by_physical_name[physical_database]
+    binding_envs = {binding.dsn_env for binding in database.bindings.values()}
+    if db_url_env not in binding_envs:
+        raise ValueError(
+            f"Legacy projection DSN {db_url_env!r} is not declared by topology "
+            f"bindings for physical database {physical_database!r}"
+        )
+
+    return ProjectionDatabaseTarget(
+        tables=tables,
+        table_targets=tuple(table_targets),
+        physical_database=physical_database,
+        db_url_env=db_url_env,
+    )
+
+
 _TOPIC_TO_EVENT_TYPE: dict[str, str] = {
     "node-heartbeat": "heartbeat",
     "node-introspection": "introspection",
@@ -1738,36 +1860,16 @@ def _raw_event_projection_enabled(
     )
 
 
-def _read_db_io_tables(contract_path: Path) -> list[dict[str, str]]:
-    """Read db_io.db_tables from a contract YAML. Returns [] if db_io is absent.
-
-    Raises on YAML parse errors or unexpected file I/O failures so the caller
-    can mark the contract as broken rather than silently falling back to the
-    non-projection wiring path.
-    """
-    try:
-        # Why: Optional integration dependency is validated at runtime but ships incomplete typing.
-        import yaml  # type: ignore[import-untyped]
-
-        with open(contract_path) as f:
-            raw = yaml.safe_load(f)
-    except FileNotFoundError:
-        return []
-    if not isinstance(raw, dict):
-        return []
-    db_io = raw.get("db_io") or {}
-    return list(db_io.get("db_tables") or [])
-
-
 def _read_dlq_topics(contract_path: Path) -> list[str]:
     """Read ``event_bus.dlq_topics`` from a contract YAML. Returns [] if absent.
 
     OMN-13548 (D-03): projection handlers declare the DLQ destination for
     malformed inbound events under ``event_bus.dlq_topics`` (the same field the
     omnimarket projection runners read). The typed ``ModelEventBusSubcontract``
-    does not carry this field, so the wiring reads it from the raw contract YAML
-    exactly as ``_read_db_io_tables`` reads ``db_io.db_tables``. The DLQ topic is
-    therefore resolved from the contract — never hardcoded in this module.
+    does not carry this field, so the wiring reads only this event-bus extension
+    from the raw contract YAML. Database table locations are already typed on
+    ``ModelDiscoveredContract`` and are never re-read here. The DLQ topic is
+    resolved from the contract — never hardcoded in this module.
 
     Raises on YAML parse / file I/O failures so a broken contract is surfaced
     rather than silently degrading to a no-DLQ projection wiring.
@@ -1789,16 +1891,16 @@ def _read_dlq_topics(contract_path: Path) -> list[str]:
 
 
 def _contract_declares_db_io(contract: ModelDiscoveredContract) -> bool:
-    return bool(_read_db_io_tables(contract.contract_path))
+    return bool(contract.db_io is not None and contract.db_io.db_tables)
 
 
 def _read_state_io(contract_path: Path) -> dict[str, object]:
     """Read the top-level ``state_io`` block from a contract YAML.
 
     Returns ``{}`` if ``state_io`` is absent. Raises on YAML parse errors or
-    unexpected file I/O failures — same fail-loud contract as
-    ``_read_db_io_tables`` — so a malformed contract is surfaced as a broken
-    contract rather than silently treated as "no state_io".
+    unexpected file I/O failures, so a malformed contract is surfaced as a
+    broken contract rather than silently treated as "no state_io". Unlike
+    ``db_io``, this legacy state subcontract does not yet have a core model.
 
     Shape (OMN-14208 opt-in runtime dispatch seam)::
 
@@ -2245,7 +2347,7 @@ class ProjectionDispatchSinks:
 
 def _make_projection_dispatch_callback(
     handler_instance: object,
-    db_tables: list[dict[str, str]],
+    target: ProjectionDatabaseTarget,
     subscribe_topics: tuple[str, ...],
     sinks: ProjectionDispatchSinks | None = None,
 ) -> DispatcherFunc:
@@ -2277,17 +2379,8 @@ def _make_projection_dispatch_callback(
     terminal_event = sinks.terminal_event
     dlq_topics = list(sinks.dlq_topics)
     handler_name = type(handler_instance).__name__
-    database = (
-        db_tables[0].get("database", "omnidash_analytics")
-        if db_tables
-        else "omnidash_analytics"
-    )
-    if database not in _DB_URL_ENV_MAP:
-        raise ValueError(
-            f"Unknown database {database!r} in contract db_io — "
-            f"must be one of {sorted(_DB_URL_ENV_MAP)!r}"
-        )
-    db_url_env = _DB_URL_ENV_MAP[database]
+    database = target.physical_database
+    db_url_env = target.db_url_env
 
     async def _callback(
         envelope: ModelEventEnvelope[object],
@@ -2315,7 +2408,7 @@ def _make_projection_dispatch_callback(
             return None
         projected = False
         try:
-            adapter = _build_sync_db_adapter(db_url)
+            adapter = _build_projection_db_adapter(db_url, target)
             topic = _extract_projection_topic(envelope)
             event_type = _derive_projection_event_type(
                 topic,
@@ -2421,6 +2514,44 @@ def _make_projection_dispatch_callback(
         return None
 
     return _callback
+
+
+def _assert_projection_adapter_supported(target: ProjectionDatabaseTarget) -> None:
+    """Fail closed until non-tenant adapters are implemented by OMN-15421."""
+    unsupported_domains = tuple(
+        domain
+        for domain in target.domains
+        if domain is not EnumDatabaseSchemaDomain.TENANT
+    )
+    if unsupported_domains:
+        raise ModelOnexError(
+            "Projection adapter selection is blocked for non-tenant domains until "
+            "OMN-15421 provides separate typed internal/catalog operations; got "
+            f"{[domain.value for domain in unsupported_domains]!r}"
+        )
+
+
+def _build_projection_db_adapter(
+    db_url: str,
+    target: ProjectionDatabaseTarget,
+) -> object:
+    """Build the current adapter through a domain-aware selection seam.
+
+    OMN-15418 makes every authoritative database/schema/domain available here.
+    OMN-15421 owns replacing the generic implementation with separate tenant,
+    internal, and catalog operations. Until then, the existing tenant-stamping
+    adapter is never allowed to serve a non-tenant declaration.
+    """
+    _assert_projection_adapter_supported(target)
+    logger.debug(
+        "Selecting projection adapter: database_refs=%s physical_database=%s "
+        "schemas=%s domains=%s",
+        target.database_refs,
+        target.physical_database,
+        target.schemas,
+        [domain.value for domain in target.domains],
+    )
+    return _build_sync_db_adapter(db_url)
 
 
 async def _emit_projection_terminal_event(
@@ -4690,6 +4821,7 @@ async def wire_from_manifest(
     result_appliers_by_contract: Mapping[str, ProtocolDispatchResultApplier]
     | None = None,
     materialized_explicit_dependencies: dict[str, dict[str, object]] | None = None,
+    topology: ModelDeploymentTopology | None = None,
 ) -> ModelAutoWiringReport:
     """Wire all discovered contracts into the dispatch engine and event bus.
 
@@ -4725,6 +4857,8 @@ async def wire_from_manifest(
             outputs from auto-wired callbacks.
         materialized_explicit_dependencies: Optional pre-built constructor
             dependencies keyed by handler name for resolver Step 2.
+        topology: Checked-in deployment topology loaded by the composition
+            boundary. Required for every contract that declares ``db_io``.
 
     Returns:
         A :class:`ModelAutoWiringReport` with per-contract outcomes.
@@ -4801,6 +4935,7 @@ async def wire_from_manifest(
                 else None,
                 result_appliers_by_contract=result_appliers_by_contract,
                 materialized_explicit_dependencies=materialized_explicit_dependencies,
+                topology=topology,
             )
             prepared_contracts.append(prepared)
         except TypeError:
@@ -5425,6 +5560,7 @@ def _prepare_contract_wiring(
     pre_resolved_handlers: dict[str, object] | None = None,
     result_appliers_by_contract: Mapping[str, ProtocolDispatchResultApplier]
     | None = None,
+    topology: ModelDeploymentTopology | None = None,
 ) -> PreparedContractWiring:
     """Prepare one contract for wiring — NO side effects.
 
@@ -5526,6 +5662,7 @@ def _prepare_contract_wiring(
                 container=container,
                 materialized_explicit_dependencies=materialized_explicit_dependencies,
                 pre_resolved_handlers=pre_resolved_handlers,
+                topology=topology,
             )
             prepared_wirings.append(prepared)
         except TypeError:
@@ -5913,6 +6050,7 @@ async def _wire_single_contract(
     event_bus: object | None,
     environment: str,
     container: object | None = None,
+    topology: ModelDeploymentTopology | None = None,
 ) -> ModelContractWiringResult:
     """Wire a single discovered contract into the dispatch engine.
 
@@ -5937,6 +6075,7 @@ async def _wire_single_contract(
         event_bus=event_bus,
         environment=environment,
         container=container,
+        topology=topology,
     )
     return await _commit_contract_wiring(prepared, dispatch_engine, event_bus)
 
@@ -5952,6 +6091,7 @@ def _prepare_handler_wiring(
     container: object | None = None,
     materialized_explicit_dependencies: (dict[str, dict[str, object]] | None) = None,
     pre_resolved_handlers: dict[str, object] | None = None,
+    topology: ModelDeploymentTopology | None = None,
 ) -> PreparedWiring:
     """Prepare one handler entry — delegates construction to the resolver.
 
@@ -6213,7 +6353,7 @@ def _prepare_handler_wiring(
     # after boundary hook and returns a normal ModelDispatchResult through
     # the standard result-applier path. A contract declaring both is a
     # wiring-time contract defect, not a case to silently prioritize one arm.
-    db_tables = _read_db_io_tables(contract.contract_path)
+    db_tables = tuple(contract.db_io.db_tables) if contract.db_io is not None else ()
     state_io = _read_state_io(contract.contract_path)
     if db_tables and state_io:
         raise ModelOnexError(
@@ -6222,6 +6362,13 @@ def _prepare_handler_wiring(
             "(OMN-14208); a contract must declare exactly one."
         )
     if db_tables:
+        if topology is None:
+            raise ModelOnexError(
+                f"handler_wiring: contract {contract.name!r} declares db_io but "
+                "wire_from_manifest received no checked-in ModelDeploymentTopology"
+            )
+        target = _resolve_projection_database_target(db_tables, topology)
+        _assert_projection_adapter_supported(target)
         subscribe_topics = (
             contract.event_bus.subscribe_topics if contract.event_bus else ()
         )
@@ -6239,7 +6386,7 @@ def _prepare_handler_wiring(
         projection_dlq_topics = _read_dlq_topics(contract.contract_path)
         callback = _make_projection_dispatch_callback(
             handler_instance,
-            db_tables,
+            target,
             subscribe_topics,
             sinks=ProjectionDispatchSinks(
                 event_bus=event_bus,
@@ -6251,7 +6398,7 @@ def _prepare_handler_wiring(
             "Auto-wired projection handler with DB injection: handler=%s db_tables=%s "
             "terminal_event=%s dlq_topics=%s",
             handler_ref.name,
-            [t.get("name") for t in db_tables],
+            [table.name for table in target.tables],
             projection_terminal_event,
             projection_dlq_topics,
         )
@@ -6442,6 +6589,7 @@ def _wire_handler_entry(
     dispatch_engine: object,
     event_bus: object | None = None,
     container: object | None = None,
+    topology: ModelDeploymentTopology | None = None,
 ) -> tuple[str, list[str]]:
     """Prepare and immediately commit one handler entry (single-contract shortcut).
 
@@ -6463,5 +6611,6 @@ def _wire_handler_entry(
         ownership_query=ownership_query,
         event_bus=event_bus,
         container=container,
+        topology=topology,
     )
     return _commit_handler_wiring(prepared, dispatch_engine)

@@ -25,6 +25,7 @@ from omnibase_core.services.service_local_handler_ownership_query import (
     ServiceLocalHandlerOwnershipQuery,
 )
 from omnibase_infra.protocols import ProtocolEventBusLike
+from omnibase_infra.runtime.auto_wiring.discovery import _parse_contract
 from omnibase_infra.runtime.auto_wiring.handler_wiring import (
     _prepare_handler_wiring,
     _read_state_io,
@@ -41,6 +42,7 @@ from omnibase_infra.runtime.auto_wiring.models import (
 )
 from omnibase_infra.runtime.message_dispatch_engine import MessageDispatchEngine
 from omnibase_infra.runtime.state_io.state_store_adapter import StateIoUnconfiguredError
+from tests.helpers.application_db_topology import application_topology
 
 _THIS_MODULE = "tests.unit.runtime.test_handler_wiring_state_io"
 _PATCH_IMPORT_HANDLER_CLASS = (
@@ -69,7 +71,16 @@ def _write_contract(
     contract_path = tmp_path / "contract.yaml"
     body = "name: node_local\n"
     if db_io:
-        body += "db_io:\n  db_tables:\n    - name: some_table\n      database: omnidash_analytics\n"
+        body += (
+            "db_io:\n"
+            "  db_tables:\n"
+            "    - name: some_table\n"
+            "      database_ref: application\n"
+            "      schema: tenant\n"
+            "      migration: tests/some_table.sql\n"
+            "      access: read_write\n"
+            "      role: fixture_projection\n"
+        )
     if state_io:
         body += (
             "state_io:\n"
@@ -84,21 +95,23 @@ def _write_contract(
 def _contract(
     contract_path: Path, entry: ModelHandlerRoutingEntry
 ) -> ModelDiscoveredContract:
-    return ModelDiscoveredContract(
-        name="node_local",
-        node_type="EFFECT_GENERIC",
-        contract_version=ModelContractVersion(major=1, minor=0, patch=0),
+    discovered = _parse_contract(
         contract_path=contract_path,
         entry_point_name="node_local",
         package_name="test-pkg",
-        event_bus=ModelEventBusWiring(
-            subscribe_topics=("onex.cmd.test-service.shared-command.v1",),
-            publish_topics=(),
-        ),
-        handler_routing=ModelHandlerRouting(
-            routing_strategy="operation_match",
-            handlers=(entry,),
-        ),
+        package_version="1.0.0",
+    )
+    return discovered.model_copy(
+        update={
+            "event_bus": ModelEventBusWiring(
+                subscribe_topics=("onex.cmd.test-service.shared-command.v1",),
+                publish_topics=(),
+            ),
+            "handler_routing": ModelHandlerRouting(
+                routing_strategy="operation_match",
+                handlers=(entry,),
+            ),
+        }
     )
 
 
@@ -114,7 +127,12 @@ def _entry(with_event_model: bool = False) -> ModelHandlerRoutingEntry:
     )
 
 
-def _prepare(contract_path: Path, entry: ModelHandlerRoutingEntry) -> object:
+def _prepare(
+    contract_path: Path,
+    entry: ModelHandlerRoutingEntry,
+    *,
+    include_topology: bool = True,
+) -> object:
     contract = _contract(contract_path, entry)
     ownership = ServiceLocalHandlerOwnershipQuery(
         local_node_names=frozenset({contract.name})
@@ -129,6 +147,7 @@ def _prepare(contract_path: Path, entry: ModelHandlerRoutingEntry) -> object:
             ownership_query=ownership,
             event_bus=None,
             container=None,
+            topology=application_topology() if include_topology else None,
         )
 
 
@@ -168,6 +187,14 @@ def test_db_io_only_selects_projection_callback(tmp_path: Path) -> None:
     assert prepared.dispatcher.__qualname__.startswith(  # type: ignore[attr-defined]
         "_make_projection_dispatch_callback"
     )
+
+
+@pytest.mark.unit
+def test_db_io_without_checked_in_topology_fails_closed(tmp_path: Path) -> None:
+    contract_path = _write_contract(tmp_path, db_io=True)
+
+    with pytest.raises(ModelOnexError, match="no checked-in ModelDeploymentTopology"):
+        _prepare(contract_path, _entry(), include_topology=False)
 
 
 @pytest.mark.unit
