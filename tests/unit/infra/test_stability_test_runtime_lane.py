@@ -159,7 +159,8 @@ def test_stability_lane_runtime_services_do_not_reuse_production_names() -> None
 def test_stability_lane_runtime_worker_is_not_scaled_to_zero() -> None:
     """OMN-12990: the worker replica count must fail-fast on the ledgered value.
 
-    The base compose default is ``${WORKER_REPLICAS:-0}``; a soft ``:-1`` default
+    The base compose default used to be a bare ``${WORKER_REPLICAS:-0}``
+    (lane-prefixed and fail-closed since OMN-14968); a soft ``:-1`` default
     here would silently re-introduce the silent-drop hole on any recreate that
     omitted the policy env. The override must reference the contract-rendered
     ``STABILITY_TEST_WORKER_REPLICAS`` with the ``:?`` fail-fast form so a missing

@@ -183,9 +183,11 @@ def test_compose_consumes_policy_env_instead_of_hardcoded_policy_values() -> Non
 def test_worker_replicas_pinned_in_contract_for_every_lane() -> None:
     """OMN-12990: each lane's worker process declares an explicit replica pin.
 
-    The base compose default is ``${WORKER_REPLICAS:-0}`` (silent drop). The
-    contract worker process must carry a contract-declared replica count >= 1 so
-    the rendered policy env preserves the worker on a lane recreate.
+    The contract worker process must carry a contract-declared replica count
+    >= 1 so the rendered policy env preserves the worker on a lane recreate.
+    Every lane's compose surface resolves that pin fail-closed (OMN-14968); a
+    lane whose contract dropped below 1 would push a zero-container lane through
+    a render that cannot detect it.
     """
     contract = _load_contract()
 
@@ -208,18 +210,34 @@ def test_worker_replicas_rendered_into_policy_env_for_every_lane() -> None:
 
 
 def test_runtime_worker_replicas_are_fail_fast_not_silent_default() -> None:
-    """OMN-12990: lane overrides reference the policy value with fail-fast ``:?``.
+    """OMN-12990 / OMN-14968: EVERY lane surface resolves replicas fail-fast.
 
-    A soft ``:-1`` / ``:-0`` default would silently re-introduce the silent-drop
-    hole on any recreate that omitted the policy env. The base compose keeps its
-    ``${WORKER_REPLICAS:-0}`` default (that is the gap the overrides close), so a
-    plain recreate against the base alone still scales to zero — by design the
-    lane overrides MUST be applied, and they now abort loudly when the policy env
-    is missing rather than dropping the worker with no signal.
+    A soft ``:-1`` / ``:-0`` default silently re-introduces the silent-drop hole
+    on any recreate that omits the policy env.
+
+    OMN-12990 converted the stability-test and prod overlays but left the base
+    infra compose on a BARE ``${WORKER_REPLICAS:-0}``. That bare name is exported
+    by no surface in this repo, so it always took the ``0`` branch — and the base
+    file with no overlay IS the dev lane, so the dev lane rendered a
+    zero-container worker, `up` created nothing, and the RT-6 deploy readback in
+    ``scripts/deploy-runtime.sh`` (whose ``RUNTIME_SERVICES`` includes
+    ``runtime-worker``) failed closed on every dev-lane deploy. OMN-14968 closed
+    it with the lane-prefixed ``${DEV_WORKER_REPLICAS:?...}`` form used by the
+    sibling ``DEV_RUNTIME_WORKER_*`` vars in the same service block.
     """
+    base_text = COMPOSE_PATH.read_text(encoding="utf-8")
     stability_text = STABILITY_COMPOSE_PATH.read_text(encoding="utf-8")
     prod_text = PROD_COMPOSE_PATH.read_text(encoding="utf-8")
 
+    assert "${DEV_WORKER_REPLICAS:?" in base_text, (
+        "the base infra compose (the dev lane's own compose file) must resolve "
+        "worker replicas fail-fast on the ledgered DEV_WORKER_REPLICAS"
+    )
+    assert "${DEV_WORKER_REPLICAS:-" not in base_text
+    assert "replicas: ${WORKER_REPLICAS" not in base_text, (
+        "the bare WORKER_REPLICAS name is exported by no surface in this repo; "
+        "it always resolved to the silent 0 default (OMN-14968)"
+    )
     assert "${STABILITY_TEST_WORKER_REPLICAS:?" in stability_text, (
         "stability worker replicas must be fail-fast on the ledgered policy value"
     )

@@ -436,9 +436,10 @@ def test_stability_lane_render_contains_isolated_runtime_identity() -> None:
 def test_stability_lane_render_pins_worker_replicas_to_one() -> None:
     """The stability worker must render with deploy.replicas == 1 (OMN-12988).
 
-    The base infra compose defaults runtime-worker to replicas 0
-    (``${WORKER_REPLICAS:-0}``); without a hard pin in the stability override a
-    plain compose recreate silently drops the worker (4-container census). This
+    The base infra compose used to default runtime-worker to replicas 0 via a
+    bare ``${WORKER_REPLICAS:-0}`` (lane-prefixed and fail-closed since
+    OMN-14968); without a hard pin in the stability override a plain compose
+    recreate silently drops the worker (4-container census). This
     ratchet fails if the override regresses to 0 or to an env-interpolation
     default that resolves to anything other than 1.
     """

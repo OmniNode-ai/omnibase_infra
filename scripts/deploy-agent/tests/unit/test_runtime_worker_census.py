@@ -4,9 +4,11 @@
 
 The stability-test lane's required state includes a running ``runtime-worker``
 container (4-container census: main, effects, worker, projection-api). The base
-``docker-compose.infra.yml`` defaults the worker to ``replicas: 0``
-(``${WORKER_REPLICAS:-0}``), so a plain compose ``up``/recreate that does not
-set replicas silently drops the worker — zero errors, zero signal.
+``docker-compose.infra.yml`` used to default the worker to ``replicas: 0`` via a
+bare ``${WORKER_REPLICAS:-0}``, so a plain compose ``up``/recreate that did not
+set replicas silently dropped the worker — zero errors, zero signal. OMN-14968
+made that base line lane-prefixed and fail-closed (``${DEV_WORKER_REPLICAS:?}``)
+as well; the census ratchets below stay the runtime-side backstop.
 
 Two ratchets guard against that:
 
@@ -47,13 +49,26 @@ def test_runtime_worker_in_runtime_scope_census() -> None:
     assert "runtime-worker" in services_for_scope(Scope.FULL)
 
 
-def test_stability_override_pins_worker_replicas_to_literal_one() -> None:
-    """The stability override pins worker ``replicas: 1`` as a literal.
+def test_stability_override_pins_worker_replicas_fail_closed() -> None:
+    """The stability override pins worker replicas fail-closed on the policy value.
 
-    Env indirection (``${STABILITY_TEST_WORKER_REPLICAS:-1}``) is a silent-drop
-    surface: an exported ``STABILITY_TEST_WORKER_REPLICAS=0`` or a future edit
-    removing the ``:-1`` fallback would scale the worker to 0 with no signal.
-    The pin must be the literal integer ``1``.
+    A SOFT env indirection (``${STABILITY_TEST_WORKER_REPLICAS:-1}``) is the
+    silent-drop surface: an exported ``STABILITY_TEST_WORKER_REPLICAS=0``, or a
+    future edit removing the ``:-1`` fallback, scales the worker to 0 with no
+    signal.
+
+    OMN-12988 first closed that with a LITERAL ``1``. OMN-12990 then deliberately
+    replaced the literal with the ledgered, fail-fast
+    ``${STABILITY_TEST_WORKER_REPLICAS:?...}`` form so the value comes from
+    ``contracts/services/runtime_policy.contract.yaml`` and a recreate that omits
+    the policy env ABORTS instead of dropping the worker. This test kept asserting
+    the superseded literal and has been RED since 2026-06-23 — invisible because
+    ``scripts/deploy-agent/tests/`` is a separate pytest root that the repo suite
+    does not collect. Corrected under OMN-14968, which applied the same fail-closed
+    form to the base compose (dev lane) as ``${DEV_WORKER_REPLICAS:?...}``.
+
+    Accepted: the literal ``1``, or a ``:?`` fail-fast reference to the ledgered
+    lane value. Rejected: any ``:-`` soft default, and a literal ``0``.
     """
     # The stability override uses docker compose custom tags (!override,
     # !!merge) that yaml.safe_load cannot parse, so assert against the raw text:
@@ -80,8 +95,13 @@ def test_stability_override_pins_worker_replicas_to_literal_one() -> None:
     )
 
     value = replicas_line.group(1)
-    assert value == "1", (
-        "stability-test runtime-worker must pin deploy.replicas to the literal "
-        f"integer 1 (no env-interpolation default that could silently scale to "
-        f"0), got {value!r}"
+    assert value == "1" or value.startswith("${STABILITY_TEST_WORKER_REPLICAS:?"), (
+        "stability-test runtime-worker must pin deploy.replicas either to the "
+        "literal integer 1 or to the ledgered policy value with the ':?' "
+        "fail-fast form (OMN-12990); a soft ':-' default can silently scale the "
+        f"worker to 0, got {value!r}"
+    )
+    assert ":-" not in value, (
+        "a soft ':-' default re-opens the silent-drop hole: a recreate that omits "
+        f"the policy env would scale the worker without any signal, got {value!r}"
     )
