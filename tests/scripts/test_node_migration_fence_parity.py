@@ -15,14 +15,12 @@ discovered.
 Live readback 2026-07-28/29 on ``.201`` (read-only, four lanes, db
 ``omnidash_analytics``):
 
-===================  ===========================  ==========================
-lane                 gated ids in ledger          relforcerowsecurity tables
-===================  ===========================  ==========================
-dev (compose)        all 6 (+ registration 0002)  6
-stability-test       all 6 (+ registration 0002)  6
-prod                 registration 0000/0001 only  0
-judge                registration 0000/0001 only  0
-===================  ===========================  ==========================
+* dev (compose)   — all 6 gated ids in the ledger (+ registration 0002); 6
+  tables with ``relforcerowsecurity``
+* stability-test  — all 6 gated ids in the ledger (+ registration 0002); 6
+  tables with ``relforcerowsecurity``
+* prod            — only registration 0000/0001; ZERO forced tables
+* judge           — only registration 0000/0001; ZERO forced tables
 
 So the breach is wider than the ticket recorded (stability-test, the designated
 proof lane, is also over the fence), AND the prod + judge compose lanes are
@@ -39,17 +37,20 @@ Both runners walk the SAME vendored SQL tree
 ``node:<node>:<filename>``. The fence is therefore a shared list over a shared
 id space, matched field-by-field:
 
-===========================  ==========================================  ===========================================
-field                        omninode_infra k8s Job                      this repo's compose runner
-===========================  ==========================================  ===========================================
-id grammar                   ``node:${node_name}:$(basename $sql_file)`` ``node:${node_name}:${filename}``
-list contents + ORDER        ``FENCED_NODE_MIGRATION_IDS=( ... )``       ``FENCED_NODE_MIGRATION_IDS="..."``
-match                        exact string equality per element           ``grep -Fxq`` (exact whole-line)
-position in loop             before the already-applied probe            before the already-applied probe
-on match                     log + ``node_skipped++`` + ``continue``     log + ``NODE_SKIPPED++`` + ``continue``
-ledger row written           NO                                          NO
-env-overridable              NO (literal array)                          NO (unconditional assignment)
-===========================  ==========================================  ===========================================
+Each field is stated as ``<field>: k8s Job -> compose runner``.
+
+* id grammar: ``node:${node_name}:$(basename "$sql_file")`` ->
+  ``node:${node_name}:${filename}`` — identical strings.
+* list contents AND order: ``FENCED_NODE_MIGRATION_IDS=( ... )`` (bash array) ->
+  ``FENCED_NODE_MIGRATION_IDS="..."`` (newline-delimited string); same six ids,
+  same order.
+* match: exact string equality per element -> ``grep -Fxq`` (exact whole-line).
+* position in loop: before the already-applied probe -> before the
+  already-applied probe.
+* on match: log + ``node_skipped++`` + ``continue`` -> log + ``NODE_SKIPPED++``
+  + ``continue``.
+* ledger row written: NO -> NO.
+* env-overridable: NO (literal array) -> NO (unconditional assignment).
 
 Syntax differs and must: the k8s Job runs ``bash`` (arrays, ``set -euo
 pipefail``); this runner is ``#!/bin/sh`` under busybox ash in the migration
