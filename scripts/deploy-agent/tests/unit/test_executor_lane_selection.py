@@ -7,7 +7,12 @@ The executor previously hardcoded the dev lane (``docker-compose.infra.yml`` /
 file(s), compose project, and runtime health targets by ``runtime_lane`` so the
 agent can deploy ``stability-test`` (18085/18086, project
 ``omnibase-infra-stability-test``) and ``prod`` (28085/28086, project
-``omnibase-infra-prod``). The dev lane is unchanged.
+``omnibase-infra-prod``).
+
+OMN-15379 later gave the dev/lab lane its own overlay too
+(``docker-compose.dev-lane.yml``) — the migration-fence lane indicator, per
+operator ruling 15 making the lab the FORCE proving ground. Dev is no longer
+single-file; it layers exactly like stability-test and prod do.
 """
 
 from __future__ import annotations
@@ -48,7 +53,10 @@ class TestLaneConfig:
         cfg = lane_config_for(EnumRuntimeLane.DEV)
         assert cfg.compose_project == COMPOSE_PROJECT == "omnibase-infra"
         assert cfg.postgres_container == "omnibase-infra-postgres"
-        assert cfg.compose_files == (COMPOSE_FILE,)
+        # OMN-15379: dev/lab now layers its own migration-fence overlay on top
+        # of the base infra compose file (previously single-file).
+        assert cfg.compose_files[0] == COMPOSE_FILE
+        assert any("docker-compose.dev-lane.yml" in f for f in cfg.compose_files)
         assert cfg.runtime_health_targets == RUNTIME_HEALTH_TARGETS
         assert cfg.runtime_health_targets == (
             ("omninode-runtime", 8085),
@@ -115,8 +123,9 @@ class TestComposeUpLaneSelection:
         assert cmd[3] == COMPOSE_FILE
         assert "-p" in cmd
         assert cmd[cmd.index("-p") + 1] == "omnibase-infra"
-        # dev does not layer an overlay
-        assert cmd.count("-f") == 1
+        # OMN-15379: dev/lab layers its own migration-fence overlay.
+        assert cmd.count("-f") == 2, f"dev lane must layer its overlay: {cmd}"
+        assert any("docker-compose.dev-lane.yml" in tok for tok in cmd)
 
     def test_stability_lane_compose_up_layers_overlay_and_project(self) -> None:
         executor = DeployExecutor()
