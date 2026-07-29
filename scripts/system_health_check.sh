@@ -14,6 +14,12 @@
 #   --json          Output results as JSON
 #   --ci            Non-interactive mode (implies --json, sets exit codes for CI)
 #   --cross-repo    Enable cross-repo checks (env audit, cloud bus refs)
+#   --lane          Lane-liveness subset ONLY (dev_lane_liveness, redpanda,
+#                   runtime_containers). Runs from a containerized CI runner
+#                   with only docker.sock + network access — deliberately
+#                   skips the checks that need POSTGRES_HOST / VALKEY_HOST /
+#                   INFISICAL_* credentials. This is the mode the scheduled
+#                   enforcement surface runs (OMN-15190).
 #   --verbose       Show detailed output for each check
 #   --help          Show this help message
 #
@@ -27,15 +33,34 @@
 #   3.  valkey            - Valkey (Redis-compatible) connectivity
 #   4.  infra_containers  - Core infra containers running
 #   5.  keycloak          - Keycloak auth (yellow if not running)
-#   6.  runtime_containers - Runtime profile containers (yellow if not running)
+#   6.  runtime_containers - Runtime profile containers (RED under keep-alive)
 #   7.  required_topics   - Required Kafka topics exist
 #   8.  migration_parity  - Docker and src migration directories in sync
 #   9.  env_audit         - No rogue .env files (--cross-repo only)
 #  10.  cloud_bus_refs    - No unsuppressed 29092 references (--cross-repo only)  # cloud-bus-ok OMN-4922
 #  11.  bus_endpoint      - KAFKA_BOOTSTRAP_SERVERS must not contain 29092  # cloud-bus-ok OMN-4922
 #  12.  infisical_folders - /shared/<transport>/ folders exist in Infisical (when INFISICAL_ADDR is set)
+#  13.  dev_lane_liveness - The lab/dev compose lane is UP and reachable on the
+#                           exact path CI publishers use (OMN-15190)
 #
-# OMN-3772 OMN-3903
+# LANE KEEP-ALIVE (ONEX_LANE_KEEPALIVE, default 1 — operator ruling 2026-07-29)
+#
+#   The lab/dev lane used to be documented as ephemeral-by-design (OMN-13414):
+#   GC/idle-reclaimed to zero containers between uses, rediscovered reactively
+#   by whichever PR happened to hit the resulting CI cascade. That posture is
+#   REVERSED by operator ruling (WS-4): the lab lane is KEEP-ALIVE, because
+#   testing things live is the entire point of the lab. Lane-down is therefore
+#   a DEFECT, not an expected state.
+#
+#   This file is where that ruling changes behavior. Before it, a fully
+#   torn-down lane scored `runtime_containers: yellow ("none running — runtime
+#   profile not active")`, and yellow exits 0 — i.e. the canonical health gate
+#   reported SUCCESS on a lane that was stranding every repo's
+#   occ-autobind / occ-companion-effect publish with connection-refused.
+#   Under keep-alive those states are RED. Set ONEX_LANE_KEEPALIVE=0 to restore
+#   the advisory posture for a lane that genuinely is ephemeral.
+#
+# OMN-3772 OMN-3903 OMN-15190
 
 set -euo pipefail
 
@@ -50,6 +75,43 @@ FLAG_JSON=false
 FLAG_CI=false
 FLAG_CROSS_REPO=false
 FLAG_VERBOSE=false
+FLAG_LANE=false
+
+# ----- Lane keep-alive posture (OMN-15190) -----
+# 1 = the lab/dev lane is expected to be UP at all times (operator ruling
+# 2026-07-29). 0 = pre-ruling ephemeral posture, lane-absent is advisory only.
+LANE_KEEPALIVE="${ONEX_LANE_KEEPALIVE:-1}"
+
+# Lane identity + probe targets come from the rendered service contract
+# (docker/runtime-policy.env, generated from contracts/services/
+# runtime_policy.contract.yaml) — the same source refresh_dev_lane.sh reads,
+# so the lane this check watches cannot drift from the lane the refresh
+# script deploys.
+#
+# Read by targeted key extraction, NOT `source`: that file is a generated
+# artifact whose key set changes when the contract is re-rendered, and
+# sourcing it into this script's global scope would let a future render
+# silently redefine POSTGRES_* / VALKEY_* / KAFKA_BOOTSTRAP_SERVERS and
+# change what the OTHER checks in this file are asserting. Two keys are
+# wanted; two keys are read.
+policy_env_value() {
+    local key="$1" file="${REPO_ROOT}/docker/runtime-policy.env"
+    [[ -f "$file" ]] || return 0
+    sed -n "s/^${key}=//p" "$file" | tail -n 1 | tr -d "\"'"
+}
+DEV_LANE_COMPOSE_PROJECT="${DEV_LANE_COMPOSE_PROJECT:-$(policy_env_value DEV_COMPOSE_PROJECT)}"
+DEV_LANE_COMPOSE_PROJECT="${DEV_LANE_COMPOSE_PROJECT:-omnibase-infra}"
+DEV_LANE_MAIN_PORT="${DEV_LANE_MAIN_PORT:-$(policy_env_value DEV_RUNTIME_MAIN_PORT)}"
+DEV_LANE_MAIN_PORT="${DEV_LANE_MAIN_PORT:-8085}"
+# The broker host-port CI publishers connect to. No contract var exists for it
+# (the contract renders in-cluster addresses); this is the PUBLISHED host port
+# that occ-autobind / occ-companion-effect dial.
+DEV_LANE_BROKER_PORT="${DEV_LANE_BROKER_PORT:-19092}"
+# fallback-ok: localhost IS the lane host in the documented primary context
+# (this script runs ON the lane host); the containerized deploy runner
+# overrides via compose env LANE_PROBE_HOST=host.docker.internal (OMN-14958),
+# exactly as refresh_dev_lane.sh / refresh_stability_lane.sh do.
+LANE_PROBE_HOST="${LANE_PROBE_HOST:-localhost}" # fallback-ok: localhost IS the lane host when this script runs ON the lane host (its documented primary context); the containerized deploy runner overrides via LANE_PROBE_HOST=host.docker.internal (OMN-14958), same as refresh_dev_lane.sh
 
 # ----- State -----
 OVERALL_STATUS="green"   # green | yellow | red
@@ -105,6 +167,7 @@ while [[ $# -gt 0 ]]; do
         --json)       FLAG_JSON=true; shift ;;
         --ci)         FLAG_CI=true; FLAG_JSON=true; shift ;;
         --cross-repo) FLAG_CROSS_REPO=true; shift ;;
+        --lane)       FLAG_LANE=true; shift ;;
         --verbose)    FLAG_VERBOSE=true; shift ;;
         --help|-h)    show_help ;;
         *) echo "Unknown option: $1" >&2; exit 2 ;;
@@ -251,13 +314,162 @@ check_runtime_containers() {
         fi
     done
 
+    # OMN-15190: under the keep-alive ruling a missing runtime service is a
+    # DEFECT, not "profile not active". Yellow exits 0, so the pre-ruling
+    # severity made this gate report success on a lane that was down.
+    local absent_severity="yellow"
+    local absent_note=" (runtime profile not active)"
+    if [[ "$LANE_KEEPALIVE" == "1" ]]; then
+        absent_severity="red"
+        absent_note=" — lab lane is KEEP-ALIVE (ONEX_LANE_KEEPALIVE=1), a missing runtime service is a defect"
+    fi
+
     if [[ ${#missing[@]} -eq 0 ]]; then
         log_check "$name" "green" "all runtime containers running (${found}/${#expected[@]})"
     elif [[ $found -gt 0 ]]; then
-        log_check "$name" "yellow" "partial: ${found}/${#expected[@]} running, missing: ${missing[*]}"
+        log_check "$name" "$absent_severity" "partial: ${found}/${#expected[@]} running, missing: ${missing[*]}${absent_note}"
     else
-        log_check "$name" "yellow" "none running (runtime profile not active)"
+        log_check "$name" "$absent_severity" "none running${absent_note}"
     fi
+}
+
+# Bounded TCP connect probe.
+#
+# Deliberately NOT `nc -w`: that flag bounds READS, not the connect itself, so
+# an `nc -w 5` against a black-holed host can hang far past the timeout
+# (memory `reference_nc_w_flag_does_not_bound_connect`). bash's /dev/tcp does
+# the connect; the bound comes from coreutils `timeout` where present and from
+# an explicit watchdog otherwise, so this works on the BSD-userland gate host
+# where `timeout` is absent.
+#
+# Returns 0 when the port accepts a connection, 1 otherwise.
+tcp_probe() {
+    local host="$1" port="$2" secs="${3:-5}"
+
+    if command -v timeout >/dev/null 2>&1; then
+        timeout "$secs" bash -c "exec 3<>/dev/tcp/${host}/${port}" 2>/dev/null
+        return $?
+    fi
+
+    ( exec 3<>/dev/tcp/"${host}"/"${port}" ) 2>/dev/null &
+    local probe_pid=$!
+    local waited=0
+    while kill -0 "$probe_pid" 2>/dev/null && [[ "$waited" -lt "$secs" ]]; do
+        sleep 1
+        waited=$((waited + 1))
+    done
+    if kill -0 "$probe_pid" 2>/dev/null; then
+        kill -9 "$probe_pid" 2>/dev/null || true
+        wait "$probe_pid" 2>/dev/null || true
+        return 1
+    fi
+    wait "$probe_pid"
+}
+
+check_dev_lane_liveness() {
+    local name="dev_lane_liveness"
+    local project="$DEV_LANE_COMPOSE_PROJECT"
+
+    # Indeterminate is not health. A check that cannot see the lane must not
+    # report the lane as fine — that is the exact inversion OMN-13915 shipped.
+    if ! command -v docker >/dev/null 2>&1; then
+        log_check "$name" "red" "docker CLI unavailable — lane liveness is unprovable (fail-closed)"
+        return
+    fi
+
+    local rows
+    if ! rows=$(docker ps -a --filter "label=com.docker.compose.project=${project}" \
+        --format '{{.Names}}|{{.State}}|{{.Status}}' 2>&1); then
+        log_check "$name" "red" "docker daemon unreachable: $(json_escape "$rows") (fail-closed)"
+        return
+    fi
+
+    # The compose PROJECT LABEL is the membership oracle, not a hardcoded
+    # container-name list: the dev lane's compose file leaves some services
+    # without an explicit container_name (compose-assigned), so a name map
+    # silently under-counts — the same trap verify_dev_refresh.py documents.
+    local total=0
+    [[ -n "$rows" ]] && total=$(printf '%s\n' "$rows" | grep -c '|')
+
+    if [[ "$total" -eq 0 ]]; then
+        if [[ "$LANE_KEEPALIVE" == "1" ]]; then
+            log_check "$name" "red" \
+                "compose project '${project}' has ZERO containers — the lab lane is fully GC/idle-reclaimed (OMN-15190). Under the keep-alive ruling this is a defect: while it is down, every repo's occ-autobind / occ-companion-effect publish fails connection-refused and cascades into occ-preflight / Receipt Gate org-wide. Recovery: docs/runbooks/cold-lane-full-bringup.md"
+        else
+            log_check "$name" "yellow" \
+                "compose project '${project}' has ZERO containers (ONEX_LANE_KEEPALIVE=0 — lane treated as ephemeral per OMN-13414)"
+        fi
+        return
+    fi
+
+    local running=0
+    local exited_nonzero=() not_running=() unhealthy=()
+    local cname cstate cstatus
+    while IFS='|' read -r cname cstate cstatus; do
+        [[ -z "$cname" ]] && continue
+        case "$cstate" in
+            running)
+                ((running++)) || true
+                # Docker health is used here ONLY as a secondary signal. It is
+                # never the sole verdict (OMN-13915: 37/48 runners sat
+                # "Up (healthy)" with a dead listener; OMN-15233: 59/64 read
+                # unhealthy while the registry said 64/64 online).
+                [[ "$cstatus" == *"(unhealthy)"* ]] && unhealthy+=("$cname")
+                ;;
+            exited)
+                # One-shots (migrations, provisioners) legitimately exit 0. A
+                # NONZERO exit is a real failure that leaves the lane serving
+                # with an unapplied schema — the OMN-15312 class, which is
+                # invisible to every "is it up?" probe.
+                if [[ "$cstatus" =~ Exited\ \(([0-9]+)\) ]]; then
+                    [[ "${BASH_REMATCH[1]}" != "0" ]] && exited_nonzero+=("${cname}(exit ${BASH_REMATCH[1]})")
+                fi
+                ;;
+            *)
+                # created / restarting / dead / paused — a container stuck in
+                # any of these in a keep-alive lane is a defect, and
+                # `restarting` specifically is a crash loop.
+                not_running+=("${cname}(${cstate})")
+                ;;
+        esac
+    done <<< "$rows"
+
+    # Reachability on the EXACT path the CI publishers use. This is the signal
+    # that actually decides whether the org's receipt path works; container
+    # state alone does not (a running broker with an unpublished/unroutable
+    # host port strands CI just as completely as a torn-down lane).
+    local red_reasons=()
+    if ! tcp_probe "$LANE_PROBE_HOST" "$DEV_LANE_BROKER_PORT" 5; then
+        red_reasons+=("broker ${LANE_PROBE_HOST}:${DEV_LANE_BROKER_PORT} refused connection (the occ-autobind / occ-companion-effect publish path)")
+    fi
+    local http_code
+    http_code=$(curl -s -o /dev/null -w '%{http_code}' --connect-timeout 3 --max-time 8 \
+        "http://${LANE_PROBE_HOST}:${DEV_LANE_MAIN_PORT}/health" 2>/dev/null) || http_code="000"
+    if [[ "$http_code" != "200" ]]; then
+        red_reasons+=("runtime /health on ${LANE_PROBE_HOST}:${DEV_LANE_MAIN_PORT} returned ${http_code}")
+    fi
+    [[ ${#exited_nonzero[@]} -gt 0 ]] && red_reasons+=("nonzero-exit container(s): ${exited_nonzero[*]}")
+    [[ ${#not_running[@]} -gt 0 ]] && red_reasons+=("not-running container(s): ${not_running[*]}")
+
+    local census="${total} container(s), ${running} running, probe host ${LANE_PROBE_HOST}"
+    if [[ ${#red_reasons[@]} -gt 0 ]]; then
+        local joined="${red_reasons[0]}"
+        local i
+        for ((i = 1; i < ${#red_reasons[@]}; i++)); do
+            joined="${joined}; ${red_reasons[$i]}"
+        done
+        log_check "$name" "red" "lane '${project}' DEGRADED — ${joined} [${census}]"
+        return
+    fi
+
+    if [[ ${#unhealthy[@]} -gt 0 ]]; then
+        # Advisory, not red: a running-but-unhealthy sidecar does not strand
+        # the CI publish path, and a permanently-red check is a disabled check.
+        log_check "$name" "yellow" "lane '${project}' serving, but docker-unhealthy: ${unhealthy[*]} [${census}]"
+        return
+    fi
+
+    log_check "$name" "green" "lane '${project}' up and reachable — broker :${DEV_LANE_BROKER_PORT} open, /health 200 [${census}]"
 }
 
 check_required_topics() {
@@ -477,18 +689,31 @@ if [[ "$FLAG_JSON" == "false" ]]; then
     echo ""
 fi
 
-check_postgres
-check_redpanda
-check_valkey
-check_infra_containers
-check_keycloak
-check_runtime_containers
-check_required_topics
-check_migration_parity
-check_env_audit
-check_cloud_bus_refs
-check_bus_endpoint
-check_infisical_folders
+if [[ "$FLAG_LANE" == "true" ]]; then
+    # Lane-liveness subset (OMN-15190). Runs from the containerized deploy
+    # runner, which has docker.sock + host-gateway network reachability but
+    # none of the POSTGRES_/VALKEY_/INFISICAL_ credentials the full gate
+    # needs — so the full gate cannot BE the scheduled surface, and a
+    # credential-less full run would die on `${POSTGRES_HOST:?}` instead of
+    # reporting on the lane.
+    check_dev_lane_liveness
+    check_redpanda
+    check_runtime_containers
+else
+    check_postgres
+    check_redpanda
+    check_valkey
+    check_infra_containers
+    check_keycloak
+    check_runtime_containers
+    check_required_topics
+    check_migration_parity
+    check_env_audit
+    check_cloud_bus_refs
+    check_bus_endpoint
+    check_infisical_folders
+    check_dev_lane_liveness
+fi
 
 # =====================================================================
 # Output
@@ -517,7 +742,9 @@ if [[ "$FLAG_JSON" == "true" ]]; then
   "flags": {
     "cross_repo": ${FLAG_CROSS_REPO},
     "ci": ${FLAG_CI},
-    "verbose": ${FLAG_VERBOSE}
+    "lane": ${FLAG_LANE},
+    "verbose": ${FLAG_VERBOSE},
+    "lane_keepalive": "${LANE_KEEPALIVE}"
   }
 }
 EOF
