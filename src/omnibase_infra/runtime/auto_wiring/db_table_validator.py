@@ -1,93 +1,77 @@
 # SPDX-FileCopyrightText: 2025 OmniNode.ai Inc.
 # SPDX-License-Identifier: MIT
-"""Warning-based preflight validation for declared db_tables.
+"""Typed physical-table preflight for discovered ``db_io`` declarations.
 
-This module is a pre-wiring step that checks whether tables declared in
-contract db_io.db_tables actually exist in the target database before
-wire_from_manifest is called.
-
-This is the WARNING phase — does NOT block wiring. Strict blocking is
-deferred to Phase 2 once all contracts are complete and validated in
-production. Degraded operation is preferable to a hard startup failure
-for missing tables.
+Global exactly-one ownership is enforced by
+``validation.application_relation_ownership``. This optional runtime preflight
+has the narrower job of warning when an already-typed table is absent from the
+current PostgreSQL connection. It never parses raw contract dictionaries and it
+never invents a default database or schema.
 """
 
 from __future__ import annotations
 
 import logging
+from collections.abc import Sequence
+
+from omnibase_infra.runtime.auto_wiring.models import ModelDiscoveredContract
+from omnibase_infra.runtime.auto_wiring.models.model_db_table_validation_warning import (
+    ModelDbTableValidationWarning,
+)
+from omnibase_infra.runtime.auto_wiring.protocol_db_table_catalog_connection import (
+    ProtocolDbTableCatalogConnection,
+)
 
 logger = logging.getLogger(__name__)
 
 
-async def validate_db_tables(contracts: list[dict], db_conn: object) -> list[dict]:
-    """Preflight check: warn when declared db_tables don't exist in the target database.
-
-    Iterates over each contract's db_io.db_tables declarations and queries
-    pg_tables to verify existence. Returns structured warning dicts for any
-    missing table but does NOT raise — wiring continues regardless.
-
-    This is the warning phase. Strict blocking is Phase 2.
-
-    Args:
-        contracts: List of raw contract dicts (as loaded from contract.yaml).
-                   Each may contain a ``db_io.db_tables`` list.
-        db_conn:   An asyncpg connection (or compatible mock). Must support
-                   ``await conn.fetchval(query, *args)``.
-
-    Returns:
-        List of warning dicts. Each dict has keys:
-        - ``reason``: always ``"missing_db_table"``
-        - ``severity``: always ``"warning"``
-        - ``details``: dict with ``table``, ``database``, and ``node`` keys.
-        Empty list if all declared tables exist (or no tables are declared).
-    """
-    warnings: list[dict] = []
+async def validate_db_tables(
+    contracts: Sequence[ModelDiscoveredContract],
+    db_conn: ProtocolDbTableCatalogConnection,
+) -> tuple[ModelDbTableValidationWarning, ...]:
+    """Warn for typed declared tables absent from the current connection."""
+    warnings: list[ModelDbTableValidationWarning] = []
     for contract in contracts:
-        db_io = contract.get("db_io", {}) or {}
-        db_tables = db_io.get("db_tables", []) or []
-        for table_decl in db_tables:
-            table_name = table_decl.get("name")
-            if not table_name:
-                logger.warning(
-                    "Contract %s has a db_tables entry missing 'name'; skipping.",
-                    contract.get("name"),
-                )
+        if contract.db_io is None:
+            continue
+        for table in contract.db_io.db_tables:
+            exists = await _table_exists(db_conn, table.schema, table.name)
+            if exists:
                 continue
-            database = table_decl.get("database", "omnidash_analytics")
-            node_name = contract.get("name")
-            exists = await _table_exists(db_conn, table_name)
-            if not exists:
-                warnings.append(
-                    {
-                        "reason": "missing_db_table",
-                        "severity": "warning",
-                        "details": {
-                            "table": table_name,
-                            "database": database,
-                            "node": node_name,
-                        },
-                    }
-                )
-                logger.warning(
-                    "Node %s declares table %s but it does not exist in %s. "
-                    "Run migrations before starting this node.",
-                    node_name,
-                    table_name,
-                    database,
-                )
-    return warnings
+            warning = ModelDbTableValidationWarning(
+                table=table.name,
+                database_ref=table.database_ref,
+                schema=table.schema,
+                node=contract.name,
+            )
+            warnings.append(warning)
+            logger.warning(
+                "Node %s declares missing table %s.%s in database_ref=%s. "
+                "Run the declared migration before starting this node.",
+                contract.name,
+                table.schema,
+                table.name,
+                table.database_ref,
+            )
+    return tuple(warnings)
 
 
-async def _table_exists(db_conn: object, table_name: str) -> bool:
-    """Return True if *table_name* exists in pg_tables (public schema).
-
-    Uses a parameterised query against the PostgreSQL information schema to
-    avoid any possibility of SQL injection from contract-sourced table names.
-    Checks the current connection's database only.
-    """
-    # Why: Optional dependency or runtime adapter exposes this attribute dynamically.
-    row = await db_conn.fetchval(  # type: ignore[attr-defined]
-        "SELECT tablename FROM pg_tables WHERE schemaname = 'public' AND tablename = $1",
+async def _table_exists(
+    db_conn: ProtocolDbTableCatalogConnection,
+    schema: str,
+    table_name: str,
+) -> bool:
+    """Check the exact typed schema/name pair on the current connection."""
+    row = await db_conn.fetchval(
+        "SELECT tablename FROM pg_tables WHERE schemaname = $1 AND tablename = $2",
+        schema,
         table_name,
     )
     return row is not None
+
+
+__all__ = [
+    "ModelDbTableValidationWarning",
+    "ProtocolDbTableCatalogConnection",
+    "validate_db_tables",
+]

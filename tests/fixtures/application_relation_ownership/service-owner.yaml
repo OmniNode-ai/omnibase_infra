@@ -1,0 +1,42 @@
+# SPDX-FileCopyrightText: 2025 OmniNode.ai Inc.
+# SPDX-License-Identifier: MIT
+
+schema_version: "1.0"
+service: fixture_migration_runner
+target_database_ref: application
+db_io:
+  db_tables:
+    - name: schema_migrations
+      database_ref: application
+      schema: omninode_internal
+      migration: run-migrations.py
+      access: read_write
+      role: canonical_migration_ledger
+relation_evidence:
+  - name: schema_migrations
+    kind: table
+    domain: OMNINODE_INTERNAL
+    owner_declaration: service:fixture_migration_runner
+    readers: [fixture_migration_runner]
+  - name: projection_delegation_summary
+    kind: view
+    database_ref: application
+    schema: tenant
+    domain: TENANT
+    owner_declaration: service:fixture_migration_runner
+    readers: [onex_api]
+  - name: projection_delegation_rollup
+    kind: materialized_view
+    database_ref: application
+    schema: omninode_internal
+    domain: OMNINODE_INTERNAL
+    owner_declaration: service:fixture_migration_runner
+    readers: [omninode_runtime]
+database_objects:
+  - name: resolve_delegation_state
+    kind: function
+    database_ref: application
+    schema: platform_catalog
+    domain: PLATFORM_CATALOG
+    owner_declaration: service:fixture_migration_runner
+    readers: [onex_api]
