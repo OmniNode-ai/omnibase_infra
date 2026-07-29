@@ -8,7 +8,7 @@ group, blocks CUTOVER while old lag remains, and rejects backward transitions.
 
 from __future__ import annotations
 
-from uuid import uuid4
+from uuid import UUID, uuid4
 
 import pytest
 
@@ -34,16 +34,35 @@ from omnibase_infra.nodes.node_topic_migration_executor_effect.handlers.handler_
 from omnibase_infra.nodes.node_topic_migration_executor_effect.models.model_topic_migration_command import (
     ModelTopicMigrationCommand,
 )
+from omnibase_infra.topics.model_topic_spec import ModelTopicSpec
 
 pytestmark = pytest.mark.unit
 
 
 class _RecordingProvisioner:
+    """Records the FULL call, matching ``ProtocolTopicProvisioner``'s shape.
+
+    OMN-15395: the previous fake accepted only ``topic_name``, which silently
+    validated the handler dropping its built ``ModelTopicSpec`` — the new topic
+    was then created at the provisioner's bare default replication factor
+    instead of the migration's declared one. A fake that cannot receive the spec
+    cannot catch a spec that never arrives.
+    """
+
     def __init__(self) -> None:
         self.provisioned: list[str] = []
+        self.specs: list[ModelTopicSpec | None] = []
 
-    async def ensure_topic_exists(self, topic_name: str) -> bool:
+    async def ensure_topic_exists(
+        self,
+        topic_name: str,
+        config: object | None = None,
+        correlation_id: UUID | None = None,
+        *,
+        spec: ModelTopicSpec | None = None,
+    ) -> bool:
         self.provisioned.append(topic_name)
+        self.specs.append(spec)
         return True
 
 
@@ -89,12 +108,16 @@ def _contract(phase: EnumMigrationPhase) -> ModelTopicMigrationContract:
 
 
 def _command(
-    contract: ModelTopicMigrationContract, target: EnumMigrationPhase
+    contract: ModelTopicMigrationContract,
+    target: EnumMigrationPhase,
+    *,
+    replication_factor: int | None = None,
 ) -> ModelTopicMigrationCommand:
     return ModelTopicMigrationCommand(
         correlation_id=uuid4(),
         contract=contract,
         target_phase=target,
+        new_topic_replication_factor=replication_factor,
     )
 
 
@@ -103,12 +126,23 @@ async def test_dual_write_provisions_new_topic() -> None:
     prov = _RecordingProvisioner()
     handler = HandlerTopicMigrationExecutor(prov, _FakeGate(allowed=True, residual=0))
     event = await handler.execute(
-        _command(_contract(EnumMigrationPhase.PLANNED), EnumMigrationPhase.DUAL_WRITE)
+        _command(
+            _contract(EnumMigrationPhase.PLANNED),
+            EnumMigrationPhase.DUAL_WRITE,
+            replication_factor=2,
+        )
     )
     assert prov.provisioned == ["onex.evt.orders.order-placed.v2"]
     assert event.new_topic_provisioned is True
     assert event.phase is EnumMigrationPhase.DUAL_WRITE
     assert "minted new group" in event.detail
+    # OMN-15395 (c): the migration's declared spec must REACH the provisioner,
+    # not be rebuilt from defaults on the other side of the call.
+    threaded = prov.specs[0]
+    assert threaded is not None
+    assert threaded.suffix == "onex.evt.orders.order-placed.v2"
+    assert threaded.partitions == 6
+    assert threaded.replication_factor == 2
 
 
 @pytest.mark.asyncio

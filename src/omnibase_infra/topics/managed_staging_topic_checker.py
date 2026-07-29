@@ -53,6 +53,12 @@ from omnibase_infra.topics.model_canary_catalog import ModelCanaryCatalog
 from omnibase_infra.topics.model_managed_staging_topic_diff import (
     ModelManagedStagingTopicDiff,
 )
+from omnibase_infra.topics.model_topic_provisioning_diff import (
+    build_provisioning_diff,
+)
+from omnibase_infra.topics.model_topic_provisioning_policy import (
+    ModelTopicProvisioningPolicy,
+)
 
 if TYPE_CHECKING:
     from aiokafka.admin import AIOKafkaAdminClient
@@ -86,8 +92,13 @@ def build_topic_diff(
     catalog_topic_set = set(catalog.topic_names)
     catalog_group_set = set(catalog.groups)
 
-    missing_topics = tuple(sorted(catalog_topic_set - existing_topic_set))
-    present_topics = tuple(sorted(catalog_topic_set & existing_topic_set))
+    # OMN-15395: the missing/present split is the SHARED provisioning diff every
+    # creation path runs — one diff engine, not a canary-only copy. This module
+    # keeps only what is genuinely canary-specific (prefix scoping + consumer
+    # groups).
+    topic_diff = build_provisioning_diff(sorted(catalog_topic_set), existing_topic_set)
+    missing_topics = topic_diff.missing_topics
+    present_topics = topic_diff.present_topics
     out_of_catalog_topics = tuple(
         sorted(
             name
@@ -163,6 +174,8 @@ async def create_missing_catalog_topics(
     admin: AIOKafkaAdminClient,
     catalog: ModelCanaryCatalog,
     diff: ModelManagedStagingTopicDiff,
+    *,
+    policy: ModelTopicProvisioningPolicy | None = None,
 ) -> tuple[tuple[str, ...], tuple[str, ...]]:
     """Create only catalog-listed, currently-missing topics (per-contract scoped).
 
@@ -171,24 +184,43 @@ async def create_missing_catalog_topics(
     are guaranteed (by construction of :func:`build_topic_diff`) to be a
     subset of the catalog's own topic set.
 
+    Every spec is resolved through the environment replication policy BEFORE the
+    first ``CreateTopics`` (OMN-15395), so this path cannot mint an RF1 topic on
+    the managed cluster even if a catalog entry regressed to one.
+
     Args:
         admin: An already-started ``AIOKafkaAdminClient``.
         catalog: The generated canary catalog (source of namespace defaults --
             partitions/replication -- per topic).
         diff: The diff previously computed by :func:`build_topic_diff`.
+        policy: Replication policy. Defaults to the policy derived from the live
+            Kafka client configuration.
 
     Returns:
         ``(created, failed)`` topic name tuples.
+
+    Raises:
+        TopicReplicationPolicyError: A catalog spec violates the policy. Raised
+            before any ``CreateTopics``.
     """
     from aiokafka.admin import NewTopic
     from aiokafka.errors import TopicAlreadyExistsError
 
+    resolved_policy = policy or ModelTopicProvisioningPolicy.from_env()
     specs_by_name = {spec.suffix: spec for spec in catalog.topics}
     created: list[str] = []
     failed: list[str] = []
 
+    # Fail closed ahead of the create loop: a durability violation anywhere in
+    # the batch means nothing is created.
+    resolved_by_name = {
+        name: resolved_policy.resolve_spec(spec)
+        for name in diff.missing_topics
+        if (spec := specs_by_name.get(name)) is not None
+    }
+
     for name in diff.missing_topics:
-        spec = specs_by_name.get(name)
+        spec = resolved_by_name.get(name)
         if spec is None:
             # Defensive: build_topic_diff guarantees missing_topics subset of
             # catalog.topic_names, so this branch should be unreachable.
