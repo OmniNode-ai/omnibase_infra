@@ -45,6 +45,9 @@ from omnibase_infra.event_bus.kafka_auth import build_aiokafka_auth_kwargs_from_
 from omnibase_infra.event_bus.models.config.model_kafka_event_bus_config import (
     ModelKafkaEventBusConfig,
 )
+from omnibase_infra.topics.broker_capacity_probe import (
+    bind_policy_to_broker_capacity,
+)
 from omnibase_infra.topics.managed_staging_canary_catalog import (
     build_canary_catalog_from_candidate,
     load_canary_namespace,
@@ -194,7 +197,8 @@ async def create_missing_catalog_topics(
             partitions/replication -- per topic).
         diff: The diff previously computed by :func:`build_topic_diff`.
         policy: Replication policy. Defaults to the policy derived from the live
-            Kafka client configuration.
+            Kafka client configuration. Whatever is supplied is bound to
+            ``admin``'s measured broker count before any spec is resolved.
 
     Returns:
         ``(created, failed)`` topic name tuples.
@@ -206,7 +210,13 @@ async def create_missing_catalog_topics(
     from aiokafka.admin import NewTopic
     from aiokafka.errors import TopicAlreadyExistsError
 
-    resolved_policy = policy or ModelTopicProvisioningPolicy.from_env()
+    # Bind the (unmeasured) configuration policy to this cluster's live node
+    # count before resolving anything: a capacity ceiling that reduces a
+    # declared replication factor must be measured, never inferred from the
+    # SASL mechanism (OMN-15395).
+    resolved_policy = await bind_policy_to_broker_capacity(
+        admin, policy or ModelTopicProvisioningPolicy.from_env()
+    )
     specs_by_name = {spec.suffix: spec for spec in catalog.topics}
     created: list[str] = []
     failed: list[str] = []

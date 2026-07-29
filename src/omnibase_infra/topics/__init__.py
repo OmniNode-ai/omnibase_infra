@@ -19,6 +19,10 @@ Exports:
     TopicResolutionError: Error raised when topic resolution fails
 """
 
+from omnibase_infra.topics.broker_capacity_probe import (
+    bind_policy_to_broker_capacity,
+    probe_broker_count,
+)
 from omnibase_infra.topics.enum_topic_provisioning_profile import (
     EnumTopicProvisioningProfile,
 )
@@ -440,7 +444,9 @@ __all__: list[str] = [
     "EnumTopicProvisioningProfile",
     "ModelTopicProvisioningDiff",
     "ModelTopicProvisioningPolicy",
+    "bind_policy_to_broker_capacity",
     "build_provisioning_diff",
+    "probe_broker_count",
     # Bus descriptor model (Phase 5 - OMN-2894)
     "ModelBusDescriptor",
     # Topic resolution

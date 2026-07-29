@@ -9,6 +9,8 @@ environment's durability floor. These tests pin both halves.
 
 from __future__ import annotations
 
+import logging
+
 import pytest
 from pydantic import ValidationError
 
@@ -60,8 +62,126 @@ class TestProfileDerivation:
         assert policy.profile is EnumTopicProvisioningProfile.SELF_HOSTED
         assert not policy.is_managed
         assert policy.default_replication_factor == 1
-        # Single-node broker: it cannot host more replicas than it has nodes.
+        # The auth mechanism says NOTHING about node count, so a
+        # config-derived policy carries no ceiling until something measures
+        # the cluster. See TestSaslClusterIsNotAssumedSingleNode.
+        assert policy.capacity_replication_factor is None
+        assert policy.broker_count is None
+
+    @pytest.mark.parametrize(
+        "mechanism",
+        ["PLAIN", "SCRAM-SHA-256", "SCRAM-SHA-512"],
+    )
+    def test_non_iam_mechanisms_carry_no_capacity_ceiling(self, mechanism: str) -> None:
+        """Every non-IAM mechanism the config accepts is unmeasured, not RF1.
+
+        RED-before: ``self_hosted()`` used to hardcode
+        ``capacity_replication_factor = 1``, so every one of these clusters had
+        its contract-declared RF silently clamped to 1.
+        """
+        config = ModelKafkaEventBusConfig(
+            bootstrap_servers="broker-1.example:9096",
+            security_protocol="SASL_SSL",
+            sasl_mechanism=mechanism,
+        )
+        policy = ModelTopicProvisioningPolicy.from_kafka_config(config)
+        assert policy.capacity_replication_factor is None
+        assert policy.broker_count is None
+
+
+class TestSaslClusterIsNotAssumedSingleNode:
+    """The capacity ceiling is MEASURED, never inferred from the auth mechanism.
+
+    RED-before (the durability regression this class exists to stop): the first
+    revision classified every ``sasl_mechanism != "AWS_MSK_IAM"`` cluster as a
+    single node and reduced its declared replication factor to 1. A multi-broker
+    cluster reached over SCRAM — including an MSK cluster fronted by SCRAM — had
+    its contract-declared RF2/RF3 clamped to RF1, which is the exact
+    ``AWS_KAFKA_HIGH_RISK_CONFIG_RF_EQUALS_ONE`` condition OMN-15395 exists to
+    eliminate.
+    """
+
+    @staticmethod
+    def _scram_policy() -> ModelTopicProvisioningPolicy:
+        config = ModelKafkaEventBusConfig(
+            bootstrap_servers="b-1.example:9096,b-2.example:9096,b-3.example:9096",
+            security_protocol="SASL_SSL",
+            sasl_mechanism="SCRAM-SHA-512",
+        )
+        return ModelTopicProvisioningPolicy.from_kafka_config(config)
+
+    def test_unmeasured_scram_cluster_does_not_clamp_declared_rf(self) -> None:
+        policy = self._scram_policy()
+        assert policy.resolve_replication_factor(topic=TOPIC, declared=2) == 2
+        assert policy.resolve_replication_factor(topic=TOPIC, declared=3) == 3
+
+    def test_three_broker_scram_cluster_preserves_declared_rf(self) -> None:
+        policy = self._scram_policy().with_broker_capacity(3)
+        assert policy.broker_count == 3
+        assert policy.capacity_replication_factor == 3
+        assert policy.resolve_replication_factor(topic=TOPIC, declared=2) == 2
+        assert policy.resolve_replication_factor(topic=TOPIC, declared=3) == 3
+
+    def test_three_broker_cluster_defaults_undeclared_rf_to_the_durable_value(
+        self,
+    ) -> None:
+        """A multi-node self-hosted cluster has no business minting RF1 either."""
+        policy = self._scram_policy().with_broker_capacity(3)
+        assert policy.resolve_replication_factor(topic=TOPIC, declared=None) == (
+            MANAGED_MINIMUM_REPLICATION_FACTOR
+        )
+
+
+class TestMeasuredBrokerCapacity:
+    """``with_broker_capacity`` may install a ceiling; it may never weaken a floor."""
+
+    def test_single_node_measurement_reduces_declared_rf(self) -> None:
+        policy = ModelTopicProvisioningPolicy.self_hosted(broker_count=1)
         assert policy.capacity_replication_factor == 1
+        assert policy.resolve_replication_factor(topic=TOPIC, declared=2) == 1
+        assert policy.resolve_replication_factor(topic=TOPIC, declared=3) == 1
+
+    def test_reduction_is_logged_at_warning_not_info(
+        self, caplog: pytest.LogCaptureFixture
+    ) -> None:
+        """A silent durability downgrade below WARNING is invisible in prod logs."""
+        policy = ModelTopicProvisioningPolicy.self_hosted(broker_count=1)
+        with caplog.at_level(
+            logging.WARNING,
+            logger="omnibase_infra.topics.model_topic_provisioning_policy",
+        ):
+            assert policy.resolve_replication_factor(topic=TOPIC, declared=2) == 1
+        assert [record for record in caplog.records if "Reducing" in record.message], (
+            "the capacity reduction must be emitted at WARNING; records seen: "
+            f"{[(r.levelname, r.message) for r in caplog.records]}"
+        )
+
+    def test_managed_floor_survives_a_measurement_below_it(self) -> None:
+        """A 1-broker managed cluster REFUSES; it does not clamp to RF1."""
+        policy = ModelTopicProvisioningPolicy.managed(broker_count=1)
+        assert policy.minimum_replication_factor == MANAGED_MINIMUM_REPLICATION_FACTOR
+        # No ceiling installed — a ceiling under the floor would be a bypass of
+        # the entire RF1 rejection.
+        assert policy.capacity_replication_factor is None
+        with pytest.raises(TopicReplicationPolicyError):
+            policy.resolve_replication_factor(topic=TOPIC, declared=1)
+
+    def test_managed_multi_broker_measurement_caps_an_impossible_rf(self) -> None:
+        policy = ModelTopicProvisioningPolicy.managed(broker_count=3)
+        assert policy.resolve_replication_factor(topic=TOPIC, declared=5) == 3
+        assert policy.resolve_replication_factor(topic=TOPIC, declared=2) == 2
+
+    def test_measurement_never_lowers_the_durability_floor(self) -> None:
+        for broker_count in (1, 2, 3, 9):
+            measured = ModelTopicProvisioningPolicy.managed(broker_count=broker_count)
+            assert measured.minimum_replication_factor == (
+                MANAGED_MINIMUM_REPLICATION_FACTOR
+            )
+            assert measured.profile is EnumTopicProvisioningProfile.MANAGED
+
+    def test_zero_or_negative_broker_count_is_refused(self) -> None:
+        with pytest.raises(ValueError, match="not a live node count"):
+            ModelTopicProvisioningPolicy.self_hosted().with_broker_capacity(0)
 
     def test_from_env_reads_the_runtime_kafka_configuration(
         self, monkeypatch: pytest.MonkeyPatch
@@ -143,15 +263,30 @@ class TestSelfHostedPolicyResolution:
         policy = ModelTopicProvisioningPolicy.self_hosted()
         assert policy.resolve_replication_factor(topic=TOPIC, declared=1) == 1
 
-    def test_declared_rf_above_capacity_is_reduced_not_rejected(self) -> None:
-        """A single-node broker cannot host RF3; reduce rather than fail create.
+    def test_declared_rf_above_measured_capacity_is_reduced_not_rejected(
+        self,
+    ) -> None:
+        """A broker MEASURED at one node cannot host RF3; reduce, don't fail create.
 
         This is what lets the contract tree declare the production-durable RF2
-        while local Redpanda, CI, and the ``.201`` lanes keep provisioning.
+        while local Redpanda, CI, and the ``.201`` lanes keep provisioning. Note
+        the measurement: the reduction is licensed by the node count, not by the
+        cluster's auth mechanism.
         """
-        policy = ModelTopicProvisioningPolicy.self_hosted()
+        policy = ModelTopicProvisioningPolicy.self_hosted(broker_count=1)
         assert policy.resolve_replication_factor(topic=TOPIC, declared=3) == 1
         assert policy.resolve_replication_factor(topic=TOPIC, declared=2) == 1
+
+    def test_unmeasured_policy_reduces_nothing(self) -> None:
+        """No measurement, no ceiling: a declared RF reaches the broker intact.
+
+        RED-before for the durability regression — this returned 1 for every
+        declared value because ``self_hosted()`` hardcoded the ceiling.
+        """
+        policy = ModelTopicProvisioningPolicy.self_hosted()
+        assert policy.capacity_replication_factor is None
+        assert policy.resolve_replication_factor(topic=TOPIC, declared=2) == 2
+        assert policy.resolve_replication_factor(topic=TOPIC, declared=3) == 3
 
     def test_reduction_is_one_way(self) -> None:
         """Capacity never RAISES a declared value; it only ever reduces."""

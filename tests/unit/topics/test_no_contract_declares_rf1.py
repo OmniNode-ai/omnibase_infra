@@ -21,9 +21,12 @@ Two assertions, and the second one matters as much as the first:
    than a slogan.
 
 Declaring RF2 (rather than leaving it undeclared) is safe for single-broker
-self-hosted brokers because ``ModelTopicProvisioningPolicy.self_hosted`` carries
-a capacity ceiling of 1 and reduces the declared value at the creation site. A
-declared value is never raised, only reduced to what the broker can host.
+self-hosted brokers because the provisioner measures the target cluster's node
+count (``describe_cluster``) before resolving anything and reduces the declared
+value to that measurement at the creation site. A declared value is never
+raised, only reduced to what the broker demonstrably can host — and only when
+the broker has actually been counted. On a multi-broker cluster the declared
+RF2 reaches ``CreateTopics`` as RF2, whatever its auth mechanism.
 """
 
 from __future__ import annotations

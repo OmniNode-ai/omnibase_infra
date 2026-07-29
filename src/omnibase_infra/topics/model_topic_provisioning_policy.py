@@ -26,6 +26,40 @@ typed resolution seam:
   *undeclared* replication factor resolves to the managed durability floor —
   never to 1, and never below the MSK broker's own RF2 default.
 
+The capacity ceiling is MEASURED, never assumed
+-----------------------------------------------
+A policy constructed from configuration alone carries **no** capacity ceiling
+(``capacity_replication_factor is None``, ``broker_count is None``). The ceiling
+is installed only by :meth:`ModelTopicProvisioningPolicy.with_broker_capacity`,
+from a live ``describe_cluster`` broker count read off the same admin client
+that will issue the ``CreateTopics``
+(:mod:`omnibase_infra.topics.broker_capacity_probe`).
+
+This is load-bearing, not a refinement. The first revision of this policy set
+``capacity_replication_factor = 1`` unconditionally for every cluster whose
+``sasl_mechanism`` was not ``AWS_MSK_IAM``, and
+:meth:`resolve_replication_factor` then silently reduced every declared value
+down to it. ``ModelKafkaEventBusConfig`` accepts PLAIN / SCRAM-SHA-256 /
+SCRAM-SHA-512 / OAUTHBEARER as well, so *any* multi-broker cluster not reached
+over MSK IAM — including an MSK cluster fronted by SCRAM — had its
+contract-declared RF2/RF3 clamped to RF1: the exact
+``AWS_KAFKA_HIGH_RISK_CONFIG_RF_EQUALS_ONE`` condition this module exists to
+eliminate, reintroduced by the mechanism meant to prevent it. A ceiling that is
+an assumption about the broker rather than a measurement of it is a durability
+downgrade wearing a capacity argument.
+
+Two invariants make the ceiling safe:
+
+* it may only ever *reduce* a value, never raise one; and
+* it is never installed below the profile's durability floor — a measured
+  broker count under the floor leaves the ceiling unset so that resolution
+  *refuses* instead of silently creating an under-replicated topic.
+
+A durability requirement is expressed in the CONTRACT. The ceiling exists only
+so a contract-declared RF2 does not make provisioning impossible on a broker
+that physically has one node, and it says so out loud (``logger.warning``) every
+time it fires.
+
 Why an undeclared RF resolves rather than refuses (deviation from a literal
 reading of OMN-15395 acceptance criterion (a), recorded here because it is a
 judgement call)
@@ -90,12 +124,16 @@ logger = logging.getLogger(__name__)
 # RF1-there divergence is exactly what OMN-15395 (c) calls the defect.
 MANAGED_MINIMUM_REPLICATION_FACTOR: int = 2
 
-# Self-hosted brokers (local Redpanda, `.201` lanes, CI sandboxes) are
-# single-node, so RF1 is both legal and the only *creatable* value there: a
-# CreateTopics carrying RF > broker count is rejected outright with
-# INVALID_REPLICATION_FACTOR. This is the self-hosted capacity ceiling as well
-# as its default, which is what lets a contract declare the production-durable
-# RF2 without breaking local and CI provisioning.
+# What an UNDECLARED replication factor resolves to on a self-hosted broker
+# whose node count has not been measured yet. It is a floor-of-last-resort for
+# the unmeasured case only: once
+# :meth:`ModelTopicProvisioningPolicy.with_broker_capacity` binds a live broker
+# count, an undeclared RF on a multi-node self-hosted cluster resolves to
+# ``MANAGED_MINIMUM_REPLICATION_FACTOR`` instead — a 3-broker Redpanda has no
+# more business minting RF1 topics than MSK does.
+#
+# This constant is NOT a capacity ceiling. Nothing reduces a declared value to
+# it; only a measured broker count can install a ceiling.
 SELF_HOSTED_REPLICATION_FACTOR: int = 1
 
 # The SASL mechanism this codebase uses to authenticate to AWS MSK.
@@ -113,12 +151,20 @@ class ModelTopicProvisioningPolicy(BaseModel):
             factor resolves to. ``None`` means there is no default and an
             undeclared replication factor is refused.
         capacity_replication_factor: The most replicas the target broker can
-            physically host. A declared value ABOVE this is reduced to it (with
-            a warning) because a ``CreateTopics`` carrying RF > broker count is
-            rejected outright. ``None`` means no ceiling. This only ever
-            *reduces*, and never below ``minimum_replication_factor`` — the
-            validator forbids a ceiling under the floor, so a durability floor
-            can never be silently undercut by a capacity ceiling.
+            physically host, **as measured** from a live ``describe_cluster``
+            broker count. A declared value ABOVE this is reduced to it (at
+            ``logger.warning`` — a durability downgrade is never emitted below
+            WARNING) because a ``CreateTopics`` carrying RF > broker count is
+            rejected outright with ``INVALID_REPLICATION_FACTOR``. ``None``
+            means **unmeasured, therefore no ceiling** — nothing is reduced.
+            This only ever *reduces*, and never below
+            ``minimum_replication_factor``: the validator forbids a ceiling
+            under the floor, so a durability floor can never be silently
+            undercut by a capacity ceiling.
+        broker_count: The live broker count this policy was bound to, or
+            ``None`` when the cluster has not been probed. Provenance for
+            ``capacity_replication_factor`` — an unmeasured policy is
+            structurally incapable of reducing anything.
     """
 
     model_config = ConfigDict(frozen=True, extra="forbid", from_attributes=True)
@@ -127,6 +173,7 @@ class ModelTopicProvisioningPolicy(BaseModel):
     minimum_replication_factor: int = Field(ge=1)
     default_replication_factor: int | None = Field(default=None, ge=1)
     capacity_replication_factor: int | None = Field(default=None, ge=1)
+    broker_count: int | None = Field(default=None, ge=1)
 
     @model_validator(mode="after")
     def _bounds_are_coherent(self) -> Self:
@@ -172,37 +219,127 @@ class ModelTopicProvisioningPolicy(BaseModel):
         return self.profile is EnumTopicProvisioningProfile.MANAGED
 
     @classmethod
-    def self_hosted(cls) -> ModelTopicProvisioningPolicy:
-        """Policy for a single-node self-hosted broker: everything resolves to RF1.
+    def self_hosted(
+        cls, *, broker_count: int | None = None
+    ) -> ModelTopicProvisioningPolicy:
+        """Policy for a self-hosted broker (local Redpanda, ``.201``, CI).
 
-        Both the default and the capacity ceiling are 1. The ceiling is what
-        allows a contract to declare the production-durable RF2 while local
-        Redpanda, CI sandboxes, and the ``.201`` lanes keep provisioning: those
-        brokers are single-node, and a CreateTopics carrying RF2 against one
-        broker fails with ``INVALID_REPLICATION_FACTOR``.
+        With ``broker_count`` unset the policy is **unmeasured**: there is no
+        capacity ceiling, so a contract-declared RF2/RF3 reaches
+        ``CreateTopics`` exactly as declared. Only a measured node count may
+        reduce it — see :meth:`with_broker_capacity`.
+
+        An undeclared replication factor resolves to
+        :data:`SELF_HOSTED_REPLICATION_FACTOR` while unmeasured, and to the
+        durable :data:`MANAGED_MINIMUM_REPLICATION_FACTOR` once a measurement
+        proves the cluster has the nodes for it.
+
+        Args:
+            broker_count: Live node count, when already known.
         """
-        return cls(
+        policy = cls(
             profile=EnumTopicProvisioningProfile.SELF_HOSTED,
             minimum_replication_factor=SELF_HOSTED_REPLICATION_FACTOR,
             default_replication_factor=SELF_HOSTED_REPLICATION_FACTOR,
-            capacity_replication_factor=SELF_HOSTED_REPLICATION_FACTOR,
+            capacity_replication_factor=None,
         )
+        if broker_count is None:
+            return policy
+        return policy.with_broker_capacity(broker_count)
 
     @classmethod
-    def managed(cls) -> ModelTopicProvisioningPolicy:
-        """Policy for a managed (MSK) cluster: RF1 rejected, no capacity ceiling.
+    def managed(
+        cls, *, broker_count: int | None = None
+    ) -> ModelTopicProvisioningPolicy:
+        """Policy for a managed (MSK) cluster: RF1 rejected fail-closed.
 
         An undeclared replication factor resolves to
         :data:`MANAGED_MINIMUM_REPLICATION_FACTOR` — the cluster's own broker
         default and the value the managed-staging namespace catalog declares —
         never to 1. See the module docstring for why this resolves rather than
         refuses.
+
+        Args:
+            broker_count: Live node count, when already known. A managed
+                cluster with FEWER nodes than the durability floor gets no
+                ceiling at all, so resolution refuses rather than clamping.
         """
-        return cls(
+        policy = cls(
             profile=EnumTopicProvisioningProfile.MANAGED,
             minimum_replication_factor=MANAGED_MINIMUM_REPLICATION_FACTOR,
             default_replication_factor=MANAGED_MINIMUM_REPLICATION_FACTOR,
             capacity_replication_factor=None,
+        )
+        if broker_count is None:
+            return policy
+        return policy.with_broker_capacity(broker_count)
+
+    def with_broker_capacity(self, broker_count: int) -> ModelTopicProvisioningPolicy:
+        """Bind this policy to a MEASURED live broker count.
+
+        This is the only way a capacity ceiling is ever installed. The
+        durability floor and the profile are carried through untouched; the
+        measurement may move exactly two things:
+
+        * the ceiling, to ``broker_count`` — but only when the cluster has at
+          least ``minimum_replication_factor`` nodes. A measurement *below* the
+          floor leaves the ceiling unset (with a warning) so resolution refuses
+          rather than clamping a topic under the durability floor.
+        * the undeclared-RF default, UP toward
+          :data:`MANAGED_MINIMUM_REPLICATION_FACTOR` when the measured cluster
+          can host it. A 3-node self-hosted broker defaults undeclared topics
+          to RF2, not RF1 — the unmeasured RF1 default is a conservative
+          placeholder for "we have not looked", not a statement about the
+          cluster.
+
+        Args:
+            broker_count: Live node count from ``describe_cluster``.
+
+        Returns:
+            A new policy bound to the measurement.
+
+        Raises:
+            ValueError: ``broker_count`` is not a positive node count.
+        """
+        if broker_count < 1:
+            raise ValueError(
+                f"broker_count={broker_count} is not a live node count; a "
+                "capacity ceiling may only be installed from a real "
+                "measurement (OMN-15395)"
+            )
+
+        capacity: int | None = broker_count
+        if broker_count < self.minimum_replication_factor:
+            logger.warning(
+                "Cluster reports %d broker(s), below the %s durability floor "
+                "of %d; NOT installing a capacity ceiling that would undercut "
+                "the floor — under-replicated specs will be refused rather "
+                "than silently created (OMN-15395)",
+                broker_count,
+                self.profile.value,
+                self.minimum_replication_factor,
+            )
+            capacity = None
+
+        default = self.default_replication_factor
+        if default is not None:
+            # Raise a conservative unmeasured default up to the durable value
+            # the measured cluster can actually host, then hold it under the
+            # ceiling. Never below the floor: `capacity` is either None or
+            # >= minimum_replication_factor by the branch above.
+            default = max(
+                default, min(MANAGED_MINIMUM_REPLICATION_FACTOR, broker_count)
+            )
+            if capacity is not None:
+                default = min(default, capacity)
+            default = max(default, self.minimum_replication_factor)
+
+        return ModelTopicProvisioningPolicy(
+            profile=self.profile,
+            minimum_replication_factor=self.minimum_replication_factor,
+            default_replication_factor=default,
+            capacity_replication_factor=capacity,
+            broker_count=broker_count,
         )
 
     @classmethod
@@ -215,6 +352,13 @@ class ModelTopicProvisioningPolicy(BaseModel):
         reaches the managed cluster, so it is the discriminator. It is read from
         the same config object the admin client authenticates with, which is why
         a caller cannot declare itself self-hosted while pointed at MSK.
+
+        The discriminator selects the *durability floor*, and nothing else. It
+        deliberately does NOT imply a node count: ``ModelKafkaEventBusConfig``
+        also accepts PLAIN / SCRAM-SHA-256 / SCRAM-SHA-512 / OAUTHBEARER, so a
+        non-IAM cluster may well be multi-broker. The returned policy is
+        therefore **unmeasured** — no capacity ceiling — until
+        :meth:`with_broker_capacity` binds a live ``describe_cluster`` count.
         """
         if config.sasl_mechanism == MANAGED_SASL_MECHANISM:
             return cls.managed()
@@ -263,22 +407,29 @@ class ModelTopicProvisioningPolicy(BaseModel):
         else:
             resolved = declared
 
-        # Capacity ceiling: only ever reduces, and the validator guarantees it
-        # cannot reduce below the durability floor. A declared RF2 on a
-        # single-node self-hosted broker becomes RF1 here rather than failing
-        # CreateTopics with INVALID_REPLICATION_FACTOR.
+        # Capacity ceiling: only ever reduces, only ever from a MEASURED broker
+        # count, and the validator guarantees it cannot reduce below the
+        # durability floor. A declared RF2 on a broker measured at one node
+        # becomes RF1 here rather than failing CreateTopics with
+        # INVALID_REPLICATION_FACTOR.
+        #
+        # WARNING, not INFO: this is a durability downgrade of a value some
+        # contract explicitly asked for. Emitting it below WARNING makes it
+        # invisible under normal log filtering, which is how a silent RF
+        # reduction stops being auditable.
         if (
             self.capacity_replication_factor is not None
             and resolved > self.capacity_replication_factor
         ):
-            logger.info(
+            logger.warning(
                 "Reducing replication_factor %d -> %d for topic %s: the %s "
-                "broker cannot host more replicas than it has nodes "
-                "(OMN-15395)",
+                "cluster measured %s broker(s) and cannot host more replicas "
+                "than it has nodes (OMN-15395)",
                 resolved,
                 self.capacity_replication_factor,
                 topic,
                 self.profile.value,
+                self.broker_count,
             )
             resolved = self.capacity_replication_factor
 
