@@ -68,6 +68,25 @@ config:
     delivery:
       retry_initial_seconds: 1
       retry_max_seconds: 30
+handler_routing:
+  routing_strategy: "operation_match"
+  handlers:
+    - operation: "gateway.forward_outbound"
+      handler:
+        name: "HandlerForwardOutbound"
+        module: "omnibase_infra.nodes.node_bus_forwarder_effect.handlers.handler_forward_outbound"
+        handler_type: "COMPUTE"
+      description: >
+        Pure transform entrypoint for validating a local canonical envelope and attaching the configured tenant wire prefix. The dedicated gateway process owns transport subscriptions and publishing.
+
+    - operation: "gateway.consume_inbound"
+      handler:
+        name: "HandlerConsumeInbound"
+        module: "omnibase_infra.nodes.node_bus_forwarder_effect.handlers.handler_consume_inbound"
+        handler_type: "COMPUTE"
+      description: >
+        Pure transform entrypoint for validating an attached cloud tenant, stripping the wire prefix, and stamping the verified tenant slug. The dedicated gateway process owns transport subscriptions and publishing.
+
 capabilities:
   - name: "tenant_prefix_transform"
     description: "Adds and strips tenant wire prefixes with envelope validation."
