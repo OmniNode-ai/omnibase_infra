@@ -16,7 +16,7 @@ from omnibase_infra.nodes.node_bus_forwarder_effect.models import (
 )
 
 BROKER_PROVIDER_ID = UUID("22222222-2222-2222-2222-222222222222")
-PRINCIPAL_ID = UUID("33333333-3333-3333-3333-333333333333")
+PRINCIPAL_ID = "t-33333333333333333333333333333333"
 
 
 def _cloud_bus() -> ModelGatewayCloudBusConfig:
@@ -65,6 +65,25 @@ def test_config_requires_silence_window_above_heartbeat() -> None:
             ),
             heartbeat_interval_seconds=60,
             max_silence_window_seconds=60,
+        )
+
+
+def test_config_requires_retry_max_at_least_initial_delay() -> None:
+    with pytest.raises(ValidationError, match="forward_retry_max_seconds"):
+        ModelGatewayForwarderConfig(
+            tenant_identity=ModelGatewayTenantIdentity(
+                tenant_id=UUID("11111111-1111-1111-1111-111111111111"),
+                tenant_slug="acme",
+                principal_id=PRINCIPAL_ID,
+            ),
+            cloud_bus=_cloud_bus(),
+            local_transport_flavor="containerized",
+            mirror_topics=ModelGatewayMirrorTopics(
+                inbound=("onex.cmd.omnibase-infra.delegation-request.v1",),
+                outbound=("onex.evt.omnibase-infra.inference-response.v1",),
+            ),
+            forward_retry_initial_seconds=10,
+            forward_retry_max_seconds=5,
         )
 
 

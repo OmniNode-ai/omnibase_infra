@@ -30,7 +30,7 @@ from omnibase_infra.nodes.node_bus_forwarder_effect.models import (
 
 TENANT_ID = UUID("11111111-1111-1111-1111-111111111111")
 BROKER_PROVIDER_ID = UUID("22222222-2222-2222-2222-222222222222")
-PRINCIPAL_ID = UUID("33333333-3333-3333-3333-333333333333")
+PRINCIPAL_ID = "t-33333333333333333333333333333333"
 INBOUND_TOPIC = "onex.cmd.omnibase-infra.delegation-inference-request.v1"
 OUTBOUND_TOPIC = "onex.evt.omnibase-infra.inference-response.v1"
 WIRE_INBOUND_TOPIC = f"tenant-acme.{INBOUND_TOPIC}"

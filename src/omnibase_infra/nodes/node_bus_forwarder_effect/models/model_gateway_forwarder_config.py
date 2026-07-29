@@ -34,11 +34,18 @@ class ModelGatewayForwarderConfig(BaseModel):
     lag_threshold_seconds: int = Field(default=120, ge=1)
     drain_deadline_seconds: int = Field(default=30, ge=1)
     dedupe_retention_hours: int = Field(default=24, ge=1)
+    forward_retry_initial_seconds: float = Field(default=1.0, gt=0)
+    forward_retry_max_seconds: float = Field(default=30.0, gt=0)
 
     @model_validator(mode="after")
     def _validate_liveness_windows(self) -> ModelGatewayForwarderConfig:
         if self.max_silence_window_seconds <= self.heartbeat_interval_seconds:
             raise ValueError(
                 "max_silence_window_seconds must exceed heartbeat_interval_seconds"
+            )
+        if self.forward_retry_max_seconds < self.forward_retry_initial_seconds:
+            raise ValueError(
+                "forward_retry_max_seconds must be greater than or equal to "
+                "forward_retry_initial_seconds"
             )
         return self
