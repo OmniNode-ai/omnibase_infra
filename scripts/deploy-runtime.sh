@@ -2736,10 +2736,24 @@ readback_deployed_ref() {
     # and exits non-zero on any mismatch. It is NOT an optional flag -- it runs
     # unconditionally after every restart / cold bring-up. Without it,
     # "deployed" / "live-readback" proof classes are unfalsifiable.
+    #
+    # OMN-15348: verifies EXACTLY the services this run actually rebuilt/
+    # recreated -- RUNTIME_BUILD_SERVICES (which already resolves to the
+    # RUNTIME_BUILD_SERVICES_OVERRIDE subset when OMN-14873 scoping is in
+    # play, else the full RUNTIME_SERVICES set). Prior to this fix the
+    # readback was hardcoded to the single omninode-runtime container
+    # regardless of scope: a scoped rebuild of e.g. runtime-effects left
+    # omninode-runtime's stale label untouched, RT-6 read THAT container,
+    # false-FAILed, and auto-triggered restore-previous-deployment on a
+    # deploy that never touched omninode-runtime at all. Looping the
+    # verified set over RUNTIME_BUILD_SERVICES means an out-of-scope
+    # container's stale label is never probed, so it can neither fail the
+    # deploy nor trigger the restore.
     local git_sha="$1"
     local version="$2"
     local compose_project="$3"
     local repo_root="$4"
+    local deploy_target="$5"
 
     log_step "Deploy Readback (RT-6, fail-closed) [OMN-14469]"
 
@@ -2751,8 +2765,12 @@ readback_deployed_ref() {
         exit 1
     fi
 
-    local runtime_container_name
-    runtime_container_name="$(resolve_lane_runtime_container_name "${compose_project}")"
+    # Compose file args to resolve non-runtime service containers below by
+    # `docker compose ps -q <service>` -- robust to lanes/services (e.g.
+    # runtime-worker on the dev lane) that have no fixed container_name and
+    # get a compose-assigned one.
+    local -a compose_args
+    resolve_compose_file_args compose_args "${deploy_target}" "${compose_project}"
 
     # The readback script lives next to this script (sync_files does NOT copy
     # scripts/ into the deploy target), so resolve it from the repo root.
@@ -2775,30 +2793,61 @@ readback_deployed_ref() {
         exit 1
     fi
 
-    # Always assert the running container's revision == the intended git SHA.
-    # Also assert the runtime package version inside the container matches the
-    # built version (always true on every lane); operators can declare extra
-    # sibling versions to assert via READBACK_EXPECTED_VERSIONS.
+    # Always assert each in-scope container's revision == the intended git SHA.
+    # Also assert the runtime package version inside the primary
+    # omninode-runtime container matches the built version (always true on
+    # every lane, and only meaningful for that container's image); operators
+    # can declare extra sibling versions to assert via
+    # READBACK_EXPECTED_VERSIONS.
     local expected_versions="omnibase-infra=${version}"
     if [[ -n "${READBACK_EXPECTED_VERSIONS:-}" ]]; then
         expected_versions="${expected_versions},${READBACK_EXPECTED_VERSIONS}"
     fi
 
-    local readback_args=(
-        --container "${runtime_container_name}"
-        --expected-revision "${git_sha}"
-        --versions "${expected_versions}"
-    )
+    log_info "Verifying in-scope service(s): ${RUNTIME_BUILD_SERVICES[*]}"
 
-    log_cmd "${python_bin} ${readback} ${readback_args[*]}"
-    if ! "${python_bin}" "${readback}" "${readback_args[@]}"; then
-        log_error "Deploy readback FAILED (RT-6): the running container is NOT the intended ref ${git_sha}."
-        log_error "Deployed code != intended ref (stale / mis-targeted image, or version drift)."
-        log_error "Refusing to certify this deploy. Rebuild + recreate the lane's runtime and re-run."
-        exit 1
-    fi
+    local service
+    for service in "${RUNTIME_BUILD_SERVICES[@]}"; do
+        local container_name=""
+        if [[ "${service}" == "omninode-runtime" ]]; then
+            # Keep the pre-existing, individually-tested resolver for the
+            # primary runtime container (lane-prefixed container_name).
+            container_name="$(resolve_lane_runtime_container_name "${compose_project}")"
+        else
+            # Every other RUNTIME_SERVICES member either has no fixed
+            # container_name (e.g. dev-lane runtime-worker, compose-assigned)
+            # or a lane-prefix convention that differs per service
+            # (projection-api -> omnimarket-*, intelligence-api ->
+            # omnibase-*). Resolve live via the compose service key instead
+            # of hardcoding a second name map (OMN-13826-class lesson).
+            container_name="$(docker compose -p "${compose_project}" "${compose_args[@]}" ps -q "${service}" 2>/dev/null || true)"
+            if [[ -z "${container_name}" ]]; then
+                log_error "Deploy readback FAILED (RT-6): could not resolve a running container for in-scope service '${service}'."
+                log_error "Refusing to certify this deploy. Rebuild + recreate the lane's runtime and re-run."
+                exit 1
+            fi
+        fi
 
-    log_info "Deploy readback passed: ${runtime_container_name} revision == ${git_sha}, runtime version == ${version} (RT-6)."
+        local -a readback_args=(
+            --container "${container_name}"
+            --expected-revision "${git_sha}"
+        )
+        if [[ "${service}" == "omninode-runtime" ]]; then
+            readback_args+=(--versions "${expected_versions}")
+        fi
+
+        log_cmd "${python_bin} ${readback} ${readback_args[*]}"
+        if ! "${python_bin}" "${readback}" "${readback_args[@]}"; then
+            log_error "Deploy readback FAILED (RT-6): service '${service}' (container ${container_name}) is NOT the intended ref ${git_sha}."
+            log_error "Deployed code != intended ref (stale / mis-targeted image, or version drift)."
+            log_error "Refusing to certify this deploy. Rebuild + recreate the lane's runtime and re-run."
+            exit 1
+        fi
+
+        log_info "Deploy readback passed: ${service} (${container_name}) revision == ${git_sha} (RT-6)."
+    done
+
+    log_info "Deploy readback passed for all ${#RUNTIME_BUILD_SERVICES[@]} in-scope service(s) (RT-6)."
 }
 
 # =============================================================================
@@ -3149,7 +3198,7 @@ main() {
         # only when this invocation actually started containers (there is nothing
         # to read back otherwise). A stale / mis-targeted running container is
         # rejected here instead of passing with only verify_deployment's warning.
-        readback_deployed_ref "${git_sha}" "${version}" "${compose_project}" "${repo_root}"
+        readback_deployed_ref "${git_sha}" "${version}" "${compose_project}" "${repo_root}" "${deploy_target}"
     fi
 
     # All phases completed successfully. Mark deployment as complete so that
