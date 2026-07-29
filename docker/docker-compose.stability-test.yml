@@ -367,7 +367,8 @@ services:
       - "com.omninode.runtime.id=stability-test-worker"
     deploy:
       # OMN-12990: fail-fast on the ledgered config value, NOT a soft :-1
-      # default. The base compose sets ${WORKER_REPLICAS:-0}; a plain recreate
+      # default (the base compose kept a bare ${WORKER_REPLICAS:-0} until
+      # OMN-14968 made it lane-prefixed and fail-closed too); a plain recreate
       # that omits the policy env would silently drop the worker. Sourcing
       # docker/runtime-policy.env (rendered from runtime_policy.contract.yaml)
       # supplies STABILITY_TEST_WORKER_REPLICAS=1; a recreate without it now

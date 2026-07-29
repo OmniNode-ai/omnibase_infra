@@ -193,8 +193,13 @@ docker compose -f docker-compose.infra.yml --profile runtime up -d --build
 # Scale workers manually
 docker compose -f docker-compose.infra.yml --profile runtime up -d --scale runtime-worker=4
 
-# Or set via environment variable
-WORKER_REPLICAS=8 docker compose -f docker-compose.infra.yml --profile runtime up -d
+# Or set via environment variable. NOTE (OMN-14968): the knob is the
+# lane-prefixed DEV_WORKER_REPLICAS, and it is fail-closed -- the render aborts
+# if it is unset, so source the ledgered policy env (which pins it to 1)
+# rather than relying on a default. The bare WORKER_REPLICAS name no longer
+# exists; it silently resolved to 0 and dropped the worker.
+source runtime-policy.env  # supplies DEV_WORKER_REPLICAS=1
+DEV_WORKER_REPLICAS=8 docker compose -f docker-compose.infra.yml --profile runtime up -d
 ```
 
 #### Consul Profile (Service Discovery)

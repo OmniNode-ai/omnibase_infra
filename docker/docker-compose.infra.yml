@@ -981,9 +981,25 @@ services:
   # retries (5) because Kafka consumer groups are joined sequentially at
   # startup. Autoheal uses a workspace-wide 2400s grace period so main,
   # effects, and workers can all finish contract wiring before restart checks.
-  # OMN-7569: Default replicas=0 — workers join the same per-topic consumer groups
-  # as the main runtime on 1-partition topics, causing a constant rebalance storm.
-  # Scale to 0 until the kernel supports profile-based subscription filtering.
+  # OMN-7569 (SUPERSEDED by OMN-14968): this block used to default replicas to 0
+  # via a bare ${WORKER_REPLICAS:-0}, because workers joined the same per-topic
+  # consumer groups as the main runtime on 1-partition topics and caused a constant
+  # rebalance storm — "scale to 0 UNTIL the kernel supports profile-based
+  # subscription filtering". That filtering shipped: each lane process now carries a
+  # disjoint capability set (this service resolves DEV_RUNTIME_WORKER_CAPABILITIES =
+  # workflow.dispatch,contract.update,runtime.worker, disjoint from the main
+  # runtime's market.skill-proof,workflow.orchestration,runtime.main), and OMN-12990
+  # pinned worker replicas to 1 for EVERY lane in
+  # contracts/services/runtime_policy.contract.yaml.
+  #
+  # OMN-12988 / OMN-12990 converted the stability-test and prod overlays to the
+  # lane-prefixed fail-closed form but left this base line bare, so the dev lane
+  # (which has no overlay — this file IS the dev lane) still resolved to 0: a plain
+  # `up -d --no-deps runtime-worker` exited 0 creating nothing, while
+  # deploy-runtime.sh's RUNTIME_SERVICES / RT-6 deploy readback requires a running
+  # container, aborting and auto-restoring every dev-lane deploy. deploy.replicas
+  # below is now lane-prefixed and fail-closed, exactly like the sibling
+  # DEV_RUNTIME_WORKER_* vars in this same service block.
   runtime-worker:
     !!merge <<: *runtime-base
     profiles: ["runtime", "full"]
@@ -1022,7 +1038,7 @@ services:
       start_period: 1200s
     deploy:
       mode: replicated
-      replicas: ${WORKER_REPLICAS:-0}
+      replicas: ${DEV_WORKER_REPLICAS:?runtime policy contract must set DEV_WORKER_REPLICAS (source docker/runtime-policy.env)}
       resources:
         limits:
           cpus: '0.5'

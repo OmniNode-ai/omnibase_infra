@@ -128,8 +128,10 @@ uv run pytest tests/integration/infra/test_stability_test_runtime_compose_render
 
 ## Worker Replica Census
 
-The base compose sets the runtime-worker deploy replicas to
-`${WORKER_REPLICAS:-0}` — a soft default of **zero**. The stability lane's
+The base compose used to set the runtime-worker deploy replicas to a bare
+`${WORKER_REPLICAS:-0}` — a soft default of **zero** that no surface exported
+(OMN-14968 replaced it with the lane-prefixed, fail-closed
+`${DEV_WORKER_REPLICAS:?...}`). The stability lane's
 required state includes a running worker (`GATE_ZERO_PROOF.md`: 4 runtime
 containers — main, effects, worker, projection-api). Any plain
 `docker compose up`/`recreate` that does not supply the worker replica count

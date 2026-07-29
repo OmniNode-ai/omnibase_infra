@@ -183,8 +183,13 @@ POSTGRES_PASSWORD=__REPLACE_WITH_SECURE_PASSWORD__
 # =============================================================================
 # Worker Runtime Service Configuration
 # =============================================================================
-# Number of worker replicas (for horizontal scaling)
-# WORKER_REPLICAS=2
+# Number of worker replicas (for horizontal scaling). OMN-14968: this is the
+# lane-prefixed DEV_WORKER_REPLICAS and it is `:?`-required in
+# docker-compose.infra.yml -- the compose render FAILS when it is unset rather
+# than silently scaling the worker to zero. The ledgered value is rendered into
+# docker/runtime-policy.env from contracts/services/runtime_policy.contract.yaml;
+# set it here only to override that pin.
+# DEV_WORKER_REPLICAS=2
 
 # Kafka topics for worker runtime
 # ONEX_WORKER_INPUT_TOPIC=worker-requests

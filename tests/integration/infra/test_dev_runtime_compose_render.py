@@ -1,14 +1,24 @@
 # SPDX-FileCopyrightText: 2025 OmniNode.ai Inc.
 # SPDX-License-Identifier: MIT
-"""Non-mutating compose render checks for the dev-lane Redpanda advertise host.
+"""Non-mutating compose render checks for the dev lane's silent-default holes.
 
-OMN-15173: `docker-compose.infra.yml` previously defaulted the dev lane's
-Redpanda advertise host to `localhost` via `${DEV_REDPANDA_ADVERTISE_HOST:-localhost}`
-whenever the env var was unset — silently rendering an address unreachable by
-any off-host client (CI runner, another machine). These tests prove the fix:
-an unset var now fails the compose render loudly instead of the client failing
-silently later, and an explicitly-set var is honored (never overridden with a
-localhost fallback).
+Two fixes of the same class are proven here — a base-compose var with a soft
+`${VAR:-default}` that failed OPEN into a wrong-but-quiet render, replaced by
+the lane-prefixed fail-closed `${DEV_...:?}` form:
+
+OMN-15173 (`DEV_REDPANDA_ADVERTISE_HOST`): the dev lane defaulted its Redpanda
+advertise host to `localhost`, silently rendering an address unreachable by any
+off-host client (CI runner, another machine).
+
+OMN-14968 (`DEV_WORKER_REPLICAS`): the `runtime-worker` deploy block resolved a
+BARE `${WORKER_REPLICAS:-0}` that no surface exported, so the dev lane rendered
+`replicas: 0`. `docker compose up -d --no-deps runtime-worker` then exited 0
+creating NOTHING, while `deploy-runtime.sh`'s `RUNTIME_SERVICES` / RT-6 deploy
+readback requires a running container — so every dev-lane deploy aborted at the
+readback and auto-restored. The lane-prefixed value is the ledgered policy
+contract's (`DEV_WORKER_REPLICAS=1`, rendered from
+`contracts/services/runtime_policy.contract.yaml`), matching what OMN-12988 /
+OMN-12990 already did for the stability-test and prod overlays.
 
 This module only ever invokes `docker compose config` (a non-mutating render)
 — it never brings up, restarts, or otherwise mutates any lane.
@@ -22,9 +32,12 @@ import subprocess
 from pathlib import Path
 
 import pytest
+import yaml
 
 REPO_ROOT = Path(__file__).resolve().parents[3]
 COMPOSE_FILE = REPO_ROOT / "docker" / "docker-compose.infra.yml"
+_DEFAULT_POLICY_ENV_FILE = "docker/runtime-policy.env"
+POLICY_ENV_PATH = REPO_ROOT / "docker" / "runtime-policy.env"
 
 # NOTE: docker-compose.infra.yml (bare, no overlay) is the dev lane's own
 # compose file (scripts/deploy-runtime.sh: "Dev lane: infra.yml alone"). A
@@ -145,17 +158,34 @@ def _render_env(**overrides: str) -> dict[str, str]:
     return env
 
 
-def _run_compose_config(env: dict[str, str]) -> subprocess.CompletedProcess[str]:
-    return subprocess.run(
-        [
-            "docker",
-            "compose",
+def _run_compose_config(
+    env: dict[str, str],
+    *,
+    policy_env_file: str = _DEFAULT_POLICY_ENV_FILE,
+    profile: str = "",
+) -> subprocess.CompletedProcess[str]:
+    # NOTE: the default arm keeps the literal "--env-file",
+    # "docker/runtime-policy.env" pair on the command line, because
+    # tests/ci/test_compose_required_env_coverage.py discovers this fixture's
+    # env-file coverage by regex over that literal pair. Do not collapse the two
+    # arms into a single interpolated path.
+    command = ["docker", "compose"]
+    if policy_env_file == _DEFAULT_POLICY_ENV_FILE:
+        command += [
             "--env-file",
             "docker/runtime-policy.env",
-            "-f",
-            str(COMPOSE_FILE),
-            "config",
-        ],
+        ]
+    else:
+        command += ["--env-file", policy_env_file]
+    command += [
+        "-f",
+        str(COMPOSE_FILE),
+    ]
+    if profile:
+        command += ["--profile", profile]
+    command.append("config")
+    return subprocess.run(
+        command,
         cwd=REPO_ROOT,
         check=False,
         capture_output=True,
@@ -199,3 +229,64 @@ def test_dev_redpanda_advertise_host_uses_explicit_value_when_set() -> None:
     assert f"{_OFF_HOST_ADVERTISE_HOST}:19092" in result.stdout
     assert f"{_OFF_HOST_ADVERTISE_HOST}:18082" in result.stdout
     assert "localhost:19092" not in result.stdout
+
+
+@pytest.mark.integration
+def test_dev_lane_renders_one_runtime_worker_replica() -> None:
+    """OMN-14968: the dev lane must render `runtime-worker` with replicas == 1.
+
+    The value is the ledgered policy contract's `DEV_WORKER_REPLICAS`, supplied
+    by `docker/runtime-policy.env`. A render of 0 reproduces the defect: compose
+    creates no container, `up` exits 0 with no output, and the RT-6 deploy
+    readback in `scripts/deploy-runtime.sh` then fails closed on an in-scope
+    service it can never resolve.
+    """
+    env = _render_env(DEV_REDPANDA_ADVERTISE_HOST=_OFF_HOST_ADVERTISE_HOST)
+
+    result = _run_compose_config(env, profile="runtime")
+
+    assert result.returncode == 0, f"docker compose config failed:\n{result.stderr}"
+    rendered = yaml.safe_load(result.stdout)
+    worker = rendered["services"]["runtime-worker"]
+    assert worker["deploy"]["replicas"] == 1, (
+        "dev-lane runtime-worker must render deploy.replicas == 1 (the ledgered "
+        f"DEV_WORKER_REPLICAS); got {worker['deploy']['replicas']!r}"
+    )
+
+
+@pytest.mark.integration
+def test_dev_worker_replicas_fails_closed_when_policy_value_unset(
+    tmp_path: Path,
+) -> None:
+    """OMN-14968 counter-test: an unset DEV_WORKER_REPLICAS must FAIL the render.
+
+    This is the RED half of the fix. The old bare `${WORKER_REPLICAS:-0}` had no
+    exporter anywhere in the repo, so it always took the silent `0` branch and
+    the lane lost its worker with zero signal. The lane-prefixed `:?` form must
+    abort the render instead — never fall back to a replica count.
+    """
+    policy_without_worker_replicas = tmp_path / "runtime-policy-no-worker.env"
+    policy_without_worker_replicas.write_text(
+        "\n".join(
+            line
+            for line in POLICY_ENV_PATH.read_text(encoding="utf-8").splitlines()
+            if not line.startswith("DEV_WORKER_REPLICAS=")
+        )
+        + "\n",
+        encoding="utf-8",
+    )
+    env = _render_env(DEV_REDPANDA_ADVERTISE_HOST=_OFF_HOST_ADVERTISE_HOST)
+    assert "DEV_WORKER_REPLICAS" not in env
+
+    result = _run_compose_config(
+        env,
+        policy_env_file=str(policy_without_worker_replicas),
+        profile="runtime",
+    )
+
+    assert result.returncode != 0, (
+        "docker compose config unexpectedly succeeded with DEV_WORKER_REPLICAS "
+        "unset — the silent-zero hole is back:\n" + result.stdout
+    )
+    assert "DEV_WORKER_REPLICAS" in result.stderr
+    assert "replicas: 0" not in result.stdout
