@@ -8,6 +8,7 @@ import asyncio
 import logging
 from pathlib import Path
 from unittest.mock import MagicMock, patch
+from uuid import UUID, uuid4
 
 import pytest
 
@@ -160,6 +161,48 @@ def test_projection_callback_injects_topic_for_strict_handlers() -> None:
             result = asyncio.run(callback(envelope))
 
     assert result is None
+
+
+@pytest.mark.unit
+def test_projection_callback_preserves_typed_envelope_id() -> None:
+    """Projection handlers receive the stable Kafka-envelope identity.
+
+    The payload is not the event envelope.  If the wiring bridge discards the
+    envelope ID, reducers have to invent a new identity on every redelivery and
+    cannot provide idempotent projections.
+    """
+    from omnibase_core.models.events.model_event_envelope import ModelEventEnvelope
+
+    received: list[dict[str, object]] = []
+
+    class EnvelopeAwareHandler:
+        def handle(self, input_data: dict[str, object]) -> dict[str, int]:
+            received.append(dict(input_data))
+            return {"rows_upserted": 1}
+
+    topic = "onex.evt.platform.node-heartbeat.v1"
+    envelope_id = uuid4()
+    envelope = ModelEventEnvelope[object](
+        payload={"service_name": "svc-a", "health_status": "healthy"},
+        envelope_id=envelope_id,
+        event_type=topic,
+    )
+    callback = _make_projection_dispatch_callback(
+        EnvelopeAwareHandler(),
+        [{"name": "live_events", "database": "omnidash_analytics"}],
+        (topic,),
+    )
+
+    with patch(
+        _PATCH_ENVIRON_GET,
+        return_value="postgresql://user:pass@host:5432/omnidash_analytics",
+    ):
+        with patch(_PATCH_BUILD_ADAPTER, return_value=MagicMock()):
+            asyncio.run(callback(envelope))
+
+    assert len(received) == 1
+    assert isinstance(received[0]["_envelope_id"], UUID)
+    assert received[0]["_envelope_id"] == envelope_id
 
 
 @pytest.mark.unit
