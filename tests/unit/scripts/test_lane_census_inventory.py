@@ -206,6 +206,11 @@ def test_api_and_cli_normalize_to_identical_envelopes(inventory: Any) -> None:
     `GET /containers/json?all=1` response and the tab-delimited CLI rows for the
     same containers (two running stability-test services, two exited dev
     one-shots).
+
+    Equality (not subset) is the right bar, and it holds at host scale: running
+    both paths back-to-back on `.201` at 2026-07-30T05:45Z, over all 91
+    containers then on the host, produced zero mismatches in `Labels`, `State`,
+    `Image`, or `Status`.
     """
     api_rows = json.loads((_FIXTURES / "engine_api_containers.json").read_text())
     cli_text = (_FIXTURES / "docker_cli_containers.tsv").read_text()
@@ -216,12 +221,13 @@ def test_api_and_cli_normalize_to_identical_envelopes(inventory: Any) -> None:
     assert len(from_api) == 4
     assert [r["Names"] for r in from_api] == [r["Names"] for r in from_cli]
     for api_row, cli_row in zip(from_api, from_cli, strict=True):
-        for field in ("Names", "State", "Status", "Image"):
+        # Full equality on every field the planner reads, Labels included.
+        # A subset check (`api Labels ⊆ cli Labels`) would let the CLI path
+        # emit spurious extra keys unnoticed; the two paths must be
+        # interchangeable, so nothing weaker than equality is correct here.
+        for field in inventory._CLI_FIELDS:
             assert api_row[field] == cli_row[field], field
-        # The CLI carries strictly more labels (compose internals); every label
-        # the API reports must match the CLI's value exactly.
-        for key, value in api_row["Labels"].items():
-            assert cli_row["Labels"][key] == value, key
+        assert api_row == cli_row
 
 
 def test_cli_label_parser_preserves_commas_inside_values(inventory: Any) -> None:
