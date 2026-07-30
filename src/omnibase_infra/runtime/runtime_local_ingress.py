@@ -10,7 +10,7 @@ import json
 import logging
 import os
 import stat
-from collections.abc import Awaitable, Callable, Iterable, Sequence
+from collections.abc import Awaitable, Callable, Sequence
 from pathlib import Path
 from typing import cast
 
@@ -18,6 +18,10 @@ import yaml
 from pydantic import BaseModel, ConfigDict, ValidationError
 
 from omnibase_core.types import JsonType
+from omnibase_infra.runtime.contract_terminal_events import (
+    extract_terminal_event_topics,
+    terminal_event_topics_from_declaration,
+)
 from omnibase_infra.runtime.event_bus_subcontract_wiring import (
     EventBusSubcontractWiring,
 )
@@ -321,31 +325,14 @@ def _local_ingress_routes_equivalent(
 def _terminal_event_topics_from_declaration(declaration: object) -> tuple[str, ...]:
     """Normalize one ``terminal_events`` declaration into success-first topics.
 
-    A mapping declaration is emitted with its ``success`` entry FIRST, regardless
-    of YAML key order, because the Pattern B broker treats
-    ``terminal_events[0]`` as the success topic whenever the contract has no
-    top-level ``terminal_event`` (``_status_for_terminal_topic``). Leaving that
-    to mapping order would make a terminal's completed-vs-failed meaning depend
-    on how the contract author happened to sort two YAML keys.
+    Delegates to the shared reader in
+    :mod:`omnibase_infra.runtime.contract_terminal_events` (OMN-15468). The
+    normalization itself is unchanged; it moved so the def-B auto-wiring can ask
+    the SAME question about the SAME contract and cannot answer it differently
+    from the broker's subscription set.
     """
 
-    if isinstance(declaration, dict):
-        ordered: list[object] = []
-        if "success" in declaration:
-            ordered.append(declaration["success"])
-        ordered.extend(value for key, value in declaration.items() if key != "success")
-        values: Iterable[object] = ordered
-    elif isinstance(declaration, list | tuple):
-        values = declaration
-    else:
-        values = ()
-
-    topics: list[str] = []
-    for value in values:
-        topic = _safe_optional_string(value)
-        if topic is not None:
-            topics.append(topic)
-    return tuple(topics)
+    return terminal_event_topics_from_declaration(declaration)
 
 
 def _extract_terminal_events(raw: dict[object, object]) -> tuple[str, ...]:
@@ -397,26 +384,15 @@ def _extract_terminal_events(raw: dict[object, object]) -> tuple[str, ...]:
     ``contract_passed=false`` with empty ``contract_yaml``/``handler_source``, and
     two correct failure terminals sat unread on
     ``onex.evt.omnimarket.node-generation-failed.v1``.
+
+    Reader body lifted to
+    :func:`omnibase_infra.runtime.contract_terminal_events.extract_terminal_event_topics`
+    (OMN-15468 slice 2) so route discovery and the def-B publish seam read the
+    contract through ONE function. This wrapper is the discovery-side name and
+    stays as the route builder's call site.
     """
 
-    terminal_events: list[str] = []
-    terminal_event = _safe_optional_string(raw.get("terminal_event"))
-    if terminal_event is not None:
-        terminal_events.append(terminal_event)
-
-    terminal_events.extend(
-        _terminal_event_topics_from_declaration(raw.get("terminal_events"))
-    )
-
-    runtime_dispatch = raw.get("runtime_dispatch")
-    if isinstance(runtime_dispatch, dict):
-        terminal_events.extend(
-            _terminal_event_topics_from_declaration(
-                runtime_dispatch.get("terminal_events")
-            )
-        )
-
-    return tuple(dict.fromkeys(terminal_events))
+    return extract_terminal_event_topics(raw)
 
 
 def _package_scoped_route_aliases(

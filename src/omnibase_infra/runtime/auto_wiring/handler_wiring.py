@@ -114,6 +114,10 @@ from omnibase_infra.runtime.auto_wiring.report import (
     ModelSkippedEntry,
     ModelWiringOutcome,
 )
+from omnibase_infra.runtime.contract_terminal_events import (
+    envelope_terminal_payload,
+    load_terminal_event_topics,
+)
 from omnibase_infra.runtime.models.model_postgres_pool_config import (
     ModelPostgresPoolConfig,
 )
@@ -4058,6 +4062,7 @@ def _make_sync_event_publisher(
     *,
     event_bus: object,
     handler_name: str,
+    terminal_topics: frozenset[str] = frozenset(),
 ) -> Callable[[str, bytes], None]:
     """Adapt async runtime event-bus publish to legacy sync handler publishers.
 
@@ -4076,6 +4081,27 @@ def _make_sync_event_publisher(
     delays (OMN-13658). Scheduling the coroutine back onto the owning kernel loop
     via ``asyncio.run_coroutine_threadsafe`` keeps every Future on its loop, so
     the publish completes immediately from any thread.
+
+    ``terminal_topics`` (OMN-15468) carries the publishing contract's declared
+    terminal topics — every site: ``terminal_event``, ``terminal_events`` and
+    ``runtime_dispatch.terminal_events``, read through the same function route
+    discovery uses. A publish to one of those topics is a TERMINAL emission and
+    is wrapped in a ``ModelEventEnvelope`` here, at the one factory that hands
+    every def-B handler its publisher.
+
+    Why here and not in the handlers: the other half of this same wiring
+    (``DispatchResultApplier``) already publishes the def-B return value as a
+    full envelope, so before this change a single contract emitted its SUCCESS
+    terminal enveloped and its handler-emitted FAILURE terminal raw — and the
+    Pattern B broker's terminal path decodes envelopes. Live on the ``.201`` dev
+    lane at merged ``5dc68190`` (2026-07-30T17:13Z), with #2560 already
+    subscribing the broker to the failure topic, a forced node-generation
+    failure still returned ``ok=true`` / ``status=completed`` / ``error=null``,
+    byte-identical to the success control, because the record waiting on the
+    failure topic was raw. Fixing that per node would mean editing every handler
+    that self-publishes a terminal; fixing it here covers the whole declared-
+    terminal set at once. Any topic that is not a declared terminal is forwarded
+    byte-for-byte unchanged.
     """
     publish = getattr(event_bus, "publish", None)
     if not callable(publish):
@@ -4095,6 +4121,11 @@ def _make_sync_event_publisher(
         ) from exc
 
     def _publish(topic: str, payload: bytes) -> None:
+        payload = envelope_terminal_payload(
+            topic=topic,
+            payload=payload,
+            terminal_topics=terminal_topics,
+        )
         result = publish(topic, None, payload)
         if not inspect.isawaitable(result):
             return
@@ -4264,6 +4295,7 @@ def _materialize_known_handler_dependencies(
     event_bus: object | None,
     container: object | None,
     ownership_query: object | None,
+    terminal_topics: frozenset[str] = frozenset(),
 ) -> dict[str, dict[str, object]] | None:
     """Materialize infra-known constructor deps for core resolver Step 2.
 
@@ -4307,6 +4339,7 @@ def _materialize_known_handler_dependencies(
         available["event_publisher"] = _make_sync_event_publisher(
             event_bus=event_bus,
             handler_name=handler_name,
+            terminal_topics=terminal_topics,
         )
     if requires_event_consumer and event_bus is not None:
         available["event_consumer"] = _make_sync_event_consumer(
@@ -6058,6 +6091,11 @@ def _prepare_handler_wiring(
         event_bus=event_bus,
         container=_effective_container,
         ownership_query=ownership_query,
+        # OMN-15468: the publishing contract's own declared terminal topics,
+        # read through the same function route discovery uses, so the wiring's
+        # notion of "this publish is a terminal" cannot drift from the set the
+        # Pattern B broker subscribes to.
+        terminal_topics=load_terminal_event_topics(contract.contract_path),
     )
 
     def _quarantine_prepared(

@@ -4,6 +4,7 @@
 from __future__ import annotations
 
 import asyncio
+import json
 from datetime import UTC, datetime
 from pathlib import Path
 from types import SimpleNamespace
@@ -23,6 +24,10 @@ from omnibase_core.models.events.model_event_envelope import ModelEventEnvelope
 from omnibase_infra.errors import ProtocolConfigurationError
 from omnibase_infra.event_bus.event_bus_inmemory import EventBusInmemory
 from omnibase_infra.event_bus.models.model_event_message import ModelEventMessage
+from omnibase_infra.runtime.auto_wiring.handler_wiring import (
+    _make_sync_event_publisher,
+)
+from omnibase_infra.runtime.contract_terminal_events import load_terminal_event_topics
 from omnibase_infra.runtime.runtime_host_process import RuntimeHostProcess
 from omnibase_infra.runtime.runtime_local_ingress import (
     ModelRuntimeLocalIngressRoute,
@@ -1228,5 +1233,166 @@ async def test_discovered_route_surfaces_failure_terminal_as_failed_status(
 
     assert result.status == "failed", (
         f"outer status must reflect the inner terminal, got {result.status!r}"
+    )
+    assert result.error_message == "contract YAML did not parse to a mapping"
+
+
+# --------------------------------------------------------------------------- #
+# OMN-15468 slice 2 — the SAME seam, driven by the artifact that actually runs.
+#
+# The test above proves the broker terminalizes a failure terminal that arrives
+# as a ModelEventEnvelope. That is not what the node emits. On the deployed dev
+# lane (2026-07-30T17:13Z, merged 5dc68190, with #2560's subscription live) the
+# record on the failure topic was the handler's RAW model dump, published
+# through the wiring-injected `event_publisher`, while the def-B wiring's
+# applier put a full envelope on the SUCCESS topic. The forced-failure /skill
+# response was byte-identical to the success control: ok=true, status=completed,
+# error=null.
+#
+# So this test does not hand-build the failure terminal. It publishes through
+# `_make_sync_event_publisher` — the one factory that hands every def-B handler
+# its publisher — and reproduces the live emission ORDER: the handler's own
+# terminal first (it publishes before handle() returns), then the applier's
+# verdict-blind republish onto the success topic (which happens after).
+# --------------------------------------------------------------------------- #
+
+_RAW_EMISSION_CONTRACT = """
+name: raw_emit_demo
+event_bus:
+  subscribe_topics:
+    - onex.cmd.demo.raw-emit-requested.v1
+  publish_topics:
+    - onex.evt.demo.raw-emit-completed.v1
+    - onex.evt.demo.raw-emit-failed.v1
+terminal_event: onex.evt.demo.raw-emit-completed.v1
+runtime_dispatch:
+  command_topic: onex.cmd.demo.raw-emit-requested.v1
+  terminal_events:
+    success: onex.evt.demo.raw-emit-completed.v1
+    failure: onex.evt.demo.raw-emit-failed.v1
+handler_routing:
+  handlers:
+    - operation: raw_emit_demo.run
+""".strip()
+
+
+@pytest.mark.asyncio
+async def test_handler_emitted_raw_failure_terminal_is_not_reported_as_completed(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """A handler self-published failure terminal must not read as ``completed``.
+
+    RED before OMN-15468 slice 2: the handler's terminal went onto the failure
+    topic un-enveloped, so the broker's terminal decode dropped it, the
+    applier's envelope on the SUCCESS topic was the only terminal it could
+    accept, and ``_status_for_terminal_topic`` returned ``completed`` from the
+    arrival topic — the exact live false success, reproduced through the real
+    publisher rather than asserted from a code reading.
+    """
+    package_root = tmp_path / "rawpkg"
+    node_dir = package_root / "nodes" / "node_raw_emit_demo"
+    node_dir.mkdir(parents=True)
+    (package_root / "__init__.py").write_text("", encoding="utf-8")
+    contract_path = node_dir / "contract.yaml"
+    contract_path.write_text(_RAW_EMISSION_CONTRACT, encoding="utf-8")
+    monkeypatch.setattr(
+        "omnibase_infra.runtime.runtime_local_ingress.importlib.import_module",
+        lambda _name: SimpleNamespace(__file__=str(package_root / "__init__.py")),
+    )
+
+    route = discover_runtime_local_ingress_routes(("rawpkg",))["raw_emit_demo"]
+    success_topic = "onex.evt.demo.raw-emit-completed.v1"
+    failure_topic = "onex.evt.demo.raw-emit-failed.v1"
+    assert failure_topic in route.terminal_events, (
+        "precondition: #2560 must already put the failure terminal on the route"
+    )
+
+    bus = EventBusInmemory(environment="test", group="pattern-b")
+    await bus.start()
+
+    # The publisher the runtime injects into the handler, built from the same
+    # contract file discovery just read.
+    publisher = _make_sync_event_publisher(
+        event_bus=bus,
+        handler_name="HandlerRawEmitDemo",
+        terminal_topics=load_terminal_event_topics(contract_path),
+    )
+
+    handler_terminal_seen = asyncio.Event()
+
+    async def _observe_failure_topic(_message: ModelEventMessage) -> None:
+        handler_terminal_seen.set()
+
+    await bus.subscribe(
+        failure_topic, group_id="probe", on_message=_observe_failure_topic
+    )
+
+    broker = RuntimePatternBBroker(
+        bus,
+        command_topic="onex.cmd.omnibase-infra.pattern-b-dispatch.v1",
+        routes={"raw_emit_demo": route},
+    )
+    await broker.start()
+
+    async def worker(message: ModelEventMessage) -> None:
+        envelope = ModelEventEnvelope[object].model_validate_json(message.value)
+        correlation_id = envelope.correlation_id
+
+        # 1. The handler's own terminal: a model dump straight to bytes, routed
+        #    by verdict to the DECLARED failure topic. This is what
+        #    HandlerGenerationConsumer._emit_benchmark does.
+        publisher(
+            failure_topic,
+            json.dumps(
+                {
+                    "correlation_id": str(correlation_id),
+                    "contract_passed": False,
+                    "failure_reason": "contract YAML did not parse to a mapping",
+                }
+            ).encode("utf-8"),
+        )
+        # The injected publisher is fire-and-forget (it schedules the publish on
+        # the kernel loop). Live, the handler awaits the broker ACK before
+        # handle() returns, so the failure terminal is durable BEFORE the
+        # applier republish below; wait for it here so the ordering under test
+        # is the live ordering and not a scheduling coincidence.
+        await asyncio.wait_for(handler_terminal_seen.wait(), timeout=2)
+
+        # 2. The def-B wiring's verdict-blind republish of the returned model
+        #    onto the contract's SUCCESS terminal (handler_wiring
+        #    _select_dispatch_result_output_topic -> DispatchResultApplier).
+        #    Still present after this fix — it is the duplicate-producer defect
+        #    tracked in OMN-15469, and it is exactly what wins the race and
+        #    reports "completed" when the failure terminal is undecodable.
+        republished = ModelEventEnvelope[object](
+            payload={"contract_passed": False},
+            correlation_id=correlation_id,
+            envelope_timestamp=datetime.now(UTC),
+            event_type="demo.raw-emit-completed",
+        )
+        await bus.publish(
+            success_topic, None, republished.model_dump_json().encode("utf-8"), None
+        )
+
+    await bus.subscribe(route.command_topic, group_id="worker", on_message=worker)
+
+    try:
+        _resolved_route, result = await broker.dispatch_request(
+            ModelDispatchBusCommand(
+                command_name="raw_emit_demo",
+                requester="runtime-local-ingress",
+                payload={"task_description": "anything"},
+                response_topic="onex.evt.pattern-b.dispatch-completed.v1",
+                timeout_seconds=2,
+            )
+        )
+    finally:
+        await broker.stop()
+        await bus.close()
+
+    assert result.status == "failed", (
+        "the handler published its declared FAILURE terminal; the outer status "
+        f"must not be {result.status!r}"
     )
     assert result.error_message == "contract YAML did not parse to a mapping"
