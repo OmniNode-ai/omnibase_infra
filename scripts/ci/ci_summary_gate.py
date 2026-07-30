@@ -247,6 +247,44 @@ MEASURED_NOT_ENFORCED_CONTEXTS: dict[str, str] = {
     ),
 }
 
+# OMN-15532 — contexts whose PRODUCER structurally does not report for a given
+# PR author, so "absent" carries no information and must not burn the poll
+# deadline. This is an *applicability* rule, not a bypass: the context stays
+# fail-closed for every author not named here.
+#
+# ADMISSION RULE — an entry is justified only by a producer-side condition that
+# makes the check-run impossible to create, quoted with the workflow file and
+# the live readback that shows it absent. "It was red and I wanted it green" is
+# never a reason. Keys must be members of EXPECTED_EXTERNAL_CONTEXTS and actors
+# must be concrete logins (no wildcards) — both pinned by tests.
+ACTOR_CONDITIONAL_CONTEXTS: dict[str, tuple[str, ...]] = {
+    # .github/workflows/cr-thread-gate-caller.yml gates the `gate` job on
+    # `(github.event_name == 'pull_request' && github.actor != 'dependabot[bot]')`.
+    # The context name is the `caller-job / reusable-job` form, so when the
+    # caller job is skipped the reusable's inner job never materialises and NO
+    # check-run is created — the context is absent, not `skipped`.
+    #
+    # Live readback 2026-07-30, infra dev Dependabot batch:
+    #   #2522 2cdf352d actor=dependabot[bot] CR-gate run conclusion=skipped -> ABSENT
+    #   #2521 841c292f actor=dependabot[bot] CR-gate run conclusion=skipped -> ABSENT
+    #   #2520 feb6627b actor=jonahgabriel    -> present, success
+    #   #2519 08e356cc actor=jonahgabriel    -> present, success
+    #   #2518 e2d38605 actor=jonahgabriel    -> present, success
+    # All five are `pull_request`, run_attempt=1: the actor is the discriminator.
+    #
+    # The OMN-15496 seed measured this context 16/16 present over #2546…#2567 —
+    # a window containing NO Dependabot PR, which is exactly how a 16/16 context
+    # can still be absent in production.
+    #
+    # Fixed consumer-side, not producer-side: OMN-10276 removed this actor skip
+    # on omnimemory, but omnimemory calls a LOCAL reusable and passes no secrets,
+    # whereas this caller invokes omniclaude's reusable with `secrets:
+    # CROSS_REPO_PAT`. Dependabot `pull_request` runs do not receive regular repo
+    # secrets, so dropping the skip here risks trading an absent-wedge for a
+    # red-wedge. See OMN-15532.
+    "gate / CodeRabbit Thread Check": ("dependabot[bot]",),
+}
+
 # Conclusions that count as "provably passed".
 GOOD_CONCLUSIONS: frozenset[str] = frozenset({"success", "skipped"})
 
@@ -373,6 +411,26 @@ def latest_check_run_by_name(
     return latest
 
 
+def applicable_external_contexts(
+    expected: tuple[str, ...],
+    pr_author: str | None,
+) -> tuple[str, ...]:
+    """Drop contexts whose producer cannot report for ``pr_author`` (OMN-15532).
+
+    Order preserved. An unknown/empty ``pr_author`` drops NOTHING — the fail-
+    closed default — so a missing ``--pr-author`` argument enforces the full set
+    rather than silently exempting it.
+    """
+
+    if not pr_author:
+        return expected
+    return tuple(
+        context
+        for context in expected
+        if pr_author not in ACTOR_CONDITIONAL_CONTEXTS.get(context, ())
+    )
+
+
 def evaluate_external_contexts(
     check_runs: list[dict[str, object]] | None,
     expected: tuple[str, ...],
@@ -423,6 +481,7 @@ def evaluate(
     allowlist: frozenset[str] = SOFT_ALLOWLIST,
     check_runs: list[dict[str, object]] | None = None,
     external_contexts: tuple[str, ...] = (),
+    pr_author: str | None = None,
 ) -> tuple[int, str]:
     """Return ``(exit_code, human_report)`` for the current job snapshot.
 
@@ -431,8 +490,12 @@ def evaluate(
     exists — are not wedged. The CLI supplies
     :data:`EXPECTED_EXTERNAL_CONTEXTS` and its ``--event-name`` defaults to
     ``pull_request``, so a *forgotten* argument enforces rather than skips.
+
+    ``pr_author`` drops only the contexts that :data:`ACTOR_CONDITIONAL_CONTEXTS`
+    marks unreportable for that author (OMN-15532). ``None`` drops nothing.
     """
 
+    external_contexts = applicable_external_contexts(external_contexts, pr_author)
     latest = dedup_latest(jobs, run_attempt=run_attempt)
     gate_names = frozenset(strict_gates) | frozenset(skippable_gates)
 
@@ -637,6 +700,14 @@ def main(argv: list[str] | None = None) -> int:
         "context set. Defaults to 'pull_request' so a FORGOTTEN argument "
         "enforces rather than silently skips.",
     )
+    parser.add_argument(
+        "--pr-author",
+        default=None,
+        help="Login of the PR author. Drops ONLY the ACTOR_CONDITIONAL_CONTEXTS "
+        "entries that this author's PRs structurally cannot produce (OMN-15532). "
+        "Omitted/empty drops nothing, so a forgotten argument enforces the full "
+        "set rather than exempting it.",
+    )
     args = parser.parse_args(argv)
 
     jobs = _load_jobs(args.jobs_file)
@@ -648,6 +719,7 @@ def main(argv: list[str] | None = None) -> int:
         run_attempt=args.run_attempt,
         check_runs=_load_check_runs(args.check_runs_file),
         external_contexts=external_contexts,
+        pr_author=args.pr_author,
     )
     print(report)
     if args.report_only:

@@ -1,0 +1,694 @@
+{
+  "_source": "live gh api repos/OmniNode-ai/omnibase_infra/commits/2cdf352d5577ac2e533da11ebdf38941697fb7ad/check-runs, captured 2026-07-30 for OMN-15532; PR #2522, author dependabot[bot]",
+  "head_sha": "2cdf352d5577ac2e533da11ebdf38941697fb7ad",
+  "pr": 2522,
+  "pr_author": "dependabot[bot]",
+  "check_runs": [
+    {
+      "conclusion": "skipped",
+      "id": 90196373842,
+      "name": "auto-tag",
+      "started_at": "2026-07-28T06:20:39Z",
+      "status": "completed"
+    },
+    {
+      "conclusion": "success",
+      "id": 90196373499,
+      "name": "Publish PR Merged Event",
+      "started_at": "2026-07-28T06:20:41Z",
+      "status": "completed"
+    },
+    {
+      "conclusion": "success",
+      "id": 90196373180,
+      "name": "Trigger node_redeploy Start",
+      "started_at": "2026-07-28T06:20:41Z",
+      "status": "completed"
+    },
+    {
+      "conclusion": "success",
+      "id": 90196373143,
+      "name": "TODO Audit",
+      "started_at": "2026-07-28T06:20:40Z",
+      "status": "completed"
+    },
+    {
+      "conclusion": "success",
+      "id": 90196373123,
+      "name": "Publish PR Webhook Event",
+      "started_at": "2026-07-28T06:20:41Z",
+      "status": "completed"
+    },
+    {
+      "conclusion": "skipped",
+      "id": 90195249939,
+      "name": "Runtime Boot Smoke (compose)",
+      "started_at": "2026-07-28T06:13:45Z",
+      "status": "completed"
+    },
+    {
+      "conclusion": "success",
+      "id": 90195170999,
+      "name": "CI Tests Gate",
+      "started_at": "2026-07-28T06:13:42Z",
+      "status": "completed"
+    },
+    {
+      "conclusion": "success",
+      "id": 90195170992,
+      "name": "Test-Failure Ratchet Gate",
+      "started_at": "2026-07-28T06:13:30Z",
+      "status": "completed"
+    },
+    {
+      "conclusion": "success",
+      "id": 90194904062,
+      "name": "Tests (Split 1/1)",
+      "started_at": "2026-07-28T06:11:49Z",
+      "status": "completed"
+    },
+    {
+      "conclusion": "success",
+      "id": 90194655992,
+      "name": "Detect Changes",
+      "started_at": "2026-07-28T06:11:09Z",
+      "status": "completed"
+    },
+    {
+      "conclusion": "success",
+      "id": 90193931522,
+      "name": "Hostile Review Gate",
+      "started_at": "2026-07-28T06:06:07Z",
+      "status": "completed"
+    },
+    {
+      "conclusion": "success",
+      "id": 90193907946,
+      "name": "Integration Silent-Skip Guard (OMN-14172)",
+      "started_at": "2026-07-28T06:10:57Z",
+      "status": "completed"
+    },
+    {
+      "conclusion": "success",
+      "id": 90193907771,
+      "name": "Migration Integration Test",
+      "started_at": "2026-07-28T06:10:48Z",
+      "status": "completed"
+    },
+    {
+      "conclusion": "success",
+      "id": 90193617388,
+      "name": "Omni Standards Gate",
+      "started_at": "2026-07-28T06:05:31Z",
+      "status": "completed"
+    },
+    {
+      "conclusion": "success",
+      "id": 90193587246,
+      "name": "reason-graph",
+      "started_at": "2026-07-28T06:05:24Z",
+      "status": "completed"
+    },
+    {
+      "conclusion": "success",
+      "id": 90193560221,
+      "name": "Version Pin Compliance",
+      "started_at": "2026-07-28T06:10:48Z",
+      "status": "completed"
+    },
+    {
+      "conclusion": "success",
+      "id": 90193560005,
+      "name": "Kafka Boundary Compat (OMN-3256)",
+      "started_at": "2026-07-28T06:10:08Z",
+      "status": "completed"
+    },
+    {
+      "conclusion": "success",
+      "id": 90193559971,
+      "name": "zone-filter / Zone Filter (docs-only check)",
+      "started_at": "2026-07-28T06:05:17Z",
+      "status": "completed"
+    },
+    {
+      "conclusion": "success",
+      "id": 90193559964,
+      "name": "Cross-Repo Migration Conflicts",
+      "started_at": "2026-07-28T06:10:10Z",
+      "status": "completed"
+    },
+    {
+      "conclusion": "success",
+      "id": 90193559953,
+      "name": "Topic Enum Drift Check",
+      "started_at": "2026-07-28T06:08:27Z",
+      "status": "completed"
+    },
+    {
+      "conclusion": "success",
+      "id": 90193559919,
+      "name": "Arch Invariants (OMN-3343)",
+      "started_at": "2026-07-28T06:05:30Z",
+      "status": "completed"
+    },
+    {
+      "conclusion": "success",
+      "id": 90193559891,
+      "name": "OCC Born-Path Trigger Coverage (OMN-14987)",
+      "started_at": "2026-07-28T06:06:25Z",
+      "status": "completed"
+    },
+    {
+      "conclusion": "success",
+      "id": 90193559873,
+      "name": "Contract Sync Gate (Wave C) [OMN-8915]",
+      "started_at": "2026-07-28T06:07:32Z",
+      "status": "completed"
+    },
+    {
+      "conclusion": "success",
+      "id": 90193559866,
+      "name": "Contract Compliance Check",
+      "started_at": "2026-07-28T06:08:58Z",
+      "status": "completed"
+    },
+    {
+      "conclusion": "success",
+      "id": 90193559863,
+      "name": "AI-Slop Pattern Check (strict, PR diff)",
+      "started_at": "2026-07-28T06:07:30Z",
+      "status": "completed"
+    },
+    {
+      "conclusion": "success",
+      "id": 90193559862,
+      "name": "Topic Drift Check",
+      "started_at": "2026-07-28T06:07:15Z",
+      "status": "completed"
+    },
+    {
+      "conclusion": "success",
+      "id": 90193559861,
+      "name": "Plugin ENV->Service Completeness (OMN-4313)",
+      "started_at": "2026-07-28T06:08:42Z",
+      "status": "completed"
+    },
+    {
+      "conclusion": "success",
+      "id": 90193559855,
+      "name": "Contract Path Pre-Flight",
+      "started_at": "2026-07-28T06:06:25Z",
+      "status": "completed"
+    },
+    {
+      "conclusion": "success",
+      "id": 90193559854,
+      "name": "Contract Compliance",
+      "started_at": "2026-07-28T06:07:37Z",
+      "status": "completed"
+    },
+    {
+      "conclusion": "success",
+      "id": 90193559849,
+      "name": "Topic Naming Lint",
+      "started_at": "2026-07-28T06:07:26Z",
+      "status": "completed"
+    },
+    {
+      "conclusion": "success",
+      "id": 90193559846,
+      "name": "Compose Required-Env Coverage (OMN-5439)",
+      "started_at": "2026-07-28T06:07:15Z",
+      "status": "completed"
+    },
+    {
+      "conclusion": "success",
+      "id": 90193559843,
+      "name": "Kafka Schema Handshake (OMN-3411)",
+      "started_at": "2026-07-28T06:08:37Z",
+      "status": "completed"
+    },
+    {
+      "conclusion": "success",
+      "id": 90193559841,
+      "name": "Demo Loop Gate",
+      "started_at": "2026-07-28T06:06:49Z",
+      "status": "completed"
+    },
+    {
+      "conclusion": "success",
+      "id": 90193559831,
+      "name": "Writer-Migration Coupling Check",
+      "started_at": "2026-07-28T06:06:55Z",
+      "status": "completed"
+    },
+    {
+      "conclusion": "success",
+      "id": 90193559815,
+      "name": "Migration Freeze Check",
+      "started_at": "2026-07-28T06:05:48Z",
+      "status": "completed"
+    },
+    {
+      "conclusion": "success",
+      "id": 90193559693,
+      "name": "Lint",
+      "started_at": "2026-07-28T06:06:10Z",
+      "status": "completed"
+    },
+    {
+      "conclusion": "success",
+      "id": 90193559681,
+      "name": "Effect-Assertion Gate (RT-5)",
+      "started_at": "2026-07-28T06:05:52Z",
+      "status": "completed"
+    },
+    {
+      "conclusion": "success",
+      "id": 90193559673,
+      "name": "Infra Node Handler Ownership",
+      "started_at": "2026-07-28T06:05:35Z",
+      "status": "completed"
+    },
+    {
+      "conclusion": "success",
+      "id": 90193559649,
+      "name": "ONEX Validators",
+      "started_at": "2026-07-28T06:05:29Z",
+      "status": "completed"
+    },
+    {
+      "conclusion": "success",
+      "id": 90193559635,
+      "name": "Fingerprint Check",
+      "started_at": "2026-07-28T06:04:50Z",
+      "status": "completed"
+    },
+    {
+      "conclusion": "success",
+      "id": 90193547415,
+      "name": "Hostile Reviewer (adversarial gate)",
+      "started_at": "2026-07-28T06:04:33Z",
+      "status": "completed"
+    },
+    {
+      "conclusion": "success",
+      "id": 90193452529,
+      "name": "call-reject-skip-token / scan / reject-skip-gate-token",
+      "started_at": "2026-07-28T06:05:14Z",
+      "status": "completed"
+    },
+    {
+      "conclusion": "success",
+      "id": 90192737115,
+      "name": "call-reject-skip-token / occ-preflight / eligibility",
+      "started_at": "2026-07-28T06:02:34Z",
+      "status": "completed"
+    },
+    {
+      "conclusion": "skipped",
+      "id": 90192736937,
+      "name": "occ-autobind-manual-replay",
+      "started_at": "2026-07-28T05:58:28Z",
+      "status": "completed"
+    },
+    {
+      "conclusion": "skipped",
+      "id": 90192736644,
+      "name": "occ-autobind",
+      "started_at": "2026-07-28T05:58:28Z",
+      "status": "completed"
+    },
+    {
+      "conclusion": "skipped",
+      "id": 90192736600,
+      "name": "occ-companion-effect",
+      "started_at": "2026-07-28T05:58:28Z",
+      "status": "completed"
+    },
+    {
+      "conclusion": "success",
+      "id": 90192736470,
+      "name": "call / validate-docs",
+      "started_at": "2026-07-28T06:02:54Z",
+      "status": "completed"
+    },
+    {
+      "conclusion": "skipped",
+      "id": 90192736416,
+      "name": "occ-companion-effect-manual-replay",
+      "started_at": "2026-07-28T05:58:28Z",
+      "status": "completed"
+    },
+    {
+      "conclusion": "skipped",
+      "id": 90192736346,
+      "name": "gate",
+      "started_at": "2026-07-28T05:58:28Z",
+      "status": "completed"
+    },
+    {
+      "conclusion": "success",
+      "id": 90192736344,
+      "name": "occ-preflight / eligibility",
+      "started_at": "2026-07-28T06:03:16Z",
+      "status": "completed"
+    },
+    {
+      "conclusion": "success",
+      "id": 90192736335,
+      "name": "no-noncanonical-lifecycle-classes",
+      "started_at": "2026-07-28T06:03:32Z",
+      "status": "completed"
+    },
+    {
+      "conclusion": "success",
+      "id": 90192736334,
+      "name": "CI Summary",
+      "started_at": "2026-07-28T06:03:26Z",
+      "status": "completed"
+    },
+    {
+      "conclusion": "success",
+      "id": 90192736296,
+      "name": "Runtime Profiles / validate",
+      "started_at": "2026-07-28T06:03:18Z",
+      "status": "completed"
+    },
+    {
+      "conclusion": "success",
+      "id": 90192736292,
+      "name": "Enforce validator-requirements.yaml (OMN-13291)",
+      "started_at": "2026-07-28T06:03:24Z",
+      "status": "completed"
+    },
+    {
+      "conclusion": "success",
+      "id": 90192736273,
+      "name": "OCC Companion Merged Gate (OMN-15214)",
+      "started_at": "2026-07-28T06:02:49Z",
+      "status": "completed"
+    },
+    {
+      "conclusion": "success",
+      "id": 90192736194,
+      "name": "deploy-gate / deploy-gate",
+      "started_at": "2026-07-28T06:03:37Z",
+      "status": "completed"
+    },
+    {
+      "conclusion": "skipped",
+      "id": 90192736166,
+      "name": "verify",
+      "started_at": "2026-07-28T05:58:28Z",
+      "status": "completed"
+    },
+    {
+      "conclusion": "success",
+      "id": 90192736165,
+      "name": "pr-title / check-title",
+      "started_at": "2026-07-28T06:02:09Z",
+      "status": "completed"
+    },
+    {
+      "conclusion": "success",
+      "id": 90192736082,
+      "name": "imperative-contract-guard / Imperative Contract Guard",
+      "started_at": "2026-07-28T06:02:21Z",
+      "status": "completed"
+    },
+    {
+      "conclusion": "success",
+      "id": 90192736072,
+      "name": "verify / verify",
+      "started_at": "2026-07-28T06:03:08Z",
+      "status": "completed"
+    },
+    {
+      "conclusion": "success",
+      "id": 90192735916,
+      "name": "required-check-skip-guard / check-skip-vectors",
+      "started_at": "2026-07-28T06:03:27Z",
+      "status": "completed"
+    },
+    {
+      "conclusion": "success",
+      "id": 90192735849,
+      "name": "occ-preflight / eligibility",
+      "started_at": "2026-07-28T06:03:10Z",
+      "status": "completed"
+    },
+    {
+      "conclusion": "success",
+      "id": 90192735577,
+      "name": "pinned-wheel-skew",
+      "started_at": "2026-07-28T06:02:48Z",
+      "status": "completed"
+    },
+    {
+      "conclusion": "success",
+      "id": 90192735470,
+      "name": "dispatcher-route-coverage",
+      "started_at": "2026-07-28T06:03:21Z",
+      "status": "completed"
+    },
+    {
+      "conclusion": "success",
+      "id": 90192735431,
+      "name": "URL Authority Gate",
+      "started_at": "2026-07-28T06:03:13Z",
+      "status": "completed"
+    },
+    {
+      "conclusion": "success",
+      "id": 90192735417,
+      "name": "Integration Test Coverage",
+      "started_at": "2026-07-28T06:02:38Z",
+      "status": "completed"
+    },
+    {
+      "conclusion": "success",
+      "id": 90192735383,
+      "name": "non-dev-base-guard",
+      "started_at": "2026-07-28T06:02:15Z",
+      "status": "completed"
+    },
+    {
+      "conclusion": "success",
+      "id": 90192735355,
+      "name": "Stale TODO Gate",
+      "started_at": "2026-07-28T06:02:10Z",
+      "status": "completed"
+    },
+    {
+      "conclusion": "success",
+      "id": 90192735347,
+      "name": "main-target-guard",
+      "started_at": "2026-07-28T06:02:13Z",
+      "status": "completed"
+    },
+    {
+      "conclusion": "success",
+      "id": 90192735343,
+      "name": "Integration Test Removal Gate",
+      "started_at": "2026-07-28T06:02:03Z",
+      "status": "completed"
+    },
+    {
+      "conclusion": "success",
+      "id": 90192735311,
+      "name": "sibling-lock-pins",
+      "started_at": "2026-07-28T06:02:46Z",
+      "status": "completed"
+    },
+    {
+      "conclusion": "success",
+      "id": 90192735310,
+      "name": "Runner Disk Preflight",
+      "started_at": "2026-07-28T06:02:00Z",
+      "status": "completed"
+    },
+    {
+      "conclusion": "success",
+      "id": 90192735309,
+      "name": "No bare compose teardown",
+      "started_at": "2026-07-28T06:02:22Z",
+      "status": "completed"
+    },
+    {
+      "conclusion": "success",
+      "id": 90192735294,
+      "name": "CodeQL",
+      "started_at": "2026-07-28T06:02:11Z",
+      "status": "completed"
+    },
+    {
+      "conclusion": "success",
+      "id": 90192735271,
+      "name": "shell-hygiene",
+      "started_at": "2026-07-28T06:02:04Z",
+      "status": "completed"
+    },
+    {
+      "conclusion": "success",
+      "id": 90192735267,
+      "name": "context-field-presence",
+      "started_at": "2026-07-28T06:02:12Z",
+      "status": "completed"
+    },
+    {
+      "conclusion": "success",
+      "id": 90192735265,
+      "name": "skill-node-mapping-sync",
+      "started_at": "2026-07-28T06:02:24Z",
+      "status": "completed"
+    },
+    {
+      "conclusion": "success",
+      "id": 90192735259,
+      "name": "release-identity",
+      "started_at": "2026-07-28T06:02:24Z",
+      "status": "completed"
+    },
+    {
+      "conclusion": "success",
+      "id": 90192735254,
+      "name": "Duplication Sweep",
+      "started_at": "2026-07-28T06:02:38Z",
+      "status": "completed"
+    },
+    {
+      "conclusion": "success",
+      "id": 90192735249,
+      "name": "terminal-cost-completeness",
+      "started_at": "2026-07-28T06:02:06Z",
+      "status": "completed"
+    },
+    {
+      "conclusion": "success",
+      "id": 90192735214,
+      "name": "Handler Contract Compliance",
+      "started_at": "2026-07-28T06:02:21Z",
+      "status": "completed"
+    },
+    {
+      "conclusion": "success",
+      "id": 90192735201,
+      "name": "Type Safety Validation",
+      "started_at": "2026-07-28T06:01:56Z",
+      "status": "completed"
+    },
+    {
+      "conclusion": "success",
+      "id": 90192735187,
+      "name": "CI Naming Convention",
+      "started_at": "2026-07-28T06:02:03Z",
+      "status": "completed"
+    },
+    {
+      "conclusion": "success",
+      "id": 90192735144,
+      "name": "PEP 604 Type Union Check (UP007)",
+      "started_at": "2026-07-28T06:01:57Z",
+      "status": "completed"
+    },
+    {
+      "conclusion": "success",
+      "id": 90192735137,
+      "name": "Check architecture handshake",
+      "started_at": "2026-07-28T06:01:53Z",
+      "status": "completed"
+    },
+    {
+      "conclusion": "success",
+      "id": 90192735113,
+      "name": "lint (shadow)",
+      "started_at": "2026-07-28T06:02:35Z",
+      "status": "completed"
+    },
+    {
+      "conclusion": "success",
+      "id": 90192735110,
+      "name": "contract-validation",
+      "started_at": "2026-07-28T06:01:49Z",
+      "status": "completed"
+    },
+    {
+      "conclusion": "success",
+      "id": 90192735099,
+      "name": "receipt-honesty",
+      "started_at": "2026-07-28T06:02:24Z",
+      "status": "completed"
+    },
+    {
+      "conclusion": "success",
+      "id": 90192735093,
+      "name": "Runner Routing Audit",
+      "started_at": "2026-07-28T06:02:52Z",
+      "status": "completed"
+    },
+    {
+      "conclusion": "success",
+      "id": 90192735090,
+      "name": "tests+coverage (shadow)",
+      "started_at": "2026-07-28T06:01:58Z",
+      "status": "completed"
+    },
+    {
+      "conclusion": "success",
+      "id": 90192735058,
+      "name": "deployed-migration-tree-sync-logic",
+      "started_at": "2026-07-28T06:03:56Z",
+      "status": "completed"
+    },
+    {
+      "conclusion": "success",
+      "id": 90192735057,
+      "name": "Canonical Inference Gate",
+      "started_at": "2026-07-28T06:01:57Z",
+      "status": "completed"
+    },
+    {
+      "conclusion": "success",
+      "id": 90192735054,
+      "name": "node-migration-sync",
+      "started_at": "2026-07-28T06:03:55Z",
+      "status": "completed"
+    },
+    {
+      "conclusion": "success",
+      "id": 90192735029,
+      "name": "typecheck (shadow)",
+      "started_at": "2026-07-28T06:01:58Z",
+      "status": "completed"
+    },
+    {
+      "conclusion": "success",
+      "id": 90192734994,
+      "name": "check-env-reads-gate",
+      "started_at": "2026-07-28T06:02:25Z",
+      "status": "completed"
+    },
+    {
+      "conclusion": "success",
+      "id": 90192734979,
+      "name": "Precommit Parity Gate",
+      "started_at": "2026-07-28T06:01:42Z",
+      "status": "completed"
+    },
+    {
+      "conclusion": "success",
+      "id": 90192734958,
+      "name": "Dep Provenance Gate",
+      "started_at": "2026-07-28T06:03:03Z",
+      "status": "completed"
+    },
+    {
+      "conclusion": "success",
+      "id": 90192734893,
+      "name": "Publish PR Webhook Event",
+      "started_at": "2026-07-28T06:02:48Z",
+      "status": "completed"
+    }
+  ]
+}

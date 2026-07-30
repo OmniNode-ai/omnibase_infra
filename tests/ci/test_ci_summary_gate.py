@@ -19,6 +19,7 @@ import pytest
 import yaml
 
 from scripts.ci.ci_summary_gate import (
+    ACTOR_CONDITIONAL_CONTEXTS,
     EXIT_FAILURE,
     EXIT_PENDING,
     EXIT_SUCCESS,
@@ -26,6 +27,7 @@ from scripts.ci.ci_summary_gate import (
     MEASURED_NOT_ENFORCED_CONTEXTS,
     SKIPPABLE_GATE_JOBS,
     STRICT_GATE_JOBS,
+    applicable_external_contexts,
     evaluate,
     evaluate_external_contexts,
     latest_check_run_by_name,
@@ -643,3 +645,138 @@ class TestExternalAssertionIsWiredIntoCiYml:
         )
         run = str(poll["run"])
         assert run.count("rm -f check_runs.json") >= 2
+
+
+# --------------------------------------------------------------------------
+# OMN-15532 — actor-conditional external contexts.
+#
+# OMN-15496 admitted `gate / CodeRabbit Thread Check` as a fail-closed external
+# context after measuring it 16/16 present over #2546…#2567. That window held no
+# Dependabot PR. cr-thread-gate-caller.yml skips the caller job when
+# `github.actor == 'dependabot[bot]'`, and because the context is the
+# `caller-job / reusable-job` form the inner job never materialises — the
+# check-run is ABSENT, not `skipped`. Absent burns the 90 min deadline and then
+# fails closed against the SOLE required context on infra dev.
+# --------------------------------------------------------------------------
+
+DEPENDABOT_FIXTURE = (
+    REPO_ROOT
+    / "tests"
+    / "ci"
+    / "fixtures"
+    / "omn15532_dependabot_pr2522_check_runs.json"
+)
+CR_THREAD_CONTEXT = "gate / CodeRabbit Thread Check"
+
+
+def _dependabot_check_runs() -> list[dict[str, Any]]:
+    """Real, unedited check-runs from Dependabot PR #2522 (head 2cdf352d)."""
+    return list(json.loads(DEPENDABOT_FIXTURE.read_text())["check_runs"])
+
+
+class TestActorConditionalExternalContexts:
+    def test_fixture_is_the_real_absent_case(self) -> None:
+        """Guard the premise: the fixture must genuinely lack ONLY this context."""
+        rows = _dependabot_check_runs()
+        names = {str(r["name"]) for r in rows}
+        absent = [c for c in EXPECTED_EXTERNAL_CONTEXTS if c not in names]
+        # If this ever changes, the exemption below is no longer justified.
+        assert absent == [CR_THREAD_CONTEXT], (
+            "fixture no longer isolates the CR-thread-gate absence; re-measure "
+            "before trusting the exemption"
+        )
+
+    def test_dependabot_pr_is_not_wedged(self) -> None:
+        """AC1 — the real absent-context payload resolves for dependabot[bot]."""
+        code, report = evaluate(
+            _all_gates("success"),
+            check_runs=_dependabot_check_runs(),
+            external_contexts=EXPECTED_EXTERNAL_CONTEXTS,
+            pr_author="dependabot[bot]",
+        )
+        assert code == EXIT_SUCCESS, report
+
+    def test_same_payload_still_blocks_a_human_author(self) -> None:
+        """AC2 — the control that matters: the exemption must not leak."""
+        code, report = evaluate(
+            _all_gates("success"),
+            check_runs=_dependabot_check_runs(),
+            external_contexts=EXPECTED_EXTERNAL_CONTEXTS,
+            pr_author="jonahgabriel",
+        )
+        assert code == EXIT_PENDING, report
+        assert CR_THREAD_CONTEXT in report
+
+    def test_absent_pr_author_enforces_everything(self) -> None:
+        """A forgotten --pr-author must enforce, never exempt."""
+        code, _ = evaluate(
+            _all_gates("success"),
+            check_runs=_dependabot_check_runs(),
+            external_contexts=EXPECTED_EXTERNAL_CONTEXTS,
+            pr_author=None,
+        )
+        assert code == EXIT_PENDING
+
+    def test_exemption_entry_is_load_bearing(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """AC3 — falsification control.
+
+        Genuinely REMOVE the registry entry and confirm the very same fixture
+        and author go back to blocking. Without this, the AC1 green could come
+        from the fixture rather than from the exemption.
+        """
+        import scripts.ci.ci_summary_gate as gate_mod
+
+        monkeypatch.setattr(gate_mod, "ACTOR_CONDITIONAL_CONTEXTS", {})
+        code, report = evaluate(
+            _all_gates("success"),
+            check_runs=_dependabot_check_runs(),
+            external_contexts=EXPECTED_EXTERNAL_CONTEXTS,
+            pr_author="dependabot[bot]",
+        )
+        assert code == EXIT_PENDING, report
+        assert CR_THREAD_CONTEXT in report
+
+    def test_exemption_drops_only_that_one_context(self) -> None:
+        """The dependabot exemption must not quietly widen."""
+        pruned = applicable_external_contexts(
+            EXPECTED_EXTERNAL_CONTEXTS, "dependabot[bot]"
+        )
+        assert set(EXPECTED_EXTERNAL_CONTEXTS) - set(pruned) == {CR_THREAD_CONTEXT}
+
+    def test_registry_keys_are_asserted_contexts(self) -> None:
+        """AC4 — cannot exempt a context that was never asserted."""
+        for context in ACTOR_CONDITIONAL_CONTEXTS:
+            assert context in EXPECTED_EXTERNAL_CONTEXTS, context
+
+    def test_registry_actors_are_concrete_logins(self) -> None:
+        """AC4 — no wildcard/empty actor may blanket-disable a context."""
+        for context, actors in ACTOR_CONDITIONAL_CONTEXTS.items():
+            assert actors, f"{context} declares an empty actor tuple"
+            for actor in actors:
+                assert actor.strip(), f"{context} declares a blank actor"
+                assert actor not in {"*", "all"}, f"{context} declares wildcard {actor}"
+
+    def test_a_failing_context_still_fails_for_dependabot(self) -> None:
+        """The exemption is applicability, not a bypass: reds still block."""
+        rows = _dependabot_check_runs()
+        for row in rows:
+            if row["name"] == "deploy-gate / deploy-gate":
+                row["conclusion"] = "failure"
+        code, report = evaluate(
+            _all_gates("success"),
+            check_runs=rows,
+            external_contexts=EXPECTED_EXTERNAL_CONTEXTS,
+            pr_author="dependabot[bot]",
+        )
+        assert code == EXIT_FAILURE, report
+
+    def test_ci_yml_passes_pr_author(self) -> None:
+        """AC5 — a rule is not a mechanism: the wiring must exist in ci.yml."""
+        job = _load_workflow(CI_WORKFLOW)["jobs"]["ci-summary"]
+        poll = next(
+            s for s in job["steps"] if "Poll run jobs" in str(s.get("name", ""))
+        )
+        assert '--pr-author "${PR_AUTHOR:-}"' in str(poll["run"])
+        assert "PR_AUTHOR" in poll["env"]
