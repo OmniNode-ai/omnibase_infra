@@ -2053,6 +2053,26 @@ jobs:
       - name: Require cited OCC evidence to be merged/durable before product merge
         run: python3 scripts/ci/check_occ_companion_merged.py
 
+  # OMN-15378 AC3: scripts/deploy-agent's own pytest root (201 tests) ran in a
+  # SEPARATELY-TRIGGERED workflow, so the CI Summary poller — which reads
+  # `actions/runs/${RUN_ID}/jobs` for its own run only — structurally could not
+  # observe it: a RED deploy-agent run left the sole required context on this
+  # branch ("CI Summary") green. Visibility without enforcement. Calling the
+  # same workflow from HERE puts its job in ci.yml's own run as the check-run
+  # "Deploy Agent Tests (OMN-15378) / deploy-agent-tests", which is registered
+  # in scripts/ci/ci_summary_gate.py STRICT_GATE_JOBS (pinned by
+  # tests/ci/test_ci_summary_gate.py) — so absent/red/skipped now fails the
+  # required context. Unconditional (no needs/if) exactly as a STRICT gate
+  # requires, which also closes the old path-filter hole where a breaking
+  # change outside scripts/deploy-agent/** produced no signal at all.
+  # DO NOT rename this job — the display name is the first segment of the
+  # STRICT_GATE_JOBS entry; a rename makes the gate permanently PENDING.
+  deploy-agent-tests:
+    name: Deploy Agent Tests (OMN-15378)
+    permissions:
+      contents: read
+    uses: ./.github/workflows/deploy-agent-tests.yml
+
   ci-summary:
     name: CI Summary
     # OMN-14127: REQUIRED branch-protection context — the single umbrella gate for

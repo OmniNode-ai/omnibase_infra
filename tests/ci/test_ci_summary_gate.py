@@ -11,7 +11,11 @@ the old needs-based ci-summary pass/fail condition.
 
 from __future__ import annotations
 
+from pathlib import Path
+from typing import Any
+
 import pytest
+import yaml
 
 from scripts.ci.ci_summary_gate import (
     EXIT_FAILURE,
@@ -23,6 +27,63 @@ from scripts.ci.ci_summary_gate import (
 )
 
 pytestmark = pytest.mark.unit
+
+REPO_ROOT = Path(__file__).resolve().parents[2]
+CI_WORKFLOW = REPO_ROOT / ".github" / "workflows" / "ci.yml"
+DEPLOY_AGENT_GATE = "Deploy Agent Tests (OMN-15378) / deploy-agent-tests"
+
+
+def _load_workflow(path: Path) -> dict[str, Any]:
+    loaded = yaml.safe_load(path.read_text(encoding="utf-8"))
+    assert isinstance(loaded, dict)
+    return loaded
+
+
+def _inner_job_names(workflow: dict[str, Any]) -> set[str]:
+    """Job ids and display names declared by a (called) workflow."""
+    jobs: dict[str, Any] = workflow["jobs"]
+    names = {str(job_id) for job_id in jobs}
+    names |= {
+        str((body or {}).get("name"))
+        for body in jobs.values()
+        if (body or {}).get("name")
+    }
+    return names
+
+
+def _observable_job_names(workflow: dict[str, Any]) -> tuple[set[str], set[str]]:
+    """Names the Actions jobs API can report for ``workflow``'s own run.
+
+    Returns ``(exact_names, remote_caller_prefixes)``. Verified against live run
+    30506617326: a plain job reports its display name (falling back to its job
+    id); a reusable-workflow caller that EXECUTES reports only
+    ``"<caller display name> / <inner job name>"`` rows and never a row under
+    its own job id (``occ-preflight / eligibility``, not ``occ-preflight``) — a
+    bare caller row appears only when the caller itself skipped (``zone-filter``,
+    ``Runtime Boot Smoke (compose)``). Inner jobs of a REMOTE reusable cannot be
+    resolved from this repo, so those callers are returned as prefixes.
+    """
+    exact: set[str] = set()
+    remote_prefixes: set[str] = set()
+    for job_id, raw in workflow["jobs"].items():
+        body: dict[str, Any] = raw or {}
+        display = str(body.get("name") or job_id)
+        uses = str(body.get("uses") or "")
+        if not uses:
+            exact.add(display)
+            continue
+        if uses.startswith("./"):
+            called_path = REPO_ROOT / uses[2:]
+            assert called_path.is_file(), (
+                f"ci.yml job {job_id!r} calls {uses!r}, which does not exist"
+            )
+            exact |= {
+                f"{display} / {inner}"
+                for inner in _inner_job_names(_load_workflow(called_path))
+            }
+        else:
+            remote_prefixes.add(display)
+    return exact, remote_prefixes
 
 
 def _job(
@@ -224,3 +285,89 @@ class TestCiSummaryGate:
         jobs.append(_job(gate, "skipped"))
         code, _ = evaluate(jobs)
         assert code == EXIT_FAILURE
+
+    def test_deploy_agent_tests_gate_is_strict_and_fails_closed(self) -> None:
+        # OMN-15378 AC3: scripts/deploy-agent/tests/ (201 tests) was wired to RUN
+        # on PRs but into no aggregator — absent from dev's required set (only
+        # "CI Summary") and absent from both gate lists here, so a RED run left
+        # the required context green: the guard was advisory, code not mechanism.
+        # It must be STRICT so absent/red/skipped all fail the required context.
+        assert DEPLOY_AGENT_GATE in STRICT_GATE_JOBS
+
+        # (a) red → FAILURE
+        jobs = [j for j in _all_gates("success") if j["name"] != DEPLOY_AGENT_GATE]
+        jobs.append(_job(DEPLOY_AGENT_GATE, "failure"))
+        code, report = evaluate(jobs)
+        assert code == EXIT_FAILURE
+        assert DEPLOY_AGENT_GATE in report
+
+        # (b) skipped → FAILURE (the caller job is unconditional in ci.yml, so a
+        # skip means someone re-added an `if:`/path filter, not a legitimate
+        # no-op).
+        jobs = [j for j in _all_gates("success") if j["name"] != DEPLOY_AGENT_GATE]
+        jobs.append(_job(DEPLOY_AGENT_GATE, "skipped"))
+        code, _ = evaluate(jobs)
+        assert code == EXIT_FAILURE
+
+        # (c) absent from the run entirely → PENDING, never a vacuous SUCCESS.
+        # This is the exact pre-fix state (the tests ran in their own workflow,
+        # so they never appeared in ci.yml's job list); the poller converts
+        # PENDING to FAILURE at its deadline.
+        jobs = [j for j in _all_gates("success") if j["name"] != DEPLOY_AGENT_GATE]
+        code, report = evaluate(jobs)
+        assert code == EXIT_PENDING
+        assert DEPLOY_AGENT_GATE in report
+
+
+class TestGateNamesResolveToRealJobs:
+    """Every gate name must be a job the poller can actually observe.
+
+    The poller reads ``actions/runs/${RUN_ID}/jobs`` for ci.yml's OWN run, so a
+    gate naming a job that ci.yml never produces (e.g. a job that lives in a
+    separately-triggered workflow) is never present → PENDING forever → the
+    required context fails closed at the deadline on EVERY PR. That is the
+    failure mode of "just add the standalone workflow's job name to
+    STRICT_GATE_JOBS", and it is what this test makes unshippable.
+    """
+
+    def test_every_gate_name_resolves_to_a_ci_yml_job(self) -> None:
+        observable, remote_caller_prefixes = _observable_job_names(
+            _load_workflow(CI_WORKFLOW)
+        )
+
+        for gate in (*STRICT_GATE_JOBS, *SKIPPABLE_GATE_JOBS):
+            if gate in observable:
+                continue
+            caller = gate.split(" / ", 1)[0]
+            assert caller in remote_caller_prefixes, (
+                f"gate {gate!r} is not a name the jobs API can report for "
+                "ci.yml's own run. A plain job reports its display name; a "
+                "reusable caller reports '<caller display name> / <inner job>' "
+                "and NEVER its own job id. A gate the poller cannot observe is "
+                "absent forever → PENDING → the required 'CI Summary' context "
+                "fails closed at its deadline on every PR. Observable names: "
+                f"{sorted(observable)}"
+            )
+
+    def test_deploy_agent_gate_caller_is_unconditional(self) -> None:
+        # A STRICT gate may never legitimately skip, so the caller job must
+        # carry no `if:` and no `needs:` (OMN-15378 AC3).
+        job = _load_workflow(CI_WORKFLOW)["jobs"]["deploy-agent-tests"]
+        assert job["name"] == "Deploy Agent Tests (OMN-15378)"
+        assert job["uses"] == "./.github/workflows/deploy-agent-tests.yml"
+        assert "if" not in job
+        assert "needs" not in job
+
+    def test_called_deploy_agent_workflow_does_not_self_trigger(self) -> None:
+        # Self-triggering would double-run the suite on every PR (duplicate
+        # producer) and re-open the path-filter blind spot the caller closes.
+        called = _load_workflow(
+            REPO_ROOT / ".github" / "workflows" / "deploy-agent-tests.yml"
+        )
+        # PyYAML parses the `on:` key as the boolean True (YAML 1.1).
+        triggers = called.get(True, called.get("on"))
+        assert isinstance(triggers, dict)
+        assert "workflow_call" in triggers
+        assert "pull_request" not in triggers
+        assert "push" not in triggers
+        assert "merge_group" not in triggers

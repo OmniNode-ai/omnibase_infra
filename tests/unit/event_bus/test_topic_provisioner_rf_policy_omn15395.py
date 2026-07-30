@@ -64,6 +64,21 @@ fix hunk and re-running:
   reported the eleven RF2 topics as replication drift on every pass and seeded
   the operator-gated reassignment queue with unhostable targets.
 
+Against the THIRD revision (the module-scope ``NewTopic`` guard shipped in
+#2552) — this round's remediation guard:
+
+* ``TestPolicyErrorsEscapeBestEffortBoundaries.test_create_topics_guard_sees_a_planted_third_path``
+  ``[policy-aware-module-raw-site]`` — that revision decided "does this site
+  resolve through the policy?" once per FILE
+  (``"ModelTopicProvisioningPolicy" in text and _POLICY_RESOLVER_RE.search(text)``),
+  so every ``NewTopic`` in a policy-aware module was waved through unless its RF
+  was an integer literal. Run against the reconstructed ``b2ca4faa`` tree it
+  reported only the operator CLI and returned NOTHING for
+  ``service_topic_manager.py``'s ``replication_factor=config.replication_factor``
+  — that lineage's own defect — because the module mentions the policy five
+  times elsewhere. Admissibility is now computed from the call site's own
+  argument expression by AST provenance.
+
 The remaining cases are deliberate regression guards on behaviour that was
 already correct (a declared RF2 reaching the broker unmutated, self-hosted RF1
 still working) and are labelled as such rather than claimed as RED.
@@ -75,6 +90,7 @@ Related:
 
 from __future__ import annotations
 
+import ast
 import re
 from collections.abc import Iterator, Sequence
 from contextlib import contextmanager
@@ -115,6 +131,22 @@ class _TopicAlreadyExistsError(Exception):
     """Stand-in for ``aiokafka.errors.TopicAlreadyExistsError``."""
 
 
+class InvalidReplicationFactorError(Exception):
+    """Stand-in for ``aiokafka.errors.InvalidReplicationFactorError``.
+
+    Named exactly as aiokafka names it, and carrying the same ``errno``, because
+    the production classifier keys on the wire error identity rather than on an
+    import — see
+    ``omnibase_infra.event_bus.service_topic_manager.is_invalid_replication_factor_error``.
+    """
+
+    errno = 38
+
+
+class _TransientBrokerError(Exception):
+    """A create failure that is NOT a durability violation (negative control)."""
+
+
 @dataclass
 class _AdminRecorder:
     """Records every admin call the provisioner makes."""
@@ -128,7 +160,17 @@ class _AdminRecorder:
     #: ``describe_cluster`` is absent from the fake admin entirely when this is
     #: False, which is the "capacity could not be measured" path.
     supports_describe_cluster: bool = True
+    #: ``describe_cluster`` exists but RAISES. The other unmeasurable shape, and
+    #: the one that can count its own calls — used to prove the probe attempt is
+    #: memoized rather than retried on every entrypoint (OMN-15395 D4).
+    describe_cluster_raises: bool = False
     describe_cluster_calls: int = 0
+    #: The most replicas this fake broker will accept on ``CreateTopics``.
+    #: ``None`` disables the check (the permissive fake). When set, a NewTopic
+    #: asking for more raises ``INVALID_REPLICATION_FACTOR`` exactly as a real
+    #: broker does — the only way a test can tell a LOUD failure apart from a
+    #: swallowed one (OMN-15395 D5).
+    max_hostable_replication_factor: int | None = None
     #: Replica count the fake broker reports per partition on metadata reads.
     reported_replicas: int = 2
     #: Partition count the fake broker reports per topic on metadata reads.
@@ -140,6 +182,11 @@ class _AdminRecorder:
     #: diff-first provisioner apart from one that blind-creates and swallows
     #: the already-exists error (~1,280 wasted authorizations per pass).
     attempted: list[str] = field(default_factory=list)
+    #: Every NewTopic handed to ``create_topics``, INCLUDING ones the broker
+    #: rejects. ``created`` only records acceptances, so it cannot answer "what
+    #: replication factor actually reached the wire?" for a rejected topic —
+    #: which is the whole question when proving no ceiling was guessed.
+    requested: list[NewTopic] = field(default_factory=list)
 
     #: What the fake broker reports per topic on a metadata read.
     def metadata(self) -> list[dict[str, object]]:
@@ -177,6 +224,12 @@ class _AdminRecorder:
         assert matches, f"no CreateTopics was issued for {name!r}"
         return matches[0]
 
+    def requested_spec(self, name: str) -> NewTopic:
+        """The NewTopic sent for ``name``, accepted or rejected."""
+        matches = [topic for topic in self.requested if topic.name == name]
+        assert matches, f"no CreateTopics request was sent for {name!r}"
+        return matches[0]
+
     def created_under_test(self) -> list[str]:
         """Only the fixture topics, ignoring installed-package contract topics.
 
@@ -207,6 +260,8 @@ def _patched_admin(recorder: _AdminRecorder) -> Iterator[None]:
 
         async def describe_cluster(self) -> dict[str, object]:
             recorder.describe_cluster_calls += 1
+            if recorder.describe_cluster_raises:
+                raise ConnectionError("cluster metadata unavailable")
             return recorder.cluster()
 
         async def describe_topics(
@@ -218,8 +273,18 @@ def _patched_admin(recorder: _AdminRecorder) -> Iterator[None]:
         async def create_topics(self, new_topics: Sequence[NewTopic]) -> None:
             for new_topic in new_topics:
                 recorder.attempted.append(new_topic.name)
+                recorder.requested.append(new_topic)
                 if new_topic.name in recorder.existing_topics:
                     raise _TopicAlreadyExistsError(new_topic.name)
+                ceiling = recorder.max_hostable_replication_factor
+                if ceiling is not None and new_topic.replication_factor > ceiling:
+                    # What a real broker does: reject, create nothing.
+                    raise InvalidReplicationFactorError(
+                        f"[Error 38] INVALID_REPLICATION_FACTOR: "
+                        f"{new_topic.name} asked for "
+                        f"{new_topic.replication_factor} replicas, cluster has "
+                        f"{ceiling} broker(s)"
+                    )
                 recorder.created.append(new_topic)
                 # The broker now has it: subsequent metadata reads must see it,
                 # which is what makes the readiness confirm meaningful.
@@ -349,6 +414,445 @@ def _provisioning_swallow_offenders(src_root: Path) -> list[str]:
                 continue  # no boundary here; the error propagates by default
             if not excepts[0].startswith("except TopicReplicationPolicyError"):
                 offenders.append(f"{path.relative_to(src_root)}:{index + 1}")
+    return offenders
+
+
+#: The ``CreateTopics`` payload constructor, by callee name.
+_NEW_TOPIC = "NewTopic"
+#: ``replication_factor`` is the third positional parameter in BOTH the
+#: ``aiokafka.admin`` and ``confluent_kafka.admin`` ``NewTopic`` signatures, so
+#: ``NewTopic("t", 1, 1)`` must be read as a hardcoded RF, not as an absent one.
+_RF_KEYWORD = "replication_factor"
+_RF_POSITION = 2
+#: The policy's resolution entrypoints. Provenance for an admissible
+#: replication factor starts at one of these three and nowhere else.
+_POLICY_RESOLVERS = frozenset(
+    {"resolve_spec", "resolve_specs_for_creation", "resolve_replication_factor"}
+)
+#: Builtins that repackage a container without touching its elements, so
+#: ``tuple(resolve_specs_for_creation(...))`` keeps the batch's provenance.
+_PASSTHROUGH_BUILTINS = frozenset(
+    {"tuple", "list", "set", "frozenset", "sorted", "dict"}
+)
+
+
+class _Element:
+    """Pseudo-expression: "an element drawn from ``iterable``".
+
+    Lets ``for spec in resolved_specs`` and ``[… for spec in resolved_specs]``
+    carry the iterable's provenance onto the loop variable.
+    """
+
+    __slots__ = ("iterable",)
+
+    def __init__(self, iterable: ast.expr) -> None:
+        self.iterable = iterable
+
+
+#: What a name is bound to. ``None`` means opaque — a parameter, an import, a
+#: ``with``/``except`` target — i.e. provenance unknown, therefore not resolved.
+_Bound = ast.expr | _Element | None
+
+
+class _Scope:
+    """One lexical scope's name bindings, ordered by line.
+
+    Bindings carry the line they occur on so a *use* resolves against the
+    nearest binding that precedes it, rather than against the union of every
+    binding of that name anywhere in the function. That distinction is
+    load-bearing: ``ensure_managed_staging_topics`` binds ``spec`` twice — once
+    from a raw ``specs_by_name.get(name)`` walrus and once from the resolved
+    ``resolved_by_name.get(name)`` — and only the second one reaches
+    ``NewTopic``. A binding with ``lineno=None`` (a parameter, or a
+    comprehension target) is visible everywhere in its scope.
+    """
+
+    __slots__ = ("bindings", "is_comprehension", "parent")
+
+    def __init__(
+        self, parent: _Scope | None, *, is_comprehension: bool = False
+    ) -> None:
+        self.parent = parent
+        self.is_comprehension = is_comprehension
+        self.bindings: dict[str, list[tuple[int | None, _Bound]]] = {}
+
+    def bind(self, name: str, lineno: int | None, bound: _Bound) -> None:
+        self.bindings.setdefault(name, []).append((lineno, bound))
+
+    def enclosing_function_scope(self) -> _Scope:
+        """The nearest non-comprehension scope — where a walrus binds (PEP 572)."""
+        scope = self
+        while scope.is_comprehension and scope.parent is not None:
+            scope = scope.parent
+        return scope
+
+    def lookup(self, name: str, lineno: int) -> _Bound:
+        scope: _Scope | None = self
+        while scope is not None:
+            entries = scope.bindings.get(name)
+            if entries:
+                visible = [
+                    entry for entry in entries if entry[0] is None or entry[0] <= lineno
+                ]
+                if not visible:
+                    # Bound only later in this scope: provenance unknown.
+                    return None
+                return max(
+                    visible, key=lambda entry: -1 if entry[0] is None else entry[0]
+                )[1]
+            scope = scope.parent
+        return None
+
+
+def _target_names(target: ast.expr) -> list[str]:
+    """Local names bound by an assignment target (attributes/subscripts bind none)."""
+    if isinstance(target, ast.Name):
+        return [target.id]
+    if isinstance(target, (ast.Tuple, ast.List)):
+        return [name for element in target.elts for name in _target_names(element)]
+    if isinstance(target, ast.Starred):
+        return _target_names(target.value)
+    return []
+
+
+def _argument_names(args: ast.arguments) -> list[str]:
+    named = [*args.posonlyargs, *args.args, *args.kwonlyargs]
+    if args.vararg is not None:
+        named.append(args.vararg)
+    if args.kwarg is not None:
+        named.append(args.kwarg)
+    return [argument.arg for argument in named]
+
+
+def _callee_name(func: ast.expr) -> str | None:
+    """The bare callee name, receiver-agnostic (``a.b.resolve_spec`` → ``resolve_spec``)."""
+    if isinstance(func, ast.Attribute):
+        return func.attr
+    if isinstance(func, ast.Name):
+        return func.id
+    return None
+
+
+def _own_returns(function: ast.AST) -> list[ast.expr]:
+    """Value-returning ``return`` statements of ``function`` itself.
+
+    Deliberately does not descend into nested functions/lambdas — a nested
+    helper's return says nothing about its enclosing function's contract.
+    """
+    returns: list[ast.expr] = []
+    stack: list[ast.AST] = list(ast.iter_child_nodes(function))
+    while stack:
+        node = stack.pop()
+        if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef, ast.Lambda)):
+            continue
+        if isinstance(node, ast.Return) and node.value is not None:
+            returns.append(node.value)
+        stack.extend(ast.iter_child_nodes(node))
+    return returns
+
+
+class _ScopeMap:
+    """Maps every AST node to its lexical scope and records the bindings."""
+
+    def __init__(self, tree: ast.Module) -> None:
+        self.of: dict[ast.AST, _Scope] = {}
+        self.functions: list[ast.FunctionDef | ast.AsyncFunctionDef] = []
+        self._walk(tree, _Scope(None))
+
+    def _walk(self, node: ast.AST, scope: _Scope) -> None:
+        self.of[node] = scope
+
+        if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef)):
+            scope.bind(node.name, node.lineno, None)
+            self.functions.append(node)
+            inner = _Scope(scope)
+            for name in _argument_names(node.args):
+                inner.bind(name, None, None)
+            for decorator in node.decorator_list:
+                self._walk(decorator, scope)
+            for statement in node.body:
+                self._walk(statement, inner)
+            return
+
+        if isinstance(node, ast.Lambda):
+            inner = _Scope(scope)
+            for name in _argument_names(node.args):
+                inner.bind(name, None, None)
+            self._walk(node.body, inner)
+            return
+
+        if isinstance(
+            node, (ast.ListComp, ast.SetComp, ast.GeneratorExp, ast.DictComp)
+        ):
+            inner = _Scope(scope, is_comprehension=True)
+            for position, generator in enumerate(node.generators):
+                # Only the first iterable is evaluated in the enclosing scope.
+                self._walk(generator.iter, scope if position == 0 else inner)
+                for name in _target_names(generator.target):
+                    inner.bind(name, None, _Element(generator.iter))
+                for condition in generator.ifs:
+                    self._walk(condition, inner)
+            if isinstance(node, ast.DictComp):
+                self._walk(node.key, inner)
+                self._walk(node.value, inner)
+            else:
+                self._walk(node.elt, inner)
+            return
+
+        if isinstance(node, ast.Assign):
+            self._walk(node.value, scope)
+            for target in node.targets:
+                for name in _target_names(target):
+                    scope.bind(name, node.lineno, node.value)
+                self._walk(target, scope)
+            return
+
+        if isinstance(node, ast.AnnAssign):
+            if node.value is not None:
+                self._walk(node.value, scope)
+            for name in _target_names(node.target):
+                scope.bind(name, node.lineno, node.value)
+            return
+
+        if isinstance(node, ast.NamedExpr):
+            self._walk(node.value, scope)
+            # PEP 572: a walrus inside a comprehension binds in the enclosing
+            # function scope, not the comprehension's.
+            host = scope.enclosing_function_scope()
+            for name in _target_names(node.target):
+                host.bind(name, node.lineno, node.value)
+            return
+
+        if isinstance(node, (ast.For, ast.AsyncFor)):
+            self._walk(node.iter, scope)
+            for name in _target_names(node.target):
+                scope.bind(name, node.lineno, _Element(node.iter))
+            for statement in [*node.body, *node.orelse]:
+                self._walk(statement, scope)
+            return
+
+        if isinstance(node, ast.AugAssign):
+            self._walk(node.value, scope)
+            for name in _target_names(node.target):
+                scope.bind(name, node.lineno, None)
+            return
+
+        if isinstance(node, (ast.With, ast.AsyncWith)):
+            for item in node.items:
+                self._walk(item.context_expr, scope)
+                if item.optional_vars is not None:
+                    for name in _target_names(item.optional_vars):
+                        scope.bind(name, node.lineno, None)
+            for statement in node.body:
+                self._walk(statement, scope)
+            return
+
+        if isinstance(node, ast.ExceptHandler):
+            if node.name is not None:
+                scope.bind(node.name, node.lineno, None)
+            for child in ast.iter_child_nodes(node):
+                self._walk(child, scope)
+            return
+
+        if isinstance(node, (ast.Import, ast.ImportFrom)):
+            for alias in node.names:
+                bound = alias.asname or alias.name.split(".")[0]
+                scope.bind(bound, node.lineno, None)
+            return
+
+        if isinstance(node, ast.ClassDef):
+            scope.bind(node.name, node.lineno, None)
+            inner = _Scope(scope)
+            for decorator in node.decorator_list:
+                self._walk(decorator, scope)
+            for statement in node.body:
+                self._walk(statement, inner)
+            return
+
+        for child in ast.iter_child_nodes(node):
+            self._walk(child, scope)
+
+
+class _ResolutionAnalyzer:
+    """Answers "was this expression produced by the provisioning policy?".
+
+    Provenance is seeded ONLY by a call to one of ``_POLICY_RESOLVERS``, then
+    propagated through the operations that preserve it — attribute access,
+    subscripting, iteration, ``.get()``, container literals, and a call to a
+    module-local function whose every return is itself resolved (which is how
+    ``TopicProvisioner._resolve_spec`` and ``_resolve_specs_for_creation``
+    qualify without being special-cased by name).
+    """
+
+    def __init__(self, scopes: _ScopeMap) -> None:
+        self._scopes = scopes
+        self._local_resolvers: set[str] = set()
+        # Fixed point: a wrapper may delegate to another wrapper.
+        for _ in range(len(scopes.functions) + 1):
+            grew = False
+            for function in scopes.functions:
+                if function.name in self._local_resolvers:
+                    continue
+                returns = _own_returns(function)
+                if returns and all(self.is_resolved(value) for value in returns):
+                    self._local_resolvers.add(function.name)
+                    grew = True
+            if not grew:
+                break
+
+    def is_resolved(
+        self, node: _Bound, seen: frozenset[tuple[int, str]] = frozenset()
+    ) -> bool:
+        if node is None:
+            return False
+        if isinstance(node, _Element):
+            return self.is_resolved(node.iterable, seen)
+        if isinstance(node, ast.Await):
+            return self.is_resolved(node.value, seen)
+        if isinstance(node, ast.Call):
+            callee = _callee_name(node.func)
+            if callee in _POLICY_RESOLVERS or callee in self._local_resolvers:
+                return True
+            # ``tuple(resolved_batch)`` repackages, it does not re-source.
+            if (
+                isinstance(node.func, ast.Name)
+                and callee in _PASSTHROUGH_BUILTINS
+                and len(node.args) == 1
+            ):
+                return self.is_resolved(node.args[0], seen)
+            # A method invoked ON a resolved value keeps its provenance:
+            # ``resolved.model_copy(...)``, ``resolved_by_name.get(name)``.
+            if isinstance(node.func, ast.Attribute):
+                return self.is_resolved(node.func.value, seen)
+            return False
+        if isinstance(node, (ast.Attribute, ast.Subscript, ast.Starred)):
+            return self.is_resolved(node.value, seen)
+        if isinstance(node, ast.Name):
+            scope = self._scopes.of.get(node)
+            if scope is None:
+                return False
+            key = (id(scope), node.id)
+            if key in seen:
+                return False  # cyclic binding (``x = x.y``): unprovable
+            return self.is_resolved(scope.lookup(node.id, node.lineno), seen | {key})
+        if isinstance(node, ast.IfExp):
+            return self.is_resolved(node.body, seen) and self.is_resolved(
+                node.orelse, seen
+            )
+        if isinstance(node, ast.BoolOp):
+            return all(self.is_resolved(value, seen) for value in node.values)
+        if isinstance(node, (ast.List, ast.Tuple, ast.Set)):
+            return bool(node.elts) and all(
+                self.is_resolved(element, seen) for element in node.elts
+            )
+        if isinstance(node, ast.Dict):
+            return bool(node.values) and all(
+                self.is_resolved(value, seen) for value in node.values
+            )
+        if isinstance(node, (ast.ListComp, ast.SetComp, ast.GeneratorExp)):
+            return self.is_resolved(node.elt, seen)
+        if isinstance(node, ast.DictComp):
+            return self.is_resolved(node.value, seen)
+        return False
+
+
+def _replication_factor_argument(call: ast.Call) -> ast.expr | None:
+    """The RF argument actually passed at this ``NewTopic`` site, if any.
+
+    A ``**kwargs`` splat yields ``None`` — the site is unreadable, so it is
+    reported rather than waved through.
+    """
+    for keyword in call.keywords:
+        if keyword.arg == _RF_KEYWORD:
+            return keyword.value
+    if any(keyword.arg is None for keyword in call.keywords):
+        return None
+    if len(call.args) > _RF_POSITION:
+        return call.args[_RF_POSITION]
+    return None
+
+
+def _is_integer_literal(node: ast.expr) -> bool:
+    if isinstance(node, ast.UnaryOp) and isinstance(node.op, (ast.USub, ast.UAdd)):
+        return _is_integer_literal(node.operand)
+    return isinstance(node, ast.Constant) and isinstance(node.value, int)
+
+
+def _raw_create_topics_offenders(roots: Sequence[Path]) -> list[str]:
+    """Return ``path:line`` for ``NewTopic`` sites outside the policy seam.
+
+    The swallow guard above only sees code that calls the *provisioner*. It is
+    structurally blind to a module that reaches past the provisioner and builds
+    its own ``NewTopic`` — which is exactly what ``scripts/create_kafka_topics.py``
+    did: a second live ``CreateTopics`` path, the one
+    ``docs/operations/README.md`` tells operators to run and the one
+    ``compare_environments.py`` names in its topic-parity ``fix_hint``, creating
+    every topic at a flat ``--replication-factor`` default of 1 with the
+    fail-closed policy never consulted. Neither the guard nor CI could see it.
+
+    Admissibility is decided **at the construction site, from the argument
+    expression itself**, by AST provenance — not from anything the enclosing
+    module happens to mention. The previous revision of this guard computed
+    ``"ModelTopicProvisioningPolicy" in text and _POLICY_RESOLVER_RE.search(text)``
+    once per FILE, so every ``NewTopic`` in a policy-aware module was waved
+    through unless its RF was an integer literal. Executed against the
+    reconstructed ``b2ca4faa`` tree it returned nothing for
+    ``service_topic_manager.py``'s ``replication_factor=config.replication_factor``
+    — the raw, unresolved value that was that round's own defect — because the
+    module mentions the policy five times elsewhere. That is the same
+    "certified a property it could not see" failure this guard exists to
+    prevent, so the module-scope arm is gone.
+
+    A site is an offender when the replication factor it passes is:
+
+    * an integer literal — the flat-default shape; or
+    * absent (including behind a ``**kwargs`` splat) — unreadable, so refused; or
+    * not traceable, through provenance-preserving operations only, back to a
+      ``resolve_spec`` / ``resolve_specs_for_creation`` /
+      ``resolve_replication_factor`` call.
+
+    Scanning ``scripts/`` as well as ``src/`` is the point: a future third path
+    lands in one of those two trees.
+
+    The analysis is deliberately conservative and errs toward REPORTING. It
+    tracks provenance through attribute access, subscripting, iteration, method
+    calls on a resolved receiver, container literals/comprehensions, and
+    single-argument builtin repackaging — but NOT through a mutated
+    accumulator (``out = []`` … ``out.append(policy.resolve_spec(spec))``).
+    That shape is reported, and the fix is to use the batch helper
+    ``resolve_specs_for_creation`` (which is what every live path does) rather
+    than to add an exemption. A guard that is loose in order to avoid
+    inconveniencing a refactor is the failure this one replaces.
+    """
+    offenders: list[str] = []
+    for root in roots:
+        for path in sorted(root.rglob("*.py")):
+            text = path.read_text(encoding="utf-8")
+            if _NEW_TOPIC not in text:
+                continue
+            scopes = _ScopeMap(ast.parse(text, filename=str(path)))
+            analyzer = _ResolutionAnalyzer(scopes)
+            sites = sorted(
+                (
+                    node
+                    for node in scopes.of
+                    if isinstance(node, ast.Call)
+                    and _callee_name(node.func) == _NEW_TOPIC
+                ),
+                key=lambda node: node.lineno,
+            )
+            for site in sites:
+                label = f"{root.name}/{path.name}:{site.lineno}"
+                argument = _replication_factor_argument(site)
+                if argument is None:
+                    offenders.append(f"{label}: no replication_factor argument")
+                elif _is_integer_literal(argument):
+                    offenders.append(f"{label}: hardcoded replication_factor")
+                elif not analyzer.is_resolved(argument):
+                    offenders.append(
+                        f"{label}: replication_factor is not policy-resolved "
+                        "at this call site"
+                    )
     return offenders
 
 
@@ -603,21 +1107,134 @@ class TestCapacityCeilingIsMeasuredNotAssumed:
         tmp_path: Path,
         monkeypatch: pytest.MonkeyPatch,
     ) -> None:
-        """No ``describe_cluster`` means no ceiling — never an assumed RF1.
+        """No ``describe_cluster`` means no ceiling — and the broker's refusal is LOUD.
 
-        A declared RF the broker cannot host then fails loudly at
-        ``CreateTopics`` instead of being quietly downgraded.
+        Two properties, and the second is the OMN-15395 D5 remediation. The
+        module docstring, the policy docstring and the PR body all promised that
+        an unmeasurable cluster leaves a declared RF unreduced so it "fails
+        loudly at ``CreateTopics``". It did not: the broker's
+        ``INVALID_REPLICATION_FACTOR`` landed in the per-topic
+        ``except Exception`` boundary, became a ``logger.warning`` plus a name
+        in ``failed``, and the pass returned ``status="partial"`` — a topic
+        silently absent from the cluster, indistinguishable from a transient
+        connection blip. The fake admin here rejects the replica count exactly
+        as a one-node broker does, so loud and quiet are discriminated:
+
+        * RED before the fix — ``ensure_provisioned_topics_exist`` returns
+          normally, no exception, ``status="partial"``;
+        * GREEN after — a typed ``TopicReplicationPolicyError`` naming the
+          topic, the refused value, and the fact that capacity was unmeasurable.
         """
         _use_self_hosted(monkeypatch)
         _write_contract(tmp_path, replication_factor=2)
         provisioner = _provisioner(tmp_path)
-        recorder = _AdminRecorder(supports_describe_cluster=False)
+        recorder = _AdminRecorder(
+            supports_describe_cluster=False,
+            max_hostable_replication_factor=1,
+        )
+
+        # The single-topic path, so exactly one CreateTopics is in flight and
+        # the assertion is about THIS topic rather than whichever of the real
+        # tree's RF2 contracts the batch pass happens to reach first.
+        with _patched_admin(recorder):
+            with pytest.raises(TopicReplicationPolicyError) as excinfo:
+                await provisioner.ensure_topic_exists(topic_name=TOPIC)
+
+        # No ceiling was guessed: the contract's RF2 reached the wire unreduced.
+        assert recorder.requested_spec(TOPIC).replication_factor == 2
+        assert provisioner.policy.capacity_replication_factor is None
+        # The broker refused it, and that refusal is fail-closed and legible.
+        message = str(excinfo.value)
+        assert TOPIC in message
+        assert "INVALID_REPLICATION_FACTOR" in message
+        assert "could NOT be measured" in message
+        # The topic really does not exist — the error is not decorative.
+        assert recorder.created_names == []
+
+    async def test_unhostable_replication_aborts_the_batch_pass_too(
+        self,
+        tmp_path: Path,
+        monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
+        """The same rule on the boot pass, which is where it actually bites.
+
+        ``ensure_provisioned_topics_exist`` previously returned
+        ``status="partial"`` with the unhostable topics listed in ``failed``,
+        so the runtime booted and attached consumers to topics that do not
+        exist.
+        """
+        _use_self_hosted(monkeypatch)
+        _write_contract(tmp_path, replication_factor=2)
+        provisioner = _provisioner(tmp_path)
+        recorder = _AdminRecorder(
+            supports_describe_cluster=False,
+            max_hostable_replication_factor=1,
+        )
 
         with _patched_admin(recorder):
-            await provisioner.ensure_provisioned_topics_exist()
+            with pytest.raises(TopicReplicationPolicyError) as excinfo:
+                await provisioner.ensure_provisioned_topics_exist()
 
-        assert recorder.created_spec(TOPIC).replication_factor == 2
-        assert provisioner.policy.capacity_replication_factor is None
+        assert "INVALID_REPLICATION_FACTOR" in str(excinfo.value)
+        # The pass aborts at the first unhostable topic rather than logging it
+        # and marching on: nothing the broker refused ended up created, and the
+        # error escaped instead of becoming status="partial".
+        assert all(topic.replication_factor <= 1 for topic in recorder.created)
+
+    async def test_a_transient_create_failure_is_still_best_effort(
+        self,
+        tmp_path: Path,
+        monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
+        """Negative control for D5: only the durability failure is fail-closed.
+
+        Without this, "raise on any create error" would pass the test above
+        while turning every broker hiccup into a boot abort. Startup stays
+        best-effort for everything that is not a durability violation.
+        """
+        _use_self_hosted(monkeypatch)
+        _write_contract(tmp_path, replication_factor=2)
+        provisioner = _provisioner(tmp_path)
+        recorder = _AdminRecorder(broker_count=1)
+
+        class _FailingAdmin:
+            def __init__(self, **_kwargs: object) -> None:
+                pass
+
+            async def start(self) -> None:
+                return None
+
+            async def close(self) -> None:
+                return None
+
+            async def describe_cluster(self) -> dict[str, object]:
+                recorder.describe_cluster_calls += 1
+                return recorder.cluster()
+
+            async def describe_topics(
+                self, topics: Sequence[str] | None = None
+            ) -> list[dict[str, object]]:
+                return recorder.metadata()
+
+            async def create_topics(self, new_topics: Sequence[NewTopic]) -> None:
+                raise _TransientBrokerError("broker not available right now")
+
+        with patch.dict(
+            "sys.modules",
+            {
+                "aiokafka": MagicMock(),
+                "aiokafka.admin": MagicMock(
+                    AIOKafkaAdminClient=_FailingAdmin, NewTopic=NewTopic
+                ),
+                "aiokafka.errors": MagicMock(
+                    TopicAlreadyExistsError=_TopicAlreadyExistsError
+                ),
+            },
+        ):
+            result = await provisioner.ensure_provisioned_topics_exist()
+
+        assert TOPIC in result["failed"]
+        assert result["status"] in ("partial", "unavailable")
 
     async def test_capacity_is_measured_once_per_provisioner(
         self,
@@ -641,6 +1258,37 @@ class TestCapacityCeilingIsMeasuredNotAssumed:
             await provisioner.ensure_provisioned_topics_exist()
 
         assert recorder.describe_cluster_calls == 1
+
+    async def test_capacity_probe_is_attempted_once_even_when_unmeasurable(
+        self,
+        tmp_path: Path,
+        monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
+        """Same bound on the FAILURE path (OMN-15395 D4).
+
+        The memo test above only pins the success case. Memoization keyed on
+        ``policy.broker_count is None`` cannot bound an UNMEASURABLE cluster:
+        the field stays ``None`` forever, so the probe re-ran on every
+        entrypoint — measured at 3 ``describe_cluster`` round trips across 3
+        entrypoints, each one guaranteed to fail, which is precisely the
+        per-call fan-out (d) exists to eliminate reappearing on the error path.
+        The sentinel memoizes the ATTEMPT.
+
+        RED before the fix: ``describe_cluster_calls == 3``.
+        """
+        _use_self_hosted(monkeypatch)
+        _write_contract(tmp_path, replication_factor=2)
+        provisioner = _provisioner(tmp_path)
+        recorder = _AdminRecorder(describe_cluster_raises=True)
+
+        with _patched_admin(recorder):
+            await provisioner.ensure_provisioned_topics_exist()
+            await provisioner.ensure_topic_exists(topic_name=OTHER_TOPIC)
+            await provisioner.ensure_provisioned_topics_exist()
+
+        assert recorder.describe_cluster_calls == 1
+        assert provisioner.policy.broker_count is None
+        assert provisioner.policy.capacity_replication_factor is None
 
 
 class TestDiffBeforeCreate:
@@ -995,14 +1643,305 @@ class TestPolicyErrorsEscapeBestEffortBoundaries:
         the shipped source so a NEW best-effort call site cannot silently
         reintroduce the swallow.
         """
-        src_root = Path(__file__).resolve().parents[3] / "src" / "omnibase_infra"
-        offenders = _provisioning_swallow_offenders(src_root)
+        repo_root = Path(__file__).resolve().parents[3]
+        offenders = [
+            offender
+            for root in (repo_root / "src" / "omnibase_infra", repo_root / "scripts")
+            for offender in _provisioning_swallow_offenders(root)
+        ]
         assert not offenders, (
             "provisioning call sites that swallow a durability violation into "
             f"a best-effort boundary: {offenders}. Add "
             "`except TopicReplicationPolicyError: raise` ahead of the bare "
             "`except Exception`."
         )
+
+    def test_every_create_topics_site_resolves_through_the_policy(self) -> None:
+        """Static guard: no ``NewTopic`` may be built outside the policy seam.
+
+        The sibling of the swallow guard, and the mechanism for OMN-15395 D2.
+        The swallow guard watches calls INTO the provisioner; this one watches
+        modules that go AROUND it and issue their own ``CreateTopics``. There
+        were three such live paths and one of them —
+        ``scripts/create_kafka_topics.py``, the documented operator runbook
+        command — hardcoded ``replication_factor`` from a CLI default of 1, so
+        every contract's declared ``topic_config.replication_factor`` was
+        discarded and the fail-closed managed-staging check never ran. Both
+        guards were blind to it: it calls no provisioner method, and it lives in
+        ``scripts/``, which was outside the scanned root entirely.
+        """
+        repo_root = Path(__file__).resolve().parents[3]
+        offenders = _raw_create_topics_offenders(
+            [repo_root / "src" / "omnibase_infra", repo_root / "scripts"]
+        )
+        assert not offenders, (
+            "CreateTopics construction sites that bypass "
+            f"ModelTopicProvisioningPolicy: {offenders}. Resolve the spec "
+            "through the policy (see TopicProvisioner or "
+            "scripts/create_kafka_topics.py) instead of passing a literal "
+            "replication factor."
+        )
+
+    @pytest.mark.parametrize(
+        ("body", "expected_reason"),
+        [
+            pytest.param(
+                "def go():\n"
+                "    return NewTopic('t', num_partitions=1, replication_factor=1)\n",
+                "hardcoded replication_factor",
+                id="flat-literal-default",
+            ),
+            pytest.param(
+                "def go(rf):\n"
+                "    return NewTopic('t', num_partitions=1, replication_factor=rf)\n",
+                "replication_factor is not policy-resolved at this call site",
+                id="unresolved-caller-supplied",
+            ),
+            # The shape the module-scope predecessor could not see. The module
+            # imports the policy and calls a resolver — for an UNRELATED
+            # purpose — and the guard's per-file ``resolves`` flag waved every
+            # NewTopic in it through. Executed against the real reconstructed
+            # b2ca4faa tree, that predecessor returned nothing at all for
+            # ``service_topic_manager.py``'s
+            # ``replication_factor=config.replication_factor``.
+            pytest.param(
+                "from omnibase_infra.topics.model_topic_provisioning_policy import (\n"
+                "    ModelTopicProvisioningPolicy,\n"
+                ")\n"
+                "\n"
+                "def audit(policy: ModelTopicProvisioningPolicy, spec):\n"
+                "    return policy.resolve_spec(spec).replication_factor\n"
+                "\n"
+                "def go(raw_config):\n"
+                "    return NewTopic(\n"
+                "        name=raw_config.name,\n"
+                "        num_partitions=raw_config.partition_count,\n"
+                "        replication_factor=raw_config.replication_factor,\n"
+                "    )\n",
+                "replication_factor is not policy-resolved at this call site",
+                id="policy-aware-module-raw-site",
+            ),
+            # Naming is not provenance: a local helper called ``_resolve_spec``
+            # that resolves nothing must not confer admissibility, or the
+            # module-local-wrapper allowance below becomes the new blanket pass.
+            pytest.param(
+                "def _resolve_spec(spec):\n"
+                "    return spec\n"
+                "\n"
+                "def go(spec):\n"
+                "    resolved = _resolve_spec(spec)\n"
+                "    return NewTopic(\n"
+                "        't',\n"
+                "        num_partitions=1,\n"
+                "        replication_factor=resolved.replication_factor,\n"
+                "    )\n",
+                "replication_factor is not policy-resolved at this call site",
+                id="stub-helper-named-like-a-resolver",
+            ),
+            # ``replication_factor`` is positional #3 in both the aiokafka and
+            # confluent_kafka signatures.
+            pytest.param(
+                "def go():\n    return NewTopic('t', 6, 1)\n",
+                "hardcoded replication_factor",
+                id="positional-literal",
+            ),
+            # An unreadable site is refused, not waved through.
+            pytest.param(
+                "def go(payload):\n    return NewTopic(**payload)\n",
+                "no replication_factor argument",
+                id="kwargs-splat",
+            ),
+            pytest.param(
+                "def go():\n    return NewTopic('t', num_partitions=6)\n",
+                "no replication_factor argument",
+                id="rf-argument-omitted",
+            ),
+        ],
+    )
+    def test_create_topics_guard_sees_a_planted_third_path(
+        self, tmp_path: Path, body: str, expected_reason: str
+    ) -> None:
+        """Positive control: a NEW bypass path is caught, every shape.
+
+        ``scripts/create_kafka_topics.py`` matched the first shape and shipped
+        for months. The guard is only worth anything if it fires on these
+        shapes without being told where to look — and, since the predecessor
+        decided admissibility per FILE, specifically if it fires on a raw site
+        inside a module that is otherwise policy-aware.
+        """
+        root = tmp_path / "scripts"
+        root.mkdir()
+        (root / "planted_creator.py").write_text(body, encoding="utf-8")
+
+        offenders = _raw_create_topics_offenders([root])
+        assert len(offenders) == 1
+        assert offenders[0].endswith(f": {expected_reason}")
+        assert offenders[0].startswith("scripts/planted_creator.py:")
+
+    @pytest.mark.parametrize(
+        ("body", "shape"),
+        [
+            pytest.param(
+                "from omnibase_infra.topics.model_topic_provisioning_policy import (\n"
+                "    ModelTopicProvisioningPolicy,\n"
+                ")\n"
+                "\n"
+                "def go(policy: ModelTopicProvisioningPolicy, spec):\n"
+                "    resolved = policy.resolve_spec(spec)\n"
+                "    return NewTopic(\n"
+                "        resolved.suffix,\n"
+                "        num_partitions=resolved.partitions,\n"
+                "        replication_factor=resolved.replication_factor,\n"
+                "    )\n",
+                "attribute of a directly resolved spec",
+                id="direct-resolve-spec",
+            ),
+            # ``TopicProvisioner.ensure_topic_exists`` config= branch.
+            pytest.param(
+                "def go(policy, topic, declared):\n"
+                "    resolved_rf = policy.resolve_replication_factor(\n"
+                "        topic=topic, declared=declared\n"
+                "    )\n"
+                "    return NewTopic(\n"
+                "        name=topic, num_partitions=6, replication_factor=resolved_rf\n"
+                "    )\n",
+                "scalar straight off resolve_replication_factor",
+                id="resolved-scalar",
+            ),
+            # ``scripts/create_kafka_topics.py`` — comprehension over a batch.
+            pytest.param(
+                "from omnibase_infra.topics.model_topic_provisioning_policy import (\n"
+                "    resolve_specs_for_creation,\n"
+                ")\n"
+                "\n"
+                "def go(policy, specs):\n"
+                "    resolved_specs = resolve_specs_for_creation(policy, specs)\n"
+                "    return [\n"
+                "        NewTopic(\n"
+                "            spec.suffix,\n"
+                "            num_partitions=spec.partitions,\n"
+                "            replication_factor=spec.replication_factor,\n"
+                "        )\n"
+                "        for spec in resolved_specs\n"
+                "    ]\n",
+                "comprehension over a batch-resolved sequence",
+                id="comprehension-over-batch",
+            ),
+            # ``managed_staging_topic_checker`` — dict-comprehension + .get(),
+            # with an EARLIER walrus binding the same name to a raw value. The
+            # nearest-preceding-binding rule is what keeps this admissible
+            # without also admitting the raw one.
+            pytest.param(
+                "def go(policy, missing, specs_by_name):\n"
+                "    resolved_by_name = {\n"
+                "        name: policy.resolve_spec(spec)\n"
+                "        for name in missing\n"
+                "        if (spec := specs_by_name.get(name)) is not None\n"
+                "    }\n"
+                "    out = []\n"
+                "    for name in missing:\n"
+                "        spec = resolved_by_name.get(name)\n"
+                "        if spec is None:\n"
+                "            continue\n"
+                "        out.append(\n"
+                "            NewTopic(\n"
+                "                name=spec.suffix,\n"
+                "                num_partitions=spec.partitions,\n"
+                "                replication_factor=spec.replication_factor,\n"
+                "            )\n"
+                "        )\n"
+                "    return out\n",
+                "rebound through a resolved mapping, shadowing a raw walrus",
+                id="dictcomp-get-after-raw-walrus",
+            ),
+            # ``TopicProvisioner._resolve_spec`` — a module-local wrapper that
+            # genuinely delegates. Admitted by its BODY, not by its name.
+            pytest.param(
+                "class P:\n"
+                "    def _resolve_spec(self, spec):\n"
+                "        return self._policy.resolve_spec(spec)\n"
+                "\n"
+                "    def go(self, spec):\n"
+                "        resolved = self._resolve_spec(spec)\n"
+                "        return NewTopic(\n"
+                "            name=resolved.suffix,\n"
+                "            num_partitions=resolved.partitions,\n"
+                "            replication_factor=resolved.replication_factor,\n"
+                "        )\n",
+                "module-local wrapper whose returns are all resolved",
+                id="local-wrapper-delegates",
+            ),
+            pytest.param(
+                "from omnibase_infra.topics.model_topic_provisioning_policy import (\n"
+                "    resolve_specs_for_creation,\n"
+                ")\n"
+                "\n"
+                "def go(policy, specs):\n"
+                "    resolved = tuple(resolve_specs_for_creation(policy, specs))\n"
+                "    return [\n"
+                "        NewTopic(\n"
+                "            s.suffix,\n"
+                "            num_partitions=s.partitions,\n"
+                "            replication_factor=s.replication_factor,\n"
+                "        )\n"
+                "        for s in resolved\n"
+                "    ]\n",
+                "builtin repackaging of a resolved batch",
+                id="tuple-repackaged-batch",
+            ),
+        ],
+    )
+    def test_create_topics_guard_accepts_a_policy_resolved_site(
+        self, tmp_path: Path, body: str, shape: str
+    ) -> None:
+        """Negative control: every live creation shape stays admissible.
+
+        These six mirror the five real ``NewTopic`` sites in the tree. Without
+        them, "tighten the guard" degenerates into "flag everything", which is
+        just as useless as the blanket pass it replaces — and the failure would
+        surface as unexplained CI red on an unrelated PR.
+        """
+        root = tmp_path / "src"
+        root.mkdir()
+        (root / "compliant_creator.py").write_text(body, encoding="utf-8")
+
+        assert _raw_create_topics_offenders([root]) == [], shape
+
+    def test_create_topics_guard_is_conservative_about_accumulators(
+        self, tmp_path: Path
+    ) -> None:
+        """Pin the documented limitation, so it is a decision and not a surprise.
+
+        Provenance is not tracked through a mutated accumulator. This shape is
+        genuinely correct code, and the guard reports it anyway — recorded here
+        deliberately: the remedy is to use the batch helper
+        ``resolve_specs_for_creation`` (as every live path does), never to
+        loosen the guard back toward a blanket pass. Left unpinned, the next
+        person to hit it would read it as a bug and widen the analysis.
+        """
+        root = tmp_path / "src"
+        root.mkdir()
+        (root / "accumulator.py").write_text(
+            "def go(policy, specs):\n"
+            "    resolved = []\n"
+            "    for spec in specs:\n"
+            "        resolved.append(policy.resolve_spec(spec))\n"
+            "    return [\n"
+            "        NewTopic(\n"
+            "            s.suffix,\n"
+            "            num_partitions=s.partitions,\n"
+            "            replication_factor=s.replication_factor,\n"
+            "        )\n"
+            "        for s in tuple(resolved)\n"
+            "    ]\n",
+            encoding="utf-8",
+        )
+
+        offenders = _raw_create_topics_offenders([root])
+        assert offenders == [
+            "src/accumulator.py:6: replication_factor is not policy-resolved "
+            "at this call site"
+        ]
 
     @pytest.mark.parametrize(
         "receiver",
@@ -1219,6 +2158,106 @@ class TestDriftIsReportedAgainstTheResolvedSpec:
         assert any(
             TOPIC in entry and "replication" in entry for entry in result["drift"]
         ), f"expected RF drift on a 3-node cluster serving 1 replica: {result['drift']}"
+
+    async def test_capped_lane_reports_no_partition_drift_for_a_6_partition_contract(
+        self,
+        tmp_path: Path,
+        monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
+        """The partition half of the same defect (OMN-15395 D3).
+
+        RED-before: the RF expectation was resolved but the PARTITION
+        expectation was still the raw, UNCAPPED ``spec.partitions``, while
+        creation applies ``_creation_partitions`` (the
+        ``ONEX_TOPIC_PROVISIONER_MAX_PARTITIONS`` cap, live at 1 on the dev,
+        stability-test and judge lanes per
+        ``docker/docker-compose.{infra,stability-test,judge}.yml``). Every
+        contract-declared 6-partition topic the provisioner had itself just
+        created with one partition came back as ``partition_mismatch`` on the
+        very next pass — 159 bogus entries per pass into the operator-gated
+        WS-M reassignment feed, from the provisioner reporting drift against its
+        own correct output.
+
+        RED assertion: with the fix reverted this yields
+        ``partition_mismatch: expected 6 partitions, broker reports 1``.
+        """
+        monkeypatch.setenv("ONEX_TOPIC_PROVISIONER_MAX_PARTITIONS", "1")
+        _use_self_hosted(monkeypatch)
+        _write_contract(tmp_path, replication_factor=1, partitions=6)
+        provisioner = _provisioner(tmp_path)
+        recorder = _AdminRecorder(
+            existing_topics=(TOPIC,),
+            broker_count=1,
+            reported_partitions=1,
+            reported_replicas=1,
+        )
+
+        with _patched_admin(recorder):
+            result = await provisioner.ensure_provisioned_topics_exist()
+
+        drift = [entry for entry in result["drift"] if TOPIC in entry]
+        assert drift == [], (
+            "a topic the partition cap correctly created with 1 partition must "
+            f"not be reported as partition drift on a capped lane: {drift}"
+        )
+
+    async def test_partitions_above_the_cap_are_not_a_reassignment_target(
+        self,
+        tmp_path: Path,
+        monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
+        """The other direction: a cap lowered under existing topics.
+
+        Kafka cannot reduce a partition count, so a topic created before the cap
+        was lowered must not be emitted as ``partition_mismatch`` either — that
+        would hand the repair lane an instruction it cannot execute. It is not
+        silently dropped: the divergence is real, it is just cap-explained, so
+        it is logged under a distinct label and kept out of the drift feed.
+        """
+        monkeypatch.setenv("ONEX_TOPIC_PROVISIONER_MAX_PARTITIONS", "1")
+        _use_self_hosted(monkeypatch)
+        _write_contract(tmp_path, replication_factor=1, partitions=6)
+        provisioner = _provisioner(tmp_path)
+        recorder = _AdminRecorder(
+            existing_topics=(TOPIC,),
+            broker_count=1,
+            reported_partitions=6,
+            reported_replicas=1,
+        )
+
+        with _patched_admin(recorder):
+            result = await provisioner.ensure_provisioned_topics_exist()
+
+        assert [entry for entry in result["drift"] if TOPIC in entry] == []
+
+    async def test_genuine_partition_drift_is_still_reported(
+        self,
+        tmp_path: Path,
+        monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
+        """Negative control: an UNCAPPED lane still reports partition drift.
+
+        Without this, "expect the capped value" degenerates into "never report
+        partition drift".
+        """
+        monkeypatch.delenv("ONEX_TOPIC_PROVISIONER_MAX_PARTITIONS", raising=False)
+        _use_self_hosted(monkeypatch)
+        _write_contract(tmp_path, replication_factor=1, partitions=6)
+        provisioner = _provisioner(tmp_path)
+        recorder = _AdminRecorder(
+            existing_topics=(TOPIC,),
+            broker_count=1,
+            reported_partitions=3,
+            reported_replicas=1,
+        )
+
+        with _patched_admin(recorder):
+            result = await provisioner.ensure_provisioned_topics_exist()
+
+        assert any(
+            TOPIC in entry and "partition_mismatch" in entry
+            for entry in result["drift"]
+        ), f"expected partition drift on an uncapped lane: {result['drift']}"
 
 
 class TestReadinessSpecPassThrough:

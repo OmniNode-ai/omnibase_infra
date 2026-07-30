@@ -10,7 +10,7 @@
 # and creates any missing topics on the Kafka broker.  Idempotent and safe
 # for repeated runs.
 #
-# Ticket: OMN-2965
+# Ticket: OMN-2965, OMN-15395
 #
 # Usage:
 #   # Dry-run: print plan, no broker connection
@@ -20,38 +20,62 @@
 #   uv run python scripts/create_kafka_topics.py \
 #       --bootstrap-servers localhost:19092
 #
-#   # Override defaults
+#   # Override the fallback used ONLY for topics whose contract declares none
 #   uv run python scripts/create_kafka_topics.py \
 #       --bootstrap-servers localhost:19092 \
 #       --partitions 3 \
-#       --replication-factor 1 \
 #       --contracts-root src/omnibase_infra/nodes/
 #
 # Exit Codes:
 #   0  Success (always in --dry-run; or all topics ensured in non-dry-run)
-#   1  Broker or create failure
+#   1  Broker or create failure, or a contract that violates the environment's
+#      replication policy (RF1 against managed staging)
 #   2  Missing --bootstrap-servers in non-dry-run mode
 #
 # Algorithm:
-#   1. Extract topics via ContractTopicExtractor (no broker connection)
-#   2. list_topics() from broker
-#   3. Diff: determine which topics are missing
-#   4. create_topics() for missing topics
-#   5. list_topics() again (source of truth — do NOT branch on create_topics return)
-#   6. Report final created count based on list_topics() diff
+#   1. Extract topics + per-topic topic_config via ContractTopicExtractor
+#   2. list_topics() from broker — this also carries the live broker count
+#   3. Bind the replication policy to that MEASURED broker count
+#   4. Diff: determine which topics are missing
+#   5. Resolve EVERY missing topic's replication factor through the policy,
+#      fail-closed, BEFORE the first create_topics()
+#   6. create_topics() for missing topics, each at its own resolved spec
+#   7. list_topics() again (source of truth — do NOT branch on create_topics return)
+#   8. Report final created count based on list_topics() diff
 #
 # Design decisions:
 #   - confluent-kafka (sync): CLI tool — no async event loop needed.
 #   - list_topics() is the source of truth, not create_topics() return value.
 #   - Repo-root is discovered via Path(__file__).resolve(), not CWD.
 #   - --dry-run never attempts a broker connection, even if --bootstrap-servers given.
+#
+# OMN-15395 (D2) — why this script shares the runtime's policy seam:
+#   This is the SECOND live CreateTopics path in the repository, and it is the
+#   one docs/operations/README.md tells operators to run and the one
+#   compare_environments.py names in its fix_hint for cloud/local topic parity.
+#   It previously created every topic with a flat `--replication-factor` whose
+#   default was 1, discarding each contract's declared
+#   `topic_config.replication_factor` entirely — an operator following the
+#   documented runbook against MSK would recreate the exact
+#   AWS_KAFKA_HIGH_RISK_CONFIG_RF_EQUALS_ONE condition OMN-15395 exists to
+#   eliminate, with the runtime provisioner's fail-closed gate never consulted.
+#   Replication is now resolved by the SAME ModelTopicProvisioningPolicy, with
+#   the SAME measured capacity ceiling and the SAME fail-closed batch check
+#   before any CreateTopics is issued. There is no flat replication default and
+#   no --replication-factor flag: durability is declared in the contract.
 
 from __future__ import annotations
 
 import argparse
 import importlib.metadata
 import sys
+from collections.abc import Sequence
 from pathlib import Path
+from typing import TYPE_CHECKING
+
+if TYPE_CHECKING:
+    from omnibase_infra.tools.contract_topic_extractor import ModelContractTopicEntry
+    from omnibase_infra.topics.model_topic_spec import ModelTopicSpec
 
 # ---------------------------------------------------------------------------
 # Repo-root discovery
@@ -153,6 +177,11 @@ Examples:
   uv run python scripts/create_kafka_topics.py \\
       --bootstrap-servers localhost:19092 \\
       --contracts-root src/omnibase_infra/nodes/
+
+Replication factor is NOT a CLI flag: it comes from each topic's owning
+contract (topic_config.replication_factor) and is resolved through the same
+ModelTopicProvisioningPolicy the runtime provisioner uses — managed (MSK)
+clusters reject RF1 fail-closed before any topic is created (OMN-15395).
 """,
     )
     parser.add_argument(
@@ -167,16 +196,15 @@ Examples:
     parser.add_argument(
         "--partitions",
         type=int,
-        default=1,
+        default=None,
         metavar="N",
-        help="Number of partitions for new topics (default: 1).",
-    )
-    parser.add_argument(
-        "--replication-factor",
-        type=int,
-        default=1,
-        metavar="N",
-        help="Replication factor for new topics (default: 1).",
+        help=(
+            "Partition count for topics whose contract declares no "
+            "topic_config.partitions. A contract-declared value always wins. "
+            "Defaults to the runtime provisioner's own default; the lane cap "
+            "ONEX_TOPIC_PROVISIONER_MAX_PARTITIONS applies either way, so this "
+            "script and the runtime never disagree about a topic's shape."
+        ),
     )
     parser.add_argument(
         "--dry-run",
@@ -277,17 +305,65 @@ def _run_dry(
     return 0
 
 
+def _build_specs(
+    entries: Sequence[ModelContractTopicEntry],
+    *,
+    partitions_fallback: int | None,
+) -> list[ModelTopicSpec]:
+    """Build one contract-driven ``ModelTopicSpec`` per unique topic.
+
+    The topic's OWN contract supplies partitions / replication_factor /
+    kafka_config (the OMN-13238 ``topic_config`` seam). ``replication_factor``
+    stays ``None`` when the contract declared nothing — "undeclared", which the
+    policy resolves or refuses. It is never coerced to a flat 1 here.
+    """
+    from omnibase_infra.topics.model_topic_spec import (
+        DEFAULT_EVENT_TOPIC_PARTITIONS,
+        ModelTopicSpec,
+    )
+
+    default_partitions = (
+        partitions_fallback
+        if partitions_fallback is not None
+        else DEFAULT_EVENT_TOPIC_PARTITIONS
+    )
+    merged: dict[str, ModelContractTopicEntry] = {}
+    for entry in entries:
+        existing = merged.get(entry.topic)
+        merged[entry.topic] = (
+            entry if existing is None else existing.merge_sources(entry)
+        )
+    return [
+        ModelTopicSpec(
+            suffix=entry.topic,
+            provisioning_priority=entry.provisioning_priority,
+            partitions=(
+                entry.partitions if entry.partitions is not None else default_partitions
+            ),
+            replication_factor=entry.replication_factor,
+            kafka_config=(
+                dict(entry.kafka_config) if entry.kafka_config is not None else None
+            ),
+        )
+        for _, entry in sorted(merged.items())
+    ]
+
+
 def _run_live(
-    topics: list[str],
+    specs: Sequence[ModelTopicSpec],
     bootstrap_servers: str,
-    partitions: int,
-    replication_factor: int,
     contracts_root: Path,
 ) -> int:
     """
     Connect to broker, diff existing topics, create missing ones.
 
-    Returns 0 on success, 1 on broker or creation failure.
+    Each topic is created at its OWN contract-declared spec, with the
+    replication factor resolved through ``ModelTopicProvisioningPolicy`` against
+    a MEASURED broker count. Every missing topic is resolved before the first
+    ``create_topics`` call, so an RF1 contract against managed staging aborts
+    the run with nothing created (OMN-15395 D2).
+
+    Returns 0 on success, 1 on broker, policy, or creation failure.
     """
     try:
         from confluent_kafka.admin import (  # type: ignore[attr-defined]
@@ -302,18 +378,49 @@ def _run_live(
         )
         return 1
 
+    from omnibase_infra.errors import TopicReplicationPolicyError
+    from omnibase_infra.event_bus.service_topic_manager import (
+        topic_partition_cap_from_env,
+    )
+    from omnibase_infra.topics.broker_capacity_probe import (
+        bind_policy_to_broker_count,
+        broker_count_from_cluster_metadata,
+        is_invalid_replication_factor_error,
+    )
+    from omnibase_infra.topics.model_topic_provisioning_policy import (
+        ModelTopicProvisioningPolicy,
+        resolve_specs_for_creation,
+    )
+
+    partition_cap = topic_partition_cap_from_env()
+
     admin: AdminClient | None = None
     try:
         print(f"Connecting to broker: {bootstrap_servers}")
         admin = AdminClient({"bootstrap.servers": bootstrap_servers})
 
-        # Step 1: List existing topics (source of truth — before)
+        # Step 1: List existing topics (source of truth — before). The same
+        # response carries the live broker list, so capacity is MEASURED off
+        # the metadata request the diff already needs — no extra round trip and
+        # no inference from the auth mechanism.
         print("Listing existing topics...")
         cluster_metadata = admin.list_topics(timeout=10)
         existing_topics: set[str] = set(cluster_metadata.topics.keys())
 
+        policy = bind_policy_to_broker_count(
+            ModelTopicProvisioningPolicy.from_env(),
+            broker_count_from_cluster_metadata(cluster_metadata),
+        )
+        print(
+            f"Replication policy: profile={policy.profile.value} "
+            f"floor={policy.minimum_replication_factor} "
+            f"measured_brokers={policy.broker_count} "
+            f"ceiling={policy.capacity_replication_factor}"
+        )
+
         # Step 2: Diff — missing topics only
-        topic_set = set(topics)
+        spec_by_name = {spec.suffix: spec for spec in specs}
+        topic_set = set(spec_by_name)
         missing = sorted(topic_set - existing_topics)
 
         if not missing:
@@ -324,19 +431,36 @@ def _run_live(
         for t in missing:
             print(f"  + {t}")
 
-        # Step 3: Create missing topics
+        # Step 3: Resolve EVERY missing topic through the policy BEFORE the
+        # first CreateTopics. Fail-closed and batch-scoped — one offending
+        # contract aborts the whole run with zero topics created.
+        try:
+            resolved_specs = resolve_specs_for_creation(
+                policy, [spec_by_name[name] for name in missing]
+            )
+        except TopicReplicationPolicyError as policy_exc:
+            print(f"ERROR: {policy_exc}", file=sys.stderr)
+            return 1
+
+        # Step 4: Create missing topics, each at its own contract-declared spec.
         new_topics = [
             NewTopic(
-                t,
-                num_partitions=partitions,
-                replication_factor=replication_factor,
+                spec.suffix,
+                num_partitions=(
+                    spec.partitions
+                    if partition_cap is None
+                    else min(spec.partitions, partition_cap)
+                ),
+                replication_factor=spec.replication_factor,
+                config=dict(spec.kafka_config) if spec.kafka_config else {},
             )
-            for t in missing
+            for spec in resolved_specs
         ]
         futures = admin.create_topics(new_topics)
 
         # Collect create results (best-effort: log per-topic errors)
         create_errors: list[str] = []
+        unhostable: list[str] = []
         for topic_name, future in futures.items():
             topic_exc = future.exception()
             if topic_exc is not None:
@@ -350,14 +474,31 @@ def _run_live(
                     ):
                         # Harmless — topic was created concurrently
                         continue
+                if is_invalid_replication_factor_error(topic_exc):
+                    # (D5) A replica count the broker cannot host is a
+                    # durability failure, not a best-effort miss.
+                    unhostable.append(f"  {topic_name}: {topic_exc}")
+                    continue
                 create_errors.append(f"  {topic_name}: {topic_exc}")
+
+        if unhostable:
+            print(
+                f"ERROR: {len(unhostable)} topic(s) were REFUSED by the broker "
+                "with INVALID_REPLICATION_FACTOR — the declared replication "
+                "factor exceeds what this cluster can host and no measured "
+                f"capacity ceiling reduced it (measured_brokers="
+                f"{policy.broker_count}). These topics do NOT exist:",
+                file=sys.stderr,
+            )
+            for err in unhostable:
+                print(err, file=sys.stderr)
 
         if create_errors:
             print("WARNING: Some topics failed to create:", file=sys.stderr)
             for err in create_errors:
                 print(err, file=sys.stderr)
 
-        # Step 4: list_topics() is the source of truth — re-check after create
+        # Step 5: list_topics() is the source of truth — re-check after create
         cluster_metadata_after = admin.list_topics(timeout=10)
         existing_after: set[str] = set(cluster_metadata_after.topics.keys())
         # Topics from our set that now exist but didn't before (newly_present is the truth)
@@ -471,10 +612,8 @@ def main() -> int:
             return _run_dry(topics, args.bootstrap_servers, contracts_root)
 
         return _run_live(
-            topics,
+            _build_specs(entries, partitions_fallback=args.partitions),
             bootstrap_servers=args.bootstrap_servers,
-            partitions=args.partitions,
-            replication_factor=args.replication_factor,
             contracts_root=contracts_root,
         )
 
@@ -545,10 +684,8 @@ def main() -> int:
         )
 
     return _run_live(
-        unique_topics,
+        _build_specs(all_entries, partitions_fallback=args.partitions),
         bootstrap_servers=args.bootstrap_servers,
-        partitions=args.partitions,
-        replication_factor=args.replication_factor,
         contracts_root=packages[0][1],  # display first package path
     )
 

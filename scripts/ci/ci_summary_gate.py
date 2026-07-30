@@ -91,6 +91,15 @@ STRICT_GATE_JOBS: tuple[str, ...] = (
     "no-noncanonical-lifecycle-classes",  # OMN-14350 non-canonical lifecycle-class ratchet
     "Effect-Assertion Gate (RT-5)",  # OMN-14467 deploy-trigger fails closed on zero output
     "OCC Companion Merged Gate (OMN-15214)",  # occ-companion-merged — cited OCC evidence must be MERGED before product merge
+    # OMN-15378 AC3: scripts/deploy-agent's standalone pytest root. ci.yml's
+    # `deploy-agent-tests` job CALLS .github/workflows/deploy-agent-tests.yml,
+    # so the inner job surfaces as "<caller display name> / <inner job name>"
+    # (same shape as "occ-preflight / eligibility"). Registering it here is what
+    # makes those 201 tests GATE merge: while they lived in a separately-
+    # triggered workflow this poller could not observe them at all (different
+    # run_id), so a RED run left "CI Summary" — the sole required context on
+    # dev — green.
+    "Deploy Agent Tests (OMN-15378) / deploy-agent-tests",
 )
 
 # Gates the old ci-summary accepted as ``success`` OR ``skipped``. Each carries

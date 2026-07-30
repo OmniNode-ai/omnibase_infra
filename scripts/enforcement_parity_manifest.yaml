@@ -82,10 +82,31 @@ repos:
           coverage: direct
           rule: >-
             OMN-14556: node-migration-sync.yml is its OWN workflow file (separate run_id from ci.yml), so ci_summary_gate.py's poll of actions/runs/${RUN_ID}/jobs structurally cannot observe it -- a needs_child declaration would be a false COVERED. Confirmed live on PR #2288 (2026-07-13): node-migration-sync=FAIL, CI Summary=PASS, different run_ids. Absent from required_status_checks today (MISSING) -- this entry makes the report-only ratchet flag it until the branch-protection PUT lands.
-        - context: "deploy-agent-tests"
-          coverage: direct
-          rule: >-
-            OMN-15378: deploy-agent-tests.yml is its OWN workflow file (separate run_id from ci.yml, path-triggered on scripts/deploy-agent/**), so ci_summary_gate.py's poll of actions/runs/${RUN_ID}/jobs structurally cannot observe it -- same class as node-migration-sync (OMN-14556) above. Wiring the tests to RUN on PR (this ticket's fix) does not make them GATE merge: a red deploy-agent-tests run today leaves CI Summary (the sole required context on this branch) green, so the exact "test exists but doesn't block anything" failure mode the ticket was filed to close is only partially closed -- visibility yes, enforcement no. Absent from required_status_checks today (MISSING) -- this entry makes the report-only ratchet flag it until the branch-protection PUT lands.
+          # OMN-15378 AC3 -- RESOLVED, so the former `deploy-agent-tests` direct-gate
+          # entry is deliberately GONE rather than left as a permanent MISSING finding.
+          # The gap it recorded was real: deploy-agent-tests.yml was its own
+          # separately-triggered workflow (own run_id), so ci_summary_gate.py's poll of
+          # actions/runs/${RUN_ID}/jobs structurally could not observe it and a RED run
+          # left "CI Summary" -- the sole required context here -- green. The fix was NOT
+          # the branch-protection PUT this entry anticipated: that workflow is path-filtered
+          # (scripts/deploy-agent/**), and a required context that does not report on every
+          # PR shape wedges merges indefinitely. Instead ci.yml now CALLS the workflow from
+          # an unconditional `deploy-agent-tests` job, so it runs inside ci.yml's own run as
+          # the check-run "Deploy Agent Tests (OMN-15378) / deploy-agent-tests", registered
+          # in scripts/ci/ci_summary_gate.py STRICT_GATE_JOBS -- absent/red/skipped all fail
+          # the required context. Pinned by tests/ci/test_ci_summary_gate.py
+          # (test_deploy_agent_tests_gate_is_strict_and_fails_closed +
+          # test_every_gate_name_resolves_to_a_ci_yml_job).
+          #
+          # RESIDUAL (flagged, not silently dropped): this manifest has no coverage mode
+          # for "strict-gated by the CI Summary poller". `direct` is false (no own
+          # context) and `needs_child` is false (ci-summary is a NO-`needs` poller, so a
+          # needs-closure check reports NEEDS_CLOSURE for every poller-strict gate). Until
+          # a `poller_strict_gate` mode exists -- verifying aggregator-required AND
+          # membership in STRICT_GATE_JOBS AND job-present-in-ci.yml -- the ratchet cannot
+          # audit this class, and the tests above are the enforcement of record. The same
+          # limitation applies to the 17 other STRICT_GATE_JOBS entries, none of which this
+          # manifest declares either.
   # --- The two repos the audit CONFIRMED are missing the gates (M1-M4) ---
   omnimarket:
     dev:

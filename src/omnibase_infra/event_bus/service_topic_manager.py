@@ -28,6 +28,7 @@ from pathlib import Path
 from typing import TYPE_CHECKING
 from uuid import UUID, uuid4
 
+from omnibase_infra.enums import EnumInfraTransportType
 from omnibase_infra.errors import TopicReplicationPolicyError
 from omnibase_infra.event_bus.enum_topic_readiness_failure_reason import (
     EnumTopicReadinessFailureReason,
@@ -45,8 +46,12 @@ from omnibase_infra.event_bus.model_topic_readiness_failure import (
 from omnibase_infra.event_bus.model_topic_set_readiness import (
     ModelTopicSetReadiness,
 )
+from omnibase_infra.models.errors.model_infra_error_context import (
+    ModelInfraErrorContext,
+)
 from omnibase_infra.topics.broker_capacity_probe import (
     bind_policy_to_broker_capacity,
+    is_invalid_replication_factor_error,
 )
 from omnibase_infra.topics.model_topic_provisioning_diff import (
     ModelTopicProvisioningDiff,
@@ -54,6 +59,7 @@ from omnibase_infra.topics.model_topic_provisioning_diff import (
 )
 from omnibase_infra.topics.model_topic_provisioning_policy import (
     ModelTopicProvisioningPolicy,
+    resolve_specs_for_creation,
 )
 from omnibase_infra.topics.model_topic_spec import ModelTopicSpec
 from omnibase_infra.utils import sanitize_error_message
@@ -79,7 +85,14 @@ ENV_TOPIC_PARTITION_CAP = "ONEX_TOPIC_PROVISIONER_MAX_PARTITIONS"
 DEFAULT_EVENT_TOPIC_PARTITIONS = 6
 
 
-def _topic_partition_cap_from_env() -> int | None:
+def topic_partition_cap_from_env() -> int | None:
+    """Return the lane's partition cap, or ``None`` when uncapped.
+
+    Public because the operator CLI (``scripts/create_kafka_topics.py``) must
+    apply the SAME cap the runtime provisioner applies. A CLI that creates a
+    topic at its contract-declared 6 partitions on a lane the runtime caps to 1
+    manufactures permanent partition drift between the two live creation paths.
+    """
     raw_value = os.environ.get(ENV_TOPIC_PARTITION_CAP)
     if raw_value is None or raw_value.strip() == "":
         return None
@@ -111,6 +124,44 @@ def _topic_partition_cap_from_env() -> int | None:
 def _topic_provisioning_sort_key(spec: ModelTopicSpec) -> tuple[int, str]:
     """Sort topics using contract-declared provisioning priority."""
     return (spec.provisioning_priority, spec.suffix)
+
+
+def unhostable_replication_error(
+    *,
+    topic: str,
+    requested_replication_factor: int | None,
+    policy: ModelTopicProvisioningPolicy,
+    cause: BaseException,
+) -> TopicReplicationPolicyError:
+    """Build the typed, receipted error for a broker-rejected replica count."""
+    context = ModelInfraErrorContext.with_correlation(
+        transport_type=EnumInfraTransportType.KAFKA,
+        operation="create_topic",
+        target_name=topic,
+    )
+    measured = (
+        f"the cluster measured {policy.broker_count} broker(s)"
+        if policy.broker_count is not None
+        else (
+            "the cluster's broker count could NOT be measured, so no capacity "
+            "ceiling was installed and the declared value was passed through "
+            "unreduced"
+        )
+    )
+    return TopicReplicationPolicyError(
+        f"Broker refused to create topic {topic!r} with "
+        f"replication_factor={requested_replication_factor}: "
+        f"INVALID_REPLICATION_FACTOR. {measured}. This is a hard provisioning "
+        "failure, not a best-effort miss — the topic does NOT exist. Fix the "
+        f"owning contract's topic_config.replication_factor, or run against a "
+        "cluster whose describe_cluster is reachable so the measured capacity "
+        f"ceiling can reduce it (OMN-15395). Broker error: {cause!r}",
+        context=context,
+        topic=topic,
+        declared_replication_factor=requested_replication_factor,
+        profile=policy.profile.value,
+        broker_count=policy.broker_count,
+    )
 
 
 class TopicProvisioner:
@@ -187,8 +238,16 @@ class TopicProvisioner:
         self._contracts_root = contracts_root
         self._skill_manifests_root = skill_manifests_root
         self._skill_manifests_roots = skill_manifests_roots
-        self._topic_partition_cap = _topic_partition_cap_from_env()
+        self._topic_partition_cap = topic_partition_cap_from_env()
         self._policy = policy or ModelTopicProvisioningPolicy.from_env()
+        # OMN-15395 (D4): memoize the capacity probe ATTEMPT, not merely a
+        # successful one. Keying the "already probed?" test on
+        # ``policy.broker_count is None`` re-probed an UNMEASURABLE cluster on
+        # every entrypoint — three entrypoints, three describe_cluster round
+        # trips, none of which could ever succeed — which is the per-call
+        # fan-out (d) exists to eliminate, reintroduced on the failure path. A
+        # policy supplied already-measured counts as probed.
+        self._capacity_probed = self._policy.broker_count is not None
         self._topic_specs = self._build_topic_specs()
         # OMN-15395 (c): the contract-derived spec registry every path resolves
         # against, so a caller that knows only a topic NAME still creates that
@@ -230,15 +289,38 @@ class TopicProvisioner:
         nothing at all about node count. Measuring here — on the same admin
         client that is about to issue the ``CreateTopics`` — is the only place
         the ceiling can be honest.
+
+        The ATTEMPT is memoized, not the success (OMN-15395 D4). A cluster whose
+        ``describe_cluster`` is absent or failing leaves ``broker_count`` at
+        ``None`` forever, so testing that field re-ran the probe on every
+        entrypoint; the sentinel bounds it to one attempt per instance.
         """
-        if self._policy.broker_count is None:
-            self._policy = await bind_policy_to_broker_capacity(admin, self._policy)
+        if self._capacity_probed:
+            return self._policy
+        self._capacity_probed = True
+        self._policy = await bind_policy_to_broker_capacity(admin, self._policy)
         return self._policy
 
     def _creation_partitions(self, spec: ModelTopicSpec) -> int:
         if self._topic_partition_cap is None:
             return spec.partitions
         return min(spec.partitions, self._topic_partition_cap)
+
+    def _creation_spec(self, spec: ModelTopicSpec) -> ModelTopicSpec:
+        """Return the spec as this provisioner would actually CREATE it.
+
+        Replication resolved through the policy, partitions clamped by the
+        lane's env cap. This is the single "effective spec" every site must
+        compare against — the creation site, and (OMN-15395 D3) the drift site.
+
+        Raises:
+            TopicReplicationPolicyError: The spec violates the policy.
+        """
+        resolved = self._resolve_spec(spec)
+        partitions = self._creation_partitions(resolved)
+        if partitions == resolved.partitions:
+            return resolved
+        return resolved.model_copy(update={"partitions": partitions})
 
     def _resolve_spec(self, spec: ModelTopicSpec) -> ModelTopicSpec:
         """Resolve one spec's replication factor through the environment policy.
@@ -264,39 +346,28 @@ class TopicProvisioner:
         collected first so one boot surfaces every offending contract instead of
         one per redeploy.
 
+        The batch resolution itself lives in
+        :func:`~omnibase_infra.topics.model_topic_provisioning_policy.resolve_specs_for_creation`
+        so the operator CLI (``scripts/create_kafka_topics.py``) enforces the
+        identical fail-closed rule; this wrapper only adds the
+        correlation-scoped log line.
+
         Returns:
             The resolved specs, each carrying an explicit replication factor.
 
         Raises:
             TopicReplicationPolicyError: Any spec violates the policy.
         """
-        resolved: list[ModelTopicSpec] = []
-        violations: list[str] = []
-        for spec in specs:
-            try:
-                resolved.append(self._resolve_spec(spec))
-            except TopicReplicationPolicyError as exc:
-                violations.append(str(exc))
-        if violations:
-            shown = violations[:10]
-            suffix = (
-                f" (+{len(violations) - len(shown)} more)"
-                if len(violations) > len(shown)
-                else ""
-            )
-            logger.error(
-                "Refusing to provision %d topic(s) under the %s replication "
+        try:
+            return resolve_specs_for_creation(self._policy, specs)
+        except TopicReplicationPolicyError:
+            logger.exception(
+                "Refusing to provision topic(s) under the %s replication "
                 "policy; no CreateTopics issued (correlation_id=%s)",
-                len(violations),
                 self._policy.profile.value,
                 correlation_id,
             )
-            raise TopicReplicationPolicyError(
-                f"Refusing to provision {len(violations)} topic(s) under the "
-                f"{self._policy.profile.value} replication policy; no "
-                f"CreateTopics was issued. Violations: " + " | ".join(shown) + suffix
-            )
-        return tuple(resolved)
+            raise
 
     async def _fetch_broker_topic_metadata(
         self,
@@ -362,14 +433,32 @@ class TopicProvisioner:
         Reuses ``evaluate_topic_readiness`` rather than re-implementing the
         comparison.
 
-        The expectation is built from the RESOLVED spec, not the raw
-        contract-declared one. "There is one resolver" only holds if every site
-        uses what it returns, and that includes the site that decides what
-        counts as drift: comparing a broker against an unresolved RF2 on a
-        cluster measured at one node reports every RF2 topic as drifted even
-        though the provisioner deliberately and correctly created it at RF1
-        there — and seeds the operator-gated reassignment queue that consumes
-        this feed with targets the cluster cannot host.
+        The expectation is the spec this provisioner would actually CREATE —
+        :meth:`_creation_spec`, i.e. replication resolved through the policy AND
+        partitions clamped by the lane's env cap. "There is one resolver" only
+        holds if every site uses what it returns, and that includes the site
+        that decides what counts as drift:
+
+        * comparing a broker against an unresolved RF2 on a cluster measured at
+          one node reports every RF2 topic as drifted even though the
+          provisioner deliberately and correctly created it at RF1 there; and
+        * comparing against the UNCAPPED ``spec.partitions`` reports every
+          contract-declared 6-partition topic as ``partition_mismatch`` on every
+          dev/stability lane, where ``ONEX_TOPIC_PROVISIONER_MAX_PARTITIONS=1``
+          means the provisioner itself created them with one partition
+          (OMN-15395 D3).
+
+        Both seed the operator-gated WS-M reassignment queue that consumes this
+        feed with targets the cluster cannot host — a provisioner reporting
+        drift against topics it just created, correctly.
+
+        Partition divergence the cap *explains* is not silently dropped either:
+        a pre-existing topic carrying more partitions than the current cap
+        allows (created before the cap was lowered) is reported under a distinct
+        ``partition_cap_suppressed`` label. Kafka cannot reduce a partition
+        count, so emitting that as ``partition_mismatch`` would feed the repair
+        queue an impossible instruction; emitting nothing at all would hide a
+        real difference between contract and broker.
 
         A spec the policy REFUSES (a contract declaring RF1 against managed) is
         reported here rather than raised: the fail-closed abort is scoped to
@@ -382,7 +471,7 @@ class TopicProvisioner:
             if declared is None:
                 continue
             try:
-                expected[name] = self._resolve_spec(declared)
+                expected[name] = self._creation_spec(declared)
             except TopicReplicationPolicyError as exc:
                 refusals.append(f"{name}: replication_policy_violation: {exc}")
         if refusals:
@@ -401,15 +490,38 @@ class TopicProvisioner:
             [metadata[name] for name in expected if name in metadata],
             expected_specs=expected,
         )
-        drift = [
-            f"{failure.topic}: {failure.reason.value}: {failure.detail}"
-            for failure in evaluation.failures
-            if failure.reason
-            in (
+        drift: list[str] = []
+        cap_suppressed: list[str] = []
+        for failure in evaluation.failures:
+            if failure.reason not in (
                 EnumTopicReadinessFailureReason.PARTITION_MISMATCH,
                 EnumTopicReadinessFailureReason.REPLICATION_MISMATCH,
+            ):
+                continue
+            entry = f"{failure.topic}: {failure.reason.value}: {failure.detail}"
+            if (
+                failure.reason is EnumTopicReadinessFailureReason.PARTITION_MISMATCH
+                and self._partition_gap_is_cap_explained(
+                    failure.topic, metadata.get(failure.topic)
+                )
+            ):
+                cap_suppressed.append(
+                    f"{failure.topic}: partition_cap_suppressed: {failure.detail} "
+                    f"(explained by {ENV_TOPIC_PARTITION_CAP}="
+                    f"{self._topic_partition_cap}; partitions cannot be reduced, "
+                    "so this is NOT a reassignment target)"
+                )
+                continue
+            drift.append(entry)
+        if cap_suppressed:
+            logger.info(
+                "Partition divergence on %d existing topic(s) is explained by "
+                "the lane partition cap — NOT reported as drift (OMN-15395): "
+                "%s (correlation_id=%s)",
+                len(cap_suppressed),
+                cap_suppressed,
+                correlation_id,
             )
-        ]
         if drift:
             logger.warning(
                 "Topic spec drift on %d existing topic(s) — reported, NOT "
@@ -419,6 +531,31 @@ class TopicProvisioner:
                 correlation_id,
             )
         return refusals + drift
+
+    def _partition_gap_is_cap_explained(
+        self,
+        topic: str,
+        entry: Mapping[str, object] | None,
+    ) -> bool:
+        """True when the broker's extra partitions are explained by the cap.
+
+        The lane cap can only ever be *lowered* against topics that already
+        exist — Kafka has no partition-reduction operation — so a topic whose
+        broker partition count sits between the capped expectation
+        (exclusive) and the contract-declared count (inclusive) is a topic
+        created before the current cap, not a contract/broker disagreement the
+        reassignment lane can act on.
+        """
+        if self._topic_partition_cap is None or entry is None:
+            return False
+        declared = self._spec_by_name.get(topic)
+        if declared is None:
+            return False
+        raw = entry.get("partitions")
+        if not isinstance(raw, Sequence) or isinstance(raw, (str, bytes)):
+            return False
+        observed = len([p for p in raw if isinstance(p, Mapping)])
+        return self._topic_partition_cap < observed <= declared.partitions
 
     def _build_topic_specs(self) -> tuple[ModelTopicSpec, ...]:
         """Build topic specs from contract YAML extraction.
@@ -517,8 +654,11 @@ class TopicProvisioner:
 
         Raises:
             TopicReplicationPolicyError: A missing topic's spec violates the
-                environment replication policy. Raised before any
-                ``CreateTopics`` — the pass creates nothing.
+                environment replication policy (raised before any
+                ``CreateTopics`` — the pass creates nothing), or the broker
+                refused a ``CreateTopics`` with ``INVALID_REPLICATION_FACTOR``
+                (OMN-15395 D5 — an unhostable replica count leaves the topic
+                absent, so it is never degraded to a warning + ``failed``).
         """
         correlation_id = correlation_id or uuid4()
         created: list[str] = []
@@ -628,7 +768,21 @@ class TopicProvisioner:
                         extra={"correlation_id": str(correlation_id)},
                     )
 
-                except Exception as e:  # noqa: BLE001 — boundary: logs warning and degrades
+                except Exception as e:
+                    # Boundary: an unhostable replica count is re-raised
+                    # fail-closed; everything else degrades to a warning.
+                    if is_invalid_replication_factor_error(e):
+                        # (D5) A replica count the broker cannot host is a
+                        # durability failure, not a best-effort miss. It leaves
+                        # the topic ABSENT, so degrading it to a warning +
+                        # status="partial" is the silent-uncreated-topic bug the
+                        # capacity measurement was supposed to make impossible.
+                        raise unhostable_replication_error(
+                            topic=spec.suffix,
+                            requested_replication_factor=spec.replication_factor,
+                            policy=self._policy,
+                            cause=e,
+                        ) from e
                     failed.append(spec.suffix)
                     logger.warning(
                         "Failed to create topic %s: %s",
@@ -748,7 +902,9 @@ class TopicProvisioner:
 
         Raises:
             TopicReplicationPolicyError: The resolved spec violates the
-                environment replication policy. Raised before ``CreateTopics``.
+                environment replication policy (raised before
+                ``CreateTopics``), or the broker refused the ``CreateTopics``
+                with ``INVALID_REPLICATION_FACTOR`` (OMN-15395 D5).
         """
         correlation_id = correlation_id or uuid4()
 
@@ -769,6 +925,9 @@ class TopicProvisioner:
         TopicAlreadyExistsError = _TopicAlreadyExistsError
 
         admin: AIOKafkaAdminClient | None = None
+        # Recorded so a broker INVALID_REPLICATION_FACTOR rejection can name the
+        # value it refused (OMN-15395 D5).
+        requested_replication_factor: int | None = None
         try:
             auth_kwargs = build_aiokafka_auth_kwargs_from_env()
             admin = AIOKafkaAdminClient(
@@ -804,6 +963,7 @@ class TopicProvisioner:
                 resolved_rf = self._policy.resolve_replication_factor(
                     topic=topic_name, declared=config.replication_factor
                 )
+                requested_replication_factor = resolved_rf
                 new_topic = NewTopic(
                     name=topic_name,
                     num_partitions=config.partition_count,
@@ -830,6 +990,7 @@ class TopicProvisioner:
                 )
                 resolved = self._resolve_spec(effective_spec)
                 created_spec = resolved
+                requested_replication_factor = resolved.replication_factor
                 new_topic = NewTopic(
                     name=topic_name,
                     num_partitions=self._creation_partitions(resolved),
@@ -862,7 +1023,19 @@ class TopicProvisioner:
             # warning-and-False, which the caller would read as "best effort".
             raise
 
-        except Exception as e:  # noqa: BLE001 — boundary: logs warning and degrades
+        except Exception as e:
+            # Boundary: an unhostable replica count is re-raised fail-closed;
+            # everything else degrades to a warning-and-False.
+            if is_invalid_replication_factor_error(e):
+                # (D5) Same rule as the batch path: a broker-rejected replica
+                # count is fail-closed, never a warning-and-False the caller
+                # reads as "best effort".
+                raise unhostable_replication_error(
+                    topic=topic_name,
+                    requested_replication_factor=requested_replication_factor,
+                    policy=self._policy,
+                    cause=e,
+                ) from e
             logger.warning(
                 "Failed to create topic %s: %s",
                 topic_name,
@@ -1193,4 +1366,9 @@ if __name__ == "__main__":
     _cli_main()
 
 
-__all__ = ["TopicProvisioner", "evaluate_topic_readiness"]
+__all__ = [
+    "TopicProvisioner",
+    "evaluate_topic_readiness",
+    "topic_partition_cap_from_env",
+    "unhostable_replication_error",
+]
