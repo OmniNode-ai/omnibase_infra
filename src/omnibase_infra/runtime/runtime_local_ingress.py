@@ -318,26 +318,83 @@ def _local_ingress_routes_equivalent(
     )
 
 
+def _terminal_event_topics_from_declaration(declaration: object) -> tuple[str, ...]:
+    """Normalize one ``terminal_events`` declaration into success-first topics.
+
+    A mapping declaration is emitted with its ``success`` entry FIRST, regardless
+    of YAML key order, because the Pattern B broker treats
+    ``terminal_events[0]`` as the success topic whenever the contract has no
+    top-level ``terminal_event`` (``_status_for_terminal_topic``). Leaving that
+    to mapping order would make a terminal's completed-vs-failed meaning depend
+    on how the contract author happened to sort two YAML keys.
+    """
+
+    if isinstance(declaration, dict):
+        ordered: list[object] = []
+        if "success" in declaration:
+            ordered.append(declaration["success"])
+        ordered.extend(value for key, value in declaration.items() if key != "success")
+        values: Iterable[object] = ordered
+    elif isinstance(declaration, list | tuple):
+        values = declaration
+    else:
+        values = ()
+
+    topics: list[str] = []
+    for value in values:
+        topic = _safe_optional_string(value)
+        if topic is not None:
+            topics.append(topic)
+    return tuple(topics)
+
+
 def _extract_terminal_events(raw: dict[object, object]) -> tuple[str, ...]:
-    """Return all contract-declared terminal topics for local ingress waits."""
+    """Return all contract-declared terminal topics for local ingress waits.
+
+    Reads three declaration sites, in success-first order:
+
+    1. top-level ``terminal_event`` (single success topic),
+    2. top-level ``terminal_events`` (mapping or sequence),
+    3. ``runtime_dispatch.terminal_events`` (OMN-15468).
+
+    Site 3 is the address external clients — the dashboard included — dispatch
+    through, and it is where 51 shipped contracts declare their FAILURE
+    terminal. It was previously unread, so those routes reached the Pattern B
+    broker carrying only their success topic even though the broker is built to
+    race every declared terminal concurrently (OMN-13118/13128). The
+    consequences were both wrong and indistinguishable from each other: a node
+    that correctly published its failure terminal either timed out (the broker
+    was not subscribed to the topic the terminal landed on) or was reported as
+    ``completed`` (the def-B wiring republishes the returned model onto the
+    contract's success ``terminal_event`` irrespective of the payload verdict).
+    24 of those 51 contracts declare NO top-level ``terminal_event`` at all, so
+    they resolved to an EMPTY terminal tuple and the broker rejected the command
+    outright with "does not declare terminal events".
+
+    Live reproduction that motivated this (.201 dev lane, 2026-07-30): correlation
+    ``4a5e0730-0000-4000-8000-000000000002`` returned outer ``ok=true`` /
+    ``status=completed`` while the payload it carried held
+    ``contract_passed=false`` with empty ``contract_yaml``/``handler_source``, and
+    two correct failure terminals sat unread on
+    ``onex.evt.omnimarket.node-generation-failed.v1``.
+    """
 
     terminal_events: list[str] = []
     terminal_event = _safe_optional_string(raw.get("terminal_event"))
     if terminal_event is not None:
         terminal_events.append(terminal_event)
 
-    raw_terminal_events = raw.get("terminal_events")
-    if isinstance(raw_terminal_events, dict):
-        values: Iterable[object] = raw_terminal_events.values()
-    elif isinstance(raw_terminal_events, list | tuple):
-        values = raw_terminal_events
-    else:
-        values = ()
+    terminal_events.extend(
+        _terminal_event_topics_from_declaration(raw.get("terminal_events"))
+    )
 
-    for value in values:
-        topic = _safe_optional_string(value)
-        if topic is not None:
-            terminal_events.append(topic)
+    runtime_dispatch = raw.get("runtime_dispatch")
+    if isinstance(runtime_dispatch, dict):
+        terminal_events.extend(
+            _terminal_event_topics_from_declaration(
+                runtime_dispatch.get("terminal_events")
+            )
+        )
 
     return tuple(dict.fromkeys(terminal_events))
 

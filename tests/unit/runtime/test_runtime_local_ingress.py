@@ -893,3 +893,129 @@ async def test_runtime_health_includes_local_ingress_details() -> None:
     assert "components" in health
     components = cast("list[dict[str, object]]", health["components"])
     assert any(component["name"] == "local_ingress" for component in components)
+
+
+# --------------------------------------------------------------------------- #
+# OMN-15468: runtime_dispatch.terminal_events must reach the ingress route.
+#
+# 51 shipped contracts declare their FAILURE terminal only under
+# ``runtime_dispatch.terminal_events`` (the address the dashboard and other
+# external clients dispatch through). Route discovery read only the TOP-LEVEL
+# ``terminal_event`` / ``terminal_events`` keys, so the Pattern B broker -- which
+# is already built to race every declared terminal topic (OMN-13118/13128) --
+# was only ever handed the success topic. A node that correctly published its
+# failure terminal therefore produced either a bogus ``completed`` (when the
+# def-B wiring republished the returned model onto the success topic) or a
+# spurious ``timeout``. Live reproduction on the .201 dev lane: correlation
+# 4a5e0730-0000-4000-8000-000000000002 returned ok=true / status=completed with
+# contract_passed=false in the very payload it carried.
+# --------------------------------------------------------------------------- #
+
+_GENERATION_CONSUMER_SHAPED_CONTRACT = """
+name: gen_demo
+event_bus:
+  subscribe_topics:
+    - onex.cmd.demo.generation-requested.v1
+  publish_topics:
+    - onex.evt.demo.generation-completed.v1
+    - onex.evt.demo.generation-failed.v1
+terminal_event: onex.evt.demo.generation-completed.v1
+runtime_dispatch:
+  command_topic: onex.cmd.demo.generation-requested.v1
+  terminal_events:
+    success: onex.evt.demo.generation-completed.v1
+    failure: onex.evt.demo.generation-failed.v1
+  default_timeout_ms: 120000
+handler_routing:
+  handlers:
+    - operation: gen_demo.run
+""".strip()
+
+# 24 of the 51 contracts declare NO top-level ``terminal_event`` at all, so
+# discovery gave them an EMPTY terminal-topic tuple and the broker rejected the
+# command outright ("Route '<name>' does not declare terminal events").
+_PLURAL_ONLY_CONTRACT = """
+name: plural_only_demo
+event_bus:
+  subscribe_topics:
+    - onex.cmd.demo.plural-only-requested.v1
+  publish_topics:
+    - onex.evt.demo.plural-only-completed.v1
+    - onex.evt.demo.plural-only-failed.v1
+runtime_dispatch:
+  command_topic: onex.cmd.demo.plural-only-requested.v1
+  terminal_events:
+    failure: onex.evt.demo.plural-only-failed.v1
+    success: onex.evt.demo.plural-only-completed.v1
+handler_routing:
+  handlers:
+    - operation: plural_only_demo.run
+""".strip()
+
+
+def _write_single_node_package(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    *,
+    node_dir: str,
+    contract_body: str,
+) -> None:
+    package_root = tmp_path / "fakepkg"
+    (package_root / "nodes" / node_dir).mkdir(parents=True)
+    (package_root / "__init__.py").write_text("", encoding="utf-8")
+    (package_root / "nodes" / node_dir / "contract.yaml").write_text(
+        contract_body,
+        encoding="utf-8",
+    )
+    monkeypatch.setattr(
+        "omnibase_infra.runtime.runtime_local_ingress.importlib.import_module",
+        lambda _name: SimpleNamespace(__file__=str(package_root / "__init__.py")),
+    )
+
+
+def test_discover_routes_reads_runtime_dispatch_failure_terminal(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """A failure terminal declared ONLY under runtime_dispatch must reach the route."""
+    _write_single_node_package(
+        tmp_path,
+        monkeypatch,
+        node_dir="node_gen_demo",
+        contract_body=_GENERATION_CONSUMER_SHAPED_CONTRACT,
+    )
+
+    route = discover_runtime_local_ingress_routes(("fakepkg",))["gen_demo"]
+
+    assert route.terminal_event == "onex.evt.demo.generation-completed.v1"
+    assert route.terminal_events == (
+        "onex.evt.demo.generation-completed.v1",
+        "onex.evt.demo.generation-failed.v1",
+    )
+
+
+def test_discover_routes_orders_runtime_dispatch_success_terminal_first(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """With no top-level terminal_event, success must still be terminal_events[0].
+
+    ``_status_for_terminal_topic`` falls back to ``terminal_topics[0]`` as the
+    success topic when ``terminal_event`` is None, so the success entry must be
+    hoisted explicitly rather than left to YAML mapping order.
+    """
+    _write_single_node_package(
+        tmp_path,
+        monkeypatch,
+        node_dir="node_plural_only_demo",
+        contract_body=_PLURAL_ONLY_CONTRACT,
+    )
+
+    route = discover_runtime_local_ingress_routes(("fakepkg",))["plural_only_demo"]
+
+    assert route.terminal_event is None
+    # ``failure`` is declared BEFORE ``success`` in the YAML above on purpose.
+    assert route.terminal_events == (
+        "onex.evt.demo.plural-only-completed.v1",
+        "onex.evt.demo.plural-only-failed.v1",
+    )

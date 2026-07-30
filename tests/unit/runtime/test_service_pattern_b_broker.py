@@ -5,6 +5,7 @@ from __future__ import annotations
 
 import asyncio
 from datetime import UTC, datetime
+from pathlib import Path
 from types import SimpleNamespace
 from typing import ClassVar
 from unittest.mock import AsyncMock
@@ -23,7 +24,10 @@ from omnibase_infra.errors import ProtocolConfigurationError
 from omnibase_infra.event_bus.event_bus_inmemory import EventBusInmemory
 from omnibase_infra.event_bus.models.model_event_message import ModelEventMessage
 from omnibase_infra.runtime.runtime_host_process import RuntimeHostProcess
-from omnibase_infra.runtime.runtime_local_ingress import ModelRuntimeLocalIngressRoute
+from omnibase_infra.runtime.runtime_local_ingress import (
+    ModelRuntimeLocalIngressRoute,
+    discover_runtime_local_ingress_routes,
+)
 from omnibase_infra.runtime.service_pattern_b_broker import RuntimePatternBBroker
 
 pytestmark = pytest.mark.unit
@@ -1111,3 +1115,118 @@ async def test_runtime_host_process_rejects_enabled_ingress_without_pattern_b_br
         match=r"local runtime ingress requires pattern_b_broker to be effectively enabled",
     ):
         await process._start_pattern_b_broker()
+
+
+# --------------------------------------------------------------------------- #
+# OMN-15468 cross-boundary regression: contract YAML -> route discovery ->
+# Pattern B broker -> terminal status.
+#
+# This deliberately does NOT hand-build a ModelRuntimeLocalIngressRoute. The
+# defect lived in the seam BETWEEN discovery and the broker: the broker already
+# raced every terminal topic the route carried (OMN-13118/13128), and discovery
+# simply never put the contract's declared failure topic on the route. Two
+# independent unit suites -- one asserting discovery parses the key, one
+# asserting the broker handles a route that already has it -- both passed while
+# the live path returned a false success. The test has to cross the seam.
+# --------------------------------------------------------------------------- #
+
+_GENERATION_SHAPED_CONTRACT = """
+name: gen_seam_demo
+event_bus:
+  subscribe_topics:
+    - onex.cmd.demo.gen-seam-requested.v1
+  publish_topics:
+    - onex.evt.demo.gen-seam-completed.v1
+    - onex.evt.demo.gen-seam-failed.v1
+terminal_event: onex.evt.demo.gen-seam-completed.v1
+runtime_dispatch:
+  command_topic: onex.cmd.demo.gen-seam-requested.v1
+  terminal_events:
+    success: onex.evt.demo.gen-seam-completed.v1
+    failure: onex.evt.demo.gen-seam-failed.v1
+handler_routing:
+  handlers:
+    - operation: gen_seam_demo.run
+""".strip()
+
+
+@pytest.mark.asyncio
+async def test_discovered_route_surfaces_failure_terminal_as_failed_status(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """A node that publishes its declared failure terminal must not read as completed.
+
+    RED before OMN-15468: discovery dropped ``runtime_dispatch.terminal_events``,
+    so the broker subscribed only to the success topic, never saw the failure
+    terminal, and returned ``timeout`` (or, with the def-B wiring republishing the
+    returned model onto the success topic, ``completed``). Either way the caller
+    was told something other than "this failed".
+    """
+    package_root = tmp_path / "fakepkg"
+    (package_root / "nodes" / "node_gen_seam_demo").mkdir(parents=True)
+    (package_root / "__init__.py").write_text("", encoding="utf-8")
+    (package_root / "nodes" / "node_gen_seam_demo" / "contract.yaml").write_text(
+        _GENERATION_SHAPED_CONTRACT,
+        encoding="utf-8",
+    )
+    monkeypatch.setattr(
+        "omnibase_infra.runtime.runtime_local_ingress.importlib.import_module",
+        lambda _name: SimpleNamespace(__file__=str(package_root / "__init__.py")),
+    )
+
+    route = discover_runtime_local_ingress_routes(("fakepkg",))["gen_seam_demo"]
+    failure_topic = "onex.evt.demo.gen-seam-failed.v1"
+
+    bus = EventBusInmemory(environment="test", group="pattern-b")
+    await bus.start()
+    broker = RuntimePatternBBroker(
+        bus,
+        command_topic="onex.cmd.omnibase-infra.pattern-b-dispatch.v1",
+        routes={"gen_seam_demo": route},
+    )
+    await broker.start()
+
+    async def worker(message: ModelEventMessage) -> None:
+        envelope = ModelEventEnvelope[object].model_validate_json(message.value)
+        # The node's real behaviour: contract validation failed, so the terminal
+        # goes to the DECLARED failure topic carrying the negative verdict.
+        terminal_envelope = ModelEventEnvelope[object](
+            payload={
+                "payload": {
+                    "contract_passed": False,
+                    "failure_reason": "contract YAML did not parse to a mapping",
+                }
+            },
+            correlation_id=envelope.correlation_id,
+            envelope_timestamp=datetime.now(UTC),
+            event_type=failure_topic,
+            source_tool="gen_seam_demo",
+        )
+        await bus.publish(
+            failure_topic,
+            None,
+            terminal_envelope.model_dump_json().encode("utf-8"),
+            None,
+        )
+
+    await bus.subscribe(route.command_topic, group_id="worker", on_message=worker)
+
+    try:
+        _resolved_route, result = await broker.dispatch_request(
+            ModelDispatchBusCommand(
+                command_name="gen_seam_demo",
+                requester="runtime-local-ingress",
+                payload={"task_description": "anything"},
+                response_topic="onex.evt.pattern-b.dispatch-completed.v1",
+                timeout_seconds=2,
+            )
+        )
+    finally:
+        await broker.stop()
+        await bus.close()
+
+    assert result.status == "failed", (
+        f"outer status must reflect the inner terminal, got {result.status!r}"
+    )
+    assert result.error_message == "contract YAML did not parse to a mapping"
