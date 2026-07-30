@@ -1,6 +1,6 @@
 # SPDX-FileCopyrightText: 2025 OmniNode.ai Inc.
 # SPDX-License-Identifier: MIT
-"""Payload model for runtime manifest INSERT intent (OMN-11197)."""
+"""Payload model for runtime manifest INSERT intent (OMN-11197 / OMN-15512)."""
 
 from __future__ import annotations
 
@@ -9,6 +9,9 @@ from typing import Literal
 
 from pydantic import BaseModel, ConfigDict, Field, field_validator
 
+from omnibase_infra.event_bus.model_runtime_attach_readiness import (
+    ModelRuntimeAttachReadiness,
+)
 from omnibase_infra.utils.util_pydantic_validators import (
     validate_timezone_aware_datetime,
 )
@@ -41,6 +44,14 @@ class ModelPayloadInsertRuntimeManifest(BaseModel):
     ownership_violations: list[dict[str, object]] = Field(default_factory=list)
     image_digest: str | None = Field(default=None)
     started_at: datetime = Field(...)
+    # OMN-15512: boot attach-readiness aggregate, carried on the SAME
+    # runtime-manifest-published envelope. The producer narrows `results` to
+    # the blocker set (ModelRuntimeAttachReadiness.blockers_only), so this is
+    # bounded by the not-attached count, not by the 475+ contracts walked at
+    # boot. The handler flattens it across four runtime_manifests columns —
+    # this model is `extra="forbid"`, so the producer key name and this field
+    # name are a matched seam and drift fails loudly at coercion.
+    attach_readiness: ModelRuntimeAttachReadiness | None = Field(default=None)
 
     @field_validator("started_at")
     @classmethod

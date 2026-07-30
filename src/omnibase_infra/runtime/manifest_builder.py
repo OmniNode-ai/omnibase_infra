@@ -1,16 +1,25 @@
 # SPDX-FileCopyrightText: 2025 OmniNode.ai Inc.
 # SPDX-License-Identifier: MIT
-"""Build a ModelRuntimeManifest from auto-wiring results (OMN-11196).
+"""Build and publish the runtime manifest snapshot (OMN-11196 / OMN-15512).
 
 Called once at the end of the bootstrap sequence, after all startup phases:
 contract discovery, ownership validation, handler registration, and topic
 ownership. Produces a deterministic, hash-stable snapshot of the runtime
 topology for observability and drift detection.
+
+OMN-15512: the snapshot also carries the boot attach-readiness aggregate, so
+the NOT-READY blocker set (contract name + the topics whose readiness confirm
+failed) reaches the ``runtime_manifests`` projection instead of dying in the
+log stream. :func:`publish_runtime_manifest` is the seam a test can drive with
+a recording bus — the kernel calls exactly this function, so a test that
+asserts on the captured envelope is asserting on the artifact that runs.
 """
 
 from __future__ import annotations
 
 from datetime import UTC, datetime
+from typing import TYPE_CHECKING
+from uuid import UUID
 
 from omnibase_infra.runtime.auto_wiring.models.model_auto_wiring_manifest import (
     ModelAutoWiringManifest,
@@ -21,32 +30,47 @@ from omnibase_infra.runtime.auto_wiring.report import (
     ModelContractWiringResult,
 )
 
+if TYPE_CHECKING:
+    from omnibase_infra.event_bus.model_runtime_attach_readiness import (
+        ModelRuntimeAttachReadiness,
+    )
+    from omnibase_infra.protocols import ProtocolEventBusLike
+    from omnibase_infra.runtime.models.model_runtime_manifest_published import (
+        ModelRuntimeManifestPublished,
+    )
+
 
 def build_runtime_manifest(
     report: ModelAutoWiringReport,
     manifest: ModelAutoWiringManifest,
     runtime_profile: str,
     image_digest: str | None = None,
+    attach_readiness: ModelRuntimeAttachReadiness | None = None,
 ) -> object:
-    """Build a ModelRuntimeManifest from auto-wiring results.
+    """Build the published runtime manifest from auto-wiring results.
 
     Extracts wired/skipped/failed contracts, topics, and handlers from the
     wiring report and discovered manifest, then returns a frozen
-    ModelRuntimeManifest ready for publication on the event bus.
+    ModelRuntimeManifestPublished ready for publication on the event bus.
 
-    The import of ModelRuntimeManifest is deferred so that this module can be
-    imported before omnibase_core PR #1098 lands (the model is gated behind a
-    try/import in service_kernel.py as well).
+    The import of the core manifest models is deferred so that this module can
+    be imported before omnibase_core PR #1098 lands (the model is gated behind
+    a try/import in service_kernel.py as well).
 
     Args:
         report: The wiring report produced by wire_from_manifest().
         manifest: The filtered auto-wiring manifest (post-quarantine).
         runtime_profile: The RUNTIME_PROFILE value (e.g. "main").
         image_digest: Optional OCI image digest for the running container.
+        attach_readiness: Boot attach-readiness aggregate (OMN-15512). Narrowed
+            to the blocker set before publication — see
+            ``ModelRuntimeAttachReadiness.blockers_only``. ``None`` when the
+            per-contract interleave did not run at all.
 
     Returns:
-        A ModelRuntimeManifest instance (typed as object to allow graceful
-        fallback when the model is not yet available in omnibase_core).
+        A ModelRuntimeManifestPublished instance (typed as object to allow
+        graceful fallback when the base model is not available in
+        omnibase_core).
 
     Raises:
         ImportError: If omnibase_core.models.runtime_manifest is not installed.
@@ -57,8 +81,8 @@ def build_runtime_manifest(
     from omnibase_core.models.runtime_manifest.model_manifest_handler import (
         ModelManifestHandler,
     )
-    from omnibase_core.models.runtime_manifest.model_runtime_manifest import (
-        ModelRuntimeManifest,
+    from omnibase_infra.runtime.models.model_runtime_manifest_published import (
+        ModelRuntimeManifestPublished,
     )
 
     results_by_outcome: dict[str, list[ModelContractWiringResult]] = {
@@ -133,7 +157,7 @@ def build_runtime_manifest(
                 )
             )
 
-    return ModelRuntimeManifest(
+    return ModelRuntimeManifestPublished(
         runtime_profile=runtime_profile,
         contracts=wired_contracts,
         owned_command_topics=frozenset(owned_command_topics),
@@ -144,4 +168,70 @@ def build_runtime_manifest(
         ownership_violations=(),
         image_digest=image_digest,
         started_at=datetime.now(tz=UTC),
+        attach_readiness=(
+            attach_readiness.blockers_only() if attach_readiness is not None else None
+        ),
     )
+
+
+async def publish_runtime_manifest(
+    *,
+    event_bus: ProtocolEventBusLike,
+    report: ModelAutoWiringReport,
+    manifest: ModelAutoWiringManifest,
+    runtime_profile: str,
+    topic: str,
+    correlation_id: UUID,
+    image_digest: str | None = None,
+    attach_readiness: ModelRuntimeAttachReadiness | None = None,
+) -> ModelRuntimeManifestPublished:
+    """Build the boot snapshot and publish it on the runtime-manifest topic.
+
+    Extracted from ``service_kernel`` step 9.8 (OMN-15512) so the publish seam
+    is drivable by a test with a recording bus. The kernel calls this exact
+    function, so a test that asserts on the captured envelope payload asserts
+    on the artifact that runs — not on a surrogate.
+
+    Args:
+        event_bus: The runtime event bus (``publish_envelope``).
+        report: The wiring report produced by wire_from_manifest().
+        manifest: The filtered auto-wiring manifest (post-quarantine).
+        runtime_profile: The RUNTIME_PROFILE value (e.g. "main").
+        topic: Resolved topic for SUFFIX_RUNTIME_MANIFEST_PUBLISHED.
+        correlation_id: The boot correlation id, propagated onto the envelope.
+        image_digest: Optional OCI image digest for the running container.
+        attach_readiness: Boot attach-readiness aggregate (OMN-15512).
+
+    Returns:
+        The published payload, so callers and tests can assert on exactly what
+        went onto the bus.
+
+    Raises:
+        ImportError: If omnibase_core.models.runtime_manifest is not installed.
+    """
+    from omnibase_core.models.events.model_event_envelope import ModelEventEnvelope
+    from omnibase_infra.runtime.models.model_runtime_manifest_published import (
+        ModelRuntimeManifestPublished,
+    )
+
+    payload = build_runtime_manifest(
+        report=report,
+        manifest=manifest,
+        runtime_profile=runtime_profile,
+        image_digest=image_digest,
+        attach_readiness=attach_readiness,
+    )
+    if not isinstance(payload, ModelRuntimeManifestPublished):  # pragma: no cover
+        raise TypeError(
+            "build_runtime_manifest must return ModelRuntimeManifestPublished, "
+            f"got {type(payload).__name__}"
+        )
+
+    envelope: ModelEventEnvelope[object] = ModelEventEnvelope(
+        payload=payload,
+        correlation_id=correlation_id,
+        event_type="runtime-manifest-published",
+        source_tool="service_kernel",
+    )
+    await event_bus.publish_envelope(envelope=envelope, topic=topic)
+    return payload
