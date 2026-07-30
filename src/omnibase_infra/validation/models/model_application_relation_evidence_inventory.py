@@ -48,7 +48,7 @@ class ModelApplicationRelationEvidenceInventory(BaseModel):
         mismatches = {
             kind: (declared_count, observed.get(kind, 0))
             for kind, declared_count in declared.items()
-            if declared_count != observed.get(kind, 0)
+            if declared_count is not None and declared_count != observed.get(kind, 0)
         }
         if mismatches:
             raise ValueError(

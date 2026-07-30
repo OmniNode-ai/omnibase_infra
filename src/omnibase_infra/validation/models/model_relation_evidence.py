@@ -20,9 +20,12 @@ class ModelRelationEvidence(BaseModel):
     kind: EnumApplicationRelationKind
     database_ref: str | None = None
     schema: str | None = None  # type: ignore[assignment]
+    current_schemas: tuple[str, ...] = ()
     domain: EnumDatabaseSchemaDomain
     owner_declaration: str = Field(..., min_length=1)
     readers: tuple[str, ...] = ()
+    writers: tuple[str, ...] = ()
+    dependent_objects: tuple[str, ...] = ()
 
     @field_validator("kind", mode="before")
     @classmethod

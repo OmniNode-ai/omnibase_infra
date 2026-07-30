@@ -1,0 +1,61 @@
+# SPDX-FileCopyrightText: 2025 OmniNode.ai Inc.
+# SPDX-License-Identifier: MIT
+
+schema_version: "1.0"
+database_ref: application
+physical_database: omnidash_analytics
+completion_status: verified
+catalog_parity_status: verified
+source_kind: synthetic_fixture
+database_owner_role: app_dashboard
+principal_refs:
+  - app_dashboard
+  - db_migrator
+  - omninode_runtime
+  - onex_api
+  - rls_admin
+  - tenant_projection_writer
+  - untrusted_login
+owner_refs:
+  - owner_omninode_internal
+  - owner_onex_tenant
+  - owner_platform_catalog
+observed_role_states:
+  - {role: app_dashboard, login: true, superuser: false, bypass_rls: false, create_database: false, create_role: false, replication: false, inherit: false}
+  - {role: db_migrator, login: false, superuser: false, bypass_rls: false, create_database: false, create_role: false, replication: false, inherit: false}
+  - {role: omninode_runtime, login: true, superuser: false, bypass_rls: false, create_database: false, create_role: false, replication: false, inherit: false}
+  - {role: onex_api, login: true, superuser: false, bypass_rls: false, create_database: false, create_role: false, replication: false, inherit: false}
+  - {role: rls_admin, login: false, superuser: false, bypass_rls: true, create_database: false, create_role: false, replication: false, inherit: true}
+  - {role: tenant_projection_writer, login: true, superuser: false, bypass_rls: false, create_database: false, create_role: false, replication: false, inherit: false}
+  - {role: untrusted_login, login: true, superuser: false, bypass_rls: false, create_database: false, create_role: false, replication: false, inherit: true}
+  - {role: owner_omninode_internal, login: false, superuser: false, bypass_rls: false, create_database: false, create_role: false, replication: false, inherit: false}
+  - {role: owner_onex_tenant, login: false, superuser: false, bypass_rls: false, create_database: false, create_role: false, replication: false, inherit: false}
+  - {role: owner_platform_catalog, login: false, superuser: false, bypass_rls: false, create_database: false, create_role: false, replication: false, inherit: false}
+observed_schema_owners:
+  tenant: app_dashboard
+  omninode_internal: tenant_projection_writer
+  platform_catalog: onex_api
+observed_objects:
+  - {schema_ref: tenant, catalog_kind: table, object_ref: tenant_accounts, owner: onex_api}
+  - {schema_ref: tenant, catalog_kind: table, object_ref: delegation_events, owner: app_dashboard}
+  - {schema_ref: tenant, catalog_kind: table, object_ref: partitioned_events, owner: onex_api}
+  - {schema_ref: tenant, catalog_kind: sequence, object_ref: delegation_events_id_seq, owner: app_dashboard}
+  - {schema_ref: tenant, catalog_kind: function, object_ref: delegation_event_count, function_signature: "()", owner: app_dashboard}
+  - {schema_ref: tenant, catalog_kind: function, object_ref: hostile_signature, function_signature: '("arg''name%" integer)', owner: app_dashboard}
+  - {schema_ref: tenant, catalog_kind: procedure, object_ref: record_delegation, function_signature: "(IN p_payload text)", owner: app_dashboard}
+  - {schema_ref: tenant, catalog_kind: view, object_ref: tenant_account_names, owner: app_dashboard}
+  - {schema_ref: tenant, catalog_kind: type, object_ref: account_ref, owner: onex_api}
+  - {schema_ref: tenant, catalog_kind: type, object_ref: account_id_span, owner: onex_api}
+  - {schema_ref: tenant, catalog_kind: type, object_ref: account_id_span_set, owner: onex_api}
+  - {schema_ref: tenant, catalog_kind: function, object_ref: account_id_span, function_signature: "(bigint, bigint)", owner: onex_api}
+  - {schema_ref: tenant, catalog_kind: function, object_ref: account_id_span, function_signature: "(bigint, bigint, text)", owner: onex_api}
+  - {schema_ref: tenant, catalog_kind: function, object_ref: account_id_span_set, function_signature: "()", owner: onex_api}
+  - {schema_ref: tenant, catalog_kind: function, object_ref: account_id_span_set, function_signature: "(VARIADIC tenant.account_id_span[])", owner: onex_api}
+  - {schema_ref: tenant, catalog_kind: function, object_ref: account_id_span_set, function_signature: "(tenant.account_id_span)", owner: onex_api}
+  - {schema_ref: omninode_internal, catalog_kind: type, object_ref: runtime_status, owner: omninode_runtime}
+  - {schema_ref: omninode_internal, catalog_kind: type, object_ref: runtime_code, owner: omninode_runtime}
+  - {schema_ref: omninode_internal, catalog_kind: table, object_ref: runtime_state, owner: tenant_projection_writer}
+  - {schema_ref: platform_catalog, catalog_kind: table, object_ref: plan_tiers, owner: onex_api}
+  - {schema_ref: platform_catalog, catalog_kind: materialized_view, object_ref: plan_tier_snapshot, owner: onex_api}
+live_database_read: false
+reason: Exact role census for the wholly synthetic PostgreSQL 16 ACL proof.

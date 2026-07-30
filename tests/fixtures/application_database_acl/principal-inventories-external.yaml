@@ -1,0 +1,108 @@
+# SPDX-FileCopyrightText: 2025 OmniNode.ai Inc.
+# SPDX-License-Identifier: MIT
+
+- schema_version: "1.0"
+  database_ref: keycloak
+  physical_database: keycloak
+  completion_status: verified
+  catalog_parity_status: verified
+  source_kind: synthetic_fixture
+  database_owner_role: postgres
+  principal_refs: &all_external_principals
+    - app_dashboard
+    - external_connect_parent
+    - keycloak_service
+    - omnibase_infra_service
+    - omniclaude_service
+    - omniintelligence_service
+    - omnimemory_service
+    - omninode_cloud_service
+    - omninode_runtime
+    - onex_api
+    - rls_admin
+    - tenant_projection_writer
+    - umami_service
+    - untrusted_login
+  observed_role_states: &all_external_role_states
+    - {role: app_dashboard, login: true, superuser: false, bypass_rls: false, create_database: false, create_role: true, replication: false, inherit: true}
+    - {role: external_connect_parent, login: false, superuser: false, bypass_rls: true, create_database: false, create_role: false, replication: false, inherit: true}
+    - {role: keycloak_service, login: true, superuser: false, bypass_rls: false, create_database: false, create_role: false, replication: false, inherit: false}
+    - {role: omnibase_infra_service, login: true, superuser: false, bypass_rls: false, create_database: false, create_role: false, replication: false, inherit: false}
+    - {role: omniclaude_service, login: true, superuser: false, bypass_rls: false, create_database: false, create_role: false, replication: false, inherit: false}
+    - {role: omniintelligence_service, login: true, superuser: false, bypass_rls: false, create_database: false, create_role: false, replication: false, inherit: false}
+    - {role: omnimemory_service, login: true, superuser: false, bypass_rls: false, create_database: false, create_role: false, replication: false, inherit: false}
+    - {role: omninode_cloud_service, login: true, superuser: false, bypass_rls: false, create_database: false, create_role: false, replication: false, inherit: false}
+    - {role: omninode_runtime, login: true, superuser: false, bypass_rls: false, create_database: false, create_role: false, replication: true, inherit: true}
+    - {role: onex_api, login: true, superuser: false, bypass_rls: false, create_database: true, create_role: false, replication: false, inherit: true}
+    - {role: rls_admin, login: false, superuser: false, bypass_rls: true, create_database: false, create_role: false, replication: false, inherit: true}
+    - {role: tenant_projection_writer, login: true, superuser: false, bypass_rls: true, create_database: false, create_role: false, replication: false, inherit: true}
+    - {role: umami_service, login: true, superuser: false, bypass_rls: false, create_database: false, create_role: false, replication: false, inherit: false}
+    - {role: untrusted_login, login: true, superuser: false, bypass_rls: false, create_database: false, create_role: false, replication: false, inherit: true}
+  live_database_read: false
+  reason: Exact synthetic cluster-role census for Keycloak CONNECT isolation.
+- schema_version: "1.0"
+  database_ref: omnibase_infra
+  physical_database: omnibase_infra
+  completion_status: verified
+  catalog_parity_status: verified
+  source_kind: synthetic_fixture
+  database_owner_role: postgres
+  principal_refs: *all_external_principals
+  observed_role_states: *all_external_role_states
+  live_database_read: false
+  reason: Exact synthetic cluster-role census for omnibase_infra CONNECT isolation.
+- schema_version: "1.0"
+  database_ref: omninode_cloud
+  physical_database: omninode_cloud
+  completion_status: verified
+  catalog_parity_status: verified
+  source_kind: synthetic_fixture
+  database_owner_role: postgres
+  principal_refs: *all_external_principals
+  observed_role_states: *all_external_role_states
+  live_database_read: false
+  reason: Exact synthetic cluster-role census for omninode_cloud CONNECT isolation.
+- schema_version: "1.0"
+  database_ref: omniclaude
+  physical_database: omniclaude
+  completion_status: verified
+  catalog_parity_status: verified
+  source_kind: synthetic_fixture
+  database_owner_role: postgres
+  principal_refs: *all_external_principals
+  observed_role_states: *all_external_role_states
+  live_database_read: false
+  reason: Exact synthetic cluster-role census for omniclaude CONNECT isolation.
+- schema_version: "1.0"
+  database_ref: omniintelligence
+  physical_database: omniintelligence
+  completion_status: verified
+  catalog_parity_status: verified
+  source_kind: synthetic_fixture
+  database_owner_role: postgres
+  principal_refs: *all_external_principals
+  observed_role_states: *all_external_role_states
+  live_database_read: false
+  reason: Exact synthetic cluster-role census for omniintelligence CONNECT isolation.
+- schema_version: "1.0"
+  database_ref: omnimemory
+  physical_database: omnimemory
+  completion_status: verified
+  catalog_parity_status: verified
+  source_kind: synthetic_fixture
+  database_owner_role: postgres
+  principal_refs: *all_external_principals
+  observed_role_states: *all_external_role_states
+  live_database_read: false
+  reason: Exact synthetic cluster-role census for omnimemory CONNECT isolation.
+- schema_version: "1.0"
+  database_ref: umami
+  physical_database: umami
+  completion_status: verified
+  catalog_parity_status: verified
+  source_kind: synthetic_fixture
+  database_owner_role: postgres
+  principal_refs: *all_external_principals
+  observed_role_states: *all_external_role_states
+  live_database_read: false
+  reason: Exact synthetic cluster-role census for umami CONNECT isolation.

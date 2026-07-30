@@ -15,8 +15,10 @@ class ModelApplicationInventoryRelationCounts(BaseModel):
     view: int = Field(..., ge=0)
     materialized_view: int = Field(default=0, ge=0)
     function: int = Field(..., ge=0)
+    procedure: int | None = Field(default=None, ge=0)
     sequence: int = Field(..., ge=0)
     extension: int = Field(..., ge=0)
+    type: int | None = Field(default=None, ge=0)
 
 
 __all__ = ["ModelApplicationInventoryRelationCounts"]

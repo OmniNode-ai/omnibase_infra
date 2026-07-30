@@ -12,6 +12,9 @@ from omnibase_infra.validation.enums.enum_application_inventory_object_kind impo
 from omnibase_infra.validation.models.model_internal_tenant_column_transform import (
     ModelInternalTenantColumnTransform,
 )
+from omnibase_infra.validation.types.type_application_database_function_signature import (
+    ApplicationDatabaseFunctionSignature,
+)
 
 
 class ModelApplicationInventoryRelation(BaseModel):
@@ -39,6 +42,7 @@ class ModelApplicationInventoryRelation(BaseModel):
     dependent_objects: tuple[str, ...] = ()
     dsn_consumers: tuple[str, ...] = ()
     foreign_keys: tuple[str, ...] = ()
+    function_signature: ApplicationDatabaseFunctionSignature | None = None
     grants: tuple[str, ...] = ()
     indexes: tuple[str, ...] = ()
     keys: tuple[str, ...] = ()
