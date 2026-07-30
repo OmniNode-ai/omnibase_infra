@@ -28,6 +28,7 @@ from concurrent.futures import ThreadPoolExecutor, as_completed
 from uuid import UUID, uuid4
 
 import pytest
+import yaml
 from pydantic import ValidationError
 
 from omnibase_core.models.errors import ModelOnexError
@@ -1217,6 +1218,69 @@ db_io:
         assert contract.db_io is not None
         assert contract.db_io.db_tables[0].database_ref == "application"
         assert contract.db_io.db_tables[0].schema == "tenant"
+
+    def test_registry_payload_preserves_runtime_extensions_without_versions(
+        self,
+    ) -> None:
+        """Exact registry subsets survive strict shell parsing and materialization."""
+        contract_yaml = _market_contract_yaml(
+            routing_module=self._MODULE,
+            routing_class=self._CLASS,
+        ).replace(
+            "  version:\n    major: 1\n    minor: 0\n    patch: 0\n",
+            "",
+        )
+        contract_yaml = contract_yaml.replace(
+            '    - operation: "sweep"\n',
+            '    - operation: "sweep"\n'
+            '      event_model: "omnimarket.models.ModelSweepRequested"\n',
+        )
+        contract_yaml += """
+event_bus:
+  subscribe_topics: [onex.cmd.omnimarket.sweep.v1]
+  publish_topics: [onex.evt.omnimarket.swept.v1]
+  dlq_topics: [onex.dlq.omnimarket.sweep.v1]
+  consumer_group: omnimarket.sweep.consume.v1
+  consumer_purpose: consume
+  plugin_managed: false
+  tenant_scoped_ingress: false
+  terminal_event: onex.evt.omnimarket.swept.v1
+db_io:
+  db_tables:
+    - name: delegation_events
+      database_ref: application
+      schema: tenant
+      migration: nodes/node_projection_delegation/0001.sql
+      access: read_write
+      role: events
+"""
+        descriptor = ContractYamlParser(environment="dev").parse(
+            "node_aislop_sweep", contract_yaml, uuid4()
+        )
+        contract = KafkaContractSource(
+            environment="dev", graceful_mode=False
+        )._build_materialization_contract(
+            node_name="node_aislop_sweep",
+            descriptor=descriptor,
+            environment="dev",
+        )
+
+        assert descriptor.contract_config is not None
+        assert descriptor.contract_config == yaml.safe_load(contract_yaml)
+        assert contract.event_bus is not None
+        assert contract.event_bus.dlq_topics == ("onex.dlq.omnimarket.sweep.v1",)
+        assert contract.event_bus.consumer_group == "omnimarket.sweep.consume.v1"
+        assert contract.terminal_event == "onex.evt.omnimarket.swept.v1"
+        assert contract.handler_routing is not None
+        assert contract.handler_routing.handlers[0].event_model is not None
+        assert (
+            contract.handler_routing.handlers[0].event_model.module
+            == "omnimarket.models"
+        )
+        assert (
+            contract.handler_routing.handlers[0].event_model.name
+            == "ModelSweepRequested"
+        )
 
     def test_kafka_registration_rejects_parallel_database_location(self) -> None:
         contract_yaml = _market_contract_yaml(
