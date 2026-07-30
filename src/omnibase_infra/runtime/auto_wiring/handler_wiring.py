@@ -5094,8 +5094,9 @@ def _contract_provision_topics(contract: ModelDiscoveredContract) -> tuple[str, 
         return ()
     ordered = list(contract.event_bus.subscribe_topics)
     ordered.extend(contract.event_bus.publish_topics)
-    if contract.event_bus.dlq_topics:
-        ordered.extend(contract.event_bus.dlq_topics)
+    typed_dlq_topics = getattr(contract.event_bus, "dlq_topics", ())
+    if typed_dlq_topics:
+        ordered.extend(typed_dlq_topics)
     else:
         try:
             ordered.extend(_read_dlq_topics(contract.contract_path))
@@ -6396,9 +6397,14 @@ def _prepare_handler_wiring(
         # OMN-13548 (D-03): resolve the malformed-event DLQ destination from the
         # contract's typed event-bus declaration. Filesystem-discovered legacy
         # contracts retain the raw-YAML fallback during the migration window.
+        typed_dlq_topics = (
+            getattr(contract.event_bus, "dlq_topics", ())
+            if contract.event_bus is not None
+            else ()
+        )
         projection_dlq_topics = (
-            list(contract.event_bus.dlq_topics)
-            if contract.event_bus is not None and contract.event_bus.dlq_topics
+            list(typed_dlq_topics)
+            if typed_dlq_topics
             else _read_dlq_topics(contract.contract_path)
         )
         callback = _make_projection_dispatch_callback(
