@@ -3,6 +3,7 @@
 
 from __future__ import annotations
 
+from pathlib import Path
 from uuid import UUID
 
 import pytest
@@ -59,6 +60,7 @@ def test_config_requires_silence_window_above_heartbeat() -> None:
             ),
             cloud_bus=_cloud_bus(),
             local_transport_flavor="containerized",
+            dedupe_store_path=Path.cwd() / "gateway-test.sqlite3",
             mirror_topics=ModelGatewayMirrorTopics(
                 inbound=("onex.cmd.omnibase-infra.delegation-inference-request.v1",),
                 outbound=("onex.evt.omnibase-infra.inference-response.v1",),
@@ -78,12 +80,50 @@ def test_config_requires_retry_max_at_least_initial_delay() -> None:
             ),
             cloud_bus=_cloud_bus(),
             local_transport_flavor="containerized",
+            dedupe_store_path=Path.cwd() / "gateway-test.sqlite3",
             mirror_topics=ModelGatewayMirrorTopics(
                 inbound=("onex.cmd.omnibase-infra.delegation-request.v1",),
                 outbound=("onex.evt.omnibase-infra.inference-response.v1",),
             ),
             forward_retry_initial_seconds=10,
             forward_retry_max_seconds=5,
+        )
+
+
+def test_config_requires_absolute_durable_store_path() -> None:
+    with pytest.raises(ValidationError, match="dedupe_store_path must be absolute"):
+        ModelGatewayForwarderConfig(
+            tenant_identity=ModelGatewayTenantIdentity(
+                tenant_id=UUID("11111111-1111-1111-1111-111111111111"),
+                tenant_slug="acme",
+                principal_id=PRINCIPAL_ID,
+            ),
+            cloud_bus=_cloud_bus(),
+            local_transport_flavor="containerized",
+            dedupe_store_path=Path("relative/delivery.sqlite3"),
+            mirror_topics=ModelGatewayMirrorTopics(
+                inbound=("onex.cmd.omnibase-infra.delegation-request.v1",),
+                outbound=("onex.evt.omnibase-infra.inference-response.v1",),
+            ),
+        )
+
+
+def test_config_enforces_twenty_four_hour_dedupe_floor() -> None:
+    with pytest.raises(ValidationError, match="greater than or equal to 24"):
+        ModelGatewayForwarderConfig(
+            tenant_identity=ModelGatewayTenantIdentity(
+                tenant_id=UUID("11111111-1111-1111-1111-111111111111"),
+                tenant_slug="acme",
+                principal_id=PRINCIPAL_ID,
+            ),
+            cloud_bus=_cloud_bus(),
+            local_transport_flavor="containerized",
+            dedupe_store_path=Path.cwd() / "gateway-test.sqlite3",
+            dedupe_retention_hours=23,
+            mirror_topics=ModelGatewayMirrorTopics(
+                inbound=("onex.cmd.omnibase-infra.delegation-request.v1",),
+                outbound=("onex.evt.omnibase-infra.inference-response.v1",),
+            ),
         )
 
 

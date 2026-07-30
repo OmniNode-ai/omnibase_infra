@@ -3,10 +3,9 @@
 
 from __future__ import annotations
 
-from collections.abc import Awaitable, Callable
 from dataclasses import dataclass
 from datetime import UTC, datetime
-from typing import Any
+from pathlib import Path
 from uuid import UUID, uuid4
 
 import pytest
@@ -54,31 +53,7 @@ class _Message:
 
 class _MockGatewayBus:
     def __init__(self) -> None:
-        self.subscriptions: dict[str, Callable[[Any], Awaitable[None]]] = {}
-        self.subscription_groups: dict[str, str] = {}
         self.published: list[_Message] = []
-        self.unsubscribe_count = 0
-
-    async def subscribe(
-        self,
-        topic: str,
-        node_identity: object | None = None,
-        on_message: Callable[[Any], Awaitable[None]] | None = None,
-        *,
-        group_id: str | None = None,
-        **_kwargs: object,
-    ) -> Callable[[], Awaitable[None]]:
-        assert on_message is not None
-        assert group_id is not None
-        self.subscriptions[topic] = on_message
-        self.subscription_groups[topic] = group_id
-
-        async def _unsubscribe() -> None:
-            self.unsubscribe_count += 1
-            self.subscriptions.pop(topic, None)
-            self.subscription_groups.pop(topic, None)
-
-        return _unsubscribe
 
     async def publish(
         self,
@@ -89,18 +64,16 @@ class _MockGatewayBus:
     ) -> None:
         self.published.append(_Message(topic, key, value, headers))
 
-    async def emit(
+    def message(
         self,
         topic: str,
         envelope: ModelEventEnvelope[dict[str, object]],
-    ) -> None:
-        await self.subscriptions[topic](
-            _Message(
-                topic=topic,
-                key=b"key-1",
-                value=envelope.model_dump_json().encode("utf-8"),
-                headers={"trace": "preserved"},
-            )
+    ) -> _Message:
+        return _Message(
+            topic=topic,
+            key=b"key-1",
+            value=envelope.model_dump_json().encode("utf-8"),
+            headers={"trace": "preserved"},
         )
 
 
@@ -138,6 +111,7 @@ def _config() -> ModelGatewayForwarderConfig:
             client_secret_api_key_ref="infisical://gateway/redpanda-events",
         ),
         local_transport_flavor="containerized",
+        dedupe_store_path=Path.cwd() / "gateway-test.sqlite3",
         mirror_topics=ModelGatewayMirrorTopics(
             inbound=(INBOUND_TOPIC,),
             outbound=(OUTBOUND_TOPIC,),
@@ -162,23 +136,6 @@ def _envelope(**overrides: object) -> ModelEventEnvelope[dict[str, object]]:
     return ModelEventEnvelope[dict[str, object]](**values)
 
 
-async def test_start_subscribes_declared_topics_only() -> None:
-    local_bus = _MockGatewayBus()
-    cloud_bus = _MockGatewayBus()
-    service = ServiceGatewayForwarder(
-        config=_config(),
-        local_bus=local_bus,
-        cloud_bus=cloud_bus,
-    )
-
-    await service.start()
-
-    assert set(local_bus.subscriptions) == {OUTBOUND_TOPIC}
-    assert set(cloud_bus.subscriptions) == {WIRE_INBOUND_TOPIC}
-    assert local_bus.subscription_groups[OUTBOUND_TOPIC].endswith("-outbound")
-    assert cloud_bus.subscription_groups[WIRE_INBOUND_TOPIC].endswith("-inbound")
-
-
 async def test_outbound_local_message_is_published_to_cloud_wire_topic() -> None:
     local_bus = _MockGatewayBus()
     cloud_bus = _MockGatewayBus()
@@ -187,9 +144,9 @@ async def test_outbound_local_message_is_published_to_cloud_wire_topic() -> None
         local_bus=local_bus,
         cloud_bus=cloud_bus,
     )
-    await service.start()
-
-    await local_bus.emit(OUTBOUND_TOPIC, _envelope())
+    await service.forward_outbound_message(
+        local_bus.message(OUTBOUND_TOPIC, _envelope())
+    )
 
     assert len(cloud_bus.published) == 1
     published = cloud_bus.published[0]
@@ -213,13 +170,11 @@ async def test_inbound_cloud_message_is_published_to_local_canonical_topic() -> 
         local_bus=local_bus,
         cloud_bus=cloud_bus,
     )
-    await service.start()
-
-    await cloud_bus.emit(
-        WIRE_INBOUND_TOPIC,
-        _envelope(
-            event_type="DelegationInferenceRequest",
-        ),
+    await service.consume_inbound_message(
+        cloud_bus.message(
+            WIRE_INBOUND_TOPIC,
+            _envelope(event_type="DelegationInferenceRequest"),
+        )
     )
 
     assert len(local_bus.published) == 1
@@ -248,9 +203,9 @@ async def test_destination_outage_retries_without_returning_source_callback() ->
         cloud_bus=cloud_bus,
         retry_sleep=record_sleep,
     )
-    await service.start()
-
-    await local_bus.emit(OUTBOUND_TOPIC, _envelope())
+    await service.forward_outbound_message(
+        local_bus.message(OUTBOUND_TOPIC, _envelope())
+    )
 
     assert slept == [1.0, 2.0]
     assert len(cloud_bus.published) == 1
@@ -328,19 +283,19 @@ async def test_inbound_payload_gets_verified_tenant_slug_not_forged_or_missing()
         local_bus=local_bus,
         cloud_bus=cloud_bus,
     )
-    await service.start()
-
     forged_payload = {
         "prompt": "steal tenant data",
         "tenant_id": "evil-tenant-forged",
         "tenant_slug": "evil-tenant-forged-slug",
     }
-    await cloud_bus.emit(
-        WIRE_INBOUND_TOPIC,
-        _envelope(
-            event_type="DelegationInferenceRequest",
-            payload=forged_payload,
-        ),
+    await service.consume_inbound_message(
+        cloud_bus.message(
+            WIRE_INBOUND_TOPIC,
+            _envelope(
+                event_type="DelegationInferenceRequest",
+                payload=forged_payload,
+            ),
+        )
     )
 
     assert len(local_bus.published) == 1
@@ -377,14 +332,14 @@ async def test_inbound_payload_stamp_carries_no_separate_tenant_slug_key() -> No
         local_bus=local_bus,
         cloud_bus=cloud_bus,
     )
-    await service.start()
-
-    await cloud_bus.emit(
-        WIRE_INBOUND_TOPIC,
-        _envelope(
-            event_type="DelegationInferenceRequest",
-            payload={"prompt": "hi"},
-        ),
+    await service.consume_inbound_message(
+        cloud_bus.message(
+            WIRE_INBOUND_TOPIC,
+            _envelope(
+                event_type="DelegationInferenceRequest",
+                payload={"prompt": "hi"},
+            ),
+        )
     )
 
     published = local_bus.published[0]
@@ -410,22 +365,22 @@ async def test_inbound_cross_tenant_forged_envelope_is_rejected_not_republished(
         local_bus=local_bus,
         cloud_bus=cloud_bus,
     )
-    await service.start()
-
     other_tenant_id = uuid4()
     with pytest.raises(ValueError, match="tenant_id does not match"):
-        await cloud_bus.emit(
-            WIRE_INBOUND_TOPIC,
-            _envelope(
-                event_type="DelegationInferenceRequest",
-                payload={"prompt": "cross-tenant forgery"},
-                metadata=ModelEnvelopeMetadata(
-                    tags={
-                        "source_tenant_id": str(other_tenant_id),
-                        "source_tenant_principal_id": PRINCIPAL_ID,
-                    }
+        await service.consume_inbound_message(
+            cloud_bus.message(
+                WIRE_INBOUND_TOPIC,
+                _envelope(
+                    event_type="DelegationInferenceRequest",
+                    payload={"prompt": "cross-tenant forgery"},
+                    metadata=ModelEnvelopeMetadata(
+                        tags={
+                            "source_tenant_id": str(other_tenant_id),
+                            "source_tenant_principal_id": PRINCIPAL_ID,
+                        }
+                    ),
                 ),
-            ),
+            )
         )
 
     assert local_bus.published == []
@@ -439,11 +394,9 @@ async def test_outbound_rejects_undeclared_topic_before_cloud_publish() -> None:
         local_bus=local_bus,
         cloud_bus=cloud_bus,
     )
-    await service.start()
-
     undeclared_topic = "onex.evt.omnibase-infra.not-declared.v1"
     with pytest.raises(ValueError, match="not declared"):
-        await service._forward_outbound_message(
+        await service.forward_outbound_message(
             _Message(
                 topic=undeclared_topic,
                 key=b"key-1",
@@ -452,24 +405,6 @@ async def test_outbound_rejects_undeclared_topic_before_cloud_publish() -> None:
         )
 
     assert cloud_bus.published == []
-
-
-async def test_stop_unsubscribes_both_legs() -> None:
-    local_bus = _MockGatewayBus()
-    cloud_bus = _MockGatewayBus()
-    service = ServiceGatewayForwarder(
-        config=_config(),
-        local_bus=local_bus,
-        cloud_bus=cloud_bus,
-    )
-    await service.start()
-
-    await service.stop()
-
-    assert local_bus.subscriptions == {}
-    assert cloud_bus.subscriptions == {}
-    assert local_bus.unsubscribe_count == 1
-    assert cloud_bus.unsubscribe_count == 1
 
 
 def _config_with_delegation_request() -> ModelGatewayForwarderConfig:
@@ -491,6 +426,7 @@ def _config_with_delegation_request() -> ModelGatewayForwarderConfig:
             client_secret_api_key_ref="infisical://gateway/redpanda-events",
         ),
         local_transport_flavor="containerized",
+        dedupe_store_path=Path.cwd() / "gateway-test.sqlite3",
         mirror_topics=ModelGatewayMirrorTopics(
             inbound=(INBOUND_TOPIC, DELEGATION_REQUEST_TOPIC),
             outbound=(OUTBOUND_TOPIC,),
@@ -526,8 +462,6 @@ async def test_delegation_request_payload_stamp_survives_real_model_round_trip()
         local_bus=local_bus,
         cloud_bus=cloud_bus,
     )
-    await service.start()
-
     request_correlation_id = uuid4()
     delegation_request = ModelDelegationRequest(
         prompt="review this diff for correctness",
@@ -536,13 +470,15 @@ async def test_delegation_request_payload_stamp_survives_real_model_round_trip()
         emitted_at=datetime.now(UTC),
         tenant_id="forged-tenant-slug",
     )
-    await cloud_bus.emit(
-        WIRE_DELEGATION_REQUEST_TOPIC,
-        _envelope(
-            event_type="DelegationRequest",
-            correlation_id=request_correlation_id,
-            payload=delegation_request.model_dump(mode="json"),
-        ),
+    await service.consume_inbound_message(
+        cloud_bus.message(
+            WIRE_DELEGATION_REQUEST_TOPIC,
+            _envelope(
+                event_type="DelegationRequest",
+                correlation_id=request_correlation_id,
+                payload=delegation_request.model_dump(mode="json"),
+            ),
+        )
     )
 
     published = [

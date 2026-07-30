@@ -4,9 +4,10 @@
 
 from __future__ import annotations
 
+from pathlib import Path
 from typing import Literal
 
-from pydantic import BaseModel, ConfigDict, Field, model_validator
+from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
 
 from omnibase_infra.nodes.node_bus_forwarder_effect.models.model_gateway_cloud_bus_config import (
     ModelGatewayCloudBusConfig,
@@ -33,9 +34,20 @@ class ModelGatewayForwarderConfig(BaseModel):
     lag_threshold_messages: int = Field(default=500, ge=1)
     lag_threshold_seconds: int = Field(default=120, ge=1)
     drain_deadline_seconds: int = Field(default=30, ge=1)
-    dedupe_retention_hours: int = Field(default=24, ge=1)
+    dedupe_store_path: Path
+    dedupe_retention_hours: int = Field(default=24, ge=24)
     forward_retry_initial_seconds: float = Field(default=1.0, gt=0)
     forward_retry_max_seconds: float = Field(default=30.0, gt=0)
+
+    @field_validator("dedupe_store_path")
+    @classmethod
+    def _validate_dedupe_store_path(cls, value: Path) -> Path:
+        if not value.is_absolute():
+            raise ValueError(
+                "dedupe_store_path must be absolute so deployment persistence "
+                "cannot depend on the container working directory"
+            )
+        return value
 
     @model_validator(mode="after")
     def _validate_liveness_windows(self) -> ModelGatewayForwarderConfig:

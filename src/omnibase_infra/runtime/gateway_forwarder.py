@@ -8,17 +8,30 @@ import argparse
 import asyncio
 import logging
 import signal
-from collections.abc import Sequence
+from collections.abc import Mapping, Sequence
 from pathlib import Path
 
 import yaml
+from aiokafka.errors import KafkaError
 
-from omnibase_infra.event_bus.event_bus_kafka import EventBusKafka
+from omnibase_core.protocols.runtime.protocol_transport_producer import (
+    ProtocolTransportProducer,
+)
+from omnibase_infra.errors import InfraUnavailableError
+from omnibase_infra.event_bus.kafka_transport import KafkaTransport
+from omnibase_infra.event_bus.models import ModelEventHeaders
+from omnibase_infra.idempotency import StoreIdempotencySqlite
 from omnibase_infra.nodes.node_bus_forwarder_effect.models import (
     ModelGatewayForwarderRuntimeConfig,
 )
+from omnibase_infra.nodes.node_bus_forwarder_effect.services.service_gateway_delivery import (
+    NodeGatewayDelivery,
+)
 from omnibase_infra.nodes.node_bus_forwarder_effect.services.service_gateway_forwarder import (
     ServiceGatewayForwarder,
+)
+from omnibase_infra.nodes.node_bus_forwarder_effect.services.service_gateway_topic_transform import (
+    prefix_topic,
 )
 
 logger = logging.getLogger(__name__)
@@ -101,27 +114,56 @@ async def run_gateway_forwarder(
     ready_path: Path | None = None,
 ) -> None:
     """Run the bridge until ``shutdown_event`` is set, then close both legs."""
-    local_bus = EventBusKafka(config=config.local_bus)
-    cloud_bus = EventBusKafka(config=config.cloud_bus)
+    tenant_slug = config.forwarder.tenant_identity.tenant_slug
+    local_transport = KafkaTransport(
+        config=config.local_bus,
+        group=f"tenant-{tenant_slug}-gateway-forwarder-outbound",
+        topics=config.forwarder.mirror_topics.outbound,
+        auto_offset_reset=config.local_bus.auto_offset_reset,
+    )
+    cloud_transport = KafkaTransport(
+        config=config.cloud_bus,
+        group=f"tenant-{tenant_slug}-gateway-forwarder-inbound",
+        topics=tuple(
+            prefix_topic(tenant_slug, topic)
+            for topic in config.forwarder.mirror_topics.inbound
+        ),
+        auto_offset_reset=config.cloud_bus.auto_offset_reset,
+    )
+    local_bus = TransportGatewayBus(local_transport)
+    cloud_bus = TransportGatewayBus(cloud_transport)
+    idempotency_store = StoreIdempotencySqlite(config.forwarder.dedupe_store_path)
     forwarder = ServiceGatewayForwarder(
         config=config.forwarder,
         local_bus=local_bus,
         cloud_bus=cloud_bus,
     )
+    delivery = NodeGatewayDelivery(
+        config=config.forwarder,
+        forwarder=forwarder,
+        local_consumer=local_transport,
+        cloud_consumer=cloud_transport,
+        idempotency_store=idempotency_store,
+    )
 
     if ready_path is not None:
         ready_path.unlink(missing_ok=True)
 
-    started_buses: list[EventBusKafka] = []
-    forwarder_started = False
+    store_started = False
+    started_transports: list[KafkaTransport] = []
+    delivery_started = False
     heartbeat_task: asyncio.Task[None] | None = None
+    delivery_wait_task: asyncio.Task[None] | None = None
+    shutdown_wait_task: asyncio.Task[bool] | None = None
     try:
-        await local_bus.start()
-        started_buses.append(local_bus)
-        await cloud_bus.start()
-        started_buses.append(cloud_bus)
-        await forwarder.start()
-        forwarder_started = True
+        await idempotency_store.start()
+        store_started = True
+        await local_transport.start()
+        started_transports.append(local_transport)
+        await cloud_transport.start()
+        started_transports.append(cloud_transport)
+        await delivery.start()
+        delivery_started = True
         heartbeat_task = asyncio.create_task(
             _run_heartbeat_loop(forwarder, config, shutdown_event),
             name="gateway-forwarder-heartbeat",
@@ -135,20 +177,91 @@ async def run_gateway_forwarder(
             identity.tenant_id,
             identity.tenant_slug,
         )
-        await shutdown_event.wait()
+        delivery_wait_task = asyncio.create_task(
+            delivery.wait(),
+            name="gateway-delivery-health",
+        )
+        shutdown_wait_task = asyncio.create_task(
+            shutdown_event.wait(),
+            name="gateway-shutdown-wait",
+        )
+        done, _ = await asyncio.wait(
+            {delivery_wait_task, shutdown_wait_task, heartbeat_task},
+            return_when=asyncio.FIRST_COMPLETED,
+        )
+        if delivery_wait_task in done:
+            await delivery_wait_task
+        if heartbeat_task in done:
+            await heartbeat_task
     finally:
         if ready_path is not None:
             ready_path.unlink(missing_ok=True)
+        for waiter in (delivery_wait_task, shutdown_wait_task):
+            if waiter is not None and not waiter.done():
+                waiter.cancel()
+        waiters = [
+            waiter
+            for waiter in (delivery_wait_task, shutdown_wait_task)
+            if waiter is not None
+        ]
+        if waiters:
+            await asyncio.gather(*waiters, return_exceptions=True)
         if heartbeat_task is not None:
             heartbeat_task.cancel()
-            try:
-                await heartbeat_task
-            except asyncio.CancelledError:
-                pass
-        if forwarder_started:
-            await forwarder.stop()
-        for bus in reversed(started_buses):
-            await bus.close()
+            await asyncio.gather(heartbeat_task, return_exceptions=True)
+        if delivery_started:
+            await delivery.stop()
+        for transport in reversed(started_transports):
+            await transport.close()
+        if store_started:
+            await idempotency_store.close()
+
+
+class TransportGatewayBus:
+    """Adapt the pull transport producer to the forwarder's publish boundary."""
+
+    def __init__(self, producer: ProtocolTransportProducer) -> None:
+        self._producer = producer
+
+    async def publish(
+        self,
+        topic: str,
+        key: bytes | None,
+        value: bytes,
+        headers: object | None = None,
+    ) -> None:
+        encoded_headers: Mapping[str, bytes]
+        if headers is None:
+            encoded_headers = {}
+        elif isinstance(headers, Mapping):
+            if not all(
+                isinstance(header_key, str) and isinstance(header_value, bytes)
+                for header_key, header_value in headers.items()
+            ):
+                raise TypeError(
+                    "gateway transport headers must map string keys to bytes"
+                )
+            encoded_headers = {
+                header_key: header_value
+                for header_key, header_value in headers.items()
+                if isinstance(header_key, str) and isinstance(header_value, bytes)
+            }
+        elif isinstance(headers, ModelEventHeaders):
+            encoded_headers = {
+                header_key: str(header_value).encode("utf-8")
+                for header_key, header_value in headers.model_dump(
+                    mode="json",
+                    exclude_none=True,
+                ).items()
+            }
+        else:
+            raise TypeError("gateway transport headers must map string keys to bytes")
+        try:
+            await self._producer.send(topic, key, value, encoded_headers)
+        except KafkaError as exc:
+            raise InfraUnavailableError(
+                f"gateway destination broker unavailable for topic {topic}"
+            ) from exc
 
 
 async def _run_heartbeat_loop(

@@ -3,6 +3,7 @@
 
 from __future__ import annotations
 
+from pathlib import Path
 from uuid import UUID, uuid4
 
 import pytest
@@ -44,6 +45,7 @@ def _config() -> ModelGatewayForwarderConfig:
             client_secret_api_key_ref="infisical://gateway/redpanda-events",
         ),
         local_transport_flavor="containerized",
+        dedupe_store_path=Path.cwd() / "gateway-test.sqlite3",
         mirror_topics=ModelGatewayMirrorTopics(
             inbound=(INBOUND_TOPIC,),
             outbound=(OUTBOUND_TOPIC,),

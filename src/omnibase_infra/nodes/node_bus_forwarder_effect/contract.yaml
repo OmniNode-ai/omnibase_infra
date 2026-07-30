@@ -64,8 +64,14 @@ config:
       lag_threshold_seconds: 120
       drain_deadline_seconds: 30
     dedupe:
+      key: "envelope_id"
+      store: "sqlite"
+      store_path_required: true
       retention_hours: 24
     delivery:
+      semantics: "at_least_once"
+      source_offset_acknowledgement: "after_destination_ack_and_durable_marker"
+      auto_commit: false
       retry_initial_seconds: 1
       retry_max_seconds: 30
 handler_routing:
@@ -94,6 +100,8 @@ capabilities:
     description: "Rejects any canonical topic not declared in mirror topic sets."
   - name: "node_owned_publish"
     description: "Handlers never publish; the effect node owns both bus legs."
+  - name: "durable_source_acknowledgement"
+    description: "Source offsets commit only after destination broker acknowledgement and a durable envelope_id marker; acknowledged redelivery is suppressed across restarts."
   - name: "raw_dispatch_envelope_normalization"
     description: "Handlers deserialize serialized outer event envelopes before reading payload."
   - name: "verified_inbound_payload_tenant_stamp"

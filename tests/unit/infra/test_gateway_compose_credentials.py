@@ -58,6 +58,16 @@ def test_gateway_has_no_inbound_application_port() -> None:
     assert service["restart"] == "unless-stopped"
 
 
+def test_gateway_delivery_state_uses_named_persistent_volume() -> None:
+    compose = yaml.safe_load(GATEWAY_COMPOSE.read_text(encoding="utf-8"))
+    service = compose["services"]["gateway-forwarder"]
+
+    assert "gateway-delivery-state:/var/lib/omninode-gateway" in service["volumes"]
+    assert compose["volumes"]["gateway-delivery-state"]["name"] == (
+        "omninode-gateway-delivery-state"
+    )
+
+
 def test_gateway_systemd_unit_waits_for_container_health() -> None:
     """The host supervisor must fail if the gateway never becomes healthy."""
     unit = GATEWAY_SYSTEMD_UNIT.read_text(encoding="utf-8")

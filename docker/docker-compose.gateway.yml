@@ -31,6 +31,7 @@ services:
       ONEX_TOPIC_ENFORCEMENT_MODE: "reject"
     volumes:
       - ./gateway/beta-gateway-canary.yaml:/app/config/gateway-forwarder.yaml:ro
+      - gateway-delivery-state:/var/lib/omninode-gateway
       # IAM Roles Anywhere supplies short-lived session credentials through
       # credential_process. No AWS access key is stored on the edge host.
       - ${GATEWAY_AWS_CONFIG_FILE:?GATEWAY_AWS_CONFIG_FILE is required}:/run/aws/config:ro
@@ -62,3 +63,6 @@ networks:
   gateway-runtime:
     external: true
     name: omnibase-infra-network
+volumes:
+  gateway-delivery-state:
+    name: omninode-gateway-delivery-state
