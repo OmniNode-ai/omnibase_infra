@@ -63,7 +63,10 @@ CREATE TABLE public.node_schema_migrations (
   checksum TEXT NOT NULL DEFAULT ''
 );
 INSERT INTO public.node_schema_migrations (version, checksum) VALUES
-  ('node:synthetic:0001.sql', 'sha256:synthetic-node-control');
+  (
+    'node:node_canary_score_reducer:0001_create_capability_scores.sql',
+    '7195b07a7fae809f141a136a67b799ad492e79d280f54c325ac14875dcfcc2cd'
+  );
 ALTER TABLE public.node_schema_migrations OWNER TO role_omnidash;
 
 -- Deliberately old node-side shapes. These are empty so current reconciling
@@ -229,5 +232,24 @@ CREATE TABLE public.schema_migrations (
   checksum TEXT
 );
 INSERT INTO public.schema_migrations (version, checksum) VALUES
-  ('legacy-cloud-0001', NULL);
+  ('20251209_m4_usage_schema.sql', NULL);
 ALTER TABLE public.schema_migrations OWNER TO omninodeadmin;
+
+CREATE TABLE public.migrations_log (
+  id SERIAL PRIMARY KEY,
+  migration_name TEXT NOT NULL,
+  direction TEXT NOT NULL CHECK (direction IN ('forward', 'rollback')),
+  executed_at TIMESTAMPTZ NOT NULL,
+  notes TEXT,
+  UNIQUE (migration_name, direction)
+);
+INSERT INTO public.migrations_log
+  (migration_name, direction, executed_at, notes)
+VALUES
+  (
+    '20251209_m4_usage_schema',
+    'forward',
+    TIMESTAMPTZ '2026-01-02 00:00:00+00',
+    'Synthetic legacy audit row'
+  );
+ALTER TABLE public.migrations_log OWNER TO omninodeadmin;

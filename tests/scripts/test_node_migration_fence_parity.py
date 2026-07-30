@@ -144,6 +144,7 @@ control, since ruling 15 released the registration trio and nothing else.
 
 from __future__ import annotations
 
+import hashlib
 import os
 import re
 import subprocess
@@ -412,11 +413,13 @@ def test_fence_is_checked_before_the_ledger_probe_and_the_apply() -> None:
     # wrong occurrence and the assertion would be meaningless.
     node_loop = text[text.index("Auto-discover and apply node-owned migrations") :]
     fence_call = node_loop.index('if is_fenced_node_migration "${migration_id}"')
-    probe = node_loop.index("already_applied=$(psql")
+    declaration = node_loop.index('resolve_application_migration "$artifact_path"')
+    probe = node_loop.index("if migration_is_applied")
     apply_sql = node_loop.index('-v ON_ERROR_STOP=1 -f "$migration_file"')
-    assert fence_call < probe < apply_sql, (
-        "the fenced-id check must precede the already-applied probe, which must "
-        f"precede the apply (node-loop offsets: fence={fence_call} "
+    assert fence_call < declaration < probe < apply_sql, (
+        "the fenced-id check must precede declaration resolution and the "
+        "canonical already-applied probe, which must precede the apply "
+        f"(node-loop offsets: fence={fence_call} declaration={declaration} "
         f"probe={probe} apply={apply_sql})"
     )
 
@@ -854,7 +857,46 @@ def node_tree(tmp_path: Path) -> Path:
         (node_dir / filename).write_text(
             f"CREATE TABLE public.{_marker_for(migration_id)} (id INT);\n"
         )
+    _write_application_ledger_contract(forward)
     return forward
+
+
+def _write_application_ledger_contract(forward: Path) -> None:
+    """Derive a typed ledger contract from a synthetic node migration tree.
+
+    OMN-15413 rejects undeclared application migrations. These fence harnesses
+    construct their own SQL, so their manifest must bind those exact bytes
+    rather than copy production checksums and fail for an unrelated reason.
+    """
+    ledger_dir = forward / "_ledger"
+    ledger_dir.mkdir()
+    bootstrap = REPO_ROOT / "docker/migrations/forward/_ledger/bootstrap.sql"
+    (ledger_dir / "bootstrap.sql").write_text(
+        bootstrap.read_text(encoding="utf-8"), encoding="utf-8"
+    )
+
+    declarations: list[str] = []
+    for migration in sorted((forward / "nodes").glob("*/*.sql")):
+        node_name = migration.parent.name
+        version = f"node:{node_name}:{migration.name}"
+        checksum = hashlib.sha256(migration.read_bytes()).hexdigest()
+        declarations.append(
+            "\t".join(
+                (
+                    f"nodes/{node_name}/{migration.name}",
+                    f"node:{node_name}",
+                    f"node:{node_name}",
+                    "tenant",
+                    version,
+                    checksum,
+                )
+            )
+        )
+    (ledger_dir / "application-migrations.tsv").write_text(
+        "\n".join(declarations) + "\n", encoding="utf-8"
+    )
+    (ledger_dir / "application-migration-blocks.tsv").write_text("", encoding="utf-8")
+    (ledger_dir / "cloud-migration-aliases.tsv").write_text("", encoding="utf-8")
 
 
 @pytest.fixture
@@ -943,7 +985,11 @@ def _ledger_ids(target: PgTarget, dbname: str) -> set[str]:
         password=target.password,
         dbname=dbname,
     )
-    rows = _psql(scoped, "SELECT migration_id FROM public.schema_migrations")
+    rows = _psql(
+        scoped,
+        "SELECT version FROM platform_catalog.schema_migrations "
+        "WHERE migration_stream LIKE 'node:%'",
+    )
     return {line.strip() for line in rows.splitlines() if line.strip()}
 
 
@@ -1101,6 +1147,7 @@ def real_registration_tree(tmp_path: Path) -> Path:
     (del_dir / del_file).write_text(
         f"CREATE TABLE public.{_marker_for(delegation_id)} (id INT);\n"
     )
+    _write_application_ledger_contract(forward)
     return forward
 
 

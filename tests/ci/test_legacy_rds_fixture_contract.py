@@ -32,6 +32,7 @@ REQUIRED_CASES = {
     "transformation_collision",
     "flat_node_shape_collision",
     "legacy_shape_collision",
+    "application_migration_ledger",
 }
 
 
@@ -128,11 +129,18 @@ def test_proof_runs_real_migrations_twice_and_pins_the_blocked_upgrade() -> None
     assert "for pass in 1 2" in proof
     assert "fresh-postgres" in proof
     assert "legacy-postgres" in proof
-    assert (
-        'column "migration_id" of relation "schema_migrations" does not exist' in proof
-    )
+    assert "unresolved migration domain" in proof
     assert "OMN-15413" in proof
+    assert "OMN-15423" in proof
     assert "fixture_case=legacy_upgrade status=BLOCKED" in proof
+    assert "platform_catalog.schema_migrations" in proof
+    assert "fixture_case=application_ledger_fresh" in proof
+    assert "fixture_case=application_ledger_legacy" in proof
+    assert "selected_oid_preserved=true" in proof
+
+    dockerfile = DOCKERFILE.read_text(encoding="utf-8")
+    assert "ledger-control/" in dockerfile
+    assert "ledger-control/forward/_ledger/bootstrap.sql" in dockerfile
 
 
 def test_required_ci_executes_rebuilt_fixture_and_always_cleans_it() -> None:
