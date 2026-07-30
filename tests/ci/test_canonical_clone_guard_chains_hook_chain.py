@@ -76,6 +76,20 @@ def _base_env(registry: Path) -> dict[str, str]:
     env["GIT_COMMITTER_EMAIL"] = env["GIT_AUTHOR_EMAIL"]
     env["OMNI_HOME"] = str(registry)
     env.pop("ALLOW_CANONICAL_CLONE_COMMIT", None)
+    # git EXPORTS repo-scoping variables into hook processes, and they OVERRIDE
+    # both `-C` and the cwd for every descendant git call (memory
+    # `reference_git_env_vars_override_c_and_cwd`). When this suite is run from
+    # the pre-push hook these leak in and every `git` below would silently
+    # operate on the omnibase_infra worktree instead of the throwaway registry.
+    for leaked in (
+        "GIT_DIR",
+        "GIT_WORK_TREE",
+        "GIT_INDEX_FILE",
+        "GIT_OBJECT_DIRECTORY",
+        "GIT_COMMON_DIR",
+        "GIT_PREFIX",
+    ):
+        env.pop(leaked, None)
     return env
 
 
@@ -263,6 +277,33 @@ def test_missing_hook_with_a_precommit_config_fails_closed() -> None:
     )
     assert "refuses to report a vacuous pass" in text, (
         "expected an explicit fail-closed branch when the chain cannot be run"
+    )
+
+
+def test_prepush_hook_unsets_leaked_git_scoping_vars_before_running_pytest() -> None:
+    """Chaining turns the pre-push hook ON for the first time on `.200`, and git
+    hands hooks a `GIT_DIR` that overrides `-C`/cwd for every descendant git
+    call. Without the unset, every test that builds a throwaway repository under
+    `tmp_path` operates on the real worktree instead and errors at setup --
+    proven live 2026-07-30: `tests/scripts/test_check_deployed_migration_tree_sync.py`
+    is 9 errors with `GIT_DIR` exported and green without it, identically under
+    the pre-fix and post-fix guard (so the breakage is the leak, not the guard).
+    """
+    hook = REPO_ROOT / "scripts" / "hooks" / "prepush_smart_tests.sh"
+    text = hook.read_text(encoding="utf-8")
+    unset_index = text.find("unset GIT_DIR")
+    assert unset_index != -1, (
+        f"{hook} must unset the repo-scoping GIT_* variables git exports into "
+        "hooks before handing control to pytest"
+    )
+    for var in ("GIT_WORK_TREE", "GIT_INDEX_FILE"):
+        assert var in text[unset_index : unset_index + 200], (
+            f"{var} must be unset alongside GIT_DIR"
+        )
+    first_pytest = text.find("uv run pytest")
+    assert first_pytest != -1, "expected a pytest invocation in the pre-push hook"
+    assert unset_index < first_pytest, (
+        "the unset must precede every pytest invocation, or the leak still applies"
     )
 
 

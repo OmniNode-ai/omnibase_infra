@@ -314,6 +314,23 @@ RC=0
 # escalation target automatically moves the guard predicate with it.
 FULL_SUITE_TARGET="tests/unit/"
 
+# OMN-15071: git EXPORTS repo-scoping variables into hook processes -- a live
+# `git push` from a worktree hands this hook
+# `GIT_DIR=<common>/worktrees/<name>` -- and those variables OVERRIDE both `-C`
+# and the cwd for every descendant `git` call (memory
+# `reference_git_env_vars_override_c_and_cwd`). Tests that build throwaway
+# repositories under `tmp_path` and commit into them therefore operate on THIS
+# worktree instead, and fail at setup. Unset them for the test run only: the
+# hook has already resolved everything it needs from git, and pytest must
+# rediscover the repository from its own cwd like any ordinary invocation.
+#
+# This is not a latent nicety. Until OMN-15071 chained the canonical-clone
+# guard into the real hook chain, `core.hooksPath` on `.200` meant this hook
+# never executed there at all, so the leak had no observable effect on the
+# documented default gate host. Turning the hook on without this unset would
+# hand every `.200` push a fail-closed pre-push that cannot pass.
+unset GIT_DIR GIT_WORK_TREE GIT_INDEX_FILE GIT_OBJECT_DIRECTORY GIT_COMMON_DIR GIT_PREFIX
+
 if [ "$IS_FULL" = "True" ] || [ "$IS_FULL" = "true" ]; then
   guard_full_suite_host
   log "running FULL unit suite (fail-closed escalation): uv run pytest ${FULL_SUITE_TARGET} --ignore=tests/integration ${PREPUSH_PYTEST_ARGS:-}"
