@@ -64,6 +64,21 @@ fix hunk and re-running:
   reported the eleven RF2 topics as replication drift on every pass and seeded
   the operator-gated reassignment queue with unhostable targets.
 
+Against the THIRD revision (the module-scope ``NewTopic`` guard shipped in
+#2552) — this round's remediation guard:
+
+* ``TestPolicyErrorsEscapeBestEffortBoundaries.test_create_topics_guard_sees_a_planted_third_path``
+  ``[policy-aware-module-raw-site]`` — that revision decided "does this site
+  resolve through the policy?" once per FILE
+  (``"ModelTopicProvisioningPolicy" in text and _POLICY_RESOLVER_RE.search(text)``),
+  so every ``NewTopic`` in a policy-aware module was waved through unless its RF
+  was an integer literal. Run against the reconstructed ``b2ca4faa`` tree it
+  reported only the operator CLI and returned NOTHING for
+  ``service_topic_manager.py``'s ``replication_factor=config.replication_factor``
+  — that lineage's own defect — because the module mentions the policy five
+  times elsewhere. Admissibility is now computed from the call site's own
+  argument expression by AST provenance.
+
 The remaining cases are deliberate regression guards on behaviour that was
 already correct (a declared RF2 reaching the broker unmutated, self-hosted RF1
 still working) and are labelled as such rather than claimed as RED.
@@ -75,6 +90,7 @@ Related:
 
 from __future__ import annotations
 
+import ast
 import re
 from collections.abc import Iterator, Sequence
 from contextlib import contextmanager
@@ -401,17 +417,365 @@ def _provisioning_swallow_offenders(src_root: Path) -> list[str]:
     return offenders
 
 
-#: A ``CreateTopics`` payload being constructed.
-_NEW_TOPIC_RE = re.compile(r"\bNewTopic\s*\(")
-#: A replication factor written as a literal at a construction site — the
-#: "flat default" shape (``--replication-factor`` default=1) that let the
-#: operator CLI discard every contract's declared value.
-_LITERAL_RF_RE = re.compile(r"replication_factor\s*=\s*-?\d+")
-#: Any of the policy's resolution entrypoints — the bound methods and the
-#: module-level batch helper, with or without a receiver.
-_POLICY_RESOLVER_RE = re.compile(
-    r"\b(?:resolve_spec|resolve_specs_for_creation|resolve_replication_factor)\s*\("
+#: The ``CreateTopics`` payload constructor, by callee name.
+_NEW_TOPIC = "NewTopic"
+#: ``replication_factor`` is the third positional parameter in BOTH the
+#: ``aiokafka.admin`` and ``confluent_kafka.admin`` ``NewTopic`` signatures, so
+#: ``NewTopic("t", 1, 1)`` must be read as a hardcoded RF, not as an absent one.
+_RF_KEYWORD = "replication_factor"
+_RF_POSITION = 2
+#: The policy's resolution entrypoints. Provenance for an admissible
+#: replication factor starts at one of these three and nowhere else.
+_POLICY_RESOLVERS = frozenset(
+    {"resolve_spec", "resolve_specs_for_creation", "resolve_replication_factor"}
 )
+#: Builtins that repackage a container without touching its elements, so
+#: ``tuple(resolve_specs_for_creation(...))`` keeps the batch's provenance.
+_PASSTHROUGH_BUILTINS = frozenset(
+    {"tuple", "list", "set", "frozenset", "sorted", "dict"}
+)
+
+
+class _Element:
+    """Pseudo-expression: "an element drawn from ``iterable``".
+
+    Lets ``for spec in resolved_specs`` and ``[… for spec in resolved_specs]``
+    carry the iterable's provenance onto the loop variable.
+    """
+
+    __slots__ = ("iterable",)
+
+    def __init__(self, iterable: ast.expr) -> None:
+        self.iterable = iterable
+
+
+#: What a name is bound to. ``None`` means opaque — a parameter, an import, a
+#: ``with``/``except`` target — i.e. provenance unknown, therefore not resolved.
+_Bound = ast.expr | _Element | None
+
+
+class _Scope:
+    """One lexical scope's name bindings, ordered by line.
+
+    Bindings carry the line they occur on so a *use* resolves against the
+    nearest binding that precedes it, rather than against the union of every
+    binding of that name anywhere in the function. That distinction is
+    load-bearing: ``ensure_managed_staging_topics`` binds ``spec`` twice — once
+    from a raw ``specs_by_name.get(name)`` walrus and once from the resolved
+    ``resolved_by_name.get(name)`` — and only the second one reaches
+    ``NewTopic``. A binding with ``lineno=None`` (a parameter, or a
+    comprehension target) is visible everywhere in its scope.
+    """
+
+    __slots__ = ("bindings", "is_comprehension", "parent")
+
+    def __init__(
+        self, parent: _Scope | None, *, is_comprehension: bool = False
+    ) -> None:
+        self.parent = parent
+        self.is_comprehension = is_comprehension
+        self.bindings: dict[str, list[tuple[int | None, _Bound]]] = {}
+
+    def bind(self, name: str, lineno: int | None, bound: _Bound) -> None:
+        self.bindings.setdefault(name, []).append((lineno, bound))
+
+    def enclosing_function_scope(self) -> _Scope:
+        """The nearest non-comprehension scope — where a walrus binds (PEP 572)."""
+        scope = self
+        while scope.is_comprehension and scope.parent is not None:
+            scope = scope.parent
+        return scope
+
+    def lookup(self, name: str, lineno: int) -> _Bound:
+        scope: _Scope | None = self
+        while scope is not None:
+            entries = scope.bindings.get(name)
+            if entries:
+                visible = [
+                    entry for entry in entries if entry[0] is None or entry[0] <= lineno
+                ]
+                if not visible:
+                    # Bound only later in this scope: provenance unknown.
+                    return None
+                return max(
+                    visible, key=lambda entry: -1 if entry[0] is None else entry[0]
+                )[1]
+            scope = scope.parent
+        return None
+
+
+def _target_names(target: ast.expr) -> list[str]:
+    """Local names bound by an assignment target (attributes/subscripts bind none)."""
+    if isinstance(target, ast.Name):
+        return [target.id]
+    if isinstance(target, (ast.Tuple, ast.List)):
+        return [name for element in target.elts for name in _target_names(element)]
+    if isinstance(target, ast.Starred):
+        return _target_names(target.value)
+    return []
+
+
+def _argument_names(args: ast.arguments) -> list[str]:
+    named = [*args.posonlyargs, *args.args, *args.kwonlyargs]
+    if args.vararg is not None:
+        named.append(args.vararg)
+    if args.kwarg is not None:
+        named.append(args.kwarg)
+    return [argument.arg for argument in named]
+
+
+def _callee_name(func: ast.expr) -> str | None:
+    """The bare callee name, receiver-agnostic (``a.b.resolve_spec`` → ``resolve_spec``)."""
+    if isinstance(func, ast.Attribute):
+        return func.attr
+    if isinstance(func, ast.Name):
+        return func.id
+    return None
+
+
+def _own_returns(function: ast.AST) -> list[ast.expr]:
+    """Value-returning ``return`` statements of ``function`` itself.
+
+    Deliberately does not descend into nested functions/lambdas — a nested
+    helper's return says nothing about its enclosing function's contract.
+    """
+    returns: list[ast.expr] = []
+    stack: list[ast.AST] = list(ast.iter_child_nodes(function))
+    while stack:
+        node = stack.pop()
+        if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef, ast.Lambda)):
+            continue
+        if isinstance(node, ast.Return) and node.value is not None:
+            returns.append(node.value)
+        stack.extend(ast.iter_child_nodes(node))
+    return returns
+
+
+class _ScopeMap:
+    """Maps every AST node to its lexical scope and records the bindings."""
+
+    def __init__(self, tree: ast.Module) -> None:
+        self.of: dict[ast.AST, _Scope] = {}
+        self.functions: list[ast.FunctionDef | ast.AsyncFunctionDef] = []
+        self._walk(tree, _Scope(None))
+
+    def _walk(self, node: ast.AST, scope: _Scope) -> None:
+        self.of[node] = scope
+
+        if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef)):
+            scope.bind(node.name, node.lineno, None)
+            self.functions.append(node)
+            inner = _Scope(scope)
+            for name in _argument_names(node.args):
+                inner.bind(name, None, None)
+            for decorator in node.decorator_list:
+                self._walk(decorator, scope)
+            for statement in node.body:
+                self._walk(statement, inner)
+            return
+
+        if isinstance(node, ast.Lambda):
+            inner = _Scope(scope)
+            for name in _argument_names(node.args):
+                inner.bind(name, None, None)
+            self._walk(node.body, inner)
+            return
+
+        if isinstance(
+            node, (ast.ListComp, ast.SetComp, ast.GeneratorExp, ast.DictComp)
+        ):
+            inner = _Scope(scope, is_comprehension=True)
+            for position, generator in enumerate(node.generators):
+                # Only the first iterable is evaluated in the enclosing scope.
+                self._walk(generator.iter, scope if position == 0 else inner)
+                for name in _target_names(generator.target):
+                    inner.bind(name, None, _Element(generator.iter))
+                for condition in generator.ifs:
+                    self._walk(condition, inner)
+            if isinstance(node, ast.DictComp):
+                self._walk(node.key, inner)
+                self._walk(node.value, inner)
+            else:
+                self._walk(node.elt, inner)
+            return
+
+        if isinstance(node, ast.Assign):
+            self._walk(node.value, scope)
+            for target in node.targets:
+                for name in _target_names(target):
+                    scope.bind(name, node.lineno, node.value)
+                self._walk(target, scope)
+            return
+
+        if isinstance(node, ast.AnnAssign):
+            if node.value is not None:
+                self._walk(node.value, scope)
+            for name in _target_names(node.target):
+                scope.bind(name, node.lineno, node.value)
+            return
+
+        if isinstance(node, ast.NamedExpr):
+            self._walk(node.value, scope)
+            # PEP 572: a walrus inside a comprehension binds in the enclosing
+            # function scope, not the comprehension's.
+            host = scope.enclosing_function_scope()
+            for name in _target_names(node.target):
+                host.bind(name, node.lineno, node.value)
+            return
+
+        if isinstance(node, (ast.For, ast.AsyncFor)):
+            self._walk(node.iter, scope)
+            for name in _target_names(node.target):
+                scope.bind(name, node.lineno, _Element(node.iter))
+            for statement in [*node.body, *node.orelse]:
+                self._walk(statement, scope)
+            return
+
+        if isinstance(node, ast.AugAssign):
+            self._walk(node.value, scope)
+            for name in _target_names(node.target):
+                scope.bind(name, node.lineno, None)
+            return
+
+        if isinstance(node, (ast.With, ast.AsyncWith)):
+            for item in node.items:
+                self._walk(item.context_expr, scope)
+                if item.optional_vars is not None:
+                    for name in _target_names(item.optional_vars):
+                        scope.bind(name, node.lineno, None)
+            for statement in node.body:
+                self._walk(statement, scope)
+            return
+
+        if isinstance(node, ast.ExceptHandler):
+            if node.name is not None:
+                scope.bind(node.name, node.lineno, None)
+            for child in ast.iter_child_nodes(node):
+                self._walk(child, scope)
+            return
+
+        if isinstance(node, (ast.Import, ast.ImportFrom)):
+            for alias in node.names:
+                bound = alias.asname or alias.name.split(".")[0]
+                scope.bind(bound, node.lineno, None)
+            return
+
+        if isinstance(node, ast.ClassDef):
+            scope.bind(node.name, node.lineno, None)
+            inner = _Scope(scope)
+            for decorator in node.decorator_list:
+                self._walk(decorator, scope)
+            for statement in node.body:
+                self._walk(statement, inner)
+            return
+
+        for child in ast.iter_child_nodes(node):
+            self._walk(child, scope)
+
+
+class _ResolutionAnalyzer:
+    """Answers "was this expression produced by the provisioning policy?".
+
+    Provenance is seeded ONLY by a call to one of ``_POLICY_RESOLVERS``, then
+    propagated through the operations that preserve it — attribute access,
+    subscripting, iteration, ``.get()``, container literals, and a call to a
+    module-local function whose every return is itself resolved (which is how
+    ``TopicProvisioner._resolve_spec`` and ``_resolve_specs_for_creation``
+    qualify without being special-cased by name).
+    """
+
+    def __init__(self, scopes: _ScopeMap) -> None:
+        self._scopes = scopes
+        self._local_resolvers: set[str] = set()
+        # Fixed point: a wrapper may delegate to another wrapper.
+        for _ in range(len(scopes.functions) + 1):
+            grew = False
+            for function in scopes.functions:
+                if function.name in self._local_resolvers:
+                    continue
+                returns = _own_returns(function)
+                if returns and all(self.is_resolved(value) for value in returns):
+                    self._local_resolvers.add(function.name)
+                    grew = True
+            if not grew:
+                break
+
+    def is_resolved(
+        self, node: _Bound, seen: frozenset[tuple[int, str]] = frozenset()
+    ) -> bool:
+        if node is None:
+            return False
+        if isinstance(node, _Element):
+            return self.is_resolved(node.iterable, seen)
+        if isinstance(node, ast.Await):
+            return self.is_resolved(node.value, seen)
+        if isinstance(node, ast.Call):
+            callee = _callee_name(node.func)
+            if callee in _POLICY_RESOLVERS or callee in self._local_resolvers:
+                return True
+            # ``tuple(resolved_batch)`` repackages, it does not re-source.
+            if (
+                isinstance(node.func, ast.Name)
+                and callee in _PASSTHROUGH_BUILTINS
+                and len(node.args) == 1
+            ):
+                return self.is_resolved(node.args[0], seen)
+            # A method invoked ON a resolved value keeps its provenance:
+            # ``resolved.model_copy(...)``, ``resolved_by_name.get(name)``.
+            if isinstance(node.func, ast.Attribute):
+                return self.is_resolved(node.func.value, seen)
+            return False
+        if isinstance(node, (ast.Attribute, ast.Subscript, ast.Starred)):
+            return self.is_resolved(node.value, seen)
+        if isinstance(node, ast.Name):
+            scope = self._scopes.of.get(node)
+            if scope is None:
+                return False
+            key = (id(scope), node.id)
+            if key in seen:
+                return False  # cyclic binding (``x = x.y``): unprovable
+            return self.is_resolved(scope.lookup(node.id, node.lineno), seen | {key})
+        if isinstance(node, ast.IfExp):
+            return self.is_resolved(node.body, seen) and self.is_resolved(
+                node.orelse, seen
+            )
+        if isinstance(node, ast.BoolOp):
+            return all(self.is_resolved(value, seen) for value in node.values)
+        if isinstance(node, (ast.List, ast.Tuple, ast.Set)):
+            return bool(node.elts) and all(
+                self.is_resolved(element, seen) for element in node.elts
+            )
+        if isinstance(node, ast.Dict):
+            return bool(node.values) and all(
+                self.is_resolved(value, seen) for value in node.values
+            )
+        if isinstance(node, (ast.ListComp, ast.SetComp, ast.GeneratorExp)):
+            return self.is_resolved(node.elt, seen)
+        if isinstance(node, ast.DictComp):
+            return self.is_resolved(node.value, seen)
+        return False
+
+
+def _replication_factor_argument(call: ast.Call) -> ast.expr | None:
+    """The RF argument actually passed at this ``NewTopic`` site, if any.
+
+    A ``**kwargs`` splat yields ``None`` — the site is unreadable, so it is
+    reported rather than waved through.
+    """
+    for keyword in call.keywords:
+        if keyword.arg == _RF_KEYWORD:
+            return keyword.value
+    if any(keyword.arg is None for keyword in call.keywords):
+        return None
+    if len(call.args) > _RF_POSITION:
+        return call.args[_RF_POSITION]
+    return None
+
+
+def _is_integer_literal(node: ast.expr) -> bool:
+    if isinstance(node, ast.UnaryOp) and isinstance(node.op, (ast.USub, ast.UAdd)):
+        return _is_integer_literal(node.operand)
+    return isinstance(node, ast.Constant) and isinstance(node.value, int)
 
 
 def _raw_create_topics_offenders(roots: Sequence[Path]) -> list[str]:
@@ -426,38 +790,69 @@ def _raw_create_topics_offenders(roots: Sequence[Path]) -> list[str]:
     every topic at a flat ``--replication-factor`` default of 1 with the
     fail-closed policy never consulted. Neither the guard nor CI could see it.
 
-    A site is an offender when either:
+    Admissibility is decided **at the construction site, from the argument
+    expression itself**, by AST provenance — not from anything the enclosing
+    module happens to mention. The previous revision of this guard computed
+    ``"ModelTopicProvisioningPolicy" in text and _POLICY_RESOLVER_RE.search(text)``
+    once per FILE, so every ``NewTopic`` in a policy-aware module was waved
+    through unless its RF was an integer literal. Executed against the
+    reconstructed ``b2ca4faa`` tree it returned nothing for
+    ``service_topic_manager.py``'s ``replication_factor=config.replication_factor``
+    — the raw, unresolved value that was that round's own defect — because the
+    module mentions the policy five times elsewhere. That is the same
+    "certified a property it could not see" failure this guard exists to
+    prevent, so the module-scope arm is gone.
 
-    * the replication factor at the construction site is an integer literal
-      (a flat default, not a resolved value); or
-    * the enclosing module never mentions ``ModelTopicProvisioningPolicy`` and
-      never calls one of its resolvers.
+    A site is an offender when the replication factor it passes is:
+
+    * an integer literal — the flat-default shape; or
+    * absent (including behind a ``**kwargs`` splat) — unreadable, so refused; or
+    * not traceable, through provenance-preserving operations only, back to a
+      ``resolve_spec`` / ``resolve_specs_for_creation`` /
+      ``resolve_replication_factor`` call.
 
     Scanning ``scripts/`` as well as ``src/`` is the point: a future third path
     lands in one of those two trees.
+
+    The analysis is deliberately conservative and errs toward REPORTING. It
+    tracks provenance through attribute access, subscripting, iteration, method
+    calls on a resolved receiver, container literals/comprehensions, and
+    single-argument builtin repackaging — but NOT through a mutated
+    accumulator (``out = []`` … ``out.append(policy.resolve_spec(spec))``).
+    That shape is reported, and the fix is to use the batch helper
+    ``resolve_specs_for_creation`` (which is what every live path does) rather
+    than to add an exemption. A guard that is loose in order to avoid
+    inconveniencing a refactor is the failure this one replaces.
     """
     offenders: list[str] = []
     for root in roots:
         for path in sorted(root.rglob("*.py")):
             text = path.read_text(encoding="utf-8")
-            if not _NEW_TOPIC_RE.search(text):
+            if _NEW_TOPIC not in text:
                 continue
-            lines = text.splitlines()
-            resolves = (
-                "ModelTopicProvisioningPolicy" in text
-                and _POLICY_RESOLVER_RE.search(text) is not None
+            scopes = _ScopeMap(ast.parse(text, filename=str(path)))
+            analyzer = _ResolutionAnalyzer(scopes)
+            sites = sorted(
+                (
+                    node
+                    for node in scopes.of
+                    if isinstance(node, ast.Call)
+                    and _callee_name(node.func) == _NEW_TOPIC
+                ),
+                key=lambda node: node.lineno,
             )
-            for index, line in enumerate(lines):
-                if not _NEW_TOPIC_RE.search(line):
-                    continue
-                if line.lstrip().startswith(("#", "*", '"', "'")):
-                    continue  # prose/docstring mention, not a construction
-                label = f"{root.name}/{path.name}:{index + 1}"
-                window = "\n".join(lines[index : index + 12])
-                if _LITERAL_RF_RE.search(window):
+            for site in sites:
+                label = f"{root.name}/{path.name}:{site.lineno}"
+                argument = _replication_factor_argument(site)
+                if argument is None:
+                    offenders.append(f"{label}: no replication_factor argument")
+                elif _is_integer_literal(argument):
                     offenders.append(f"{label}: hardcoded replication_factor")
-                elif not resolves:
-                    offenders.append(f"{label}: module resolves no replication policy")
+                elif not analyzer.is_resolved(argument):
+                    offenders.append(
+                        f"{label}: replication_factor is not policy-resolved "
+                        "at this call site"
+                    )
     return offenders
 
 
@@ -1299,49 +1694,254 @@ class TestPolicyErrorsEscapeBestEffortBoundaries:
             pytest.param(
                 "def go(rf):\n"
                 "    return NewTopic('t', num_partitions=1, replication_factor=rf)\n",
-                "module resolves no replication policy",
+                "replication_factor is not policy-resolved at this call site",
                 id="unresolved-caller-supplied",
+            ),
+            # The shape the module-scope predecessor could not see. The module
+            # imports the policy and calls a resolver — for an UNRELATED
+            # purpose — and the guard's per-file ``resolves`` flag waved every
+            # NewTopic in it through. Executed against the real reconstructed
+            # b2ca4faa tree, that predecessor returned nothing at all for
+            # ``service_topic_manager.py``'s
+            # ``replication_factor=config.replication_factor``.
+            pytest.param(
+                "from omnibase_infra.topics.model_topic_provisioning_policy import (\n"
+                "    ModelTopicProvisioningPolicy,\n"
+                ")\n"
+                "\n"
+                "def audit(policy: ModelTopicProvisioningPolicy, spec):\n"
+                "    return policy.resolve_spec(spec).replication_factor\n"
+                "\n"
+                "def go(raw_config):\n"
+                "    return NewTopic(\n"
+                "        name=raw_config.name,\n"
+                "        num_partitions=raw_config.partition_count,\n"
+                "        replication_factor=raw_config.replication_factor,\n"
+                "    )\n",
+                "replication_factor is not policy-resolved at this call site",
+                id="policy-aware-module-raw-site",
+            ),
+            # Naming is not provenance: a local helper called ``_resolve_spec``
+            # that resolves nothing must not confer admissibility, or the
+            # module-local-wrapper allowance below becomes the new blanket pass.
+            pytest.param(
+                "def _resolve_spec(spec):\n"
+                "    return spec\n"
+                "\n"
+                "def go(spec):\n"
+                "    resolved = _resolve_spec(spec)\n"
+                "    return NewTopic(\n"
+                "        't',\n"
+                "        num_partitions=1,\n"
+                "        replication_factor=resolved.replication_factor,\n"
+                "    )\n",
+                "replication_factor is not policy-resolved at this call site",
+                id="stub-helper-named-like-a-resolver",
+            ),
+            # ``replication_factor`` is positional #3 in both the aiokafka and
+            # confluent_kafka signatures.
+            pytest.param(
+                "def go():\n    return NewTopic('t', 6, 1)\n",
+                "hardcoded replication_factor",
+                id="positional-literal",
+            ),
+            # An unreadable site is refused, not waved through.
+            pytest.param(
+                "def go(payload):\n    return NewTopic(**payload)\n",
+                "no replication_factor argument",
+                id="kwargs-splat",
+            ),
+            pytest.param(
+                "def go():\n    return NewTopic('t', num_partitions=6)\n",
+                "no replication_factor argument",
+                id="rf-argument-omitted",
             ),
         ],
     )
     def test_create_topics_guard_sees_a_planted_third_path(
         self, tmp_path: Path, body: str, expected_reason: str
     ) -> None:
-        """Positive control: a NEW bypass path is caught, both shapes.
+        """Positive control: a NEW bypass path is caught, every shape.
 
         ``scripts/create_kafka_topics.py`` matched the first shape and shipped
-        for months. The guard is only worth anything if it fires on that shape
-        without being told where to look.
+        for months. The guard is only worth anything if it fires on these
+        shapes without being told where to look — and, since the predecessor
+        decided admissibility per FILE, specifically if it fires on a raw site
+        inside a module that is otherwise policy-aware.
         """
         root = tmp_path / "scripts"
         root.mkdir()
         (root / "planted_creator.py").write_text(body, encoding="utf-8")
 
         offenders = _raw_create_topics_offenders([root])
-        assert offenders == [f"scripts/planted_creator.py:2: {expected_reason}"]
+        assert len(offenders) == 1
+        assert offenders[0].endswith(f": {expected_reason}")
+        assert offenders[0].startswith("scripts/planted_creator.py:")
 
+    @pytest.mark.parametrize(
+        ("body", "shape"),
+        [
+            pytest.param(
+                "from omnibase_infra.topics.model_topic_provisioning_policy import (\n"
+                "    ModelTopicProvisioningPolicy,\n"
+                ")\n"
+                "\n"
+                "def go(policy: ModelTopicProvisioningPolicy, spec):\n"
+                "    resolved = policy.resolve_spec(spec)\n"
+                "    return NewTopic(\n"
+                "        resolved.suffix,\n"
+                "        num_partitions=resolved.partitions,\n"
+                "        replication_factor=resolved.replication_factor,\n"
+                "    )\n",
+                "attribute of a directly resolved spec",
+                id="direct-resolve-spec",
+            ),
+            # ``TopicProvisioner.ensure_topic_exists`` config= branch.
+            pytest.param(
+                "def go(policy, topic, declared):\n"
+                "    resolved_rf = policy.resolve_replication_factor(\n"
+                "        topic=topic, declared=declared\n"
+                "    )\n"
+                "    return NewTopic(\n"
+                "        name=topic, num_partitions=6, replication_factor=resolved_rf\n"
+                "    )\n",
+                "scalar straight off resolve_replication_factor",
+                id="resolved-scalar",
+            ),
+            # ``scripts/create_kafka_topics.py`` — comprehension over a batch.
+            pytest.param(
+                "from omnibase_infra.topics.model_topic_provisioning_policy import (\n"
+                "    resolve_specs_for_creation,\n"
+                ")\n"
+                "\n"
+                "def go(policy, specs):\n"
+                "    resolved_specs = resolve_specs_for_creation(policy, specs)\n"
+                "    return [\n"
+                "        NewTopic(\n"
+                "            spec.suffix,\n"
+                "            num_partitions=spec.partitions,\n"
+                "            replication_factor=spec.replication_factor,\n"
+                "        )\n"
+                "        for spec in resolved_specs\n"
+                "    ]\n",
+                "comprehension over a batch-resolved sequence",
+                id="comprehension-over-batch",
+            ),
+            # ``managed_staging_topic_checker`` — dict-comprehension + .get(),
+            # with an EARLIER walrus binding the same name to a raw value. The
+            # nearest-preceding-binding rule is what keeps this admissible
+            # without also admitting the raw one.
+            pytest.param(
+                "def go(policy, missing, specs_by_name):\n"
+                "    resolved_by_name = {\n"
+                "        name: policy.resolve_spec(spec)\n"
+                "        for name in missing\n"
+                "        if (spec := specs_by_name.get(name)) is not None\n"
+                "    }\n"
+                "    out = []\n"
+                "    for name in missing:\n"
+                "        spec = resolved_by_name.get(name)\n"
+                "        if spec is None:\n"
+                "            continue\n"
+                "        out.append(\n"
+                "            NewTopic(\n"
+                "                name=spec.suffix,\n"
+                "                num_partitions=spec.partitions,\n"
+                "                replication_factor=spec.replication_factor,\n"
+                "            )\n"
+                "        )\n"
+                "    return out\n",
+                "rebound through a resolved mapping, shadowing a raw walrus",
+                id="dictcomp-get-after-raw-walrus",
+            ),
+            # ``TopicProvisioner._resolve_spec`` — a module-local wrapper that
+            # genuinely delegates. Admitted by its BODY, not by its name.
+            pytest.param(
+                "class P:\n"
+                "    def _resolve_spec(self, spec):\n"
+                "        return self._policy.resolve_spec(spec)\n"
+                "\n"
+                "    def go(self, spec):\n"
+                "        resolved = self._resolve_spec(spec)\n"
+                "        return NewTopic(\n"
+                "            name=resolved.suffix,\n"
+                "            num_partitions=resolved.partitions,\n"
+                "            replication_factor=resolved.replication_factor,\n"
+                "        )\n",
+                "module-local wrapper whose returns are all resolved",
+                id="local-wrapper-delegates",
+            ),
+            pytest.param(
+                "from omnibase_infra.topics.model_topic_provisioning_policy import (\n"
+                "    resolve_specs_for_creation,\n"
+                ")\n"
+                "\n"
+                "def go(policy, specs):\n"
+                "    resolved = tuple(resolve_specs_for_creation(policy, specs))\n"
+                "    return [\n"
+                "        NewTopic(\n"
+                "            s.suffix,\n"
+                "            num_partitions=s.partitions,\n"
+                "            replication_factor=s.replication_factor,\n"
+                "        )\n"
+                "        for s in resolved\n"
+                "    ]\n",
+                "builtin repackaging of a resolved batch",
+                id="tuple-repackaged-batch",
+            ),
+        ],
+    )
     def test_create_topics_guard_accepts_a_policy_resolved_site(
-        self, tmp_path: Path
+        self, tmp_path: Path, body: str, shape: str
     ) -> None:
-        """Negative control: the guard is not flagging every NewTopic."""
+        """Negative control: every live creation shape stays admissible.
+
+        These six mirror the five real ``NewTopic`` sites in the tree. Without
+        them, "tighten the guard" degenerates into "flag everything", which is
+        just as useless as the blanket pass it replaces — and the failure would
+        surface as unexplained CI red on an unrelated PR.
+        """
         root = tmp_path / "src"
         root.mkdir()
-        (root / "compliant_creator.py").write_text(
-            "from omnibase_infra.topics.model_topic_provisioning_policy import (\n"
-            "    ModelTopicProvisioningPolicy,\n"
-            ")\n"
-            "\n"
-            "def go(policy: ModelTopicProvisioningPolicy, spec):\n"
-            "    resolved = policy.resolve_spec(spec)\n"
-            "    return NewTopic(\n"
-            "        resolved.suffix,\n"
-            "        num_partitions=resolved.partitions,\n"
-            "        replication_factor=resolved.replication_factor,\n"
-            "    )\n",
+        (root / "compliant_creator.py").write_text(body, encoding="utf-8")
+
+        assert _raw_create_topics_offenders([root]) == [], shape
+
+    def test_create_topics_guard_is_conservative_about_accumulators(
+        self, tmp_path: Path
+    ) -> None:
+        """Pin the documented limitation, so it is a decision and not a surprise.
+
+        Provenance is not tracked through a mutated accumulator. This shape is
+        genuinely correct code, and the guard reports it anyway — recorded here
+        deliberately: the remedy is to use the batch helper
+        ``resolve_specs_for_creation`` (as every live path does), never to
+        loosen the guard back toward a blanket pass. Left unpinned, the next
+        person to hit it would read it as a bug and widen the analysis.
+        """
+        root = tmp_path / "src"
+        root.mkdir()
+        (root / "accumulator.py").write_text(
+            "def go(policy, specs):\n"
+            "    resolved = []\n"
+            "    for spec in specs:\n"
+            "        resolved.append(policy.resolve_spec(spec))\n"
+            "    return [\n"
+            "        NewTopic(\n"
+            "            s.suffix,\n"
+            "            num_partitions=s.partitions,\n"
+            "            replication_factor=s.replication_factor,\n"
+            "        )\n"
+            "        for s in tuple(resolved)\n"
+            "    ]\n",
             encoding="utf-8",
         )
 
-        assert _raw_create_topics_offenders([root]) == []
+        offenders = _raw_create_topics_offenders([root])
+        assert offenders == [
+            "src/accumulator.py:6: replication_factor is not policy-resolved "
+            "at this call site"
+        ]
 
     @pytest.mark.parametrize(
         "receiver",
