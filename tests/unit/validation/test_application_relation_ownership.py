@@ -187,6 +187,50 @@ def test_rich_omn15423_inventory_projects_without_dropping_blockers() -> None:
     assert EnumApplicationRelationViolation.INCOMPLETE_CENSUS in codes
 
 
+def test_rich_inventory_cannot_self_assert_completeness_with_missing_rows() -> None:
+    inventory = load_application_relation_inventory(
+        _FIXTURES / "false-complete-census.yaml"
+    )
+
+    report = validate_application_relation_ownership(
+        topology=_topology(),
+        node_contract_paths=(),
+        service_manifest_paths=(),
+        inventory=inventory,
+    )
+
+    assert not report.is_valid
+    census_violations = [
+        violation
+        for violation in report.violations
+        if violation.code is EnumApplicationRelationViolation.INCOMPLETE_CENSUS
+    ]
+    assert {violation.message for violation in census_violations} == {
+        "Application inventory retained census base tables do not match typed "
+        "relation rows: observed=86, projected=0",
+        "Application inventory retained census views and materialized views do not "
+        "match typed relation rows: observed=9, projected=0",
+    }
+
+
+def test_rich_inventory_source_count_must_match_typed_projection() -> None:
+    inventory = load_application_relation_inventory(_FIXTURES / "rich-inventory.yaml")
+    stale_inventory = inventory.model_copy(update={"source_relation_count": 99})
+
+    report = validate_application_relation_ownership(
+        topology=_topology(),
+        node_contract_paths=(),
+        service_manifest_paths=(),
+        inventory=stale_inventory,
+    )
+
+    assert any(
+        violation.code is EnumApplicationRelationViolation.INCOMPLETE_CENSUS
+        and "source_relation_count" in violation.message
+        for violation in report.violations
+    )
+
+
 def test_only_explicit_migration_ledger_roles_have_ledger_purpose() -> None:
     webhook_table = ModelDbTableDeclaration(
         name="stripe_webhook_events",

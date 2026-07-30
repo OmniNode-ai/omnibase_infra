@@ -11,7 +11,7 @@ Readers remain explicit and never count as owners.
 
 from __future__ import annotations
 
-from collections import defaultdict
+from collections import Counter, defaultdict
 from collections.abc import Mapping, Sequence
 from pathlib import Path
 
@@ -213,6 +213,23 @@ def _append_inventory_evidence_violations(
     violations: list[ModelApplicationRelationViolation],
 ) -> None:
     """Retain rich inventory blockers in the global fail-closed report."""
+    if inventory.source_relation_count is not None:
+        projected_source_count = len(inventory.relations) + len(
+            inventory.excluded_database_objects
+        )
+        if inventory.source_relation_count != projected_source_count:
+            violations.append(
+                ModelApplicationRelationViolation(
+                    code=EnumApplicationRelationViolation.INCOMPLETE_CENSUS,
+                    message=(
+                        "Application inventory source_relation_count does not match "
+                        "the typed relation projection plus explicitly excluded "
+                        f"database objects: declared={inventory.source_relation_count}, "
+                        f"projected={projected_source_count}"
+                    ),
+                )
+            )
+
     if inventory.completion_status and _status_is_blocking(inventory.completion_status):
         violations.append(
             ModelApplicationRelationViolation(
@@ -238,8 +255,39 @@ def _append_inventory_evidence_violations(
             )
 
     census = inventory.retained_live_census
-    if census is not None and census.parity_status is not None:
-        if _status_is_blocking(census.parity_status):
+    if census is not None:
+        projected_kind_counts = Counter(
+            relation.kind for relation in inventory.relations
+        )
+        census_comparisons = (
+            (
+                "base tables",
+                census.observed_base_tables,
+                projected_kind_counts[EnumApplicationRelationKind.TABLE],
+            ),
+            (
+                "views and materialized views",
+                census.observed_views_and_materialized_views,
+                projected_kind_counts[EnumApplicationRelationKind.VIEW]
+                + projected_kind_counts[EnumApplicationRelationKind.MATERIALIZED_VIEW],
+            ),
+        )
+        for relation_group, observed_count, projected_count in census_comparisons:
+            if observed_count is not None and observed_count != projected_count:
+                violations.append(
+                    ModelApplicationRelationViolation(
+                        code=EnumApplicationRelationViolation.INCOMPLETE_CENSUS,
+                        message=(
+                            f"Application inventory retained census {relation_group} "
+                            "do not match typed relation rows: "
+                            f"observed={observed_count}, projected={projected_count}"
+                        ),
+                    )
+                )
+
+        if census.parity_status is not None and _status_is_blocking(
+            census.parity_status
+        ):
             violations.append(
                 ModelApplicationRelationViolation(
                     code=EnumApplicationRelationViolation.INCOMPLETE_CENSUS,

@@ -1,0 +1,29 @@
+# SPDX-FileCopyrightText: 2025 OmniNode.ai Inc.
+# SPDX-License-Identifier: MIT
+
+schema_version: "1.0"
+ticket: OMN-15423
+database_ref: application
+physical_seed_database: omnidash_analytics
+ownership_authority: distributed node contract.yaml -> db_io.db_tables
+inventory_projection: generated; never an ownership allowlist
+completion_status: passed
+relation_counts:
+  table: 0
+  view: 0
+  materialized_view: 0
+  function: 0
+  sequence: 0
+  extension: 0
+relations: []
+blocked_relations: []
+retained_live_census:
+  observed_base_tables: 86
+  observed_views_and_materialized_views: 9
+  parity_status: passed
+runtime_evidence:
+  dsn_key_provenance: {}
+  full_day_datname_usename_activity:
+    status: passed
+  live_catalog_parity:
+    status: passed
