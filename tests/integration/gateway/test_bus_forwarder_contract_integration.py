@@ -3,9 +3,8 @@
 
 from __future__ import annotations
 
-from collections.abc import Awaitable, Callable
 from dataclasses import dataclass
-from typing import Any
+from pathlib import Path
 from uuid import UUID, uuid4
 
 import pytest
@@ -44,29 +43,7 @@ class _Message:
 
 class _RecordingBus:
     def __init__(self) -> None:
-        self.subscriptions: dict[str, Callable[[Any], Awaitable[None]]] = {}
-        self.subscription_groups: dict[str, str] = {}
         self.published: list[_Message] = []
-
-    async def subscribe(
-        self,
-        topic: str,
-        node_identity: object | None = None,
-        on_message: Callable[[Any], Awaitable[None]] | None = None,
-        *,
-        group_id: str | None = None,
-        **_kwargs: object,
-    ) -> Callable[[], Awaitable[None]]:
-        assert on_message is not None
-        assert group_id is not None
-        self.subscriptions[topic] = on_message
-        self.subscription_groups[topic] = group_id
-
-        async def _unsubscribe() -> None:
-            self.subscriptions.pop(topic, None)
-            self.subscription_groups.pop(topic, None)
-
-        return _unsubscribe
 
     async def publish(
         self,
@@ -77,18 +54,16 @@ class _RecordingBus:
     ) -> None:
         self.published.append(_Message(topic, key, value, headers))
 
-    async def emit(
+    def message(
         self,
         topic: str,
         envelope: ModelEventEnvelope[dict[str, object]],
-    ) -> None:
-        await self.subscriptions[topic](
-            _Message(
-                topic=topic,
-                key=b"tenant-key",
-                value=envelope.model_dump_json().encode("utf-8"),
-                headers={"traceparent": "00-test"},
-            )
+    ) -> _Message:
+        return _Message(
+            topic=topic,
+            key=b"tenant-key",
+            value=envelope.model_dump_json().encode("utf-8"),
+            headers={"traceparent": "00-test"},
         )
 
 
@@ -108,6 +83,7 @@ def _config() -> ModelGatewayForwarderConfig:
             client_secret_api_key_ref="infisical://gateway/redpanda-events",
         ),
         local_transport_flavor="containerized",
+        dedupe_store_path=Path.cwd() / "gateway-test.sqlite3",
         mirror_topics=ModelGatewayMirrorTopics(
             inbound=(INBOUND_TOPIC,),
             outbound=(OUTBOUND_TOPIC,),
@@ -142,22 +118,14 @@ async def test_gateway_forwarder_preserves_envelope_across_both_bus_legs() -> No
         cloud_bus=cloud_bus,
     )
 
-    await service.start()
-    await local_bus.emit(OUTBOUND_TOPIC, _envelope())
-    await cloud_bus.emit(
-        WIRE_INBOUND_TOPIC,
-        _envelope(
-            event_type="DelegationInferenceRequest",
-        ),
+    await service.forward_outbound_message(
+        local_bus.message(OUTBOUND_TOPIC, _envelope())
     )
-
-    assert set(local_bus.subscriptions) == {OUTBOUND_TOPIC}
-    assert set(cloud_bus.subscriptions) == {WIRE_INBOUND_TOPIC}
-    assert local_bus.subscription_groups[OUTBOUND_TOPIC] == (
-        "tenant-acme-gateway-forwarder-outbound"
-    )
-    assert cloud_bus.subscription_groups[WIRE_INBOUND_TOPIC] == (
-        "tenant-acme-gateway-forwarder-inbound"
+    await service.consume_inbound_message(
+        cloud_bus.message(
+            WIRE_INBOUND_TOPIC,
+            _envelope(event_type="DelegationInferenceRequest"),
+        )
     )
 
     outbound = cloud_bus.published[0]

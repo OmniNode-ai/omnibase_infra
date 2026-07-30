@@ -18,10 +18,7 @@ from uuid import uuid4
 
 from omnibase_core.models.core.model_envelope_metadata import ModelEnvelopeMetadata
 from omnibase_core.models.events.model_event_envelope import ModelEventEnvelope
-from omnibase_infra.enums import EnumConsumerGroupPurpose
 from omnibase_infra.errors import RuntimeHostError
-from omnibase_infra.event_bus.models import ModelEventHeaders, ModelEventMessage
-from omnibase_infra.models import ModelNodeIdentity
 from omnibase_infra.nodes.node_bus_forwarder_effect.models import (
     ModelGatewayForwarderConfig,
     ModelGatewayHeartbeat,
@@ -35,40 +32,28 @@ from omnibase_infra.shared.tenant_stamp import stamp_verified_tenant_slug
 logger = logging.getLogger(__name__)
 
 
-class ProtocolGatewayBus(Protocol):
-    """Structural subset shared by EventBusKafka, EventBusInmemory, and tests."""
+class ProtocolGatewayPublisher(Protocol):
+    """Destination publish boundary shared by push and pull transports."""
 
     async def publish(
         self,
         topic: str,
         key: bytes | None,
         value: bytes,
-        headers: ModelEventHeaders | None = None,
+        headers: object | None = None,
     ) -> None:
         """Publish bytes to a topic."""
 
-    async def subscribe(
-        self,
-        topic: str,
-        node_identity: ModelNodeIdentity | None = None,
-        on_message: Callable[[ModelEventMessage], Awaitable[None]] | None = None,
-        *,
-        group_id: str | None = None,
-        purpose: EnumConsumerGroupPurpose = EnumConsumerGroupPurpose.CONSUME,
-        required_for_readiness: bool = False,
-    ) -> Callable[[], Awaitable[None]]:
-        """Subscribe to a topic and return an async unsubscribe callback."""
-
 
 class ServiceGatewayForwarder:
-    """Subscribe to mirrored topics on both legs and republish transformed envelopes."""
+    """Validate, transform, and republish explicitly polled gateway envelopes."""
 
     def __init__(
         self,
         *,
         config: ModelGatewayForwarderConfig,
-        local_bus: ProtocolGatewayBus,
-        cloud_bus: ProtocolGatewayBus,
+        local_bus: ProtocolGatewayPublisher,
+        cloud_bus: ProtocolGatewayPublisher,
         retry_sleep: Callable[[float], Awaitable[None]] | None = None,
     ) -> None:
         self._config = config
@@ -79,40 +64,6 @@ class ServiceGatewayForwarder:
 
             retry_sleep = asyncio.sleep
         self._retry_sleep = retry_sleep
-        self._unsubscribe_callbacks: list[Callable[[], Awaitable[None]]] = []
-        self._started = False
-
-    async def start(self) -> None:
-        """Start subscriptions on both bus legs."""
-        if self._started:
-            return
-
-        for topic in self._config.mirror_topics.outbound:
-            unsubscribe = await self._local_bus.subscribe(
-                topic=topic,
-                group_id=self._group_id("outbound"),
-                on_message=self._forward_outbound_message,
-            )
-            self._unsubscribe_callbacks.append(unsubscribe)
-
-        tenant_slug = self._config.tenant_identity.tenant_slug
-        for topic in self._config.mirror_topics.inbound:
-            unsubscribe = await self._cloud_bus.subscribe(
-                topic=prefix_topic(tenant_slug, topic),
-                group_id=self._group_id("inbound"),
-                on_message=self._consume_inbound_message,
-            )
-            self._unsubscribe_callbacks.append(unsubscribe)
-
-        self._started = True
-
-    async def stop(self) -> None:
-        """Stop all active subscriptions."""
-        callbacks = list(reversed(self._unsubscribe_callbacks))
-        self._unsubscribe_callbacks.clear()
-        self._started = False
-        for unsubscribe in callbacks:
-            await unsubscribe()
 
     async def _forward_outbound_message(self, message: object) -> None:
         source_topic = self._message_topic(message)
@@ -136,6 +87,17 @@ class ServiceGatewayForwarder:
             headers=getattr(message, "headers", None),
         )
 
+    async def forward_outbound_message(self, message: object) -> None:
+        """Validate, transform, and broker-acknowledge one outbound message."""
+        await self._forward_outbound_message(message)
+
+    def validate_outbound_message(self, message: object) -> None:
+        """Validate an outbound trust-boundary message without publishing it."""
+        source_topic = self._message_topic(message)
+        envelope = self._decode_message(message)
+        if envelope.metadata.tags.get("gateway_direction") != "cloud-to-local":
+            self._prepare_outbound(envelope, source_topic)
+
     async def _consume_inbound_message(self, message: object) -> None:
         wire_topic = self._message_topic(message)
         envelope = self._decode_message(message)
@@ -153,6 +115,25 @@ class ServiceGatewayForwarder:
             value=self._encode_envelope(transformed),
             headers=getattr(message, "headers", None),
         )
+
+    async def consume_inbound_message(self, message: object) -> None:
+        """Validate, transform, and broker-acknowledge one inbound message."""
+        await self._consume_inbound_message(message)
+
+    def validate_inbound_message(self, message: object) -> None:
+        """Validate an inbound trust-boundary message without publishing it."""
+        wire_topic = self._message_topic(message)
+        envelope = self._decode_message(message)
+        if envelope.metadata.tags.get("gateway_direction") != "local-to-cloud":
+            self._prepare_inbound(envelope, wire_topic)
+
+    @classmethod
+    def decode_message(
+        cls,
+        message: object,
+    ) -> ModelEventEnvelope[dict[str, object]]:
+        """Decode the canonical envelope used as the durable dedupe key source."""
+        return cls._decode_message(message)
 
     async def publish_heartbeat(self) -> None:
         """Publish one tenant-scoped liveness event onto the cloud wire topic."""
@@ -195,19 +176,19 @@ class ServiceGatewayForwarder:
     async def _publish_with_delivery_retry(
         self,
         *,
-        bus: ProtocolGatewayBus,
+        bus: ProtocolGatewayPublisher,
         topic: str,
         key: bytes | None,
         value: bytes,
-        headers: ModelEventHeaders | None = None,
+        headers: object | None = None,
     ) -> None:
         """Block source acknowledgement until a transient destination recovers.
 
-        ``EventBusKafka.publish`` already performs its bounded transport retry.
+        ``KafkaTransport.send`` awaits the destination broker acknowledgement.
         The gateway adds a process-lifetime retry around that boundary so the
-        source consumer callback cannot return (and be auto-committed) while
-        the message exists on only one broker. Cancellation during shutdown is
-        deliberately not caught.
+        delivery node cannot record its durable marker or commit the source
+        offset while the message exists on only one broker. Cancellation during
+        shutdown is deliberately not caught.
         """
         delay = self._config.forward_retry_initial_seconds
         attempt = 0
@@ -233,10 +214,6 @@ class ServiceGatewayForwarder:
                 )
                 await self._retry_sleep(delay)
                 delay = min(delay * 2, self._config.forward_retry_max_seconds)
-
-    def _group_id(self, direction: str) -> str:
-        identity = self._config.tenant_identity
-        return f"tenant-{identity.tenant_slug}-gateway-forwarder-{direction}"
 
     @staticmethod
     def _decode_message(message: object) -> ModelEventEnvelope[dict[str, object]]:

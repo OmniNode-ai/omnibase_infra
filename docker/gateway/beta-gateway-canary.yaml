@@ -20,6 +20,7 @@ forwarder:
   lag_threshold_messages: 500
   lag_threshold_seconds: 120
   drain_deadline_seconds: 30
+  dedupe_store_path: "/app/data/gateway/delivery.sqlite3"
   dedupe_retention_hours: 24
   forward_retry_initial_seconds: 1
   forward_retry_max_seconds: 30
@@ -28,14 +29,14 @@ local_bus:
   environment: "beta-gateway-local"
   timeout_seconds: 30
   auto_offset_reset: "latest"
-  enable_auto_commit: true
+  enable_auto_commit: false
   security_protocol: "PLAINTEXT"
 cloud_bus:
   bootstrap_servers: "b-1.omninodedevmsk.7ozyd3.c14.kafka.us-east-1.amazonaws.com:9098,b-2.omninodedevmsk.7ozyd3.c14.kafka.us-east-1.amazonaws.com:9098"
   environment: "beta-gateway-cloud"
   timeout_seconds: 60
   auto_offset_reset: "latest"
-  enable_auto_commit: true
+  enable_auto_commit: false
   security_protocol: "SASL_SSL"
   sasl_mechanism: "AWS_MSK_IAM"
   msk_region: "us-east-1"

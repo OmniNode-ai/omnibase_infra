@@ -3,10 +3,11 @@
 
 """Kafka face for the unified-runtime transport protocols (epic OMN-14717, S3).
 
-Net-new, currently UNUSED in production (ticket OMN-14756; see
+Introduced for the unified-runtime transport seam (ticket OMN-14756; see
 ``docs/plans/2026-07-17-single-runtime-transport-di-unification-plan.md`` sections
-(c)/(d), step S3). This is the concrete Kafka implementation of the two core
-transport protocols
+(c)/(d), step S3) and used by the production hybrid gateway runtime for explicit
+cross-broker acknowledgement. This is the concrete Kafka implementation of the two
+core transport protocols
 
 * ``omnibase_core.protocols.runtime.protocol_transport_consumer.ProtocolTransportConsumer``
 * ``omnibase_core.protocols.runtime.protocol_transport_producer.ProtocolTransportProducer``

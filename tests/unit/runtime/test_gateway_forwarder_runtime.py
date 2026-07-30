@@ -4,7 +4,7 @@
 from __future__ import annotations
 
 import asyncio
-from collections.abc import Awaitable, Callable
+from collections.abc import Mapping, Sequence
 from pathlib import Path
 from uuid import UUID
 
@@ -39,6 +39,7 @@ def _runtime_config() -> ModelGatewayForwarderRuntimeConfig:
                 sasl_mechanism="AWS_MSK_IAM",
             ),
             local_transport_flavor="containerized",
+            dedupe_store_path=Path.cwd() / "gateway-test.sqlite3",
             mirror_topics=ModelGatewayMirrorTopics(
                 inbound=("onex.cmd.omnibase-infra.delegation-request.v1",),
                 outbound=(
@@ -50,6 +51,7 @@ def _runtime_config() -> ModelGatewayForwarderRuntimeConfig:
         local_bus=ModelKafkaEventBusConfig(
             bootstrap_servers="redpanda:9092",
             environment="gateway-local",
+            enable_auto_commit=False,
         ),
         cloud_bus=ModelKafkaEventBusConfig(
             bootstrap_servers="b-1.example.kafka.amazonaws.com:9098",
@@ -57,6 +59,7 @@ def _runtime_config() -> ModelGatewayForwarderRuntimeConfig:
             security_protocol="SASL_SSL",
             sasl_mechanism="AWS_MSK_IAM",
             msk_region="us-east-1",
+            enable_auto_commit=False,
         ),
     )
 
@@ -85,6 +88,18 @@ def test_runtime_config_requires_outbound_heartbeat() -> None:
         ModelGatewayForwarderRuntimeConfig(
             forwarder=forwarder,
             local_bus=config.local_bus,
+            cloud_bus=config.cloud_bus,
+        )
+
+
+def test_runtime_config_rejects_source_auto_commit() -> None:
+    config = _runtime_config()
+    auto_commit_local = config.local_bus.model_copy(update={"enable_auto_commit": True})
+
+    with pytest.raises(ValueError, match="enable_auto_commit=false"):
+        ModelGatewayForwarderRuntimeConfig(
+            forwarder=config.forwarder,
+            local_bus=auto_commit_local,
             cloud_bus=config.cloud_bus,
         )
 
@@ -148,14 +163,28 @@ async def test_process_starts_both_legs_and_cleans_readiness(
     monkeypatch: pytest.MonkeyPatch,
     tmp_path: Path,
 ) -> None:
-    instances: list[_FakeBus] = []
+    instances: list[_FakeTransport] = []
+    stores: list[_FakeStore] = []
 
-    class _Factory(_FakeBus):
-        def __init__(self, *, config: ModelKafkaEventBusConfig) -> None:
-            super().__init__(config=config)
+    class _Factory(_FakeTransport):
+        def __init__(
+            self,
+            *,
+            config: ModelKafkaEventBusConfig,
+            group: str,
+            topics: Sequence[str],
+            auto_offset_reset: str,
+        ) -> None:
+            super().__init__(config=config, group=group, topics=topics)
             instances.append(self)
 
-    monkeypatch.setattr(gateway_forwarder, "EventBusKafka", _Factory)
+    class _StoreFactory(_FakeStore):
+        def __init__(self, path: Path) -> None:
+            super().__init__(path)
+            stores.append(self)
+
+    monkeypatch.setattr(gateway_forwarder, "KafkaTransport", _Factory)
+    monkeypatch.setattr(gateway_forwarder, "StoreIdempotencySqlite", _StoreFactory)
     shutdown_event = asyncio.Event()
     shutdown_event.set()
     ready_path = tmp_path / "ready"
@@ -169,6 +198,9 @@ async def test_process_starts_both_legs_and_cleans_readiness(
     assert len(instances) == 2
     assert all(instance.started for instance in instances)
     assert all(instance.closed for instance in instances)
+    assert len(stores) == 1
+    assert stores[0].started is True
+    assert stores[0].closed is True
     assert not ready_path.exists()
 
 
@@ -193,12 +225,19 @@ async def test_heartbeat_loop_emits_immediately_and_stops() -> None:
     assert forwarder.calls == 1
 
 
-class _FakeBus:
-    def __init__(self, *, config: ModelKafkaEventBusConfig) -> None:
+class _FakeTransport:
+    def __init__(
+        self,
+        *,
+        config: ModelKafkaEventBusConfig,
+        group: str,
+        topics: Sequence[str],
+    ) -> None:
         self.config = config
+        self.group = group
+        self.topics = tuple(topics)
         self.started = False
         self.closed = False
-        self.subscriptions: dict[str, Callable[[object], Awaitable[None]]] = {}
 
     async def start(self) -> None:
         self.started = True
@@ -206,29 +245,46 @@ class _FakeBus:
     async def close(self) -> None:
         self.closed = True
 
-    async def subscribe(
-        self,
-        topic: str,
-        node_identity: object | None = None,
-        on_message: Callable[[object], Awaitable[None]] | None = None,
-        *,
-        group_id: str | None = None,
-        **kwargs: object,
-    ) -> Callable[[], Awaitable[None]]:
-        assert on_message is not None
-        assert group_id is not None
-        self.subscriptions[topic] = on_message
+    async def poll(self, *, max_messages: int, timeout_ms: int) -> Sequence[object]:
+        await asyncio.sleep(0)
+        return []
 
-        async def _unsubscribe() -> None:
-            self.subscriptions.pop(topic, None)
+    async def commit(self, message: object) -> None:
+        raise AssertionError("no source message should be committed")
 
-        return _unsubscribe
+    async def nack(self, message: object) -> None:
+        raise AssertionError("no source message should be nacked")
 
-    async def publish(
+    async def send(
         self,
         topic: str,
         key: bytes | None,
         value: bytes,
-        headers: object | None = None,
+        headers: Mapping[str, bytes],
     ) -> None:
         raise AssertionError("no message should be published in lifecycle test")
+
+
+class _FakeStore:
+    def __init__(self, path: Path) -> None:
+        self.path = path
+        self.started = False
+        self.closed = False
+
+    async def start(self) -> None:
+        self.started = True
+
+    async def close(self) -> None:
+        self.closed = True
+
+    async def cleanup_expired(self, ttl_seconds: int) -> int:
+        return 0
+
+    async def is_processed(self, message_id: UUID, domain: str | None = None) -> bool:
+        return False
+
+    async def mark_processed(self, *args: object, **kwargs: object) -> None:
+        pass
+
+    async def check_and_record(self, *args: object, **kwargs: object) -> bool:
+        return True

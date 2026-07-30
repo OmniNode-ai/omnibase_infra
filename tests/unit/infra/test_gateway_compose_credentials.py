@@ -8,6 +8,8 @@ import yaml
 
 REPO_ROOT = Path(__file__).parents[3]
 GATEWAY_COMPOSE = REPO_ROOT / "docker" / "docker-compose.gateway.yml"
+GATEWAY_CONFIG = REPO_ROOT / "docker" / "gateway" / "beta-gateway-canary.yaml"
+RUNTIME_DOCKERFILE = REPO_ROOT / "docker" / "Dockerfile.runtime"
 GATEWAY_SYSTEMD_UNIT = (
     REPO_ROOT / "docker" / "gateway" / "onex-gateway-forwarder.service"
 )
@@ -56,6 +58,25 @@ def test_gateway_has_no_inbound_application_port() -> None:
     assert service["image"] == "${GATEWAY_IMAGE:?GATEWAY_IMAGE is required}"
     assert service["pull_policy"] == "never"
     assert service["restart"] == "unless-stopped"
+
+
+def test_gateway_delivery_state_uses_named_persistent_volume() -> None:
+    compose = yaml.safe_load(GATEWAY_COMPOSE.read_text(encoding="utf-8"))
+    service = compose["services"]["gateway-forwarder"]
+    config = yaml.safe_load(GATEWAY_CONFIG.read_text(encoding="utf-8"))
+    dockerfile = RUNTIME_DOCKERFILE.read_text(encoding="utf-8")
+
+    assert "gateway-delivery-state:/app/data" in service["volumes"]
+    assert compose["volumes"]["gateway-delivery-state"]["name"] == (
+        "omninode-gateway-delivery-state"
+    )
+    assert config["forwarder"]["dedupe_store_path"] == (
+        "/app/data/gateway/delivery.sqlite3"
+    )
+    assert (
+        "install -d -o omniinfra -g omniinfra /app/logs /app/data /app/tmp"
+        in dockerfile
+    )
 
 
 def test_gateway_systemd_unit_waits_for_container_health() -> None:

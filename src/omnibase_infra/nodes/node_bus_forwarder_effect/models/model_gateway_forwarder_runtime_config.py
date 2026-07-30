@@ -18,7 +18,7 @@ class ModelGatewayForwarderRuntimeConfig(BaseModel):
     ``forwarder.cloud_bus`` remains the provider-neutral declaration of the
     required capabilities and secret references.  ``cloud_bus`` and
     ``local_bus`` are the resolved, typed materialization consumed by
-    ``EventBusKafka``.  Keeping the layers separate prevents a process-wide
+    ``KafkaTransport``.  Keeping the layers separate prevents a process-wide
     ``KAFKA_*`` environment from silently making both legs point at one broker.
     """
 
@@ -37,6 +37,11 @@ class ModelGatewayForwarderRuntimeConfig(BaseModel):
             )
         if self.local_bus.bootstrap_servers == self.cloud_bus.bootstrap_servers:
             raise ValueError("gateway local_bus and cloud_bus must be distinct")
+        if self.local_bus.enable_auto_commit or self.cloud_bus.enable_auto_commit:
+            raise ValueError(
+                "gateway transport legs require enable_auto_commit=false; source "
+                "offsets are committed only after durable destination delivery"
+            )
         if not any(
             topic.endswith(".gateway-heartbeat.v1")
             for topic in self.forwarder.mirror_topics.outbound
