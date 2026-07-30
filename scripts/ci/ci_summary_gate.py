@@ -100,6 +100,19 @@ STRICT_GATE_JOBS: tuple[str, ...] = (
     # run_id), so a RED run left "CI Summary" — the sole required context on
     # dev — green.
     "Deploy Agent Tests (OMN-15378) / deploy-agent-tests",
+    # OMN-15484: the Merge Hold Gate, fanned out from OMN-15483 (omnibase_infra
+    # carries incident §C, #2560, and had zero coverage). THIS LINE IS THE
+    # MECHANISM — not the job's existence in ci.yml. The default-deny sweep
+    # below already catches a hold job that FAILS, but an unregistered job that
+    # is `skipped` or `absent` yields CI Summary SUCCESS, so a held PR would be
+    # required-green and the sweep would land it. Measured against this very
+    # evaluator on omnimarket#1973: unregistered, `skipped` -> SUCCESS and
+    # `absent` -> SUCCESS; registered, `skipped` -> FAILURE and `absent` ->
+    # PENDING. The job is unconditional (no needs/if), so a skip is anomalous,
+    # never a legitimate opt-out. Same "<caller display name> / <inner job
+    # name>" shape as the two entries above; renaming either half makes this
+    # gate permanently PENDING. Pinned by tests/ci/test_merge_hold_gate_omn15484.py.
+    "merge-hold-gate / evaluate",
 )
 
 # Gates the old ci-summary accepted as ``success`` OR ``skipped``. Each carries
