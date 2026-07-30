@@ -56,6 +56,46 @@
 #   refused, DNS failure, timeout -> code 000) is CRITICAL, never skipped; a
 #   docker query that fails is CRITICAL, never treated as "nothing wrong".
 #
+# WHAT OMN-15525 FIXES ON TOP (found by actually deploying the above)
+#   The OMN-15509 revision was installed on .201 on 2026-07-30T18:12Z and
+#   immediately reported CRITICAL for all three lanes against a demonstrably
+#   HEALTHY fleet (all three /health returned 200 with "healthy":true). It was
+#   rolled back at 18:13:29Z, before the 18:15 cron fired. Two defects:
+#
+#     A. False-RED from a truncated parse. `check_runtime_lane` cut the body to
+#        180 bytes for display and then handed THAT to jq. A real runtime
+#        /health body on .201 is 2644 bytes, so jq always failed with
+#        "Unfinished string at EOF", the verdict was always "unresolvable", and
+#        fail-closed correctly turned an unparseable input into CRITICAL. The
+#        rule was right; the input was mutilated before it got there. The body
+#        is now parsed whole and truncated only for the reported excerpt.
+#        This is why the unit fixtures did not catch it: HEALTHY_BODY was 63
+#        bytes, comfortably under the cut. Fixtures now carry a realistic
+#        >180-byte body so the truncation boundary is inside test coverage.
+#
+#     C. The alert could not fire at all. `$issues`, `$issue_keys`,
+#        `$critical_count` and `$warning_count` were all selected with
+#        `$2=="CRITICAL"`, but endpoint rows carry their status in `$1` (only
+#        disk/docker rows use `$2`). So no endpoint failure — no runtime lane,
+#        projection-api, deploy-agent or web — ever reached `$issues`, and
+#        `--mode alert` took the "clean" branch and posted nothing. The digest
+#        text rendered the CRITICAL lines because `format_digest` happened to
+#        handle both shapes, which is why the .201 run printed three CRITICAL
+#        lanes directly under `Issues: *0 critical*`. OMN-15509 taught this
+#        script to SEE a dead lane; defect C is what kept it from SAYING so.
+#        See `row_status` / `row_key` near the bottom of this file.
+#
+#     B. Silent hardcoded port fallback (rule 8). `policy_env_value` returned
+#        SUCCESS when the policy file did not exist, and `lane_main_port`
+#        substituted a literal 8085/18085/28085 for an empty value. A renamed
+#        key or an unrendered runtime-policy.env degraded to probing guessed
+#        ports with no signal. An unresolvable lane port is now CRITICAL.
+#
+#   A monitor has two failure directions and both are fatal to it: blind (the
+#   OMN-15509 defect) and crying wolf (defect A). A permanent CRITICAL on a
+#   healthy fleet gets the channel muted, after which the blind spot is back
+#   with extra steps.
+#
 # PROD IS READ-ONLY
 #   The prod lane is probed with a plain GET against /health and nothing else.
 #   This script never mutates any lane.
@@ -74,6 +114,10 @@ PROBE_HOST=${OMNINODE_ALERT_PROBE_HOST:-127.0.0.1} # fallback-ok: this reporter 
 # Grace applied to a `health: starting` container whose image declares no
 # start_period. Fail-closed: a finite grace, not "never alarm".
 STARTING_GRACE_SECONDS=${OMNINODE_ALERT_STARTING_GRACE_SECONDS:-180}
+# How much of a response body is quoted into the Slack message / log line. This
+# bounds DISPLAY ONLY. It must never be applied before a body is parsed or
+# pattern-matched (OMN-15525) — see check_runtime_lane.
+BODY_EXCERPT_BYTES=${OMNINODE_ALERT_BODY_EXCERPT_BYTES:-180}
 MODE=digest
 
 if [[ "${1:-}" == "--mode" ]]; then
@@ -130,27 +174,49 @@ ROOT_CRIT_FREE_GB=${ROOT_CRIT_FREE_GB:-20}
 # redefine this script's other variables. Same idiom, same file, and the same
 # reasoning as scripts/system_health_check.sh.
 #
-# The literal fallbacks are last-resort only and exist so a missing//unrendered
-# policy file degrades to probing the documented ports rather than probing
-# NOTHING — dropping a lane is the exact failure this ticket exists to close.
+# There are NO literal fallback ports (OMN-15525). The original revision of this
+# block fell back to hardcoded 8085/18085/28085 whenever the policy file was
+# missing or a key was renamed, and `policy_env_value` even returned SUCCESS on
+# a missing file. That is a silent default masquerading as a resolved contract —
+# CLAUDE.md rule 8 forbids exactly this, and it is the same false-green family
+# OMN-15509 closed: the probe would keep reporting on a guessed port and the
+# operator would never learn the lane map had stopped resolving. An unresolvable
+# lane port is now a CRITICAL fact, reported the same as an unreachable endpoint.
 # ---------------------------------------------------------------------------
-policy_env_value() {
-  local key="$1" file="${OMNINODE_RUNTIME_POLICY_ENV:-${INFRA_REPO_ROOT}/docker/runtime-policy.env}"
-  [[ -f "$file" ]] || return 0
-  sed -n "s/^${key}=//p" "$file" | tail -n 1 | tr -d "\"'"
+LANE_PORT_UNRESOLVED='__unresolved__'
+
+runtime_policy_file() {
+  printf '%s' "${OMNINODE_RUNTIME_POLICY_ENV:-${INFRA_REPO_ROOT}/docker/runtime-policy.env}"
 }
 
-# label|policy-key|fallback-port
+# Echo the value for `key`, or return non-zero when the policy file is absent or
+# the key is not present in it. Fail-fast: never returns a substitute value.
+policy_env_value() {
+  local key="$1" file value
+  file="$(runtime_policy_file)"
+  [[ -f "$file" ]] || return 1
+  value=$(sed -n "s/^${key}=//p" "$file" | tail -n 1 | tr -d "\"'")
+  [[ -n "$value" ]] || return 1
+  printf '%s' "$value"
+}
+
+# label|policy-key
 RUNTIME_LANE_SPECS=(
-  "dev|DEV_RUNTIME_MAIN_PORT|8085"
-  "stability-test|STABILITY_TEST_RUNTIME_MAIN_PORT|18085"
-  "prod|PROD_RUNTIME_MAIN_PORT|28085"
+  "dev|DEV_RUNTIME_MAIN_PORT"
+  "stability-test|STABILITY_TEST_RUNTIME_MAIN_PORT"
+  "prod|PROD_RUNTIME_MAIN_PORT"
 )
 
+# Resolve a lane's main runtime port, or emit $LANE_PORT_UNRESOLVED. A value that
+# is not a bare integer is also unresolved — probing "http://host:garbage/health"
+# would just produce a confusing connection error instead of naming the real
+# problem (the lane map).
 lane_main_port() {
-  local key="$1" fallback="$2" value
-  value="$(policy_env_value "$key")"
-  [[ -n "$value" ]] || value="$fallback"
+  local key="$1" value
+  if ! value="$(policy_env_value "$key")" || [[ ! "$value" =~ ^[0-9]+$ ]]; then
+    printf '%s' "$LANE_PORT_UNRESOLVED"
+    return 0
+  fi
   printf '%s' "$value"
 }
 
@@ -188,10 +254,14 @@ classify_disk() {
 
 check_http() {
   local label="$1" url="$2" expect_regex="${3:-}"
-  local tmp code status body
+  local tmp code status body body_excerpt
   tmp=$(mktemp)
   code=$(curl -sS --max-time 4 -o "$tmp" -w '%{http_code}' "$url" 2>/dev/null || true)
-  body=$(tr '\n' ' ' <"$tmp" | head -c 180)
+  # Match against the WHOLE body; truncate only the excerpt that gets reported.
+  # See BODY_EXCERPT_BYTES — matching an excerpt makes the verdict depend on
+  # where the payload happens to be cut.
+  body=$(tr '\n' ' ' <"$tmp")
+  body_excerpt=$(printf '%s' "$body" | head -c "$BODY_EXCERPT_BYTES")
   rm -f "$tmp"
   status="OK"
   if [[ ! "$code" =~ ^2 ]]; then
@@ -199,7 +269,7 @@ check_http() {
   elif [[ -n "$expect_regex" ]] && ! grep -Eiq "$expect_regex" <<<"$body"; then
     status="WARNING"
   fi
-  printf '%s|%s|%s|%s\n' "$status" "$label" "${code:-000}" "$body"
+  printf '%s|%s|%s|%s\n' "$status" "$label" "${code:-000}" "$body_excerpt"
 }
 
 # Resolve a runtime /health body to healthy / unhealthy / unresolvable.
@@ -234,23 +304,30 @@ runtime_body_verdict() {
 check_runtime_lane() {
   local lane="$1" port="$2"
   local label="runtime-${lane}-${port}"
-  local tmp code body status detail verdict
+  local tmp code body body_excerpt status detail verdict
   tmp=$(mktemp)
   code=$(curl -sS -X GET --max-time 4 -o "$tmp" -w '%{http_code}' "http://${PROBE_HOST}:${port}/health" 2>/dev/null || true)
-  body=$(tr '\n' ' ' <"$tmp" | head -c 180)
+  # The verdict is computed from the FULL body; only the reported excerpt is
+  # truncated. Truncating BEFORE the verdict was OMN-15525: a real .201 runtime
+  # /health body is ~2.6 KB, so the 180-byte excerpt handed to jq was always
+  # invalid JSON ("Unfinished string at EOF"), every lane resolved to
+  # "unresolvable", and fail-closed turned that into CRITICAL on a fully healthy
+  # fleet. Fail-closed is right; feeding it a mutilated input is not.
+  body=$(tr '\n' ' ' <"$tmp")
+  body_excerpt=$(printf '%s' "$body" | head -c "$BODY_EXCERPT_BYTES")
   rm -f "$tmp"
   code="${code:-000}"
 
   if [[ ! "$code" =~ ^2 ]]; then
     # Covers 5xx AND connection-refused/timeout (code 000). Never skipped.
     status="CRITICAL"
-    detail="$body"
+    detail="$body_excerpt"
   else
     verdict=$(runtime_body_verdict "$body")
     case "$verdict" in
-      healthy)      status="OK";       detail="$body" ;;
-      unhealthy)    status="CRITICAL"; detail="HTTP 200 but health body is NOT healthy: $body" ;;
-      *)            status="CRITICAL"; detail="HTTP 200 but health status could not be resolved from body (fail-closed): $body" ;;
+      healthy)      status="OK";       detail="$body_excerpt" ;;
+      unhealthy)    status="CRITICAL"; detail="HTTP 200 but health body is NOT healthy: $body_excerpt" ;;
+      *)            status="CRITICAL"; detail="HTTP 200 but health status could not be resolved from body (fail-closed): $body_excerpt" ;;
     esac
   fi
   printf '%s|%s|%s|%s\n' "$status" "$label" "$code" "$detail"
@@ -324,7 +401,7 @@ exited_nonzero() {
 collect() {
   local now host root data root_status data_status running unhealthy restarting dead created
   local dangling named_dangling anonymous_dangling docker_status docker_detail
-  local starting_stuck exited_bad lane spec key fallback port
+  local starting_stuck exited_bad lane spec key port
   now=$(date -u +%Y-%m-%dT%H:%M:%SZ)
   host=$(hostname)
   root=$(df_line /)
@@ -370,8 +447,15 @@ collect() {
     echo "docker|OK|dangling_volumes|total=$dangling anonymous=$anonymous_dangling named=$named_dangling"
     # Every lane's MAIN runtime health endpoint, from the lane->port map.
     for spec in "${RUNTIME_LANE_SPECS[@]}"; do
-      IFS='|' read -r lane key fallback <<<"$spec"
-      port=$(lane_main_port "$key" "$fallback")
+      IFS='|' read -r lane key <<<"$spec"
+      port=$(lane_main_port "$key")
+      if [[ "$port" == "$LANE_PORT_UNRESOLVED" ]]; then
+        # Rule 8 / OMN-15525: refuse to probe a guessed port. An unresolvable
+        # lane map is itself the outage-shaped fact worth alarming on.
+        printf 'CRITICAL|runtime-%s-unresolved|000|lane main port unresolvable: key %s missing from %s\n' \
+          "$lane" "$key" "$(runtime_policy_file)"
+        continue
+      fi
       check_runtime_lane "$lane" "$port"
     done
     check_http projection-api-13002 "http://${PROBE_HOST}:13002/health" 'ok|healthy'
@@ -386,10 +470,36 @@ if [[ "$MODE" != "dry-run" ]]; then
 fi
 
 host=$(awk -F'|' '$1=="host"{print $2}' <<<"$snapshot")
-issues=$(awk -F'|' '$2=="WARNING" || $2=="CRITICAL" {print}' <<<"$snapshot" || true)
-issue_keys=$(awk -F'|' '$2=="WARNING" || $2=="CRITICAL" {print $1 "|" $2 "|" $3}' <<<"$snapshot" || true)
-critical_count=$(awk -F'|' '$2=="CRITICAL" {c++} END {print c+0}' <<<"$snapshot")
-warning_count=$(awk -F'|' '$2=="WARNING" {c++} END {print c+0}' <<<"$snapshot")
+
+# The snapshot carries TWO row shapes and the status lives in a different
+# column in each:
+#
+#   disk|STATUS|name|...            <- resource rows, status in $2
+#   docker|STATUS|name|...
+#   STATUS|label|code|detail        <- endpoint rows, status in $1
+#
+# OMN-15525: every selector below used to test `$2` only, so NO endpoint row
+# could ever land in `$issues` / the counters. `format_digest` handled both
+# shapes, which is why the rendered text listed `CRITICAL runtime-dev-8085`
+# under *Active issues* while the header said `0 critical` — and, far worse,
+# why `--mode alert` computed an EMPTY `$issues`, took the "clean" branch, and
+# paged nobody. A dead runtime lane could not raise an alert even after the
+# probe was fixed: OMN-15509 taught the reporter to SEE the lane, and this is
+# what stopped it from SAYING anything. Verified live on .201 — the merged
+# revision printed three CRITICAL lanes above `Issues: *0 critical*`.
+#
+# `row_status` is the single definition of "this row's status" and everything
+# downstream keys off it.
+row_status='function row_status() { return ($1=="OK" || $1=="WARNING" || $1=="CRITICAL") ? $1 : $2 }'
+# Stable identity for alert de-duplication: label + status only. Volatile
+# fields (HTTP code, body excerpt, free-GB) are deliberately excluded so a
+# flapping 000/503 on one dead lane is one alert, not one per tick.
+row_key='function row_key() { return ($1=="OK" || $1=="WARNING" || $1=="CRITICAL") ? $2 : $1 "|" $3 }'
+
+issues=$(awk -F'|' "$row_status"'{ s=row_status() } s=="WARNING" || s=="CRITICAL" {print}' <<<"$snapshot" || true)
+issue_keys=$(awk -F'|' "$row_status$row_key"'{ s=row_status() } s=="WARNING" || s=="CRITICAL" {print row_key() "|" s}' <<<"$snapshot" || true)
+critical_count=$(awk -F'|' "$row_status"'{ s=row_status() } s=="CRITICAL" {c++} END {print c+0}' <<<"$snapshot")
+warning_count=$(awk -F'|' "$row_status"'{ s=row_status() } s=="WARNING" {c++} END {print c+0}' <<<"$snapshot")
 issue_hash=$(printf '%s\n' "$issue_keys" | sha256sum | awk '{print $1}')
 state_file="$STATE_DIR/omninode-system-alert.hash"
 prev_hash=$(cat "$state_file" 2>/dev/null || true)
