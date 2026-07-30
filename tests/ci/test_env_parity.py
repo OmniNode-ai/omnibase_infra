@@ -143,6 +143,18 @@ LOCAL_ONLY_KEYS: frozenset[str] = frozenset(
         "LOCAL_LLM_SHARED_SECRET",
         # Topic provisioner partition cap — local-only tuning knob; k8s does not set it
         "ONEX_TOPIC_PROVISIONER_MAX_PARTITIONS",
+        # OMN-15529 / OMN-15362: OnexBot-OCC-Writer App identity for the OCC
+        # companion producer. Deliberately NOT propagated to k8s today — the
+        # operator mints the App private key onto the .201 bus runtime only
+        # (ruling 2026-07-30), and the onex-dev cluster does not run the OCC
+        # companion producer. Classified local-only rather than SECRET_KEYS on
+        # purpose: SECRET_KEYS asserts "k8s injects this via Secret/Infisical",
+        # which would be a false claim here. If the cluster ever runs this
+        # producer, ONEXBOT_OCC_* move to SECRET_KEYS and
+        # OMNI_OCC_GITHUB_AUTH_MODE moves to the ConfigMap.
+        "ONEXBOT_OCC_APP_ID",
+        "ONEXBOT_OCC_PRIVATE_KEY",
+        "OMNI_OCC_GITHUB_AUTH_MODE",
     }
 )
 

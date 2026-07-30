@@ -56,6 +56,17 @@ ALLOWED_EMPTY_DEFAULTS = {
     "BIFROST_LOCAL_CODER_ENDPOINT_URL",
     "BIFROST_LOCAL_REASONER_ENDPOINT_URL",
     "BIFROST_LOCAL_EMBEDDING_ENDPOINT_URL",
+    # OMN-15529: OnexBot-OCC-Writer App identity. Opt-in per host — the App key
+    # is minted onto a specific runtime host (.201) by the operator, so every
+    # other lane must render and run without it. Empty is NOT "silently
+    # disabled" here, it is the current, explicit PAT behaviour: both consumers
+    # read the mode as `os.environ.get(..., "pat").strip().lower() or "pat"`, and
+    # `resolve_api_key(..., required=False)` treats an empty credential as absent
+    # and raises GitHubAppCredentialMissingError in app mode instead of falling
+    # back to the shared PAT. A `:?` form would wedge every unprovisioned lane.
+    "ONEXBOT_OCC_APP_ID",
+    "ONEXBOT_OCC_PRIVATE_KEY",
+    "OMNI_OCC_GITHUB_AUTH_MODE",
 }
 
 

@@ -185,6 +185,26 @@ x-runtime-env: &runtime-env
   # read GITHUB_TOKEN.
   GITHUB_TOKEN: ${GITHUB_TOKEN:?GITHUB_TOKEN must be set}
   GH_TOKEN: ${GITHUB_TOKEN:?GITHUB_TOKEN must be set}
+  # OMN-15529 (OMN-15362 blocker 3 cutover): OnexBot-OCC-Writer App identity for
+  # the OCC companion producer (node_occ_companion_effect / OccCompanionEmitter).
+  # This anchor is an ALLOWLIST, not a host-env pass-through — a credential in
+  # ~/.omnibase/.env is invisible to the container unless it is named here.
+  #
+  # Optional by design, NOT a silent fallback: the App key is provisioned only on
+  # hosts the operator has minted it onto (.201 today), and every other lane must
+  # render and run unchanged without it. Empty is the safe, inert state on both
+  # consumers, verified field-by-field against omnimarket@dev:
+  #   * handler_occ_companion_effect.py:187 and occ_companion_emitter.py:208 read
+  #     `os.environ.get("OMNI_OCC_GITHUB_AUTH_MODE", "pat").strip().lower() or "pat"`
+  #     — "" coalesces to PAT mode, the current behaviour, unchanged.
+  #   * github_app_auth.py resolves both credentials through
+  #     `resolve_api_key(..., required=False)`, which treats an empty value as
+  #     absent and raises GitHubAppCredentialMissingError in app mode rather than
+  #     falling back to the shared PAT.
+  # `:?` is therefore wrong here — it would wedge every lane that has no App key.
+  ONEXBOT_OCC_APP_ID: ${ONEXBOT_OCC_APP_ID:-}
+  ONEXBOT_OCC_PRIVATE_KEY: ${ONEXBOT_OCC_PRIVATE_KEY:-}
+  OMNI_OCC_GITHUB_AUTH_MODE: ${OMNI_OCC_GITHUB_AUTH_MODE:-}
   # OMN-15009: node_redeploy_deploy_effect signs rebuild commands before they
   # cross the runtime/deploy-agent trust boundary. The deploy agent rejects
   # unsigned commands, so an absent secret must fail at compose render time.
