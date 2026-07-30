@@ -1,0 +1,194 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+PATH=/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin
+ENV_FILE=${OMNINODE_ALERT_ENV_FILE:-/data/omninode/omnibase_infra/.env}
+STATE_DIR=/data/maintenance/state
+LOG_DIR=/data/maintenance/logs
+LOCK_FILE=/run/omninode-system-slack-report.lock
+MODE=digest
+
+if [[ "${1:-}" == "--mode" ]]; then
+  MODE="${2:-digest}"
+elif [[ -n "${1:-}" ]]; then
+  MODE="$1"
+fi
+
+mkdir -p "$STATE_DIR" "$LOG_DIR"
+LOG_FILE="$LOG_DIR/omninode-system-slack-report-$(date -u +%Y%m%dT%H%M%SZ).log"
+exec >>"$LOG_FILE" 2>&1
+exec 9>"$LOCK_FILE"
+if ! flock -n 9; then
+  echo "$(date -Is) another system report is already running"
+  exit 0
+fi
+
+if [[ -f "$ENV_FILE" ]]; then
+  set -a
+  set +u
+  # shellcheck disable=SC1090
+  . "$ENV_FILE"
+  set -u
+  set +a
+fi
+
+: "${SLACK_BOT_TOKEN:?SLACK_BOT_TOKEN must be set in $ENV_FILE}"
+SLACK_CHANNEL_ID="${SLACK_CHANNEL_ID:-${SLACK_DEFAULT_CHANNEL:-}}"
+: "${SLACK_CHANNEL_ID:?SLACK_CHANNEL_ID or SLACK_DEFAULT_CHANNEL must be set in $ENV_FILE}"
+
+DATA_WARN_PCT=${DATA_WARN_PCT:-95}
+DATA_CRIT_PCT=${DATA_CRIT_PCT:-98}
+DATA_WARN_FREE_GB=${DATA_WARN_FREE_GB:-200}
+DATA_CRIT_FREE_GB=${DATA_CRIT_FREE_GB:-50}
+ROOT_WARN_PCT=${ROOT_WARN_PCT:-85}
+ROOT_CRIT_PCT=${ROOT_CRIT_PCT:-92}
+ROOT_WARN_FREE_GB=${ROOT_WARN_FREE_GB:-50}
+ROOT_CRIT_FREE_GB=${ROOT_CRIT_FREE_GB:-20}
+
+post_slack() {
+  local text="$1"
+  local color="${2:-#439FE0}"
+  local payload
+  payload=$(jq -n \
+    --arg channel "$SLACK_CHANNEL_ID" \
+    --arg text "$text" \
+    --arg color "$color" \
+    '{channel:$channel,text:$text,attachments:[{color:$color,text:$text,mrkdwn_in:["text"]}]}')
+  curl -fsS --retry 2 --max-time 10 \
+    -H "Authorization: Bearer ${SLACK_BOT_TOKEN}" \
+    -H 'Content-Type: application/json; charset=utf-8' \
+    -d "$payload" \
+    https://slack.com/api/chat.postMessage | jq -e '.ok == true' >/dev/null
+}
+
+df_line() {
+  local mount="$1"
+  df -BG --output=target,size,used,avail,pcent "$mount" | awk 'NR==2 {gsub("G","",$4); gsub("%","",$5); print $1"|"$2"|"$3"|"$4"|"$5}'
+}
+
+classify_disk() {
+  local mount="$1" pct="$2" avail_gb="$3" warn_pct="$4" crit_pct="$5" warn_free="$6" crit_free="$7"
+  if (( pct >= crit_pct || avail_gb <= crit_free )); then
+    echo "CRITICAL"
+  elif (( pct >= warn_pct || avail_gb <= warn_free )); then
+    echo "WARNING"
+  else
+    echo "OK"
+  fi
+}
+
+check_http() {
+  local label="$1" url="$2" expect_regex="${3:-}"
+  local tmp code status body
+  tmp=$(mktemp)
+  code=$(curl -sS --max-time 4 -o "$tmp" -w '%{http_code}' "$url" 2>/dev/null || true)
+  body=$(tr '\n' ' ' <"$tmp" | head -c 180)
+  rm -f "$tmp"
+  status="OK"
+  if [[ ! "$code" =~ ^2 ]]; then
+    status="CRITICAL"
+  elif [[ -n "$expect_regex" ]] && ! grep -Eiq "$expect_regex" <<<"$body"; then
+    status="WARNING"
+  fi
+  printf '%s|%s|%s|%s\n' "$status" "$label" "${code:-000}" "$body"
+}
+
+collect() {
+  local now host root data root_status data_status running unhealthy restarting dead created exited dangling named_dangling anonymous_dangling
+  now=$(date -Is)
+  host=$(hostname)
+  root=$(df_line /)
+  data=$(df_line /data)
+  IFS='|' read -r _ root_size root_used root_avail root_pct <<<"$root"
+  IFS='|' read -r _ data_size data_used data_avail data_pct <<<"$data"
+  root_status=$(classify_disk / "$root_pct" "$root_avail" "$ROOT_WARN_PCT" "$ROOT_CRIT_PCT" "$ROOT_WARN_FREE_GB" "$ROOT_CRIT_FREE_GB")
+  data_status=$(classify_disk /data "$data_pct" "$data_avail" "$DATA_WARN_PCT" "$DATA_CRIT_PCT" "$DATA_WARN_FREE_GB" "$DATA_CRIT_FREE_GB")
+
+  running=$(docker ps --format '{{.Names}}' | wc -l | tr -d ' ')
+  unhealthy=$(docker ps -a --format '{{.Names}}\t{{.Status}}' | grep -Eci 'unhealthy' || true)
+  restarting=$(docker ps -a --format '{{.Names}}\t{{.Status}}' | grep -Eci 'Restarting' || true)
+  dead=$(docker ps -a --format '{{.Names}}\t{{.Status}}' | grep -Eci 'Dead' || true)
+  created=$(docker ps -a --format '{{.Names}}\t{{.Status}}' | grep -Eci 'Created' || true)
+  exited=$(docker ps -a --format '{{.Names}}\t{{.Status}}' | grep -Eci 'Exited' || true)
+  dangling=$(docker volume ls -qf dangling=true | wc -l | tr -d ' ')
+  anonymous_dangling=$(docker volume ls -qf dangling=true | grep -Ec '^[0-9a-f]{64}$' || true)
+  named_dangling=$(docker volume ls -qf dangling=true | grep -Evc '^[0-9a-f]{64}$' || true)
+
+  {
+    echo "timestamp|$now"
+    echo "host|$host"
+    echo "disk|$root_status|/|${root_used}/${root_size}|${root_avail}G free|${root_pct}%"
+    echo "disk|$data_status|/data|${data_used}/${data_size}|${data_avail}G free|${data_pct}%"
+    echo "docker|OK|running_containers|$running"
+    echo "docker|$([[ "$unhealthy" == 0 && "$restarting" == 0 && "$dead" == 0 && "$created" == 0 ]] && echo OK || echo CRITICAL)|container_issues|unhealthy=$unhealthy restarting=$restarting dead=$dead created=$created exited=$exited"
+    echo "docker|OK|dangling_volumes|total=$dangling anonymous=$anonymous_dangling named=$named_dangling"
+    check_http runtime-18085 http://127.0.0.1:18085/health 'healthy|ok'
+    check_http runtime-28085 http://127.0.0.1:28085/health 'healthy|ok'
+    check_http projection-api-13002 http://127.0.0.1:13002/health 'ok|healthy'
+    check_http deploy-agent-8099 http://127.0.0.1:8099/health 'idle|running|state|ok'
+    check_http web-3003 http://127.0.0.1:3003/ ''
+  }
+}
+
+snapshot=$(collect)
+echo "$snapshot"
+
+host=$(awk -F'|' '$1=="host"{print $2}' <<<"$snapshot")
+issues=$(awk -F'|' '$2=="WARNING" || $2=="CRITICAL" {print}' <<<"$snapshot" || true)
+issue_keys=$(awk -F'|' '$2=="WARNING" || $2=="CRITICAL" {print $1 "|" $2 "|" $3}' <<<"$snapshot" || true)
+critical_count=$(awk -F'|' '$2=="CRITICAL" {c++} END {print c+0}' <<<"$snapshot")
+warning_count=$(awk -F'|' '$2=="WARNING" {c++} END {print c+0}' <<<"$snapshot")
+issue_hash=$(printf '%s\n' "$issue_keys" | sha256sum | awk '{print $1}')
+state_file="$STATE_DIR/omninode-system-alert.hash"
+prev_hash=$(cat "$state_file" 2>/dev/null || true)
+
+format_digest() {
+  local title="$1"
+  local lines endpoint_lines issue_lines
+  lines=$(awk -F'|' '$1=="disk" {printf "- `%s`: %s, %s, %s (%s)\n", $3, $4, $5, $6, $2} $1=="docker" {printf "- Docker `%s`: %s (%s)\n", $3, $4, $2}' <<<"$snapshot")
+  endpoint_lines=$(awk -F'|' '$1=="OK" || $1=="WARNING" || $1=="CRITICAL" {printf "- `%s`: HTTP %s (%s)\n", $2, $3, $1}' <<<"$snapshot")
+  issue_lines=$(awk -F'|' '$2=="WARNING" || $2=="CRITICAL" {printf "- %s `%s`: %s %s %s\n", $2, $3, $4, $5, $6}' <<<"$snapshot")
+  if [[ -z "$issue_lines" ]]; then
+    issue_lines="- No active warning/critical checks"
+  fi
+  cat <<MSG
+$title
+Host: $host
+Issues: *$critical_count critical*, *$warning_count warning*
+
+*Disk / Docker*
+$lines
+*Runtime endpoints*
+$endpoint_lines
+*Active issues*
+$issue_lines
+MSG
+}
+
+case "$MODE" in
+  digest)
+    post_slack "$(format_digest '*OmniNode morning system digest*')" '#439FE0'
+    ;;
+  alert)
+    if [[ -z "$issues" ]]; then
+      if [[ -n "$prev_hash" && "$prev_hash" != "clean" ]]; then
+        post_slack "*[OmniNode alert resolved]* .201 system checks are clean again." 'good'
+      fi
+      echo clean >"$state_file"
+    elif [[ "$issue_hash" != "$prev_hash" ]]; then
+      color='warning'
+      [[ "$critical_count" != 0 ]] && color='danger'
+      post_slack "$(format_digest '*OmniNode system alert*')" "$color"
+      echo "$issue_hash" >"$state_file"
+    else
+      echo "$(date -Is) issues unchanged; Slack suppressed"
+    fi
+    ;;
+  dry-run)
+    format_digest '*OmniNode system dry run*'
+    ;;
+  *)
+    echo "unknown mode: $MODE" >&2
+    exit 2
+    ;;
+esac
