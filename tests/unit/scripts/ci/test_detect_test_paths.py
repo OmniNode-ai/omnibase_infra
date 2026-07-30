@@ -3,9 +3,14 @@
 from pathlib import Path
 
 import pytest
+from pydantic import ValidationError
 
-from scripts.ci.detect_test_paths import compute_selection, resolve_test_paths
-from scripts.ci.test_selection_models import EnumFullSuiteReason
+from scripts.ci.detect_test_paths import (
+    COLLOCATED_TEST_ROOTS,
+    compute_selection,
+    resolve_test_paths,
+)
+from scripts.ci.test_selection_models import EnumFullSuiteReason, ModelTestSelection
 
 pytestmark = pytest.mark.unit
 
@@ -51,8 +56,16 @@ def test_ci_process_change_selects_ci_tests() -> None:
     ]
     paths = resolve_test_paths(changed_files, adjacency_path=ADJ)
     # tests/ci/ for the CI-process mapping, plus (OMN-15245) the two families
-    # that exercise scripts/ — scripts/ci/ci_summary_gate.py is a scripts/ file.
-    assert paths == ["tests/ci/", "tests/scripts/", "tests/unit/scripts/"]
+    # that exercise scripts/ — scripts/ci/ci_summary_gate.py is a scripts/ file
+    # — plus (OMN-15410) the collocated roots that live inside scripts/ itself
+    # and are collected via pyproject testpaths.
+    assert paths == [
+        "scripts/ci/tests/",
+        "scripts/tests/",
+        "tests/ci/",
+        "tests/scripts/",
+        "tests/unit/scripts/",
+    ]
 
 
 def test_workflow_only_change_selects_ci_tests_alone() -> None:
@@ -544,6 +557,92 @@ def test_scripts_ci_change_still_selects_ci_process_tests() -> None:
     )
     assert "tests/ci/" in selection.selected_paths
     assert "tests/unit/scripts/" in selection.selected_paths
+
+
+# ---------------------------------------------------------------------------
+# OMN-15410: collocated test roots must be selectable by a NARROWED run
+#
+# The four roots collected by OMN-15410 live next to their code, not under
+# tests/. Adding them to pyproject `testpaths` only makes the FULL suite run
+# them; a narrowed smart-selection run reaches nothing it is not explicitly
+# mapped to. Without these mappings the roots would be "collected" only in the
+# sense that an unrelated escalation might happen to run them — a weaker
+# guarantee than the OMN-15378 class demands.
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.parametrize(
+    ("changed_file", "expected_root"),
+    [
+        ("scripts/ci/ci_summary_gate.py", "scripts/ci/tests/"),
+        ("scripts/seed-keycloak-clients.py", "scripts/tests/"),
+        (
+            "scripts/runtime_build/refresh_stability_lane.sh",
+            "scripts/runtime_build/tests/",
+        ),
+        (
+            "src/omnibase_infra/services/observability/agent_actions/consumer.py",
+            "src/omnibase_infra/services/observability/agent_actions/tests/",
+        ),
+    ],
+)
+def test_collocated_root_is_selected_by_a_change_to_its_own_code(
+    changed_file: str, expected_root: str
+) -> None:
+    selection = compute_selection(
+        changed_files=[changed_file],
+        adjacency_path=ADJ,
+        ref_name="pr-branch",
+    )
+    assert selection.is_full_suite is False, (
+        "this case must prove NARROWED selection reaches the root, not that an "
+        "escalation ran everything"
+    )
+    assert expected_root in selection.selected_paths, (
+        f"{changed_file} did not select its collocated test root "
+        f"{expected_root} (selection={selection.selected_paths})"
+    )
+
+
+def test_selected_path_contract_admits_collocated_roots_but_not_source_dirs() -> None:
+    """OMN-15410 widened ``TestPath`` — prove it widened, and no further.
+
+    The original pattern accepted only ``tests/...``, so ``ModelTestSelection``
+    raised ``string_pattern_mismatch`` the moment the selector tried to emit a
+    collocated root. The replacement still requires the final path component to
+    be ``tests``, so the selector cannot hand pytest a source directory.
+    """
+    for root in COLLOCATED_TEST_ROOTS.values():
+        ModelTestSelection(
+            selected_paths=[root],
+            split_count=1,
+            is_full_suite=False,
+            matrix=[1],
+        )
+
+    for rejected in (
+        "src/omnibase_infra/services/",  # a source dir, not a tests dir
+        "scripts/ci/tests",  # missing trailing slash
+        "scripts/ci/testsuite/",  # `tests` must be the whole component
+    ):
+        with pytest.raises(ValidationError):
+            ModelTestSelection(
+                selected_paths=[rejected],
+                split_count=1,
+                is_full_suite=False,
+                matrix=[1],
+            )
+
+
+def test_collocated_test_roots_all_exist_on_disk() -> None:
+    # A mapping to a directory that does not exist would hand pytest a bad
+    # path; _resolve filters those out silently, so the mapping would be a
+    # no-op rather than an error. Assert the real thing instead.
+    for source_prefix, root in COLLOCATED_TEST_ROOTS.items():
+        assert (REPO_ROOT / root).is_dir(), (
+            f"COLLOCATED_TEST_ROOTS maps {source_prefix!r} -> {root!r}, which is "
+            "not a directory; the selector would silently drop it."
+        )
 
 
 # ---------------------------------------------------------------------------

@@ -1301,10 +1301,22 @@ jobs:
         # OMN-15233: see the smart-selection step above — the live `uses:` pin
         # resolution test needs an authenticated token or it fails closed on
         # HTTP 403 rate limiting. This step is the one that surfaced it.
+        #
+        # OMN-15410: NO positional path is passed to pytest here, deliberately.
+        # This step used to say `uv run pytest tests/`, which silently made
+        # this workflow — not pyproject.toml — the real definition of "the full
+        # suite": four collocated test roots (scripts/ci/tests, scripts/tests,
+        # scripts/runtime_build/tests, and the agent_actions root) existed on
+        # disk and were collectable, but no CI job ever named them, so 366
+        # tests never ran and 4 of them had been RED since 2026-04-02
+        # undetected. With no positional argument pytest inherits
+        # `testpaths` from pyproject.toml verbatim, so there is exactly one
+        # place to add a root. scripts/validation/validate_test_root_collection.py
+        # fails closed if a positional path is re-introduced here.
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
-          uv run pytest tests/ \
+          uv run pytest \
             --ignore=tests/integration/docker \
             -m "not slow and not chaos and not kafka and not performance" \
             --splits ${{ needs.detect-changes.outputs.split_count }} \
