@@ -126,7 +126,12 @@ class StoreIdempotencySqlite(ProtocolIdempotencyStore):
                 )
 
     def _connect(self) -> sqlite3.Connection:
-        connection = sqlite3.connect(self._path, timeout=5.0)
+        # This class is the injected ProtocolIdempotencyStore implementation;
+        # opening its edge-local database here is the service boundary itself.
+        connection = sqlite3.connect(  # no-contract-check: injected store boundary
+            self._path,
+            timeout=5.0,
+        )
         connection.execute("PRAGMA journal_mode=WAL")
         connection.execute("PRAGMA synchronous=FULL")
         return connection
