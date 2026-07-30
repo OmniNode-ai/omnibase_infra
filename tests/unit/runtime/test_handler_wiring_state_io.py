@@ -8,7 +8,7 @@ stateful callback, both is a wiring-time error, and neither falls back to the
 plain dispatch callback. Also covers that ``payload_type_matcher`` scoping
 (OMN-12416) survives the state_io wrapper, and that a missing
 ``OMNIBASE_INFRA_DB_URL`` fails closed at wiring time (not lazily per-dispatch,
-unlike the optional db_io projection path).
+matching the fail-closed projection db_io binding rule).
 """
 
 from __future__ import annotations
@@ -50,6 +50,11 @@ _PATCH_IMPORT_HANDLER_CLASS = (
 )
 
 
+@pytest.fixture(autouse=True)
+def _configured_projection_dsn(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setenv("OMNIDASH_ANALYTICS_DB_URL", "postgresql://fixture")
+
+
 class ModelStateIoPayload(BaseModel):
     """Real importable event model used as the handler entry's event_model."""
 
@@ -74,10 +79,10 @@ def _write_contract(
         body += (
             "db_io:\n"
             "  db_tables:\n"
-            "    - name: some_table\n"
+            "    - name: delegation_events\n"
             "      database_ref: application\n"
             "      schema: tenant\n"
-            "      migration: tests/some_table.sql\n"
+            "      migration: tests/delegation_events.sql\n"
             "      access: read_write\n"
             "      role: fixture_projection\n"
         )
@@ -273,9 +278,7 @@ def test_no_event_model_produces_no_matcher_under_state_io(
 def test_state_io_missing_db_url_raises_at_wiring_time(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    """Unlike optional db_io (logs + returns None per dispatch), state_io is a
-    REQUIRED durability seam: a missing DSN must fail the wiring call itself,
-    not degrade silently at dispatch time."""
+    """State IO is a required durability seam and fails during wiring."""
     monkeypatch.delenv("OMNIBASE_INFRA_DB_URL", raising=False)
     contract_path = _write_contract(tmp_path, state_io=True)
     with pytest.raises(StateIoUnconfiguredError, match="OMNIBASE_INFRA_DB_URL"):

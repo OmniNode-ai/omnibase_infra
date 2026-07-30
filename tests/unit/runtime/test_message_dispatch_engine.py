@@ -36,10 +36,16 @@ from omnibase_infra.enums.enum_dispatch_status import EnumDispatchStatus
 from omnibase_infra.enums.enum_message_category import EnumMessageCategory
 from omnibase_infra.models.dispatch.model_dispatch_outputs import ModelDispatchOutputs
 from omnibase_infra.models.dispatch.model_dispatch_result import ModelDispatchResult
+from omnibase_infra.runtime.dispatch_envelope_context import (
+    bind_projection_tenant_authority,
+    current_dispatch_envelope,
+    current_projection_tenant_authority,
+)
 from omnibase_infra.runtime.message_dispatch_engine import (
     MessageDispatchEngine,
     coerce_message_category,
 )
+from tests.helpers.projection_tenant_authority import signed_tenant_authority_fixture
 
 # ============================================================================
 # Test Event Types (for category inference)
@@ -5081,3 +5087,44 @@ class TestCoerceMessageCategory:
 
         assert exc_info.value.error_code == EnumCoreErrorCode.INVALID_PARAMETER
         assert "not_a_category" in exc_info.value.message
+
+
+# OMN-15421: ``run_in_executor`` does not propagate ContextVars by default.
+@pytest.mark.asyncio
+async def test_sync_dispatcher_receives_copied_typed_context() -> None:
+    topic = "onex.evt.platform.context-copy-proof.v1"
+    envelope = ModelEventEnvelope[dict[str, object]](
+        payload={"value": "proof"},
+        correlation_id=uuid4(),
+        event_type=topic,
+    )
+    authority = signed_tenant_authority_fixture(
+        uuid4(), event_envelope=envelope
+    ).verify()
+    observed: dict[str, object] = {}
+
+    def sync_dispatcher(_materialized: object) -> None:
+        observed["envelope"] = current_dispatch_envelope()
+        observed["authority"] = current_projection_tenant_authority()
+
+    engine = MessageDispatchEngine()
+    engine.register_dispatcher(
+        dispatcher_id="context-copy-proof",
+        dispatcher=sync_dispatcher,
+        category=EnumMessageCategory.EVENT,
+    )
+    engine.register_route(
+        ModelDispatchRoute(
+            route_id="context-copy-proof",
+            topic_pattern=topic,
+            message_category=EnumMessageCategory.EVENT,
+            dispatcher_id="context-copy-proof",
+        )
+    )
+    engine.freeze()
+
+    with bind_projection_tenant_authority(authority):
+        result = await engine.dispatch(topic, envelope)
+
+    assert result.status is EnumDispatchStatus.SUCCESS
+    assert observed == {"envelope": envelope, "authority": authority}

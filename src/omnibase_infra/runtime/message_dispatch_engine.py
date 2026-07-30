@@ -137,6 +137,7 @@ import logging
 import threading
 import time
 from collections.abc import Awaitable, Callable
+from contextvars import copy_context
 from datetime import UTC, datetime
 from typing import TYPE_CHECKING, TypedDict, Unpack, cast, overload
 from uuid import UUID, uuid4
@@ -182,6 +183,7 @@ from omnibase_infra.models.dispatch.model_materialized_dispatch import (
 from omnibase_infra.runtime._enum_coercion import coerce_message_category
 from omnibase_infra.runtime.binding_resolver import OperationBindingResolver
 from omnibase_infra.runtime.dispatch_context_enforcer import DispatchContextEnforcer
+from omnibase_infra.runtime.dispatch_envelope_context import bind_dispatch_envelope
 from omnibase_infra.utils import sanitize_error_message
 
 _VALIDATION_DETAIL_MAX_LENGTH = 500
@@ -2164,55 +2166,68 @@ class MessageDispatchEngine:
         # Note: context is only non-None when entry.accepts_context is True,
         # so checking `context is not None` is sufficient to determine whether
         # to pass context to the dispatcher.
-        if inspect.iscoroutinefunction(dispatcher):
-            if context is not None:
-                # NOTE: Dispatcher signature varies - context param may be optional.
-                # Return type depends on dispatcher implementation (dict or model).
-                # Why: Runtime factory dispatch accepts this dynamic constructor shape.
-                return await dispatcher(envelope_for_handler, context)  # type: ignore[call-arg,no-any-return]  # NOTE: dispatcher signature varies
-            # NOTE: Return type depends on dispatcher implementation (dict or model).
-            # Why: Dispatcher boundary returns adapter output whose concrete type is runtime-defined.
-            return await dispatcher(envelope_for_handler)  # type: ignore[no-any-return]  # NOTE: dispatcher return type varies
-        else:
-            # Sync dispatcher execution via ThreadPoolExecutor
-            # -----------------------------------------------
-            # WARNING: Sync dispatchers MUST be non-blocking (< 100ms execution).
-            # Blocking dispatchers can exhaust the thread pool, causing:
-            # - Starvation of other sync dispatchers
-            # - Delayed async dispatcher scheduling
-            # - Potential deadlocks under high load
-            #
-            # For blocking I/O operations, use async dispatchers instead.
-            loop = asyncio.get_running_loop()
-
-            if context is not None:
-                # Context-aware sync dispatcher
-                sync_ctx_dispatcher = cast(
-                    "_SyncContextAwareDispatcherFunc", dispatcher
-                )
-                # NOTE: run_in_executor arg-type check fails because envelope_for_handler
-                # is dict[str, JsonType] but dispatcher expects dict[str, object].
-                # JsonType is a subset of object, so this is safe at runtime.
-                return await loop.run_in_executor(
-                    None,
-                    # Why: Runtime wiring validates and narrows this payload shape before use.
-                    sync_ctx_dispatcher,  # type: ignore[arg-type]
-                    envelope_for_handler,
-                    context,
-                )
+        # The handler still receives the canonical JSON-safe materialization.
+        # Bind the original typed envelope beside it only for transport identity
+        # (for example envelope_id). Tenant authentication uses a separate,
+        # cryptographically verified capability and never derives from this model.
+        with bind_dispatch_envelope(envelope):
+            if inspect.iscoroutinefunction(dispatcher):
+                if context is not None:
+                    # NOTE: Dispatcher signature varies - context param may be optional.
+                    # Return type depends on dispatcher implementation (dict or model).
+                    # Why: Runtime factory dispatch accepts this dynamic constructor shape.
+                    return await dispatcher(envelope_for_handler, context)  # type: ignore[call-arg,no-any-return]  # NOTE: dispatcher signature varies
+                # NOTE: Return type depends on dispatcher implementation (dict or model).
+                # Why: Dispatcher boundary returns adapter output whose concrete type is runtime-defined.
+                return await dispatcher(envelope_for_handler)  # type: ignore[no-any-return]  # NOTE: dispatcher return type varies
             else:
-                # Cast to sync-only type - safe because iscoroutinefunction check above
-                # guarantees this branch only executes for non-async callables
-                sync_dispatcher = cast("_SyncDispatcherFunc", dispatcher)
-                # NOTE: run_in_executor arg-type check fails because envelope_for_handler
-                # is dict[str, JsonType] but dispatcher expects dict[str, object].
-                # JsonType is a subset of object, so this is safe at runtime.
-                return await loop.run_in_executor(
-                    None,
-                    # Why: Runtime wiring validates and narrows this payload shape before use.
-                    sync_dispatcher,  # type: ignore[arg-type]
-                    envelope_for_handler,
-                )
+                # Sync dispatcher execution via ThreadPoolExecutor
+                # -----------------------------------------------
+                # WARNING: Sync dispatchers MUST be non-blocking (< 100ms execution).
+                # Blocking dispatchers can exhaust the thread pool, causing:
+                # - Starvation of other sync dispatchers
+                # - Delayed async dispatcher scheduling
+                # - Potential deadlocks under high concurrent load
+                #
+                # For blocking I/O operations, use async dispatchers instead.
+                loop = asyncio.get_running_loop()
+
+                if context is not None:
+                    # Context-aware sync dispatcher
+                    sync_ctx_dispatcher = cast(
+                        "_SyncContextAwareDispatcherFunc", dispatcher
+                    )
+                    payload_for_sync = cast("dict[str, object]", envelope_for_handler)
+                    execution_context = copy_context()
+
+                    def _invoke_sync_dispatcher_with_context() -> DispatcherOutput:
+                        return execution_context.run(
+                            sync_ctx_dispatcher,
+                            payload_for_sync,
+                            context,
+                        )
+
+                    return await loop.run_in_executor(
+                        None,
+                        _invoke_sync_dispatcher_with_context,
+                    )
+                else:
+                    # Cast to sync-only type - safe because iscoroutinefunction check above
+                    # guarantees this branch only executes for non-async callables
+                    sync_dispatcher = cast("_SyncDispatcherFunc", dispatcher)
+                    payload_for_sync = cast("dict[str, object]", envelope_for_handler)
+                    execution_context = copy_context()
+
+                    def _invoke_sync_dispatcher() -> DispatcherOutput:
+                        return execution_context.run(
+                            sync_dispatcher,
+                            payload_for_sync,
+                        )
+
+                    return await loop.run_in_executor(
+                        None,
+                        _invoke_sync_dispatcher,
+                    )
 
     def _create_context_for_entry(
         self,
