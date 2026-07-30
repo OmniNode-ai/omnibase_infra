@@ -102,6 +102,45 @@ def _select_delegation_route(
     )
 
 
+def _resolve_delegation_provenance(normalized: Mapping[str, object]) -> str:
+    """Resolve where the delegation actually ran, from the terminal's own fields.
+
+    OMN-15471: this used to be ``normalized.get("provider", "local")``. No real
+    ``delegation-completed.v1`` payload carries a ``provider`` key — that event
+    models the resolved serving endpoint as ``endpoint_url`` plus
+    ``cost_tier_name`` — so the literal default fired on EVERY bus-path
+    delegation and stamped ``provider="local"`` on the durable terminal. A
+    Gemini-routed result (``endpoint_url`` = the Google Generative Language API,
+    ``cost_tier_name`` = ``cheap_cloud``) was recorded as a local-provider run:
+    39/39 ``delegate-skill-completed.v1`` rows read ``local`` on the onex-dev
+    lane and not one of them ran on a local model.
+
+    Provenance is therefore derived ONLY from facts the terminal payload
+    actually carries, in descending order of how directly they identify the
+    serving endpoint:
+
+    1. ``provider`` — an explicit upstream stamp, if a producer ever sets one.
+    2. ``endpoint_url`` — the host that was really called. This is the strongest
+       available provenance fact: it cannot read as local for a cloud call, and
+       for a genuinely local backend it is the private/loopback address, so the
+       local case stays identifiable.
+    3. ``cost_tier_name`` / ``cost_tier_type`` — the resolved routing tier, used
+       only when no endpoint identity survived into the terminal.
+
+    When none of those resolve, the return is the empty string. That is
+    deliberate: an absent provenance must stay absent so the consumer
+    (``handler_delegate_skill._response_from_result``, which reads
+    ``delegated_to or endpoint_url or ""``) falls through its own chain instead
+    of inheriting a fabricated deployment class. Never invent one here.
+    """
+
+    for key in ("provider", "endpoint_url", "cost_tier_name", "cost_tier_type"):
+        value = normalized.get(key)
+        if isinstance(value, str) and value.strip():
+            return value.strip()
+    return ""
+
+
 def _normalize_result_payload(
     *,
     status: str,
@@ -125,7 +164,8 @@ def _normalize_result_payload(
     if error_message:
         normalized["error_message"] = error_message
     normalized.setdefault("model_name", normalized.get("model_used", ""))
-    normalized.setdefault("delegated_to", normalized.get("provider", "local"))
+    # OMN-15471: derive real provenance; never default to the literal "local".
+    normalized.setdefault("delegated_to", _resolve_delegation_provenance(normalized))
     normalized.setdefault(
         "quality_gate_passed", normalized.get("quality_passed", False)
     )
