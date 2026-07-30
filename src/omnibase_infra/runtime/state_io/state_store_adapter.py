@@ -430,10 +430,10 @@ class StateStoreAdapter:
 class StateIoUnconfiguredError(RuntimeHostError):
     """Raised at wiring time when a contract declares state_io but its DSN env var is unset.
 
-    Unlike the optional db_io projection path (which logs and returns None
-    when its DSN is unset), state_io is a REQUIRED durability seam — a
-    contract that opts in without a working DSN is a startup-fatal
-    configuration error, not a degradable condition.
+    State IO is a REQUIRED durability seam: a contract that opts in without a
+    working DSN is a startup-fatal configuration error, not a degradable
+    condition. Projection db_io topology bindings use the same fail-closed
+    wiring-time configuration rule.
     """
 
 

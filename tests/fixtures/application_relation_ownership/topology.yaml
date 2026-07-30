@@ -23,6 +23,35 @@ databases:
       owner_omninode_internal: {login: false}
       owner_platform_catalog: {login: false}
     principals:
+      app_dashboard:
+        login: true
+        bypass_rls: false
+        grants:
+          - object_type: SCHEMA
+            schema: platform_catalog
+            privileges: [USAGE]
+          - object_type: TABLE
+            schema: platform_catalog
+            objects: [plan_tiers]
+            privileges: [SELECT]
+      onex_api:
+        login: true
+        bypass_rls: false
+        grants:
+          - object_type: SCHEMA
+            schema: platform_catalog
+            privileges: [USAGE]
+      omninode_runtime:
+        login: true
+        bypass_rls: false
+        grants:
+          - object_type: SCHEMA
+            schema: omninode_internal
+            privileges: [USAGE]
+          - object_type: TABLE
+            schema: omninode_internal
+            objects: [generation_events]
+            privileges: [SELECT, INSERT, UPDATE]
       tenant_projection_writer:
         login: true
         bypass_rls: false
@@ -35,7 +64,19 @@ databases:
             objects: [delegation_events]
             privileges: [SELECT, INSERT, UPDATE]
     bindings:
-      tenant_projection_writer:
+      app_dashboard:
+        database_ref: application
+        principal: app_dashboard
+        dsn_env: OMNIDASH_ANALYTICS_DB_URL
+      onex_api:
+        database_ref: application
+        principal: onex_api
+        dsn_env: OMNINODE_CLOUD_DB_URL
+      omninode_runtime_service:
+        database_ref: application
+        principal: omninode_runtime
+        dsn_env: OMNINODE_INTERNAL_DB_URL
+      tenant_projection:
         database_ref: application
         principal: tenant_projection_writer
         dsn_env: OMNIDASH_ANALYTICS_DB_URL

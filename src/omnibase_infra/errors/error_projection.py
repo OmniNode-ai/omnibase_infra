@@ -99,15 +99,14 @@ class ProjectionError(RuntimeHostError):
 
 
 class ProjectionTenantContextError(ProjectionError):
-    """Raised when a projection write resolves no tenant and enforcement is on.
+    """Raised when a tenant projection has no valid authenticated authority.
 
-    OMN-15301. Tenant-scoped projection tables carry an RLS policy comparing
-    ``tenant_id`` against the ``app.tenant_id`` GUC, so a write with no
-    resolved tenant has no honest row to produce: it would either be rejected
-    by the policy or absorbed by the shared column default. With
-    ``ENFORCE_TENANT_ISOLATION`` set, the writer refuses BEFORE issuing any
-    SQL, so a refused write leaves zero rows -- never a partially-written row
-    and never one silently attributed to the shared default tenant.
+    OMN-15421. Tenant-scoped projection tables compare their UUID tenant key
+    with the transaction-local ``app.tenant_id`` setting. The adapter accepts
+    only an opaque capability minted after canonical signed-envelope verification
+    and an authoritative signer-to-tenant binding check. Ordinary security-context
+    fields, gateway metadata, request/payload values, environment values, empty
+    strings, slugs, and shared sentinels are never authority or fallbacks.
 
     Distinct from the generic :class:`ProjectionError` so callers and operators
     can tell a tenant-attribution refusal apart from a connection or schema

@@ -73,6 +73,45 @@ jobs:
       - name: Validate Dockerfile plugin pin ranges
         run: python scripts/check_dockerfile_pins.py --dockerfile docker/Dockerfile.runtime
 
+  # OMN-15421: prove the tenant/internal/catalog operation split from a rebuilt
+  # source image against PostgreSQL 16. This is deliberately independent from
+  # the large runtime image build so a narrow adapter regression gets a narrow,
+  # actionable verdict.
+  domain-adapter-proof:
+    name: Projection Domain Adapter Proof (OMN-15421)
+    runs-on: >-
+      ${{
+        (github.event_name == 'pull_request' &&
+         github.event.pull_request.head.repo.full_name != github.repository)
+        && fromJSON(vars.OMNI_PUBLIC_PR_RUNS_ON_JSON || '["ubuntu-latest"]')
+        || fromJSON(vars.OMNI_DOCKER_CI_RUNS_ON_JSON || vars.OMNI_TRUSTED_CI_RUNS_ON_JSON || '["self-hosted","omnibase-ci"]')
+      }}
+    timeout-minutes: 15
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+
+      - name: Verify Docker socket access
+        run: docker info
+
+      - name: Run rebuilt-image PostgreSQL 16 proof
+        env:
+          COMPOSE_PROJECT_NAME: omn15421-${{ github.run_id }}-${{ github.run_attempt }}
+        run: >-
+          docker compose
+          -f docker/domain-adapter-proof/compose.yml
+          up --build --abort-on-container-exit --exit-code-from proof
+
+      - name: Remove proof containers and volumes
+        if: always()
+        env:
+          COMPOSE_PROJECT_NAME: omn15421-${{ github.run_id }}-${{ github.run_attempt }}
+        run: >-
+          docker compose
+          -f docker/domain-adapter-proof/compose.yml
+          down --volumes --remove-orphans
+
   # Build and validate Docker image
   docker-build:
     name: Build Runtime Image
