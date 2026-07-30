@@ -20,7 +20,7 @@ forwarder:
   lag_threshold_messages: 500
   lag_threshold_seconds: 120
   drain_deadline_seconds: 30
-  dedupe_store_path: "/var/lib/omninode-gateway/delivery.sqlite3"
+  dedupe_store_path: "/app/data/gateway/delivery.sqlite3"
   dedupe_retention_hours: 24
   forward_retry_initial_seconds: 1
   forward_retry_max_seconds: 30
