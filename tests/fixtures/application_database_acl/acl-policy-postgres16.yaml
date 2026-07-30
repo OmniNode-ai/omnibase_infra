@@ -1,0 +1,74 @@
+# SPDX-FileCopyrightText: 2025 OmniNode.ai Inc.
+# SPDX-License-Identifier: MIT
+
+schema_version: "1.0"
+database_ref: application
+physical_database: omnidash_analytics
+completion_status: verified
+source_kind: synthetic_fixture
+principal_domains:
+  onex_api: [TENANT, PLATFORM_CATALOG]
+  tenant_projection_writer: [TENANT]
+  app_dashboard: [TENANT, PLATFORM_CATALOG]
+  omninode_runtime: [OMNINODE_INTERNAL]
+database_owner_role: owner_platform_catalog
+migration_principal: db_migrator
+migration_owner_roles:
+  - owner_onex_tenant
+  - owner_omninode_internal
+  - owner_platform_catalog
+governed_role_states:
+  - {role: app_dashboard, role_kind: workload, login: true}
+  - {role: db_migrator, role_kind: migration, login: false}
+  - {role: keycloak_service, role_kind: external_connect, login: true, manage_attributes: false}
+  - {role: omninode_runtime, role_kind: workload, login: true}
+  - {role: omnibase_infra_service, role_kind: external_connect, login: true, manage_attributes: false}
+  - {role: omniclaude_service, role_kind: external_connect, login: true, manage_attributes: false}
+  - {role: omniintelligence_service, role_kind: external_connect, login: true, manage_attributes: false}
+  - {role: omnimemory_service, role_kind: external_connect, login: true, manage_attributes: false}
+  - {role: omninode_cloud_service, role_kind: external_connect, login: true, manage_attributes: false}
+  - {role: onex_api, role_kind: workload, login: true}
+  - {role: owner_omninode_internal, role_kind: owner, login: false}
+  - {role: owner_onex_tenant, role_kind: owner, login: false}
+  - {role: owner_platform_catalog, role_kind: owner, login: false}
+  - {role: tenant_projection_writer, role_kind: workload, login: true}
+  - {role: umami_service, role_kind: external_connect, login: true, manage_attributes: false}
+retained_administrative_principals: [rls_admin]
+connection_policies:
+  - database_ref: keycloak
+    physical_database: keycloak
+    observed_database_owner_role: postgres
+    allowed_principals: [keycloak_service]
+  - database_ref: omnibase_infra
+    physical_database: omnibase_infra
+    observed_database_owner_role: postgres
+    allowed_principals: [omnibase_infra_service]
+  - database_ref: application
+    physical_database: omnidash_analytics
+    observed_database_owner_role: app_dashboard
+    allowed_principals:
+      - app_dashboard
+      - omninode_runtime
+      - onex_api
+      - tenant_projection_writer
+  - database_ref: omninode_cloud
+    physical_database: omninode_cloud
+    observed_database_owner_role: postgres
+    allowed_principals: [omninode_cloud_service]
+  - database_ref: omniclaude
+    physical_database: omniclaude
+    observed_database_owner_role: postgres
+    allowed_principals: [omniclaude_service]
+  - database_ref: omniintelligence
+    physical_database: omniintelligence
+    observed_database_owner_role: postgres
+    allowed_principals: [omniintelligence_service]
+  - database_ref: omnimemory
+    physical_database: omnimemory
+    observed_database_owner_role: postgres
+    allowed_principals: [omnimemory_service]
+  - database_ref: umami
+    physical_database: umami
+    observed_database_owner_role: postgres
+    allowed_principals: [umami_service]
+reason: Independent eight-database CONNECT and application-domain policy.

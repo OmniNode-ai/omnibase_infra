@@ -1,0 +1,55 @@
+# SPDX-FileCopyrightText: 2025 OmniNode.ai Inc.
+# SPDX-License-Identifier: MIT
+schema_version: "1.0"
+required_connect_databases:
+  - keycloak
+  - omnibase_infra
+  - omnidash_analytics
+  - omninode_cloud
+  - omniclaude
+  - omniintelligence
+  - omnimemory
+  - umami
+sources:
+  - source_key: topology_owner
+    repository: OmniNode-ai/omnibase_infra
+    revision: d7f1ac464a54696ac9ed05fd8f3766463a0a7eea
+    path: src/omnibase_infra/topology/instances/local.yaml
+    sha256: e4170e97e26fb9c63a53f5f660cedacd15bf7e99609309c54bff15c3d026ac8d
+    purpose: topology
+  - source_key: typed_ownership_loader
+    repository: OmniNode-ai/omnibase_infra
+    revision: 9e9e62c3177f568b7e5110f653ee4be6dcda965c
+    path: src/omnibase_infra/validation/application_relation_ownership.py
+    sha256: be712ed5d6372dc9bc0720742291b2739f7b815c61abbab3d87157dfb80216c4
+    purpose: typed_loader
+  - source_key: kubernetes_topology_projection
+    repository: OmniNode-ai/omninode_infra
+    revision: 1a1fff92cbf8e02e488ac6e6e89b1087ca396657
+    path: topology/kubernetes/source-lock.yaml
+    sha256: aa6b4502f79244160f07769da788f1826f2b9d5e756b477508eddf5af929226f
+    purpose: rendered_topology
+  - source_key: omnimarket_relation_inventory
+    repository: OmniNode-ai/omnimarket
+    revision: a0f65e9471da06b88eecb91bbc1c847989cb10d8
+    path: docs/evidence/OMN-15423-relation-inventory.json
+    sha256: c7ff16080dc553ae204da405519f51b5b631847b129f5876db136c048a4c63da
+    purpose: relation_inventory
+  - source_key: onex_api_service_ownership
+    repository: OmniNode-ai/omninode_infra
+    revision: 39033d55147ef22a061b665345b506246d3aa543
+    path: db/migrations/application-relation-ownership.yaml
+    sha256: 4a47bb42a8e724ffc44453cb649b754568f3ffa83dabaf831ccfaebaa0723712
+    purpose: service_ownership
+  - source_key: node_migration_service_ownership
+    repository: OmniNode-ai/omninode_infra
+    revision: 39033d55147ef22a061b665345b506246d3aa543
+    path: k8s/migrations/application-relation-ownership.yaml
+    sha256: 8ca701c4804d2f7d749dc1ef2a26fc383dcd3806bc42c004ed8851a5ff5d25e0
+    purpose: service_ownership
+  - source_key: sanitized_legacy_fixture
+    repository: OmniNode-ai/omnibase_infra
+    revision: 18df1728bdbcc7a773c790f64b6569f58b524841
+    path: docker/legacy-rds-fixture/fixture-manifest.json
+    sha256: 1cdc1db7d707bc2daa72ad8f1521bb589cf87594e5b48f6480893b08875e3f26
+    purpose: legacy_fixture

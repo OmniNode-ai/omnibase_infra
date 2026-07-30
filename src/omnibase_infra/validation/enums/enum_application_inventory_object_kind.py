@@ -14,8 +14,10 @@ class EnumApplicationInventoryObjectKind(StrEnum):
     VIEW = "view"
     MATERIALIZED_VIEW = "materialized_view"
     FUNCTION = "function"
+    PROCEDURE = "procedure"
     SEQUENCE = "sequence"
     EXTENSION = "extension"
+    TYPE = "type"
 
 
 __all__ = ["EnumApplicationInventoryObjectKind"]

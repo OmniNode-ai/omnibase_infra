@@ -13,6 +13,11 @@ class ModelRetainedLiveCensus(BaseModel):
 
     observed_base_tables: int | None = Field(default=None, ge=0)
     observed_views_and_materialized_views: int | None = Field(default=None, ge=0)
+    observed_sequences: int | None = Field(default=None, ge=0)
+    observed_functions: int | None = Field(default=None, ge=0)
+    observed_procedures: int | None = Field(default=None, ge=0)
+    observed_types: int | None = Field(default=None, ge=0)
+    observed_extensions: int | None = Field(default=None, ge=0)
     parity_status: str | None = None
     reason: str | None = None
 

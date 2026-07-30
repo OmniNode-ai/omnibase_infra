@@ -32,6 +32,8 @@ class ModelMigrationOwnershipManifest(BaseModel):
     schema_version: str = Field(..., min_length=1)
     service: str = Field(..., min_length=1)
     owner_declaration: str | None = Field(default=None, min_length=1)
+    current_physical_database: str | None = Field(default=None, min_length=1)
+    materialized_physical_databases: tuple[str, ...] = ()
     target_database_ref: str = Field(..., min_length=1)
     db_io: ModelDbOwnershipSubcontract
     relation_evidence: tuple[ModelRelationEvidence, ...] = ()
