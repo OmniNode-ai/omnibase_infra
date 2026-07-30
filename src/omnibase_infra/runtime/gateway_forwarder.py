@@ -293,7 +293,10 @@ def _build_parser() -> argparse.ArgumentParser:
         "--ready-file",
         type=Path,
         default=None,
-        help="Optional readiness sentinel written only after both subscriptions start",
+        help=(
+            "Optional readiness sentinel written only after both broker transports "
+            "and delivery loops start"
+        ),
     )
     return parser
 
