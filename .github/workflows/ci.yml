@@ -2198,6 +2198,13 @@ jobs:
           # also absent from branch protection (dev requires exactly "CI Summary"),
           # so those checks previously blocked nothing.
           EVENT_NAME: ${{ github.event_name }}
+          # OMN-15532 — PR author login. Drops ONLY the contexts that this
+          # author's PRs structurally cannot produce (ACTOR_CONDITIONAL_CONTEXTS:
+          # cr-thread-gate-caller.yml skips dependabot[bot], so
+          # "gate / CodeRabbit Thread Check" is never created on its PRs and
+          # would otherwise burn the full deadline then fail closed). Empty on
+          # non-PR events, which drops nothing.
+          PR_AUTHOR: ${{ github.event.pull_request.user.login }}
           HEAD_SHA: >-
             ${{ github.event.pull_request.head.sha
               || github.event.merge_group.head_sha
@@ -2247,7 +2254,8 @@ jobs:
               fi
             fi
             python3 scripts/ci/ci_summary_gate.py --jobs-file jobs.json --run-attempt "${RUN_ATTEMPT}" \
-              --check-runs-file check_runs.json --event-name "${EVENT_NAME}"
+              --check-runs-file check_runs.json --event-name "${EVENT_NAME}" \
+              --pr-author "${PR_AUTHOR:-}"
             rc=$?
             case "${rc}" in
               0) echo "::notice::CI Summary = SUCCESS (all gating jobs and asserted external contexts provably passed)"; exit 0 ;;
