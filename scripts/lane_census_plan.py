@@ -279,9 +279,22 @@ def reconcile_lane(
     return findings
 
 
-def _labels_to_dict(labels: str) -> dict[str, str]:
+def _labels_to_dict(labels: Any) -> dict[str, str]:
+    """Coerce a container's Labels to a mapping.
+
+    The Docker Engine API returns Labels as a real mapping; the Docker CLI
+    returns a comma-joined ``k=v`` string. The collector
+    (``lane_census_inventory.py``) normalizes both to a mapping, so the mapping
+    branch is the live path — the string branch is retained for envelopes
+    produced by older callers and for direct CLI-shaped fixtures. Note the string
+    form is lossy by construction: a label VALUE may itself contain commas
+    (``com.docker.compose.project.config_files``), which a flat split cannot
+    recover. Prefer the mapping form (OMN-15466).
+    """
+    if isinstance(labels, dict):
+        return {str(k): str(v) for k, v in labels.items()}
     out: dict[str, str] = {}
-    for pair in labels.split(","):
+    for pair in str(labels or "").split(","):
         if "=" in pair:
             key, value = pair.split("=", 1)
             out[key.strip()] = value.strip()
