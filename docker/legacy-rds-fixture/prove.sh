@@ -10,7 +10,8 @@ FRESH_PORT="${FRESH_PORT:-5432}"
 LEGACY_PORT="${LEGACY_PORT:-5432}"
 MIGRATIONS_DIR="${MIGRATIONS_DIR:-/migrations/forward}"
 RUNNER="${RUNNER:-/opt/omn15422/run-forward-migrations.sh}"
-LEDGER_BLOCKER='column "migration_id" of relation "schema_migrations" does not exist'
+CONTROL_MIGRATIONS_DIR="${CONTROL_MIGRATIONS_DIR:-/opt/omn15422/ledger-control/forward}"
+LEDGER_BLOCKER='unresolved migration domain for node:node_projection_delegation:0016_delegation_judge_verdict_events.sql (OMN-15423: delegation_judge_verdict_events domain unresolved)'
 
 fail() {
   echo "fixture_status=FAIL detail=$1" >&2
@@ -173,33 +174,163 @@ run_forward() {
   sh "$RUNNER" >"$log" 2>&1
 }
 
-for pass in 1 2; do
-  fresh_log="$(mktemp)"
-  if ! run_forward "$FRESH_HOST" "$FRESH_PORT" omnibase_infra "$fresh_log"; then
-    sed -n '1,240p' "$fresh_log"
-    fail "fresh real migration pass $pass failed"
+create_fixture_database() {
+  host="$1"
+  port="$2"
+  database="$3"
+  exists="$(psql -X -qAt -h "$host" -p "$port" -U postgres -d postgres \
+    -v ON_ERROR_STOP=1 -v database="$database" -f - <<'EOSQL'
+SELECT count(*) FROM pg_database WHERE datname = :'database';
+EOSQL
+)"
+  if [ "$exists" = "0" ]; then
+    psql -X -q -h "$host" -p "$port" -U postgres -d postgres \
+      -v ON_ERROR_STOP=1 -c "CREATE DATABASE ${database}"
   fi
-  grep -F 'Sentinel set. Migration gate will report HEALTHY.' "$fresh_log" >/dev/null \
-    || fail "fresh pass $pass omitted terminal sentinel proof"
-  if [ "$pass" = "2" ]; then
-    grep -E 'Complete: 0 infra applied, [0-9]+ infra skipped; 0 node applied, [0-9]+ node skipped' "$fresh_log" >/dev/null \
-      || { tail -n 80 "$fresh_log"; fail "fresh second pass was not idempotent"; }
-  fi
-  echo "fixture_case=fresh_install pass=$pass status=PASS"
+}
+
+run_control_forward() {
+  host="$1"
+  port="$2"
+  service_database="$3"
+  application_database="$4"
+  cloud_database="$5"
+  log="$6"
+  POSTGRES_HOST="$host" \
+  POSTGRES_PORT="$port" \
+  POSTGRES_USER=postgres \
+  POSTGRES_PASSWORD='' \
+  POSTGRES_DB="$service_database" \
+  NODE_POSTGRES_DB="$application_database" \
+  OMNINODE_CLOUD_HISTORY_DB="$cloud_database" \
+  MIGRATIONS_DIR="$CONTROL_MIGRATIONS_DIR" \
+  sh "$RUNNER" >"$log" 2>&1
+}
+
+# Positive ledger controls use separate synthetic databases and the same real
+# runner/bootstrap artifact. They cross the OMN-15423 preflight hold without
+# weakening it: the control tree contains one fully classified migration and
+# an empty committed block set. Both fresh and legacy histories run twice.
+for database in omn15413_control_service omn15413_control_app omn15413_control_cloud; do
+  create_fixture_database "$FRESH_HOST" "$FRESH_PORT" "$database"
+done
+for database in omn15413_control_service omn15413_control_app omn15413_control_cloud; do
+  create_fixture_database "$LEGACY_HOST" "$LEGACY_PORT" "$database"
 done
 
-# The fixture executes the real legacy-upgrade path twice on the same synthetic
-# state. Until OMN-15413 converges/imports the filename ledger, the current
-# runner must fail at this exact catalog boundary. Treating another error (or a
-# surprise success) as equivalent would make the fixture a false green.
+psql -X -q -h "$LEGACY_HOST" -p "$LEGACY_PORT" -U postgres \
+  -d omn15413_control_app -v ON_ERROR_STOP=1 <<'EOSQL'
+CREATE TABLE public.schema_migrations (
+  filename TEXT PRIMARY KEY,
+  applied_at TIMESTAMPTZ NOT NULL
+);
+INSERT INTO public.schema_migrations VALUES
+  ('0001_legacy_control.sql', TIMESTAMPTZ '2026-01-01 00:00:00+00');
+CREATE TABLE public.node_schema_migrations (
+  version TEXT PRIMARY KEY,
+  applied_at TIMESTAMPTZ NOT NULL,
+  checksum TEXT NOT NULL
+);
+INSERT INTO public.node_schema_migrations VALUES (
+  'node:node_example:0001_create_example.sql',
+  TIMESTAMPTZ '2026-01-02 00:00:00+00',
+  '1f605f28cc1f4a1a7500862be51c35d01431cacba2d34201150f3ae3deb6c923'
+);
+EOSQL
+psql -X -q -h "$LEGACY_HOST" -p "$LEGACY_PORT" -U postgres \
+  -d omn15413_control_cloud -v ON_ERROR_STOP=1 <<'EOSQL'
+CREATE TABLE public.schema_migrations (
+  version TEXT PRIMARY KEY,
+  applied_at TIMESTAMPTZ NOT NULL,
+  checksum TEXT
+);
+INSERT INTO public.schema_migrations VALUES
+  ('20260101_cloud_control.sql', TIMESTAMPTZ '2026-01-03 00:00:00+00', NULL);
+CREATE TABLE public.migrations_log (
+  migration_name TEXT NOT NULL,
+  direction TEXT NOT NULL,
+  executed_at TIMESTAMPTZ NOT NULL,
+  UNIQUE (migration_name, direction)
+);
+INSERT INTO public.migrations_log VALUES
+  ('20260101_cloud_control', 'forward', TIMESTAMPTZ '2026-01-03 00:00:00+00');
+EOSQL
+
+legacy_control_node_oid="$(sql_value "$LEGACY_HOST" omn15413_control_app \
+  "SELECT 'public.node_schema_migrations'::regclass::oid")"
+legacy_control_cloud_source="$(sql_value "$LEGACY_HOST" omn15413_control_cloud \
+  "SELECT version || '|' || coalesce(checksum, '<NULL>') || '|' || applied_at::text FROM public.schema_migrations")"
+
+for pass in 1 2; do
+  fresh_control_log="$(mktemp)"
+  run_control_forward "$FRESH_HOST" "$FRESH_PORT" \
+    omn15413_control_service omn15413_control_app omn15413_control_cloud \
+    "$fresh_control_log" \
+    || { sed -n '1,240p' "$fresh_control_log"; fail "fresh ledger control pass $pass failed"; }
+  grep -F 'Sentinel set. Migration gate will report HEALTHY.' "$fresh_control_log" >/dev/null \
+    || fail "fresh ledger control pass $pass omitted terminal sentinel proof"
+  if [ "$pass" = "2" ]; then
+    grep -F 'Complete: 0 infra applied, 1 infra skipped; 0 node applied, 1 node skipped' "$fresh_control_log" >/dev/null \
+      || { tail -n 80 "$fresh_control_log"; fail "fresh ledger control second pass was not idempotent"; }
+  fi
+  echo "fixture_case=application_ledger_fresh pass=$pass status=PASS"
+
+  legacy_control_log="$(mktemp)"
+  run_control_forward "$LEGACY_HOST" "$LEGACY_PORT" \
+    omn15413_control_service omn15413_control_app omn15413_control_cloud \
+    "$legacy_control_log" \
+    || { sed -n '1,240p' "$legacy_control_log"; fail "legacy ledger control pass $pass failed"; }
+  grep -F 'Sentinel set. Migration gate will report HEALTHY.' "$legacy_control_log" >/dev/null \
+    || fail "legacy ledger control pass $pass omitted terminal sentinel proof"
+  echo "fixture_case=application_ledger_legacy pass=$pass status=PASS"
+done
+
+[ "$(sql_value "$FRESH_HOST" omn15413_control_app "SELECT count(*) FROM platform_catalog.schema_migrations")" = "1" ] \
+  || fail "fresh ledger control canonical row count drifted"
+[ "$(sql_value "$LEGACY_HOST" omn15413_control_app "SELECT count(*) FROM platform_catalog.schema_migrations")" = "3" ] \
+  || fail "legacy ledger control did not import all three source shapes"
+[ "$(sql_value "$LEGACY_HOST" omn15413_control_app "SELECT 'platform_catalog.schema_migrations'::regclass::oid")" = "$legacy_control_node_oid" ] \
+  || fail "selected node ledger was copied instead of moved in place"
+[ "$(sql_value "$LEGACY_HOST" omn15413_control_app "SELECT count(*) FROM public.schema_migrations")" = "1" ] \
+  || fail "filename-only source ledger was rewritten"
+[ "$(sql_value "$LEGACY_HOST" omn15413_control_cloud "SELECT version || '|' || coalesce(checksum, '<NULL>') || '|' || applied_at::text FROM public.schema_migrations")" = "$legacy_control_cloud_source" ] \
+  || fail "cloud applied-set source ledger was rewritten"
+echo "fixture_case=application_ledger_sources status=PASS selected_oid_preserved=true sources_immutable=true"
+
+for pass in 1 2; do
+  fresh_log="$(mktemp)"
+  if run_forward "$FRESH_HOST" "$FRESH_PORT" omnibase_infra "$fresh_log"; then
+    fail "fresh real migration pass $pass crossed an unresolved domain"
+  fi
+  grep -F "$LEDGER_BLOCKER" "$fresh_log" >/dev/null \
+    || { sed -n '1,240p' "$fresh_log"; fail "fresh blocker signature moved"; }
+  echo "fixture_case=fresh_install status=BLOCKED pass=$pass blocker=OMN-15423 signature=unresolved_domain"
+done
+
+[ "$(sql_value "$FRESH_HOST" omnidash_analytics "SELECT to_regclass('platform_catalog.schema_migrations') IS NULL")" = "t" ] \
+  || fail "fresh preflight blocker mutated the canonical application ledger"
+
+# The fixture executes the real legacy-upgrade entry point twice. OMN-15413 now
+# crosses the old filename-ledger parser boundary, but OMN-15423 still has no
+# authoritative domain for delegation_judge_verdict_events. That known,
+# unfenced ambiguity must stop in preflight before any ledger or DDL mutation.
 for pass in 1 2; do
   legacy_log="$(mktemp)"
-  if run_forward "$LEGACY_HOST" "$LEGACY_PORT" omnidash_analytics "$legacy_log"; then
-    fail "legacy upgrade pass $pass unexpectedly crossed the OMN-15413 boundary"
+  if run_forward "$LEGACY_HOST" "$LEGACY_PORT" omnibase_infra "$legacy_log"; then
+    fail "legacy upgrade pass $pass crossed an unresolved domain"
   fi
   grep -F "$LEDGER_BLOCKER" "$legacy_log" >/dev/null \
     || { sed -n '1,240p' "$legacy_log"; fail "legacy upgrade blocker signature moved"; }
-  echo "fixture_case=legacy_upgrade status=BLOCKED pass=$pass blocker=OMN-15413 signature=migration_id_missing"
+  echo "fixture_case=legacy_upgrade status=BLOCKED pass=$pass blocker=OMN-15423 signature=unresolved_domain"
 done
 
-echo "fixture_status=PASS_WITH_EXPECTED_BLOCKER blocker=OMN-15413"
+[ "$(sql_value "$LEGACY_HOST" omnidash_analytics "SELECT to_regclass('public.node_schema_migrations') IS NOT NULL")" = "t" ] \
+  || fail "legacy preflight blocker moved the selected ledger"
+[ "$(sql_value "$LEGACY_HOST" omnidash_analytics "SELECT to_regclass('platform_catalog.schema_migrations') IS NULL")" = "t" ] \
+  || fail "legacy preflight blocker created the canonical ledger"
+[ "$(sql_value "$LEGACY_HOST" omnidash_analytics "SELECT count(*) FROM public.schema_migrations")" = "23" ] \
+  || fail "legacy preflight blocker rewrote filename history"
+
+sh /opt/omn15422/cutover-proof/prove.sh
+
+echo "fixture_status=PASS_WITH_EXPECTED_BLOCKER blocker=OMN-15423"

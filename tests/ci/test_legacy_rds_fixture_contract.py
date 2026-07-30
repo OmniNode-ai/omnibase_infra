@@ -20,6 +20,16 @@ DOCKERFILE = FIXTURE_ROOT / "Dockerfile"
 MANIFEST = FIXTURE_ROOT / "fixture-manifest.json"
 LEGACY_SEED = FIXTURE_ROOT / "legacy-seed.sql"
 PROOF = FIXTURE_ROOT / "prove.sh"
+CUTOVER_PROOF = FIXTURE_ROOT / "cutover-proof" / "prove.sh"
+CUTOVER_BOOTSTRAP = (
+    REPO_ROOT
+    / "src"
+    / "omnibase_infra"
+    / "migration"
+    / "cutover"
+    / "sql"
+    / "bootstrap.sql"
+)
 CI_WORKFLOW = REPO_ROOT / ".github" / "workflows" / "legacy-rds-fixture-proof.yml"
 
 REQUIRED_CASES = {
@@ -32,6 +42,8 @@ REQUIRED_CASES = {
     "transformation_collision",
     "flat_node_shape_collision",
     "legacy_shape_collision",
+    "application_migration_ledger",
+    "cutover_receipts_and_rollback_boundary",
 }
 
 
@@ -128,11 +140,18 @@ def test_proof_runs_real_migrations_twice_and_pins_the_blocked_upgrade() -> None
     assert "for pass in 1 2" in proof
     assert "fresh-postgres" in proof
     assert "legacy-postgres" in proof
-    assert (
-        'column "migration_id" of relation "schema_migrations" does not exist' in proof
-    )
+    assert "unresolved migration domain" in proof
     assert "OMN-15413" in proof
+    assert "OMN-15423" in proof
     assert "fixture_case=legacy_upgrade status=BLOCKED" in proof
+    assert "platform_catalog.schema_migrations" in proof
+    assert "fixture_case=application_ledger_fresh" in proof
+    assert "fixture_case=application_ledger_legacy" in proof
+    assert "selected_oid_preserved=true" in proof
+
+    dockerfile = DOCKERFILE.read_text(encoding="utf-8")
+    assert "ledger-control/" in dockerfile
+    assert "ledger-control/forward/_ledger/bootstrap.sql" in dockerfile
 
 
 def test_required_ci_executes_rebuilt_fixture_and_always_cleans_it() -> None:
@@ -157,3 +176,33 @@ def test_required_ci_executes_rebuilt_fixture_and_always_cleans_it() -> None:
     )
     assert cleanup["if"] == "always()"
     assert "down --volumes --remove-orphans" in cleanup["run"]
+
+
+def test_cutover_extension_is_durable_and_red_proven_in_the_rebuilt_image() -> None:
+    proof = CUTOVER_PROOF.read_text(encoding="utf-8")
+    bootstrap = CUTOVER_BOOTSTRAP.read_text(encoding="utf-8")
+    outer_proof = PROOF.read_text(encoding="utf-8")
+    dockerfile = DOCKERFILE.read_text(encoding="utf-8")
+
+    assert "cutover-proof/prove.sh" in outer_proof
+    assert "cutover-proof/prove.sh" in dockerfile
+    assert "migration/cutover/sql/bootstrap.sql" in dockerfile
+    for table in (
+        "cutover_family_contracts",
+        "transformation_receipts",
+        "cutover_journal",
+        "reverse_delta_proofs",
+        "reverse_delta_entries",
+    ):
+        assert table in bootstrap
+    for signature in (
+        "cutover_family_mismatch_isolation",
+        "cutover_pre_checkpoint_dsn_rollback",
+        "cutover_blind_dual_write",
+        "cutover_post_checkpoint_direct_rollback",
+        "cutover_reverse_delta_coverage",
+        "cutover_reverse_delta_complete",
+        "cutover_forward_fix_only",
+        "cutover_durable_journal",
+    ):
+        assert signature in proof
