@@ -45,6 +45,9 @@ from omnibase_infra.event_bus.model_topic_readiness_failure import (
 from omnibase_infra.event_bus.model_topic_set_readiness import (
     ModelTopicSetReadiness,
 )
+from omnibase_infra.topics.broker_capacity_probe import (
+    bind_policy_to_broker_capacity,
+)
 from omnibase_infra.topics.model_topic_provisioning_diff import (
     ModelTopicProvisioningDiff,
     build_provisioning_diff,
@@ -161,7 +164,12 @@ class TopicProvisioner:
                 Defaults to the policy derived from the live Kafka client
                 configuration, so a managed (MSK) target rejects a declared RF1
                 fail-closed and resolves an undeclared replication factor to the
-                managed durability floor rather than to 1.
+                managed durability floor rather than to 1. Whatever is supplied
+                here is UNMEASURED — it carries no capacity ceiling until the
+                first admin connection binds a live ``describe_cluster`` broker
+                count to it (see :meth:`_measured_policy`). The measurement may
+                only install a ceiling and raise an undeclared default; it never
+                weakens the durability floor.
 
         Raises:
             FileNotFoundError: If *contracts_root* does not point to an
@@ -205,7 +213,26 @@ class TopicProvisioner:
 
     @property
     def policy(self) -> ModelTopicProvisioningPolicy:
-        """The replication policy this provisioner resolves specs against."""
+        """The replication policy this provisioner resolves specs against.
+
+        Unmeasured until the first admin connection; thereafter bound to the
+        cluster's live broker count (OMN-15395).
+        """
+        return self._policy
+
+    async def _measured_policy(self, admin: object) -> ModelTopicProvisioningPolicy:
+        """Bind the policy to the cluster's live broker count, once.
+
+        The capacity ceiling that reduces a contract-declared replication
+        factor MUST come from a measurement of the target broker, never from an
+        inference off the SASL mechanism: ``ModelKafkaEventBusConfig`` accepts
+        PLAIN / SCRAM / OAUTHBEARER as well as MSK IAM, so "not IAM" says
+        nothing at all about node count. Measuring here — on the same admin
+        client that is about to issue the ``CreateTopics`` — is the only place
+        the ceiling can be honest.
+        """
+        if self._policy.broker_count is None:
+            self._policy = await bind_policy_to_broker_capacity(admin, self._policy)
         return self._policy
 
     def _creation_partitions(self, spec: ModelTopicSpec) -> int:
@@ -334,14 +361,41 @@ class TopicProvisioner:
         operator-gated WS-M reassignment lane, not this provisioner's call.
         Reuses ``evaluate_topic_readiness`` rather than re-implementing the
         comparison.
+
+        The expectation is built from the RESOLVED spec, not the raw
+        contract-declared one. "There is one resolver" only holds if every site
+        uses what it returns, and that includes the site that decides what
+        counts as drift: comparing a broker against an unresolved RF2 on a
+        cluster measured at one node reports every RF2 topic as drifted even
+        though the provisioner deliberately and correctly created it at RF1
+        there — and seeds the operator-gated reassignment queue that consumes
+        this feed with targets the cluster cannot host.
+
+        A spec the policy REFUSES (a contract declaring RF1 against managed) is
+        reported here rather than raised: the fail-closed abort is scoped to
+        topics being created, and a pre-existing topic is already on the broker.
         """
-        expected = {
-            name: spec
-            for name in present_topics
-            if (spec := self._spec_by_name.get(name)) is not None
-        }
+        expected: dict[str, ModelTopicSpec] = {}
+        refusals: list[str] = []
+        for name in present_topics:
+            declared = self._spec_by_name.get(name)
+            if declared is None:
+                continue
+            try:
+                expected[name] = self._resolve_spec(declared)
+            except TopicReplicationPolicyError as exc:
+                refusals.append(f"{name}: replication_policy_violation: {exc}")
+        if refusals:
+            logger.warning(
+                "%d existing topic(s) have a contract spec the %s replication "
+                "policy would refuse to create: %s (correlation_id=%s)",
+                len(refusals),
+                self._policy.profile.value,
+                refusals,
+                correlation_id,
+            )
         if not expected:
-            return []
+            return refusals
         evaluation = evaluate_topic_readiness(
             tuple(expected),
             [metadata[name] for name in expected if name in metadata],
@@ -364,7 +418,7 @@ class TopicProvisioner:
                 drift,
                 correlation_id,
             )
-        return drift
+        return refusals + drift
 
     def _build_topic_specs(self) -> tuple[ModelTopicSpec, ...]:
         """Build topic specs from contract YAML extraction.
@@ -503,6 +557,12 @@ class TopicProvisioner:
                 **auth_kwargs,
             )
             await admin.start()
+
+            # Measure the cluster's node count BEFORE resolving anything: the
+            # capacity ceiling that may reduce a contract-declared replication
+            # factor has to be a measurement of this broker, not an inference
+            # from its auth mechanism (OMN-15395).
+            await self._measured_policy(admin)
 
             # (d) One metadata request replaces the blind create-everything
             # sweep. Only names the broker does not already have are candidates.
@@ -717,6 +777,10 @@ class TopicProvisioner:
                 **auth_kwargs,
             )
             await admin.start()
+
+            # Same measured-capacity binding as the full pass: the ceiling is
+            # read off this cluster, never inferred (OMN-15395).
+            await self._measured_policy(admin)
 
             # (d) Skip creation entirely when the broker already has the topic.
             # The snapshot is fetched once per provisioner instance, so the
