@@ -115,6 +115,22 @@ class _TopicAlreadyExistsError(Exception):
     """Stand-in for ``aiokafka.errors.TopicAlreadyExistsError``."""
 
 
+class InvalidReplicationFactorError(Exception):
+    """Stand-in for ``aiokafka.errors.InvalidReplicationFactorError``.
+
+    Named exactly as aiokafka names it, and carrying the same ``errno``, because
+    the production classifier keys on the wire error identity rather than on an
+    import — see
+    ``omnibase_infra.event_bus.service_topic_manager.is_invalid_replication_factor_error``.
+    """
+
+    errno = 38
+
+
+class _TransientBrokerError(Exception):
+    """A create failure that is NOT a durability violation (negative control)."""
+
+
 @dataclass
 class _AdminRecorder:
     """Records every admin call the provisioner makes."""
@@ -128,7 +144,17 @@ class _AdminRecorder:
     #: ``describe_cluster`` is absent from the fake admin entirely when this is
     #: False, which is the "capacity could not be measured" path.
     supports_describe_cluster: bool = True
+    #: ``describe_cluster`` exists but RAISES. The other unmeasurable shape, and
+    #: the one that can count its own calls — used to prove the probe attempt is
+    #: memoized rather than retried on every entrypoint (OMN-15395 D4).
+    describe_cluster_raises: bool = False
     describe_cluster_calls: int = 0
+    #: The most replicas this fake broker will accept on ``CreateTopics``.
+    #: ``None`` disables the check (the permissive fake). When set, a NewTopic
+    #: asking for more raises ``INVALID_REPLICATION_FACTOR`` exactly as a real
+    #: broker does — the only way a test can tell a LOUD failure apart from a
+    #: swallowed one (OMN-15395 D5).
+    max_hostable_replication_factor: int | None = None
     #: Replica count the fake broker reports per partition on metadata reads.
     reported_replicas: int = 2
     #: Partition count the fake broker reports per topic on metadata reads.
@@ -140,6 +166,11 @@ class _AdminRecorder:
     #: diff-first provisioner apart from one that blind-creates and swallows
     #: the already-exists error (~1,280 wasted authorizations per pass).
     attempted: list[str] = field(default_factory=list)
+    #: Every NewTopic handed to ``create_topics``, INCLUDING ones the broker
+    #: rejects. ``created`` only records acceptances, so it cannot answer "what
+    #: replication factor actually reached the wire?" for a rejected topic —
+    #: which is the whole question when proving no ceiling was guessed.
+    requested: list[NewTopic] = field(default_factory=list)
 
     #: What the fake broker reports per topic on a metadata read.
     def metadata(self) -> list[dict[str, object]]:
@@ -177,6 +208,12 @@ class _AdminRecorder:
         assert matches, f"no CreateTopics was issued for {name!r}"
         return matches[0]
 
+    def requested_spec(self, name: str) -> NewTopic:
+        """The NewTopic sent for ``name``, accepted or rejected."""
+        matches = [topic for topic in self.requested if topic.name == name]
+        assert matches, f"no CreateTopics request was sent for {name!r}"
+        return matches[0]
+
     def created_under_test(self) -> list[str]:
         """Only the fixture topics, ignoring installed-package contract topics.
 
@@ -207,6 +244,8 @@ def _patched_admin(recorder: _AdminRecorder) -> Iterator[None]:
 
         async def describe_cluster(self) -> dict[str, object]:
             recorder.describe_cluster_calls += 1
+            if recorder.describe_cluster_raises:
+                raise ConnectionError("cluster metadata unavailable")
             return recorder.cluster()
 
         async def describe_topics(
@@ -218,8 +257,18 @@ def _patched_admin(recorder: _AdminRecorder) -> Iterator[None]:
         async def create_topics(self, new_topics: Sequence[NewTopic]) -> None:
             for new_topic in new_topics:
                 recorder.attempted.append(new_topic.name)
+                recorder.requested.append(new_topic)
                 if new_topic.name in recorder.existing_topics:
                     raise _TopicAlreadyExistsError(new_topic.name)
+                ceiling = recorder.max_hostable_replication_factor
+                if ceiling is not None and new_topic.replication_factor > ceiling:
+                    # What a real broker does: reject, create nothing.
+                    raise InvalidReplicationFactorError(
+                        f"[Error 38] INVALID_REPLICATION_FACTOR: "
+                        f"{new_topic.name} asked for "
+                        f"{new_topic.replication_factor} replicas, cluster has "
+                        f"{ceiling} broker(s)"
+                    )
                 recorder.created.append(new_topic)
                 # The broker now has it: subsequent metadata reads must see it,
                 # which is what makes the readiness confirm meaningful.
@@ -349,6 +398,66 @@ def _provisioning_swallow_offenders(src_root: Path) -> list[str]:
                 continue  # no boundary here; the error propagates by default
             if not excepts[0].startswith("except TopicReplicationPolicyError"):
                 offenders.append(f"{path.relative_to(src_root)}:{index + 1}")
+    return offenders
+
+
+#: A ``CreateTopics`` payload being constructed.
+_NEW_TOPIC_RE = re.compile(r"\bNewTopic\s*\(")
+#: A replication factor written as a literal at a construction site — the
+#: "flat default" shape (``--replication-factor`` default=1) that let the
+#: operator CLI discard every contract's declared value.
+_LITERAL_RF_RE = re.compile(r"replication_factor\s*=\s*-?\d+")
+#: Any of the policy's resolution entrypoints — the bound methods and the
+#: module-level batch helper, with or without a receiver.
+_POLICY_RESOLVER_RE = re.compile(
+    r"\b(?:resolve_spec|resolve_specs_for_creation|resolve_replication_factor)\s*\("
+)
+
+
+def _raw_create_topics_offenders(roots: Sequence[Path]) -> list[str]:
+    """Return ``path:line`` for ``NewTopic`` sites outside the policy seam.
+
+    The swallow guard above only sees code that calls the *provisioner*. It is
+    structurally blind to a module that reaches past the provisioner and builds
+    its own ``NewTopic`` — which is exactly what ``scripts/create_kafka_topics.py``
+    did: a second live ``CreateTopics`` path, the one
+    ``docs/operations/README.md`` tells operators to run and the one
+    ``compare_environments.py`` names in its topic-parity ``fix_hint``, creating
+    every topic at a flat ``--replication-factor`` default of 1 with the
+    fail-closed policy never consulted. Neither the guard nor CI could see it.
+
+    A site is an offender when either:
+
+    * the replication factor at the construction site is an integer literal
+      (a flat default, not a resolved value); or
+    * the enclosing module never mentions ``ModelTopicProvisioningPolicy`` and
+      never calls one of its resolvers.
+
+    Scanning ``scripts/`` as well as ``src/`` is the point: a future third path
+    lands in one of those two trees.
+    """
+    offenders: list[str] = []
+    for root in roots:
+        for path in sorted(root.rglob("*.py")):
+            text = path.read_text(encoding="utf-8")
+            if not _NEW_TOPIC_RE.search(text):
+                continue
+            lines = text.splitlines()
+            resolves = (
+                "ModelTopicProvisioningPolicy" in text
+                and _POLICY_RESOLVER_RE.search(text) is not None
+            )
+            for index, line in enumerate(lines):
+                if not _NEW_TOPIC_RE.search(line):
+                    continue
+                if line.lstrip().startswith(("#", "*", '"', "'")):
+                    continue  # prose/docstring mention, not a construction
+                label = f"{root.name}/{path.name}:{index + 1}"
+                window = "\n".join(lines[index : index + 12])
+                if _LITERAL_RF_RE.search(window):
+                    offenders.append(f"{label}: hardcoded replication_factor")
+                elif not resolves:
+                    offenders.append(f"{label}: module resolves no replication policy")
     return offenders
 
 
@@ -603,21 +712,134 @@ class TestCapacityCeilingIsMeasuredNotAssumed:
         tmp_path: Path,
         monkeypatch: pytest.MonkeyPatch,
     ) -> None:
-        """No ``describe_cluster`` means no ceiling — never an assumed RF1.
+        """No ``describe_cluster`` means no ceiling — and the broker's refusal is LOUD.
 
-        A declared RF the broker cannot host then fails loudly at
-        ``CreateTopics`` instead of being quietly downgraded.
+        Two properties, and the second is the OMN-15395 D5 remediation. The
+        module docstring, the policy docstring and the PR body all promised that
+        an unmeasurable cluster leaves a declared RF unreduced so it "fails
+        loudly at ``CreateTopics``". It did not: the broker's
+        ``INVALID_REPLICATION_FACTOR`` landed in the per-topic
+        ``except Exception`` boundary, became a ``logger.warning`` plus a name
+        in ``failed``, and the pass returned ``status="partial"`` — a topic
+        silently absent from the cluster, indistinguishable from a transient
+        connection blip. The fake admin here rejects the replica count exactly
+        as a one-node broker does, so loud and quiet are discriminated:
+
+        * RED before the fix — ``ensure_provisioned_topics_exist`` returns
+          normally, no exception, ``status="partial"``;
+        * GREEN after — a typed ``TopicReplicationPolicyError`` naming the
+          topic, the refused value, and the fact that capacity was unmeasurable.
         """
         _use_self_hosted(monkeypatch)
         _write_contract(tmp_path, replication_factor=2)
         provisioner = _provisioner(tmp_path)
-        recorder = _AdminRecorder(supports_describe_cluster=False)
+        recorder = _AdminRecorder(
+            supports_describe_cluster=False,
+            max_hostable_replication_factor=1,
+        )
+
+        # The single-topic path, so exactly one CreateTopics is in flight and
+        # the assertion is about THIS topic rather than whichever of the real
+        # tree's RF2 contracts the batch pass happens to reach first.
+        with _patched_admin(recorder):
+            with pytest.raises(TopicReplicationPolicyError) as excinfo:
+                await provisioner.ensure_topic_exists(topic_name=TOPIC)
+
+        # No ceiling was guessed: the contract's RF2 reached the wire unreduced.
+        assert recorder.requested_spec(TOPIC).replication_factor == 2
+        assert provisioner.policy.capacity_replication_factor is None
+        # The broker refused it, and that refusal is fail-closed and legible.
+        message = str(excinfo.value)
+        assert TOPIC in message
+        assert "INVALID_REPLICATION_FACTOR" in message
+        assert "could NOT be measured" in message
+        # The topic really does not exist — the error is not decorative.
+        assert recorder.created_names == []
+
+    async def test_unhostable_replication_aborts_the_batch_pass_too(
+        self,
+        tmp_path: Path,
+        monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
+        """The same rule on the boot pass, which is where it actually bites.
+
+        ``ensure_provisioned_topics_exist`` previously returned
+        ``status="partial"`` with the unhostable topics listed in ``failed``,
+        so the runtime booted and attached consumers to topics that do not
+        exist.
+        """
+        _use_self_hosted(monkeypatch)
+        _write_contract(tmp_path, replication_factor=2)
+        provisioner = _provisioner(tmp_path)
+        recorder = _AdminRecorder(
+            supports_describe_cluster=False,
+            max_hostable_replication_factor=1,
+        )
 
         with _patched_admin(recorder):
-            await provisioner.ensure_provisioned_topics_exist()
+            with pytest.raises(TopicReplicationPolicyError) as excinfo:
+                await provisioner.ensure_provisioned_topics_exist()
 
-        assert recorder.created_spec(TOPIC).replication_factor == 2
-        assert provisioner.policy.capacity_replication_factor is None
+        assert "INVALID_REPLICATION_FACTOR" in str(excinfo.value)
+        # The pass aborts at the first unhostable topic rather than logging it
+        # and marching on: nothing the broker refused ended up created, and the
+        # error escaped instead of becoming status="partial".
+        assert all(topic.replication_factor <= 1 for topic in recorder.created)
+
+    async def test_a_transient_create_failure_is_still_best_effort(
+        self,
+        tmp_path: Path,
+        monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
+        """Negative control for D5: only the durability failure is fail-closed.
+
+        Without this, "raise on any create error" would pass the test above
+        while turning every broker hiccup into a boot abort. Startup stays
+        best-effort for everything that is not a durability violation.
+        """
+        _use_self_hosted(monkeypatch)
+        _write_contract(tmp_path, replication_factor=2)
+        provisioner = _provisioner(tmp_path)
+        recorder = _AdminRecorder(broker_count=1)
+
+        class _FailingAdmin:
+            def __init__(self, **_kwargs: object) -> None:
+                pass
+
+            async def start(self) -> None:
+                return None
+
+            async def close(self) -> None:
+                return None
+
+            async def describe_cluster(self) -> dict[str, object]:
+                recorder.describe_cluster_calls += 1
+                return recorder.cluster()
+
+            async def describe_topics(
+                self, topics: Sequence[str] | None = None
+            ) -> list[dict[str, object]]:
+                return recorder.metadata()
+
+            async def create_topics(self, new_topics: Sequence[NewTopic]) -> None:
+                raise _TransientBrokerError("broker not available right now")
+
+        with patch.dict(
+            "sys.modules",
+            {
+                "aiokafka": MagicMock(),
+                "aiokafka.admin": MagicMock(
+                    AIOKafkaAdminClient=_FailingAdmin, NewTopic=NewTopic
+                ),
+                "aiokafka.errors": MagicMock(
+                    TopicAlreadyExistsError=_TopicAlreadyExistsError
+                ),
+            },
+        ):
+            result = await provisioner.ensure_provisioned_topics_exist()
+
+        assert TOPIC in result["failed"]
+        assert result["status"] in ("partial", "unavailable")
 
     async def test_capacity_is_measured_once_per_provisioner(
         self,
@@ -641,6 +863,37 @@ class TestCapacityCeilingIsMeasuredNotAssumed:
             await provisioner.ensure_provisioned_topics_exist()
 
         assert recorder.describe_cluster_calls == 1
+
+    async def test_capacity_probe_is_attempted_once_even_when_unmeasurable(
+        self,
+        tmp_path: Path,
+        monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
+        """Same bound on the FAILURE path (OMN-15395 D4).
+
+        The memo test above only pins the success case. Memoization keyed on
+        ``policy.broker_count is None`` cannot bound an UNMEASURABLE cluster:
+        the field stays ``None`` forever, so the probe re-ran on every
+        entrypoint — measured at 3 ``describe_cluster`` round trips across 3
+        entrypoints, each one guaranteed to fail, which is precisely the
+        per-call fan-out (d) exists to eliminate reappearing on the error path.
+        The sentinel memoizes the ATTEMPT.
+
+        RED before the fix: ``describe_cluster_calls == 3``.
+        """
+        _use_self_hosted(monkeypatch)
+        _write_contract(tmp_path, replication_factor=2)
+        provisioner = _provisioner(tmp_path)
+        recorder = _AdminRecorder(describe_cluster_raises=True)
+
+        with _patched_admin(recorder):
+            await provisioner.ensure_provisioned_topics_exist()
+            await provisioner.ensure_topic_exists(topic_name=OTHER_TOPIC)
+            await provisioner.ensure_provisioned_topics_exist()
+
+        assert recorder.describe_cluster_calls == 1
+        assert provisioner.policy.broker_count is None
+        assert provisioner.policy.capacity_replication_factor is None
 
 
 class TestDiffBeforeCreate:
@@ -995,14 +1248,100 @@ class TestPolicyErrorsEscapeBestEffortBoundaries:
         the shipped source so a NEW best-effort call site cannot silently
         reintroduce the swallow.
         """
-        src_root = Path(__file__).resolve().parents[3] / "src" / "omnibase_infra"
-        offenders = _provisioning_swallow_offenders(src_root)
+        repo_root = Path(__file__).resolve().parents[3]
+        offenders = [
+            offender
+            for root in (repo_root / "src" / "omnibase_infra", repo_root / "scripts")
+            for offender in _provisioning_swallow_offenders(root)
+        ]
         assert not offenders, (
             "provisioning call sites that swallow a durability violation into "
             f"a best-effort boundary: {offenders}. Add "
             "`except TopicReplicationPolicyError: raise` ahead of the bare "
             "`except Exception`."
         )
+
+    def test_every_create_topics_site_resolves_through_the_policy(self) -> None:
+        """Static guard: no ``NewTopic`` may be built outside the policy seam.
+
+        The sibling of the swallow guard, and the mechanism for OMN-15395 D2.
+        The swallow guard watches calls INTO the provisioner; this one watches
+        modules that go AROUND it and issue their own ``CreateTopics``. There
+        were three such live paths and one of them —
+        ``scripts/create_kafka_topics.py``, the documented operator runbook
+        command — hardcoded ``replication_factor`` from a CLI default of 1, so
+        every contract's declared ``topic_config.replication_factor`` was
+        discarded and the fail-closed managed-staging check never ran. Both
+        guards were blind to it: it calls no provisioner method, and it lives in
+        ``scripts/``, which was outside the scanned root entirely.
+        """
+        repo_root = Path(__file__).resolve().parents[3]
+        offenders = _raw_create_topics_offenders(
+            [repo_root / "src" / "omnibase_infra", repo_root / "scripts"]
+        )
+        assert not offenders, (
+            "CreateTopics construction sites that bypass "
+            f"ModelTopicProvisioningPolicy: {offenders}. Resolve the spec "
+            "through the policy (see TopicProvisioner or "
+            "scripts/create_kafka_topics.py) instead of passing a literal "
+            "replication factor."
+        )
+
+    @pytest.mark.parametrize(
+        ("body", "expected_reason"),
+        [
+            pytest.param(
+                "def go():\n"
+                "    return NewTopic('t', num_partitions=1, replication_factor=1)\n",
+                "hardcoded replication_factor",
+                id="flat-literal-default",
+            ),
+            pytest.param(
+                "def go(rf):\n"
+                "    return NewTopic('t', num_partitions=1, replication_factor=rf)\n",
+                "module resolves no replication policy",
+                id="unresolved-caller-supplied",
+            ),
+        ],
+    )
+    def test_create_topics_guard_sees_a_planted_third_path(
+        self, tmp_path: Path, body: str, expected_reason: str
+    ) -> None:
+        """Positive control: a NEW bypass path is caught, both shapes.
+
+        ``scripts/create_kafka_topics.py`` matched the first shape and shipped
+        for months. The guard is only worth anything if it fires on that shape
+        without being told where to look.
+        """
+        root = tmp_path / "scripts"
+        root.mkdir()
+        (root / "planted_creator.py").write_text(body, encoding="utf-8")
+
+        offenders = _raw_create_topics_offenders([root])
+        assert offenders == [f"scripts/planted_creator.py:2: {expected_reason}"]
+
+    def test_create_topics_guard_accepts_a_policy_resolved_site(
+        self, tmp_path: Path
+    ) -> None:
+        """Negative control: the guard is not flagging every NewTopic."""
+        root = tmp_path / "src"
+        root.mkdir()
+        (root / "compliant_creator.py").write_text(
+            "from omnibase_infra.topics.model_topic_provisioning_policy import (\n"
+            "    ModelTopicProvisioningPolicy,\n"
+            ")\n"
+            "\n"
+            "def go(policy: ModelTopicProvisioningPolicy, spec):\n"
+            "    resolved = policy.resolve_spec(spec)\n"
+            "    return NewTopic(\n"
+            "        resolved.suffix,\n"
+            "        num_partitions=resolved.partitions,\n"
+            "        replication_factor=resolved.replication_factor,\n"
+            "    )\n",
+            encoding="utf-8",
+        )
+
+        assert _raw_create_topics_offenders([root]) == []
 
     @pytest.mark.parametrize(
         "receiver",
@@ -1219,6 +1558,106 @@ class TestDriftIsReportedAgainstTheResolvedSpec:
         assert any(
             TOPIC in entry and "replication" in entry for entry in result["drift"]
         ), f"expected RF drift on a 3-node cluster serving 1 replica: {result['drift']}"
+
+    async def test_capped_lane_reports_no_partition_drift_for_a_6_partition_contract(
+        self,
+        tmp_path: Path,
+        monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
+        """The partition half of the same defect (OMN-15395 D3).
+
+        RED-before: the RF expectation was resolved but the PARTITION
+        expectation was still the raw, UNCAPPED ``spec.partitions``, while
+        creation applies ``_creation_partitions`` (the
+        ``ONEX_TOPIC_PROVISIONER_MAX_PARTITIONS`` cap, live at 1 on the dev,
+        stability-test and judge lanes per
+        ``docker/docker-compose.{infra,stability-test,judge}.yml``). Every
+        contract-declared 6-partition topic the provisioner had itself just
+        created with one partition came back as ``partition_mismatch`` on the
+        very next pass — 159 bogus entries per pass into the operator-gated
+        WS-M reassignment feed, from the provisioner reporting drift against its
+        own correct output.
+
+        RED assertion: with the fix reverted this yields
+        ``partition_mismatch: expected 6 partitions, broker reports 1``.
+        """
+        monkeypatch.setenv("ONEX_TOPIC_PROVISIONER_MAX_PARTITIONS", "1")
+        _use_self_hosted(monkeypatch)
+        _write_contract(tmp_path, replication_factor=1, partitions=6)
+        provisioner = _provisioner(tmp_path)
+        recorder = _AdminRecorder(
+            existing_topics=(TOPIC,),
+            broker_count=1,
+            reported_partitions=1,
+            reported_replicas=1,
+        )
+
+        with _patched_admin(recorder):
+            result = await provisioner.ensure_provisioned_topics_exist()
+
+        drift = [entry for entry in result["drift"] if TOPIC in entry]
+        assert drift == [], (
+            "a topic the partition cap correctly created with 1 partition must "
+            f"not be reported as partition drift on a capped lane: {drift}"
+        )
+
+    async def test_partitions_above_the_cap_are_not_a_reassignment_target(
+        self,
+        tmp_path: Path,
+        monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
+        """The other direction: a cap lowered under existing topics.
+
+        Kafka cannot reduce a partition count, so a topic created before the cap
+        was lowered must not be emitted as ``partition_mismatch`` either — that
+        would hand the repair lane an instruction it cannot execute. It is not
+        silently dropped: the divergence is real, it is just cap-explained, so
+        it is logged under a distinct label and kept out of the drift feed.
+        """
+        monkeypatch.setenv("ONEX_TOPIC_PROVISIONER_MAX_PARTITIONS", "1")
+        _use_self_hosted(monkeypatch)
+        _write_contract(tmp_path, replication_factor=1, partitions=6)
+        provisioner = _provisioner(tmp_path)
+        recorder = _AdminRecorder(
+            existing_topics=(TOPIC,),
+            broker_count=1,
+            reported_partitions=6,
+            reported_replicas=1,
+        )
+
+        with _patched_admin(recorder):
+            result = await provisioner.ensure_provisioned_topics_exist()
+
+        assert [entry for entry in result["drift"] if TOPIC in entry] == []
+
+    async def test_genuine_partition_drift_is_still_reported(
+        self,
+        tmp_path: Path,
+        monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
+        """Negative control: an UNCAPPED lane still reports partition drift.
+
+        Without this, "expect the capped value" degenerates into "never report
+        partition drift".
+        """
+        monkeypatch.delenv("ONEX_TOPIC_PROVISIONER_MAX_PARTITIONS", raising=False)
+        _use_self_hosted(monkeypatch)
+        _write_contract(tmp_path, replication_factor=1, partitions=6)
+        provisioner = _provisioner(tmp_path)
+        recorder = _AdminRecorder(
+            existing_topics=(TOPIC,),
+            broker_count=1,
+            reported_partitions=3,
+            reported_replicas=1,
+        )
+
+        with _patched_admin(recorder):
+            result = await provisioner.ensure_provisioned_topics_exist()
+
+        assert any(
+            TOPIC in entry and "partition_mismatch" in entry
+            for entry in result["drift"]
+        ), f"expected partition drift on an uncapped lane: {result['drift']}"
 
 
 class TestReadinessSpecPassThrough:
