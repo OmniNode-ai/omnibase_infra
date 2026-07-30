@@ -3,6 +3,7 @@
 
 from __future__ import annotations
 
+import asyncio
 from collections.abc import Mapping, Sequence
 from pathlib import Path
 from uuid import UUID, uuid4
@@ -48,6 +49,26 @@ class _RecordingBus:
     ) -> None:
         self.events.append("destination_ack")
         self.sent.append((topic, value))
+
+
+class _BlockingBus(_RecordingBus):
+    def __init__(self, events: list[str]) -> None:
+        super().__init__(events)
+        self.entered = asyncio.Event()
+        self.release = asyncio.Event()
+        self.publish_calls = 0
+
+    async def publish(
+        self,
+        topic: str,
+        key: bytes | None,
+        value: bytes,
+        headers: object | None = None,
+    ) -> None:
+        self.publish_calls += 1
+        self.entered.set()
+        await self.release.wait()
+        await super().publish(topic, key, value, headers)
 
 
 class _Source:
@@ -211,6 +232,44 @@ async def test_restart_after_commit_failure_suppresses_republish(
     assert restarted_cloud.sent == []
     assert restarted_events == ["source_commit"]
     assert restarted_source.committed == [message]
+
+
+async def test_concurrent_duplicate_is_published_once() -> None:
+    events: list[str] = []
+    source = _Source(events)
+    store = StoreIdempotencyInmemory()
+    local_bus = _RecordingBus(events)
+    cloud_bus = _BlockingBus(events)
+    config = _config()
+    delivery = NodeGatewayDelivery(
+        config=config,
+        forwarder=ServiceGatewayForwarder(
+            config=config,
+            local_bus=local_bus,  # type: ignore[arg-type]
+            cloud_bus=cloud_bus,  # type: ignore[arg-type]
+        ),
+        local_consumer=source,  # type: ignore[arg-type]
+        cloud_consumer=source,  # type: ignore[arg-type]
+        idempotency_store=store,
+    )
+    message = _message()
+
+    first = asyncio.create_task(
+        delivery.deliver_message("outbound", source, message),  # type: ignore[arg-type]
+    )
+    await asyncio.wait_for(cloud_bus.entered.wait(), timeout=1)
+    duplicate = asyncio.create_task(
+        delivery.deliver_message("outbound", source, message),  # type: ignore[arg-type]
+    )
+    for _ in range(5):
+        await asyncio.sleep(0)
+
+    assert cloud_bus.publish_calls == 1
+    cloud_bus.release.set()
+    await asyncio.gather(first, duplicate)
+
+    assert len(cloud_bus.sent) == 1
+    assert source.committed == [message, message]
 
 
 async def test_store_failure_nacks_without_destination_dispatch() -> None:

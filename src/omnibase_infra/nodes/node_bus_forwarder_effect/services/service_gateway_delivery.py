@@ -70,6 +70,11 @@ class NodeGatewayDelivery:
         self._cloud_consumer = cloud_consumer
         self._idempotency_store = idempotency_store
         self._poll_timeout_ms = poll_timeout_ms
+        # The two directional loops share one process and one durable marker
+        # namespace. Serialize the check -> publish -> marker -> commit sequence
+        # so the same envelope cannot race through both directions before either
+        # loop records it.
+        self._delivery_lock = asyncio.Lock()
         self._tasks: list[asyncio.Task[None]] = []
 
     async def start(self) -> None:
@@ -113,7 +118,17 @@ class NodeGatewayDelivery:
         source: ProtocolGatewayConsumer,
         message: ModelTransportMessage,
     ) -> None:
-        """Deliver one record and commit its source offset in the safe order."""
+        """Serialize and deliver one record in the durable acknowledgement order."""
+        async with self._delivery_lock:
+            await self._deliver_message_locked(direction, source, message)
+
+    async def _deliver_message_locked(
+        self,
+        direction: Literal["outbound", "inbound"],
+        source: ProtocolGatewayConsumer,
+        message: ModelTransportMessage,
+    ) -> None:
+        """Deliver one record while holding the process-wide delivery lock."""
         envelope = self._forwarder.decode_message(message)
         domain = f"gateway:{self._config.tenant_identity.tenant_slug}"
         try:
