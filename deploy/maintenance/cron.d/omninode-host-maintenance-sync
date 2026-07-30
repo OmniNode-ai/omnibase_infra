@@ -1,0 +1,6 @@
+SHELL=/bin/bash
+PATH=/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin
+
+# OMN-15525: fail loudly when a host maintenance artifact drifts from origin/dev.
+# Hourly at :37 to stay off the */15 system-report boundary.
+37 * * * * root /data/maintenance/bin/omninode-host-maintenance-sync.sh --check --slack
