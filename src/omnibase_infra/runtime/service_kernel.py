@@ -70,6 +70,9 @@ from uuid import UUID
 import yaml
 
 if TYPE_CHECKING:
+    from omnibase_core.models.core.model_deployment_topology import (
+        ModelDeploymentTopology,
+    )
     from omnibase_infra.event_bus.model_topic_readiness_config import (
         ModelTopicReadinessConfig,
     )
@@ -354,6 +357,23 @@ def _get_contracts_dir() -> Path:
         return Path(onex_value)
 
     return Path(DEFAULT_CONTRACTS_DIR)
+
+
+def _load_runtime_database_topology() -> ModelDeploymentTopology | None:
+    """Resolve only the explicit application-database topology profile.
+
+    ``ONEX_ENVIRONMENT`` and ``KAFKA_ENVIRONMENT`` are event namespaces and are
+    intentionally not consulted here. An absent profile leaves non-database
+    runtimes unchanged; a runtime that owns a ``db_io`` contract is rejected
+    after discovery unless this function returned a checked-in topology.
+    """
+    profile = os.environ.get("ONEX_DATABASE_TOPOLOGY_PROFILE")
+    if profile is None:
+        return None
+
+    from omnibase_infra.topology import load_topology_profile
+
+    return load_topology_profile(profile)
 
 
 def _should_auto_create_missing_topics(
@@ -981,6 +1001,7 @@ async def bootstrap() -> int:
         # Pass correlation_id for consistent tracing across initialization sequence
         config_start_time = time.time()
         config = load_runtime_config(contracts_dir, correlation_id=correlation_id)
+        deployment_topology = _load_runtime_database_topology()
         config_duration = time.time() - config_start_time
         # Log only safe config fields (no credentials or sensitive data)
         # Full config.model_dump() could leak passwords, API keys, connection strings
@@ -2605,6 +2626,18 @@ async def bootstrap() -> int:
                     errors=manifest.errors,
                 )
                 auto_wiring_manifest_for_subscriptions = filtered_manifest
+                db_io_contracts = tuple(
+                    contract.name
+                    for contract in filtered_manifest.contracts
+                    if contract.db_io is not None and contract.db_io.db_tables
+                )
+                if db_io_contracts and deployment_topology is None:
+                    raise RuntimeHostError(
+                        "Auto-wiring discovered db_io contracts but "
+                        "ONEX_DATABASE_TOPOLOGY_PROFILE is not set; an explicit "
+                        "checked-in database topology profile is required for: "
+                        f"{sorted(db_io_contracts)}"
+                    )
 
                 # OMN-12409: Wire result appliers for all manifest contracts that
                 # declare published_events but are not yet in auto_wiring_result_appliers.
@@ -2820,6 +2853,7 @@ async def bootstrap() -> int:
                     subscribe_immediately=False,
                     result_appliers_by_contract=auto_wiring_result_appliers,
                     materialized_explicit_dependencies=(runtime_handler_dependencies),
+                    topology=deployment_topology,
                 )
 
                 auto_wiring_duration = time.time() - auto_wiring_start
@@ -3124,6 +3158,9 @@ async def bootstrap() -> int:
             runtime_node_graph_config=node_graph_config,
             # OMN-10587: Wire prefetch policy from runtime profile.
             prefetch_policy=kernel_profile.prefetch_policy,
+            # OMN-15418: Thread the same checked-in topology used by cold boot
+            # into post-freeze Kafka contract materialization.
+            deployment_topology=deployment_topology,
         )
         runtime_create_duration = time.time() - runtime_create_start_time
         logger.debug(
