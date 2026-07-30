@@ -17,6 +17,7 @@ required_env:
   - LLM_CLOUD_ENDPOINT_HOST_ALLOWLIST
   - LOCAL_LLM_SHARED_SECRET
   - GITHUB_TOKEN
+  - DEPLOY_AGENT_HMAC_SECRET
 hardcoded_env:
   OMNIBASE_INFRA_DB_URL: 'postgresql://postgres:${POSTGRES_PASSWORD}@postgres:5432/omnibase_infra'
   OMNIINTELLIGENCE_DB_URL: 'postgresql://postgres:${POSTGRES_PASSWORD}@postgres:5432/omniintelligence'

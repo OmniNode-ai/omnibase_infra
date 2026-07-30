@@ -85,6 +85,7 @@ BASE_REQUIRED_ENV: dict[str, str] = {
     "ONEX_SERVICE_CLIENT_SECRET": "test-service-secret",
     "LINEAR_API_KEY": "test-linear-api-key",
     "GITHUB_TOKEN": "test-github-token",
+    "DEPLOY_AGENT_HMAC_SECRET": "render-only-deploy-agent-hmac-secret",
     "LLM_CODER_URL": "http://llm-coder.test:8000",
     "LLM_CODER_FAST_URL": "http://llm-coder-fast.test:8001",
     "LLM_EMBEDDING_URL": "http://llm-embed.test:8100",

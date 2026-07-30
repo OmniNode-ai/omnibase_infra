@@ -45,6 +45,7 @@ REQUIRED_KEYS: frozenset[str] = frozenset(
         "OMNIBASE_INFRA_DB_URL",
         "ONEX_CONTRACTS_DIR",
         "POSTGRES_PASSWORD",
+        "DEPLOY_AGENT_HMAC_SECRET",
         "USE_EVENT_ROUTING",
     }
 )

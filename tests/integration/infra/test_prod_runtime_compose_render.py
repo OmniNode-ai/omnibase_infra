@@ -33,6 +33,7 @@ COMPOSE_RENDER_ENV = {
     "INFISICAL_ENCRYPTION_KEY": "render-only-infisical-encryption-key-32",
     "INFISICAL_REDIS_URL": "redis://valkey:6379",
     "GITHUB_TOKEN": "render-only-github-token",
+    "DEPLOY_AGENT_HMAC_SECRET": "render-only-deploy-agent-hmac-secret",
     "LINEAR_API_KEY": "render-only-linear-api-key",
     "LLM_CODER_FAST_URL": _http_url("llm-coder-fast.invalid"),
     "LLM_CODER_URL": _http_url("llm-coder.invalid"),

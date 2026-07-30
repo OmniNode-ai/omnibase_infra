@@ -69,6 +69,10 @@ _PRE_GROWTH_ENV_VARS = frozenset(
         # OMN-11595: runtime-effects owns GitHub API polling and must validate
         # its deploy-time token requirement with the rest of the effects bundle.
         "GITHUB_TOKEN",
+        # OMN-15009: already present in the .201 host environment. The effects
+        # runtime signs deploy commands with it; the deploy agent rejects
+        # unsigned commands.
+        "DEPLOY_AGENT_HMAC_SECRET",
         # omnidash projection DSN: present in ~/.omnibase/.env alongside
         # POSTGRES_PASSWORD; used by intelligence-api and projection consumers.
         "OMNIDASH_ANALYTICS_DB_URL",
@@ -124,6 +128,14 @@ def test_runtime_effects_requires_github_token() -> None:
     resolved = resolver.resolve(bundles=["runtime-core"])
     assert "runtime-effects" in resolved.service_names
     assert "GITHUB_TOKEN" in resolved.required_env
+
+
+@pytest.mark.unit
+def test_runtime_effects_requires_deploy_agent_hmac_secret() -> None:
+    resolver = CatalogResolver(catalog_dir=CATALOG_DIR)
+    resolved = resolver.resolve(bundles=["runtime-core"])
+    assert "runtime-effects" in resolved.service_names
+    assert "DEPLOY_AGENT_HMAC_SECRET" in resolved.required_env
 
 
 @pytest.mark.unit

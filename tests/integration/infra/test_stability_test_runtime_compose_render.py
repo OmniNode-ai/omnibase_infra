@@ -124,6 +124,7 @@ COMPOSE_RENDER_ENV = {
     "INFISICAL_REDIS_URL": "redis://:render-only-valkey-password@valkey:6379",
     "CI_CALLBACK_TOKEN": "deploy-agent-compose-parse-only",
     "GITHUB_TOKEN": "render-only-github-token",
+    "DEPLOY_AGENT_HMAC_SECRET": "render-only-deploy-agent-hmac-secret",
     "KEYCLOAK_ADMIN_CLIENT_SECRET": "render-only-admin-client-secret",
     "LINEAR_API_KEY": "render-only-linear-api-key",
     "LINEAR_WEBHOOK_SECRET": "deploy-agent-compose-parse-only",

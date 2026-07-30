@@ -44,38 +44,40 @@ branch protection.
 
 **What happens:** On a merged PR, the `runtime-rebuild-trigger.yml` workflow fires.
 It evaluates whether the PR touched runtime-relevant files and, if so, publishes a
-signed Kafka event to the cloud data-plane bus.
+strict `redeploy-start` command to the development control bus. The runtime-owned
+redeploy orchestrator validates and gates the request before its deploy effect
+publishes a separately signed command to the deploy agent.
 
 **Trigger owner:** GitHub Actions — `on: pull_request: types: [closed]` on the
-`omnimarket` repo, gated by `if: github.event.pull_request.merged == true`.
+runtime repository, gated by `if: github.event.pull_request.merged == true`.
 
 **Code location:**
-- Workflow: `omnimarket/.github/workflows/runtime-rebuild-trigger.yml`
-- Decision script: `omnimarket/scripts/trigger_rebuild_on_merge.py`
-- Topic published: `onex.cmd.deploy.rebuild-requested.v1` (via cloud SASL/SSL Kafka)
-- Required secrets: `KAFKA_BOOTSTRAP_SERVERS`, `KAFKA_SASL_USERNAME`,
-  `KAFKA_SASL_PASSWORD`, `DEPLOY_AGENT_HMAC_SECRET`
+- Workflow: `.github/workflows/runtime-rebuild-trigger.yml`
+- Decision script: `scripts/trigger_rebuild_on_merge.py`
+- Broker authority: `omnimarket/config/ci_bus_lanes.yaml`
+- Topic published: `onex.cmd.omnimarket.redeploy-start.v1`
+- Required GitHub secrets: none for the development control bus
 
 **Trigger conditions** (`trigger_rebuild_on_merge.py::should_trigger`):
 - PR had the `runtime_change` label, **OR**
 - Any changed file matches `src/omnimarket/*` or `src/omnibase_infra/nodes/*`
 
-**Payload:** `ModelRebuildRequested` (from `deploy_agent/events.py`):
+**Payload:** the strict `ModelRedeployStartCommand` shape:
 ```text
-correlation_id, requested_by, scope="runtime", git_ref="origin/main"
+correlation_id, scope, git_ref, runtime_lane, build_source, requested_by
 ```
 
-**HMAC signing:** the payload is signed with `DEPLOY_AGENT_HMAC_SECRET` before
-publishing. The deploy-agent verifies the signature on receipt.
+**HMAC signing:** the upstream `redeploy-start` command is not a deploy-agent
+command and is not HMAC-signed. `node_redeploy_deploy_effect` signs the downstream
+`onex.cmd.deploy.rebuild-requested.v1` command with `DEPLOY_AGENT_HMAC_SECRET`.
+Both `runtime-effects` and `deploy-agent.service` receive that secret from the
+runtime host environment; the deploy agent verifies it on receipt.
 
-**Deploy-agent Kafka control bus:** The trigger script publishes to
-`KAFKA_BOOTSTRAP_SERVERS`, and the deploy-agent now requires the same explicit
-Kafka config for command consumption, completion publishing, and rejection
-publishing. There is intentionally no localhost fallback. A prior fix eliminated the
-code-level split-brain path where the deploy-agent could silently consume or
-publish on a different bus from the trigger publisher. Post-merge validation must
-still verify the runtime host user service environment contains the intended
-`KAFKA_BOOTSTRAP_SERVERS` value before relying on automated rebuilds.
+**Control-bus routing:** trusted self-hosted CI selects the checked-in `dev` lane
+and publishes over the local plaintext Redpanda listener. The selected broker is
+reviewable configuration, not a secret; any injected broker value is accepted only
+when it exactly matches the overlay. The deploy agent separately consumes the
+downstream signed command on the target lane selected by the orchestrator.
 
 ---
 
