@@ -35,6 +35,31 @@ CI_PROCESS_TEST_PATHS = (
     "config/runner_routing_policy.yaml",
 )
 
+# OMN-15410: pytest roots that live NEXT TO the code they cover instead of
+# under tests/. They are collected by the full suite (pyproject.toml
+# `testpaths`), but the full suite is only one of two pytest steps — a
+# NARROWED smart-selection run reaches nothing it is not explicitly told to
+# reach. Without these mappings the four roots would be "collected" in the
+# weakest possible sense: exercised only when something else escalated the
+# job to full suite. Keys are source prefixes, values are the test roots a
+# change under that prefix must run. Over-selection here is safe (extra tests
+# run); under-selection is the OMN-15378 false-green class.
+#
+# Every value MUST also appear in pyproject.toml `testpaths`, and every
+# non-`tests` testpaths entry MUST appear as a value here — both directions
+# are asserted by scripts/validation/validate_test_root_collection.py.
+COLLOCATED_TEST_ROOTS: dict[str, str] = {
+    # Broadest first is irrelevant (all matches apply), but note scripts/tests/
+    # covers the seed/keycloak scripts that live directly under scripts/, so it
+    # is mapped from the whole scripts/ tree, matching SCRIPTS_TEST_PREFIXES.
+    "scripts/": "scripts/tests/",
+    "scripts/ci/": "scripts/ci/tests/",
+    "scripts/runtime_build/": "scripts/runtime_build/tests/",
+    "src/omnibase_infra/services/observability/agent_actions/": (
+        "src/omnibase_infra/services/observability/agent_actions/tests/"
+    ),
+}
+
 # Test families the change-aware pytest job structurally cannot run, so
 # selecting one can never make it execute -- it would only make pytest exit 5
 # ("no tests ran") when it is the sole selected path, reddening the gate without
@@ -185,6 +210,13 @@ def _resolve(
             # omnibase_infra#2493). Note this is an `if`, not an `elif`:
             # scripts/ci/ keeps its tests/ci/ CI-process mapping AND gains these.
             selected.update(SCRIPTS_TEST_PREFIXES)
+
+        # OMN-15410: collocated roots (tests living beside their code rather
+        # than under tests/). Independent of every branch above — a path can
+        # legitimately map to a tests/ directory AND to its collocated root.
+        for source_prefix, collocated_root in COLLOCATED_TEST_ROOTS.items():
+            if path.startswith(source_prefix):
+                selected.add(collocated_root)
 
     expanded: set[str] = set(direct_modules)
     for module in direct_modules:

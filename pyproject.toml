@@ -384,7 +384,26 @@ split-on-trailing-comma = true
 
 [tool.pytest.ini_options]
 pythonpath = ["src", "."]
-testpaths = ["tests"]
+# OMN-15410: `testpaths` is the SINGLE SOURCE OF TRUTH for what CI collects.
+# The full-suite job in .github/workflows/ci.yml deliberately passes NO
+# positional path to pytest so it inherits this list verbatim; previously it
+# hardcoded `pytest tests/`, which meant a root added here would still never
+# run. scripts/validation/validate_test_root_collection.py fails closed on
+# both halves of that seam (a tests/ dir absent from this list, and a ci.yml
+# full-suite step that re-introduces a positional path).
+#
+# The four non-`tests/` entries are collocated roots that were uncollected by
+# every CI job until OMN-15410 (the OMN-15378 class). They cannot be folded
+# into tests/ as-is: scripts/tests/ and the agent_actions root declare their
+# own packages, and moving them would break their relative imports for no
+# collection benefit now that this list governs.
+testpaths = [
+    "tests",
+    "scripts/ci/tests",
+    "scripts/tests",
+    "scripts/runtime_build/tests",
+    "src/omnibase_infra/services/observability/agent_actions/tests",
+]
 python_files = ["test_*.py", "*_test.py"]
 python_classes = ["Test*"]
 python_functions = ["test_*"]
