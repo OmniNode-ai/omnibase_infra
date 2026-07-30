@@ -60,6 +60,9 @@ from omnibase_infra.validation.models.model_application_database_acl_policy impo
 from omnibase_infra.validation.models.model_application_database_activity_result_evidence import (
     ModelApplicationDatabaseActivityResultEvidence,
 )
+from omnibase_infra.validation.models.model_application_database_catalog_object_evidence import (
+    ModelApplicationDatabaseCatalogObjectEvidence,
+)
 from omnibase_infra.validation.models.model_application_database_catalog_result_evidence import (
     ModelApplicationDatabaseCatalogResultEvidence,
 )
@@ -116,13 +119,26 @@ class ObjectEvidence:
 class ProtocolApplicationDatabaseRoleAttributeState(Protocol):
     """Structural shape shared by observed and governed PostgreSQL role state."""
 
-    login: bool
-    superuser: bool
-    bypass_rls: bool
-    create_database: bool
-    create_role: bool
-    replication: bool
-    inherit: bool
+    @property
+    def login(self) -> bool: ...
+
+    @property
+    def superuser(self) -> bool: ...
+
+    @property
+    def bypass_rls(self) -> bool: ...
+
+    @property
+    def create_database(self) -> bool: ...
+
+    @property
+    def create_role(self) -> bool: ...
+
+    @property
+    def replication(self) -> bool: ...
+
+    @property
+    def inherit(self) -> bool: ...
 
 
 def _status_is_ready(status: str | None) -> bool:
@@ -1104,7 +1120,10 @@ def build_application_database_acl_matrix(
             }
         )
     )
-    observed_role_state_by_name = {}
+    observed_role_state_by_name: dict[
+        str,
+        ModelApplicationDatabaseObservedRoleState,
+    ] = {}
     for source_id, principal_inventory in sorted(principal_inventories.items()):
         for observed_state in principal_inventory.observed_role_states:
             existing_state = observed_role_state_by_name.get(observed_state.role)
@@ -1442,10 +1461,10 @@ def build_application_database_acl_matrix(
     database_owners: dict[str, str] = {}
     observed_schema_owners: dict[str, dict[str, str]] = {}
     absent_schemas: dict[str, tuple[str, ...]] = {}
-    observed_catalog_objects = []
+    observed_catalog_objects: list[ModelApplicationDatabaseCatalogObjectEvidence] = []
     principal_domains: dict[str, set[EnumDatabaseSchemaDomain]] = defaultdict(set)
     allowed_memberships: list[ModelApplicationDatabaseRoleMembership] = []
-    governed_role_states = []
+    governed_role_states: list[ModelApplicationDatabaseRoleState] = []
     retained_administrative_principals: set[str] = set()
     for database_ref, database in sorted(topology.databases.items()):
         declared = tuple(sorted(database.principals))
@@ -1532,9 +1551,9 @@ def build_application_database_acl_matrix(
         else:
             database_owners[database_ref] = policy.database_owner_role
         if len(inventory_inputs) == 1:
-            inventory = inventory_inputs[0][1]
-            owner_evidence = set(inventory.owner_refs).union(
-                inventory.absent_owner_refs
+            principal_inventory = inventory_inputs[0][1]
+            owner_evidence = set(principal_inventory.owner_refs).union(
+                principal_inventory.absent_owner_refs
             )
             missing_owner_evidence = sorted(expected_owners - owner_evidence)
             if missing_owner_evidence:
@@ -1610,14 +1629,14 @@ def build_application_database_acl_matrix(
                     "manage_memberships=True"
                 )
             if not state.manage_attributes:
-                observed_state = observed_role_state_by_name.get(state.role)
-                if observed_state is None:
+                actual_role_state = observed_role_state_by_name.get(state.role)
+                if actual_role_state is None:
                     blockers.append(
                         f"{database_ref}: non-mutating governed role {state.role!r} "
                         "lacks observed attribute evidence"
                     )
                 elif any(
-                    getattr(observed_state, field_name) != getattr(state, field_name)
+                    getattr(actual_role_state, field_name) != getattr(state, field_name)
                     for field_name in (
                         "login",
                         "superuser",
@@ -1716,7 +1735,7 @@ def build_application_database_acl_matrix(
             ),
         )
     )
-    expected_catalog_object_ids = {
+    expected_catalog_object_ids: set[tuple[str, str, str, str]] = {
         (
             obj.catalog_kind,
             obj.schema_ref,
@@ -1725,7 +1744,9 @@ def build_application_database_acl_matrix(
         )
         for obj in ordered_objects
     }
-    observed_catalog_object_ids = {obj.identity for obj in observed_catalog_objects}
+    observed_catalog_object_ids: set[tuple[str, str, str, str]] = {
+        obj.identity for obj in observed_catalog_objects
+    }
     if expected_catalog_object_ids != observed_catalog_object_ids:
         object_blockers.append(
             "live catalog object identities differ from the exact typed ownership "
@@ -2594,7 +2615,7 @@ def render_application_database_acl_sql(
         for row in matrix.default_privileges
     }
     observed_states = {state.role: state for state in matrix.observed_role_states}
-    desired_object_owners = {
+    desired_object_owners: dict[tuple[str, str, str, str], str] = {
         (
             obj.catalog_kind,
             obj.schema_ref,
