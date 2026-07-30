@@ -28,6 +28,7 @@ LAYERED_RENDER_DUMMY_ENV = {
     # its `command:` block during the layered render.
     "DEV_REDPANDA_ADVERTISE_HOST": "localhost",  # kafka-fallback-ok — test fixture
     "GITHUB_TOKEN": "layered-render-dummy",
+    "DEPLOY_AGENT_HMAC_SECRET": "layered-render-dummy",
     "LINEAR_API_KEY": "layered-render-dummy",
     "ONEX_REGISTRATION_AUTO_ACK": "false",
     "ONEX_SERVICE_CLIENT_SECRET": "layered-render-dummy",

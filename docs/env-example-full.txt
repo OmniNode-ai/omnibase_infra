@@ -271,6 +271,10 @@ ONEX_LOG_LEVEL=INFO
 # The same rule applies to any future ONEX_EFFECTS_*_TOPIC overrides.
 # ONEX_EFFECTS_GROUP_ID=onex-runtime-effects
 
+# HMAC-SHA256 key shared by runtime-effects and deploy-agent. Required for
+# signed rebuild commands; generate once and store in ~/.omnibase/.env.
+# DEPLOY_AGENT_HMAC_SECRET=__REPLACE_WITH_SECURE_RANDOM_SECRET__
+
 # Worker runtime Kafka topics (optional)
 # Default: worker-requests, worker-responses, onex-runtime-workers
 # ONEX_WORKER_INPUT_TOPIC=worker-requests

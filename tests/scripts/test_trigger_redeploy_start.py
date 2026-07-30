@@ -27,6 +27,25 @@ REDEPLOY_START_TOPIC = "onex.cmd.omnimarket.redeploy-start.v1"
 REBUILD_REQUESTED_TOPIC = "onex.cmd.deploy.rebuild-requested.v1"
 
 
+def _write_bus_contracts(tmp_path: Path) -> tuple[Path, Path]:
+    overlay = tmp_path / "ci_bus_lanes.yaml"
+    overlay.write_text(
+        "default: inmemory\nlanes:\n  dev:\n    broker: declared:19092\n"
+    )
+    consumer_model = tmp_path / "model_redeploy_start_command.py"
+    consumer_model.write_text(
+        "class ModelRedeployStartCommand(BaseModel):\n"
+        "    model_config = ConfigDict(frozen=True, extra='forbid')\n"
+        "    correlation_id: UUID = Field(...)\n"
+        "    scope: str = Field(default='full')\n"
+        "    git_ref: str = Field(default='origin/main')\n"
+        "    runtime_lane: str = Field(default='dev')\n"
+        "    build_source: str = Field(default='release')\n"
+        "    requested_by: str = Field(default='node_redeploy_orchestrator')\n"
+    )
+    return overlay, consumer_model
+
+
 def _load_trigger_module() -> Any:
     spec = importlib.util.spec_from_file_location(
         "trigger_rebuild_on_merge", SCRIPT_PATH
@@ -126,11 +145,10 @@ def test_publish_redeploy_start_carries_triggering_lane_and_ref(
         bootstrap_servers="broker:9092",
         username="user",
         password="secret",
-        hmac_secret="hmac-secret",
         runtime_lane="dev",
-        source_branch="dev",
-        source_sha="abc123",
-        correlation_id="corr-123",
+        build_source="workspace",
+        source_sha="abc1234",
+        correlation_id="d35d0dd8-e1a5-4fa7-a323-b1704ee44406",
         requested_by="gha/omnibase_infra/pr-42",
     )
 
@@ -142,23 +160,25 @@ def test_publish_redeploy_start_carries_triggering_lane_and_ref(
     assert msg["topic"] == REDEPLOY_START_TOPIC
     payload = msg["payload"]
     assert payload["runtime_lane"] == "dev"
-    assert payload["source_branch"] == "dev"
-    assert payload["source_sha"] == "abc123"
+    assert payload["git_ref"] == "abc1234"
+    assert payload["build_source"] == "workspace"
     # No hardcoded origin/main anywhere in the payload.
     assert "origin/main" not in json.dumps(payload)
-    # HMAC signature is still applied.
-    assert "_signature" in payload
+    assert "_signature" not in payload
+    assert "source_branch" not in payload
+    assert "source_sha" not in payload
 
 
 @pytest.mark.unit
 def test_cli_publishes_redeploy_start_with_main_lane(
-    trigger_module: Any, monkeypatch: pytest.MonkeyPatch
+    trigger_module: Any, monkeypatch: pytest.MonkeyPatch, tmp_path: Path
 ) -> None:
     """End-to-end CLI: a main-base trigger publishes the stability-test lane."""
-    monkeypatch.setenv("KAFKA_BOOTSTRAP_SERVERS", "broker:9092")
-    monkeypatch.setenv("KAFKA_SASL_USERNAME", "user")
-    monkeypatch.setenv("KAFKA_SASL_PASSWORD", "secret")
-    monkeypatch.setenv("DEPLOY_AGENT_HMAC_SECRET", "hmac-secret")
+    monkeypatch.delenv("KAFKA_BOOTSTRAP_SERVERS", raising=False)
+    monkeypatch.delenv("KAFKA_SASL_USERNAME", raising=False)
+    monkeypatch.delenv("KAFKA_SASL_PASSWORD", raising=False)
+    monkeypatch.delenv("DEPLOY_AGENT_HMAC_SECRET", raising=False)
+    overlay, consumer_model = _write_bus_contracts(tmp_path)
 
     captured: dict[str, Any] = {}
 
@@ -180,15 +200,21 @@ def test_cli_publishes_redeploy_start_with_main_lane(
             "--source-sha",
             "deadbeef",
             "--correlation-id",
-            "corr-xyz",
+            "d35d0dd8-e1a5-4fa7-a323-b1704ee44406",
             "--requested-by",
             "gha/omnibase_infra/pr-7",
+            "--bus-lane",
+            "dev",
+            "--bus-overlay",
+            str(overlay),
+            "--consumer-model",
+            str(consumer_model),
         ],
     )
 
     assert result.exit_code == 0, result.output
     assert captured["runtime_lane"] == "stability-test"
-    assert captured["source_branch"] == "main"
+    assert captured["build_source"] == "release"
     assert captured["source_sha"] == "deadbeef"
 
 

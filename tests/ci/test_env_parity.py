@@ -97,6 +97,8 @@ SECRET_KEYS: frozenset[str] = frozenset(
         # GitHub API/CLI auth — injected via Infisical at runtime
         "GITHUB_TOKEN",
         "GH_TOKEN",
+        # Deploy control-plane command authentication — injected via Infisical at runtime
+        "DEPLOY_AGENT_HMAC_SECRET",
         # Qdrant vector store API key — credential, sourced from Infisical
         "QDRANT_API_KEY",
         # Cloud-tier LLM route secret ref — credential, sourced from Infisical/k8s secret.

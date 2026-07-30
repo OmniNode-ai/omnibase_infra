@@ -26,11 +26,15 @@
 #
 # Tickets: OMN-8917 (original auto-trigger), OMN-12573 (re-point to node_redeploy)
 #
-# Required environment variables (when not --dry-run):
-#   KAFKA_BOOTSTRAP_SERVERS   -- broker address(es), e.g. host:9092
-#   KAFKA_SASL_USERNAME       -- SASL username / API key
-#   KAFKA_SASL_PASSWORD       -- SASL password / API secret
-#   DEPLOY_AGENT_HMAC_SECRET  -- HMAC secret for payload signing
+# Required inputs (when not --dry-run):
+#   --bus-lane                -- control-bus lane declared by the overlay
+#   --bus-overlay             -- checked-in config/ci_bus_lanes.yaml path
+#   --consumer-model          -- canonical strict consumer model source
+#
+# Optional environment variables:
+#   KAFKA_BOOTSTRAP_SERVERS   -- drift guard / from-secret broker only
+#   KAFKA_SASL_USERNAME       -- SASL username / API key (cloud broker only)
+#   KAFKA_SASL_PASSWORD       -- SASL password / API secret (cloud broker only)
 #
 # Usage:
 #   python scripts/trigger_rebuild_on_merge.py \
@@ -42,16 +46,19 @@
 
 from __future__ import annotations
 
+import ast
 import fnmatch
-import hashlib
-import hmac
 import json
 import os
 import sys
 import uuid
-from datetime import UTC, datetime
+from pathlib import Path
+from typing import Literal
+from uuid import UUID
 
 import click
+import yaml
+from pydantic import BaseModel, ConfigDict, ValidationError, field_validator
 
 from omnibase_infra.utils.util_producer_effect_assertion import (
     ProducerZeroOutputError,
@@ -79,6 +86,286 @@ _BASE_BRANCH_LANES: dict[str, str] = {
     "dev": "dev",
     "main": "stability-test",
 }
+
+
+class ModelCiBusLane(BaseModel):
+    """One checked-in CI control-bus lane declaration."""
+
+    model_config = ConfigDict(extra="forbid", str_strip_whitespace=True)
+
+    broker: str
+
+    @field_validator("broker")
+    @classmethod
+    def validate_broker(cls, value: str) -> str:
+        """Reject empty broker declarations at the contract boundary."""
+        if not value:
+            raise ValueError("broker must not be empty")
+        return value
+
+
+class ModelCiBusOverlay(BaseModel):
+    """Typed contract for the authoritative lane-to-broker overlay."""
+
+    model_config = ConfigDict(extra="forbid", str_strip_whitespace=True)
+
+    default: str
+    lanes: dict[str, ModelCiBusLane]
+
+    @field_validator("default")
+    @classmethod
+    def validate_default(cls, value: str) -> str:
+        """The current overlay contract has an explicit in-memory default."""
+        if value != "inmemory":
+            raise ValueError("default must be 'inmemory'")
+        return value
+
+    @field_validator("lanes")
+    @classmethod
+    def validate_lanes(
+        cls, value: dict[str, ModelCiBusLane]
+    ) -> dict[str, ModelCiBusLane]:
+        """A bus overlay without declared lanes cannot route a producer."""
+        if not value:
+            raise ValueError("lanes must not be empty")
+        if any(not lane.strip() for lane in value):
+            raise ValueError("lane names must not be empty")
+        return value
+
+
+# The script is also loaded directly from its file path by hermetic tests. Give
+# Pydantic the explicit namespace so postponed annotations resolve without
+# depending on the module having first been inserted into sys.modules.
+ModelCiBusOverlay.model_rebuild(_types_namespace={"ModelCiBusLane": ModelCiBusLane})
+
+
+class ModelRedeployStartCommandWire(BaseModel):
+    """Strict producer-side subset of the redeploy orchestrator command."""
+
+    model_config = ConfigDict(extra="forbid", str_strip_whitespace=True)
+
+    correlation_id: UUID
+    scope: Literal["full"] = "full"
+    git_ref: str
+    runtime_lane: Literal["dev", "stability-test"]
+    build_source: Literal["workspace", "release"]
+    requested_by: str
+
+    @field_validator("git_ref")
+    @classmethod
+    def validate_git_ref(cls, value: str) -> str:
+        """The live trigger carries an exact hexadecimal merge commit SHA."""
+        is_hex = all(character in "0123456789abcdef" for character in value)
+        if not (7 <= len(value) <= 64) or not is_hex:
+            raise ValueError(
+                "git_ref must be a 7-64 character lowercase hex commit SHA"
+            )
+        return value
+
+    @field_validator("requested_by")
+    @classmethod
+    def validate_requested_by(cls, value: str) -> str:
+        if not value:
+            raise ValueError("requested_by must not be empty")
+        return value
+
+
+ModelRedeployStartCommandWire.model_rebuild(
+    _types_namespace={"Literal": Literal, "UUID": UUID}
+)
+
+
+def load_ci_bus_overlay(path: Path) -> ModelCiBusOverlay:
+    """Load and strictly validate the checked-in CI bus overlay."""
+    if not path.is_file():
+        raise ValueError(f"CI bus overlay does not exist: {path}")
+    try:
+        raw = yaml.safe_load(path.read_text(encoding="utf-8"))
+        return ModelCiBusOverlay.model_validate(raw)
+    except (OSError, yaml.YAMLError, ValidationError) as exc:
+        raise ValueError(f"Invalid CI bus overlay {path}: {exc}") from exc
+
+
+def resolve_ci_bus_broker(
+    *,
+    overlay: ModelCiBusOverlay,
+    lane: str,
+    injected_broker: str,
+) -> str:
+    """Resolve one control-bus lane without allowing opaque target drift."""
+    lane_key = lane.strip()
+    if not lane_key:
+        raise ValueError("CI bus lane must not be empty")
+    declaration = overlay.lanes.get(lane_key)
+    if declaration is None:
+        raise ValueError(
+            f"CI bus lane {lane_key!r} is not declared; "
+            f"declared lanes: {sorted(overlay.lanes)}"
+        )
+
+    broker = declaration.broker
+    if broker == "inmemory":
+        raise ValueError(
+            f"CI bus lane {lane_key!r} declares 'inmemory'; a post-merge "
+            "redeploy command requires a cross-process broker"
+        )
+    if broker == "from-secret":
+        if not injected_broker:
+            raise ValueError(
+                f"CI bus lane {lane_key!r} declares 'from-secret', but "
+                "KAFKA_BOOTSTRAP_SERVERS is empty"
+            )
+        return injected_broker
+    if injected_broker and injected_broker != broker:
+        raise ValueError(
+            "LANE BUS DRIFT: injected KAFKA_BOOTSTRAP_SERVERS does not match "
+            f"the checked-in broker for lane {lane_key!r} ({broker})"
+        )
+    return broker
+
+
+def build_kafka_producer_config(
+    bootstrap_servers: str,
+    username: str,
+    password: str,
+) -> dict[str, str | int | float | bool]:
+    """Build plaintext local or SASL_SSL cloud transport deterministically."""
+    if bool(username) != bool(password):
+        raise ValueError(
+            "KAFKA_SASL_USERNAME and KAFKA_SASL_PASSWORD must both be set "
+            "or both be empty"
+        )
+    config: dict[str, str | int | float | bool] = {
+        "bootstrap.servers": bootstrap_servers,
+    }
+    if username and password:
+        config.update(
+            {
+                "security.protocol": "SASL_SSL",
+                "sasl.mechanisms": "PLAIN",
+                "sasl.username": username,
+                "sasl.password": password,
+            }
+        )
+    return config
+
+
+def _field_call_is_required(value: ast.expr | None) -> bool:
+    """Return whether one annotated consumer field has no default."""
+    if value is None:
+        return True
+    if not isinstance(value, ast.Call):
+        return False
+    if value.args and isinstance(value.args[0], ast.Constant):
+        if value.args[0].value is Ellipsis:
+            return True
+    for keyword in value.keywords:
+        if keyword.arg == "default" and isinstance(keyword.value, ast.Constant):
+            return keyword.value.value is Ellipsis
+    return False
+
+
+def _class_declares_extra_forbid(node: ast.ClassDef) -> bool:
+    for statement in node.body:
+        if not isinstance(statement, ast.Assign):
+            continue
+        if not any(
+            isinstance(target, ast.Name) and target.id == "model_config"
+            for target in statement.targets
+        ):
+            continue
+        if not isinstance(statement.value, ast.Call):
+            return False
+        return any(
+            keyword.arg == "extra"
+            and isinstance(keyword.value, ast.Constant)
+            and keyword.value.value == "forbid"
+            for keyword in statement.value.keywords
+        )
+    return False
+
+
+def load_consumer_model_contract(
+    model_path: Path,
+) -> tuple[frozenset[str], frozenset[str]]:
+    """Read field and required-field truth from the canonical consumer model."""
+    if not model_path.is_file():
+        raise ValueError(f"consumer model does not exist: {model_path}")
+    try:
+        tree = ast.parse(
+            model_path.read_text(encoding="utf-8"), filename=str(model_path)
+        )
+    except (OSError, SyntaxError) as exc:
+        raise ValueError(f"invalid consumer model {model_path}: {exc}") from exc
+
+    model_node = next(
+        (
+            node
+            for node in tree.body
+            if isinstance(node, ast.ClassDef)
+            and node.name == "ModelRedeployStartCommand"
+        ),
+        None,
+    )
+    if model_node is None:
+        raise ValueError(
+            f"consumer model {model_path} does not define ModelRedeployStartCommand"
+        )
+    if not _class_declares_extra_forbid(model_node):
+        raise ValueError(
+            "ModelRedeployStartCommand must declare ConfigDict(extra='forbid')"
+        )
+
+    fields: set[str] = set()
+    required: set[str] = set()
+    for statement in model_node.body:
+        if not isinstance(statement, ast.AnnAssign):
+            continue
+        if not isinstance(statement.target, ast.Name):
+            continue
+        name = statement.target.id
+        fields.add(name)
+        if _field_call_is_required(statement.value):
+            required.add(name)
+    if not fields:
+        raise ValueError("ModelRedeployStartCommand declares no annotated fields")
+    return frozenset(fields), frozenset(required)
+
+
+def assert_consumer_model_accepts_payload(
+    *, payload: dict[str, object], model_path: Path
+) -> None:
+    """Fail before publish if the strict consumer cannot accept these keys."""
+    fields, required = load_consumer_model_contract(model_path)
+    payload_fields = frozenset(payload)
+    extras = sorted(payload_fields - fields)
+    missing = sorted(required - payload_fields)
+    if extras:
+        raise ValueError(
+            f"consumer rejects extra fields from producer payload: {extras}"
+        )
+    if missing:
+        raise ValueError(f"producer payload misses required consumer fields: {missing}")
+
+
+def build_redeploy_start_payload(
+    *,
+    runtime_lane: str,
+    build_source: str,
+    source_sha: str,
+    correlation_id: str,
+    requested_by: str,
+) -> dict[str, object]:
+    """Build exactly the strict command shape consumed by node_redeploy."""
+    command = ModelRedeployStartCommandWire(
+        correlation_id=correlation_id,
+        scope="full",
+        git_ref=source_sha,
+        runtime_lane=runtime_lane,
+        build_source=build_source,
+        requested_by=requested_by,
+    )
+    return command.model_dump(mode="json")
 
 
 def should_trigger(changed_files: list[str], labels: list[str]) -> bool:
@@ -109,25 +396,26 @@ def lane_for_base_branch(base_branch: str) -> str:
     return lane
 
 
-def _sign_envelope(envelope: dict[str, object], secret: str) -> dict[str, object]:
-    body_dict = {k: v for k, v in envelope.items() if k != "_signature"}
-    body = json.dumps(body_dict, sort_keys=True, separators=(",", ":")).encode()
-    signature = hmac.new(secret.encode(), body, hashlib.sha256).hexdigest()
-    return {**envelope, "_signature": signature}
+def build_source_for_base_branch(base_branch: str) -> str:
+    """Map branch lineage to the deploy agent's provenance mode."""
+    if base_branch == "dev":
+        return "workspace"
+    if base_branch == "main":
+        return "release"
+    raise ValueError(f"No build source mapping for base branch {base_branch!r}")
 
 
 def publish_redeploy_start_event(
     bootstrap_servers: str,
     username: str,
     password: str,
-    hmac_secret: str,
     runtime_lane: str,
-    source_branch: str,
+    build_source: str,
     source_sha: str,
     correlation_id: str,
     requested_by: str,
 ) -> int:
-    """Publish a signed redeploy-start command to node_redeploy_orchestrator via SASL_SSL.
+    """Publish a strict redeploy-start command to node_redeploy_orchestrator.
 
     Returns the number of commands delivered (``1`` on success). Raises on any
     delivery failure so the caller can assert a non-zero emit count — a producer
@@ -135,27 +423,17 @@ def publish_redeploy_start_event(
     """
     from confluent_kafka import Producer
 
-    envelope = {
-        "correlation_id": correlation_id,
-        "requested_by": requested_by,
-        "runtime_lane": runtime_lane,
-        "source_branch": source_branch,
-        "source_sha": source_sha,
-        # dev dogfoods OCC drafting; stability gates on readiness before prod.
-        "requires_occ": True,
-        "requires_readiness_gate": runtime_lane != "dev",
-        "requested_at": datetime.now(UTC).isoformat(),
-    }
-    signed = _sign_envelope(envelope, hmac_secret)
+    payload = build_redeploy_start_payload(
+        runtime_lane=runtime_lane,
+        build_source=build_source,
+        source_sha=source_sha,
+        correlation_id=correlation_id,
+        requested_by=requested_by,
+    )
 
-    producer_config: dict[str, str | int | float | bool] = {
-        "bootstrap.servers": bootstrap_servers,
-        "security.protocol": "SASL_SSL",
-        "sasl.mechanisms": "PLAIN",
-        "sasl.username": username,
-        "sasl.password": password,
-    }
-    producer = Producer(producer_config)
+    producer = Producer(
+        build_kafka_producer_config(bootstrap_servers, username, password)
+    )
 
     delivery_error: BaseException | None = None
 
@@ -164,7 +442,7 @@ def publish_redeploy_start_event(
         if err is not None:
             delivery_error = RuntimeError(str(err))
 
-    message = json.dumps(signed, default=str).encode("utf-8")
+    message = json.dumps(payload, default=str).encode("utf-8")
     key = f"gha-redeploy/{correlation_id}".encode()
 
     producer.produce(
@@ -173,10 +451,15 @@ def publish_redeploy_start_event(
         value=message,
         on_delivery=_on_delivery,
     )
-    producer.flush(timeout=30)
+    remaining = producer.flush(timeout=30)
 
     if delivery_error is not None:
         raise RuntimeError(f"Kafka delivery failed: {delivery_error}") from None
+    if remaining and remaining > 0:
+        raise RuntimeError(
+            f"Kafka delivery timed out: {remaining} message(s) remain "
+            "undelivered after the 30 second flush"
+        )
 
     # Exactly one redeploy-start command was delivered; the caller asserts N>0.
     return 1
@@ -214,6 +497,23 @@ def publish_redeploy_start_event(
     help="Correlation ID (auto-generated if not provided)",
 )
 @click.option(
+    "--bus-lane",
+    default="",
+    help="Control-bus lane id declared by the CI bus overlay (normally 'dev')",
+)
+@click.option(
+    "--bus-overlay",
+    type=click.Path(path_type=Path),
+    default=None,
+    help="Path to the authoritative checked-in config/ci_bus_lanes.yaml",
+)
+@click.option(
+    "--consumer-model",
+    type=click.Path(path_type=Path),
+    default=None,
+    help="Path to omnimarket's canonical ModelRedeployStartCommand source",
+)
+@click.option(
     "--dry-run",
     is_flag=True,
     default=False,
@@ -226,6 +526,9 @@ def main(
     source_sha: str,
     requested_by: str,
     correlation_id: str,
+    bus_lane: str,
+    bus_overlay: Path | None,
+    consumer_model: Path | None,
     dry_run: bool,
 ) -> None:
     """Publish a node_redeploy_orchestrator start command if a PR contains runtime changes.
@@ -246,6 +549,7 @@ def main(
     corr_id = correlation_id or str(uuid.uuid4())
 
     runtime_lane = lane_for_base_branch(base_branch)
+    build_source = build_source_for_base_branch(base_branch)
 
     if not should_trigger(files, label_list):
         click.echo(
@@ -263,14 +567,45 @@ def main(
         click.echo("(dry-run: skipping Kafka publish)")
         sys.exit(0)
 
-    bootstrap_servers = os.environ.get("KAFKA_BOOTSTRAP_SERVERS", "")
+    injected_broker = os.environ.get("KAFKA_BOOTSTRAP_SERVERS", "").strip()
     username = os.environ.get("KAFKA_SASL_USERNAME", "")
     password = os.environ.get("KAFKA_SASL_PASSWORD", "")
-    hmac_secret = os.environ.get("DEPLOY_AGENT_HMAC_SECRET", "")
+
+    if bus_overlay is None or not bus_lane.strip() or consumer_model is None:
+        click.echo(
+            "ERROR: --bus-lane, --bus-overlay, and --consumer-model are "
+            "required for a live redeploy publish",
+            err=True,
+        )
+        sys.exit(1)
+
+    try:
+        overlay = load_ci_bus_overlay(bus_overlay)
+        bootstrap_servers = resolve_ci_bus_broker(
+            overlay=overlay,
+            lane=bus_lane,
+            injected_broker=injected_broker,
+        )
+        # Validate the transport pair before the producer is constructed.
+        build_kafka_producer_config(bootstrap_servers, username, password)
+        candidate_payload = build_redeploy_start_payload(
+            runtime_lane=runtime_lane,
+            build_source=build_source,
+            source_sha=source_sha,
+            correlation_id=corr_id,
+            requested_by=requested_by,
+        )
+        assert_consumer_model_accepts_payload(
+            payload=candidate_payload,
+            model_path=consumer_model,
+        )
+    except ValueError as exc:
+        click.echo(f"ERROR: {exc}", err=True)
+        sys.exit(1)
 
     # A runtime change was detected and this is not a dry run, so the job's
     # PURPOSE is now to publish exactly one redeploy-start command. If any
-    # precondition for publishing is absent (broker, SASL creds, HMAC secret),
+    # precondition for publishing is absent (resolved broker),
     # this producer CANNOT emit — that is zero output and MUST fail closed
     # (RT-5 / OMN-14467), never "skip publish" green. The dead-producer bug this
     # replaces printed "KAFKA_BOOTSTRAP_SERVERS is not set -- skipping publish"
@@ -280,10 +615,7 @@ def main(
         require_producer_preconditions(
             artifact=TOPIC,
             preconditions={
-                "KAFKA_BOOTSTRAP_SERVERS": bootstrap_servers,
-                "KAFKA_SASL_USERNAME": username,
-                "KAFKA_SASL_PASSWORD": password,
-                "DEPLOY_AGENT_HMAC_SECRET": hmac_secret,
+                "CI_BUS_BROKER": bootstrap_servers,
             },
         )
     except ProducerZeroOutputError as exc:
@@ -295,9 +627,8 @@ def main(
             bootstrap_servers=bootstrap_servers,
             username=username,
             password=password,
-            hmac_secret=hmac_secret,
             runtime_lane=runtime_lane,
-            source_branch=base_branch,
+            build_source=build_source,
             source_sha=source_sha,
             correlation_id=corr_id,
             requested_by=requested_by,

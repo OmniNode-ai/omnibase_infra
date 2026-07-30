@@ -13,6 +13,7 @@ Exit codes:
 from __future__ import annotations
 
 import argparse
+import os
 import re
 import sys
 from pathlib import Path
@@ -79,7 +80,10 @@ def main(argv: list[str] | None = None) -> int:
         return 1
 
     required_vars = _parse_compose_vars(compose_path)
-    set_vars: set[str] = set()
+    # Docker Compose resolves the invoking process environment before env files.
+    # Honor the same input surface so CI can provide short-lived render values
+    # without persisting real runtime secrets on a build machine.
+    set_vars: set[str] = {key for key, value in os.environ.items() if value}
     for env_path in env_paths:
         set_vars.update(_parse_env_file(env_path))
 
@@ -94,7 +98,8 @@ def main(argv: list[str] | None = None) -> int:
 
     env_path_text = ", ".join(str(path) for path in env_paths)
     print(
-        f"ERROR: {len(missing)} env var(s) referenced in {compose_path} are missing from {env_path_text}:",
+        f"ERROR: {len(missing)} env var(s) referenced in {compose_path} are "
+        f"missing from the process environment and {env_path_text}:",
         file=sys.stderr,
     )
     for var in missing:

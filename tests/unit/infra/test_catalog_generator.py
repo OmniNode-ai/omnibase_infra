@@ -159,6 +159,20 @@ def test_generated_runtime_services_export_onex_state_dir() -> None:
 
 
 @pytest.mark.unit
+def test_generated_runtime_effects_requires_deploy_agent_hmac_secret() -> None:
+    """The deploy effect must never emit an unsigned rebuild command."""
+    resolver = CatalogResolver(catalog_dir=CATALOG_DIR)
+    resolved = resolver.resolve(bundles=["runtime-core"])
+    compose = generate_compose(resolved)
+
+    effects_env = compose["services"]["runtime-effects"]["environment"]
+    assert effects_env["DEPLOY_AGENT_HMAC_SECRET"] == (
+        "${DEPLOY_AGENT_HMAC_SECRET:?DEPLOY_AGENT_HMAC_SECRET must be set in "
+        "~/.omnibase/.env}"
+    )
+
+
+@pytest.mark.unit
 def test_generated_compose_includes_network_and_volumes() -> None:
     resolver = CatalogResolver(catalog_dir=CATALOG_DIR)
     resolved = resolver.resolve(bundles=["core"])

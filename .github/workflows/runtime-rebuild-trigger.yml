@@ -20,13 +20,16 @@
 #   - PR had the "runtime_change" label, OR
 #   - Any changed file matches src/omnimarket/** or src/omnibase_infra/nodes/**
 #
-# Tickets: OMN-8917 (original auto-trigger), OMN-12573 (re-point to node_redeploy)
+# Control-bus routing is independent of the requested runtime lane. Both dev
+# and stability-test commands enter through the dev control bus where
+# node_redeploy_orchestrator consumes them; runtime_lane in the signed payload
+# decides the deployment target. The broker comes from omnimarket's checked-in
+# config/ci_bus_lanes.yaml overlay, not an opaque Actions secret (OMN-15009).
 #
-# Required GitHub Secrets:
-#   KAFKA_BOOTSTRAP_SERVERS    -- e.g. pkc-xxx.us-east-1.aws.confluent.cloud:9092
-#   KAFKA_SASL_USERNAME        -- Confluent Cloud API key (or SASL username)
-#   KAFKA_SASL_PASSWORD        -- Confluent Cloud API secret (or SASL password)
-#   DEPLOY_AGENT_HMAC_SECRET   -- HMAC secret for signing redeploy commands
+# Required GitHub Secrets: none. The deploy-agent HMAC belongs to the runtime
+# deploy EFFECT that emits rebuild-requested, not this upstream start command.
+#
+# Tickets: OMN-8917, OMN-12573, OMN-15009
 
 name: Runtime Rebuild Trigger
 
@@ -60,6 +63,18 @@ jobs:
         with:
           separator: ","
 
+      - name: Fetch authoritative CI bus lane overlay
+        uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+        with:
+          repository: OmniNode-ai/omnimarket
+          ref: dev
+          path: .ci-bus-overlay
+          persist-credentials: false
+          sparse-checkout: |
+            config/ci_bus_lanes.yaml
+            src/omnimarket/nodes/node_redeploy_orchestrator/models/model_redeploy_start_command.py
+          sparse-checkout-cone-mode: false
+
       - name: Set up CI Python environment
         uses: ./.github/actions/setup-python-uv
         with:
@@ -73,10 +88,6 @@ jobs:
         # All potentially attacker-controlled inputs (labels, base_ref, sha) are
         # passed through environment variables to prevent shell injection.
         env:
-          KAFKA_BOOTSTRAP_SERVERS: ${{ secrets.KAFKA_BOOTSTRAP_SERVERS }}
-          KAFKA_SASL_USERNAME: ${{ secrets.KAFKA_SASL_USERNAME }}
-          KAFKA_SASL_PASSWORD: ${{ secrets.KAFKA_SASL_PASSWORD }}
-          DEPLOY_AGENT_HMAC_SECRET: ${{ secrets.DEPLOY_AGENT_HMAC_SECRET }}
           PR_CHANGED_FILES: ${{ steps.changed-files.outputs.all_changed_files }}
           PR_LABELS: ${{ join(github.event.pull_request.labels.*.name, ',') }}
           PR_NUMBER: ${{ github.event.pull_request.number }}
@@ -90,4 +101,7 @@ jobs:
             --labels "$PR_LABELS" \
             --base-branch "$PR_BASE_BRANCH" \
             --source-sha "$PR_MERGE_SHA" \
+            --bus-lane "dev" \
+            --bus-overlay ".ci-bus-overlay/config/ci_bus_lanes.yaml" \
+            --consumer-model ".ci-bus-overlay/src/omnimarket/nodes/node_redeploy_orchestrator/models/model_redeploy_start_command.py" \
             --requested-by "gha/omnibase_infra/pr-$PR_NUMBER"
