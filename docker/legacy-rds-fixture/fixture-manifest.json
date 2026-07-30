@@ -1,5 +1,9 @@
 {
   "ticket": "OMN-15422",
+  "extension_tickets": [
+    "OMN-15413",
+    "OMN-15420"
+  ],
   "postgres_major": 16,
   "provenance": {
     "sources": [
@@ -98,6 +102,13 @@
       "red_fixture": "checked-in unresolved delegation_judge_verdict_events domain",
       "detector": "real runner selects one checksum ledger, imports three source shapes, and preserves source OIDs/rows",
       "expected_red_signature": "unresolved domain fails in preflight before canonical ledger mutation"
+    },
+    {
+      "id": "cutover_receipts_and_rollback_boundary",
+      "positive_fixture": "omn15420_cutover_proof.omninode_internal cutover journal",
+      "red_fixture": "family-local owner mismatch, expired dual-write, reverse-delta sequence gap, and forward-fix-only post-write rollback",
+      "detector": "durable receipt/journal schema plus per-family rollback predicates in PostgreSQL 16",
+      "expected_red_signature": "mismatch isolation, direct rollback refusal, bounded dual-write, and incomplete reverse-delta detection"
     }
   ]
 }

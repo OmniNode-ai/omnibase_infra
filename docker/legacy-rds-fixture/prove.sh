@@ -331,4 +331,6 @@ done
 [ "$(sql_value "$LEGACY_HOST" omnidash_analytics "SELECT count(*) FROM public.schema_migrations")" = "23" ] \
   || fail "legacy preflight blocker rewrote filename history"
 
+sh /opt/omn15422/cutover-proof/prove.sh
+
 echo "fixture_status=PASS_WITH_EXPECTED_BLOCKER blocker=OMN-15423"
