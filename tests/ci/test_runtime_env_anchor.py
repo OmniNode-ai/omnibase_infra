@@ -51,6 +51,12 @@ REQUIRED_RUNTIME_KEYS: frozenset[str] = frozenset(
         "USE_EVENT_ROUTING",
         "GITHUB_TOKEN",
         "GH_TOKEN",
+        # OMN-15529: OnexBot-OCC-Writer App identity for the OCC companion
+        # producer. Absent from the anchor, the credential on the host is
+        # invisible to the container and the OMN-15362 cutover is a no-op.
+        "ONEXBOT_OCC_APP_ID",
+        "ONEXBOT_OCC_PRIVATE_KEY",
+        "OMNI_OCC_GITHUB_AUTH_MODE",
         "DEPLOY_AGENT_HMAC_SECRET",
         "LLM_GLM_URL",
         "LLM_GLM_MODEL_NAME",
@@ -110,6 +116,88 @@ class TestRuntimeEnvAnchorContainsRequiredKeys:
             + "\n\nAdd missing keys to x-runtime-env in docker/docker-compose.infra.yml. "
             "Format: KEY: ${KEY:-} (or ${KEY:?error} for required keys)."
         )
+
+
+class TestOccAppIdentityReachesRuntimeServices:
+    """OMN-15529: the OCC App credential must reach the container, not just the anchor.
+
+    Asserting anchor membership alone is not the seam — a service only sees a
+    var if the anchor is merged into *its* environment. These tests drive the
+    resolved ``services.<svc>.environment`` mapping (PyYAML resolves the
+    ``!!merge <<: *runtime-env`` keys), which is the same merge Docker Compose
+    performs before interpolation.
+
+    Failure mode this closes (OMN-15362 defect D2): the OnexBot-OCC-Writer key
+    was provisioned into ``~/.omnibase/.env`` on the runtime host and was still
+    invisible to ``node_occ_companion_effect`` / ``OccCompanionEmitter``,
+    because ``x-runtime-env`` is an allowlist rather than a pass-through.
+    ``OMNI_OCC_GITHUB_AUTH_MODE=app`` would then fail with
+    ``GitHubAppCredentialMissingError`` against a dead runtime path.
+    """
+
+    OCC_APP_IDENTITY_KEYS: frozenset[str] = frozenset(
+        {
+            "ONEXBOT_OCC_APP_ID",
+            "ONEXBOT_OCC_PRIVATE_KEY",
+            "OMNI_OCC_GITHUB_AUTH_MODE",
+        }
+    )
+
+    # runtime-effects hosts the OCC companion EFFECT — the producer whose
+    # GitHub identity this credential changes. The other two runtime services
+    # inherit the same anchor and are asserted for consistency.
+    OCC_PRODUCER_SERVICE = "runtime-effects"
+    RUNTIME_SERVICES = ("omninode-runtime", "runtime-effects", "runtime-worker")
+
+    @pytest.mark.unit
+    def test_occ_app_identity_reaches_occ_producer_service(self) -> None:
+        """The OCC producer container's env exposes all three App identity vars."""
+        data = _load_compose()
+        service = data["services"][self.OCC_PRODUCER_SERVICE]
+        environment = service["environment"]
+        assert isinstance(environment, dict)
+
+        missing = self.OCC_APP_IDENTITY_KEYS - set(environment)
+        assert not missing, (
+            f"Service '{self.OCC_PRODUCER_SERVICE}' does not expose "
+            f"{sorted(missing)}. The host credential is invisible to the "
+            "containerized OCC companion producer — add the name(s) to "
+            "x-runtime-env in docker/docker-compose.infra.yml (OMN-15529)."
+        )
+
+    @pytest.mark.unit
+    def test_occ_app_identity_reaches_every_runtime_service(self) -> None:
+        """Every anchor-inheriting runtime service sees the same App identity vars."""
+        data = _load_compose()
+        for service_name in self.RUNTIME_SERVICES:
+            environment = data["services"][service_name]["environment"]
+            assert isinstance(environment, dict)
+            missing = self.OCC_APP_IDENTITY_KEYS - set(environment)
+            assert not missing, (
+                f"Service '{service_name}' is missing {sorted(missing)} from its "
+                "resolved environment (x-runtime-env merge)."
+            )
+
+    @pytest.mark.unit
+    def test_occ_app_identity_is_optional_not_fail_closed(self) -> None:
+        """The three vars use the optional form, so lanes without the key still render.
+
+        ``${VAR:?...}`` here would abort ``docker compose config`` on every lane
+        that has not been provisioned with the App key. Empty is safe on both
+        consumers: the auth-mode readers coalesce ``""`` to ``pat``, and
+        ``resolve_api_key(..., required=False)`` treats an empty credential as
+        absent (raising ``GitHubAppCredentialMissingError`` in app mode rather
+        than silently falling back to the shared PAT).
+        """
+        raw = COMPOSE_PATH.read_text()
+        for key in sorted(self.OCC_APP_IDENTITY_KEYS):
+            declaration = f"{key}: ${{{key}:-}}"
+            assert declaration in raw, (
+                f"{key} must be declared as '{declaration}' in x-runtime-env. "
+                "A required (:?) or defaulted (:-value) form would either wedge "
+                "unprovisioned lanes or pin a default that belongs to the "
+                "consuming code, not to compose."
+            )
 
 
 class TestRuntimeEnvAnchorSyntaxValid:
