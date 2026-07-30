@@ -20,7 +20,9 @@ from omnibase_core.models.gate.model_omnigate_check_result import (
 from omnibase_core.models.gate.model_omnigate_config import ModelOmniGateConfig
 from omnibase_infra.gate.validator_registry import execute_validator
 
-_BASE_ENV_ALLOWLIST = frozenset({"PATH", "HOME", "USER", "LANG", "LC_ALL"})
+# ``LC_ALL`` remains available through a check's explicit ``allowed_env``.
+# Ambient overrides are not trusted because invalid values alter receipt evidence.
+_BASE_ENV_ALLOWLIST = frozenset({"PATH", "HOME", "USER", "LANG"})
 _SECRET_PATTERNS = (
     re.compile(r"(?i)(api[_-]?key|token|password|secret)\s*[:=]\s*\S+"),
     re.compile(r"(?i)(bearer|basic)\s+[A-Za-z0-9._~+/=-]{16,}"),
