@@ -18,7 +18,7 @@ from deploy_agent.events import (
     PhaseStatus,
     Scope,
 )
-from deploy_agent.executor import DeployExecutor
+from deploy_agent.executor import DeployExecutor, _build_source_build_args
 from pydantic import ValidationError
 
 REPO_ROOT = Path(__file__).resolve().parents[4]
@@ -83,6 +83,8 @@ def test_compose_build_passes_build_source_args(
     assert "--build-arg" in build_cmd
     assert "BUILD_SOURCE=workspace" in build_cmd
     assert "EXPECTED_BUILD_SOURCE=workspace" in build_cmd
+    assert "PROMOTION_CLASS=stability-candidate" in build_cmd
+    assert "NON_MAIN_LINEAGE=true" in build_cmd
     assert "OMNI_HOME=/data/omninode/omni_home" in build_cmd
 
     # OMN-12965: the workspace build must stamp the full OCI image-identity quad
@@ -96,6 +98,27 @@ def test_compose_build_passes_build_source_args(
         "RUNTIME_VERSION must come from pyproject, not the Dockerfile placeholder"
     )
     assert any(a.startswith("BUILD_DATE=") for a in build_cmd)
+
+
+@pytest.mark.parametrize(
+    ("build_source", "promotion_class", "non_main_lineage"),
+    [
+        (BuildSource.WORKSPACE, "stability-candidate", "true"),
+        (BuildSource.RELEASE, "clean-main", "false"),
+    ],
+)
+def test_deploy_agent_build_provenance_matches_canonical_deploy_contract(
+    build_source: BuildSource,
+    promotion_class: str,
+    non_main_lineage: str,
+) -> None:
+    """Agent and deploy-runtime.sh must stamp the same promotion metadata."""
+    env = {"OMNI_HOME": "/data/omninode/omni_home"}
+
+    build_args = _build_source_build_args(build_source, env=env)
+
+    assert f"PROMOTION_CLASS={promotion_class}" in build_args
+    assert f"NON_MAIN_LINEAGE={non_main_lineage}" in build_args
 
 
 def test_unknown_build_source_fails_before_compose_build(

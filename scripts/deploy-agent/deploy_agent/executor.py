@@ -75,6 +75,10 @@ REQUIRED_PROJECTION_TABLES: tuple[str, ...] = (
 )
 
 _BUILD_SOURCE_ALLOWED = ", ".join(source.value for source in BuildSource)
+_BUILD_PROVENANCE_BY_SOURCE: dict[BuildSource, tuple[str, str]] = {
+    BuildSource.WORKSPACE: ("stability-candidate", "true"),
+    BuildSource.RELEASE: ("clean-main", "false"),
+}
 
 # Promotion-lineage guard (OMN-12626, R1). Loaded from scripts/ by file path
 # because scripts/ is not an importable package. The guard refuses to build a
@@ -374,11 +378,17 @@ def _build_source_build_args(
     if selected == BuildSource.WORKSPACE and not omni_home:
         raise RuntimeError("BUILD_SOURCE=workspace requires OMNI_HOME before build")
 
+    promotion_class, non_main_lineage = _BUILD_PROVENANCE_BY_SOURCE[selected]
+
     return [
         "--build-arg",
         f"BUILD_SOURCE={selected.value}",
         "--build-arg",
         f"EXPECTED_BUILD_SOURCE={expected.value}",
+        "--build-arg",
+        f"PROMOTION_CLASS={promotion_class}",
+        "--build-arg",
+        f"NON_MAIN_LINEAGE={non_main_lineage}",
         "--build-arg",
         f"OMNI_HOME={omni_home}",
     ]
