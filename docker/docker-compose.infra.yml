@@ -174,6 +174,7 @@ x-runtime-env: &runtime-env
   ONEX_RUNTIME_CONTRACTS_DIR: /app/contracts/runtime
   ONEX_LOG_LEVEL: ${ONEX_LOG_LEVEL:-INFO}
   ONEX_ENVIRONMENT: ${ONEX_ENVIRONMENT:-local}
+  ONEX_DATABASE_TOPOLOGY_PROFILE: local
   # Local Docker Redpanda uses a bounded single-shard broker. Cap default topic
   # creation to one partition unless an operator explicitly opts into wider
   # contract-declared partition counts.
