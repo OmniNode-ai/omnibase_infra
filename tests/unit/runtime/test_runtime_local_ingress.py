@@ -898,9 +898,12 @@ async def test_runtime_health_includes_local_ingress_details() -> None:
 # --------------------------------------------------------------------------- #
 # OMN-15468: runtime_dispatch.terminal_events must reach the ingress route.
 #
-# 51 shipped contracts declare their FAILURE terminal only under
+# 51 contracts declare their FAILURE terminal only under
 # ``runtime_dispatch.terminal_events`` (the address the dashboard and other
-# external clients dispatch through). Route discovery read only the TOP-LEVEL
+# external clients dispatch through) -- measured over the raw corpus of 384
+# ``src/omnimarket/nodes/*/contract.yaml`` at
+# omnimarket@aea0c33dd89fb82fdca33aac7149992a21c46d43 (origin/dev, 2026-07-30),
+# no discovery filter applied. Route discovery read only the TOP-LEVEL
 # ``terminal_event`` / ``terminal_events`` keys, so the Pattern B broker -- which
 # is already built to race every declared terminal topic (OMN-13118/13128) --
 # was only ever handed the success topic. A node that correctly published its
@@ -931,9 +934,15 @@ handler_routing:
     - operation: gen_demo.run
 """.strip()
 
-# 24 of the 51 contracts declare NO top-level ``terminal_event`` at all, so
-# discovery gave them an EMPTY terminal-topic tuple and the broker rejected the
-# command outright ("Route '<name>' does not declare terminal events").
+# 30 of those 51 declare NO top-level ``terminal_event`` or ``terminal_events``
+# at all, so discovery gave them an EMPTY terminal-topic tuple and the broker
+# rejected the command outright ("Route '<name>' does not declare terminal
+# events"). 17 of the 30 also clear the route-discovery filter (an ``event_bus``
+# mapping whose ``subscribe_topics`` yield a ``.cmd.`` command topic), i.e. 17
+# were live undispatchable /skill routes and 13 were latent declarations.
+# Same corpus/sha/date as the block above; re-derive, do not copy forward --
+# the pre-correction figure here was an unsourced "24 of the 51" that
+# reproduces under no framing (see _extract_terminal_events PROVENANCE note).
 _PLURAL_ONLY_CONTRACT = """
 name: plural_only_demo
 event_bus:

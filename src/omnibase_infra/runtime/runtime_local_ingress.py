@@ -358,8 +358,8 @@ def _extract_terminal_events(raw: dict[object, object]) -> tuple[str, ...]:
     3. ``runtime_dispatch.terminal_events`` (OMN-15468).
 
     Site 3 is the address external clients — the dashboard included — dispatch
-    through, and it is where 51 shipped contracts declare their FAILURE
-    terminal. It was previously unread, so those routes reached the Pattern B
+    through, and it is where **51** contracts declare their FAILURE terminal and
+    nowhere else. It was previously unread, so those routes reached the Pattern B
     broker carrying only their success topic even though the broker is built to
     race every declared terminal concurrently (OMN-13118/13128). The
     consequences were both wrong and indistinguishable from each other: a node
@@ -367,9 +367,29 @@ def _extract_terminal_events(raw: dict[object, object]) -> tuple[str, ...]:
     was not subscribed to the topic the terminal landed on) or was reported as
     ``completed`` (the def-B wiring republishes the returned model onto the
     contract's success ``terminal_event`` irrespective of the payload verdict).
-    24 of those 51 contracts declare NO top-level ``terminal_event`` at all, so
-    they resolved to an EMPTY terminal tuple and the broker rejected the command
-    outright with "does not declare terminal events".
+
+    Of those 51, **30** declare no top-level ``terminal_event`` *or*
+    ``terminal_events``, so this function returned an EMPTY tuple for them and
+    the broker rejected the command outright with "does not declare terminal
+    events"; the other 21 kept a working success topic and lost only the failure
+    one. **17** of the 30 also clear the route-discovery filter in
+    ``discover_runtime_local_ingress_routes`` above (a mapping ``event_bus``
+    whose ``subscribe_topics`` yield a ``_select_command_topic``), so 17 were
+    live, undispatchable ``/skill`` routes; the remaining 13 are latent
+    declarations discovery never reaches.
+
+    PROVENANCE — every number above is a measurement, not a constant. Framing:
+    the RAW corpus of 384 ``src/omnimarket/nodes/*/contract.yaml`` files at
+    ``omnimarket@aea0c33dd89fb82fdca33aac7149992a21c46d43`` (``origin/dev``),
+    measured 2026-07-30, no discovery filter applied except where "17" says so.
+    Re-derive rather than copy forward: 51 = contracts whose
+    ``runtime_dispatch.terminal_events`` normalizes non-empty (all 51 carry an
+    explicit ``failure`` key and at least one topic absent from the top level);
+    30 = those 51 whose top-level ``terminal_event`` and ``terminal_events`` are
+    both empty; 17 = those 30 for which ``_select_command_topic`` returns a
+    topic. These drift as contracts land. An earlier revision of this docstring
+    asserted an unsourced "24 of the 51", which reproduces under no framing —
+    the defect was the missing provenance, not only the wrong digit.
 
     Live reproduction that motivated this (.201 dev lane, 2026-07-30): correlation
     ``4a5e0730-0000-4000-8000-000000000002`` returned outer ``ok=true`` /
