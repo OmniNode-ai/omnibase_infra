@@ -26,24 +26,35 @@ name: Deploy Agent Tests (OMN-15378)
 # workflow as the CI wiring behind scripts/deploy-agent's
 # STANDALONE_PROJECT_ROOTS entry — if this file is renamed/removed without
 # updating that registration, the guard fails closed.
+#
+# OMN-15378 AC3 (enforcement, not just visibility): this workflow is
+# `workflow_call`-only and is invoked by the `deploy-agent-tests` job in
+# .github/workflows/ci.yml, so its job surfaces in ci.yml's OWN run as the
+# check-run "Deploy Agent Tests (OMN-15378) / deploy-agent-tests" and is
+# registered in scripts/ci/ci_summary_gate.py STRICT_GATE_JOBS. That is what
+# makes it GATE merge: the CI Summary poller reads
+# `actions/runs/${RUN_ID}/jobs` for its own run only, so while these tests
+# lived in a separately-triggered workflow a RED result left the sole required
+# context ("CI Summary") green — the tests ran but blocked nothing.
+#
+# DO NOT re-add `pull_request:`/`push:`/`merge_group:` triggers here — the
+# caller in ci.yml already covers those events, and self-triggering would run
+# the suite twice per PR (duplicate producer). DO NOT rename this file or the
+# `deploy-agent-tests` job: the file path is the guard's registration key and
+# the job name is the second segment of the STRICT_GATE_JOBS entry.
+#
+# The caller's path filters are also deliberately gone: the previous
+# `paths: [scripts/deploy-agent/**]` filter meant a change ANYWHERE ELSE that
+# broke these tests produced no signal at all. The suite is 201 tests in ~6s,
+# so it now runs unconditionally on every ci.yml event.
+#
+# No `concurrency:` block: in a called workflow `github.workflow` resolves to
+# the CALLER's workflow name, so a group key here would shadow ci.yml's own
+# (already-correct) PR-keyed cancel-in-progress group.
 
 on:
-  pull_request:
-    branches: [main, dev]
-    paths:
-      - "scripts/deploy-agent/**"
-      - ".github/workflows/deploy-agent-tests.yml"
-  push:
-    branches: [main, dev]
-    paths:
-      - "scripts/deploy-agent/**"
-      - ".github/workflows/deploy-agent-tests.yml"
-  merge_group:
+  workflow_call:
   workflow_dispatch:
-
-concurrency:
-  group: ${{ github.workflow }}-${{ github.ref }}
-  cancel-in-progress: true
 
 env:
   UV_VERSION: "0.6.14"
