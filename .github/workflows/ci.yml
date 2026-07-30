@@ -2073,6 +2073,49 @@ jobs:
       contents: read
     uses: ./.github/workflows/deploy-agent-tests.yml
 
+  # OMN-15484 (fan-out of OMN-15483). The merge sweep lands PRs while
+  # adversarial verification is still running against them. OMN-15483 built the
+  # fix — a required check that fails while a PR carries a hold marker in its
+  # title or labels, so a held PR can never be required-green for ANY consumer
+  # (the Codex controller, `gh pr merge`, auto-merge, a merge queue, or the ONEX
+  # merge node) — but shipped it in omnimarket ONLY. omnibase_infra carries
+  # incident §C (#2560) in that ticket's table and had zero coverage.
+  #
+  # NO VOCABULARY IS DECLARED HERE, deliberately. The hold tokens live in
+  # exactly one place fleet-wide — omnimarket's
+  # src/omnimarket/merge_control/hold_marker.py — and the reusable workflow
+  # reads that module at run time. Copying it here would rebuild across repos
+  # the bug OMN-15483 round 1 found inside omnimarket: two divergent
+  # `_DO_NOT_MERGE_RE` definitions, neither a superset of the other. The shared
+  # workflow scans THIS repo on every run and fails if a second vocabulary
+  # appears (AC1), proves the gate actually fires here by driving a held vector
+  # through it (AC3), and checks the context name is not itself a hold token
+  # (AC5).
+  #
+  # UNCONDITIONAL BY DESIGN (AC4) — no `needs:`, no `if:`, no paths filter, same
+  # posture as `deploy-agent-tests` above and for the same reason. A hold gate
+  # an unrelated upstream failure can cascade-skip is not a gate.
+  #
+  # DO NOT rename this job, and do not add a `name:` — the check-run is
+  # "<caller job display name> / <inner job display name>", i.e.
+  # "merge-hold-gate / evaluate", which is the exact string registered in
+  # scripts/ci/ci_summary_gate.py STRICT_GATE_JOBS. A rename on either side
+  # makes the required CI Summary context permanently PENDING (the same trap
+  # documented on deploy-agent-tests). tests/ci/test_merge_hold_gate_omn15484.py
+  # pins both halves and the STRICT registration itself.
+  #
+  # `vocabulary_ref` MUST equal the ref in `uses:`: the first selects the
+  # workflow file, the second selects the source it reads, and drifting them
+  # would run one vintage of the gate against another vintage of the tokens.
+  merge-hold-gate:
+    permissions:
+      contents: read
+      pull-requests: read
+    uses: OmniNode-ai/omnimarket/.github/workflows/merge-hold-gate-reusable.yml@879d6fc6825f876458c6d45ed670c8715de8ac95
+    with:
+      vocabulary_ref: 879d6fc6825f876458c6d45ed670c8715de8ac95
+      context_name: merge-hold-gate / evaluate
+
   ci-summary:
     name: CI Summary
     # OMN-14127: REQUIRED branch-protection context — the single umbrella gate for
