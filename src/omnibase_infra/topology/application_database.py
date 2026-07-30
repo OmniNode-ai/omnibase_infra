@@ -11,7 +11,9 @@ local setup may render a projection there, but it cannot override platform truth
 from __future__ import annotations
 
 import hashlib
+import re
 from pathlib import Path
+from types import MappingProxyType
 from typing import cast
 
 import yaml
@@ -19,16 +21,73 @@ import yaml
 from omnibase_core.enums.enum_database_schema_domain import EnumDatabaseSchemaDomain
 from omnibase_core.models.core import ModelDeploymentTopology
 from omnibase_infra.docker.catalog.resolver import _load_manifest
-from omnibase_infra.topology.models import ModelDockerDatabaseConsumerCatalog
+from omnibase_infra.runtime.models.model_runtime_policy_contract import (
+    ModelRuntimePolicyContract,
+)
+from omnibase_infra.topology.models import (
+    ModelApplicationDatabaseTopologyProfile,
+    ModelApplicationDatabaseTopologyProfileCatalog,
+    ModelDockerDatabaseConsumerCatalog,
+)
 
 APPLICATION_DATABASE_REF = "application"
 APPLICATION_DATABASE_PHYSICAL_NAME = "omnidash_analytics"
-SUPPORTED_ENVIRONMENTS = frozenset({"local", "onex-dev", "onex-prod"})
+
+_EXPECTED_PROFILE_INSTANCE_MAP = {
+    "local": "local",
+    "test": "local",
+    "stability-test": "local",
+    "judge": "local",
+    "prod": "local",
+    "onex-dev": "onex-dev",
+    "onex-prod": "onex-prod",
+}
+_EXPECTED_PROFILE_INJECTION_SURFACES = {
+    "local": ("OmniNode-ai/omnibase_infra", "docker/docker-compose.infra.yml"),
+    "test": ("OmniNode-ai/omnibase_infra", "docker/docker-compose.e2e.yml"),
+    "stability-test": (
+        "OmniNode-ai/omnibase_infra",
+        "docker/docker-compose.stability-test.yml",
+    ),
+    "judge": ("OmniNode-ai/omnibase_infra", "docker/docker-compose.judge.yml"),
+    "prod": ("OmniNode-ai/omnibase_infra", "docker/docker-compose.prod.yml"),
+    "onex-dev": (
+        "OmniNode-ai/omninode_infra",
+        "k8s/onex-dev/runtime/configmap.yaml",
+    ),
+    "onex-prod": (
+        "OmniNode-ai/omninode_infra",
+        "k8s/onex-prod/runtime/configmap.yaml",
+    ),
+}
+_EXPECTED_RUNTIME_POLICY_PROFILE_MAP = {
+    "dev": "local",
+    "stability-test": "stability-test",
+    "judge": "judge",
+    "prod": "prod",
+}
+SUPPORTED_TOPOLOGY_PROFILES = frozenset(_EXPECTED_PROFILE_INSTANCE_MAP)
+TOPOLOGY_PROFILE_INSTANCE_MAP = MappingProxyType(_EXPECTED_PROFILE_INSTANCE_MAP)
+# Compatibility name for the draft API. New consumers must use the explicit
+# profile terminology because ONEX_ENVIRONMENT is a separate event namespace.
+SUPPORTED_ENVIRONMENTS = SUPPORTED_TOPOLOGY_PROFILES
 
 _TOPOLOGY_INSTANCE_ROOT = Path(__file__).resolve().parent / "instances"
+_PROFILE_CATALOG_PATH = (
+    Path(__file__).resolve().parent / "application_database_profiles.yaml"
+)
 _REPOSITORY_ROOT = Path(__file__).resolve().parents[3]
 _TOPOLOGY_REPOSITORY = "OmniNode-ai/omnibase_infra"
 _TOPOLOGY_SOURCE_PREFIX = "src/omnibase_infra/topology/instances"
+_PROFILE_CATALOG_SOURCE_PATH = (
+    "src/omnibase_infra/topology/application_database_profiles.yaml"
+)
+_TOPOLOGY_PROFILE_ENV_VAR = "ONEX_DATABASE_TOPOLOGY_PROFILE"
+_TOPOLOGY_PROFILE_LINE = re.compile(
+    rf"^\s*{_TOPOLOGY_PROFILE_ENV_VAR}:\s*[\"']?(?P<profile>[a-z0-9-]+)"
+    r"[\"']?\s*(?:#.*)?$",
+    re.MULTILINE,
+)
 
 _EXPECTED_SCHEMAS = {
     "tenant": EnumDatabaseSchemaDomain.TENANT,
@@ -68,15 +127,67 @@ _EXPECTED_BINDING_DSN_ENVS = {
 }
 
 
-def _topology_path(environment: str, topology_root: Path | None = None) -> Path:
-    """Return one allowlisted checked-in topology path without any fallback."""
-    if environment not in SUPPORTED_ENVIRONMENTS:
+def _load_profile_catalog(
+    profile_catalog_path: Path | None = None,
+) -> ModelApplicationDatabaseTopologyProfileCatalog:
+    """Load and validate the exact checked-in profile-to-instance contract."""
+    path = profile_catalog_path or _PROFILE_CATALOG_PATH
+    raw = yaml.safe_load(path.read_text(encoding="utf-8"))
+    catalog = ModelApplicationDatabaseTopologyProfileCatalog.model_validate(raw)
+    if set(catalog.profiles) != SUPPORTED_TOPOLOGY_PROFILES:
         raise ValueError(
-            f"Unsupported topology environment '{environment}'; expected one of "
-            f"{sorted(SUPPORTED_ENVIRONMENTS)}"
+            "Database topology profile set drift: expected "
+            f"{sorted(SUPPORTED_TOPOLOGY_PROFILES)}, got "
+            f"{sorted(catalog.profiles)}"
         )
+    actual_instance_map = {
+        profile: binding.instance for profile, binding in catalog.profiles.items()
+    }
+    if actual_instance_map != _EXPECTED_PROFILE_INSTANCE_MAP:
+        raise ValueError(
+            "Database topology profile/instance drift: expected "
+            f"{_EXPECTED_PROFILE_INSTANCE_MAP}, got {actual_instance_map}"
+        )
+    actual_surfaces = {
+        profile: (binding.deployment_repository, binding.injection_path)
+        for profile, binding in catalog.profiles.items()
+    }
+    if actual_surfaces != _EXPECTED_PROFILE_INJECTION_SURFACES:
+        raise ValueError("Database topology profile injection surface drift")
+    actual_runtime_profiles = {
+        binding.runtime_policy_profile: profile
+        for profile, binding in catalog.profiles.items()
+        if binding.runtime_policy_profile is not None
+    }
+    if actual_runtime_profiles != _EXPECTED_RUNTIME_POLICY_PROFILE_MAP:
+        raise ValueError("Database topology runtime-policy profile drift")
+    return catalog
+
+
+def _resolve_profile(
+    profile: str,
+    profile_catalog_path: Path | None = None,
+) -> ModelApplicationDatabaseTopologyProfile:
+    """Resolve one exact profile without environment inference or fallback."""
+    catalog = _load_profile_catalog(profile_catalog_path)
+    binding = catalog.profiles.get(profile)
+    if binding is None:
+        raise ValueError(
+            f"Unsupported database topology profile '{profile}'; expected one of "
+            f"{sorted(SUPPORTED_TOPOLOGY_PROFILES)}"
+        )
+    return binding
+
+
+def _topology_instance_path(
+    instance: str,
+    topology_root: Path | None = None,
+) -> Path:
+    """Return one allowlisted checked-in topology instance without fallback."""
+    if instance not in _EXPECTED_BINDING_DSN_ENVS:
+        raise ValueError(f"Unsupported database topology instance '{instance}'")
     root = topology_root if topology_root is not None else _TOPOLOGY_INSTANCE_ROOT
-    path = root / f"{environment}.yaml"
+    path = root / f"{instance}.yaml"
     if not path.is_file():
         raise FileNotFoundError(
             f"Required checked-in deployment topology does not exist: {path}"
@@ -84,25 +195,44 @@ def _topology_path(environment: str, topology_root: Path | None = None) -> Path:
     return path
 
 
+def load_topology_profile(
+    profile: str,
+    topology_root: Path | None = None,
+    *,
+    profile_catalog_path: Path | None = None,
+) -> ModelDeploymentTopology:
+    """Load a topology by its independent database-topology profile."""
+    binding = _resolve_profile(profile, profile_catalog_path)
+    topology = ModelDeploymentTopology.from_yaml(
+        _topology_instance_path(binding.instance, topology_root)
+    )
+    validate_application_database_invariants(topology, binding.instance)
+    return topology
+
+
 def load_environment_topology(
     environment: str,
     topology_root: Path | None = None,
+    *,
+    profile_catalog_path: Path | None = None,
 ) -> ModelDeploymentTopology:
-    """Load and validate an authoritative checked-in environment topology."""
-    topology = ModelDeploymentTopology.from_yaml(
-        _topology_path(environment, topology_root)
+    """Compatibility wrapper for the explicit database-topology profile API."""
+    return load_topology_profile(
+        environment,
+        topology_root,
+        profile_catalog_path=profile_catalog_path,
     )
-    validate_application_database_invariants(topology, environment)
-    return topology
 
 
 def validate_application_database_invariants(
     topology: ModelDeploymentTopology,
-    environment: str,
+    topology_instance: str,
 ) -> None:
     """Fail on physical database, schema, role, or binding drift."""
-    if environment not in SUPPORTED_ENVIRONMENTS:
-        raise ValueError(f"Unsupported topology environment '{environment}'")
+    if topology_instance not in _EXPECTED_BINDING_DSN_ENVS:
+        raise ValueError(
+            f"Unsupported database topology instance '{topology_instance}'"
+        )
 
     database = topology.databases.get(APPLICATION_DATABASE_REF)
     if database is None:
@@ -150,7 +280,7 @@ def validate_application_database_invariants(
                 f"Binding '{binding_name}' principal drift: expected "
                 f"'{expected_principal}', got '{binding.principal}'"
             )
-        expected_dsn_env = _EXPECTED_BINDING_DSN_ENVS[environment][binding_name]
+        expected_dsn_env = _EXPECTED_BINDING_DSN_ENVS[topology_instance][binding_name]
         if binding.dsn_env != expected_dsn_env:
             raise ValueError(
                 f"Binding '{binding_name}' dsn_env drift: expected "
@@ -175,19 +305,32 @@ def validate_application_database_invariants(
 def render_database_projection(
     environment: str,
     topology_root: Path | None = None,
+    *,
+    profile_catalog_path: Path | None = None,
 ) -> dict[str, object]:
     """Render the stable, secret-free database subset for downstream consumers."""
-    source_path = _topology_path(environment, topology_root)
-    topology = load_environment_topology(environment, topology_root)
+    binding = _resolve_profile(environment, profile_catalog_path)
+    source_path = _topology_instance_path(binding.instance, topology_root)
+    catalog_path = profile_catalog_path or _PROFILE_CATALOG_PATH
+    topology = load_topology_profile(
+        environment,
+        topology_root,
+        profile_catalog_path=profile_catalog_path,
+    )
     dumped = topology.model_dump(mode="json")
     databases = cast("dict[str, object]", dumped["databases"])
     return {
         "schema_version": "1.0",
         "environment": environment,
+        "topology_instance": binding.instance,
         "source": {
             "repository": _TOPOLOGY_REPOSITORY,
-            "path": f"{_TOPOLOGY_SOURCE_PREFIX}/{environment}.yaml",
+            "path": f"{_TOPOLOGY_SOURCE_PREFIX}/{binding.instance}.yaml",
             "sha256": hashlib.sha256(source_path.read_bytes()).hexdigest(),
+            "profile_catalog_path": _PROFILE_CATALOG_SOURCE_PATH,
+            "profile_catalog_sha256": hashlib.sha256(
+                catalog_path.read_bytes()
+            ).hexdigest(),
         },
         "databases": databases,
     }
@@ -197,12 +340,18 @@ def write_database_projection(
     environment: str,
     output: Path,
     topology_root: Path | None = None,
+    *,
+    profile_catalog_path: Path | None = None,
 ) -> None:
     """Write a deterministic database projection without secret material."""
     output.parent.mkdir(parents=True, exist_ok=True)
     output.write_text(
         yaml.safe_dump(
-            render_database_projection(environment, topology_root),
+            render_database_projection(
+                environment,
+                topology_root,
+                profile_catalog_path=profile_catalog_path,
+            ),
             sort_keys=True,
         ),
         encoding="utf-8",
@@ -213,13 +362,19 @@ def validate_database_projection(
     environment: str,
     projection_path: Path,
     topology_root: Path | None = None,
+    *,
+    profile_catalog_path: Path | None = None,
 ) -> None:
     """Require a checked-in projection to exactly match its typed source."""
     actual_raw = yaml.safe_load(projection_path.read_text(encoding="utf-8"))
     if not isinstance(actual_raw, dict):
         raise ValueError(f"Database projection must be a mapping: {projection_path}")
     actual = cast("dict[str, object]", actual_raw)
-    expected = render_database_projection(environment, topology_root)
+    expected = render_database_projection(
+        environment,
+        topology_root,
+        profile_catalog_path=profile_catalog_path,
+    )
     if actual != expected:
         raise ValueError(
             f"Database projection drift for '{environment}': {projection_path}; "
@@ -230,6 +385,40 @@ def validate_database_projection(
 def _load_docker_consumer_catalog(path: Path) -> ModelDockerDatabaseConsumerCatalog:
     raw = yaml.safe_load(path.read_text(encoding="utf-8"))
     return ModelDockerDatabaseConsumerCatalog.model_validate(raw)
+
+
+def validate_docker_topology_profile_injections(
+    repo_root: Path = _REPOSITORY_ROOT,
+    *,
+    profile_catalog_path: Path | None = None,
+) -> None:
+    """Prove every checked-in Docker lane injects its exact DB profile."""
+    catalog = _load_profile_catalog(profile_catalog_path)
+    for profile, binding in catalog.profiles.items():
+        if binding.deployment_repository != _TOPOLOGY_REPOSITORY:
+            continue
+        path = repo_root / binding.injection_path
+        declared = set(_TOPOLOGY_PROFILE_LINE.findall(path.read_text(encoding="utf-8")))
+        if profile not in declared:
+            raise ValueError(
+                f"Docker topology profile injection drift for '{profile}': "
+                f"{binding.injection_path} must declare "
+                f"{_TOPOLOGY_PROFILE_ENV_VAR}: {profile}"
+            )
+
+    runtime_policy_path = (
+        repo_root / "contracts" / "services" / "runtime_policy.contract.yaml"
+    )
+    runtime_policy = ModelRuntimePolicyContract.model_validate(
+        yaml.safe_load(runtime_policy_path.read_text(encoding="utf-8"))
+    )
+    mapped_runtime_profiles = {
+        binding.runtime_policy_profile
+        for binding in catalog.profiles.values()
+        if binding.runtime_policy_profile is not None
+    }
+    if mapped_runtime_profiles != set(runtime_policy.profiles):
+        raise ValueError("Docker topology runtime-policy profile coverage drift")
 
 
 def validate_docker_catalog_parity(
@@ -305,10 +494,14 @@ def validate_docker_catalog_parity(
 __all__ = [
     "APPLICATION_DATABASE_REF",
     "SUPPORTED_ENVIRONMENTS",
+    "SUPPORTED_TOPOLOGY_PROFILES",
+    "TOPOLOGY_PROFILE_INSTANCE_MAP",
     "load_environment_topology",
+    "load_topology_profile",
     "render_database_projection",
     "validate_application_database_invariants",
     "validate_database_projection",
     "validate_docker_catalog_parity",
+    "validate_docker_topology_profile_injections",
     "write_database_projection",
 ]

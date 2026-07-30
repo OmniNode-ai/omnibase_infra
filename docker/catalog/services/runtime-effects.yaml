@@ -60,6 +60,7 @@ operational_defaults:
   POSTGRES_USER: postgres
   ONEX_LOG_LEVEL: INFO
   ONEX_ENVIRONMENT: local
+  ONEX_DATABASE_TOPOLOGY_PROFILE: local
   KEYCLOAK_REALM: omninode
   KEYCLOAK_ADMIN_CLIENT_ID: onex-admin
   KEYCLOAK_ISSUER: http://localhost:28080/realms/omninode
