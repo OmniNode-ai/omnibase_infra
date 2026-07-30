@@ -10,6 +10,7 @@ Type=oneshot
 RemainAfterExit=yes
 WorkingDirectory=/opt/omninode/gateway
 EnvironmentFile=/etc/omninode/gateway/gateway.env
+ExecStartPre=/usr/bin/grep -Eq "^GATEWAY_IMAGE=sha256:[0-9a-f]{64}$" /etc/omninode/gateway/gateway.env
 ExecStartPre=/usr/bin/docker image inspect ${GATEWAY_IMAGE}
 ExecStart=/usr/bin/docker compose --project-name omninode-gateway --env-file /etc/omninode/gateway/gateway.env -f /opt/omninode/gateway/docker-compose.gateway.yml up -d --no-build --wait --wait-timeout 120 gateway-forwarder
 ExecReload=/usr/bin/docker compose --project-name omninode-gateway --env-file /etc/omninode/gateway/gateway.env -f /opt/omninode/gateway/docker-compose.gateway.yml up -d --no-build --force-recreate --wait --wait-timeout 120 gateway-forwarder

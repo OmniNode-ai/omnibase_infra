@@ -63,6 +63,10 @@ def test_gateway_systemd_unit_waits_for_container_health() -> None:
     unit = GATEWAY_SYSTEMD_UNIT.read_text(encoding="utf-8")
 
     assert "After=network-online.target docker.service tailscaled.service" in unit
+    assert (
+        'ExecStartPre=/usr/bin/grep -Eq "^GATEWAY_IMAGE=sha256:[0-9a-f]{64}$" '
+        "/etc/omninode/gateway/gateway.env"
+    ) in unit
     assert "ExecStartPre=/usr/bin/docker image inspect ${GATEWAY_IMAGE}" in unit
     assert "up -d --no-build --wait --wait-timeout 120 gateway-forwarder" in unit
     assert "WantedBy=multi-user.target" in unit
