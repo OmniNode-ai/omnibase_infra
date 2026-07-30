@@ -18,6 +18,11 @@ time. This module proves the guard that closes that class:
      itself a defect the guard should not paper over.
   4. Every ``STANDALONE_PROJECT_ROOTS`` entry resolves to a real
      ``pyproject.toml`` and a real, live CI workflow file.
+  5. That workflow is actually *reachable on a pull request* and actually
+     *references the root* (OMN-15378 AC3). File existence alone was never
+     proof of wiring: the deploy-agent workflow is now ``workflow_call``-only,
+     reachable solely through ci.yml's caller job, which is what puts its
+     result under the required "CI Summary" context.
 """
 
 from __future__ import annotations
@@ -99,6 +104,130 @@ def test_synthetic_unregistered_standalone_project_fails_closed(
 
     assert len(violations) == 1
     assert "does-not-exist.yml does not exist" in violations[0]
+
+
+def _synthetic_standalone_root(tmp_path: Path) -> Path:
+    """A registered-shaped standalone project: pyproject.toml + its own tests/."""
+    root = tmp_path / "scripts" / "widget-agent"
+    tests_dir = root / "tests"
+    tests_dir.mkdir(parents=True)
+    (tests_dir / "test_thing.py").write_text("def test_ok() -> None:\n    pass\n")
+    (root / "pyproject.toml").write_text("[project]\nname = 'widget-agent'\n")
+    (tmp_path / ".github" / "workflows").mkdir(parents=True)
+    return root
+
+
+def _with_registration(
+    tmp_path: Path, workflow_rel: str
+) -> list[str]:  # pragma: no cover - helper
+    from scripts.validation import validate_test_root_collection as module
+
+    original = dict(module.STANDALONE_PROJECT_ROOTS)
+    module.STANDALONE_PROJECT_ROOTS.clear()
+    module.STANDALONE_PROJECT_ROOTS["scripts/widget-agent"] = workflow_rel
+    try:
+        return module.find_violations(tmp_path)
+    finally:
+        module.STANDALONE_PROJECT_ROOTS.clear()
+        module.STANDALONE_PROJECT_ROOTS.update(original)
+
+
+def test_registered_workflow_that_never_runs_on_a_pr_fails_closed(
+    tmp_path: Path,
+) -> None:
+    """RED-proof for the OMN-15378 AC3 hardening: a `workflow_call`-only wiring
+    workflow that NO workflow invokes runs zero tests, so registering it must
+    still fail — file existence alone was never proof of wiring."""
+    _synthetic_standalone_root(tmp_path)
+    (tmp_path / ".github" / "workflows" / "widget-agent-tests.yml").write_text(
+        "name: Widget Agent Tests\n"
+        "on:\n"
+        "  workflow_call:\n"
+        "jobs:\n"
+        "  widget-agent-tests:\n"
+        "    runs-on: ubuntu-latest\n"
+        "    steps:\n"
+        "      - run: pytest scripts/widget-agent/tests\n"
+    )
+
+    violations = _with_registration(
+        tmp_path, ".github/workflows/widget-agent-tests.yml"
+    )
+
+    assert len(violations) == 1
+    assert "never runs on a pull request" in violations[0]
+
+
+def test_registered_workflow_called_by_a_pr_workflow_is_accepted(
+    tmp_path: Path,
+) -> None:
+    """The shape this repo now uses: the reusable is invoked by a PR-triggered
+    caller (ci.yml), which is what puts its result under a required context."""
+    _synthetic_standalone_root(tmp_path)
+    workflows = tmp_path / ".github" / "workflows"
+    (workflows / "widget-agent-tests.yml").write_text(
+        "name: Widget Agent Tests\n"
+        "on:\n"
+        "  workflow_call:\n"
+        "jobs:\n"
+        "  widget-agent-tests:\n"
+        "    runs-on: ubuntu-latest\n"
+        "    steps:\n"
+        "      - run: pytest scripts/widget-agent/tests\n"
+    )
+    (workflows / "ci.yml").write_text(
+        "name: CI\n"
+        "on:\n"
+        "  pull_request:\n"
+        "    branches: [dev]\n"
+        "jobs:\n"
+        "  widget-agent-tests:\n"
+        "    uses: ./.github/workflows/widget-agent-tests.yml\n"
+    )
+
+    assert (
+        _with_registration(tmp_path, ".github/workflows/widget-agent-tests.yml") == []
+    )
+
+
+def test_registered_workflow_that_does_not_reference_the_root_fails_closed(
+    tmp_path: Path,
+) -> None:
+    """A PR-triggered workflow that never mentions the root cannot be running
+    its tests — registration must not be satisfiable by pointing at any old
+    workflow file (e.g. re-pointing an entry at ci.yml)."""
+    _synthetic_standalone_root(tmp_path)
+    (tmp_path / ".github" / "workflows" / "unrelated.yml").write_text(
+        "name: Unrelated\n"
+        "on:\n"
+        "  pull_request:\n"
+        "    branches: [dev]\n"
+        "jobs:\n"
+        "  lint:\n"
+        "    runs-on: ubuntu-latest\n"
+        "    steps:\n"
+        "      - run: echo lint\n"
+    )
+
+    violations = _with_registration(tmp_path, ".github/workflows/unrelated.yml")
+
+    assert len(violations) == 1
+    assert "never references scripts/widget-agent" in violations[0]
+
+
+def test_deploy_agent_wiring_workflow_is_pr_reachable_in_this_repo() -> None:
+    """Live assertion for the registration this repo actually ships: the
+    deploy-agent reusable is `workflow_call`-only, so its PR reachability comes
+    entirely from ci.yml's caller job. If that caller is removed, this fails."""
+    from scripts.validation.validate_test_root_collection import (
+        _workflow_runs_on_pull_request,
+    )
+
+    for root, workflow in STANDALONE_PROJECT_ROOTS.items():
+        assert _workflow_runs_on_pull_request(workflow, REPO_ROOT), (
+            f"{root}'s wiring workflow {workflow} is not reachable on a pull "
+            "request — its tests would be uncollected in practice"
+        )
 
 
 def test_known_uncollected_debt_entries_still_exist_and_are_still_uncollected() -> None:
