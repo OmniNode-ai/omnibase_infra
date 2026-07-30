@@ -116,5 +116,8 @@ environment: local
 schema_version: '1.0'
 source:
   path: src/omnibase_infra/topology/instances/local.yaml
+  profile_catalog_path: src/omnibase_infra/topology/application_database_profiles.yaml
+  profile_catalog_sha256: 759f32da77ad41b874fbb05d2824c44f9de4c64e9d269d99da21445225a90ca1
   repository: OmniNode-ai/omnibase_infra
   sha256: e4170e97e26fb9c63a53f5f660cedacd15bf7e99609309c54bff15c3d026ac8d
+topology_instance: local

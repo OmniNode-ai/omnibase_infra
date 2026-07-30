@@ -134,6 +134,7 @@ services:
       OMNIMEMORY_MEMGRAPH_HOST: ${PROD_RUNTIME_MAIN_OMNIMEMORY_MEMGRAPH_HOST?runtime policy contract must set PROD_RUNTIME_MAIN_OMNIMEMORY_MEMGRAPH_HOST}
       ONEX_ENVIRONMENT: prod
       KAFKA_ENVIRONMENT: prod
+      ONEX_DATABASE_TOPOLOGY_PROFILE: prod
       ONEX_STATE_ROOT: /app/data/.onex_state_prod
       ONEX_BOX_ID: omninode-pc
       ONEX_RUNTIME_ID: prod-main
@@ -170,6 +171,7 @@ services:
       OMNIMEMORY_MEMGRAPH_HOST: ${PROD_RUNTIME_EFFECTS_OMNIMEMORY_MEMGRAPH_HOST?runtime policy contract must set PROD_RUNTIME_EFFECTS_OMNIMEMORY_MEMGRAPH_HOST}
       ONEX_ENVIRONMENT: prod
       KAFKA_ENVIRONMENT: prod
+      ONEX_DATABASE_TOPOLOGY_PROFILE: prod
       ONEX_STATE_ROOT: /app/data/.onex_state_prod
       ONEX_BOX_ID: omninode-pc
       ONEX_RUNTIME_ID: prod-effects
@@ -197,6 +199,7 @@ services:
     environment:
       ONEX_ENVIRONMENT: prod
       KAFKA_ENVIRONMENT: prod
+      ONEX_DATABASE_TOPOLOGY_PROFILE: prod
       OTEL_SERVICE_NAME: omnimarket-prod-projection-api
     ports: !override
       - "${PROD_PROJECTION_API_PORT:-23002}:3002"

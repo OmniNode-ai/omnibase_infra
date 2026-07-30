@@ -291,6 +291,7 @@ services:
       VALKEY_PORT: 6379
       # Runtime configuration
       ONEX_ENVIRONMENT: test
+      ONEX_DATABASE_TOPOLOGY_PROFILE: test
       ONEX_LOG_LEVEL: ${ONEX_LOG_LEVEL:-DEBUG}
       ONEX_GROUP_ID: onex-runtime-e2e
       ONEX_CONTRACTS_DIR: /app/contracts
