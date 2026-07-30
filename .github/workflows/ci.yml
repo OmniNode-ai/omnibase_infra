@@ -2107,13 +2107,27 @@ jobs:
   # `vocabulary_ref` MUST equal the ref in `uses:`: the first selects the
   # workflow file, the second selects the source it reads, and drifting them
   # would run one vintage of the gate against another vintage of the tokens.
+  #
+  # PIN AN ANCESTOR OF omnimarket `dev`, NEVER A PR-HEAD SHA (OMN-15484 step 6).
+  # The original fan-out pinned 879d6fc6 — the PR HEAD of omnimarket#1976. That
+  # SHA was 40-hex and therefore satisfied every local check, but it lived only
+  # on the PR branch. When #1976 squash-merged at 2026-07-30T18:29:59Z the branch
+  # was deleted and the ref stopped resolving for Actions, so THIS ENTIRE
+  # WORKFLOW FILE failed to load: runs after 18:59Z reported `conclusion=failure`
+  # with 0 jobs and `name` degraded to the raw path. That takes down the required
+  # `CI Summary` context by ABSENCE rather than by failure, which branch
+  # protection treats as never-satisfied — every omnibase_infra dev PR based on
+  # 27478af4 or later was unmergeable until this repin.
+  #
+  # 454c429f is that PR's dev squash commit (`gh pr view 1976 --repo
+  # OmniNode-ai/omnimarket --json mergeCommit`), reachable from `dev` forever.
   merge-hold-gate:
     permissions:
       contents: read
       pull-requests: read
-    uses: OmniNode-ai/omnimarket/.github/workflows/merge-hold-gate-reusable.yml@879d6fc6825f876458c6d45ed670c8715de8ac95
+    uses: OmniNode-ai/omnimarket/.github/workflows/merge-hold-gate-reusable.yml@454c429f328e68e19300f33ffb8121f1bccc7f86
     with:
-      vocabulary_ref: 879d6fc6825f876458c6d45ed670c8715de8ac95
+      vocabulary_ref: 454c429f328e68e19300f33ffb8121f1bccc7f86
       context_name: merge-hold-gate / evaluate
 
   ci-summary:
