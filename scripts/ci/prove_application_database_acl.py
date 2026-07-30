@@ -131,6 +131,13 @@ def _admin(dsn: str = ADMIN_DSN) -> psycopg2.extensions.connection:
     return connection
 
 
+def _admin_dsn_for_database(database: str) -> str:
+    """Retarget the configured admin DSN without dropping authentication."""
+    parameters = psycopg2.extensions.parse_dsn(ADMIN_DSN)
+    parameters["dbname"] = database
+    return cast("str", psycopg2.extensions.make_dsn(**parameters))
+
+
 def _dict_rows(
     statement: str,
     parameters: Sequence[object] = (),
@@ -2094,9 +2101,7 @@ def _scaffold_probe_matrix(
 def _scaffold_phase_proof(matrix: ModelApplicationDatabaseAclMatrix) -> None:
     """Prove P1 can precede object materialization without weakening rollback."""
     probe = _scaffold_probe_matrix(matrix)
-    probe_dsn = (
-        f"postgresql://postgres@{DATABASE_HOST}:{DATABASE_PORT}/acl_scaffold_probe"
-    )
+    probe_dsn = _admin_dsn_for_database("acl_scaffold_probe")
     assert probe.status == "BLOCKED"
     assert probe.scaffold_status == "READY"
     rendered = render_application_database_acl_sql(
