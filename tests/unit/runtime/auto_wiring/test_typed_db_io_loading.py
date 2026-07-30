@@ -16,7 +16,7 @@ from omnibase_core.models.contracts.subcontracts.model_db_table_declaration impo
     ModelDbTableDeclaration,
 )
 from omnibase_core.models.core.model_deployment_topology import ModelDeploymentTopology
-from omnibase_core.models.errors import ModelOnexError
+from omnibase_core.models.events.model_event_envelope import ModelEventEnvelope
 from omnibase_infra.runtime.auto_wiring.discovery import _parse_contract
 from omnibase_infra.runtime.auto_wiring.handler_wiring import (
     _build_projection_db_adapter,
@@ -30,6 +30,12 @@ pytestmark = pytest.mark.unit
 _FIXTURE_ROOT = (
     Path(__file__).parents[3] / "fixtures" / "application_relation_ownership"
 )
+
+
+@pytest.fixture(autouse=True)
+def _configured_projection_dsn(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setenv("OMNIDASH_ANALYTICS_DB_URL", "postgresql://fixture")
+    monkeypatch.setenv("OMNINODE_INTERNAL_DB_URL", "postgresql://fixture")
 
 
 def _parse(path: Path) -> ModelDiscoveredContract:
@@ -128,7 +134,8 @@ def test_projection_target_exposes_typed_database_schema_and_domain() -> None:
     assert target.physical_database == "omnidash_analytics"
     assert target.schemas == ("tenant",)
     assert target.domains == (EnumDatabaseSchemaDomain.TENANT,)
-    assert target.db_url_env == "OMNIDASH_ANALYTICS_DB_URL"
+    assert target.dsn_envs == ("OMNIDASH_ANALYTICS_DB_URL",)
+    assert [binding.binding_ref for binding in target.bindings] == ["tenant_projection"]
 
 
 def test_projection_target_rejects_unknown_schema() -> None:
@@ -156,11 +163,11 @@ def test_projection_target_preserves_multiple_schemas_in_one_database() -> None:
             role="events",
         ),
         ModelDbTableDeclaration(
-            name="judge_verdict_events",
+            name="generation_events",
             database_ref="application",
             schema="omninode_internal",
             migration="0002.sql",
-            role="judge_verdicts",
+            role="generation_events",
         ),
     )
 
@@ -174,11 +181,11 @@ def test_projection_target_preserves_multiple_schemas_in_one_database() -> None:
     )
     assert [table_target.table.name for table_target in target.table_targets] == [
         "delegation_events",
-        "judge_verdict_events",
+        "generation_events",
     ]
 
 
-def test_non_tenant_target_fails_closed_until_adapter_split() -> None:
+def test_non_tenant_target_selects_explicit_internal_operation() -> None:
     topology = ModelDeploymentTopology.from_yaml(_FIXTURE_ROOT / "topology.yaml")
     table = ModelDbTableDeclaration(
         name="generation_events",
@@ -189,8 +196,14 @@ def test_non_tenant_target_fails_closed_until_adapter_split() -> None:
     )
     target = _resolve_projection_database_target((table,), topology)
 
-    with pytest.raises(ModelOnexError, match="OMN-15421"):
-        _build_projection_db_adapter("postgresql://fixture", target)
+    adapter = _build_projection_db_adapter(
+        {"omninode_runtime_service": "postgresql://fixture"},
+        target,
+        None,
+        None,
+    )
+
+    assert callable(adapter.upsert)
 
 
 def test_projection_adapter_selection_receives_resolved_domain_target() -> None:
@@ -235,5 +248,10 @@ def test_projection_adapter_selection_receives_resolved_domain_target() -> None:
 
         asyncio.run(invoke_callback())
 
-    build_adapter.assert_called_once_with("postgresql://fixture", target)
+    build_adapter.assert_called_once_with(
+        {"tenant_projection": "postgresql://fixture"},
+        target,
+        None,
+        envelope,
+    )
     assert received[0]["_db"] is adapter

@@ -1,0 +1,30 @@
+# SPDX-License-Identifier: MIT
+services:
+  postgres:
+    image: postgres:16-alpine
+    environment:
+      POSTGRES_DB: omnidash_analytics
+      POSTGRES_PASSWORD: postgres-proof-only
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U postgres -d omnidash_analytics"]
+      interval: 1s
+      timeout: 3s
+      retries: 30
+  proof:
+    build:
+      context: ../..
+      dockerfile: docker/domain-adapter-proof/Dockerfile
+    depends_on:
+      postgres:
+        condition: service_healthy
+    command:
+      - /app/.venv/bin/python
+      - /app/proof/prove.py
+      - --admin-dsn
+      - postgresql://postgres:postgres-proof-only@postgres:5432/omnidash_analytics
+      - --tenant-dsn
+      - postgresql://tenant_projection_writer:domain-adapter-proof-only@postgres:5432/omnidash_analytics
+      - --internal-dsn
+      - postgresql://omninode_runtime:domain-adapter-proof-only@postgres:5432/omnidash_analytics
+      - --catalog-dsn
+      - postgresql://app_dashboard:domain-adapter-proof-only@postgres:5432/omnidash_analytics

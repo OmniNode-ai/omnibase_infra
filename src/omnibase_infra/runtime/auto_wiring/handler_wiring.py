@@ -52,6 +52,10 @@ from uuid import UUID, uuid4
 from pydantic import BaseModel, ValidationError
 
 from omnibase_core.enums.enum_core_error_code import EnumCoreErrorCode
+from omnibase_core.enums.enum_database_grant_object_type import (
+    EnumDatabaseGrantObjectType,
+)
+from omnibase_core.enums.enum_database_privilege import EnumDatabasePrivilege
 from omnibase_core.enums.enum_database_schema_domain import EnumDatabaseSchemaDomain
 from omnibase_core.enums.enum_handler_resolution_outcome import (
     EnumHandlerResolutionOutcome,
@@ -126,8 +130,17 @@ from omnibase_infra.runtime.contract_terminal_events import (
     envelope_terminal_payload,
     load_terminal_event_topics,
 )
+from omnibase_infra.runtime.dispatch_envelope_context import (
+    current_dispatch_envelope,
+    current_projection_tenant_authority,
+)
 from omnibase_infra.runtime.models.model_postgres_pool_config import (
     ModelPostgresPoolConfig,
+)
+from omnibase_infra.runtime.projection_tenant_authority import (
+    VerifiedProjectionTenantAuthority,
+    assert_projection_tenant_authority_matches_event,
+    parse_canonical_tenant_uuid,
 )
 from omnibase_infra.runtime.providers.provider_postgres_pool import ProviderPostgresPool
 from omnibase_infra.runtime.state_io.state_store_adapter import (
@@ -1636,7 +1649,24 @@ _DB_URL_ENV_MAP: dict[str, str] = {
     "omnidash_analytics": "OMNIDASH_ANALYTICS_DB_URL",
 }
 
-_OPTIONAL_PROJECTION_DATABASES: frozenset[str] = frozenset({"omnidash_analytics"})
+
+@dataclass(frozen=True)
+class ProjectionDatabaseBindingTarget:
+    """One topology-declared workload identity and its secret-free DSN key."""
+
+    binding_ref: str
+    database_ref: str
+    physical_database: str
+    principal: str
+    dsn_env: str
+
+
+@dataclass(frozen=True)
+class ProjectionCatalogBindingPolicy:
+    """Composition-root choice of existing topology catalog identities."""
+
+    read_binding: str | None = None
+    write_binding: str | None = None
 
 
 @dataclass(frozen=True)
@@ -1648,24 +1678,17 @@ class ProjectionTableTarget:
     physical_database: str
     schema: str
     domain: EnumDatabaseSchemaDomain
+    read_binding: ProjectionDatabaseBindingTarget | None
+    write_binding: ProjectionDatabaseBindingTarget | None
 
 
 @dataclass(frozen=True)
 class ProjectionDatabaseTarget:
-    """Topology-resolved connection target for one projection handler.
-
-    A projection callback currently injects one physical connection, but a node
-    contract may legitimately declare tables in more than one schema/domain of
-    that database. Per-table locations remain attached so the adapter-split lane
-    can select a typed operation without re-reading YAML or inferring a domain
-    from row contents. Different physical databases still fail closed because a
-    single ``_db`` injection cannot serve them safely.
-    """
+    """Topology-resolved, per-operation pools for one projection handler."""
 
     tables: tuple[ModelDbTableDeclaration, ...]
     table_targets: tuple[ProjectionTableTarget, ...]
     physical_database: str
-    db_url_env: str
 
     @property
     def database_refs(self) -> tuple[str, ...]:
@@ -1687,10 +1710,183 @@ class ProjectionDatabaseTarget:
             )
         )
 
+    @property
+    def bindings(self) -> tuple[ProjectionDatabaseBindingTarget, ...]:
+        """Return every selected operation binding in stable order."""
+        by_ref: dict[str, ProjectionDatabaseBindingTarget] = {}
+        for table_target in self.table_targets:
+            for binding in (table_target.read_binding, table_target.write_binding):
+                if binding is not None:
+                    by_ref[binding.binding_ref] = binding
+        return tuple(by_ref[key] for key in sorted(by_ref))
+
+    @property
+    def dsn_envs(self) -> tuple[str, ...]:
+        """Return every required DSN environment key in stable order."""
+        return tuple(sorted({binding.dsn_env for binding in self.bindings}))
+
+
+_TENANT_PROJECTION_BINDING = "tenant_projection"
+_INTERNAL_PROJECTION_BINDING = "omninode_runtime_service"
+
+
+def _resolve_projection_binding(
+    database: ModelDeploymentTopologyDatabase,
+    database_ref: str,
+    binding_ref: str,
+) -> ProjectionDatabaseBindingTarget:
+    """Resolve one explicit workload binding without a physical-DB fallback."""
+    binding = database.bindings.get(binding_ref)
+    if binding is None:
+        raise ValueError(
+            f"Projection binding {binding_ref!r} is not declared for "
+            f"database_ref {database_ref!r}"
+        )
+    if binding.database_ref != database_ref:
+        raise ValueError(
+            f"Projection binding {binding_ref!r} resolves to database_ref "
+            f"{binding.database_ref!r}, expected {database_ref!r}"
+        )
+    principal = database.principals.get(binding.principal)
+    if principal is None:
+        raise ValueError(
+            f"Projection binding {binding_ref!r} references unknown principal "
+            f"{binding.principal!r}"
+        )
+    if not principal.login or principal.bypass_rls:
+        raise ValueError(
+            f"Projection principal {binding.principal!r} must be LOGIN and NOBYPASSRLS"
+        )
+    return ProjectionDatabaseBindingTarget(
+        binding_ref=binding_ref,
+        database_ref=database_ref,
+        physical_database=database.physical_name,
+        principal=binding.principal,
+        dsn_env=binding.dsn_env,
+    )
+
+
+def _require_projection_binding_privileges(
+    database: ModelDeploymentTopologyDatabase,
+    binding: ProjectionDatabaseBindingTarget,
+    table: ModelDbTableDeclaration,
+    *,
+    operation: str,
+) -> None:
+    """Prove the selected topology principal can perform the exact operation."""
+    principal = database.principals[binding.principal]
+    has_schema_usage = any(
+        grant.object_type is EnumDatabaseGrantObjectType.SCHEMA
+        and grant.schema == table.schema
+        and EnumDatabasePrivilege.USAGE in grant.privileges
+        for grant in principal.grants
+    )
+    required_table_privileges = (
+        {EnumDatabasePrivilege.SELECT}
+        if operation == "read"
+        else {
+            # PostgreSQL requires SELECT as well as INSERT/UPDATE for the
+            # adapter's INSERT ... ON CONFLICT DO UPDATE statement.
+            EnumDatabasePrivilege.SELECT,
+            EnumDatabasePrivilege.INSERT,
+            EnumDatabasePrivilege.UPDATE,
+        }
+    )
+    granted_table_privileges = {
+        privilege
+        for grant in principal.grants
+        if grant.object_type is EnumDatabaseGrantObjectType.TABLE
+        and grant.schema == table.schema
+        and table.name in grant.objects
+        for privilege in grant.privileges
+    }
+    missing_table_privileges = sorted(
+        required_table_privileges - granted_table_privileges,
+        key=lambda privilege: privilege.value,
+    )
+    if not has_schema_usage or missing_table_privileges:
+        missing = []
+        if not has_schema_usage:
+            missing.append(f"USAGE on schema {table.schema!r}")
+        if missing_table_privileges:
+            names = ", ".join(privilege.value for privilege in missing_table_privileges)
+            missing.append(f"{names} on table {table.schema}.{table.name}")
+        raise ValueError(
+            f"Projection binding {binding.binding_ref!r} principal "
+            f"{binding.principal!r} lacks declared {operation} privileges: "
+            + "; ".join(missing)
+        )
+
+
+def _projection_operation_bindings(
+    *,
+    table: ModelDbTableDeclaration,
+    database: ModelDeploymentTopologyDatabase,
+    domain: EnumDatabaseSchemaDomain,
+    catalog_read_binding: str | None,
+    catalog_write_binding: str | None,
+) -> tuple[
+    ProjectionDatabaseBindingTarget | None,
+    ProjectionDatabaseBindingTarget | None,
+]:
+    """Select explicit read/write identities from domain and table access."""
+    needs_read = table.access in {"read", "read_write"}
+    needs_write = table.access in {"write", "read_write"}
+    if domain is EnumDatabaseSchemaDomain.TENANT:
+        binding_ref = _TENANT_PROJECTION_BINDING
+        read_ref = binding_ref if needs_read else None
+        write_ref = binding_ref if needs_write else None
+    elif domain is EnumDatabaseSchemaDomain.OMNINODE_INTERNAL:
+        binding_ref = _INTERNAL_PROJECTION_BINDING
+        read_ref = binding_ref if needs_read else None
+        write_ref = binding_ref if needs_write else None
+    elif domain is EnumDatabaseSchemaDomain.PLATFORM_CATALOG:
+        read_ref = catalog_read_binding if needs_read else None
+        write_ref = catalog_write_binding if needs_write else None
+        if needs_read and read_ref is None:
+            raise ValueError(
+                f"Catalog table {table.name!r} requires an explicit reader binding"
+            )
+        if needs_write and write_ref is None:
+            raise ValueError(
+                f"Catalog table {table.name!r} requires an explicit writer binding"
+            )
+    else:  # pragma: no cover - enum exhaustiveness guard
+        raise ValueError(f"Unsupported projection database domain {domain!r}")
+
+    read_binding = (
+        _resolve_projection_binding(database, table.database_ref, read_ref)
+        if read_ref is not None
+        else None
+    )
+    write_binding = (
+        _resolve_projection_binding(database, table.database_ref, write_ref)
+        if write_ref is not None
+        else None
+    )
+    if read_binding is not None:
+        _require_projection_binding_privileges(
+            database,
+            read_binding,
+            table,
+            operation="read",
+        )
+    if write_binding is not None:
+        _require_projection_binding_privileges(
+            database,
+            write_binding,
+            table,
+            operation="write",
+        )
+    return read_binding, write_binding
+
 
 def _resolve_projection_database_target(
     db_tables: Sequence[ModelDbTableDeclaration],
     topology: ModelDeploymentTopology,
+    *,
+    catalog_read_binding: str | None = None,
+    catalog_write_binding: str | None = None,
 ) -> ProjectionDatabaseTarget:
     """Resolve typed table declarations through the authoritative topology."""
     tables = tuple(db_tables)
@@ -1711,6 +1907,13 @@ def _resolve_projection_database_target(
         domain = topology.schema_domain(table.database_ref, table.schema)
         physical_database = database.physical_name
         databases_by_physical_name[physical_database] = database
+        read_binding, write_binding = _projection_operation_bindings(
+            table=table,
+            database=database,
+            domain=domain,
+            catalog_read_binding=catalog_read_binding,
+            catalog_write_binding=catalog_write_binding,
+        )
         table_targets.append(
             ProjectionTableTarget(
                 table=table,
@@ -1718,6 +1921,8 @@ def _resolve_projection_database_target(
                 physical_database=physical_database,
                 schema=table.schema,
                 domain=domain,
+                read_binding=read_binding,
+                write_binding=write_binding,
             )
         )
 
@@ -1728,27 +1933,10 @@ def _resolve_projection_database_target(
             f"connection, got {physical_databases!r}; split the handler or provide "
             "an explicit multi-adapter boundary"
         )
-    physical_database = physical_databases[0]
-    if physical_database not in _DB_URL_ENV_MAP:
-        raise ValueError(
-            "Typed db_table declarations resolve to unknown physical "
-            f"database {physical_database!r}; expected runtime catalog parity with "
-            f"one of {sorted(_DB_URL_ENV_MAP)!r}"
-        )
-    db_url_env = _DB_URL_ENV_MAP[physical_database]
-    database = databases_by_physical_name[physical_database]
-    binding_envs = {binding.dsn_env for binding in database.bindings.values()}
-    if db_url_env not in binding_envs:
-        raise ValueError(
-            f"Legacy projection DSN {db_url_env!r} is not declared by topology "
-            f"bindings for physical database {physical_database!r}"
-        )
-
     return ProjectionDatabaseTarget(
         tables=tables,
         table_targets=tuple(table_targets),
-        physical_database=physical_database,
-        db_url_env=db_url_env,
+        physical_database=physical_databases[0],
     )
 
 
@@ -1935,233 +2123,420 @@ def _contract_declares_state_io(contract: ModelDiscoveredContract) -> bool:
     return bool(_read_state_io(contract.contract_path))
 
 
-# OMN-15301: tenant-scoped projection tables carry an RLS policy comparing
-# ``tenant_id`` against this GUC (omnimarket migration 0023 and siblings):
-#   USING/WITH CHECK (tenant_id = current_setting('app.tenant_id', true))
-# The GUC name is shared with the two existing reader seams (onex-api
-# ``analytics_db.run_query`` and omnidash ``postgres-projection-reader``); it is
-# a cross-repo contract, not a local choice.
+# Tenant-scoped projection tables compare ``tenant_id`` with this
+# transaction-local setting in both USING and WITH CHECK policies.
 _TENANT_GUC = "app.tenant_id"
 
-# The DEFAULT carried by every landed tenant_id column (omnimarket 0019/0022,
-# savings 080). When an event resolves no tenant, the row takes this default, so
-# the GUC must be set to the SAME value or the policy's WITH CHECK rejects the
-# write it would otherwise have accepted.
-_INTERIM_DEFAULT_TENANT = "omninode"
 
-_TRUTHY_ENV = frozenset({"1", "true", "yes", "on"})
-
-
-def _tenant_isolation_enforced() -> bool:
-    """Whether a tenant-less projection write must be refused outright.
-
-    Mirrors omnimarket's ``Settings.enforce_tenant_isolation`` (OMN-14898) as a
-    shared env-var contract. It is deliberately OFF by default: every lane runs
-    the OMN-14058 operator-accepted single-tenant interim today, and an
-    unconditional reject would take down the whole projection write path for no
-    isolation benefit.
-    """
-    return os.environ.get("ENFORCE_TENANT_ISOLATION", "").strip().lower() in _TRUTHY_ENV
-
-
-def _resolve_write_tenant(tenant_value: object, *, table: str) -> str:
-    """Resolve the tenant a projection WRITE runs under.
-
-    The GUC must equal the value the database will actually store, or the
-    policy's WITH CHECK rejects a write it would otherwise accept. So the only
-    authorities are the row itself and, when the row omits ``tenant_id``, the
-    column DEFAULT that Postgres will then apply.
-
-    Deliberately does NOT consult ``ONEX_TENANT_ID``: tenant resolution from the
-    environment belongs to the handler (which stamps ``row["tenant_id"]`` when
-    it resolves one), not here. Reading it a second time at this boundary would
-    set the session to a tenant the row does not carry -- proven to fail against
-    a real policy by ``test_lane_tenant_env_does_not_override_the_column_default``.
-    """
-    # Imported lazily, matching this module's convention for omnibase_infra.errors.
+def _projection_tenant_context_error(message: str) -> Exception:
     from omnibase_infra.errors.error_projection import ProjectionTenantContextError
 
-    if isinstance(tenant_value, str) and tenant_value.strip():
-        return tenant_value.strip()
-    if _tenant_isolation_enforced():
-        raise ProjectionTenantContextError(
-            f"{table} write refused: no tenant_id resolved and "
-            "ENFORCE_TENANT_ISOLATION is set (OMN-15301) — refusing to write "
-            "under the shared tenant default.",
-            projection_type=table,
+    return ProjectionTenantContextError(message)
+
+
+def _reject_canonical_tenant_field(
+    values: Mapping[str, object] | None, *, domain: EnumDatabaseSchemaDomain
+) -> None:
+    if values is not None and "tenant_id" in values:
+        raise ValueError(
+            f"{domain.value} operation rejects canonical tenant_id; "
+            "only tenant-domain operations may carry it"
         )
-    return _INTERIM_DEFAULT_TENANT
 
 
-def _resolve_read_tenant(tenant_value: object) -> str:
-    """Resolve the tenant a projection READ runs under.
+class ProjectionTableOperation:
+    """Shared SQL mechanics for one topology-resolved table declaration."""
 
-    A read must find what the writer stored, so this mirrors the HANDLER's
-    resolution order (explicit filter, then the lane's ``ONEX_TENANT_ID``, then
-    the interim default) rather than the write path's column-default rule: on a
-    lane where ``ONEX_TENANT_ID`` is set, the handler stamped that tenant onto
-    the rows, so that is where the existing-row probes must look.
+    def __init__(
+        self,
+        adapter: ProjectionDatabaseOperations,
+        target: ProjectionTableTarget,
+    ) -> None:
+        self._adapter = adapter
+        self._target = target
 
-    Never raises. An unresolvable read tenant already fails closed at the policy
-    (zero rows visible, no leak), and raising here would break the probes that
-    guard against evidence clobbering.
-    """
-    if isinstance(tenant_value, str) and tenant_value.strip():
-        return tenant_value.strip()
-    return os.environ.get("ONEX_TENANT_ID", "").strip() or _INTERIM_DEFAULT_TENANT
-
-
-def _build_sync_db_adapter(db_url: str) -> object:
-    """Build a synchronous psycopg2-backed DatabaseAdapter from a DSN.
-
-    Separated from _make_projection_dispatch_callback to allow test patching.
-
-    OMN-15301: every statement runs inside an explicit transaction that first
-    sets the ``app.tenant_id`` GUC, so RLS-covered tables accept the write. The
-    connection is otherwise in autocommit, under which a bare ``SET LOCAL``
-    would be a no-op -- each statement would be its own implicit transaction and
-    the GUC would evaporate before the INSERT ran.
-    """
-    # Why: Optional integration dependency is validated at runtime but ships incomplete typing.
-    import psycopg2  # type: ignore[import-untyped]
-
-    # Why: Optional integration dependency is validated at runtime but ships incomplete typing.
-    import psycopg2.extras  # type: ignore[import-untyped]
-
-    class SyncPsycopg2Adapter:
-        _conn: object
-
-        def __init__(self, dsn: str) -> None:
-            self._dsn = dsn
-            self._conn = None
-
-        def _get_conn(self) -> object:
-            if self._conn is None or getattr(self._conn, "closed", False):
-                conn = psycopg2.connect(self._dsn)
-                conn.autocommit = True
-                self._conn = conn
-            return self._conn
-
-        @contextlib.contextmanager
-        def _tenant_scoped(self, conn: object, tenant: str) -> Iterator[None]:
-            """Run the enclosed statements in one tenant-scoped transaction.
-
-            ``set_config(..., is_local => true)`` is the parameterized,
-            transaction-scoped form of ``SET LOCAL`` (``SET LOCAL`` itself
-            cannot take a bind parameter, so a tenant value would have to be
-            interpolated into the SQL text). It is the same mechanism the
-            onex-api reader seam uses, so both sides of the policy agree.
-
-            Autocommit is dropped only for the duration of the statement and
-            always restored, so the GUC cannot outlive the transaction and leak
-            one event's tenant onto the next write over this cached connection.
-            """
-            # Why: Control flow narrows this union at runtime before the attribute access.
-            conn.autocommit = False  # type: ignore[attr-defined]
-            try:
-                with conn.cursor() as cur:  # type: ignore[attr-defined]
-                    cur.execute(
-                        "SELECT set_config(%s, %s, true)", (_TENANT_GUC, tenant)
-                    )
-                yield
-                conn.commit()  # type: ignore[attr-defined]
-            except BaseException:
-                conn.rollback()  # type: ignore[attr-defined]
-                raise
-            finally:
-                conn.autocommit = True  # type: ignore[attr-defined]
-
-        def upsert(self, table: str, conflict_key: str, row: dict[str, object]) -> bool:
-            if not _TABLE_NAME_RE.match(table):
-                raise ValueError(f"Invalid table name: {table!r}")
-            # OMN-15301: resolved before any connection or SQL, so an enforced
-            # refusal cannot leave a partially-written row.
-            tenant = _resolve_write_tenant(row.get("tenant_id"), table=table)
-            conflict_keys = [
-                key.strip() for key in conflict_key.split(",") if key.strip()
-            ]
-            if not conflict_keys:
-                raise ValueError("conflict_key must contain at least one column")
-            bad_conflict_keys = [
-                key for key in conflict_keys if not _TABLE_NAME_RE.match(key)
-            ]
-            if bad_conflict_keys:
-                raise ValueError(f"Invalid conflict key: {conflict_key!r}")
-            conn = self._get_conn()
-            cols = list(row.keys())
-            bad_cols = [c for c in cols if not _TABLE_NAME_RE.match(str(c))]
-            if bad_cols:
-                raise ValueError(f"Invalid column names: {bad_cols!r}")
-            missing_conflict_keys = [key for key in conflict_keys if key not in row]
-            if missing_conflict_keys:
-                raise KeyError(
-                    f"row missing conflict key(s): {missing_conflict_keys!r}"
-                )
-            quoted_cols = ", ".join(f'"{c}"' for c in cols)
-            placeholders = ", ".join(f"%({c})s" for c in cols)
-            conflict_key_set = set(conflict_keys)
-            updates = ", ".join(
-                f'"{c}" = EXCLUDED."{c}"' for c in cols if c not in conflict_key_set
+    def _assert_write_declared(self) -> None:
+        if self._target.table.access not in {"write", "read_write"}:
+            raise PermissionError(
+                f"{self._target.schema}.{self._target.table.name} declares "
+                f"access={self._target.table.access!r}; write refused"
             )
-            conflict_columns = ", ".join(f'"{key}"' for key in conflict_keys)
-            # JSONB adaptation: a dict is always JSON-adapted. A list is
-            # JSON-adapted per _should_jsonb_wrap_list (suffix convention,
-            # allowlist, or the OMN-14494 structural any-element-is-dict/list
-            # heuristic) and otherwise passed raw so genuine Postgres text[]
-            # ARRAY columns (e.g. swarm_runs.models_used / machines_used)
-            # keep their array semantics. A JSONB list sent as a Postgres
-            # ARRAY literal fails the INSERT — which is what silently
-            # dropped node-generation-completed events before this fix.
-            adapted_row = {
-                key: (
-                    psycopg2.extras.Json(value)
-                    if isinstance(value, dict)
-                    or (isinstance(value, list) and _should_jsonb_wrap_list(key, value))
-                    else value
+
+    def _assert_read_declared(self) -> None:
+        if self._target.table.access not in {"read", "read_write"}:
+            raise PermissionError(
+                f"{self._target.schema}.{self._target.table.name} declares "
+                f"access={self._target.table.access!r}; read refused"
+            )
+
+    def upsert(self, conflict_key: str, row: dict[str, object]) -> bool:
+        self._assert_write_declared()
+        return self._adapter._execute_upsert(
+            self._target, conflict_key, row, tenant_context=None
+        )
+
+    def query(
+        self, filters: dict[str, object] | None = None
+    ) -> list[dict[str, object]]:
+        self._assert_read_declared()
+        return self._adapter._execute_query(self._target, filters, tenant_context=None)
+
+
+class TenantProjectionTableOperation(ProjectionTableOperation):
+    """Tenant operation whose only authority is a verified capability."""
+
+    def _context(self) -> VerifiedProjectionTenantAuthority:
+        return self._adapter._bound_tenant_context()
+
+    def _assert_supplied_tenant(
+        self,
+        supplied_tenant: object,
+        context: VerifiedProjectionTenantAuthority,
+        *,
+        operation: str,
+    ) -> None:
+        if isinstance(supplied_tenant, UUID):
+            supplied_uuid = supplied_tenant
+        elif isinstance(supplied_tenant, str):
+            supplied_uuid = parse_canonical_tenant_uuid(
+                supplied_tenant,
+                authority=f"{self._target.table.name} {operation} compatibility field",
+            )
+        else:
+            raise _projection_tenant_context_error(
+                f"{self._target.table.name} {operation} tenant_id does not match "
+                "verified projection authority"
+            )
+        if supplied_uuid != context.tenant_id:
+            raise _projection_tenant_context_error(
+                f"{self._target.table.name} {operation} tenant_id does not match "
+                "verified projection authority"
+            )
+
+    def upsert(self, conflict_key: str, row: dict[str, object]) -> bool:
+        self._assert_write_declared()
+        context = self._context()
+        attributed_row = dict(row)
+        supplied_tenant = attributed_row.get("tenant_id")
+        if supplied_tenant is not None:
+            self._assert_supplied_tenant(supplied_tenant, context, operation="row")
+        attributed_row["tenant_id"] = context.tenant_id
+        return self._adapter._execute_upsert(
+            self._target,
+            conflict_key,
+            attributed_row,
+            tenant_context=context,
+        )
+
+    def query(
+        self, filters: dict[str, object] | None = None
+    ) -> list[dict[str, object]]:
+        self._assert_read_declared()
+        context = self._context()
+        attributed_filters = dict(filters or {})
+        supplied_tenant = attributed_filters.get("tenant_id")
+        if supplied_tenant is not None:
+            self._assert_supplied_tenant(supplied_tenant, context, operation="query")
+        attributed_filters["tenant_id"] = context.tenant_id
+        return self._adapter._execute_query(
+            self._target,
+            attributed_filters,
+            tenant_context=context,
+        )
+
+
+class InternalProjectionTableOperation(ProjectionTableOperation):
+    """Internal operation that never resolves or sets tenant context."""
+
+    def upsert(self, conflict_key: str, row: dict[str, object]) -> bool:
+        _reject_canonical_tenant_field(row, domain=self._target.domain)
+        conflict_keys = {key.strip() for key in conflict_key.split(",")}
+        if "source_tenant_id" in conflict_keys:
+            raise ValueError(
+                "Internal source_tenant_id is provenance only and cannot be an "
+                "upsert conflict key"
+            )
+        return super().upsert(conflict_key, row)
+
+    def query(
+        self, filters: dict[str, object] | None = None
+    ) -> list[dict[str, object]]:
+        _reject_canonical_tenant_field(filters, domain=self._target.domain)
+        return super().query(filters)
+
+
+class CatalogProjectionTableOperation(ProjectionTableOperation):
+    """Catalog operation enforcing the declaration's explicit access mode."""
+
+    def upsert(self, conflict_key: str, row: dict[str, object]) -> bool:
+        _reject_canonical_tenant_field(row, domain=self._target.domain)
+        return super().upsert(conflict_key, row)
+
+    def query(
+        self, filters: dict[str, object] | None = None
+    ) -> list[dict[str, object]]:
+        _reject_canonical_tenant_field(filters, domain=self._target.domain)
+        return super().query(filters)
+
+
+class ProjectionBindingConnections:
+    """Own per-binding connections, identity attestation, and transactions."""
+
+    def __init__(
+        self,
+        db_urls: Mapping[str, str],
+        target: ProjectionDatabaseTarget,
+        psycopg2_module: object,
+    ) -> None:
+        required_bindings = {binding.binding_ref for binding in target.bindings}
+        supplied_bindings = set(db_urls)
+        if supplied_bindings != required_bindings:
+            raise ValueError(
+                "Projection DSN bindings must exactly match the topology target: "
+                f"required={sorted(required_bindings)!r}, "
+                f"supplied={sorted(supplied_bindings)!r}"
+            )
+        if any(not isinstance(url, str) or not url for url in db_urls.values()):
+            raise ValueError("Projection DSN binding values must be non-empty strings")
+        self._db_urls = dict(db_urls)
+        self._connections: dict[str, object] = {}
+        self._closed = False
+        self._psycopg2 = psycopg2_module
+
+    @property
+    def connections(self) -> dict[str, object]:
+        """Expose live connections for narrow diagnostics and cleanup proofs."""
+        return self._connections
+
+    def get(self, binding: ProjectionDatabaseBindingTarget | None) -> object:
+        """Return an attested connection for one exact topology binding."""
+        self.ensure_open()
+        if binding is None:
+            raise PermissionError(
+                "Projection operation has no declared workload binding"
+            )
+        conn = self._connections.get(binding.binding_ref)
+        if conn is None or getattr(conn, "closed", False):
+            connect = self._psycopg2.connect  # type: ignore[attr-defined]
+            conn = connect(self._db_urls[binding.binding_ref])
+            try:
+                conn.autocommit = True
+                with conn.cursor() as cursor:  # type: ignore[attr-defined]
+                    cursor.execute("SELECT current_user, current_database()")
+                    identity = cursor.fetchone()
+                expected_identity = (binding.principal, binding.physical_database)
+                if (
+                    not isinstance(identity, (tuple, list))
+                    or tuple(identity) != expected_identity
+                ):
+                    raise PermissionError(
+                        f"Projection binding {binding.binding_ref!r} connected as "
+                        f"{identity!r}, expected {expected_identity!r}"
+                    )
+            except BaseException:
+                conn.close()  # type: ignore[attr-defined]
+                raise
+            self._connections[binding.binding_ref] = conn
+        return conn
+
+    def close(self) -> None:
+        """Deterministically close every per-binding connection."""
+        if self._closed:
+            return
+        self._closed = True
+        connections = tuple(self._connections.values())
+        self._connections.clear()
+        for conn in connections:
+            if not getattr(conn, "closed", False):
+                conn.close()  # type: ignore[attr-defined]
+
+    def ensure_open(self) -> None:
+        if self._closed:
+            raise RuntimeError("Projection database adapter is closed")
+
+    @contextlib.contextmanager
+    def tenant_transaction(
+        self, conn: object, context: VerifiedProjectionTenantAuthority
+    ) -> Iterator[None]:
+        """Set the GUC locally from a validated context, then always end it."""
+        conn.autocommit = False  # type: ignore[attr-defined]
+        try:
+            with conn.cursor() as cursor:  # type: ignore[attr-defined]
+                cursor.execute(
+                    "SELECT set_config(%s, %s, true)",
+                    (_TENANT_GUC, str(context.tenant_id)),
                 )
-                for key, value in row.items()
-            }
-            # table/conflict_key/cols validated by _TABLE_NAME_RE — not raw user input
-            parts = [
-                f'INSERT INTO "{table}" ({quoted_cols})',
+            yield
+            conn.commit()  # type: ignore[attr-defined]
+        except BaseException:
+            conn.rollback()  # type: ignore[attr-defined]
+            raise
+        finally:
+            conn.autocommit = True  # type: ignore[attr-defined]
+
+
+class ProjectionDatabaseOperations:
+    """Router over separate table operations selected from typed topology."""
+
+    def __init__(
+        self,
+        db_urls: Mapping[str, str],
+        target: ProjectionDatabaseTarget,
+        tenant_authority: VerifiedProjectionTenantAuthority | None,
+        tenant_event: object | None,
+        psycopg2_module: object,
+        extras_module: object,
+    ) -> None:
+        self._binding_connections = ProjectionBindingConnections(
+            db_urls,
+            target,
+            psycopg2_module,
+        )
+        # Kept as a read-only diagnostic seam for existing runtime proofs.
+        self._connections = self._binding_connections.connections
+        self._extras = extras_module
+        self._tenant_authority = tenant_authority
+        self._tenant_event = tenant_event
+        operation_types: dict[
+            EnumDatabaseSchemaDomain, type[ProjectionTableOperation]
+        ] = {
+            EnumDatabaseSchemaDomain.TENANT: TenantProjectionTableOperation,
+            EnumDatabaseSchemaDomain.OMNINODE_INTERNAL: InternalProjectionTableOperation,
+            EnumDatabaseSchemaDomain.PLATFORM_CATALOG: CatalogProjectionTableOperation,
+        }
+        self._operations = {
+            table_target.table.name: operation_types[table_target.domain](
+                self, table_target
+            )
+            for table_target in target.table_targets
+        }
+
+    def _bound_tenant_context(self) -> VerifiedProjectionTenantAuthority:
+        """Return the already-verified authority or fail before connecting."""
+        self._binding_connections.ensure_open()
+        if self._tenant_authority is None:
+            raise _projection_tenant_context_error(
+                "Tenant projection has no cryptographically verified authority"
+            )
+        assert_projection_tenant_authority_matches_event(
+            self._tenant_authority,
+            self._tenant_event,
+        )
+        return self._tenant_authority
+
+    def close(self) -> None:
+        """Release authority and deterministically close every connection."""
+        self._tenant_authority = None
+        self._tenant_event = None
+        self._binding_connections.close()
+
+    def _operation(self, table: str) -> ProjectionTableOperation:
+        self._binding_connections.ensure_open()
+        operation = self._operations.get(table)
+        if operation is None:
+            raise ValueError(
+                f"Projection table {table!r} is not declared by the typed db_io contract"
+            )
+        return operation
+
+    def _adapt_row(self, row: Mapping[str, object]) -> dict[str, object]:
+        json_adapter = self._extras.Json  # type: ignore[attr-defined]
+        return {
+            key: (
+                json_adapter(value)
+                if isinstance(value, dict)
+                or (isinstance(value, list) and _should_jsonb_wrap_list(key, value))
+                else value
+            )
+            for key, value in row.items()
+        }
+
+    def _execute_upsert(
+        self,
+        target: ProjectionTableTarget,
+        conflict_key: str,
+        row: dict[str, object],
+        *,
+        tenant_context: VerifiedProjectionTenantAuthority | None,
+    ) -> bool:
+        conflict_keys = [key.strip() for key in conflict_key.split(",") if key.strip()]
+        if not conflict_keys:
+            raise ValueError("conflict_key must contain at least one column")
+        if any(not _TABLE_NAME_RE.fullmatch(key) for key in conflict_keys):
+            raise ValueError(f"Invalid conflict key: {conflict_key!r}")
+        cols = list(row)
+        bad_cols = [column for column in cols if not _TABLE_NAME_RE.fullmatch(column)]
+        if bad_cols:
+            raise ValueError(f"Invalid column names: {bad_cols!r}")
+        missing = [key for key in conflict_keys if key not in row]
+        if missing:
+            raise KeyError(f"row missing conflict key(s): {missing!r}")
+        quoted_cols = ", ".join(f'"{column}"' for column in cols)
+        placeholders = ", ".join(f"%({column})s" for column in cols)
+        conflict_columns = ", ".join(f'"{key}"' for key in conflict_keys)
+        conflict_set = set(conflict_keys)
+        updates = ", ".join(
+            f'"{column}" = EXCLUDED."{column}"'
+            for column in cols
+            if column not in conflict_set
+        )
+        action = f"DO UPDATE SET {updates}" if updates else "DO NOTHING"
+        insert_sql = " ".join(
+            (
+                f'INSERT INTO "{target.schema}"."{target.table.name}" ({quoted_cols})',
                 f"VALUES ({placeholders})",
-                f"ON CONFLICT ({conflict_columns}) DO UPDATE SET {updates}",
+                f"ON CONFLICT ({conflict_columns}) {action}",
+            )
+        )
+        conn = self._binding_connections.get(target.write_binding)
+        adapted_row = self._adapt_row(row)
+        if tenant_context is None:
+            with conn.cursor() as cursor:  # type: ignore[attr-defined]
+                cursor.execute(insert_sql, adapted_row)
+        else:
+            with self._binding_connections.tenant_transaction(conn, tenant_context):
+                with conn.cursor() as cursor:  # type: ignore[attr-defined]
+                    cursor.execute(insert_sql, adapted_row)
+        return True
+
+    def _execute_query(
+        self,
+        target: ProjectionTableTarget,
+        filters: dict[str, object] | None,
+        *,
+        tenant_context: VerifiedProjectionTenantAuthority | None,
+    ) -> list[dict[str, object]]:
+        # Schema/table originate in validated typed declarations, never request data.
+        select_sql = f'SELECT * FROM "{target.schema}"."{target.table.name}"'  # noqa: S608
+        params: list[object] = []
+        if filters:
+            bad_keys = [
+                key for key in filters if not _TABLE_NAME_RE.fullmatch(str(key))
             ]
-            insert_sql = " ".join(parts)
-            with self._tenant_scoped(conn, tenant):
-                # Why: Control flow narrows this union at runtime before the attribute access.
-                with conn.cursor() as cur:  # type: ignore[union-attr, attr-defined]
-                    cur.execute(insert_sql, adapted_row)
-            return True
+            if bad_keys:
+                raise ValueError(f"Invalid filter keys: {bad_keys!r}")
+            select_sql += " WHERE " + " AND ".join(f'"{key}" = %s' for key in filters)
+            params = list(filters.values())
+        conn = self._binding_connections.get(target.read_binding)
 
-        def query(
-            self, table: str, filters: dict[str, object] | None = None
-        ) -> list[dict[str, object]]:
-            if not _TABLE_NAME_RE.match(table):
-                raise ValueError(f"Invalid table name: {table!r}")
-            conn = self._get_conn()
-            # table validated by _TABLE_NAME_RE — not user input
-            select_sql = f'SELECT * FROM "{table}"'  # noqa: S608
-            params: list[object] = []
-            if filters:
-                bad_keys = [k for k in filters if not _TABLE_NAME_RE.match(str(k))]
-                if bad_keys:
-                    raise ValueError(f"Invalid filter keys: {bad_keys!r}")
-                clauses = [f'"{k}" = %s' for k in filters]
-                select_sql += " WHERE " + " AND ".join(clauses)
-                params = list(filters.values())
-            # OMN-15301: reads need the GUC too. Without it an RLS-covered table
-            # returns ZERO rows rather than erroring, so the existing-row probes
-            # (_preserve_existing_evidence, the judge-verdict tenant join) would
-            # silently conclude no prior row exists and clobber real evidence.
-            tenant = _resolve_read_tenant((filters or {}).get("tenant_id"))
-            with self._tenant_scoped(conn, tenant):
-                # Why: Control flow narrows this union at runtime before the attribute access.
-                with conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor) as cur:  # type: ignore[union-attr, attr-defined]
-                    cur.execute(select_sql, params or None)
-                    return [dict(r) for r in cur.fetchall()]
+        def _query() -> list[dict[str, object]]:
+            cursor_factory = self._extras.RealDictCursor  # type: ignore[attr-defined]
+            with conn.cursor(cursor_factory=cursor_factory) as cursor:  # type: ignore[attr-defined]
+                cursor.execute(select_sql, params or None)
+                return [dict(record) for record in cursor.fetchall()]
 
-    return SyncPsycopg2Adapter(db_url)
+        if tenant_context is None:
+            return _query()
+        with self._binding_connections.tenant_transaction(conn, tenant_context):
+            return _query()
+
+    def upsert(self, table: str, conflict_key: str, row: dict[str, object]) -> bool:
+        return self._operation(table).upsert(conflict_key, row)
+
+    def query(
+        self, table: str, filters: dict[str, object] | None = None
+    ) -> list[dict[str, object]]:
+        return self._operation(table).query(filters)
 
 
 def _connect_projection_runner_db_if_needed(handler_instance: object) -> None:
@@ -2383,36 +2758,55 @@ def _make_projection_dispatch_callback(
     terminal_event = sinks.terminal_event
     dlq_topics = list(sinks.dlq_topics)
     handler_name = type(handler_instance).__name__
-    database = target.physical_database
-    db_url_env = target.db_url_env
+    is_projection_runner = _is_projection_runner_handler(handler_instance)
+    db_urls = (
+        {}
+        if is_projection_runner
+        else {
+            binding.binding_ref: os.environ.get(binding.dsn_env, "")
+            for binding in target.bindings
+        }
+    )
+    missing_bindings = [
+        binding
+        for binding in target.bindings
+        if not is_projection_runner and not db_urls[binding.binding_ref]
+    ]
+    if missing_bindings:
+        raise ValueError(
+            "Projection handler requires topology bindings with configured DSNs: "
+            + ", ".join(
+                f"{binding.binding_ref}:{binding.dsn_env}"
+                for binding in missing_bindings
+            )
+        )
 
     async def _callback(
         envelope: ModelEventEnvelope[object],
     ) -> ModelDispatchResult | None:
-        if _is_projection_runner_handler(handler_instance):
+        if is_projection_runner:
             logger.debug(
                 "Projection runner skipped by DB-injection auto-wiring: handler=%s topic=%s",
                 type(handler_instance).__name__,
                 _extract_projection_topic(envelope) or "unknown",
             )
             return None
-        db_url = os.environ.get(db_url_env, "")
-        if not db_url:
-            log_level = (
-                logging.INFO
-                if database in _OPTIONAL_PROJECTION_DATABASES
-                else logging.ERROR
-            )
-            logger.log(
-                log_level,
-                "Projection handler inactive: %s not set (database=%s)",
-                db_url_env,
-                database,
-            )
-            return None
         projected = False
+        adapter: object | None = None
         try:
-            adapter = _build_projection_db_adapter(db_url, target)
+            # MessageDispatchEngine hands callbacks a JSON-safe materialization.
+            # The original typed envelope is retained only for stable transport
+            # identity; it is never a tenant-authentication source.  Tenant
+            # operations require the separate cryptographically verified
+            # capability bound by trusted ingress.
+            typed_envelope = current_dispatch_envelope() or envelope
+            tenant_authority = current_projection_tenant_authority()
+            adapter = _build_projection_db_adapter(
+                db_urls,
+                target,
+                tenant_authority,
+                typed_envelope,
+            )
             topic = _extract_projection_topic(envelope)
             event_type = _derive_projection_event_type(
                 topic,
@@ -2429,7 +2823,7 @@ def _make_projection_dispatch_callback(
             input_data["_db"] = adapter
             input_data["_event_type"] = event_type
             input_data["_topic"] = topic
-            envelope_id = _extract_projection_envelope_id(envelope)
+            envelope_id = _extract_projection_envelope_id(typed_envelope)
             if envelope_id is not None:
                 # Preserve the UUID at the transport boundary. Projection
                 # handlers may use it as their durable idempotency key instead
@@ -2511,6 +2905,11 @@ def _make_projection_dispatch_callback(
                 handler_name,
                 f"{type(exc).__name__}: {_sanitize_exc(exc)}",
             )
+        finally:
+            if adapter is not None:
+                close = getattr(adapter, "close", None)
+                if callable(close):
+                    close()
 
         if projected and event_bus is not None and terminal_event is not None:
             await _emit_projection_terminal_event(event_bus, terminal_event, envelope)
@@ -2520,33 +2919,23 @@ def _make_projection_dispatch_callback(
     return _callback
 
 
-def _assert_projection_adapter_supported(target: ProjectionDatabaseTarget) -> None:
-    """Fail closed until non-tenant adapters are implemented by OMN-15421."""
-    unsupported_domains = tuple(
-        domain
-        for domain in target.domains
-        if domain is not EnumDatabaseSchemaDomain.TENANT
-    )
-    if unsupported_domains:
-        raise ModelOnexError(
-            "Projection adapter selection is blocked for non-tenant domains until "
-            "OMN-15421 provides separate typed internal/catalog operations; got "
-            f"{[domain.value for domain in unsupported_domains]!r}"
-        )
-
-
 def _build_projection_db_adapter(
-    db_url: str,
+    db_urls: Mapping[str, str],
     target: ProjectionDatabaseTarget,
+    tenant_authority: VerifiedProjectionTenantAuthority | None,
+    tenant_event: object | None,
 ) -> object:
-    """Build the current adapter through a domain-aware selection seam.
+    """Build a router whose operations come only from typed topology targets."""
+    # Why: Optional integration dependency ships incomplete typing.
+    import psycopg2  # type: ignore[import-untyped]
 
-    OMN-15418 makes every authoritative database/schema/domain available here.
-    OMN-15421 owns replacing the generic implementation with separate tenant,
-    internal, and catalog operations. Until then, the existing tenant-stamping
-    adapter is never allowed to serve a non-tenant declaration.
-    """
-    _assert_projection_adapter_supported(target)
+    # Why: Optional integration dependency ships incomplete typing.
+    import psycopg2.extras  # type: ignore[import-untyped]
+
+    # Keep UUIDs typed through the adapter and teach psycopg2 the final wire
+    # conversion, instead of stringifying correlation/tenant IDs in row data.
+    psycopg2.extras.register_uuid()
+
     logger.debug(
         "Selecting projection adapter: database_refs=%s physical_database=%s "
         "schemas=%s domains=%s",
@@ -2555,7 +2944,14 @@ def _build_projection_db_adapter(
         target.schemas,
         [domain.value for domain in target.domains],
     )
-    return _build_sync_db_adapter(db_url)
+    return ProjectionDatabaseOperations(
+        db_urls,
+        target,
+        tenant_authority,
+        tenant_event,
+        psycopg2,
+        psycopg2.extras,
+    )
 
 
 async def _emit_projection_terminal_event(
@@ -2746,8 +3142,8 @@ def _make_stateful_dispatch_callback(
         raise StateIoUnconfiguredError(
             f"handler_wiring: contract declares state_io (table={table!r}) "
             f"but {db_url_env} is unset. state_io is a REQUIRED durability "
-            "seam (OMN-14208) — unlike the optional db_io projection path, "
-            "it fails closed at wiring time rather than degrading silently."
+            "seam (OMN-14208) and fails closed at wiring time. Projection "
+            "db_io topology bindings are likewise wiring-time requirements."
         )
     # Resolved once, at wiring time, not on every dispatch — mirrors the
     # fail-fast intent of every other _import_handler_class call in this
@@ -4855,6 +5251,7 @@ async def wire_from_manifest(
     | None = None,
     materialized_explicit_dependencies: dict[str, dict[str, object]] | None = None,
     topology: ModelDeploymentTopology | None = None,
+    catalog_binding_policy: ProjectionCatalogBindingPolicy | None = None,
 ) -> ModelAutoWiringReport:
     """Wire all discovered contracts into the dispatch engine and event bus.
 
@@ -4892,6 +5289,8 @@ async def wire_from_manifest(
             dependencies keyed by handler name for resolver Step 2.
         topology: Checked-in deployment topology loaded by the composition
             boundary. Required for every contract that declares ``db_io``.
+        catalog_binding_policy: Explicit topology binding names for catalog read
+            and write operations. Missing choices fail catalog wiring closed.
 
     Returns:
         A :class:`ModelAutoWiringReport` with per-contract outcomes.
@@ -4969,6 +5368,7 @@ async def wire_from_manifest(
                 result_appliers_by_contract=result_appliers_by_contract,
                 materialized_explicit_dependencies=materialized_explicit_dependencies,
                 topology=topology,
+                catalog_binding_policy=catalog_binding_policy,
             )
             prepared_contracts.append(prepared)
         except TypeError:
@@ -5598,6 +5998,7 @@ def _prepare_contract_wiring(
     result_appliers_by_contract: Mapping[str, ProtocolDispatchResultApplier]
     | None = None,
     topology: ModelDeploymentTopology | None = None,
+    catalog_binding_policy: ProjectionCatalogBindingPolicy | None = None,
 ) -> PreparedContractWiring:
     """Prepare one contract for wiring — NO side effects.
 
@@ -5700,6 +6101,7 @@ def _prepare_contract_wiring(
                 materialized_explicit_dependencies=materialized_explicit_dependencies,
                 pre_resolved_handlers=pre_resolved_handlers,
                 topology=topology,
+                catalog_binding_policy=catalog_binding_policy,
             )
             prepared_wirings.append(prepared)
         except TypeError:
@@ -6093,6 +6495,7 @@ async def _wire_single_contract(
     environment: str,
     container: object | None = None,
     topology: ModelDeploymentTopology | None = None,
+    catalog_binding_policy: ProjectionCatalogBindingPolicy | None = None,
     dynamic_materialization_authorized: bool = False,
 ) -> ModelContractWiringResult:
     """Wire a single discovered contract into the dispatch engine.
@@ -6119,6 +6522,7 @@ async def _wire_single_contract(
         environment=environment,
         container=container,
         topology=topology,
+        catalog_binding_policy=catalog_binding_policy,
     )
     return await _commit_contract_wiring(
         prepared,
@@ -6140,6 +6544,7 @@ def _prepare_handler_wiring(
     materialized_explicit_dependencies: (dict[str, dict[str, object]] | None) = None,
     pre_resolved_handlers: dict[str, object] | None = None,
     topology: ModelDeploymentTopology | None = None,
+    catalog_binding_policy: ProjectionCatalogBindingPolicy | None = None,
 ) -> PreparedWiring:
     """Prepare one handler entry — delegates construction to the resolver.
 
@@ -6420,8 +6825,13 @@ def _prepare_handler_wiring(
                 f"handler_wiring: contract {contract.name!r} declares db_io but "
                 "wire_from_manifest received no checked-in ModelDeploymentTopology"
             )
-        target = _resolve_projection_database_target(db_tables, topology)
-        _assert_projection_adapter_supported(target)
+        catalog_policy = catalog_binding_policy or ProjectionCatalogBindingPolicy()
+        target = _resolve_projection_database_target(
+            db_tables,
+            topology,
+            catalog_read_binding=catalog_policy.read_binding,
+            catalog_write_binding=catalog_policy.write_binding,
+        )
         subscribe_topics = (
             contract.event_bus.subscribe_topics if contract.event_bus else ()
         )
@@ -6651,6 +7061,7 @@ def _wire_handler_entry(
     event_bus: object | None = None,
     container: object | None = None,
     topology: ModelDeploymentTopology | None = None,
+    catalog_binding_policy: ProjectionCatalogBindingPolicy | None = None,
 ) -> tuple[str, list[str]]:
     """Prepare and immediately commit one handler entry (single-contract shortcut).
 
@@ -6673,5 +7084,6 @@ def _wire_handler_entry(
         event_bus=event_bus,
         container=container,
         topology=topology,
+        catalog_binding_policy=catalog_binding_policy,
     )
     return _commit_handler_wiring(prepared, dispatch_engine)

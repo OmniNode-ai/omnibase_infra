@@ -19,8 +19,14 @@ from omnibase_infra.runtime.auto_wiring.handler_wiring import (
 )
 from tests.helpers.application_db_topology import projection_database_target
 
+
+@pytest.fixture(autouse=True)
+def _configured_projection_dsn(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setenv("OMNIDASH_ANALYTICS_DB_URL", "postgresql://fixture")
+
+
 _PATCH_BUILD_ADAPTER = (
-    "omnibase_infra.runtime.auto_wiring.handler_wiring._build_sync_db_adapter"
+    "omnibase_infra.runtime.auto_wiring.handler_wiring._build_projection_db_adapter"
 )
 _PATCH_ENVIRON_GET = "omnibase_infra.runtime.auto_wiring.handler_wiring.os.environ.get"
 
@@ -120,11 +126,10 @@ def test_projection_dispatch_bridge_non_platform_topic_passes_raw_event_type() -
 
 
 @pytest.mark.integration
-def test_projection_dispatch_bridge_no_call_when_db_url_missing() -> None:
-    """Projection handler is NOT called when OMNIDASH_ANALYTICS_DB_URL is unset.
-
-    Verifies no silent error occurs — optional projection handler is skipped.
-    """
+def test_projection_dispatch_bridge_rejects_missing_db_url_at_wiring(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """A missing required DSN fails before the projection can dispatch."""
     call_count = [0]
 
     class FakeProjectionHandler:
@@ -134,14 +139,9 @@ def test_projection_dispatch_bridge_no_call_when_db_url_missing() -> None:
 
     db_tables = projection_database_target("node_service_registry")
     handler = FakeProjectionHandler()
-    callback = _make_projection_dispatch_callback(handler, db_tables, ())
+    monkeypatch.delenv("OMNIDASH_ANALYTICS_DB_URL")
 
-    envelope = MagicMock()
-    envelope.topic = "onex.evt.platform.node-heartbeat.v1"
-    envelope.payload = {}
+    with pytest.raises(ValueError, match="tenant_projection"):
+        _make_projection_dispatch_callback(handler, db_tables, ())
 
-    with patch(_PATCH_ENVIRON_GET, return_value=""):
-        result = asyncio.run(callback(envelope))
-
-    assert result is None
     assert call_count[0] == 0, "Handler must not be called when DB URL is absent"
