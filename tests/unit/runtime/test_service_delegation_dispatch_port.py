@@ -376,6 +376,53 @@ def test_normalize_result_payload_flattens_delegation_event_shape() -> None:
     assert normalized["delegation_latency_ms"] == 125
 
 
+@pytest.mark.parametrize(
+    ("payload", "expected_cost_usd"),
+    [
+        (
+            {
+                "final_attempt_cost": 0.00137,
+                "cumulative_attempt_cost": 0.00182,
+                "cost_usd": 0.0,
+            },
+            0.00182,
+        ),
+        ({"final_attempt_cost": 0.00137}, 0.00137),
+        (
+            {
+                "final_attempt_cost": 0.00137,
+                "cumulative_attempt_cost": 0.0,
+            },
+            0.00137,
+        ),
+        (
+            {
+                "final_attempt_cost": 0.0,
+                "cumulative_attempt_cost": 0.0,
+            },
+            0.0,
+        ),
+    ],
+)
+def test_normalize_result_payload_promotes_measured_attempt_cost(
+    payload: dict[str, object],
+    expected_cost_usd: float,
+) -> None:
+    """The delegate-skill boundary exposes the workflow's measured actual cost.
+
+    ``cumulative_attempt_cost`` owns total actual cost when present, including an
+    explicit zero.  A terminal from a single-attempt workflow only carries
+    ``final_attempt_cost``, which is the compatible fallback.
+    """
+    normalized = _normalize_result_payload(
+        status="completed",
+        payload=payload,
+        error_message=None,
+    )
+
+    assert normalized["cost_usd"] == pytest.approx(expected_cost_usd)
+
+
 # ---------------------------------------------------------------------------
 # OMN-15471: provider provenance must never be the hardcoded literal "local".
 #

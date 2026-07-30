@@ -107,3 +107,57 @@ async def test_absent_consumer_features_dispatch_through_runtime_bus(
     assert "max_tokens" not in captured_commands[0].payload
     assert "backend_id" not in captured_commands[0].payload
     assert "response_contract" not in captured_commands[0].payload
+
+
+@pytest.mark.asyncio
+async def test_metered_terminal_cost_crosses_the_runtime_consumer_boundary(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """A metered workflow terminal reaches the consumer as measured actual cost."""
+    route = _delegation_route()
+
+    class FakePatternBBroker:
+        def __init__(self, *_args: object, **_kwargs: object) -> None:
+            pass
+
+        async def dispatch_request(
+            self, command: ModelDispatchBusCommand
+        ) -> tuple[ModelRuntimeLocalIngressRoute, ModelDispatchBusTerminalResult]:
+            return route, ModelDispatchBusTerminalResult(
+                correlation_id=command.correlation_id,
+                status="completed",
+                payload={
+                    "model_used": "gemini-2.5-flash",
+                    "prompt_tokens": 115,
+                    "completion_tokens": 130,
+                    "final_attempt_cost": 0.00137,
+                    "cumulative_attempt_cost": 0.00182,
+                },
+                completed_at=datetime.now(UTC),
+            )
+
+    monkeypatch.setattr(
+        "omnibase_infra.runtime.service_delegation_dispatch_port.RuntimePatternBBroker",
+        FakePatternBBroker,
+    )
+    port = RuntimeDelegationDispatchPort(
+        event_bus=object(),  # type: ignore[arg-type]
+        routes={"delegation.orchestrate": route},
+    )
+
+    result = await port.dispatch(
+        prompt="metered workflow probe",
+        task_type="reasoning",
+        correlation_id=uuid4(),
+        max_tokens=None,
+        source_file_path=None,
+        source_session_id=None,
+        wait=True,
+        quality_contract_mode="extend_task_class",
+        acceptance_criteria=(),
+        tenant_id=None,
+        backend_id=None,
+        response_contract=None,
+    )
+
+    assert result["cost_usd"] == pytest.approx(0.00182)
