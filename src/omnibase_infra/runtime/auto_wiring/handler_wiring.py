@@ -5094,21 +5094,24 @@ def _contract_provision_topics(contract: ModelDiscoveredContract) -> tuple[str, 
         return ()
     ordered = list(contract.event_bus.subscribe_topics)
     ordered.extend(contract.event_bus.publish_topics)
-    try:
-        ordered.extend(_read_dlq_topics(contract.contract_path))
-    except Exception:  # noqa: BLE001 — boundary: per-contract, never fatal at boot
-        # ``_interleave_contract`` runs under ``asyncio.gather(...)`` with no
-        # ``return_exceptions=True``, so a raise here would abort the ENTIRE
-        # boot subscribe pass for every contract. Degrading this one contract
-        # to its pre-OMN-15330 behaviour (no DLQ provisioning) is strictly less
-        # bad, and the warning names the contract that needs fixing.
-        logger.warning(
-            "Could not read event_bus.dlq_topics for contract '%s' from %s — "
-            "its DLQ topics will NOT be provisioned at boot (OMN-15330)",
-            contract.name,
-            contract.contract_path,
-            exc_info=True,
-        )
+    if contract.event_bus.dlq_topics:
+        ordered.extend(contract.event_bus.dlq_topics)
+    else:
+        try:
+            ordered.extend(_read_dlq_topics(contract.contract_path))
+        except Exception:  # noqa: BLE001 — per-contract boot boundary
+            # ``_interleave_contract`` runs under ``asyncio.gather(...)`` with no
+            # ``return_exceptions=True``, so a raise here would abort the ENTIRE
+            # boot subscribe pass for every contract. Degrading this one contract
+            # to its pre-OMN-15330 behaviour (no DLQ provisioning) is strictly less
+            # bad, and the warning names the contract that needs fixing.
+            logger.warning(
+                "Could not read event_bus.dlq_topics for contract '%s' from %s — "
+                "its DLQ topics will NOT be provisioned at boot (OMN-15330)",
+                contract.name,
+                contract.contract_path,
+                exc_info=True,
+            )
     return tuple(dict.fromkeys(t for t in ordered if t and t.strip()))
 
 
@@ -5724,6 +5727,7 @@ async def _commit_contract_wiring(
     *,
     subscribe_immediately: bool = True,
     result_applier: ProtocolDispatchResultApplier | None = None,
+    dynamic_materialization_authorized: bool = False,
 ) -> ModelContractWiringResult:
     """Commit a validated PreparedContractWiring to the engine and event bus.
 
@@ -5747,7 +5751,11 @@ async def _commit_contract_wiring(
     quarantined: list[ModelQuarantinedWiring] = []
 
     for prepared in pcw.prepared_wirings:
-        dispatcher_id, route_ids = _commit_handler_wiring(prepared, dispatch_engine)
+        dispatcher_id, route_ids = _commit_handler_wiring(
+            prepared,
+            dispatch_engine,
+            dynamic_materialization_authorized=dynamic_materialization_authorized,
+        )
         if prepared.is_quarantined:
             assert prepared.quarantine_reason is not None  # narrow for mypy
             quarantined.append(
@@ -6051,6 +6059,7 @@ async def _wire_single_contract(
     environment: str,
     container: object | None = None,
     topology: ModelDeploymentTopology | None = None,
+    dynamic_materialization_authorized: bool = False,
 ) -> ModelContractWiringResult:
     """Wire a single discovered contract into the dispatch engine.
 
@@ -6077,7 +6086,12 @@ async def _wire_single_contract(
         container=container,
         topology=topology,
     )
-    return await _commit_contract_wiring(prepared, dispatch_engine, event_bus)
+    return await _commit_contract_wiring(
+        prepared,
+        dispatch_engine,
+        event_bus,
+        dynamic_materialization_authorized=dynamic_materialization_authorized,
+    )
 
 
 def _prepare_handler_wiring(
@@ -6380,10 +6394,13 @@ def _prepare_handler_wiring(
             else None
         )
         # OMN-13548 (D-03): resolve the malformed-event DLQ destination from the
-        # contract's event_bus.dlq_topics (not the typed subcontract, which omits
-        # the field) so a projection handler error routes to the bus instead of
-        # being logged + dropped. Never hardcoded here.
-        projection_dlq_topics = _read_dlq_topics(contract.contract_path)
+        # contract's typed event-bus declaration. Filesystem-discovered legacy
+        # contracts retain the raw-YAML fallback during the migration window.
+        projection_dlq_topics = (
+            list(contract.event_bus.dlq_topics)
+            if contract.event_bus is not None and contract.event_bus.dlq_topics
+            else _read_dlq_topics(contract.contract_path)
+        )
         callback = _make_projection_dispatch_callback(
             handler_instance,
             target,
