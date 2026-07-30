@@ -196,6 +196,20 @@ class TestMaterializeCachedContractSuccess:
         node_names = {n for (n, _) in source._materialized_contracts}
         assert "test_dynamic" in node_names
 
+    def test_authorizes_post_freeze_registration_only_on_dynamic_path(self) -> None:
+        source = KafkaContractSource(environment="dev")
+        _add_default_descriptor(source)
+
+        with patch(
+            _WIRE_PATCH,
+            new_callable=AsyncMock,
+            return_value=_make_wiring_result(),
+        ) as mock_wire:
+            result = _materialize(source)
+
+        assert result.status == EnumMaterializationStatus.MATERIALIZED
+        assert mock_wire.await_args.kwargs["dynamic_materialization_authorized"] is True
+
 
 class TestMaterializeCachedContractWiringSkipped:
     """When _wire_single_contract returns SKIPPED, result is REJECTED."""
