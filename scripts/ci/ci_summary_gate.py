@@ -55,6 +55,28 @@ missing or still running, the verdict is PENDING (poll again). At the caller's
 deadline, PENDING is converted to FAILURE (fail-closed): the required context
 always reaches a terminal state.
 
+4. **External context assertion (OMN-15496).** Checks 1-3 all read
+   ``actions/runs/${RUN_ID}/jobs`` — *this* workflow run's job list. Any check
+   produced by a **different workflow file** is structurally invisible to them,
+   and ``omnibase_infra``'s ``dev`` requires exactly one context (``CI Summary``,
+   ``strict=false``), so such checks were enforced by **neither** layer:
+   59 distinct cross-workflow check-run names on a real merged PR head
+   (#2567 / ``0fca3b5e``) versus 40 inside this run's suite.
+
+   :data:`EXPECTED_EXTERNAL_CONTEXTS` closes that hole *without* re-fanning 59
+   required contexts (which would discard the deliberate single-umbrella design
+   of OMN-4497/OMN-14127 — and a context that does not report on every PR shape
+   wedges the branch indefinitely). Each named context is resolved from the PR
+   head's ``commits/{sha}/check-runs`` and must be **present**, **completed**,
+   and conclude ``success``; missing or still-running is PENDING, which the
+   caller's deadline converts to FAILURE. This is the presence assertion
+   OMN-14456 AC4 asked for.
+
+   *Why this was load-bearing:* PR #2555 merged 2026-07-30T04:25:09Z with
+   ``CI Summary`` = **success** (all 53 in-run jobs green) while
+   ``deploy-gate / deploy-gate`` = **failure** on the same head SHA. The
+   required context was green because the failing check was in another run.
+
 Exit codes: ``0`` success, ``1`` failure, ``2`` pending.
 """
 
@@ -141,8 +163,85 @@ SOFT_ALLOWLIST: frozenset[str] = frozenset(
     }
 )
 
+# ---------------------------------------------------------------------------
+# OMN-15496 — cross-workflow ("external") required contexts.
+# ---------------------------------------------------------------------------
+# Contexts produced by OTHER workflow files on the SAME head SHA. They are not
+# in `dev`'s required_status_checks (which is exactly ["CI Summary"]) and are
+# invisible to the run-scoped checks above, so before this tuple existed they
+# blocked nothing.
+#
+# ADMISSION RULE — do not add a name here from a workflow file alone.
+# A context is admitted only after measuring its *merge-time* report rate over
+# the last N merged `dev` PRs: for each PR, the check-runs on its head SHA whose
+# `started_at <= mergedAt` (post-merge runs are a retrospective artifact — on the
+# first pass they produced three phantom "failures" for contexts that were green
+# at merge). A context that does not report on every PR shape MUST NOT be listed:
+# a permanently-absent entry burns the poll deadline and then fails closed, i.e.
+# it wedges the branch. Every name below was measured 16/16 present over the 16
+# `dev` PRs merged 2026-07-29T23:04Z → 2026-07-30T14:54Z (#2546…#2567).
+#
+# Replaying those 16 PRs' merge-time payloads through this resolver yields 15
+# green and exactly one block — #2555, `deploy-gate / deploy-gate` = failure,
+# which is the real defect this gate exists to catch. Slowest seeded context
+# finished 24.9 min after `CI Summary` started, well inside the caller's 90 min
+# poll deadline, so waiting on these cannot time the poller out.
+# Fixture + regression: tests/ci/fixtures/omn15496_merge_time_external_check_runs.json.
+EXPECTED_EXTERNAL_CONTEXTS: tuple[str, ...] = (
+    "deploy-gate / deploy-gate",  # 16/16 present, 15/16 green (#2555 red AT MERGE)
+    "verify / verify",  # Receipt Gate
+    "call-reject-skip-token / scan / reject-skip-gate-token",  # CLAUDE.md rule 10 mechanism
+    "main-target-guard",
+    "non-dev-base-guard",
+    "pr-title / check-title",
+    "URL Authority Gate",
+    "imperative-contract-guard / Imperative Contract Guard",
+    "gate / CodeRabbit Thread Check",
+    "Canonical Inference Gate",
+    "Type Safety Validation",
+    "Omni Standards Gate",
+    "Duplication Sweep",
+    "Stale TODO Gate",
+    "dispatcher-route-coverage",
+    "CodeQL",
+    "required-check-skip-guard / check-skip-vectors",
+)
+
+# Contexts that were MEASURED and deliberately NOT enforced. Recorded as data —
+# not silently omitted — so the exclusion is auditable and has to be re-argued
+# with numbers rather than rediscovered. Pinned by test_ci_summary_gate.py.
+MEASURED_NOT_ENFORCED_CONTEXTS: dict[str, str] = {
+    "Enforce clean + promoted build source": (
+        "1/16 present — path-filtered; requiring it would wedge every PR that "
+        "does not touch its paths (the exact never-reports failure mode)."
+    ),
+    "occ-companion-effect / Publish occ-companion-effect command": (
+        "16/16 present but only 10/16 green — a flaky publisher EFFECT, not a "
+        "validator. The substantive requirement it stands in for is already "
+        "enforced in-run by the STRICT gate 'OCC Companion Merged Gate "
+        "(OMN-15214)'."
+    ),
+    "Hostile Review Gate": (
+        "16/16 present, 14/16 green — an adversarial-judgment gate. A 12.5% red "
+        "rate needs per-red root-cause before it may block merges; admitting it "
+        "blind would convert review opinion into a merge outage."
+    ),
+    "occ-preflight / eligibility": (
+        "Already a STRICT_GATE_JOBS entry, and the ONE name observed both inside "
+        "and outside this run's check suite (duplicate producers: ci.yml and "
+        "hostile-reviewer.yml). Asserting it on both surfaces would double-count "
+        "an ambiguous name — see OMN-15112."
+    ),
+}
+
 # Conclusions that count as "provably passed".
 GOOD_CONCLUSIONS: frozenset[str] = frozenset({"success", "skipped"})
+
+# External contexts are held to the STRICT bar: `skipped` fails closed. Every
+# name above was measured `success` on all 16 sampled PRs (never skipped), so
+# this costs nothing today and closes the skip-vector fail-open that OMN-15057 /
+# OMN-14854 exist to prevent.
+EXTERNAL_GOOD_CONCLUSIONS: frozenset[str] = frozenset({"success"})
 
 EXIT_SUCCESS = 0
 EXIT_FAILURE = 1
@@ -214,6 +313,79 @@ def dedup_latest(
     return latest
 
 
+def latest_check_run_by_name(
+    check_runs: list[dict[str, object]],
+) -> dict[str, JobState]:
+    """Collapse ``commits/{sha}/check-runs`` to one entry per context name.
+
+    Resolution is **latest wins** by ``(started_at, id)`` — deliberately the same
+    rule GitHub itself applies when deciding a required status check from several
+    same-named check-runs on one SHA.
+
+    A stricter "most-blocking across all same-named runs" rule was measured and
+    **rejected**: replayed over the 16 sampled merged PRs it blocks 6, of which 5
+    are transient-red-then-rerun-green. Because check-runs accumulate on a SHA
+    forever, most-blocking makes any transient red permanent and removes re-run
+    as a recovery path — it manufactures merge outages instead of catching
+    defects. Latest-wins blocks 1/16, and that one is a real red at merge.
+
+    Known bounded residual: when two workflow files emit the same context name, a
+    red from the earlier producer followed by a green from the later one resolves
+    green. That ANY-vs-ALL ambiguity is tracked in OMN-15112 and is why
+    ``occ-preflight / eligibility`` — the one name observed on both sides — is
+    excluded here (see :data:`MEASURED_NOT_ENFORCED_CONTEXTS`).
+    """
+
+    latest: dict[str, JobState] = {}
+    ordering: dict[str, tuple[str, int]] = {}
+    for raw in check_runs:
+        name = str(raw.get("name") or "")
+        if not name:
+            continue
+        try:
+            run_id = int(str(raw.get("id") or 0))
+        except (TypeError, ValueError):
+            run_id = 0
+        key = (str(raw.get("started_at") or ""), run_id)
+        if name in ordering and key <= ordering[name]:
+            continue
+        conclusion = raw.get("conclusion")
+        ordering[name] = key
+        latest[name] = JobState(
+            name=name,
+            status=str(raw.get("status") or ""),
+            conclusion=None if conclusion is None else str(conclusion),
+            run_attempt=1,
+        )
+    return latest
+
+
+def evaluate_external_contexts(
+    check_runs: list[dict[str, object]] | None,
+    expected: tuple[str, ...],
+) -> tuple[list[str], list[str]]:
+    """Return ``(failures, missing_or_pending)`` for the declared external contexts.
+
+    ``check_runs is None`` means the caller could not fetch the head SHA's
+    check-runs. That is treated as **every** expected context being unobserved —
+    PENDING, never success — so a transient API failure retries and a permanent
+    one fails closed at the deadline. It must never read as green.
+    """
+
+    if not expected:
+        return [], []
+    latest = latest_check_run_by_name(check_runs or [])
+    failures: list[str] = []
+    unresolved: list[str] = []
+    for context in expected:
+        state = latest.get(context)
+        if state is None or state.status != "completed":
+            unresolved.append(context)
+        elif state.conclusion not in EXTERNAL_GOOD_CONCLUSIONS:
+            failures.append(context)
+    return sorted(failures), sorted(unresolved)
+
+
 def _is_allowlisted(name: str, allowlist: frozenset[str]) -> bool:
     """Prefix-aware allowlist check.
 
@@ -236,8 +408,17 @@ def evaluate(
     strict_gates: tuple[str, ...] = STRICT_GATE_JOBS,
     skippable_gates: tuple[str, ...] = SKIPPABLE_GATE_JOBS,
     allowlist: frozenset[str] = SOFT_ALLOWLIST,
+    check_runs: list[dict[str, object]] | None = None,
+    external_contexts: tuple[str, ...] = (),
 ) -> tuple[int, str]:
-    """Return ``(exit_code, human_report)`` for the current job snapshot."""
+    """Return ``(exit_code, human_report)`` for the current job snapshot.
+
+    ``external_contexts`` defaults to empty (assert nothing) so non-PR callers —
+    ``merge_group`` / ``workflow_dispatch``, where no PR-scoped context set
+    exists — are not wedged. The CLI supplies
+    :data:`EXPECTED_EXTERNAL_CONTEXTS` and its ``--event-name`` defaults to
+    ``pull_request``, so a *forgotten* argument enforces rather than skips.
+    """
 
     latest = dedup_latest(jobs, run_attempt=run_attempt)
     gate_names = frozenset(strict_gates) | frozenset(skippable_gates)
@@ -282,40 +463,36 @@ def evaluate(
         if (latest.get(g) is None or latest[g].status != "completed")
     ]
 
-    all_failures = strict_failures + skippable_failures + sweep_failures
+    # (4) OMN-15496 external contexts: cross-workflow checks on the PR head.
+    external_failures, external_unresolved = evaluate_external_contexts(
+        check_runs, external_contexts
+    )
+
+    all_failures = (
+        strict_failures + skippable_failures + sweep_failures + external_failures
+    )
+    all_unresolved = gate_missing_or_pending + external_unresolved
+
+    def _verdict(label: str) -> str:
+        return _report(
+            label,
+            latest,
+            strict_gates,
+            skippable_gates,
+            strict_failures,
+            skippable_failures,
+            sweep_failures,
+            gate_missing_or_pending,
+            external_contexts,
+            external_failures,
+            external_unresolved,
+        )
 
     if all_failures:
-        return EXIT_FAILURE, _report(
-            "FAILURE",
-            latest,
-            strict_gates,
-            skippable_gates,
-            strict_failures,
-            skippable_failures,
-            sweep_failures,
-            gate_missing_or_pending,
-        )
-    if gate_missing_or_pending:
-        return EXIT_PENDING, _report(
-            "PENDING",
-            latest,
-            strict_gates,
-            skippable_gates,
-            strict_failures,
-            skippable_failures,
-            sweep_failures,
-            gate_missing_or_pending,
-        )
-    return EXIT_SUCCESS, _report(
-        "SUCCESS",
-        latest,
-        strict_gates,
-        skippable_gates,
-        strict_failures,
-        skippable_failures,
-        sweep_failures,
-        gate_missing_or_pending,
-    )
+        return EXIT_FAILURE, _verdict("FAILURE")
+    if all_unresolved:
+        return EXIT_PENDING, _verdict("PENDING")
+    return EXIT_SUCCESS, _verdict("SUCCESS")
 
 
 def _report(
@@ -327,6 +504,9 @@ def _report(
     skippable_failures: list[str],
     sweep_failures: list[str],
     gate_missing_or_pending: list[str],
+    external_contexts: tuple[str, ...] = (),
+    external_failures: list[str] | None = None,
+    external_unresolved: list[str] | None = None,
 ) -> str:
     lines = [f"CI Summary verdict: {verdict}", f"  jobs observed: {len(latest)}"]
     lines.append("  strict gates:")
@@ -353,6 +533,14 @@ def _report(
         lines.append(f"  default-deny sweep failures: {', '.join(sweep_failures)}")
     if gate_missing_or_pending:
         lines.append(f"  gates missing/pending: {', '.join(gate_missing_or_pending)}")
+    if external_contexts:
+        lines.append(f"  external contexts asserted: {len(external_contexts)}")
+        if external_failures:
+            lines.append(f"  external-context failures: {', '.join(external_failures)}")
+        if external_unresolved:
+            lines.append(
+                f"  external contexts missing/pending: {', '.join(external_unresolved)}"
+            )
     return "\n".join(lines)
 
 
@@ -371,6 +559,35 @@ def _load_jobs(path: str | None) -> list[dict[str, object]]:
     if not isinstance(jobs, list):
         raise ValueError("jobs payload must be a list or an object with a 'jobs' array")
     return jobs
+
+
+def _load_check_runs(path: str | None) -> list[dict[str, object]] | None:
+    """Load ``commits/{sha}/check-runs``; return ``None`` when unavailable.
+
+    ``None`` is the fail-closed signal: :func:`evaluate_external_contexts` reads
+    it as "no context observed" → PENDING → FAILURE at the caller's deadline. A
+    missing, empty, or malformed payload must never green the gate, so every
+    failure path here returns ``None`` rather than an empty list.
+    """
+
+    if not path:
+        return None
+    try:
+        with open(path, encoding="utf-8") as handle:
+            raw = handle.read()
+    except OSError:
+        return None
+    if not raw.strip():
+        return None
+    try:
+        data = json.loads(raw)
+    except json.JSONDecodeError:
+        return None
+    if isinstance(data, dict):
+        data = data.get("check_runs", [])
+    if not isinstance(data, list):
+        return None
+    return [row for row in data if isinstance(row, dict)]
 
 
 def main(argv: list[str] | None = None) -> int:
@@ -392,10 +609,33 @@ def main(argv: list[str] | None = None) -> int:
         default=None,
         help="Evaluate only rows for this GitHub Actions run_attempt.",
     )
+    parser.add_argument(
+        "--check-runs-file",
+        default=None,
+        help="Path to the PR head SHA's commits/{sha}/check-runs JSON, used to "
+        "assert EXPECTED_EXTERNAL_CONTEXTS (OMN-15496). A missing/unreadable "
+        "file is PENDING, never success.",
+    )
+    parser.add_argument(
+        "--event-name",
+        default="pull_request",
+        help="GitHub event name. External contexts are asserted on "
+        "'pull_request' only — merge_group/workflow_dispatch have no PR-scoped "
+        "context set. Defaults to 'pull_request' so a FORGOTTEN argument "
+        "enforces rather than silently skips.",
+    )
     args = parser.parse_args(argv)
 
     jobs = _load_jobs(args.jobs_file)
-    code, report = evaluate(jobs, run_attempt=args.run_attempt)
+    external_contexts = (
+        EXPECTED_EXTERNAL_CONTEXTS if args.event_name == "pull_request" else ()
+    )
+    code, report = evaluate(
+        jobs,
+        run_attempt=args.run_attempt,
+        check_runs=_load_check_runs(args.check_runs_file),
+        external_contexts=external_contexts,
+    )
     print(report)
     if args.report_only:
         return EXIT_SUCCESS
