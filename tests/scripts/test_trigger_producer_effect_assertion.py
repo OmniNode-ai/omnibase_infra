@@ -28,6 +28,7 @@ from click.testing import CliRunner
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
 SCRIPT_PATH = REPO_ROOT / "scripts" / "trigger_rebuild_on_merge.py"
+RUNTIME_PATH_VALIDATOR = REPO_ROOT / "tests" / "fixtures" / "runtime_path_classifier.py"
 
 # Producers that MUST share the RT-5 fail-closed invariant. Extend as the publish
 # step / pin cascade / OCC publisher are wired onto the same assertion.
@@ -120,6 +121,8 @@ def test_runtime_change_with_broker_unset_fails_closed(
         [
             "--changed-files",
             _RUNTIME_CHANGE_FILE,
+            "--runtime-path-validator",
+            str(RUNTIME_PATH_VALIDATOR),
             "--base-branch",
             "dev",
             "--source-sha",
@@ -158,6 +161,8 @@ def test_zero_delivery_emit_fails_closed(
         [
             "--changed-files",
             _RUNTIME_CHANGE_FILE,
+            "--runtime-path-validator",
+            str(RUNTIME_PATH_VALIDATOR),
             "--base-branch",
             "dev",
             "--source-sha",
@@ -192,6 +197,8 @@ def test_no_runtime_change_exits_zero(
         [
             "--changed-files",
             "README.md,docs/thing.md",
+            "--runtime-path-validator",
+            str(RUNTIME_PATH_VALIDATOR),
             "--base-branch",
             "dev",
             "--source-sha",
@@ -220,6 +227,8 @@ def test_dry_run_with_runtime_change_exits_zero(
         [
             "--changed-files",
             _RUNTIME_CHANGE_FILE,
+            "--runtime-path-validator",
+            str(RUNTIME_PATH_VALIDATOR),
             "--base-branch",
             "dev",
             "--source-sha",
@@ -252,6 +261,8 @@ def test_happy_path_publishes_and_exits_zero(
         [
             "--changed-files",
             _RUNTIME_CHANGE_FILE,
+            "--runtime-path-validator",
+            str(RUNTIME_PATH_VALIDATOR),
             "--base-branch",
             "dev",
             "--source-sha",

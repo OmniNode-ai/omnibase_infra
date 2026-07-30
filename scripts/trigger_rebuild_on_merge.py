@@ -16,7 +16,7 @@
 #
 # Triggers when:
 #   - PR had the "runtime_change" label, OR
-#   - Any changed file matches src/omnimarket/** or src/omnibase_infra/nodes/**
+#   - The canonical deploy-gate classifier identifies a changed runtime path
 #
 # Lane policy (the triggering ref decides the lane — no hardcoded origin/main):
 #   - merge to dev  -> runtime_lane=dev,            source_branch=dev
@@ -47,13 +47,14 @@
 from __future__ import annotations
 
 import ast
-import fnmatch
+import importlib.util
 import json
 import os
 import sys
 import uuid
+from collections.abc import Callable
 from pathlib import Path
-from typing import Literal
+from typing import Literal, cast
 from uuid import UUID
 
 import click
@@ -71,12 +72,9 @@ from omnibase_infra.utils.util_producer_effect_assertion import (
 # command downstream.
 TOPIC = "onex.cmd.omnimarket.redeploy-start.v1"
 
-_RUNTIME_PATH_PATTERNS = [
-    "src/omnimarket/*",
-    "src/omnibase_infra/nodes/*",
-]
-
 _RUNTIME_LABEL = "runtime_change"
+
+RuntimePathClassifier = Callable[[list[str]], list[str]]
 
 # Maps the merged PR's base branch to a runtime lane. Values match
 # deploy_agent.events.EnumRuntimeLane (dev | stability-test | prod). prod is not
@@ -368,15 +366,53 @@ def build_redeploy_start_payload(
     return command.model_dump(mode="json")
 
 
-def should_trigger(changed_files: list[str], labels: list[str]) -> bool:
-    """Return True if a rebuild should be triggered."""
-    if _RUNTIME_LABEL in labels:
-        return True
-    for f in changed_files:
-        for pattern in _RUNTIME_PATH_PATTERNS:
-            if fnmatch.fnmatch(f, pattern) or f.startswith(pattern.rstrip("*")):
-                return True
-    return False
+def load_runtime_path_classifier(path: Path) -> RuntimePathClassifier:
+    """Load the exact deploy-gate runtime-path classifier used by hosted CI.
+
+    Runtime deployment scope has one owner: omniclaude's deploy-gate validator.
+    Loading its ``find_runtime_paths`` callable keeps the post-merge publisher
+    aligned with the required deploy gate instead of maintaining a second path
+    allowlist that can silently drift.
+    """
+    if not path.is_file():
+        raise ValueError(f"runtime path validator does not exist: {path}")
+
+    module_name = "_canonical_deploy_path_classifier"
+    spec = importlib.util.spec_from_file_location(module_name, path)
+    if spec is None or spec.loader is None:
+        raise ValueError(f"cannot load runtime path validator: {path}")
+
+    module = importlib.util.module_from_spec(spec)
+    sys.modules[module_name] = module
+    try:
+        spec.loader.exec_module(module)
+    except Exception as exc:
+        sys.modules.pop(module_name, None)
+        raise ValueError(f"invalid runtime path validator {path}: {exc}") from exc
+
+    classifier = getattr(module, "find_runtime_paths", None)
+    if not callable(classifier):
+        raise ValueError(
+            f"runtime path validator {path} does not define find_runtime_paths"
+        )
+    return cast("RuntimePathClassifier", classifier)
+
+
+def classify_runtime_paths(
+    changed_files: list[str], classifier: RuntimePathClassifier
+) -> list[str]:
+    """Run and validate the canonical classifier's output fail-closed."""
+    runtime_paths = classifier(changed_files)
+    if not isinstance(runtime_paths, list) or any(
+        not isinstance(path, str) or not path.strip() for path in runtime_paths
+    ):
+        raise ValueError("runtime path validator returned an invalid path list")
+    return runtime_paths
+
+
+def should_trigger(runtime_paths: list[str], labels: list[str]) -> bool:
+    """Return True for a runtime label or canonical deploy-path hit."""
+    return _RUNTIME_LABEL in labels or bool(runtime_paths)
 
 
 def lane_for_base_branch(base_branch: str) -> str:
@@ -514,6 +550,12 @@ def publish_redeploy_start_event(
     help="Path to omnimarket's canonical ModelRedeployStartCommand source",
 )
 @click.option(
+    "--runtime-path-validator",
+    type=click.Path(path_type=Path, exists=True, dir_okay=False),
+    required=True,
+    help="Path to omniclaude's canonical deploy-gate validator source",
+)
+@click.option(
     "--dry-run",
     is_flag=True,
     default=False,
@@ -529,12 +571,13 @@ def main(
     bus_lane: str,
     bus_overlay: Path | None,
     consumer_model: Path | None,
+    runtime_path_validator: Path,
     dry_run: bool,
 ) -> None:
     """Publish a node_redeploy_orchestrator start command if a PR contains runtime changes.
 
-    Triggers when PR had the runtime_change label OR changed files match
-    src/omnimarket/** or src/omnibase_infra/nodes/**. The triggering base branch
+    Triggers when the PR had the runtime_change label or the canonical deploy
+    gate classifies a changed path as runtime-scoped. The triggering base branch
     decides the runtime lane; the merge SHA is the ref node_redeploy_orchestrator rebuilds.
     """
     files: list[str] = (
@@ -551,7 +594,14 @@ def main(
     runtime_lane = lane_for_base_branch(base_branch)
     build_source = build_source_for_base_branch(base_branch)
 
-    if not should_trigger(files, label_list):
+    try:
+        classifier = load_runtime_path_classifier(runtime_path_validator)
+        runtime_paths = classify_runtime_paths(files, classifier)
+    except ValueError as exc:
+        click.echo(f"ERROR: {exc}", err=True)
+        sys.exit(1)
+
+    if not should_trigger(runtime_paths, label_list):
         click.echo(
             "No rebuild trigger: no runtime_change label or runtime path changes detected."
         )
@@ -560,7 +610,7 @@ def main(
     click.echo(
         f"Redeploy triggered: runtime_lane={runtime_lane} source_branch={base_branch} "
         f"source_sha={source_sha} correlation_id={corr_id} labels={label_list} "
-        f"files_matched={[f for f in files if any(f.startswith(p.rstrip('*')) for p in _RUNTIME_PATH_PATTERNS)]}"
+        f"files_matched={runtime_paths}"
     )
 
     if dry_run:
