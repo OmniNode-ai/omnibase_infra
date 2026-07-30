@@ -1,0 +1,21 @@
+[Unit]
+Description=OmniNode dev hybrid gateway forwarder
+Documentation=https://github.com/OmniNode-ai/omnibase_infra/tree/dev/docker/gateway
+Wants=network-online.target
+After=network-online.target docker.service tailscaled.service
+Requires=docker.service
+
+[Service]
+Type=oneshot
+RemainAfterExit=yes
+WorkingDirectory=/opt/omninode/gateway
+EnvironmentFile=/etc/omninode/gateway/gateway.env
+ExecStartPre=/usr/bin/docker image inspect ${GATEWAY_IMAGE}
+ExecStart=/usr/bin/docker compose --project-name omninode-gateway --env-file /etc/omninode/gateway/gateway.env -f /opt/omninode/gateway/docker-compose.gateway.yml up -d --no-build --wait --wait-timeout 120 gateway-forwarder
+ExecReload=/usr/bin/docker compose --project-name omninode-gateway --env-file /etc/omninode/gateway/gateway.env -f /opt/omninode/gateway/docker-compose.gateway.yml up -d --no-build --force-recreate --wait --wait-timeout 120 gateway-forwarder
+ExecStop=/usr/bin/docker compose --project-name omninode-gateway --env-file /etc/omninode/gateway/gateway.env -f /opt/omninode/gateway/docker-compose.gateway.yml stop --timeout 30 gateway-forwarder
+TimeoutStartSec=180
+TimeoutStopSec=60
+
+[Install]
+WantedBy=multi-user.target
