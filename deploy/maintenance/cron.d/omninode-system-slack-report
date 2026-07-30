@@ -1,0 +1,8 @@
+SHELL=/bin/bash
+PATH=/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin
+
+# Morning OmniNode system digest to Slack.
+5 8 * * * root /data/maintenance/bin/omninode-system-slack-report.sh --mode digest
+
+# State-change alerts for disk pressure, Docker container health, and runtime endpoint health.
+*/15 * * * * root /data/maintenance/bin/omninode-system-slack-report.sh --mode alert
