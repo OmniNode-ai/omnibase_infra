@@ -83,6 +83,7 @@ _RUNTIME_POLICY_ENV = _REPO_ROOT / "docker" / "runtime-policy.env"
 _DUMMY_BOOTSTRAP_ENV: dict[str, str] = dict.fromkeys(
     (
         "GITHUB_TOKEN",
+        "DEPLOY_AGENT_HMAC_SECRET",
         "LINEAR_API_KEY",
         "LLM_CODER_FAST_URL",
         "POSTGRES_PASSWORD",
