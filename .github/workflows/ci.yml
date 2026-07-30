@@ -2086,11 +2086,24 @@ jobs:
     # success/failure within a bounded deadline.
     #
     # DEFAULT-DENY, FAIL-CLOSED: green ONLY when every strict + skippable
-    # aggregate gate is present+good AND no non-allowlisted job failed. The
-    # auditable gating set + soft-allowlist live in scripts/ci/ci_summary_gate.py
+    # aggregate gate is present+good, no non-allowlisted job failed, AND every
+    # declared EXTERNAL context on the PR head is present+success. The auditable
+    # gating set + soft-allowlist live in scripts/ci/ci_summary_gate.py
     # (unit-tested in tests/ci/test_ci_summary_gate.py); it reproduces the exact
     # strictness of the old needs-based condition (13 strict `== success` gates,
     # 4 `success||skipped` gates) and adds a strictly-stronger default-deny sweep.
+    #
+    # OMN-15496: the job-list poll below only ever sees THIS run. Checks emitted
+    # by other workflow files are invisible to it and are ALSO absent from branch
+    # protection (dev requires exactly ["CI Summary"], strict=false), so they were
+    # enforced by neither layer — 59 such contexts on a real merged PR head, incl.
+    # deploy-gate, Receipt Gate, CodeRabbit Thread Check and pr-title. #2555 merged
+    # with this context GREEN while `deploy-gate / deploy-gate` was RED on the same
+    # SHA. The poll step now also asserts EXPECTED_EXTERNAL_CONTEXTS against
+    # commits/<head>/check-runs, fail-closed. That tuple is measured, not guessed:
+    # a context is admitted only at 100% merge-time report rate over recent merged
+    # dev PRs, because a context that does not report on every PR shape wedges the
+    # branch. Do NOT add names to it from a workflow file alone.
     # Pure hosted GitHub-API polling: ZERO self-hosted/LAN dependency, so it is
     # immune to fleet saturation. This also supersedes the (unset, no-op)
     # OMNI_REQUIRED_CI_RUNS_ON_JSON merge_group runner-override that used to sit on
@@ -2122,8 +2135,21 @@ jobs:
           GH_REPO: ${{ github.repository }}
           RUN_ID: ${{ github.run_id }}
           RUN_ATTEMPT: ${{ github.run_attempt }}
+          # OMN-15496: the PR head SHA whose CROSS-WORKFLOW check-runs are asserted
+          # against EXPECTED_EXTERNAL_CONTEXTS. The jobs API above only ever sees
+          # THIS run; every other workflow file's context is invisible to it and is
+          # also absent from branch protection (dev requires exactly "CI Summary"),
+          # so those checks previously blocked nothing.
+          EVENT_NAME: ${{ github.event_name }}
+          HEAD_SHA: >-
+            ${{ github.event.pull_request.head.sha
+              || github.event.merge_group.head_sha
+              || github.sha }}
           # Bounded poll window (minutes) — kept under the run-cancel window so
-          # the required context always reaches a terminal state first.
+          # the required context always reaches a terminal state first. Measured
+          # headroom for the external wait (OMN-15496): over the 16 dev PRs merged
+          # 2026-07-29→30, the slowest asserted external context terminalized
+          # 24.9 min after this job started, so 90 min is not a new timeout risk.
           DEADLINE_MINUTES: "90"
           POLL_INTERVAL_SECONDS: "45"
         run: |
@@ -2136,7 +2162,7 @@ jobs:
           attempt=0
           while true; do
             if [ "$(date +%s)" -ge "${deadline}" ]; then
-              echo "::error::CI Summary poll deadline (${DEADLINE_MINUTES}m) reached with gating jobs still pending or the jobs API unreachable — failing closed"
+              echo "::error::CI Summary poll deadline (${DEADLINE_MINUTES}m) reached with gating jobs or external contexts still pending, or the API unreachable — failing closed"
               python3 scripts/ci/ci_summary_gate.py --jobs-file jobs.json --run-attempt "${RUN_ATTEMPT}" --report-only 2>/dev/null || true
               exit 1
             fi
@@ -2148,12 +2174,28 @@ jobs:
               sleep "${POLL_INTERVAL_SECONDS}"
               continue
             fi
-            python3 scripts/ci/ci_summary_gate.py --jobs-file jobs.json --run-attempt "${RUN_ATTEMPT}"
+            # Cross-workflow check-runs for the exact head. On a failed fetch the
+            # file is REMOVED, not left stale: the gate reads an absent file as
+            # "no external context observed" → PENDING → fail-closed at the
+            # deadline. It must never resolve green off a stale or partial file.
+            rm -f check_runs.json
+            if [ "${EVENT_NAME}" = "pull_request" ]; then
+              if ! gh api --paginate \
+                  "repos/${GH_REPO}/commits/${HEAD_SHA}/check-runs?per_page=100" \
+                  --jq '.check_runs[]' | jq -s '.' > check_runs.json; then
+                echo "check-runs fetch failed (attempt ${attempt}); retrying after ${POLL_INTERVAL_SECONDS}s"
+                rm -f check_runs.json
+                sleep "${POLL_INTERVAL_SECONDS}"
+                continue
+              fi
+            fi
+            python3 scripts/ci/ci_summary_gate.py --jobs-file jobs.json --run-attempt "${RUN_ATTEMPT}" \
+              --check-runs-file check_runs.json --event-name "${EVENT_NAME}"
             rc=$?
             case "${rc}" in
-              0) echo "::notice::CI Summary = SUCCESS (all gating jobs provably passed)"; exit 0 ;;
-              1) echo "::error::CI Summary = FAILURE (fail-closed: a gating job failed/cancelled)"; exit 1 ;;
-              2) : ;;  # PENDING — gating jobs still running; keep polling
+              0) echo "::notice::CI Summary = SUCCESS (all gating jobs and asserted external contexts provably passed)"; exit 0 ;;
+              1) echo "::error::CI Summary = FAILURE (fail-closed: a gating job or an asserted external context failed/cancelled)"; exit 1 ;;
+              2) : ;;  # PENDING — gating jobs or external contexts still running; keep polling
               *) echo "::error::ci_summary_gate.py returned unexpected code ${rc}; failing closed"; exit 1 ;;
             esac
             sleep "${POLL_INTERVAL_SECONDS}"

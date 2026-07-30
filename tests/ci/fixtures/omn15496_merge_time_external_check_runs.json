@@ -1,0 +1,3866 @@
+{
+ "_provenance": {
+  "ticket": "OMN-15496",
+  "captured_utc": "2026-07-30",
+  "source": "GET /repos/OmniNode-ai/omnibase_infra/commits/{sha}/check-runs?per_page=100 (paginated)",
+  "filter": "rows whose name is in EXPECTED_EXTERNAL_CONTEXTS AND whose started_at <= the PR's mergedAt (merge-time state; post-merge runs excluded)",
+  "note": "unedited API rows, reduced to the fields the resolver reads"
+ },
+ "pull_requests": {
+  "2567": {
+   "head_sha": "0fca3b5ef257dd7d15e7002cbcf88955d413fdb4",
+   "merged_at": "2026-07-30T14:54:07Z",
+   "check_runs": [
+    {
+     "name": "Canonical Inference Gate",
+     "status": "completed",
+     "conclusion": "success",
+     "started_at": "2026-07-30T13:49:10Z",
+     "id": 90891357905
+    },
+    {
+     "name": "Canonical Inference Gate",
+     "status": "completed",
+     "conclusion": "success",
+     "started_at": "2026-07-30T14:17:40Z",
+     "id": 90899221389
+    },
+    {
+     "name": "Canonical Inference Gate",
+     "status": "completed",
+     "conclusion": "success",
+     "started_at": "2026-07-30T14:23:29Z",
+     "id": 90900881915
+    },
+    {
+     "name": "CodeQL",
+     "status": "completed",
+     "conclusion": "success",
+     "started_at": "2026-07-30T13:49:03Z",
+     "id": 90891358861
+    },
+    {
+     "name": "Duplication Sweep",
+     "status": "completed",
+     "conclusion": "success",
+     "started_at": "2026-07-30T13:49:04Z",
+     "id": 90891359065
+    },
+    {
+     "name": "Duplication Sweep",
+     "status": "completed",
+     "conclusion": "success",
+     "started_at": "2026-07-30T14:17:33Z",
+     "id": 90899221155
+    },
+    {
+     "name": "Duplication Sweep",
+     "status": "completed",
+     "conclusion": "success",
+     "started_at": "2026-07-30T14:23:29Z",
+     "id": 90900882206
+    },
+    {
+     "name": "Omni Standards Gate",
+     "status": "completed",
+     "conclusion": "success",
+     "started_at": "2026-07-30T13:59:56Z",
+     "id": 90894331977
+    },
+    {
+     "name": "Stale TODO Gate",
+     "status": "completed",
+     "conclusion": "success",
+     "started_at": "2026-07-30T13:49:10Z",
+     "id": 90891358860
+    },
+    {
+     "name": "Type Safety Validation",
+     "status": "completed",
+     "conclusion": "success",
+     "started_at": "2026-07-30T13:49:04Z",
+     "id": 90891358554
+    },
+    {
+     "name": "URL Authority Gate",
+     "status": "completed",
+     "conclusion": "success",
+     "started_at": "2026-07-30T14:17:40Z",
+     "id": 90899221475
+    },
+    {
+     "name": "URL Authority Gate",
+     "status": "completed",
+     "conclusion": "success",
+     "started_at": "2026-07-30T14:23:29Z",
+     "id": 90900881309
+    },
+    {
+     "name": "URL Authority Gate",
+     "status": "completed",
+     "conclusion": "success",
+     "started_at": "2026-07-30T14:29:56Z",
+     "id": 90902684273
+    },
+    {
+     "name": "call-reject-skip-token / scan / reject-skip-gate-token",
+     "status": "completed",
+     "conclusion": "success",
+     "started_at": "2026-07-30T14:18:27Z",
+     "id": 90899471625
+    },
+    {
+     "name": "call-reject-skip-token / scan / reject-skip-gate-token",
+     "status": "completed",
+     "conclusion": "success",
+     "started_at": "2026-07-30T14:24:15Z",
+     "id": 90901094188
+    },
+    {
+     "name": "call-reject-skip-token / scan / reject-skip-gate-token",
+     "status": "completed",
+     "conclusion": "success",
+     "started_at": "2026-07-30T14:30:54Z",
+     "id": 90902969585
+    },
+    {
+     "name": "deploy-gate / deploy-gate",
+     "status": "completed",
+     "conclusion": "success",
+     "started_at": "2026-07-30T13:49:05Z",
+     "id": 90891359690
+    },
+    {
+     "name": "dispatcher-route-coverage",
+     "status": "completed",
+     "conclusion": "success",
+     "started_at": "2026-07-30T13:49:05Z",
+     "id": 90891358749
+    },
+    {
+     "name": "gate / CodeRabbit Thread Check",
+     "status": "completed",
+     "conclusion": "success",
+     "started_at": "2026-07-30T13:49:04Z",
+     "id": 90891359681
+    },
+    {
+     "name": "imperative-contract-guard / Imperative Contract Guard",
+     "status": "completed",
+     "conclusion": "success",
+     "started_at": "2026-07-30T13:49:10Z",
+     "id": 90891359905
+    },
+    {
+     "name": "main-target-guard",
+     "status": "completed",
+     "conclusion": "success",
+     "started_at": "2026-07-30T13:49:08Z",
+     "id": 90891357715
+    },
+    {
+     "name": "main-target-guard",
+     "status": "completed",
+     "conclusion": "success",
+     "started_at": "2026-07-30T14:17:42Z",
+     "id": 90899221908
+    },
+    {
+     "name": "main-target-guard",
+     "status": "completed",
+     "conclusion": "success",
+     "started_at": "2026-07-30T14:23:29Z",
+     "id": 90900880990
+    },
+    {
+     "name": "non-dev-base-guard",
+     "status": "completed",
+     "conclusion": "success",
+     "started_at": "2026-07-30T13:49:04Z",
+     "id": 90891358278
+    },
+    {
+     "name": "non-dev-base-guard",
+     "status": "completed",
+     "conclusion": "success",
+     "started_at": "2026-07-30T14:17:32Z",
+     "id": 90899221048
+    },
+    {
+     "name": "non-dev-base-guard",
+     "status": "completed",
+     "conclusion": "success",
+     "started_at": "2026-07-30T14:23:29Z",
+     "id": 90900881637
+    },
+    {
+     "name": "pr-title / check-title",
+     "status": "completed",
+     "conclusion": "success",
+     "started_at": "2026-07-30T13:49:04Z",
+     "id": 90891359528
+    },
+    {
+     "name": "pr-title / check-title",
+     "status": "completed",
+     "conclusion": "success",
+     "started_at": "2026-07-30T14:17:46Z",
+     "id": 90899224277
+    },
+    {
+     "name": "pr-title / check-title",
+     "status": "completed",
+     "conclusion": "success",
+     "started_at": "2026-07-30T14:23:35Z",
+     "id": 90900884508
+    },
+    {
+     "name": "required-check-skip-guard / check-skip-vectors",
+     "status": "completed",
+     "conclusion": "success",
+     "started_at": "2026-07-30T13:49:05Z",
+     "id": 90891359878
+    },
+    {
+     "name": "required-check-skip-guard / check-skip-vectors",
+     "status": "completed",
+     "conclusion": "success",
+     "started_at": "2026-07-30T13:49:25Z",
+     "id": 90891452329
+    },
+    {
+     "name": "verify / verify",
+     "status": "completed",
+     "conclusion": "success",
+     "started_at": "2026-07-30T14:23:29Z",
+     "id": 90900883381
+    },
+    {
+     "name": "verify / verify",
+     "status": "completed",
+     "conclusion": "cancelled",
+     "started_at": "2026-07-30T14:29:59Z",
+     "id": 90902714145
+    },
+    {
+     "name": "verify / verify",
+     "status": "completed",
+     "conclusion": "success",
+     "started_at": "2026-07-30T14:30:07Z",
+     "id": 90902738151
+    }
+   ]
+  },
+  "2565": {
+   "head_sha": "712ccb070e93bb8de192d466b349c0e7afd6e4b8",
+   "merged_at": "2026-07-30T09:27:57Z",
+   "check_runs": [
+    {
+     "name": "Canonical Inference Gate",
+     "status": "completed",
+     "conclusion": "success",
+     "started_at": "2026-07-30T07:38:25Z",
+     "id": 90809348945
+    },
+    {
+     "name": "Canonical Inference Gate",
+     "status": "completed",
+     "conclusion": "success",
+     "started_at": "2026-07-30T07:48:46Z",
+     "id": 90811193618
+    },
+    {
+     "name": "Canonical Inference Gate",
+     "status": "completed",
+     "conclusion": "success",
+     "started_at": "2026-07-30T08:14:37Z",
+     "id": 90816644722
+    },
+    {
+     "name": "CodeQL",
+     "status": "completed",
+     "conclusion": "success",
+     "started_at": "2026-07-30T07:38:24Z",
+     "id": 90809349137
+    },
+    {
+     "name": "Duplication Sweep",
+     "status": "completed",
+     "conclusion": "success",
+     "started_at": "2026-07-30T07:38:31Z",
+     "id": 90809349146
+    },
+    {
+     "name": "Duplication Sweep",
+     "status": "completed",
+     "conclusion": "success",
+     "started_at": "2026-07-30T07:48:39Z",
+     "id": 90811192464
+    },
+    {
+     "name": "Duplication Sweep",
+     "status": "completed",
+     "conclusion": "success",
+     "started_at": "2026-07-30T08:14:38Z",
+     "id": 90816644231
+    },
+    {
+     "name": "Omni Standards Gate",
+     "status": "completed",
+     "conclusion": "success",
+     "started_at": "2026-07-30T07:39:44Z",
+     "id": 90809571129
+    },
+    {
+     "name": "Stale TODO Gate",
+     "status": "completed",
+     "conclusion": "success",
+     "started_at": "2026-07-30T07:38:24Z",
+     "id": 90809348452
+    },
+    {
+     "name": "Type Safety Validation",
+     "status": "completed",
+     "conclusion": "success",
+     "started_at": "2026-07-30T07:38:27Z",
+     "id": 90809348204
+    },
+    {
+     "name": "URL Authority Gate",
+     "status": "completed",
+     "conclusion": "success",
+     "started_at": "2026-07-30T07:38:24Z",
+     "id": 90809348299
+    },
+    {
+     "name": "URL Authority Gate",
+     "status": "completed",
+     "conclusion": "success",
+     "started_at": "2026-07-30T07:48:39Z",
+     "id": 90811192496
+    },
+    {
+     "name": "URL Authority Gate",
+     "status": "completed",
+     "conclusion": "success",
+     "started_at": "2026-07-30T08:14:38Z",
+     "id": 90816644536
+    },
+    {
+     "name": "call-reject-skip-token / scan / reject-skip-gate-token",
+     "status": "completed",
+     "conclusion": "success",
+     "started_at": "2026-07-30T08:15:57Z",
+     "id": 90816940775
+    },
+    {
+     "name": "call-reject-skip-token / scan / reject-skip-gate-token",
+     "status": "completed",
+     "conclusion": "cancelled",
+     "started_at": "2026-07-30T09:17:56Z",
+     "id": 90830216225
+    },
+    {
+     "name": "call-reject-skip-token / scan / reject-skip-gate-token",
+     "status": "completed",
+     "conclusion": "success",
+     "started_at": "2026-07-30T09:18:45Z",
+     "id": 90830378924
+    },
+    {
+     "name": "deploy-gate / deploy-gate",
+     "status": "completed",
+     "conclusion": "success",
+     "started_at": "2026-07-30T09:17:54Z",
+     "id": 90830202416
+    },
+    {
+     "name": "dispatcher-route-coverage",
+     "status": "completed",
+     "conclusion": "success",
+     "started_at": "2026-07-30T07:38:24Z",
+     "id": 90809348773
+    },
+    {
+     "name": "gate / CodeRabbit Thread Check",
+     "status": "completed",
+     "conclusion": "success",
+     "started_at": "2026-07-30T07:38:24Z",
+     "id": 90809349739
+    },
+    {
+     "name": "imperative-contract-guard / Imperative Contract Guard",
+     "status": "completed",
+     "conclusion": "success",
+     "started_at": "2026-07-30T07:38:24Z",
+     "id": 90809349769
+    },
+    {
+     "name": "main-target-guard",
+     "status": "completed",
+     "conclusion": "success",
+     "started_at": "2026-07-30T07:38:30Z",
+     "id": 90809348353
+    },
+    {
+     "name": "main-target-guard",
+     "status": "completed",
+     "conclusion": "success",
+     "started_at": "2026-07-30T07:48:39Z",
+     "id": 90811193647
+    },
+    {
+     "name": "main-target-guard",
+     "status": "completed",
+     "conclusion": "success",
+     "started_at": "2026-07-30T08:14:39Z",
+     "id": 90816644324
+    },
+    {
+     "name": "non-dev-base-guard",
+     "status": "completed",
+     "conclusion": "success",
+     "started_at": "2026-07-30T07:38:24Z",
+     "id": 90809348417
+    },
+    {
+     "name": "non-dev-base-guard",
+     "status": "completed",
+     "conclusion": "success",
+     "started_at": "2026-07-30T07:48:39Z",
+     "id": 90811194190
+    },
+    {
+     "name": "non-dev-base-guard",
+     "status": "completed",
+     "conclusion": "success",
+     "started_at": "2026-07-30T08:14:33Z",
+     "id": 90816644520
+    },
+    {
+     "name": "pr-title / check-title",
+     "status": "completed",
+     "conclusion": "success",
+     "started_at": "2026-07-30T07:38:24Z",
+     "id": 90809349766
+    },
+    {
+     "name": "pr-title / check-title",
+     "status": "completed",
+     "conclusion": "success",
+     "started_at": "2026-07-30T07:48:46Z",
+     "id": 90811194284
+    },
+    {
+     "name": "pr-title / check-title",
+     "status": "completed",
+     "conclusion": "success",
+     "started_at": "2026-07-30T08:14:33Z",
+     "id": 90816645680
+    },
+    {
+     "name": "required-check-skip-guard / check-skip-vectors",
+     "status": "completed",
+     "conclusion": "success",
+     "started_at": "2026-07-30T07:38:25Z",
+     "id": 90809349238
+    },
+    {
+     "name": "verify / verify",
+     "status": "completed",
+     "conclusion": "success",
+     "started_at": "2026-07-30T08:14:38Z",
+     "id": 90816646205
+    },
+    {
+     "name": "verify / verify",
+     "status": "completed",
+     "conclusion": "cancelled",
+     "started_at": "2026-07-30T09:17:53Z",
+     "id": 90830199369
+    },
+    {
+     "name": "verify / verify",
+     "status": "completed",
+     "conclusion": "success",
+     "started_at": "2026-07-30T09:18:00Z",
+     "id": 90830219481
+    }
+   ]
+  },
+  "2564": {
+   "head_sha": "c79fd5c36a10fe5e3ca4d17b6f3e79d465d0ff64",
+   "merged_at": "2026-07-30T07:20:46Z",
+   "check_runs": [
+    {
+     "name": "Canonical Inference Gate",
+     "status": "completed",
+     "conclusion": "success",
+     "started_at": "2026-07-30T06:52:08Z",
+     "id": 90801000257
+    },
+    {
+     "name": "Canonical Inference Gate",
+     "status": "completed",
+     "conclusion": "success",
+     "started_at": "2026-07-30T06:53:14Z",
+     "id": 90801197628
+    },
+    {
+     "name": "Canonical Inference Gate",
+     "status": "completed",
+     "conclusion": "success",
+     "started_at": "2026-07-30T06:55:58Z",
+     "id": 90801547127
+    },
+    {
+     "name": "CodeQL",
+     "status": "completed",
+     "conclusion": "success",
+     "started_at": "2026-07-30T06:52:14Z",
+     "id": 90800999520
+    },
+    {
+     "name": "Duplication Sweep",
+     "status": "completed",
+     "conclusion": "success",
+     "started_at": "2026-07-30T06:52:08Z",
+     "id": 90800999755
+    },
+    {
+     "name": "Duplication Sweep",
+     "status": "completed",
+     "conclusion": "success",
+     "started_at": "2026-07-30T06:53:15Z",
+     "id": 90801198068
+    },
+    {
+     "name": "Duplication Sweep",
+     "status": "completed",
+     "conclusion": "success",
+     "started_at": "2026-07-30T06:56:08Z",
+     "id": 90801547646
+    },
+    {
+     "name": "Omni Standards Gate",
+     "status": "completed",
+     "conclusion": "success",
+     "started_at": "2026-07-30T06:53:24Z",
+     "id": 90801224259
+    },
+    {
+     "name": "Stale TODO Gate",
+     "status": "completed",
+     "conclusion": "success",
+     "started_at": "2026-07-30T06:52:08Z",
+     "id": 90800999973
+    },
+    {
+     "name": "Type Safety Validation",
+     "status": "completed",
+     "conclusion": "success",
+     "started_at": "2026-07-30T06:52:08Z",
+     "id": 90800999851
+    },
+    {
+     "name": "URL Authority Gate",
+     "status": "completed",
+     "conclusion": "success",
+     "started_at": "2026-07-30T06:52:14Z",
+     "id": 90801000643
+    },
+    {
+     "name": "URL Authority Gate",
+     "status": "completed",
+     "conclusion": "success",
+     "started_at": "2026-07-30T06:53:15Z",
+     "id": 90801198057
+    },
+    {
+     "name": "URL Authority Gate",
+     "status": "completed",
+     "conclusion": "success",
+     "started_at": "2026-07-30T06:55:18Z",
+     "id": 90801546635
+    },
+    {
+     "name": "call-reject-skip-token / scan / reject-skip-gate-token",
+     "status": "completed",
+     "conclusion": "success",
+     "started_at": "2026-07-30T06:56:45Z",
+     "id": 90801821787
+    },
+    {
+     "name": "call-reject-skip-token / scan / reject-skip-gate-token",
+     "status": "completed",
+     "conclusion": "success",
+     "started_at": "2026-07-30T07:02:39Z",
+     "id": 90802918395
+    },
+    {
+     "name": "call-reject-skip-token / scan / reject-skip-gate-token",
+     "status": "completed",
+     "conclusion": "success",
+     "started_at": "2026-07-30T07:08:41Z",
+     "id": 90804058979
+    },
+    {
+     "name": "deploy-gate / deploy-gate",
+     "status": "completed",
+     "conclusion": "success",
+     "started_at": "2026-07-30T06:52:16Z",
+     "id": 90801001454
+    },
+    {
+     "name": "dispatcher-route-coverage",
+     "status": "completed",
+     "conclusion": "success",
+     "started_at": "2026-07-30T06:52:08Z",
+     "id": 90800999936
+    },
+    {
+     "name": "gate / CodeRabbit Thread Check",
+     "status": "completed",
+     "conclusion": "success",
+     "started_at": "2026-07-30T06:52:12Z",
+     "id": 90801001463
+    },
+    {
+     "name": "imperative-contract-guard / Imperative Contract Guard",
+     "status": "completed",
+     "conclusion": "success",
+     "started_at": "2026-07-30T06:52:09Z",
+     "id": 90801001096
+    },
+    {
+     "name": "main-target-guard",
+     "status": "completed",
+     "conclusion": "success",
+     "started_at": "2026-07-30T06:52:08Z",
+     "id": 90800999299
+    },
+    {
+     "name": "main-target-guard",
+     "status": "completed",
+     "conclusion": "success",
+     "started_at": "2026-07-30T06:53:19Z",
+     "id": 90801197672
+    },
+    {
+     "name": "main-target-guard",
+     "status": "completed",
+     "conclusion": "success",
+     "started_at": "2026-07-30T06:56:05Z",
+     "id": 90801547222
+    },
+    {
+     "name": "non-dev-base-guard",
+     "status": "completed",
+     "conclusion": "success",
+     "started_at": "2026-07-30T06:52:08Z",
+     "id": 90800999968
+    },
+    {
+     "name": "non-dev-base-guard",
+     "status": "completed",
+     "conclusion": "success",
+     "started_at": "2026-07-30T06:53:15Z",
+     "id": 90801198266
+    },
+    {
+     "name": "non-dev-base-guard",
+     "status": "completed",
+     "conclusion": "success",
+     "started_at": "2026-07-30T06:56:10Z",
+     "id": 90801547344
+    },
+    {
+     "name": "pr-title / check-title",
+     "status": "completed",
+     "conclusion": "success",
+     "started_at": "2026-07-30T06:52:09Z",
+     "id": 90801001330
+    },
+    {
+     "name": "pr-title / check-title",
+     "status": "completed",
+     "conclusion": "success",
+     "started_at": "2026-07-30T06:53:16Z",
+     "id": 90801199131
+    },
+    {
+     "name": "pr-title / check-title",
+     "status": "completed",
+     "conclusion": "success",
+     "started_at": "2026-07-30T06:55:47Z",
+     "id": 90801548360
+    },
+    {
+     "name": "required-check-skip-guard / check-skip-vectors",
+     "status": "completed",
+     "conclusion": "success",
+     "started_at": "2026-07-30T06:52:08Z",
+     "id": 90801000902
+    },
+    {
+     "name": "verify / verify",
+     "status": "completed",
+     "conclusion": "success",
+     "started_at": "2026-07-30T06:55:38Z",
+     "id": 90801548330
+    },
+    {
+     "name": "verify / verify",
+     "status": "completed",
+     "conclusion": "success",
+     "started_at": "2026-07-30T07:01:53Z",
+     "id": 90802751519
+    },
+    {
+     "name": "verify / verify",
+     "status": "completed",
+     "conclusion": "success",
+     "started_at": "2026-07-30T07:07:50Z",
+     "id": 90803890325
+    }
+   ]
+  },
+  "2563": {
+   "head_sha": "a8a5f89477d6b2c19208b06c0add039720beeb42",
+   "merged_at": "2026-07-30T07:05:42Z",
+   "check_runs": [
+    {
+     "name": "Canonical Inference Gate",
+     "status": "completed",
+     "conclusion": "success",
+     "started_at": "2026-07-30T06:00:02Z",
+     "id": 90792713615
+    },
+    {
+     "name": "Canonical Inference Gate",
+     "status": "completed",
+     "conclusion": "success",
+     "started_at": "2026-07-30T06:47:09Z",
+     "id": 90800137327
+    },
+    {
+     "name": "CodeQL",
+     "status": "completed",
+     "conclusion": "success",
+     "started_at": "2026-07-30T06:00:03Z",
+     "id": 90792713582
+    },
+    {
+     "name": "Duplication Sweep",
+     "status": "completed",
+     "conclusion": "success",
+     "started_at": "2026-07-30T06:00:02Z",
+     "id": 90792713738
+    },
+    {
+     "name": "Duplication Sweep",
+     "status": "completed",
+     "conclusion": "success",
+     "started_at": "2026-07-30T06:47:07Z",
+     "id": 90800137248
+    },
+    {
+     "name": "Omni Standards Gate",
+     "status": "completed",
+     "conclusion": "success",
+     "started_at": "2026-07-30T06:01:30Z",
+     "id": 90792944590
+    },
+    {
+     "name": "Stale TODO Gate",
+     "status": "completed",
+     "conclusion": "success",
+     "started_at": "2026-07-30T06:00:03Z",
+     "id": 90792713750
+    },
+    {
+     "name": "Type Safety Validation",
+     "status": "completed",
+     "conclusion": "success",
+     "started_at": "2026-07-30T06:00:03Z",
+     "id": 90792713630
+    },
+    {
+     "name": "URL Authority Gate",
+     "status": "completed",
+     "conclusion": "success",
+     "started_at": "2026-07-30T06:00:05Z",
+     "id": 90792713772
+    },
+    {
+     "name": "URL Authority Gate",
+     "status": "completed",
+     "conclusion": "success",
+     "started_at": "2026-07-30T06:47:15Z",
+     "id": 90800137171
+    },
+    {
+     "name": "call-reject-skip-token / scan / reject-skip-gate-token",
+     "status": "completed",
+     "conclusion": "success",
+     "started_at": "2026-07-30T06:48:45Z",
+     "id": 90800409341
+    },
+    {
+     "name": "call-reject-skip-token / scan / reject-skip-gate-token",
+     "status": "completed",
+     "conclusion": "success",
+     "started_at": "2026-07-30T07:02:29Z",
+     "id": 90802866374
+    },
+    {
+     "name": "deploy-gate / deploy-gate",
+     "status": "completed",
+     "conclusion": "success",
+     "started_at": "2026-07-30T06:00:03Z",
+     "id": 90792714478
+    },
+    {
+     "name": "dispatcher-route-coverage",
+     "status": "completed",
+     "conclusion": "success",
+     "started_at": "2026-07-30T06:00:03Z",
+     "id": 90792713600
+    },
+    {
+     "name": "gate / CodeRabbit Thread Check",
+     "status": "completed",
+     "conclusion": "success",
+     "started_at": "2026-07-30T06:00:03Z",
+     "id": 90792714581
+    },
+    {
+     "name": "imperative-contract-guard / Imperative Contract Guard",
+     "status": "completed",
+     "conclusion": "success",
+     "started_at": "2026-07-30T06:00:08Z",
+     "id": 90792714324
+    },
+    {
+     "name": "main-target-guard",
+     "status": "completed",
+     "conclusion": "success",
+     "started_at": "2026-07-30T06:00:02Z",
+     "id": 90792713666
+    },
+    {
+     "name": "main-target-guard",
+     "status": "completed",
+     "conclusion": "success",
+     "started_at": "2026-07-30T06:47:14Z",
+     "id": 90800137299
+    },
+    {
+     "name": "non-dev-base-guard",
+     "status": "completed",
+     "conclusion": "success",
+     "started_at": "2026-07-30T06:00:03Z",
+     "id": 90792713847
+    },
+    {
+     "name": "non-dev-base-guard",
+     "status": "completed",
+     "conclusion": "success",
+     "started_at": "2026-07-30T06:47:14Z",
+     "id": 90800137427
+    },
+    {
+     "name": "pr-title / check-title",
+     "status": "completed",
+     "conclusion": "success",
+     "started_at": "2026-07-30T06:00:14Z",
+     "id": 90792714641
+    },
+    {
+     "name": "pr-title / check-title",
+     "status": "completed",
+     "conclusion": "success",
+     "started_at": "2026-07-30T06:47:14Z",
+     "id": 90800138442
+    },
+    {
+     "name": "required-check-skip-guard / check-skip-vectors",
+     "status": "completed",
+     "conclusion": "success",
+     "started_at": "2026-07-30T06:00:10Z",
+     "id": 90792714434
+    },
+    {
+     "name": "verify / verify",
+     "status": "completed",
+     "conclusion": "success",
+     "started_at": "2026-07-30T06:47:50Z",
+     "id": 90800264250
+    },
+    {
+     "name": "verify / verify",
+     "status": "completed",
+     "conclusion": "success",
+     "started_at": "2026-07-30T07:01:42Z",
+     "id": 90802739834
+    }
+   ]
+  },
+  "2562": {
+   "head_sha": "89025826343ea40d66747ae4dbea119434cb9e2a",
+   "merged_at": "2026-07-30T06:25:32Z",
+   "check_runs": [
+    {
+     "name": "Canonical Inference Gate",
+     "status": "completed",
+     "conclusion": "success",
+     "started_at": "2026-07-30T06:12:29Z",
+     "id": 90794644405
+    },
+    {
+     "name": "Canonical Inference Gate",
+     "status": "completed",
+     "conclusion": "success",
+     "started_at": "2026-07-30T06:22:12Z",
+     "id": 90796136375
+    },
+    {
+     "name": "CodeQL",
+     "status": "completed",
+     "conclusion": "success",
+     "started_at": "2026-07-30T06:12:29Z",
+     "id": 90794644147
+    },
+    {
+     "name": "Duplication Sweep",
+     "status": "completed",
+     "conclusion": "success",
+     "started_at": "2026-07-30T06:12:30Z",
+     "id": 90794645006
+    },
+    {
+     "name": "Duplication Sweep",
+     "status": "completed",
+     "conclusion": "success",
+     "started_at": "2026-07-30T06:22:18Z",
+     "id": 90796136194
+    },
+    {
+     "name": "Omni Standards Gate",
+     "status": "completed",
+     "conclusion": "success",
+     "started_at": "2026-07-30T06:14:17Z",
+     "id": 90794918310
+    },
+    {
+     "name": "Stale TODO Gate",
+     "status": "completed",
+     "conclusion": "success",
+     "started_at": "2026-07-30T06:12:30Z",
+     "id": 90794644399
+    },
+    {
+     "name": "Type Safety Validation",
+     "status": "completed",
+     "conclusion": "success",
+     "started_at": "2026-07-30T06:12:29Z",
+     "id": 90794645326
+    },
+    {
+     "name": "URL Authority Gate",
+     "status": "completed",
+     "conclusion": "success",
+     "started_at": "2026-07-30T06:12:30Z",
+     "id": 90794645066
+    },
+    {
+     "name": "URL Authority Gate",
+     "status": "completed",
+     "conclusion": "success",
+     "started_at": "2026-07-30T06:22:17Z",
+     "id": 90796136275
+    },
+    {
+     "name": "call-reject-skip-token / scan / reject-skip-gate-token",
+     "status": "completed",
+     "conclusion": "success",
+     "started_at": "2026-07-30T06:13:10Z",
+     "id": 90794745790
+    },
+    {
+     "name": "call-reject-skip-token / scan / reject-skip-gate-token",
+     "status": "completed",
+     "conclusion": "success",
+     "started_at": "2026-07-30T06:22:53Z",
+     "id": 90796236254
+    },
+    {
+     "name": "deploy-gate / deploy-gate",
+     "status": "completed",
+     "conclusion": "success",
+     "started_at": "2026-07-30T06:24:38Z",
+     "id": 90796507447
+    },
+    {
+     "name": "dispatcher-route-coverage",
+     "status": "completed",
+     "conclusion": "success",
+     "started_at": "2026-07-30T06:12:30Z",
+     "id": 90794644327
+    },
+    {
+     "name": "gate / CodeRabbit Thread Check",
+     "status": "completed",
+     "conclusion": "success",
+     "started_at": "2026-07-30T06:12:30Z",
+     "id": 90794646379
+    },
+    {
+     "name": "imperative-contract-guard / Imperative Contract Guard",
+     "status": "completed",
+     "conclusion": "success",
+     "started_at": "2026-07-30T06:12:30Z",
+     "id": 90794646274
+    },
+    {
+     "name": "main-target-guard",
+     "status": "completed",
+     "conclusion": "success",
+     "started_at": "2026-07-30T06:12:30Z",
+     "id": 90794644726
+    },
+    {
+     "name": "main-target-guard",
+     "status": "completed",
+     "conclusion": "success",
+     "started_at": "2026-07-30T06:22:19Z",
+     "id": 90796136402
+    },
+    {
+     "name": "non-dev-base-guard",
+     "status": "completed",
+     "conclusion": "success",
+     "started_at": "2026-07-30T06:12:29Z",
+     "id": 90794644250
+    },
+    {
+     "name": "non-dev-base-guard",
+     "status": "completed",
+     "conclusion": "success",
+     "started_at": "2026-07-30T06:22:12Z",
+     "id": 90796136004
+    },
+    {
+     "name": "pr-title / check-title",
+     "status": "completed",
+     "conclusion": "success",
+     "started_at": "2026-07-30T06:12:31Z",
+     "id": 90794645699
+    },
+    {
+     "name": "pr-title / check-title",
+     "status": "completed",
+     "conclusion": "success",
+     "started_at": "2026-07-30T06:22:14Z",
+     "id": 90796137514
+    },
+    {
+     "name": "required-check-skip-guard / check-skip-vectors",
+     "status": "completed",
+     "conclusion": "success",
+     "started_at": "2026-07-30T06:12:30Z",
+     "id": 90794646165
+    },
+    {
+     "name": "verify / verify",
+     "status": "completed",
+     "conclusion": "success",
+     "started_at": "2026-07-30T06:12:31Z",
+     "id": 90794646034
+    },
+    {
+     "name": "verify / verify",
+     "status": "completed",
+     "conclusion": "success",
+     "started_at": "2026-07-30T06:22:20Z",
+     "id": 90796137171
+    }
+   ]
+  },
+  "2561": {
+   "head_sha": "4d33ed425c8d9134e171560933d4a5680406c525",
+   "merged_at": "2026-07-30T07:06:11Z",
+   "check_runs": [
+    {
+     "name": "Canonical Inference Gate",
+     "status": "completed",
+     "conclusion": "success",
+     "started_at": "2026-07-30T05:32:48Z",
+     "id": 90788724190
+    },
+    {
+     "name": "Canonical Inference Gate",
+     "status": "completed",
+     "conclusion": "success",
+     "started_at": "2026-07-30T05:35:10Z",
+     "id": 90789063132
+    },
+    {
+     "name": "Canonical Inference Gate",
+     "status": "completed",
+     "conclusion": "success",
+     "started_at": "2026-07-30T05:36:46Z",
+     "id": 90789308968
+    },
+    {
+     "name": "Canonical Inference Gate",
+     "status": "completed",
+     "conclusion": "success",
+     "started_at": "2026-07-30T06:47:30Z",
+     "id": 90800206429
+    },
+    {
+     "name": "Canonical Inference Gate",
+     "status": "completed",
+     "conclusion": "success",
+     "started_at": "2026-07-30T06:51:26Z",
+     "id": 90800883204
+    },
+    {
+     "name": "Canonical Inference Gate",
+     "status": "completed",
+     "conclusion": "success",
+     "started_at": "2026-07-30T06:55:44Z",
+     "id": 90801563944
+    },
+    {
+     "name": "CodeQL",
+     "status": "completed",
+     "conclusion": "success",
+     "started_at": "2026-07-30T05:32:49Z",
+     "id": 90788724356
+    },
+    {
+     "name": "Duplication Sweep",
+     "status": "completed",
+     "conclusion": "success",
+     "started_at": "2026-07-30T05:32:43Z",
+     "id": 90788725021
+    },
+    {
+     "name": "Duplication Sweep",
+     "status": "completed",
+     "conclusion": "success",
+     "started_at": "2026-07-30T05:35:04Z",
+     "id": 90789063264
+    },
+    {
+     "name": "Duplication Sweep",
+     "status": "completed",
+     "conclusion": "success",
+     "started_at": "2026-07-30T05:36:53Z",
+     "id": 90789309215
+    },
+    {
+     "name": "Duplication Sweep",
+     "status": "completed",
+     "conclusion": "success",
+     "started_at": "2026-07-30T06:47:30Z",
+     "id": 90800206416
+    },
+    {
+     "name": "Duplication Sweep",
+     "status": "completed",
+     "conclusion": "success",
+     "started_at": "2026-07-30T06:51:28Z",
+     "id": 90800883256
+    },
+    {
+     "name": "Duplication Sweep",
+     "status": "completed",
+     "conclusion": "success",
+     "started_at": "2026-07-30T06:55:55Z",
+     "id": 90801564756
+    },
+    {
+     "name": "Omni Standards Gate",
+     "status": "completed",
+     "conclusion": "success",
+     "started_at": "2026-07-30T05:34:46Z",
+     "id": 90789019810
+    },
+    {
+     "name": "Stale TODO Gate",
+     "status": "completed",
+     "conclusion": "success",
+     "started_at": "2026-07-30T05:32:42Z",
+     "id": 90788724366
+    },
+    {
+     "name": "Type Safety Validation",
+     "status": "completed",
+     "conclusion": "success",
+     "started_at": "2026-07-30T05:32:49Z",
+     "id": 90788724459
+    },
+    {
+     "name": "URL Authority Gate",
+     "status": "completed",
+     "conclusion": "failure",
+     "started_at": "2026-07-30T05:32:43Z",
+     "id": 90788724284
+    },
+    {
+     "name": "URL Authority Gate",
+     "status": "completed",
+     "conclusion": "success",
+     "started_at": "2026-07-30T05:35:04Z",
+     "id": 90789063146
+    },
+    {
+     "name": "URL Authority Gate",
+     "status": "completed",
+     "conclusion": "success",
+     "started_at": "2026-07-30T05:36:46Z",
+     "id": 90789309070
+    },
+    {
+     "name": "URL Authority Gate",
+     "status": "completed",
+     "conclusion": "success",
+     "started_at": "2026-07-30T06:47:30Z",
+     "id": 90800206268
+    },
+    {
+     "name": "URL Authority Gate",
+     "status": "completed",
+     "conclusion": "success",
+     "started_at": "2026-07-30T06:51:27Z",
+     "id": 90800883159
+    },
+    {
+     "name": "URL Authority Gate",
+     "status": "completed",
+     "conclusion": "success",
+     "started_at": "2026-07-30T06:55:36Z",
+     "id": 90801565527
+    },
+    {
+     "name": "call-reject-skip-token / scan / reject-skip-gate-token",
+     "status": "completed",
+     "conclusion": "success",
+     "started_at": "2026-07-30T06:48:21Z",
+     "id": 90800348658
+    },
+    {
+     "name": "call-reject-skip-token / scan / reject-skip-gate-token",
+     "status": "completed",
+     "conclusion": "success",
+     "started_at": "2026-07-30T06:49:25Z",
+     "id": 90800532658
+    },
+    {
+     "name": "call-reject-skip-token / scan / reject-skip-gate-token",
+     "status": "completed",
+     "conclusion": "success",
+     "started_at": "2026-07-30T06:52:21Z",
+     "id": 90801010304
+    },
+    {
+     "name": "call-reject-skip-token / scan / reject-skip-gate-token",
+     "status": "completed",
+     "conclusion": "success",
+     "started_at": "2026-07-30T06:56:59Z",
+     "id": 90801863254
+    },
+    {
+     "name": "call-reject-skip-token / scan / reject-skip-gate-token",
+     "status": "completed",
+     "conclusion": "cancelled",
+     "started_at": "2026-07-30T07:01:49Z",
+     "id": 90802768342
+    },
+    {
+     "name": "call-reject-skip-token / scan / reject-skip-gate-token",
+     "status": "completed",
+     "conclusion": "success",
+     "started_at": "2026-07-30T07:02:32Z",
+     "id": 90802894327
+    },
+    {
+     "name": "deploy-gate / deploy-gate",
+     "status": "completed",
+     "conclusion": "success",
+     "started_at": "2026-07-30T07:01:43Z",
+     "id": 90802739042
+    },
+    {
+     "name": "dispatcher-route-coverage",
+     "status": "completed",
+     "conclusion": "success",
+     "started_at": "2026-07-30T05:32:42Z",
+     "id": 90788724113
+    },
+    {
+     "name": "gate / CodeRabbit Thread Check",
+     "status": "completed",
+     "conclusion": "success",
+     "started_at": "2026-07-30T05:32:43Z",
+     "id": 90788725596
+    },
+    {
+     "name": "imperative-contract-guard / Imperative Contract Guard",
+     "status": "completed",
+     "conclusion": "success",
+     "started_at": "2026-07-30T05:32:49Z",
+     "id": 90788725321
+    },
+    {
+     "name": "main-target-guard",
+     "status": "completed",
+     "conclusion": "success",
+     "started_at": "2026-07-30T05:32:43Z",
+     "id": 90788724674
+    },
+    {
+     "name": "main-target-guard",
+     "status": "completed",
+     "conclusion": "success",
+     "started_at": "2026-07-30T05:35:04Z",
+     "id": 90789063274
+    },
+    {
+     "name": "main-target-guard",
+     "status": "completed",
+     "conclusion": "success",
+     "started_at": "2026-07-30T05:36:47Z",
+     "id": 90789309038
+    },
+    {
+     "name": "main-target-guard",
+     "status": "completed",
+     "conclusion": "success",
+     "started_at": "2026-07-30T06:47:30Z",
+     "id": 90800206209
+    },
+    {
+     "name": "main-target-guard",
+     "status": "completed",
+     "conclusion": "success",
+     "started_at": "2026-07-30T06:51:27Z",
+     "id": 90800883605
+    },
+    {
+     "name": "main-target-guard",
+     "status": "completed",
+     "conclusion": "success",
+     "started_at": "2026-07-30T06:56:35Z",
+     "id": 90801565223
+    },
+    {
+     "name": "non-dev-base-guard",
+     "status": "completed",
+     "conclusion": "success",
+     "started_at": "2026-07-30T05:32:42Z",
+     "id": 90788724758
+    },
+    {
+     "name": "non-dev-base-guard",
+     "status": "completed",
+     "conclusion": "success",
+     "started_at": "2026-07-30T05:35:04Z",
+     "id": 90789063236
+    },
+    {
+     "name": "non-dev-base-guard",
+     "status": "completed",
+     "conclusion": "success",
+     "started_at": "2026-07-30T05:36:53Z",
+     "id": 90789309179
+    },
+    {
+     "name": "non-dev-base-guard",
+     "status": "completed",
+     "conclusion": "success",
+     "started_at": "2026-07-30T06:47:30Z",
+     "id": 90800206256
+    },
+    {
+     "name": "non-dev-base-guard",
+     "status": "completed",
+     "conclusion": "success",
+     "started_at": "2026-07-30T06:51:33Z",
+     "id": 90800883321
+    },
+    {
+     "name": "non-dev-base-guard",
+     "status": "completed",
+     "conclusion": "success",
+     "started_at": "2026-07-30T06:55:53Z",
+     "id": 90801563956
+    },
+    {
+     "name": "pr-title / check-title",
+     "status": "completed",
+     "conclusion": "success",
+     "started_at": "2026-07-30T05:32:49Z",
+     "id": 90788725866
+    },
+    {
+     "name": "pr-title / check-title",
+     "status": "completed",
+     "conclusion": "success",
+     "started_at": "2026-07-30T05:35:06Z",
+     "id": 90789064068
+    },
+    {
+     "name": "pr-title / check-title",
+     "status": "completed",
+     "conclusion": "success",
+     "started_at": "2026-07-30T05:36:47Z",
+     "id": 90789309976
+    },
+    {
+     "name": "pr-title / check-title",
+     "status": "completed",
+     "conclusion": "success",
+     "started_at": "2026-07-30T06:47:39Z",
+     "id": 90800207488
+    },
+    {
+     "name": "pr-title / check-title",
+     "status": "completed",
+     "conclusion": "success",
+     "started_at": "2026-07-30T06:51:27Z",
+     "id": 90800884198
+    },
+    {
+     "name": "pr-title / check-title",
+     "status": "completed",
+     "conclusion": "success",
+     "started_at": "2026-07-30T06:56:13Z",
+     "id": 90801568872
+    },
+    {
+     "name": "required-check-skip-guard / check-skip-vectors",
+     "status": "completed",
+     "conclusion": "success",
+     "started_at": "2026-07-30T05:32:42Z",
+     "id": 90788725285
+    },
+    {
+     "name": "verify / verify",
+     "status": "completed",
+     "conclusion": "success",
+     "started_at": "2026-07-30T06:47:31Z",
+     "id": 90800207761
+    },
+    {
+     "name": "verify / verify",
+     "status": "completed",
+     "conclusion": "success",
+     "started_at": "2026-07-30T06:48:34Z",
+     "id": 90800382837
+    },
+    {
+     "name": "verify / verify",
+     "status": "completed",
+     "conclusion": "success",
+     "started_at": "2026-07-30T06:51:31Z",
+     "id": 90800884055
+    },
+    {
+     "name": "verify / verify",
+     "status": "completed",
+     "conclusion": "success",
+     "started_at": "2026-07-30T06:55:43Z",
+     "id": 90801566616
+    },
+    {
+     "name": "verify / verify",
+     "status": "completed",
+     "conclusion": "cancelled",
+     "started_at": "2026-07-30T07:01:45Z",
+     "id": 90802755082
+    },
+    {
+     "name": "verify / verify",
+     "status": "completed",
+     "conclusion": "success",
+     "started_at": "2026-07-30T07:01:49Z",
+     "id": 90802760706
+    }
+   ]
+  },
+  "2560": {
+   "head_sha": "182cef9dd02fc7cc46ad66e4420b876861ae6af5",
+   "merged_at": "2026-07-30T07:05:56Z",
+   "check_runs": [
+    {
+     "name": "Canonical Inference Gate",
+     "status": "completed",
+     "conclusion": "success",
+     "started_at": "2026-07-30T05:26:24Z",
+     "id": 90787770626
+    },
+    {
+     "name": "Canonical Inference Gate",
+     "status": "completed",
+     "conclusion": "success",
+     "started_at": "2026-07-30T05:36:59Z",
+     "id": 90789336565
+    },
+    {
+     "name": "Canonical Inference Gate",
+     "status": "completed",
+     "conclusion": "success",
+     "started_at": "2026-07-30T06:47:20Z",
+     "id": 90800172660
+    },
+    {
+     "name": "Canonical Inference Gate",
+     "status": "completed",
+     "conclusion": "success",
+     "started_at": "2026-07-30T06:51:18Z",
+     "id": 90800859210
+    },
+    {
+     "name": "CodeQL",
+     "status": "completed",
+     "conclusion": "success",
+     "started_at": "2026-07-30T05:26:20Z",
+     "id": 90787770310
+    },
+    {
+     "name": "Duplication Sweep",
+     "status": "completed",
+     "conclusion": "success",
+     "started_at": "2026-07-30T05:26:17Z",
+     "id": 90787770539
+    },
+    {
+     "name": "Duplication Sweep",
+     "status": "completed",
+     "conclusion": "success",
+     "started_at": "2026-07-30T05:37:05Z",
+     "id": 90789336690
+    },
+    {
+     "name": "Duplication Sweep",
+     "status": "completed",
+     "conclusion": "success",
+     "started_at": "2026-07-30T06:47:19Z",
+     "id": 90800172760
+    },
+    {
+     "name": "Duplication Sweep",
+     "status": "completed",
+     "conclusion": "success",
+     "started_at": "2026-07-30T06:51:18Z",
+     "id": 90800859490
+    },
+    {
+     "name": "Omni Standards Gate",
+     "status": "completed",
+     "conclusion": "success",
+     "started_at": "2026-07-30T05:27:58Z",
+     "id": 90788030267
+    },
+    {
+     "name": "Stale TODO Gate",
+     "status": "completed",
+     "conclusion": "success",
+     "started_at": "2026-07-30T05:26:33Z",
+     "id": 90787770660
+    },
+    {
+     "name": "Type Safety Validation",
+     "status": "completed",
+     "conclusion": "success",
+     "started_at": "2026-07-30T05:26:32Z",
+     "id": 90787770789
+    },
+    {
+     "name": "URL Authority Gate",
+     "status": "completed",
+     "conclusion": "success",
+     "started_at": "2026-07-30T05:37:21Z",
+     "id": 90789390131
+    },
+    {
+     "name": "URL Authority Gate",
+     "status": "completed",
+     "conclusion": "success",
+     "started_at": "2026-07-30T06:47:57Z",
+     "id": 90800282431
+    },
+    {
+     "name": "URL Authority Gate",
+     "status": "completed",
+     "conclusion": "success",
+     "started_at": "2026-07-30T06:51:19Z",
+     "id": 90800859178
+    },
+    {
+     "name": "URL Authority Gate",
+     "status": "completed",
+     "conclusion": "success",
+     "started_at": "2026-07-30T07:01:47Z",
+     "id": 90802752026
+    },
+    {
+     "name": "call-reject-skip-token / scan / reject-skip-gate-token",
+     "status": "completed",
+     "conclusion": "success",
+     "started_at": "2026-07-30T06:48:42Z",
+     "id": 90800411847
+    },
+    {
+     "name": "call-reject-skip-token / scan / reject-skip-gate-token",
+     "status": "completed",
+     "conclusion": "success",
+     "started_at": "2026-07-30T06:52:06Z",
+     "id": 90800992798
+    },
+    {
+     "name": "call-reject-skip-token / scan / reject-skip-gate-token",
+     "status": "completed",
+     "conclusion": "cancelled",
+     "started_at": "2026-07-30T07:01:44Z",
+     "id": 90802752592
+    },
+    {
+     "name": "call-reject-skip-token / scan / reject-skip-gate-token",
+     "status": "completed",
+     "conclusion": "success",
+     "started_at": "2026-07-30T07:02:35Z",
+     "id": 90802904023
+    },
+    {
+     "name": "deploy-gate / deploy-gate",
+     "status": "completed",
+     "conclusion": "success",
+     "started_at": "2026-07-30T05:26:13Z",
+     "id": 90787771551
+    },
+    {
+     "name": "dispatcher-route-coverage",
+     "status": "completed",
+     "conclusion": "success",
+     "started_at": "2026-07-30T05:26:12Z",
+     "id": 90787770483
+    },
+    {
+     "name": "gate / CodeRabbit Thread Check",
+     "status": "completed",
+     "conclusion": "success",
+     "started_at": "2026-07-30T05:26:47Z",
+     "id": 90787771509
+    },
+    {
+     "name": "imperative-contract-guard / Imperative Contract Guard",
+     "status": "completed",
+     "conclusion": "success",
+     "started_at": "2026-07-30T05:26:36Z",
+     "id": 90787771302
+    },
+    {
+     "name": "main-target-guard",
+     "status": "completed",
+     "conclusion": "success",
+     "started_at": "2026-07-30T05:26:13Z",
+     "id": 90787770241
+    },
+    {
+     "name": "main-target-guard",
+     "status": "completed",
+     "conclusion": "success",
+     "started_at": "2026-07-30T05:36:58Z",
+     "id": 90789336571
+    },
+    {
+     "name": "main-target-guard",
+     "status": "completed",
+     "conclusion": "success",
+     "started_at": "2026-07-30T06:47:26Z",
+     "id": 90800172727
+    },
+    {
+     "name": "main-target-guard",
+     "status": "completed",
+     "conclusion": "success",
+     "started_at": "2026-07-30T06:51:18Z",
+     "id": 90800859331
+    },
+    {
+     "name": "non-dev-base-guard",
+     "status": "completed",
+     "conclusion": "success",
+     "started_at": "2026-07-30T05:26:17Z",
+     "id": 90787770652
+    },
+    {
+     "name": "non-dev-base-guard",
+     "status": "completed",
+     "conclusion": "success",
+     "started_at": "2026-07-30T05:36:58Z",
+     "id": 90789336655
+    },
+    {
+     "name": "non-dev-base-guard",
+     "status": "completed",
+     "conclusion": "success",
+     "started_at": "2026-07-30T06:47:25Z",
+     "id": 90800173033
+    },
+    {
+     "name": "non-dev-base-guard",
+     "status": "completed",
+     "conclusion": "success",
+     "started_at": "2026-07-30T06:51:23Z",
+     "id": 90800859238
+    },
+    {
+     "name": "pr-title / check-title",
+     "status": "completed",
+     "conclusion": "success",
+     "started_at": "2026-07-30T05:26:21Z",
+     "id": 90787771734
+    },
+    {
+     "name": "pr-title / check-title",
+     "status": "completed",
+     "conclusion": "success",
+     "started_at": "2026-07-30T05:37:05Z",
+     "id": 90789337385
+    },
+    {
+     "name": "pr-title / check-title",
+     "status": "completed",
+     "conclusion": "success",
+     "started_at": "2026-07-30T06:47:20Z",
+     "id": 90800174002
+    },
+    {
+     "name": "pr-title / check-title",
+     "status": "completed",
+     "conclusion": "success",
+     "started_at": "2026-07-30T06:51:19Z",
+     "id": 90800861319
+    },
+    {
+     "name": "required-check-skip-guard / check-skip-vectors",
+     "status": "completed",
+     "conclusion": "success",
+     "started_at": "2026-07-30T05:26:33Z",
+     "id": 90787771476
+    },
+    {
+     "name": "verify / verify",
+     "status": "completed",
+     "conclusion": "success",
+     "started_at": "2026-07-30T06:51:24Z",
+     "id": 90800861180
+    },
+    {
+     "name": "verify / verify",
+     "status": "completed",
+     "conclusion": "cancelled",
+     "started_at": "2026-07-30T07:01:39Z",
+     "id": 90802738649
+    },
+    {
+     "name": "verify / verify",
+     "status": "completed",
+     "conclusion": "cancelled",
+     "started_at": "2026-07-30T07:01:41Z",
+     "id": 90802742483
+    },
+    {
+     "name": "verify / verify",
+     "status": "completed",
+     "conclusion": "success",
+     "started_at": "2026-07-30T07:01:47Z",
+     "id": 90802751911
+    }
+   ]
+  },
+  "2559": {
+   "head_sha": "1e87c0e7cc516e0c8d0f061d9f5605ea4a4f6b05",
+   "merged_at": "2026-07-30T05:48:14Z",
+   "check_runs": [
+    {
+     "name": "Canonical Inference Gate",
+     "status": "completed",
+     "conclusion": "cancelled",
+     "started_at": "2026-07-30T05:15:02Z",
+     "id": 90786135571
+    },
+    {
+     "name": "Canonical Inference Gate",
+     "status": "completed",
+     "conclusion": "success",
+     "started_at": "2026-07-30T05:15:59Z",
+     "id": 90786250409
+    },
+    {
+     "name": "CodeQL",
+     "status": "completed",
+     "conclusion": "success",
+     "started_at": "2026-07-30T05:15:03Z",
+     "id": 90786135574
+    },
+    {
+     "name": "Duplication Sweep",
+     "status": "completed",
+     "conclusion": "success",
+     "started_at": "2026-07-30T05:15:03Z",
+     "id": 90786135917
+    },
+    {
+     "name": "Duplication Sweep",
+     "status": "completed",
+     "conclusion": "success",
+     "started_at": "2026-07-30T05:15:44Z",
+     "id": 90786239154
+    },
+    {
+     "name": "Omni Standards Gate",
+     "status": "completed",
+     "conclusion": "success",
+     "started_at": "2026-07-30T05:17:02Z",
+     "id": 90786421888
+    },
+    {
+     "name": "Stale TODO Gate",
+     "status": "completed",
+     "conclusion": "success",
+     "started_at": "2026-07-30T05:15:02Z",
+     "id": 90786135620
+    },
+    {
+     "name": "Type Safety Validation",
+     "status": "completed",
+     "conclusion": "success",
+     "started_at": "2026-07-30T05:15:07Z",
+     "id": 90786135978
+    },
+    {
+     "name": "URL Authority Gate",
+     "status": "completed",
+     "conclusion": "cancelled",
+     "started_at": "2026-07-30T05:15:03Z",
+     "id": 90786136419
+    },
+    {
+     "name": "URL Authority Gate",
+     "status": "completed",
+     "conclusion": "success",
+     "started_at": "2026-07-30T05:15:50Z",
+     "id": 90786259202
+    },
+    {
+     "name": "call-reject-skip-token / scan / reject-skip-gate-token",
+     "status": "completed",
+     "conclusion": "skipped",
+     "started_at": "2026-07-30T05:15:17Z",
+     "id": 90786184903
+    },
+    {
+     "name": "call-reject-skip-token / scan / reject-skip-gate-token",
+     "status": "completed",
+     "conclusion": "success",
+     "started_at": "2026-07-30T05:16:29Z",
+     "id": 90786357376
+    },
+    {
+     "name": "deploy-gate / deploy-gate",
+     "status": "completed",
+     "conclusion": "success",
+     "started_at": "2026-07-30T05:15:10Z",
+     "id": 90786136943
+    },
+    {
+     "name": "dispatcher-route-coverage",
+     "status": "completed",
+     "conclusion": "success",
+     "started_at": "2026-07-30T05:15:02Z",
+     "id": 90786135814
+    },
+    {
+     "name": "gate / CodeRabbit Thread Check",
+     "status": "completed",
+     "conclusion": "success",
+     "started_at": "2026-07-30T05:15:03Z",
+     "id": 90786136542
+    },
+    {
+     "name": "imperative-contract-guard / Imperative Contract Guard",
+     "status": "completed",
+     "conclusion": "success",
+     "started_at": "2026-07-30T05:15:07Z",
+     "id": 90786136515
+    },
+    {
+     "name": "main-target-guard",
+     "status": "completed",
+     "conclusion": "success",
+     "started_at": "2026-07-30T05:15:09Z",
+     "id": 90786135740
+    },
+    {
+     "name": "main-target-guard",
+     "status": "completed",
+     "conclusion": "success",
+     "started_at": "2026-07-30T05:15:49Z",
+     "id": 90786238777
+    },
+    {
+     "name": "non-dev-base-guard",
+     "status": "completed",
+     "conclusion": "success",
+     "started_at": "2026-07-30T05:15:04Z",
+     "id": 90786136160
+    },
+    {
+     "name": "non-dev-base-guard",
+     "status": "completed",
+     "conclusion": "success",
+     "started_at": "2026-07-30T05:15:41Z",
+     "id": 90786238990
+    },
+    {
+     "name": "pr-title / check-title",
+     "status": "completed",
+     "conclusion": "success",
+     "started_at": "2026-07-30T05:15:03Z",
+     "id": 90786136753
+    },
+    {
+     "name": "pr-title / check-title",
+     "status": "completed",
+     "conclusion": "success",
+     "started_at": "2026-07-30T05:15:47Z",
+     "id": 90786239655
+    },
+    {
+     "name": "required-check-skip-guard / check-skip-vectors",
+     "status": "completed",
+     "conclusion": "success",
+     "started_at": "2026-07-30T05:15:09Z",
+     "id": 90786136655
+    },
+    {
+     "name": "verify / verify",
+     "status": "completed",
+     "conclusion": "failure",
+     "started_at": "2026-07-30T05:15:03Z",
+     "id": 90786136994
+    },
+    {
+     "name": "verify / verify",
+     "status": "completed",
+     "conclusion": "success",
+     "started_at": "2026-07-30T05:15:46Z",
+     "id": 90786240076
+    }
+   ]
+  },
+  "2556": {
+   "head_sha": "c27137cca08d04b2d6147db7420b4eeb61518d83",
+   "merged_at": "2026-07-30T04:08:25Z",
+   "check_runs": [
+    {
+     "name": "Canonical Inference Gate",
+     "status": "completed",
+     "conclusion": "success",
+     "started_at": "2026-07-30T03:37:12Z",
+     "id": 90772850507
+    },
+    {
+     "name": "Canonical Inference Gate",
+     "status": "completed",
+     "conclusion": "success",
+     "started_at": "2026-07-30T03:42:52Z",
+     "id": 90773583590
+    },
+    {
+     "name": "CodeQL",
+     "status": "completed",
+     "conclusion": "success",
+     "started_at": "2026-07-30T03:37:06Z",
+     "id": 90772851289
+    },
+    {
+     "name": "Duplication Sweep",
+     "status": "completed",
+     "conclusion": "success",
+     "started_at": "2026-07-30T03:37:06Z",
+     "id": 90772850721
+    },
+    {
+     "name": "Duplication Sweep",
+     "status": "completed",
+     "conclusion": "success",
+     "started_at": "2026-07-30T03:42:52Z",
+     "id": 90773583622
+    },
+    {
+     "name": "Omni Standards Gate",
+     "status": "completed",
+     "conclusion": "success",
+     "started_at": "2026-07-30T03:38:57Z",
+     "id": 90773087370
+    },
+    {
+     "name": "Stale TODO Gate",
+     "status": "completed",
+     "conclusion": "success",
+     "started_at": "2026-07-30T03:37:06Z",
+     "id": 90772851150
+    },
+    {
+     "name": "Type Safety Validation",
+     "status": "completed",
+     "conclusion": "success",
+     "started_at": "2026-07-30T03:37:06Z",
+     "id": 90772851016
+    },
+    {
+     "name": "URL Authority Gate",
+     "status": "completed",
+     "conclusion": "success",
+     "started_at": "2026-07-30T03:37:06Z",
+     "id": 90772851092
+    },
+    {
+     "name": "URL Authority Gate",
+     "status": "completed",
+     "conclusion": "success",
+     "started_at": "2026-07-30T03:42:52Z",
+     "id": 90773583580
+    },
+    {
+     "name": "call-reject-skip-token / scan / reject-skip-gate-token",
+     "status": "completed",
+     "conclusion": "success",
+     "started_at": "2026-07-30T03:43:37Z",
+     "id": 90773670384
+    },
+    {
+     "name": "call-reject-skip-token / scan / reject-skip-gate-token",
+     "status": "completed",
+     "conclusion": "success",
+     "started_at": "2026-07-30T03:59:32Z",
+     "id": 90775741301
+    },
+    {
+     "name": "deploy-gate / deploy-gate",
+     "status": "completed",
+     "conclusion": "success",
+     "started_at": "2026-07-30T03:37:06Z",
+     "id": 90772852098
+    },
+    {
+     "name": "dispatcher-route-coverage",
+     "status": "completed",
+     "conclusion": "success",
+     "started_at": "2026-07-30T03:37:06Z",
+     "id": 90772851044
+    },
+    {
+     "name": "gate / CodeRabbit Thread Check",
+     "status": "completed",
+     "conclusion": "success",
+     "started_at": "2026-07-30T03:37:11Z",
+     "id": 90772851994
+    },
+    {
+     "name": "imperative-contract-guard / Imperative Contract Guard",
+     "status": "completed",
+     "conclusion": "success",
+     "started_at": "2026-07-30T03:37:07Z",
+     "id": 90772851669
+    },
+    {
+     "name": "main-target-guard",
+     "status": "completed",
+     "conclusion": "success",
+     "started_at": "2026-07-30T03:37:06Z",
+     "id": 90772851076
+    },
+    {
+     "name": "main-target-guard",
+     "status": "completed",
+     "conclusion": "success",
+     "started_at": "2026-07-30T03:42:59Z",
+     "id": 90773583610
+    },
+    {
+     "name": "non-dev-base-guard",
+     "status": "completed",
+     "conclusion": "success",
+     "started_at": "2026-07-30T03:37:12Z",
+     "id": 90772850710
+    },
+    {
+     "name": "non-dev-base-guard",
+     "status": "completed",
+     "conclusion": "success",
+     "started_at": "2026-07-30T03:42:52Z",
+     "id": 90773583715
+    },
+    {
+     "name": "pr-title / check-title",
+     "status": "completed",
+     "conclusion": "success",
+     "started_at": "2026-07-30T03:37:07Z",
+     "id": 90772851616
+    },
+    {
+     "name": "pr-title / check-title",
+     "status": "completed",
+     "conclusion": "success",
+     "started_at": "2026-07-30T03:42:54Z",
+     "id": 90773584593
+    },
+    {
+     "name": "required-check-skip-guard / check-skip-vectors",
+     "status": "completed",
+     "conclusion": "success",
+     "started_at": "2026-07-30T03:37:13Z",
+     "id": 90772851911
+    },
+    {
+     "name": "required-check-skip-guard / check-skip-vectors",
+     "status": "completed",
+     "conclusion": "success",
+     "started_at": "2026-07-30T03:42:25Z",
+     "id": 90773528632
+    },
+    {
+     "name": "verify / verify",
+     "status": "completed",
+     "conclusion": "success",
+     "started_at": "2026-07-30T03:42:52Z",
+     "id": 90773584556
+    },
+    {
+     "name": "verify / verify",
+     "status": "completed",
+     "conclusion": "success",
+     "started_at": "2026-07-30T03:58:42Z",
+     "id": 90775632676
+    }
+   ]
+  },
+  "2555": {
+   "head_sha": "0dbedbca0ee0c3fa2c0258632021c86209028893",
+   "merged_at": "2026-07-30T04:25:09Z",
+   "check_runs": [
+    {
+     "name": "Canonical Inference Gate",
+     "status": "completed",
+     "conclusion": "success",
+     "started_at": "2026-07-30T04:00:03Z",
+     "id": 90775808019
+    },
+    {
+     "name": "Canonical Inference Gate",
+     "status": "completed",
+     "conclusion": "success",
+     "started_at": "2026-07-30T04:14:36Z",
+     "id": 90777846871
+    },
+    {
+     "name": "CodeQL",
+     "status": "completed",
+     "conclusion": "success",
+     "started_at": "2026-07-30T04:00:03Z",
+     "id": 90775807753
+    },
+    {
+     "name": "Duplication Sweep",
+     "status": "completed",
+     "conclusion": "success",
+     "started_at": "2026-07-30T04:00:03Z",
+     "id": 90775807836
+    },
+    {
+     "name": "Duplication Sweep",
+     "status": "completed",
+     "conclusion": "success",
+     "started_at": "2026-07-30T04:14:36Z",
+     "id": 90777846967
+    },
+    {
+     "name": "Omni Standards Gate",
+     "status": "completed",
+     "conclusion": "success",
+     "started_at": "2026-07-30T04:01:38Z",
+     "id": 90776029477
+    },
+    {
+     "name": "Stale TODO Gate",
+     "status": "completed",
+     "conclusion": "success",
+     "started_at": "2026-07-30T04:00:04Z",
+     "id": 90775807706
+    },
+    {
+     "name": "Type Safety Validation",
+     "status": "completed",
+     "conclusion": "success",
+     "started_at": "2026-07-30T04:00:04Z",
+     "id": 90775807854
+    },
+    {
+     "name": "URL Authority Gate",
+     "status": "completed",
+     "conclusion": "success",
+     "started_at": "2026-07-30T04:00:11Z",
+     "id": 90775807733
+    },
+    {
+     "name": "URL Authority Gate",
+     "status": "completed",
+     "conclusion": "success",
+     "started_at": "2026-07-30T04:14:37Z",
+     "id": 90777846720
+    },
+    {
+     "name": "call-reject-skip-token / scan / reject-skip-gate-token",
+     "status": "completed",
+     "conclusion": "success",
+     "started_at": "2026-07-30T04:01:08Z",
+     "id": 90775964158
+    },
+    {
+     "name": "call-reject-skip-token / scan / reject-skip-gate-token",
+     "status": "completed",
+     "conclusion": "success",
+     "started_at": "2026-07-30T04:15:22Z",
+     "id": 90777947334
+    },
+    {
+     "name": "deploy-gate / deploy-gate",
+     "status": "completed",
+     "conclusion": "failure",
+     "started_at": "2026-07-30T04:24:38Z",
+     "id": 90779162389
+    },
+    {
+     "name": "dispatcher-route-coverage",
+     "status": "completed",
+     "conclusion": "success",
+     "started_at": "2026-07-30T04:00:11Z",
+     "id": 90775807850
+    },
+    {
+     "name": "gate / CodeRabbit Thread Check",
+     "status": "completed",
+     "conclusion": "success",
+     "started_at": "2026-07-30T04:00:09Z",
+     "id": 90775808461
+    },
+    {
+     "name": "imperative-contract-guard / Imperative Contract Guard",
+     "status": "completed",
+     "conclusion": "success",
+     "started_at": "2026-07-30T04:00:07Z",
+     "id": 90775808505
+    },
+    {
+     "name": "main-target-guard",
+     "status": "completed",
+     "conclusion": "success",
+     "started_at": "2026-07-30T04:00:03Z",
+     "id": 90775807816
+    },
+    {
+     "name": "main-target-guard",
+     "status": "completed",
+     "conclusion": "success",
+     "started_at": "2026-07-30T04:14:36Z",
+     "id": 90777846921
+    },
+    {
+     "name": "non-dev-base-guard",
+     "status": "completed",
+     "conclusion": "success",
+     "started_at": "2026-07-30T04:00:02Z",
+     "id": 90775807645
+    },
+    {
+     "name": "non-dev-base-guard",
+     "status": "completed",
+     "conclusion": "success",
+     "started_at": "2026-07-30T04:14:36Z",
+     "id": 90777846849
+    },
+    {
+     "name": "pr-title / check-title",
+     "status": "completed",
+     "conclusion": "success",
+     "started_at": "2026-07-30T04:00:09Z",
+     "id": 90775808387
+    },
+    {
+     "name": "pr-title / check-title",
+     "status": "completed",
+     "conclusion": "success",
+     "started_at": "2026-07-30T04:14:36Z",
+     "id": 90777847818
+    },
+    {
+     "name": "required-check-skip-guard / check-skip-vectors",
+     "status": "completed",
+     "conclusion": "success",
+     "started_at": "2026-07-30T04:00:09Z",
+     "id": 90775808329
+    },
+    {
+     "name": "verify / verify",
+     "status": "completed",
+     "conclusion": "success",
+     "started_at": "2026-07-30T04:00:03Z",
+     "id": 90775808394
+    },
+    {
+     "name": "verify / verify",
+     "status": "completed",
+     "conclusion": "success",
+     "started_at": "2026-07-30T04:14:42Z",
+     "id": 90777847706
+    }
+   ]
+  },
+  "2554": {
+   "head_sha": "0bb3f099183a1dfb592b97f1de57a7ff3e97528d",
+   "merged_at": "2026-07-30T03:48:09Z",
+   "check_runs": [
+    {
+     "name": "Canonical Inference Gate",
+     "status": "completed",
+     "conclusion": "cancelled",
+     "started_at": "2026-07-30T02:41:59Z",
+     "id": 90765288264
+    },
+    {
+     "name": "Canonical Inference Gate",
+     "status": "completed",
+     "conclusion": "success",
+     "started_at": "2026-07-30T02:43:10Z",
+     "id": 90765406702
+    },
+    {
+     "name": "CodeQL",
+     "status": "completed",
+     "conclusion": "success",
+     "started_at": "2026-07-30T02:41:51Z",
+     "id": 90765288028
+    },
+    {
+     "name": "Duplication Sweep",
+     "status": "completed",
+     "conclusion": "success",
+     "started_at": "2026-07-30T02:41:50Z",
+     "id": 90765288031
+    },
+    {
+     "name": "Duplication Sweep",
+     "status": "completed",
+     "conclusion": "success",
+     "started_at": "2026-07-30T02:42:45Z",
+     "id": 90765378073
+    },
+    {
+     "name": "Omni Standards Gate",
+     "status": "completed",
+     "conclusion": "success",
+     "started_at": "2026-07-30T02:44:02Z",
+     "id": 90765581823
+    },
+    {
+     "name": "Stale TODO Gate",
+     "status": "completed",
+     "conclusion": "success",
+     "started_at": "2026-07-30T02:41:50Z",
+     "id": 90765288076
+    },
+    {
+     "name": "Type Safety Validation",
+     "status": "completed",
+     "conclusion": "success",
+     "started_at": "2026-07-30T02:42:11Z",
+     "id": 90765288546
+    },
+    {
+     "name": "URL Authority Gate",
+     "status": "completed",
+     "conclusion": "cancelled",
+     "started_at": "2026-07-30T02:41:56Z",
+     "id": 90765288111
+    },
+    {
+     "name": "URL Authority Gate",
+     "status": "completed",
+     "conclusion": "success",
+     "started_at": "2026-07-30T02:42:38Z",
+     "id": 90765389639
+    },
+    {
+     "name": "call-reject-skip-token / scan / reject-skip-gate-token",
+     "status": "completed",
+     "conclusion": "skipped",
+     "started_at": "2026-07-30T02:42:25Z",
+     "id": 90765371157
+    },
+    {
+     "name": "call-reject-skip-token / scan / reject-skip-gate-token",
+     "status": "completed",
+     "conclusion": "success",
+     "started_at": "2026-07-30T02:43:22Z",
+     "id": 90765475461
+    },
+    {
+     "name": "deploy-gate / deploy-gate",
+     "status": "completed",
+     "conclusion": "success",
+     "started_at": "2026-07-30T02:41:58Z",
+     "id": 90765288847
+    },
+    {
+     "name": "dispatcher-route-coverage",
+     "status": "completed",
+     "conclusion": "success",
+     "started_at": "2026-07-30T02:41:50Z",
+     "id": 90765288122
+    },
+    {
+     "name": "gate / CodeRabbit Thread Check",
+     "status": "completed",
+     "conclusion": "success",
+     "started_at": "2026-07-30T02:42:10Z",
+     "id": 90765288906
+    },
+    {
+     "name": "imperative-contract-guard / Imperative Contract Guard",
+     "status": "completed",
+     "conclusion": "success",
+     "started_at": "2026-07-30T02:42:12Z",
+     "id": 90765288853
+    },
+    {
+     "name": "main-target-guard",
+     "status": "completed",
+     "conclusion": "success",
+     "started_at": "2026-07-30T02:41:51Z",
+     "id": 90765288182
+    },
+    {
+     "name": "main-target-guard",
+     "status": "completed",
+     "conclusion": "success",
+     "started_at": "2026-07-30T02:42:42Z",
+     "id": 90765377931
+    },
+    {
+     "name": "non-dev-base-guard",
+     "status": "completed",
+     "conclusion": "success",
+     "started_at": "2026-07-30T02:41:50Z",
+     "id": 90765288015
+    },
+    {
+     "name": "non-dev-base-guard",
+     "status": "completed",
+     "conclusion": "success",
+     "started_at": "2026-07-30T02:42:37Z",
+     "id": 90765377986
+    },
+    {
+     "name": "pr-title / check-title",
+     "status": "completed",
+     "conclusion": "success",
+     "started_at": "2026-07-30T02:42:07Z",
+     "id": 90765288946
+    },
+    {
+     "name": "pr-title / check-title",
+     "status": "completed",
+     "conclusion": "success",
+     "started_at": "2026-07-30T02:42:34Z",
+     "id": 90765378629
+    },
+    {
+     "name": "required-check-skip-guard / check-skip-vectors",
+     "status": "completed",
+     "conclusion": "success",
+     "started_at": "2026-07-30T02:42:08Z",
+     "id": 90765288885
+    },
+    {
+     "name": "verify / verify",
+     "status": "completed",
+     "conclusion": "failure",
+     "started_at": "2026-07-30T02:42:07Z",
+     "id": 90765288945
+    },
+    {
+     "name": "verify / verify",
+     "status": "completed",
+     "conclusion": "success",
+     "started_at": "2026-07-30T02:42:38Z",
+     "id": 90765378634
+    }
+   ]
+  },
+  "2553": {
+   "head_sha": "dcb2cf6f0cd5a79c69cefa7aa42a0d447dab449e",
+   "merged_at": "2026-07-30T03:48:40Z",
+   "check_runs": [
+    {
+     "name": "Canonical Inference Gate",
+     "status": "completed",
+     "conclusion": "success",
+     "started_at": "2026-07-30T02:38:11Z",
+     "id": 90764807483
+    },
+    {
+     "name": "Canonical Inference Gate",
+     "status": "completed",
+     "conclusion": "success",
+     "started_at": "2026-07-30T02:39:39Z",
+     "id": 90764952990
+    },
+    {
+     "name": "Canonical Inference Gate",
+     "status": "completed",
+     "conclusion": "success",
+     "started_at": "2026-07-30T02:56:49Z",
+     "id": 90767259607
+    },
+    {
+     "name": "CodeQL",
+     "status": "completed",
+     "conclusion": "success",
+     "started_at": "2026-07-30T02:38:24Z",
+     "id": 90764820167
+    },
+    {
+     "name": "Duplication Sweep",
+     "status": "completed",
+     "conclusion": "success",
+     "started_at": "2026-07-30T02:38:12Z",
+     "id": 90764808796
+    },
+    {
+     "name": "Duplication Sweep",
+     "status": "completed",
+     "conclusion": "success",
+     "started_at": "2026-07-30T02:39:29Z",
+     "id": 90764953089
+    },
+    {
+     "name": "Duplication Sweep",
+     "status": "completed",
+     "conclusion": "success",
+     "started_at": "2026-07-30T02:56:50Z",
+     "id": 90767259601
+    },
+    {
+     "name": "Omni Standards Gate",
+     "status": "completed",
+     "conclusion": "success",
+     "started_at": "2026-07-30T02:40:10Z",
+     "id": 90765022680
+    },
+    {
+     "name": "Stale TODO Gate",
+     "status": "completed",
+     "conclusion": "success",
+     "started_at": "2026-07-30T02:38:16Z",
+     "id": 90764801996
+    },
+    {
+     "name": "Type Safety Validation",
+     "status": "completed",
+     "conclusion": "success",
+     "started_at": "2026-07-30T02:38:09Z",
+     "id": 90764801405
+    },
+    {
+     "name": "URL Authority Gate",
+     "status": "completed",
+     "conclusion": "success",
+     "started_at": "2026-07-30T02:38:12Z",
+     "id": 90764808377
+    },
+    {
+     "name": "URL Authority Gate",
+     "status": "completed",
+     "conclusion": "success",
+     "started_at": "2026-07-30T02:39:24Z",
+     "id": 90764953035
+    },
+    {
+     "name": "URL Authority Gate",
+     "status": "completed",
+     "conclusion": "success",
+     "started_at": "2026-07-30T02:56:49Z",
+     "id": 90767259527
+    },
+    {
+     "name": "call-reject-skip-token / scan / reject-skip-gate-token",
+     "status": "completed",
+     "conclusion": "success",
+     "started_at": "2026-07-30T02:38:54Z",
+     "id": 90764889045
+    },
+    {
+     "name": "call-reject-skip-token / scan / reject-skip-gate-token",
+     "status": "completed",
+     "conclusion": "success",
+     "started_at": "2026-07-30T02:40:36Z",
+     "id": 90765125915
+    },
+    {
+     "name": "call-reject-skip-token / scan / reject-skip-gate-token",
+     "status": "completed",
+     "conclusion": "success",
+     "started_at": "2026-07-30T02:57:54Z",
+     "id": 90767402146
+    },
+    {
+     "name": "deploy-gate / deploy-gate",
+     "status": "completed",
+     "conclusion": "success",
+     "started_at": "2026-07-30T02:38:17Z",
+     "id": 90764802914
+    },
+    {
+     "name": "dispatcher-route-coverage",
+     "status": "completed",
+     "conclusion": "success",
+     "started_at": "2026-07-30T02:38:09Z",
+     "id": 90764801016
+    },
+    {
+     "name": "gate / CodeRabbit Thread Check",
+     "status": "completed",
+     "conclusion": "success",
+     "started_at": "2026-07-30T02:38:10Z",
+     "id": 90764802202
+    },
+    {
+     "name": "imperative-contract-guard / Imperative Contract Guard",
+     "status": "completed",
+     "conclusion": "success",
+     "started_at": "2026-07-30T02:38:10Z",
+     "id": 90764802193
+    },
+    {
+     "name": "main-target-guard",
+     "status": "completed",
+     "conclusion": "success",
+     "started_at": "2026-07-30T02:38:10Z",
+     "id": 90764801374
+    },
+    {
+     "name": "main-target-guard",
+     "status": "completed",
+     "conclusion": "success",
+     "started_at": "2026-07-30T02:39:44Z",
+     "id": 90764953104
+    },
+    {
+     "name": "main-target-guard",
+     "status": "completed",
+     "conclusion": "success",
+     "started_at": "2026-07-30T02:56:49Z",
+     "id": 90767259576
+    },
+    {
+     "name": "non-dev-base-guard",
+     "status": "completed",
+     "conclusion": "success",
+     "started_at": "2026-07-30T02:38:16Z",
+     "id": 90764801430
+    },
+    {
+     "name": "non-dev-base-guard",
+     "status": "completed",
+     "conclusion": "success",
+     "started_at": "2026-07-30T02:39:39Z",
+     "id": 90764952920
+    },
+    {
+     "name": "non-dev-base-guard",
+     "status": "completed",
+     "conclusion": "success",
+     "started_at": "2026-07-30T02:56:55Z",
+     "id": 90767259381
+    },
+    {
+     "name": "pr-title / check-title",
+     "status": "completed",
+     "conclusion": "success",
+     "started_at": "2026-07-30T02:38:10Z",
+     "id": 90764803386
+    },
+    {
+     "name": "pr-title / check-title",
+     "status": "completed",
+     "conclusion": "success",
+     "started_at": "2026-07-30T02:39:24Z",
+     "id": 90764954159
+    },
+    {
+     "name": "pr-title / check-title",
+     "status": "completed",
+     "conclusion": "success",
+     "started_at": "2026-07-30T02:56:51Z",
+     "id": 90767260691
+    },
+    {
+     "name": "required-check-skip-guard / check-skip-vectors",
+     "status": "completed",
+     "conclusion": "success",
+     "started_at": "2026-07-30T02:38:09Z",
+     "id": 90764801774
+    },
+    {
+     "name": "verify / verify",
+     "status": "completed",
+     "conclusion": "success",
+     "started_at": "2026-07-30T02:38:17Z",
+     "id": 90764808226
+    },
+    {
+     "name": "verify / verify",
+     "status": "completed",
+     "conclusion": "success",
+     "started_at": "2026-07-30T02:39:28Z",
+     "id": 90764954562
+    },
+    {
+     "name": "verify / verify",
+     "status": "completed",
+     "conclusion": "success",
+     "started_at": "2026-07-30T02:56:50Z",
+     "id": 90767260311
+    }
+   ]
+  },
+  "2552": {
+   "head_sha": "05e105cf7ede887dbf1617f9d7c1248c2a70f11c",
+   "merged_at": "2026-07-30T02:08:13Z",
+   "check_runs": [
+    {
+     "name": "Canonical Inference Gate",
+     "status": "completed",
+     "conclusion": "cancelled",
+     "started_at": "2026-07-30T01:36:58Z",
+     "id": 90756203571
+    },
+    {
+     "name": "Canonical Inference Gate",
+     "status": "completed",
+     "conclusion": "success",
+     "started_at": "2026-07-30T01:37:54Z",
+     "id": 90756295266
+    },
+    {
+     "name": "Canonical Inference Gate",
+     "status": "completed",
+     "conclusion": "success",
+     "started_at": "2026-07-30T01:39:10Z",
+     "id": 90756515139
+    },
+    {
+     "name": "CodeQL",
+     "status": "completed",
+     "conclusion": "success",
+     "started_at": "2026-07-30T01:36:58Z",
+     "id": 90756203968
+    },
+    {
+     "name": "Duplication Sweep",
+     "status": "completed",
+     "conclusion": "success",
+     "started_at": "2026-07-30T01:36:58Z",
+     "id": 90756203736
+    },
+    {
+     "name": "Duplication Sweep",
+     "status": "completed",
+     "conclusion": "success",
+     "started_at": "2026-07-30T01:37:29Z",
+     "id": 90756282801
+    },
+    {
+     "name": "Duplication Sweep",
+     "status": "completed",
+     "conclusion": "success",
+     "started_at": "2026-07-30T01:39:13Z",
+     "id": 90756514950
+    },
+    {
+     "name": "Omni Standards Gate",
+     "status": "completed",
+     "conclusion": "success",
+     "started_at": "2026-07-30T01:38:50Z",
+     "id": 90756470437
+    },
+    {
+     "name": "Stale TODO Gate",
+     "status": "completed",
+     "conclusion": "success",
+     "started_at": "2026-07-30T01:36:58Z",
+     "id": 90756203772
+    },
+    {
+     "name": "Type Safety Validation",
+     "status": "completed",
+     "conclusion": "success",
+     "started_at": "2026-07-30T01:36:58Z",
+     "id": 90756203725
+    },
+    {
+     "name": "URL Authority Gate",
+     "status": "completed",
+     "conclusion": "cancelled",
+     "started_at": "2026-07-30T01:37:04Z",
+     "id": 90756203350
+    },
+    {
+     "name": "URL Authority Gate",
+     "status": "completed",
+     "conclusion": "success",
+     "started_at": "2026-07-30T01:37:49Z",
+     "id": 90756296355
+    },
+    {
+     "name": "URL Authority Gate",
+     "status": "completed",
+     "conclusion": "success",
+     "started_at": "2026-07-30T01:39:25Z",
+     "id": 90756515111
+    },
+    {
+     "name": "call-reject-skip-token / scan / reject-skip-gate-token",
+     "status": "completed",
+     "conclusion": "skipped",
+     "started_at": "2026-07-30T01:37:17Z",
+     "id": 90756259443
+    },
+    {
+     "name": "call-reject-skip-token / scan / reject-skip-gate-token",
+     "status": "completed",
+     "conclusion": "success",
+     "started_at": "2026-07-30T01:38:38Z",
+     "id": 90756405196
+    },
+    {
+     "name": "call-reject-skip-token / scan / reject-skip-gate-token",
+     "status": "completed",
+     "conclusion": "success",
+     "started_at": "2026-07-30T01:39:55Z",
+     "id": 90756624595
+    },
+    {
+     "name": "deploy-gate / deploy-gate",
+     "status": "completed",
+     "conclusion": "success",
+     "started_at": "2026-07-30T01:36:58Z",
+     "id": 90756204236
+    },
+    {
+     "name": "dispatcher-route-coverage",
+     "status": "completed",
+     "conclusion": "success",
+     "started_at": "2026-07-30T01:36:58Z",
+     "id": 90756203943
+    },
+    {
+     "name": "gate / CodeRabbit Thread Check",
+     "status": "completed",
+     "conclusion": "success",
+     "started_at": "2026-07-30T01:36:58Z",
+     "id": 90756204373
+    },
+    {
+     "name": "imperative-contract-guard / Imperative Contract Guard",
+     "status": "completed",
+     "conclusion": "success",
+     "started_at": "2026-07-30T01:36:59Z",
+     "id": 90756204545
+    },
+    {
+     "name": "main-target-guard",
+     "status": "completed",
+     "conclusion": "success",
+     "started_at": "2026-07-30T01:36:58Z",
+     "id": 90756204172
+    },
+    {
+     "name": "main-target-guard",
+     "status": "completed",
+     "conclusion": "success",
+     "started_at": "2026-07-30T01:37:30Z",
+     "id": 90756282748
+    },
+    {
+     "name": "main-target-guard",
+     "status": "completed",
+     "conclusion": "success",
+     "started_at": "2026-07-30T01:39:11Z",
+     "id": 90756515086
+    },
+    {
+     "name": "non-dev-base-guard",
+     "status": "completed",
+     "conclusion": "success",
+     "started_at": "2026-07-30T01:36:58Z",
+     "id": 90756203404
+    },
+    {
+     "name": "non-dev-base-guard",
+     "status": "completed",
+     "conclusion": "success",
+     "started_at": "2026-07-30T01:37:29Z",
+     "id": 90756282891
+    },
+    {
+     "name": "non-dev-base-guard",
+     "status": "completed",
+     "conclusion": "success",
+     "started_at": "2026-07-30T01:39:18Z",
+     "id": 90756515264
+    },
+    {
+     "name": "pr-title / check-title",
+     "status": "completed",
+     "conclusion": "success",
+     "started_at": "2026-07-30T01:36:58Z",
+     "id": 90756204564
+    },
+    {
+     "name": "pr-title / check-title",
+     "status": "completed",
+     "conclusion": "success",
+     "started_at": "2026-07-30T01:37:30Z",
+     "id": 90756283348
+    },
+    {
+     "name": "pr-title / check-title",
+     "status": "completed",
+     "conclusion": "success",
+     "started_at": "2026-07-30T01:39:21Z",
+     "id": 90756516286
+    },
+    {
+     "name": "required-check-skip-guard / check-skip-vectors",
+     "status": "completed",
+     "conclusion": "success",
+     "started_at": "2026-07-30T01:36:58Z",
+     "id": 90756204334
+    },
+    {
+     "name": "verify / verify",
+     "status": "completed",
+     "conclusion": "failure",
+     "started_at": "2026-07-30T01:36:58Z",
+     "id": 90756204347
+    },
+    {
+     "name": "verify / verify",
+     "status": "completed",
+     "conclusion": "success",
+     "started_at": "2026-07-30T01:37:30Z",
+     "id": 90756283736
+    },
+    {
+     "name": "verify / verify",
+     "status": "completed",
+     "conclusion": "success",
+     "started_at": "2026-07-30T01:39:11Z",
+     "id": 90756516507
+    }
+   ]
+  },
+  "2551": {
+   "head_sha": "bdcbeccd809f05f5fcb95e7359af9b0af1cfe23c",
+   "merged_at": "2026-07-30T01:04:49Z",
+   "check_runs": [
+    {
+     "name": "Canonical Inference Gate",
+     "status": "completed",
+     "conclusion": "success",
+     "started_at": "2026-07-30T00:44:47Z",
+     "id": 90748473086
+    },
+    {
+     "name": "Canonical Inference Gate",
+     "status": "completed",
+     "conclusion": "cancelled",
+     "started_at": "2026-07-30T00:47:01Z",
+     "id": 90748821931
+    },
+    {
+     "name": "Canonical Inference Gate",
+     "status": "completed",
+     "conclusion": "success",
+     "started_at": "2026-07-30T00:47:42Z",
+     "id": 90748922123
+    },
+    {
+     "name": "CodeQL",
+     "status": "completed",
+     "conclusion": "success",
+     "started_at": "2026-07-30T00:44:48Z",
+     "id": 90748472596
+    },
+    {
+     "name": "Duplication Sweep",
+     "status": "completed",
+     "conclusion": "success",
+     "started_at": "2026-07-30T00:44:54Z",
+     "id": 90748472365
+    },
+    {
+     "name": "Duplication Sweep",
+     "status": "completed",
+     "conclusion": "success",
+     "started_at": "2026-07-30T00:47:01Z",
+     "id": 90748822136
+    },
+    {
+     "name": "Duplication Sweep",
+     "status": "completed",
+     "conclusion": "success",
+     "started_at": "2026-07-30T00:47:27Z",
+     "id": 90748883849
+    },
+    {
+     "name": "Omni Standards Gate",
+     "status": "completed",
+     "conclusion": "success",
+     "started_at": "2026-07-30T00:46:37Z",
+     "id": 90748758539
+    },
+    {
+     "name": "Stale TODO Gate",
+     "status": "completed",
+     "conclusion": "success",
+     "started_at": "2026-07-30T00:44:47Z",
+     "id": 90748472481
+    },
+    {
+     "name": "Type Safety Validation",
+     "status": "completed",
+     "conclusion": "success",
+     "started_at": "2026-07-30T00:44:53Z",
+     "id": 90748472642
+    },
+    {
+     "name": "URL Authority Gate",
+     "status": "completed",
+     "conclusion": "success",
+     "started_at": "2026-07-30T00:44:54Z",
+     "id": 90748472581
+    },
+    {
+     "name": "URL Authority Gate",
+     "status": "completed",
+     "conclusion": "cancelled",
+     "started_at": "2026-07-30T00:47:07Z",
+     "id": 90748822039
+    },
+    {
+     "name": "URL Authority Gate",
+     "status": "completed",
+     "conclusion": "success",
+     "started_at": "2026-07-30T00:47:31Z",
+     "id": 90748891544
+    },
+    {
+     "name": "call-reject-skip-token / scan / reject-skip-gate-token",
+     "status": "completed",
+     "conclusion": "success",
+     "started_at": "2026-07-30T00:45:35Z",
+     "id": 90748598762
+    },
+    {
+     "name": "call-reject-skip-token / scan / reject-skip-gate-token",
+     "status": "completed",
+     "conclusion": "cancelled",
+     "started_at": "2026-07-30T00:47:28Z",
+     "id": 90748895765
+    },
+    {
+     "name": "call-reject-skip-token / scan / reject-skip-gate-token",
+     "status": "completed",
+     "conclusion": "success",
+     "started_at": "2026-07-30T00:48:19Z",
+     "id": 90749023803
+    },
+    {
+     "name": "deploy-gate / deploy-gate",
+     "status": "completed",
+     "conclusion": "success",
+     "started_at": "2026-07-30T00:44:53Z",
+     "id": 90748473606
+    },
+    {
+     "name": "dispatcher-route-coverage",
+     "status": "completed",
+     "conclusion": "success",
+     "started_at": "2026-07-30T00:44:48Z",
+     "id": 90748474941
+    },
+    {
+     "name": "gate / CodeRabbit Thread Check",
+     "status": "completed",
+     "conclusion": "success",
+     "started_at": "2026-07-30T00:44:48Z",
+     "id": 90748473551
+    },
+    {
+     "name": "imperative-contract-guard / Imperative Contract Guard",
+     "status": "completed",
+     "conclusion": "success",
+     "started_at": "2026-07-30T00:44:54Z",
+     "id": 90748473437
+    },
+    {
+     "name": "main-target-guard",
+     "status": "completed",
+     "conclusion": "success",
+     "started_at": "2026-07-30T00:44:53Z",
+     "id": 90748472432
+    },
+    {
+     "name": "main-target-guard",
+     "status": "completed",
+     "conclusion": "success",
+     "started_at": "2026-07-30T00:47:01Z",
+     "id": 90748821926
+    },
+    {
+     "name": "main-target-guard",
+     "status": "completed",
+     "conclusion": "success",
+     "started_at": "2026-07-30T00:47:33Z",
+     "id": 90748883971
+    },
+    {
+     "name": "non-dev-base-guard",
+     "status": "completed",
+     "conclusion": "success",
+     "started_at": "2026-07-30T00:44:48Z",
+     "id": 90748472592
+    },
+    {
+     "name": "non-dev-base-guard",
+     "status": "completed",
+     "conclusion": "success",
+     "started_at": "2026-07-30T00:47:01Z",
+     "id": 90748822019
+    },
+    {
+     "name": "non-dev-base-guard",
+     "status": "completed",
+     "conclusion": "success",
+     "started_at": "2026-07-30T00:47:27Z",
+     "id": 90748883790
+    },
+    {
+     "name": "pr-title / check-title",
+     "status": "completed",
+     "conclusion": "success",
+     "started_at": "2026-07-30T00:44:47Z",
+     "id": 90748473330
+    },
+    {
+     "name": "pr-title / check-title",
+     "status": "completed",
+     "conclusion": "success",
+     "started_at": "2026-07-30T00:47:05Z",
+     "id": 90748828482
+    },
+    {
+     "name": "pr-title / check-title",
+     "status": "completed",
+     "conclusion": "success",
+     "started_at": "2026-07-30T00:47:29Z",
+     "id": 90748884897
+    },
+    {
+     "name": "required-check-skip-guard / check-skip-vectors",
+     "status": "completed",
+     "conclusion": "success",
+     "started_at": "2026-07-30T00:44:54Z",
+     "id": 90748473284
+    },
+    {
+     "name": "verify / verify",
+     "status": "completed",
+     "conclusion": "success",
+     "started_at": "2026-07-30T00:44:49Z",
+     "id": 90748473548
+    },
+    {
+     "name": "verify / verify",
+     "status": "completed",
+     "conclusion": "failure",
+     "started_at": "2026-07-30T00:47:04Z",
+     "id": 90748828825
+    },
+    {
+     "name": "verify / verify",
+     "status": "completed",
+     "conclusion": "success",
+     "started_at": "2026-07-30T00:47:28Z",
+     "id": 90748884866
+    }
+   ]
+  },
+  "2550": {
+   "head_sha": "6efc6b6fb8c1f171b32ece934b79184c85f027dd",
+   "merged_at": "2026-07-30T00:48:11Z",
+   "check_runs": [
+    {
+     "name": "Canonical Inference Gate",
+     "status": "completed",
+     "conclusion": "success",
+     "started_at": "2026-07-29T23:55:31Z",
+     "id": 90740599072
+    },
+    {
+     "name": "Canonical Inference Gate",
+     "status": "completed",
+     "conclusion": "success",
+     "started_at": "2026-07-30T00:23:50Z",
+     "id": 90745135172
+    },
+    {
+     "name": "CodeQL",
+     "status": "completed",
+     "conclusion": "success",
+     "started_at": "2026-07-29T23:55:37Z",
+     "id": 90740599339
+    },
+    {
+     "name": "Duplication Sweep",
+     "status": "completed",
+     "conclusion": "success",
+     "started_at": "2026-07-29T23:55:31Z",
+     "id": 90740599460
+    },
+    {
+     "name": "Duplication Sweep",
+     "status": "completed",
+     "conclusion": "success",
+     "started_at": "2026-07-30T00:23:50Z",
+     "id": 90745135516
+    },
+    {
+     "name": "Omni Standards Gate",
+     "status": "completed",
+     "conclusion": "success",
+     "started_at": "2026-07-29T23:57:14Z",
+     "id": 90740874553
+    },
+    {
+     "name": "Stale TODO Gate",
+     "status": "completed",
+     "conclusion": "success",
+     "started_at": "2026-07-29T23:55:37Z",
+     "id": 90740599419
+    },
+    {
+     "name": "Type Safety Validation",
+     "status": "completed",
+     "conclusion": "success",
+     "started_at": "2026-07-29T23:55:31Z",
+     "id": 90740599479
+    },
+    {
+     "name": "URL Authority Gate",
+     "status": "completed",
+     "conclusion": "success",
+     "started_at": "2026-07-29T23:55:38Z",
+     "id": 90740599444
+    },
+    {
+     "name": "URL Authority Gate",
+     "status": "completed",
+     "conclusion": "success",
+     "started_at": "2026-07-30T00:23:50Z",
+     "id": 90745135104
+    },
+    {
+     "name": "call-reject-skip-token / scan / reject-skip-gate-token",
+     "status": "completed",
+     "conclusion": "success",
+     "started_at": "2026-07-30T00:24:39Z",
+     "id": 90745268277
+    },
+    {
+     "name": "call-reject-skip-token / scan / reject-skip-gate-token",
+     "status": "completed",
+     "conclusion": "success",
+     "started_at": "2026-07-30T00:36:27Z",
+     "id": 90747159049
+    },
+    {
+     "name": "deploy-gate / deploy-gate",
+     "status": "completed",
+     "conclusion": "success",
+     "started_at": "2026-07-29T23:55:32Z",
+     "id": 90740600547
+    },
+    {
+     "name": "dispatcher-route-coverage",
+     "status": "completed",
+     "conclusion": "success",
+     "started_at": "2026-07-29T23:55:31Z",
+     "id": 90740599308
+    },
+    {
+     "name": "gate / CodeRabbit Thread Check",
+     "status": "completed",
+     "conclusion": "success",
+     "started_at": "2026-07-29T23:55:32Z",
+     "id": 90740600369
+    },
+    {
+     "name": "imperative-contract-guard / Imperative Contract Guard",
+     "status": "completed",
+     "conclusion": "success",
+     "started_at": "2026-07-29T23:55:32Z",
+     "id": 90740600301
+    },
+    {
+     "name": "main-target-guard",
+     "status": "completed",
+     "conclusion": "success",
+     "started_at": "2026-07-29T23:55:31Z",
+     "id": 90740599510
+    },
+    {
+     "name": "main-target-guard",
+     "status": "completed",
+     "conclusion": "success",
+     "started_at": "2026-07-30T00:23:57Z",
+     "id": 90745135100
+    },
+    {
+     "name": "non-dev-base-guard",
+     "status": "completed",
+     "conclusion": "success",
+     "started_at": "2026-07-29T23:55:31Z",
+     "id": 90740599402
+    },
+    {
+     "name": "non-dev-base-guard",
+     "status": "completed",
+     "conclusion": "success",
+     "started_at": "2026-07-30T00:23:56Z",
+     "id": 90745135261
+    },
+    {
+     "name": "pr-title / check-title",
+     "status": "completed",
+     "conclusion": "success",
+     "started_at": "2026-07-29T23:55:32Z",
+     "id": 90740600339
+    },
+    {
+     "name": "pr-title / check-title",
+     "status": "completed",
+     "conclusion": "success",
+     "started_at": "2026-07-30T00:23:57Z",
+     "id": 90745136427
+    },
+    {
+     "name": "required-check-skip-guard / check-skip-vectors",
+     "status": "completed",
+     "conclusion": "success",
+     "started_at": "2026-07-29T23:55:31Z",
+     "id": 90740600555
+    },
+    {
+     "name": "verify / verify",
+     "status": "completed",
+     "conclusion": "success",
+     "started_at": "2026-07-30T00:23:59Z",
+     "id": 90745136298
+    },
+    {
+     "name": "verify / verify",
+     "status": "completed",
+     "conclusion": "success",
+     "started_at": "2026-07-30T00:35:37Z",
+     "id": 90747033832
+    }
+   ]
+  },
+  "2546": {
+   "head_sha": "746865732c45107f57ec876b717f035db195af20",
+   "merged_at": "2026-07-29T23:04:37Z",
+   "check_runs": [
+    {
+     "name": "Canonical Inference Gate",
+     "status": "completed",
+     "conclusion": "cancelled",
+     "started_at": "2026-07-29T22:13:32Z",
+     "id": 90722749209
+    },
+    {
+     "name": "Canonical Inference Gate",
+     "status": "completed",
+     "conclusion": "success",
+     "started_at": "2026-07-29T22:18:34Z",
+     "id": 90722882000
+    },
+    {
+     "name": "Canonical Inference Gate",
+     "status": "completed",
+     "conclusion": "success",
+     "started_at": "2026-07-29T22:44:53Z",
+     "id": 90728693250
+    },
+    {
+     "name": "Canonical Inference Gate",
+     "status": "completed",
+     "conclusion": "success",
+     "started_at": "2026-07-29T22:46:57Z",
+     "id": 90729039190
+    },
+    {
+     "name": "Canonical Inference Gate",
+     "status": "completed",
+     "conclusion": "success",
+     "started_at": "2026-07-29T22:49:26Z",
+     "id": 90729441521
+    },
+    {
+     "name": "Canonical Inference Gate",
+     "status": "completed",
+     "conclusion": "success",
+     "started_at": "2026-07-29T22:51:58Z",
+     "id": 90729937357
+    },
+    {
+     "name": "Canonical Inference Gate",
+     "status": "completed",
+     "conclusion": "success",
+     "started_at": "2026-07-29T22:55:13Z",
+     "id": 90730451837
+    },
+    {
+     "name": "CodeQL",
+     "status": "completed",
+     "conclusion": "success",
+     "started_at": "2026-07-29T22:16:51Z",
+     "id": 90722749164
+    },
+    {
+     "name": "Duplication Sweep",
+     "status": "completed",
+     "conclusion": "cancelled",
+     "started_at": "2026-07-29T22:13:32Z",
+     "id": 90722749133
+    },
+    {
+     "name": "Duplication Sweep",
+     "status": "completed",
+     "conclusion": "success",
+     "started_at": "2026-07-29T22:18:56Z",
+     "id": 90722882269
+    },
+    {
+     "name": "Duplication Sweep",
+     "status": "completed",
+     "conclusion": "success",
+     "started_at": "2026-07-29T22:44:53Z",
+     "id": 90728692769
+    },
+    {
+     "name": "Duplication Sweep",
+     "status": "completed",
+     "conclusion": "success",
+     "started_at": "2026-07-29T22:46:58Z",
+     "id": 90729039076
+    },
+    {
+     "name": "Duplication Sweep",
+     "status": "completed",
+     "conclusion": "success",
+     "started_at": "2026-07-29T22:49:26Z",
+     "id": 90729441596
+    },
+    {
+     "name": "Duplication Sweep",
+     "status": "completed",
+     "conclusion": "success",
+     "started_at": "2026-07-29T22:51:55Z",
+     "id": 90729937166
+    },
+    {
+     "name": "Duplication Sweep",
+     "status": "completed",
+     "conclusion": "success",
+     "started_at": "2026-07-29T22:55:10Z",
+     "id": 90730452512
+    },
+    {
+     "name": "Omni Standards Gate",
+     "status": "completed",
+     "conclusion": "success",
+     "started_at": "2026-07-29T22:22:09Z",
+     "id": 90723877967
+    },
+    {
+     "name": "Stale TODO Gate",
+     "status": "completed",
+     "conclusion": "success",
+     "started_at": "2026-07-29T22:16:48Z",
+     "id": 90722749161
+    },
+    {
+     "name": "Type Safety Validation",
+     "status": "completed",
+     "conclusion": "success",
+     "started_at": "2026-07-29T22:17:29Z",
+     "id": 90722749032
+    },
+    {
+     "name": "URL Authority Gate",
+     "status": "completed",
+     "conclusion": "cancelled",
+     "started_at": "2026-07-29T22:13:32Z",
+     "id": 90722749241
+    },
+    {
+     "name": "URL Authority Gate",
+     "status": "completed",
+     "conclusion": "success",
+     "started_at": "2026-07-29T22:18:25Z",
+     "id": 90722882090
+    },
+    {
+     "name": "URL Authority Gate",
+     "status": "completed",
+     "conclusion": "success",
+     "started_at": "2026-07-29T22:44:54Z",
+     "id": 90728692758
+    },
+    {
+     "name": "URL Authority Gate",
+     "status": "completed",
+     "conclusion": "success",
+     "started_at": "2026-07-29T22:47:16Z",
+     "id": 90729038915
+    },
+    {
+     "name": "URL Authority Gate",
+     "status": "completed",
+     "conclusion": "success",
+     "started_at": "2026-07-29T22:49:18Z",
+     "id": 90729441612
+    },
+    {
+     "name": "URL Authority Gate",
+     "status": "completed",
+     "conclusion": "success",
+     "started_at": "2026-07-29T22:51:53Z",
+     "id": 90729936928
+    },
+    {
+     "name": "URL Authority Gate",
+     "status": "completed",
+     "conclusion": "success",
+     "started_at": "2026-07-29T22:55:18Z",
+     "id": 90730452015
+    },
+    {
+     "name": "call-reject-skip-token / scan / reject-skip-gate-token",
+     "status": "completed",
+     "conclusion": "cancelled",
+     "started_at": "2026-07-29T22:14:14Z",
+     "id": 90722884595
+    },
+    {
+     "name": "call-reject-skip-token / scan / reject-skip-gate-token",
+     "status": "completed",
+     "conclusion": "success",
+     "started_at": "2026-07-29T22:22:06Z",
+     "id": 90723884608
+    },
+    {
+     "name": "call-reject-skip-token / scan / reject-skip-gate-token",
+     "status": "completed",
+     "conclusion": "success",
+     "started_at": "2026-07-29T22:47:42Z",
+     "id": 90729190193
+    },
+    {
+     "name": "call-reject-skip-token / scan / reject-skip-gate-token",
+     "status": "completed",
+     "conclusion": "success",
+     "started_at": "2026-07-29T22:50:10Z",
+     "id": 90729616941
+    },
+    {
+     "name": "call-reject-skip-token / scan / reject-skip-gate-token",
+     "status": "completed",
+     "conclusion": "cancelled",
+     "started_at": "2026-07-29T22:52:08Z",
+     "id": 90729985580
+    },
+    {
+     "name": "call-reject-skip-token / scan / reject-skip-gate-token",
+     "status": "completed",
+     "conclusion": "success",
+     "started_at": "2026-07-29T22:52:50Z",
+     "id": 90730096766
+    },
+    {
+     "name": "call-reject-skip-token / scan / reject-skip-gate-token",
+     "status": "completed",
+     "conclusion": "success",
+     "started_at": "2026-07-29T22:55:57Z",
+     "id": 90730628318
+    },
+    {
+     "name": "deploy-gate / deploy-gate",
+     "status": "completed",
+     "conclusion": "success",
+     "started_at": "2026-07-29T22:17:06Z",
+     "id": 90722750815
+    },
+    {
+     "name": "dispatcher-route-coverage",
+     "status": "completed",
+     "conclusion": "success",
+     "started_at": "2026-07-29T22:17:22Z",
+     "id": 90722749102
+    },
+    {
+     "name": "gate / CodeRabbit Thread Check",
+     "status": "completed",
+     "conclusion": "success",
+     "started_at": "2026-07-29T22:17:23Z",
+     "id": 90722750836
+    },
+    {
+     "name": "imperative-contract-guard / Imperative Contract Guard",
+     "status": "completed",
+     "conclusion": "success",
+     "started_at": "2026-07-29T22:17:57Z",
+     "id": 90722750667
+    },
+    {
+     "name": "main-target-guard",
+     "status": "completed",
+     "conclusion": "cancelled",
+     "started_at": "2026-07-29T22:13:32Z",
+     "id": 90722748861
+    },
+    {
+     "name": "main-target-guard",
+     "status": "completed",
+     "conclusion": "success",
+     "started_at": "2026-07-29T22:18:46Z",
+     "id": 90722882368
+    },
+    {
+     "name": "main-target-guard",
+     "status": "completed",
+     "conclusion": "success",
+     "started_at": "2026-07-29T22:44:53Z",
+     "id": 90728693085
+    },
+    {
+     "name": "main-target-guard",
+     "status": "completed",
+     "conclusion": "success",
+     "started_at": "2026-07-29T22:47:13Z",
+     "id": 90729039476
+    },
+    {
+     "name": "main-target-guard",
+     "status": "completed",
+     "conclusion": "success",
+     "started_at": "2026-07-29T22:49:07Z",
+     "id": 90729441654
+    },
+    {
+     "name": "main-target-guard",
+     "status": "completed",
+     "conclusion": "success",
+     "started_at": "2026-07-29T22:51:59Z",
+     "id": 90729936768
+    },
+    {
+     "name": "main-target-guard",
+     "status": "completed",
+     "conclusion": "success",
+     "started_at": "2026-07-29T22:55:00Z",
+     "id": 90730452231
+    },
+    {
+     "name": "non-dev-base-guard",
+     "status": "completed",
+     "conclusion": "cancelled",
+     "started_at": "2026-07-29T22:13:32Z",
+     "id": 90722749184
+    },
+    {
+     "name": "non-dev-base-guard",
+     "status": "completed",
+     "conclusion": "success",
+     "started_at": "2026-07-29T22:18:52Z",
+     "id": 90722882200
+    },
+    {
+     "name": "non-dev-base-guard",
+     "status": "completed",
+     "conclusion": "success",
+     "started_at": "2026-07-29T22:44:53Z",
+     "id": 90728693181
+    },
+    {
+     "name": "non-dev-base-guard",
+     "status": "completed",
+     "conclusion": "success",
+     "started_at": "2026-07-29T22:47:14Z",
+     "id": 90729039165
+    },
+    {
+     "name": "non-dev-base-guard",
+     "status": "completed",
+     "conclusion": "success",
+     "started_at": "2026-07-29T22:49:39Z",
+     "id": 90729441571
+    },
+    {
+     "name": "non-dev-base-guard",
+     "status": "completed",
+     "conclusion": "success",
+     "started_at": "2026-07-29T22:52:01Z",
+     "id": 90729936790
+    },
+    {
+     "name": "non-dev-base-guard",
+     "status": "completed",
+     "conclusion": "success",
+     "started_at": "2026-07-29T22:55:13Z",
+     "id": 90730451799
+    },
+    {
+     "name": "pr-title / check-title",
+     "status": "completed",
+     "conclusion": "cancelled",
+     "started_at": "2026-07-29T22:13:33Z",
+     "id": 90722750604
+    },
+    {
+     "name": "pr-title / check-title",
+     "status": "completed",
+     "conclusion": "success",
+     "started_at": "2026-07-29T22:18:57Z",
+     "id": 90722885133
+    },
+    {
+     "name": "pr-title / check-title",
+     "status": "completed",
+     "conclusion": "success",
+     "started_at": "2026-07-29T22:45:01Z",
+     "id": 90728694132
+    },
+    {
+     "name": "pr-title / check-title",
+     "status": "completed",
+     "conclusion": "success",
+     "started_at": "2026-07-29T22:47:09Z",
+     "id": 90729039959
+    },
+    {
+     "name": "pr-title / check-title",
+     "status": "completed",
+     "conclusion": "success",
+     "started_at": "2026-07-29T22:49:20Z",
+     "id": 90729442813
+    },
+    {
+     "name": "pr-title / check-title",
+     "status": "completed",
+     "conclusion": "success",
+     "started_at": "2026-07-29T22:51:59Z",
+     "id": 90729938206
+    },
+    {
+     "name": "pr-title / check-title",
+     "status": "completed",
+     "conclusion": "success",
+     "started_at": "2026-07-29T22:54:54Z",
+     "id": 90730453213
+    },
+    {
+     "name": "required-check-skip-guard / check-skip-vectors",
+     "status": "completed",
+     "conclusion": "success",
+     "started_at": "2026-07-29T22:17:39Z",
+     "id": 90722750366
+    },
+    {
+     "name": "verify / verify",
+     "status": "completed",
+     "conclusion": "cancelled",
+     "started_at": "2026-07-29T22:13:33Z",
+     "id": 90722750823
+    },
+    {
+     "name": "verify / verify",
+     "status": "completed",
+     "conclusion": "success",
+     "started_at": "2026-07-29T22:18:44Z",
+     "id": 90722883604
+    },
+    {
+     "name": "verify / verify",
+     "status": "completed",
+     "conclusion": "success",
+     "started_at": "2026-07-29T22:49:20Z",
+     "id": 90729442795
+    },
+    {
+     "name": "verify / verify",
+     "status": "completed",
+     "conclusion": "cancelled",
+     "started_at": "2026-07-29T22:51:58Z",
+     "id": 90729938167
+    },
+    {
+     "name": "verify / verify",
+     "status": "completed",
+     "conclusion": "success",
+     "started_at": "2026-07-29T22:55:00Z",
+     "id": 90730453681
+    },
+    {
+     "name": "verify / verify",
+     "status": "completed",
+     "conclusion": "success",
+     "started_at": "2026-07-29T23:00:04Z",
+     "id": 90731344845
+    }
+   ]
+  }
+ }
+}

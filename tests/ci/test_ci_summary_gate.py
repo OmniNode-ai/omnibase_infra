@@ -11,6 +11,7 @@ the old needs-based ci-summary pass/fail condition.
 
 from __future__ import annotations
 
+import json
 from pathlib import Path
 from typing import Any
 
@@ -21,9 +22,13 @@ from scripts.ci.ci_summary_gate import (
     EXIT_FAILURE,
     EXIT_PENDING,
     EXIT_SUCCESS,
+    EXPECTED_EXTERNAL_CONTEXTS,
+    MEASURED_NOT_ENFORCED_CONTEXTS,
     SKIPPABLE_GATE_JOBS,
     STRICT_GATE_JOBS,
     evaluate,
+    evaluate_external_contexts,
+    latest_check_run_by_name,
 )
 
 pytestmark = pytest.mark.unit
@@ -31,6 +36,31 @@ pytestmark = pytest.mark.unit
 REPO_ROOT = Path(__file__).resolve().parents[2]
 CI_WORKFLOW = REPO_ROOT / ".github" / "workflows" / "ci.yml"
 DEPLOY_AGENT_GATE = "Deploy Agent Tests (OMN-15378) / deploy-agent-tests"
+
+# Real, unedited `commits/{sha}/check-runs` rows captured from the 16 dev PRs
+# merged 2026-07-29T23:04Z → 2026-07-30T14:54Z, filtered to merge-time state.
+# See the file's `_provenance` block for the exact capture command.
+EXTERNAL_FIXTURE = (
+    REPO_ROOT
+    / "tests"
+    / "ci"
+    / "fixtures"
+    / "omn15496_merge_time_external_check_runs.json"
+)
+
+
+def _load_external_fixture() -> dict[str, Any]:
+    loaded = json.loads(EXTERNAL_FIXTURE.read_text(encoding="utf-8"))
+    assert isinstance(loaded, dict)
+    return loaded
+
+
+def _external_fixture(pr: str) -> list[dict[str, object]]:
+    """Merge-time external check-runs for one real merged dev PR."""
+    entry = _load_external_fixture()["pull_requests"][pr]
+    runs = entry["check_runs"]
+    assert isinstance(runs, list) and runs
+    return [dict(row) for row in runs]
 
 
 def _load_workflow(path: Path) -> dict[str, Any]:
@@ -371,3 +401,245 @@ class TestGateNamesResolveToRealJobs:
         assert "pull_request" not in triggers
         assert "push" not in triggers
         assert "merge_group" not in triggers
+
+
+class TestExternalContextAssertion:
+    """OMN-15496 — cross-workflow contexts must gate the required rollup.
+
+    Checks 1-3 above read ``actions/runs/${RUN_ID}/jobs``: ci.yml's OWN run. A
+    check produced by any other workflow file is invisible to them, and
+    ``omnibase_infra``'s ``dev`` requires exactly one context (``CI Summary``,
+    ``strict=false``) — so those checks were enforced by neither layer.
+
+    Every fixture here is an UNEDITED ``commits/{sha}/check-runs`` payload from a
+    real merged ``dev`` PR, filtered to merge-time state
+    (``started_at <= mergedAt``). No hand-built dict stands in for the API shape.
+    """
+
+    def test_red_before_the_real_incident_greened(self) -> None:
+        """The exact false green this gate exists to prevent.
+
+        PR #2555 merged 2026-07-30T04:25:09Z with ``CI Summary`` = success while
+        ``deploy-gate / deploy-gate`` = failure on the same head SHA. All 53
+        in-run jobs really were green, so the run-scoped checks CANNOT catch it —
+        this is "exists but wrong", not a missing import.
+        """
+        jobs = _all_gates("success")
+        # Pre-condition — the run-scoped verdict alone (i.e. this module's
+        # behaviour before OMN-15496) is SUCCESS on that very head SHA.
+        assert evaluate(jobs)[0] == EXIT_SUCCESS
+
+        # ...and the payload really does carry the red, so the RED below is not
+        # passing for some unrelated reason.
+        deploy_gate = [
+            row
+            for row in _external_fixture("2555")
+            if row["name"] == "deploy-gate / deploy-gate"
+        ]
+        assert [row["conclusion"] for row in deploy_gate] == ["failure"]
+
+        code, report = evaluate(
+            jobs,
+            check_runs=_external_fixture("2555"),
+            external_contexts=EXPECTED_EXTERNAL_CONTEXTS,
+        )
+        assert code == EXIT_FAILURE
+        assert "deploy-gate / deploy-gate" in report
+
+    def test_falsification_control_tuple_entry_is_load_bearing(self) -> None:
+        """Drop the context from the tuple and the SAME payload greens.
+
+        Without this the RED above could be passing for an unrelated reason.
+        """
+        remaining = tuple(
+            c for c in EXPECTED_EXTERNAL_CONTEXTS if c != "deploy-gate / deploy-gate"
+        )
+        assert len(remaining) == len(EXPECTED_EXTERNAL_CONTEXTS) - 1
+        code, _ = evaluate(
+            _all_gates("success"),
+            check_runs=_external_fixture("2555"),
+            external_contexts=remaining,
+        )
+        assert code == EXIT_SUCCESS
+
+    def test_absent_context_is_pending_never_success(self) -> None:
+        """A context that never reports must not read as passing.
+
+        Absence and success are indistinguishable to branch protection; that is
+        the OMN-14456 AC4 hole. PENDING is converted to FAILURE by the caller's
+        deadline.
+        """
+        payload = [
+            row
+            for row in _external_fixture("2567")
+            if row["name"] != "URL Authority Gate"
+        ]
+        code, report = evaluate(
+            _all_gates("success"),
+            check_runs=payload,
+            external_contexts=EXPECTED_EXTERNAL_CONTEXTS,
+        )
+        assert code == EXIT_PENDING
+        assert "URL Authority Gate" in report
+
+    def test_missing_payload_is_pending_never_success(self) -> None:
+        """A failed check-runs fetch must not green the gate."""
+        code, _ = evaluate(
+            _all_gates("success"),
+            check_runs=None,
+            external_contexts=EXPECTED_EXTERNAL_CONTEXTS,
+        )
+        assert code == EXIT_PENDING
+
+    def test_still_running_context_is_pending(self) -> None:
+        payload = [dict(row) for row in _external_fixture("2567")]
+        for row in payload:
+            if row["name"] == "CodeQL":
+                row["status"] = "in_progress"
+                row["conclusion"] = None
+        code, _ = evaluate(
+            _all_gates("success"),
+            check_runs=payload,
+            external_contexts=EXPECTED_EXTERNAL_CONTEXTS,
+        )
+        assert code == EXIT_PENDING
+
+    def test_skipped_external_context_fails_closed(self) -> None:
+        """`skipped` is not a pass for an external context (OMN-15057 vector)."""
+        payload = [dict(row) for row in _external_fixture("2567")]
+        for row in payload:
+            if row["name"] == "verify / verify":
+                row["conclusion"] = "skipped"
+        code, report = evaluate(
+            _all_gates("success"),
+            check_runs=payload,
+            external_contexts=EXPECTED_EXTERNAL_CONTEXTS,
+        )
+        assert code == EXIT_FAILURE
+        assert "verify / verify" in report
+
+    def test_no_external_contexts_means_no_assertion(self) -> None:
+        """merge_group / workflow_dispatch have no PR-scoped context set."""
+        code, _ = evaluate(_all_gates("success"), check_runs=None, external_contexts=())
+        assert code == EXIT_SUCCESS
+
+    def test_latest_wins_resolution_matches_github(self) -> None:
+        """A rerun's green supersedes the earlier red for the same name.
+
+        Check-runs accumulate on a SHA forever, so "any red fails" would make
+        every transient red permanent and delete rerun as a recovery path.
+        Measured: that rule blocks 6 of the 16 sampled merged PRs, 5 of them on
+        already-reruns-green contexts.
+        """
+        red_then_green = [
+            {
+                "name": "CodeQL",
+                "status": "completed",
+                "conclusion": "failure",
+                "started_at": "2026-07-30T01:00:00Z",
+                "id": 1,
+            },
+            {
+                "name": "CodeQL",
+                "status": "completed",
+                "conclusion": "success",
+                "started_at": "2026-07-30T02:00:00Z",
+                "id": 2,
+            },
+        ]
+        resolved = latest_check_run_by_name(red_then_green)
+        assert resolved["CodeQL"].conclusion == "success"
+
+        # ...and the reverse order still resolves to the LATEST, not the best.
+        green_then_red = [dict(row) for row in red_then_green]
+        green_then_red[0]["conclusion"] = "success"
+        green_then_red[1]["conclusion"] = "failure"
+        assert (
+            latest_check_run_by_name(green_then_red)["CodeQL"].conclusion == "failure"
+        )
+
+    def test_external_contexts_disjoint_from_in_run_gates(self) -> None:
+        """No context may be asserted on both surfaces.
+
+        ``occ-preflight / eligibility`` is the one name observed both inside and
+        outside ci.yml's check suite; asserting it twice would double-count an
+        ambiguous name (OMN-15112).
+        """
+        overlap = set(EXPECTED_EXTERNAL_CONTEXTS) & {
+            *STRICT_GATE_JOBS,
+            *SKIPPABLE_GATE_JOBS,
+        }
+        assert overlap == set(), f"asserted on both surfaces: {sorted(overlap)}"
+
+    def test_excluded_contexts_are_recorded_with_a_reason(self) -> None:
+        """Exclusions are data, not silence — each carries its measurement."""
+        assert MEASURED_NOT_ENFORCED_CONTEXTS
+        for context, reason in MEASURED_NOT_ENFORCED_CONTEXTS.items():
+            assert context not in EXPECTED_EXTERNAL_CONTEXTS
+            assert len(reason) > 40, f"{context} needs a substantive reason"
+
+    def test_no_wedge_replay_over_sixteen_merged_dev_prs(self) -> None:
+        """The admitted tuple must not block PRs that legitimately merged.
+
+        A required gate that reds on healthy PRs is worse than the hole it
+        closes. Replaying the merge-time payload of every dev PR merged
+        2026-07-29T23:04Z → 2026-07-30T14:54Z must yield exactly ONE block, and
+        it must be the real defect (#2555, deploy-gate red at merge).
+        """
+        fixture = _load_external_fixture()
+        blocked: dict[str, list[str]] = {}
+        for pr, entry in fixture["pull_requests"].items():
+            failures, unresolved = evaluate_external_contexts(
+                entry["check_runs"], EXPECTED_EXTERNAL_CONTEXTS
+            )
+            if failures or unresolved:
+                blocked[pr] = failures + unresolved
+
+        assert len(fixture["pull_requests"]) == 16
+        assert blocked == {"2555": ["deploy-gate / deploy-gate"]}, (
+            "seed membership changed the no-wedge profile. Re-measure per-context "
+            "merge-time report rate over recent merged dev PRs before admitting a "
+            f"context; got {blocked}"
+        )
+
+    def test_every_admitted_context_reported_on_every_sampled_pr(self) -> None:
+        """Admission rule, enforced: 100% merge-time presence or it can wedge dev."""
+        fixture = _load_external_fixture()
+        missing: dict[str, list[str]] = {}
+        for pr, entry in fixture["pull_requests"].items():
+            observed = latest_check_run_by_name(entry["check_runs"])
+            absent = [c for c in EXPECTED_EXTERNAL_CONTEXTS if c not in observed]
+            if absent:
+                missing[pr] = absent
+        assert missing == {}, (
+            "a context absent from any sampled PR does not report on every PR "
+            f"shape; requiring it burns the poll deadline and wedges dev: {missing}"
+        )
+
+
+class TestExternalAssertionIsWiredIntoCiYml:
+    """A rule is not a mechanism — the gate must be load-bearing, not merely defined."""
+
+    def test_poll_step_passes_check_runs_and_event_name(self) -> None:
+        job = _load_workflow(CI_WORKFLOW)["jobs"]["ci-summary"]
+        poll = next(
+            s for s in job["steps"] if "Poll run jobs" in str(s.get("name", ""))
+        )
+        run = str(poll["run"])
+        assert "--check-runs-file check_runs.json" in run
+        assert '--event-name "${EVENT_NAME}"' in run
+        assert "commits/${HEAD_SHA}/check-runs" in run
+        # The verdict step owns pass/fail: it must NOT be continue-on-error, or
+        # the assertion is decorative exactly like the report-only cascade step.
+        assert poll.get("continue-on-error") is not True
+        assert job["permissions"]["checks"] == "read"
+        assert "HEAD_SHA" in poll["env"] and "EVENT_NAME" in poll["env"]
+
+    def test_failed_check_runs_fetch_removes_the_file(self) -> None:
+        """A stale check_runs.json from a previous iteration must never be reused."""
+        job = _load_workflow(CI_WORKFLOW)["jobs"]["ci-summary"]
+        poll = next(
+            s for s in job["steps"] if "Poll run jobs" in str(s.get("name", ""))
+        )
+        run = str(poll["run"])
+        assert run.count("rm -f check_runs.json") >= 2
