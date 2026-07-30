@@ -93,6 +93,7 @@ the managed cluster".
 from __future__ import annotations
 
 import logging
+from collections.abc import Sequence
 from typing import TYPE_CHECKING, Self
 
 from pydantic import BaseModel, ConfigDict, Field, model_validator
@@ -481,9 +482,67 @@ class ModelTopicProvisioningPolicy(BaseModel):
         )
 
 
+def resolve_specs_for_creation(
+    policy: ModelTopicProvisioningPolicy,
+    specs: Sequence[ModelTopicSpec],
+) -> tuple[ModelTopicSpec, ...]:
+    """Resolve EVERY spec before any ``CreateTopics`` is issued.
+
+    Fail-closed and batch-scoped: a single spec that violates the environment
+    replication policy — the RF1-on-MSK case — aborts the whole batch with ZERO
+    creates issued. Not a warning, not a clamp-and-continue, and not a per-topic
+    skip that lets the rest of the pass proceed while a durability defect sits
+    unfixed in a contract we own. Every violation is collected first so one run
+    surfaces every offending contract instead of one per redeploy.
+
+    Module-level rather than a method (matching ``build_provisioning_diff``'s
+    shape in the sibling diff module) because there is more than one live
+    ``CreateTopics`` path in this repository: the runtime provisioner
+    (:class:`~omnibase_infra.event_bus.service_topic_manager.TopicProvisioner`),
+    the managed-staging canary checker, and the operator CLI
+    ``scripts/create_kafka_topics.py``. A batch resolver owned by one of them is
+    a resolver the others silently do without — which is exactly how the CLI
+    shipped a flat ``--replication-factor 1`` default that discarded every
+    contract's declared ``topic_config.replication_factor`` (OMN-15395 D2).
+
+    Args:
+        policy: The environment policy to resolve against.
+        specs: The specs about to be created.
+
+    Returns:
+        The resolved specs, each carrying an explicit replication factor, in
+        input order.
+
+    Raises:
+        TopicReplicationPolicyError: Any spec violates the policy. The message
+            enumerates up to ten violations and counts the rest.
+    """
+    resolved: list[ModelTopicSpec] = []
+    violations: list[str] = []
+    for spec in specs:
+        try:
+            resolved.append(policy.resolve_spec(spec))
+        except TopicReplicationPolicyError as exc:
+            violations.append(str(exc))
+    if violations:
+        shown = violations[:10]
+        suffix = (
+            f" (+{len(violations) - len(shown)} more)"
+            if len(violations) > len(shown)
+            else ""
+        )
+        raise TopicReplicationPolicyError(
+            f"Refusing to provision {len(violations)} topic(s) under the "
+            f"{policy.profile.value} replication policy; no CreateTopics was "
+            "issued. Violations: " + " | ".join(shown) + suffix
+        )
+    return tuple(resolved)
+
+
 __all__: list[str] = [
     "MANAGED_MINIMUM_REPLICATION_FACTOR",
     "MANAGED_SASL_MECHANISM",
     "SELF_HOSTED_REPLICATION_FACTOR",
     "ModelTopicProvisioningPolicy",
+    "resolve_specs_for_creation",
 ]

@@ -47,6 +47,7 @@ from omnibase_infra.event_bus.models.config.model_kafka_event_bus_config import 
 )
 from omnibase_infra.topics.broker_capacity_probe import (
     bind_policy_to_broker_capacity,
+    is_invalid_replication_factor_error,
 )
 from omnibase_infra.topics.managed_staging_canary_catalog import (
     build_canary_catalog_from_candidate,
@@ -247,8 +248,23 @@ async def create_missing_catalog_topics(
             created.append(name)
         except TopicAlreadyExistsError:
             created.append(name)
-        except Exception:  # noqa: BLE001 — boundary: report, do not raise
-            logger.warning("Failed to create catalog topic %s", name)
+        except Exception as exc:
+            # Boundary: report, do not raise.
+            # This surface is a REPORT generator, so it never raises — but a
+            # durability refusal must still be distinguishable from a transient
+            # miss in the log, the same rule the runtime provisioner enforces by
+            # re-raising (OMN-15395 D5).
+            if is_invalid_replication_factor_error(exc):
+                logger.exception(
+                    "Broker REFUSED catalog topic %s with "
+                    "INVALID_REPLICATION_FACTOR (requested "
+                    "replication_factor=%s); the topic does not exist and this "
+                    "is a durability failure, not a transient miss (OMN-15395)",
+                    name,
+                    spec.replication_factor,
+                )
+            else:
+                logger.warning("Failed to create catalog topic %s", name)
             failed.append(name)
 
     return tuple(created), tuple(failed)
