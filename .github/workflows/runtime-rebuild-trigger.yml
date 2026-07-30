@@ -18,7 +18,7 @@
 #
 # Trigger conditions (evaluated by scripts/trigger_rebuild_on_merge.py):
 #   - PR had the "runtime_change" label, OR
-#   - Any changed file matches src/omnimarket/** or src/omnibase_infra/nodes/**
+#   - omniclaude's canonical deploy-gate classifier identifies a runtime path
 #
 # Control-bus routing is independent of the requested runtime lane. Both dev
 # and stability-test commands enter through the dev control bus where
@@ -75,6 +75,17 @@ jobs:
             src/omnimarket/nodes/node_redeploy_orchestrator/models/model_redeploy_start_command.py
           sparse-checkout-cone-mode: false
 
+      - name: Fetch canonical deploy-path classifier
+        uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+        with:
+          repository: OmniNode-ai/omniclaude
+          ref: main
+          path: .deploy-gate-source
+          persist-credentials: false
+          sparse-checkout: |
+            .github/actions/deploy-gate/validate_pr_deploy_required.py
+          sparse-checkout-cone-mode: false
+
       - name: Set up CI Python environment
         uses: ./.github/actions/setup-python-uv
         with:
@@ -104,4 +115,5 @@ jobs:
             --bus-lane "dev" \
             --bus-overlay ".ci-bus-overlay/config/ci_bus_lanes.yaml" \
             --consumer-model ".ci-bus-overlay/src/omnimarket/nodes/node_redeploy_orchestrator/models/model_redeploy_start_command.py" \
+            --runtime-path-validator ".deploy-gate-source/.github/actions/deploy-gate/validate_pr_deploy_required.py" \
             --requested-by "gha/omnibase_infra/pr-$PR_NUMBER"

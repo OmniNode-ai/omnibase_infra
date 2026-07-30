@@ -22,6 +22,7 @@ from click.testing import CliRunner
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
 SCRIPT_PATH = REPO_ROOT / "scripts" / "trigger_rebuild_on_merge.py"
+RUNTIME_PATH_VALIDATOR = REPO_ROOT / "tests" / "fixtures" / "runtime_path_classifier.py"
 
 REDEPLOY_START_TOPIC = "onex.cmd.omnimarket.redeploy-start.v1"
 REBUILD_REQUESTED_TOPIC = "onex.cmd.deploy.rebuild-requested.v1"
@@ -195,6 +196,8 @@ def test_cli_publishes_redeploy_start_with_main_lane(
         [
             "--changed-files",
             "src/omnibase_infra/nodes/node_runtime_sweep/handler.py",
+            "--runtime-path-validator",
+            str(RUNTIME_PATH_VALIDATOR),
             "--base-branch",
             "main",
             "--source-sha",
@@ -234,6 +237,8 @@ def test_cli_dry_run_reports_lane_and_ref(
         [
             "--changed-files",
             "src/omnimarket/nodes/foo/handler.py",
+            "--runtime-path-validator",
+            str(RUNTIME_PATH_VALIDATOR),
             "--base-branch",
             "dev",
             "--source-sha",

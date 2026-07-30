@@ -23,6 +23,7 @@ from click.testing import CliRunner
 REPO_ROOT = Path(__file__).resolve().parents[3]
 SCRIPT_PATH = REPO_ROOT / "scripts" / "trigger_rebuild_on_merge.py"
 WORKFLOW_PATH = REPO_ROOT / ".github" / "workflows" / "runtime-rebuild-trigger.yml"
+RUNTIME_PATH_VALIDATOR = REPO_ROOT / "tests" / "fixtures" / "runtime_path_classifier.py"
 
 
 def _script_env() -> dict[str, str]:
@@ -62,67 +63,104 @@ def _import_trigger_module():
 
 @pytest.mark.unit
 class TestRebuildTriggerLogic:
-    """Unit tests for should_trigger() path/label detection logic."""
+    """Unit tests for canonical runtime-path and label trigger logic."""
 
     def setup_method(self) -> None:
         self.mod = _import_trigger_module()
+        self.classifier = self.mod.load_runtime_path_classifier(RUNTIME_PATH_VALIDATOR)
 
     def test_runtime_change_label_triggers(self) -> None:
         """runtime_change label alone should trigger rebuild."""
         assert self.mod.should_trigger(
-            changed_files=[],
+            runtime_paths=[],
             labels=["runtime_change"],
         )
 
     def test_omnimarket_src_path_triggers(self) -> None:
         """Changed file under src/omnimarket/ should trigger rebuild."""
         assert self.mod.should_trigger(
-            changed_files=["src/omnimarket/nodes/foo/handler.py"],
+            runtime_paths=self.classifier(["src/omnimarket/nodes/foo/handler.py"]),
             labels=[],
         )
 
     def test_omnibase_infra_nodes_path_triggers(self) -> None:
         """Changed file under src/omnibase_infra/nodes/ should trigger rebuild."""
         assert self.mod.should_trigger(
-            changed_files=["src/omnibase_infra/nodes/node_foo/contract.yaml"],
+            runtime_paths=self.classifier(
+                ["src/omnibase_infra/nodes/node_foo/contract.yaml"]
+            ),
             labels=[],
         )
+
+    def test_docker_compose_path_triggers(self) -> None:
+        """The exact OMN-15009 false-green Docker path must trigger rebuild."""
+        runtime_paths = self.mod.classify_runtime_paths(
+            ["docker/docker-compose.infra.yml"], self.classifier
+        )
+
+        assert runtime_paths == ["docker/docker-compose.infra.yml"]
+        assert self.mod.should_trigger(runtime_paths=runtime_paths, labels=[])
 
     def test_non_runtime_path_does_not_trigger(self) -> None:
         """Changed file outside runtime paths should not trigger rebuild."""
         assert not self.mod.should_trigger(
-            changed_files=["docs/plans/some-plan.md", "tests/unit/test_foo.py"],
+            runtime_paths=self.classifier(
+                ["docs/plans/some-plan.md", "tests/unit/test_foo.py"]
+            ),
             labels=[],
         )
 
     def test_mixed_paths_one_match_triggers(self) -> None:
         """Any single matching file among many should trigger rebuild."""
         assert self.mod.should_trigger(
-            changed_files=[
-                "README.md",
-                "src/omnimarket/nodes/bar/node.py",
-                "pyproject.toml",
-            ],
+            runtime_paths=self.classifier(
+                [
+                    "README.md",
+                    "src/omnimarket/nodes/bar/node.py",
+                    "pyproject.toml",
+                ]
+            ),
             labels=[],
         )
 
     def test_empty_inputs_no_trigger(self) -> None:
         """No files and no labels should not trigger."""
-        assert not self.mod.should_trigger(changed_files=[], labels=[])
+        assert not self.mod.should_trigger(runtime_paths=[], labels=[])
 
     def test_unrelated_label_does_not_trigger(self) -> None:
         """Labels other than runtime_change should not trigger."""
         assert not self.mod.should_trigger(
-            changed_files=[],
+            runtime_paths=[],
             labels=["bug", "documentation"],
         )
 
     def test_multiple_labels_with_runtime_change_triggers(self) -> None:
         """runtime_change among other labels should trigger."""
         assert self.mod.should_trigger(
-            changed_files=[],
+            runtime_paths=[],
             labels=["bug", "runtime_change", "enhancement"],
         )
+
+    def test_classifier_without_canonical_callable_fails_closed(
+        self, tmp_path: Path
+    ) -> None:
+        """A fetched validator missing the canonical seam must stop the job."""
+        validator = tmp_path / "validator.py"
+        validator.write_text("RUNTIME_PATH_PATTERNS = []\n", encoding="utf-8")
+
+        with pytest.raises(ValueError, match="does not define find_runtime_paths"):
+            self.mod.load_runtime_path_classifier(validator)
+
+    def test_invalid_classifier_result_fails_closed(self) -> None:
+        """The hosted validator may not silently change its return contract."""
+
+        def invalid_classifier(_changed_files: list[str]) -> tuple[str, ...]:
+            return ("docker/docker-compose.infra.yml",)
+
+        with pytest.raises(ValueError, match="returned an invalid path list"):
+            self.mod.classify_runtime_paths(
+                ["docker/docker-compose.infra.yml"], invalid_classifier
+            )
 
 
 @pytest.mark.unit
@@ -131,11 +169,14 @@ def test_workflow_uses_authoritative_overlay_not_raw_kafka_secrets() -> None:
     workflow = WORKFLOW_PATH.read_text()
 
     assert "repository: OmniNode-ai/omnimarket" in workflow
+    assert "repository: OmniNode-ai/omniclaude" in workflow
     assert "config/ci_bus_lanes.yaml" in workflow
     assert "model_redeploy_start_command.py" in workflow
+    assert "validate_pr_deploy_required.py" in workflow
     assert '--bus-lane "dev"' in workflow
     assert "--bus-overlay" in workflow
     assert "--consumer-model" in workflow
+    assert "--runtime-path-validator" in workflow
     assert "secrets.KAFKA_BOOTSTRAP_SERVERS" not in workflow
     assert "secrets.KAFKA_SASL_USERNAME" not in workflow
     assert "secrets.KAFKA_SASL_PASSWORD" not in workflow
@@ -267,6 +308,8 @@ class TestRedeployStartPublish:
             [
                 "--changed-files",
                 "src/omnibase_infra/nodes/node_runtime_sweep/handler.py",
+                "--runtime-path-validator",
+                str(RUNTIME_PATH_VALIDATOR),
                 "--base-branch",
                 "dev",
                 "--source-sha",
@@ -384,6 +427,8 @@ class TestRedeployStartCLI:
                 str(SCRIPT_PATH),
                 "--changed-files",
                 "README.md,docs/plans/foo.md",
+                "--runtime-path-validator",
+                str(RUNTIME_PATH_VALIDATOR),
                 "--labels",
                 "",
                 "--base-branch",
@@ -409,6 +454,8 @@ class TestRedeployStartCLI:
                 str(SCRIPT_PATH),
                 "--changed-files",
                 "",
+                "--runtime-path-validator",
+                str(RUNTIME_PATH_VALIDATOR),
                 "--labels",
                 "runtime_change",
                 "--base-branch",
@@ -435,6 +482,8 @@ class TestRedeployStartCLI:
                 str(SCRIPT_PATH),
                 "--changed-files",
                 "src/omnimarket/nodes/foo/handler.py",
+                "--runtime-path-validator",
+                str(RUNTIME_PATH_VALIDATOR),
                 "--labels",
                 "",
                 "--base-branch",
@@ -461,6 +510,8 @@ class TestRedeployStartCLI:
                 str(SCRIPT_PATH),
                 "--changed-files",
                 "src/omnimarket/nodes/foo/handler.py",
+                "--runtime-path-validator",
+                str(RUNTIME_PATH_VALIDATOR),
                 "--labels",
                 "",
                 "--base-branch",
