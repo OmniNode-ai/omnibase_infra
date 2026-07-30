@@ -20,6 +20,16 @@ DOCKERFILE = FIXTURE_ROOT / "Dockerfile"
 MANIFEST = FIXTURE_ROOT / "fixture-manifest.json"
 LEGACY_SEED = FIXTURE_ROOT / "legacy-seed.sql"
 PROOF = FIXTURE_ROOT / "prove.sh"
+CUTOVER_PROOF = FIXTURE_ROOT / "cutover-proof" / "prove.sh"
+CUTOVER_BOOTSTRAP = (
+    REPO_ROOT
+    / "src"
+    / "omnibase_infra"
+    / "migration"
+    / "cutover"
+    / "sql"
+    / "bootstrap.sql"
+)
 CI_WORKFLOW = REPO_ROOT / ".github" / "workflows" / "legacy-rds-fixture-proof.yml"
 
 REQUIRED_CASES = {
@@ -33,6 +43,7 @@ REQUIRED_CASES = {
     "flat_node_shape_collision",
     "legacy_shape_collision",
     "application_migration_ledger",
+    "cutover_receipts_and_rollback_boundary",
 }
 
 
@@ -165,3 +176,33 @@ def test_required_ci_executes_rebuilt_fixture_and_always_cleans_it() -> None:
     )
     assert cleanup["if"] == "always()"
     assert "down --volumes --remove-orphans" in cleanup["run"]
+
+
+def test_cutover_extension_is_durable_and_red_proven_in_the_rebuilt_image() -> None:
+    proof = CUTOVER_PROOF.read_text(encoding="utf-8")
+    bootstrap = CUTOVER_BOOTSTRAP.read_text(encoding="utf-8")
+    outer_proof = PROOF.read_text(encoding="utf-8")
+    dockerfile = DOCKERFILE.read_text(encoding="utf-8")
+
+    assert "cutover-proof/prove.sh" in outer_proof
+    assert "cutover-proof/prove.sh" in dockerfile
+    assert "migration/cutover/sql/bootstrap.sql" in dockerfile
+    for table in (
+        "cutover_family_contracts",
+        "transformation_receipts",
+        "cutover_journal",
+        "reverse_delta_proofs",
+        "reverse_delta_entries",
+    ):
+        assert table in bootstrap
+    for signature in (
+        "cutover_family_mismatch_isolation",
+        "cutover_pre_checkpoint_dsn_rollback",
+        "cutover_blind_dual_write",
+        "cutover_post_checkpoint_direct_rollback",
+        "cutover_reverse_delta_coverage",
+        "cutover_reverse_delta_complete",
+        "cutover_forward_fix_only",
+        "cutover_durable_journal",
+    ):
+        assert signature in proof

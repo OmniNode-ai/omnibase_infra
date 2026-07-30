@@ -18,5 +18,7 @@ COPY docker/legacy-rds-fixture/ledger-control/ /opt/omn15422/ledger-control/
 COPY docker/migrations/forward/_ledger/bootstrap.sql /opt/omn15422/ledger-control/forward/_ledger/bootstrap.sql
 COPY docker/legacy-rds-fixture/fixture-manifest.json /opt/omn15422/fixture-manifest.json
 COPY docker/legacy-rds-fixture/prove.sh /opt/omn15422/prove.sh
+COPY docker/legacy-rds-fixture/cutover-proof/prove.sh /opt/omn15422/cutover-proof/prove.sh
+COPY src/omnibase_infra/migration/cutover/sql/bootstrap.sql /opt/omn15422/cutover-proof/bootstrap.sql
 
 ENTRYPOINT ["sh", "/opt/omn15422/prove.sh"]
