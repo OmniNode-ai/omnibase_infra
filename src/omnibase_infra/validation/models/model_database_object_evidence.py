@@ -9,6 +9,9 @@ from omnibase_core.enums.enum_database_schema_domain import EnumDatabaseSchemaDo
 from omnibase_infra.validation.enums.enum_application_database_object_kind import (
     EnumApplicationDatabaseObjectKind,
 )
+from omnibase_infra.validation.types.type_application_database_function_signature import (
+    ApplicationDatabaseFunctionSignature,
+)
 
 
 class ModelDatabaseObjectEvidence(BaseModel):
@@ -23,6 +26,9 @@ class ModelDatabaseObjectEvidence(BaseModel):
     domain: EnumDatabaseSchemaDomain
     owner_declaration: str = Field(..., min_length=1)
     readers: tuple[str, ...] = ()
+    writers: tuple[str, ...] = ()
+    current_schemas: tuple[str, ...] = ()
+    function_signature: ApplicationDatabaseFunctionSignature | None = None
 
     @field_validator("kind", mode="before")
     @classmethod
