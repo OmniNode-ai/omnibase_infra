@@ -696,6 +696,60 @@ jobs:
             --check-placeholders \
             --scan-dir src/omnibase_infra
 
+  # Pin reachability -- every cross-repo pin (workflow `uses:`/`with:` refs,
+  # pyproject [tool.uv.sources] revs, uv.lock git revs) must name a commit
+  # reachable from a PROTECTED branch of the target repo (OMN-15538).
+  #
+  # Why this is a required gate and not a sweep: on 2026-07-30 two pins that
+  # every existing validator accepted took production down twice. ci.yml
+  # pinned a deleted omnimarket branch head and startup-failed for ~2.5h with
+  # every open PR unmergeable (OMN-15536); omnimarket@dev pinned an unlanded
+  # omnibase_core branch head straight past a prose comment forbidding it. The
+  # pre-existing validators check hex SHAPE (`[0-9a-f]{40}`) and conclude
+  # "immutable, therefore safe". Immutable is not reachable.
+  pin-reachability:
+    needs: occ-preflight
+    if: always()
+    name: Pin Reachability (OMN-15538)
+    # OMNI_RUNNER_SELECTOR_V1 — trusted CI defaults to self-hosted omnibase-ci; public forks default to ubuntu-latest
+    runs-on: >-
+      ${{
+        ((github.event_name == 'pull_request' && github.base_ref == 'dev') ||
+         (github.event_name == 'pull_request' &&
+          github.event.pull_request.head.repo.full_name != github.repository))
+        && fromJSON(vars.OMNI_PUBLIC_PR_RUNS_ON_JSON || '["ubuntu-latest"]')
+        || fromJSON((github.event_name == 'merge_group' && vars.OMNI_REQUIRED_CI_RUNS_ON_JSON) || vars.OMNI_TRUSTED_CI_RUNS_ON_JSON || '["self-hosted","omnibase-ci"]')
+      }}
+    timeout-minutes: 10
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+
+      - name: Setup Python and uv
+        uses: ./.github/actions/setup-python-uv
+        with:
+          python-version: ${{ env.PYTHON_VERSION }}
+          uv-version: ${{ env.UV_VERSION }}
+          cache-version: ${{ env.CACHE_VERSION }}
+          cache-enabled: "false"
+
+      - name: Every cross-repo pin must be reachable from dev or main
+        env:
+          # Read-only, public repos: the compare endpoint works unauthenticated
+          # (60 req/hr). The ambient token is attached purely for rate-limit
+          # headroom so a busy PR queue cannot turn the gate UNDETERMINED.
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          echo "================================================================"
+          echo "Pin Reachability (OMN-15538)"
+          echo "================================================================"
+          # --min-pins is the anti-vacuity floor: this tree carries >20 pins, so
+          # an extractor that suddenly finds fewer than 5 is broken, not clean.
+          # No --allow-undetermined: the script REFUSES that flag when CI is set,
+          # so an unresolvable pin fails the gate instead of skipping silently.
+          uv run python scripts/ci/check_pin_reachability.py --min-pins 5
+
   # Topic drift check -- CI gate validating SUFFIX_* constants against contracts (OMN-5248/OMN-5258)
   # Ensures static topic constants stay in sync with contract.yaml topic declarations.
   # Cross-repo scanning (OMN-5258): checks out sibling repos to resolve topic references.

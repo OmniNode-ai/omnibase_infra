@@ -192,6 +192,21 @@ repos:
         files: ^src/omnibase_infra/configs/pricing_manifest\.yaml$
         pass_filenames: true
         stages: [pre-commit]
+      # OMN-15538: reject a pin whose commit is not reachable from a protected
+      # branch of the target repo. Mirrors the required CI job
+      # "Pin Reachability (OMN-15538)"; catching a dead pin at commit time is
+      # what stops the OMN-15536 shape (ci.yml startup-fails, "CI Summary"
+      # never reports, the whole repo wedges) from reaching the remote at all.
+      # --allow-undetermined keeps an offline commit unblocked; the script
+      # REFUSES that flag under CI, so the enforcing surface stays fail-closed
+      # and the hook can never be the reason a bad pin merges.
+      - id: check-pin-reachability
+        name: Cross-repo pins must be reachable from dev/main (OMN-15538)
+        entry: uv run --frozen python scripts/ci/check_pin_reachability.py --allow-undetermined
+        language: system
+        files: ^(\.github/workflows/.*\.ya?ml|pyproject\.toml|uv\.lock)$
+        pass_filenames: true
+        stages: [pre-commit]
       - id: reject-node-implementations
         name: Reject unallowlisted node handlers (belong in omnimarket)
         entry: bash scripts/ci/reject-node-implementations.sh --staged
