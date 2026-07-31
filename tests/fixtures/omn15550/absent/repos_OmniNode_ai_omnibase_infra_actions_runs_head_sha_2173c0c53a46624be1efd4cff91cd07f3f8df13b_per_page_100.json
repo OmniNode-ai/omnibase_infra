@@ -1,0 +1,174 @@
+{
+ "workflow_runs": [
+  {
+   "conclusion": "success",
+   "created_at": "2026-07-30T19:17:00Z",
+   "head_branch": "jonah/omn-15525-alert-body-truncation-and-drift-gate",
+   "head_sha": "2173c0c53a46624be1efd4cff91cd07f3f8df13b",
+   "id": 30574145773,
+   "name": "PR Title Check",
+   "status": "completed",
+   "updated_at": "2026-07-30T19:17:26Z"
+  },
+  {
+   "conclusion": "success",
+   "created_at": "2026-07-30T19:17:00Z",
+   "head_branch": "jonah/omn-15525-alert-body-truncation-and-drift-gate",
+   "head_sha": "2173c0c53a46624be1efd4cff91cd07f3f8df13b",
+   "id": 30574146135,
+   "name": "Reject skip-gate bypass tokens",
+   "status": "completed",
+   "updated_at": "2026-07-30T19:18:15Z"
+  },
+  {
+   "conclusion": "success",
+   "created_at": "2026-07-30T19:17:00Z",
+   "head_branch": "jonah/omn-15525-alert-body-truncation-and-drift-gate",
+   "head_sha": "2173c0c53a46624be1efd4cff91cd07f3f8df13b",
+   "id": 30574145723,
+   "name": "Receipt Gate",
+   "status": "completed",
+   "updated_at": "2026-07-30T19:18:18Z"
+  },
+  {
+   "conclusion": "success",
+   "created_at": "2026-07-30T19:16:59Z",
+   "head_branch": "jonah/omn-15525-alert-body-truncation-and-drift-gate",
+   "head_sha": "2173c0c53a46624be1efd4cff91cd07f3f8df13b",
+   "id": 30574145227,
+   "name": "Duplication Sweep",
+   "status": "completed",
+   "updated_at": "2026-07-30T19:17:15Z"
+  },
+  {
+   "conclusion": "success",
+   "created_at": "2026-07-30T19:16:59Z",
+   "head_branch": "jonah/omn-15525-alert-body-truncation-and-drift-gate",
+   "head_sha": "2173c0c53a46624be1efd4cff91cd07f3f8df13b",
+   "id": 30574145181,
+   "name": "Non-dev base guard",
+   "status": "completed",
+   "updated_at": "2026-07-30T19:17:11Z"
+  },
+  {
+   "conclusion": "success",
+   "created_at": "2026-07-30T19:16:59Z",
+   "head_branch": "jonah/omn-15525-alert-body-truncation-and-drift-gate",
+   "head_sha": "2173c0c53a46624be1efd4cff91cd07f3f8df13b",
+   "id": 30574145170,
+   "name": "Main target guard",
+   "status": "completed",
+   "updated_at": "2026-07-30T19:17:14Z"
+  },
+  {
+   "conclusion": "success",
+   "created_at": "2026-07-30T19:16:59Z",
+   "head_branch": "jonah/omn-15525-alert-body-truncation-and-drift-gate",
+   "head_sha": "2173c0c53a46624be1efd4cff91cd07f3f8df13b",
+   "id": 30574145349,
+   "name": "URL Authority Gate",
+   "status": "completed",
+   "updated_at": "2026-07-30T19:17:52Z"
+  },
+  {
+   "conclusion": "success",
+   "created_at": "2026-07-30T19:16:59Z",
+   "head_branch": "jonah/omn-15525-alert-body-truncation-and-drift-gate",
+   "head_sha": "2173c0c53a46624be1efd4cff91cd07f3f8df13b",
+   "id": 30574145140,
+   "name": "Canonical Inference Gate",
+   "status": "completed",
+   "updated_at": "2026-07-30T19:17:46Z"
+  },
+  {
+   "conclusion": "success",
+   "created_at": "2026-07-30T19:15:49Z",
+   "head_branch": "jonah/omn-15525-alert-body-truncation-and-drift-gate",
+   "head_sha": "2173c0c53a46624be1efd4cff91cd07f3f8df13b",
+   "id": 30574058841,
+   "name": "CR Thread Gate (caller)",
+   "status": "completed",
+   "updated_at": "2026-07-30T19:16:07Z"
+  },
+  {
+   "conclusion": "success",
+   "created_at": "2026-07-30T19:15:49Z",
+   "head_branch": "jonah/omn-15525-alert-body-truncation-and-drift-gate",
+   "head_sha": "2173c0c53a46624be1efd4cff91cd07f3f8df13b",
+   "id": 30574059012,
+   "name": "Reject skip-gate bypass tokens",
+   "status": "completed",
+   "updated_at": "2026-07-30T19:23:08Z"
+  },
+  {
+   "conclusion": "failure",
+   "created_at": "2026-07-30T19:15:48Z",
+   "head_branch": "jonah/omn-15525-alert-body-truncation-and-drift-gate",
+   "head_sha": "2173c0c53a46624be1efd4cff91cd07f3f8df13b",
+   "id": 30574058377,
+   "name": ".github/workflows/ci.yml",
+   "status": "completed",
+   "updated_at": "2026-07-30T19:15:48Z"
+  },
+  {
+   "conclusion": "skipped",
+   "created_at": "2026-07-30T19:15:48Z",
+   "head_branch": "jonah/omn-15525-alert-body-truncation-and-drift-gate",
+   "head_sha": "2173c0c53a46624be1efd4cff91cd07f3f8df13b",
+   "id": 30574058150,
+   "name": "OmniGate",
+   "status": "completed",
+   "updated_at": "2026-07-30T19:15:49Z"
+  },
+  {
+   "conclusion": "success",
+   "created_at": "2026-07-30T19:15:48Z",
+   "head_branch": "jonah/omn-15525-alert-body-truncation-and-drift-gate",
+   "head_sha": "2173c0c53a46624be1efd4cff91cd07f3f8df13b",
+   "id": 30574057942,
+   "name": "check-env-reads-gate",
+   "status": "completed",
+   "updated_at": "2026-07-30T19:16:09Z"
+  },
+  {
+   "conclusion": "success",
+   "created_at": "2026-07-30T19:15:48Z",
+   "head_branch": "jonah/omn-15525-alert-body-truncation-and-drift-gate",
+   "head_sha": "2173c0c53a46624be1efd4cff91cd07f3f8df13b",
+   "id": 30574057936,
+   "name": "Non-dev base guard",
+   "status": "completed",
+   "updated_at": "2026-07-30T19:16:04Z"
+  },
+  {
+   "conclusion": "success",
+   "created_at": "2026-07-30T19:15:48Z",
+   "head_branch": "jonah/omn-15525-alert-body-truncation-and-drift-gate",
+   "head_sha": "2173c0c53a46624be1efd4cff91cd07f3f8df13b",
+   "id": 30574057920,
+   "name": "Stale TODO Gate",
+   "status": "completed",
+   "updated_at": "2026-07-30T19:16:05Z"
+  },
+  {
+   "conclusion": "success",
+   "created_at": "2026-07-30T19:15:48Z",
+   "head_branch": "jonah/omn-15525-alert-body-truncation-and-drift-gate",
+   "head_sha": "2173c0c53a46624be1efd4cff91cd07f3f8df13b",
+   "id": 30574057886,
+   "name": "Precommit Parity Gate",
+   "status": "completed",
+   "updated_at": "2026-07-30T19:16:06Z"
+  },
+  {
+   "conclusion": "success",
+   "created_at": "2026-07-30T19:15:48Z",
+   "head_branch": "jonah/omn-15525-alert-body-truncation-and-drift-gate",
+   "head_sha": "2173c0c53a46624be1efd4cff91cd07f3f8df13b",
+   "id": 30574057926,
+   "name": "Runner Disk Preflight",
+   "status": "completed",
+   "updated_at": "2026-07-30T19:16:07Z"
+  }
+ ]
+}
