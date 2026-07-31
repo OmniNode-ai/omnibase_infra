@@ -56,7 +56,6 @@ allowlist:
   - "omnibase_infra.observability.runner_health.collector_runner_health:CollectorRunnerHealth"
   - "omnibase_infra.onboarding.adapter_cli_input:AdapterCliInput"
   - "omnibase_infra.onboarding.adapter_fake_input:AdapterFakeInput"
-  - "omnibase_infra.runtime.auto_wiring.handler_wiring:SyncPsycopg2Adapter"
   - "omnibase_infra.runtime.contract_registration_event_router:ContractRegistrationEventRouter"
   - "omnibase_infra.runtime.emit_daemon.event_registry:EventRegistry"
   - "omnibase_infra.runtime.freshness_monitor:ServiceFreshnessMonitor"

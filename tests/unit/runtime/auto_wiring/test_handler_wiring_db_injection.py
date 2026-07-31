@@ -12,54 +12,53 @@ from uuid import UUID, uuid4
 
 import pytest
 
+from omnibase_core.models.contracts.subcontracts.model_db_table_declaration import (
+    ModelDbTableDeclaration,
+)
 from omnibase_infra.runtime.auto_wiring.handler_wiring import (
     _DB_URL_ENV_MAP,
     ProjectionDispatchSinks,
-    _build_sync_db_adapter,
+    _build_projection_db_adapter,
     _make_dispatch_callback,
     _make_projection_dispatch_callback,
-    _read_db_io_tables,
     _read_dlq_topics,
+    _resolve_projection_database_target,
     _should_jsonb_wrap_list,
+)
+from tests.helpers.application_db_topology import (
+    application_topology,
+    projection_database_target,
+    projection_database_urls,
 )
 
 _PATCH_BUILD_ADAPTER = (
-    "omnibase_infra.runtime.auto_wiring.handler_wiring._build_sync_db_adapter"
+    "omnibase_infra.runtime.auto_wiring.handler_wiring._build_projection_db_adapter"
 )
 _PATCH_ENVIRON_GET = "omnibase_infra.runtime.auto_wiring.handler_wiring.os.environ.get"
 
 
-# ---------------------------------------------------------------------------
-# Tests: _read_db_io_tables
-# ---------------------------------------------------------------------------
-
-
-@pytest.mark.unit
-def test_read_db_io_tables_returns_tables(tmp_path: Path) -> None:
-    contract = tmp_path / "contract.yaml"
-    contract.write_text(
-        "name: test\n"
-        "db_io:\n"
-        "  db_tables:\n"
-        "    - name: node_service_registry\n"
-        "      database: omnidash_analytics\n"
+@pytest.fixture(autouse=True)
+def _configured_projection_dsns(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Projection callback construction models startup with configured DSNs."""
+    monkeypatch.setenv(
+        "OMNIDASH_ANALYTICS_DB_URL",
+        "postgresql://user:pass@host:5432/omnidash_analytics",
     )
-    tables = _read_db_io_tables(contract)
-    assert len(tables) == 1
-    assert tables[0]["name"] == "node_service_registry"
-    assert tables[0]["database"] == "omnidash_analytics"
+    monkeypatch.setenv(
+        "OMNINODE_INTERNAL_DB_URL",
+        "postgresql://user:pass@host:5432/omnidash_analytics",
+    )
 
 
-@pytest.mark.unit
-def test_read_db_io_tables_returns_empty_when_absent(tmp_path: Path) -> None:
-    contract = tmp_path / "contract.yaml"
-    contract.write_text("name: test\nnode_type: EFFECT_GENERIC\n")
-    assert _read_db_io_tables(contract) == []
-
-
-@pytest.mark.unit
-def test_read_db_io_tables_returns_empty_on_missing_file() -> None:
-    assert _read_db_io_tables(Path("/nonexistent/contract.yaml")) == []
+def _internal_db_adapter(table: str) -> object:
+    """Build the explicit no-tenant operation used by SQL-shape unit tests."""
+    target = projection_database_target(table, schema="omninode_internal")
+    return _build_projection_db_adapter(
+        projection_database_urls(target, "postgresql://user:pass@host/db"),
+        target,
+        None,
+        None,
+    )
 
 
 # ---------------------------------------------------------------------------
@@ -98,7 +97,7 @@ def test_projection_callback_injects_db_and_event_type() -> None:
             received.append(dict(input_data))
             return {"rows_upserted": 1}
 
-    db_tables = [{"name": "node_service_registry", "database": "omnidash_analytics"}]
+    db_tables = projection_database_target("node_service_registry")
     handler = FakeHandler()
     callback = _make_projection_dispatch_callback(
         handler, db_tables, ("onex.evt.platform.node-heartbeat.v1",)
@@ -143,7 +142,7 @@ def test_projection_callback_injects_topic_for_strict_handlers() -> None:
                 )
             return {"rows_upserted": 1}
 
-    db_tables = [{"name": "live_events", "database": "omnidash_analytics"}]
+    db_tables = projection_database_target("live_events")
     callback = _make_projection_dispatch_callback(
         StrictTopicHandler(), db_tables, ("onex.evt.platform.node-heartbeat.v1",)
     )
@@ -189,7 +188,7 @@ def test_projection_callback_preserves_typed_envelope_id() -> None:
     )
     callback = _make_projection_dispatch_callback(
         EnvelopeAwareHandler(),
-        [{"name": "live_events", "database": "omnidash_analytics"}],
+        projection_database_target("live_events"),
         (topic,),
     )
 
@@ -216,7 +215,7 @@ def test_projection_callback_runs_sync_handler_outside_active_loop() -> None:
 
             return asyncio.run(_project())
 
-    db_tables = [{"name": "delegation_events", "database": "omnidash_analytics"}]
+    db_tables = projection_database_target("delegation_events")
     callback = _make_projection_dispatch_callback(
         LoopOwningHandler(),
         db_tables,
@@ -262,7 +261,7 @@ def test_projection_callback_connects_runner_db_before_handle() -> None:
             return {"projected": True}
 
     handler = DelegationProjectionRunner()
-    db_tables = [{"name": "delegation_events", "database": "omnidash_analytics"}]
+    db_tables = projection_database_target("delegation_events")
     callback = _make_projection_dispatch_callback(
         handler,
         db_tables,
@@ -304,7 +303,7 @@ def test_projection_callback_skips_standalone_projection_runner() -> None:
             return {"projected": True}
 
     handler = DelegationProjectionRunner()
-    db_tables = [{"name": "delegation_events", "database": "omnidash_analytics"}]
+    db_tables = projection_database_target("delegation_events")
     callback = _make_projection_dispatch_callback(
         handler,
         db_tables,
@@ -331,7 +330,7 @@ def test_projection_callback_maps_introspection_event_type() -> None:
             received.append(dict(input_data))
             return {}
 
-    db_tables = [{"name": "node_service_registry", "database": "omnidash_analytics"}]
+    db_tables = projection_database_target("node_service_registry")
     handler = FakeHandler()
     callback = _make_projection_dispatch_callback(
         handler, db_tables, ("onex.evt.platform.node-introspection.v1",)
@@ -364,7 +363,7 @@ def test_projection_callback_awaits_async_handle() -> None:
             received.append(dict(input_data))
             return {"rows_upserted": 1}
 
-    db_tables = [{"name": "node_service_registry", "database": "omnidash_analytics"}]
+    db_tables = projection_database_target("node_service_registry")
     handler = FakeHandler()
     callback = _make_projection_dispatch_callback(
         handler, db_tables, ("onex.evt.platform.node-heartbeat.v1",)
@@ -388,10 +387,10 @@ def test_projection_callback_awaits_async_handle() -> None:
 
 
 @pytest.mark.unit
-def test_projection_callback_skips_when_db_url_missing(
-    caplog: pytest.LogCaptureFixture,
+def test_projection_callback_rejects_missing_db_url_at_wiring(
+    monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    """When DB URL env var is absent, optional projections are skipped cleanly."""
+    """A required missing DSN fails at callback construction, before dispatch."""
     call_count = [0]
 
     class FakeHandler:
@@ -399,26 +398,14 @@ def test_projection_callback_skips_when_db_url_missing(
             call_count[0] += 1
             return {}
 
-    db_tables = [{"name": "node_service_registry", "database": "omnidash_analytics"}]
+    db_tables = projection_database_target("node_service_registry")
     handler = FakeHandler()
-    callback = _make_projection_dispatch_callback(handler, db_tables, ())
+    monkeypatch.delenv("OMNIDASH_ANALYTICS_DB_URL")
 
-    envelope = MagicMock()
-    envelope.topic = "onex.evt.platform.node-heartbeat.v1"
-    envelope.payload = {}
+    with pytest.raises(ValueError, match="tenant_projection"):
+        _make_projection_dispatch_callback(handler, db_tables, ())
 
-    with caplog.at_level(
-        logging.INFO, logger="omnibase_infra.runtime.auto_wiring.handler_wiring"
-    ):
-        with patch(_PATCH_ENVIRON_GET, return_value=""):
-            result = asyncio.run(callback(envelope))
-
-    assert result is None
     assert call_count[0] == 0
-    assert any(
-        r.levelno == logging.INFO and "Projection handler inactive" in r.message
-        for r in caplog.records
-    )
 
 
 @pytest.mark.unit
@@ -431,7 +418,7 @@ def test_projection_callback_logs_type_error_not_raises(
         def handle(self, input_data: dict) -> dict:
             raise TypeError("missing _db")
 
-    db_tables = [{"name": "node_service_registry", "database": "omnidash_analytics"}]
+    db_tables = projection_database_target("node_service_registry")
     handler = BrokenHandler()
     callback = _make_projection_dispatch_callback(handler, db_tables, ())
 
@@ -458,6 +445,7 @@ def test_projection_callback_logs_type_error_not_raises(
 def test_sync_db_adapter_accepts_multi_column_conflict_key() -> None:
     """Projection DB adapter preserves protocol support for composite UPSERT keys."""
     cursor = MagicMock()
+    cursor.fetchone.return_value = ("omninode_runtime", "omnidash_analytics")
     cursor_context = MagicMock()
     cursor_context.__enter__.return_value = cursor
     conn = MagicMock()
@@ -465,7 +453,7 @@ def test_sync_db_adapter_accepts_multi_column_conflict_key() -> None:
     conn.cursor.return_value = cursor_context
 
     with patch("psycopg2.connect", return_value=conn):
-        adapter = _build_sync_db_adapter("postgresql://user:pass@host/db")
+        adapter = _internal_db_adapter("savings_estimates")
         result = adapter.upsert(
             "savings_estimates",
             "session_id,event_timestamp,model_local,model_cloud_baseline",
@@ -493,6 +481,7 @@ def test_sync_db_adapter_json_adapts_list_values() -> None:
     import psycopg2.extras
 
     cursor = MagicMock()
+    cursor.fetchone.return_value = ("omninode_runtime", "omnidash_analytics")
     cursor_context = MagicMock()
     cursor_context.__enter__.return_value = cursor
     conn = MagicMock()
@@ -500,7 +489,7 @@ def test_sync_db_adapter_json_adapts_list_values() -> None:
     conn.cursor.return_value = cursor_context
 
     with patch("psycopg2.connect", return_value=conn):
-        adapter = _build_sync_db_adapter("postgresql://user:pass@host/db")
+        adapter = _internal_db_adapter("delegation_events")
         result = adapter.upsert(
             "delegation_events",
             "correlation_id",
@@ -531,6 +520,7 @@ def test_sync_db_adapter_json_adapts_unsuffixed_jsonb_list_column() -> None:
     import psycopg2.extras
 
     cursor = MagicMock()
+    cursor.fetchone.return_value = ("omninode_runtime", "omnidash_analytics")
     cursor_context = MagicMock()
     cursor_context.__enter__.return_value = cursor
     conn = MagicMock()
@@ -538,7 +528,7 @@ def test_sync_db_adapter_json_adapts_unsuffixed_jsonb_list_column() -> None:
     conn.cursor.return_value = cursor_context
 
     with patch("psycopg2.connect", return_value=conn):
-        adapter = _build_sync_db_adapter("postgresql://user:pass@host/db")
+        adapter = _internal_db_adapter("generation_events")
         result = adapter.upsert(
             "generation_events",
             "correlation_id",
@@ -596,6 +586,7 @@ def test_sync_db_adapter_json_adapts_recent_responses_list_of_objects() -> None:
         psycopg2.extensions.adapt(recent_responses).getquoted()
 
     cursor = MagicMock()
+    cursor.fetchone.return_value = ("omninode_runtime", "omnidash_analytics")
     cursor_context = MagicMock()
     cursor_context.__enter__.return_value = cursor
     conn = MagicMock()
@@ -603,7 +594,7 @@ def test_sync_db_adapter_json_adapts_recent_responses_list_of_objects() -> None:
     conn.cursor.return_value = cursor_context
 
     with patch("psycopg2.connect", return_value=conn):
-        adapter = _build_sync_db_adapter("postgresql://user:pass@host/db")
+        adapter = _internal_db_adapter("projection_delegation_inference_response_text")
         result = adapter.upsert(
             "projection_delegation_inference_response_text",
             "singleton_key",
@@ -716,6 +707,7 @@ def test_sync_db_adapter_json_adapts_new_unsuffixed_unallowlisted_list_of_dicts_
         psycopg2.extensions.adapt(audit_findings).getquoted()
 
     cursor = MagicMock()
+    cursor.fetchone.return_value = ("omninode_runtime", "omnidash_analytics")
     cursor_context = MagicMock()
     cursor_context.__enter__.return_value = cursor
     conn = MagicMock()
@@ -723,7 +715,7 @@ def test_sync_db_adapter_json_adapts_new_unsuffixed_unallowlisted_list_of_dicts_
     conn.cursor.return_value = cursor_context
 
     with patch("psycopg2.connect", return_value=conn):
-        adapter = _build_sync_db_adapter("postgresql://user:pass@host/db")
+        adapter = _internal_db_adapter("compliance_scan_results")
         result = adapter.upsert(
             "compliance_scan_results",
             "scan_id",
@@ -763,7 +755,7 @@ def test_projection_callback_emits_terminal_event_on_success() -> None:
         async def publish(self, topic: str, key: object, value: bytes) -> None:
             published.append((topic, key, value))
 
-    db_tables = [{"name": "delegation_events", "database": "omnidash_analytics"}]
+    db_tables = projection_database_target("delegation_events")
     handler = FakeHandler()
     fake_bus = FakeEventBus()
     terminal_topic = "onex.evt.omnimarket.projection-delegation-applied.v1"
@@ -820,7 +812,7 @@ def test_projection_callback_does_not_emit_terminal_event_on_zero_rows() -> None
         async def publish(self, topic: str, key: object, value: bytes) -> None:
             published.append((topic, key, value))
 
-    db_tables = [{"name": "delegation_events", "database": "omnidash_analytics"}]
+    db_tables = projection_database_target("delegation_events")
     terminal_topic = "onex.evt.omnimarket.projection-delegation-applied.v1"
     callback = _make_projection_dispatch_callback(
         ZeroRowHandler(),
@@ -867,7 +859,7 @@ def test_projection_callback_emits_terminal_event_from_materialized_dict() -> No
         async def publish(self, topic: str, key: object, value: bytes) -> None:
             published.append((topic, key, value))
 
-    db_tables = [{"name": "delegation_events", "database": "omnidash_analytics"}]
+    db_tables = projection_database_target("delegation_events")
     terminal_topic = "onex.evt.omnimarket.projection-delegation-applied.v1"
     callback = _make_projection_dispatch_callback(
         FakeHandler(),
@@ -924,7 +916,7 @@ def test_projection_callback_does_not_emit_terminal_event_on_handler_error() -> 
         async def publish(self, topic: str, key: object, value: bytes) -> None:
             published.append((topic, key, value))
 
-    db_tables = [{"name": "delegation_events", "database": "omnidash_analytics"}]
+    db_tables = projection_database_target("delegation_events")
     handler = FailingHandler()
     fake_bus = FakeEventBus()
     terminal_topic = "onex.evt.omnimarket.projection-delegation-applied.v1"
@@ -967,7 +959,7 @@ def test_projection_callback_no_terminal_event_when_bus_is_none() -> None:
         def handle(self, input_data: dict) -> dict:
             return {"rows_upserted": 1}
 
-    db_tables = [{"name": "delegation_events", "database": "omnidash_analytics"}]
+    db_tables = projection_database_target("delegation_events")
     handler = FakeHandler()
     callback = _make_projection_dispatch_callback(
         handler,
@@ -1010,7 +1002,7 @@ def test_projection_callback_terminal_event_publish_failure_does_not_propagate(
         async def publish(self, topic: str, key: object, value: bytes) -> None:
             raise OSError("kafka unavailable")
 
-    db_tables = [{"name": "delegation_events", "database": "omnidash_analytics"}]
+    db_tables = projection_database_target("delegation_events")
     handler = FakeHandler()
     callback = _make_projection_dispatch_callback(
         handler,
@@ -1067,49 +1059,27 @@ def test_db_url_env_map_matches_per_service_db_url_contract() -> None:
 
 
 @pytest.mark.unit
-def test_omniintelligence_is_accepted_db_identity_per_db_url_contract() -> None:
-    """omniintelligence resolves to OMNIINTELLIGENCE_DB_URL.
+def test_omniintelligence_requires_an_authoritative_topology_binding() -> None:
+    """A legacy DB URL map entry cannot substitute for typed topology.
 
-    Authoritative evidence: docs/patterns/db_url_contract.md line 14 names
-    env OMNIINTELLIGENCE_DB_URL -> database omniintelligence ->
-    role role_omniintelligence. node_dispatch_outcome_bridge_effect declares
-    db_io.db_tables[0].database == omniintelligence; building its projection
-    dispatch callback must not raise (regression guard for OMN-13158 F3).
+    OMN-15423 currently declares ``omniintelligence/public`` while OMN-15414's
+    application topology does not. The runtime must retain that as an explicit
+    dependency blocker instead of accepting the old physical-name map alone.
     """
     assert _DB_URL_ENV_MAP["omniintelligence"] == "OMNIINTELLIGENCE_DB_URL"
 
-    received: list[dict] = []
-
-    class FakeHandler:
-        def handle(self, input_data: dict) -> dict:
-            received.append(dict(input_data))
-            return {"rows_upserted": 1}
-
-    db_tables = [{"name": "dispatch_eval_results", "database": "omniintelligence"}]
-    callback = _make_projection_dispatch_callback(
-        FakeHandler(),
-        db_tables,
-        ("onex.evt.omniintelligence.dispatch-outcome.v1",),
+    table = ModelDbTableDeclaration(
+        name="dispatch_eval_results",
+        database_ref="omniintelligence",
+        schema="tenant",
+        migration="proof/dispatch_eval_results.sql",
+        role="dispatch_eval_results",
     )
-
-    envelope = MagicMock()
-    envelope.topic = "onex.evt.omniintelligence.dispatch-outcome.v1"
-    envelope.payload = {"correlation_id": "corr-1"}
-    fake_adapter = MagicMock()
-
-    captured_env: list[str] = []
-
-    def _env_get(key: str, default: object = None) -> object:
-        captured_env.append(key)
-        return "postgresql://role_omniintelligence:pw@host:5432/omniintelligence"
-
-    with patch(_PATCH_ENVIRON_GET, side_effect=_env_get):
-        with patch(_PATCH_BUILD_ADAPTER, return_value=fake_adapter):
-            asyncio.run(callback(envelope))
-
-    assert "OMNIINTELLIGENCE_DB_URL" in captured_env
-    assert len(received) == 1
-    assert received[0]["_db"] is fake_adapter
+    with pytest.raises(ValueError, match="Unknown database_ref"):
+        _resolve_projection_database_target(
+            (table,),
+            application_topology(),
+        )
 
 
 # ---------------------------------------------------------------------------
@@ -1200,7 +1170,7 @@ def test_projection_callback_routes_validation_error_to_dlq() -> None:
     bus = _CapturingEventBus()
     callback = _make_projection_dispatch_callback(
         _raising_validation_handler(),
-        [{"name": "delegation_events", "database": "omnidash_analytics"}],
+        projection_database_target("delegation_events"),
         ("onex.evt.omniclaude.task-delegated.v1",),
         sinks=ProjectionDispatchSinks(event_bus=bus, dlq_topics=(_DLQ_TOPIC,)),
     )
@@ -1237,7 +1207,7 @@ def test_projection_callback_no_dlq_publish_on_success() -> None:
     bus = _CapturingEventBus()
     callback = _make_projection_dispatch_callback(
         _raising_validation_handler(),
-        [{"name": "delegation_events", "database": "omnidash_analytics"}],
+        projection_database_target("delegation_events"),
         ("onex.evt.omniclaude.task-delegated.v1",),
         sinks=ProjectionDispatchSinks(event_bus=bus, dlq_topics=(_DLQ_TOPIC,)),
     )
@@ -1273,7 +1243,7 @@ def test_projection_callback_routes_to_quarantine_when_no_dlq_topic_declared(
     bus = _CapturingEventBus()
     callback = _make_projection_dispatch_callback(
         _raising_validation_handler(),
-        [{"name": "delegation_events", "database": "omnidash_analytics"}],
+        projection_database_target("delegation_events"),
         ("onex.evt.omniclaude.task-delegated.v1",),
         sinks=ProjectionDispatchSinks(event_bus=bus, dlq_topics=()),
     )

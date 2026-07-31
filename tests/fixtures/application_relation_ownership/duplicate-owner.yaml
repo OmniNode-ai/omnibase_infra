@@ -1,0 +1,21 @@
+# SPDX-FileCopyrightText: 2025 OmniNode.ai Inc.
+# SPDX-License-Identifier: MIT
+
+schema_version: "1.0"
+service: duplicate_delegation_owner
+owner_declaration: service:duplicate_delegation_owner
+target_database_ref: application
+db_io:
+  db_tables:
+    - name: delegation_events
+      database_ref: application
+      schema: tenant
+      migration: duplicate.sql
+      access: read_write
+      role: duplicate_events
+relation_evidence:
+  - name: delegation_events
+    kind: table
+    domain: TENANT
+    owner_declaration: service:duplicate_delegation_owner
+    readers: []

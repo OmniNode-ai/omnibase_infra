@@ -19,10 +19,15 @@ from unittest.mock import MagicMock, patch
 
 import pytest
 
+from omnibase_core.models.contracts.subcontracts.model_db_ownership_subcontract import (
+    ModelDbOwnershipSubcontract,
+)
+from omnibase_core.models.contracts.subcontracts.model_db_table_declaration import (
+    ModelDbTableDeclaration,
+)
 from omnibase_infra.runtime.auto_wiring.handler_wiring import (
-    _build_sync_db_adapter,
+    _build_projection_db_adapter,
     _make_projection_dispatch_callback,
-    _read_db_io_tables,
 )
 from omnibase_infra.runtime.auto_wiring.models import (
     ModelContractVersion,
@@ -32,24 +37,32 @@ from omnibase_infra.runtime.auto_wiring.models import (
     ModelHandlerRouting,
     ModelHandlerRoutingEntry,
 )
+from tests.helpers.application_db_topology import projection_database_target
+
+
+@pytest.fixture(autouse=True)
+def _configured_projection_dsn(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setenv("OMNIDASH_ANALYTICS_DB_URL", "postgresql://fixture")
+    monkeypatch.setenv("OMNINODE_INTERNAL_DB_URL", "postgresql://fixture")
+
 
 # ---------------------------------------------------------------------------
 # Helpers
 # ---------------------------------------------------------------------------
 
 
-def _make_contract(tmp_path: Path, db_tables_yaml: str = "") -> ModelDiscoveredContract:
+def _make_contract(
+    tmp_path: Path, *, declare_db_io: bool = False
+) -> ModelDiscoveredContract:
     """Write a minimal contract.yaml and return a ModelDiscoveredContract."""
-    db_io_block = f"db_io:\n  db_tables:\n{db_tables_yaml}" if db_tables_yaml else ""
     contract_path = tmp_path / "contract.yaml"
     contract_path.write_text(
-        f"name: projection_registration\n"
-        f"node_type: reducer\n"
-        f"contract_version: {{major: 1, minor: 0, patch: 0}}\n"
-        f"{db_io_block}\n"
-        f"event_bus:\n"
-        f"  subscribe_topics:\n"
-        f"    - onex.evt.platform.node-heartbeat.v1\n"
+        "name: projection_registration\n"
+        "node_type: reducer\n"
+        "contract_version: {major: 1, minor: 0, patch: 0}\n"
+        "event_bus:\n"
+        "  subscribe_topics:\n"
+        "    - onex.evt.platform.node-heartbeat.v1\n"
     )
     return ModelDiscoveredContract(
         name="projection_registration",
@@ -72,6 +85,22 @@ def _make_contract(tmp_path: Path, db_tables_yaml: str = "") -> ModelDiscoveredC
                     ),
                 ),
             ),
+        ),
+        db_io=(
+            ModelDbOwnershipSubcontract(
+                db_tables=[
+                    ModelDbTableDeclaration(
+                        name="node_service_registry",
+                        database_ref="application",
+                        schema="tenant",
+                        migration="tests/node_service_registry.sql",
+                        access="read_write",
+                        role="service_registry",
+                    )
+                ]
+            )
+            if declare_db_io
+            else None
         ),
     )
 
@@ -105,7 +134,7 @@ def test_projection_callback_end_to_end_with_fake_db(tmp_path: Path) -> None:
         def query(self, table: str, filters: dict | None = None) -> list:
             return []
 
-    db_tables = [{"name": "node_service_registry", "database": "omnidash_analytics"}]
+    db_tables = projection_database_target("node_service_registry")
     handler = FakeProjectionHandler()
     callback = _make_projection_dispatch_callback(
         handler, db_tables, ("onex.evt.platform.node-heartbeat.v1",)
@@ -118,7 +147,7 @@ def test_projection_callback_end_to_end_with_fake_db(tmp_path: Path) -> None:
     fake_db = FakeDb()
 
     with patch(
-        "omnibase_infra.runtime.auto_wiring.handler_wiring._build_sync_db_adapter",
+        "omnibase_infra.runtime.auto_wiring.handler_wiring._build_projection_db_adapter",
         return_value=fake_db,
     ):
         with patch(
@@ -161,7 +190,7 @@ def test_projection_callback_uses_sole_subscribed_topic_when_envelope_has_no_top
 
     callback = _make_projection_dispatch_callback(
         FakeProjectionHandler(),
-        [{"name": "node_service_registry", "database": "omnidash_analytics"}],
+        projection_database_target("node_service_registry"),
         ("onex.evt.platform.node-heartbeat.v1",),
     )
 
@@ -170,7 +199,7 @@ def test_projection_callback_uses_sole_subscribed_topic_when_envelope_has_no_top
     envelope.payload = {"service_name": "runtime-host", "health_status": "healthy"}
 
     with patch(
-        "omnibase_infra.runtime.auto_wiring.handler_wiring._build_sync_db_adapter",
+        "omnibase_infra.runtime.auto_wiring.handler_wiring._build_projection_db_adapter",
         return_value=FakeDb(),
     ):
         with patch(
@@ -212,7 +241,7 @@ def test_projection_callback_uses_event_type_when_multitopic_envelope_has_no_top
 
     callback = _make_projection_dispatch_callback(
         FakeProjectionHandler(),
-        [{"name": "node_service_registry", "database": "omnidash_analytics"}],
+        projection_database_target("node_service_registry"),
         (
             "onex.evt.platform.node-introspection.v1",
             "onex.evt.platform.node-heartbeat.v1",
@@ -225,7 +254,7 @@ def test_projection_callback_uses_event_type_when_multitopic_envelope_has_no_top
     envelope.payload = {"service_name": "runtime-host", "health_status": "healthy"}
 
     with patch(
-        "omnibase_infra.runtime.auto_wiring.handler_wiring._build_sync_db_adapter",
+        "omnibase_infra.runtime.auto_wiring.handler_wiring._build_projection_db_adapter",
         return_value=FakeDb(),
     ):
         with patch(
@@ -267,7 +296,7 @@ def test_projection_callback_uses_materialized_dispatch_trace_topic(
 
     callback = _make_projection_dispatch_callback(
         FakeProjectionHandler(),
-        [{"name": "node_service_registry", "database": "omnidash_analytics"}],
+        projection_database_target("node_service_registry"),
         (
             "onex.evt.platform.node-introspection.v1",
             "onex.evt.platform.node-heartbeat.v1",
@@ -284,7 +313,7 @@ def test_projection_callback_uses_materialized_dispatch_trace_topic(
     }
 
     with patch(
-        "omnibase_infra.runtime.auto_wiring.handler_wiring._build_sync_db_adapter",
+        "omnibase_infra.runtime.auto_wiring.handler_wiring._build_projection_db_adapter",
         return_value=FakeDb(),
     ):
         with patch(
@@ -326,7 +355,7 @@ def test_projection_callback_maps_node_state_change_topic(
 
     callback = _make_projection_dispatch_callback(
         FakeProjectionHandler(),
-        [{"name": "node_service_registry", "database": "omnidash_analytics"}],
+        projection_database_target("node_service_registry"),
         (
             "onex.evt.platform.node-introspection.v1",
             "onex.evt.platform.node-heartbeat.v1",
@@ -344,7 +373,7 @@ def test_projection_callback_maps_node_state_change_topic(
     }
 
     with patch(
-        "omnibase_infra.runtime.auto_wiring.handler_wiring._build_sync_db_adapter",
+        "omnibase_infra.runtime.auto_wiring.handler_wiring._build_projection_db_adapter",
         return_value=FakeDb(),
     ):
         with patch(
@@ -363,28 +392,23 @@ def test_wire_handler_entry_uses_projection_path_when_db_io_declared(
     tmp_path: Path,
 ) -> None:
     """_wire_handler_entry selects projection callback (not standard) when contract has db_io."""
-    contract = _make_contract(
-        tmp_path,
-        db_tables_yaml="    - name: node_service_registry\n      database: omnidash_analytics\n",
-    )
+    contract = _make_contract(tmp_path, declare_db_io=True)
 
-    # _read_db_io_tables should find the declared table
-    tables = _read_db_io_tables(contract.contract_path)
-    assert len(tables) == 1
-    assert tables[0]["database"] == "omnidash_analytics"
+    assert contract.db_io is not None
+    assert contract.db_io.db_tables[0].database_ref == "application"
+    assert contract.db_io.db_tables[0].schema == "tenant"
 
 
 @pytest.mark.integration
 def test_wire_handler_entry_uses_standard_path_when_no_db_io(tmp_path: Path) -> None:
     """_wire_handler_entry uses standard envelope path when contract has no db_io."""
-    contract = _make_contract(tmp_path, db_tables_yaml="")
-    tables = _read_db_io_tables(contract.contract_path)
-    assert tables == []
+    contract = _make_contract(tmp_path)
+    assert contract.db_io is None
 
 
 @pytest.mark.integration
-def test_projection_callback_no_op_when_db_url_missing(tmp_path: Path) -> None:
-    """Projection callback returns None without calling handler when DB URL unset."""
+def test_projection_callback_rejects_missing_db_url_at_wiring(tmp_path: Path) -> None:
+    """Projection wiring fails before dispatch when a required DSN is unset."""
     call_count = [0]
 
     class CountingHandler:
@@ -392,20 +416,17 @@ def test_projection_callback_no_op_when_db_url_missing(tmp_path: Path) -> None:
             call_count[0] += 1
             return {}
 
-    db_tables = [{"name": "node_service_registry", "database": "omnidash_analytics"}]
-    callback = _make_projection_dispatch_callback(CountingHandler(), db_tables, ())
-
-    envelope = MagicMock()
-    envelope.topic = "onex.evt.platform.node-heartbeat.v1"
-    envelope.payload = {}
-
     with patch(
         "omnibase_infra.runtime.auto_wiring.handler_wiring.os.environ.get",
         return_value="",
     ):
-        result = asyncio.run(callback(envelope))
+        with pytest.raises(ValueError, match="tenant_projection"):
+            _make_projection_dispatch_callback(
+                CountingHandler(),
+                projection_database_target("node_service_registry"),
+                (),
+            )
 
-    assert result is None
     assert call_count[0] == 0
 
 
@@ -428,9 +449,12 @@ def test_sync_psycopg2_adapter_preserves_text_array_lists(
         def __exit__(self, *args: object) -> None:
             return None
 
-        def execute(self, sql: str, params: object) -> None:
+        def execute(self, sql: str, params: object | None = None) -> None:
             captured_execute["sql"] = sql
             captured_execute["params"] = params
+
+        def fetchone(self) -> tuple[str, str]:
+            return ("omninode_runtime", "omnidash_analytics")
 
     class FakeConnection:
         closed = False
@@ -448,7 +472,14 @@ def test_sync_psycopg2_adapter_preserves_text_array_lists(
         def rollback(self) -> None:
             captured_execute["rolled_back"] = True
 
-    fake_extras = types.SimpleNamespace(Json=FakeJson, RealDictCursor=object)
+        def close(self) -> None:
+            self.closed = True
+
+    fake_extras = types.SimpleNamespace(
+        Json=FakeJson,
+        RealDictCursor=object,
+        register_uuid=lambda: None,
+    )
     fake_psycopg2 = types.SimpleNamespace(
         connect=lambda dsn: FakeConnection(),
         extras=fake_extras,
@@ -457,7 +488,13 @@ def test_sync_psycopg2_adapter_preserves_text_array_lists(
     monkeypatch.setitem(sys.modules, "psycopg2", fake_psycopg2)
     monkeypatch.setitem(sys.modules, "psycopg2.extras", fake_extras)
 
-    adapter = _build_sync_db_adapter("postgresql://example")
+    target = projection_database_target("swarm_runs", schema="omninode_internal")
+    adapter = _build_projection_db_adapter(
+        {"omninode_runtime_service": "postgresql://example"},
+        target,
+        None,
+        None,
+    )
     result = adapter.upsert(
         "swarm_runs",
         "run_id",
@@ -476,9 +513,8 @@ def test_sync_psycopg2_adapter_preserves_text_array_lists(
     assert params["machines_used"] == ["worker-a", "worker-b"]
     assert isinstance(params["metadata"], FakeJson)
     assert params["metadata"].value == {"source": "integration-test"}
-    # OMN-15301: the write committed its tenant-scoped transaction rather than
-    # rolling back. A table with no tenant_id column still runs under the
-    # interim default context — harmless where no policy exists, required where
-    # one does.
-    assert captured_execute.get("committed") is True
+    # OMN-15421: this is an internal-domain operation, so it uses ordinary
+    # autocommit and never enters the tenant transaction helper.
+    assert "set_config" not in str(captured_execute["sql"])
+    assert "committed" not in captured_execute
     assert "rolled_back" not in captured_execute

@@ -129,6 +129,9 @@ KNOWN_INFRA_PROTOCOLS: dict[str, str] = {
     "ProtocolRuntimeScheduler": "runtime/protocols/protocol_runtime_scheduler.py",
     "ProtocolSecretResolver": "runtime/config_discovery/models/protocol_secret_resolver.py",
     "ProtocolSecretResolverMetrics": "runtime/secret_resolver.py",
+    "ProtocolDbTableCatalogConnection": "runtime/auto_wiring/protocol_db_table_catalog_connection.py",  # [RUNTIME] OMN-15418 narrow asyncpg catalog-query boundary for typed table ownership validation
+    "ProtocolProjectionTenantBindingResolver": "runtime/projection_tenant_authority.py",  # [DI] OMN-15421 signer-scope-to-tenant authority binding injected at the verification boundary
+    "ProtocolApplicationDatabaseRoleAttributeState": "validation/application_database_acl.py",  # [DI] OMN-15355 shared read-only role-attribute shape for generated ACL policy and observed catalog state
     "ProtocolHandleable": "runtime/auto_wiring/handler_wiring.py",  # [RUNTIME] OMN-7656 auto-wiring dispatch
     "ProtocolDelegationDispatchPort": "runtime/protocols/protocol_delegation_dispatch_port.py",  # [RUNTIME] OMN-E0 delegation dispatch port interface — infra-internal, narrows dispatch surface for handler injection
     # OMN-13445: the 5 ProtocolLocalRuntime* protocols relocated to

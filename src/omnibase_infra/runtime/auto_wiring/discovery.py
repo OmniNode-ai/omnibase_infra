@@ -21,6 +21,9 @@ from pathlib import Path
 
 import yaml
 
+from omnibase_core.models.contracts.subcontracts.model_db_ownership_subcontract import (
+    ModelDbOwnershipSubcontract,
+)
 from omnibase_infra.runtime.auto_wiring.models import (
     ModelAutoWiringManifest,
     ModelContractVersion,
@@ -414,11 +417,14 @@ def _parse_contract(
         event_bus = ModelEventBusWiring(
             subscribe_topics=tuple(eb_raw.get("subscribe_topics", [])),
             publish_topics=tuple(eb_raw.get("publish_topics", [])),
+            dlq_topics=tuple(eb_raw.get("dlq_topics", [])),
+            consumer_group=eb_raw.get("consumer_group"),
             consumer_purpose=eb_raw.get("consumer_purpose"),
             plugin_managed=_parse_bool_field(eb_raw, "plugin_managed", False),
             tenant_scoped_ingress=_parse_bool_field(
                 eb_raw, "tenant_scoped_ingress", False
             ),
+            terminal_event=eb_raw.get("terminal_event"),
         )
 
     # Extract handler routing — new format (handler_routing:) or legacy (handler:)
@@ -437,6 +443,12 @@ def _parse_contract(
         handler_routing = _parse_legacy_handler(h_raw)
 
     runtime_profiles = _extract_runtime_profiles(raw)
+    db_io_raw = raw.get("db_io")
+    db_io = (
+        ModelDbOwnershipSubcontract.model_validate(db_io_raw)
+        if db_io_raw is not None
+        else None
+    )
 
     return ModelDiscoveredContract(
         name=raw.get("name", entry_point_name),
@@ -450,10 +462,17 @@ def _parse_contract(
         package_version=package_version,
         runtime_profiles=runtime_profiles,
         compatibility_publish_topics=raw.get("compatibility_publish_topics"),
-        terminal_event=raw.get("terminal_event"),
+        terminal_event=(
+            raw.get("terminal_event")
+            if raw.get("terminal_event") is not None
+            else event_bus.terminal_event
+            if event_bus is not None
+            else None
+        ),
         requires_cloud_gateway=_contract_requires_cloud_gateway(raw),
         event_bus=event_bus,
         handler_routing=handler_routing,
+        db_io=db_io,
     )
 
 
@@ -564,6 +583,15 @@ def _parse_handler_routing(
                 name=em_raw.get("name", ""),
                 module=em_raw.get("module", ""),
             )
+        elif isinstance(em_raw, str):
+            module_name, separator, model_name = em_raw.rpartition(".")
+            if not separator or not module_name or not model_name:
+                raise ValueError(
+                    f"handler_routing.handlers[{index}].event_model must be a "
+                    "fully qualified 'module.Model' string or a {name, module} "
+                    "mapping"
+                )
+            event_model = ModelHandlerRef(name=model_name, module=module_name)
         entries.append(
             ModelHandlerRoutingEntry(
                 handler=handler_ref,

@@ -1,0 +1,64 @@
+# SPDX-FileCopyrightText: 2025 OmniNode.ai Inc.
+# SPDX-License-Identifier: MIT
+
+name: Application ACL PostgreSQL 16 Proof
+
+on:
+  pull_request:
+    branches: [main, dev, develop]
+    paths:
+      - ".github/workflows/application-acl-postgres16-proof.yml"
+      - "docker/application-acl-proof/**"
+      - "scripts/generate_application_database_acl.py"
+      - "scripts/ci/prove_application_database_acl.py"
+      - "src/omnibase_infra/validation/application_database_acl.py"
+      - "src/omnibase_infra/validation/enums/**"
+      - "src/omnibase_infra/validation/models/**"
+      - "src/omnibase_infra/validation/types/**"
+      - "tests/fixtures/application_database_acl/**"
+      - "tests/unit/validation/test_application_database_acl.py"
+      - "tests/ci/test_application_database_acl_contract.py"
+      - "tests/integration/test_application_acl_postgres16_proof.py"
+  workflow_dispatch:
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  rebuilt-postgres16-proof:
+    name: Rebuilt PostgreSQL 16 ACL and rollback proof
+    env:
+      COMPOSE_PROJECT_NAME: application-acl-proof-${{ github.run_id }}-${{ github.run_attempt }}
+    permissions:
+      contents: read
+    runs-on: >-
+      ${{
+        (github.event_name == 'pull_request' &&
+         github.event.pull_request.head.repo.full_name != github.repository)
+        && fromJSON(vars.OMNI_PUBLIC_PR_RUNS_ON_JSON || '["ubuntu-latest"]')
+        || fromJSON(vars.OMNI_DOCKER_CI_RUNS_ON_JSON || vars.OMNI_TRUSTED_CI_RUNS_ON_JSON || '["self-hosted","omnibase-ci"]')
+      }}
+    timeout-minutes: 30
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+        with:
+          persist-credentials: false
+
+      - name: Verify Docker engine
+        run: docker info
+
+      - name: Rebuild and prove ACL matrix
+        run: >-
+          docker compose
+          -f docker/application-acl-proof/compose.yml
+          up --build --abort-on-container-exit --exit-code-from proof
+
+      - name: Tear down synthetic proof
+        if: always()
+        run: >-
+          docker compose
+          -f docker/application-acl-proof/compose.yml
+          down --volumes --remove-orphans

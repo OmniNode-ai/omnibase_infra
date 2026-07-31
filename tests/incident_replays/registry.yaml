@@ -198,3 +198,35 @@ cases:
     test: tests/ci/test_incident_replay_coverage_omn15547.py::test_the_omn15536_outage_pin_is_unreachable_by_the_real_predicate
     why: >-
       omnibase_infra#2570 pinned the merge-hold reusable workflow at omnimarket@879d6fc6 -- the pre-squash head of omnimarket#1976, whose branch GitHub deleted when it squash-merged as 454c429f. The ref then resolved to nothing, so ci.yml failed to LOAD (0 jobs, conclusion=failure) and the sole required context CI Summary went ABSENT rather than red: all seven open infra PRs blocked for ~2.5h with no failing check to point at. Both repos already shipped pin validators and both PASSED the dead pin, because both only checked that it looked like 40 hex characters. The captured artifact is GitHub answering the question those validators never asked -- `status: diverged`, i.e. unreachable from the protected branch. OMN-15538 (#2583) built the predicate; this case pins it against the real response rather than a hardcoded string, and its `behind` sibling (omnimarket-compare-dev-454c429f, the squash that actually landed) is the control that stops a blanket-reject implementation looking correct.
+  - id: omn15355-acl-generator-source-lock-missing-roots
+    guard: scripts/generate_application_database_acl.py
+    incident: OMN-15355
+    regression_class: false_green
+    guard_verdict_on_artifact: reject
+    artifact:
+      fixture: tests/fixtures/omn15547/application-acl-source-lock.yaml.captured
+      sha256: 79d329c20554dcd4508322dc9f0d73630464e20e2f84dd712e8584a7caea0a97
+    capture:
+      method: git-object
+      source: git-object:OmniNode-ai/omnibase_infra@b65dd286f373c3363e14066e0bbf272ddbc0aec6:docker/application-acl-proof/source-lock.yaml
+      captured_at: "2026-07-31T05:55:00Z"
+      captured_by: Codex merge sweep (OMN-15418 repair)
+    test: tests/unit/scripts/test_prove_application_database_acl.py::test_generator_rejects_source_lock_without_repository_roots
+    why: >-
+      The ACL matrix generator is an enforcement guard only if it refuses to render from a source lock whose repository roots are not explicitly supplied. A missing-root run can otherwise produce proof-shaped output divorced from the immutable Git objects named by the lock. This fixture is the real source lock from the rebased #2548 head; the replay drives the actual generator entrypoint with no repository roots and requires the fail-closed missing-root verdict.
+  - id: omn15355-acl-proof-prechange-drift
+    guard: scripts/ci/prove_application_database_acl.py
+    incident: OMN-15355
+    regression_class: false_green
+    guard_verdict_on_artifact: reject
+    artifact:
+      fixture: tests/fixtures/omn15547/application-acl-prechange-fixture.json.captured
+      sha256: a38988de6a5f7927491bb36c47e45202577b254db4b60731f0b1d24cfad235d5
+    capture:
+      method: git-object
+      source: git-object:OmniNode-ai/omnibase_infra@b65dd286f373c3363e14066e0bbf272ddbc0aec6:docker/application-acl-proof/generated/prechange-fixture-acl.json
+      captured_at: "2026-07-31T05:55:00Z"
+      captured_by: Codex merge sweep (OMN-15418 repair)
+    test: tests/unit/scripts/test_prove_application_database_acl.py::test_prechange_capture_pins_durable_acl_drift_predicate
+    why: >-
+      The PostgreSQL ACL proof is only durable if its pre-change rollback artifact is exact. A proof that accepts drift in that artifact can pass while rollback no longer restores the real pre-change graph. This fixture is the real generated pre-change artifact from the rebased #2548 head; the replay loads it through the proof module's EXPECTED_PRECHANGE path and requires the same durable-prechange equality predicate to reject a one-row drift.
