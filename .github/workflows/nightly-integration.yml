@@ -255,17 +255,43 @@ jobs:
       # OMN-15565: the explicit -p is load-bearing. `-v --remove-orphans` against
       # the default project is exactly what deleted the lab lane's containers and
       # data volumes every night; scoped to the run-scoped project it can only
-      # delete this run's own resources. The guard rejects an empty project name
-      # rather than letting compose fall back to the file default.
+      # delete this run's own resources. Because this step uses `if: always()`, it
+      # independently re-derives this run's immutable project and rejects empty,
+      # unexpected, or censused live-lane targets before the destructive down.
       - name: Tear down e2e stack
         if: always()
         run: |
           set -euo pipefail
           project="${OMNIBASE_INFRA_COMPOSE_PROJECT:-}"
+          e2e_id="e2e-${GITHUB_RUN_ID:-local}-${GITHUB_RUN_ATTEMPT:-1}"
+          e2e_id="$(echo "$e2e_id" | tr '[:upper:]' '[:lower:]' | tr -cs 'a-z0-9_-' '-')"
+          expected_project="omnibase-infra-${e2e_id}"
           if [[ -z "$project" ]]; then
             echo "::error::OMNIBASE_INFRA_COMPOSE_PROJECT is unset - refusing to run a project-less teardown"
             exit 1
           fi
+          if [[ "$project" != "$expected_project" ]]; then
+            echo "::error::refusing to tear down unexpected compose project '$project' (expected '$expected_project' for this run)"
+            exit 1
+          fi
+          uv run python - "$project" <<'PY'
+          import sys
+
+          import yaml
+
+          project = sys.argv[1]
+          manifest = yaml.safe_load(open("deploy/lane-census/lane-manifest.yaml", encoding="utf-8"))
+          protected = {
+              lane["compose_project"]
+              for lane in manifest["lanes"].values()
+              if lane.get("compose_project")
+          }
+          if project in protected:
+              sys.exit(
+                  f"::error::refusing to tear down live lane project {project!r} "
+                  f"(censused lanes: {sorted(protected)})"
+              )
+          PY
           docker compose -p "$project" -f docker/docker-compose.e2e.yml down -v --remove-orphans
 
       - name: Upload test results
