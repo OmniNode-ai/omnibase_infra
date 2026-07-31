@@ -49,8 +49,12 @@ INSERT INTO runtime_manifests (
     failed_contracts,
     ownership_violations,
     image_digest,
-    started_at
-) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13)
+    started_at,
+    attach_state,
+    attach_required_contracts,
+    attach_attached_contracts,
+    attach_not_ready_contracts
+) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17)
 ON CONFLICT (runtime_profile, topology_hash, started_at) DO NOTHING
 RETURNING id;
 """
@@ -113,6 +117,24 @@ class HandlerPostgresRuntimeManifestInsert(MixinPostgresOpExecutor):
         payload: ModelPayloadInsertRuntimeManifest,
         correlation_id: UUID,
     ) -> None:
+        # OMN-15512: flatten the attach-readiness aggregate across four
+        # columns. `attach_state` stays 'unknown' (the column default) when the
+        # per-contract interleave never ran — deliberately distinct from
+        # 'ready', which asserts it ran and every contract attached.
+        readiness = payload.attach_readiness
+        if readiness is None:
+            attach_state = "unknown"
+            attach_required = 0
+            attach_attached = 0
+            attach_not_ready_json = "[]"
+        else:
+            attach_state = readiness.state.value
+            attach_required = readiness.required_contracts
+            attach_attached = readiness.attached_contracts
+            attach_not_ready_json = json.dumps(
+                [r.model_dump(mode="json") for r in readiness.not_ready_results]
+            )
+
         async with self._pool.acquire() as conn:
             row = await conn.fetchrow(
                 SQL_INSERT_RUNTIME_MANIFEST,
@@ -129,6 +151,10 @@ class HandlerPostgresRuntimeManifestInsert(MixinPostgresOpExecutor):
                 json.dumps(list(payload.ownership_violations)),
                 payload.image_digest,
                 payload.started_at,
+                attach_state,
+                attach_required,
+                attach_attached,
+                attach_not_ready_json,
             )
 
         if row is None:

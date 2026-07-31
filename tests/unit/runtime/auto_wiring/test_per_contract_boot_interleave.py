@@ -434,3 +434,104 @@ class TestBackwardCompatNoProvisioner:
 
         assert subscriptions == {"node_a": (topic,)}
         event_bus.subscribe.assert_called_once()
+
+
+# ---------------------------------------------------------------------------
+# OMN-15512 — the blocker-set narrowing used for the published/persisted copy
+# ---------------------------------------------------------------------------
+
+
+class TestBlockerSetNarrowing:
+    """``blockers_only()`` bounds the published payload without losing signal.
+
+    Boot walks 475+ contracts; re-emitting every ATTACHED result on the
+    runtime-manifest envelope would roughly double it for zero added
+    information, since attached contracts are already enumerated in the
+    manifest's own ``contracts``/``handlers``. The counts must survive the
+    narrowing or the reader cannot reconstruct the whole walk.
+    """
+
+    def _mixed(self) -> ModelRuntimeAttachReadiness:
+        return ModelRuntimeAttachReadiness.from_results(
+            (
+                ModelContractAttachResult(
+                    contract_name="node_ok",
+                    status=EnumContractAttachStatus.ATTACHED,
+                ),
+                ModelContractAttachResult(
+                    contract_name="node_not_ready",
+                    status=EnumContractAttachStatus.NOT_READY,
+                    detail="topic metadata did not converge",
+                ),
+                ModelContractAttachResult(
+                    contract_name="node_failed",
+                    status=EnumContractAttachStatus.FAILED,
+                    detail="consumer attach raised",
+                ),
+            )
+        )
+
+    def test_not_ready_results_covers_failed_as_well_as_not_ready(self) -> None:
+        """FAILED is a blocker too — it also means no consumer is attached."""
+        names = {r.contract_name for r in self._mixed().not_ready_results}
+        assert names == {"node_not_ready", "node_failed"}
+
+    def test_blockers_only_narrows_results_but_keeps_counts(self) -> None:
+        narrowed = self._mixed().blockers_only()
+        assert len(narrowed.results) == 2
+        assert narrowed.required_contracts == 3
+        assert narrowed.attached_contracts == 1
+        assert narrowed.state is EnumRuntimeReadinessState.DEGRADED
+
+    def test_count_invariant_holds_on_the_narrowed_copy(self) -> None:
+        """required - attached == len(results): the reconstruction invariant."""
+        narrowed = self._mixed().blockers_only()
+        assert narrowed.required_contracts - narrowed.attached_contracts == len(
+            narrowed.results
+        )
+
+    def test_blockers_only_is_idempotent(self) -> None:
+        once = self._mixed().blockers_only()
+        assert once.blockers_only() == once
+
+    def test_all_attached_narrows_to_empty_not_to_unknown(self) -> None:
+        """A clean boot must publish READY with zero blockers.
+
+        Distinct from "no aggregate at all", which the projection records as
+        attach_state='unknown'. Absence of evidence is not evidence of
+        attachment.
+        """
+        clean = ModelRuntimeAttachReadiness.from_results(
+            (
+                ModelContractAttachResult(
+                    contract_name="node_ok",
+                    status=EnumContractAttachStatus.ATTACHED,
+                ),
+            )
+        ).blockers_only()
+        assert clean.state is EnumRuntimeReadinessState.READY
+        assert clean.results == ()
+        assert clean.required_contracts == 1
+        assert clean.attached_contracts == 1
+
+    def test_narrowing_preserves_the_failing_topic_detail(self) -> None:
+        """The topic names are the payload — narrowing must not flatten them."""
+        readiness = ModelRuntimeAttachReadiness.from_results(
+            (
+                ModelContractAttachResult(
+                    contract_name="node_blocked",
+                    status=EnumContractAttachStatus.NOT_READY,
+                    readiness=ModelTopicSetReadiness(
+                        topics=("topic.absent.v1",),
+                        status=EnumTopicReadinessStatus.NOT_READY,
+                        ready_topics=(),
+                        attempts=1,
+                    ),
+                    detail="topic metadata did not converge",
+                ),
+            )
+        )
+        blocker = readiness.blockers_only().results[0]
+        assert blocker.readiness is not None
+        assert blocker.readiness.topics == ("topic.absent.v1",)
+        assert blocker.detail == "topic metadata did not converge"

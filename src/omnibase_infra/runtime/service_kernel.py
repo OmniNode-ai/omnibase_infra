@@ -70,6 +70,9 @@ from uuid import UUID
 import yaml
 
 if TYPE_CHECKING:
+    from omnibase_infra.event_bus.model_runtime_attach_readiness import (
+        ModelRuntimeAttachReadiness as ModelRuntimeAttachReadinessType,
+    )
     from omnibase_infra.event_bus.model_topic_readiness_config import (
         ModelTopicReadinessConfig,
     )
@@ -2485,6 +2488,11 @@ async def bootstrap() -> int:
         auto_wiring_manifest_for_subscriptions = None
         auto_wiring_manifest_discovered = None  # OMN-11198: full discovery result
         lifecycle_executor = None
+        # OMN-15512: boot attach-readiness aggregate, hoisted to bootstrap scope
+        # so step 9.8 can fold it onto the runtime-manifest snapshot. Stays None
+        # when the per-contract interleave never ran, which is distinct from
+        # "ran and everything attached" (that carries a READY aggregate).
+        attach_readiness: ModelRuntimeAttachReadinessType | None = None
         try:
             from omnibase_infra.runtime.auto_wiring import (
                 LifecycleHookExecutor,
@@ -3236,6 +3244,16 @@ async def bootstrap() -> int:
             _attach_readiness = ModelRuntimeAttachReadiness.from_results(
                 tuple(_attach_results)
             )
+            # OMN-15512: hand the aggregate to the enclosing bootstrap scope so
+            # step 9.8 folds it onto the runtime-manifest snapshot. Before this
+            # it died at the logger.info below, so the only way to read the
+            # NOT-READY blocker set was `docker logs | grep NOT-READY` — which
+            # is literally how OMN-15508 had to be diagnosed.
+            attach_readiness = _attach_readiness
+            # Counts also go onto the EXISTING /health/detailed components map.
+            # No new endpoint and no new producer: the authoritative, queryable
+            # copy is the runtime_manifests projection, not this endpoint.
+            health_server.attach_readiness(_attach_readiness)
             logger.info(
                 "Per-contract boot interleave: state=%s attached=%d/%d "
                 "(OMN-13237) (correlation_id=%s)",
@@ -3896,16 +3914,19 @@ async def bootstrap() -> int:
         # 9.8. Emit runtime manifest snapshot (OMN-11196).
         # Published once per startup after all phases complete.
         # Non-fatal: failures are logged and the kernel continues.
+        #
+        # OMN-15512: the snapshot now also carries the boot attach-readiness
+        # aggregate, so the NOT-READY blocker set (contract + the topics whose
+        # readiness confirm failed) lands in the runtime_manifests projection
+        # instead of only the log stream. Same event, same table, same row —
+        # no second producer.
         if (
             auto_wiring_report is not None
             and auto_wiring_manifest_for_subscriptions is not None
         ):
             try:
-                from omnibase_core.models.events.model_event_envelope import (
-                    ModelEventEnvelope,
-                )
                 from omnibase_infra.runtime.manifest_builder import (
-                    build_runtime_manifest,
+                    publish_runtime_manifest,
                 )
                 from omnibase_infra.topics import SUFFIX_RUNTIME_MANIFEST_PUBLISHED
 
@@ -3913,27 +3934,31 @@ async def bootstrap() -> int:
                     SUFFIX_RUNTIME_MANIFEST_PUBLISHED,
                     correlation_id=correlation_id,
                 )
-                _runtime_profile_for_manifest = os.getenv("RUNTIME_PROFILE", "main")
-                _image_digest = os.getenv("ONEX_IMAGE_DIGEST")
-                _runtime_manifest = build_runtime_manifest(
+                _published_manifest = await publish_runtime_manifest(
+                    event_bus=event_bus,
                     report=auto_wiring_report,
                     manifest=auto_wiring_manifest_for_subscriptions,
-                    runtime_profile=_runtime_profile_for_manifest,
-                    image_digest=_image_digest,
-                )
-                _manifest_envelope: ModelEventEnvelope[object] = ModelEventEnvelope(
-                    payload=_runtime_manifest,
-                    correlation_id=correlation_id,
-                    event_type="runtime-manifest-published",
-                    source_tool="service_kernel",
-                )
-                await event_bus.publish_envelope(
-                    envelope=_manifest_envelope,
+                    runtime_profile=os.getenv("RUNTIME_PROFILE", "main"),
                     topic=_manifest_topic,
+                    correlation_id=correlation_id,
+                    image_digest=os.getenv("ONEX_IMAGE_DIGEST"),
+                    attach_readiness=attach_readiness,
                 )
+                _published_readiness = _published_manifest.attach_readiness
                 logger.info(
-                    "Runtime manifest published (topic=%s, correlation_id=%s)",
+                    "Runtime manifest published (topic=%s, attach_state=%s, "
+                    "not_ready_contracts=%d, correlation_id=%s)",
                     _manifest_topic,
+                    (
+                        _published_readiness.state.value
+                        if _published_readiness is not None
+                        else "unknown"
+                    ),
+                    (
+                        len(_published_readiness.results)
+                        if _published_readiness is not None
+                        else 0
+                    ),
                     correlation_id,
                 )
             except ImportError:

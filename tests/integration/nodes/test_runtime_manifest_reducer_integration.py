@@ -45,6 +45,13 @@ _MIGRATION_PATH = (
     / "forward"
     / "079_create_runtime_manifests.sql"
 )
+_ATTACH_MIGRATION_PATH = (
+    _REPO_ROOT
+    / "docker"
+    / "migrations"
+    / "forward"
+    / "095_add_attach_readiness_to_runtime_manifests.sql"
+)
 
 
 def _valid_payload(
@@ -98,6 +105,10 @@ def test_sql_template_names_every_payload_column() -> None:
 
     Drift here would silently drop fields on insert or break with a Postgres
     column-mismatch error after deploy.
+
+    ``attach_readiness`` (OMN-15512) is the one payload field that is NOT a
+    column: the handler flattens the aggregate across four columns, so it is
+    asserted through ``_ATTACH_READINESS_COLUMNS`` below rather than by name.
     """
     expected_columns = {
         "runtime_profile",
@@ -117,6 +128,46 @@ def test_sql_template_names_every_payload_column() -> None:
     sql = SQL_INSERT_RUNTIME_MANIFEST.lower()
     for col in expected_columns:
         assert col.lower() in sql, f"SQL template missing column {col!r}"
+
+    flattened = {"attach_readiness"}
+    modelled = set(ModelPayloadInsertRuntimeManifest.model_fields) - {"intent_type"}
+    assert modelled == expected_columns | flattened, (
+        "payload model fields drifted from the SQL column set — add the column "
+        "(or extend the flattened set with a stated reason)"
+    )
+
+
+# OMN-15512: the four columns the attach-readiness aggregate flattens into.
+_ATTACH_READINESS_COLUMNS = (
+    "attach_state",
+    "attach_required_contracts",
+    "attach_attached_contracts",
+    "attach_not_ready_contracts",
+)
+
+
+def test_sql_template_writes_the_attach_readiness_columns() -> None:
+    """The blocker set must actually be written, not merely modelled (OMN-15512)."""
+    sql = SQL_INSERT_RUNTIME_MANIFEST.lower()
+    for col in _ATTACH_READINESS_COLUMNS:
+        assert col in sql, f"SQL template missing column {col!r}"
+
+
+def test_attach_readiness_columns_exist_in_a_migration() -> None:
+    """Every column the INSERT names must be created by a forward migration.
+
+    Migration 079 creates the table; 095 adds the attach-readiness columns.
+    A column present in the INSERT but absent from DDL fails only at runtime,
+    after deploy.
+    """
+    if not _MIGRATION_PATH.is_file() or not _ATTACH_MIGRATION_PATH.is_file():
+        pytest.skip("migration files not present")
+    ddl = (
+        _MIGRATION_PATH.read_text(encoding="utf-8")
+        + _ATTACH_MIGRATION_PATH.read_text(encoding="utf-8")
+    ).lower()
+    for col in _ATTACH_READINESS_COLUMNS:
+        assert col in ddl, f"no migration creates column {col!r}"
 
 
 def test_migration_creates_table_and_unique_index() -> None:
