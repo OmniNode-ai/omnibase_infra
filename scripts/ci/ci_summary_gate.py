@@ -135,6 +135,17 @@ STRICT_GATE_JOBS: tuple[str, ...] = (
     # name>" shape as the two entries above; renaming either half makes this
     # gate permanently PENDING. Pinned by tests/ci/test_merge_hold_gate_omn15484.py.
     "merge-hold-gate / evaluate",
+    # OMN-15538: every cross-repo pin must resolve to a commit reachable from a
+    # protected branch of the target repo. THIS LINE IS THE MECHANISM, not the
+    # job's presence in ci.yml — `CI Summary` is dev's sole required context, so
+    # an unregistered job that fails still yields SUCCESS here and the PR lands.
+    # The gate it replaces the absence of: on 2026-07-30 a `uses:` pin to a
+    # deleted omnimarket branch head made ci.yml startup-fail for ~2.5h
+    # (OMN-15536), and a pyproject rev pinned to an unlanded omnibase_core
+    # branch head merged past a comment forbidding it — both accepted by
+    # SHAPE-only 40-hex validators. The job is unconditional (`if: always()`),
+    # so a skip is anomalous and correctly fails closed here.
+    "Pin Reachability (OMN-15538)",
 )
 
 # Gates the old ci-summary accepted as ``success`` OR ``skipped``. Each carries
