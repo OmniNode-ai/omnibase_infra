@@ -230,3 +230,19 @@ cases:
     test: tests/unit/scripts/test_prove_application_database_acl.py::test_prechange_capture_pins_durable_acl_drift_predicate
     why: >-
       The PostgreSQL ACL proof is only durable if its pre-change rollback artifact is exact. A proof that accepts drift in that artifact can pass while rollback no longer restores the real pre-change graph. This fixture is the real generated pre-change artifact from the rebased #2548 head; the replay loads it through the proof module's EXPECTED_PRECHANGE path and requires the same durable-prechange equality predicate to reject a one-row drift.
+  - id: omn15361-application-sql-unqualified-node-migration
+    guard: scripts/ci/check_application_database_sql.py
+    incident: OMN-15361
+    regression_class: false_green
+    guard_verdict_on_artifact: reject
+    artifact:
+      fixture: tests/fixtures/omn15547/node-service-registry-tenant-rls-unqualified.sql.captured
+      sha256: 3e8a3c12dbefc4432262a1c2533667f4a5f342c39149915bd80b45241c182e98
+    capture:
+      method: git-object
+      source: git-object:OmniNode-ai/omnibase_infra@5d845c16c348e5c1e337dfd56f7f452f5547235a:docker/migrations/forward/nodes/node_projection_registration/0002_node_service_registry_tenant_rls.sql
+      captured_at: "2026-07-31T06:49:00Z"
+      captured_by: Codex merge sweep (OMN-15361 repair)
+    test: tests/ci/test_application_database_sql_gate.py::test_omn15361_replay_rejects_real_unqualified_application_migration
+    why: >-
+      The changed-SQL gate is load-bearing only if it rejects deployable application migrations exactly as they appear in the migration tree, not only small SQL literals assembled inside unit tests. This fixture captures the real node_service_registry tenant-RLS migration bytes from the #2590 head: it targets application relations with unqualified names and no authoritative ownership manifest, the shape OMN-15361 exists to stop from silently extending the application authority surface. The replay stages those captured bytes as an actual changed .sql path in a Git repository and drives the real scripts/ci/check_application_database_sql.py validator through validate_changed_sql, requiring the schema-qualification rejection.

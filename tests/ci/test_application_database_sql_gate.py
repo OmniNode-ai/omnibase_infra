@@ -13,6 +13,15 @@ from scripts.ci.check_application_database_sql import validate_changed_sql
 
 pytestmark = pytest.mark.unit
 
+_ROOT = Path(__file__).parents[2]
+_OMN15547_FIXTURE = (
+    _ROOT
+    / "tests"
+    / "fixtures"
+    / "omn15547"
+    / "node-service-registry-tenant-rls-unqualified.sql.captured"
+)
+
 
 def _git(repository: Path, *arguments: str) -> str:
     result = subprocess.run(
@@ -253,3 +262,37 @@ def test_red_control_wrong_object_kind(
         ownership_manifest_paths=(manifest,),
     )
     assert any("exact object-kind ownership declaration" in item for item in violations)
+
+
+def test_omn15361_replay_rejects_real_unqualified_application_migration(
+    tmp_path: Path,
+) -> None:
+    """Replay the real node_service_registry migration shape that motivated the gate."""
+    repository = tmp_path / "repository"
+    repository.mkdir()
+    _git(repository, "init", "--initial-branch=main")
+    (repository / "baseline.txt").write_text("baseline\n", encoding="utf-8")
+    base_revision = _commit(repository, "baseline")
+    migration = (
+        repository
+        / "docker"
+        / "migrations"
+        / "forward"
+        / "nodes"
+        / "node_projection_registration"
+        / "0002_node_service_registry_tenant_rls.sql"
+    )
+    migration.parent.mkdir(parents=True)
+    migration.write_bytes(_OMN15547_FIXTURE.read_bytes())
+    head_revision = _commit(repository, "captured unqualified migration")
+
+    violations = validate_changed_sql(
+        repository,
+        base_revision,
+        head_revision,
+        ownership_manifest_paths=(),
+    )
+
+    rendered = "\n".join(violations)
+    assert "0002_node_service_registry_tenant_rls.sql" in rendered
+    assert "schema-qualified" in rendered
