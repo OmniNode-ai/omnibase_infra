@@ -1,0 +1,114 @@
+{
+  "ticket": "OMN-15422",
+  "extension_tickets": [
+    "OMN-15413",
+    "OMN-15420"
+  ],
+  "postgres_major": 16,
+  "provenance": {
+    "sources": [
+      "OMN-15332 ledger-shape description",
+      "OMN-15335 two-owner description",
+      "OMN-15376 committed shape-drift execution test",
+      "OMN-15384 flat/node overlap inventory",
+      "OMN-15423 committed source inventory"
+    ],
+    "live_database_read": false,
+    "dump_derived": false
+  },
+  "sanitization": {
+    "customer_data": false,
+    "credentials": false,
+    "secrets": false,
+    "identifiers": "invented deterministic controls only"
+  },
+  "database_names": [
+    "omnibase_infra",
+    "omnidash_analytics",
+    "omninode_cloud"
+  ],
+  "ledger_shapes": [
+    "migration_id_checksum_source_set",
+    "version_nullable_checksum",
+    "filename_applied_at"
+  ],
+  "cases": [
+    {
+      "id": "mapping_ambiguity",
+      "positive_fixture": "omn15422_fixture.mapping_positive",
+      "red_fixture": "omn15422_fixture.mapping_red",
+      "detector": "one legacy tenant value resolves to exactly one UUID",
+      "expected_red_signature": "ambiguous mapping group count > 0"
+    },
+    {
+      "id": "checksum_conflict",
+      "positive_fixture": "omn15422_fixture.checksum_positive",
+      "red_fixture": "omn15422_fixture.checksum_red",
+      "detector": "one migration identity carries exactly one checksum",
+      "expected_red_signature": "conflicting checksum group count > 0"
+    },
+    {
+      "id": "owner_drift",
+      "positive_fixture": "omn15422_fixture.owner_positive",
+      "red_fixture": "omn15422_fixture.owner_red",
+      "detector": "catalog owner equals role_omnidash",
+      "expected_red_signature": "owner mismatch count > 0"
+    },
+    {
+      "id": "unsafe_rls_policy",
+      "positive_fixture": "omn15422_fixture.tenant_usage_safe",
+      "red_fixture": "public.tenant_usage_legacy",
+      "detector": "UUID NOT NULL plus ENABLE and FORCE RLS",
+      "expected_red_signature": "legacy varchar and ENABLE-only defects > 0"
+    },
+    {
+      "id": "unsafe_view",
+      "positive_fixture": "omn15422_fixture.tenant_usage_safe_view",
+      "red_fixture": "omn15422_fixture.tenant_usage_red_view",
+      "detector": "view carries security_invoker=true",
+      "expected_red_signature": "missing invoker option"
+    },
+    {
+      "id": "unsafe_function",
+      "positive_fixture": "omn15422_fixture.tenant_usage_safe_count()",
+      "red_fixture": "omn15422_fixture.tenant_usage_red_count()",
+      "detector": "not SECURITY DEFINER and no PUBLIC EXECUTE",
+      "expected_red_signature": "definer or PUBLIC EXECUTE defect > 0"
+    },
+    {
+      "id": "transformation_collision",
+      "positive_fixture": "omn15422_fixture.transform_positive",
+      "red_fixture": "omn15422_fixture.transform_red",
+      "detector": "target key remains unique after transformation",
+      "expected_red_signature": "duplicate target-key group count > 0"
+    },
+    {
+      "id": "flat_node_shape_collision",
+      "positive_fixture": "flat_node_parity_control in both application databases",
+      "red_fixture": "llm_cost_aggregates in both application databases",
+      "detector": "ordered information_schema column signature equality",
+      "expected_red_signature": "flat and node signatures differ"
+    },
+    {
+      "id": "legacy_shape_collision",
+      "positive_fixture": "omnibase_infra.public.schema_migrations",
+      "red_fixture": "omnidash_analytics.public.schema_migrations",
+      "detector": "real run-forward-migrations.sh preflight plus PostgreSQL 16 ledger integration proof",
+      "expected_red_signature": "unresolved OMN-15423 domain blocks before ledger mutation"
+    },
+    {
+      "id": "application_migration_ledger",
+      "positive_fixture": "ledger-control fresh and sanitized legacy databases, each run twice",
+      "red_fixture": "checked-in unresolved delegation_judge_verdict_events domain",
+      "detector": "real runner selects one checksum ledger, imports three source shapes, and preserves source OIDs/rows",
+      "expected_red_signature": "unresolved domain fails in preflight before canonical ledger mutation"
+    },
+    {
+      "id": "cutover_receipts_and_rollback_boundary",
+      "positive_fixture": "omn15420_cutover_proof.omninode_internal cutover journal",
+      "red_fixture": "family-local owner mismatch, expired dual-write, reverse-delta sequence gap, and forward-fix-only post-write rollback",
+      "detector": "durable receipt/journal schema plus per-family rollback predicates in PostgreSQL 16",
+      "expected_red_signature": "mismatch isolation, direct rollback refusal, bounded dual-write, and incomplete reverse-delta detection"
+    }
+  ]
+}

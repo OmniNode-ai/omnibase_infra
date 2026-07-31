@@ -79,6 +79,36 @@ def test_ephemeral_proof_seed_is_not_a_deployable_changed_sql_path(
     assert changed_sql_paths(repository, base_revision, head_revision) == (deployed,)
 
 
+def test_fixture_and_control_bootstrap_sql_are_not_deployable_changed_sql(
+    tmp_path: Path,
+) -> None:
+    repository = tmp_path / "repository"
+    repository.mkdir()
+    _git(repository, "init", "--initial-branch=main")
+    (repository / "baseline.txt").write_text("baseline\n", encoding="utf-8")
+    base_revision = _commit(repository, "baseline")
+
+    excluded_paths = (
+        repository / "docker/legacy-rds-fixture/legacy-seed.sql",
+        repository
+        / "docker/legacy-rds-fixture/ledger-control/forward/000_db_metadata.sql",
+        repository / "docker/migrations/forward/_ledger/bootstrap.sql",
+        repository / "src/omnibase_infra/migration/cutover/sql/bootstrap.sql",
+    )
+    for path in excluded_paths:
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_text(
+            "CREATE TABLE public.fixture_only (id uuid);\n", encoding="utf-8"
+        )
+
+    deployed = repository / "docker/migrations/forward/nodes/node_real/0001.sql"
+    deployed.parent.mkdir(parents=True)
+    deployed.write_text("CREATE TABLE tenant.deployed (id uuid);\n", encoding="utf-8")
+    head_revision = _commit(repository, "changed SQL")
+
+    assert changed_sql_paths(repository, base_revision, head_revision) == (deployed,)
+
+
 def test_production_sql_workflow_never_composes_ephemeral_proof_authority() -> None:
     workflow = _CI_WORKFLOW.read_text(encoding="utf-8")
     trusted_step = workflow.split(

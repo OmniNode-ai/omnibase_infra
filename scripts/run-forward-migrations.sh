@@ -4,7 +4,8 @@
 
 # run-forward-migrations.sh — Apply omnibase_infra forward migrations on warm Postgres volumes
 #
-# Tracks applied migrations in public.schema_migrations and applies any
+# Tracks service-owned flat migrations in public.schema_migrations and
+# application/node migrations in platform_catalog.schema_migrations. Applies
 # pending files from /migrations/forward in sorted order. Safe to run on
 # both fresh volumes (no-op for files already applied via docker-entrypoint-initdb.d)
 # and warm volumes (applies any new files not yet recorded).
@@ -93,6 +94,10 @@ MIGRATIONS_DIR="${MIGRATIONS_DIR:-/migrations/forward}"
 NODE_MIGRATIONS_DIR="${NODE_MIGRATIONS_DIR:-${MIGRATIONS_DIR}/nodes}"
 NODE_PGDB="${NODE_POSTGRES_DB:-${PGDB}}"
 PG_WAIT_RETRIES="${PG_WAIT_RETRIES:-30}"
+LEDGER_BOOTSTRAP="${MIGRATIONS_DIR}/_ledger/bootstrap.sql"
+APPLICATION_MIGRATION_MANIFEST="${MIGRATIONS_DIR}/_ledger/application-migrations.tsv"
+APPLICATION_MIGRATION_BLOCKS="${MIGRATIONS_DIR}/_ledger/application-migration-blocks.tsv"
+CLOUD_MIGRATION_ALIASES="${MIGRATIONS_DIR}/_ledger/cloud-migration-aliases.tsv"
 
 export PGPASSWORD="${POSTGRES_PASSWORD}"
 
@@ -429,9 +434,593 @@ EOSQL
 }
 
 # ---------------------------------------------------------------------------
-# 1. Ensure schema_migrations tracking table exists (idempotent)
+# Canonical application migration ledger (OMN-15413)
 # ---------------------------------------------------------------------------
-echo "[forward-migration] Ensuring schema_migrations table exists..."
+# The approved topology contract selects platform_catalog.schema_migrations
+# with explicit stream/domain/version/checksum columns.  bootstrap.sql evolves
+# the checksum-capable node relation in place before any already-applied probe;
+# the filename-only relation remains immutable import evidence.
+
+validate_migration_identity() {
+  identity="$1"
+  if ! printf '%s' "$identity" | grep -Eq '^[A-Za-z0-9_./:-]+$'; then
+    echo "[forward-migration] FATAL: invalid migration identity '${identity}'" >&2
+    exit 1
+  fi
+}
+
+validate_client_file_path() {
+  client_file_path="$1"
+  case "$client_file_path" in
+    ""|*[!A-Za-z0-9_./-]*)
+      echo "[forward-migration] FATAL: unsafe psql client file path '${client_file_path}'" >&2
+      exit 1
+      ;;
+  esac
+  if [ ! -f "$client_file_path" ]; then
+    echo "[forward-migration] FATAL: psql client file is missing: ${client_file_path}" >&2
+    exit 1
+  fi
+}
+
+file_sha256() {
+  sha256sum "$1" | awk '{print $1}'
+}
+
+validate_application_migration_manifest() {
+  for manifest_file in \
+    "$APPLICATION_MIGRATION_MANIFEST" \
+    "$APPLICATION_MIGRATION_BLOCKS" \
+    "$CLOUD_MIGRATION_ALIASES"
+  do
+    if [ ! -f "$manifest_file" ]; then
+      echo "[forward-migration] FATAL: application migration declaration missing: ${manifest_file}" >&2
+      exit 1
+    fi
+  done
+
+  if ! awk -F '\t' '
+    NF != 6 { exit 1 }
+    {
+      path_count = split($1, path_parts, "/")
+      expected_owner = "node:" path_parts[2]
+      expected_version = expected_owner ":" path_parts[3]
+    }
+    path_count != 3 || path_parts[1] != "nodes" { exit 1 }
+    path_parts[2] !~ /^[A-Za-z0-9_][A-Za-z0-9_.-]*$/ { exit 1 }
+    path_parts[3] !~ /^[A-Za-z0-9_][A-Za-z0-9_.-]*[.]sql$/ { exit 1 }
+    $2 != expected_owner || $3 != expected_owner || $5 != expected_version { exit 1 }
+    $4 != "tenant" && $4 != "omninode_internal" { exit 1 }
+    $6 !~ /^[0-9a-f]{64}$/ { exit 1 }
+  ' "$APPLICATION_MIGRATION_MANIFEST"; then
+    echo "[forward-migration] FATAL: malformed or unknown stream/owner/domain in application migration manifest" >&2
+    exit 1
+  fi
+  if ! awk -F '\t' '
+    NF != 5 { exit 1 }
+    {
+      path_count = split($1, path_parts, "/")
+      expected_version = "node:" path_parts[2] ":" path_parts[3]
+    }
+    path_count != 3 || path_parts[1] != "nodes" { exit 1 }
+    path_parts[2] !~ /^[A-Za-z0-9_][A-Za-z0-9_.-]*$/ { exit 1 }
+    path_parts[3] !~ /^[A-Za-z0-9_][A-Za-z0-9_.-]*[.]sql$/ { exit 1 }
+    $2 != expected_version || $3 !~ /^[0-9a-f]{64}$/ { exit 1 }
+    $4 !~ /^OMN-[0-9]+$/ || $5 == "" { exit 1 }
+  ' "$APPLICATION_MIGRATION_BLOCKS"; then
+    echo "[forward-migration] FATAL: malformed application migration block declaration" >&2
+    exit 1
+  fi
+  if ! awk -F '\t' 'NF != 2 || $1 !~ /^[A-Za-z0-9_.-]+$/ || $2 !~ /^[A-Za-z0-9_.-]+[.]sql$/ { exit 1 }' \
+    "$CLOUD_MIGRATION_ALIASES"; then
+    echo "[forward-migration] FATAL: malformed cloud migration alias declaration" >&2
+    exit 1
+  fi
+  if [ -n "$(cut -f 1 "$CLOUD_MIGRATION_ALIASES" | sort | uniq -d | head -n 1)" ] \
+     || [ -n "$(cut -f 2 "$CLOUD_MIGRATION_ALIASES" | sort | uniq -d | head -n 1)" ]; then
+    echo "[forward-migration] FATAL: duplicate cloud migration alias declaration" >&2
+    exit 1
+  fi
+
+  duplicate_artifact="$(cut -f 1 "$APPLICATION_MIGRATION_MANIFEST" | sort | uniq -d | head -n 1)"
+  duplicate_identity="$(cut -f 2,4,5 "$APPLICATION_MIGRATION_MANIFEST" | sort | uniq -d | head -n 1)"
+  if [ -n "$duplicate_artifact" ]; then
+    echo "[forward-migration] FATAL: double migration declaration for artifact ${duplicate_artifact}" >&2
+    exit 1
+  fi
+  if [ -n "$duplicate_identity" ]; then
+    echo "[forward-migration] FATAL: duplicate migration version ${duplicate_identity}" >&2
+    exit 1
+  fi
+
+  while IFS='	' read -r artifact_path _ _ _ declared_version declared_checksum; do
+    migration_file="${MIGRATIONS_DIR}/${artifact_path}"
+    if [ ! -f "$migration_file" ]; then
+      echo "[forward-migration] FATAL: declared migration artifact missing: ${artifact_path}" >&2
+      exit 1
+    fi
+    actual_checksum="$(file_sha256 "$migration_file")"
+    if [ "$actual_checksum" != "$declared_checksum" ]; then
+      echo "[forward-migration] FATAL: conflicting migration checksum for ${declared_version}" >&2
+      exit 1
+    fi
+  done <"$APPLICATION_MIGRATION_MANIFEST"
+
+  while IFS='	' read -r artifact_path blocked_version blocked_checksum blocked_ticket blocked_reason; do
+    migration_file="${MIGRATIONS_DIR}/${artifact_path}"
+    if [ ! -f "$migration_file" ] || [ "$(file_sha256 "$migration_file")" != "$blocked_checksum" ]; then
+      echo "[forward-migration] FATAL: conflicting migration checksum for blocked ${blocked_version}" >&2
+      exit 1
+    fi
+    if ! is_fenced_node_migration "$blocked_version" \
+       || is_lane_released_node_migration "$blocked_version"; then
+      echo "[forward-migration] FATAL: unresolved migration domain for ${blocked_version} (${blocked_ticket}: ${blocked_reason})" >&2
+      exit 1
+    fi
+  done <"$APPLICATION_MIGRATION_BLOCKS"
+
+  for migration_file in $(find "$NODE_MIGRATIONS_DIR" -mindepth 2 -maxdepth 2 -type f -name '*.sql' | sort); do
+    artifact_path="nodes/${migration_file#"${NODE_MIGRATIONS_DIR}"/}"
+    declared_count="$(awk -F '\t' -v path="$artifact_path" '$1 == path { count++ } END { print count + 0 }' \
+      "$APPLICATION_MIGRATION_MANIFEST")"
+    blocked_count="$(awk -F '\t' -v path="$artifact_path" '$1 == path { count++ } END { print count + 0 }' \
+      "$APPLICATION_MIGRATION_BLOCKS")"
+    if [ $((declared_count + blocked_count)) -ne 1 ]; then
+      echo "[forward-migration] FATAL: migration ${artifact_path} must have exactly one declaration or explicit block" >&2
+      exit 1
+    fi
+  done
+}
+
+resolve_application_migration() {
+  artifact_path="$1"
+  expected_version="$2"
+  declaration="$(awk -F '\t' -v path="$artifact_path" '$1 == path { print }' \
+    "$APPLICATION_MIGRATION_MANIFEST")"
+  if [ -z "$declaration" ]; then
+    block="$(awk -F '\t' -v path="$artifact_path" '$1 == path { print }' \
+      "$APPLICATION_MIGRATION_BLOCKS")"
+    if [ -n "$block" ]; then
+      block_ticket="$(printf '%s\n' "$block" | cut -f 4)"
+      block_reason="$(printf '%s\n' "$block" | cut -f 5)"
+      echo "[forward-migration] FATAL: unresolved migration domain for ${expected_version} (${block_ticket}: ${block_reason})" >&2
+    else
+      echo "[forward-migration] FATAL: unknown application migration ${artifact_path}" >&2
+    fi
+    exit 1
+  fi
+
+  DECLARED_STREAM="$(printf '%s\n' "$declaration" | cut -f 2)"
+  DECLARED_OWNER="$(printf '%s\n' "$declaration" | cut -f 3)"
+  DECLARED_DOMAIN="$(printf '%s\n' "$declaration" | cut -f 4)"
+  DECLARED_VERSION="$(printf '%s\n' "$declaration" | cut -f 5)"
+  DECLARED_CHECKSUM="$(printf '%s\n' "$declaration" | cut -f 6)"
+  if [ "$DECLARED_VERSION" != "$expected_version" ]; then
+    echo "[forward-migration] FATAL: migration version mismatch for ${artifact_path}" >&2
+    exit 1
+  fi
+}
+
+prepare_canonical_ledger() {
+  ledger_database="$1"
+  validate_database_identifier "$ledger_database"
+  if [ ! -f "$LEDGER_BOOTSTRAP" ]; then
+    echo "[forward-migration] FATAL: canonical ledger bootstrap missing: ${LEDGER_BOOTSTRAP}" >&2
+    exit 1
+  fi
+  validate_client_file_path "$APPLICATION_MIGRATION_MANIFEST"
+  echo "[forward-migration] Converging canonical ledger in ${ledger_database}..."
+  psql -X -q -h "$PGHOST" -p "$PGPORT" -U "$PGUSER" -d "$ledger_database" \
+    -v ON_ERROR_STOP=1 \
+    -c "CREATE TEMP TABLE onex_application_migration_manifest (
+          artifact_path TEXT NOT NULL,
+          migration_stream TEXT NOT NULL,
+          owner TEXT NOT NULL,
+          domain TEXT NOT NULL,
+          version TEXT NOT NULL,
+          checksum TEXT NOT NULL,
+          PRIMARY KEY (artifact_path),
+          UNIQUE (migration_stream, domain, version)
+        )" \
+    -c "\copy onex_application_migration_manifest FROM '${APPLICATION_MIGRATION_MANIFEST}' WITH (FORMAT text, DELIMITER E'\t')" \
+    -f "$LEDGER_BOOTSTRAP"
+}
+
+# Return 0 only when the version is already present and its canonical metadata
+# is safe to skip.  Content hashes must match byte-for-byte.  A
+# legacy_attestation row is deliberately distinguishable and can never satisfy
+# an active node migration probe: it proves a source record, not file bytes.
+migration_is_applied() {
+  ledger_database="$1"
+  ledger_stream="$2"
+  ledger_owner="$3"
+  ledger_domain="$4"
+  ledger_version="$5"
+  expected_checksum="$6"
+  validate_migration_identity "$ledger_version"
+
+  ledger_row="$(
+    psql -X -qAt -h "$PGHOST" -p "$PGPORT" -U "$PGUSER" -d "$ledger_database" \
+      -v ON_ERROR_STOP=1 \
+      -v ledger_stream="$ledger_stream" \
+      -v ledger_version="$ledger_version" \
+      -v ledger_domain="$ledger_domain" \
+      -f - <<'EOSQL'
+SELECT checksum || '|' || checksum_kind || '|' || owner || '|' || provenance
+          FROM platform_catalog.schema_migrations
+          WHERE migration_stream = :'ledger_stream'
+            AND domain = :'ledger_domain'
+            AND version = :'ledger_version';
+EOSQL
+  )"
+  if [ -z "$ledger_row" ]; then
+    return 1
+  fi
+
+  recorded_checksum="$(printf '%s\n' "$ledger_row" | cut -d '|' -f 1)"
+  recorded_kind="$(printf '%s\n' "$ledger_row" | cut -d '|' -f 2)"
+  recorded_owner="$(printf '%s\n' "$ledger_row" | cut -d '|' -f 3)"
+
+  if [ "$recorded_owner" != "$ledger_owner" ]; then
+    echo "[forward-migration] FATAL: double migration declaration for ${ledger_stream}:${ledger_domain}:${ledger_version} (recorded owner ${recorded_owner}, declared ${ledger_owner})" >&2
+    exit 1
+  fi
+  case "$recorded_kind" in
+    content_sha256)
+      if [ "$recorded_checksum" != "$expected_checksum" ]; then
+        echo "[forward-migration] FATAL: conflicting migration checksum for ${ledger_stream}:${ledger_domain}:${ledger_version}" >&2
+        exit 1
+      fi
+      ;;
+    legacy_attestation)
+      echo "[forward-migration] FATAL: active migration ${ledger_version} has only a legacy checksum attestation" >&2
+      exit 1
+      ;;
+    *)
+      echo "[forward-migration] FATAL: unknown checksum kind '${recorded_kind}' for ${ledger_version}" >&2
+      exit 1
+      ;;
+  esac
+  return 0
+}
+
+record_migration() {
+  ledger_database="$1"
+  ledger_stream="$2"
+  ledger_owner="$3"
+  ledger_domain="$4"
+  ledger_version="$5"
+  ledger_checksum="$6"
+  ledger_provenance="$7"
+  validate_migration_identity "$ledger_version"
+  if ! printf '%s' "$ledger_checksum" | grep -Eq '^[0-9a-f]{64}$'; then
+    echo "[forward-migration] FATAL: malformed SHA-256 for ${ledger_version}" >&2
+    exit 1
+  fi
+
+  psql -X -q -h "$PGHOST" -p "$PGPORT" -U "$PGUSER" -d "$ledger_database" \
+    -v ON_ERROR_STOP=1 \
+    -v ledger_stream="$ledger_stream" \
+    -v ledger_owner="$ledger_owner" \
+    -v ledger_domain="$ledger_domain" \
+    -v ledger_version="$ledger_version" \
+    -v ledger_checksum="$ledger_checksum" \
+    -v ledger_provenance="$ledger_provenance" \
+    -f - <<'EOSQL'
+INSERT INTO platform_catalog.schema_migrations (
+          migration_stream, owner, domain, version, checksum, checksum_kind, provenance
+        ) VALUES (
+          :'ledger_stream', :'ledger_owner', :'ledger_domain', :'ledger_version',
+          :'ledger_checksum', 'content_sha256', :'ledger_provenance'
+        );
+EOSQL
+}
+
+database_exists() {
+  candidate_database="$1"
+  validate_database_identifier "$candidate_database"
+  [ "$(
+    psql -X -qAt -h "$PGHOST" -p "$PGPORT" -U "$PGUSER" -d "$PGDB" \
+      -v ON_ERROR_STOP=1 -v candidate_database="$candidate_database" \
+      -f - <<'EOSQL'
+SELECT count(*) FROM pg_database WHERE datname = :'candidate_database';
+EOSQL
+  )" = "1" ]
+}
+
+import_ledger_stage() {
+  target_database="$1"
+  stage_file="$2"
+  if [ ! -s "$stage_file" ]; then
+    return 0
+  fi
+  validate_client_file_path "$stage_file"
+
+  psql -X -q -h "$PGHOST" -p "$PGPORT" -U "$PGUSER" -d "$target_database" \
+    -v ON_ERROR_STOP=1 \
+    -c "BEGIN; CREATE TEMP TABLE onex_migration_import_stage (
+          migration_stream TEXT NOT NULL,
+          owner TEXT NOT NULL,
+          domain TEXT NOT NULL,
+          version TEXT NOT NULL,
+          checksum TEXT NOT NULL,
+          checksum_kind TEXT NOT NULL,
+          applied_at TIMESTAMPTZ NOT NULL,
+          provenance TEXT NOT NULL
+        ) ON COMMIT DROP" \
+    -c "\copy onex_migration_import_stage FROM '${stage_file}' WITH (FORMAT csv)" \
+    -f - <<'EOSQL'
+DO $import_validation$
+BEGIN
+  IF EXISTS (
+    SELECT 1 FROM onex_migration_import_stage
+    WHERE NOT (
+      migration_stream = 'omninode-cloud'
+      AND owner = 'service:onex_api'
+      AND domain = 'legacy_unclassified'
+    )
+  ) THEN
+    RAISE EXCEPTION 'unknown migration stream/domain declaration in import';
+  END IF;
+  IF EXISTS (
+    SELECT 1 FROM onex_migration_import_stage
+    WHERE checksum !~ '^[0-9a-f]{64}$'
+       OR checksum_kind NOT IN ('content_sha256', 'legacy_attestation')
+  ) THEN
+    RAISE EXCEPTION 'malformed migration checksum in import';
+  END IF;
+  IF EXISTS (
+    SELECT 1
+    FROM onex_migration_import_stage
+    GROUP BY migration_stream, domain, version
+    HAVING count(*) > 1
+  ) THEN
+    RAISE EXCEPTION 'duplicate migration version in import';
+  END IF;
+  IF EXISTS (
+    SELECT 1
+    FROM onex_migration_import_stage incoming
+    JOIN platform_catalog.schema_migrations existing
+      USING (migration_stream, domain, version)
+    WHERE incoming.checksum <> existing.checksum
+  ) THEN
+    RAISE EXCEPTION 'conflicting migration checksum in import';
+  END IF;
+  IF EXISTS (
+    SELECT 1
+    FROM onex_migration_import_stage incoming
+    JOIN platform_catalog.schema_migrations existing
+      USING (migration_stream, domain, version)
+    WHERE incoming.checksum = existing.checksum
+      AND (
+        incoming.owner <> existing.owner
+        OR incoming.checksum_kind <> existing.checksum_kind
+        OR incoming.applied_at <> existing.applied_at
+        OR incoming.provenance <> existing.provenance
+      )
+  ) THEN
+    RAISE EXCEPTION 'double migration declaration in import';
+  END IF;
+END
+$import_validation$;
+
+INSERT INTO platform_catalog.schema_migrations (
+  migration_stream, owner, domain, version, checksum, checksum_kind,
+  applied_at, provenance
+)
+SELECT incoming.migration_stream, incoming.owner, incoming.domain, incoming.version,
+       incoming.checksum, incoming.checksum_kind, incoming.applied_at,
+       incoming.provenance
+FROM onex_migration_import_stage incoming
+WHERE NOT EXISTS (
+  SELECT 1
+  FROM platform_catalog.schema_migrations existing
+  WHERE existing.migration_stream = incoming.migration_stream
+    AND existing.domain = incoming.domain
+    AND existing.version = incoming.version
+);
+COMMIT;
+EOSQL
+}
+
+import_cloud_history() {
+  target_database="$1"
+  cloud_database="${OMNINODE_CLOUD_HISTORY_DB:-omninode_cloud}"
+  validate_database_identifier "$cloud_database"
+  if ! database_exists "$cloud_database"; then
+    echo "[forward-migration] Historical cloud database ${cloud_database} absent; no cloud history to import."
+    return 0
+  fi
+
+  stage_file="$(mktemp)"
+  validate_client_file_path "$CLOUD_MIGRATION_ALIASES"
+  psql -X -q -h "$PGHOST" -p "$PGPORT" -U "$PGUSER" -d "$cloud_database" \
+    -v ON_ERROR_STOP=1 \
+    -c "CREATE TEMP TABLE onex_cloud_migration_alias (
+          migration_name TEXT PRIMARY KEY,
+          runner_version TEXT NOT NULL UNIQUE
+        )" \
+    -c "CREATE TEMP TABLE onex_cloud_migration_export (
+          migration_stream TEXT NOT NULL,
+          owner TEXT NOT NULL,
+          domain TEXT NOT NULL,
+          version TEXT NOT NULL,
+          checksum TEXT NOT NULL,
+          checksum_kind TEXT NOT NULL,
+          applied_at TIMESTAMPTZ NOT NULL,
+          provenance TEXT NOT NULL
+        )" \
+    -c "BEGIN ISOLATION LEVEL REPEATABLE READ READ ONLY" \
+    -c "\copy onex_cloud_migration_alias FROM '${CLOUD_MIGRATION_ALIASES}' WITH (FORMAT text, DELIMITER E'\t')" \
+    -f - <<'EOSQL' >"$stage_file"
+DO $cloud_history_export$
+DECLARE
+  schema_columns TEXT;
+  log_columns TEXT;
+BEGIN
+  SELECT coalesce(string_agg(column_name, ',' ORDER BY column_name), '')
+  INTO schema_columns
+  FROM information_schema.columns
+  WHERE table_schema = 'public' AND table_name = 'schema_migrations';
+  SELECT coalesce(string_agg(column_name, ',' ORDER BY column_name), '')
+  INTO log_columns
+  FROM information_schema.columns
+  WHERE table_schema = 'public' AND table_name = 'migrations_log';
+
+  IF schema_columns = '' THEN
+    IF log_columns <> '' THEN
+      RAISE EXCEPTION
+        'cloud migrations_log is audit-only: applied-set ledger is absent';
+    END IF;
+    RETURN;
+  END IF;
+  IF schema_columns <> 'applied_at,checksum,version' OR EXISTS (
+    SELECT 1
+    FROM information_schema.columns
+    WHERE table_schema = 'public' AND table_name = 'schema_migrations'
+      AND (
+        (column_name = 'version'
+          AND (udt_name <> 'text' OR is_nullable <> 'NO'))
+        OR (column_name = 'checksum' AND udt_name <> 'text')
+        OR (column_name = 'applied_at'
+          AND (udt_name <> 'timestamptz' OR is_nullable <> 'NO'))
+      )
+  ) THEN
+    RAISE EXCEPTION
+      'unknown cloud applied-set ledger shape: public.schema_migrations (%)',
+      schema_columns;
+  END IF;
+
+  IF log_columns <> '' AND (
+    NOT ('migration_name' = ANY (string_to_array(log_columns, ',')))
+    OR NOT ('direction' = ANY (string_to_array(log_columns, ',')))
+    OR NOT ('executed_at' = ANY (string_to_array(log_columns, ',')))
+    OR EXISTS (
+      SELECT 1
+      FROM information_schema.columns
+      WHERE table_schema = 'public' AND table_name = 'migrations_log'
+        AND (
+          (column_name IN ('migration_name', 'direction')
+            AND (udt_name <> 'text' OR is_nullable <> 'NO'))
+          OR (column_name = 'executed_at'
+            AND (udt_name <> 'timestamptz' OR is_nullable <> 'NO'))
+        )
+    )
+  ) THEN
+    RAISE EXCEPTION
+      'unknown cloud audit ledger shape: public.migrations_log (%)', log_columns;
+  END IF;
+
+  IF log_columns = '' THEN
+    INSERT INTO onex_cloud_migration_export
+    SELECT
+      'omninode-cloud',
+      'service:onex_api',
+      'legacy_unclassified',
+      applied.version,
+      CASE
+        WHEN applied.checksum ~ '^[0-9a-f]{64}$' THEN applied.checksum
+        ELSE encode(sha256(convert_to(
+          'omninode-cloud|legacy_unclassified|' || applied.version || '|' ||
+          coalesce(applied.checksum, '<NULL>'), 'UTF8'
+        )), 'hex')
+      END,
+      CASE
+        WHEN applied.checksum ~ '^[0-9a-f]{64}$' THEN 'content_sha256'
+        ELSE 'legacy_attestation'
+      END,
+      applied.applied_at,
+      format(
+        'legacy:%s:public.schema_migrations:version:%s:raw-checksum=%s',
+        current_database(), applied.version, coalesce(applied.checksum, '<NULL>')
+      )
+    FROM public.schema_migrations applied
+    ORDER BY applied.version;
+    RETURN;
+  END IF;
+
+  IF EXISTS (
+    SELECT 1 FROM public.migrations_log
+    WHERE direction IS NULL OR direction NOT IN ('forward', 'rollback')
+  ) THEN
+    RAISE EXCEPTION 'unknown cloud migrations_log direction';
+  END IF;
+  IF EXISTS (
+    SELECT 1
+    FROM public.migrations_log log
+    LEFT JOIN onex_cloud_migration_alias alias
+      ON alias.migration_name = log.migration_name
+    WHERE alias.migration_name IS NULL
+  ) THEN
+    RAISE EXCEPTION 'unknown cloud migrations_log alias';
+  END IF;
+  IF EXISTS (
+    SELECT 1
+    FROM public.migrations_log log
+    JOIN onex_cloud_migration_alias alias
+      ON alias.migration_name = log.migration_name
+    LEFT JOIN public.schema_migrations applied
+      ON applied.version = alias.runner_version
+    WHERE applied.version IS NULL
+  ) THEN
+    RAISE EXCEPTION
+      'cloud migrations_log is audit-only: log-only alias cannot be imported as applied';
+  END IF;
+
+  INSERT INTO onex_cloud_migration_export
+  SELECT
+    'omninode-cloud',
+    'service:onex_api',
+    'legacy_unclassified',
+    applied.version,
+    CASE
+      WHEN applied.checksum ~ '^[0-9a-f]{64}$' THEN applied.checksum
+      ELSE encode(sha256(convert_to(
+        'omninode-cloud|legacy_unclassified|' || applied.version || '|' ||
+        coalesce(applied.checksum, '<NULL>'), 'UTF8'
+      )), 'hex')
+    END,
+    CASE
+      WHEN applied.checksum ~ '^[0-9a-f]{64}$' THEN 'content_sha256'
+      ELSE 'legacy_attestation'
+    END,
+    applied.applied_at,
+    format(
+      'legacy:%s:public.schema_migrations:version:%s:raw-checksum=%s%s',
+      current_database(), applied.version, coalesce(applied.checksum, '<NULL>'),
+      CASE WHEN bool_or(log.migration_name IS NOT NULL)
+        THEN ';migrations_log:' || max(log.migration_name)
+        ELSE ''
+      END
+    )
+  FROM public.schema_migrations applied
+  LEFT JOIN onex_cloud_migration_alias alias
+    ON alias.runner_version = applied.version
+  LEFT JOIN public.migrations_log log
+    ON log.migration_name = alias.migration_name
+  GROUP BY applied.version, applied.checksum, applied.applied_at
+  ORDER BY applied.version;
+END
+$cloud_history_export$;
+
+COPY onex_cloud_migration_export TO STDOUT WITH (FORMAT csv);
+COMMIT;
+EOSQL
+  import_ledger_stage "$target_database" "$stage_file"
+  rm -f "$stage_file"
+}
+
+# Validate the complete checked-in application declaration surface before
+# either database is mutated. Service-only invocations with no node tree keep
+# using only the separate flat ledger and do not bootstrap an application DB.
+if [ -d "$NODE_MIGRATIONS_DIR" ]; then
+  validate_application_migration_manifest
+fi
+
+# ---------------------------------------------------------------------------
+# 1. Ensure service-owned schema_migrations tracking table exists (idempotent)
+# ---------------------------------------------------------------------------
+echo "[forward-migration] Ensuring service migration ledger exists in ${PGDB}..."
 
 psql -h "$PGHOST" -p "$PGPORT" -U "$PGUSER" -d "$PGDB" -c "
 CREATE TABLE IF NOT EXISTS public.schema_migrations (
@@ -485,7 +1074,7 @@ for migration_file in $(ls "${MIGRATIONS_DIR}"/*.sql | sort); do
   if is_skipped_by_manifest "${migration_id}"; then
     echo "[forward-migration]   skip  ${filename} (skip-manifest)"
     SKIPPED=$((SKIPPED + 1))
-    # Record in schema_migrations so the table stays consistent.
+    # Record in the service-owned ledger so the table stays consistent.
     psql -h "$PGHOST" -p "$PGPORT" -U "$PGUSER" -d "$PGDB" \
       -c "INSERT INTO public.schema_migrations (migration_id, checksum, source_set)
           VALUES ('${migration_id}', 'skip-manifest', 'docker')
@@ -493,7 +1082,8 @@ for migration_file in $(ls "${MIGRATIONS_DIR}"/*.sql | sort); do
     continue
   fi
 
-  # Check if already applied
+  # The flat set belongs to the separate omnibase_infra service database.  Its
+  # runner/ledger remain out of the unified application-database scope.
   already_applied=$(psql -h "$PGHOST" -p "$PGPORT" -U "$PGUSER" -d "$PGDB" \
     -tAc "SELECT 1 FROM public.schema_migrations WHERE migration_id = '${migration_id}'" 2>/dev/null || true)
 
@@ -519,6 +1109,14 @@ for migration_file in $(ls "${MIGRATIONS_DIR}"/*.sql | sort); do
   APPLIED=$((APPLIED + 1))
 done
 
+# Converge only the unified application database when this invocation actually
+# carries the node migration tree. omnibase_infra remains a separate
+# service-owned database under plan section 0.1.
+if [ -d "$NODE_MIGRATIONS_DIR" ]; then
+  prepare_canonical_ledger "$NODE_PGDB"
+  import_cloud_history "$NODE_PGDB"
+fi
+
 # ---------------------------------------------------------------------------
 # 3. Auto-discover and apply node-owned migrations (OMN-12559)
 # ---------------------------------------------------------------------------
@@ -530,17 +1128,6 @@ NODE_APPLIED=0
 NODE_SKIPPED=0
 
 if [ -d "${NODE_MIGRATIONS_DIR}" ]; then
-  echo "[forward-migration] Ensuring schema_migrations table exists in node projection database ${NODE_PGDB}..."
-
-  psql -h "$PGHOST" -p "$PGPORT" -U "$PGUSER" -d "$NODE_PGDB" -c "
-CREATE TABLE IF NOT EXISTS public.schema_migrations (
-    migration_id TEXT PRIMARY KEY,
-    applied_at   TIMESTAMPTZ NOT NULL DEFAULT NOW(),
-    checksum     TEXT NOT NULL,
-    source_set   TEXT NOT NULL
-);
-"
-
   echo "[forward-migration] Scanning ${NODE_MIGRATIONS_DIR} for node-owned migrations in ${NODE_PGDB}..."
 
   # Iterate node directories in sorted order for deterministic application.
@@ -555,6 +1142,7 @@ CREATE TABLE IF NOT EXISTS public.schema_migrations (
     for migration_file in $(ls "${node_dir}"*.sql | sort); do
       filename=$(basename "$migration_file")
       migration_id="node:${node_name}:${filename}"
+      migration_checksum="$(file_sha256 "$migration_file")"
 
       # ---- BEGIN fenced-id skip (OMN-15336) ----
       # FIRST, ahead of the ledger probe and the apply. Skip and count it;
@@ -576,10 +1164,16 @@ CREATE TABLE IF NOT EXISTS public.schema_migrations (
       fi
       # ---- END fenced-id skip (OMN-15336) ----
 
-      already_applied=$(psql -h "$PGHOST" -p "$PGPORT" -U "$PGUSER" -d "$NODE_PGDB" \
-        -tAc "SELECT 1 FROM public.schema_migrations WHERE migration_id = '${migration_id}'" 2>/dev/null || true)
+      artifact_path="nodes/${node_name}/${filename}"
+      resolve_application_migration "$artifact_path" "$migration_id"
+      if [ "$DECLARED_CHECKSUM" != "$migration_checksum" ]; then
+        echo "[forward-migration] FATAL: conflicting migration checksum for ${migration_id}" >&2
+        exit 1
+      fi
 
-      if [ "$already_applied" = "1" ]; then
+      if migration_is_applied \
+        "$NODE_PGDB" "$DECLARED_STREAM" "$DECLARED_OWNER" "$DECLARED_DOMAIN" \
+        "$migration_id" "$migration_checksum"; then
         echo "[forward-migration]   skip  ${migration_id} (already applied)"
         NODE_SKIPPED=$((NODE_SKIPPED + 1))
         continue
@@ -590,10 +1184,10 @@ CREATE TABLE IF NOT EXISTS public.schema_migrations (
       psql -h "$PGHOST" -p "$PGPORT" -U "$PGUSER" -d "$NODE_PGDB" \
         -v ON_ERROR_STOP=1 -f "$migration_file"
 
-      psql -h "$PGHOST" -p "$PGPORT" -U "$PGUSER" -d "$NODE_PGDB" \
-        -c "INSERT INTO public.schema_migrations (migration_id, checksum, source_set)
-            VALUES ('${migration_id}', 'applied-by-runner', 'node')
-            ON CONFLICT (migration_id) DO NOTHING;"
+      record_migration \
+        "$NODE_PGDB" "$DECLARED_STREAM" "$DECLARED_OWNER" "$DECLARED_DOMAIN" \
+        "$migration_id" "$migration_checksum" \
+        "file:nodes/${node_name}/${filename}"
 
       echo "[forward-migration]   done  ${migration_id}"
       NODE_APPLIED=$((NODE_APPLIED + 1))

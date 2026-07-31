@@ -217,22 +217,12 @@ This is a development error — rename one of the files and update the fingerpri
 
 ### Migration applied but `schema_migrations` row missing
 
-If a migration applied successfully but was not tracked (e.g., the runner was killed mid-run),
-manually insert the tracking row:
-
-```sql
-INSERT INTO schema_migrations (migration_id, checksum, source_set)
-VALUES (
-  'docker/035_another_migration.sql',
-  encode(sha256(pg_read_binary_file('...')::bytea), 'hex'),
-  'docker'
-)
-ON CONFLICT DO NOTHING;
-```
-
-Or re-run `run-migrations.py` — it uses `ON CONFLICT DO NOTHING` so re-applying is safe
-for already-applied migrations that have tracking rows. For migrations without tracking rows,
-wrap in a transaction and check for idempotency before re-applying.
+Treat this as an indeterminate apply and stop the lane. Do not hand-insert a
+tracking row: that would claim content, owner, and apply provenance that the
+runner did not durably record. Preserve the database catalogs and runner logs,
+prove whether the DDL committed, then repair through a reviewed deterministic
+import or a new idempotent migration. Application/node history follows
+[the application migration ledger procedure](application-migration-ledger.md).
 
 ## Omnidash Read-Model Migrations
 
