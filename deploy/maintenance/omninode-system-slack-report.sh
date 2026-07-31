@@ -398,6 +398,63 @@ exited_nonzero() {
   awk -F'\t' '$2 ~ /Exited \([1-9][0-9]*\)/ {printf "%s ", $1}' <<<"$raw" | sed 's/ $//'
 }
 
+# Required GitHub status contexts that never reported (OMN-15550).
+#
+# WHY THIS LIVES HERE AND NOT IN GITHUB ACTIONS
+#   A required check that never reports is ABSENT, not RED. Branch protection
+#   blocks the PR identically, but an absent context has no row in any list, so
+#   `gh pr checks` reads all-green while every PR in the repo is unmergeable.
+#   On 2026-07-30 (OMN-15536) `omnibase_infra`'s ci.yml failed to assemble;
+#   `CI Summary` is that repo's SOLE required context, so all 7 open PRs wedged
+#   silently for ~2.5h until a human noticed. A detector living inside the CI
+#   system it watches would have failed to assemble with it -- so it runs here,
+#   on a host that does not depend on GitHub Actions.
+#
+#   Folding it into this reporter rather than building a second alerter is the
+#   net-negative-surface rule: it inherits this script's Slack poster, its
+#   state-change de-duplication, its resolved-notification and its */15 cron.
+#   No new cron unit, no second Slack integration.
+#
+# The probe emits `ci|STATUS|key|detail` rows, which `row_status()` reads at
+# column 2 and `row_key()` de-duplicates as `ci|<key>`. A probe failure is a
+# WARNING row, never silence: "could not look" must not render as "nothing
+# wrong". It is deliberately not CRITICAL -- an unreachable API is not evidence
+# that PRs are stranded, and paging on every network blip mutes the channel.
+check_ci_required_contexts() {
+  # Both artifacts are installed side by side in /data/maintenance/bin by the
+  # host maintenance sync, so `dirname $0` resolves the probe on the host. In
+  # the repo the probe lives under scripts/ (the env-read gate's approved
+  # location for operational Python), not next to this file.
+  local probe="${OMNINODE_CI_PROBE_SCRIPT:-$(dirname "$0")/omninode-ci-required-context-probe.py}"
+  local python_bin="${OMNINODE_CI_PROBE_PYTHON:-python3}"
+
+  if [[ "${OMNINODE_CI_PROBE_ENABLED:-1}" != "1" ]]; then
+    return 0
+  fi
+  if [[ ! -r "$probe" ]]; then
+    printf 'ci|WARNING|required-contexts|probe script missing or unreadable at %s\n' "$probe"
+    return 0
+  fi
+  if ! command -v "$python_bin" >/dev/null 2>&1; then
+    printf 'ci|WARNING|required-contexts|%s not found; required-context probe did not run\n' "$python_bin"
+    return 0
+  fi
+
+  local out
+  # A hung probe must not wedge the whole 15-minute health tick, so it is
+  # bounded and a timeout is reported as a WARNING row like any other
+  # "we could not look" outcome.
+  if ! out=$(timeout "${OMNINODE_CI_PROBE_TIMEOUT:-120}" "$python_bin" "$probe" 2>/dev/null); then
+    printf 'ci|WARNING|required-contexts|probe exited non-zero or timed out; required-context state unknown\n'
+    return 0
+  fi
+  if [[ -z "$out" ]]; then
+    printf 'ci|WARNING|required-contexts|probe produced no rows; required-context state unknown\n'
+    return 0
+  fi
+  printf '%s\n' "$out"
+}
+
 collect() {
   local now host root data root_status data_status running unhealthy restarting dead created
   local dangling named_dangling anonymous_dangling docker_status docker_detail
@@ -461,6 +518,7 @@ collect() {
     check_http projection-api-13002 "http://${PROBE_HOST}:13002/health" 'ok|healthy'
     check_http deploy-agent-8099 "http://${PROBE_HOST}:8099/health" 'idle|running|state|ok'
     check_http web-3003 "http://${PROBE_HOST}:3003/" ''
+    check_ci_required_contexts
   }
 }
 
@@ -506,10 +564,17 @@ prev_hash=$(cat "$state_file" 2>/dev/null || true)
 
 format_digest() {
   local title="$1"
-  local lines endpoint_lines issue_lines
+  local lines endpoint_lines ci_lines issue_lines
   lines=$(awk -F'|' '$1=="disk" {printf "- `%s`: %s, %s, %s (%s)\n", $3, $4, $5, $6, $2} $1=="docker" {printf "- Docker `%s`: %s (%s)\n", $3, $4, $2}' <<<"$snapshot")
   endpoint_lines=$(awk -F'|' '$1=="OK" || $1=="WARNING" || $1=="CRITICAL" {printf "- `%s`: HTTP %s (%s)\n", $2, $3, $1}' <<<"$snapshot")
-  issue_lines=$(awk -F'|' '$2=="WARNING" || $2=="CRITICAL" {printf "- %s `%s`: %s %s %s\n", $2, $3, $4, $5, $6} $1=="WARNING" || $1=="CRITICAL" {printf "- %s `%s`: HTTP %s %s\n", $1, $2, $3, $4}' <<<"$snapshot")
+  # OMN-15550. The heartbeat row renders here even when clean, so a reader can
+  # tell "scanned N repos, found nothing" apart from "did not scan" -- the
+  # detection-shelf blindness where a silent section reads as healthy.
+  ci_lines=$(awk -F'|' '$1=="ci" {printf "- `%s`: %s (%s)\n", $3, $4, $2}' <<<"$snapshot")
+  [[ -n "$ci_lines" ]] || ci_lines="- No required-context probe rows this tick"
+  # `next` keeps the three row shapes mutually exclusive so a `ci` row cannot
+  # also be rendered by the generic column-2 branch below it.
+  issue_lines=$(awk -F'|' '$1=="ci" && ($2=="WARNING" || $2=="CRITICAL") {printf "- %s `%s`: %s\n", $2, $3, $4; next} $2=="WARNING" || $2=="CRITICAL" {printf "- %s `%s`: %s %s %s\n", $2, $3, $4, $5, $6; next} $1=="WARNING" || $1=="CRITICAL" {printf "- %s `%s`: HTTP %s %s\n", $1, $2, $3, $4}' <<<"$snapshot")
   if [[ -z "$issue_lines" ]]; then
     issue_lines="- No active warning/critical checks"
   fi
@@ -522,6 +587,8 @@ Issues: *$critical_count critical*, *$warning_count warning*
 $lines
 *Runtime endpoints*
 $endpoint_lines
+*CI required contexts*
+$ci_lines
 *Active issues*
 $issue_lines
 MSG

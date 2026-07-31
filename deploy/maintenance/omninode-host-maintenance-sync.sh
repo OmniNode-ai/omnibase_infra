@@ -53,6 +53,11 @@ SKIP_FETCH=${OMNINODE_MAINTENANCE_SYNC_SKIP_FETCH:-0}
 # this manifest is exactly the OMN-15525 condition and will not be checked.
 MANIFEST=(
   "deploy/maintenance/omninode-system-slack-report.sh|/data/maintenance/bin/omninode-system-slack-report.sh|0755"
+  # OMN-15550. The reporter shells out to this probe from `collect()`, so an
+  # un-synced copy is a silently blind detector -- exactly the OMN-15525
+  # condition (merged, never deployed, nothing alarms) that this manifest
+  # exists to make impossible.
+  "scripts/omninode-ci-required-context-probe.py|/data/maintenance/bin/omninode-ci-required-context-probe.py|0755"
   "deploy/maintenance/cron.d/omninode-system-slack-report|/etc/cron.d/omninode-system-slack-report|0644"
   "deploy/maintenance/omninode-host-maintenance-sync.sh|/data/maintenance/bin/omninode-host-maintenance-sync.sh|0755"
   "deploy/maintenance/cron.d/omninode-host-maintenance-sync|/etc/cron.d/omninode-host-maintenance-sync|0644"

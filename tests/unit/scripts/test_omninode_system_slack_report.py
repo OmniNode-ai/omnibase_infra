@@ -264,6 +264,12 @@ def _run(
             "OMNINODE_RUNTIME_POLICY_ENV": str(RUNTIME_POLICY_ENV),
             "SLACK_BOT_TOKEN": "test-token",
             "SLACK_CHANNEL_ID": "C-TEST",
+            # OMN-15550: the reporter now shells out to the required-context
+            # probe from collect(). These lane tests are about disk/docker/
+            # endpoint classification and must not acquire a GitHub network
+            # dependency; the probe's own rows are asserted in
+            # test_omninode_ci_required_context_probe.py.
+            "OMNINODE_CI_PROBE_ENABLED": "0",
         }
     )
     if extra_env:
@@ -949,6 +955,12 @@ def _run_alert(
             "OMNINODE_RUNTIME_POLICY_ENV": str(RUNTIME_POLICY_ENV),
             "SLACK_BOT_TOKEN": "test-token",
             "SLACK_CHANNEL_ID": "C-TEST",
+            # OMN-15550: the reporter now shells out to the required-context
+            # probe from collect(). These lane tests are about disk/docker/
+            # endpoint classification and must not acquire a GitHub network
+            # dependency; the probe's own rows are asserted in
+            # test_omninode_ci_required_context_probe.py.
+            "OMNINODE_CI_PROBE_ENABLED": "0",
         }
     )
     if extra_env:
