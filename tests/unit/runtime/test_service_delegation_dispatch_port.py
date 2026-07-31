@@ -321,10 +321,16 @@ async def test_runtime_delegation_dispatch_port_accepts_absent_optional_bus_feat
         monkeypatch,
         backend_id=None,
         response_contract=None,
+        system_prompt=None,
+        temperature=None,
+        response_format=None,
     )
 
     assert "backend_id" not in payloads[0]
     assert "response_contract" not in payloads[0]
+    assert "system_prompt" not in payloads[0]
+    assert "temperature" not in payloads[0]
+    assert "response_format" not in payloads[0]
 
 
 @pytest.mark.asyncio
@@ -335,6 +341,12 @@ async def test_runtime_delegation_dispatch_port_accepts_absent_optional_bus_feat
         (
             {"response_contract": {"type": "object"}},
             "response_contract",
+        ),
+        ({"system_prompt": "Answer tersely."}, "system_prompt"),
+        ({"temperature": 0.2}, "temperature"),
+        (
+            {"response_format": {"type": "json_object"}},
+            "response_format",
         ),
     ],
 )

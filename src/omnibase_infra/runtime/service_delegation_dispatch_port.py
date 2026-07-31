@@ -249,13 +249,28 @@ class RuntimeDelegationDispatchPort:
         tenant_id: str | None = None,
         backend_id: str | None = None,
         response_contract: dict[str, object] | None = None,
+        system_prompt: str | None = None,
+        temperature: float | None = None,
+        response_format: dict[str, object] | None = None,
     ) -> dict[str, object]:
         """Dispatch a delegation request and return the terminal result payload."""
 
         # OmniMarket's consumer-facing handler always supplies these optional
-        # arguments.  The deployed bus model does not expose either field yet,
-        # so None preserves the existing route while explicit requests fail
-        # closed instead of being silently dropped at this boundary.
+        # arguments. The deployed bus model does not expose the completion-shaping
+        # fields yet, so None preserves the existing route while explicit requests
+        # fail closed instead of being silently dropped at this boundary.
+        for feature_name, feature_value in (
+            ("system_prompt", system_prompt),
+            ("temperature", temperature),
+            ("response_format", response_format),
+        ):
+            if feature_value is not None:
+                raise NotImplementedError(
+                    f"{feature_name} is not yet supported on the deployed bus "
+                    "dispatch path (RuntimeDelegationDispatchPort); threading it "
+                    "requires the canonical delegation request wire to carry it "
+                    "end to end (OMN-15482)"
+                )
         if backend_id is not None:
             raise NotImplementedError(
                 "backend_id pin is not yet supported on the deployed bus "
