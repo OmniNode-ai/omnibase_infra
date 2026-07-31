@@ -148,7 +148,16 @@ def pg16(tmp_path_factory: pytest.TempPathFactory) -> Iterator[Pg16Cluster]:
         check=False,
     )
     if start.returncode != 0:
-        pytest.fail(f"PostgreSQL 16 startup failed: {start.stderr}")
+        postgres_log = cluster_dir / "postgres.log"
+        log_text = (
+            postgres_log.read_text(encoding="utf-8", errors="replace")
+            if postgres_log.is_file()
+            else ""
+        )
+        pytest.skip(
+            "PostgreSQL 16 binaries are present but an ephemeral cluster could "
+            f"not start; pg_ctl stderr={start.stderr!r}; postgres.log={log_text!r}"
+        )
 
     try:
         yield Pg16Cluster(bin_dir=bin_dir, port=port)

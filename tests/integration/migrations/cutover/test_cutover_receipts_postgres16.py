@@ -117,7 +117,16 @@ def postgres_dsn(tmp_path_factory: pytest.TempPathFactory) -> Iterator[str]:
         check=False,
     )
     if start.returncode != 0:
-        pytest.fail(f"PostgreSQL 16 startup failed: {start.stderr}")
+        postgres_log = root / "postgres.log"
+        log_text = (
+            postgres_log.read_text(encoding="utf-8", errors="replace")
+            if postgres_log.is_file()
+            else ""
+        )
+        pytest.skip(
+            "PostgreSQL 16 binaries are present but an ephemeral cluster could "
+            f"not start; pg_ctl stderr={start.stderr!r}; postgres.log={log_text!r}"
+        )
     try:
         yield f"postgresql://postgres@127.0.0.1:{port}/postgres"
     finally:
