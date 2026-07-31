@@ -14,6 +14,7 @@ from pathlib import Path
 import pytest
 
 from omnibase_core.errors.model_onex_error import ModelOnexError
+from omnibase_infra.enums import EnumMessageCategory
 from omnibase_infra.runtime.auto_wiring.handler_wiring import _subscribe_contract_topics
 from omnibase_infra.runtime.auto_wiring.models.model_contract_version import (
     ModelContractVersion,
@@ -46,6 +47,21 @@ class _RecordingBus:
         self.subscribed.append(topic)
 
 
+async def _noop_dispatcher(envelope: object) -> None:
+    del envelope
+
+
+def _owned_engine(contract_name: str) -> MessageDispatchEngine:
+    engine = MessageDispatchEngine()
+    engine.register_dispatcher(
+        dispatcher_id="test-dispatcher",
+        dispatcher=_noop_dispatcher,
+        category=EnumMessageCategory.COMMAND,
+        owner_contract_name=contract_name,
+    )
+    return engine
+
+
 def _contract() -> ModelDiscoveredContract:
     return ModelDiscoveredContract(
         name="node_delegation_routing_reducer",
@@ -72,7 +88,7 @@ async def test_empty_allowlist_subscribes_topic_unchanged() -> None:
     bus = _RecordingBus()
     subscribed = await _subscribe_contract_topics(
         contract=_contract(),
-        dispatch_engine=MessageDispatchEngine(),
+        dispatch_engine=_owned_engine("node_delegation_routing_reducer"),
         event_bus=bus,
         environment="dev",
         allowed_dispatcher_ids={"test-dispatcher"},
@@ -87,7 +103,7 @@ async def test_allowlisted_topic_is_skipped_by_legacy_path() -> None:
     bus = _RecordingBus()
     subscribed = await _subscribe_contract_topics(
         contract=_contract(),
-        dispatch_engine=object(),
+        dispatch_engine=_owned_engine("node_delegation_routing_reducer"),
         event_bus=bus,
         environment="dev",
         allowed_dispatcher_ids={"test-dispatcher"},
@@ -213,7 +229,7 @@ async def test_fanout_owner_subscription_skipped_nonowner_kept() -> None:
     owner_bus = _RecordingBus()
     owner_subscribed = await _subscribe_contract_topics(
         contract=_fanout_contract("orch"),
-        dispatch_engine=object(),
+        dispatch_engine=_owned_engine("orch"),
         event_bus=owner_bus,
         environment="dev",
         allowed_dispatcher_ids={"test-dispatcher"},
@@ -226,7 +242,7 @@ async def test_fanout_owner_subscription_skipped_nonowner_kept() -> None:
     legacy_bus = _RecordingBus()
     legacy_subscribed = await _subscribe_contract_topics(
         contract=_fanout_contract("projection"),
-        dispatch_engine=MessageDispatchEngine(),
+        dispatch_engine=_owned_engine("projection"),
         event_bus=legacy_bus,
         environment="dev",
         allowed_dispatcher_ids={"test-dispatcher"},

@@ -84,6 +84,9 @@ async def test_registration_orchestrator_all_declared_topics_get_subscribed(
     dispatch_engine.is_frozen = True
     dispatch_engine._routes = {}
     dispatch_engine.dispatch_scoped = AsyncMock(return_value=None)
+    dispatch_engine.validate_contract_dispatcher_scope = MagicMock(
+        side_effect=lambda _contract_name, dispatcher_ids: frozenset(dispatcher_ids)
+    )
 
     monkeypatch.setenv("RUNTIME_PROFILE", "main")
 

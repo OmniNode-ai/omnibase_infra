@@ -11,15 +11,29 @@ executes every matching handler twice.
 
 from __future__ import annotations
 
-from collections.abc import Awaitable, Callable
+import json
+from collections.abc import Awaitable, Callable, Mapping, Sequence
 from pathlib import Path
 from typing import TYPE_CHECKING
 
 import pytest
 
+from omnibase_infra.event_bus.enum_contract_attach_status import (
+    EnumContractAttachStatus,
+)
+from omnibase_infra.event_bus.enum_topic_readiness_status import (
+    EnumTopicReadinessStatus,
+)
+from omnibase_infra.event_bus.model_contract_attach_result import (
+    ModelContractAttachResult,
+)
+from omnibase_infra.event_bus.model_topic_set_readiness import (
+    ModelTopicSetReadiness,
+)
 from omnibase_infra.models import ModelNodeIdentity
 from omnibase_infra.runtime.auto_wiring import (
     ModelAutoWiringManifest,
+    ModelAutoWiringReport,
     ModelContractVersion,
     ModelDiscoveredContract,
     ModelEventBusWiring,
@@ -38,6 +52,7 @@ if TYPE_CHECKING:
     from omnibase_infra.models.dispatch.model_dispatch_result import (
         ModelDispatchResult,
     )
+    from omnibase_infra.topics.model_topic_spec import ModelTopicSpec
 
 pytestmark = pytest.mark.integration
 
@@ -110,6 +125,42 @@ class _RecordingBus:
             await callback(message)
 
 
+class _RecordingReadyProvisioner:
+    """Provisioner double that exposes any pre-validation side effect."""
+
+    def __init__(self) -> None:
+        self.ensure_calls: list[str] = []
+        self.confirm_calls: list[tuple[str, ...]] = []
+
+    async def ensure_topic_exists(
+        self,
+        topic_name: str,
+        spec: ModelTopicSpec | None = None,
+        correlation_id: UUID | None = None,
+    ) -> bool:
+        del spec, correlation_id
+        self.ensure_calls.append(topic_name)
+        return True
+
+    async def confirm_topics_ready(
+        self,
+        topics: Sequence[str],
+        *,
+        expected_specs: Mapping[str, ModelTopicSpec] | None = None,
+        config: object | None = None,
+        correlation_id: UUID | None = None,
+    ) -> ModelTopicSetReadiness:
+        del expected_specs, config, correlation_id
+        normalized_topics = tuple(topics)
+        self.confirm_calls.append(normalized_topics)
+        return ModelTopicSetReadiness(
+            topics=normalized_topics,
+            status=EnumTopicReadinessStatus.READY,
+            ready_topics=normalized_topics,
+            attempts=1,
+        )
+
+
 class _ProtocolOnlyDispatchEngine:
     """Published SPI shape without the opt-in scoped-dispatch capability."""
 
@@ -135,6 +186,13 @@ class _ProtocolOnlyDispatchEngine:
 
 
 def _contract(name: str, handler_name: str) -> ModelDiscoveredContract:
+    return _contract_with_handlers(name, (handler_name,))
+
+
+def _contract_with_handlers(
+    name: str,
+    handler_names: tuple[str, ...],
+) -> ModelDiscoveredContract:
     return ModelDiscoveredContract(
         name=name,
         node_type="ORCHESTRATOR_GENERIC",
@@ -145,14 +203,28 @@ def _contract(name: str, handler_name: str) -> ModelDiscoveredContract:
         event_bus=ModelEventBusWiring(subscribe_topics=(_SHARED_TOPIC,)),
         handler_routing=ModelHandlerRouting(
             routing_strategy="operation_match",
-            handlers=(
+            handlers=tuple(
                 ModelHandlerRoutingEntry(
                     handler=ModelHandlerRef(name=handler_name, module=__name__),
                     event_model=None,
-                ),
+                )
+                for handler_name in handler_names
             ),
         ),
     )
+
+
+def _revalidate_report_with_scopes(
+    report: ModelAutoWiringReport,
+    scopes_by_contract: Mapping[str, tuple[str, ...]],
+) -> ModelAutoWiringReport:
+    """Forge only through the public serialization/validation boundary."""
+    payload = json.loads(report.model_dump_json())
+    for result in payload["results"]:
+        contract_name = result["contract_name"]
+        if contract_name in scopes_by_contract:
+            result["dispatchers_registered"] = list(scopes_by_contract[contract_name])
+    return ModelAutoWiringReport.model_validate_json(json.dumps(payload))
 
 
 @pytest.mark.asyncio
@@ -276,6 +348,53 @@ async def test_immediate_subscriptions_preserve_contract_scope() -> None:
 
 
 @pytest.mark.asyncio
+async def test_duplicate_manifest_names_fail_at_wire_entry() -> None:
+    """Immediate wiring rejects typed name collisions before preparation."""
+    from omnibase_core.models.errors import ModelOnexError
+
+    HandlerContractA.calls = 0
+    HandlerContractB.calls = 0
+    contract_a = _contract("node_wire_duplicate_a", "HandlerContractA")
+    contract_b = _contract("node_wire_duplicate_b", "HandlerContractB")
+    original_manifest = ModelAutoWiringManifest(
+        contracts=(contract_a, contract_b),
+        errors=(),
+    )
+    payload = json.loads(original_manifest.model_dump_json())
+    payload["contracts"][1]["name"] = contract_a.name
+    duplicate_manifest = ModelAutoWiringManifest.model_validate_json(
+        json.dumps(payload)
+    )
+    engine = MessageDispatchEngine()
+    bus = _RecordingBus()
+    applier = _RecordingApplier()
+    caught: ModelOnexError | None = None
+
+    try:
+        await wire_from_manifest(
+            duplicate_manifest,
+            engine,
+            event_bus=bus,
+            environment="test",
+            result_appliers_by_contract={contract_a.name: applier},
+        )
+    except ModelOnexError as exc:
+        caught = exc
+
+    assert caught is not None, (
+        "wire_from_manifest accepted a serialized/Pydantic HandlerA/HandlerB "
+        "manifest name collision "
+        f"(dispatchers={engine.dispatcher_count}, subscriptions={len(bus.subscriptions)})"
+    )
+    assert "duplicate manifest contract names" in str(caught)
+    assert engine.dispatcher_count == 0
+    assert bus.subscriptions == []
+    assert HandlerContractA.calls == 0
+    assert HandlerContractB.calls == 0
+    assert applier.results == []
+
+
+@pytest.mark.asyncio
 async def test_wired_subscription_without_dispatcher_scope_fails_closed() -> None:
     """A wired callback can never silently regain process-global fan-out."""
     from omnibase_core.models.errors import ModelOnexError
@@ -312,6 +431,685 @@ async def test_engine_without_scoped_dispatch_fails_before_subscribe() -> None:
         )
 
     assert bus.subscriptions == []
+
+
+@pytest.mark.asyncio
+async def test_revalidated_cross_contract_scope_fails_before_provisioning() -> None:
+    """A typed report cannot assign one dispatcher to two contract owners."""
+    from omnibase_core.models.errors import ModelOnexError
+
+    contract_a = _contract("node_forged_owner_a", "HandlerContractA")
+    contract_b = _contract("node_forged_owner_b", "HandlerContractB")
+    manifest = ModelAutoWiringManifest(contracts=(contract_a, contract_b), errors=())
+    engine = MessageDispatchEngine()
+    bus = _RecordingBus()
+    report = await wire_from_manifest(
+        manifest,
+        engine,
+        event_bus=bus,
+        environment="test",
+        subscribe_immediately=False,
+    )
+    engine.freeze()
+
+    by_name = {result.contract_name: result for result in report.results}
+    dispatcher_a = by_name[contract_a.name].dispatchers_registered[0]
+    forged_report = _revalidate_report_with_scopes(
+        report,
+        {
+            contract_a.name: (dispatcher_a,),
+            contract_b.name: (dispatcher_a,),
+        },
+    )
+    provisioner = _RecordingReadyProvisioner()
+
+    with pytest.raises(ModelOnexError, match="multiple contracts"):
+        await subscribe_wired_contract_topics(
+            manifest,
+            forged_report,
+            engine,
+            bus,
+            "test",
+            provisioner=provisioner,
+        )
+
+    assert provisioner.ensure_calls == []
+    assert provisioner.confirm_calls == []
+    assert bus.subscriptions == []
+
+
+@pytest.mark.asyncio
+async def test_revalidated_duplicate_report_names_fail_before_side_effects() -> None:
+    """Typed duplicate result identities cannot schedule a contract twice."""
+    from omnibase_core.models.errors import ModelOnexError
+
+    contract = _contract("node_duplicate_report", "HandlerContractA")
+    manifest = ModelAutoWiringManifest(contracts=(contract,), errors=())
+    engine = MessageDispatchEngine()
+    report = await wire_from_manifest(
+        manifest,
+        engine,
+        event_bus=_RecordingBus(),
+        environment="test",
+        subscribe_immediately=False,
+    )
+    engine.freeze()
+    payload = json.loads(report.model_dump_json())
+    payload["results"].append(dict(payload["results"][0]))
+    duplicate_report = ModelAutoWiringReport.model_validate_json(json.dumps(payload))
+    bus = _RecordingBus()
+    provisioner = _RecordingReadyProvisioner()
+    attach_results: list[ModelContractAttachResult] = []
+
+    with pytest.raises(ModelOnexError, match="duplicate report contract names"):
+        await subscribe_wired_contract_topics(
+            manifest,
+            duplicate_report,
+            engine,
+            bus,
+            "test",
+            provisioner=provisioner,
+            attach_results_out=attach_results,
+        )
+
+    assert provisioner.ensure_calls == []
+    assert provisioner.confirm_calls == []
+    assert bus.subscriptions == []
+    assert attach_results == []
+
+
+@pytest.mark.asyncio
+async def test_revalidated_duplicate_manifest_names_fail_before_side_effects() -> None:
+    """Two different handlers cannot collapse under one manifest identity."""
+    from omnibase_core.models.errors import ModelOnexError
+
+    contract_a = _contract("node_manifest_a", "HandlerContractA")
+    contract_b = _contract("node_manifest_b", "HandlerContractB")
+    original_manifest = ModelAutoWiringManifest(
+        contracts=(contract_a, contract_b),
+        errors=(),
+    )
+    engine = MessageDispatchEngine()
+    report = await wire_from_manifest(
+        original_manifest,
+        engine,
+        event_bus=_RecordingBus(),
+        environment="test",
+        subscribe_immediately=False,
+    )
+    engine.freeze()
+    payload = json.loads(original_manifest.model_dump_json())
+    payload["contracts"][1]["name"] = contract_a.name
+    duplicate_manifest = ModelAutoWiringManifest.model_validate_json(
+        json.dumps(payload)
+    )
+    bus = _RecordingBus()
+    provisioner = _RecordingReadyProvisioner()
+    attach_results: list[ModelContractAttachResult] = []
+
+    with pytest.raises(ModelOnexError, match="duplicate manifest contract names"):
+        await subscribe_wired_contract_topics(
+            duplicate_manifest,
+            report,
+            engine,
+            bus,
+            "test",
+            provisioner=provisioner,
+            attach_results_out=attach_results,
+        )
+
+    assert provisioner.ensure_calls == []
+    assert provisioner.confirm_calls == []
+    assert bus.subscriptions == []
+    assert attach_results == []
+
+
+@pytest.mark.asyncio
+async def test_initial_contract_names_must_be_canonical_and_bijective() -> None:
+    """Whitespace aliases and missing report identities both fail synchronously."""
+    from omnibase_core.models.errors import ModelOnexError
+
+    contract_a = _contract("node_identity_a", "HandlerContractA")
+    contract_b = _contract("node_identity_b", "HandlerContractB")
+    manifest = ModelAutoWiringManifest(contracts=(contract_a, contract_b), errors=())
+    engine = MessageDispatchEngine()
+    report = await wire_from_manifest(
+        manifest,
+        engine,
+        event_bus=_RecordingBus(),
+        environment="test",
+        subscribe_immediately=False,
+    )
+    engine.freeze()
+
+    noncanonical_payload = json.loads(report.model_dump_json())
+    noncanonical_payload["results"][0]["contract_name"] = f" {contract_a.name} "
+    noncanonical_report = ModelAutoWiringReport.model_validate_json(
+        json.dumps(noncanonical_payload)
+    )
+    missing_payload = json.loads(report.model_dump_json())
+    missing_payload["results"] = missing_payload["results"][:1]
+    missing_report = ModelAutoWiringReport.model_validate_json(
+        json.dumps(missing_payload)
+    )
+    noncanonical_manifest_payload = json.loads(manifest.model_dump_json())
+    noncanonical_manifest_payload["contracts"][0]["name"] = f" {contract_a.name} "
+    noncanonical_manifest = ModelAutoWiringManifest.model_validate_json(
+        json.dumps(noncanonical_manifest_payload)
+    )
+
+    for forged_manifest, forged_report, error_match in (
+        (
+            noncanonical_manifest,
+            report,
+            "noncanonical manifest contract names",
+        ),
+        (manifest, noncanonical_report, "noncanonical report contract names"),
+        (manifest, missing_report, "report.*manifest contract-name mismatch"),
+    ):
+        bus = _RecordingBus()
+        provisioner = _RecordingReadyProvisioner()
+        attach_results: list[ModelContractAttachResult] = []
+        with pytest.raises(ModelOnexError, match=error_match):
+            await subscribe_wired_contract_topics(
+                forged_manifest,
+                forged_report,
+                engine,
+                bus,
+                "test",
+                provisioner=provisioner,
+                attach_results_out=attach_results,
+            )
+        assert provisioner.ensure_calls == []
+        assert provisioner.confirm_calls == []
+        assert bus.subscriptions == []
+        assert attach_results == []
+
+
+@pytest.mark.asyncio
+async def test_revalidated_wrong_registered_owner_fails_before_provisioning() -> None:
+    """A unique registered ID still cannot be reassigned to another contract."""
+    from omnibase_core.models.errors import ModelOnexError
+
+    contract_a = _contract("node_wrong_owner_a", "HandlerContractA")
+    contract_b = _contract("node_wrong_owner_b", "HandlerContractB")
+    manifest = ModelAutoWiringManifest(contracts=(contract_a, contract_b), errors=())
+    engine = MessageDispatchEngine()
+    bus = _RecordingBus()
+    report = await wire_from_manifest(
+        manifest,
+        engine,
+        event_bus=bus,
+        environment="test",
+        subscribe_immediately=False,
+    )
+    engine.freeze()
+    by_name = {result.contract_name: result for result in report.results}
+    dispatcher_b = by_name[contract_b.name].dispatchers_registered[0]
+    forged_report = _revalidate_report_with_scopes(
+        report,
+        {
+            contract_a.name: (dispatcher_b,),
+            contract_b.name: (),
+        },
+    )
+    provisioner = _RecordingReadyProvisioner()
+
+    with pytest.raises(ModelOnexError, match="not owned by contract"):
+        await subscribe_wired_contract_topics(
+            manifest,
+            forged_report,
+            engine,
+            bus,
+            "test",
+            provisioner=provisioner,
+        )
+
+    assert provisioner.ensure_calls == []
+    assert provisioner.confirm_calls == []
+    assert bus.subscriptions == []
+
+
+@pytest.mark.asyncio
+async def test_revalidated_unknown_report_scope_fails_before_provisioning() -> None:
+    """Every dispatcher cited by a typed wiring report must exist now."""
+    from omnibase_core.models.errors import ModelOnexError
+
+    contract = _contract("node_forged_unknown", "HandlerContractA")
+    manifest = ModelAutoWiringManifest(contracts=(contract,), errors=())
+    engine = MessageDispatchEngine()
+    bus = _RecordingBus()
+    report = await wire_from_manifest(
+        manifest,
+        engine,
+        event_bus=bus,
+        environment="test",
+        subscribe_immediately=False,
+    )
+    engine.freeze()
+    forged_report = _revalidate_report_with_scopes(
+        report,
+        {contract.name: ("dispatcher.forged-unknown",)},
+    )
+    provisioner = _RecordingReadyProvisioner()
+
+    with pytest.raises(ModelOnexError, match="not registered on this engine"):
+        await subscribe_wired_contract_topics(
+            manifest,
+            forged_report,
+            engine,
+            bus,
+            "test",
+            provisioner=provisioner,
+        )
+
+    assert provisioner.ensure_calls == []
+    assert provisioner.confirm_calls == []
+    assert bus.subscriptions == []
+
+
+@pytest.mark.asyncio
+async def test_direct_unknown_scope_fails_before_subscribe() -> None:
+    """The lowest direct subscription boundary also checks membership."""
+    from omnibase_core.models.errors import ModelOnexError
+    from omnibase_infra.runtime.auto_wiring.handler_wiring import (
+        _subscribe_contract_topics,
+    )
+
+    engine = MessageDispatchEngine()
+    engine.freeze()
+    bus = _RecordingBus()
+
+    with pytest.raises(ModelOnexError, match="not registered on this engine"):
+        await _subscribe_contract_topics(
+            contract=_contract("node_direct_unknown", "HandlerContractA"),
+            dispatch_engine=engine,
+            event_bus=bus,
+            environment="test",
+            allowed_dispatcher_ids={"dispatcher.direct-unknown"},
+        )
+
+    assert bus.subscriptions == []
+
+
+@pytest.mark.asyncio
+async def test_revalidated_not_ready_unknown_scope_fails_before_provisioning() -> None:
+    """A persisted NOT_READY scope is revalidated against the live engine."""
+    from omnibase_core.models.errors import ModelOnexError
+    from omnibase_infra.runtime.auto_wiring.handler_wiring import (
+        reattach_not_ready_contracts,
+    )
+
+    contract = _contract("node_not_ready_unknown", "HandlerContractA")
+    manifest = ModelAutoWiringManifest(contracts=(contract,), errors=())
+    engine = MessageDispatchEngine()
+    bus = _RecordingBus()
+    await wire_from_manifest(
+        manifest,
+        engine,
+        event_bus=bus,
+        environment="test",
+        subscribe_immediately=False,
+    )
+    engine.freeze()
+    forged_result = ModelContractAttachResult.model_validate_json(
+        json.dumps(
+            {
+                "contract_name": contract.name,
+                "status": EnumContractAttachStatus.NOT_READY.value,
+                "dispatcher_ids": ["dispatcher.not-ready-unknown"],
+            }
+        )
+    )
+    provisioner = _RecordingReadyProvisioner()
+
+    with pytest.raises(ModelOnexError, match="not registered on this engine"):
+        await reattach_not_ready_contracts(
+            manifest,
+            (forged_result,),
+            engine,
+            bus,
+            "test",
+            provisioner=provisioner,
+        )
+
+    assert provisioner.ensure_calls == []
+    assert provisioner.confirm_calls == []
+    assert bus.subscriptions == []
+
+
+@pytest.mark.asyncio
+async def test_not_ready_cross_contract_scope_fails_before_provisioning() -> None:
+    """Reattach rejects one dispatcher persisted under two contracts."""
+    from omnibase_core.models.errors import ModelOnexError
+    from omnibase_infra.runtime.auto_wiring.handler_wiring import (
+        reattach_not_ready_contracts,
+    )
+
+    contract_a = _contract("node_not_ready_owner_a", "HandlerContractA")
+    contract_b = _contract("node_not_ready_owner_b", "HandlerContractB")
+    manifest = ModelAutoWiringManifest(contracts=(contract_a, contract_b), errors=())
+    engine = MessageDispatchEngine()
+    bus = _RecordingBus()
+    report = await wire_from_manifest(
+        manifest,
+        engine,
+        event_bus=bus,
+        environment="test",
+        subscribe_immediately=False,
+    )
+    engine.freeze()
+    by_name = {result.contract_name: result for result in report.results}
+    shared_dispatcher = by_name[contract_a.name].dispatchers_registered[0]
+    results = tuple(
+        ModelContractAttachResult.model_validate_json(
+            json.dumps(
+                {
+                    "contract_name": contract_name,
+                    "status": EnumContractAttachStatus.NOT_READY.value,
+                    "dispatcher_ids": [shared_dispatcher],
+                }
+            )
+        )
+        for contract_name in (contract_a.name, contract_b.name)
+    )
+    provisioner = _RecordingReadyProvisioner()
+
+    with pytest.raises(ModelOnexError, match="multiple contracts"):
+        await reattach_not_ready_contracts(
+            manifest,
+            results,
+            engine,
+            bus,
+            "test",
+            provisioner=provisioner,
+        )
+
+    assert provisioner.ensure_calls == []
+    assert provisioner.confirm_calls == []
+    assert bus.subscriptions == []
+
+
+@pytest.mark.asyncio
+async def test_duplicate_typed_not_ready_names_fail_before_side_effects() -> None:
+    """Persisted duplicate identities cannot schedule two reattach attempts."""
+    from omnibase_core.models.errors import ModelOnexError
+    from omnibase_infra.runtime.auto_wiring.handler_wiring import (
+        reattach_not_ready_contracts,
+    )
+
+    contract = _contract("node_duplicate_not_ready", "HandlerContractA")
+    manifest = ModelAutoWiringManifest(contracts=(contract,), errors=())
+    engine = MessageDispatchEngine()
+    report = await wire_from_manifest(
+        manifest,
+        engine,
+        event_bus=_RecordingBus(),
+        environment="test",
+        subscribe_immediately=False,
+    )
+    engine.freeze()
+    dispatcher_id = report.results[0].dispatchers_registered[0]
+    serialized_result = json.dumps(
+        {
+            "contract_name": contract.name,
+            "status": EnumContractAttachStatus.NOT_READY.value,
+            "dispatcher_ids": [dispatcher_id],
+        }
+    )
+    duplicate_results = tuple(
+        ModelContractAttachResult.model_validate_json(serialized_result)
+        for _ in range(2)
+    )
+    bus = _RecordingBus()
+    provisioner = _RecordingReadyProvisioner()
+
+    with pytest.raises(ModelOnexError, match="duplicate NOT_READY contract names"):
+        await reattach_not_ready_contracts(
+            manifest,
+            duplicate_results,
+            engine,
+            bus,
+            "test",
+            provisioner=provisioner,
+        )
+
+    assert provisioner.ensure_calls == []
+    assert provisioner.confirm_calls == []
+    assert bus.subscriptions == []
+
+
+@pytest.mark.asyncio
+async def test_duplicate_initial_not_ready_fails_before_loop_side_effects() -> None:
+    """The public reconciliation loop validates before dict collapse or sleep."""
+    from omnibase_core.models.errors import ModelOnexError
+    from omnibase_infra.runtime.auto_wiring.handler_wiring import (
+        run_not_ready_reconciliation_loop,
+    )
+
+    contract = _contract("node_duplicate_initial_not_ready", "HandlerContractA")
+    manifest = ModelAutoWiringManifest(contracts=(contract,), errors=())
+    engine = MessageDispatchEngine()
+    report = await wire_from_manifest(
+        manifest,
+        engine,
+        event_bus=_RecordingBus(),
+        environment="test",
+        subscribe_immediately=False,
+    )
+    engine.freeze()
+    baseline_dispatcher_count = engine.dispatcher_count
+    dispatcher_id = report.results[0].dispatchers_registered[0]
+    serialized_result = json.dumps(
+        {
+            "contract_name": contract.name,
+            "status": EnumContractAttachStatus.NOT_READY.value,
+            "dispatcher_ids": [dispatcher_id],
+        }
+    )
+    duplicate_initial_not_ready = tuple(
+        ModelContractAttachResult.model_validate_json(serialized_result)
+        for _ in range(2)
+    )
+    bus = _RecordingBus()
+    provisioner = _RecordingReadyProvisioner()
+    applier = _RecordingApplier()
+    sleep_calls: list[float] = []
+    attempt_results: list[tuple[ModelContractAttachResult, ...]] = []
+    returned_results: tuple[ModelContractAttachResult, ...] = ()
+    caught: ModelOnexError | None = None
+
+    async def _record_sleep(seconds: float) -> None:
+        sleep_calls.append(seconds)
+
+    def _record_attempt(
+        _subscribed: dict[str, tuple[str, ...]],
+        results: tuple[ModelContractAttachResult, ...],
+    ) -> None:
+        attempt_results.append(results)
+
+    try:
+        returned_results = await run_not_ready_reconciliation_loop(
+            manifest,
+            duplicate_initial_not_ready,
+            engine,
+            bus,
+            "test",
+            {contract.name: applier},
+            provisioner=provisioner,
+            max_attempts=1,
+            on_attempt=_record_attempt,
+            sleep=_record_sleep,
+        )
+    except ModelOnexError as exc:
+        caught = exc
+
+    assert caught is not None, (
+        "reconciliation accepted duplicate typed initial NOT_READY identities "
+        f"(sleep={sleep_calls}, ensure={provisioner.ensure_calls}, "
+        f"confirm={provisioner.confirm_calls}, subscriptions={len(bus.subscriptions)}, "
+        f"results={returned_results})"
+    )
+    assert "duplicate NOT_READY contract names" in str(caught)
+    assert engine.dispatcher_count == baseline_dispatcher_count
+    assert sleep_calls == []
+    assert provisioner.ensure_calls == []
+    assert provisioner.confirm_calls == []
+    assert bus.subscriptions == []
+    assert returned_results == ()
+    assert attempt_results == []
+    assert applier.results == []
+
+
+@pytest.mark.asyncio
+async def test_not_ready_names_must_be_canonical_manifest_subset() -> None:
+    """Reattach rejects whitespace aliases and names absent from the manifest."""
+    from omnibase_core.models.errors import ModelOnexError
+    from omnibase_infra.runtime.auto_wiring.handler_wiring import (
+        reattach_not_ready_contracts,
+    )
+
+    contract = _contract("node_not_ready_identity", "HandlerContractA")
+    manifest = ModelAutoWiringManifest(contracts=(contract,), errors=())
+    engine = MessageDispatchEngine()
+    report = await wire_from_manifest(
+        manifest,
+        engine,
+        event_bus=_RecordingBus(),
+        environment="test",
+        subscribe_immediately=False,
+    )
+    engine.freeze()
+    dispatcher_id = report.results[0].dispatchers_registered[0]
+
+    for contract_name, error_match in (
+        (f" {contract.name} ", "noncanonical NOT_READY contract names"),
+        ("node_not_in_manifest", "NOT_READY.*manifest contract-name mismatch"),
+    ):
+        forged_result = ModelContractAttachResult.model_validate_json(
+            json.dumps(
+                {
+                    "contract_name": contract_name,
+                    "status": EnumContractAttachStatus.NOT_READY.value,
+                    "dispatcher_ids": [dispatcher_id],
+                }
+            )
+        )
+        bus = _RecordingBus()
+        provisioner = _RecordingReadyProvisioner()
+        with pytest.raises(ModelOnexError, match=error_match):
+            await reattach_not_ready_contracts(
+                manifest,
+                (forged_result,),
+                engine,
+                bus,
+                "test",
+                provisioner=provisioner,
+            )
+        assert provisioner.ensure_calls == []
+        assert provisioner.confirm_calls == []
+        assert bus.subscriptions == []
+
+
+@pytest.mark.asyncio
+async def test_not_ready_wrong_registered_owner_fails_before_provisioning() -> None:
+    """A reattach scope must retain its original live contract provenance."""
+    from omnibase_core.models.errors import ModelOnexError
+    from omnibase_infra.runtime.auto_wiring.handler_wiring import (
+        reattach_not_ready_contracts,
+    )
+
+    contract_a = _contract("node_not_ready_wrong_a", "HandlerContractA")
+    contract_b = _contract("node_not_ready_wrong_b", "HandlerContractB")
+    manifest = ModelAutoWiringManifest(contracts=(contract_a, contract_b), errors=())
+    engine = MessageDispatchEngine()
+    bus = _RecordingBus()
+    report = await wire_from_manifest(
+        manifest,
+        engine,
+        event_bus=bus,
+        environment="test",
+        subscribe_immediately=False,
+    )
+    engine.freeze()
+    by_name = {result.contract_name: result for result in report.results}
+    dispatcher_b = by_name[contract_b.name].dispatchers_registered[0]
+    forged_result = ModelContractAttachResult.model_validate_json(
+        json.dumps(
+            {
+                "contract_name": contract_a.name,
+                "status": EnumContractAttachStatus.NOT_READY.value,
+                "dispatcher_ids": [dispatcher_b],
+            }
+        )
+    )
+    provisioner = _RecordingReadyProvisioner()
+
+    with pytest.raises(ModelOnexError, match="not owned by contract"):
+        await reattach_not_ready_contracts(
+            manifest,
+            (forged_result,),
+            engine,
+            bus,
+            "test",
+            provisioner=provisioner,
+        )
+
+    assert provisioner.ensure_calls == []
+    assert provisioner.confirm_calls == []
+    assert bus.subscriptions == []
+
+
+@pytest.mark.asyncio
+async def test_one_contract_may_own_two_unique_dispatchers() -> None:
+    """Ownership uniqueness is per dispatcher, not one dispatcher per contract."""
+    from datetime import UTC, datetime
+    from uuid import uuid4
+
+    from omnibase_core.models.events.model_event_envelope import ModelEventEnvelope
+
+    HandlerContractA.calls = 0
+    HandlerContractB.calls = 0
+    contract = _contract_with_handlers(
+        "node_two_dispatchers",
+        ("HandlerContractA", "HandlerContractB"),
+    )
+    manifest = ModelAutoWiringManifest(contracts=(contract,), errors=())
+    engine = MessageDispatchEngine()
+    bus = _RecordingBus()
+    report = await wire_from_manifest(
+        manifest,
+        engine,
+        event_bus=bus,
+        environment="test",
+        subscribe_immediately=False,
+    )
+    engine.freeze()
+
+    owned_dispatchers = report.results[0].dispatchers_registered
+    assert len(owned_dispatchers) == 2
+    assert len(set(owned_dispatchers)) == 2
+    subscriptions = await subscribe_wired_contract_topics(
+        manifest,
+        report,
+        engine,
+        bus,
+        "test",
+    )
+    assert subscriptions == {contract.name: (_SHARED_TOPIC,)}
+    assert len(bus.subscriptions) == 1
+
+    envelope = ModelEventEnvelope[object](
+        payload={"prompt": "one contract, two dispatchers"},
+        correlation_id=uuid4(),
+        envelope_timestamp=datetime.now(UTC),
+        event_type="omn15474.shared-command",
+        source_tool="contract-scoped-dispatch-test",
+    )
+    await bus.deliver_to_every_group(envelope)
+
+    assert HandlerContractA.calls == 1
+    assert HandlerContractB.calls == 1
 
 
 @pytest.mark.asyncio
