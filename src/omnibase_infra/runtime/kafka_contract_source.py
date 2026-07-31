@@ -267,13 +267,12 @@ class ContractYamlParser:  # ai-slop-ok: pre-existing
         # Validate against ModelHandlerContract
         contract = ModelHandlerContract.model_validate(contract_data)
 
-        # Extract handler_class from metadata section
-        # NOTE: handler_class is read from metadata for handler-shaped contracts
-        # (root-level extra fields are ignored by ModelHandlerContract).
-        handler_class = None
+        # Extract handler_class from the typed field first, then fall back to
+        # legacy metadata for older dynamic-registration payloads.
+        handler_class = contract.handler_class
         if isinstance(contract_data, dict):
             metadata = contract_data.get("metadata", {})
-            if isinstance(metadata, dict):
+            if handler_class is None and isinstance(metadata, dict):
                 handler_class = metadata.get("handler_class")
 
         # Fallback for node-shaped (market) contracts: these declare the handler
@@ -1183,17 +1182,44 @@ class KafkaContractSource(MixinTypedContractEvents, ProtocolContractSource):
         )
 
         eb_raw = config.get("event_bus")
-        if not isinstance(eb_raw, dict):
-            return None
+        if isinstance(eb_raw, dict):
+            sub_raw = eb_raw.get("subscribe_topics")
+            pub_raw = eb_raw.get("publish_topics")
+            cp_raw = eb_raw.get("consumer_purpose")
+            return ModelEventBusWiring(
+                subscribe_topics=tuple(sub_raw) if isinstance(sub_raw, list) else (),
+                publish_topics=tuple(pub_raw) if isinstance(pub_raw, list) else (),
+                consumer_purpose=cp_raw if isinstance(cp_raw, str) else None,
+                plugin_managed=bool(eb_raw.get("plugin_managed", False)),
+            )
 
-        sub_raw = eb_raw.get("subscribe_topics")
-        pub_raw = eb_raw.get("publish_topics")
-        cp_raw = eb_raw.get("consumer_purpose")
+        consumed_raw = config.get("yaml_consumed_events")
+        published_raw = config.get("yaml_published_events")
+        subscribe_topics = (
+            tuple(
+                str(item.get("event_type"))
+                for item in consumed_raw
+                if isinstance(item, dict) and item.get("event_type")
+            )
+            if isinstance(consumed_raw, list)
+            else ()
+        )
+        publish_topics = (
+            tuple(
+                str(item.get("topic"))
+                for item in published_raw
+                if isinstance(item, dict) and item.get("topic")
+            )
+            if isinstance(published_raw, list)
+            else ()
+        )
+        if not subscribe_topics and not publish_topics:
+            return None
         return ModelEventBusWiring(
-            subscribe_topics=tuple(sub_raw) if isinstance(sub_raw, list) else (),
-            publish_topics=tuple(pub_raw) if isinstance(pub_raw, list) else (),
-            consumer_purpose=cp_raw if isinstance(cp_raw, str) else None,
-            plugin_managed=bool(eb_raw.get("plugin_managed", False)),
+            subscribe_topics=subscribe_topics,
+            publish_topics=publish_topics,
+            consumer_purpose=None,
+            plugin_managed=False,
         )
 
     @staticmethod
