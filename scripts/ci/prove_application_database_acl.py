@@ -37,13 +37,15 @@ from omnibase_infra.validation.enums.enum_application_database_acl_render_phase 
 )
 from omnibase_infra.validation.models.model_application_database_acl_matrix import (
     ModelApplicationDatabaseAclMatrix,
-    ModelApplicationDatabaseAclSource,
 )
 from omnibase_infra.validation.models.model_application_database_acl_policy import (
     ModelApplicationDatabaseAclPolicy,
 )
 from omnibase_infra.validation.models.model_application_database_acl_row import (
     ModelApplicationDatabaseAclRow,
+)
+from omnibase_infra.validation.models.model_application_database_acl_source import (
+    ModelApplicationDatabaseAclSource,
 )
 from omnibase_infra.validation.models.model_application_database_default_acl_row import (
     ModelApplicationDatabaseDefaultAclRow,

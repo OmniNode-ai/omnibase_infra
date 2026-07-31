@@ -27,11 +27,11 @@ from omnibase_infra.validation.enums.enum_application_database_acl_authorization
 from omnibase_infra.validation.enums.enum_application_database_acl_render_phase import (
     EnumApplicationDatabaseAclRenderPhase,
 )
-from omnibase_infra.validation.models.model_application_database_acl_matrix import (
-    ModelApplicationDatabaseAclSource,
-)
 from omnibase_infra.validation.models.model_application_database_acl_policy import (
     ModelApplicationDatabaseAclPolicy,
+)
+from omnibase_infra.validation.models.model_application_database_acl_source import (
+    ModelApplicationDatabaseAclSource,
 )
 from omnibase_infra.validation.models.model_application_database_activity_result_evidence import (
     ModelApplicationDatabaseActivityResultEvidence,

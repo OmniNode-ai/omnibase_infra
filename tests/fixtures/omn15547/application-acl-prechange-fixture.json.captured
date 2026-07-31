@@ -1,0 +1,1361 @@
+{
+  "column_acl": [
+    {
+      "catalog_kind": "table",
+      "column_name": "display_name",
+      "grantee": "rls_admin",
+      "grantor": "onex_api",
+      "is_grantable": true,
+      "object_name": "tenant_accounts",
+      "privilege_type": "UPDATE",
+      "schema_name": "tenant"
+    },
+    {
+      "catalog_kind": "table",
+      "column_name": "display_name",
+      "grantee": "untrusted_login",
+      "grantor": "onex_api",
+      "is_grantable": true,
+      "object_name": "tenant_accounts",
+      "privilege_type": "SELECT",
+      "schema_name": "tenant"
+    },
+    {
+      "catalog_kind": "table",
+      "column_name": "display_name",
+      "grantee": "untrusted_login",
+      "grantor": "rls_admin",
+      "is_grantable": false,
+      "object_name": "tenant_accounts",
+      "privilege_type": "UPDATE",
+      "schema_name": "tenant"
+    }
+  ],
+  "database_acl": [
+    {
+      "database_name": "keycloak",
+      "grantee": "PUBLIC",
+      "grantor": "postgres",
+      "is_grantable": false,
+      "privilege_type": "CONNECT"
+    },
+    {
+      "database_name": "keycloak",
+      "grantee": "PUBLIC",
+      "grantor": "postgres",
+      "is_grantable": false,
+      "privilege_type": "TEMPORARY"
+    },
+    {
+      "database_name": "keycloak",
+      "grantee": "app_dashboard",
+      "grantor": "postgres",
+      "is_grantable": false,
+      "privilege_type": "CREATE"
+    },
+    {
+      "database_name": "keycloak",
+      "grantee": "external_connect_parent",
+      "grantor": "postgres",
+      "is_grantable": false,
+      "privilege_type": "CONNECT"
+    },
+    {
+      "database_name": "omnibase_infra",
+      "grantee": "PUBLIC",
+      "grantor": "postgres",
+      "is_grantable": false,
+      "privilege_type": "CONNECT"
+    },
+    {
+      "database_name": "omnibase_infra",
+      "grantee": "PUBLIC",
+      "grantor": "postgres",
+      "is_grantable": false,
+      "privilege_type": "TEMPORARY"
+    },
+    {
+      "database_name": "omnibase_infra",
+      "grantee": "keycloak_service",
+      "grantor": "rls_admin",
+      "is_grantable": false,
+      "privilege_type": "CONNECT"
+    },
+    {
+      "database_name": "omnibase_infra",
+      "grantee": "onex_api",
+      "grantor": "postgres",
+      "is_grantable": false,
+      "privilege_type": "CREATE"
+    },
+    {
+      "database_name": "omnibase_infra",
+      "grantee": "onex_api",
+      "grantor": "postgres",
+      "is_grantable": false,
+      "privilege_type": "TEMPORARY"
+    },
+    {
+      "database_name": "omnibase_infra",
+      "grantee": "rls_admin",
+      "grantor": "postgres",
+      "is_grantable": true,
+      "privilege_type": "CONNECT"
+    },
+    {
+      "database_name": "omnibase_infra",
+      "grantee": "rls_admin",
+      "grantor": "postgres",
+      "is_grantable": true,
+      "privilege_type": "CREATE"
+    },
+    {
+      "database_name": "omniclaude",
+      "grantee": "PUBLIC",
+      "grantor": "postgres",
+      "is_grantable": false,
+      "privilege_type": "CONNECT"
+    },
+    {
+      "database_name": "omniclaude",
+      "grantee": "PUBLIC",
+      "grantor": "postgres",
+      "is_grantable": false,
+      "privilege_type": "TEMPORARY"
+    },
+    {
+      "database_name": "omnidash_analytics",
+      "grantee": "PUBLIC",
+      "grantor": "app_dashboard",
+      "is_grantable": false,
+      "privilege_type": "CONNECT"
+    },
+    {
+      "database_name": "omnidash_analytics",
+      "grantee": "PUBLIC",
+      "grantor": "app_dashboard",
+      "is_grantable": false,
+      "privilege_type": "TEMPORARY"
+    },
+    {
+      "database_name": "omnidash_analytics",
+      "grantee": "untrusted_login",
+      "grantor": "app_dashboard",
+      "is_grantable": false,
+      "privilege_type": "CONNECT"
+    },
+    {
+      "database_name": "omnidash_analytics",
+      "grantee": "untrusted_login",
+      "grantor": "app_dashboard",
+      "is_grantable": false,
+      "privilege_type": "TEMPORARY"
+    },
+    {
+      "database_name": "omniintelligence",
+      "grantee": "PUBLIC",
+      "grantor": "postgres",
+      "is_grantable": false,
+      "privilege_type": "CONNECT"
+    },
+    {
+      "database_name": "omniintelligence",
+      "grantee": "PUBLIC",
+      "grantor": "postgres",
+      "is_grantable": false,
+      "privilege_type": "TEMPORARY"
+    },
+    {
+      "database_name": "omnimemory",
+      "grantee": "PUBLIC",
+      "grantor": "postgres",
+      "is_grantable": false,
+      "privilege_type": "CONNECT"
+    },
+    {
+      "database_name": "omnimemory",
+      "grantee": "PUBLIC",
+      "grantor": "postgres",
+      "is_grantable": false,
+      "privilege_type": "TEMPORARY"
+    },
+    {
+      "database_name": "omninode_cloud",
+      "grantee": "PUBLIC",
+      "grantor": "postgres",
+      "is_grantable": false,
+      "privilege_type": "CONNECT"
+    },
+    {
+      "database_name": "omninode_cloud",
+      "grantee": "PUBLIC",
+      "grantor": "postgres",
+      "is_grantable": false,
+      "privilege_type": "TEMPORARY"
+    },
+    {
+      "database_name": "umami",
+      "grantee": "PUBLIC",
+      "grantor": "postgres",
+      "is_grantable": false,
+      "privilege_type": "CONNECT"
+    },
+    {
+      "database_name": "umami",
+      "grantee": "PUBLIC",
+      "grantor": "postgres",
+      "is_grantable": false,
+      "privilege_type": "TEMPORARY"
+    }
+  ],
+  "database_owner": [
+    {
+      "database_name": "keycloak",
+      "owner": "postgres"
+    },
+    {
+      "database_name": "omnibase_infra",
+      "owner": "postgres"
+    },
+    {
+      "database_name": "omniclaude",
+      "owner": "postgres"
+    },
+    {
+      "database_name": "omnidash_analytics",
+      "owner": "app_dashboard"
+    },
+    {
+      "database_name": "omniintelligence",
+      "owner": "postgres"
+    },
+    {
+      "database_name": "omnimemory",
+      "owner": "postgres"
+    },
+    {
+      "database_name": "omninode_cloud",
+      "owner": "postgres"
+    },
+    {
+      "database_name": "umami",
+      "owner": "postgres"
+    }
+  ],
+  "default_acl": [
+    {
+      "grantee": "PUBLIC",
+      "grantor": "owner_onex_tenant",
+      "is_grantable": false,
+      "object_type": "FUNCTION",
+      "owner": "owner_onex_tenant",
+      "privilege_type": "EXECUTE",
+      "schema_name": "tenant"
+    },
+    {
+      "grantee": "app_dashboard",
+      "grantor": "owner_onex_tenant",
+      "is_grantable": false,
+      "object_type": "TABLE",
+      "owner": "owner_onex_tenant",
+      "privilege_type": "SELECT",
+      "schema_name": null
+    },
+    {
+      "grantee": "app_dashboard",
+      "grantor": "owner_onex_tenant",
+      "is_grantable": true,
+      "object_type": "TABLE",
+      "owner": "owner_onex_tenant",
+      "privilege_type": "SELECT",
+      "schema_name": "tenant"
+    },
+    {
+      "grantee": "keycloak_service",
+      "grantor": "owner_onex_tenant",
+      "is_grantable": true,
+      "object_type": "TABLE",
+      "owner": "owner_onex_tenant",
+      "privilege_type": "SELECT",
+      "schema_name": "tenant"
+    },
+    {
+      "grantee": "untrusted_login",
+      "grantor": "owner_onex_tenant",
+      "is_grantable": false,
+      "object_type": "TABLE",
+      "owner": "owner_onex_tenant",
+      "privilege_type": "SELECT",
+      "schema_name": null
+    }
+  ],
+  "default_acl_catalog_rows": [
+    {
+      "object_type": "FUNCTION",
+      "owner": "owner_onex_tenant",
+      "raw_acl": "=X/owner_onex_tenant",
+      "schema_name": "tenant"
+    },
+    {
+      "object_type": "TABLE",
+      "owner": "owner_onex_tenant",
+      "raw_acl": "app_dashboard=r*/owner_onex_tenant,keycloak_service=r*/owner_onex_tenant",
+      "schema_name": "tenant"
+    },
+    {
+      "object_type": "TABLE",
+      "owner": "owner_onex_tenant",
+      "raw_acl": "app_dashboard=r/owner_onex_tenant,owner_onex_tenant=arwdDxt/owner_onex_tenant,untrusted_login=r/owner_onex_tenant",
+      "schema_name": null
+    }
+  ],
+  "memberships": [
+    {
+      "admin_option": false,
+      "grantor": "postgres",
+      "inherit_option": false,
+      "member_role": "owner_onex_tenant",
+      "parent_role": "rls_admin",
+      "set_option": true
+    },
+    {
+      "admin_option": false,
+      "grantor": "postgres",
+      "inherit_option": true,
+      "member_role": "omninode_runtime",
+      "parent_role": "owner_omninode_internal",
+      "set_option": true
+    },
+    {
+      "admin_option": false,
+      "grantor": "postgres",
+      "inherit_option": true,
+      "member_role": "shadow_login",
+      "parent_role": "keycloak_service",
+      "set_option": true
+    },
+    {
+      "admin_option": false,
+      "grantor": "postgres",
+      "inherit_option": true,
+      "member_role": "tenant_projection_writer",
+      "parent_role": "owner_onex_tenant",
+      "set_option": true
+    },
+    {
+      "admin_option": false,
+      "grantor": "rls_admin",
+      "inherit_option": false,
+      "member_role": "keycloak_service",
+      "parent_role": "external_connect_parent",
+      "set_option": true
+    },
+    {
+      "admin_option": true,
+      "grantor": "postgres",
+      "inherit_option": true,
+      "member_role": "app_dashboard",
+      "parent_role": "rls_admin",
+      "set_option": true
+    },
+    {
+      "admin_option": true,
+      "grantor": "postgres",
+      "inherit_option": true,
+      "member_role": "db_migrator",
+      "parent_role": "owner_onex_tenant",
+      "set_option": false
+    }
+  ],
+  "object_acl": [
+    {
+      "catalog_kind": "function",
+      "function_signature": "()",
+      "grantee": "PUBLIC",
+      "grantor": "app_dashboard",
+      "is_grantable": false,
+      "object_name": "delegation_event_count",
+      "object_type": "FUNCTION",
+      "privilege_type": "EXECUTE",
+      "schema_name": "tenant"
+    },
+    {
+      "catalog_kind": "function",
+      "function_signature": "()",
+      "grantee": "PUBLIC",
+      "grantor": "onex_api",
+      "is_grantable": false,
+      "object_name": "account_id_span_set",
+      "object_type": "FUNCTION",
+      "privilege_type": "EXECUTE",
+      "schema_name": "tenant"
+    },
+    {
+      "catalog_kind": "function",
+      "function_signature": "(VARIADIC tenant.account_id_span[])",
+      "grantee": "PUBLIC",
+      "grantor": "onex_api",
+      "is_grantable": false,
+      "object_name": "account_id_span_set",
+      "object_type": "FUNCTION",
+      "privilege_type": "EXECUTE",
+      "schema_name": "tenant"
+    },
+    {
+      "catalog_kind": "function",
+      "function_signature": "(\"arg'name%\" integer)",
+      "grantee": "PUBLIC",
+      "grantor": "app_dashboard",
+      "is_grantable": false,
+      "object_name": "hostile_signature",
+      "object_type": "FUNCTION",
+      "privilege_type": "EXECUTE",
+      "schema_name": "tenant"
+    },
+    {
+      "catalog_kind": "function",
+      "function_signature": "(bigint, bigint)",
+      "grantee": "PUBLIC",
+      "grantor": "onex_api",
+      "is_grantable": false,
+      "object_name": "account_id_span",
+      "object_type": "FUNCTION",
+      "privilege_type": "EXECUTE",
+      "schema_name": "tenant"
+    },
+    {
+      "catalog_kind": "function",
+      "function_signature": "(bigint, bigint, text)",
+      "grantee": "PUBLIC",
+      "grantor": "onex_api",
+      "is_grantable": false,
+      "object_name": "account_id_span",
+      "object_type": "FUNCTION",
+      "privilege_type": "EXECUTE",
+      "schema_name": "tenant"
+    },
+    {
+      "catalog_kind": "function",
+      "function_signature": "(tenant.account_id_span)",
+      "grantee": "PUBLIC",
+      "grantor": "onex_api",
+      "is_grantable": false,
+      "object_name": "account_id_span_set",
+      "object_type": "FUNCTION",
+      "privilege_type": "EXECUTE",
+      "schema_name": "tenant"
+    },
+    {
+      "catalog_kind": "materialized_view",
+      "grantee": "app_dashboard",
+      "grantor": "onex_api",
+      "is_grantable": false,
+      "object_name": "plan_tier_snapshot",
+      "object_type": "TABLE",
+      "privilege_type": "DELETE",
+      "schema_name": "platform_catalog"
+    },
+    {
+      "catalog_kind": "materialized_view",
+      "grantee": "app_dashboard",
+      "grantor": "onex_api",
+      "is_grantable": false,
+      "object_name": "plan_tier_snapshot",
+      "object_type": "TABLE",
+      "privilege_type": "INSERT",
+      "schema_name": "platform_catalog"
+    },
+    {
+      "catalog_kind": "materialized_view",
+      "grantee": "app_dashboard",
+      "grantor": "onex_api",
+      "is_grantable": false,
+      "object_name": "plan_tier_snapshot",
+      "object_type": "TABLE",
+      "privilege_type": "REFERENCES",
+      "schema_name": "platform_catalog"
+    },
+    {
+      "catalog_kind": "materialized_view",
+      "grantee": "app_dashboard",
+      "grantor": "onex_api",
+      "is_grantable": false,
+      "object_name": "plan_tier_snapshot",
+      "object_type": "TABLE",
+      "privilege_type": "SELECT",
+      "schema_name": "platform_catalog"
+    },
+    {
+      "catalog_kind": "materialized_view",
+      "grantee": "app_dashboard",
+      "grantor": "onex_api",
+      "is_grantable": false,
+      "object_name": "plan_tier_snapshot",
+      "object_type": "TABLE",
+      "privilege_type": "TRIGGER",
+      "schema_name": "platform_catalog"
+    },
+    {
+      "catalog_kind": "materialized_view",
+      "grantee": "app_dashboard",
+      "grantor": "onex_api",
+      "is_grantable": false,
+      "object_name": "plan_tier_snapshot",
+      "object_type": "TABLE",
+      "privilege_type": "TRUNCATE",
+      "schema_name": "platform_catalog"
+    },
+    {
+      "catalog_kind": "materialized_view",
+      "grantee": "app_dashboard",
+      "grantor": "onex_api",
+      "is_grantable": false,
+      "object_name": "plan_tier_snapshot",
+      "object_type": "TABLE",
+      "privilege_type": "UPDATE",
+      "schema_name": "platform_catalog"
+    },
+    {
+      "catalog_kind": "procedure",
+      "function_signature": "(IN p_payload text)",
+      "grantee": "PUBLIC",
+      "grantor": "app_dashboard",
+      "is_grantable": false,
+      "object_name": "record_delegation",
+      "object_type": "PROCEDURE",
+      "privilege_type": "EXECUTE",
+      "schema_name": "tenant"
+    },
+    {
+      "catalog_kind": "table",
+      "grantee": "app_dashboard",
+      "grantor": "onex_api",
+      "is_grantable": false,
+      "object_name": "partitioned_events",
+      "object_type": "TABLE",
+      "privilege_type": "DELETE",
+      "schema_name": "tenant"
+    },
+    {
+      "catalog_kind": "table",
+      "grantee": "app_dashboard",
+      "grantor": "onex_api",
+      "is_grantable": false,
+      "object_name": "partitioned_events",
+      "object_type": "TABLE",
+      "privilege_type": "INSERT",
+      "schema_name": "tenant"
+    },
+    {
+      "catalog_kind": "table",
+      "grantee": "app_dashboard",
+      "grantor": "onex_api",
+      "is_grantable": false,
+      "object_name": "partitioned_events",
+      "object_type": "TABLE",
+      "privilege_type": "REFERENCES",
+      "schema_name": "tenant"
+    },
+    {
+      "catalog_kind": "table",
+      "grantee": "app_dashboard",
+      "grantor": "onex_api",
+      "is_grantable": false,
+      "object_name": "partitioned_events",
+      "object_type": "TABLE",
+      "privilege_type": "SELECT",
+      "schema_name": "tenant"
+    },
+    {
+      "catalog_kind": "table",
+      "grantee": "app_dashboard",
+      "grantor": "onex_api",
+      "is_grantable": false,
+      "object_name": "partitioned_events",
+      "object_type": "TABLE",
+      "privilege_type": "TRIGGER",
+      "schema_name": "tenant"
+    },
+    {
+      "catalog_kind": "table",
+      "grantee": "app_dashboard",
+      "grantor": "onex_api",
+      "is_grantable": false,
+      "object_name": "partitioned_events",
+      "object_type": "TABLE",
+      "privilege_type": "TRUNCATE",
+      "schema_name": "tenant"
+    },
+    {
+      "catalog_kind": "table",
+      "grantee": "app_dashboard",
+      "grantor": "onex_api",
+      "is_grantable": false,
+      "object_name": "partitioned_events",
+      "object_type": "TABLE",
+      "privilege_type": "UPDATE",
+      "schema_name": "tenant"
+    },
+    {
+      "catalog_kind": "table",
+      "grantee": "app_dashboard",
+      "grantor": "onex_api",
+      "is_grantable": false,
+      "object_name": "plan_tiers",
+      "object_type": "TABLE",
+      "privilege_type": "DELETE",
+      "schema_name": "platform_catalog"
+    },
+    {
+      "catalog_kind": "table",
+      "grantee": "app_dashboard",
+      "grantor": "onex_api",
+      "is_grantable": false,
+      "object_name": "plan_tiers",
+      "object_type": "TABLE",
+      "privilege_type": "INSERT",
+      "schema_name": "platform_catalog"
+    },
+    {
+      "catalog_kind": "table",
+      "grantee": "app_dashboard",
+      "grantor": "onex_api",
+      "is_grantable": false,
+      "object_name": "plan_tiers",
+      "object_type": "TABLE",
+      "privilege_type": "REFERENCES",
+      "schema_name": "platform_catalog"
+    },
+    {
+      "catalog_kind": "table",
+      "grantee": "app_dashboard",
+      "grantor": "onex_api",
+      "is_grantable": false,
+      "object_name": "plan_tiers",
+      "object_type": "TABLE",
+      "privilege_type": "SELECT",
+      "schema_name": "platform_catalog"
+    },
+    {
+      "catalog_kind": "table",
+      "grantee": "app_dashboard",
+      "grantor": "onex_api",
+      "is_grantable": false,
+      "object_name": "plan_tiers",
+      "object_type": "TABLE",
+      "privilege_type": "TRIGGER",
+      "schema_name": "platform_catalog"
+    },
+    {
+      "catalog_kind": "table",
+      "grantee": "app_dashboard",
+      "grantor": "onex_api",
+      "is_grantable": false,
+      "object_name": "plan_tiers",
+      "object_type": "TABLE",
+      "privilege_type": "TRUNCATE",
+      "schema_name": "platform_catalog"
+    },
+    {
+      "catalog_kind": "table",
+      "grantee": "app_dashboard",
+      "grantor": "onex_api",
+      "is_grantable": false,
+      "object_name": "plan_tiers",
+      "object_type": "TABLE",
+      "privilege_type": "UPDATE",
+      "schema_name": "platform_catalog"
+    },
+    {
+      "catalog_kind": "table",
+      "grantee": "app_dashboard",
+      "grantor": "onex_api",
+      "is_grantable": false,
+      "object_name": "tenant_accounts",
+      "object_type": "TABLE",
+      "privilege_type": "DELETE",
+      "schema_name": "tenant"
+    },
+    {
+      "catalog_kind": "table",
+      "grantee": "app_dashboard",
+      "grantor": "onex_api",
+      "is_grantable": false,
+      "object_name": "tenant_accounts",
+      "object_type": "TABLE",
+      "privilege_type": "INSERT",
+      "schema_name": "tenant"
+    },
+    {
+      "catalog_kind": "table",
+      "grantee": "app_dashboard",
+      "grantor": "onex_api",
+      "is_grantable": false,
+      "object_name": "tenant_accounts",
+      "object_type": "TABLE",
+      "privilege_type": "REFERENCES",
+      "schema_name": "tenant"
+    },
+    {
+      "catalog_kind": "table",
+      "grantee": "app_dashboard",
+      "grantor": "onex_api",
+      "is_grantable": false,
+      "object_name": "tenant_accounts",
+      "object_type": "TABLE",
+      "privilege_type": "TRIGGER",
+      "schema_name": "tenant"
+    },
+    {
+      "catalog_kind": "table",
+      "grantee": "app_dashboard",
+      "grantor": "onex_api",
+      "is_grantable": false,
+      "object_name": "tenant_accounts",
+      "object_type": "TABLE",
+      "privilege_type": "TRUNCATE",
+      "schema_name": "tenant"
+    },
+    {
+      "catalog_kind": "table",
+      "grantee": "app_dashboard",
+      "grantor": "onex_api",
+      "is_grantable": false,
+      "object_name": "tenant_accounts",
+      "object_type": "TABLE",
+      "privilege_type": "UPDATE",
+      "schema_name": "tenant"
+    },
+    {
+      "catalog_kind": "table",
+      "grantee": "app_dashboard",
+      "grantor": "onex_api",
+      "is_grantable": true,
+      "object_name": "tenant_accounts",
+      "object_type": "TABLE",
+      "privilege_type": "SELECT",
+      "schema_name": "tenant"
+    },
+    {
+      "catalog_kind": "table",
+      "grantee": "app_dashboard",
+      "grantor": "tenant_projection_writer",
+      "is_grantable": false,
+      "object_name": "runtime_state",
+      "object_type": "TABLE",
+      "privilege_type": "DELETE",
+      "schema_name": "omninode_internal"
+    },
+    {
+      "catalog_kind": "table",
+      "grantee": "app_dashboard",
+      "grantor": "tenant_projection_writer",
+      "is_grantable": false,
+      "object_name": "runtime_state",
+      "object_type": "TABLE",
+      "privilege_type": "INSERT",
+      "schema_name": "omninode_internal"
+    },
+    {
+      "catalog_kind": "table",
+      "grantee": "app_dashboard",
+      "grantor": "tenant_projection_writer",
+      "is_grantable": false,
+      "object_name": "runtime_state",
+      "object_type": "TABLE",
+      "privilege_type": "REFERENCES",
+      "schema_name": "omninode_internal"
+    },
+    {
+      "catalog_kind": "table",
+      "grantee": "app_dashboard",
+      "grantor": "tenant_projection_writer",
+      "is_grantable": false,
+      "object_name": "runtime_state",
+      "object_type": "TABLE",
+      "privilege_type": "SELECT",
+      "schema_name": "omninode_internal"
+    },
+    {
+      "catalog_kind": "table",
+      "grantee": "app_dashboard",
+      "grantor": "tenant_projection_writer",
+      "is_grantable": false,
+      "object_name": "runtime_state",
+      "object_type": "TABLE",
+      "privilege_type": "TRIGGER",
+      "schema_name": "omninode_internal"
+    },
+    {
+      "catalog_kind": "table",
+      "grantee": "app_dashboard",
+      "grantor": "tenant_projection_writer",
+      "is_grantable": false,
+      "object_name": "runtime_state",
+      "object_type": "TABLE",
+      "privilege_type": "TRUNCATE",
+      "schema_name": "omninode_internal"
+    },
+    {
+      "catalog_kind": "table",
+      "grantee": "app_dashboard",
+      "grantor": "tenant_projection_writer",
+      "is_grantable": false,
+      "object_name": "runtime_state",
+      "object_type": "TABLE",
+      "privilege_type": "UPDATE",
+      "schema_name": "omninode_internal"
+    },
+    {
+      "catalog_kind": "table",
+      "grantee": "rls_admin",
+      "grantor": "onex_api",
+      "is_grantable": true,
+      "object_name": "partitioned_events",
+      "object_type": "TABLE",
+      "privilege_type": "SELECT",
+      "schema_name": "tenant"
+    },
+    {
+      "catalog_kind": "table",
+      "grantee": "rls_admin",
+      "grantor": "onex_api",
+      "is_grantable": true,
+      "object_name": "tenant_accounts",
+      "object_type": "TABLE",
+      "privilege_type": "SELECT",
+      "schema_name": "tenant"
+    },
+    {
+      "catalog_kind": "table",
+      "grantee": "untrusted_login",
+      "grantor": "onex_api",
+      "is_grantable": false,
+      "object_name": "tenant_accounts",
+      "object_type": "TABLE",
+      "privilege_type": "SELECT",
+      "schema_name": "tenant"
+    },
+    {
+      "catalog_kind": "table",
+      "grantee": "untrusted_login",
+      "grantor": "rls_admin",
+      "is_grantable": false,
+      "object_name": "partitioned_events",
+      "object_type": "TABLE",
+      "privilege_type": "SELECT",
+      "schema_name": "tenant"
+    },
+    {
+      "catalog_kind": "table",
+      "grantee": "untrusted_login",
+      "grantor": "rls_admin",
+      "is_grantable": false,
+      "object_name": "tenant_accounts",
+      "object_type": "TABLE",
+      "privilege_type": "SELECT",
+      "schema_name": "tenant"
+    },
+    {
+      "catalog_kind": "type",
+      "grantee": "PUBLIC",
+      "grantor": "omninode_runtime",
+      "is_grantable": false,
+      "object_name": "runtime_code",
+      "object_type": "TYPE",
+      "privilege_type": "USAGE",
+      "schema_name": "omninode_internal"
+    },
+    {
+      "catalog_kind": "type",
+      "grantee": "PUBLIC",
+      "grantor": "omninode_runtime",
+      "is_grantable": false,
+      "object_name": "runtime_status",
+      "object_type": "TYPE",
+      "privilege_type": "USAGE",
+      "schema_name": "omninode_internal"
+    },
+    {
+      "catalog_kind": "type",
+      "grantee": "PUBLIC",
+      "grantor": "onex_api",
+      "is_grantable": false,
+      "object_name": "account_id_span",
+      "object_type": "TYPE",
+      "privilege_type": "USAGE",
+      "schema_name": "tenant"
+    },
+    {
+      "catalog_kind": "type",
+      "grantee": "PUBLIC",
+      "grantor": "onex_api",
+      "is_grantable": false,
+      "object_name": "account_id_span_set",
+      "object_type": "TYPE",
+      "privilege_type": "USAGE",
+      "schema_name": "tenant"
+    },
+    {
+      "catalog_kind": "type",
+      "grantee": "PUBLIC",
+      "grantor": "onex_api",
+      "is_grantable": false,
+      "object_name": "account_ref",
+      "object_type": "TYPE",
+      "privilege_type": "USAGE",
+      "schema_name": "tenant"
+    }
+  ],
+  "object_owners": [
+    {
+      "catalog_kind": "function",
+      "function_signature": "()",
+      "object_name": "account_id_span_set",
+      "object_type": "FUNCTION",
+      "owner": "onex_api",
+      "owner_keyword": "FUNCTION",
+      "schema_name": "tenant"
+    },
+    {
+      "catalog_kind": "function",
+      "function_signature": "()",
+      "object_name": "delegation_event_count",
+      "object_type": "FUNCTION",
+      "owner": "app_dashboard",
+      "owner_keyword": "FUNCTION",
+      "schema_name": "tenant"
+    },
+    {
+      "catalog_kind": "function",
+      "function_signature": "(VARIADIC tenant.account_id_span[])",
+      "object_name": "account_id_span_set",
+      "object_type": "FUNCTION",
+      "owner": "onex_api",
+      "owner_keyword": "FUNCTION",
+      "schema_name": "tenant"
+    },
+    {
+      "catalog_kind": "function",
+      "function_signature": "(\"arg'name%\" integer)",
+      "object_name": "hostile_signature",
+      "object_type": "FUNCTION",
+      "owner": "app_dashboard",
+      "owner_keyword": "FUNCTION",
+      "schema_name": "tenant"
+    },
+    {
+      "catalog_kind": "function",
+      "function_signature": "(bigint, bigint)",
+      "object_name": "account_id_span",
+      "object_type": "FUNCTION",
+      "owner": "onex_api",
+      "owner_keyword": "FUNCTION",
+      "schema_name": "tenant"
+    },
+    {
+      "catalog_kind": "function",
+      "function_signature": "(bigint, bigint, text)",
+      "object_name": "account_id_span",
+      "object_type": "FUNCTION",
+      "owner": "onex_api",
+      "owner_keyword": "FUNCTION",
+      "schema_name": "tenant"
+    },
+    {
+      "catalog_kind": "function",
+      "function_signature": "(tenant.account_id_span)",
+      "object_name": "account_id_span_set",
+      "object_type": "FUNCTION",
+      "owner": "onex_api",
+      "owner_keyword": "FUNCTION",
+      "schema_name": "tenant"
+    },
+    {
+      "catalog_kind": "materialized_view",
+      "object_name": "plan_tier_snapshot",
+      "object_type": "TABLE",
+      "owner": "onex_api",
+      "owner_keyword": "MATERIALIZED VIEW",
+      "schema_name": "platform_catalog"
+    },
+    {
+      "catalog_kind": "procedure",
+      "function_signature": "(IN p_payload text)",
+      "object_name": "record_delegation",
+      "object_type": "PROCEDURE",
+      "owner": "app_dashboard",
+      "owner_keyword": "PROCEDURE",
+      "schema_name": "tenant"
+    },
+    {
+      "catalog_kind": "sequence",
+      "object_name": "delegation_events_id_seq",
+      "object_type": "SEQUENCE",
+      "owner": "app_dashboard",
+      "owner_keyword": "SEQUENCE",
+      "schema_name": "tenant"
+    },
+    {
+      "catalog_kind": "table",
+      "object_name": "delegation_events",
+      "object_type": "TABLE",
+      "owner": "app_dashboard",
+      "owner_keyword": "TABLE",
+      "schema_name": "tenant"
+    },
+    {
+      "catalog_kind": "table",
+      "object_name": "partitioned_events",
+      "object_type": "TABLE",
+      "owner": "onex_api",
+      "owner_keyword": "TABLE",
+      "schema_name": "tenant"
+    },
+    {
+      "catalog_kind": "table",
+      "object_name": "plan_tiers",
+      "object_type": "TABLE",
+      "owner": "onex_api",
+      "owner_keyword": "TABLE",
+      "schema_name": "platform_catalog"
+    },
+    {
+      "catalog_kind": "table",
+      "object_name": "runtime_state",
+      "object_type": "TABLE",
+      "owner": "tenant_projection_writer",
+      "owner_keyword": "TABLE",
+      "schema_name": "omninode_internal"
+    },
+    {
+      "catalog_kind": "table",
+      "object_name": "tenant_accounts",
+      "object_type": "TABLE",
+      "owner": "onex_api",
+      "owner_keyword": "TABLE",
+      "schema_name": "tenant"
+    },
+    {
+      "catalog_kind": "type",
+      "object_name": "account_id_span",
+      "object_type": "TYPE",
+      "owner": "onex_api",
+      "owner_keyword": "TYPE",
+      "schema_name": "tenant"
+    },
+    {
+      "catalog_kind": "type",
+      "object_name": "account_id_span_set",
+      "object_type": "TYPE",
+      "owner": "onex_api",
+      "owner_keyword": "TYPE",
+      "schema_name": "tenant"
+    },
+    {
+      "catalog_kind": "type",
+      "object_name": "account_ref",
+      "object_type": "TYPE",
+      "owner": "onex_api",
+      "owner_keyword": "TYPE",
+      "schema_name": "tenant"
+    },
+    {
+      "catalog_kind": "type",
+      "object_name": "runtime_code",
+      "object_type": "TYPE",
+      "owner": "omninode_runtime",
+      "owner_keyword": "TYPE",
+      "schema_name": "omninode_internal"
+    },
+    {
+      "catalog_kind": "type",
+      "object_name": "runtime_status",
+      "object_type": "TYPE",
+      "owner": "omninode_runtime",
+      "owner_keyword": "TYPE",
+      "schema_name": "omninode_internal"
+    },
+    {
+      "catalog_kind": "view",
+      "object_name": "tenant_account_names",
+      "object_type": "TABLE",
+      "owner": "app_dashboard",
+      "owner_keyword": "VIEW",
+      "schema_name": "tenant"
+    }
+  ],
+  "provenance": {
+    "authorization_scope": "synthetic_proof",
+    "dump_derived": false,
+    "live_database_read": false,
+    "postgres_major": 16,
+    "source": "sanitized_postgresql_16_fixture"
+  },
+  "roles": [
+    {
+      "rolbypassrls": false,
+      "rolcanlogin": false,
+      "rolcreatedb": false,
+      "rolcreaterole": false,
+      "rolinherit": true,
+      "rolname": "db_migrator",
+      "rolreplication": false,
+      "rolsuper": false
+    },
+    {
+      "rolbypassrls": false,
+      "rolcanlogin": false,
+      "rolcreatedb": false,
+      "rolcreaterole": false,
+      "rolinherit": true,
+      "rolname": "owner_omninode_internal",
+      "rolreplication": false,
+      "rolsuper": false
+    },
+    {
+      "rolbypassrls": false,
+      "rolcanlogin": false,
+      "rolcreatedb": false,
+      "rolcreaterole": false,
+      "rolinherit": true,
+      "rolname": "owner_onex_tenant",
+      "rolreplication": false,
+      "rolsuper": false
+    },
+    {
+      "rolbypassrls": false,
+      "rolcanlogin": false,
+      "rolcreatedb": false,
+      "rolcreaterole": false,
+      "rolinherit": true,
+      "rolname": "owner_platform_catalog",
+      "rolreplication": false,
+      "rolsuper": false
+    },
+    {
+      "rolbypassrls": false,
+      "rolcanlogin": true,
+      "rolcreatedb": false,
+      "rolcreaterole": false,
+      "rolinherit": false,
+      "rolname": "keycloak_service",
+      "rolreplication": false,
+      "rolsuper": false
+    },
+    {
+      "rolbypassrls": false,
+      "rolcanlogin": true,
+      "rolcreatedb": false,
+      "rolcreaterole": false,
+      "rolinherit": false,
+      "rolname": "omnibase_infra_service",
+      "rolreplication": false,
+      "rolsuper": false
+    },
+    {
+      "rolbypassrls": false,
+      "rolcanlogin": true,
+      "rolcreatedb": false,
+      "rolcreaterole": false,
+      "rolinherit": false,
+      "rolname": "omniclaude_service",
+      "rolreplication": false,
+      "rolsuper": false
+    },
+    {
+      "rolbypassrls": false,
+      "rolcanlogin": true,
+      "rolcreatedb": false,
+      "rolcreaterole": false,
+      "rolinherit": false,
+      "rolname": "omniintelligence_service",
+      "rolreplication": false,
+      "rolsuper": false
+    },
+    {
+      "rolbypassrls": false,
+      "rolcanlogin": true,
+      "rolcreatedb": false,
+      "rolcreaterole": false,
+      "rolinherit": false,
+      "rolname": "omnimemory_service",
+      "rolreplication": false,
+      "rolsuper": false
+    },
+    {
+      "rolbypassrls": false,
+      "rolcanlogin": true,
+      "rolcreatedb": false,
+      "rolcreaterole": false,
+      "rolinherit": false,
+      "rolname": "omninode_cloud_service",
+      "rolreplication": false,
+      "rolsuper": false
+    },
+    {
+      "rolbypassrls": false,
+      "rolcanlogin": true,
+      "rolcreatedb": false,
+      "rolcreaterole": false,
+      "rolinherit": false,
+      "rolname": "umami_service",
+      "rolreplication": false,
+      "rolsuper": false
+    },
+    {
+      "rolbypassrls": false,
+      "rolcanlogin": true,
+      "rolcreatedb": false,
+      "rolcreaterole": false,
+      "rolinherit": true,
+      "rolname": "omninode_runtime",
+      "rolreplication": true,
+      "rolsuper": false
+    },
+    {
+      "rolbypassrls": false,
+      "rolcanlogin": true,
+      "rolcreatedb": false,
+      "rolcreaterole": false,
+      "rolinherit": true,
+      "rolname": "untrusted_login",
+      "rolreplication": false,
+      "rolsuper": false
+    },
+    {
+      "rolbypassrls": false,
+      "rolcanlogin": true,
+      "rolcreatedb": false,
+      "rolcreaterole": true,
+      "rolinherit": true,
+      "rolname": "app_dashboard",
+      "rolreplication": false,
+      "rolsuper": false
+    },
+    {
+      "rolbypassrls": false,
+      "rolcanlogin": true,
+      "rolcreatedb": true,
+      "rolcreaterole": false,
+      "rolinherit": true,
+      "rolname": "onex_api",
+      "rolreplication": false,
+      "rolsuper": false
+    },
+    {
+      "rolbypassrls": true,
+      "rolcanlogin": false,
+      "rolcreatedb": false,
+      "rolcreaterole": false,
+      "rolinherit": true,
+      "rolname": "external_connect_parent",
+      "rolreplication": false,
+      "rolsuper": false
+    },
+    {
+      "rolbypassrls": true,
+      "rolcanlogin": false,
+      "rolcreatedb": false,
+      "rolcreaterole": false,
+      "rolinherit": true,
+      "rolname": "rls_admin",
+      "rolreplication": false,
+      "rolsuper": false
+    },
+    {
+      "rolbypassrls": true,
+      "rolcanlogin": true,
+      "rolcreatedb": false,
+      "rolcreaterole": false,
+      "rolinherit": true,
+      "rolname": "tenant_projection_writer",
+      "rolreplication": false,
+      "rolsuper": false
+    }
+  ],
+  "schema_acl": [
+    {
+      "grantee": "PUBLIC",
+      "grantor": "app_dashboard",
+      "is_grantable": false,
+      "privilege_type": "CREATE",
+      "schema_name": "tenant"
+    },
+    {
+      "grantee": "PUBLIC",
+      "grantor": "app_dashboard",
+      "is_grantable": false,
+      "privilege_type": "USAGE",
+      "schema_name": "tenant"
+    },
+    {
+      "grantee": "PUBLIC",
+      "grantor": "onex_api",
+      "is_grantable": false,
+      "privilege_type": "CREATE",
+      "schema_name": "platform_catalog"
+    },
+    {
+      "grantee": "PUBLIC",
+      "grantor": "onex_api",
+      "is_grantable": false,
+      "privilege_type": "USAGE",
+      "schema_name": "platform_catalog"
+    },
+    {
+      "grantee": "PUBLIC",
+      "grantor": "pg_database_owner",
+      "is_grantable": false,
+      "privilege_type": "USAGE",
+      "schema_name": "public"
+    },
+    {
+      "grantee": "PUBLIC",
+      "grantor": "tenant_projection_writer",
+      "is_grantable": false,
+      "privilege_type": "CREATE",
+      "schema_name": "omninode_internal"
+    },
+    {
+      "grantee": "PUBLIC",
+      "grantor": "tenant_projection_writer",
+      "is_grantable": false,
+      "privilege_type": "USAGE",
+      "schema_name": "omninode_internal"
+    },
+    {
+      "grantee": "app_dashboard",
+      "grantor": "tenant_projection_writer",
+      "is_grantable": false,
+      "privilege_type": "USAGE",
+      "schema_name": "omninode_internal"
+    },
+    {
+      "grantee": "untrusted_login",
+      "grantor": "app_dashboard",
+      "is_grantable": false,
+      "privilege_type": "USAGE",
+      "schema_name": "tenant"
+    }
+  ],
+  "schema_owners": [
+    {
+      "owner": "app_dashboard",
+      "schema_name": "tenant"
+    },
+    {
+      "owner": "onex_api",
+      "schema_name": "platform_catalog"
+    },
+    {
+      "owner": "pg_database_owner",
+      "schema_name": "public"
+    },
+    {
+      "owner": "tenant_projection_writer",
+      "schema_name": "omninode_internal"
+    }
+  ],
+  "schema_version": "3.0"
+}

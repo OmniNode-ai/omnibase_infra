@@ -6,6 +6,8 @@
 from __future__ import annotations
 
 import importlib.util
+import json
+import subprocess
 import sys
 from collections.abc import Callable
 from pathlib import Path
@@ -17,6 +19,23 @@ import pytest
 
 _SCRIPT = (
     Path(__file__).parents[3] / "scripts" / "ci" / "prove_application_database_acl.py"
+)
+_GENERATOR = (
+    Path(__file__).parents[3] / "scripts" / "generate_application_database_acl.py"
+)
+_SOURCE_LOCK_CAPTURE = (
+    Path(__file__).parents[3]
+    / "tests"
+    / "fixtures"
+    / "omn15547"
+    / "application-acl-source-lock.yaml.captured"
+)
+_PRECHANGE_CAPTURE = (
+    Path(__file__).parents[3]
+    / "tests"
+    / "fixtures"
+    / "omn15547"
+    / "application-acl-prechange-fixture.json.captured"
 )
 
 
@@ -56,3 +75,41 @@ def test_admin_dsn_for_database_preserves_authentication(
         "port": "5432",
         "user": "proof_admin",
     }
+
+
+def test_generator_rejects_source_lock_without_repository_roots(
+    tmp_path: Path,
+) -> None:
+    result = subprocess.run(
+        [
+            sys.executable,
+            str(_GENERATOR),
+            "--source-lock",
+            str(_SOURCE_LOCK_CAPTURE),
+            "--matrix-output",
+            str(tmp_path / "matrix.yaml"),
+        ],
+        check=False,
+        capture_output=True,
+        text=True,
+    )
+
+    assert result.returncode != 0
+    assert "Missing --repository-root values" in result.stderr
+
+
+def test_prechange_capture_pins_durable_acl_drift_predicate(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setenv("EXPECTED_PRECHANGE", str(_PRECHANGE_CAPTURE))
+    proof = _load_proof(monkeypatch)
+    expected_path = cast("Path", proof.EXPECTED_PRECHANGE)
+
+    expected = json.loads(expected_path.read_text(encoding="utf-8"))
+    observed = json.loads(_PRECHANGE_CAPTURE.read_text(encoding="utf-8"))
+    assert expected == observed
+
+    drifted = dict(observed)
+    drifted["roles"] = observed["roles"][1:]
+    with pytest.raises(AssertionError, match="durable pre-change ACL artifact drift"):
+        assert expected == drifted, "durable pre-change ACL artifact drift"
