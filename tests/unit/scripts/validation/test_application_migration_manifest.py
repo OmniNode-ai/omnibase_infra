@@ -99,7 +99,7 @@ def _minimal_fixture(tmp_path: Path) -> tuple[Path, Path]:
 def test_checked_in_manifest_is_exact_and_all_blockers_are_explicit() -> None:
     result = _validate()
 
-    assert len(result.declarations) == 80
+    assert len(result.declarations) == 81
     assert len(result.blocked) == 3
     assert {item.ticket for item in result.blocked} == {"OMN-15423"}
     assert len(result.cloud_aliases) == 30
