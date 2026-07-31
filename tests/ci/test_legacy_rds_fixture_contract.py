@@ -20,6 +20,13 @@ DOCKERFILE = FIXTURE_ROOT / "Dockerfile"
 MANIFEST = FIXTURE_ROOT / "fixture-manifest.json"
 LEGACY_SEED = FIXTURE_ROOT / "legacy-seed.sql"
 PROOF = FIXTURE_ROOT / "prove.sh"
+PROOF_REPLAY_CAPTURE = (
+    REPO_ROOT
+    / "tests"
+    / "fixtures"
+    / "omn15547"
+    / "legacy-rds-fixture-prove.sh.captured"
+)
 CUTOVER_PROOF = FIXTURE_ROOT / "cutover-proof" / "prove.sh"
 CUTOVER_BOOTSTRAP = (
     REPO_ROOT
@@ -136,6 +143,7 @@ def test_legacy_seed_reproduces_the_named_catalog_collision_classes() -> None:
 
 def test_proof_runs_real_migrations_twice_and_pins_the_blocked_upgrade() -> None:
     proof = PROOF.read_text(encoding="utf-8")
+    assert PROOF_REPLAY_CAPTURE.read_text(encoding="utf-8") == proof
     assert proof.count("run-forward-migrations.sh") >= 1
     assert "for pass in 1 2" in proof
     assert "fresh-postgres" in proof
@@ -158,7 +166,9 @@ def test_required_ci_executes_rebuilt_fixture_and_always_cleans_it() -> None:
     workflow = yaml.safe_load(CI_WORKFLOW.read_text(encoding="utf-8"))
     job = workflow["jobs"]["fixture-proof"]
     assert "needs" not in job
-    assert job["runs-on"] == "ubuntu-latest"
+    assert "OMNI_RUNNER_SELECTOR_V1" in CI_WORKFLOW.read_text(encoding="utf-8")
+    assert "OMNI_DOCKER_CI_RUNS_ON_JSON" in job["runs-on"]
+    assert "OMNI_TRUSTED_CI_RUNS_ON_JSON" in job["runs-on"]
     steps = job["steps"]
     proof = next(
         step

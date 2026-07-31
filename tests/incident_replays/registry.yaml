@@ -246,3 +246,19 @@ cases:
     test: tests/ci/test_application_database_sql_gate.py::test_omn15361_replay_rejects_real_unqualified_application_migration
     why: >-
       The changed-SQL gate is load-bearing only if it rejects deployable application migrations exactly as they appear in the migration tree, not only small SQL literals assembled inside unit tests. This fixture captures the real node_service_registry tenant-RLS migration bytes from the #2590 head: it targets application relations with unqualified names and no authoritative ownership manifest, the shape OMN-15361 exists to stop from silently extending the application authority surface. The replay stages those captured bytes as an actual changed .sql path in a Git repository and drives the real scripts/ci/check_application_database_sql.py validator through validate_changed_sql, requiring the schema-qualification rejection.
+  - id: omn15422-run-forward-legacy-ledger-fixture
+    guard: scripts/run-forward-migrations.sh
+    incident: OMN-15422
+    regression_class: false_green
+    guard_verdict_on_artifact: reject
+    artifact:
+      fixture: tests/fixtures/omn15547/legacy-rds-fixture-prove.sh.captured
+      sha256: dbaa9701ceaa9fbdc3a7d011f82d6931f4714c6b6574b322b8d7e46b513f168c
+    capture:
+      method: git-object
+      source: git-object:OmniNode-ai/omnibase_infra@60f542619f2df5db9c173982f3a06bd1dc4134b8:docker/legacy-rds-fixture/prove.sh
+      captured_at: "2026-07-31T07:35:00Z"
+      captured_by: Codex merge sweep (OMN-15422 repair)
+    test: tests/ci/test_legacy_rds_fixture_contract.py::test_proof_runs_real_migrations_twice_and_pins_the_blocked_upgrade
+    why: >-
+      The forward migration runner became newly wired enforcement when the OMN-15422 rebuilt legacy-RDS proof workflow started invoking it against both fresh and legacy PostgreSQL 16 histories. The incident was a false-green upgrade proof: a runner could pass a fresh path while legacy ledger shapes, duplicate checksums, and the unresolved OMN-15423 node migration wall were never exercised together. This captured proof script is the committed artifact that drives the real runner twice through the synthetic legacy ledger corpus and requires the blocked-upgrade signature, so the runner cannot be counted as wired enforcement without the regression surface it exists to catch.
