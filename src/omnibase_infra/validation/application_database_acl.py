@@ -277,16 +277,24 @@ def _object_type_from_inventory(
         EnumApplicationInventoryObjectKind.TABLE,
         EnumApplicationInventoryObjectKind.VIEW,
         EnumApplicationInventoryObjectKind.MATERIALIZED_VIEW,
+        EnumApplicationInventoryObjectKind.FOREIGN_TABLE,
     }:
         return EnumDatabaseGrantObjectType.TABLE
     if kind is EnumApplicationInventoryObjectKind.SEQUENCE:
         return EnumDatabaseGrantObjectType.SEQUENCE
     if kind in {
         EnumApplicationInventoryObjectKind.FUNCTION,
+        EnumApplicationInventoryObjectKind.AGGREGATE,
+        EnumApplicationInventoryObjectKind.WINDOW_FUNCTION,
         EnumApplicationInventoryObjectKind.PROCEDURE,
     }:
         return EnumDatabaseGrantObjectType.FUNCTION
-    if kind is EnumApplicationInventoryObjectKind.TYPE:
+    if kind in {
+        EnumApplicationInventoryObjectKind.TYPE,
+        EnumApplicationInventoryObjectKind.BASE_TYPE,
+        EnumApplicationInventoryObjectKind.RANGE_TYPE,
+        EnumApplicationInventoryObjectKind.MULTIRANGE_TYPE,
+    }:
         return EnumDatabaseGrantObjectType.TYPE
     return None
 
@@ -304,12 +312,34 @@ def _object_type_from_service(
         return EnumDatabaseGrantObjectType.SEQUENCE
     if kind in {
         EnumApplicationDatabaseObjectKind.FUNCTION,
+        EnumApplicationDatabaseObjectKind.AGGREGATE,
+        EnumApplicationDatabaseObjectKind.WINDOW_FUNCTION,
         EnumApplicationDatabaseObjectKind.PROCEDURE,
     }:
         return EnumDatabaseGrantObjectType.FUNCTION
-    if kind is EnumApplicationDatabaseObjectKind.TYPE:
+    if kind in {
+        EnumApplicationDatabaseObjectKind.TYPE,
+        EnumApplicationDatabaseObjectKind.BASE_TYPE,
+        EnumApplicationDatabaseObjectKind.RANGE_TYPE,
+        EnumApplicationDatabaseObjectKind.MULTIRANGE_TYPE,
+    }:
         return EnumDatabaseGrantObjectType.TYPE
     return None
+
+
+def _unsupported_object_acl_blocker(
+    *,
+    source_id: str,
+    schema_name: str | None,
+    object_name: str,
+    kind: str,
+) -> str:
+    """Explain why an owned object cannot enter PostgreSQL's object ACL matrix."""
+    location = f"{schema_name}.{object_name}" if schema_name else object_name
+    return (
+        f"{source_id}:{location}:{kind} has no PostgreSQL object ACL or "
+        "default-privilege class; explicit extension security proof is required"
+    )
 
 
 def _source_status_blockers(
@@ -340,9 +370,15 @@ def _source_status_blockers(
             + typed_kind_counts.get("materialized_view", 0)
         ),
         "observed_sequences": typed_kind_counts.get("sequence", 0),
-        "observed_functions": typed_kind_counts.get("function", 0),
+        "observed_functions": sum(
+            typed_kind_counts.get(kind, 0)
+            for kind in ("function", "aggregate", "window_function")
+        ),
         "observed_procedures": typed_kind_counts.get("procedure", 0),
-        "observed_types": typed_kind_counts.get("type", 0),
+        "observed_types": sum(
+            typed_kind_counts.get(kind, 0)
+            for kind in ("type", "base_type", "range_type", "multirange_type")
+        ),
         "observed_extensions": typed_kind_counts.get("extension", 0),
     }
     for field_name in (
@@ -416,9 +452,15 @@ def _service_status_blockers(
                 + relation_counts.get("materialized_view", 0)
             ),
             "observed_sequences": object_counts.get("sequence", 0),
-            "observed_functions": object_counts.get("function", 0),
+            "observed_functions": sum(
+                object_counts.get(kind, 0)
+                for kind in ("function", "aggregate", "window_function")
+            ),
             "observed_procedures": object_counts.get("procedure", 0),
-            "observed_types": object_counts.get("type", 0),
+            "observed_types": sum(
+                object_counts.get(kind, 0)
+                for kind in ("type", "base_type", "range_type", "multirange_type")
+            ),
             "observed_extensions": object_counts.get("extension", 0),
         }
         for field_name, typed_count in expected_counts.items():
@@ -509,9 +551,13 @@ def _append_inventory_objects(
     for relation in inventory.relations:
         object_type = _object_type_from_inventory(relation.kind)
         if object_type is None:
-            excluded.append(
-                f"{source_id}:{relation.target_schema}.{relation.name}:"
-                f"{relation.kind.value}"
+            blockers.append(
+                _unsupported_object_acl_blocker(
+                    source_id=source_id,
+                    schema_name=relation.target_schema,
+                    object_name=relation.name,
+                    kind=relation.kind.value,
+                )
             )
             continue
         if relation.target_schema not in database.schemas:
@@ -708,8 +754,13 @@ def _append_service_objects(
     for database_object in manifest.database_objects:
         object_type = _object_type_from_service(database_object.kind)
         if object_type is None:
-            excluded.append(
-                f"{source_id}:{database_object.name}:{database_object.kind.value}"
+            blockers.append(
+                _unsupported_object_acl_blocker(
+                    source_id=source_id,
+                    schema_name=database_object.schema,
+                    object_name=database_object.name,
+                    kind=database_object.kind.value,
+                )
             )
             continue
         database_ref = database_object.database_ref or manifest.target_database_ref
@@ -2497,6 +2548,7 @@ def _sql_object_target(
             "table": "TABLE",
             "view": "VIEW",
             "materialized_view": "MATERIALIZED VIEW",
+            "foreign_table": "FOREIGN TABLE",
         }[obj.catalog_kind]
         return owner_keyword, "TABLE", qualified
     if obj.object_type is EnumDatabaseGrantObjectType.SEQUENCE:
@@ -2507,8 +2559,10 @@ def _sql_object_target(
         raise ValueError(
             f"Function {obj.schema_ref}.{obj.object_ref} lacks function_signature"
         )
-    keyword = "PROCEDURE" if obj.catalog_kind == "procedure" else "FUNCTION"
-    return keyword, keyword, f"{qualified}{obj.function_signature}"
+    if obj.catalog_kind == "procedure":
+        return "PROCEDURE", "PROCEDURE", f"{qualified}{obj.function_signature}"
+    owner_keyword = "AGGREGATE" if obj.catalog_kind == "aggregate" else "FUNCTION"
+    return owner_keyword, "FUNCTION", f"{qualified}{obj.function_signature}"
 
 
 def render_application_database_acl_sql(
@@ -2899,24 +2953,34 @@ def render_application_database_acl_sql(
                 "             WHEN 'p' THEN 'table'",
                 "             WHEN 'v' THEN 'view'",
                 "             WHEN 'm' THEN 'materialized_view'",
+                "             WHEN 'f' THEN 'foreign_table'",
                 "             WHEN 'S' THEN 'sequence'",
                 "           END || '|' || namespace.nspname || '|' ||",
                 "           relation.relname || '|' AS catalog_identity",
                 "    FROM pg_catalog.pg_class relation",
                 "    JOIN pg_catalog.pg_namespace namespace ON namespace.oid = relation.relnamespace",
                 f"    WHERE namespace.nspname IN ({managed_schema_literals})",
-                "      AND relation.relkind IN ('r', 'p', 'v', 'm', 'S')",
+                "      AND relation.relkind IN ('r', 'p', 'v', 'm', 'f', 'S')",
                 "    UNION ALL",
-                "    SELECT CASE WHEN procedure.prokind = 'p'",
-                "                THEN 'procedure' ELSE 'function' END || '|' ||",
+                "    SELECT CASE procedure.prokind",
+                "             WHEN 'p' THEN 'procedure'",
+                "             WHEN 'a' THEN 'aggregate'",
+                "             WHEN 'w' THEN 'window_function'",
+                "             ELSE 'function'",
+                "           END || '|' ||",
                 "           namespace.nspname || '|' || procedure.proname || '|' ||",
                 "           '(' || pg_catalog.pg_get_function_identity_arguments(procedure.oid) || ')'",
                 "    FROM pg_catalog.pg_proc procedure",
                 "    JOIN pg_catalog.pg_namespace namespace ON namespace.oid = procedure.pronamespace",
                 f"    WHERE namespace.nspname IN ({managed_schema_literals})",
-                "      AND procedure.prokind IN ('f', 'p')",
+                "      AND procedure.prokind IN ('f', 'p', 'a', 'w')",
                 "    UNION ALL",
-                "    SELECT 'type|' || namespace.nspname || '|' || type.typname || '|'",
+                "    SELECT CASE type.typtype",
+                "             WHEN 'b' THEN 'base_type'",
+                "             WHEN 'r' THEN 'range_type'",
+                "             WHEN 'm' THEN 'multirange_type'",
+                "             ELSE 'type'",
+                "           END || '|' || namespace.nspname || '|' || type.typname || '|'",
                 "    FROM pg_catalog.pg_type type",
                 "    JOIN pg_catalog.pg_namespace namespace ON namespace.oid = type.typnamespace",
                 "    LEFT JOIN pg_catalog.pg_class relation ON relation.oid = type.typrelid",
@@ -2945,12 +3009,14 @@ def render_application_database_acl_sql(
                 "table",
                 "view",
                 "materialized_view",
+                "foreign_table",
                 "sequence",
             }:
                 relkind_condition = {
                     "table": "relation.relkind IN ('r', 'p')",
                     "view": "relation.relkind = 'v'",
                     "materialized_view": "relation.relkind = 'm'",
+                    "foreign_table": "relation.relkind = 'f'",
                     "sequence": "relation.relkind = 'S'",
                 }[observed_object.catalog_kind]
                 owner_query = [
@@ -2962,8 +3028,18 @@ def render_application_database_acl_sql(
                     f"    AND relation.relname = '{observed_object.object_ref}'",
                     f"    AND {relkind_condition};",
                 ]
-            elif observed_object.catalog_kind in {"function", "procedure"}:
-                prokind = "p" if observed_object.catalog_kind == "procedure" else "f"
+            elif observed_object.catalog_kind in {
+                "function",
+                "aggregate",
+                "window_function",
+                "procedure",
+            }:
+                prokind = {
+                    "function": "f",
+                    "aggregate": "a",
+                    "window_function": "w",
+                    "procedure": "p",
+                }[observed_object.catalog_kind]
                 owner_query = [
                     "  SELECT owner.rolname INTO actual_owner",
                     "  FROM pg_catalog.pg_proc procedure",
@@ -2976,6 +3052,15 @@ def render_application_database_acl_sql(
                     f"{_quote_sql_literal(observed_object.function_signature or '')};",
                 ]
             else:
+                type_condition = {
+                    "type": (
+                        "((type.typtype IN ('d', 'e') AND type.typelem = 0) "
+                        "OR (type.typtype = 'c' AND relation.relkind = 'c'))"
+                    ),
+                    "base_type": "type.typtype = 'b' AND type.typelem = 0",
+                    "range_type": "type.typtype = 'r' AND type.typelem = 0",
+                    "multirange_type": "type.typtype = 'm' AND type.typelem = 0",
+                }[observed_object.catalog_kind]
                 owner_query = [
                     "  SELECT owner.rolname INTO actual_owner",
                     "  FROM pg_catalog.pg_type type",
@@ -2985,8 +3070,7 @@ def render_application_database_acl_sql(
                     f"  WHERE namespace.nspname = '{observed_object.schema_ref}'",
                     f"    AND type.typname = '{observed_object.object_ref}'",
                     "    AND type.typisdefined",
-                    "    AND ((type.typtype IN ('b', 'd', 'e', 'r', 'm') AND type.typelem = 0)",
-                    "         OR (type.typtype = 'c' AND relation.relkind = 'c'));",
+                    f"    AND ({type_condition});",
                 ]
             lines.extend(
                 [
@@ -3338,6 +3422,7 @@ def render_application_database_acl_sql(
                 "table": "object.relkind IN ('r', 'p')",
                 "view": "object.relkind = 'v'",
                 "materialized_view": "object.relkind = 'm'",
+                "foreign_table": "object.relkind = 'f'",
                 "sequence": "object.relkind = 'S'",
             }[obj.catalog_kind]
             catalog_acl_lines = [
@@ -3354,7 +3439,12 @@ def render_application_database_acl_sql(
                 "      AND acl.grantee <> object.relowner",
             ]
         elif obj.object_type is EnumDatabaseGrantObjectType.FUNCTION:
-            prokind = "p" if obj.catalog_kind == "procedure" else "f"
+            prokind = {
+                "function": "f",
+                "aggregate": "a",
+                "window_function": "w",
+                "procedure": "p",
+            }[obj.catalog_kind]
             catalog_acl_lines = [
                 "    FROM pg_catalog.pg_proc object",
                 "    JOIN pg_catalog.pg_namespace namespace ON namespace.oid = object.pronamespace",
@@ -3371,9 +3461,19 @@ def render_application_database_acl_sql(
                 "      AND acl.grantee <> object.proowner",
             ]
         else:
+            type_condition = {
+                "type": (
+                    "((object.typtype IN ('d', 'e') AND object.typelem = 0) "
+                    "OR (object.typtype = 'c' AND relation.relkind = 'c'))"
+                ),
+                "base_type": "object.typtype = 'b' AND object.typelem = 0",
+                "range_type": "object.typtype = 'r' AND object.typelem = 0",
+                "multirange_type": "object.typtype = 'm' AND object.typelem = 0",
+            }[obj.catalog_kind]
             catalog_acl_lines = [
                 "    FROM pg_catalog.pg_type object",
                 "    JOIN pg_catalog.pg_namespace namespace ON namespace.oid = object.typnamespace",
+                "    LEFT JOIN pg_catalog.pg_class relation ON relation.oid = object.typrelid",
                 "    CROSS JOIN LATERAL pg_catalog.aclexplode(",
                 "      COALESCE(object.typacl, pg_catalog.acldefault('T', object.typowner))",
                 "    ) acl",
@@ -3381,6 +3481,8 @@ def render_application_database_acl_sql(
                 "    JOIN pg_catalog.pg_authid grantor ON grantor.oid = acl.grantor",
                 f"    WHERE namespace.nspname = '{obj.schema_ref}'",
                 f"      AND object.typname = '{obj.object_ref}'",
+                "      AND object.typisdefined",
+                f"      AND ({type_condition})",
                 "      AND acl.grantee <> object.typowner",
             ]
         lines.extend(

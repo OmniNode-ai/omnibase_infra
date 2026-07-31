@@ -38,6 +38,7 @@ relations:
     migration_stream: omnimarket_node_migrations
   - name: resolve_delegation
     kind: function
+    function_signature: "()"
     target_schema: platform_catalog
     domain: PLATFORM_CATALOG
     owner_declaration: node:node_projection_delegation

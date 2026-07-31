@@ -88,6 +88,9 @@ def load_application_relation_inventory(
         EnumApplicationInventoryObjectKind.MATERIALIZED_VIEW: (
             EnumApplicationRelationKind.MATERIALIZED_VIEW
         ),
+        EnumApplicationInventoryObjectKind.FOREIGN_TABLE: (
+            EnumApplicationRelationKind.FOREIGN_TABLE
+        ),
         EnumApplicationInventoryObjectKind.FUNCTION: (
             EnumApplicationRelationKind.FUNCTION
         ),
@@ -100,6 +103,7 @@ def load_application_relation_inventory(
             kind=kind_map[relation.kind],
             purpose=_inventory_relation_purpose(relation.name),
             domain=relation.domain,
+            function_signature=relation.function_signature,
         )
         for relation in evidence.relations
         if relation.kind in kind_map
@@ -508,6 +512,7 @@ def _append_service_declarations(
                 access="read_write",
                 role=evidence.kind.value,
                 source_path=str(path),
+                function_signature=evidence.function_signature,
             )
         )
 
@@ -622,6 +627,7 @@ def _append_service_declarations(
                 access="read_write",
                 role="function",
                 source_path=str(path),
+                function_signature=database_object.function_signature,
             )
         )
 

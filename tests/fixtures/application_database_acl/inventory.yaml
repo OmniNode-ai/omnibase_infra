@@ -16,7 +16,7 @@ relation_counts:
   procedure: 1
   sequence: 1
   extension: 0
-  type: 5
+  type: 3
 relations:
   - name: tenant_accounts
     kind: table
@@ -146,7 +146,7 @@ relations:
     classification_status: classified
     migration_root: proof
   - name: account_id_span
-    kind: type
+    kind: range_type
     target_schema: tenant
     current_schema: [tenant]
     domain: TENANT
@@ -156,7 +156,7 @@ relations:
     classification_status: classified
     migration_root: proof
   - name: account_id_span_set
-    kind: type
+    kind: multirange_type
     target_schema: tenant
     current_schema: [tenant]
     domain: TENANT

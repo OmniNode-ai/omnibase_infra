@@ -24,10 +24,16 @@ class ModelApplicationDatabaseCatalogObjectEvidence(BaseModel):
         "table",
         "view",
         "materialized_view",
+        "foreign_table",
         "sequence",
         "function",
+        "aggregate",
+        "window_function",
         "procedure",
         "type",
+        "base_type",
+        "range_type",
+        "multirange_type",
     ]
     object_ref: str = Field(..., pattern=r"^[a-z_][a-z0-9_]*$")
     function_signature: ApplicationDatabaseFunctionSignature | None = None
@@ -38,7 +44,12 @@ class ModelApplicationDatabaseCatalogObjectEvidence(BaseModel):
         self,
     ) -> ModelApplicationDatabaseCatalogObjectEvidence:
         """Require exact signatures only for routines."""
-        routine = self.catalog_kind in {"function", "procedure"}
+        routine = self.catalog_kind in {
+            "function",
+            "aggregate",
+            "window_function",
+            "procedure",
+        }
         if routine != (self.function_signature is not None):
             raise ValueError(
                 "catalog routine evidence requires a signature and non-routines forbid it"

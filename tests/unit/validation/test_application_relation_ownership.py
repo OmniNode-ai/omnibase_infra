@@ -81,41 +81,47 @@ def test_read_only_node_declaration_is_an_explicit_reader_not_second_owner() -> 
 @pytest.mark.parametrize(
     ("inventory_name", "node_names", "service_names", "expected"),
     [
-        (
+        pytest.param(
             "inventory-with-missing.yaml",
             ("node-owner.yaml",),
             ("service-owner.yaml",),
             EnumApplicationRelationViolation.MISSING_OWNER,
+            id="missing-owner",
         ),
-        (
+        pytest.param(
             "inventory.yaml",
             ("node-owner.yaml",),
             ("service-owner.yaml", "duplicate-owner.yaml"),
             EnumApplicationRelationViolation.DUPLICATE_OWNER,
+            id="duplicate-owner",
         ),
-        (
+        pytest.param(
             "inventory.yaml",
             ("node-owner.yaml", "conflicting-location.yaml"),
             ("service-owner.yaml",),
             EnumApplicationRelationViolation.CONFLICTING_LOCATION,
+            id="conflicting-location",
         ),
-        (
+        pytest.param(
             "inventory-without-delegation.yaml",
             ("node-owner.yaml",),
             ("service-owner.yaml",),
             EnumApplicationRelationViolation.UNKNOWN_RELATION,
+            id="unknown-relation",
         ),
-        (
+        pytest.param(
             "inventory.yaml",
             ("node-owner.yaml",),
             ("blocked-service.yaml",),
             EnumApplicationRelationViolation.BLOCKED_RELATION,
+            id="blocked-relation",
         ),
-        (
+        pytest.param(
             "inventory.yaml",
             ("node-owner.yaml",),
             ("incomplete-census.yaml",),
             EnumApplicationRelationViolation.INCOMPLETE_CENSUS,
+            id="incomplete-census",
         ),
     ],
 )
@@ -174,6 +180,7 @@ def test_rich_omn15423_inventory_projects_without_dropping_blockers() -> None:
     )
     assert inventory.relations[0].database_ref == "application"
     assert inventory.relations[0].schema == "tenant"
+    assert inventory.relations[2].function_signature == "()"
 
     report = validate_application_relation_ownership(
         topology=_topology(),
@@ -187,7 +194,7 @@ def test_rich_omn15423_inventory_projects_without_dropping_blockers() -> None:
     assert EnumApplicationRelationViolation.INCOMPLETE_CENSUS in codes
 
 
-def test_rich_inventory_cannot_self_assert_completeness_with_missing_rows() -> None:
+def test_red_control_incomplete_retained_census() -> None:
     inventory = load_application_relation_inventory(
         _FIXTURES / "false-complete-census.yaml"
     )

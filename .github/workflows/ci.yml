@@ -2198,6 +2198,196 @@ jobs:
     with:
       vocabulary_ref: 454c429f328e68e19300f33ffb8121f1bccc7f86
       context_name: merge-hold-gate / evaluate
+  # OMN-15361: P0/P8 fail-closed application database domain enforcement.
+  # Unconditional after OCC eligibility and STRICT in ci_summary_gate.py: validators,
+  # seeded counterexamples, and rebuilt PostgreSQL 16 proofs report in this
+  # workflow's run and therefore gate the sole required CI Summary context.
+  # Deployment activation remains separately BLOCKED in the typed contract;
+  # this job performs no live database, secret, grant, deploy, or runtime action.
+  application-database-domain-enforcement:
+    name: Application Database Domain Enforcement (OMN-15361)
+    needs: occ-preflight
+    permissions:
+      contents: read
+    runs-on: >-
+      ${{
+        ((github.event_name == 'pull_request' && github.base_ref == 'dev') ||
+         (github.event_name == 'pull_request' &&
+          github.event.pull_request.head.repo.full_name != github.repository))
+        && fromJSON(vars.OMNI_PUBLIC_PR_RUNS_ON_JSON || '["ubuntu-latest"]')
+        || fromJSON((github.event_name == 'merge_group' && vars.OMNI_REQUIRED_CI_RUNS_ON_JSON) || vars.OMNI_DOCKER_CI_RUNS_ON_JSON || vars.OMNI_TRUSTED_CI_RUNS_ON_JSON || '["self-hosted","omnibase-ci"]')
+      }}
+    timeout-minutes: 60
+    steps:
+      - name: Checkout enforcement source
+        uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+
+      - name: Checkout exact sanitized legacy fixture dependency
+        uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+        with:
+          repository: OmniNode-ai/omnibase_infra
+          ref: 95351f5d8e806fcf7fa2c276d9065df93ccf92b9
+          path: .proof-dependencies/legacy-fixture
+          persist-credentials: false
+
+      - name: Checkout exact authenticated domain-adapter dependency
+        uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+        with:
+          repository: OmniNode-ai/omnibase_infra
+          ref: 2a2cfb275810b34197d4d5baf55bdcddc443e6dc
+          path: .proof-dependencies/domain-adapter
+          persist-credentials: false
+
+      - name: Checkout exact typed registry dependency
+        uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+        with:
+          repository: OmniNode-ai/omnimarket
+          ref: 4637e625c99ef17c190aa471a5e51b7f646c6dfd
+          path: .proof-dependencies/omnimarket
+          persist-credentials: false
+
+      - name: Checkout exact service ownership dependency
+        if: >-
+          github.event_name != 'pull_request' ||
+          github.event.pull_request.head.repo.full_name == github.repository
+        uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+        with:
+          repository: OmniNode-ai/omninode_infra
+          ref: 39033d55147ef22a061b665345b506246d3aa543
+          path: .proof-dependencies/omninode-infra
+          token: ${{ secrets.CROSS_REPO_PAT }}
+          persist-credentials: false
+
+      - name: Setup Python and uv
+        uses: ./.github/actions/setup-python-uv
+        with:
+          python-version: ${{ env.PYTHON_VERSION }}
+          uv-version: ${{ env.UV_VERSION }}
+          cache-version: ${{ env.CACHE_VERSION }}
+          cache-enabled: "false"
+
+      - name: Execute mandatory source assertions and seeded RED controls
+        run: >-
+          uv run pytest -q
+          tests/unit/validation/test_application_relation_ownership.py
+          tests/unit/validation/test_application_database_acl.py
+          tests/unit/validation/test_application_database_domain_enforcement.py
+          tests/unit/validation/test_application_database_sql_enforcement_regressions.py
+          tests/unit/topology/test_application_database_topology.py
+          tests/unit/runtime/auto_wiring/test_projection_domain_adapters.py
+          tests/ci/test_application_database_domain_enforcement_contract.py
+          tests/ci/test_application_database_sql_authority_isolation.py
+          tests/ci/test_application_database_sql_gate.py
+
+      - name: Enforce schema qualification in changed SQL (trusted)
+        if: >-
+          github.event_name != 'pull_request' ||
+          github.event.pull_request.head.repo.full_name == github.repository
+        env:
+          APPLICATION_SQL_BASE_REVISION: >-
+            ${{ github.event.pull_request.base.sha || github.event.merge_group.base_sha || '7228ce0c0934ae096dd6effd0f84ff1913fec6c0' }}
+        run: >-
+          uv run python scripts/ci/check_application_database_sql.py
+          --base-revision "$APPLICATION_SQL_BASE_REVISION"
+          --head-revision HEAD
+          --ownership-manifest .proof-dependencies/omnimarket/scripts/application-relation-ownership.yaml
+          --ownership-manifest .proof-dependencies/omninode-infra/db/migrations/application-relation-ownership.yaml
+          --ownership-manifest .proof-dependencies/omninode-infra/k8s/migrations/application-relation-ownership.yaml
+
+      # Public-fork pull_request jobs cannot receive organization secrets. The
+      # fork lane deliberately omits the private manifest authority: any changed
+      # SQL targeting one of those objects is rejected as undeclared. The
+      # synthetic Docker-proof authority is also isolated from both production
+      # lanes and is proved independently by mandatory source and Docker gates.
+      - name: Enforce schema qualification in changed SQL (public fork, fail closed)
+        if: >-
+          github.event_name == 'pull_request' &&
+          github.event.pull_request.head.repo.full_name != github.repository
+        env:
+          APPLICATION_SQL_BASE_REVISION: ${{ github.event.pull_request.base.sha }}
+        run: >-
+          uv run python scripts/ci/check_application_database_sql.py
+          --base-revision "$APPLICATION_SQL_BASE_REVISION"
+          --head-revision HEAD
+          --ownership-manifest .proof-dependencies/omnimarket/scripts/application-relation-ownership.yaml
+
+      - name: Verify Docker engine
+        run: docker info
+
+      - name: Rebuild and prove application-domain catalog gates
+        env:
+          COMPOSE_PROJECT_NAME: omn15361-domain-${{ github.run_id }}-${{ github.run_attempt }}
+        run: >-
+          docker compose
+          -f docker/application-domain-enforcement/compose.yml
+          up --build --abort-on-container-exit --exit-code-from proof
+
+      - name: Clean application-domain proof
+        if: always()
+        env:
+          COMPOSE_PROJECT_NAME: omn15361-domain-${{ github.run_id }}-${{ github.run_attempt }}
+        run: >-
+          docker compose
+          -f docker/application-domain-enforcement/compose.yml
+          down --volumes --remove-orphans
+
+      - name: Rebuild and prove authenticated domain adapters
+        working-directory: .proof-dependencies/domain-adapter
+        env:
+          COMPOSE_PROJECT_NAME: omn15361-adapter-${{ github.run_id }}-${{ github.run_attempt }}
+        run: >-
+          docker compose
+          -f docker/domain-adapter-proof/compose.yml
+          up --build --abort-on-container-exit --exit-code-from proof
+
+      - name: Clean domain-adapter proof
+        if: always()
+        working-directory: .proof-dependencies/domain-adapter
+        env:
+          COMPOSE_PROJECT_NAME: omn15361-adapter-${{ github.run_id }}-${{ github.run_attempt }}
+        run: >-
+          docker compose
+          -f docker/domain-adapter-proof/compose.yml
+          down --volumes --remove-orphans
+
+      - name: Rebuild and prove generated role and default-privilege gates
+        env:
+          COMPOSE_PROJECT_NAME: omn15361-acl-${{ github.run_id }}-${{ github.run_attempt }}
+        run: >-
+          docker compose
+          -f docker/application-acl-proof/compose.yml
+          up --build --abort-on-container-exit --exit-code-from proof
+
+      - name: Clean generated ACL proof
+        if: always()
+        env:
+          COMPOSE_PROJECT_NAME: omn15361-acl-${{ github.run_id }}-${{ github.run_attempt }}
+        run: >-
+          docker compose
+          -f docker/application-acl-proof/compose.yml
+          down --volumes --remove-orphans
+
+      - name: Rebuild and prove exact sanitized fresh and legacy fixture
+        working-directory: .proof-dependencies/legacy-fixture
+        env:
+          COMPOSE_PROJECT_NAME: omn15361-legacy-${{ github.run_id }}-${{ github.run_attempt }}
+        run: >-
+          docker compose
+          -f docker/legacy-rds-fixture/compose.yml
+          up --build --abort-on-container-exit --exit-code-from proof
+
+      - name: Clean sanitized fresh and legacy fixture proof
+        if: always()
+        working-directory: .proof-dependencies/legacy-fixture
+        env:
+          COMPOSE_PROJECT_NAME: omn15361-legacy-${{ github.run_id }}-${{ github.run_attempt }}
+        run: >-
+          docker compose
+          -f docker/legacy-rds-fixture/compose.yml
+          down --volumes --remove-orphans
 
   ci-summary:
     name: CI Summary
