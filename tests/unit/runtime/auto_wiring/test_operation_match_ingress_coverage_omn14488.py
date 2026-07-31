@@ -22,7 +22,7 @@ valid producer payload, and a mismatched/stub input_model MUST reject it (non-va
 from __future__ import annotations
 
 import enum
-from uuid import uuid4
+from uuid import UUID, uuid4
 
 import pytest
 from pydantic import BaseModel, ConfigDict, Field, ValidationError
@@ -30,6 +30,7 @@ from pydantic import BaseModel, ConfigDict, Field, ValidationError
 from omnibase_core.models.delegation.model_invocation_command import (
     ModelInvocationCommand,
 )
+from omnibase_core.types import JsonType
 from omnibase_infra.runtime.runtime_local_ingress import (
     ModelRuntimeLocalIngressRoute,
     validate_runtime_local_ingress_payload,
@@ -60,7 +61,7 @@ def _first_enum_value(annotation: object) -> object:
     raise AssertionError(f"no Enum member in {annotation!r}")
 
 
-def _producer_invocation_payload() -> dict[str, object]:
+def _producer_invocation_payload() -> dict[str, JsonType]:
     """The RICH ModelInvocationCommand the producer actually publishes."""
     kind = _first_enum_value(
         ModelInvocationCommand.model_fields["invocation_kind"].annotation
@@ -109,7 +110,11 @@ def test_canonical_input_model_accepts_producer_payload() -> None:
     # would leave it in; its absence below proves the ingress seam actually resolved
     # and model_validate'd against the declared input_model rather than short-circuiting.
     assert "model_backend" in payload and payload["model_backend"] is None
-    normalized = validate_runtime_local_ingress_payload(route, payload)
+    normalized = validate_runtime_local_ingress_payload(
+        route,
+        payload,
+        correlation_id=UUID(str(payload["correlation_id"])),
+    )
     for field in ("task_id", "invocation_kind", "target_ref"):
         assert field in normalized, f"{field} dropped by input_model validation"
     assert "model_backend" not in normalized, (
@@ -127,5 +132,10 @@ def test_stub_input_model_rejects_producer_payload() -> None:
     route = _operation_match_route(
         input_model_module=_THIS_MODULE, input_model_name="_StubInvocationCommand"
     )
+    payload = _producer_invocation_payload()
     with pytest.raises(ValidationError):
-        validate_runtime_local_ingress_payload(route, _producer_invocation_payload())
+        validate_runtime_local_ingress_payload(
+            route,
+            payload,
+            correlation_id=UUID(str(payload["correlation_id"])),
+        )
