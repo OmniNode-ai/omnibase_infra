@@ -28,10 +28,12 @@ from __future__ import annotations
 
 import json
 import logging
+import os
 import signal
 import tempfile
 import time
 import uuid
+from collections.abc import Generator
 from pathlib import Path
 from typing import get_args
 
@@ -63,6 +65,25 @@ from omnibase_infra.cli.omnimarket_drift_guard import (
 pytestmark = pytest.mark.unit
 
 KAFKA_BOOTSTRAP_ARG = "$KAFKA_BOOTSTRAP_SERVERS"
+_RECEIPT_ENV_SENTINEL = "OMN15569_DELEGATION_RECEIPT_TEST_SENTINEL"
+
+
+@pytest.fixture(autouse=True)
+def _restore_process_environment_after_test() -> Generator[None, None, None]:
+    """Confine receipt-mode env loading to the current in-process CLI test.
+
+    The real CLI intentionally loads ``~/.omnibase/.env`` for the lifetime of
+    its process. These tests call that CLI boundary in the pytest worker, so
+    values added directly to ``os.environ`` would otherwise survive into
+    unrelated tests. Restoration happens only at teardown; environment changes
+    remain observable for the full duration of the test that made them.
+    """
+    environment_before = dict(os.environ)
+    try:
+        yield
+    finally:
+        os.environ.clear()
+        os.environ.update(environment_before)
 
 
 @pytest.fixture(autouse=True)
@@ -143,6 +164,44 @@ class TestClassifyTaskType:
 
     def test_case_insensitive(self) -> None:
         assert classify_task_type("REFACTOR the LOOP") == "refactor"
+
+
+class TestReceiptEnvironmentIsolation:
+    """Receipt-mode env loading must not contaminate the next unit test."""
+
+    def test_01_receipt_mode_loads_controlled_env_file(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        env_file = tmp_path / "omnibase.env"
+        env_file.write_text(
+            f"{_RECEIPT_ENV_SENTINEL}=loaded-by-receipt-mode\n",
+            encoding="utf-8",
+        )
+        contract_path = tmp_path / "contract.yaml"
+        contract_path.write_text(_PROOF_NOOP_CONTRACT, encoding="utf-8")
+        monkeypatch.setenv("OMNIBASE_ENV_FILE", str(env_file))
+        monkeypatch.delenv(_RECEIPT_ENV_SENTINEL, raising=False)
+        monkeypatch.setattr(
+            cli_delegate,
+            "_resolve_packaged_contract",
+            lambda _name: contract_path,
+        )
+        monkeypatch.setenv("ONEX_ARTIFACT_STORE_ROOT", str(tmp_path / "artifacts"))
+
+        run_delegate(
+            prompt="implement an HTTP server",
+            task_type=None,
+            max_tokens=None,
+            state_root=tmp_path / "state",
+            timeout=60,
+            verbose=False,
+            emit_socket=tmp_path / "no-daemon.sock",
+        )
+
+        assert os.environ[_RECEIPT_ENV_SENTINEL] == "loaded-by-receipt-mode"
+
+    def test_02_receipt_environment_did_not_escape_previous_test(self) -> None:
+        assert _RECEIPT_ENV_SENTINEL not in os.environ
 
 
 class TestPayloadScratch:
