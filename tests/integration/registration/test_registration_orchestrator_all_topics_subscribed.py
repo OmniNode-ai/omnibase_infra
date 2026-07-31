@@ -5,17 +5,15 @@
 Regression test for OMN-9413: contract.yaml declares 7 subscribe_topics but
 only 3 consumer groups were wired at runtime.
 
-Root cause: the _prepare_handler_wiring special-case for node_registration_orchestrator
-skips all handler dispatchers (RESOLVED_VIA_LOCAL_OWNERSHIP_SKIP) so the generic
-contract auto-wiring path owns topic subscription. This test verifies that all 7
-declared subscribe_topics receive Kafka consumer subscriptions via
-subscribe_wired_contract_topics.
+The generic contract auto-wiring path owns these topic subscriptions. This test
+verifies that all 7 declared subscribe_topics receive Kafka consumer
+subscriptions via subscribe_wired_contract_topics.
 """
 
 from __future__ import annotations
 
 from pathlib import Path
-from unittest.mock import MagicMock
+from unittest.mock import AsyncMock, MagicMock
 
 import pytest
 
@@ -69,10 +67,8 @@ async def test_registration_orchestrator_all_declared_topics_get_subscribed(
 ) -> None:
     """All 7 contract subscribe_topics must receive a Kafka subscription.
 
-    This is the regression test for OMN-9413. wire_from_manifest skips
-    handler dispatchers for the orchestrator (all handlers are
-    RESOLVED_VIA_LOCAL_OWNERSHIP_SKIP) but subscribe_wired_contract_topics
-    must still subscribe every declared topic.
+    This is the regression test for OMN-9413. The generic auto-wiring path must
+    subscribe every declared topic after registering the contract's dispatchers.
     """
     assert _CONTRACT_PATH.exists(), f"Contract not found: {_CONTRACT_PATH}"
     manifest = discover_contracts_from_paths([_CONTRACT_PATH])
@@ -87,6 +83,7 @@ async def test_registration_orchestrator_all_declared_topics_get_subscribed(
     dispatch_engine = MagicMock()
     dispatch_engine.is_frozen = True
     dispatch_engine._routes = {}
+    dispatch_engine.dispatch_scoped = AsyncMock(return_value=None)
 
     monkeypatch.setenv("RUNTIME_PROFILE", "main")
 

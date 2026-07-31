@@ -25,6 +25,9 @@ class ModelContractAttachResult(BaseModel):
         contract_name: The wired contract's node name.
         status: Whether the contract's consumer attached, was skipped as
             not-ready, or failed during attach.
+        dispatcher_ids: Exact dispatcher scope owned by the contract's
+            subscription callbacks. Preserved on NOT_READY results so a later
+            reconciliation attempt cannot fall back to process-global fan-out.
         topics_subscribed: Topics whose consumers were actually attached.
         readiness: The readiness confirm outcome for the contract's topics.
         detail: Human-readable detail for non-attached outcomes (no secrets).
@@ -34,6 +37,7 @@ class ModelContractAttachResult(BaseModel):
 
     contract_name: str
     status: EnumContractAttachStatus
+    dispatcher_ids: tuple[str, ...] = Field(default_factory=tuple)
     topics_subscribed: tuple[str, ...] = Field(default_factory=tuple)
     readiness: ModelTopicSetReadiness | None = Field(default=None)
     detail: str = Field(default="")

@@ -35,7 +35,7 @@ import os
 import re
 import time
 from collections import defaultdict
-from collections.abc import Awaitable, Callable, Iterator, Mapping, Sequence
+from collections.abc import Awaitable, Callable, Collection, Iterator, Mapping, Sequence
 from dataclasses import dataclass, field
 from datetime import UTC, datetime
 from pathlib import Path
@@ -141,6 +141,9 @@ from omnibase_infra.runtime.projection_tenant_authority import (
     VerifiedProjectionTenantAuthority,
     assert_projection_tenant_authority_matches_event,
     parse_canonical_tenant_uuid,
+)
+from omnibase_infra.runtime.protocols.protocol_contract_scoped_dispatch_engine import (
+    ProtocolContractScopedDispatchEngine,
 )
 from omnibase_infra.runtime.providers.provider_postgres_pool import ProviderPostgresPool
 from omnibase_infra.runtime.state_io.state_store_adapter import (
@@ -3865,6 +3868,257 @@ def _raise_if_silent_dispatch_failure(
     )
 
 
+def _require_contract_dispatcher_scope(
+    dispatcher_ids: Collection[str] | None,
+    *,
+    contract_name: str,
+) -> frozenset[str]:
+    """Return an exact non-empty dispatcher scope or fail before subscribing.
+
+    A contract-owned Kafka callback must never fall back to process-global
+    dispatch. Two contracts can intentionally consume the same topic under
+    distinct groups; global fan-out from each callback executes both contracts'
+    handlers once per group (OMN-15474). The wiring report is the authoritative
+    source for this scope.
+    """
+    if dispatcher_ids is None:
+        raise ModelOnexError(
+            message=(
+                "handler_wiring: contract-scoped subscription is missing its "
+                f"dispatcher scope for contract {contract_name!r}; refusing "
+                "process-global fan-out."
+            ),
+            error_code=EnumCoreErrorCode.INVALID_CONFIGURATION,
+        )
+    raw_dispatcher_ids = tuple(dispatcher_ids)
+    if not raw_dispatcher_ids or any(
+        not dispatcher_id or dispatcher_id != dispatcher_id.strip()
+        for dispatcher_id in raw_dispatcher_ids
+    ):
+        raise ModelOnexError(
+            message=(
+                "handler_wiring: contract-scoped subscription has an empty or "
+                f"invalid dispatcher scope for contract {contract_name!r}; "
+                "refusing process-global fan-out."
+            ),
+            error_code=EnumCoreErrorCode.INVALID_CONFIGURATION,
+        )
+    return frozenset(raw_dispatcher_ids)
+
+
+def _require_unique_canonical_contract_names(
+    contract_names: Sequence[str],
+    *,
+    identity_source: str,
+) -> frozenset[str]:
+    """Return an exact identity set or reject aliases and duplicate rows."""
+    raw_names = tuple(contract_names)
+    noncanonical_names = tuple(
+        sorted(
+            {
+                contract_name
+                for contract_name in raw_names
+                if not contract_name or contract_name != contract_name.strip()
+            }
+        )
+    )
+    if noncanonical_names:
+        raise ModelOnexError(
+            message=(
+                f"handler_wiring: noncanonical {identity_source} contract names "
+                f"are not valid subscription identities: {noncanonical_names}"
+            ),
+            error_code=EnumCoreErrorCode.INVALID_CONFIGURATION,
+        )
+
+    seen: set[str] = set()
+    duplicate_names: set[str] = set()
+    for contract_name in raw_names:
+        if contract_name in seen:
+            duplicate_names.add(contract_name)
+        seen.add(contract_name)
+    if duplicate_names:
+        raise ModelOnexError(
+            message=(
+                f"handler_wiring: duplicate {identity_source} contract names "
+                "would collapse or schedule repeated consumer attachment: "
+                f"{sorted(duplicate_names)}"
+            ),
+            error_code=EnumCoreErrorCode.INVALID_CONFIGURATION,
+        )
+    return frozenset(raw_names)
+
+
+def _validate_initial_subscription_contract_identities(
+    manifest: ModelAutoWiringManifest,
+    report: ModelAutoWiringReport,
+) -> None:
+    """Require a canonical one-to-one report-to-manifest identity mapping."""
+    manifest_names = _require_unique_canonical_contract_names(
+        tuple(contract.name for contract in manifest.contracts),
+        identity_source="manifest",
+    )
+    report_names = _require_unique_canonical_contract_names(
+        tuple(result.contract_name for result in report.results),
+        identity_source="report",
+    )
+    if report_names != manifest_names:
+        raise ModelOnexError(
+            message=(
+                "handler_wiring: report and manifest contract-name mismatch; "
+                "initial subscription requires an exact bijection "
+                f"(missing_from_report={sorted(manifest_names - report_names)}, "
+                f"unexpected_in_report={sorted(report_names - manifest_names)})"
+            ),
+            error_code=EnumCoreErrorCode.INVALID_CONFIGURATION,
+        )
+
+
+def _validate_not_ready_contract_identities(
+    manifest: ModelAutoWiringManifest,
+    not_ready_results: Sequence[ModelContractAttachResult],
+) -> tuple[ModelContractAttachResult, ...]:
+    """Return uniquely named NOT_READY rows forming a valid manifest subset."""
+    manifest_names = _require_unique_canonical_contract_names(
+        tuple(contract.name for contract in manifest.contracts),
+        identity_source="manifest",
+    )
+    pending_results = tuple(
+        result
+        for result in not_ready_results
+        if result.status is EnumContractAttachStatus.NOT_READY
+    )
+    not_ready_names = _require_unique_canonical_contract_names(
+        tuple(result.contract_name for result in pending_results),
+        identity_source="NOT_READY",
+    )
+    unexpected_names = not_ready_names.difference(manifest_names)
+    if unexpected_names:
+        raise ModelOnexError(
+            message=(
+                "handler_wiring: NOT_READY and manifest contract-name mismatch; "
+                "reattach identities must be a manifest subset "
+                f"(unexpected={sorted(unexpected_names)})"
+            ),
+            error_code=EnumCoreErrorCode.INVALID_CONFIGURATION,
+        )
+    return pending_results
+
+
+def _require_contract_scoped_dispatch_engine(
+    dispatch_engine: object,
+    *,
+    contract_name: str,
+) -> ProtocolContractScopedDispatchEngine:
+    """Resolve the explicit scoped-dispatch capability before consumer attach."""
+    scoped_dispatch = getattr(dispatch_engine, "dispatch_scoped", None)
+    if not callable(scoped_dispatch):
+        raise ModelOnexError(
+            message=(
+                "handler_wiring: contract-scoped subscription requires an "
+                f"explicit scoped dispatch capability for contract {contract_name!r}; "
+                "refusing to attach a consumer that could fail after delivery."
+            ),
+            error_code=EnumCoreErrorCode.INVALID_CONFIGURATION,
+        )
+    return cast("ProtocolContractScopedDispatchEngine", dispatch_engine)
+
+
+def _require_registered_contract_dispatcher_scope(
+    dispatch_engine: object,
+    dispatcher_ids: Collection[str] | None,
+    *,
+    contract_name: str,
+) -> frozenset[str]:
+    """Require one contract's exact scope to exist on the current engine."""
+    dispatcher_scope = _require_contract_dispatcher_scope(
+        dispatcher_ids,
+        contract_name=contract_name,
+    )
+    scoped_engine = _require_contract_scoped_dispatch_engine(
+        dispatch_engine,
+        contract_name=contract_name,
+    )
+    ownership_validator = getattr(
+        dispatch_engine,
+        "validate_contract_dispatcher_scope",
+        None,
+    )
+    if not callable(ownership_validator):
+        raise ModelOnexError(
+            message=(
+                "handler_wiring: contract-scoped subscription requires a "
+                "dispatcher ownership validation capability for contract "
+                f"{contract_name!r}; refusing to attach without proving "
+                "current engine membership."
+            ),
+            error_code=EnumCoreErrorCode.INVALID_CONFIGURATION,
+        )
+    return scoped_engine.validate_contract_dispatcher_scope(
+        contract_name,
+        dispatcher_scope,
+    )
+
+
+def _validate_contract_dispatcher_ownership(
+    dispatch_engine: object,
+    dispatcher_scopes: Sequence[tuple[str, Collection[str]]],
+) -> None:
+    """Validate current engine membership and one-contract ownership.
+
+    Reports and persisted NOT_READY results are typed transport artifacts, not
+    engine authority. Validate every referenced dispatcher before provisioning
+    or attaching any consumer. One contract may own multiple unique dispatcher
+    IDs; one dispatcher ID may never be claimed by multiple contracts.
+    """
+    normalized_scopes: list[tuple[str, frozenset[str]]] = []
+    owners_by_dispatcher: dict[str, set[str]] = defaultdict(set)
+    for contract_name, dispatcher_ids in dispatcher_scopes:
+        dispatcher_scope = _require_contract_dispatcher_scope(
+            dispatcher_ids,
+            contract_name=contract_name,
+        )
+        normalized_scopes.append((contract_name, dispatcher_scope))
+        for dispatcher_id in dispatcher_scope:
+            owners_by_dispatcher[dispatcher_id].add(contract_name)
+
+    multiply_owned = {
+        dispatcher_id: tuple(sorted(owners))
+        for dispatcher_id, owners in owners_by_dispatcher.items()
+        if len(owners) > 1
+    }
+    if multiply_owned:
+        raise ModelOnexError(
+            message=(
+                "handler_wiring: contract-scoped subscription assigns "
+                "dispatcher IDs to multiple contracts; refusing consumer "
+                f"attach: {multiply_owned}"
+            ),
+            error_code=EnumCoreErrorCode.INVALID_CONFIGURATION,
+        )
+
+    for contract_name, dispatcher_scope in normalized_scopes:
+        _require_registered_contract_dispatcher_scope(
+            dispatch_engine,
+            dispatcher_scope,
+            contract_name=contract_name,
+        )
+
+
+async def _dispatch_to_contract_scope(
+    dispatch_engine: ProtocolContractScopedDispatchEngine,
+    topic: str,
+    envelope: ModelEventEnvelope[object],
+    allowed_dispatcher_ids: frozenset[str],
+) -> ModelDispatchResult:
+    """Dispatch through the engine while preserving callback ownership."""
+    return await dispatch_engine.dispatch_scoped(
+        topic,
+        envelope,
+        allowed_dispatcher_ids=allowed_dispatcher_ids,
+    )
+
+
 def _make_event_bus_callback(
     topic: str,
     dispatch_engine: ProtocolDispatchEngine,
@@ -3873,6 +4127,7 @@ def _make_event_bus_callback(
     tenant_scoped: bool = False,
     event_bus: object | None = None,
     propagate_publish_failures: bool = False,
+    allowed_dispatcher_ids: Collection[str] | None = None,
 ) -> Callable[..., Awaitable[None]]:
     """Create a Kafka on_message callback that deserializes and dispatches to engine.
 
@@ -3902,6 +4157,15 @@ def _make_event_bus_callback(
     import json
 
     from omnibase_core.models.events.model_event_envelope import ModelEventEnvelope
+
+    dispatcher_scope = _require_contract_dispatcher_scope(
+        allowed_dispatcher_ids,
+        contract_name=topic,
+    )
+    scoped_dispatch_engine = _require_contract_scoped_dispatch_engine(
+        dispatch_engine,
+        contract_name=topic,
+    )
 
     def _derive_event_type_from_topic(topic: str) -> str | None:
         parts = topic.split(".")
@@ -3951,7 +4215,12 @@ def _make_event_bus_callback(
             try:
                 if not await _wait_for_dispatch_engine_freeze(topic, dispatch_engine):
                     return
-                result = await dispatch_engine.dispatch(topic, envelope)
+                result = await _dispatch_to_contract_scope(
+                    scoped_dispatch_engine,
+                    topic,
+                    envelope,
+                    dispatcher_scope,
+                )
                 if result_applier is not None and result is not None:
                     try:
                         await result_applier.apply(result, envelope.correlation_id)
@@ -4282,10 +4551,21 @@ def _make_raw_event_projection_callback(
     topic: str,
     dispatch_engine: ProtocolDispatchEngine,
     result_applier: ProtocolDispatchResultApplier,
+    *,
+    allowed_dispatcher_ids: Collection[str] | None = None,
 ) -> Callable[..., Awaitable[None]]:
     """Create a callback for raw Kafka `ModelEventMessage` projection contracts."""
     from omnibase_core.models.events.model_event_envelope import ModelEventEnvelope
     from omnibase_infra.event_bus.models.model_event_message import ModelEventMessage
+
+    dispatcher_scope = _require_contract_dispatcher_scope(
+        allowed_dispatcher_ids,
+        contract_name=topic,
+    )
+    scoped_dispatch_engine = _require_contract_scoped_dispatch_engine(
+        dispatch_engine,
+        contract_name=topic,
+    )
 
     async def callback(message: object) -> None:
         try:
@@ -4306,7 +4586,12 @@ def _make_raw_event_projection_callback(
                 ),
                 source_tool=raw_message.headers.source,
             )
-            result = await dispatch_engine.dispatch(topic, envelope)
+            result = await _dispatch_to_contract_scope(
+                scoped_dispatch_engine,
+                topic,
+                envelope,
+                dispatcher_scope,
+            )
             if result is not None:
                 await result_applier.apply(result, envelope.correlation_id)
         except Exception as exc:  # noqa: BLE001 — consumer boundary; log and continue
@@ -5295,6 +5580,11 @@ async def wire_from_manifest(
     Returns:
         A :class:`ModelAutoWiringReport` with per-contract outcomes.
     """
+    _require_unique_canonical_contract_names(
+        tuple(contract.name for contract in manifest.contracts),
+        identity_source="manifest",
+    )
+
     # Construct the resolver + ownership query ONCE per wiring pass from the
     # manifest itself (OMN-9201). The ownership query is set-membership
     # against the locally discovered node_name set — no I/O, no SQL. See
@@ -5585,13 +5875,24 @@ async def subscribe_wired_contract_topics(
     actually subscribed). Backward-compatible: with no *provisioner* the
     behavior is the original concurrent subscribe (no readiness gate).
     """
+    _validate_initial_subscription_contract_identities(manifest, report)
     if event_bus is None:
         return {}
+
+    report_dispatcher_scopes = tuple(
+        (result.contract_name, result.dispatchers_registered)
+        for result in report.results
+        if result.dispatchers_registered
+    )
+    _validate_contract_dispatcher_ownership(
+        dispatch_engine,
+        report_dispatcher_scopes,
+    )
 
     contract_by_name = {contract.name: contract for contract in manifest.contracts}
 
     # Collect eligible contracts in priority order (projection appliers first).
-    eligible: list[tuple[str, ModelDiscoveredContract]] = []
+    eligible: list[tuple[ModelContractWiringResult, ModelDiscoveredContract]] = []
     for result in _prioritize_subscription_results(
         report,
         result_appliers_by_contract,
@@ -5600,6 +5901,18 @@ async def subscribe_wired_contract_topics(
             continue
         contract = contract_by_name.get(result.contract_name)
         if contract is None:
+            continue
+        if not result.dispatchers_registered:
+            # Resolver-owned skips and quarantines intentionally register no
+            # local dispatcher. They therefore own no consume callback. The
+            # old path still subscribed them and a process-global dispatch
+            # could execute some other contract's matching handler; keeping
+            # them unsubscribed is the only truthful zero-owner state.
+            logger.info(
+                "Auto-wiring (deferred): skipping Kafka subscription for "
+                "contract '%s' because it owns zero dispatchers (OMN-15474)",
+                contract.name,
+            )
             continue
         if _is_raw_event_projection_contract(contract) and (
             result_appliers_by_contract is None
@@ -5614,7 +5927,7 @@ async def subscribe_wired_contract_topics(
                 contract.name,
             )
             continue
-        eligible.append((result.contract_name, contract))
+        eligible.append((result, contract))
 
     knobs = readiness_config or ModelTopicReadinessConfig()
     # Bounded parallelism across contracts; each contract keeps its own
@@ -5622,16 +5935,20 @@ async def subscribe_wired_contract_topics(
     semaphore = asyncio.Semaphore(knobs.max_concurrent_contract_attach)
 
     async def _provision_ready_attach(
-        name: str, contract: ModelDiscoveredContract
+        result: ModelContractWiringResult,
+        contract: ModelDiscoveredContract,
     ) -> ModelContractAttachResult:
         async with semaphore:
             return await _interleave_contract(
-                name=name,
+                name=result.contract_name,
                 contract=contract,
                 dispatch_engine=dispatch_engine,
                 event_bus=event_bus,
                 environment=environment,
-                result_applier=(result_appliers_by_contract or {}).get(name),
+                result_applier=(result_appliers_by_contract or {}).get(
+                    result.contract_name
+                ),
+                allowed_dispatcher_ids=result.dispatchers_registered,
                 provisioner=provisioner,
                 readiness_config=knobs,
                 core_runtime_topics=core_runtime_topics,
@@ -5639,7 +5956,7 @@ async def subscribe_wired_contract_topics(
             )
 
     attach_results = await asyncio.gather(
-        *(_provision_ready_attach(name, contract) for name, contract in eligible)
+        *(_provision_ready_attach(result, contract) for result, contract in eligible)
     )
 
     if attach_results_out is not None:
@@ -5660,6 +5977,7 @@ async def _interleave_contract(
     event_bus: object,
     environment: str,
     result_applier: ProtocolDispatchResultApplier | None,
+    allowed_dispatcher_ids: Collection[str] | None,
     provisioner: ProtocolTopicProvisioner | None,
     readiness_config: ModelTopicReadinessConfig,
     core_runtime_topics: frozenset[str] = frozenset(),
@@ -5670,6 +5988,11 @@ async def _interleave_contract(
     The order invariant is enforced here: every ``ensure_topic_exists`` for the
     contract precedes its readiness confirm, which precedes consumer attach.
     """
+    dispatcher_scope = _require_registered_contract_dispatcher_scope(
+        dispatch_engine,
+        allowed_dispatcher_ids,
+        contract_name=name,
+    )
     provision_topics = _contract_provision_topics(contract)
 
     readiness: ModelTopicSetReadiness | None = None
@@ -5722,6 +6045,7 @@ async def _interleave_contract(
             return ModelContractAttachResult(
                 contract_name=name,
                 status=EnumContractAttachStatus.NOT_READY,
+                dispatcher_ids=tuple(sorted(dispatcher_scope)),
                 readiness=readiness,
                 detail=f"readiness {readiness.status.value}",
             )
@@ -5734,6 +6058,7 @@ async def _interleave_contract(
             event_bus=event_bus,
             environment=environment,
             result_applier=result_applier,
+            allowed_dispatcher_ids=dispatcher_scope,
             core_runtime_topics=core_runtime_topics,
             core_runtime_owners=core_runtime_owners,
         )
@@ -5747,6 +6072,7 @@ async def _interleave_contract(
         return ModelContractAttachResult(
             contract_name=name,
             status=EnumContractAttachStatus.FAILED,
+            dispatcher_ids=tuple(sorted(dispatcher_scope)),
             readiness=readiness,
             detail=type(exc).__name__,
         )
@@ -5754,6 +6080,7 @@ async def _interleave_contract(
     return ModelContractAttachResult(
         contract_name=name,
         status=EnumContractAttachStatus.ATTACHED,
+        dispatcher_ids=tuple(sorted(dispatcher_scope)),
         topics_subscribed=tuple(topics_subscribed),
         readiness=readiness,
     )
@@ -5820,24 +6147,34 @@ async def reattach_not_ready_contracts(
     ``run_not_ready_reconciliation_loop``) until every contract attaches or a
     bounded retry budget is exhausted.
     """
+    pending_results = _validate_not_ready_contract_identities(
+        manifest,
+        not_ready_results,
+    )
     if event_bus is None:
         return {}, ()
 
     contract_by_name = {contract.name: contract for contract in manifest.contracts}
-    still_not_ready_names = tuple(
-        r.contract_name
-        for r in not_ready_results
-        if r.status is EnumContractAttachStatus.NOT_READY
-    )
+    still_not_ready_names = tuple(result.contract_name for result in pending_results)
     if not still_not_ready_names:
         return {}, ()
+
+    _validate_contract_dispatcher_ownership(
+        dispatch_engine,
+        tuple(
+            (result.contract_name, result.dispatcher_ids) for result in pending_results
+        ),
+    )
 
     knobs = readiness_config or ModelTopicReadinessConfig()
     semaphore = asyncio.Semaphore(knobs.max_concurrent_contract_attach)
 
+    not_ready_by_name = {result.contract_name: result for result in pending_results}
+
     async def _retry_one(name: str) -> ModelContractAttachResult | None:
         contract = contract_by_name.get(name)
-        if contract is None:
+        previous_result = not_ready_by_name.get(name)
+        if contract is None or previous_result is None:
             return None
         async with semaphore:
             return await _interleave_contract(
@@ -5847,6 +6184,7 @@ async def reattach_not_ready_contracts(
                 event_bus=event_bus,
                 environment=environment,
                 result_applier=(result_appliers_by_contract or {}).get(name),
+                allowed_dispatcher_ids=previous_result.dispatcher_ids,
                 provisioner=provisioner,
                 readiness_config=knobs,
                 core_runtime_topics=core_runtime_topics,
@@ -5902,10 +6240,12 @@ async def run_not_ready_reconciliation_loop(
     each attempt with ``(newly_subscribed, results)``. ``sleep`` is injectable
     so tests can drive the loop without real wall-clock delay.
     """
+    validated_not_ready = _validate_not_ready_contract_identities(
+        manifest,
+        initial_not_ready,
+    )
     pending: dict[str, ModelContractAttachResult] = {
-        r.contract_name: r
-        for r in initial_not_ready
-        if r.status is EnumContractAttachStatus.NOT_READY
+        r.contract_name: r for r in validated_not_ready
     }
     if not pending:
         return ()
@@ -6190,6 +6530,7 @@ async def _commit_contract_wiring(
         dispatcher_id, route_ids = _commit_handler_wiring(
             prepared,
             dispatch_engine,
+            owner_contract_name=contract.name,
             dynamic_materialization_authorized=dynamic_materialization_authorized,
         )
         if prepared.is_quarantined:
@@ -6256,7 +6597,12 @@ async def _commit_contract_wiring(
             quarantined_handlers=tuple(quarantined),
         )
 
-    if subscribe_immediately and event_bus is not None and pcw.subscription_topics:
+    if (
+        subscribe_immediately
+        and event_bus is not None
+        and pcw.subscription_topics
+        and dispatchers_registered
+    ):
         topics_subscribed.extend(
             await _subscribe_contract_topics(
                 contract=contract,
@@ -6264,7 +6610,19 @@ async def _commit_contract_wiring(
                 event_bus=event_bus,
                 environment=pcw.environment,
                 result_applier=result_applier,
+                allowed_dispatcher_ids=dispatchers_registered,
             )
+        )
+    elif (
+        subscribe_immediately
+        and event_bus is not None
+        and pcw.subscription_topics
+        and not dispatchers_registered
+    ):
+        logger.info(
+            "Auto-wiring: skipping Kafka subscription for contract '%s' "
+            "because it owns zero dispatchers (OMN-15474)",
+            contract.name,
         )
 
     # OMN-9457: when every prepared handler was quarantined, report SKIPPED
@@ -6311,6 +6669,7 @@ async def _subscribe_contract_topics(
     event_bus: object,
     environment: str,
     result_applier: ProtocolDispatchResultApplier | None = None,
+    allowed_dispatcher_ids: Collection[str] | None = None,
     core_runtime_topics: frozenset[str] = frozenset(),
     core_runtime_owners: Mapping[str, str] | None = None,
 ) -> list[str]:
@@ -6332,6 +6691,12 @@ async def _subscribe_contract_topics(
     owner_by_topic = dict(core_runtime_owners or {})
     if contract.event_bus is None or not contract.event_bus.subscribe_topics:
         return []
+
+    dispatcher_scope = _require_registered_contract_dispatcher_scope(
+        dispatch_engine,
+        allowed_dispatcher_ids,
+        contract_name=contract.name,
+    )
 
     from omnibase_infra.enums import EnumConsumerGroupPurpose
     from omnibase_infra.models import ModelNodeIdentity
@@ -6423,6 +6788,7 @@ async def _subscribe_contract_topics(
                 # Why: Runtime wiring validates and narrows this payload shape before use.
                 dispatch_engine,  # type: ignore[arg-type]
                 effective_result_applier,
+                allowed_dispatcher_ids=dispatcher_scope,
             )
         else:
             callback = _make_event_bus_callback(
@@ -6439,6 +6805,7 @@ async def _subscribe_contract_topics(
                 # (redeliver) instead of being log-and-discarded. Non-state_io
                 # contracts keep the historical swallow behavior unchanged.
                 propagate_publish_failures=_contract_declares_state_io(contract),
+                allowed_dispatcher_ids=dispatcher_scope,
             )
         topic_callbacks.append((topic, callback))
 
@@ -6988,6 +7355,8 @@ def _prepare_handler_wiring(
 def _commit_handler_wiring(
     prepared: PreparedWiring,
     dispatch_engine: object,
+    *,
+    owner_contract_name: str | None = None,
     dynamic_materialization_authorized: bool = False,
 ) -> tuple[str, list[str]]:
     """Register a prepared handler wiring with the dispatch engine (side effects only).
@@ -7007,6 +7376,9 @@ def _commit_handler_wiring(
     the private dynamic registration methods are used instead of the standard
     ones. This flag MUST only be set by ``materialize_cached_contract()`` after
     full contract validation — never by general application code (OMN-11246).
+    ``owner_contract_name`` records the contract provenance used by the
+    pre-subscribe ownership validator. Auto-wiring callers always supply it;
+    direct/manual registrations remain deliberately unowned.
 
     Returns:
         Tuple of (dispatcher_id, list of route_ids registered). Returns
@@ -7036,6 +7408,7 @@ def _commit_handler_wiring(
                 category=prepared.category,
                 message_types=prepared.message_types,
                 payload_type_matcher=prepared.payload_type_matcher,
+                owner_contract_name=owner_contract_name,
             )
             for route in prepared.routes:
                 engine._register_route_dynamic(route)
@@ -7046,6 +7419,7 @@ def _commit_handler_wiring(
                 category=prepared.category,
                 message_types=prepared.message_types,
                 payload_type_matcher=prepared.payload_type_matcher,
+                owner_contract_name=owner_contract_name,
             )
             for route in prepared.routes:
                 engine.register_route(route)
@@ -7086,4 +7460,8 @@ def _wire_handler_entry(
         topology=topology,
         catalog_binding_policy=catalog_binding_policy,
     )
-    return _commit_handler_wiring(prepared, dispatch_engine)
+    return _commit_handler_wiring(
+        prepared,
+        dispatch_engine,
+        owner_contract_name=contract.name,
+    )

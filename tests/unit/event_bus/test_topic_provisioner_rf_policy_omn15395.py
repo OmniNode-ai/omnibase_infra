@@ -1628,6 +1628,7 @@ class TestPolicyErrorsEscapeBestEffortBoundaries:
                     event_bus=MagicMock(spec=ProtocolEventBusLike),
                     environment="test",
                     result_applier=None,
+                    allowed_dispatcher_ids={"test-dispatcher"},
                     provisioner=provisioner,
                     readiness_config=ModelTopicReadinessConfig(),
                 )

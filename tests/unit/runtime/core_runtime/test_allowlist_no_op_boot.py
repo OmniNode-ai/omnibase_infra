@@ -30,6 +30,7 @@ from omnibase_infra.runtime.core_runtime.composition import (
     parse_core_runtime_topics,
     resolve_core_runtime_owners,
 )
+from omnibase_infra.runtime.message_dispatch_engine import MessageDispatchEngine
 
 ROUTING_TOPIC = "onex.cmd.omnibase-infra.delegation-routing-request.v1"
 FANOUT_TOPIC = "onex.evt.omnibase-infra.inference-response.v1"
@@ -71,9 +72,10 @@ async def test_empty_allowlist_subscribes_topic_unchanged() -> None:
     bus = _RecordingBus()
     subscribed = await _subscribe_contract_topics(
         contract=_contract(),
-        dispatch_engine=object(),
+        dispatch_engine=MessageDispatchEngine(),
         event_bus=bus,
         environment="dev",
+        allowed_dispatcher_ids={"test-dispatcher"},
         core_runtime_topics=frozenset(),  # default no-op
     )
     assert subscribed == [ROUTING_TOPIC]
@@ -88,6 +90,7 @@ async def test_allowlisted_topic_is_skipped_by_legacy_path() -> None:
         dispatch_engine=object(),
         event_bus=bus,
         environment="dev",
+        allowed_dispatcher_ids={"test-dispatcher"},
         core_runtime_topics=frozenset({ROUTING_TOPIC}),
     )
     # Legacy path must NOT subscribe an allowlisted topic (ownership=core-runtime).
@@ -213,6 +216,7 @@ async def test_fanout_owner_subscription_skipped_nonowner_kept() -> None:
         dispatch_engine=object(),
         event_bus=owner_bus,
         environment="dev",
+        allowed_dispatcher_ids={"test-dispatcher"},
         core_runtime_topics=frozenset({FANOUT_TOPIC}),
         core_runtime_owners=owners,
     )
@@ -222,9 +226,10 @@ async def test_fanout_owner_subscription_skipped_nonowner_kept() -> None:
     legacy_bus = _RecordingBus()
     legacy_subscribed = await _subscribe_contract_topics(
         contract=_fanout_contract("projection"),
-        dispatch_engine=object(),
+        dispatch_engine=MessageDispatchEngine(),
         event_bus=legacy_bus,
         environment="dev",
+        allowed_dispatcher_ids={"test-dispatcher"},
         core_runtime_topics=frozenset({FANOUT_TOPIC}),
         core_runtime_owners=owners,
     )

@@ -21,6 +21,7 @@ message is now durably preserved in the DLQ instead of vanishing.
 
 from __future__ import annotations
 
+from collections.abc import Awaitable, Callable
 from unittest.mock import AsyncMock, MagicMock
 from uuid import uuid4
 
@@ -31,8 +32,26 @@ from omnibase_core.models.events.model_event_envelope import ModelEventEnvelope
 from omnibase_infra.event_bus.event_bus_kafka import EventBusKafka
 from omnibase_infra.runtime.auto_wiring.handler_wiring import (
     _BOUNDARY_DLQ_ENV,
-    _make_event_bus_callback,
 )
+from omnibase_infra.runtime.auto_wiring.handler_wiring import (
+    _make_event_bus_callback as _make_contract_scoped_event_bus_callback,
+)
+
+
+def _make_event_bus_callback(
+    topic: str,
+    dispatch_engine: object,
+    result_applier: object | None = None,
+    **kwargs: object,
+) -> Callable[..., Awaitable[None]]:
+    """Build the boundary under its required synthetic contract scope."""
+    return _make_contract_scoped_event_bus_callback(
+        topic,
+        dispatch_engine,  # type: ignore[arg-type]
+        result_applier=result_applier,  # type: ignore[arg-type]
+        allowed_dispatcher_ids={"test-dispatcher"},
+        **kwargs,  # type: ignore[arg-type]
+    )
 
 
 def _dlq_capable_event_bus() -> MagicMock:
@@ -46,7 +65,7 @@ def _dlq_capable_event_bus() -> MagicMock:
 
 def _raising_dispatch_engine(exc: Exception) -> MagicMock:
     engine = MagicMock()
-    engine.dispatch = AsyncMock(side_effect=exc)
+    engine.dispatch_scoped = AsyncMock(side_effect=exc)
     return engine
 
 
@@ -81,7 +100,7 @@ class TestBoundaryDlqFlagOff:
         # consumer loop," preserved identically pre- and post-fix.
         await callback(_envelope())
 
-        dispatch_engine.dispatch.assert_awaited_once()
+        dispatch_engine.dispatch_scoped.assert_awaited_once()
         # RED premise pinned as a permanent regression guard: with the flag
         # off, the message is still swallowed -- no DLQ, exactly like the
         # pre-fix code. This is the historical shape, not a bug re-introduced
@@ -104,7 +123,7 @@ class TestBoundaryDlqFlagOff:
 
         await callback(_envelope())  # must not raise
 
-        dispatch_engine.dispatch.assert_awaited_once()
+        dispatch_engine.dispatch_scoped.assert_awaited_once()
 
 
 class TestBoundaryDlqFlagOn:
@@ -150,7 +169,7 @@ class TestBoundaryDlqFlagOn:
         dispatch_engine = MagicMock()
         dispatch_result = MagicMock()
         # Fails once, then succeeds -- must recover without ever touching DLQ.
-        dispatch_engine.dispatch = AsyncMock(
+        dispatch_engine.dispatch_scoped = AsyncMock(
             side_effect=[RuntimeError("transient"), dispatch_result]
         )
         result_applier = MagicMock()
@@ -166,7 +185,7 @@ class TestBoundaryDlqFlagOn:
 
         await callback(_envelope())
 
-        assert dispatch_engine.dispatch.await_count == 2
+        assert dispatch_engine.dispatch_scoped.await_count == 2
         result_applier.apply.assert_awaited_once()
         event_bus._publish_raw_to_dlq.assert_not_awaited()
 
@@ -193,7 +212,7 @@ class TestBoundaryDlqFlagOn:
 
         await callback(_envelope())
 
-        assert dispatch_engine.dispatch.await_count == _BOUNDARY_DLQ_MAX_ATTEMPTS
+        assert dispatch_engine.dispatch_scoped.await_count == _BOUNDARY_DLQ_MAX_ATTEMPTS
         event_bus._publish_raw_to_dlq.assert_awaited_once()
 
     @pytest.mark.asyncio
@@ -279,7 +298,7 @@ class TestBoundaryDlqNonRetryableClassification:
 
         # ONE attempt, not _BOUNDARY_DLQ_MAX_ATTEMPTS -- the retry budget is
         # never spent on a guaranteed-repeat content error.
-        dispatch_engine.dispatch.assert_awaited_once()
+        dispatch_engine.dispatch_scoped.assert_awaited_once()
         event_bus._publish_raw_to_dlq.assert_awaited_once()
         call_kwargs = event_bus._publish_raw_to_dlq.call_args.kwargs
         assert call_kwargs["error"] is validation_error
@@ -304,7 +323,7 @@ class TestBoundaryDlqNonRetryableClassification:
 
         await callback(_envelope())
 
-        dispatch_engine.dispatch.assert_awaited_once()
+        dispatch_engine.dispatch_scoped.assert_awaited_once()
         event_bus._publish_raw_to_dlq.assert_awaited_once()
 
     @pytest.mark.asyncio
@@ -330,7 +349,7 @@ class TestBoundaryDlqNonRetryableClassification:
 
         await callback(_envelope())
 
-        assert dispatch_engine.dispatch.await_count == _BOUNDARY_DLQ_MAX_ATTEMPTS
+        assert dispatch_engine.dispatch_scoped.await_count == _BOUNDARY_DLQ_MAX_ATTEMPTS
 
 
 class TestBoundaryDlqMetricNaming:
