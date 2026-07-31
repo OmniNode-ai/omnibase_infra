@@ -30,7 +30,10 @@ make that premise true.
 
 from __future__ import annotations
 
+import os
 import re
+import subprocess
+import sys
 from pathlib import Path
 from typing import Any
 
@@ -330,6 +333,142 @@ def test_every_workflow_e2e_compose_invocation_names_its_project() -> None:
         "An unnamed project resolves to the compose file default. That is how "
         "nightly-integration.yml deleted the lab lane every night (OMN-15565)."
     )
+
+
+def _nightly_step(name: str) -> dict[str, Any]:
+    workflow = yaml.safe_load(
+        (WORKFLOWS_DIR / "nightly-integration.yml").read_text(encoding="utf-8")
+    )
+    steps = workflow["jobs"]["integration-tests"]["steps"]
+    return next(step for step in steps if step.get("name") == name)
+
+
+def _run_teardown_with_stubs(
+    project: str, tmp_path: Path
+) -> tuple[subprocess.CompletedProcess[str], list[str]]:
+    """Execute the workflow teardown shell with non-mutating uv/docker stubs."""
+    fake_bin = tmp_path / "bin"
+    fake_bin.mkdir()
+    call_log = tmp_path / "docker-calls.log"
+
+    uv_stub = fake_bin / "uv"
+    uv_stub.write_text(
+        "#!/bin/sh\n"
+        'if [ "${1:-}" != run ] || [ "${2:-}" != python ]; then exit 97; fi\n'
+        "shift 2\n"
+        'exec "$TEST_PYTHON" "$@"\n',
+        encoding="utf-8",
+    )
+    uv_stub.chmod(0o700)
+
+    docker_stub = fake_bin / "docker"
+    docker_stub.write_text(
+        '#!/bin/sh\nprintf \'docker %s\\n\' "$*" >> "$DOCKER_CALL_LOG"\n',
+        encoding="utf-8",
+    )
+    docker_stub.chmod(0o700)
+
+    env = os.environ | {
+        "DOCKER_CALL_LOG": str(call_log),
+        "GITHUB_RUN_ATTEMPT": "2",
+        "GITHUB_RUN_ID": "314159",
+        "OMNIBASE_INFRA_COMPOSE_PROJECT": project,
+        "PATH": f"{fake_bin}{os.pathsep}{os.environ['PATH']}",
+        "TEST_PYTHON": sys.executable,
+    }
+    result = subprocess.run(
+        ["bash", "-c", _nightly_step("Tear down e2e stack")["run"]],
+        cwd=REPO_ROOT,
+        env=env,
+        capture_output=True,
+        text=True,
+        check=False,
+    )
+    calls = (
+        call_log.read_text(encoding="utf-8").splitlines() if call_log.exists() else []
+    )
+    return result, calls
+
+
+@pytest.mark.parametrize(
+    "project",
+    ["", *sorted(_lane_projects()), "some-other-uncensused-project"],
+)
+def test_nightly_teardown_rejects_every_non_run_project_without_docker(
+    project: str, tmp_path: Path
+) -> None:
+    """Empty, protected, and arbitrary projects must all fail before Docker."""
+    result, calls = _run_teardown_with_stubs(project, tmp_path)
+    assert result.returncode != 0, result.stdout + result.stderr
+    assert calls == []
+
+
+def test_nightly_teardown_downs_exact_run_project_once(tmp_path: Path) -> None:
+    """Only the immutable project for this run may reach the exact scoped down."""
+    # The canonical derive recipe uses `echo | tr -cs`, so echo's newline is
+    # normalized to the trailing hyphen. Teardown must reproduce it byte-for-byte.
+    expected = "omnibase-infra-e2e-314159-2-"
+    result, calls = _run_teardown_with_stubs(expected, tmp_path)
+    assert result.returncode == 0, result.stdout + result.stderr
+    assert calls == [
+        f"docker compose -p {expected} -f docker/docker-compose.e2e.yml "
+        "down -v --remove-orphans"
+    ]
+
+
+def test_nightly_teardown_rederives_run_identity_before_manifest_and_down() -> None:
+    """Ratchet the always-run teardown's immutable identity and lane guards."""
+    derive_run = _nightly_step("Derive isolated e2e namespace")["run"]
+    teardown = _nightly_step("Tear down e2e stack")
+    run = teardown["run"]
+
+    assert teardown["if"] == "always()"
+
+    protected_projects = _lane_projects()
+    assert protected_projects, "lane manifest must provide the protected project set"
+    assert all(
+        f'"{project}"' not in run and f"'{project}'" not in run
+        for project in protected_projects
+    ), (
+        "teardown must derive protected projects from lane-manifest.yaml, not hardcode "
+        "today's lane names"
+    )
+
+    id_recipe = 'e2e_id="e2e-${GITHUB_RUN_ID:-local}-${GITHUB_RUN_ATTEMPT:-1}"'
+    normalization = (
+        "e2e_id=\"$(echo \"$e2e_id\" | tr '[:upper:]' '[:lower:]' "
+        "| tr -cs 'a-z0-9_-' '-')\""
+    )
+    assert id_recipe in derive_run and id_recipe in run
+    assert normalization in derive_run and normalization in run
+    assert 'project="omnibase-infra-${e2e_id}"' in derive_run
+
+    expected_project = 'expected_project="omnibase-infra-${e2e_id}"'
+    identity_guard = 'if [[ "$project" != "$expected_project" ]]; then'
+    manifest_load = 'open("deploy/lane-census/lane-manifest.yaml", encoding="utf-8")'
+    membership_guard = "if project in protected:"
+    rejection = "sys.exit("
+    destructive_down = (
+        'docker compose -p "$project" -f docker/docker-compose.e2e.yml '
+        "down -v --remove-orphans"
+    )
+    for fragment in (
+        expected_project,
+        identity_guard,
+        manifest_load,
+        membership_guard,
+        rejection,
+        destructive_down,
+    ):
+        assert fragment in run, f"nightly teardown is missing: {fragment}"
+    assert (
+        run.index(expected_project)
+        < run.index(identity_guard)
+        < run.index(manifest_load)
+        < run.index(membership_guard)
+        < run.index(rejection, run.index(membership_guard))
+        < run.index(destructive_down)
+    ), "identity and manifest rejection must execute before destructive compose down"
 
 
 # ---------------------------------------------------------------------------
