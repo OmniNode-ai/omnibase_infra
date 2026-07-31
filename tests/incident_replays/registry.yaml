@@ -1,0 +1,200 @@
+# SPDX-FileCopyrightText: 2025 OmniNode.ai Inc.
+# SPDX-License-Identifier: MIT
+#
+# INCIDENT REPLAY REGISTRY (OMN-15547)
+#
+# Enforced by `scripts/ci/check_incident_replay_coverage.py`. Read that module's
+# docstring for rules R1-R5 and why they are worded the way they are.
+#
+# The one-line version: a guard that has never been run against the real thing
+# it exists to catch is decorative. On 2026-07-30 three separate guards were
+# green while enforcing nothing, each because its tests fed it a synthetic input
+# that could not exhibit the failure.
+#
+# HOW TO ADD A CASE (the honest bar)
+#   1. Get the real bytes. Fetch them from the surface that actually failed --
+#      `gh api` a run/PR, `git cat-file` the object, `curl` the live endpoint,
+#      `scp` the host file. Do NOT retype them from memory or from a report; a
+#      plausible-looking reconstruction is the defect, not the fix.
+#   2. Commit them verbatim under `tests/fixtures/<incident>/`. Use a
+#      `.captured` infix so header/format hooks leave the bytes alone -- a
+#      reformatted artifact is no longer the artifact that failed.
+#   3. Record the sha256 and a `capture.source` locator someone else can
+#      re-fetch. Free-text provenance is rejected on purpose: a hand-typed
+#      fixture has no locator that resolves, and that is the only difference a
+#      machine can see between a capture and an invention.
+#   4. Write the test that drives the REAL guard with those bytes and asserts
+#      the verdict the buggy guard got wrong.
+version: 1
+scope:
+  # Guards whose enforcement is load-bearing enough that a missing replay case
+  # is a hard failure. APPEND-ONLY -- removing a line is removing a proof
+  # obligation. An entry whose file does not exist yet reports PENDING rather
+  # than failing, which is how a requirement is armed BEFORE the guard lands.
+  required_guards:
+    # The .201 system-health alert. Incident OMN-15525: a 63-byte synthetic
+    # HEALTHY_BODY hid a 180-byte pre-parse truncation, so a 654-line suite was
+    # green while the deployed artifact paged CRITICAL on a healthy fleet.
+    - deploy/maintenance/omninode-system-slack-report.sh
+    # Pre-registered, not yet present. Lands with OMN-15538 (omnibase_infra
+    # #2583), which replays 879d6fc6 -- the pin that wedged every open infra PR
+    # for ~2.5h on 2026-07-30 (OMN-15536). Listing it here now means the
+    # requirement arms itself the moment that PR merges, with no follow-up edit.
+    - scripts/ci/check_pin_reachability.py
+  # Wired enforcement guards that carry NO replay case yet: the honest
+  # outstanding debt, enumerated so it is countable. This list may only SHRINK.
+  # Generated 2026-07-31 from the wired-guard inventory
+  # (`check_incident_replay_coverage.wired_guards`) at dev fea3f3e6.
+  #
+  # Being on this list is not permission -- it is a debt record. Anything NOT on
+  # it and NOT covered fails DEFAULT-DENY, which is the rule that stops the
+  # detection shelf growing faster than the proof behind it.
+  debt_baseline:
+    - scripts/audit-branch-protection.sh
+    - scripts/audit-merge-method-on-main.sh
+    - scripts/audit-runner-routing.py
+    - scripts/audit_required_context_parity_cli.py
+    - scripts/batch_validate_node_contracts.py
+    - scripts/check-env-reads.sh
+    - scripts/check-pinned-wheels.py
+    - scripts/check-realm-no-clients.sh
+    - scripts/check-strict-gate-ordering.sh
+    - scripts/check_context_field_presence.py
+    - scripts/check_contract_topic_parity.py
+    - scripts/check_dep_provenance.py
+    - scripts/check_dispatcher_route_coverage.py
+    - scripts/check_dockerfile_pins.py
+    - scripts/check_event_registry_fingerprint.py
+    - scripts/check_evidence_provenance_probe.py
+    - scripts/check_lane_attestation.py
+    - scripts/check_lane_census_age.py
+    - scripts/check_lane_env_drift.py
+    - scripts/check_migration_freeze.sh
+    - scripts/check_migration_required.py
+    - scripts/check_no_cloud_bus_wrapper.sh
+    - scripts/check_prod_promotion_lineage.py
+    - scripts/check_release_identity.py
+    - scripts/check_required_env_vars.py
+    - scripts/check_runtime_image_identity.py
+    - scripts/check_schema_fingerprint.py
+    - scripts/check_seed_provenance.py
+    - scripts/check_shared_enum_ownership.py
+    - scripts/check_terminal_cost_completeness.py
+    - scripts/check_test_failure_ratchet.py
+    - scripts/check_topic_drift.py
+    - scripts/check_version_pins.py
+    - scripts/ci/build_runner_image.sh
+    - scripts/ci/canonical_handler_shape_baseline.py
+    - scripts/ci/check_deploy_scope_dod.py
+    - scripts/ci/check_integration_skips.py
+    - scripts/ci/check_occ_companion_merged.py
+    - scripts/ci/check_shell_hygiene.sh
+    - scripts/ci/ci_env_digest.py
+    - scripts/ci/ci_summary_gate.py
+    - scripts/ci/detect_test_paths.py
+    - scripts/ci/ensure_ci_env.sh
+    - scripts/ci/merge_queue_enqueue.py
+    - scripts/ci/occ_manual_replay_precheck.py
+    - scripts/ci/parity_red_on_base_baseline.py
+    - scripts/ci/publish_with_retry.py
+    - scripts/ci/reject-node-implementations.sh
+    - scripts/ci/run_duplication_sweep.py
+    - scripts/ci/runner_fleet_canary.sh
+    - scripts/ci/runner_image_identity.py
+    - scripts/ci/verify_pypi_pin_resolvability.py
+    - scripts/ci_check_kafka_no_localhost_default.py
+    - scripts/deploy-agent/deploy_agent/executor.py
+    - scripts/deploy-runtime.sh
+    - scripts/generate_claude_lane_block.py
+    - scripts/generate_topic_enums.py
+    - scripts/hooks/prepush_smart_tests.sh
+    - scripts/lint_compose_dangling_deps.py
+    - scripts/lint_pricing_manifest.py
+    - scripts/publish_pr_merged_event.py
+    - scripts/publish_pr_webhook_event.py
+    - scripts/publish_test_failure_baseline.py
+    - scripts/release_drift_monitor.py
+    - scripts/resolve_node_migration_source_ref.py
+    - scripts/run-migrations.py
+    - scripts/run_baselines_batch_compute.py
+    - scripts/runtime_build/check_sibling_lock_pins.py
+    - scripts/runtime_build/cut_release_train_tag.sh
+    - scripts/runtime_build/refresh_dev_lane.sh
+    - scripts/runtime_build/refresh_stability_lane.sh
+    - scripts/runtime_build/stage_workspace.sh
+    - scripts/sync-node-migrations.sh
+    - scripts/system_health_check.sh
+    - scripts/trigger_rebuild_on_merge.py
+    - scripts/update-plugin-pins.py
+    - scripts/update_version_matrix.py
+    - scripts/validate-kafka-schema-handshake.py
+    - scripts/validate-pr-contract-sync.sh
+    - scripts/validate.py
+    - scripts/validate_no_env_fallbacks.py
+    - scripts/validation/check_ai_slop.py
+    - scripts/validation/check_kafka_no_hardcoded_fallback.sh
+    - scripts/validation/check_no_infra_inmemory_import.sh
+    - scripts/validation/check_published_events_consistency.py
+    - scripts/validation/check_topic_literals.py
+    - scripts/validation/check_topic_suffix_exports.py
+    - scripts/validation/lint_topic_names.py
+    - scripts/validation/run_topic_lint.sh
+    - scripts/validation/validate_migration_freeze.py
+    - scripts/validation/validate_migration_sequence.py
+    - scripts/validation/validate_model_dump_json_mode.py
+    - scripts/validation/validate_naming.py
+    - scripts/validation/validate_precommit_fail_loud.py
+    - scripts/validation/validate_precommit_pin_parity.py
+    - scripts/validation/validate_test_removal_gate.py
+    - scripts/validation/validate_test_root_collection.py
+    - scripts/verify-merge-queue-no-bypass.sh
+cases:
+  - id: omn15525-health-body-truncation
+    guard: deploy/maintenance/omninode-system-slack-report.sh
+    incident: OMN-15525
+    regression_class: false_red
+    guard_verdict_on_artifact: accept
+    artifact:
+      fixture: tests/fixtures/omn15547/health-dev-8085.json.captured
+      sha256: 240178e33079f76b38f4995c39b7a90da68c37d4f08365c13752411a9da6050a
+    capture:
+      method: live-fetch
+      source: live-http:omni-201-ts:8085/health
+      captured_at: 2026-07-31T00:03:06Z
+      captured_by: lane replay (OMN-15547)
+    test: tests/unit/scripts/test_omninode_system_slack_report.py::test_healthy_lane_with_a_realistic_body_is_not_critical
+    discriminator: tests/unit/scripts/test_omninode_system_slack_report.py::test_unreachable_runtime_endpoint_is_critical_not_skipped
+    why: >-
+      The reporter truncated the /health body to 180 bytes before handing it to jq. Every real body on .201 is 2079-2644 bytes, so jq died on every lane ("Unfinished string at EOF"), the verdict fell through to `unresolvable`, and the alert paged CRITICAL for all three lanes against a fully healthy fleet. The suite could not see any of it because HEALTHY_BODY was 63 bytes -- under the cut. The OMN-15525 repair made the literal bigger but kept it hand-typed ("Shape mirrors the live body"); this case replaces it with the 2644 bytes the endpoint actually returned, so the fixture can exhibit failure modes nobody anticipated. Direction is false_red, so the `discriminator` is required: it proves the same reporter still says CRITICAL when an endpoint is genuinely unreachable, which is what stops an accept-only proof from passing a stuck-open guard.
+  - id: omn15547-handtyped-fixture-passed-as-proof
+    guard: scripts/ci/check_incident_replay_coverage.py
+    incident: OMN-15547
+    regression_class: false_green
+    guard_verdict_on_artifact: reject
+    artifact:
+      fixture: tests/fixtures/omn15547/test_omninode_system_slack_report.handtyped-fixture.py.captured
+      sha256: 10cfdc48ef1a80dbc10f2c9cf1a84cfc20a68877111e15b5cbe1e56c428c5a0c
+    capture:
+      method: git-object
+      source: git-object:OmniNode-ai/omnibase_infra@0f05039434996594000db85cd8d3947523bfebcf:tests/unit/scripts/test_omninode_system_slack_report.py
+      captured_at: "2026-07-31T00:12:00Z"
+      captured_by: lane replay (OMN-15547)
+    test: tests/ci/test_incident_replay_coverage_omn15547.py::test_the_shipped_handtyped_fixture_fails_r1_and_r2
+    why: >-
+      This lint is itself a new guard, so its own default-deny rule demands a real regression case rather than a baseline exemption -- and it fired on itself the first time it was wired, which is how this case came to exist. The artifact is the verbatim blob that shipped on dev at 0f050394 as the REPAIR for OMN-15525: a hand-typed HEALTHY_BODY literal defended by the comment "Shape mirrors the live body". It was accepted as proof, and it was not proof -- the key names, nesting and value shapes were guesses, so the fixture could only ever exhibit failure modes its author had already imagined. The case drives the real R1/R2 predicates over those bytes and requires BOTH to say no: R1 because the body is a literal inside the test rather than a committed capture, R2 because "Shape mirrors the live body" is the strongest provenance the file offers and it resolves to nothing. A world with this lint could not have shipped that blob; a world without it did, twice.
+  - id: omn15536-unreachable-pin-outage
+    guard: scripts/ci/check_pin_reachability.py
+    incident: OMN-15536
+    regression_class: false_green
+    guard_verdict_on_artifact: reject
+    artifact:
+      fixture: tests/fixtures/omn15547/omnimarket-compare-dev-879d6fc6.gh-api.json.captured
+      sha256: 4e957324574cf01581701cc662adba35cb092670ee67db48f31118f17239f3b5
+    capture:
+      method: live-fetch
+      source: gh-api:repos/OmniNode-ai/omnimarket/compare/dev...879d6fc6825f876458c6d45ed670c8715de8ac95
+      captured_at: "2026-07-31T00:18:28Z"
+      captured_by: lane replay (OMN-15547)
+    test: tests/ci/test_incident_replay_coverage_omn15547.py::test_the_omn15536_outage_pin_is_unreachable_by_the_real_predicate
+    why: >-
+      omnibase_infra#2570 pinned the merge-hold reusable workflow at omnimarket@879d6fc6 -- the pre-squash head of omnimarket#1976, whose branch GitHub deleted when it squash-merged as 454c429f. The ref then resolved to nothing, so ci.yml failed to LOAD (0 jobs, conclusion=failure) and the sole required context CI Summary went ABSENT rather than red: all seven open infra PRs blocked for ~2.5h with no failing check to point at. Both repos already shipped pin validators and both PASSED the dead pin, because both only checked that it looked like 40 hex characters. The captured artifact is GitHub answering the question those validators never asked -- `status: diverged`, i.e. unreachable from the protected branch. OMN-15538 (#2583) built the predicate; this case pins it against the real response rather than a hardcoded string, and its `behind` sibling (omnimarket-compare-dev-454c429f, the squash that actually landed) is the control that stops a blanket-reject implementation looking correct.

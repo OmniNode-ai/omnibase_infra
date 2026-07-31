@@ -307,36 +307,58 @@ DEV_503_BODY = json.dumps(
         "config_prefetch_status": "pending",
     }
 )
-# The healthy runtime body -- A REAL CAPTURE, not a reconstruction (OMN-15547).
+# A REALISTIC healthy runtime body (OMN-15525).
 #
-# History of this one fixture is the whole argument for the incident-replay
-# convention:
+# The original fixture here was `{"status":"healthy","healthy":true,
+# "version":"0.38.4"}` -- 63 bytes. Every real `/health` body on .201 is 2644
+# bytes, and `check_runtime_lane` truncated the body to 180 bytes before handing
+# it to jq. Under the short fixture the truncation never bit, so the suite was
+# green while the deployed artifact reported CRITICAL for all three lanes
+# against a fully healthy fleet. The fixture must cross the excerpt boundary or
+# it cannot see that class of defect at all.
 #
-#   * ORIGINALLY it was `{"status":"healthy","healthy":true,"version":"0.38.4"}`
-#     -- 63 bytes. `check_runtime_lane` truncated the body to 180 bytes before
-#     handing it to jq, so under a 63-byte fixture the truncation never bit. The
-#     654-line suite was green while the deployed artifact reported CRITICAL for
-#     all three lanes against a fully healthy fleet (OMN-15525).
-#   * THE OMN-15525 FIX replaced it with a larger literal whose own comment read
-#     "Shape mirrors the live body". That crosses the byte boundary, but it is
-#     still something a person typed: it can only exhibit the failure modes its
-#     author already thought of. Key names, nesting depth and the actual value
-#     shapes were guesses.
-#   * NOW it is the bytes off the wire. Anything the real payload does that a
-#     reconstruction would not -- ordering, unicode, numeric formatting, a key
-#     nobody remembered -- is in scope for this suite by construction.
-#
-# Registered as an incident replay case in tests/incident_replays/registry.yaml
-# (`omn15525-health-body-truncation`, regression_class: false_red).
-HEALTHY_BODY_FIXTURE = (
-    REPO_ROOT / "tests" / "fixtures" / "omn15547" / "health-dev-8085.json.captured"
+# Shape mirrors the live body: top-level status/version/details, with the
+# health-bearing booleans inside `details` and enough sibling keys to push the
+# payload well past any display-truncation limit.
+HEALTHY_BODY = json.dumps(
+    {
+        "status": "healthy",
+        "version": "0.38.4",
+        "details": {
+            "healthy": True,
+            "degraded": False,
+            "startup_in_progress": False,
+            "is_running": True,
+            "is_draining": False,
+            "pending_message_count": 0,
+            "max_concurrent_handlers": 32,
+            "handler_pool_size": 8,
+            "in_flight_tasks": 0,
+            "event_bus_healthy": True,
+            "event_bus": "kafka",
+            "runtime_attached": True,
+            "runtime_health": "healthy",
+            "local_ingress": True,
+            "no_handlers_registered": False,
+            "config_prefetch_status": "complete",
+            "batch_response_enabled": True,
+            "batch_response_pending": 0,
+            "failed_handlers": [],
+            "skipped_handlers": [],
+            "registered_handlers": [
+                "handler_node_registration_effect",
+                "handler_session_state_reducer",
+            ],
+            "handler_pools": {"default": {"size": 8, "busy": 0}},
+            "components": {
+                "postgres": "healthy",
+                "redpanda": "healthy",
+                "valkey": "healthy",
+            },
+            "handlers": {"registered": 2, "failed": 0, "skipped": 0},
+        },
+    }
 )
-# sha256 of the response body returned by GET http://127.0.0.1:8085/health on
-# .201 at 2026-07-31T00:03:06Z (dev lane, live-healthy at the time). Asserted
-# below for the same reason the as-deployed script capture is: an edited
-# artifact is no longer the artifact, and the claim must break loudly.
-HEALTHY_BODY_SHA256 = "240178e33079f76b38f4995c39b7a90da68c37d4f08365c13752411a9da6050a"
-HEALTHY_BODY = HEALTHY_BODY_FIXTURE.read_text(encoding="utf-8")
 # Guard the guard: if someone shrinks this fixture the truncation defect becomes
 # invisible again, so assert the property the fixture exists to provide.
 assert len(HEALTHY_BODY) > 180, (
@@ -744,36 +766,6 @@ def test_healthy_lane_with_a_realistic_body_is_not_critical(
         )
     assert "could not be resolved from body" not in report, report
     assert "Issues: *0 critical*, *0 warning*" in report, report
-
-
-def test_healthy_body_fixture_is_the_unmodified_201_capture() -> None:
-    """Provenance guard for the OMN-15547 replay artifact.
-
-    The value of this fixture is that nobody wrote it. If it is edited it
-    becomes a reconstruction again -- indistinguishable, to every other test in
-    this file, from the hand-typed literal it replaced -- so the edit has to
-    fail here rather than quietly weaken every assertion downstream.
-    """
-    digest = hashlib.sha256(HEALTHY_BODY_FIXTURE.read_bytes()).hexdigest()
-    assert digest == HEALTHY_BODY_SHA256, (
-        "the healthy-body fixture no longer matches the response captured from "
-        "GET http://127.0.0.1:8085/health on .201 at 2026-07-31T00:03:06Z; "
-        "re-capture it rather than editing it"
-    )
-    # The property the byte count is standing in for: the real payload is an
-    # order of magnitude past the reporter's 180-byte pre-parse cut. A fixture
-    # that drifts back under that boundary cannot see the OMN-15525 class at all.
-    assert len(HEALTHY_BODY_FIXTURE.read_bytes()) > 2000, (
-        "a real .201 /health body is 2079-2644 bytes; a fixture materially "
-        "smaller than that is not the thing the reporter parses in production"
-    )
-    # It must also still be the payload the reporter's jq expression reads.
-    parsed = json.loads(HEALTHY_BODY)
-    assert parsed["details"]["healthy"] is True, (
-        "the capture must be a HEALTHY body -- this case replays the false-RED "
-        "direction (a healthy fleet paged CRITICAL), so a body that is genuinely "
-        "unhealthy would make every assertion built on it vacuous"
-    )
 
 
 def test_verdict_is_independent_of_the_display_excerpt_size(

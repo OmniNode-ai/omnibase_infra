@@ -422,6 +422,21 @@ jobs:
           echo "================================================================"
           uv run pytest tests/audit/test_io_violations.py::TestCIGateIOPurity -v --tb=short
 
+      # OMN-15547: every enforcement guard must replay a REAL incident.
+      # Rides this job on purpose — "ONEX Validators" is already in
+      # ci_summary_gate.STRICT_GATE_JOBS, so the check gates merge through the
+      # sole required context without adding a workflow, a job, or a required
+      # context (net-negative-surface rule). Blocking from the first run: the
+      # debt is baselined in the registry, so the only way to fail on day one is
+      # to wire a NEW guard with no real regression case — which is the exact
+      # behaviour this gate exists to stop.
+      - name: Incident-replay coverage (OMN-15547)
+        run: |
+          echo "================================================================"
+          echo "Incident-Replay Coverage (OMN-15547)"
+          echo "================================================================"
+          uv run python scripts/ci/check_incident_replay_coverage.py
+
       # ARCH-004 imperative-orchestrator ratchet (OMN-13472).
       # Full report over the repo: surfaces every contract-declared-but-unbound
       # orchestrator FSM driven imperatively by a handler (the delegation-shaped

@@ -107,11 +107,16 @@ repos:
   - repo: https://github.com/pre-commit/pre-commit-hooks
     rev: v6.0.0
     hooks:
+      # `\.captured$`: verbatim incident-replay artifacts (OMN-15547). These
+      # hooks are `types: [text]`, so they match on content and would append a
+      # newline to a captured HTTP body or API response -- silently voiding the
+      # sha256 that makes it evidence. Observed, not hypothetical: it happened
+      # to all three captures on their first commit and R1 rejected them.
       - id: trailing-whitespace
         args: [--markdown-linebreak-ext=md]
-        exclude: ^\.github/workflows/
+        exclude: ^\.github/workflows/|\.captured$
       - id: end-of-file-fixer
-        exclude: ^\.github/workflows/
+        exclude: ^\.github/workflows/|\.captured$
       - id: check-merge-conflict
       - id: check-added-large-files
         args: [--maxkb=1000]
@@ -1033,6 +1038,21 @@ repos:
         always_run: true
         stages: [pre-commit]
         files: ^(\.pre-commit-config\.yaml|\.github/workflows/(canonical-inference-gate|url-authority-gate)\.yml)$
+      # Incident-replay coverage (OMN-15547): a guard that has never been run
+      # against the real thing it exists to catch is decorative. Fires on the
+      # two surfaces that can create the gap -- wiring a new guard (this config
+      # or a workflow) and editing the registry/fixtures themselves. Local
+      # because the failure it prevents is committed BEFORE CI sees it: the
+      # author who adds the hook line is the only person who still has the real
+      # artifact to hand.
+      - id: incident-replay-coverage
+        name: Incident-replay coverage (OMN-15547)
+        entry: uv run python scripts/ci/check_incident_replay_coverage.py
+        language: system
+        pass_filenames: false
+        always_run: true
+        stages: [pre-commit]
+        files: ^(\.pre-commit-config\.yaml|\.github/workflows/.*\.ya?ml|tests/incident_replays/.*|tests/fixtures/.*|scripts/.*\.(py|sh)|deploy/maintenance/.*)$
   # Governed impacted-test selector at PRE-PUSH (OMN-13973 / WS7 OMN-14655 fan-out;
   # canary = omnibase_core#1451). Runs the fast local IMPACTED SUBSET of the unit
   # suite once per `git push`, via the SAME selector CI uses
