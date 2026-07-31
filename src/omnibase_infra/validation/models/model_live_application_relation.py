@@ -14,8 +14,17 @@ from omnibase_infra.validation.enums.enum_application_relation_kind import (
 from omnibase_infra.validation.enums.enum_application_relation_purpose import (
     EnumApplicationRelationPurpose,
 )
+from omnibase_infra.validation.types.type_application_database_function_signature import (
+    ApplicationDatabaseFunctionSignature,
+)
 
-RelationIdentity = tuple[str, str, str, EnumApplicationRelationKind]
+RelationIdentity = tuple[
+    str,
+    str,
+    str,
+    EnumApplicationRelationKind,
+    ApplicationDatabaseFunctionSignature | None,
+]
 
 
 class ModelLiveApplicationRelation(BaseModel):
@@ -29,6 +38,7 @@ class ModelLiveApplicationRelation(BaseModel):
     kind: EnumApplicationRelationKind
     purpose: EnumApplicationRelationPurpose = EnumApplicationRelationPurpose.DATA
     domain: EnumDatabaseSchemaDomain | None = None
+    function_signature: ApplicationDatabaseFunctionSignature | None = None
 
     @field_validator("kind", mode="before")
     @classmethod
@@ -39,7 +49,13 @@ class ModelLiveApplicationRelation(BaseModel):
 
     @property
     def identity(self) -> RelationIdentity:
-        return (self.database_ref, self.schema, self.name, self.kind)
+        return (
+            self.database_ref,
+            self.schema,
+            self.name,
+            self.kind,
+            self.function_signature,
+        )
 
 
 __all__ = ["ModelLiveApplicationRelation", "RelationIdentity"]

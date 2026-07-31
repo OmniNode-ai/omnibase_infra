@@ -146,6 +146,12 @@ STRICT_GATE_JOBS: tuple[str, ...] = (
     # SHAPE-only 40-hex validators. The job is unconditional (`if: always()`),
     # so a skip is anomalous and correctly fails closed here.
     "Pin Reachability (OMN-15538)",
+    # OMN-15361: one unconditional source+Docker gate executes the classification,
+    # schema/RLS, role, adapter, one-database, and topology assertions together
+    # with their seeded RED controls. Registering the plain job display name here
+    # makes the source contract and rebuilt PostgreSQL 16 proofs part of the sole
+    # required CI Summary context rather than a separately-triggered advisory run.
+    "Application Database Domain Enforcement (OMN-15361)",
 )
 
 # Gates the old ci-summary accepted as ``success`` OR ``skipped``. Each carries

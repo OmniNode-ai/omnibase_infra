@@ -38,6 +38,7 @@ pytestmark = pytest.mark.unit
 REPO_ROOT = Path(__file__).resolve().parents[2]
 CI_WORKFLOW = REPO_ROOT / ".github" / "workflows" / "ci.yml"
 DEPLOY_AGENT_GATE = "Deploy Agent Tests (OMN-15378) / deploy-agent-tests"
+APPLICATION_DB_GATE = "Application Database Domain Enforcement (OMN-15361)"
 
 # Real, unedited `commits/{sha}/check-runs` rows captured from the 16 dev PRs
 # merged 2026-07-29T23:04Z → 2026-07-30T14:54Z, filtered to merge-time state.
@@ -349,6 +350,24 @@ class TestCiSummaryGate:
         code, report = evaluate(jobs)
         assert code == EXIT_PENDING
         assert DEPLOY_AGENT_GATE in report
+
+    def test_application_database_gate_is_strict_and_unconditional(self) -> None:
+        """OMN-15361 source and rebuilt-Docker controls must gate CI Summary."""
+        assert APPLICATION_DB_GATE in STRICT_GATE_JOBS
+        jobs = [
+            job for job in _all_gates("success") if job["name"] != APPLICATION_DB_GATE
+        ]
+        jobs.append(_job(APPLICATION_DB_GATE, "failure"))
+        code, report = evaluate(jobs)
+        assert code == EXIT_FAILURE
+        assert APPLICATION_DB_GATE in report
+
+        workflow_job = _load_workflow(CI_WORKFLOW)["jobs"][
+            "application-database-domain-enforcement"
+        ]
+        assert workflow_job["name"] == APPLICATION_DB_GATE
+        assert "if" not in workflow_job
+        assert workflow_job["needs"] == "occ-preflight"
 
 
 class TestGateNamesResolveToRealJobs:

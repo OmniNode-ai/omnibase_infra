@@ -13,11 +13,17 @@ class EnumApplicationInventoryObjectKind(StrEnum):
     TABLE = "table"
     VIEW = "view"
     MATERIALIZED_VIEW = "materialized_view"
+    FOREIGN_TABLE = "foreign_table"
     FUNCTION = "function"
+    AGGREGATE = "aggregate"
+    WINDOW_FUNCTION = "window_function"
     PROCEDURE = "procedure"
     SEQUENCE = "sequence"
     EXTENSION = "extension"
     TYPE = "type"
+    BASE_TYPE = "base_type"
+    RANGE_TYPE = "range_type"
+    MULTIRANGE_TYPE = "multirange_type"
 
 
 __all__ = ["EnumApplicationInventoryObjectKind"]

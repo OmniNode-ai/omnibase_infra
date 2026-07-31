@@ -13,6 +13,7 @@ class EnumApplicationRelationKind(StrEnum):
     TABLE = "table"
     VIEW = "view"
     MATERIALIZED_VIEW = "materialized_view"
+    FOREIGN_TABLE = "foreign_table"
     FUNCTION = "function"
 
 

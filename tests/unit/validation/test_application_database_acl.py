@@ -360,53 +360,75 @@ def test_cluster_global_role_presence_cannot_conflict_with_absence_evidence() ->
         ModelApplicationDatabaseAclMatrix.model_validate(payload)
 
 
-def test_seeded_public_owner_cross_domain_ddl_and_future_grant_controls_fail() -> None:
+@pytest.mark.parametrize(
+    "control_id",
+    [
+        "public-connect",
+        "public-execute",
+        "runtime-owner",
+        "runtime-ddl",
+        "unsafe-default-privilege",
+    ],
+)
+def test_seeded_acl_red_control_fails_closed(control_id: str) -> None:
     matrix = _matrix()
     rows = list(matrix.rows)
-    public_database = next(
-        row
-        for row in rows
-        if row.principal == PUBLIC_PRINCIPAL
-        and row.object_type is EnumDatabaseGrantObjectType.DATABASE
-    )
-    rows[rows.index(public_database)] = public_database.model_copy(
-        update={"privileges": (EnumDatabasePrivilege.CONNECT,)}
-    )
-    internal_on_tenant = next(
-        row
-        for row in rows
-        if row.principal == "omninode_runtime" and row.object_ref == "delegation_events"
-    )
-    rows[rows.index(internal_on_tenant)] = internal_on_tenant.model_copy(
-        update={"privileges": (EnumDatabasePrivilege.SELECT,)}
-    )
-    dashboard_schema = next(
-        row
-        for row in rows
-        if row.principal == "app_dashboard"
-        and row.object_type is EnumDatabaseGrantObjectType.SCHEMA
-        and row.schema_ref == "tenant"
-    )
-    rows[rows.index(dashboard_schema)] = dashboard_schema.model_copy(
-        update={
-            "privileges": (
-                EnumDatabasePrivilege.USAGE,
-                EnumDatabasePrivilege.CREATE,
-            )
-        }
-    )
     objects = list(matrix.objects)
-    objects[0] = objects[0].model_copy(update={"owner": "app_dashboard"})
     defaults = list(matrix.default_privileges)
-    dashboard_default = next(
-        row
-        for row in defaults
-        if row.grantee == "app_dashboard"
-        and row.object_type is EnumDatabaseGrantObjectType.TABLE
-    )
-    defaults[defaults.index(dashboard_default)] = dashboard_default.model_copy(
-        update={"privileges": (EnumDatabasePrivilege.SELECT,)}
-    )
+    expected: str
+    if control_id == "public-connect":
+        target = next(
+            row
+            for row in rows
+            if row.principal == PUBLIC_PRINCIPAL
+            and row.object_type is EnumDatabaseGrantObjectType.DATABASE
+        )
+        rows[rows.index(target)] = target.model_copy(
+            update={"privileges": (EnumDatabasePrivilege.CONNECT,)}
+        )
+        expected = "PUBLIC has"
+    elif control_id == "public-execute":
+        target = next(
+            row
+            for row in rows
+            if row.principal == PUBLIC_PRINCIPAL
+            and row.object_type is EnumDatabaseGrantObjectType.FUNCTION
+        )
+        rows[rows.index(target)] = target.model_copy(
+            update={"privileges": (EnumDatabasePrivilege.EXECUTE,)}
+        )
+        expected = "PUBLIC has"
+    elif control_id == "runtime-owner":
+        objects[0] = objects[0].model_copy(update={"owner": "app_dashboard"})
+        expected = "owns"
+    elif control_id == "runtime-ddl":
+        target = next(
+            row
+            for row in rows
+            if row.principal == "app_dashboard"
+            and row.object_type is EnumDatabaseGrantObjectType.SCHEMA
+            and row.schema_ref == "tenant"
+        )
+        rows[rows.index(target)] = target.model_copy(
+            update={
+                "privileges": (
+                    EnumDatabasePrivilege.USAGE,
+                    EnumDatabasePrivilege.CREATE,
+                )
+            }
+        )
+        expected = "DDL privilege"
+    else:
+        target = next(
+            row
+            for row in defaults
+            if row.grantee == "app_dashboard"
+            and row.object_type is EnumDatabaseGrantObjectType.TABLE
+        )
+        defaults[defaults.index(target)] = target.model_copy(
+            update={"privileges": (EnumDatabasePrivilege.SELECT,)}
+        )
+        expected = "broad future"
     red = matrix.model_copy(
         update={
             "objects": tuple(objects),
@@ -417,14 +439,36 @@ def test_seeded_public_owner_cross_domain_ddl_and_future_grant_controls_fail() -
 
     violations = validate_application_database_acl_matrix(red)
 
-    assert any("PUBLIC has" in violation for violation in violations)
-    assert any("cross-domain" in violation for violation in violations)
-    assert any("DDL privilege" in violation for violation in violations)
-    assert any("owns" in violation for violation in violations)
-    assert any("broad future" in violation for violation in violations)
+    assert any(expected in violation for violation in violations)
 
 
-def test_topology_cross_domain_grant_is_blocked_by_independent_policy() -> None:
+def test_red_control_runtime_bypassrls() -> None:
+    payload = _principal_inventory().model_dump(mode="json")
+    role_state = next(
+        state
+        for state in payload["observed_role_states"]
+        if state["role"] == "app_dashboard"
+    )
+    role_state["bypass_rls"] = True
+    inventory = ModelApplicationDatabasePrincipalInventory.model_validate(payload)
+
+    matrix = build_application_database_acl_matrix(
+        topology=ModelDeploymentTopology.from_yaml(_FIXTURES / "topology.yaml"),
+        sources=_complete_sources(),
+        relation_inventories={"inventory": _inventory()},
+        service_manifests={},
+        principal_inventories={"principal_inventory": inventory},
+        acl_policies={"acl_policy": _acl_policy()},
+        authorization_scope=(
+            EnumApplicationDatabaseAclAuthorizationScope.SYNTHETIC_PROOF
+        ),
+    )
+
+    assert matrix.scaffold_status == "BLOCKED"
+    assert any("app_dashboard" in blocker for blocker in matrix.scaffold_blockers)
+
+
+def test_red_control_cross_domain_grant() -> None:
     topology = ModelDeploymentTopology.from_yaml(_FIXTURES / "topology.yaml")
     database = topology.databases["application"]
     runtime = database.principals["omninode_runtime"]
@@ -1411,3 +1455,321 @@ def test_service_inventory_requires_explicit_ready_retained_census_status() -> N
         "service_ownership: retained_live_census=None" in blocker
         for blocker in matrix.blockers
     )
+
+
+@pytest.mark.parametrize(
+    ("kind", "object_type", "signature"),
+    [
+        ("foreign_table", EnumDatabaseGrantObjectType.TABLE, None),
+        ("aggregate", EnumDatabaseGrantObjectType.FUNCTION, "(integer)"),
+        ("window_function", EnumDatabaseGrantObjectType.FUNCTION, "(integer)"),
+        ("base_type", EnumDatabaseGrantObjectType.TYPE, None),
+        ("range_type", EnumDatabaseGrantObjectType.TYPE, None),
+        ("multirange_type", EnumDatabaseGrantObjectType.TYPE, None),
+    ],
+)
+def test_supporting_inventory_kinds_are_acl_governed_not_excluded(
+    kind: str,
+    object_type: EnumDatabaseGrantObjectType,
+    signature: str | None,
+) -> None:
+    payload = _inventory().model_dump(mode="json")
+    supporting = dict(payload["relations"][0])
+    supporting.update(
+        {
+            "name": f"acl_{kind}",
+            "kind": kind,
+            "owner_declaration": "service:onex_api",
+            "function_signature": signature,
+        }
+    )
+    payload["relations"].append(supporting)
+    inventory = ModelApplicationRelationEvidenceInventory.model_validate(payload)
+
+    matrix = build_application_database_acl_matrix(
+        topology=ModelDeploymentTopology.from_yaml(_FIXTURES / "topology.yaml"),
+        sources=_complete_sources(),
+        relation_inventories={"inventory": inventory},
+        service_manifests={},
+        principal_inventories={"principal_inventory": _principal_inventory()},
+        acl_policies={"acl_policy": _acl_policy()},
+        authorization_scope=(
+            EnumApplicationDatabaseAclAuthorizationScope.SYNTHETIC_PROOF
+        ),
+    )
+
+    governed = [obj for obj in matrix.objects if obj.object_ref == f"acl_{kind}"]
+    assert len(governed) == 1
+    assert governed[0].catalog_kind == kind
+    assert governed[0].object_type is object_type
+    assert governed[0].function_signature == signature
+    assert not any(f":{kind}" in item for item in matrix.excluded_objects)
+    assert any(
+        "live catalog object identities differ" in blocker
+        for blocker in matrix.blockers
+    )
+    public_row = next(
+        row
+        for row in matrix.rows
+        if row.principal == PUBLIC_PRINCIPAL and row.object_ref == f"acl_{kind}"
+    )
+    assert not public_row.privileges
+
+
+def test_extension_inventory_is_an_explicit_acl_blocker_not_an_exclusion() -> None:
+    payload = _inventory().model_dump(mode="json")
+    extension = dict(payload["relations"][0])
+    extension.update(
+        {
+            "name": "pgcrypto",
+            "kind": "extension",
+            "owner_declaration": "service:onex_api",
+            "function_signature": None,
+        }
+    )
+    payload["relations"].append(extension)
+    payload["relation_counts"]["extension"] += 1
+    payload["retained_live_census"]["observed_extensions"] += 1
+    inventory = ModelApplicationRelationEvidenceInventory.model_validate(payload)
+
+    matrix = build_application_database_acl_matrix(
+        topology=ModelDeploymentTopology.from_yaml(_FIXTURES / "topology.yaml"),
+        sources=_complete_sources(),
+        relation_inventories={"inventory": inventory},
+        service_manifests={},
+        principal_inventories={"principal_inventory": _principal_inventory()},
+        acl_policies={"acl_policy": _acl_policy()},
+        authorization_scope=(
+            EnumApplicationDatabaseAclAuthorizationScope.SYNTHETIC_PROOF
+        ),
+    )
+
+    assert matrix.status == "BLOCKED"
+    assert any(
+        "extension" in blocker and "no PostgreSQL object ACL" in blocker
+        for blocker in matrix.blockers
+    )
+    assert not any(":extension" in item for item in matrix.excluded_objects)
+
+
+def _supporting_service_manifest() -> ModelMigrationOwnershipManifest:
+    return ModelMigrationOwnershipManifest.model_validate(
+        {
+            "schema_version": "1.0",
+            "service": "acl_supporting_objects",
+            "current_physical_database": "omnidash_analytics",
+            "materialized_physical_databases": ["omnidash_analytics"],
+            "target_database_ref": "application",
+            "db_io": {"db_tables": []},
+            "relation_evidence": [
+                {
+                    "name": "acl_foreign_table",
+                    "kind": "foreign_table",
+                    "database_ref": "application",
+                    "schema": "tenant",
+                    "current_schemas": ["tenant"],
+                    "domain": "TENANT",
+                    "owner_declaration": "service:acl_supporting_objects",
+                }
+            ],
+            "database_objects": [
+                {
+                    "name": "acl_aggregate",
+                    "kind": "aggregate",
+                    "database_ref": "application",
+                    "schema": "tenant",
+                    "current_schemas": ["tenant"],
+                    "domain": "TENANT",
+                    "owner_declaration": "service:acl_supporting_objects",
+                    "function_signature": "(integer)",
+                },
+                {
+                    "name": "acl_window_function",
+                    "kind": "window_function",
+                    "database_ref": "application",
+                    "schema": "tenant",
+                    "current_schemas": ["tenant"],
+                    "domain": "TENANT",
+                    "owner_declaration": "service:acl_supporting_objects",
+                    "function_signature": "(integer)",
+                },
+                *(
+                    {
+                        "name": f"acl_{kind}",
+                        "kind": kind,
+                        "database_ref": "application",
+                        "schema": "tenant",
+                        "current_schemas": ["tenant"],
+                        "domain": "TENANT",
+                        "owner_declaration": "service:acl_supporting_objects",
+                    }
+                    for kind in ("base_type", "range_type", "multirange_type")
+                ),
+            ],
+            "blocked_relations": [],
+            "completion_status": "verified",
+            "retained_live_census": {
+                "observed_base_tables": 0,
+                "observed_views_and_materialized_views": 0,
+                "observed_sequences": 0,
+                "observed_functions": 2,
+                "observed_procedures": 0,
+                "observed_types": 3,
+                "observed_extensions": 0,
+                "parity_status": "verified",
+                "reason": "synthetic exact supporting-object census",
+            },
+            "runtime_evidence": {
+                "full_day_datname_usename_activity": {
+                    "status": "verified",
+                    "reason": "synthetic fixture",
+                },
+                "live_catalog_parity": {
+                    "status": "verified",
+                    "reason": "synthetic fixture",
+                },
+            },
+        }
+    )
+
+
+def test_service_supporting_kinds_render_exact_owner_acl_and_catalog_guards() -> None:
+    principal_payload = _principal_inventory().model_dump(mode="json")
+    principal_payload["observed_objects"].extend(
+        [
+            {
+                "schema_ref": "tenant",
+                "catalog_kind": "foreign_table",
+                "object_ref": "acl_foreign_table",
+                "owner": "onex_api",
+            },
+            {
+                "schema_ref": "tenant",
+                "catalog_kind": "aggregate",
+                "object_ref": "acl_aggregate",
+                "function_signature": "(integer)",
+                "owner": "onex_api",
+            },
+            {
+                "schema_ref": "tenant",
+                "catalog_kind": "window_function",
+                "object_ref": "acl_window_function",
+                "function_signature": "(integer)",
+                "owner": "onex_api",
+            },
+            *(
+                {
+                    "schema_ref": "tenant",
+                    "catalog_kind": kind,
+                    "object_ref": f"acl_{kind}",
+                    "owner": "onex_api",
+                }
+                for kind in ("base_type", "range_type", "multirange_type")
+            ),
+        ]
+    )
+    principal_inventory = ModelApplicationDatabasePrincipalInventory.model_validate(
+        principal_payload
+    )
+    matrix = build_application_database_acl_matrix(
+        topology=ModelDeploymentTopology.from_yaml(_FIXTURES / "topology.yaml"),
+        sources=(
+            *_complete_sources(),
+            _source("service_ownership", "service_ownership"),
+        ),
+        relation_inventories={"inventory": _inventory()},
+        service_manifests={"service_ownership": _supporting_service_manifest()},
+        principal_inventories={"principal_inventory": principal_inventory},
+        acl_policies={"acl_policy": _acl_policy()},
+        authorization_scope=(
+            EnumApplicationDatabaseAclAuthorizationScope.SYNTHETIC_PROOF
+        ),
+    )
+
+    assert matrix.status == "READY", matrix.blockers
+    assert not matrix.excluded_objects
+    assert all(
+        not row.privileges
+        for row in matrix.rows
+        if row.principal == PUBLIC_PRINCIPAL
+        and row.object_ref is not None
+        and row.object_ref.startswith("acl_")
+    )
+    sql = render_application_database_acl_sql(matrix, allow_synthetic_proof=True)
+    assert (
+        'ALTER FOREIGN TABLE "tenant"."acl_foreign_table" OWNER TO '
+        '"owner_onex_tenant";' in sql
+    )
+    assert (
+        'REVOKE ALL PRIVILEGES ON TABLE "tenant"."acl_foreign_table" FROM PUBLIC' in sql
+    )
+    assert (
+        'ALTER AGGREGATE "tenant"."acl_aggregate"(integer) OWNER TO '
+        '"owner_onex_tenant";' in sql
+    )
+    assert (
+        'REVOKE ALL PRIVILEGES ON FUNCTION "tenant"."acl_aggregate"(integer) '
+        "FROM PUBLIC" in sql
+    )
+    assert (
+        'ALTER FUNCTION "tenant"."acl_window_function"(integer) OWNER TO '
+        '"owner_onex_tenant";' in sql
+    )
+    assert 'ALTER TYPE "tenant"."acl_range_type" OWNER TO "owner_onex_tenant";' in sql
+    assert "WHEN 'f' THEN 'foreign_table'" in sql
+    assert "WHEN 'a' THEN 'aggregate'" in sql
+    assert "WHEN 'w' THEN 'window_function'" in sql
+    assert "WHEN 'b' THEN 'base_type'" in sql
+    assert "WHEN 'r' THEN 'range_type'" in sql
+    assert "WHEN 'm' THEN 'multirange_type'" in sql
+    assert "object.prokind = 'a'" in sql
+    assert "object.prokind = 'w'" in sql
+    assert "object.typtype = 'b'" in sql
+    assert "object.typtype = 'r'" in sql
+    assert "object.typtype = 'm'" in sql
+
+
+def test_service_extension_is_an_explicit_acl_blocker_not_an_exclusion() -> None:
+    payload = _supporting_service_manifest().model_dump(mode="json")
+    payload["relation_evidence"] = []
+    payload["database_objects"] = [
+        {
+            "name": "pgcrypto",
+            "kind": "extension",
+            "database_ref": "application",
+            "schema": "tenant",
+            "current_schemas": ["tenant"],
+            "domain": "TENANT",
+            "owner_declaration": "service:acl_supporting_objects",
+        }
+    ]
+    payload["retained_live_census"].update(
+        {
+            "observed_functions": 0,
+            "observed_types": 0,
+            "observed_extensions": 1,
+        }
+    )
+    manifest = ModelMigrationOwnershipManifest.model_validate(payload)
+
+    matrix = build_application_database_acl_matrix(
+        topology=ModelDeploymentTopology.from_yaml(_FIXTURES / "topology.yaml"),
+        sources=(
+            *_complete_sources(),
+            _source("service_ownership", "service_ownership"),
+        ),
+        relation_inventories={"inventory": _inventory()},
+        service_manifests={"service_ownership": manifest},
+        principal_inventories={"principal_inventory": _principal_inventory()},
+        acl_policies={"acl_policy": _acl_policy()},
+        authorization_scope=(
+            EnumApplicationDatabaseAclAuthorizationScope.SYNTHETIC_PROOF
+        ),
+    )
+
+    assert matrix.status == "BLOCKED"
+    assert any(
+        "extension" in blocker and "no PostgreSQL object ACL" in blocker
+        for blocker in matrix.blockers
+    )
+    assert not any(":extension" in item for item in matrix.excluded_objects)

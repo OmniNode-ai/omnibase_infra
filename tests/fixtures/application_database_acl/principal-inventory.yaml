@@ -45,8 +45,8 @@ observed_objects:
   - {schema_ref: tenant, catalog_kind: procedure, object_ref: record_delegation, function_signature: "(IN p_payload text)", owner: app_dashboard}
   - {schema_ref: tenant, catalog_kind: view, object_ref: tenant_account_names, owner: app_dashboard}
   - {schema_ref: tenant, catalog_kind: type, object_ref: account_ref, owner: onex_api}
-  - {schema_ref: tenant, catalog_kind: type, object_ref: account_id_span, owner: onex_api}
-  - {schema_ref: tenant, catalog_kind: type, object_ref: account_id_span_set, owner: onex_api}
+  - {schema_ref: tenant, catalog_kind: range_type, object_ref: account_id_span, owner: onex_api}
+  - {schema_ref: tenant, catalog_kind: multirange_type, object_ref: account_id_span_set, owner: onex_api}
   - {schema_ref: tenant, catalog_kind: function, object_ref: account_id_span, function_signature: "(bigint, bigint)", owner: onex_api}
   - {schema_ref: tenant, catalog_kind: function, object_ref: account_id_span, function_signature: "(bigint, bigint, text)", owner: onex_api}
   - {schema_ref: tenant, catalog_kind: function, object_ref: account_id_span_set, function_signature: "()", owner: onex_api}

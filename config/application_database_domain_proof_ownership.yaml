@@ -1,0 +1,97 @@
+# SPDX-FileCopyrightText: 2025 OmniNode.ai Inc.
+# SPDX-License-Identifier: MIT
+schema_version: "1.0"
+service: application_domain_proof
+owner_declaration: service:application_domain_proof
+target_database_ref: application
+db_io:
+  db_tables:
+    - name: tenants
+      database_ref: application
+      schema: tenant
+      migration: docker/application-domain-enforcement/seed.sql
+      access: read_write
+      role: tenant_identity_root
+    - name: events
+      database_ref: application
+      schema: tenant
+      migration: docker/application-domain-enforcement/seed.sql
+      access: read_write
+      role: tenant_event_proof
+    - name: runtime_state
+      database_ref: application
+      schema: omninode_internal
+      migration: docker/application-domain-enforcement/seed.sql
+      access: read_write
+      role: internal_runtime_proof
+    - name: feature_flags
+      database_ref: application
+      schema: platform_catalog
+      migration: docker/application-domain-enforcement/seed.sql
+      access: read_write
+      role: platform_catalog_proof
+relation_evidence:
+  - name: tenants
+    kind: table
+    database_ref: application
+    schema: tenant
+    domain: TENANT
+    owner_declaration: service:application_domain_proof
+    tenant_identity_column: id
+    identity_root_contract: canonical_tenant_identity_root
+    identity_root_control_role: tenant_control_admin
+    identity_root_control_operations:
+      - tenant_creation
+      - cross_tenant_enumeration
+    canonical_policy_name: tenant_identity_isolation
+    deduplication_key_columns: [id]
+    authorization_dependency_columns: [id]
+    write_eligibility_dependency_columns: [id]
+  - name: events
+    kind: table
+    database_ref: application
+    schema: tenant
+    domain: TENANT
+    owner_declaration: service:application_domain_proof
+    tenant_identity_column: tenant_id
+    canonical_policy_name: tenant_isolation
+    deduplication_key_columns: [event_id]
+    authorization_dependency_columns: [tenant_id]
+    write_eligibility_dependency_columns: [tenant_id]
+  - name: runtime_state
+    kind: table
+    database_ref: application
+    schema: omninode_internal
+    domain: OMNINODE_INTERNAL
+    owner_declaration: service:application_domain_proof
+    source_tenant_provenance_contract: non_authoritative_provenance
+    deduplication_key_columns: [state_id]
+    authorization_dependency_columns: []
+    write_eligibility_dependency_columns: []
+  - name: feature_flags
+    kind: table
+    database_ref: application
+    schema: platform_catalog
+    domain: PLATFORM_CATALOG
+    owner_declaration: service:application_domain_proof
+    deduplication_key_columns: [flag_id]
+    authorization_dependency_columns: []
+    write_eligibility_dependency_columns: []
+  - name: events_view
+    kind: view
+    database_ref: application
+    schema: tenant
+    domain: TENANT
+    owner_declaration: service:application_domain_proof
+    readers: [app_dashboard]
+database_objects:
+  - name: safe_report
+    kind: function
+    database_ref: application
+    schema: tenant
+    domain: TENANT
+    owner_declaration: service:application_domain_proof
+    readers: [app_dashboard]
+    function_signature: "()"
+    audit_id: OMN-15361:tenant.safe_report:58b47971e3234c0117f153a4d3d7c7d0efdfb611804ba729153dfac19e503cfe
+    definition_sha256: 58b47971e3234c0117f153a4d3d7c7d0efdfb611804ba729153dfac19e503cfe
