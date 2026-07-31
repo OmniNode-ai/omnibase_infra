@@ -141,6 +141,28 @@ def _resolve_delegation_provenance(normalized: Mapping[str, object]) -> str:
     return ""
 
 
+def _resolve_measured_actual_cost(normalized: Mapping[str, object]) -> float | None:
+    """Resolve non-negative measured spend from the canonical terminal fields.
+
+    The cumulative total is authoritative for a current terminal, while the
+    final-attempt value keeps older/defaulted terminals compatible.  Taking the
+    maximum also enforces the domain invariant that total spend cannot be less
+    than the final attempt, without turning a genuine free-local ``0/0`` into an
+    absent measurement.
+    """
+
+    costs: list[float] = []
+    for key in ("cumulative_attempt_cost", "final_attempt_cost"):
+        value = normalized.get(key)
+        if (
+            isinstance(value, int | float)
+            and not isinstance(value, bool)
+            and value >= 0.0
+        ):
+            costs.append(float(value))
+    return max(costs) if costs else None
+
+
 def _normalize_result_payload(
     *,
     status: str,
@@ -172,6 +194,14 @@ def _normalize_result_payload(
     normalized.setdefault("input_tokens", normalized.get("prompt_tokens", 0))
     normalized.setdefault("output_tokens", normalized.get("completion_tokens", 0))
     normalized.setdefault("delegation_latency_ms", normalized.get("latency_ms", 0))
+    # OMN-15520: the workflow terminal owns measured actual cost.  Total cost
+    # across an escalation ladder is cumulative; single-attempt/legacy
+    # terminals expose only the final attempt.  Preserve an explicit zero by
+    # checking for None rather than truthiness, and overwrite any stale
+    # consumer-shaped ``cost_usd`` with the upstream measurement when present.
+    actual_cost = _resolve_measured_actual_cost(normalized)
+    if actual_cost is not None:
+        normalized["cost_usd"] = actual_cost
     return normalized
 
 
