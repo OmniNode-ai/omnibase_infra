@@ -1,0 +1,123 @@
+databases:
+  application:
+    bindings:
+      app_dashboard:
+        database_ref: application
+        dsn_env: DATABASE_URL
+        principal: app_dashboard
+      omninode_runtime_service:
+        database_ref: application
+        dsn_env: OMNINODE_INTERNAL_DB_URL
+        principal: omninode_runtime
+      onex_api:
+        database_ref: application
+        dsn_env: OMNINODE_CLOUD_DB_URL
+        principal: onex_api
+      tenant_projection:
+        database_ref: application
+        dsn_env: OMNIDASH_ANALYTICS_DB_URL
+        principal: tenant_projection_writer
+    checksum_ledger: canonical
+    checksum_ledgers:
+      canonical:
+        checksum_column: checksum
+        domain_column: domain
+        relation: schema_migrations
+        schema: platform_catalog
+        stream_column: migration_stream
+        version_column: version
+    migration_stream: omnibase_infra.application
+    owners:
+      owner_omninode_internal:
+        login: false
+      owner_onex_tenant:
+        login: false
+      owner_platform_catalog:
+        login: false
+    physical_name: omnidash_analytics
+    principals:
+      app_dashboard:
+        bypass_rls: false
+        grants:
+          - object_type: DATABASE
+            objects: []
+            privileges:
+              - CONNECT
+            schema: null
+          - object_type: SCHEMA
+            objects: []
+            privileges:
+              - USAGE
+            schema: tenant
+          - object_type: SCHEMA
+            objects: []
+            privileges:
+              - USAGE
+            schema: platform_catalog
+        login: true
+      omninode_runtime:
+        bypass_rls: false
+        grants:
+          - object_type: DATABASE
+            objects: []
+            privileges:
+              - CONNECT
+            schema: null
+          - object_type: SCHEMA
+            objects: []
+            privileges:
+              - USAGE
+            schema: omninode_internal
+        login: true
+      onex_api:
+        bypass_rls: false
+        grants:
+          - object_type: DATABASE
+            objects: []
+            privileges:
+              - CONNECT
+            schema: null
+          - object_type: SCHEMA
+            objects: []
+            privileges:
+              - USAGE
+            schema: tenant
+          - object_type: SCHEMA
+            objects: []
+            privileges:
+              - USAGE
+            schema: platform_catalog
+        login: true
+      tenant_projection_writer:
+        bypass_rls: false
+        grants:
+          - object_type: DATABASE
+            objects: []
+            privileges:
+              - CONNECT
+            schema: null
+          - object_type: SCHEMA
+            objects: []
+            privileges:
+              - USAGE
+            schema: tenant
+        login: true
+    schemas:
+      omninode_internal:
+        domain: OMNINODE_INTERNAL
+        owner: owner_omninode_internal
+      platform_catalog:
+        domain: PLATFORM_CATALOG
+        owner: owner_platform_catalog
+      tenant:
+        domain: TENANT
+        owner: owner_onex_tenant
+environment: onex-prod
+schema_version: '1.0'
+source:
+  path: src/omnibase_infra/topology/instances/onex-prod.yaml
+  profile_catalog_path: src/omnibase_infra/topology/application_database_profiles.yaml
+  profile_catalog_sha256: 759f32da77ad41b874fbb05d2824c44f9de4c64e9d269d99da21445225a90ca1
+  repository: OmniNode-ai/omnibase_infra
+  sha256: b34206e7512eca5eba1502e969fea52c641b4b5eda4eff538ba5c7a459e7b07d
+topology_instance: onex-prod

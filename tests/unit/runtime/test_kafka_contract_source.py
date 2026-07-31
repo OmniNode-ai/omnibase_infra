@@ -28,6 +28,7 @@ from concurrent.futures import ThreadPoolExecutor, as_completed
 from uuid import UUID, uuid4
 
 import pytest
+from pydantic import ValidationError
 
 from omnibase_core.models.errors import ModelOnexError
 from omnibase_core.models.events import (
@@ -1154,20 +1155,19 @@ class TestMarketNodeHandlerResolution:
 
         assert descriptor.handler_class == f"{self._MODULE}.{self._CLASS}"
 
-    def test_resolves_from_top_level_handler(self) -> None:
-        """Top-level fallback: handler.{module,class} when routing is absent."""
+    def test_rejects_legacy_top_level_handler(self) -> None:
+        """The typed contract rejects the undeclared legacy handler block."""
         parser = ContractYamlParser(environment="dev")
         contract_yaml = _market_contract_yaml(
             top_level_module=self._MODULE,
             top_level_class=self._CLASS,
         )
 
-        descriptor = parser.parse("node_aislop_sweep", contract_yaml, uuid4())
+        with pytest.raises(ValidationError, match="handler"):
+            parser.parse("node_aislop_sweep", contract_yaml, uuid4())
 
-        assert descriptor.handler_class == f"{self._MODULE}.{self._CLASS}"
-
-    def test_routing_form_preferred_over_top_level(self) -> None:
-        """Routing form wins when both forms are present."""
+    def test_routing_does_not_hide_legacy_top_level_handler(self) -> None:
+        """Strict validation rejects extras even when canonical routing exists."""
         parser = ContractYamlParser(environment="dev")
         contract_yaml = _market_contract_yaml(
             routing_module=self._MODULE,
@@ -1176,9 +1176,8 @@ class TestMarketNodeHandlerResolution:
             top_level_class="HandlerOther",
         )
 
-        descriptor = parser.parse("node_aislop_sweep", contract_yaml, uuid4())
-
-        assert descriptor.handler_class == f"{self._MODULE}.{self._CLASS}"
+        with pytest.raises(ValidationError, match="handler"):
+            parser.parse("node_aislop_sweep", contract_yaml, uuid4())
 
     def test_unresolvable_handler_class_is_none(self) -> None:
         """No metadata.handler_class and no handler block -> handler_class is None."""

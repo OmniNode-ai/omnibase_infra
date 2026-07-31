@@ -36,7 +36,7 @@ pytestmark = pytest.mark.integration
 
 # ---------------------------------------------------------------------------
 # Minimal contract YAML for a Noop in-process handler.
-# handler_class in metadata so ContractYamlParser can extract it.
+# handler_class is top-level because ModelHandlerContract now owns it directly.
 # NOTE: topic strings here are contract-declared per ONEX convention.
 # ---------------------------------------------------------------------------
 
@@ -52,12 +52,12 @@ descriptor:
 input_model: omnibase_infra.models.types.JsonDict
 output_model: omnibase_core.models.dispatch.model_handler_output.ModelHandlerOutput
 description: E2E test for dynamic contract registration
-metadata:
-  handler_class: tests.fixtures.handler_noop.HandlerNoop
-event_bus:
-  subscribe_topics:
-    - onex.evt.test.e2e-dynamic.v1
-  publish_topics: []
+handler_class: tests.fixtures.handler_noop.HandlerNoop
+metadata: {}
+yaml_consumed_events:
+  - event_type: onex.evt.test.e2e-dynamic.v1
+    handler_function: handle
+yaml_published_events: []
 handler_routing:
   version:
     major: 1
@@ -68,6 +68,7 @@ handler_routing:
     - handler:
         name: HandlerNoop
         module: tests.fixtures.handler_noop
+      topic: onex.evt.test.e2e-dynamic.v1
 """
 
 _EVIL_MODULE_CONTRACT_YAML = (

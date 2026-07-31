@@ -146,21 +146,20 @@ def _resolve_handler_class_from_routing(
 
     Market node contracts do not declare ``metadata.handler_class`` (the form
     ModelHandlerContract reads). Instead they declare the handler module under
-    ``handler_routing.handlers[].handler.module`` and/or a top-level
-    ``handler.module``, with the class name under ``.name`` (routing form) or
-    ``.class`` (top-level form). This helper joins module + class into the
-    ``module.ClassName`` path the live materializer imports.
+    ``handler_routing.handlers[].handler.module``, with the class name under
+    ``.name``. This helper joins module + class into the ``module.ClassName``
+    path the live materializer imports.
 
-    The routing form is preferred over the top-level form because routing is the
-    canonical dispatch surface; the top-level ``handler`` block is a convenience
-    declaration.
+    A legacy top-level ``handler`` block is intentionally not accepted. The
+    canonical ``ModelHandlerContract`` rejects undeclared fields, so accepting
+    that block here would bypass the typed contract boundary.
 
     Args:
         contract_data: Parsed contract YAML as a mapping.
 
     Returns:
-        Fully qualified ``module.ClassName`` path, or None when neither the
-        routing nor the top-level handler block carries a resolvable module.
+        Fully qualified ``module.ClassName`` path, or None when the routing
+        declaration does not carry a resolvable module.
     """
 
     def _join(module: object, class_name: object) -> str | None:
@@ -185,13 +184,6 @@ def _resolve_handler_class_from_routing(
                     resolved = _join(handler.get("module"), handler.get("name"))
                     if resolved is not None:
                         return resolved
-
-    # Fall back to the top-level form: handler.{module,class}
-    top_level = contract_data.get("handler")
-    if isinstance(top_level, dict):
-        resolved = _join(top_level.get("module"), top_level.get("class"))
-        if resolved is not None:
-            return resolved
 
     return None
 
@@ -275,19 +267,18 @@ class ContractYamlParser:  # ai-slop-ok: pre-existing
         # Validate against ModelHandlerContract
         contract = ModelHandlerContract.model_validate(contract_data)
 
-        # Extract handler_class from metadata section
-        # NOTE: handler_class is read from metadata for handler-shaped contracts
-        # (root-level extra fields are ignored by ModelHandlerContract).
-        handler_class = None
+        # Extract handler_class from the typed field first, then fall back to
+        # legacy metadata for older dynamic-registration payloads.
+        handler_class = contract.handler_class
         if isinstance(contract_data, dict):
             metadata = contract_data.get("metadata", {})
-            if isinstance(metadata, dict):
+            if handler_class is None and isinstance(metadata, dict):
                 handler_class = metadata.get("handler_class")
 
         # Fallback for node-shaped (market) contracts: these declare the handler
-        # module under handler_routing.handlers[].handler.module (and/or a
-        # top-level handler.module) rather than metadata.handler_class. Join
-        # module + class into the fully qualified path the materializer imports.
+        # module under handler_routing.handlers[].handler.module rather than
+        # metadata.handler_class. Join module + class into the fully qualified
+        # path the materializer imports.
         if handler_class is None and isinstance(contract_data, dict):
             handler_class = _resolve_handler_class_from_routing(contract_data)
 
@@ -1191,17 +1182,45 @@ class KafkaContractSource(MixinTypedContractEvents, ProtocolContractSource):
         )
 
         eb_raw = config.get("event_bus")
-        if not isinstance(eb_raw, dict):
-            return None
+        if isinstance(eb_raw, dict):
+            sub_raw = eb_raw.get("subscribe_topics")
+            pub_raw = eb_raw.get("publish_topics")
+            cp_raw = eb_raw.get("consumer_purpose")
+            return ModelEventBusWiring(
+                subscribe_topics=tuple(sub_raw) if isinstance(sub_raw, list) else (),
+                publish_topics=tuple(pub_raw) if isinstance(pub_raw, list) else (),
+                consumer_purpose=cp_raw if isinstance(cp_raw, str) else None,
+                plugin_managed=bool(eb_raw.get("plugin_managed", False)),
+            )
 
-        sub_raw = eb_raw.get("subscribe_topics")
-        pub_raw = eb_raw.get("publish_topics")
-        cp_raw = eb_raw.get("consumer_purpose")
+        consumed_raw = config.get("yaml_consumed_events")
+        published_raw = config.get("yaml_published_events")
+        subscribe_topics = (
+            tuple(
+                str(item.get("event_type"))
+                for item in consumed_raw
+                if isinstance(item, dict) and item.get("event_type")
+            )
+            if isinstance(consumed_raw, list)
+            else ()
+        )
+        publish_topics = (
+            tuple(
+                str(item.get("event_type") or item.get("topic"))
+                for item in published_raw
+                if isinstance(item, dict)
+                and (item.get("event_type") or item.get("topic"))
+            )
+            if isinstance(published_raw, list)
+            else ()
+        )
+        if not subscribe_topics and not publish_topics:
+            return None
         return ModelEventBusWiring(
-            subscribe_topics=tuple(sub_raw) if isinstance(sub_raw, list) else (),
-            publish_topics=tuple(pub_raw) if isinstance(pub_raw, list) else (),
-            consumer_purpose=cp_raw if isinstance(cp_raw, str) else None,
-            plugin_managed=bool(eb_raw.get("plugin_managed", False)),
+            subscribe_topics=subscribe_topics,
+            publish_topics=publish_topics,
+            consumer_purpose=None,
+            plugin_managed=False,
         )
 
     @staticmethod
