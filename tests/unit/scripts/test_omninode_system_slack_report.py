@@ -62,13 +62,60 @@ CRON_UNIT = (
 RUNTIME_POLICY_ENV = REPO_ROOT / "docker" / "runtime-policy.env"
 
 # Lane -> the runtime-policy.env key that carries its MAIN runtime port.
-# Dropping a row here is the regression this module exists to catch, so the map
-# is asserted against the rendered policy rather than trusted.
-LANE_PORT_KEYS = {
-    "dev": "DEV_RUNTIME_MAIN_PORT",
-    "stability-test": "STABILITY_TEST_RUNTIME_MAIN_PORT",
-    "prod": "PROD_RUNTIME_MAIN_PORT",
-}
+#
+# DERIVED from the rendered policy, never hand-written (OMN-15556). The previous
+# revision carried a literal dev/stability-test/prod dict -- the *same* three
+# rows the reporter enumerated -- while claiming in this very comment that the
+# map "is asserted against the rendered policy rather than trusted". Nothing
+# read the policy, so the guard was structurally blind to the one regression it
+# exists to catch: a lane declared in runtime-policy.env that nothing probes.
+# JUDGE_RUNTIME_MAIN_PORT (:48085, seven containers live on .201) sat unprobed
+# behind a fully green suite. Deriving the map means the next lane added to the
+# policy fails this module until the reporter enumerates it.
+LANE_MAIN_PORT_KEY_RE = re.compile(r"^([A-Z0-9_]+)_RUNTIME_MAIN_PORT=")
+
+
+def _derive_lane_port_keys(policy: Path) -> dict[str, str]:
+    """Parse {lane: policy_key} out of the rendered runtime policy.
+
+    Lane name is the key prefix lowercased with underscores hyphenated, which is
+    the label convention the reporter uses in RUNTIME_LANE_SPECS
+    (STABILITY_TEST_RUNTIME_MAIN_PORT -> stability-test).
+    """
+    keys: dict[str, str] = {}
+    for line in policy.read_text().splitlines():
+        match = LANE_MAIN_PORT_KEY_RE.match(line.strip())
+        if match is None:
+            continue
+        prefix = match.group(1)
+        keys[prefix.lower().replace("_", "-")] = f"{prefix}_RUNTIME_MAIN_PORT"
+    # Fail loudly rather than deriving an empty map: an empty map would make
+    # every lane assertion below vacuously true, which is the failure mode this
+    # whole module exists to prevent.
+    assert keys, f"no *_RUNTIME_MAIN_PORT keys found in {policy}"
+    return keys
+
+
+LANE_PORT_KEYS = _derive_lane_port_keys(RUNTIME_POLICY_ENV)
+
+# The reporter declares the same mapping in bash; parsed here so the two can be
+# held in two-way parity by a test rather than by convention.
+RUNTIME_LANE_SPECS_RE = re.compile(
+    r"^RUNTIME_LANE_SPECS=\((?P<body>.*?)^\)", re.MULTILINE | re.DOTALL
+)
+
+
+def _script_lane_specs(script: Path) -> dict[str, str]:
+    """Parse the reporter's own RUNTIME_LANE_SPECS array into {lane: policy_key}."""
+    match = RUNTIME_LANE_SPECS_RE.search(script.read_text())
+    assert match, f"RUNTIME_LANE_SPECS array not found in {script}"
+    specs: dict[str, str] = {}
+    for row in re.findall(r'"([^"]+)"', match.group("body")):
+        lane, _, key = row.partition("|")
+        specs[lane] = key
+    assert specs, f"RUNTIME_LANE_SPECS in {script} parsed to an empty map"
+    return specs
+
 
 pytestmark = pytest.mark.skipif(
     shutil.which("bash") is None or shutil.which("jq") is None,
@@ -351,17 +398,26 @@ assert len(HEALTHY_BODY) > 180, (
 )
 
 
-def _outage_http(
-    dev_port: str, stability_port: str, prod_port: str
-) -> dict[str, tuple[int, str]]:
-    return {
-        dev_port: (503, DEV_503_BODY),
-        stability_port: (200, HEALTHY_BODY),
-        prod_port: (200, HEALTHY_BODY),
-        "13002": (200, json.dumps({"status": "ok"})),
-        "8099": (200, json.dumps({"state": "idle"})),
-        "3003": (200, "<html>ok</html>"),
-    }
+def _outage_http(lane_ports: dict[str, str]) -> dict[str, tuple[int, str]]:
+    """The replayed outage: dev 503, every OTHER declared lane healthy.
+
+    Built from the derived lane set rather than a fixed dev/stability/prod
+    triple (OMN-15556). A lane absent from this stub reads as connection-refused
+    and would fabricate an outage the fixture is not replaying, so a
+    newly-declared lane has to land here as green automatically.
+    """
+    http: dict[str, tuple[int, str]] = dict.fromkeys(
+        lane_ports.values(), (200, HEALTHY_BODY)
+    )
+    http[lane_ports["dev"]] = (503, DEV_503_BODY)
+    http.update(
+        {
+            "13002": (200, json.dumps({"status": "ok"})),
+            "8099": (200, json.dumps({"state": "idle"})),
+            "3003": (200, "<html>ok</html>"),
+        }
+    )
+    return http
 
 
 def _outage_docker() -> dict[str, Any]:
@@ -409,9 +465,7 @@ def test_as_deployed_reports_green_on_the_replayed_outage(
     """RED-before: the live 2026-07-30 script never looked at the dev runtime."""
     bin_dir = _make_stub_bin(
         tmp_path,
-        http=_outage_http(
-            lane_ports["dev"], lane_ports["stability-test"], lane_ports["prod"]
-        ),
+        http=_outage_http(lane_ports),
         docker_state=_outage_docker(),
     )
     report = _run(AS_DEPLOYED_SCRIPT, tmp_path, bin_dir)
@@ -445,9 +499,7 @@ def test_fixed_reports_red_and_names_the_dev_runtime_on_the_same_state(
     """GREEN-after: identical replayed state, fixed artifact, RED naming dev."""
     bin_dir = _make_stub_bin(
         tmp_path,
-        http=_outage_http(
-            lane_ports["dev"], lane_ports["stability-test"], lane_ports["prod"]
-        ),
+        http=_outage_http(lane_ports),
         docker_state=_outage_docker(),
     )
     report = _run(FIXED_SCRIPT, tmp_path, bin_dir)
@@ -489,6 +541,41 @@ def test_every_lane_main_runtime_port_is_in_the_probe_set(
             f"lane {lane} (:{port}) is not probed -- a lane's MAIN runtime health "
             f"endpoint was dropped from the alert (OMN-15509 AC2/AC7)"
         )
+
+
+def test_reporter_lane_specs_and_policy_lanes_are_in_two_way_parity() -> None:
+    """RUNTIME_LANE_SPECS and runtime-policy.env must declare the same lane set.
+
+    Two-way on purpose, because the two directions are different bugs:
+
+    * a policy lane missing from the script is the OMN-15556 judge-lane blind
+      spot -- a live runtime (:48085, seven containers on .201) whose death
+      pages nobody while the digest keeps printing ``0 critical``;
+    * a script lane missing from the policy is the inverse -- ``lane_main_port``
+      can never resolve the key, so the reporter fails closed and alarms forever
+      on a lane that does not exist.
+
+    Neither direction is observable by iterating one hand-written map, which is
+    how judge stayed invisible through OMN-15509 and OMN-15525.
+    """
+    script_lanes = _script_lane_specs(FIXED_SCRIPT)
+
+    unprobed = sorted(set(LANE_PORT_KEYS) - set(script_lanes))
+    assert not unprobed, (
+        f"lane(s) {unprobed} declare a *_RUNTIME_MAIN_PORT in "
+        f"{RUNTIME_POLICY_ENV.name} but are absent from RUNTIME_LANE_SPECS in "
+        f"{FIXED_SCRIPT.name} -- a live runtime lane whose death pages nobody"
+    )
+    phantom = sorted(set(script_lanes) - set(LANE_PORT_KEYS))
+    assert not phantom, (
+        f"lane(s) {phantom} appear in RUNTIME_LANE_SPECS but declare no "
+        f"*_RUNTIME_MAIN_PORT in {RUNTIME_POLICY_ENV.name} -- the port can "
+        f"never resolve, so the reporter alarms forever on a phantom lane"
+    )
+    assert script_lanes == LANE_PORT_KEYS, (
+        f"lane -> policy-key mapping disagrees between the reporter and the "
+        f"policy: script={script_lanes} policy={LANE_PORT_KEYS}"
+    )
 
 
 def test_lane_specs_are_sourced_from_the_rendered_runtime_policy() -> None:
@@ -869,10 +956,18 @@ def test_renamed_policy_key_is_critical(
 ) -> None:
     """A policy file that exists but no longer carries the key must alarm."""
     partial = tmp_path / "partial-policy.env"
+    # Generated from the derived lane map (OMN-15556): dev's key is renamed out
+    # from under the reporter, every other DECLARED lane still resolves.
+    # Hardcoding three lines here meant a newly-declared lane was silently
+    # absent from the partial policy, so it read as unresolved for the wrong
+    # reason and the test proved nothing about that lane.
     partial.write_text(
-        f"DEV_RUNTIME_MAIN_PORT_RENAMED={lane_ports['dev']}\n"
-        f"STABILITY_TEST_RUNTIME_MAIN_PORT={lane_ports['stability-test']}\n"
-        f"PROD_RUNTIME_MAIN_PORT={lane_ports['prod']}\n"
+        "".join(
+            f"{key}_RENAMED={lane_ports[lane]}\n"
+            if lane == "dev"
+            else f"{key}={lane_ports[lane]}\n"
+            for lane, key in LANE_PORT_KEYS.items()
+        )
     )
     bin_dir = _make_stub_bin(
         tmp_path,
@@ -999,9 +1094,7 @@ def test_alert_mode_pages_when_a_runtime_lane_is_down(
     """
     bin_dir = _make_stub_bin(
         tmp_path,
-        http=_outage_http(
-            lane_ports["dev"], lane_ports["stability-test"], lane_ports["prod"]
-        ),
+        http=_outage_http(lane_ports),
         docker_state={"containers": [], "dangling": []},
     )
     log_text, posts = _run_alert(FIXED_SCRIPT, tmp_path, bin_dir)
@@ -1055,9 +1148,7 @@ def test_endpoint_failures_are_counted_in_the_header(
     """
     bin_dir = _make_stub_bin(
         tmp_path,
-        http=_outage_http(
-            lane_ports["dev"], lane_ports["stability-test"], lane_ports["prod"]
-        ),
+        http=_outage_http(lane_ports),
         docker_state={"containers": [], "dangling": []},
     )
     report = _run(FIXED_SCRIPT, tmp_path, bin_dir)
