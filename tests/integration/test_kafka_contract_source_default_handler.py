@@ -32,12 +32,11 @@ def test_kafka_contract_source_materializes_default_handler_shorthand() -> None:
         output_model: "omnibase_core.models.dispatch.ModelHandlerOutput"
         metadata:
           handler_class: "tests.fixtures.handler_proof_noop.HandlerProofNoop"
-        event_bus:
-          subscribe_topics:
-            - onex.cmd.test.default-handler.v1
-          publish_topics:
-            - onex.evt.test.default-handler-completed.v1
-          consumer_purpose: consume
+        yaml_consumed_events:
+          - event_type: onex.cmd.test.default-handler.v1
+        yaml_published_events:
+          - event_type: onex.evt.test.default-handler-completed.v1
+            topic: onex.evt.test.default-handler-completed.v1
         handler_routing:
           version:
             major: 1

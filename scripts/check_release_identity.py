@@ -54,6 +54,7 @@ import argparse
 import subprocess
 import sys
 import tomllib
+import warnings
 from pathlib import Path
 
 _REPO_ROOT = Path(__file__).resolve().parents[1]
@@ -77,10 +78,16 @@ if _SRC_DIR.is_dir():
     sys.path[:] = [p for p in sys.path if p != _src_str]
     sys.path.insert(0, _src_str)
 
-from omnibase_infra.nodes.node_release_identity_compute import (
-    HandlerReleaseIdentity,
-    ModelReleaseIdentityRequest,
-)
+with warnings.catch_warnings():
+    warnings.filterwarnings(
+        "ignore",
+        message=r'Field name "schema" in .* shadows an attribute in parent "BaseModel"',
+        category=UserWarning,
+    )
+    from omnibase_infra.nodes.node_release_identity_compute import (
+        HandlerReleaseIdentity,
+        ModelReleaseIdentityRequest,
+    )
 
 
 def _git(args: list[str]) -> str:

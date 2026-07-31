@@ -219,7 +219,7 @@ onex-change-control = { git = "https://github.com/OmniNode-ai/onex_change_contro
 # so the ==0.46.8 pins above stay consistent. Not on PyPI.
 # REMOVE WHEN RELEASED: once core publishes a version containing S1/S2/S4, delete
 # this override and `uv lock`.
-omnibase-core = { git = "https://github.com/OmniNode-ai/omnibase_core.git", rev = "1f4549d71d4d39560ac5a162ac1d39e54d86e688" }  # raw-override-ok: OMN-15414
+omnibase-core = { git = "https://github.com/OmniNode-ai/omnibase_core.git", rev = "3d51b047a43ee412a7521502619d35c216dc7811" }  # raw-override-ok: OMN-15414
 
 [tool.ruff]
 target-version = "py312"

@@ -1206,9 +1206,10 @@ class KafkaContractSource(MixinTypedContractEvents, ProtocolContractSource):
         )
         publish_topics = (
             tuple(
-                str(item.get("topic"))
+                str(item.get("event_type") or item.get("topic"))
                 for item in published_raw
-                if isinstance(item, dict) and item.get("topic")
+                if isinstance(item, dict)
+                and (item.get("event_type") or item.get("topic"))
             )
             if isinstance(published_raw, list)
             else ()
