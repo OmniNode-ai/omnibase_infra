@@ -53,6 +53,9 @@ def test_runtime_port_exposes_consumer_handler_optional_parameters() -> None:
         assert parameters["max_tokens"].annotation in {"int | None", int | None}
         assert parameters["backend_id"].default is None
         assert parameters["response_contract"].default is None
+        assert parameters["system_prompt"].default is None
+        assert parameters["temperature"].default is None
+        assert parameters["response_format"].default is None
 
 
 @pytest.mark.asyncio
@@ -100,6 +103,9 @@ async def test_absent_consumer_features_dispatch_through_runtime_bus(
         tenant_id=None,
         backend_id=None,
         response_contract=None,
+        system_prompt=None,
+        temperature=None,
+        response_format=None,
     )
 
     assert result["status"] == "completed"
@@ -107,6 +113,9 @@ async def test_absent_consumer_features_dispatch_through_runtime_bus(
     assert "max_tokens" not in captured_commands[0].payload
     assert "backend_id" not in captured_commands[0].payload
     assert "response_contract" not in captured_commands[0].payload
+    assert "system_prompt" not in captured_commands[0].payload
+    assert "temperature" not in captured_commands[0].payload
+    assert "response_format" not in captured_commands[0].payload
 
 
 @pytest.mark.asyncio

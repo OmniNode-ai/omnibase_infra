@@ -28,6 +28,9 @@ class ProtocolDelegationDispatchPort(Protocol):
         tenant_id: str | None = None,
         backend_id: str | None = None,
         response_contract: dict[str, object] | None = None,
+        system_prompt: str | None = None,
+        temperature: float | None = None,
+        response_format: dict[str, object] | None = None,
     ) -> dict[str, object]: ...
 
 
