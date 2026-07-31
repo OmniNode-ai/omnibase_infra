@@ -200,11 +200,24 @@ policy_env_value() {
   printf '%s' "$value"
 }
 
-# label|policy-key
+# label|policy-key -- a pure data table, no comments inside the array (the
+# fallback-port guard parses every line in it as lane|key).
+#
+# Must cover EVERY lane declaring a *_RUNTIME_MAIN_PORT in runtime-policy.env.
+# Held in two-way parity by
+# tests/unit/scripts/test_omninode_system_slack_report.py, which DERIVES the
+# lane set from the policy instead of restating it: a row dropped here, or a
+# lane added to the policy and not here, fails that module.
+#
+# judge (:48085) is read-only and NOT authorized for mutation, but it runs
+# seven containers on .201 and was omitted from this table through OMN-15509
+# and OMN-15525, so a dead judge runtime paged nobody (OMN-15556). Probing it
+# is a plain GET /health, which is a read.
 RUNTIME_LANE_SPECS=(
   "dev|DEV_RUNTIME_MAIN_PORT"
   "stability-test|STABILITY_TEST_RUNTIME_MAIN_PORT"
   "prod|PROD_RUNTIME_MAIN_PORT"
+  "judge|JUDGE_RUNTIME_MAIN_PORT"
 )
 
 # Resolve a lane's main runtime port, or emit $LANE_PORT_UNRESOLVED. A value that
