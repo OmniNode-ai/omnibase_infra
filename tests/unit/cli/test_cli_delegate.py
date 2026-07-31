@@ -33,7 +33,6 @@ import signal
 import tempfile
 import time
 import uuid
-from collections.abc import Generator
 from pathlib import Path
 from typing import get_args
 
@@ -66,24 +65,6 @@ pytestmark = pytest.mark.unit
 
 KAFKA_BOOTSTRAP_ARG = "$KAFKA_BOOTSTRAP_SERVERS"
 _RECEIPT_ENV_SENTINEL = "OMN15569_DELEGATION_RECEIPT_TEST_SENTINEL"
-
-
-@pytest.fixture(autouse=True)
-def _restore_process_environment_after_test() -> Generator[None, None, None]:
-    """Confine receipt-mode env loading to the current in-process CLI test.
-
-    The real CLI intentionally loads ``~/.omnibase/.env`` for the lifetime of
-    its process. These tests call that CLI boundary in the pytest worker, so
-    values added directly to ``os.environ`` would otherwise survive into
-    unrelated tests. Restoration happens only at teardown; environment changes
-    remain observable for the full duration of the test that made them.
-    """
-    environment_before = dict(os.environ)
-    try:
-        yield
-    finally:
-        os.environ.clear()
-        os.environ.update(environment_before)
 
 
 @pytest.fixture(autouse=True)
