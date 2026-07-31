@@ -17,9 +17,23 @@ from omnibase_infra.validation.application_database_domain_enforcement import (
     load_application_database_ownership_identities,
 )
 
-_NON_DEPLOYABLE_SQL_PROOF_FIXTURES = frozenset(
-    {Path("docker/application-domain-enforcement/seed.sql")}
+_NON_DEPLOYABLE_SQL_EXACT_PATHS = frozenset(
+    {
+        Path("docker/application-domain-enforcement/seed.sql"),
+        Path("docker/migrations/forward/_ledger/bootstrap.sql"),
+        Path("src/omnibase_infra/migration/cutover/sql/bootstrap.sql"),
+    }
 )
+_NON_DEPLOYABLE_SQL_PREFIXES = (Path("docker/legacy-rds-fixture"),)
+
+
+def _is_non_deployable_sql_path(relative_path: Path) -> bool:
+    if relative_path in _NON_DEPLOYABLE_SQL_EXACT_PATHS:
+        return True
+    return any(
+        relative_path == prefix or relative_path.is_relative_to(prefix)
+        for prefix in _NON_DEPLOYABLE_SQL_PREFIXES
+    )
 
 
 def changed_sql_paths(
@@ -52,10 +66,10 @@ def changed_sql_paths(
     resolved: list[Path] = []
     repository_root = repository.resolve()
     for relative_path in relative_paths:
-        if relative_path in _NON_DEPLOYABLE_SQL_PROOF_FIXTURES:
-            # This exact SQL file initializes only the rebuilt, ephemeral PG16
-            # proof container. Its synthetic ownership universe is validated
-            # independently and must never be composed with production owners.
+        if _is_non_deployable_sql_path(relative_path):
+            # These SQL files initialize proof fixtures or internal control
+            # ledgers. Their synthetic authority universes are validated by
+            # dedicated gates and must not be composed with production owners.
             continue
         candidate = (repository_root / relative_path).resolve()
         if not candidate.is_relative_to(repository_root):
