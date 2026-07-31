@@ -516,6 +516,16 @@
       "schema_name": "platform_catalog"
     },
     {
+      "catalog_kind": "multirange_type",
+      "grantee": "PUBLIC",
+      "grantor": "onex_api",
+      "is_grantable": false,
+      "object_name": "account_id_span_set",
+      "object_type": "TYPE",
+      "privilege_type": "USAGE",
+      "schema_name": "tenant"
+    },
+    {
       "catalog_kind": "procedure",
       "function_signature": "(IN p_payload text)",
       "grantee": "PUBLIC",
@@ -524,6 +534,16 @@
       "object_name": "record_delegation",
       "object_type": "PROCEDURE",
       "privilege_type": "EXECUTE",
+      "schema_name": "tenant"
+    },
+    {
+      "catalog_kind": "range_type",
+      "grantee": "PUBLIC",
+      "grantor": "onex_api",
+      "is_grantable": false,
+      "object_name": "account_id_span",
+      "object_type": "TYPE",
+      "privilege_type": "USAGE",
       "schema_name": "tenant"
     },
     {
@@ -881,26 +901,6 @@
       "grantee": "PUBLIC",
       "grantor": "onex_api",
       "is_grantable": false,
-      "object_name": "account_id_span",
-      "object_type": "TYPE",
-      "privilege_type": "USAGE",
-      "schema_name": "tenant"
-    },
-    {
-      "catalog_kind": "type",
-      "grantee": "PUBLIC",
-      "grantor": "onex_api",
-      "is_grantable": false,
-      "object_name": "account_id_span_set",
-      "object_type": "TYPE",
-      "privilege_type": "USAGE",
-      "schema_name": "tenant"
-    },
-    {
-      "catalog_kind": "type",
-      "grantee": "PUBLIC",
-      "grantor": "onex_api",
-      "is_grantable": false,
       "object_name": "account_ref",
       "object_type": "TYPE",
       "privilege_type": "USAGE",
@@ -980,12 +980,28 @@
       "schema_name": "platform_catalog"
     },
     {
+      "catalog_kind": "multirange_type",
+      "object_name": "account_id_span_set",
+      "object_type": "TYPE",
+      "owner": "onex_api",
+      "owner_keyword": "TYPE",
+      "schema_name": "tenant"
+    },
+    {
       "catalog_kind": "procedure",
       "function_signature": "(IN p_payload text)",
       "object_name": "record_delegation",
       "object_type": "PROCEDURE",
       "owner": "app_dashboard",
       "owner_keyword": "PROCEDURE",
+      "schema_name": "tenant"
+    },
+    {
+      "catalog_kind": "range_type",
+      "object_name": "account_id_span",
+      "object_type": "TYPE",
+      "owner": "onex_api",
+      "owner_keyword": "TYPE",
       "schema_name": "tenant"
     },
     {
@@ -1034,22 +1050,6 @@
       "object_type": "TABLE",
       "owner": "onex_api",
       "owner_keyword": "TABLE",
-      "schema_name": "tenant"
-    },
-    {
-      "catalog_kind": "type",
-      "object_name": "account_id_span",
-      "object_type": "TYPE",
-      "owner": "onex_api",
-      "owner_keyword": "TYPE",
-      "schema_name": "tenant"
-    },
-    {
-      "catalog_kind": "type",
-      "object_name": "account_id_span_set",
-      "object_type": "TYPE",
-      "owner": "onex_api",
-      "owner_keyword": "TYPE",
       "schema_name": "tenant"
     },
     {
