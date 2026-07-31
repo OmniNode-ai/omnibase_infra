@@ -3868,18 +3868,19 @@ def _raise_if_silent_dispatch_failure(
     )
 
 
-def _require_contract_dispatcher_scope(
+def _normalize_contract_dispatcher_scope(
     dispatcher_ids: Collection[str] | None,
     *,
     contract_name: str,
+    allow_empty: bool,
 ) -> frozenset[str]:
-    """Return an exact non-empty dispatcher scope or fail before subscribing.
+    """Return a canonical unique dispatcher scope without trusting transport state.
 
     A contract-owned Kafka callback must never fall back to process-global
     dispatch. Two contracts can intentionally consume the same topic under
     distinct groups; global fan-out from each callback executes both contracts'
-    handlers once per group (OMN-15474). The wiring report is the authoritative
-    source for this scope.
+    handlers once per group (OMN-15474). The live engine owner registry, not a
+    serialized wiring report, is authoritative for completeness.
     """
     if dispatcher_ids is None:
         raise ModelOnexError(
@@ -3891,19 +3892,43 @@ def _require_contract_dispatcher_scope(
             error_code=EnumCoreErrorCode.INVALID_CONFIGURATION,
         )
     raw_dispatcher_ids = tuple(dispatcher_ids)
-    if not raw_dispatcher_ids or any(
-        not dispatcher_id or dispatcher_id != dispatcher_id.strip()
-        for dispatcher_id in raw_dispatcher_ids
+    seen: set[str] = set()
+    duplicate_ids: set[str] = set()
+    for dispatcher_id in raw_dispatcher_ids:
+        if dispatcher_id in seen:
+            duplicate_ids.add(dispatcher_id)
+        seen.add(dispatcher_id)
+    if (
+        (not raw_dispatcher_ids and not allow_empty)
+        or any(
+            not dispatcher_id or dispatcher_id != dispatcher_id.strip()
+            for dispatcher_id in raw_dispatcher_ids
+        )
+        or duplicate_ids
     ):
         raise ModelOnexError(
             message=(
                 "handler_wiring: contract-scoped subscription has an empty or "
-                f"invalid dispatcher scope for contract {contract_name!r}; "
+                f"invalid dispatcher scope for contract {contract_name!r} "
+                f"(duplicates={sorted(duplicate_ids)}); "
                 "refusing process-global fan-out."
             ),
             error_code=EnumCoreErrorCode.INVALID_CONFIGURATION,
         )
     return frozenset(raw_dispatcher_ids)
+
+
+def _require_contract_dispatcher_scope(
+    dispatcher_ids: Collection[str] | None,
+    *,
+    contract_name: str,
+) -> frozenset[str]:
+    """Return a canonical non-empty dispatcher scope before subscribing."""
+    return _normalize_contract_dispatcher_scope(
+        dispatcher_ids,
+        contract_name=contract_name,
+        allow_empty=False,
+    )
 
 
 def _require_unique_canonical_contract_names(
@@ -4024,17 +4049,13 @@ def _require_contract_scoped_dispatch_engine(
     return cast("ProtocolContractScopedDispatchEngine", dispatch_engine)
 
 
-def _require_registered_contract_dispatcher_scope(
+def _validate_registered_contract_dispatcher_scope(
     dispatch_engine: object,
-    dispatcher_ids: Collection[str] | None,
+    dispatcher_scope: frozenset[str],
     *,
     contract_name: str,
 ) -> frozenset[str]:
-    """Require one contract's exact scope to exist on the current engine."""
-    dispatcher_scope = _require_contract_dispatcher_scope(
-        dispatcher_ids,
-        contract_name=contract_name,
-    )
+    """Compare one normalized scope with the complete live engine owner set."""
     scoped_engine = _require_contract_scoped_dispatch_engine(
         dispatch_engine,
         contract_name=contract_name,
@@ -4060,9 +4081,29 @@ def _require_registered_contract_dispatcher_scope(
     )
 
 
+def _require_registered_contract_dispatcher_scope(
+    dispatch_engine: object,
+    dispatcher_ids: Collection[str] | None,
+    *,
+    contract_name: str,
+) -> frozenset[str]:
+    """Require one non-empty exact scope to exist on the current engine."""
+    dispatcher_scope = _require_contract_dispatcher_scope(
+        dispatcher_ids,
+        contract_name=contract_name,
+    )
+    return _validate_registered_contract_dispatcher_scope(
+        dispatch_engine,
+        dispatcher_scope,
+        contract_name=contract_name,
+    )
+
+
 def _validate_contract_dispatcher_ownership(
     dispatch_engine: object,
     dispatcher_scopes: Sequence[tuple[str, Collection[str]]],
+    *,
+    allow_empty_scopes: bool = False,
 ) -> None:
     """Validate current engine membership and one-contract ownership.
 
@@ -4074,9 +4115,10 @@ def _validate_contract_dispatcher_ownership(
     normalized_scopes: list[tuple[str, frozenset[str]]] = []
     owners_by_dispatcher: dict[str, set[str]] = defaultdict(set)
     for contract_name, dispatcher_ids in dispatcher_scopes:
-        dispatcher_scope = _require_contract_dispatcher_scope(
+        dispatcher_scope = _normalize_contract_dispatcher_scope(
             dispatcher_ids,
             contract_name=contract_name,
+            allow_empty=allow_empty_scopes,
         )
         normalized_scopes.append((contract_name, dispatcher_scope))
         for dispatcher_id in dispatcher_scope:
@@ -4098,7 +4140,7 @@ def _validate_contract_dispatcher_ownership(
         )
 
     for contract_name, dispatcher_scope in normalized_scopes:
-        _require_registered_contract_dispatcher_scope(
+        _validate_registered_contract_dispatcher_scope(
             dispatch_engine,
             dispatcher_scope,
             contract_name=contract_name,
@@ -5441,6 +5483,74 @@ def _live_message_types(pcw: PreparedContractWiring) -> set[str]:
     return message_types
 
 
+def _preflight_prepared_registration_ids(
+    prepared_contracts: Sequence[PreparedContractWiring],
+    dispatch_engine: object,
+    *,
+    dynamic_materialization_authorized: bool = False,
+) -> None:
+    """Validate every derived dispatcher/route ID before the first commit.
+
+    Preparation is deliberately side-effect-free. Preserve that transaction
+    boundary by detecting cross-contract, same-contract, and normalization
+    collisions across the complete manifest before any engine registration or
+    Kafka subscription becomes visible.
+    """
+    dispatcher_origins: dict[str, list[str]] = defaultdict(list)
+    dispatcher_owners: dict[str, str] = {}
+    route_origins: dict[str, list[str]] = defaultdict(list)
+    for prepared_contract in prepared_contracts:
+        if prepared_contract.skip_result is not None:
+            continue
+        contract_name = prepared_contract.contract.name
+        for prepared in prepared_contract.prepared_wirings:
+            if prepared.is_skip or prepared.is_quarantined:
+                continue
+            origin = f"{contract_name}:{prepared.handler_name}"
+            dispatcher_origins[prepared.dispatcher_id].append(origin)
+            dispatcher_owners[prepared.dispatcher_id] = contract_name
+            for route_id in prepared.route_ids:
+                route_origins[route_id].append(origin)
+
+    duplicate_dispatcher_ids = {
+        dispatcher_id: tuple(origins)
+        for dispatcher_id, origins in dispatcher_origins.items()
+        if len(origins) > 1
+    }
+    if duplicate_dispatcher_ids:
+        raise ModelOnexError(
+            message=(
+                "handler_wiring: duplicate prepared dispatcher IDs across the "
+                f"manifest: {duplicate_dispatcher_ids}"
+            ),
+            error_code=EnumCoreErrorCode.DUPLICATE_REGISTRATION,
+        )
+
+    duplicate_route_ids = {
+        route_id: tuple(origins)
+        for route_id, origins in route_origins.items()
+        if len(origins) > 1
+    }
+    if duplicate_route_ids:
+        raise ModelOnexError(
+            message=(
+                "handler_wiring: duplicate prepared route IDs across the manifest "
+                f"(including normalized topic IDs): {duplicate_route_ids}"
+            ),
+            error_code=EnumCoreErrorCode.DUPLICATE_REGISTRATION,
+        )
+
+    from omnibase_infra.runtime.message_dispatch_engine import MessageDispatchEngine
+
+    if isinstance(dispatch_engine, MessageDispatchEngine):
+        dispatch_engine.validate_registration_batch(
+            tuple(dispatcher_origins),
+            tuple(route_origins),
+            dispatcher_owners=dispatcher_owners,
+            allow_frozen=dynamic_materialization_authorized,
+        )
+
+
 def _collect_orchestrator_dispatcher_coverage_gaps(
     prepared_contracts: list[PreparedContractWiring],
     failed_gaps: list[str] | None = None,
@@ -5720,6 +5830,8 @@ async def wire_from_manifest(
             dispatcher_coverage_failed_gaps,
         )
 
+    _preflight_prepared_registration_ids(prepared_contracts, dispatch_engine)
+
     # Phase 2: All contracts validated — commit registrations and subscriptions.
     # Failed contracts are included in results so total_failed is accurate.
     # service_kernel respects the flag before asserting total_failed == 0.
@@ -5882,11 +5994,11 @@ async def subscribe_wired_contract_topics(
     report_dispatcher_scopes = tuple(
         (result.contract_name, result.dispatchers_registered)
         for result in report.results
-        if result.dispatchers_registered
     )
     _validate_contract_dispatcher_ownership(
         dispatch_engine,
         report_dispatcher_scopes,
+        allow_empty_scopes=True,
     )
 
     contract_by_name = {contract.name: contract for contract in manifest.contracts}
@@ -6243,6 +6355,13 @@ async def run_not_ready_reconciliation_loop(
     validated_not_ready = _validate_not_ready_contract_identities(
         manifest,
         initial_not_ready,
+    )
+    _validate_contract_dispatcher_ownership(
+        dispatch_engine,
+        tuple(
+            (result.contract_name, result.dispatcher_ids)
+            for result in validated_not_ready
+        ),
     )
     pending: dict[str, ModelContractAttachResult] = {
         r.contract_name: r for r in validated_not_ready
@@ -6890,6 +7009,11 @@ async def _wire_single_contract(
         container=container,
         topology=topology,
         catalog_binding_policy=catalog_binding_policy,
+    )
+    _preflight_prepared_registration_ids(
+        (prepared,),
+        dispatch_engine,
+        dynamic_materialization_authorized=dynamic_materialization_authorized,
     )
     return await _commit_contract_wiring(
         prepared,

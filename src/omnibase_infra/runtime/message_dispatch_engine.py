@@ -136,7 +136,7 @@ import inspect
 import logging
 import threading
 import time
-from collections.abc import Awaitable, Callable, Collection
+from collections.abc import Awaitable, Callable, Collection, Mapping
 from contextvars import copy_context
 from dataclasses import dataclass
 from datetime import UTC, datetime
@@ -301,6 +301,17 @@ def _get_route_dispatcher_id(route: object) -> str:
     route_id: str = getattr(route, "route_id", "<unknown>")
     msg = f"Route '{route_id}' has neither dispatcher_id nor handler_id"
     raise AttributeError(msg)
+
+
+def _find_duplicate_identifiers(values: Collection[str]) -> frozenset[str]:
+    """Return identifiers repeated within one claimed registration boundary."""
+    seen: set[str] = set()
+    duplicates: set[str] = set()
+    for value in values:
+        if value in seen:
+            duplicates.add(value)
+        seen.add(value)
+    return frozenset(duplicates)
 
 
 # Minimum number of parameters for a dispatcher to be considered context-aware.
@@ -2978,26 +2989,142 @@ class MessageDispatchEngine:
         """Get the number of registered dispatchers."""
         return len(self._dispatchers)
 
+    def validate_registration_batch(
+        self,
+        dispatcher_ids: Collection[str],
+        route_ids: Collection[str],
+        *,
+        dispatcher_owners: Mapping[str, str],
+        allow_frozen: bool = False,
+    ) -> None:
+        """Prove a complete prepared batch is collision-free before mutation.
+
+        Auto-wiring prepares every dispatcher and route before committing any
+        side effects. This boundary validates the complete derived identifier
+        batch, including normalization collisions, conflicts with the live
+        registry, and immutable contract-owner conflicts, while holding the
+        same lock used by registration.
+        """
+        raw_dispatcher_ids = tuple(dispatcher_ids)
+        raw_route_ids = tuple(route_ids)
+        for label, identifiers in (
+            ("dispatcher", raw_dispatcher_ids),
+            ("route", raw_route_ids),
+        ):
+            invalid_ids = tuple(
+                identifier
+                for identifier in identifiers
+                if not identifier or identifier != identifier.strip()
+            )
+            if invalid_ids:
+                raise ModelOnexError(
+                    message=(
+                        f"Prepared {label} IDs must be non-empty and canonical: "
+                        f"{invalid_ids}"
+                    ),
+                    error_code=EnumCoreErrorCode.INVALID_PARAMETER,
+                )
+            duplicate_ids = _find_duplicate_identifiers(identifiers)
+            if duplicate_ids:
+                raise ModelOnexError(
+                    message=(
+                        f"Auto-wiring batch contains duplicate prepared {label} IDs: "
+                        f"{sorted(duplicate_ids)}"
+                    ),
+                    error_code=EnumCoreErrorCode.DUPLICATE_REGISTRATION,
+                )
+
+        prepared_dispatcher_ids = frozenset(raw_dispatcher_ids)
+        if frozenset(dispatcher_owners) != prepared_dispatcher_ids or any(
+            not owner or owner != owner.strip() for owner in dispatcher_owners.values()
+        ):
+            raise ModelOnexError(
+                message=(
+                    "Prepared dispatcher ownership must provide one canonical "
+                    "contract owner for every prepared dispatcher ID."
+                ),
+                error_code=EnumCoreErrorCode.INVALID_CONFIGURATION,
+            )
+
+        with self._registration_lock:
+            if (
+                self._frozen
+                and not allow_frozen
+                and (raw_dispatcher_ids or raw_route_ids)
+            ):
+                raise ModelOnexError(
+                    message=(
+                        "Cannot commit prepared registration batch: "
+                        "MessageDispatchEngine is frozen."
+                    ),
+                    error_code=EnumCoreErrorCode.INVALID_STATE,
+                )
+            existing_dispatcher_ids = frozenset(raw_dispatcher_ids).intersection(
+                self._dispatchers
+            )
+            if existing_dispatcher_ids:
+                raise ModelOnexError(
+                    message=(
+                        "Prepared dispatcher IDs are already registered on this engine: "
+                        f"{sorted(existing_dispatcher_ids)}"
+                    ),
+                    error_code=EnumCoreErrorCode.DUPLICATE_REGISTRATION,
+                )
+            existing_route_ids = frozenset(raw_route_ids).intersection(self._routes)
+            if existing_route_ids:
+                raise ModelOnexError(
+                    message=(
+                        "Prepared route IDs are already registered on this engine: "
+                        f"{sorted(existing_route_ids)}"
+                    ),
+                    error_code=EnumCoreErrorCode.DUPLICATE_REGISTRATION,
+                )
+            prepared_owner_names = frozenset(dispatcher_owners.values())
+            existing_owner_scopes = {
+                owner_name: tuple(
+                    sorted(
+                        dispatcher_id
+                        for dispatcher_id, entry in self._dispatchers.items()
+                        if entry.owner_contract_name == owner_name
+                    )
+                )
+                for owner_name in prepared_owner_names
+            }
+            conflicting_owner_scopes = {
+                owner_name: dispatcher_scope
+                for owner_name, dispatcher_scope in existing_owner_scopes.items()
+                if dispatcher_scope
+            }
+            if conflicting_owner_scopes:
+                raise ModelOnexError(
+                    message=(
+                        "Prepared registration would extend immutable live "
+                        "contract-owner dispatcher scopes: "
+                        f"{conflicting_owner_scopes}"
+                    ),
+                    error_code=EnumCoreErrorCode.INVALID_CONFIGURATION,
+                )
+
     def validate_contract_dispatcher_scope(
         self,
         contract_name: str,
         dispatcher_ids: Collection[str],
     ) -> frozenset[str]:
-        """Prove scope membership and ownership against the live registry."""
+        """Prove an exact scope against the complete immutable owner snapshot."""
         raw_dispatcher_ids = tuple(dispatcher_ids)
         if (
             not contract_name
             or contract_name != contract_name.strip()
-            or not raw_dispatcher_ids
             or any(
                 not dispatcher_id or dispatcher_id != dispatcher_id.strip()
                 for dispatcher_id in raw_dispatcher_ids
             )
+            or _find_duplicate_identifiers(raw_dispatcher_ids)
         ):
             raise ModelOnexError(
                 message=(
-                    "Contract dispatcher scope requires canonical, non-empty "
-                    "contract and dispatcher IDs."
+                    "Contract dispatcher scope requires a canonical contract name "
+                    "and unique canonical dispatcher IDs."
                 ),
                 error_code=EnumCoreErrorCode.INVALID_CONFIGURATION,
             )
@@ -3026,7 +3153,22 @@ class MessageDispatchEngine:
                     ),
                     error_code=EnumCoreErrorCode.INVALID_CONFIGURATION,
                 )
-        return dispatcher_scope
+            complete_owner_scope = frozenset(
+                dispatcher_id
+                for dispatcher_id, entry in self._dispatchers.items()
+                if entry.owner_contract_name == contract_name
+            )
+            if dispatcher_scope != complete_owner_scope:
+                raise ModelOnexError(
+                    message=(
+                        "Contract-scoped subscription does not match the complete "
+                        f"live owner set for contract {contract_name!r}: "
+                        f"missing={sorted(complete_owner_scope - dispatcher_scope)}, "
+                        f"unexpected={sorted(dispatcher_scope - complete_owner_scope)}"
+                    ),
+                    error_code=EnumCoreErrorCode.INVALID_CONFIGURATION,
+                )
+            return complete_owner_scope
 
     def __str__(self) -> str:
         """Human-readable string representation."""

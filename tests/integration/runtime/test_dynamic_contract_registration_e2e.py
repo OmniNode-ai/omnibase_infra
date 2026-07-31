@@ -20,6 +20,7 @@ from uuid import uuid4
 
 import pytest
 
+from omnibase_infra.enums.enum_message_category import EnumMessageCategory
 from omnibase_infra.event_bus.event_bus_inmemory import EventBusInmemory
 from omnibase_infra.runtime.enums.enum_materialization_rejection import (
     EnumMaterializationRejection,
@@ -162,6 +163,46 @@ async def test_register_then_materialize_wires_dispatcher_and_topic() -> None:
 
     # Step 5: result.subscribed_topics reflects the wiring.
     assert "onex.evt.test.e2e-dynamic.v1" in result.subscribed_topics
+
+
+@pytest.mark.asyncio
+async def test_existing_contract_owner_rejects_before_dynamic_engine_mutation() -> None:
+    """A stale same-owner dispatcher must fail before dynamic commit side effects."""
+    source = _make_source()
+    engine = _make_engine()
+    bus = _make_bus()
+
+    async def stale_handler(envelope: object) -> None:
+        del envelope
+
+    engine.register_dispatcher(
+        dispatcher_id="stale-node-e2e-dynamic-dispatcher",
+        dispatcher=stale_handler,
+        category=EnumMessageCategory.EVENT,
+        owner_contract_name="node_e2e_dynamic",
+    )
+    engine.freeze()
+    source.on_contract_registered(
+        node_name="node_e2e_dynamic",
+        contract_yaml=_NOOP_CONTRACT_YAML,
+        correlation_id=uuid4(),
+    )
+
+    dispatchers_before = frozenset(engine._dispatchers)
+    routes_before = frozenset(engine._routes)
+    topics_before = await bus.get_topics()
+
+    result = await source.materialize_cached_contract(
+        node_name="node_e2e_dynamic",
+        dispatch_engine=engine,
+        event_bus=bus,
+        environment="test",
+    )
+
+    assert result.status == EnumMaterializationStatus.REJECTED
+    assert frozenset(engine._dispatchers) == dispatchers_before
+    assert frozenset(engine._routes) == routes_before
+    assert await bus.get_topics() == topics_before
 
 
 # ---------------------------------------------------------------------------
