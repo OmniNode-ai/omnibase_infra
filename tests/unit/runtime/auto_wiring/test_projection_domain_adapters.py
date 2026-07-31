@@ -173,7 +173,7 @@ def test_signed_tenant_or_payload_tampering_fails_verification() -> None:
         )
 
 
-def test_verified_signer_cannot_select_a_tenant_outside_its_binding() -> None:
+def test_red_control_mismatched_signer_binding() -> None:
     fixture = signed_tenant_authority_fixture(uuid4())
     wrong_binding = StaticTenantBindingResolver(
         runtime_id=fixture.envelope.runtime_id,
@@ -190,7 +190,7 @@ def test_verified_signer_cannot_select_a_tenant_outside_its_binding() -> None:
         )
 
 
-def test_structural_security_context_is_not_tenant_authority() -> None:
+def test_red_control_untrusted_tenant_selection() -> None:
     tenant_id = uuid4()
     envelope = ModelEventEnvelope[dict[str, object]](
         payload={"tenant_id": str(tenant_id)},
@@ -230,7 +230,7 @@ def test_capability_constructor_is_sealed() -> None:
         )
 
 
-def test_tenant_operation_stamps_context_and_sets_transaction_local_guc() -> None:
+def test_red_control_nonlocal_tenant_guc() -> None:
     tenant_id = uuid4()
     target = projection_database_target("tenant_events", schema="tenant")
     conn, cursor = _connection("tenant_projection_writer")
@@ -251,6 +251,25 @@ def test_tenant_operation_stamps_context_and_sets_transaction_local_guc() -> Non
     assert calls[2].args[1]["tenant_id"] == tenant_id
     assert isinstance(calls[2].args[1]["tenant_id"], UUID)
     conn.commit.assert_called_once_with()
+    assert conn.autocommit is True
+
+
+def test_red_control_leaked_tenant_guc() -> None:
+    tenant_id = uuid4()
+    target = projection_database_target("tenant_events", schema="tenant")
+    conn, cursor = _connection("tenant_projection_writer")
+    cursor.execute.side_effect = (None, None, RuntimeError("write failed"))
+
+    with patch("psycopg2.connect", return_value=conn):
+        adapter = _verified_adapter(target, tenant_id)
+        with pytest.raises(RuntimeError, match="write failed"):
+            adapter.upsert(
+                "tenant_events", "event_id", {"event_id": uuid4(), "value": "red"}
+            )
+
+    conn.rollback.assert_called_once_with()
+    conn.commit.assert_not_called()
+    assert conn.autocommit is True
 
 
 def test_equal_canonical_row_string_is_assertion_not_authority() -> None:
@@ -360,6 +379,26 @@ def test_internal_source_tenant_is_provenance_not_conflict_authority() -> None:
             "source_tenant_id",
             {"source_tenant_id": uuid4(), "status": "complete"},
         )
+
+
+def test_red_control_internal_resolver_call() -> None:
+    target = projection_database_target("generation_events", schema="omninode_internal")
+    conn, cursor = _connection("omninode_runtime")
+
+    with (
+        patch("psycopg2.connect", return_value=conn),
+        patch(
+            "omnibase_infra.runtime.auto_wiring.handler_wiring."
+            "assert_projection_tenant_authority_matches_event"
+        ) as resolve_tenant,
+    ):
+        adapter = _adapter(target)
+        assert adapter.upsert("generation_events", "event_id", {"event_id": uuid4()})
+
+    resolve_tenant.assert_not_called()
+    assert not any(
+        "set_config" in call.args[0] for call in cursor.execute.call_args_list
+    )
 
 
 @pytest.mark.parametrize("schema", ["tenant", "omninode_internal"])
@@ -496,7 +535,7 @@ def test_adapter_rejects_missing_or_extra_dsn_bindings() -> None:
         )
 
 
-def test_adapter_rejects_undeclared_table_without_name_inference() -> None:
+def test_red_control_domain_blind_upsert() -> None:
     target = projection_database_target("generation_events", schema="omninode_internal")
     adapter = _adapter(target)
 

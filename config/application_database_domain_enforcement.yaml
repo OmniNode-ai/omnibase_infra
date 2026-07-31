@@ -1,0 +1,190 @@
+# SPDX-License-Identifier: MIT
+schema_version: "1.0"
+ticket: OMN-15361
+predecessor_pins:
+  "omnibase_core#1529": 1f4549d71d4d39560ac5a162ac1d39e54d86e688
+  "omnibase_infra#2547": 95351f5d8e806fcf7fa2c276d9065df93ccf92b9
+  "omnibase_infra#2548": 7228ce0c0934ae096dd6effd0f84ff1913fec6c0
+  "omnibase_infra#2558": 2a2cfb275810b34197d4d5baf55bdcddc443e6dc
+  "omnimarket#1956": 4637e625c99ef17c190aa471a5e51b7f646c6dfd
+  "omninode_infra#771": 39033d55147ef22a061b665345b506246d3aa543
+gates:
+  classification:
+    source_enforcement: mandatory
+    deployment_enforcement: blocked
+    source_proofs:
+      - typed exactly-one-owner, topology-domain, and exact catalog-census validators green
+      - seeded missing, duplicate, conflicting, incomplete, empty, and public-leak census controls red
+    source_proof_paths:
+      - tests/unit/validation/test_application_relation_ownership.py
+      - tests/unit/validation/test_application_database_domain_enforcement.py
+      - docker/application-domain-enforcement/compose.yml
+      - config/application_database_domain_proof_ownership.yaml
+    seeded_red_controls:
+      - missing-owner
+      - duplicate-owner
+      - conflicting-location
+      - incomplete-retained-census
+      - empty-authoritative-relation-set
+      - public-catalog-leak
+    deployment_blockers:
+      - OMN-15423 retained live census and full-day activity evidence remain blocked
+      - OMN-15423 ownership manifests are not landed on their deployment branches
+  schema_qualification:
+    source_enforcement: mandatory
+    deployment_enforcement: blocked
+    source_proofs:
+      - changed-file migration SQL gate rejects public and unqualified reads, writes, DDL, grants, indexes, and references
+      - deployable production manifests and the ephemeral PostgreSQL proof manifest are independently validated authority universes and are never composed
+      - kind-aware ownership checks bind non-CREATE targets to exact object classes and routine overloads; procedural dynamic SQL and implicit multirange identities fail closed
+      - rebuilt PostgreSQL catalog proof contains only typed application schemas
+    source_proof_paths:
+      - tests/unit/validation/test_application_database_domain_enforcement.py
+      - tests/unit/validation/test_application_database_sql_enforcement_regressions.py
+      - tests/ci/test_application_database_sql_authority_isolation.py
+      - tests/ci/test_application_database_sql_gate.py
+      - docker/application-domain-enforcement/compose.yml
+    seeded_red_controls:
+      - public-application-table
+      - unqualified-application-table
+      - unqualified-application-mutation-target
+      - unknown-topology-schema
+      - wrong-object-kind
+      - wrong-routine-overload
+      - dynamic-sql-target
+      - implicit-multirange-identity
+    deployment_blockers:
+      - OMN-15356 and OMN-15359 target schema migrations are not landed
+      - migrated public sources remain until the separately approved P8 retirement
+  tenant_rls:
+    source_enforcement: mandatory
+    deployment_enforcement: blocked
+    source_proofs:
+      - typed catalog validator covers UUID identity, no default, ENABLE and FORCE RLS
+      - exact USING and WITH CHECK plus tenant A/B, unset, malformed view and function behavior execute red
+      - canonical policy pg_policy.polroles evidence is exact PUBLIC scope; unrelated or missing role scope fails closed
+      - identity-root creation and enumeration are behaviorally bound to an audited NOLOGIN BYPASSRLS control identity while runtime cross-tenant access remains denied
+      - SECURITY DEFINER authority fingerprints language, body forms, leakproof/volatility/parallel flags, config, kind, strictness, result shape, and RLS-relevant metadata
+    source_proof_paths:
+      - tests/unit/validation/test_application_database_domain_enforcement.py
+      - tests/ci/test_application_database_sql_gate.py
+      - docker/application-domain-enforcement/compose.yml
+    seeded_red_controls:
+      - tenant-text-key
+      - tenant-nullable
+      - tenant-default
+      - missing-enable-rls
+      - missing-force-rls
+      - using-drift
+      - with-check-drift
+      - canonical-policy-unrelated-role
+      - uncontracted-identity-root
+      - identity-root-runtime-login
+      - identity-root-unproven-enumeration
+      - identity-root-runtime-membership
+      - identity-root-runtime-set-role
+      - widening-permissive-policy
+      - owner-security-view
+      - unsafe-security-definer
+      - unproven-security-view
+      - unproven-security-definer
+      - security-definer-volatility-drift
+    deployment_blockers:
+      - OMN-15416 non-owner FORCE-RLS deployed behavior proof is not complete
+      - tenant target migrations and live grant/RLS application require a separately approved deploy
+  internal_catalog:
+    source_enforcement: mandatory
+    deployment_enforcement: blocked
+    source_proofs:
+      - internal and catalog catalog-state validators reject tenant columns, RLS, and authoritative source_tenant_id
+      - generated-column dependency expansion prevents source_tenant_id aliases from acquiring uniqueness, partition, deduplication, authorization, or write authority
+      - internal no-GUC behavior is exercised through the rebuilt adapter proof
+    source_proof_paths:
+      - tests/unit/validation/test_application_database_domain_enforcement.py
+      - docker/domain-adapter-proof/compose.yml
+    seeded_red_controls:
+      - internal-tenant-id
+      - catalog-tenant-id
+      - internal-tenant-policy
+      - catalog-rls
+      - uncontracted-source-tenant
+      - source-tenant-generated-unique-alias
+    deployment_blockers:
+      - OMN-15356 internal and catalog transformations are not landed
+      - internal and catalog live pool secrets and deploy evidence do not exist
+  role_acl:
+    source_enforcement: mandatory
+    deployment_enforcement: blocked
+    source_proofs:
+      - generated ACL matrix rejects runtime ownership, DDL, BYPASSRLS, broad and future grants
+      - foreign tables, aggregate/window routines, and base/range/multirange types use exact PostgreSQL grant classes and catalog kinds; extensions fail closed
+      - rebuilt PostgreSQL 16 ACL and rollback proof executes seeded role defects
+    source_proof_paths:
+      - tests/unit/validation/test_application_database_acl.py
+      - docker/application-acl-proof/compose.yml
+    seeded_red_controls:
+      - public-connect
+      - public-execute
+      - runtime-owner
+      - runtime-ddl
+      - runtime-bypassrls
+      - cross-domain-grant
+      - unsafe-default-privilege
+    deployment_blockers:
+      - authorized catalog parity and full-day activity evidence are blocked
+      - workload role secret, live grant, and deploy preconditions are not authorized
+  one_database:
+    source_enforcement: mandatory
+    deployment_enforcement: blocked
+    source_proofs:
+      - checked-in topology resolves all application pools to one physical database
+      - typed pool evidence requires exact distinct current users
+    source_proof_paths:
+      - tests/unit/topology/test_application_database_topology.py
+      - tests/unit/validation/test_application_database_domain_enforcement.py
+    seeded_red_controls:
+      - old-application-database
+      - duplicate-pool-user
+      - wrong-pool-user
+      - missing-pool-binding
+    deployment_blockers:
+      - OMN-15358 app_dashboard pool cutover is not landed or deployed
+      - OMN-15424 onex_api pool cutover is not landed or deployed
+      - OMN-15425 tenant projection pool cutover is not landed or deployed
+      - OMN-15426 internal runtime pool cutover is not landed or deployed
+  adapter:
+    source_enforcement: mandatory
+    deployment_enforcement: blocked
+    source_proofs:
+      - verified envelope authority binds the tenant UUID transaction-locally
+      - internal operation proves no resolver and no tenant GUC
+    source_proof_paths:
+      - tests/unit/runtime/auto_wiring/test_projection_domain_adapters.py
+      - docker/domain-adapter-proof/compose.yml
+    seeded_red_controls:
+      - untrusted-tenant-selection
+      - mismatched-signer-binding
+      - nonlocal-tenant-guc
+      - leaked-tenant-guc
+      - internal-resolver-call
+      - domain-blind-upsert
+    deployment_blockers:
+      - dedicated pool secrets are absent from authorized source evidence
+      - adapter deployment and real-pool readback require a separately approved deploy
+  topology_parity:
+    source_enforcement: mandatory
+    deployment_enforcement: blocked
+    source_proofs:
+      - typed topology renders exact Docker projections
+      - Docker topology and catalog projections are parity-validated; Kubernetes parity remains blocked
+    source_proof_paths:
+      - tests/unit/topology/test_application_database_topology.py
+      - src/omnibase_infra/topology/application_database.py
+    seeded_red_controls:
+      - profile-instance-drift
+      - database-user-drift
+      - docker-profile-injection-drift
+      - docker-dsn-consumer-drift
+    deployment_blockers:
+      - Kubernetes topology projection source is not landed on deployment branches
+      - no authorized deployed topology readback has been captured

@@ -106,7 +106,7 @@ def test_unknown_topology_profile_fails_closed(profile: str) -> None:
         load_topology_profile(profile)
 
 
-def test_seeded_profile_instance_mapping_drift_fails_closed(tmp_path: Path) -> None:
+def test_red_control_profile_instance_drift(tmp_path: Path) -> None:
     profile_catalog = tmp_path / "application_database_profiles.yaml"
     shutil.copyfile(PROFILE_CATALOG, profile_catalog)
     raw = yaml.safe_load(profile_catalog.read_text(encoding="utf-8"))
@@ -194,6 +194,12 @@ def test_host_local_topology_cannot_override_checked_in_authority(
             "dsn_env drift",
         ),
     ],
+    ids=(
+        "physical-database-drift",
+        "schema-domain-drift",
+        "database-user-drift",
+        "binding-dsn-drift",
+    ),
 )
 def test_seeded_database_user_schema_and_dsn_drift_fail_closed(
     tmp_path: Path,
@@ -229,7 +235,7 @@ def test_docker_surfaces_inject_exact_database_topology_profiles() -> None:
     validate_docker_topology_profile_injections()
 
 
-def test_seeded_docker_topology_profile_injection_drift_fails_closed(
+def test_red_control_docker_profile_injection_drift(
     tmp_path: Path,
 ) -> None:
     repo_root = tmp_path / "repo"
@@ -277,6 +283,7 @@ def test_seeded_docker_topology_profile_injection_drift_fails_closed(
             "inventory drift",
         ),
     ],
+    ids=("docker-dsn-consumer-drift", "docker-required-env-inventory-drift"),
 )
 def test_seeded_docker_database_or_dsn_drift_fails_closed(
     tmp_path: Path,

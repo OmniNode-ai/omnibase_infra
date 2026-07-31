@@ -33,10 +33,16 @@ class ModelApplicationDatabaseAclObject(BaseModel):
         "table",
         "view",
         "materialized_view",
+        "foreign_table",
         "sequence",
         "function",
+        "aggregate",
+        "window_function",
         "procedure",
         "type",
+        "base_type",
+        "range_type",
+        "multirange_type",
     ]
     owner: str = Field(..., min_length=1)
     owner_declaration: str = Field(..., min_length=1)
@@ -51,20 +57,31 @@ class ModelApplicationDatabaseAclObject(BaseModel):
             "table": EnumDatabaseGrantObjectType.TABLE,
             "view": EnumDatabaseGrantObjectType.TABLE,
             "materialized_view": EnumDatabaseGrantObjectType.TABLE,
+            "foreign_table": EnumDatabaseGrantObjectType.TABLE,
             "sequence": EnumDatabaseGrantObjectType.SEQUENCE,
             "function": EnumDatabaseGrantObjectType.FUNCTION,
+            "aggregate": EnumDatabaseGrantObjectType.FUNCTION,
+            "window_function": EnumDatabaseGrantObjectType.FUNCTION,
             "procedure": EnumDatabaseGrantObjectType.FUNCTION,
             "type": EnumDatabaseGrantObjectType.TYPE,
+            "base_type": EnumDatabaseGrantObjectType.TYPE,
+            "range_type": EnumDatabaseGrantObjectType.TYPE,
+            "multirange_type": EnumDatabaseGrantObjectType.TYPE,
         }[self.catalog_kind]
         if self.object_type is not expected_object_type:
             raise ValueError(
                 f"catalog_kind={self.catalog_kind!r} requires "
                 f"object_type={expected_object_type.value!r}"
             )
-        is_routine = self.catalog_kind in {"function", "procedure"}
+        is_routine = self.catalog_kind in {
+            "function",
+            "aggregate",
+            "window_function",
+            "procedure",
+        }
         if not is_routine and self.function_signature is not None:
             raise ValueError(
-                "function_signature is only valid for function/procedure catalog kinds"
+                "function_signature is only valid for routine catalog kinds"
             )
         return self
 

@@ -3,7 +3,9 @@
 
 """Non-table database object evidence from a migration ownership manifest."""
 
-from pydantic import BaseModel, ConfigDict, Field, field_validator
+from typing import Self
+
+from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
 
 from omnibase_core.enums.enum_database_schema_domain import EnumDatabaseSchemaDomain
 from omnibase_infra.validation.enums.enum_application_database_object_kind import (
@@ -29,6 +31,11 @@ class ModelDatabaseObjectEvidence(BaseModel):
     writers: tuple[str, ...] = ()
     current_schemas: tuple[str, ...] = ()
     function_signature: ApplicationDatabaseFunctionSignature | None = None
+    audit_id: str | None = Field(default=None, min_length=1)
+    definition_sha256: str | None = Field(
+        default=None,
+        pattern=r"^[0-9a-f]{64}$",
+    )
 
     @field_validator("kind", mode="before")
     @classmethod
@@ -36,6 +43,21 @@ class ModelDatabaseObjectEvidence(BaseModel):
         if not isinstance(value, str):
             return value
         return value.strip().lower().replace("-", "_").replace(" ", "_")
+
+    @model_validator(mode="after")
+    def validate_audit_pair(self) -> Self:
+        """An authoritative routine audit names both its record and exact body."""
+        if (self.audit_id is None) != (self.definition_sha256 is None):
+            raise ValueError(
+                "database object audit_id and definition_sha256 must be declared together"
+            )
+        if (
+            self.audit_id is not None
+            and self.definition_sha256 is not None
+            and self.definition_sha256 not in self.audit_id
+        ):
+            raise ValueError("database object audit_id must bind definition_sha256")
+        return self
 
 
 __all__ = ["ModelDatabaseObjectEvidence"]
