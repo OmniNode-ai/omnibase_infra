@@ -38,6 +38,9 @@ from omnibase_infra.validation.enums.enum_application_database_acl_render_phase 
 from omnibase_infra.validation.models.model_application_database_acl_matrix import (
     ModelApplicationDatabaseAclMatrix,
 )
+from omnibase_infra.validation.models.model_application_database_acl_object import (
+    ModelApplicationDatabaseAclObject,
+)
 from omnibase_infra.validation.models.model_application_database_acl_policy import (
     ModelApplicationDatabaseAclPolicy,
 )
@@ -218,6 +221,13 @@ def _owner_roles(matrix: ModelApplicationDatabaseAclMatrix) -> set[str]:
         | {obj.owner for obj in matrix.objects}
         | {row.owner for row in matrix.default_privileges}
     )
+
+
+def _acl_object_keyword(obj: ModelApplicationDatabaseAclObject) -> str:
+    """Return the PostgreSQL ACL keyword from typed object authority."""
+    if obj.catalog_kind == "procedure":
+        return "PROCEDURE"
+    return obj.object_type.value
 
 
 def _allowed_connect_roles(matrix: ModelApplicationDatabaseAclMatrix) -> set[str]:
@@ -455,7 +465,12 @@ def _capture_snapshot(
     type_owners = query(
         """
         SELECT namespace.nspname AS schema_name, type.typname AS object_name,
-               'type' AS catalog_kind, 'TYPE' AS owner_keyword,
+               CASE type.typtype
+                 WHEN 'b' THEN 'base_type'
+                 WHEN 'r' THEN 'range_type'
+                 WHEN 'm' THEN 'multirange_type'
+                 ELSE 'type'
+               END AS catalog_kind, 'TYPE' AS owner_keyword,
                'TYPE' AS object_type,
                owner.rolname AS owner
         FROM pg_type type
@@ -474,7 +489,13 @@ def _capture_snapshot(
     type_acl = query(
         """
         SELECT namespace.nspname AS schema_name, type.typname AS object_name,
-               'TYPE' AS object_type, 'type' AS catalog_kind,
+               'TYPE' AS object_type,
+               CASE type.typtype
+                 WHEN 'b' THEN 'base_type'
+                 WHEN 'r' THEN 'range_type'
+                 WHEN 'm' THEN 'multirange_type'
+                 ELSE 'type'
+               END AS catalog_kind,
                COALESCE(grantee.rolname, 'PUBLIC') AS grantee,
                grantor.rolname AS grantor, acl.privilege_type,
                acl.is_grantable
@@ -1436,15 +1457,7 @@ def _restore_snapshot(
                     ).format(sql.Identifier(schema_name), grantees)
                 )
             for obj in matrix.objects:
-                keyword = {
-                    "table": "TABLE",
-                    "view": "TABLE",
-                    "materialized_view": "TABLE",
-                    "sequence": "SEQUENCE",
-                    "function": "FUNCTION",
-                    "procedure": "PROCEDURE",
-                    "type": "TYPE",
-                }[obj.catalog_kind]
+                keyword = _acl_object_keyword(obj)
                 target = sql.SQL("{}.{}").format(
                     sql.Identifier(obj.schema_ref), sql.Identifier(obj.object_ref)
                 )

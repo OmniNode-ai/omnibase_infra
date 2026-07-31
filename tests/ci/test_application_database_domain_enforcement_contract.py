@@ -5,6 +5,7 @@
 from __future__ import annotations
 
 import json
+import runpy
 import subprocess
 import sys
 from dataclasses import FrozenInstanceError
@@ -46,12 +47,109 @@ _CI_WORKFLOW = _ROOT / ".github" / "workflows" / "ci.yml"
 _DOMAIN_PROOF = (
     _ROOT / "scripts" / "ci" / "prove_application_database_domain_enforcement.py"
 )
+_ACL_PROOF = _ROOT / "scripts" / "ci" / "prove_application_database_acl.py"
+_ACL_POSTGRES16_INVENTORY = (
+    _ROOT
+    / "tests"
+    / "fixtures"
+    / "application_database_acl"
+    / "principal-inventory-postgres16.yaml"
+)
+_ACL_FIXTURES = _ACL_POSTGRES16_INVENTORY.parent
+_ACL_PRECHANGE = (
+    _ROOT
+    / "docker"
+    / "application-acl-proof"
+    / "generated"
+    / "prechange-fixture-acl.json"
+)
 
 
 def _contract() -> ModelApplicationDatabaseEnforcementContract:
     return ModelApplicationDatabaseEnforcementContract.model_validate(
         yaml.safe_load(_CONTRACT.read_text(encoding="utf-8"))
     )
+
+
+def test_acl_postgres16_evidence_preserves_range_type_identities() -> None:
+    inventory = yaml.safe_load(_ACL_POSTGRES16_INVENTORY.read_text(encoding="utf-8"))
+    inventory_kinds = {
+        item["catalog_kind"]
+        for item in inventory["observed_objects"]
+        if item["object_ref"] == "account_id_span"
+        and item.get("function_signature") is None
+    }
+    assert inventory_kinds == {"range_type"}
+    multirange_inventory_kinds = {
+        item["catalog_kind"]
+        for item in inventory["observed_objects"]
+        if item["object_ref"] == "account_id_span_set"
+        and item.get("function_signature") is None
+    }
+    assert multirange_inventory_kinds == {"multirange_type"}
+
+    prechange = json.loads(_ACL_PRECHANGE.read_text(encoding="utf-8"))
+    for section in ("object_acl", "object_owners"):
+        object_kinds = {
+            item["object_name"]: item["catalog_kind"]
+            for item in prechange[section]
+            if item["object_type"] == "TYPE"
+        }
+        assert object_kinds["account_id_span"] == "range_type", section
+        assert object_kinds["account_id_span_set"] == "multirange_type", section
+
+
+def test_acl_prechange_artifact_rows_are_canonically_sorted() -> None:
+    prechange = json.loads(_ACL_PRECHANGE.read_text(encoding="utf-8"))
+    for section, rows in prechange.items():
+        if not isinstance(rows, list) or not rows:
+            continue
+        assert rows == sorted(
+            rows,
+            key=lambda row: json.dumps(
+                row,
+                sort_keys=True,
+                separators=(",", ":"),
+            ),
+        ), section
+
+
+def test_acl_live_snapshot_classifies_postgres_type_subkinds_exactly() -> None:
+    source = _ACL_PROOF.read_text(encoding="utf-8")
+    exact_catalog_kind_case = "\n".join(
+        (
+            "CASE type.typtype",
+            "                 WHEN 'b' THEN 'base_type'",
+            "                 WHEN 'r' THEN 'range_type'",
+            "                 WHEN 'm' THEN 'multirange_type'",
+            "                 ELSE 'type'",
+            "               END AS catalog_kind",
+        )
+    )
+
+    assert source.count(exact_catalog_kind_case) == 2
+    assert "'type' AS catalog_kind, 'TYPE' AS owner_keyword" not in source
+    assert "'TYPE' AS object_type, 'type' AS catalog_kind" not in source
+
+
+def test_acl_postgres16_fixture_matrix_is_ready_and_rollback_keywords_are_typed(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setenv("ADMIN_DSN", "dbname=unused")
+    monkeypatch.setenv("ACL_FIXTURES", str(_ACL_FIXTURES))
+    proof = runpy.run_path(str(_ACL_PROOF), run_name="acl_proof_contract")
+
+    matrix = proof["_fixture_matrix"]()
+    assert matrix.status == "READY", matrix.blockers
+    typed_objects = {
+        obj.catalog_kind: obj
+        for obj in matrix.objects
+        if obj.object_ref in {"account_id_span", "account_id_span_set"}
+        and obj.function_signature is None
+    }
+    assert set(typed_objects) == {"range_type", "multirange_type"}
+    assert proof["_acl_object_keyword"](typed_objects["range_type"]) == "TYPE"
+    assert proof["_acl_object_keyword"](typed_objects["multirange_type"]) == "TYPE"
 
 
 def test_every_domain_gate_is_mandatory_in_source_and_has_red_green_proof() -> None:
