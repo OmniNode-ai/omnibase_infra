@@ -719,7 +719,13 @@ async def test_revalidated_duplicate_manifest_names_fail_before_side_effects() -
 
 @pytest.mark.asyncio
 async def test_initial_contract_names_must_be_canonical_and_bijective() -> None:
-    """Whitespace aliases and missing report identities both fail synchronously."""
+    """Whitespace aliases and non-manifest report identities fail synchronously.
+
+    A report naming a contract the manifest never declared is an identity error
+    and must fail before any side effect. A report that merely OMITS a manifest
+    contract is not — see the partial-report case at the end, which is the
+    OMN-15474 regression guard.
+    """
     from omnibase_core.models.errors import ModelOnexError
 
     contract_a = _contract("node_identity_a", "HandlerContractA")
@@ -740,10 +746,15 @@ async def test_initial_contract_names_must_be_canonical_and_bijective() -> None:
     noncanonical_report = ModelAutoWiringReport.model_validate_json(
         json.dumps(noncanonical_payload)
     )
-    missing_payload = json.loads(report.model_dump_json())
-    missing_payload["results"] = missing_payload["results"][:1]
-    missing_report = ModelAutoWiringReport.model_validate_json(
-        json.dumps(missing_payload)
+    unexpected_payload = json.loads(report.model_dump_json())
+    unexpected_payload["results"][0]["contract_name"] = "node_identity_absent"
+    unexpected_report = ModelAutoWiringReport.model_validate_json(
+        json.dumps(unexpected_payload)
+    )
+    partial_payload = json.loads(report.model_dump_json())
+    partial_payload["results"] = partial_payload["results"][:1]
+    partial_report = ModelAutoWiringReport.model_validate_json(
+        json.dumps(partial_payload)
     )
     noncanonical_manifest_payload = json.loads(manifest.model_dump_json())
     noncanonical_manifest_payload["contracts"][0]["name"] = f" {contract_a.name} "
@@ -758,7 +769,7 @@ async def test_initial_contract_names_must_be_canonical_and_bijective() -> None:
             "noncanonical manifest contract names",
         ),
         (manifest, noncanonical_report, "noncanonical report contract names"),
-        (manifest, missing_report, "report.*manifest contract-name mismatch"),
+        (manifest, unexpected_report, "must be a manifest subset"),
     ):
         bus = _RecordingBus()
         provisioner = _RecordingReadyProvisioner()
@@ -777,6 +788,27 @@ async def test_initial_contract_names_must_be_canonical_and_bijective() -> None:
         assert provisioner.confirm_calls == []
         assert bus.subscriptions == []
         assert attach_results == []
+
+    # OMN-15474 regression guard: report.results is a PARTIAL view of the
+    # manifest by construction (failed/skipped/quarantined contracts produce no
+    # row). An earlier revision required an exact bijection here, which refused
+    # the boot against the full shipped manifest (missing_from_report=118) and
+    # broke 24 kernel tests. A report that omits a manifest contract must be
+    # accepted, and must subscribe ONLY the contract it actually names.
+    partial_bus = _RecordingBus()
+    partial_provisioner = _RecordingReadyProvisioner()
+    partial_attach_results: list[ModelContractAttachResult] = []
+    attached = await subscribe_wired_contract_topics(
+        manifest,
+        partial_report,
+        engine,
+        partial_bus,
+        "test",
+        provisioner=partial_provisioner,
+        attach_results_out=partial_attach_results,
+    )
+    assert set(attached) == {contract_a.name}
+    assert contract_b.name not in attached
 
 
 @pytest.mark.asyncio
