@@ -1,11 +1,14 @@
 # SPDX-FileCopyrightText: 2025 OmniNode.ai Inc.
 # SPDX-License-Identifier: MIT
-"""Wiring-report totality at the initial-subscription seam (OMN-15474).
+"""Wiring-report totality at the initial-subscription seam (OMN-15474/OMN-15621).
 
-``subscribe_wired_contract_topics`` requires report identities to be unique and
-to belong to the manifest it is handed. The report may still be a partial view:
-a contract that failed to wire, was resolver-skipped, or was quarantined can
-legitimately be absent from ``report.results``.
+``subscribe_wired_contract_topics`` requires an exact bijection between the
+manifest it is handed and the wiring report it is handed, and it enforces that
+BEFORE it does anything else — a mismatch aborts the kernel at boot (ruling 4,
+OMN-15474; restored by OMN-15621 after PR #2609 narrowed it to a
+report-subset-of-manifest check). That check is only safe if the report is
+TOTAL over the manifest: every discovered contract carries an explicit verdict
+(wired / failed / skipped-with-a-reason) rather than being silently absent.
 
 These tests drive the real producer (``wire_from_manifest``) and the real
 consumer (``subscribe_wired_contract_topics``) against contracts that
@@ -139,8 +142,18 @@ async def test_subscribe_accepts_a_total_report_built_by_the_totality_constructo
     assert subscribed == {}, "no contract wired, so nothing may subscribe"
 
 
-async def test_subscribe_accepts_a_partial_manifest_report() -> None:
-    """The initial subscription identity check is report-subset-of-manifest."""
+async def test_subscribe_still_rejects_a_partial_report() -> None:
+    """Totality is added at the producer; the identity check is NOT relaxed.
+
+    RED-before/GREEN-after proof for OMN-15621 (ruling 4, OMN-15474): the fix
+    must not degrade the bijection to a subset relation — a report that omits
+    manifest contracts is still a hard boot-time refusal, because "this
+    contract has no verdict" is exactly the state that let a contract's
+    events reach a process-global dispatch. At the pre-fix HEAD (PR #2609,
+    report-subset-of-manifest only) this test fails because
+    ``subscribe_wired_contract_topics`` silently accepts the truncated report
+    below instead of raising.
+    """
     manifest = _never_wiring_manifest()
     partial = ModelAutoWiringReport(
         results=build_unwired_contract_results(
@@ -150,15 +163,16 @@ async def test_subscribe_accepts_a_partial_manifest_report() -> None:
         duplicates=(),
     )
 
-    subscribed = await subscribe_wired_contract_topics(
-        manifest=manifest,
-        report=partial,
-        dispatch_engine=MessageDispatchEngine(),
-        event_bus=object(),
-        environment="dev",
-    )
+    with pytest.raises(ModelOnexError) as excinfo:
+        await subscribe_wired_contract_topics(
+            manifest=manifest,
+            report=partial,
+            dispatch_engine=MessageDispatchEngine(),
+            event_bus=object(),
+            environment="dev",
+        )
 
-    assert subscribed == {}, "no contract wired, so nothing may subscribe"
+    assert "exact bijection" in str(excinfo.value)
 
 
 async def test_subscribe_still_rejects_report_rows_with_no_manifest_contract() -> None:
