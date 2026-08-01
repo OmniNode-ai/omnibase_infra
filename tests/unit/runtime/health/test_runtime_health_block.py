@@ -13,6 +13,9 @@ from uuid import uuid4
 
 import pytest
 
+from omnibase_infra.event_bus.enum_runtime_readiness_state import (
+    EnumRuntimeReadinessState,
+)
 from omnibase_infra.models.health.model_runtime_health_check_event import (
     ModelRuntimeHealthCheckEvent,
 )
@@ -21,6 +24,7 @@ from omnibase_infra.models.health.model_runtime_health_dimension import (
 )
 from omnibase_infra.runtime.health.runtime_health_block import (
     build_runtime_health_block,
+    fold_attach_readiness_into_status,
     fold_runtime_verdict_into_status,
 )
 
@@ -128,3 +132,61 @@ class TestFoldRuntimeVerdictIntoStatus:
         reported healthy while four contracts were failing to load.
         """
         assert fold_runtime_verdict_into_status("healthy", "DEGRADED") == "degraded"
+
+
+@pytest.mark.unit
+class TestFoldAttachReadinessIntoStatus:
+    """OMN-15642: mirrors TestFoldRuntimeVerdictIntoStatus for boot attach readiness.
+
+    Before OMN-15642, ``ModelRuntimeAttachReadiness`` (OMN-15512) reached only
+    ``details.components.runtime_wiring`` -- a nested payload detail nothing
+    upstream reads -- while the top-level ``status`` field stayed "healthy"
+    with HTTP 200 even when a boot-wired Kafka consumer contract silently
+    failed to attach its subscription. This is the exact class of gap
+    OMN-15217 already closed for the runtime-health-monitor verdict above;
+    ``fold_attach_readiness_into_status`` closes the SAME gap for the
+    attach-readiness aggregate.
+    """
+
+    @pytest.mark.parametrize(
+        ("payload_status", "readiness_state", "expected"),
+        [
+            ("healthy", None, "healthy"),
+            ("healthy", EnumRuntimeReadinessState.READY, "healthy"),
+            ("healthy", EnumRuntimeReadinessState.DEGRADED, "degraded"),
+            ("healthy", EnumRuntimeReadinessState.FAILED, "unhealthy"),
+            ("degraded", EnumRuntimeReadinessState.READY, "degraded"),
+            ("degraded", EnumRuntimeReadinessState.FAILED, "unhealthy"),
+            ("unhealthy", EnumRuntimeReadinessState.READY, "unhealthy"),
+            ("unhealthy", None, "unhealthy"),
+        ],
+    )
+    def test_reported_status_is_the_worse_of_the_two(
+        self,
+        payload_status: str,
+        readiness_state: EnumRuntimeReadinessState | None,
+        expected: str,
+    ) -> None:
+        assert (
+            fold_attach_readiness_into_status(payload_status, readiness_state)  # type: ignore[arg-type]
+            == expected
+        )
+
+    def test_a_live_boot_with_a_dropped_consumer_is_not_reported_healthy(self) -> None:
+        """OMN-15642 live incident: boot green, one consumer silently absent.
+
+        onex-dev run 30720296789 (and the n=2 reproduction, run 30721670043):
+        deploy-onex-staging steps 30-36 (rollout, digest triple-match,
+        dashboard health, post-deploy verification, staleness) all passed
+        while the correlation-keyed delegation projection and the unified
+        system-event stream stayed silently empty -- surfacing only ~60s
+        later at the terminal business-proof gate. Pre-fix, /health's status
+        field could not have shown this even if a gate had checked it: the
+        DEGRADED attach_readiness aggregate never reached `status`.
+        """
+        assert (
+            fold_attach_readiness_into_status(
+                "healthy", EnumRuntimeReadinessState.DEGRADED
+            )
+            == "degraded"
+        )
