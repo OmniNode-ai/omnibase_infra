@@ -719,12 +719,15 @@ async def test_revalidated_duplicate_manifest_names_fail_before_side_effects() -
 
 @pytest.mark.asyncio
 async def test_initial_contract_names_must_be_canonical_and_bijective() -> None:
-    """Whitespace aliases and non-manifest report identities fail synchronously.
+    """Whitespace aliases, unexpected names, and missing names all fail synchronously.
 
-    A report naming a contract the manifest never declared is an identity error
-    and must fail before any side effect. A report that merely OMITS a manifest
-    contract is not — see the partial-report case at the end, which is the
-    OMN-15474 regression guard.
+    OMN-15474 ruling 4 (restored by OMN-15621 after PR #2609 narrowed this to a
+    report-subset-of-manifest check): the report must be an EXACT bijection of
+    the manifest, both directions. A report naming a contract the manifest
+    never declared is an identity error (``unexpected_in_report``), and a
+    report that OMITS a manifest contract is equally an identity error
+    (``missing_from_report``) — "this contract has no verdict" is exactly the
+    state that let a contract's events reach a process-global dispatch.
     """
     from omnibase_core.models.errors import ModelOnexError
 
@@ -769,7 +772,8 @@ async def test_initial_contract_names_must_be_canonical_and_bijective() -> None:
             "noncanonical manifest contract names",
         ),
         (manifest, noncanonical_report, "noncanonical report contract names"),
-        (manifest, unexpected_report, "must be a manifest subset"),
+        (manifest, unexpected_report, "unexpected_in_report"),
+        (manifest, partial_report, "missing_from_report"),
     ):
         bus = _RecordingBus()
         provisioner = _RecordingReadyProvisioner()
@@ -788,27 +792,6 @@ async def test_initial_contract_names_must_be_canonical_and_bijective() -> None:
         assert provisioner.confirm_calls == []
         assert bus.subscriptions == []
         assert attach_results == []
-
-    # OMN-15474 regression guard: report.results is a PARTIAL view of the
-    # manifest by construction (failed/skipped/quarantined contracts produce no
-    # row). An earlier revision required an exact bijection here, which refused
-    # the boot against the full shipped manifest (missing_from_report=118) and
-    # broke 24 kernel tests. A report that omits a manifest contract must be
-    # accepted, and must subscribe ONLY the contract it actually names.
-    partial_bus = _RecordingBus()
-    partial_provisioner = _RecordingReadyProvisioner()
-    partial_attach_results: list[ModelContractAttachResult] = []
-    attached = await subscribe_wired_contract_topics(
-        manifest,
-        partial_report,
-        engine,
-        partial_bus,
-        "test",
-        provisioner=partial_provisioner,
-        attach_results_out=partial_attach_results,
-    )
-    assert set(attached) == {contract_a.name}
-    assert contract_b.name not in attached
 
 
 @pytest.mark.asyncio

@@ -4058,10 +4058,11 @@ def _validate_initial_subscription_contract_identities(
     manifest: ModelAutoWiringManifest,
     report: ModelAutoWiringReport,
 ) -> None:
-    """Return uniquely named report rows forming a valid manifest subset.
+    """Require a canonical, exact bijection between report and manifest names.
 
-    OMN-15474 scope. Two properties are load-bearing for single-owner dispatch,
-    and only two:
+    OMN-15474 ruling 4 (re-affirmed by OMN-15621 after PR #2609 narrowed this
+    to a report-subset-of-manifest check, contrary to the ruling). Both
+    directions are load-bearing for single-owner dispatch:
 
     1. **Uniqueness** on each side. A repeated contract name would schedule a
        repeated consumer attachment for one identity — the same
@@ -4069,17 +4070,28 @@ def _validate_initial_subscription_contract_identities(
     2. **report ⊆ manifest.** A report row naming a contract the manifest never
        declared is an identity error: it would attach a consumer for a contract
        this boot does not own.
+    3. **manifest ⊆ report.** A manifest contract with no report row at all is
+       indistinguishable from one that silently vanished from the wiring
+       pass — exactly the class of bug that produced process-global dispatch
+       (OMN-15474). This direction is safe to assert unconditionally because
+       the report is contractually TOTAL over the manifest it was built from:
+       :func:`wire_from_manifest` backfills one explicit SKIPPED row per
+       uncovered contract via :func:`build_unwired_contract_results` before it
+       returns (see the "OMN-15474 totality post-condition" comment there), so
+       a contract that failed to wire, was resolver-skipped, or was
+       quarantined still produces a row — it is simply not ``WIRED``. A
+       missing row is therefore never legitimate; it means some caller handed
+       this function a report that was never produced by the real producer
+       (e.g. a hand-truncated report in a test), or a manifest that differs
+       from the one the report was built against. Both are boot-time bugs.
 
-    The reverse direction is deliberately NOT asserted. ``report.results``
-    is a *partial* view of ``manifest.contracts`` by construction — a contract
-    that failed to wire, was resolver-skipped, or was quarantined legitimately
-    produces no report row, and the subscribe loop below already tolerates that
-    (``contract_by_name.get(...) is None -> continue``, plus the non-``WIRED``
-    skip). Requiring an exact bijection here asserted far beyond this ticket and
-    refused the boot outright against the full shipped manifest
-    (``missing_from_report`` = 118 contracts). This mirrors
-    ``_validate_not_ready_contract_identities`` below, which models the same
-    relation correctly as a subset.
+    A prior revision of this docstring claimed the reverse direction "refused
+    the boot outright against the full shipped manifest (missing_from_report
+    = 118 contracts)". That is not reproducible against the current producer:
+    a live run of the real main-profile manifest (118 contracts) through
+    :func:`wire_from_manifest` yields a report that is already exactly total
+    (0 missing, 0 unexpected) before this check ever runs. The 118 in that
+    docstring was the full manifest size, not a genuine gap — see OMN-15621.
     """
     manifest_names = _require_unique_canonical_contract_names(
         tuple(contract.name for contract in manifest.contracts),
@@ -4089,13 +4101,13 @@ def _validate_initial_subscription_contract_identities(
         tuple(result.contract_name for result in report.results),
         identity_source="report",
     )
-    unexpected_names = report_names.difference(manifest_names)
-    if unexpected_names:
+    if report_names != manifest_names:
         raise ModelOnexError(
             message=(
                 "handler_wiring: report and manifest contract-name mismatch; "
-                "initial subscription identities must be a manifest subset "
-                f"(unexpected={sorted(unexpected_names)})"
+                "initial subscription requires an exact bijection "
+                f"(missing_from_report={sorted(manifest_names - report_names)}, "
+                f"unexpected_in_report={sorted(report_names - manifest_names)})"
             ),
             error_code=EnumCoreErrorCode.INVALID_CONFIGURATION,
         )
