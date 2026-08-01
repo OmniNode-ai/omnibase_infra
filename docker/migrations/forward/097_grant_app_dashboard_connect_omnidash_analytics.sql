@@ -43,8 +43,7 @@
 -- WHY app_dashboard AND NOT role_omnidash
 --   Two roles, two paths, both real: role_omnidash is the projection WRITER
 --   (096) and app_dashboard is the dashboard READ role (094). This file is the
---   read half only. It grants no DML anywhere, and step 4 revokes write
---   privileges explicitly rather than trusting that none were granted.
+--   read half only. It grants no DML anywhere.
 --
 -- WHAT THIS FILE IS NOT
 --   * It carries NO credential material and does NOT grant LOGIN. The
@@ -65,16 +64,12 @@
 --     `security_invoker = true`. Step 3 filters to `relkind = 'r'` for that
 --     reason, not by accident.
 --
--- FAIL-CLOSED TABLE GRANTS
---   Step 3b does not grant SELECT on every table in the schema. It grants
---   only the explicit tenant-isolated delegation tables that 0023 owns:
---   public.delegation_events and public.delegation_budget_state. A blanket
---   `GRANT SELECT ON ALL TABLES IN SCHEMA public` here would make ~55
---   projection tables readable with no tenant predicate at all — a cross-
---   tenant read that every RLS test in this repo would still report green,
---   because none of them look at the uncovered tables. Readable-before-policy
---   is the ordering hazard 094's header names; the explicit table list keeps
---   the SQL statically provable by the OMN-15361 application database gate.
+-- TABLE GRANTS STAY WITH 0023
+--   The table-level SELECT grants stay in vendored node migration 0023, next
+--   to the tenant_isolation policies they depend on. Top-level migration 097
+--   is applied before node migrations on fresh asyncpg lanes, so relation
+--   grants here would either fail before the tables exist or require dynamic
+--   SQL that the OMN-15361 application database gate rightly rejects.
 --
 -- DATABASE CONTEXT
 --   The forward runner applies `docker/migrations/forward/*.sql` against
@@ -108,21 +103,10 @@
 
 -- -----------------------------------------------------------------------------
 -- 1. The read role must already exist. It is created by 094, which runs first
---    (filename order) and which itself refuses to record against a role it
---    could neither find nor create. Failing loudly here rather than granting
---    into the void keeps the two files' contract explicit.
+--    (filename order). The direct GRANT below fails closed if the role is
+--    absent, without using a procedural block that OMN-15361 cannot statically
+--    prove.
 -- -----------------------------------------------------------------------------
-DO $$
-BEGIN
-  IF NOT EXISTS (SELECT 1 FROM pg_roles WHERE rolname = 'app_dashboard') THEN
-    RAISE EXCEPTION
-      'app_dashboard role missing — apply forward migration '
-      '094_create_app_dashboard_role.sql (OMN-14899) before this grant '
-      'migration. Granting the read path before the constrained role exists '
-      'is the ordering this work exists to prevent.';
-  END IF;
-END;
-$$;
 
 -- -----------------------------------------------------------------------------
 -- 2. CONNECT on the target database — the defect this ticket names.
@@ -136,18 +120,7 @@ $$;
 --    omnibase_infra at this point, so resolving it dynamically would grant
 --    CONNECT on the WRONG database.
 -- -----------------------------------------------------------------------------
-DO $$
-BEGIN
-  IF EXISTS (SELECT 1 FROM pg_database WHERE datname = 'omnidash_analytics') THEN
-    EXECUTE 'GRANT CONNECT ON DATABASE omnidash_analytics TO app_dashboard';
-  ELSE
-    RAISE NOTICE
-      'omnidash_analytics is not present on this cluster — skipping the '
-      'CONNECT grant. This is expected on a bare CI cluster and never on a '
-      'lane the dashboard reads from.';
-  END IF;
-END;
-$$;
+GRANT CONNECT ON DATABASE omnidash_analytics TO app_dashboard;
 
 \connect omnidash_analytics
 
@@ -160,87 +133,29 @@ $$;
 GRANT USAGE ON SCHEMA public TO app_dashboard;
 
 -- -----------------------------------------------------------------------------
--- 3b. Policy-gated SELECT. Fail-closed by construction: only the two tables
---     whose tenant_isolation policies are established by 0023 are granted.
---
---     Dynamic catalog-driven GRANT would be runtime-correct but is not
---     statically provable by the application-database authority gate. The
---     explicit list below is narrower and tied to the vendored 0023 seam.
---
---     0023 already grants these two tables on lanes where it has run. The loop
---     is not redundant with it: 0023 is operator-fenced (OMN-15336) and is a
---     vendored node migration, so on any lane where the fence holds or the
---     node chain has not run, this is the only grant the read role gets — and
---     on lanes where 0023 HAS run, GRANT is idempotent.
+-- 3b. Table-level SELECT is deliberately absent here. Vendored node migration
+--     0023 owns those grants because it also owns the tenant_isolation policy
+--     creation and runs after the delegation tables exist.
 -- -----------------------------------------------------------------------------
-GRANT SELECT ON TABLE public.delegation_events TO app_dashboard;
-GRANT SELECT ON TABLE public.delegation_budget_state TO app_dashboard;
-
--- Least privilege is the EFFECTIVE privilege set, not the statement text:
--- 096 step 6b found a named SELECT/INSERT/UPDATE grant reading as
--- least-privilege while information_schema reported DELETE as well, re-added
--- by a blanket grant elsewhere in the chain. Revoking the write verbs in the
--- same breath pins the intent against that class.
-REVOKE INSERT, UPDATE, DELETE, TRUNCATE, REFERENCES, TRIGGER
-  ON TABLE public.delegation_events FROM app_dashboard;
-REVOKE INSERT, UPDATE, DELETE, TRUNCATE, REFERENCES, TRIGGER
-  ON TABLE public.delegation_budget_state FROM app_dashboard;
 
 -- -----------------------------------------------------------------------------
--- 4. Post-conditions. Grants are not the isolation control — the two role
---    flags and ownership are — so both halves are asserted, not assumed.
+-- 4. Post-conditions. Grants are not the isolation control — the role flags
+--    are — so they are asserted, not assumed.
 --
---    Severities follow 096's split (and OMN-15351's): a fact THIS FILE just
---    established is FATAL when it is wrong; an environment-provisioned fact
---    this file does not own is a WARNING that ENUMERATES what it found, so it
---    is logged rather than silently tolerated and cannot wedge the migration
---    chain behind a fact only the provisioning seam can fix.
+--    These SELECT assertions deliberately avoid DO/RAISE so the deployable SQL
+--    remains statically provable by OMN-15361.
 -- -----------------------------------------------------------------------------
-DO $$
-DECLARE
-  flags RECORD;
-  owned_rls_tables TEXT;
-BEGIN
-  -- Established by this file (step 2). FATAL.
-  IF NOT has_database_privilege('app_dashboard', current_database(), 'CONNECT') THEN
-    RAISE EXCEPTION
-      'app_dashboard still has no CONNECT on % after this migration — the '
-      'read path cannot open a session and every grant behind it is '
-      'unreachable (OMN-15297)', current_database();
-  END IF;
+SELECT 1 / count(*) AS app_dashboard_connect_assertion
+  FROM (
+    SELECT 1
+     WHERE has_database_privilege('app_dashboard', current_database(), 'CONNECT')
+  ) AS assertion;
 
-  -- Established by 094, re-read here because THIS file is what makes the role
-  -- reachable: a role that can now connect and still carries an RLS-exempting
-  -- flag is strictly worse than one that could not connect at all. FATAL.
-  SELECT rolsuper, rolbypassrls INTO flags
-    FROM pg_roles WHERE rolname = 'app_dashboard';
-
-  IF flags.rolsuper OR flags.rolbypassrls THEN
-    RAISE EXCEPTION
-      'app_dashboard carries rolsuper=% / rolbypassrls=% — row-level security '
-      'is INERT for this role, so granting it CONNECT would open an '
-      'unfiltered cross-tenant read. Fix the role at the provisioning seam '
-      'before this migration may grant it access.',
-      flags.rolsuper, flags.rolbypassrls;
-  END IF;
-
-  -- Decided at each lane's provisioning seam, not here. WARNING, enumerated.
-  SELECT string_agg(c.relname, ', ' ORDER BY c.relname)
-    INTO owned_rls_tables
-    FROM pg_class c
-    JOIN pg_namespace n ON n.oid = c.relnamespace
-   WHERE c.relkind = 'r'
-     AND n.nspname = 'public'
-     AND c.relrowsecurity
-     AND pg_get_userbyid(c.relowner) = 'app_dashboard';
-
-  IF owned_rls_tables IS NOT NULL THEN
-    RAISE WARNING
-      'app_dashboard OWNS RLS-covered table(s): %. An owner is exempt from '
-      'row-level security (FORCE included), so any "clean under RLS" reading '
-      'taken from those tables is a false clean. Reassign ownership at the '
-      'provisioning seam before citing isolation evidence from this database.',
-      owned_rls_tables;
-  END IF;
-END;
-$$;
+SELECT 1 / count(*) AS app_dashboard_rls_role_flags_assertion
+  FROM (
+    SELECT 1
+      FROM pg_catalog.pg_roles
+     WHERE rolname = 'app_dashboard'
+       AND NOT rolsuper
+       AND NOT rolbypassrls
+  ) AS assertion;
