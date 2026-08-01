@@ -471,6 +471,56 @@ def test_nightly_teardown_rederives_run_identity_before_manifest_and_down() -> N
     ), "identity and manifest rejection must execute before destructive compose down"
 
 
+def test_nightly_database_url_uses_the_ephemeral_postgres_port(
+    tmp_path: Path,
+) -> None:
+    """The run-scoped stack must ignore an opaque database URL override."""
+    fake_bin = tmp_path / "bin"
+    fake_bin.mkdir()
+    port_counter = tmp_path / "port-counter"
+    port_counter.write_text("45000\n", encoding="utf-8")
+    python_stub = fake_bin / "python3"
+    python_stub.write_text(
+        "#!/bin/sh\n"
+        'port="$(cat "$PORT_COUNTER")"\n'
+        "port=$((port + 1))\n"
+        'printf "%s\\n" "$port" > "$PORT_COUNTER"\n'
+        'printf "%s\\n" "$port"\n',
+        encoding="utf-8",
+    )
+    python_stub.chmod(0o700)
+
+    github_env = tmp_path / "github-env"
+    hostile_url = "postgresql://u:p@192.168.86.201:5436/protected"
+    env = os.environ | {
+        "DB_URL_SECRET": hostile_url,
+        "GITHUB_ENV": str(github_env),
+        "GITHUB_RUN_ATTEMPT": "1",
+        "GITHUB_RUN_ID": "271828",
+        "INTEGRATION_POSTGRES_PASSWORD": "test-password",
+        "PATH": f"{fake_bin}{os.pathsep}{os.environ['PATH']}",
+        "PORT_COUNTER": str(port_counter),
+    }
+    result = subprocess.run(
+        ["bash", "-c", _nightly_step("Derive isolated e2e namespace")["run"]],
+        cwd=REPO_ROOT,
+        env=env,
+        capture_output=True,
+        text=True,
+        check=False,
+    )
+    assert result.returncode == 0, result.stdout + result.stderr
+
+    emitted = github_env.read_text(encoding="utf-8")
+    values = dict(line.split("=", 1) for line in emitted.splitlines())
+    postgres_port = values["POSTGRES_PORT"]
+    assert values["INTEGRATION_POSTGRES_PORT"] == postgres_port
+    assert values["OMNIBASE_INFRA_DB_URL"] == (
+        f"postgresql://postgres:test-password@localhost:{postgres_port}/omnibase_infra"
+    )
+    assert hostile_url not in emitted
+
+
 # ---------------------------------------------------------------------------
 # Scanner self-tests — prove the checks are RED against the pre-fix shape
 # ---------------------------------------------------------------------------
