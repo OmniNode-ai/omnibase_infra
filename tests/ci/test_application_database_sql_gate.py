@@ -137,6 +137,53 @@ def test_gate_checks_only_real_changed_sql_files(tmp_path: Path) -> None:
     assert all("unchanged_legacy.sql" not in violation for violation in violations)
 
 
+def test_gate_exempts_only_the_omn15503_legacy_node_migration_path(
+    tmp_path: Path,
+) -> None:
+    repository = tmp_path / "repository"
+    repository.mkdir()
+    _git(repository, "init", "--initial-branch=main")
+    (repository / "baseline.txt").write_text("baseline\n", encoding="utf-8")
+    base_revision = _commit(repository, "baseline")
+
+    exempt = (
+        repository
+        / "docker"
+        / "migrations"
+        / "forward"
+        / "nodes"
+        / "node_projection_delegation"
+        / "0029_delegation_terminal_failure_cause.sql"
+    )
+    exempt.parent.mkdir(parents=True)
+    exempt.write_text(
+        "ALTER TABLE delegation_events ADD COLUMN terminal_ok boolean;\n",
+        encoding="utf-8",
+    )
+    exempt_head = _commit(repository, "exempt legacy migration")
+    assert not validate_changed_sql(
+        repository,
+        base_revision,
+        exempt_head,
+        ownership_manifest_paths=(),
+    )
+
+    adjacent = exempt.with_name("0030_adjacent_unqualified.sql")
+    adjacent.write_text(
+        "ALTER TABLE delegation_events ADD COLUMN still_blocked text;\n",
+        encoding="utf-8",
+    )
+    adjacent_head = _commit(repository, "adjacent legacy migration")
+    violations = validate_changed_sql(
+        repository,
+        exempt_head,
+        adjacent_head,
+        ownership_manifest_paths=(),
+    )
+    assert any("0030_adjacent_unqualified.sql" in item for item in violations)
+    assert any("schema-qualified" in item for item in violations)
+
+
 def test_qualified_create_requires_an_authoritative_ownership_declaration(
     tmp_path: Path,
 ) -> None:

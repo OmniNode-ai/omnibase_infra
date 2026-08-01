@@ -2241,11 +2241,16 @@ jobs:
           path: .proof-dependencies/domain-adapter
           persist-credentials: false
 
+      - name: Resolve omnimarket migration source ref
+        id: resolve-omnimarket-ref
+        shell: bash
+        run: python3 scripts/resolve_node_migration_source_ref.py
+
       - name: Checkout exact typed registry dependency
         uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
         with:
           repository: OmniNode-ai/omnimarket
-          ref: 4637e625c99ef17c190aa471a5e51b7f646c6dfd
+          ref: ${{ steps.resolve-omnimarket-ref.outputs.ref == 'dev' && '4637e625c99ef17c190aa471a5e51b7f646c6dfd' || steps.resolve-omnimarket-ref.outputs.ref }}
           path: .proof-dependencies/omnimarket
           persist-credentials: false
 
