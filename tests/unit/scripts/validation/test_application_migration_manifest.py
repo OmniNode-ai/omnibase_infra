@@ -99,7 +99,9 @@ def _minimal_fixture(tmp_path: Path) -> tuple[Path, Path]:
 def test_checked_in_manifest_is_exact_and_all_blockers_are_explicit() -> None:
     result = _validate()
 
-    assert len(result.declarations) == 81
+    # 82 as of OMN-15503, which vendored
+    # nodes/node_projection_delegation/0029_delegation_terminal_failure_cause.sql.
+    assert len(result.declarations) == 82
     assert len(result.blocked) == 3
     assert {item.ticket for item in result.blocked} == {"OMN-15423"}
     assert len(result.cloud_aliases) == 30
