@@ -156,6 +156,37 @@ from omnibase_infra.utils.util_retry_optimistic import (
 from omnibase_infra.utils.util_topic_event_type import derive_event_type_from_topic
 
 
+class BoundaryDlqNotPersistedError(Exception):
+    """Marks a boundary failure whose DLQ write was NOT confirmed durable.
+
+    OMN-14498 (Lane C): ``_route_swallowed_exception`` used to return normally
+    even when ``_publish_raw_to_dlq`` reported non-persistence via its
+    documented ``False`` return. A callback that returns normally IS an ACK --
+    ``EventBusKafka._dispatch_to_subscriber`` reads "no exception" as success
+    and lets the offset advance -- so the message was acknowledged while
+    existing nowhere durable. That made the OMN-15232 rewind path
+    (``_rewind_after_unpersisted_dlq``) structurally unreachable for every
+    auto-wired handler: the boundary swallowed its own failure before the
+    consumer loop could see it.
+
+    Raising this type in that ONE case (DLQ enabled AND the write confirmed
+    non-durable) restores the invariant a NACK is supposed to carry: the
+    offset is withheld and Kafka redelivers. It is deliberately NOT raised
+    when the DLQ write succeeded, when the flag is off, or when no
+    DLQ-capable bus is wired -- those paths keep their prior semantics.
+    """
+
+    def __init__(self, topic: str, correlation_id: object, cause: Exception) -> None:
+        super().__init__(
+            f"boundary DLQ write not persisted; offset must not advance "
+            f"(topic={topic} correlation_id={correlation_id} "
+            f"cause={type(cause).__name__})"
+        )
+        self.topic = topic
+        self.correlation_id = correlation_id
+        self.cause = cause
+
+
 class BoundaryPublishError(Exception):
     """Marks a result-applier (publish) failure the outbox boundary must PROPAGATE.
 
@@ -1163,6 +1194,55 @@ def _coerce_uuid_or_none(value: object) -> object | None:
         except ValueError:
             return None
     return None
+
+
+def _ingress_correlation_id(message: object) -> UUID | None:
+    """Recover the ingress correlation id from a message's TRANSPORT surface.
+
+    OMN-14498: the consume boundary must be able to establish lineage without
+    decoding the body, because the body is exactly what is unavailable for a
+    poisoned message. Three transport shapes are supported, in order:
+
+    * ``ModelEventMessage`` -- ``headers.correlation_id`` (a real ``UUID``);
+      this is what ``EventBusKafka`` hands the callback in production.
+    * a raw aiokafka ``ConsumerRecord`` -- ``headers`` as an iterable of
+      ``(str, bytes)`` pairs, matching the ``correlation_id`` header both
+      ``MixinKafkaDlq`` and ``DLQProducer.replay_message`` write.
+    * a ``ModelEventEnvelope`` passed directly (legacy in-process call shape)
+      -- its own ``correlation_id``.
+
+    Returns ``None`` when no lineage is present on the transport, leaving the
+    caller to fall back to the body and then to minting a fresh id. Never
+    raises: a malformed header must not take down the consume boundary.
+    """
+    from uuid import UUID as _UUID
+
+    headers = getattr(message, "headers", None)
+
+    header_corr = getattr(headers, "correlation_id", None)
+    coerced = _coerce_uuid_or_none(header_corr)
+    if isinstance(coerced, _UUID):
+        return coerced
+
+    if headers is not None and not isinstance(headers, (str, bytes)):
+        try:
+            for entry in headers:
+                key, value = entry
+                if key != "correlation_id":
+                    continue
+                decoded = (
+                    value.decode("utf-8", errors="replace")
+                    if isinstance(value, bytes)
+                    else value
+                )
+                coerced = _coerce_uuid_or_none(decoded)
+                if isinstance(coerced, _UUID):
+                    return coerced
+        except (TypeError, ValueError):
+            pass
+
+    coerced = _coerce_uuid_or_none(getattr(message, "correlation_id", None))
+    return coerced if isinstance(coerced, _UUID) else None
 
 
 def _coerce_datetime_or_none(value: object) -> object | None:
@@ -4147,7 +4227,15 @@ def _make_event_bus_callback(
                     correlation_id,
                 )
                 _increment_message_lost_counter()
-        except Exception as dlq_exc:  # noqa: BLE001 — DLQ publish is itself a boundary; never let it crash the consumer
+                # OMN-14498: a NACK must never ACK the offset. Returning
+                # normally here IS an ACK -- _dispatch_to_subscriber reads
+                # "no exception" as success and lets the offset advance --
+                # so the record would be acknowledged while existing nowhere
+                # durable, and the OMN-15232 rewind path would never see it.
+                raise BoundaryDlqNotPersistedError(topic, correlation_id, exc)
+        except BoundaryDlqNotPersistedError:
+            raise
+        except Exception as dlq_exc:
             # Best-effort DLQ failed too -- the message IS lost here (gap G1).
             # Loud, not silent, but not prevented -- see gap G3 above.
             logger.error(
@@ -4161,11 +4249,27 @@ def _make_event_bus_callback(
                 correlation_id,
             )
             _increment_message_lost_counter()
+            # Same invariant as the False-return branch above: the DLQ write
+            # is not durable, so the offset must be withheld rather than
+            # advanced over a message that exists nowhere.
+            raise BoundaryDlqNotPersistedError(topic, correlation_id, exc) from dlq_exc
 
     async def callback(message: object) -> None:
         from uuid import uuid4
 
-        correlation_id: UUID = uuid4()
+        # OMN-14498: seed lineage from the INGRESS transport headers before
+        # anything can fail. The body is not a reliable lineage source -- a
+        # poisoned message (truncated/undecodable JSON) raises inside
+        # json.loads below, before either body-derived recovery
+        # (envelope.correlation_id / data["correlation_id"]) can run, and the
+        # boundary then fell through to the DLQ still holding a freshly
+        # minted uuid4. That produced a VALID id with the WRONG lineage: the
+        # DLQ record, and every faithful replay of it, carried a fabricated
+        # ancestry, so the resulting terminal joined to nothing upstream.
+        # Precedence is ingress header -> body -> mint, so a decodable
+        # envelope still wins (it is the authoritative in-band value) and a
+        # message with no lineage anywhere still gets a usable id.
+        correlation_id: UUID = _ingress_correlation_id(message) or uuid4()
         try:
             raw = getattr(message, "value", None)
             if raw is not None:

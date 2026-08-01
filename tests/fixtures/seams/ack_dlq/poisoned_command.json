@@ -1,0 +1,11 @@
+{
+  "_comment": "OMN-14498 Lane C seam fixture. A poisoned command as it arrives at the auto-wired consume boundary: the ingress correlation_id is carried on the Kafka message HEADERS (ModelEventMessage.headers.correlation_id), while the message VALUE is truncated JSON that json.loads() cannot decode. This is the exists-but-wrong shape: the boundary cannot recover lineage from the body, so a pre-fix boundary mints a fresh uuid4() and the DLQ record -- and therefore every replay of it -- carries a VALID id with the WRONG lineage, producing an orphan terminal.",
+  "topic": "onex.cmd.platform.node-rebuild.v1",
+  "ingress_correlation_id": "3f9d2c17-8b4a-4e51-9a26-7c0d5e1b8f34",
+  "ingress_key": "node-rebuild-omn14498",
+  "ingress_partition": 3,
+  "ingress_offset": "417",
+  "poisoned_value": "{\"event_type\": \"onex.cmd.platform.node-rebuild.v1\", \"correlation_id\": \"3f9d2c17-8b4a-4e51-9a26-7c0d5e1b8f34\", \"payload\": {\"node_id\": \"node_rebuild\", \"truncated_here\":",
+  "expected_dlq_topic_category": "commands",
+  "expected_failure_type": "handler_exception"
+}
