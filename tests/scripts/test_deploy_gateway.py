@@ -17,15 +17,32 @@ Coverage maps 1:1 to the OMN-15521 falsifiable acceptance criteria:
          test_print_compose_cmd_targets_repo_resident_compose_project,
          test_dry_run_default_performs_no_mutation
   AC2 -- test_build_command_stamps_oci_provenance_build_args,
+         test_build_command_stamps_sibling_ref_build_args,
          test_execute_deploy_produces_non_empty_image_labels
   AC3 -- test_verify_deployment_red_before_files_absent,
          test_verify_deployment_green_after_files_present
   AC4 -- test_sync_host_files_red_before_stale_copy_diverges,
          test_sync_host_files_green_after_diff_is_empty
   AC6 -- test_execute_deploy_writes_registry_with_rollback_target,
-         test_second_deploy_records_previous_digest
-  (AC5 -- the OMN-12912 restart/redelivery receipt -- is explicitly OUT of
-  scope for this ticket; it lands on OMN-12912, not here.)
+         test_second_deploy_records_previous_digest_as_first_deploys_active,
+         test_rollback_target_derived_from_running_container_not_env_file,
+         test_previous_image_retagged_for_retention_before_build,
+         test_rollback_target_not_recorded_if_previous_image_missing
+  (AC5 -- the OMN-12912 restart/redelivery receipt -- is proven separately by
+  scripts/gateway_restart_safety_proof.sh +
+  tests/scripts/test_gateway_restart_safety_proof.py; the receipt itself lands
+  on OMN-12912, not here, per that ticket's own filing instruction.)
+
+Remediation round (OMN-15521, 2026-08-01): a prior version of this script (a)
+derived the AC6 rollback target from gateway.env's GATEWAY_IMAGE= line
+instead of the container's actual running image, with no existence check --
+this produced a registry.json rollback_command that pointed at an already
+pruned/dangling image; (b) omitted the OMNIBASE_COMPAT_REF / OMNIMARKET_REF /
+ONEX_CHANGE_CONTROL_REF build-args deploy-runtime.sh always passes, silently
+falling back to the Dockerfile's hardcoded defaults; (c) verify_deployment()
+never compared the running container's actual image against the digest it
+just built, so a reload that silently failed to recreate the container still
+reported success. The new tests below are RED-before/GREEN-after for each.
 """
 
 from __future__ import annotations
@@ -60,6 +77,23 @@ case "$*" in
     ;;
   "image inspect "*"--format={{.Id}}")
     printf 'sha256:%064d\\n' "${GW_TEST_DIGEST_SEED:-1}"
+    exit 0
+    ;;
+  "inspect omninode-gateway-forwarder --format {{.Image}}")
+    # resolve_running_container_image() / verify_deployment()'s digest
+    # readback. Backed by a state file so a `systemctl reload` (fake sudo,
+    # below) can simulate the container actually being recreated onto the
+    # new digest -- distinguishing "before this deploy" from "after reload".
+    state="${GW_TEST_RUNNING_IMAGE_STATE:?}"
+    if [ -f "${state}" ]; then
+      cat "${state}"
+    fi
+    exit 0
+    ;;
+  "tag "*)
+    if [ "${GW_TEST_ROLLBACK_TARGET_MISSING:-0}" = "1" ]; then
+      exit 1
+    fi
     exit 0
     ;;
   *"--format={{index .Config.Labels \\"org.opencontainers.image.revision\\"}}}"*)
@@ -104,6 +138,22 @@ for a in "$@"; do
 done
 if [ "${args[0]:-}" = "systemctl" ]; then
   printf '%s\\n' "${args[*]}" >> "${GW_TEST_SYSTEMCTL_LOG:?}"
+  if [ "${args[1]:-}" = "reload" ] && [ "${GW_TEST_RELOAD_TAKES_EFFECT:-1}" = "1" ]; then
+    # Simulate the reload actually recreating the container onto whatever
+    # digest gateway.env holds at this point (update_gateway_env_digest()
+    # already ran before reload_service() is called) -- mirrors real compose
+    # behavior. GW_TEST_RELOAD_TAKES_EFFECT=0 simulates a reload that exits 0
+    # but does not actually recreate the container (the silent-failure case
+    # verify_deployment()'s digest check now catches).
+    state="${GW_TEST_RUNNING_IMAGE_STATE:-}"
+    env_file="${GATEWAY_ENV_FILE:-}"
+    if [ -n "${state}" ] && [ -n "${env_file}" ] && [ -f "${env_file}" ]; then
+      new_image="$(awk -F= '/^GATEWAY_IMAGE=/{print $2; exit}' "${env_file}")"
+      if [ -n "${new_image}" ]; then
+        printf '%s' "${new_image}" > "${state}"
+      fi
+    fi
+  fi
   exit 0
 fi
 exec "${args[@]}"
@@ -132,6 +182,7 @@ class _Harness:
         self.registry_dir = tmp_path / "home" / ".omnibase" / "gateway"
         self.docker_log = tmp_path / "docker.log"
         self.systemctl_log = tmp_path / "systemctl.log"
+        self.running_image_state = tmp_path / "running-image.state"
         _write_fake_bin(self.bin_dir)
         self.env_file.write_text(
             "GATEWAY_IMAGE=sha256:" + ("0" * 64) + "\n"
@@ -146,6 +197,10 @@ class _Harness:
             "GATEWAY_CONTAINER_GID=1000\n",
             encoding="utf-8",
         )
+        # Simulates a container already running this digest before the
+        # deploy under test -- the rollback-target source of truth now that
+        # it is read from `docker inspect`, not gateway.env's own line.
+        self.running_image_state.write_text("sha256:" + ("0" * 64), encoding="utf-8")
 
     def env(self, **overrides: str) -> dict[str, str]:
         e = os.environ.copy()
@@ -156,6 +211,7 @@ class _Harness:
         e["GATEWAY_REGISTRY_DIR"] = str(self.registry_dir)
         e["GW_TEST_DOCKER_LOG"] = str(self.docker_log)
         e["GW_TEST_SYSTEMCTL_LOG"] = str(self.systemctl_log)
+        e["GW_TEST_RUNNING_IMAGE_STATE"] = str(self.running_image_state)
         e.update(overrides)
         return e
 
@@ -267,6 +323,26 @@ def test_build_command_stamps_oci_provenance_build_args(harness: _Harness) -> No
 
 
 @pytest.mark.unit
+def test_build_command_stamps_sibling_ref_build_args(harness: _Harness) -> None:
+    """AC2 remediation (OMN-15521): scripts/deploy-runtime.sh's build_images()
+    passes OMNIBASE_COMPAT_REF / OMNIMARKET_REF / ONEX_CHANGE_CONTROL_REF
+    unconditionally on every build -- a prior version of this script silently
+    dropped all three, so the gateway image fell back to the Dockerfile's
+    hardcoded ARG defaults (OMNIBASE_COMPAT_REF=v0.5.5,
+    ONEX_CHANGE_CONTROL_REF=v0.5.3, OMNIMARKET_REF=dev). That is exactly how
+    the deployed gateway container's onex-change-control pin (0.5.3) drifted
+    from the omnibase-infra runtime container's pin (0.5.1) on the same
+    `.201` box. OMNI_HOME is explicitly cleared so the fallback strings are
+    deterministic regardless of the host running this test.
+    """
+    result = harness.run("--print-compose-cmd", OMNI_HOME="")
+    assert result.returncode == 0, result.stderr
+    assert "--build-arg OMNIBASE_COMPAT_REF=main" in result.stdout
+    assert "--build-arg OMNIMARKET_REF=dev" in result.stdout
+    assert "--build-arg ONEX_CHANGE_CONTROL_REF=main" in result.stdout
+
+
+@pytest.mark.unit
 def test_current_compose_file_declares_no_provenance_build_args() -> None:
     """RED-before-the-fix control: docker-compose.gateway.yml's OWN declared
     build.args block (what a bare `docker compose build` would use with no
@@ -341,6 +417,29 @@ def test_verify_deployment_green_after_files_present(harness: _Harness) -> None:
     )
     assert result.returncode == 0, result.stderr + result.stdout
     assert "AC3 OK" in result.stdout
+
+
+@pytest.mark.unit
+def test_verify_deployment_red_before_reload_silently_fails(harness: _Harness) -> None:
+    """RED (OMN-15521 remediation, exists-but-wrong): a `systemctl reload`
+    that exits 0 without actually recreating the container must NOT be
+    reported as a successful deploy. A prior version of verify_deployment()
+    only checked image labels and file presence -- both of which the STALE
+    (still-running, pre-deploy) container also satisfies once it has already
+    been deployed once -- so a silently-failed recreate on any deploy after
+    the first read as success on every subsequent run.
+    """
+    result = harness.run(
+        "--execute",
+        GW_TEST_LABEL_REVISION="3541ac805b86",
+        GW_TEST_LABEL_BUILD_SOURCE="release",
+        GW_TEST_DELIVERY_PRESENT="1",
+        GW_TEST_SQLITE_PRESENT="1",
+        GW_TEST_RELOAD_TAKES_EFFECT="0",
+    )
+    assert result.returncode != 0
+    assert "AC-VERIFY FAILED" in result.stdout + result.stderr
+    assert "did not take effect" in result.stdout + result.stderr
 
 
 # ---------------------------------------------------------------------------
@@ -471,6 +570,146 @@ def test_second_deploy_records_previous_digest_as_first_deploys_active(
 
     assert second_registry["previous_digest"] == first_registry["active_digest"]
     assert second_registry["active_digest"] != first_registry["active_digest"]
+
+
+@pytest.mark.unit
+def test_rollback_target_derived_from_running_container_not_env_file(
+    harness: _Harness,
+) -> None:
+    """RED-before-the-fix control / GREEN-after (OMN-15521 remediation): a
+    prior version of this script awk'd the rollback target out of
+    gateway.env's GATEWAY_IMAGE= line. That line can drift from what the
+    container is actually running (a previous deploy that wrote the file but
+    was killed before reload; a manual edit) -- exactly what this fixture
+    reproduces: gateway.env claims one digest, the running container (the
+    fake docker inspect state file) reports a different one. The recorded
+    previous_digest must be the ACTUAL running digest, never the stale
+    env-file value.
+    """
+    stale_env_digest = "sha256:" + ("e" * 64)
+    harness.env_file.write_text(
+        harness.env_file.read_text(encoding="utf-8").replace(
+            "GATEWAY_IMAGE=sha256:" + ("0" * 64),
+            f"GATEWAY_IMAGE={stale_env_digest}",
+        ),
+        encoding="utf-8",
+    )
+    actually_running_digest = "sha256:" + ("a" * 64)
+    harness.running_image_state.write_text(actually_running_digest, encoding="utf-8")
+
+    result = harness.run(
+        "--execute",
+        GW_TEST_LABEL_REVISION="3541ac805b86",
+        GW_TEST_LABEL_BUILD_SOURCE="release",
+        GW_TEST_DELIVERY_PRESENT="1",
+        GW_TEST_SQLITE_PRESENT="1",
+        GW_TEST_DIGEST_SEED="1",
+    )
+    assert result.returncode == 0, result.stderr + result.stdout
+
+    registry = harness.registry()
+    assert registry["previous_digest"] == actually_running_digest
+    assert registry["previous_digest"] != stale_env_digest
+
+
+@pytest.mark.unit
+def test_previous_image_retagged_for_retention_before_build(
+    harness: _Harness,
+) -> None:
+    """OMN-15521 remediation: the previous running image must be retagged
+    under a durable name (`docker tag <previous_digest>
+    docker-gateway-forwarder:previous`) BEFORE the build moves
+    BUILD_IMAGE_TAG onto the new image -- otherwise the old image becomes
+    untagged/dangling the instant the build succeeds and is eligible for
+    collection by a routine `docker image prune` before anyone needs it for
+    rollback. Order matters, not just occurrence.
+    """
+    previous_digest = "sha256:" + ("a" * 64)
+    harness.running_image_state.write_text(previous_digest, encoding="utf-8")
+
+    result = harness.run(
+        "--execute",
+        GW_TEST_LABEL_REVISION="3541ac805b86",
+        GW_TEST_LABEL_BUILD_SOURCE="release",
+        GW_TEST_DELIVERY_PRESENT="1",
+        GW_TEST_SQLITE_PRESENT="1",
+    )
+    assert result.returncode == 0, result.stderr + result.stdout
+
+    lines = harness.docker_log.read_text(encoding="utf-8").splitlines()
+    tag_idx = next((i for i, line in enumerate(lines) if line.startswith("tag ")), None)
+    build_idx = next(
+        (
+            i
+            for i, line in enumerate(lines)
+            if line.startswith("compose -p omninode-gateway")
+        ),
+        None,
+    )
+    assert tag_idx is not None, f"expected a `docker tag ...` call, got: {lines}"
+    assert build_idx is not None, (
+        f"expected a `docker compose ... build` call, got: {lines}"
+    )
+    assert f"tag {previous_digest} docker-gateway-forwarder:previous" in lines[tag_idx]
+    assert tag_idx < build_idx, (
+        "retention tag must be applied BEFORE the build moves "
+        "BUILD_IMAGE_TAG off the previous image"
+    )
+
+
+@pytest.mark.unit
+def test_rollback_target_not_recorded_if_previous_image_missing(
+    harness: _Harness,
+) -> None:
+    """Fail-closed (OMN-15521 remediation): if the previous running image no
+    longer resolves locally (already pruned), the script must not record it
+    as a rollback target -- recording an unvalidated digest verbatim was
+    exactly how the previous version produced a registry.json
+    rollback_command pointing at an image `docker image inspect` could not
+    find (confirmed live on `.201`: registry previous_digest
+    sha256:b51b380d... resolved to "No such image").
+    """
+    previous_digest = "sha256:" + ("a" * 64)
+    harness.running_image_state.write_text(previous_digest, encoding="utf-8")
+
+    result = harness.run(
+        "--execute",
+        GW_TEST_LABEL_REVISION="3541ac805b86",
+        GW_TEST_LABEL_BUILD_SOURCE="release",
+        GW_TEST_DELIVERY_PRESENT="1",
+        GW_TEST_SQLITE_PRESENT="1",
+        GW_TEST_ROLLBACK_TARGET_MISSING="1",
+    )
+    assert result.returncode == 0, result.stderr + result.stdout
+
+    registry = harness.registry()
+    assert registry["previous_digest"] is None
+
+
+@pytest.mark.unit
+def test_first_deploy_records_no_rollback_target(harness: _Harness) -> None:
+    """First-ever deploy: no container is running yet (the fake docker
+    inspect state file is absent), so there is nothing to roll back to --
+    registry.json must record previous_digest as null, not a fabricated or
+    stale value.
+    """
+    harness.running_image_state.unlink()
+
+    result = harness.run(
+        "--execute",
+        GW_TEST_LABEL_REVISION="3541ac805b86",
+        GW_TEST_LABEL_BUILD_SOURCE="release",
+        GW_TEST_DELIVERY_PRESENT="1",
+        GW_TEST_SQLITE_PRESENT="1",
+    )
+    assert result.returncode == 0, result.stderr + result.stdout
+
+    registry = harness.registry()
+    assert registry["previous_digest"] is None
+    docker_log = harness.docker_log.read_text(encoding="utf-8")
+    assert not any(line.startswith("tag ") for line in docker_log.splitlines()), (
+        "must not attempt to retag an empty previous digest"
+    )
 
 
 @pytest.mark.unit
