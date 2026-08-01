@@ -4058,7 +4058,29 @@ def _validate_initial_subscription_contract_identities(
     manifest: ModelAutoWiringManifest,
     report: ModelAutoWiringReport,
 ) -> None:
-    """Require a canonical one-to-one report-to-manifest identity mapping."""
+    """Return uniquely named report rows forming a valid manifest subset.
+
+    OMN-15474 scope. Two properties are load-bearing for single-owner dispatch,
+    and only two:
+
+    1. **Uniqueness** on each side. A repeated contract name would schedule a
+       repeated consumer attachment for one identity — the same
+       execute-the-command-twice class this ticket exists to close.
+    2. **report ⊆ manifest.** A report row naming a contract the manifest never
+       declared is an identity error: it would attach a consumer for a contract
+       this boot does not own.
+
+    The reverse direction is deliberately NOT asserted. ``report.results``
+    is a *partial* view of ``manifest.contracts`` by construction — a contract
+    that failed to wire, was resolver-skipped, or was quarantined legitimately
+    produces no report row, and the subscribe loop below already tolerates that
+    (``contract_by_name.get(...) is None -> continue``, plus the non-``WIRED``
+    skip). Requiring an exact bijection here asserted far beyond this ticket and
+    refused the boot outright against the full shipped manifest
+    (``missing_from_report`` = 118 contracts). This mirrors
+    ``_validate_not_ready_contract_identities`` below, which models the same
+    relation correctly as a subset.
+    """
     manifest_names = _require_unique_canonical_contract_names(
         tuple(contract.name for contract in manifest.contracts),
         identity_source="manifest",
@@ -4067,13 +4089,13 @@ def _validate_initial_subscription_contract_identities(
         tuple(result.contract_name for result in report.results),
         identity_source="report",
     )
-    if report_names != manifest_names:
+    unexpected_names = report_names.difference(manifest_names)
+    if unexpected_names:
         raise ModelOnexError(
             message=(
                 "handler_wiring: report and manifest contract-name mismatch; "
-                "initial subscription requires an exact bijection "
-                f"(missing_from_report={sorted(manifest_names - report_names)}, "
-                f"unexpected_in_report={sorted(report_names - manifest_names)})"
+                "initial subscription identities must be a manifest subset "
+                f"(unexpected={sorted(unexpected_names)})"
             ),
             error_code=EnumCoreErrorCode.INVALID_CONFIGURATION,
         )
@@ -5736,10 +5758,31 @@ def _assert_single_owner_command_topics(
     rule is that a strict invariant "lands AFTER all downstream consumers are
     compliant... if a strict gate must ship first, it ships behind an env flag
     (default OFF) and is flipped in a separate PR once compliance is merged"
-    (CLAUDE.md, Testing and CI). Compliance is NOT met today — a live scan of
-    the shipped contracts found 8 command topics with more than one owner
-    (1 in omnibase_infra: ``onex.cmd.omnibase-infra.chain-learn.v1``; 7 in
-    omnimarket). Raising unconditionally here would refuse the runtime boot on
+    (CLAUDE.md, Testing and CI). Compliance is NOT met today. Measured
+    2026-08-01 by running THIS gate's own detection over
+    ``discover_contracts()`` (109 contracts, omnibase_infra only —
+    ``omnimarket`` is not installed in that venv, so its contracts are not
+    discoverable and are NOT counted here), 3 command topics have more than
+    one in-process owner:
+
+    - ``onex.cmd.omnibase-infra.build-loop-append.v1``
+      -> node_build_loop_write_effect, node_ledger_projection_compute
+    - ``onex.cmd.omnibase-infra.chain-learn.v1``
+      -> node_chain_orchestrator, node_chain_retrieval_effect
+    - ``onex.cmd.platform.request-introspection.v1``
+      -> node_ledger_projection_compute, node_registration_orchestrator
+
+    An earlier revision of this docstring claimed "8 (1 in omnibase_infra;
+    7 in omnimarket)". That is not reproducible: infra alone is 3, not 1. The
+    omnimarket figure cannot be measured from this repo's venv at all. A raw,
+    unfiltered ``contract.yaml`` scan across the infra worktree plus the
+    canonical omnimarket clone yields 16 topics with >1 declared subscriber,
+    but that is a strict superset (it applies none of the discovery, package-
+    activation, or plugin_managed filtering the gate applies). Re-measure with
+    the gate's own code path in the target deployment before flipping the flag;
+    do not trust any count in this docstring as the deployed number.
+
+    Raising unconditionally here would refuse the runtime boot on
     the very next deploy. So: OFF ⇒ log an ERROR naming every violation
     (louder than the pre-existing post-commit WARNING, and now emitted BEFORE
     the subscriptions attach); ON ⇒ raise before any side effect. Flip
