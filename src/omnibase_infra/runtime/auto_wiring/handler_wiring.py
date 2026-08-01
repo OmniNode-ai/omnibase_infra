@@ -5695,6 +5695,93 @@ def _assert_orchestrator_dispatcher_coverage(
         )
 
 
+ENV_SINGLE_OWNER_COMMAND_TOPICS = "ONEX_SINGLE_OWNER_COMMAND_TOPICS"
+
+
+def _single_owner_command_topics_strict() -> bool:
+    """True when the OMN-15474 single-owner command-topic gate must fail closed."""
+    return os.environ.get(ENV_SINGLE_OWNER_COMMAND_TOPICS, "").strip().lower() in (
+        "1",
+        "true",
+    )
+
+
+def _assert_single_owner_command_topics(
+    manifest: ModelAutoWiringManifest,
+) -> None:
+    """Fail closed when a COMMAND topic has more than one in-process consumer.
+
+    OMN-15474. A command is an instruction to execute exactly once. Every wired
+    contract joins its own consumer group (``compute_consumer_group_id`` keys on
+    node identity), so two contracts subscribed to one ``onex.cmd.*`` topic in
+    one process means the broker delivers the accepted command to BOTH: the
+    whole reducer chain runs twice, both executions carry the SAME ingress
+    correlation id, and every terminal event, projection row, LLM judge call and
+    cost line is doubled. That is the live defect measured on ``onex-dev``
+    (73 duplicated ``(correlation_id, topic)`` pairs in 48h; two quality-gate
+    evaluations returning DIFFERENT scores for one command).
+
+    ``_detect_duplicate_topics`` already SAW this — it logged
+    ``Duplicate topic ownership detected`` on every affected boot — but it ran
+    AFTER Phase 2 had already committed the subscriptions, and only at WARNING.
+    Detection that arrives after the side effect and cannot fail the boot is not
+    enforcement ([[feedback_a_rule_is_not_a_mechanism]]). This is the mechanism:
+    a preflight, before any subscription is attached.
+
+    EVENT topics are deliberately untouched. Fan-out is their contract — many
+    independent consumers legitimately observe one event on their own groups.
+    Only the command category carries the execute-exactly-once obligation.
+
+    STRICT MODE IS OFF BY DEFAULT, and that is deliberate. This repo's standing
+    rule is that a strict invariant "lands AFTER all downstream consumers are
+    compliant... if a strict gate must ship first, it ships behind an env flag
+    (default OFF) and is flipped in a separate PR once compliance is merged"
+    (CLAUDE.md, Testing and CI). Compliance is NOT met today — a live scan of
+    the shipped contracts found 8 command topics with more than one owner
+    (1 in omnibase_infra: ``onex.cmd.omnibase-infra.chain-learn.v1``; 7 in
+    omnimarket). Raising unconditionally here would refuse the runtime boot on
+    the very next deploy. So: OFF ⇒ log an ERROR naming every violation
+    (louder than the pre-existing post-commit WARNING, and now emitted BEFORE
+    the subscriptions attach); ON ⇒ raise before any side effect. Flip
+    ``ONEX_SINGLE_OWNER_COMMAND_TOPICS=1`` in a follow-up once those 8 are
+    resolved.
+    """
+    from omnibase_infra.enums import EnumMessageCategory
+
+    command_topic_owners: dict[str, list[str]] = defaultdict(list)
+    for contract in manifest.contracts:
+        if contract.event_bus is None:
+            continue
+        for topic in contract.event_bus.subscribe_topics:
+            if _derive_message_category(topic) == EnumMessageCategory.COMMAND.value:
+                command_topic_owners[topic].append(contract.name)
+
+    violations = [
+        f"{topic} owned by {sorted(owners)}"
+        for topic, owners in sorted(command_topic_owners.items())
+        if len(owners) > 1
+    ]
+    if not violations:
+        return
+
+    detail = (
+        "Command topics are single-owner: a command must execute exactly once, "
+        "but these command topics have more than one in-process consumer, so "
+        "every accepted command is dispatched once per owner, under one "
+        f"correlation id (OMN-15474): {'; '.join(violations)}. Give each "
+        "command topic exactly one owning contract, or move the additional "
+        "consumers onto an event topic."
+    )
+    if _single_owner_command_topics_strict():
+        raise ModelOnexError(detail, error_code=EnumCoreErrorCode.INVALID_STATE)
+    logger.error(
+        "%s (non-strict — set %s=1 to refuse the boot instead of doubling "
+        "every accepted command on these topics)",
+        detail,
+        ENV_SINGLE_OWNER_COMMAND_TOPICS,
+    )
+
+
 def _detect_duplicate_topics(
     manifest: ModelAutoWiringManifest,
 ) -> list[ModelDuplicateTopicOwnership]:
@@ -5986,6 +6073,11 @@ async def wire_from_manifest(
             prepared_contracts,
             dispatcher_coverage_failed_gaps,
         )
+
+    # OMN-15474: single-owner command topics, asserted BEFORE Phase 2 commits any
+    # subscription. Must stay above the commit loop — the post-commit
+    # _detect_duplicate_topics warning below is diagnosis, not a gate.
+    _assert_single_owner_command_topics(manifest)
 
     _preflight_prepared_registration_ids(prepared_contracts, dispatch_engine)
 
