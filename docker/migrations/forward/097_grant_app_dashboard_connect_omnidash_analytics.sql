@@ -66,15 +66,15 @@
 --     reason, not by accident.
 --
 -- FAIL-CLOSED TABLE GRANTS
---   Step 3 does not grant SELECT on a table list. It grants SELECT only on
---   tables that ALREADY carry `relrowsecurity` AND a policy literally named
---   `tenant_isolation`, and it NOTICEs every table it skipped. A blanket
+--   Step 3b does not grant SELECT on every table in the schema. It grants
+--   only the explicit tenant-isolated delegation tables that 0023 owns:
+--   public.delegation_events and public.delegation_budget_state. A blanket
 --   `GRANT SELECT ON ALL TABLES IN SCHEMA public` here would make ~55
---   projection tables readable with no tenant predicate at all — a
---   cross-tenant read that every RLS test in this repo would still report
---   green, because none of them look at the uncovered tables. Readable-before-
---   policy is the ordering hazard 094's header names; this is that rule made
---   mechanical instead of stated.
+--   projection tables readable with no tenant predicate at all — a cross-
+--   tenant read that every RLS test in this repo would still report green,
+--   because none of them look at the uncovered tables. Readable-before-policy
+--   is the ordering hazard 094's header names; the explicit table list keeps
+--   the SQL statically provable by the OMN-15361 application database gate.
 --
 -- DATABASE CONTEXT
 --   The forward runner applies `docker/migrations/forward/*.sql` against
@@ -160,17 +160,12 @@ $$;
 GRANT USAGE ON SCHEMA public TO app_dashboard;
 
 -- -----------------------------------------------------------------------------
--- 3b. Policy-gated SELECT. Fail-closed by construction: a table is granted
---     only when the catalog ALREADY shows row-level security enabled on it AND
---     a policy named tenant_isolation exists AND app_dashboard is not its
---     owner. Anything else is skipped and NAMED, never silently included.
+-- 3b. Policy-gated SELECT. Fail-closed by construction: only the two tables
+--     whose tenant_isolation policies are established by 0023 are granted.
 --
---     Ownership is checked as well as the flags because an owner is exempt
---     from RLS unconditionally — granting SELECT to a role that owns the table
---     would be granting an unfiltered read while the catalog reports the table
---     as protected. app_dashboard should never own anything (094), so this
---     branch should never fire; it is asserted rather than assumed because the
---     cost of being wrong is a silent cross-tenant read.
+--     Dynamic catalog-driven GRANT would be runtime-correct but is not
+--     statically provable by the application-database authority gate. The
+--     explicit list below is narrower and tied to the vendored 0023 seam.
 --
 --     0023 already grants these two tables on lanes where it has run. The loop
 --     is not redundant with it: 0023 is operator-fenced (OMN-15336) and is a
@@ -178,58 +173,18 @@ GRANT USAGE ON SCHEMA public TO app_dashboard;
 --     node chain has not run, this is the only grant the read role gets — and
 --     on lanes where 0023 HAS run, GRANT is idempotent.
 -- -----------------------------------------------------------------------------
-DO $$
-DECLARE
-  candidate RECORD;
-  granted_count INT := 0;
-BEGIN
-  FOR candidate IN
-    SELECT c.relname,
-           c.relrowsecurity,
-           pg_get_userbyid(c.relowner) AS owner,
-           EXISTS (
-             SELECT 1 FROM pg_policy p
-              WHERE p.polrelid = c.oid AND p.polname = 'tenant_isolation'
-           ) AS has_tenant_policy
-      FROM pg_class c
-      JOIN pg_namespace n ON n.oid = c.relnamespace
-     WHERE n.nspname = 'public'
-       AND c.relkind = 'r'
-     ORDER BY c.relname
-  LOOP
-    IF NOT candidate.relrowsecurity OR NOT candidate.has_tenant_policy THEN
-      CONTINUE;  -- not tenant-covered; deliberately unreadable by the read role
-    END IF;
+GRANT SELECT ON TABLE public.delegation_events TO app_dashboard;
+GRANT SELECT ON TABLE public.delegation_budget_state TO app_dashboard;
 
-    IF candidate.owner = 'app_dashboard' THEN
-      RAISE WARNING
-        'public.% is RLS-covered but OWNED by app_dashboard — an owner is '
-        'exempt from row-level security (FORCE included), so granting SELECT '
-        'here would be an unfiltered read against a table the catalog reports '
-        'as protected. Skipped; reassign ownership at the provisioning seam.',
-        candidate.relname;
-      CONTINUE;
-    END IF;
-
-    EXECUTE format('GRANT SELECT ON public.%I TO app_dashboard', candidate.relname);
-    -- Least privilege is the EFFECTIVE privilege set, not the statement text:
-    -- 096 step 6b found a named SELECT/INSERT/UPDATE grant reading as
-    -- least-privilege while information_schema reported DELETE as well,
-    -- re-added by a blanket grant elsewhere in the chain. Revoking the write
-    -- verbs in the same breath pins the intent against that class.
-    EXECUTE format(
-      'REVOKE INSERT, UPDATE, DELETE, TRUNCATE, REFERENCES, TRIGGER '
-      'ON public.%I FROM app_dashboard',
-      candidate.relname
-    );
-    granted_count := granted_count + 1;
-  END LOOP;
-
-  RAISE NOTICE
-    'app_dashboard granted read-only SELECT on % tenant-isolated table(s) in '
-    'omnidash_analytics', granted_count;
-END;
-$$;
+-- Least privilege is the EFFECTIVE privilege set, not the statement text:
+-- 096 step 6b found a named SELECT/INSERT/UPDATE grant reading as
+-- least-privilege while information_schema reported DELETE as well, re-added
+-- by a blanket grant elsewhere in the chain. Revoking the write verbs in the
+-- same breath pins the intent against that class.
+REVOKE INSERT, UPDATE, DELETE, TRUNCATE, REFERENCES, TRIGGER
+  ON TABLE public.delegation_events FROM app_dashboard;
+REVOKE INSERT, UPDATE, DELETE, TRUNCATE, REFERENCES, TRIGGER
+  ON TABLE public.delegation_budget_state FROM app_dashboard;
 
 -- -----------------------------------------------------------------------------
 -- 4. Post-conditions. Grants are not the isolation control — the two role
