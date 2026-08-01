@@ -5634,6 +5634,59 @@ def _detect_duplicate_topics(
     return duplicates
 
 
+UNWIRED_BACKFILL_REASON = (
+    "no wiring result produced for this manifest contract "
+    "(wiring-report totality backfill, OMN-15474)"
+)
+
+
+def build_unwired_contract_results(
+    manifest: ModelAutoWiringManifest,
+    *,
+    reason: str,
+    already_reported: Collection[str] = (),
+) -> tuple[ModelContractWiringResult, ...]:
+    """Return one explicit "did not wire" row per uncovered manifest contract.
+
+    The wiring report consumed by :func:`subscribe_wired_contract_topics` is
+    TOTAL over the manifest: every discovered contract either wired, failed, or
+    carries an explicit :attr:`EnumWiringOutcome.SKIPPED` row naming why it did
+    not. Totality is what makes the initial-subscription identity check
+    (:func:`_validate_initial_subscription_contract_identities`) a decision
+    instead of a guess — a report that merely *omits* a contract is
+    indistinguishable from one where the contract silently vanished, and
+    silently-vanished contracts are exactly the class of bug that produced
+    process-global dispatch (OMN-15474).
+
+    This is the canonical constructor for those rows. Every producer of a
+    :class:`ModelAutoWiringReport` — including test doubles standing in for the
+    wiring engine — MUST use it rather than emitting a partial report, so the
+    "did not wire" set is derived from the manifest the runtime actually holds
+    rather than hand-mirrored against it.
+
+    Args:
+        manifest: The manifest the report must be total over.
+        reason: Human-readable reason recorded on each synthesized row.
+        already_reported: Contract names that already have a result row.
+
+    Returns:
+        One SKIPPED result per manifest contract absent from
+        ``already_reported``, in manifest order. Empty when the report is
+        already total.
+    """
+    covered = frozenset(already_reported)
+    return tuple(
+        ModelContractWiringResult(
+            contract_name=contract.name,
+            package_name=contract.package_name,
+            outcome=EnumWiringOutcome.SKIPPED,
+            reason=reason,
+        )
+        for contract in manifest.contracts
+        if contract.name not in covered
+    )
+
+
 async def wire_from_manifest(
     manifest: ModelAutoWiringManifest,
     dispatch_engine: ProtocolDispatchEngine,
@@ -5845,6 +5898,33 @@ async def wire_from_manifest(
             result_applier=(result_appliers_by_contract or {}).get(pcw.contract.name),
         )
         results.append(result)
+
+    # OMN-15474 totality post-condition. Phase 1 + Phase 2 above are written so
+    # that every manifest contract yields exactly one row (a prepared contract
+    # commits a row, a preparation failure collects one). That is a property of
+    # two loops, not of this function's signature, so a future refactor can
+    # break it silently — and the only downstream symptom would be
+    # subscribe_wired_contract_topics aborting the kernel at boot on a
+    # report/manifest bijection failure. Backfill instead: any manifest
+    # contract with no row gets an explicit SKIPPED row naming why, so the
+    # report this function returns is TOTAL by contract rather than by
+    # accident. This does NOT relax the downstream identity check — that check
+    # is unchanged and still rejects report rows with no manifest contract,
+    # which is the direction no backfill can repair.
+    unwired_backfill = build_unwired_contract_results(
+        manifest,
+        reason=UNWIRED_BACKFILL_REASON,
+        already_reported=tuple(r.contract_name for r in results),
+    )
+    if unwired_backfill:
+        logger.error(
+            "Auto-wiring produced no result row for %d manifest contract(s); "
+            "backfilling explicit unwired rows to keep the report total "
+            "(OMN-15474). This is a wiring-engine bug, not a contract bug: %s",
+            len(unwired_backfill),
+            sorted(r.contract_name for r in unwired_backfill),
+        )
+        results.extend(unwired_backfill)
 
     duplicates = _detect_duplicate_topics(manifest)
 
