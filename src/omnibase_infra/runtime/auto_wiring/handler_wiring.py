@@ -6478,6 +6478,15 @@ async def _subscribe_contract_topics(
             output_topic=output_topic,
             output_topic_map=output_topic_map,
             allowed_output_topics=contract.event_bus.publish_topics,
+            # OMN-15468 AC2: hand the applier the contract's DECLARED failure
+            # terminal so a returned model that states a failure verdict cannot
+            # be republished onto the success terminal by map-miss fallback.
+            # Read through the same single reader the Pattern B broker's
+            # subscription set is built from, so the two cannot disagree about
+            # which topics are terminal for this contract.
+            failure_terminal_topics=_declared_failure_terminal_topics(
+                contract, success_topic=output_topic
+            ),
         )
     node_identity = ModelNodeIdentity(
         env=environment,
@@ -6571,6 +6580,38 @@ async def _subscribe_contract_topics(
     )
 
     return topics_subscribed
+
+
+def _declared_failure_terminal_topics(
+    contract: ModelDiscoveredContract,
+    *,
+    success_topic: str,
+) -> tuple[str, ...]:
+    """Return the contract's declared FAILURE terminal topics (OMN-15468 AC2).
+
+    A failure terminal is any contract-declared terminal topic that is (a) not
+    the success terminal the applier falls back to and (b) actually publishable
+    by this contract. Both conditions matter: publishing to an undeclared topic
+    would violate the contract's own publish allowlist, and re-routing to the
+    success terminal would be a no-op.
+
+    Read through :func:`load_terminal_event_topics` — the SAME reader the
+    Pattern B broker's subscription set is built from — so the applier's idea of
+    which topics are terminal cannot drift from the broker's. A second
+    hand-rolled reader here is exactly the seam mismatch that produced this
+    ticket.
+    """
+    if contract.event_bus is None or not contract.event_bus.publish_topics:
+        return ()
+    publishable = set(contract.event_bus.publish_topics)
+    declared = load_terminal_event_topics(contract.contract_path)
+    return tuple(
+        sorted(
+            topic
+            for topic in declared
+            if topic != success_topic and topic in publishable
+        )
+    )
 
 
 def _select_dispatch_result_output_topic(
