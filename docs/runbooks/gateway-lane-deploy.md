@@ -95,12 +95,23 @@ hand-built image had `rev=(empty)`.
 In order, this:
 
 1. Resolves `repo_root` / `version` (pyproject.toml) / `git_sha` (HEAD).
-2. Reads the **existing** `GATEWAY_IMAGE` digest from
-   `/etc/omninode/gateway/gateway.env` and records it as the rollback target.
-3. Sources that same env file so the AWS/TPM/UID variables the compose file
+2. Resolves the CONTAINER's currently running image
+   (`docker inspect omninode-gateway-forwarder --format '{{.Image}}'`) as the
+   rollback target — **never** `gateway.env`'s `GATEWAY_IMAGE=` line, which can
+   go stale relative to what is actually running — and retags it durably as
+   `docker-gateway-forwarder:previous` so it survives the build below moving
+   the build tag onto the new image. If the previous image no longer resolves
+   locally (already pruned), no rollback target is recorded for this deploy
+   rather than recording a digest `docker image inspect` cannot find.
+3. Sources the env file so the AWS/TPM/UID variables the compose file
    requires resolve for the build.
 4. Builds `docker-gateway-forwarder:build` with the provenance build-args from
-   step 2 above.
+   step 2 above, **plus** `OMNIBASE_COMPAT_REF` / `OMNIMARKET_REF` /
+   `ONEX_CHANGE_CONTROL_REF` — the same sibling-ref args
+   `deploy-runtime.sh`'s `build_images()` passes unconditionally. Omitting
+   these silently falls back to the Dockerfile's hardcoded ARG defaults,
+   which is how the gateway image's `onex-change-control` pin drifted from
+   the `omnibase-infra` runtime image's pin on the same box.
 5. Resolves the built image's digest (`docker image inspect --format='{{.Id}}'`).
 6. Syncs `docker/docker-compose.gateway.yml` and
    `docker/gateway/beta-gateway-canary.yaml` from **this checkout** into
@@ -116,9 +127,11 @@ In order, this:
    `~/.omnibase/infra/registry.json` uses for the `omnibase-infra` lane.
 9. `sudo systemctl reload onex-gateway-forwarder` — the unit's existing
    `ExecReload` force-recreates the container on the new digest.
-10. Verifies: labels are non-empty, and the two OMN-12912 files
-    (`service_gateway_delivery.py`, `store_sqlite.py`) are present inside the
-    running container.
+10. Verifies: the container is actually running the digest just built (a
+    reload that silently fails to recreate the container is caught here
+    instead of reporting success), labels are non-empty, and the two
+    OMN-12912 files (`service_gateway_delivery.py`, `store_sqlite.py`) are
+    present inside the running container.
 
 Pass `--skip-reload` to build + sync + pin the new digest without recreating
 the running container yet (the old container keeps running on the old
@@ -150,7 +163,10 @@ cat ~/.omnibase/gateway/registry.json | jq .
 ## Rollback
 
 `~/.omnibase/gateway/registry.json`'s `previous_digest` names the last-known-
-good digest. To roll back to it:
+good digest — resolved from the container's own running state at deploy time
+and retagged as `docker-gateway-forwarder:previous` so a routine
+`docker image prune` cannot silently make it unresolvable before anyone needs
+it. To roll back to it:
 
 ```bash
 sudo sed -i "s|^GATEWAY_IMAGE=.*|GATEWAY_IMAGE=$(jq -r .previous_digest ~/.omnibase/gateway/registry.json)|" \
@@ -166,12 +182,27 @@ digest is always restored by hand from the registry.
 
 ---
 
-## What OMN-15521 does NOT cover
+## AC5 — the OMN-12912 restart/redelivery proof
 
-The OMN-12912 restart/redelivery proof (source-offset-ack / dedupe receipt,
-run against the freshly deployed forwarder after a restart) is **out of
-scope for this ticket** — it lands on OMN-12912, not here, per that ticket's
-own falsifiable acceptance criteria.
+```bash
+./scripts/gateway_restart_safety_proof.sh
+```
+
+Snapshots the running container's durable idempotency store row count,
+reloads `onex-gateway-forwarder` (the same mechanism `--execute` uses to
+recreate the container), waits for Docker-healthy, then re-snapshots and
+fails if any durable marker was lost across the restart or the container
+never came back genuinely healthy. This is a real restart-durability smoke
+proof, driven against the actual running container — it is **not** the full
+cross-broker at-least-once/exactly-once redelivery proof (a deliberately
+killed in-flight message never duplicating or dropping on the far side),
+which needs a synthetic in-flight cloud MSK message and is OMN-12912's own
+test suite's job.
+
+Per OMN-15521's own AC5 wording ("that receipt lands on OMN-12912, not this
+ticket"): run the script, then paste its printed receipt into an OMN-12912
+comment. This runbook and `scripts/gateway_restart_safety_proof.sh` do not
+file it anywhere themselves.
 
 ## Related runbooks
 

@@ -108,26 +108,36 @@ REQUIRED ENVIRONMENT (--execute only)
 
 WHAT --execute DOES, IN ORDER
     1. Resolve repo root, version (pyproject.toml), and git SHA (HEAD).
-    2. Build the image with the same OCI provenance build-args every
+    2. Resolve the CONTAINER's currently running image (docker inspect
+       --format '{{.Image}}') as the rollback target, and retag it durably as
+       ${ROLLBACK_IMAGE_TAG} so it survives the build below moving the
+       build tag onto the new image (a bare env-file digest is never used --
+       it can go stale relative to what is actually running).
+    3. Build the image with the same OCI provenance build-args every
        omnibase-infra runtime container gets (VCS_REF, RUNTIME_VERSION,
        BUILD_DATE, COMPOSE_PROJECT, RUNTIME_SOURCE_HASH, PROMOTION_CLASS,
-       NON_MAIN_LINEAGE).
-    3. Resolve the built image's digest (sha256:<64 hex>).
-    4. Sync docker/docker-compose.gateway.yml and
+       NON_MAIN_LINEAGE, OMNIBASE_COMPAT_REF, OMNIMARKET_REF,
+       ONEX_CHANGE_CONTROL_REF).
+    4. Resolve the built image's digest (sha256:<64 hex>).
+    5. Sync docker/docker-compose.gateway.yml and
        docker/gateway/beta-gateway-canary.yaml from this checkout into
        ${GATEWAY_HOST_DIR} (root-owned, mode 0444 -- same posture the files
        already have), replacing the hand-copied originals.
-    5. Rewrite ${GATEWAY_ENV_FILE}'s GATEWAY_IMAGE= line to the new digest,
+    6. Rewrite ${GATEWAY_ENV_FILE}'s GATEWAY_IMAGE= line to the new digest,
        preserving every other key untouched.
-    6. Record the previous digest + this deploy's identity in
+    7. Record the previous digest + this deploy's identity in
        ${GATEWAY_REGISTRY_FILE} (rollback target).
-    7. 'systemctl reload ${SYSTEMD_UNIT}' (force-recreates the container on
+    8. 'systemctl reload ${SYSTEMD_UNIT}' (force-recreates the container on
        the new digest; requires sudo) unless --skip-reload.
-    8. Verify: image labels are non-empty, and log whether the container is
-       running the new digest.
+    9. Verify: the container is actually running the digest just built (not
+       just that labels are non-empty -- a reload that silently fails to
+       recreate the container is caught here instead of reporting success),
+       image labels are non-empty, and the two OMN-12912 files are present.
 
 ROLLBACK
-    ${GATEWAY_REGISTRY_FILE} records "previous_digest". To roll back:
+    ${GATEWAY_REGISTRY_FILE} records "previous_digest" -- the image this
+    script retagged as ${ROLLBACK_IMAGE_TAG} before building, so it remains
+    resolvable even after a later 'docker image prune'. To roll back:
       sudo sed -i "s|^GATEWAY_IMAGE=.*|GATEWAY_IMAGE=<previous_digest>|" ${GATEWAY_ENV_FILE}
       sudo systemctl reload ${SYSTEMD_UNIT}
     (mirrors the omnibase-infra lane's manual rollback-via-registry.json
@@ -254,6 +264,21 @@ read_git_sha() {
     echo "${sha}"
 }
 
+read_repo_ref_or_main() {
+    # Same helper as deploy-runtime.sh's read_repo_ref_or_main (OMN-15521
+    # remediation): resolve a full git SHA for a sibling workspace repo when
+    # available, falling back to "main" (or the repo's own default via the
+    # Dockerfile ARG default) when OMNI_HOME or the sibling clone is absent.
+    local repo_path="$1" fallback="$2"
+    local sha
+    sha="$(git -C "${repo_path}" rev-parse HEAD 2>/dev/null || true)"
+    if [[ -n "${sha}" ]]; then
+        echo "${sha}"
+    else
+        echo "${fallback}"
+    fi
+}
+
 check_git_dirty() {
     local repo_root="$1"
     local status_output
@@ -283,6 +308,23 @@ resolve_build_args() {
         promotion_class="stability-candidate"
         non_main_lineage="true"
     fi
+    # OMN-15521 remediation: these three sibling-ref build-args are NOT
+    # optional extras -- deploy-runtime.sh's build_images() passes them
+    # unconditionally on every build_source (scripts/deploy-runtime.sh
+    # resolve+pass at build_images()). Omitting them silently falls back to
+    # the Dockerfile's hardcoded ARG defaults (OMNIBASE_COMPAT_REF=v0.5.5,
+    # ONEX_CHANGE_CONTROL_REF=v0.5.3, OMNIMARKET_REF=dev), which is exactly
+    # how the gateway image drifted from the omnibase-infra runtime image's
+    # onex-change-control pin on the same box (0.5.3 vs 0.5.1).
+    local omni_home="${OMNI_HOME:-}"
+    local compat_ref="main"
+    local omnimarket_ref="dev"
+    local occ_ref="main"
+    if [[ -n "${omni_home}" ]]; then
+        compat_ref="$(read_repo_ref_or_main "${omni_home}/omnibase_compat" "main")"
+        omnimarket_ref="$(read_repo_ref_or_main "${omni_home}/omnimarket" "dev")"
+        occ_ref="$(read_repo_ref_or_main "${omni_home}/onex_change_control" "main")"
+    fi
     cat <<EOF
 GIT_SHA=${git_sha}
 VCS_REF=${git_sha}
@@ -294,7 +336,10 @@ BUILD_SOURCE=${build_source}
 EXPECTED_BUILD_SOURCE=${expected_build_source}
 PROMOTION_CLASS=${promotion_class}
 NON_MAIN_LINEAGE=${non_main_lineage}
-OMNI_HOME=${OMNI_HOME:-}
+OMNI_HOME=${omni_home}
+OMNIBASE_COMPAT_REF=${compat_ref}
+OMNIMARKET_REF=${omnimarket_ref}
+ONEX_CHANGE_CONTROL_REF=${occ_ref}
 EOF
     unset repo_root
 }
@@ -386,17 +431,54 @@ verify_host_files_match() {
 }
 
 # =============================================================================
-# gateway.env digest pin
+# Rollback target retention (AC6) -- OMN-15521 remediation.
+#
+# The rollback target must be derived from what the CONTAINER is actually
+# running, never from gateway.env's GATEWAY_IMAGE= line: that line can go
+# stale relative to the running container (manual edits, a previous deploy
+# that wrote the file but was killed before reload, etc.), which produces a
+# recorded "rollback target" that was never the last-known-good image.
+#
+# It must also be RETAGGED under a durable name before build_image() moves
+# BUILD_IMAGE_TAG onto the freshly built image -- otherwise the previous
+# image becomes untagged/dangling the instant the build succeeds and is
+# eligible for collection by any routine `docker image prune`, so the
+# recorded digest resolves to nothing by the time anyone needs it.
 # =============================================================================
 
-current_gateway_image_digest() {
-    local env_file="$1"
-    if [[ ! -f "${env_file}" ]]; then
-        echo ""
+readonly ROLLBACK_IMAGE_TAG="docker-gateway-forwarder:previous"
+
+resolve_running_container_image() {
+    # Prints the image id (sha256:<64 hex>) CONTAINER_NAME is currently
+    # running, or empty if the container does not exist yet (first deploy).
+    # Read straight off the live container's own state -- this is the true
+    # last-known-good and cannot go stale the way gateway.env's line can.
+    docker inspect "${CONTAINER_NAME}" --format '{{.Image}}' 2>/dev/null || true
+}
+
+retain_previous_image() {
+    # Retag the previous running image under ROLLBACK_IMAGE_TAG so it
+    # survives the build moving BUILD_IMAGE_TAG onto the new image. Returns
+    # non-zero (and the caller must then treat the rollback target as
+    # unavailable) if the image no longer resolves locally -- `docker tag`
+    # against a missing source image fails, which is exactly the existence
+    # check a bare env-file digest never got.
+    local previous_digest="$1"
+    if [[ -z "${previous_digest}" ]]; then
+        log_info "No previous running container image to retain (first deploy)."
+        return 1
+    fi
+    if docker tag "${previous_digest}" "${ROLLBACK_IMAGE_TAG}" 2>/dev/null; then
+        log_info "Retained previous image ${previous_digest} as ${ROLLBACK_IMAGE_TAG} (rollback target, survives prune)."
         return 0
     fi
-    awk -F= '/^GATEWAY_IMAGE=/{print $2; exit}' "${env_file}"
+    log_warn "Previous running image ${previous_digest} could not be retagged (already pruned / not local); no rollback target will be recorded for this deploy."
+    return 1
 }
+
+# =============================================================================
+# gateway.env digest pin
+# =============================================================================
 
 update_gateway_env_digest() {
     local env_file="$1" new_digest="$2"
@@ -468,7 +550,23 @@ reload_service() {
 # =============================================================================
 
 verify_deployment() {
+    # verify_deployment NEW_DIGEST -- OMN-15521 remediation: the first check
+    # must be that the container is actually running the digest this
+    # invocation just built. Without this, a `systemctl reload` that
+    # silently fails to recreate the container (e.g. a transient compose
+    # error swallowed by the unit) leaves the OLD container running, which
+    # still passes every other check here (non-empty labels, both files
+    # present) -- the deploy reports success while nothing actually changed.
+    local new_digest="$1"
     log_step "Verify"
+    local running_image
+    running_image="$(resolve_running_container_image)"
+    if [[ "${running_image}" != "${new_digest}" ]]; then
+        log_error "AC-VERIFY FAILED: ${CONTAINER_NAME} is running ${running_image:-<no container>}, expected the newly built ${new_digest}. The reload did not take effect."
+        return 1
+    fi
+    log_info "AC-VERIFY OK: ${CONTAINER_NAME} is running the newly deployed digest ${new_digest}."
+
     local rev src
     rev="$(docker inspect "${CONTAINER_NAME}" --format '{{index .Config.Labels "org.opencontainers.image.revision"}}' 2>/dev/null || true)"
     src="$(docker inspect "${CONTAINER_NAME}" --format '{{index .Config.Labels "com.omninode.build_source"}}' 2>/dev/null || true)"
@@ -534,8 +632,11 @@ main() {
     fi
 
     local previous_digest
-    previous_digest="$(current_gateway_image_digest "${GATEWAY_ENV_FILE}")"
-    log_info "Previous GATEWAY_IMAGE (rollback target): ${previous_digest:-<none recorded>}"
+    previous_digest="$(resolve_running_container_image)"
+    if ! retain_previous_image "${previous_digest}"; then
+        previous_digest=""
+    fi
+    log_info "Previous running image (rollback target): ${previous_digest:-<none recorded -- first deploy or image no longer resolvable>}"
 
     set -a
     # shellcheck source=/dev/null
@@ -559,7 +660,7 @@ main() {
     fi
 
     reload_service
-    verify_deployment
+    verify_deployment "${new_digest}"
     log_step "Done"
     log_info "omninode-gateway deployed: version=${version} git_sha=${git_sha} digest=${new_digest}"
 }
