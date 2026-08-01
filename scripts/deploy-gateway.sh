@@ -301,8 +301,8 @@ EOF
 
 build_compose_cmd() {
     # build_compose_cmd REPO_ROOT GIT_SHA VERSION -- prints (one token per
-    # line, for readarray consumption) the full 'docker compose ... build'
-    # argv.
+    # line, for _read_lines_into_array consumption) the full
+    # 'docker compose ... build' argv.
     local repo_root="$1" git_sha="$2" version="$3"
     printf 'docker\ncompose\n-p\n%s\n-f\ndocker/docker-compose.gateway.yml\nbuild\n--progress=plain\n' "${COMPOSE_PROJECT}"
     while IFS= read -r arg; do
@@ -313,17 +313,29 @@ build_compose_cmd() {
 }
 
 print_compose_commands() {
+    # Portable stand-in for bash 4's `readarray`/`mapfile` (unavailable on
+    # macOS's shipped /bin/bash 3.2 -- Apple has not updated it past 3.2 since
+    # bash moved to GPLv3, and this script must run there like
+    # scripts/deploy-runtime.sh and its runtime_build siblings do). Namerefs
+    # (`local -n`, bash 4.3+) are equally unavailable, so this loop is
+    # inlined at each call site rather than factored into a helper.
     local repo_root="$1" git_sha="$2" version="$3"
-    local -a cmd
-    readarray -t cmd < <(build_compose_cmd "${repo_root}" "${git_sha}" "${version}")
+    local -a cmd=()
+    local line
+    while IFS= read -r line; do
+        cmd+=("${line}")
+    done < <(build_compose_cmd "${repo_root}" "${git_sha}" "${version}")
     log_step "Build command (compose project: ${COMPOSE_PROJECT})"
     log_cmd "GATEWAY_IMAGE=${BUILD_IMAGE_TAG} ${cmd[*]}"
 }
 
 build_image() {
     local repo_root="$1" git_sha="$2" version="$3"
-    local -a cmd
-    readarray -t cmd < <(build_compose_cmd "${repo_root}" "${git_sha}" "${version}")
+    local -a cmd=()
+    local line
+    while IFS= read -r line; do
+        cmd+=("${line}")
+    done < <(build_compose_cmd "${repo_root}" "${git_sha}" "${version}")
 
     log_step "Build Image"
     log_info "Building ${BUILD_IMAGE_TAG} with VCS_REF=${git_sha} RUNTIME_VERSION=${version}..."
