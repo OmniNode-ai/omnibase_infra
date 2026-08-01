@@ -78,20 +78,21 @@ from omnibase_infra.runtime.auto_wiring.handler_wiring import (
 def _make_event_bus_callback(
     topic: str,
     dispatch_engine: object,
+    result_applier: object | None = None,
     **kwargs: object,
 ) -> Callable[..., Awaitable[None]]:
     """Build the boundary under its required synthetic contract scope.
 
-    OMN-15474 made the ingress boundary contract-scoped: the callback dispatches
-    only to the dispatcher ids its owning contract registered, and refuses to be
-    built without them rather than falling back to a process-global fan-out.
-    These OMN-14498 seam tests are about correlation lineage across the DLQ
-    boundary, not about ownership, so they supply one synthetic dispatcher id —
-    mirroring the identical shim in test_boundary_dlq_omn14507.py.
+    OMN-15474 made the dispatcher scope an explicit, required argument of the
+    boundary callback (a contract may no longer fan out process-globally).
+    This seam asserts DLQ/ack correlation semantics, not scoping, so it binds
+    one synthetic scope — same wrapper the sibling boundary-DLQ seam uses in
+    test_boundary_dlq_omn14507.py.
     """
     return _make_contract_scoped_event_bus_callback(
         topic,
         dispatch_engine,  # type: ignore[arg-type]
+        result_applier=result_applier,  # type: ignore[arg-type]
         allowed_dispatcher_ids={"test-dispatcher"},
         **kwargs,  # type: ignore[arg-type]
     )
