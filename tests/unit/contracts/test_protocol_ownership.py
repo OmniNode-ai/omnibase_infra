@@ -128,6 +128,7 @@ KNOWN_INFRA_PROTOCOLS: dict[str, str] = {
     "ProtocolIntentEffect": "runtime/service_intent_executor.py",
     "ProtocolIntentPayload": "runtime/protocols/protocol_intent_payload.py",
     "ProtocolRuntimeScheduler": "runtime/protocols/protocol_runtime_scheduler.py",
+    "ProtocolContractScopedDispatchEngine": "runtime/protocols/protocol_contract_scoped_dispatch_engine.py",  # [RUNTIME] OMN-15474 exact contract-owned dispatcher scope capability
     "ProtocolSecretResolver": "runtime/config_discovery/models/protocol_secret_resolver.py",
     "ProtocolSecretResolverMetrics": "runtime/secret_resolver.py",
     "ProtocolDbTableCatalogConnection": "runtime/auto_wiring/protocol_db_table_catalog_connection.py",  # [RUNTIME] OMN-15418 narrow asyncpg catalog-query boundary for typed table ownership validation

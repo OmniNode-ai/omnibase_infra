@@ -136,8 +136,9 @@ import inspect
 import logging
 import threading
 import time
-from collections.abc import Awaitable, Callable
+from collections.abc import Awaitable, Callable, Collection, Mapping
 from contextvars import copy_context
+from dataclasses import dataclass
 from datetime import UTC, datetime
 from typing import TYPE_CHECKING, TypedDict, Unpack, cast, overload
 from uuid import UUID, uuid4
@@ -302,6 +303,17 @@ def _get_route_dispatcher_id(route: object) -> str:
     raise AttributeError(msg)
 
 
+def _find_duplicate_identifiers(values: Collection[str]) -> frozenset[str]:
+    """Return identifiers repeated within one claimed registration boundary."""
+    seen: set[str] = set()
+    duplicates: set[str] = set()
+    for value in values:
+        if value in seen:
+            duplicates.add(value)
+        seen.add(value)
+    return frozenset(duplicates)
+
+
 # Minimum number of parameters for a dispatcher to be considered context-aware.
 # Context-aware dispatchers have signature: (envelope, context, ...)
 # Non-context-aware dispatchers have signature: (envelope)
@@ -394,6 +406,9 @@ class DispatchEntryInternal:
             instead of fanning the message out to every sibling handler
             (OMN-12416). ``None`` preserves the legacy string-only matching for
             operation-only or untyped dispatchers.
+        owner_contract_name: Contract that registered this dispatcher through
+            auto-wiring. ``None`` marks a manual/global dispatcher that cannot
+            be used as a contract-owned subscription scope.
     """
 
     __slots__ = (
@@ -404,6 +419,7 @@ class DispatchEntryInternal:
         "message_types",
         "node_kind",
         "operation_bindings",
+        "owner_contract_name",
         "payload_type_matcher",
     )
 
@@ -417,6 +433,7 @@ class DispatchEntryInternal:
         accepts_context: bool = False,
         operation_bindings: ModelOperationBindingsSubcontract | None = None,
         payload_type_matcher: Callable[[object], bool] | None = None,
+        owner_contract_name: str | None = None,
     ) -> None:
         self.dispatcher_id = dispatcher_id
         self.dispatcher = dispatcher
@@ -427,8 +444,23 @@ class DispatchEntryInternal:
         self.operation_bindings = (
             operation_bindings  # Declarative bindings for this dispatcher
         )
+        self.owner_contract_name = owner_contract_name
         # None means "not type-scoped" — legacy string-only matching applies.
         self.payload_type_matcher = payload_type_matcher
+
+
+@dataclass(
+    frozen=True,
+    slots=True,
+)  # internal-dataclass-ok: dispatch-engine-internal routing criteria
+class DispatchMatchCriteriaInternal:
+    """Cohesive criteria for the private dispatcher-matching pass."""
+
+    topic: str
+    category: EnumMessageCategory
+    message_type: str
+    payload: object | None = None
+    allowed_dispatcher_ids: frozenset[str] | None = None
 
 
 class PayloadScopingOutcomeInternal:
@@ -691,6 +723,7 @@ class MessageDispatchEngine:
         node_kind: None = None,
         operation_bindings: ModelOperationBindingsSubcontract | None = None,
         payload_type_matcher: Callable[[object], bool] | None = None,
+        owner_contract_name: str | None = None,
     ) -> None: ...  # Stub: no node_kind -> DispatcherFunc (no context)
 
     @overload
@@ -704,6 +737,7 @@ class MessageDispatchEngine:
         node_kind: EnumNodeKind,
         operation_bindings: ModelOperationBindingsSubcontract | None = None,
         payload_type_matcher: Callable[[object], bool] | None = None,
+        owner_contract_name: str | None = None,
     ) -> None: ...  # Stub: with node_kind -> ContextAwareDispatcherFunc (gets context)
 
     def register_dispatcher(
@@ -715,6 +749,7 @@ class MessageDispatchEngine:
         node_kind: EnumNodeKind | None = None,
         operation_bindings: ModelOperationBindingsSubcontract | None = None,
         payload_type_matcher: Callable[[object], bool] | None = None,
+        owner_contract_name: str | None = None,
     ) -> None:
         """
         Register a message dispatcher.
@@ -751,6 +786,9 @@ class MessageDispatchEngine:
                 message to the single handler whose ``event_model`` matches the
                 payload type rather than fanning out to every sibling handler
                 (OMN-12416). When None, legacy string-only matching applies.
+            owner_contract_name: Exact auto-wiring contract owner. Manual/global
+                registrations leave this unset and cannot later be cited by a
+                contract-owned subscription scope.
 
         Raises:
             ModelOnexError: If engine is frozen (INVALID_STATE)
@@ -829,6 +867,7 @@ class MessageDispatchEngine:
                 node_kind=node_kind,
                 operation_bindings=operation_bindings,
                 payload_type_matcher=payload_type_matcher,
+                owner_contract_name=owner_contract_name,
             )
 
     def _validate_dispatcher_registration(
@@ -866,12 +905,21 @@ class MessageDispatchEngine:
         node_kind: EnumNodeKind | None,
         operation_bindings: ModelOperationBindingsSubcontract | None,
         payload_type_matcher: Callable[[object], bool] | None = None,
+        owner_contract_name: str | None = None,
     ) -> None:
         if dispatcher_id in self._dispatchers:
             raise ModelOnexError(
                 message=f"Dispatcher with ID '{dispatcher_id}' is already registered. "
                 "Cannot register duplicate dispatcher ID.",
                 error_code=EnumCoreErrorCode.DUPLICATE_REGISTRATION,
+            )
+        if owner_contract_name is not None and (
+            not owner_contract_name
+            or owner_contract_name != owner_contract_name.strip()
+        ):
+            raise ModelOnexError(
+                message="Dispatcher owner contract name must be non-empty and canonical.",
+                error_code=EnumCoreErrorCode.INVALID_PARAMETER,
             )
 
         accepts_context = self._dispatcher_accepts_context(dispatcher)
@@ -884,6 +932,7 @@ class MessageDispatchEngine:
             accepts_context=accepts_context,
             operation_bindings=operation_bindings,
             payload_type_matcher=payload_type_matcher,
+            owner_contract_name=owner_contract_name,
         )
         self._dispatchers[dispatcher_id] = entry
 
@@ -973,6 +1022,7 @@ class MessageDispatchEngine:
         category: EnumMessageCategory,
         message_types: set[str] | None = None,
         payload_type_matcher: Callable[[object], bool] | None = None,
+        owner_contract_name: str | None = None,
     ) -> None:
         """Register a dispatcher post-freeze for dynamic contract materialization.
 
@@ -1004,6 +1054,7 @@ class MessageDispatchEngine:
                 node_kind=None,
                 operation_bindings=None,
                 payload_type_matcher=payload_type_matcher,
+                owner_contract_name=owner_contract_name,
             )
 
             self._logger.info(
@@ -1098,6 +1149,8 @@ class MessageDispatchEngine:
         self,
         topic: str,
         envelope: ModelEventEnvelope[object],
+        *,
+        allowed_dispatcher_ids: Collection[str] | None = None,
     ) -> ModelDispatchResult:
         """
         Dispatch a message to matching dispatchers.
@@ -1116,6 +1169,11 @@ class MessageDispatchEngine:
         Args:
             topic: The topic the message was received on (e.g., "dev.user.events.v1")
             envelope: The message envelope to dispatch
+            allowed_dispatcher_ids: Optional exact dispatcher scope for a wired
+                contract subscription. When supplied, only routes owned by these
+                dispatcher IDs may execute. An empty or unknown scope fails
+                closed. ``None`` preserves process-global fan-out for direct
+                runtime callers that are not contract subscription callbacks.
 
         Returns:
             ModelDispatchResult with dispatch status, metrics, and dispatcher outputs
@@ -1160,6 +1218,28 @@ class MessageDispatchEngine:
                 message="Cannot dispatch None envelope. ModelEventEnvelope is required.",
                 error_code=EnumCoreErrorCode.INVALID_PARAMETER,
             )
+
+        dispatcher_scope: frozenset[str] | None = None
+        if allowed_dispatcher_ids is not None:
+            dispatcher_scope = frozenset(allowed_dispatcher_ids)
+            if not dispatcher_scope:
+                raise ModelOnexError(
+                    message=(
+                        "Contract-scoped dispatch requires at least one allowed "
+                        "dispatcher ID; refusing process-global fan-out."
+                    ),
+                    error_code=EnumCoreErrorCode.INVALID_PARAMETER,
+                )
+            unknown_dispatcher_ids = dispatcher_scope.difference(self._dispatchers)
+            if unknown_dispatcher_ids:
+                raise ModelOnexError(
+                    message=(
+                        "Contract-scoped dispatch references dispatcher IDs that "
+                        "are not registered on this engine: "
+                        f"{sorted(unknown_dispatcher_ids)}"
+                    ),
+                    error_code=EnumCoreErrorCode.ITEM_NOT_REGISTERED,
+                )
 
         # Start timing
         start_time = time.perf_counter()
@@ -1286,10 +1366,13 @@ class MessageDispatchEngine:
         # multi-handler contract routes each message to the single matching
         # handler instead of fanning out to every sibling (OMN-12416).
         matching_dispatchers, scoping_outcome = self._find_matching_dispatchers(
-            topic=topic,
-            category=topic_category,
-            message_type=message_type,
-            payload=envelope_payload,
+            DispatchMatchCriteriaInternal(
+                topic=topic,
+                category=topic_category,
+                message_type=message_type,
+                payload=envelope_payload,
+                allowed_dispatcher_ids=dispatcher_scope,
+            )
         )
 
         # Log routing decision at DEBUG level
@@ -1627,6 +1710,11 @@ class MessageDispatchEngine:
         # Use empty string sentinel internally to avoid str | None union
         matched_route_id: str = ""
         for route in self._routes.values():
+            if (
+                dispatcher_scope is not None
+                and _get_route_dispatcher_id(route) not in dispatcher_scope
+            ):
+                continue
             if route.matches(topic, topic_category, message_type):
                 matched_route_id = route.route_id
                 break
@@ -1761,6 +1849,26 @@ class MessageDispatchEngine:
                 output_events=[],
             )
 
+    async def dispatch_scoped(
+        self,
+        topic: str,
+        envelope: ModelEventEnvelope[object],
+        *,
+        allowed_dispatcher_ids: Collection[str],
+    ) -> ModelDispatchResult:
+        """Dispatch through an explicit, non-empty contract-owned scope.
+
+        This distinct capability keeps the published ``ProtocolDispatchEngine``
+        call shape backward compatible. Contract subscription wiring resolves
+        this method before attaching a consumer, so an engine that implements
+        only the process-global protocol cannot fail after receiving a record.
+        """
+        return await self.dispatch(
+            topic,
+            envelope,
+            allowed_dispatcher_ids=allowed_dispatcher_ids,
+        )
+
     async def dispatch_with_transaction(
         self,
         *,
@@ -1875,10 +1983,7 @@ class MessageDispatchEngine:
 
     def _find_matching_dispatchers(
         self,
-        topic: str,
-        category: EnumMessageCategory,
-        message_type: str,
-        payload: object | None = None,
+        criteria: DispatchMatchCriteriaInternal,
     ) -> tuple[list[DispatchEntryInternal], PayloadScopingOutcomeInternal]:
         """
         Find all dispatchers that match the given criteria.
@@ -1900,12 +2005,8 @@ class MessageDispatchEngine:
         legacy string-only matching and are unaffected.
 
         Args:
-            topic: The topic to match
-            category: The message category
-            message_type: The specific message type
-            payload: The message payload, used for event_model type-scoping.
-                When None (e.g. legacy callers without a payload), type-scoping
-                is skipped and string-only matching applies.
+            criteria: Topic, category, message type, payload, and optional exact
+                dispatcher scope used for this matching pass.
 
         Returns:
             Tuple of (matching dispatcher entries (may be empty), scoping
@@ -1915,6 +2016,12 @@ class MessageDispatchEngine:
             existed but its event_model rejected the payload), plus the real
             validation detail for the latter.
         """
+        topic = criteria.topic
+        category = criteria.category
+        message_type = criteria.message_type
+        payload = criteria.payload
+        allowed_dispatcher_ids = criteria.allowed_dispatcher_ids
+
         matching_dispatchers: list[DispatchEntryInternal] = []
         seen_dispatcher_ids: set[str] = set()
         scoping_outcome = PayloadScopingOutcomeInternal()
@@ -1933,6 +2040,11 @@ class MessageDispatchEngine:
 
             # Get the dispatcher for this route
             dispatcher_id = _get_route_dispatcher_id(route)
+            if (
+                allowed_dispatcher_ids is not None
+                and dispatcher_id not in allowed_dispatcher_ids
+            ):
+                continue
             if dispatcher_id in seen_dispatcher_ids:
                 # Avoid duplicate dispatcher execution
                 continue
@@ -2876,6 +2988,187 @@ class MessageDispatchEngine:
     def dispatcher_count(self) -> int:
         """Get the number of registered dispatchers."""
         return len(self._dispatchers)
+
+    def validate_registration_batch(
+        self,
+        dispatcher_ids: Collection[str],
+        route_ids: Collection[str],
+        *,
+        dispatcher_owners: Mapping[str, str],
+        allow_frozen: bool = False,
+    ) -> None:
+        """Prove a complete prepared batch is collision-free before mutation.
+
+        Auto-wiring prepares every dispatcher and route before committing any
+        side effects. This boundary validates the complete derived identifier
+        batch, including normalization collisions, conflicts with the live
+        registry, and immutable contract-owner conflicts, while holding the
+        same lock used by registration.
+        """
+        raw_dispatcher_ids = tuple(dispatcher_ids)
+        raw_route_ids = tuple(route_ids)
+        for label, identifiers in (
+            ("dispatcher", raw_dispatcher_ids),
+            ("route", raw_route_ids),
+        ):
+            invalid_ids = tuple(
+                identifier
+                for identifier in identifiers
+                if not identifier or identifier != identifier.strip()
+            )
+            if invalid_ids:
+                raise ModelOnexError(
+                    message=(
+                        f"Prepared {label} IDs must be non-empty and canonical: "
+                        f"{invalid_ids}"
+                    ),
+                    error_code=EnumCoreErrorCode.INVALID_PARAMETER,
+                )
+            duplicate_ids = _find_duplicate_identifiers(identifiers)
+            if duplicate_ids:
+                raise ModelOnexError(
+                    message=(
+                        f"Auto-wiring batch contains duplicate prepared {label} IDs: "
+                        f"{sorted(duplicate_ids)}"
+                    ),
+                    error_code=EnumCoreErrorCode.DUPLICATE_REGISTRATION,
+                )
+
+        prepared_dispatcher_ids = frozenset(raw_dispatcher_ids)
+        if frozenset(dispatcher_owners) != prepared_dispatcher_ids or any(
+            not owner or owner != owner.strip() for owner in dispatcher_owners.values()
+        ):
+            raise ModelOnexError(
+                message=(
+                    "Prepared dispatcher ownership must provide one canonical "
+                    "contract owner for every prepared dispatcher ID."
+                ),
+                error_code=EnumCoreErrorCode.INVALID_CONFIGURATION,
+            )
+
+        with self._registration_lock:
+            if (
+                self._frozen
+                and not allow_frozen
+                and (raw_dispatcher_ids or raw_route_ids)
+            ):
+                raise ModelOnexError(
+                    message=(
+                        "Cannot commit prepared registration batch: "
+                        "MessageDispatchEngine is frozen."
+                    ),
+                    error_code=EnumCoreErrorCode.INVALID_STATE,
+                )
+            existing_dispatcher_ids = frozenset(raw_dispatcher_ids).intersection(
+                self._dispatchers
+            )
+            if existing_dispatcher_ids:
+                raise ModelOnexError(
+                    message=(
+                        "Prepared dispatcher IDs are already registered on this engine: "
+                        f"{sorted(existing_dispatcher_ids)}"
+                    ),
+                    error_code=EnumCoreErrorCode.DUPLICATE_REGISTRATION,
+                )
+            existing_route_ids = frozenset(raw_route_ids).intersection(self._routes)
+            if existing_route_ids:
+                raise ModelOnexError(
+                    message=(
+                        "Prepared route IDs are already registered on this engine: "
+                        f"{sorted(existing_route_ids)}"
+                    ),
+                    error_code=EnumCoreErrorCode.DUPLICATE_REGISTRATION,
+                )
+            prepared_owner_names = frozenset(dispatcher_owners.values())
+            existing_owner_scopes = {
+                owner_name: tuple(
+                    sorted(
+                        dispatcher_id
+                        for dispatcher_id, entry in self._dispatchers.items()
+                        if entry.owner_contract_name == owner_name
+                    )
+                )
+                for owner_name in prepared_owner_names
+            }
+            conflicting_owner_scopes = {
+                owner_name: dispatcher_scope
+                for owner_name, dispatcher_scope in existing_owner_scopes.items()
+                if dispatcher_scope
+            }
+            if conflicting_owner_scopes:
+                raise ModelOnexError(
+                    message=(
+                        "Prepared registration would extend immutable live "
+                        "contract-owner dispatcher scopes: "
+                        f"{conflicting_owner_scopes}"
+                    ),
+                    error_code=EnumCoreErrorCode.INVALID_CONFIGURATION,
+                )
+
+    def validate_contract_dispatcher_scope(
+        self,
+        contract_name: str,
+        dispatcher_ids: Collection[str],
+    ) -> frozenset[str]:
+        """Prove an exact scope against the complete immutable owner snapshot."""
+        raw_dispatcher_ids = tuple(dispatcher_ids)
+        if (
+            not contract_name
+            or contract_name != contract_name.strip()
+            or any(
+                not dispatcher_id or dispatcher_id != dispatcher_id.strip()
+                for dispatcher_id in raw_dispatcher_ids
+            )
+            or _find_duplicate_identifiers(raw_dispatcher_ids)
+        ):
+            raise ModelOnexError(
+                message=(
+                    "Contract dispatcher scope requires a canonical contract name "
+                    "and unique canonical dispatcher IDs."
+                ),
+                error_code=EnumCoreErrorCode.INVALID_CONFIGURATION,
+            )
+        dispatcher_scope = frozenset(raw_dispatcher_ids)
+        with self._registration_lock:
+            unknown_dispatcher_ids = dispatcher_scope.difference(self._dispatchers)
+            if unknown_dispatcher_ids:
+                raise ModelOnexError(
+                    message=(
+                        "Contract-scoped subscription references dispatcher IDs "
+                        "that are not registered on this engine for contract "
+                        f"{contract_name!r}: {sorted(unknown_dispatcher_ids)}"
+                    ),
+                    error_code=EnumCoreErrorCode.ITEM_NOT_REGISTERED,
+                )
+            invalid_owners = {
+                dispatcher_id: self._dispatchers[dispatcher_id].owner_contract_name
+                for dispatcher_id in dispatcher_scope
+                if self._dispatchers[dispatcher_id].owner_contract_name != contract_name
+            }
+            if invalid_owners:
+                raise ModelOnexError(
+                    message=(
+                        "Contract-scoped subscription references dispatcher IDs "
+                        f"not owned by contract {contract_name!r}: {invalid_owners}"
+                    ),
+                    error_code=EnumCoreErrorCode.INVALID_CONFIGURATION,
+                )
+            complete_owner_scope = frozenset(
+                dispatcher_id
+                for dispatcher_id, entry in self._dispatchers.items()
+                if entry.owner_contract_name == contract_name
+            )
+            if dispatcher_scope != complete_owner_scope:
+                raise ModelOnexError(
+                    message=(
+                        "Contract-scoped subscription does not match the complete "
+                        f"live owner set for contract {contract_name!r}: "
+                        f"missing={sorted(complete_owner_scope - dispatcher_scope)}, "
+                        f"unexpected={sorted(dispatcher_scope - complete_owner_scope)}"
+                    ),
+                    error_code=EnumCoreErrorCode.INVALID_CONFIGURATION,
+                )
+            return complete_owner_scope
 
     def __str__(self) -> str:
         """Human-readable string representation."""

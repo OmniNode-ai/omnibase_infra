@@ -22,7 +22,6 @@ from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 
-from omnibase_core.errors.error_service_resolution import ServiceResolutionError
 from omnibase_infra.protocols import ProtocolEventBusLike
 from omnibase_infra.runtime.auto_wiring.enum_quarantine_reason import (
     EnumQuarantineReason,
@@ -92,6 +91,10 @@ def _make_dispatch_engine() -> MagicMock:
     engine._container = None
     engine.register_dispatcher = MagicMock()
     engine.register_route = MagicMock()
+    engine.dispatch_scoped = AsyncMock()
+    engine.validate_contract_dispatcher_scope = MagicMock(
+        side_effect=lambda _contract_name, dispatcher_ids: frozenset(dispatcher_ids)
+    )
     engine.freeze = MagicMock()
     return engine
 
@@ -205,9 +208,8 @@ async def test_mixed_contract_wires_good_quarantines_bad() -> None:
     The contract outcome is WIRED (at least one live handler); quarantined_handlers
     has exactly one entry for _BadHandler; total_failed == 0.
 
-    _GoodHandler is zero-arg: the container raises ServiceResolutionError (not an
-    asyncio error) so wiring falls through to the zero-arg construction path, which
-    succeeds cleanly.
+    The container returns a concrete _GoodHandler while the bad handler raises the
+    exact async-incompatibility signal, so the WIRED outcome cannot be vacuous.
     """
 
     class _BadHandler:
@@ -226,18 +228,15 @@ async def test_mixed_contract_wires_good_quarantines_bad() -> None:
     )
     manifest = ModelAutoWiringManifest(contracts=(contract,), errors=())
 
-    # Container raises ServiceResolutionError for good handler (triggers zero-arg
-    # fallback) and asyncio RuntimeError for bad handler (triggers quarantine).
+    # Resolve the good handler through the container so this test owns a real
+    # dispatcher; the bad handler still triggers quarantine.
     async def _get_service_async(cls: type) -> object:
         if cls is _GoodHandler:
-            raise ServiceResolutionError("no registration for _GoodHandler")
+            return _GoodHandler()
         raise RuntimeError(_ASYNCIO_RUN_MSG)
 
-    def _get_service(cls: type) -> object:
-        raise ServiceResolutionError("sync path not used")
-
     container = MagicMock()
-    container.get_service = MagicMock(side_effect=_get_service)
+    container.get_service = MagicMock(side_effect=AssertionError("sync path not used"))
     container.get_service_async = AsyncMock(side_effect=_get_service_async)
 
     event_bus = MagicMock(spec=ProtocolEventBusLike)
@@ -268,9 +267,10 @@ async def test_mixed_contract_wires_good_quarantines_bad() -> None:
         report.quarantined_handlers[0].reason == EnumQuarantineReason.ASYNC_INCOMPATIBLE
     )
     assert "_BadHandler" in report.quarantined_handlers[0].handler_name
-    # Contract must be WIRED (good handler resolved via zero-arg path)
+    # Contract must be WIRED (good handler resolved through the container).
     wired_results = [r for r in report.results if r.outcome == EnumWiringOutcome.WIRED]
     assert len(wired_results) == 1, f"Expected 1 WIRED result, got {report.results}"
+    assert len(wired_results[0].dispatchers_registered) == 1
 
 
 @pytest.mark.integration

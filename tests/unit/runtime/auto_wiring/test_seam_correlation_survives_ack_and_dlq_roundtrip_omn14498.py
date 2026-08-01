@@ -47,6 +47,7 @@ withheld and Kafka redelivers.
 from __future__ import annotations
 
 import json
+from collections.abc import Awaitable, Callable
 from datetime import UTC, datetime
 from pathlib import Path
 from unittest.mock import AsyncMock, MagicMock
@@ -68,8 +69,33 @@ from omnibase_infra.nodes.node_dlq_replay_effect.models.model_dlq_message import
 from omnibase_infra.runtime.auto_wiring.handler_wiring import (
     _BOUNDARY_DLQ_ENV,
     BoundaryDlqNotPersistedError,
-    _make_event_bus_callback,
 )
+from omnibase_infra.runtime.auto_wiring.handler_wiring import (
+    _make_event_bus_callback as _make_contract_scoped_event_bus_callback,
+)
+
+
+def _make_event_bus_callback(
+    topic: str,
+    dispatch_engine: object,
+    **kwargs: object,
+) -> Callable[..., Awaitable[None]]:
+    """Build the boundary under its required synthetic contract scope.
+
+    OMN-15474 made the ingress boundary contract-scoped: the callback dispatches
+    only to the dispatcher ids its owning contract registered, and refuses to be
+    built without them rather than falling back to a process-global fan-out.
+    These OMN-14498 seam tests are about correlation lineage across the DLQ
+    boundary, not about ownership, so they supply one synthetic dispatcher id —
+    mirroring the identical shim in test_boundary_dlq_omn14507.py.
+    """
+    return _make_contract_scoped_event_bus_callback(
+        topic,
+        dispatch_engine,  # type: ignore[arg-type]
+        allowed_dispatcher_ids={"test-dispatcher"},
+        **kwargs,  # type: ignore[arg-type]
+    )
+
 
 _FIXTURE_PATH = (
     Path(__file__).resolve().parents[3]

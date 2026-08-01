@@ -1618,16 +1618,22 @@ class TestPolicyErrorsEscapeBestEffortBoundaries:
             contract_path = tmp_path / "node_example" / "contract.yaml"
             event_bus = _EventBus()
 
+        dispatch_engine = MagicMock(spec=ProtocolDispatchEngine)
+        dispatch_engine.dispatch_scoped = MagicMock()
+        dispatch_engine.validate_contract_dispatcher_scope = MagicMock(
+            side_effect=lambda _contract_name, dispatcher_ids: frozenset(dispatcher_ids)
+        )
         recorder = _AdminRecorder()
         with _patched_admin(recorder):
             with pytest.raises(TopicReplicationPolicyError):
                 await _interleave_contract(
                     name="node_example",
                     contract=_Contract(),  # type: ignore[arg-type]
-                    dispatch_engine=MagicMock(spec=ProtocolDispatchEngine),
+                    dispatch_engine=dispatch_engine,
                     event_bus=MagicMock(spec=ProtocolEventBusLike),
                     environment="test",
                     result_applier=None,
+                    allowed_dispatcher_ids={"test-dispatcher"},
                     provisioner=provisioner,
                     readiness_config=ModelTopicReadinessConfig(),
                 )

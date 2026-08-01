@@ -46,7 +46,10 @@ from omnibase_infra.runtime.auto_wiring.models import (
     ModelHandlerRouting,
     ModelHandlerRoutingEntry,
 )
-from omnibase_infra.runtime.message_dispatch_engine import MessageDispatchEngine
+from omnibase_infra.runtime.message_dispatch_engine import (
+    DispatchMatchCriteriaInternal,
+    MessageDispatchEngine,
+)
 
 _COMMAND_TOPIC = "onex.cmd.omnibase-infra.delegation-request.v1"
 _WIRE_EVENT_MODEL_MODULE = "omnibase_core.models.delegation.wire"
@@ -137,10 +140,12 @@ async def test_valid_event_model_instance_routes_to_dispatcher() -> None:
     # Precondition: the payload really is a valid instance of the declared model.
     ModelDelegationRequest.model_validate(valid)
     matches, _scoping_outcome = engine._find_matching_dispatchers(
-        topic=_COMMAND_TOPIC,
-        category=EnumMessageCategory.COMMAND,
-        message_type="ModelDelegationRequest",
-        payload=valid,
+        DispatchMatchCriteriaInternal(
+            topic=_COMMAND_TOPIC,
+            category=EnumMessageCategory.COMMAND,
+            message_type="ModelDelegationRequest",
+            payload=valid,
+        )
     )
     assert len(matches) == 1, (
         "A valid instance of the declared event_model MUST resolve the registered "
@@ -161,10 +166,12 @@ async def test_nonconforming_payload_is_dropped_by_type_scoping() -> None:
     with pytest.raises(Exception):
         ModelDelegationRequest.model_validate(nonconforming)
     matches, scoping_outcome = engine._find_matching_dispatchers(
-        topic=_COMMAND_TOPIC,
-        category=EnumMessageCategory.COMMAND,
-        message_type="ModelDelegationRequest",
-        payload=nonconforming,
+        DispatchMatchCriteriaInternal(
+            topic=_COMMAND_TOPIC,
+            category=EnumMessageCategory.COMMAND,
+            message_type="ModelDelegationRequest",
+            payload=nonconforming,
+        )
     )
     assert matches == [], (
         "A payload that fails the declared event_model must be type-scoping-dropped "

@@ -34,8 +34,32 @@ class _FakeDispatchEngine:
     calls: list[tuple[str, ModelEventEnvelope[object]]] = field(default_factory=list)
     is_frozen: bool = True
 
-    async def dispatch(self, topic: str, envelope: ModelEventEnvelope[object]) -> None:
+    async def dispatch(
+        self,
+        topic: str,
+        envelope: ModelEventEnvelope[object],
+    ) -> None:
         self.calls.append((topic, envelope))
+
+    async def dispatch_scoped(
+        self,
+        topic: str,
+        envelope: ModelEventEnvelope[object],
+        *,
+        allowed_dispatcher_ids: object,
+    ) -> None:
+        del allowed_dispatcher_ids
+        await self.dispatch(topic, envelope)
+
+    async def dispatch_with_transaction(
+        self,
+        *,
+        topic: str,
+        envelope: ModelEventEnvelope[object],
+        tx: object,
+    ) -> None:
+        del tx
+        await self.dispatch(topic, envelope)
 
 
 @dataclass(frozen=True)
@@ -62,6 +86,7 @@ async def test_tenant_scoped_stamps_verified_slug_overwriting_forged_payload() -
         "tenant-acme.onex.cmd.omnimarket.delegate-skill.v1",
         engine,
         tenant_scoped=True,
+        allowed_dispatcher_ids={"tenant-test-dispatcher"},
     )
 
     await callback(_raw_message({"prompt": "hi", "tenant_id": "evil-forged-tenant"}))
@@ -80,6 +105,7 @@ async def test_tenant_scoped_stamps_slug_when_payload_omits_tenant_id() -> None:
         "tenant-beta.onex.cmd.omnimarket.delegate-skill.v1",
         engine,
         tenant_scoped=True,
+        allowed_dispatcher_ids={"tenant-test-dispatcher"},
     )
 
     await callback(_raw_message({"prompt": "hi"}))
@@ -99,6 +125,7 @@ async def test_tenant_scoped_never_stamps_a_default_on_non_prefixed_topic() -> N
         "onex.cmd.omnimarket.delegate-skill.v1",  # bare, no tenant prefix
         engine,
         tenant_scoped=True,
+        allowed_dispatcher_ids={"tenant-test-dispatcher"},
     )
 
     await callback(_raw_message({"prompt": "hi", "tenant_id": "self-reported"}))
@@ -116,6 +143,7 @@ async def test_tenant_scoped_off_by_default_is_a_true_no_op() -> None:
         "tenant-acme.onex.cmd.omnimarket.delegate-skill.v1",
         engine,
         # tenant_scoped omitted -- defaults False
+        allowed_dispatcher_ids={"tenant-test-dispatcher"},
     )
 
     await callback(_raw_message({"prompt": "hi"}))
@@ -131,6 +159,7 @@ async def test_tenant_scoped_rejects_malformed_slug_without_stamping() -> None:
         "tenant-NOT_VALID!.onex.cmd.omnimarket.delegate-skill.v1",
         engine,
         tenant_scoped=True,
+        allowed_dispatcher_ids={"tenant-test-dispatcher"},
     )
 
     await callback(_raw_message({"prompt": "hi"}))

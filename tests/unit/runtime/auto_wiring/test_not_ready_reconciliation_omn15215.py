@@ -304,6 +304,12 @@ class TestSeededRedNotReadyPermanentlyStarvesConsumer:
         )
         by_name = {r.contract_name: r for r in attach_out}
         assert by_name[CONTRACT_NAME].status is EnumContractAttachStatus.NOT_READY
+        wiring_result = next(
+            result for result in report.results if result.contract_name == CONTRACT_NAME
+        )
+        assert set(by_name[CONTRACT_NAME].dispatcher_ids) == set(
+            wiring_result.dispatchers_registered
+        )
 
 
 class TestFixReattachesOnceReady:
@@ -335,6 +341,12 @@ class TestFixReattachesOnceReady:
             attach_results_out=attach_out,
         )
         assert subscriptions == {}  # still starting from the RED state
+        wiring_result = next(
+            result for result in report.results if result.contract_name == CONTRACT_NAME
+        )
+        assert set(attach_out[0].dispatcher_ids) == set(
+            wiring_result.dispatchers_registered
+        )
 
         newly_subscribed, results = await reattach_not_ready_contracts(
             manifest,
@@ -351,6 +363,7 @@ class TestFixReattachesOnceReady:
         assert provisioner.confirm_calls == 2  # 1 failed + 1 succeeded
         assert len(results) == 1
         assert results[0].status is EnumContractAttachStatus.ATTACHED
+        assert results[0].dispatcher_ids == attach_out[0].dispatcher_ids
         assert set(results[0].topics_subscribed) == set(TOPICS)
 
     @pytest.mark.asyncio

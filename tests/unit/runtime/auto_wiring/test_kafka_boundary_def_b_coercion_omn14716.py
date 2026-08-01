@@ -177,7 +177,12 @@ async def test_kafka_boundary_coerces_wire_dict_to_declared_def_b_model(
     handler = _HandlerSeamProbe()
     engine = _frozen_engine_for(handler)
     event_bus = _dlq_capable_event_bus()
-    callback = _make_event_bus_callback(_TOPIC, engine, event_bus=event_bus)
+    callback = _make_event_bus_callback(
+        _TOPIC,
+        engine,
+        event_bus=event_bus,
+        allowed_dispatcher_ids={"seam-dispatcher"},
+    )
 
     correlation_id = uuid4()
     wire = {"correlation_id": str(correlation_id), "config": {"threshold": 3}}
@@ -216,7 +221,12 @@ async def test_kafka_boundary_surfaces_crashing_def_b_handler_to_dlq(
     handler = _HandlerSeamCrash()
     engine = _frozen_engine_for(handler)
     event_bus = _dlq_capable_event_bus()
-    callback = _make_event_bus_callback(_TOPIC, engine, event_bus=event_bus)
+    callback = _make_event_bus_callback(
+        _TOPIC,
+        engine,
+        event_bus=event_bus,
+        allowed_dispatcher_ids={"seam-dispatcher"},
+    )
 
     correlation_id = uuid4()
     wire = {"correlation_id": str(correlation_id), "config": {"threshold": 1}}

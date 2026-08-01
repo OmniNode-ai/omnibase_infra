@@ -264,7 +264,7 @@ class TestMakeEventBusCallbackFallbackPath:
     @pytest.mark.asyncio
     async def test_non_envelope_message_is_dropped_not_dispatched(self) -> None:
         """A message with no .value attribute that is not a ModelEventEnvelope must
-        be dropped (dispatch_engine.dispatch not called) rather than passed through raw."""
+        be dropped (scoped dispatch not called) rather than passed through raw."""
         from unittest.mock import AsyncMock, MagicMock
 
         from omnibase_core.models.events.model_event_envelope import ModelEventEnvelope
@@ -273,11 +273,12 @@ class TestMakeEventBusCallbackFallbackPath:
         )
 
         dispatch_engine = MagicMock()
-        dispatch_engine.dispatch = AsyncMock()
+        dispatch_engine.dispatch_scoped = AsyncMock()
 
         callback = _make_event_bus_callback(
             "onex.cmd.test.v1",
             dispatch_engine,  # type: ignore[arg-type]
+            allowed_dispatcher_ids={"test-dispatcher"},
         )
 
         # A plain object with no .value — not a ModelEventEnvelope
@@ -285,7 +286,7 @@ class TestMakeEventBusCallbackFallbackPath:
         await callback(bad_message)
 
         # dispatch_engine must NOT have been called with the raw non-envelope
-        dispatch_engine.dispatch.assert_not_called()
+        dispatch_engine.dispatch_scoped.assert_not_called()
 
     @pytest.mark.asyncio
     async def test_valid_envelope_message_passes_through(self) -> None:
@@ -298,11 +299,12 @@ class TestMakeEventBusCallbackFallbackPath:
         )
 
         dispatch_engine = MagicMock()
-        dispatch_engine.dispatch = AsyncMock()
+        dispatch_engine.dispatch_scoped = AsyncMock()
 
         callback = _make_event_bus_callback(
             "onex.cmd.test.v1",
             dispatch_engine,  # type: ignore[arg-type]
+            allowed_dispatcher_ids={"test-dispatcher"},
         )
 
         envelope = ModelEventEnvelope[object].model_construct(
@@ -311,8 +313,8 @@ class TestMakeEventBusCallbackFallbackPath:
         )
         await callback(envelope)
 
-        dispatch_engine.dispatch.assert_called_once()
-        _, call_envelope = dispatch_engine.dispatch.call_args.args
+        dispatch_engine.dispatch_scoped.assert_called_once()
+        _, call_envelope = dispatch_engine.dispatch_scoped.call_args.args
         assert isinstance(call_envelope, ModelEventEnvelope)
 
     @pytest.mark.asyncio
@@ -327,11 +329,12 @@ class TestMakeEventBusCallbackFallbackPath:
         )
 
         dispatch_engine = MagicMock()
-        dispatch_engine.dispatch = AsyncMock()
+        dispatch_engine.dispatch_scoped = AsyncMock()
 
         callback = _make_event_bus_callback(
             "onex.evt.platform.node-heartbeat.v1",
             dispatch_engine,  # type: ignore[arg-type]
+            allowed_dispatcher_ids={"test-dispatcher"},
         )
 
         envelope = ModelEventEnvelope[object].model_construct(
@@ -342,8 +345,8 @@ class TestMakeEventBusCallbackFallbackPath:
 
         await callback(message)
 
-        dispatch_engine.dispatch.assert_called_once()
-        _, call_envelope = dispatch_engine.dispatch.call_args.args
+        dispatch_engine.dispatch_scoped.assert_called_once()
+        _, call_envelope = dispatch_engine.dispatch_scoped.call_args.args
         assert call_envelope.event_type == "platform.node-heartbeat"
 
     @pytest.mark.asyncio
@@ -360,7 +363,7 @@ class TestMakeEventBusCallbackFallbackPath:
 
         dispatch_result = MagicMock()
         dispatch_engine = MagicMock()
-        dispatch_engine.dispatch = AsyncMock(return_value=dispatch_result)
+        dispatch_engine.dispatch_scoped = AsyncMock(return_value=dispatch_result)
 
         result_applier = MagicMock()
         result_applier.apply = AsyncMock()
@@ -369,6 +372,7 @@ class TestMakeEventBusCallbackFallbackPath:
             "onex.cmd.test.v1",
             dispatch_engine,  # type: ignore[arg-type]
             result_applier=result_applier,
+            allowed_dispatcher_ids={"test-dispatcher"},
         )
 
         envelope = ModelEventEnvelope[object].model_construct(
@@ -378,7 +382,7 @@ class TestMakeEventBusCallbackFallbackPath:
         )
         await callback(envelope)
 
-        dispatch_engine.dispatch.assert_called_once()
+        dispatch_engine.dispatch_scoped.assert_called_once()
         result_applier.apply.assert_awaited_once_with(dispatch_result, None)
 
     def test_registration_heartbeat_handler_declares_wire_event_type(self) -> None:
@@ -413,12 +417,13 @@ class TestMakeEventBusCallbackFallbackPath:
         class FakeDispatchEngine:
             def __init__(self) -> None:
                 self.is_frozen = False
-                self.dispatch = AsyncMock()
+                self.dispatch_scoped = AsyncMock()
 
         dispatch_engine = FakeDispatchEngine()
         callback = _make_event_bus_callback(
             "onex.cmd.test.v1",
             dispatch_engine,  # type: ignore[arg-type]
+            allowed_dispatcher_ids={"test-dispatcher"},
         )
         envelope = ModelEventEnvelope[object].model_construct(
             event_type="onex.cmd.test.v1",
@@ -427,12 +432,12 @@ class TestMakeEventBusCallbackFallbackPath:
 
         task = asyncio.create_task(callback(envelope))
         await asyncio.sleep(0.2)
-        dispatch_engine.dispatch.assert_not_called()
+        dispatch_engine.dispatch_scoped.assert_not_called()
 
         dispatch_engine.is_frozen = True
         await asyncio.wait_for(task, timeout=2)
 
-        dispatch_engine.dispatch.assert_called_once()
+        dispatch_engine.dispatch_scoped.assert_called_once()
 
     @pytest.mark.asyncio
     async def test_callback_drops_after_freeze_wait_timeout(
@@ -449,13 +454,14 @@ class TestMakeEventBusCallbackFallbackPath:
             is_frozen = False
 
             def __init__(self) -> None:
-                self.dispatch = AsyncMock()
+                self.dispatch_scoped = AsyncMock()
 
         monkeypatch.setenv("ONEX_DISPATCH_FREEZE_WAIT_TIMEOUT_SECONDS", "0.1")
         dispatch_engine = FakeDispatchEngine()
         callback = _make_event_bus_callback(
             "onex.cmd.test.v1",
             dispatch_engine,  # type: ignore[arg-type]
+            allowed_dispatcher_ids={"test-dispatcher"},
         )
         envelope = ModelEventEnvelope[object].model_construct(
             event_type="onex.cmd.test.v1",
@@ -464,7 +470,7 @@ class TestMakeEventBusCallbackFallbackPath:
 
         await callback(envelope)
 
-        dispatch_engine.dispatch.assert_not_called()
+        dispatch_engine.dispatch_scoped.assert_not_called()
 
     @pytest.mark.unit
     def test_freeze_wait_timeout_rejects_non_finite_values(
