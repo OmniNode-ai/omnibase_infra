@@ -138,8 +138,6 @@ jobs:
       # allocated free because the e2e defaults (19092/18082/...) are bound by
       # the live lane.
       - name: Derive isolated e2e namespace
-        env:
-          DB_URL_SECRET: ${{ secrets.OMNIBASE_INFRA_DB_URL }}
         run: |
           set -euo pipefail
           e2e_id="e2e-${GITHUB_RUN_ID:-local}-${GITHUB_RUN_ATTEMPT:-1}"
@@ -159,10 +157,7 @@ jobs:
           postgres_port="$(pick_free_port)"
           kafka_port="$(pick_free_port)"
 
-          db_url="${DB_URL_SECRET:-}"
-          if [[ -z "$db_url" ]]; then
-            db_url="postgresql://postgres:${INTEGRATION_POSTGRES_PASSWORD}@localhost:${postgres_port}/omnibase_infra"
-          fi
+          db_url="postgresql://postgres:${INTEGRATION_POSTGRES_PASSWORD}@localhost:${postgres_port}/omnibase_infra"
 
           {
             echo "OMNIBASE_INFRA_COMPOSE_PROJECT=${project}"
