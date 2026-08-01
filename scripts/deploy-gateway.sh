@@ -147,13 +147,27 @@ WHAT --execute DOES, IN ORDER
         image labels are non-empty, and the two OMN-12912 files are present.
 
 ROLLBACK
-    ${GATEWAY_REGISTRY_FILE} records "previous_digest" -- the image this
-    script retagged as ${ROLLBACK_IMAGE_TAG} before building, so it remains
-    resolvable even after a later 'docker image prune'. To roll back:
-      sudo sed -i "s|^GATEWAY_IMAGE=.*|GATEWAY_IMAGE=<previous_digest>|" ${GATEWAY_ENV_FILE}
-      sudo systemctl reload ${SYSTEMD_UNIT}
+    ${GATEWAY_REGISTRY_FILE}'s "rollback_command" field carries the exact
+    restore command, already pre-filled with "previous_digest" -- the image
+    this script retagged as ${ROLLBACK_IMAGE_TAG} before building, so it
+    stays resolvable even after a later 'docker image prune'. Read it out of
+    the registry and run it verbatim; do NOT reconstruct it by hand:
+      jq -r .rollback_command ${GATEWAY_REGISTRY_FILE}
+      bash -c "\$(jq -r .rollback_command ${GATEWAY_REGISTRY_FILE})"
+
+    "rollback_command" is null when there is no rollback target -- the first
+    deploy ever run against this lane, or a deploy whose previous running
+    image had already been pruned before it could be retagged. There is
+    nothing to roll back to in that case: deploy forward instead. Do not
+    hand-build a substitution from "previous_digest" -- a JSON null printed
+    through 'jq -r' renders as the literal string "null", which substitutes
+    straight into ${GATEWAY_ENV_FILE}'s GATEWAY_IMAGE= line and corrupts it;
+    the systemd unit's ExecStartPre digest-format assertion then refuses to
+    start on the next restart/reboot.
+
     (mirrors the omnibase-infra lane's manual rollback-via-registry.json
     pattern -- deploy-runtime.sh has no automated --rollback flag either.)
+    Full procedure: docs/runbooks/gateway-lane-deploy.md
 
 EXAMPLES
     # Preview what would be built and deployed

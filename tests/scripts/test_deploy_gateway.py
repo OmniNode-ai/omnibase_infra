@@ -270,6 +270,89 @@ def test_help_documents_runbook() -> None:
 
 
 @pytest.mark.unit
+def test_help_rollback_reads_registry_command_not_hand_reconstructed() -> None:
+    """AC1 (round-4 remediation): --help's ROLLBACK section must tell the
+    operator to read `rollback_command` out of registry.json and run it
+    verbatim -- NOT to hand-reconstruct a sed substitution from
+    `previous_digest`.
+
+    The hand-reconstruction recipe this replaces was the exact hazard
+    docs/runbooks/gateway-lane-deploy.md now warns against: `rollback_command`
+    (and `previous_digest`) are JSON `null` when there is no rollback target,
+    and a `null` printed through `jq -r` renders as the literal 4-character
+    string "null", which a hand-written `sed` substitution writes straight
+    into gateway.env's GATEWAY_IMAGE= line. The systemd unit's ExecStartPre
+    digest-format assertion then refuses to start the container on the next
+    restart/reboot. The script's own --help was still shipping that recipe
+    after the runbook was fixed -- the operator surface most likely to be
+    read at 3am contradicted the doc.
+    """
+    result = subprocess.run(
+        ["bash", str(DEPLOY_SCRIPT), "--help"],
+        cwd=REPO_ROOT,
+        capture_output=True,
+        text=True,
+        check=True,
+    )
+    help_text = result.stdout
+
+    assert "ROLLBACK" in help_text, "--help must document rollback at all"
+    assert "rollback_command" in help_text, (
+        "--help must name registry.json's rollback_command field as the "
+        "rollback source of truth"
+    )
+    assert "jq -r .rollback_command" in help_text, (
+        "--help must show the operator how to READ the pre-filled command "
+        "out of the registry, not how to rebuild it"
+    )
+
+    # The hazard itself: no hand-fill template may survive anywhere in --help.
+    assert "<previous_digest>" not in help_text, (
+        "--help must not print a fill-in-the-blank rollback template -- "
+        "hand-substituting previous_digest is precisely what corrupts "
+        "gateway.env when the field is null"
+    )
+    assert "sed -i" not in help_text, (
+        "--help must not carry a sed-reconstruction recipe; the only sed "
+        "the operator should ever run for rollback is the one registry.json "
+        "already pre-filled in rollback_command"
+    )
+
+    # And it must say what to do when there IS no rollback target.
+    assert "null" in help_text, (
+        "--help must state that rollback_command is null when there is no "
+        "rollback target (first deploy / previous image pruned)"
+    )
+
+
+@pytest.mark.unit
+def test_help_rollback_matches_runbook_guidance() -> None:
+    """The script's --help and the runbook must not drift apart on rollback:
+    both must point at `jq -r .rollback_command`, and neither may carry the
+    `<previous_digest>` hand-fill template. The round-3 defect was exactly
+    this drift -- the runbook was corrected, the script's usage() was not.
+    """
+    result = subprocess.run(
+        ["bash", str(DEPLOY_SCRIPT), "--help"],
+        cwd=REPO_ROOT,
+        capture_output=True,
+        text=True,
+        check=True,
+    )
+    runbook_text = RUNBOOK.read_text(encoding="utf-8")
+
+    assert "jq -r .rollback_command" in runbook_text, (
+        "runbook must document reading rollback_command from the registry"
+    )
+    assert "<previous_digest>" not in runbook_text, (
+        "runbook must not carry the hand-fill rollback template"
+    )
+    assert "jq -r .rollback_command" in result.stdout, (
+        "usage() must mirror the runbook's rollback instruction"
+    )
+
+
+@pytest.mark.unit
 def test_print_compose_cmd_targets_repo_resident_compose_project(
     harness: _Harness,
 ) -> None:
