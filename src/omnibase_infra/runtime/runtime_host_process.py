@@ -2540,6 +2540,7 @@ class RuntimeHostProcess:
             validated_payload = validate_runtime_local_ingress_payload(
                 route,
                 request.payload,
+                correlation_id=correlation_id,
             )
         except ValidationError as exc:
             return ModelLocalRuntimeIngressResponse(

@@ -8,16 +8,25 @@ import json
 from datetime import UTC, datetime
 from pathlib import Path
 from types import SimpleNamespace
-from typing import cast
+from typing import Annotated, cast
 from unittest.mock import AsyncMock
-from uuid import uuid4
+from uuid import UUID, uuid4
 
 import pytest
-from pydantic import ValidationError
+from pydantic import (
+    AliasChoices,
+    AliasPath,
+    BaseModel,
+    ConfigDict,
+    Field,
+    Strict,
+    ValidationError,
+)
 
 from omnibase_core.models.dispatch.model_dispatch_bus_terminal_result import (
     ModelDispatchBusTerminalResult,
 )
+from omnibase_core.types import JsonType
 from omnibase_infra.runtime.models import (
     ModelLocalRuntimeIngressConfig,
     ModelLocalRuntimeIngressRequest,
@@ -29,6 +38,7 @@ from omnibase_infra.runtime.runtime_local_ingress import (
     RuntimeLocalIngressServer,
     discover_runtime_local_ingress_routes,
     parse_active_runtime_packages,
+    validate_runtime_local_ingress_payload,
 )
 from tests.helpers.runtime_helpers import make_runtime_config, seed_mock_handlers
 
@@ -37,6 +47,76 @@ pytestmark = pytest.mark.unit
 _SESSION_ORCHESTRATOR_CONTRACT_PATH = (
     "/var/lib/omninode/node_session_orchestrator/contract.yaml"
 )
+
+
+class _IngressPayloadWithDefaultCorrelation(BaseModel):
+    model_config = ConfigDict(frozen=True, extra="forbid")
+
+    prompt: str
+    correlation_id: UUID = Field(default_factory=uuid4)
+
+
+class _IngressPayloadWithoutCorrelation(BaseModel):
+    model_config = ConfigDict(frozen=True, extra="forbid")
+
+    prompt: str
+
+
+class _IngressPayloadWithStringCorrelation(BaseModel):
+    model_config = ConfigDict(frozen=True, extra="forbid", strict=True)
+
+    prompt: str
+    correlation_id: str | None = None
+
+
+class _IngressPayloadWithSerializedCorrelationAlias(BaseModel):
+    model_config = ConfigDict(
+        frozen=True,
+        extra="forbid",
+        serialize_by_alias=True,
+    )
+
+    prompt: str
+    correlation_id: UUID = Field(serialization_alias="correlationId")
+
+
+class _IngressPayloadWithNestedAnnotatedOptionalCorrelation(BaseModel):
+    model_config = ConfigDict(frozen=True, extra="forbid", strict=True)
+
+    prompt: str
+    correlation_id: Annotated[UUID, Strict()] | None = None
+
+
+class _IngressPayloadWithCorrelationAliasChoices(BaseModel):
+    model_config = ConfigDict(frozen=True, extra="forbid", populate_by_name=True)
+
+    prompt: str
+    correlation_id: UUID = Field(
+        validation_alias=AliasChoices("correlation_id", "correlationId")
+    )
+
+
+class _IngressPayloadWithCorrelationAlias(BaseModel):
+    model_config = ConfigDict(frozen=True, extra="forbid")
+
+    prompt: str
+    correlation_id: UUID = Field(alias="correlationId")
+
+
+class _IngressPayloadWithCorrelationAliasPath(BaseModel):
+    model_config = ConfigDict(frozen=True, extra="forbid")
+
+    prompt: str
+    correlation_id: UUID = Field(validation_alias=AliasPath("trace", "correlation_id"))
+
+
+class _IngressPayloadWithIndexedCorrelationAliasPath(BaseModel):
+    model_config = ConfigDict(frozen=True, extra="forbid")
+
+    prompt: str
+    correlation_id: UUID = Field(
+        validation_alias=AliasPath("trace", 0, "correlation_id")
+    )
 
 
 def _session_orchestrator_route() -> ModelRuntimeLocalIngressRoute:
@@ -48,6 +128,20 @@ def _session_orchestrator_route() -> ModelRuntimeLocalIngressRoute:
         terminal_event="onex.evt.omnimarket.session-orchestrator-completed.v1",
         contract_path=_SESSION_ORCHESTRATOR_CONTRACT_PATH,
         package_name="omnimarket",
+    )
+
+
+def _correlated_ingress_route() -> ModelRuntimeLocalIngressRoute:
+    return ModelRuntimeLocalIngressRoute(
+        node_name="node_correlated_ingress",
+        contract_name="correlated_ingress",
+        command_topic="onex.cmd.test.correlated-ingress.v1",
+        event_type="test.correlated-ingress",
+        terminal_event="onex.evt.test.correlated-ingress-completed.v1",
+        contract_path="/fake/correlated_ingress_contract.yaml",
+        package_name="tests",
+        input_model_module=__name__,
+        input_model_name="_IngressPayloadWithDefaultCorrelation",
     )
 
 
@@ -131,6 +225,288 @@ def test_local_runtime_ingress_config_accepts_yaml_list_package_names() -> None:
 
     assert config.package_names == ("omnibase_infra", "omnimarket")
     assert config.enabled_profiles == ("main",)
+
+
+def test_validate_runtime_local_ingress_payload_accepts_matching_correlation() -> None:
+    correlation_id = uuid4()
+
+    normalized = validate_runtime_local_ingress_payload(
+        _correlated_ingress_route(),
+        {
+            "prompt": "write tests",
+            "correlation_id": str(correlation_id),
+        },
+        correlation_id=correlation_id,
+    )
+
+    assert normalized["correlation_id"] == str(correlation_id)
+
+
+@pytest.mark.parametrize("payload_correlation_id", [None, "not-a-uuid"])
+def test_validate_runtime_local_ingress_payload_rejects_malformed_correlation(
+    payload_correlation_id: str | None,
+) -> None:
+    with pytest.raises(ValueError, match="correlation_id must be a valid UUID"):
+        validate_runtime_local_ingress_payload(
+            _correlated_ingress_route(),
+            {
+                "prompt": "write tests",
+                "correlation_id": payload_correlation_id,
+            },
+            correlation_id=uuid4(),
+        )
+
+
+def test_validate_runtime_local_ingress_payload_preserves_model_without_correlation() -> (
+    None
+):
+    route = _correlated_ingress_route().model_copy(
+        update={"input_model_name": "_IngressPayloadWithoutCorrelation"}
+    )
+
+    normalized = validate_runtime_local_ingress_payload(
+        route,
+        {"prompt": "write tests"},
+        correlation_id=uuid4(),
+    )
+
+    assert normalized == {"prompt": "write tests"}
+
+
+def test_validate_runtime_local_ingress_payload_stamps_declared_string_correlation() -> (
+    None
+):
+    correlation_id = uuid4()
+    route = _correlated_ingress_route().model_copy(
+        update={"input_model_name": "_IngressPayloadWithStringCorrelation"}
+    )
+
+    normalized = validate_runtime_local_ingress_payload(
+        route,
+        {"prompt": "write tests"},
+        correlation_id=correlation_id,
+    )
+
+    assert normalized["correlation_id"] == str(correlation_id)
+
+
+def test_validate_runtime_local_ingress_payload_dumps_correlation_by_field_name() -> (
+    None
+):
+    correlation_id = uuid4()
+    route = _correlated_ingress_route().model_copy(
+        update={"input_model_name": "_IngressPayloadWithSerializedCorrelationAlias"}
+    )
+
+    normalized = validate_runtime_local_ingress_payload(
+        route,
+        {"prompt": "write tests"},
+        correlation_id=correlation_id,
+    )
+
+    assert normalized["correlation_id"] == str(correlation_id)
+    assert "correlationId" not in normalized
+
+
+def test_validate_runtime_local_ingress_payload_stamps_nested_annotated_optional_uuid() -> (
+    None
+):
+    correlation_id = uuid4()
+    route = _correlated_ingress_route().model_copy(
+        update={
+            "input_model_name": (
+                "_IngressPayloadWithNestedAnnotatedOptionalCorrelation"
+            )
+        }
+    )
+
+    normalized = validate_runtime_local_ingress_payload(
+        route,
+        {"prompt": "write tests"},
+        correlation_id=correlation_id,
+    )
+
+    assert normalized["correlation_id"] == str(correlation_id)
+
+
+def test_validate_runtime_local_ingress_payload_accepts_equivalent_alias_choice() -> (
+    None
+):
+    correlation_id = uuid4()
+    route = _correlated_ingress_route().model_copy(
+        update={"input_model_name": "_IngressPayloadWithCorrelationAliasChoices"}
+    )
+
+    normalized = validate_runtime_local_ingress_payload(
+        route,
+        {
+            "prompt": "write tests",
+            "correlationId": str(correlation_id),
+        },
+        correlation_id=correlation_id,
+    )
+
+    assert normalized["correlation_id"] == str(correlation_id)
+    assert "correlationId" not in normalized
+
+
+def test_validate_runtime_local_ingress_payload_rejects_conflicting_alias_choice() -> (
+    None
+):
+    correlation_id = uuid4()
+    route = _correlated_ingress_route().model_copy(
+        update={"input_model_name": "_IngressPayloadWithCorrelationAliasChoices"}
+    )
+
+    with pytest.raises(ValueError, match="correlation_id conflicts"):
+        validate_runtime_local_ingress_payload(
+            route,
+            {
+                "prompt": "write tests",
+                "correlationId": str(uuid4()),
+            },
+            correlation_id=correlation_id,
+        )
+
+
+def test_validate_runtime_local_ingress_payload_rejects_divergent_duplicate_aliases() -> (
+    None
+):
+    correlation_id = uuid4()
+    route = _correlated_ingress_route().model_copy(
+        update={"input_model_name": "_IngressPayloadWithCorrelationAliasChoices"}
+    )
+
+    with pytest.raises(ValueError, match="correlation_id conflicts"):
+        validate_runtime_local_ingress_payload(
+            route,
+            {
+                "prompt": "write tests",
+                "correlation_id": str(correlation_id),
+                "correlationId": str(uuid4()),
+            },
+            correlation_id=correlation_id,
+        )
+
+
+def test_validate_runtime_local_ingress_payload_accepts_equivalent_duplicate_aliases() -> (
+    None
+):
+    correlation_id = uuid4()
+    route = _correlated_ingress_route().model_copy(
+        update={"input_model_name": "_IngressPayloadWithCorrelationAliasChoices"}
+    )
+
+    normalized = validate_runtime_local_ingress_payload(
+        route,
+        {
+            "prompt": "write tests",
+            "correlation_id": str(correlation_id),
+            "correlationId": str(correlation_id),
+        },
+        correlation_id=correlation_id,
+    )
+
+    assert normalized["correlation_id"] == str(correlation_id)
+    assert "correlationId" not in normalized
+
+
+def test_validate_runtime_local_ingress_payload_rejects_malformed_alias_choice() -> (
+    None
+):
+    route = _correlated_ingress_route().model_copy(
+        update={"input_model_name": "_IngressPayloadWithCorrelationAliasChoices"}
+    )
+
+    with pytest.raises(ValueError, match="correlation_id must be a valid UUID"):
+        validate_runtime_local_ingress_payload(
+            route,
+            {
+                "prompt": "write tests",
+                "correlationId": None,
+            },
+            correlation_id=uuid4(),
+        )
+
+
+def test_validate_runtime_local_ingress_payload_stamps_alias_only_model() -> None:
+    correlation_id = uuid4()
+    route = _correlated_ingress_route().model_copy(
+        update={"input_model_name": "_IngressPayloadWithCorrelationAlias"}
+    )
+
+    normalized = validate_runtime_local_ingress_payload(
+        route,
+        {"prompt": "write tests"},
+        correlation_id=correlation_id,
+    )
+
+    assert normalized["correlation_id"] == str(correlation_id)
+
+
+def test_validate_runtime_local_ingress_payload_stamps_alias_path_model() -> None:
+    correlation_id = uuid4()
+    route = _correlated_ingress_route().model_copy(
+        update={"input_model_name": "_IngressPayloadWithCorrelationAliasPath"}
+    )
+
+    normalized = validate_runtime_local_ingress_payload(
+        route,
+        {"prompt": "write tests"},
+        correlation_id=correlation_id,
+    )
+
+    assert normalized["correlation_id"] == str(correlation_id)
+
+
+def test_validate_runtime_local_ingress_payload_rejects_conflicting_alias_path() -> (
+    None
+):
+    correlation_id = uuid4()
+    route = _correlated_ingress_route().model_copy(
+        update={"input_model_name": "_IngressPayloadWithCorrelationAliasPath"}
+    )
+
+    with pytest.raises(ValueError, match="correlation_id conflicts"):
+        validate_runtime_local_ingress_payload(
+            route,
+            {
+                "prompt": "write tests",
+                "trace": {"correlation_id": str(uuid4())},
+            },
+            correlation_id=correlation_id,
+        )
+
+
+def test_validate_runtime_local_ingress_payload_stamps_indexed_alias_path_model() -> (
+    None
+):
+    correlation_id = uuid4()
+    route = _correlated_ingress_route().model_copy(
+        update={"input_model_name": "_IngressPayloadWithIndexedCorrelationAliasPath"}
+    )
+
+    normalized = validate_runtime_local_ingress_payload(
+        route,
+        {"prompt": "write tests"},
+        correlation_id=correlation_id,
+    )
+
+    assert normalized["correlation_id"] == str(correlation_id)
+
+
+def test_validate_runtime_local_ingress_payload_preserves_payload_without_model() -> (
+    None
+):
+    payload: dict[str, JsonType] = {"prompt": "write tests"}
+
+    normalized = validate_runtime_local_ingress_payload(
+        _session_orchestrator_route(),
+        payload,
+        correlation_id=uuid4(),
+    )
+
+    assert normalized is payload
 
 
 @pytest.mark.asyncio
@@ -660,6 +1036,7 @@ async def test_runtime_host_process_dispatch_local_ingress_rejects_invalid_paylo
 async def test_runtime_host_process_dispatch_local_ingress_publishes_validated_payload() -> (
     None
 ):
+    correlation_id = uuid4()
     route = ModelRuntimeLocalIngressRoute(
         node_name="node_session_orchestrator",
         contract_name="session_orchestrator",
@@ -677,7 +1054,7 @@ async def test_runtime_host_process_dispatch_local_ingress_publishes_validated_p
         status="completed",
         payload={"status": "complete"},
         completed_at=datetime.now(UTC),
-        correlation_id=uuid4(),
+        correlation_id=correlation_id,
     )
     broker = SimpleNamespace(
         dispatch_request=AsyncMock(return_value=(route, dispatch_result))
@@ -696,16 +1073,86 @@ async def test_runtime_host_process_dispatch_local_ingress_publishes_validated_p
                 "command_name": "inner-command",
                 "payload": {"dry_run": True},
             },
+            correlation_id=correlation_id,
         )
     )
 
     assert response.ok is True
     command = broker.dispatch_request.await_args.args[0]
+    assert command.correlation_id == correlation_id
     assert command.payload == {
         "command_name": "inner-command",
+        "correlation_id": str(correlation_id),
         "payload": {"dry_run": True},
         "timeout_ms": 300_000,
     }
+
+
+@pytest.mark.asyncio
+async def test_runtime_host_process_injects_authoritative_correlation_before_payload_validation() -> (
+    None
+):
+    correlation_id = uuid4()
+    route = _correlated_ingress_route()
+    dispatch_result = ModelDispatchBusTerminalResult(
+        status="completed",
+        payload={"status": "complete"},
+        completed_at=datetime.now(UTC),
+        correlation_id=correlation_id,
+    )
+    broker = SimpleNamespace(
+        dispatch_request=AsyncMock(return_value=(route, dispatch_result))
+    )
+    process = RuntimeHostProcess(
+        config=make_runtime_config(), dispatch_engine=AsyncMock()
+    )
+    process._is_running = True
+    process._local_ingress_routes = {route.contract_name: route}
+    process._pattern_b_broker = cast("object", broker)
+
+    response = await process._dispatch_local_ingress_request(
+        ModelLocalRuntimeIngressRequest(
+            command_name=route.contract_name,
+            payload={"prompt": "write tests"},
+            correlation_id=correlation_id,
+        )
+    )
+
+    assert response.ok is True
+    command = broker.dispatch_request.await_args.args[0]
+    assert command.correlation_id == correlation_id
+    assert command.payload["correlation_id"] == str(correlation_id)
+
+
+@pytest.mark.asyncio
+async def test_runtime_host_process_rejects_conflicting_payload_correlation_before_broker() -> (
+    None
+):
+    correlation_id = uuid4()
+    route = _correlated_ingress_route()
+    broker = SimpleNamespace(dispatch_request=AsyncMock())
+    process = RuntimeHostProcess(
+        config=make_runtime_config(), dispatch_engine=AsyncMock()
+    )
+    process._is_running = True
+    process._local_ingress_routes = {route.contract_name: route}
+    process._pattern_b_broker = cast("object", broker)
+
+    response = await process._dispatch_local_ingress_request(
+        ModelLocalRuntimeIngressRequest(
+            command_name=route.contract_name,
+            payload={
+                "prompt": "write tests",
+                "correlation_id": str(uuid4()),
+            },
+            correlation_id=correlation_id,
+        )
+    )
+
+    assert response.ok is False
+    assert response.error is not None
+    assert response.error.code == "validation_error"
+    broker.dispatch_request.assert_not_awaited()
 
 
 @pytest.mark.asyncio
