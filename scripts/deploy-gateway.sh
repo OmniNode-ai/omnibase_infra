@@ -106,6 +106,11 @@ REQUIRED ENVIRONMENT (--execute only)
     GATEWAY_CONTAINER_UID, GATEWAY_CONTAINER_GID). This script does not invent
     these -- it reads the same file the systemd unit already reads.
 
+    BUILD_SOURCE=workspace additionally requires OMNI_HOME to be set (same
+    convention as deploy-runtime.sh) so sibling repos can be staged from the
+    operator's local clones before the build; the default BUILD_SOURCE=release
+    does not stage anything.
+
 WHAT --execute DOES, IN ORDER
     1. Resolve repo root, version (pyproject.toml), and git SHA (HEAD).
     2. Resolve the CONTAINER's currently running image (docker inspect
@@ -113,26 +118,33 @@ WHAT --execute DOES, IN ORDER
        ${ROLLBACK_IMAGE_TAG} so it survives the build below moving the
        build tag onto the new image (a bare env-file digest is never used --
        it can go stale relative to what is actually running).
-    3. Build the image with the same OCI provenance build-args every
+    3. If BUILD_SOURCE=workspace: stage workspace/sibling-repos/ from OMNI_HOME
+       (same scripts/runtime_build/stage_workspace.sh deploy-runtime.sh uses)
+       and run the OMN-12987 sibling lock-pin preflight -- skipped entirely in
+       the default BUILD_SOURCE=release mode.
+    4. Build the image with the same OCI provenance build-args every
        omnibase-infra runtime container gets (VCS_REF, RUNTIME_VERSION,
        BUILD_DATE, COMPOSE_PROJECT, RUNTIME_SOURCE_HASH, PROMOTION_CLASS,
        NON_MAIN_LINEAGE, OMNIBASE_COMPAT_REF, OMNIMARKET_REF,
        ONEX_CHANGE_CONTROL_REF).
-    4. Resolve the built image's digest (sha256:<64 hex>).
-    5. Sync docker/docker-compose.gateway.yml and
+    5. Resolve the built image's digest (sha256:<64 hex>).
+    6. Sync docker/docker-compose.gateway.yml and
        docker/gateway/beta-gateway-canary.yaml from this checkout into
        ${GATEWAY_HOST_DIR} (root-owned, mode 0444 -- same posture the files
        already have), replacing the hand-copied originals.
-    6. Rewrite ${GATEWAY_ENV_FILE}'s GATEWAY_IMAGE= line to the new digest,
+    7. Rewrite ${GATEWAY_ENV_FILE}'s GATEWAY_IMAGE= line to the new digest,
        preserving every other key untouched.
-    7. Record the previous digest + this deploy's identity in
-       ${GATEWAY_REGISTRY_FILE} (rollback target).
-    8. 'systemctl reload ${SYSTEMD_UNIT}' (force-recreates the container on
+    8. Record the previous digest + this deploy's identity in
+       ${GATEWAY_REGISTRY_FILE} (rollback target). rollback_command is null
+       when no previous image was retained (first deploy, or the previous
+       image had already been pruned) -- never a command built from an empty
+       digest.
+    9. 'systemctl reload ${SYSTEMD_UNIT}' (force-recreates the container on
        the new digest; requires sudo) unless --skip-reload.
-    9. Verify: the container is actually running the digest just built (not
-       just that labels are non-empty -- a reload that silently fails to
-       recreate the container is caught here instead of reporting success),
-       image labels are non-empty, and the two OMN-12912 files are present.
+    10. Verify: the container is actually running the digest just built (not
+        just that labels are non-empty -- a reload that silently fails to
+        recreate the container is caught here instead of reporting success),
+        image labels are non-empty, and the two OMN-12912 files are present.
 
 ROLLBACK
     ${GATEWAY_REGISTRY_FILE} records "previous_digest" -- the image this
@@ -401,6 +413,116 @@ resolve_image_digest() {
 }
 
 # =============================================================================
+# Workspace staging (BUILD_SOURCE=workspace) -- OMN-15521 remediation.
+#
+# resolve_build_args() already honours BUILD_SOURCE=workspace for the label
+# values (promotion_class/non_main_lineage), but a prior version of this
+# script never actually populated workspace/sibling-repos/ -- unlike
+# scripts/deploy-runtime.sh's build_images(), which always calls
+# stage_workspace_if_needed() first. docker/Dockerfile.runtime unconditionally
+# COPYs workspace/sibling-repos/, so an unstaged workspace build silently used
+# the committed placeholder (or whatever stale staging happened to be sitting
+# in the checkout) while still stamping workspace-provenance labels. This is
+# the same helper deploy-runtime.sh uses -- same underlying
+# scripts/runtime_build/stage_workspace.sh and
+# scripts/runtime_build/check_sibling_lock_pins.py, invoked the same way, not
+# reimplemented -- adapted only to this script's own build-source resolution
+# (no COLD_FULL_BRINGUP concept here).
+# =============================================================================
+
+stage_workspace_if_needed() {
+    # Populate workspace/sibling-repos/ from the operator-selected OMNI_HOME so
+    # Dockerfile.runtime can install exact local sibling repo contents.
+    local repo_root="$1"
+    local build_source omni_home stage_script
+    build_source="${BUILD_SOURCE:-release}"
+    if [[ "${build_source}" != "workspace" ]]; then
+        return 0
+    fi
+
+    omni_home="${OMNI_HOME:-}"
+    if [[ -z "${omni_home}" ]]; then
+        log_error "BUILD_SOURCE=workspace requires OMNI_HOME before staging or build."
+        exit 64
+    fi
+
+    stage_script="${repo_root}/scripts/runtime_build/stage_workspace.sh"
+    if [[ ! -f "${stage_script}" ]]; then
+        log_error "Workspace staging script not found: ${stage_script}"
+        log_error "Cannot proceed with BUILD_SOURCE=workspace."
+        exit 1
+    fi
+
+    log_step "Stage Workspace Sibling Repos"
+    log_cmd "OMNI_HOME=${omni_home} bash ${stage_script}"
+    (cd "${repo_root}" && OMNI_HOME="${omni_home}" bash "${stage_script}")
+
+    check_sibling_lock_pins "${repo_root}" "${omni_home}"
+}
+
+check_sibling_lock_pins() {
+    # Fail-fast preflight (OMN-12987, same guard deploy-runtime.sh runs): every
+    # vendored sibling's version/SHA must match the consuming repo's
+    # (omnimarket) uv.lock pin. A stale vendored sibling produced the
+    # 2026-06-11 stability crash; this guard refuses to build against one.
+    local repo_root="$1"
+    local omni_home="$2"
+    local guard="${repo_root}/scripts/runtime_build/check_sibling_lock_pins.py"
+    if [[ ! -f "${guard}" ]]; then
+        log_error "Sibling lock-pin preflight not found: ${guard}"
+        log_error "Cannot verify vendored siblings match the consuming lock. Aborting."
+        exit 1
+    fi
+
+    log_step "Sibling Lock-Pin Preflight (OMN-12987)"
+    mkdir -p "${repo_root}/workspace/sibling-repos"
+    local provenance_out="${repo_root}/workspace/sibling-repos/.sibling-lock-pins.json"
+    local python_bin
+    if [[ -x "${repo_root}/.venv/bin/python" ]]; then
+        python_bin="${repo_root}/.venv/bin/python"
+    elif command -v uv &>/dev/null; then
+        python_bin="uv-run"
+    elif command -v python3 &>/dev/null; then
+        python_bin="python3"
+    else
+        log_error "No Python interpreter available to run the sibling lock-pin preflight."
+        exit 1
+    fi
+
+    local lock_path="${omni_home}/omnimarket/uv.lock"
+    local guard_args=(
+        --lock "${lock_path}"
+        --repo "omnibase-infra=${omni_home}/omnibase_infra"
+        --repo "omnibase-core=${omni_home}/omnibase_core"
+        --repo "omnibase-spi=${omni_home}/omnibase_spi"
+        --repo "omnibase-compat=${omni_home}/omnibase_compat"
+        --repo "onex-change-control=${omni_home}/onex_change_control"
+        --output "${provenance_out}"
+        --build-source workspace
+    )
+    if [[ "${ALLOW_SIBLING_PIN_DRIFT:-0}" == "1" ]]; then
+        guard_args+=(--allow-drift)
+        log_warn "ALLOW_SIBLING_PIN_DRIFT=1 -- passing --allow-drift to sibling lock-pin preflight (OMN-12977)"
+    fi
+
+    log_cmd "OMNI_HOME=${omni_home} ${guard} ${guard_args[*]}"
+    if [[ "${python_bin}" == "uv-run" ]]; then
+        if ! OMNI_HOME="${omni_home}" uv run --project "${repo_root}" python "${guard}" \
+            "${guard_args[@]}"; then
+            log_error "Sibling lock-pin preflight FAILED. Refusing to build a stale image."
+            exit 1
+        fi
+    else
+        if ! OMNI_HOME="${omni_home}" "${python_bin}" "${guard}" \
+            "${guard_args[@]}"; then
+            log_error "Sibling lock-pin preflight FAILED. Refusing to build a stale image."
+            exit 1
+        fi
+    fi
+    log_info "Sibling lock-pin preflight passed: all vendored siblings match the lock."
+}
+
+# =============================================================================
 # Host-file sync (AC4) -- eliminates the 2026-07-29 hand-copy as the source of
 # truth. Every deploy re-syncs from this checkout so the host copy can never
 # silently drift from a merged commit again.
@@ -527,7 +649,13 @@ write_registry() {
             compose_project: $compose_project,
             gateway_env_file: $gateway_env_file,
             host_compose_file: $host_compose_file,
-            rollback_command: ("sudo sed -i \"s|^GATEWAY_IMAGE=.*|GATEWAY_IMAGE=" + ($previous_digest // "") + "|\" " + $gateway_env_file + " && sudo systemctl reload onex-gateway-forwarder")
+            rollback_command: (
+                if ($previous_digest != "") then
+                    ("sudo sed -i \"s|^GATEWAY_IMAGE=.*|GATEWAY_IMAGE=" + $previous_digest + "|\" " + $gateway_env_file + " && sudo systemctl reload onex-gateway-forwarder")
+                else
+                    null
+                end
+            )
         }' >"${tmp_file}"
     mv "${tmp_file}" "${GATEWAY_REGISTRY_FILE}"
     log_info "Registry written: ${GATEWAY_REGISTRY_FILE}"
@@ -642,6 +770,8 @@ main() {
     # shellcheck source=/dev/null
     source "${GATEWAY_ENV_FILE}"
     set +a
+
+    stage_workspace_if_needed "${repo_root}"
 
     build_image "${repo_root}" "${git_sha}" "${version}"
     local new_digest

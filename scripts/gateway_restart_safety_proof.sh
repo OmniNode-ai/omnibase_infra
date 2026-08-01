@@ -84,7 +84,11 @@ snapshot() {
     # sqlite3 CLI binary is installed in the runtime image -- see
     # docker/Dockerfile.runtime's minimal apt-get install list). Read-only;
     # "0\t0" if the store does not exist yet (container never processed
-    # anything) or the container is unreachable.
+    # anything). Callers MUST call require_reachable() first -- this function
+    # no longer distinguishes "genuinely empty store" from "container
+    # unreachable" itself (both used to collapse to "0\t0", which made the
+    # after<before durability check vacuous against an unreachable
+    # container -- OMN-15521 remediation round 2).
     docker exec "${CONTAINER_NAME}" python3 -c "
 import sqlite3
 try:
@@ -96,6 +100,31 @@ try:
 except Exception:
     print('0\t0')
 " 2>/dev/null || printf '0\t0\n'
+}
+
+require_reachable() {
+    # Fail loudly (not a silent 0\t0) if the container cannot be reached via
+    # `docker exec` at all -- distinct from a genuinely empty idempotency
+    # store, which is a legitimate (if weak) reading. Without this, an
+    # unreachable container after the restart made before_count/after_count
+    # both resolve to 0 via snapshot()'s own exception handler, the
+    # after<before comparison became vacuously true, and the proof printed
+    # "AC5-PROOF OK" for a container that was never actually checked.
+    local label="$1"
+    if ! docker exec "${CONTAINER_NAME}" true 2>/dev/null; then
+        log_error "AC5-PROOF FAILED: ${CONTAINER_NAME} is not reachable via 'docker exec' (${label}) -- cannot prove restart safety against a container that cannot be inspected."
+        exit 1
+    fi
+}
+
+container_identity() {
+    # "<Id>|<StartedAt>" -- proves a restart actually RECREATED the
+    # container, not merely that a health probe happened to return "healthy"
+    # against a stale, never-touched container (the exact false-green a fake
+    # `sudo systemctl reload` that exits 0 and does nothing produces: the
+    # health check and row-count check both pass trivially because nothing
+    # changed). Empty if the container does not exist / is not inspectable.
+    docker inspect "${CONTAINER_NAME}" --format '{{.Id}}|{{.State.StartedAt}}' 2>/dev/null || true
 }
 
 wait_healthy() {
@@ -113,6 +142,15 @@ wait_healthy() {
 main() {
     log_step "Restart-safety proof: ${CONTAINER_NAME}"
     log_info "Idempotency store: ${SQLITE_PATH}"
+
+    local before_identity
+    before_identity="$(container_identity)"
+    if [[ -z "${before_identity}" ]]; then
+        log_error "AC5-PROOF FAILED: ${CONTAINER_NAME} is not inspectable before the restart -- cannot prove restart safety against a container that isn't running."
+        exit 1
+    fi
+
+    require_reachable "before restart"
 
     local before before_count before_max
     before="$(snapshot)"
@@ -132,7 +170,21 @@ main() {
         log_error "AC5-PROOF FAILED: ${CONTAINER_NAME} did not report Docker-healthy within ${HEALTHY_TIMEOUT_SECONDS}s of restart."
         exit 1
     fi
-    log_info "Container healthy after restart (not false-green)."
+    log_info "Container reports healthy after restart."
+
+    local after_identity
+    after_identity="$(container_identity)"
+    if [[ -z "${after_identity}" ]]; then
+        log_error "AC5-PROOF FAILED: ${CONTAINER_NAME} is not inspectable after the restart."
+        exit 1
+    fi
+    if [[ "${after_identity}" == "${before_identity}" ]]; then
+        log_error "AC5-PROOF FAILED: ${CONTAINER_NAME} was NOT actually recreated by 'systemctl reload ${SYSTEMD_UNIT}' (container identity unchanged: ${before_identity}). A reload that exits 0 and reports healthy without recreating the container is a false-green, not a real restart -- 'healthy' alone (checked above) is not sufficient proof."
+        exit 1
+    fi
+    log_info "Container identity changed across restart (${before_identity} -> ${after_identity}): a real restart occurred, not a stale no-op."
+
+    require_reachable "after restart"
 
     local after after_count after_max
     after="$(snapshot)"
@@ -146,7 +198,7 @@ main() {
     fi
 
     log_step "Done"
-    log_info "AC5-PROOF OK: idempotency store survived restart (rows ${before_count} -> ${after_count}, no durable-marker loss); container returned genuinely healthy."
+    log_info "AC5-PROOF OK: idempotency store survived restart (rows ${before_count} -> ${after_count}, no durable-marker loss); container was genuinely recreated and returned healthy (not false-green)."
     log_info "File this receipt on OMN-12912 (not OMN-15521, per that ticket's own AC5 filing instruction) -- this script does not post it anywhere itself."
 }
 

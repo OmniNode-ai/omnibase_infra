@@ -105,29 +105,42 @@ In order, this:
    rather than recording a digest `docker image inspect` cannot find.
 3. Sources the env file so the AWS/TPM/UID variables the compose file
    requires resolve for the build.
-4. Builds `docker-gateway-forwarder:build` with the provenance build-args from
+4. If `BUILD_SOURCE=workspace` (default `release`): stages
+   `workspace/sibling-repos/` from `OMNI_HOME` via the SAME
+   `scripts/runtime_build/stage_workspace.sh` `deploy-runtime.sh` uses, then
+   runs the OMN-12987 sibling lock-pin preflight. `docker/Dockerfile.runtime`
+   unconditionally `COPY`s `workspace/sibling-repos/`, so skipping this step
+   in workspace mode silently built against the committed placeholder /
+   whatever staging happened to already be in the checkout, while still
+   stamping workspace-provenance labels. `BUILD_SOURCE=release` (the default)
+   skips this entirely.
+5. Builds `docker-gateway-forwarder:build` with the provenance build-args from
    step 2 above, **plus** `OMNIBASE_COMPAT_REF` / `OMNIMARKET_REF` /
    `ONEX_CHANGE_CONTROL_REF` — the same sibling-ref args
    `deploy-runtime.sh`'s `build_images()` passes unconditionally. Omitting
    these silently falls back to the Dockerfile's hardcoded ARG defaults,
    which is how the gateway image's `onex-change-control` pin drifted from
    the `omnibase-infra` runtime image's pin on the same box.
-5. Resolves the built image's digest (`docker image inspect --format='{{.Id}}'`).
-6. Syncs `docker/docker-compose.gateway.yml` and
+6. Resolves the built image's digest (`docker image inspect --format='{{.Id}}'`).
+7. Syncs `docker/docker-compose.gateway.yml` and
    `docker/gateway/beta-gateway-canary.yaml` from **this checkout** into
    `/opt/omninode/gateway/` (`sudo install -m 0444 -o root -g root`, matching
    the existing file posture) — replacing the 2026-07-29 hand-copy as the
    source of truth. Every deploy re-syncs, so the host copy can never drift
    from a merged commit again.
-7. Rewrites `/etc/omninode/gateway/gateway.env`'s `GATEWAY_IMAGE=` line to the
+8. Rewrites `/etc/omninode/gateway/gateway.env`'s `GATEWAY_IMAGE=` line to the
    new digest, leaving every other key untouched.
-8. Writes `~/.omnibase/gateway/registry.json` recording `active_digest`,
+9. Writes `~/.omnibase/gateway/registry.json` recording `active_digest`,
    `previous_digest` (the rollback target), `git_sha`, `deployed_at`, and a
    ready-to-run `rollback_command` — the same convention
    `~/.omnibase/infra/registry.json` uses for the `omnibase-infra` lane.
-9. `sudo systemctl reload onex-gateway-forwarder` — the unit's existing
-   `ExecReload` force-recreates the container on the new digest.
-10. Verifies: the container is actually running the digest just built (a
+   `previous_digest` and `rollback_command` are both `null` when there is no
+   rollback target (first deploy, or the previous image had already been
+   pruned) — never a fabricated digest or a sed command built from an empty
+   value.
+10. `sudo systemctl reload onex-gateway-forwarder` — the unit's existing
+    `ExecReload` force-recreates the container on the new digest.
+11. Verifies: the container is actually running the digest just built (a
     reload that silently fails to recreate the container is caught here
     instead of reporting success), labels are non-empty, and the two
     OMN-12912 files (`service_gateway_delivery.py`, `store_sqlite.py`) are
@@ -166,19 +179,31 @@ cat ~/.omnibase/gateway/registry.json | jq .
 good digest — resolved from the container's own running state at deploy time
 and retagged as `docker-gateway-forwarder:previous` so a routine
 `docker image prune` cannot silently make it unresolvable before anyone needs
-it. To roll back to it:
+it. `registry.json`'s own `rollback_command` field carries the exact restore
+command pre-filled with that digest — run it verbatim, do not reconstruct it
+by hand:
 
 ```bash
-sudo sed -i "s|^GATEWAY_IMAGE=.*|GATEWAY_IMAGE=$(jq -r .previous_digest ~/.omnibase/gateway/registry.json)|" \
-  /etc/omninode/gateway/gateway.env
-sudo systemctl reload onex-gateway-forwarder
+jq -r .rollback_command ~/.omnibase/gateway/registry.json
+# -> sudo sed -i "s|^GATEWAY_IMAGE=.*|GATEWAY_IMAGE=sha256:<64 hex>|" /etc/omninode/gateway/gateway.env && sudo systemctl reload onex-gateway-forwarder
+
+# then either paste that command, or:
+bash -c "$(jq -r .rollback_command ~/.omnibase/gateway/registry.json)"
 ```
 
-(`registry.json`'s own `rollback_command` field carries this exact command
-pre-filled with the digest recorded at deploy time.) This mirrors the
-`omnibase-infra` lane's own manual rollback-via-`registry.json` pattern —
-`deploy-runtime.sh` has no automated `--rollback` flag either; a prior
-digest is always restored by hand from the registry.
+**`rollback_command` is `null` when there is no rollback target** — the first
+deploy ever run against this lane, or a deploy whose previous running image
+had already been pruned before this script could retag it. There is nothing
+to roll back to in that case; do not reconstruct a sed command from
+`.previous_digest` by hand (a JSON `null` printed through `jq -r` renders as
+the literal string `null`, which `sed`s straight into `gateway.env`'s
+`GATEWAY_IMAGE=` line and corrupts it — the systemd unit's `ExecStartPre`
+digest-format assertion then refuses to start on the next restart/reboot).
+Deploy forward instead.
+
+This mirrors the `omnibase-infra` lane's own manual rollback-via-
+`registry.json` pattern — `deploy-runtime.sh` has no automated `--rollback`
+flag either; a prior digest is always restored by hand from the registry.
 
 ---
 
@@ -188,11 +213,16 @@ digest is always restored by hand from the registry.
 ./scripts/gateway_restart_safety_proof.sh
 ```
 
-Snapshots the running container's durable idempotency store row count,
-reloads `onex-gateway-forwarder` (the same mechanism `--execute` uses to
-recreate the container), waits for Docker-healthy, then re-snapshots and
-fails if any durable marker was lost across the restart or the container
-never came back genuinely healthy. This is a real restart-durability smoke
+Confirms the container is reachable via `docker exec` and records its
+identity (`Id` + `State.StartedAt`), snapshots the running container's
+durable idempotency store row count, reloads `onex-gateway-forwarder` (the
+same mechanism `--execute` uses to recreate the container), waits for
+Docker-healthy, then asserts the container's identity actually **changed**
+(a reload that exits 0 and reports healthy without recreating anything is a
+false-green a health check alone cannot catch), re-confirms reachability,
+and re-snapshots — failing if any durable marker was lost across the
+restart, the container never came back genuinely healthy, was never actually
+recreated, or became unreachable. This is a real restart-durability smoke
 proof, driven against the actual running container — it is **not** the full
 cross-broker at-least-once/exactly-once redelivery proof (a deliberately
 killed in-flight message never duplicating or dropping on the far side),

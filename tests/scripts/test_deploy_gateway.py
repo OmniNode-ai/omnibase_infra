@@ -684,6 +684,15 @@ def test_rollback_target_not_recorded_if_previous_image_missing(
 
     registry = harness.registry()
     assert registry["previous_digest"] is None
+    assert registry["rollback_command"] is None, (
+        "OMN-15521 remediation round 3: a null previous_digest must produce a "
+        "null rollback_command, never a sed command built from an empty "
+        "digest -- confirmed live on .201: a prior version emitted "
+        '"GATEWAY_IMAGE=" (nothing after the =) here, which would have '
+        "corrupted gateway.env's GATEWAY_IMAGE= line to an unparseable value "
+        "on the next accidental run, wedging the systemd unit's "
+        "ExecStartPre digest-format assertion on the following restart."
+    )
 
 
 @pytest.mark.unit
@@ -706,6 +715,10 @@ def test_first_deploy_records_no_rollback_target(harness: _Harness) -> None:
 
     registry = harness.registry()
     assert registry["previous_digest"] is None
+    assert registry["rollback_command"] is None, (
+        "first deploy has no rollback target -- rollback_command must be "
+        "null, not a sed command with an empty GATEWAY_IMAGE= value"
+    )
     docker_log = harness.docker_log.read_text(encoding="utf-8")
     assert not any(line.startswith("tag ") for line in docker_log.splitlines()), (
         "must not attempt to retag an empty previous digest"
@@ -744,3 +757,99 @@ def test_execute_without_env_file_fails_closed(harness: _Harness) -> None:
     assert result.returncode != 0
     assert "GATEWAY_ENV_FILE not found" in result.stderr
     assert not (harness.registry_dir / "registry.json").exists()
+
+
+# ---------------------------------------------------------------------------
+# BUILD_SOURCE=workspace staging (OMN-15521 remediation round 3)
+#
+# A prior version of this script honoured BUILD_SOURCE=workspace for the
+# stamped labels (promotion_class/non_main_lineage) but never actually staged
+# workspace/sibling-repos/ -- unlike scripts/deploy-runtime.sh's
+# build_images(), which always calls stage_workspace_if_needed() first.
+# docker/Dockerfile.runtime unconditionally COPYs workspace/sibling-repos/,
+# so a workspace-mode build silently used the committed placeholder (or
+# whatever stale staging happened to already be sitting in the checkout)
+# while still stamping workspace-provenance labels the prod-promotion gate
+# and lineage guard consume. A full live staging run needs real OMNI_HOME
+# sibling git clones, so -- matching the established convention
+# tests/scripts/test_deploy_runtime_build_context.py already uses for the
+# identical deploy-runtime.sh wiring (test_deploy_runtime_stages_workspace_
+# and_passes_omni_home_arg / test_deploy_runtime_runs_sibling_lock_pin_
+# preflight) -- these are static assertions on the wiring, not a live
+# staging run.
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.unit
+def test_deploy_gateway_stages_workspace_before_build() -> None:
+    """AC2 remediation: BUILD_SOURCE=workspace must stage sibling repos
+    before build_image() runs, or the build silently uses stale/placeholder
+    workspace/sibling-repos/ content while still claiming workspace
+    provenance in its stamped labels.
+    """
+    deploy_script = DEPLOY_SCRIPT.read_text(encoding="utf-8")
+
+    assert 'stage_workspace_if_needed "${repo_root}"' in deploy_script
+    stage_call_idx = deploy_script.index('stage_workspace_if_needed "${repo_root}"\n')
+    build_call_idx = deploy_script.index('build_image "${repo_root}" "${git_sha}"')
+    assert stage_call_idx < build_call_idx, (
+        "stage_workspace_if_needed must run BEFORE build_image in main(), or "
+        "the build reads workspace/sibling-repos/ before it is populated"
+    )
+
+    # The staging function itself must invoke the SAME script deploy-runtime.sh
+    # uses -- reused machinery, not a parallel reimplementation.
+    assert (
+        'stage_script="${repo_root}/scripts/runtime_build/stage_workspace.sh"'
+        in deploy_script
+    )
+    assert 'bash "${stage_script}"' in deploy_script
+
+    # Release mode (the default) must not attempt to stage anything.
+    assert (
+        'if [[ "${build_source}" != "workspace" ]]; then\n        return 0'
+        in (deploy_script.split("stage_workspace_if_needed() {", 1)[1])
+    )
+
+
+@pytest.mark.unit
+def test_deploy_gateway_requires_omni_home_for_workspace_build_source(
+    harness: _Harness,
+) -> None:
+    """BUILD_SOURCE=workspace with no OMNI_HOME must fail closed before any
+    build/mutation -- mirrors deploy-runtime.sh's validate_build_source_config.
+    """
+    result = harness.run(
+        "--execute",
+        BUILD_SOURCE="workspace",
+        OMNI_HOME="",
+        GW_TEST_LABEL_REVISION="3541ac805b86",
+        GW_TEST_LABEL_BUILD_SOURCE="workspace",
+        GW_TEST_DELIVERY_PRESENT="1",
+        GW_TEST_SQLITE_PRESENT="1",
+    )
+    assert result.returncode != 0
+    assert "BUILD_SOURCE=workspace requires OMNI_HOME" in (
+        result.stdout + result.stderr
+    )
+    assert not harness.docker_log.exists() or "compose -p" not in (
+        harness.docker_log.read_text(encoding="utf-8")
+    ), "must fail before attempting a build, not mid-build"
+
+
+@pytest.mark.unit
+def test_deploy_gateway_runs_sibling_lock_pin_preflight_in_workspace_mode() -> None:
+    """Workspace staging must run the OMN-12987 lock-pin preflight before
+    build, same as deploy-runtime.sh -- the recurrence guard for a stale
+    vendored sibling silently shipping (the 2026-06-11 stability crash).
+    """
+    deploy_script = DEPLOY_SCRIPT.read_text(encoding="utf-8")
+
+    assert 'check_sibling_lock_pins "${repo_root}" "${omni_home}"' in deploy_script
+    assert "scripts/runtime_build/check_sibling_lock_pins.py" in deploy_script
+    assert "Refusing to build a stale image." in deploy_script
+    # Current CLI (OMN-12977/12987): --lock / repeatable --repo / --output,
+    # never the removed --provenance-out flag.
+    assert "--lock" in deploy_script
+    assert "--output" in deploy_script
+    assert "--provenance-out" not in deploy_script
