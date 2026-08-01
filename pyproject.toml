@@ -202,24 +202,18 @@ onex-change-control = { git = "https://github.com/OmniNode-ai/onex_change_contro
 # omnibase-core/omnibase-spi were DELETED here and the version pins bumped to
 # the released exact versions, restoring a fully PyPI-sourced reproducible lock.
 #
-# OMN-14758 (epic OMN-14717, S6): TEMPORARY dev-build pin advanced from S3's
-# aca32f24 to core dev HEAD (a2562165), a strict descendant (verified
-# `git merge-base --is-ancestor`). S6 wires the delegation command spine onto
-# S4 RuntimeDispatch, which is DEV-ONLY / UNRELEASED (latest core release is
-# 0.46.7). This pin carries S1 transport protocols + ModelTransportMessage
-# (#1463), S2 InMemoryTransport + TransportConformanceSuite (#1464), S4
-# RuntimeDispatch + DispatchRoute + runtime_envelope_router + EnumDeliveryDisposition
-# (#1466), and S3 conformance (#1467). a2562165 is version 0.46.8, so the
-# ==0.46.8 pins above stay consistent. Not on PyPI.
-#
-# OMN-15414: bumped 3f2998b3 -> 1f4549d7, the exact dependency head from
-# omnibase_core#1529. That change adds the frozen application-database topology
-# models consumed by the checked-in instances below. The OMN-15414 PR remains
-# draft and landing-blocked until #1529 merges. 1f4549d7 is still version 0.46.8,
-# so the ==0.46.8 pins above stay consistent. Not on PyPI.
-# REMOVE WHEN RELEASED: once core publishes a version containing S1/S2/S4, delete
-# this override and `uv lock`.
-omnibase-core = { git = "https://github.com/OmniNode-ai/omnibase_core.git", rev = "3d51b047a43ee412a7521502619d35c216dc7811" }  # raw-override-ok: OMN-15414
+# OMN-14628 (2026-08-01): the omnibase-core git-rev override is DELETED. Its own
+# exit condition ("REMOVE WHEN RELEASED: once core publishes a version containing
+# S1/S2/S4") is met — omnibase-core 0.46.8 is published on PyPI and is a content
+# SUPERSET of the last override rev (3d51b047): it carries every module that rev
+# carried, plus enum_delegation_terminal_failure_cause and
+# enum_quality_score_comparison, plus the typed execution_scope field. Verified by
+# tree diff of the published wheel against `git archive 3d51b047 -- src/omnibase_core`
+# (nothing existed only in the rev). The lock is once again fully PyPI-sourced.
+# The seam is now held mechanically, not by this comment:
+# tests/unit/runtime/test_seam_released_core_pin.py asserts the frozen symbol and
+# field-TYPE surface in tests/fixtures/seams/core_release/.
+# Do NOT reintroduce a git-rev or branch pin here.
 
 [tool.ruff]
 target-version = "py312"
