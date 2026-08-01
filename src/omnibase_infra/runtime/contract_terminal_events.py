@@ -43,12 +43,16 @@ stamps ``event_type``, the same ``uuid5``-from-correlation scheme mints
 ``envelope_id``, and the same ``correlation_id``/``envelope_timestamp`` fields
 are populated.
 
-Scope, stated so it is not mistaken for more than it is: this makes the failure
-terminal *decodable and correctly typed* on the wire. It does NOT stop
-``DispatchResultApplier`` from also republishing a negative-verdict return value
-onto the contract's SUCCESS terminal — that verdict-blind republish is the
-duplicate-producer defect tracked in OMN-15469, and OMN-15468 acceptance
-criterion 2 stays open until it lands.
+3. **Whether a terminal record is telling the truth.** ``DispatchResultApplier``
+   routed the def-B return value by class name alone: a model missing the
+   contract's ``published_events`` map fell back to the SUCCESS terminal
+   whatever verdict its payload carried, and the Pattern B broker then derived
+   ``completed`` from the arrival topic. :func:`resolve_terminal_verdict` reads
+   the verdict the payload already states and
+   :func:`apply_failure_terminal_guard` re-routes it to the contract's declared
+   failure terminal — fail-closed, and only when the model states a failure.
+   This is OMN-15468 acceptance criterion 2, which the earlier revision of this
+   docstring correctly recorded as still open; it is closed here.
 """
 
 from __future__ import annotations
@@ -56,7 +60,7 @@ from __future__ import annotations
 import hashlib
 import json
 import logging
-from collections.abc import Container, Iterable, Mapping
+from collections.abc import Container, Iterable, Mapping, Sequence
 from datetime import UTC, datetime
 from pathlib import Path
 from uuid import UUID, uuid5
@@ -75,11 +79,23 @@ _ENVELOPE_MARKER_KEYS: frozenset[str] = frozenset(
 )
 
 __all__ = [
+    "apply_failure_terminal_guard",
     "envelope_terminal_payload",
     "extract_terminal_event_topics",
     "load_terminal_event_topics",
+    "resolve_terminal_verdict",
     "terminal_event_topics_from_declaration",
 ]
+
+# Status strings that name a terminal outcome, in the vocabulary the runtime
+# already uses on the wire (``ModelDispatchBusTerminalResult.status`` is
+# completed/failed/timeout; producers additionally use error/cancelled).
+_FAILED_STATUS_VALUES: frozenset[str] = frozenset(
+    {"failed", "failure", "timeout", "timed_out", "error", "cancelled", "canceled"}
+)
+_SUCCEEDED_STATUS_VALUES: frozenset[str] = frozenset(
+    {"completed", "complete", "succeeded", "success", "ok"}
+)
 
 
 def _safe_optional_string(value: object) -> str | None:
@@ -189,6 +205,117 @@ def load_terminal_event_topics(contract_path: Path | None) -> frozenset[str]:
     if not isinstance(raw, Mapping):
         return frozenset()
     return frozenset(extract_terminal_event_topics(raw))
+
+
+def resolve_terminal_verdict(event: object) -> bool | None:
+    """Read a returned model's OWN terminal verdict. ``None`` means unknown.
+
+    OMN-15468 AC2. ``DispatchResultApplier`` routes a definition-B return value
+    to the contract's SUCCESS terminal whenever the model's class name misses
+    the ``published_events`` map — the payload's verdict is never consulted.
+    Live on 2026-07-30 that republished a ``contract_passed=false`` benchmark
+    onto ``node-generation-completed.v1``, and the Pattern B broker, which
+    derives status purely from the arrival topic, reported ``ok=true`` for a run
+    that had failed. This function is the missing read.
+
+    Fields are consulted in decreasing order of explicitness. Each is a field
+    ONEX producers already carry; nothing new is required of a handler to be
+    covered:
+
+    1. ``terminal_failure_cause`` — a typed non-``None`` cause is an
+       unambiguous failure declaration (the delegate-skill seam, OMN-15469).
+    2. ``status`` — the wire vocabulary the broker itself terminalizes on.
+    3. ``ok`` / ``success`` — explicit booleans.
+    4. ``contract_passed`` — the generation-benchmark verdict field from this
+       ticket's original live reproduction.
+
+    Returns ``None`` when the model declares no verdict at all, which is the
+    common case and MUST leave routing exactly as it was: this is a fail-closed
+    correction for models that state a failure, never a guess about models that
+    state nothing.
+    """
+    cause = getattr(event, "terminal_failure_cause", None)
+    if cause is not None:
+        return False
+
+    status = getattr(event, "status", None)
+    if isinstance(status, str):
+        normalized = status.strip().lower()
+        if normalized in _FAILED_STATUS_VALUES:
+            return False
+        if normalized in _SUCCEEDED_STATUS_VALUES:
+            return True
+
+    for attribute in ("ok", "success", "contract_passed"):
+        value = getattr(event, attribute, None)
+        if isinstance(value, bool):
+            return value
+
+    return None
+
+
+def apply_failure_terminal_guard(
+    event: object,
+    topic: str,
+    *,
+    success_topic: str,
+    failure_terminal_topics: Sequence[str],
+) -> str:
+    """Re-route a failure-verdict return value off the SUCCESS terminal.
+
+    OMN-15468 AC2 — the residual PR #2578 left open. Class-based routing (a
+    handler returning a ``…Failed`` variant declared in ``published_events``) is
+    the primary mechanism and this guard never overrides it: it fires ONLY when
+    the resolution already landed on the contract's success terminal. It is the
+    fail-closed backstop for the case that produced the live defect — a returned
+    model whose class misses the map, which falls back to the success terminal
+    no matter what verdict the payload carries.
+
+    Three conditions must ALL hold, so the guard cannot fire speculatively:
+
+    * the resolved topic is the contract's success terminal;
+    * the contract declares exactly ONE failure terminal (two or more is
+      ambiguous — there is no basis to choose, so routing is left alone and the
+      ambiguity is logged rather than guessed at);
+    * the model declares an explicit failure verdict
+      (:func:`resolve_terminal_verdict` returns ``False``; ``None`` — no verdict
+      field at all, the common case — changes nothing).
+
+    Lives here rather than on ``DispatchResultApplier`` so that *which topics
+    are terminal* and *what a failure verdict is* stay in the one module that
+    already owns both questions for the broker's subscription set.
+    """
+    if topic != success_topic:
+        return topic
+    if len(failure_terminal_topics) != 1:
+        if failure_terminal_topics and resolve_terminal_verdict(event) is False:
+            logger.warning(
+                "Failure-verdict output event left on the success terminal: "
+                "contract declares %d failure terminals, cannot disambiguate "
+                "(OMN-15468)",
+                len(failure_terminal_topics),
+                extra={
+                    "output_event_type": type(event).__name__,
+                    "success_topic": topic,
+                    "failure_topics": list(failure_terminal_topics),
+                },
+            )
+        return topic
+    if resolve_terminal_verdict(event) is not False:
+        return topic
+    failure_topic = failure_terminal_topics[0]
+    logger.warning(
+        "Re-routing failure-verdict output event from success terminal %s to "
+        "declared failure terminal %s (OMN-15468)",
+        topic,
+        failure_topic,
+        extra={
+            "output_event_type": type(event).__name__,
+            "success_topic": topic,
+            "failure_topic": failure_topic,
+        },
+    )
+    return failure_topic
 
 
 def _is_already_envelope(body: Mapping[str, object]) -> bool:
