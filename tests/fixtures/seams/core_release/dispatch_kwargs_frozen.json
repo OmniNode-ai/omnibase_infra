@@ -1,0 +1,53 @@
+{
+  "_comment": [
+    "OMN-14628 seam fixture. Freezes the RuntimeDelegationDispatchPort.dispatch()",
+    "keyword surface that current OmniMarket callers rely on.",
+    "PR #2595 restored callable parity for system_prompt/temperature/response_format;",
+    "PR #2312 added tenant_id. Nothing mechanically held that surface afterwards, so",
+    "a rename, a reordering into positional, or a dropped default silently breaks the",
+    "cross-repo call site with no local test failure. This fixture is that mechanism.",
+    "Note: several of these fail closed with NotImplementedError when non-None. The",
+    "CALLABLE contract (name + kind + annotation + default) is what is frozen here;",
+    "the accept/reject behavior is asserted by the existing dispatch-port tests."
+  ],
+  "module": "omnibase_infra.runtime.service_delegation_dispatch_port",
+  "qualname": "RuntimeDelegationDispatchPort.dispatch",
+  "required_keyword_only_params": [
+    {
+      "name": "tenant_id",
+      "annotation": "str | None",
+      "default": null,
+      "added_by": "OMN-14628 / PR #2312"
+    },
+    {
+      "name": "system_prompt",
+      "annotation": "str | None",
+      "default": null,
+      "added_by": "OMN-14628 / PR #2595"
+    },
+    {
+      "name": "temperature",
+      "annotation": "float | None",
+      "default": null,
+      "added_by": "OMN-14628 / PR #2595"
+    },
+    {
+      "name": "response_format",
+      "annotation": "dict[str, object] | None",
+      "default": null,
+      "added_by": "OMN-14628 / PR #2595"
+    },
+    {
+      "name": "backend_id",
+      "annotation": "str | None",
+      "default": null,
+      "added_by": "OMN-14628"
+    },
+    {
+      "name": "response_contract",
+      "annotation": "dict[str, object] | None",
+      "default": null,
+      "added_by": "OMN-14628"
+    }
+  ]
+}

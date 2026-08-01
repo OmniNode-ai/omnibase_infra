@@ -32,6 +32,7 @@ from omnibase_core.models.events.model_event_envelope import ModelEventEnvelope
 from omnibase_infra.event_bus.event_bus_kafka import EventBusKafka
 from omnibase_infra.runtime.auto_wiring.handler_wiring import (
     _BOUNDARY_DLQ_ENV,
+    BoundaryDlqNotPersistedError,
 )
 from omnibase_infra.runtime.auto_wiring.handler_wiring import (
     _make_event_bus_callback as _make_contract_scoped_event_bus_callback,
@@ -235,8 +236,17 @@ class TestBoundaryDlqFlagOn:
     async def test_flag_on_dlq_publish_failure_never_crashes_consumer(
         self, monkeypatch: pytest.MonkeyPatch
     ) -> None:
-        """A DLQ publish that itself raises must not propagate -- the DLQ
-        publish is itself a boundary."""
+        """A DLQ publish that itself raises must not propagate the ORIGINAL
+        handler exception -- the DLQ publish is itself a boundary.
+
+        OMN-14498 amendment: this used to assert the callback returns
+        normally. That return WAS an ACK (``_dispatch_to_subscriber`` reads
+        "no exception" as success and advances the offset), so a record whose
+        DLQ write failed was acknowledged while existing nowhere durable, and
+        the OMN-15232 rewind path never saw it. The boundary still never
+        leaks the raw handler error and still never unsubscribes; it now
+        signals non-persistence with the dedicated
+        ``BoundaryDlqNotPersistedError`` so the offset is withheld."""
         monkeypatch.setenv(_BOUNDARY_DLQ_ENV, "1")
 
         dispatch_engine = _raising_dispatch_engine(RuntimeError("boom"))
@@ -251,7 +261,8 @@ class TestBoundaryDlqFlagOn:
             event_bus=event_bus,
         )
 
-        await callback(_envelope())  # must not raise
+        with pytest.raises(BoundaryDlqNotPersistedError):
+            await callback(_envelope())
 
         event_bus._publish_raw_to_dlq.assert_awaited_once()
 
@@ -412,7 +423,7 @@ class TestBoundaryDlqMetricNaming:
             event_bus=event_bus,
         )
 
-        with caplog.at_level("ERROR"):
+        with caplog.at_level("ERROR"), pytest.raises(BoundaryDlqNotPersistedError):
             await callback(_envelope())
 
         assert "metric_name=boundary_swallow_prevented" not in caplog.text
@@ -474,7 +485,10 @@ class TestBoundaryDlqAlertableMessageLostCounter:
             event_bus=event_bus,
         )
 
-        await callback(_envelope())  # must not raise -- boundary never crashes
+        # OMN-14498: raises BoundaryDlqNotPersistedError so the offset is
+        # withheld; the counter assertion below is unchanged.
+        with pytest.raises(BoundaryDlqNotPersistedError):
+            await callback(_envelope())
 
         after = _BOUNDARY_MESSAGE_LOST_COUNTER.labels(
             topic=topic, error_type=error_type
@@ -572,7 +586,10 @@ class TestBoundaryDlqAlertableMessageLostCounter:
             event_bus=event_bus,
         )
 
-        await callback(_envelope())  # must not raise
+        # OMN-14498: a confirmed non-persistent DLQ write is a NACK, not an
+        # ACK -- the callback now raises so the offset is not advanced.
+        with pytest.raises(BoundaryDlqNotPersistedError):
+            await callback(_envelope())
 
         event_bus._publish_raw_to_dlq.assert_awaited_once()
         after = _BOUNDARY_MESSAGE_LOST_COUNTER.labels(
@@ -606,7 +623,7 @@ class TestBoundaryDlqAlertableMessageLostCounter:
             event_bus=event_bus,
         )
 
-        with caplog.at_level("ERROR"):
+        with caplog.at_level("ERROR"), pytest.raises(BoundaryDlqNotPersistedError):
             await callback(_envelope())
 
         assert "metric_name=boundary_swallow_prevented" not in caplog.text
