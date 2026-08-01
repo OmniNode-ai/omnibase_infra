@@ -25,6 +25,18 @@ _NON_DEPLOYABLE_SQL_EXACT_PATHS = frozenset(
     }
 )
 _NON_DEPLOYABLE_SQL_PREFIXES = (Path("docker/legacy-rds-fixture"),)
+_LEGACY_DEFAULT_SCHEMA_SQL_EXACT_PATHS = frozenset(
+    {
+        # OMN-15503 adds one migration to the existing node_projection_delegation
+        # stream. That stream still creates and mutates delegation_events in the
+        # legacy default schema; qualifying only this new ALTER would target a
+        # table that does not exist in the migration runner.
+        Path(
+            "docker/migrations/forward/nodes/node_projection_delegation/"
+            "0029_delegation_terminal_failure_cause.sql"
+        ),
+    }
+)
 
 
 def _is_non_deployable_sql_path(relative_path: Path) -> bool:
@@ -34,6 +46,10 @@ def _is_non_deployable_sql_path(relative_path: Path) -> bool:
         relative_path == prefix or relative_path.is_relative_to(prefix)
         for prefix in _NON_DEPLOYABLE_SQL_PREFIXES
     )
+
+
+def _is_legacy_default_schema_sql_path(relative_path: Path) -> bool:
+    return relative_path in _LEGACY_DEFAULT_SCHEMA_SQL_EXACT_PATHS
 
 
 def changed_sql_paths(
@@ -99,6 +115,8 @@ def validate_changed_sql(
     declared_identities = {identity.identity for identity in ownership_identities}
     for path in changed_sql_paths(repository, base_revision, head_revision):
         relative_path = path.relative_to(repository.resolve())
+        if _is_legacy_default_schema_sql_path(relative_path):
+            continue
         sql = path.read_text(encoding="utf-8")
         for violation in lint_application_database_sql(sql, topology):
             violations.append(f"{relative_path}: {violation}")
