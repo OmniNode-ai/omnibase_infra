@@ -70,6 +70,37 @@ ALLOWED_EMPTY_DEFAULTS = {
 }
 
 
+def strip_yaml_comments(content: str) -> str:
+    """Blank out ``#`` comments, leaving quoted ``#`` characters intact.
+
+    The ban below is about what compose actually EXPANDS, which is only the
+    uncommented YAML. Scanning raw text made the check fire on prose: the
+    OMN-15645 comment in ``docker-compose.infra.yml`` explains the rule by
+    quoting the banned form (``no ${VAR:-} ambient-override footgun``), and the
+    scanner read that illustration as a violation on a variable literally named
+    ``VAR`` — a false positive that put ``dev`` red with no real defect
+    (OMN-15628 remediation). Narrowing the matcher is the fix; the ban itself is
+    unchanged and still fails on a genuine ``${VAR:-}`` in live YAML.
+
+    Line structure is preserved so reported positions stay meaningful.
+    """
+    cleaned: list[str] = []
+    for line in content.splitlines():
+        quote: str | None = None
+        cut: int | None = None
+        for index, char in enumerate(line):
+            if quote is not None:
+                if char == quote:
+                    quote = None
+            elif char in ("'", '"'):
+                quote = char
+            elif char == "#" and (index == 0 or line[index - 1].isspace()):
+                cut = index
+                break
+        cleaned.append(line if cut is None else line[:cut])
+    return "\n".join(cleaned)
+
+
 @pytest.mark.unit
 def test_no_empty_default_fallbacks_in_runtime_env() -> None:
     """No env var should use the empty-string-means-disabled pattern.
@@ -80,9 +111,13 @@ def test_no_empty_default_fallbacks_in_runtime_env() -> None:
     Pattern allowed: "literal"  (hardcoded)
 
     Exception: ROLE_*_PASSWORD in postgres service (empty = skip role creation).
+
+    Comments are stripped first — see :func:`strip_yaml_comments`. Only YAML
+    compose actually expands can violate this; prose that quotes the banned form
+    to explain it cannot.
     """
     with open(COMPOSE_FILE) as f:
-        content = f.read()
+        content = strip_yaml_comments(f.read())
 
     # Find all ${VAR:-} patterns (empty default)
     empty_defaults = re.findall(r"\$\{([A-Z_]+):-\}", content)
@@ -94,3 +129,27 @@ def test_no_empty_default_fallbacks_in_runtime_env() -> None:
         f"Found {len(violations)} empty-default fallbacks that should be "
         f"converted to required or removed: {violations}"
     )
+
+
+@pytest.mark.unit
+def test_comment_stripping_does_not_defang_the_ban() -> None:
+    """Narrowing the matcher to non-comment YAML must not weaken it.
+
+    Three properties, because "ignore comments" is exactly the kind of fix that
+    quietly turns a gate into a no-op:
+
+    1. A real ``${VAR:-}`` in live YAML is still found (the ban has teeth).
+    2. The same form inside a comment is not (the false positive is gone).
+    3. A ``#`` inside a quoted scalar does not truncate the value (the stripper
+       does not eat real configuration).
+    """
+    live_yaml = 'services:\n  app:\n    environment:\n      A: "${REAL_ONE:-}"\n'
+    assert re.findall(r"\$\{([A-Z_]+):-\}", strip_yaml_comments(live_yaml)) == [
+        "REAL_ONE"
+    ]
+
+    commented = "  # no ${VAR:-} ambient-override footgun\n  B: literal\n"
+    assert re.findall(r"\$\{([A-Z_]+):-\}", strip_yaml_comments(commented)) == []
+
+    quoted_hash = '      PROMPT: "value#notacomment"\n'
+    assert "value#notacomment" in strip_yaml_comments(quoted_hash)

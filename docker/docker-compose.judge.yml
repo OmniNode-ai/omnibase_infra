@@ -96,7 +96,12 @@ x-judge-runtime-env: &judge-runtime-env
   # the routing-tiers pin explicitly alongside BIFROST_CONTRACT_PATH. Same
   # in-image path and same fail-closed consumer as the base infra anchor
   # (docker/docker-compose.infra.yml); see that comment for the full rationale.
-  DELEGATION_ROUTING_TIERS_PATH: /app/.venv/lib/python3.12/site-packages/omnimarket/configs/routing_tiers.yaml
+  # OMN-15628/OMN-15645: same canonical value as docker-compose.infra.yml's
+  # x-runtime-env. Judge owns a separate anchor, so it needs the binding
+  # explicitly; it builds from docker/Dockerfile.runtime, which bakes
+  # /app/config/delegation/routing_tiers.yaml from the installed omnimarket
+  # package (glob-derived, no interpreter minor version in the literal).
+  DELEGATION_ROUTING_TIERS_PATH: /app/config/delegation/routing_tiers.yaml
   BIFROST_SOURCE_CONTRACT_PATH: ${BIFROST_SOURCE_CONTRACT_PATH:-}
   LLM_CLOUD_ENDPOINT_HOST_ALLOWLIST: ${LLM_CLOUD_ENDPOINT_HOST_ALLOWLIST:?runtime policy contract must set LLM_CLOUD_ENDPOINT_HOST_ALLOWLIST}
   LLM_CODER_URL: ${LLM_CODER_URL:-https://generativelanguage.googleapis.com}
