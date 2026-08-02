@@ -49,7 +49,11 @@ pytestmark = [
     pytest.mark.kafka,
 ]
 
-BOOTSTRAP_SERVERS = "localhost:19092"
+# OMN-15567: read the CI-derived bootstrap address (nightly-integration.yml
+# assigns a run-scoped port and, on containerized runners, a non-localhost
+# host) instead of hardcoding the docker-compose.e2e.yml default -- a
+# hardcoded value here silently ignores both.
+BOOTSTRAP_SERVERS = os.environ.get("KAFKA_BOOTSTRAP_SERVERS", "localhost:19092")
 
 
 @pytest.fixture

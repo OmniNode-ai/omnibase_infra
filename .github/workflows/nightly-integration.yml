@@ -159,6 +159,14 @@ jobs:
 
           db_url="postgresql://postgres:${INTEGRATION_POSTGRES_PASSWORD}@localhost:${postgres_port}/omnibase_infra"
 
+          # KAFKA_BOOTSTRAP_SERVERS / OMNIBASE_INFRA_DB_URL / INTEGRATION_POSTGRES_HOST
+          # below are "localhost" defaults, matching the historical (pre-OMN-15567)
+          # shape so test_nightly_database_url_uses_the_ephemeral_postgres_port
+          # keeps passing unmodified. OMN-15567: on this self-hosted runner
+          # "localhost" is not reliably reachable from the runner process, so the
+          # later "Resolve reachable e2e connectivity host" step re-derives and
+          # overrides all of these (later $GITHUB_ENV writes win) once the actual
+          # stack is up and its real reachability has been probed.
           {
             echo "OMNIBASE_INFRA_COMPOSE_PROJECT=${project}"
             echo "OMNIBASE_INFRA_POSTGRES_CONTAINER=${project}-postgres"
@@ -185,6 +193,72 @@ jobs:
 
           echo "e2e compose project: ${project}"
           echo "e2e postgres port: ${postgres_port}, kafka port: ${kafka_port}"
+
+      # OMN-15567: reusable-runtime-boot.yml:250-270 documents that this class
+      # of self-hosted runner executes inside a container sharing the host
+      # Docker daemon, so host-published ports are not reachable at
+      # "localhost" from the runner process -- only from the actual Docker
+      # host. nightly-integration.yml never detected or handled this. Mirror
+      # reusable-runtime-boot.yml's detection here (same runner_container_id
+      # heuristic, same /proc/net/route default-gateway read) so redpanda's
+      # external listener can advertise the Docker host gateway instead of
+      # "localhost" when that fallback is needed by the probe below.
+      - name: Detect runner network topology
+        run: |
+          set -euo pipefail
+          runner_container_id=""
+          mapfile -t runner_candidates < <(
+            {
+              grep -Eo '[0-9a-f]{64}' /proc/self/cgroup 2>/dev/null || true
+              hostname
+            } | awk 'NF && !seen[$0]++'
+          )
+          for candidate in "${runner_candidates[@]}"; do
+            if docker inspect --type container "$candidate" >/dev/null 2>&1; then
+              runner_container_id="$(docker inspect --type container --format '{{.Id}}' "$candidate")"
+              break
+            fi
+          done
+
+          e2e_advertise_host="localhost"
+          if [[ -n "$runner_container_id" ]]; then
+            docker_host_gateway="$(
+              python3 - <<'PY'
+          import socket
+          import struct
+
+          try:
+              with open("/proc/net/route", encoding="utf-8") as route_file:
+                  next(route_file)
+                  for line in route_file:
+                      fields = line.split()
+                      if len(fields) >= 3 and fields[1] == "00000000":
+                          gateway = int(fields[2], 16)
+                          print(socket.inet_ntoa(struct.pack("<L", gateway)))
+                          break
+          except OSError:
+              pass
+          PY
+            )"
+            if [[ -n "$docker_host_gateway" ]]; then
+              e2e_advertise_host="${docker_host_gateway}"
+            fi
+            echo "Runner container ID: ${runner_container_id}"
+          fi
+
+          # Same live-host guard as "Reject if ANY host variable targets
+          # .201": the value computed here is dynamic and did not exist yet
+          # when that static check ran, so it needs its own assertion.
+          if [[ "$e2e_advertise_host" == "192.168.86.201" ]]; then
+            echo "::error::detected Docker host gateway resolves to the live .201 instance; refusing to advertise it"
+            exit 1
+          fi
+
+          echo "e2e Redpanda advertise host: ${e2e_advertise_host}"
+          {
+            echo "OMNIBASE_INFRA_RUNNER_CONTAINER_ID=${runner_container_id}"
+            echo "E2E_REDPANDA_ADVERTISE_HOST=${e2e_advertise_host}"
+          } >> "$GITHUB_ENV"
 
       # Fail closed at run time, not just at review time: the protected set is
       # read from the lane census manifest, so a lane added later is covered
@@ -234,6 +308,91 @@ jobs:
           timeout 60 bash -c 'until [ "$(docker inspect -f "{{.State.Status}}" "$OMNIBASE_INFRA_TOPIC_MANAGER_CONTAINER" 2>/dev/null)" = "exited" ]; do sleep 2; done'
 
           echo "All services healthy"
+
+      # OMN-15567: the stack being Healthy (previous step) does not prove the
+      # runner process itself can reach it -- "Wait for health checks" only
+      # probes from inside the containers via `docker exec`. Confirmed live:
+      # on runs 30681782952 (workflow_dispatch) and 30685774570 (schedule),
+      # both post-OMN-15565, redpanda/postgres came up Healthy in ~5s but the
+      # runner's own connection to "localhost:<host-published-port>" failed
+      # outright (aiokafka KafkaConnectionError / asyncpg OSError "Connect
+      # call failed"), because this runner does not share a network namespace
+      # with the Docker host. Mirror reusable-runtime-boot.yml's connectivity
+      # probe: try Docker DNS (compose network) first, then localhost, then
+      # the Docker host gateway; fail closed with diagnostics if none work
+      # instead of letting pytest fail on opaque connection-refused errors.
+      - name: Resolve reachable e2e connectivity host
+        run: |
+          set -euo pipefail
+
+          can_connect() {
+            python3 - "$1" "$2" <<'PY'
+          import socket
+          import sys
+
+          host = sys.argv[1]
+          port = int(sys.argv[2])
+          try:
+              with socket.create_connection((host, port), timeout=2):
+                  pass
+          except OSError:
+              raise SystemExit(1)
+          PY
+          }
+
+          runner_on_compose_network=false
+          if [[ -n "${OMNIBASE_INFRA_RUNNER_CONTAINER_ID:-}" ]]; then
+            docker network connect "${OMNIBASE_INFRA_NETWORK}" "${OMNIBASE_INFRA_RUNNER_CONTAINER_ID}" 2>/dev/null || true
+            if docker inspect --type container --format '{{json .NetworkSettings.Networks}}' "${OMNIBASE_INFRA_RUNNER_CONTAINER_ID}" \
+              | grep -q "\"${OMNIBASE_INFRA_NETWORK}\""; then
+              runner_on_compose_network=true
+            fi
+          fi
+
+          resolved_host=""
+          resolved_pg_port=""
+          if $runner_on_compose_network \
+            && can_connect "${OMNIBASE_INFRA_POSTGRES_CONTAINER}" 5432 \
+            && can_connect "${OMNIBASE_INFRA_REDPANDA_CONTAINER}" 9092; then
+            echo "e2e stack reachable by generated container names (Docker DNS)"
+            resolved_host="${OMNIBASE_INFRA_POSTGRES_CONTAINER}"
+            resolved_pg_port="5432"
+            kafka_host_port="${OMNIBASE_INFRA_REDPANDA_CONTAINER}:9092"
+            pg_host_port="${OMNIBASE_INFRA_POSTGRES_CONTAINER}:5432"
+          elif can_connect localhost "${POSTGRES_PORT}" && can_connect localhost "${KAFKA_PORT}"; then
+            echo "e2e stack reachable by host-published ports (localhost)"
+            resolved_host="localhost"
+            resolved_pg_port="${POSTGRES_PORT}"
+            kafka_host_port="localhost:${KAFKA_PORT}"
+            pg_host_port="localhost:${POSTGRES_PORT}"
+          elif [[ "${E2E_REDPANDA_ADVERTISE_HOST}" != "localhost" ]] \
+            && can_connect "${E2E_REDPANDA_ADVERTISE_HOST}" "${POSTGRES_PORT}" \
+            && can_connect "${E2E_REDPANDA_ADVERTISE_HOST}" "${KAFKA_PORT}"; then
+            echo "e2e stack reachable by Docker host gateway (${E2E_REDPANDA_ADVERTISE_HOST})"
+            resolved_host="${E2E_REDPANDA_ADVERTISE_HOST}"
+            resolved_pg_port="${POSTGRES_PORT}"
+            kafka_host_port="${E2E_REDPANDA_ADVERTISE_HOST}:${KAFKA_PORT}"
+            pg_host_port="${E2E_REDPANDA_ADVERTISE_HOST}:${POSTGRES_PORT}"
+          else
+            echo "::error::e2e stack is Healthy but unreachable from the runner by Docker DNS, localhost, or Docker host gateway"
+            echo "runner_container_id=${OMNIBASE_INFRA_RUNNER_CONTAINER_ID:-<none>} runner_on_compose_network=${runner_on_compose_network} e2e_redpanda_advertise_host=${E2E_REDPANDA_ADVERTISE_HOST}"
+            exit 1
+          fi
+
+          if [[ "$resolved_host" == "192.168.86.201" ]]; then
+            echo "::error::resolved e2e connectivity host is the live .201 instance; refusing"
+            exit 1
+          fi
+
+          {
+            echo "KAFKA_BOOTSTRAP_SERVERS=${kafka_host_port}"
+            echo "OMNIBASE_INFRA_DB_URL=postgresql://postgres:${INTEGRATION_POSTGRES_PASSWORD}@${pg_host_port}/omnibase_infra"
+            echo "INTEGRATION_POSTGRES_HOST=${resolved_host}"
+            echo "INTEGRATION_POSTGRES_PORT=${resolved_pg_port}"
+            echo "OMNI_INFRA_HOST=${resolved_host}"
+            echo "POSTGRES_HOST=${resolved_host}"
+            echo "REDPANDA_ADVERTISE_HOST=${resolved_host}"
+          } >> "$GITHUB_ENV"
 
       - name: Run integration tests
         run: |
