@@ -152,6 +152,16 @@ STRICT_GATE_JOBS: tuple[str, ...] = (
     # makes the source contract and rebuilt PostgreSQL 16 proofs part of the sole
     # required CI Summary context rather than a separately-triggered advisory run.
     "Application Database Domain Enforcement (OMN-15361)",
+    # OMN-15604: a [tool.uv.sources] git-pinned rev must build the SAME src/
+    # tree as the released tag its declared `pkg==X.Y.Z` version names, even
+    # on a line carrying a `# raw-override-ok:` escape token (that token only
+    # exempts the separate, pre-existing `Dep Provenance Gate` -- the
+    # forbid-git-source rule -- never a content-lineage claim). The job is
+    # unconditional (`if: always()`), so a skip is anomalous and correctly
+    # fails closed here. Registered directly (not via EXPECTED_EXTERNAL_
+    # CONTEXTS) because it is a job inside ci.yml's own run, observable
+    # without the external-context admission rule's historical measurement.
+    "Dep Provenance Lineage Gate (OMN-15604)",
 )
 
 # Gates the old ci-summary accepted as ``success`` OR ``skipped``. Each carries
