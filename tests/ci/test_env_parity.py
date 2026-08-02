@@ -12,6 +12,25 @@ ConfigMap ``data`` keys plus literal ``value:`` entries in the runtime
 Deployments — is bound somewhere in ``docker-compose.infra.yml``, or is
 explicitly classified as cluster-only / tracked parity debt.
 
+Scope of each direction (read this before extending either — they deliberately
+use DIFFERENT k8s surfaces, and the reverse walk is deliberately single-file):
+
+* FORWARD is scoped to the compose ``x-runtime-env`` anchor, which compose
+  merges into all three runtime-family services at once. Its k8s counterpart is
+  therefore the RUNTIME-FAMILY surface: ConfigMap keys (every runtime Deployment
+  ``envFrom``-s ``onex-runtime-config``) plus keys bound inline on ALL THREE
+  runtime Deployments. A key bound inline on only one workload does NOT satisfy
+  it — see ``test_k8s_family_surface_requires_all_runtime_deployments``.
+* REVERSE is scoped to ``docker-compose.infra.yml`` only, and asks the weaker
+  question "does this key reach ANY compose container at all?", so it uses the
+  UNION of every k8s workload's bindings. ``infra.yml`` is the base file that
+  ``resolve_compose_file_args`` layers first for every deployed lane, so a key
+  bound there reaches all of them. The standalone lanes (``judge``, ``e2e``)
+  are NOT reverse-walked — they run deliberately narrower service sets, so a
+  full reverse walk against them would report design, not drift. They are
+  covered for the OMN-15628 seam specifically, by value, in
+  ``test_delegation_routing_tiers_path_matches_k8s_pin``.
+
 The reverse direction exists because the forward-only gate was structurally
 blind to the failure that shipped in OMN-15628: ``DELEGATION_ROUTING_TIERS_PATH``
 was bound on all three onex-dev runtime Deployments and on ZERO compose files,
@@ -27,6 +46,7 @@ Tickets: OMN-4307 (forward), OMN-15628 (reverse)
 
 from __future__ import annotations
 
+import fnmatch
 import os
 import re
 from pathlib import Path
@@ -109,6 +129,17 @@ COMPOSE_RUNTIME_FAMILY_SERVICES: tuple[str, ...] = (
     "runtime-effects",
     "runtime-worker",
 )
+
+# Every compose file that stands up a delegation-runtime container, mapped to
+# the services in it that must carry the k8s-pinned routing-tiers VALUE (not
+# merely the key). ``infra`` is the dev/lab base every deployed lane layers;
+# ``judge`` and ``e2e`` are standalone and inherit nothing, so a typo in either
+# would otherwise be invisible to a presence-only check.
+COMPOSE_RUNTIME_SERVICES_BY_FILE: dict[str, tuple[str, ...]] = {
+    "docker-compose.infra.yml": COMPOSE_RUNTIME_FAMILY_SERVICES,
+    "docker-compose.judge.yml": ("omninode-runtime", "runtime-effects"),
+    "docker-compose.e2e.yml": ("runtime",),
+}
 
 # ---------------------------------------------------------------------------
 # Key classification
@@ -239,12 +270,6 @@ CONFIGMAP_DEBT_KEYS: frozenset[str] = frozenset(
         "BIFROST_CONTRACT_PATH",
         "BIFROST_SOURCE_CONTRACT_PATH",
         "BIFROST_VERIFY_ENDPOINTS",
-        # OMN-15645: newly bound on the .201 compose lanes (omnimarket#2000 /
-        # OMN-15628 fail-fast). k8s ConfigMap parity is OMN-15628's own
-        # k8s-manifest-scoped acceptance criterion (In Progress) in the
-        # sibling omninode_infra checkout, not this ticket's -- OMN-15645's
-        # scope is the .201 compose lanes only.
-        "DELEGATION_ROUTING_TIERS_PATH",
         # OpenTelemetry — opt-in observability (empty = disabled)
         "OTEL_EXPORTER_OTLP_ENDPOINT",
         "OTEL_SERVICE_NAME",
@@ -316,6 +341,80 @@ COMPOSE_PARITY_DEBT_KEYS: frozenset[str] = frozenset(
 
 
 # ---------------------------------------------------------------------------
+# Compose YAML loading
+# ---------------------------------------------------------------------------
+# The lane overlays (prod / stability-test / judge) use the Compose merge
+# directives ``!override`` and ``!reset``, which plain ``yaml.safe_load`` refuses
+# with ConstructorError. Preserve the tag instead of dropping it: whether a
+# service's ``environment`` mapping carries one of those tags is exactly the
+# fact the lane-coverage test needs to assert, so it must survive parsing.
+
+
+class ComposeTagged:
+    """A YAML node that carried a Compose merge directive (``!override`` / ``!reset``)."""
+
+    __slots__ = ("tag", "value")
+
+    def __init__(self, tag: str, value: object) -> None:
+        self.tag = tag
+        self.value = value
+
+    def __repr__(self) -> str:  # pragma: no cover - debug aid only
+        return f"ComposeTagged({self.tag!r}, {self.value!r})"
+
+
+class _ComposeLoader(yaml.SafeLoader):
+    """SafeLoader that keeps unknown tags as :class:`ComposeTagged` wrappers.
+
+    Deliberately NOT shared with the same-named loader in
+    ``tests/unit/infra/test_judge_compose_profile.py``: that one UNWRAPS compose
+    merge tags to their bare value, which is the opposite of what this module
+    needs. Whether ``environment`` carries ``!override`` / ``!reset`` is the
+    fact ``test_every_runtime_compose_lane_binds_delegation_routing_tiers_path``
+    asserts on, so the tag has to survive parsing here.
+    """
+
+
+# The complete set of Compose merge directives. Anything else stays a hard
+# ConstructorError rather than being silently wrapped — a tag this module does
+# not understand should fail loudly, not read as "no directive present".
+COMPOSE_MERGE_DIRECTIVES: tuple[str, ...] = ("!override", "!reset")
+
+
+def _construct_tagged(loader: yaml.SafeLoader, node: yaml.Node) -> ComposeTagged:
+    if isinstance(node, yaml.MappingNode):
+        value: object = loader.construct_mapping(node, deep=True)
+    elif isinstance(node, yaml.SequenceNode):
+        value = loader.construct_sequence(node, deep=True)
+    elif isinstance(node, yaml.ScalarNode):
+        value = loader.construct_scalar(node)
+    else:  # pragma: no cover - PyYAML emits no other node kinds
+        raise TypeError(f"unsupported node type for {node.tag}: {type(node).__name__}")
+    return ComposeTagged(node.tag, value)
+
+
+for _directive in COMPOSE_MERGE_DIRECTIVES:
+    _ComposeLoader.add_constructor(_directive, _construct_tagged)
+
+
+def load_compose(compose_path: Path) -> dict[str, object]:
+    """Parse a compose file, tolerating ``!override`` / ``!reset`` directives."""
+    # _ComposeLoader extends SafeLoader; the multi-constructor only wraps
+    # unknown tags in a ComposeTagged record and never instantiates arbitrary
+    # objects, so S506's arbitrary-deserialization concern does not apply. Same
+    # justification and same suppression the four sibling compose-parsing tests
+    # under tests/unit/infra/ already carry.
+    document = yaml.load(compose_path.read_text(), Loader=_ComposeLoader)  # noqa: S506
+    return document if isinstance(document, dict) else {}
+
+
+def compose_services(compose_path: Path) -> dict[str, object]:
+    """Return the ``services`` mapping of a compose file (empty if absent)."""
+    services = load_compose(compose_path).get("services")
+    return services if isinstance(services, dict) else {}
+
+
+# ---------------------------------------------------------------------------
 # Extraction helpers
 # ---------------------------------------------------------------------------
 
@@ -342,11 +441,18 @@ def extract_configmap_keys(configmap_path: Path) -> set[str]:
     return set(data.get("data", {}).keys())
 
 
+def service_environment(service: object) -> object:
+    """Return a compose service's raw ``environment`` node (tag preserved)."""
+    if not isinstance(service, dict):
+        return None
+    return service.get("environment")
+
+
 def _service_env_keys(service: object) -> set[str]:
     """Return the env keys a single compose service declares."""
-    if not isinstance(service, dict):
-        return set()
-    env = service.get("environment") or {}
+    env = service_environment(service)
+    if isinstance(env, ComposeTagged):
+        env = env.value
     if isinstance(env, dict):
         return {str(k) for k in env}
     if isinstance(env, list):
@@ -362,13 +468,11 @@ def extract_compose_bound_keys(compose_path: Path) -> set[str]:
     the shared surface it governs. The reverse check must ask a broader
     question — "does this key reach a container at all?" — so it takes the union
     over every service's resolved ``environment`` mapping (YAML merge keys and
-    anchors are resolved by ``yaml.safe_load``, so anchor-merged services
-    contribute the anchor's keys).
+    anchors are resolved at parse time, so anchor-merged services contribute
+    the anchor's keys).
     """
-    document = yaml.safe_load(compose_path.read_text())
-    services = (document or {}).get("services") or {}
     keys: set[str] = set()
-    for service in services.values():
+    for service in compose_services(compose_path).values():
         keys |= _service_env_keys(service)
     return keys
 
@@ -409,6 +513,90 @@ def extract_k8s_bound_keys(runtime_dir: Path) -> dict[str, set[str]]:
     return bound
 
 
+def extract_k8s_runtime_family_bound_keys(runtime_dir: Path) -> set[str]:
+    """Keys bound for EVERY runtime-family workload, not merely somewhere in k8s.
+
+    This is the correct counterpart for the FORWARD direction. The compose
+    ``x-runtime-env`` anchor is merged into all three runtime services at once,
+    so "this anchor key exists in k8s" is only true if every runtime workload
+    actually receives it. Two sources qualify:
+
+      * ConfigMap ``data`` keys — every runtime Deployment ``envFrom``-s
+        ``onex-runtime-config``, so a ConfigMap key reaches all of them.
+      * Keys bound inline with a literal ``value:`` on ALL of
+        :data:`K8S_RUNTIME_FAMILY_DEPLOYMENTS`.
+
+    A key bound inline on only SOME runtime Deployments (today:
+    ``OMNIINTELLIGENCE_PUBLISH_INTROSPECTION``, ``ONEX_PUSH_VALIDATION_WORKROOT``)
+    is deliberately excluded — treating it as satisfied would let a per-workload
+    binding stand in for an anchor-wide one, which is granularity the union
+    surface used by the reverse walk cannot express.
+    """
+    bound = extract_k8s_bound_keys(runtime_dir)
+    per_manifest = [
+        {k for k, sources in bound.items() if manifest in sources}
+        for manifest in K8S_RUNTIME_FAMILY_DEPLOYMENTS
+    ]
+    inline_on_every_runtime_workload: set[str] = (
+        set.intersection(*per_manifest) if per_manifest else set()
+    )
+    return (
+        extract_configmap_keys(runtime_dir / "configmap.yaml")
+        | inline_on_every_runtime_workload
+    )
+
+
+def extract_dockerfile_baked_aliases(dockerfile_path: Path) -> dict[str, str]:
+    """Map each in-image path that ``Dockerfile.runtime`` COPYs FROM -> the path it copies TO.
+
+    ``docker/Dockerfile.runtime`` bakes the packaged ``routing_tiers.yaml`` out
+    of the installed venv into a stable, interpreter-version-free location
+    (OMN-15645). The compose lanes therefore legitimately pin a DIFFERENT
+    literal than the onex-dev k8s Deployments, which pin the venv source path —
+    both name the same file content.
+
+    Parsed from the Dockerfile rather than hardcoded as a second literal: a
+    hardcoded alias table would drift from the COPY the moment either path
+    moved, which is the exact failure the value lock exists to prevent.
+    """
+    if not dockerfile_path.exists():
+        return {}
+
+    aliases: dict[str, str] = {}
+    # ``COPY --from=... <src> <dst>`` possibly spread over backslash continuations.
+    text = re.sub(r"\\\s*\n\s*", " ", dockerfile_path.read_text())
+    for line in text.splitlines():
+        stripped = line.strip()
+        if not stripped.upper().startswith("COPY "):
+            continue
+        operands = [
+            token
+            for token in stripped.split()[1:]
+            if not token.startswith("--") and token.upper() != "COPY"
+        ]
+        if len(operands) != 2:
+            continue
+        source, destination = operands
+        if source.startswith("/") and destination.startswith("/"):
+            aliases[source] = destination
+    return aliases
+
+
+def resolve_baked_aliases(value: str, aliases: dict[str, str]) -> set[str]:
+    """Return ``value`` plus every in-image path Dockerfile.runtime bakes it to.
+
+    Glob segments in the COPY source (``python*``) are matched with
+    :meth:`Path.match`-style semantics via :func:`fnmatch.fnmatch`, so the
+    interpreter-minor wildcard in the Dockerfile lines up with the concrete
+    ``python3.12`` literal the k8s manifests pin.
+    """
+    equivalent = {value}
+    for source, destination in aliases.items():
+        if source == value or fnmatch.fnmatch(value, source):
+            equivalent.add(destination)
+    return equivalent
+
+
 def extract_k8s_env_value(manifest_path: Path, key: str) -> str | None:
     """Return the literal ``value:`` a Deployment binds for ``key``, if any."""
     document = yaml.safe_load(manifest_path.read_text())
@@ -430,9 +618,9 @@ def extract_compose_service_env_value(
     compose_path: Path, service: str, key: str
 ) -> str | None:
     """Return the resolved env value a compose service binds for ``key``."""
-    document = yaml.safe_load(compose_path.read_text())
-    services = (document or {}).get("services") or {}
-    env = (services.get(service) or {}).get("environment") or {}
+    env = service_environment(compose_services(compose_path).get(service))
+    if isinstance(env, ComposeTagged):
+        env = env.value
     if isinstance(env, dict):
         value = env.get(key)
         return None if value is None else str(value)
@@ -459,12 +647,19 @@ def test_runtime_env_keys_have_k8s_entries() -> None:
     LOCAL_ONLY_KEYS (for local-dev-only bootstrap variables), or
     CONFIGMAP_DEBT_KEYS (known gaps tracked as tech debt).
 
-    The k8s surface is the SAME one the reverse check uses (OMN-15628):
-    ConfigMap ``data`` keys PLUS literal ``value:`` entries on the runtime
-    Deployments. It was ConfigMap-only before, which made the two directions
-    disagree about what "bound in k8s" means — a key bound inline on a
-    Deployment (the placement used for DELEGATION_ROUTING_TIERS_PATH and
-    BIFROST_CONTRACT_PATH) read as absent here even though the cluster sets it.
+    The k8s surface is the RUNTIME-FAMILY surface (OMN-15628): ConfigMap
+    ``data`` keys PLUS keys bound inline on ALL THREE runtime Deployments. It
+    was ConfigMap-only before, which made a key bound inline on a Deployment
+    (the placement used for DELEGATION_ROUTING_TIERS_PATH and
+    BIFROST_CONTRACT_PATH) read as absent even though the cluster sets it.
+
+    Widening it to the plain union of every k8s workload's bindings would have
+    been the easy fix and is WRONG: ``x-runtime-env`` is merged into all three
+    runtime services at once, so a key bound inline on one workload only (e.g.
+    ``ONEX_PUSH_VALIDATION_WORKROOT`` on runtime-worker) must not satisfy an
+    anchor-wide claim. ``extract_k8s_runtime_family_bound_keys`` keeps that
+    granularity; ``test_k8s_family_surface_requires_all_runtime_deployments``
+    locks it.
 
     To fix a failure, choose one of:
       1. Bind the key in k8s (omninode_infra/k8s/onex-dev/runtime/configmap.yaml,
@@ -485,13 +680,15 @@ def test_runtime_env_keys_have_k8s_entries() -> None:
         "Has the anchor been renamed or removed?"
     )
 
-    k8s_keys = set(extract_k8s_bound_keys(K8S_RUNTIME_DIR))
+    k8s_keys = extract_k8s_runtime_family_bound_keys(K8S_RUNTIME_DIR)
     accounted_for = k8s_keys | SECRET_KEYS | LOCAL_ONLY_KEYS | CONFIGMAP_DEBT_KEYS
     missing = compose_keys - accounted_for
 
     assert not missing, (
-        "Keys in x-runtime-env but not bound anywhere in the onex-dev k8s manifests "
-        "(and not in SECRET_KEYS, LOCAL_ONLY_KEYS, or CONFIGMAP_DEBT_KEYS):\n"
+        "Keys in x-runtime-env but not bound for EVERY runtime workload in the "
+        "onex-dev k8s manifests (and not in SECRET_KEYS, LOCAL_ONLY_KEYS, or "
+        "CONFIGMAP_DEBT_KEYS). A key bound inline on only some runtime "
+        "Deployments does not count — x-runtime-env reaches all of them:\n"
         + "\n".join(f"  {k}" for k in sorted(missing))
         + "\n\nFix: add each missing key to one of:\n"
         "  • omninode_infra/k8s/onex-dev/runtime/configmap.yaml  (preferred)\n"
@@ -563,8 +760,27 @@ def test_delegation_routing_tiers_path_matches_k8s_pin() -> None:
     delegation routing consumers (omnimarket
     ``handler_delegation_routing._get_config`` →
     ``resolve_required_path_config``), so compose and k8s pointing at different
-    in-container paths is a silent request-path break, not a boot failure. Lock
-    the two literals together on every runtime-family service/Deployment pair.
+    in-container paths is a silent request-path break, not a boot failure.
+
+    The value is locked on EVERY compose file that stands up a runtime container
+    (:data:`COMPOSE_RUNTIME_SERVICES_BY_FILE`), not just the ``infra`` base. The
+    lane-coverage test below is presence-only, so a typo'd literal in
+    ``docker-compose.judge.yml`` or ``docker-compose.e2e.yml`` — the two lanes
+    that inherit nothing — would otherwise satisfy both checks while pointing
+    the container at a path that does not exist. That is precisely the
+    "bound on both sides, different paths" failure this lock exists to catch.
+
+    KNOWN CROSS-REPO DIVERGENCE (discovered here, tracked separately, NOT
+    asserted): ``configmap.yaml`` also carries this key, pinned to the stale
+    ``/app/contracts/delegation/routing_tiers.yaml``. All three runtime
+    Deployments override it inline with the correct site-packages path, and
+    inline ``env`` beats ``envFrom`` in Kubernetes, so the runtime family is
+    unaffected — but any workload that ``envFrom``-s ``onex-runtime-config``
+    WITHOUT an inline override would receive the stale path. The k8s pin used
+    below is therefore the Deployment inline value, which is what those runtime
+    containers actually see. Fixing the ConfigMap is an ``omninode_infra``
+    change that cannot land in this repo's PR; asserting it here would leave a
+    permanently-red gate on ``omnibase_infra`` for a defect it cannot fix.
     """
     if K8S_RUNTIME_DIR is None:
         pytest.skip(
@@ -584,27 +800,56 @@ def test_delegation_routing_tiers_path_matches_k8s_pin() -> None:
         "one side reopens the OMN-15628 seam."
     )
 
-    distinct_k8s = set(k8s_values.values())
+    bound_k8s: dict[str, str] = {m: v for m, v in k8s_values.items() if v is not None}
+    distinct_k8s = set(bound_k8s.values())
     assert len(distinct_k8s) == 1, (
         f"{key} is pinned to different values across the onex-dev runtime "
-        f"Deployments: {k8s_values}"
+        f"Deployments: {bound_k8s}"
     )
     expected = next(iter(distinct_k8s))
 
-    compose_values: dict[str, str | None] = {
-        service: extract_compose_service_env_value(COMPOSE_PATH, service, key)
-        for service in COMPOSE_RUNTIME_FAMILY_SERVICES
-    }
-    mismatched = {s: v for s, v in compose_values.items() if v != expected}
+    docker_dir = COMPOSE_PATH.parent
+    compose_values: dict[str, str | None] = {}
+    for filename, services in COMPOSE_RUNTIME_SERVICES_BY_FILE.items():
+        compose_path = docker_dir / filename
+        assert compose_path.exists(), (
+            f"{filename} is listed in COMPOSE_RUNTIME_SERVICES_BY_FILE but does "
+            "not exist. Update the map when a compose lane is renamed or removed."
+        )
+        for service in services:
+            compose_values[f"{filename}::{service}"] = (
+                extract_compose_service_env_value(compose_path, service, key)
+            )
+
+    # Accept either the k8s literal itself or a path Dockerfile.runtime bakes it
+    # to. Both name the same file inside the image; see
+    # extract_dockerfile_baked_aliases.
+    aliases = extract_dockerfile_baked_aliases(docker_dir / "Dockerfile.runtime")
+    acceptable = resolve_baked_aliases(expected, aliases)
+
+    mismatched = {s: v for s, v in compose_values.items() if v not in acceptable}
 
     assert not mismatched, (
         f"{key} disagrees between docker-compose and the onex-dev k8s pin.\n"
         f"  k8s pin ({', '.join(K8S_RUNTIME_FAMILY_DEPLOYMENTS)}): {expected}\n"
-        + "\n".join(
-            f"  compose service {s!r}: {v!r}" for s, v in sorted(mismatched.items())
-        )
-        + f"\n\nFix: bind {key} to the k8s pin in {COMPOSE_PATH.name} "
-        "(the x-runtime-env anchor covers all three runtime services at once)."
+        f"  accepted in compose (k8s pin + Dockerfile.runtime-baked aliases of it): "
+        f"{sorted(acceptable)}\n"
+        + "\n".join(f"  compose {s}: {v!r}" for s, v in sorted(mismatched.items()))
+        + f"\n\nFix: bind {key} in each file above to one of the accepted paths "
+        "(in infra.yml and judge.yml the runtime-env anchor covers every runtime "
+        "service at once; e2e.yml binds on the service directly). If you meant to "
+        "introduce a NEW in-image location, add the COPY to docker/Dockerfile.runtime "
+        "first — this check reads the aliases from there, it does not take a literal "
+        "on trust."
+    )
+
+    distinct_compose = set(compose_values.values())
+    assert len(distinct_compose) == 1, (
+        f"{key} is pinned to different (individually acceptable) paths across the "
+        f"compose lanes: {compose_values}. Every lane builds the same "
+        "docker/Dockerfile.runtime image, so they must agree on one literal — "
+        "divergence here is how a lane-specific edit silently stops matching the "
+        "others."
     )
 
 
@@ -622,8 +867,14 @@ def test_every_runtime_compose_lane_binds_delegation_routing_tiers_path() -> Non
       scripts/deploy-runtime.sh). Compose merges ``environment`` mappings
       key-by-key across ``-f`` layers, so these inherit the base pin. That
       inheritance holds ONLY while no overlay replaces the mapping wholesale
-      with ``environment: !override`` — assert that it does not.
+      with a Compose merge directive (``environment: !override`` or
+      ``environment: !reset``) — assert that no service in the overlay does.
     * STANDALONE — files that layer nothing (e2e). Must bind the key directly.
+
+    The directive check is STRUCTURAL, over the parsed service graph, not a
+    regex over raw text: the previous regex matched the literal string
+    ``environment: !override`` only, so it was blind to ``!reset`` (which
+    severs inheritance identically) and to any reformatting of the same tag.
     """
     docker_dir = COMPOSE_PATH.parent
 
@@ -652,13 +903,19 @@ def test_every_runtime_compose_lane_binds_delegation_routing_tiers_path() -> Non
         )
 
     for filename in lane_overlays:
-        raw = (docker_dir / filename).read_text()
-        assert not re.search(r"^\s*environment:\s*!!?override\b", raw, re.MULTILINE), (
+        severed = {
+            name: env.tag
+            for name, service in compose_services(docker_dir / filename).items()
+            if isinstance((env := service_environment(service)), ComposeTagged)
+        }
+        assert not severed, (
             f"{filename} replaces a service's `environment` mapping wholesale with "
-            "!override. That severs the compose merge that carries "
+            "a Compose merge directive: "
+            + ", ".join(f"{name} -> {tag}" for name, tag in sorted(severed.items()))
+            + ". That severs the compose merge that carries "
             f"{key} (and every other x-runtime-env key) from "
             "docker-compose.infra.yml into this lane. Bind the key explicitly in "
-            "this overlay, or drop the !override."
+            "this overlay, or drop the directive."
         )
 
     for filename in standalone:
@@ -667,6 +924,131 @@ def test_every_runtime_compose_lane_binds_delegation_routing_tiers_path() -> Non
             f"{filename} layers no base compose file, so it inherits nothing — "
             f"it must bind {key} on its runtime service directly."
         )
+
+
+def _duplicate_mapping_keys(node: yaml.Node, path: str = "") -> list[str]:
+    """Report ``a.b.KEY`` for every mapping key declared more than once."""
+    duplicates: list[str] = []
+    if isinstance(node, yaml.MappingNode):
+        seen: set[str] = set()
+        for key_node, value_node in node.value:
+            name = str(getattr(key_node, "value", key_node))
+            where = f"{path}.{name}" if path else name
+            if name in seen:
+                duplicates.append(where)
+            seen.add(name)
+            duplicates.extend(_duplicate_mapping_keys(value_node, where))
+    elif isinstance(node, yaml.SequenceNode):
+        for index, item in enumerate(node.value):
+            duplicates.extend(_duplicate_mapping_keys(item, f"{path}[{index}]"))
+    return duplicates
+
+
+@pytest.mark.ci
+def test_no_duplicate_keys_in_compose_files() -> None:
+    """No compose mapping declares the same key twice (OMN-15628 / OMN-15645).
+
+    THIS IS THE CHECK THAT WOULD HAVE CAUGHT THE COLLISION. On 2026-08-02,
+    omnibase_infra#2620 (OMN-15645) and #2621 (OMN-15628) each added
+    ``DELEGATION_ROUTING_TIERS_PATH`` to the SAME ``x-runtime-env`` anchor with
+    a DIFFERENT value, 14 minutes apart. Both PRs were individually green.
+    Merged together they produced a duplicate key, and YAML last-wins silently
+    elected one value — putting ``dev`` red on the parity gate below with no
+    single PR having introduced the failure.
+
+    A duplicate key is never intentional in these files and is invisible to
+    every loader-based check in this module, because ``yaml.safe_load``
+    collapses it before any assertion runs. It has to be caught at the NODE
+    level, pre-construction, which is what this test does.
+    """
+    docker_dir = COMPOSE_PATH.parent
+    compose_files = sorted(docker_dir.glob("docker-compose*.yml"))
+    assert compose_files, f"No docker-compose*.yml files found in {docker_dir}"
+
+    offenders: dict[str, list[str]] = {}
+    for compose_file in compose_files:
+        # yaml.compose stops at the node graph and constructs nothing, so
+        # unlike yaml.load below it raises no S506 concern at all.
+        node = yaml.compose(compose_file.read_text(), Loader=_ComposeLoader)
+        if node is not None and (duplicates := _duplicate_mapping_keys(node)):
+            offenders[compose_file.name] = duplicates
+
+    assert not offenders, (
+        "Compose files declare duplicate mapping keys. YAML keeps the LAST "
+        "occurrence, so the earlier declaration is silently dead — an edit to it "
+        "is a no-op, and two PRs that each add the same key to the same block "
+        "merge into a wrong value with neither PR ever going red:\n"
+        + "\n".join(
+            f"  {name}: {', '.join(where)}" for name, where in sorted(offenders.items())
+        )
+        + "\n\nFix: keep exactly one declaration per key and delete the other."
+    )
+
+
+@pytest.mark.ci
+def test_k8s_family_surface_requires_all_runtime_deployments(tmp_path: Path) -> None:
+    """The forward k8s surface must not accept a partially-bound key.
+
+    Regression lock for the granularity the OMN-15628 fix could have silently
+    traded away. Widening the forward direction from ConfigMap-only to "bound
+    anywhere in k8s" would let a key bound inline on ONE runtime Deployment
+    satisfy an ``x-runtime-env`` claim that reaches all three — a strictly
+    weaker assertion than the one it replaced.
+
+    Driven against the REAL manifests, copied to a temp dir with the binding
+    removed from exactly one Deployment. Asserts the two surfaces diverge in
+    the expected direction: the union surface still reports the key (it is
+    still bound somewhere), the family surface no longer does.
+
+    The probe key is DERIVED, not hardcoded: it must be inline on all three
+    runtime Deployments AND absent from the ConfigMap, otherwise the ConfigMap
+    term would keep it in the family surface and the mutation would prove
+    nothing. ``DELEGATION_ROUTING_TIERS_PATH`` itself does not qualify — see
+    the ConfigMap-divergence note on
+    ``test_delegation_routing_tiers_path_matches_k8s_pin``.
+    """
+    if K8S_RUNTIME_DIR is None:
+        pytest.skip(
+            "omninode_infra not found as a sibling — set OMNINODE_INFRA_DIR to run this test"
+        )
+
+    mutated_manifest = "deployment-omninode-runtime-worker.yaml"
+
+    for source in K8S_RUNTIME_DIR.iterdir():
+        if source.is_file():
+            (tmp_path / source.name).write_text(source.read_text())
+
+    configmap_keys = extract_configmap_keys(tmp_path / "configmap.yaml")
+    inline_only_family_keys = sorted(
+        extract_k8s_runtime_family_bound_keys(tmp_path) - configmap_keys
+    )
+    assert inline_only_family_keys, (
+        "No key is bound inline on all three runtime Deployments while absent "
+        "from the ConfigMap, so the family-vs-union distinction cannot be "
+        "probed. If the manifests genuinely moved every inline binding into the "
+        "ConfigMap, delete extract_k8s_runtime_family_bound_keys' inline term "
+        "rather than leaving this test unable to fail."
+    )
+    key = inline_only_family_keys[0]
+
+    target = tmp_path / mutated_manifest
+    document = yaml.safe_load(target.read_text())
+    for container in document["spec"]["template"]["spec"]["containers"]:
+        container["env"] = [e for e in container.get("env") or [] if e["name"] != key]
+    target.write_text(yaml.safe_dump(document, sort_keys=False))
+
+    assert key in extract_k8s_bound_keys(tmp_path), (
+        f"{key} should still appear in the UNION surface — it is still bound on "
+        "the other two runtime Deployments. If this fails, the fixture mutation "
+        "removed more than intended."
+    )
+    assert key not in extract_k8s_runtime_family_bound_keys(tmp_path), (
+        f"{key} was removed from {mutated_manifest} yet the runtime-FAMILY "
+        "surface still reports it as bound. extract_k8s_runtime_family_bound_keys "
+        "has been widened to a union and the forward parity check is now weaker "
+        "than ConfigMap-only was: a per-workload binding can stand in for an "
+        "anchor-wide one (OMN-15628)."
+    )
 
 
 @pytest.mark.ci

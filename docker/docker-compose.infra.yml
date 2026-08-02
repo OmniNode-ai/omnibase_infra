@@ -164,28 +164,6 @@ x-runtime-env: &runtime-env
   # (projection-api, contract-resolver) explicitly set BIFROST_CONTRACT_PATH: ""
   # in their own environment blocks — those overrides remain intentional.
   BIFROST_CONTRACT_PATH: /app/data/delegation/bifrost_delegation.yaml
-  # OMN-15628: the delegation ROUTING TIERS contract, sibling seam to
-  # BIFROST_CONTRACT_PATH above. omnimarket's routing reducer resolves this key
-  # through `resolve_required_path_config`
-  # (omnimarket/.../delegation_config_provenance.py), which RAISES when the env
-  # var is unset — there is no default. It is bound on all three onex-dev
-  # runtime Deployments (omninode_infra k8s/onex-dev/runtime/
-  # deployment-omninode-runtime{,-effects,-worker}.yaml) and was bound in ZERO
-  # compose files, so every docker lane booted healthy and then fail-closed on
-  # the FIRST delegation-routing request. A green health check is not a
-  # detector for this class; tests/ci/test_env_parity.py is.
-  #
-  # Hardcoded, not `${VAR:-default}`, for the same reason as BIFROST_CONTRACT_PATH
-  # directly above: an accidentally-exported empty value in an operator shell
-  # must not propagate into the containers.
-  #
-  # Value is the in-image site-packages location of the single canonical
-  # routing_tiers.yaml, byte-identical to the k8s pin. The image installs into
-  # /app/.venv on python:3.12-slim (docker/Dockerfile.runtime: ARG
-  # PYTHON_VERSION=3.12, UV_PROJECT_ENVIRONMENT=/app/.venv), and
-  # docker/entrypoint-runtime.sh re-derives the path from the installed
-  # omnimarket package if a Python minor bump ever invalidates this literal.
-  DELEGATION_ROUTING_TIERS_PATH: /app/.venv/lib/python3.12/site-packages/omnimarket/configs/routing_tiers.yaml
   BIFROST_SOURCE_CONTRACT_PATH: ${BIFROST_SOURCE_CONTRACT_PATH:-}
   BIFROST_VERIFY_ENDPOINTS: ${BIFROST_VERIFY_ENDPOINTS:?runtime policy contract must set BIFROST_VERIFY_ENDPOINTS}
   # OMN-15645: Hardcoded default — same locus/reason as BIFROST_CONTRACT_PATH

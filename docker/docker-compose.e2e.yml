@@ -323,7 +323,7 @@ services:
       # x-runtime-env anchor and needs its own routing-tiers pin. Same image
       # (docker/Dockerfile.runtime), same in-image path, same fail-closed
       # consumer in omnimarket's routing reducer.
-      DELEGATION_ROUTING_TIERS_PATH: /app/.venv/lib/python3.12/site-packages/omnimarket/configs/routing_tiers.yaml
+      DELEGATION_ROUTING_TIERS_PATH: /app/config/delegation/routing_tiers.yaml
     ports:
       - "${RUNTIME_PORT:-8085}:8085"
     networks:
