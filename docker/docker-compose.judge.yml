@@ -428,6 +428,11 @@ services:
       RUNTIME_PROFILE: projection-api
       OTEL_SERVICE_NAME: omnimarket-judge-projection-api
       BIFROST_CONTRACT_PATH: ""
+      # Projection API serves materialized read models and does not invoke the
+      # delegation routing reducer. Keep the judge overlay opt-out explicit so
+      # layered base+judge renders cannot inherit the runtime anchor's routing
+      # tiers path.
+      DELEGATION_ROUTING_TIERS_PATH: ""
     ports: !override
       - "${JUDGE_PROJECTION_API_PORT:-43002}:3002"
     volumes:
