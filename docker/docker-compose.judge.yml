@@ -92,6 +92,11 @@ x-judge-runtime-env: &judge-runtime-env
   ONEX_STATE_DIR: /app/data/.onex_state_judge
   ONEX_BOX_ID: judge-local
   BIFROST_CONTRACT_PATH: ${BIFROST_CONTRACT_PATH:-/app/data/delegation/bifrost_delegation.yaml}
+  # OMN-15628: judge redefines its own x-runtime-env anchor, so it must carry
+  # the routing-tiers pin explicitly alongside BIFROST_CONTRACT_PATH. Same
+  # in-image path and same fail-closed consumer as the base infra anchor
+  # (docker/docker-compose.infra.yml); see that comment for the full rationale.
+  DELEGATION_ROUTING_TIERS_PATH: /app/.venv/lib/python3.12/site-packages/omnimarket/configs/routing_tiers.yaml
   BIFROST_SOURCE_CONTRACT_PATH: ${BIFROST_SOURCE_CONTRACT_PATH:-}
   LLM_CLOUD_ENDPOINT_HOST_ALLOWLIST: ${LLM_CLOUD_ENDPOINT_HOST_ALLOWLIST:?runtime policy contract must set LLM_CLOUD_ENDPOINT_HOST_ALLOWLIST}
   LLM_CODER_URL: ${LLM_CODER_URL:-https://generativelanguage.googleapis.com}
