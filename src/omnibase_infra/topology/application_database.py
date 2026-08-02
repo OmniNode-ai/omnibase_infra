@@ -336,6 +336,32 @@ def render_database_projection(
     }
 
 
+class ProjectionDumper(yaml.SafeDumper):
+    """Dumper that indents sequence items under their parent mapping key.
+
+    PyYAML's default ``SafeDumper`` emits block sequences at the *same*
+    indentation as the mapping key that owns them, but every checked-in
+    catalog under ``docker/catalog/database-topology/`` is written in the
+    indented form. Without this override ``--output`` reformats all seven
+    catalogs on every regeneration: measured on ``bf070a94e`` with no
+    semantic change at all, a bare re-render produced 819 insertions / 819
+    deletions of pure indentation churn. ``validate_database_projection``
+    compares parsed YAML, so the drift never failed a gate — it just made
+    the documented "regenerate it from the checked-in typed topology"
+    instruction unusable, because the real change was buried in style noise
+    and collided with every other open PR touching these files.
+
+    ``ModelDeploymentTopology``'s instance writer
+    (``scripts/generate_application_database_table_grants.py::_InstanceDumper``)
+    already carries the identical override for the same reason; this keeps
+    the source instances and their rendered projections on one style
+    contract instead of two.
+    """
+
+    def increase_indent(self, flow: bool = False, indentless: bool = False) -> None:
+        return super().increase_indent(flow, False)
+
+
 def write_database_projection(
     environment: str,
     output: Path,
@@ -346,13 +372,15 @@ def write_database_projection(
     """Write a deterministic database projection without secret material."""
     output.parent.mkdir(parents=True, exist_ok=True)
     output.write_text(
-        yaml.safe_dump(
+        yaml.dump(
             render_database_projection(
                 environment,
                 topology_root,
                 profile_catalog_path=profile_catalog_path,
             ),
+            Dumper=ProjectionDumper,
             sort_keys=True,
+            default_flow_style=False,
         ),
         encoding="utf-8",
     )

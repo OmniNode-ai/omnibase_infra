@@ -21,6 +21,7 @@ from omnibase_infra.topology import (
     validate_docker_catalog_parity,
     validate_docker_topology_profile_injections,
 )
+from omnibase_infra.topology.application_database import write_database_projection
 
 REPO_ROOT = Path(__file__).resolve().parents[3]
 TOPOLOGY_ROOT = REPO_ROOT / "src" / "omnibase_infra" / "topology" / "instances"
@@ -92,6 +93,32 @@ def test_checked_in_docker_projections_exactly_match_typed_instances() -> None:
         validate_database_projection(
             environment,
             PROJECTION_ROOT / f"{environment}.yaml",
+        )
+
+
+def test_regenerating_a_projection_reproduces_the_checked_in_bytes(
+    tmp_path: Path,
+) -> None:
+    """``--output`` must be byte-idempotent, not merely semantically equal.
+
+    ``validate_database_projection`` compares parsed YAML, so a style drift in
+    the writer passed every gate while making the documented "regenerate it
+    from the checked-in typed topology" instruction unusable: on ``bf070a94e``
+    a bare re-render of all seven catalogs, with no semantic change at all,
+    produced 819 insertions / 819 deletions of pure sequence-indentation
+    churn that buried the real diff and collided with every other open PR
+    touching these files. This asserts the property the semantic check cannot
+    see.
+    """
+    for environment in sorted(SUPPORTED_TOPOLOGY_PROFILES):
+        regenerated = tmp_path / f"{environment}.yaml"
+        write_database_projection(environment, regenerated)
+        assert regenerated.read_text(encoding="utf-8") == (
+            PROJECTION_ROOT / f"{environment}.yaml"
+        ).read_text(encoding="utf-8"), (
+            f"regenerating docker/catalog/database-topology/{environment}.yaml "
+            "changed bytes without changing meaning; the writer's YAML style "
+            "drifted from the checked-in style"
         )
 
 
