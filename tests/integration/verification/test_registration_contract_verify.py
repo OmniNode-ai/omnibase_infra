@@ -115,6 +115,7 @@ def _make_live_watermark_fn() -> Any:
 
 
 @pytest.mark.integration
+@pytest.mark.kafka
 class TestRegistrationContractVerifyLive:
     """Integration tests against live PostgreSQL and Kafka."""
 
