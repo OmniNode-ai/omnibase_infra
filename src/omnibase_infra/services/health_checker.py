@@ -1170,20 +1170,29 @@ class ServiceHealth:
             status = fold_runtime_verdict_into_status(
                 status, verdict.status if verdict is not None else None
             )
-            # OMN-15642: fold the boot attach-readiness aggregate the SAME way
-            # OMN-15217 folded the runtime-health-monitor verdict above. Before
-            # this, a DEGRADED/FAILED attach_readiness reached only
-            # details.components.runtime_wiring (below) -- nothing upstream
-            # reads that nested detail, so a consumer contract that silently
-            # failed to attach its Kafka subscription left `status` reporting
-            # "healthy" with HTTP 200. See fold_attach_readiness_into_status's
-            # docstring for the live incident this closes.
-            status = fold_attach_readiness_into_status(
-                status,
-                self._attach_readiness.state
-                if self._attach_readiness is not None
-                else None,
-            )
+            # OMN-15642 (remediation): boot attach-readiness is DELIBERATELY NOT
+            # folded into this endpoint's gated `status`, unlike the runtime-verdict
+            # fold above. `/health` is the liveness probe that four real automated
+            # gates hard-fail on with no DEGRADED tolerance --
+            # .github/workflows/reusable-runtime-boot.yml (`jq -e '.status ==
+            # "healthy" ...' || exit 1`), scripts/deploy-agent/deploy_agent/executor.py
+            # (`_runtime_health_passed`), and the deploy-readiness checks in
+            # scripts/runtime_build/verify_stability_refresh.py and
+            # verify_dev_refresh.py. `ModelRuntimeAttachReadiness`'s own docstring
+            # (omnibase_infra.event_bus.model_runtime_attach_readiness) states "The
+            # readiness endpoint reports attach status ONLY -- it is not a source of
+            # truth for contract lifecycle", and OMN-13237 deliberately designed a
+            # NOT-READY/DEGRADED contract to be recorded and skipped, never fatal,
+            # never a restart/redeploy trigger (service_kernel.py's boot-walk
+            # comment: "it never recycles the process"). A single unprovisioned
+            # topic -- a documented live condition on onex-dev (OMN-15330) -- would
+            # therefore have turned a deliberately-non-fatal per-contract skip into a
+            # hard boot/deploy failure on every future boot. The aggregate is still
+            # fully visible without that risk: enriched_details["components"]
+            # ["runtime_wiring"] below (pre-existing, OMN-15512) and
+            # /health/detailed's own `status` (fold_attach_readiness_into_status,
+            # below in _handle_health_detailed -- that endpoint is not a probe
+            # target for any of the four consumers above).
 
             self._log_health_transition(
                 status=status,
@@ -1580,20 +1589,30 @@ class ServiceHealth:
                 status = "unhealthy"
                 http_status = 503
 
-            # OMN-15642: same fold as /health -- see fold_attach_readiness_into_status.
-            # Without this, /health/detailed's own status/http_status pair stayed
-            # green while attach_readiness.state != READY was visible only inside
-            # the nested components.runtime_wiring detail below.
+            # OMN-15642: fold the boot attach-readiness aggregate into THIS
+            # endpoint's status -- deliberately NOT into /health's (see the long
+            # comment in _handle_health for why). /health/detailed is not a probe
+            # target for any automated boot/deploy gate (verified: no k8s manifest,
+            # CI workflow, or deploy script under this repo or omninode_infra reads
+            # this path), so it is safe here and matches this endpoint's own
+            # documented contract (503 for "unhealthy"). Without this fold,
+            # /health/detailed's own status/http_status pair stayed green while
+            # attach_readiness.state != READY was visible only inside the nested
+            # components.runtime_wiring detail below.
             status = fold_attach_readiness_into_status(
                 status,
                 self._attach_readiness.state
                 if self._attach_readiness is not None
                 else None,
             )
+            # Only "unhealthy" can change http_status here: fold_attach_readiness_
+            # into_status() early-returns unchanged for an already-"unhealthy"
+            # payload_status, and every pre-fold path that yields "healthy" or
+            # "degraded" already set http_status=200 above -- so a post-fold
+            # "degraded" never needs (or gets) a different http_status than it
+            # already had.
             if status == "unhealthy":
                 http_status = 503
-            elif status == "degraded":
-                http_status = 200
 
             checked_at = datetime.now(tz=UTC).isoformat()
             components = build_component_health(

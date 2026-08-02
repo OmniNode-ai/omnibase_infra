@@ -154,20 +154,32 @@ def fold_attach_readiness_into_status(
     the ``ServiceRuntimeHealthMonitor`` verdict (see the module docstring): a
     runtime can boot fully, with EVERY rollout/digest/dashboard/staleness gate
     green, while one Kafka consumer contract silently never attaches its
-    subscription (``_require_contract_dispatcher_scope`` et al. raise inside
-    ``subscribe_wired_contract_topics``, caught per-contract and downgraded to
-    a non-fatal ``ModelContractAttachResult`` — see
-    ``omnibase_infra.event_bus.model_runtime_attach_readiness``). A projection
-    or reducer that stops consuming produces zero new rows for whatever it
-    writes, invisible to every liveness/rollout check that never queries the
-    wiring detail. OMN-15642 observed exactly this shape live on onex-dev:
-    steps 30-36 of ``deploy-onex-staging`` (rollout, digest triple-match,
-    dashboard health, post-deploy verification, staleness) all passed while a
-    correlation-keyed projection and the unified system-event stream stayed
-    silently empty, surfacing only ~60s later at the terminal business-proof
-    gate. Folding the aggregate into ``status`` here means the SAME class of
-    silent drop is visible at ``/health`` immediately, not only after a
-    downstream consumer happens to probe by correlation_id.
+    subscription (raises inside ``subscribe_wired_contract_topics``, caught
+    per-contract and downgraded to a non-fatal ``ModelContractAttachResult`` —
+    see ``omnibase_infra.event_bus.model_runtime_attach_readiness``). A
+    projection or reducer that stops consuming produces zero new rows for
+    whatever it writes, invisible to every liveness/rollout check that never
+    queries the wiring detail.
+
+    Caller scoping (remediation, read before wiring this into a new caller):
+    this fold is used by ``ServiceHealth._handle_health_detailed`` ONLY, not
+    ``_handle_health``. ``ModelRuntimeAttachReadiness``'s own docstring states
+    "the readiness endpoint reports attach status ONLY — it is not a source of
+    truth for contract lifecycle", and OMN-13237 deliberately designed a
+    NOT_READY/DEGRADED contract to be recorded and skipped, never fatal, never
+    a restart/redeploy trigger. ``/health`` (unlike ``/health/detailed``) is a
+    hard, no-tolerance boot/deploy gate for four real automated consumers —
+    ``.github/workflows/reusable-runtime-boot.yml``,
+    ``scripts/deploy-agent/deploy_agent/executor.py``,
+    ``scripts/runtime_build/verify_stability_refresh.py`` /
+    ``verify_dev_refresh.py`` — that assert ``status == "healthy"`` with no
+    DEGRADED tolerance. Folding a documented-non-fatal DEGRADED into
+    ``/health``'s gated status would convert every ordinary NOT_READY skip
+    (e.g. one unprovisioned topic, a documented live condition on onex-dev —
+    OMN-15330) into a hard boot/deploy failure. Route new visibility needs
+    through ``/health/detailed`` or the existing
+    ``details.components.runtime_wiring`` block, not through this fold on
+    ``/health``.
 
     Args:
         payload_status: Status derived from ``RuntimeHostProcess.health_check()``,

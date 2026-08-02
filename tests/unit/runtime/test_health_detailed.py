@@ -639,12 +639,21 @@ class TestRuntimeWiringComponent:
 
         half-fixed. Until OMN-15642, ``data["status"]`` stayed "healthy" here
         — only the nested ``components.runtime_wiring`` said otherwise, which
-        nothing upstream (including deploy-onex-staging's own health-gate
-        steps) reads. ``fold_attach_readiness_into_status`` now folds the
-        aggregate into the top-level ``status`` too, the same way OMN-15217
-        already folds the runtime-health-monitor verdict. The HTTP status
-        code stays 200 — a runtime is designed to stay live with NOT_READY
-        contracts (OMN-13237) — but `status` itself is now honest.
+        nothing read either. ``fold_attach_readiness_into_status`` now folds
+        the aggregate into this endpoint's top-level ``status`` too, the same
+        way OMN-15217 already folds the runtime-health-monitor verdict. The
+        HTTP status code stays 200 — a runtime is designed to stay live with
+        NOT_READY contracts (OMN-13237) — but `status` itself is now honest.
+
+        NOTE (remediation): this fold lives on ``/health/detailed`` only, not
+        ``/health`` — neither endpoint is read by ``deploy-onex-staging``
+        (verified: that workflow probes k8s `/ready`, omnidash's
+        `/api/health/data-sources`, and consumer-group health, never
+        `/health` or `/health/detailed`), and ``/health``'s gated `status` is
+        a hard, no-DEGRADED-tolerance boot/deploy gate for four OTHER
+        automated consumers (see
+        ``tests/unit/runtime/test_service_health_attach_readiness.py``'s
+        module docstring) that this fold must not touch.
         """
         server = ServiceHealth(runtime=_healthy_runtime(["db", "http"]), version="1.0")
         server.attach_readiness(_readiness(attached=3, not_ready=2))
