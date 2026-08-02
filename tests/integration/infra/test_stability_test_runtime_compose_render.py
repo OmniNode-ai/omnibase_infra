@@ -434,6 +434,39 @@ def test_stability_lane_render_contains_isolated_runtime_identity() -> None:
 
 
 @pytest.mark.integration
+def test_stability_lane_delegation_routing_tiers_path_binding() -> None:
+    """OMN-15645: DELEGATION_ROUTING_TIERS_PATH must be bound on every runtime
+    service in the stability-test lane, to a fixed, non-version-embedded
+    in-image path.
+
+    omnimarket#2000 (OMN-15628) removed the packaged-default fallback for this
+    key in the delegation routing reducer's ``_get_config()`` singleton; an
+    unbound key now raises ``ProtocolConfigurationError`` at first config read.
+    See ``test_dev_lane_delegation_routing_tiers_path_binding`` in
+    ``test_dev_runtime_compose_render.py`` for the full seam citation.
+    """
+    rendered_config = _compose_config_json()
+    services = rendered_config["services"]
+
+    expected_path = "/app/contracts/delegation/routing_tiers.yaml"
+    for service_name in REQUIRED_RUNTIME_SERVICES:
+        environment = services[service_name]["environment"]
+        assert environment.get("DELEGATION_ROUTING_TIERS_PATH") == expected_path, (
+            f"Service '{service_name}' must bind DELEGATION_ROUTING_TIERS_PATH="
+            f"{expected_path!r}; got "
+            f"{environment.get('DELEGATION_ROUTING_TIERS_PATH')!r}"
+        )
+
+    for service_name in ("projection-api", "omninode-contract-resolver"):
+        environment = services[service_name]["environment"]
+        assert environment.get("DELEGATION_ROUTING_TIERS_PATH", "") == "", (
+            f"Service '{service_name}' deliberately has no delegation-routing "
+            "surface and must not bind DELEGATION_ROUTING_TIERS_PATH; got "
+            f"{environment.get('DELEGATION_ROUTING_TIERS_PATH')!r}"
+        )
+
+
+@pytest.mark.integration
 def test_stability_lane_render_pins_worker_replicas_to_one() -> None:
     """The stability worker must render with deploy.replicas == 1 (OMN-12988).
 

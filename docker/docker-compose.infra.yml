@@ -166,6 +166,21 @@ x-runtime-env: &runtime-env
   BIFROST_CONTRACT_PATH: /app/data/delegation/bifrost_delegation.yaml
   BIFROST_SOURCE_CONTRACT_PATH: ${BIFROST_SOURCE_CONTRACT_PATH:-}
   BIFROST_VERIFY_ENDPOINTS: ${BIFROST_VERIFY_ENDPOINTS:?runtime policy contract must set BIFROST_VERIFY_ENDPOINTS}
+  # OMN-15645: Hardcoded default — same locus/reason as BIFROST_CONTRACT_PATH
+  # above (OMN-12864: no ${VAR:-} ambient-override footgun). omnimarket#2000
+  # (OMN-15628) removed the packaged-default fallback in the delegation routing
+  # reducer, so an unbound key now fails boot with ProtocolConfigurationError
+  # instead of silently defaulting. The value is NOT a literal python3.X
+  # site-packages path (that trap is exactly what OMN-15628's runtime
+  # entrypoint self-heal exists to correct for a *stale* pin) — it is a fixed,
+  # version-independent location that docker/Dockerfile.runtime bakes into the
+  # image at build time from the installed omnimarket package's own configs/
+  # directory (glob-derived, never a hardcoded interpreter minor version).
+  # Services that have no delegation-routing surface (projection-api,
+  # contract-resolver) explicitly set DELEGATION_ROUTING_TIERS_PATH: "" in
+  # their own environment blocks below, mirroring the BIFROST_CONTRACT_PATH
+  # opt-out.
+  DELEGATION_ROUTING_TIERS_PATH: /app/contracts/delegation/routing_tiers.yaml
   ONEX_SECRET_RESOLVER_CONFIG_PATH: ${DEV_RUNTIME_MAIN_SECRET_RESOLVER_CONFIG_PATH:?runtime policy contract must set DEV_RUNTIME_MAIN_SECRET_RESOLVER_CONFIG_PATH}
   ONEX_SECRET_RESOLVER_CONFIG_JSON: ${DEV_RUNTIME_MAIN_SECRET_RESOLVER_CONFIG_JSON:?runtime policy contract must set DEV_RUNTIME_MAIN_SECRET_RESOLVER_CONFIG_JSON}
   # Restrict the runtime surface to first-party infra + marketplace packages.
@@ -985,6 +1000,11 @@ services:
       # Projection API serves materialized read models and has no runtime data
       # volume for the rendered Bifrost delegation contract.
       BIFROST_CONTRACT_PATH: ""
+      # OMN-15645: Projection API is a read-only materialized-view server; it
+      # never invokes the delegation routing reducer, so it deliberately has no
+      # delegation-routing surface (mirrors the BIFROST_CONTRACT_PATH opt-out
+      # above).
+      DELEGATION_ROUTING_TIERS_PATH: ""
     ports:
       - "${PROJECTION_API_PORT:-3002}:3002"
     healthcheck:
@@ -1364,6 +1384,12 @@ services:
       # Contract resolver does not mount /app/data, so it must not render the
       # Bifrost delegation contract into the shared runtime data path.
       BIFROST_CONTRACT_PATH: ""
+      # OMN-15645: Contract resolver is a synchronous HTTP bridge for
+      # NodeContractResolveCompute (contract *resolution*, not delegation
+      # *routing*); it never invokes the delegation routing reducer, so it
+      # deliberately has no delegation-routing surface (mirrors the
+      # BIFROST_CONTRACT_PATH opt-out above).
+      DELEGATION_ROUTING_TIERS_PATH: ""
       CORS_ORIGINS: ${CONTRACT_RESOLVER_CORS_ORIGINS:-http://localhost:3000,http://localhost:3001,http://localhost:8085}
       CONTRACT_RESOLVER_PORT: "8091"
       ONEX_LOG_LEVEL: ${ONEX_LOG_LEVEL:-INFO}
