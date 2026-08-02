@@ -178,13 +178,19 @@ def test_live_red_escape_token_end_to_end_against_the_real_incident_token(
     mod,
 ) -> None:
     """RED end-to-end: the EXACT live incident line (rev 3d51b047, token
-    `# raw-override-ok: OMN-15414`) fails find_escape_token_violations via
-    the real Linear API, reproducing the ticket's cited proof requirement
-    ("RED case where a well-formed token cites a Done ticket") without an
-    injected fake resolver."""
-    if not os.environ.get("LINEAR_API_KEY"):
-        pytest.skip("LINEAR_API_KEY not set in this environment")
+    `# raw-override-ok: OMN-15414`, no until=) fails
+    find_escape_token_violations, reproducing the ticket's cited proof
+    requirement ("RED case where a well-formed token cites a Done ticket")
+    against the real production code path.
 
+    Deliberately does NOT skip on a missing LINEAR_API_KEY: LINEAR_API_KEY is
+    not provisioned as a repo or org secret anywhere in OmniNode-ai today, so
+    a skip-on-unset guard here would mean this proof never actually executes
+    in the live enforcing CI environment -- precisely the gap a remediation
+    round found ("Both live AC3 proofs also skip in CI"). The mandatory-
+    until= enforcement path (`find_escape_token_violations`) fires on this
+    exact token shape with zero network calls, so this test is unconditional.
+    """
     pyproject_text = (
         "[project]\n"
         'name = "omnibase-infra"\n'
@@ -199,15 +205,5 @@ def test_live_red_escape_token_end_to_end_against_the_real_incident_token(
     )
 
     violations = mod.find_escape_token_violations(pyproject_text)
-    if not violations and _IN_CI:
-        pytest.fail(
-            "expected a violation for a token citing OMN-15414 (Done) -- "
-            "got none; either the ticket reopened or the live check regressed"
-        )
-    elif not violations:
-        pytest.skip(
-            "no violation reported -- either OMN-15414 reopened or the live "
-            "Linear API call failed transiently"
-        )
-    assert len(violations) == 1
+    assert len(violations) == 1, violations
     assert "OMN-15414" in violations[0]

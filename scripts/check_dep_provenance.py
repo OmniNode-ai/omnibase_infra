@@ -70,14 +70,16 @@ is set (same posture as ``check_pin_reachability.py``).
 
 A non-exact declared constraint (a range like ``>=0.46.8,<0.47.0``, or no
 declared constraint at all) sitting next to a git override is ALSO a lineage
-violation, not a free pass: ``_declared_versions``'s single-operator regex
-only recognizes ``pkg==X.Y.Z``, so loosening the constraint from ``==`` to a
-range is enough to make ``find_lineage_violations`` skip the package entirely
-while ``find_violations`` still exempts the same line via its escape token —
-a complete bypass of both checks. There is no released tree that a range
-constraint unambiguously names, so it cannot be lineage-verified; the
-constraint must be tightened to an exact pin (or the override deleted)
-before this check can prove anything about it.
+violation, not a free pass: an earlier, single-operator-only version lookup
+recognized only ``pkg==X.Y.Z``, so loosening the constraint from ``==`` to a
+range was enough to make ``find_lineage_violations`` skip the package entirely
+while ``find_violations`` still exempted the same line via its escape token —
+a complete bypass of both checks. ``_declared_version_specs`` closes that gap
+by capturing every requirement shape (see below), so a range/unversioned
+constraint is now itself flagged rather than silently skipped. There is no
+released tree that a range constraint unambiguously names, so it cannot be
+lineage-verified; the constraint must be tightened to an exact pin (or the
+override deleted) before this check can prove anything about it.
 
 Escape-token reconciliation (OMN-15604 AC3, opt-in via ``--check-token-expiry``)
 ---------------------------------------------------------------------------------
@@ -98,6 +100,20 @@ Like the escape-token check itself, LINEAR_API_KEY is optional infrastructure
 resolution is skipped (not failed) so a repo that has never provisioned the
 secret is not permanently red. The ``until=`` date check requires no network
 and always runs.
+
+**Mandatory-``until=`` residual (closed here).** ``LINEAR_API_KEY`` is not
+provisioned as a repo *or* org secret anywhere in OmniNode-ai as of this
+writing (verified via ``gh secret list`` / ``gh api orgs/.../actions/secrets``)
+-- so condition 2 above never actually fires in any live enforcing
+environment; it is dead code in production, not merely optional. Left as
+originally shipped, a token with no ``until=`` suffix (e.g. the literal
+``# raw-override-ok: OMN-15414`` from the live incident this ticket names)
+would fall straight through both conditions and pass unconditionally and
+forever -- the exact defect AC3 exists to close, reproduced under the exact
+live incident token. A token that supplies neither a live ``until=`` date nor
+a resolvable ticket status is therefore *itself* a violation: graceful
+degradation on a missing ``LINEAR_API_KEY`` only applies when the ``until=``
+date is present and did the enforcing (see ``find_escape_token_violations``).
 
 Cascade-movability check (OMN-15604 AC4, ``--check-movable <PACKAGE>``)
 --------------------------------------------------------------------------
@@ -325,12 +341,14 @@ def _declared_version_specs(parsed: dict[str, object]) -> dict[str, str]:
     actually resolves against) takes precedence over a project.dependencies
     entry for the same package, if they ever disagree.
 
-    Unlike `_declared_versions` (exact `==` pins only), this captures EVERY
-    shape referencing the package -- an exact pin (`==0.46.8`), a range
-    (`>=0.46.8,<0.47.0`), or a bare unversioned name (empty spec) -- so a
-    loosened constraint cannot silently evade comparison the way a
-    single-operator regex would (OMN-15604: this was the exact bypass a
-    ranged constraint produced against `find_lineage_violations`).
+    Captures EVERY shape referencing the package -- an exact pin
+    (`==0.46.8`), a range (`>=0.46.8,<0.47.0`), or a bare unversioned name
+    (empty spec) -- so a loosened constraint cannot silently evade
+    comparison the way an exact-only, single-operator lookup would (OMN-15604:
+    this was the exact bypass a ranged constraint produced against
+    `find_lineage_violations` before this function replaced that lookup).
+    Callers that need only the exact `==` pins filter this dict's values
+    through `_EXACT_PIN_SUFFIX_RE` themselves (see `find_lineage_violations`).
     """
     specs: dict[str, str] = {}
 
@@ -352,22 +370,6 @@ def _declared_version_specs(parsed: dict[str, object]) -> dict[str, str]:
                 specs[_normalize(match.group(1))] = match.group(2).strip()
 
     return specs
-
-
-def _declared_versions(parsed: dict[str, object]) -> dict[str, str]:
-    """Return {normalized_pkg: version} for every EXACT `pkg==X.Y.Z` pin.
-
-    Derived from `_declared_version_specs` (the general, any-operator view)
-    by keeping only entries whose spec is a single `==` pin -- a range or
-    unversioned entry has no value here, matching this function's original
-    (pre-OMN-15604) single-operator-regex behavior exactly.
-    """
-    versions: dict[str, str] = {}
-    for pkg, spec in _declared_version_specs(parsed).items():
-        exact_m = _EXACT_PIN_SUFFIX_RE.match(spec)
-        if exact_m:
-            versions[pkg] = exact_m.group(1)
-    return versions
 
 
 def _repo_from_git_url(git_url: str) -> str | None:
@@ -658,6 +660,16 @@ def find_escape_token_violations(
        status — the override's justification is closed, so the override
        itself is stale.
 
+    `LINEAR_API_KEY` is not provisioned anywhere in this org today, so
+    condition 2 never actually resolves in the live enforcing environment --
+    a token with no `until=` suffix would otherwise fall through both
+    conditions and pass forever, exactly reproducing the AC3 defect against
+    the live incident token. A token supplying neither a live `until=` date
+    nor a resolvable ticket status is therefore a violation in its own right:
+    graceful degradation on a missing `LINEAR_API_KEY` only applies once an
+    `until=` date has already provided a live, network-free enforcement path
+    for this line.
+
     A line with NO escape token is out of scope here — `find_violations`
     already fails it unconditionally; this function only reconciles tokens
     that `find_violations` currently treats as a permanent pass.
@@ -714,7 +726,30 @@ def find_escape_token_violations(
         status_name, detail = resolve_ticket(ticket_id)
         if status_name is None:
             if detail == "LINEAR_API_KEY not set":
-                # Graceful degradation, same posture as check_stale_todos.py.
+                if until_date is None:
+                    # Neither reconciliation condition is live: there is no
+                    # until= date to fail closed on, and ticket-status
+                    # resolution cannot run without LINEAR_API_KEY (unset
+                    # everywhere in this org today). Falling through here
+                    # would reproduce the exact OMN-13873 unconditional-
+                    # forever pass this function exists to close, so the
+                    # token itself is the violation.
+                    violations.append(
+                        f"{pkg}: raw-override-ok token for {raw_ticket} has "
+                        "no until= expiry date, and Linear ticket-status "
+                        "resolution is unavailable (LINEAR_API_KEY not set) "
+                        "-- neither reconciliation condition is live, so the "
+                        "override would otherwise be exempt unconditionally "
+                        "and forever. Add an explicit `until=YYYY-MM-DD` "
+                        "suffix to the token."
+                    )
+                    continue
+                # An until= date IS present (and, since we reached this line,
+                # already checked above as not yet expired) -- that date is
+                # itself a live, network-free fail-closed condition, so a
+                # missing credential for this secondary ticket-status check
+                # is not fatal. Graceful degradation, same posture as
+                # check_stale_todos.py.
                 continue
             violations.append(
                 f"{pkg}: could not resolve Linear status for cited ticket "
@@ -824,11 +859,14 @@ def main(argv: list[str] | None = None) -> int:
         action="store_true",
         help=(
             "Additionally run the escape-token reconciliation check "
-            "(OMN-15604 AC3): fail if a raw-override-ok token's until= date "
-            "has passed, or if its cited ticket resolves (via the Linear "
-            "API) to a closed status. Requires LINEAR_API_KEY for the "
-            "ticket-status half; gracefully skipped (not failed) when unset, "
-            "matching scripts/validation/check_stale_todos.py's posture."
+            "(OMN-15604 AC3): fail if a raw-override-ok token has no "
+            "until= date, if its until= date has passed, or if its cited "
+            "ticket resolves (via the Linear API) to a closed status. "
+            "Ticket-status resolution requires LINEAR_API_KEY and is "
+            "gracefully skipped (not failed) when unset -- but ONLY once "
+            "a live until= date is present; a token with neither is a "
+            "violation, matching scripts/validation/check_stale_todos.py's "
+            "graceful-degradation posture for the secondary check only."
         ),
     )
     parser.add_argument(
