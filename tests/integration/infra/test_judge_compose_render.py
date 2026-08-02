@@ -365,7 +365,7 @@ def test_judge_lane_delegation_routing_tiers_path_binding() -> None:
     rendered_config = _layered_compose_config_json()
     services = rendered_config["services"]
 
-    expected_path = "/app/contracts/delegation/routing_tiers.yaml"
+    expected_path = "/app/config/delegation/routing_tiers.yaml"
     for service_name in ("omninode-runtime", "runtime-effects"):
         environment = services[service_name]["environment"]
         assert environment.get("DELEGATION_ROUTING_TIERS_PATH") == expected_path, (

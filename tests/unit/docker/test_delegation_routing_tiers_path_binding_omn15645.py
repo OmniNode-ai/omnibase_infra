@@ -41,8 +41,10 @@ plus the GREEN cold bring-up captured in the OMN-15645 PR body.
 from __future__ import annotations
 
 import re
+from pathlib import Path
 
 import pytest
+import yaml
 
 # The exact key name the omnimarket consumer reads. Do not rename without
 # updating the omnimarket-side seam citation above.
@@ -50,7 +52,7 @@ _ENV_KEY = "DELEGATION_ROUTING_TIERS_PATH"
 
 # The fixed, non-version-embedded in-image path this PR binds the key to.
 # Single source of truth for the value asserted across every render fixture.
-_EXPECTED_PATH = "/app/contracts/delegation/routing_tiers.yaml"
+_EXPECTED_PATH = "/app/config/delegation/routing_tiers.yaml"
 
 # A literal python3.<minor> site-packages path is exactly the trap OMN-15628's
 # runtime entrypoint self-heal exists to correct for a *stale* pin — the
@@ -177,4 +179,52 @@ def test_projection_api_and_contract_resolver_opt_out_explicitly(
         f"{opt_out_count}. If a service's delegation-routing surface changed, "
         "update this count and the render-fixture assertions in "
         "tests/integration/infra/test_*compose_render*.py together."
+    )
+
+
+@pytest.mark.unit
+def test_expected_path_is_never_shadowed_by_a_volume_mount(
+    compose_file_path: Path,
+) -> None:
+    """CodeRabbit catch (PR #2620): the bound path must never fall under a
+    service's mounted volume target. The runtime services bind-mount
+    ``../contracts:/app/contracts:ro`` (host content) and
+    ``${OMNICLAUDE_SKILLS_DIR:-./skills}:/app/skills:ro`` — a baked file under
+    either of those container-side prefixes would be silently HIDDEN by the
+    mount at container start, making the image bake pointless and leaving the
+    entrypoint's OMN-15628 self-heal to paper over it. This test parses every
+    service's ``volumes:`` list and asserts the expected path's directory is
+    never a descendant of any mounted target, for every runtime-profile
+    service that inherits the anchor.
+    """
+    data = yaml.safe_load(compose_file_path.read_text())
+    services = data.get("services", {})
+    expected_dir = _EXPECTED_PATH.rsplit("/", 1)[0] + "/"
+
+    runtime_services = ("omninode-runtime", "runtime-effects", "runtime-worker")
+    violations: list[str] = []
+    for service_name in runtime_services:
+        service = services.get(service_name)
+        if service is None:
+            continue
+        for volume_entry in service.get("volumes", []) or []:
+            if not isinstance(volume_entry, str):
+                continue
+            # "src:dst[:mode]" — container-side target is the second field.
+            parts = volume_entry.split(":")
+            if len(parts) < 2:
+                continue
+            target = parts[1]
+            target_dir = target if target.endswith("/") else target + "/"
+            if expected_dir.startswith(target_dir):
+                violations.append(
+                    f"{service_name}: mount {volume_entry!r} shadows {_EXPECTED_PATH!r}"
+                )
+
+    assert not violations, (
+        "DELEGATION_ROUTING_TIERS_PATH's expected path is shadowed by a "
+        "volume mount on at least one runtime service:\n"
+        + "\n".join(f"  - {v}" for v in violations)
+        + f"\n\nChoose a fixed path outside every mounted target for "
+        f"{runtime_services}."
     )

@@ -280,7 +280,7 @@ def test_dev_lane_delegation_routing_tiers_path_binding() -> None:
     rendered = yaml.safe_load(result.stdout)
     services = rendered["services"]
 
-    expected_path = "/app/contracts/delegation/routing_tiers.yaml"
+    expected_path = "/app/config/delegation/routing_tiers.yaml"
     for service_name in ("omninode-runtime", "runtime-effects", "runtime-worker"):
         environment = services[service_name]["environment"]
         assert environment.get("DELEGATION_ROUTING_TIERS_PATH") == expected_path, (

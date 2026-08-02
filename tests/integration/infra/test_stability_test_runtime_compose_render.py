@@ -448,7 +448,7 @@ def test_stability_lane_delegation_routing_tiers_path_binding() -> None:
     rendered_config = _compose_config_json()
     services = rendered_config["services"]
 
-    expected_path = "/app/contracts/delegation/routing_tiers.yaml"
+    expected_path = "/app/config/delegation/routing_tiers.yaml"
     for service_name in REQUIRED_RUNTIME_SERVICES:
         environment = services[service_name]["environment"]
         assert environment.get("DELEGATION_ROUTING_TIERS_PATH") == expected_path, (

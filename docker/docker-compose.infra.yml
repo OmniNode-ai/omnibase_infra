@@ -176,11 +176,15 @@ x-runtime-env: &runtime-env
   # version-independent location that docker/Dockerfile.runtime bakes into the
   # image at build time from the installed omnimarket package's own configs/
   # directory (glob-derived, never a hardcoded interpreter minor version).
+  # /app/config/ (not /app/contracts/) deliberately: the runtime services
+  # bind-mount ../contracts:/app/contracts:ro (host content that would shadow
+  # anything baked into that path at image-build time); /app/config/ carries
+  # no volume/bind-mount entry anywhere in these compose lane files.
   # Services that have no delegation-routing surface (projection-api,
   # contract-resolver) explicitly set DELEGATION_ROUTING_TIERS_PATH: "" in
   # their own environment blocks below, mirroring the BIFROST_CONTRACT_PATH
   # opt-out.
-  DELEGATION_ROUTING_TIERS_PATH: /app/contracts/delegation/routing_tiers.yaml
+  DELEGATION_ROUTING_TIERS_PATH: /app/config/delegation/routing_tiers.yaml
   ONEX_SECRET_RESOLVER_CONFIG_PATH: ${DEV_RUNTIME_MAIN_SECRET_RESOLVER_CONFIG_PATH:?runtime policy contract must set DEV_RUNTIME_MAIN_SECRET_RESOLVER_CONFIG_PATH}
   ONEX_SECRET_RESOLVER_CONFIG_JSON: ${DEV_RUNTIME_MAIN_SECRET_RESOLVER_CONFIG_JSON:?runtime policy contract must set DEV_RUNTIME_MAIN_SECRET_RESOLVER_CONFIG_JSON}
   # Restrict the runtime surface to first-party infra + marketplace packages.
