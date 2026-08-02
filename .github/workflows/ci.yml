@@ -765,6 +765,69 @@ jobs:
           # so an unresolvable pin fails the gate instead of skipping silently.
           uv run python scripts/ci/check_pin_reachability.py --min-pins 5
 
+  # Dep-provenance content-lineage gate (OMN-15604) -- a [tool.uv.sources]
+  # git-pinned rev must build the SAME src/ tree as the released tag its
+  # PyPI version string declares, even when the line carries a
+  # `# raw-override-ok:` escape token.
+  #
+  # Why this is a separate gate from `Dep Provenance Gate` (OMN-13873,
+  # .github/workflows/dep-provenance-gate.yml): that gate forbids a git
+  # source unconditionally but exempts any line with a non-empty escape
+  # token -- shape-only, never checked against content. Live incident this
+  # closes: omnibase_infra@dev declared omnibase-core==0.46.8 while pinning
+  # git rev 3d51b047 (escaped via `# raw-override-ok: OMN-15414`) whose
+  # src/ tree measurably DIFFERED from released tag v0.46.8 (9 files,
+  # +381/-27 lines) -- invisible to every existing check because the escape
+  # token exempted the only gate that looks at this file at all. This job
+  # lives in ci.yml (not the standalone dep-provenance-gate.yml workflow)
+  # so it is immediately observable by the `CI Summary` STRICT_GATE_JOBS
+  # assertion without needing the EXPECTED_EXTERNAL_CONTEXTS admission
+  # rule's historical report-rate measurement, which a brand-new context
+  # cannot satisfy on day one.
+  dep-provenance-lineage-gate:
+    needs: occ-preflight
+    if: always()
+    name: Dep Provenance Lineage Gate (OMN-15604)
+    # OMNI_RUNNER_SELECTOR_V1 — trusted CI defaults to self-hosted omnibase-ci; public forks default to ubuntu-latest
+    runs-on: >-
+      ${{
+        ((github.event_name == 'pull_request' && github.base_ref == 'dev') ||
+         (github.event_name == 'pull_request' &&
+          github.event.pull_request.head.repo.full_name != github.repository))
+        && fromJSON(vars.OMNI_PUBLIC_PR_RUNS_ON_JSON || '["ubuntu-latest"]')
+        || fromJSON((github.event_name == 'merge_group' && vars.OMNI_REQUIRED_CI_RUNS_ON_JSON) || vars.OMNI_TRUSTED_CI_RUNS_ON_JSON || '["self-hosted","omnibase-ci"]')
+      }}
+    timeout-minutes: 10
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+
+      - name: Setup Python and uv
+        uses: ./.github/actions/setup-python-uv
+        with:
+          python-version: ${{ env.PYTHON_VERSION }}
+          uv-version: ${{ env.UV_VERSION }}
+          cache-version: ${{ env.CACHE_VERSION }}
+          cache-enabled: "false"
+
+      - name: A git-pinned override must build the released tree of its declared version
+        env:
+          # Read-only, public repos: the commits/trees endpoints work
+          # unauthenticated (60 req/hr). The ambient token is attached purely
+          # for rate-limit headroom so a busy PR queue cannot turn the gate
+          # UNDETERMINED.
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          echo "================================================================"
+          echo "Dep Provenance Lineage Gate (OMN-15604)"
+          echo "================================================================"
+          # No --allow-undetermined-lineage: the script REFUSES that flag
+          # when CI is set, so an unresolvable pin fails the gate instead of
+          # skipping silently. --check-lineage runs the network-dependent
+          # half in addition to the existing offline forbid-git-source check.
+          uv run python scripts/check_dep_provenance.py --check-lineage
+
   # Topic drift check -- CI gate validating SUFFIX_* constants against contracts (OMN-5248/OMN-5258)
   # Ensures static topic constants stay in sync with contract.yaml topic declarations.
   # Cross-repo scanning (OMN-5258): checks out sibling repos to resolve topic references.
