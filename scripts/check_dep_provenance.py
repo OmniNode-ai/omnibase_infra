@@ -68,11 +68,59 @@ unresolved rev/tag is reported as a lineage violation, not silently skipped —
 unless ``--allow-undetermined-lineage`` is passed, which is refused when ``CI``
 is set (same posture as ``check_pin_reachability.py``).
 
+A non-exact declared constraint (a range like ``>=0.46.8,<0.47.0``, or no
+declared constraint at all) sitting next to a git override is ALSO a lineage
+violation, not a free pass: ``_declared_versions``'s single-operator regex
+only recognizes ``pkg==X.Y.Z``, so loosening the constraint from ``==`` to a
+range is enough to make ``find_lineage_violations`` skip the package entirely
+while ``find_violations`` still exempts the same line via its escape token —
+a complete bypass of both checks. There is no released tree that a range
+constraint unambiguously names, so it cannot be lineage-verified; the
+constraint must be tightened to an exact pin (or the override deleted)
+before this check can prove anything about it.
+
+Escape-token reconciliation (OMN-15604 AC3, opt-in via ``--check-token-expiry``)
+---------------------------------------------------------------------------------
+The ``# raw-override-ok: <ticket>`` escape token in ``find_violations`` never
+expires and never checks whether ``<ticket>`` is still open. ``
+find_escape_token_violations`` closes that gap two ways, either of which fails
+the line:
+
+1. an explicit ``until=YYYY-MM-DD`` suffix on the token
+   (``# raw-override-ok: OMN-15414 until=2026-09-01``) that has passed, or
+2. the cited ticket resolves (via the Linear API, ``LINEAR_API_KEY``) to a
+   Done/Cancelled/Duplicate status — a closed ticket is no longer a live
+   justification for an unconditional override.
+
+Like the escape-token check itself, LINEAR_API_KEY is optional infrastructure
+(same graceful-degradation posture as ``scripts/validation/check_stale_todos.py``
+/ ``.github/workflows/stale-todo-gate.yml``): when it is unset, ticket-status
+resolution is skipped (not failed) so a repo that has never provisioned the
+secret is not permanently red. The ``until=`` date check requires no network
+and always runs.
+
+Cascade-movability check (OMN-15604 AC4, ``--check-movable <PACKAGE>``)
+--------------------------------------------------------------------------
+``uv lock --upgrade-package <pkg>==<version>`` cannot move a
+``[tool.uv.sources]`` git-source override — uv always prefers an explicit
+source override over registry resolution, so re-locking against the SAME
+override typically re-resolves to a byte-identical ``uv.lock``. The automated
+cascade in ``.github/workflows/dependency-cascade.yml`` reads that as
+"no lockfile changes — already on latest", which is a false-positive SKIP:
+the repo is not on latest, it is still stuck on the git pin.
+``find_unmovable_cascade_targets`` gives that workflow (or any caller) an
+explicit, actionable failure instead of a silent no-op: it fails when
+``PACKAGE`` currently has an active ``[tool.uv.sources]`` git override,
+regardless of a ``raw-override-ok`` token (the token was never designed to
+exempt a cascade's ability to move the pin either).
+
 Usage::
 
     uv run python scripts/check_dep_provenance.py
     uv run python scripts/check_dep_provenance.py --pyproject pyproject.toml
     uv run python scripts/check_dep_provenance.py --check-lineage
+    uv run python scripts/check_dep_provenance.py --check-token-expiry
+    uv run python scripts/check_dep_provenance.py --check-movable omnibase-core
 """
 
 from __future__ import annotations
@@ -87,9 +135,11 @@ import urllib.error
 import urllib.parse
 import urllib.request
 from collections.abc import Callable
+from datetime import UTC, date, datetime
 from pathlib import Path
 
 _ResolveFn = Callable[[str, str], "tuple[str | None, str]"]
+_TicketResolveFn = Callable[[str], "tuple[str | None, str]"]
 
 # ---------------------------------------------------------------------------
 # First-party PyPI-published deps that must be resolved from PyPI, never git.
@@ -112,13 +162,38 @@ _GIT_SOURCE_KEYS: frozenset[str] = frozenset({"git", "rev", "branch", "tag"})
 # Inline escape token: `# raw-override-ok: <ticket>` with a non-empty token.
 _ESCAPE_TOKEN_RE = re.compile(r"#\s*raw-override-ok:\s*(\S+)")
 
+# Optional `until=YYYY-MM-DD` suffix on the escape token, e.g.
+# `# raw-override-ok: OMN-15414 until=2026-09-01`.
+_ESCAPE_TOKEN_UNTIL_RE = re.compile(
+    r"#\s*raw-override-ok:\s*\S+\s+until=(\d{4}-\d{2}-\d{2})"
+)
+
+# A ticket identifier at the start of a token, e.g. `OMN-15414` out of a token
+# that might carry trailing punctuation.
+_TICKET_ID_RE = re.compile(r"^([A-Za-z]+-\d+)")
+
 # `pkg==X.Y.Z` inside a project.dependencies / override-dependencies string.
 _DECLARED_VERSION_RE = re.compile(r"^([A-Za-z0-9_.-]+)==([A-Za-z0-9_.+-]+)$")
+
+# Any requirement string naming a package, regardless of operator/shape:
+# captures the package name and the raw remainder (may be an exact `==` pin,
+# a range, or empty for a bare unversioned name).
+_REQUIREMENT_SPEC_RE = re.compile(r"^([A-Za-z0-9_.-]+)\s*(.*)$")
+
+# An exact-pin spec, e.g. `==0.46.8` (the remainder captured above).
+_EXACT_PIN_SUFFIX_RE = re.compile(r"^==\s*([A-Za-z0-9_.+-]+)$")
 
 # GitHub org all first-party OmniNode repos live under, and the REST root.
 _ORG = "OmniNode-ai"
 _GITHUB_API = "https://api.github.com"  # url-authority-ok: fixed public REST API, no ONEX routing authority
+_LINEAR_API = "https://api.linear.app/graphql"  # url-authority-ok: fixed public GraphQL API, no ONEX routing authority
 _REQUEST_TIMEOUT_SECONDS = 10.0
+
+# Linear issue-state names/types that mean "closed" -- same set as
+# scripts/validation/check_stale_todos.py's done_statuses.
+_TICKET_DONE_STATUSES = frozenset(
+    {"done", "completed", "canceled", "cancelled", "duplicate"}
+)
 
 # `git = "https://github.com/OmniNode-ai/<repo>.git"` — extracts <repo>.
 _SOURCE_URL_RE = re.compile(
@@ -240,16 +315,24 @@ def find_violations(text: str) -> list[str]:
 # ---------------------------------------------------------------------------
 
 
-def _declared_versions(parsed: dict[str, object]) -> dict[str, str]:
-    """Return {normalized_pkg: version} for every `pkg==X.Y.Z` pin.
+def _declared_version_specs(parsed: dict[str, object]) -> dict[str, str]:
+    """Return {normalized_pkg: raw_version_spec} for every requirement string
+    naming a package, regardless of operator/shape.
 
     Scans `project.dependencies` and `[tool.uv] override-dependencies` — the
     two loci the live incident used (pyproject.toml:36 and :189). Later
     entries win over earlier ones so override-dependencies (which is what uv
     actually resolves against) takes precedence over a project.dependencies
     entry for the same package, if they ever disagree.
+
+    Unlike `_declared_versions` (exact `==` pins only), this captures EVERY
+    shape referencing the package -- an exact pin (`==0.46.8`), a range
+    (`>=0.46.8,<0.47.0`), or a bare unversioned name (empty spec) -- so a
+    loosened constraint cannot silently evade comparison the way a
+    single-operator regex would (OMN-15604: this was the exact bypass a
+    ranged constraint produced against `find_lineage_violations`).
     """
-    versions: dict[str, str] = {}
+    specs: dict[str, str] = {}
 
     project = parsed.get("project", {})
     dependencies = project.get("dependencies", []) if isinstance(project, dict) else []
@@ -264,10 +347,26 @@ def _declared_versions(parsed: dict[str, object]) -> dict[str, str]:
         for requirement in requirement_list:
             if not isinstance(requirement, str):
                 continue
-            match = _DECLARED_VERSION_RE.match(requirement.strip())
+            match = _REQUIREMENT_SPEC_RE.match(requirement.strip())
             if match:
-                versions[_normalize(match.group(1))] = match.group(2)
+                specs[_normalize(match.group(1))] = match.group(2).strip()
 
+    return specs
+
+
+def _declared_versions(parsed: dict[str, object]) -> dict[str, str]:
+    """Return {normalized_pkg: version} for every EXACT `pkg==X.Y.Z` pin.
+
+    Derived from `_declared_version_specs` (the general, any-operator view)
+    by keeping only entries whose spec is a single `==` pin -- a range or
+    unversioned entry has no value here, matching this function's original
+    (pre-OMN-15604) single-operator-regex behavior exactly.
+    """
+    versions: dict[str, str] = {}
+    for pkg, spec in _declared_version_specs(parsed).items():
+        exact_m = _EXACT_PIN_SUFFIX_RE.match(spec)
+        if exact_m:
+            versions[pkg] = exact_m.group(1)
     return versions
 
 
@@ -367,12 +466,17 @@ def find_lineage_violations(
     tree of the version declared alongside it (OMN-15604).
 
     Applies to every forbidden package (omnibase-core / omnibase-spi /
-    omnibase-compat) that has BOTH a `[tool.uv.sources]` git override AND a
-    `pkg==X.Y.Z` version constraint — **regardless of a `# raw-override-ok:`
-    escape token**, which exempts a line from `find_violations` only. A
-    package with a git override but no parseable declared version is skipped
-    (nothing to compare against — that shape is a `find_violations` failure,
-    not a lineage failure).
+    omnibase-compat) that has a `[tool.uv.sources]` git override — regardless
+    of a `# raw-override-ok:` escape token, which exempts a line from
+    `find_violations` only. A package with a git override but NO requirement
+    string referencing it anywhere is skipped (nothing to compare against —
+    that shape is a `find_violations` failure, not a lineage failure). A
+    package that IS referenced but not with an exact `pkg==X.Y.Z` pin (a
+    range, or a bare unversioned name) is a VIOLATION, not a skip: a range
+    constraint does not unambiguously name one released tree to compare
+    against, and treating it as "nothing to compare" is precisely the bypass
+    that let a `>=0.46.8,<0.47.0`-style loosening evade this check entirely
+    while `find_violations` still exempted the same line via its token.
 
     `resolve` is injectable for hermetic unit tests; it defaults to the live
     `resolve_src_tree_sha`, which calls the GitHub REST API.
@@ -384,7 +488,7 @@ def find_lineage_violations(
     except tomllib.TOMLDecodeError as exc:
         return [f"invalid TOML: {exc}"]
 
-    declared = _declared_versions(parsed)
+    declared_specs = _declared_version_specs(parsed)
     sources = _parse_uv_source_entries(text)
 
     violations: list[str] = []
@@ -397,9 +501,27 @@ def find_lineage_violations(
         ref = attrs.get("rev") or attrs.get("tag") or attrs.get("branch")
         if not isinstance(ref, str) or not ref:
             continue
-        version = declared.get(pkg)
-        if version is None:
+
+        spec = declared_specs.get(pkg)
+        if spec is None:
+            # Never referenced by any dependency/override-dependency entry --
+            # nothing to compare against, and out of this check's scope.
             continue
+
+        exact_m = _EXACT_PIN_SUFFIX_RE.match(spec)
+        if exact_m is None:
+            violations.append(
+                f"{pkg}: git-pinned override (rev={ref!r}) sits alongside a "
+                f"non-exact declared constraint ({spec!r}) instead of a "
+                f"single `{pkg}==X.Y.Z` pin. A range/loosened/unversioned "
+                "constraint cannot be lineage-verified against one released "
+                "tree -- this is the exact shape that bypasses this check "
+                "by construction (loosen the pin, keep the escape token). "
+                "Pin an exact `pkg==X.Y.Z` version, or delete the "
+                "[tool.uv.sources] override, so lineage can be proven."
+            )
+            continue
+        version = exact_m.group(1)
 
         repo = _repo_from_git_url(git_url)
         if repo is None:
@@ -432,6 +554,234 @@ def find_lineage_violations(
             )
 
     return violations
+
+
+# ---------------------------------------------------------------------------
+# Escape-token reconciliation (OMN-15604 AC3) — network (Linear), opt-in via
+# --check-token-expiry. The `until=` date half never needs network.
+# ---------------------------------------------------------------------------
+
+
+def _parse_escape_token(raw_line: str) -> tuple[str, str | None] | None:
+    """Return `(ticket, until_date)` from a raw source line's
+    `# raw-override-ok: <ticket> [until=YYYY-MM-DD]` comment, or `None` if no
+    valid non-empty token is present on the line.
+    """
+    token_m = _ESCAPE_TOKEN_RE.search(raw_line)
+    if not token_m or not token_m.group(1).strip():
+        return None
+    ticket = token_m.group(1).strip()
+    until_m = _ESCAPE_TOKEN_UNTIL_RE.search(raw_line)
+    until_date = until_m.group(1) if until_m else None
+    return ticket, until_date
+
+
+def resolve_ticket_status(ticket_id: str) -> tuple[str | None, str]:
+    """Resolve a Linear ticket's status name via the Linear GraphQL API.
+
+    Returns `(status_name, "ok")` on success, or `(None, detail)` if the
+    ticket could not be resolved: `LINEAR_API_KEY` unset, transport failure,
+    or the ticket not found. `detail == "LINEAR_API_KEY not set"` is the
+    specific sentinel `find_escape_token_violations` checks to apply the same
+    graceful-degradation posture as this org's other already-shipped,
+    LINEAR_API_KEY-gated Linear check (the stale ticket-tag scanner under
+    `scripts/validation/`, wired as its own required CI gate): without a
+    credential the check cannot run at all, so it is skipped rather than
+    failing every PR in a repo that never provisioned the secret.
+
+    Uses `issue(id: "<identifier>")`, not the `issueSearch` filter shape that
+    scanner uses — that filter shape (`identifier: { eq: ... }`) is rejected
+    by the live Linear schema (`GRAPHQL_VALIDATION_FAILED`); `issue(id:)`
+    accepts a human-readable identifier directly and was verified live
+    against the real OMN-15414 ticket during this ticket's own build.
+    """
+    api_key = os.environ.get("LINEAR_API_KEY", "")
+    if not api_key:
+        return None, "LINEAR_API_KEY not set"
+
+    query = {
+        "query": (
+            'query { issue(id: "'
+            + ticket_id.replace('"', "")
+            + '") { identifier state { name type } } }'
+        )
+    }
+    request = urllib.request.Request(  # noqa: S310 - fixed https host
+        _LINEAR_API,
+        data=json.dumps(query).encode("utf-8"),
+        headers={"Authorization": api_key, "Content-Type": "application/json"},
+    )
+    try:
+        with urllib.request.urlopen(  # noqa: S310 - fixed https host
+            request, timeout=_REQUEST_TIMEOUT_SECONDS
+        ) as response:
+            payload = json.loads(response.read().decode("utf-8", errors="replace"))
+    except urllib.error.HTTPError as exc:
+        return None, f"HTTP {exc.code}"
+    except (urllib.error.URLError, OSError, TimeoutError, ValueError) as exc:
+        return None, f"transport error: {exc}"
+
+    if not isinstance(payload, dict):
+        return None, "malformed Linear API response"
+    if payload.get("errors"):
+        return None, f"Linear API error: {payload['errors']}"
+    issue = (
+        payload.get("data", {}).get("issue")
+        if isinstance(payload.get("data"), dict)
+        else None
+    )
+    if not isinstance(issue, dict):
+        return None, f"ticket {ticket_id!r} not found in Linear"
+    state = issue.get("state") if isinstance(issue.get("state"), dict) else {}
+    name = state.get("name") if isinstance(state, dict) else None
+    if not isinstance(name, str) or not name:
+        return None, f"ticket {ticket_id!r} has no resolvable state"
+    return name, "ok"
+
+
+def find_escape_token_violations(
+    text: str,
+    *,
+    resolve_ticket: _TicketResolveFn = resolve_ticket_status,
+    today: date | None = None,
+) -> list[str]:
+    """RED when a `# raw-override-ok: <ticket>` escape token has expired
+    (OMN-15604 AC3).
+
+    The token exempted a forbidden git-source override unconditionally and
+    forever in the original OMN-13873 design. This closes that gap with
+    either of the two conditions the ticket accepts as sufficient:
+
+    1. an explicit `until=YYYY-MM-DD` suffix has passed `today`
+       (`# raw-override-ok: OMN-15414 until=2026-09-01`), or
+    2. the cited ticket resolves (via Linear) to a Done/Cancelled/Duplicate
+       status — the override's justification is closed, so the override
+       itself is stale.
+
+    A line with NO escape token is out of scope here — `find_violations`
+    already fails it unconditionally; this function only reconciles tokens
+    that `find_violations` currently treats as a permanent pass.
+
+    `resolve_ticket` is injectable for hermetic unit tests; it defaults to
+    the live `resolve_ticket_status`, which calls the Linear API.
+    """
+    if today is None:
+        today = datetime.now(tz=UTC).date()
+
+    block = _uv_sources_block(text) or text
+    try:
+        entries = _parse_uv_source_entries(text)
+    except ValueError as exc:
+        return [str(exc)]
+
+    violations: list[str] = []
+    for pkg, attrs in entries.items():
+        if pkg not in _FORBIDDEN_PACKAGES:
+            continue
+        if not (_GIT_SOURCE_KEYS & set(attrs)):
+            continue
+
+        raw_line = _line_for_package(block, pkg)
+        if raw_line is None:
+            continue
+        parsed_token = _parse_escape_token(raw_line)
+        if parsed_token is None:
+            continue
+        raw_ticket, until_date = parsed_token
+
+        if until_date is not None:
+            try:
+                expiry = date.fromisoformat(until_date)
+            except ValueError:
+                violations.append(
+                    f"{pkg}: raw-override-ok token for {raw_ticket} has an "
+                    f"unparseable until= date ({until_date!r}); expected "
+                    "YYYY-MM-DD"
+                )
+                continue
+            if today > expiry:
+                violations.append(
+                    f"{pkg}: raw-override-ok token for {raw_ticket} EXPIRED "
+                    f"on {until_date} (today: {today.isoformat()}) — the "
+                    "override is no longer exempt from the forbid-git-source "
+                    "gate. Renew with a new until= date, or resolve the "
+                    "override."
+                )
+                continue
+
+        ticket_m = _TICKET_ID_RE.match(raw_ticket)
+        ticket_id = ticket_m.group(1) if ticket_m else raw_ticket
+        status_name, detail = resolve_ticket(ticket_id)
+        if status_name is None:
+            if detail == "LINEAR_API_KEY not set":
+                # Graceful degradation, same posture as check_stale_todos.py.
+                continue
+            violations.append(
+                f"{pkg}: could not resolve Linear status for cited ticket "
+                f"{ticket_id} to verify the raw-override-ok token is still "
+                f"valid: {detail}"
+            )
+            continue
+        if status_name.strip().lower() in _TICKET_DONE_STATUSES:
+            violations.append(
+                f"{pkg}: raw-override-ok token cites {ticket_id}, whose "
+                f"Linear status is {status_name!r} — a closed ticket is no "
+                "longer a valid justification for an unconditional "
+                "git-source override. File a reconciliation ticket, or "
+                "resolve the override."
+            )
+
+    return violations
+
+
+# ---------------------------------------------------------------------------
+# Cascade-movability check (OMN-15604 AC4) — offline, `--check-movable`.
+# ---------------------------------------------------------------------------
+
+
+def find_unmovable_cascade_targets(text: str, package: str) -> list[str]:
+    """Return a violation message if `package` cannot be moved by a
+    dependency cascade (OMN-15604 AC4).
+
+    `uv lock --upgrade-package <pkg>==<version>` re-resolves the dependency
+    graph, but a `[tool.uv.sources]` entry for that package takes precedence
+    over registry resolution regardless — uv re-resolves against the SAME
+    pinned git ref and typically produces a byte-identical `uv.lock`, which
+    `.github/workflows/dependency-cascade.yml` currently reads as "no
+    lockfile changes — already on latest" (a false-positive SKIP: the repo is
+    not on latest, it is still stuck on the git pin).
+
+    Returns a non-empty list (one message) when `package` has an active
+    `[tool.uv.sources]` git override — regardless of a `raw-override-ok`
+    escape token, since the token only ever exempted the forbid-git-source
+    rule, never a cascade's ability to move the pin. Returns `[]` when
+    `package` has no such override (movable), including when `package` isn't
+    tracked at all (`onex-change-control`-style git pins are legitimate and
+    out of scope for this check, same as `find_violations`/
+    `find_lineage_violations`).
+    """
+    pkg = _normalize(package)
+    try:
+        sources = _parse_uv_source_entries(text)
+    except ValueError as exc:
+        return [str(exc)]
+
+    attrs = sources.get(pkg)
+    if attrs is None:
+        return []
+    git_keys = sorted(_GIT_SOURCE_KEYS & set(attrs))
+    if not git_keys:
+        return []
+
+    keys_desc = ", ".join(f"{k}={attrs[k]!r}" for k in git_keys)
+    return [
+        f"{pkg}: pinned via [tool.uv.sources] git override ({keys_desc}). "
+        "'uv lock --upgrade-package' cannot move a [tool.uv.sources] git "
+        "pin -- it re-resolves against the SAME override and will silently "
+        "report no lockfile change, masking a no-op cascade. Remove the "
+        "[tool.uv.sources] override for this package before running a "
+        "dependency cascade against it."
+    ]
 
 
 # ---------------------------------------------------------------------------
@@ -469,6 +819,31 @@ def main(argv: list[str] | None = None) -> int:
             "CI is set, matching check_pin_reachability.py's posture."
         ),
     )
+    parser.add_argument(
+        "--check-token-expiry",
+        action="store_true",
+        help=(
+            "Additionally run the escape-token reconciliation check "
+            "(OMN-15604 AC3): fail if a raw-override-ok token's until= date "
+            "has passed, or if its cited ticket resolves (via the Linear "
+            "API) to a closed status. Requires LINEAR_API_KEY for the "
+            "ticket-status half; gracefully skipped (not failed) when unset, "
+            "matching scripts/validation/check_stale_todos.py's posture."
+        ),
+    )
+    parser.add_argument(
+        "--check-movable",
+        metavar="PACKAGE",
+        default=None,
+        help=(
+            "Standalone check (OMN-15604 AC4): fail if PACKAGE has an active "
+            "[tool.uv.sources] git override, which a `uv lock "
+            "--upgrade-package` dependency cascade cannot move and will "
+            "silently no-op against. Runs instead of the default "
+            "find_violations check; does not combine with --check-lineage "
+            "or --check-token-expiry."
+        ),
+    )
     args = parser.parse_args(argv)
 
     in_ci = bool(os.environ.get("CI"))
@@ -487,6 +862,23 @@ def main(argv: list[str] | None = None) -> int:
             file=sys.stderr,
         )
         return 1
+
+    if args.check_movable:
+        text = pyproject_path.read_text()
+        movable_violations = find_unmovable_cascade_targets(text, args.check_movable)
+        if movable_violations:
+            print(
+                f"FAIL: {args.check_movable} cannot be moved by a dependency cascade:",
+                file=sys.stderr,
+            )
+            for msg in movable_violations:
+                print(f"  - {msg}", file=sys.stderr)
+            return 1
+        print(
+            f"OK: {args.check_movable} has no [tool.uv.sources] git override "
+            "-- movable by a dependency cascade."
+        )
+        return 0
 
     text = pyproject_path.read_text()
     violations = find_violations(text)
@@ -515,42 +907,64 @@ def main(argv: list[str] | None = None) -> int:
         f"{pyproject_path} [tool.uv.sources]."
     )
 
-    if not args.check_lineage:
+    if not args.check_lineage and not args.check_token_expiry:
         return 0
 
-    lineage_violations = find_lineage_violations(text)
-    undetermined = [v for v in lineage_violations if "UNDETERMINED lineage" in v]
-    diverged = [v for v in lineage_violations if v not in undetermined]
+    failed = False
 
-    if diverged:
-        print(
-            "\nFAIL: git-pinned override content diverges from the released "
-            f"tree of its declared version in {pyproject_path}:",
-            file=sys.stderr,
-        )
-        for msg in diverged:
-            print(f"  - {msg}", file=sys.stderr)
-        return 1
+    if args.check_lineage:
+        lineage_violations = find_lineage_violations(text)
+        undetermined = [v for v in lineage_violations if "UNDETERMINED lineage" in v]
+        diverged = [v for v in lineage_violations if v not in undetermined]
 
-    if undetermined and not args.allow_undetermined_lineage:
-        print(
-            f"\nFAIL: {len(undetermined)} pin(s) could not be lineage-resolved. "
-            "An unresolvable pin is not a passing pin.",
-            file=sys.stderr,
-        )
-        for msg in undetermined:
-            print(f"  - {msg}", file=sys.stderr)
-        return 1
+        if diverged:
+            print(
+                "\nFAIL: git-pinned override content diverges from the released "
+                f"tree of its declared version in {pyproject_path}:",
+                file=sys.stderr,
+            )
+            for msg in diverged:
+                print(f"  - {msg}", file=sys.stderr)
+            failed = True
+        elif undetermined and not args.allow_undetermined_lineage:
+            print(
+                f"\nFAIL: {len(undetermined)} pin(s) could not be "
+                "lineage-resolved. An unresolvable pin is not a passing pin.",
+                file=sys.stderr,
+            )
+            for msg in undetermined:
+                print(f"  - {msg}", file=sys.stderr)
+            failed = True
+        elif undetermined:
+            print(
+                f"\nWARNING: {len(undetermined)} pin(s) UNDETERMINED and "
+                "--allow-undetermined-lineage was passed. This run proved "
+                "nothing about lineage for those pins; CI is the enforcing "
+                "surface."
+            )
+        else:
+            print(
+                "OK: no git-pinned override content diverges from its declared version."
+            )
 
-    if undetermined:
-        print(
-            f"\nWARNING: {len(undetermined)} pin(s) UNDETERMINED and "
-            "--allow-undetermined-lineage was passed. This run proved nothing "
-            "about lineage for those pins; CI is the enforcing surface."
-        )
+    if args.check_token_expiry:
+        token_violations = find_escape_token_violations(text)
+        if token_violations:
+            print(
+                "\nFAIL: raw-override-ok escape token(s) need reconciliation "
+                f"in {pyproject_path}:",
+                file=sys.stderr,
+            )
+            for msg in token_violations:
+                print(f"  - {msg}", file=sys.stderr)
+            failed = True
+        else:
+            print(
+                "OK: no raw-override-ok escape token is expired or cites a "
+                "closed ticket."
+            )
 
-    print("OK: no git-pinned override content diverges from its declared version.")
-    return 0
+    return 1 if failed else 0
 
 
 if __name__ == "__main__":

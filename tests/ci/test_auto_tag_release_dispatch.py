@@ -175,3 +175,42 @@ def test_dependency_cascade_polls_until_pypi_visible_with_real_ceiling() -> None
     assert ":-900" in run_script  # default 15-minute ceiling
     # The old too-short 12x10s ceiling is gone.
     assert "seq 1 12" not in run_script
+
+
+def test_dependency_cascade_checks_movability_before_locking() -> None:
+    """OMN-15604 AC4: a git-pinned package cannot be moved by `uv lock
+    --upgrade-package` (uv always prefers an explicit [tool.uv.sources]
+    override over registry resolution), so the previous no-op re-lock
+    silently reported "no lockfile changes -- already on latest" even when
+    the repo was still stuck on the git pin. The lock step must now run the
+    movability check FIRST and fail loud+explicit, not attempt the
+    guaranteed-no-op lock."""
+    workflow = _load_yaml(CASCADE_WORKFLOW)
+    steps = workflow["jobs"]["open-bump-pr"]["steps"]
+
+    checkout_step = next(
+        step
+        for step in steps
+        if step.get("name") == "Checkout omnibase_infra dep-provenance script"
+    )
+    assert checkout_step["with"]["repository"] == "OmniNode-ai/omnibase_infra"
+    assert "check_dep_provenance.py" in checkout_step["with"]["sparse-checkout"]
+
+    lock_step = next(
+        step
+        for step in steps
+        if step.get("name") == "Create branch and upgrade lockfile"
+    )
+    run_script = lock_step["run"]
+    movability_check_index = run_script.index("--check-movable")
+    lock_command_index = run_script.index("uv lock \\")
+    # The movability pre-check must run BEFORE the (potentially no-op) lock
+    # command, not after -- checking after would already have silently
+    # produced the misleading "no lockfile changes" state.
+    assert movability_check_index < lock_command_index
+    assert "check_dep_provenance.py" in run_script
+
+    pre_lock_block = run_script[:lock_command_index]
+    assert "--check-movable" in pre_lock_block
+    assert "::error::" in pre_lock_block
+    assert "exit 1" in pre_lock_block

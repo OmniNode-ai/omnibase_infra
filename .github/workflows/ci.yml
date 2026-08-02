@@ -828,6 +828,20 @@ jobs:
           # half in addition to the existing offline forbid-git-source check.
           uv run python scripts/check_dep_provenance.py --check-lineage
 
+      - name: A raw-override-ok escape token must not be expired or cite a closed ticket
+        env:
+          # Optional: the ticket-status half of this check gracefully
+          # degrades (skips, does not fail) when LINEAR_API_KEY is unset --
+          # same posture as this org's other already-shipped, LINEAR_API_KEY-
+          # gated Linear check (see stale-todo-gate.yml). The until= date
+          # half of the check needs no credential and always runs.
+          LINEAR_API_KEY: ${{ secrets.LINEAR_API_KEY }}
+        run: |
+          echo "================================================================"
+          echo "Dep Provenance Escape-Token Reconciliation (OMN-15604 AC3)"
+          echo "================================================================"
+          uv run python scripts/check_dep_provenance.py --check-token-expiry
+
   # Topic drift check -- CI gate validating SUFFIX_* constants against contracts (OMN-5248/OMN-5258)
   # Ensures static topic constants stay in sync with contract.yaml topic declarations.
   # Cross-repo scanning (OMN-5258): checks out sibling repos to resolve topic references.

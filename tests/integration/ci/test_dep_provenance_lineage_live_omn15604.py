@@ -150,3 +150,64 @@ def test_live_this_repos_own_pyproject_is_lineage_clean() -> None:
         "omnibase_infra's own pyproject.toml should carry no forbidden "
         f"git-pinned override post-OMN-14628; got: {violations}"
     )
+
+
+@pytest.mark.integration
+def test_live_omn_15414_resolves_to_done(mod) -> None:
+    """AC3 ground truth: the exact ticket the live incident's escape token
+    cites (`# raw-override-ok: OMN-15414`) really is Done today, via the
+    real Linear API -- not an assumed/stale fact. Skipped (not failed) when
+    LINEAR_API_KEY is unavailable, matching the check's own graceful
+    degradation posture."""
+    if not os.environ.get("LINEAR_API_KEY"):
+        pytest.skip("LINEAR_API_KEY not set in this environment")
+
+    status_name, detail = mod.resolve_ticket_status("OMN-15414")
+    if status_name is None:
+        if _IN_CI:
+            pytest.fail(f"could not resolve OMN-15414 via live Linear API: {detail}")
+        pytest.skip(f"could not resolve OMN-15414 via live Linear API: {detail}")
+    assert status_name.strip().lower() in mod._TICKET_DONE_STATUSES, (
+        f"expected OMN-15414 to be closed (Done at ticket-file time), got "
+        f"{status_name!r}"
+    )
+
+
+@pytest.mark.integration
+def test_live_red_escape_token_end_to_end_against_the_real_incident_token(
+    mod,
+) -> None:
+    """RED end-to-end: the EXACT live incident line (rev 3d51b047, token
+    `# raw-override-ok: OMN-15414`) fails find_escape_token_violations via
+    the real Linear API, reproducing the ticket's cited proof requirement
+    ("RED case where a well-formed token cites a Done ticket") without an
+    injected fake resolver."""
+    if not os.environ.get("LINEAR_API_KEY"):
+        pytest.skip("LINEAR_API_KEY not set in this environment")
+
+    pyproject_text = (
+        "[project]\n"
+        'name = "omnibase-infra"\n'
+        'version = "0.0.0"\n'
+        "dependencies = [\n"
+        '    "omnibase-core==0.46.8",\n'
+        "]\n"
+        "\n"
+        "[tool.uv.sources]\n"
+        'omnibase-core = { git = "https://github.com/OmniNode-ai/omnibase_core.git", '
+        f'rev = "{_PINNED_REV}" }}  # raw-override-ok: OMN-15414\n'
+    )
+
+    violations = mod.find_escape_token_violations(pyproject_text)
+    if not violations and _IN_CI:
+        pytest.fail(
+            "expected a violation for a token citing OMN-15414 (Done) -- "
+            "got none; either the ticket reopened or the live check regressed"
+        )
+    elif not violations:
+        pytest.skip(
+            "no violation reported -- either OMN-15414 reopened or the live "
+            "Linear API call failed transiently"
+        )
+    assert len(violations) == 1
+    assert "OMN-15414" in violations[0]
