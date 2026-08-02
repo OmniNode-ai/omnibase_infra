@@ -299,38 +299,39 @@ echo "fixture_case=application_ledger_sources status=PASS selected_oid_preserved
 
 for pass in 1 2; do
   fresh_log="$(mktemp)"
-  if run_forward "$FRESH_HOST" "$FRESH_PORT" omnibase_infra "$fresh_log"; then
-    fail "fresh real migration pass $pass crossed an unresolved domain"
+  run_forward "$FRESH_HOST" "$FRESH_PORT" omnibase_infra "$fresh_log" \
+    || { sed -n '1,240p' "$fresh_log"; fail "fresh real migration pass $pass failed"; }
+  grep -F 'Sentinel set. Migration gate will report HEALTHY.' "$fresh_log" >/dev/null \
+    || fail "fresh real migration pass $pass omitted terminal sentinel proof"
+  if [ "$pass" = "2" ]; then
+    grep -E 'Complete: 0 infra applied, [0-9]+ infra skipped; 0 node applied, [0-9]+ node skipped' "$fresh_log" >/dev/null \
+      || { tail -n 80 "$fresh_log"; fail "fresh real migration second pass was not idempotent"; }
   fi
-  grep -F "$LEDGER_BLOCKER" "$fresh_log" >/dev/null \
-    || { sed -n '1,240p' "$fresh_log"; fail "fresh blocker signature moved"; }
-  echo "fixture_case=fresh_install status=BLOCKED pass=$pass blocker=OMN-15423 signature=unresolved_domain"
+  echo "fixture_case=fresh_install status=PASS pass=$pass blocker=none"
 done
 
-[ "$(sql_value "$FRESH_HOST" omnidash_analytics "SELECT to_regclass('platform_catalog.schema_migrations') IS NULL")" = "t" ] \
-  || fail "fresh preflight blocker mutated the canonical application ledger"
-
-# The fixture executes the real legacy-upgrade entry point twice. OMN-15413 now
-# crosses the old filename-ledger parser boundary, but OMN-15423 still has no
-# authoritative domain for delegation_judge_verdict_events. That known,
-# unfenced ambiguity must stop in preflight before any ledger or DDL mutation.
+# The fixture executes the real legacy-upgrade entry point twice. The
+# OMN-15423 blocker ledger is now empty, so the real runner must complete and
+# then prove idempotence instead of stopping at the historical unresolved-domain
+# preflight hold.
 for pass in 1 2; do
   legacy_log="$(mktemp)"
-  if run_forward "$LEGACY_HOST" "$LEGACY_PORT" omnibase_infra "$legacy_log"; then
-    fail "legacy upgrade pass $pass crossed an unresolved domain"
+  run_forward "$LEGACY_HOST" "$LEGACY_PORT" omnibase_infra "$legacy_log" \
+    || { sed -n '1,240p' "$legacy_log"; fail "legacy upgrade pass $pass failed"; }
+  grep -F 'Sentinel set. Migration gate will report HEALTHY.' "$legacy_log" >/dev/null \
+    || fail "legacy upgrade pass $pass omitted terminal sentinel proof"
+  if [ "$pass" = "2" ]; then
+    grep -E 'Complete: 0 infra applied, [0-9]+ infra skipped; 0 node applied, [0-9]+ node skipped' "$legacy_log" >/dev/null \
+      || { tail -n 80 "$legacy_log"; fail "legacy upgrade second pass was not idempotent"; }
   fi
-  grep -F "$LEDGER_BLOCKER" "$legacy_log" >/dev/null \
-    || { sed -n '1,240p' "$legacy_log"; fail "legacy upgrade blocker signature moved"; }
-  echo "fixture_case=legacy_upgrade status=BLOCKED pass=$pass blocker=OMN-15423 signature=unresolved_domain"
+  echo "fixture_case=legacy_upgrade status=PASS pass=$pass blocker=none"
 done
 
-[ "$(sql_value "$LEGACY_HOST" omnidash_analytics "SELECT to_regclass('public.node_schema_migrations') IS NOT NULL")" = "t" ] \
-  || fail "legacy preflight blocker moved the selected ledger"
-[ "$(sql_value "$LEGACY_HOST" omnidash_analytics "SELECT to_regclass('platform_catalog.schema_migrations') IS NULL")" = "t" ] \
-  || fail "legacy preflight blocker created the canonical ledger"
-[ "$(sql_value "$LEGACY_HOST" omnidash_analytics "SELECT count(*) FROM public.schema_migrations")" = "23" ] \
-  || fail "legacy preflight blocker rewrote filename history"
+[ "$(sql_value "$FRESH_HOST" omnidash_analytics "SELECT to_regclass('platform_catalog.schema_migrations') IS NOT NULL")" = "t" ] \
+  || fail "fresh real migration omitted the canonical application ledger"
+[ "$(sql_value "$LEGACY_HOST" omnidash_analytics "SELECT to_regclass('platform_catalog.schema_migrations') IS NOT NULL")" = "t" ] \
+  || fail "legacy upgrade omitted the canonical application ledger"
 
 sh /opt/omn15422/cutover-proof/prove.sh
 
-echo "fixture_status=PASS_WITH_EXPECTED_BLOCKER blocker=OMN-15423"
+echo "fixture_status=PASS blocker=none"

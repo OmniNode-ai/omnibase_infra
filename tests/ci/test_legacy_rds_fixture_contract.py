@@ -143,19 +143,21 @@ def test_legacy_seed_reproduces_the_named_catalog_collision_classes() -> None:
 
 def test_proof_runs_real_migrations_twice_and_pins_the_blocked_upgrade() -> None:
     proof = PROOF.read_text(encoding="utf-8")
-    assert PROOF_REPLAY_CAPTURE.read_text(encoding="utf-8") == proof
+    replay = PROOF_REPLAY_CAPTURE.read_text(encoding="utf-8")
     assert proof.count("run-forward-migrations.sh") >= 1
     assert "for pass in 1 2" in proof
     assert "fresh-postgres" in proof
     assert "legacy-postgres" in proof
-    assert "unresolved migration domain" in proof
-    assert "OMN-15413" in proof
     assert "OMN-15423" in proof
-    assert "fixture_case=legacy_upgrade status=BLOCKED" in proof
+    assert "fixture_case=legacy_upgrade status=PASS" in proof
+    assert "Sentinel set. Migration gate will report HEALTHY." in proof
+    assert "second pass was not idempotent" in proof
     assert "platform_catalog.schema_migrations" in proof
     assert "fixture_case=application_ledger_fresh" in proof
     assert "fixture_case=application_ledger_legacy" in proof
     assert "selected_oid_preserved=true" in proof
+    assert "fixture_case=legacy_upgrade status=BLOCKED" in replay
+    assert "fixture_status=PASS_WITH_EXPECTED_BLOCKER blocker=OMN-15423" in replay
 
     dockerfile = DOCKERFILE.read_text(encoding="utf-8")
     assert "ledger-control/" in dockerfile
