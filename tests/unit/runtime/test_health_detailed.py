@@ -635,11 +635,16 @@ class TestRuntimeWiringComponent:
 
     @pytest.mark.asyncio
     async def test_degraded_wiring_under_a_green_endpoint(self) -> None:
-        """The false-green case, verbatim: /health 200 with blockers pending.
+        """OMN-15642: the false-green case this component ORIGINALLY only
 
-        The endpoint stays 200 — a runtime is designed to stay live with
-        NOT_READY contracts (OMN-13237) — but the component says otherwise, so
-        the green status can no longer be read as "everything attached".
+        half-fixed. Until OMN-15642, ``data["status"]`` stayed "healthy" here
+        — only the nested ``components.runtime_wiring`` said otherwise, which
+        nothing upstream (including deploy-onex-staging's own health-gate
+        steps) reads. ``fold_attach_readiness_into_status`` now folds the
+        aggregate into the top-level ``status`` too, the same way OMN-15217
+        already folds the runtime-health-monitor verdict. The HTTP status
+        code stays 200 — a runtime is designed to stay live with NOT_READY
+        contracts (OMN-13237) — but `status` itself is now honest.
         """
         server = ServiceHealth(runtime=_healthy_runtime(["db", "http"]), version="1.0")
         server.attach_readiness(_readiness(attached=3, not_ready=2))
@@ -648,7 +653,7 @@ class TestRuntimeWiringComponent:
         data = json.loads(response.text)
 
         assert response.status == 200
-        assert data["status"] == "healthy"
+        assert data["status"] == "degraded"
         assert data["components"]["runtime_wiring"]["status"] == "degraded"
         assert (
             "2 contract(s) did not attach"

@@ -41,6 +41,9 @@ from typing import TYPE_CHECKING, Literal, cast
 from omnibase_core.types import JsonType
 
 if TYPE_CHECKING:
+    from omnibase_infra.event_bus.enum_runtime_readiness_state import (
+        EnumRuntimeReadinessState,
+    )
     from omnibase_infra.models.health.model_runtime_health_check_event import (
         ModelRuntimeHealthCheckEvent,
     )
@@ -138,8 +141,65 @@ def fold_runtime_verdict_into_status(
     return payload_status
 
 
+def fold_attach_readiness_into_status(
+    payload_status: Literal["healthy", "degraded", "unhealthy"],
+    readiness_state: EnumRuntimeReadinessState | None,
+) -> Literal["healthy", "degraded", "unhealthy"]:
+    """Degrade the payload status when a boot-wired consumer failed to attach.
+
+    OMN-15642. Before this, ``ModelRuntimeAttachReadiness`` (OMN-15512) reached
+    only ``details.components.runtime_wiring`` — a nested detail nothing
+    upstream reads — while the top-level ``status`` field stayed ``"healthy"``
+    with HTTP 200. That is the exact class of gap OMN-15217 already closed for
+    the ``ServiceRuntimeHealthMonitor`` verdict (see the module docstring): a
+    runtime can boot fully, with EVERY rollout/digest/dashboard/staleness gate
+    green, while one Kafka consumer contract silently never attaches its
+    subscription (``_require_contract_dispatcher_scope`` et al. raise inside
+    ``subscribe_wired_contract_topics``, caught per-contract and downgraded to
+    a non-fatal ``ModelContractAttachResult`` — see
+    ``omnibase_infra.event_bus.model_runtime_attach_readiness``). A projection
+    or reducer that stops consuming produces zero new rows for whatever it
+    writes, invisible to every liveness/rollout check that never queries the
+    wiring detail. OMN-15642 observed exactly this shape live on onex-dev:
+    steps 30-36 of ``deploy-onex-staging`` (rollout, digest triple-match,
+    dashboard health, post-deploy verification, staleness) all passed while a
+    correlation-keyed projection and the unified system-event stream stayed
+    silently empty, surfacing only ~60s later at the terminal business-proof
+    gate. Folding the aggregate into ``status`` here means the SAME class of
+    silent drop is visible at ``/health`` immediately, not only after a
+    downstream consumer happens to probe by correlation_id.
+
+    Args:
+        payload_status: Status derived from ``RuntimeHostProcess.health_check()``,
+            already folded with :func:`fold_runtime_verdict_into_status`.
+        readiness_state: The boot attach-readiness aggregate's tri-state, or
+            ``None`` before the kernel has attached it (status unchanged --
+            absence is not evidence of degradation, matching
+            :func:`fold_runtime_verdict_into_status`'s ``None`` handling).
+
+    Returns:
+        The worse of the two statuses. Deliberately does NOT change the HTTP
+        status code -- see the module docstring's "Deliberate non-change".
+    """
+    if payload_status == "unhealthy" or readiness_state is None:
+        return payload_status
+    # Local import: EnumRuntimeReadinessState is TYPE_CHECKING-only above so
+    # this module carries no runtime import-time dependency on the event_bus
+    # package for callers that never pass a readiness_state.
+    from omnibase_infra.event_bus.enum_runtime_readiness_state import (
+        EnumRuntimeReadinessState as _EnumRuntimeReadinessState,
+    )
+
+    if readiness_state is _EnumRuntimeReadinessState.FAILED:
+        return "unhealthy"
+    if readiness_state is _EnumRuntimeReadinessState.DEGRADED:
+        return "degraded"
+    return payload_status
+
+
 __all__: list[str] = [
     "RUNTIME_HEALTH_DETAIL_KEY",
     "build_runtime_health_block",
+    "fold_attach_readiness_into_status",
     "fold_runtime_verdict_into_status",
 ]
