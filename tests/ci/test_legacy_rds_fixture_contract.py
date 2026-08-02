@@ -38,6 +38,13 @@ CUTOVER_BOOTSTRAP = (
     / "bootstrap.sql"
 )
 CI_WORKFLOW = REPO_ROOT / ".github" / "workflows" / "legacy-rds-fixture-proof.yml"
+ROOT_COST_MIGRATION = (
+    REPO_ROOT
+    / "docker"
+    / "migrations"
+    / "forward"
+    / "031_create_llm_call_metrics_and_cost_aggregates.sql"
+)
 
 REQUIRED_CASES = {
     "mapping_ambiguity",
@@ -156,6 +163,15 @@ def test_proof_runs_real_migrations_twice_and_pins_the_blocked_upgrade() -> None
     assert "fixture_case=application_ledger_fresh" in proof
     assert "fixture_case=application_ledger_legacy" in proof
     assert "selected_oid_preserved=true" in proof
+    assert "estimated_coverage_pct" in ROOT_COST_MIGRATION.read_text(encoding="utf-8")
+    assert (
+        "legacy shape reconciliation: llm_cost_aggregates"
+        in ROOT_COST_MIGRATION.read_text(encoding="utf-8")
+    )
+    assert (
+        "ALTER TABLE llm_cost_aggregates ADD COLUMN IF NOT EXISTS estimated_coverage_pct"
+        in ROOT_COST_MIGRATION.read_text(encoding="utf-8")
+    )
     assert "fixture_case=legacy_upgrade status=BLOCKED" in replay
     assert "fixture_status=PASS_WITH_EXPECTED_BLOCKER blocker=OMN-15423" in replay
 

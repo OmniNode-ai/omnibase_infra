@@ -315,9 +315,14 @@ class ConfigObserved(Exception):
 
 
 def stop_after_config(_parser, *_args, **_kwargs):
-    caller = inspect.currentframe().f_back
-    assert caller is not None
-    module_globals = caller.f_globals
+    frame = inspect.currentframe()
+    module_globals = None
+    while frame is not None:
+        if frame.f_globals.get("__file__") == os.environ["OMN15572_MONITOR_SCRIPT"]:
+            module_globals = frame.f_globals
+            break
+        frame = frame.f_back
+    assert module_globals is not None
     assert_monitor_config(module_globals)
     raise ConfigObserved
 
