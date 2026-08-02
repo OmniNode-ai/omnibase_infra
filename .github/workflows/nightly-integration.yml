@@ -207,18 +207,33 @@ jobs:
         run: |
           set -euo pipefail
           runner_container_id=""
-          mapfile -t runner_candidates < <(
+          # NB: intentionally NOT `mapfile`/`readarray` -- those are bash 4+
+          # builtins. This step's shell is invoked directly by pytest in
+          # tests/unit/docker/test_nightly_e2e_runner_connectivity.py via
+          # `bash -c`, and the system `/bin/bash` on macOS gate hosts is
+          # 3.2.57 (Apple ships no newer bash for licensing reasons). A
+          # `while read` loop reading from the same process substitution is
+          # bash-3-compatible and behaves identically on the Linux runner.
+          runner_candidates=()
+          while IFS= read -r candidate; do
+            runner_candidates+=("$candidate")
+          done < <(
             {
               grep -Eo '[0-9a-f]{64}' /proc/self/cgroup 2>/dev/null || true
               hostname
             } | awk 'NF && !seen[$0]++'
           )
-          for candidate in "${runner_candidates[@]}"; do
-            if docker inspect --type container "$candidate" >/dev/null 2>&1; then
-              runner_container_id="$(docker inspect --type container --format '{{.Id}}' "$candidate")"
-              break
-            fi
-          done
+          # bash 3.2 (unlike 4.4+) raises "unbound variable" under `set -u`
+          # when expanding "${arr[@]}" on a zero-length array, even one that
+          # was explicitly declared empty -- guard the count first.
+          if [[ ${#runner_candidates[@]} -gt 0 ]]; then
+            for candidate in "${runner_candidates[@]}"; do
+              if docker inspect --type container "$candidate" >/dev/null 2>&1; then
+                runner_container_id="$(docker inspect --type container --format '{{.Id}}' "$candidate")"
+                break
+              fi
+            done
+          fi
 
           e2e_advertise_host="localhost"
           if [[ -n "$runner_container_id" ]]; then
@@ -349,19 +364,30 @@ jobs:
             fi
           fi
 
+          # resolved_host is the POSTGRES host; resolved_kafka_host is the
+          # REDPANDA host. In the localhost/gateway branches these are always
+          # the same value (one Docker-published endpoint, disambiguated only
+          # by port). The Docker DNS branch is the one case where postgres
+          # and redpanda are DIFFERENT container names on the compose
+          # network -- a single shared variable there previously cross-wired
+          # REDPANDA_ADVERTISE_HOST/OMNI_INFRA_HOST to the *postgres*
+          # container name.
           resolved_host=""
+          resolved_kafka_host=""
           resolved_pg_port=""
           if $runner_on_compose_network \
             && can_connect "${OMNIBASE_INFRA_POSTGRES_CONTAINER}" 5432 \
             && can_connect "${OMNIBASE_INFRA_REDPANDA_CONTAINER}" 9092; then
             echo "e2e stack reachable by generated container names (Docker DNS)"
             resolved_host="${OMNIBASE_INFRA_POSTGRES_CONTAINER}"
+            resolved_kafka_host="${OMNIBASE_INFRA_REDPANDA_CONTAINER}"
             resolved_pg_port="5432"
             kafka_host_port="${OMNIBASE_INFRA_REDPANDA_CONTAINER}:9092"
             pg_host_port="${OMNIBASE_INFRA_POSTGRES_CONTAINER}:5432"
           elif can_connect localhost "${POSTGRES_PORT}" && can_connect localhost "${KAFKA_PORT}"; then
             echo "e2e stack reachable by host-published ports (localhost)"
             resolved_host="localhost"
+            resolved_kafka_host="localhost"
             resolved_pg_port="${POSTGRES_PORT}"
             kafka_host_port="localhost:${KAFKA_PORT}"
             pg_host_port="localhost:${POSTGRES_PORT}"
@@ -370,6 +396,7 @@ jobs:
             && can_connect "${E2E_REDPANDA_ADVERTISE_HOST}" "${KAFKA_PORT}"; then
             echo "e2e stack reachable by Docker host gateway (${E2E_REDPANDA_ADVERTISE_HOST})"
             resolved_host="${E2E_REDPANDA_ADVERTISE_HOST}"
+            resolved_kafka_host="${E2E_REDPANDA_ADVERTISE_HOST}"
             resolved_pg_port="${POSTGRES_PORT}"
             kafka_host_port="${E2E_REDPANDA_ADVERTISE_HOST}:${KAFKA_PORT}"
             pg_host_port="${E2E_REDPANDA_ADVERTISE_HOST}:${POSTGRES_PORT}"
@@ -379,7 +406,7 @@ jobs:
             exit 1
           fi
 
-          if [[ "$resolved_host" == "192.168.86.201" ]]; then
+          if [[ "$resolved_host" == "192.168.86.201" || "$resolved_kafka_host" == "192.168.86.201" ]]; then
             echo "::error::resolved e2e connectivity host is the live .201 instance; refusing"
             exit 1
           fi
@@ -389,9 +416,9 @@ jobs:
             echo "OMNIBASE_INFRA_DB_URL=postgresql://postgres:${INTEGRATION_POSTGRES_PASSWORD}@${pg_host_port}/omnibase_infra"
             echo "INTEGRATION_POSTGRES_HOST=${resolved_host}"
             echo "INTEGRATION_POSTGRES_PORT=${resolved_pg_port}"
-            echo "OMNI_INFRA_HOST=${resolved_host}"
+            echo "OMNI_INFRA_HOST=${resolved_kafka_host}"
             echo "POSTGRES_HOST=${resolved_host}"
-            echo "REDPANDA_ADVERTISE_HOST=${resolved_host}"
+            echo "REDPANDA_ADVERTISE_HOST=${resolved_kafka_host}"
           } >> "$GITHUB_ENV"
 
       - name: Run integration tests
@@ -446,6 +473,20 @@ jobs:
                   f"(censused lanes: {sorted(protected)})"
               )
           PY
+
+          # OMN-15567: "Resolve reachable e2e connectivity host" attaches the
+          # long-lived self-hosted runner container to this run's network
+          # (`docker network connect`) so it can reach containers by Docker
+          # DNS name. Nothing disconnected it before this fix -- every run
+          # leaked one network attachment (and the network delete below
+          # then failed with "Resource is still in use", silently, since
+          # `docker compose down` does not propagate that as a nonzero exit
+          # for an already-removed set of containers). Disconnect first so
+          # the network can actually be deleted.
+          if [[ -n "${OMNIBASE_INFRA_RUNNER_CONTAINER_ID:-}" && -n "${OMNIBASE_INFRA_NETWORK:-}" ]]; then
+            docker network disconnect "${OMNIBASE_INFRA_NETWORK}" "${OMNIBASE_INFRA_RUNNER_CONTAINER_ID}" 2>/dev/null || true
+          fi
+
           docker compose -p "$project" -f docker/docker-compose.e2e.yml down -v --remove-orphans
 
       - name: Upload test results

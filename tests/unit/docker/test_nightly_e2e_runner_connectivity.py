@@ -116,9 +116,19 @@ def _write_stub(path: Path, body: str) -> None:
 
 
 def _run_step(
-    step_name: str, tmp_path: Path, extra_env: dict[str, str], stubs: dict[str, str]
+    step_name: str,
+    tmp_path: Path,
+    extra_env: dict[str, str],
+    stubs: dict[str, str],
+    bash_bin: str = "bash",
 ) -> tuple[subprocess.CompletedProcess[str], Path]:
-    """Execute a workflow step's `run:` shell with stub binaries on PATH."""
+    """Execute a workflow step's `run:` shell with stub binaries on PATH.
+
+    `bash_bin` defaults to whatever `bash` resolves to on PATH; pass an
+    absolute path (e.g. "/bin/bash") to pin the exact interpreter instead of
+    relying on PATH order -- load-bearing for proving portability across
+    bash versions rather than whichever one happens to resolve first.
+    """
     fake_bin = tmp_path / "bin"
     fake_bin.mkdir()
     for stub_name, body in stubs.items():
@@ -135,7 +145,7 @@ def _run_step(
         }
     )
     result = subprocess.run(
-        ["bash", "-c", _step(step_name)["run"]],
+        [bash_bin, "-c", _step(step_name)["run"]],
         cwd=REPO_ROOT,
         env=env,
         capture_output=True,
@@ -167,6 +177,35 @@ def test_detect_topology_defaults_to_localhost_off_a_bare_runner(
         tmp_path,
         extra_env={},
         stubs={"docker": _DOCKER_INSPECT_ALWAYS_FAILS},
+    )
+    assert result.returncode == 0, result.stdout + result.stderr
+    values = _read_github_env(github_env)
+    assert values["E2E_REDPANDA_ADVERTISE_HOST"] == "localhost"
+    assert values["OMNIBASE_INFRA_RUNNER_CONTAINER_ID"] == ""
+
+
+@pytest.mark.skipif(
+    not Path("/bin/bash").exists(), reason="no /bin/bash on this platform"
+)
+def test_detect_topology_is_compatible_with_bin_bash_specifically(
+    tmp_path: Path,
+) -> None:
+    """Regression: `mapfile`/`readarray` are bash 4+ builtins.
+
+    macOS ships bash 3.2.57 at /bin/bash (Apple stopped shipping newer bash
+    for GPLv3 licensing reasons) and does not upgrade it. The step's `run:`
+    shell must not depend on a bash-4+-only builtin, or it is permanently
+    RED on any macOS gate host regardless of what a newer Homebrew `bash`
+    earlier on PATH would paper over. This pins /bin/bash explicitly so a
+    PATH that happens to resolve a newer bash first cannot hide a
+    regression back to a bash-4-only construct.
+    """
+    result, github_env = _run_step(
+        "Detect runner network topology",
+        tmp_path,
+        extra_env={},
+        stubs={"docker": _DOCKER_INSPECT_ALWAYS_FAILS},
+        bash_bin="/bin/bash",
     )
     assert result.returncode == 0, result.stdout + result.stderr
     values = _read_github_env(github_env)
@@ -281,6 +320,60 @@ def test_resolve_connectivity_falls_back_to_docker_host_gateway(
     )
 
 
+def test_resolve_connectivity_uses_container_specific_hosts_for_docker_dns(
+    tmp_path: Path,
+) -> None:
+    """Docker DNS branch must use EACH container's own name -- not cross-wire postgres->kafka.
+
+    Regression: the Docker DNS branch (case 1) is the ONLY branch where
+    postgres and redpanda are reachable at DIFFERENT hostnames (their own
+    generated container names) rather than one shared host disambiguated
+    only by port. A single `resolved_host` variable previously fed BOTH
+    `INTEGRATION_POSTGRES_HOST` and `REDPANDA_ADVERTISE_HOST`/`OMNI_INFRA_HOST`
+    from the *postgres* container's name -- proven live on run 30733477609,
+    where `REDPANDA_ADVERTISE_HOST` and `OMNI_INFRA_HOST` were both set to
+    the postgres container name instead of the redpanda one. This is also
+    the only test in this module that drives `runner_on_compose_network=true`
+    (via `OMNIBASE_INFRA_RUNNER_CONTAINER_ID` + stubbed `docker network
+    connect`/`docker inspect`) -- every other resolve-connectivity test
+    exercises only the localhost/gateway branches.
+    """
+    postgres_container = _BASE_RESOLVE_ENV["OMNIBASE_INFRA_POSTGRES_CONTAINER"]
+    redpanda_container = _BASE_RESOLVE_ENV["OMNIBASE_INFRA_REDPANDA_CONTAINER"]
+    docker_dns_stub = (
+        'case "$1" in\n'
+        "  network) exit 0 ;;\n"
+        '  inspect) printf \'{"%s":{}}\' "$OMNIBASE_INFRA_NETWORK" ;;\n'
+        "  *) exit 1 ;;\n"
+        "esac\n"
+    )
+    result, github_env = _run_step(
+        "Resolve reachable e2e connectivity host",
+        tmp_path,
+        extra_env={
+            **_BASE_RESOLVE_ENV,
+            "E2E_REDPANDA_ADVERTISE_HOST": "localhost",
+            "OMNIBASE_INFRA_RUNNER_CONTAINER_ID": "fake-runner-container-id",
+        },
+        stubs={
+            "docker": docker_dns_stub,
+            "python3": _python3_can_connect_stub(
+                f"{postgres_container}:5432 {redpanda_container}:9092"
+            ),
+        },
+    )
+    assert result.returncode == 0, result.stdout + result.stderr
+    values = _read_github_env(github_env)
+    assert values["KAFKA_BOOTSTRAP_SERVERS"] == f"{redpanda_container}:9092"
+    assert values["INTEGRATION_POSTGRES_HOST"] == postgres_container
+    assert values["POSTGRES_HOST"] == postgres_container
+    assert values["OMNI_INFRA_HOST"] == redpanda_container
+    assert values["REDPANDA_ADVERTISE_HOST"] == redpanda_container
+    assert values["OMNIBASE_INFRA_DB_URL"] == (
+        f"postgresql://postgres:test-password@{postgres_container}:5432/omnibase_infra"
+    )
+
+
 def test_resolve_connectivity_refuses_to_resolve_to_live_201_host(
     tmp_path: Path,
 ) -> None:
@@ -301,6 +394,133 @@ def test_resolve_connectivity_refuses_to_resolve_to_live_201_host(
     values = _read_github_env(github_env)
     assert live_host not in values.get("KAFKA_BOOTSTRAP_SERVERS", "")
     assert live_host not in values.get("OMNIBASE_INFRA_DB_URL", "")
+
+
+# --- "Tear down e2e stack" ---------------------------------------------------
+
+
+def _run_teardown_step(
+    tmp_path: Path, extra_env: dict[str, str], docker_body: str
+) -> tuple[subprocess.CompletedProcess[str], list[str]]:
+    """Execute the teardown shell with a call-logging docker stub and a
+    no-op uv stub (mirrors test_e2e_compose_lane_isolation.py's
+    `_run_teardown_with_stubs` pattern for the same step)."""
+    fake_bin = tmp_path / "bin"
+    fake_bin.mkdir()
+    call_log = tmp_path / "docker-calls.log"
+
+    uv_stub = fake_bin / "uv"
+    uv_stub.write_text(
+        "#!/bin/sh\n"
+        'if [ "${1:-}" != run ] || [ "${2:-}" != python ]; then exit 97; fi\n'
+        "shift 2\n"
+        'exec "$TEST_PYTHON" "$@"\n',
+        encoding="utf-8",
+    )
+    uv_stub.chmod(0o700)
+    _write_stub(fake_bin / "docker", docker_body)
+
+    env = (
+        os.environ
+        | extra_env
+        | {
+            "DOCKER_CALL_LOG": str(call_log),
+            "PATH": f"{fake_bin}{os.pathsep}{os.environ['PATH']}",
+            "TEST_PYTHON": sys.executable,
+        }
+    )
+    result = subprocess.run(
+        ["bash", "-c", _step("Tear down e2e stack")["run"]],
+        cwd=REPO_ROOT,
+        env=env,
+        capture_output=True,
+        text=True,
+        check=False,
+        timeout=30,
+    )
+    calls = (
+        call_log.read_text(encoding="utf-8").splitlines() if call_log.exists() else []
+    )
+    return result, calls
+
+
+_DOCKER_CALL_LOGGING_STUB = 'printf \'%s\\n\' "$*" >> "$DOCKER_CALL_LOG"\nexit 0\n'
+
+# The canonical derive recipe is `echo "$e2e_id" | tr ... | tr -cs 'a-z0-9_-' '-'`
+# (see "Derive isolated e2e namespace" / test_nightly_teardown_downs_exact_run_project_once
+# in test_e2e_compose_lane_isolation.py) -- echo's trailing newline gets
+# squeezed by `tr -cs` into a trailing hyphen, so the expected project carries
+# one. Teardown rejects any project that doesn't reproduce this exactly.
+_TEARDOWN_PROJECT = "omnibase-infra-e2e-271828-1-"
+_TEARDOWN_BASE_ENV = {
+    "GITHUB_RUN_ID": "271828",
+    "GITHUB_RUN_ATTEMPT": "1",
+    "OMNIBASE_INFRA_COMPOSE_PROJECT": _TEARDOWN_PROJECT,
+    "OMNIBASE_INFRA_NETWORK": f"{_TEARDOWN_PROJECT}-network",
+}
+
+
+def test_teardown_disconnects_runner_container_before_compose_down(
+    tmp_path: Path,
+) -> None:
+    """Regression: nothing ever disconnected the runner from the e2e network.
+
+    "Resolve reachable e2e connectivity host" attaches the long-lived
+    self-hosted runner container to this run's compose network via `docker
+    network connect` and never disconnects it -- proven live: run
+    30733477609's teardown logged `Network
+    omnibase-infra-e2e-30733477609-1--network Resource is still in use` and
+    did not fail (docker compose down does not propagate that as a nonzero
+    exit). Every nightly run leaked one network attachment on the shared
+    self-hosted host. The disconnect must run BEFORE `docker compose down`,
+    which is what actually deletes the network.
+    """
+    result, calls = _run_teardown_step(
+        tmp_path,
+        extra_env={
+            **_TEARDOWN_BASE_ENV,
+            "OMNIBASE_INFRA_RUNNER_CONTAINER_ID": "fake-runner-container-id",
+        },
+        docker_body=_DOCKER_CALL_LOGGING_STUB,
+    )
+    assert result.returncode == 0, result.stdout + result.stderr
+    disconnect_call = (
+        f"network disconnect {_TEARDOWN_BASE_ENV['OMNIBASE_INFRA_NETWORK']} "
+        "fake-runner-container-id"
+    )
+    down_call = (
+        f"compose -p {_TEARDOWN_PROJECT} -f docker/docker-compose.e2e.yml "
+        "down -v --remove-orphans"
+    )
+    assert disconnect_call in calls, calls
+    assert down_call in calls, calls
+    assert calls.index(disconnect_call) < calls.index(down_call), (
+        "the runner must be disconnected before the network-owning compose "
+        f"project is torn down: {calls}"
+    )
+
+
+def test_teardown_skips_disconnect_when_runner_was_never_attached(
+    tmp_path: Path,
+) -> None:
+    """A bare (non-containerized) runner never called `docker network connect`.
+
+    Teardown must not invoke `docker network disconnect` in that case --
+    there is nothing to disconnect, and OMNIBASE_INFRA_RUNNER_CONTAINER_ID
+    is empty exactly like "Detect runner network topology" leaves it for a
+    bare runner (see test_detect_topology_defaults_to_localhost_off_a_bare_runner).
+    """
+    result, calls = _run_teardown_step(
+        tmp_path,
+        extra_env={**_TEARDOWN_BASE_ENV, "OMNIBASE_INFRA_RUNNER_CONTAINER_ID": ""},
+        docker_body=_DOCKER_CALL_LOGGING_STUB,
+    )
+    assert result.returncode == 0, result.stdout + result.stderr
+    assert not any(call.startswith("network disconnect") for call in calls), calls
+    assert calls == [
+        f"compose -p {_TEARDOWN_PROJECT} -f docker/docker-compose.e2e.yml "
+        "down -v --remove-orphans"
+    ]
 
 
 # ---------------------------------------------------------------------------
