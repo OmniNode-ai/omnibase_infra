@@ -61,9 +61,11 @@ async def kafka_producer() -> AsyncGenerator[AIOKafkaProducer, None]:
     producer = AIOKafkaProducer(
         bootstrap_servers=BOOTSTRAP_SERVERS,
     )
-    await producer.start()
-    yield producer
-    await producer.stop()
+    try:
+        await producer.start()
+        yield producer
+    finally:
+        await producer.stop()
 
 
 @pytest.fixture
@@ -78,9 +80,11 @@ async def kafka_consumer() -> AsyncGenerator[AIOKafkaConsumer, None]:
         enable_auto_commit=True,
         consumer_timeout_ms=5000,
     )
-    await consumer.start()
-    yield consumer
-    await consumer.stop()
+    try:
+        await consumer.start()
+        yield consumer
+    finally:
+        await consumer.stop()
 
 
 class _EnableBridgeCtx:
