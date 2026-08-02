@@ -350,6 +350,43 @@ def test_layered_render_isolates_every_judge_service_to_judge_network() -> None:
 
 
 @pytest.mark.integration
+def test_judge_lane_delegation_routing_tiers_path_binding() -> None:
+    """OMN-15645: DELEGATION_ROUTING_TIERS_PATH must reach the judge lane's
+    runtime services via the layered (deployed) shape, to a fixed,
+    non-version-embedded in-image path.
+
+    The judge lane's own ``x-judge-runtime-env`` anchor does not declare this
+    key, so a *standalone* judge.yml render omits it — only the layered
+    base+overlay render (``deploy-runtime.sh``'s actual deployed shape) proves
+    the base file's ``x-runtime-env`` anchor binding survives into this lane.
+    See ``test_dev_lane_delegation_routing_tiers_path_binding`` in
+    ``test_dev_runtime_compose_render.py`` for the full seam citation.
+    """
+    rendered_config = _layered_compose_config_json()
+    services = rendered_config["services"]
+
+    expected_path = "/app/config/delegation/routing_tiers.yaml"
+    for service_name in ("omninode-runtime", "runtime-effects"):
+        environment = services[service_name]["environment"]
+        assert environment.get("DELEGATION_ROUTING_TIERS_PATH") == expected_path, (
+            f"Service '{service_name}' must bind DELEGATION_ROUTING_TIERS_PATH="
+            f"{expected_path!r}; got "
+            f"{environment.get('DELEGATION_ROUTING_TIERS_PATH')!r}"
+        )
+
+    # NOTE: omninode-contract-resolver is judge-profile-gated OUT_OF_SCOPE
+    # (never rendered under --profile judge), so only projection-api is
+    # checked here — see EXPECTED_RENDERED_SERVICES / OUT_OF_SCOPE_SERVICES
+    # above.
+    environment = services["projection-api"]["environment"]
+    assert environment.get("DELEGATION_ROUTING_TIERS_PATH", "") == "", (
+        "Service 'projection-api' deliberately has no delegation-routing "
+        "surface and must not bind DELEGATION_ROUTING_TIERS_PATH; got "
+        f"{environment.get('DELEGATION_ROUTING_TIERS_PATH')!r}"
+    )
+
+
+@pytest.mark.integration
 def test_judge_secret_refs_are_rendered_from_runtime_policy() -> None:
     rendered_config = _compose_config_json()
     services = rendered_config["services"]

@@ -256,6 +256,57 @@ def test_dev_lane_renders_one_runtime_worker_replica() -> None:
 
 
 @pytest.mark.integration
+def test_dev_lane_delegation_routing_tiers_path_binding() -> None:
+    """OMN-15645: DELEGATION_ROUTING_TIERS_PATH must be bound on every runtime
+    service in the dev lane, to a fixed, non-version-embedded in-image path.
+
+    omnimarket#2000 (OMN-15628) removed the packaged-default fallback for this
+    key in the delegation routing reducer's ``_get_config()`` singleton
+    (``resolve_required_path_config("DELEGATION_ROUTING_TIERS_PATH")`` —
+    omnimarket ``handler_delegation_routing.py:392-393``); an unbound key now
+    raises ``ProtocolConfigurationError`` at first config read instead of
+    silently defaulting. The bound value must never be a literal
+    ``python3.X`` site-packages path (a base-image Python version bump would
+    silently invalidate it) — ``docker/Dockerfile.runtime`` bakes the packaged
+    omnimarket ``routing_tiers.yaml`` into this exact fixed location at build
+    time via a glob-derived COPY, so the compose-declared value here is always
+    backed by a real file regardless of the interpreter minor version.
+    """
+    env = _render_env(DEV_REDPANDA_ADVERTISE_HOST=_OFF_HOST_ADVERTISE_HOST)
+
+    result = _run_compose_config(env, profile="runtime")
+
+    assert result.returncode == 0, f"docker compose config failed:\n{result.stderr}"
+    rendered = yaml.safe_load(result.stdout)
+    services = rendered["services"]
+
+    expected_path = "/app/config/delegation/routing_tiers.yaml"
+    for service_name in ("omninode-runtime", "runtime-effects", "runtime-worker"):
+        environment = services[service_name]["environment"]
+        assert environment.get("DELEGATION_ROUTING_TIERS_PATH") == expected_path, (
+            f"Service '{service_name}' must bind DELEGATION_ROUTING_TIERS_PATH="
+            f"{expected_path!r}; got "
+            f"{environment.get('DELEGATION_ROUTING_TIERS_PATH')!r}"
+        )
+        assert "python3." not in environment.get("DELEGATION_ROUTING_TIERS_PATH", ""), (
+            f"Service '{service_name}' binds a version-embedded python3.X literal "
+            "for DELEGATION_ROUTING_TIERS_PATH — the exact trap OMN-15628's "
+            "runtime self-heal exists to correct for a *stale* pin; the compose "
+            "default must be a stable, version-independent path instead."
+        )
+
+    # Services with no delegation-routing surface deliberately opt out (mirrors
+    # the BIFROST_CONTRACT_PATH opt-out pattern for the same two services).
+    for service_name in ("projection-api", "omninode-contract-resolver"):
+        environment = services[service_name]["environment"]
+        assert environment.get("DELEGATION_ROUTING_TIERS_PATH", "") == "", (
+            f"Service '{service_name}' deliberately has no delegation-routing "
+            "surface and must not bind DELEGATION_ROUTING_TIERS_PATH; got "
+            f"{environment.get('DELEGATION_ROUTING_TIERS_PATH')!r}"
+        )
+
+
+@pytest.mark.integration
 def test_dev_worker_replicas_fails_closed_when_policy_value_unset(
     tmp_path: Path,
 ) -> None:

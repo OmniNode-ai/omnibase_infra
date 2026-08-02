@@ -143,3 +143,40 @@ def test_prod_redpanda_advertise_host_is_prod_specific() -> None:
     assert "192.168.86.201:49092" in redpanda_command
     assert "192.168.86.201:48082" in redpanda_command
     assert "100.109.203.94:49092" not in redpanda_command
+
+
+@pytest.mark.integration
+def test_prod_delegation_routing_tiers_path_binding() -> None:
+    """OMN-15645: DELEGATION_ROUTING_TIERS_PATH must be bound on every runtime
+    service in the prod lane, to a fixed, non-version-embedded in-image path.
+
+    Config-level readback only, per the OMN-15645 prod boundary — this proves
+    the compose-declared binding without recreating any live prod container.
+    See ``test_dev_lane_delegation_routing_tiers_path_binding`` in
+    ``test_dev_runtime_compose_render.py`` for the full seam citation.
+    """
+    rendered_config = _compose_config_json()
+    services = rendered_config["services"]
+
+    expected_path = "/app/config/delegation/routing_tiers.yaml"
+    for service_name in ("omninode-runtime", "runtime-effects", "runtime-worker"):
+        environment = services[service_name]["environment"]
+        assert environment.get("DELEGATION_ROUTING_TIERS_PATH") == expected_path, (
+            f"Service '{service_name}' must bind DELEGATION_ROUTING_TIERS_PATH="
+            f"{expected_path!r}; got "
+            f"{environment.get('DELEGATION_ROUTING_TIERS_PATH')!r}"
+        )
+
+    # NOTE: omninode-contract-resolver is not rendered under --profile runtime
+    # for this lane (observed live via docker compose config, 2026-08-02);
+    # only projection-api is checked unconditionally.
+    for service_name in ("projection-api", "omninode-contract-resolver"):
+        service = services.get(service_name)
+        if service is None:
+            continue
+        environment = service["environment"]
+        assert environment.get("DELEGATION_ROUTING_TIERS_PATH", "") == "", (
+            f"Service '{service_name}' deliberately has no delegation-routing "
+            "surface and must not bind DELEGATION_ROUTING_TIERS_PATH; got "
+            f"{environment.get('DELEGATION_ROUTING_TIERS_PATH')!r}"
+        )

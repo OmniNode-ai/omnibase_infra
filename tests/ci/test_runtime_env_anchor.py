@@ -66,6 +66,19 @@ REQUIRED_RUNTIME_KEYS: frozenset[str] = frozenset(
         "LLM_CLOUD_ENDPOINT_HOST_ALLOWLIST",
         "VALKEY_HOST",
         "VALKEY_PORT",
+        # OMN-15645: omnimarket#2000 (OMN-15628) removed the packaged-default
+        # fallback for this key in the delegation routing reducer
+        # (resolve_required_path_config("DELEGATION_ROUTING_TIERS_PATH"),
+        # omnimarket src/omnimarket/nodes/node_delegation_routing_reducer/
+        # handlers/handler_delegation_routing.py:392-393). An unbound key now
+        # raises ProtocolConfigurationError at first config read instead of
+        # silently defaulting — absent from the anchor, this key is a boot
+        # landmine, not a missing-optional-feature. This entry is the
+        # code-declared-required-key -> compose-anchor-coverage check AC4 of
+        # OMN-15645 asks for, scoped to this one key (registry-based, not a
+        # generic code scanner — see the OMN-15645 PR body for the deferral of
+        # the fully generic mechanism to OMN-14951).
+        "DELEGATION_ROUTING_TIERS_PATH",
     }
 )
 

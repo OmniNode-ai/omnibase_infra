@@ -194,6 +194,12 @@ CONFIGMAP_DEBT_KEYS: frozenset[str] = frozenset(
         "BIFROST_CONTRACT_PATH",
         "BIFROST_SOURCE_CONTRACT_PATH",
         "BIFROST_VERIFY_ENDPOINTS",
+        # OMN-15645: newly bound on the .201 compose lanes (omnimarket#2000 /
+        # OMN-15628 fail-fast). k8s ConfigMap parity is OMN-15628's own
+        # k8s-manifest-scoped acceptance criterion (In Progress) in the
+        # sibling omninode_infra checkout, not this ticket's -- OMN-15645's
+        # scope is the .201 compose lanes only.
+        "DELEGATION_ROUTING_TIERS_PATH",
         # OpenTelemetry — opt-in observability (empty = disabled)
         "OTEL_EXPORTER_OTLP_ENDPOINT",
         "OTEL_SERVICE_NAME",
