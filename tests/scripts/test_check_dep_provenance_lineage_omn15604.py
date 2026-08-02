@@ -297,21 +297,24 @@ def test_undetermined_when_resolver_cannot_resolve(mod, tmp_path: Path) -> None:
 
 
 # ---------------------------------------------------------------------------
-# _declared_versions / _repo_from_git_url unit coverage
+# _declared_version_specs / _repo_from_git_url unit coverage
 # ---------------------------------------------------------------------------
 
 
-def test_declared_versions_prefers_override_dependencies(mod) -> None:
+def test_declared_version_specs_prefers_override_dependencies(mod) -> None:
     parsed = {
         "project": {"dependencies": ["omnibase-core==0.46.7"]},
         "tool": {"uv": {"override-dependencies": ["omnibase-core==0.46.8"]}},
     }
-    assert mod._declared_versions(parsed) == {"omnibase-core": "0.46.8"}
+    assert mod._declared_version_specs(parsed) == {"omnibase-core": "==0.46.8"}
 
 
-def test_declared_versions_ignores_range_constraints(mod) -> None:
+def test_declared_version_specs_captures_range_constraints(mod) -> None:
+    """Unlike an exact-only lookup, a range is captured (not dropped) -- this
+    is what lets `find_lineage_violations` flag it as unprovable instead of
+    silently skipping the package (the AC2 range-constraint bypass)."""
     parsed = {"project": {"dependencies": ["omnibase-spi>=0.23.0,<0.24.0"]}}
-    assert mod._declared_versions(parsed) == {}
+    assert mod._declared_version_specs(parsed) == {"omnibase-spi": ">=0.23.0,<0.24.0"}
 
 
 def test_repo_from_git_url_extracts_bare_repo_name(mod) -> None:
@@ -382,11 +385,13 @@ def test_allow_undetermined_lineage_refused_under_ci(
 
 def test_red_token_cites_a_done_ticket(mod, tmp_path: Path) -> None:
     """The exact RED case the ticket names: a well-formed token citing a
-    ticket that resolves to Done."""
+    ticket that resolves to Done. Carries a live (not-yet-expired) until=
+    date so the mandatory-until= check (below) does not itself short-circuit
+    before the ticket-status path is exercised."""
     block = (
         "[tool.uv.sources]\n"
         'omnibase-core = { git = "https://github.com/OmniNode-ai/omnibase_core.git", '
-        f'rev = "{_PINNED_REV}" }}  # raw-override-ok: OMN-15414\n'
+        f'rev = "{_PINNED_REV}" }}  # raw-override-ok: OMN-15414 until=2099-01-01\n'
     )
     path = _write_pyproject(tmp_path, sources_block=block)
 
@@ -409,7 +414,7 @@ def test_red_token_cites_other_closed_statuses(
     block = (
         "[tool.uv.sources]\n"
         'omnibase-core = { git = "https://github.com/OmniNode-ai/omnibase_core.git", '
-        f'rev = "{_PINNED_REV}" }}  # raw-override-ok: OMN-1\n'
+        f'rev = "{_PINNED_REV}" }}  # raw-override-ok: OMN-1 until=2099-01-01\n'
     )
     path = _write_pyproject(tmp_path, sources_block=block)
     violations = mod.find_escape_token_violations(
@@ -422,7 +427,7 @@ def test_green_token_cites_an_open_ticket(mod, tmp_path: Path) -> None:
     block = (
         "[tool.uv.sources]\n"
         'omnibase-core = { git = "https://github.com/OmniNode-ai/omnibase_core.git", '
-        f'rev = "{_PINNED_REV}" }}  # raw-override-ok: OMN-1\n'
+        f'rev = "{_PINNED_REV}" }}  # raw-override-ok: OMN-1 until=2099-01-01\n'
     )
     path = _write_pyproject(tmp_path, sources_block=block)
     violations = mod.find_escape_token_violations(
@@ -490,12 +495,22 @@ def test_green_no_escape_token_present(mod, tmp_path: Path) -> None:
     )
 
 
-def test_graceful_skip_when_linear_api_key_unset(
+def test_red_when_token_has_no_until_and_linear_api_key_unset(
     mod, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    """No LINEAR_API_KEY -- resolve_ticket_status's real implementation
-    returns the sentinel detail, and the check degrades gracefully (skip,
-    not fail), matching check_stale_todos.py's posture."""
+    """The residual AC3 gap a remediation-round adversarial verifier found:
+    LINEAR_API_KEY is not provisioned as a repo OR org secret anywhere in
+    OmniNode-ai (verified live via `gh secret list` / `gh api
+    orgs/.../actions/secrets`), so the ticket-status reconciliation path
+    never actually runs in any live enforcing environment. A token with no
+    until= suffix -- the EXACT shape of the live incident token,
+    `# raw-override-ok: OMN-15414` -- must therefore RED here rather than
+    fall through both conditions and pass unconditionally and forever
+    (which is what shipped before this fix: this fixture, run against the
+    original implementation, returned `[]`).
+
+    Uses the REAL resolve_ticket_status (no injected fake) so this proves
+    the shipped production code path, not just a test double."""
     monkeypatch.delenv("LINEAR_API_KEY", raising=False)
     block = (
         "[tool.uv.sources]\n"
@@ -503,8 +518,26 @@ def test_graceful_skip_when_linear_api_key_unset(
         f'rev = "{_PINNED_REV}" }}  # raw-override-ok: OMN-15414\n'
     )
     path = _write_pyproject(tmp_path, sources_block=block)
-    # Uses the REAL resolve_ticket_status (no injected fake) to prove the
-    # graceful-degradation path in the shipped code, not just the test double.
+    violations = mod.find_escape_token_violations(path.read_text())
+    assert len(violations) == 1
+    assert "OMN-15414" in violations[0]
+    assert "until=" in violations[0]
+
+
+def test_graceful_skip_when_linear_api_key_unset_but_until_date_covers_it(
+    mod, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Graceful degradation on a missing LINEAR_API_KEY still applies -- but
+    only once an until= date has already supplied a live, network-free
+    enforcement condition for the line. Matches check_stale_todos.py's
+    degrade-don't-fail posture for the SECONDARY (ticket-status) check only."""
+    monkeypatch.delenv("LINEAR_API_KEY", raising=False)
+    block = (
+        "[tool.uv.sources]\n"
+        'omnibase-core = { git = "https://github.com/OmniNode-ai/omnibase_core.git", '
+        f'rev = "{_PINNED_REV}" }}  # raw-override-ok: OMN-15414 until=2099-01-01\n'
+    )
+    path = _write_pyproject(tmp_path, sources_block=block)
     assert mod.find_escape_token_violations(path.read_text()) == []
 
 
