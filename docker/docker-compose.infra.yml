@@ -198,6 +198,10 @@ x-runtime-env: &runtime-env
   # creation to one partition unless an operator explicitly opts into wider
   # contract-declared partition counts.
   ONEX_TOPIC_PROVISIONER_MAX_PARTITIONS: ${ONEX_TOPIC_PROVISIONER_MAX_PARTITIONS:-1}
+  ONEX_BOUNDARY_DLQ_ENABLED: ${DEV_BOUNDARY_DLQ_ENABLED:?runtime policy contract must set DEV_BOUNDARY_DLQ_ENABLED}
+  ONEX_SINGLE_OWNER_COMMAND_TOPICS: ${ONEX_SINGLE_OWNER_COMMAND_TOPICS:-0}
+  ONEX_TOPIC_ENFORCEMENT_MODE: ${ONEX_TOPIC_ENFORCEMENT_MODE:-warn}
+  ONEX_WIRING_STRICT_MODE: ${ONEX_WIRING_STRICT_MODE:-0}
   # Linear API for build loop ticket fetching
   LINEAR_API_KEY: ${LINEAR_API_KEY:?LINEAR_API_KEY must be set}
   # GitHub API/CLI auth for runtime-owned PR lifecycle inventory and merge gates.
