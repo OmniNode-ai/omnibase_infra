@@ -40,20 +40,6 @@ _SCRIPTS_DIR = str(Path(__file__).resolve().parents[2] / "scripts")
 if _SCRIPTS_DIR not in sys.path:
     sys.path.insert(0, _SCRIPTS_DIR)
 
-# OMN-15567: every test below that constructs MonitorAlertEmitter(dry_run=...)
-# instantiates a real `confluent_kafka.Producer` (patched per-test, but the
-# construction still runs inside the same process/thread the mock replaces
-# at call time) with KAFKA_BOOTSTRAP_SERVERS pointed at "localhost:19092" --
-# a broker address with no live guarantee in the regular CI split (unlike
-# the nightly e2e stack, which does bring up a real broker). This file was
-# missing the `kafka` marker that its sibling files
-# (test_consumer_health_pipeline.py, test_runtime_log_bridge_pipeline.py,
-# test_runtime_health_monitor.py) already carry for exactly this reason, so
-# `-m "not slow and not chaos and not kafka and not performance"` (CI's
-# regular split selection) never deselected it -- only `-m integration`
-# (nightly's selection, which does not exclude kafka-marked tests) should.
-pytestmark = pytest.mark.kafka
-
 
 @pytest.mark.integration
 def test_topic_loaded_from_actual_contract_yaml() -> None:

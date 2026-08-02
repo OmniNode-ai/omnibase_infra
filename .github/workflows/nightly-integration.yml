@@ -418,6 +418,16 @@ jobs:
             echo "INTEGRATION_POSTGRES_PORT=${resolved_pg_port}"
             echo "OMNI_INFRA_HOST=${resolved_kafka_host}"
             echo "POSTGRES_HOST=${resolved_host}"
+            # OMN-15567 remediation round 2: POSTGRES_PORT was set once, in
+            # the earlier "Derive isolated e2e namespace" step, to the
+            # ephemeral host-published port, and never re-emitted here, so it
+            # stayed paired with the ORIGINAL host even after POSTGRES_HOST
+            # was overridden to resolved_host above -- an invalid host/port
+            # pair under the Docker-DNS and gateway branches. Consumers:
+            # tests/integration/test_dispatch_roundtrip.py,
+            # tests/integration/injection_effectiveness/conftest.py,
+            # tests/integration/migrations/test_node_migration_shape_drift_omn15376.py.
+            echo "POSTGRES_PORT=${resolved_pg_port}"
             echo "REDPANDA_ADVERTISE_HOST=${resolved_kafka_host}"
           } >> "$GITHUB_ENV"
 
@@ -485,6 +495,19 @@ jobs:
           # the network can actually be deleted.
           if [[ -n "${OMNIBASE_INFRA_RUNNER_CONTAINER_ID:-}" && -n "${OMNIBASE_INFRA_NETWORK:-}" ]]; then
             docker network disconnect "${OMNIBASE_INFRA_NETWORK}" "${OMNIBASE_INFRA_RUNNER_CONTAINER_ID}" 2>/dev/null || true
+            # OMN-15567 remediation round 2: the disconnect above swallows its
+            # own exit code on purpose -- a disconnect racing an
+            # already-gone container/network is benign and must not fail
+            # this always()-run teardown step -- but that made a REAL
+            # failure to detach just as silent as the original bug. Verify
+            # the runner is actually off the network's member list; if not,
+            # surface it loudly (non-fatal ::error:: annotation) instead of
+            # reproducing the silence this fix exists to close.
+            if docker network inspect "${OMNIBASE_INFRA_NETWORK}" \
+              --format '{{json .Containers}}' 2>/dev/null \
+              | grep -q "${OMNIBASE_INFRA_RUNNER_CONTAINER_ID}"; then
+              echo "::error::runner container ${OMNIBASE_INFRA_RUNNER_CONTAINER_ID} is still attached to ${OMNIBASE_INFRA_NETWORK} after docker network disconnect -- this run will leak the attachment"
+            fi
           fi
 
           docker compose -p "$project" -f docker/docker-compose.e2e.yml down -v --remove-orphans

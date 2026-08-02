@@ -500,6 +500,63 @@ def test_teardown_disconnects_runner_container_before_compose_down(
     )
 
 
+_DOCKER_DISCONNECT_SUCCEEDS_BUT_STILL_ATTACHED_STUB = """
+printf '%s\\n' "$*" >> "$DOCKER_CALL_LOG"
+if [ "$1" = "network" ] && [ "$2" = "inspect" ]; then
+  echo '{"fake-runner-container-id":{"EndpointID":"deadbeef"}}'
+fi
+exit 0
+"""
+
+
+def test_teardown_surfaces_error_when_disconnect_does_not_take(
+    tmp_path: Path,
+) -> None:
+    """`docker network disconnect` swallows its own exit code (benign-race
+    tolerance for an always()-run step) -- but a REAL failure to detach must
+    not be silent the way the pre-fix leak was. If `docker network inspect`
+    still lists the runner container as a member after the disconnect call,
+    teardown must print a non-fatal ::error:: annotation naming the network
+    and container -- the step must still complete (exit 0) and still run
+    `docker compose down`.
+    """
+    result, calls = _run_teardown_step(
+        tmp_path,
+        extra_env={
+            **_TEARDOWN_BASE_ENV,
+            "OMNIBASE_INFRA_RUNNER_CONTAINER_ID": "fake-runner-container-id",
+        },
+        docker_body=_DOCKER_DISCONNECT_SUCCEEDS_BUT_STILL_ATTACHED_STUB,
+    )
+    assert result.returncode == 0, result.stdout + result.stderr
+    combined = result.stdout + result.stderr
+    assert "::error::" in combined, combined
+    assert "fake-runner-container-id" in combined
+    assert _TEARDOWN_BASE_ENV["OMNIBASE_INFRA_NETWORK"] in combined
+    down_call = (
+        f"compose -p {_TEARDOWN_PROJECT} -f docker/docker-compose.e2e.yml "
+        "down -v --remove-orphans"
+    )
+    assert down_call in calls, calls
+
+
+def test_teardown_silent_when_disconnect_verified_gone(tmp_path: Path) -> None:
+    """The happy path: once `docker network inspect` no longer lists the
+    runner container, teardown must NOT print the ::error:: annotation --
+    the check above must not false-positive on a disconnect that worked.
+    """
+    result, _calls = _run_teardown_step(
+        tmp_path,
+        extra_env={
+            **_TEARDOWN_BASE_ENV,
+            "OMNIBASE_INFRA_RUNNER_CONTAINER_ID": "fake-runner-container-id",
+        },
+        docker_body=_DOCKER_CALL_LOGGING_STUB,
+    )
+    assert result.returncode == 0, result.stdout + result.stderr
+    assert "::error::" not in (result.stdout + result.stderr)
+
+
 def test_teardown_skips_disconnect_when_runner_was_never_attached(
     tmp_path: Path,
 ) -> None:
