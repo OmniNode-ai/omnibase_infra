@@ -77,6 +77,106 @@ CREATE TABLE IF NOT EXISTS baselines_comparisons (
     CONSTRAINT uk_baselines_comparisons_date UNIQUE (comparison_date)
 );
 
+-- ---- BEGIN OMN-15655 legacy shape reconciliation: baselines_comparisons ----
+-- Legacy application databases can already contain a node-shaped
+-- baselines_comparisons table. CREATE TABLE IF NOT EXISTS then no-ops, and the
+-- first index below fails on missing comparison_date. Converge empty drift
+-- tables to the declared root shape; refuse non-empty incompatible tables so
+-- the migration never invents historical A/B data.
+DO $$
+DECLARE
+    v_rows BIGINT;
+    v_id_type TEXT;
+BEGIN
+    SELECT count(*) INTO v_rows FROM baselines_comparisons;
+
+    SELECT data_type INTO v_id_type
+    FROM information_schema.columns
+    WHERE table_schema = 'public'
+      AND table_name = 'baselines_comparisons'
+      AND column_name = 'id';
+
+    IF v_id_type IS DISTINCT FROM 'uuid' THEN
+        IF v_rows = 0 THEN
+            ALTER TABLE baselines_comparisons DROP COLUMN IF EXISTS id CASCADE;
+            ALTER TABLE baselines_comparisons ADD COLUMN id UUID DEFAULT gen_random_uuid();
+            ALTER TABLE baselines_comparisons ADD CONSTRAINT baselines_comparisons_pkey PRIMARY KEY (id);
+        ELSE
+            RAISE EXCEPTION
+                'OMN-15655: cannot converge baselines_comparisons.id from % to uuid with % pre-existing row(s); operator data mapping required.',
+                coalesce(v_id_type, '<missing>'), v_rows;
+        END IF;
+    ELSIF NOT EXISTS (
+        SELECT 1 FROM pg_constraint
+        WHERE conrelid = 'baselines_comparisons'::regclass AND contype = 'p'
+    ) THEN
+        ALTER TABLE baselines_comparisons ADD CONSTRAINT baselines_comparisons_pkey PRIMARY KEY (id);
+    END IF;
+END$$;
+
+ALTER TABLE baselines_comparisons ADD COLUMN IF NOT EXISTS comparison_date DATE;
+ALTER TABLE baselines_comparisons ADD COLUMN IF NOT EXISTS period_label TEXT;
+ALTER TABLE baselines_comparisons ADD COLUMN IF NOT EXISTS treatment_sessions BIGINT DEFAULT 0;
+ALTER TABLE baselines_comparisons ADD COLUMN IF NOT EXISTS treatment_success_rate REAL;
+ALTER TABLE baselines_comparisons ADD COLUMN IF NOT EXISTS treatment_avg_latency_ms REAL;
+ALTER TABLE baselines_comparisons ADD COLUMN IF NOT EXISTS treatment_avg_cost_tokens REAL;
+ALTER TABLE baselines_comparisons ADD COLUMN IF NOT EXISTS treatment_total_tokens BIGINT DEFAULT 0;
+ALTER TABLE baselines_comparisons ADD COLUMN IF NOT EXISTS control_sessions BIGINT DEFAULT 0;
+ALTER TABLE baselines_comparisons ADD COLUMN IF NOT EXISTS control_success_rate REAL;
+ALTER TABLE baselines_comparisons ADD COLUMN IF NOT EXISTS control_avg_latency_ms REAL;
+ALTER TABLE baselines_comparisons ADD COLUMN IF NOT EXISTS control_avg_cost_tokens REAL;
+ALTER TABLE baselines_comparisons ADD COLUMN IF NOT EXISTS control_total_tokens BIGINT DEFAULT 0;
+ALTER TABLE baselines_comparisons ADD COLUMN IF NOT EXISTS roi_pct REAL;
+ALTER TABLE baselines_comparisons ADD COLUMN IF NOT EXISTS latency_improvement_pct REAL;
+ALTER TABLE baselines_comparisons ADD COLUMN IF NOT EXISTS cost_improvement_pct REAL;
+ALTER TABLE baselines_comparisons ADD COLUMN IF NOT EXISTS sample_size BIGINT DEFAULT 0;
+ALTER TABLE baselines_comparisons ADD COLUMN IF NOT EXISTS computed_at TIMESTAMPTZ DEFAULT NOW();
+ALTER TABLE baselines_comparisons ADD COLUMN IF NOT EXISTS created_at TIMESTAMPTZ DEFAULT NOW();
+ALTER TABLE baselines_comparisons ADD COLUMN IF NOT EXISTS updated_at TIMESTAMPTZ DEFAULT NOW();
+
+DO $$
+DECLARE
+    v_col TEXT;
+    v_nulls BIGINT;
+BEGIN
+    FOREACH v_col IN ARRAY ARRAY[
+        'id', 'comparison_date', 'treatment_sessions', 'treatment_total_tokens',
+        'control_sessions', 'control_total_tokens', 'sample_size',
+        'computed_at', 'created_at', 'updated_at'
+    ]
+    LOOP
+        EXECUTE format(
+            'SELECT count(*) FROM %s WHERE %I IS NULL',
+            'baselines_comparisons'::regclass,
+            v_col
+        ) INTO v_nulls;
+        IF v_nulls = 0 THEN
+            EXECUTE format(
+                'ALTER TABLE %s ALTER COLUMN %I SET NOT NULL',
+                'baselines_comparisons'::regclass,
+                v_col
+            );
+        ELSE
+            RAISE EXCEPTION
+                'OMN-15655: cannot converge baselines_comparisons.% to NOT NULL -- % pre-existing row(s) hold NULL; operator data mapping required.',
+                v_col, v_nulls;
+        END IF;
+    END LOOP;
+END$$;
+
+DO $$
+BEGIN
+    IF NOT EXISTS (
+        SELECT 1 FROM pg_constraint
+        WHERE conrelid = 'baselines_comparisons'::regclass
+          AND conname = 'uk_baselines_comparisons_date'
+    ) THEN
+        ALTER TABLE baselines_comparisons
+            ADD CONSTRAINT uk_baselines_comparisons_date UNIQUE (comparison_date);
+    END IF;
+END$$;
+-- ---- END OMN-15655 legacy shape reconciliation: baselines_comparisons ----
+
 -- =============================================================================
 -- INDEXES: baselines_comparisons
 -- =============================================================================

@@ -45,6 +45,9 @@ ROOT_COST_MIGRATION = (
     / "forward"
     / "031_create_llm_call_metrics_and_cost_aggregates.sql"
 )
+ROOT_BASELINES_MIGRATION = (
+    REPO_ROOT / "docker" / "migrations" / "forward" / "050_create_baselines_tables.sql"
+)
 
 REQUIRED_CASES = {
     "mapping_ambiguity",
@@ -172,6 +175,14 @@ def test_proof_runs_real_migrations_twice_and_pins_the_blocked_upgrade() -> None
         "ALTER TABLE llm_cost_aggregates ADD COLUMN IF NOT EXISTS estimated_coverage_pct"
         in ROOT_COST_MIGRATION.read_text(encoding="utf-8")
     )
+    baselines_migration = ROOT_BASELINES_MIGRATION.read_text(encoding="utf-8")
+    assert "legacy shape reconciliation: baselines_comparisons" in baselines_migration
+    assert (
+        "ALTER TABLE baselines_comparisons ADD COLUMN IF NOT EXISTS comparison_date"
+        in baselines_migration
+    )
+    assert "DROP COLUMN IF EXISTS id CASCADE" in baselines_migration
+    assert "operator data mapping required" in baselines_migration
     assert "fixture_case=legacy_upgrade status=BLOCKED" in replay
     assert "fixture_status=PASS_WITH_EXPECTED_BLOCKER blocker=OMN-15423" in replay
 
