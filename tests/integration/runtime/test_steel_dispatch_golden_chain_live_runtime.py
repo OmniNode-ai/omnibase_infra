@@ -137,7 +137,7 @@ def _postgres_dsn() -> str | None:
 # negative-case test reads a checked-in fixture and needs no live infra, so
 # it must not be swept up by a module-wide skip (it would otherwise never
 # run at all in an environment without stability-lane reachability, e.g. CI).
-pytestmark = [pytest.mark.integration]
+pytestmark = [pytest.mark.integration, pytest.mark.kafka]
 
 _live_infra_skips = [
     pytest.mark.skipif(

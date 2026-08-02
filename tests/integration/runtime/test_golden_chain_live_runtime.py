@@ -89,6 +89,7 @@ def _kafka_available() -> bool:
 
 pytestmark = [
     pytest.mark.integration,
+    pytest.mark.kafka,
     pytest.mark.external,
     pytest.mark.skipif(
         not _kafka_available(),
