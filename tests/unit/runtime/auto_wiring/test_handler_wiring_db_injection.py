@@ -51,7 +51,12 @@ def _configured_projection_dsns(monkeypatch: pytest.MonkeyPatch) -> None:
 
 
 def _internal_db_adapter(table: str) -> object:
-    """Build the explicit no-tenant operation used by SQL-shape unit tests."""
+    """Build the explicit no-tenant operation used by SQL-shape unit tests.
+
+    The relation must be one the shipped topology grants ``omninode_runtime``
+    in ``omninode_internal`` (OMN-15656): this adapter supplies no tenant
+    authority, so a tenant-owned relation cannot be driven through it.
+    """
     target = projection_database_target(table, schema="omninode_internal")
     return _build_projection_db_adapter(
         projection_database_urls(target, "postgresql://user:pass@host/db"),
@@ -97,7 +102,9 @@ def test_projection_callback_injects_db_and_event_type() -> None:
             received.append(dict(input_data))
             return {"rows_upserted": 1}
 
-    db_tables = projection_database_target("node_service_registry")
+    db_tables = projection_database_target(
+        "node_service_registry", schema="omninode_internal"
+    )
     handler = FakeHandler()
     callback = _make_projection_dispatch_callback(
         handler, db_tables, ("onex.evt.platform.node-heartbeat.v1",)
@@ -142,7 +149,7 @@ def test_projection_callback_injects_topic_for_strict_handlers() -> None:
                 )
             return {"rows_upserted": 1}
 
-    db_tables = projection_database_target("live_events")
+    db_tables = projection_database_target("live_events", schema="omninode_internal")
     callback = _make_projection_dispatch_callback(
         StrictTopicHandler(), db_tables, ("onex.evt.platform.node-heartbeat.v1",)
     )
@@ -188,7 +195,7 @@ def test_projection_callback_preserves_typed_envelope_id() -> None:
     )
     callback = _make_projection_dispatch_callback(
         EnvelopeAwareHandler(),
-        projection_database_target("live_events"),
+        projection_database_target("live_events", schema="omninode_internal"),
         (topic,),
     )
 
@@ -330,7 +337,9 @@ def test_projection_callback_maps_introspection_event_type() -> None:
             received.append(dict(input_data))
             return {}
 
-    db_tables = projection_database_target("node_service_registry")
+    db_tables = projection_database_target(
+        "node_service_registry", schema="omninode_internal"
+    )
     handler = FakeHandler()
     callback = _make_projection_dispatch_callback(
         handler, db_tables, ("onex.evt.platform.node-introspection.v1",)
@@ -363,7 +372,9 @@ def test_projection_callback_awaits_async_handle() -> None:
             received.append(dict(input_data))
             return {"rows_upserted": 1}
 
-    db_tables = projection_database_target("node_service_registry")
+    db_tables = projection_database_target(
+        "node_service_registry", schema="omninode_internal"
+    )
     handler = FakeHandler()
     callback = _make_projection_dispatch_callback(
         handler, db_tables, ("onex.evt.platform.node-heartbeat.v1",)
@@ -398,7 +409,7 @@ def test_projection_callback_rejects_missing_db_url_at_wiring(
             call_count[0] += 1
             return {}
 
-    db_tables = projection_database_target("node_service_registry")
+    db_tables = projection_database_target("delegation_events", schema="tenant")
     handler = FakeHandler()
     monkeypatch.delenv("OMNIDASH_ANALYTICS_DB_URL")
 
@@ -418,7 +429,9 @@ def test_projection_callback_logs_type_error_not_raises(
         def handle(self, input_data: dict) -> dict:
             raise TypeError("missing _db")
 
-    db_tables = projection_database_target("node_service_registry")
+    db_tables = projection_database_target(
+        "node_service_registry", schema="omninode_internal"
+    )
     handler = BrokenHandler()
     callback = _make_projection_dispatch_callback(handler, db_tables, ())
 
@@ -453,9 +466,9 @@ def test_sync_db_adapter_accepts_multi_column_conflict_key() -> None:
     conn.cursor.return_value = cursor_context
 
     with patch("psycopg2.connect", return_value=conn):
-        adapter = _internal_db_adapter("savings_estimates")
+        adapter = _internal_db_adapter("cost_by_repo_snapshots")
         result = adapter.upsert(
-            "savings_estimates",
+            "cost_by_repo_snapshots",
             "session_id,event_timestamp,model_local,model_cloud_baseline",
             {
                 "session_id": "sess-1",
@@ -489,9 +502,9 @@ def test_sync_db_adapter_json_adapts_list_values() -> None:
     conn.cursor.return_value = cursor_context
 
     with patch("psycopg2.connect", return_value=conn):
-        adapter = _internal_db_adapter("delegation_events")
+        adapter = _internal_db_adapter("llm_delegation_daily_projection")
         result = adapter.upsert(
-            "delegation_events",
+            "llm_delegation_daily_projection",
             "correlation_id",
             {
                 "correlation_id": "corr-1",
@@ -594,9 +607,9 @@ def test_sync_db_adapter_json_adapts_recent_responses_list_of_objects() -> None:
     conn.cursor.return_value = cursor_context
 
     with patch("psycopg2.connect", return_value=conn):
-        adapter = _internal_db_adapter("projection_delegation_inference_response_text")
+        adapter = _internal_db_adapter("llm_routing_decisions")
         result = adapter.upsert(
-            "projection_delegation_inference_response_text",
+            "llm_routing_decisions",
             "singleton_key",
             {
                 "singleton_key": "inference_response_singleton",
@@ -715,9 +728,9 @@ def test_sync_db_adapter_json_adapts_new_unsuffixed_unallowlisted_list_of_dicts_
     conn.cursor.return_value = cursor_context
 
     with patch("psycopg2.connect", return_value=conn):
-        adapter = _internal_db_adapter("compliance_scan_results")
+        adapter = _internal_db_adapter("session_outcomes")
         result = adapter.upsert(
-            "compliance_scan_results",
+            "session_outcomes",
             "scan_id",
             {
                 "scan_id": "scan-1",

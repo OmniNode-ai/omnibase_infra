@@ -87,7 +87,7 @@ class _TenantProjectionHandler:
     def handle(self, input_data: dict[str, object]) -> dict[str, int]:
         database = input_data["_db"]
         database.upsert(  # type: ignore[union-attr]
-            "tenant_events",
+            "delegation_events",
             "correlation_id",
             {"correlation_id": input_data["_envelope_id"], "value": "dispatched"},
         )
@@ -116,7 +116,7 @@ async def test_dispatch_engine_keeps_verified_authority_out_of_band(
     monkeypatch.setenv("OMNIDASH_ANALYTICS_DB_URL", "postgresql://fixture")
     callback = _make_projection_dispatch_callback(
         _TenantProjectionHandler(),
-        projection_database_target("tenant_events", schema="tenant"),
+        projection_database_target("delegation_events", schema="tenant"),
         (TOPIC,),
     )
     engine = MessageDispatchEngine()
@@ -156,7 +156,7 @@ async def test_dispatch_engine_keeps_verified_authority_out_of_band(
         "SELECT set_config(%s, %s, true)",
         ("app.tenant_id", str(tenant_id)),
     )
-    assert 'INSERT INTO "tenant"."tenant_events"' in calls[2][0]
+    assert 'INSERT INTO "tenant"."delegation_events"' in calls[2][0]
     assert calls[2][1]["correlation_id"] == envelope.envelope_id  # type: ignore[index]
     assert calls[2][1]["tenant_id"] == tenant_id  # type: ignore[index]
     assert connection.close_calls == 1
@@ -168,7 +168,7 @@ async def test_dispatch_without_verified_capability_fails_before_connect(
     monkeypatch.setenv("OMNIDASH_ANALYTICS_DB_URL", "postgresql://fixture")
     callback = _make_projection_dispatch_callback(
         _TenantProjectionHandler(),
-        projection_database_target("tenant_events", schema="tenant"),
+        projection_database_target("delegation_events", schema="tenant"),
         (TOPIC,),
     )
     envelope = ModelEventEnvelope[dict[str, object]](

@@ -262,3 +262,19 @@ cases:
     test: tests/ci/test_legacy_rds_fixture_contract.py::test_proof_runs_real_migrations_twice_and_pins_the_blocked_upgrade
     why: >-
       The forward migration runner became newly wired enforcement when the OMN-15422 rebuilt legacy-RDS proof workflow started invoking it against both fresh and legacy PostgreSQL 16 histories. The incident was a false-green upgrade proof: a runner could pass a fresh path while legacy ledger shapes, duplicate checksums, and the unresolved OMN-15423 node migration wall were never exercised together. This captured proof script is the committed artifact that drives the real runner twice through the synthetic legacy ledger corpus and requires the blocked-upgrade signature, so the runner cannot be counted as wired enforcement without the regression surface it exists to catch.
+  - id: omn15656-topology-zero-table-grants
+    guard: scripts/generate_application_database_table_grants.py
+    incident: OMN-15656
+    regression_class: false_green
+    guard_verdict_on_artifact: reject
+    artifact:
+      fixture: tests/fixtures/omn15547/onex-dev-topology-zero-table-grants.yaml.captured
+      sha256: b34206e7512eca5eba1502e969fea52c641b4b5eda4eff538ba5c7a459e7b07d
+    capture:
+      method: git-object
+      source: git-object:OmniNode-ai/omnibase_infra@27630ec1be051faaef0a9f61a59615af11b28a39:src/omnibase_infra/topology/instances/onex-dev.yaml
+      captured_at: "2026-08-02T10:40:00Z"
+      captured_by: lane replay (OMN-15656)
+    test: tests/unit/topology/test_application_database_table_grants.py::test_replay_derivation_rejects_the_captured_topology_as_drifted
+    why: >-
+      The onex-dev runtime plane failed to boot on deploy run 30737415706 because every topology instance declared ZERO `object_type: TABLE` grants, so the OMN-15418 privilege validator refused all 43 contract-declared projections on all 7 profiles. This artifact is the exact instance the cluster consumed -- its sha256 b34206e7 is the same digest recorded in the rendered catalogs' `source.sha256` and in omninode_infra's k8s source-lock, so it is the deployed bytes rather than a reconstruction. Direction is false_green: nothing was red. CI passed, the ACL matrix had already serialized the finding as a BLOCKED blocker two days earlier, and the wiring tests were green because `_with_projection_fixture_grants` manufactured the missing grants at test time and loaded a fixture topology instead of the shipped one. The replay drives the real derivation over the captured bytes and requires the guard to reject them, and its sibling `test_replay_captured_topology_reproduces_the_deploy_failure_verbatim` pins the resolver's error string character-for-character against the pod log, so a future change that merely reshapes the message cannot quietly satisfy this case.

@@ -5,14 +5,12 @@
 from __future__ import annotations
 
 from functools import lru_cache
-from pathlib import Path
 from typing import Literal
 
 from omnibase_core.enums.enum_database_grant_object_type import (
     EnumDatabaseGrantObjectType,
 )
 from omnibase_core.enums.enum_database_privilege import EnumDatabasePrivilege
-from omnibase_core.enums.enum_database_schema_domain import EnumDatabaseSchemaDomain
 from omnibase_core.models.contracts.subcontracts.model_db_table_declaration import (
     ModelDbTableDeclaration,
 )
@@ -24,106 +22,91 @@ from omnibase_infra.runtime.auto_wiring.handler_wiring import (
     ProjectionDatabaseTarget,
     _resolve_projection_database_target,
 )
-
-_TOPOLOGY_PATH = (
-    Path(__file__).parents[1]
-    / "fixtures"
-    / "application_relation_ownership"
-    / "topology.yaml"
-)
+from omnibase_infra.topology import load_topology_profile
 
 
 @lru_cache(maxsize=1)
 def application_topology() -> ModelDeploymentTopology:
-    return ModelDeploymentTopology.from_yaml(_TOPOLOGY_PATH)
+    """Return the real shipped topology every runtime profile resolves.
+
+    OMN-15656: this deliberately loads the platform instance rather than
+    ``tests/fixtures/application_relation_ownership/topology.yaml``. The fixture
+    topology carried hand-written TABLE grants that the shipped instances did
+    not, so wiring tests proved a topology that does not exist and a 43/43
+    strict-wiring failure shipped to onex-dev undetected.
+    """
+    return load_topology_profile("local")
 
 
 ProjectionAccess = Literal["read", "write", "read_write"]
 
 
-def _with_projection_fixture_grants(
+def _shipped_table_grant_exists(
+    topology: ModelDeploymentTopology, principal: str, schema: str, table: str
+) -> bool:
+    database = topology.databases["application"]
+    return any(
+        grant.object_type is EnumDatabaseGrantObjectType.TABLE
+        and grant.schema == schema
+        and table in grant.objects
+        for grant in database.principals[principal].grants
+    )
+
+
+def _topology_with_unshipped_grants(
     topology: ModelDeploymentTopology,
     tables: tuple[ModelDbTableDeclaration, ...],
     *,
-    catalog_read_binding: str | None,
-    catalog_write_binding: str | None,
+    principal: str,
+    privileges: tuple[EnumDatabasePrivilege, ...],
+    reason: str,
 ) -> ModelDeploymentTopology:
-    """Add exact per-table grants requested by a focused test fixture."""
-    database = topology.databases["application"]
-    required: dict[tuple[str, str, str], set[EnumDatabasePrivilege]] = {}
-    for table in tables:
-        domain = topology.schema_domain(table.database_ref, table.schema)
-        if domain is EnumDatabaseSchemaDomain.TENANT:
-            read_ref = write_ref = "tenant_projection"
-        elif domain is EnumDatabaseSchemaDomain.OMNINODE_INTERNAL:
-            read_ref = write_ref = "omninode_runtime_service"
-        else:
-            read_ref = catalog_read_binding
-            write_ref = catalog_write_binding
-        operations: tuple[tuple[str | None, set[EnumDatabasePrivilege]], ...] = (
-            (
-                read_ref if table.access in {"read", "read_write"} else None,
-                {EnumDatabasePrivilege.SELECT},
-            ),
-            (
-                write_ref if table.access in {"write", "read_write"} else None,
-                {
-                    EnumDatabasePrivilege.SELECT,
-                    EnumDatabasePrivilege.INSERT,
-                    EnumDatabasePrivilege.UPDATE,
-                },
-            ),
-        )
-        for binding_ref, privileges in operations:
-            binding = database.bindings.get(binding_ref) if binding_ref else None
-            if binding is None:
-                continue
-            key = (binding.principal, table.schema, table.name)
-            required.setdefault(key, set()).update(privileges)
+    """Grant relations the platform deliberately does not ship yet.
 
+    This is the ONLY sanctioned grant synthesis left in the test tree
+    (OMN-15656). It exists for domains whose grants cannot be derived from node
+    contracts — today only ``PLATFORM_CATALOG``, which requires a
+    caller-supplied binding and which no ``db_io.db_tables`` block declares.
+
+    It is fail-closed against the failure class this ticket fixed: synthesising
+    a grant the shipped topology is *supposed* to carry is refused outright, so
+    this helper can never be used to re-hide a missing platform grant the way
+    the old ``_with_projection_fixture_grants`` did.
+    """
+    if not reason.strip():
+        raise ValueError("unshipped grant synthesis requires an explicit reason")
+    database = topology.databases["application"]
+    for table in tables:
+        if _shipped_table_grant_exists(topology, principal, table.schema, table.name):
+            raise AssertionError(
+                f"{table.schema}.{table.name} is already granted to {principal!r} by "
+                "the shipped topology; use the real grant instead of synthesising one"
+            )
     principals = dict(database.principals)
-    for (principal_name, schema, table_name), privileges in required.items():
-        principal = principals[principal_name]
-        grants = list(principal.grants)
-        has_schema_usage = any(
-            grant.object_type is EnumDatabaseGrantObjectType.SCHEMA
-            and grant.schema == schema
-            and EnumDatabasePrivilege.USAGE in grant.privileges
-            for grant in grants
-        )
-        if not has_schema_usage:
-            grants.append(
-                ModelDeploymentTopologyDatabaseGrant(
-                    object_type=EnumDatabaseGrantObjectType.SCHEMA,
-                    schema=schema,
-                    privileges=(EnumDatabasePrivilege.USAGE,),
-                )
+    target = principals[principal]
+    principals[principal] = target.model_copy(
+        update={
+            "grants": (
+                *target.grants,
+                *(
+                    ModelDeploymentTopologyDatabaseGrant(
+                        object_type=EnumDatabaseGrantObjectType.TABLE,
+                        schema=table.schema,
+                        objects=(table.name,),
+                        privileges=privileges,
+                    )
+                    for table in tables
+                ),
             )
-        already_granted = {
-            privilege
-            for grant in grants
-            if grant.object_type is EnumDatabaseGrantObjectType.TABLE
-            and grant.schema == schema
-            and table_name in grant.objects
-            for privilege in grant.privileges
         }
-        missing = tuple(
-            sorted(privileges - already_granted, key=lambda item: item.value)
-        )
-        if missing:
-            grants.append(
-                ModelDeploymentTopologyDatabaseGrant(
-                    object_type=EnumDatabaseGrantObjectType.TABLE,
-                    schema=schema,
-                    objects=(table_name,),
-                    privileges=missing,
-                )
-            )
-        principals[principal_name] = principal.model_copy(
-            update={"grants": tuple(grants)}
-        )
-    database = database.model_copy(update={"principals": principals})
-    return topology.model_copy(update={"databases": {"application": database}})
+    )
+    return topology.model_copy(
+        update={
+            "databases": {
+                "application": database.model_copy(update={"principals": principals})
+            }
+        }
+    )
 
 
 def projection_database_target(
@@ -133,6 +116,8 @@ def projection_database_target(
     access: ProjectionAccess = "read_write",
     catalog_read_binding: str | None = None,
     catalog_write_binding: str | None = None,
+    unshipped_grant_principal: str | None = None,
+    unshipped_grant_reason: str = "",
 ) -> ProjectionDatabaseTarget:
     names = table_names or ("projection_fixture",)
     tables = tuple(
@@ -147,12 +132,22 @@ def projection_database_target(
         for name in names
     )
     topology = application_topology()
-    topology = _with_projection_fixture_grants(
-        topology,
-        tables,
-        catalog_read_binding=catalog_read_binding,
-        catalog_write_binding=catalog_write_binding,
-    )
+    if unshipped_grant_principal is not None:
+        topology = _topology_with_unshipped_grants(
+            topology,
+            tables,
+            principal=unshipped_grant_principal,
+            privileges=(
+                (EnumDatabasePrivilege.SELECT,)
+                if access == "read"
+                else (
+                    EnumDatabasePrivilege.SELECT,
+                    EnumDatabasePrivilege.INSERT,
+                    EnumDatabasePrivilege.UPDATE,
+                )
+            ),
+            reason=unshipped_grant_reason,
+        )
     if physical_database != topology.databases["application"].physical_name:
         database = topology.databases["application"].model_copy(
             update={"physical_name": physical_database}

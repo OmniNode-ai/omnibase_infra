@@ -458,3 +458,32 @@ def test_owner_manifest_can_express_every_observed_application_object_kind() -> 
     assert {"audit_id", "definition_sha256"}.issubset(
         ModelDatabaseObjectEvidence.model_fields
     )
+
+
+def test_contract_derived_table_grant_gate_is_wired_and_strict() -> None:
+    """OMN-15656: the TABLE-grant derivation gate must run in the STRICT job.
+
+    ``deploy-gate`` never saw the 43/43 strict-wiring failure because nothing
+    resolved real node contracts against the real shipped topology. This asserts
+    the gate exists, consumes the pinned cross-repo checkout, and runs both
+    directions of the drift check.
+    """
+    workflow = _CI_WORKFLOW.read_text(encoding="utf-8")
+
+    assert (
+        "- name: Enforce contract-derived application-database TABLE grants" in workflow
+    )
+    step = workflow.split(
+        "- name: Enforce contract-derived application-database TABLE grants",
+        maxsplit=1,
+    )[1].split("- name:", maxsplit=1)[0]
+    assert "scripts/generate_application_database_table_grants.py" in step
+    assert ".proof-dependencies/omnimarket/src/omnimarket/nodes" in step
+    # --check catches grant/contract drift; --prove catches a grant that exists
+    # but does not actually satisfy the wiring validator.
+    assert "--check --prove" in step
+
+    gate_module = (_ROOT / "scripts" / "ci" / "ci_summary_gate.py").read_text(
+        encoding="utf-8"
+    )
+    assert '"Application Database Domain Enforcement (OMN-15361)"' in gate_module

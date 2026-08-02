@@ -2359,10 +2359,23 @@ jobs:
           tests/unit/validation/test_application_database_domain_enforcement.py
           tests/unit/validation/test_application_database_sql_enforcement_regressions.py
           tests/unit/topology/test_application_database_topology.py
+          tests/unit/topology/test_application_database_table_grants.py
           tests/unit/runtime/auto_wiring/test_projection_domain_adapters.py
           tests/ci/test_application_database_domain_enforcement_contract.py
           tests/ci/test_application_database_sql_authority_isolation.py
           tests/ci/test_application_database_sql_gate.py
+
+      # OMN-15656: the shipped topology's TABLE grants are a projection of node
+      # contract db_io.db_tables. --check fails on drift in either direction (a
+      # declared table with no grant, or a grant no contract declares); --prove
+      # resolves every declaration through the real wiring validator against
+      # every shipped profile. A contract added upstream without a matching
+      # grant now fails here instead of failing a deploy.
+      - name: Enforce contract-derived application-database TABLE grants
+        run: >-
+          uv run python scripts/generate_application_database_table_grants.py
+          --contracts-root .proof-dependencies/omnimarket/src/omnimarket/nodes
+          --check --prove
 
       - name: Enforce schema qualification in changed SQL (trusted)
         if: >-
