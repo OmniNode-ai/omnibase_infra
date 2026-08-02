@@ -288,6 +288,18 @@ jobs:
           [ "$PC" = "stability-candidate" ] || { echo "::error::promotion_class label must be stability-candidate"; exit 1; }
           [ "$NL" = "true" ] || { echo "::error::non_main_lineage label must be true"; exit 1; }
 
+      # OMN-15676: prove the required config files are actually IN the candidate
+      # image before it can be pushed and pinned. The onex-dev runtime digest is
+      # pinned from exactly this workflow's output (e.g. omninode_infra#802), so
+      # this is the step that stops a missing COPY from reaching the cluster.
+      # Reads src/omnibase_infra/runtime/required_image_config_paths.py and runs
+      # `test -f` INSIDE the built image; fails closed if the probe cannot run.
+      - name: Assert required config paths exist in the built image (OMN-15676)
+        run: |
+          set -euo pipefail
+          python3 scripts/ci/assert_image_config_paths.py \
+            --image "${{ steps.meta.outputs.image_repo }}:${{ steps.meta.outputs.candidate_tag }}"
+
       - name: Push candidate image to Amazon ECR
         if: success()
         shell: bash

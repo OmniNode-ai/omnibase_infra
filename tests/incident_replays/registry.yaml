@@ -278,3 +278,19 @@ cases:
     test: tests/unit/topology/test_application_database_table_grants.py::test_replay_derivation_rejects_the_captured_topology_as_drifted
     why: >-
       The onex-dev runtime plane failed to boot on deploy run 30737415706 because every topology instance declared ZERO `object_type: TABLE` grants, so the OMN-15418 privilege validator refused all 43 contract-declared projections on all 7 profiles. This artifact is the exact instance the cluster consumed -- its sha256 b34206e7 is the same digest recorded in the rendered catalogs' `source.sha256` and in omninode_infra's k8s source-lock, so it is the deployed bytes rather than a reconstruction. Direction is false_green: nothing was red. CI passed, the ACL matrix had already serialized the finding as a BLOCKED blocker two days earlier, and the wiring tests were green because `_with_projection_fixture_grants` manufactured the missing grants at test time and loaded a fixture topology instead of the shipped one. The replay drives the real derivation over the captured bytes and requires the guard to reject them, and its sibling `test_replay_captured_topology_reproduces_the_deploy_failure_verbatim` pins the resolver's error string character-for-character against the pod log, so a future change that merely reshapes the message cannot quietly satisfy this case.
+  - id: omn15676-runner-fleet-missing-from-image
+    guard: scripts/ci/assert_image_config_paths.py
+    incident: OMN-15676
+    regression_class: false_green
+    guard_verdict_on_artifact: reject
+    artifact:
+      fixture: tests/fixtures/omn15676/runtime-image-config-probe-403b6092.txt.captured
+      sha256: 9be8ff420b04bd0b96ef944ff4b67d639501f32810320fa96294d1f4b5d60a41
+    capture:
+      method: container-probe
+      source: container-probe:ghcr.io/omninode-ai/omnibase-infra-runtime@sha256:403b60921fe0a624ab788d9444e710a2223bd8d3c39304e7e8d9809e7ef1fcdd:/app/config
+      captured_at: "2026-08-02T23:41:00Z"
+      captured_by: lane replay (OMN-15676)
+    test: tests/ci/test_assert_image_config_paths.py::test_replay_real_prefix_image_probe_is_rejected
+    why: >-
+      config/runner_fleet.yaml was tracked, valid, referenced by config code, and shipped in NO runtime image, because no Dockerfile COPY placed it. The runtime resolves it at /app/config/runner_fleet.yaml (default_runner_fleet_config_path is repo-root-relative, and the image sets PYTHONPATH=/app/src, so parents[4] is /app), HandlerRunnerFleetSnapshot.__init__ calls load_runner_fleet_config() which raises rather than falling back to lab defaults, and the handler is instantiated during auto-wiring -- so with ONEX_WIRING_STRICT_MODE=1 bound on onex-dev the absence is a boot failure, not a degraded mode. Direction is false_green in the strongest sense: there was no red anywhere. Every source-level check passed, because every source-level check was looking at a working tree that was correct. This is the THIRD instance of the class (grants fixture, then routing_tiers.yaml under OMN-15645, now this), which is why the repair ships the generalized in-image assertion and not just the missing COPY. The artifact is the verbatim stdout of the guard's own probe run inside the digest-pinned image ghcr.io/omninode-ai/omnibase-infra-runtime@sha256:403b6092 on omni-201-ts -- two lines, one MISSING and one PRESENT, so it is also the control: a blanket-reject implementation that failed every path would look correct against an all-missing capture, and cannot against this one. The locator grammar `container-probe` was added to this checker in the same commit for the same reason -- an incident whose failing bytes exist only inside an image had no re-fetchable locator, so this class could not be replayed at all.

@@ -192,6 +192,19 @@ jobs:
           severity: 'CRITICAL,HIGH'
           version: 'v0.69.3'
 
+      # OMN-15676: prove the required config files are actually IN the image
+      # before it can be pushed. Three incidents (grants fixture, routing_tiers,
+      # runner_fleet) shipped images whose repo tree was perfectly correct and
+      # whose runtime boot-crashed on a missing /app/config file. The registry
+      # this reads is src/omnibase_infra/runtime/required_image_config_paths.py;
+      # it runs `test -f` INSIDE the built image, not against the checkout, and
+      # fails closed on a probe that cannot run.
+      - name: Assert required config paths exist in the built image (OMN-15676)
+        run: |
+          set -euo pipefail
+          python3 scripts/ci/assert_image_config_paths.py \
+            --image "${{ steps.meta.outputs.image_repo }}:${{ github.sha }}"
+
       - name: Push image to Amazon ECR
         if: success()
         shell: bash
