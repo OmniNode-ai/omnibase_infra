@@ -189,16 +189,17 @@ def test_green_when_no_uv_sources_override_present(mod, tmp_path: Path) -> None:
 
 
 def test_green_when_git_override_has_no_declared_version(mod, tmp_path: Path) -> None:
-    """A git override for a package with NO `pkg==X.Y.Z` constraint has
-    nothing to compare against -- that shape is find_violations' problem
-    (forbidden override), not a lineage-mismatch problem."""
+    """A git override for a package NEVER REFERENCED by any dependency /
+    override-dependency entry (not even a range) has nothing to compare
+    against -- that shape is find_violations' problem (forbidden override),
+    not a lineage-mismatch problem."""
 
     def _resolve(repo: str, ref: str) -> tuple[str | None, str]:
         raise AssertionError("resolver must not be called with no declared version")
 
     path = _write_pyproject(
         tmp_path,
-        dependencies='"omnibase-core>=0.46.1,<0.47.0",',
+        dependencies="",
         sources_block=(
             "[tool.uv.sources]\n"
             'omnibase-core = { git = "https://github.com/OmniNode-ai/omnibase_core.git", '
@@ -206,6 +207,72 @@ def test_green_when_git_override_has_no_declared_version(mod, tmp_path: Path) ->
         ),
     )
     assert mod.find_lineage_violations(path.read_text(), resolve=_resolve) == []
+
+
+# ---------------------------------------------------------------------------
+# RED: the AC2 bypass an adversarial verifier found and reproduced live --
+# loosening `==0.46.8` to `>=0.46.8,<0.47.0` made the ORIGINAL implementation
+# skip the package entirely (declared.get(pkg) is None for a range), so a
+# git override escaped by a valid raw-override-ok token sailed through BOTH
+# find_violations (token) and find_lineage_violations (no exact version to
+# compare) with zero violations. Live repro command that produced CASE B:
+# `check_dep_provenance.py --check-lineage` exited 0 for the identical
+# divergent rev (3d51b047) + identical token with `>=0.46.8,<0.47.0` instead
+# of `==0.46.8`, while the `==` form exited 1.
+# ---------------------------------------------------------------------------
+
+
+def test_red_when_declared_constraint_is_a_range_not_an_exact_pin(
+    mod, tmp_path: Path
+) -> None:
+    """A range constraint next to a git override + valid escape token must
+    RED, not silently pass -- a range does not unambiguously name a single
+    released tree to compare against, so "nothing to compare" is wrong; it
+    is an unprovable, and therefore failing, shape."""
+    path = _write_pyproject(
+        tmp_path,
+        dependencies='"omnibase-core>=0.46.8,<0.47.0",',
+        sources_block=(
+            "[tool.uv.sources]\n"
+            'omnibase-core = { git = "https://github.com/OmniNode-ai/omnibase_core.git", '
+            f'rev = "{_PINNED_REV}" }}  # raw-override-ok: OMN-15414\n'
+        ),
+    )
+    text = path.read_text()
+
+    def _boom(repo: str, ref: str) -> tuple[str | None, str]:
+        raise AssertionError(
+            "a range constraint has no single released tree to resolve "
+            "against -- the resolver must not even be called"
+        )
+
+    # find_violations is fooled by the token, same as the exact-pin case.
+    assert mod.find_violations(text) == []
+    violations = mod.find_lineage_violations(text, resolve=_boom)
+    assert len(violations) == 1
+    assert "omnibase-core" in violations[0]
+    assert "non-exact" in violations[0]
+
+
+def test_red_when_declared_constraint_is_a_bare_unversioned_name(
+    mod, tmp_path: Path
+) -> None:
+    """A bare `"omnibase-core"` entry (no version operator at all) next to a
+    git override is likewise unprovable and must RED."""
+    path = _write_pyproject(
+        tmp_path,
+        dependencies='"omnibase-core",',
+        sources_block=(
+            "[tool.uv.sources]\n"
+            'omnibase-core = { git = "https://github.com/OmniNode-ai/omnibase_core.git", '
+            f'rev = "{_PINNED_REV}" }}  # raw-override-ok: OMN-15414\n'
+        ),
+    )
+    violations = mod.find_lineage_violations(
+        path.read_text(), resolve=lambda repo, ref: (None, "should not be called")
+    )
+    assert len(violations) == 1
+    assert "non-exact" in violations[0]
 
 
 # ---------------------------------------------------------------------------
@@ -299,3 +366,250 @@ def test_allow_undetermined_lineage_refused_under_ci(
         )
         == 2
     )
+
+
+# ---------------------------------------------------------------------------
+# AC3 -- escape-token reconciliation (find_escape_token_violations).
+#
+# Root cause: `# raw-override-ok: <ticket>` exempted `find_violations`
+# unconditionally and forever -- never checked against whether `<ticket>` is
+# still open. Reproduced live during this ticket's own build: a well-formed
+# `# raw-override-ok: OMN-15414` token against the real OMN-15414 ticket
+# (confirmed Done via Linear `get_issue`) exits 0 under `--check-lineage`
+# under CI=true -- the exact RED case this section closes.
+# ---------------------------------------------------------------------------
+
+
+def test_red_token_cites_a_done_ticket(mod, tmp_path: Path) -> None:
+    """The exact RED case the ticket names: a well-formed token citing a
+    ticket that resolves to Done."""
+    block = (
+        "[tool.uv.sources]\n"
+        'omnibase-core = { git = "https://github.com/OmniNode-ai/omnibase_core.git", '
+        f'rev = "{_PINNED_REV}" }}  # raw-override-ok: OMN-15414\n'
+    )
+    path = _write_pyproject(tmp_path, sources_block=block)
+
+    def _resolve_done(ticket_id: str) -> tuple[str | None, str]:
+        assert ticket_id == "OMN-15414"
+        return "Done", "ok"
+
+    violations = mod.find_escape_token_violations(
+        path.read_text(), resolve_ticket=_resolve_done
+    )
+    assert len(violations) == 1
+    assert "OMN-15414" in violations[0]
+    assert "closed" in violations[0]
+
+
+@pytest.mark.parametrize("status_name", ["Cancelled", "Duplicate", "done"])
+def test_red_token_cites_other_closed_statuses(
+    mod, tmp_path: Path, status_name: str
+) -> None:
+    block = (
+        "[tool.uv.sources]\n"
+        'omnibase-core = { git = "https://github.com/OmniNode-ai/omnibase_core.git", '
+        f'rev = "{_PINNED_REV}" }}  # raw-override-ok: OMN-1\n'
+    )
+    path = _write_pyproject(tmp_path, sources_block=block)
+    violations = mod.find_escape_token_violations(
+        path.read_text(), resolve_ticket=lambda t: (status_name, "ok")
+    )
+    assert len(violations) == 1
+
+
+def test_green_token_cites_an_open_ticket(mod, tmp_path: Path) -> None:
+    block = (
+        "[tool.uv.sources]\n"
+        'omnibase-core = { git = "https://github.com/OmniNode-ai/omnibase_core.git", '
+        f'rev = "{_PINNED_REV}" }}  # raw-override-ok: OMN-1\n'
+    )
+    path = _write_pyproject(tmp_path, sources_block=block)
+    violations = mod.find_escape_token_violations(
+        path.read_text(), resolve_ticket=lambda t: ("In Progress", "ok")
+    )
+    assert violations == []
+
+
+def test_red_token_until_date_has_expired(mod, tmp_path: Path) -> None:
+    """The `until=` half needs no network at all and fires purely on date."""
+    from datetime import date
+
+    block = (
+        "[tool.uv.sources]\n"
+        'omnibase-core = { git = "https://github.com/OmniNode-ai/omnibase_core.git", '
+        f'rev = "{_PINNED_REV}" }}  # raw-override-ok: OMN-1 until=2026-01-01\n'
+    )
+    path = _write_pyproject(tmp_path, sources_block=block)
+
+    def _boom(ticket_id: str) -> tuple[str | None, str]:
+        raise AssertionError(
+            "an already-expired until= date must short-circuit before any "
+            "ticket-status resolution"
+        )
+
+    violations = mod.find_escape_token_violations(
+        path.read_text(), resolve_ticket=_boom, today=date(2026, 8, 1)
+    )
+    assert len(violations) == 1
+    assert "EXPIRED" in violations[0]
+
+
+def test_green_token_until_date_not_yet_expired(mod, tmp_path: Path) -> None:
+    from datetime import date
+
+    block = (
+        "[tool.uv.sources]\n"
+        'omnibase-core = { git = "https://github.com/OmniNode-ai/omnibase_core.git", '
+        f'rev = "{_PINNED_REV}" }}  # raw-override-ok: OMN-1 until=2027-01-01\n'
+    )
+    path = _write_pyproject(tmp_path, sources_block=block)
+    violations = mod.find_escape_token_violations(
+        path.read_text(),
+        resolve_ticket=lambda t: ("In Progress", "ok"),
+        today=date(2026, 8, 1),
+    )
+    assert violations == []
+
+
+def test_green_no_escape_token_present(mod, tmp_path: Path) -> None:
+    """No token at all is find_violations' problem, not this check's -- must
+    not call the resolver."""
+    block = (
+        "[tool.uv.sources]\n"
+        'omnibase-core = { git = "https://github.com/OmniNode-ai/omnibase_core.git", '
+        f'rev = "{_PINNED_REV}" }}\n'
+    )
+    path = _write_pyproject(tmp_path, sources_block=block)
+
+    def _boom(ticket_id: str) -> tuple[str | None, str]:
+        raise AssertionError("resolver must not run with no escape token")
+
+    assert (
+        mod.find_escape_token_violations(path.read_text(), resolve_ticket=_boom) == []
+    )
+
+
+def test_graceful_skip_when_linear_api_key_unset(
+    mod, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """No LINEAR_API_KEY -- resolve_ticket_status's real implementation
+    returns the sentinel detail, and the check degrades gracefully (skip,
+    not fail), matching check_stale_todos.py's posture."""
+    monkeypatch.delenv("LINEAR_API_KEY", raising=False)
+    block = (
+        "[tool.uv.sources]\n"
+        'omnibase-core = { git = "https://github.com/OmniNode-ai/omnibase_core.git", '
+        f'rev = "{_PINNED_REV}" }}  # raw-override-ok: OMN-15414\n'
+    )
+    path = _write_pyproject(tmp_path, sources_block=block)
+    # Uses the REAL resolve_ticket_status (no injected fake) to prove the
+    # graceful-degradation path in the shipped code, not just the test double.
+    assert mod.find_escape_token_violations(path.read_text()) == []
+
+
+def test_check_token_expiry_flag_wired_through_cli(mod, tmp_path: Path) -> None:
+    """--check-token-expiry runs find_escape_token_violations and fails the
+    process; omitting it does not."""
+    block = (
+        "[tool.uv.sources]\n"
+        'omnibase-core = { git = "https://github.com/OmniNode-ai/omnibase_core.git", '
+        f'rev = "{_PINNED_REV}" }}  # raw-override-ok: OMN-1 until=2020-01-01\n'
+    )
+    path = _write_pyproject(tmp_path, sources_block=block)
+
+    assert mod.main(["--pyproject", str(path)]) == 0
+    assert mod.main(["--pyproject", str(path), "--check-token-expiry"]) == 1
+
+
+# ---------------------------------------------------------------------------
+# AC4 -- cascade-movability check (find_unmovable_cascade_targets,
+# --check-movable). Proof this closes: a dependency-cascade run
+# (`.github/workflows/dependency-cascade.yml`) that tries to move a
+# [tool.uv.sources]-git-pinned package via `uv lock --upgrade-package` cannot
+# -- uv always prefers the explicit source override -- and previously had no
+# way to surface that as anything other than a silent "no lockfile changes"
+# skip. This is the standalone CLI check that workflow now runs BEFORE
+# attempting the (guaranteed no-op) lock.
+# ---------------------------------------------------------------------------
+
+
+def test_check_movable_fails_for_a_git_pinned_package(mod, tmp_path: Path) -> None:
+    block = (
+        "[tool.uv.sources]\n"
+        'omnibase-core = { git = "https://github.com/OmniNode-ai/omnibase_core.git", '
+        f'rev = "{_PINNED_REV}" }}  # raw-override-ok: OMN-15414\n'
+    )
+    path = _write_pyproject(tmp_path, sources_block=block)
+    violations = mod.find_unmovable_cascade_targets(path.read_text(), "omnibase-core")
+    assert len(violations) == 1
+    assert "cannot move" in violations[0]
+
+
+def test_check_movable_ignores_escape_token(mod, tmp_path: Path) -> None:
+    """A valid raw-override-ok token does NOT make the package movable by a
+    cascade -- the token only ever exempted find_violations."""
+    block = (
+        "[tool.uv.sources]\n"
+        'omnibase-core = { git = "https://github.com/OmniNode-ai/omnibase_core.git", '
+        f'rev = "{_PINNED_REV}" }}  # raw-override-ok: OMN-15414\n'
+    )
+    path = _write_pyproject(tmp_path, sources_block=block)
+    assert mod.find_violations(path.read_text()) == []  # token exempts this check
+    assert (
+        len(mod.find_unmovable_cascade_targets(path.read_text(), "omnibase-core")) == 1
+    )
+
+
+def test_check_movable_underscore_and_hyphen_spelling_both_match(
+    mod, tmp_path: Path
+) -> None:
+    block = (
+        "[tool.uv.sources]\n"
+        'omnibase-core = { git = "https://github.com/OmniNode-ai/omnibase_core.git", '
+        f'rev = "{_PINNED_REV}" }}\n'
+    )
+    path = _write_pyproject(tmp_path, sources_block=block)
+    assert (
+        len(mod.find_unmovable_cascade_targets(path.read_text(), "omnibase_core")) == 1
+    )
+
+
+def test_check_movable_green_when_no_override_present(mod, tmp_path: Path) -> None:
+    path = _write_pyproject(tmp_path, sources_block="[tool.uv.sources]\n")
+    assert mod.find_unmovable_cascade_targets(path.read_text(), "omnibase-core") == []
+
+
+def test_check_movable_flag_wired_through_cli(mod, tmp_path: Path) -> None:
+    """--check-movable is a standalone CLI path (used directly by
+    dependency-cascade.yml) independent of find_violations/--check-lineage."""
+    block = (
+        "[tool.uv.sources]\n"
+        'omnibase-core = { git = "https://github.com/OmniNode-ai/omnibase_core.git", '
+        f'rev = "{_PINNED_REV}" }}  # raw-override-ok: OMN-15414\n'
+    )
+    path = _write_pyproject(tmp_path, sources_block=block)
+    assert mod.main(["--pyproject", str(path), "--check-movable", "omnibase-core"]) == 1
+    assert mod.main(["--pyproject", str(path), "--check-movable", "omnibase-spi"]) == 0
+
+
+def test_ci_yml_dep_provenance_lineage_job_also_runs_check_token_expiry() -> None:
+    """AC3 must be a real wired gate, not detection-only: the SAME job
+    already registered in ci_summary_gate.py's STRICT_GATE_JOBS
+    ("Dep Provenance Lineage Gate (OMN-15604)") must also invoke
+    --check-token-expiry, so a fail there fails the same fail-closed job the
+    lineage half already fails through."""
+    import yaml
+
+    repo_root = Path(__file__).resolve().parents[2]
+    workflow = yaml.safe_load(
+        (repo_root / ".github" / "workflows" / "ci.yml").read_text()
+    )
+    job = workflow["jobs"]["dep-provenance-lineage-gate"]
+    assert job["name"] == "Dep Provenance Lineage Gate (OMN-15604)"
+
+    run_scripts = "\n".join(
+        step.get("run", "") for step in job["steps"] if "run" in step
+    )
+    assert "--check-lineage" in run_scripts
+    assert "--check-token-expiry" in run_scripts
