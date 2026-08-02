@@ -132,7 +132,7 @@ def test_verified_authority_cannot_authorize_a_different_dispatch_event() -> Non
         payload={"value": "different"},
         correlation_id=authority.trace_id,
     )
-    target = projection_database_target("tenant_events", schema="tenant")
+    target = projection_database_target("delegation_events", schema="tenant")
 
     with patch("psycopg2.connect") as connect:
         adapter = _adapter(
@@ -141,7 +141,7 @@ def test_verified_authority_cannot_authorize_a_different_dispatch_event() -> Non
             tenant_event=different_event,
         )
         with pytest.raises(ProjectionTenantContextError, match="dispatched envelope"):
-            adapter.upsert("tenant_events", "event_id", {"event_id": uuid4()})
+            adapter.upsert("delegation_events", "event_id", {"event_id": uuid4()})
 
     connect.assert_not_called()
 
@@ -201,13 +201,13 @@ def test_red_control_untrusted_tenant_selection() -> None:
             security_labels={"tenant_id": str(tenant_id)},
         ),
     )
-    target = projection_database_target("tenant_events", schema="tenant")
+    target = projection_database_target("delegation_events", schema="tenant")
     conn, _ = _connection("tenant_projection_writer")
 
     with patch("psycopg2.connect", return_value=conn):
         adapter = _adapter(target, authority=None)
         with pytest.raises(ProjectionTenantContextError, match="verified authority"):
-            adapter.upsert("tenant_events", "event_id", {"event_id": uuid4()})
+            adapter.upsert("delegation_events", "event_id", {"event_id": uuid4()})
 
     conn.cursor.assert_not_called()
     assert (
@@ -232,13 +232,13 @@ def test_capability_constructor_is_sealed() -> None:
 
 def test_red_control_nonlocal_tenant_guc() -> None:
     tenant_id = uuid4()
-    target = projection_database_target("tenant_events", schema="tenant")
+    target = projection_database_target("delegation_events", schema="tenant")
     conn, cursor = _connection("tenant_projection_writer")
 
     with patch("psycopg2.connect", return_value=conn):
         adapter = _verified_adapter(target, tenant_id)
         assert adapter.upsert(
-            "tenant_events", "event_id", {"event_id": uuid4(), "value": "ok"}
+            "delegation_events", "event_id", {"event_id": uuid4(), "value": "ok"}
         )
 
     calls = cursor.execute.call_args_list
@@ -247,7 +247,7 @@ def test_red_control_nonlocal_tenant_guc() -> None:
         "SELECT set_config(%s, %s, true)",
         ("app.tenant_id", str(tenant_id)),
     )
-    assert 'INSERT INTO "tenant"."tenant_events"' in calls[2].args[0]
+    assert 'INSERT INTO "tenant"."delegation_events"' in calls[2].args[0]
     assert calls[2].args[1]["tenant_id"] == tenant_id
     assert isinstance(calls[2].args[1]["tenant_id"], UUID)
     conn.commit.assert_called_once_with()
@@ -256,7 +256,7 @@ def test_red_control_nonlocal_tenant_guc() -> None:
 
 def test_red_control_leaked_tenant_guc() -> None:
     tenant_id = uuid4()
-    target = projection_database_target("tenant_events", schema="tenant")
+    target = projection_database_target("delegation_events", schema="tenant")
     conn, cursor = _connection("tenant_projection_writer")
     cursor.execute.side_effect = (None, None, RuntimeError("write failed"))
 
@@ -264,7 +264,7 @@ def test_red_control_leaked_tenant_guc() -> None:
         adapter = _verified_adapter(target, tenant_id)
         with pytest.raises(RuntimeError, match="write failed"):
             adapter.upsert(
-                "tenant_events", "event_id", {"event_id": uuid4(), "value": "red"}
+                "delegation_events", "event_id", {"event_id": uuid4(), "value": "red"}
             )
 
     conn.rollback.assert_called_once_with()
@@ -274,13 +274,13 @@ def test_red_control_leaked_tenant_guc() -> None:
 
 def test_equal_canonical_row_string_is_assertion_not_authority() -> None:
     tenant_id = uuid4()
-    target = projection_database_target("tenant_events", schema="tenant")
+    target = projection_database_target("delegation_events", schema="tenant")
     conn, cursor = _connection("tenant_projection_writer")
 
     with patch("psycopg2.connect", return_value=conn):
         adapter = _verified_adapter(target, tenant_id)
         adapter.upsert(
-            "tenant_events",
+            "delegation_events",
             "event_id",
             {"event_id": uuid4(), "tenant_id": str(tenant_id)},
         )
@@ -293,13 +293,13 @@ def test_equal_canonical_row_string_is_assertion_not_authority() -> None:
 @pytest.mark.parametrize("supplied", [uuid4(), "not-a-uuid", "", 7])
 def test_wrong_or_malformed_row_tenant_fails_before_connect(supplied: object) -> None:
     tenant_id = uuid4()
-    target = projection_database_target("tenant_events", schema="tenant")
+    target = projection_database_target("delegation_events", schema="tenant")
 
     with patch("psycopg2.connect") as connect:
         adapter = _verified_adapter(target, tenant_id)
         with pytest.raises(ProjectionTenantContextError):
             adapter.upsert(
-                "tenant_events",
+                "delegation_events",
                 "event_id",
                 {"event_id": uuid4(), "tenant_id": supplied},
             )
@@ -328,7 +328,7 @@ def test_mixed_target_uses_distinct_domain_bindings_and_connections() -> None:
             schema="tenant",
             migration="proof/tenant.sql",
             access="read_write",
-            role="tenant_events",
+            role="delegation_events",
         ),
         ModelDbTableDeclaration(
             name="generation_events",
@@ -401,13 +401,20 @@ def test_red_control_internal_resolver_call() -> None:
     )
 
 
-@pytest.mark.parametrize("schema", ["tenant", "omninode_internal"])
-def test_write_only_declaration_rejects_query_for_every_domain(schema: str) -> None:
-    target = _target("write_only", schema, "write")
+@pytest.mark.parametrize(
+    ("schema", "table"),
+    [("tenant", "delegation_events"), ("omninode_internal", "generation_events")],
+)
+def test_write_only_declaration_rejects_query_for_every_domain(
+    schema: str, table: str
+) -> None:
+    # Relations are real shipped grants (OMN-15656): a write-only *declaration*
+    # must refuse reads even when the principal separately holds SELECT.
+    target = _target(table, schema, "write")
     adapter = _adapter(target)
 
     with pytest.raises(PermissionError, match="read refused"):
-        adapter.query("write_only")
+        adapter.query(table)
 
 
 def test_catalog_reader_is_explicit_and_has_no_writer_operation() -> None:
@@ -416,6 +423,13 @@ def test_catalog_reader_is_explicit_and_has_no_writer_operation() -> None:
         schema="platform_catalog",
         access="read",
         catalog_read_binding="app_dashboard",
+        unshipped_grant_principal="app_dashboard",
+        unshipped_grant_reason=(
+            "PLATFORM_CATALOG grants are not derivable from node contracts: no "
+            "db_io.db_tables block declares a catalog relation, so the shipped "
+            "topology carries none (OMN-15355/OMN-15424 own that grant set). "
+            "This asserts the catalog binding mechanism, not catalog coverage."
+        ),
     )
     reader_conn, reader_cursor = _connection("app_dashboard")
 
@@ -540,7 +554,7 @@ def test_red_control_domain_blind_upsert() -> None:
     adapter = _adapter(target)
 
     with pytest.raises(ValueError, match="not declared"):
-        adapter.upsert("tenant_events", "event_id", {"event_id": uuid4()})
+        adapter.upsert("delegation_events", "event_id", {"event_id": uuid4()})
 
 
 def test_closed_adapter_cannot_reconnect_or_reuse_authority() -> None:

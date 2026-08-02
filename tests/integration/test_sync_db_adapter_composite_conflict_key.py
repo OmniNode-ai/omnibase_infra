@@ -44,9 +44,9 @@ def test_sync_db_adapter_composite_conflict_key_sql_shape() -> None:
     conn.cursor.return_value = cursor_context
 
     with patch("psycopg2.connect", return_value=conn):
-        adapter = _internal_adapter("savings_estimates")
+        adapter = _internal_adapter("cost_by_repo_snapshots")
         result = adapter.upsert(
-            "savings_estimates",
+            "cost_by_repo_snapshots",
             "session_id,event_timestamp,model_local,model_cloud_baseline",
             {
                 "session_id": "sess-1",
@@ -77,9 +77,9 @@ def test_sync_db_adapter_single_conflict_key_unchanged() -> None:
     conn.cursor.return_value = cursor_context
 
     with patch("psycopg2.connect", return_value=conn):
-        adapter = _internal_adapter("node_registrations")
+        adapter = _internal_adapter("node_service_registry")
         result = adapter.upsert(
-            "node_registrations",
+            "node_service_registry",
             "node_id",
             {"node_id": "n1", "status": "active"},
         )

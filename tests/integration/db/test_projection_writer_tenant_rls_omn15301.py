@@ -229,6 +229,13 @@ def _catalog_reader_adapter(dsn: str) -> object:
         schema="platform_catalog",
         access="read",
         catalog_read_binding="app_dashboard",
+        unshipped_grant_principal="app_dashboard",
+        unshipped_grant_reason=(
+            "PLATFORM_CATALOG grants are not derivable from node contracts: no "
+            "db_io.db_tables block declares a catalog relation, so the shipped "
+            "topology carries none (OMN-15355/OMN-15424 own that grant set). "
+            "This asserts catalog read isolation, not catalog coverage."
+        ),
     )
     return _build_projection_db_adapter(
         projection_database_urls(target, dsn), target, None, None

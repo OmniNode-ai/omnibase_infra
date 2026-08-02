@@ -134,7 +134,9 @@ def test_projection_callback_end_to_end_with_fake_db(tmp_path: Path) -> None:
         def query(self, table: str, filters: dict | None = None) -> list:
             return []
 
-    db_tables = projection_database_target("node_service_registry")
+    db_tables = projection_database_target(
+        "node_service_registry", schema="omninode_internal"
+    )
     handler = FakeProjectionHandler()
     callback = _make_projection_dispatch_callback(
         handler, db_tables, ("onex.evt.platform.node-heartbeat.v1",)
@@ -190,7 +192,7 @@ def test_projection_callback_uses_sole_subscribed_topic_when_envelope_has_no_top
 
     callback = _make_projection_dispatch_callback(
         FakeProjectionHandler(),
-        projection_database_target("node_service_registry"),
+        projection_database_target("node_service_registry", schema="omninode_internal"),
         ("onex.evt.platform.node-heartbeat.v1",),
     )
 
@@ -241,7 +243,7 @@ def test_projection_callback_uses_event_type_when_multitopic_envelope_has_no_top
 
     callback = _make_projection_dispatch_callback(
         FakeProjectionHandler(),
-        projection_database_target("node_service_registry"),
+        projection_database_target("node_service_registry", schema="omninode_internal"),
         (
             "onex.evt.platform.node-introspection.v1",
             "onex.evt.platform.node-heartbeat.v1",
@@ -296,7 +298,7 @@ def test_projection_callback_uses_materialized_dispatch_trace_topic(
 
     callback = _make_projection_dispatch_callback(
         FakeProjectionHandler(),
-        projection_database_target("node_service_registry"),
+        projection_database_target("node_service_registry", schema="omninode_internal"),
         (
             "onex.evt.platform.node-introspection.v1",
             "onex.evt.platform.node-heartbeat.v1",
@@ -355,7 +357,7 @@ def test_projection_callback_maps_node_state_change_topic(
 
     callback = _make_projection_dispatch_callback(
         FakeProjectionHandler(),
-        projection_database_target("node_service_registry"),
+        projection_database_target("node_service_registry", schema="omninode_internal"),
         (
             "onex.evt.platform.node-introspection.v1",
             "onex.evt.platform.node-heartbeat.v1",
@@ -423,7 +425,7 @@ def test_projection_callback_rejects_missing_db_url_at_wiring(tmp_path: Path) ->
         with pytest.raises(ValueError, match="tenant_projection"):
             _make_projection_dispatch_callback(
                 CountingHandler(),
-                projection_database_target("node_service_registry"),
+                projection_database_target("delegation_events", schema="tenant"),
                 (),
             )
 

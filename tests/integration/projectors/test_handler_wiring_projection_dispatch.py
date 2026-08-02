@@ -23,6 +23,7 @@ from tests.helpers.application_db_topology import projection_database_target
 @pytest.fixture(autouse=True)
 def _configured_projection_dsn(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setenv("OMNIDASH_ANALYTICS_DB_URL", "postgresql://fixture")
+    monkeypatch.setenv("OMNINODE_INTERNAL_DB_URL", "postgresql://fixture")
 
 
 _PATCH_BUILD_ADAPTER = (
@@ -46,7 +47,9 @@ def test_projection_dispatch_bridge_injects_db_and_event_type() -> None:
             received.append(dict(input_data))
             return {"rows_upserted": 1}
 
-    db_tables = projection_database_target("node_service_registry")
+    db_tables = projection_database_target(
+        "node_service_registry", schema="omninode_internal"
+    )
     handler = FakeProjectionHandler()
     callback = _make_projection_dispatch_callback(
         handler, db_tables, ("onex.evt.platform.node-heartbeat.v1",)
@@ -137,7 +140,7 @@ def test_projection_dispatch_bridge_rejects_missing_db_url_at_wiring(
             call_count[0] += 1
             return {}
 
-    db_tables = projection_database_target("node_service_registry")
+    db_tables = projection_database_target("delegation_events", schema="tenant")
     handler = FakeProjectionHandler()
     monkeypatch.delenv("OMNIDASH_ANALYTICS_DB_URL")
 
