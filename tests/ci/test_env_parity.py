@@ -46,6 +46,7 @@ Tickets: OMN-4307 (forward), OMN-15628 (reverse)
 
 from __future__ import annotations
 
+import ast
 import fnmatch
 import os
 import re
@@ -324,7 +325,6 @@ K8S_ONLY_KEYS: frozenset[str] = frozenset(
 COMPOSE_PARITY_DEBT_KEYS: frozenset[str] = frozenset(
     {
         # Runtime feature flags set cluster-side only.
-        "ENABLE_PATTERN_ENFORCEMENT",
         "ENABLE_REAL_TIME_EVENTS",
         "KAFKA_ENABLE_INTELLIGENCE",
         "ONEX_BOOT_UNIVERSE_PROVISION",
@@ -338,6 +338,76 @@ COMPOSE_PARITY_DEBT_KEYS: frozenset[str] = frozenset(
         "OMNIBASE_INFRA_SKILL_LIFECYCLE_HEALTH_CHECK_STALENESS_SECONDS",
     }
 )
+
+
+# ---------------------------------------------------------------------------
+# Flags this repo has deleted (OMN-15659)
+# ---------------------------------------------------------------------------
+# OMN-8779 / OMN-8780 deleted a set of feature flags from omnibase_infra because
+# they defaulted to false and were therefore silent non-enforcement gates.
+# ``tests/audit/test_no_dead_delegation_flags.py`` keeps them deleted by
+# rejecting their names anywhere in this tree.
+#
+# That puts the reverse walk in a genuine deadlock for any such flag the cluster
+# still binds: EVERY remedy the reverse walk prescribes -- bind it in compose,
+# list it in K8S_ONLY_KEYS, list it in COMPOSE_PARITY_DEBT_KEYS -- requires
+# writing the rejected name. Both gates cannot be satisfied at once. That is the
+# defect OMN-15659 fixes: OMN-15628 classified one of these flags as compose
+# parity debt, the audit rejected the classification, and dev went red.
+#
+# Resolution: a flag THIS repo deleted is out of scope for compose parity. Its
+# absence from the compose lanes is the intended end state, not a gap. The
+# shared onex-dev ConfigMap may still bind it for another owner -- the canonical
+# feature-flag registry in ``omnibase_core.feature_flags.registry`` assigns each
+# flag an ``owning_repo`` -- and a binding owned by another repo is not
+# omnibase_infra parity debt.
+#
+# The set is READ FROM THE AUDIT rather than restated, so the two gates cannot
+# drift apart and so this module never names a rejected flag. Excluding these
+# keys does not create a blind spot: the audit itself scans every ``*.yml`` /
+# ``*.yaml`` in this tree, so a compose lane that re-bound one of them would
+# fail that audit directly.
+#
+# Fail-closed: a missing file, a renamed symbol, or an empty list raises at
+# import rather than silently yielding an empty exclusion set.
+_DEAD_FLAG_AUDIT_PATH = (
+    _REPO_ROOT / "tests" / "audit" / "test_no_dead_delegation_flags.py"
+)
+_DEAD_FLAG_AUDIT_SYMBOL = "_DEAD_FLAGS"
+
+
+def _load_repo_deleted_flags() -> frozenset[str]:
+    """Return the flag names the dead-flag audit rejects from this tree."""
+    try:
+        source = _DEAD_FLAG_AUDIT_PATH.read_text()
+    except OSError as exc:  # pragma: no cover - fail closed
+        raise RuntimeError(
+            f"cannot read the dead-flag audit at {_DEAD_FLAG_AUDIT_PATH}: {exc}. "
+            "The reverse parity walk cannot resolve which flags this repo deleted."
+        ) from exc
+
+    for node in ast.parse(source).body:
+        if not isinstance(node, ast.Assign):
+            continue
+        if not any(
+            isinstance(target, ast.Name) and target.id == _DEAD_FLAG_AUDIT_SYMBOL
+            for target in node.targets
+        ):
+            continue
+        names = frozenset(str(name) for name in ast.literal_eval(node.value))
+        if not names:
+            raise RuntimeError(
+                f"{_DEAD_FLAG_AUDIT_PATH}: {_DEAD_FLAG_AUDIT_SYMBOL} is empty"
+            )
+        return names
+
+    raise RuntimeError(
+        f"{_DEAD_FLAG_AUDIT_SYMBOL} not found in {_DEAD_FLAG_AUDIT_PATH}. "
+        "The reverse parity walk cannot resolve which flags this repo deleted."
+    )
+
+
+REPO_DELETED_FLAG_KEYS: frozenset[str] = _load_repo_deleted_flags()
 
 
 # ---------------------------------------------------------------------------
@@ -717,6 +787,10 @@ def test_k8s_bound_keys_are_bound_in_compose() -> None:
          describes cluster topology or a managed data plane
       3. Add it to COMPOSE_PARITY_DEBT_KEYS only if the compose binding is
          genuinely blocked (and file/cite a ticket)
+
+    Keys in REPO_DELETED_FLAG_KEYS are exempt and CANNOT be classified by any of
+    the three remedies above -- the dead-flag audit rejects their names anywhere
+    in this tree. See that constant for why (OMN-15659).
     """
     if K8S_RUNTIME_DIR is None:
         pytest.skip(
@@ -735,7 +809,9 @@ def test_k8s_bound_keys_are_bound_in_compose() -> None:
         "Has the services block been restructured?"
     )
 
-    accounted_for = compose_keys | K8S_ONLY_KEYS | COMPOSE_PARITY_DEBT_KEYS
+    accounted_for = (
+        compose_keys | K8S_ONLY_KEYS | COMPOSE_PARITY_DEBT_KEYS | REPO_DELETED_FLAG_KEYS
+    )
     missing = {k: v for k, v in k8s_bound.items() if k not in accounted_for}
 
     assert not missing, (
