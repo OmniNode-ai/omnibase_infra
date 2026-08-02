@@ -318,6 +318,12 @@ services:
       ONEX_LOG_LEVEL: ${ONEX_LOG_LEVEL:-DEBUG}
       ONEX_GROUP_ID: onex-runtime-e2e
       ONEX_CONTRACTS_DIR: /app/contracts
+      # OMN-15628: standalone e2e lane — it does not layer
+      # docker-compose.infra.yml, so it inherits nothing from that file's
+      # x-runtime-env anchor and needs its own routing-tiers pin. Same image
+      # (docker/Dockerfile.runtime), same in-image path, same fail-closed
+      # consumer in omnimarket's routing reducer.
+      DELEGATION_ROUTING_TIERS_PATH: /app/.venv/lib/python3.12/site-packages/omnimarket/configs/routing_tiers.yaml
     ports:
       - "${RUNTIME_PORT:-8085}:8085"
     networks:
