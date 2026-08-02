@@ -367,6 +367,7 @@ def test_resolve_connectivity_uses_container_specific_hosts_for_docker_dns(
     assert values["KAFKA_BOOTSTRAP_SERVERS"] == f"{redpanda_container}:9092"
     assert values["INTEGRATION_POSTGRES_HOST"] == postgres_container
     assert values["POSTGRES_HOST"] == postgres_container
+    assert values["POSTGRES_PORT"] == "5432"
     assert values["OMNI_INFRA_HOST"] == redpanda_container
     assert values["REDPANDA_ADVERTISE_HOST"] == redpanda_container
     assert values["OMNIBASE_INFRA_DB_URL"] == (
