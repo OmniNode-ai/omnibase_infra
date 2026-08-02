@@ -1072,27 +1072,50 @@ def test_db_url_env_map_matches_per_service_db_url_contract() -> None:
 
 
 @pytest.mark.unit
-def test_omniintelligence_requires_an_authoritative_topology_binding() -> None:
+def test_a_db_url_map_entry_alone_does_not_authorise_a_relation() -> None:
     """A legacy DB URL map entry cannot substitute for typed topology.
 
-    OMN-15423 currently declares ``omniintelligence/public`` while OMN-15414's
-    application topology does not. The runtime must retain that as an explicit
-    dependency blocker instead of accepting the old physical-name map alone.
+    This assertion originally used ``omniintelligence`` as its example because
+    that database had a map entry and no topology declaration. OMN-15655 AC-2
+    declared it, so the example moves to ``omnimemory`` — still in the map,
+    still undeclared — which keeps the property under test alive instead of
+    deleting it along with the blocker it happened to be pinning.
     """
-    assert _DB_URL_ENV_MAP["omniintelligence"] == "OMNIINTELLIGENCE_DB_URL"
+    assert _DB_URL_ENV_MAP["omnimemory"] == "OMNIMEMORY_DB_URL"
 
     table = ModelDbTableDeclaration(
-        name="dispatch_eval_results",
-        database_ref="omniintelligence",
-        schema="tenant",
-        migration="proof/dispatch_eval_results.sql",
-        role="dispatch_eval_results",
+        name="memory_documents",
+        database_ref="omnimemory",
+        schema="public",
+        migration="proof/memory_documents.sql",
+        role="memory_documents",
     )
     with pytest.raises(ValueError, match="Unknown database_ref"):
         _resolve_projection_database_target(
             (table,),
             application_topology(),
         )
+
+
+@pytest.mark.unit
+def test_omniintelligence_now_resolves_through_the_typed_topology() -> None:
+    """The closed half of the same blocker: the declaration is what authorises it.
+
+    ``node_dispatch_outcome_bridge_effect`` runs on the ``effects`` profile
+    under ``ONEX_WIRING_STRICT_MODE``, so this resolution is the difference
+    between a booting pod and a crash loop.
+    """
+    table = ModelDbTableDeclaration(
+        name="dispatch_eval_results",
+        database_ref="omniintelligence",
+        schema="public",
+        migration="proof/dispatch_eval_results.sql",
+        access="write",
+        role="dispatch_eval_results",
+    )
+    target = _resolve_projection_database_target((table,), application_topology())
+    assert target.physical_database == "omniintelligence"
+    assert target.dsn_envs == ("OMNIINTELLIGENCE_DB_URL",)
 
 
 # ---------------------------------------------------------------------------

@@ -52,8 +52,8 @@ from omnibase_infra.topology.application_database import (
 )
 from omnibase_infra.topology.table_grant_derivation import (
     ContractTableDeclaration,
-    DerivedTableGrants,
-    derive_table_grants,
+    TopologyTableGrants,
+    derive_topology_table_grants,
     load_contract_declarations,
 )
 
@@ -132,24 +132,36 @@ def _grant_to_document(grant: object) -> dict[str, object]:
     return document
 
 
-def _render_instance(path: Path, derived: DerivedTableGrants) -> str:
-    """Return the instance text with derived TABLE grants substituted in."""
+def _render_instance(path: Path, derived: TopologyTableGrants) -> str:
+    """Return the instance text with derived TABLE grants substituted in.
+
+    Every logical database in the instance is rendered, not just
+    ``application``: the omniintelligence service database (OMN-15655 AC-2)
+    carries its own principal, and a renderer scoped to one database would
+    leave that principal permanently grant-less while ``--check`` reported
+    green.
+    """
     original = path.read_text(encoding="utf-8")
     document = yaml.safe_load(original)
-    database = document["databases"]["application"]
-    for principal_name, principal in database["principals"].items():
-        # Drop every existing TABLE grant: this script owns that subset
-        # entirely, so a stale entry must not survive a regeneration.
-        retained = [
-            grant
-            for grant in principal.get("grants", [])
-            if grant.get("object_type") != EnumDatabaseGrantObjectType.TABLE.value
-        ]
-        generated = [
-            _grant_to_document(grant)
-            for grant in derived.grants.get(principal_name, ())
-        ]
-        principal["grants"] = retained + generated
+    for database_ref, database in document["databases"].items():
+        database_grants = derived.per_database.get(database_ref)
+        for principal_name, principal in database["principals"].items():
+            # Drop every existing TABLE grant: this script owns that subset
+            # entirely, so a stale entry must not survive a regeneration.
+            retained = [
+                grant
+                for grant in principal.get("grants", [])
+                if grant.get("object_type") != EnumDatabaseGrantObjectType.TABLE.value
+            ]
+            generated = (
+                []
+                if database_grants is None
+                else [
+                    _grant_to_document(grant)
+                    for grant in database_grants.grants.get(principal_name, ())
+                ]
+            )
+            principal["grants"] = retained + generated
     header = "".join(
         line for line in original.splitlines(keepends=True) if line.startswith("#")
     )
@@ -166,11 +178,11 @@ def _render_instance(path: Path, derived: DerivedTableGrants) -> str:
 
 def _derivation_for_instance(
     instance_name: str, declarations: Sequence[ContractTableDeclaration]
-) -> DerivedTableGrants:
+) -> TopologyTableGrants:
     topology = ModelDeploymentTopology.from_yaml(
         _INSTANCE_ROOT / f"{instance_name}.yaml"
     )
-    return derive_table_grants(topology, declarations)
+    return derive_topology_table_grants(topology, declarations)
 
 
 def _run_write(declarations: Sequence[ContractTableDeclaration]) -> int:
@@ -225,7 +237,7 @@ def _run_prove(declarations: Sequence[ContractTableDeclaration]) -> int:
     overall_failures = 0
     for profile in sorted(SUPPORTED_TOPOLOGY_PROFILES):
         topology = load_topology_profile(profile)
-        derived = derive_table_grants(topology, declarations)
+        derived = derive_topology_table_grants(topology, declarations)
         residual_keys = {residual.key for residual in derived.unmappable}
         passed = 0
         failed: list[str] = []

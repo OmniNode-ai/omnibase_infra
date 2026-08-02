@@ -33,6 +33,27 @@ from omnibase_infra.topology.models import (
 APPLICATION_DATABASE_REF = "application"
 APPLICATION_DATABASE_PHYSICAL_NAME = "omnidash_analytics"
 
+# OMN-15655 AC-2. ADR-0027 unified the tenant/internal *application* pair into
+# one physical database and explicitly left "identity-plane and independently
+# service-owned databases ... separate". omniintelligence is one of those: its
+# own physical database, its own migration runner, its own DSN key
+# (docs/patterns/db_url_contract.md). It is declared here so a node contract
+# that names ``database_ref: omniintelligence`` resolves through the same typed
+# authority as an application relation instead of hard-failing strict-mode
+# auto-wiring at boot.
+OMNIINTELLIGENCE_DATABASE_REF = "omniintelligence"
+OMNIINTELLIGENCE_DATABASE_PHYSICAL_NAME = "omniintelligence"
+_OMNIINTELLIGENCE_SCHEMAS = {"public": EnumDatabaseSchemaDomain.OMNINODE_INTERNAL}
+_OMNIINTELLIGENCE_SCHEMA_OWNERS = {"public": "owner_omniintelligence"}
+_OMNIINTELLIGENCE_BINDING_PRINCIPALS = {
+    "omninode_runtime_service": "role_omniintelligence"
+}
+# One DSN key across every instance: unlike the application pair, no lane
+# rebinds the omniintelligence DSN to a different variable.
+_OMNIINTELLIGENCE_BINDING_DSN_ENVS = {
+    "omninode_runtime_service": "OMNIINTELLIGENCE_DB_URL"
+}
+
 _EXPECTED_PROFILE_INSTANCE_MAP = {
     "local": "local",
     "test": "local",
@@ -209,6 +230,7 @@ def load_topology_profile(
         _topology_instance_path(binding.instance, topology_root)
     )
     validate_application_database_invariants(topology, binding.instance)
+    validate_omniintelligence_database_invariants(topology)
     return topology
 
 
@@ -302,6 +324,73 @@ def validate_application_database_invariants(
             "The omninode_runtime service name cannot double as a database binding; "
             "use omninode_runtime_service for the PostgreSQL principal namespace"
         )
+
+
+def validate_omniintelligence_database_invariants(
+    topology: ModelDeploymentTopology,
+) -> None:
+    """Fail on drift in the omniintelligence service-database declaration.
+
+    ``node_dispatch_outcome_bridge_effect`` runs on the ``effects`` runtime
+    profile, where ``ONEX_WIRING_STRICT_MODE`` makes an unresolved
+    ``database_ref`` a boot-fatal error rather than a skipped handler. Pinning
+    the declaration here means a silent edit to the instance YAML fails the
+    topology loader in CI instead of the pod at rollout.
+    """
+    database = topology.databases.get(OMNIINTELLIGENCE_DATABASE_REF)
+    if database is None:
+        raise ValueError(
+            "Topology must declare the 'omniintelligence' service database; "
+            "node contracts declare database_ref: omniintelligence and "
+            "strict-mode auto-wiring fails closed without it"
+        )
+    if database.physical_name != OMNIINTELLIGENCE_DATABASE_PHYSICAL_NAME:
+        raise ValueError(
+            "omniintelligence database must resolve to "
+            f"'{OMNIINTELLIGENCE_DATABASE_PHYSICAL_NAME}', got "
+            f"'{database.physical_name}'"
+        )
+
+    actual_schemas = {name: schema.domain for name, schema in database.schemas.items()}
+    if actual_schemas != _OMNIINTELLIGENCE_SCHEMAS:
+        raise ValueError(
+            "omniintelligence schema/domain drift: expected "
+            f"{_OMNIINTELLIGENCE_SCHEMAS}, got {actual_schemas}"
+        )
+    actual_owners = {name: schema.owner for name, schema in database.schemas.items()}
+    if actual_owners != _OMNIINTELLIGENCE_SCHEMA_OWNERS:
+        raise ValueError(
+            "omniintelligence schema-owner drift: expected "
+            f"{_OMNIINTELLIGENCE_SCHEMA_OWNERS}, got {actual_owners}"
+        )
+
+    if set(database.bindings) != set(_OMNIINTELLIGENCE_BINDING_PRINCIPALS):
+        raise ValueError(
+            "omniintelligence binding drift: expected "
+            f"{sorted(_OMNIINTELLIGENCE_BINDING_PRINCIPALS)}, got "
+            f"{sorted(database.bindings)}"
+        )
+    for (
+        binding_name,
+        expected_principal,
+    ) in _OMNIINTELLIGENCE_BINDING_PRINCIPALS.items():
+        binding = database.bindings[binding_name]
+        if binding.database_ref != OMNIINTELLIGENCE_DATABASE_REF:
+            raise ValueError(
+                f"Binding '{binding_name}' must resolve to database_ref "
+                f"'{OMNIINTELLIGENCE_DATABASE_REF}'"
+            )
+        if binding.principal != expected_principal:
+            raise ValueError(
+                f"omniintelligence binding '{binding_name}' principal drift: "
+                f"expected '{expected_principal}', got '{binding.principal}'"
+            )
+        expected_dsn_env = _OMNIINTELLIGENCE_BINDING_DSN_ENVS[binding_name]
+        if binding.dsn_env != expected_dsn_env:
+            raise ValueError(
+                f"omniintelligence binding '{binding_name}' dsn_env drift: "
+                f"expected '{expected_dsn_env}', got '{binding.dsn_env}'"
+            )
 
 
 def render_database_projection(
@@ -523,6 +612,7 @@ def validate_docker_catalog_parity(
 
 __all__ = [
     "APPLICATION_DATABASE_REF",
+    "OMNIINTELLIGENCE_DATABASE_REF",
     "SUPPORTED_ENVIRONMENTS",
     "SUPPORTED_TOPOLOGY_PROFILES",
     "TOPOLOGY_PROFILE_INSTANCE_MAP",
@@ -533,5 +623,6 @@ __all__ = [
     "validate_database_projection",
     "validate_docker_catalog_parity",
     "validate_docker_topology_profile_injections",
+    "validate_omniintelligence_database_invariants",
     "write_database_projection",
 ]

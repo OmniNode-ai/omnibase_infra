@@ -52,6 +52,7 @@ from omnibase_infra.topology.physical_schema_mapping import (
 __all__ = [
     "ContractTableDeclaration",
     "DerivedTableGrants",
+    "TopologyTableGrants",
     "UnmappableDeclaration",
     "READ_PRIVILEGES",
     "WRITE_PRIVILEGES",
@@ -59,6 +60,7 @@ __all__ = [
     "TENANT_TABLES_PHYSICALLY_IN_PUBLIC_UNTIL_OMN15359",
     "physical_grant_schema_for_table",
     "derive_table_grants",
+    "derive_topology_table_grants",
     "load_contract_declarations",
 ]
 
@@ -116,6 +118,21 @@ class DerivedTableGrants:
     """TABLE grants per principal plus the residuals that could not be derived."""
 
     grants: Mapping[str, tuple[ModelDeploymentTopologyDatabaseGrant, ...]]
+    unmappable: tuple[UnmappableDeclaration, ...]
+
+
+@dataclass(frozen=True, slots=True)
+class TopologyTableGrants:
+    """Per-logical-database derivation for a whole topology instance.
+
+    The topology stopped being single-database when the omniintelligence
+    service database was declared (OMN-15655 AC-2). Deriving only the
+    ``application`` database would have silently classified every
+    service-database declaration as an undeliverable residual, which is the
+    exact "declared but never granted" shape OMN-15656 exists to prevent.
+    """
+
+    per_database: Mapping[str, DerivedTableGrants]
     unmappable: tuple[UnmappableDeclaration, ...]
 
 
@@ -283,4 +300,62 @@ def derive_table_grants(
         unmappable=tuple(
             unmappable[key] for key in sorted(unmappable, key=lambda item: item)
         ),
+    )
+
+
+def derive_topology_table_grants(
+    topology: ModelDeploymentTopology,
+    declarations: Iterable[ContractTableDeclaration],
+) -> TopologyTableGrants:
+    """Derive TABLE grants for every logical database the topology declares.
+
+    Each declaration is routed to the database its contract names, so a
+    service-database relation is derived against that database's own
+    principals rather than being reported as an ``application`` residual. A
+    declaration naming a database no instance declares stays a typed residual
+    — routing must never invent a database to make a contract resolvable.
+    """
+    materialized = tuple(declarations)
+    by_database_ref: dict[str, list[ContractTableDeclaration]] = {}
+    for declaration in materialized:
+        by_database_ref.setdefault(declaration.table.database_ref, []).append(
+            declaration
+        )
+
+    per_database: dict[str, DerivedTableGrants] = {}
+    residuals: dict[tuple[str, str, str], UnmappableDeclaration] = {}
+    for database_ref in topology.databases:
+        # Databases with no declarations still get an entry so the renderer
+        # clears any stale TABLE grant no contract backs any more.
+        derived = derive_table_grants(
+            topology,
+            by_database_ref.get(database_ref, ()),
+            database_ref=database_ref,
+        )
+        per_database[database_ref] = derived
+        for residual in derived.unmappable:
+            residuals.setdefault(residual.key, residual)
+
+    for database_ref, database_declarations in by_database_ref.items():
+        if database_ref in topology.databases:
+            continue
+        for declaration in database_declarations:
+            table = declaration.table
+            residuals.setdefault(
+                (table.database_ref, table.schema, table.name),
+                UnmappableDeclaration(
+                    node=declaration.node,
+                    database_ref=table.database_ref,
+                    schema=table.schema,
+                    name=table.name,
+                    reason=(
+                        f"database_ref {table.database_ref!r} is not declared in "
+                        "the topology"
+                    ),
+                ),
+            )
+
+    return TopologyTableGrants(
+        per_database=per_database,
+        unmappable=tuple(residuals[key] for key in sorted(residuals)),
     )

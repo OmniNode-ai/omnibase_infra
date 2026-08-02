@@ -50,6 +50,7 @@ from omnibase_infra.topology.table_grant_derivation import (
     WRITE_PRIVILEGES,
     ContractTableDeclaration,
     derive_table_grants,
+    derive_topology_table_grants,
     physical_grant_schema_for_table,
 )
 
@@ -59,6 +60,10 @@ _INSTANCE_ROOT = (
     Path(__file__).parents[3] / "src" / "omnibase_infra" / "topology" / "instances"
 )
 _INSTANCE_NAMES = ("local", "onex-dev", "onex-prod")
+# Every logical database the shipped instances declare. ``omniintelligence`` is
+# the independently service-owned database ADR-0027 keeps separate from the
+# unified application pair (OMN-15655 AC-2).
+_DATABASE_REFS = ("application", "omniintelligence")
 _HELPER = Path(__file__).parents[2] / "helpers" / "application_db_topology.py"
 
 # The only privilege shapes the validator can ever require.
@@ -193,8 +198,11 @@ def test_omn15359_pending_tenant_tables_grant_against_current_physical_schema() 
     [
         (_declaration("x", "unresolved", "write"), "schema 'unresolved'"),
         (
-            _declaration("y", "public", "write", database_ref="omniintelligence"),
-            "database_ref 'omniintelligence'",
+            # omnimemory has a real per-service DSN key in _DB_URL_ENV_MAP but no
+            # topology declaration, so it is the live example of the class that
+            # ``omniintelligence`` occupied before OMN-15655 AC-2 declared it.
+            _declaration("y", "public", "write", database_ref="omnimemory"),
+            "database_ref 'omnimemory'",
         ),
     ],
 )
@@ -206,6 +214,51 @@ def test_undeclarable_relations_are_returned_as_typed_residuals(
     assert derived.grants == {}
     assert len(derived.unmappable) == 1
     assert reason_fragment in derived.unmappable[0].reason
+
+
+def test_topology_derivation_routes_each_declaration_to_its_own_database() -> None:
+    """Service-database declarations derive against that database's principal.
+
+    Single-database derivation classified every ``omniintelligence``
+    declaration as an ``application`` residual, so the service principal would
+    have shipped grant-less while ``--check`` stayed green.
+    """
+    topology = load_topology_profile("local")
+    derived = derive_topology_table_grants(
+        topology,
+        [
+            _declaration("generation_events", "omninode_internal", "write"),
+            _declaration(
+                "dispatch_eval_results",
+                "public",
+                "write",
+                database_ref="omniintelligence",
+            ),
+        ],
+    )
+    assert set(derived.per_database) == set(topology.databases)
+    assert set(derived.per_database["application"].grants) == {"omninode_runtime"}
+    assert set(derived.per_database["omniintelligence"].grants) == {
+        "role_omniintelligence"
+    }
+    service_grant = derived.per_database["omniintelligence"].grants[
+        "role_omniintelligence"
+    ][0]
+    assert service_grant.schema == "public"
+    assert service_grant.objects == ("dispatch_eval_results",)
+    assert set(service_grant.privileges) == set(WRITE_PRIVILEGES)
+    assert derived.unmappable == ()
+
+
+def test_topology_derivation_still_reports_an_undeclared_database_as_residual() -> None:
+    """Routing must not invent a database to make a contract resolvable."""
+    derived = derive_topology_table_grants(
+        load_topology_profile("local"),
+        [_declaration("z", "public", "write", database_ref="omnimemory")],
+    )
+    assert all(entry.grants == {} for entry in derived.per_database.values())
+    assert len(derived.unmappable) == 1
+    assert "database_ref 'omnimemory'" in derived.unmappable[0].reason
 
 
 def test_platform_catalog_is_not_derivable_from_contracts() -> None:
@@ -239,17 +292,23 @@ def test_one_relation_declared_by_two_contracts_yields_one_grant() -> None:
 # ---------------------------------------------------------------------------
 
 
-def test_every_shipped_instance_declares_table_grants() -> None:
-    """The regression itself: zero TABLE grants is what broke onex-dev."""
+@pytest.mark.parametrize("database_ref", _DATABASE_REFS)
+def test_every_shipped_instance_declares_table_grants(database_ref: str) -> None:
+    """The regression itself: zero TABLE grants is what broke onex-dev.
+
+    Parametrised over every declared database because a service database whose
+    principal ships with no TABLE grant reproduces the same defect one
+    ``database_ref`` over.
+    """
     for name in _INSTANCE_NAMES:
         document = yaml.safe_load((_INSTANCE_ROOT / f"{name}.yaml").read_text())
         grants = [
             grant
-            for principal in document["databases"]["application"]["principals"].values()
+            for principal in document["databases"][database_ref]["principals"].values()
             for grant in principal["grants"]
             if grant["object_type"] == "TABLE"
         ]
-        assert grants, f"{name}.yaml declares no TABLE grants"
+        assert grants, f"{name}.yaml declares no TABLE grants for {database_ref}"
 
 
 def test_shipped_instances_declare_identical_grants() -> None:
@@ -259,43 +318,59 @@ def test_shipped_instances_declare_identical_grants() -> None:
         document = yaml.safe_load((_INSTANCE_ROOT / f"{name}.yaml").read_text())
         blocks.append(
             {
-                principal: value["grants"]
-                for principal, value in document["databases"]["application"][
-                    "principals"
-                ].items()
+                (database_ref, principal): value["grants"]
+                for database_ref, database in document["databases"].items()
+                for principal, value in database["principals"].items()
             }
         )
     assert blocks[0] == blocks[1] == blocks[2]
+
+
+def test_every_shipped_instance_declares_the_same_databases() -> None:
+    """A database declared in one instance but not another is a lane-only boot break."""
+    declared = [
+        set(yaml.safe_load((_INSTANCE_ROOT / f"{name}.yaml").read_text())["databases"])
+        for name in _INSTANCE_NAMES
+    ]
+    assert declared[0] == declared[1] == declared[2] == set(_DATABASE_REFS)
 
 
 @pytest.mark.parametrize("profile", sorted(SUPPORTED_TOPOLOGY_PROFILES))
 def test_shipped_table_grants_are_explicit_and_minimal(profile: str) -> None:
     """No wildcards, no future-object grants, no privilege beyond the validator's."""
     topology = load_topology_profile(profile)
-    database = topology.databases["application"]
-    for principal_name, principal in database.principals.items():
-        for grant in principal.grants:
-            if grant.object_type is not EnumDatabaseGrantObjectType.TABLE:
-                continue
-            assert grant.objects, f"{principal_name} has a TABLE grant with no objects"
-            assert grant.schema is not None
-            assert not any("*" in name for name in grant.objects)
-            assert set(grant.privileges) in [
-                set(item) for item in _LEGAL_PRIVILEGE_SETS
-            ], f"{principal_name} holds a non-canonical privilege set"
+    for database_ref in _DATABASE_REFS:
+        database = topology.databases[database_ref]
+        for principal_name, principal in database.principals.items():
+            for grant in principal.grants:
+                if grant.object_type is not EnumDatabaseGrantObjectType.TABLE:
+                    continue
+                assert grant.objects, (
+                    f"{database_ref}.{principal_name} has a TABLE grant with no objects"
+                )
+                assert grant.schema is not None
+                assert not any("*" in name for name in grant.objects)
+                assert set(grant.privileges) in [
+                    set(item) for item in _LEGAL_PRIVILEGE_SETS
+                ], (
+                    f"{database_ref}.{principal_name} holds a non-canonical privilege set"
+                )
 
 
 @pytest.mark.parametrize("profile", sorted(SUPPORTED_TOPOLOGY_PROFILES))
+@pytest.mark.parametrize("database_ref", _DATABASE_REFS)
 def test_every_granted_relation_resolves_through_the_real_validator(
     profile: str,
+    database_ref: str,
 ) -> None:
     """Each shipped grant must actually satisfy ``_resolve_projection_database_target``.
 
     Drives the real resolver against the real shipped topology on every
-    supported profile — no fixture topology, no synthesised grants.
+    supported profile and every declared database — no fixture topology, no
+    synthesised grants.
     """
     topology = load_topology_profile(profile)
-    database = topology.databases["application"]
+    database = topology.databases[database_ref]
     checked = 0
     for principal in database.principals.values():
         for grant in principal.grants:
@@ -315,7 +390,7 @@ def test_every_granted_relation_resolves_through_the_real_validator(
                 )
                 table = ModelDbTableDeclaration(
                     name=name,
-                    database_ref="application",
+                    database_ref=database_ref,
                     schema=logical_schema or "",
                     migration=f"{name}.sql",
                     access=access,
@@ -323,7 +398,9 @@ def test_every_granted_relation_resolves_through_the_real_validator(
                 )
                 _resolve_projection_database_target((table,), topology)
                 checked += 1
-    assert checked > 0, f"profile {profile} granted no relations to check"
+    assert checked > 0, (
+        f"profile {profile} granted no {database_ref} relations to check"
+    )
 
 
 # ---------------------------------------------------------------------------

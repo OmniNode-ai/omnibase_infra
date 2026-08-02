@@ -194,6 +194,53 @@ databases:
       tenant:
         domain: TENANT
         owner: owner_onex_tenant
+  omniintelligence:
+    bindings:
+      omninode_runtime_service:
+        database_ref: omniintelligence
+        dsn_env: OMNIINTELLIGENCE_DB_URL
+        principal: role_omniintelligence
+    checksum_ledger: service_owned
+    checksum_ledgers:
+      service_owned:
+        checksum_column: checksum
+        domain_column: domain
+        relation: schema_migrations
+        schema: public
+        stream_column: migration_stream
+        version_column: version
+    migration_stream: omniintelligence.service
+    owners:
+      owner_omniintelligence:
+        login: false
+    physical_name: omniintelligence
+    principals:
+      role_omniintelligence:
+        bypass_rls: false
+        grants:
+          - object_type: DATABASE
+            objects: []
+            privileges:
+              - CONNECT
+            schema: null
+          - object_type: SCHEMA
+            objects: []
+            privileges:
+              - USAGE
+            schema: public
+          - object_type: TABLE
+            objects:
+              - dispatch_eval_results
+            privileges:
+              - INSERT
+              - SELECT
+              - UPDATE
+            schema: public
+        login: true
+    schemas:
+      public:
+        domain: OMNINODE_INTERNAL
+        owner: owner_omniintelligence
 environment: prod
 schema_version: '1.0'
 source:
@@ -201,5 +248,5 @@ source:
   profile_catalog_path: src/omnibase_infra/topology/application_database_profiles.yaml
   profile_catalog_sha256: 759f32da77ad41b874fbb05d2824c44f9de4c64e9d269d99da21445225a90ca1
   repository: OmniNode-ai/omnibase_infra
-  sha256: bc52e945a5255b0e0b56c712184713544f03bb4bdf7f321e15cbee87871bece6
+  sha256: d4fb2428f289a417ee7a385fa73f08f10de3c141270f44c2d237c18558b9f227
 topology_instance: local

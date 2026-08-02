@@ -164,6 +164,45 @@ databases:
       tenant:
         domain: TENANT
         owner: owner_onex_tenant
+  omniintelligence:
+    bindings:
+      omninode_runtime_service:
+        database_ref: omniintelligence
+        dsn_env: OMNIINTELLIGENCE_DB_URL
+        principal: role_omniintelligence
+    checksum_ledger: service_owned
+    checksum_ledgers:
+      service_owned:
+        checksum_column: checksum
+        domain_column: domain
+        relation: schema_migrations
+        schema: public
+        stream_column: migration_stream
+        version_column: version
+    migration_stream: omniintelligence.service
+    owners:
+      owner_omniintelligence:
+        login: false
+    physical_name: omniintelligence
+    principals:
+      role_omniintelligence:
+        bypass_rls: false
+        grants:
+          - object_type: DATABASE
+            privileges: [CONNECT]
+          - object_type: SCHEMA
+            privileges: [USAGE]
+            schema: public
+          - object_type: TABLE
+            objects:
+              - dispatch_eval_results
+            privileges: [INSERT, SELECT, UPDATE]
+            schema: public
+        login: true
+    schemas:
+      public:
+        domain: OMNINODE_INTERNAL
+        owner: owner_omniintelligence
 presets:
   application-local:
     - postgres
