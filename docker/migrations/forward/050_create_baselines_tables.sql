@@ -87,6 +87,7 @@ DO $$
 DECLARE
     v_rows BIGINT;
     v_id_type TEXT;
+    v_pk_columns TEXT[];
 BEGIN
     SELECT count(*) INTO v_rows FROM baselines_comparisons;
 
@@ -106,11 +107,21 @@ BEGIN
                 'OMN-15655: cannot converge baselines_comparisons.id from % to uuid with % pre-existing row(s); operator data mapping required.',
                 coalesce(v_id_type, '<missing>'), v_rows;
         END IF;
-    ELSIF NOT EXISTS (
-        SELECT 1 FROM pg_constraint
-        WHERE conrelid = 'baselines_comparisons'::regclass AND contype = 'p'
-    ) THEN
-        ALTER TABLE baselines_comparisons ADD CONSTRAINT baselines_comparisons_pkey PRIMARY KEY (id);
+    ELSE
+        SELECT array_agg(a.attname::text ORDER BY k.ordinality) INTO v_pk_columns
+        FROM pg_constraint c
+        CROSS JOIN LATERAL unnest(c.conkey) WITH ORDINALITY AS k(attnum, ordinality)
+        JOIN pg_attribute a ON a.attrelid = c.conrelid AND a.attnum = k.attnum
+        WHERE c.conrelid = 'baselines_comparisons'::regclass
+          AND c.contype = 'p';
+
+        IF v_pk_columns IS NULL THEN
+            ALTER TABLE baselines_comparisons ADD CONSTRAINT baselines_comparisons_pkey PRIMARY KEY (id);
+        ELSIF v_pk_columns <> ARRAY['id']::text[] THEN
+            RAISE EXCEPTION
+                'OMN-15655: baselines_comparisons primary key covers %, expected {id}; operator schema ruling required.',
+                v_pk_columns;
+        END IF;
     END IF;
 END$$;
 

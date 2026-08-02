@@ -320,6 +320,10 @@ for pass in 1 2; do
     || { sed -n '1,240p' "$legacy_log"; fail "legacy upgrade pass $pass failed"; }
   grep -F 'Sentinel set. Migration gate will report HEALTHY.' "$legacy_log" >/dev/null \
     || fail "legacy upgrade pass $pass omitted terminal sentinel proof"
+  if [ "$pass" = "1" ]; then
+    grep -F 'delegation_budget_state house-tenant re-key: 0 moved, 0 left as collisions' "$legacy_log" >/dev/null \
+      || { tail -n 120 "$legacy_log"; fail "legacy upgrade pass $pass did not prove zero delegation_budget_state house-tenant collisions"; }
+  fi
   if [ "$pass" = "2" ]; then
     grep -E 'Complete: 0 infra applied, [0-9]+ infra skipped; 0 node applied, [0-9]+ node skipped' "$legacy_log" >/dev/null \
       || { tail -n 80 "$legacy_log"; fail "legacy upgrade second pass was not idempotent"; }

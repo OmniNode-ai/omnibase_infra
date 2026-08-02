@@ -48,6 +48,24 @@ ROOT_COST_MIGRATION = (
 ROOT_BASELINES_MIGRATION = (
     REPO_ROOT / "docker" / "migrations" / "forward" / "050_create_baselines_tables.sql"
 )
+CAPABILITY_TENANT_MIGRATION = (
+    REPO_ROOT
+    / "docker"
+    / "migrations"
+    / "forward"
+    / "nodes"
+    / "node_canary_score_reducer"
+    / "0002_capability_scores_tenant_id_and_rls.sql"
+)
+DELEGATION_REKEY_MIGRATION = (
+    REPO_ROOT
+    / "docker"
+    / "migrations"
+    / "forward"
+    / "nodes"
+    / "node_projection_delegation"
+    / "0030_delegation_budget_state_house_tenant_rekey.sql"
+)
 
 REQUIRED_CASES = {
     "mapping_ambiguity",
@@ -175,6 +193,15 @@ def test_proof_runs_real_migrations_twice_and_pins_the_blocked_upgrade() -> None
         "ALTER TABLE llm_cost_aggregates ADD COLUMN IF NOT EXISTS estimated_coverage_pct"
         in ROOT_COST_MIGRATION.read_text(encoding="utf-8")
     )
+    root_cost_migration = ROOT_COST_MIGRATION.read_text(encoding="utf-8")
+    assert "ALTER TABLE llm_cost_aggregates ADD COLUMN IF NOT EXISTS id UUID;" in (
+        root_cost_migration
+    )
+    assert (
+        "ALTER TABLE llm_cost_aggregates ALTER COLUMN id SET DEFAULT gen_random_uuid()"
+        in (root_cost_migration)
+    )
+    assert "LIMIT 10000" in root_cost_migration
     baselines_migration = ROOT_BASELINES_MIGRATION.read_text(encoding="utf-8")
     assert "legacy shape reconciliation: baselines_comparisons" in baselines_migration
     assert (
@@ -183,8 +210,27 @@ def test_proof_runs_real_migrations_twice_and_pins_the_blocked_upgrade() -> None
     )
     assert "DROP COLUMN IF EXISTS id CASCADE" in baselines_migration
     assert "operator data mapping required" in baselines_migration
+    capability_tenant_migration = CAPABILITY_TENANT_MIGRATION.read_text(
+        encoding="utf-8"
+    )
+    assert "Legacy upgrade guard" in capability_tenant_migration
+    assert "CREATE TABLE IF NOT EXISTS public.capability_scores" in (
+        capability_tenant_migration
+    )
+    assert (
+        "ADD COLUMN IF NOT EXISTS tenant_id TEXT NOT NULL DEFAULT 'omninode'"
+        in capability_tenant_migration
+    )
     assert "fixture_case=legacy_upgrade status=BLOCKED" in replay
     assert "fixture_status=PASS_WITH_EXPECTED_BLOCKER blocker=OMN-15423" in replay
+    proof_text = proof
+    assert (
+        "delegation_budget_state house-tenant re-key: 0 moved, 0 left as collisions"
+        in proof_text
+    )
+    delegation_rekey = DELEGATION_REKEY_MIGRATION.read_text(encoding="utf-8")
+    assert "to_regclass('delegation_budget_state')" in delegation_rekey
+    assert "relkind IN ('r', 'p')" in delegation_rekey
 
     dockerfile = DOCKERFILE.read_text(encoding="utf-8")
     assert "ledger-control/" in dockerfile

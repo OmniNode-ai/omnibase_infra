@@ -172,7 +172,8 @@ CREATE TABLE IF NOT EXISTS llm_cost_aggregates (
 -- exists. Converge the table before column-dependent indexes/comments run, while
 -- preserving pre-existing rows and failing loudly if required columns cannot be
 -- made NOT NULL without inventing data.
-ALTER TABLE llm_cost_aggregates ADD COLUMN IF NOT EXISTS id UUID DEFAULT gen_random_uuid();
+ALTER TABLE llm_cost_aggregates ADD COLUMN IF NOT EXISTS id UUID;
+ALTER TABLE llm_cost_aggregates ALTER COLUMN id SET DEFAULT gen_random_uuid();
 ALTER TABLE llm_cost_aggregates ADD COLUMN IF NOT EXISTS aggregation_key VARCHAR(512);
 ALTER TABLE llm_cost_aggregates ADD COLUMN IF NOT EXISTS "window" cost_aggregation_window;
 ALTER TABLE llm_cost_aggregates ADD COLUMN IF NOT EXISTS total_cost_usd NUMERIC(14, 6) DEFAULT 0;
@@ -181,6 +182,27 @@ ALTER TABLE llm_cost_aggregates ADD COLUMN IF NOT EXISTS call_count INTEGER DEFA
 ALTER TABLE llm_cost_aggregates ADD COLUMN IF NOT EXISTS estimated_coverage_pct NUMERIC(5, 2);
 ALTER TABLE llm_cost_aggregates ADD COLUMN IF NOT EXISTS created_at TIMESTAMPTZ DEFAULT NOW();
 ALTER TABLE llm_cost_aggregates ADD COLUMN IF NOT EXISTS updated_at TIMESTAMPTZ DEFAULT NOW();
+
+DO $$
+DECLARE
+    v_rows BIGINT;
+BEGIN
+    LOOP
+        WITH batch AS (
+            SELECT ctid
+            FROM llm_cost_aggregates
+            WHERE id IS NULL
+            LIMIT 10000
+        )
+        UPDATE llm_cost_aggregates AS target
+        SET id = gen_random_uuid()
+        FROM batch
+        WHERE target.ctid = batch.ctid;
+
+        GET DIAGNOSTICS v_rows = ROW_COUNT;
+        EXIT WHEN v_rows = 0;
+    END LOOP;
+END$$;
 
 DO $$
 DECLARE
@@ -205,12 +227,22 @@ BEGIN
 END$$;
 
 DO $$
+DECLARE
+    v_pk_columns TEXT[];
 BEGIN
-    IF NOT EXISTS (
-        SELECT 1 FROM pg_constraint
-        WHERE conrelid = 'llm_cost_aggregates'::regclass AND contype = 'p'
-    ) THEN
+    SELECT array_agg(a.attname::text ORDER BY k.ordinality) INTO v_pk_columns
+    FROM pg_constraint c
+    CROSS JOIN LATERAL unnest(c.conkey) WITH ORDINALITY AS k(attnum, ordinality)
+    JOIN pg_attribute a ON a.attrelid = c.conrelid AND a.attnum = k.attnum
+    WHERE c.conrelid = 'llm_cost_aggregates'::regclass
+      AND c.contype = 'p';
+
+    IF v_pk_columns IS NULL THEN
         ALTER TABLE llm_cost_aggregates ADD CONSTRAINT llm_cost_aggregates_pkey PRIMARY KEY (id);
+    ELSIF v_pk_columns <> ARRAY['id']::text[] THEN
+        RAISE EXCEPTION
+            'OMN-15655: llm_cost_aggregates primary key covers %, expected {id}; operator schema ruling required.',
+            v_pk_columns;
     END IF;
 END$$;
 
