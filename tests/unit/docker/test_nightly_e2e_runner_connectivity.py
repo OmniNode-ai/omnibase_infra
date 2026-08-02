@@ -141,6 +141,7 @@ def _run_step(
         capture_output=True,
         text=True,
         check=False,
+        timeout=30,
     )
     return result, github_env
 
@@ -339,5 +340,6 @@ def test_python_can_import_the_fixed_kafka_test_modules() -> None:
             capture_output=True,
             text=True,
             check=False,
+            timeout=60,
         )
         assert result.returncode == 0, result.stdout + result.stderr
