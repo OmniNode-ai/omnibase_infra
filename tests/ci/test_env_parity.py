@@ -324,7 +324,6 @@ K8S_ONLY_KEYS: frozenset[str] = frozenset(
 COMPOSE_PARITY_DEBT_KEYS: frozenset[str] = frozenset(
     {
         # Runtime feature flags set cluster-side only.
-        "ENABLE_PATTERN_ENFORCEMENT",
         "ENABLE_REAL_TIME_EVENTS",
         "KAFKA_ENABLE_INTELLIGENCE",
         "ONEX_BOOT_UNIVERSE_PROVISION",
