@@ -69,10 +69,17 @@ def _resolve_k8s_runtime_dir() -> Path | None:
 
     # Try sibling directories relative to the repo root
     candidates: list[Path] = [
-        # Direct sibling (local worktree or CI dual-checkout)
+        # Direct sibling (CI dual-checkout, or a ticket dir holding both repos)
         _REPO_ROOT.parent / "omninode_infra" / _K8S_RUNTIME_SUBPATH,
-        # Two levels up (omni_home monorepo layout: omni_home/omnibase_infra)
+        # Two levels up (omni_home registry layout: omni_home/omnibase_infra)
         _REPO_ROOT.parent.parent / "omninode_infra" / _K8S_RUNTIME_SUBPATH,
+        # Three levels up: the standard worktree layout
+        # omni_home/omni_worktrees/<ticket>/omnibase_infra, whose canonical
+        # omninode_infra clone sits at the omni_home root. Without this the
+        # gate SKIPS on every local worktree run (including the pre-push hook),
+        # which is a vacuous green — the pre-push run for OMN-15628 skipped all
+        # three parity assertions for exactly this reason.
+        _REPO_ROOT.parent.parent.parent / "omninode_infra" / _K8S_RUNTIME_SUBPATH,
     ]
     for candidate in candidates:
         if (candidate / "configmap.yaml").exists():
