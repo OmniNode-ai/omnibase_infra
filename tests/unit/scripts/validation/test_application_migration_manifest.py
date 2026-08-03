@@ -99,10 +99,10 @@ def _minimal_fixture(tmp_path: Path) -> tuple[Path, Path]:
 def test_checked_in_manifest_is_exact_and_all_blockers_are_explicit() -> None:
     result = _validate()
 
-    # 85 as of the OMN-15423 dev-source rebase: the manifest mirrors the
-    # vendored node migration tree, and the nine stale house-tenant RLS
-    # migrations were removed when syncing against omnimarket dev.
-    assert len(result.declarations) == 85
+    # 94 as of the OMN-14894 vendor-parity repair: the manifest mirrors the
+    # vendored node migration tree after restoring the nine house-tenant RLS
+    # migrations that are still source-owned in omnimarket dev.
+    assert len(result.declarations) == 94
     assert result.blocked == ()
     assert len(result.cloud_aliases) == 30
 
