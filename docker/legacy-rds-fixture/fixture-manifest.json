@@ -94,14 +94,14 @@
       "positive_fixture": "omnibase_infra.public.schema_migrations",
       "red_fixture": "omnidash_analytics.public.schema_migrations",
       "detector": "real run-forward-migrations.sh preflight plus PostgreSQL 16 ledger integration proof",
-      "expected_red_signature": "unresolved OMN-15423 domain blocks before ledger mutation"
+      "expected_red_signature": "legacy shape controls remain discriminated before successful forward migration"
     },
     {
       "id": "application_migration_ledger",
       "positive_fixture": "ledger-control fresh and sanitized legacy databases, each run twice",
-      "red_fixture": "checked-in unresolved delegation_judge_verdict_events domain",
-      "detector": "real runner selects one checksum ledger, imports three source shapes, and preserves source OIDs/rows",
-      "expected_red_signature": "unresolved domain fails in preflight before canonical ledger mutation"
+      "red_fixture": "historical unresolved delegation_judge_verdict_events domain replayed by fixture controls",
+      "detector": "real runner selects one checksum ledger, imports three source shapes, preserves source OIDs/rows, and completes real fresh/legacy forward migrations twice",
+      "expected_red_signature": "second real forward pass is idempotent after OMN-15423 blocker ledger is emptied"
     },
     {
       "id": "cutover_receipts_and_rollback_boundary",

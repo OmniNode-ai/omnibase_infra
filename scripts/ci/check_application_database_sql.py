@@ -74,6 +74,14 @@ _LEGACY_DEFAULT_SCHEMA_SQL_EXACT_PATHS = frozenset(
             "docker/migrations/forward/nodes/node_projection_skill_executions/"
             "0002_skill_execution_snapshots_tenant_id_and_rls.sql"
         ),
+        # OMN-15655 also reconciles historical root migration shapes for
+        # fixture parity. These are legacy default-schema repair paths, not new
+        # application-database authority, and they must retain compatibility with
+        # the existing migration runner until the governed schema cutover lands.
+        Path(
+            "docker/migrations/forward/031_create_llm_call_metrics_and_cost_aggregates.sql"
+        ),
+        Path("docker/migrations/forward/050_create_baselines_tables.sql"),
     }
 )
 
