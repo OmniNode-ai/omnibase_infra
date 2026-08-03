@@ -74,6 +74,7 @@ def test_all_environment_instances_are_typed_and_target_one_application_db() -> 
 
         assert database.physical_name == "omnidash_analytics"
         assert set(database.schemas) == {
+            "public",
             "tenant",
             "omninode_internal",
             "platform_catalog",

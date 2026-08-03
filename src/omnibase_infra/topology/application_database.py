@@ -90,11 +90,13 @@ _TOPOLOGY_PROFILE_LINE = re.compile(
 )
 
 _EXPECTED_SCHEMAS = {
+    "public": EnumDatabaseSchemaDomain.TENANT,
     "tenant": EnumDatabaseSchemaDomain.TENANT,
     "omninode_internal": EnumDatabaseSchemaDomain.OMNINODE_INTERNAL,
     "platform_catalog": EnumDatabaseSchemaDomain.PLATFORM_CATALOG,
 }
 _EXPECTED_SCHEMA_OWNERS = {
+    "public": "owner_onex_tenant",
     "tenant": "owner_onex_tenant",
     "omninode_internal": "owner_omninode_internal",
     "platform_catalog": "owner_platform_catalog",

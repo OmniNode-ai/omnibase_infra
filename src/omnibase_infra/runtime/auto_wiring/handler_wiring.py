@@ -152,6 +152,9 @@ from omnibase_infra.runtime.state_io.state_store_adapter import (
     StateStoreAdapter,
 )
 from omnibase_infra.shared.tenant_stamp import stamp_verified_tenant_slug
+from omnibase_infra.topology.physical_schema_mapping import (
+    physical_grant_schema_for_table,
+)
 from omnibase_infra.utils.util_retry_optimistic import (
     OptimisticConflictError,
     retry_on_optimistic_conflict,
@@ -1858,9 +1861,10 @@ def _require_projection_binding_privileges(
 ) -> None:
     """Prove the selected topology principal can perform the exact operation."""
     principal = database.principals[binding.principal]
+    grant_schema = physical_grant_schema_for_table(table.schema, table.name)
     has_schema_usage = any(
         grant.object_type is EnumDatabaseGrantObjectType.SCHEMA
-        and grant.schema == table.schema
+        and grant.schema == grant_schema
         and EnumDatabasePrivilege.USAGE in grant.privileges
         for grant in principal.grants
     )
@@ -1879,7 +1883,7 @@ def _require_projection_binding_privileges(
         privilege
         for grant in principal.grants
         if grant.object_type is EnumDatabaseGrantObjectType.TABLE
-        and grant.schema == table.schema
+        and grant.schema == grant_schema
         and table.name in grant.objects
         for privilege in grant.privileges
     }
@@ -1890,7 +1894,7 @@ def _require_projection_binding_privileges(
     if not has_schema_usage or missing_table_privileges:
         missing = []
         if not has_schema_usage:
-            missing.append(f"USAGE on schema {table.schema!r}")
+            missing.append(f"USAGE on schema {grant_schema!r}")
         if missing_table_privileges:
             names = ", ".join(privilege.value for privilege in missing_table_privileges)
             missing.append(f"{names} on table {table.schema}.{table.name}")

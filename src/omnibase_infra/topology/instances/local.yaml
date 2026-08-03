@@ -129,6 +129,9 @@ databases:
           - object_type: SCHEMA
             privileges: [USAGE]
             schema: tenant
+          - object_type: SCHEMA
+            privileges: [USAGE]
+            schema: public
           - object_type: TABLE
             objects:
               - agent_routing_decisions
@@ -146,7 +149,7 @@ databases:
               - savings_estimates
               - skill_execution_snapshots
             privileges: [INSERT, SELECT, UPDATE]
-            schema: tenant
+            schema: public
         login: true
     schemas:
       omninode_internal:
@@ -155,6 +158,9 @@ databases:
       platform_catalog:
         domain: PLATFORM_CATALOG
         owner: owner_platform_catalog
+      public:
+        domain: TENANT
+        owner: owner_onex_tenant
       tenant:
         domain: TENANT
         owner: owner_onex_tenant

@@ -154,6 +154,11 @@ databases:
             privileges:
               - USAGE
             schema: tenant
+          - object_type: SCHEMA
+            objects: []
+            privileges:
+              - USAGE
+            schema: public
           - object_type: TABLE
             objects:
               - agent_routing_decisions
@@ -174,7 +179,7 @@ databases:
               - INSERT
               - SELECT
               - UPDATE
-            schema: tenant
+            schema: public
         login: true
     schemas:
       omninode_internal:
@@ -183,6 +188,9 @@ databases:
       platform_catalog:
         domain: PLATFORM_CATALOG
         owner: owner_platform_catalog
+      public:
+        domain: TENANT
+        owner: owner_onex_tenant
       tenant:
         domain: TENANT
         owner: owner_onex_tenant
@@ -193,5 +201,5 @@ source:
   profile_catalog_path: src/omnibase_infra/topology/application_database_profiles.yaml
   profile_catalog_sha256: 759f32da77ad41b874fbb05d2824c44f9de4c64e9d269d99da21445225a90ca1
   repository: OmniNode-ai/omnibase_infra
-  sha256: eaadf4ca5795e71df7c22ef670e85394ab776cf53f87a43515109ea423ab6fb3
+  sha256: bc52e945a5255b0e0b56c712184713544f03bb4bdf7f321e15cbee87871bece6
 topology_instance: local
