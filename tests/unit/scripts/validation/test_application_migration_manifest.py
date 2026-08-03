@@ -99,9 +99,10 @@ def _minimal_fixture(tmp_path: Path) -> tuple[Path, Path]:
 def test_checked_in_manifest_is_exact_and_all_blockers_are_explicit() -> None:
     result = _validate()
 
-    # 94 as of OMN-15655, which classified the final OMN-15423 delegation
-    # judge-verdict migrations and vendored the nine house-tenant RLS migrations.
-    assert len(result.declarations) == 94
+    # 85 as of the OMN-15423 dev-source rebase: the manifest mirrors the
+    # vendored node migration tree, and the nine stale house-tenant RLS
+    # migrations were removed when syncing against omnimarket dev.
+    assert len(result.declarations) == 85
     assert result.blocked == ()
     assert len(result.cloud_aliases) == 30
 
