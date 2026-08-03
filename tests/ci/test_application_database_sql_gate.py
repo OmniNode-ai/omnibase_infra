@@ -184,6 +184,50 @@ def test_gate_exempts_only_the_omn15503_legacy_node_migration_path(
     assert any("schema-qualified" in item for item in violations)
 
 
+def test_gate_exempts_omn15655_legacy_root_shape_repair_paths(
+    tmp_path: Path,
+) -> None:
+    repository = tmp_path / "repository"
+    repository.mkdir()
+    _git(repository, "init", "--initial-branch=main")
+    (repository / "baseline.txt").write_text("baseline\n", encoding="utf-8")
+    base_revision = _commit(repository, "baseline")
+
+    migration_dir = repository / "docker" / "migrations" / "forward"
+    migration_dir.mkdir(parents=True)
+    for filename in (
+        "031_create_llm_call_metrics_and_cost_aggregates.sql",
+        "050_create_baselines_tables.sql",
+    ):
+        (migration_dir / filename).write_text(
+            "ALTER TABLE public.legacy_shape ADD COLUMN tenant_id uuid;\n",
+            encoding="utf-8",
+        )
+
+    exempt_head = _commit(repository, "exempt legacy root shape repairs")
+    assert not validate_changed_sql(
+        repository,
+        base_revision,
+        exempt_head,
+        ownership_manifest_paths=(),
+    )
+
+    adjacent = migration_dir / "051_adjacent_unqualified.sql"
+    adjacent.write_text(
+        "ALTER TABLE legacy_shape ADD COLUMN still_blocked text;\n",
+        encoding="utf-8",
+    )
+    adjacent_head = _commit(repository, "adjacent root migration")
+    violations = validate_changed_sql(
+        repository,
+        exempt_head,
+        adjacent_head,
+        ownership_manifest_paths=(),
+    )
+    assert any("051_adjacent_unqualified.sql" in item for item in violations)
+    assert any("schema-qualified" in item for item in violations)
+
+
 def test_qualified_create_requires_an_authoritative_ownership_declaration(
     tmp_path: Path,
 ) -> None:
