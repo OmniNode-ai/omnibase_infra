@@ -1,0 +1,17 @@
+# OFFLINE zero-collision readback (in-repo generated catalog vs an EMPTY existing-state snapshot).
+# This is NOT the live cluster readback the field label implies; the module docstring is
+# explicit that the live readback (real 1089 topics) needs a broker connection from inside
+# the VPC and is deferred to Phase 3 (apply-to-cluster). This proves the catalog/report code
+# path executes cleanly and the freshly generated namespace has zero self-collisions; it does
+# NOT prove disjointness from the live cluster state.
+is_clean: True
+topic_prefix: onex.mstg1.
+group_prefix: onex.mstg1.
+checked_topic_count: 164
+checked_group_count: 56
+existing_topic_count (snapshot size): 0
+existing_group_count (snapshot size): 0
+colliding_topics: ()
+colliding_groups: ()
+prefix_conflicting_topics: ()
+prefix_conflicting_groups: ()
