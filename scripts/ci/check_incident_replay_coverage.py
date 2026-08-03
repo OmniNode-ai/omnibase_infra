@@ -131,6 +131,19 @@ LOCATOR_GRAMMARS: dict[str, re.Pattern[str]] = {
     "live-http": re.compile(r"^live-http:[A-Za-z0-9_.-]+:\d{2,5}/[A-Za-z0-9_./?=&-]*$"),
     # ci-artifact:30574058377/coverage-shard-3
     "ci-artifact": re.compile(r"^ci-artifact:\d{6,}/[A-Za-z0-9_.-]+$"),
+    # container-probe:ghcr.io/omninode-ai/omnibase-infra-runtime@sha256:<64hex>:/app/config
+    #
+    # Added by OMN-15676, which could not otherwise be replayed at all. That
+    # incident's failing artifact lives INSIDE a built image: runner_fleet.yaml
+    # was tracked, valid and referenced, and absent only from the image, so
+    # every locator above points at a surface that was correct at the time.
+    # The image MUST be digest-pinned -- a tag is mutable, so a tag-locator
+    # would let the bytes behind a case silently change and is exactly the
+    # "capture that stops being the capture" R1 exists to prevent. Re-fetch:
+    #   docker run --rm --entrypoint sh <ref> -c 'ls -R <path>'
+    "container-probe": re.compile(
+        r"^container-probe:[A-Za-z0-9._/-]+@sha256:[0-9a-f]{64}:/[A-Za-z0-9_./,+-]*$"
+    ),
 }
 
 INCIDENT_RE = re.compile(r"^(?:OMN-\d+|[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+#\d+)$")
