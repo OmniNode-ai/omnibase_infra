@@ -176,7 +176,8 @@ def test_proof_runs_real_migrations_twice_and_pins_the_blocked_upgrade() -> None
     assert "for pass in 1 2" in proof
     assert "fresh-postgres" in proof
     assert "legacy-postgres" in proof
-    assert "OMN-15423" in proof
+    assert "LEDGER_BLOCKER=" not in proof
+    assert "fixture_status=PASS blocker=none" in proof
     assert "fixture_case=legacy_upgrade status=PASS" in proof
     assert "Sentinel set. Migration gate will report HEALTHY." in proof
     assert "second pass was not idempotent" in proof

@@ -11,7 +11,6 @@ LEGACY_PORT="${LEGACY_PORT:-5432}"
 MIGRATIONS_DIR="${MIGRATIONS_DIR:-/migrations/forward}"
 RUNNER="${RUNNER:-/opt/omn15422/run-forward-migrations.sh}"
 CONTROL_MIGRATIONS_DIR="${CONTROL_MIGRATIONS_DIR:-/opt/omn15422/ledger-control/forward}"
-LEDGER_BLOCKER='unresolved migration domain for node:node_projection_delegation:0016_delegation_judge_verdict_events.sql (OMN-15423: delegation_judge_verdict_events domain unresolved)'
 
 fail() {
   echo "fixture_status=FAIL detail=$1" >&2

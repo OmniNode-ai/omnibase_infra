@@ -99,16 +99,17 @@ def _minimal_fixture(tmp_path: Path) -> tuple[Path, Path]:
 def test_checked_in_manifest_is_exact_and_all_blockers_are_explicit() -> None:
     result = _validate()
 
-    # 91 as of OMN-15655, which vendored the nine house-tenant RLS migrations.
-    assert len(result.declarations) == 91
-    assert len(result.blocked) == 3
-    assert {item.ticket for item in result.blocked} == {"OMN-15423"}
+    # 94 as of OMN-15655, which classified the final OMN-15423 delegation
+    # judge-verdict migrations and vendored the nine house-tenant RLS migrations.
+    assert len(result.declarations) == 94
+    assert result.blocked == ()
     assert len(result.cloud_aliases) == 30
 
 
-def test_completion_gate_stays_red_while_domain_classification_is_unresolved() -> None:
-    with pytest.raises(validator.ManifestError, match="incomplete: 3 blocked"):
-        _validate(require_complete=True)
+def test_completion_gate_is_green_after_domain_classification_is_complete() -> None:
+    result = _validate(require_complete=True)
+
+    assert result.blocked == ()
 
 
 def test_empty_block_set_is_valid_after_all_artifacts_are_classified(
