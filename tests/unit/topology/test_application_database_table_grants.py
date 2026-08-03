@@ -46,9 +46,11 @@ from omnibase_infra.topology.application_database import SUPPORTED_TOPOLOGY_PROF
 from omnibase_infra.topology.table_grant_derivation import (
     DOMAIN_PROJECTION_BINDINGS,
     READ_PRIVILEGES,
+    TENANT_TABLES_PHYSICALLY_IN_PUBLIC_UNTIL_OMN15359,
     WRITE_PRIVILEGES,
     ContractTableDeclaration,
     derive_table_grants,
+    physical_grant_schema_for_table,
 )
 
 pytestmark = pytest.mark.unit
@@ -157,10 +159,28 @@ def test_domain_bindings_match_the_wiring_module() -> None:
 def test_tenant_declarations_route_to_the_tenant_writer() -> None:
     topology = load_topology_profile("local")
     derived = derive_table_grants(
-        topology, [_declaration("delegation_events", "tenant", "write")]
+        topology, [_declaration("future_tenant_projection", "tenant", "write")]
     )
     assert set(derived.grants) == {"tenant_projection_writer"}
     assert derived.grants["tenant_projection_writer"][0].schema == "tenant"
+
+
+def test_omn15359_pending_tenant_tables_grant_against_current_physical_schema() -> None:
+    """Temporary physical-schema bridge: logical tenant tables still live in public."""
+    topology = load_topology_profile("local")
+    derived = derive_table_grants(
+        topology,
+        [_declaration("delegation_judge_verdict_events", "tenant", "write")],
+    )
+    assert set(derived.grants) == {"tenant_projection_writer"}
+    assert derived.grants["tenant_projection_writer"][0].schema == "public"
+    assert (
+        physical_grant_schema_for_table("tenant", "delegation_judge_verdict_events")
+        == "public"
+    )
+    assert physical_grant_schema_for_table("tenant", "future_tenant_projection") == (
+        "tenant"
+    )
 
 
 # ---------------------------------------------------------------------------
@@ -285,10 +305,18 @@ def test_every_granted_relation_resolves_through_the_real_validator(
                 "read" if set(grant.privileges) == set(READ_PRIVILEGES) else "write"
             )
             for name in grant.objects:
+                logical_schema = (
+                    "tenant"
+                    if (
+                        grant.schema == "public"
+                        and name in TENANT_TABLES_PHYSICALLY_IN_PUBLIC_UNTIL_OMN15359
+                    )
+                    else grant.schema
+                )
                 table = ModelDbTableDeclaration(
                     name=name,
                     database_ref="application",
-                    schema=grant.schema or "",
+                    schema=logical_schema or "",
                     migration=f"{name}.sql",
                     access=access,
                     role=f"{name}_projection",

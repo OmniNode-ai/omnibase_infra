@@ -61,19 +61,15 @@ databases:
             schema: omninode_internal
           - object_type: TABLE
             objects:
-              - agent_routing_decisions
               - baselines_breakdown
               - baselines_comparisons
               - baselines_quality_snapshots
               - baselines_roi_snapshots
               - baselines_snapshots
               - baselines_trend
-              - capability_scores
               - capsule_store
-              - context_roi_scores
               - contract_registry
               - cost_by_repo_snapshots
-              - dep_health_findings
               - deployment_evidence_projection
               - deployment_readiness_projection
               - event_chain
@@ -83,11 +79,9 @@ databases:
               - gate_activity
               - gate_metrics
               - generation_events
-              - instruction_eval_aggregate_snapshots
               - intent_classification_events
               - live_events
               - llm_call_metrics
-              - llm_cost_aggregates
               - llm_delegation_daily_projection
               - llm_routing_decisions
               - mcp_tools
@@ -97,7 +91,6 @@ databases:
               - node_service_registry
               - overnight_session_phases
               - overnight_sessions
-              - pattern_learning_artifacts
               - pr_lifecycle_ledger_entries
               - pr_merged_events
               - receipt_gate_rows
@@ -105,11 +98,15 @@ databases:
               - sandbox_decisions
               - session_outcomes
               - session_replay_snapshots
-              - skill_execution_snapshots
               - swarm_runs
               - traces
               - voice_sessions
             privileges: [INSERT, SELECT, UPDATE]
+            schema: omninode_internal
+          - object_type: TABLE
+            objects:
+              - nightly_loop_configs
+            privileges: [SELECT]
             schema: omninode_internal
         login: true
       onex_api:
@@ -132,15 +129,27 @@ databases:
           - object_type: SCHEMA
             privileges: [USAGE]
             schema: tenant
+          - object_type: SCHEMA
+            privileges: [USAGE]
+            schema: public
           - object_type: TABLE
             objects:
+              - agent_routing_decisions
+              - capability_scores
+              - context_roi_scores
               - delegation_budget_state
               - delegation_events
+              - delegation_judge_verdict_events
               - delegation_shadow_comparisons
+              - dep_health_findings
+              - instruction_eval_aggregate_snapshots
+              - llm_cost_aggregates
+              - pattern_learning_artifacts
               - projection_delegation_inference_response_text
               - savings_estimates
+              - skill_execution_snapshots
             privileges: [INSERT, SELECT, UPDATE]
-            schema: tenant
+            schema: public
         login: true
     schemas:
       omninode_internal:
@@ -149,6 +158,9 @@ databases:
       platform_catalog:
         domain: PLATFORM_CATALOG
         owner: owner_platform_catalog
+      public:
+        domain: TENANT
+        owner: owner_onex_tenant
       tenant:
         domain: TENANT
         owner: owner_onex_tenant

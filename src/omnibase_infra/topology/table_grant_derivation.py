@@ -44,6 +44,10 @@ from omnibase_infra.runtime.auto_wiring.handler_wiring import (
     _INTERNAL_PROJECTION_BINDING,
     _TENANT_PROJECTION_BINDING,
 )
+from omnibase_infra.topology.physical_schema_mapping import (
+    TENANT_TABLES_PHYSICALLY_IN_PUBLIC_UNTIL_OMN15359,
+    physical_grant_schema_for_table,
+)
 
 __all__ = [
     "ContractTableDeclaration",
@@ -52,6 +56,8 @@ __all__ = [
     "READ_PRIVILEGES",
     "WRITE_PRIVILEGES",
     "DOMAIN_PROJECTION_BINDINGS",
+    "TENANT_TABLES_PHYSICALLY_IN_PUBLIC_UNTIL_OMN15359",
+    "physical_grant_schema_for_table",
     "derive_table_grants",
     "load_contract_declarations",
 ]
@@ -240,8 +246,9 @@ def derive_table_grants(
                 ),
             )
             continue
+        grant_schema = physical_grant_schema_for_table(table.schema, table.name)
         entry = required.setdefault(
-            (binding.principal, table.schema, table.name), set()
+            (binding.principal, grant_schema, table.name), set()
         )
         entry.update(_privileges_for_access(table.access))
 

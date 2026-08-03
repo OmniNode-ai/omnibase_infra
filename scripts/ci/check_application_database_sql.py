@@ -35,6 +35,45 @@ _LEGACY_DEFAULT_SCHEMA_SQL_EXACT_PATHS = frozenset(
             "docker/migrations/forward/nodes/node_projection_delegation/"
             "0029_delegation_terminal_failure_cause.sql"
         ),
+        # OMN-15655 adds the house-tenant tenant_id/RLS tranche for relations
+        # whose physical tables intentionally remain in public until the
+        # governed OMN-15359 schema cutover moves the full classified set.
+        Path(
+            "docker/migrations/forward/nodes/node_canary_score_reducer/"
+            "0002_capability_scores_tenant_id_and_rls.sql"
+        ),
+        Path(
+            "docker/migrations/forward/nodes/node_projection_context_roi/"
+            "003_context_roi_scores_tenant_id_and_rls.sql"
+        ),
+        Path(
+            "docker/migrations/forward/nodes/node_projection_cost_summary/"
+            "0002_llm_cost_aggregates_tenant_id_and_rls.sql"
+        ),
+        Path(
+            "docker/migrations/forward/nodes/node_projection_delegation/"
+            "0030_delegation_budget_state_house_tenant_rekey.sql"
+        ),
+        Path(
+            "docker/migrations/forward/nodes/node_projection_dep_health/"
+            "002_dep_health_findings_tenant_id_and_rls.sql"
+        ),
+        Path(
+            "docker/migrations/forward/nodes/node_projection_instruction_eval/"
+            "0002_instruction_eval_aggregate_snapshots_tenant_id_and_rls.sql"
+        ),
+        Path(
+            "docker/migrations/forward/nodes/node_projection_pattern_learning/"
+            "0001_pattern_learning_artifacts_tenant_id_and_rls.sql"
+        ),
+        Path(
+            "docker/migrations/forward/nodes/node_projection_routing_decision/"
+            "0022_agent_routing_decisions_tenant_id_and_rls.sql"
+        ),
+        Path(
+            "docker/migrations/forward/nodes/node_projection_skill_executions/"
+            "0002_skill_execution_snapshots_tenant_id_and_rls.sql"
+        ),
     }
 )
 

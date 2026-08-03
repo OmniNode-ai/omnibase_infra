@@ -9,6 +9,9 @@ databases:
   application:
     physical_name: omnidash_analytics
     schemas:
+      public:
+        domain: TENANT
+        owner: owner_onex_tenant
       tenant:
         domain: TENANT
         owner: owner_onex_tenant
@@ -57,10 +60,13 @@ databases:
         bypass_rls: false
         grants:
           - object_type: SCHEMA
+            schema: public
+            privileges: [USAGE]
+          - object_type: SCHEMA
             schema: tenant
             privileges: [USAGE]
           - object_type: TABLE
-            schema: tenant
+            schema: public
             objects: [delegation_events]
             privileges: [SELECT, INSERT, UPDATE]
     bindings:
