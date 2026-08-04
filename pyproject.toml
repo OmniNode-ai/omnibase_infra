@@ -55,8 +55,8 @@ dependencies = [
     #   - SHAs provide audit trail and tamper-evidence
     # Core dependencies
     "pydantic>=2.11.7,<3.0.0",
-    "fastapi>=0.120.1,<0.141.0",
-    "uvicorn>=0.32.0,<0.52.0",
+    "fastapi>=0.120.1,<0.142.0",
+    "uvicorn>=0.32.0,<0.53.0",
     "pyyaml>=6.0.2,<7.0.0",
     # OMN-15688 (2026-08-04): floor raised to 3.14.3 to clear CVE-2026-69244
     # (HIGH, out-of-bounds heap read in the C HTTP response parser error path

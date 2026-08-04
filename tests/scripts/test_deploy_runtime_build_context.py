@@ -46,6 +46,25 @@ def _dockerfile_workspace_copy_sources() -> list[str]:
     return sources
 
 
+def _dockerfile_config_copy_sources() -> list[str]:
+    """Every Dockerfile.runtime COPY source that pulls from the config/ tree.
+
+    Same rationale as `_dockerfile_workspace_copy_sources` (OMN-12987), applied
+    to config/ (OMN-15696): sync_files() must rsync config/ into the deployed
+    build context or a COPY config/<x> fails workspace-mode `docker build` with
+    "failed to calculate checksum ...: not found".
+    """
+    dockerfile = DOCKERFILE.read_text(encoding="utf-8")
+    sources: list[str] = []
+    for match in _COPY_LINE_RE.finditer(dockerfile):
+        tokens = match.group("args").split()
+        if any(tok.startswith("--from=") for tok in tokens):
+            continue
+        operands = [tok for tok in tokens if not tok.startswith("--")]
+        sources.extend(src for src in operands[:-1] if src.startswith("config/"))
+    return sources
+
+
 @pytest.mark.unit
 def test_deploy_runtime_syncs_runtime_dockerfile_copy_sources() -> None:
     """deploy-runtime.sh must ship paths copied by Dockerfile.runtime."""
@@ -101,6 +120,47 @@ def test_deploy_runtime_stages_every_workspace_copy_source() -> None:
         f"does not stage them into the deployed build context: {missing}. Add an "
         "rsync of each into sync_files() or workspace-mode `docker build` will "
         "fail with 'failed to calculate checksum ...: not found' (OMN-12987)."
+    )
+
+
+@pytest.mark.unit
+def test_deploy_runtime_stages_every_config_copy_source() -> None:
+    """Every `COPY config/<x>` in Dockerfile.runtime must be staged.
+
+    Regression guard for OMN-15696: Dockerfile.runtime COPYs
+    config/runner_fleet.yaml (added by OMN-15676), but sync_files() never
+    rsynced config/ into the deployed build context, so any --force redeploy
+    or cold bring-up that recreates deployed/<version>/ failed the image build
+    with "failed to calculate checksum of ref ...:/config/runner_fleet.yaml:
+    not found" -- the same COPY-without-matching-rsync class OMN-12987 fixed
+    for workspace/.
+
+    This test derives the config/ COPY sources from the live Dockerfile and
+    asserts deploy-runtime.sh stages each -- either via an exact-file rsync
+    argument, or by rsyncing the containing config/ directory -- so a future
+    Dockerfile COPY without a matching rsync fails CI.
+    """
+    deploy_script = DEPLOY_SCRIPT.read_text(encoding="utf-8")
+
+    config_sources = _dockerfile_config_copy_sources()
+    # The Dockerfile must at minimum COPY the known runner_fleet.yaml path; a
+    # regex that silently matched nothing would make this guard vacuously pass.
+    assert "config/runner_fleet.yaml" in config_sources
+
+    directory_staged = '"${repo_root}/config/"' in deploy_script
+
+    missing: list[str] = []
+    for source in config_sources:
+        staged = directory_staged or f'"${{repo_root}}/{source}"' in deploy_script
+        if not staged:
+            missing.append(source)
+
+    assert not missing, (
+        "Dockerfile.runtime COPYs these config/ paths but deploy-runtime.sh "
+        f"does not stage them into the deployed build context: {missing}. Add an "
+        "rsync of each (or of config/ as a whole) into sync_files() or "
+        "workspace-mode `docker build` will fail with 'failed to calculate "
+        "checksum ...: not found' (OMN-15696)."
     )
 
 

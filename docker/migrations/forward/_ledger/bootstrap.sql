@@ -14,6 +14,16 @@
 -- application relation is moved (same OID, rows and owner) into
 -- platform_catalog and extended in place.  The filename-only ledger is an
 -- import source, never the selected canonical relation.
+--
+-- OMN-15695 (operator ruling 2026-08-04): the four-column
+-- public.schema_migrations(migration_id, applied_at, checksum, source_set)
+-- relation is ambiguous by column signature alone — it is the service-owned
+-- ledger in the service database and the predecessor NODE ledger in the
+-- application database.  It is partitioned on row content: source_set 'node'
+-- rows with a node:<node>:<file>.sql identity are adopted as an import source
+-- (source preserved, never moved), source_set 'docker' rows are ignored as
+-- service-owned, and anything else aborts the transaction.  A relation with no
+-- adoptable row is still refused outright.
 
 \set ON_ERROR_STOP on
 
@@ -30,6 +40,13 @@ DECLARE
   origin_shape TEXT := 'canonical';
   origin_source TEXT := 'platform_catalog.schema_migrations';
   public_shape TEXT := 'absent';
+  -- OMN-15695: row-content sub-classification of the migration_id shape.
+  -- 'none' when the shape is not migration_id, 'adopt' when the relation
+  -- carries the historical runner's node rows, 'service' when it carries only
+  -- the separate service-owned set.
+  migration_id_disposition TEXT := 'none';
+  adoptable_row_count INTEGER := 0;
+  unrecognized_row_count INTEGER := 0;
   primary_key_name TEXT;
   primary_key_columns TEXT[];
 BEGIN
@@ -87,6 +104,40 @@ BEGIN
            )
        ) THEN
       public_shape := 'migration_id';
+
+      -- OMN-15695: the column signature alone cannot tell the service-owned
+      -- ledger apart from the application database's predecessor NODE ledger.
+      -- The pre-OMN-15413 runner wrote both shapes with these four columns:
+      -- service rows as ('docker/<file>', ..., 'docker') and node rows as
+      -- ('node:<node>:<file>.sql', ..., 'node').  Partition on row content and
+      -- refuse anything that is neither.
+      SELECT
+        count(*) FILTER (
+          WHERE source_set = 'node'
+            AND migration_id ~
+              '^node:[A-Za-z0-9_][A-Za-z0-9_.-]*:[A-Za-z0-9_][A-Za-z0-9_.-]*[.]sql$'
+        ),
+        count(*) FILTER (
+          WHERE NOT (
+            source_set = 'node'
+            AND migration_id ~
+              '^node:[A-Za-z0-9_][A-Za-z0-9_.-]*:[A-Za-z0-9_][A-Za-z0-9_.-]*[.]sql$'
+          )
+          AND NOT (source_set = 'docker' AND migration_id ~ '^docker/')
+        )
+      INTO adoptable_row_count, unrecognized_row_count
+      FROM public.schema_migrations;
+
+      IF unrecognized_row_count > 0 THEN
+        RAISE EXCEPTION
+          'unknown migration ledger shape: public.schema_migrations contains % unrecognized migration_id rows',
+          unrecognized_row_count;
+      END IF;
+      IF adoptable_row_count > 0 THEN
+        migration_id_disposition := 'adopt';
+      ELSE
+        migration_id_disposition := 'service';
+      END IF;
     ELSIF column_count = 3
        AND NOT EXISTS (
          SELECT 1 FROM information_schema.columns
@@ -121,10 +172,25 @@ BEGIN
     RAISE EXCEPTION
       'double migration declaration: both public.node_schema_migrations and platform_catalog.schema_migrations exist';
   END IF;
+  -- OMN-15695: an adopted migration_id node ledger is deliberately preserved
+  -- beside the canonical ledger (the same non-destructive contract the
+  -- filename-only source has), so it is not a double declaration.  Every other
+  -- checksum-capable public relation beside the canonical ledger still is.
   IF canonical_ledger IS NOT NULL
-     AND public_shape IN ('migration_id', 'version') THEN
+     AND (public_shape = 'version'
+          OR (public_shape = 'migration_id'
+              AND migration_id_disposition <> 'adopt')) THEN
     RAISE EXCEPTION
       'double migration declaration: checksum-capable public.schema_migrations exists beside the canonical ledger';
+  END IF;
+
+  -- A migration_id relation that carries no adoptable node row is the
+  -- service-owned ledger.  It is never selected for the application database.
+  IF canonical_ledger IS NULL
+     AND public_shape = 'migration_id'
+     AND migration_id_disposition <> 'adopt' THEN
+    RAISE EXCEPTION
+      'unknown migration stream: service-owned migration_id ledger cannot be selected for the application database';
   END IF;
 
   IF canonical_ledger IS NULL AND node_ledger IS NOT NULL THEN
@@ -160,12 +226,11 @@ BEGIN
     origin_source := 'public.schema_migrations';
     public_ledger := NULL;
     public_shape := 'absent';
-  ELSIF canonical_ledger IS NULL AND public_shape = 'migration_id' THEN
-    RAISE EXCEPTION
-      'unknown migration stream: service-owned migration_id ledger cannot be selected for the application database';
   ELSIF canonical_ledger IS NULL THEN
-    -- Fresh databases and filename-only databases have no checksum-capable
-    -- candidate.  Create the selected canonical shape; filename history is
+    -- Fresh databases, filename-only databases, and the adopted migration_id
+    -- node ledger have no checksum-capable candidate that can be moved: the
+    -- migration_id relation cannot become the canonical shape without dropping
+    -- source_set.  Create the selected canonical shape; that history is
     -- imported below without renaming or rewriting the source relation.
     CREATE TABLE platform_catalog.schema_migrations (
       migration_stream TEXT NOT NULL,
@@ -418,6 +483,19 @@ BEGIN
   SELECT count(*) INTO source_column_count
   FROM information_schema.columns
   WHERE table_schema = 'public' AND table_name = 'schema_migrations';
+
+  -- OMN-15695: the migration_id-shaped predecessor node ledger is adopted by
+  -- $migration_id_import$ below.  It is a deliberately preserved adoption
+  -- source, not a filename-only source and not a double declaration.
+  IF source_column_count = 4 AND NOT EXISTS (
+    SELECT 1 FROM information_schema.columns
+    WHERE table_schema = 'public' AND table_name = 'schema_migrations'
+      AND column_name NOT IN
+        ('migration_id', 'applied_at', 'checksum', 'source_set')
+  ) THEN
+    RETURN;
+  END IF;
+
   IF source_column_count <> 2 OR EXISTS (
     SELECT 1 FROM information_schema.columns
     WHERE table_schema = 'public' AND table_name = 'schema_migrations'
@@ -473,6 +551,126 @@ BEGIN
   END LOOP;
 END
 $filename_import$;
+
+-- OMN-15695: adopt the application database's predecessor node ledger.
+--
+-- The pre-OMN-15413 runner created
+-- public.schema_migrations(migration_id, applied_at, checksum, source_set)
+-- in the NODE database and recorded each applied node migration as
+-- ('node:<node>:<file>.sql', now(), 'applied-by-runner', 'node').  That
+-- relation is the legitimate applied-history of this database, so the
+-- migration_id arm's blanket refusal was a false negative for it.
+--
+-- Operator ruling 2026-08-04 (ADOPT/CONVERT): preserve the applied history,
+-- never re-apply an already-applied migration, never delete or rewrite the
+-- source rows.  The source relation is left byte-for-byte intact, exactly as
+-- the filename-only import leaves its source.
+--
+-- Evidence class, stated plainly: 'applied-by-runner' is a sentinel, not a
+-- hash — this ledger never captured file bytes.  Adoption writes the checked-in
+-- manifest checksum under checksum_kind 'content_sha256', which ASSERTS that
+-- the bytes applied historically equal today's checked-in bytes.  That
+-- assertion is the operator ruling made mechanical; it is not derivable from
+-- the database.  It is kept auditable and non-forgeable three ways: only the
+-- exact 'applied-by-runner' literal is adoptable, a 64-hex source checksum that
+-- disagrees with the manifest is still fatal, and provenance permanently
+-- records the raw source checksum under an 'adopted:' prefix so an adopted row
+-- can never be mistaken for a runner-verified 'file:nodes/...' row.
+--
+-- Service-owned rows (source_set 'docker') belong to the separate service
+-- ledger and are ignored here.  Any row that is neither has already aborted the
+-- transaction in the selection block above.
+DO $migration_id_import$
+DECLARE
+  source_row RECORD;
+  manifest_row RECORD;
+  existing_row RECORD;
+  imported_checksum TEXT;
+  imported_provenance TEXT;
+  source_column_count INTEGER;
+BEGIN
+  IF to_regclass('public.schema_migrations') IS NULL THEN
+    RETURN;
+  END IF;
+
+  SELECT count(*) INTO source_column_count
+  FROM information_schema.columns
+  WHERE table_schema = 'public' AND table_name = 'schema_migrations';
+  IF source_column_count <> 4 OR EXISTS (
+    SELECT 1 FROM information_schema.columns
+    WHERE table_schema = 'public' AND table_name = 'schema_migrations'
+      AND column_name NOT IN
+        ('migration_id', 'applied_at', 'checksum', 'source_set')
+  ) THEN
+    RETURN;
+  END IF;
+
+  FOR source_row IN
+    SELECT migration_id, applied_at, checksum
+    FROM public.schema_migrations
+    WHERE source_set = 'node'
+      AND migration_id ~
+        '^node:[A-Za-z0-9_][A-Za-z0-9_.-]*:[A-Za-z0-9_][A-Za-z0-9_.-]*[.]sql$'
+    ORDER BY migration_id
+  LOOP
+    SELECT * INTO manifest_row
+    FROM onex_application_migration_manifest
+    WHERE version = source_row.migration_id;
+    IF NOT FOUND THEN
+      RAISE EXCEPTION
+        'unknown migration stream/domain: adopted node version % has no checked-in declaration',
+        source_row.migration_id;
+    END IF;
+
+    IF source_row.checksum ~ '^[0-9a-f]{64}$' THEN
+      IF source_row.checksum <> manifest_row.checksum THEN
+        RAISE EXCEPTION
+          'conflicting migration checksum for version %', source_row.migration_id;
+      END IF;
+      imported_checksum := source_row.checksum;
+    ELSIF source_row.checksum = 'applied-by-runner' THEN
+      imported_checksum := manifest_row.checksum;
+    ELSE
+      RAISE EXCEPTION
+        'conflicting migration checksum for version %', source_row.migration_id;
+    END IF;
+
+    imported_provenance := format(
+      'adopted:%s:public.schema_migrations:migration_id:%s:raw-checksum=%s',
+      current_database(), source_row.migration_id, source_row.checksum
+    );
+
+    SELECT * INTO existing_row
+    FROM platform_catalog.schema_migrations
+    WHERE migration_stream = manifest_row.migration_stream
+      AND domain = manifest_row.domain
+      AND version = source_row.migration_id;
+    IF FOUND THEN
+      IF existing_row.checksum <> imported_checksum THEN
+        RAISE EXCEPTION
+          'conflicting migration checksum for version %', source_row.migration_id;
+      ELSIF existing_row.owner <> manifest_row.owner
+         OR existing_row.domain <> manifest_row.domain
+         OR existing_row.checksum_kind <> 'content_sha256'
+         OR existing_row.applied_at IS DISTINCT FROM source_row.applied_at
+         OR existing_row.provenance <> imported_provenance THEN
+        RAISE EXCEPTION
+          'double migration declaration for version %', source_row.migration_id;
+      END IF;
+    ELSE
+      INSERT INTO platform_catalog.schema_migrations (
+        migration_stream, owner, domain, version, checksum, checksum_kind,
+        applied_at, provenance
+      ) VALUES (
+        manifest_row.migration_stream, manifest_row.owner,
+        manifest_row.domain, source_row.migration_id,
+        imported_checksum, 'content_sha256', source_row.applied_at,
+        imported_provenance
+      );
+    END IF;
+  END LOOP;
+END
+$migration_id_import$;
 
 -- Import omnimarket's specialized projection ledger when present.  Its
 -- (node_name, filename) identity normalizes to the already-deployed
