@@ -1,4 +1,4 @@
-# SPDX-FileCopyrightText: 2026 OmniNode.ai Inc.
+# SPDX-FileCopyrightText: 2025 OmniNode.ai Inc.
 # SPDX-License-Identifier: MIT
 from __future__ import annotations
 
@@ -58,6 +58,123 @@ def test_local_workflow_audit_honors_explicit_allowlist(tmp_path: Path) -> None:
     }
 
     assert module.audit_local_workflows(policy, tmp_path) == []
+
+
+def test_local_workflow_audit_rejects_dev_base_shortcut(tmp_path: Path) -> None:
+    module = _load_script()
+    workflow_dir = tmp_path / ".github" / "workflows"
+    workflow_dir.mkdir(parents=True)
+    (workflow_dir / "bad.yml").write_text(
+        """name: bad
+jobs:
+  test:
+    runs-on: >-
+      ${{
+        (github.event_name == 'pull_request' && github.base_ref == 'dev')
+        && fromJSON(vars.OMNI_PUBLIC_PR_RUNS_ON_JSON)
+        || fromJSON(vars.OMNI_TRUSTED_CI_RUNS_ON_JSON)
+      }}
+""",
+        encoding="utf-8",
+    )
+
+    findings = module.audit_local_workflows({"hosted_runner_allowlist": []}, tmp_path)
+
+    assert len(findings) == 2
+    assert "dev-base shortcut" in findings[0].message
+    assert "head repository differs" in findings[1].message
+
+
+def test_local_workflow_audit_rejects_public_runner_for_every_pr(
+    tmp_path: Path,
+) -> None:
+    module = _load_script()
+    workflow_dir = tmp_path / ".github" / "workflows"
+    workflow_dir.mkdir(parents=True)
+    (workflow_dir / "bad.yml").write_text(
+        """name: bad
+jobs:
+  test:
+    runs-on: >-
+      ${{
+        github.event_name == 'pull_request'
+        && fromJSON(vars.OMNI_PUBLIC_PR_RUNS_ON_JSON)
+        || fromJSON(vars.OMNI_TRUSTED_CI_RUNS_ON_JSON)
+      }}
+""",
+        encoding="utf-8",
+    )
+
+    findings = module.audit_local_workflows({"hosted_runner_allowlist": []}, tmp_path)
+
+    assert len(findings) == 1
+    assert "head repository differs" in findings[0].message
+
+
+def test_runner_variable_selection_is_fork_aware() -> None:
+    module = _load_script()
+
+    assert (
+        module.runner_variable_for_event(
+            "pull_request", "OmniNode-ai/omnibase_infra", "OmniNode-ai/omnibase_infra"
+        )
+        == "OMNI_TRUSTED_CI_RUNS_ON_JSON"
+    )
+    assert (
+        module.runner_variable_for_event(
+            "pull_request", "contributor/omnibase_infra", "OmniNode-ai/omnibase_infra"
+        )
+        == "OMNI_PUBLIC_PR_RUNS_ON_JSON"
+    )
+    assert (
+        module.runner_variable_for_event("push", None, "OmniNode-ai/omnibase_infra")
+        == "OMNI_TRUSTED_CI_RUNS_ON_JSON"
+    )
+    assert (
+        module.runner_variable_for_event(
+            "merge_group",
+            None,
+            "OmniNode-ai/omnibase_infra",
+            merge_group_variable="OMNI_REQUIRED_CI_RUNS_ON_JSON",
+        )
+        == "OMNI_REQUIRED_CI_RUNS_ON_JSON"
+    )
+
+
+def test_repository_workflows_follow_fork_aware_runner_policy() -> None:
+    module = _load_script()
+    import yaml
+
+    policy = yaml.safe_load(POLICY.read_text(encoding="utf-8"))
+
+    assert module.audit_local_workflows(policy, REPO_ROOT) == []
+
+
+def test_local_workflow_audit_rejects_pull_request_target(tmp_path: Path) -> None:
+    module = _load_script()
+    workflow_dir = tmp_path / ".github" / "workflows"
+    workflow_dir.mkdir(parents=True)
+    (workflow_dir / "bad.yml").write_text(
+        """name: bad
+on: pull_request_target
+jobs:
+  test:
+    runs-on: ubuntu-latest
+""",
+        encoding="utf-8",
+    )
+
+    findings = module.audit_local_workflows(
+        {
+            "hosted_runner_allowlist": [
+                {"path": ".github/workflows/bad.yml", "reason": "test"}
+            ]
+        },
+        tmp_path,
+    )
+
+    assert len(findings) == 1
+    assert "pull_request_target is prohibited" in findings[0].message
 
 
 def test_policy_tracks_repos_that_drifted_to_hosted_minutes() -> None:
