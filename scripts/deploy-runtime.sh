@@ -1935,6 +1935,24 @@ sync_files() {
         exit 1
     fi
 
+    # 3c. Config (repo-tracked deploy-time config baked into the image)
+    # OMN-15696: Dockerfile.runtime COPYs config/runner_fleet.yaml (OMN-15676),
+    # but sync_files() never rsynced config/ into the deployed build context, so
+    # any --force redeploy or cold bring-up that recreates deployed/<version>/
+    # fails the image build with "failed to calculate checksum of ref
+    # ...:/config/runner_fleet.yaml: not found" -- the same COPY-without-matching-
+    # rsync class OMN-12987 fixed for workspace/. Sync the whole directory (not
+    # just runner_fleet.yaml) so a future config/ COPY addition doesn't reopen
+    # the same gap.
+    if [[ -d "${repo_root}/config/" ]]; then
+        log_info "Syncing config/..."
+        log_cmd "rsync -a --delete config/ -> deployed"
+        rsync -a --delete \
+            "${repo_root}/config/" "${deploy_target}/config/"
+    else
+        log_info "No config/ directory present, skipping config sync."
+    fi
+
     # 4. Docker files -- with preserve allowlist
     #    .env, .env.local, certs/, overrides/ survive --delete
     #    Excludes use a leading '/' to anchor them to the transfer root (docker/),
