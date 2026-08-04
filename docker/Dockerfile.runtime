@@ -756,6 +756,16 @@ RUN set -eu; \
 # /usr/lib/node_modules/npm/node_modules/ are flagged CRITICAL/HIGH by Trivy
 # (severity CRITICAL,HIGH, ignore-unfixed):
 #   cross-spawn 7.0.3  -> CVE-2024-21538                 (fixed 7.0.5)
+#                         REMOVED from the pack loop in OMN-15688: npm 11.18.0
+#                         does not bundle cross-spawn AT ALL. Measured against
+#                         `node:20-slim` + `npm install -g npm@11.18.0`:
+#                         `find $(npm root -g)/npm/node_modules -type d -name
+#                         cross-spawn` returns NOTHING, at any depth. The loop's
+#                         `rm -rf` was a no-op and the `tar -xzf` was creating a
+#                         brand-new, unreferenced top-level copy that nothing
+#                         resolves — dead weight since the npm 10 -> 11 upgrade.
+#                         Trivy does not flag cross-spawn on this image, which is
+#                         consistent: there is no copy of it to flag.
 #   glob        10.4.2 -> CVE-2025-64756                 (fixed 10.5.0/11.1.0)
 #   minimatch   9.0.5  -> CVE-2026-26996/27903/27904     (fixed >=9.0.7 / 10.2.x)
 #   tar         6.2.1  -> CVE-2026-23745/23950/24842/
@@ -781,6 +791,13 @@ RUN set -eu; \
 #      package and leaves npm's bundled vulnerable copy in place (Trivy would
 #      still flag it), so instead `npm pack` each patched release and extract it
 #      directly over the bundled copy under $(npm root -g)/npm/node_modules.
+#      The loop is guarded by a presence assert (OMN-15688): every package it
+#      overwrites must ALREADY exist at that exact path. Without the assert, a
+#      package npm does not bundle there gets a fresh unreferenced copy while any
+#      real vulnerable copy survives elsewhere — a green scan over a still-
+#      vulnerable image. The assert is what caught the dead cross-spawn entry
+#      above. Verified on npm 11.18.0 that the remaining five are flat top-level
+#      entries with no nested duplicates.
 #      Exact versions keep the image reproducible (npm pack is not an
 #      `npm install -g` global-CLI install, so it is outside the pin-check).
 # The Node CLI itself is retained — it backs runtime coding-agent delegation
@@ -789,14 +806,14 @@ RUN set -eu; \
     npm install -g npm@11.18.0; \
     npm cache clean --force; \
     NPM_MODULES="$(npm root -g)/npm/node_modules"; \
-    for pkg in cross-spawn glob minimatch tar brace-expansion ip-address; do \
+    for pkg in glob minimatch tar brace-expansion ip-address; do \
         test -d "${NPM_MODULES}/${pkg}" || { \
             echo "ERROR: no bundled ${pkg} at ${NPM_MODULES}/${pkg} — npm's bundle layout changed; extracting there would create an unreferenced copy and leave the vulnerable one in place" >&2; \
             exit 1; \
         }; \
     done; \
     tmp="$(mktemp -d)"; \
-    for spec in cross-spawn@7.0.6 glob@13.0.6 minimatch@10.2.5 tar@7.5.19 brace-expansion@5.0.9 ip-address@10.3.1; do \
+    for spec in glob@13.0.6 minimatch@10.2.5 tar@7.5.19 brace-expansion@5.0.9 ip-address@10.3.1; do \
         pkg="${spec%@*}"; \
         npm pack "$spec" --pack-destination "$tmp" >/dev/null; \
         tb="$(ls "$tmp/${pkg}"-*.tgz)"; \
@@ -805,7 +822,7 @@ RUN set -eu; \
         tar -xzf "$tb" -C "${NPM_MODULES}/${pkg}" --strip-components=1; \
     done; \
     rm -rf "$tmp"; \
-    for pkg in cross-spawn glob minimatch tar brace-expansion ip-address; do \
+    for pkg in glob minimatch tar brace-expansion ip-address; do \
         v="$(node -p "require('${NPM_MODULES}/${pkg}/package.json').version")"; \
         echo "npm bundled ${pkg} patched to ${v}"; \
     done
