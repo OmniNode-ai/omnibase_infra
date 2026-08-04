@@ -166,6 +166,30 @@ REPO_ROOT="$(git rev-parse --show-toplevel 2>/dev/null)" \
          "run 'git push' from within the omnibase_infra repository"
 cd "$REPO_ROOT"
 
+# =============================================================================
+# bash>=5 canary (OMN-15617)
+# =============================================================================
+# On stickybeatz-studio (.200, the rule-11a default gate host), non-interactive
+# ssh sessions resolve `bash` to the system 3.2.57 shell even though a modern
+# bash 5.x sits at /opt/homebrew/bin/bash -- it just is not first on PATH for
+# that session class. runner-monitor.sh (exercised end-to-end by
+# tests/unit/observability/runner_health/test_runner_monitor_*.py) uses
+# `declare -A`, which bash 3.2 does not support, so those tests fail SILENTLY
+# on every push from this host class -- a bash syntax error deep inside a
+# subprocess, not a resolvable "wrong interpreter" diagnostic.
+#
+# Resolve a bash>=5 interpreter EXPLICITLY here, independent of PATH order,
+# via the same resolver the pytest harness uses (single source of truth --
+# scripts/ci/resolve_modern_bash.sh -- so the two can never drift apart), and
+# export it so the harness does not have to re-discover it. Fail LOUD with a
+# pointed remediation message if none is resolvable anywhere -- never a quiet
+# skip, never a silent fallback to whatever "bash" happens to resolve first.
+MODERN_BASH="$(bash "${REPO_ROOT}/scripts/ci/resolve_modern_bash.sh")" \
+  || die "no bash>=5 interpreter resolvable on this host" \
+         "install a modern bash (e.g. 'brew install bash') and/or set OMNIBASE_INFRA_BASH_BIN to its absolute path; see scripts/ci/resolve_modern_bash.sh"
+export OMNIBASE_INFRA_BASH_BIN="$MODERN_BASH"
+log "bash>=5 canary: resolved ${MODERN_BASH}"
+
 BASE_REF="${PREPUSH_BASE_REF:-origin/dev}"
 
 # Deterministic diff base: fetch the base ref best-effort so an online push gets

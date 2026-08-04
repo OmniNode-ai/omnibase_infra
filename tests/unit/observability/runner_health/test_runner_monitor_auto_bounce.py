@@ -39,6 +39,10 @@ from pathlib import Path
 
 import pytest
 
+from tests.unit.observability.runner_health._resolve_modern_bash import (
+    resolve_modern_bash,
+)
+
 REPO_ROOT = Path(__file__).parents[4]
 MONITOR_SCRIPT = REPO_ROOT / "docker" / "runners" / "runner-monitor.sh"
 
@@ -55,6 +59,11 @@ def _require_tools() -> None:
     for tool in ("bash", "jq", "flock"):
         if shutil.which(tool) is None:
             pytest.skip(f"{tool} not available; shell detection test requires it")
+    # runner-monitor.sh uses `declare -A` (bash>=4). OMN-15617: a bash that
+    # merely EXISTS on PATH (checked above) is not sufficient -- resolve one
+    # that is actually >=5, explicitly. Fails loud (never a silent skip) when
+    # none is resolvable anywhere.
+    resolve_modern_bash()
 
 
 def _write_exec(path: Path, body: str) -> None:
@@ -268,6 +277,11 @@ def _run_monitor(
     if extra_env:
         env.update(extra_env)
 
+    # OMN-15617: resolve a bash>=5 interpreter explicitly rather than trusting
+    # ambient PATH order (see the sibling wedge-detection module for the full
+    # rationale).
+    modern_bash = resolve_modern_bash()
+
     wrapper = tmp_path / "run.sh"
     wrapper.write_text(
         textwrap.dedent(
@@ -275,7 +289,7 @@ def _run_monitor(
             #!/usr/bin/env bash
             set -euo pipefail
             sed 's#^STATE_FILE=.*#STATE_FILE="{state_file}"#' "{MONITOR_SCRIPT}" > "{tmp_path}/monitor.sh"
-            bash "{tmp_path}/monitor.sh"
+            "{modern_bash}" "{tmp_path}/monitor.sh"
             """
         ),
         encoding="utf-8",
@@ -283,7 +297,7 @@ def _run_monitor(
     wrapper.chmod(wrapper.stat().st_mode | stat.S_IEXEC)
 
     result = subprocess.run(
-        ["bash", str(wrapper)],
+        [modern_bash, str(wrapper)],
         env=env,
         capture_output=True,
         text=True,
