@@ -1,7 +1,14 @@
 # SPDX-FileCopyrightText: 2025 OmniNode.ai Inc.
 # SPDX-License-Identifier: MIT
 
-"""PostgreSQL 16 proof for OMN-15413 ledger selection and import semantics."""
+"""PostgreSQL 16 proof for OMN-15413 ledger selection and import semantics.
+
+OMN-15695 extends this module with the adopt/convert proof for the
+pre-OMN-15413 ``public.schema_migrations(migration_id, applied_at, checksum,
+source_set)`` node ledger written by the historical runner into the application
+database.  Operator ruling 2026-08-04: adopt that exact shape non-destructively;
+every other unrecognized shape stays fail-closed.
+"""
 
 # ruff: noqa: S608 -- all interpolated SQL values are checked-in manifest data.
 
@@ -733,4 +740,396 @@ INSERT INTO public.schema_migrations VALUES
     assert "duplicate migration version in import" in run.stderr
     assert (
         pg16.sql(cloud_database, "SELECT count(*) FROM public.schema_migrations") == "2"
+    )
+
+
+# ---------------------------------------------------------------------------
+# OMN-15695: adopt/convert the pre-OMN-15413 migration_id node ledger.
+#
+# The live dev-lane application database (omnidash_analytics) carries 80 rows
+# written by the historical runner as
+#   public.schema_migrations(migration_id, applied_at, checksum, source_set)
+# with checksum='applied-by-runner' and source_set='node'.  That relation is
+# the predecessor NODE ledger of the application database, not the service
+# ledger, so the fail-closed migration_id arm was a false negative for it.
+# ---------------------------------------------------------------------------
+
+LIVE_APPLIED_AT = "2026-07-31 06:44:27.696803+00"
+
+LEDGER_SIGNATURE_SQL = """
+SELECT string_agg(
+  migration_stream || '|' || owner || '|' || domain || '|' || version ||
+  '|' || checksum || '|' || checksum_kind || '|' || applied_at::text ||
+  '|' || provenance,
+  E'\n' ORDER BY migration_stream, domain, version
+)
+FROM platform_catalog.schema_migrations
+"""
+
+
+def _seed_migration_id_ledger(
+    pg16: Pg16Cluster,
+    database: str,
+    rows: list[tuple[str, str, str]],
+    *,
+    applied_at: str = LIVE_APPLIED_AT,
+) -> None:
+    """Create the historical runner ledger shape verbatim and seed ``rows``.
+
+    ``rows`` are ``(migration_id, checksum, source_set)`` triples.
+    """
+    values = ",\n  ".join(
+        f"('{migration_id}', TIMESTAMPTZ '{applied_at}', '{checksum}', '{source_set}')"
+        for migration_id, checksum, source_set in rows
+    )
+    pg16.command(
+        database,
+        "-f",
+        "-",
+        input_text=f"""
+CREATE TABLE public.schema_migrations (
+  migration_id TEXT PRIMARY KEY,
+  applied_at   TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+  checksum     TEXT NOT NULL,
+  source_set   TEXT NOT NULL
+);
+INSERT INTO public.schema_migrations
+  (migration_id, applied_at, checksum, source_set)
+VALUES
+  {values};
+""",
+    )
+
+
+def _live_shaped_rows(count: int = 80) -> list[tuple[str, str, str]]:
+    """Reproduce the live dev-lane ledger: N declared node ids, no byte evidence."""
+    return [(row[4], "applied-by-runner", "node") for row in _declarations()[:count]]
+
+
+def _canonical_rows(pg16: Pg16Cluster, database: str) -> list[list[str]]:
+    dumped = pg16.sql(
+        database,
+        "SELECT version || E'\\t' || migration_stream || E'\\t' || owner || "
+        "E'\\t' || domain || E'\\t' || checksum || E'\\t' || checksum_kind || "
+        "E'\\t' || provenance FROM platform_catalog.schema_migrations "
+        "ORDER BY version",
+    )
+    return [line.split("\t") for line in dumped.splitlines()]
+
+
+def test_migration_id_node_ledger_is_adopted_twice(pg16: Pg16Cluster) -> None:
+    database = "omn15695_adopt"
+    pg16.create_database(database)
+    declarations = _declarations()[:80]
+    assert len(declarations) == 80
+    _seed_migration_id_ledger(pg16, database, _live_shaped_rows())
+    source_oid = pg16.sql(database, "SELECT 'public.schema_migrations'::regclass::oid")
+
+    signatures: list[str] = []
+    for _ in range(2):
+        run = _run_bootstrap(pg16, database)
+        assert run.returncode == 0, f"{run.stdout}\n{run.stderr}"
+        signatures.append(pg16.sql(database, LEDGER_SIGNATURE_SQL))
+
+    assert signatures[0] == signatures[1]
+    assert len(signatures[0].splitlines()) == 80
+    assert (
+        pg16.sql(database, "SELECT count(*) FROM platform_catalog.schema_migrations")
+        == "80"
+    )
+    assert (
+        pg16.sql(
+            database,
+            "SELECT count(*) FROM platform_catalog.schema_migrations "
+            "WHERE checksum_kind = 'content_sha256'",
+        )
+        == "80"
+    )
+    # applied_at is preserved verbatim: this is the ruling's history clause.
+    assert (
+        pg16.sql(
+            database,
+            "SELECT count(*) FROM platform_catalog.schema_migrations "
+            f"WHERE applied_at = TIMESTAMPTZ '{LIVE_APPLIED_AT}'",
+        )
+        == "80"
+    )
+
+    expected = {row[4]: (row[1], row[2], row[3], row[5]) for row in declarations}
+    observed = _canonical_rows(pg16, database)
+    assert len(observed) == 80
+    for version, stream, owner, domain, checksum, kind, provenance in observed:
+        assert expected[version] == (stream, owner, domain, checksum)
+        assert kind == "content_sha256"
+        assert provenance == (
+            f"adopted:{database}:public.schema_migrations:migration_id:"
+            f"{version}:raw-checksum=applied-by-runner"
+        )
+
+    # The source relation is never renamed, updated, or deleted.
+    assert (
+        pg16.sql(database, "SELECT 'public.schema_migrations'::regclass::oid")
+        == source_oid
+    )
+    assert pg16.sql(database, "SELECT count(*) FROM public.schema_migrations") == "80"
+
+
+def test_adopted_ledger_makes_the_real_runner_skip(
+    pg16: Pg16Cluster, tmp_path: Path
+) -> None:
+    migrations_dir, version, checksum = _synthetic_migration_tree(tmp_path)
+    service_database = "omn15695_runner_adopt_service"
+    application_database = "omn15695_runner_adopt_app"
+    cloud_database = "omn15695_runner_adopt_cloud"
+    for database in (service_database, application_database, cloud_database):
+        pg16.create_database(database)
+    _seed_migration_id_ledger(
+        pg16, application_database, [(version, "applied-by-runner", "node")]
+    )
+
+    runs = [
+        _run_forward_runner(
+            pg16,
+            migrations_dir,
+            service_database=service_database,
+            application_database=application_database,
+            cloud_database=cloud_database,
+        )
+        for _ in range(2)
+    ]
+
+    for run in runs:
+        assert run.returncode == 0, f"{run.stdout}\n{run.stderr}"
+        # The FIRST run is the load-bearing no-re-application proof.
+        assert "0 node applied, 1 node skipped" in run.stdout
+        assert f"skip  {version} (already applied)" in run.stdout
+    assert (
+        pg16.sql(
+            application_database,
+            "SELECT checksum FROM platform_catalog.schema_migrations "
+            f"WHERE version = '{version}'",
+        )
+        == checksum
+    )
+
+
+def test_service_owned_migration_id_ledger_still_fails_closed(
+    pg16: Pg16Cluster,
+) -> None:
+    database = "omn15695_service_only"
+    pg16.create_database(database)
+    _seed_migration_id_ledger(
+        pg16,
+        database,
+        [
+            ("docker/000_db_metadata.sql", "applied-by-runner", "docker"),
+            ("docker/001_initial.sql", "skip-manifest", "docker"),
+        ],
+    )
+
+    run = _run_bootstrap(pg16, database)
+
+    assert run.returncode != 0
+    assert (
+        "unknown migration stream: service-owned migration_id ledger cannot be "
+        "selected for the application database" in run.stderr
+    )
+    assert (
+        pg16.sql(
+            database, "SELECT to_regclass('platform_catalog.schema_migrations') IS NULL"
+        )
+        == "t"
+    )
+    assert pg16.sql(database, "SELECT count(*) FROM public.schema_migrations") == "2"
+
+
+def test_mixed_service_and_node_rows_partition(pg16: Pg16Cluster) -> None:
+    database = "omn15695_mixed"
+    pg16.create_database(database)
+    first = _declarations()[0]
+    _seed_migration_id_ledger(
+        pg16,
+        database,
+        [
+            ("docker/000_db_metadata.sql", "applied-by-runner", "docker"),
+            (first[4], "applied-by-runner", "node"),
+        ],
+    )
+
+    run = _run_bootstrap(pg16, database)
+
+    assert run.returncode == 0, f"{run.stdout}\n{run.stderr}"
+    assert (
+        pg16.sql(database, "SELECT version FROM platform_catalog.schema_migrations")
+        == first[4]
+    )
+    assert pg16.sql(database, "SELECT count(*) FROM public.schema_migrations") == "2"
+    assert (
+        pg16.sql(
+            database,
+            "SELECT count(*) FROM platform_catalog.schema_migrations "
+            "WHERE version LIKE 'docker/%'",
+        )
+        == "0"
+    )
+
+
+@pytest.mark.parametrize(
+    ("case_name", "migration_id_factory", "source_set"),
+    [
+        ("unknown_source_set", lambda row: row[4], "cloud"),
+        ("bare_filename_identity", lambda row: "0001_bare.sql", "node"),
+    ],
+)
+def test_unrecognized_migration_id_rows_are_atomic_red(
+    pg16: Pg16Cluster,
+    case_name: str,
+    migration_id_factory: Callable[[list[str]], str],
+    source_set: str,
+) -> None:
+    database = f"omn15695_{case_name}"
+    pg16.create_database(database)
+    first = _declarations()[0]
+    _seed_migration_id_ledger(
+        pg16,
+        database,
+        [(migration_id_factory(first), "applied-by-runner", source_set)],
+    )
+
+    run = _run_bootstrap(pg16, database)
+
+    assert run.returncode != 0
+    assert "unrecognized migration_id rows" in run.stderr
+    assert (
+        pg16.sql(
+            database, "SELECT to_regclass('platform_catalog.schema_migrations') IS NULL"
+        )
+        == "t"
+    )
+    assert pg16.sql(database, "SELECT count(*) FROM public.schema_migrations") == "1"
+
+
+def test_undeclared_node_version_is_atomic_red(pg16: Pg16Cluster) -> None:
+    database = "omn15695_undeclared"
+    pg16.create_database(database)
+    _seed_migration_id_ledger(
+        pg16, database, [("node:unknown:0001.sql", "applied-by-runner", "node")]
+    )
+
+    run = _run_bootstrap(pg16, database)
+
+    assert run.returncode != 0
+    assert "unknown migration stream/domain" in run.stderr
+    assert (
+        pg16.sql(
+            database, "SELECT to_regclass('platform_catalog.schema_migrations') IS NULL"
+        )
+        == "t"
+    )
+    assert pg16.sql(database, "SELECT count(*) FROM public.schema_migrations") == "1"
+
+
+@pytest.mark.parametrize(
+    ("case_name", "checksum"),
+    [("hex_conflict", "0" * 64), ("non_sentinel", "migrated-by-hand")],
+)
+def test_conflicting_adoption_checksums_are_atomic_reds(
+    pg16: Pg16Cluster, case_name: str, checksum: str
+) -> None:
+    database = f"omn15695_{case_name}"
+    pg16.create_database(database)
+    first = _declarations()[0]
+    _seed_migration_id_ledger(pg16, database, [(first[4], checksum, "node")])
+
+    run = _run_bootstrap(pg16, database)
+
+    assert run.returncode != 0
+    assert "conflicting migration checksum" in run.stderr
+    assert (
+        pg16.sql(
+            database, "SELECT to_regclass('platform_catalog.schema_migrations') IS NULL"
+        )
+        == "t"
+    )
+    assert pg16.sql(database, "SELECT count(*) FROM public.schema_migrations") == "1"
+
+
+def test_adoption_is_idempotent_beside_a_populated_canonical_ledger(
+    pg16: Pg16Cluster,
+) -> None:
+    """Regression for the double-declaration guard and the filename-import guard.
+
+    The source relation is deliberately preserved, so a second bootstrap sees a
+    checksum-capable ``public.schema_migrations`` beside a populated canonical
+    ledger.  Neither the ledger-selection guard nor the filename import may
+    treat that as a double declaration.
+    """
+    database = "omn15695_idempotent"
+    pg16.create_database(database)
+    _seed_migration_id_ledger(pg16, database, _live_shaped_rows(5))
+
+    first_run = _run_bootstrap(pg16, database)
+    assert first_run.returncode == 0, f"{first_run.stdout}\n{first_run.stderr}"
+
+    second_run = _run_bootstrap(pg16, database)
+
+    assert second_run.returncode == 0, f"{second_run.stdout}\n{second_run.stderr}"
+    assert "double migration declaration" not in second_run.stderr
+    assert "remains beside the canonical ledger" not in second_run.stderr
+    assert (
+        pg16.sql(database, "SELECT count(*) FROM platform_catalog.schema_migrations")
+        == "5"
+    )
+
+
+def test_tampered_adopted_row_is_a_double_declaration_red(
+    pg16: Pg16Cluster,
+) -> None:
+    database = "omn15695_tampered"
+    pg16.create_database(database)
+    first = _declarations()[0]
+    _seed_migration_id_ledger(pg16, database, [(first[4], "applied-by-runner", "node")])
+    first_run = _run_bootstrap(pg16, database)
+    assert first_run.returncode == 0, f"{first_run.stdout}\n{first_run.stderr}"
+    pg16.command(
+        database,
+        "-c",
+        "UPDATE platform_catalog.schema_migrations "
+        "SET provenance = provenance || ':tampered'",
+    )
+
+    run = _run_bootstrap(pg16, database)
+
+    assert run.returncode != 0
+    assert "double migration declaration for version" in run.stderr
+
+
+def test_unknown_public_ledger_shape_still_fails_closed(pg16: Pg16Cluster) -> None:
+    """A shape that is neither filename, version, migration_id, nor node stays RED."""
+    database = "omn15695_unknown_shape"
+    pg16.create_database(database)
+    pg16.command(
+        database,
+        "-f",
+        "-",
+        input_text="""
+CREATE TABLE public.schema_migrations (
+  migration_id TEXT PRIMARY KEY,
+  applied_at   TIMESTAMPTZ NOT NULL,
+  checksum     TEXT NOT NULL,
+  source_set   TEXT NOT NULL,
+  extra_column TEXT NOT NULL
+);
+""",
+    )
+
+    run = _run_bootstrap(pg16, database)
+
+    assert run.returncode != 0
+    assert "unknown migration ledger shape" in run.stderr
+    assert (
+        pg16.sql(
+            database, "SELECT to_regclass('platform_catalog.schema_migrations') IS NULL"
+        )
+        == "t"
     )
