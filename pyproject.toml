@@ -92,13 +92,13 @@ dependencies = [
     # docker/Dockerfile.runtime force-installs cryptography>=50.0.0 after the
     # plugin installs. Raising the declared ceiling HERE is blocked on a
     # published omnibase-core release: omnibase-core==0.46.8 on PyPI declares
-    # cryptography>=46.0.3,<50.0.0, and `uv lock` fails closed --
-    #   Because omnibase-core>=0.46.8 depends on cryptography>=46.0.3,<50.0.0
+    # cryptography>=46.0.3,<51.0.0, and `uv lock` fails closed --
+    #   Because omnibase-core>=0.46.8 depends on cryptography>=46.0.3,<51.0.0
     #   and your project depends on cryptography>=50.0.0,<51.0.0 [...]
     #   your project's requirements are unsatisfiable.
     # The core-side raise is omnibase_core PR (OMN-15688); this line moves to
     # >=50.0.0,<51.0.0 in the same commit that bumps omnibase-core off 0.46.8.
-    "cryptography>=46.0.3,<50.0.0",
+    "cryptography>=46.0.3,<51.0.0",
     "sigstore>=4.0.0,<5.0.0",
     # packaging: PEP 440 version parsing/comparison for the release-identity
     # fitness node (node_release_identity_compute, OMN-14471). Previously a
