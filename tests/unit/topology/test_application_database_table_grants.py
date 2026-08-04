@@ -541,3 +541,170 @@ def test_replay_shipped_topology_now_accepts_the_deploy_relation() -> None:
         _resolve_projection_database_target(
             (_DEPLOY_RELATION,), load_topology_profile(profile)
         )
+
+
+# ---------------------------------------------------------------------------
+# Incident replay (OMN-15701 registry): onex-dev CrashLoopBackOff on
+# 2026-08-04, deployed digest sha256:5507667152e2 (infra dev 2e5ef7da)
+# ---------------------------------------------------------------------------
+#
+# infra#2634 (merged 2026-08-03T05:05:30Z) correctly derived
+# ``tenant_projection_writer`` TABLE grants for all nine house-tenant
+# relations. infra#2632 (merged 2026-08-03T18:06:11Z, an ancestor of the
+# deployed SHA) then re-ran the derivation's ``--write`` step against the CI
+# workflow's hardcoded omnimarket fallback pin
+# (``4637e625c99ef17c190aa471a5e51b7f646c6dfd``, 2026-07-30) instead of
+# omnimarket's actual dev HEAD, and that pin still declared
+# ``schema: omninode_internal`` for these relations (omnimarket's
+# reclassification, commit 485be549, landed on omnimarket dev at
+# 2026-08-03T15:56:54Z -- *after* #2632 merged). The regeneration silently
+# reverted eight of the nine relations back to ``omninode_runtime`` /
+# ``omninode_internal``, so every contract that declares one of them
+# (``schema: tenant``, per the operator ruling recorded on OMN-15655) failed
+# ``_require_projection_binding_privileges`` on every profile.
+#
+# ``onex-dev-topology-reverted-tenant-grants.yaml.captured`` is byte-identical
+# to the shipped ``instances/onex-dev.yaml`` at infra dev commit
+# ``2e5ef7da5d08df9f1bcbe7eff58eed696c14d1e4`` -- the exact bytes the
+# CrashLoopBackOff pods loaded, not a reconstruction.
+
+_REVERTED_GRANTS_CAPTURE = (
+    Path(__file__).parents[2]
+    / "fixtures"
+    / "omn15701"
+    / "onex-dev-topology-reverted-tenant-grants.yaml.captured"
+)
+
+# Verbatim from the omninode-runtime pod's Auto-wiring failure on the
+# CrashLoopBackOff observed 2026-08-04 (one of eight identically-shaped
+# failures; capability_scores chosen as the exemplar).
+_REVERTED_GRANT_ERROR = (
+    "Projection binding 'tenant_projection' principal 'tenant_projection_writer' "
+    "lacks declared write privileges: INSERT, SELECT, UPDATE on table "
+    "tenant.capability_scores"
+)
+
+_REVERTED_GRANT_RELATION = ModelDbTableDeclaration(
+    name="capability_scores",
+    database_ref="application",
+    schema="tenant",
+    migration="0002_capability_scores_tenant_id_and_rls.sql",
+    access="write",
+    role="capability_scores",
+)
+
+# All eight relations infra#2632 reverted (the ninth,
+# delegation_judge_verdict_events, was dropped from both grant lists entirely
+# rather than merely moved, so it fails with a different message and is
+# checked separately below).
+_REVERTED_GRANT_RELATIONS = (
+    _REVERTED_GRANT_RELATION,
+    ModelDbTableDeclaration(
+        name="context_roi_scores",
+        database_ref="application",
+        schema="tenant",
+        migration="003_context_roi_scores_tenant_id_and_rls.sql",
+        access="write",
+        role="scores",
+    ),
+    ModelDbTableDeclaration(
+        name="llm_cost_aggregates",
+        database_ref="application",
+        schema="tenant",
+        migration="0002_llm_cost_aggregates_tenant_id_and_rls.sql",
+        access="write",
+        role="cost_summary",
+    ),
+    ModelDbTableDeclaration(
+        name="dep_health_findings",
+        database_ref="application",
+        schema="tenant",
+        migration="002_dep_health_findings_tenant_id_and_rls.sql",
+        access="write",
+        role="findings",
+    ),
+    ModelDbTableDeclaration(
+        name="instruction_eval_aggregate_snapshots",
+        database_ref="application",
+        schema="tenant",
+        migration="0001_create_instruction_eval_aggregate_snapshots.sql",
+        access="write",
+        role="instruction_eval_aggregate",
+    ),
+    ModelDbTableDeclaration(
+        name="pattern_learning_artifacts",
+        database_ref="application",
+        schema="tenant",
+        migration="0000_create_pattern_learning_artifacts.sql",
+        access="write",
+        role="artifacts",
+    ),
+    ModelDbTableDeclaration(
+        name="agent_routing_decisions",
+        database_ref="application",
+        schema="tenant",
+        migration="0021_create_agent_routing_decisions.sql",
+        access="write",
+        role="agent_routing_decisions",
+    ),
+    ModelDbTableDeclaration(
+        name="skill_execution_snapshots",
+        database_ref="application",
+        schema="tenant",
+        migration="0001_create_skill_execution_snapshots.sql",
+        access="write",
+        role="skill_executions_aggregate",
+    ),
+)
+
+
+def test_omn15701_replay_captured_topology_reproduces_the_reverted_grant_failure() -> (
+    None
+):
+    """The exact shipped bytes that crash-looped onex-dev, driven through the
+    real resolver -- proves the captured incident fixture is non-vacuous."""
+    from omnibase_core.models.core import ModelDeploymentTopology
+
+    captured = ModelDeploymentTopology.from_yaml(_REVERTED_GRANTS_CAPTURE)
+
+    with pytest.raises(ValueError) as excinfo:
+        _resolve_projection_database_target((_REVERTED_GRANT_RELATION,), captured)
+    assert str(excinfo.value) == _REVERTED_GRANT_ERROR
+
+
+def test_omn15701_replay_captured_topology_fails_all_eight_reverted_relations() -> None:
+    """Every relation infra#2632 silently moved back must fail identically on
+    the captured (broken) topology -- not just the exemplar above."""
+    from omnibase_core.models.core import ModelDeploymentTopology
+
+    captured = ModelDeploymentTopology.from_yaml(_REVERTED_GRANTS_CAPTURE)
+
+    for relation in _REVERTED_GRANT_RELATIONS:
+        with pytest.raises(ValueError, match="lacks declared write privileges"):
+            _resolve_projection_database_target((relation,), captured)
+
+
+def test_omn15701_replay_shipped_topology_now_accepts_all_reverted_relations() -> None:
+    """The nine house-tenant relations resolve cleanly on every shipped profile
+    now that the tenant_projection_writer grants are restored."""
+    for profile in sorted(SUPPORTED_TOPOLOGY_PROFILES):
+        topology = load_topology_profile(profile)
+        for relation in _REVERTED_GRANT_RELATIONS:
+            _resolve_projection_database_target((relation,), topology)
+
+
+def test_omn15701_shipped_grants_restore_nightly_loop_configs_read() -> None:
+    """infra#2632 also dropped the omninode_runtime SELECT grant on
+    omninode_internal.nightly_loop_configs that infra#2634 had added; this is
+    the nightly_loop_controller effects-pod failure recorded on OMN-15655
+    comment 4a229dbf. Must be restored alongside the tenant relations."""
+    relation = ModelDbTableDeclaration(
+        name="nightly_loop_configs",
+        database_ref="application",
+        schema="omninode_internal",
+        migration="nightly_loop_configs.sql",
+        access="read",
+        role="nightly_loop_controller",
+    )
+    for profile in sorted(SUPPORTED_TOPOLOGY_PROFILES):
+        _resolve_projection_database_target((relation,), load_topology_profile(profile))
