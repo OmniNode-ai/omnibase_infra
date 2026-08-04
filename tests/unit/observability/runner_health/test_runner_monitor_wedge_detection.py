@@ -54,16 +54,16 @@ pytestmark = pytest.mark.unit
 
 
 def _require_tools() -> None:
+    # OMN-15617: resolve a bash>=5 interpreter FIRST, before any
+    # tool-availability skip below. A missing secondary tool (jq) must never
+    # short-circuit this assertion via pytest.skip -- that would silently
+    # mask the exact wrong-interpreter host class this ticket targets
+    # (skip-before-assert is green-by-absence, not a real pass). Fails loud
+    # (pytest.fail via resolve_modern_bash) when no bash>=5 is resolvable.
+    resolve_modern_bash()
     for tool in ("bash", "jq"):
         if shutil.which(tool) is None:
             pytest.skip(f"{tool} not available; shell detection test requires it")
-    # runner-monitor.sh uses `declare -A` (bash>=4). Resolve a bash>=5
-    # interpreter explicitly here too -- a bash that merely EXISTS on PATH
-    # (checked above) is not sufficient; OMN-15617 is exactly the case where
-    # "bash" exists but resolves to the wrong (3.2) interpreter. Fails loud
-    # (pytest.fail via resolve_modern_bash), never a silent skip, when no
-    # bash>=5 is resolvable anywhere.
-    resolve_modern_bash()
 
 
 def _write_exec(path: Path, body: str) -> None:

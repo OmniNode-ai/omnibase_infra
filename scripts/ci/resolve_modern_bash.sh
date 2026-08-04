@@ -60,21 +60,28 @@ try_candidate() {
 # Ordered candidate list: explicit override, the two brew prefixes (Apple
 # Silicon + Intel), then every "bash" found walking $PATH -- so a modern bash
 # installed somewhere non-standard is still picked up without PATH surgery.
-CANDIDATES=""
+#
+# Built as an array (not a space-joined string) so an interpreter path or
+# PATH entry containing a space is never word-split into non-existent
+# fragments -- indexed arrays are bash-3.2-safe (only `declare -A` requires
+# bash>=4, which this script must not presuppose). A dropped candidate would
+# be a silent-wrong-answer mode in the exact script whose purpose is to
+# eliminate silent wrong interpreter resolution.
+CANDIDATES=()
 if [ -n "${OMNIBASE_INFRA_BASH_BIN:-}" ]; then
-  CANDIDATES="${CANDIDATES} ${OMNIBASE_INFRA_BASH_BIN}"
+  CANDIDATES+=("${OMNIBASE_INFRA_BASH_BIN}")
 fi
-CANDIDATES="${CANDIDATES} /opt/homebrew/bin/bash /usr/local/bin/bash"
+CANDIDATES+=("/opt/homebrew/bin/bash" "/usr/local/bin/bash")
 
 old_ifs="$IFS"
 IFS=':'
 for _dir in $PATH; do
   [ -n "$_dir" ] || continue
-  CANDIDATES="${CANDIDATES} ${_dir}/bash"
+  CANDIDATES+=("${_dir}/bash")
 done
 IFS="$old_ifs"
 
-for _candidate in $CANDIDATES; do
+for _candidate in "${CANDIDATES[@]}"; do
   if try_candidate "$_candidate"; then
     exit 0
   fi
