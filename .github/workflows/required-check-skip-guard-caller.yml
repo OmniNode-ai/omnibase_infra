@@ -43,4 +43,4 @@ permissions:
 jobs:
   required-check-skip-guard:
     if: ${{ always() }}
-    uses: OmniNode-ai/omniclaude/.github/workflows/required-check-skip-guard-reusable.yml@866afbf4044546075efaecead48c0e4983f77c39
+    uses: OmniNode-ai/omniclaude/.github/workflows/required-check-skip-guard-reusable.yml@80de61fd1fee04abdeb6918e7f91cf820717e6a8
