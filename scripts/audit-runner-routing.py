@@ -23,6 +23,14 @@ import yaml
 
 ORG = "OmniNode-ai"
 DEFAULT_POLICY = Path("config/runner_routing_policy.yaml")
+PUBLIC_PR_RUNNER_VARIABLE = "OMNI_PUBLIC_PR_RUNS_ON_JSON"
+TRUSTED_CI_RUNNER_VARIABLE = "OMNI_TRUSTED_CI_RUNS_ON_JSON"
+REQUIRED_CI_RUNNER_VARIABLE = "OMNI_REQUIRED_CI_RUNS_ON_JSON"
+FORK_PR_PREDICATE = (
+    "github.event_name=='pull_request'&&"
+    "github.event.pull_request.head.repo.full_name!=github.repository"
+)
+DEV_BASE_SHORTCUT = "github.event_name=='pull_request'&&github.base_ref=='dev'"
 
 
 @dataclass(frozen=True)
@@ -130,6 +138,29 @@ def _workflow_paths(repo_root: Path) -> list[Path]:
     )
 
 
+def _normalized_expression(value: str) -> str:
+    return re.sub(r"\s+", "", value)
+
+
+def runner_variable_for_event(
+    event_name: str,
+    head_repository: str | None,
+    repository: str,
+    *,
+    merge_group_variable: str | None = None,
+) -> str:
+    """Return the runner variable allowed for a workflow event shape.
+
+    The helper models the selector policy for focused regression tests. Workflow
+    expressions are audited separately below because Actions evaluates them.
+    """
+    if event_name == "pull_request" and head_repository != repository:
+        return PUBLIC_PR_RUNNER_VARIABLE
+    if event_name == "merge_group" and merge_group_variable is not None:
+        return merge_group_variable
+    return TRUSTED_CI_RUNNER_VARIABLE
+
+
 def audit_local_workflows(policy: dict[str, Any], repo_root: Path) -> list[Finding]:
     allowlist = {
         str(item["path"])
@@ -143,16 +174,48 @@ def audit_local_workflows(policy: dict[str, Any], repo_root: Path) -> list[Findi
     for path in _workflow_paths(repo_root):
         rel = path.relative_to(repo_root).as_posix()
         text = path.read_text(encoding="utf-8")
-        if not bare_hosted.search(text):
-            continue
-        if rel in allowlist:
-            continue
-        findings.append(
-            Finding(
-                rel,
-                "bare runs-on: ubuntu-latest is not allowed; use OMNI_RUNNER_SELECTOR_V1 or add an explicit policy exception",
+        if "pull_request_target" in text:
+            findings.append(
+                Finding(
+                    rel,
+                    "pull_request_target is prohibited because untrusted fork code must never reach self-hosted runners",
+                )
             )
-        )
+        if bare_hosted.search(text) and rel not in allowlist:
+            findings.append(
+                Finding(
+                    rel,
+                    "bare runs-on: ubuntu-latest is not allowed; use OMNI_RUNNER_SELECTOR_V1 or add an explicit policy exception",
+                )
+            )
+
+        workflow = yaml.safe_load(text)
+        jobs = workflow.get("jobs", {}) if isinstance(workflow, dict) else {}
+        if not isinstance(jobs, dict):
+            continue
+        for job_name, job in jobs.items():
+            if not isinstance(job, dict):
+                continue
+            runs_on = job.get("runs-on")
+            if not isinstance(runs_on, str):
+                continue
+            expression = _normalized_expression(runs_on)
+            if PUBLIC_PR_RUNNER_VARIABLE not in expression:
+                continue
+            if DEV_BASE_SHORTCUT in expression:
+                findings.append(
+                    Finding(
+                        f"{rel}:{job_name}",
+                        "public PR runner selection must not use the pull_request/dev-base shortcut",
+                    )
+                )
+            if FORK_PR_PREDICATE not in expression:
+                findings.append(
+                    Finding(
+                        f"{rel}:{job_name}",
+                        "OMNI_PUBLIC_PR_RUNS_ON_JSON is allowed only for pull requests whose head repository differs from github.repository",
+                    )
+                )
     return findings
 
 

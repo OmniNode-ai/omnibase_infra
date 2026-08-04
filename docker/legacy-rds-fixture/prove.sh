@@ -296,6 +296,60 @@ done
   || fail "cloud applied-set source ledger was rewritten"
 echo "fixture_case=application_ledger_sources status=PASS selected_oid_preserved=true sources_immutable=true"
 
+# OMN-15695: the pre-OMN-15413 runner's migration_id node ledger is adopted in
+# place of being refused. The service-owned row in the same relation must stay
+# ignored, the source relation must survive untouched, and the second pass must
+# apply nothing.
+for database in omn15695_adopt_service omn15695_adopt_app omn15695_adopt_cloud; do
+  create_fixture_database "$LEGACY_HOST" "$LEGACY_PORT" "$database"
+done
+psql -X -q -h "$LEGACY_HOST" -p "$LEGACY_PORT" -U postgres \
+  -d omn15695_adopt_app -v ON_ERROR_STOP=1 <<'EOSQL'
+CREATE TABLE public.schema_migrations (
+  migration_id TEXT PRIMARY KEY,
+  applied_at   TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+  checksum     TEXT NOT NULL,
+  source_set   TEXT NOT NULL
+);
+INSERT INTO public.schema_migrations (migration_id, applied_at, checksum, source_set)
+VALUES
+  ('node:node_example:0001_create_example.sql',
+   TIMESTAMPTZ '2026-07-31 06:44:27.696803+00', 'applied-by-runner', 'node'),
+  ('docker/000_db_metadata.sql',
+   TIMESTAMPTZ '2026-07-31 06:44:27.696803+00', 'applied-by-runner', 'docker');
+EOSQL
+adopt_source_oid="$(sql_value "$LEGACY_HOST" omn15695_adopt_app \
+  "SELECT 'public.schema_migrations'::regclass::oid")"
+
+for pass in 1 2; do
+  adopt_log="$(mktemp)"
+  run_control_forward "$LEGACY_HOST" "$LEGACY_PORT" \
+    omn15695_adopt_service omn15695_adopt_app omn15695_adopt_cloud \
+    "$adopt_log" \
+    || { sed -n '1,240p' "$adopt_log"; fail "migration_id adoption pass $pass failed"; }
+  grep -F 'Sentinel set. Migration gate will report HEALTHY.' "$adopt_log" >/dev/null \
+    || fail "migration_id adoption pass $pass omitted terminal sentinel proof"
+  grep -F '0 node applied, 1 node skipped' "$adopt_log" >/dev/null \
+    || { tail -n 80 "$adopt_log"; fail "migration_id adoption pass $pass re-applied an adopted migration"; }
+  echo "fixture_case=application_ledger_migration_id_adoption pass=$pass status=PASS"
+done
+
+[ "$(sql_value "$LEGACY_HOST" omn15695_adopt_app "SELECT count(*) FROM platform_catalog.schema_migrations")" = "1" ] \
+  || fail "migration_id adoption imported the service-owned row or duplicated the node row"
+[ "$(sql_value "$LEGACY_HOST" omn15695_adopt_app "SELECT checksum || '|' || checksum_kind FROM platform_catalog.schema_migrations")" \
+  = "1f605f28cc1f4a1a7500862be51c35d01431cacba2d34201150f3ae3deb6c923|content_sha256" ] \
+  || fail "adopted row did not carry the checked-in manifest checksum"
+[ "$(sql_value "$LEGACY_HOST" omn15695_adopt_app "SELECT provenance FROM platform_catalog.schema_migrations")" \
+  = "adopted:omn15695_adopt_app:public.schema_migrations:migration_id:node:node_example:0001_create_example.sql:raw-checksum=applied-by-runner" ] \
+  || fail "adopted row did not record its raw source checksum in provenance"
+[ "$(sql_value "$LEGACY_HOST" omn15695_adopt_app "SELECT count(*) FROM platform_catalog.schema_migrations WHERE applied_at = TIMESTAMPTZ '2026-07-31 06:44:27.696803+00'")" = "1" ] \
+  || fail "adopted row did not preserve its original applied_at"
+[ "$(sql_value "$LEGACY_HOST" omn15695_adopt_app "SELECT count(*) FROM public.schema_migrations")" = "2" ] \
+  || fail "migration_id adoption source ledger was rewritten"
+[ "$(sql_value "$LEGACY_HOST" omn15695_adopt_app "SELECT 'public.schema_migrations'::regclass::oid")" = "$adopt_source_oid" ] \
+  || fail "migration_id adoption source ledger was moved instead of preserved"
+echo "fixture_case=application_ledger_migration_id_sources status=PASS source_preserved=true service_row_ignored=true"
+
 for pass in 1 2; do
   fresh_log="$(mktemp)"
   run_forward "$FRESH_HOST" "$FRESH_PORT" omnibase_infra "$fresh_log" \
