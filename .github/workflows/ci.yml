@@ -2327,7 +2327,7 @@ jobs:
         uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
         with:
           repository: OmniNode-ai/omnimarket
-          ref: ${{ steps.resolve-omnimarket-ref.outputs.ref == 'dev' && '4637e625c99ef17c190aa471a5e51b7f646c6dfd' || steps.resolve-omnimarket-ref.outputs.ref }}
+          ref: ${{ steps.resolve-omnimarket-ref.outputs.ref == 'dev' && '54356a831e3d8876c69373cac884a3df2a5653f7' || steps.resolve-omnimarket-ref.outputs.ref }}
           path: .proof-dependencies/omnimarket
           persist-credentials: false
 
