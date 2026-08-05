@@ -200,6 +200,23 @@ FENCE_BEGIN = "# ---- BEGIN operator fence — node migration ids (OMN-15336) --
 FENCE_END = "# ---- END operator fence — node migration ids (OMN-15336) ----"
 SKIP_BEGIN = "# ---- BEGIN fenced-id skip (OMN-15336) ----"
 SKIP_END = "# ---- END fenced-id skip (OMN-15336) ----"
+# OMN-15336 item 4: the unclassified-FORCE-RLS guard. Two blocks — the
+# predicate's own definition (sits beside is_fenced_node_migration) and the
+# call site (sits in the node loop, after the already-applied probe).
+FORCE_RLS_GUARD_DEF_BEGIN = (
+    "# ---- BEGIN unclassified FORCE ROW LEVEL SECURITY guard (OMN-15336 item 4) ----"
+)
+FORCE_RLS_GUARD_DEF_END = (
+    "# ---- END unclassified FORCE ROW LEVEL SECURITY guard (OMN-15336 item 4) ----"
+)
+FORCE_RLS_GUARD_CALL_BEGIN = (
+    "# ---- BEGIN unclassified FORCE ROW LEVEL SECURITY guard call "
+    "(OMN-15336 item 4) ----"
+)
+FORCE_RLS_GUARD_CALL_END = (
+    "# ---- END unclassified FORCE ROW LEVEL SECURITY guard call "
+    "(OMN-15336 item 4) ----"
+)
 
 # --- OMN-15349 single-sourced manifest ---------------------------------------
 MANIFEST_RELPATH = "docker/migrations/forward/fenced-node-migrations.yaml"
@@ -265,12 +282,24 @@ FENCED_REGISTRATION_IDS = (
 FENCED_PR_REVIEW_BOT_IDS = (
     "node:node_pr_review_bot:001_create_review_bot_bypass_log.sql",
 )
+# OMN-15336 item 4 / OMN-15656: contract-declared TENANT domain (unlike
+# node_service_registry, this is not a misclassification), held for the same
+# OMN-15301 writer-tenant-context reason as the delegation quartet. Was never
+# in this manifest on any runner before this entry — see the manifest's own
+# docstring for the incident.
+FENCED_INFERENCE_RESPONSE_IDS = (
+    "node:node_projection_delegation_inference_response:"
+    "0003_inference_response_text_rls_tenant_isolation.sql",
+)
 # Pinned expectation for the manifest content (OMN-15349): the baseline fence,
 # exact and in order. A manifest edit that moves this must update the pin in
 # the same PR — same change-control friction the pre-OMN-15349 shell-literal
 # pin gave, now pointed at the actual single source instead of a copy of it.
 EXPECTED_FENCE = (
-    FENCED_DELEGATION_IDS + FENCED_REGISTRATION_IDS + FENCED_PR_REVIEW_BOT_IDS
+    FENCED_DELEGATION_IDS
+    + FENCED_REGISTRATION_IDS
+    + FENCED_PR_REVIEW_BOT_IDS
+    + FENCED_INFERENCE_RESPONSE_IDS
 )
 
 # --- OMN-15349 k8s-side release (operator ruling 21, OMN-15332 comment
@@ -359,6 +388,43 @@ def _extract_marked(text: str, begin: str, end: str) -> str:
         )
         raise AssertionError(msg)
     return "\n".join(lines[starts[0] + 1 : ends[0]]) + "\n"
+
+
+def extract_force_rls_guard_def(text: str | None = None) -> str:
+    """Return the unclassified-FORCE-RLS predicate's own definition block."""
+    return _extract_marked(
+        text if text is not None else _runner_text(),
+        FORCE_RLS_GUARD_DEF_BEGIN,
+        FORCE_RLS_GUARD_DEF_END,
+    )
+
+
+def extract_force_rls_guard_call(text: str | None = None) -> str:
+    """Return the in-loop call site of the unclassified-FORCE-RLS guard."""
+    return _extract_marked(
+        text if text is not None else _runner_text(),
+        FORCE_RLS_GUARD_CALL_BEGIN,
+        FORCE_RLS_GUARD_CALL_END,
+    )
+
+
+def strip_force_rls_guard(text: str) -> str:
+    """The pre-OMN-15336-item-4 runner: byte-identical minus the guard.
+
+    Derived from the shipped artifact, same discipline as ``strip_fence``
+    above, so the RED-control-for-the-RED-control can never drift from the
+    thing it is the control for.
+    """
+    out = text
+    for begin, end in (
+        (FORCE_RLS_GUARD_DEF_BEGIN, FORCE_RLS_GUARD_DEF_END),
+        (FORCE_RLS_GUARD_CALL_BEGIN, FORCE_RLS_GUARD_CALL_END),
+    ):
+        lines = out.splitlines(keepends=True)
+        start = next(i for i, ln in enumerate(lines) if ln.strip() == begin)
+        stop = next(i for i, ln in enumerate(lines) if ln.strip() == end)
+        out = "".join(lines[:start] + lines[stop + 1 :])
+    return out
 
 
 def strip_fence(text: str) -> str:
@@ -455,8 +521,12 @@ def test_manifest_pins_the_known_baseline_fence() -> None:
     assert (
         found[len(FENCED_DELEGATION_IDS) : registration_end] == FENCED_REGISTRATION_IDS
     ), "the OMN-15335/OMN-15343 registration hold is not the exact expected trio"
-    assert found[registration_end:] == FENCED_PR_REVIEW_BOT_IDS, (
-        "the OMN-15717/OMN-15376 node_pr_review_bot hold is not the exact expected id"
+    pr_review_bot_end = registration_end + len(FENCED_PR_REVIEW_BOT_IDS)
+    assert (
+        found[registration_end:pr_review_bot_end] == FENCED_PR_REVIEW_BOT_IDS
+    ), "the OMN-15717/OMN-15376 node_pr_review_bot hold is not the exact expected id"
+    assert found[pr_review_bot_end:] == FENCED_INFERENCE_RESPONSE_IDS, (
+        "the OMN-15336 item-4 inference-response hold is not the expected id"
     )
 
 
@@ -565,6 +635,62 @@ def test_fenced_skip_never_records_a_ledger_row() -> None:
     assert "NODE_SKIPPED=$((NODE_SKIPPED + 1))" in branch, (
         "the skip must be RECORDED in the run's skipped counter, so a fenced "
         "run is distinguishable from a run that discovered nothing"
+    )
+
+
+def test_unclassified_force_rls_guard_is_defined() -> None:
+    """OMN-15336 item 4: the predicate and its call site both exist."""
+    definition = extract_force_rls_guard_def()
+    assert "migration_declares_unclassified_force_rls()" in definition, (
+        "the guard predicate must be defined"
+    )
+    call = extract_force_rls_guard_call()
+    assert "migration_declares_unclassified_force_rls" in call, (
+        "the node loop must call the guard predicate"
+    )
+    assert "exit 1" in call, "the guard must FATAL, not warn, on a match"
+
+
+def test_unclassified_force_rls_guard_excludes_no_force_statements() -> None:
+    """`NO FORCE ROW LEVEL SECURITY` (a disabling statement) must never trip
+    the guard — otherwise a future FORCE-strip migration could never ship.
+    """
+    definition = extract_force_rls_guard_def()
+    assert "NO[[:space:]]+FORCE" in definition, (
+        "the predicate must explicitly exclude the NO FORCE (disabling) form"
+    )
+
+
+def test_unclassified_force_rls_guard_is_checked_only_for_unfenced_ids() -> None:
+    """The guard must not re-litigate an id someone already classified.
+
+    Both the fenced-and-held and the fenced-and-released cases must bypass
+    it: the manifest entry itself is the classification the guard exists to
+    require, whether or not this lane also carries a release for it.
+    """
+    call = extract_force_rls_guard_call()
+    assert re.search(r"!\s*is_fenced_node_migration\s+\"\$\{migration_id\}\"", call), (
+        "the guard must be gated on `! is_fenced_node_migration ...`"
+    )
+
+
+def test_unclassified_force_rls_guard_runs_after_the_already_applied_probe() -> None:
+    """Ordering is load-bearing the OTHER way from the fence-skip check above:
+    this guard must run AFTER ``migration_is_applied`` returns false, never
+    before — a guard that ran earlier would FATAL on every subsequent run of
+    a lane where an unclassified id already applied before this guard
+    existed (e.g. the real .201 dev lane's 0003/081), bricking that lane's
+    every future deploy over already-committed history it cannot undo.
+    """
+    text = _runner_text()
+    node_loop = text[text.index("Auto-discover and apply node-owned migrations") :]
+    probe = node_loop.index("if migration_is_applied")
+    guard_call = node_loop.index('if ! is_fenced_node_migration "${migration_id}" \\')
+    apply_sql = node_loop.index('-v ON_ERROR_STOP=1 -f "$migration_file"')
+    assert probe < guard_call < apply_sql, (
+        "the unclassified-FORCE-RLS guard must run strictly between the "
+        "already-applied probe and the apply "
+        f"(node-loop offsets: probe={probe} guard={guard_call} apply={apply_sql})"
     )
 
 
@@ -979,11 +1105,14 @@ def test_fence_matches_omninode_infra_k8s_runner() -> None:
         f"baseline does not cover: {stray}"
     )
     effective_k8s_fence = tuple(i for i in baseline if i not in k8s_release)
-    expected_effective_k8s_fence = FENCED_DELEGATION_IDS + FENCED_PR_REVIEW_BOT_IDS
+    expected_effective_k8s_fence = (
+        FENCED_DELEGATION_IDS + FENCED_PR_REVIEW_BOT_IDS + FENCED_INFERENCE_RESPONSE_IDS
+    )
     assert effective_k8s_fence == expected_effective_k8s_fence, (
         "the k8s Job's effective (post-release) fence no longer equals the "
-        "delegation quartet plus the OMN-15717 node_pr_review_bot hold — "
-        "either the shared manifest baseline or the k8s release changed: "
+        "delegation quartet plus the OMN-15717 node_pr_review_bot hold plus "
+        "the OMN-15336 item-4 inference-response hold — either the shared "
+        "manifest baseline or the k8s release changed: "
         f"{effective_k8s_fence}"
     )
 
@@ -1078,6 +1207,12 @@ def _write_application_ledger_contract(forward: Path) -> None:
     )
     (ledger_dir / "application-migration-blocks.tsv").write_text("", encoding="utf-8")
     (ledger_dir / "cloud-migration-aliases.tsv").write_text("", encoding="utf-8")
+    # OMN-15717 (#2678) added LEGACY_NODE_MIGRATION_DECLARATIONS as a fourth
+    # unconditionally-required manifest file in validate_application_migration_
+    # manifest() -- empty is valid (mirrors the two files above: the awk
+    # per-record validators never fire on zero input lines, so an empty file
+    # passes every format/duplicate/overlap check untouched).
+    (ledger_dir / "legacy-node-migrations.tsv").write_text("", encoding="utf-8")
 
 
 @pytest.fixture
@@ -1501,4 +1636,129 @@ def test_unknown_lane_value_fails_closed_to_the_full_fence(
     assert "unknown ONEX_MIGRATION_LANE" in result.stderr, (
         "failing closed silently is still a silent failure — the runner must "
         f"say it did not recognise the lane:\n{result.stderr}"
+    )
+
+
+# --------------------------------------------------------------------------
+# OMN-15336 item 4 — unclassified FORCE ROW LEVEL SECURITY guard. Live half.
+#
+# The required-fix item this closes: "Reconsider whether 0003/081/0002
+# belong in the fence list — they carry the same hazard and are currently
+# ungated on every runner." 0002 was added by OMN-15379/OMN-15349; this
+# guard is the durable mechanism so the NEXT one (there is no reason to
+# believe 0003/081 are the last) is refused instead of silently applying —
+# closing the gap the proof stage found: nothing in either runner, and
+# nothing wired into omnibase_infra CI, inspected a migration's SQL text to
+# block an unfenced FORCE ROW LEVEL SECURITY statement.
+# --------------------------------------------------------------------------
+
+UNCLASSIFIED_FORCE_RLS_CONTROL_ID = (
+    "node:node_projection_delegation:0098_unclassified_force_rls_control.sql"
+)
+
+
+@pytest.fixture
+def unclassified_force_rls_tree(tmp_path: Path) -> Path:
+    """``node_tree`` plus one migration that enables FORCE ROW LEVEL SECURITY
+    and is deliberately ABSENT from the fence manifest — the exact OMN-15336
+    item-4 scenario that produced the real, ungated 0003 and 081 incidents:
+    a live hazard with no classification at all (as opposed to a classified
+    id someone has reviewed and either held or released).
+    """
+    forward = tmp_path / "migrations" / "forward"
+    forward.mkdir(parents=True)
+    (forward / "001_noop.sql").write_text("SELECT 1;\n")
+
+    for migration_id in (*EXPECTED_FENCE, UNFENCED_CONTROL_ID):
+        _, node_name, filename = migration_id.split(":", 2)
+        node_dir = forward / "nodes" / node_name
+        node_dir.mkdir(parents=True, exist_ok=True)
+        (node_dir / filename).write_text(
+            f"CREATE TABLE public.{_marker_for(migration_id)} (id INT);\n"
+        )
+
+    _, control_node, control_filename = UNCLASSIFIED_FORCE_RLS_CONTROL_ID.split(":", 2)
+    control_dir = forward / "nodes" / control_node
+    control_dir.mkdir(parents=True, exist_ok=True)
+    marker = _marker_for(UNCLASSIFIED_FORCE_RLS_CONTROL_ID)
+    control_dir.joinpath(control_filename).write_text(
+        "-- a real DDL shape, matching the actual 0003/081 migrations: a\n"
+        "-- prose comment mentioning FORCE ROW LEVEL SECURITY must NOT alone\n"
+        "-- trip the guard (comment-blind matching), only the DDL below does.\n"
+        f"CREATE TABLE public.{marker} (id INT, tenant_id TEXT);\n"
+        f"ALTER TABLE public.{marker} ENABLE ROW LEVEL SECURITY;\n"
+        f"ALTER TABLE public.{marker} FORCE ROW LEVEL SECURITY;\n"
+    )
+
+    _write_fence_manifest(forward, EXPECTED_FENCE)
+    _write_application_ledger_contract(forward)
+    return forward
+
+
+@pytest.mark.integration
+def test_unclassified_force_rls_migration_is_refused(
+    pg_target: PgTarget,
+    unclassified_force_rls_tree: Path,
+    node_db: str,
+) -> None:
+    """RED control: a node migration enabling FORCE ROW LEVEL SECURITY with
+    no fence entry at all must be REFUSED, not applied.
+
+    Before this guard, this is exactly what happened to
+    node_projection_delegation_inference_response/0003 and
+    node_projection_savings/081 — neither was ever in the fence manifest on
+    any runner, and both applied unattended on the .201 dev lane (see the
+    module docstring's incident description and OMN-15336's required-fix
+    item 4).
+    """
+    result = _run(RUNNER, pg_target, unclassified_force_rls_tree, node_db)
+    combined = result.stdout + result.stderr
+    assert result.returncode != 0, (
+        "the runner must refuse an unclassified FORCE ROW LEVEL SECURITY "
+        f"migration, not apply it silently:\n{combined}"
+    )
+    assert UNCLASSIFIED_FORCE_RLS_CONTROL_ID in combined, (
+        f"the FATAL must name the offending migration id:\n{combined}"
+    )
+    assert "FATAL" in combined and "FORCE ROW LEVEL SECURITY" in combined, (
+        f"expected a FATAL naming the FORCE ROW LEVEL SECURITY hazard:\n{combined}"
+    )
+    assert not _table_exists(
+        pg_target, node_db, _marker_for(UNCLASSIFIED_FORCE_RLS_CONTROL_ID)
+    ), "FENCE BREACH: the unclassified FORCE RLS migration was APPLIED"
+    ledger = _ledger_ids(pg_target, node_db)
+    assert UNCLASSIFIED_FORCE_RLS_CONTROL_ID not in ledger, (
+        "a refused migration must not be recorded as applied — that would "
+        "make later classification a silent no-op"
+    )
+
+
+@pytest.mark.integration
+def test_guard_free_runner_applies_the_unclassified_migration(
+    pg_target: PgTarget,
+    unclassified_force_rls_tree: Path,
+    node_db: str,
+    tmp_path: Path,
+) -> None:
+    """RED control FOR the RED control: without the guard, the exact same
+    scenario reproduces the OMN-15336 item-4 incident — silent apply.
+
+    Without this, ``test_unclassified_force_rls_migration_is_refused`` could
+    be passing for an unrelated reason (a checksum mismatch, a missing
+    manifest declaration) and still look like proof the guard works.
+    """
+    legacy = tmp_path / "run-forward-migrations.preguard.sh"
+    legacy.write_text(strip_force_rls_guard(_runner_text()))
+
+    result = _run(legacy, pg_target, unclassified_force_rls_tree, node_db)
+    assert result.returncode == 0, result.stdout + result.stderr
+    assert _table_exists(
+        pg_target, node_db, _marker_for(UNCLASSIFIED_FORCE_RLS_CONTROL_ID)
+    ), (
+        "the guard-free runner was expected to apply the unclassified FORCE "
+        f"RLS migration, reproducing the item-4 incident:\n{result.stdout}"
+    )
+    ledger = _ledger_ids(pg_target, node_db)
+    assert UNCLASSIFIED_FORCE_RLS_CONTROL_ID in ledger, (
+        f"the guard-free runner did not record the migration either: {sorted(ledger)}"
     )
