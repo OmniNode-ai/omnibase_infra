@@ -33,16 +33,31 @@ Two subcommands:
     the renderer-owned Evidence section and re-appends exactly one canonical
     block, so ``stamp(stamp(x)) == stamp(x)`` is a fixpoint.
 
+``onex occ compute-contract-hash CONTRACT_PATH [--evidence-item-id ID]`` (OMN-15711)
+    Print the ``contract_sha256`` (and, with ``--evidence-item-id``, the
+    per-entry ``contract_entry_sha256``) that a DoD receipt for CONTRACT_PATH
+    must carry to pass ``validator_receipt_gate.check_receipt_contract_binding``.
+    This command owns zero hashing logic — it imports
+    :func:`omnibase_core.validation.validator_receipt_gate.compute_contract_sha256`
+    and :func:`...compute_contract_entry_sha256` verbatim, so a receipt authored
+    via this CLI and the gate's own hash check can never diverge. Packages the
+    hash-chaining the gate previously kept internal, so neither an agent
+    hand-authoring a receipt nor an automation authoring one on its behalf has
+    to reimplement SHA-256 canonicalization to stay bound to the gate.
+
 .. versionadded:: OMN-14190
+.. versionadded:: OMN-15711 ``compute-contract-hash``
 """
 
 from __future__ import annotations
 
+import json
 import sys
 from collections.abc import Sequence
 from pathlib import Path
 
 import click
+import yaml
 
 # Canonical OCC stamp schema — single import block. The models + parser/renderer
 # were relocated from omnibase_core to omnibase_compat (the lowest shared layer)
@@ -54,13 +69,25 @@ from omnibase_compat.contracts.pr_occ_stamp import (
     render_pr_occ_metadata_stamp,
 )
 
+# Receipt-Gate's own hash-chaining functions (OMN-15711 / OMN-13888). Imported
+# verbatim -- never reimplemented -- so this CLI's output and the gate's own
+# `check_receipt_contract_binding` check can never compute a different hash for
+# the same contract bytes/entry.
+from omnibase_core.validation.validator_receipt_gate import (
+    ContractEntryNotFoundError,
+    compute_contract_entry_sha256,
+    compute_contract_sha256,
+)
+
 __all__ = [
     "occ",
     "occ_validate",
     "occ_stamp",
+    "occ_compute_contract_hash",
     "parse_evidence_source_token",
     "validate_pr_body",
     "stamp_pr_body",
+    "compute_receipt_contract_hashes",
 ]
 
 
@@ -246,3 +273,76 @@ def occ_stamp(
         file.write_text(stamped, encoding="utf-8")
     else:
         click.echo(stamped, nl=False)
+
+
+# ---------------------------------------------------------------------------
+# compute-contract-hash (OMN-15711 / FM5) — package validator_receipt_gate's
+# hash-chaining as a supported CLI so authoring a DoD receipt never requires
+# reimplementing SHA-256 canonicalization inline.
+# ---------------------------------------------------------------------------
+
+
+def compute_receipt_contract_hashes(
+    contract_path: Path, *, evidence_item_id: str | None = None
+) -> dict[str, str]:
+    """Return the receipt-binding hash(es) for ``contract_path``.
+
+    Always includes ``contract_sha256`` (the whole-file hash, prefixed
+    ``sha256:`` to match the canonical receipt field format). When
+    ``evidence_item_id`` is given, also includes ``contract_entry_sha256`` (the
+    per-entry hash for that ``dod_evidence`` item id).
+
+    Delegates entirely to
+    :func:`omnibase_core.validation.validator_receipt_gate.compute_contract_sha256`
+    and ``compute_contract_entry_sha256`` — this function performs no hashing of
+    its own, only the "sha256:" prefix formatting the gate's receipt models
+    expect and YAML parsing for the entry-hash path.
+
+    Raises:
+        ContractEntryNotFoundError: when ``evidence_item_id`` is given but no
+            ``dod_evidence`` item in the contract carries that id.
+    """
+    result: dict[str, str] = {
+        "contract_sha256": f"sha256:{compute_contract_sha256(contract_path)}"
+    }
+    if evidence_item_id is not None:
+        contract_data = yaml.safe_load(contract_path.read_text(encoding="utf-8"))
+        result["contract_entry_sha256"] = compute_contract_entry_sha256(
+            contract_data, evidence_item_id
+        )
+    return result
+
+
+@occ.command("compute-contract-hash")
+@click.argument(
+    "contract_path",
+    type=click.Path(exists=True, dir_okay=False, path_type=Path),
+)
+@click.option(
+    "--evidence-item-id",
+    "evidence_item_id",
+    default=None,
+    metavar="ID",
+    help="dod_evidence item id to also compute the per-entry "
+    "contract_entry_sha256 for (OMN-13888 per-entry hash scheme).",
+)
+def occ_compute_contract_hash(
+    contract_path: Path, evidence_item_id: str | None
+) -> None:
+    """Print the contract_sha256 (+ optional contract_entry_sha256) a DoD
+    receipt for CONTRACT_PATH must carry to bind against Receipt-Gate.
+
+    Prints a single-line JSON object to stdout, e.g.:
+    ``{"contract_sha256": "sha256:...."}`` or, with --evidence-item-id,
+    ``{"contract_entry_sha256": "sha256:....", "contract_sha256": "sha256:...."}``.
+    Exits non-zero with an actionable message when --evidence-item-id names a
+    dod_evidence item absent from the contract.
+    """
+    try:
+        result = compute_receipt_contract_hashes(
+            contract_path, evidence_item_id=evidence_item_id
+        )
+    except ContractEntryNotFoundError as exc:
+        raise click.UsageError(str(exc)) from exc
+
+    click.echo(json.dumps(result, sort_keys=True))
