@@ -422,6 +422,11 @@ class TestNamespacedDiscoveryWiring:
     ) -> None:
         migrations_dir = tmp_path / "migrations"
         migrations_dir.mkdir()
+        # OMN-15349: the runner unconditionally requires the fence manifest
+        # to exist under MIGRATIONS_DIR.
+        (migrations_dir / "fenced-node-migrations.yaml").write_text(
+            "fenced_node_migrations: []\n", encoding="utf-8"
+        )
         (migrations_dir / "001_bad_directive.sql").write_text(
             "--   onex-create-database: bad/name\nSELECT 1;\n",
             encoding="utf-8",

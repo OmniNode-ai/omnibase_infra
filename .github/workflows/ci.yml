@@ -2312,11 +2312,43 @@ jobs:
         shell: bash
         run: python3 scripts/resolve_node_migration_source_ref.py
 
+      - name: Live-resolve omnimarket dev HEAD
+        # OMN-15703: no hardcoded fallback SHA. When the trailer is absent
+        # (resolve-omnimarket-ref emits the literal "dev"), resolve
+        # omnimarket's live dev HEAD via the GitHub API at run time instead
+        # of pinning to a snapshot that goes stale the moment omnimarket
+        # dev moves again (the OMN-15701 incident). Fails loudly (non-zero
+        # exit) rather than silently falling back to a stale pin.
+        #
+        # Token: fork-triggered pull_request runs receive no org secrets, so
+        # secrets.CROSS_REPO_PAT is empty there and this step must not
+        # hard-depend on it. omnimarket is a PUBLIC repo, so reading its
+        # commits API needs no elevated scope -- github.token (always present,
+        # including on fork PRs) is sufficient. Prefer CROSS_REPO_PAT when
+        # present (same-repo/trusted runs) to stay on the higher, shared
+        # cross-repo rate-limit budget those runs already use elsewhere in
+        # this workflow (see lines ~1508/1665/1696); fall back to
+        # github.token so the fork lane keeps functioning rather than
+        # aborting before its fork-lane proof steps below.
+        id: resolve-omnimarket-live-head
+        if: steps.resolve-omnimarket-ref.outputs.ref == 'dev'
+        shell: bash
+        env:
+          GH_TOKEN: ${{ secrets.CROSS_REPO_PAT || github.token }}
+        run: |
+          set -euo pipefail
+          sha="$(gh api repos/OmniNode-ai/omnimarket/commits/dev --jq .sha)"
+          if [[ ! "$sha" =~ ^[0-9a-f]{40}$ ]]; then
+            echo "::error::live omnimarket dev HEAD resolution returned an invalid sha: '${sha}'" >&2
+            exit 1
+          fi
+          echo "sha=${sha}" >> "$GITHUB_OUTPUT"
+
       - name: Checkout exact typed registry dependency
         uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
         with:
           repository: OmniNode-ai/omnimarket
-          ref: ${{ steps.resolve-omnimarket-ref.outputs.ref == 'dev' && '54356a831e3d8876c69373cac884a3df2a5653f7' || steps.resolve-omnimarket-ref.outputs.ref }}
+          ref: ${{ steps.resolve-omnimarket-ref.outputs.ref == 'dev' && steps.resolve-omnimarket-live-head.outputs.sha || steps.resolve-omnimarket-ref.outputs.ref }}
           path: .proof-dependencies/omnimarket
           persist-credentials: false
 

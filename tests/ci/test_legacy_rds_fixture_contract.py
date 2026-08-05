@@ -196,6 +196,7 @@ def test_proof_runs_real_migrations_twice_and_pins_the_blocked_upgrade() -> None
     assert "fixture_status=PASS_WITH_EXPECTED_BLOCKER blocker=OMN-15423" in replay
     dockerfile = DOCKERFILE.read_text(encoding="utf-8")
     assert "ledger-control/" in dockerfile
+    assert "ledger-control/forward/fenced-node-migrations.yaml" in dockerfile
     assert "ledger-control/forward/_ledger/bootstrap.sql" in dockerfile
 
 

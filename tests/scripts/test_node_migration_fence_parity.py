@@ -63,25 +63,50 @@ matching the k8s runner: a ledger row would make the eventual un-fencing a
 silent no-op (the runner would read the row, call it already applied, and never
 run the migration).
 
-DRIFT HAZARD / follow-up
-------------------------
-There is no single source of truth for this list. It is duplicated in two repos
-and today only prose and these tests keep them equal.
+DRIFT HAZARD / follow-up — RESOLVED for the baseline by OMN-15349
+------------------------------------------------------------------
+Originally there was no single source of truth for this list: it was
+duplicated in two repos and only prose and these tests kept them equal.
+OMN-15349 (Option 1, operator ruling R-f 2026-08-05) removed that duplication
+for the BASELINE fence: ``docker/migrations/forward/fenced-node-migrations.yaml``
+is now the sole committed list, and ``scripts/run-forward-migrations.sh``
+parses it at runtime instead of carrying its own literal copy (see the
+"single-sourced" comment in the OMN-15336 fence block there). The k8s Job
+(``omninode_infra``) parses the same manifest out of the same
+``omnibase-infra-migrate`` image it already pulls.
 
-* Always on, gating every PR: ``EXPECTED_FENCE`` below pins the list read from
-  ``omninode_infra@dev`` at authoring time, asserted exact and IN ORDER.
-* Opt-in: ``test_fence_matches_omninode_infra_k8s_runner`` diffs this repo's
-  list against the live k8s manifest. It is opt-in on purpose — it depends on
-  an ``omninode_infra`` checkout whose freshness this repo cannot guarantee,
-  and an always-on version went RED on the ``.200`` build host purely because
-  that clone sat two commits behind dev. False REDs from another repo's local
-  staleness are worse than the gap they close.
+What single-sourcing the baseline does NOT do: make the two runners' EFFECTIVE
+fences equal. Each runner layers its own, independently operator-ruled,
+lane-scoped RELEASE on top of the shared baseline (see the OMN-15379 section
+below and ``manifest_ids()``/``K8S_RULING_21_RELEASE`` here) — a release is an
+environment-specific operator decision, not fence data, so it deliberately
+stays out of the manifest. ``test_fence_matches_omninode_infra_k8s_runner``
+below therefore asserts baseline-superset + known-release-subtraction, not
+raw equality.
 
-So the residual gap is real: a fence entry added to the k8s runner alone still
-lands unnoticed here until someone runs the opt-in check or updates the pin.
-Single-sourcing the list (one committed manifest consumed by both runners, or a
-generated block) is a cross-repo architecture change, deliberately NOT done
-here; it is proposed as a follow-up in the PR body.
+* Always on, gating every PR: ``test_manifest_pins_the_known_baseline_fence``
+  pins the manifest's content, exact and IN ORDER — the same change-control
+  friction the old pinned-tuple test gave the shell script, now pointed at
+  the actual single source. ``test_manifest_shell_parse_matches_yaml_parse``
+  guards the OTHER hazard single-sourcing introduces: both runners parse this
+  YAML with a plain ``sed`` one-liner (no YAML library in ``/bin/sh`` or the
+  k8s Job's minimal bash), so a manifest reformatted in a way ``yaml.safe_load``
+  still accepts but the sed grammar cannot (e.g. single-quoted ids, an
+  unindented list) would silently ship a truncated or empty fence in
+  production while every YAML-aware tool kept reading it fine.
+* Opt-in: ``test_fence_matches_omninode_infra_k8s_runner`` diffs the manifest
+  baseline against the live k8s manifest's effective (post-ruling-21) list. It
+  is opt-in on purpose — it depends on an ``omninode_infra`` checkout whose
+  freshness this repo cannot guarantee, and an always-on version went RED on
+  the ``.200`` build host purely because that clone sat two commits behind
+  dev. False REDs from another repo's local staleness are worse than the gap
+  they close.
+
+Residual gap, unchanged by OMN-15349: a NEW baseline id added to the k8s side
+alone (as opposed to a release-policy change) would still land unnoticed here
+until someone runs the opt-in check — single-sourcing the data removes the
+"two literals to keep in sync" hazard, it does not make one repo's CI aware of
+the other repo's uncommitted intentions.
 
 Live proofs drive THE ARTIFACT THAT RUNS — the shipped
 ``scripts/run-forward-migrations.sh``, executed against a real Postgres.
@@ -176,6 +201,44 @@ FENCE_END = "# ---- END operator fence — node migration ids (OMN-15336) ----"
 SKIP_BEGIN = "# ---- BEGIN fenced-id skip (OMN-15336) ----"
 SKIP_END = "# ---- END fenced-id skip (OMN-15336) ----"
 
+# --- OMN-15349 single-sourced manifest ---------------------------------------
+MANIFEST_RELPATH = "docker/migrations/forward/fenced-node-migrations.yaml"
+MANIFEST_PATH = REPO_ROOT / MANIFEST_RELPATH
+
+# The regex both runners actually execute against the manifest at runtime
+# (POSIX `sed`; neither /bin/sh nor the k8s Job's bash has a YAML library).
+# This is the REAL parse path in production.
+_MANIFEST_ID_LINE = re.compile(r'^\s*-\s*id:\s*"([^"]*)"', re.MULTILINE)
+
+
+def parse_shell_manifest_ids(text: str) -> tuple[str, ...]:
+    """Reproduce the shell `sed` extraction of `- id: "..."` lines verbatim."""
+    return tuple(_MANIFEST_ID_LINE.findall(text))
+
+
+def _load_manifest() -> list[dict[str, str]]:
+    """Independent oracle: a real YAML parse of the manifest, schema-checked."""
+    doc = yaml.safe_load(MANIFEST_PATH.read_text(encoding="utf-8"))
+    assert isinstance(doc, dict) and "fenced_node_migrations" in doc, (
+        f"{MANIFEST_RELPATH} must be a mapping with a top-level "
+        "'fenced_node_migrations' key"
+    )
+    entries = doc["fenced_node_migrations"]
+    assert isinstance(entries, list) and entries, (
+        f"{MANIFEST_RELPATH}'s fenced_node_migrations must be a non-empty list"
+    )
+    for i, entry in enumerate(entries):
+        assert isinstance(entry, dict) and "id" in entry, (
+            f"{MANIFEST_RELPATH} entry {i} is not a mapping with an 'id' key: {entry!r}"
+        )
+    return entries
+
+
+def manifest_ids() -> tuple[str, ...]:
+    """Ordered ids from the manifest, via the YAML-parse oracle."""
+    return tuple(entry["id"] for entry in _load_manifest())
+
+
 # The four OMN-14974/OMN-15313 delegation ids. Kept as their own tuple so a
 # failure says WHICH half of the fence moved.
 FENCED_DELEGATION_IDS = (
@@ -194,15 +257,35 @@ FENCED_REGISTRATION_IDS = (
     "node:node_projection_registration:0001_add_heartbeat_columns.sql",
     "node:node_projection_registration:0002_node_service_registry_tenant_rls.sql",
 )
-# Source of truth at authoring time: omninode_infra@dev commit 966463a,
-# k8s/migrations/omnibase-infra-migrate.yaml, FENCED_NODE_MIGRATION_IDS.
+# Pinned expectation for the manifest content (OMN-15349): the baseline fence,
+# exact and in order. A manifest edit that moves this must update the pin in
+# the same PR — same change-control friction the pre-OMN-15349 shell-literal
+# pin gave, now pointed at the actual single source instead of a copy of it.
 EXPECTED_FENCE = FENCED_DELEGATION_IDS + FENCED_REGISTRATION_IDS
+
+# --- OMN-15349 k8s-side release (operator ruling 21, OMN-15332 comment
+# 1a067542, 2026-07-31T14:05Z GO) --------------------------------------------
+# Unlike the lab-lane release below (env-gated, ruling 15), ruling 21
+# authorized a DURABLE release of the registration trio on the k8s Job, which
+# serves exactly one environment (staging/onex-dev). This is a k8s-side
+# runner policy, not manifest data (see the manifest file's own docstring for
+# why) — pinned here only so the opt-in cross-repo test
+# (`test_fence_matches_omninode_infra_k8s_runner`) can state the expected
+# baseline-minus-release relationship instead of asserting raw equality.
+K8S_RULING_21_RELEASE = (
+    "node:node_projection_registration:0000_create_node_service_registry.sql",
+    "node:node_projection_registration:0001_add_heartbeat_columns.sql",
+    "node:node_projection_registration:0002_node_service_registry_tenant_rls.sql",
+)
 
 # --- OMN-15379 lane-scoped release (operator ruling 15, 2026-07-29) ----------
 # Ruling 15: node_service_registry FORCE ROW LEVEL SECURITY extends to the LAB
 # LANE ONLY. The lab (compose dev lane, project `omnibase-infra`) applies the
-# registration trio in full as the proving ground; the omninode_infra k8s fence
-# is unchanged at all seven ids.
+# registration trio in full as the proving ground. The omninode_infra k8s
+# fence is a SEPARATE release (ruling 21, K8S_RULING_21_RELEASE above) — not
+# "unchanged," and not the same mechanism (durable vs env-gated). See the
+# CORRECTION comment in run-forward-migrations.sh's LANE-SCOPED FENCE RELEASE
+# block for the same fix applied at the runner.
 LANE_INDICATOR_ENV = "ONEX_MIGRATION_LANE"
 DEV_LANE_VALUE = "dev"
 # Spelled out rather than aliased to FENCED_REGISTRATION_IDS: if the two are
@@ -283,19 +366,6 @@ def strip_fence(text: str) -> str:
     return out
 
 
-def parse_shell_fence_list(block: str) -> tuple[str, ...]:
-    """Parse ``FENCED_NODE_MIGRATION_IDS="a\\nb\\n..."`` into an ordered tuple."""
-    match = re.search(
-        r'FENCED_NODE_MIGRATION_IDS="\\?\n?(?P<body>[^"]*)"', block, re.DOTALL
-    )
-    assert match is not None, (
-        "FENCED_NODE_MIGRATION_IDS assignment not found in the fence block"
-    )
-    return tuple(
-        line.strip() for line in match.group("body").splitlines() if line.strip()
-    )
-
-
 def parse_lane_release_policies(block: str) -> dict[str, tuple[str, ...]]:
     """Parse the OMN-15379 ``case "${ONEX_MIGRATION_LANE}" in ... esac`` policy.
 
@@ -352,16 +422,18 @@ def test_runner_carries_the_operator_fence() -> None:
     )
 
 
-def test_fence_is_exactly_the_expected_ids_in_order() -> None:
-    """Exact-set and ORDER, not containment.
+def test_manifest_pins_the_known_baseline_fence() -> None:
+    """Exact-set and ORDER, not containment — now pinned against the manifest.
 
-    Silently dropping one id while adding another is precisely the regression
-    this assertion exists to catch, and order is asserted because the two repos'
-    lists are diffed element-for-element.
+    OMN-15349: the shell script no longer carries its own literal copy of the
+    fence, so there is nothing left to pin THERE. This is the same
+    change-control friction as the pre-OMN-15349 test, pointed at the actual
+    single source: a manifest edit that silently drops one id while adding
+    another is precisely the regression this assertion exists to catch.
     """
-    found = parse_shell_fence_list(extract_fence_block())
+    found = manifest_ids()
     assert found == EXPECTED_FENCE, (
-        "the operator fence changed. Expected exactly:\n  "
+        f"{MANIFEST_RELPATH} changed. Expected exactly:\n  "
         + "\n  ".join(EXPECTED_FENCE)
         + "\nFound:\n  "
         + "\n  ".join(found)
@@ -372,6 +444,46 @@ def test_fence_is_exactly_the_expected_ids_in_order() -> None:
     assert found[len(FENCED_DELEGATION_IDS) :] == FENCED_REGISTRATION_IDS, (
         "the OMN-15335/OMN-15343 registration hold is not the exact expected trio"
     )
+
+
+def test_manifest_shell_parse_matches_yaml_parse() -> None:
+    """The REAL production parse path (`sed`) must agree with `yaml.safe_load`.
+
+    Neither runner has a YAML library available. A manifest edit that a real
+    YAML parser still accepts but the shell one-liner cannot (single-quoted
+    ids, an unindented list, a missing closing quote) would ship a truncated
+    or empty fence in production while looking correct to every YAML-aware
+    tool, including this test file's own `manifest_ids()` oracle if it were
+    the only check.
+    """
+    text = MANIFEST_PATH.read_text(encoding="utf-8")
+    shell_parsed = parse_shell_manifest_ids(text)
+    yaml_parsed = manifest_ids()
+    assert shell_parsed == yaml_parsed, (
+        "the sed one-liner both runners execute against the manifest "
+        "disagrees with a real YAML parse — the manifest format is not "
+        "parseable the way production actually parses it.\n"
+        f"  sed:  {shell_parsed}\n  yaml: {yaml_parsed}"
+    )
+
+
+def test_manifest_ids_are_well_formed_and_unique() -> None:
+    """Schema/shape validator (OMN-15349): grammar + no duplicates.
+
+    A typo'd id or an accidental duplicate fences nothing extra (or hides a
+    duplicate entry silently) without this check — `grep -Fxq` in the runner
+    would just never match, or match the same line twice.
+    """
+    ids = manifest_ids()
+    assert len(ids) == len(set(ids)), (
+        f"{MANIFEST_RELPATH} has duplicate ids: {[i for i in ids if ids.count(i) > 1]}"
+    )
+    for entry_id in ids:
+        parts = entry_id.split(":")
+        assert len(parts) == 3 and parts[0] == "node" and all(parts), (
+            f"{entry_id!r} does not match the node:<node>:<filename> grammar"
+        )
+        assert parts[2].endswith(".sql"), f"{entry_id!r} does not name a .sql file"
 
 
 def test_every_fenced_id_names_a_real_vendored_sql_file() -> None:
@@ -525,7 +637,7 @@ def test_no_lane_can_release_anything_outside_the_fence() -> None:
     the node loop: an id in a release arm but not in the fence would be dead
     weight at best and a mis-stated policy at worst.
     """
-    fence = set(parse_shell_fence_list(extract_fence_block()))
+    fence = set(manifest_ids())
     for label, released in parse_lane_release_policies(extract_fence_block()).items():
         stray = sorted(set(released or ()) - fence)
         assert not stray, (
@@ -772,7 +884,23 @@ def _k8s_manifest_source(root: Path) -> tuple[str, str]:
 
 
 def test_fence_matches_omninode_infra_k8s_runner() -> None:
-    """THE cross-repo seam assertion: the two lists must be identical.
+    """THE cross-repo seam assertion.
+
+    Pre-OMN-15349 shape: assert raw equality of two independently-maintained
+    literal lists. Post-OMN-15349 shape: the two runners no longer maintain
+    independent lists at all — the k8s Job parses the SAME manifest baseline
+    this repo owns (``manifest_ids()``) and layers its own, operator-ruled
+    release (ruling 21, ``K8S_RULING_21_RELEASE``) on top. So this test
+    asserts three things instead of raw equality:
+
+      1. the k8s Job still references the shared manifest by name (it did not
+         quietly revert to a hardcoded baseline copy),
+      2. the k8s Job's committed release policy still matches the expected
+         ruling-21 registration trio, exactly (drift here IS a real defect —
+         unlike the baseline, there is only one copy of this release list),
+      3. the k8s Job's resulting EFFECTIVE fence (baseline minus release)
+         still equals the delegation quartet — the only ids ruling 21 left
+         fenced there.
 
     OPT-IN via ``REQUIRE_CROSS_REPO_FENCE_PARITY`` — deliberately, and this is
     the honest shape rather than the convenient one. The comparison depends on
@@ -782,15 +910,16 @@ def test_fence_matches_omninode_infra_k8s_runner() -> None:
     while this change was being gated, and an always-on version of this test
     went RED there for exactly that reason). Gating every PR on another repo's
     local checkout freshness manufactures false REDs, so the always-on leg is
-    ``EXPECTED_FENCE`` above; this is the sharper check you run deliberately,
-    after fetching, on a host that has both repos.
+    ``test_manifest_pins_the_known_baseline_fence`` above; this is the sharper
+    check you run deliberately, after fetching, on a host that has both repos.
     """
     if not os.environ.get("REQUIRE_CROSS_REPO_FENCE_PARITY"):
         pytest.skip(
             "cross-repo fence diff is opt-in: fetch omninode_infra, then run "
             "with REQUIRE_CROSS_REPO_FENCE_PARITY=1 (optionally "
-            "OMNINODE_INFRA_ROOT=<path>). The pinned EXPECTED_FENCE assertion "
-            "gates every PR regardless."
+            "OMNINODE_INFRA_ROOT=<path>). The pinned "
+            "test_manifest_pins_the_known_baseline_fence assertion gates "
+            "every PR regardless."
         )
 
     root = _omninode_infra_root()
@@ -802,27 +931,44 @@ def test_fence_matches_omninode_infra_k8s_runner() -> None:
         )
 
     text, provenance = _k8s_manifest_source(root)
-    match = re.search(r"FENCED_NODE_MIGRATION_IDS=\((?P<body>.*?)\)", text, re.DOTALL)
-    assert match is not None, (
-        f"{provenance}: FENCED_NODE_MIGRATION_IDS array not found — the k8s "
-        "runner lost its fence, or the array was reshaped"
+    manifest_filename = MANIFEST_RELPATH.rsplit("/", 1)[-1]
+    assert manifest_filename in text, (
+        f"{provenance}: the k8s Job no longer references the shared manifest "
+        f"{manifest_filename!r} — it may have reverted to a hardcoded fence "
+        "baseline, reopening the exact duplication OMN-15349 removed"
     )
-    k8s_fence = tuple(re.findall(r'"([^"]+)"', match.group("body")))
-    compose_fence = parse_shell_fence_list(extract_fence_block())
-    assert compose_fence == k8s_fence, (
-        "CROSS-REPO FENCE DRIFT: the compose runner and the k8s runner gate "
-        "different sets of node migrations over the SAME id space.\n"
-        f"  compose ({RUNNER.relative_to(REPO_ROOT)}):\n    "
-        + "\n    ".join(compose_fence)
-        + f"\n  k8s ({provenance}):\n    "
-        + "\n    ".join(k8s_fence)
-        + "\nOnly in k8s: "
-        + str(sorted(set(k8s_fence) - set(compose_fence)))
-        + "\nOnly in compose: "
-        + str(sorted(set(compose_fence) - set(k8s_fence)))
-        + "\nBEFORE treating this as real drift, confirm the k8s source above "
-        "is the live dev tip: `git -C <omninode_infra> fetch origin dev` and "
-        "re-run. A clone parked behind dev reports drift that does not exist."
+
+    release_match = re.search(
+        r"K8S_RULING_21_RELEASED_NODE_MIGRATION_IDS=\((?P<body>.*?)\)",
+        text,
+        re.DOTALL,
+    )
+    assert release_match is not None, (
+        f"{provenance}: K8S_RULING_21_RELEASED_NODE_MIGRATION_IDS array not "
+        "found — the k8s Job's ruling-21 release policy was removed or "
+        "reshaped"
+    )
+    k8s_release = tuple(re.findall(r'"([^"]+)"', release_match.group("body")))
+    assert k8s_release == K8S_RULING_21_RELEASE, (
+        "CROSS-REPO RELEASE-POLICY DRIFT: the k8s Job's ruling-21 release no "
+        "longer matches the expected registration trio.\n"
+        f"  k8s ({provenance}):\n    "
+        + "\n    ".join(k8s_release)
+        + "\n  expected:\n    "
+        + "\n    ".join(K8S_RULING_21_RELEASE)
+    )
+
+    baseline = manifest_ids()
+    stray = sorted(set(k8s_release) - set(baseline))
+    assert not stray, (
+        f"{provenance}: the k8s release names ids the shared manifest "
+        f"baseline does not cover: {stray}"
+    )
+    effective_k8s_fence = tuple(i for i in baseline if i not in k8s_release)
+    assert effective_k8s_fence == FENCED_DELEGATION_IDS, (
+        "the k8s Job's effective (post-release) fence no longer equals the "
+        "delegation quartet — either the shared manifest baseline or the "
+        f"k8s release changed: {effective_k8s_fence}"
     )
 
 
@@ -857,8 +1003,27 @@ def node_tree(tmp_path: Path) -> Path:
         (node_dir / filename).write_text(
             f"CREATE TABLE public.{_marker_for(migration_id)} (id INT);\n"
         )
+    _write_fence_manifest(forward, EXPECTED_FENCE)
     _write_application_ledger_contract(forward)
     return forward
+
+
+def _write_fence_manifest(forward: Path, ids: tuple[str, ...]) -> None:
+    """Write a synthetic fence manifest into a test harness's migrations tree.
+
+    OMN-15349: the shipped runner unconditionally requires
+    ``${MIGRATIONS_DIR}/fenced-node-migrations.yaml`` now — a harness that
+    built its own ``forward/`` tree without one would only prove the runner's
+    FATAL-if-missing guard, not the fence itself. Written in the exact format
+    the shipped ``sed`` one-liner parses (mirrors the committed manifest under
+    ``docker/migrations/forward/fenced-node-migrations.yaml``).
+    """
+    lines = ["fenced_node_migrations:"]
+    for migration_id in ids:
+        lines.append(f'  - id: "{migration_id}"')
+    (forward / "fenced-node-migrations.yaml").write_text(
+        "\n".join(lines) + "\n", encoding="utf-8"
+    )
 
 
 def _write_application_ledger_contract(forward: Path) -> None:
@@ -1147,6 +1312,7 @@ def real_registration_tree(tmp_path: Path) -> Path:
     (del_dir / del_file).write_text(
         f"CREATE TABLE public.{_marker_for(delegation_id)} (id INT);\n"
     )
+    _write_fence_manifest(forward, EXPECTED_FENCE)
     _write_application_ledger_contract(forward)
     return forward
 

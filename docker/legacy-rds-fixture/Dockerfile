@@ -15,6 +15,7 @@ FROM postgres:16-alpine AS proof
 COPY scripts/run-forward-migrations.sh /opt/omn15422/run-forward-migrations.sh
 COPY docker/migrations/ /migrations/
 COPY docker/legacy-rds-fixture/ledger-control/ /opt/omn15422/ledger-control/
+COPY docker/migrations/forward/fenced-node-migrations.yaml /opt/omn15422/ledger-control/forward/fenced-node-migrations.yaml
 COPY docker/migrations/forward/_ledger/bootstrap.sql /opt/omn15422/ledger-control/forward/_ledger/bootstrap.sql
 COPY docker/legacy-rds-fixture/fixture-manifest.json /opt/omn15422/fixture-manifest.json
 COPY docker/legacy-rds-fixture/prove.sh /opt/omn15422/prove.sh
