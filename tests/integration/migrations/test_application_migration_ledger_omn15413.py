@@ -481,6 +481,12 @@ INSERT INTO public.db_metadata (id) VALUES (TRUE) ON CONFLICT (id) DO NOTHING;
     (ledger_dir / "cloud-migration-aliases.tsv").write_text(
         "20260101_cloud\t20260101_cloud.sql\n", encoding="utf-8"
     )
+    # OMN-15349: the runner unconditionally requires the single-sourced
+    # operator fence manifest under MIGRATIONS_DIR; none of this synthetic
+    # tree's ids need to be fenced, so an empty-baseline manifest suffices.
+    (migrations_dir / "fenced-node-migrations.yaml").write_text(
+        "fenced_node_migrations: []\n", encoding="utf-8"
+    )
     return migrations_dir, version, checksum
 
 

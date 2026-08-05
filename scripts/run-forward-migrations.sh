@@ -126,66 +126,49 @@ is_skipped_by_manifest() {
 }
 
 # ---- BEGIN operator fence — node migration ids (OMN-15336) ----
-# PARITY PORT of omninode_infra/k8s/migrations/omnibase-infra-migrate.yaml's
-# FENCED_NODE_MIGRATION_IDS. The two runners share one id space
-# (node:<node>:<filename>) over one vendored SQL tree, so a fence in only one of
-# them is not a fence: OMN-15336 found the .201 dev lane and the stability-test
-# lane had applied all of the gated ids and were running FORCE ROW LEVEL
-# SECURITY on six tables, while the cloud RDS copy the k8s runner drives was
-# clean. Semantics matched field-by-field with the k8s runner:
+# SINGLE-SOURCED from docker/migrations/forward/fenced-node-migrations.yaml
+# (OMN-15349). That file is the baseline operator fence over the id space
+# this runner and omninode_infra/k8s/migrations/omnibase-infra-migrate.yaml
+# share (node:<node>:<filename>, minted over the same vendored SQL tree) — a
+# fence in only one of them is not a fence: OMN-15336 found the .201 dev lane
+# and the stability-test lane had applied all of the gated ids and were
+# running FORCE ROW LEVEL SECURITY on six tables, while the cloud RDS copy
+# the k8s runner drives was clean.
 #
-#   * EXACT-STRING match on the full namespaced id — no prefix, no glob.
-#   * Checked FIRST, before the already-applied ledger probe and before any
-#     psql -f, so a fenced id cannot be applied by any path through this loop
-#     (in particular it cannot be reached by a ledger probe that fails open).
-#   * SKIP + RECORD-THE-SKIP: the id is counted into NODE_SKIPPED and named on
-#     stdout. It is deliberately NOT written to schema_migrations. Recording it
-#     would make the eventual un-fencing a silent no-op — the runner would read
-#     the row, call it already applied, and the migration would never run. The
-#     k8s runner has the same shape for the same reason.
-#   * NEVER applied. This runner has no un-gate path; the fence is lifted by
-#     removing an id here in a change that also lands the operator ruling, in
-#     lockstep with the k8s list.
+# Before OMN-15349 this list was a hand-maintained literal here AND in the
+# k8s manifest — two copies that had already drifted once (k8s durably
+# released the registration trio under operator ruling 21 while this runner
+# stayed at the full baseline; see the LANE-SCOPED FENCE RELEASE block below
+# for why that is a *different* release mechanism, not a parity break).
+# Loading the same manifest file both runners read removes that drift class
+# for the baseline; each runner's release policy on top of the baseline is
+# still its own, because the release is an environment-specific operator
+# decision, not fence data.
 #
-# Assigned unconditionally, NOT `${FENCED_NODE_MIGRATION_IDS:-...}`: only a
-# COMMITTED fence is honoured, exactly as with the skip-manifest above. An
-# operator env var must not be able to empty this list.
-#
-# WHY these ids (verbatim from the k8s runner's rationale):
-#   delegation 0023-0026 — OMN-14974/OMN-15313. They put tenant-isolation RLS
-#     on live, actively-written delegation tables; un-gate only in a change that
-#     also proves the writer sets app.tenant_id per connection.
-#   registration 0000/0001/0002 — OMN-15335/OMN-15088/OMN-15343. All three must
-#     ALTER node_service_registry, and 0002 is itself the migration that applies
-#     ALTER TABLE node_service_registry FORCE ROW LEVEL SECURITY — i.e. it would
-#     land the posture change unattended from a deploy path. HELD pending the
-#     operator ruling on whether node_service_registry gets FORCE.
-#
-# SEAM (cross-repo, drift-prone by construction): this list must equal
-# omninode_infra@dev's FENCED_NODE_MIGRATION_IDS array element-for-element and
-# in order. Enforced by tests/scripts/test_node_migration_fence_parity.py, which
-# pins the expected tuple and — when an omninode_infra checkout is reachable —
-# diffs this list against the live k8s manifest. There is no single source of
-# truth for the list today; adding one is a cross-repo architecture change
-# (follow-up filed, see the test module docstring).
-#
-# OMN-15379: registration 0002 is added here. It was in the k8s list from the
-# start and was MISSING from this one, which is not a cosmetic gap: with 0000
-# fenced and 0002 unfenced, every cold compose lane ran 0002 against a
-# node_service_registry that had never been created and died with
-#   0002_node_service_registry_tenant_rls.sql:41 ERROR: relation
-#   "node_service_registry" does not exist
-# taking the whole forward-migration one-shot to exit 3 and the lane with it
-# (measured on .201 2026-07-29). A fence that gates the CREATE but not the
-# dependent ALTER is worse than no fence.
-FENCED_NODE_MIGRATION_IDS="\
-node:node_projection_delegation:0023_delegation_rls_tenant_isolation.sql
-node:node_projection_delegation:0024_drop_unwired_routing_columns.sql
-node:node_projection_delegation:0025_delegation_judge_verdict_events_tenant_id.sql
-node:node_projection_delegation:0026_delegation_judge_verdict_events_rls_tenant_isolation.sql
-node:node_projection_registration:0000_create_node_service_registry.sql
-node:node_projection_registration:0001_add_heartbeat_columns.sql
-node:node_projection_registration:0002_node_service_registry_tenant_rls.sql"
+# Loaded from the manifest, NOT `${FENCED_NODE_MIGRATION_IDS:-...}`: only a
+# COMMITTED manifest is honoured, exactly as with the skip-manifest above. An
+# operator env var must not be able to supply or empty this list — see
+# test_fence_is_not_overridable_by_environment.
+FENCE_MANIFEST="${MIGRATIONS_DIR}/fenced-node-migrations.yaml"
+if [ ! -f "${FENCE_MANIFEST}" ]; then
+  echo "FATAL: operator fence manifest not found: ${FENCE_MANIFEST}" >&2
+  exit 1
+fi
+FENCED_NODE_MIGRATION_IDS="$(sed -n \
+  's/^[[:space:]]*-[[:space:]]*id:[[:space:]]*"\([^"]*\)".*/\1/p' \
+  "${FENCE_MANIFEST}")"
+if [ -z "${FENCED_NODE_MIGRATION_IDS}" ]; then
+  # Not FATAL: an empty fence is a legitimate future state (every id
+  # eventually released) as well as the symptom of a malformed manifest, and
+  # this sed grammar cannot tell the two apart. Blocking the whole migration
+  # run on an empty fence would make "no ids currently need gating" a worse
+  # outage than the fence gap it replaces. The committed-content checks
+  # (test_manifest_pins_the_known_baseline_fence,
+  # test_manifest_shell_parse_matches_yaml_parse) are what catch an
+  # accidentally-emptied manifest, at PR time, before it ships.
+  echo "[forward-migration] WARNING: operator fence manifest ${FENCE_MANIFEST}" \
+    "parsed to an empty list — no node migrations are currently fenced" >&2
+fi
 
 is_fenced_node_migration() {
   candidate="$1"
@@ -197,7 +180,19 @@ is_fenced_node_migration() {
 # the LAB LANE ONLY. The lab (compose dev lane, project `omnibase-infra`) applies
 # the registration trio IN FULL — CREATE + heartbeat columns + ENABLE/FORCE RLS —
 # as the proving ground that generates the evidence the staging un-fence is
-# waiting on. The staging k8s fence is UNCHANGED and stays at all seven ids.
+# waiting on.
+#
+# CORRECTION (OMN-15349, 2026-08-05): this comment previously claimed "the
+# staging k8s fence is UNCHANGED and stays at all seven ids." That was true
+# when ruling 15 landed (2026-07-29) and stale within two days: operator
+# ruling 21 (OMN-15332 comment 1a067542, 2026-07-31T14:05Z GO) durably
+# released the registration trio on the k8s/staging side too — permanently,
+# not env-gated like this lab-lane release, because that Job serves exactly
+# one environment. So THIS runner's release (below) and the k8s runner's
+# release are two independently-ruled policies over the same shared baseline
+# manifest (docker/migrations/forward/fenced-node-migrations.yaml), not one
+# parity relationship — do not re-derive "the two runners must show the same
+# effective fence" from this block; they intentionally do not right now.
 #
 # FAIL-CLOSED BY CONSTRUCTION. Three independent properties, each tested:
 #

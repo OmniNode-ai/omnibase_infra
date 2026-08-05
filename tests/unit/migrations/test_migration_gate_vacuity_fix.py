@@ -214,6 +214,12 @@ class TestWaitForPostgresGuard:
         # Use an empty migrations dir so the runner stops after the wait loop.
         migrations_dir = tmp_path / "migrations"
         migrations_dir.mkdir()
+        # OMN-15349: the runner unconditionally requires the fence manifest
+        # to exist under MIGRATIONS_DIR before it ever reaches the wait loop
+        # this test targets.
+        (migrations_dir / "fenced-node-migrations.yaml").write_text(
+            "fenced_node_migrations: []\n", encoding="utf-8"
+        )
 
         result = subprocess.run(
             ["sh", str(RUNNER)],
@@ -313,6 +319,11 @@ class TestSkipManifest:
 
         migrations_dir = tmp_path / "migrations" / "forward"
         migrations_dir.mkdir(parents=True)
+        # OMN-15349: the runner unconditionally requires the fence manifest
+        # to exist under MIGRATIONS_DIR.
+        (migrations_dir / "fenced-node-migrations.yaml").write_text(
+            "fenced_node_migrations: []\n", encoding="utf-8"
+        )
 
         # One migration that is listed in the skip-manifest.
         skip_sql = migrations_dir / "001_should_be_skipped.sql"
