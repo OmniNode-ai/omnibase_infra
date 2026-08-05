@@ -344,6 +344,44 @@ def test_private_ownership_pin_is_pat_authenticated_and_fork_fail_closed() -> No
     assert "config/application_database_domain_proof_ownership.yaml" not in fork_step
 
 
+def test_live_omnimarket_head_resolution_survives_fork_prs_without_org_secrets() -> (
+    None
+):
+    """OMN-15703 forkfix: the live-resolve step must not hard-depend on
+    CROSS_REPO_PAT. Fork-triggered pull_request runs receive no org secrets,
+    so a bare `secrets.CROSS_REPO_PAT` GH_TOKEN resolves empty, `gh api`
+    fails unauthenticated, and `set -euo pipefail` aborts the job before its
+    dedicated fork-lane proof step
+    ("Enforce schema qualification in changed SQL (public fork, fail closed)")
+    ever runs. omnimarket is a public repo, so github.token (always present,
+    including on fork PRs) is sufficient to read its commits API -- the step
+    must fall back to it rather than failing closed on token absence alone.
+    """
+    workflow = _CI_WORKFLOW.read_text(encoding="utf-8")
+
+    live_resolve_step = workflow.split(
+        "- name: Live-resolve omnimarket dev HEAD",
+        maxsplit=1,
+    )[1].split("- name:", maxsplit=1)[0]
+
+    # Must not hard-depend on CROSS_REPO_PAT alone -- a fork PR run has no
+    # org secrets, so a bare `${{ secrets.CROSS_REPO_PAT }}` here means an
+    # empty GH_TOKEN and an unauthenticated `gh api` failure under
+    # `set -euo pipefail`.
+    assert "GH_TOKEN: ${{ secrets.CROSS_REPO_PAT }}" not in live_resolve_step
+    # Must fall back to the always-present github.token so the fork lane
+    # keeps resolving (omnimarket is public; no elevated scope is needed).
+    assert (
+        "GH_TOKEN: ${{ secrets.CROSS_REPO_PAT || github.token }}" in live_resolve_step
+    )
+    # Fail-closed behavior is preserved: no mutable-tag/latest/dev-ref
+    # fallback, hard exit on invalid resolution, still gated to the
+    # not-yet-pinned ("dev") case only.
+    assert "set -euo pipefail" in live_resolve_step
+    assert "exit 1" in live_resolve_step
+    assert "if: steps.resolve-omnimarket-ref.outputs.ref == 'dev'" in live_resolve_step
+
+
 def test_predecessor_pins_reject_in_place_mutation() -> None:
     contract = _contract()
 
