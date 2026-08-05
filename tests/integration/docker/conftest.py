@@ -36,11 +36,17 @@ Helper functions available for direct import:
     - run_container(): Context manager for container lifecycle
     - wait_for_healthy(): Poll container health status
     - wait_for_log_message(): Wait for log output
+    - _run_subprocess_with_group_kill(): group-kill-safe subprocess runner,
+      shared with test_docker_integration.py via ``from .conftest import ...``
+      (OMN-15567 -- see docstring on the function itself for why this matters
+      for the ``built_test_image`` fixture specifically).
 """
 
 from __future__ import annotations
 
+import contextlib
 import os
+import signal
 import socket
 import subprocess
 import time
@@ -288,6 +294,49 @@ def test_image_name() -> str:
     return f"omnibase-infra-test:{os.getpid()}"
 
 
+def _run_subprocess_with_group_kill(
+    cmd: list[str],
+    *,
+    timeout: int,
+    env: dict[str, str] | None = None,
+) -> subprocess.CompletedProcess[str]:
+    """Run a subprocess, killing its whole process group on timeout.
+
+    ``subprocess.run(..., timeout=...)`` only terminates the immediate child on
+    a ``TimeoutExpired`` -- a killed ``docker build`` invocation (and any
+    grandchild ``buildkit``/``runc`` processes it spawned) is left orphaned on
+    the runner, still consuming CPU/network after pytest has moved on. Running
+    the child in its own session (``start_new_session=True``) lets us kill the
+    whole process group via ``os.killpg`` instead of just the direct child.
+
+    OMN-15567: defined here (not in test_docker_integration.py) so the
+    ``built_test_image`` fixture below and the explicit build tests in
+    test_docker_integration.py share one group-kill implementation instead of
+    the fixture using a bare ``subprocess.run`` that can orphan build
+    processes. test_docker_integration.py imports this via
+    ``from .conftest import _run_subprocess_with_group_kill``.
+    """
+    proc = subprocess.Popen(
+        cmd,
+        stdout=subprocess.PIPE,
+        stderr=subprocess.PIPE,
+        text=True,
+        env=env,
+        start_new_session=True,
+    )
+    try:
+        stdout, stderr = proc.communicate(timeout=timeout)
+    except subprocess.TimeoutExpired:
+        with contextlib.suppress(ProcessLookupError, PermissionError):
+            os.killpg(proc.pid, signal.SIGKILL)
+        # Drain pipes so the killed child doesn't leave zombie fds behind.
+        stdout, stderr = proc.communicate()
+        raise
+    return subprocess.CompletedProcess(
+        cmd, proc.returncode, stdout=stdout, stderr=stderr
+    )
+
+
 @pytest.fixture(scope="module")
 def built_test_image(
     docker_available: bool,
@@ -298,6 +347,16 @@ def built_test_image(
 
     This fixture builds the Docker image once per test module and
     cleans up after all tests in the module complete.
+
+    OMN-15567: this is a module-scoped fixture, so its build only actually
+    runs for the first test in the module that requests it -- that test item
+    is charged the full build wall-clock under pytest-timeout (func_only
+    defaults to False, so the timer wraps setup+call+teardown). Every class
+    below that consumes this fixture carries a class-level
+    ``pytestmark = [pytest.mark.timeout(...)]`` sized for a cold build, so
+    the budget applies regardless of which test happens to be the first
+    consumer -- see the module docstring in test_docker_integration.py for
+    the full "why this can't regress via reordering" argument.
 
     Args:
         docker_available: Whether Docker is available.
@@ -326,14 +385,10 @@ def built_test_image(
     env = os.environ.copy()
     env["DOCKER_BUILDKIT"] = "1"
 
-    result = subprocess.run(
+    result = _run_subprocess_with_group_kill(
         build_cmd,
-        capture_output=True,
-        text=True,
         timeout=int(os.getenv("OMNI_DOCKER_BUILD_TIMEOUT_SECONDS", "1200")),
         env=env,
-        check=False,
-        shell=False,
     )
 
     if result.returncode != 0:
