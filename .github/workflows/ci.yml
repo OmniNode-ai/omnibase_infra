@@ -2312,11 +2312,32 @@ jobs:
         shell: bash
         run: python3 scripts/resolve_node_migration_source_ref.py
 
+      - name: Live-resolve omnimarket dev HEAD
+        # OMN-15703: no hardcoded fallback SHA. When the trailer is absent
+        # (resolve-omnimarket-ref emits the literal "dev"), resolve
+        # omnimarket's live dev HEAD via the GitHub API at run time instead
+        # of pinning to a snapshot that goes stale the moment omnimarket
+        # dev moves again (the OMN-15701 incident). Fails loudly (non-zero
+        # exit) rather than silently falling back to a stale pin.
+        id: resolve-omnimarket-live-head
+        if: steps.resolve-omnimarket-ref.outputs.ref == 'dev'
+        shell: bash
+        env:
+          GH_TOKEN: ${{ secrets.CROSS_REPO_PAT }}
+        run: |
+          set -euo pipefail
+          sha="$(gh api repos/OmniNode-ai/omnimarket/commits/dev --jq .sha)"
+          if [[ ! "$sha" =~ ^[0-9a-f]{40}$ ]]; then
+            echo "::error::live omnimarket dev HEAD resolution returned an invalid sha: '${sha}'" >&2
+            exit 1
+          fi
+          echo "sha=${sha}" >> "$GITHUB_OUTPUT"
+
       - name: Checkout exact typed registry dependency
         uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
         with:
           repository: OmniNode-ai/omnimarket
-          ref: ${{ steps.resolve-omnimarket-ref.outputs.ref == 'dev' && '54356a831e3d8876c69373cac884a3df2a5653f7' || steps.resolve-omnimarket-ref.outputs.ref }}
+          ref: ${{ steps.resolve-omnimarket-ref.outputs.ref == 'dev' && steps.resolve-omnimarket-live-head.outputs.sha || steps.resolve-omnimarket-ref.outputs.ref }}
           path: .proof-dependencies/omnimarket
           persist-credentials: false
 
