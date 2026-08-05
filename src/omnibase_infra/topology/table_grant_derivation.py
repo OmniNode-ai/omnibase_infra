@@ -45,6 +45,7 @@ from omnibase_infra.runtime.auto_wiring.handler_wiring import (
     _TENANT_PROJECTION_BINDING,
 )
 from omnibase_infra.topology.physical_schema_mapping import (
+    INTERNAL_TABLES_PHYSICALLY_IN_PUBLIC_UNTIL_OMN15359,
     TENANT_TABLES_PHYSICALLY_IN_PUBLIC_UNTIL_OMN15359,
     physical_grant_schema_for_table,
 )
@@ -58,6 +59,7 @@ __all__ = [
     "WRITE_PRIVILEGES",
     "DOMAIN_PROJECTION_BINDINGS",
     "TENANT_TABLES_PHYSICALLY_IN_PUBLIC_UNTIL_OMN15359",
+    "INTERNAL_TABLES_PHYSICALLY_IN_PUBLIC_UNTIL_OMN15359",
     "physical_grant_schema_for_table",
     "derive_table_grants",
     "derive_topology_table_grants",
