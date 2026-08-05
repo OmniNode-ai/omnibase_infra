@@ -59,14 +59,9 @@ repos:
   # shared baseline at omnibase_core/src/omnibase_core/validation/baselines/url_authority_baseline.json.
   # Baseline is burn-down only. Suppress with: # url-authority-ok: <reason>
   # OMN-15692 (ruling 39): rev bumped to pull in rule 5
-  # (msk-direct-broker-endpoint). PROVISIONAL pin — pinned to
-  # omnibase_core PR #1547's branch head (75c85126...) because that PR is
-  # not yet merged; must be re-pinned to the actual dev merge commit once
-  # #1547 lands (a squash merge mints a new SHA — see reference
-  # `reference_occ_squash_invalidates_evidence_source.md`). Do not merge
-  # this PR until that re-pin lands.
+  # (msk-direct-broker-endpoint), merged to omnibase_core dev by PR #1547.
   - repo: https://github.com/OmniNode-ai/omnibase_core
-    rev: 75c851266ba2583a3ccc4408f74ff79cb5449dc5 # pragma: allowlist secret
+    rev: 478e205d6f415adb2b5edd06b61f185279bba12e # pragma: allowlist secret
     hooks:
       - id: check-url-authority
         args: [--repo, omnibase_infra, --repo-root, .]
