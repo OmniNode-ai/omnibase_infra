@@ -20,9 +20,11 @@ integration tests for Docker infrastructure implementation.
 
 from __future__ import annotations
 
+import contextlib
 import json
 import os
 import re
+import signal
 import subprocess
 import time
 import urllib.error
@@ -52,10 +54,56 @@ CONTAINER_START_TIMEOUT = int(os.getenv("OMNI_DOCKER_CONTAINER_TIMEOUT_SECONDS",
 HEALTH_CHECK_TIMEOUT = 90
 SHUTDOWN_TIMEOUT = int(os.getenv("OMNI_DOCKER_SHUTDOWN_TIMEOUT_SECONDS", "120"))
 
+# Headroom above BUILD_TIMEOUT for the pytest-level per-test timeout marker.
+# OMN-15567: nightly-integration.yml invokes the whole suite with a blanket
+# `pytest --timeout=300 --timeout-method=thread`, sized for the rest of the
+# suite. Without a per-test `@pytest.mark.timeout(...)` override, that 300s
+# CLI ceiling silently pre-empts BUILD_TIMEOUT (default 1200s) and kills a
+# cold-cache `docker build` long before the subprocess-level timeout the test
+# was actually designed around ever fires. pytest-timeout's marker-level
+# setting takes precedence over the CLI flag for the tests that declare it.
+BUILD_TEST_TIMEOUT_MARGIN_SECONDS = 60
+
 
 # =============================================================================
 # Helper Functions
 # =============================================================================
+
+
+def _run_subprocess_with_group_kill(
+    cmd: list[str],
+    *,
+    timeout: int,
+    env: dict[str, str] | None = None,
+) -> subprocess.CompletedProcess[str]:
+    """Run a subprocess, killing its whole process group on timeout.
+
+    ``subprocess.run(..., timeout=...)`` only terminates the immediate child on
+    a ``TimeoutExpired`` -- a killed ``docker build`` invocation (and any
+    grandchild ``buildkit``/``runc`` processes it spawned) is left orphaned on
+    the runner, still consuming CPU/network after pytest has moved on. Running
+    the child in its own session (``start_new_session=True``) lets us kill the
+    whole process group via ``os.killpg`` instead of just the direct child.
+    """
+    proc = subprocess.Popen(
+        cmd,
+        stdout=subprocess.PIPE,
+        stderr=subprocess.PIPE,
+        text=True,
+        env=env,
+        start_new_session=True,
+    )
+    try:
+        stdout, stderr = proc.communicate(timeout=timeout)
+    except subprocess.TimeoutExpired:
+        with contextlib.suppress(ProcessLookupError, PermissionError):
+            os.killpg(proc.pid, signal.SIGKILL)
+        # Drain pipes so the killed child doesn't leave zombie fds behind.
+        stdout, stderr = proc.communicate()
+        raise
+    return subprocess.CompletedProcess(
+        cmd, proc.returncode, stdout=stdout, stderr=stderr
+    )
 
 
 def extract_profiles_from_compose(compose_path: Path) -> set[str]:
@@ -96,6 +144,7 @@ class TestDockerBuild:
     """Tests for Docker image build process."""
 
     @pytest.mark.slow
+    @pytest.mark.timeout(BUILD_TIMEOUT + BUILD_TEST_TIMEOUT_MARGIN_SECONDS)
     def test_build_succeeds_with_public_deps(
         self,
         docker_available: bool,
@@ -129,14 +178,10 @@ class TestDockerBuild:
             env = os.environ.copy()
             env["DOCKER_BUILDKIT"] = "1"
 
-            result = subprocess.run(
+            result = _run_subprocess_with_group_kill(
                 build_cmd,
-                capture_output=True,
-                text=True,
                 timeout=BUILD_TIMEOUT,
                 env=env,
-                check=False,
-                shell=False,
             )
 
             assert result.returncode == 0, (
@@ -156,6 +201,7 @@ class TestDockerBuild:
             )
 
     @pytest.mark.slow
+    @pytest.mark.timeout(BUILD_TIMEOUT + BUILD_TEST_TIMEOUT_MARGIN_SECONDS)
     def test_build_uses_buildkit_cache_mounts(
         self,
         buildkit_available: bool,
@@ -190,14 +236,10 @@ class TestDockerBuild:
                 str(project_root),
             ]
 
-            first_result = subprocess.run(
+            first_result = _run_subprocess_with_group_kill(
                 first_build_cmd,
-                capture_output=True,
-                text=True,
                 timeout=BUILD_TIMEOUT,
                 env=env,
-                check=False,
-                shell=False,
             )
 
             assert first_result.returncode == 0, "First build failed"
