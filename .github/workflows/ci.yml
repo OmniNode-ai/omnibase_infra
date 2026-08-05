@@ -2319,11 +2319,22 @@ jobs:
         # of pinning to a snapshot that goes stale the moment omnimarket
         # dev moves again (the OMN-15701 incident). Fails loudly (non-zero
         # exit) rather than silently falling back to a stale pin.
+        #
+        # Token: fork-triggered pull_request runs receive no org secrets, so
+        # secrets.CROSS_REPO_PAT is empty there and this step must not
+        # hard-depend on it. omnimarket is a PUBLIC repo, so reading its
+        # commits API needs no elevated scope -- github.token (always present,
+        # including on fork PRs) is sufficient. Prefer CROSS_REPO_PAT when
+        # present (same-repo/trusted runs) to stay on the higher, shared
+        # cross-repo rate-limit budget those runs already use elsewhere in
+        # this workflow (see lines ~1508/1665/1696); fall back to
+        # github.token so the fork lane keeps functioning rather than
+        # aborting before its fork-lane proof steps below.
         id: resolve-omnimarket-live-head
         if: steps.resolve-omnimarket-ref.outputs.ref == 'dev'
         shell: bash
         env:
-          GH_TOKEN: ${{ secrets.CROSS_REPO_PAT }}
+          GH_TOKEN: ${{ secrets.CROSS_REPO_PAT || github.token }}
         run: |
           set -euo pipefail
           sha="$(gh api repos/OmniNode-ai/omnimarket/commits/dev --jq .sha)"
