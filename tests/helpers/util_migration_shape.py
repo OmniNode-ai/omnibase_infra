@@ -10,9 +10,13 @@ two questions that the shape-drift gate and its execution proof both need:
 * which columns does the same file RECONCILE with a guarded
   ``ALTER TABLE ... ADD COLUMN IF NOT EXISTS``.
 
-The operator fence is READ FROM the runner (``scripts/run-forward-migrations.sh``)
-rather than restated here: a second hand-maintained copy of that list is exactly
-the cross-repo drift OMN-15336 was filed about.
+The operator fence is READ FROM the single-sourced manifest
+(``docker/migrations/forward/fenced-node-migrations.yaml``, OMN-15349) rather
+than restated here: a second hand-maintained copy of that list is exactly the
+cross-repo drift OMN-15336 was filed about. Before OMN-15349 this read from
+the runner script's own literal copy; the runner no longer carries one (it
+parses the same manifest at runtime), so this helper now points at the
+manifest directly instead.
 
 Ticket: OMN-15376
 """
@@ -26,6 +30,9 @@ from pathlib import Path
 REPO_ROOT = Path(__file__).resolve().parents[2]
 NODE_MIGRATIONS_DIR = REPO_ROOT / "docker" / "migrations" / "forward" / "nodes"
 FORWARD_RUNNER = REPO_ROOT / "scripts" / "run-forward-migrations.sh"
+FENCE_MANIFEST = (
+    REPO_ROOT / "docker" / "migrations" / "forward" / "fenced-node-migrations.yaml"
+)
 
 _CREATE_TABLE_GUARDED = re.compile(
     r"CREATE\s+TABLE\s+IF\s+NOT\s+EXISTS\s+([A-Za-z0-9_.\"]+)\s*\(", re.I
@@ -35,7 +42,7 @@ _ADD_COLUMN_GUARDED = re.compile(
     r'("?[A-Za-z_][A-Za-z0-9_]*"?)',
     re.I,
 )
-_FENCE_BLOCK = re.compile(r'FENCED_NODE_MIGRATION_IDS="\\\n(.*?)"', re.S)
+_MANIFEST_ID_LINE = re.compile(r'^\s*-\s*id:\s*"([^"]*)"', re.MULTILINE)
 
 # A leading keyword that marks a table-level constraint rather than a column.
 _CONSTRAINT_HEADS = frozenset(
@@ -270,17 +277,20 @@ def reconciled_columns(sql: str, table: GuardedTable) -> set[str]:
 
 
 def fenced_migration_ids() -> frozenset[str]:
-    """The operator fence, read from the runner so it cannot drift from it."""
-    block = _FENCE_BLOCK.search(FORWARD_RUNNER.read_text(encoding="utf-8"))
-    if block is None:  # pragma: no cover - structural guard
+    """The operator fence baseline, read from the single-sourced manifest
+    (OMN-15349) so this helper cannot drift from what the runners actually
+    load. Note this is the BASELINE fence, not either runner's post-release
+    effective fence — callers that need the effective (post-release) set for
+    a specific lane must apply that lane's release policy themselves.
+    """
+    ids = tuple(_MANIFEST_ID_LINE.findall(FENCE_MANIFEST.read_text(encoding="utf-8")))
+    if not ids:  # pragma: no cover - structural guard
         raise AssertionError(
-            "FENCED_NODE_MIGRATION_IDS not found in "
-            f"{FORWARD_RUNNER} — the fence seam moved; fix this reader, do not "
+            f"no fenced ids parsed from {FENCE_MANIFEST} — the manifest is "
+            "missing, empty, or the fence seam moved; fix this reader, do not "
             "restate the list here."
         )
-    return frozenset(
-        line.strip() for line in block.group(1).splitlines() if line.strip()
-    )
+    return frozenset(ids)
 
 
 def node_migration_files() -> list[tuple[str, Path]]:

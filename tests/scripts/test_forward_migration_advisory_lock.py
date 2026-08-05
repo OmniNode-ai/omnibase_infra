@@ -389,6 +389,11 @@ def migrations_dir(tmp_path: Path) -> Path:
     forward = tmp_path / "migrations" / "forward"
     forward.mkdir(parents=True)
     (forward / "001_race_target.sql").write_text(RACE_MIGRATION_SQL)
+    # OMN-15349: the runner unconditionally requires the fence manifest to
+    # exist under MIGRATIONS_DIR; none of this fixture's ids need gating.
+    (forward / "fenced-node-migrations.yaml").write_text(
+        "fenced_node_migrations: []\n", encoding="utf-8"
+    )
     return forward
 
 
@@ -634,6 +639,11 @@ def two_migrations_dir(tmp_path: Path) -> Path:
     (forward / "001_race_target.sql").write_text(RACE_MIGRATION_SQL)
     (forward / "002_after_signal.sql").write_text(
         "INSERT INTO public.apply_probe (label, phase) VALUES ('second', 'applied');\n"
+    )
+    # OMN-15349: the runner unconditionally requires the fence manifest to
+    # exist under MIGRATIONS_DIR; none of this fixture's ids need gating.
+    (forward / "fenced-node-migrations.yaml").write_text(
+        "fenced_node_migrations: []\n", encoding="utf-8"
     )
     return forward
 

@@ -49,6 +49,7 @@ NODES_DIR = FORWARD_DIR / "nodes"
 RUNNER = REPO_ROOT / "scripts" / "run-forward-migrations.sh"
 SAVINGS_BASE = FORWARD_DIR / "074_create_savings_estimates.sql"
 INFRA_FLAT_076 = FORWARD_DIR / "076_add_savings_estimate_provenance.sql"
+FENCE_MANIFEST = FORWARD_DIR / "fenced-node-migrations.yaml"
 OMNIBASE_ENV = Path.home() / ".omnibase" / ".env"
 
 
@@ -195,6 +196,9 @@ def test_node_migration_discovery_applies_views(tmp_path: Path) -> None:
     mig_dir.mkdir()
     shutil.copy(SAVINGS_BASE, mig_dir / SAVINGS_BASE.name)
     shutil.copytree(NODES_DIR, mig_dir / "nodes")
+    # OMN-15349: the runner now unconditionally requires the single-sourced
+    # operator fence manifest to exist under MIGRATIONS_DIR.
+    shutil.copy(FENCE_MANIFEST, mig_dir / FENCE_MANIFEST.name)
 
     env = _psql_env(config)
     env["MIGRATIONS_DIR"] = str(mig_dir)

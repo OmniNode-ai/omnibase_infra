@@ -1,0 +1,94 @@
+# fenced-node-migrations.yaml — Single source of truth for the node-migration
+# operator fence (OMN-15349, Option 1)
+#
+# Ticket: OMN-15349 (single-source the fence across omnibase_infra +
+#   omninode_infra — this file is that single source)
+# Predecessor: OMN-15336 (parity port that first gave the compose runner a
+#   fence at all; left the list duplicated in two repos, which this file
+#   removes)
+#
+# PURPOSE
+# This is the BASELINE operator fence over the shared node-migration id space
+# (node:<node>:<filename>, minted identically by both runners over the same
+# vendored docker/migrations/forward/nodes/ tree). It is consumed READ-ONLY by:
+#
+#   - omnibase_infra/scripts/run-forward-migrations.sh (every compose lane —
+#     dev, stability-test, judge, prod). Reads this file directly via the
+#     ${MIGRATIONS_DIR} bind mount (docker/docker-compose.infra.yml mounts
+#     ../docker/migrations/forward:/migrations/forward:ro).
+#   - omninode_infra/k8s/migrations/omnibase-infra-migrate.yaml (the k8s
+#     Job). The Job's copy-migrations initContainer already copies this
+#     entire directory (docker/Dockerfile.migrate: COPY docker/migrations/
+#     forward/ /migrations/forward/, recursive) out of the
+#     omnibase-infra-migrate image it pulls — no new image dependency, the
+#     coupling already existed for the SQL tree this file sits next to.
+#
+# BASELINE, NOT PER-LANE EFFECTIVE FENCE
+# This list is the maximal fence — every id both runners fence by default.
+# Each runner separately layers its OWN, independently operator-ruled,
+# lane-scoped RELEASE on top of this baseline (a strict subset carve-out,
+# never a widening):
+#
+#   - compose: ONEX_MIGRATION_LANE=dev releases the registration trio on the
+#     lab lane only (operator ruling 15, OMN-15379). Every other lane stays
+#     fully fenced. See the "LANE-SCOPED FENCE RELEASE" block in
+#     run-forward-migrations.sh.
+#   - k8s: releases the registration trio unconditionally, because that Job
+#     serves exactly one environment (staging/onex-dev) and operator ruling
+#     21 (OMN-15332 comment 1a067542, 2026-07-31T14:05Z GO) authorized a
+#     DURABLE release there, not an env-gated one. See the "k8s lane
+#     release" block in omnibase-infra-migrate.yaml.
+#
+# The release policies are deliberately NOT expressed in this file: they are
+# per-environment operator decisions, not shared fence DATA, and folding them
+# in would turn one shared baseline back into two hand-reconciled effective
+# lists. What this file guarantees is that both runners start from the same
+# baseline before either applies its own release — the seam OMN-15349 exists
+# to close.
+#
+# FORMAT
+# A flat list under `fenced_node_migrations`, each entry an `id:` (mandatory,
+# machine-parsed) plus a `ticket:` (advisory, for humans). Order is
+# significant — both runners preserve it. Parsed with a portable
+# sed one-liner (no yq/python dependency in either runner's shell):
+#
+#   sed -n 's/^[[:space:]]*-[[:space:]]*id:[[:space:]]*"\([^"]*\)".*/\1/p' \
+#     fenced-node-migrations.yaml
+#
+# Mirrors the parsing style already used for docker/migrations/skip-manifest.yaml.
+#
+# CHANGING THIS LIST
+# Editing this file changes the baseline for BOTH runners in one commit —
+# that is the point of single-sourcing it. It does NOT by itself change
+# either runner's effective (post-release) fence; a release policy change
+# (e.g. widening ruling 21's scope, or adding a new ruling-15-style lane
+# carve-out) is a separate, explicit edit to that runner's release block.
+#
+# WHY THESE SEVEN IDS (verbatim rationale, unchanged from the pre-OMN-15349
+# hand-maintained lists):
+#   delegation 0023-0026 — OMN-14974 / OMN-15313. Tenant-isolation RLS on
+#     live, actively-written delegation tables; un-gate only in a change that
+#     also proves the writer sets app.tenant_id per connection. No lane may
+#     release these (see the "delegation ids are not releasable" checks in
+#     both runners).
+#   registration 0000/0001/0002 — OMN-15335 / OMN-15088 / OMN-15343. All
+#     three ALTER node_service_registry; 0002 applies FORCE ROW LEVEL
+#     SECURITY. 0000 (CREATE) and 0002 (the dependent ALTER) must move
+#     together — a fence that gates one but not the other is worse than no
+#     fence (OMN-15379 postmortem: a cold compose lane with 0000 fenced and
+#     0002 not died with "relation node_service_registry does not exist").
+fenced_node_migrations:
+  - id: "node:node_projection_delegation:0023_delegation_rls_tenant_isolation.sql"
+    ticket: "OMN-14974"
+  - id: "node:node_projection_delegation:0024_drop_unwired_routing_columns.sql"
+    ticket: "OMN-14974"
+  - id: "node:node_projection_delegation:0025_delegation_judge_verdict_events_tenant_id.sql"
+    ticket: "OMN-15313"
+  - id: "node:node_projection_delegation:0026_delegation_judge_verdict_events_rls_tenant_isolation.sql"
+    ticket: "OMN-15313"
+  - id: "node:node_projection_registration:0000_create_node_service_registry.sql"
+    ticket: "OMN-15335"
+  - id: "node:node_projection_registration:0001_add_heartbeat_columns.sql"
+    ticket: "OMN-15088"
+  - id: "node:node_projection_registration:0002_node_service_registry_tenant_rls.sql"
+    ticket: "OMN-15343"
