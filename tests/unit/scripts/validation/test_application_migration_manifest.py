@@ -99,10 +99,14 @@ def _minimal_fixture(tmp_path: Path) -> tuple[Path, Path]:
 def test_checked_in_manifest_is_exact_and_all_blockers_are_explicit() -> None:
     result = _validate()
 
-    # 94 as of the OMN-14894 vendor-parity repair: the manifest mirrors the
-    # vendored node migration tree after restoring the nine house-tenant RLS
-    # migrations that are still source-owned in omnimarket dev.
-    assert len(result.declarations) == 94
+    # 95 as of OMN-15356: +1 for
+    # nodes/node_canary_score_reducer/0003_capability_scores_tenant_id_to_uuid.sql
+    # (the first classified-TENANT relation converted from a TEXT slug to the
+    # canonical UUID identity). Previously 94 as of the OMN-14894
+    # vendor-parity repair: the manifest mirrors the vendored node migration
+    # tree after restoring the nine house-tenant RLS migrations that are
+    # still source-owned in omnimarket dev.
+    assert len(result.declarations) == 95
     assert result.blocked == ()
     assert len(result.cloud_aliases) == 30
 
