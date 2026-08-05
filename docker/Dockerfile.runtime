@@ -943,6 +943,17 @@ RUN chmod +x /app/entrypoint-runtime.sh
 # scripts/seed-keycloak-clients.py` -- no dedicated image, no separate ECR
 # push. Reuses the SAME immutable omninode-runtime digest every other onex-dev
 # runtime workload already pins (single build/push pipeline, no new artifact).
+#
+# REQUIRED MERGE ORDER (2026-08-05 adversarial-verify fix, defect #3): the
+# digest currently pinned in omninode_infra k8s/onex-dev/{runtime,jobs}/
+# kustomization.yaml was built BEFORE this COPY existed, so it has no
+# /app/scripts/ tree at all. Applying the seed-keycloak-clients Job against
+# that stale digest fails with "python: can't open file
+# '/app/scripts/seed-keycloak-clients.py'". This PR does not self-apply --
+# after it merges, CI builds+pushes a fresh omninode-runtime image off the
+# new dev HEAD; only once that fresh digest is pinned in BOTH
+# omninode_infra kustomization.yaml files does the Job manifest actually
+# contain this script.
 COPY --chown=omniinfra:omniinfra scripts/seed-keycloak-clients.py /app/scripts/seed-keycloak-clients.py
 
 # OMN-15217: semantic container healthcheck, installed at a stable path.
