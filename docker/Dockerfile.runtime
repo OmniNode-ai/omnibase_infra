@@ -937,6 +937,14 @@ COPY --from=builder --chown=omniinfra:omniinfra /app/build-provenance.json /app/
 COPY --chown=omniinfra:omniinfra docker/entrypoint-runtime.sh /app/entrypoint-runtime.sh
 RUN chmod +x /app/entrypoint-runtime.sh
 
+# OMN-10318 / OMN-14916: bake the Keycloak realm-client reconciler into the
+# runtime image so the digest-pinned onex-dev seed-keycloak-clients Job
+# (omninode_infra k8s/onex-dev/jobs/) can invoke it with `python
+# scripts/seed-keycloak-clients.py` -- no dedicated image, no separate ECR
+# push. Reuses the SAME immutable omninode-runtime digest every other onex-dev
+# runtime workload already pins (single build/push pipeline, no new artifact).
+COPY --chown=omniinfra:omniinfra scripts/seed-keycloak-clients.py /app/scripts/seed-keycloak-clients.py
+
 # OMN-15217: semantic container healthcheck, installed at a stable path.
 # Same file as omnibase_infra/runtime/health/container_healthcheck.py — copied
 # rather than invoked via `python -m` on purpose: importing the omnibase_infra
