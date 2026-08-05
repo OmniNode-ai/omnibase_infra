@@ -77,6 +77,20 @@
 #     together — a fence that gates one but not the other is worse than no
 #     fence (OMN-15379 postmortem: a cold compose lane with 0000 fenced and
 #     0002 not died with "relation node_service_registry does not exist").
+#   delegation_inference_response 0003 — OMN-15336 item 4 / OMN-15656. FORCE
+#     ROW LEVEL SECURITY on projection_delegation_inference_response_text.
+#     Contract-declared tenant domain (node_projection_delegation_inference_
+#     response/contract.yaml db_io.schema), so the RLS posture itself is
+#     correctly classified — unlike node_service_registry below, this is not
+#     an internal-domain misclassification. It is held for the same reason
+#     the delegation quartet above is held: OMN-15301 found the projection
+#     writer never sets app.tenant_id per connection, so an un-gated FORCE
+#     apply here reproduces the identical false-clean (zero rows, no error)
+#     write-lockout hazard on a live, actively-written table. Was NEVER in
+#     this list on any runner before this entry — it applied unattended on
+#     the .201 dev lane (2026-07-31T06:44:32Z) purely because nothing here
+#     named it. Un-gate only in a change that also proves the writer sets
+#     app.tenant_id per connection, matching the delegation quartet's bar.
 fenced_node_migrations:
   - id: "node:node_projection_delegation:0023_delegation_rls_tenant_isolation.sql"
     ticket: "OMN-14974"
@@ -92,3 +106,5 @@ fenced_node_migrations:
     ticket: "OMN-15088"
   - id: "node:node_projection_registration:0002_node_service_registry_tenant_rls.sql"
     ticket: "OMN-15343"
+  - id: "node:node_projection_delegation_inference_response:0003_inference_response_text_rls_tenant_isolation.sql"
+    ticket: "OMN-15336"
