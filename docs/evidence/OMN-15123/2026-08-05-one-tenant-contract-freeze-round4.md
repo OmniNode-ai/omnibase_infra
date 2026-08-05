@@ -30,7 +30,7 @@
 
 | # | Acceptance criterion | Status | Why |
 |---|---|---|---|
-| 1 | Committed, immutable contract artifact enumerating all 19 fields | **NOT MET** | 14 of 19 fields now carry real values (up from 8/19); 5 remain BLOCKED (k8s/DB-dependent). Not immutable in the AC's sense until complete. |
+| 1 | Committed, immutable contract artifact enumerating all 19 fields | **NOT MET** | 12 full + 1 partial of 19 fields now carry real values (up from 8/19); 5 remain BLOCKED (k8s/DB-dependent) and 1 (`freeze_signature`) is deliberately unfilled. Not immutable in the AC's sense until complete. |
 | 2 | Digest fields read back equal to the live candidate at freeze time, command output attached | **PARTIAL** | `source_digest`/`image_digest`/`config`-adjacent (migrate) digests are filled with fresh, ECR-verified readback (below) — but the candidate is not yet the *pinned* one (#818/#819 open), so "at freeze time" cannot be asserted as final. `config_digest` (rendered k8s configmap hash) remains BLOCKED — no k8s access. |
 | 3 | Rolling plan citation | **RESOLVED** (carried forward) | Per the 2026-08-04T03:58:31Z plan-governor reconcile (`ROLLING_WORK_LEDGER.md:12253`, plan commit `7fb2e9853`): OMN-15123 is bound at two live anchors — §0-CHAIN link 6 and §2 "Fastest readiness order" item 6 — both citing OMN-15123 by ID directly. No further action needed; confirmed present in the live plan by this instance's own grep (see `plan_row_binding` row). |
 | 4 | OMN-14736 (B11 canary) references this frozen tuple as its input | **NOT MET** | The tuple isn't frozen (AC #1 unmet) — deferred to the complete instance, unchanged from 2026-08-03. |
