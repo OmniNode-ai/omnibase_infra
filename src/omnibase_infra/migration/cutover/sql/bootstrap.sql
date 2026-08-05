@@ -36,8 +36,10 @@ CREATE TABLE IF NOT EXISTS omninode_internal.transformation_receipts (
     receipt_hash TEXT NOT NULL CHECK (receipt_hash ~ '^[0-9a-f]{64}$'),
     receipt_json JSONB NOT NULL CHECK (jsonb_typeof(receipt_json) = 'object'),
     generated_at TIMESTAMPTZ NOT NULL,
+    idempotency_key TEXT NOT NULL,
     UNIQUE (family_id, receipt_hash),
-    UNIQUE (family_id, receipt_id)
+    UNIQUE (family_id, receipt_id),
+    UNIQUE (family_id, idempotency_key)
 );
 
 CREATE TABLE IF NOT EXISTS omninode_internal.cutover_journal (
@@ -57,9 +59,20 @@ CREATE TABLE IF NOT EXISTS omninode_internal.cutover_journal (
     previous_event_hash TEXT NOT NULL CHECK (previous_event_hash ~ '^[0-9a-f]{64}$'),
     event_hash TEXT NOT NULL CHECK (event_hash ~ '^[0-9a-f]{64}$'),
     occurred_at TIMESTAMPTZ NOT NULL,
+    idempotency_key TEXT NOT NULL,
     UNIQUE (family_id, sequence),
     UNIQUE (family_id, event_hash),
-    UNIQUE (family_id, event_id)
+    UNIQUE (family_id, event_id),
+    UNIQUE (family_id, idempotency_key)
+);
+
+CREATE TABLE IF NOT EXISTS omninode_internal.reverse_delta_artifacts (
+    family_id UUID NOT NULL REFERENCES omninode_internal.cutover_family_contracts(family_id),
+    artifact_ref TEXT NOT NULL,
+    content_hash TEXT NOT NULL CHECK (content_hash ~ '^[0-9a-f]{64}$'),
+    content_json JSONB NOT NULL,
+    registered_at TIMESTAMPTZ NOT NULL DEFAULT clock_timestamp(),
+    PRIMARY KEY (family_id, artifact_ref)
 );
 
 CREATE TABLE IF NOT EXISTS omninode_internal.reverse_delta_proofs (

@@ -6,6 +6,8 @@ from omnibase_infra.migration.cutover.cutover_coordinator import (
     CutoverCoordinator,
 )
 from omnibase_infra.migration.cutover.models import (
+    ModelApplicationPathWriteProof,
+    ModelConnectionIdentity,
     ModelControlPlaneDeltaEvidence,
     ModelCutoverContinuityEvidence,
     ModelCutoverFamilyContract,
@@ -33,6 +35,8 @@ from omnibase_infra.migration.cutover.transformation_receipt_builder import (
 
 __all__ = [
     "CutoverCoordinator",
+    "ModelApplicationPathWriteProof",
+    "ModelConnectionIdentity",
     "ModelControlPlaneDeltaEvidence",
     "ModelCutoverContinuityEvidence",
     "ModelCutoverFamilyContract",

@@ -6,12 +6,21 @@ from __future__ import annotations
 
 import hashlib
 import json
+import re
 
 import asyncpg
 
 from omnibase_infra.migration.cutover.models import (
+    ModelApplicationPathWriteProof,
+    ModelConnectionIdentity,
     ModelPostgresEvidenceQuerySet,
     ModelTransformationEvidence,
+)
+
+_READ_PREFIX = re.compile(r"^\s*(?:SELECT|WITH)\b", re.IGNORECASE)
+_MUTATING_TOKEN = re.compile(
+    r"\b(?:INSERT|UPDATE|DELETE|DROP|ALTER|CREATE|GRANT|REVOKE|TRUNCATE|COPY|CALL|DO)\b",
+    re.IGNORECASE,
 )
 
 
@@ -21,9 +30,128 @@ class PostgresTransformationEvidenceCollector:
     def __init__(self, connection: asyncpg.Connection) -> None:
         self._connection = connection
 
-    async def collect(
+    async def verify_application_path_write(
+        self,
+        verification_sql: str,
+        schema_ref: str,
+        target_sequence: int,
+    ) -> ModelApplicationPathWriteProof:
+        """Independently prove a real application-path write occurred.
+
+        ``database_ref``/``principal`` come from a live ``current_database()``/
+        ``current_user`` readback on the same connection that performed the
+        write -- never from caller-typed strings.  ``verification_sql`` must be
+        a caller-declared read-only query whose result rows are hashed into
+        ``write_result_hash``, proving the write's actual data landed rather
+        than merely being asserted.
+        """
+        if not _READ_PREFIX.match(verification_sql):
+            raise ValueError("write verification query must start with SELECT or WITH")
+        if ";" in verification_sql:
+            raise ValueError("write verification query must be exactly one statement")
+        if _MUTATING_TOKEN.search(verification_sql):
+            raise ValueError("write verification query must be read-only")
+
+        schema_exists = await self._connection.fetchval(
+            "SELECT count(*) FROM information_schema.schemata WHERE schema_name = $1",
+            schema_ref,
+        )
+        if not schema_exists:
+            raise ValueError(
+                f"schema {schema_ref!r} does not exist on the verifying connection"
+            )
+
+        identity_row = await self._connection.fetchrow(
+            "SELECT current_database() AS database, current_user AS principal, "
+            "pg_backend_pid() AS backend_pid, clock_timestamp() AS collected_at"
+        )
+        if identity_row is None:
+            raise RuntimeError("write-proof identity readback returned no row")
+
+        rows = await self._connection.fetch(verification_sql)
+        if not rows:
+            raise ValueError(
+                "write verification query returned no rows; write is not proven"
+            )
+        canonical_rows = sorted(
+            json.dumps(
+                dict(row),
+                sort_keys=True,
+                separators=(",", ":"),
+                ensure_ascii=True,
+                default=str,
+            )
+            for row in rows
+        )
+        write_result_hash = hashlib.sha256(
+            json.dumps(canonical_rows, separators=(",", ":"), ensure_ascii=True).encode(
+                "utf-8"
+            )
+        ).hexdigest()
+        verification_query_hash = hashlib.sha256(
+            verification_sql.encode("utf-8")
+        ).hexdigest()
+
+        return ModelApplicationPathWriteProof(
+            database_ref=identity_row["database"],
+            principal=identity_row["principal"],
+            schema_ref=schema_ref,
+            target_sequence=target_sequence,
+            verification_query_hash=verification_query_hash,
+            write_result_hash=write_result_hash,
+            connection_identity=ModelConnectionIdentity(
+                database=identity_row["database"],
+                backend_pid=int(identity_row["backend_pid"]),
+                collected_at=identity_row["collected_at"],
+            ),
+        )
+
+    async def collect_pair(
+        self,
+        source_queries: ModelPostgresEvidenceQuerySet,
+        source_binding_ref: str,
+        target_queries: ModelPostgresEvidenceQuerySet,
+        target_binding_ref: str,
+    ) -> tuple[ModelTransformationEvidence, ModelTransformationEvidence]:
+        """Collect source and target in one read-only repeatable-read snapshot.
+
+        Both sides are stamped with the identical, server-verified connection
+        identity (database, backend pid, collection instant) proving they were
+        captured atomically on the same live backend -- never on two evidence
+        objects assembled independently or by hand.
+        """
+        async with self._connection.transaction(
+            isolation="repeatable_read",
+            readonly=True,
+        ):
+            identity = await self._read_connection_identity()
+            source = await self._collect_one(
+                source_queries, source_binding_ref, identity
+            )
+            target = await self._collect_one(
+                target_queries, target_binding_ref, identity
+            )
+        return source, target
+
+    async def _read_connection_identity(self) -> ModelConnectionIdentity:
+        row = await self._connection.fetchrow(
+            "SELECT current_database() AS database, "
+            "pg_backend_pid() AS backend_pid, "
+            "clock_timestamp() AS collected_at"
+        )
+        if row is None:
+            raise RuntimeError("connection identity readback returned no row")
+        return ModelConnectionIdentity(
+            database=row["database"],
+            backend_pid=int(row["backend_pid"]),
+            collected_at=row["collected_at"],
+        )
+
+    async def _collect_one(
         self,
         queries: ModelPostgresEvidenceQuerySet,
+        binding_ref: str,
+        identity: ModelConnectionIdentity,
     ) -> ModelTransformationEvidence:
         """Collect all receipt dimensions without defaults or omitted scans."""
         keys = await self._fetch_strings(queries.keys_sql)
@@ -31,6 +159,8 @@ class PostgresTransformationEvidenceCollector:
         return ModelTransformationEvidence(
             label=queries.label,
             evidence_contract_hash=self._query_contract_hash(queries),
+            binding_ref=binding_ref,
+            connection_identity=identity,
             keys=keys,
             row_count=len(rows),
             transformed_row_hashes=tuple(
@@ -45,20 +175,6 @@ class PostgresTransformationEvidenceCollector:
             dependencies=await self._fetch_strings(queries.dependencies_sql),
             collision_keys=await self._fetch_strings(queries.collisions_sql),
         )
-
-    async def collect_pair(
-        self,
-        source_queries: ModelPostgresEvidenceQuerySet,
-        target_queries: ModelPostgresEvidenceQuerySet,
-    ) -> tuple[ModelTransformationEvidence, ModelTransformationEvidence]:
-        """Collect source and target in one read-only repeatable-read snapshot."""
-        async with self._connection.transaction(
-            isolation="repeatable_read",
-            readonly=True,
-        ):
-            source = await self.collect(source_queries)
-            target = await self.collect(target_queries)
-        return source, target
 
     @staticmethod
     def _query_contract_hash(queries: ModelPostgresEvidenceQuerySet) -> str:

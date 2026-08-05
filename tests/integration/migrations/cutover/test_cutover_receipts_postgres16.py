@@ -4,6 +4,7 @@
 
 from __future__ import annotations
 
+import asyncio
 import hashlib
 import shutil
 import socket
@@ -391,8 +392,19 @@ async def test_postgres16_receipts_journal_and_rollback_boundaries(
         collector = PostgresTransformationEvidenceCollector(connection)
         source, target = await collector.collect_pair(
             _source_queries(),
+            "application.legacy",
             _target_queries(),
+            "application.target",
         )
+        assert (
+            source.connection_identity.database == target.connection_identity.database
+        )
+        assert (
+            source.connection_identity.backend_pid
+            == target.connection_identity.backend_pid
+        )
+        assert source.binding_ref == "application.legacy"
+        assert target.binding_ref == "application.target"
 
         projection = _contract(
             "tenant.usage",
@@ -433,8 +445,31 @@ async def test_postgres16_receipts_journal_and_rollback_boundaries(
             source,
             target,
             projection_continuity,
+            "idem:reconcile/projection/initial",
         )
         assert projection_receipt.status is EnumReceiptStatus.PASS
+
+        # Idempotency: retrying reconcile with the same key and identical
+        # inputs returns the original persisted receipt, not a fresh one.
+        replayed_projection_receipt = await coordinator.reconcile(
+            projection,
+            source,
+            target,
+            projection_continuity,
+            "idem:reconcile/projection/initial",
+        )
+        assert replayed_projection_receipt.receipt_id == projection_receipt.receipt_id
+        assert (
+            replayed_projection_receipt.generated_at == projection_receipt.generated_at
+        )
+        with pytest.raises(ValueError, match="different reconciliation content"):
+            await coordinator.reconcile(
+                projection,
+                source,
+                target.model_copy(update={"owners": ("usage:different_owner",)}),
+                projection_continuity,
+                "idem:reconcile/projection/initial",
+            )
 
         digest = _hash("control-plane")
         control_continuity = ModelCutoverContinuityEvidence(
@@ -454,15 +489,16 @@ async def test_postgres16_receipts_journal_and_rollback_boundaries(
             source,
             target,
             control_continuity,
+            "idem:reconcile/control/old",
         )
         with pytest.raises(asyncpg.ForeignKeyViolationError):
             await connection.execute(
                 """
 INSERT INTO omninode_internal.cutover_journal
   (event_id, family_id, sequence, event_kind, request_json, receipt_id,
-   previous_event_hash, event_hash, occurred_at)
+   previous_event_hash, event_hash, occurred_at, idempotency_key)
 VALUES ($1, $2, 99, 'backfill_completed', '{}'::jsonb, $3,
-        repeat('0', 64), repeat('f', 64), clock_timestamp())
+        repeat('0', 64), repeat('f', 64), clock_timestamp(), 'idem:fk-violation-probe')
 """,
                 uuid4(),
                 projection.family_id,
@@ -474,6 +510,7 @@ VALUES ($1, $2, 99, 'backfill_completed', '{}'::jsonb, $3,
             source,
             failed_target,
             control_continuity,
+            "idem:reconcile/control/failed",
         )
         assert failed_control_receipt.status is EnumReceiptStatus.FAIL
         assert (await repository.get_state(control.family_id)).status is (
@@ -489,6 +526,7 @@ VALUES ($1, $2, 99, 'backfill_completed', '{}'::jsonb, $3,
                     kind=EnumCutoverEventKind.BACKFILL_STARTED,
                     occurred_at=now,
                     evidence_ref="proof/control/backfill",
+                    idempotency_key="idem:proof/control/backfill",
                 ),
             )
         with pytest.raises(ValueError, match="postdate the failure"):
@@ -498,6 +536,7 @@ VALUES ($1, $2, 99, 'backfill_completed', '{}'::jsonb, $3,
                     kind=EnumCutoverEventKind.MISMATCH_RESOLVED,
                     occurred_at=now,
                     evidence_ref="proof/control/stale-pass-replay",
+                    idempotency_key="idem:proof/control/stale-pass-replay",
                     receipt_id=old_control_receipt.receipt_id,
                 ),
             )
@@ -507,6 +546,7 @@ VALUES ($1, $2, 99, 'backfill_completed', '{}'::jsonb, $3,
             source,
             target,
             control_continuity,
+            "idem:reconcile/control/resolved",
         )
         await coordinator.append(
             control.family_id,
@@ -514,6 +554,7 @@ VALUES ($1, $2, 99, 'backfill_completed', '{}'::jsonb, $3,
                 kind=EnumCutoverEventKind.MISMATCH_RESOLVED,
                 occurred_at=now,
                 evidence_ref="proof/control/mismatch-resolved",
+                idempotency_key="idem:proof/control/mismatch-resolved",
                 receipt_id=control_receipt.receipt_id,
             ),
         )
@@ -527,6 +568,7 @@ VALUES ($1, $2, 99, 'backfill_completed', '{}'::jsonb, $3,
                 kind=EnumCutoverEventKind.BACKFILL_STARTED,
                 occurred_at=now,
                 evidence_ref="proof/projection/backfill-start",
+                idempotency_key="idem:proof/projection/backfill-start",
             ),
         )
         with pytest.raises(ValueError, match="precedes the durable prior event"):
@@ -536,6 +578,7 @@ VALUES ($1, $2, 99, 'backfill_completed', '{}'::jsonb, $3,
                     kind=EnumCutoverEventKind.BACKFILL_COMPLETED,
                     occurred_at=now - timedelta(seconds=1),
                     evidence_ref="proof/projection/time-travel",
+                    idempotency_key="idem:proof/projection/time-travel",
                     receipt_id=projection_receipt.receipt_id,
                 ),
             )
@@ -545,6 +588,7 @@ VALUES ($1, $2, 99, 'backfill_completed', '{}'::jsonb, $3,
                 kind=EnumCutoverEventKind.BACKFILL_COMPLETED,
                 occurred_at=now + timedelta(seconds=1),
                 evidence_ref="proof/projection/backfill-complete",
+                idempotency_key="idem:proof/projection/backfill-complete",
                 receipt_id=projection_receipt.receipt_id,
             ),
         )
@@ -554,6 +598,7 @@ VALUES ($1, $2, 99, 'backfill_completed', '{}'::jsonb, $3,
                 kind=EnumCutoverEventKind.DUAL_WRITE_STARTED,
                 occurred_at=now + timedelta(seconds=2),
                 evidence_ref="proof/projection/dual-write-telemetry",
+                idempotency_key="idem:proof/projection/dual-write-telemetry",
                 dual_write_expires_at=now + timedelta(seconds=12),
             ),
         )
@@ -569,6 +614,7 @@ VALUES ($1, $2, 99, 'backfill_completed', '{}'::jsonb, $3,
                     kind=EnumCutoverEventKind.FINAL_DELTA_APPLIED,
                     occurred_at=now + timedelta(seconds=3),
                     evidence_ref="proof/projection/final-delta-early",
+                    idempotency_key="idem:proof/projection/final-delta-early",
                     receipt_id=projection_receipt.receipt_id,
                 ),
             )
@@ -578,6 +624,7 @@ VALUES ($1, $2, 99, 'backfill_completed', '{}'::jsonb, $3,
                 kind=EnumCutoverEventKind.DUAL_WRITE_ENDED,
                 occurred_at=now + timedelta(seconds=4),
                 evidence_ref="proof/projection/dual-write-ended",
+                idempotency_key="idem:proof/projection/dual-write-ended",
             ),
         )
         await coordinator.append(
@@ -586,6 +633,7 @@ VALUES ($1, $2, 99, 'backfill_completed', '{}'::jsonb, $3,
                 kind=EnumCutoverEventKind.FINAL_DELTA_APPLIED,
                 occurred_at=now + timedelta(seconds=5),
                 evidence_ref="proof/projection/final-delta",
+                idempotency_key="idem:proof/projection/final-delta",
                 receipt_id=projection_receipt.receipt_id,
             ),
         )
@@ -595,6 +643,7 @@ VALUES ($1, $2, 99, 'backfill_completed', '{}'::jsonb, $3,
                 kind=EnumCutoverEventKind.WRITER_CHECKPOINT,
                 occurred_at=now + timedelta(seconds=6),
                 evidence_ref="proof/projection/writer-checkpoint",
+                idempotency_key="idem:proof/projection/writer-checkpoint",
                 receipt_id=projection_receipt.receipt_id,
                 source_binding_ref=projection.source_binding_ref,
                 target_binding_ref=projection.target_binding_ref,
@@ -602,16 +651,54 @@ VALUES ($1, $2, 99, 'backfill_completed', '{}'::jsonb, $3,
         )
         before_write = await coordinator.evaluate_direct_rollback(projection.family_id)
         assert before_write.allowed and before_write.direct_dsn_rollback
+
+        # Gap 1 RED controls: verify_application_path_write refuses a
+        # mutating query, a query with no rows, and a schema that does not
+        # exist on the verifying connection -- it never trusts a caller
+        # string.
+        with pytest.raises(ValueError, match="SELECT or WITH"):
+            await collector.verify_application_path_write(
+                "UPDATE tenant.usage SET amount = amount",
+                "tenant",
+                7,
+            )
+        with pytest.raises(ValueError, match="read-only"):
+            await collector.verify_application_path_write(
+                "SELECT count(*) FROM tenant.usage WHERE 1=1 OR DELETE",
+                "tenant",
+                7,
+            )
+        with pytest.raises(ValueError, match="no rows"):
+            await collector.verify_application_path_write(
+                "SELECT id FROM tenant.usage WHERE id = -1",
+                "tenant",
+                7,
+            )
+        with pytest.raises(ValueError, match="does not exist"):
+            await collector.verify_application_path_write(
+                "SELECT 1",
+                "does_not_exist",
+                7,
+            )
+
+        # GREEN: an independently, server-verified write proof -- database
+        # and principal come from a live current_database()/current_user
+        # readback on the connection, never from a caller-typed string.
+        write_proof = await collector.verify_application_path_write(
+            "SELECT id, tenant_id, amount FROM tenant.usage ORDER BY id",
+            "tenant",
+            7,
+        )
+        assert write_proof.database_ref == write_proof.connection_identity.database
+        assert write_proof.principal
         await coordinator.append(
             projection.family_id,
             ModelCutoverJournalRequest(
                 kind=EnumCutoverEventKind.APPLICATION_PATH_WRITE_PROVEN,
                 occurred_at=now + timedelta(seconds=7),
                 evidence_ref="proof/projection/real-application-path-write",
-                database_ref="application",
-                principal="tenant_projection_writer",
-                schema_ref="tenant",
-                target_sequence=7,
+                idempotency_key="idem:proof/projection/real-application-path-write",
+                application_path_write_proof=write_proof,
             ),
         )
         after_write = await coordinator.evaluate_direct_rollback(projection.family_id)
@@ -624,6 +711,7 @@ VALUES ($1, $2, 99, 'backfill_completed', '{}'::jsonb, $3,
                     kind=EnumCutoverEventKind.PRE_CHECKPOINT_ROLLBACK,
                     occurred_at=now + timedelta(seconds=8),
                     evidence_ref="proof/projection/unsafe-direct-rollback",
+                    idempotency_key="idem:proof/projection/unsafe-direct-rollback",
                 ),
             )
         await coordinator.append(
@@ -632,50 +720,106 @@ VALUES ($1, $2, 99, 'backfill_completed', '{}'::jsonb, $3,
                 kind=EnumCutoverEventKind.READER_CUTOVER,
                 occurred_at=now + timedelta(seconds=8),
                 evidence_ref="proof/projection/reader-cutover",
+                idempotency_key="idem:proof/projection/reader-cutover",
             ),
         )
-        observation_ends_at = now + timedelta(seconds=11)
+        # Gap 2: server-clock-authoritative observation deadline. Anchor the
+        # window to real wall-clock time (not the backdated `now`) so a too-
+        # early completion attempt is genuinely refused, and only a real
+        # elapsed sleep proves the window, per the database's own
+        # clock_timestamp() -- never the caller-supplied occurred_at.
+        observation_started_at = datetime.now(UTC)
+        observation_ends_at = observation_started_at + timedelta(seconds=2)
         await coordinator.append(
             projection.family_id,
             ModelCutoverJournalRequest(
                 kind=EnumCutoverEventKind.OBSERVATION_WINDOW_STARTED,
-                occurred_at=now + timedelta(seconds=9),
+                occurred_at=observation_started_at,
                 evidence_ref="proof/projection/observation-start",
+                idempotency_key="idem:proof/projection/observation-start",
                 observation_ends_at=observation_ends_at,
             ),
         )
-        with pytest.raises(ValueError, match="has not reached its deadline"):
+        with pytest.raises(ValueError, match="server clock"):
             await coordinator.append(
                 projection.family_id,
                 ModelCutoverJournalRequest(
                     kind=EnumCutoverEventKind.OBSERVATION_WINDOW_COMPLETED,
-                    occurred_at=now + timedelta(seconds=10),
+                    # A caller lying that the deadline has already passed
+                    # must still be refused: only real elapsed server time
+                    # proves the window.
+                    occurred_at=observation_ends_at + timedelta(seconds=1),
                     evidence_ref="proof/projection/observation-too-early",
+                    idempotency_key="idem:proof/projection/observation-too-early",
                 ),
             )
+        await asyncio.sleep(2.1)
         await coordinator.append(
             projection.family_id,
             ModelCutoverJournalRequest(
                 kind=EnumCutoverEventKind.OBSERVATION_WINDOW_COMPLETED,
-                occurred_at=observation_ends_at,
+                occurred_at=datetime.now(UTC),
                 evidence_ref="proof/projection/observation-complete",
+                idempotency_key="idem:proof/projection/observation-complete",
             ),
         )
         quiescence = await coordinator.append(
             projection.family_id,
             ModelCutoverJournalRequest(
                 kind=EnumCutoverEventKind.WRITER_QUIESCED,
-                occurred_at=now + timedelta(seconds=12),
+                occurred_at=datetime.now(UTC),
                 evidence_ref="proof/projection/writer-quiesced",
+                idempotency_key="idem:proof/projection/writer-quiesced",
                 target_sequence=8,
             ),
         )
+
+        # Idempotency at the journal-append layer: retrying the same
+        # (family_id, idempotency_key) with identical content returns the
+        # already-durable event rather than advancing the sequence again;
+        # the same key with different content is refused.
+        replayed_quiescence = await coordinator.append(
+            projection.family_id,
+            ModelCutoverJournalRequest(
+                kind=EnumCutoverEventKind.WRITER_QUIESCED,
+                occurred_at=quiescence.request.occurred_at,
+                evidence_ref="proof/projection/writer-quiesced",
+                idempotency_key="idem:proof/projection/writer-quiesced",
+                target_sequence=8,
+            ),
+        )
+        assert replayed_quiescence.event_id == quiescence.event_id
+        assert replayed_quiescence.sequence == quiescence.sequence
+        with pytest.raises(ValueError, match="different request"):
+            await coordinator.append(
+                projection.family_id,
+                ModelCutoverJournalRequest(
+                    kind=EnumCutoverEventKind.WRITER_QUIESCED,
+                    occurred_at=datetime.now(UTC),
+                    evidence_ref="proof/projection/writer-quiesced-retry-mismatch",
+                    idempotency_key="idem:proof/projection/writer-quiesced",
+                    target_sequence=8,
+                ),
+            )
+
         reverse_reconciliation_receipt = await coordinator.reconcile(
             projection,
             source,
             target,
             projection_continuity,
+            "idem:reconcile/projection/reverse-delta",
         )
+        # Gap 4: reverse-delta entries must dereference + hash-bind to a
+        # durably registered artifact -- a bare ref string is refused.
+        before_image_hashes: dict[int, str] = {}
+        for sequence in (7, 8):
+            before_image_hashes[
+                sequence
+            ] = await coordinator.register_reverse_delta_artifact(
+                projection.family_id,
+                f"proof/reverse-delta/{sequence}",
+                {"target_sequence": sequence, "before": f"before-{sequence}"},
+            )
         entries = tuple(
             ModelReverseDeltaEntry(
                 entry_id=uuid4(),
@@ -684,12 +828,51 @@ VALUES ($1, $2, 99, 'backfill_completed', '{}'::jsonb, $3,
                 relation="tenant.usage",
                 operation=EnumReverseDeltaOperation.INSERT,
                 primary_key_hash=_hash(f"pk-{sequence}"),
-                before_image_hash=_hash(f"before-{sequence}"),
+                before_image_hash=before_image_hashes[sequence],
                 after_image_hash=_hash(f"after-{sequence}"),
                 inverse_artifact_ref=f"proof/reverse-delta/{sequence}",
             )
             for sequence in (7, 8)
         )
+        unregistered_readback_proof = ModelReverseDeltaProof(
+            proof_id=uuid4(),
+            family_id=projection.family_id,
+            start_sequence=7,
+            end_sequence=8,
+            entries=entries,
+            quiescence_event_id=quiescence.event_id,
+            reconciliation_receipt_id=reverse_reconciliation_receipt.receipt_id,
+            behavioral_readback_ref="proof/reverse-delta/never-registered",
+            proven_at=datetime.now(UTC),
+        )
+        with pytest.raises(ValueError, match="behavioral readback"):
+            await coordinator.record_reverse_delta(unregistered_readback_proof)
+
+        mismatched_entries = tuple(
+            entry.model_copy(
+                update={"before_image_hash": _hash(f"tampered-{entry.target_sequence}")}
+            )
+            for entry in entries
+        )
+        mismatched_proof = ModelReverseDeltaProof(
+            proof_id=uuid4(),
+            family_id=projection.family_id,
+            start_sequence=7,
+            end_sequence=8,
+            entries=mismatched_entries,
+            quiescence_event_id=quiescence.event_id,
+            reconciliation_receipt_id=reverse_reconciliation_receipt.receipt_id,
+            behavioral_readback_ref="proof/reverse-delta/behavioral-readback",
+            proven_at=datetime.now(UTC),
+        )
+        await coordinator.register_reverse_delta_artifact(
+            projection.family_id,
+            "proof/reverse-delta/behavioral-readback",
+            {"family_id": str(projection.family_id), "readback": "matches-source"},
+        )
+        with pytest.raises(ValueError, match="hash-bind"):
+            await coordinator.record_reverse_delta(mismatched_proof)
+
         reverse_proof = ModelReverseDeltaProof(
             proof_id=uuid4(),
             family_id=projection.family_id,
@@ -711,6 +894,7 @@ VALUES ($1, $2, 99, 'backfill_completed', '{}'::jsonb, $3,
                 kind=EnumCutoverEventKind.REVERSE_DELTA_PROVEN,
                 occurred_at=datetime.now(UTC),
                 evidence_ref="proof/reverse-delta/complete",
+                idempotency_key="idem:proof/reverse-delta/complete",
                 receipt_id=reverse_reconciliation_receipt.receipt_id,
                 reverse_delta_proof_id=reverse_proof.proof_id,
             ),
@@ -727,6 +911,7 @@ VALUES ($1, $2, 99, 'backfill_completed', '{}'::jsonb, $3,
                 kind=EnumCutoverEventKind.BACKFILL_STARTED,
                 occurred_at=now,
                 evidence_ref="proof/control/backfill-start",
+                idempotency_key="idem:proof/control/backfill-start",
             ),
         )
         await coordinator.append(
@@ -735,6 +920,7 @@ VALUES ($1, $2, 99, 'backfill_completed', '{}'::jsonb, $3,
                 kind=EnumCutoverEventKind.BACKFILL_COMPLETED,
                 occurred_at=now + timedelta(seconds=1),
                 evidence_ref="proof/control/backfill-complete",
+                idempotency_key="idem:proof/control/backfill-complete",
                 receipt_id=control_receipt.receipt_id,
             ),
         )
@@ -744,6 +930,7 @@ VALUES ($1, $2, 99, 'backfill_completed', '{}'::jsonb, $3,
                 kind=EnumCutoverEventKind.FINAL_DELTA_APPLIED,
                 occurred_at=now + timedelta(seconds=2),
                 evidence_ref="proof/control/final-delta",
+                idempotency_key="idem:proof/control/final-delta",
                 receipt_id=control_receipt.receipt_id,
             ),
         )
@@ -753,10 +940,16 @@ VALUES ($1, $2, 99, 'backfill_completed', '{}'::jsonb, $3,
                 kind=EnumCutoverEventKind.WRITER_CHECKPOINT,
                 occurred_at=now + timedelta(seconds=3),
                 evidence_ref="proof/control/checkpoint",
+                idempotency_key="idem:proof/control/checkpoint",
                 receipt_id=control_receipt.receipt_id,
                 source_binding_ref=control.source_binding_ref,
                 target_binding_ref=control.target_binding_ref,
             ),
+        )
+        control_write_proof = await collector.verify_application_path_write(
+            "SELECT id, tenant_id, amount FROM tenant.usage ORDER BY id",
+            "tenant",
+            1,
         )
         await coordinator.append(
             control.family_id,
@@ -764,10 +957,8 @@ VALUES ($1, $2, 99, 'backfill_completed', '{}'::jsonb, $3,
                 kind=EnumCutoverEventKind.APPLICATION_PATH_WRITE_PROVEN,
                 occurred_at=now + timedelta(seconds=4),
                 evidence_ref="proof/control/real-application-path-write",
-                database_ref="application",
-                principal="onex_api",
-                schema_ref="tenant",
-                target_sequence=1,
+                idempotency_key="idem:proof/control/real-application-path-write",
+                application_path_write_proof=control_write_proof,
             ),
         )
         forward_fix_receipt = await coordinator.reconcile(
@@ -775,6 +966,7 @@ VALUES ($1, $2, 99, 'backfill_completed', '{}'::jsonb, $3,
             source,
             target,
             control_continuity,
+            "idem:reconcile/control/forward-fix",
         )
         await coordinator.append(
             control.family_id,
@@ -782,6 +974,7 @@ VALUES ($1, $2, 99, 'backfill_completed', '{}'::jsonb, $3,
                 kind=EnumCutoverEventKind.FORWARD_FIX_RECORDED,
                 occurred_at=now + timedelta(seconds=5),
                 evidence_ref="proof/control/forward-fix",
+                idempotency_key="idem:proof/control/forward-fix",
                 receipt_id=forward_fix_receipt.receipt_id,
             ),
         )
