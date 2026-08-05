@@ -1,0 +1,17 @@
+{
+    "imageDetails": [
+        {
+            "registryId": "272493677981",
+            "repositoryName": "omninode-runtime",
+            "imageDigest": "sha256:b829c56f547340363be347391275cc847b1f465c18fa275836dd098989f7ecb7",
+            "imageTags": [
+                "candidate-a853500-20260805212844"
+            ],
+            "imageSizeInBytes": 784571021,
+            "imagePushedAt": "2026-08-05T17:33:12.278000-04:00",
+            "imageManifestMediaType": "application/vnd.docker.distribution.manifest.v2+json",
+            "artifactMediaType": "application/vnd.docker.container.image.v1+json",
+            "imageStatus": "ACTIVE"
+        }
+    ]
+}

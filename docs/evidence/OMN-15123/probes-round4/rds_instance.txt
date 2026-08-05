@@ -1,0 +1,1 @@
+omninode-dev-postgres	omninode-dev-postgres.cqjkkokeaqd2.us-east-1.rds.amazonaws.com

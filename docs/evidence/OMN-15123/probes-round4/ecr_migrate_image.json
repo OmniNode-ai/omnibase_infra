@@ -1,0 +1,17 @@
+{
+    "imageDetails": [
+        {
+            "registryId": "272493677981",
+            "repositoryName": "omnibase-infra-migrate",
+            "imageDigest": "sha256:64f519fe7907329e01bce38693f77f34a033ee9c33b8c91e22044248a3a7ec18",
+            "imageTags": [
+                "a853500ab3c74620acdba34b418f6bd087081153",
+                "latest"
+            ],
+            "imageSizeInBytes": 3634009,
+            "imagePushedAt": "2026-08-05T17:22:00.764000-04:00",
+            "imageManifestMediaType": "application/vnd.oci.image.index.v1+json",
+            "imageStatus": "ACTIVE"
+        }
+    ]
+}

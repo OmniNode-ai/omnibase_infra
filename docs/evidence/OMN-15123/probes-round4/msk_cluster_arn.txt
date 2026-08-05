@@ -1,0 +1,1 @@
+arn:aws:kafka:us-east-1:272493677981:cluster/omninode-dev-msk/88ad72bc-f70c-4549-93bc-c392b965f424-14
