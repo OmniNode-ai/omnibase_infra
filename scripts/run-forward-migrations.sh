@@ -97,6 +97,7 @@ PG_WAIT_RETRIES="${PG_WAIT_RETRIES:-30}"
 LEDGER_BOOTSTRAP="${MIGRATIONS_DIR}/_ledger/bootstrap.sql"
 APPLICATION_MIGRATION_MANIFEST="${MIGRATIONS_DIR}/_ledger/application-migrations.tsv"
 APPLICATION_MIGRATION_BLOCKS="${MIGRATIONS_DIR}/_ledger/application-migration-blocks.tsv"
+LEGACY_NODE_MIGRATION_DECLARATIONS="${MIGRATIONS_DIR}/_ledger/legacy-node-migrations.tsv"
 CLOUD_MIGRATION_ALIASES="${MIGRATIONS_DIR}/_ledger/cloud-migration-aliases.tsv"
 
 export PGPASSWORD="${POSTGRES_PASSWORD}"
@@ -466,6 +467,7 @@ validate_application_migration_manifest() {
   for manifest_file in \
     "$APPLICATION_MIGRATION_MANIFEST" \
     "$APPLICATION_MIGRATION_BLOCKS" \
+    "$LEGACY_NODE_MIGRATION_DECLARATIONS" \
     "$CLOUD_MIGRATION_ALIASES"
   do
     if [ ! -f "$manifest_file" ]; then
@@ -506,6 +508,22 @@ validate_application_migration_manifest() {
     echo "[forward-migration] FATAL: malformed application migration block declaration" >&2
     exit 1
   fi
+  if ! awk -F '\t' '
+    NF != 6 { exit 1 }
+    {
+      version_count = split($4, version_parts, ":")
+      expected_owner = "node:" version_parts[2]
+    }
+    version_count != 3 || version_parts[1] != "node" { exit 1 }
+    version_parts[2] !~ /^[A-Za-z0-9_][A-Za-z0-9_.-]*$/ { exit 1 }
+    version_parts[3] !~ /^[A-Za-z0-9_][A-Za-z0-9_.-]*[.]sql$/ { exit 1 }
+    $1 != expected_owner || $2 != expected_owner { exit 1 }
+    $3 != "tenant" && $3 != "omninode_internal" { exit 1 }
+    $5 !~ /^[A-Za-z0-9_.:-]+$/ || $6 !~ /^OMN-[0-9]+$/ { exit 1 }
+  ' "$LEGACY_NODE_MIGRATION_DECLARATIONS"; then
+    echo "[forward-migration] FATAL: malformed historical node migration declaration" >&2
+    exit 1
+  fi
   if ! awk -F '\t' 'NF != 2 || $1 !~ /^[A-Za-z0-9_.-]+$/ || $2 !~ /^[A-Za-z0-9_.-]+[.]sql$/ { exit 1 }' \
     "$CLOUD_MIGRATION_ALIASES"; then
     echo "[forward-migration] FATAL: malformed cloud migration alias declaration" >&2
@@ -527,6 +545,21 @@ validate_application_migration_manifest() {
     echo "[forward-migration] FATAL: duplicate migration version ${duplicate_identity}" >&2
     exit 1
   fi
+  duplicate_legacy_version="$(cut -f 4 "$LEGACY_NODE_MIGRATION_DECLARATIONS" | sort | uniq -d | head -n 1)"
+  legacy_active_overlap="$( { cut -f 5 "$APPLICATION_MIGRATION_MANIFEST"; cut -f 2 "$APPLICATION_MIGRATION_BLOCKS"; cut -f 4 "$LEGACY_NODE_MIGRATION_DECLARATIONS"; } | sort | uniq -d | head -n 1)"
+  if [ -n "$duplicate_legacy_version" ] || [ -n "$legacy_active_overlap" ]; then
+    echo "[forward-migration] FATAL: ambiguous historical node migration declaration" >&2
+    exit 1
+  fi
+
+  while IFS='\t' read -r legacy_stream legacy_owner _ legacy_version _ _; do
+    legacy_node="$(printf '%s' "$legacy_version" | cut -d ':' -f 2)"
+    legacy_filename="$(printf '%s' "$legacy_version" | cut -d ':' -f 3)"
+    if [ -f "${NODE_MIGRATIONS_DIR}/${legacy_node}/${legacy_filename}" ]; then
+      echo "[forward-migration] FATAL: historical declaration has active artifact ${legacy_version}" >&2
+      exit 1
+    fi
+  done <"$LEGACY_NODE_MIGRATION_DECLARATIONS"
 
   while IFS='	' read -r artifact_path _ _ _ declared_version declared_checksum; do
     migration_file="${MIGRATIONS_DIR}/${artifact_path}"
@@ -604,6 +637,7 @@ prepare_canonical_ledger() {
     exit 1
   fi
   validate_client_file_path "$APPLICATION_MIGRATION_MANIFEST"
+  validate_client_file_path "$LEGACY_NODE_MIGRATION_DECLARATIONS"
   echo "[forward-migration] Converging canonical ledger in ${ledger_database}..."
   psql -X -q -h "$PGHOST" -p "$PGPORT" -U "$PGUSER" -d "$ledger_database" \
     -v ON_ERROR_STOP=1 \
@@ -616,8 +650,16 @@ prepare_canonical_ledger() {
           checksum TEXT NOT NULL,
           PRIMARY KEY (artifact_path),
           UNIQUE (migration_stream, domain, version)
+        ); CREATE TEMP TABLE onex_legacy_node_migration_declarations (
+          migration_stream TEXT NOT NULL,
+          owner TEXT NOT NULL,
+          domain TEXT NOT NULL,
+          version TEXT NOT NULL PRIMARY KEY,
+          source_checksum TEXT NOT NULL,
+          ticket TEXT NOT NULL
         )" \
     -c "\copy onex_application_migration_manifest FROM '${APPLICATION_MIGRATION_MANIFEST}' WITH (FORMAT text, DELIMITER E'\t')" \
+    -c "\copy onex_legacy_node_migration_declarations FROM '${LEGACY_NODE_MIGRATION_DECLARATIONS}' WITH (FORMAT text, DELIMITER E'\t')" \
     -f "$LEDGER_BOOTSTRAP"
 }
 

@@ -529,11 +529,12 @@ class RegistrationReducer:
         >>>
         >>> reducer = RegistrationReducer()
         >>> state = ModelRegistrationState()  # Initial idle state
+        >>> resolved_health_endpoint = "<routing-authority-resolved-health-endpoint>"
         >>> event = ModelNodeIntrospectionEvent(
         ...     node_id=uuid4(),
         ...     node_type="effect",
         ...     node_version="1.0.0",
-        ...     endpoints={"health": "http://localhost:8080/health"},
+        ...     endpoints={"health": resolved_health_endpoint},
         ... )
         >>> output = reducer.reduce(state, event)
         >>> print(output.result.status)  # "pending"

@@ -47,6 +47,7 @@ def _validate(
         migrations_dir,
         ledger_dir / "application-migrations.tsv",
         ledger_dir / "application-migration-blocks.tsv",
+        ledger_dir / "legacy-node-migrations.tsv",
         ledger_dir / "cloud-migration-aliases.tsv",
         require_complete=require_complete,
     )
@@ -93,6 +94,7 @@ def _minimal_fixture(tmp_path: Path) -> tuple[Path, Path]:
     (ledger_dir / "cloud-migration-aliases.tsv").write_text(
         "20260101_example\t20260101_example.sql\n", encoding="utf-8"
     )
+    (ledger_dir / "legacy-node-migrations.tsv").write_text("", encoding="utf-8")
     return migrations_dir, ledger_dir
 
 
@@ -109,6 +111,7 @@ def test_checked_in_manifest_is_exact_and_all_blockers_are_explicit() -> None:
     # node_pr_review_bot/001_create_review_bot_bypass_log.sql.
     assert len(result.declarations) == 97
     assert result.blocked == ()
+    assert len(result.legacy_node_declarations) == 2
     assert len(result.cloud_aliases) == 30
 
 
@@ -188,6 +191,54 @@ def test_duplicate_cloud_alias_fails_closed(tmp_path: Path) -> None:
 
     with pytest.raises(
         validator.ManifestError, match="duplicate cloud migration alias"
+    ):
+        _validate(migrations_dir, ledger_dir)
+
+
+def test_legacy_node_declaration_cannot_shadow_an_active_artifact(
+    tmp_path: Path,
+) -> None:
+    migrations_dir, ledger_dir = _minimal_fixture(tmp_path)
+    (ledger_dir / "legacy-node-migrations.tsv").write_text(
+        "\t".join(
+            (
+                "node:node_example",
+                "node:node_example",
+                "omninode_internal",
+                "node:node_example:0001.sql",
+                "hotfix-applied-by-codex",
+                "OMN-15717",
+            )
+        )
+        + "\n",
+        encoding="utf-8",
+    )
+
+    with pytest.raises(
+        validator.ManifestError, match="legacy declaration has vendored artifact"
+    ):
+        _validate(migrations_dir, ledger_dir)
+
+
+def test_legacy_node_declaration_requires_a_valid_source_record(tmp_path: Path) -> None:
+    migrations_dir, ledger_dir = _minimal_fixture(tmp_path)
+    (ledger_dir / "legacy-node-migrations.tsv").write_text(
+        "\t".join(
+            (
+                "node:node_history",
+                "node:node_history",
+                "omninode_internal",
+                "node:node_history:0001_removed.sql",
+                "raw checksum with spaces",
+                "OMN-15717",
+            )
+        )
+        + "\n",
+        encoding="utf-8",
+    )
+
+    with pytest.raises(
+        validator.ManifestError, match="malformed legacy source checksum"
     ):
         _validate(migrations_dir, ledger_dir)
 

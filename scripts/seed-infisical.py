@@ -211,7 +211,7 @@ def _load_infisical_credentials() -> tuple[str, str, str, str]:
     """
     infisical_addr = os.environ.get(
         "INFISICAL_ADDR",
-        "http://localhost:8880",  # fallback-ok: local seed default
+        "http://localhost:8880",  # url-authority-ok: INFISICAL_ADDR is bootstrap-only by registry contract, and a resolver cannot reach Infisical before this seed tool establishes it.
     )
     client_id = os.environ.get("INFISICAL_CLIENT_ID", "")
     client_secret = os.environ.get("INFISICAL_CLIENT_SECRET", "")

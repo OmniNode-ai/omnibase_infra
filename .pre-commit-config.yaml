@@ -815,7 +815,7 @@ repos:
         language: system
         entry: uv run --frozen python scripts/validation/validate_application_migration_manifest.py
         pass_filenames: false
-        files: ^docker/migrations/forward/(nodes/|_ledger/(application-migrations|application-migration-blocks)\.tsv)
+        files: ^docker/migrations/forward/(nodes/|_ledger/(application-migrations|application-migration-blocks|legacy-node-migrations)\.tsv)
         stages: [pre-commit]
       # OMN-3617: Block planning docs (belong in omni_home/docs/plans/)
       - id: no-planning-docs

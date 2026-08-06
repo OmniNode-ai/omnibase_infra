@@ -586,14 +586,15 @@ def write_env_credentials(
     realm: str,
     onex_admin_secret: str,
     onex_service_secret: str,
+    issuer_base_url: str,
     dry_run: bool = False,
 ) -> None:
     """Write the 7 KEYCLOAK_*/ONEX_SERVICE_* vars to the env file.
 
     ``KEYCLOAK_ADMIN_URL`` is always the INTERNAL Docker DNS address
-    (``http://keycloak:8080``), regardless of the ``--kc-url`` argument.
-    The ``--kc-url`` arg is the external URL used only by this script and
-    must NEVER be written to the env file.
+    (``http://keycloak:8080``). ``KEYCLOAK_ISSUER`` is derived from the
+    operator-selected external ``--kc-url`` so clients receive an issuer they
+    can actually resolve.
 
     ``KEYCLOAK_ADMIN_PASSWORD`` is NOT written — it is consumed transiently
     during bootstrap and must not persist in env files.
@@ -607,7 +608,7 @@ def write_env_credentials(
         "KEYCLOAK_REALM": realm,
         "KEYCLOAK_ADMIN_CLIENT_ID": "onex-admin",
         "KEYCLOAK_ADMIN_CLIENT_SECRET": onex_admin_secret,
-        "KEYCLOAK_ISSUER": f"http://localhost:28080/realms/{realm}",
+        "KEYCLOAK_ISSUER": f"{issuer_base_url.rstrip('/')}/realms/{realm}",
         "ONEX_SERVICE_CLIENT_ID": "onex-service",
         "ONEX_SERVICE_CLIENT_SECRET": onex_service_secret,
     }
@@ -638,6 +639,7 @@ def seed_infisical(
     realm: str,
     onex_admin_secret: str,
     onex_service_secret: str,
+    issuer_base_url: str,
     dry_run: bool = False,
 ) -> None:
     """Seed Keycloak config and secrets into Infisical if INFISICAL_ADDR is set.
@@ -661,7 +663,7 @@ def seed_infisical(
     shared_vars = {
         "KEYCLOAK_ADMIN_URL": "http://keycloak:8080",
         "KEYCLOAK_REALM": realm,
-        "KEYCLOAK_ISSUER": f"http://localhost:28080/realms/{realm}",
+        "KEYCLOAK_ISSUER": f"{issuer_base_url.rstrip('/')}/realms/{realm}",
         "KEYCLOAK_ADMIN_CLIENT_ID": "onex-admin",
         "ONEX_SERVICE_CLIENT_ID": "onex-service",
     }
@@ -765,7 +767,7 @@ def _build_parser() -> argparse.ArgumentParser:
     )
     p.add_argument(
         "--kc-url",
-        default="http://localhost:28080",  # fallback-ok: local Keycloak provisioning default
+        default="http://localhost:28080",  # fallback-ok: operator-facing bootstrap CLI default; # url-authority-ok: no runtime routing authority exists before Keycloak is provisioned.
         help=(
             "External base URL for Keycloak (no path prefix). "
             "Default: http://localhost:28080.  "
@@ -907,6 +909,7 @@ def main(argv: list[str] | None = None) -> int:
             args.realm,
             onex_admin_secret,
             onex_service_secret,
+            args.kc_url,
             dry_run=args.dry_run,
         )
 
@@ -916,6 +919,7 @@ def main(argv: list[str] | None = None) -> int:
                 args.realm,
                 onex_admin_secret,
                 onex_service_secret,
+                args.kc_url,
                 dry_run=args.dry_run,
             )
         else:

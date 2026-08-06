@@ -2872,8 +2872,9 @@ jobs:
 
   # Node migration declaration check -- every vendored node migration under
   # docker/migrations/forward/nodes/ must carry a checked-in stream/domain
-  # declaration (application-migrations.tsv) or explicit block
-  # (application-migration-blocks.tsv) BEFORE it can reach a runtime.
+  # declaration (application-migrations.tsv), explicit block
+  # (application-migration-blocks.tsv), or audited historical declaration
+  # (legacy-node-migrations.tsv) BEFORE it can reach a runtime.
   # scripts/validation/validate_application_migration_manifest.py already
   # implemented this exact check (plus checksum + duplicate + shape
   # validation) but was never wired anywhere -- only its own test file
