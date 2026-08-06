@@ -110,6 +110,7 @@ STRICT_GATE_JOBS: tuple[str, ...] = (
     "Arch Invariants (OMN-3343)",  # arch-invariants
     "Kafka Schema Handshake (OMN-3411)",  # schema-handshake
     "Writer-Migration Coupling Check",  # migration-required-check
+    "Node Migration Declaration Check",  # node-migration-declaration-check (OMN-15717)
     "no-noncanonical-lifecycle-classes",  # OMN-14350 non-canonical lifecycle-class ratchet
     "Effect-Assertion Gate (RT-5)",  # OMN-14467 deploy-trigger fails closed on zero output
     "OCC Companion Merged Gate (OMN-15214)",  # occ-companion-merged — cited OCC evidence must be MERGED before product merge

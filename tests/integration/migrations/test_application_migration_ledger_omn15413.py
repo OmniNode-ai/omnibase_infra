@@ -880,6 +880,47 @@ def test_migration_id_node_ledger_is_adopted_twice(pg16: Pg16Cluster) -> None:
     assert pg16.sql(database, "SELECT count(*) FROM public.schema_migrations") == "80"
 
 
+def test_pr_review_bot_bypass_log_adopts_cleanly_omn15717(pg16: Pg16Cluster) -> None:
+    """Reproduces the exact OMN-15717 live failure and proves the fix.
+
+    Before the OMN-15717 declaration was added, a database carrying the
+    legacy runner's row for
+    ``node:node_pr_review_bot:001_create_review_bot_bypass_log.sql`` failed
+    bootstrap.sql with "unknown migration stream/domain: adopted node
+    version ... has no checked-in declaration" (the live
+    refresh_stability_lane.sh forensic log, bootstrap.sql:673). This test
+    seeds that exact legacy row and asserts bootstrap.sql now adopts it
+    without error, is idempotent, and classifies it omninode_internal (R-q:
+    bookkeeping/audit-log state, not tenant workload data).
+    """
+    database = "omn15717_pr_review_bot_adopt"
+    pg16.create_database(database)
+    version = "node:node_pr_review_bot:001_create_review_bot_bypass_log.sql"
+    _seed_migration_id_ledger(pg16, database, [(version, "applied-by-runner", "node")])
+
+    for _ in range(2):
+        run = _run_bootstrap(pg16, database)
+        assert run.returncode == 0, f"{run.stdout}\n{run.stderr}"
+
+    row = pg16.sql(
+        database,
+        "SELECT migration_stream || E'\\t' || owner || E'\\t' || domain || E'\\t' || "
+        "checksum_kind || E'\\t' || provenance FROM platform_catalog.schema_migrations "
+        f"WHERE version = '{version}'",
+    )
+    stream, owner, domain, checksum_kind, provenance = row.split("\t")
+    assert stream == "node:node_pr_review_bot"
+    assert owner == "node:node_pr_review_bot"
+    assert domain == "omninode_internal"
+    assert checksum_kind == "content_sha256"
+    assert provenance == (
+        f"adopted:{database}:public.schema_migrations:migration_id:"
+        f"{version}:raw-checksum=applied-by-runner"
+    )
+    # Legacy source row is preserved verbatim, never rewritten or deleted.
+    assert pg16.sql(database, "SELECT count(*) FROM public.schema_migrations") == "1"
+
+
 def test_adopted_ledger_makes_the_real_runner_skip(
     pg16: Pg16Cluster, tmp_path: Path
 ) -> None:

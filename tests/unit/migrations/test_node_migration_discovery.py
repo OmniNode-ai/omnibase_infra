@@ -536,3 +536,76 @@ class TestVendoredTreeMatchesSource:
             "vendored node migrations are out of sync with omnimarket:\n"
             f"stdout:\n{result.stdout}\nstderr:\n{result.stderr}"
         )
+
+
+class TestLegacyDeclaredExemption:
+    """OMN-15717: a vendored file with a checked-in application-migrations.tsv
+    declaration is preserved applied history, not drift -- even after its
+    omnimarket source is deleted. An UNDECLARED file with a deleted source is
+    still flagged stale (the original 6th-occurrence drift class)."""
+
+    def _run_check(
+        self, tmp_path: Path, dest_root: Path, manifest: Path
+    ) -> subprocess.CompletedProcess[str]:
+        # Empty omnimarket source: no node migrations exist upstream, so
+        # every vendored file under dest_root is a candidate for "stale".
+        omk = tmp_path / "omnimarket-src"
+        (omk / "src" / "omnimarket" / "nodes").mkdir(parents=True)
+        return subprocess.run(
+            ["bash", str(SYNC_SCRIPT), "--check"],
+            cwd=str(REPO_ROOT),
+            env={
+                **os.environ,
+                "OMNIMARKET_SRC": str(omk),
+                "SYNC_NODE_MIGRATIONS_DEST_ROOT": str(dest_root),
+                "APPLICATION_MIGRATION_MANIFEST": str(manifest),
+            },
+            capture_output=True,
+            text=True,
+            timeout=60,
+            check=False,
+        )
+
+    def test_declared_vendored_file_with_no_upstream_source_is_not_stale(
+        self, tmp_path: Path
+    ) -> None:
+        dest_root = tmp_path / "nodes"
+        (dest_root / "node_pr_review_bot").mkdir(parents=True)
+        (
+            dest_root / "node_pr_review_bot" / "001_create_review_bot_bypass_log.sql"
+        ).write_text("-- historical migration\n")
+
+        manifest = tmp_path / "application-migrations.tsv"
+        manifest.write_text(
+            "nodes/node_pr_review_bot/001_create_review_bot_bypass_log.sql\t"
+            "node:node_pr_review_bot\tnode:node_pr_review_bot\tomninode_internal\t"
+            "node:node_pr_review_bot:001_create_review_bot_bypass_log.sql\t"
+            + ("a" * 64)
+            + "\n"
+        )
+
+        result = self._run_check(tmp_path, dest_root, manifest)
+
+        assert result.returncode == 0, result.stdout + result.stderr
+        assert "legacy-declared (OMN-15717), not stale" in result.stdout
+        assert "DRIFT" not in result.stderr
+
+    def test_undeclared_vendored_file_with_no_upstream_source_is_still_stale(
+        self, tmp_path: Path
+    ) -> None:
+        dest_root = tmp_path / "nodes"
+        (dest_root / "node_some_other_node").mkdir(parents=True)
+        (dest_root / "node_some_other_node" / "0001_orphan.sql").write_text(
+            "-- undeclared orphan\n"
+        )
+
+        manifest = tmp_path / "application-migrations.tsv"
+        manifest.write_text("")
+
+        result = self._run_check(tmp_path, dest_root, manifest)
+
+        assert result.returncode == 1
+        assert (
+            "DRIFT: stale vendored migration node_some_other_node/0001_orphan.sql"
+            in (result.stderr)
+        )

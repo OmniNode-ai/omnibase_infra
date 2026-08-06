@@ -804,6 +804,18 @@ repos:
         entry: uv run --frozen python scripts/check_migration_required.py --pre-commit
         pass_filenames: false
         stages: [pre-commit]
+      # OMN-15717: every vendored node migration under docker/migrations/forward/nodes/
+      # must carry a checked-in stream/domain declaration BEFORE it can reach a
+      # runtime -- catches the class of gap that let node_pr_review_bot's
+      # 001_create_review_bot_bypass_log.sql ship undeclared and fail closed at
+      # bootstrap.sql deploy time instead of at PR time.
+      - id: onex-check-node-migration-declarations
+        name: Node Migration Declaration Check
+        language: system
+        entry: uv run --frozen python scripts/check_node_migration_declarations.py
+        pass_filenames: false
+        files: ^docker/migrations/forward/(nodes/|_ledger/(application-migrations|application-migration-blocks)\.tsv)
+        stages: [pre-commit]
       # OMN-3617: Block planning docs (belong in omni_home/docs/plans/)
       - id: no-planning-docs
         name: Block planning docs (belong in omni_home/docs/plans/)
