@@ -35,6 +35,22 @@ CI_PROCESS_TEST_PATHS = (
     "config/runner_routing_policy.yaml",
 )
 
+# OMN-15336 item 4 repair follow-up: the vendored node-migration tree lives
+# under neither src/, scripts/, nor tests/, so a change there (a new
+# migration .sql, its _ledger row, or the FORCE-RLS fence/grandfather
+# manifests) produced NO selection at all and fell through to the
+# conservative tests/unit/ fallback -- which does not contain
+# tests/scripts/test_node_migration_fence_parity.py. That test is the ratchet
+# guarding against a future FORCE-RLS migration being laundered onto the
+# grandfather snapshot; it is unreachable by the everyday change-aware
+# selector on exactly the class of change that would breach it (verified:
+# a grandfather-manifest + new .sql + ledger-row diff selected only
+# tests/unit/ before this mapping existed). Deliberately mapped only to
+# tests/scripts/ (not the full SCRIPTS_TEST_PREFIXES pair) -- the fence-parity
+# ratchet lives there alone, and this keeps the added footprint to that one
+# directory rather than also pulling in tests/unit/scripts/.
+MIGRATION_TREE_PREFIX = "docker/migrations/forward/"
+
 # OMN-15410: pytest roots that live NEXT TO the code they cover instead of
 # under tests/. They are collected by the full suite (pyproject.toml
 # `testpaths`), but the full suite is only one of two pytest steps — a
@@ -210,6 +226,18 @@ def _resolve(
             # omnibase_infra#2493). Note this is an `if`, not an `elif`:
             # scripts/ci/ keeps its tests/ci/ CI-process mapping AND gains these.
             selected.update(SCRIPTS_TEST_PREFIXES)
+
+        if path.startswith(MIGRATION_TREE_PREFIX):
+            # OMN-15336 item 4 repair follow-up: see MIGRATION_TREE_PREFIX's
+            # own comment above. Deliberately NOT routed through
+            # COLLOCATED_TEST_ROOTS -- tests/scripts/ is already collected via
+            # the plain "tests" testpaths entry, so adding it as a
+            # COLLOCATED_TEST_ROOTS value would trip
+            # check_collocated_selector_coverage's parity assertion in
+            # scripts/validation/validate_test_root_collection.py (that check
+            # is scoped to roots requiring their OWN testpaths entry, which
+            # tests/scripts/ does not).
+            selected.add("tests/scripts/")
 
         # OMN-15410: collocated roots (tests living beside their code rather
         # than under tests/). Independent of every branch above — a path can
