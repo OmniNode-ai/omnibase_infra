@@ -718,6 +718,41 @@ VALUES ($1, $2, 99, 'backfill_completed', '{}'::jsonb, $3,
                 ),
             )
 
+        # ROUND-3 GAP 1 attack (a): the collector itself refuses to mint a
+        # durable proof from an unrelated query against a different table --
+        # reproducing the 2026-08-06 verifier's exact forgery: a vacuous
+        # literal query verified against the SOURCE schema, never the
+        # family's real target.
+        with pytest.raises(ValueError, match="not the durably-collected target"):
+            await collector.verify_application_path_write(
+                projection.family_id,
+                "SELECT 1 AS nothing_to_do_with_any_write",
+                "legacy_fixture",
+                7,
+            )
+
+        # ROUND-3 GAP 1 attack (a'): schema_ref honestly names the real
+        # target ("tenant") but verification_sql actually reads from the
+        # SOURCE table -- PostgreSQL's own EXPLAIN plan (not the caller's
+        # schema_ref claim) must catch this.
+        with pytest.raises(ValueError, match="outside the durably-collected"):
+            await collector.verify_application_path_write(
+                projection.family_id,
+                "SELECT id FROM legacy_fixture.usage",
+                "tenant",
+                7,
+            )
+
+        # ROUND-3 GAP 1 attack (a''): a query that reads no relation at all
+        # proves nothing about any write, even against a legitimate schema.
+        with pytest.raises(ValueError, match="does not read any relation"):
+            await collector.verify_application_path_write(
+                projection.family_id,
+                "SELECT 1",
+                "tenant",
+                7,
+            )
+
         # GREEN: an independently, server-verified write proof -- database
         # and principal come from a live current_database()/current_user
         # readback on the connection, never from a caller-typed string.
@@ -729,6 +764,30 @@ VALUES ($1, $2, 99, 'backfill_completed', '{}'::jsonb, $3,
         )
         assert write_proof.database_ref == write_proof.connection_identity.database
         assert write_proof.principal
+
+        # ROUND-3 GAP 2 attack: a legitimate proof with connection_identity.
+        # database hand-tampered to an attacker-controlled value must be
+        # refused fail-closed, even though every other field (including
+        # database_ref) still matches the durable row exactly.
+        tampered_identity_proof = write_proof.model_copy(
+            update={
+                "connection_identity": write_proof.connection_identity.model_copy(
+                    update={"database": "ATTACKER_CONTROLLED_DB"}
+                )
+            }
+        )
+        with pytest.raises(ValueError, match="does not match its durably"):
+            await coordinator.append(
+                projection.family_id,
+                ModelCutoverJournalRequest(
+                    kind=EnumCutoverEventKind.APPLICATION_PATH_WRITE_PROVEN,
+                    occurred_at=now + timedelta(seconds=7),
+                    evidence_ref="proof/projection/tampered-connection-database",
+                    idempotency_key="idem:proof/projection/tampered-connection-database",
+                    application_path_write_proof=tampered_identity_proof,
+                ),
+            )
+
         await coordinator.append(
             projection.family_id,
             ModelCutoverJournalRequest(

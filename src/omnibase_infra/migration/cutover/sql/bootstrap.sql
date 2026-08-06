@@ -74,10 +74,22 @@ CREATE TABLE IF NOT EXISTS omninode_internal.application_path_write_proofs (
     schema_ref TEXT NOT NULL,
     verification_query_hash TEXT NOT NULL CHECK (verification_query_hash ~ '^[0-9a-f]{64}$'),
     write_result_hash TEXT NOT NULL CHECK (write_result_hash ~ '^[0-9a-f]{64}$'),
+    connection_database TEXT NOT NULL,
     backend_pid BIGINT NOT NULL CHECK (backend_pid > 0),
     collected_at TIMESTAMPTZ NOT NULL,
     verified_at TIMESTAMPTZ NOT NULL DEFAULT clock_timestamp(),
     PRIMARY KEY (family_id, target_sequence)
+);
+
+-- GAP 1 (round 3): the schema(s) a target binding ref legitimately refers to,
+-- derived once from PostgreSQL's own EXPLAIN plan of the target evidence
+-- collection's data-bearing queries in collect_pair() -- never from a
+-- caller-typed schema string. verify_application_path_write() refuses any
+-- write proof whose schema is not a member of this durably-registered set.
+CREATE TABLE IF NOT EXISTS omninode_internal.target_binding_schemas (
+    target_binding_ref TEXT PRIMARY KEY,
+    schema_names TEXT[] NOT NULL CHECK (array_length(schema_names, 1) > 0),
+    registered_at TIMESTAMPTZ NOT NULL DEFAULT clock_timestamp()
 );
 
 CREATE TABLE IF NOT EXISTS omninode_internal.reverse_delta_artifacts (

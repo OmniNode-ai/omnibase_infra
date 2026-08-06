@@ -811,8 +811,13 @@ WHERE event_id = $1 AND family_id = $2
         it must dereference to the row
         ``PostgresTransformationEvidenceCollector.verify_application_path_write``
         wrote to ``omninode_internal.application_path_write_proofs`` and match
-        it field-for-field. A hand-constructed proof that never passed
-        through the collector has no durable row and is rejected here.
+        it field-for-field -- including ``connection_identity.database``,
+        which is persisted independently of ``database_ref`` (both are
+        derived from the same live readback at mint time, but nothing
+        upstream of this check enforces that the two stay equal on a
+        hand-copied/tampered proof) -- a proof that never passed through the
+        collector, or was altered after it did, has no matching durable row
+        and is rejected here.
         """
         if proof is None:
             raise ValueError("application-path write proof is missing")
@@ -821,7 +826,7 @@ WHERE event_id = $1 AND family_id = $2
         durable = await self._connection.fetchrow(
             """
 SELECT database_ref, principal, schema_ref, verification_query_hash,
-       write_result_hash, backend_pid, collected_at
+       write_result_hash, connection_database, backend_pid, collected_at
 FROM omninode_internal.application_path_write_proofs
 WHERE family_id = $1 AND target_sequence = $2
 """,
@@ -839,6 +844,7 @@ WHERE family_id = $1 AND target_sequence = $2
             or durable["schema_ref"] != proof.schema_ref
             or durable["verification_query_hash"] != proof.verification_query_hash
             or durable["write_result_hash"] != proof.write_result_hash
+            or durable["connection_database"] != proof.connection_identity.database
             or int(durable["backend_pid"]) != proof.connection_identity.backend_pid
             or durable["collected_at"] != proof.connection_identity.collected_at
         )
