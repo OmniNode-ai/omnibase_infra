@@ -28,6 +28,13 @@ from omnibase_infra.errors import (
 from omnibase_infra.event_bus.event_bus_kafka import EventBusKafka
 from omnibase_infra.event_bus.models import ModelEventHeaders, ModelEventMessage
 from omnibase_infra.event_bus.models.config import ModelKafkaEventBusConfig
+from omnibase_infra.nodes.node_dlq_replay_effect.engine_dlq_replay import (
+    ModelDlqReplayEngineConfig,
+    should_replay,
+)
+from omnibase_infra.nodes.node_dlq_replay_effect.models.model_dlq_message import (
+    ModelDlqMessage,
+)
 from omnibase_infra.utils.util_consumer_group import KAFKA_CONSUMER_GROUP_MAX_LENGTH
 from tests.conftest import make_test_node_identity
 
@@ -2935,6 +2942,174 @@ class TestKafkaEventBusDLQRouting:
 
             final_metrics = event_bus.dlq_metrics
             assert final_metrics.successful_publishes == 1
+
+            await event_bus.close()
+
+    @pytest.mark.asyncio
+    async def test_raw_dlq_propagates_replay_count_header(
+        self, mock_producer: AsyncMock, dlq_config: ModelKafkaEventBusConfig
+    ) -> None:
+        """OMN-14551: ``_publish_raw_to_dlq`` must read the inbound
+        ``x-replay-count`` header (stamped by
+        ``node_dlq_replay_effect.engine_dlq_replay.DLQProducer.replay_message``
+        when it republishes a DLQ'd message to its original topic) and carry
+        it into the new DLQ record's ``retry_count`` field, instead of
+        hardcoding 0.
+
+        Without this, a replayed message that fails again forever resets to
+        ``retry_count=0`` in its DLQ record, so ``should_replay``'s
+        ``retry_count >= max_replay_count`` guard can never trip -- exactly
+        the structural DLQ-amplification defect from the live dev incident.
+        """
+        with patch(
+            "omnibase_infra.event_bus.event_bus_kafka.AIOKafkaProducer",
+            return_value=mock_producer,
+        ):
+            event_bus = EventBusKafka(config=dlq_config)
+            await event_bus.start()
+
+            # A message that has already been replayed 3 times -- the raw
+            # Kafka ConsumerRecord shape _consume_loop hands to
+            # _publish_raw_to_dlq on a deserialization failure.
+            mock_raw_msg = MagicMock()
+            mock_raw_msg.key = b"test-key"
+            mock_raw_msg.value = b"still-poisoned"
+            mock_raw_msg.offset = 300
+            mock_raw_msg.partition = 0
+            mock_raw_msg.headers = [
+                ("x-replay-count", b"3"),
+                ("x-replayed-by", b"node_dlq_replay_effect"),
+            ]
+
+            correlation_id = uuid4()
+            error = ValueError("still fails to deserialize after replay")
+
+            result = await event_bus._publish_raw_to_dlq(
+                original_topic="source-topic",
+                raw_msg=mock_raw_msg,
+                error=error,
+                correlation_id=correlation_id,
+                failure_type="deserialization_error",
+                consumer_group="test.test-service.dlq-test.consume.v1",
+            )
+            assert result is True
+
+            call_kwargs = mock_producer.send_and_wait.call_args.kwargs
+            payload = json.loads(call_kwargs["value"])
+            assert payload["retry_count"] == 3, (
+                "the x-replay-count header value must be propagated into the "
+                "DLQ record's retry_count field verbatim (the replay engine "
+                "already performed the +1 at replay time), not reset to 0"
+            )
+
+            await event_bus.close()
+
+    @pytest.mark.asyncio
+    async def test_raw_dlq_defaults_replay_count_to_zero_when_header_absent(
+        self, mock_producer: AsyncMock, dlq_config: ModelKafkaEventBusConfig
+    ) -> None:
+        """A first-failure message (never replayed, no x-replay-count header)
+        must still publish to DLQ with retry_count=0 -- the pre-existing,
+        correct behavior for the common case must not regress."""
+        with patch(
+            "omnibase_infra.event_bus.event_bus_kafka.AIOKafkaProducer",
+            return_value=mock_producer,
+        ):
+            event_bus = EventBusKafka(config=dlq_config)
+            await event_bus.start()
+
+            mock_raw_msg = MagicMock()
+            mock_raw_msg.key = b"test-key"
+            mock_raw_msg.value = b"first-failure"
+            mock_raw_msg.offset = 301
+            mock_raw_msg.partition = 0
+            mock_raw_msg.headers = []
+
+            correlation_id = uuid4()
+            error = ValueError("first-time deserialization failure")
+
+            result = await event_bus._publish_raw_to_dlq(
+                original_topic="source-topic",
+                raw_msg=mock_raw_msg,
+                error=error,
+                correlation_id=correlation_id,
+                failure_type="deserialization_error",
+                consumer_group="test.test-service.dlq-test.consume.v1",
+            )
+            assert result is True
+
+            call_kwargs = mock_producer.send_and_wait.call_args.kwargs
+            payload = json.loads(call_kwargs["value"])
+            assert payload["retry_count"] == 0
+
+            await event_bus.close()
+
+    @pytest.mark.asyncio
+    async def test_raw_dlq_makes_max_replay_guard_reachable_end_to_end(
+        self, mock_producer: AsyncMock, dlq_config: ModelKafkaEventBusConfig
+    ) -> None:
+        """OMN-14551: a message replayed up to the max-replay threshold must
+        drive ``should_replay`` to the guard (reject) path the NEXT time it
+        is considered for replay, not another silent re-publish.
+
+        This is the real end-to-end seam: raw Kafka message with
+        ``x-replay-count`` at the threshold -> ``_publish_raw_to_dlq`` (the
+        REAL mixin method, only the producer socket mocked) -> the DLQ wire
+        payload -> ``ModelDlqMessage.from_kafka_message`` (the real replay
+        node's parser) -> ``should_replay`` (the real replay node's
+        eligibility predicate). No mock stands in for any of these hops.
+        """
+        max_replay_count = 5
+
+        with patch(
+            "omnibase_infra.event_bus.event_bus_kafka.AIOKafkaProducer",
+            return_value=mock_producer,
+        ):
+            event_bus = EventBusKafka(config=dlq_config)
+            await event_bus.start()
+
+            mock_raw_msg = MagicMock()
+            mock_raw_msg.key = b"test-key"
+            mock_raw_msg.value = b"chronically-poisoned"
+            mock_raw_msg.offset = 302
+            mock_raw_msg.partition = 0
+            mock_raw_msg.headers = [
+                ("x-replay-count", str(max_replay_count).encode("utf-8")),
+            ]
+
+            correlation_id = uuid4()
+            error = ValueError("still fails at the replay threshold")
+
+            result = await event_bus._publish_raw_to_dlq(
+                original_topic="source-topic",
+                raw_msg=mock_raw_msg,
+                error=error,
+                correlation_id=correlation_id,
+                failure_type="deserialization_error",
+                consumer_group="test.test-service.dlq-test.consume.v1",
+            )
+            assert result is True
+
+            call_kwargs = mock_producer.send_and_wait.call_args.kwargs
+            dlq_payload = json.loads(call_kwargs["value"])
+
+            dlq_message = ModelDlqMessage.from_kafka_message(
+                payload=dlq_payload, dlq_offset=42, dlq_partition=0
+            )
+            assert dlq_message.retry_count == max_replay_count
+
+            replay_config = ModelDlqReplayEngineConfig(
+                bootstrap_servers="localhost:9092",
+                dlq_topic="dlq-events",
+                max_replay_count=max_replay_count,
+            )
+            eligible, reason = should_replay(dlq_message, replay_config)
+            assert eligible is False, (
+                "the max-replay guard must be reachable through "
+                "_publish_raw_to_dlq -- a message at the threshold must be "
+                "rejected for further replay, not endlessly re-published"
+            )
+            assert "Exceeded max replay count" in reason
 
             await event_bus.close()
 
