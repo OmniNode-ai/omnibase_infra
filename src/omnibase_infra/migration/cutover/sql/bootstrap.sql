@@ -81,15 +81,26 @@ CREATE TABLE IF NOT EXISTS omninode_internal.application_path_write_proofs (
     PRIMARY KEY (family_id, target_sequence)
 );
 
--- GAP 1 (round 3): the schema(s) a target binding ref legitimately refers to,
--- derived once from PostgreSQL's own EXPLAIN plan of the target evidence
--- collection's data-bearing queries in collect_pair() -- never from a
--- caller-typed schema string. verify_application_path_write() refuses any
--- write proof whose schema is not a member of this durably-registered set.
+-- GAP 1 (round 4): the exact relation(s) -- not merely the schema(s) -- a
+-- target binding ref's evidence collection legitimately reads, derived once
+-- from PostgreSQL's own EXPLAIN plan of the target evidence collection's
+-- data-bearing queries in collect_pair(), never from a caller-typed schema
+-- string. Keyed by (target_binding_ref, evidence_contract_hash) rather than
+-- target_binding_ref alone: evidence_contract_hash is the same
+-- content-addressed hash of the query set that lands in the family
+-- contract's immutable target_evidence_contract_hash field, so a later
+-- collect_pair() call for the same ref with different (e.g. attacker-typed)
+-- query content is content-addressed into a distinct row instead of
+-- overwriting the row a registered family actually depends on.
+-- verify_application_path_write() refuses any write proof whose schema or
+-- relation is not a member of the row matching the *proving family's own*
+-- registered target_evidence_contract_hash.
 CREATE TABLE IF NOT EXISTS omninode_internal.target_binding_schemas (
-    target_binding_ref TEXT PRIMARY KEY,
-    schema_names TEXT[] NOT NULL CHECK (array_length(schema_names, 1) > 0),
-    registered_at TIMESTAMPTZ NOT NULL DEFAULT clock_timestamp()
+    target_binding_ref TEXT NOT NULL,
+    evidence_contract_hash TEXT NOT NULL CHECK (evidence_contract_hash ~ '^[0-9a-f]{64}$'),
+    relation_names TEXT[] NOT NULL CHECK (array_length(relation_names, 1) > 0),
+    registered_at TIMESTAMPTZ NOT NULL DEFAULT clock_timestamp(),
+    PRIMARY KEY (target_binding_ref, evidence_contract_hash)
 );
 
 CREATE TABLE IF NOT EXISTS omninode_internal.reverse_delta_artifacts (

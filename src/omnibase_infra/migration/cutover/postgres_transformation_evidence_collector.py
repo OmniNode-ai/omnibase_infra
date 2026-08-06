@@ -23,6 +23,17 @@ _MUTATING_TOKEN = re.compile(
     r"\b(?:INSERT|UPDATE|DELETE|DROP|ALTER|CREATE|GRANT|REVOKE|TRUNCATE|COPY|CALL|DO)\b",
     re.IGNORECASE,
 )
+# EXPLAIN VERBOSE always schema-qualifies a non-``pg_catalog`` function call
+# in expression fields (``Output``, ``Filter``, ...) as ``schema.func(...)``,
+# even when the function lives in the same schema as the scan it appears
+# beside. A bare column reference is never rendered this way (it is
+# ``relation.column`` -- alias-qualified, never schema-qualified). This is
+# how a query that scans a legitimate relation but pulls its actual returned
+# value out of a foreign-schema function call is caught: relation-scan
+# harvesting alone cannot see inside an opaque (non-inlined) function call.
+_QUALIFIED_CALL_PATTERN = re.compile(
+    r"\b([A-Za-z_][A-Za-z0-9_]*)\.[A-Za-z_][A-Za-z0-9_]*\s*\("
+)
 
 
 def _collect_schema_names(node: object, schemas: set[str]) -> None:
@@ -36,6 +47,50 @@ def _collect_schema_names(node: object, schemas: set[str]) -> None:
     elif isinstance(node, list):
         for item in node:
             _collect_schema_names(item, schemas)
+
+
+def _collect_expression_schema_refs(node: object, schemas: set[str]) -> None:
+    """Recursively harvest schema-qualified function-call refs from EXPLAIN text.
+
+    PostgreSQL does not inline every function call into a child plan node --
+    a ``STABLE``/``VOLATILE`` or non-inlinable ``SQL`` function invoked in a
+    target list or filter shows up only as an opaque string such as
+    ``"legacy_fixture.usage_count()"`` inside fields like ``"Output"``. A
+    relation-scan-only walk (``_collect_schema_names``) is blind to this,
+    which previously let a verification query "prove" a write by scanning a
+    legitimate relation while pulling its actual returned value out of a
+    function call that reads a different (e.g. source) schema entirely.
+    """
+    if isinstance(node, dict):
+        for value in node.values():
+            _collect_expression_schema_refs(value, schemas)
+    elif isinstance(node, list):
+        for item in node:
+            _collect_expression_schema_refs(item, schemas)
+    elif isinstance(node, str):
+        for match in _QUALIFIED_CALL_PATTERN.finditer(node):
+            schemas.add(match.group(1))
+
+
+def _collect_relations(node: object, relations: set[tuple[str, str]]) -> None:
+    """Recursively pull every ``(schema, relation)`` pair off EXPLAIN scan nodes.
+
+    Schema membership alone is not write-level binding: two unrelated tables
+    can share a schema, and a caller can mint a "proof" against any relation
+    in that schema regardless of whether it was ever part of the target
+    evidence the family actually collected. This harvests the exact relation
+    identity PostgreSQL's own planner reports, never a caller string.
+    """
+    if isinstance(node, dict):
+        schema = node.get("Schema")
+        relation = node.get("Relation Name")
+        if isinstance(schema, str) and isinstance(relation, str):
+            relations.add((schema, relation))
+        for value in node.values():
+            _collect_relations(value, relations)
+    elif isinstance(node, list):
+        for item in node:
+            _collect_relations(item, relations)
 
 
 class PostgresTransformationEvidenceCollector:
@@ -61,19 +116,26 @@ class PostgresTransformationEvidenceCollector:
         than merely being asserted.
 
         A shape-valid, schema-existing query is not sufficient on its own --
-        that oracle previously accepted a proof minted from an arbitrary
-        caller-chosen query against an unrelated schema (e.g. the family's
-        own SOURCE schema), because nothing tied ``schema_ref``/
-        ``verification_sql`` back to what the family actually collected as
-        its target.  This method now looks up the family's durable contract
-        (``omninode_internal.cutover_family_contracts``) to find its
-        ``target_binding_ref``, then requires ``schema_ref`` -- and every
-        schema PostgreSQL's own ``EXPLAIN (FORMAT JSON, VERBOSE)`` plan says
-        ``verification_sql`` actually reads -- to be a member of the schema
-        set durably registered for that binding ref by ``collect_pair()``.
-        A query that touches no relation at all (e.g. a bare ``SELECT 1``)
-        or that reads from any other schema is refused before it can ever
-        be durably registered as a proof.
+        schema membership alone is not write-level binding either, since any
+        relation in the target schema (or a foreign-schema function call
+        embedded in an otherwise-legitimate scan) would satisfy it. This
+        method looks up the family's durable contract
+        (``omninode_internal.cutover_family_contracts``) to find both its
+        ``target_binding_ref`` and its immutable
+        ``target_evidence_contract_hash``, then requires ``schema_ref``,
+        every schema PostgreSQL's own ``EXPLAIN (FORMAT JSON, VERBOSE)`` plan
+        says ``verification_sql`` actually reads (including through an
+        opaque schema-qualified function call), and every relation it
+        directly scans, to all be members of the *exact* relation set
+        ``collect_pair()`` durably registered for that
+        ``(target_binding_ref, evidence_contract_hash)`` pair -- never a
+        schema string, and never merely ``target_binding_ref``, which a
+        later ``collect_pair()`` call could otherwise silently re-point at
+        different (attacker-supplied) query content. A query that touches
+        no relation at all (e.g. a bare ``SELECT 1``), that reads from any
+        other schema or relation, or that pulls its returned value through a
+        foreign-schema function call is refused before it can ever be
+        durably registered as a proof.
 
         The computed proof is durably registered in
         ``omninode_internal.application_path_write_proofs`` before it is
@@ -156,47 +218,65 @@ class PostgresTransformationEvidenceCollector:
         schema_ref: str,
         verification_sql: str,
     ) -> None:
-        """Refuse a write proof unless its schema is the family's real target.
+        """Refuse a write proof unless it is bound to the family's real target.
 
         ``family_id`` resolves to a durably-registered contract (registration
         is a repository-level precondition; ``application_path_write_proofs``
-        itself carries a foreign key to it), which carries the family's
-        ``target_binding_ref``.  That binding ref must in turn have a
-        durably-registered schema set from a prior ``collect_pair()`` call --
-        derived from PostgreSQL's own query plan of the target evidence
-        collection, never from a caller string.  Both ``schema_ref`` and
-        every schema the planner says ``verification_sql`` actually reads
-        must be members of that set.
+        itself carries a foreign key to it), which carries both the family's
+        ``target_binding_ref`` *and* its immutable
+        ``target_evidence_contract_hash``. The durably-registered relation
+        set is looked up by the *pair* -- never ``target_binding_ref`` alone
+        -- so a later ``collect_pair()`` call for the same binding ref with
+        different (e.g. attacker-typed) query content is content-addressed
+        into a distinct row instead of silently overwriting the row this
+        family actually depends on. ``schema_ref``, every schema
+        ``verification_sql``'s own EXPLAIN plan (including opaque
+        schema-qualified function calls it invokes) says it reads, and every
+        relation it directly scans must all be members of that pinned row.
         """
-        target_binding_ref = await self._connection.fetchval(
+        contract_row = await self._connection.fetchrow(
             """
-SELECT contract_json->>'target_binding_ref'
+SELECT contract_json->>'target_binding_ref' AS target_binding_ref,
+       contract_json->>'target_evidence_contract_hash' AS target_evidence_contract_hash
 FROM omninode_internal.cutover_family_contracts
 WHERE family_id = $1
 """,
             family_id,
         )
-        if not target_binding_ref:
+        if contract_row is None or not contract_row["target_binding_ref"]:
             raise ValueError(
                 f"family {family_id} has no durably registered contract; "
                 "register_family() must run before proving an application-path write"
             )
+        target_binding_ref = contract_row["target_binding_ref"]
+        target_evidence_contract_hash = contract_row["target_evidence_contract_hash"]
 
         registered_row = await self._connection.fetchrow(
             """
-SELECT schema_names
+SELECT relation_names
 FROM omninode_internal.target_binding_schemas
-WHERE target_binding_ref = $1
+WHERE target_binding_ref = $1 AND evidence_contract_hash = $2
 """,
             target_binding_ref,
+            target_evidence_contract_hash,
         )
         if registered_row is None:
             raise ValueError(
                 f"target binding {target_binding_ref!r} has no durably-collected "
-                "evidence; collect_pair() must run before proving an "
-                "application-path write"
+                "evidence matching this family's registered "
+                "target_evidence_contract_hash; collect_pair() must run with "
+                "the exact target query set the family contract declares "
+                "before proving an application-path write"
             )
-        legitimate_schemas = frozenset(registered_row["schema_names"])
+        legitimate_relations = frozenset(
+            (schema, relation)
+            for schema, relation in (
+                label.split(".", 1) for label in registered_row["relation_names"]
+            )
+        )
+        legitimate_schemas = frozenset(
+            schema for schema, _relation in legitimate_relations
+        )
 
         if schema_ref not in legitimate_schemas:
             raise ValueError(
@@ -218,12 +298,26 @@ WHERE target_binding_ref = $1
                 f"target for binding {target_binding_ref!r}"
             )
 
-    async def _explain_schemas(self, sql: str) -> frozenset[str]:
-        """Return the schema names PostgreSQL's own planner says ``sql`` reads.
+        referenced_relations = await self._explain_relations(verification_sql)
+        if not referenced_relations:
+            raise ValueError(
+                "write verification query does not scan any relation; a "
+                "write is not proven by a query that reads no target-bound "
+                "table"
+            )
+        foreign_relations = referenced_relations - legitimate_relations
+        if foreign_relations:
+            raise ValueError(
+                "write verification query reads relation(s) "
+                f"{sorted(foreign_relations)} outside the durably-collected "
+                f"target for binding {target_binding_ref!r}"
+            )
 
-        Uses ``EXPLAIN (FORMAT JSON, VERBOSE)`` -- never a text-level parse of
-        the caller's SQL -- so the answer is the server's own understanding
-        of which relations the query touches, not something a caller can
+    async def _explain_plan(self, sql: str) -> object:
+        """Return PostgreSQL's own ``EXPLAIN (FORMAT JSON, VERBOSE)`` plan for ``sql``.
+
+        Never a text-level parse of the caller's SQL -- the answer is the
+        server's own understanding of the query, not something a caller can
         spoof by phrasing (comments, aliasing, literal-only queries).
         """
         plan_rows = await self._connection.fetch(
@@ -231,10 +325,29 @@ WHERE target_binding_ref = $1
         )
         if not plan_rows:
             raise RuntimeError("EXPLAIN returned no plan for the verification query")
-        plan = json.loads(plan_rows[0][0])
+        plan: object = json.loads(plan_rows[0][0])
+        return plan
+
+    async def _explain_schemas(self, sql: str) -> frozenset[str]:
+        """Return every schema PostgreSQL's own planner says ``sql`` reads.
+
+        Includes both relation-scan schemas and schemas referenced only
+        through an opaque, schema-qualified function call embedded in an
+        expression (see ``_collect_expression_schema_refs``) -- a query can
+        "read" data through either path.
+        """
+        plan = await self._explain_plan(sql)
         schemas: set[str] = set()
         _collect_schema_names(plan, schemas)
+        _collect_expression_schema_refs(plan, schemas)
         return frozenset(schemas)
+
+    async def _explain_relations(self, sql: str) -> frozenset[tuple[str, str]]:
+        """Return every ``(schema, relation)`` PostgreSQL's planner directly scans in ``sql``."""
+        plan = await self._explain_plan(sql)
+        relations: set[tuple[str, str]] = set()
+        _collect_relations(plan, relations)
+        return frozenset(relations)
 
     async def _register_write_proof(
         self,
@@ -290,11 +403,13 @@ WHERE family_id = $1 AND target_sequence = $2
         captured atomically on the same live backend -- never on two evidence
         objects assembled independently or by hand.
 
-        The target's schema(s) -- as PostgreSQL's own query plan reports them
-        for the data-bearing ``keys_sql``/``rows_sql`` queries, never a caller
-        string -- are durably registered against ``target_binding_ref`` so
+        The target's relation(s) -- as PostgreSQL's own query plan reports
+        them for the data-bearing ``keys_sql``/``rows_sql`` queries, never a
+        caller string -- are durably registered against the pair
+        ``(target_binding_ref, evidence_contract_hash)`` so
         ``verify_application_path_write()`` can later refuse a write proof
-        minted against any other schema (e.g. the source's).
+        minted against any other relation (e.g. an unrelated table in the
+        same schema, or the source's).
         """
         async with self._connection.transaction(
             isolation="repeatable_read",
@@ -315,33 +430,46 @@ WHERE family_id = $1 AND target_sequence = $2
         target_binding_ref: str,
         queries: ModelPostgresEvidenceQuerySet,
     ) -> None:
-        """Durably record which schemas a target binding's real data lives in.
+        """Durably record which relations a target binding's real data lives in.
 
         Derived from PostgreSQL's own ``EXPLAIN`` plan of the data-bearing
         ``keys_sql``/``rows_sql`` queries only (never the auxiliary
         integrity-check queries, which legitimately touch ``pg_catalog``/
         ``information_schema`` and would otherwise leak those in as a
-        false-positive "legitimate" target schema).  Runs outside the
-        read-only snapshot transaction because it durably writes.
+        false-positive "legitimate" target relation). Keyed by
+        ``(target_binding_ref, evidence_contract_hash)`` -- the same
+        content-addressed hash of ``queries`` that a registered family
+        pins as its immutable ``target_evidence_contract_hash`` -- so a
+        later call for the same ``target_binding_ref`` with different query
+        content (e.g. attacker-supplied) lands in a distinct row instead of
+        overwriting the row an already-registered family depends on. Runs
+        outside the read-only snapshot transaction because it durably
+        writes.
         """
-        schemas = (await self._explain_schemas(queries.keys_sql)) | (
-            await self._explain_schemas(queries.rows_sql)
+        relations = (await self._explain_relations(queries.keys_sql)) | (
+            await self._explain_relations(queries.rows_sql)
         )
-        if not schemas:
+        if not relations:
             raise ValueError(
                 f"target binding {target_binding_ref!r} evidence queries "
                 "reference no relation; cannot durably establish its target "
-                "schema"
+                "relation"
             )
+        evidence_contract_hash = self._query_contract_hash(queries)
+        relation_names = sorted(
+            f"{schema}.{relation}" for schema, relation in relations
+        )
         await self._connection.execute(
             """
-INSERT INTO omninode_internal.target_binding_schemas (target_binding_ref, schema_names)
-VALUES ($1, $2)
-ON CONFLICT (target_binding_ref)
-DO UPDATE SET schema_names = EXCLUDED.schema_names, registered_at = clock_timestamp()
+INSERT INTO omninode_internal.target_binding_schemas
+  (target_binding_ref, evidence_contract_hash, relation_names)
+VALUES ($1, $2, $3)
+ON CONFLICT (target_binding_ref, evidence_contract_hash)
+DO UPDATE SET relation_names = EXCLUDED.relation_names, registered_at = clock_timestamp()
 """,
             target_binding_ref,
-            sorted(schemas),
+            evidence_contract_hash,
+            relation_names,
         )
 
     async def _read_connection_identity(self) -> ModelConnectionIdentity:

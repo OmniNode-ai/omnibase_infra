@@ -753,6 +753,65 @@ VALUES ($1, $2, 99, 'backfill_completed', '{}'::jsonb, $3,
                 7,
             )
 
+        # ROUND-4 GAP 1 attack (b): schema-level binding is not write-level
+        # binding. "tenant" is the legitimate target schema, but
+        # tenant.tenants is an unrelated table that collect_pair() never
+        # collected (only tenant.usage was) -- relation identity, not merely
+        # schema membership, must refuse this.
+        with pytest.raises(ValueError, match="outside the durably-collected"):
+            await collector.verify_application_path_write(
+                projection.family_id,
+                "SELECT id FROM tenant.tenants",
+                "tenant",
+                71,
+            )
+
+        # ROUND-4 GAP 1 attack (c): the round-2 forgery restored with a
+        # throwaway FROM bolted on to satisfy the "reads at least one
+        # relation" guard -- still an unrelated relation, still refused by
+        # relation-identity binding.
+        with pytest.raises(ValueError, match="outside the durably-collected"):
+            await collector.verify_application_path_write(
+                projection.family_id,
+                "SELECT 1 AS nothing_to_do_with_any_write FROM tenant.tenants LIMIT 1",
+                "tenant",
+                72,
+            )
+
+        # ROUND-4 GAP 1 attack (d): the FROM-clause relation (tenant.usage)
+        # is the family's real, legitimate target -- but the actual returned
+        # value is pulled out of a SOURCE-schema function call PostgreSQL
+        # does not inline into a child scan node, so relation-scan
+        # harvesting alone is blind to it. EXPLAIN VERBOSE always
+        # schema-qualifies the call, so this is not spoofable by phrasing.
+        with pytest.raises(ValueError, match="outside the durably-collected"):
+            await collector.verify_application_path_write(
+                projection.family_id,
+                "SELECT legacy_fixture.usage_count() AS v FROM tenant.usage LIMIT 1",
+                "tenant",
+                70,
+            )
+
+        # ROUND-4 GAP 1 attack (e): the durably-collected target set must not
+        # be re-clobberable through the mutable target_binding_ref alone. A
+        # second collect_pair() call for "application.target" with swapped
+        # (attacker-chosen) query content registers under a *different*
+        # evidence_contract_hash and must not disturb the row this family's
+        # own immutable target_evidence_contract_hash already pins.
+        await collector.collect_pair(
+            _target_queries(),
+            "application.legacy",
+            _source_queries(),
+            "application.target",
+        )
+        with pytest.raises(ValueError, match="not the durably-collected target"):
+            await collector.verify_application_path_write(
+                projection.family_id,
+                "SELECT id FROM legacy_fixture.usage",
+                "legacy_fixture",
+                73,
+            )
+
         # GREEN: an independently, server-verified write proof -- database
         # and principal come from a live current_database()/current_user
         # readback on the connection, never from a caller-typed string.
