@@ -87,11 +87,12 @@ import json
 import os
 import re
 import sys
+import time
 import tomllib
 import urllib.error
 import urllib.parse
 import urllib.request
-from collections.abc import Iterable, Sequence
+from collections.abc import Callable, Iterable, Sequence
 from dataclasses import dataclass
 from enum import Enum
 from pathlib import Path
@@ -108,7 +109,21 @@ _ORG_PREFIX = f"{_ORG}/"
 # scripts/ci/publish_with_retry.py.
 _GITHUB_API = "https://api.github.com"  # url-authority-ok: fixed public REST API, no ONEX routing authority
 _DEFAULT_PROTECTED: tuple[str, ...] = ("dev", "main")
-_REQUEST_TIMEOUT_SECONDS = 10.0
+# Raised from 10.0 (2026-08-06, defect fix): a single 10s-timeout, zero-retry
+# GET was redding this gate on a pin that was verifiably reachable live (the
+# onex_change_control @ 2dd26ade... compare call) -- 10s is not a realistic
+# GitHub REST compare-endpoint budget under transient load. 30s per attempt.
+_REQUEST_TIMEOUT_SECONDS = 30.0
+# Bounded retry for transient transport failures (timeout/connection errors,
+# HTTP 5xx, HTTP 429). A definitive HTTP 4xx is never retried -- it will not
+# change on a second try, and this job runs on every PR so added latency is
+# never free. Worst case for one fully-exhausted call:
+# 3 * _REQUEST_TIMEOUT_SECONDS + sum(_API_RETRY_BACKOFF_SECONDS) = 96s, still
+# well under the CI job timeout; the fail-closed UNDETERMINED mapping is
+# unchanged once the ceiling is actually exhausted.
+_API_MAX_ATTEMPTS = 3
+_API_RETRY_BACKOFF_SECONDS: tuple[float, ...] = (2.0, 4.0)
+_TRANSIENT_HTTP_STATUS = frozenset({429, 500, 502, 503, 504})
 # Stop probing after this many consecutive transport (non-HTTP-status) failures
 # and report the remainder as undetermined; keeps the worst case bounded well
 # under the CI job timeout instead of serially timing out on every pin.
@@ -457,11 +472,40 @@ def status_is_reachable(status: str) -> bool:
     return status in {"behind", "identical"}
 
 
-def _api_get(url: str) -> tuple[int | None, dict[str, Any] | None, str]:
-    """GET a GitHub REST endpoint. Returns ``(status, body, detail)``.
+def _is_transient_http_status(status: int) -> bool:
+    """True for an HTTP status worth retrying: 429 (rate limit) or any 5xx.
 
-    ``status is None`` means the request could not be performed at all.
+    Every other status -- 404, 403 without rate-limit semantics, 400, 401,
+    410, ... -- is definitive: a second identical GET will not produce a
+    different answer, so retrying it only adds latency to a gate that runs on
+    every PR.
     """
+    return status in _TRANSIENT_HTTP_STATUS
+
+
+def _api_get(
+    url: str, *, sleep: Callable[[float], None] | None = None
+) -> tuple[int | None, dict[str, Any] | None, str]:
+    """GET a GitHub REST endpoint with bounded retry on transient failures.
+
+    Returns ``(status, body, detail)``. ``status is None`` means the request
+    could not be performed at all after exhausting ``_API_MAX_ATTEMPTS``.
+
+    Retries ONLY the transient failure classes: a transport-level failure
+    (timeout, connection error -- no HTTP status at all) or an HTTP 429/5xx
+    (see :func:`_is_transient_http_status`), up to ``_API_MAX_ATTEMPTS`` total
+    attempts with a short bounded backoff (``_API_RETRY_BACKOFF_SECONDS``,
+    never unbounded). A definitive HTTP 4xx returns immediately on the first
+    attempt -- no retry, no added latency.
+
+    If every attempt fails on a transient class, the final failing result is
+    returned unchanged from today's single-shot behavior: the caller's
+    existing fail-closed UNDETERMINED mapping is untouched. This function
+    eliminates FALSE failures caused by one unlucky transient hiccup; it does
+    not, and must not, weaken the fail-closed posture for a genuinely
+    unresolvable pin.
+    """
+    effective_sleep = sleep or time.sleep
     headers = {
         "Accept": "application/vnd.github+json",
         "User-Agent": "omnibase-infra-pin-reachability-gate (OMN-15538)",
@@ -470,25 +514,41 @@ def _api_get(url: str) -> tuple[int | None, dict[str, Any] | None, str]:
     if token:
         headers["Authorization"] = f"Bearer {token}"
     request = urllib.request.Request(url, headers=headers)  # noqa: S310 - fixed https host
-    try:
-        with urllib.request.urlopen(  # noqa: S310 - fixed https host
-            request, timeout=_REQUEST_TIMEOUT_SECONDS
-        ) as response:
-            payload = json.loads(response.read().decode("utf-8", errors="replace"))
-            body = payload if isinstance(payload, dict) else None
-            return response.status, body, f"HTTP {response.status}"
-    except urllib.error.HTTPError as exc:
-        detail = f"HTTP {exc.code}"
+
+    last_status: int | None = None
+    last_body: dict[str, Any] | None = None
+    last_detail = ""
+    for attempt in range(1, _API_MAX_ATTEMPTS + 1):
         try:
-            body = json.loads(exc.read().decode("utf-8", errors="replace"))
-            message = body.get("message", "") if isinstance(body, dict) else ""
-            if message:
-                detail = f"HTTP {exc.code}: {message}"
-        except (ValueError, OSError):
-            pass
-        return exc.code, None, detail
-    except (urllib.error.URLError, OSError, TimeoutError, ValueError) as exc:
-        return None, None, f"transport error: {exc}"
+            with urllib.request.urlopen(  # noqa: S310 - fixed https host
+                request, timeout=_REQUEST_TIMEOUT_SECONDS
+            ) as response:
+                payload = json.loads(response.read().decode("utf-8", errors="replace"))
+                body = payload if isinstance(payload, dict) else None
+                return response.status, body, f"HTTP {response.status}"
+        except urllib.error.HTTPError as exc:
+            detail = f"HTTP {exc.code}"
+            try:
+                error_body = json.loads(exc.read().decode("utf-8", errors="replace"))
+                message = (
+                    error_body.get("message", "")
+                    if isinstance(error_body, dict)
+                    else ""
+                )
+                if message:
+                    detail = f"HTTP {exc.code}: {message}"
+            except (ValueError, OSError):
+                pass
+            if not _is_transient_http_status(exc.code):
+                return exc.code, None, detail
+            last_status, last_body, last_detail = exc.code, None, detail
+        except (urllib.error.URLError, OSError, TimeoutError, ValueError) as exc:
+            last_status, last_body, last_detail = None, None, f"transport error: {exc}"
+
+        if attempt < _API_MAX_ATTEMPTS:
+            effective_sleep(_API_RETRY_BACKOFF_SECONDS[attempt - 1])
+
+    return last_status, last_body, last_detail
 
 
 def _compare_url(repo: str, base: str, ref: str) -> str:

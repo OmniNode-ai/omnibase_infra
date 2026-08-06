@@ -32,6 +32,11 @@ through, or to a way a naive "fix" would silently un-fix it:
 
 from __future__ import annotations
 
+import io
+import json
+import time
+import urllib.error
+import urllib.request
 from pathlib import Path
 
 import pytest
@@ -39,6 +44,9 @@ import pytest
 from scripts.ci.check_pin_reachability import (
     PinRef,
     Verdict,
+    _api_get,
+    _is_transient_http_status,
+    _Resolver,
     extract_pins,
     extract_pyproject_pins,
     extract_uv_lock_pins,
@@ -389,3 +397,242 @@ def test_verdict_values_are_stable_strings() -> None:
     assert Verdict.REACHABLE.value == "REACHABLE"
     assert Verdict.UNREACHABLE.value == "UNREACHABLE"
     assert Verdict.UNDETERMINED.value == "UNDETERMINED"
+
+
+# ---------------------------------------------------------------------------
+# Transport retry (defect fix, 2026-08-06): one unretried 10s timeout on the
+# onex_change_control @ 2dd26ade... compare call was redding essentially every
+# open omnibase_infra dev PR, even though the pin is verifiably reachable
+# live. ``_api_get`` must absorb a transient hiccup with a bounded retry
+# instead of handing the caller a single-shot UNDETERMINED -- while a
+# genuinely exhausted retry ceiling must still fail closed (this is a false-RED
+# fix, not a weakening of the fail-closed gate), and a definitive 4xx must
+# never be retried (it will not change on a second try; retrying it only adds
+# latency to a job that runs on every PR).
+# ---------------------------------------------------------------------------
+
+
+def _http_error(code: int, message: str = "") -> urllib.error.HTTPError:
+    body = json.dumps({"message": message}).encode("utf-8") if message else b"{}"
+    return urllib.error.HTTPError(
+        url="https://api.github.com/x",
+        code=code,
+        msg=message or "error",
+        hdrs=None,  # type: ignore[arg-type]
+        fp=io.BytesIO(body),
+    )
+
+
+class _FakeResponse:
+    """Minimal stand-in for the ``http.client.HTTPResponse`` context manager."""
+
+    def __init__(self, status: int, payload: dict[str, object]) -> None:
+        self.status = status
+        self._payload = json.dumps(payload).encode("utf-8")
+
+    def read(self) -> bytes:
+        return self._payload
+
+    def __enter__(self) -> _FakeResponse:
+        return self
+
+    def __exit__(self, *exc_info: object) -> None:
+        return None
+
+
+def _scripted_urlopen(
+    effects: list[Exception | _FakeResponse],
+) -> tuple[object, list[int]]:
+    """Return a fake ``urllib.request.urlopen`` that replays ``effects`` in order.
+
+    ``calls`` records one entry per invocation so tests can assert exactly how
+    many HTTP attempts were made -- the whole point of the retry-vs-no-retry
+    split.
+    """
+    calls: list[int] = []
+
+    def fake_urlopen(request: object, timeout: float | None = None) -> _FakeResponse:
+        index = len(calls)
+        calls.append(index)
+        effect = effects[index]
+        if isinstance(effect, Exception):
+            raise effect
+        return effect
+
+    return fake_urlopen, calls
+
+
+@pytest.mark.unit
+@pytest.mark.parametrize(
+    ("status", "expected"),
+    [
+        (429, True),
+        (500, True),
+        (502, True),
+        (503, True),
+        (504, True),
+        (404, False),
+        (403, False),
+        (400, False),
+        (401, False),
+        (410, False),
+    ],
+)
+def test_is_transient_http_status_covers_only_5xx_and_429(
+    status: int, expected: bool
+) -> None:
+    assert _is_transient_http_status(status) is expected
+
+
+@pytest.mark.unit
+def test_api_get_retries_transient_timeout_then_succeeds(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """(a) attempt 1 transient, attempt 2 succeeds -> the successful result, no UNDETERMINED."""
+    fake_urlopen, calls = _scripted_urlopen(
+        [TimeoutError("timed out"), _FakeResponse(200, {"status": "behind"})]
+    )
+    monkeypatch.setattr(urllib.request, "urlopen", fake_urlopen)
+    slept: list[float] = []
+
+    status, body, detail = _api_get("https://api.github.com/x", sleep=slept.append)
+
+    assert status == 200
+    assert body == {"status": "behind"}
+    assert detail == "HTTP 200"
+    assert len(calls) == 2, "must retry exactly once after the transient timeout"
+    assert slept == [2.0], "one bounded backoff sleep before the successful retry"
+
+
+@pytest.mark.unit
+def test_api_get_retries_transient_http_5xx_and_429_then_succeeds(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Both no-status transport errors AND HTTP 5xx/429 are retried."""
+    fake_urlopen, calls = _scripted_urlopen(
+        [
+            _http_error(503, "Service Unavailable"),
+            _http_error(429, "rate limited"),
+            _FakeResponse(200, {"status": "identical"}),
+        ]
+    )
+    monkeypatch.setattr(urllib.request, "urlopen", fake_urlopen)
+    slept: list[float] = []
+
+    status, body, _detail = _api_get("https://api.github.com/x", sleep=slept.append)
+
+    assert status == 200
+    assert body == {"status": "identical"}
+    assert len(calls) == 3
+    assert slept == [2.0, 4.0], "bounded exponential backoff across two retries"
+
+
+@pytest.mark.unit
+def test_api_get_exhausts_retries_and_stays_a_failure(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """(b) fail-closed preserved: exhausting the ceiling is still a FAILURE, never a pass."""
+    fake_urlopen, calls = _scripted_urlopen(
+        [
+            TimeoutError("timed out"),
+            TimeoutError("timed out"),
+            TimeoutError("timed out"),
+        ]
+    )
+    monkeypatch.setattr(urllib.request, "urlopen", fake_urlopen)
+    slept: list[float] = []
+
+    status, body, detail = _api_get("https://api.github.com/x", sleep=slept.append)
+
+    assert status is None, "exhausted transient failure must not resolve to a pass"
+    assert body is None
+    assert "transport error" in detail
+    assert len(calls) == 3, "retries exactly _API_MAX_ATTEMPTS times, no more"
+    assert slept == [2.0, 4.0]
+
+
+@pytest.mark.unit
+def test_resolver_stays_undetermined_after_retries_exhausted(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """(b) end-to-end through ``_Resolver``: exhausted retries -> UNDETERMINED, not REACHABLE.
+
+    This is the assertion that actually matters: a caller consuming
+    ``_Resolver.resolve`` (as ``main()`` does) must see the same fail-closed
+    UNDETERMINED verdict it always has -- the retry only removes the FALSE
+    reds, never the true ones.
+    """
+    fake_urlopen, calls = _scripted_urlopen(
+        [
+            TimeoutError("timed out"),
+            TimeoutError("timed out"),
+            TimeoutError("timed out"),
+        ]
+    )
+    monkeypatch.setattr(urllib.request, "urlopen", fake_urlopen)
+    monkeypatch.setattr(time, "sleep", lambda _seconds: None)
+
+    resolution = _Resolver(("dev", "main")).resolve("omnimarket", "a" * 40)
+
+    assert resolution.verdict is Verdict.UNDETERMINED
+    assert len(calls) == 3, (
+        "one compare call, fully retried, is enough to fail closed -- the "
+        "resolver must not need to exhaust every protected branch"
+    )
+
+
+@pytest.mark.unit
+def test_api_get_does_not_retry_a_definitive_404(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """(c) a definitive 4xx maps to its existing meaning immediately, no retry."""
+    fake_urlopen, calls = _scripted_urlopen([_http_error(404, "Not Found")])
+    monkeypatch.setattr(urllib.request, "urlopen", fake_urlopen)
+    slept: list[float] = []
+
+    status, body, detail = _api_get("https://api.github.com/x", sleep=slept.append)
+
+    assert status == 404
+    assert body is None
+    assert detail == "HTTP 404: Not Found"
+    assert len(calls) == 1, "a definitive 404 must not be retried"
+    assert slept == [], "no backoff sleep for a non-retried definitive failure"
+
+
+@pytest.mark.unit
+def test_api_get_does_not_retry_a_definitive_403(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """(c) 403 without rate-limit semantics (429) is definitive, not transient."""
+    fake_urlopen, calls = _scripted_urlopen([_http_error(403, "Forbidden")])
+    monkeypatch.setattr(urllib.request, "urlopen", fake_urlopen)
+    slept: list[float] = []
+
+    status, _body, _detail = _api_get("https://api.github.com/x", sleep=slept.append)
+
+    assert status == 403
+    assert len(calls) == 1, "a definitive 403 must not be retried"
+    assert slept == []
+
+
+@pytest.mark.unit
+def test_api_get_backoff_is_bounded(monkeypatch: pytest.MonkeyPatch) -> None:
+    """(d) backoff is bounded -- a persistent transient failure sleeps a fixed,
+    short, known schedule, never an unbounded or growing-without-limit one."""
+    fake_urlopen, _calls = _scripted_urlopen(
+        [
+            TimeoutError("t"),
+            TimeoutError("t"),
+            TimeoutError("t"),
+        ]
+    )
+    monkeypatch.setattr(urllib.request, "urlopen", fake_urlopen)
+    slept: list[float] = []
+
+    _api_get("https://api.github.com/x", sleep=slept.append)
+
+    assert len(slept) == 2, "at most _API_MAX_ATTEMPTS - 1 backoff sleeps"
+    assert all(0 < delay <= 10.0 for delay in slept), (
+        f"each backoff sleep must be short and bounded, got {slept}"
+    )
+    assert sum(slept) <= 30.0, f"total backoff time must be bounded, got {slept}"
