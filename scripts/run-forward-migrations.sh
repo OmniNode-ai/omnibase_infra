@@ -176,6 +176,36 @@ is_fenced_node_migration() {
   printf '%s\n' "${FENCED_NODE_MIGRATION_IDS}" | grep -Fxq "${candidate}"
 }
 
+# ---- BEGIN FORCE ROW LEVEL SECURITY grandfather snapshot (OMN-15336 item 4 repair) ----
+# What this is, and why it is a SEPARATE file from ${FENCE_MANIFEST}: see
+# grandfathered-force-rls-migrations.yaml's own header. Short version — it is
+# a frozen snapshot of the FORCE-enabling node migrations that were already
+# vendored and already applying ungated, on EVERY lane, before the guard
+# below existed. It is a grandfather RECORD (a fact about the tree at guard-
+# introduction time), never an operator GATE (the fence manifest above stays
+# the only place an operator holds a migration back) -- conflating the two
+# would let a future editor "release" a genuinely new hazard by mislabeling
+# it grandfathered instead of routing it through fence review.
+#
+# Same committed-file-only discipline as the fence manifest: only a file
+# checked into this repo is honoured, never an operator env var (parity with
+# test_fence_is_not_overridable_by_environment's reasoning, mirrored here by
+# test_grandfather_is_not_overridable_by_environment).
+GRANDFATHER_MANIFEST="${MIGRATIONS_DIR}/grandfathered-force-rls-migrations.yaml"
+if [ ! -f "${GRANDFATHER_MANIFEST}" ]; then
+  echo "FATAL: FORCE-RLS grandfather manifest not found: ${GRANDFATHER_MANIFEST}" >&2
+  exit 1
+fi
+GRANDFATHERED_FORCE_RLS_IDS="$(sed -n \
+  's/^[[:space:]]*-[[:space:]]*id:[[:space:]]*"\([^"]*\)".*/\1/p' \
+  "${GRANDFATHER_MANIFEST}")"
+
+is_grandfathered_force_rls_migration() {
+  candidate="$1"
+  printf '%s\n' "${GRANDFATHERED_FORCE_RLS_IDS}" | grep -Fxq "${candidate}"
+}
+# ---- END FORCE ROW LEVEL SECURITY grandfather snapshot (OMN-15336 item 4 repair) ----
+
 # ---- BEGIN unclassified FORCE ROW LEVEL SECURITY guard (OMN-15336 item 4) ----
 # What this closes: the fence above only gates ids someone already listed in
 # ${FENCE_MANIFEST}. OMN-15336's own required-fix item 4 found three ids that
@@ -195,6 +225,19 @@ is_fenced_node_migration() {
 #   - an id already in the fence manifest (classified, whether currently
 #     released on this lane or not) -- that migration already went through
 #     operator review; re-litigating it here would be noise, not a gate.
+#   - an id in ${GRANDFATHER_MANIFEST} -- a FORCE-enabling migration that was
+#     already vendored and already applying ungated on every lane BEFORE this
+#     guard existed (see that file's own header for the entry criteria and
+#     why this is a frozen snapshot, not a rolling allowlist). Repair for the
+#     defect found empirically 2026-08-05: the guard as first shipped fired
+#     for ALL 13 vendored FORCE-enabling node migrations except the 4 the
+#     operator fence happened to already cover, FATALing on a virgin database
+#     at the FIRST of the other 9 it reached and applying NOTHING -- a cold
+#     lane bring-up (CI, a fresh compose volume) could never converge. The
+#     fence and the grandfather list are checked as two independent
+#     conditions (see the call site), never merged into one list: the fence
+#     is operator-editable data that can gate a BRAND NEW migration; the
+#     grandfather list is a closed historical fact that cannot.
 #   - a migration already recorded in the ledger -- the guard is checked at
 #     the call site ONLY after migration_is_applied returns false, so it can
 #     never retroactively block a lane (e.g. .201 dev) where an unclassified
@@ -1265,10 +1308,13 @@ if [ -d "${NODE_MIGRATIONS_DIR}" ]; then
       # ---- BEGIN unclassified FORCE ROW LEVEL SECURITY guard call (OMN-15336 item 4) ----
       # Reached only for a migration that (a) is not in the fence manifest at
       # all -- an already-fenced id was already handled above, released or
-      # not -- and (b) has never applied on this database -- the ledger probe
-      # just above returned false. See the guard's own definition for why
-      # both conditions are required.
+      # not -- (b) is not in the grandfather snapshot -- already vendored and
+      # already applying, before this guard existed, see
+      # GRANDFATHER_MANIFEST's definition above -- and (c) has never applied
+      # on this database -- the ledger probe just above returned false. See
+      # the guard's own definition for why all three conditions are required.
       if ! is_fenced_node_migration "${migration_id}" \
+         && ! is_grandfathered_force_rls_migration "${migration_id}" \
          && migration_declares_unclassified_force_rls "$migration_file"; then
         echo "[forward-migration] FATAL: ${migration_id} enables FORCE ROW LEVEL SECURITY" \
           "but is not in the operator fence manifest (${FENCE_MANIFEST})." \
