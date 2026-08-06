@@ -1242,6 +1242,101 @@ class TestKafkaEventBusHeaderConversion:
         assert headers.source == "test-source"
         assert headers.event_type == "test-event"
 
+    def test_kafka_headers_to_model_propagates_x_replay_count(self) -> None:
+        """OMN-14551 defect 3: ``_kafka_headers_to_model`` must carry the
+        inbound ``x-replay-count`` header (stamped by
+        ``node_dlq_replay_effect.engine_dlq_replay.DLQProducer.replay_message``
+        onto a republished message) into ``ModelEventHeaders.retry_count``.
+
+        Every ``ModelEventMessage`` the consume loop builds via
+        ``_kafka_msg_to_model`` flows through this method. The typed
+        ``_publish_to_dlq`` path (``mixin_kafka_dlq.py``) reads
+        ``failed_message.headers.retry_count`` directly with no header
+        translation of its own -- if this conversion does not populate that
+        field from ``x-replay-count``, that path is structurally 0 on every
+        replayed message regardless of any fix in ``_publish_raw_to_dlq``.
+        """
+        event_bus = EventBusKafka()
+
+        kafka_headers = [
+            ("source", b"test-source"),
+            ("event_type", b"test-event"),
+            ("x-replay-count", b"4"),
+        ]
+
+        headers = event_bus._kafka_headers_to_model(kafka_headers)
+
+        assert headers.retry_count == 4, (
+            "x-replay-count must be propagated into ModelEventHeaders."
+            "retry_count, not left at the default of 0"
+        )
+
+    def test_kafka_headers_to_model_x_replay_count_wins_over_stale_retry_count(
+        self,
+    ) -> None:
+        """When both a stale ``retry_count`` header and the authoritative
+        ``x-replay-count`` header are present, the replay lineage counter
+        must win -- ``retry_count`` is never stamped by the replay engine,
+        so its presence here would only ever be stale/unrelated data.
+        """
+        event_bus = EventBusKafka()
+
+        kafka_headers = [
+            ("source", b"test-source"),
+            ("event_type", b"test-event"),
+            ("retry_count", b"0"),
+            ("x-replay-count", b"3"),
+        ]
+
+        headers = event_bus._kafka_headers_to_model(kafka_headers)
+
+        assert headers.retry_count == 3
+
+    def test_kafka_headers_to_model_fails_closed_on_malformed_x_replay_count(
+        self,
+    ) -> None:
+        """OMN-14551 defect 4: a corrupted/forged ``x-replay-count`` header
+        must not reset ``retry_count`` to 0 -- that would silently reopen
+        the unbounded-replay amplification the header exists to bound. It
+        must fail CLOSED: produce a value guaranteed to trip
+        ``should_replay``'s ``retry_count >= max_replay_count`` guard.
+        """
+        event_bus = EventBusKafka()
+
+        kafka_headers = [
+            ("source", b"test-source"),
+            ("event_type", b"test-event"),
+            ("x-replay-count", b"not-an-int"),
+        ]
+
+        headers = event_bus._kafka_headers_to_model(kafka_headers)
+
+        assert headers.retry_count >= 1000, (
+            "a malformed x-replay-count header must fail closed to a value "
+            "that trips any realistic max_replay_count guard, not silently "
+            "default to 0"
+        )
+
+    def test_kafka_headers_to_model_fails_closed_on_negative_x_replay_count(
+        self,
+    ) -> None:
+        """Same fail-closed requirement as the malformed case, for a
+        negative (impossible) replay count."""
+        event_bus = EventBusKafka()
+
+        kafka_headers = [
+            ("source", b"test-source"),
+            ("event_type", b"test-event"),
+            ("x-replay-count", b"-1"),
+        ]
+
+        headers = event_bus._kafka_headers_to_model(kafka_headers)
+
+        assert headers.retry_count >= 1000, (
+            "a negative x-replay-count header must fail closed, not "
+            "silently default to 0"
+        )
+
 
 class TestKafkaEventBusMessageConversion:
     """Test suite for message conversion methods."""
@@ -3110,6 +3205,242 @@ class TestKafkaEventBusDLQRouting:
                 "rejected for further replay, not endlessly re-published"
             )
             assert "Exceeded max replay count" in reason
+
+            await event_bus.close()
+
+    @pytest.mark.asyncio
+    async def test_raw_dlq_propagates_replay_count_for_parsed_message_shape(
+        self, mock_producer: AsyncMock, dlq_config: ModelKafkaEventBusConfig
+    ) -> None:
+        """OMN-14551 defects 1/2/5: 3 of the 4 production
+        ``_publish_raw_to_dlq`` call sites --
+        ``handler_wiring.py:4543`` (``failure_type="handler_exception"``)
+        and ``event_bus_subcontract_wiring.py``'s 5 call sites -- pass a
+        parsed ``ModelEventMessage``/``ProtocolEventMessage`` as ``raw_msg``,
+        not a raw Kafka ``ConsumerRecord``. Its ``.headers`` is a
+        ``ModelEventHeaders`` instance, not a ``list[tuple[str, bytes]]``.
+        The prior fix only recognized the raw-list shape and silently
+        returned 0 for this shape, resetting replay lineage on exactly the
+        path the 2026-08-05 dev DLQ amplification incident exercised
+        (all 9 ``boundary_swallow_observed`` events that day were handler
+        exceptions, not deserialization failures).
+        """
+        with patch(
+            "omnibase_infra.event_bus.event_bus_kafka.AIOKafkaProducer",
+            return_value=mock_producer,
+        ):
+            event_bus = EventBusKafka(config=dlq_config)
+            await event_bus.start()
+
+            # Simulate the real consume-loop conversion: a raw
+            # ConsumerRecord carrying x-replay-count=5 from a prior replay,
+            # converted to a ModelEventMessage by _kafka_msg_to_model --
+            # exactly what handler_wiring.py's `message` callback parameter
+            # is (event_bus_kafka.py:2370 builds it before dispatch).
+            mock_raw_msg = MagicMock()
+            mock_raw_msg.key = b"test-key"
+            mock_raw_msg.value = b"still-fails-in-handler"
+            mock_raw_msg.offset = 400
+            mock_raw_msg.partition = 0
+            mock_raw_msg.headers = [
+                ("x-replay-count", b"5"),
+                ("x-replayed-by", b"node_dlq_replay_effect"),
+            ]
+            parsed_message = event_bus._kafka_msg_to_model(mock_raw_msg, "source-topic")
+            assert isinstance(parsed_message, ModelEventMessage)
+            assert parsed_message.headers.retry_count == 5
+
+            correlation_id = uuid4()
+            error = RuntimeError("handler exception after replay")
+
+            # Exact call shape of handler_wiring.py's
+            # _route_swallowed_exception (line ~4542-4550).
+            result = await event_bus._publish_raw_to_dlq(
+                original_topic="source-topic",
+                raw_msg=parsed_message,
+                error=error,
+                correlation_id=correlation_id,
+                failure_type="handler_exception",
+                consumer_group="auto-wiring",
+            )
+            assert result is True
+
+            call_kwargs = mock_producer.send_and_wait.call_args.kwargs
+            payload = json.loads(call_kwargs["value"])
+            assert payload["retry_count"] == 5, (
+                "retry_count must be read off the parsed ModelEventMessage's "
+                "headers.retry_count, not reset to 0 because raw_msg isn't "
+                "a raw list[tuple] Kafka ConsumerRecord"
+            )
+
+            await event_bus.close()
+
+    @pytest.mark.asyncio
+    async def test_typed_publish_to_dlq_reads_replay_count_from_parsed_headers(
+        self, mock_producer: AsyncMock, dlq_config: ModelKafkaEventBusConfig
+    ) -> None:
+        """OMN-14551 defect 3: the typed ``_publish_to_dlq`` path
+        (``mixin_kafka_dlq.py``) reads ``failed_message.headers.retry_count``
+        directly. That field is only correctly populated if
+        ``_kafka_headers_to_model`` carries the inbound ``x-replay-count``
+        header into ``ModelEventHeaders.retry_count`` at message-conversion
+        time -- prior to the fix it read a plain ``"retry_count"`` Kafka
+        header the replay engine never stamps, so this path was
+        structurally 0 on every replayed message regardless of any fix to
+        ``_publish_raw_to_dlq``.
+        """
+        with patch(
+            "omnibase_infra.event_bus.event_bus_kafka.AIOKafkaProducer",
+            return_value=mock_producer,
+        ):
+            event_bus = EventBusKafka(config=dlq_config)
+            await event_bus.start()
+
+            mock_raw_msg = MagicMock()
+            mock_raw_msg.key = b"test-key"
+            mock_raw_msg.value = b'{"foo": "bar"}'
+            mock_raw_msg.offset = 401
+            mock_raw_msg.partition = 0
+            mock_raw_msg.headers = [
+                ("x-replay-count", b"4"),
+            ]
+            parsed_message = event_bus._kafka_msg_to_model(mock_raw_msg, "source-topic")
+            assert parsed_message.headers.retry_count == 4
+
+            correlation_id = uuid4()
+            error = RuntimeError("no dispatcher after replay")
+
+            result = await event_bus._publish_to_dlq(
+                original_topic="source-topic",
+                failed_message=parsed_message,
+                error=error,
+                correlation_id=correlation_id,
+                consumer_group="test.test-service.dlq-test.consume.v1",
+            )
+            assert result is True
+
+            call_kwargs = mock_producer.send_and_wait.call_args.kwargs
+            payload = json.loads(call_kwargs["value"])
+            assert payload["retry_count"] == 4, (
+                "the typed _publish_to_dlq path must read the real replay "
+                "lineage off failed_message.headers.retry_count, not a "
+                "structural 0"
+            )
+
+            await event_bus.close()
+
+    @pytest.mark.asyncio
+    async def test_raw_dlq_fails_closed_on_malformed_replay_count_header(
+        self, mock_producer: AsyncMock, dlq_config: ModelKafkaEventBusConfig
+    ) -> None:
+        """OMN-14551 defect 4: a corrupted/forged ``x-replay-count`` header
+        must not reset replay lineage to 0 (which would silently reopen the
+        unbounded-replay amplification the header exists to bound). It must
+        fail CLOSED -- produce a ``retry_count`` that trips
+        ``should_replay``'s ``retry_count >= max_replay_count`` guard on the
+        very next eligibility check.
+        """
+        with patch(
+            "omnibase_infra.event_bus.event_bus_kafka.AIOKafkaProducer",
+            return_value=mock_producer,
+        ):
+            event_bus = EventBusKafka(config=dlq_config)
+            await event_bus.start()
+
+            mock_raw_msg = MagicMock()
+            mock_raw_msg.key = b"test-key"
+            mock_raw_msg.value = b"forged-header"
+            mock_raw_msg.offset = 402
+            mock_raw_msg.partition = 0
+            mock_raw_msg.headers = [("x-replay-count", b"not-an-int")]
+
+            correlation_id = uuid4()
+            error = ValueError("still fails with a forged header")
+
+            result = await event_bus._publish_raw_to_dlq(
+                original_topic="source-topic",
+                raw_msg=mock_raw_msg,
+                error=error,
+                correlation_id=correlation_id,
+                failure_type="deserialization_error",
+                consumer_group="test.test-service.dlq-test.consume.v1",
+            )
+            assert result is True
+
+            call_kwargs = mock_producer.send_and_wait.call_args.kwargs
+            dlq_payload = json.loads(call_kwargs["value"])
+            assert dlq_payload["retry_count"] != 0, (
+                "a malformed x-replay-count header must not silently reset "
+                "retry_count to 0 -- that reopens the unbounded replay loop"
+            )
+
+            dlq_message = ModelDlqMessage.from_kafka_message(
+                payload=dlq_payload, dlq_offset=42, dlq_partition=0
+            )
+            replay_config = ModelDlqReplayEngineConfig(
+                bootstrap_servers="localhost:9092",
+                dlq_topic="dlq-events",
+                max_replay_count=5,
+            )
+            eligible, reason = should_replay(dlq_message, replay_config)
+            assert eligible is False, (
+                f"a forged/malformed replay-count header must fail closed "
+                f"-- the message must be rejected for further replay, not "
+                f"endlessly re-published (reason={reason!r})"
+            )
+
+            await event_bus.close()
+
+    @pytest.mark.asyncio
+    async def test_raw_dlq_fails_closed_on_negative_replay_count_header(
+        self, mock_producer: AsyncMock, dlq_config: ModelKafkaEventBusConfig
+    ) -> None:
+        """Same fail-closed requirement as the malformed case, for a
+        negative (impossible) replay count header value."""
+        with patch(
+            "omnibase_infra.event_bus.event_bus_kafka.AIOKafkaProducer",
+            return_value=mock_producer,
+        ):
+            event_bus = EventBusKafka(config=dlq_config)
+            await event_bus.start()
+
+            mock_raw_msg = MagicMock()
+            mock_raw_msg.key = b"test-key"
+            mock_raw_msg.value = b"negative-header"
+            mock_raw_msg.offset = 403
+            mock_raw_msg.partition = 0
+            mock_raw_msg.headers = [("x-replay-count", b"-1")]
+
+            correlation_id = uuid4()
+            error = ValueError("still fails with a negative header")
+
+            result = await event_bus._publish_raw_to_dlq(
+                original_topic="source-topic",
+                raw_msg=mock_raw_msg,
+                error=error,
+                correlation_id=correlation_id,
+                failure_type="deserialization_error",
+                consumer_group="test.test-service.dlq-test.consume.v1",
+            )
+            assert result is True
+
+            call_kwargs = mock_producer.send_and_wait.call_args.kwargs
+            dlq_payload = json.loads(call_kwargs["value"])
+            assert dlq_payload["retry_count"] != 0
+
+            dlq_message = ModelDlqMessage.from_kafka_message(
+                payload=dlq_payload, dlq_offset=42, dlq_partition=0
+            )
+            replay_config = ModelDlqReplayEngineConfig(
+                bootstrap_servers="localhost:9092",
+                dlq_topic="dlq-events",
+                max_replay_count=5,
+            )
+            eligible, reason = should_replay(dlq_message, replay_config)
+            assert eligible is False, (
+                f"a negative replay-count header must fail closed, not "
+                f"reset lineage to 0 (reason={reason!r})"
+            )
 
             await event_bus.close()
 
