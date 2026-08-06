@@ -4,6 +4,8 @@
 
 from __future__ import annotations
 
+from uuid import UUID
+
 from pydantic import BaseModel, ConfigDict, Field
 
 from omnibase_infra.migration.cutover.models.model_connection_identity import (
@@ -23,10 +25,19 @@ class ModelApplicationPathWriteProof(BaseModel):
     the caller-declared, read-only ``verification_sql`` (hashed together with
     the query text itself via ``verification_query_hash`` so the query cannot
     be swapped after the fact).
+
+    Shape validity alone does not make this proof trustworthy: the journal
+    (``repository_postgres_cutover_journal.py``) refuses to accept an
+    ``APPLICATION_PATH_WRITE_PROVEN`` event unless a durable row produced by
+    ``PostgresTransformationEvidenceCollector.verify_application_path_write``
+    exists in ``omninode_internal.application_path_write_proofs`` and every
+    field here matches it exactly -- a hand-constructed proof with no such
+    durable row is rejected regardless of shape validity.
     """
 
     model_config = ConfigDict(frozen=True, extra="forbid", from_attributes=True)
 
+    family_id: UUID
     database_ref: str = Field(..., min_length=1, max_length=200)
     principal: str = Field(..., min_length=1, max_length=160)
     schema_ref: str = Field(..., min_length=1, max_length=160)

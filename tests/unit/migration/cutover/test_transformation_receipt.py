@@ -86,10 +86,16 @@ def _contract(
 
 
 def _connection_identity(*, backend_pid: int = 4242) -> ModelConnectionIdentity:
+    """Fixed, deterministic identity so two calls with the same ``backend_pid``
+    compare equal -- mirroring ``collect_pair``, which reads the server clock
+    exactly once and stamps the identical identity onto both evidence sides.
+    A fresh ``datetime.now(UTC)`` per call would make source/target evidence
+    diverge by construction even when nothing in the test intends a mismatch.
+    """
     return ModelConnectionIdentity(
         database="application",
         backend_pid=backend_pid,
-        collected_at=datetime.now(UTC),
+        collected_at=datetime(2026, 1, 1, tzinfo=UTC),
     )
 
 
@@ -352,6 +358,32 @@ def test_each_seeded_red_dimension_fails_closed(
     assert check.detail.startswith("MISMATCH:")
 
 
+def test_receipt_builder_refuses_evidence_with_mismatched_connection_identity() -> None:
+    """GAP 3 forgery-refusal: source/target evidence not collected atomically.
+
+    ``PostgresTransformationEvidenceCollector.collect_pair`` always stamps
+    both sides with one server-verified identity read inside a single
+    repeatable-read transaction. Two evidence objects with divergent
+    ``connection_identity`` values could not have come from a genuine
+    ``collect_pair`` call -- they must be refused before any dimension
+    comparison runs, not silently reconciled.
+    """
+    source = _evidence("source")
+    target = _evidence("target").model_copy(
+        update={"connection_identity": _connection_identity(backend_pid=9999)}
+    )
+    with pytest.raises(ValueError, match="connection_identity mismatch"):
+        TransformationReceiptBuilder().build(
+            _reconciliation_input(
+                _contract(),
+                source,
+                target,
+                _projection_continuity(),
+                "idempotency-key:mismatched-connection-identity",
+            )
+        )
+
+
 def test_query_contract_rejects_mutation_and_missing_dimensions() -> None:
     valid = {
         "label": "source",
@@ -429,6 +461,7 @@ def test_journal_requests_refuse_unbounded_dual_write_and_weak_write_proof() -> 
     assert bounded.dual_write_expires_at is not None
 
     proof = ModelApplicationPathWriteProof(
+        family_id=uuid4(),
         database_ref="application",
         principal="onex_api",
         schema_ref="tenant",
@@ -478,6 +511,7 @@ def test_evidence_requires_binding_ref_and_connection_identity() -> None:
 def test_application_path_write_proof_requires_every_verified_field() -> None:
     with pytest.raises(ValidationError, match="database_ref"):
         ModelApplicationPathWriteProof(
+            family_id=uuid4(),
             database_ref="",
             principal="onex_api",
             schema_ref="tenant",
@@ -488,6 +522,7 @@ def test_application_path_write_proof_requires_every_verified_field() -> None:
         )
     with pytest.raises(ValidationError):
         ModelApplicationPathWriteProof(
+            family_id=uuid4(),
             database_ref="application",
             principal="onex_api",
             schema_ref="tenant",

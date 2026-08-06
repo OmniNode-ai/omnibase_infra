@@ -20,6 +20,8 @@ import pytest
 
 from omnibase_infra.migration.cutover import (
     CutoverCoordinator,
+    ModelApplicationPathWriteProof,
+    ModelConnectionIdentity,
     ModelControlPlaneDeltaEvidence,
     ModelCutoverContinuityEvidence,
     ModelCutoverFamilyContract,
@@ -658,33 +660,69 @@ VALUES ($1, $2, 99, 'backfill_completed', '{}'::jsonb, $3,
         # string.
         with pytest.raises(ValueError, match="SELECT or WITH"):
             await collector.verify_application_path_write(
+                projection.family_id,
                 "UPDATE tenant.usage SET amount = amount",
                 "tenant",
                 7,
             )
         with pytest.raises(ValueError, match="read-only"):
             await collector.verify_application_path_write(
+                projection.family_id,
                 "SELECT count(*) FROM tenant.usage WHERE 1=1 OR DELETE",
                 "tenant",
                 7,
             )
         with pytest.raises(ValueError, match="no rows"):
             await collector.verify_application_path_write(
+                projection.family_id,
                 "SELECT id FROM tenant.usage WHERE id = -1",
                 "tenant",
                 7,
             )
         with pytest.raises(ValueError, match="does not exist"):
             await collector.verify_application_path_write(
+                projection.family_id,
                 "SELECT 1",
                 "does_not_exist",
                 7,
+            )
+
+        # GAP 1 forgery-refusal RED control: a shape-valid, hand-constructed
+        # ModelApplicationPathWriteProof that never passed through
+        # verify_application_path_write (and so has no durable row in
+        # omninode_internal.application_path_write_proofs) must be refused
+        # by append_event, not accepted on shape validity alone.
+        forged_write_proof = ModelApplicationPathWriteProof(
+            family_id=projection.family_id,
+            database_ref="totally_fake_db",
+            principal="attacker",
+            schema_ref="nonexistent_schema",
+            target_sequence=7,
+            verification_query_hash="a" * 64,
+            write_result_hash="b" * 64,
+            connection_identity=ModelConnectionIdentity(
+                database="totally_fake_db",
+                backend_pid=1,
+                collected_at=datetime.now(UTC),
+            ),
+        )
+        with pytest.raises(ValueError, match="never durably verified"):
+            await coordinator.append(
+                projection.family_id,
+                ModelCutoverJournalRequest(
+                    kind=EnumCutoverEventKind.APPLICATION_PATH_WRITE_PROVEN,
+                    occurred_at=now + timedelta(seconds=7),
+                    evidence_ref="proof/projection/forged-application-path-write",
+                    idempotency_key="idem:proof/projection/forged-write",
+                    application_path_write_proof=forged_write_proof,
+                ),
             )
 
         # GREEN: an independently, server-verified write proof -- database
         # and principal come from a live current_database()/current_user
         # readback on the connection, never from a caller-typed string.
         write_proof = await collector.verify_application_path_write(
+            projection.family_id,
             "SELECT id, tenant_id, amount FROM tenant.usage ORDER BY id",
             "tenant",
             7,
@@ -947,6 +985,7 @@ VALUES ($1, $2, 99, 'backfill_completed', '{}'::jsonb, $3,
             ),
         )
         control_write_proof = await collector.verify_application_path_write(
+            control.family_id,
             "SELECT id, tenant_id, amount FROM tenant.usage ORDER BY id",
             "tenant",
             1,

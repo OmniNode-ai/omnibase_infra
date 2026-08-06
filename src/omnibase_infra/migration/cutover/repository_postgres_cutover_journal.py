@@ -19,6 +19,7 @@ from omnibase_infra.migration.cutover.enums import (
     EnumReceiptStatus,
 )
 from omnibase_infra.migration.cutover.models import (
+    ModelApplicationPathWriteProof,
     ModelCutoverFamilyContract,
     ModelCutoverFamilyState,
     ModelCutoverJournalEvent,
@@ -724,6 +725,9 @@ WHERE receipt_id = $1 AND family_id = $2 AND status = 'pass'
                 raise ValueError("checkpoint target binding differs from contract")
         elif kind is EnumCutoverEventKind.APPLICATION_PATH_WRITE_PROVEN:
             self._require_previous(previous, EnumCutoverEventKind.WRITER_CHECKPOINT)
+            await self._require_durable_write_proof(
+                contract.family_id, request.application_path_write_proof
+            )
         elif kind is EnumCutoverEventKind.READER_CUTOVER:
             self._require_previous(
                 previous,
@@ -795,6 +799,54 @@ WHERE event_id = $1 AND family_id = $2
                 raise ValueError(
                     "direct pre-checkpoint rollback after target write refused"
                 )
+
+    async def _require_durable_write_proof(
+        self,
+        family_id: UUID,
+        proof: ModelApplicationPathWriteProof | None,
+    ) -> None:
+        """Refuse a write proof unless it matches a durably verified record.
+
+        A shape-valid ``ModelApplicationPathWriteProof`` is not sufficient --
+        it must dereference to the row
+        ``PostgresTransformationEvidenceCollector.verify_application_path_write``
+        wrote to ``omninode_internal.application_path_write_proofs`` and match
+        it field-for-field. A hand-constructed proof that never passed
+        through the collector has no durable row and is rejected here.
+        """
+        if proof is None:
+            raise ValueError("application-path write proof is missing")
+        if proof.family_id != family_id:
+            raise ValueError("application-path write proof belongs to another family")
+        durable = await self._connection.fetchrow(
+            """
+SELECT database_ref, principal, schema_ref, verification_query_hash,
+       write_result_hash, backend_pid, collected_at
+FROM omninode_internal.application_path_write_proofs
+WHERE family_id = $1 AND target_sequence = $2
+""",
+            family_id,
+            proof.target_sequence,
+        )
+        if durable is None:
+            raise ValueError(
+                "application-path write proof was never durably verified by "
+                "the evidence collector"
+            )
+        mismatch = (
+            durable["database_ref"] != proof.database_ref
+            or durable["principal"] != proof.principal
+            or durable["schema_ref"] != proof.schema_ref
+            or durable["verification_query_hash"] != proof.verification_query_hash
+            or durable["write_result_hash"] != proof.write_result_hash
+            or int(durable["backend_pid"]) != proof.connection_identity.backend_pid
+            or durable["collected_at"] != proof.connection_identity.collected_at
+        )
+        if mismatch:
+            raise ValueError(
+                "application-path write proof does not match its durably "
+                "verified record"
+            )
 
     @staticmethod
     def _require_previous(

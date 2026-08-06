@@ -7,6 +7,7 @@ from __future__ import annotations
 import hashlib
 import json
 import re
+from uuid import UUID
 
 import asyncpg
 
@@ -32,6 +33,7 @@ class PostgresTransformationEvidenceCollector:
 
     async def verify_application_path_write(
         self,
+        family_id: UUID,
         verification_sql: str,
         schema_ref: str,
         target_sequence: int,
@@ -44,6 +46,13 @@ class PostgresTransformationEvidenceCollector:
         a caller-declared read-only query whose result rows are hashed into
         ``write_result_hash``, proving the write's actual data landed rather
         than merely being asserted.
+
+        The computed proof is durably registered in
+        ``omninode_internal.application_path_write_proofs`` before it is
+        returned to the caller. The journal's ``APPLICATION_PATH_WRITE_PROVEN``
+        transition dereferences this row and refuses any submitted proof that
+        does not match it field-for-field -- a proof that never passed through
+        this method (however well-shaped) has no durable row and is rejected.
         """
         if not _READ_PREFIX.match(verification_sql):
             raise ValueError("write verification query must start with SELECT or WITH")
@@ -92,7 +101,8 @@ class PostgresTransformationEvidenceCollector:
             verification_sql.encode("utf-8")
         ).hexdigest()
 
-        return ModelApplicationPathWriteProof(
+        proof = ModelApplicationPathWriteProof(
+            family_id=family_id,
             database_ref=identity_row["database"],
             principal=identity_row["principal"],
             schema_ref=schema_ref,
@@ -105,6 +115,46 @@ class PostgresTransformationEvidenceCollector:
                 collected_at=identity_row["collected_at"],
             ),
         )
+        await self._register_write_proof(proof)
+        return proof
+
+    async def _register_write_proof(
+        self,
+        proof: ModelApplicationPathWriteProof,
+    ) -> None:
+        """Durably record a collector-verified write proof, once per sequence."""
+        await self._connection.execute(
+            """
+INSERT INTO omninode_internal.application_path_write_proofs
+  (family_id, target_sequence, database_ref, principal, schema_ref,
+   verification_query_hash, write_result_hash, backend_pid, collected_at)
+VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)
+ON CONFLICT (family_id, target_sequence) DO NOTHING
+""",
+            proof.family_id,
+            proof.target_sequence,
+            proof.database_ref,
+            proof.principal,
+            proof.schema_ref,
+            proof.verification_query_hash,
+            proof.write_result_hash,
+            proof.connection_identity.backend_pid,
+            proof.connection_identity.collected_at,
+        )
+        stored = await self._connection.fetchrow(
+            """
+SELECT write_result_hash
+FROM omninode_internal.application_path_write_proofs
+WHERE family_id = $1 AND target_sequence = $2
+""",
+            proof.family_id,
+            proof.target_sequence,
+        )
+        if stored is None or stored["write_result_hash"] != proof.write_result_hash:
+            raise ValueError(
+                f"target sequence {proof.target_sequence} is already bound to a "
+                "different durably-verified write proof"
+            )
 
     async def collect_pair(
         self,

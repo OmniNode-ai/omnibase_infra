@@ -66,6 +66,20 @@ CREATE TABLE IF NOT EXISTS omninode_internal.cutover_journal (
     UNIQUE (family_id, idempotency_key)
 );
 
+CREATE TABLE IF NOT EXISTS omninode_internal.application_path_write_proofs (
+    family_id UUID NOT NULL REFERENCES omninode_internal.cutover_family_contracts(family_id),
+    target_sequence BIGINT NOT NULL CHECK (target_sequence > 0),
+    database_ref TEXT NOT NULL,
+    principal TEXT NOT NULL,
+    schema_ref TEXT NOT NULL,
+    verification_query_hash TEXT NOT NULL CHECK (verification_query_hash ~ '^[0-9a-f]{64}$'),
+    write_result_hash TEXT NOT NULL CHECK (write_result_hash ~ '^[0-9a-f]{64}$'),
+    backend_pid BIGINT NOT NULL CHECK (backend_pid > 0),
+    collected_at TIMESTAMPTZ NOT NULL,
+    verified_at TIMESTAMPTZ NOT NULL DEFAULT clock_timestamp(),
+    PRIMARY KEY (family_id, target_sequence)
+);
+
 CREATE TABLE IF NOT EXISTS omninode_internal.reverse_delta_artifacts (
     family_id UUID NOT NULL REFERENCES omninode_internal.cutover_family_contracts(family_id),
     artifact_ref TEXT NOT NULL,
