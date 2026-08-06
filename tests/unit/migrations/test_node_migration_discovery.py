@@ -440,6 +440,15 @@ class TestNamespacedDiscoveryWiring:
         (migrations_dir / "fenced-node-migrations.yaml").write_text(
             "fenced_node_migrations: []\n", encoding="utf-8"
         )
+        # OMN-15336 item 4 repair (D1): the runner also unconditionally
+        # requires the FORCE-RLS grandfather manifest to exist under
+        # MIGRATIONS_DIR, same discipline as the fence manifest above. This
+        # fixture predates that requirement (a853500ab3) and was never
+        # updated for it -- undetected for the same selector-reachability
+        # reason noted in test_migration_gate_vacuity_fix.py.
+        (migrations_dir / "grandfathered-force-rls-migrations.yaml").write_text(
+            "grandfathered_force_rls_migrations: []\n", encoding="utf-8"
+        )
         (migrations_dir / "001_bad_directive.sql").write_text(
             "--   onex-create-database: bad/name\nSELECT 1;\n",
             encoding="utf-8",
