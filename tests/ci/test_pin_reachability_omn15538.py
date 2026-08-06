@@ -33,11 +33,13 @@ through, or to a way a naive "fix" would silently un-fix it:
 from __future__ import annotations
 
 import email.message
+import http.client
 import io
 import json
 import time
 import urllib.error
 import urllib.request
+from collections.abc import Callable
 from pathlib import Path
 
 import pytest
@@ -705,49 +707,72 @@ def test_resolver_enforces_a_run_wide_deadline_independent_of_the_breaker(
 def test_resolver_aggregate_wall_time_is_bounded_under_intermittent_transport(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    """End-to-end through ``_Resolver.resolve``: a pattern that alternates
-    per-ref between "always transient-fails all 3 attempts" and "succeeds
-    immediately" -- the exact shape that resets the consecutive-failure
-    breaker on every other pin -- must not blow past the run-wide deadline
-    plus one in-flight call, even across many more pins than any real tree
-    has today."""
-    from scripts.ci.check_pin_reachability import _RUN_DEADLINE_SECONDS
+    """End-to-end through ``_Resolver.resolve``, using a pin-boundary-aligned
+    WORST-CASE pattern (independent verifier's probe2/probe3 construction):
+    a fast ``dev`` compare followed by a ``main`` compare that fully exhausts
+    the 96s per-call retry ceiling (3 * 30s request timeout + 2s + 4s backoff
+    -- the module's own documented worst-case-per-call formula at :120-121)
+    before finally answering a definitive 404. That lands the run-wide
+    deadline crossing exactly inside ``_explain``'s own lookup call.
+
+    A prior version of this test used a hash-derived alternating
+    success/timeout split that happened to never land a maximally-expensive
+    main-compare immediately followed by ``_explain`` right after a passing
+    deadline check -- it asserted a bound it never actually exercised. Before
+    the ``_explain`` deadline guard was added, THIS pattern doubled the
+    post-deadline tail to ~192s (measured 671.15s in a full-run
+    reconstruction); the true bound is one already-in-flight call's 96s
+    ceiling, not two."""
+    from scripts.ci.check_pin_reachability import _API_MAX_ATTEMPTS
 
     clock = {"t": 0.0}
 
     def fake_sleep(seconds: float) -> None:
         clock["t"] += seconds
 
+    attempt_counts: dict[str, int] = {}
+    calls: list[str] = []
+
     def fake_urlopen(request: object, timeout: float | None = None) -> object:
         url = getattr(request, "full_url", "")
-        clock["t"] += 0.05
-        # Deterministic per-URL split (not process hash-seed dependent):
-        # roughly half the refs always time out on every attempt, the rest
-        # succeed immediately.
-        if sum(ord(c) for c in url) % 2 == 0:
-            clock["t"] += timeout or 0.0
-            raise TimeoutError("timed out")
-        return _FakeResponse(200, {"status": "diverged"})
+        calls.append(url)
+        if "/compare/dev" in url:
+            # dev-branch compare: fast, definitive "not reachable" -- no
+            # latency tax.
+            return _FakeResponse(200, {"status": "diverged"})
+        # main-branch compare AND the commits/_explain endpoint: both fully
+        # exhaust the per-call retry ceiling before finally answering 404.
+        clock["t"] += timeout or 0.0
+        attempt_counts[url] = attempt_counts.get(url, 0) + 1
+        if attempt_counts[url] < _API_MAX_ATTEMPTS:
+            raise _http_error_with_headers(503, "server error")
+        raise _http_error_with_headers(404, "not found")
 
     monkeypatch.setattr(urllib.request, "urlopen", fake_urlopen)
     monkeypatch.setattr(time, "sleep", fake_sleep)
 
     resolver = _Resolver(("dev", "main"), now=lambda: clock["t"])
-    results = [
-        resolver.resolve("omnimarket", f"{i:040x}".replace("0", "a"))
-        for i in range(1, 61)
-    ]
+    # Land the deadline exactly between "dev's fast compare completes" (~0s)
+    # and "main's 96s compare completes" (~96s) -- the per-branch loop's OWN
+    # deadline check (before main's call) must still pass here; it is
+    # ``_explain``'s guard that must catch the crossing.
+    resolver._deadline_at = 50.0
 
-    assert any(r.verdict is Verdict.UNDETERMINED for r in results), (
-        "the deadline must actually have engaged for this test to be meaningful"
+    resolution = resolver.resolve("omnimarket", "b" * 40)
+
+    assert resolution.verdict is Verdict.UNREACHABLE
+    assert not any("/commits/" in url for url in calls), (
+        "the deadline was already exceeded by main's compare call -- "
+        "_explain must not issue its own unguarded network call past the "
+        "deadline"
     )
-    # Aggregate bound: the run-wide deadline plus at most one already-in-flight
-    # call (worst case: the deadline check passes, then that one call fully
-    # exhausts its own per-call ceiling before the next check).
-    assert clock["t"] <= _RUN_DEADLINE_SECONDS + 96.0 + 1.0, (
-        f"aggregate simulated wall time {clock['t']}s must stay bounded by the "
-        "run-wide deadline, not grow unbounded with pin count under "
-        "intermittent transport failures"
+    # True bound: the deadline plus at most ONE already-in-flight call's 96s
+    # ceiling -- not two (one compare call plus one unguarded _explain call,
+    # the bug this test pins).
+    assert clock["t"] <= 96.0 + 1.0, (
+        f"aggregate simulated wall time {clock['t']}s must stay bounded by "
+        "one already-in-flight call's 96s ceiling past the deadline, not "
+        "double-charged by an unguarded _explain call"
     )
 
 
@@ -866,3 +891,87 @@ def test_api_get_does_not_index_error_when_max_attempts_exceeds_backoff_schedule
     assert "transport error" in detail
     assert len(calls) == 5
     assert len(slept) == 4, "sleeps between all 5 attempts, no IndexError"
+
+
+# ---------------------------------------------------------------------------
+# Regression (defect fix, 2026-08-06): http.client.HTTPException coverage
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.unit
+@pytest.mark.parametrize(
+    "make_exc",
+    [
+        lambda: http.client.IncompleteRead(b""),
+        lambda: http.client.BadStatusLine("garbage"),
+    ],
+    ids=["IncompleteRead", "BadStatusLine"],
+)
+def test_api_get_retries_http_client_transport_exceptions(
+    monkeypatch: pytest.MonkeyPatch,
+    make_exc: Callable[[], Exception],
+) -> None:
+    """``http.client.IncompleteRead`` (raised by ``response.read()`` on a
+    truncated/chunked-abort body) and ``http.client.BadStatusLine``
+    (re-raised by urllib's ``do_open`` from ``h.getresponse()``) are neither
+    ``OSError`` nor any of the other pre-fix caught classes -- their MRO is
+    ``(HTTPException, Exception, BaseException, object)``. Pre-fix, both
+    escaped ``_api_get`` uncaught: zero retries, an uncaught traceback, on
+    exactly the transient-transport class this gate exists to retry."""
+    fake_urlopen, calls = _scripted_urlopen(
+        [make_exc(), _FakeResponse(200, {"status": "behind"})]
+    )
+    monkeypatch.setattr(urllib.request, "urlopen", fake_urlopen)
+    slept: list[float] = []
+
+    status, body, _detail = _api_get("https://api.github.com/x", sleep=slept.append)
+
+    assert status == 200
+    assert body == {"status": "behind"}
+    assert len(calls) == 2, "a transport HTTPException must be retried, not raised"
+
+
+# ---------------------------------------------------------------------------
+# Regression (defect fix, 2026-08-06): negative Retry-After must not crash
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.unit
+def test_rate_limit_backoff_floors_a_negative_retry_after_at_zero() -> None:
+    """A malformed/adversarial ``Retry-After: -5`` header must not produce a
+    negative delay -- the sibling ``x-ratelimit-reset`` branch already
+    guards with ``if delta > 0``; this branch must match."""
+    from scripts.ci.check_pin_reachability import _rate_limit_backoff_seconds
+
+    delay = _rate_limit_backoff_seconds(_headers({"Retry-After": "-5"}))
+
+    assert delay is not None
+    assert delay >= 0.0
+
+
+@pytest.mark.unit
+def test_api_get_does_not_crash_on_a_negative_retry_after_header(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """End-to-end, using the REAL ``time.sleep`` (no ``sleep=`` override) --
+    exactly where the pre-fix bug crashed: ``effective_sleep(delay)`` at
+    :640 is OUTSIDE any try/except, so ``time.sleep(-5.0)`` raises
+    ``ValueError: sleep length must be non-negative`` unconditionally, an
+    unguarded crash in a required CI gate. Fails closed only in the sense
+    that a crash halts the job; it must instead retry with a floored,
+    non-negative backoff."""
+    fake_urlopen, calls = _scripted_urlopen(
+        [
+            _http_error_with_headers(
+                429, "rate limited", headers={"Retry-After": "-5"}
+            ),
+            _FakeResponse(200, {"status": "identical"}),
+        ]
+    )
+    monkeypatch.setattr(urllib.request, "urlopen", fake_urlopen)
+
+    status, body, _detail = _api_get("https://api.github.com/x")
+
+    assert status == 200
+    assert body == {"status": "identical"}
+    assert len(calls) == 2

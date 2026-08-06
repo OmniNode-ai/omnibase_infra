@@ -83,6 +83,7 @@ undetermined | ``2`` misuse (e.g. ``--allow-undetermined`` under CI).
 from __future__ import annotations
 
 import argparse
+import http.client
 import json
 import os
 import re
@@ -144,11 +145,14 @@ _MAX_RATE_LIMIT_BACKOFF_SECONDS = 30.0
 # ``_RUN_DEADLINE_SECONDS``.
 _TRANSPORT_FAILURE_CIRCUIT_BREAKER = 3
 # Run-wide wall-clock budget across every pin resolved by one ``_Resolver``.
-# Checked before each per-branch compare call, so the actual worst case is
-# this deadline plus at most one already-in-flight call's 96s ceiling --
-# 480 + 96 = 576s, still under the CI job's ``timeout-minutes: 10`` (600s;
-# .github/workflows/ci.yml). Once exceeded, every remaining resolution is
-# reported UNDETERMINED (fail-closed, not a pass), never silently dropped.
+# Checked before each per-branch compare call AND before ``_explain``'s own
+# commits-endpoint lookup (defect found 2026-08-06: ``_explain`` used to run
+# an unguarded second call after the last passing check, doubling the
+# post-deadline tail to 192s). With both call sites guarded, the actual
+# worst case is this deadline plus at most one already-in-flight call's 96s
+# ceiling -- 480 + 96 = 576s, still under the CI job's ``timeout-minutes: 10``
+# (600s; .github/workflows/ci.yml). Once exceeded, every remaining resolution
+# is reported UNDETERMINED (fail-closed, not a pass), never silently dropped.
 _RUN_DEADLINE_SECONDS = 480.0
 
 _SHA40_RE = re.compile(r"\A[0-9a-f]{40}\Z")
@@ -544,7 +548,7 @@ def _rate_limit_backoff_seconds(headers: Any) -> float | None:
     retry_after = headers.get("Retry-After")
     if retry_after is not None:
         try:
-            return min(float(retry_after), _MAX_RATE_LIMIT_BACKOFF_SECONDS)
+            return max(0.0, min(float(retry_after), _MAX_RATE_LIMIT_BACKOFF_SECONDS))
         except ValueError:
             pass
     reset_at = headers.get("x-ratelimit-reset")
@@ -624,7 +628,13 @@ def _api_get(
             last_status, last_body, last_detail = exc.code, None, detail
             if exc.code == 429 or rate_limited_403:
                 server_backoff = _rate_limit_backoff_seconds(exc.headers)
-        except (urllib.error.URLError, OSError, TimeoutError, ValueError) as exc:
+        except (
+            urllib.error.URLError,
+            OSError,
+            TimeoutError,
+            ValueError,
+            http.client.HTTPException,
+        ) as exc:
             last_status, last_body, last_detail = None, None, f"transport error: {exc}"
 
         if attempt < _API_MAX_ATTEMPTS:
@@ -751,8 +761,19 @@ class _Resolver:
         the OMN-14447 shape exactly: the object exists and is reachable from
         nothing protected. This call never grants a pass -- it only sharpens
         the failure message.
+
+        Guarded by the same run-wide deadline as the per-branch compare
+        calls above: without this check, this call could run AFTER the
+        deadline had already been exceeded by the last compare call,
+        doubling the documented 96s post-deadline tail to 192s (defect found
+        2026-08-06). Once the deadline is exceeded, skip the lookup entirely
+        and return the plain observations -- the verdict is UNREACHABLE
+        either way; this only sharpens detail text, never a pass/fail
+        outcome, so skipping it costs nothing but explanation detail.
         """
         joined = "; ".join(observations)
+        if self._deadline_exceeded:
+            return joined
         status, _body, _detail = _api_get(
             f"{_GITHUB_API}/repos/{_ORG}/{repo}/commits/"
             f"{urllib.parse.quote(ref, safe='/')}"
