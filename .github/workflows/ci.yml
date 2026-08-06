@@ -2873,10 +2873,13 @@ jobs:
   # Node migration declaration check -- every vendored node migration under
   # docker/migrations/forward/nodes/ must carry a checked-in stream/domain
   # declaration (application-migrations.tsv) or explicit block
-  # (application-migration-blocks.tsv) BEFORE it can reach a runtime. Pre-merge
-  # mirror of the deploy-time validate_application_migration_manifest() check
-  # in run-forward-migrations.sh. OMN-15717: node_pr_review_bot's
-  # 001_create_review_bot_bypass_log.sql shipped undeclared and only failed
+  # (application-migration-blocks.tsv) BEFORE it can reach a runtime.
+  # scripts/validation/validate_application_migration_manifest.py already
+  # implemented this exact check (plus checksum + duplicate + shape
+  # validation) but was never wired anywhere -- only its own test file
+  # exercised it directly. OMN-15717: node_pr_review_bot's
+  # 001_create_review_bot_bypass_log.sql shipped undeclared and this
+  # pre-existing, unwired validator would have caught it; it only failed
   # closed at a live bootstrap.sql deploy, weeks after merge.
   node-migration-declaration-check:
     needs: occ-preflight
@@ -2904,7 +2907,7 @@ jobs:
           install-args: '--reinstall-package omnibase-core --reinstall-package omnibase-spi --frozen'
 
       - name: Check node migration declarations
-        run: uv run python scripts/check_node_migration_declarations.py --ci
+        run: uv run python scripts/validation/validate_application_migration_manifest.py
 
   # Migration integration test -- spins up real Postgres, applies all migrations,
   # and asserts every manifest table exists (OMN-3529)
