@@ -32,6 +32,7 @@ through, or to a way a naive "fix" would silently un-fix it:
 
 from __future__ import annotations
 
+import email.message
 import io
 import json
 import time
@@ -636,3 +637,232 @@ def test_api_get_backoff_is_bounded(monkeypatch: pytest.MonkeyPatch) -> None:
         f"each backoff sleep must be short and bounded, got {slept}"
     )
     assert sum(slept) <= 30.0, f"total backoff time must be bounded, got {slept}"
+
+
+# ---------------------------------------------------------------------------
+# Regression (defect fix, 2026-08-06): bounded-worst-case-under-CI-timeout
+# ---------------------------------------------------------------------------
+# The per-call retry ceiling above (96s) only bounds ONE call. The
+# pre-existing consecutive-transport-failure circuit breaker resets to 0 on
+# ANY HTTP-status-bearing response (including a retried-and-still-failing
+# 503/429), so an intermittent-transport run can pay the full per-call
+# ceiling on every pin without the breaker ever tripping -- the run-wide
+# wall time was unbounded. ``_Resolver`` must enforce its own run-wide
+# deadline independent of the breaker.
+
+
+def _headers(pairs: dict[str, str] | None = None) -> email.message.Message:
+    msg = email.message.Message()
+    for key, value in (pairs or {}).items():
+        msg[key] = value
+    return msg
+
+
+def _http_error_with_headers(
+    code: int, message: str = "", headers: dict[str, str] | None = None
+) -> urllib.error.HTTPError:
+    body = json.dumps({"message": message}).encode("utf-8") if message else b"{}"
+    return urllib.error.HTTPError(
+        url="https://api.github.com/x",
+        code=code,
+        msg=message or "error",
+        hdrs=_headers(headers),
+        fp=io.BytesIO(body),
+    )
+
+
+@pytest.mark.unit
+def test_resolver_enforces_a_run_wide_deadline_independent_of_the_breaker(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Once the injected clock is already past the run-wide deadline, a fresh
+    resolution must fail closed to UNDETERMINED WITHOUT making any network
+    call -- proving the deadline is checked before spending any more wall
+    time, not merely reported after the fact."""
+    from scripts.ci.check_pin_reachability import _RUN_DEADLINE_SECONDS
+
+    def fail_if_called(request: object, timeout: float | None = None) -> None:
+        raise AssertionError(
+            "no network call should be attempted once the run-wide deadline "
+            "is already exceeded"
+        )
+
+    monkeypatch.setattr(urllib.request, "urlopen", fail_if_called)
+
+    clock = {"t": _RUN_DEADLINE_SECONDS + 1.0}
+    resolver = _Resolver(("dev", "main"), now=lambda: clock["t"])
+    # Force the deadline to be recorded as already-elapsed regardless of the
+    # constructor's own start-time read.
+    resolver._deadline_at = 0.0
+
+    resolution = resolver.resolve("omnimarket", "b" * 40)
+
+    assert resolution.verdict is Verdict.UNDETERMINED
+    assert "deadline" in resolution.detail.lower()
+
+
+@pytest.mark.unit
+def test_resolver_aggregate_wall_time_is_bounded_under_intermittent_transport(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """End-to-end through ``_Resolver.resolve``: a pattern that alternates
+    per-ref between "always transient-fails all 3 attempts" and "succeeds
+    immediately" -- the exact shape that resets the consecutive-failure
+    breaker on every other pin -- must not blow past the run-wide deadline
+    plus one in-flight call, even across many more pins than any real tree
+    has today."""
+    from scripts.ci.check_pin_reachability import _RUN_DEADLINE_SECONDS
+
+    clock = {"t": 0.0}
+
+    def fake_sleep(seconds: float) -> None:
+        clock["t"] += seconds
+
+    def fake_urlopen(request: object, timeout: float | None = None) -> object:
+        url = getattr(request, "full_url", "")
+        clock["t"] += 0.05
+        # Deterministic per-URL split (not process hash-seed dependent):
+        # roughly half the refs always time out on every attempt, the rest
+        # succeed immediately.
+        if sum(ord(c) for c in url) % 2 == 0:
+            clock["t"] += timeout or 0.0
+            raise TimeoutError("timed out")
+        return _FakeResponse(200, {"status": "diverged"})
+
+    monkeypatch.setattr(urllib.request, "urlopen", fake_urlopen)
+    monkeypatch.setattr(time, "sleep", fake_sleep)
+
+    resolver = _Resolver(("dev", "main"), now=lambda: clock["t"])
+    results = [
+        resolver.resolve("omnimarket", f"{i:040x}".replace("0", "a"))
+        for i in range(1, 61)
+    ]
+
+    assert any(r.verdict is Verdict.UNDETERMINED for r in results), (
+        "the deadline must actually have engaged for this test to be meaningful"
+    )
+    # Aggregate bound: the run-wide deadline plus at most one already-in-flight
+    # call (worst case: the deadline check passes, then that one call fully
+    # exhausts its own per-call ceiling before the next check).
+    assert clock["t"] <= _RUN_DEADLINE_SECONDS + 96.0 + 1.0, (
+        f"aggregate simulated wall time {clock['t']}s must stay bounded by the "
+        "run-wide deadline, not grow unbounded with pin count under "
+        "intermittent transport failures"
+    )
+
+
+# ---------------------------------------------------------------------------
+# Regression (defect fix, 2026-08-06): rate-limit-aware 403/429 handling
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.unit
+def test_api_get_retries_a_primary_rate_limited_403_honoring_reset_header(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """A 403 carrying GitHub's primary-rate-limit signal
+    (``x-ratelimit-remaining: 0``) is transient and must be retried, backing
+    off by the server-provided ``x-ratelimit-reset`` delta rather than a
+    blind fixed schedule."""
+    monkeypatch.setattr(time, "time", lambda: 1000.0)
+    fake_urlopen, calls = _scripted_urlopen(
+        [
+            _http_error_with_headers(
+                403,
+                "API rate limit exceeded",
+                headers={"x-ratelimit-remaining": "0", "x-ratelimit-reset": "1005"},
+            ),
+            _FakeResponse(200, {"status": "behind"}),
+        ]
+    )
+    monkeypatch.setattr(urllib.request, "urlopen", fake_urlopen)
+    slept: list[float] = []
+
+    status, body, _detail = _api_get("https://api.github.com/x", sleep=slept.append)
+
+    assert status == 200
+    assert body == {"status": "behind"}
+    assert len(calls) == 2, (
+        "a rate-limited 403 must be retried, not treated as definitive"
+    )
+    assert slept == [5.0], "backoff must follow the server-provided reset delta"
+
+
+@pytest.mark.unit
+def test_api_get_caps_rate_limit_backoff_instead_of_honoring_it_unbounded(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """A server-requested backoff longer than the cap must be clamped, never
+    honored unbounded -- an hour-long primary-rate-limit reset must not turn
+    one pin into an hour-long CI job."""
+    fake_urlopen, _calls = _scripted_urlopen(
+        [
+            _http_error_with_headers(
+                429, "rate limited", headers={"Retry-After": "3600"}
+            ),
+            _FakeResponse(200, {"status": "identical"}),
+        ]
+    )
+    monkeypatch.setattr(urllib.request, "urlopen", fake_urlopen)
+    slept: list[float] = []
+
+    _api_get("https://api.github.com/x", sleep=slept.append)
+
+    assert slept, "must still back off"
+    assert slept[0] <= 30.0, f"rate-limit backoff must be capped, got {slept}"
+
+
+@pytest.mark.unit
+def test_api_get_does_not_retry_a_plain_403_even_with_unrelated_headers(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """A 403 with headers present but no rate-limit signal is still
+    definitive -- discrimination is by signal, not by header presence."""
+    fake_urlopen, calls = _scripted_urlopen(
+        [
+            _http_error_with_headers(
+                403, "Forbidden", headers={"x-github-request-id": "abc"}
+            )
+        ]
+    )
+    monkeypatch.setattr(urllib.request, "urlopen", fake_urlopen)
+    slept: list[float] = []
+
+    status, _body, _detail = _api_get("https://api.github.com/x", sleep=slept.append)
+
+    assert status == 403
+    assert len(calls) == 1, "a 403 without rate-limit headers must not be retried"
+    assert slept == []
+
+
+# ---------------------------------------------------------------------------
+# Regression (defect fix, 2026-08-06): backoff-schedule/max-attempts coupling
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.unit
+def test_api_get_does_not_index_error_when_max_attempts_exceeds_backoff_schedule(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """``_API_RETRY_BACKOFF_SECONDS`` has 2 entries for the shipped
+    ``_API_MAX_ATTEMPTS = 3``. Raising ``_API_MAX_ATTEMPTS`` without
+    extending the tuple must degrade gracefully (reuse the last known
+    backoff), never raise ``IndexError`` inside a required CI gate."""
+    import scripts.ci.check_pin_reachability as module
+
+    monkeypatch.setattr(module, "_API_MAX_ATTEMPTS", 5)
+    fake_urlopen, calls = _scripted_urlopen(
+        [TimeoutError("t")] * 5,
+    )
+    monkeypatch.setattr(urllib.request, "urlopen", fake_urlopen)
+    slept: list[float] = []
+
+    status, body, detail = module._api_get(
+        "https://api.github.com/x", sleep=slept.append
+    )
+
+    assert status is None
+    assert body is None
+    assert "transport error" in detail
+    assert len(calls) == 5
+    assert len(slept) == 4, "sleeps between all 5 attempts, no IndexError"

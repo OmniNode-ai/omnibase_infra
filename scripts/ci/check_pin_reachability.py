@@ -115,19 +115,41 @@ _DEFAULT_PROTECTED: tuple[str, ...] = ("dev", "main")
 # GitHub REST compare-endpoint budget under transient load. 30s per attempt.
 _REQUEST_TIMEOUT_SECONDS = 30.0
 # Bounded retry for transient transport failures (timeout/connection errors,
-# HTTP 5xx, HTTP 429). A definitive HTTP 4xx is never retried -- it will not
-# change on a second try, and this job runs on every PR so added latency is
-# never free. Worst case for one fully-exhausted call:
-# 3 * _REQUEST_TIMEOUT_SECONDS + sum(_API_RETRY_BACKOFF_SECONDS) = 96s, still
-# well under the CI job timeout; the fail-closed UNDETERMINED mapping is
-# unchanged once the ceiling is actually exhausted.
+# HTTP 5xx, HTTP 429, and a rate-limit-signaled 403). A definitive HTTP 4xx is
+# never retried -- it will not change on a second try, and this job runs on
+# every PR so added latency is never free. Worst case for one fully-exhausted
+# call: 3 * _REQUEST_TIMEOUT_SECONDS + sum(_API_RETRY_BACKOFF_SECONDS) = 96s.
+#
+# That 96s bounds ONE call, not the run. The circuit breaker below resets its
+# consecutive-failure counter on ANY HTTP-status-bearing response -- including
+# a retried-and-still-failing 503/429 -- so a run whose transport failures are
+# intermittent rather than sustained can pay the full 96s ceiling on every
+# pin without the breaker ever tripping (defect found 2026-08-06: measured
+# max 944s / 1174s across 21-pin trials with 19-23/30 exceeding the 600s CI
+# job timeout). ``_RUN_DEADLINE_SECONDS`` below is the actual run-wide bound;
+# the breaker remains a fast-path for the sustained-outage case it was built
+# for, but is no longer the thing standing between this gate and the job
+# timeout.
 _API_MAX_ATTEMPTS = 3
 _API_RETRY_BACKOFF_SECONDS: tuple[float, ...] = (2.0, 4.0)
 _TRANSIENT_HTTP_STATUS = frozenset({429, 500, 502, 503, 504})
+# A server-requested rate-limit backoff (``Retry-After`` or
+# ``x-ratelimit-reset``) is honored up to this cap, never unbounded -- an
+# hour-long primary-rate-limit reset must not turn one pin into an hour-long
+# CI job.
+_MAX_RATE_LIMIT_BACKOFF_SECONDS = 30.0
 # Stop probing after this many consecutive transport (non-HTTP-status) failures
-# and report the remainder as undetermined; keeps the worst case bounded well
-# under the CI job timeout instead of serially timing out on every pin.
+# and report the remainder as undetermined -- a fast path for a SUSTAINED
+# outage. It does not, by itself, bound a run with INTERMITTENT failures; see
+# ``_RUN_DEADLINE_SECONDS``.
 _TRANSPORT_FAILURE_CIRCUIT_BREAKER = 3
+# Run-wide wall-clock budget across every pin resolved by one ``_Resolver``.
+# Checked before each per-branch compare call, so the actual worst case is
+# this deadline plus at most one already-in-flight call's 96s ceiling --
+# 480 + 96 = 576s, still under the CI job's ``timeout-minutes: 10`` (600s;
+# .github/workflows/ci.yml). Once exceeded, every remaining resolution is
+# reported UNDETERMINED (fail-closed, not a pass), never silently dropped.
+_RUN_DEADLINE_SECONDS = 480.0
 
 _SHA40_RE = re.compile(r"\A[0-9a-f]{40}\Z")
 
@@ -473,14 +495,67 @@ def status_is_reachable(status: str) -> bool:
 
 
 def _is_transient_http_status(status: int) -> bool:
-    """True for an HTTP status worth retrying: 429 (rate limit) or any 5xx.
+    """True for an HTTP status that is unconditionally worth retrying: 429
+    (rate limit) or any 5xx.
 
-    Every other status -- 404, 403 without rate-limit semantics, 400, 401,
-    410, ... -- is definitive: a second identical GET will not produce a
-    different answer, so retrying it only adds latency to a gate that runs on
-    every PR.
+    404, 400, 401, 410, ... are definitive regardless of headers: a second
+    identical GET will not produce a different answer, so retrying only adds
+    latency to a gate that runs on every PR.
+
+    403 is deliberately NOT in this set -- a plain 403 (bad/missing auth,
+    genuinely forbidden) is just as definitive as a 404. But GitHub also uses
+    403 to signal BOTH the primary rate limit (``x-ratelimit-remaining: 0``)
+    and the secondary rate limit (a ``Retry-After`` header), and those two
+    ARE transient. Discriminating requires the response headers, which this
+    function -- status-code-only, by design, so it stays a trivial pure
+    predicate -- does not receive. See :func:`_is_rate_limited_403`, which
+    ``_api_get`` consults separately for the 403 case.
     """
     return status in _TRANSIENT_HTTP_STATUS
+
+
+def _is_rate_limited_403(headers: Any) -> bool:
+    """True when a 403's headers carry GitHub's rate-limit signal.
+
+    Primary rate limit: ``x-ratelimit-remaining: 0``. Secondary rate limit:
+    a ``Retry-After`` header. A 403 with neither is a genuine authorization
+    failure -- definitive, not transient (see :func:`_is_transient_http_status`).
+    """
+    if headers is None:
+        return False
+    if headers.get("x-ratelimit-remaining") == "0":
+        return True
+    return headers.get("Retry-After") is not None
+
+
+def _rate_limit_backoff_seconds(headers: Any) -> float | None:
+    """Read a server-provided rate-limit backoff off response headers.
+
+    Prefers ``Retry-After`` (seconds); falls back to ``x-ratelimit-reset``
+    (unix epoch seconds), converted to a delta from now. Always capped at
+    ``_MAX_RATE_LIMIT_BACKOFF_SECONDS`` -- honoring the signal is better than
+    a blind fixed schedule, but honoring it UNBOUNDED would let one rate
+    limit turn a single pin into an hour-long CI job. Returns ``None`` when
+    neither header is present or parseable, so the caller falls back to the
+    fixed schedule.
+    """
+    if headers is None:
+        return None
+    retry_after = headers.get("Retry-After")
+    if retry_after is not None:
+        try:
+            return min(float(retry_after), _MAX_RATE_LIMIT_BACKOFF_SECONDS)
+        except ValueError:
+            pass
+    reset_at = headers.get("x-ratelimit-reset")
+    if reset_at is not None:
+        try:
+            delta = float(reset_at) - time.time()
+        except ValueError:
+            return None
+        if delta > 0:
+            return min(delta, _MAX_RATE_LIMIT_BACKOFF_SECONDS)
+    return None
 
 
 def _api_get(
@@ -492,10 +567,13 @@ def _api_get(
     could not be performed at all after exhausting ``_API_MAX_ATTEMPTS``.
 
     Retries ONLY the transient failure classes: a transport-level failure
-    (timeout, connection error -- no HTTP status at all) or an HTTP 429/5xx
-    (see :func:`_is_transient_http_status`), up to ``_API_MAX_ATTEMPTS`` total
-    attempts with a short bounded backoff (``_API_RETRY_BACKOFF_SECONDS``,
-    never unbounded). A definitive HTTP 4xx returns immediately on the first
+    (timeout, connection error -- no HTTP status at all), an HTTP 429/5xx
+    (see :func:`_is_transient_http_status`), or a rate-limit-signaled 403
+    (see :func:`_is_rate_limited_403`) -- up to ``_API_MAX_ATTEMPTS`` total
+    attempts. Backoff prefers the server-provided rate-limit signal
+    (:func:`_rate_limit_backoff_seconds`, capped) and otherwise falls back to
+    the short fixed schedule (``_API_RETRY_BACKOFF_SECONDS``, never
+    unbounded). A definitive HTTP 4xx returns immediately on the first
     attempt -- no retry, no added latency.
 
     If every attempt fails on a transient class, the final failing result is
@@ -519,6 +597,7 @@ def _api_get(
     last_body: dict[str, Any] | None = None
     last_detail = ""
     for attempt in range(1, _API_MAX_ATTEMPTS + 1):
+        server_backoff: float | None = None
         try:
             with urllib.request.urlopen(  # noqa: S310 - fixed https host
                 request, timeout=_REQUEST_TIMEOUT_SECONDS
@@ -539,14 +618,26 @@ def _api_get(
                     detail = f"HTTP {exc.code}: {message}"
             except (ValueError, OSError):
                 pass
-            if not _is_transient_http_status(exc.code):
+            rate_limited_403 = exc.code == 403 and _is_rate_limited_403(exc.headers)
+            if not _is_transient_http_status(exc.code) and not rate_limited_403:
                 return exc.code, None, detail
             last_status, last_body, last_detail = exc.code, None, detail
+            if exc.code == 429 or rate_limited_403:
+                server_backoff = _rate_limit_backoff_seconds(exc.headers)
         except (urllib.error.URLError, OSError, TimeoutError, ValueError) as exc:
             last_status, last_body, last_detail = None, None, f"transport error: {exc}"
 
         if attempt < _API_MAX_ATTEMPTS:
-            effective_sleep(_API_RETRY_BACKOFF_SECONDS[attempt - 1])
+            if server_backoff is not None:
+                delay = server_backoff
+            else:
+                # Clamp rather than index directly: if _API_MAX_ATTEMPTS is
+                # ever raised without extending _API_RETRY_BACKOFF_SECONDS to
+                # match, reuse the last known backoff instead of raising
+                # IndexError inside a required CI gate.
+                schedule_index = min(attempt - 1, len(_API_RETRY_BACKOFF_SECONDS) - 1)
+                delay = _API_RETRY_BACKOFF_SECONDS[schedule_index]
+            effective_sleep(delay)
 
     return last_status, last_body, last_detail
 
@@ -558,18 +649,40 @@ def _compare_url(repo: str, base: str, ref: str) -> str:
 
 
 class _Resolver:
-    """Resolves pins against the live GitHub API, with dedup + a circuit breaker."""
+    """Resolves pins against the live GitHub API, with dedup + a circuit breaker.
 
-    def __init__(self, protected: Sequence[str]) -> None:
+    Two independent bounds protect the CI job timeout, for two different
+    failure shapes:
+
+    * ``tripped`` (the pre-existing consecutive-transport-failure breaker) is
+      a fast path for a SUSTAINED outage -- every call failing with no HTTP
+      status at all.
+    * ``_deadline_exceeded`` (the run-wide wall-clock budget) is what
+      actually bounds an INTERMITTENT-failure run: the breaker's counter
+      resets on any HTTP-status-bearing response (even a retried-and-still-
+      failing one), so a pattern that alternates success/failure across pins
+      never trips it, and every pin can independently pay the full per-call
+      retry ceiling. See ``_RUN_DEADLINE_SECONDS``.
+    """
+
+    def __init__(
+        self, protected: Sequence[str], *, now: Callable[[], float] | None = None
+    ) -> None:
         self._protected = tuple(protected)
         self._cache: dict[tuple[str, str], Resolution] = {}
         self._consecutive_transport_failures = 0
+        self._now = now or time.monotonic
+        self._deadline_at = self._now() + _RUN_DEADLINE_SECONDS
 
     @property
     def tripped(self) -> bool:
         return (
             self._consecutive_transport_failures >= _TRANSPORT_FAILURE_CIRCUIT_BREAKER
         )
+
+    @property
+    def _deadline_exceeded(self) -> bool:
+        return self._now() >= self._deadline_at
 
     def resolve(self, repo: str, ref: str) -> Resolution:
         key = (repo, ref)
@@ -596,6 +709,13 @@ class _Resolver:
 
         not_found: list[str] = []
         for base in self._protected:
+            if self._deadline_exceeded:
+                return Resolution(
+                    Verdict.UNDETERMINED,
+                    f"skipped: run-wide {_RUN_DEADLINE_SECONDS:.0f}s deadline "
+                    "exceeded -- remaining pins reported undetermined "
+                    "(fail-closed) to stay within the CI job timeout",
+                )
             status, body, detail = _api_get(_compare_url(repo, base, ref))
             if status is None:
                 self._consecutive_transport_failures += 1
