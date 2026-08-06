@@ -220,6 +220,19 @@ class TestWaitForPostgresGuard:
         (migrations_dir / "fenced-node-migrations.yaml").write_text(
             "fenced_node_migrations: []\n", encoding="utf-8"
         )
+        # OMN-15336 item 4 repair (D1): the runner also unconditionally
+        # requires the FORCE-RLS grandfather manifest to exist under
+        # MIGRATIONS_DIR, same discipline as the fence manifest above. This
+        # fixture predates that requirement (a853500ab3) and was never
+        # updated for it, so the runner FATALed before ever reaching the
+        # wait-for-postgres loop this test targets -- undetected because the
+        # change-aware selector did not reach tests/unit/migrations/ for a
+        # scripts/ change until the MIGRATION_TREE_PREFIX fix (OMN-15336
+        # item 4 repair follow-up) started selecting the whole tests/unit/
+        # tree again.
+        (migrations_dir / "grandfathered-force-rls-migrations.yaml").write_text(
+            "grandfathered_force_rls_migrations: []\n", encoding="utf-8"
+        )
 
         result = subprocess.run(
             ["sh", str(RUNNER)],
