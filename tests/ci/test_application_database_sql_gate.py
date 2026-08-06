@@ -228,6 +228,53 @@ def test_gate_exempts_omn15655_legacy_root_shape_repair_paths(
     assert any("schema-qualified" in item for item in violations)
 
 
+def test_gate_exempts_only_the_omn15356_legacy_tenant_uuid_migration_path(
+    tmp_path: Path,
+) -> None:
+    repository = tmp_path / "repository"
+    repository.mkdir()
+    _git(repository, "init", "--initial-branch=main")
+    (repository / "baseline.txt").write_text("baseline\n", encoding="utf-8")
+    base_revision = _commit(repository, "baseline")
+
+    migration_dir = (
+        repository
+        / "docker"
+        / "migrations"
+        / "forward"
+        / "nodes"
+        / "node_canary_score_reducer"
+    )
+    migration_dir.mkdir(parents=True)
+    exempt = migration_dir / "0003_capability_scores_tenant_id_to_uuid.sql"
+    exempt.write_text(
+        "ALTER TABLE public.capability_scores ADD COLUMN tenant_uuid uuid;\n",
+        encoding="utf-8",
+    )
+    exempt_head = _commit(repository, "exempt governed legacy conversion")
+    assert not validate_changed_sql(
+        repository,
+        base_revision,
+        exempt_head,
+        ownership_manifest_paths=(),
+    )
+
+    adjacent = migration_dir / "0004_adjacent_unqualified.sql"
+    adjacent.write_text(
+        "ALTER TABLE capability_scores ADD COLUMN still_blocked text;\n",
+        encoding="utf-8",
+    )
+    adjacent_head = _commit(repository, "adjacent legacy migration")
+    violations = validate_changed_sql(
+        repository,
+        exempt_head,
+        adjacent_head,
+        ownership_manifest_paths=(),
+    )
+    assert any("0004_adjacent_unqualified.sql" in item for item in violations)
+    assert any("schema-qualified" in item for item in violations)
+
+
 def test_qualified_create_requires_an_authoritative_ownership_declaration(
     tmp_path: Path,
 ) -> None:

@@ -42,6 +42,13 @@ _LEGACY_DEFAULT_SCHEMA_SQL_EXACT_PATHS = frozenset(
             "docker/migrations/forward/nodes/node_canary_score_reducer/"
             "0002_capability_scores_tenant_id_and_rls.sql"
         ),
+        # OMN-15356 converts the same legacy capability_scores relation from a
+        # text tenant slug to the governed house-tenant UUID. Its physical move
+        # from public to tenant remains owned by the OMN-15359 schema cutover.
+        Path(
+            "docker/migrations/forward/nodes/node_canary_score_reducer/"
+            "0003_capability_scores_tenant_id_to_uuid.sql"
+        ),
         Path(
             "docker/migrations/forward/nodes/node_projection_context_roi/"
             "003_context_roi_scores_tenant_id_and_rls.sql"

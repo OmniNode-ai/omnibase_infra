@@ -29,15 +29,8 @@ after confirming (by hand, via `git diff <old-rev> <new-rev>` in omnibase_core)
 that both sides really do reference the same validator, not two independently
 pinned tools that happen to share an upstream repo.
 
-KNOWN DRIFT (intentionally NOT yet enforced here): the `check-url-authority`
-pre-commit hook pins omnibase_core `be4f95460dcd6865264ab0713a5b1cc48b41aef9`
-while `.github/workflows/url-authority-gate.yml` pins the same
-`validator_url_authority` at `8a53a063bd28f643d08b4cbbc6dd5c7c9f6435df`. That is
-a live DRIFT-3 this gate is designed to catch, but resolving it requires bumping
-one side's core SHA (a change with its own baseline blast-radius) and is tracked
-separately (see PR body / follow-up ticket). Add the url-authority row to
-PIN_PAIRS in the SAME change that converges the two SHAs, so this gate lands
-green and then stays converged.
+The URL Authority pair was added when its pre-commit and CI pins converged, so
+future baseline drift now fails closed on either surface.
 """
 
 from __future__ import annotations
@@ -61,6 +54,12 @@ PIN_PAIRS: tuple[tuple[str, str, str, str], ...] = (
         "https://github.com/OmniNode-ai/omnibase_core",
         ".github/workflows/canonical-inference-gate.yml",
         "validator_canonical_inference",
+    ),
+    (
+        "check-url-authority",
+        "https://github.com/OmniNode-ai/omnibase_core",
+        ".github/workflows/url-authority-gate.yml",
+        "validator_url_authority",
     ),
 )
 
