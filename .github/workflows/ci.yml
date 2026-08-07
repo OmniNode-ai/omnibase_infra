@@ -731,7 +731,25 @@ jobs:
         && fromJSON(vars.OMNI_PUBLIC_PR_RUNS_ON_JSON || '["ubuntu-latest"]')
         || fromJSON((github.event_name == 'merge_group' && vars.OMNI_REQUIRED_CI_RUNS_ON_JSON) || vars.OMNI_TRUSTED_CI_RUNS_ON_JSON || '["self-hosted","omnibase-ci"]')
       }}
-    timeout-minutes: 10
+    # Raised from 10 to 18 (2026-08-07, PR #2679 comment 5211687650): a
+    # 38-run fleet measurement of THIS job found setup time (job start ->
+    # script step start) alone had median 317s and max 613s under
+    # cache-enabled: "false" -- 6/38 runs were killed by the old
+    # timeout-minutes: 10 (600s) DURING setup, before the script step ever
+    # ran. Derivation of 18min (1080s), conservatively assuming a cache MISS
+    # (the fleet max, not the cache-enabled improvement below) so this bound
+    # holds even when the uv cache is cold/evicted:
+    #   613s (measured max setup, cache-miss-safe)
+    # + 150s (script _RUN_DEADLINE_SECONDS, see check_pin_reachability.py)
+    # + 150s (worst-case post-deadline tail: one in-flight rate-limited call,
+    #         3 * 30s timeouts + 2 * 30s capped backoffs)
+    # = 913s < 1080s, ~167s (~15%) real margin.
+    # See scripts/ci/check_pin_reachability.py's _RUN_DEADLINE_SECONDS
+    # comment for the full script-side derivation, and
+    # tests/ci/test_pin_reachability_omn15538.py::test_pin_reachability_job_timeout_covers_measured_budget
+    # for the binding test that parses this value from ci.yml and fails
+    # closed if it stops covering the budget (or is gamed absurdly high).
+    timeout-minutes: 18
 
     steps:
       - name: Checkout code
@@ -743,7 +761,14 @@ jobs:
           python-version: ${{ env.PYTHON_VERSION }}
           uv-version: ${{ env.UV_VERSION }}
           cache-version: ${{ env.CACHE_VERSION }}
-          cache-enabled: "false"
+          # Enabled (2026-08-07, PR #2679 comment 5211687650): cache-enabled:
+          # "false" was the dominant setup-time term (measured 133s+/run of
+          # the 317s median setup) with no offsetting benefit -- this job
+          # only reads two small lockfiles' worth of deps, nothing that
+          # needs a forced-cold install. Restoring the uv cache lowers the
+          # TYPICAL setup cost; timeout-minutes above is raised independent
+          # of this so the job's worst-case bound does not depend on the
+          # cache actually hitting.
 
       - name: Every cross-repo pin must be reachable from dev or main
         env:

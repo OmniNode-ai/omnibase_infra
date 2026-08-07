@@ -43,6 +43,7 @@ from collections.abc import Callable
 from pathlib import Path
 
 import pytest
+import yaml
 
 from scripts.ci.check_pin_reachability import (
     PinRef,
@@ -1021,3 +1022,129 @@ def test_api_get_does_not_crash_on_a_negative_retry_after_header(
     assert status == 200
     assert body == {"status": "identical"}
     assert len(calls) == 2
+
+
+# ---------------------------------------------------------------------------
+# Regression (workflow-level fix, 2026-08-07, PR #2679 comment 5211687650):
+# the script-side deadline alone cannot bound this job -- a 38-run fleet
+# measurement found job setup (job start -> script step start) had median
+# 317s and max 613s under the old ``cache-enabled: "false"``, with 6/38 runs
+# killed by ``timeout-minutes: 10`` (600s) DURING setup, before the script
+# ever started. No value of ``_RUN_DEADLINE_SECONDS`` fixes a job whose setup
+# alone can exceed the job timeout. This binding test parses ci.yml as DATA
+# (not a copied literal) so a future edit to either the job's
+# ``timeout-minutes`` or the script's ``_RUN_DEADLINE_SECONDS`` is checked
+# against the real measured budget, in both directions:
+#
+#   * too small -- the job timeout no longer covers
+#     measured-setup + script-deadline + worst-case-tail, so GitHub kills the
+#     job mid-run exactly like the pre-fix incident;
+#   * too large -- "raise timeout-minutes" gamed into an absurd value that
+#     trivially satisfies the lower-bound arithmetic without being a real
+#     fix, defeating a CI gate's fail-fast purpose.
+# ---------------------------------------------------------------------------
+
+# Measured worst-case job-start -> script-step-start wall time across the
+# 38-run fleet (PR #2679 comment 5211687650), under the OLD
+# ``cache-enabled: "false"``. Enabling the uv cache (the ci.yml half of this
+# same fix) lowers the TYPICAL case well below this, but the GitHub Actions
+# cache is a best-effort, evictable store (lockfile hash change, 7-day
+# no-access eviction, cold first run) -- a cache MISS can still cost the full
+# no-cache setup time, so this stays the conservative bound the arithmetic
+# below is built on, independent of whether the cache actually hits on any
+# given run.
+_MEASURED_SETUP_BUDGET_SECONDS = 613.0
+
+
+def _job_timeout_seconds(job_id: str) -> float:
+    """Parse ``timeout-minutes`` for ``job_id`` out of the real ci.yml, as
+    data -- never a copied/hardcoded literal, so this test tracks the live
+    workflow file."""
+    loaded = yaml.safe_load((WORKFLOWS_DIR / "ci.yml").read_text(encoding="utf-8"))
+    job = loaded["jobs"][job_id]
+    timeout_minutes = job["timeout-minutes"]
+    assert isinstance(timeout_minutes, int | float), (
+        f"jobs.{job_id}.timeout-minutes must be a plain number, got {timeout_minutes!r}"
+    )
+    return float(timeout_minutes) * 60.0
+
+
+def _assert_pin_reachability_timeout_budget_ok(timeout_seconds: float) -> None:
+    """Both directions of the budget check.
+
+    Lower bound: the job timeout must cover measured setup + the script's
+    own run-wide deadline + the worst-case post-deadline tail (one
+    fully-exhausted rate-limited call:
+    ``_API_MAX_ATTEMPTS * _REQUEST_TIMEOUT_SECONDS +
+    (_API_MAX_ATTEMPTS - 1) * _MAX_RATE_LIMIT_BACKOFF_SECONDS`` = 150s, per
+    the derivation in ``check_pin_reachability.py``'s
+    ``_RUN_DEADLINE_SECONDS`` comment).
+
+    Upper bound: the job timeout must not be absurdly large. This job makes
+    a handful of bounded, retried GitHub REST calls -- nothing legitimate
+    ever needs more than 30 minutes. Without this half, "raise
+    timeout-minutes" could be satisfied by setting it to something enormous,
+    which trivially passes the lower-bound arithmetic without fixing
+    anything and defeats the point of having a bounded CI gate at all.
+    """
+    from scripts.ci.check_pin_reachability import (
+        _API_MAX_ATTEMPTS,
+        _MAX_RATE_LIMIT_BACKOFF_SECONDS,
+        _REQUEST_TIMEOUT_SECONDS,
+        _RUN_DEADLINE_SECONDS,
+    )
+
+    worst_case_tail_seconds = (
+        _API_MAX_ATTEMPTS * _REQUEST_TIMEOUT_SECONDS
+        + (_API_MAX_ATTEMPTS - 1) * _MAX_RATE_LIMIT_BACKOFF_SECONDS
+    )
+    required_seconds = (
+        _MEASURED_SETUP_BUDGET_SECONDS + _RUN_DEADLINE_SECONDS + worst_case_tail_seconds
+    )
+    assert required_seconds < timeout_seconds, (
+        f"pin-reachability job timeout ({timeout_seconds:.0f}s) does not "
+        f"cover measured setup ({_MEASURED_SETUP_BUDGET_SECONDS:.0f}s) + "
+        f"script deadline ({_RUN_DEADLINE_SECONDS:.0f}s) + worst-case tail "
+        f"({worst_case_tail_seconds:.0f}s) = {required_seconds:.0f}s -- "
+        "raise jobs.pin-reachability.timeout-minutes in ci.yml"
+    )
+
+    upper_bound_seconds = 30 * 60.0
+    assert timeout_seconds <= upper_bound_seconds, (
+        f"pin-reachability job timeout ({timeout_seconds:.0f}s) exceeds the "
+        f"sane upper bound ({upper_bound_seconds:.0f}s) for a job that makes "
+        "a handful of bounded, retried GitHub REST calls -- an absurdly "
+        "large timeout is not a real fix for the setup-budget problem and "
+        "defeats CI's fail-fast purpose"
+    )
+
+
+@pytest.mark.unit
+def test_pin_reachability_job_timeout_covers_measured_budget() -> None:
+    """Binding test: the real ci.yml ``timeout-minutes`` for the
+    ``pin-reachability`` job must cover measured setup + the script's own
+    deadline + the worst-case post-deadline tail, with real margin, and must
+    not be an absurdly large non-fix. Fails on the pre-fix ``timeout-minutes:
+    10`` (600s < 913s required)."""
+    _assert_pin_reachability_timeout_budget_ok(_job_timeout_seconds("pin-reachability"))
+
+
+@pytest.mark.unit
+def test_pin_reachability_job_timeout_budget_kills_too_small_mutant() -> None:
+    """A too-small job timeout (480s, echoing the old broken ``480.0``
+    magnitude that used to be ``_RUN_DEADLINE_SECONDS`` before it was found
+    to overshoot the job timeout) must fail the lower-bound check -- this is
+    the exact class of defect this test exists to catch: a job whose setup
+    alone can exceed 480s gets killed mid-setup, exactly as measured pre-fix."""
+    with pytest.raises(AssertionError, match="does not cover"):
+        _assert_pin_reachability_timeout_budget_ok(480.0)
+
+
+@pytest.mark.unit
+def test_pin_reachability_job_timeout_budget_kills_absurd_upper_bound_mutant() -> None:
+    """An absurdly large job timeout (99999s, ~27.8h) must fail the
+    upper-bound sanity check even though it trivially satisfies the
+    lower-bound arithmetic -- proving the test cannot be satisfied by gaming
+    ``timeout-minutes`` to an unreasonable value instead of a real fix."""
+    with pytest.raises(AssertionError, match="exceeds the sane upper bound"):
+        _assert_pin_reachability_timeout_budget_ok(99999.0)

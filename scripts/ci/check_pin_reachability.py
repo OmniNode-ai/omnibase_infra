@@ -184,14 +184,46 @@ _TRANSPORT_FAILURE_CIRCUIT_BREAKER = 3
 #   exact wedged-red-without-a-message failure mode this file exists to
 #   remove.
 #
-# New bound, real margin:
-#     ~200s measured setup + 220s deadline + 150s max post-deadline tail
-#       = ~570s < 600s job timeout  (~30s margin)
+# [SUPERSEDED bound below] ~200s measured setup + 220s deadline + 150s max
+# post-deadline tail = ~570s < 600s job timeout (~30s margin). This bound was
+# itself falsified before it ever landed (PR #2679 comment 5211687650): the
+# ``~196s`` / ``~200s`` setup figure above came from ONE below-median sample
+# (job 92716571663), not the fleet. A 38-run fleet measurement of this same
+# job found setup alone had median 317s and max 613s -- 6/38 runs were
+# killed by ``timeout-minutes: 10`` DURING setup, before this deadline ever
+# had a chance to fire. No value of ``_RUN_DEADLINE_SECONDS`` fixes a job
+# whose setup sometimes eats the whole 600s budget by itself; the job
+# timeout itself had to move. See ``.github/workflows/ci.yml``'s
+# ``pin-reachability`` job comment for that half of the fix.
 #
-# 220s still comfortably bounds a *sustained* cross-pin failure run (which is
-# fail-closed UNDETERMINED anyway, not a false pass) while leaving the script
-# room to print its own diagnostic before the job's hard cancellation.
-_RUN_DEADLINE_SECONDS = 220.0
+# Re-derived 2026-08-07 from the POST-FIX setup budget (workflow-level fix,
+# same PR, same comment): ``timeout-minutes`` raised 10 -> 18 (1080s) and the
+# uv cache re-enabled for this job (was ``cache-enabled: "false"``, the
+# dominant ~133s/run term in the measured 317s median setup). The job-timeout
+# bound is built CONSERVATIVELY on the fleet-measured 613s setup MAX under
+# the old no-cache config, not an assumed post-cache-enable improvement --
+# the GitHub Actions cache is a best-effort, evictable store, so a cold/
+# evicted cache can still cost the full no-cache setup time on any given run:
+#     613s (measured max setup, cache-miss-safe)
+#   + 150s (this deadline, re-derived below)
+#   + 150s (max post-deadline tail, unchanged -- one already-in-flight
+#           rate-limited call: 3 * 30s timeouts + 2 * 30s capped backoffs)
+#   = 913s < 1080s job timeout  (~167s / ~15% real margin)
+#
+# ``_RUN_DEADLINE_SECONDS`` itself is lowered 220.0 -> 150.0 to fit inside
+# that budget with real margin rather than consuming nearly all of it: 150s
+# still comfortably bounds a *sustained* cross-pin failure run (which is
+# fail-closed UNDETERMINED anyway, not a false pass) -- it is exactly one
+# worst-case per-call ceiling, i.e. this deadline alone guarantees at least
+# one full retry-exhaustion cycle completes before the run is cut off --
+# while leaving the script room to print its own diagnostic before the job's
+# hard cancellation. A binding test
+# (``tests/ci/test_pin_reachability_omn15538.py::test_pin_reachability_job_timeout_covers_measured_budget``)
+# parses ``timeout-minutes`` out of the real ci.yml and asserts this
+# arithmetic in both directions (too-small AND absurdly-large timeout), so a
+# future edit to either side of this budget that breaks the bound fails CI
+# instead of silently drifting back into the pre-fix failure mode.
+_RUN_DEADLINE_SECONDS = 150.0
 
 _SHA40_RE = re.compile(r"\A[0-9a-f]{40}\Z")
 
