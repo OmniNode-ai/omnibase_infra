@@ -119,18 +119,26 @@ _REQUEST_TIMEOUT_SECONDS = 30.0
 # HTTP 5xx, HTTP 429, and a rate-limit-signaled 403). A definitive HTTP 4xx is
 # never retried -- it will not change on a second try, and this job runs on
 # every PR so added latency is never free. Worst case for one fully-exhausted
-# call: 3 * _REQUEST_TIMEOUT_SECONDS + sum(_API_RETRY_BACKOFF_SECONDS) = 96s.
+# call has TWO ceilings depending on backoff class (corrected 2026-08-06,
+# terminal adversarial verify round 2 -- the fixed-schedule figure below was
+# previously mis-cited as THE worst case; it is only the cheaper of the two):
+#   fixed-schedule (non-rate-limit 5xx, no server backoff header):
+#     3 * _REQUEST_TIMEOUT_SECONDS + sum(_API_RETRY_BACKOFF_SECONDS) = 96s
+#   rate-limited (429 / rate-limited 403 with a server Retry-After header,
+#   which is PREFERRED over the fixed schedule and capped at
+#   _MAX_RATE_LIMIT_BACKOFF_SECONDS -- see ``_rate_limit_backoff_seconds``):
+#     3 * _REQUEST_TIMEOUT_SECONDS + 2 * _MAX_RATE_LIMIT_BACKOFF_SECONDS = 150s
 #
-# That 96s bounds ONE call, not the run. The circuit breaker below resets its
-# consecutive-failure counter on ANY HTTP-status-bearing response -- including
-# a retried-and-still-failing 503/429 -- so a run whose transport failures are
-# intermittent rather than sustained can pay the full 96s ceiling on every
-# pin without the breaker ever tripping (defect found 2026-08-06: measured
-# max 944s / 1174s across 21-pin trials with 19-23/30 exceeding the 600s CI
-# job timeout). ``_RUN_DEADLINE_SECONDS`` below is the actual run-wide bound;
-# the breaker remains a fast-path for the sustained-outage case it was built
-# for, but is no longer the thing standing between this gate and the job
-# timeout.
+# That 150s (the true ceiling, not 96s) bounds ONE call, not the run. The
+# circuit breaker below resets its consecutive-failure counter on ANY
+# HTTP-status-bearing response -- including a retried-and-still-failing
+# 503/429 -- so a run whose transport failures are intermittent rather than
+# sustained can pay the full per-call ceiling on every pin without the
+# breaker ever tripping (defect found 2026-08-06: measured max 944s / 1174s
+# across 21-pin trials with 19-23/30 exceeding the 600s CI job timeout).
+# ``_RUN_DEADLINE_SECONDS`` below is the actual run-wide bound; the breaker
+# remains a fast-path for the sustained-outage case it was built for, but is
+# no longer the thing standing between this gate and the job timeout.
 _API_MAX_ATTEMPTS = 3
 _API_RETRY_BACKOFF_SECONDS: tuple[float, ...] = (2.0, 4.0)
 _TRANSIENT_HTTP_STATUS = frozenset({429, 500, 502, 503, 504})
@@ -149,11 +157,41 @@ _TRANSPORT_FAILURE_CIRCUIT_BREAKER = 3
 # commits-endpoint lookup (defect found 2026-08-06: ``_explain`` used to run
 # an unguarded second call after the last passing check, doubling the
 # post-deadline tail to 192s). With both call sites guarded, the actual
-# worst case is this deadline plus at most one already-in-flight call's 96s
-# ceiling -- 480 + 96 = 576s, still under the CI job's ``timeout-minutes: 10``
-# (600s; .github/workflows/ci.yml). Once exceeded, every remaining resolution
-# is reported UNDETERMINED (fail-closed, not a pass), never silently dropped.
-_RUN_DEADLINE_SECONDS = 480.0
+# worst case is this deadline plus at most one already-in-flight call's tail.
+#
+# Lowered from 480.0 to 220.0 (2026-08-06, terminal adversarial verify round
+# 2, PR #2679 comment 5209929069): the prior ``480 + 96 = 576s`` bound used
+# the WRONG per-call ceiling and ignored job setup entirely.
+#
+# * The 96s figure only covered the fixed-schedule backoff class
+#   (2.0 + 4.0 = 6s of sleep). It is NOT the worst case: a 429 / rate-limited
+#   403 with a server ``Retry-After`` prefers the server-provided delay over
+#   the fixed schedule, capped at ``_MAX_RATE_LIMIT_BACKOFF_SECONDS`` (30s)
+#   -- see ``_rate_limit_backoff_seconds``. One fully-exhausted call in that
+#   class costs ``_API_MAX_ATTEMPTS`` (3) timeouts of
+#   ``_REQUEST_TIMEOUT_SECONDS`` (30s) each, PLUS a capped 30s server backoff
+#   after each of the first two attempts:
+#     3 * 30.0 + 2 * 30.0 = 90 + 60 = 150s   (measured/derived from code, not
+#                                              the 96s this comment used to say)
+# * 600s is the CI **job**'s ``timeout-minutes`` (.github/workflows/ci.yml),
+#   not the script's own budget. Measured on this PR's own prior CI head
+#   (job 92716571663): checkout + ``uv`` setup (cache disabled) costs ~196s
+#   BEFORE the script starts, leaving the script itself only ~404s of the
+#   600s job budget -- not 600s. The old ``480 + 96 = 576s`` "margin" never
+#   accounted for that ~196s prefix, so real worst case was
+#   ``196 + 480 + 150 = 826s``: the job gets cancelled by GitHub at 600s and
+#   the script's own fail-closed UNDETERMINED print never happens -- the
+#   exact wedged-red-without-a-message failure mode this file exists to
+#   remove.
+#
+# New bound, real margin:
+#     ~200s measured setup + 220s deadline + 150s max post-deadline tail
+#       = ~570s < 600s job timeout  (~30s margin)
+#
+# 220s still comfortably bounds a *sustained* cross-pin failure run (which is
+# fail-closed UNDETERMINED anyway, not a false pass) while leaving the script
+# room to print its own diagnostic before the job's hard cancellation.
+_RUN_DEADLINE_SECONDS = 220.0
 
 _SHA40_RE = re.compile(r"\A[0-9a-f]{40}\Z")
 

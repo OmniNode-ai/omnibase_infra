@@ -644,7 +644,8 @@ def test_api_get_backoff_is_bounded(monkeypatch: pytest.MonkeyPatch) -> None:
 # ---------------------------------------------------------------------------
 # Regression (defect fix, 2026-08-06): bounded-worst-case-under-CI-timeout
 # ---------------------------------------------------------------------------
-# The per-call retry ceiling above (96s) only bounds ONE call. The
+# The per-call retry ceiling above (150s, the TRUE worst case -- see the
+# rate-limited-class correction below) only bounds ONE call. The
 # pre-existing consecutive-transport-failure circuit breaker resets to 0 on
 # ANY HTTP-status-bearing response (including a retried-and-still-failing
 # 503/429), so an intermittent-transport run can pay the full per-call
@@ -708,22 +709,33 @@ def test_resolver_aggregate_wall_time_is_bounded_under_intermittent_transport(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     """End-to-end through ``_Resolver.resolve``, using a pin-boundary-aligned
-    WORST-CASE pattern (independent verifier's probe2/probe3 construction):
-    a fast ``dev`` compare followed by a ``main`` compare that fully exhausts
-    the 96s per-call retry ceiling (3 * 30s request timeout + 2s + 4s backoff
-    -- the module's own documented worst-case-per-call formula at :120-121)
-    before finally answering a definitive 404. That lands the run-wide
-    deadline crossing exactly inside ``_explain``'s own lookup call.
+    TRUE-WORST-CASE pattern: a fast ``dev`` compare followed by a ``main``
+    compare that fully exhausts the RATE-LIMITED retry ceiling -- 429 with a
+    server ``Retry-After`` header on the first two attempts (capped at
+    ``_MAX_RATE_LIMIT_BACKOFF_SECONDS``, and PREFERRED over the fixed 2s/4s
+    schedule per ``_rate_limit_backoff_seconds``) -- before finally answering
+    a definitive 404 on the third attempt:
 
-    A prior version of this test used a hash-derived alternating
-    success/timeout split that happened to never land a maximally-expensive
-    main-compare immediately followed by ``_explain`` right after a passing
-    deadline check -- it asserted a bound it never actually exercised. Before
-    the ``_explain`` deadline guard was added, THIS pattern doubled the
-    post-deadline tail to ~192s (measured 671.15s in a full-run
-    reconstruction); the true bound is one already-in-flight call's 96s
-    ceiling, not two."""
-    from scripts.ci.check_pin_reachability import _API_MAX_ATTEMPTS
+        3 * _REQUEST_TIMEOUT_SECONDS + 2 * _MAX_RATE_LIMIT_BACKOFF_SECONDS
+          = 90 + 60 = 150s
+
+    That lands the run-wide deadline crossing exactly inside ``main``'s
+    still-in-flight compare call, with ``_explain``'s own lookup guarded
+    against running afterward.
+
+    Corrected 2026-08-06 (terminal adversarial verify round 2, PR #2679
+    comment 5209929069): a prior version of this test exercised only the
+    header-less-503 fixed-schedule backoff class, whose per-call ceiling is
+    96s -- cheaper than, and therefore not discriminating against, the
+    150s rate-limited ceiling this module's own retry logic actually pays
+    when GitHub signals a rate limit. A test asserting ``<= 96.0 + 1.0`` on
+    THIS construction would fail (undercounts the true tail by 54s) --
+    proof the old assertion was pinning the wrong number, not merely a
+    smaller one."""
+    from scripts.ci.check_pin_reachability import (
+        _API_MAX_ATTEMPTS,
+        _MAX_RATE_LIMIT_BACKOFF_SECONDS,
+    )
 
     clock = {"t": 0.0}
 
@@ -740,12 +752,24 @@ def test_resolver_aggregate_wall_time_is_bounded_under_intermittent_transport(
             # dev-branch compare: fast, definitive "not reachable" -- no
             # latency tax.
             return _FakeResponse(200, {"status": "diverged"})
-        # main-branch compare AND the commits/_explain endpoint: both fully
-        # exhaust the per-call retry ceiling before finally answering 404.
+        if "/commits/" in url:
+            # _explain's own lookup: must never be reached once the
+            # run-wide deadline is already exceeded by main's compare call.
+            raise AssertionError(
+                "_explain must not issue its own unguarded network call "
+                "past the deadline"
+            )
+        # main-branch compare: fully exhaust the RATE-LIMITED retry ceiling
+        # (429 + Retry-After, capped and preferred over the fixed schedule)
+        # before finally answering a definitive 404 on the last attempt.
         clock["t"] += timeout or 0.0
         attempt_counts[url] = attempt_counts.get(url, 0) + 1
         if attempt_counts[url] < _API_MAX_ATTEMPTS:
-            raise _http_error_with_headers(503, "server error")
+            raise _http_error_with_headers(
+                429,
+                "rate limited",
+                {"Retry-After": str(_MAX_RATE_LIMIT_BACKOFF_SECONDS)},
+            )
         raise _http_error_with_headers(404, "not found")
 
     monkeypatch.setattr(urllib.request, "urlopen", fake_urlopen)
@@ -753,10 +777,12 @@ def test_resolver_aggregate_wall_time_is_bounded_under_intermittent_transport(
 
     resolver = _Resolver(("dev", "main"), now=lambda: clock["t"])
     # Land the deadline exactly between "dev's fast compare completes" (~0s)
-    # and "main's 96s compare completes" (~96s) -- the per-branch loop's OWN
-    # deadline check (before main's call) must still pass here; it is
-    # ``_explain``'s guard that must catch the crossing.
-    resolver._deadline_at = 50.0
+    # and "main's 150s compare completes" (~150s) -- the per-branch loop's
+    # OWN deadline check (before main's call) must still pass here, so
+    # main's call is already in flight when the deadline is crossed; it is
+    # ``_explain``'s guard that must catch the crossing afterward.
+    deadline_at = 50.0
+    resolver._deadline_at = deadline_at
 
     resolution = resolver.resolve("omnimarket", "b" * 40)
 
@@ -766,13 +792,33 @@ def test_resolver_aggregate_wall_time_is_bounded_under_intermittent_transport(
         "_explain must not issue its own unguarded network call past the "
         "deadline"
     )
-    # True bound: the deadline plus at most ONE already-in-flight call's 96s
-    # ceiling -- not two (one compare call plus one unguarded _explain call,
-    # the bug this test pins).
-    assert clock["t"] <= 96.0 + 1.0, (
+    # True bound: the deadline plus at most ONE already-in-flight call's
+    # REAL 150s rate-limited ceiling -- not the cheaper 96s fixed-schedule
+    # figure, and not doubled by an unguarded _explain call.
+    real_ceiling = 3 * 30.0 + 2 * _MAX_RATE_LIMIT_BACKOFF_SECONDS
+    assert real_ceiling == 150.0, "sanity: this test's own ceiling arithmetic"
+    assert clock["t"] <= real_ceiling + 1.0, (
         f"aggregate simulated wall time {clock['t']}s must stay bounded by "
-        "one already-in-flight call's 96s ceiling past the deadline, not "
-        "double-charged by an unguarded _explain call"
+        f"one already-in-flight call's {real_ceiling}s rate-limited ceiling "
+        "past the deadline, not double-charged by an unguarded _explain call"
+    )
+    # Post-deadline tail specifically (the portion that runs AFTER the
+    # deadline was already crossed) must not exceed the real per-call
+    # ceiling either -- it is bounded by "one already-in-flight call", full
+    # stop, regardless of when within that call the deadline landed.
+    post_deadline_tail = clock["t"] - deadline_at
+    assert post_deadline_tail <= real_ceiling + 1.0, (
+        f"post-deadline tail {post_deadline_tail}s must stay within the "
+        f"real {real_ceiling}s per-call ceiling"
+    )
+    # Discriminate against the old, wrong 96s figure: this construction's
+    # true cost must exceed it, proving a test that only asserted <= 96s
+    # would have been fooled by a cheaper backoff class than the one that
+    # actually governs the rate-limited path.
+    assert clock["t"] > 96.0, (
+        f"aggregate simulated wall time {clock['t']}s must exceed the old "
+        "(wrong) 96s fixed-schedule ceiling -- otherwise this test cannot "
+        "discriminate the rate-limited class from the cheaper one"
     )
 
 
