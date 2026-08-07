@@ -607,17 +607,17 @@ resolve_compose_file_args() {
     #   local -a compose_args
     #   resolve_compose_file_args compose_args "${deploy_target}" "${compose_project}"
     #   docker compose -p "${compose_project}" "${compose_args[@]}" ...
-    local -n _out_args="$1"
+    local _out_args_name="$1"
     local deploy_target="$2"
     local compose_project="$3"
 
     local docker_dir="${deploy_target}/docker"
-    _out_args=("-f" "${docker_dir}/docker-compose.infra.yml")
+    eval "${_out_args_name}=(-f $(printf '%q' "${docker_dir}/docker-compose.infra.yml"))"
 
     local overlay_filename
     overlay_filename="$(resolve_lane_overlay_filename "${compose_project}")"
     if [[ -n "${overlay_filename}" ]]; then
-        _out_args+=("-f" "${docker_dir}/${overlay_filename}")
+        eval "${_out_args_name}+=( -f $(printf '%q' "${docker_dir}/${overlay_filename}") )"
     else
         # Dev/lab lane (bare omnibase-infra project). OMN-15379: layer the
         # dev-lane overlay, whose ONLY content is ONEX_MIGRATION_LANE=dev for
@@ -628,7 +628,7 @@ resolve_compose_file_args() {
         # docker/docker-compose.dev-lane.yml. Unset indicator = FULL fence, so
         # omitting this file degrades safely (the lane comes up without
         # node_service_registry) rather than dangerously.
-        _out_args+=("-f" "${docker_dir}/docker-compose.dev-lane.yml")
+        eval "${_out_args_name}+=( -f $(printf '%q' "${docker_dir}/docker-compose.dev-lane.yml") )"
     fi
 }
 
@@ -1804,19 +1804,19 @@ resolve_core_contracts_dir() {
     # `local resolved=""` here produced an empty resolved-dir output AND
     # incorrectly returned success on the fail-closed case once the caller's
     # own variable was also named "resolved".
-    local -n _out_probed="$1"
-    local -n _out_resolved="$2"
-    _out_resolved=""
+    local _out_probed_name="$1"
+    local _out_resolved_name="$2"
+    eval "${_out_resolved_name}=''"
     local _resolve_ccd_dir=""
 
     if [[ -n "${OMNI_HOME:-}" ]]; then
         local fs_candidate="${OMNI_HOME}/omnibase_core/src/omnibase_core/contracts/runtime_data"
-        _out_probed+=("${fs_candidate}")
+        eval "${_out_probed_name}+=( $(printf '%q' "${fs_candidate}") )"
         if [[ -d "${fs_candidate}" ]]; then
             _resolve_ccd_dir="${fs_candidate}"
         fi
     else
-        _out_probed+=("<OMNI_HOME unset -- cannot probe the sibling clone filesystem path>")
+        eval "${_out_probed_name}+=( $(printf '%q' "<OMNI_HOME unset -- cannot probe the sibling clone filesystem path>") )"
     fi
 
     if [[ -z "${_resolve_ccd_dir}" ]]; then
@@ -1834,15 +1834,15 @@ if spec and spec.origin:
         print(runtime_data)
 " 2>/dev/null || true)"
         if [[ -n "${py_candidate}" ]]; then
-            _out_probed+=("${py_candidate} (python find_spec('omnibase_core') resolution)")
+            eval "${_out_probed_name}+=( $(printf '%q' "${py_candidate} (python find_spec('omnibase_core') resolution)") )"
             _resolve_ccd_dir="${py_candidate}"
         else
-            _out_probed+=("<python find_spec('omnibase_core') returned no importable spec/origin>")
+            eval "${_out_probed_name}+=( $(printf '%q' "<python find_spec('omnibase_core') returned no importable spec/origin>") )"
         fi
     fi
 
     if [[ -n "${_resolve_ccd_dir}" ]]; then
-        _out_resolved="${_resolve_ccd_dir}"
+        eval "${_out_resolved_name}=$(printf '%q' "${_resolve_ccd_dir}")"
         return 0
     fi
     return 1

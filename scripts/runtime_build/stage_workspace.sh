@@ -206,7 +206,7 @@ if [[ -f "${CONSUMER_LOCK}" ]]; then
             "${PREFLIGHT_REPO_ARGS[@]}" \
             --output "${PIN_COMPARISON_OUT}" \
             --build-source workspace \
-            "${preflight_extra[@]}" || preflight_status=$?
+            ${preflight_extra[@]+"${preflight_extra[@]}"} || preflight_status=$?
     else
         preflight_status=0
         "${PREFLIGHT_PYTHON}" "${SCRIPT_DIR}/check_sibling_lock_pins.py" \
@@ -214,7 +214,7 @@ if [[ -f "${CONSUMER_LOCK}" ]]; then
             "${PREFLIGHT_REPO_ARGS[@]}" \
             --output "${PIN_COMPARISON_OUT}" \
             --build-source workspace \
-            "${preflight_extra[@]}" || preflight_status=$?
+            ${preflight_extra[@]+"${preflight_extra[@]}"} || preflight_status=$?
     fi
     if [[ "${preflight_status}" != "0" ]]; then
         echo "ERROR: sibling-pin preflight failed against ${CONSUMER_LOCK}" >&2
