@@ -1045,14 +1045,16 @@ def test_api_get_does_not_crash_on_a_negative_retry_after_header(
 # ---------------------------------------------------------------------------
 
 # Measured worst-case job-start -> script-step-start wall time across the
-# 38-run fleet (PR #2679 comment 5211687650), under the OLD
-# ``cache-enabled: "false"``. Enabling the uv cache (the ci.yml half of this
-# same fix) lowers the TYPICAL case well below this, but the GitHub Actions
-# cache is a best-effort, evictable store (lockfile hash change, 7-day
-# no-access eviction, cold first run) -- a cache MISS can still cost the full
-# no-cache setup time, so this stays the conservative bound the arithmetic
-# below is built on, independent of whether the cache actually hits on any
-# given run.
+# 38-run fleet (PR #2679 comment 5211687650), under ``cache-enabled: "false"``
+# -- left unchanged for this job (see the ci.yml ``pin-reachability`` job
+# comment: this repo's self-hosted CI already replaced the per-job uv cache
+# with a shared dependency-environment canary, and
+# ``docs/ci/versioned-ci-env-canary.md`` forbids enabling setup-uv cache save
+# on jobs that intentionally run ``uv sync --no-cache``, which
+# ``test_ci_workflow_resilience.py::test_short_gates_can_disable_uv_cache_cleanup``
+# enforces uniformly). This is the fleet-measured MAX, not a typical/median
+# figure, so the arithmetic below holds without assuming any future setup
+# speedup.
 _MEASURED_SETUP_BUDGET_SECONDS = 613.0
 
 

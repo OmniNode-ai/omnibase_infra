@@ -197,14 +197,17 @@ _TRANSPORT_FAILURE_CIRCUIT_BREAKER = 3
 # ``pin-reachability`` job comment for that half of the fix.
 #
 # Re-derived 2026-08-07 from the POST-FIX setup budget (workflow-level fix,
-# same PR, same comment): ``timeout-minutes`` raised 10 -> 18 (1080s) and the
-# uv cache re-enabled for this job (was ``cache-enabled: "false"``, the
-# dominant ~133s/run term in the measured 317s median setup). The job-timeout
-# bound is built CONSERVATIVELY on the fleet-measured 613s setup MAX under
-# the old no-cache config, not an assumed post-cache-enable improvement --
-# the GitHub Actions cache is a best-effort, evictable store, so a cold/
-# evicted cache can still cost the full no-cache setup time on any given run:
-#     613s (measured max setup, cache-miss-safe)
+# same PR, same comment): ``timeout-minutes`` raised 10 -> 18 (1080s).
+# ``cache-enabled: "false"`` is intentionally left unchanged for this job --
+# this repo's self-hosted-fleet CI already replaced the per-job uv cache with
+# the shared host-local dependency-environment canary (see
+# ``docs/ci/versioned-ci-env-canary.md``), which explicitly forbids enabling
+# setup-uv cache save on jobs that run ``uv sync --no-cache``, and
+# ``tests/ci/test_ci_workflow_resilience.py::test_short_gates_can_disable_uv_cache_cleanup``
+# enforces that uniformly across every ci.yml job. The job-timeout bound
+# below is therefore built directly on the fleet-measured 613s setup MAX
+# (not an assumed cache improvement that was never applied):
+#     613s (measured max setup, fleet n=38)
 #   + 150s (this deadline, re-derived below)
 #   + 150s (max post-deadline tail, unchanged -- one already-in-flight
 #           rate-limited call: 3 * 30s timeouts + 2 * 30s capped backoffs)

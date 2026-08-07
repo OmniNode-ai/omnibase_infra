@@ -733,13 +733,23 @@ jobs:
       }}
     # Raised from 10 to 18 (2026-08-07, PR #2679 comment 5211687650): a
     # 38-run fleet measurement of THIS job found setup time (job start ->
-    # script step start) alone had median 317s and max 613s under
-    # cache-enabled: "false" -- 6/38 runs were killed by the old
+    # script step start) alone had median 317s and max 613s under the
+    # existing cache-enabled: "false" -- 6/38 runs were killed by the old
     # timeout-minutes: 10 (600s) DURING setup, before the script step ever
-    # ran. Derivation of 18min (1080s), conservatively assuming a cache MISS
-    # (the fleet max, not the cache-enabled improvement below) so this bound
-    # holds even when the uv cache is cold/evicted:
-    #   613s (measured max setup, cache-miss-safe)
+    # ran. ``cache-enabled: "false"`` is intentionally NOT flipped here: this
+    # repo's self-hosted-fleet CI already replaced the per-job uv cache with
+    # the shared host-local dependency-environment canary (see
+    # ``docs/ci/versioned-ci-env-canary.md``), which explicitly says "Do not
+    # enable setup-uv cache save for direct jobs that intentionally run
+    # ``uv sync --no-cache``; the post-job cache upload can outlive the
+    # actual check and cancel merge-group CI while adding no useful reuse" --
+    # and ``tests/ci/test_ci_workflow_resilience.py::test_short_gates_can_disable_uv_cache_cleanup``
+    # enforces ``cache-enabled: "false"`` on every ci.yml job uniformly for
+    # exactly that reason. The fix here is timeout-minutes alone; the
+    # derivation below is built on the measured fleet MAX (not an assumed
+    # cache improvement) so it is correct with or without any future cache
+    # change:
+    #   613s (measured max setup, fleet n=38)
     # + 150s (script _RUN_DEADLINE_SECONDS, see check_pin_reachability.py)
     # + 150s (worst-case post-deadline tail: one in-flight rate-limited call,
     #         3 * 30s timeouts + 2 * 30s capped backoffs)
@@ -761,14 +771,7 @@ jobs:
           python-version: ${{ env.PYTHON_VERSION }}
           uv-version: ${{ env.UV_VERSION }}
           cache-version: ${{ env.CACHE_VERSION }}
-          # Enabled (2026-08-07, PR #2679 comment 5211687650): cache-enabled:
-          # "false" was the dominant setup-time term (measured 133s+/run of
-          # the 317s median setup) with no offsetting benefit -- this job
-          # only reads two small lockfiles' worth of deps, nothing that
-          # needs a forced-cold install. Restoring the uv cache lowers the
-          # TYPICAL setup cost; timeout-minutes above is raised independent
-          # of this so the job's worst-case bound does not depend on the
-          # cache actually hitting.
+          cache-enabled: "false"
 
       - name: Every cross-repo pin must be reachable from dev or main
         env:
