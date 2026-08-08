@@ -31,7 +31,9 @@ on:
     # `occ-preflight` job -- see ci.yml's identical trigger for the full
     # rationale. Without it, `occ-preflight / eligibility` (workflowName
     # "Hostile Reviewer") sits at a stale pre-stamp FAILURE forever.
-    types: [opened, edited, synchronize, reopened]
+    # OMN-15731: add labeled/unlabeled so applying/removing ci:ready
+    # retriggers this workflow's evaluation of the hostile-review job's if:.
+    types: [opened, edited, synchronize, reopened, labeled, unlabeled]
 
 permissions:
   pull-requests: write
@@ -58,6 +60,12 @@ jobs:
 
   hostile-review:
     needs: occ-preflight
+    # OMN-15731 label-gated CI pilot: "Hostile Review Gate" does not gate
+    # merge today (absent from STRICT_GATE_JOBS/SKIPPABLE_GATE_JOBS/
+    # EXPECTED_EXTERNAL_CONTEXTS in scripts/ci/ci_summary_gate.py, and not a
+    # direct required context) -- gating it off ci:ready is a pure runner-
+    # cost win with no fail-closed exposure to design around.
+    if: contains(github.event.pull_request.labels.*.name, 'ci:ready') || github.event_name != 'pull_request'
     name: Hostile Reviewer (adversarial gate)
     # self-hosted runner on .201 required -- qwen3-review(-b) are LAN-only  # onex-allow-internal-ip
     runs-on: >-

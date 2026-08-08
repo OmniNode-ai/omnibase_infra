@@ -87,8 +87,21 @@ gates:
     caller_workflow: deploy-gate.yml
     caller_job: deploy-gate
     cross_repo_ref: "OmniNode-ai/omniclaude/.github/workflows/deploy-gate-reusable.yml@ff230264ac3300d7ced43564dc921f44558110fe"
-    skip_semantics: never
-    rationale: "Runtime-change PRs must cite a ticket with deploy evidence (OMN-8912/DGM-Phase6). Caller job has no if:, no path filter, pull_request+merge_group trigger present."
+    # OMN-15731 label-gated CI pilot: the caller job now carries
+    # `if: contains(github.event.pull_request.labels.*.name, 'ci:ready') ||
+    # github.event_name != 'pull_request'`. neutral_ok, not never, because a
+    # skip here does not weaken enforcement: when the caller is skipped the
+    # reusable workflow never starts, so "deploy-gate / deploy-gate" is
+    # ABSENT from commits/{sha}/check-runs -- and this context is also an
+    # EXPECTED_EXTERNAL_CONTEXTS member in scripts/ci/ci_summary_gate.py,
+    # whose own docstring states missing/still-running resolves to PENDING,
+    # converted to FAILURE at the poller's deadline -- never SUCCESS. An
+    # unlabeled PR's sole required context ("CI Summary") therefore still
+    # fails closed; applying ci:ready restores the caller's unconditional
+    # trigger and the context reports normally. merge_group is unaffected
+    # (github.event_name != 'pull_request' short-circuits the label check).
+    skip_semantics: neutral_ok
+    rationale: "OMN-15731: pilot label-gated CI. Runtime-change PRs must still cite a ticket with deploy evidence (OMN-8912/DGM-Phase6) once ci:ready is applied; an unlabeled PR is not exempted -- it is PENDING/FAILURE via the EXPECTED_EXTERNAL_CONTEXTS absent-context path in CI Summary, never green-by-skip. See comment above for the full chain."
   - name: "Topic Enum Drift Check"
     mode: REQUIRED
     producer_kind: local

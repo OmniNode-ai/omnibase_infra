@@ -13,6 +13,9 @@ name: Deploy Gate
 on:
   pull_request:
     branches: [main, dev, develop]
+    # OMN-15731: add labeled/unlabeled so applying/removing ci:ready
+    # retriggers this workflow's evaluation of the deploy-gate job's if:.
+    types: [opened, synchronize, reopened, labeled, unlabeled]
   merge_group:
 
 concurrency:
@@ -21,6 +24,12 @@ concurrency:
 
 jobs:
   deploy-gate:
+    # OMN-15731 label-gated CI pilot: "deploy-gate / deploy-gate" is an
+    # EXPECTED_EXTERNAL_CONTEXTS member in scripts/ci/ci_summary_gate.py,
+    # where EXTERNAL_GOOD_CONCLUSIONS = {"success"} -- a "skipped" conclusion
+    # already fails closed there with no code change needed. merge_group
+    # events carry no PR labels and are unaffected by this condition.
+    if: contains(github.event.pull_request.labels.*.name, 'ci:ready') || github.event_name != 'pull_request'
     uses: OmniNode-ai/omniclaude/.github/workflows/deploy-gate-reusable.yml@70718ddb45f6df5eb5e07159f2ae812efb1da7db
     secrets: inherit
     with:

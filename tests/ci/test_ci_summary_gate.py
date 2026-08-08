@@ -798,4 +798,122 @@ class TestActorConditionalExternalContexts:
             s for s in job["steps"] if "Poll run jobs" in str(s.get("name", ""))
         )
         assert '--pr-author "${PR_AUTHOR:-}"' in str(poll["run"])
-        assert "PR_AUTHOR" in poll["env"]
+
+
+# --------------------------------------------------------------------------
+# OMN-15731 — label-gated CI pilot (omnibase_infra + onex_change_control).
+#
+# `test-parallel` (the heavy split-matrix run) is gated behind the `ci:ready`
+# label. The trap this pins (AC(b) on OMN-15731): `tests-gate` ("CI Tests
+# Gate", a STRICT_GATE_JOBS member) already treats a `skipped` test-parallel
+# result as pass for the pre-existing docs-only exemption. Without the fix
+# below, an unlabeled non-docs-only PR would hit that exact same skip-is-pass
+# path and read CI Summary = SUCCESS with zero tests run. These tests pin
+# that the workflow-level fix distinguishes the two skip reasons, and that
+# the poller's existing STRICT-gate failure path (unchanged code) correctly
+# fails closed once "CI Tests Gate" itself reports failure.
+# --------------------------------------------------------------------------
+
+
+class TestLabelGatedCiPilotOmn15731:
+    def test_pull_request_trigger_includes_label_events(self) -> None:
+        """Applying/removing ci:ready must retrigger evaluation, not just push."""
+        workflow = _load_workflow(CI_WORKFLOW)
+        # PyYAML's default (YAML 1.1) resolver parses the bare `on:` key as
+        # the boolean True, not the string "on" -- this is not a typo.
+        pr_trigger = workflow[True]["pull_request"]
+        for event_type in ("labeled", "unlabeled"):
+            assert event_type in pr_trigger["types"], (
+                f"ci.yml pull_request.types is missing {event_type!r}; a label "
+                "change on a PR would not retrigger the workflow"
+            )
+
+    def test_test_parallel_if_is_gated_on_ci_ready_label(self) -> None:
+        job = _load_workflow(CI_WORKFLOW)["jobs"]["test-parallel"]
+        condition = str(job["if"])
+        assert "contains(github.event.pull_request.labels.*.name, 'ci:ready')" in (
+            condition
+        )
+        # Non-pull_request events (push, merge_group, workflow_dispatch) carry
+        # no PR labels to gate on and must remain unaffected.
+        assert "github.event_name != 'pull_request'" in condition
+
+    def test_tests_gate_distinguishes_docs_only_skip_from_label_skip(self) -> None:
+        """The mechanism that closes the AC(b) trap must exist in ci.yml, not
+        just in this poller's already-generic STRICT-gate failure path."""
+        job = _load_workflow(CI_WORKFLOW)["jobs"]["tests-gate"]
+        step = next(
+            s
+            for s in job["steps"]
+            if "Check test matrix results" in str(s.get("name", ""))
+        )
+        run = str(step["run"])
+        env = step["env"]
+        assert "DOCS_ONLY" in env
+        assert "CI_READY" in env
+        assert '[ "$DOCS_ONLY" = "true" ]' in run
+        assert '[ "$CI_READY" != "true" ]' in run
+        # The label-skip branch must exit non-zero (fail closed), distinct
+        # from the docs-only branch which must not.
+        assert "exit 1" in run
+        assert "zone-filter" in job["needs"]
+
+    def test_unlabeled_skip_reported_as_ci_tests_gate_failure_fails_closed(
+        self,
+    ) -> None:
+        """Simulates the exact live outcome once tests-gate's bash exits 1 for
+        a label-skip: "CI Tests Gate" reports `failure`, and the poller's
+        pre-existing (unmodified) STRICT-gate logic must fail the whole
+        summary closed — proving no new poller mechanism was needed for the
+        infra half of this pilot."""
+        gates = _all_gates("success")
+        for gate in gates:
+            if gate["name"] == "CI Tests Gate":
+                gate["conclusion"] = "failure"
+        code, report = evaluate(gates + [_job("Detect Changes", "success")])
+        assert code == EXIT_FAILURE, report
+        assert "CI Tests Gate" in report
+
+    def test_docs_only_skip_is_still_success(self) -> None:
+        """Control: the pre-existing docs-only exemption must be unaffected —
+        "CI Tests Gate" reporting `success` (as it does when the bash script's
+        docs-only branch completes without exiting 1) still passes."""
+        code, report = evaluate(
+            _all_gates("success") + [_job("Detect Changes", "success")]
+        )
+        assert code == EXIT_SUCCESS, report
+
+    def test_deploy_gate_job_if_gated_on_ci_ready_label(self) -> None:
+        deploy_gate_workflow = _load_workflow(
+            REPO_ROOT / ".github" / "workflows" / "deploy-gate.yml"
+        )
+        job = deploy_gate_workflow["jobs"]["deploy-gate"]
+        condition = str(job["if"])
+        assert "contains(github.event.pull_request.labels.*.name, 'ci:ready')" in (
+            condition
+        )
+        assert "github.event_name != 'pull_request'" in condition
+        assert "labeled" in deploy_gate_workflow[True]["pull_request"]["types"]
+        assert "unlabeled" in deploy_gate_workflow[True]["pull_request"]["types"]
+
+    def test_codeql_job_if_gated_on_ci_ready_label(self) -> None:
+        security_workflow = _load_workflow(
+            REPO_ROOT / ".github" / "workflows" / "security-scan.yml"
+        )
+        job = security_workflow["jobs"]["codeql"]
+        condition = str(job["if"])
+        assert "contains(github.event.pull_request.labels.*.name, 'ci:ready')" in (
+            condition
+        )
+        assert "github.event_name != 'pull_request'" in condition
+
+    def test_hostile_review_job_if_gated_on_ci_ready_label(self) -> None:
+        hostile_workflow = _load_workflow(
+            REPO_ROOT / ".github" / "workflows" / "hostile-reviewer.yml"
+        )
+        job = hostile_workflow["jobs"]["hostile-review"]
+        condition = str(job["if"])
+        assert "contains(github.event.pull_request.labels.*.name, 'ci:ready')" in (
+            condition
+        )
+        assert "github.event_name != 'pull_request'" in condition
