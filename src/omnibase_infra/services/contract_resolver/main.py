@@ -11,7 +11,10 @@ Usage:
     # Create app with container (required)
     from omnibase_core.container import ModelONEXContainer
     container = ModelONEXContainer()
-    app = create_app(container=container)
+    app = create_app(
+        container=container,
+        cors_origins=["https://dashboard.example.invalid"],
+    )
 
     # Run with uvicorn
     uvicorn.run(app, host="0.0.0.0", port=8091)

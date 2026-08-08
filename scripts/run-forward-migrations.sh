@@ -552,7 +552,7 @@ validate_application_migration_manifest() {
     exit 1
   fi
 
-  while IFS='\t' read -r legacy_stream legacy_owner _ legacy_version _ _; do
+  while IFS='	' read -r legacy_stream legacy_owner _ legacy_version _ _; do
     legacy_node="$(printf '%s' "$legacy_version" | cut -d ':' -f 2)"
     legacy_filename="$(printf '%s' "$legacy_version" | cut -d ':' -f 3)"
     if [ -f "${NODE_MIGRATIONS_DIR}/${legacy_node}/${legacy_filename}" ]; then
