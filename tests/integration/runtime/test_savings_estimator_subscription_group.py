@@ -6,10 +6,20 @@ from __future__ import annotations
 
 import ast
 from pathlib import Path
+from uuid import uuid4
 
 import pytest
 
+from omnibase_infra.event_bus.event_bus_kafka import EventBusKafka
+from omnibase_infra.event_bus.models.config import ModelKafkaEventBusConfig
+from omnibase_infra.models import ModelNodeIdentity
+from omnibase_infra.services.observability.savings_estimation.config import (
+    ConfigSavingsEstimation,
+)
+from omnibase_infra.utils import compute_consumer_group_id
+
 SERVICE_KERNEL_PATH = Path("src/omnibase_infra/runtime/service_kernel.py")
+TEST_BOOTSTRAP_SERVERS = "localhost:9092"
 
 
 def _load_service_kernel_ast() -> ast.Module:
@@ -83,6 +93,42 @@ def test_savings_estimator_subscribe_calls_use_canonical_identity() -> None:
     assert all(
         keyword.arg != "group_id" for keyword in savings_subscribe_calls[0].keywords
     )
+
+
+@pytest.mark.integration
+def test_savings_estimator_topics_keep_distinct_effective_consumer_groups() -> None:
+    """Canonical base identity remains isolated per topic at the Kafka boundary."""
+    savings_config = ConfigSavingsEstimation(
+        kafka_bootstrap_servers=TEST_BOOTSTRAP_SERVERS,
+    )
+    identity = ModelNodeIdentity(
+        env="dev",
+        service="onex-kernel",
+        node_name="savings-estimator",
+        version="v1",
+    )
+    base_group_id = compute_consumer_group_id(identity)
+    event_bus = EventBusKafka(
+        config=ModelKafkaEventBusConfig(
+            bootstrap_servers=TEST_BOOTSTRAP_SERVERS,
+            environment="dev",
+        )
+    )
+
+    effective_group_ids = {
+        topic: event_bus._resolve_effective_group_id(
+            base_group_id,
+            topic,
+            uuid4(),
+            (topic, base_group_id),
+        )
+        for topic in savings_config.consumed_topics
+    }
+
+    assert len(effective_group_ids) >= 3
+    assert len(set(effective_group_ids.values())) == len(effective_group_ids)
+    for topic, effective_group_id in effective_group_ids.items():
+        assert effective_group_id == f"{base_group_id}.__t.{topic}"
 
 
 @pytest.mark.integration
