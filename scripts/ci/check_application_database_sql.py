@@ -43,6 +43,10 @@ _LEGACY_DEFAULT_SCHEMA_SQL_EXACT_PATHS = frozenset(
             "0002_capability_scores_tenant_id_and_rls.sql"
         ),
         Path(
+            "docker/migrations/forward/nodes/node_canary_score_reducer/"
+            "0003_capability_scores_tenant_id_to_uuid.sql"
+        ),
+        Path(
             "docker/migrations/forward/nodes/node_projection_context_roi/"
             "003_context_roi_scores_tenant_id_and_rls.sql"
         ),
@@ -82,6 +86,16 @@ _LEGACY_DEFAULT_SCHEMA_SQL_EXACT_PATHS = frozenset(
             "docker/migrations/forward/031_create_llm_call_metrics_and_cost_aggregates.sql"
         ),
         Path("docker/migrations/forward/050_create_baselines_tables.sql"),
+        # OMN-15336 item 4 narrows the historical FORCE-RLS posture of the
+        # existing node_service_registry table. The table is logically
+        # omninode_internal but remains physically in the legacy default schema
+        # until the governed schema cutover moves it; this migration only
+        # applies NO FORCE ROW LEVEL SECURITY when the existing physical table
+        # is present.
+        Path(
+            "docker/migrations/forward/nodes/node_projection_registration/"
+            "0004_node_service_registry_no_force_rls.sql"
+        ),
     }
 )
 
