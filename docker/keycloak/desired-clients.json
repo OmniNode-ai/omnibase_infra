@@ -102,6 +102,62 @@
           }
         }
       ]
+    },
+    {
+      "clientId": "house-tenant-gateway",
+      "publicClient": false,
+      "standardFlowEnabled": false,
+      "directAccessGrantsEnabled": false,
+      "serviceAccountsEnabled": true,
+      "secretEnv": "HOUSE_TENANT_GATEWAY_CLIENT_SECRET",
+      "defaultClientScopes": ["basic", "web-origins", "roles", "profile", "email"],
+      "protocolMappers": [
+        {
+          "name": "tenant_id",
+          "protocolMapper": "oidc-hardcoded-claim-mapper",
+          "config": {
+            "claim.name": "tenant_id",
+            "claim.value": "820272f9-4aaf-5add-a2df-0af942852ab2",
+            "id.token.claim": "true",
+            "access.token.claim": "true",
+            "userinfo.token.claim": "true",
+            "jsonType.label": "String"
+          }
+        },
+        {
+          "name": "tenant_slug",
+          "protocolMapper": "oidc-hardcoded-claim-mapper",
+          "config": {
+            "claim.name": "tenant_slug",
+            "claim.value": "omninode",
+            "id.token.claim": "true",
+            "access.token.claim": "true",
+            "userinfo.token.claim": "true",
+            "jsonType.label": "String"
+          }
+        },
+        {
+          "name": "principal_id",
+          "protocolMapper": "oidc-hardcoded-claim-mapper",
+          "config": {
+            "claim.name": "principal_id",
+            "claim.value": "house-tenant-gateway",
+            "id.token.claim": "true",
+            "access.token.claim": "true",
+            "userinfo.token.claim": "true",
+            "jsonType.label": "String"
+          }
+        },
+        {
+          "name": "gateway-attach-audience",
+          "protocolMapper": "oidc-audience-mapper",
+          "config": {
+            "included.client.audience": "gateway-attach",
+            "id.token.claim": "false",
+            "access.token.claim": "true"
+          }
+        }
+      ]
     }
   ],
   "clientScopes": [],
