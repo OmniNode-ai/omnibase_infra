@@ -49,12 +49,27 @@ def test_savings_estimator_subscribe_calls_use_canonical_identity() -> None:
     assert identity_keywords["env"].id == "environment"
     assert isinstance(identity_keywords["node_name"], ast.Constant)
     assert identity_keywords["node_name"].value == "savings-estimator"
-    assert "service" in identity_keywords
-    assert "version" in identity_keywords
+    assert isinstance(identity_keywords["service"], ast.BoolOp)
+    assert isinstance(identity_keywords["service"].op, ast.Or)
+    assert isinstance(identity_keywords["service"].values[0], ast.Attribute)
+    assert identity_keywords["service"].values[0].attr == "name"
+    assert isinstance(identity_keywords["service"].values[1], ast.Constant)
+    assert identity_keywords["service"].values[1].value == "onex-kernel"
+    assert isinstance(identity_keywords["version"], ast.Constant)
+    assert identity_keywords["version"].value == "v1"
+
+    savings_input_loops = [
+        node
+        for node in ast.walk(tree)
+        if isinstance(node, ast.For)
+        and isinstance(node.target, ast.Name)
+        and node.target.id == "_input_topic"
+    ]
+    assert len(savings_input_loops) == 1
 
     savings_subscribe_calls = [
         node
-        for node in ast.walk(tree)
+        for node in ast.walk(savings_input_loops[0])
         if isinstance(node, ast.Call) and _call_name(node.func) == "subscribe"
         if any(
             keyword.arg == "node_identity"
