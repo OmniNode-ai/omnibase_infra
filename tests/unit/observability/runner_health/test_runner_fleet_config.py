@@ -255,11 +255,31 @@ def test_runner_fleet_config_tool_cache_durability_is_recorded() -> None:
     assert (REPO_ROOT / config.tool_cache.recreate_procedure).is_file()
 
 
+def test_runner_fleet_config_dns_cache_is_recorded_but_inert() -> None:
+    """OMN-15736: the local DNS-cache endpoint is recorded as fleet
+    source-of-truth but stays inert (active=False) until the operator-gated
+    rollout repoints canary runners' `dns:` directive. Proves the
+    shovel-ready record parses under the strict (extra='forbid') fleet-config
+    model and does not activate the cache.
+    """
+    config = load_runner_fleet_config(REPO_ROOT / "config" / "runner_fleet.yaml")
+
+    assert config.dns_cache is not None
+    assert config.dns_cache.active is False
+    assert config.dns_cache.host == "192.168.86.201"
+    assert config.dns_cache.port == 53
+    assert config.dns_cache.upstream_forwarders == (
+        "192.168.86.1",
+        "1.1.1.1",
+        "8.8.8.8",
+    )
+
+
 def test_runner_fleet_config_git_mirror_and_tool_cache_are_optional(
     tmp_path: Path,
 ) -> None:
-    """A fleet config predating the git-transport egress work must still
-    validate — both fields are optional and default to None."""
+    """A fleet config predating the git-transport egress and DNS-cache work
+    must still validate — the fields are optional and default to None."""
     minimal = tmp_path / "runner_fleet.yaml"
     minimal.write_text(
         "version: '1.0'\n"
@@ -275,6 +295,7 @@ def test_runner_fleet_config_git_mirror_and_tool_cache_are_optional(
 
     assert config.git_mirror is None
     assert config.tool_cache is None
+    assert config.dns_cache is None
 
 
 def test_runner_scripts_do_not_embed_legacy_count() -> None:
