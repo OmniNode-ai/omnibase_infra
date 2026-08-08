@@ -156,9 +156,12 @@ def test_runtime_config_loader_round_trips_yaml(tmp_path: Path) -> None:
     config = _runtime_config()
     path = tmp_path / "gateway.yaml"
     contract_path = tmp_path / "contract.yaml"
+    broker_ref_map_path = tmp_path / "broker-ref-map.yaml"
     dumped = config.model_dump(mode="json")
     dumped["local_bus"].pop("acks_aiokafka")
     dumped["cloud_bus"].pop("acks_aiokafka")
+    bootstrap_servers = dumped["cloud_bus"].pop("bootstrap_servers")
+    cloud_broker_ref = dumped["forwarder"]["cloud_bus"]["cloud_broker_ref"]
     mirror_topics = dumped["forwarder"].pop("mirror_topics")
     canary = dumped["forwarder"].pop("canary")
     dumped["forwarder"]["mirror_topic_set"] = "node_bus_forwarder_effect"
@@ -175,16 +178,22 @@ def test_runtime_config_loader_round_trips_yaml(tmp_path: Path) -> None:
                     "gateway_forwarder": {
                         "mirror_topics": mirror_topics,
                         "canary": canary,
+                        "cloud_leg": {"cloud_broker_ref": cloud_broker_ref},
                     }
                 },
             }
         ),
         encoding="utf-8",
     )
+    broker_ref_map_path.write_text(
+        yaml.safe_dump({cloud_broker_ref: bootstrap_servers}),
+        encoding="utf-8",
+    )
 
     loaded = gateway_forwarder.load_gateway_forwarder_runtime_config(
         path,
         contract_path=contract_path,
+        broker_ref_map_path=broker_ref_map_path,
     )
 
     assert loaded == config
@@ -198,7 +207,81 @@ def test_runtime_config_rejects_inline_mirror_topic_literals(tmp_path: Path) -> 
     path.write_text(yaml.safe_dump(dumped), encoding="utf-8")
 
     with pytest.raises(ValueError, match="must name mirror_topic_set"):
-        gateway_forwarder.load_gateway_forwarder_runtime_config(path)
+        gateway_forwarder.load_gateway_forwarder_runtime_config(
+            path,
+            broker_ref_map_path=tmp_path / "unused-broker-ref-map.yaml",
+        )
+
+
+def test_runtime_config_rejects_inline_cloud_broker_literal(tmp_path: Path) -> None:
+    path = tmp_path / "gateway.yaml"
+    contract_path = tmp_path / "contract.yaml"
+    dumped = _runtime_config().model_dump(mode="json")
+    dumped["local_bus"].pop("acks_aiokafka")
+    dumped["cloud_bus"].pop("acks_aiokafka")
+    cloud_broker_ref = dumped["forwarder"]["cloud_bus"]["cloud_broker_ref"]
+    mirror_topics = dumped["forwarder"].pop("mirror_topics")
+    dumped["forwarder"]["mirror_topic_set"] = "node_bus_forwarder_effect"
+    path.write_text(yaml.safe_dump(dumped), encoding="utf-8")
+    contract_path.write_text(
+        yaml.safe_dump(
+            {
+                "contract_name": "node_bus_forwarder_effect",
+                "config": {
+                    "gateway_forwarder": {
+                        "mirror_topics": mirror_topics,
+                        "cloud_leg": {"cloud_broker_ref": cloud_broker_ref},
+                    }
+                },
+            }
+        ),
+        encoding="utf-8",
+    )
+
+    with pytest.raises(
+        ValueError, match="must not declare cloud_bus\\.bootstrap_servers"
+    ):
+        gateway_forwarder.load_gateway_forwarder_runtime_config(
+            path,
+            contract_path=contract_path,
+            broker_ref_map_path=tmp_path / "unused-broker-ref-map.yaml",
+        )
+
+
+def test_runtime_config_fails_closed_on_missing_broker_ref_map(
+    tmp_path: Path,
+) -> None:
+    path = tmp_path / "gateway.yaml"
+    contract_path = tmp_path / "contract.yaml"
+    dumped = _runtime_config().model_dump(mode="json")
+    dumped["local_bus"].pop("acks_aiokafka")
+    dumped["cloud_bus"].pop("acks_aiokafka")
+    dumped["cloud_bus"].pop("bootstrap_servers")
+    cloud_broker_ref = dumped["forwarder"]["cloud_bus"]["cloud_broker_ref"]
+    mirror_topics = dumped["forwarder"].pop("mirror_topics")
+    dumped["forwarder"]["mirror_topic_set"] = "node_bus_forwarder_effect"
+    path.write_text(yaml.safe_dump(dumped), encoding="utf-8")
+    contract_path.write_text(
+        yaml.safe_dump(
+            {
+                "contract_name": "node_bus_forwarder_effect",
+                "config": {
+                    "gateway_forwarder": {
+                        "mirror_topics": mirror_topics,
+                        "cloud_leg": {"cloud_broker_ref": cloud_broker_ref},
+                    }
+                },
+            }
+        ),
+        encoding="utf-8",
+    )
+
+    with pytest.raises(ValueError, match="no broker-ref map was found"):
+        gateway_forwarder.load_gateway_forwarder_runtime_config(
+            path,
+            contract_path=contract_path,
+            broker_ref_map_path=tmp_path / "does-not-exist.yaml",
+        )
 
 
 def test_runtime_config_rejects_inline_canary_literals(tmp_path: Path) -> None:
@@ -232,7 +315,9 @@ def test_staging_canary_resolves_topics_from_node_contract() -> None:
     repo_root = Path(__file__).parents[3]
 
     loaded = gateway_forwarder.load_gateway_forwarder_runtime_config(
-        repo_root / "docker/gateway/beta-gateway-canary.yaml"
+        repo_root / "docker/gateway/beta-gateway-canary.yaml",
+        broker_ref_map_path=repo_root
+        / "tests/fixtures/gateway/beta-gateway-canary-broker-ref-map.yaml",
     )
 
     assert len(loaded.forwarder.mirror_topics.inbound) == 3
@@ -249,6 +334,10 @@ def test_staging_canary_resolves_topics_from_node_contract() -> None:
     assert loaded.cloud_bus.auto_offset_reset == "earliest"
     assert loaded.forwarder.canary.topic == "onex.evt.omnibase-infra.gateway-canary.v1"
     assert loaded.forwarder.canary.cadence_seconds == 30
+    assert loaded.cloud_bus.bootstrap_servers == (
+        "b-1.omninodedevmsk.7ozyd3.c14.kafka.us-east-1.amazonaws.com:9098,"
+        "b-2.omninodedevmsk.7ozyd3.c14.kafka.us-east-1.amazonaws.com:9098"
+    )
 
 
 @pytest.mark.asyncio

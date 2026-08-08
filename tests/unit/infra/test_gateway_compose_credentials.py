@@ -50,6 +50,30 @@ def test_gateway_uses_roles_anywhere_instead_of_static_access_keys() -> None:
     ]
 
 
+def test_gateway_resolves_cloud_broker_from_contract_not_extra_hosts() -> None:
+    """OMN-15743: the cloud broker endpoint is contract-resolved, not baked
+    into a Docker /etc/hosts override."""
+    service = _gateway_service()
+
+    assert "extra_hosts" not in service
+    assert any(
+        ":/run/gateway/broker-ref-map.yaml:ro" in mount for mount in service["volumes"]
+    )
+    assert any(
+        mount.startswith(
+            "${GATEWAY_BROKER_REF_MAP_FILE:?GATEWAY_BROKER_REF_MAP_FILE is required}:"
+        )
+        for mount in service["volumes"]
+    )
+    assert "--broker-ref-map" in service["command"]
+    assert "/run/gateway/broker-ref-map.yaml" in service["command"]
+
+    config = yaml.safe_load(GATEWAY_CONFIG.read_text(encoding="utf-8"))
+    assert "bootstrap_servers" not in config["cloud_bus"]
+    assert "100.53.215.198" not in GATEWAY_COMPOSE.read_text(encoding="utf-8")
+    assert "100.53.215.198" not in GATEWAY_CONFIG.read_text(encoding="utf-8")
+
+
 def test_gateway_has_no_inbound_application_port() -> None:
     """The hybrid edge remains outbound-only after credential hardening."""
     service = _gateway_service()
