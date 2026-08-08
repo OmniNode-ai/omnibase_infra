@@ -1,0 +1,119 @@
+# SPDX-FileCopyrightText: 2025 OmniNode.ai Inc.
+# SPDX-License-Identifier: MIT
+# Copyright (c) 2026 OmniNode Team
+#
+# ONEX Node Contract — Gateway Attach/Session Control-Plane Effect Node
+#
+# G6 of the gateway node-architecture lift
+# (docs/design/2026-08-08-gateway-node-architecture-lift.md) and the ingress
+# node recommended by the connectivity design brief's Open Question 2
+# (docs/design/2026-08-08-customer-cloud-connectivity-design.md, candidate
+# A). This node is the control plane only: attach handshake, per-tenant
+# Keycloak client-credentials validation, session registration bound to
+# tenant_id, heartbeat re-validation (the revocation-detection mechanism),
+# and detach. Byte-forwarding stays in node_bus_forwarder_effect per the
+# lift assessment's §2 — this node never touches the data-plane sockets.
+#
+# Related Tickets:
+#   - OMN-15750: this node
+#   - OMN-15739: architecture ADOPT ruling (epic OMN-12908)
+#   - OMN-12911: per-tenant Keycloak client + credential lifecycle (P0B)
+name: "node_gateway_attach_effect"
+contract_name: "node_gateway_attach_effect"
+node_name: "node_gateway_attach_effect"
+node_type: "EFFECT_GENERIC"
+contract_version:
+  major: 0
+  minor: 1
+  patch: 0
+node_version:
+  major: 0
+  minor: 1
+  patch: 0
+runtime_profiles:
+  - effects
+  - canary
+description: >
+  Control-plane effect node for tenant edge attach/session lifecycle. Validates a per-tenant Keycloak client-credentials access token at attach, registers a tenant-bound session, re-validates via RFC 7662 introspection on each heartbeat (the revocation path -- disabling the tenant's Keycloak client is observable within one heartbeat interval), and tears down on explicit detach. Handlers never publish directly; the runtime publishes each handler's typed response onto the contract-declared session-event topic (node_owned_publish, thin-publisher pattern).
+
+input_model:
+  name: "ModelGatewayAttachRequest"
+  module: "omnibase_infra.nodes.node_gateway_attach_effect.models.model_gateway_attach_request"
+  description: "Primary (attach) request shape. gateway.heartbeat and gateway.detach use their own typed request models at the handler level, matching node_vector_store_effect's per-operation typing convention."
+output_model:
+  name: "ModelGatewayAttachResponse"
+  module: "omnibase_infra.nodes.node_gateway_attach_effect.models.model_gateway_attach_response"
+  description: "Primary (attach) response shape, embedding the thin-publish session_event payload."
+event_bus:
+  version:
+    major: 1
+    minor: 0
+    patch: 0
+  subscribe_topics:
+    - "onex.cmd.omnibase-infra.gateway-attach-request.v1"
+    - "onex.cmd.omnibase-infra.gateway-heartbeat-request.v1"
+    - "onex.cmd.omnibase-infra.gateway-detach-request.v1"
+  publish_topics:
+    - "onex.evt.omnibase-infra.gateway-session.v1"
+config:
+  name: "ModelGatewayAttachConfig"
+  module: "omnibase_infra.nodes.node_gateway_attach_effect.models.model_gateway_attach_config"
+  description: "Frozen attach-node configuration resolved from contract overlays and secret refs. No broker/broker-adjacent literals here — this node validates identity, it never touches Kafka."
+  gateway_attach:
+    keycloak_issuer_ref: "gateway.attach.keycloak.issuer"
+    keycloak_introspection_ref: "gateway.attach.keycloak.introspection"
+    keycloak_admin_client_ref: "gateway.attach.keycloak.admin_client_credentials"
+    required_audience: "gateway-attach"
+    heartbeat_interval_seconds: 15
+    session_degraded_after_seconds: 60
+    max_session_ttl_seconds: 3600
+handler_routing:
+  routing_strategy: "operation_match"
+  handlers:
+    - operation: "gateway.attach"
+      handler:
+        name: "HandlerGatewayAttach"
+        module: "omnibase_infra.nodes.node_gateway_attach_effect.handlers.handler_gateway_attach"
+        handler_type: "INFRA"
+      description: >
+        Decode and validate a client-credentials access token's claims (issuer, audience, tenant_id/tenant_slug/principal_id), register a new tenant-bound session, return the session plus the ATTACHED session_event.
+
+    - operation: "gateway.heartbeat"
+      handler:
+        name: "HandlerGatewayHeartbeat"
+        module: "omnibase_infra.nodes.node_gateway_attach_effect.handlers.handler_gateway_heartbeat"
+        handler_type: "INFRA"
+      description: >
+        Re-validate the session's token via Keycloak RFC 7662 introspection. A disabled tenant client makes this return active:false on the next call, which tears the session down and emits a REVOKED session_event -- this is the revocation mechanism, not a separate admin call against this node.
+
+    - operation: "gateway.detach"
+      handler:
+        name: "HandlerGatewayDetach"
+        module: "omnibase_infra.nodes.node_gateway_attach_effect.handlers.handler_gateway_detach"
+        handler_type: "INFRA"
+      description: >
+        Explicit edge-initiated session teardown, independent of token state.
+
+capabilities:
+  - name: "client_credentials_attach"
+    description: "Validates per-tenant Keycloak confidential-client access tokens (client_credentials grant) at attach time."
+  - name: "introspection_revocation"
+    description: "Heartbeat re-validation via RFC 7662 introspection makes Keycloak-side client revocation observable within one heartbeat interval, independent of the token's own exp."
+  - name: "tenant_bound_session"
+    description: "Every session carries the immutable tenant_id/principal_id derived from the validated token; handlers never trust caller-declared tenant identity."
+  - name: "node_owned_publish"
+    description: "Handlers never publish; the runtime publishes each handler's typed response (embedding session_event) onto the declared session-event topic."
+metadata:
+  description: "Gateway attach/session control-plane effect node (G6)"
+  author: "OmniNode Team"
+  created: "2026-08-08"
+  updated: "2026-08-08"
+  tags:
+    - gateway
+    - ingress
+    - attach
+    - session
+    - keycloak
+    - tenant-isolation
+  known_gaps:
+    - "Session store is in-process (StoreGatewaySessionMemory) for the first slice — a multi-pod deployment needs a shared backend (Valkey) behind the same ProtocolGatewaySessionStore seam. Tracked as follow-on, not built in OMN-15750."
