@@ -461,6 +461,36 @@
       "package": "omnibase_infra",
       "type_scoped": false
     },
+    "dispatcher.auto.node_gateway_link_health_projection_compute.HandlerGatewayLinkHealthProjection.gateway_link_health_project_b6e85659": {
+      "category": "event",
+      "contract_name": "node_gateway_link_health_projection_compute",
+      "event_model_module": null,
+      "event_model_name": null,
+      "handler_id": "dispatcher.auto.node_gateway_link_health_projection_compute.HandlerGatewayLinkHealthProjection.gateway_link_health_project_b6e85659",
+      "handler_module": "omnibase_infra.nodes.node_gateway_link_health_projection_compute.handlers.handler_gateway_link_health_projection",
+      "handler_name": "HandlerGatewayLinkHealthProjection",
+      "message_types": [
+        "omnibase-infra.gateway-heartbeat",
+        "onex.evt.omnibase-infra.gateway-heartbeat.v1"
+      ],
+      "package": "omnibase_infra",
+      "type_scoped": false
+    },
+    "dispatcher.auto.node_gateway_link_health_write_effect.HandlerGatewayLinkHealthUpsert.gateway_link_health_upsert_e2d256a3": {
+      "category": "command",
+      "contract_name": "node_gateway_link_health_write_effect",
+      "event_model_module": null,
+      "event_model_name": null,
+      "handler_id": "dispatcher.auto.node_gateway_link_health_write_effect.HandlerGatewayLinkHealthUpsert.gateway_link_health_upsert_e2d256a3",
+      "handler_module": "omnibase_infra.nodes.node_gateway_link_health_write_effect.handlers.handler_gateway_link_health_upsert",
+      "handler_name": "HandlerGatewayLinkHealthUpsert",
+      "message_types": [
+        "omnibase-infra.gateway-link-health-upsert",
+        "onex.cmd.omnibase-infra.gateway-link-health-upsert.v1"
+      ],
+      "package": "omnibase_infra",
+      "type_scoped": false
+    },
     "dispatcher.auto.node_github_pr_poller_effect.HandlerGitHubApiPoll.github_poll_prs_7786448a": {
       "category": "intent",
       "contract_name": "node_github_pr_poller_effect",
@@ -3230,15 +3260,15 @@
     "corpus": {
       "contracts_by_package": {
         "omnibase_core": 15,
-        "omnibase_infra": 113,
+        "omnibase_infra": 115,
         "onex-change-control": 4
       },
-      "contracts_discovered": 132,
+      "contracts_discovered": 134,
       "discovery_errors": 0,
-      "distinct_subscribe_topics": 108,
-      "probe_count": 1046,
-      "registered_dispatchers": 114,
-      "registered_routes": 124,
+      "distinct_subscribe_topics": 110,
+      "probe_count": 1050,
+      "registered_dispatchers": 116,
+      "registered_routes": 126,
       "type_scoped_dispatchers": 69
     },
     "duplicate_winners": [],
@@ -3279,10 +3309,10 @@
       "omnimemory"
     ],
     "fixture_version": "v2",
-    "generated_at_utc": "2026-08-13T00:51:20.726285+00:00",
+    "generated_at_utc": "2026-08-16T11:30:17.397404+00:00",
     "installed_package_versions": {
       "omnibase-core": "0.46.8",
-      "omnibase-infra": "0.38.4",
+      "omnibase-infra": "0.38.7",
       "omniclaude": null,
       "omniintelligence": null,
       "omnimarket": null,
@@ -3513,6 +3543,23 @@
         "status": "success"
       },
       "topic": "onex.cmd.omnibase-infra.gateway-heartbeat-request.v1"
+    },
+    "P1a::onex.cmd.omnibase-infra.gateway-link-health-upsert.v1": {
+      "family": "P1_topic_event_type_matrix",
+      "input": {
+        "event_type": "omnibase-infra.gateway-link-health-upsert",
+        "payload": "_DictPayload"
+      },
+      "selection": {
+        "dispatcher_ids": [
+          "dispatcher.auto.node_gateway_link_health_write_effect.HandlerGatewayLinkHealthUpsert.gateway_link_health_upsert_e2d256a3"
+        ],
+        "dlq_topic": null,
+        "message_category": "command",
+        "message_type": "omnibase-infra.gateway-link-health-upsert",
+        "status": "success"
+      },
+      "topic": "onex.cmd.omnibase-infra.gateway-link-health-upsert.v1"
     },
     "P1a::onex.cmd.omnibase-infra.llm-completion-request.v1": {
       "family": "P1_topic_event_type_matrix",
@@ -4273,6 +4320,23 @@
         "status": "success"
       },
       "topic": "onex.evt.omnibase-infra.db-error.v1"
+    },
+    "P1a::onex.evt.omnibase-infra.gateway-heartbeat.v1": {
+      "family": "P1_topic_event_type_matrix",
+      "input": {
+        "event_type": "omnibase-infra.gateway-heartbeat",
+        "payload": "_DictPayload"
+      },
+      "selection": {
+        "dispatcher_ids": [
+          "dispatcher.auto.node_gateway_link_health_projection_compute.HandlerGatewayLinkHealthProjection.gateway_link_health_project_b6e85659"
+        ],
+        "dlq_topic": null,
+        "message_category": "event",
+        "message_type": "omnibase-infra.gateway-heartbeat",
+        "status": "success"
+      },
+      "topic": "onex.evt.omnibase-infra.gateway-heartbeat.v1"
     },
     "P1a::onex.evt.omnibase-infra.runner-fleet-health-verdict.v1": {
       "family": "P1_topic_event_type_matrix",
@@ -5205,6 +5269,21 @@
       },
       "topic": "onex.cmd.omnibase-infra.gateway-heartbeat-request.v1"
     },
+    "P1b::onex.cmd.omnibase-infra.gateway-link-health-upsert.v1": {
+      "family": "P1_topic_event_type_matrix",
+      "input": {
+        "event_type": null,
+        "payload": "_DictPayload"
+      },
+      "selection": {
+        "dispatcher_ids": [],
+        "dlq_topic": "onex.dlq.omnibase-infra.commands.v1",
+        "message_category": "command",
+        "message_type": "_DictPayload",
+        "status": "no_dispatcher"
+      },
+      "topic": "onex.cmd.omnibase-infra.gateway-link-health-upsert.v1"
+    },
     "P1b::onex.cmd.omnibase-infra.llm-completion-request.v1": {
       "family": "P1_topic_event_type_matrix",
       "input": {
@@ -5924,6 +6003,21 @@
         "status": "no_dispatcher"
       },
       "topic": "onex.evt.omnibase-infra.db-error.v1"
+    },
+    "P1b::onex.evt.omnibase-infra.gateway-heartbeat.v1": {
+      "family": "P1_topic_event_type_matrix",
+      "input": {
+        "event_type": null,
+        "payload": "_DictPayload"
+      },
+      "selection": {
+        "dispatcher_ids": [],
+        "dlq_topic": "onex.dlq.omnibase-infra.events.v1",
+        "message_category": "event",
+        "message_type": "_DictPayload",
+        "status": "no_dispatcher"
+      },
+      "topic": "onex.evt.omnibase-infra.gateway-heartbeat.v1"
     },
     "P1b::onex.evt.omnibase-infra.runner-fleet-health-verdict.v1": {
       "family": "P1_topic_event_type_matrix",
@@ -23073,6 +23167,26 @@
       "route_id": "route.auto.node_gateway_attach_effect.HandlerGatewayHeartbeat.gateway_heartbeat_9ace454d.onex_cmd_omnibase_infra_gateway_heartbeat_request_v1",
       "topic": "onex.cmd.omnibase-infra.gateway-heartbeat-request.v1",
       "topic_pattern": "*.cmd.omnibase-infra.gateway-heartbeat-request.*",
+      "type_scoped": false
+    },
+    {
+      "contract_name": "node_gateway_link_health_projection_compute",
+      "dispatcher_id": "dispatcher.auto.node_gateway_link_health_projection_compute.HandlerGatewayLinkHealthProjection.gateway_link_health_project_b6e85659",
+      "handler_id": "dispatcher.auto.node_gateway_link_health_projection_compute.HandlerGatewayLinkHealthProjection.gateway_link_health_project_b6e85659",
+      "message_category": "event",
+      "route_id": "route.auto.node_gateway_link_health_projection_compute.HandlerGatewayLinkHealthProjection.gateway_link_health_project_b6e85659.onex_evt_omnibase_infra_gateway_heartbeat_v1",
+      "topic": "onex.evt.omnibase-infra.gateway-heartbeat.v1",
+      "topic_pattern": "*.evt.omnibase-infra.gateway-heartbeat.*",
+      "type_scoped": false
+    },
+    {
+      "contract_name": "node_gateway_link_health_write_effect",
+      "dispatcher_id": "dispatcher.auto.node_gateway_link_health_write_effect.HandlerGatewayLinkHealthUpsert.gateway_link_health_upsert_e2d256a3",
+      "handler_id": "dispatcher.auto.node_gateway_link_health_write_effect.HandlerGatewayLinkHealthUpsert.gateway_link_health_upsert_e2d256a3",
+      "message_category": "command",
+      "route_id": "route.auto.node_gateway_link_health_write_effect.HandlerGatewayLinkHealthUpsert.gateway_link_health_upsert_e2d256a3.onex_cmd_omnibase_infra_gateway_link_health_upsert_v1",
+      "topic": "onex.cmd.omnibase-infra.gateway-link-health-upsert.v1",
+      "topic_pattern": "*.cmd.omnibase-infra.gateway-link-health-upsert.*",
       "type_scoped": false
     },
     {

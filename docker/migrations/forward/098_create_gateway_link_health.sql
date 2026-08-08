@@ -51,6 +51,20 @@
 --   cited contract lines for auditability. Revisit if/when multiple tenant
 --   liveness profiles exist.
 --
+--   OMN-15762 (4th-copy class): this is the 4th independent copy of these
+--   three numbers -- contract.yaml, ModelGatewayForwarderConfig defaults,
+--   deploy YAML, and now this view -- with no load-time cross-check between
+--   them. There is no existing repo pattern for materializing a value into
+--   an already-applied SQL view at migration time (the runtime config
+--   loader's _materialize_contract_* functions resolve at process start
+--   against a live YAML file; a CREATE OR REPLACE VIEW body is baked in
+--   once, at migration-apply time, and this table is already live). Rather
+--   than leave the drift silent, tests/unit/db/test_migration_098.py pins
+--   these three literals against the contract's declared values and fails
+--   the suite the moment they diverge -- see OMN-15762 for the tracked
+--   de-duplication fix (a single materialized-config source all 4 copies
+--   read from).
+--
 -- IDEMPOTENCY:
 --   - CREATE TABLE IF NOT EXISTS / CREATE INDEX IF NOT EXISTS are safe to
 --     re-run.

@@ -253,6 +253,45 @@ async def test_heartbeat_is_tenant_bound_and_published_to_cloud_wire_topic() -> 
     assert envelope.metadata.tags["gateway_direction"] == "local-to-cloud"
 
 
+async def test_heartbeat_also_mirrors_untransformed_to_local_canonical_topic() -> None:
+    """OMN-15570 (G3): NodeGatewayLinkHealthProjectionCompute subscribes to
+    the gateway-heartbeat topic on the LOCAL bus (bus-is-transport: local
+    consumers read canonical topics, never the cloud wire topic). Before
+    this fix ``publish_heartbeat`` only reached the cloud leg, so no local
+    consumer ever observed a heartbeat.
+    """
+    local_bus = _MockGatewayBus()
+    cloud_bus = _MockGatewayBus()
+    config = _config().model_copy(
+        update={
+            "mirror_topics": ModelGatewayMirrorTopics(
+                inbound=(INBOUND_TOPIC,),
+                outbound=(OUTBOUND_TOPIC, HEARTBEAT_TOPIC),
+            )
+        }
+    )
+    service = ServiceGatewayForwarder(
+        config=config,
+        local_bus=local_bus,
+        cloud_bus=cloud_bus,
+    )
+
+    await service.publish_heartbeat()
+
+    assert len(local_bus.published) == 1
+    message = local_bus.published[0]
+    assert message.topic == HEARTBEAT_TOPIC
+    envelope = ModelEventEnvelope[dict[str, object]].model_validate_json(message.value)
+    assert envelope.event_type == "omnibase-infra.gateway-heartbeat"
+    assert envelope.payload["tenant_id"] == "acme"
+    assert envelope.payload["status"] == "active"
+    # Same liveness tick, both legs: envelope_id must match the cloud copy.
+    cloud_envelope = ModelEventEnvelope[dict[str, object]].model_validate_json(
+        cloud_bus.published[0].value
+    )
+    assert envelope.envelope_id == cloud_envelope.envelope_id
+
+
 async def test_publish_status_degraded_goes_to_local_bus_not_cloud() -> None:
     """OMN-15742: DEGRADED must stay observable while the cloud leg is down.
 
