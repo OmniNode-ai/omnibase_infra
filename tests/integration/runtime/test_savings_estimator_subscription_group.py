@@ -96,7 +96,10 @@ def test_savings_estimator_subscribe_calls_use_canonical_identity() -> None:
 
 
 @pytest.mark.integration
-def test_savings_estimator_topics_keep_distinct_effective_consumer_groups() -> None:
+@pytest.mark.asyncio
+async def test_savings_estimator_topics_keep_distinct_effective_consumer_groups() -> (
+    None
+):
     """Canonical base identity remains isolated per topic at the Kafka boundary."""
     savings_config = ConfigSavingsEstimation(
         kafka_bootstrap_servers=TEST_BOOTSTRAP_SERVERS,
@@ -114,21 +117,39 @@ def test_savings_estimator_topics_keep_distinct_effective_consumer_groups() -> N
             environment="dev",
         )
     )
+    event_bus._started = True
+    effective_group_ids: dict[str, str] = {}
 
-    effective_group_ids = {
-        topic: event_bus._resolve_effective_group_id(
-            base_group_id,
+    async def capture_consumer_start(topic: str, group_id: str) -> None:
+        effective_group_ids[topic] = event_bus._resolve_effective_group_id(
+            group_id,
             topic,
             uuid4(),
-            (topic, base_group_id),
+            (topic, group_id),
         )
-        for topic in savings_config.consumed_topics
-    }
+        event_bus._pending_consumer_keys.discard((topic, group_id))
+
+    async def on_message(_message: object) -> None:
+        return None
+
+    event_bus._start_consumer_for_topic_unlocked = capture_consumer_start  # type: ignore[method-assign]
+
+    for topic in savings_config.consumed_topics:
+        await event_bus.subscribe(
+            topic,
+            node_identity=identity,
+            on_message=on_message,
+        )
 
     assert len(effective_group_ids) >= 3
     assert len(set(effective_group_ids.values())) == len(effective_group_ids)
     for topic, effective_group_id in effective_group_ids.items():
         assert effective_group_id == f"{base_group_id}.__t.{topic}"
+        registered_group_ids = {
+            group_id
+            for group_id, _subscription_id, _callback in event_bus._subscribers[topic]
+        }
+        assert registered_group_ids == {base_group_id}
 
 
 @pytest.mark.integration
