@@ -99,10 +99,13 @@ def _minimal_fixture(tmp_path: Path) -> tuple[Path, Path]:
 def test_checked_in_manifest_is_exact_and_all_blockers_are_explicit() -> None:
     result = _validate()
 
-    # 94 as of the OMN-14894 vendor-parity repair: the manifest mirrors the
-    # vendored node migration tree after restoring the nine house-tenant RLS
-    # migrations that are still source-owned in omnimarket dev.
-    assert len(result.declarations) == 94
+    # 96 as of OMN-15732: 94 from the OMN-14894 vendor-parity repair (the
+    # manifest mirrors the vendored node migration tree after restoring the
+    # nine house-tenant RLS migrations that are still source-owned in
+    # omnimarket dev), +2 for node_canary_score_reducer/0003 and
+    # node_projection_registration/0004 (see OMN-15361 exemption fix above
+    # for why these are the deadlock-triggering vendor files).
+    assert len(result.declarations) == 96
     assert result.blocked == ()
     assert len(result.cloud_aliases) == 30
 

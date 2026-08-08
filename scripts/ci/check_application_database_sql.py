@@ -42,6 +42,36 @@ _LEGACY_DEFAULT_SCHEMA_SQL_EXACT_PATHS = frozenset(
             "docker/migrations/forward/nodes/node_canary_score_reducer/"
             "0002_capability_scores_tenant_id_and_rls.sql"
         ),
+        # OMN-15732: 0003 is the direct sequel to 0002 above -- it continues
+        # the OMN-15356 tenant_id TEXT->UUID conversion on the SAME physical
+        # public.capability_scores table 0002 already exempted for the
+        # identical reason (physical table intentionally remains in public
+        # until the governed OMN-15359 schema cutover). OMN-15732 AC2
+        # adjudication (2026-08-08) rejected a standalone, schema-qualified
+        # mapping function as inadmissible for a node migration stream (no
+        # `node:%` domain -- {tenant, omninode_internal} -- admits
+        # platform_catalog); the mapping is now inlined into this same file's
+        # `ALTER COLUMN ... USING` clause, so there is no separate object to
+        # qualify. node-migration-sync (OMN-13332) forces this file to be
+        # vendored verbatim from omnimarket dev regardless of this gate, so
+        # exempting it here (not editing the SQL) is the canonical fix -- see
+        # docs/tracking/ROLLING_WORK_LEDGER.md 2026-08-08
+        # [mergesweep-0808-deadlock] for the full deadlock analysis.
+        Path(
+            "docker/migrations/forward/nodes/node_canary_score_reducer/"
+            "0003_capability_scores_tenant_id_to_uuid.sql"
+        ),
+        # OMN-15732: node_service_registry has been unqualified (default/
+        # public schema) since its 0000 CREATE TABLE; 0004 only flips its
+        # FORCE ROW LEVEL SECURITY posture (OMN-15336 item 4 / operator
+        # ruling R-q, 2026-08-05) inside a DO block that references the same
+        # already-unqualified table -- it introduces no new physical-schema
+        # authority. Same node-migration-sync-forced-vendoring rationale as
+        # above.
+        Path(
+            "docker/migrations/forward/nodes/node_projection_registration/"
+            "0004_node_service_registry_no_force_rls.sql"
+        ),
         Path(
             "docker/migrations/forward/nodes/node_projection_context_roi/"
             "003_context_roi_scores_tenant_id_and_rls.sql"
