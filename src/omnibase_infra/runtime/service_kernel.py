@@ -1680,6 +1680,12 @@ async def bootstrap() -> int:
                 _savings_topic = _savings_config.produce_topic
 
                 _savings_input_topics = list(_savings_config.consumed_topics)
+                _savings_node_identity = ModelNodeIdentity(
+                    env=environment,
+                    service=config.name or "onex-kernel",
+                    node_name="savings-estimator",
+                    version="v1",
+                )
 
                 async def _savings_consumer_loop() -> None:
                     """Consume input events and produce savings estimates."""
@@ -1701,8 +1707,8 @@ async def bootstrap() -> int:
 
                             await event_bus.subscribe(
                                 _input_topic,
+                                node_identity=_savings_node_identity,
                                 on_message=_savings_on_message,
-                                group_id=f"savings-estimator.{_input_topic}",
                             )
                         except Exception:  # noqa: BLE001
                             logger.warning(

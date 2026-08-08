@@ -25,30 +25,49 @@ def _call_name(node: ast.AST) -> str:
 
 
 @pytest.mark.integration
-def test_savings_estimator_subscribe_calls_include_group_id() -> None:
-    """Savings estimator subscriptions must be consumer-group owned."""
+def test_savings_estimator_subscribe_calls_use_canonical_identity() -> None:
+    """Savings subscriptions derive their groups from a typed node identity."""
     tree = _load_service_kernel_ast()
-    subscribe_calls = [
+    savings_identity_assignments = [
         node
         for node in ast.walk(tree)
-        if isinstance(node, ast.Call) and _call_name(node.func) == "subscribe"
+        if isinstance(node, ast.Assign)
+        and any(
+            isinstance(target, ast.Name) and target.id == "_savings_node_identity"
+            for target in node.targets
+        )
+        and isinstance(node.value, ast.Call)
+        and _call_name(node.value.func) == "ModelNodeIdentity"
     ]
+    assert len(savings_identity_assignments) == 1
+    identity_call = savings_identity_assignments[0].value
+    assert isinstance(identity_call, ast.Call)
+    identity_keywords = {
+        keyword.arg: keyword.value for keyword in identity_call.keywords
+    }
+    assert isinstance(identity_keywords["env"], ast.Name)
+    assert identity_keywords["env"].id == "environment"
+    assert isinstance(identity_keywords["node_name"], ast.Constant)
+    assert identity_keywords["node_name"].value == "savings-estimator"
+    assert "service" in identity_keywords
+    assert "version" in identity_keywords
 
     savings_subscribe_calls = [
         node
-        for node in subscribe_calls
+        for node in ast.walk(tree)
+        if isinstance(node, ast.Call) and _call_name(node.func) == "subscribe"
         if any(
-            keyword.arg == "group_id"
-            and isinstance(keyword.value, ast.JoinedStr)
-            and any(
-                isinstance(part, ast.Constant) and part.value == "savings-estimator."
-                for part in keyword.value.values
-            )
+            keyword.arg == "node_identity"
+            and isinstance(keyword.value, ast.Name)
+            and keyword.value.id == "_savings_node_identity"
             for keyword in node.keywords
         )
     ]
 
     assert len(savings_subscribe_calls) == 1
+    assert all(
+        keyword.arg != "group_id" for keyword in savings_subscribe_calls[0].keywords
+    )
 
 
 @pytest.mark.integration
