@@ -235,23 +235,35 @@ class HandlerGatewayLinkHealthUpsert:
 
     async def handle(
         self,
-        envelope: object,
+        payload: object,
     ) -> ModelHandlerOutput[ModelGatewayLinkHealthUpsertResult]:
-        """Contract-routed operation_match entry point."""
-        payload_raw = self._extract_envelope_field(envelope, "payload")
+        """Contract-routed operation_match entry point.
+
+        Named ``payload`` (an ONEX canonical-shape magic parameter name, per
+        ``canonical_handler_shape.py``'s ``MAGIC_PARAM_NAMES``) rather than
+        typed directly as ``ModelPayloadGatewayLinkHealthUpsert``: this
+        handler is invoked two ways -- the contract-declared
+        ``operation_match`` dispatch path (a raw dict/object envelope) and
+        ``IntentEffectDispatchBridge`` (OMN-14516), which always calls
+        ``handle({"payload": ..., "correlation_id": ...})`` regardless of
+        this parameter's static type, so an ``object`` annotation reflects
+        the real invocation contract honestly rather than asserting a type
+        the runtime does not actually guarantee.
+        """
+        payload_raw = self._extract_envelope_field(payload, "payload")
         if payload_raw is None:
-            payload_raw = envelope
-        payload = (
+            payload_raw = payload
+        typed_payload = (
             payload_raw
             if isinstance(payload_raw, ModelPayloadGatewayLinkHealthUpsert)
             else ModelPayloadGatewayLinkHealthUpsert.model_validate(payload_raw)
         )
 
         envelope_correlation_id = self._extract_envelope_field(
-            envelope, "correlation_id"
+            payload, "correlation_id"
         )
         correlation_id = self._safe_correlation_id(envelope_correlation_id)
-        result = await self.upsert(payload, correlation_id=correlation_id)
+        result = await self.upsert(typed_payload, correlation_id=correlation_id)
 
         return ModelHandlerOutput.for_compute(
             input_envelope_id=uuid4(),
