@@ -221,7 +221,9 @@ def test_runtime_config_rejects_inline_cloud_broker_literal(tmp_path: Path) -> N
     dumped["cloud_bus"].pop("acks_aiokafka")
     cloud_broker_ref = dumped["forwarder"]["cloud_bus"]["cloud_broker_ref"]
     mirror_topics = dumped["forwarder"].pop("mirror_topics")
+    canary = dumped["forwarder"].pop("canary")
     dumped["forwarder"]["mirror_topic_set"] = "node_bus_forwarder_effect"
+    dumped["forwarder"]["canary_topic_set"] = "node_bus_forwarder_effect"
     path.write_text(yaml.safe_dump(dumped), encoding="utf-8")
     contract_path.write_text(
         yaml.safe_dump(
@@ -230,6 +232,7 @@ def test_runtime_config_rejects_inline_cloud_broker_literal(tmp_path: Path) -> N
                 "config": {
                     "gateway_forwarder": {
                         "mirror_topics": mirror_topics,
+                        "canary": canary,
                         "cloud_leg": {"cloud_broker_ref": cloud_broker_ref},
                     }
                 },
@@ -259,7 +262,9 @@ def test_runtime_config_fails_closed_on_missing_broker_ref_map(
     dumped["cloud_bus"].pop("bootstrap_servers")
     cloud_broker_ref = dumped["forwarder"]["cloud_bus"]["cloud_broker_ref"]
     mirror_topics = dumped["forwarder"].pop("mirror_topics")
+    canary = dumped["forwarder"].pop("canary")
     dumped["forwarder"]["mirror_topic_set"] = "node_bus_forwarder_effect"
+    dumped["forwarder"]["canary_topic_set"] = "node_bus_forwarder_effect"
     path.write_text(yaml.safe_dump(dumped), encoding="utf-8")
     contract_path.write_text(
         yaml.safe_dump(
@@ -268,6 +273,7 @@ def test_runtime_config_fails_closed_on_missing_broker_ref_map(
                 "config": {
                     "gateway_forwarder": {
                         "mirror_topics": mirror_topics,
+                        "canary": canary,
                         "cloud_leg": {"cloud_broker_ref": cloud_broker_ref},
                     }
                 },
@@ -307,7 +313,9 @@ def test_runtime_config_rejects_inline_canary_literals(tmp_path: Path) -> None:
 
     with pytest.raises(ValueError, match="must name canary_topic_set"):
         gateway_forwarder.load_gateway_forwarder_runtime_config(
-            path, contract_path=contract_path
+            path,
+            contract_path=contract_path,
+            broker_ref_map_path=tmp_path / "unused-broker-ref-map.yaml",
         )
 
 
