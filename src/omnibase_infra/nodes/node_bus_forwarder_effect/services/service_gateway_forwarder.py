@@ -13,7 +13,7 @@ from __future__ import annotations
 import logging
 from collections.abc import Awaitable, Callable
 from datetime import UTC, datetime
-from typing import Protocol
+from typing import Literal, Protocol
 from uuid import uuid4
 
 from omnibase_core.models.core.model_envelope_metadata import ModelEnvelopeMetadata
@@ -140,16 +140,25 @@ class ServiceGatewayForwarder:
         """Decode the canonical envelope used as the durable dedupe key source."""
         return cls._decode_message(message)
 
-    async def publish_heartbeat(self) -> None:
-        """Publish one tenant-scoped liveness event onto the cloud wire topic."""
+    def _build_status_envelope(
+        self,
+        status: Literal["active", "degraded"],
+        *,
+        consecutive_failures: int = 0,
+        detail: str = "",
+    ) -> tuple[ModelEventEnvelope[dict[str, object]], str]:
+        """Build the heartbeat/status envelope plus its canonical topic."""
         identity = self._config.tenant_identity
         now = datetime.now(UTC)
         envelope_id = uuid4()
         heartbeat = ModelGatewayHeartbeat(
             tenant_id=identity.tenant_slug,
             principal_id=identity.principal_id,
+            status=status,
             emitted_at=now,
             local_transport_flavor=self._config.local_transport_flavor,
+            consecutive_failures=consecutive_failures,
+            detail=detail,
         )
         envelope = ModelEventEnvelope[dict[str, object]](
             envelope_id=envelope_id,
@@ -170,12 +179,50 @@ class ServiceGatewayForwarder:
             for topic in self._config.mirror_topics.outbound
             if topic.endswith(".gateway-heartbeat.v1")
         )
+        return envelope, canonical_topic
+
+    async def publish_heartbeat(self) -> None:
+        """Publish one tenant-scoped liveness event onto the cloud wire topic."""
+        identity = self._config.tenant_identity
+        envelope, canonical_topic = self._build_status_envelope("active")
+        # OMN-15740: _prepare_outbound returns (transformed_envelope, wire_topic) --
+        # the transform-seam handler delegation G0 wired in, not the pre-G0 single
+        # return this call site used to unpack. Keep G0's tuple return; G2 only
+        # adds the reconnect-supervision status publish below.
         transformed, wire_topic = self._prepare_outbound(envelope, canonical_topic)
         await self._publish_with_delivery_retry(
             bus=self._cloud_bus,
             topic=wire_topic,
             key=str(identity.tenant_id).encode("utf-8"),
             value=self._encode_envelope(transformed),
+        )
+
+    async def publish_status(
+        self,
+        status: Literal["active", "degraded"],
+        *,
+        consecutive_failures: int = 0,
+        detail: str = "",
+    ) -> None:
+        """Publish a reconnect-supervision status event onto the LOCAL bus.
+
+        Unlike ``publish_heartbeat`` (which crosses the cloud wire),
+        reconnect-supervision status -- most importantly a ``DEGRADED``
+        transition -- must stay observable while the cloud leg that caused
+        it is itself unreachable, so this publishes on the local bus using
+        the same heartbeat topic instead of the cloud leg.
+        """
+        identity = self._config.tenant_identity
+        envelope, canonical_topic = self._build_status_envelope(
+            status,
+            consecutive_failures=consecutive_failures,
+            detail=detail,
+        )
+        await self._publish_with_delivery_retry(
+            bus=self._local_bus,
+            topic=canonical_topic,
+            key=str(identity.tenant_id).encode("utf-8"),
+            value=self._encode_envelope(envelope),
         )
 
     async def _publish_with_delivery_retry(

@@ -102,6 +102,47 @@ def test_config_requires_retry_max_at_least_initial_delay() -> None:
         )
 
 
+def test_config_requires_reconnect_backoff_max_at_least_initial_delay() -> None:
+    with pytest.raises(ValidationError, match="reconnect_backoff_max_seconds"):
+        ModelGatewayForwarderConfig(
+            tenant_identity=ModelGatewayTenantIdentity(
+                tenant_id=UUID("11111111-1111-1111-1111-111111111111"),
+                tenant_slug="acme",
+                principal_id=PRINCIPAL_ID,
+            ),
+            cloud_bus=_cloud_bus(),
+            local_transport_flavor="containerized",
+            dedupe_store_path=Path.cwd() / "gateway-test.sqlite3",
+            mirror_topics=ModelGatewayMirrorTopics(
+                inbound=("onex.cmd.omnibase-infra.delegation-request.v1",),
+                outbound=("onex.evt.omnibase-infra.inference-response.v1",),
+            ),
+            reconnect_backoff_initial_seconds=10,
+            reconnect_backoff_max_seconds=5,
+        )
+
+
+def test_config_reconnect_defaults_match_contract() -> None:
+    config = ModelGatewayForwarderConfig(
+        tenant_identity=ModelGatewayTenantIdentity(
+            tenant_id=UUID("11111111-1111-1111-1111-111111111111"),
+            tenant_slug="acme",
+            principal_id=PRINCIPAL_ID,
+        ),
+        cloud_bus=_cloud_bus(),
+        local_transport_flavor="containerized",
+        dedupe_store_path=Path.cwd() / "gateway-test.sqlite3",
+        mirror_topics=ModelGatewayMirrorTopics(
+            inbound=("onex.cmd.omnibase-infra.delegation-request.v1",),
+            outbound=("onex.evt.omnibase-infra.inference-response.v1",),
+        ),
+    )
+    assert config.reconnect_backoff_initial_seconds == 1.0
+    assert config.reconnect_backoff_max_seconds == 30.0
+    assert config.reconnect_backoff_jitter_seconds == 0.5
+    assert config.degraded_after_seconds == 60
+
+
 def test_config_requires_absolute_durable_store_path() -> None:
     with pytest.raises(ValidationError, match="dedupe_store_path must be absolute"):
         ModelGatewayForwarderConfig(
