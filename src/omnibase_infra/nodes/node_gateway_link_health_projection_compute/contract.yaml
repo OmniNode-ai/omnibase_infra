@@ -1,0 +1,103 @@
+# SPDX-FileCopyrightText: 2025 OmniNode.ai Inc.
+# SPDX-License-Identifier: MIT
+# Copyright (c) 2026 OmniNode Team
+#
+# ONEX Node Contract
+# Node: NodeGatewayLinkHealthProjectionCompute
+#
+# COMPUTE node that subscribes to the gateway heartbeat event topic
+# (produced by node_bus_forwarder_effect / ServiceGatewayForwarder) and
+# emits ModelIntent payloads for the EFFECT layer to persist into
+# gateway_link_health. Mirrors the canonical node_pr_state_projection_compute
+# pattern.
+#
+# Related Tickets:
+#   - OMN-15570: Gateway lift Phase 0, item G3 (link-health projection).
+#   - OMN-15739 / OMN-15692: parent connectivity-brief tickets. G3 depends on
+#     G1 (OMN-15741, path-verifying healthcheck) and G2 (OMN-15742, reconnect
+#     supervision + DEGRADED bus state) per the lift plan's dependency order,
+#     but neither has merged as of this ticket -- this node consumes ONLY the
+#     heartbeat topic that already ships today (tenant_id/principal_id/
+#     emitted_at/local_transport_flavor). It does not depend on G1/G2 code;
+#     it is scoped down to what the current heartbeat payload carries. See
+#     ModelPayloadGatewayLinkHealthUpsert's module docstring for the exact
+#     field-level gap (lag_messages/lag_seconds always None today).
+name: "node_gateway_link_health_projection_compute"
+node_type: "COMPUTE_GENERIC"
+contract_version:
+  major: 1
+  minor: 0
+  patch: 0
+node_version: "0.1.0"
+description: >
+  Subscribes to onex.evt.omnibase-infra.gateway-heartbeat.v1 and projects each heartbeat event into a ModelPayloadGatewayLinkHealthUpsert intent for NodeGatewayLinkHealthWriteEffect to persist into the gateway_link_health per-tenant-edge liveness projection. Uses the canonical def-B typed ModelEventMessage handler entrypoint and mirrors the canonical node_pr_state_projection_compute pattern.
+
+event_bus:
+  version:
+    major: 1
+    minor: 0
+    patch: 0
+  subscribe_topics:
+    - "onex.evt.omnibase-infra.gateway-heartbeat.v1"
+  consumer_purpose: "audit"
+  auto_offset_reset: "earliest"
+  consumer_group: "onex-gateway-link-health-projection-compute"
+input_model:
+  name: "ModelEventMessage"
+  module: "omnibase_infra.event_bus.models.model_event_message"
+  description: >
+    Kafka event message containing raw bytes payload and headers for the gateway heartbeat event.
+
+output_model:
+  name: "ModelIntent"
+  module: "omnibase_core.models.reducer.model_intent"
+  description: >
+    ModelIntent wrapping ModelPayloadGatewayLinkHealthUpsert, routed to NodeGatewayLinkHealthWriteEffect for persistence.
+
+handler_routing:
+  routing_strategy: "operation_match"
+  handlers:
+    - operation: gateway_link_health.project
+      handler_type: "gateway_link_health_projection"
+      handler:
+        name: "HandlerGatewayLinkHealthProjection"
+        module: "omnibase_infra.nodes.node_gateway_link_health_projection_compute.handlers.handler_gateway_link_health_projection"
+      supported_operations:
+        - "gateway_link_health.project"
+# Intent consumption: the projection emits a `gateway_link_health.upsert`
+# intent per consumed heartbeat event. The kernel derives this contract's
+# result applier from this table -- it names the effect node whose canonical
+# handle() persists the intent (node_gateway_link_health_write_effect ->
+# HandlerGatewayLinkHealthUpsert, keyed by the write-effect's
+# `gateway_link_health.upsert` operation). Mirrors node_pr_state_projection_compute's
+# intent_consumption table (OMN-14516).
+intent_consumption:
+  intent_routing_table:
+    "gateway_link_health.upsert": "node_gateway_link_health_write_effect"
+capabilities:
+  - name: "gateway_link_health.projection"
+    description: "Project the gateway heartbeat event into a write intent"
+    version: "0.1.0"
+  - name: "gateway_link_health.projection.audit"
+    description: "Read-only, latest-state consumption of gateway heartbeat events"
+dependencies:
+  - name: "node_gateway_link_health_write_effect"
+    type: "node"
+    class_name: "NodeGatewayLinkHealthWriteEffect"
+    module: "omnibase_infra.nodes.node_gateway_link_health_write_effect"
+    description: "Effect node that persists projected intents into gateway_link_health"
+metadata:
+  description: >
+    Subscribes to the gateway heartbeat event topic and projects each event into a ModelPayloadGatewayLinkHealthUpsert intent for the EFFECT layer to persist into the gateway_link_health per-tenant-edge liveness projection through the canonical def-B typed ModelEventMessage handler entrypoint.
+
+  author: "OmniNode Team"
+  license: "MIT"
+  created: "2026-08-08"
+  updated: "2026-08-08"
+  ticket: "OMN-15570"
+  tags:
+    - compute
+    - def-b
+    - gateway
+    - link_health
+    - projection

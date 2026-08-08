@@ -1,0 +1,121 @@
+# SPDX-FileCopyrightText: 2025 OmniNode.ai Inc.
+# SPDX-License-Identifier: MIT
+# Copyright (c) 2026 OmniNode Team
+#
+# ONEX Node Contract
+# Node: NodeGatewayLinkHealthWriteEffect
+#
+# EFFECT node that consumes ModelPayloadGatewayLinkHealthUpsert intents
+# emitted by NodeGatewayLinkHealthProjectionCompute and UPSERTs them into
+# the gateway_link_health latest-known-state table via HandlerDb.
+#
+# Related Tickets:
+#   - OMN-15570: Gateway lift Phase 0, item G3 (link-health projection).
+name: "node_gateway_link_health_write_effect"
+node_type: "EFFECT_GENERIC"
+runtime_profiles:
+  - effects
+contract_version:
+  major: 1
+  minor: 0
+  patch: 0
+node_version: "0.1.0"
+description: >
+  Capability-oriented EFFECT node for gateway_link_health persistence. Consumes ModelPayloadGatewayLinkHealthUpsert intents and UPSERTs one row per tenant_id into the public.gateway_link_health latest-known-state table via ON CONFLICT DO UPDATE, so the table always reflects the most recently observed heartbeat per tenant edge and never drops a row on silence -- the gateway_link_health_status view (docker/migrations/forward/098_create_gateway_link_health.sql) evaluates staleness against the contract-declared liveness thresholds at read time.
+
+# Strongly typed I/O models
+input_model:
+  name: "ModelPayloadGatewayLinkHealthUpsert"
+  module: "omnibase_infra.nodes.node_gateway_link_health_projection_compute.models"
+  description: "Input payload describing one tenant edge's latest known heartbeat to persist."
+output_model:
+  name: "ModelGatewayLinkHealthUpsertResult"
+  module: "omnibase_infra.nodes.node_gateway_link_health_write_effect.models"
+  description: "Outcome of one gateway_link_health upsert."
+# Event bus configuration
+event_bus:
+  subscribe_topics:
+    - "onex.cmd.omnibase-infra.gateway-link-health-upsert.v1"
+# Handler routing
+handler_routing:
+  routing_strategy: "operation_match"
+  handlers:
+    - operation: "gateway_link_health.upsert"
+      handler:
+        name: "HandlerGatewayLinkHealthUpsert"
+        module: "omnibase_infra.nodes.node_gateway_link_health_write_effect.handlers.handler_gateway_link_health_upsert"
+      topic: "onex.cmd.omnibase-infra.gateway-link-health-upsert.v1"
+      description: "Upsert latest known tenant-edge heartbeat into gateway_link_health"
+capabilities:
+  - name: "gateway_link_health.write"
+    description: "Upsert a tenant edge's latest known heartbeat into gateway_link_health"
+    version: "0.1.0"
+  - name: "gateway_link_health.write.upsert"
+    description: "Upsert a single row into gateway_link_health, keyed by tenant_id"
+node_capabilities:
+  postgres: true
+  write: true
+  database: true
+io_operations:
+  - operation: "gateway_link_health.upsert"
+    description: "Upsert a single tenant edge's latest known heartbeat"
+    input_fields:
+      - tenant_id: "str"
+      - principal_id: "str"
+      - local_transport_flavor: "str"
+      - last_seen_at: "datetime"
+      - lag_messages: "int | None"
+      - lag_seconds: "float | None"
+    output_fields:
+      - success: "bool"
+      - tenant_id: "str"
+      - was_insert: "bool"
+    idempotent: true
+dependencies:
+  - name: "handler_gateway_link_health_upsert"
+    type: "handler"
+    class_name: "HandlerGatewayLinkHealthUpsert"
+    module: "omnibase_infra.nodes.node_gateway_link_health_write_effect.handlers.handler_gateway_link_health_upsert"
+    description: "Upsert handler that lazily composes HandlerDb from the runtime container and writes to gateway_link_health"
+  - name: "handler_db"
+    type: "handler"
+    class_name: "HandlerDb"
+    module: "omnibase_infra.handlers.handler_db"
+    description: "PostgreSQL database handler (composed by the gateway_link_health upsert handler)"
+error_handling:
+  retry_policy:
+    max_retries: 3
+    initial_delay_ms: 100
+    max_delay_ms: 5000
+    exponential_base: 2
+    retry_on:
+      - "InfraConnectionError"
+      - "InfraTimeoutError"
+  circuit_breaker:
+    enabled: true
+    failure_threshold: 5
+    reset_timeout_ms: 60000
+health_check:
+  enabled: true
+  endpoint: "/health"
+  interval_seconds: 30
+  timeout_ms: 5000
+  checks:
+    - name: "database_backend"
+      type: "connection"
+      critical: true
+metadata:
+  description: >
+    Capability-oriented EFFECT node that persists gateway heartbeat projections into the latest-known-state public.gateway_link_health table. HandlerGatewayLinkHealthUpsert composes its database dependency internally from the runtime container, matching the OMN-14140 auto-wiring pattern.
+
+  author: "OmniNode Team"
+  license: "MIT"
+  created: "2026-08-08"
+  updated: "2026-08-08"
+  ticket: "OMN-15570"
+  tags:
+    - effect
+    - gateway
+    - link_health
+    - storage
+    - postgresql
