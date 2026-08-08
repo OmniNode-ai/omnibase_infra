@@ -34,7 +34,7 @@ jobs:
     # = {"success"} -- a "skipped" conclusion already fails closed there with
     # no code change needed, so gating this job on ci:ready is safe as-is for
     # pull_request events. push/schedule are unaffected (no PR to gate on).
-    if: contains(github.event.pull_request.labels.*.name, 'ci:ready') || github.event_name != 'pull_request'
+    if: contains(github.event.pull_request.labels.*.name, 'ci:ready') || github.event_name != 'pull_request' || github.base_ref != 'dev'
     runs-on: >-
       ${{
         (github.event_name == 'pull_request' &&

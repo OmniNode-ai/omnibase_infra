@@ -65,7 +65,7 @@ jobs:
     # EXPECTED_EXTERNAL_CONTEXTS in scripts/ci/ci_summary_gate.py, and not a
     # direct required context) -- gating it off ci:ready is a pure runner-
     # cost win with no fail-closed exposure to design around.
-    if: contains(github.event.pull_request.labels.*.name, 'ci:ready') || github.event_name != 'pull_request'
+    if: contains(github.event.pull_request.labels.*.name, 'ci:ready') || github.event_name != 'pull_request' || github.base_ref != 'dev'
     name: Hostile Reviewer (adversarial gate)
     # self-hosted runner on .201 required -- qwen3-review(-b) are LAN-only  # onex-allow-internal-ip
     runs-on: >-

@@ -1407,7 +1407,7 @@ jobs:
     # labels to gate on. tests-gate (below) distinguishes this label-skip from
     # the pre-existing docs-only skip and fails closed rather than passing it
     # through as a legitimate exemption.
-    if: needs.occ-preflight.result == 'success' && (needs.zone-filter.outputs.docs_only != 'true') && (contains(github.event.pull_request.labels.*.name, 'ci:ready') || github.event_name != 'pull_request')
+    if: needs.occ-preflight.result == 'success' && (needs.zone-filter.outputs.docs_only != 'true') && (contains(github.event.pull_request.labels.*.name, 'ci:ready') || github.event_name != 'pull_request' || github.base_ref != 'dev')
     # OMNI_RUNNER_SELECTOR_V1 — trusted CI defaults to self-hosted omnibase-ci; public forks default to ubuntu-latest
     runs-on: >-
       ${{
@@ -1713,7 +1713,7 @@ jobs:
           TESTS_RESULT: ${{ needs.test-parallel.result }}
           SPLIT_COUNT: ${{ needs.detect-changes.outputs.split_count }}
           DOCS_ONLY: ${{ needs.zone-filter.outputs.docs_only }}
-          CI_READY: ${{ contains(github.event.pull_request.labels.*.name, 'ci:ready') || github.event_name != 'pull_request' }}
+          CI_READY: ${{ contains(github.event.pull_request.labels.*.name, 'ci:ready') || github.event_name != 'pull_request' || github.base_ref != 'dev' }}
         run: |
           if [ "$TESTS_RESULT" = "skipped" ]; then
             if [ "$DOCS_ONLY" = "true" ]; then

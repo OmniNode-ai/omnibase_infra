@@ -798,6 +798,7 @@ class TestActorConditionalExternalContexts:
             s for s in job["steps"] if "Poll run jobs" in str(s.get("name", ""))
         )
         assert '--pr-author "${PR_AUTHOR:-}"' in str(poll["run"])
+        assert "PR_AUTHOR" in poll["env"]
 
 
 # --------------------------------------------------------------------------
@@ -837,6 +838,10 @@ class TestLabelGatedCiPilotOmn15731:
         # Non-pull_request events (push, merge_group, workflow_dispatch) carry
         # no PR labels to gate on and must remain unaffected.
         assert "github.event_name != 'pull_request'" in condition
+        # Main-boundary carve-out (CLAUDE.md rule 4): the dev->main promotion
+        # boundary is never narrowed, so any PR targeting main must run the
+        # full fleet unconditionally regardless of ci:ready.
+        assert "github.base_ref != 'dev'" in condition
 
     def test_tests_gate_distinguishes_docs_only_skip_from_label_skip(self) -> None:
         """The mechanism that closes the AC(b) trap must exist in ci.yml, not
@@ -851,6 +856,7 @@ class TestLabelGatedCiPilotOmn15731:
         env = step["env"]
         assert "DOCS_ONLY" in env
         assert "CI_READY" in env
+        assert "github.base_ref != 'dev'" in str(env["CI_READY"])
         assert '[ "$DOCS_ONLY" = "true" ]' in run
         assert '[ "$CI_READY" != "true" ]' in run
         # The label-skip branch must exit non-zero (fail closed), distinct
@@ -893,6 +899,7 @@ class TestLabelGatedCiPilotOmn15731:
             condition
         )
         assert "github.event_name != 'pull_request'" in condition
+        assert "github.base_ref != 'dev'" in condition
         assert "labeled" in deploy_gate_workflow[True]["pull_request"]["types"]
         assert "unlabeled" in deploy_gate_workflow[True]["pull_request"]["types"]
 
@@ -906,6 +913,7 @@ class TestLabelGatedCiPilotOmn15731:
             condition
         )
         assert "github.event_name != 'pull_request'" in condition
+        assert "github.base_ref != 'dev'" in condition
 
     def test_hostile_review_job_if_gated_on_ci_ready_label(self) -> None:
         hostile_workflow = _load_workflow(
@@ -917,3 +925,4 @@ class TestLabelGatedCiPilotOmn15731:
             condition
         )
         assert "github.event_name != 'pull_request'" in condition
+        assert "github.base_ref != 'dev'" in condition
