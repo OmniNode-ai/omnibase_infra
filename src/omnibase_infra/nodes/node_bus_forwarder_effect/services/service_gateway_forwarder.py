@@ -34,6 +34,45 @@ from omnibase_infra.nodes.node_bus_forwarder_effect.services.service_gateway_top
 
 logger = logging.getLogger(__name__)
 
+# ``gateway_direction`` tag values that mark an envelope as local-bus-only --
+# the forwarder's own outbound consumer loop (NodeGatewayDelivery polling the
+# SAME transport local_bus publishes into, see runtime/gateway_forwarder.py)
+# must skip these rather than re-forward them to cloud (OMN-15570/OMN-15742
+# reconciliation finding D1). "cloud-to-local" is an inbound-transformed
+# envelope publish_status/publish_heartbeat never emit and needs the same
+# skip already established for the inbound leg; "local-mirror" marks a
+# direct local-only publish (DEGRADED status, and the G3 heartbeat local
+# mirror) that was never meant to leave this cluster at all.
+_LOCAL_ONLY_DIRECTIONS = frozenset({"cloud-to-local", "local-mirror"})
+
+
+def _stamp_local_only(
+    envelope: ModelEventEnvelope[dict[str, object]],
+) -> ModelEventEnvelope[dict[str, object]]:
+    """Tag a local-bus-only publish so the outbound consumer never re-forwards it.
+
+    Both the DEGRADED status publish (``ServiceGatewayForwarder.publish_status``)
+    and the G3 heartbeat local mirror (``publish_heartbeat``) go directly onto
+    the local bus's canonical outbound topic -- exactly the topic the
+    forwarder's own outbound consumer polls (``NodeGatewayDelivery`` on
+    ``local_consumer``, the SAME transport object ``local_bus`` publishes into
+    in the real runtime). Without this tag, ``_forward_outbound_message``'s
+    loopback skip does not match an untagged envelope, so it falls through to
+    ``_prepare_outbound`` -- a second cloud publish per heartbeat tick, or a
+    DEGRADED status leak to cloud (OMN-15570/OMN-15742 reconciliation finding
+    D1). Module-level (not a method) to stay under the class's method-count
+    pattern threshold.
+    """
+    metadata = envelope.metadata.model_copy(
+        update={
+            "tags": {
+                **envelope.metadata.tags,
+                "gateway_direction": "local-mirror",
+            }
+        }
+    )
+    return envelope.model_copy(update={"metadata": metadata})
+
 
 class ProtocolGatewayPublisher(Protocol):
     """Destination publish boundary shared by push and pull transports."""
@@ -77,10 +116,12 @@ class ServiceGatewayForwarder:
     async def _forward_outbound_message(self, message: object) -> None:
         source_topic = self._message_topic(message)
         envelope = self._decode_message(message)
-        if envelope.metadata.tags.get("gateway_direction") == "cloud-to-local":
+        direction = envelope.metadata.tags.get("gateway_direction")
+        if direction in _LOCAL_ONLY_DIRECTIONS:
             logger.debug(
-                "Skipping gateway loopback on local topic %s",
+                "Skipping gateway loopback on local topic %s (direction=%s)",
                 source_topic,
+                direction,
             )
             return
         transformed, wire_topic = self._prepare_outbound(envelope, source_topic)
@@ -100,7 +141,8 @@ class ServiceGatewayForwarder:
         """Validate an outbound trust-boundary message without publishing it."""
         source_topic = self._message_topic(message)
         envelope = self._decode_message(message)
-        if envelope.metadata.tags.get("gateway_direction") != "cloud-to-local":
+        direction = envelope.metadata.tags.get("gateway_direction")
+        if direction not in _LOCAL_ONLY_DIRECTIONS:
             self._prepare_outbound(envelope, source_topic)
 
     async def _consume_inbound_message(self, message: object) -> None:
@@ -218,11 +260,12 @@ class ServiceGatewayForwarder:
             consecutive_failures=consecutive_failures,
             detail=detail,
         )
+        local_only = _stamp_local_only(envelope)
         await self._publish_with_delivery_retry(
             bus=self._local_bus,
             topic=canonical_topic,
             key=str(identity.tenant_id).encode("utf-8"),
-            value=self._encode_envelope(envelope),
+            value=self._encode_envelope(local_only),
         )
 
     async def _publish_with_delivery_retry(

@@ -27,13 +27,16 @@ from omnibase_infra.nodes.node_bus_forwarder_effect.services.service_gateway_del
 from omnibase_infra.nodes.node_bus_forwarder_effect.services.service_gateway_forwarder import (
     ServiceGatewayForwarder,
 )
+from omnibase_infra.runtime.gateway_forwarder import TransportGatewayBus
 
 pytestmark = pytest.mark.asyncio
 
 TENANT_ID = UUID("11111111-1111-1111-1111-111111111111")
 PRINCIPAL_ID = "t-33333333333333333333333333333333"
 OUTBOUND_TOPIC = "onex.evt.omnibase-infra.inference-response.v1"
+HEARTBEAT_TOPIC = "onex.evt.omnibase-infra.gateway-heartbeat.v1"
 WIRE_OUTBOUND_TOPIC = f"tenant-acme.{OUTBOUND_TOPIC}"
+WIRE_HEARTBEAT_TOPIC = f"tenant-acme.{HEARTBEAT_TOPIC}"
 
 
 class _RecordingBus:
@@ -297,3 +300,141 @@ async def test_store_failure_nacks_without_destination_dispatch() -> None:
     assert source.committed == []
     assert source.nacked == [message]
     assert events == ["source_nack"]
+
+
+class _SharedLocalTransport:
+    """A single fake object playing BOTH runtime roles ``local_transport`` plays.
+
+    ``runtime/gateway_forwarder.py:run_gateway_forwarder`` builds exactly one
+    ``KafkaTransport`` as ``local_transport``, wraps it in
+    ``TransportGatewayBus`` for ``local_bus`` (what ``publish_status`` and the
+    heartbeat local mirror publish INTO), and passes the SAME object as
+    ``local_consumer`` to ``NodeGatewayDelivery`` (what the outbound direction
+    polls FROM). Every other test in this module uses two separate fakes
+    (``local_bus`` / ``local_consumer``) that never actually connect, so none
+    of them can observe a message published locally being re-polled by the
+    forwarder's own outbound consumer loop and re-forwarded to cloud
+    (OMN-15570/OMN-15742 reconciliation finding D1). This fake connects
+    ``send`` (the ``ProtocolTransportProducer`` surface ``TransportGatewayBus``
+    calls) directly to ``poll``/``commit``/``nack`` (the
+    ``ProtocolGatewayConsumer`` surface ``NodeGatewayDelivery`` polls) through
+    one in-memory queue, reproducing the real wiring.
+    """
+
+    def __init__(self) -> None:
+        self._queue: asyncio.Queue[ModelTransportMessage] = asyncio.Queue()
+        self.sent: list[tuple[str, bytes]] = []
+        self.committed: list[object] = []
+        self._offset = 0
+
+    async def send(
+        self,
+        topic: str,
+        key: bytes | None,
+        value: bytes,
+        headers: Mapping[str, bytes] | None = None,
+    ) -> None:
+        self._offset += 1
+        message = ModelTransportMessage(
+            topic=topic,
+            partition=0,
+            offset=self._offset,
+            key=key,
+            value=value,
+            headers=dict(headers or {}),
+            ack_token=(topic, 0, self._offset),
+        )
+        self.sent.append((topic, value))
+        await self._queue.put(message)
+
+    async def poll(
+        self, *, max_messages: int, timeout_ms: int
+    ) -> Sequence[ModelTransportMessage]:
+        try:
+            message = await asyncio.wait_for(
+                self._queue.get(), timeout=timeout_ms / 1000
+            )
+        except TimeoutError:
+            return []
+        return [message]
+
+    async def commit(self, message: object) -> None:
+        self.committed.append(message)
+
+    async def nack(self, message: object) -> None:  # pragma: no cover - defensive
+        pass
+
+
+async def test_real_outbound_consumer_loop_does_not_reforward_degraded_status() -> None:
+    """OMN-15742 reconciliation D1 (real-dispatch-path regression).
+
+    ``publish_status`` publishes DEGRADED straight onto the local bus's
+    canonical outbound topic. That topic is exactly what the forwarder's own
+    outbound consumer (``NodeGatewayDelivery`` polling ``local_consumer``,
+    the SAME transport object ``local_bus`` publishes into in the real
+    runtime -- see ``_SharedLocalTransport`` above) is subscribed to. Every
+    existing DEGRADED test (``test_publish_status_degraded_goes_to_local_bus_not_cloud``
+    in ``test_gateway_forwarder_service.py``) uses a bare ``_MockGatewayBus``
+    with no consumer loop at all, so it cannot see the DEGRADED status get
+    picked back up and re-forwarded to cloud. This test wires the real
+    ``NodeGatewayDelivery`` consumer loop against a transport that actually
+    connects publish to poll, and drives it end to end.
+
+    Pre-fix: FAILS -- the untagged DEGRADED envelope round-trips through the
+    outbound consumer loop, ``_forward_outbound_message``'s loopback skip
+    (``gateway_direction == "cloud-to-local"``) does not match, and the
+    envelope reaches ``cloud_bus`` a second time carrying the DEGRADED
+    payload.
+    """
+    events: list[str] = []
+    shared_local_transport = _SharedLocalTransport()
+    cloud_bus = _RecordingBus(events)
+    idle_cloud_consumer = _Source(events)
+    config = _config().model_copy(
+        update={
+            "mirror_topics": ModelGatewayMirrorTopics(
+                inbound=("onex.cmd.omnibase-infra.delegation-request.v1",),
+                outbound=(OUTBOUND_TOPIC, HEARTBEAT_TOPIC),
+            )
+        }
+    )
+    local_bus = TransportGatewayBus(shared_local_transport)  # type: ignore[arg-type]
+    forwarder = ServiceGatewayForwarder(
+        config=config,
+        local_bus=local_bus,
+        cloud_bus=cloud_bus,  # type: ignore[arg-type]
+    )
+    delivery = NodeGatewayDelivery(
+        config=config,
+        forwarder=forwarder,
+        local_consumer=shared_local_transport,  # type: ignore[arg-type]
+        cloud_consumer=idle_cloud_consumer,  # type: ignore[arg-type]
+        idempotency_store=StoreIdempotencyInmemory(),
+        poll_timeout_ms=50,
+    )
+
+    await delivery.start()
+    try:
+        await forwarder.publish_status(
+            "degraded",
+            consecutive_failures=3,
+            detail="InfraUnavailableError: boom",
+        )
+        for _ in range(100):
+            if shared_local_transport.committed:
+                break
+            await asyncio.sleep(0.01)
+    finally:
+        await delivery.stop()
+
+    assert shared_local_transport.committed, (
+        "outbound consumer loop never polled the local-bus DEGRADED publish "
+        "-- test wiring is broken, not proving anything"
+    )
+    degraded_on_cloud = [
+        value for _topic, value in cloud_bus.sent if b'"degraded"' in value
+    ]
+    assert degraded_on_cloud == [], (
+        "DEGRADED status leaked to the cloud leg via the outbound consumer "
+        f"loop re-forwarding the local-bus mirror: {degraded_on_cloud!r}"
+    )
