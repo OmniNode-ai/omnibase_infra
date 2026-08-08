@@ -39,7 +39,14 @@ local_bus:
   enable_auto_commit: false
   security_protocol: "PLAINTEXT"
 cloud_bus:
-  bootstrap_servers: "b-1.omninodedevmsk.7ozyd3.c14.kafka.us-east-1.amazonaws.com:9098,b-2.omninodedevmsk.7ozyd3.c14.kafka.us-east-1.amazonaws.com:9098"
+  # STOPGAP (OMN-15744): bootstrap only strictly needs one reachable seed,
+  # but aiokafka's cluster metadata response enumerates all 6 MSK brokers,
+  # and every one of those FQDNs must independently resolve (via the
+  # docker-compose.gateway.yml extra_hosts bastion pin) or producer/consumer
+  # requests against partitions owned by b-3..b-6 fail. Listing all 6 here
+  # keeps this file's broker set consistent with extra_hosts and avoids a
+  # silent bootstrap-only listing that looked complete but wasn't.
+  bootstrap_servers: "b-1.omninodedevmsk.7ozyd3.c14.kafka.us-east-1.amazonaws.com:9098,b-2.omninodedevmsk.7ozyd3.c14.kafka.us-east-1.amazonaws.com:9098,b-3.omninodedevmsk.7ozyd3.c14.kafka.us-east-1.amazonaws.com:9098,b-4.omninodedevmsk.7ozyd3.c14.kafka.us-east-1.amazonaws.com:9098,b-5.omninodedevmsk.7ozyd3.c14.kafka.us-east-1.amazonaws.com:9098,b-6.omninodedevmsk.7ozyd3.c14.kafka.us-east-1.amazonaws.com:9098"
   environment: "beta-gateway-cloud"
   timeout_seconds: 60
   # OMN-15781: see local_bus.auto_offset_reset comment above -- same hazard,

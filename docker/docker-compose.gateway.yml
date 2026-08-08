@@ -47,9 +47,20 @@ services:
       - ${GATEWAY_TPM_DEVICE:?GATEWAY_TPM_DEVICE is required}:/dev/tpmrm0
     networks:
       - gateway-runtime
+    # STOPGAP (OMN-15744): the on-prem host cannot resolve MSK's internal VPC
+    # DNS, so every broker FQDN the cluster can return in a metadata response
+    # must be pinned to the SNI-routing bastion (100.53.215.198) here. This
+    # was previously b-1/b-2 only, which left b-3..b-6 unroutable
+    # (Errno 101) and blocked InitProducerIdRequest — outbound producer
+    # traffic was zero. OMN-15743 (G4: resolve cloud_broker_ref at the
+    # effect boundary) deletes this whole block once landed.
     extra_hosts:
       - "b-1.omninodedevmsk.7ozyd3.c14.kafka.us-east-1.amazonaws.com:100.53.215.198"
       - "b-2.omninodedevmsk.7ozyd3.c14.kafka.us-east-1.amazonaws.com:100.53.215.198"
+      - "b-3.omninodedevmsk.7ozyd3.c14.kafka.us-east-1.amazonaws.com:100.53.215.198"
+      - "b-4.omninodedevmsk.7ozyd3.c14.kafka.us-east-1.amazonaws.com:100.53.215.198"
+      - "b-5.omninodedevmsk.7ozyd3.c14.kafka.us-east-1.amazonaws.com:100.53.215.198"
+      - "b-6.omninodedevmsk.7ozyd3.c14.kafka.us-east-1.amazonaws.com:100.53.215.198"
     restart: unless-stopped
     stop_grace_period: 30s
     healthcheck:
