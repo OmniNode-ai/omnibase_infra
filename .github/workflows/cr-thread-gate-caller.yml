@@ -14,7 +14,19 @@ on:
     types: [checks_requested]
 
 concurrency:
-  group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}
+  # OMN-15730 / CodeRabbit: issue_comment and merge_group events do not
+  # populate github.event.pull_request, so the || github.ref fallback
+  # resolved to one shared identity (default branch ref, or the merge_group
+  # ref) across unrelated PRs' comment/merge-queue-triggered runs, letting
+  # them cancel each other. Use the event-specific identity before falling
+  # back to the run id.
+  group: >-
+    ${{ github.workflow }}-${{
+      github.event.pull_request.number ||
+      github.event.issue.number ||
+      github.event.merge_group.head_sha ||
+      github.run_id
+    }}
   cancel-in-progress: true
 
 jobs:
