@@ -15,6 +15,7 @@ from omnibase_core.models.events.model_event_envelope import ModelEventEnvelope
 from omnibase_core.models.runtime.model_transport_message import ModelTransportMessage
 from omnibase_infra.idempotency import StoreIdempotencyInmemory, StoreIdempotencySqlite
 from omnibase_infra.nodes.node_bus_forwarder_effect.models import (
+    ModelGatewayCanaryConfig,
     ModelGatewayCloudBusConfig,
     ModelGatewayForwarderConfig,
     ModelGatewayMirrorTopics,
@@ -130,6 +131,12 @@ def _config() -> ModelGatewayForwarderConfig:
         mirror_topics=ModelGatewayMirrorTopics(
             inbound=("onex.cmd.omnibase-infra.delegation-request.v1",),
             outbound=(OUTBOUND_TOPIC,),
+        ),
+        canary=ModelGatewayCanaryConfig(
+            topic="onex.evt.omnibase-infra.gateway-canary.v1",
+            cadence_seconds=30,
+            produce_deadline_seconds=8,
+            readback_deadline_seconds=12,
         ),
     )
 

@@ -9,6 +9,9 @@ from typing import Literal
 
 from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
 
+from omnibase_infra.nodes.node_bus_forwarder_effect.models.model_gateway_canary_config import (
+    ModelGatewayCanaryConfig,
+)
 from omnibase_infra.nodes.node_bus_forwarder_effect.models.model_gateway_cloud_bus_config import (
     ModelGatewayCloudBusConfig,
 )
@@ -29,6 +32,7 @@ class ModelGatewayForwarderConfig(BaseModel):
     cloud_bus: ModelGatewayCloudBusConfig
     local_transport_flavor: Literal["containerized", "lightweight"]
     mirror_topics: ModelGatewayMirrorTopics
+    canary: ModelGatewayCanaryConfig
     heartbeat_interval_seconds: int = Field(default=15, ge=1)
     max_silence_window_seconds: int = Field(default=60, ge=1)
     lag_threshold_messages: int = Field(default=500, ge=1)
@@ -59,5 +63,12 @@ class ModelGatewayForwarderConfig(BaseModel):
             raise ValueError(
                 "forward_retry_max_seconds must be greater than or equal to "
                 "forward_retry_initial_seconds"
+            )
+        if self.canary.topic in self.mirror_topics.inbound or (
+            self.canary.topic in self.mirror_topics.outbound
+        ):
+            raise ValueError(
+                "canary.topic must be dedicated and must not appear in "
+                "mirror_topics.inbound or mirror_topics.outbound"
             )
         return self
