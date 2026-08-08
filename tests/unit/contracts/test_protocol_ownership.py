@@ -109,6 +109,7 @@ KNOWN_INFRA_PROTOCOLS: dict[str, str] = {
     "ProtocolRegistrationPersistence": "nodes/node_registration_storage_effect/protocols/protocol_registration_persistence.py",
     "ProtocolDiscoveryOperations": "nodes/node_service_discovery_effect/protocols/protocol_discovery_operations.py",
     "ProtocolLedgerPersistence": "nodes/node_ledger_write_effect/protocols/protocol_ledger_persistence.py",
+    "ProtocolGatewaySessionStore": "nodes/node_gateway_attach_effect/services/protocol_gateway_session_store.py",  # [NODE] OMN-15750 DI seam so the attach session-store backend (in-process for this slice, Valkey follow-on) is swappable without touching handlers
     # [NODE] DI boundaries for NodeSetupOrchestrator — narrow effect interfaces injected via constructor
     "ProtocolPreflightEffect": "nodes/node_setup_orchestrator/protocols/protocol_preflight_effect.py",
     "ProtocolProvisionEffect": "nodes/node_setup_orchestrator/protocols/protocol_provision_effect.py",
