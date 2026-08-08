@@ -10,6 +10,7 @@ import pytest
 from pydantic import ValidationError
 
 from omnibase_infra.nodes.node_bus_forwarder_effect.models import (
+    ModelGatewayCanaryConfig,
     ModelGatewayCloudBusConfig,
     ModelGatewayForwarderConfig,
     ModelGatewayMirrorTopics,
@@ -28,6 +29,15 @@ def _cloud_bus() -> ModelGatewayCloudBusConfig:
         acl_provisioner_ref="gateway.cloud.kafka.authorization",
         client_id_ref="gateway.cloud.kafka.oauth.client_id",
         client_secret_api_key_ref="infisical://gateway/redpanda-events",
+    )
+
+
+def _canary() -> ModelGatewayCanaryConfig:
+    return ModelGatewayCanaryConfig(
+        topic="onex.evt.omnibase-infra.gateway-canary.v1",
+        cadence_seconds=30,
+        produce_deadline_seconds=8,
+        readback_deadline_seconds=12,
     )
 
 
@@ -59,6 +69,7 @@ def test_config_requires_silence_window_above_heartbeat() -> None:
                 principal_id=PRINCIPAL_ID,
             ),
             cloud_bus=_cloud_bus(),
+            canary=_canary(),
             local_transport_flavor="containerized",
             dedupe_store_path=Path.cwd() / "gateway-test.sqlite3",
             mirror_topics=ModelGatewayMirrorTopics(
@@ -79,6 +90,7 @@ def test_config_requires_retry_max_at_least_initial_delay() -> None:
                 principal_id=PRINCIPAL_ID,
             ),
             cloud_bus=_cloud_bus(),
+            canary=_canary(),
             local_transport_flavor="containerized",
             dedupe_store_path=Path.cwd() / "gateway-test.sqlite3",
             mirror_topics=ModelGatewayMirrorTopics(
@@ -99,6 +111,7 @@ def test_config_requires_absolute_durable_store_path() -> None:
                 principal_id=PRINCIPAL_ID,
             ),
             cloud_bus=_cloud_bus(),
+            canary=_canary(),
             local_transport_flavor="containerized",
             dedupe_store_path=Path("relative/delivery.sqlite3"),
             mirror_topics=ModelGatewayMirrorTopics(
@@ -117,6 +130,7 @@ def test_config_enforces_twenty_four_hour_dedupe_floor() -> None:
                 principal_id=PRINCIPAL_ID,
             ),
             cloud_bus=_cloud_bus(),
+            canary=_canary(),
             local_transport_flavor="containerized",
             dedupe_store_path=Path.cwd() / "gateway-test.sqlite3",
             dedupe_retention_hours=23,

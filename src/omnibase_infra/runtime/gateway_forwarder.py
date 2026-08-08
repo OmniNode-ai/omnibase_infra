@@ -53,7 +53,29 @@ def load_gateway_forwarder_runtime_config(
         raise ValueError("gateway forwarder config must be a YAML mapping")
     raw: dict[str, object] = {str(key): value for key, value in raw_object.items()}
     _materialize_contract_mirror_topics(raw, contract_path)
+    _materialize_contract_canary_config(raw, contract_path)
     return ModelGatewayForwarderRuntimeConfig.model_validate(raw)
+
+
+def _load_gateway_forwarder_config_block(
+    contract_path: Path, selector: object
+) -> dict[str, object]:
+    """Read and validate ``config.gateway_forwarder`` from the node contract."""
+    contract_object: object = yaml.safe_load(contract_path.read_text(encoding="utf-8"))
+    if not isinstance(contract_object, dict):
+        raise ValueError("gateway node contract must be a YAML mapping")
+    contract: dict[str, object] = {
+        str(key): value for key, value in contract_object.items()
+    }
+    if contract.get("contract_name") != selector:
+        raise ValueError("gateway node contract does not match mirror_topic_set")
+    contract_config = contract.get("config")
+    if not isinstance(contract_config, dict):
+        raise ValueError("gateway node contract is missing config")
+    gateway_config = contract_config.get("gateway_forwarder")
+    if not isinstance(gateway_config, dict):
+        raise ValueError("gateway node contract is missing gateway_forwarder")
+    return {str(key): value for key, value in gateway_config.items()}
 
 
 def _materialize_contract_mirror_topics(
@@ -85,26 +107,48 @@ def _materialize_contract_mirror_topics(
             f"mirror_topic_set must be {_GATEWAY_CONTRACT_NAME!r}, got {selector!r}"
         )
 
-    contract_object: object = yaml.safe_load(contract_path.read_text(encoding="utf-8"))
-    if not isinstance(contract_object, dict):
-        raise ValueError("gateway node contract must be a YAML mapping")
-    contract: dict[str, object] = {
-        str(key): value for key, value in contract_object.items()
-    }
-    if contract.get("contract_name") != selector:
-        raise ValueError("gateway node contract does not match mirror_topic_set")
-    contract_config = contract.get("config")
-    if not isinstance(contract_config, dict):
-        raise ValueError("gateway node contract is missing config")
-    gateway_config = contract_config.get("gateway_forwarder")
-    if not isinstance(gateway_config, dict):
-        raise ValueError("gateway node contract is missing gateway_forwarder")
+    gateway_config = _load_gateway_forwarder_config_block(contract_path, selector)
     mirror_topics_object = gateway_config.get("mirror_topics")
     if not isinstance(mirror_topics_object, dict):
         raise ValueError("gateway node contract mirror_topics must be a mapping")
     forwarder["mirror_topics"] = {
         str(key): value for key, value in mirror_topics_object.items()
     }
+
+
+def _materialize_contract_canary_config(
+    raw: dict[str, object],
+    contract_path: Path,
+) -> None:
+    """Resolve the canary probe topic/cadence/deadlines from the node contract.
+
+    Same authority pattern as ``_materialize_contract_mirror_topics``: resolved
+    deployment YAML names the contract via ``canary_topic_set`` and may not
+    redeclare the canary block inline, so the contract stays the sole source
+    of the canary topic and its cadence/deadlines (OMN-15741).
+    """
+    forwarder_object = raw["forwarder"]
+    if not isinstance(forwarder_object, dict):
+        raise ValueError("gateway forwarder config requires a forwarder mapping")
+    forwarder: dict[str, object] = forwarder_object
+    if "canary" in forwarder:
+        raise ValueError(
+            "resolved gateway config must name canary_topic_set instead of "
+            "redeclaring the canary block"
+        )
+    selector = forwarder.pop("canary_topic_set", None)
+    if selector != _GATEWAY_CONTRACT_NAME:
+        raise ValueError(
+            f"canary_topic_set must be {_GATEWAY_CONTRACT_NAME!r}, got {selector!r}"
+        )
+
+    gateway_config = _load_gateway_forwarder_config_block(contract_path, selector)
+    canary_object = gateway_config.get("canary")
+    if not isinstance(canary_object, dict):
+        raise ValueError(
+            "gateway node contract is missing config.gateway_forwarder.canary"
+        )
+    forwarder["canary"] = {str(key): value for key, value in canary_object.items()}
 
 
 async def run_gateway_forwarder(

@@ -15,6 +15,7 @@ from omnibase_core.models.delegation.wire import ModelDelegationRequest
 from omnibase_core.models.events.model_event_envelope import ModelEventEnvelope
 from omnibase_infra.errors import InfraUnavailableError
 from omnibase_infra.nodes.node_bus_forwarder_effect.models import (
+    ModelGatewayCanaryConfig,
     ModelGatewayCloudBusConfig,
     ModelGatewayForwarderConfig,
     ModelGatewayMirrorTopics,
@@ -41,6 +42,15 @@ WIRE_OUTBOUND_TOPIC = f"tenant-acme.{OUTBOUND_TOPIC}"
 # (delegation-inference-request.v1), which is an intermediate intent topic.
 DELEGATION_REQUEST_TOPIC = "onex.cmd.omnibase-infra.delegation-request.v1"
 WIRE_DELEGATION_REQUEST_TOPIC = f"tenant-acme.{DELEGATION_REQUEST_TOPIC}"
+
+
+def _canary() -> ModelGatewayCanaryConfig:
+    return ModelGatewayCanaryConfig(
+        topic="onex.evt.omnibase-infra.gateway-canary.v1",
+        cadence_seconds=30,
+        produce_deadline_seconds=8,
+        readback_deadline_seconds=12,
+    )
 
 
 @dataclass(frozen=True)
@@ -116,6 +126,7 @@ def _config() -> ModelGatewayForwarderConfig:
             inbound=(INBOUND_TOPIC,),
             outbound=(OUTBOUND_TOPIC,),
         ),
+        canary=_canary(),
     )
 
 
@@ -431,6 +442,7 @@ def _config_with_delegation_request() -> ModelGatewayForwarderConfig:
             inbound=(INBOUND_TOPIC, DELEGATION_REQUEST_TOPIC),
             outbound=(OUTBOUND_TOPIC,),
         ),
+        canary=_canary(),
     )
 
 

@@ -13,6 +13,7 @@ import yaml
 
 from omnibase_infra.event_bus.models.config import ModelKafkaEventBusConfig
 from omnibase_infra.nodes.node_bus_forwarder_effect.models import (
+    ModelGatewayCanaryConfig,
     ModelGatewayCloudBusConfig,
     ModelGatewayForwarderConfig,
     ModelGatewayForwarderRuntimeConfig,
@@ -46,6 +47,12 @@ def _runtime_config() -> ModelGatewayForwarderRuntimeConfig:
                     "onex.evt.omnibase-infra.delegation-completed.v1",
                     "onex.evt.omnibase-infra.gateway-heartbeat.v1",
                 ),
+            ),
+            canary=ModelGatewayCanaryConfig(
+                topic="onex.evt.omnibase-infra.gateway-canary.v1",
+                cadence_seconds=30,
+                produce_deadline_seconds=8,
+                readback_deadline_seconds=12,
             ),
         ),
         local_bus=ModelKafkaEventBusConfig(
@@ -112,7 +119,9 @@ def test_runtime_config_loader_round_trips_yaml(tmp_path: Path) -> None:
     dumped["local_bus"].pop("acks_aiokafka")
     dumped["cloud_bus"].pop("acks_aiokafka")
     mirror_topics = dumped["forwarder"].pop("mirror_topics")
+    canary = dumped["forwarder"].pop("canary")
     dumped["forwarder"]["mirror_topic_set"] = "node_bus_forwarder_effect"
+    dumped["forwarder"]["canary_topic_set"] = "node_bus_forwarder_effect"
     path.write_text(
         yaml.safe_dump(dumped),
         encoding="utf-8",
@@ -121,7 +130,12 @@ def test_runtime_config_loader_round_trips_yaml(tmp_path: Path) -> None:
         yaml.safe_dump(
             {
                 "contract_name": "node_bus_forwarder_effect",
-                "config": {"gateway_forwarder": {"mirror_topics": mirror_topics}},
+                "config": {
+                    "gateway_forwarder": {
+                        "mirror_topics": mirror_topics,
+                        "canary": canary,
+                    }
+                },
             }
         ),
         encoding="utf-8",
@@ -146,6 +160,33 @@ def test_runtime_config_rejects_inline_mirror_topic_literals(tmp_path: Path) -> 
         gateway_forwarder.load_gateway_forwarder_runtime_config(path)
 
 
+def test_runtime_config_rejects_inline_canary_literals(tmp_path: Path) -> None:
+    config = _runtime_config()
+    path = tmp_path / "gateway.yaml"
+    contract_path = tmp_path / "contract.yaml"
+    dumped = config.model_dump(mode="json")
+    dumped["local_bus"].pop("acks_aiokafka")
+    dumped["cloud_bus"].pop("acks_aiokafka")
+    mirror_topics = dumped["forwarder"].pop("mirror_topics")
+    dumped["forwarder"]["mirror_topic_set"] = "node_bus_forwarder_effect"
+    # canary is left inline (not popped) -- the redeclare that must be rejected.
+    path.write_text(yaml.safe_dump(dumped), encoding="utf-8")
+    contract_path.write_text(
+        yaml.safe_dump(
+            {
+                "contract_name": "node_bus_forwarder_effect",
+                "config": {"gateway_forwarder": {"mirror_topics": mirror_topics}},
+            }
+        ),
+        encoding="utf-8",
+    )
+
+    with pytest.raises(ValueError, match="must name canary_topic_set"):
+        gateway_forwarder.load_gateway_forwarder_runtime_config(
+            path, contract_path=contract_path
+        )
+
+
 def test_staging_canary_resolves_topics_from_node_contract() -> None:
     repo_root = Path(__file__).parents[3]
 
@@ -156,6 +197,8 @@ def test_staging_canary_resolves_topics_from_node_contract() -> None:
     assert len(loaded.forwarder.mirror_topics.inbound) == 3
     assert len(loaded.forwarder.mirror_topics.outbound) == 6
     assert loaded.local_bus.bootstrap_servers == "redpanda:9092"
+    assert loaded.forwarder.canary.topic == "onex.evt.omnibase-infra.gateway-canary.v1"
+    assert loaded.forwarder.canary.cadence_seconds == 30
 
 
 @pytest.mark.asyncio
