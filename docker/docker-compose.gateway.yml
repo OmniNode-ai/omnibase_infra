@@ -71,7 +71,11 @@ services:
       # for 4 days). Real checks are cadence-bound (contract
       # `gateway_forwarder.canary.cadence_seconds`, default 30s) via
       # --state-file so this does not hit the brokers on every 15s tick.
-      test: ["CMD", "onex-gateway-canary-probe", "--config", "/app/config/gateway-forwarder.yaml", "--state-file", "/tmp/gateway-canary-probe-state.json"]
+      # --broker-ref-map (OMN-15743): the probe resolves cloud_bus.bootstrap_servers
+      # the same fail-closed way the main process does, from the operator-supplied
+      # map already mounted at /run/gateway/broker-ref-map.yaml above -- it does not
+      # re-derive or hardcode a broker endpoint of its own.
+      test: ["CMD", "onex-gateway-canary-probe", "--config", "/app/config/gateway-forwarder.yaml", "--state-file", "/tmp/gateway-canary-probe-state.json", "--broker-ref-map", "/run/gateway/broker-ref-map.yaml"]
       interval: 15s
       timeout: 25s
       retries: 4
