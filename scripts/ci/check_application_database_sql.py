@@ -46,16 +46,17 @@ _LEGACY_DEFAULT_SCHEMA_SQL_EXACT_PATHS = frozenset(
         # the OMN-15356 tenant_id TEXT->UUID conversion on the SAME physical
         # public.capability_scores table 0002 already exempted for the
         # identical reason (physical table intentionally remains in public
-        # until the governed OMN-15359 schema cutover). The mapping function
-        # `house_tenant_map_slug_to_uuid` it defines is deployed alongside
-        # that table and shares its schema fate; qualifying only this new
-        # statement would target objects that do not exist under a qualified
-        # name in the runner today. node-migration-sync (OMN-13332) forces
-        # this file to be vendored verbatim from omnimarket dev regardless of
-        # this gate, so exempting it here (not editing the SQL) is the
-        # canonical fix -- see docs/tracking/ROLLING_WORK_LEDGER.md
-        # 2026-08-08 [mergesweep-0808-deadlock] for the full deadlock
-        # analysis.
+        # until the governed OMN-15359 schema cutover). OMN-15732 AC2
+        # adjudication (2026-08-08) rejected a standalone, schema-qualified
+        # mapping function as inadmissible for a node migration stream (no
+        # `node:%` domain -- {tenant, omninode_internal} -- admits
+        # platform_catalog); the mapping is now inlined into this same file's
+        # `ALTER COLUMN ... USING` clause, so there is no separate object to
+        # qualify. node-migration-sync (OMN-13332) forces this file to be
+        # vendored verbatim from omnimarket dev regardless of this gate, so
+        # exempting it here (not editing the SQL) is the canonical fix -- see
+        # docs/tracking/ROLLING_WORK_LEDGER.md 2026-08-08
+        # [mergesweep-0808-deadlock] for the full deadlock analysis.
         Path(
             "docker/migrations/forward/nodes/node_canary_score_reducer/"
             "0003_capability_scores_tenant_id_to_uuid.sql"
