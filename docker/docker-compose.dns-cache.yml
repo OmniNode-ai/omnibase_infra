@@ -1,0 +1,57 @@
+# docker-compose.dns-cache.yml
+# OMN-15736 — local caching DNS resolver (unbound) for the self-hosted runner
+# fleet. Scaling precondition #1 (capacity probe: [mergesweep-0808-capacity]).
+#
+# STATUS: SHOVEL-READY / INERT. This service is NOT part of the runner fleet
+# (docker/docker-compose.runners.yml) and is NOT started by any default deploy
+# path. It is stood up SEPARATELY, at rollout, ONLY after explicit operator
+# go — same pattern as docker/docker-compose.pypi-cache.yml (OMN-14027). This
+# is a NEW service; bringing it up does not mutate any prod daemon or the
+# runner containers, and no existing container's DNS is repointed by this file
+# alone (see docker-compose.dns-canary.yml for the opt-in canary wiring).
+#
+# Why it exists: all 64+ runner containers resolve DNS through
+# systemd-resolved pointed at a single LAN-router upstream (192.168.86.1, with
+# 8.8.8.8 fallback) with no local caching layer. Under a 64+ concurrent
+# job-start burst, every container fires its own upstream query for the same
+# hostnames (files.pythonhosted.org, pypi.org, codeload.github.com,
+# api.github.com, ...) — the plausible chokepoint behind OMN-15733's
+# deterministic "Temporary failure in name resolution" failures. This cache is
+# additive (forwards to the same router + public fallback); it does not
+# replace or reconfigure the router.
+#
+# Rollout / rollback (do NOT run now): docs/runbooks/runner-dns-cache-rollout.md
+#   Bring up:  docker compose -f docker/docker-compose.dns-cache.yml up -d --build
+#   Tear down: docker compose -f docker/docker-compose.dns-cache.yml down
+services:
+  omninode-dns-cache:
+    build:
+      context: ./dns-cache
+    image: omninode-dns-cache:latest
+    container_name: omninode-dns-cache
+    restart: unless-stopped
+    # Published on the runner host's LAN address so every fleet runner
+    # container can point its `dns:` directive at it (see
+    # docker-compose.dns-canary.yml). `dns:` requires a raw IP, not a
+    # Tailscale MagicDNS hostname, so the canary override uses the host's LAN
+    # IP directly (192.168.86.201) rather than the omninode-pc.tail75df5e.ts.net
+    # name the pypi-cache endpoint uses.
+    ports:
+      - "53:53/udp"
+      - "53:53/tcp"
+    mem_limit: 256m
+    pids_limit: 128
+    healthcheck:
+      # Resolves a real hostname through the cache's own listener — proves
+      # unbound is actually answering queries, not just that the process is
+      # up. Uses the loopback address inside the container's own network ns.
+      test: ["CMD-SHELL", "dig +time=3 +tries=1 @127.0.0.1 files.pythonhosted.org >/dev/null || exit 1"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 30s
+    logging:
+      driver: json-file
+      options:
+        max-size: "10m"
+        max-file: "3"
