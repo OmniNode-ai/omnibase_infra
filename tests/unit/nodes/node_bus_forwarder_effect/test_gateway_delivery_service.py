@@ -4,6 +4,8 @@
 from __future__ import annotations
 
 import asyncio
+import contextlib
+import json
 from collections.abc import Mapping, Sequence
 from pathlib import Path
 from uuid import UUID, uuid4
@@ -81,12 +83,23 @@ class _Source:
         self.fail_commit = fail_commit
         self.committed: list[object] = []
         self.nacked: list[object] = []
+        self.sent: list[tuple[str, bytes]] = []
 
     async def start(self) -> None:
         pass
 
     async def close(self) -> None:
         pass
+
+    async def send(
+        self,
+        topic: str,
+        key: bytes | None,
+        value: bytes,
+        headers: Mapping[str, bytes],
+    ) -> None:
+        self.events.append("dlq_send")
+        self.sent.append((topic, value))
 
     async def poll(
         self, *, max_messages: int, timeout_ms: int
@@ -453,3 +466,186 @@ async def test_real_outbound_consumer_loop_does_not_reforward_degraded_status() 
         "DEGRADED status leaked to the cloud leg via the outbound consumer "
         f"loop re-forwarding the local-bus mirror: {degraded_on_cloud!r}"
     )
+
+
+# --- OMN-15748: poison-pill quarantine + membership-loss watchdog ----------
+
+
+async def test_undecodable_record_is_quarantined_not_crashed() -> None:
+    """decode_message() failure must be quarantined, never propagate raw.
+
+    Pre-fix: ``_deliver_message_locked`` calls ``decode_message()`` BEFORE
+    the try/except that nacks, so a malformed record raises straight out of
+    ``deliver_message`` -- exactly the live 2026-08-08T16:50Z crash trigger
+    (verbatim pydantic ``ValidationError`` traceback ending in
+    ``sys.exit(main())``). Nacking it (the ordinary failure path) would also
+    be wrong: a permanently malformed record redelivers via nack's ``seek``
+    and re-crashes forever. It must be logged, dead-lettered, and committed
+    past (skipped) so the consumer loop keeps making forward progress.
+    """
+    events: list[str] = []
+    source = _Source(events)
+    store = _RecordingStore(events)
+    delivery, cloud_bus = _delivery(events, source, store)
+    poison = ModelTransportMessage(
+        topic=OUTBOUND_TOPIC,
+        partition=0,
+        offset=3,
+        key=b"tenant-key",
+        value=b"SYNTHETIC-not-valid-json{{{",
+        headers={},
+        ack_token=(OUTBOUND_TOPIC, 0, 3),
+    )
+
+    # Must not raise -- this is the process-crash regression.
+    await delivery.deliver_message("outbound", source, poison)  # type: ignore[arg-type]
+
+    assert source.committed == [poison], (
+        "poison record must be committed (skipped), not left uncommitted"
+    )
+    assert source.nacked == [], (
+        "must not nack a permanently undecodable record -- nack seeks back "
+        "to the same offset and re-crashes forever (poison-loop)"
+    )
+    assert cloud_bus.sent == [], (
+        "an undecodable record must never reach the destination"
+    )
+    assert source.sent, "undecodable record must be dead-lettered, not silently dropped"
+    dlq_topic, dlq_value = source.sent[0]
+    assert dlq_topic == "onex.dlq.omnibase-infra.events.v1"
+    payload = json.loads(dlq_value)
+    assert payload["original_topic"] == OUTBOUND_TOPIC
+    assert payload["original_partition"] == 0
+    assert payload["original_offset"] == 3
+    assert payload["direction"] == "outbound"
+    assert payload["failure_class"] == "gateway_undecodable_record"
+
+
+class _StallThenRecoverSource:
+    """Reproduces the live 2026-08-09T10:03:07Z silent-eviction mechanism.
+
+    aiokafka's client-side ``max_poll_interval_ms`` idle-eviction fires from
+    a SEPARATE asyncio task (``GroupCoordinator._heartbeat_routine``) than
+    the poll loop -- it force-leaves the group and the poll loop's own
+    ``poll()`` call simply never returns and never raises. The only way out
+    is a brand-new client instance (a fresh group join), which is exactly
+    what ``close()`` + ``start()`` on a real ``KafkaTransport`` does. This
+    fake models that: the first ``poll()`` hangs forever with zero
+    exception; only after ``close()``/``start()`` are called does it behave
+    like a healthy transport again (real suspension via ``asyncio.sleep``,
+    not a busy-spin return -- the same discipline
+    ``test_real_outbound_consumer_loop_does_not_reforward_degraded_status``
+    documents above).
+    """
+
+    def __init__(self) -> None:
+        self.poll_calls = 0
+        self.start_calls = 0
+        self.close_calls = 0
+        self.committed: list[object] = []
+        self.nacked: list[object] = []
+        self._recreated = False
+        self._stuck: asyncio.Event = asyncio.Event()
+
+    async def start(self) -> None:
+        self.start_calls += 1
+        self._recreated = True
+
+    async def close(self) -> None:
+        self.close_calls += 1
+
+    def has_group_membership(self) -> bool:
+        return self._recreated
+
+    async def poll(
+        self, *, max_messages: int, timeout_ms: int
+    ) -> Sequence[ModelTransportMessage]:
+        self.poll_calls += 1
+        if not self._recreated:
+            await self._stuck.wait()  # never set: permanent stall, no exception
+            return []  # pragma: no cover - unreachable in this test
+        await asyncio.sleep(timeout_ms / 1000)
+        return []
+
+    async def commit(self, message: object) -> None:
+        self.committed.append(message)
+
+    async def nack(self, message: object) -> None:
+        self.nacked.append(message)
+
+
+async def test_membership_loss_watchdog_recreates_and_recovers() -> None:
+    """OMN-15748/OMN-15690: silent LeaveGroup (zero exception) must recover.
+
+    Pre-fix: there is no watchdog at all. The only recovery mechanism is
+    ``runtime/gateway_forwarder.py``'s ``_supervise_gateway_delivery``, which
+    is exception-triggered off ``delivery.wait()`` -- structurally unable to
+    observe a task that is alive and hung, never done, never exceptioned.
+    That is the adjudicated live failure mode: the process is left with
+    MEMBERS=0 on one direction forever, no rejoin, no restart, no alert.
+    """
+    local_bus = _RecordingBus([])
+    cloud_bus = _RecordingBus([])
+    config = _config().model_copy(
+        update={
+            "heartbeat_interval_seconds": 1,
+            "max_silence_window_seconds": 2,
+            "mirror_topics": ModelGatewayMirrorTopics(
+                inbound=("onex.cmd.omnibase-infra.delegation-request.v1",),
+                outbound=(OUTBOUND_TOPIC, HEARTBEAT_TOPIC),
+            ),
+        }
+    )
+    forwarder = ServiceGatewayForwarder(
+        config=config,
+        local_bus=local_bus,  # type: ignore[arg-type]
+        cloud_bus=cloud_bus,  # type: ignore[arg-type]
+    )
+    stalled_outbound = _StallThenRecoverSource()
+    idle_inbound = _Source([])
+    delivery = NodeGatewayDelivery(
+        config=config,
+        forwarder=forwarder,
+        local_consumer=stalled_outbound,  # type: ignore[arg-type]
+        cloud_consumer=idle_inbound,  # type: ignore[arg-type]
+        idempotency_store=StoreIdempotencyInmemory(),
+        poll_timeout_ms=50,
+    )
+
+    await delivery.start()
+    try:
+        for _ in range(200):
+            if stalled_outbound.start_calls:
+                break
+            await asyncio.sleep(0.02)
+        assert stalled_outbound.start_calls >= 1, (
+            "watchdog never force-recreated the stalled transport -- the "
+            "silent-eviction mode was never detected"
+        )
+        assert stalled_outbound.close_calls >= 1
+
+        # Prove actual recovery (forward progress resumes), not merely a
+        # crash-free wait.
+        polls_at_recreate = stalled_outbound.poll_calls
+        for _ in range(100):
+            if stalled_outbound.poll_calls > polls_at_recreate:
+                break
+            await asyncio.sleep(0.02)
+        assert stalled_outbound.poll_calls > polls_at_recreate, (
+            "recreated direction never resumed polling"
+        )
+
+        degraded = [value for _topic, value in local_bus.sent if b'"degraded"' in value]
+        assert degraded, "membership-loss recovery must publish a DEGRADED status"
+
+        # No task death: the exception-triggered supervision surface
+        # (delivery.wait()) must never see this recovery -- it is handled
+        # entirely inside the watchdog.
+        wait_task = asyncio.create_task(delivery.wait())
+        done, _pending = await asyncio.wait({wait_task}, timeout=0.2)
+        assert wait_task not in done, "delivery loop task must not have died"
+        wait_task.cancel()
+        with contextlib.suppress(asyncio.CancelledError):
+            await wait_task
+    finally:
+        await delivery.stop()

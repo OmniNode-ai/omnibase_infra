@@ -264,6 +264,25 @@ class KafkaTransport:
         if first_error is not None:
             raise first_error
 
+    def has_group_membership(self) -> bool:
+        """Best-effort local check: does the consumer still hold a partition assignment?
+
+        Not authoritative on its own -- ``assignment()`` reflects the client's
+        last-known state and can be momentarily stale across a rebalance. Used
+        as a corroborating signal for the delivery-loop staleness watchdog
+        (``NodeGatewayDelivery``, OMN-15748/OMN-15690): a silent
+        ``max_poll_interval_ms`` idle-eviction (aiokafka's client-side
+        ``GroupCoordinator._heartbeat_routine``) drops group membership with
+        zero exception raised to the caller, so the watchdog cannot rely on
+        task failure alone to detect it.
+        """
+        if self._consumer is None:
+            return False
+        try:
+            return bool(self._consumer.assignment())
+        except Exception:  # noqa: BLE001 — boundary: best-effort probe, never raises
+            return False
+
     async def caught_up_topics(self, topics: frozenset[str]) -> frozenset[str]:
         """Return the subset of ``topics`` whose consumer has caught up (LAG=0).
 
