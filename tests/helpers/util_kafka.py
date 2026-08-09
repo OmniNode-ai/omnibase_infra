@@ -1344,15 +1344,44 @@ class KafkaTopicManager:
             self.created_topics.append(topic_name)
 
             # Wait for topic metadata to propagate
-            await wait_for_topic_metadata(
+            topic_ready = await wait_for_topic_metadata(
                 admin, topic_name, expected_partitions=partitions
             )
+            if not topic_ready:
+                correlation_id = uuid4()
+                context = ModelInfraErrorContext.with_correlation(
+                    correlation_id=correlation_id,
+                    transport_type=EnumInfraTransportType.KAFKA,
+                    operation="create_topic",
+                    target_name=topic_name,
+                )
+                raise InfraUnavailableError(
+                    f"Topic '{topic_name}' metadata did not propagate within "
+                    f"timeout (expected {partitions} partition(s)); create_topic "
+                    "cannot confirm the topic actually exists on the broker.",
+                    context=context,
+                )
 
         except TopicAlreadyExistsError:
             # Topic already exists - still wait for metadata
-            await wait_for_topic_metadata(
+            topic_ready = await wait_for_topic_metadata(
                 admin, topic_name, timeout=5.0, expected_partitions=partitions
             )
+            if not topic_ready:
+                correlation_id = uuid4()
+                context = ModelInfraErrorContext.with_correlation(
+                    correlation_id=correlation_id,
+                    transport_type=EnumInfraTransportType.KAFKA,
+                    operation="create_topic",
+                    target_name=topic_name,
+                )
+                raise InfraUnavailableError(
+                    f"Topic '{topic_name}' already existed but its metadata did "
+                    f"not propagate within timeout (expected {partitions} "
+                    "partition(s)); create_topic cannot confirm the topic "
+                    "actually exists on the broker.",
+                    context=context,
+                )
 
         return topic_name
 
