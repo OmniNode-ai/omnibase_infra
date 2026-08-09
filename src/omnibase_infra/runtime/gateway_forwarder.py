@@ -6,10 +6,14 @@ from __future__ import annotations
 
 import argparse
 import asyncio
+import contextlib
 import logging
+import random
 import signal
 from collections.abc import Mapping, Sequence
+from datetime import UTC, datetime
 from pathlib import Path
+from typing import Literal
 
 import yaml
 from aiokafka.errors import KafkaError
@@ -22,6 +26,7 @@ from omnibase_infra.event_bus.kafka_transport import KafkaTransport
 from omnibase_infra.event_bus.models import ModelEventHeaders
 from omnibase_infra.idempotency import StoreIdempotencySqlite
 from omnibase_infra.nodes.node_bus_forwarder_effect.models import (
+    ModelGatewayForwarderConfig,
     ModelGatewayForwarderRuntimeConfig,
 )
 from omnibase_infra.nodes.node_bus_forwarder_effect.services.service_gateway_delivery import (
@@ -197,8 +202,6 @@ async def run_gateway_forwarder(
     started_transports: list[KafkaTransport] = []
     delivery_started = False
     heartbeat_task: asyncio.Task[None] | None = None
-    delivery_wait_task: asyncio.Task[None] | None = None
-    shutdown_wait_task: asyncio.Task[bool] | None = None
     try:
         await idempotency_store.start()
         store_started = True
@@ -221,37 +224,19 @@ async def run_gateway_forwarder(
             identity.tenant_id,
             identity.tenant_slug,
         )
-        delivery_wait_task = asyncio.create_task(
-            delivery.wait(),
-            name="gateway-delivery-health",
+        await _supervise_gateway_delivery(
+            forwarder=forwarder,
+            delivery=delivery,
+            heartbeat_task=heartbeat_task,
+            shutdown_event=shutdown_event,
+            config=config.forwarder,
         )
-        shutdown_wait_task = asyncio.create_task(
-            shutdown_event.wait(),
-            name="gateway-shutdown-wait",
-        )
-        done, _ = await asyncio.wait(
-            {delivery_wait_task, shutdown_wait_task, heartbeat_task},
-            return_when=asyncio.FIRST_COMPLETED,
-        )
-        if delivery_wait_task in done:
-            await delivery_wait_task
-        if heartbeat_task in done:
-            await heartbeat_task
     finally:
         if ready_path is not None:
             ready_path.unlink(missing_ok=True)
-        for waiter in (delivery_wait_task, shutdown_wait_task):
-            if waiter is not None and not waiter.done():
-                waiter.cancel()
-        waiters = [
-            waiter
-            for waiter in (delivery_wait_task, shutdown_wait_task)
-            if waiter is not None
-        ]
-        if waiters:
-            await asyncio.gather(*waiters, return_exceptions=True)
-        if heartbeat_task is not None:
+        if heartbeat_task is not None and not heartbeat_task.done():
             heartbeat_task.cancel()
+        if heartbeat_task is not None:
             await asyncio.gather(heartbeat_task, return_exceptions=True)
         if delivery_started:
             await delivery.stop()
@@ -259,6 +244,174 @@ async def run_gateway_forwarder(
             await transport.close()
         if store_started:
             await idempotency_store.close()
+
+
+async def _supervise_gateway_delivery(
+    *,
+    forwarder: ServiceGatewayForwarder,
+    delivery: NodeGatewayDelivery,
+    heartbeat_task: asyncio.Task[None],
+    shutdown_event: asyncio.Event,
+    config: ModelGatewayForwarderConfig,
+) -> None:
+    """Keep the delivery loop alive across cloud-leg faults, no terminal exit.
+
+    A delivery-loop failure (e.g. the cloud broker leg dropping) previously
+    propagated straight out of ``run_gateway_forwarder`` and ended the
+    process. It is now retried in place with bounded exponential backoff
+    and jitter. Once the failure has persisted past the contract-declared
+    ``degraded_after_seconds`` window, one ``DEGRADED`` status event is
+    published (locally -- see ``ServiceGatewayForwarder.publish_status``)
+    so the failure is observable on the bus rather than only in restart
+    counts. A restart only clears the failure window once the delivery
+    loop has stayed up for a full ``heartbeat_interval_seconds`` recovery
+    window without failing again -- a bare ``delivery.start()`` call
+    succeeding proves the coroutines were scheduled, not that the cloud
+    leg is actually reachable again, so it is deliberately not treated as
+    recovery on its own. The process still exits on shutdown, on the
+    heartbeat task failing unexpectedly, or on the delivery loop returning
+    without either an exception or a shutdown signal (both are
+    unrecoverable/programmer errors, not connectivity faults).
+    """
+    consecutive_failures = 0
+    first_failure_at: datetime | None = None
+    degraded_emitted = False
+    shutdown_wait_task = asyncio.create_task(
+        shutdown_event.wait(), name="gateway-shutdown-wait"
+    )
+    try:
+        while True:
+            delivery_wait_task = asyncio.create_task(
+                delivery.wait(), name="gateway-delivery-health"
+            )
+            recovery_task: asyncio.Task[None] | None = None
+            if consecutive_failures > 0:
+                recovery_task = asyncio.create_task(
+                    asyncio.sleep(config.heartbeat_interval_seconds),
+                    name="gateway-delivery-recovery-confirm",
+                )
+            waitables: set[asyncio.Task[object]] = {
+                delivery_wait_task,
+                shutdown_wait_task,
+                heartbeat_task,
+            }
+            if recovery_task is not None:
+                waitables.add(recovery_task)
+            try:
+                done, _ = await asyncio.wait(
+                    waitables, return_when=asyncio.FIRST_COMPLETED
+                )
+                if shutdown_wait_task in done:
+                    return
+                if heartbeat_task in done:
+                    await heartbeat_task
+                    return
+                if (
+                    recovery_task is not None
+                    and recovery_task in done
+                    and delivery_wait_task not in done
+                ):
+                    # Survived a full heartbeat interval without a new
+                    # failure -- treat the connection as recovered.
+                    consecutive_failures = 0
+                    first_failure_at = None
+                    if degraded_emitted:
+                        await _publish_gateway_status(forwarder, status="active")
+                        degraded_emitted = False
+                    continue
+                exc = delivery_wait_task.exception()
+                if exc is None:
+                    raise RuntimeError(
+                        "gateway delivery loop exited without a shutdown signal"
+                    )
+            finally:
+                if recovery_task is not None and not recovery_task.done():
+                    recovery_task.cancel()
+                    with contextlib.suppress(asyncio.CancelledError):
+                        await recovery_task
+                if not delivery_wait_task.done():
+                    delivery_wait_task.cancel()
+                    with contextlib.suppress(asyncio.CancelledError):
+                        await delivery_wait_task
+
+            consecutive_failures += 1
+            now = datetime.now(UTC)
+            if first_failure_at is None:
+                first_failure_at = now
+            elapsed_seconds = (now - first_failure_at).total_seconds()
+            logger.warning(
+                "Gateway delivery loop failed; reconnect attempt=%d "
+                "elapsed_seconds=%.1f error_type=%s error=%s",
+                consecutive_failures,
+                elapsed_seconds,
+                type(exc).__name__,
+                exc,
+            )
+
+            degraded_threshold = config.degraded_after_seconds
+            if not degraded_emitted and elapsed_seconds >= degraded_threshold:
+                await _publish_gateway_status(
+                    forwarder,
+                    status="degraded",
+                    consecutive_failures=consecutive_failures,
+                    detail=f"{type(exc).__name__}: {exc}",
+                )
+                degraded_emitted = True
+
+            delay = _compute_reconnect_delay_seconds(config, consecutive_failures)
+            shutdown_fired = await _sleep_or_shutdown(delay, shutdown_event)
+            if shutdown_fired:
+                return
+
+            await delivery.stop()
+            try:
+                await delivery.start()
+            except Exception:
+                logger.exception("Gateway delivery restart failed; will retry")
+                continue
+    finally:
+        if not shutdown_wait_task.done():
+            shutdown_wait_task.cancel()
+        with contextlib.suppress(asyncio.CancelledError):
+            await shutdown_wait_task
+
+
+def _compute_reconnect_delay_seconds(
+    config: ModelGatewayForwarderConfig,
+    attempt: int,
+) -> float:
+    """Bounded exponential backoff with additive jitter, contract-declared."""
+    exponential = config.reconnect_backoff_initial_seconds * (2 ** (attempt - 1))
+    capped = min(exponential, config.reconnect_backoff_max_seconds)
+    jitter = random.uniform(0, config.reconnect_backoff_jitter_seconds)
+    return capped + jitter
+
+
+async def _sleep_or_shutdown(delay: float, shutdown_event: asyncio.Event) -> bool:
+    """Sleep for ``delay`` seconds; return True if shutdown fired first."""
+    try:
+        await asyncio.wait_for(shutdown_event.wait(), timeout=delay)
+    except TimeoutError:
+        return False
+    return True
+
+
+async def _publish_gateway_status(
+    forwarder: ServiceGatewayForwarder,
+    *,
+    status: Literal["active", "degraded"],
+    consecutive_failures: int = 0,
+    detail: str = "",
+) -> None:
+    """Best-effort status publish -- must never itself take down supervision."""
+    try:
+        await forwarder.publish_status(
+            status,
+            consecutive_failures=consecutive_failures,
+            detail=detail,
+        )
+    except Exception:
+        logger.exception("Gateway %s status publish failed", status)
 
 
 class TransportGatewayBus:
