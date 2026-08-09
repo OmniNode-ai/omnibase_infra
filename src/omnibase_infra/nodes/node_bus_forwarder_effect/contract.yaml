@@ -7,11 +7,11 @@ node_type: "EFFECT_GENERIC"
 contract_version:
   major: 0
   minor: 1
-  patch: 0
+  patch: 1
 node_version:
   major: 0
   minor: 1
-  patch: 0
+  patch: 1
 description: >
   Trust-boundary effect node that mirrors contract-declared tenant gateway topics between a local runtime bus and the hosted cloud Kafka edge. The node owns all publishes; handlers only validate and return transformed envelopes.
 
@@ -57,12 +57,27 @@ config:
         - "onex.evt.omniintelligence.llm-call-completed.v1"
         - "onex.evt.omnibase-infra.llm-call-completed.v1"
         - "onex.evt.omnibase-infra.gateway-heartbeat.v1"
+    canary:
+      # OMN-15741 (G1): dedicated topic for the path-verifying healthcheck probe.
+      # Never mirrored, never carries tenant traffic -- the probe produces a tiny
+      # record here and reads it back across each leg using the same transport
+      # and credentials as real traffic, so the healthcheck can tell "connected
+      # and forwarding" apart from "started once, now silently broken" (the
+      # 2026-08-04 failure: ready-file present, forwarding 0% for 4 days).
+      topic: "onex.evt.omnibase-infra.gateway-canary.v1"
+      cadence_seconds: 30
+      produce_deadline_seconds: 8
+      readback_deadline_seconds: 12
     liveness:
       heartbeat_interval_seconds: 15
       max_silence_window_seconds: 60
       lag_threshold_messages: 500
       lag_threshold_seconds: 120
       drain_deadline_seconds: 30
+      reconnect_backoff_initial_seconds: 1
+      reconnect_backoff_max_seconds: 30
+      reconnect_backoff_jitter_seconds: 0.5
+      degraded_after_seconds: 60
     dedupe:
       key: "envelope_id"
       store: "sqlite"
@@ -110,7 +125,7 @@ metadata:
   description: "Hybrid gateway local runtime bus forwarder"
   author: "OmniNode Team"
   created: "2026-06-10"
-  updated: "2026-07-14"
+  updated: "2026-08-08"
   tags:
     - gateway
     - event-bus

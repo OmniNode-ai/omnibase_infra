@@ -59,6 +59,9 @@ databases:
           - object_type: SCHEMA
             privileges: [USAGE]
             schema: omninode_internal
+          - object_type: SCHEMA
+            privileges: [USAGE]
+            schema: public
           - object_type: TABLE
             objects:
               - baselines_breakdown
@@ -102,12 +105,12 @@ databases:
               - traces
               - voice_sessions
             privileges: [INSERT, SELECT, UPDATE]
-            schema: omninode_internal
+            schema: public
           - object_type: TABLE
             objects:
               - nightly_loop_configs
             privileges: [SELECT]
-            schema: omninode_internal
+            schema: public
         login: true
       onex_api:
         bypass_rls: false

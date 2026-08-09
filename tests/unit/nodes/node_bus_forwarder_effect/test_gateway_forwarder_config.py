@@ -10,6 +10,7 @@ import pytest
 from pydantic import ValidationError
 
 from omnibase_infra.nodes.node_bus_forwarder_effect.models import (
+    ModelGatewayCanaryConfig,
     ModelGatewayCloudBusConfig,
     ModelGatewayForwarderConfig,
     ModelGatewayMirrorTopics,
@@ -28,6 +29,15 @@ def _cloud_bus() -> ModelGatewayCloudBusConfig:
         acl_provisioner_ref="gateway.cloud.kafka.authorization",
         client_id_ref="gateway.cloud.kafka.oauth.client_id",
         client_secret_api_key_ref="infisical://gateway/redpanda-events",
+    )
+
+
+def _canary() -> ModelGatewayCanaryConfig:
+    return ModelGatewayCanaryConfig(
+        topic="onex.evt.omnibase-infra.gateway-canary.v1",
+        cadence_seconds=30,
+        produce_deadline_seconds=8,
+        readback_deadline_seconds=12,
     )
 
 
@@ -59,6 +69,7 @@ def test_config_requires_silence_window_above_heartbeat() -> None:
                 principal_id=PRINCIPAL_ID,
             ),
             cloud_bus=_cloud_bus(),
+            canary=_canary(),
             local_transport_flavor="containerized",
             dedupe_store_path=Path.cwd() / "gateway-test.sqlite3",
             mirror_topics=ModelGatewayMirrorTopics(
@@ -79,6 +90,7 @@ def test_config_requires_retry_max_at_least_initial_delay() -> None:
                 principal_id=PRINCIPAL_ID,
             ),
             cloud_bus=_cloud_bus(),
+            canary=_canary(),
             local_transport_flavor="containerized",
             dedupe_store_path=Path.cwd() / "gateway-test.sqlite3",
             mirror_topics=ModelGatewayMirrorTopics(
@@ -90,6 +102,49 @@ def test_config_requires_retry_max_at_least_initial_delay() -> None:
         )
 
 
+def test_config_requires_reconnect_backoff_max_at_least_initial_delay() -> None:
+    with pytest.raises(ValidationError, match="reconnect_backoff_max_seconds"):
+        ModelGatewayForwarderConfig(
+            tenant_identity=ModelGatewayTenantIdentity(
+                tenant_id=UUID("11111111-1111-1111-1111-111111111111"),
+                tenant_slug="acme",
+                principal_id=PRINCIPAL_ID,
+            ),
+            cloud_bus=_cloud_bus(),
+            canary=_canary(),
+            local_transport_flavor="containerized",
+            dedupe_store_path=Path.cwd() / "gateway-test.sqlite3",
+            mirror_topics=ModelGatewayMirrorTopics(
+                inbound=("onex.cmd.omnibase-infra.delegation-request.v1",),
+                outbound=("onex.evt.omnibase-infra.inference-response.v1",),
+            ),
+            reconnect_backoff_initial_seconds=10,
+            reconnect_backoff_max_seconds=5,
+        )
+
+
+def test_config_reconnect_defaults_match_contract() -> None:
+    config = ModelGatewayForwarderConfig(
+        tenant_identity=ModelGatewayTenantIdentity(
+            tenant_id=UUID("11111111-1111-1111-1111-111111111111"),
+            tenant_slug="acme",
+            principal_id=PRINCIPAL_ID,
+        ),
+        cloud_bus=_cloud_bus(),
+        canary=_canary(),
+        local_transport_flavor="containerized",
+        dedupe_store_path=Path.cwd() / "gateway-test.sqlite3",
+        mirror_topics=ModelGatewayMirrorTopics(
+            inbound=("onex.cmd.omnibase-infra.delegation-request.v1",),
+            outbound=("onex.evt.omnibase-infra.inference-response.v1",),
+        ),
+    )
+    assert config.reconnect_backoff_initial_seconds == 1.0
+    assert config.reconnect_backoff_max_seconds == 30.0
+    assert config.reconnect_backoff_jitter_seconds == 0.5
+    assert config.degraded_after_seconds == 60
+
+
 def test_config_requires_absolute_durable_store_path() -> None:
     with pytest.raises(ValidationError, match="dedupe_store_path must be absolute"):
         ModelGatewayForwarderConfig(
@@ -99,6 +154,7 @@ def test_config_requires_absolute_durable_store_path() -> None:
                 principal_id=PRINCIPAL_ID,
             ),
             cloud_bus=_cloud_bus(),
+            canary=_canary(),
             local_transport_flavor="containerized",
             dedupe_store_path=Path("relative/delivery.sqlite3"),
             mirror_topics=ModelGatewayMirrorTopics(
@@ -117,6 +173,7 @@ def test_config_enforces_twenty_four_hour_dedupe_floor() -> None:
                 principal_id=PRINCIPAL_ID,
             ),
             cloud_bus=_cloud_bus(),
+            canary=_canary(),
             local_transport_flavor="containerized",
             dedupe_store_path=Path.cwd() / "gateway-test.sqlite3",
             dedupe_retention_hours=23,

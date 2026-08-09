@@ -12,6 +12,7 @@ import pytest
 from omnibase_core.models.core.model_envelope_metadata import ModelEnvelopeMetadata
 from omnibase_core.models.events.model_event_envelope import ModelEventEnvelope
 from omnibase_infra.nodes.node_bus_forwarder_effect.models import (
+    ModelGatewayCanaryConfig,
     ModelGatewayCloudBusConfig,
     ModelGatewayForwarderConfig,
     ModelGatewayMirrorTopics,
@@ -87,6 +88,12 @@ def _config() -> ModelGatewayForwarderConfig:
         mirror_topics=ModelGatewayMirrorTopics(
             inbound=(INBOUND_TOPIC,),
             outbound=(OUTBOUND_TOPIC,),
+        ),
+        canary=ModelGatewayCanaryConfig(
+            topic="onex.evt.omnibase-infra.gateway-canary.v1",
+            cadence_seconds=30,
+            produce_deadline_seconds=8,
+            readback_deadline_seconds=12,
         ),
     )
 

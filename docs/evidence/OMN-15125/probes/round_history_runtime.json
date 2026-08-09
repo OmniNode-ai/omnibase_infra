@@ -1,0 +1,42 @@
+[
+    {
+        "Tag": "candidate-d42cbe7-20260731022315",
+        "Pushed": "2026-07-30T22:27:14.600000-04:00",
+        "Digest": "sha256:40a744dfea44ced2b1b11cef0352e92d99323358cf06c721fbd8a6ae22bf62f1"
+    },
+    {
+        "Tag": "candidate-6644803-20260801191103",
+        "Pushed": "2026-08-01T15:15:29.002000-04:00",
+        "Digest": "sha256:5cca91c6d92b50485491e516f46ef7edb603edacc46d80f6232b50cbf6d8bb1b"
+    },
+    {
+        "Tag": "candidate-72d27ef-20260801212041",
+        "Pushed": "2026-08-01T17:25:16.890000-04:00",
+        "Digest": "sha256:a45fab64f77c84978244767a5127b624927faa4df072ec1afa472db6eccfecf9"
+    },
+    {
+        "Tag": "candidate-bf070a9-20260802180459",
+        "Pushed": "2026-08-02T14:09:39.785000-04:00",
+        "Digest": "sha256:70d7880a8096dcf597c9c3e925baaaf848c49f02d9a0062cddcb08b165dd42f9"
+    },
+    {
+        "Tag": "candidate-2e5ef7d-20260804155301",
+        "Pushed": "2026-08-04T11:57:31.384000-04:00",
+        "Digest": "sha256:5507667152e2dc420fc4dd6bd337f8dbe2ecf592939572dc8f353efb10a05dd6"
+    },
+    {
+        "Tag": "candidate-234f7bd-20260804192314",
+        "Pushed": "2026-08-04T15:27:47.315000-04:00",
+        "Digest": "sha256:8535742ee43968809e3efe7ed87a4cf7a9ff8621b22fe46f10e0860290dc1c7d"
+    },
+    {
+        "Tag": "candidate-d53e3cf-20260805004651",
+        "Pushed": "2026-08-04T20:51:27.557000-04:00",
+        "Digest": "sha256:d2a0cac015bb86fb3dd35939d5b9f064f8b69deb17f68f6bdd019986132eda46"
+    },
+    {
+        "Tag": "candidate-a853500-20260805212844",
+        "Pushed": "2026-08-05T17:33:12.278000-04:00",
+        "Digest": "sha256:b829c56f547340363be347391275cc847b1f465c18fa275836dd098989f7ecb7"
+    }
+]
