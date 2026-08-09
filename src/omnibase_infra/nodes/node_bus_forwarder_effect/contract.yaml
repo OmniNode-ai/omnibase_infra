@@ -74,6 +74,10 @@ config:
       lag_threshold_messages: 500
       lag_threshold_seconds: 120
       drain_deadline_seconds: 30
+      reconnect_backoff_initial_seconds: 1
+      reconnect_backoff_max_seconds: 30
+      reconnect_backoff_jitter_seconds: 0.5
+      degraded_after_seconds: 60
     dedupe:
       key: "envelope_id"
       store: "sqlite"
@@ -121,7 +125,7 @@ metadata:
   description: "Hybrid gateway local runtime bus forwarder"
   author: "OmniNode Team"
   created: "2026-06-10"
-  updated: "2026-07-14"
+  updated: "2026-08-08"
   tags:
     - gateway
     - event-bus

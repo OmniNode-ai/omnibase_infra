@@ -42,6 +42,10 @@ class ModelGatewayForwarderConfig(BaseModel):
     dedupe_retention_hours: int = Field(default=24, ge=24)
     forward_retry_initial_seconds: float = Field(default=1.0, gt=0)
     forward_retry_max_seconds: float = Field(default=30.0, gt=0)
+    reconnect_backoff_initial_seconds: float = Field(default=1.0, gt=0)
+    reconnect_backoff_max_seconds: float = Field(default=30.0, gt=0)
+    reconnect_backoff_jitter_seconds: float = Field(default=0.5, ge=0)
+    degraded_after_seconds: int = Field(default=60, ge=1)
 
     @field_validator("dedupe_store_path")
     @classmethod
@@ -70,5 +74,10 @@ class ModelGatewayForwarderConfig(BaseModel):
             raise ValueError(
                 "canary.topic must be dedicated and must not appear in "
                 "mirror_topics.inbound or mirror_topics.outbound"
+            )
+        if self.reconnect_backoff_max_seconds < self.reconnect_backoff_initial_seconds:
+            raise ValueError(
+                "reconnect_backoff_max_seconds must be greater than or equal to "
+                "reconnect_backoff_initial_seconds"
             )
         return self

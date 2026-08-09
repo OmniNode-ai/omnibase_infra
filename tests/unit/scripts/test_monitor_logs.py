@@ -26,6 +26,17 @@ _MODULE_NAME = "monitor_logs"
 _ENV_SENTINEL = "OMN15572_MONITOR_IMPORT_SENTINEL"
 _MONITOR_SCRIPT = _SCRIPTS_DIR / "monitor_logs.py"
 
+# A fresh interpreter startup + `import monitor_logs` normally completes in well
+# under a second, but the self-hosted CI fleet runs many concurrent pytest-split
+# shards per job, and interpreter spawn/import can occasionally queue behind
+# that CPU contention. A 10s bound tripped this way twice live, on unrelated
+# PRs' Split 12/15 (infra#2697 and infra#2700, mergesweep-0809-poisonpath-verify
+# / mergesweep-0809-landingset), both times as three subprocess.TimeoutExpired
+# failures at exactly this bound, unrelated to either PR's own diff. 30s keeps
+# the bound tight enough to still catch a genuine hang while giving real
+# headroom against fleet contention.
+_SUBPROCESS_TIMEOUT_SECONDS = 30
+
 
 def _import() -> Any:
     if _MODULE_NAME in sys.modules:
@@ -104,7 +115,7 @@ class TestImportEnvironmentIsolation:
             env=subprocess_env,
             capture_output=True,
             text=True,
-            timeout=10,
+            timeout=_SUBPROCESS_TIMEOUT_SECONDS,
             check=False,
         )
 
@@ -288,7 +299,7 @@ else:
             env=subprocess_env,
             capture_output=True,
             text=True,
-            timeout=10,
+            timeout=_SUBPROCESS_TIMEOUT_SECONDS,
             check=False,
         )
 
@@ -342,7 +353,7 @@ else:
             env=subprocess_env,
             capture_output=True,
             text=True,
-            timeout=10,
+            timeout=_SUBPROCESS_TIMEOUT_SECONDS,
             check=False,
         )
 

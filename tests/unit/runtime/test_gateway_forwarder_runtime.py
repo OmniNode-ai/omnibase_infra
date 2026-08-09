@@ -318,6 +318,141 @@ async def test_heartbeat_loop_emits_immediately_and_stops() -> None:
     assert forwarder.calls == 1
 
 
+class _FakeSupervisedDelivery:
+    """Fakes ``NodeGatewayDelivery`` for ``_supervise_gateway_delivery`` tests.
+
+    ``wait()`` raises each queued exception in order, then blocks forever
+    (an unset ``asyncio.Event``) to represent a healthy running loop.
+    """
+
+    def __init__(self, failures: Sequence[Exception]) -> None:
+        self._failures = list(failures)
+        self._never = asyncio.Event()
+        self.start_calls = 0
+        self.stop_calls = 0
+
+    async def wait(self) -> None:
+        if self._failures:
+            raise self._failures.pop(0)
+        await self._never.wait()
+
+    async def start(self) -> None:
+        self.start_calls += 1
+
+    async def stop(self) -> None:
+        self.stop_calls += 1
+
+
+class _FakeStatusForwarder:
+    def __init__(self) -> None:
+        self.calls: list[tuple[str, int, str]] = []
+
+    async def publish_status(
+        self,
+        status: str,
+        *,
+        consecutive_failures: int = 0,
+        detail: str = "",
+    ) -> None:
+        self.calls.append((status, consecutive_failures, detail))
+
+
+async def _never_ending_heartbeat(shutdown_event: asyncio.Event) -> None:
+    await shutdown_event.wait()
+
+
+@pytest.mark.asyncio
+async def test_supervise_gateway_delivery_retries_without_raising() -> None:
+    """OMN-15742: a cloud-leg failure retries with backoff, never propagates."""
+    shutdown_event = asyncio.Event()
+    delivery = _FakeSupervisedDelivery([ValueError("boom-1"), ValueError("boom-2")])
+    forwarder = _FakeStatusForwarder()
+    heartbeat_task = asyncio.create_task(_never_ending_heartbeat(shutdown_event))
+    config = _runtime_config().forwarder.model_copy(
+        update={
+            "reconnect_backoff_initial_seconds": 0.01,
+            "reconnect_backoff_max_seconds": 0.01,
+            "reconnect_backoff_jitter_seconds": 0.0,
+            "degraded_after_seconds": 1000,
+            "heartbeat_interval_seconds": 1,
+        }
+    )
+
+    async def _stop_after_recovery() -> None:
+        # Two failed attempts + one full recovery-confirm window
+        # (heartbeat_interval_seconds) is enough time for the loop to have
+        # restarted twice and reset its failure window; extra margin for
+        # scheduling jitter on a loaded CI host.
+        await asyncio.sleep(1.8)
+        shutdown_event.set()
+
+    stopper = asyncio.create_task(_stop_after_recovery())
+    try:
+        await gateway_forwarder._supervise_gateway_delivery(
+            forwarder=forwarder,  # type: ignore[arg-type]
+            delivery=delivery,  # type: ignore[arg-type]
+            heartbeat_task=heartbeat_task,
+            shutdown_event=shutdown_event,
+            config=config,
+        )
+    finally:
+        heartbeat_task.cancel()
+        await asyncio.gather(heartbeat_task, return_exceptions=True)
+        await stopper
+
+    assert delivery.start_calls == 2
+    assert delivery.stop_calls == 2
+    assert forwarder.calls == []  # degraded_after_seconds never crossed
+
+
+@pytest.mark.asyncio
+async def test_supervise_gateway_delivery_emits_degraded_then_recovers() -> None:
+    """OMN-15742: sustained failure crosses the contract degradation window."""
+    shutdown_event = asyncio.Event()
+    delivery = _FakeSupervisedDelivery(
+        [ValueError("boom-1"), ValueError("boom-2"), ValueError("boom-3")]
+    )
+    forwarder = _FakeStatusForwarder()
+    heartbeat_task = asyncio.create_task(_never_ending_heartbeat(shutdown_event))
+    config = _runtime_config().forwarder.model_copy(
+        update={
+            "reconnect_backoff_initial_seconds": 0.5,
+            "reconnect_backoff_max_seconds": 0.5,
+            "reconnect_backoff_jitter_seconds": 0.0,
+            "degraded_after_seconds": 1,
+            "heartbeat_interval_seconds": 1,
+        }
+    )
+
+    async def _stop_when_recovered() -> None:
+        # 3 failures spaced ~0.5s apart cross the 1s degraded window;
+        # +1s recovery-confirm window after the loop stabilizes; extra
+        # margin for scheduling jitter on a loaded CI host.
+        await asyncio.sleep(3.5)
+        shutdown_event.set()
+
+    stopper = asyncio.create_task(_stop_when_recovered())
+    try:
+        await gateway_forwarder._supervise_gateway_delivery(
+            forwarder=forwarder,  # type: ignore[arg-type]
+            delivery=delivery,  # type: ignore[arg-type]
+            heartbeat_task=heartbeat_task,
+            shutdown_event=shutdown_event,
+            config=config,
+        )
+    finally:
+        heartbeat_task.cancel()
+        await asyncio.gather(heartbeat_task, return_exceptions=True)
+        await stopper
+
+    assert delivery.start_calls == 3
+    statuses = [call[0] for call in forwarder.calls]
+    assert statuses == ["degraded", "active"]
+    degraded_call = forwarder.calls[0]
+    assert degraded_call[1] == 3  # consecutive_failures at emission
+    assert "boom-3" in degraded_call[2]
+
+
 class _FakeTransport:
     def __init__(
         self,
