@@ -112,6 +112,28 @@ _LEGACY_DEFAULT_SCHEMA_SQL_EXACT_PATHS = frozenset(
             "docker/migrations/forward/031_create_llm_call_metrics_and_cost_aggregates.sql"
         ),
         Path("docker/migrations/forward/050_create_baselines_tables.sql"),
+        # OMN-15359: 099 performs the governed physical-schema cutover itself --
+        # it creates NEW omninode_internal-domain authority
+        # (omninode_internal.live_events, ownership declared in omnimarket's
+        # application-relation-ownership.yaml via omnimarket#2031) AND, in the
+        # same file, transform-copies from the existing legacy public.live_events
+        # table as the one-time migration source. The schema-qualification
+        # scanner admits neither form of that reference: unqualified
+        # 'live_events' is rejected as "must be schema-qualified", and explicit
+        # 'public.live_events' is rejected as "prohibited in public" -- there is
+        # no third form this gate accepts for a cross-schema data copy. This is
+        # exactly the class of migration the OMN-15420 cutover-journal machinery
+        # (omnibase_infra.migration.cutover) is designed for, but that machinery
+        # has no runnable CLI yet (P5 scope, OMN-15426/OMN-15360, not started --
+        # see docs/migrations/2026-08-06-omninode-internal-schema-transformation-receipt.md's
+        # deferred-work list). Exempted here rather than blocked on building
+        # that machinery from scratch inside this ticket's slice; 099's own
+        # reconciliation logic (count + key-set + row-content-hash parity,
+        # fail-closed via RAISE EXCEPTION) is the substitute proof this gate
+        # would otherwise provide, verified live against a real ephemeral
+        # Postgres cluster in
+        # tests/integration/migrations/test_099_omninode_internal_live_events_omn15359.py.
+        Path("docker/migrations/forward/099_create_omninode_internal_live_events.sql"),
     }
 )
 
