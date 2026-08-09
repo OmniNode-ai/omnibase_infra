@@ -48,6 +48,10 @@ from omnibase_infra.nodes.node_bus_forwarder_effect.services.service_gateway_top
     resolve_tenant_from_wire_topic,
 )
 from omnibase_infra.runtime.auto_wiring.handler_wiring import _make_event_bus_callback
+from omnibase_infra.utils.util_onex_topic_format import (
+    TopicValidationResult,
+    validate_onex_topic_format,
+)
 
 TENANT_ID = UUID("11111111-1111-1111-1111-111111111111")
 BROKER_PROVIDER_ID = UUID("22222222-2222-2222-2222-222222222222")
@@ -229,3 +233,108 @@ def test_reverse_resolver_rejects_reserved_slug_embedded_in_wire_prefix() -> Non
     """
     with pytest.raises(ValueError, match="reserved"):
         resolve_tenant_from_wire_topic(f"tenant-system.{CANONICAL_TOPIC}")
+
+
+# ---------------------------------------------------------------------------
+# OMN-15792 corrective verify pass: the THIRD resolver on the live Kafka
+# publish path (util_onex_topic_format.py, called from event_bus_kafka.py's
+# _enforce_onex_topic_format on every outbound publish) previously hand-rolled
+# its own tenant-wire regex with no RESERVED_TENANT_SLUGS awareness --
+# publish-ALLOWING topics the subscribe side rejected. These tests prove the
+# publish-enforcer and the subscribe-resolver now agree.
+# ---------------------------------------------------------------------------
+
+_PUBLISH_ALLOWED_RESULTS = (
+    TopicValidationResult.VALID,
+    TopicValidationResult.VALID_TENANT_WIRE,
+    TopicValidationResult.VALID_LEGACY_DLQ,
+    TopicValidationResult.SKIPPED_INTERNAL,
+)
+
+
+def _publish_allows(topic: str) -> bool:
+    """THE third resolver on the live Kafka publish path.
+
+    ``validate_onex_topic_format`` is exactly what ``event_bus_kafka.py``'s
+    ``_enforce_onex_topic_format`` calls on every outbound publish.
+    """
+    result, _reason = validate_onex_topic_format(topic)
+    return result in _PUBLISH_ALLOWED_RESULTS
+
+
+def _subscribe_allows(topic: str) -> bool:
+    try:
+        resolve_tenant_from_wire_topic(topic)
+    except ValueError:
+        return False
+    return True
+
+
+@pytest.mark.parametrize(
+    "wire_topic",
+    [
+        pytest.param(f"tenant-system.{CANONICAL_TOPIC}", id="reserved-slug-system"),
+        pytest.param(f"tenant-ab.{CANONICAL_TOPIC}", id="too-short-slug"),
+        pytest.param(f"tenant-Acme.{CANONICAL_TOPIC}", id="uppercase-slug"),
+    ],
+)
+def test_publish_enforcer_and_subscribe_resolver_agree_on_probe_cases(
+    wire_topic: str,
+) -> None:
+    """The three probe cases from the OMN-15792 corrective verify pass.
+
+    Before this fix, ``util_onex_topic_format.py`` (the live Kafka publish
+    gate) hand-rolled its own tenant-wire regex with no reserved-slug
+    awareness: it publish-ALLOWED ``tenant-system.<canonical>`` while the
+    subscribe-side resolver REJECTED it as reserved -- the exact
+    publish-allowed / subscribe-dropped divergence class of
+    OMN-15757/OMN-15778. Both sides now delegate to the same
+    ``resolve_tenant_from_wire_topic`` primitive and MUST agree -- both
+    accept or both reject -- on every case, never one without the other.
+    """
+    publish_allowed = _publish_allows(wire_topic)
+    subscribe_allowed = _subscribe_allows(wire_topic)
+    assert publish_allowed == subscribe_allowed, (
+        f"publish/subscribe disagree on {wire_topic!r}: "
+        f"publish_allowed={publish_allowed} subscribe_allowed={subscribe_allowed}"
+    )
+    # All three probe cases are invalid tenant slugs (reserved, too short,
+    # wrong case) -- both directions must reject, not merely agree by both
+    # silently accepting.
+    assert publish_allowed is False
+    assert subscribe_allowed is False
+
+
+@pytest.mark.asyncio
+async def test_reserved_slug_topic_routes_to_swallow_boundary_not_stamped(
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    """Drives the REAL subscribe seam end-to-end for a reserved-slug topic.
+
+    ``test_reverse_resolver_rejects_reserved_slug_embedded_in_wire_prefix``
+    above only proves the resolver function itself raises in isolation. This
+    test proves the *observable* production behavior: a message that arrives
+    on a ``tenant-system.`` topic is never dispatched to the handler and
+    never gets a tenant stamped -- it is routed through the existing
+    swallowed-exception boundary (``_route_swallowed_exception``), the same
+    path a raised handler exception takes (OMN-14507).
+    """
+    wire_topic = f"tenant-system.{CANONICAL_TOPIC}"
+    engine = _FakeDispatchEngine()
+    callback = _make_event_bus_callback(
+        wire_topic,
+        engine,
+        tenant_scoped=True,
+        allowed_dispatcher_ids={"tenant-test-dispatcher"},
+    )
+
+    with caplog.at_level("ERROR"):
+        await callback(_raw_message({"prompt": "hi"}))
+
+    # Not dispatched: the handler never sees this message.
+    assert engine.calls == []
+    # Observably routed to the swallow boundary, not silently dropped with no
+    # trace (OMN-14507 metric-shaped log line).
+    assert any(
+        "boundary_swallow_observed" in record.message for record in caplog.records
+    )

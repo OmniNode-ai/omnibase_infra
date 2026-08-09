@@ -96,17 +96,32 @@ def resolve_tenant_from_wire_topic(wire_topic: str) -> tuple[str | None, str]:
     dispatch layer calls this instead of re-deriving a tenant prefix with a
     private regex.
 
-    Returns ``(None, wire_topic)`` unchanged when ``wire_topic`` carries no
-    ``tenant-<slug>.`` prefix -- never a defaulted or guessed tenant (Stage-1
-    warn semantics, matching the OMN-14349 stamp's existing contract). When a
-    prefix-shaped string IS present, the embedded slug is fully validated
-    through ``validate_tenant_slug`` (rejecting a reserved or malformed slug)
-    rather than accepted unconditionally -- closing the validation gap the
-    prior ad hoc extraction left open.
+    Returns ``(None, wire_topic)`` unchanged when ``wire_topic`` does not
+    start with the ``tenant-`` prefix at all -- never a defaulted or guessed
+    tenant (Stage-1 warn semantics, matching the OMN-14349 stamp's existing
+    contract).
+
+    ``tenant-`` is a reserved wire-format prefix: ``validate_canonical_topic``
+    already rejects any bare contract-declared topic that starts with it, so
+    ANY string starting with ``tenant-`` is by construction an attempted
+    tenant-wire topic, never a coincidentally-named bare canonical topic.
+    Once that prefix is present, the full ``tenant-<slug>.`` shape and the
+    embedded slug (``validate_tenant_slug`` -- reserved or malformed slugs
+    included) are both enforced; a shape or slug failure raises rather than
+    silently falling back to "no tenant". This closes the divergence class
+    where a malformed-looking ``tenant-`` prefix (wrong case, too short) was
+    published-side REJECTED but subscribe-side silently passed through
+    untenanted -- the two directions must agree (both-accept or
+    both-reject), not just on well-formed-but-reserved slugs.
     """
+    if not wire_topic.startswith("tenant-"):
+        return None, wire_topic
     match = _TENANT_WIRE_PREFIX_RE.match(wire_topic)
     if match is None:
-        return None, wire_topic
+        raise ValueError(
+            "wire_topic starts with the reserved 'tenant-' prefix but does "
+            f"not match the tenant wire-topic shape: {wire_topic!r}"
+        )
     slug = validate_tenant_slug(match.group(1))
     canonical_topic = validate_canonical_topic(wire_topic[len(match.group(0)) :])
     return slug, canonical_topic
