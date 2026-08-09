@@ -111,6 +111,7 @@ def test_config_requires_reconnect_backoff_max_at_least_initial_delay() -> None:
                 principal_id=PRINCIPAL_ID,
             ),
             cloud_bus=_cloud_bus(),
+            canary=_canary(),
             local_transport_flavor="containerized",
             dedupe_store_path=Path.cwd() / "gateway-test.sqlite3",
             mirror_topics=ModelGatewayMirrorTopics(
@@ -130,6 +131,7 @@ def test_config_reconnect_defaults_match_contract() -> None:
             principal_id=PRINCIPAL_ID,
         ),
         cloud_bus=_cloud_bus(),
+        canary=_canary(),
         local_transport_flavor="containerized",
         dedupe_store_path=Path.cwd() / "gateway-test.sqlite3",
         mirror_topics=ModelGatewayMirrorTopics(
