@@ -42,6 +42,19 @@ class ModelGatewayForwarderRuntimeConfig(BaseModel):
                 "gateway transport legs require enable_auto_commit=false; source "
                 "offsets are committed only after durable destination delivery"
             )
+        if (
+            self.local_bus.auto_offset_reset != "earliest"
+            or self.cloud_bus.auto_offset_reset != "earliest"
+        ):
+            raise ValueError(
+                "gateway transport legs require auto_offset_reset=earliest on "
+                "both legs; enable_auto_commit=false only preserves offsets "
+                "already inside the consumer's read window -- a 'latest' leg "
+                "silently drops any backlog produced while the consumer group "
+                "was unjoined (crash, LeaveGroup, cold restart before rejoin), "
+                "and auto_offset_reset also fires mid-session on "
+                "OffsetOutOfRangeError, not only on first boot (OMN-15781)"
+            )
         if not any(
             topic.endswith(".gateway-heartbeat.v1")
             for topic in self.forwarder.mirror_topics.outbound
