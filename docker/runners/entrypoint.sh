@@ -313,6 +313,18 @@ LISTENER_PGREP_PATTERN="${LISTENER_PGREP_PATTERN:-${RUNNER_HOME//./\\.}/bin/Runn
 # Worker pattern (OMN-14564): a Runner.Worker process means a job is executing
 # — the heartbeat watchdog must NEVER recycle mid-job.
 WORKER_PGREP_PATTERN="${WORKER_PGREP_PATTERN:-${RUNNER_HOME//./\\.}/bin/Runner\.Worker}"
+# run-helper pattern (OMN-15776): match THIS runner home's run.sh->run-helper.sh
+# wrapper (the direct parent of Runner.Listener — see healthcheck.sh's process
+# tree comment). MUST be RUNNER_HOME-anchored like the two patterns above: an
+# unanchored "run-helper" pkill matches ANY process on the host whose cmdline
+# contains that substring, including the real fleet runner's own run-helper.sh
+# when a nested/synthetic entrypoint.sh (e.g. the functional tests in
+# tests/ci/test_runner_listener_liveness.py) runs in the same PID namespace —
+# this is the confirmed root cause of self-hosted CI jobs mid-run receiving an
+# out-of-band shutdown signal ("[HostContext] Runner will be shutdown for
+# UserCancelled") while test_entrypoint_recycles_hung_listener exercises this
+# recycle path elsewhere in the same container.
+RUN_HELPER_PGREP_PATTERN="${RUN_HELPER_PGREP_PATTERN:-${RUNNER_HOME//./\\.}.*run-helper}"
 
 # OMN-14564: same find-mmin condition as healthcheck.sh layer 2 — returns 0
 # (stale) when no _diag *.log was modified within
@@ -338,11 +350,11 @@ _listener_heartbeat_stale() {
 _recycle_runner_tree() {
     local pid="${1}"
     kill -TERM "${pid}" 2>/dev/null || true
-    pkill -TERM -f "run-helper" 2>/dev/null || true
+    pkill -TERM -f "${RUN_HELPER_PGREP_PATTERN}" 2>/dev/null || true
     pkill -TERM -f "${LISTENER_PGREP_PATTERN}" 2>/dev/null || true
     sleep 10
     kill -KILL "${pid}" 2>/dev/null || true
-    pkill -KILL -f "run-helper" 2>/dev/null || true
+    pkill -KILL -f "${RUN_HELPER_PGREP_PATTERN}" 2>/dev/null || true
     pkill -KILL -f "${LISTENER_PGREP_PATTERN}" 2>/dev/null || true
 }
 

@@ -1042,6 +1042,57 @@ class TestEntrypointWatchdog:
             "watchdog pgrep pattern must be derived from RUNNER_HOME"
         )
 
+    def test_recycle_run_helper_pkill_is_runner_home_anchored(self) -> None:
+        """OMN-15776: an unanchored ``pkill -f "run-helper"`` inside
+        ``_recycle_runner_tree`` matches ANY process on the host whose cmdline
+        contains that substring — including the real fleet runner's own
+        ``run.sh -> run-helper.sh -> Runner.Listener`` wrapper (see
+        healthcheck.sh's process-tree comment) — when a nested/synthetic
+        entrypoint.sh runs the recycle path in the same PID namespace (no
+        docker-in-docker isolation on the self-hosted fleet). This is the
+        confirmed mechanism behind self-hosted CI jobs receiving an
+        out-of-band "[HostContext] Runner will be shutdown for UserCancelled"
+        signal mid-run while TestEntrypointHungListenerWatchdog exercises
+        this same recycle path elsewhere in the container.
+
+        RED against the unanchored literal; GREEN once the pkill target is
+        derived from RUNNER_HOME like LISTENER_PGREP_PATTERN/
+        WORKER_PGREP_PATTERN already are.
+        """
+        content = ENTRYPOINT.read_text(encoding="utf-8")
+        recycle = content[content.index("_recycle_runner_tree() {") :]
+        recycle = recycle[: recycle.index("\n}\n")]
+        assert 'pkill -TERM -f "run-helper"' not in recycle, (
+            "unanchored run-helper pkill would kill the real fleet runner's "
+            "own wrapper tree from inside a nested/synthetic entrypoint.sh "
+            "run sharing the same PID namespace"
+        )
+        assert 'pkill -KILL -f "run-helper"' not in recycle, (
+            "unanchored run-helper pkill would kill the real fleet runner's "
+            "own wrapper tree from inside a nested/synthetic entrypoint.sh "
+            "run sharing the same PID namespace"
+        )
+        assert "RUN_HELPER_PGREP_PATTERN" in recycle, (
+            "_recycle_runner_tree must pkill the run-helper wrapper via a "
+            "RUNNER_HOME-anchored pattern variable, not a bare substring"
+        )
+        pattern_line = next(
+            (
+                line
+                for line in content.splitlines()
+                if line.strip().startswith('RUN_HELPER_PGREP_PATTERN="')
+            ),
+            None,
+        )
+        assert pattern_line is not None, (
+            "RUN_HELPER_PGREP_PATTERN must have a default assignment"
+        )
+        assert "${RUNNER_HOME//." in pattern_line, (
+            "RUN_HELPER_PGREP_PATTERN default must be anchored to RUNNER_HOME, "
+            f"matching the LISTENER_PGREP_PATTERN/WORKER_PGREP_PATTERN convention: "
+            f"{pattern_line}"
+        )
+
     def test_entrypoint_bash_syntax(self) -> None:
         result = subprocess.run(
             ["bash", "-n", str(ENTRYPOINT)], check=False, capture_output=True, text=True
