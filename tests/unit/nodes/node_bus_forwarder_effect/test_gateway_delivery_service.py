@@ -666,3 +666,89 @@ async def test_membership_loss_watchdog_recreates_and_recovers() -> None:
         with contextlib.suppress(asyncio.CancelledError):
             await wait_task
         await delivery.stop()
+
+
+class _StallThenFailSource:
+    """Like ``_StallThenRecoverSource``, but the RECREATED consumer then hits a
+    genuine (non-cancellation) failure -- reproducing the CodeRabbit-flagged
+    gap on this PR: a watchdog-spawned replacement task must stay under
+    ``wait()``'s supervision, not just the original stale task.
+    """
+
+    def __init__(self) -> None:
+        self.poll_calls = 0
+        self.restart_calls = 0
+        self._recreated = False
+        self._stuck: asyncio.Event = asyncio.Event()
+
+    async def restart_consumer(self) -> None:
+        self.restart_calls += 1
+        self._recreated = True
+
+    def has_group_membership(self) -> bool:
+        return self._recreated
+
+    async def poll(
+        self, *, max_messages: int, timeout_ms: int
+    ) -> Sequence[ModelTransportMessage]:
+        self.poll_calls += 1
+        if not self._recreated:
+            await self._stuck.wait()  # never set: permanent stall, no exception
+            return []  # pragma: no cover - unreachable in this test
+        # First poll after recreation still needs to yield once so the
+        # watchdog's spawn/splice of the replacement task can be observed
+        # settling before the hard failure below.
+        await asyncio.sleep(0)
+        raise RuntimeError("synthetic hard failure on recovered direction")
+
+    async def commit(self, message: object) -> None:  # pragma: no cover
+        pass
+
+    async def nack(self, message: object) -> None:  # pragma: no cover
+        pass
+
+
+async def test_watchdog_replacement_task_failure_still_reaches_wait() -> None:
+    """CodeRabbit finding on this PR: a real exception on the WATCHDOG-SPAWNED
+    replacement task must still surface through ``wait()``, not only the
+    original (superseded) task's completion. Pre-fix (unbounded
+    ``asyncio.wait`` with no re-scan trigger absent a completion of an
+    already-``watched`` task), the replacement task raising here would go
+    unsupervised: the composition root's ``_supervise_gateway_delivery``
+    would never observe the fault.
+    """
+    local_bus = _RecordingBus([])
+    cloud_bus = _RecordingBus([])
+    config = _config().model_copy(
+        update={
+            "heartbeat_interval_seconds": 1,
+            "max_silence_window_seconds": 2,
+            "mirror_topics": ModelGatewayMirrorTopics(
+                inbound=("onex.cmd.omnibase-infra.delegation-request.v1",),
+                outbound=(OUTBOUND_TOPIC, HEARTBEAT_TOPIC),
+            ),
+        }
+    )
+    forwarder = ServiceGatewayForwarder(
+        config=config,
+        local_bus=local_bus,  # type: ignore[arg-type]
+        cloud_bus=cloud_bus,  # type: ignore[arg-type]
+    )
+    stalled_outbound = _StallThenFailSource()
+    idle_inbound = _Source([])
+    delivery = NodeGatewayDelivery(
+        config=config,
+        forwarder=forwarder,
+        local_consumer=stalled_outbound,  # type: ignore[arg-type]
+        cloud_consumer=idle_inbound,  # type: ignore[arg-type]
+        idempotency_store=StoreIdempotencyInmemory(),
+        poll_timeout_ms=50,
+    )
+
+    await delivery.start()
+    wait_task = asyncio.create_task(delivery.wait())
+    try:
+        with pytest.raises(RuntimeError, match="synthetic hard failure"):
+            await asyncio.wait_for(wait_task, timeout=10)
+    finally:
+        await delivery.stop()

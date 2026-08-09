@@ -195,8 +195,8 @@ class NodeGatewayDelivery:
         Awaits the LIVE task set, not a one-time snapshot: a watchdog-initiated
         direction recovery (``_recover_stalled_direction``) replaces that
         direction's entry in ``self._tasks`` in place with a fresh task, and
-        this loop re-reads ``self._tasks`` after every completion so it picks
-        up the replacement and keeps supervising it. The superseded task's own
+        this loop re-reads ``self._tasks`` after every wake so it picks up the
+        replacement and keeps supervising it. The superseded task's own
         completion is a clean return (``_run_direction``'s
         ``_watchdog_recovering`` check), never a propagated CancelledError, so
         a watchdog recovery is invisible here -- it neither raises nor ends
@@ -204,13 +204,28 @@ class NodeGatewayDelivery:
         frozen snapshot previously re-raised the cancelled task's
         CancelledError from this call, which the composition root's
         exception-triggered supervisor cannot distinguish from a real fault).
+
+        The ``asyncio.wait`` below is bounded by ``_watchdog_tick_seconds``
+        rather than waiting unboundedly for the next completion (CodeRabbit
+        finding on this PR). ``_recover_stalled_direction`` splices the
+        replacement task into ``self._tasks`` only AFTER the stale task has
+        already finished and this loop has already woken and rebuilt
+        ``watched`` from the (still stale-only) task list -- an unbounded
+        wait would then block on the remaining old tasks with no further
+        wakeup until one of THEM completes, so the replacement would never
+        be picked up and a real exception on the recovered direction would
+        go unsupervised. The bound guarantees this loop revisits
+        ``self._tasks`` at least once per watchdog tick even with zero new
+        completions.
         """
         if not self._tasks:
             raise RuntimeError("gateway delivery node is not started")
         watched: set[asyncio.Task[None]] = set(self._tasks)
         while watched:
             done, watched = await asyncio.wait(
-                watched, return_when=asyncio.FIRST_COMPLETED
+                watched,
+                timeout=self._watchdog_tick_seconds,
+                return_when=asyncio.FIRST_COMPLETED,
             )
             for task in done:
                 if task.cancelled():
@@ -221,10 +236,17 @@ class NodeGatewayDelivery:
                 exc = task.exception()
                 if exc is not None:
                     raise exc
-            # Pick up any watchdog-spawned replacement task not yet tracked.
-            watched |= {
-                task for task in self._tasks if task not in watched and not task.done()
-            }
+            # Pick up any watchdog-spawned replacement task not yet tracked --
+            # including one that raced ahead and already finished (with an
+            # exception) before this rescan, which the bounded timeout above
+            # guarantees we reach even without a completion to wake us.
+            for task in self._tasks:
+                if task in watched:
+                    continue
+                if not task.done() or (
+                    not task.cancelled() and task.exception() is not None
+                ):
+                    watched.add(task)
 
     async def stop(self) -> None:
         """Cancel pull loops without acknowledging any in-flight source record."""
@@ -342,13 +364,13 @@ class NodeGatewayDelivery:
         """
         logger.error(
             "Gateway undecodable record quarantined direction=%s source_topic=%s "
-            "source_partition=%s source_offset=%s error_type=%s",
+            "source_partition=%s source_offset=%s error_type=%s error=%s",
             direction,
             message.topic,
             message.partition,
             message.offset,
             type(error).__name__,
-            exc_info=error,
+            sanitize_error_message(error),
         )
         sender = getattr(source, "send", None)
         if callable(sender):
