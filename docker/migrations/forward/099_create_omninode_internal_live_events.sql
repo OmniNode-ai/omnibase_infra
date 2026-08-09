@@ -96,20 +96,22 @@ CREATE TABLE IF NOT EXISTS omninode_internal.live_events (
   created_at     TIMESTAMPTZ NOT NULL DEFAULT NOW()
 );
 
--- Transform-copy: every public.live_events row that is not already present in
--- the destination (by event_id, the table's real dedup key). Safe to re-run.
-INSERT INTO omninode_internal.live_events
-  (id, event_id, type, timestamp, source, topic, summary, payload, correlation_id, created_at)
-SELECT
-  src.id, src.event_id, src.type, src.timestamp, src.source, src.topic,
-  src.summary, src.payload, src.correlation_id, src.created_at
-FROM public.live_events AS src
-ON CONFLICT (event_id) DO NOTHING;
-
--- Reconciliation: count, key-set, and row-content-hash parity between source
--- and destination. Any mismatch aborts the migration Job (ON_ERROR_STOP=1
--- propagates the RAISE EXCEPTION as a nonzero psql exit) rather than landing
--- a partial or corrupted copy.
+-- Transform-copy + reconciliation, guarded by public.live_events actually
+-- existing. That table is node-owned DDL
+-- (docker/migrations/forward/nodes/node_projection_live_events/0000_create_live_events.sql,
+-- vendored from omnimarket) applied by a SEPARATE migration stream
+-- (scripts/sync-node-migrations.sh + run-forward-migrations.sh) from this
+-- file's own top-level docker/migrations/forward/*.sql stream. The two
+-- streams are not guaranteed ordered relative to each other in every
+-- consumer: the standalone "Migration Integration Test" CI gate applies only
+-- the numbered top-level files (024...098, no nodes/ subtree) against a
+-- fresh database, so public.live_events genuinely does not exist in that
+-- scope. Guarding on `to_regclass` (not EXECUTE/dynamic SQL -- an ordinary
+-- plpgsql IF branch is compiled but not planned/resolved until control flow
+-- actually reaches it) makes this file correct in both scopes: the full
+-- production apply (where node migrations already ran and populated real
+-- rows) and the standalone top-level-only gate (empty destination, no
+-- reconciliation to perform, migration still succeeds).
 DO $$
 DECLARE
   v_src_count     BIGINT;
@@ -118,6 +120,22 @@ DECLARE
   v_src_hash      TEXT;
   v_dst_hash      TEXT;
 BEGIN
+  IF to_regclass('public.live_events') IS NULL THEN
+    RAISE NOTICE
+      'OMN-15359: public.live_events does not exist in this migration scope '
+      '(node-owned migration not applied here) -- omninode_internal.live_events '
+      'created empty; transform-copy and reconciliation skipped.';
+    RETURN;
+  END IF;
+
+  INSERT INTO omninode_internal.live_events
+    (id, event_id, type, timestamp, source, topic, summary, payload, correlation_id, created_at)
+  SELECT
+    src.id, src.event_id, src.type, src.timestamp, src.source, src.topic,
+    src.summary, src.payload, src.correlation_id, src.created_at
+  FROM public.live_events AS src
+  ON CONFLICT (event_id) DO NOTHING;
+
   SELECT count(*) INTO v_src_count FROM public.live_events;
   SELECT count(*) INTO v_dst_count FROM omninode_internal.live_events;
 

@@ -294,3 +294,29 @@ def test_099_rollback_drops_the_table_and_preserves_the_source(
     assert not _table_exists(seeded_pg, "omninode_internal", "live_events")
     assert _table_exists(seeded_pg, "public", "live_events")
     assert _row_count(seeded_pg, "public", "live_events") == 25
+
+
+def test_099_succeeds_when_public_live_events_does_not_exist(
+    ephemeral_postgres: EphemeralPostgres,
+) -> None:
+    """Matches omnibase_infra's standalone "Migration Integration Test" CI gate,
+    which applies only the numbered top-level docker/migrations/forward/*.sql
+    files (not the nodes/ subtree that vendors public.live_events's own
+    CREATE TABLE) against a fresh database. public.live_events genuinely does
+    not exist in that scope -- 099 must still succeed, creating
+    omninode_internal.live_events empty rather than failing UndefinedTable.
+    """
+    bootstrap = ephemeral_postgres.connect()
+    bootstrap.autocommit = True
+    with bootstrap.cursor() as cur:
+        cur.execute(f'CREATE DATABASE "{ANALYTICS_DB}"')
+    bootstrap.close()
+
+    _apply_ok(ephemeral_postgres, SCHEMA_MIGRATION)
+
+    assert not _table_exists(ephemeral_postgres, "public", "live_events")
+
+    _apply_ok(ephemeral_postgres, MIGRATION)
+
+    assert _table_exists(ephemeral_postgres, "omninode_internal", "live_events")
+    assert _row_count(ephemeral_postgres, "omninode_internal", "live_events") == 0
