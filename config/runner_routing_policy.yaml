@@ -23,3 +23,5 @@ hosted_runner_allowlist:
     reason: "Fork-only untrusted PR verification must not execute on self-hosted runners."
   - path: .github/workflows/runner-fleet-canary.yml
     reason: "OMN-13915: scheduled fleet canary must not share fate with the self-hosted runner fleet it monitors."
+  - path: .github/workflows/runner-broker-dispatch-wedge-rerun.yml
+    reason: "OMN-15776: scheduled broker-dispatch-wedge rerun must not share fate with the self-hosted runner fleet it remediates -- same isolation rationale as runner-fleet-canary.yml above."
