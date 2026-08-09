@@ -1,6 +1,18 @@
 # SPDX-FileCopyrightText: 2025 OmniNode.ai Inc.
 # SPDX-License-Identifier: MIT
-"""Tenant-prefix transform helpers for the gateway trust boundary."""
+"""Tenant-prefix transform helpers for the gateway trust boundary.
+
+OMN-15792 (2026-08-09 operator addressing ruling): ``resolve_physical_topic``
+and its inverse ``resolve_tenant_from_wire_topic`` are THE single runtime
+topic resolver -- physical topic addressing resolved from a contract-declared
+canonical topic plus optional tenant execution context. Every publish and
+subscribe call site that needs tenant-aware physical topic addressing MUST
+route through these two functions rather than re-deriving the transform.
+This module does not redesign the wire format (still ``tenant-{slug}.``);
+it makes ``prefix_topic``/``strip_topic_prefix`` the sole path instead of one
+of several independent implementations (OMN-15757/OMN-15778's structural root
+cause).
+"""
 
 from __future__ import annotations
 
@@ -9,7 +21,13 @@ import re
 from omnibase_core.validation import validate_topic_suffix
 
 RESERVED_TENANT_SLUGS = frozenset({"", "system"})
-_TENANT_SLUG_RE = re.compile(r"^[a-z][a-z0-9-]{1,61}[a-z0-9]$")
+_TENANT_SLUG_PATTERN = r"[a-z][a-z0-9-]{1,61}[a-z0-9]"
+_TENANT_SLUG_RE = re.compile(rf"^{_TENANT_SLUG_PATTERN}$")
+# Inline-cites _TENANT_SLUG_PATTERN rather than hand-duplicating the character
+# class (OMN-15759 is the tracked ticket for a cross-repo shared constant;
+# until it lands, this is the single in-repo copy the wire-prefix matcher and
+# the slug validator both derive from).
+_TENANT_WIRE_PREFIX_RE = re.compile(rf"^tenant-({_TENANT_SLUG_PATTERN})\.")
 
 
 def validate_tenant_slug(tenant_slug: str) -> str:
@@ -52,3 +70,43 @@ def strip_topic_prefix(tenant_slug: str, wire_topic: str) -> str:
         raise ValueError("wire_topic does not match attached tenant prefix")
     canonical_topic = wire_topic[len(prefix) :]
     return validate_canonical_topic(canonical_topic)
+
+
+def resolve_physical_topic(canonical_topic: str, *, tenant_slug: str | None) -> str:
+    """Resolve a contract-declared canonical topic to the physical wire topic.
+
+    THE single resolver (OMN-15792) consulted by both the publish path and
+    the subscribe/dispatch path: contract-declared canonical topic + optional
+    tenant execution context -> physical topic.
+
+    * ``tenant_slug=None`` -> bare canonical topic (unchanged pass-through
+      behavior for non-gateway/local-only paths).
+    * ``tenant_slug`` present -> ``tenant-{slug}.{canonical_topic}``, via
+      ``prefix_topic`` -- the wire format is not redesigned here.
+    """
+    if tenant_slug is None:
+        return validate_canonical_topic(canonical_topic)
+    return prefix_topic(tenant_slug, canonical_topic)
+
+
+def resolve_tenant_from_wire_topic(wire_topic: str) -> tuple[str | None, str]:
+    """Inverse of ``resolve_physical_topic``: derive ``(tenant_slug, canonical_topic)``.
+
+    THE single resolver's subscribe-side direction (OMN-15792) -- the runtime
+    dispatch layer calls this instead of re-deriving a tenant prefix with a
+    private regex.
+
+    Returns ``(None, wire_topic)`` unchanged when ``wire_topic`` carries no
+    ``tenant-<slug>.`` prefix -- never a defaulted or guessed tenant (Stage-1
+    warn semantics, matching the OMN-14349 stamp's existing contract). When a
+    prefix-shaped string IS present, the embedded slug is fully validated
+    through ``validate_tenant_slug`` (rejecting a reserved or malformed slug)
+    rather than accepted unconditionally -- closing the validation gap the
+    prior ad hoc extraction left open.
+    """
+    match = _TENANT_WIRE_PREFIX_RE.match(wire_topic)
+    if match is None:
+        return None, wire_topic
+    slug = validate_tenant_slug(match.group(1))
+    canonical_topic = validate_canonical_topic(wire_topic[len(match.group(0)) :])
+    return slug, canonical_topic
