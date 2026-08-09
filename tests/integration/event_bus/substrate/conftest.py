@@ -103,10 +103,76 @@ async def _ensure_shared_contract_test_topics(bootstrap_servers: str) -> None:
     ``TopicAlreadyExistsError`` as harmless (see
     ``tests/helpers/util_kafka.py``), so calling this on every real_broker
     fixture build is safe and cheap once the topics exist.
+
+    Fail-closed post-condition (mergesweep-0809-dualsub-verify F1): a live
+    adversarial re-verify proved ``KafkaTopicManager.create_topic()`` can
+    report success while creating NOTHING on the broker (rpk through the
+    identical tunnel creates the same topic fine -- not environmental). The
+    mechanism is that ``create_topic()`` awaits
+    ``wait_for_topic_metadata(...)`` but never checks its boolean return
+    value, so a metadata-propagation timeout (which means the topic never
+    actually appeared) is silently discarded rather than raised. Since
+    ``KafkaTopicManager`` is test-only (``tests/helpers/util_kafka.py``,
+    no production/runtime caller), the fix here is defense-in-depth at the
+    call site rather than a change to the shared helper: verify each topic
+    is actually visible via ``describe_topics`` immediately after
+    ``create_topic`` returns, and raise with a precise message if it is not.
     """
     async with KafkaTopicManager(bootstrap_servers) as manager:
         for topic in SHARED_CONTRACT_TEST_TOPICS:
             await manager.create_topic(topic, partitions=1, replication_factor=1)
+            await _verify_topic_actually_exists(manager, topic)
+
+
+async def _verify_topic_actually_exists(
+    manager: KafkaTopicManager, topic_name: str
+) -> None:
+    """Fail-closed post-condition readback for ``KafkaTopicManager.create_topic``.
+
+    ``create_topic`` has a known silent-success defect: it can return the
+    topic name as if creation succeeded even when the broker created
+    nothing (see the caller's docstring above). Confirm the topic is real
+    by describing it directly on the admin client before trusting it.
+
+    Raises:
+        RuntimeError: if the topic does not actually exist on the broker
+            per ``describe_topics``, despite ``create_topic`` reporting
+            success.
+    """
+    admin = manager.admin_client
+    if admin is None:
+        raise RuntimeError(
+            f"Cannot verify topic '{topic_name}': KafkaTopicManager admin "
+            f"client was not initialized by create_topic()."
+        )
+
+    description = await admin.describe_topics([topic_name])
+
+    topic_info: object | None
+    if isinstance(description, dict):
+        topic_info = description.get(topic_name)
+    elif isinstance(description, list):
+        topic_info = next(
+            (
+                item
+                for item in description
+                if isinstance(item, dict) and item.get("topic") == topic_name
+            ),
+            None,
+        )
+    else:
+        topic_info = None
+
+    if topic_info is None:
+        raise RuntimeError(
+            f"KafkaTopicManager.create_topic() reported success for topic "
+            f"'{topic_name}', but describe_topics() shows it does not "
+            f"exist on the broker at {manager.bootstrap_servers!r}. This is "
+            f"the known silent no-op create defect (mergesweep-0809-"
+            f"dualsub-verify F1) -- the real_broker substrate fixture "
+            f"cannot proceed without this topic. Verify broker "
+            f"reachability and KAFKA_BOOTSTRAP_SERVERS."
+        )
 
 
 def _build_infra_event_bus_substrate_instance(
