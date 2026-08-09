@@ -532,14 +532,30 @@ def test_reporter_invokes_the_probe_from_collect() -> None:
 
 
 def test_reporter_degrades_visibly_when_the_probe_is_missing(tmp_path: Path) -> None:
-    """A missing probe file must produce a WARNING row, not silence."""
-    staged = tmp_path / "reporter.sh"
-    staged.write_text(REPORTER.read_text())
+    """A missing probe file must produce a WARNING row, not silence.
+
+    The function body is extracted in Python and written to a plain file that
+    bash then ``source``s directly (OMN-15788). Apple's system ``/bin/bash``
+    3.2 does not reliably populate the invoking shell with functions defined
+    via ``source <(...)`` process substitution -- the sourced function silently
+    fails to land even though the extracted text is byte-identical, so
+    ``check_ci_required_contexts`` ends up undefined ("command not found").
+    Sourcing a real file instead of a process-substitution fd sidesteps that
+    bash-version dependency entirely and behaves identically on bash 3.2 and
+    modern bash.
+    """
+    script = REPORTER.read_text()
+    match = re.search(
+        r"^check_ci_required_contexts\(\).*?^\}", script, re.MULTILINE | re.DOTALL
+    )
+    assert match, "check_ci_required_contexts() not found in reporter script"
+    func_file = tmp_path / "check_ci_required_contexts.sh"
+    func_file.write_text(match.group(0) + "\n")
     proc = subprocess.run(
         [
             "bash",
             "-c",
-            f'source <(sed -n "/^check_ci_required_contexts()/,/^}}/p" {staged}); '
+            f"source {func_file}; "
             f"OMNINODE_CI_PROBE_SCRIPT={tmp_path}/nope.py check_ci_required_contexts",
         ],
         capture_output=True,
