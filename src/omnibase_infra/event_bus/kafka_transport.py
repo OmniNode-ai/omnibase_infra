@@ -170,42 +170,90 @@ class KafkaTransport:
             await self._producer.start()
 
             if self._topics:
-                # Group ``subscribe`` (topics passed positionally): the consumer joins
-                # the group and, on join, NATIVELY resumes each partition from its
-                # group-committed offset (a fresh group starts at ``auto_offset_reset``).
-                # This is what makes "restart resumes from the committed offset" and
-                # "uncommitted offsets redeliver on restart" hold, with no manual
-                # ``seek`` dance. A single transport instance is the sole group member,
-                # so it is assigned every partition of its topics — matching the unified
-                # runtime's single-poll-loop-per-topic-set model (single-owner-per-topic
-                # is the S6 boot invariant, R1). The one-time join latency is absorbed by
-                # ``_prime`` below so the runtime's first ``poll`` still returns promptly.
-                self._consumer = AIOKafkaConsumer(
-                    *self._topics,
-                    bootstrap_servers=self._config.bootstrap_servers,
-                    group_id=self._group,
-                    # FORCED for the new transport consumers (plan S3): the runtime, not
-                    # the client, decides when an offset is durable. Legacy push
-                    # consumers keep their per-consumer config setting untouched.
-                    enable_auto_commit=False,
-                    auto_offset_reset=self._auto_offset_reset,
-                    session_timeout_ms=self._config.session_timeout_ms,
-                    heartbeat_interval_ms=self._config.heartbeat_interval_ms,
-                    max_poll_interval_ms=self._config.max_poll_interval_ms,
-                    retry_backoff_ms=self._config.reconnect_backoff_ms,
-                    **self._client_version_kwargs(AIOKafkaConsumer),
-                    **self._auth_kwargs(),
-                )
-                await self._consumer.start()
-                # Trigger the group join + first fetch now, buffering the first batch, so
-                # the runtime's first poll() returns the available records instead of
-                # racing the lazy rebalance.
-                await self._prime(self._consumer)
+                await self._start_consumer()
         except BaseException:
             await self.close()
             raise
 
         self._started = True
+
+    async def _start_consumer(self) -> None:
+        """Construct, start, and prime a fresh consumer bound to ``self._topics``.
+
+        Factored out of ``start()`` so ``restart_consumer`` can rejoin the group
+        from zero (a brand-new client instance -- the only way to recover from a
+        silent ``max_poll_interval_ms`` idle-eviction, see
+        ``has_group_membership``) without touching ``self._producer``. A single
+        ``KafkaTransport`` instance can back both one gateway direction's
+        consumer AND the other direction's (plus status/heartbeat) producer, so
+        a watchdog-triggered consumer recreate (``NodeGatewayDelivery``,
+        OMN-15748/OMN-15690) must never go through ``close()`` + ``start()``,
+        which stops both clients.
+        """
+        # Group ``subscribe`` (topics passed positionally): the consumer joins
+        # the group and, on join, NATIVELY resumes each partition from its
+        # group-committed offset (a fresh group starts at ``auto_offset_reset``).
+        # This is what makes "restart resumes from the committed offset" and
+        # "uncommitted offsets redeliver on restart" hold, with no manual
+        # ``seek`` dance. A single transport instance is the sole group member,
+        # so it is assigned every partition of its topics — matching the unified
+        # runtime's single-poll-loop-per-topic-set model (single-owner-per-topic
+        # is the S6 boot invariant, R1). The one-time join latency is absorbed by
+        # ``_prime`` below so the runtime's first ``poll`` still returns promptly.
+        self._consumer = AIOKafkaConsumer(
+            *self._topics,
+            bootstrap_servers=self._config.bootstrap_servers,
+            group_id=self._group,
+            # FORCED for the new transport consumers (plan S3): the runtime, not
+            # the client, decides when an offset is durable. Legacy push
+            # consumers keep their per-consumer config setting untouched.
+            enable_auto_commit=False,
+            auto_offset_reset=self._auto_offset_reset,
+            session_timeout_ms=self._config.session_timeout_ms,
+            heartbeat_interval_ms=self._config.heartbeat_interval_ms,
+            max_poll_interval_ms=self._config.max_poll_interval_ms,
+            retry_backoff_ms=self._config.reconnect_backoff_ms,
+            **self._client_version_kwargs(AIOKafkaConsumer),
+            **self._auth_kwargs(),
+        )
+        await self._consumer.start()
+        # Trigger the group join + first fetch now, buffering the first batch, so
+        # the runtime's first poll() returns the available records instead of
+        # racing the lazy rebalance.
+        await self._prime(self._consumer)
+
+    async def restart_consumer(self) -> None:
+        """Recreate ONLY the consumer-side client; the shared producer stays up.
+
+        A gateway direction's membership-loss watchdog recovery
+        (``NodeGatewayDelivery._recover_stalled_direction``,
+        OMN-15748/OMN-15690) must rejoin the group from a fresh client without
+        killing the producer this same instance also serves for the OTHER
+        direction's forward-publish and every status/heartbeat publish --
+        ``close()`` + ``start()`` stops both clients and would silently break
+        those for the duration of the recreate. Requires an assigned
+        ``topics`` set (a producer-only transport has nothing to restart).
+        """
+        if not self._topics:
+            context = ModelInfraErrorContext.with_correlation(
+                transport_type=EnumInfraTransportType.KAFKA,
+                operation="restart_consumer",
+                target_name="kafka_transport",
+            )
+            raise ProtocolConfigurationError(
+                "KafkaTransport.restart_consumer() requires topics=[...]; "
+                "this instance is producer-only.",
+                context=context,
+                parameter="topics",
+                value=list(self._topics),
+            )
+        self._buffer.clear()
+        if self._consumer is not None:
+            try:
+                await self._consumer.stop()
+            finally:
+                self._consumer = None
+        await self._start_consumer()
 
     async def _prime(self, consumer: AIOKafkaConsumer) -> None:
         """Eagerly fetch ONE batch into ``self._buffer`` after a position change.

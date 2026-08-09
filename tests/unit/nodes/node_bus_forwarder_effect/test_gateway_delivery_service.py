@@ -528,31 +528,33 @@ class _StallThenRecoverSource:
     a SEPARATE asyncio task (``GroupCoordinator._heartbeat_routine``) than
     the poll loop -- it force-leaves the group and the poll loop's own
     ``poll()`` call simply never returns and never raises. The only way out
-    is a brand-new client instance (a fresh group join), which is exactly
-    what ``close()`` + ``start()`` on a real ``KafkaTransport`` does. This
-    fake models that: the first ``poll()`` hangs forever with zero
-    exception; only after ``close()``/``start()`` are called does it behave
-    like a healthy transport again (real suspension via ``asyncio.sleep``,
-    not a busy-spin return -- the same discipline
+    is a brand-new consumer client instance (a fresh group join), which is
+    exactly what ``restart_consumer()`` on a real ``KafkaTransport`` does.
+    This fake deliberately implements ONLY ``restart_consumer`` -- no
+    ``close``/``start`` at all -- so a regression back to the old
+    ``close()``/``start()`` recovery path fails loudly (``AttributeError``
+    via ``getattr``'s ``callable`` guard silently no-op'ing recovery,
+    caught by the polls-resume assertion below) rather than silently
+    reintroducing the shared-producer-close bug (OMN-15748 finding ii): the
+    first ``poll()`` hangs forever with zero exception; only after
+    ``restart_consumer()`` is called does it behave like a healthy transport
+    again (real suspension via ``asyncio.sleep``, not a busy-spin return --
+    the same discipline
     ``test_real_outbound_consumer_loop_does_not_reforward_degraded_status``
     documents above).
     """
 
     def __init__(self) -> None:
         self.poll_calls = 0
-        self.start_calls = 0
-        self.close_calls = 0
+        self.restart_calls = 0
         self.committed: list[object] = []
         self.nacked: list[object] = []
         self._recreated = False
         self._stuck: asyncio.Event = asyncio.Event()
 
-    async def start(self) -> None:
-        self.start_calls += 1
+    async def restart_consumer(self) -> None:
+        self.restart_calls += 1
         self._recreated = True
-
-    async def close(self) -> None:
-        self.close_calls += 1
 
     def has_group_membership(self) -> bool:
         return self._recreated
@@ -583,6 +585,15 @@ async def test_membership_loss_watchdog_recreates_and_recovers() -> None:
     observe a task that is alive and hung, never done, never exceptioned.
     That is the adjudicated live failure mode: the process is left with
     MEMBERS=0 on one direction forever, no rejoin, no restart, no alert.
+
+    ``delivery.wait()`` is armed BEFORE the stall/recovery happens (matching
+    production ordering: the composition root's supervisor enters and calls
+    ``delivery.wait()`` before any fault occurs) so this test actually
+    exercises the watchdog-vs-wait() race, not just the watchdog in
+    isolation. Pre the ``NodeGatewayDelivery.wait()``/``_run_direction``
+    fix, this would fail: the watchdog's ``stale_task.cancel()`` makes the
+    still-armed ``wait()``'s ``asyncio.gather``/``asyncio.wait`` observe a
+    cancelled task and propagate ``CancelledError`` out of ``wait_task``.
     """
     local_bus = _RecordingBus([])
     cloud_bus = _RecordingBus([])
@@ -614,15 +625,18 @@ async def test_membership_loss_watchdog_recreates_and_recovers() -> None:
 
     await delivery.start()
     try:
+        # Arm wait() FIRST, exactly as the composition root's supervisor
+        # does at the top of its loop -- before the stall/recovery below.
+        wait_task = asyncio.create_task(delivery.wait())
+
         for _ in range(200):
-            if stalled_outbound.start_calls:
+            if stalled_outbound.restart_calls:
                 break
             await asyncio.sleep(0.02)
-        assert stalled_outbound.start_calls >= 1, (
+        assert stalled_outbound.restart_calls >= 1, (
             "watchdog never force-recreated the stalled transport -- the "
             "silent-eviction mode was never detected"
         )
-        assert stalled_outbound.close_calls >= 1
 
         # Prove actual recovery (forward progress resumes), not merely a
         # crash-free wait.
@@ -639,13 +653,16 @@ async def test_membership_loss_watchdog_recreates_and_recovers() -> None:
         assert degraded, "membership-loss recovery must publish a DEGRADED status"
 
         # No task death: the exception-triggered supervision surface
-        # (delivery.wait()) must never see this recovery -- it is handled
-        # entirely inside the watchdog.
-        wait_task = asyncio.create_task(delivery.wait())
+        # (delivery.wait(), already armed above) must survive the recovery
+        # -- it is handled entirely inside the watchdog and must never
+        # surface a CancelledError or any other exception here.
         done, _pending = await asyncio.wait({wait_task}, timeout=0.2)
-        assert wait_task not in done, "delivery loop task must not have died"
+        assert wait_task not in done, (
+            "delivery.wait() must not have completed -- a watchdog recovery "
+            "must be invisible to the exception-triggered supervision path"
+        )
+    finally:
         wait_task.cancel()
         with contextlib.suppress(asyncio.CancelledError):
             await wait_task
-    finally:
         await delivery.stop()

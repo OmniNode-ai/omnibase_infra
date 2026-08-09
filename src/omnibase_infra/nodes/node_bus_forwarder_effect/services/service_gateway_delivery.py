@@ -44,16 +44,25 @@ class ProtocolGatewayConsumer(Protocol):
 
 # The delivery loop's real sources (``KafkaTransport``) carry three optional
 # capabilities beyond the ``ProtocolGatewayConsumer`` pull surface above:
-# ``start``/``close`` (recreate the underlying client -- a fresh group join),
-# ``has_group_membership`` (a best-effort local assignment probe), and
-# ``send`` (the same object is also a producer, for best-effort
-# dead-lettering). None of these are declared as their own ``Protocol`` --
-# the architecture validator enforces one ``Protocol`` class per file, and
-# ``ProtocolGatewayConsumer`` above already occupies this file's slot -- so
-# they are duck-typed via ``getattr``/``callable`` instead. Absence of any of
-# them (e.g. the unit-test fakes that only implement poll/commit/nack)
-# degrades gracefully: no dead-letter, no forced recreate, no membership
-# signal, never an error.
+# ``restart_consumer`` (recreate ONLY the consumer-side client -- a fresh
+# group join -- without touching the shared producer another direction and
+# status/heartbeat publishing may also depend on; see
+# ``KafkaTransport.restart_consumer``), ``has_group_membership`` (a
+# best-effort local assignment probe), and ``send`` (the same object is also
+# a producer, for best-effort dead-lettering). None of these are declared as
+# their own ``Protocol`` -- the architecture validator enforces one
+# ``Protocol`` class per file, and ``ProtocolGatewayConsumer`` above already
+# occupies this file's slot -- so they are duck-typed via
+# ``getattr``/``callable`` instead. Absence of any of them (e.g. the
+# unit-test fakes that only implement poll/commit/nack) degrades gracefully:
+# no dead-letter, no forced recreate, no membership signal, never an error.
+#
+# NOTE: watchdog recovery deliberately does NOT use ``close()``/``start()``
+# (OMN-15748). Those stop/start BOTH the consumer and the producer, and a
+# single ``KafkaTransport`` instance backs one direction's consumer AND the
+# other direction's outbound publish (plus status/heartbeat) -- see
+# ``runtime/gateway_forwarder.py``'s ``local_bus``/``cloud_bus`` wiring.
+# ``restart_consumer`` is the consumer-scoped alternative.
 
 
 def _build_quarantine_payload(
@@ -132,6 +141,14 @@ class NodeGatewayDelivery:
         self._last_progress_monotonic: dict[Literal["outbound", "inbound"], float] = {}
         self._membership_lost_streak: dict[Literal["outbound", "inbound"], int] = {}
         self._watchdog_degraded: set[Literal["outbound", "inbound"]] = set()
+        # Directions currently mid-recovery: ``_run_direction`` checks this to
+        # tell a watchdog-initiated ``stale_task.cancel()`` apart from a real
+        # shutdown/failure cancel, so it can return cleanly instead of
+        # re-raising CancelledError. Without this, the cancelled task's
+        # CancelledError would surface through ``wait()`` (a BaseException,
+        # escaping ``except Exception`` in the composition root's supervisor)
+        # and kill the whole process on every watchdog recovery (OMN-15748).
+        self._watchdog_recovering: set[Literal["outbound", "inbound"]] = set()
         self._watchdog_stale_seconds = (
             watchdog_stale_seconds
             if watchdog_stale_seconds is not None
@@ -173,10 +190,41 @@ class NodeGatewayDelivery:
         return task
 
     async def wait(self) -> None:
-        """Propagate a delivery-loop failure to the composition root."""
+        """Propagate a delivery-loop failure to the composition root.
+
+        Awaits the LIVE task set, not a one-time snapshot: a watchdog-initiated
+        direction recovery (``_recover_stalled_direction``) replaces that
+        direction's entry in ``self._tasks`` in place with a fresh task, and
+        this loop re-reads ``self._tasks`` after every completion so it picks
+        up the replacement and keeps supervising it. The superseded task's own
+        completion is a clean return (``_run_direction``'s
+        ``_watchdog_recovering`` check), never a propagated CancelledError, so
+        a watchdog recovery is invisible here -- it neither raises nor ends
+        ``wait()`` (OMN-15748; a plain ``asyncio.gather(*self._tasks)`` over a
+        frozen snapshot previously re-raised the cancelled task's
+        CancelledError from this call, which the composition root's
+        exception-triggered supervisor cannot distinguish from a real fault).
+        """
         if not self._tasks:
             raise RuntimeError("gateway delivery node is not started")
-        await asyncio.gather(*self._tasks)
+        watched: set[asyncio.Task[None]] = set(self._tasks)
+        while watched:
+            done, watched = await asyncio.wait(
+                watched, return_when=asyncio.FIRST_COMPLETED
+            )
+            for task in done:
+                if task.cancelled():
+                    # Only a watchdog-initiated recovery (or a stop() call
+                    # racing this loop) cancels a tracked task; either way it
+                    # is not a supervised failure.
+                    continue
+                exc = task.exception()
+                if exc is not None:
+                    raise exc
+            # Pick up any watchdog-spawned replacement task not yet tracked.
+            watched |= {
+                task for task in self._tasks if task not in watched and not task.done()
+            }
 
     async def stop(self) -> None:
         """Cancel pull loops without acknowledging any in-flight source record."""
@@ -331,15 +379,25 @@ class NodeGatewayDelivery:
         direction: Literal["outbound", "inbound"],
         source: ProtocolGatewayConsumer,
     ) -> None:
-        while True:
-            messages = await source.poll(
-                max_messages=1,
-                timeout_ms=self._poll_timeout_ms,
-            )
-            self._last_progress_monotonic[direction] = time.monotonic()
-            for message in messages:
-                await self.deliver_message(direction, source, message)
+        try:
+            while True:
+                messages = await source.poll(
+                    max_messages=1,
+                    timeout_ms=self._poll_timeout_ms,
+                )
                 self._last_progress_monotonic[direction] = time.monotonic()
+                for message in messages:
+                    await self.deliver_message(direction, source, message)
+                    self._last_progress_monotonic[direction] = time.monotonic()
+        except asyncio.CancelledError:
+            if direction in self._watchdog_recovering:
+                # Watchdog-initiated: ``_recover_stalled_direction`` cancelled
+                # this task on purpose to swap in a fresh consumer. Return
+                # cleanly rather than re-raise so this completion registers
+                # as ordinary bookkeeping to ``wait()``, never a propagated
+                # CancelledError (OMN-15748).
+                return
+            raise
 
     async def _run_watchdog_loop(self) -> None:
         """Detect a stalled direction independent of task exceptions.
@@ -406,16 +464,22 @@ class NodeGatewayDelivery:
         )
         stale_task = self._direction_tasks.get(direction)
         if stale_task is not None and not stale_task.done():
-            stale_task.cancel()
-            await asyncio.gather(stale_task, return_exceptions=True)
+            self._watchdog_recovering.add(direction)
+            try:
+                stale_task.cancel()
+                await asyncio.gather(stale_task, return_exceptions=True)
+            finally:
+                self._watchdog_recovering.discard(direction)
 
         source = self._direction_sources[direction]
-        closer = getattr(source, "close", None)
-        starter = getattr(source, "start", None)
-        if callable(closer) and callable(starter):
+        # Consumer-scoped recreate ONLY -- never close()/start(), which would
+        # also stop the producer this same transport instance may serve for
+        # the OTHER direction's forward-publish and status/heartbeat publish
+        # (OMN-15748).
+        restarter = getattr(source, "restart_consumer", None)
+        if callable(restarter):
             try:
-                await closer()
-                await starter()
+                await restarter()
             except Exception:
                 logger.exception(
                     "Gateway %s transport recreate failed; will retry next "
