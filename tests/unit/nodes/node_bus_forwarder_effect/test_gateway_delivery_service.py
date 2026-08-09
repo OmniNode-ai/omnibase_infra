@@ -91,6 +91,21 @@ class _Source:
     async def poll(
         self, *, max_messages: int, timeout_ms: int
     ) -> Sequence[ModelTransportMessage]:
+        # A real transport's poll always blocks up to timeout_ms (or yields
+        # on an actual socket read) before returning empty -- it never
+        # returns synchronously with zero awaits inside. A poll that never
+        # suspends starves the asyncio event loop when driven by
+        # NodeGatewayDelivery's real `_run_direction` task loop (a bare
+        # `while True: await source.poll(...)` with nothing else to yield
+        # on): `task.cancel()` only takes effect at the next real suspension
+        # point, so a non-yielding poll makes the loop uncancellable and
+        # `delivery.stop()` hangs forever awaiting it. Only
+        # test_real_outbound_consumer_loop_does_not_reforward_degraded_status
+        # drives this fake through the real task loop (every other _Source
+        # usage in this file calls deliver_message directly, never through
+        # poll()), so this sleep costs that one test ~poll_timeout_ms and
+        # nothing else.
+        await asyncio.sleep(timeout_ms / 1000)
         return []
 
     async def commit(self, message: object) -> None:
