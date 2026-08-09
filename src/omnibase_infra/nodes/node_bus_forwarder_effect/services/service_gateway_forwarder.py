@@ -19,15 +19,18 @@ from uuid import uuid4
 from omnibase_core.models.core.model_envelope_metadata import ModelEnvelopeMetadata
 from omnibase_core.models.events.model_event_envelope import ModelEventEnvelope
 from omnibase_infra.errors import RuntimeHostError
+from omnibase_infra.nodes.node_bus_forwarder_effect.handlers import (
+    HandlerConsumeInbound,
+    HandlerForwardOutbound,
+)
 from omnibase_infra.nodes.node_bus_forwarder_effect.models import (
+    ModelGatewayEnvelope,
     ModelGatewayForwarderConfig,
     ModelGatewayHeartbeat,
 )
 from omnibase_infra.nodes.node_bus_forwarder_effect.services.service_gateway_topic_transform import (
-    prefix_topic,
     strip_topic_prefix,
 )
-from omnibase_infra.shared.tenant_stamp import stamp_verified_tenant_slug
 
 logger = logging.getLogger(__name__)
 
@@ -64,6 +67,12 @@ class ServiceGatewayForwarder:
 
             retry_sleep = asyncio.sleep
         self._retry_sleep = retry_sleep
+        # OMN-15740: the tenant-prefix transform is owned by the contract-declared
+        # COMPUTE handlers, not re-derived here. The service's job is the trust
+        # boundary (tag/tenant validation against untrusted bus input) plus the
+        # I/O; the pure prefix/strip transform and payload stamp are delegated.
+        self._forward_outbound_handler = HandlerForwardOutbound(config)
+        self._consume_inbound_handler = HandlerConsumeInbound(config)
 
     async def _forward_outbound_message(self, message: object) -> None:
         source_topic = self._message_topic(message)
@@ -74,11 +83,7 @@ class ServiceGatewayForwarder:
                 source_topic,
             )
             return
-        transformed = self._prepare_outbound(envelope, source_topic)
-        wire_topic = prefix_topic(
-            self._config.tenant_identity.tenant_slug,
-            source_topic,
-        )
+        transformed, wire_topic = self._prepare_outbound(envelope, source_topic)
         await self._publish_with_delivery_retry(
             bus=self._cloud_bus,
             topic=wire_topic,
@@ -165,10 +170,10 @@ class ServiceGatewayForwarder:
             for topic in self._config.mirror_topics.outbound
             if topic.endswith(".gateway-heartbeat.v1")
         )
-        transformed = self._prepare_outbound(envelope, canonical_topic)
+        transformed, wire_topic = self._prepare_outbound(envelope, canonical_topic)
         await self._publish_with_delivery_retry(
             bus=self._cloud_bus,
-            topic=prefix_topic(identity.tenant_slug, canonical_topic),
+            topic=wire_topic,
             key=str(identity.tenant_id).encode("utf-8"),
             value=self._encode_envelope(transformed),
         )
@@ -244,7 +249,14 @@ class ServiceGatewayForwarder:
         envelope: ModelEventEnvelope[dict[str, object]],
         wire_topic: str,
     ) -> tuple[ModelEventEnvelope[dict[str, object]], str]:
-        """Validate a cloud command and stamp its config-bound local tenant."""
+        """Validate a cloud command and stamp its config-bound local tenant.
+
+        Trust-boundary validation (topic declared, tags match the config-bound
+        identity) stays here against the untrusted bus input. The prefix-strip
+        transform and payload stamp themselves are delegated to the
+        contract-declared ``HandlerConsumeInbound`` COMPUTE handler (OMN-15740)
+        so there is exactly one implementation of that transform.
+        """
         identity = self._config.tenant_identity
         canonical_topic = strip_topic_prefix(identity.tenant_slug, wire_topic)
         if canonical_topic not in self._config.mirror_topics.inbound:
@@ -256,10 +268,21 @@ class ServiceGatewayForwarder:
         if tags.get("source_tenant_principal_id") != str(identity.principal_id):
             raise ValueError("envelope principal_id does not match attached tenant")
 
-        payload = stamp_verified_tenant_slug(
-            envelope.payload,
-            identity.tenant_slug,
+        gateway_envelope = ModelGatewayEnvelope(
+            tenant_id=identity.tenant_id,
+            tenant_slug=identity.tenant_slug,
+            envelope_id=envelope.envelope_id,
+            correlation_id=envelope.correlation_id,
+            event_type=envelope.event_type,
+            source_topic=wire_topic,
+            wire_topic=wire_topic,
+            canonical_topic=canonical_topic,
+            payload=envelope.payload,
         )
+        transformed_gateway = self._consume_inbound_handler.consume_inbound(
+            gateway_envelope
+        )
+
         metadata = envelope.metadata.model_copy(
             update={
                 "tags": {
@@ -274,15 +297,20 @@ class ServiceGatewayForwarder:
             }
         )
         return envelope.model_copy(
-            update={"payload": payload, "metadata": metadata}
+            update={"payload": transformed_gateway.payload, "metadata": metadata}
         ), canonical_topic
 
     def _prepare_outbound(
         self,
         envelope: ModelEventEnvelope[dict[str, object]],
         canonical_topic: str,
-    ) -> ModelEventEnvelope[dict[str, object]]:
-        """Validate a local event and bind it to the attached tenant."""
+    ) -> tuple[ModelEventEnvelope[dict[str, object]], str]:
+        """Validate a local event and bind it to the attached tenant.
+
+        Trust-boundary validation stays here; the wire-topic prefix transform
+        is delegated to the contract-declared ``HandlerForwardOutbound``
+        COMPUTE handler (OMN-15740).
+        """
         identity = self._config.tenant_identity
         if canonical_topic not in self._config.mirror_topics.outbound:
             raise ValueError("canonical_topic is not declared for outbound mirroring")
@@ -309,7 +337,22 @@ class ServiceGatewayForwarder:
                 "outbound envelope principal_id does not match attached tenant"
             )
 
-        wire_topic = prefix_topic(identity.tenant_slug, canonical_topic)
+        gateway_envelope = ModelGatewayEnvelope(
+            tenant_id=identity.tenant_id,
+            tenant_slug=identity.tenant_slug,
+            envelope_id=envelope.envelope_id,
+            correlation_id=envelope.correlation_id,
+            event_type=envelope.event_type,
+            source_topic=canonical_topic,
+            wire_topic=canonical_topic,
+            canonical_topic=canonical_topic,
+            payload=envelope.payload,
+        )
+        transformed_gateway = self._forward_outbound_handler.forward_outbound(
+            gateway_envelope
+        )
+        wire_topic = transformed_gateway.wire_topic
+
         metadata = envelope.metadata.model_copy(
             update={
                 "tags": {
@@ -323,4 +366,4 @@ class ServiceGatewayForwarder:
                 }
             }
         )
-        return envelope.model_copy(update={"metadata": metadata})
+        return envelope.model_copy(update={"metadata": metadata}), wire_topic
