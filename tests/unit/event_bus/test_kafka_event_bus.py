@@ -444,7 +444,9 @@ class TestKafkaEventBusSubscribe:
         kafka_event_bus_basic._started = True
         kafka_event_bus_basic._validate_topic_name = MagicMock()  # type: ignore[method-assign]
 
-        async def fake_start(topic: str, group_id: str) -> None:
+        async def fake_start(
+            topic: str, group_id: str, *, auto_offset_reset_override: str | None = None
+        ) -> None:
             kafka_event_bus_basic._group_consumers[(topic, group_id)] = AsyncMock()
 
         kafka_event_bus_basic._start_consumer_for_topic_unlocked = AsyncMock(  # type: ignore[method-assign]
@@ -477,7 +479,9 @@ class TestKafkaEventBusSubscribe:
 
         identity = make_test_node_identity("shared")
 
-        async def fake_start(topic: str, group_id: str) -> None:
+        async def fake_start(
+            topic: str, group_id: str, *, auto_offset_reset_override: str | None = None
+        ) -> None:
             kafka_event_bus_basic._group_consumers[(topic, group_id)] = AsyncMock()
 
         kafka_event_bus_basic._start_consumer_for_topic_unlocked = AsyncMock(  # type: ignore[method-assign]
@@ -511,7 +515,9 @@ class TestKafkaEventBusSubscribe:
         """Concurrent subscribe() calls for distinct keys start one consumer each."""
         started: list[tuple[str, str]] = []
 
-        async def fake_start(topic: str, group_id: str) -> None:
+        async def fake_start(
+            topic: str, group_id: str, *, auto_offset_reset_override: str | None = None
+        ) -> None:
             started.append((topic, group_id))
             kafka_event_bus_basic._group_consumers[(topic, group_id)] = AsyncMock()
 
@@ -544,7 +550,9 @@ class TestKafkaEventBusSubscribe:
         """Concurrent subscribe() calls for the same (topic, group) start exactly one consumer."""
         start_count = 0
 
-        async def fake_start(topic: str, group_id: str) -> None:
+        async def fake_start(
+            topic: str, group_id: str, *, auto_offset_reset_override: str | None = None
+        ) -> None:
             nonlocal start_count
             start_count += 1
             kafka_event_bus_basic._group_consumers[(topic, group_id)] = AsyncMock()
@@ -2072,7 +2080,9 @@ class TestKafkaEventBusStartConsuming:
         """
         call_log: list[tuple[str, str]] = []
 
-        async def fake_start_unlocked(topic: str, group_id: str) -> None:
+        async def fake_start_unlocked(
+            topic: str, group_id: str, *, auto_offset_reset_override: str | None = None
+        ) -> None:
             call_log.append((topic, group_id))
             # Yield control to simulate concurrent group-join latency
             await asyncio.sleep(0)
