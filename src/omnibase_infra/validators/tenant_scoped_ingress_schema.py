@@ -82,10 +82,24 @@ import yaml
 DEFAULT_SCAN_ROOT = Path("src/omnibase_infra")
 DEFAULT_ALLOWLIST_PATH = Path("config/validation/tenant_scoped_ingress_allowlist.yaml")
 
-# SYNC with the canonical runtime stamp regex
+# SYNC with the canonical shared-resolver wire-prefix shape. OMN-15792 unified
+# the runtime path onto a single resolver (``resolve_physical_topic`` /
+# ``resolve_tenant_from_wire_topic`` in
+# ``omnibase_infra.nodes.node_bus_forwarder_effect.services.service_gateway_topic_transform``,
+# whose private ``_TENANT_WIRE_PREFIX_RE`` derives from that module's
+# ``_TENANT_SLUG_PATTERN`` constant). The symbol formerly cited here,
 # ``omnibase_infra.runtime.auto_wiring.handler_wiring._TENANT_WIRE_PREFIX_RE``
-# (OMN-14349). The runtime form captures the slug; this gate only needs the
-# match, so the capture group is dropped. Both accept ``tenant-<slug>.`` where
+# (OMN-14349), was DELETED by OMN-15792 — that call site now calls the shared
+# resolver directly instead of hand-rolling its own regex.
+#
+# This gate deliberately keeps its own copy rather than routing through the
+# shared resolver: it statically checks a `contract.yaml` topic *string*
+# shape (a boolean "is this prefixed" match), not a live wire topic, so it
+# does not need the resolver's full ``RESERVED_TENANT_SLUGS``-aware
+# validation — `resolve_tenant_from_wire_topic` *raises* on a malformed or
+# reserved slug rather than reporting "not prefixed", which would change this
+# gate's PASS/FAIL semantics, not just deduplicate the copy. See OMN-15792
+# ticket item (e) residual list. Both accept ``tenant-<slug>.`` where
 # ``<slug>`` is a 3-63 char DNS-compatible lowercase label.
 _TENANT_WIRE_PREFIX_RE: re.Pattern[str] = re.compile(
     r"^tenant-[a-z][a-z0-9-]{1,61}[a-z0-9]\."
