@@ -64,6 +64,11 @@ databases:
             schema: public
           - object_type: TABLE
             objects:
+              - live_events
+            privileges: [INSERT, SELECT, UPDATE]
+            schema: omninode_internal
+          - object_type: TABLE
+            objects:
               - baselines_breakdown
               - baselines_comparisons
               - baselines_quality_snapshots
@@ -83,7 +88,6 @@ databases:
               - gate_metrics
               - generation_events
               - intent_classification_events
-              - live_events
               - llm_call_metrics
               - llm_delegation_daily_projection
               - llm_routing_decisions

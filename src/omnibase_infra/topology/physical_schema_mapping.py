@@ -37,6 +37,18 @@ TENANT_TABLES_PHYSICALLY_IN_PUBLIC_UNTIL_OMN15359: frozenset[str] = frozenset(
 # internal rule) so a *new* table declared against `omninode_internal` after
 # this landed resolves to its real target schema, matching the precedent set
 # by TENANT_TABLES_PHYSICALLY_IN_PUBLIC_UNTIL_OMN15359 above.
+#
+# `live_events` is REMOVED from this set as of
+# docker/migrations/forward/099_create_omninode_internal_live_events.sql --
+# it is the first family individually transform-copied out of the bridge.
+# Post-099, physical_grant_schema_for_table('omninode_internal', 'live_events')
+# must return 'omninode_internal' (no override) so it agrees with the real
+# INSERT-target schema handler_wiring._resolve_projection_database_target
+# already resolves from the node contract's literal db_io.db_tables[0].schema.
+# Leaving it enumerated here after the physical table exists would silently
+# reintroduce the drift 099 exists to close: the grant-privilege check would
+# keep asserting against `public` while every write already lands in
+# `omninode_internal`.
 INTERNAL_TABLES_PHYSICALLY_IN_PUBLIC_UNTIL_OMN15359: frozenset[str] = frozenset(
     {
         "baselines_breakdown",
@@ -58,7 +70,6 @@ INTERNAL_TABLES_PHYSICALLY_IN_PUBLIC_UNTIL_OMN15359: frozenset[str] = frozenset(
         "gate_metrics",
         "generation_events",
         "intent_classification_events",
-        "live_events",
         "llm_call_metrics",
         "llm_delegation_daily_projection",
         "llm_routing_decisions",
