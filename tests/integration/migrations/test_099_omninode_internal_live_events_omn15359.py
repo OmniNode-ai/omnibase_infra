@@ -202,12 +202,14 @@ def test_099_row_content_is_faithfully_reproduced(
     conn.autocommit = True
     with conn.cursor() as cur:
         cur.execute(
-            "SELECT event_id, type, source, topic, summary, payload, correlation_id "
+            "SELECT id, event_id, type, source, topic, summary, payload, "
+            "correlation_id, timestamp, created_at "
             "FROM public.live_events ORDER BY event_id"
         )
         source_rows = cur.fetchall()
         cur.execute(
-            "SELECT event_id, type, source, topic, summary, payload, correlation_id "
+            "SELECT id, event_id, type, source, topic, summary, payload, "
+            "correlation_id, timestamp, created_at "
             "FROM omninode_internal.live_events ORDER BY event_id"
         )
         dest_rows = cur.fetchall()

@@ -214,11 +214,21 @@ def validate_changed_sql(
     declared_identities = {identity.identity for identity in ownership_identities}
     for path in changed_sql_paths(repository, base_revision, head_revision):
         relative_path = path.relative_to(repository.resolve())
-        if _is_legacy_default_schema_sql_path(relative_path):
-            continue
+        # A legacy-default-schema exemption narrows to the schema-qualification
+        # LINT only (unqualified/`public.`-qualified references to a pre-existing
+        # legacy table, which the lint has no accepted syntax for at all -- see
+        # each path's own comment above for its justification). Ownership
+        # validation for anything the file actually CREATES stays active: an
+        # exempted file that creates new schema-qualified authority (e.g. 099's
+        # `omninode_internal.live_events`) must still carry a declared owner.
+        # Narrowing this way (OMN-15359, CodeRabbit) closes the gap the prior
+        # blanket `continue` left open -- ownership was previously unchecked for
+        # every exempted file's created objects, not just its legacy references.
+        is_legacy_exempt = _is_legacy_default_schema_sql_path(relative_path)
         sql = path.read_text(encoding="utf-8")
-        for violation in lint_application_database_sql(sql, topology):
-            violations.append(f"{relative_path}: {violation}")
+        if not is_legacy_exempt:
+            for violation in lint_application_database_sql(sql, topology):
+                violations.append(f"{relative_path}: {violation}")
         for requirement in application_database_sql_target_requirements(sql, topology):
             location_matches = tuple(
                 identity

@@ -121,10 +121,13 @@ BEGIN
   SELECT count(*) INTO v_src_count FROM public.live_events;
   SELECT count(*) INTO v_dst_count FROM omninode_internal.live_events;
 
-  IF v_dst_count < v_src_count THEN
+  -- Exact parity, not "at least as many": a destination with MORE rows than
+  -- the source (e.g. a stray row from an unrelated write) is exactly as much
+  -- a reconciliation failure as one with fewer.
+  IF v_dst_count <> v_src_count THEN
     RAISE EXCEPTION
       'OMN-15359: omninode_internal.live_events has % row(s), public.live_events '
-      'has % -- copy incomplete', v_dst_count, v_src_count;
+      'has % -- row counts must match exactly', v_dst_count, v_src_count;
   END IF;
 
   SELECT count(*) INTO v_missing_keys
@@ -139,17 +142,23 @@ BEGIN
       'missing from omninode_internal.live_events', v_missing_keys;
   END IF;
 
-  -- Row-content hash over the shared key set. Deterministic ordering
-  -- (ORDER BY event_id) makes the aggregate hash reproducible across the
-  -- source and destination scans.
+  -- Row-content hash over the shared key set, including `id` (the primary
+  -- key, not just event_id the dedup key). Deterministic ordering (ORDER BY
+  -- event_id) makes the aggregate hash reproducible across the source and
+  -- destination scans. Including `id` matters: without it, a destination row
+  -- whose event_id matches but whose id differs (e.g. a stale row from a
+  -- prior partial/corrupted copy that ON CONFLICT (event_id) DO NOTHING left
+  -- in place) would hash identically to the correct row and this check would
+  -- pass over a genuine primary-key divergence.
   SELECT md5(string_agg(row_hash, '' ORDER BY event_id)) INTO v_src_hash
     FROM (
       SELECT
         event_id,
         md5(
-          event_id || '|' || type || '|' || source || '|' || topic || '|' ||
-          summary || '|' || payload || '|' || coalesce(correlation_id, '') ||
-          '|' || timestamp::text || '|' || created_at::text
+          id::text || '|' || event_id || '|' || type || '|' || source || '|' ||
+          topic || '|' || summary || '|' || payload || '|' ||
+          coalesce(correlation_id, '') || '|' || timestamp::text || '|' ||
+          created_at::text
         ) AS row_hash
       FROM public.live_events
     ) AS s;
@@ -159,9 +168,10 @@ BEGIN
       SELECT
         event_id,
         md5(
-          event_id || '|' || type || '|' || source || '|' || topic || '|' ||
-          summary || '|' || payload || '|' || coalesce(correlation_id, '') ||
-          '|' || timestamp::text || '|' || created_at::text
+          id::text || '|' || event_id || '|' || type || '|' || source || '|' ||
+          topic || '|' || summary || '|' || payload || '|' ||
+          coalesce(correlation_id, '') || '|' || timestamp::text || '|' ||
+          created_at::text
         ) AS row_hash
       FROM omninode_internal.live_events
       WHERE event_id IN (SELECT event_id FROM public.live_events)
