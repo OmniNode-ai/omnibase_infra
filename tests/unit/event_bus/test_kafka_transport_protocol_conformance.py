@@ -182,3 +182,87 @@ async def test_close_attempts_producer_stop_after_consumer_stop_fails(
     assert transport._consumer is None
     assert transport._producer is None
     assert transport._started is False
+
+
+@pytest.mark.asyncio
+async def test_restart_consumer_rejects_producer_only_instance(
+    unit_bootstrap: str,
+) -> None:
+    # OMN-15748: a producer-only transport (no assigned topics) has nothing
+    # for restart_consumer() to recreate -- fail fast rather than silently
+    # no-op.
+    transport = KafkaTransport.from_bootstrap(unit_bootstrap)
+
+    with pytest.raises(ProtocolConfigurationError, match="producer-only"):
+        await transport.restart_consumer()
+
+
+@pytest.mark.asyncio
+async def test_restart_consumer_recreates_consumer_without_touching_producer(
+    monkeypatch: pytest.MonkeyPatch, unit_bootstrap: str, unit_topic: str
+) -> None:
+    """OMN-15748: watchdog recovery must not call close()/start() -- that stops
+    the shared producer another gateway direction (and status/heartbeat) still
+    depends on. restart_consumer() must stop only the old consumer, start a
+    fresh one, and never touch the producer instance at all.
+    """
+    consumer_events: list[str] = []
+    consumer_instances: list[object] = []
+
+    class FakeProducer:
+        def __init__(self, **_kwargs: object) -> None:
+            self.stop_calls = 0
+
+        async def start(self) -> None:
+            pass
+
+        async def stop(self) -> None:
+            self.stop_calls += 1
+
+    class FakeConsumer:
+        def __init__(self, *_topics: str, **_kwargs: object) -> None:
+            consumer_instances.append(self)
+            consumer_events.append("created")
+
+        async def start(self) -> None:
+            consumer_events.append("started")
+
+        async def stop(self) -> None:
+            consumer_events.append("stopped")
+
+        def assignment(self) -> list[object]:
+            return [object()]
+
+        async def getmany(
+            self, *, timeout_ms: int, max_records: int
+        ) -> dict[object, list[object]]:
+            return {}
+
+    monkeypatch.setattr(kafka_transport_module, "AIOKafkaProducer", FakeProducer)
+    monkeypatch.setattr(kafka_transport_module, "AIOKafkaConsumer", FakeConsumer)
+
+    transport = KafkaTransport.from_bootstrap(
+        unit_bootstrap, group="unit-conformance", topics=[unit_topic]
+    )
+    await transport.start()
+    original_producer = transport._producer
+    original_consumer = transport._consumer
+    assert consumer_events == ["created", "started"]
+
+    await transport.restart_consumer()
+
+    assert transport._producer is original_producer, (
+        "restart_consumer() must never replace or stop the shared producer"
+    )
+    assert original_producer.stop_calls == 0  # type: ignore[union-attr]
+    assert transport._consumer is not original_consumer, (
+        "restart_consumer() must construct a brand-new consumer client"
+    )
+    assert len(consumer_instances) == 2
+    assert consumer_events == [
+        "created",
+        "started",
+        "stopped",
+        "created",
+        "started",
+    ]

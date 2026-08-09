@@ -744,7 +744,35 @@ jobs:
         && fromJSON(vars.OMNI_PUBLIC_PR_RUNS_ON_JSON || '["ubuntu-latest"]')
         || fromJSON((github.event_name == 'merge_group' && vars.OMNI_REQUIRED_CI_RUNS_ON_JSON) || vars.OMNI_TRUSTED_CI_RUNS_ON_JSON || '["self-hosted","omnibase-ci"]')
       }}
-    timeout-minutes: 10
+    # Raised from 10 to 18 (2026-08-07, PR #2679 comment 5211687650): a
+    # 38-run fleet measurement of THIS job found setup time (job start ->
+    # script step start) alone had median 317s and max 613s under the
+    # existing cache-enabled: "false" -- 6/38 runs were killed by the old
+    # timeout-minutes: 10 (600s) DURING setup, before the script step ever
+    # ran. ``cache-enabled: "false"`` is intentionally NOT flipped here: this
+    # repo's self-hosted-fleet CI already replaced the per-job uv cache with
+    # the shared host-local dependency-environment canary (see
+    # ``docs/ci/versioned-ci-env-canary.md``), which explicitly says "Do not
+    # enable setup-uv cache save for direct jobs that intentionally run
+    # ``uv sync --no-cache``; the post-job cache upload can outlive the
+    # actual check and cancel merge-group CI while adding no useful reuse" --
+    # and ``tests/ci/test_ci_workflow_resilience.py::test_short_gates_can_disable_uv_cache_cleanup``
+    # enforces ``cache-enabled: "false"`` on every ci.yml job uniformly for
+    # exactly that reason. The fix here is timeout-minutes alone; the
+    # derivation below is built on the measured fleet MAX (not an assumed
+    # cache improvement) so it is correct with or without any future cache
+    # change:
+    #   613s (measured max setup, fleet n=38)
+    # + 150s (script _RUN_DEADLINE_SECONDS, see check_pin_reachability.py)
+    # + 150s (worst-case post-deadline tail: one in-flight rate-limited call,
+    #         3 * 30s timeouts + 2 * 30s capped backoffs)
+    # = 913s < 1080s, ~167s (~15%) real margin.
+    # See scripts/ci/check_pin_reachability.py's _RUN_DEADLINE_SECONDS
+    # comment for the full script-side derivation, and
+    # tests/ci/test_pin_reachability_omn15538.py::test_pin_reachability_job_timeout_covers_measured_budget
+    # for the binding test that parses this value from ci.yml and fails
+    # closed if it stops covering the budget (or is gamed absurdly high).
+    timeout-minutes: 18
 
     steps:
       - name: Checkout code
