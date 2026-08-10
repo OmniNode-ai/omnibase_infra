@@ -119,14 +119,21 @@ async def test_savings_estimator_topics_keep_distinct_effective_consumer_groups(
     )
     event_bus._started = True
     effective_group_ids: dict[str, str] = {}
+    captured_auto_offset_reset_overrides: dict[str, str | None] = {}
 
-    async def capture_consumer_start(topic: str, group_id: str) -> None:
+    async def capture_consumer_start(
+        topic: str,
+        group_id: str,
+        *,
+        auto_offset_reset_override: str | None = None,
+    ) -> None:
         effective_group_ids[topic] = event_bus._resolve_effective_group_id(
             group_id,
             topic,
             uuid4(),
             (topic, group_id),
         )
+        captured_auto_offset_reset_overrides[topic] = auto_offset_reset_override
         event_bus._pending_consumer_keys.discard((topic, group_id))
 
     async def on_message(_message: object) -> None:
