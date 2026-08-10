@@ -10,7 +10,7 @@
 # enumeration of every FORCE-ROW-LEVEL-SECURITY-enabling node migration that
 # was ALREADY VENDORED, and had ALREADY BEEN APPLYING UNGATED on every warm
 # lane, at the moment scripts/run-forward-migrations.sh gained the unclassified-
-# FORCE-RLS guard (commit 90cd78a580, 2026-08-05). It exists solely so the
+# FORCE-RLS guard (commit 3bc7fcaf2e, 2026-08-05). It exists solely so the
 # guard can distinguish "a migration nobody has reviewed yet" (must FATAL)
 # from "a migration that predates the guard and is part of the established
 # baseline" (must keep applying — that is what "established baseline" means).
@@ -33,9 +33,18 @@
 # ENTRY CRITERIA (both required)
 #   1. Enables FORCE ROW LEVEL SECURITY (the exact condition
 #      migration_declares_unclassified_force_rls tests for).
-#   2. Existed in docker/migrations/forward/nodes/ at commit 90cd78a580~1 —
+#   2. Existed in docker/migrations/forward/nodes/ at commit 3bc7fcaf2e~1 —
 #      i.e. BEFORE the guard first shipped. Verified per-id via
-#      `git show 90cd78a580~1:docker/migrations/forward/nodes/<id-path>`.
+#      `git show 3bc7fcaf2e~1:docker/migrations/forward/nodes/<id-path>`.
+#
+# OMN-15831 NOTE: the commit cited above was repointed from the original
+# 90cd78a580 to 3bc7fcaf2e (the PR's SQUASH MERGE SHA, permanent on `dev`)
+# because 90cd78a580 was a PR-branch commit that squash-merge + branch
+# deletion later made unreachable from any ref — `git show 90cd78a580~1:...`
+# fails on a fresh checkout. 3bc7fcaf2e~1 resolves the identical pre-guard
+# tree state. See tests/scripts/test_node_migration_fence_parity.py
+# GUARD_INTRODUCTION_COMMIT for the same fix and a self-diagnosing guard
+# against this recurring.
 #
 # THIS LIST DOES NOT GROW.
 # It is a snapshot of one commit's tree, not a rolling allowlist. A NEW
