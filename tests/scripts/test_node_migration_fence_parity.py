@@ -1887,7 +1887,7 @@ def test_guard_free_runner_applies_the_unclassified_migration(
 # GUARD_INTRODUCTION_COMMIT is the commit that first shipped the unclassified-
 # FORCE-RLS guard; every grandfathered id must have existed in the tree at its
 # PARENT (i.e. immediately before the guard could ever have fired for it).
-GUARD_INTRODUCTION_COMMIT = "bbac5205f0d29a73f76238446c8660085fb07b7a"
+GUARD_INTRODUCTION_COMMIT = "7a957a0a9b00102faf1873211d28e8b5bea6b4ca"
 
 
 def _sql_declares_unclassified_force_rls(sql_text: str) -> bool:
