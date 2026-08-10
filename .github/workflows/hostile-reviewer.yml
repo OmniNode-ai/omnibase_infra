@@ -26,7 +26,12 @@ name: Hostile Reviewer
 on:
   pull_request:
     branches: [main, dev]
-    types: [opened, synchronize, reopened]
+    # OMN-14241: `edited` added so a PR-body-only edit (e.g. stamping
+    # `Evidence-Source: OCC#<n>`) retriggers this workflow's own
+    # `occ-preflight` job -- see ci.yml's identical trigger for the full
+    # rationale. Without it, `occ-preflight / eligibility` (workflowName
+    # "Hostile Reviewer") sits at a stale pre-stamp FAILURE forever.
+    types: [opened, edited, synchronize, reopened]
 
 permissions:
   pull-requests: write
@@ -49,7 +54,7 @@ jobs:
     with:
       contracts-dir: contracts
       receipts-dir: drift/dod_receipts
-      core-ref: 8a47e092002dd1338599fa0733feda469436acbf
+      core-ref: dev
 
   hostile-review:
     needs: occ-preflight
