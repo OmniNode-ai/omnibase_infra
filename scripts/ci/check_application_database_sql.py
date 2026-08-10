@@ -112,6 +112,21 @@ _LEGACY_DEFAULT_SCHEMA_SQL_EXACT_PATHS = frozenset(
             "docker/migrations/forward/031_create_llm_call_metrics_and_cost_aggregates.sql"
         ),
         Path("docker/migrations/forward/050_create_baselines_tables.sql"),
+        # OMN-15717: node_pr_review_bot's 001_create_review_bot_bypass_log.sql is
+        # a legacy-declared, vendor-synced migration (node-migration-sync,
+        # OMN-13332) restored byte-identical to the original omnimarket commit --
+        # sha256-verified against the historical file and cross-checked against
+        # the live omnidash_analytics.platform_catalog.schema_migrations row
+        # this ticket exists to declare. Its unqualified `review_bot_bypass_log`
+        # target predates this gate; qualifying it now would break both the
+        # byte-identity proof and the checksum this migration's own declaration
+        # row binds to. Same node-migration-sync-forced-vendoring rationale as
+        # the node_canary_score_reducer / node_projection_registration entries
+        # above -- exempting here (not editing the SQL) is the canonical fix.
+        Path(
+            "docker/migrations/forward/nodes/node_pr_review_bot/"
+            "001_create_review_bot_bypass_log.sql"
+        ),
         # OMN-15359: 099 performs the governed physical-schema cutover itself --
         # it creates NEW omninode_internal-domain authority
         # (omninode_internal.live_events, ownership declared in omnimarket's
