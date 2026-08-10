@@ -26,6 +26,42 @@ _MODULE_NAME = "monitor_logs"
 _ENV_SENTINEL = "OMN15572_MONITOR_IMPORT_SENTINEL"
 _MONITOR_SCRIPT = _SCRIPTS_DIR / "monitor_logs.py"
 
+# `import monitor_logs` is NOT cheap (OMN-15836 measured this — a prior version of
+# this comment claimed "well under a second," which was never measured and is false).
+# monitor_logs.py's `_load_monitor_alert_topic()` runs at module-import time
+# (module-scope call, not a function only invoked on demand) and does
+# `from omnibase_infra.models.contracts.model_monitor_alert_contract import
+# ModelMonitorAlertContract`. In any environment where omnibase_infra is installed
+# (dev, CI), that succeeds and pays the transitive cost of
+# omnibase_infra/models/__init__.py's eager-loading chain (pulls in
+# nodes.node_architecture_validator, nodes.node_registration_orchestrator.dispatchers,
+# and omnibase_core.models.dispatch/reducer/common/validation) just to reach one
+# small Pydantic model. Measured via `python -X importtime` on this repo's own
+# .venv/bin/python3 (the same interpreter `sys.executable` resolves to for the
+# subprocess below): `monitor_logs` cumulative import cost is 3,464,293us (~3.46s),
+# of which 3,415,000us (~3.42s) is the omnibase_infra.models.contracts... subtree.
+# 10 repeated cold single-process subprocess.run() calls of the exact probe below,
+# serial/uncontended: [4.395, 4.403, 4.433, 4.434, 4.449, 4.452, 4.511, 4.539,
+# 4.584, 5.515] seconds (p50 4.452s, max 5.515s) — i.e. genuinely multi-second even
+# with zero contention, not "well under a second."
+#
+# The self-hosted CI fleet runs many concurrent pytest-split shards per job, and
+# this import is CPU-bound, so contention multiplies it further: a 10s bound
+# tripped this way twice live, on unrelated PRs' Split 12/15 (infra#2697 and
+# infra#2700, mergesweep-0809-poisonpath-verify / mergesweep-0809-landingset), both
+# times as three subprocess.TimeoutExpired failures at exactly the 10s bound,
+# unrelated to either PR's own diff. Reproduced directly (OMN-15836) by running N
+# copies of the same import concurrently via ThreadPoolExecutor on a 24-core box:
+# N=24 (1x core count) -> per-process wall time min 11.152s / p50 11.349s /
+# max 11.425s (already exceeds the old 10s bound, matching the live failure);
+# N=48 (2x oversubscription) -> min 17.985s / p50 18.583s / max 18.906s. 30s keeps
+# ~1.6x margin over the worst measured case (48-way oversubscription) and ~2.6x
+# margin over 1x-oversubscription, while still catching a genuine hang (which would
+# run far longer than either measured ceiling). See OMN-15836 for the full
+# measurement writeup; the underlying heavy import is a known, deliberately
+# out-of-scope architecture cost, not fixed here.
+_SUBPROCESS_TIMEOUT_SECONDS = 30
+
 
 def _import() -> Any:
     if _MODULE_NAME in sys.modules:
@@ -104,7 +140,7 @@ class TestImportEnvironmentIsolation:
             env=subprocess_env,
             capture_output=True,
             text=True,
-            timeout=10,
+            timeout=_SUBPROCESS_TIMEOUT_SECONDS,
             check=False,
         )
 
@@ -288,7 +324,7 @@ else:
             env=subprocess_env,
             capture_output=True,
             text=True,
-            timeout=10,
+            timeout=_SUBPROCESS_TIMEOUT_SECONDS,
             check=False,
         )
 
@@ -342,7 +378,7 @@ else:
             env=subprocess_env,
             capture_output=True,
             text=True,
-            timeout=10,
+            timeout=_SUBPROCESS_TIMEOUT_SECONDS,
             check=False,
         )
 

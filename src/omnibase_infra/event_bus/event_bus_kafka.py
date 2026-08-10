@@ -224,7 +224,11 @@ from omnibase_infra.event_bus.kafka_auth import (
     build_aiokafka_auth_kwargs,
 )
 from omnibase_infra.event_bus.mixin_kafka_broadcast import MixinKafkaBroadcast
-from omnibase_infra.event_bus.mixin_kafka_dlq import MixinKafkaDlq
+from omnibase_infra.event_bus.mixin_kafka_dlq import (
+    _REPLAY_COUNT_HEADER,
+    _REPLAY_COUNT_PARSE_FAILURE_SENTINEL,
+    MixinKafkaDlq,
+)
 from omnibase_infra.event_bus.models import (
     ModelEventBusReadiness,
     ModelEventHeaders,
@@ -1315,6 +1319,7 @@ class EventBusKafka(
         group_id: str | None = None,
         purpose: EnumConsumerGroupPurpose = EnumConsumerGroupPurpose.CONSUME,
         required_for_readiness: bool = False,
+        auto_offset_reset: str | None = None,
     ) -> Callable[[], Awaitable[None]]:
         """Subscribe to topic with callback handler.
 
@@ -1344,6 +1349,21 @@ class EventBusKafka(
             required_for_readiness: Whether this subscription must have active
                 partition assignments for the runtime to report as ready via
                 ``/ready``. Defaults to False (does not block readiness).
+            auto_offset_reset: Optional per-subscription override of this
+                consumer's ``auto_offset_reset`` policy ("earliest"/"latest").
+                When ``None`` (the default, unchanged behavior), the bus-level
+                ``self._config.auto_offset_reset`` applies, as before this
+                parameter existed. Each ``(topic, group_id)`` pair already
+                gets its own dedicated ``AIOKafkaConsumer``
+                (``_start_consumer_for_topic_unlocked``), so this override is
+                scoped to exactly the one consumer this call creates -- it
+                does not affect any other subscription's offset-reset
+                behavior. Added for OMN-15789 so the
+                ``event_bus_substrate`` fixture's ``real_broker`` leg can
+                exercise the same per-call ``auto_offset_reset`` surface
+                ``EventBusSemanticFake`` (omnibase_core) already has, instead
+                of needing a separate ``EventBusKafka`` instance per offset
+                policy under test.
 
         Returns:
             Async unsubscribe function to remove this subscription
@@ -1426,7 +1446,9 @@ class EventBusKafka(
         # calls during cold start.  _pending_consumer_keys (set above under
         # the lock) guards against duplicate starts across concurrent callers.
         if need_consumer_start:
-            await self._start_consumer_for_topic_unlocked(topic, effective_group_id)
+            await self._start_consumer_for_topic_unlocked(
+                topic, effective_group_id, auto_offset_reset_override=auto_offset_reset
+            )
 
         async with self._lock:
             logger.debug(
@@ -1670,7 +1692,11 @@ class EventBusKafka(
         return f"{effective_group_id[:prefix_budget]}-{host_hash}"
 
     async def _start_consumer_for_topic_unlocked(
-        self, topic: str, group_id: str
+        self,
+        topic: str,
+        group_id: str,
+        *,
+        auto_offset_reset_override: str | None = None,
     ) -> None:
         """Start a Kafka consumer without holding the shared lock.
 
@@ -1696,6 +1722,11 @@ class EventBusKafka(
                 group ID (e.g. ``"my-group.__t.events"`` with
                 ``topic="events"``).
 
+            auto_offset_reset_override: Optional per-consumer override of
+                ``auto_offset_reset``. ``None`` (the default) preserves the
+                pre-OMN-15789 behavior of always using
+                ``self._config.auto_offset_reset``.
+
         Raises:
             ProtocolConfigurationError: If group_id is empty or contains only
                 whitespace (must be derived from compute_consumer_group_id or
@@ -1712,6 +1743,11 @@ class EventBusKafka(
             group_id, topic, correlation_id, consumer_key
         )
         resolved_group_instance_id = self._resolve_group_instance_id(effective_group_id)
+        resolved_auto_offset_reset = (
+            auto_offset_reset_override
+            if auto_offset_reset_override is not None
+            else self._config.auto_offset_reset
+        )
 
         # Apply consumer configuration from config model
         consumer = AIOKafkaConsumer(
@@ -1719,7 +1755,7 @@ class EventBusKafka(
             bootstrap_servers=self._bootstrap_servers,
             group_id=effective_group_id,
             group_instance_id=resolved_group_instance_id,
-            auto_offset_reset=self._config.auto_offset_reset,
+            auto_offset_reset=resolved_auto_offset_reset,
             enable_auto_commit=self._config.enable_auto_commit,
             session_timeout_ms=self._config.session_timeout_ms,
             heartbeat_interval_ms=self._config.heartbeat_interval_ms,
@@ -1846,7 +1882,7 @@ class EventBusKafka(
                     bootstrap_servers=self._bootstrap_servers,
                     group_id=effective_group_id,
                     group_instance_id=resolved_group_instance_id,
-                    auto_offset_reset=self._config.auto_offset_reset,
+                    auto_offset_reset=resolved_auto_offset_reset,
                     enable_auto_commit=self._config.enable_auto_commit,
                     session_timeout_ms=self._config.session_timeout_ms,
                     heartbeat_interval_ms=self._config.heartbeat_interval_ms,
@@ -2939,6 +2975,42 @@ class EventBusKafka(
         retry_count = self._parse_int_header(
             headers_dict.get("retry_count"), 0, "retry_count"
         )
+
+        # OMN-14551: a message republished by node_dlq_replay_effect carries
+        # x-replay-count instead of retry_count (see mixin_kafka_dlq.py's
+        # _REPLAY_COUNT_HEADER doc for the producer/reader contract). When
+        # present it is the authoritative replay lineage counter and wins
+        # over any stale "retry_count" header -- the replay engine never
+        # stamps "retry_count", so its presence here is unrelated/stale data.
+        # Every ModelEventMessage built from this method flows into
+        # _publish_raw_to_dlq (handler_exception / subcontract-wiring call
+        # sites) and _publish_to_dlq (typed path, reads
+        # failed_message.headers.retry_count directly) -- if this conversion
+        # drops the header, both paths reset replay lineage to 0 on every
+        # republish and should_replay's guard never trips (the 2026-08-05
+        # dev DLQ amplification incident).
+        replay_count_str = headers_dict.get(_REPLAY_COUNT_HEADER)
+        if replay_count_str is not None:
+            try:
+                parsed_replay_count = int(replay_count_str)
+            except (ValueError, TypeError):
+                logger.warning(
+                    "Malformed %s header %r, failing closed to stop replay",
+                    _REPLAY_COUNT_HEADER,
+                    replay_count_str,
+                )
+                retry_count = _REPLAY_COUNT_PARSE_FAILURE_SENTINEL
+            else:
+                if parsed_replay_count < 0:
+                    logger.warning(
+                        "Negative %s header value %d, failing closed to stop replay",
+                        _REPLAY_COUNT_HEADER,
+                        parsed_replay_count,
+                    )
+                    retry_count = _REPLAY_COUNT_PARSE_FAILURE_SENTINEL
+                else:
+                    retry_count = parsed_replay_count
+
         max_retries = self._parse_int_header(
             headers_dict.get("max_retries"), 3, "max_retries"
         )

@@ -51,6 +51,7 @@ from omnibase_infra.topology.application_database import (
     TOPOLOGY_PROFILE_INSTANCE_MAP,
 )
 from omnibase_infra.topology.table_grant_derivation import (
+    STATE_IO_TABLE_DECLARATIONS,
     ContractTableDeclaration,
     TopologyTableGrants,
     derive_topology_table_grants,
@@ -298,10 +299,13 @@ def main(argv: Sequence[str] | None = None) -> int:
     if args.write and args.check:
         parser.error("--write and --check are mutually exclusive")
 
-    declarations = load_contract_declarations(args.contracts_root)
+    declarations = (
+        load_contract_declarations(args.contracts_root) + STATE_IO_TABLE_DECLARATIONS
+    )
     print(
-        f"loaded {len(declarations)} db_io.db_tables declaration(s) "
-        f"from {args.contracts_root}"
+        f"loaded {len(declarations) - len(STATE_IO_TABLE_DECLARATIONS)} "
+        f"db_io.db_tables declaration(s) from {args.contracts_root} plus "
+        f"{len(STATE_IO_TABLE_DECLARATIONS)} state_io declaration(s)"
     )
 
     exit_code = 0

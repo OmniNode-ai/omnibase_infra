@@ -47,6 +47,7 @@ def _validate(
         migrations_dir,
         ledger_dir / "application-migrations.tsv",
         ledger_dir / "application-migration-blocks.tsv",
+        ledger_dir / "legacy-node-migrations.tsv",
         ledger_dir / "cloud-migration-aliases.tsv",
         require_complete=require_complete,
     )
@@ -93,17 +94,24 @@ def _minimal_fixture(tmp_path: Path) -> tuple[Path, Path]:
     (ledger_dir / "cloud-migration-aliases.tsv").write_text(
         "20260101_example\t20260101_example.sql\n", encoding="utf-8"
     )
+    (ledger_dir / "legacy-node-migrations.tsv").write_text("", encoding="utf-8")
     return migrations_dir, ledger_dir
 
 
 def test_checked_in_manifest_is_exact_and_all_blockers_are_explicit() -> None:
     result = _validate()
 
-    # 94 as of the OMN-14894 vendor-parity repair: the manifest mirrors the
-    # vendored node migration tree after restoring the nine house-tenant RLS
-    # migrations that are still source-owned in omnimarket dev.
-    assert len(result.declarations) == 94
+    # 97 as of OMN-15717 (rebased onto OMN-15732): 94 from the OMN-14894
+    # vendor-parity repair (the manifest mirrors the vendored node migration
+    # tree after restoring the nine house-tenant RLS migrations that are
+    # still source-owned in omnimarket dev), +2 for
+    # node_canary_score_reducer/0003 and node_projection_registration/0004
+    # (see OMN-15361 exemption fix above for why these are the
+    # deadlock-triggering vendor files), +1 for OMN-15717's legacy-declared
+    # node_pr_review_bot/001_create_review_bot_bypass_log.sql.
+    assert len(result.declarations) == 97
     assert result.blocked == ()
+    assert len(result.legacy_node_declarations) == 2
     assert len(result.cloud_aliases) == 30
 
 
@@ -185,3 +193,98 @@ def test_duplicate_cloud_alias_fails_closed(tmp_path: Path) -> None:
         validator.ManifestError, match="duplicate cloud migration alias"
     ):
         _validate(migrations_dir, ledger_dir)
+
+
+def test_legacy_node_declaration_cannot_shadow_an_active_artifact(
+    tmp_path: Path,
+) -> None:
+    migrations_dir, ledger_dir = _minimal_fixture(tmp_path)
+    (ledger_dir / "legacy-node-migrations.tsv").write_text(
+        "\t".join(
+            (
+                "node:node_example",
+                "node:node_example",
+                "omninode_internal",
+                "node:node_example:0001.sql",
+                "hotfix-applied-by-codex",
+                "OMN-15717",
+            )
+        )
+        + "\n",
+        encoding="utf-8",
+    )
+
+    with pytest.raises(
+        validator.ManifestError, match="legacy declaration has vendored artifact"
+    ):
+        _validate(migrations_dir, ledger_dir)
+
+
+def test_legacy_node_declaration_requires_a_valid_source_record(tmp_path: Path) -> None:
+    migrations_dir, ledger_dir = _minimal_fixture(tmp_path)
+    (ledger_dir / "legacy-node-migrations.tsv").write_text(
+        "\t".join(
+            (
+                "node:node_history",
+                "node:node_history",
+                "omninode_internal",
+                "node:node_history:0001_removed.sql",
+                "raw checksum with spaces",
+                "OMN-15717",
+            )
+        )
+        + "\n",
+        encoding="utf-8",
+    )
+
+    with pytest.raises(
+        validator.ManifestError, match="malformed legacy source checksum"
+    ):
+        _validate(migrations_dir, ledger_dir)
+
+
+CAPTURED_OMN15717_FIXTURE = (
+    Path(__file__).parents[3]
+    / "fixtures"
+    / "omn15717"
+    / "001_create_review_bot_bypass_log.sql.captured"
+)
+
+
+class TestOmn15717IncidentReplay:
+    """Incident replay case (OMN-15547 registry): drives THIS validator
+    against the exact captured bytes of node_pr_review_bot's
+    001_create_review_bot_bypass_log.sql (git-object:OmniNode-ai/omnimarket@
+    cedd24311ed320d34cc5ab5f8f79f5b04e9abf25:src/omnimarket/nodes/
+    node_pr_review_bot/migrations/001_create_review_bot_bypass_log.sql),
+    vendored with NO manifest declaration -- reproducing the exact pre-fix
+    tree shape. This validator existed, unwired, the whole time; had it been
+    wired the omission would have failed a PR instead of a live
+    bootstrap.sql deploy weeks later ("unknown migration stream/domain:
+    adopted node version node:node_pr_review_bot:001_create_review_bot_bypass_log.sql
+    has no checked-in declaration", .201:/tmp/refresh_stability_lane_20260805.log).
+    """
+
+    def test_captured_undeclared_migration_is_rejected(self, tmp_path: Path) -> None:
+        assert CAPTURED_OMN15717_FIXTURE.is_file(), (
+            f"incident replay fixture missing: {CAPTURED_OMN15717_FIXTURE}"
+        )
+        migrations_dir, ledger_dir = _minimal_fixture(tmp_path)
+        undeclared_artifact = (
+            migrations_dir
+            / "nodes"
+            / "node_pr_review_bot"
+            / "001_create_review_bot_bypass_log.sql"
+        )
+        undeclared_artifact.parent.mkdir(parents=True)
+        undeclared_artifact.write_bytes(CAPTURED_OMN15717_FIXTURE.read_bytes())
+
+        with pytest.raises(
+            validator.ManifestError,
+            match="migration declaration set differs from the vendored node tree",
+        ) as excinfo:
+            _validate(migrations_dir, ledger_dir)
+
+        assert "nodes/node_pr_review_bot/001_create_review_bot_bypass_log.sql" in str(
+            excinfo.value
+        )

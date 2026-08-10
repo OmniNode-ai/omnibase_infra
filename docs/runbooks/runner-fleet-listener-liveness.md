@@ -1,7 +1,7 @@
 # Runner fleet listener liveness (OMN-13915)
 
 **Status:** active runbook
-**Ticket:** OMN-13915 (incident 2026-07-03) — related: OMN-12433 (egress healthcheck), OMN-13109 (silent wedge / crash loop monitor), OMN-15233 (2026-07-27 threshold recalibration + orphan/crash-loop detection), OMN-15255 (composite readiness + quarantine gate)
+**Ticket:** OMN-13915 (incident 2026-07-03) — related: OMN-12433 (egress healthcheck), OMN-13109 (silent wedge / crash loop monitor), OMN-15233 (2026-07-27 threshold recalibration + orphan/crash-loop detection), OMN-15255 (composite readiness + quarantine gate), OMN-15776 (broker-dispatch/reconnect race — a distinct GitHub-side failure class, targeted rerun remediation)
 
 ## The rule that changed
 
@@ -96,6 +96,67 @@ by `node_runner_health_snapshot_effect`, and until that runs against the fleet
 those signals report `UNKNOWN`. UNKNOWN quarantines nothing and bounces nothing,
 so the code is inert before rollout by construction — verify `ready_count` is
 non-zero before trusting the view.
+
+## Broker-dispatch/reconnect race — a DIFFERENT failure class (OMN-15776)
+
+Layers 1–4 and the composite readiness verdict above all detect state the
+*local runner process* can observe: a dead listener, a hung listener, a
+container that is unhealthy or offline. **This class is invisible to every one
+of them**, because the failure happens on the GitHub side of the wire before
+any local process this repo controls ever runs.
+
+**Mechanism (proven, 2026-08-09 — direct evidence on 4/4 independently-checked
+runners: omninode-runner-2/17/35/48):** GitHub's Actions broker dispatches a
+job to a self-hosted runner within 2-7s of that SAME runner finishing its
+*previous, unrelated* job — exactly while the runner's `Runner.Listener` is
+mid-reconnect on its broker long-poll (every job completion triggers a
+`TaskCanceledException`/`IOException`/`SocketException(125)` retry storm on
+that connection, with an observed 5-12s exponential backoff). The new dispatch
+lands in that reconnect gap and is **never delivered** to the runner's active
+message loop — no `Runner.Worker` process is ever spawned locally, so the
+runner's own `_diag/Runner_*.log` has **zero** `"Running job: <name>"` entry
+for that job (this is not a crashed step 1 — it is a dispatch that never
+arrived) — while GitHub's server side records the assignment, sets
+`started_at`, and independently times the orphaned assignment out at a
+**fixed ~10m0-1s**, unrelated to any declared `timeout-minutes` and unrelated
+to this repo's `LISTENER_HEARTBEAT_MAX_AGE_SECONDS` (3600s) watchdog.
+
+**Ruled out** (2026-08-09 investigation): host resource contention (`docker
+events` = zero container-level events in every kill window, `RestartCount=0`
+throughout), kernel/NIC faults (`journalctl -k` shows only routine veth
+churn), host cron/`runner-monitor.sh` auto-bounce (zero bounces on any
+implicated runner in any kill window), and the OMN-14564 heartbeat watchdog
+(fires on these runners routinely but always 50min-3h offset from the actual
+kill windows — its detection surface, idle-listener silence, has zero overlap
+with this failure's signature: an *actively chattering* listener silently
+dropping one specific dispatch, with no Worker for the watchdog's
+Worker-running guard to ever observe).
+
+**Why no entrypoint.sh/watchdog fix applies.** The drop occurs in the GitHub
+Actions client/broker protocol path, strictly before local process state
+diverges from normal — there is nothing to `pgrep`, no heartbeat to go stale,
+no wrapper tree to recycle. A local fix cannot close this gap.
+
+**Remediation layer 5 — targeted, signature-keyed rerun
+(`runner-broker-dispatch-wedge-rerun` GHA workflow, 10-min cadence,
+GitHub-hosted — same isolation rationale as layer 4):**
+`scripts/ci/runner_broker_dispatch_wedge_rerun.sh` queries the Jobs API
+(never log-text grepping — there is no log content to grep) for jobs matching
+the exact structural fingerprint and reissues only the matched job:
+
+| Signal | Match condition |
+|---|---|
+| `runner_name` | set (self-hosted only — GitHub-hosted jobs are never touched) |
+| `conclusion` | `failure` or `cancelled` |
+| `steps` | empty array (no Worker ever spawned) |
+| duration | `completed_at - started_at` within a tight band (default 595-605s) around the proven fixed ~10m0-1s server-side timeout |
+
+This is deliberately narrow and additive to the existing
+`scripts/infra-signature-rerun.sh` (OMN-13040), which matches known infra
+**log-content** signatures (disk casualty, network wedge) — this class has no
+log content to match against, so it needed a structural (Jobs-API-shape)
+matcher instead. A job outside the duration band, or with any recorded steps,
+is a genuine failure and is never rerun by this layer.
 
 Coverage: `tests/unit/nodes/node_runner_fleet_maintain/test_runner_readiness_composite_omn15255.py`
 and `..._facts_effect_omn15255.py`.

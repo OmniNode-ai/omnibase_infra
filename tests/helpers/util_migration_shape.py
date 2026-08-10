@@ -28,7 +28,8 @@ from dataclasses import dataclass
 from pathlib import Path
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
-NODE_MIGRATIONS_DIR = REPO_ROOT / "docker" / "migrations" / "forward" / "nodes"
+FORWARD_DIR = REPO_ROOT / "docker" / "migrations" / "forward"
+NODE_MIGRATIONS_DIR = FORWARD_DIR / "nodes"
 FORWARD_RUNNER = REPO_ROOT / "scripts" / "run-forward-migrations.sh"
 FENCE_MANIFEST = (
     REPO_ROOT / "docker" / "migrations" / "forward" / "fenced-node-migrations.yaml"
@@ -300,3 +301,92 @@ def node_migration_files() -> list[tuple[str, Path]]:
         for sql_file in sorted(node_dir.glob("*.sql")):
             files.append((f"node:{node_dir.name}:{sql_file.name}", sql_file))
     return files
+
+
+def flat_migration_files() -> list[tuple[str, Path]]:
+    """Every top-level (non-node) forward migration as ``(namespaced_id, path)``.
+
+    Deliberately excludes ``NODE_MIGRATIONS_DIR`` (``forward/nodes/``) -- that
+    corpus is `node_migration_files`'s. This is the OTHER producer OMN-15384
+    is about: ``docker/migrations/forward/*.sql`` at the top level, applied
+    against the ``omnibase_infra`` database rather than a node's own DB.
+    """
+    files: list[tuple[str, Path]] = []
+    for sql_file in sorted(FORWARD_DIR.glob("*.sql")):
+        files.append((f"flat:{sql_file.name}", sql_file))
+    return files
+
+
+def normalized_column_type(type_text: str) -> str:
+    """Collapse insignificant whitespace so ``DECIMAL(5,4)`` == ``DECIMAL(5, 4)``.
+
+    Comparison, not display: two type spellings that differ only in whitespace
+    inside the type/precision text are the same declared type. Genuine type
+    differences (``REAL`` vs ``DOUBLE PRECISION``, ``UUID`` vs ``TEXT``,
+    ``NUMERIC(14,6)`` vs ``NUMERIC(18,6)``) are NOT collapsed by this -- those
+    are real shape divergence, the thing OMN-15384's gate exists to catch.
+    """
+    return re.sub(r"\s+", "", type_text).upper()
+
+
+@dataclass(frozen=True)
+class ShapeDiff:
+    """Column-level divergence between one table's flat and node declarations."""
+
+    only_flat: tuple[str, ...]
+    only_node: tuple[str, ...]
+    type_diff: tuple[tuple[str, str, str], ...]  # (column, flat_type, node_type)
+
+    def __bool__(self) -> bool:
+        """True iff there IS a divergence -- empty diff is falsy, like a set."""
+        return bool(self.only_flat or self.only_node or self.type_diff)
+
+    def describe(self, *, table: str) -> str:
+        parts = [f"{table}:"]
+        if self.only_flat:
+            parts.append(f"  only in flat: {list(self.only_flat)}")
+        if self.only_node:
+            parts.append(f"  only in node: {list(self.only_node)}")
+        for column, flat_type, node_type in self.type_diff:
+            parts.append(f"  type diff {column}: flat={flat_type!r} node={node_type!r}")
+        return "\n".join(parts)
+
+
+def diff_column_shapes(
+    flat_columns: dict[str, str], node_columns: dict[str, str]
+) -> ShapeDiff:
+    """Pure comparison of two ``{column: normalized_type}`` maps for one table."""
+    flat_names = set(flat_columns)
+    node_names = set(node_columns)
+    type_diff = tuple(
+        sorted(
+            (column, flat_columns[column], node_columns[column])
+            for column in flat_names & node_names
+            if flat_columns[column] != node_columns[column]
+        )
+    )
+    return ShapeDiff(
+        only_flat=tuple(sorted(flat_names - node_names)),
+        only_node=tuple(sorted(node_names - flat_names)),
+        type_diff=type_diff,
+    )
+
+
+def table_column_shapes(files: list[tuple[str, Path]]) -> dict[str, dict[str, str]]:
+    """Map ``bare table name -> {column name: normalized type}`` across *files*.
+
+    Later files win per column on a repeat ``CREATE TABLE IF NOT EXISTS`` for
+    the same table in the same corpus (e.g. ``baselines`` has both a
+    ``0001_create`` and a later ``0002_realign`` file) -- the same
+    last-applied-wins semantics the migrations themselves have at runtime.
+    """
+    shapes: dict[str, dict[str, str]] = {}
+    for _migration_id, path in files:
+        sql = path.read_text(encoding="utf-8")
+        for table in guarded_create_tables(sql):
+            bucket = shapes.setdefault(table.bare_name.lower(), {})
+            for column in table.columns:
+                bucket[column.name.strip('"').lower()] = normalized_column_type(
+                    column.type_text
+                )
+    return shapes

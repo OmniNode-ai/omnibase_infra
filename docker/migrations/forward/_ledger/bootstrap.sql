@@ -316,7 +316,12 @@ BEGIN
      AND manifest.owner = ledger.owner
      AND manifest.domain = ledger.domain
      AND manifest.version = ledger.version
-    WHERE manifest.version IS NULL
+    LEFT JOIN onex_legacy_node_migration_declarations legacy
+      ON legacy.migration_stream = ledger.migration_stream
+     AND legacy.owner = ledger.owner
+     AND legacy.domain = ledger.domain
+     AND legacy.version = ledger.version
+    WHERE manifest.version IS NULL AND legacy.version IS NULL
       AND NOT (
         ledger.migration_stream = 'legacy:filename-only'
         AND ledger.owner = 'legacy:filename-only'
@@ -584,8 +589,13 @@ DO $migration_id_import$
 DECLARE
   source_row RECORD;
   manifest_row RECORD;
+  legacy_row RECORD;
   existing_row RECORD;
+  resolved_stream TEXT;
+  resolved_owner TEXT;
+  resolved_domain TEXT;
   imported_checksum TEXT;
+  imported_checksum_kind TEXT;
   imported_provenance TEXT;
   source_column_count INTEGER;
 BEGIN
@@ -617,41 +627,67 @@ BEGIN
     FROM onex_application_migration_manifest
     WHERE version = source_row.migration_id;
     IF NOT FOUND THEN
-      RAISE EXCEPTION
-        'unknown migration stream/domain: adopted node version % has no checked-in declaration',
-        source_row.migration_id;
-    END IF;
-
-    IF source_row.checksum ~ '^[0-9a-f]{64}$' THEN
-      IF source_row.checksum <> manifest_row.checksum THEN
+      SELECT * INTO legacy_row
+      FROM onex_legacy_node_migration_declarations
+      WHERE version = source_row.migration_id;
+      IF NOT FOUND THEN
+        RAISE EXCEPTION
+          'unknown migration stream/domain: adopted node version % has no checked-in declaration',
+          source_row.migration_id;
+      END IF;
+      IF source_row.checksum <> legacy_row.source_checksum THEN
         RAISE EXCEPTION
           'conflicting migration checksum for version %', source_row.migration_id;
       END IF;
-      imported_checksum := source_row.checksum;
-    ELSIF source_row.checksum = 'applied-by-runner' THEN
-      imported_checksum := manifest_row.checksum;
+      resolved_stream := legacy_row.migration_stream;
+      resolved_owner := legacy_row.owner;
+      resolved_domain := legacy_row.domain;
+      imported_checksum := encode(sha256(convert_to(
+        'legacy-node-attestation|' || source_row.migration_id || '|' ||
+        source_row.checksum || '|' || legacy_row.ticket,
+        'UTF8'
+      )), 'hex');
+      imported_checksum_kind := 'legacy_attestation';
+      imported_provenance := format(
+        'legacy-adopted:%s:public.schema_migrations:migration_id:%s:raw-checksum=%s:ticket=%s',
+        current_database(), source_row.migration_id, source_row.checksum,
+        legacy_row.ticket
+      );
     ELSE
-      RAISE EXCEPTION
-        'conflicting migration checksum for version %', source_row.migration_id;
+      resolved_stream := manifest_row.migration_stream;
+      resolved_owner := manifest_row.owner;
+      resolved_domain := manifest_row.domain;
+      IF source_row.checksum ~ '^[0-9a-f]{64}$' THEN
+        IF source_row.checksum <> manifest_row.checksum THEN
+          RAISE EXCEPTION
+            'conflicting migration checksum for version %', source_row.migration_id;
+        END IF;
+        imported_checksum := source_row.checksum;
+      ELSIF source_row.checksum = 'applied-by-runner' THEN
+        imported_checksum := manifest_row.checksum;
+      ELSE
+        RAISE EXCEPTION
+          'conflicting migration checksum for version %', source_row.migration_id;
+      END IF;
+      imported_checksum_kind := 'content_sha256';
+      imported_provenance := format(
+        'adopted:%s:public.schema_migrations:migration_id:%s:raw-checksum=%s',
+        current_database(), source_row.migration_id, source_row.checksum
+      );
     END IF;
-
-    imported_provenance := format(
-      'adopted:%s:public.schema_migrations:migration_id:%s:raw-checksum=%s',
-      current_database(), source_row.migration_id, source_row.checksum
-    );
 
     SELECT * INTO existing_row
     FROM platform_catalog.schema_migrations
-    WHERE migration_stream = manifest_row.migration_stream
-      AND domain = manifest_row.domain
+    WHERE migration_stream = resolved_stream
+      AND domain = resolved_domain
       AND version = source_row.migration_id;
     IF FOUND THEN
       IF existing_row.checksum <> imported_checksum THEN
         RAISE EXCEPTION
           'conflicting migration checksum for version %', source_row.migration_id;
-      ELSIF existing_row.owner <> manifest_row.owner
-         OR existing_row.domain <> manifest_row.domain
-         OR existing_row.checksum_kind <> 'content_sha256'
+      ELSIF existing_row.owner <> resolved_owner
+         OR existing_row.domain <> resolved_domain
+         OR existing_row.checksum_kind <> imported_checksum_kind
          OR existing_row.applied_at IS DISTINCT FROM source_row.applied_at
          OR existing_row.provenance <> imported_provenance THEN
         RAISE EXCEPTION
@@ -662,9 +698,9 @@ BEGIN
         migration_stream, owner, domain, version, checksum, checksum_kind,
         applied_at, provenance
       ) VALUES (
-        manifest_row.migration_stream, manifest_row.owner,
-        manifest_row.domain, source_row.migration_id,
-        imported_checksum, 'content_sha256', source_row.applied_at,
+        resolved_stream, resolved_owner,
+        resolved_domain, source_row.migration_id,
+        imported_checksum, imported_checksum_kind, source_row.applied_at,
         imported_provenance
       );
     END IF;

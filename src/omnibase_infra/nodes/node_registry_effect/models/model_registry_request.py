@@ -62,13 +62,14 @@ class ModelRegistryRequest(BaseModel):
         >>> from uuid import uuid4
         >>> from omnibase_core.enums.enum_node_kind import EnumNodeKind
         >>> from omnibase_core.models.primitives.model_semver import ModelSemVer
+        >>> resolved_health_endpoint = "<routing-authority-resolved-health-endpoint>"
         >>> request = ModelRegistryRequest(
         ...     node_id=uuid4(),
         ...     node_type=EnumNodeKind.EFFECT,
         ...     node_version=ModelSemVer(major=1, minor=0, patch=0),
         ...     correlation_id=uuid4(),
         ...     service_name="onex-effect",
-        ...     endpoints={"health": "http://localhost:8080/health"},
+        ...     endpoints={"health": resolved_health_endpoint},
         ...     timestamp=datetime(2025, 1, 15, 12, 0, 0, tzinfo=UTC),
         ... )
         >>> request.node_type

@@ -12,13 +12,35 @@ from omnibase_infra.runtime.auto_wiring.models.model_discovered_contract import 
 from omnibase_infra.runtime.auto_wiring.models.model_discovery_error import (
     ModelDiscoveryError,
 )
+from omnibase_infra.runtime.auto_wiring.models.model_runtime_build_sha import (
+    ModelRuntimeBuildSha,
+)
+
+
+def _unbound_build_sha() -> ModelRuntimeBuildSha:
+    """Default for legacy/discovery-only construction (OMN-10856).
+
+    Distinct from an env-lookup miss: this manifest was constructed before
+    any identity binding was attempted at all (e.g. ``discover_contracts()``
+    or one of the ~50 pre-existing test call sites that only care about
+    ``contracts``/``errors``). ``bind_introspection_manifest_identity()`` is
+    the single place that resolves the real SHA-from-env values.
+    """
+    return ModelRuntimeBuildSha(
+        value=None,
+        absent_reason="manifest constructed without a build-identity binding",
+    )
 
 
 class ModelAutoWiringManifest(BaseModel):
     """Complete manifest produced by contract auto-discovery.
 
     Contains all successfully discovered contracts and any errors
-    encountered during scanning. Pure data — no side effects.
+    encountered during scanning, plus the runtime build identity (OMN-10856)
+    that binds this reported topology to a specific deployed process:
+    which runtime profile produced it, and which image/deployment build it
+    came from. Pure data — no side effects; identity resolution (env var
+    reads) happens in ``bind_introspection_manifest_identity``, not here.
     """
 
     model_config = ConfigDict(frozen=True, extra="forbid", from_attributes=True)
@@ -30,6 +52,28 @@ class ModelAutoWiringManifest(BaseModel):
     errors: tuple[ModelDiscoveryError, ...] = Field(
         default_factory=tuple,
         description="Errors encountered during discovery",
+    )
+    runtime_profile: str = Field(
+        default="",
+        description=(
+            "RUNTIME_PROFILE identity this manifest was built for (e.g. "
+            "'workers', 'effects', 'main'). Empty string means the manifest "
+            "was constructed before profile binding (discovery-only)."
+        ),
+    )
+    image_sha: ModelRuntimeBuildSha = Field(
+        default_factory=_unbound_build_sha,
+        description=(
+            "Container image SHA/digest this runtime was built from, or an "
+            "explicit absent-with-reason marker (OMN-10856)."
+        ),
+    )
+    deployment_sha: ModelRuntimeBuildSha = Field(
+        default_factory=_unbound_build_sha,
+        description=(
+            "Deployment/source revision SHA this runtime was deployed from, "
+            "or an explicit absent-with-reason marker (OMN-10856)."
+        ),
     )
 
     @property

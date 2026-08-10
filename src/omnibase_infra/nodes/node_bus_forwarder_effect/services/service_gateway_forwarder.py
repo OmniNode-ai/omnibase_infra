@@ -13,23 +13,65 @@ from __future__ import annotations
 import logging
 from collections.abc import Awaitable, Callable
 from datetime import UTC, datetime
-from typing import Protocol
+from typing import Literal, Protocol
 from uuid import uuid4
 
 from omnibase_core.models.core.model_envelope_metadata import ModelEnvelopeMetadata
 from omnibase_core.models.events.model_event_envelope import ModelEventEnvelope
 from omnibase_infra.errors import RuntimeHostError
+from omnibase_infra.nodes.node_bus_forwarder_effect.handlers import (
+    HandlerConsumeInbound,
+    HandlerForwardOutbound,
+)
 from omnibase_infra.nodes.node_bus_forwarder_effect.models import (
+    ModelGatewayEnvelope,
     ModelGatewayForwarderConfig,
     ModelGatewayHeartbeat,
 )
 from omnibase_infra.nodes.node_bus_forwarder_effect.services.service_gateway_topic_transform import (
-    prefix_topic,
     strip_topic_prefix,
 )
-from omnibase_infra.shared.tenant_stamp import stamp_verified_tenant_slug
 
 logger = logging.getLogger(__name__)
+
+# ``gateway_direction`` tag values that mark an envelope as local-bus-only --
+# the forwarder's own outbound consumer loop (NodeGatewayDelivery polling the
+# SAME transport local_bus publishes into, see runtime/gateway_forwarder.py)
+# must skip these rather than re-forward them to cloud (OMN-15570/OMN-15742
+# reconciliation finding D1). "cloud-to-local" is an inbound-transformed
+# envelope publish_status/publish_heartbeat never emit and needs the same
+# skip already established for the inbound leg; "local-mirror" marks a
+# direct local-only publish (DEGRADED status, and the G3 heartbeat local
+# mirror) that was never meant to leave this cluster at all.
+_LOCAL_ONLY_DIRECTIONS = frozenset({"cloud-to-local", "local-mirror"})
+
+
+def _stamp_local_only(
+    envelope: ModelEventEnvelope[dict[str, object]],
+) -> ModelEventEnvelope[dict[str, object]]:
+    """Tag a local-bus-only publish so the outbound consumer never re-forwards it.
+
+    Both the DEGRADED status publish (``ServiceGatewayForwarder.publish_status``)
+    and the G3 heartbeat local mirror (``publish_heartbeat``) go directly onto
+    the local bus's canonical outbound topic -- exactly the topic the
+    forwarder's own outbound consumer polls (``NodeGatewayDelivery`` on
+    ``local_consumer``, the SAME transport object ``local_bus`` publishes into
+    in the real runtime). Without this tag, ``_forward_outbound_message``'s
+    loopback skip does not match an untagged envelope, so it falls through to
+    ``_prepare_outbound`` -- a second cloud publish per heartbeat tick, or a
+    DEGRADED status leak to cloud (OMN-15570/OMN-15742 reconciliation finding
+    D1). Module-level (not a method) to stay under the class's method-count
+    pattern threshold.
+    """
+    metadata = envelope.metadata.model_copy(
+        update={
+            "tags": {
+                **envelope.metadata.tags,
+                "gateway_direction": "local-mirror",
+            }
+        }
+    )
+    return envelope.model_copy(update={"metadata": metadata})
 
 
 class ProtocolGatewayPublisher(Protocol):
@@ -64,21 +106,25 @@ class ServiceGatewayForwarder:
 
             retry_sleep = asyncio.sleep
         self._retry_sleep = retry_sleep
+        # OMN-15740: the tenant-prefix transform is owned by the contract-declared
+        # COMPUTE handlers, not re-derived here. The service's job is the trust
+        # boundary (tag/tenant validation against untrusted bus input) plus the
+        # I/O; the pure prefix/strip transform and payload stamp are delegated.
+        self._forward_outbound_handler = HandlerForwardOutbound(config)
+        self._consume_inbound_handler = HandlerConsumeInbound(config)
 
     async def _forward_outbound_message(self, message: object) -> None:
         source_topic = self._message_topic(message)
         envelope = self._decode_message(message)
-        if envelope.metadata.tags.get("gateway_direction") == "cloud-to-local":
+        direction = envelope.metadata.tags.get("gateway_direction")
+        if direction in _LOCAL_ONLY_DIRECTIONS:
             logger.debug(
-                "Skipping gateway loopback on local topic %s",
+                "Skipping gateway loopback on local topic %s (direction=%s)",
                 source_topic,
+                direction,
             )
             return
-        transformed = self._prepare_outbound(envelope, source_topic)
-        wire_topic = prefix_topic(
-            self._config.tenant_identity.tenant_slug,
-            source_topic,
-        )
+        transformed, wire_topic = self._prepare_outbound(envelope, source_topic)
         await self._publish_with_delivery_retry(
             bus=self._cloud_bus,
             topic=wire_topic,
@@ -95,7 +141,8 @@ class ServiceGatewayForwarder:
         """Validate an outbound trust-boundary message without publishing it."""
         source_topic = self._message_topic(message)
         envelope = self._decode_message(message)
-        if envelope.metadata.tags.get("gateway_direction") != "cloud-to-local":
+        direction = envelope.metadata.tags.get("gateway_direction")
+        if direction not in _LOCAL_ONLY_DIRECTIONS:
             self._prepare_outbound(envelope, source_topic)
 
     async def _consume_inbound_message(self, message: object) -> None:
@@ -135,16 +182,25 @@ class ServiceGatewayForwarder:
         """Decode the canonical envelope used as the durable dedupe key source."""
         return cls._decode_message(message)
 
-    async def publish_heartbeat(self) -> None:
-        """Publish one tenant-scoped liveness event onto the cloud wire topic."""
+    def _build_status_envelope(
+        self,
+        status: Literal["active", "degraded"],
+        *,
+        consecutive_failures: int = 0,
+        detail: str = "",
+    ) -> tuple[ModelEventEnvelope[dict[str, object]], str]:
+        """Build the heartbeat/status envelope plus its canonical topic."""
         identity = self._config.tenant_identity
         now = datetime.now(UTC)
         envelope_id = uuid4()
         heartbeat = ModelGatewayHeartbeat(
             tenant_id=identity.tenant_slug,
             principal_id=identity.principal_id,
+            status=status,
             emitted_at=now,
             local_transport_flavor=self._config.local_transport_flavor,
+            consecutive_failures=consecutive_failures,
+            detail=detail,
         )
         envelope = ModelEventEnvelope[dict[str, object]](
             envelope_id=envelope_id,
@@ -165,12 +221,51 @@ class ServiceGatewayForwarder:
             for topic in self._config.mirror_topics.outbound
             if topic.endswith(".gateway-heartbeat.v1")
         )
-        transformed = self._prepare_outbound(envelope, canonical_topic)
+        return envelope, canonical_topic
+
+    async def publish_heartbeat(self) -> None:
+        """Publish one tenant-scoped liveness event onto the cloud wire topic."""
+        identity = self._config.tenant_identity
+        envelope, canonical_topic = self._build_status_envelope("active")
+        # OMN-15740: _prepare_outbound returns (transformed_envelope, wire_topic) --
+        # the transform-seam handler delegation G0 wired in, not the pre-G0 single
+        # return this call site used to unpack. Keep G0's tuple return; G2 only
+        # adds the reconnect-supervision status publish below.
+        transformed, wire_topic = self._prepare_outbound(envelope, canonical_topic)
         await self._publish_with_delivery_retry(
             bus=self._cloud_bus,
-            topic=prefix_topic(identity.tenant_slug, canonical_topic),
+            topic=wire_topic,
             key=str(identity.tenant_id).encode("utf-8"),
             value=self._encode_envelope(transformed),
+        )
+
+    async def publish_status(
+        self,
+        status: Literal["active", "degraded"],
+        *,
+        consecutive_failures: int = 0,
+        detail: str = "",
+    ) -> None:
+        """Publish a reconnect-supervision status event onto the LOCAL bus.
+
+        Unlike ``publish_heartbeat`` (which crosses the cloud wire),
+        reconnect-supervision status -- most importantly a ``DEGRADED``
+        transition -- must stay observable while the cloud leg that caused
+        it is itself unreachable, so this publishes on the local bus using
+        the same heartbeat topic instead of the cloud leg.
+        """
+        identity = self._config.tenant_identity
+        envelope, canonical_topic = self._build_status_envelope(
+            status,
+            consecutive_failures=consecutive_failures,
+            detail=detail,
+        )
+        local_only = _stamp_local_only(envelope)
+        await self._publish_with_delivery_retry(
+            bus=self._local_bus,
+            topic=canonical_topic,
+            key=str(identity.tenant_id).encode("utf-8"),
+            value=self._encode_envelope(local_only),
         )
 
     async def _publish_with_delivery_retry(
@@ -244,7 +339,14 @@ class ServiceGatewayForwarder:
         envelope: ModelEventEnvelope[dict[str, object]],
         wire_topic: str,
     ) -> tuple[ModelEventEnvelope[dict[str, object]], str]:
-        """Validate a cloud command and stamp its config-bound local tenant."""
+        """Validate a cloud command and stamp its config-bound local tenant.
+
+        Trust-boundary validation (topic declared, tags match the config-bound
+        identity) stays here against the untrusted bus input. The prefix-strip
+        transform and payload stamp themselves are delegated to the
+        contract-declared ``HandlerConsumeInbound`` COMPUTE handler (OMN-15740)
+        so there is exactly one implementation of that transform.
+        """
         identity = self._config.tenant_identity
         canonical_topic = strip_topic_prefix(identity.tenant_slug, wire_topic)
         if canonical_topic not in self._config.mirror_topics.inbound:
@@ -256,10 +358,21 @@ class ServiceGatewayForwarder:
         if tags.get("source_tenant_principal_id") != str(identity.principal_id):
             raise ValueError("envelope principal_id does not match attached tenant")
 
-        payload = stamp_verified_tenant_slug(
-            envelope.payload,
-            identity.tenant_slug,
+        gateway_envelope = ModelGatewayEnvelope(
+            tenant_id=identity.tenant_id,
+            tenant_slug=identity.tenant_slug,
+            envelope_id=envelope.envelope_id,
+            correlation_id=envelope.correlation_id,
+            event_type=envelope.event_type,
+            source_topic=wire_topic,
+            wire_topic=wire_topic,
+            canonical_topic=canonical_topic,
+            payload=envelope.payload,
         )
+        transformed_gateway = self._consume_inbound_handler.consume_inbound(
+            gateway_envelope
+        )
+
         metadata = envelope.metadata.model_copy(
             update={
                 "tags": {
@@ -274,15 +387,20 @@ class ServiceGatewayForwarder:
             }
         )
         return envelope.model_copy(
-            update={"payload": payload, "metadata": metadata}
+            update={"payload": transformed_gateway.payload, "metadata": metadata}
         ), canonical_topic
 
     def _prepare_outbound(
         self,
         envelope: ModelEventEnvelope[dict[str, object]],
         canonical_topic: str,
-    ) -> ModelEventEnvelope[dict[str, object]]:
-        """Validate a local event and bind it to the attached tenant."""
+    ) -> tuple[ModelEventEnvelope[dict[str, object]], str]:
+        """Validate a local event and bind it to the attached tenant.
+
+        Trust-boundary validation stays here; the wire-topic prefix transform
+        is delegated to the contract-declared ``HandlerForwardOutbound``
+        COMPUTE handler (OMN-15740).
+        """
         identity = self._config.tenant_identity
         if canonical_topic not in self._config.mirror_topics.outbound:
             raise ValueError("canonical_topic is not declared for outbound mirroring")
@@ -309,7 +427,22 @@ class ServiceGatewayForwarder:
                 "outbound envelope principal_id does not match attached tenant"
             )
 
-        wire_topic = prefix_topic(identity.tenant_slug, canonical_topic)
+        gateway_envelope = ModelGatewayEnvelope(
+            tenant_id=identity.tenant_id,
+            tenant_slug=identity.tenant_slug,
+            envelope_id=envelope.envelope_id,
+            correlation_id=envelope.correlation_id,
+            event_type=envelope.event_type,
+            source_topic=canonical_topic,
+            wire_topic=canonical_topic,
+            canonical_topic=canonical_topic,
+            payload=envelope.payload,
+        )
+        transformed_gateway = self._forward_outbound_handler.forward_outbound(
+            gateway_envelope
+        )
+        wire_topic = transformed_gateway.wire_topic
+
         metadata = envelope.metadata.model_copy(
             update={
                 "tags": {
@@ -323,4 +456,4 @@ class ServiceGatewayForwarder:
                 }
             }
         )
-        return envelope.model_copy(update={"metadata": metadata})
+        return envelope.model_copy(update={"metadata": metadata}), wire_topic

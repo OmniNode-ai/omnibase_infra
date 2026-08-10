@@ -25,6 +25,7 @@ _SHA256 = re.compile(r"^[0-9a-f]{64}$")
 _TICKET = re.compile(r"^OMN-[0-9]+$")
 _NODE_NAME = re.compile(r"^[A-Za-z0-9_][A-Za-z0-9_.-]*$")
 _CLOUD_NAME = re.compile(r"^[A-Za-z0-9_.-]+$")
+_LEGACY_SOURCE_CHECKSUM = re.compile(r"^[A-Za-z0-9_.:-]+$")
 _ALLOWED_DOMAINS = frozenset({"tenant", "omninode_internal"})
 
 
@@ -52,6 +53,16 @@ class BlockedMigration:
 
 
 @dataclass(frozen=True, slots=True)
+class LegacyNodeMigrationDeclaration:
+    migration_stream: str
+    owner: str
+    domain: str
+    version: str
+    source_checksum: str
+    ticket: str
+
+
+@dataclass(frozen=True, slots=True)
 class CloudAlias:
     migration_name: str
     runner_version: str
@@ -61,6 +72,7 @@ class CloudAlias:
 class ValidationResult:
     declarations: tuple[MigrationDeclaration, ...]
     blocked: tuple[BlockedMigration, ...]
+    legacy_node_declarations: tuple[LegacyNodeMigrationDeclaration, ...]
     cloud_aliases: tuple[CloudAlias, ...]
 
 
@@ -102,10 +114,23 @@ def _content_sha256(path: Path) -> str:
     return hashlib.sha256(path.read_bytes()).hexdigest()
 
 
+def _node_identity_from_version(version: str) -> tuple[str, str, str]:
+    parts = version.split(":")
+    if len(parts) != 3 or parts[0] != "node" or not parts[2].endswith(".sql"):
+        raise ManifestError(f"invalid historical node migration version: {version!r}")
+    _, node_name, filename = parts
+    if _NODE_NAME.fullmatch(node_name) is None:
+        raise ManifestError(f"invalid node name in historical version: {version!r}")
+    if _NODE_NAME.fullmatch(filename.removesuffix(".sql")) is None:
+        raise ManifestError(f"invalid filename in historical version: {version!r}")
+    return f"node:{node_name}", node_name, filename
+
+
 def validate_manifests(
     migrations_dir: Path,
     declaration_path: Path,
     blocked_path: Path,
+    legacy_node_declaration_path: Path,
     cloud_alias_path: Path,
     *,
     require_complete: bool = False,
@@ -114,6 +139,7 @@ def validate_manifests(
 
     declarations: list[MigrationDeclaration] = []
     blocked: list[BlockedMigration] = []
+    legacy_node_declarations: list[LegacyNodeMigrationDeclaration] = []
     aliases: list[CloudAlias] = []
 
     for line_number, fields in _read_tsv(declaration_path, 6):
@@ -180,6 +206,46 @@ def validate_manifests(
             )
         blocked.append(item)
 
+    for line_number, fields in _read_tsv(
+        legacy_node_declaration_path, 6, allow_empty=True
+    ):
+        legacy_item = LegacyNodeMigrationDeclaration(*fields)
+        expected_stream, node_name, filename = _node_identity_from_version(
+            legacy_item.version
+        )
+        if legacy_item.migration_stream != expected_stream:
+            raise ManifestError(
+                f"{legacy_node_declaration_path}:{line_number}: unknown migration "
+                f"stream {legacy_item.migration_stream!r}; expected {expected_stream!r}"
+            )
+        if legacy_item.owner != expected_stream:
+            raise ManifestError(
+                f"{legacy_node_declaration_path}:{line_number}: owner must equal "
+                "the node stream"
+            )
+        if legacy_item.domain not in _ALLOWED_DOMAINS:
+            raise ManifestError(
+                f"{legacy_node_declaration_path}:{line_number}: unknown domain "
+                f"{legacy_item.domain!r}"
+            )
+        if _LEGACY_SOURCE_CHECKSUM.fullmatch(legacy_item.source_checksum) is None:
+            raise ManifestError(
+                f"{legacy_node_declaration_path}:{line_number}: malformed legacy "
+                "source checksum"
+            )
+        if _TICKET.fullmatch(legacy_item.ticket) is None:
+            raise ManifestError(
+                f"{legacy_node_declaration_path}:{line_number}: invalid blocker "
+                f"ticket {legacy_item.ticket!r}"
+            )
+        artifact = migrations_dir / "nodes" / node_name / filename
+        if artifact.exists():
+            raise ManifestError(
+                f"{legacy_node_declaration_path}:{line_number}: legacy declaration "
+                f"has vendored artifact: {artifact.relative_to(migrations_dir)}"
+            )
+        legacy_node_declarations.append(legacy_item)
+
     for line_number, fields in _read_tsv(cloud_alias_path, 2):
         alias = CloudAlias(*fields)
         if (
@@ -194,11 +260,13 @@ def validate_manifests(
 
     declared_paths = [item.artifact_path for item in declarations]
     blocked_paths = [item.artifact_path for item in blocked]
+    legacy_versions = [item.version for item in legacy_node_declarations]
     declared_identities = [
         (item.migration_stream, item.domain, item.version) for item in declarations
     ]
     _reject_duplicates(declared_paths, "double migration declaration")
     _reject_duplicates(blocked_paths, "duplicate blocked migration")
+    _reject_duplicates(legacy_versions, "duplicate historical node migration")
     _reject_duplicates(declared_identities, "duplicate migration version")
     _reject_duplicates(
         [item.migration_name for item in aliases], "duplicate cloud migration alias"
@@ -211,6 +279,14 @@ def validate_manifests(
     if overlap:
         raise ManifestError(
             f"double migration declaration across active/blocked sets: {overlap!r}"
+        )
+    active_versions = {item.version for item in declarations}
+    blocked_versions = {item.version for item in blocked}
+    legacy_overlap = sorted((active_versions | blocked_versions) & set(legacy_versions))
+    if legacy_overlap:
+        raise ManifestError(
+            "historical node migration conflicts with an active or blocked "
+            f"declaration: {legacy_overlap!r}"
         )
 
     filesystem_paths = {
@@ -233,7 +309,12 @@ def validate_manifests(
             f"artifact(s), blockers={blockers!r}"
         )
 
-    return ValidationResult(tuple(declarations), tuple(blocked), tuple(aliases))
+    return ValidationResult(
+        tuple(declarations),
+        tuple(blocked),
+        tuple(legacy_node_declarations),
+        tuple(aliases),
+    )
 
 
 def _reject_duplicates(values: Sequence[Hashable], label: str) -> None:
@@ -264,6 +345,11 @@ def main(argv: list[str] | None = None) -> int:
         default=default_ledger / "application-migration-blocks.tsv",
     )
     parser.add_argument(
+        "--legacy-node-declarations",
+        type=Path,
+        default=default_ledger / "legacy-node-migrations.tsv",
+    )
+    parser.add_argument(
         "--cloud-aliases",
         type=Path,
         default=default_ledger / "cloud-migration-aliases.tsv",
@@ -280,6 +366,7 @@ def main(argv: list[str] | None = None) -> int:
             args.migrations_dir,
             args.declarations,
             args.blocked,
+            args.legacy_node_declarations,
             args.cloud_aliases,
             require_complete=args.require_complete,
         )
@@ -290,6 +377,7 @@ def main(argv: list[str] | None = None) -> int:
     print(
         "PASS: deterministic application migration declarations validated "
         f"({len(result.declarations)} active, {len(result.blocked)} blocked, "
+        f"{len(result.legacy_node_declarations)} historical, "
         f"{len(result.cloud_aliases)} cloud aliases)."
     )
     return 0
