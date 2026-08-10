@@ -1887,7 +1887,16 @@ def test_guard_free_runner_applies_the_unclassified_migration(
 # GUARD_INTRODUCTION_COMMIT is the commit that first shipped the unclassified-
 # FORCE-RLS guard; every grandfathered id must have existed in the tree at its
 # PARENT (i.e. immediately before the guard could ever have fired for it).
-GUARD_INTRODUCTION_COMMIT = "90cd78a5805a5a4d02367a76d05af24034cd6183"
+#
+# OMN-15831: this constant has now rotted to an unreachable commit TWICE
+# (bbac5205 -> 7a957a0a -> 90cd78a5) because each prior pin named a #2666
+# BRANCH commit that squash-merge + branch deletion later orphaned (no ref
+# contains it, `merge-base --is-ancestor` fails). The value below is the
+# #2666 SQUASH MERGE commit itself, which is permanent history on `dev` and
+# cannot be orphaned by branch cleanup the way a branch-tip commit can.
+# `test_guard_introduction_commit_is_reachable` (below) makes this a fail-
+# closed, self-diagnosing assertion instead of a silent future recurrence.
+GUARD_INTRODUCTION_COMMIT = "3bc7fcaf2e0858b04dda5f3fd3e695a7df88b754"
 
 
 def _sql_declares_unclassified_force_rls(sql_text: str) -> bool:
@@ -1978,6 +1987,40 @@ def test_grandfathered_ids_actually_declare_force_rls() -> None:
             f"{grandfathered} is grandfathered but its SQL does not declare "
             "FORCE ROW LEVEL SECURITY — remove it from the snapshot"
         )
+
+
+def test_guard_introduction_commit_is_reachable() -> None:
+    """OMN-15831: fail closed with a DIAGNOSIS, not a mystery, the moment
+    GUARD_INTRODUCTION_COMMIT next rots.
+
+    This pin has already gone unreachable twice (bbac5205 -> 7a957a0a ->
+    90cd78a5) because each prior value named a PR-branch commit that a later
+    squash-merge + branch deletion orphaned — `git show <pin>~1:<path>` then
+    fails on any fresh checkout with no stale local objects, and the bare
+    `returncode == 0` assert in test_grandfathered_ids_predate_the_guard_commit
+    gave no hint why. This test runs first (alphabetically before
+    ...predate...) and asserts the pin is an ancestor of HEAD before anything
+    downstream tries to dereference it.
+    """
+    result = subprocess.run(
+        ["git", "merge-base", "--is-ancestor", GUARD_INTRODUCTION_COMMIT, "HEAD"],
+        cwd=REPO_ROOT,
+        capture_output=True,
+        text=True,
+        check=False,
+    )
+    assert result.returncode == 0, (
+        f"GUARD_INTRODUCTION_COMMIT ({GUARD_INTRODUCTION_COMMIT}) is not an "
+        "ancestor of HEAD — this is the squash-orphaning failure mode "
+        "documented at OMN-15831 (third occurrence in the OMN-15336 lane: "
+        "the pin named a PR-branch commit that was squash-merged and "
+        "then had its branch deleted, so the commit object is unreachable "
+        "from any ref. Repoint GUARD_INTRODUCTION_COMMIT to the SQUASH MERGE "
+        "commit SHA for the PR that introduced the guard (verify with "
+        "`git merge-base --is-ancestor <candidate> origin/dev`), not a "
+        "branch-tip commit that will be deleted after merge.\n"
+        f"stderr: {result.stderr}"
+    )
 
 
 def test_grandfathered_ids_predate_the_guard_commit() -> None:
