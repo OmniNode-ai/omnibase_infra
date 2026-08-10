@@ -414,30 +414,67 @@ def _extract_raw_topics_from_contract(
     # onex.snapshot.projection.* topics are declared under `projection_api`,
     # not under `event_bus.*` or the consumed/published/produced_events
     # sections above — the only topic family with its own top-level contract
-    # key. Scoped to `bus_backed: true` exposures only: that is exactly the
-    # set omnimarket's SnapshotCache blocks projection-api startup on
-    # (snapshot_cache.py's _wait_topics reads cfg.bus_backed the same way),
-    # so provisioning tracks the genuinely required set instead of eagerly
-    # creating topics for exposures nothing publishes to yet.
-    projection_api = data.get("projection_api")
-    if isinstance(projection_api, dict):
-        for proj_item in _iter_projection_api_exposures(projection_api):
-            if proj_item.get("bus_backed") is not True:
-                continue
-            topic_val = proj_item.get("topic")
-            if isinstance(topic_val, str) and topic_val:
-                partitions, rf, kc = _parse_topic_config(proj_item, source)
-                raw_topics.append(
-                    RawTopicDecl(
-                        topic=topic_val,
-                        provisioning_priority=_topic_priority(proj_item),
-                        partitions=partitions,
-                        replication_factor=rf,
-                        kafka_config=kc,
-                    )
+    # key. Scoped to `expose: true` AND `bus_backed: true` exposures only:
+    #
+    # - `expose` is a SECTION-LEVEL gate (declared once under `projection_api`,
+    #   never repeated per-exposure — see node_projection_delegation's
+    #   contract.yaml for the exposures-list shape). It must be checked BEFORE
+    #   iterating exposures, matching
+    #   omnimarket.projection.discovery.build_projection_topic_map's own gate
+    #   (`if not section.get("expose", False): continue`, checked before any
+    #   bus_backed logic). Without this check, an `expose: false` +
+    #   `bus_backed: true` contract would be provisioned here while
+    #   build_projection_topic_map never serves it — a topic created but never
+    #   read.
+    # - `bus_backed: true` is exactly the per-exposure set omnimarket's
+    #   SnapshotCache blocks projection-api startup on (snapshot_cache.py's
+    #   _wait_topics reads cfg.bus_backed the same way), so provisioning
+    #   tracks the genuinely required set instead of eagerly creating topics
+    #   for exposures nothing publishes to yet.
+    for proj_item in _projection_api_served_exposures(data.get("projection_api")):
+        topic_val = proj_item.get("topic")
+        if isinstance(topic_val, str) and topic_val:
+            partitions, rf, kc = _parse_topic_config(proj_item, source)
+            raw_topics.append(
+                RawTopicDecl(
+                    topic=topic_val,
+                    provisioning_priority=_topic_priority(proj_item),
+                    partitions=partitions,
+                    replication_factor=rf,
+                    kafka_config=kc,
                 )
+            )
 
     return raw_topics
+
+
+def _projection_api_served_exposures(
+    projection_api: object,
+) -> list[dict[object, object]]:
+    """Return the ``projection_api`` exposure dicts that are actually served.
+
+    Single source of parsing truth for "is this projection_api exposure
+    genuinely reachable" — reused by both the contract.yaml scan above and
+    ``handler_wiring._contract_provision_topics`` (OMN-15832 Phase B
+    provisioning) via :func:`read_projection_api_topics`, so the boot-time
+    provision set and the extractor's static scan can never diverge.
+
+    An exposure is served iff:
+    - the section itself declares ``expose: true`` (section-level gate,
+      never per-exposure — mirrors
+      ``omnimarket.projection.discovery.build_projection_topic_map``), AND
+    - the individual exposure declares ``bus_backed: true`` (the predicate
+      omnimarket's ``SnapshotCache`` gates startup on).
+    """
+    if not isinstance(projection_api, dict):
+        return []
+    if projection_api.get("expose") is not True:
+        return []
+    return [
+        item
+        for item in _iter_projection_api_exposures(projection_api)
+        if item.get("bus_backed") is True
+    ]
 
 
 def _iter_projection_api_exposures(
@@ -626,6 +663,41 @@ def _discover_installed_topic_packages() -> tuple[str, ...]:
 # ---------------------------------------------------------------------------
 # Public API
 # ---------------------------------------------------------------------------
+
+
+def read_projection_api_topics(contract_path: Path) -> tuple[str, ...]:
+    """Read one contract.yaml's served ``projection_api`` topics (OMN-15832).
+
+    Single source of parsing truth for a contract's ``projection_api`` topics
+    — used by :meth:`ContractTopicExtractor.extract` (global scan, via
+    :func:`_projection_api_served_exposures`) AND by
+    ``handler_wiring._contract_provision_topics`` (per-contract Phase B boot
+    provisioning), so the two call sites can never disagree about which
+    ``projection_api`` topics are provisioned.
+
+    Returns the raw topic strings (unvalidated — callers that need
+    :class:`ModelContractTopicEntry` validation should go through
+    :meth:`ContractTopicExtractor.extract`) for exposures where the section
+    declares ``expose: true`` AND the individual exposure declares
+    ``bus_backed: true``. Returns ``()`` if the file cannot be read, is not a
+    mapping, or has no served exposures — mirrors the degrade-not-abort
+    contract of ``_read_dlq_topics``.
+    """
+    try:
+        with contract_path.open(encoding="utf-8") as fh:
+            raw_yaml = yaml.safe_load(fh)
+    except Exception:  # noqa: BLE001 — boundary: degrade to no topics, never raise
+        return ()
+
+    if not isinstance(raw_yaml, dict):
+        return ()
+
+    topics: list[str] = []
+    for item in _projection_api_served_exposures(raw_yaml.get("projection_api")):
+        topic_val = item.get("topic")
+        if isinstance(topic_val, str) and topic_val:
+            topics.append(topic_val)
+    return tuple(dict.fromkeys(topics))
 
 
 class ContractTopicExtractor:

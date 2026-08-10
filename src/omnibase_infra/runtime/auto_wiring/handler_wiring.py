@@ -152,6 +152,7 @@ from omnibase_infra.runtime.state_io.state_store_adapter import (
     StateStoreAdapter,
 )
 from omnibase_infra.shared.tenant_stamp import stamp_verified_tenant_slug
+from omnibase_infra.tools.contract_topic_extractor import read_projection_api_topics
 from omnibase_infra.topology.physical_schema_mapping import (
     physical_grant_schema_for_table,
 )
@@ -6234,11 +6235,13 @@ async def wire_from_manifest(
 
 
 def _contract_provision_topics(contract: ModelDiscoveredContract) -> tuple[str, ...]:
-    """Return the topic set this contract owns at boot (OMN-13237 §3.6, OMN-15330).
+    """Return the topic set this contract owns at boot (OMN-13237 §3.6, OMN-15330,
+    OMN-15832).
 
     Subscribe topics (the consumers that attach) UNION the contract's owned
-    publish topics UNION its declared ``event_bus.dlq_topics``. Names come from
-    the contract's own declarations only — never a Python literal.
+    publish topics UNION its declared ``event_bus.dlq_topics`` UNION its served
+    ``projection_api`` topics. Names come from the contract's own declarations
+    only — never a Python literal.
 
     OMN-15330 — DLQ topics used to be excluded here and left to the best-effort
     universe warm. That delegation broke the moment the warm was switched off:
@@ -6259,6 +6262,20 @@ def _contract_provision_topics(contract: ModelDiscoveredContract) -> tuple[str, 
     dead-letter sink is not ready guarantees silent loss on the first malformed
     event, so this fails closed (a NOT_READY contract is retried by the
     OMN-15215 reconciliation loop).
+
+    OMN-15832 — the same universe-warm-off gap applies to ``projection_api``
+    (``onex.snapshot.*``) topics: nothing else creates them at boot, and the
+    contract's ``event_bus`` union above never scanned that section at all.
+    ``read_projection_api_topics`` (``omnibase_infra.tools.contract_topic_extractor``)
+    is the SAME parser ``ContractTopicExtractor.extract``'s global scan uses —
+    one source of parsing truth, scoped to ``expose: true`` AND
+    ``bus_backed: true`` exposures, so the boot provision set can never diverge
+    from what ``omnimarket.projection.discovery.build_projection_topic_map``
+    will actually serve. Explicitly NOT a fix to re-enable
+    ``ONEX_BOOT_UNIVERSE_PROVISION`` or to have the consumer
+    (``SnapshotCache``) self-provision its own topics — both remain out of
+    scope by standing decision; this stays a governed, boot-side, per-contract
+    addition to the same confirm path DLQ topics already use.
     """
     if contract.event_bus is None:
         return ()
@@ -6283,6 +6300,16 @@ def _contract_provision_topics(contract: ModelDiscoveredContract) -> tuple[str, 
                 contract.contract_path,
                 exc_info=True,
             )
+    try:
+        ordered.extend(read_projection_api_topics(contract.contract_path))
+    except Exception:  # noqa: BLE001 — per-contract boot boundary, see DLQ comment above
+        logger.warning(
+            "Could not read projection_api topics for contract '%s' from %s — "
+            "its snapshot topics will NOT be provisioned at boot (OMN-15832)",
+            contract.name,
+            contract.contract_path,
+            exc_info=True,
+        )
     return tuple(dict.fromkeys(t for t in ordered if t and t.strip()))
 
 
