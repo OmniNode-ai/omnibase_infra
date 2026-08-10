@@ -347,6 +347,138 @@ def test_extract_all_projection_dlq_topics_provisioned(tmp_path: Path) -> None:
 
 
 # ---------------------------------------------------------------------------
+# projection_api.topic / projection_api.exposures[].topic (OMN-15832)
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.unit
+def test_extract_projection_api_singular_topic_bus_backed(tmp_path: Path) -> None:
+    """A legacy-singular ``projection_api.topic`` with ``bus_backed: true``
+    reaches the provisioner create-set.
+
+    RED before the OMN-15832 fix: ``projection_api`` was not a scanned
+    section at all, so this topic was never extracted regardless of its kind.
+    node_projection_registration/contract.yaml (origin/dev) is this exact
+    shape.
+    """
+    write_contract(
+        tmp_path,
+        "node_projection_registration",
+        """
+        event_bus:
+          subscribe_topics:
+            - "onex.evt.platform.node-heartbeat.v1"
+        projection_api:
+          expose: true
+          topic: "onex.snapshot.projection.registration.v1"
+          table: "node_service_registry"
+          bus_backed: true
+          key_columns:
+            - "service_name"
+        """,
+    )
+    extractor = ContractTopicExtractor()
+    results = extractor.extract(tmp_path)
+
+    topics = {e.topic for e in results}
+    assert "onex.snapshot.projection.registration.v1" in topics
+
+    entry = next(
+        e for e in results if e.topic == "onex.snapshot.projection.registration.v1"
+    )
+    assert entry.kind == "snapshot"
+    assert entry.producer == "projection"
+    assert entry.event_name == "registration"
+    assert entry.version == "v1"
+
+
+@pytest.mark.unit
+def test_extract_projection_api_exposures_list_filters_bus_backed(
+    tmp_path: Path,
+) -> None:
+    """Of an ``exposures`` list, only ``bus_backed: true`` entries are
+    extracted — a ``bus_backed: false`` (or absent) exposure is not yet
+    published to and must not be provisioned ahead of any producer.
+
+    node_projection_savings/contract.yaml (origin/dev) is this exact shape:
+    one bus_backed:true-eligible exposure plus several bus_backed:false ones
+    (the latter using a real multi-segment producer.event-name topic that
+    ``_parse_topic``'s 5-segment rule would reject anyway — proving the
+    filter, not the parser, is what excludes it here).
+    """
+    write_contract(
+        tmp_path,
+        "node_projection_savings",
+        """
+        projection_api:
+          expose: true
+          exposures:
+            - topic: "onex.snapshot.projection.savings.v1"
+              table: savings_estimates
+              bus_backed: true
+              key_columns:
+                - id
+            - topic: "onex.snapshot.projection.cost.savings-overview.v1"
+              table: projection_cost_savings_overview
+              bus_backed: false
+        """,
+    )
+    extractor = ContractTopicExtractor()
+    topics = {e.topic for e in extractor.extract(tmp_path)}
+
+    assert "onex.snapshot.projection.savings.v1" in topics
+    assert "onex.snapshot.projection.cost.savings-overview.v1" not in topics
+
+
+@pytest.mark.unit
+def test_extract_projection_api_exposure_missing_bus_backed_is_excluded(
+    tmp_path: Path,
+) -> None:
+    """An exposure with no ``bus_backed`` key at all (not even ``false``) is
+    excluded — the filter is ``is not True``, never a falsy/truthy check."""
+    write_contract(
+        tmp_path,
+        "node_projection_example",
+        """
+        projection_api:
+          expose: true
+          topic: "onex.snapshot.projection.example.v1"
+          table: example_table
+        """,
+    )
+    extractor = ContractTopicExtractor()
+    topics = {e.topic for e in extractor.extract(tmp_path)}
+
+    assert topics == set()
+
+
+@pytest.mark.unit
+def test_snapshot_kind_accepted_as_valid(
+    tmp_path: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    """``snapshot`` is a valid kind token, matching
+    omnibase_core.constants.constants_topic_taxonomy.get_valid_topic_suffix_kinds()
+    — a bus_backed snapshot topic is never rejected as an "invalid kind"."""
+    write_contract(
+        tmp_path,
+        "node_projection_registration",
+        """
+        projection_api:
+          expose: true
+          topic: "onex.snapshot.projection.registration.v1"
+          bus_backed: true
+        """,
+    )
+    extractor = ContractTopicExtractor()
+    results = extractor.extract(tmp_path)
+
+    captured = capsys.readouterr()
+    assert "invalid kind" not in captured.err
+    assert len(results) == 1
+    assert results[0].kind == "snapshot"
+
+
+# ---------------------------------------------------------------------------
 # No early break — all sections are always checked
 # ---------------------------------------------------------------------------
 

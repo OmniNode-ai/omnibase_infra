@@ -43,7 +43,16 @@ logger = logging.getLogger(__name__)
 # Constants
 # ---------------------------------------------------------------------------
 
-_VALID_KINDS: frozenset[str] = frozenset({"evt", "cmd", "intent", "dlq"})
+# OMN-15832: "snapshot" is a first-class kind, not a local addition — it
+# mirrors omnibase_core.constants.constants_topic_taxonomy's canonical
+# token-to-type mapping (get_valid_topic_suffix_kinds() already returns
+# {"cmd", "dlq", "evt", "intent", "snapshot"}). This extractor's set had
+# drifted behind that source of truth: every onex.snapshot.projection.*
+# topic (declared under a contract's projection_api section, see
+# _extract_raw_topics_from_contract below) was silently rejected here as an
+# "invalid kind", which is why those topics were never in the provisioner's
+# create-set despite auto-create being off on managed MSK.
+_VALID_KINDS: frozenset[str] = frozenset({"evt", "cmd", "intent", "dlq", "snapshot"})
 _VALID_DLQ_CATEGORIES: frozenset[str] = frozenset({"intents", "events", "commands"})
 _RE_VERSION = re.compile(r"^v\d+$")
 _RE_EVENT_NAME = re.compile(r"^[a-z0-9._-]+$")
@@ -97,7 +106,7 @@ class ModelContractTopicEntry(BaseModel):
     """
 
     topic: str
-    kind: Literal["evt", "cmd", "intent", "dlq"]
+    kind: Literal["evt", "cmd", "intent", "dlq", "snapshot"]
     producer: str
     event_name: str
     version: str  # e.g. "v1"
@@ -251,7 +260,7 @@ def _parse_topic(raw: str, source: Path) -> ModelContractTopicEntry | None:
 
     return ModelContractTopicEntry(
         topic=raw,
-        kind=cast("Literal['evt', 'cmd', 'intent', 'dlq']", kind),
+        kind=cast("Literal['evt', 'cmd', 'intent', 'dlq', 'snapshot']", kind),
         producer=producer,
         event_name=event_name,
         version=version,
@@ -401,7 +410,55 @@ def _extract_raw_topics_from_contract(
                     )
                 )
 
+    # --- projection_api.topic / projection_api.exposures[].topic (OMN-15832) ---
+    # onex.snapshot.projection.* topics are declared under `projection_api`,
+    # not under `event_bus.*` or the consumed/published/produced_events
+    # sections above — the only topic family with its own top-level contract
+    # key. Scoped to `bus_backed: true` exposures only: that is exactly the
+    # set omnimarket's SnapshotCache blocks projection-api startup on
+    # (snapshot_cache.py's _wait_topics reads cfg.bus_backed the same way),
+    # so provisioning tracks the genuinely required set instead of eagerly
+    # creating topics for exposures nothing publishes to yet.
+    projection_api = data.get("projection_api")
+    if isinstance(projection_api, dict):
+        for proj_item in _iter_projection_api_exposures(projection_api):
+            if proj_item.get("bus_backed") is not True:
+                continue
+            topic_val = proj_item.get("topic")
+            if isinstance(topic_val, str) and topic_val:
+                partitions, rf, kc = _parse_topic_config(proj_item, source)
+                raw_topics.append(
+                    RawTopicDecl(
+                        topic=topic_val,
+                        provisioning_priority=_topic_priority(proj_item),
+                        partitions=partitions,
+                        replication_factor=rf,
+                        kafka_config=kc,
+                    )
+                )
+
     return raw_topics
+
+
+def _iter_projection_api_exposures(
+    section: dict[object, object],
+) -> list[dict[object, object]]:
+    """Yield each exposure dict under a contract's ``projection_api`` section.
+
+    Mirrors omnimarket.projection.discovery._parse_projection_api_sections's
+    legacy-singular vs. exposures-list duality: a contract declaring a single
+    ``projection_api.topic`` key (no ``exposures`` list) is one implicit
+    exposure; a contract declaring ``projection_api.exposures: [...]`` has one
+    exposure per list entry. A non-list, non-dict, or empty ``exposures``
+    value yields nothing rather than falling back to the legacy shape — the
+    same ambiguity omnimarket's own parser treats as contract-invalid.
+    """
+    exposures = section.get("exposures")
+    if exposures is not None:
+        if isinstance(exposures, list):
+            return [item for item in exposures if isinstance(item, dict)]
+        return []
+    return [section]
 
 
 def _extract_topics_from_python_ast(source_path: Path) -> list[str]:
