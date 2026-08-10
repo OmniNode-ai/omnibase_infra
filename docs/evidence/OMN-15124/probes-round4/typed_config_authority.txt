@@ -1,0 +1,12 @@
+Using CPython 3.12.12
+Creating virtual environment at: .venv
+   Building omnibase-infra @ file:///Users/jonah/Code/omni_home/omni_worktrees/OMN-15124-round4/omnibase_infra
+      Built omnibase-infra @ file:///Users/jonah/Code/omni_home/omni_worktrees/OMN-15124-round4/omnibase_infra
+Installed 195 packages in 458ms
+/Users/jonah/Code/omni_home/omni_worktrees/OMN-15124-round4/omnibase_infra/.venv/lib/python3.12/site-packages/omnibase_core/models/core/model_deployment_topology_database_migration_ledger.py:13: UserWarning: Field name "schema" in "ModelDeploymentTopologyDatabaseMigrationLedger" shadows an attribute in parent "BaseModel"
+  class ModelDeploymentTopologyDatabaseMigrationLedger(BaseModel):
+/Users/jonah/Code/omni_home/omni_worktrees/OMN-15124-round4/omnibase_infra/.venv/lib/python3.12/site-packages/omnibase_core/models/core/model_deployment_topology_database_grant.py:56: UserWarning: Field name "schema" in "ModelDeploymentTopologyDatabaseGrant" shadows an attribute in parent "BaseModel"
+  class ModelDeploymentTopologyDatabaseGrant(BaseModel):
+/Users/jonah/Code/omni_home/omni_worktrees/OMN-15124-round4/omnibase_infra/.venv/lib/python3.12/site-packages/omnibase_core/models/contracts/subcontracts/model_db_table_declaration.py:13: UserWarning: Field name "schema" in "ModelDbTableDeclaration" shadows an attribute in parent "BaseModel"
+  class ModelDbTableDeclaration(BaseModel):
+omnibase_infra.event_bus.kafka_auth
