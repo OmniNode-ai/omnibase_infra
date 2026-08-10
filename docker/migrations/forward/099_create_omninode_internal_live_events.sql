@@ -77,7 +77,136 @@
 --   object has been built against omninode_internal.live_events. Because
 --   public.live_events is untouched, rollback of this migration alone never
 --   loses data: the source of truth remains intact throughout.
+--
+-- WHY THIS FILE ALSO ISSUES THE omninode_runtime GRANT (grant-gap repair,
+-- same PR, projplane-slice-verify)
+--   098 physically created the omninode_internal SCHEMA but deliberately
+--   granted nothing (its own docstring lists "owner_omninode_internal/
+--   omninode_runtime role creation" as explicit deferred P5 work). This file
+--   physically creates the FIRST TABLE in that schema and simultaneously
+--   removes live_events from INTERNAL_TABLES_PHYSICALLY_IN_PUBLIC_UNTIL_OMN15359
+--   -- so, unlike the other ~40 still-bridged families, live_events is live
+--   TODAY: handler_wiring._resolve_projection_database_target already issues
+--   `INSERT INTO omninode_internal.live_events` against the omninode_runtime
+--   binding in production. A migration that creates the table but never
+--   grants the write-path role converts the prior UndefinedTable failure into
+--   InsufficientPrivilege on first deploy -- proven live against a real RDS
+--   snapshot (4 independent checks: the table is owned by a role
+--   omninode_runtime is not; `information_schema.role_table_grants` returns
+--   zero rows for omninode_runtime against this table; omninode_runtime has
+--   no CREATE on omninode_internal; `pg_default_acl` carries no entry for the
+--   schema). The GRANT below is derived from, and must stay byte-for-byte
+--   consistent with, the single declared source of truth:
+--   `src/omnibase_infra/topology/instances/*.yaml` `principals.omninode_runtime
+--   .grants[schema: omninode_internal]` (regenerated into
+--   `docker/catalog/database-topology/*.yaml` by
+--   `scripts/generate_application_database_table_grants.py --write`) --
+--   SELECT, INSERT, UPDATE, no DELETE (a projection writer upserts, it does
+--   not reshape the table -- same invariant 096 states for role_omnidash).
+--   No other principal declares a live_events grant in that topology today,
+--   so no read-side principal needs anything here.
+--
+-- WHY THE ROLE IS ALSO GUARD-CREATED HERE (not just granted)
+--   Unlike 098's deferred table-privilege work, `omninode_runtime` itself has
+--   never been created by ANY migration in this repo (grepped the full
+--   `docker/migrations/forward/*.sql` corpus: zero `CREATE ROLE omninode_runtime`
+--   hits before this file). The standalone "Migration Integration Test" CI
+--   gate applies only `docker/migrations/forward/*.sql` via
+--   `scripts/run-migrations.py` against a bare `postgres:16-alpine` service --
+--   it never runs `000_create_multiple_databases.sh` (that script's own
+--   SERVICE_DB_MAP does not even list `omninode_runtime`; it is a distinct,
+--   newer per-domain principal, not one of the legacy per-microservice
+--   `role_*` names). Without a guarded CREATE here, the GRANT below would
+--   fail closed with `role "omninode_runtime" does not exist` (42704) in
+--   that CI scope on every PR, not just this one. The guard follows the
+--   exact precedent 094 (app_dashboard) and 096 (role_omnidash) already
+--   established in this file set: CREATE only when absent (so a role
+--   provisioned out-of-band on a managed instance is never re-created or
+--   clobbered), NOLOGIN at create time (LOGIN + password attach stays
+--   deployment-owned -- AWS Secrets Manager on the cloud path, lane-local on
+--   compose -- never re-asserted here even though the topology declares
+--   `login: true`), and RAISE EXCEPTION rather than silently skip if the
+--   executing role lacks CREATEROLE and the role is not already there.
+--
+-- WHY ALTER DEFAULT PRIVILEGES IN SCHEMA omninode_internal (decision, not a
+-- given)
+--   098's own docstring names ~40 more OMNINODE_INTERNAL-domain families
+--   still physically bridged to `public`, each of which will need this exact
+--   same GRANT boilerplate the day its own family-cutover migration lands.
+--   Repeating steps 1-4 by hand in each of those ~40 files is exactly the
+--   defect class this repair exists to close -- a future author who copies
+--   099's CREATE TABLE but forgets the GRANT reintroduces the identical
+--   UndefinedTable->InsufficientPrivilege bug this file fixes. `ALTER DEFAULT
+--   PRIVILEGES IN SCHEMA omninode_internal GRANT ... TO omninode_runtime`
+--   makes every future table created BY THE SAME EXECUTING ROLE in this
+--   schema inherit the grant automatically, with no per-migration GRANT
+--   statement required. The scope is correct because it is bounded to the
+--   caveat 096 already documents for `public`: default privileges apply only
+--   to objects the CURRENT (migration-executing) role creates -- exactly the
+--   role every future omninode_internal family-cutover migration will run
+--   as, on every lane (compose: `postgres`; managed: the OMN-15335 migration
+--   principal). If a lane's migrations ever ran as a different principal than
+--   the one that issued this ALTER DEFAULT PRIVILEGES, that principal would
+--   need its own default-privileges assertion -- the same fact 096 already
+--   states for `public` and not a new caveat introduced here.
 -- =============================================================================
+
+-- -----------------------------------------------------------------------------
+-- 1. Role existence (cluster-wide, issued before \connect). Guarded exactly
+--    like 094/096: Postgres checks create-role privilege BEFORE it checks
+--    whether the name is taken, so an unconditional CREATE ROLE would raise
+--    `permission denied to create role` (42501) instead of the
+--    duplicate_object this handler is written for.
+-- -----------------------------------------------------------------------------
+DO $$
+BEGIN
+  IF NOT EXISTS (SELECT 1 FROM pg_roles WHERE rolname = 'omninode_runtime') THEN
+    BEGIN
+      CREATE ROLE omninode_runtime WITH
+        NOLOGIN
+        NOSUPERUSER
+        NOBYPASSRLS
+        NOCREATEDB
+        NOCREATEROLE
+        NOREPLICATION;
+    EXCEPTION
+      WHEN duplicate_object OR unique_violation THEN
+        NULL; -- created concurrently by another migration path
+    END;
+  END IF;
+END;
+$$;
+
+-- -----------------------------------------------------------------------------
+-- 2. Fail loud, name the problem, if the role could not be created and is
+--    still not there -- never silently record this migration against a role
+--    that does not exist.
+-- -----------------------------------------------------------------------------
+DO $$
+BEGIN
+  IF NOT EXISTS (SELECT 1 FROM pg_roles WHERE rolname = 'omninode_runtime') THEN
+    RAISE EXCEPTION
+      'omninode_runtime role does not exist and could not be created -- the '
+      'executing role lacks CREATEROLE. On a managed instance the role is '
+      'provisioned at the provisioning seam; this migration refuses to record '
+      'itself against a role that is not there.';
+  END IF;
+END;
+$$;
+
+-- -----------------------------------------------------------------------------
+-- 3. CONNECT on the target database, issued from the current (omnibase_infra)
+--    context because GRANT ... ON DATABASE is cluster-wide. Guarded on the
+--    database existing so this file stays valid on a cluster that has not
+--    been through 000 -- mirrors 096 step 3 exactly.
+-- -----------------------------------------------------------------------------
+DO $$
+BEGIN
+  IF EXISTS (SELECT 1 FROM pg_database WHERE datname = 'omnidash_analytics') THEN
+    EXECUTE 'GRANT CONNECT ON DATABASE omnidash_analytics TO omninode_runtime';
+  END IF;
+END;
+$$;
 
 \connect omnidash_analytics
 
@@ -95,6 +224,25 @@ CREATE TABLE IF NOT EXISTS omninode_internal.live_events (
   correlation_id TEXT,
   created_at     TIMESTAMPTZ NOT NULL DEFAULT NOW()
 );
+
+-- -----------------------------------------------------------------------------
+-- 4. The actual grant-gap repair. Derived from, and must stay consistent
+--    with, `src/omnibase_infra/topology/instances/*.yaml`
+--    `principals.omninode_runtime.grants[schema: omninode_internal]`.
+--    SELECT/INSERT/UPDATE only -- no DELETE, matching the topology
+--    declaration and 096's projection-writer invariant.
+-- -----------------------------------------------------------------------------
+GRANT USAGE ON SCHEMA omninode_internal TO omninode_runtime;
+GRANT SELECT, INSERT, UPDATE ON omninode_internal.live_events TO omninode_runtime;
+
+-- -----------------------------------------------------------------------------
+-- 5. Forward-looking default privileges for the ~40 remaining
+--    OMNINODE_INTERNAL-domain families still bridged to `public` (098's
+--    deferred-work list). See the file-header rationale above for scope and
+--    the "same executing role" caveat this inherits from 096.
+-- -----------------------------------------------------------------------------
+ALTER DEFAULT PRIVILEGES IN SCHEMA omninode_internal
+  GRANT SELECT, INSERT, UPDATE ON TABLES TO omninode_runtime;
 
 -- Transform-copy + reconciliation, guarded by public.live_events actually
 -- existing. That table is node-owned DDL
@@ -223,3 +371,14 @@ CREATE INDEX IF NOT EXISTS idx_omninode_internal_live_events_correlation_id
 SELECT 1 / count(*) AS omninode_internal_live_events_exists_assertion
   FROM information_schema.tables
  WHERE table_schema = 'omninode_internal' AND table_name = 'live_events';
+
+-- Post-condition on the grant-gap repair itself: the write-path role must
+-- actually carry INSERT on the physical table this migration just created,
+-- or the migration Job succeeded while leaving the runtime write path
+-- broken. Statically provable, same pattern as the assertion above.
+SELECT 1 / count(*) AS omninode_runtime_live_events_insert_grant_assertion
+  FROM information_schema.role_table_grants
+ WHERE table_schema = 'omninode_internal'
+   AND table_name = 'live_events'
+   AND grantee = 'omninode_runtime'
+   AND privilege_type = 'INSERT';

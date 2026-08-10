@@ -24,21 +24,48 @@ adversarial verify, rolling ledger 2026-08-09T18:45Z)
     that relation actually exists, and that the row is durably readable back
     from that exact physical location afterward.
 
+THE SECOND GAP THIS CLOSES (projplane-slice-verify grant-gap, same ledger
+entry, live-verified on a real RDS snapshot 2026-08-10)
+
+    This file's own fixture used to hand-issue the write-path role's grants
+    (``CREATE ROLE ... LOGIN`` + ``GRANT ... ON omninode_internal.live_events``)
+    directly in Python, independent of migration 099. That MASKED a real
+    defect: 099 created the physical table but never granted anything on it,
+    so on live RDS ``omninode_runtime`` carried zero privileges on
+    ``omninode_internal.live_events`` and no CREATE on the schema --
+    deploying 099 as shipped would have converted the original UndefinedTable
+    failure into InsufficientPrivilege on the very first write. The fixture's
+    hand-issued GRANT proved the dispatch/adapter code path while silently
+    supplying the one thing production would not have had.
+
+    099 now issues the grant itself (guarded role creation + GRANT USAGE ON
+    SCHEMA + GRANT SELECT/INSERT/UPDATE ON the table, derived from
+    ``src/omnibase_infra/topology/instances/*.yaml``). The fixture below no
+    longer grants anything -- it applies 098 + 099 exactly as production does
+    and only attaches LOGIN + a password afterward, mirroring the same
+    deployment-owned credential-attach step 094/096 already document for
+    app_dashboard/role_omnidash (a migration never carries LOGIN + password;
+    that stays an operator-gated step, never re-asserted by a migration re-run).
+    If 099 stopped granting privileges, this fixture would surface it as a
+    real ``psycopg2.errors.InsufficientPrivilege`` on first write, not a
+    silently-passing test.
+
 THIS TEST
 
     Drives a real event through the REAL infra dispatch bridge
     (``_make_projection_dispatch_callback`` -> real, unpatched
     ``_build_projection_db_adapter`` -> real ``ProjectionDatabaseOperations``)
     against an ephemeral, real PostgreSQL 16 cluster that has had
-    098 + 099 applied via the same ``psql -f`` path production uses, with a
-    real ``omninode_runtime`` LOGIN role carrying exactly the grants the
-    shipped topology derives (mirroring
-    ``docker/domain-adapter-proof/prove.py``'s real-role-identity pattern).
-    Nothing about the DB adapter is mocked. The handler under test is a
-    minimal stand-in (the real ``HandlerProjectionLiveEvents`` lives in the
-    omnimarket repo and is not importable here) that performs the exact
-    ``_db.upsert("live_events", "event_id", row)`` call the golden path in
-    ``node_projection_live_events/contract.yaml`` documents -- the infra
+    098 + 099 applied via the same ``psql -f`` path production uses, connecting
+    as the REAL ``omninode_runtime`` role 099 itself creates and grants --
+    LOGIN is attached afterward as the one deployment-owned step a migration
+    never performs (mirroring ``docker/domain-adapter-proof/prove.py``'s
+    real-role-identity pattern). Nothing about the DB adapter, the role, or
+    its grants is mocked or hand-issued outside the migration. The handler
+    under test is a minimal stand-in (the real ``HandlerProjectionLiveEvents``
+    lives in the omnimarket repo and is not importable here) that performs the
+    exact ``_db.upsert("live_events", "event_id", row)`` call the golden path
+    in ``node_projection_live_events/contract.yaml`` documents -- the infra
     dispatch/adapter code under test is 100% real either way.
 
     Assertions:
@@ -50,6 +77,11 @@ THIS TEST
          agrees with the resolved write-target schema post-migration (both
          'omninode_internal', with live_events removed from the physical
          bridge in this same PR).
+      3. The EFFECTIVE grant set 099 produced on a fresh cluster (queried from
+         ``information_schema.role_table_grants``, not asserted from memory)
+         equals the set DERIVED from the shipped topology declaration
+         (``application_topology()``'s ``principals.omninode_runtime.grants``
+         entry for this table) -- exactly, neither a subset nor a superset.
 """
 
 from __future__ import annotations
@@ -64,6 +96,9 @@ from unittest.mock import MagicMock
 import psycopg2
 import pytest
 
+from omnibase_core.enums.enum_database_grant_object_type import (
+    EnumDatabaseGrantObjectType,
+)
 from omnibase_core.models.contracts.subcontracts.model_db_table_declaration import (
     ModelDbTableDeclaration,
 )
@@ -106,8 +141,16 @@ def _internal_role_dsn(pg: EphemeralPostgres) -> str:
 
 @pytest.fixture
 def live_events_pg(ephemeral_postgres: EphemeralPostgres) -> EphemeralPostgres:
-    """Ephemeral cluster with 098 + 099 applied and a real omninode_runtime
-    LOGIN role carrying exactly the shipped topology's live_events grant."""
+    """Ephemeral cluster with 098 + 099 applied EXACTLY as production applies
+    them -- no hand-issued role or grant. 099 itself now guard-creates
+    ``omninode_runtime`` (NOLOGIN) and issues every grant this fixture used to
+    supply by hand; the only thing added here is the LOGIN + password attach,
+    which mirrors the same deployment-owned credential step 094/096 already
+    document (a migration never carries LOGIN + password -- that stays an
+    operator-gated attach, on RDS via Secrets Manager, here via a direct
+    ALTER ROLE). If 099 regressed to granting nothing again, the write-path
+    test below would fail with a real InsufficientPrivilege, not silently
+    pass."""
     bootstrap = ephemeral_postgres.connect()
     bootstrap.autocommit = True
     with bootstrap.cursor() as cur:
@@ -146,19 +189,14 @@ def live_events_pg(ephemeral_postgres: EphemeralPostgres) -> EphemeralPostgres:
     _apply(ephemeral_postgres, SCHEMA_MIGRATION)
     _apply(ephemeral_postgres, TABLE_MIGRATION)
 
+    # The ONE deployment-owned step a migration never performs: attaching
+    # LOGIN + a real password to the role 099 already created NOLOGIN. No
+    # privilege statement runs here -- everything omninode_runtime can do
+    # against omninode_internal.live_events was granted by 099 itself.
     admin = psycopg2.connect(_admin_dsn(ephemeral_postgres))
     admin.autocommit = True
     with admin.cursor() as cur:
-        cur.execute(
-            f"CREATE ROLE {INTERNAL_ROLE} LOGIN PASSWORD %s NOSUPERUSER NOBYPASSRLS",
-            (ROLE_PASSWORD,),
-        )
-        cur.execute(f"GRANT CONNECT ON DATABASE {ANALYTICS_DB} TO {INTERNAL_ROLE}")
-        cur.execute(f"GRANT USAGE ON SCHEMA omninode_internal TO {INTERNAL_ROLE}")
-        cur.execute(
-            f"GRANT SELECT, INSERT, UPDATE ON omninode_internal.live_events "
-            f"TO {INTERNAL_ROLE}"
-        )
+        cur.execute(f"ALTER ROLE {INTERNAL_ROLE} LOGIN PASSWORD %s", (ROLE_PASSWORD,))
     admin.close()
     return ephemeral_postgres
 
@@ -280,3 +318,78 @@ def test_grant_derivation_schema_agrees_with_the_insert_target_schema() -> None:
 
     assert grant_check_schema == "omninode_internal"
     assert grant_check_schema == insert_target_schema
+
+
+def _declared_live_events_privileges() -> set[str]:
+    """Derive the expected omninode_runtime privilege set on
+    omninode_internal.live_events from the shipped topology declaration --
+    never hand-typed. Fails loudly (KeyError/StopIteration) if the shipped
+    instance ever drops the grant this migration is supposed to carry,
+    instead of silently asserting an empty/stale set."""
+    database = application_topology().databases["application"]
+    grant = next(
+        g
+        for g in database.principals["omninode_runtime"].grants
+        if g.object_type is EnumDatabaseGrantObjectType.TABLE
+        and g.schema == "omninode_internal"
+        and "live_events" in g.objects
+    )
+    return {privilege.value.upper() for privilege in grant.privileges}
+
+
+def test_099_effective_grants_match_the_shipped_topology_declaration_exactly(
+    live_events_pg: EphemeralPostgres,
+) -> None:
+    """The grant-gap repair itself, proven end to end: what 099 ACTUALLY
+    grants on a fresh cluster (queried from live catalog state, not asserted
+    from memory) must equal -- not merely include -- what the shipped
+    topology declares for omninode_runtime on this table. A superset would
+    hide an over-grant (e.g. a stray DELETE); a subset would reproduce the
+    exact InsufficientPrivilege defect this migration exists to close.
+    """
+    expected = _declared_live_events_privileges()
+    assert expected == {"SELECT", "INSERT", "UPDATE"}, (
+        "topology declaration drifted from what this test assumed; re-derive "
+        "before trusting the comparison below"
+    )
+
+    conn = psycopg2.connect(_admin_dsn(live_events_pg))
+    conn.autocommit = True
+    try:
+        with conn.cursor() as cur:
+            cur.execute(
+                "SELECT privilege_type FROM information_schema.role_table_grants "
+                "WHERE table_schema = %s AND table_name = %s AND grantee = %s",
+                ("omninode_internal", "live_events", INTERNAL_ROLE),
+            )
+            effective = {row[0] for row in cur.fetchall()}
+    finally:
+        conn.close()
+
+    assert effective == expected, (
+        f"099's effective grant on omninode_internal.live_events for "
+        f"{INTERNAL_ROLE} is {effective!r}, the shipped topology declares "
+        f"{expected!r} -- these must match exactly"
+    )
+
+
+def test_099_grants_schema_usage_on_omninode_internal(
+    live_events_pg: EphemeralPostgres,
+) -> None:
+    """USAGE ON SCHEMA is a separate ACL from the TABLE grant above and is not
+    visible in role_table_grants -- without it every table grant is inert
+    (Postgres refuses to even resolve the table name for a role with no
+    schema USAGE). Queried from has_schema_privilege, live catalog state."""
+    conn = psycopg2.connect(_admin_dsn(live_events_pg))
+    conn.autocommit = True
+    try:
+        with conn.cursor() as cur:
+            cur.execute(
+                "SELECT has_schema_privilege(%s, 'omninode_internal', 'USAGE')",
+                (INTERNAL_ROLE,),
+            )
+            (has_usage,) = cur.fetchone()
+    finally:
+        conn.close()
+
+    assert has_usage is True
