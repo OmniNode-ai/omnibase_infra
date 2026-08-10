@@ -44,16 +44,28 @@
 # again, without this script's targeted rerun closing the gap for the CI
 # consumer immediately.
 #
-# WHY THIS SCRIPT STILL EXISTS (revised): the OMN-14564 watchdog is real and
-# does eventually recover the runner, but it is not a fix for the ~600s
-# orphan-timeout false-red a CI consumer sees, and it is far too slow
-# (~53min later) to prevent it. Nothing in the GitHub Actions client/broker
-# protocol path is controllable from this repo, so the false-red itself
-# cannot be prevented locally — the remediation for THAT (fast recovery of
-# the specific orphaned job) lives here via signature-keyed rerun. The
-# remediation for the wedged LISTENER (getting the runner back into service)
-# is the OMN-14564 watchdog in entrypoint.sh, whose detection threshold is
-# addressed separately (see OMN-14564 threshold PR, same ticket family).
+# WHY THIS SCRIPT STILL EXISTS (revised 2026-08-10, omn15776-wedge-verify —
+# rescoped, see below): the OMN-14564 watchdog is real and does eventually
+# recover the runner, but it is not a fix for the ~600s orphan-timeout
+# false-red a CI consumer sees, and it is far too slow (~53min later) to
+# prevent it. Nothing in the GitHub Actions client/broker protocol path is
+# controllable from this repo, so the false-red itself cannot be prevented
+# locally ON THE SILENCE-THRESHOLD SURFACE — i.e. a fix that waits for and
+# measures listener silence duration (OMN-14564's surface) cannot, by
+# construction, resolve faster than a silence-duration threshold allows.
+# That scoping is deliberate: it does NOT claim no local fix of any kind can
+# ever beat the ~600s orphan timeout. A separate, non-threshold local
+# detector — matching the "Acknowledging runner request <id>" /
+# no-"Running job" structural signature directly, instead of inferring the
+# wedge from elapsed silence — could recycle the listener far sooner; that
+# surface is tracked as its own follow-up, OMN-15806, not addressed here.
+# The remediation for the wedged LISTENER via the silence-threshold surface
+# (getting the runner back into service) is the OMN-14564 watchdog in
+# entrypoint.sh, whose detection threshold is addressed separately (see
+# OMN-14564 threshold PR, same ticket family). The remediation for the CI
+# consumer's ~600s orphan false-red (fast recovery of the specific orphaned
+# job, independent of either local watchdog) lives here via signature-keyed
+# rerun.
 #
 # STRUCTURAL SIGNATURE (matched via the Jobs API, never log-text grepping —
 # there is no log content to grep, because no Worker ever ran):
