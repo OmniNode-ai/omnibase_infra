@@ -10,7 +10,7 @@
 # enumeration of every FORCE-ROW-LEVEL-SECURITY-enabling node migration that
 # was ALREADY VENDORED, and had ALREADY BEEN APPLYING UNGATED on every warm
 # lane, at the moment scripts/run-forward-migrations.sh gained the unclassified-
-# FORCE-RLS guard (commit 7a957a0a9b, 2026-08-05). It exists solely so the
+# FORCE-RLS guard (commit 90cd78a580, 2026-08-05). It exists solely so the
 # guard can distinguish "a migration nobody has reviewed yet" (must FATAL)
 # from "a migration that predates the guard and is part of the established
 # baseline" (must keep applying — that is what "established baseline" means).
@@ -33,9 +33,9 @@
 # ENTRY CRITERIA (both required)
 #   1. Enables FORCE ROW LEVEL SECURITY (the exact condition
 #      migration_declares_unclassified_force_rls tests for).
-#   2. Existed in docker/migrations/forward/nodes/ at commit 7a957a0a9b~1 —
+#   2. Existed in docker/migrations/forward/nodes/ at commit 90cd78a580~1 —
 #      i.e. BEFORE the guard first shipped. Verified per-id via
-#      `git show 7a957a0a9b~1:docker/migrations/forward/nodes/<id-path>`.
+#      `git show 90cd78a580~1:docker/migrations/forward/nodes/<id-path>`.
 #
 # THIS LIST DOES NOT GROW.
 # It is a snapshot of one commit's tree, not a rolling allowlist. A NEW

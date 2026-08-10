@@ -599,9 +599,9 @@ def test_manifest_pins_the_known_baseline_fence() -> None:
         found[len(FENCED_DELEGATION_IDS) : registration_end] == FENCED_REGISTRATION_IDS
     ), "the OMN-15335/OMN-15343 registration hold is not the exact expected trio"
     pr_review_bot_end = registration_end + len(FENCED_PR_REVIEW_BOT_IDS)
-    assert (
-        found[registration_end:pr_review_bot_end] == FENCED_PR_REVIEW_BOT_IDS
-    ), "the OMN-15717/OMN-15376 node_pr_review_bot hold is not the exact expected id"
+    assert found[registration_end:pr_review_bot_end] == FENCED_PR_REVIEW_BOT_IDS, (
+        "the OMN-15717/OMN-15376 node_pr_review_bot hold is not the exact expected id"
+    )
     assert found[pr_review_bot_end:] == FENCED_INFERENCE_RESPONSE_IDS, (
         "the OMN-15336 item-4 inference-response hold is not the expected id"
     )
@@ -1887,7 +1887,7 @@ def test_guard_free_runner_applies_the_unclassified_migration(
 # GUARD_INTRODUCTION_COMMIT is the commit that first shipped the unclassified-
 # FORCE-RLS guard; every grandfathered id must have existed in the tree at its
 # PARENT (i.e. immediately before the guard could ever have fired for it).
-GUARD_INTRODUCTION_COMMIT = "7a957a0a9b00102faf1873211d28e8b5bea6b4ca"
+GUARD_INTRODUCTION_COMMIT = "90cd78a5805a5a4d02367a76d05af24034cd6183"
 
 
 def _sql_declares_unclassified_force_rls(sql_text: str) -> bool:
