@@ -1,0 +1,85 @@
+# grandfathered-force-rls-migrations.yaml — baseline snapshot for the
+# unclassified FORCE ROW LEVEL SECURITY guard (OMN-15336 item 4 repair,
+# operator ruling D1 2026-08-05)
+#
+# WHAT THIS IS (and is NOT)
+# This is a GRANDFATHER RECORD, not an operator fence. The fence
+# (fenced-node-migrations.yaml, read by is_fenced_node_migration) is an
+# operator GATE: an id on that list is actively held back from applying
+# pending a ruling. This file is the opposite kind of fact: a frozen
+# enumeration of every FORCE-ROW-LEVEL-SECURITY-enabling node migration that
+# was ALREADY VENDORED, and had ALREADY BEEN APPLYING UNGATED on every warm
+# lane, at the moment scripts/run-forward-migrations.sh gained the unclassified-
+# FORCE-RLS guard (commit 90cd78a580, 2026-08-05). It exists solely so the
+# guard can distinguish "a migration nobody has reviewed yet" (must FATAL)
+# from "a migration that predates the guard and is part of the established
+# baseline" (must keep applying — that is what "established baseline" means).
+#
+# THE DEFECT THIS FIXES
+# The guard as first shipped fired for ANY FORCE-enabling migration absent
+# from the operator fence, with no notion of "already part of the tree."
+# The vendored tree carries 13 FORCE-enabling node migrations; the operator
+# fence classifies only 4 of them (the ones an operator affirmatively chose
+# to hold back). The other 9 were never held back by anyone — they are
+# ordinary, already-shipped, already-applying-everywhere migrations — but
+# the guard could not tell that apart from "brand new, unreviewed." Result:
+# on ANY fresh/cold database (a virgin CI Postgres, a new lane bring-up), the
+# guard FATALed on the first of the 9 it reached
+# (node_canary_score_reducer/0002), aborting migration application entirely
+# with a FATAL naming a migration nobody had asked to gate. Reproduced live:
+# shipped runner against a virgin PG16 -> exit 1, 1 node migration applied,
+# 87 withheld. Guard-stripped copy of the same tree -> exit 0, 87 applied.
+#
+# ENTRY CRITERIA (both required)
+#   1. Enables FORCE ROW LEVEL SECURITY (the exact condition
+#      migration_declares_unclassified_force_rls tests for).
+#   2. Existed in docker/migrations/forward/nodes/ at commit 90cd78a580~1 —
+#      i.e. BEFORE the guard first shipped. Verified per-id via
+#      `git show 90cd78a580~1:docker/migrations/forward/nodes/<id-path>`.
+#
+# THIS LIST DOES NOT GROW.
+# It is a snapshot of one commit's tree, not a rolling allowlist. A NEW
+# FORCE-enabling node migration written after 2026-08-05 must NEVER be added
+# here to silence the guard — it must go through the operator fence
+# (fenced-node-migrations.yaml) like every migration written since OMN-15336
+# shipped, or ship as a deliberately unfenced release with an operator ruling
+# on record. tests/scripts/test_node_migration_fence_parity.py pins this
+# file's exact, in-order content (test_grandfather_pins_the_snapshot_baseline)
+# — an addition here without an accompanying test-pin update fails CI closed.
+# A subtraction (an id being un-grandfathered because its FORCE posture was
+# reconsidered) is the normal path off this list: move it to the operator
+# fence instead, or strip FORCE entirely (see
+# node_projection_registration/0004's NO FORCE precedent) and drop the id
+# from both files in the same PR.
+#
+# FORMAT
+# Same as fenced-node-migrations.yaml: a flat list under
+# `grandfathered_force_rls_migrations`, each entry an `id:` (mandatory,
+# machine-parsed) plus a `ticket:` (advisory). Parsed with the same portable
+# sed one-liner both runners already use for the fence manifest:
+#
+#   sed -n 's/^[[:space:]]*-[[:space:]]*id:[[:space:]]*"\([^"]*\)".*/\1/p' \
+#     grandfathered-force-rls-migrations.yaml
+#
+# Order is significant only in that it is pinned verbatim by the test above;
+# it carries no runtime semantics (membership is a set, checked by exact
+# whole-line match).
+grandfathered_force_rls_migrations:
+  - id: "node:node_canary_score_reducer:0002_capability_scores_tenant_id_and_rls.sql"
+    ticket: "OMN-15336"
+  - id: "node:node_projection_context_roi:003_context_roi_scores_tenant_id_and_rls.sql"
+    ticket: "OMN-15336"
+  - id: "node:node_projection_cost_summary:0002_llm_cost_aggregates_tenant_id_and_rls.sql"
+    ticket: "OMN-15336"
+  - id: "node:node_projection_dep_health:002_dep_health_findings_tenant_id_and_rls.sql"
+    ticket: "OMN-15336"
+  - id: "node:node_projection_instruction_eval:0002_instruction_eval_aggregate_snapshots_tenant_id_and_rls.sql"
+    ticket: "OMN-15336"
+  - id: "node:node_projection_pattern_learning:0001_pattern_learning_artifacts_tenant_id_and_rls.sql"
+    ticket: "OMN-15336"
+  - id: "node:node_projection_routing_decision:0022_agent_routing_decisions_tenant_id_and_rls.sql"
+    ticket: "OMN-15336"
+  - id: "node:node_projection_savings:081_savings_estimates_rls_tenant_isolation.sql"
+    ticket: "OMN-15336"
+  - id: "node:node_projection_skill_executions:0002_skill_execution_snapshots_tenant_id_and_rls.sql"
+    ticket: "OMN-15336"

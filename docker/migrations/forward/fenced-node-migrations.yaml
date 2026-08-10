@@ -64,9 +64,11 @@
 # (e.g. widening ruling 21's scope, or adding a new ruling-15-style lane
 # carve-out) is a separate, explicit edit to that runner's release block.
 #
-# WHY THESE EIGHT IDS (verbatim rationale, unchanged from the pre-OMN-15349
-# hand-maintained lists for the first seven; the eighth was added under
-# OMN-15717/OMN-15376):
+# WHY THESE NINE IDS (verbatim rationale, unchanged from the pre-OMN-15349
+# hand-maintained lists for the first seven; the eighth (node_pr_review_bot
+# 001) was added under OMN-15717/OMN-15376 and the ninth
+# (delegation_inference_response 0003) under OMN-15336 item 4 / OMN-15656 —
+# two independent PRs landing concurrently, both additive, not conflicting):
 #   delegation 0023-0026 — OMN-14974 / OMN-15313. Tenant-isolation RLS on
 #     live, actively-written delegation tables; un-gate only in a change that
 #     also proves the writer sets app.tenant_id per connection. No lane may
@@ -102,6 +104,20 @@
 #     risk: a genuinely new future lane (never bootstrapped from any of the
 #     four) would skip creating this table until an operator adds a lane
 #     release, same accepted-tradeoff shape as the delegation ids above.
+#   delegation_inference_response 0003 — OMN-15336 item 4 / OMN-15656. FORCE
+#     ROW LEVEL SECURITY on projection_delegation_inference_response_text.
+#     Contract-declared tenant domain (node_projection_delegation_inference_
+#     response/contract.yaml db_io.schema), so the RLS posture itself is
+#     correctly classified — unlike node_service_registry below, this is not
+#     an internal-domain misclassification. It is held for the same reason
+#     the delegation quartet above is held: OMN-15301 found the projection
+#     writer never sets app.tenant_id per connection, so an un-gated FORCE
+#     apply here reproduces the identical false-clean (zero rows, no error)
+#     write-lockout hazard on a live, actively-written table. Was NEVER in
+#     this list on any runner before this entry — it applied unattended on
+#     the .201 dev lane (2026-07-31T06:44:32Z) purely because nothing here
+#     named it. Un-gate only in a change that also proves the writer sets
+#     app.tenant_id per connection, matching the delegation quartet's bar.
 fenced_node_migrations:
   - id: "node:node_projection_delegation:0023_delegation_rls_tenant_isolation.sql"
     ticket: "OMN-14974"
@@ -119,3 +135,5 @@ fenced_node_migrations:
     ticket: "OMN-15343"
   - id: "node:node_pr_review_bot:001_create_review_bot_bypass_log.sql"
     ticket: "OMN-15717"
+  - id: "node:node_projection_delegation_inference_response:0003_inference_response_text_rls_tenant_isolation.sql"
+    ticket: "OMN-15336"
