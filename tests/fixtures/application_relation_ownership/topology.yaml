@@ -53,7 +53,7 @@ databases:
             privileges: [USAGE]
           - object_type: TABLE
             schema: omninode_internal
-            objects: [generation_events]
+            objects: [future_internal_projection]
             privileges: [SELECT, INSERT, UPDATE]
       tenant_projection_writer:
         login: true

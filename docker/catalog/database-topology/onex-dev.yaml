@@ -68,6 +68,11 @@ databases:
             privileges:
               - USAGE
             schema: omninode_internal
+          - object_type: SCHEMA
+            objects: []
+            privileges:
+              - USAGE
+            schema: public
           - object_type: TABLE
             objects:
               - baselines_breakdown
@@ -114,13 +119,13 @@ databases:
               - INSERT
               - SELECT
               - UPDATE
-            schema: omninode_internal
+            schema: public
           - object_type: TABLE
             objects:
               - nightly_loop_configs
             privileges:
               - SELECT
-            schema: omninode_internal
+            schema: public
         login: true
       onex_api:
         bypass_rls: false
@@ -248,5 +253,5 @@ source:
   profile_catalog_path: src/omnibase_infra/topology/application_database_profiles.yaml
   profile_catalog_sha256: 759f32da77ad41b874fbb05d2824c44f9de4c64e9d269d99da21445225a90ca1
   repository: OmniNode-ai/omnibase_infra
-  sha256: dc8e45c263f61aa34290ca13ea2b87b9041383335a1d0635acc49ff6128e9e08
+  sha256: cc2688a57e629e890ea259ab5a67d25d2afac1b40c8996f190ea51f88caa642a
 topology_instance: onex-dev

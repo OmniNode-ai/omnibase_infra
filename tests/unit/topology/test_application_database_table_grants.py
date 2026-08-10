@@ -45,6 +45,7 @@ from omnibase_infra.topology import load_topology_profile
 from omnibase_infra.topology.application_database import SUPPORTED_TOPOLOGY_PROFILES
 from omnibase_infra.topology.table_grant_derivation import (
     DOMAIN_PROJECTION_BINDINGS,
+    INTERNAL_TABLES_PHYSICALLY_IN_PUBLIC_UNTIL_OMN15359,
     READ_PRIVILEGES,
     TENANT_TABLES_PHYSICALLY_IN_PUBLIC_UNTIL_OMN15359,
     WRITE_PRIVILEGES,
@@ -124,12 +125,13 @@ def test_access_mode_derives_exactly_the_validator_privileges(
     """
     topology = load_topology_profile("local")
     derived = derive_table_grants(
-        topology, [_declaration("generation_events", "omninode_internal", access)]
+        topology,
+        [_declaration("future_internal_projection", "omninode_internal", access)],
     )
     grants = derived.grants["omninode_runtime"]
     assert len(grants) == 1
     assert set(grants[0].privileges) == set(expected)
-    assert grants[0].objects == ("generation_events",)
+    assert grants[0].objects == ("future_internal_projection",)
     assert grants[0].schema == "omninode_internal"
 
 
@@ -186,6 +188,59 @@ def test_omn15359_pending_tenant_tables_grant_against_current_physical_schema() 
     assert physical_grant_schema_for_table("tenant", "future_tenant_projection") == (
         "tenant"
     )
+
+
+def test_omn15359_pending_internal_tables_grant_against_current_physical_schema() -> (
+    None
+):
+    """Physical-schema bridge for OMNINODE_INTERNAL: the target schema now
+    physically exists (098_create_omninode_internal_schema.sql) but the 41
+    tables the shipped topology grants against it are still physically
+    created in ``public`` by their node migrations — the OMN-15426 gap.
+    """
+    topology = load_topology_profile("local")
+    derived = derive_table_grants(
+        topology,
+        [_declaration("node_service_registry", "omninode_internal", "write")],
+    )
+    assert set(derived.grants) == {"omninode_runtime"}
+    assert derived.grants["omninode_runtime"][0].schema == "public"
+    assert (
+        physical_grant_schema_for_table("omninode_internal", "node_service_registry")
+        == "public"
+    )
+    assert physical_grant_schema_for_table(
+        "omninode_internal", "future_internal_projection"
+    ) == ("omninode_internal")
+
+
+def test_omn15359_internal_bridge_covers_every_shipped_internal_grant() -> None:
+    """The bridge set must not silently drift from the shipped topology.
+
+    The shipped `omninode_runtime` TABLE grants are generated with the
+    physical bridge already applied (``physical_grant_schema_for_table``), so
+    on the live `local` profile they carry ``schema: public`` today -- none of
+    the 41 relations has a copy migration yet. Every one of those physically-
+    public table names must be a member of
+    ``INTERNAL_TABLES_PHYSICALLY_IN_PUBLIC_UNTIL_OMN15359``: this is a
+    shrink-only ratchet in the graduation direction (a table leaves the
+    frozenset only once its family's copy has actually landed and the
+    generator re-derives it against ``omninode_internal``), and it fails
+    closed if topology grants a new table to `omninode_runtime` this bridge
+    does not yet know about -- exactly the drift class OMN-15426 hit.
+    """
+    topology = load_topology_profile("local")
+    internal_database = topology.databases["application"]
+    omninode_runtime_grants = internal_database.principals["omninode_runtime"].grants
+    granted_public_tables = {
+        table_name
+        for grant in omninode_runtime_grants
+        if grant.object_type == EnumDatabaseGrantObjectType.TABLE
+        and grant.schema == "public"
+        for table_name in grant.objects
+    }
+    assert granted_public_tables
+    assert granted_public_tables <= INTERNAL_TABLES_PHYSICALLY_IN_PUBLIC_UNTIL_OMN15359
 
 
 # ---------------------------------------------------------------------------
@@ -380,14 +435,18 @@ def test_every_granted_relation_resolves_through_the_real_validator(
                 "read" if set(grant.privileges) == set(READ_PRIVILEGES) else "write"
             )
             for name in grant.objects:
-                logical_schema = (
-                    "tenant"
-                    if (
-                        grant.schema == "public"
-                        and name in TENANT_TABLES_PHYSICALLY_IN_PUBLIC_UNTIL_OMN15359
-                    )
-                    else grant.schema
-                )
+                if (
+                    grant.schema == "public"
+                    and name in TENANT_TABLES_PHYSICALLY_IN_PUBLIC_UNTIL_OMN15359
+                ):
+                    logical_schema = "tenant"
+                elif (
+                    grant.schema == "public"
+                    and name in INTERNAL_TABLES_PHYSICALLY_IN_PUBLIC_UNTIL_OMN15359
+                ):
+                    logical_schema = "omninode_internal"
+                else:
+                    logical_schema = grant.schema
                 table = ModelDbTableDeclaration(
                     name=name,
                     database_ref=database_ref,
@@ -474,6 +533,22 @@ _DEPLOY_ERROR = (
     "omninode_internal.evidence_dashboard_projection"
 )
 
+# OMN-15359 extended the physical-schema bridge
+# (``physical_grant_schema_for_table``) to cover OMNINODE_INTERNAL-domain
+# tables, so ``evidence_dashboard_projection`` now resolves against ``public``
+# (its real physical location) instead of ``omninode_internal``. Replaying the
+# zero-grant capture against the CURRENT resolver therefore also finds the
+# capture missing ``USAGE`` on the (now correctly identified) target schema --
+# a real gap the capture always had but the pre-bridge resolver never checked
+# for this relation, because it was still looking at the wrong schema. The
+# verbatim historical pod message (``_DEPLOY_ERROR`` above) is preserved
+# unmodified for the record; this is what the same capture produces today.
+_DEPLOY_ERROR_POST_OMN15359_BRIDGE = (
+    "Projection binding 'omninode_runtime_service' principal 'omninode_runtime' "
+    "lacks declared write privileges: USAGE on schema 'public'; INSERT, SELECT, "
+    "UPDATE on table omninode_internal.evidence_dashboard_projection"
+)
+
 _DEPLOY_RELATION = ModelDbTableDeclaration(
     name="evidence_dashboard_projection",
     database_ref="application",
@@ -492,6 +567,15 @@ def test_replay_captured_topology_reproduces_the_deploy_failure_verbatim() -> No
     ``b34206e7…`` recorded in the rendered catalogs' ``source.sha256`` and in
     omninode_infra's k8s ``source-lock.yaml``, so this is the artifact the
     cluster actually consumed, not a reconstruction.
+
+    OMN-15359 note: the assertion below is
+    ``_DEPLOY_ERROR_POST_OMN15359_BRIDGE``, not the verbatim ``_DEPLOY_ERROR``
+    pod message (still preserved above for the historical record). Extending
+    the physical-schema bridge to OMNINODE_INTERNAL made this exact relation
+    resolve against ``public`` instead of ``omninode_internal``, and the
+    zero-grant capture is missing ``USAGE`` there too — a real, additional gap
+    the pre-bridge resolver could not see because it was checking the wrong
+    schema.
     """
     from omnibase_core.models.core import ModelDeploymentTopology
 
@@ -499,7 +583,7 @@ def test_replay_captured_topology_reproduces_the_deploy_failure_verbatim() -> No
 
     with pytest.raises(ValueError) as excinfo:
         _resolve_projection_database_target((_DEPLOY_RELATION,), captured)
-    assert str(excinfo.value) == _DEPLOY_ERROR
+    assert str(excinfo.value) == _DEPLOY_ERROR_POST_OMN15359_BRIDGE
 
 
 def test_replay_derivation_rejects_the_captured_topology_as_drifted() -> None:

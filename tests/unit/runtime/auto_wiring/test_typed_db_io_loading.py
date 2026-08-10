@@ -163,11 +163,11 @@ def test_projection_target_preserves_multiple_schemas_in_one_database() -> None:
             role="events",
         ),
         ModelDbTableDeclaration(
-            name="generation_events",
+            name="future_internal_projection",
             database_ref="application",
             schema="omninode_internal",
             migration="0002.sql",
-            role="generation_events",
+            role="future_internal_projection",
         ),
     )
 
@@ -181,14 +181,14 @@ def test_projection_target_preserves_multiple_schemas_in_one_database() -> None:
     )
     assert [table_target.table.name for table_target in target.table_targets] == [
         "delegation_events",
-        "generation_events",
+        "future_internal_projection",
     ]
 
 
 def test_non_tenant_target_selects_explicit_internal_operation() -> None:
     topology = ModelDeploymentTopology.from_yaml(_FIXTURE_ROOT / "topology.yaml")
     table = ModelDbTableDeclaration(
-        name="generation_events",
+        name="future_internal_projection",
         database_ref="application",
         schema="omninode_internal",
         migration="0002.sql",
