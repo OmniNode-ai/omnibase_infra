@@ -75,6 +75,14 @@ databases:
             schema: public
           - object_type: TABLE
             objects:
+              - live_events
+            privileges:
+              - INSERT
+              - SELECT
+              - UPDATE
+            schema: omninode_internal
+          - object_type: TABLE
+            objects:
               - baselines_breakdown
               - baselines_comparisons
               - baselines_quality_snapshots
@@ -94,7 +102,6 @@ databases:
               - gate_metrics
               - generation_events
               - intent_classification_events
-              - live_events
               - llm_call_metrics
               - llm_delegation_daily_projection
               - llm_routing_decisions
@@ -253,5 +260,5 @@ source:
   profile_catalog_path: src/omnibase_infra/topology/application_database_profiles.yaml
   profile_catalog_sha256: 759f32da77ad41b874fbb05d2824c44f9de4c64e9d269d99da21445225a90ca1
   repository: OmniNode-ai/omnibase_infra
-  sha256: cc2688a57e629e890ea259ab5a67d25d2afac1b40c8996f190ea51f88caa642a
+  sha256: e26344aafbea136b6557c5a96945ea972b1790685633ddf12578daf878f70f28
 topology_instance: onex-prod
