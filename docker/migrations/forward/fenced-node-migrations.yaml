@@ -64,8 +64,9 @@
 # (e.g. widening ruling 21's scope, or adding a new ruling-15-style lane
 # carve-out) is a separate, explicit edit to that runner's release block.
 #
-# WHY THESE SEVEN IDS (verbatim rationale, unchanged from the pre-OMN-15349
-# hand-maintained lists):
+# WHY THESE EIGHT IDS (verbatim rationale, unchanged from the pre-OMN-15349
+# hand-maintained lists for the first seven; the eighth was added under
+# OMN-15717/OMN-15376):
 #   delegation 0023-0026 — OMN-14974 / OMN-15313. Tenant-isolation RLS on
 #     live, actively-written delegation tables; un-gate only in a change that
 #     also proves the writer sets app.tenant_id per connection. No lane may
@@ -77,6 +78,30 @@
 #     together — a fence that gates one but not the other is worse than no
 #     fence (OMN-15379 postmortem: a cold compose lane with 0000 fenced and
 #     0002 not died with "relation node_service_registry does not exist").
+#   node_pr_review_bot 001 — OMN-15717 / OMN-15376. The CREATE TABLE IF NOT
+#     EXISTS for review_bot_bypass_log declares 7 columns with no ALTER TABLE
+#     ADD COLUMN IF NOT EXISTS reconciliation, tripping the OMN-15376 static
+#     shape-reconciliation gate (tests/ci/test_node_migration_shape_reconciliation.py).
+#     Editing the SQL to add the missing ALTER statements is NOT the fix here:
+#     it would change the file's content sha256 (currently
+#     63e2646a7f8767fad9ec969b224982e00b83aacb665107ab5b103964d5616e00), and
+#     that checksum is bound both by the application-migrations.tsv
+#     declaration and by dev's already-applied
+#     omnidash_analytics.platform_catalog.schema_migrations row
+#     (content_sha256, applied_at 2026-08-06) — a changed checksum makes
+#     scripts/run-forward-migrations.sh's migration_is_applied() check FATAL
+#     ("conflicting migration checksum") on that lane, since the runner has
+#     no path to reconcile a stored checksum against a changed file. Fencing
+#     is safe today, not merely convenient: read-only .201 probes (2026-08-10)
+#     confirm this migration is ALREADY applied on all four live lanes —
+#     dev via the content_sha256 row above, and stability-test/judge/prod via
+#     the legacy 'applied-by-runner' public.schema_migrations rows dated
+#     2026-06-10/06-11 — and review_bot_bypass_log's live columns already
+#     match the 7 declared columns exactly on every lane, so there is no
+#     shape drift to reconcile anywhere that exists today. Residual, accepted
+#     risk: a genuinely new future lane (never bootstrapped from any of the
+#     four) would skip creating this table until an operator adds a lane
+#     release, same accepted-tradeoff shape as the delegation ids above.
 fenced_node_migrations:
   - id: "node:node_projection_delegation:0023_delegation_rls_tenant_isolation.sql"
     ticket: "OMN-14974"
@@ -92,3 +117,5 @@ fenced_node_migrations:
     ticket: "OMN-15088"
   - id: "node:node_projection_registration:0002_node_service_registry_tenant_rls.sql"
     ticket: "OMN-15343"
+  - id: "node:node_pr_review_bot:001_create_review_bot_bypass_log.sql"
+    ticket: "OMN-15717"
