@@ -58,6 +58,7 @@ __all__ = [
     "READ_PRIVILEGES",
     "WRITE_PRIVILEGES",
     "DOMAIN_PROJECTION_BINDINGS",
+    "STATE_IO_TABLE_DECLARATIONS",
     "TENANT_TABLES_PHYSICALLY_IN_PUBLIC_UNTIL_OMN15359",
     "INTERNAL_TABLES_PHYSICALLY_IN_PUBLIC_UNTIL_OMN15359",
     "physical_grant_schema_for_table",
@@ -97,6 +98,35 @@ class ContractTableDeclaration:
     node: str
     contract_path: Path
     table: ModelDbTableDeclaration
+
+
+# ``state_io`` (OMN-14208, ``handler_wiring._read_state_io``) is a legacy
+# contract subcontract that pre-dates ``ModelDbTableDeclaration`` and has no
+# core model of its own -- ``load_contract_declarations`` only scans
+# ``db_io.db_tables`` and can never discover a state_io-owned relation.
+# Without an entry here, ``delegation_workflow_state`` would derive zero TABLE
+# grants for every profile and stay permanently ungranted while ``--check``
+# reported green, the exact "declared but never granted" shape OMN-15656
+# exists to prevent. This is the sanctioned, checked-in way a state_io table
+# still participates in derivation (OMN-15337 / operator ruling R-q).
+STATE_IO_TABLE_DECLARATIONS: tuple[ContractTableDeclaration, ...] = (
+    ContractTableDeclaration(
+        node="state_io:delegation_workflow_state",
+        contract_path=Path(
+            "docker/migrations/forward/090_create_delegation_workflow_state.sql"
+        ),
+        table=ModelDbTableDeclaration(
+            name="delegation_workflow_state",
+            database_ref="omnibase_infra",
+            schema="public",
+            migration=(
+                "docker/migrations/forward/090_create_delegation_workflow_state.sql"
+            ),
+            access="read_write",
+            role="state",
+        ),
+    ),
+)
 
 
 @dataclass(frozen=True, slots=True)

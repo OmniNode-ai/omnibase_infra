@@ -171,6 +171,45 @@ databases:
       tenant:
         domain: TENANT
         owner: owner_onex_tenant
+  omnibase_infra:
+    bindings:
+      omninode_runtime_service:
+        database_ref: omnibase_infra
+        dsn_env: OMNIBASE_INFRA_DB_URL
+        principal: role_omnibase_infra
+    checksum_ledger: service_owned
+    checksum_ledgers:
+      service_owned:
+        checksum_column: checksum
+        domain_column: domain
+        relation: schema_migrations
+        schema: public
+        stream_column: migration_stream
+        version_column: version
+    migration_stream: omnibase_infra.service
+    owners:
+      owner_omnibase_infra:
+        login: false
+    physical_name: omnibase_infra
+    principals:
+      role_omnibase_infra:
+        bypass_rls: false
+        grants:
+          - object_type: DATABASE
+            privileges: [CONNECT]
+          - object_type: SCHEMA
+            privileges: [USAGE]
+            schema: public
+          - object_type: TABLE
+            objects:
+              - delegation_workflow_state
+            privileges: [INSERT, SELECT, UPDATE]
+            schema: public
+        login: true
+    schemas:
+      public:
+        domain: OMNINODE_INTERNAL
+        owner: owner_omnibase_infra
   omniintelligence:
     bindings:
       omninode_runtime_service:

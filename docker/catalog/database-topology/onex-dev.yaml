@@ -206,6 +206,53 @@ databases:
       tenant:
         domain: TENANT
         owner: owner_onex_tenant
+  omnibase_infra:
+    bindings:
+      omninode_runtime_service:
+        database_ref: omnibase_infra
+        dsn_env: OMNIBASE_INFRA_DB_URL
+        principal: role_omnibase_infra
+    checksum_ledger: service_owned
+    checksum_ledgers:
+      service_owned:
+        checksum_column: checksum
+        domain_column: domain
+        relation: schema_migrations
+        schema: public
+        stream_column: migration_stream
+        version_column: version
+    migration_stream: omnibase_infra.service
+    owners:
+      owner_omnibase_infra:
+        login: false
+    physical_name: omnibase_infra
+    principals:
+      role_omnibase_infra:
+        bypass_rls: false
+        grants:
+          - object_type: DATABASE
+            objects: []
+            privileges:
+              - CONNECT
+            schema: null
+          - object_type: SCHEMA
+            objects: []
+            privileges:
+              - USAGE
+            schema: public
+          - object_type: TABLE
+            objects:
+              - delegation_workflow_state
+            privileges:
+              - INSERT
+              - SELECT
+              - UPDATE
+            schema: public
+        login: true
+    schemas:
+      public:
+        domain: OMNINODE_INTERNAL
+        owner: owner_omnibase_infra
   omniintelligence:
     bindings:
       omninode_runtime_service:
@@ -260,5 +307,5 @@ source:
   profile_catalog_path: src/omnibase_infra/topology/application_database_profiles.yaml
   profile_catalog_sha256: 759f32da77ad41b874fbb05d2824c44f9de4c64e9d269d99da21445225a90ca1
   repository: OmniNode-ai/omnibase_infra
-  sha256: e26344aafbea136b6557c5a96945ea972b1790685633ddf12578daf878f70f28
+  sha256: 16afbd462702012a4e6e269a86e48fad07fe834de5801cad2de7bad04a1f5b0b
 topology_instance: onex-dev

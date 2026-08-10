@@ -61,10 +61,11 @@ _INSTANCE_ROOT = (
     Path(__file__).parents[3] / "src" / "omnibase_infra" / "topology" / "instances"
 )
 _INSTANCE_NAMES = ("local", "onex-dev", "onex-prod")
-# Every logical database the shipped instances declare. ``omniintelligence`` is
-# the independently service-owned database ADR-0027 keeps separate from the
-# unified application pair (OMN-15655 AC-2).
-_DATABASE_REFS = ("application", "omniintelligence")
+# Every logical database the shipped instances declare. ``omniintelligence``
+# and ``omnibase_infra`` are independently service-owned databases ADR-0027
+# keeps separate from the unified application pair (OMN-15655 AC-2,
+# OMN-15337).
+_DATABASE_REFS = ("application", "omnibase_infra", "omniintelligence")
 _HELPER = Path(__file__).parents[2] / "helpers" / "application_db_topology.py"
 
 # The only privilege shapes the validator can ever require.
