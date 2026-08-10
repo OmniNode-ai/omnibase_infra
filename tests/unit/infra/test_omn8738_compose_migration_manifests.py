@@ -35,6 +35,10 @@ OMNIMARKET_PROJECTION_MANIFESTS = [
     "omnimarket-projection-delegation",
     "omnimarket-projection-baselines",
     "omnimarket-projection-registration",
+    # OMN-15800: writer merged in omnimarket#2044 (84a25a8c); this catalog
+    # entry is the missing "who runs it" half — mirrors the registration
+    # entry field-for-field.
+    "omnimarket-projection-live-events",
 ]
 
 OMNIDASH_MANIFESTS = [
@@ -105,8 +109,8 @@ def test_omnimemory_bundle_resolves_all_four_services() -> None:
 
 
 @pytest.mark.unit
-def test_omnimarket_projections_bundle_resolves_all_six_consumers() -> None:
-    """The omnimarket-projections bundle must resolve all 6 projection consumers."""
+def test_omnimarket_projections_bundle_resolves_all_seven_consumers() -> None:
+    """The omnimarket-projections bundle must resolve all 7 projection consumers."""
     resolver = CatalogResolver(catalog_dir=str(CATALOG_DIR))
     resolved = resolver.resolve(bundles=["omnimarket-projections"])
     for svc in OMNIMARKET_PROJECTION_MANIFESTS:
