@@ -1,8 +1,7 @@
 # SPDX-FileCopyrightText: 2025 OmniNode.ai Inc.
 # SPDX-License-Identifier: MIT
 
-"""OMN-15359 -- physically create omninode_internal.live_events and
-transform-copy the existing public.live_events rows.
+"""OMN-15359 -- physically create omninode_internal.live_events.
 
 THE GAP (live evidence, mergesweep-0809-projplane ground phase + adversarial
 verify, rolling ledger 2026-08-09)
@@ -24,6 +23,29 @@ uses (matching `test_098_omninode_internal_schema_omn15359.py`), against a
 real ephemeral cluster seeded with representative pre-existing
 `public.live_events` rows, and asserts real catalog + row-level state -- not
 string matching the SQL text.
+
+OMN-15838 AMENDMENT: 099 originally also transform-copied every row from
+`public.live_events` into `omninode_internal.live_events` in the same file,
+then RAISE EXCEPTIONed unless the two tables' row counts matched exactly.
+That reconciliation was a non-atomic race on any lane with a concurrent
+writer to `public.live_events` (the stability-test lane runs at ~24
+writes/min): the INSERT...SELECT snapshots the source, then two separate
+follow-up `SELECT count(*)` statements re-read both tables, so any row
+committed to the source in between makes the counts diverge and the DO block
+RAISE deterministically -- not intermittently. Because
+`scripts/run-forward-migrations.sh` runs with `ON_ERROR_STOP=1`, that RAISE
+aborted the whole migration run before it was ever recorded applied, so every
+subsequent refresh retried and failed identically (963965 vs 963977 rows,
+OMN-15838). Data delivery for this table is independently owned by the
+node-owned replacement migration
+(`docker/migrations/forward/nodes/node_projection_live_events/
+0002_create_omninode_internal_live_events.sql`, OMN-15819), so 099's own copy
+of that logic was also redundant on top of being racy. 099 now only creates
+schema shape (table, grants, indexes) and asserts it -- it never reads
+`public.live_events` at all. The row-copy/idempotent-copy/reconciliation
+tests that covered the removed logic are replaced below by tests proving the
+removed behavior stays removed: 099 no longer copies rows, and a diverging
+public/internal row count no longer fails the migration.
 """
 
 from __future__ import annotations
@@ -137,14 +159,19 @@ def _row_count(pg: EphemeralPostgres, schema: str, table: str) -> int:
     return int(count)
 
 
-def _event_ids(pg: EphemeralPostgres, schema: str, table: str) -> set[str]:
+def _insert_out_of_band_row(pg: EphemeralPostgres, event_id: str) -> None:
+    """Insert directly into omninode_internal.live_events with an event_id
+    that does not exist in public.live_events -- simulating the dual-write
+    bleed OMN-15838 observed (a row landing in one table but not the other)."""
     conn = pg.connect(dbname=ANALYTICS_DB)
     conn.autocommit = True
     with conn.cursor() as cur:
-        cur.execute(f'SELECT event_id FROM "{schema}"."{table}"')  # noqa: S608
-        rows = {row[0] for row in cur.fetchall()}
+        cur.execute(
+            "INSERT INTO omninode_internal.live_events (event_id, topic) "
+            "VALUES (%s, %s)",
+            (event_id, "onex.evt.platform.node-heartbeat.v1"),
+        )
     conn.close()
-    return rows
 
 
 @pytest.fixture
@@ -169,19 +196,6 @@ def test_099_creates_omninode_internal_live_events(
     assert _table_exists(seeded_pg, "omninode_internal", "live_events")
 
 
-def test_099_copies_every_source_row(seeded_pg: EphemeralPostgres) -> None:
-    _apply_ok(seeded_pg, MIGRATION)
-
-    src_count = _row_count(seeded_pg, "public", "live_events")
-    dst_count = _row_count(seeded_pg, "omninode_internal", "live_events")
-    assert src_count == 25
-    assert dst_count == src_count
-
-    src_ids = _event_ids(seeded_pg, "public", "live_events")
-    dst_ids = _event_ids(seeded_pg, "omninode_internal", "live_events")
-    assert src_ids == dst_ids
-
-
 def test_099_preserves_public_live_events(seeded_pg: EphemeralPostgres) -> None:
     """OMN-15359 AC: source relation must survive until parity is reproven."""
     before_count = _row_count(seeded_pg, "public", "live_events")
@@ -192,95 +206,56 @@ def test_099_preserves_public_live_events(seeded_pg: EphemeralPostgres) -> None:
     assert _row_count(seeded_pg, "public", "live_events") == before_count
 
 
-def test_099_row_content_is_faithfully_reproduced(
+def test_099_does_not_copy_any_rows_even_when_source_has_data(
     seeded_pg: EphemeralPostgres,
 ) -> None:
-    """Every copied column value matches the source row exactly, not just the key."""
+    """OMN-15838: 099 is schema-shape + grants only. It must never read
+    public.live_events, regardless of how many rows the source carries."""
+    src_count = _row_count(seeded_pg, "public", "live_events")
+    assert src_count == 25, "test setup invariant"
+
     _apply_ok(seeded_pg, MIGRATION)
 
-    conn = seeded_pg.connect(dbname=ANALYTICS_DB)
-    conn.autocommit = True
-    with conn.cursor() as cur:
-        cur.execute(
-            "SELECT id, event_id, type, source, topic, summary, payload, "
-            "correlation_id, timestamp, created_at "
-            "FROM public.live_events ORDER BY event_id"
-        )
-        source_rows = cur.fetchall()
-        cur.execute(
-            "SELECT id, event_id, type, source, topic, summary, payload, "
-            "correlation_id, timestamp, created_at "
-            "FROM omninode_internal.live_events ORDER BY event_id"
-        )
-        dest_rows = cur.fetchall()
-    conn.close()
-
-    assert source_rows == dest_rows
+    assert _row_count(seeded_pg, "omninode_internal", "live_events") == 0
 
 
-def test_099_is_idempotent_on_reapply(seeded_pg: EphemeralPostgres) -> None:
-    _apply_ok(seeded_pg, MIGRATION)
-    _apply_ok(seeded_pg, MIGRATION)
-
-    assert _row_count(seeded_pg, "omninode_internal", "live_events") == 25
-
-
-def test_099_reapply_after_new_source_rows_copies_only_the_delta(
+def test_099_succeeds_when_public_and_internal_row_counts_diverge(
     seeded_pg: EphemeralPostgres,
 ) -> None:
-    """A later, unrelated re-apply must pick up rows written to the source
-    after the first apply (e.g. a retry window) without duplicating existing
-    ones."""
-    _apply_ok(seeded_pg, MIGRATION)
-    assert _row_count(seeded_pg, "omninode_internal", "live_events") == 25
-
-    conn = seeded_pg.connect(dbname=ANALYTICS_DB)
-    conn.autocommit = True
-    with conn.cursor() as cur:
-        cur.execute(
-            "INSERT INTO public.live_events (event_id, topic) VALUES (%s, %s)",
-            (f"evt-late-{uuid.uuid4()}", "onex.evt.platform.node-heartbeat.v1"),
-        )
-    conn.close()
-
-    _apply_ok(seeded_pg, MIGRATION)
-
-    assert _row_count(seeded_pg, "public", "live_events") == 26
-    assert _row_count(seeded_pg, "omninode_internal", "live_events") == 26
-    assert _event_ids(seeded_pg, "public", "live_events") == _event_ids(
-        seeded_pg, "omninode_internal", "live_events"
-    )
-
-
-def test_099_reconciliation_fails_closed_on_a_corrupted_partial_copy(
-    seeded_pg: EphemeralPostgres,
-) -> None:
-    """If the destination table exists but a row was corrupted/dropped before
-    the reconciliation check runs, the migration must abort loudly rather than
-    silently accept the mismatch. Simulated by hand-creating the destination
-    table with only a subset of rows and a content divergence, then re-running
-    099's own reconciliation logic via the full migration file (which is
-    idempotent CREATE TABLE + copy + reconcile in one file): corrupt one row's
-    payload directly in the destination after a first successful apply, then
-    prove a second apply (which re-derives hashes from live state on every
-    run) detects it.
+    """OMN-15838 regression: the removed transform-copy/reconciliation block
+    used to RAISE EXCEPTION whenever public.live_events and
+    omninode_internal.live_events had different row counts -- exactly the
+    condition the stability-test lane hit under concurrent writes (963965 vs
+    963977). Manufacture that divergence directly (an out-of-band row in the
+    destination with no counterpart in the source, mirroring the dual-write
+    bleed) and prove a re-apply of 099 still succeeds and leaves the
+    divergence untouched -- it no longer compares the two tables at all.
     """
     _apply_ok(seeded_pg, MIGRATION)
+    _insert_out_of_band_row(seeded_pg, f"evt-out-of-band-{uuid.uuid4()}")
+    _insert_out_of_band_row(seeded_pg, f"evt-out-of-band-{uuid.uuid4()}")
 
-    conn = seeded_pg.connect(dbname=ANALYTICS_DB)
-    conn.autocommit = True
-    with conn.cursor() as cur:
-        cur.execute(
-            "UPDATE omninode_internal.live_events "
-            "SET payload = payload || '-corrupted' "
-            "WHERE event_id = (SELECT event_id FROM public.live_events LIMIT 1)"
-        )
-    conn.close()
+    src_count = _row_count(seeded_pg, "public", "live_events")
+    dst_count_before = _row_count(seeded_pg, "omninode_internal", "live_events")
+    assert dst_count_before != src_count, "test setup invariant: counts diverge"
 
     result = _apply(seeded_pg, MIGRATION)
 
-    assert result.returncode != 0
-    assert "content hash mismatch" in result.stderr
+    assert result.returncode == 0, (
+        f"099 must not fail on a diverging row count:\n{result.stderr}"
+    )
+    assert _row_count(seeded_pg, "omninode_internal", "live_events") == (
+        dst_count_before
+    ), "099 must not mutate existing rows in either table on re-apply"
+
+
+def test_099_schema_shape_is_idempotent_on_reapply(
+    seeded_pg: EphemeralPostgres,
+) -> None:
+    _apply_ok(seeded_pg, MIGRATION)
+    _apply_ok(seeded_pg, MIGRATION)
+
+    assert _table_exists(seeded_pg, "omninode_internal", "live_events")
 
 
 def test_099_rollback_drops_the_table_and_preserves_the_source(
@@ -304,7 +279,8 @@ def test_099_succeeds_when_public_live_events_does_not_exist(
     files (not the nodes/ subtree that vendors public.live_events's own
     CREATE TABLE) against a fresh database. public.live_events genuinely does
     not exist in that scope -- 099 must still succeed, creating
-    omninode_internal.live_events empty rather than failing UndefinedTable.
+    omninode_internal.live_events empty (as it always does now, OMN-15838)
+    rather than failing UndefinedTable.
     """
     bootstrap = ephemeral_postgres.connect()
     bootstrap.autocommit = True

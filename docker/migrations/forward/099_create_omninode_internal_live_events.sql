@@ -26,15 +26,72 @@
 -- tests/ci/test_flat_migration_no_foreign_connect_gate.py /
 -- docker/migrations/forward/cross-database-flat-migrations.yaml.
 -- =============================================================================
--- MIGRATION: physically create omninode_internal.live_events + transform-copy
---            the existing public.live_events rows (OMN-15359)
+-- AMENDMENT (OMN-15838, 2026-08-10): the "byte-unchanged below this header"
+-- promise above is superseded for the transform-copy/reconciliation section
+-- ONLY. The tombstone above is accurate for its own scope (the k8s Job /
+-- managed-RDS path this file cannot reach) but that is not the only path
+-- that executes this file: `scripts/run-forward-migrations.sh` (the .201
+-- docker-compose lanes -- dev/stability-test/prod) applies this exact flat
+-- file directly via `psql -v ON_ERROR_STOP=1 -f`, tracked one-time per
+-- database in that lane's own `public.schema_migrations` (filename-keyed,
+-- content-blind -- confirmed by reading the runner script, OMN-15838). On
+-- that path this file DOES execute, and its transform-copy + exact-row-count
+-- reconciliation (formerly step 2/3 below) is a non-atomic race: it snapshots
+-- `public.live_events` via one INSERT...SELECT, then re-counts both tables in
+-- separate follow-up statements. Under READ COMMITTED, any row committed to
+-- `public.live_events` by the live write path between the INSERT and the
+-- recount (observed at ~24 writes/min on the stability lane) makes
+-- `v_dst_count <> v_src_count` true by construction, RAISE EXCEPTIONs, and
+-- rolls back the INSERT within that DO block -- deterministically failing on
+-- any lane with concurrent writers, not intermittently. Because
+-- `ON_ERROR_STOP=1` aborts the whole runner script on that RAISE, the
+-- migration is never recorded applied and every subsequent refresh attempt
+-- retries and fails identically (OMN-15838: 963965 vs 963977 divergence,
+-- blocking the OMN-15826/OMN-15837 stability-test refresh outright).
+--
+-- Since data delivery for this table is already owned by the node-owned
+-- replacement migration this file's own tombstone names above
+-- (0002_create_omninode_internal_live_events.sql, which does NOT duplicate
+-- the transform-copy), 099's own copy of that logic is now dead weight on
+-- top of being racy. This amendment REMOVES the transform-copy +
+-- reconciliation DO block entirely; 099 is now schema-shape + grant only
+-- (CREATE TABLE, GRANT, ALTER DEFAULT PRIVILEGES, indexes, and the two
+-- statically-provable post-condition assertions it already carried) on every
+-- path that executes it. See tests/integration/migrations/
+-- test_099_omninode_internal_live_events_omn15359.py for the updated proof
+-- set (row-copy/reconciliation tests replaced by a direct regression test
+-- that a diverging public/internal row count no longer fails the migration).
+--
+-- RESIDUAL NOT FIXED HERE (OMN-15838, noted for the refresh to absorb): the
+-- stability-test lane's `omninode_internal.live_events` currently carries
+-- ~108MB of index pages built during an earlier successful apply (when the
+-- table held ~963965 rows) over what is now an EMPTY table -- the failed
+-- re-run's RAISE rolled back that attempt's INSERT (rolling back everything
+-- executed inside that DO block) but ran strictly before the CREATE INDEX
+-- statements below it in file order, so the indexes from the earlier
+-- successful apply were never touched and never shrink on their own
+-- (ordinary Postgres MVCC/index bloat, not a bug in the index statements
+-- themselves). A REINDEX is a storage-maintenance operation, not a
+-- schema-shape assertion, and this migration only ever runs once per
+-- database (ledger-gated); adding it here would need to be correct for both
+-- the fresh-create and the bloated-reapply case for a benefit that only
+-- matters once. Left as an out-of-band step for whichever refresh/recovery
+-- procedure next lands the fixed 099 on that lane: `REINDEX TABLE
+-- omninode_internal.live_events;` (or DROP + recreate the 4 indexes below)
+-- after this migration reports success.
+-- =============================================================================
+-- MIGRATION: physically create omninode_internal.live_events (schema shape +
+--            grants only -- OMN-15359 original, OMN-15838 removed the
+--            transform-copy/reconciliation of public.live_events rows)
 -- =============================================================================
 -- Ticket: OMN-15359 (P2-P4 build classified schemas and migrate internal,
 --         control-plane, catalog, and tenant targets)
 -- Related: OMN-15421 (Projection Domain Adapter Proof), OMN-15423 (relation
 --          inventory/ownership), OMN-15425 (tenant projection authority --
---          separate, unrelated gap)
--- Version: 1.0.0
+--          separate, unrelated gap), OMN-15819 (node-owned replacement now
+--          owns data delivery), OMN-15838 (this amendment -- removed the
+--          racy transform-copy/reconciliation block)
+-- Version: 1.1.0
 --
 -- WHAT THIS FILE DOES
 --   098_create_omninode_internal_schema.sql created the (empty) omninode_internal
@@ -47,17 +104,13 @@
 --   1. CREATE TABLE omninode_internal.live_events, identical shape to
 --      public.live_events (docker/migrations/forward/nodes/node_projection_live_events/
 --      0000_create_live_events.sql + 0001's type-classification data fixups).
---   2. Transform-copy every row from public.live_events into
---      omninode_internal.live_events (idempotent: ON CONFLICT (event_id) DO
---      NOTHING, safe to re-run).
---   3. Reconciliation: fail loud (RAISE EXCEPTION, migration Job aborts) unless
---      every source row's key is present in the destination AND a row-level
---      content hash over the full shared key set matches exactly. A partial or
---      corrupted copy blocks the migration Job instead of silently landing.
---   4. public.live_events is PRESERVED -- not dropped, not ALTER TABLE ... SET
---      SCHEMA'd. This ticket's own scope text requires the source relation to
---      survive until parity is independently reproven post-deploy (see the
---      ground-phase live readback cited in the companion PR body).
+--   2. public.live_events is PRESERVED -- not dropped, not ALTER TABLE ... SET
+--      SCHEMA'd, and (as of OMN-15838) not read from at all by this file.
+--      Backfilling `omninode_internal.live_events` from pre-existing
+--      `public.live_events` history is intentionally out of scope here -- see
+--      the node-owned replacement migration's own header for the same
+--      framing ("a distinct, separately-scoped follow-up if the dashboard
+--      needs continuous history in the internal-schema copy").
 --
 -- WHY THIS TABLE, WHY NOW
 --   node_projection_live_events/contract.yaml has declared
@@ -91,10 +144,8 @@
 --   POSTGRES_DB, so this file switches with `\connect omnidash_analytics`.
 --
 -- IDEMPOTENCY
---   CREATE TABLE IF NOT EXISTS + INSERT ... ON CONFLICT DO NOTHING are both
---   safe to re-run. The reconciliation DO block re-derives its counts/hashes
---   from live catalog state on every apply, so a re-run after a partial prior
---   apply re-validates rather than trusting a cached result.
+--   CREATE TABLE IF NOT EXISTS, the GRANT statements, and CREATE INDEX IF NOT
+--   EXISTS are all safe to re-run.
 --
 -- ROLLBACK
 --   See rollback/rollback_099_create_omninode_internal_live_events.sql.
@@ -270,112 +321,12 @@ GRANT SELECT, INSERT, UPDATE ON omninode_internal.live_events TO omninode_runtim
 ALTER DEFAULT PRIVILEGES IN SCHEMA omninode_internal
   GRANT SELECT, INSERT, UPDATE ON TABLES TO omninode_runtime;
 
--- Transform-copy + reconciliation, guarded by public.live_events actually
--- existing. That table is node-owned DDL
--- (docker/migrations/forward/nodes/node_projection_live_events/0000_create_live_events.sql,
--- vendored from omnimarket) applied by a SEPARATE migration stream
--- (scripts/sync-node-migrations.sh + run-forward-migrations.sh) from this
--- file's own top-level docker/migrations/forward/*.sql stream. The two
--- streams are not guaranteed ordered relative to each other in every
--- consumer: the standalone "Migration Integration Test" CI gate applies only
--- the numbered top-level files (024...098, no nodes/ subtree) against a
--- fresh database, so public.live_events genuinely does not exist in that
--- scope. Guarding on `to_regclass` (not EXECUTE/dynamic SQL -- an ordinary
--- plpgsql IF branch is compiled but not planned/resolved until control flow
--- actually reaches it) makes this file correct in both scopes: the full
--- production apply (where node migrations already ran and populated real
--- rows) and the standalone top-level-only gate (empty destination, no
--- reconciliation to perform, migration still succeeds).
-DO $$
-DECLARE
-  v_src_count     BIGINT;
-  v_dst_count     BIGINT;
-  v_missing_keys  BIGINT;
-  v_src_hash      TEXT;
-  v_dst_hash      TEXT;
-BEGIN
-  IF to_regclass('public.live_events') IS NULL THEN
-    RAISE NOTICE
-      'OMN-15359: public.live_events does not exist in this migration scope '
-      '(node-owned migration not applied here) -- omninode_internal.live_events '
-      'created empty; transform-copy and reconciliation skipped.';
-    RETURN;
-  END IF;
-
-  INSERT INTO omninode_internal.live_events
-    (id, event_id, type, timestamp, source, topic, summary, payload, correlation_id, created_at)
-  SELECT
-    src.id, src.event_id, src.type, src.timestamp, src.source, src.topic,
-    src.summary, src.payload, src.correlation_id, src.created_at
-  FROM public.live_events AS src
-  ON CONFLICT (event_id) DO NOTHING;
-
-  SELECT count(*) INTO v_src_count FROM public.live_events;
-  SELECT count(*) INTO v_dst_count FROM omninode_internal.live_events;
-
-  -- Exact parity, not "at least as many": a destination with MORE rows than
-  -- the source (e.g. a stray row from an unrelated write) is exactly as much
-  -- a reconciliation failure as one with fewer.
-  IF v_dst_count <> v_src_count THEN
-    RAISE EXCEPTION
-      'OMN-15359: omninode_internal.live_events has % row(s), public.live_events '
-      'has % -- row counts must match exactly', v_dst_count, v_src_count;
-  END IF;
-
-  SELECT count(*) INTO v_missing_keys
-    FROM public.live_events AS src
-   WHERE NOT EXISTS (
-     SELECT 1 FROM omninode_internal.live_events AS dst
-      WHERE dst.event_id = src.event_id
-   );
-  IF v_missing_keys > 0 THEN
-    RAISE EXCEPTION
-      'OMN-15359: % source event_id key(s) present in public.live_events but '
-      'missing from omninode_internal.live_events', v_missing_keys;
-  END IF;
-
-  -- Row-content hash over the shared key set, including `id` (the primary
-  -- key, not just event_id the dedup key). Deterministic ordering (ORDER BY
-  -- event_id) makes the aggregate hash reproducible across the source and
-  -- destination scans. Including `id` matters: without it, a destination row
-  -- whose event_id matches but whose id differs (e.g. a stale row from a
-  -- prior partial/corrupted copy that ON CONFLICT (event_id) DO NOTHING left
-  -- in place) would hash identically to the correct row and this check would
-  -- pass over a genuine primary-key divergence.
-  SELECT md5(string_agg(row_hash, '' ORDER BY event_id)) INTO v_src_hash
-    FROM (
-      SELECT
-        event_id,
-        md5(
-          id::text || '|' || event_id || '|' || type || '|' || source || '|' ||
-          topic || '|' || summary || '|' || payload || '|' ||
-          coalesce(correlation_id, '') || '|' || timestamp::text || '|' ||
-          created_at::text
-        ) AS row_hash
-      FROM public.live_events
-    ) AS s;
-
-  SELECT md5(string_agg(row_hash, '' ORDER BY event_id)) INTO v_dst_hash
-    FROM (
-      SELECT
-        event_id,
-        md5(
-          id::text || '|' || event_id || '|' || type || '|' || source || '|' ||
-          topic || '|' || summary || '|' || payload || '|' ||
-          coalesce(correlation_id, '') || '|' || timestamp::text || '|' ||
-          created_at::text
-        ) AS row_hash
-      FROM omninode_internal.live_events
-      WHERE event_id IN (SELECT event_id FROM public.live_events)
-    ) AS d;
-
-  IF v_src_hash IS DISTINCT FROM v_dst_hash THEN
-    RAISE EXCEPTION
-      'OMN-15359: content hash mismatch between public.live_events and '
-      'omninode_internal.live_events over the shared key set (src=%, dst=%)',
-      v_src_hash, v_dst_hash;
-  END IF;
-END$$;
+-- No transform-copy / reconciliation block here (OMN-15838 removed it -- see
+-- the AMENDMENT in the file header for why: it was a non-atomic race against
+-- a live `public.live_events` writer, and data delivery for this table is
+-- already owned by the node-owned replacement migration, not this file).
+-- omninode_internal.live_events is therefore created empty by this file on
+-- every path that executes it -- schema shape and grants only.
 
 -- Indexes matching public.live_events's shape
 -- (docker/migrations/forward/nodes/node_projection_live_events/0000_create_live_events.sql).
