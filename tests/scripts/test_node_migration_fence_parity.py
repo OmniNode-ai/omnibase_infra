@@ -257,11 +257,21 @@ FENCED_REGISTRATION_IDS = (
     "node:node_projection_registration:0001_add_heartbeat_columns.sql",
     "node:node_projection_registration:0002_node_service_registry_tenant_rls.sql",
 )
+# The OMN-15717/OMN-15376 node_pr_review_bot id. Fenced (not SQL-edited) to
+# satisfy the OMN-15376 shape-reconciliation gate without changing the file's
+# content sha256, which is bound to an already-applied production row (see
+# fenced-node-migrations.yaml's own rationale comment for the full argument).
+# Not releasable on any lane today — no ONEX_MIGRATION_LANE value un-gates it.
+FENCED_PR_REVIEW_BOT_IDS = (
+    "node:node_pr_review_bot:001_create_review_bot_bypass_log.sql",
+)
 # Pinned expectation for the manifest content (OMN-15349): the baseline fence,
 # exact and in order. A manifest edit that moves this must update the pin in
 # the same PR — same change-control friction the pre-OMN-15349 shell-literal
 # pin gave, now pointed at the actual single source instead of a copy of it.
-EXPECTED_FENCE = FENCED_DELEGATION_IDS + FENCED_REGISTRATION_IDS
+EXPECTED_FENCE = (
+    FENCED_DELEGATION_IDS + FENCED_REGISTRATION_IDS + FENCED_PR_REVIEW_BOT_IDS
+)
 
 # --- OMN-15349 k8s-side release (operator ruling 21, OMN-15332 comment
 # 1a067542, 2026-07-31T14:05Z GO) --------------------------------------------
@@ -441,8 +451,12 @@ def test_manifest_pins_the_known_baseline_fence() -> None:
     assert found[: len(FENCED_DELEGATION_IDS)] == FENCED_DELEGATION_IDS, (
         "the OMN-14974 delegation fence was disturbed"
     )
-    assert found[len(FENCED_DELEGATION_IDS) :] == FENCED_REGISTRATION_IDS, (
-        "the OMN-15335/OMN-15343 registration hold is not the exact expected trio"
+    registration_end = len(FENCED_DELEGATION_IDS) + len(FENCED_REGISTRATION_IDS)
+    assert (
+        found[len(FENCED_DELEGATION_IDS) : registration_end] == FENCED_REGISTRATION_IDS
+    ), "the OMN-15335/OMN-15343 registration hold is not the exact expected trio"
+    assert found[registration_end:] == FENCED_PR_REVIEW_BOT_IDS, (
+        "the OMN-15717/OMN-15376 node_pr_review_bot hold is not the exact expected id"
     )
 
 
@@ -965,10 +979,12 @@ def test_fence_matches_omninode_infra_k8s_runner() -> None:
         f"baseline does not cover: {stray}"
     )
     effective_k8s_fence = tuple(i for i in baseline if i not in k8s_release)
-    assert effective_k8s_fence == FENCED_DELEGATION_IDS, (
+    expected_effective_k8s_fence = FENCED_DELEGATION_IDS + FENCED_PR_REVIEW_BOT_IDS
+    assert effective_k8s_fence == expected_effective_k8s_fence, (
         "the k8s Job's effective (post-release) fence no longer equals the "
-        "delegation quartet — either the shared manifest baseline or the "
-        f"k8s release changed: {effective_k8s_fence}"
+        "delegation quartet plus the OMN-15717 node_pr_review_bot hold — "
+        "either the shared manifest baseline or the k8s release changed: "
+        f"{effective_k8s_fence}"
     )
 
 

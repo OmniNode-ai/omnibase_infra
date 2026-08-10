@@ -75,12 +75,13 @@ class ModelRegistrationRecord(BaseModel):
         >>> from uuid import uuid4
         >>> from omnibase_core.enums.enum_node_kind import EnumNodeKind
         >>> from omnibase_core.models.primitives.model_semver import ModelSemVer
+        >>> resolved_health_endpoint = "<routing-authority-resolved-health-endpoint>"
         >>> record = ModelRegistrationRecord(
         ...     node_id=uuid4(),
         ...     node_type=EnumNodeKind.EFFECT,
         ...     node_version=ModelSemVer(major=1, minor=0, patch=0),
         ...     capabilities=("registration.storage", "registration.storage.query"),
-        ...     endpoints={"health": "http://localhost:8080/health"},
+        ...     endpoints={"health": resolved_health_endpoint},
         ...     metadata={"team": "platform"},
         ...     created_at=datetime.now(UTC),
         ...     updated_at=datetime.now(UTC),

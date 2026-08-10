@@ -7,9 +7,12 @@ node_type: "EFFECT_GENERIC"
 contract_version:
   major: 1
   minor: 0
-  patch: 1
-node_version: "1.0.1"
+  patch: 2
+node_version: "1.0.2"
 changelog:
+  - version: "1.0.2"
+    ticket: "OMN-15717"
+    change: "Annotate the localhost health-check probe URL with a url-authority-ok marker (LOCAL topology probes a host-mapped Compose port on this deployment host) — no behavior change."
   - version: "1.0.1"
     ticket: "OMN-10705"
     change: "Export HandlerServiceValidate via handlers/__init__.py public API"

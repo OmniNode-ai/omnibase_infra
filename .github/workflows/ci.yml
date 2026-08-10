@@ -2870,6 +2870,46 @@ jobs:
       - name: Check writer-migration coupling
         run: uv run python scripts/check_migration_required.py --ci
 
+  # Node migration declaration check -- every vendored node migration under
+  # docker/migrations/forward/nodes/ must carry a checked-in stream/domain
+  # declaration (application-migrations.tsv), explicit block
+  # (application-migration-blocks.tsv), or audited historical declaration
+  # (legacy-node-migrations.tsv) BEFORE it can reach a runtime.
+  # scripts/validation/validate_application_migration_manifest.py already
+  # implemented this exact check (plus checksum + duplicate + shape
+  # validation) but was never wired anywhere -- only its own test file
+  # exercised it directly. OMN-15717: node_pr_review_bot's
+  # 001_create_review_bot_bypass_log.sql shipped undeclared and this
+  # pre-existing, unwired validator would have caught it; it only failed
+  # closed at a live bootstrap.sql deploy, weeks after merge.
+  node-migration-declaration-check:
+    needs: occ-preflight
+    timeout-minutes: 30
+    name: Node Migration Declaration Check
+    runs-on: >-
+      ${{
+        (github.event_name == 'pull_request' &&
+         github.event.pull_request.head.repo.full_name != github.repository)
+        && fromJSON(vars.OMNI_PUBLIC_PR_RUNS_ON_JSON || '["ubuntu-latest"]')
+        || fromJSON((github.event_name == 'merge_group' && vars.OMNI_REQUIRED_CI_RUNS_ON_JSON) || vars.OMNI_TRUSTED_CI_RUNS_ON_JSON || '["self-hosted","omnibase-ci"]')
+      }}
+    steps:
+      - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+        with:
+          fetch-depth: 0
+
+      - name: Setup Python and uv
+        uses: ./.github/actions/setup-python-uv
+        with:
+          python-version: ${{ env.PYTHON_VERSION }}
+          uv-version: ${{ env.UV_VERSION }}
+          cache-version: ${{ env.CACHE_VERSION }}
+          cache-enabled: "false"
+          install-args: '--reinstall-package omnibase-core --reinstall-package omnibase-spi --frozen'
+
+      - name: Check node migration declarations
+        run: uv run python scripts/validation/validate_application_migration_manifest.py
+
   # Migration integration test -- spins up real Postgres, applies all migrations,
   # and asserts every manifest table exists (OMN-3529)
   migration-integration:

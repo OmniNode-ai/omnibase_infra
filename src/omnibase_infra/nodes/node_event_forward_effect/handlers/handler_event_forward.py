@@ -11,11 +11,13 @@ Ported from archive: omniarchon/python/src/server/nodes/handlers
 from __future__ import annotations
 
 import logging
-import os
 
 import httpx
 
 from omnibase_infra.enums import EnumHandlerType, EnumHandlerTypeCategory
+from omnibase_infra.nodes.node_event_forward_effect.contract_descriptor import (
+    contract_event_forward_backend_url,
+)
 from omnibase_infra.nodes.node_event_forward_effect.models.model_event_forward_request import (
     ModelEventForwardRequest,
 )
@@ -68,9 +70,7 @@ class HandlerEventForward:
         Returns:
             ModelEventForwardResult with HTTP status and success flag.
         """
-        backend_url = os.environ.get(  # ONEX_EXCLUDE: archive port
-            "EVENT_FORWARD_BACKEND_URL", "http://localhost:8000"
-        )
+        backend_url = contract_event_forward_backend_url()
         endpoint_path = _CATEGORY_ENDPOINTS.get(
             request.category, _CATEGORY_ENDPOINTS["generic"]
         )

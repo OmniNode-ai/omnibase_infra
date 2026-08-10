@@ -46,6 +46,8 @@ dependencies:
   - type: "environment"
     name: "EVENT_FORWARD_BACKEND_URL"
     description: "Base URL of the HTTP backend to forward events to"
+descriptor:
+  backend_url: "${env.EVENT_FORWARD_BACKEND_URL}"
 error_handling:
   retry_policy:
     max_retries: 3

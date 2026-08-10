@@ -11,13 +11,12 @@ Usage:
     from omnibase_core.container import ModelONEXContainer
 
     container = ModelONEXContainer()
-    app = create_app(container=container, cors_origins=["http://localhost:3000"])
+    app = create_app(container=container)
 
     # Create app with projection reader
     app = create_app(
         container=container,
         projection_reader=reader,
-        cors_origins=["http://localhost:3000"],
     )
 
     # Run with uvicorn
@@ -173,7 +172,7 @@ def create_app(
                 "CORS_ORIGINS must be configured. "
                 "Set the CORS_ORIGINS environment variable (comma-separated list of allowed origins) "
                 "or pass cors_origins parameter to create_app(). "
-                "Example: CORS_ORIGINS=http://localhost:3000,https://dashboard.example.com",
+                "Example: CORS_ORIGINS=https://dashboard.example.invalid",
                 context=context,
             )
         origins = env_origins.split(",")
@@ -240,7 +239,7 @@ def create_app(
 #     app = create_app(
 #         container=container,
 #         projection_reader=reader,
-#         cors_origins=["http://localhost:3000"],
+#         cors_origins=["https://dashboard.example.invalid"],
 #     )
 #     uvicorn.run(app, host="0.0.0.0", port=8000)
 #
