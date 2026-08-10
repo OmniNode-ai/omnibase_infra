@@ -101,15 +101,20 @@ def _minimal_fixture(tmp_path: Path) -> tuple[Path, Path]:
 def test_checked_in_manifest_is_exact_and_all_blockers_are_explicit() -> None:
     result = _validate()
 
-    # 97 as of OMN-15717 (rebased onto OMN-15732): 94 from the OMN-14894
-    # vendor-parity repair (the manifest mirrors the vendored node migration
-    # tree after restoring the nine house-tenant RLS migrations that are
-    # still source-owned in omnimarket dev), +2 for
-    # node_canary_score_reducer/0003 and node_projection_registration/0004
-    # (see OMN-15361 exemption fix above for why these are the
-    # deadlock-triggering vendor files), +1 for OMN-15717's legacy-declared
-    # node_pr_review_bot/001_create_review_bot_bypass_log.sql.
-    assert len(result.declarations) == 97
+    # 98 as of OMN-15819 (rebased onto OMN-15717): 97 from OMN-15717 (94 from
+    # the OMN-14894 vendor-parity repair -- the manifest mirrors the vendored
+    # node migration tree after restoring the nine house-tenant RLS
+    # migrations that are still source-owned in omnimarket dev -- +2 for
+    # node_canary_score_reducer/0003 and node_projection_registration/0004,
+    # see OMN-15361 exemption fix above for why these are the
+    # deadlock-triggering vendor files, +1 for OMN-15717's legacy-declared
+    # node_pr_review_bot/001_create_review_bot_bypass_log.sql), +1 for
+    # nodes/node_projection_live_events/0002_create_omninode_internal_live_events.sql
+    # -- the node-owned replacement that delivers omninode_internal.live_events
+    # through the node-owned loop, since the flat
+    # 099_create_omninode_internal_live_events.sql migration has no execution
+    # path in the k8s Job that applies flat migrations (cross-DB \connect).
+    assert len(result.declarations) == 98
     assert result.blocked == ()
     assert len(result.legacy_node_declarations) == 2
     assert len(result.cloud_aliases) == 30
