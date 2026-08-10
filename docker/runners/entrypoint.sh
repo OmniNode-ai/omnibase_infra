@@ -134,6 +134,35 @@ LISTENER_RESTART_MAX="${LISTENER_RESTART_MAX:-50}"
 # unconditional, retry-free healthcheck must not flag. Do NOT "restore
 # ordering" by dropping the alert threshold back toward 900s: that is the
 # arithmetic false positive OMN-15233 removed.
+#
+# RE-DERIVATION ATTEMPT (2026-08-10, omn15776-wedge-verify): OMN-15776 asked
+# whether this threshold could be tightened toward sub-900s to close the gap
+# between GitHub's ~600s broker-dispatch-wedge orphan timeout and this
+# watchdog's eventual recycle (see scripts/ci/runner_broker_dispatch_wedge_rerun.sh
+# for that mechanism). Measured LIVE, read-only, against 5 healthy fleet
+# runners' own _diag/Runner_*.log inter-line gaps (not a hypothetical):
+#
+#   runner  log window (real)        max observed gap
+#   -----   ------------------------  -----------------
+#   19      04:50-08:09 UTC (~19.7h)  3007s (~50.1min)
+#   20      Aug8 22:14-Aug9 08:09     3009s (~50.2min)
+#   29      04:04-08:09 UTC (~4.1h)   2960s (~49.3min)
+#   2, 4    partial windows (fleet    319-508s (windows
+#           under load, no full            did not span a
+#           idle cycle observed)           full idle cycle)
+#
+# Max observed normal-idle gap across the sample: 3009s. This corroborates,
+# not contradicts, the 2026-07-23 finding above (~50min benign ceiling) and
+# the independent OMN-15233 healthcheck.sh derivation (~50min OAuth/AAD
+# token-refresh cadence while idle). CONCLUSION: sub-900s detection is NOT
+# supported by evidence — a threshold anywhere near 900s-3000s would
+# reproduce the exact mass-recycle false-positive class OMN-15233 fixed,
+# just on this watchdog's KILL path instead of the healthcheck's ALERT path.
+# 3600s already sits ~590-600s (~20%) above the measured ceiling, which is
+# the intended margin, not slack to cut. Threshold left UNCHANGED at 3600s.
+# The broker-dispatch-wedge false-red this was evaluated against is instead
+# closed by scripts/ci/runner_broker_dispatch_wedge_rerun.sh's targeted
+# rerun, which does not depend on this watchdog's timing.
 LISTENER_HEARTBEAT_MAX_AGE_SECONDS="${LISTENER_HEARTBEAT_MAX_AGE_SECONDS:-3600}"
 LISTENER_HEARTBEAT_MISSES="${LISTENER_HEARTBEAT_MISSES:-3}"
 
