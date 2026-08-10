@@ -9,7 +9,7 @@
 # contract). Build args MUST match docker/runners/runner-image.lock.json — CI
 # verifies the bound identity via scripts/ci/runner_image_identity.py.
 
-ARG RUNNER_VERSION=2.334.0
+ARG RUNNER_VERSION=2.336.0
 ARG GH_VERSION=2.67.0
 ARG KUBECTL_VERSION=1.32.1
 # uv pinned to the shared CI env (canary) version so the image binding is truthful.
@@ -184,8 +184,8 @@ RUN groupadd --gid 1001 runner \
     && usermod -aG docker runner
 
 # Download and SHA256-verify GitHub Actions runner binary
-# SHA256 for actions-runner-linux-x64-2.334.0.tar.gz
-ENV RUNNER_SHA256=048024cd2c848eb6f14d5646d56c13a4def2ae7ee3ad12122bee960c56f3d271
+# SHA256 for actions-runner-linux-x64-2.336.0.tar.gz
+ENV RUNNER_SHA256=04cf0be1aff4c3ec3554466c39124ca250e3effd8873bb7e8d68535aa9505d5d
 
 RUN mkdir -p "${RUNNER_HOME}" \
     && cd "${RUNNER_HOME}" \
