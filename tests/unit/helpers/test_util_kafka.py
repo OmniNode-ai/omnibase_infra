@@ -11,8 +11,11 @@ from __future__ import annotations
 
 import pytest
 
+from omnibase_infra.errors import InfraUnavailableError
+from tests.helpers import util_kafka
 from tests.helpers.util_kafka import (
     KafkaConfigValidationResult,
+    KafkaTopicManager,
     parse_bootstrap_servers,
     validate_bootstrap_servers,
 )
@@ -395,3 +398,78 @@ class TestKafkaConfigValidationResultBool:
             assert not invalid_result.is_valid
         else:
             pytest.fail("Invalid result should be falsy")
+
+
+class TestKafkaTopicManagerCreateTopicFailClosed:
+    """Regression tests for the fail-open topic-existence bug (OMN-15789).
+
+    KafkaTopicManager.create_topic() previously discarded the bool return
+    value of wait_for_topic_metadata() at both call sites (the create path
+    and the TopicAlreadyExistsError path). A topic whose metadata never
+    actually propagated to the broker (wait timed out) was still reported
+    by create_topic as created successfully -- callers proceeded against a
+    topic that provably does not exist on the broker. Both sites must now
+    raise InfraUnavailableError instead of silently returning.
+    """
+
+    async def test_create_topic_raises_when_metadata_never_propagates(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """create_topic must raise when wait_for_topic_metadata returns False
+        on the fresh-create path (no errors reported by create_topics)."""
+
+        class _FakeCreateTopicsResponse:
+            topic_errors: list[object] = []
+
+        class _FakeAdminClient:
+            async def create_topics(
+                self, new_topics: object
+            ) -> _FakeCreateTopicsResponse:
+                return _FakeCreateTopicsResponse()
+
+        async def _fake_wait_for_topic_metadata(
+            admin_client: object,
+            topic_name: str,
+            timeout: float = 10.0,
+            expected_partitions: int = 1,
+        ) -> bool:
+            return False
+
+        monkeypatch.setattr(
+            util_kafka, "wait_for_topic_metadata", _fake_wait_for_topic_metadata
+        )
+
+        manager = KafkaTopicManager("localhost:9092")
+        manager._admin = _FakeAdminClient()
+
+        with pytest.raises(InfraUnavailableError, match="metadata did not propagate"):
+            await manager.create_topic("test.topic.never-propagates")
+
+    async def test_create_topic_raises_when_already_exists_and_metadata_never_propagates(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """The TopicAlreadyExistsError path must also raise, not silently
+        pass, when the post-existence metadata wait times out."""
+        from aiokafka.errors import TopicAlreadyExistsError
+
+        class _FakeAdminClient:
+            async def create_topics(self, new_topics: object) -> object:
+                raise TopicAlreadyExistsError("already exists")
+
+        async def _fake_wait_for_topic_metadata(
+            admin_client: object,
+            topic_name: str,
+            timeout: float = 10.0,
+            expected_partitions: int = 1,
+        ) -> bool:
+            return False
+
+        monkeypatch.setattr(
+            util_kafka, "wait_for_topic_metadata", _fake_wait_for_topic_metadata
+        )
+
+        manager = KafkaTopicManager("localhost:9092")
+        manager._admin = _FakeAdminClient()
+
+        with pytest.raises(InfraUnavailableError, match="already existed"):
+            await manager.create_topic("test.topic.already-exists")
