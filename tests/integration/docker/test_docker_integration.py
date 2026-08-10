@@ -16,6 +16,39 @@ Test categories:
 
 This test suite addresses PR #32 reviewer feedback requesting CI/CD
 integration tests for Docker infrastructure implementation.
+
+Cold-build timeout budget (OMN-15567)
+--------------------------------------
+The nightly suite runs under a blanket ``pytest --timeout=300``. Two kinds of
+test in this module actually invoke ``docker build`` and need a much larger
+budget than that:
+
+1. The two explicit build tests in ``TestDockerBuild``
+   (``test_build_succeeds_with_public_deps``,
+   ``test_build_uses_buildkit_cache_mounts``) carry their own function-level
+   ``@pytest.mark.timeout(BUILD_TIMEOUT + BUILD_TEST_TIMEOUT_MARGIN_SECONDS)``.
+2. The module-scoped ``built_test_image`` fixture (defined in ``conftest.py``)
+   does the same build for every other class below that consumes it. Because
+   the fixture is module-scoped, only the *first* test in the module that
+   requests it actually pays the build cost -- and pytest-timeout charges
+   that cost to whichever test item happens to be first (``func_only``
+   defaults to False, so the timer spans setup+call+teardown of that item,
+   not just its body).
+
+   Rather than mark only "the currently-first" consumer -- which would
+   silently regress the instant a test is added, removed, or reordered ahead
+   of it -- every class below that declares a fixture parameter typed
+   ``built_test_image: str`` carries its own class-level
+   ``pytestmark = [pytest.mark.timeout(BUILD_TIMEOUT + BUILD_TEST_TIMEOUT_MARGIN_SECONDS)]``.
+   ``pytest.Item.get_closest_marker("timeout")`` resolves per test item by
+   walking function -> class -> module, so no matter which member of one of
+   these classes pytest picks as the actual first consumer, that item's
+   closest "timeout" marker is always at least the cold-build budget. A
+   function-level marker (as in ``TestDockerBuild``'s two explicit build
+   tests) still wins over the class-level one where both are present, since
+   it is closer. This makes the budget invariant to collection/execution
+   order within the file, and any new test added to one of these classes
+   inherits it automatically instead of needing its own opt-in marker.
 """
 
 from __future__ import annotations
@@ -32,6 +65,11 @@ from pathlib import Path
 
 import pytest
 import yaml
+
+# OMN-15567: _run_subprocess_with_group_kill lives in conftest.py so the
+# built_test_image fixture and these explicit build tests share one
+# group-kill implementation -- see conftest.py's docstring on the function.
+from .conftest import _run_subprocess_with_group_kill
 
 # =============================================================================
 # Test Markers and Constants
@@ -51,6 +89,16 @@ BUILD_TIMEOUT = int(os.getenv("OMNI_DOCKER_BUILD_TIMEOUT_SECONDS", "1200"))
 CONTAINER_START_TIMEOUT = int(os.getenv("OMNI_DOCKER_CONTAINER_TIMEOUT_SECONDS", "180"))
 HEALTH_CHECK_TIMEOUT = 90
 SHUTDOWN_TIMEOUT = int(os.getenv("OMNI_DOCKER_SHUTDOWN_TIMEOUT_SECONDS", "120"))
+
+# Headroom above BUILD_TIMEOUT for the pytest-level per-test timeout marker.
+# OMN-15567: nightly-integration.yml invokes the whole suite with a blanket
+# `pytest --timeout=300 --timeout-method=thread`, sized for the rest of the
+# suite. Without a per-test `@pytest.mark.timeout(...)` override, that 300s
+# CLI ceiling silently pre-empts BUILD_TIMEOUT (default 1200s) and kills a
+# cold-cache `docker build` long before the subprocess-level timeout the test
+# was actually designed around ever fires. pytest-timeout's marker-level
+# setting takes precedence over the CLI flag for the tests that declare it.
+BUILD_TEST_TIMEOUT_MARGIN_SECONDS = 60
 
 
 # =============================================================================
@@ -95,7 +143,16 @@ def extract_profiles_from_compose(compose_path: Path) -> set[str]:
 class TestDockerBuild:
     """Tests for Docker image build process."""
 
+    # OMN-15567: test_build_produces_reasonable_image_size (below) consumes
+    # built_test_image and has no function-level timeout marker of its own;
+    # this class-level marker is its fallback budget. See the module
+    # docstring "Cold-build timeout budget" section for why.
+    pytestmark = [
+        pytest.mark.timeout(BUILD_TIMEOUT + BUILD_TEST_TIMEOUT_MARGIN_SECONDS)
+    ]
+
     @pytest.mark.slow
+    @pytest.mark.timeout(BUILD_TIMEOUT + BUILD_TEST_TIMEOUT_MARGIN_SECONDS)
     def test_build_succeeds_with_public_deps(
         self,
         docker_available: bool,
@@ -129,14 +186,10 @@ class TestDockerBuild:
             env = os.environ.copy()
             env["DOCKER_BUILDKIT"] = "1"
 
-            result = subprocess.run(
+            result = _run_subprocess_with_group_kill(
                 build_cmd,
-                capture_output=True,
-                text=True,
                 timeout=BUILD_TIMEOUT,
                 env=env,
-                check=False,
-                shell=False,
             )
 
             assert result.returncode == 0, (
@@ -156,6 +209,7 @@ class TestDockerBuild:
             )
 
     @pytest.mark.slow
+    @pytest.mark.timeout(BUILD_TIMEOUT + BUILD_TEST_TIMEOUT_MARGIN_SECONDS)
     def test_build_uses_buildkit_cache_mounts(
         self,
         buildkit_available: bool,
@@ -190,14 +244,10 @@ class TestDockerBuild:
                 str(project_root),
             ]
 
-            first_result = subprocess.run(
+            first_result = _run_subprocess_with_group_kill(
                 first_build_cmd,
-                capture_output=True,
-                text=True,
                 timeout=BUILD_TIMEOUT,
                 env=env,
-                check=False,
-                shell=False,
             )
 
             assert first_result.returncode == 0, "First build failed"
@@ -274,6 +324,15 @@ class TestDockerBuild:
 @pytest.mark.integration
 class TestDockerSecurity:
     """Tests for Docker security properties."""
+
+    # OMN-15567: one of this class's tests may be the first consumer of the
+    # module-scoped built_test_image fixture (order-dependent -- see the
+    # module docstring's "Cold-build timeout budget" section). This
+    # class-level marker guarantees the cold-build budget applies regardless
+    # of which one it is.
+    pytestmark = [
+        pytest.mark.timeout(BUILD_TIMEOUT + BUILD_TEST_TIMEOUT_MARGIN_SECONDS)
+    ]
 
     @pytest.mark.slow
     def test_container_runs_as_non_root_user(
@@ -443,6 +502,12 @@ class TestDockerSecurity:
 @pytest.mark.integration
 class TestDockerRuntime:
     """Tests for Docker container runtime behavior."""
+
+    # OMN-15567: see TestDockerSecurity above -- same module-scoped
+    # built_test_image first-consumer hazard.
+    pytestmark = [
+        pytest.mark.timeout(BUILD_TIMEOUT + BUILD_TEST_TIMEOUT_MARGIN_SECONDS)
+    ]
 
     @pytest.mark.slow
     def test_container_starts_successfully(
@@ -697,6 +762,12 @@ class TestDockerRuntime:
 @pytest.mark.integration
 class TestDockerHealthCheck:
     """Tests for Docker health check functionality."""
+
+    # OMN-15567: see TestDockerSecurity above -- same module-scoped
+    # built_test_image first-consumer hazard.
+    pytestmark = [
+        pytest.mark.timeout(BUILD_TIMEOUT + BUILD_TEST_TIMEOUT_MARGIN_SECONDS)
+    ]
 
     @pytest.mark.slow
     def test_health_endpoint_accessible(
@@ -1213,6 +1284,12 @@ class TestDockerComposeProfiles:
 @pytest.mark.integration
 class TestDockerImageLabels:
     """Tests for Docker image OCI labels."""
+
+    # OMN-15567: see TestDockerSecurity above -- same module-scoped
+    # built_test_image first-consumer hazard.
+    pytestmark = [
+        pytest.mark.timeout(BUILD_TIMEOUT + BUILD_TEST_TIMEOUT_MARGIN_SECONDS)
+    ]
 
     @pytest.mark.slow
     def test_image_has_oci_labels(
