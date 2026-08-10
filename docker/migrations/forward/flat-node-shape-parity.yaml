@@ -42,6 +42,8 @@ tables:
     status: identical
   evidence_readiness_aggregate_projection:
     status: identical
+  live_events:
+    status: identical
   llm_call_metrics:
     status: identical
   llm_cost_aggregates:

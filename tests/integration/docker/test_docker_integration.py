@@ -1094,7 +1094,11 @@ COMPOSE_CONFIG_RENDER_ENV: dict[str, str] = {
     "DEV_RUNTIME_WORKER_CAPABILITIES": "workflow.dispatch,contract.update,runtime.worker",
     "DEV_RUNTIME_WORKER_SECRET_RESOLVER_CONFIG_JSON": _SECRET_RESOLVER_CONFIG_JSON,
     "DEV_RUNTIME_WORKER_SECRET_RESOLVER_CONFIG_PATH": _SECRET_RESOLVER_CONFIG_PATH,
-    "DEV_BOUNDARY_DLQ_ENABLED": "false",
+    # OMN-14551: dev-lane flipped ON 2026-08-05; kept in sync with the
+    # rendered docker/runtime-policy.env value (this fixture only needs to
+    # satisfy the compose `:?` fail-fast, but tracking the live value avoids
+    # a misleading fixture).
+    "DEV_BOUNDARY_DLQ_ENABLED": "true",
     # OMN-14968: runtime-worker's deploy.replicas is `:?`-required on the
     # lane-prefixed policy value (it was a bare ${WORKER_REPLICAS:-0} that no
     # surface exported, so the dev lane silently rendered zero replicas).

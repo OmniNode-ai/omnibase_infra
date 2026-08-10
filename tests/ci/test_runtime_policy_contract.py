@@ -257,7 +257,9 @@ def test_boundary_dlq_enabled_declared_explicitly_for_every_lane() -> None:
     """
     contract = _load_contract()
 
-    assert contract.profiles["dev"].boundary_dlq_enabled is False
+    # OMN-14551: flipped ON 2026-08-05 after a dedicated dev-lane live proof
+    # (see the contract's boundary_dlq_enabled comment on the dev profile).
+    assert contract.profiles["dev"].boundary_dlq_enabled is True
     assert contract.profiles["stability-test"].boundary_dlq_enabled is True
     assert contract.profiles["judge"].boundary_dlq_enabled is False
     assert contract.profiles["prod"].boundary_dlq_enabled is False
@@ -267,7 +269,7 @@ def test_boundary_dlq_enabled_rendered_into_policy_env_for_every_lane() -> None:
     """OMN-14551: the renderer emits ``{PROFILE}_BOUNDARY_DLQ_ENABLED`` per lane."""
     env = _load_dotenv(POLICY_ENV_PATH)
 
-    assert env["DEV_BOUNDARY_DLQ_ENABLED"] == "false"
+    assert env["DEV_BOUNDARY_DLQ_ENABLED"] == "true"
     assert env["STABILITY_TEST_BOUNDARY_DLQ_ENABLED"] == "true"
     assert env["JUDGE_BOUNDARY_DLQ_ENABLED"] == "false"
     assert env["PROD_BOUNDARY_DLQ_ENABLED"] == "false"
@@ -295,3 +297,16 @@ def test_stability_test_boundary_dlq_wired_fail_fast_prod_and_judge_untouched() 
     assert "${STABILITY_TEST_BOUNDARY_DLQ_ENABLED:-" not in stability_text
     assert "ONEX_BOUNDARY_DLQ_ENABLED" not in prod_text
     assert "ONEX_BOUNDARY_DLQ_ENABLED" not in judge_text
+
+
+def test_dev_boundary_dlq_wired_fail_fast() -> None:
+    """OMN-14551 dev-lane flip (2026-08-05): dev's runtime containers reference
+    the ledgered ``DEV_BOUNDARY_DLQ_ENABLED`` value fail-fast (``:?``, no
+    silent ``:-false`` default) via the shared ``x-runtime-env`` anchor.
+    """
+    dev_text = COMPOSE_PATH.read_text(encoding="utf-8")
+
+    assert "ONEX_BOUNDARY_DLQ_ENABLED: ${DEV_BOUNDARY_DLQ_ENABLED:?" in dev_text, (
+        "expected the flag wired fail-fast on the shared runtime-env anchor"
+    )
+    assert "${DEV_BOUNDARY_DLQ_ENABLED:-" not in dev_text
