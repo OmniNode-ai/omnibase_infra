@@ -43,6 +43,9 @@ CODEQL_CONFIG = REPO_ROOT / ".github" / "codeql" / "codeql-config.yml"
 SETUP_PYTHON_UV_ACTION = (
     REPO_ROOT / ".github" / "actions" / "setup-python-uv" / "action.yml"
 )
+CR_THREAD_GATE_CALLER_WORKFLOW = (
+    REPO_ROOT / ".github" / "workflows" / "cr-thread-gate-caller.yml"
+)
 CHECKOUT_V7_SHA = "9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0"
 CODEQL_V4_SHA = "dc73d59c2d7bd4f8194098a91219eeee6d8a1719"
 OMNICLAUDE_REJECT_SKIP_NO_CHECKOUT_SHA = "80de61fd1fee04abdeb6918e7f91cf820717e6a8"
@@ -908,3 +911,103 @@ def test_codeql_uses_repo_config_that_ignores_github_metadata() -> None:
 
     assert config["paths"] == ["src", "scripts", "tests"]
     assert ".github/**" in config["paths-ignore"]
+
+
+_CR_GATE_FALLBACK_CHAIN = (
+    "github.event.pull_request.number || "
+    "github.event.issue.number || "
+    "github.event.merge_group.head_sha || "
+    "github.run_id"
+)
+
+
+def _normalized_group(node: dict[str, Any]) -> str:
+    group = node["concurrency"]["group"]
+    assert isinstance(group, str)
+    return " ".join(group.split())
+
+
+def _render_cr_gate_group(
+    normalized_template: str, *, event_name: str, number: int
+) -> str:
+    """Minimal renderer for cr-thread-gate-caller.yml's two group templates.
+
+    Only understands the exact `||`-chained fallback this workflow uses
+    (`github.event.pull_request.number || github.event.issue.number || ...`,
+    resolved GitHub-Actions-style: first non-empty/non-null operand wins)
+    plus the literal `github.workflow` / `github.event_name` tokens. Not a
+    general expression evaluator — sufficient to prove the OMN-15815
+    group-key non-collision property for pull_request vs. issue_comment.
+    """
+    fallback_expr = f"${{{{ {_CR_GATE_FALLBACK_CHAIN} }}}}"
+    assert fallback_expr in normalized_template, (
+        "cr-thread-gate-caller.yml concurrency group's fallback chain "
+        "drifted from the shape this test renders — update the renderer "
+        "alongside any real template change"
+    )
+    if event_name in ("pull_request", "issue_comment"):
+        resolved_number = str(number)
+    else:  # pragma: no cover - only two event types exercised below
+        resolved_number = "RUN_ID"
+    rendered = normalized_template.replace(fallback_expr, resolved_number)
+    rendered = rendered.replace("${{ github.workflow }}", "CR Thread Gate (caller)")
+    rendered = rendered.replace("${{ github.event_name }}", event_name)
+    return rendered
+
+
+def test_cr_thread_gate_caller_concurrency_group_is_event_scoped() -> None:
+    """OMN-15815 regression: a CodeRabbit issue_comment run must never share
+    a concurrency group with the pull_request run of the same PR.
+
+    Both the workflow-level and job-level `concurrency.group` templates
+    fall back through `github.event.pull_request.number ||
+    github.event.issue.number || ...` with no event discriminator — a
+    pull_request run and an issue_comment run on the SAME PR resolve to the
+    identical group key. With cancel-in-progress: true, CodeRabbit editing
+    its summary comment (an issue_comment event) cancels the in-flight real
+    gate run; the CodeRabbit-actored run then skips its own gate job (see
+    the job's actor-filtered `if:`), so no replacement check-run is ever
+    emitted and the required "gate / CodeRabbit Thread Check" context is
+    left stuck cancelled with no successor.
+    """
+    workflow = _load_yaml(CR_THREAD_GATE_CALLER_WORKFLOW)
+    gate_job = workflow["jobs"]["gate"]
+
+    assert workflow["concurrency"]["cancel-in-progress"] is True
+    assert gate_job["concurrency"]["cancel-in-progress"] is True
+
+    for node, label in ((workflow, "workflow-level"), (gate_job, "job-level")):
+        template = _normalized_group(node)
+        assert "${{ github.event_name }}" in template, (
+            f"{label} concurrency group must key on github.event_name "
+            "(OMN-15815) so issue_comment runs can't cancel pull_request runs"
+        )
+
+        pull_request_key = _render_cr_gate_group(
+            template, event_name="pull_request", number=2663
+        )
+        issue_comment_key = _render_cr_gate_group(
+            template, event_name="issue_comment", number=2663
+        )
+        assert pull_request_key != issue_comment_key, (
+            f"{label} concurrency group collides across pull_request and "
+            "issue_comment for the identical PR number — this is exactly "
+            "the OMN-15815 self-cancellation shape"
+        )
+
+        # Same event type + same PR/issue number must still coalesce: two
+        # rapid pushes to one PR (pull_request) still supersede each other,
+        # and rapid consecutive CodeRabbit comment edits on one PR
+        # (issue_comment) still dedup among themselves.
+        assert pull_request_key == _render_cr_gate_group(
+            template, event_name="pull_request", number=2663
+        )
+        assert issue_comment_key == _render_cr_gate_group(
+            template, event_name="issue_comment", number=2663
+        )
+
+        # Different PRs of the same event type must still resolve to
+        # distinct groups (no cross-PR collision regression).
+        assert pull_request_key != _render_cr_gate_group(
+            template, event_name="pull_request", number=2666
+        )
