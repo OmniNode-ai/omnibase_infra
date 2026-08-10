@@ -1,5 +1,29 @@
 -- onex-create-database: omnidash_analytics
 -- =============================================================================
+-- TOMBSTONE (OMN-15819, 2026-08-10): this file is UNDELIVERABLE via the k8s
+-- Job that applies docker/migrations/forward/*.sql
+-- (omninode_infra/k8s/migrations/omnibase-infra-migrate.yaml). That Job owns
+-- only the omnibase_infra database; its flat loop's `psql -f` apply is
+-- gated on `directive_db == $DB_NAME` and is UNREACHABLE for this file's
+-- `\connect omnidash_analytics` below, in that loop or any other in the
+-- runner. It has never executed anywhere -- live-confirmed 2026-08-10
+-- (omninode_internal schema exists, out-of-band-created, but this file's
+-- own CREATE SCHEMA statement is not why). Kept in place, byte-unchanged
+-- below this header, as ledgered history (migration files are append-only)
+-- -- do NOT delete it and do NOT try to make it deliverable in place; the
+-- fix is the node-owned migration under
+-- docker/migrations/forward/nodes/node_projection_live_events/, which
+-- ASSERTS (does not create) this schema as a guarded precondition of the
+-- table it owns (0002_create_omninode_internal_live_events.sql) -- the
+-- schema itself is operator-provisioned out-of-band, not created by that
+-- replacement or by this file's own CREATE SCHEMA on any path that
+-- actually executes. Runner honesty for
+-- this class of file (no silent false-"applied" ledger row; fail-closed for
+-- any FUTURE cross-DB flat file) is the companion PR in omninode_infra.
+-- Static pre-merge enforcement in THIS repo:
+-- tests/ci/test_flat_migration_no_foreign_connect_gate.py /
+-- docker/migrations/forward/cross-database-flat-migrations.yaml.
+-- =============================================================================
 -- MIGRATION: physically create the omninode_internal schema (empty, additive)
 -- =============================================================================
 -- Ticket: OMN-15359 (P2-P4 build classified schemas and migrate internal,
