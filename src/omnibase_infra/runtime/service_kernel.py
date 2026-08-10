@@ -3205,6 +3205,36 @@ async def bootstrap() -> int:
             else auto_wiring_manifest_discovered
         )
         if _introspection_manifest is not None:
+            # OMN-10856: bind runtime profile + image/deployment SHA identity
+            # onto the served manifest so a reported topology can be tied to
+            # a specific deployed build. contracts/errors are carried through
+            # unchanged (single source — see bind_introspection_manifest_identity).
+            # Env reads happen HERE, not in the auto_wiring package, because
+            # this file is the approved env-read boundary
+            # (scripts/check-env-reads.sh). ONEX_IMAGE_DIGEST reuses the same
+            # var already read below at publish_runtime_manifest(image_digest=...)
+            # (OMN-11196/OMN-11197) rather than inventing a second name for
+            # the same concept.
+            from omnibase_infra.runtime.auto_wiring.introspection_manifest_identity import (
+                ENV_VAR_DEPLOYMENT_SHA,
+                ENV_VAR_IMAGE_SHA,
+                bind_introspection_manifest_identity,
+            )
+            from omnibase_infra.runtime.auto_wiring.models.model_runtime_build_sha import (
+                ModelRuntimeBuildSha,
+            )
+
+            _introspection_manifest = bind_introspection_manifest_identity(
+                _introspection_manifest,
+                runtime_profile=kernel_profile.name,
+                image_sha=ModelRuntimeBuildSha.from_raw(
+                    os.environ.get(ENV_VAR_IMAGE_SHA), source_name=ENV_VAR_IMAGE_SHA
+                ),
+                deployment_sha=ModelRuntimeBuildSha.from_raw(
+                    os.environ.get(ENV_VAR_DEPLOYMENT_SHA),
+                    source_name=ENV_VAR_DEPLOYMENT_SHA,
+                ),
+            )
             health_server.attach_manifest(_introspection_manifest)
 
         # OMN-13768: the long-running Kafka subscription work (per-contract
