@@ -59,6 +59,7 @@ def _runtime_config() -> ModelGatewayForwarderRuntimeConfig:
             bootstrap_servers="redpanda:9092",
             environment="gateway-local",
             enable_auto_commit=False,
+            auto_offset_reset="earliest",
         ),
         cloud_bus=ModelKafkaEventBusConfig(
             bootstrap_servers="b-1.example.kafka.amazonaws.com:9098",
@@ -67,6 +68,7 @@ def _runtime_config() -> ModelGatewayForwarderRuntimeConfig:
             sasl_mechanism="AWS_MSK_IAM",
             msk_region="us-east-1",
             enable_auto_commit=False,
+            auto_offset_reset="earliest",
         ),
     )
 
@@ -109,6 +111,45 @@ def test_runtime_config_rejects_source_auto_commit() -> None:
             local_bus=auto_commit_local,
             cloud_bus=config.cloud_bus,
         )
+
+
+def test_runtime_config_rejects_latest_auto_offset_reset_on_local_leg() -> None:
+    """OMN-15781: a `latest` local leg drops any backlog produced during an outage.
+
+    ``enable_auto_commit=false`` means offsets commit only after durable
+    destination delivery -- but that guarantee is moot if the consumer starts
+    reading from ``latest`` on rejoin, since the backlog produced while the
+    consumer group was unjoined is never in the read window at all.
+    """
+    config = _runtime_config()
+    latest_local = config.local_bus.model_copy(update={"auto_offset_reset": "latest"})
+
+    with pytest.raises(ValueError, match="auto_offset_reset=earliest"):
+        ModelGatewayForwarderRuntimeConfig(
+            forwarder=config.forwarder,
+            local_bus=latest_local,
+            cloud_bus=config.cloud_bus,
+        )
+
+
+def test_runtime_config_rejects_latest_auto_offset_reset_on_cloud_leg() -> None:
+    """OMN-15781: same hazard on the cloud leg -- both legs are pull-based."""
+    config = _runtime_config()
+    latest_cloud = config.cloud_bus.model_copy(update={"auto_offset_reset": "latest"})
+
+    with pytest.raises(ValueError, match="auto_offset_reset=earliest"):
+        ModelGatewayForwarderRuntimeConfig(
+            forwarder=config.forwarder,
+            local_bus=config.local_bus,
+            cloud_bus=latest_cloud,
+        )
+
+
+def test_runtime_config_accepts_earliest_auto_offset_reset() -> None:
+    """Sanity: the correct value is not itself rejected."""
+    config = _runtime_config()
+    assert config.local_bus.auto_offset_reset == "earliest"
+    assert config.cloud_bus.auto_offset_reset == "earliest"
 
 
 def test_runtime_config_loader_round_trips_yaml(tmp_path: Path) -> None:
@@ -197,6 +238,15 @@ def test_staging_canary_resolves_topics_from_node_contract() -> None:
     assert len(loaded.forwarder.mirror_topics.inbound) == 3
     assert len(loaded.forwarder.mirror_topics.outbound) == 6
     assert loaded.local_bus.bootstrap_servers == "redpanda:9092"
+    # OMN-15781: deployed config must resolve to "earliest" on both legs, not
+    # the model default -- a "latest" resolved leg here silently drops any
+    # backlog produced while the consumer group was unjoined (crash/rejoin
+    # window), and this is the exact deployed config the production process
+    # loads. The runtime-config validator also fails closed on "latest" (see
+    # test_runtime_config_rejects_latest_auto_offset_reset_on_*_leg above),
+    # so a regression here would fail at load time, not just this assertion.
+    assert loaded.local_bus.auto_offset_reset == "earliest"
+    assert loaded.cloud_bus.auto_offset_reset == "earliest"
     assert loaded.forwarder.canary.topic == "onex.evt.omnibase-infra.gateway-canary.v1"
     assert loaded.forwarder.canary.cadence_seconds == 30
 

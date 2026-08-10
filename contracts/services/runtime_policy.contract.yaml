@@ -28,10 +28,15 @@ profiles:
     effects_port: 8086
     topic_provisioner_max_partitions: 0
     # OMN-14551: boundary DLQ routing (auto-wired consume boundary,
-    # ONEX_BOUNDARY_DLQ_ENABLED) stays OFF here. This lane is currently cold;
-    # flip only after a dedicated dev-lane live proof, not bundled with the
-    # stability-test G6 proof this contract change lands.
-    boundary_dlq_enabled: false
+    # ONEX_BOUNDARY_DLQ_ENABLED) flipped ON 2026-08-05 after a dedicated
+    # dev-lane live proof (the lane is warm, not cold, as of this flip --
+    # supersedes the prior "currently cold" framing). Ruling basis:
+    # never-silent-drop doctrine + the measured live swallow escalation on
+    # this lane (OMN-15447, 9 boundary_swallow_observed occurrences
+    # 2026-08-05, dlq_enabled=False on every one). Best-effort DLQ delivery
+    # only (no nack/redelivery) per the forbid-verify ruling on
+    # OMN-14507/OMN-14548 -- see stability-test's identical stance above.
+    boundary_dlq_enabled: true
     secret_resolver_config_path: /app/data/delegation/secret_resolver.yaml
     secret_resolver_mappings:
       - logical_name: llm.openrouter.api_key

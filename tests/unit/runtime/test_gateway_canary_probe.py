@@ -50,6 +50,7 @@ def _bus_config() -> ModelKafkaEventBusConfig:
         bootstrap_servers="redpanda:9092",
         environment="gateway-test",
         enable_auto_commit=False,
+        auto_offset_reset="earliest",
     )
 
 
@@ -198,6 +199,7 @@ async def test_run_canary_check_distinguishes_local_healthy_cloud_dead(
             sasl_mechanism="AWS_MSK_IAM",
             msk_region="us-east-1",
             enable_auto_commit=False,
+            auto_offset_reset="earliest",
         ),
     )
 
@@ -260,6 +262,7 @@ async def test_probe_reports_overall_fail_when_either_leg_fails(
             sasl_mechanism="AWS_MSK_IAM",
             msk_region="us-east-1",
             enable_auto_commit=False,
+            auto_offset_reset="earliest",
         ),
     )
 
@@ -338,6 +341,7 @@ async def test_probe_serves_cached_result_within_cadence(tmp_path: Path) -> None
                 sasl_mechanism="AWS_MSK_IAM",
                 msk_region="us-east-1",
                 enable_auto_commit=False,
+                auto_offset_reset="earliest",
             ),
         )
         passed, report = await gateway_canary_probe.probe(config, state_path=state_path)
