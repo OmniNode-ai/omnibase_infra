@@ -42,7 +42,7 @@ run will consume:
 
 > Broker auto-create is OFF
 
-```
+```console
 $ aws kafka describe-configuration-revision \
     --arn arn:aws:kafka:us-east-1:272493677981:configuration/omninode-dev-msk-config/930d30cc-105c-4c3e-ab2a-aa6cfb0a5b0b-14 \
     --revision 1 --region us-east-1 --query ServerProperties --output text | base64 -d
@@ -54,14 +54,49 @@ min.insync.replicas=1
 num.partitions=3
 ```
 
-Full output: `probes-round4/msk_configuration_server_properties.txt`. **FILLED —
-live.** This is the cluster-wide configuration applied to `omninode-dev-msk`
-(config ARN above, revision 1, the same config the round-4 candidate would connect
-to). `auto.create.topics.enable=false` confirmed.
+Full output: `probes-round4/msk_configuration_server_properties.txt`. This is
+revision **1** of the config, which is **not** proof it is the revision bound to the
+live cluster — the round-4 evidence CodeRabbit review (2026-08-08) correctly flagged
+that the field was FILLED off a configuration revision without confirming that
+revision is the one the active cluster actually runs.
+
+**Cluster-binding readback, added to close that gap** (2026-08-09, same AWS SSO
+session, live/read-only):
+
+```console
+$ aws kafka describe-cluster --region us-east-1 \
+    --cluster-arn arn:aws:kafka:us-east-1:272493677981:cluster/omninode-dev-msk/88ad72bc-f70c-4549-93bc-c392b965f424-14
+ClusterArn:            arn:aws:kafka:us-east-1:272493677981:cluster/omninode-dev-msk/88ad72bc-f70c-4549-93bc-c392b965f424-14
+State:                 ACTIVE
+PublicAccess.Type:     DISABLED
+CurrentBrokerSoftwareInfo.ConfigurationArn:      arn:aws:kafka:us-east-1:272493677981:configuration/omninode-dev-msk-config/930d30cc-105c-4c3e-ab2a-aa6cfb0a5b0b-14
+CurrentBrokerSoftwareInfo.ConfigurationRevision: 2
+```
+
+Full output: `probes-round4/msk_describe_cluster.json`. **The active revision is 2,
+not 1** — the original probe queried a stale revision. Revision 2 was re-read
+directly to confirm the field value still holds on the actually-bound config:
+
+```console
+$ aws kafka describe-configuration-revision \
+    --arn arn:aws:kafka:us-east-1:272493677981:configuration/omninode-dev-msk-config/930d30cc-105c-4c3e-ab2a-aa6cfb0a5b0b-14 \
+    --revision 2 --region us-east-1 --query ServerProperties --output text | base64 -d
+auto.create.topics.enable=false
+default.replication.factor=2
+delete.topic.enable=true
+log.retention.hours=168
+min.insync.replicas=1
+num.partitions=3
+```
+
+Full output: `probes-round4/msk_configuration_revision2_server_properties.txt` —
+identical values to revision 1, `auto.create.topics.enable=false` unchanged.
+**FILLED — live, now bound to the cluster's active configuration (ArN + revision 2),
+cluster state ACTIVE, `PublicAccess.Type: DISABLED` confirmed.**
 
 ### New finding (not a manifest field): broker network reachability from this host
 
-```
+```console
 $ nc -zv -w5 b-1.omninodedevmsk.7ozyd3.c14.kafka.us-east-1.amazonaws.com 9098
 Connection to b-1.omninodedevmsk.7ozyd3.c14.kafka.us-east-1.amazonaws.com port 9098 [tcp/*] succeeded!
 
@@ -94,7 +129,7 @@ proof.
 ### Fields carried forward unchanged (re-run, same result)
 
 `typed_config_authority`:
-```
+```console
 $ env -u PYTHONPATH uv run python -c "
 from omnibase_infra.event_bus.kafka_auth import build_aiokafka_auth_kwargs_from_env
 print(build_aiokafka_auth_kwargs_from_env.__module__)
@@ -105,7 +140,7 @@ Full output: `probes-round4/typed_config_authority.txt`. Unchanged from 2026-08-
 this module boundary has not moved.
 
 `no_raw_endpoint_fallback` (static half):
-```
+```console
 $ bash scripts/check_no_cloud_bus_wrapper.sh
 (no output, exit 0)
 $ grep -n "PLAINTEXT" src/omnibase_infra/event_bus/kafka_auth.py
@@ -175,7 +210,16 @@ OMN-15124 does not clear OMN-15639.
 a separate plan-governor commit, not this PR, so it is recorded here rather than
 claimed as this PR's own closure). This instance adds 2 new live, read-only AWS
 findings (`auto_create_off` filled; MSK broker network reachability noted as a
-scoping lead) on top of the 2 static fields carried forward unchanged. 8 of 12
-manifest fields remain BLOCKED, each with a stated reason and — where one exists — a
-cheaper path flagged for the next session with real isolation-lane or candidate
-credentials.
+scoping lead) on top of the 2 static fields carried forward unchanged. The
+candidate-isolation manifest (`docs/runbooks/managed-staging-proof-kit/fields.yaml`,
+`isolation_lane` … `dashboard_zero_authority`) declares 12 unique field IDs backing
+AC1–AC4; `plan_row_binding` (AC5) is a separate, thirteenth field not counted in that
+12. Of the 12: **3 FILLED** (`auto_create_off`, `typed_config_authority`,
+`no_raw_endpoint_fallback` static half) and **9 BLOCKED** — every BLOCKED field is
+enumerated with its reason in the gap table above (`isolation_lane`,
+`candidate_image_digest`, `msk_iam_signer` live half, `token_refresh_cycle`,
+`explicit_topic_bootstrap`, `negative_control_out_of_catalog`, `broker_group_perms`,
+`rds_verify_full`, `dashboard_zero_authority`). A prior revision of this document
+undercounted this as "8 of 12" — corrected here after CodeRabbit flagged the
+mismatch (2026-08-08); each next session should derive the count from the gap
+table's row count, not restate a number by hand.
