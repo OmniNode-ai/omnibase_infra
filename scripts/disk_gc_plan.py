@@ -22,6 +22,19 @@ Output: a single JSON object on stdout:
   {
     "min_age_days": int,
     "remove_image_ids": [str, ...],
+    "remove_image_refs": {image_id: [repo:tag, ...]},  # OMN-15804: every tag
+                                                         # reference an id carries,
+                                                         # so the executor can
+                                                         # untag-then-remove a
+                                                         # multi-tag image instead
+                                                         # of `docker rmi <id>`,
+                                                         # which docker refuses
+                                                         # ("referenced in
+                                                         # multiple repositories")
+                                                         # once >1 repo:tag point
+                                                         # at the same id. Empty
+                                                         # list = dangling (no tag
+                                                         # to untag), remove by id.
     "remove_container_ids": [str, ...],
     "kept_reasons": {image_id: reason, ...}   # for dry-run transparency
   }
@@ -32,6 +45,13 @@ Safety invariants (enforced + tested in tests/unit/scripts/test_disk_gc_plan.py)
   - never remove an image referenced by any container when protect_running is true
   - never remove anything younger than min_age_days
   - retain the newest superseded_image_keep_generations of each kept repo
+
+In-use matching (OMN-15804): `inuse_refs` entries can be a repo:tag string OR an
+image ID, and image IDs can appear TRUNCATED (12 hex chars, as printed by
+`docker ps --format '{{.Image}}'` when a container was started directly by ID)
+or FULL (`sha256:<64hex>`, as printed by `docker image ls --no-trunc`). Exact
+string equality misses the truncated-vs-full case, so matching also compares
+the normalized 12-hex-char short form of both sides.
 
 PR-state reaping invariants (OMN-13225, tested in test_disk_gc_pr_state.py):
   - ghcr CI tags pr-<N> / sha-* are DISPOSABLE and bypassed the age/generation window
@@ -98,6 +118,36 @@ def _load_ndjson(blob: str) -> list[dict[str, Any]]:
 
 def _repo_protected(repo: str, keep_repos: list[str]) -> bool:
     return any(sub in repo for sub in keep_repos)
+
+
+_HEX_ID_RE = re.compile(r"^[0-9a-f]{12,64}$")
+
+
+def _short_id(value: str) -> str | None:
+    """Return the 12-hex-char short form of an image ID, or None if `value`
+    is not a hex image ID at all (OMN-15804).
+
+    `docker image ls --no-trunc` prints `sha256:<64hex>`; `docker ps --format
+    '{{.Image}}'` prints the bare 12-hex short form when a container was
+    started directly by image ID (not by repo:tag). Only hex-ID-shaped
+    strings are normalized — a repo:tag ref (e.g. "myrepo:v1") never matches
+    this shape, so it can never false-positive-collide with a short id.
+    """
+    v = value.strip()
+    if v.startswith("sha256:"):
+        v = v[len("sha256:") :]
+    if not _HEX_ID_RE.match(v):
+        return None
+    return v[:12]
+
+
+def _is_in_use(image_id: str, ref: str, inuse_refs: set[str]) -> bool:
+    if image_id in inuse_refs or ref in inuse_refs:
+        return True
+    short = _short_id(image_id)
+    if short is None:
+        return False
+    return any(short == _short_id(entry) for entry in inuse_refs)
 
 
 def _is_disposable_ci_tag(tag: str) -> bool:
@@ -186,6 +236,12 @@ def build_plan(
     remove_image_ids: list[str] = []
     kept_reasons: dict[str, str] = {}
 
+    # Every repo:tag ref seen for a given image id, across ALL rows (not just
+    # removal candidates) — OMN-15804: the executor needs the full tag set to
+    # untag-then-remove a multi-tag image (`docker rmi <id>` alone fails with
+    # "referenced in multiple repositories" once >1 tag points at one id).
+    refs_by_id: dict[str, list[str]] = {}
+
     # Group superseded candidates per repo so we can keep the N newest.
     superseded_by_repo: dict[str, list[tuple[float, str]]] = {}
 
@@ -197,12 +253,19 @@ def build_plan(
         age = _parse_created_at(created, now)
         ref = f"{repo}:{tag}" if repo and tag and repo != "<none>" else image_id
 
+        if repo and tag and repo != "<none>" and tag != "<none>":
+            tag_list = refs_by_id.setdefault(image_id, [])
+            if ref not in tag_list:
+                tag_list.append(ref)
+        else:
+            refs_by_id.setdefault(image_id, [])
+
         # --- Hard safety guards (always win, regardless of PR state) ---
 
         if tag in keep_tags and tag and tag != "<none>":
             kept_reasons[image_id] = f"tag '{tag}' in keep_image_tags"
             continue
-        if protect_running and (ref in inuse_refs or image_id in inuse_refs):
+        if protect_running and _is_in_use(image_id, ref, inuse_refs):
             kept_reasons[image_id] = "referenced by a container (protect_running)"
             continue
 
@@ -300,9 +363,14 @@ def build_plan(
         safe_remove.append(image_id)
     remove_image_ids = safe_remove
 
+    remove_image_refs: dict[str, list[str]] = {
+        image_id: refs_by_id.get(image_id, []) for image_id in remove_image_ids
+    }
+
     return {
         "min_age_days": min_age_days,
         "remove_image_ids": remove_image_ids,
+        "remove_image_refs": remove_image_refs,
         "remove_container_ids": remove_container_ids,
         "kept_reasons": kept_reasons,
     }
