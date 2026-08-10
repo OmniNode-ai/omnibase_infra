@@ -2,5 +2,5 @@
 # Regenerate: python scripts/check_schema_fingerprint.py stamp
 # Verify:     python scripts/check_schema_fingerprint.py verify
 sha256:f491168ddf298aa77bf1fadfe638716e5b6582b31ea6c08cf340d176bae0813e
-generated_at: 2026-08-10T16:17:20Z
+generated_at: 2026-08-10T17:11:25Z
 migration_file_count: 84
