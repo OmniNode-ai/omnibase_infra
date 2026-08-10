@@ -453,6 +453,96 @@ def test_extract_projection_api_exposure_missing_bus_backed_is_excluded(
 
 
 @pytest.mark.unit
+def test_extract_projection_api_expose_false_excluded_even_when_bus_backed(
+    tmp_path: Path,
+) -> None:
+    """``projection_api.expose: false`` excludes the topic even though
+    ``bus_backed: true`` — matching
+    ``omnimarket.projection.discovery.build_projection_topic_map``'s gate
+    (``if not section.get("expose", False): continue``, checked BEFORE any
+    bus_backed logic applies).
+
+    RED before the finding-e fix: ``_extract_raw_topics_from_contract`` never
+    read ``projection_api.expose`` at all, so an ``expose: false`` +
+    ``bus_backed: true`` contract would be provisioned by this extractor's
+    scan while ``build_projection_topic_map`` never serves it — a topic
+    created but never read.
+    """
+    write_contract(
+        tmp_path,
+        "node_projection_example",
+        """
+        projection_api:
+          expose: false
+          topic: "onex.snapshot.projection.example.v1"
+          table: example_table
+          bus_backed: true
+          key_columns:
+            - id
+        """,
+    )
+    extractor = ContractTopicExtractor()
+    topics = {e.topic for e in extractor.extract(tmp_path)}
+
+    assert topics == set()
+
+
+@pytest.mark.unit
+def test_extract_projection_api_expose_absent_excluded_even_when_bus_backed(
+    tmp_path: Path,
+) -> None:
+    """A ``projection_api`` section with no ``expose`` key at all (not even
+    ``false``) is excluded — the gate is ``is True``, never a falsy/truthy
+    default, mirroring ``build_projection_topic_map``'s ``.get("expose",
+    False)`` default-false semantics.
+    """
+    write_contract(
+        tmp_path,
+        "node_projection_example",
+        """
+        projection_api:
+          topic: "onex.snapshot.projection.example.v1"
+          table: example_table
+          bus_backed: true
+          key_columns:
+            - id
+        """,
+    )
+    extractor = ContractTopicExtractor()
+    topics = {e.topic for e in extractor.extract(tmp_path)}
+
+    assert topics == set()
+
+
+@pytest.mark.unit
+def test_extract_projection_api_exposures_list_expose_false_excludes_all(
+    tmp_path: Path,
+) -> None:
+    """``expose`` is a section-level gate (declared once, not per-exposure) —
+    ``expose: false`` on the section excludes every ``exposures[]`` entry
+    even when each carries ``bus_backed: true``."""
+    write_contract(
+        tmp_path,
+        "node_projection_example",
+        """
+        projection_api:
+          expose: false
+          exposures:
+            - topic: "onex.snapshot.projection.exampleone.v1"
+              table: example_one
+              bus_backed: true
+            - topic: "onex.snapshot.projection.exampletwo.v1"
+              table: example_two
+              bus_backed: true
+        """,
+    )
+    extractor = ContractTopicExtractor()
+    topics = {e.topic for e in extractor.extract(tmp_path)}
+
+    assert topics == set()
+
+
+@pytest.mark.unit
 def test_snapshot_kind_accepted_as_valid(
     tmp_path: Path, capsys: pytest.CaptureFixture[str]
 ) -> None:
