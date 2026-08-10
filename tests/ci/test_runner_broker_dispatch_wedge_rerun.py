@@ -277,6 +277,60 @@ class TestBrokerDispatchWedgeSignatureDetection:
         assert result.returncode == 0
         assert state.rerun_job_ids == [cancelled["id"]]
 
+    # -------------------------------------------------------------------
+    # Isolated single-variable mutation-killers (2026-08-10,
+    # omn15776-wedge-verify). The mutation matrix found M2 (delete the
+    # `step_count != 0` skip) and M3 (short-circuit the conclusion-class
+    # check to always-false) SURVIVING against the fixtures above, because
+    # every existing negative fixture changes more than one variable at
+    # once relative to WEDGE_JOB (REAL_FAILURE_JOB changes both steps AND
+    # duration; HOSTED_JOB_SAME_SHAPE changes runner_name only — that one
+    # is already isolated and kills M1; SUCCESS_JOB changes conclusion AND
+    # steps AND duration). These two fixtures hold every other WEDGE_JOB
+    # property fixed (duration=600s in-band, runner_name set) and flip
+    # exactly the one property each mutation removes, so only that removed
+    # check can be the reason the job is excluded.
+    # -------------------------------------------------------------------
+
+    def test_in_band_failure_with_steps_present_is_not_a_candidate(self) -> None:
+        """Isolates the steps==0 check (kills mutation M2: deleting the
+        `step_count != 0` skip). Same duration (600s, in-band), same
+        runner_name-set, same conclusion=failure as WEDGE_JOB — the ONLY
+        difference is steps=[<one step>] instead of steps=[]. If the steps
+        check is removed, this job passes every remaining check and gets
+        wrongly selected — which would launder a genuine content failure
+        that happens to also run exactly 600s."""
+        one_step_at_600s = dict(WEDGE_JOB)
+        one_step_at_600s["id"] = 93294483333
+        one_step_at_600s["steps"] = [{"name": "Run tests", "conclusion": "failure"}]
+        result, state = _run_script([one_step_at_600s], dry_run=True)
+        assert result.returncode == 0
+        assert str(one_step_at_600s["id"]) not in result.stdout, (
+            "a job with a real step must never be a candidate even at the "
+            "exact wedge duration — only steps==0 may discriminate this case"
+        )
+        assert state.rerun_job_ids == []
+
+    def test_in_band_zero_steps_success_is_not_a_candidate(self) -> None:
+        """Isolates the conclusion-class check (kills mutation M3:
+        short-circuiting the conclusion check to always-false/no-op). Same
+        duration (600s, in-band), same runner_name-set, same steps=[] as
+        WEDGE_JOB — the ONLY difference is conclusion=success instead of
+        failure/cancelled. If the conclusion check is disabled, this job
+        passes every remaining check and gets wrongly selected — a
+        successful job must never be rerun."""
+        zero_steps_success_at_600s = dict(WEDGE_JOB)
+        zero_steps_success_at_600s["id"] = 93294484444
+        zero_steps_success_at_600s["conclusion"] = "success"
+        result, state = _run_script([zero_steps_success_at_600s], dry_run=True)
+        assert result.returncode == 0
+        assert str(zero_steps_success_at_600s["id"]) not in result.stdout, (
+            "a successful job must never be a candidate even with steps==0 "
+            "at the exact wedge duration — only conclusion may discriminate "
+            "this case"
+        )
+        assert state.rerun_job_ids == []
+
 
 # ---------------------------------------------------------------------------
 # Incident replay (OMN-15547): the guard driven against REAL captured bytes,
