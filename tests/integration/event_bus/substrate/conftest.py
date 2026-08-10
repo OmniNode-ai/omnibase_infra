@@ -120,12 +120,15 @@ async def _ensure_shared_contract_test_topics(bootstrap_servers: str) -> None:
     """
     async with KafkaTopicManager(bootstrap_servers) as manager:
         for topic in SHARED_CONTRACT_TEST_TOPICS:
-            await manager.create_topic(topic, partitions=1, replication_factor=1)
-            await _verify_topic_actually_exists(manager, topic)
+            expected_partitions = 1
+            await manager.create_topic(
+                topic, partitions=expected_partitions, replication_factor=1
+            )
+            await _verify_topic_actually_exists(manager, topic, expected_partitions)
 
 
 async def _verify_topic_actually_exists(
-    manager: KafkaTopicManager, topic_name: str
+    manager: KafkaTopicManager, topic_name: str, expected_partitions: int
 ) -> None:
     """Fail-closed post-condition readback for ``KafkaTopicManager.create_topic``.
 
@@ -134,10 +137,32 @@ async def _verify_topic_actually_exists(
     nothing (see the caller's docstring above). Confirm the topic is real
     by describing it directly on the admin client before trusting it.
 
+    dualsub-followup-verify (2026-08-10) found this guard itself was
+    fail-open in the exact case it claims to catch: aiokafka's
+    ``describe_topics()`` returns one entry PER REQUESTED TOPIC, including
+    absent ones -- a missing topic comes back as
+    ``{"topic": <name>, "error_code": 3 (UNKNOWN_TOPIC_OR_PARTITION),
+    "partitions": []}``. The prior version of this function only checked
+    "an entry exists" (``topic_info is not None``), which that absent-topic
+    entry satisfies -- so a genuinely missing topic passed. Fixed by
+    checking ``error_code`` and partition count the same way
+    ``wait_for_topic_metadata`` (the sibling helper in
+    ``tests/helpers/util_kafka.py``) already does, instead of mere entry
+    presence.
+
+    Auto-create residual (secondary finding, same verify pass): the pinned
+    aiokafka 0.13.0 ``AIOKafkaAdminClient.describe_topics(topics=None)``
+    has no ``allow_auto_topic_creation`` parameter to suppress
+    broker-side auto-creation on the readback call, so on a broker with
+    ``auto.create.topics.enable=true`` this describe could in principle
+    materialize the topic itself. Documented here rather than silently
+    left unaddressed since the pinned client API offers no suppression
+    knob; if aiokafka ever adds one, wire it through here.
+
     Raises:
         RuntimeError: if the topic does not actually exist on the broker
-            per ``describe_topics``, despite ``create_topic`` reporting
-            success.
+            (per ``error_code`` and partition count from ``describe_topics``),
+            despite ``create_topic`` reporting success.
     """
     admin = manager.admin_client
     if admin is None:
@@ -172,6 +197,45 @@ async def _verify_topic_actually_exists(
             f"dualsub-verify F1) -- the real_broker substrate fixture "
             f"cannot proceed without this topic. Verify broker "
             f"reachability and KAFKA_BOOTSTRAP_SERVERS."
+        )
+
+    # Extract error_code / partitions the same way as the sibling helper
+    # wait_for_topic_metadata (tests/helpers/util_kafka.py) -- an entry
+    # existing in the response is NOT sufficient proof of existence: a
+    # missing topic still returns an entry with a non-zero error_code and
+    # an empty partitions list (dualsub-followup-verify).
+    error_code: int | None = (
+        getattr(topic_info, "error_code", None)
+        if hasattr(topic_info, "error_code")
+        else topic_info.get("error_code", -1)
+        if isinstance(topic_info, dict)
+        else -1
+    )
+    partitions: list[object] = (
+        getattr(topic_info, "partitions", [])
+        if hasattr(topic_info, "partitions")
+        else topic_info.get("partitions", [])
+        if isinstance(topic_info, dict)
+        else []
+    )
+
+    topic_is_real = (error_code is None or error_code == 0) and (
+        len(partitions) >= expected_partitions
+    )
+    if not topic_is_real:
+        raise RuntimeError(
+            f"KafkaTopicManager.create_topic() reported success for topic "
+            f"'{topic_name}', but describe_topics() proves it does NOT "
+            f"actually exist on the broker at {manager.bootstrap_servers!r}: "
+            f"error_code={error_code!r}, partitions={len(partitions)} "
+            f"(expected >= {expected_partitions}). aiokafka returns an "
+            f"entry for absent topics too (error_code=3/"
+            f"UNKNOWN_TOPIC_OR_PARTITION, partitions=[]), so entry "
+            f"presence alone does not prove existence (dualsub-followup-"
+            f"verify). This is the known silent no-op create defect "
+            f"(mergesweep-0809-dualsub-verify F1) -- the real_broker "
+            f"substrate fixture cannot proceed without this topic. Verify "
+            f"broker reachability and KAFKA_BOOTSTRAP_SERVERS."
         )
 
 
