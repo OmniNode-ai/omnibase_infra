@@ -53,9 +53,18 @@ services:
     restart: unless-stopped
     stop_grace_period: 30s
     healthcheck:
-      test: ["CMD", "test", "-f", "/tmp/gateway-forwarder-ready"]
+      # OMN-15741 (G1): path-verifying probe, not a sentinel-file check. Dials
+      # both broker legs directly with the same transport/credentials as real
+      # traffic and produces+reads-back a dedicated canary record; exits
+      # non-zero when either leg's path is dead even though the process is
+      # still up and `test -f` would have reported healthy (the exact failure
+      # mode of the 2026-08-04 outage -- ready-file present, forwarding 0%
+      # for 4 days). Real checks are cadence-bound (contract
+      # `gateway_forwarder.canary.cadence_seconds`, default 30s) via
+      # --state-file so this does not hit the brokers on every 15s tick.
+      test: ["CMD", "onex-gateway-canary-probe", "--config", "/app/config/gateway-forwarder.yaml", "--state-file", "/tmp/gateway-canary-probe-state.json"]
       interval: 15s
-      timeout: 3s
+      timeout: 25s
       retries: 4
       start_period: 90s
     labels:

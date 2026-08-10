@@ -58,7 +58,7 @@ ROLE_PASSWORD = "domain-adapter-proof-only"  # pragma: allowlist secret
 TENANT_A = UUID("aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa")
 TENANT_B = UUID("bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb")
 TENANT_TABLE = "delegation_events"
-INTERNAL_TABLE = "generation_events"
+INTERNAL_TABLE = "future_internal_projection"
 CATALOG_TABLE = "plan_tiers"
 
 psycopg2.extras.register_uuid()
@@ -538,7 +538,7 @@ def main() -> None:
     )
 
     for dsn, sql in (
-        (TENANT_DSN, "SELECT * FROM omninode_internal.generation_events"),
+        (TENANT_DSN, f"SELECT * FROM omninode_internal.{INTERNAL_TABLE}"),
         (INTERNAL_DSN, "SELECT * FROM tenant.delegation_events"),
         (
             CATALOG_DSN,

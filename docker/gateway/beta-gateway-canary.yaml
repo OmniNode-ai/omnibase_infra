@@ -15,6 +15,7 @@ forwarder:
     sasl_mechanism: "AWS_MSK_IAM"
   local_transport_flavor: "containerized"
   mirror_topic_set: "node_bus_forwarder_effect"
+  canary_topic_set: "node_bus_forwarder_effect"
   heartbeat_interval_seconds: 15
   max_silence_window_seconds: 60
   lag_threshold_messages: 500
