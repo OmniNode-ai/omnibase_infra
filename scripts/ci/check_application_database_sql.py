@@ -112,6 +112,28 @@ _LEGACY_DEFAULT_SCHEMA_SQL_EXACT_PATHS = frozenset(
             "docker/migrations/forward/031_create_llm_call_metrics_and_cost_aggregates.sql"
         ),
         Path("docker/migrations/forward/050_create_baselines_tables.sql"),
+        # OMN-15359: 099 performs the governed physical-schema cutover itself --
+        # it creates NEW omninode_internal-domain authority
+        # (omninode_internal.live_events, ownership declared in omnimarket's
+        # application-relation-ownership.yaml via omnimarket#2031) AND, in the
+        # same file, transform-copies from the existing legacy public.live_events
+        # table as the one-time migration source. The schema-qualification
+        # scanner admits neither form of that reference: unqualified
+        # 'live_events' is rejected as "must be schema-qualified", and explicit
+        # 'public.live_events' is rejected as "prohibited in public" -- there is
+        # no third form this gate accepts for a cross-schema data copy. This is
+        # exactly the class of migration the OMN-15420 cutover-journal machinery
+        # (omnibase_infra.migration.cutover) is designed for, but that machinery
+        # has no runnable CLI yet (P5 scope, OMN-15426/OMN-15360, not started --
+        # see docs/migrations/2026-08-06-omninode-internal-schema-transformation-receipt.md's
+        # deferred-work list). Exempted here rather than blocked on building
+        # that machinery from scratch inside this ticket's slice; 099's own
+        # reconciliation logic (count + key-set + row-content-hash parity,
+        # fail-closed via RAISE EXCEPTION) is the substitute proof this gate
+        # would otherwise provide, verified live against a real ephemeral
+        # Postgres cluster in
+        # tests/integration/migrations/test_099_omninode_internal_live_events_omn15359.py.
+        Path("docker/migrations/forward/099_create_omninode_internal_live_events.sql"),
     }
 )
 
@@ -192,45 +214,59 @@ def validate_changed_sql(
     declared_identities = {identity.identity for identity in ownership_identities}
     for path in changed_sql_paths(repository, base_revision, head_revision):
         relative_path = path.relative_to(repository.resolve())
-        if _is_legacy_default_schema_sql_path(relative_path):
-            continue
+        # A legacy-default-schema exemption narrows to (1) the schema-qualification
+        # LINT and (2) the target-requirement ownership check for ALTER/DROP/
+        # GRANT/etc against relations the exemption's own justification names as
+        # already-existing legacy tables (docker/migrations/forward/031 and 050's
+        # own `public.legacy_shape` ALTERs are exactly this case -- modifying a
+        # pre-existing legacy table is not new authority and was never required
+        # to carry an ownership declaration). CREATED-OBJECT ownership validation
+        # stays active regardless of the exemption: an exempted file that CREATEs
+        # new schema-qualified authority (e.g. 099's `omninode_internal.live_events`)
+        # must still carry a declared owner -- narrowing this way (OMN-15359,
+        # CodeRabbit) closes the gap the prior blanket `continue` left open, where
+        # ownership was unchecked even for an exempted file's newly created objects.
+        is_legacy_exempt = _is_legacy_default_schema_sql_path(relative_path)
         sql = path.read_text(encoding="utf-8")
-        for violation in lint_application_database_sql(sql, topology):
-            violations.append(f"{relative_path}: {violation}")
-        for requirement in application_database_sql_target_requirements(sql, topology):
-            location_matches = tuple(
-                identity
-                for identity in ownership_identities
-                if identity.schema == requirement.schema
-                and identity.name == requirement.name
-            )
-            kind_matches = tuple(
-                identity
-                for identity in location_matches
-                if identity.kind in requirement.allowed_kinds
-            )
-            if not location_matches:
-                violations.append(
-                    f"{relative_path}: application target "
-                    f"{requirement.schema}.{requirement.name} requires exactly one "
-                    "ownership declaration"
-                )
-            elif not kind_matches:
-                violations.append(
-                    f"{relative_path}: application target "
-                    f"{requirement.schema}.{requirement.name} requires an exact "
-                    "object-kind ownership declaration"
-                )
-            elif requirement.function_signature is not None and all(
-                identity.function_signature != requirement.function_signature
-                for identity in kind_matches
+        if not is_legacy_exempt:
+            for violation in lint_application_database_sql(sql, topology):
+                violations.append(f"{relative_path}: {violation}")
+            for requirement in application_database_sql_target_requirements(
+                sql, topology
             ):
-                violations.append(
-                    f"{relative_path}: application target "
-                    f"{requirement.schema}.{requirement.name}"
-                    f"{requirement.function_signature} requires an exact routine "
-                    "ownership declaration"
+                location_matches = tuple(
+                    identity
+                    for identity in ownership_identities
+                    if identity.schema == requirement.schema
+                    and identity.name == requirement.name
                 )
+                kind_matches = tuple(
+                    identity
+                    for identity in location_matches
+                    if identity.kind in requirement.allowed_kinds
+                )
+                if not location_matches:
+                    violations.append(
+                        f"{relative_path}: application target "
+                        f"{requirement.schema}.{requirement.name} requires exactly "
+                        "one ownership declaration"
+                    )
+                elif not kind_matches:
+                    violations.append(
+                        f"{relative_path}: application target "
+                        f"{requirement.schema}.{requirement.name} requires an exact "
+                        "object-kind ownership declaration"
+                    )
+                elif requirement.function_signature is not None and all(
+                    identity.function_signature != requirement.function_signature
+                    for identity in kind_matches
+                ):
+                    violations.append(
+                        f"{relative_path}: application target "
+                        f"{requirement.schema}.{requirement.name}"
+                        f"{requirement.function_signature} requires an exact "
+                        "routine ownership declaration"
+                    )
         for identity in application_database_created_catalog_identities(sql):
             if identity.identity not in declared_identities:
                 violations.append(

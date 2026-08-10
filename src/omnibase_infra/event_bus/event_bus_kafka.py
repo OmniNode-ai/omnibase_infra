@@ -224,7 +224,11 @@ from omnibase_infra.event_bus.kafka_auth import (
     build_aiokafka_auth_kwargs,
 )
 from omnibase_infra.event_bus.mixin_kafka_broadcast import MixinKafkaBroadcast
-from omnibase_infra.event_bus.mixin_kafka_dlq import MixinKafkaDlq
+from omnibase_infra.event_bus.mixin_kafka_dlq import (
+    _REPLAY_COUNT_HEADER,
+    _REPLAY_COUNT_PARSE_FAILURE_SENTINEL,
+    MixinKafkaDlq,
+)
 from omnibase_infra.event_bus.models import (
     ModelEventBusReadiness,
     ModelEventHeaders,
@@ -2971,6 +2975,42 @@ class EventBusKafka(
         retry_count = self._parse_int_header(
             headers_dict.get("retry_count"), 0, "retry_count"
         )
+
+        # OMN-14551: a message republished by node_dlq_replay_effect carries
+        # x-replay-count instead of retry_count (see mixin_kafka_dlq.py's
+        # _REPLAY_COUNT_HEADER doc for the producer/reader contract). When
+        # present it is the authoritative replay lineage counter and wins
+        # over any stale "retry_count" header -- the replay engine never
+        # stamps "retry_count", so its presence here is unrelated/stale data.
+        # Every ModelEventMessage built from this method flows into
+        # _publish_raw_to_dlq (handler_exception / subcontract-wiring call
+        # sites) and _publish_to_dlq (typed path, reads
+        # failed_message.headers.retry_count directly) -- if this conversion
+        # drops the header, both paths reset replay lineage to 0 on every
+        # republish and should_replay's guard never trips (the 2026-08-05
+        # dev DLQ amplification incident).
+        replay_count_str = headers_dict.get(_REPLAY_COUNT_HEADER)
+        if replay_count_str is not None:
+            try:
+                parsed_replay_count = int(replay_count_str)
+            except (ValueError, TypeError):
+                logger.warning(
+                    "Malformed %s header %r, failing closed to stop replay",
+                    _REPLAY_COUNT_HEADER,
+                    replay_count_str,
+                )
+                retry_count = _REPLAY_COUNT_PARSE_FAILURE_SENTINEL
+            else:
+                if parsed_replay_count < 0:
+                    logger.warning(
+                        "Negative %s header value %d, failing closed to stop replay",
+                        _REPLAY_COUNT_HEADER,
+                        parsed_replay_count,
+                    )
+                    retry_count = _REPLAY_COUNT_PARSE_FAILURE_SENTINEL
+                else:
+                    retry_count = parsed_replay_count
+
         max_retries = self._parse_int_header(
             headers_dict.get("max_retries"), 3, "max_retries"
         )

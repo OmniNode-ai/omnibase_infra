@@ -42,7 +42,9 @@ async def test_concurrent_distinct_subscriptions_start_consumers_in_parallel() -
     max_active_starts = 0
     started: list[tuple[str, str]] = []
 
-    async def fake_start(topic: str, group_id: str) -> None:
+    async def fake_start(
+        topic: str, group_id: str, *, auto_offset_reset_override: str | None = None
+    ) -> None:
         nonlocal active_starts, max_active_starts
         active_starts += 1
         max_active_starts = max(max_active_starts, active_starts)
@@ -80,7 +82,12 @@ async def test_concurrent_duplicate_subscription_starts_one_consumer() -> None:
     identity = make_test_node_identity("shared")
     started: list[tuple[str, str]] = []
 
-    async def fake_start(start_topic: str, group_id: str) -> None:
+    async def fake_start(
+        start_topic: str,
+        group_id: str,
+        *,
+        auto_offset_reset_override: str | None = None,
+    ) -> None:
         await asyncio.sleep(0)
         bus._group_consumers[(start_topic, group_id)] = AsyncMock()
         bus._pending_consumer_keys.discard((start_topic, group_id))

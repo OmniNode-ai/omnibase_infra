@@ -67,6 +67,11 @@ REGISTRATION_OBSERVABILITY_RECONCILE = (
     / "node_projection_registration"
     / "0003_reconcile_heartbeat_observability.sql"
 )
+REGISTRATION_NO_FORCE_RLS = (
+    NODES_DIR
+    / "node_projection_registration"
+    / "0004_node_service_registry_no_force_rls.sql"
+)
 DEPLOYMENT_EVIDENCE_CREATE = (
     NODES_DIR
     / "node_deployment_evidence_reducer"
@@ -125,6 +130,14 @@ class TestVendoredViewMigrations:
         assert "ADD COLUMN IF NOT EXISTS last_heartbeat_at" in sql
         assert "ADD COLUMN IF NOT EXISTS uptime_seconds" in sql
         assert "idx_node_service_registry_last_heartbeat_at" in sql
+
+    def test_registration_force_rls_reversal_targets_public_table(self) -> None:
+        sql = REGISTRATION_NO_FORCE_RLS.read_text(encoding="utf-8")
+
+        assert "to_regclass('public.node_service_registry') IS NOT NULL" in sql
+        assert (
+            "ALTER TABLE public.node_service_registry NO FORCE ROW LEVEL SECURITY;"
+        ) in sql
 
     def test_savings_projection_view_vendored(self) -> None:
         assert SAVINGS_VIEW.is_file(), (

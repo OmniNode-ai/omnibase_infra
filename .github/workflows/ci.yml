@@ -5,6 +5,19 @@ on:
     branches: [main]
   pull_request:
     branches: [main, dev]
+    # OMN-14241: `edited` is required so a PR-body-only edit (the common case
+    # is stamping `Evidence-Source: OCC#<n>` after the companion OCC PR
+    # merges) retriggers this workflow's `occ-preflight` job. The reusable
+    # occ-preflight.yml already live-fetches the current PR body via
+    # `gh pr view` on every run -- the defect was never a frozen-body read,
+    # it was that no new run fired at all, so the last commit-triggered
+    # FAILURE (correct at that instant, before the stamp existed) sat as the
+    # permanent status for `occ-preflight / eligibility` and CI Summary
+    # failed closed on it forever (live case: infra#2696, #2694). GitHub's
+    # implicit default when `types:` is omitted is
+    # [opened, synchronize, reopened], which is what this workflow ran on
+    # before this fix.
+    types: [opened, edited, synchronize, reopened]
   merge_group:
   workflow_dispatch:
 
@@ -66,7 +79,7 @@ jobs:
     with:
       contracts-dir: contracts
       receipts-dir: drift/dod_receipts
-      core-ref: 8a47e092002dd1338599fa0733feda469436acbf
+      core-ref: dev
 
   # =============================================================================
   # Phase 0 - Zone filter (OMN-10475)
