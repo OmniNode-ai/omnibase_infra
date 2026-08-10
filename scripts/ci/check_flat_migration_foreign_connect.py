@@ -50,12 +50,47 @@ RUNNER_OWN_DATABASE = "omnibase_infra"
 
 _VALID_DISPOSITIONS = frozenset({"undeliverable", "grandfathered"})
 
+# The manifest is a CLOSED ledger as of OMN-15819 (this gate's own
+# authorship, commit 6083b76b4): "a NEW cross-DB flat file is a hard,
+# fail-closed reject" (module docstring) means what it says regardless of
+# disposition or citation -- a manifest entry alone must never be able to
+# authorize a brand-new cross-DB flat migration, because the manifest is
+# ordinary repo-tracked YAML a PR can edit in the same diff that adds the
+# offending file. Without this, `check()` verified only that a live
+# cross-DB file's manifest entry *exists and its connect_target matches* --
+# it never asked whether the entry was itself new, so a PR could add both
+# the file and a plausible-looking manifest entry (any disposition) in one
+# shot and pass clean (found in review, OMN-15819 CodeRabbit thread
+# r3749990788). Pinning the exact filenames the manifest was seeded with at
+# gate-authorship time closes that regardless of what the YAML says.
+#
+# `check()` takes this as an explicit, opt-in `frozen_seed` kwarg (default
+# None = unrestricted) rather than a hardcoded default so every OTHER test
+# in this suite -- which exercises stale-entry / target-drift / malformed
+# scenarios against synthetic, non-production filenames -- is unaffected;
+# only `main()` (the real CI entrypoint) and the tests that specifically
+# cover this closed-ledger property pass it.
+MANIFEST_FROZEN_SEED: frozenset[str] = frozenset(
+    {
+        "098_create_omninode_internal_schema.sql",
+        "099_create_omninode_internal_live_events.sql",
+        "083_create_log_entries.sql",
+        "096_grant_role_omnidash_omnidash_analytics.sql",
+        "097_grant_app_dashboard_connect_omnidash_analytics.sql",
+    }
+)
+
 # Same directive shape the k8s Job's own awk one-liner recognizes:
 # `awk '$1 == "\\connect" { print $2; exit }'` -- first line whose first
 # whitespace-delimited field is the literal token `\connect`, first match
-# wins. Mirrored here (not shelled out to awk) so this gate has no bash
-# dependency and is independently testable.
-_CONNECT_DIRECTIVE = re.compile(r"^\\connect\s+(\S+)", re.MULTILINE)
+# wins. awk's default field splitting strips leading horizontal whitespace,
+# so a line like `  \connect other_db` still has `$1 == "\\connect"` in the
+# runner. `[^\S\r\n]*` mirrors that (leading spaces/tabs, not newlines) so
+# an indented directive cannot silently read as "no \connect" to this gate
+# while the runner still executes it as a real cross-DB connect. Mirrored
+# here (not shelled out to awk) so this gate has no bash dependency and is
+# independently testable.
+_CONNECT_DIRECTIVE = re.compile(r"^[^\S\r\n]*\\connect\s+(\S+)", re.MULTILINE)
 
 
 @dataclass(frozen=True)
@@ -126,8 +161,17 @@ def check(
     forward_dir: Path = FORWARD_DIR,
     manifest_path: Path = MANIFEST_PATH,
     runner_own_database: str = RUNNER_OWN_DATABASE,
+    *,
+    frozen_seed: frozenset[str] | None = None,
 ) -> list[Violation]:
-    """Fail-closed, both directions. Empty return == gate passes."""
+    """Fail-closed, both directions. Empty return == gate passes.
+
+    ``frozen_seed``, when provided, additionally rejects any manifest entry
+    for a filename outside that set -- see ``MANIFEST_FROZEN_SEED`` above.
+    ``None`` (the default) skips that check entirely, which is what every
+    synthetic-fixture test in this suite that is not specifically about the
+    closed-ledger property wants.
+    """
     manifest = load_manifest(manifest_path)
     live_cross_db: dict[str, str] = {}
     for sql_path in flat_migration_files(forward_dir):
@@ -155,6 +199,22 @@ def check(
                         "author a node-owned replacement under "
                         "docker/migrations/forward/nodes/<node>/ instead of adding "
                         "a flat cross-DB migration."
+                    ),
+                )
+            )
+        elif frozen_seed is not None and filename not in frozen_seed:
+            violations.append(
+                Violation(
+                    file=filename,
+                    reason=(
+                        f"flat migration carries `\\connect {target}` and has a "
+                        f"matching entry in {manifest_display} (disposition="
+                        f"{entry.disposition!r}), but {filename!r} is not part of "
+                        "the frozen OMN-15819 seed set -- a NEW cross-DB flat "
+                        "migration is a hard reject regardless of disposition or "
+                        "citation; a manifest entry alone cannot authorize one. "
+                        "Author a node-owned replacement under "
+                        "docker/migrations/forward/nodes/<node>/ instead."
                     ),
                 )
             )
@@ -197,7 +257,11 @@ def main(argv: list[str] | None = None) -> int:
     )
     args = parser.parse_args(argv)
 
-    violations = check(forward_dir=args.forward_dir, manifest_path=args.manifest)
+    violations = check(
+        forward_dir=args.forward_dir,
+        manifest_path=args.manifest,
+        frozen_seed=MANIFEST_FROZEN_SEED,
+    )
     if not violations:
         print("OK: no un-ledgered cross-DB flat migrations (OMN-15819)")
         return 0

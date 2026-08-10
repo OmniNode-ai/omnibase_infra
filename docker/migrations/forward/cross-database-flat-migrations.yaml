@@ -58,7 +58,7 @@ entries:
     connect_target: omnidash_analytics
     disposition: undeliverable
     citation: >-
-      OMN-15819 -- confirmed undeliverable via the k8s Job. Superseded by docker/migrations/forward/nodes/node_projection_live_events/ (creates the omninode_internal schema as a guarded precondition of the table it owns).
+      OMN-15819 -- confirmed undeliverable via the k8s Job. Superseded by docker/migrations/forward/nodes/node_projection_live_events/ (asserts, does not create, the operator-provisioned omninode_internal schema as a guarded precondition of the table it owns).
   - file: 099_create_omninode_internal_live_events.sql
     connect_target: omnidash_analytics
     disposition: undeliverable

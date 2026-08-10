@@ -46,8 +46,20 @@ def _write_manifest(path: Path, entries: list[dict[str, str]]) -> None:
 
 
 def test_gate_passes_against_the_live_repo() -> None:
-    violations = gate.check()
+    # frozen_seed=MANIFEST_FROZEN_SEED matches what main() (the real CI
+    # entrypoint) actually passes -- a bare gate.check() would not exercise
+    # the closed-ledger enforcement against the live manifest at all.
+    violations = gate.check(frozen_seed=gate.MANIFEST_FROZEN_SEED)
     assert not violations, "\n".join(v.describe() for v in violations)
+
+
+def test_manifest_frozen_seed_matches_the_live_manifest_exactly() -> None:
+    """MANIFEST_FROZEN_SEED is a hand-maintained pin, not derived from the
+    manifest at runtime (by design -- it must not move just because someone
+    edits the manifest). Catch drift between the two explicitly instead of
+    letting it show up only as a confusing rejection/acceptance elsewhere."""
+    manifest = gate.load_manifest()
+    assert set(manifest) == gate.MANIFEST_FROZEN_SEED
 
 
 def test_live_manifest_has_the_two_omn15819_undeliverable_entries() -> None:
@@ -108,6 +120,26 @@ def test_connect_target_takes_the_first_directive_only(tmp_path: Path) -> None:
     assert gate.flat_migration_connect_target(sql) == "first_db"
 
 
+def test_connect_target_matches_a_directive_with_leading_whitespace(
+    tmp_path: Path,
+) -> None:
+    """The k8s Job's own `awk '$1 == "\\connect"'` predicate strips leading
+    whitespace via default field splitting -- an indented `\\connect` is a
+    real, live directive to the runner. This gate must see it too, or a
+    migration with `  \\connect other_db` reads as "no \\connect" here while
+    remaining foreign to the runner (OMN-15819 CodeRabbit thread
+    r3749990754)."""
+    sql = tmp_path / "001_example.sql"
+    sql.write_text("  \\connect omnidash_analytics\nCREATE TABLE t (id int);\n")
+    assert gate.flat_migration_connect_target(sql) == "omnidash_analytics"
+
+
+def test_connect_target_matches_a_directive_with_a_leading_tab(tmp_path: Path) -> None:
+    sql = tmp_path / "001_example.sql"
+    sql.write_text("\t\\connect omnidash_analytics\nCREATE TABLE t (id int);\n")
+    assert gate.flat_migration_connect_target(sql) == "omnidash_analytics"
+
+
 def test_flat_migration_files_excludes_the_nodes_subdirectory(tmp_path: Path) -> None:
     (tmp_path / "001_flat.sql").write_text("SELECT 1;\n")
     node_dir = tmp_path / "nodes" / "some_node"
@@ -144,8 +176,12 @@ def test_gate_rejects_a_synthetic_new_cross_db_flat_file(tmp_path: Path) -> None
     assert "no execution path" in violations[0].reason
 
 
-def test_gate_passes_when_the_new_file_is_properly_ledgered(tmp_path: Path) -> None:
-    """GREEN control: the identical file, WITH a manifest entry, is clean."""
+def test_gate_without_frozen_seed_passes_a_new_file_with_a_matching_entry(
+    tmp_path: Path,
+) -> None:
+    """`frozen_seed=None` (the default) does not enforce the closed-ledger
+    property -- unrelated tests in this file rely on that. This is the
+    permissive baseline the next two tests contrast against."""
     forward_dir = tmp_path / "forward"
     forward_dir.mkdir()
     (forward_dir / "200_new_cross_db_migration.sql").write_text(
@@ -165,6 +201,85 @@ def test_gate_passes_when_the_new_file_is_properly_ledgered(tmp_path: Path) -> N
     )
 
     assert gate.check(forward_dir=forward_dir, manifest_path=manifest_path) == []
+
+
+# ---------------------------------------------------------------------------
+# The closed-ledger property (OMN-15819 CodeRabbit thread r3749990788): a
+# manifest entry, on its own, must never be able to authorize a brand-new
+# cross-DB flat migration -- only a filename already present at
+# gate-authorship time (``MANIFEST_FROZEN_SEED``) may pass, regardless of
+# disposition or citation. This is what ``main()`` actually enforces.
+# ---------------------------------------------------------------------------
+
+
+def test_gate_with_frozen_seed_rejects_a_new_file_even_with_a_matching_entry(
+    tmp_path: Path,
+) -> None:
+    """RED-first: the exact scenario the permissive test above shows passing
+    must now fail once ``frozen_seed`` is supplied -- a new file + a new,
+    perfectly well-formed manifest entry in the same PR is still a reject."""
+    forward_dir = tmp_path / "forward"
+    forward_dir.mkdir()
+    (forward_dir / "200_new_cross_db_migration.sql").write_text(
+        "\\connect some_other_database\nCREATE TABLE t (id int);\n"
+    )
+    manifest_path = tmp_path / "manifest.yaml"
+    _write_manifest(
+        manifest_path,
+        entries=[
+            {
+                "file": "200_new_cross_db_migration.sql",
+                "connect_target": "some_other_database",
+                "disposition": "undeliverable",
+                "citation": "OMN-99999 -- test fixture",
+            }
+        ],
+    )
+
+    violations = gate.check(
+        forward_dir=forward_dir,
+        manifest_path=manifest_path,
+        frozen_seed=gate.MANIFEST_FROZEN_SEED,
+    )
+
+    assert len(violations) == 1
+    assert violations[0].file == "200_new_cross_db_migration.sql"
+    assert "not part of the frozen OMN-15819 seed set" in violations[0].reason
+    assert "hard reject" in violations[0].reason
+
+
+def test_gate_with_frozen_seed_passes_a_file_that_is_in_the_seed(
+    tmp_path: Path,
+) -> None:
+    """Positive control: a filename genuinely in ``MANIFEST_FROZEN_SEED``
+    (one of the two OMN-15819 undeliverable entries) with a matching,
+    correct manifest entry still passes -- the closed-ledger check only
+    rejects filenames OUTSIDE the frozen set."""
+    forward_dir = tmp_path / "forward"
+    forward_dir.mkdir()
+    (forward_dir / "098_create_omninode_internal_schema.sql").write_text(
+        "\\connect omnidash_analytics\nCREATE SCHEMA IF NOT EXISTS x;\n"
+    )
+    manifest_path = tmp_path / "manifest.yaml"
+    _write_manifest(
+        manifest_path,
+        entries=[
+            {
+                "file": "098_create_omninode_internal_schema.sql",
+                "connect_target": "omnidash_analytics",
+                "disposition": "undeliverable",
+                "citation": "OMN-15819 -- test fixture",
+            }
+        ],
+    )
+
+    violations = gate.check(
+        forward_dir=forward_dir,
+        manifest_path=manifest_path,
+        frozen_seed=gate.MANIFEST_FROZEN_SEED,
+    )
+
+    assert violations == []
 
 
 def test_gate_ignores_a_same_database_flat_file(tmp_path: Path) -> None:

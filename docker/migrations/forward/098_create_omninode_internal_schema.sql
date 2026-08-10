@@ -13,8 +13,11 @@
 -- -- do NOT delete it and do NOT try to make it deliverable in place; the
 -- fix is the node-owned migration under
 -- docker/migrations/forward/nodes/node_projection_live_events/, which
--- asserts and creates this schema as a guarded precondition of the table it
--- owns (0002_create_omninode_internal_live_events.sql). Runner honesty for
+-- ASSERTS (does not create) this schema as a guarded precondition of the
+-- table it owns (0002_create_omninode_internal_live_events.sql) -- the
+-- schema itself is operator-provisioned out-of-band, not created by that
+-- replacement or by this file's own CREATE SCHEMA on any path that
+-- actually executes. Runner honesty for
 -- this class of file (no silent false-"applied" ledger row; fail-closed for
 -- any FUTURE cross-DB flat file) is the companion PR in omninode_infra.
 -- Static pre-merge enforcement in THIS repo:
