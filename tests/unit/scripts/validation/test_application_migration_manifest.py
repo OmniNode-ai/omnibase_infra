@@ -113,8 +113,12 @@ def test_checked_in_manifest_is_exact_and_all_blockers_are_explicit() -> None:
     # -- the node-owned replacement that delivers omninode_internal.live_events
     # through the node-owned loop, since the flat
     # 099_create_omninode_internal_live_events.sql migration has no execution
-    # path in the k8s Job that applies flat migrations (cross-DB \connect).
-    assert len(result.declarations) == 98
+    # path in the k8s Job that applies flat migrations (cross-DB \connect),
+    # +1 for OMN-15846's nodes/node_log_persistence_effect/0000_create_log_entries.sql
+    # -- the node-owned replacement that delivers log_entries through the
+    # node-owned loop, since the flat 083_create_log_entries.sql migration has
+    # the same no-execution-path defect (cross-DB \connect).
+    assert len(result.declarations) == 99
     assert result.blocked == ()
     assert len(result.legacy_node_declarations) == 2
     assert len(result.cloud_aliases) == 30

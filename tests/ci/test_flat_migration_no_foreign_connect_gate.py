@@ -62,17 +62,45 @@ def test_manifest_frozen_seed_matches_the_live_manifest_exactly() -> None:
     assert set(manifest) == gate.MANIFEST_FROZEN_SEED
 
 
-def test_live_manifest_has_the_two_omn15819_undeliverable_entries() -> None:
+def test_live_manifest_has_the_five_undeliverable_entries() -> None:
     manifest = gate.load_manifest()
     undeliverable = {
         name for name, entry in manifest.items() if entry.disposition == "undeliverable"
     }
+    # OMN-15846 re-audited 083/096/097 (previously grandfathered) and
+    # confirmed all three are ALSO undeliverable via the k8s Job -- the
+    # manifest is now a fully-audited closed ledger with zero grandfathered
+    # entries remaining.
     assert undeliverable == {
         "098_create_omninode_internal_schema.sql",
         "099_create_omninode_internal_live_events.sql",
+        "083_create_log_entries.sql",
+        "096_grant_role_omnidash_omnidash_analytics.sql",
+        "097_grant_app_dashboard_connect_omnidash_analytics.sql",
     }
-    for name in undeliverable:
+    for name in (
+        "098_create_omninode_internal_schema.sql",
+        "099_create_omninode_internal_live_events.sql",
+    ):
         assert "OMN-15819" in manifest[name].citation, name
+    for name in (
+        "083_create_log_entries.sql",
+        "096_grant_role_omnidash_omnidash_analytics.sql",
+        "097_grant_app_dashboard_connect_omnidash_analytics.sql",
+    ):
+        assert "OMN-15846" in manifest[name].citation, name
+
+
+def test_no_grandfathered_entries_remain() -> None:
+    # OMN-15846 closed out every entry the manifest was seeded with as
+    # "grandfathered" (not re-audited) -- the frozen seed set is fully
+    # audited now, so a NEW grandfathered entry would only ever come from a
+    # future manifest edit that ducks the re-audit this test guards against.
+    manifest = gate.load_manifest()
+    grandfathered = {
+        name for name, entry in manifest.items() if entry.disposition == "grandfathered"
+    }
+    assert grandfathered == set()
 
 
 def test_live_manifest_entries_all_target_omnidash_analytics() -> None:
