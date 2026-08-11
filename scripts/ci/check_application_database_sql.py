@@ -170,6 +170,21 @@ _LEGACY_DEFAULT_SCHEMA_SQL_EXACT_PATHS = frozenset(
         Path(
             "docker/migrations/forward/096_grant_role_omnidash_omnidash_analytics.sql"
         ),
+        # OMN-15846: the OMN-15376 shape-reconciliation blocks in this NEW
+        # node-owned migration (NOT NULL convergence + primary-key guard,
+        # added for CodeRabbit finding 3754510314 on omnimarket#2046) use
+        # `EXECUTE format(...)` for per-column dynamic SQL -- the exact same
+        # idiom `nodes/node_projection_live_events/0000_create_live_events.sql`
+        # already uses for its own NOT NULL/PK reconciliation (OMN-15376
+        # original). This gate cannot prove a dynamic relation target
+        # statically regardless of how well-guarded/idempotent the block is;
+        # 099's own exemption entry above establishes this is an accepted,
+        # already-precedented limitation for legitimate reconciliation DO
+        # blocks in this corpus, not something unique to this file.
+        Path(
+            "docker/migrations/forward/nodes/node_log_persistence_effect/"
+            "0000_create_log_entries.sql"
+        ),
     }
 )
 
