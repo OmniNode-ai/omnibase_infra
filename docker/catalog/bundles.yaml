@@ -142,6 +142,7 @@ omnimarket-projections:
     - omnimarket-projection-delegation
     - omnimarket-projection-baselines
     - omnimarket-projection-registration
+    - omnimarket-projection-live-events
   includes:
     - core
   inject_required_env:
