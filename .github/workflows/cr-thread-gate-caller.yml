@@ -63,7 +63,7 @@ jobs:
       # that fix, so it carried the identical same-PR cross-event collision.
       group: cr-thread-gate-${{ github.event_name }}-${{ github.event.pull_request.number || github.event.issue.number || github.event.merge_group.head_sha || github.run_id }}
       cancel-in-progress: true
-    uses: OmniNode-ai/omniclaude/.github/workflows/cr-thread-gate.yml@80de61fd1fee04abdeb6918e7f91cf820717e6a8
+    uses: OmniNode-ai/omniclaude/.github/workflows/cr-thread-gate.yml@9604842857f74ecdba5b063c67bf142a7649502e
     with:
       pr-number: ${{ format('{0}', github.event.pull_request.number || github.event.issue.number || 0) }}
     secrets:
