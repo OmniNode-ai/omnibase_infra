@@ -145,6 +145,31 @@ _LEGACY_DEFAULT_SCHEMA_SQL_EXACT_PATHS = frozenset(
         # exemption list is therefore NOT safe post-OMN-15838 -- it would newly
         # fail the lint on the untouched DO blocks, not clear it.
         Path("docker/migrations/forward/099_create_omninode_internal_live_events.sql"),
+        # OMN-15846: this file is TOMBSTONED (undeliverable via the k8s Job --
+        # cross-DB \connect, no execution path -- see the file's own header
+        # and docker/migrations/forward/cross-database-flat-migrations.yaml).
+        # The tombstone convention requires the SQL body stay byte-unchanged
+        # below the header (migration files are append-only ledgered
+        # history), so its pre-existing unqualified `log_entries` target
+        # cannot be qualified in place -- the node-owned replacement
+        # (docker/migrations/forward/nodes/node_log_persistence_effect/) is
+        # what physically creates the schema-qualified
+        # omninode_internal.log_entries table now. This entry only exists
+        # because OMN-15846 is the first PR to touch this file (a header-only
+        # comment addition) since this gate started linting changed files --
+        # its own DDL was never in scope before.
+        Path("docker/migrations/forward/083_create_log_entries.sql"),
+        # OMN-15846: this file is TOMBSTONED (undeliverable via the k8s Job,
+        # and unneeded on RDS -- role_omnidash already owns the schema there;
+        # see the file's own header). Same byte-unchanged-below-header
+        # append-only convention as 083 above -- its `GRANT ... ON ALL TABLES
+        # IN SCHEMA public` (unqualified `all` target) and role-DDL DO blocks
+        # predate this gate's scope and are not being re-authored. First PR
+        # to touch this file (header-only) since this gate started linting
+        # changed files.
+        Path(
+            "docker/migrations/forward/096_grant_role_omnidash_omnidash_analytics.sql"
+        ),
     }
 )
 
