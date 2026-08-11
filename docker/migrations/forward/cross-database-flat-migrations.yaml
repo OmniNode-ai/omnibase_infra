@@ -66,16 +66,16 @@ entries:
       OMN-15819 -- confirmed undeliverable via the k8s Job. Superseded by the node-owned replacement migration under docker/migrations/forward/nodes/node_projection_live_events/.
   - file: 083_create_log_entries.sql
     connect_target: omnidash_analytics
-    disposition: grandfathered
+    disposition: undeliverable
     citation: >-
-      OMN-12131 (#1743) -- predates the OMN-15819 gate. k8s-Job delivery status not re-audited by this gate; grandfathered so the gate's introduction does not retroactively fail CI on a file this PR did not investigate.
+      OMN-15846 -- re-audited (was grandfathered). Confirmed undeliverable via the k8s Job: to_regclass('public.log_entries') is NULL in both omnibase_infra and omnidash_analytics on onex-dev RDS (2026-08-10), and omnibase_infra's own schema_migrations carried a false "applied" row masking this. Superseded by docker/migrations/forward/nodes/node_log_persistence_effect/ (node-owned replacement, same content, delivered via the node-owned loop's role_omnidash connection).
   - file: 096_grant_role_omnidash_omnidash_analytics.sql
     connect_target: omnidash_analytics
-    disposition: grandfathered
+    disposition: undeliverable
     citation: >-
-      OMN-15363 -- predates the OMN-15819 gate. k8s-Job delivery status not re-audited by this gate; grandfathered, not asserted delivered.
+      OMN-15846 -- re-audited (was grandfathered). Confirmed undeliverable via the k8s Job: pg_default_acl for omnidash_analytics/public is empty on onex-dev RDS (2026-08-10), so this file's unconditional ALTER DEFAULT PRIVILEGES step never executed; the false "applied" ledger row masked this. Also unneeded on RDS: role_omnidash already owns 89/90 tables in omnidash_analytics.public there (OMN-15335 two-owner-split migration-principal model, live-verified), which strictly subsumes this file's named grants -- an owner is exempt from RLS and needs no such grant. No node-owned replacement is authored; OMN-15355 (P1, In Review) is the tracked systematic successor (generated ACL/default-privilege matrix covering role_omnidash-owned domains). File remains applicable, unchanged, on the .201 lab lane it was authored for (a different runner, unaffected by this k8s-Job-scoped classification).
   - file: 097_grant_app_dashboard_connect_omnidash_analytics.sql
     connect_target: omnidash_analytics
-    disposition: grandfathered
+    disposition: undeliverable
     citation: >-
-      OMN-15297 -- predates the OMN-15819 gate. k8s-Job delivery status not re-audited by this gate; grandfathered, not asserted delivered.
+      OMN-15846 -- re-audited (was grandfathered). Confirmed undeliverable via the k8s Job: app_dashboard's USAGE on schema public is granted by pg_database_owner/omninodeadmin, not role_omnibase_infra, on onex-dev RDS (2026-08-10); the false "applied" ledger row masked this. The CONNECT defect this file repairs is latent there today (PUBLIC's CONNECT has not been revoked -- pg_database.datacl still carries PUBLIC=Tc), per this file's own header framing ("the declared target state" pending OMN-15355). No node-owned replacement is authored; OMN-15355 (P1, In Review, explicit app_dashboard acceptance criterion) is the tracked systematic successor. File remains applicable, unchanged, on any lane whose own runner (scripts/run-forward-migrations.sh) can reach omnidash_analytics.

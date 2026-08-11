@@ -50,6 +50,8 @@ tables:
     status: identical
   llm_routing_decisions:
     status: identical
+  log_entries:
+    status: identical
   swarm_runs:
     status: identical
   baselines_comparisons:
