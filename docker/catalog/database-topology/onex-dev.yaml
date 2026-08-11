@@ -76,6 +76,7 @@ databases:
           - object_type: TABLE
             objects:
               - live_events
+              - log_entries
             privileges:
               - INSERT
               - SELECT
@@ -307,5 +308,5 @@ source:
   profile_catalog_path: src/omnibase_infra/topology/application_database_profiles.yaml
   profile_catalog_sha256: 759f32da77ad41b874fbb05d2824c44f9de4c64e9d269d99da21445225a90ca1
   repository: OmniNode-ai/omnibase_infra
-  sha256: 16afbd462702012a4e6e269a86e48fad07fe834de5801cad2de7bad04a1f5b0b
+  sha256: c856d2032bf585f93a71d2353002ec14128da4bbd4328ca1012a6a3aaa7b8da3
 topology_instance: onex-dev
