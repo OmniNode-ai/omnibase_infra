@@ -3,7 +3,7 @@
   "ticket": "OMN-15496",
   "captured_utc": "2026-07-30",
   "source": "GET /repos/OmniNode-ai/omnibase_infra/commits/{sha}/check-runs?per_page=100 (paginated)",
-  "filter": "rows whose name is in EXPECTED_EXTERNAL_CONTEXTS AND whose started_at <= the PR's mergedAt (merge-time state; post-merge runs excluded)",
+  "filter": "rows whose name is in EXPECTED_EXTERNAL_CONTEXTS AND whose started_at <= the PR's mergedAt (merge-time state; post-merge runs excluded). Backfilled 2026-08-12 (OMN-15979) with 'Integration Test Removal Gate' rows for this same 16-PR window, admitted into EXPECTED_EXTERNAL_CONTEXTS after that ticket's independent 16/16-present measurement over a later window (#2705...#2720, see omn15979_merge_time_external_check_runs.json).",
   "note": "unedited API rows, reduced to the fields the resolver reads"
  },
  "pull_requests": {
@@ -59,6 +59,13 @@
      "conclusion": "success",
      "started_at": "2026-07-30T14:23:29Z",
      "id": 90900882206
+    },
+    {
+     "name": "Integration Test Removal Gate",
+     "status": "completed",
+     "conclusion": "success",
+     "started_at": "2026-07-30T13:49:10Z",
+     "id": 90891357698
     },
     {
      "name": "Omni Standards Gate",
@@ -305,6 +312,13 @@
      "id": 90816644231
     },
     {
+     "name": "Integration Test Removal Gate",
+     "status": "completed",
+     "conclusion": "success",
+     "started_at": "2026-07-30T07:38:25Z",
+     "id": 90809348661
+    },
+    {
      "name": "Omni Standards Gate",
      "status": "completed",
      "conclusion": "success",
@@ -542,6 +556,13 @@
      "id": 90801547646
     },
     {
+     "name": "Integration Test Removal Gate",
+     "status": "completed",
+     "conclusion": "success",
+     "started_at": "2026-07-30T06:52:10Z",
+     "id": 90800999932
+    },
+    {
      "name": "Omni Standards Gate",
      "status": "completed",
      "conclusion": "success",
@@ -765,6 +786,13 @@
      "id": 90800137248
     },
     {
+     "name": "Integration Test Removal Gate",
+     "status": "completed",
+     "conclusion": "success",
+     "started_at": "2026-07-30T06:00:02Z",
+     "id": 90792713716
+    },
+    {
      "name": "Omni Standards Gate",
      "status": "completed",
      "conclusion": "success",
@@ -944,6 +972,13 @@
      "conclusion": "success",
      "started_at": "2026-07-30T06:22:18Z",
      "id": 90796136194
+    },
+    {
+     "name": "Integration Test Removal Gate",
+     "status": "completed",
+     "conclusion": "success",
+     "started_at": "2026-07-30T06:12:30Z",
+     "id": 90794644448
     },
     {
      "name": "Omni Standards Gate",
@@ -1181,6 +1216,13 @@
      "conclusion": "success",
      "started_at": "2026-07-30T06:55:55Z",
      "id": 90801564756
+    },
+    {
+     "name": "Integration Test Removal Gate",
+     "status": "completed",
+     "conclusion": "success",
+     "started_at": "2026-07-30T05:32:42Z",
+     "id": 90788724676
     },
     {
      "name": "Omni Standards Gate",
@@ -1560,6 +1602,13 @@
      "id": 90800859490
     },
     {
+     "name": "Integration Test Removal Gate",
+     "status": "completed",
+     "conclusion": "success",
+     "started_at": "2026-07-30T05:26:21Z",
+     "id": 90787770696
+    },
+    {
      "name": "Omni Standards Gate",
      "status": "completed",
      "conclusion": "success",
@@ -1825,6 +1874,13 @@
      "id": 90786239154
     },
     {
+     "name": "Integration Test Removal Gate",
+     "status": "completed",
+     "conclusion": "success",
+     "started_at": "2026-07-30T05:15:03Z",
+     "id": 90786137381
+    },
+    {
      "name": "Omni Standards Gate",
      "status": "completed",
      "conclusion": "success",
@@ -2004,6 +2060,13 @@
      "conclusion": "success",
      "started_at": "2026-07-30T03:42:52Z",
      "id": 90773583622
+    },
+    {
+     "name": "Integration Test Removal Gate",
+     "status": "completed",
+     "conclusion": "success",
+     "started_at": "2026-07-30T03:37:06Z",
+     "id": 90772851526
     },
     {
      "name": "Omni Standards Gate",
@@ -2194,6 +2257,13 @@
      "id": 90777846967
     },
     {
+     "name": "Integration Test Removal Gate",
+     "status": "completed",
+     "conclusion": "success",
+     "started_at": "2026-07-30T04:00:09Z",
+     "id": 90775807785
+    },
+    {
      "name": "Omni Standards Gate",
      "status": "completed",
      "conclusion": "success",
@@ -2373,6 +2443,13 @@
      "conclusion": "success",
      "started_at": "2026-07-30T02:42:45Z",
      "id": 90765378073
+    },
+    {
+     "name": "Integration Test Removal Gate",
+     "status": "completed",
+     "conclusion": "success",
+     "started_at": "2026-07-30T02:41:50Z",
+     "id": 90765288037
     },
     {
      "name": "Omni Standards Gate",
@@ -2568,6 +2645,13 @@
      "conclusion": "success",
      "started_at": "2026-07-30T02:56:50Z",
      "id": 90767259601
+    },
+    {
+     "name": "Integration Test Removal Gate",
+     "status": "completed",
+     "conclusion": "success",
+     "started_at": "2026-07-30T02:38:11Z",
+     "id": 90764801043
     },
     {
      "name": "Omni Standards Gate",
@@ -2807,6 +2891,13 @@
      "id": 90756514950
     },
     {
+     "name": "Integration Test Removal Gate",
+     "status": "completed",
+     "conclusion": "success",
+     "started_at": "2026-07-30T01:37:04Z",
+     "id": 90756203382
+    },
+    {
      "name": "Omni Standards Gate",
      "status": "completed",
      "conclusion": "success",
@@ -3044,6 +3135,13 @@
      "id": 90748883849
     },
     {
+     "name": "Integration Test Removal Gate",
+     "status": "completed",
+     "conclusion": "success",
+     "started_at": "2026-07-30T00:44:47Z",
+     "id": 90748472525
+    },
+    {
      "name": "Omni Standards Gate",
      "status": "completed",
      "conclusion": "success",
@@ -3265,6 +3363,13 @@
      "conclusion": "success",
      "started_at": "2026-07-30T00:23:50Z",
      "id": 90745135516
+    },
+    {
+     "name": "Integration Test Removal Gate",
+     "status": "completed",
+     "conclusion": "success",
+     "started_at": "2026-07-29T23:55:31Z",
+     "id": 90740599384
     },
     {
      "name": "Omni Standards Gate",
@@ -3516,6 +3621,13 @@
      "conclusion": "success",
      "started_at": "2026-07-29T22:55:10Z",
      "id": 90730452512
+    },
+    {
+     "name": "Integration Test Removal Gate",
+     "status": "completed",
+     "conclusion": "success",
+     "started_at": "2026-07-29T22:17:44Z",
+     "id": 90722749166
     },
     {
      "name": "Omni Standards Gate",
