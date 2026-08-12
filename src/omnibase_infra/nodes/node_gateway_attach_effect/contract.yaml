@@ -105,6 +105,7 @@ capabilities:
     description: "Handlers never publish; the runtime publishes each handler's typed response (embedding session_event) onto the declared session-event topic."
 metadata:
   description: "Gateway attach/session control-plane effect node (G6)"
+  transport_type: "HTTP"
   author: "OmniNode Team"
   created: "2026-08-08"
   updated: "2026-08-08"

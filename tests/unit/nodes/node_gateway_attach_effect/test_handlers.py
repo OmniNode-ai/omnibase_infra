@@ -4,10 +4,13 @@
 
 This is the end-to-end slice proof at the unit level (OMN-15753's local
 component): attach -> authenticated ACTIVE session -> heartbeat (active) ->
-heartbeat (introspection reports revoked) -> session torn down. The live
-Keycloak introspection call is faked via monkeypatch (see
-test_service_keycloak_token_validator.py for the transport-level coverage);
-this file proves the handler/session-store wiring around it.
+heartbeat (introspection reports revoked) -> session torn down. The
+introspection HTTP call lives inline in ``HandlerGatewayHeartbeat._introspect``
+(moved out of a freestanding services/ module to satisfy the
+imperative-contract-guard's handlers/-only I/O boundary) and is faked via
+monkeypatch here, including ``TestHeartbeatIntrospection`` for the
+transport-level fail-closed cases that used to live in
+test_service_keycloak_token_validator.py.
 """
 
 from __future__ import annotations
@@ -30,6 +33,9 @@ from omnibase_infra.nodes.node_gateway_attach_effect.handlers.handler_gateway_de
 from omnibase_infra.nodes.node_gateway_attach_effect.handlers.handler_gateway_heartbeat import (
     HandlerGatewayHeartbeat,
 )
+from omnibase_infra.nodes.node_gateway_attach_effect.handlers.handler_gateway_heartbeat import (
+    SessionNotFoundError as HeartbeatSessionNotFoundError,
+)
 from omnibase_infra.nodes.node_gateway_attach_effect.models.enum_gateway_session_event_type import (
     EnumGatewaySessionEventType,
 )
@@ -47,6 +53,9 @@ from omnibase_infra.nodes.node_gateway_attach_effect.models.model_gateway_detach
 )
 from omnibase_infra.nodes.node_gateway_attach_effect.models.model_gateway_heartbeat_request import (
     ModelGatewayHeartbeatRequest,
+)
+from omnibase_infra.nodes.node_gateway_attach_effect.services.service_keycloak_token_validator import (
+    TokenValidationError,
 )
 from omnibase_infra.nodes.node_gateway_attach_effect.services.store_gateway_session_memory import (
     StoreGatewaySessionMemory,
@@ -140,6 +149,22 @@ async def test_attach_registers_active_session(
     assert stored is not None
 
 
+async def test_attach_rejects_expired_token(
+    config: ModelGatewayAttachConfig,
+) -> None:
+    store = StoreGatewaySessionMemory()
+    handler = HandlerGatewayAttach(config=config, session_store=store)
+
+    with pytest.raises(TokenValidationError):
+        await handler.handle(
+            ModelGatewayAttachRequest(
+                access_token=_fake_jwt(exp=0), edge_instance_id="edge-201"
+            )
+        )
+    # Nothing was ever registered for the rejected token.
+    assert store._sessions == {}
+
+
 async def test_heartbeat_active_token_keeps_session_active(
     monkeypatch: pytest.MonkeyPatch,
     config: ModelGatewayAttachConfig,
@@ -221,7 +246,7 @@ async def test_heartbeat_unknown_session_raises() -> None:
         session_store=store,
         secret_resolver=_FakeSecretResolver({}),  # type: ignore[arg-type]
     )
-    with pytest.raises(Exception):
+    with pytest.raises(HeartbeatSessionNotFoundError):
         await heartbeat.handle(
             ModelGatewayHeartbeatRequest(session_id=uuid4(), access_token=_fake_jwt())
         )
@@ -249,3 +274,79 @@ async def test_detach_unknown_session_raises() -> None:
     detach = HandlerGatewayDetach(session_store=store)
     with pytest.raises(SessionNotFoundError):
         await detach.handle(ModelGatewayDetachRequest(session_id=uuid4(), reason="x"))
+
+
+class TestHeartbeatIntrospection:
+    """Transport-level fail-closed coverage for ``HandlerGatewayHeartbeat._introspect``.
+
+    Moved here from test_service_keycloak_token_validator.py when the RFC 7662
+    HTTP call relocated from a freestanding services/ module into this
+    handler (imperative-contract-guard's handlers/-only I/O boundary).
+    """
+
+    async def test_client_id_mismatch_returns_false(
+        self,
+        monkeypatch: pytest.MonkeyPatch,
+        config: ModelGatewayAttachConfig,
+        secret_resolver: _FakeSecretResolver,
+    ) -> None:
+        response = _FakeResponse(
+            200, {"active": True, "client_id": "gw-tenant-someone-else"}
+        )
+        monkeypatch.setattr(
+            httpx, "AsyncClient", lambda **_: _FakeAsyncClient(response)
+        )
+        heartbeat = HandlerGatewayHeartbeat(
+            config=config,
+            session_store=StoreGatewaySessionMemory(),
+            secret_resolver=secret_resolver,  # type: ignore[arg-type]
+        )
+        result = await heartbeat._introspect(
+            access_token="tok", client_id="gw-tenant-acme"
+        )
+        assert result is False
+
+    async def test_transport_error_fails_closed(
+        self,
+        monkeypatch: pytest.MonkeyPatch,
+        config: ModelGatewayAttachConfig,
+        secret_resolver: _FakeSecretResolver,
+    ) -> None:
+        class _RaisingAsyncClient(_FakeAsyncClient):
+            async def post(self, *args: object, **kwargs: object) -> _FakeResponse:
+                raise httpx.ConnectError("unreachable")
+
+        monkeypatch.setattr(
+            httpx,
+            "AsyncClient",
+            lambda **_: _RaisingAsyncClient(_FakeResponse(200, {})),
+        )
+        heartbeat = HandlerGatewayHeartbeat(
+            config=config,
+            session_store=StoreGatewaySessionMemory(),
+            secret_resolver=secret_resolver,  # type: ignore[arg-type]
+        )
+        result = await heartbeat._introspect(
+            access_token="tok", client_id="gw-tenant-acme"
+        )
+        assert result is False
+
+    async def test_non_200_fails_closed(
+        self,
+        monkeypatch: pytest.MonkeyPatch,
+        config: ModelGatewayAttachConfig,
+        secret_resolver: _FakeSecretResolver,
+    ) -> None:
+        response = _FakeResponse(500, {})
+        monkeypatch.setattr(
+            httpx, "AsyncClient", lambda **_: _FakeAsyncClient(response)
+        )
+        heartbeat = HandlerGatewayHeartbeat(
+            config=config,
+            session_store=StoreGatewaySessionMemory(),
+            secret_resolver=secret_resolver,  # type: ignore[arg-type]
+        )
+        result = await heartbeat._introspect(
+            access_token="tok", client_id="gw-tenant-acme"
+        )
+        assert result is False

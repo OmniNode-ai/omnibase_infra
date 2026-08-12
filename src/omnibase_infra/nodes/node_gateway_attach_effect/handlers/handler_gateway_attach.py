@@ -70,7 +70,9 @@ class HandlerGatewayAttach:
         claims = token_validator.decode_claims(request.access_token, self._config)
 
         now = datetime.now(UTC)
-        token_ttl_seconds = max(claims.expires_at_epoch - int(now.timestamp()), 0)
+        token_ttl_seconds = claims.expires_at_epoch - int(now.timestamp())
+        if token_ttl_seconds <= 0:
+            raise token_validator.TokenValidationError("access_token has expired")
         session_ttl_seconds = min(
             token_ttl_seconds, self._config.max_session_ttl_seconds
         )

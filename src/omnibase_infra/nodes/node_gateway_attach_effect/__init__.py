@@ -4,8 +4,8 @@
 
 Validates a per-tenant Keycloak client-credentials access token, registers a
 tenant-bound attach session, and provides heartbeat re-validation (which is
-also the revocation path — see ``services.service_keycloak_token_validator``)
-and explicit detach. This is the control plane for the productized edge
+also the revocation path — see ``handlers.handler_gateway_heartbeat``) and
+explicit detach. This is the control plane for the productized edge
 ingress recommended in ``docs/design/2026-08-08-customer-cloud-connectivity-design.md``
 (candidate A) and ``docs/design/2026-08-08-gateway-node-architecture-lift.md`` (G6).
 

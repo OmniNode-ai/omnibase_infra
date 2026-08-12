@@ -5,7 +5,7 @@
 All values resolve from ``contract.yaml`` and contract overlays; secret
 material (Keycloak admin credentials) is referenced by name here and
 resolved from Infisical at the effect boundary inside
-``service_keycloak_token_validator`` -- never read from a bare env var and
+``HandlerGatewayHeartbeat._introspect`` -- never read from a bare env var and
 never embedded in this model (operator ruling 2026-08-08: config lives in
 contract overlays + Infisical, env for bootstrap only).
 """

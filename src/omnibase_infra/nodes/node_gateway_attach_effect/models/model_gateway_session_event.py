@@ -5,7 +5,7 @@
 Handlers return this alongside their typed response; the node/runtime
 owns the actual publish (node_owned_publish, mirroring
 node_bus_forwarder_effect's capability of the same name) onto
-``onex.evt.omnibase-infra.gateway-session.v1``. Handlers never call the bus
+the contract-declared gateway session-event topic. Handlers never call the bus
 directly -- this keeps the effect boundary at the node, not scattered across
 handler internals, and lets the eventual link-health projection (G3)
 consume one canonical event shape for both the forwarder heartbeat and the
