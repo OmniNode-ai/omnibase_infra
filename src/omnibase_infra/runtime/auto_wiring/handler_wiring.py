@@ -4862,11 +4862,11 @@ def _derive_route_id(
     that share a common segment (OMN-8735).
 
     When two routing entries reference the same handler class for different
-    operations (e.g. ``HandlerLlmCliSubprocess`` for both ``inference.gemini_cli``
-    and ``inference.codex_cli``) and subscribe to the same topic, the
-    ``handler + topic`` pair alone produces a collision.  The handler entry key
-    includes the sanitized operation suffix when present, guaranteeing each
-    entry gets a distinct route ID (OMN-9461 / OMN-10447).
+    operations (e.g. one handler bound to both ``inference.variant_a`` and
+    ``inference.variant_b`` on the same contract) and subscribe to the same
+    topic, the ``handler + topic`` pair alone produces a collision.  The
+    handler entry key includes the sanitized operation suffix when present,
+    guaranteeing each entry gets a distinct route ID (OMN-9461 / OMN-10447).
     """
     safe_topic = re.sub(r"[.\-]", "_", topic)
     return f"route.auto.{contract_name}.{handler_key}.{safe_topic}"
@@ -4876,8 +4876,8 @@ def _derive_dispatcher_id(contract_name: str, handler_key: str) -> str:
     """Derive a dispatcher ID from contract name and handler entry key.
 
     When two routing entries in the same contract reference the same handler
-    class (e.g. ``HandlerLlmCliSubprocess`` wired for both ``inference.gemini_cli``
-    and ``inference.codex_cli``), the plain handler name alone produces a
+    class (e.g. one handler wired for both ``inference.variant_a`` and
+    ``inference.variant_b``), the plain handler name alone produces a
     collision.  The entry key includes the sanitized operation suffix and keeps
     dispatcher IDs distinct (OMN-9461 / OMN-10447).
     """
