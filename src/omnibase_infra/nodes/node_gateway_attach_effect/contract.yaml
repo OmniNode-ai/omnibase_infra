@@ -18,17 +18,23 @@
 #   - OMN-15750: this node
 #   - OMN-15739: architecture ADOPT ruling (epic OMN-12908)
 #   - OMN-12911: per-tenant Keycloak client + credential lifecycle (P0B)
+#   - OMN-15918: hardening follow-ups from CodeRabbit review on #2694 --
+#     JWT signature verification (JWKS), heartbeat/detach identity binding,
+#     atomic session-store transitions, outage-vs-revocation circuit
+#     breaker. Bumps minor: ModelGatewayDetachRequest gains a required
+#     access_token field (wire-breaking) and ModelGatewayAttachConfig gains
+#     keycloak_jwks_ref + circuit_breaker_* fields.
 name: "node_gateway_attach_effect"
 contract_name: "node_gateway_attach_effect"
 node_name: "node_gateway_attach_effect"
 node_type: "EFFECT_GENERIC"
 contract_version:
   major: 0
-  minor: 1
+  minor: 2
   patch: 0
 node_version:
   major: 0
-  minor: 1
+  minor: 2
   patch: 0
 runtime_profiles:
   - effects
@@ -63,10 +69,13 @@ config:
     keycloak_issuer_ref: "gateway.attach.keycloak.issuer"
     keycloak_introspection_ref: "gateway.attach.keycloak.introspection"
     keycloak_admin_client_ref: "gateway.attach.keycloak.admin_client_credentials"
+    keycloak_jwks_ref: "gateway.attach.keycloak.jwks"
     required_audience: "gateway-attach"
     heartbeat_interval_seconds: 15
     session_degraded_after_seconds: 60
     max_session_ttl_seconds: 3600
+    circuit_breaker_threshold: 5
+    circuit_breaker_reset_timeout_seconds: 30.0
 handler_routing:
   routing_strategy: "operation_match"
   handlers:
@@ -76,7 +85,7 @@ handler_routing:
         module: "omnibase_infra.nodes.node_gateway_attach_effect.handlers.handler_gateway_attach"
         handler_type: "INFRA"
       description: >
-        Decode and validate a client-credentials access token's claims (issuer, audience, tenant_id/tenant_slug/principal_id), register a new tenant-bound session, return the session plus the ATTACHED session_event.
+        Verify a client-credentials access token's signature against Keycloak's JWKS keyset, then validate its claims (issuer, audience, tenant_id/tenant_slug/principal_id), register a new tenant-bound session, return the session plus the ATTACHED session_event.
 
     - operation: "gateway.heartbeat"
       handler:
@@ -84,7 +93,7 @@ handler_routing:
         module: "omnibase_infra.nodes.node_gateway_attach_effect.handlers.handler_gateway_heartbeat"
         handler_type: "INFRA"
       description: >
-        Re-validate the session's token via Keycloak RFC 7662 introspection. A disabled tenant client makes this return active:false on the next call, which tears the session down and emits a REVOKED session_event -- this is the revocation mechanism, not a separate admin call against this node.
+        Verify the presented token's signature and bind it to the stored session's tenant/principal/client identity, then re-validate via Keycloak RFC 7662 introspection. A disabled tenant client makes introspection return active:false on the next call, which tears the session down and emits a REVOKED session_event -- this is the revocation mechanism, not a separate admin call against this node. A Keycloak/JWKS outage raises InfraUnavailableError and leaves the session untouched rather than revoking it.
 
     - operation: "gateway.detach"
       handler:
@@ -92,15 +101,17 @@ handler_routing:
         module: "omnibase_infra.nodes.node_gateway_attach_effect.handlers.handler_gateway_detach"
         handler_type: "INFRA"
       description: >
-        Explicit edge-initiated session teardown, independent of token state.
+        Explicit edge-initiated session teardown. Requires a signature-verified access token bound to the stored session's tenant/principal/client identity -- a caller cannot detach a session it does not hold the matching credential for.
 
 capabilities:
   - name: "client_credentials_attach"
-    description: "Validates per-tenant Keycloak confidential-client access tokens (client_credentials grant) at attach time."
+    description: "Verifies per-tenant Keycloak confidential-client access tokens (client_credentials grant) against the realm's JWKS keyset, then validates claims, at attach time."
   - name: "introspection_revocation"
     description: "Heartbeat re-validation via RFC 7662 introspection makes Keycloak-side client revocation observable within one heartbeat interval, independent of the token's own exp."
   - name: "tenant_bound_session"
-    description: "Every session carries the immutable tenant_id/principal_id derived from the validated token; handlers never trust caller-declared tenant identity."
+    description: "Every session carries the immutable tenant_id/principal_id derived from the signature-verified token; handlers never trust caller-declared tenant identity, and heartbeat/detach bind the presented token back to the stored session's identity before acting."
+  - name: "outage_revocation_distinction"
+    description: "MixinAsyncCircuitBreaker-guarded Keycloak calls (JWKS fetch, introspection) raise InfraUnavailableError on transport failure/non-200/malformed body instead of treating an unreachable IdP as revocation -- a Keycloak outage no longer mass-revokes every active session."
   - name: "node_owned_publish"
     description: "Handlers never publish; the runtime publishes each handler's typed response (embedding session_event) onto the declared session-event topic."
 metadata:
@@ -108,7 +119,7 @@ metadata:
   transport_type: "HTTP"
   author: "OmniNode Team"
   created: "2026-08-08"
-  updated: "2026-08-08"
+  updated: "2026-08-12"
   tags:
     - gateway
     - ingress
@@ -118,3 +129,6 @@ metadata:
     - tenant-isolation
   known_gaps:
     - "Session store is in-process (StoreGatewaySessionMemory) for the first slice — a multi-pod deployment needs a shared backend (Valkey) behind the same ProtocolGatewaySessionStore seam. Tracked as follow-on, not built in OMN-15750."
+    - "Handlers still take config/services as direct constructor args instead of resolving through ModelONEXContainer.get_service(...) (OMN-15918 ticket item 1, DI container). Deferred: needs the node's DI wiring to register ProtocolGatewaySessionStore/SecretResolver/ModelGatewayAttachConfig as container services first, out of scope for the OMN-15918 hardening slice landed here."
+    - "JWKS keys are fetched fresh on every attach/heartbeat/detach call (no in-process cache/TTL). Acceptable for the first slice's call volume; a cache would reduce Keycloak load under sustained heartbeat traffic. Tracked as follow-on, not built here."
+    - "No dedicated unattended pairing/renewal contract exists yet for a persistent runtime to re-mint an attach token across the 900-second client-credentials token expiry without a browser session in the loop -- tracked as OMN-15952, blocking OMN-15877."
