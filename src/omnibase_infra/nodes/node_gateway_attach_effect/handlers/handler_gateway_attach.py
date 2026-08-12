@@ -3,9 +3,13 @@
 """Handler for gateway.attach -- validate token, register session.
 
 Canonical definition-B EFFECT handler: ``handle(request) -> response``. I/O
-(Keycloak claim decode has no network call; the session store write is local
-to this process for the first slice) lives entirely inside this handler and
-the services it calls, never in the node's dispatch wiring.
+(the issuer secret-ref resolution and the session store write are local to
+this process for the first slice) lives entirely inside this handler and the
+services it calls, never in the node's dispatch wiring. Claim decode itself
+has no network call; the expected-issuer *value* it compares against is
+resolved here via ``SecretResolver``, mirroring how
+``HandlerGatewayHeartbeat._introspect`` resolves the introspection endpoint
+ref -- the same ref-resolution pattern, applied to ``keycloak_issuer_ref``.
 """
 
 from __future__ import annotations
@@ -41,6 +45,7 @@ from omnibase_infra.nodes.node_gateway_attach_effect.services import (
 from omnibase_infra.nodes.node_gateway_attach_effect.services.protocol_gateway_session_store import (
     ProtocolGatewaySessionStore,
 )
+from omnibase_infra.runtime.secret_resolver import SecretResolver
 
 __all__ = ["HandlerGatewayAttach"]
 
@@ -52,9 +57,11 @@ class HandlerGatewayAttach:
         self,
         config: ModelGatewayAttachConfig,
         session_store: ProtocolGatewaySessionStore,
+        secret_resolver: SecretResolver,
     ) -> None:
         self._config = config
         self._session_store = session_store
+        self._secret_resolver = secret_resolver
 
     @property
     def handler_type(self) -> EnumHandlerType:
@@ -67,7 +74,19 @@ class HandlerGatewayAttach:
     async def handle(
         self, request: ModelGatewayAttachRequest
     ) -> ModelGatewayAttachResponse:
-        claims = token_validator.decode_claims(request.access_token, self._config)
+        issuer_secret = await self._secret_resolver.get_secret_async(
+            self._config.keycloak_issuer_ref,
+            required=True,
+        )
+        if issuer_secret is None:
+            raise token_validator.TokenValidationError(
+                "Keycloak issuer secret ref resolved to None despite required=True"
+            )
+        expected_issuer = issuer_secret.get_secret_value()
+
+        claims = token_validator.decode_claims(
+            request.access_token, self._config, expected_issuer=expected_issuer
+        )
 
         now = datetime.now(UTC)
         token_ttl_seconds = claims.expires_at_epoch - int(now.timestamp())

@@ -4,7 +4,13 @@
 
 ``decode_claims`` (attach time): local JWT decode, ``iss``/``aud``/``exp``
 validated against the configured issuer, no network call. Cheap, used once
-per attach.
+per attach. The expected issuer is a resolved secret value (the literal
+issuer URL, not the ``keycloak_issuer_ref`` contract-ref name) -- resolving
+it is I/O, so the caller (``HandlerGatewayAttach.handle``) resolves it via
+``SecretResolver`` before calling in, matching the ref-resolution pattern
+``HandlerGatewayHeartbeat._introspect`` uses for the introspection endpoint.
+This function itself stays I/O-free: it only compares the already-resolved
+string against the token's ``iss`` claim.
 
 The heartbeat-time RFC 7662 introspection round-trip (the revocation
 mechanism -- disabling the tenant's Keycloak client makes ``active: false``
@@ -46,7 +52,9 @@ class ClaimSet:
     expires_at_epoch: int
 
 
-def decode_claims(access_token: str, config: ModelGatewayAttachConfig) -> ClaimSet:
+def decode_claims(
+    access_token: str, config: ModelGatewayAttachConfig, *, expected_issuer: str
+) -> ClaimSet:
     """Decode and structurally validate a JWT's claim set (no signature check).
 
     Signature verification happens implicitly downstream: a forged token
@@ -55,6 +63,12 @@ def decode_claims(access_token: str, config: ModelGatewayAttachConfig) -> ClaimS
     (an unknown/forged token is never ``active`` there), so attach-time
     decode only needs to reject structurally invalid or wrong-audience
     tokens fast.
+
+    ``expected_issuer`` is the resolved literal issuer URL (the caller
+    resolves ``config.keycloak_issuer_ref`` via ``SecretResolver`` before
+    calling in). A token whose ``iss`` claim does not match is rejected --
+    without this check, ``iss`` was presence-checked only, so any token from
+    any issuer that happened to satisfy the other claims would attach.
     """
     parts = access_token.split(".")
     if len(parts) != 3:
@@ -86,6 +100,13 @@ def decode_claims(access_token: str, config: ModelGatewayAttachConfig) -> ClaimS
             raise TokenValidationError(
                 f"access_token missing required claim: {required}"
             )
+
+    token_issuer = str(claims["iss"])
+    if token_issuer != expected_issuer:
+        raise TokenValidationError(
+            f"access_token issuer {token_issuer!r} does not match "
+            f"configured issuer {expected_issuer!r}"
+        )
 
     try:
         tenant_id = UUID(str(claims["tenant_id"]))

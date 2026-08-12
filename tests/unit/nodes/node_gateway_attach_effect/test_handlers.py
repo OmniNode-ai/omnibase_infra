@@ -125,6 +125,7 @@ def config() -> ModelGatewayAttachConfig:
 def secret_resolver(config: ModelGatewayAttachConfig) -> _FakeSecretResolver:
     return _FakeSecretResolver(
         {
+            config.keycloak_issuer_ref: "https://keycloak.example/realms/omninode",
             config.keycloak_introspection_ref: "https://keycloak.example/introspect",
             f"{config.keycloak_admin_client_ref}.client_id": "admin-cli",
             f"{config.keycloak_admin_client_ref}.client_secret": "admin-secret",
@@ -134,9 +135,14 @@ def secret_resolver(config: ModelGatewayAttachConfig) -> _FakeSecretResolver:
 
 async def test_attach_registers_active_session(
     config: ModelGatewayAttachConfig,
+    secret_resolver: _FakeSecretResolver,
 ) -> None:
     store = StoreGatewaySessionMemory()
-    handler = HandlerGatewayAttach(config=config, session_store=store)
+    handler = HandlerGatewayAttach(
+        config=config,
+        session_store=store,
+        secret_resolver=secret_resolver,  # type: ignore[arg-type]
+    )
 
     response = await handler.handle(
         ModelGatewayAttachRequest(access_token=_fake_jwt(), edge_instance_id="edge-201")
@@ -151,9 +157,14 @@ async def test_attach_registers_active_session(
 
 async def test_attach_rejects_expired_token(
     config: ModelGatewayAttachConfig,
+    secret_resolver: _FakeSecretResolver,
 ) -> None:
     store = StoreGatewaySessionMemory()
-    handler = HandlerGatewayAttach(config=config, session_store=store)
+    handler = HandlerGatewayAttach(
+        config=config,
+        session_store=store,
+        secret_resolver=secret_resolver,  # type: ignore[arg-type]
+    )
 
     with pytest.raises(TokenValidationError):
         await handler.handle(
@@ -165,13 +176,63 @@ async def test_attach_rejects_expired_token(
     assert store._sessions == {}
 
 
+async def test_attach_rejects_mismatched_issuer(
+    config: ModelGatewayAttachConfig,
+    secret_resolver: _FakeSecretResolver,
+) -> None:
+    """R3: HandlerGatewayAttach resolves keycloak_issuer_ref and rejects a
+    token whose iss claim does not match, end-to-end through the handler."""
+    store = StoreGatewaySessionMemory()
+    handler = HandlerGatewayAttach(
+        config=config,
+        session_store=store,
+        secret_resolver=secret_resolver,  # type: ignore[arg-type]
+    )
+
+    with pytest.raises(TokenValidationError, match="issuer"):
+        await handler.handle(
+            ModelGatewayAttachRequest(
+                access_token=_fake_jwt(iss="https://attacker.example/realms/evil"),
+                edge_instance_id="edge-201",
+            )
+        )
+    assert store._sessions == {}
+
+
+async def test_attach_accepts_matching_issuer(
+    config: ModelGatewayAttachConfig,
+    secret_resolver: _FakeSecretResolver,
+) -> None:
+    """R3 happy path: a token whose iss matches the resolved configured
+    issuer attaches successfully end-to-end through the handler."""
+    store = StoreGatewaySessionMemory()
+    handler = HandlerGatewayAttach(
+        config=config,
+        session_store=store,
+        secret_resolver=secret_resolver,  # type: ignore[arg-type]
+    )
+
+    response = await handler.handle(
+        ModelGatewayAttachRequest(
+            access_token=_fake_jwt(iss="https://keycloak.example/realms/omninode"),
+            edge_instance_id="edge-201",
+        )
+    )
+
+    assert response.session.status is EnumGatewaySessionStatus.ACTIVE
+
+
 async def test_heartbeat_active_token_keeps_session_active(
     monkeypatch: pytest.MonkeyPatch,
     config: ModelGatewayAttachConfig,
     secret_resolver: _FakeSecretResolver,
 ) -> None:
     store = StoreGatewaySessionMemory()
-    attach = HandlerGatewayAttach(config=config, session_store=store)
+    attach = HandlerGatewayAttach(
+        config=config,
+        session_store=store,
+        secret_resolver=secret_resolver,  # type: ignore[arg-type]
+    )
     attach_response = await attach.handle(
         ModelGatewayAttachRequest(access_token=_fake_jwt(), edge_instance_id="edge-201")
     )
@@ -208,7 +269,11 @@ async def test_heartbeat_after_keycloak_revocation_tears_down_session(
 ) -> None:
     """The revocation proof: introspection active:false kills the session."""
     store = StoreGatewaySessionMemory()
-    attach = HandlerGatewayAttach(config=config, session_store=store)
+    attach = HandlerGatewayAttach(
+        config=config,
+        session_store=store,
+        secret_resolver=secret_resolver,  # type: ignore[arg-type]
+    )
     attach_response = await attach.handle(
         ModelGatewayAttachRequest(access_token=_fake_jwt(), edge_instance_id="edge-201")
     )
@@ -252,9 +317,16 @@ async def test_heartbeat_unknown_session_raises() -> None:
         )
 
 
-async def test_detach_removes_session(config: ModelGatewayAttachConfig) -> None:
+async def test_detach_removes_session(
+    config: ModelGatewayAttachConfig,
+    secret_resolver: _FakeSecretResolver,
+) -> None:
     store = StoreGatewaySessionMemory()
-    attach = HandlerGatewayAttach(config=config, session_store=store)
+    attach = HandlerGatewayAttach(
+        config=config,
+        session_store=store,
+        secret_resolver=secret_resolver,  # type: ignore[arg-type]
+    )
     attach_response = await attach.handle(
         ModelGatewayAttachRequest(access_token=_fake_jwt(), edge_instance_id="edge-201")
     )
