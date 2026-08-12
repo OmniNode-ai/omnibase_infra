@@ -28,7 +28,7 @@ def test_omniweb_allows_the_managed_staging_callback() -> None:
     assert "https://dev.app.omninode.ai" in omniweb["webOrigins"]
 
 
-def test_omniweb_gateway_token_claim_contract() -> None:
+def test_omniweb_user_identity_claim_contract() -> None:
     config = json.loads(_CONFIG_PATH.read_text())
     omniweb = _client(config, "omniweb")
     mappers = {mapper["name"]: mapper for mapper in omniweb["protocolMappers"]}
@@ -41,8 +41,9 @@ def test_omniweb_gateway_token_claim_contract() -> None:
     assert principal["config"]["access.token.claim"] == "true"
     assert principal["config"]["userinfo.token.claim"] == "true"
 
-    audience = mappers["gateway-attach-audience"]
-    assert audience["protocolMapper"] == "oidc-audience-mapper"
-    assert audience["config"]["included.custom.audience"] == "gateway-attach"
-    assert audience["config"]["id.token.claim"] == "false"
-    assert audience["config"]["access.token.claim"] == "true"
+    assert "gateway-attach-audience" not in mappers
+    assert all(
+        mapper.get("config", {}).get("included.custom.audience")
+        != "gateway-attach"
+        for mapper in mappers.values()
+    )

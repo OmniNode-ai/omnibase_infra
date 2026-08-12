@@ -70,15 +70,6 @@
             "id.token.claim": "false",
             "access.token.claim": "true"
           }
-        },
-        {
-          "name": "gateway-attach-audience",
-          "protocolMapper": "oidc-audience-mapper",
-          "config": {
-            "included.custom.audience": "gateway-attach",
-            "id.token.claim": "false",
-            "access.token.claim": "true"
-          }
         }
       ]
     },
