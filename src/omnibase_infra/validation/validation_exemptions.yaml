@@ -3810,6 +3810,45 @@ pattern_exemptions:
       principal_id is the canonical MSK tenant principal t-<tenant UUID hex>, whose t- prefix makes UUID an invalid representation.
 
     ticket: OMN-12912
+  # ==========================================================================
+  # Gateway attach/session control-plane exemptions (OMN-15750)
+  # ==========================================================================
+  - file_pattern: 'model_gateway_session\.py'
+    violation_pattern: "Field 'principal_id' should use UUID type instead of str"
+    reason: >
+      Same t-<tenant UUID hex> canonical MSK principal as model_gateway_tenant_identity.py; the t- prefix makes UUID an invalid representation. The underlying tenant_id field remains strongly typed as UUID.
+
+    ticket: OMN-15750
+  - file_pattern: 'model_gateway_session\.py'
+    violation_pattern: "Field 'keycloak_client_id' should use UUID type instead of str"
+    reason: >
+      Keycloak clientId is an arbitrary realm-scoped string (this node sets it to the immutable principal_id, itself non-UUID -- see above), not a UUID.
+
+    ticket: OMN-15750
+  - file_pattern: 'model_gateway_session\.py'
+    violation_pattern: "Field 'edge_instance_id' should use UUID type instead of str"
+    reason: >
+      Caller-declared host label for observability/bookkeeping only, never used for authorization (that is derived entirely from the validated token claims). Free-form string, not a UUID.
+
+    ticket: OMN-15750
+  - file_pattern: 'model_gateway_attach_request\.py'
+    violation_pattern: "Field 'edge_instance_id' should use UUID type instead of str"
+    reason: >
+      Same caller-declared host label as model_gateway_session.py's edge_instance_id.
+
+    ticket: OMN-15750
+  - file_pattern: 'model_gateway_session_event\.py'
+    violation_pattern: "Field 'principal_id' should use UUID type instead of str"
+    reason: >
+      Same t-<tenant UUID hex> canonical MSK principal as model_gateway_tenant_identity.py.
+
+    ticket: OMN-15750
+  - file_pattern: 'model_gateway_session_event\.py'
+    violation_pattern: "Field 'edge_instance_id' should use UUID type instead of str"
+    reason: >
+      Same caller-declared host label as model_gateway_session.py's edge_instance_id.
+
+    ticket: OMN-15750
 # These handle one-model-per-file violations for domain-grouped protocols
 architecture_exemptions:
   # ==========================================================================

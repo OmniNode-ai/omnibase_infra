@@ -88,6 +88,10 @@ src/omnibase_infra/nodes/node_event_bus_wiring_effect/handlers/__init__.py  # ap
 src/omnibase_infra/nodes/node_event_bus_wiring_effect/handlers/handler_event_bus_wiring.py  # approved existing infra handler path; new business-domain handlers belong in omnimarket.
 src/omnibase_infra/nodes/node_event_forward_effect/handlers/__init__.py  # approved existing infra handler path; new business-domain handlers belong in omnimarket.
 src/omnibase_infra/nodes/node_event_forward_effect/handlers/handler_event_forward.py  # approved existing infra handler path; new business-domain handlers belong in omnimarket.
+src/omnibase_infra/nodes/node_gateway_attach_effect/handlers/__init__.py  # infra-owned gateway attach/session control plane (OMN-15750); trust-boundary identity validation, not business-domain logic; sibling of node_bus_forwarder_effect.
+src/omnibase_infra/nodes/node_gateway_attach_effect/handlers/handler_gateway_attach.py  # infra-owned gateway attach/session control plane (OMN-15750); trust-boundary identity validation, not business-domain logic; sibling of node_bus_forwarder_effect.
+src/omnibase_infra/nodes/node_gateway_attach_effect/handlers/handler_gateway_detach.py  # infra-owned gateway attach/session control plane (OMN-15750); trust-boundary identity validation, not business-domain logic; sibling of node_bus_forwarder_effect.
+src/omnibase_infra/nodes/node_gateway_attach_effect/handlers/handler_gateway_heartbeat.py  # infra-owned gateway attach/session control plane (OMN-15750); trust-boundary identity validation, not business-domain logic; sibling of node_bus_forwarder_effect.
 src/omnibase_infra/nodes/node_github_pr_poller_effect/handlers/__init__.py  # approved existing infra handler path; new business-domain handlers belong in omnimarket.
 src/omnibase_infra/nodes/node_github_pr_poller_effect/handlers/handler_github_api_poll.py  # approved existing infra handler path; new business-domain handlers belong in omnimarket.
 src/omnibase_infra/nodes/node_gmail_archive_cleanup_effect/handlers/__init__.py  # approved existing infra handler path; new business-domain handlers belong in omnimarket.
