@@ -5,30 +5,49 @@
 This is the end-to-end slice proof at the unit level (OMN-15753's local
 component): attach -> authenticated ACTIVE session -> heartbeat (active) ->
 heartbeat (introspection reports revoked) -> session torn down. The
-introspection HTTP call lives inline in ``HandlerGatewayHeartbeat._introspect``
+introspection HTTP call and the JWKS fetch live inline in the handlers
 (moved out of a freestanding services/ module to satisfy the
-imperative-contract-guard's handlers/-only I/O boundary) and is faked via
-monkeypatch here, including ``TestHeartbeatIntrospection`` for the
-transport-level fail-closed cases that used to live in
-test_service_keycloak_token_validator.py.
+imperative-contract-guard's handlers/-only I/O boundary) and are faked via
+monkeypatch here.
+
+OMN-15918 hardening coverage added in this revision (RED-before/GREEN-after
+for each CodeRabbit-flagged gap):
+  - R1 (JWT signature verification): ``_fake_jwt`` from the pre-hardening
+    revision (``alg: none``, unsigned) is gone -- every token here is a real
+    RS256-signed JWT verified against a mocked JWKS response.
+    ``test_attach_rejects_forged_signature`` / ``test_attach_jwks_outage_*``
+    are the direct proof.
+  - R2 (identity binding): ``test_heartbeat_rejects_identity_mismatch`` /
+    ``test_detach_rejects_identity_mismatch`` prove a validly-signed token
+    for the WRONG tenant/principal/client is rejected before the store is
+    touched.
+  - R3 (atomic transitions): ``test_heartbeat_does_not_resurrect_*`` proves
+    the read-introspect-write race CodeRabbit flagged is closed via
+    ``put_if_present``.
+  - R4 (outage vs revocation): ``test_heartbeat_transport_outage_*`` /
+    ``test_heartbeat_introspection_non200_*`` prove a Keycloak outage raises
+    ``InfraUnavailableError`` and leaves the session untouched, rather than
+    tearing it down as if revoked.
 """
 
 from __future__ import annotations
 
-import base64
-import json
+from typing import Any
 from uuid import UUID, uuid4
 
 import httpx
 import pytest
 from pydantic import SecretStr
 
+from omnibase_infra.errors import InfraUnavailableError
 from omnibase_infra.nodes.node_gateway_attach_effect.handlers.handler_gateway_attach import (
     HandlerGatewayAttach,
 )
 from omnibase_infra.nodes.node_gateway_attach_effect.handlers.handler_gateway_detach import (
     HandlerGatewayDetach,
-    SessionNotFoundError,
+)
+from omnibase_infra.nodes.node_gateway_attach_effect.handlers.handler_gateway_detach import (
+    SessionNotFoundError as DetachSessionNotFoundError,
 )
 from omnibase_infra.nodes.node_gateway_attach_effect.handlers.handler_gateway_heartbeat import (
     HandlerGatewayHeartbeat,
@@ -60,13 +79,22 @@ from omnibase_infra.nodes.node_gateway_attach_effect.services.service_keycloak_t
 from omnibase_infra.nodes.node_gateway_attach_effect.services.store_gateway_session_memory import (
     StoreGatewaySessionMemory,
 )
+from tests.unit.nodes.node_gateway_attach_effect._jwt_test_support import (
+    OTHER_KID,
+    TENANT_KID,
+    generate_key_material,
+    jwks_response_body,
+    sign_claims,
+)
 
 TENANT_ID = UUID("11111111-1111-1111-1111-111111111111")
+OTHER_TENANT_ID = UUID("22222222-2222-2222-2222-222222222222")
+ISSUER = "https://keycloak.example/realms/omninode"
 
 
-def _fake_jwt(**overrides: object) -> str:
-    claims = {
-        "iss": "https://keycloak.example/realms/omninode",
+def _claims(**overrides: object) -> dict[str, object]:
+    base: dict[str, object] = {
+        "iss": ISSUER,
         "sub": "svc-acct-abc",
         "aud": "gateway-attach",
         "tenant_id": str(TENANT_ID),
@@ -75,12 +103,8 @@ def _fake_jwt(**overrides: object) -> str:
         "azp": "gw-tenant-acme",
         "exp": 9999999999,
     }
-    claims.update(overrides)
-    header = base64.urlsafe_b64encode(b'{"alg":"none"}').rstrip(b"=").decode()
-    payload = (
-        base64.urlsafe_b64encode(json.dumps(claims).encode()).rstrip(b"=").decode()
-    )
-    return f"{header}.{payload}.sig"
+    base.update(overrides)
+    return base
 
 
 class _FakeSecretResolver:
@@ -94,26 +118,70 @@ class _FakeSecretResolver:
 
 
 class _FakeResponse:
-    def __init__(self, status_code: int, body: dict[str, object]) -> None:
+    def __init__(self, status_code: int, body: Any) -> None:
         self.status_code = status_code
         self._body = body
 
-    def json(self) -> dict[str, object]:
+    def json(self) -> Any:
+        if isinstance(self._body, Exception):
+            raise self._body
         return self._body
 
 
-class _FakeAsyncClient:
-    def __init__(self, response: _FakeResponse) -> None:
-        self._response = response
+class _ScriptedAsyncClient:
+    """Routes ``get``/``post`` to pre-scripted results (response or exception).
 
-    async def __aenter__(self) -> _FakeAsyncClient:
+    Both ``HandlerGatewayAttach``/``HandlerGatewayHeartbeat``/
+    ``HandlerGatewayDetach._fetch_jwks`` (GET) and
+    ``HandlerGatewayHeartbeat._introspect`` (POST) open their own
+    ``httpx.AsyncClient()`` context -- this fake stands in for all of them
+    within one monkeypatched test, so each test scripts exactly the
+    GET/POST outcomes it needs and nothing else.
+    """
+
+    def __init__(
+        self,
+        *,
+        get_result: _FakeResponse | Exception | None = None,
+        post_result: _FakeResponse | Exception | None = None,
+    ) -> None:
+        self._get_result = get_result
+        self._post_result = post_result
+
+    async def __aenter__(self) -> _ScriptedAsyncClient:
         return self
 
     async def __aexit__(self, *exc: object) -> None:
         return None
 
+    async def get(self, *args: object, **kwargs: object) -> _FakeResponse:
+        if self._get_result is None:
+            raise AssertionError("unexpected GET call in this test")
+        if isinstance(self._get_result, Exception):
+            raise self._get_result
+        return self._get_result
+
     async def post(self, *args: object, **kwargs: object) -> _FakeResponse:
-        return self._response
+        if self._post_result is None:
+            raise AssertionError("unexpected POST call in this test")
+        if isinstance(self._post_result, Exception):
+            raise self._post_result
+        return self._post_result
+
+
+def _patch_client(
+    monkeypatch: pytest.MonkeyPatch,
+    *,
+    get_result: _FakeResponse | Exception | None = None,
+    post_result: _FakeResponse | Exception | None = None,
+) -> None:
+    monkeypatch.setattr(
+        httpx,
+        "AsyncClient",
+        lambda **_: _ScriptedAsyncClient(
+            get_result=get_result, post_result=post_result
+        ),
+    )
 
 
 @pytest.fixture
@@ -122,30 +190,69 @@ def config() -> ModelGatewayAttachConfig:
 
 
 @pytest.fixture
+def tenant_key():
+    return generate_key_material(TENANT_KID)
+
+
+@pytest.fixture
+def attacker_key():
+    return generate_key_material(OTHER_KID)
+
+
+@pytest.fixture
+def jwks_ok(tenant_key) -> _FakeResponse:
+    return _FakeResponse(200, jwks_response_body(tenant_key))
+
+
+@pytest.fixture
 def secret_resolver(config: ModelGatewayAttachConfig) -> _FakeSecretResolver:
     return _FakeSecretResolver(
         {
-            config.keycloak_issuer_ref: "https://keycloak.example/realms/omninode",
+            config.keycloak_issuer_ref: ISSUER,
             config.keycloak_introspection_ref: "https://keycloak.example/introspect",
+            config.keycloak_jwks_ref: "https://keycloak.example/jwks",
             f"{config.keycloak_admin_client_ref}.client_id": "admin-cli",
             f"{config.keycloak_admin_client_ref}.client_secret": "admin-secret",
         }
     )
 
 
-async def test_attach_registers_active_session(
+async def _attach(
     config: ModelGatewayAttachConfig,
     secret_resolver: _FakeSecretResolver,
-) -> None:
-    store = StoreGatewaySessionMemory()
+    store: StoreGatewaySessionMemory,
+    monkeypatch: pytest.MonkeyPatch,
+    tenant_key,
+    jwks_ok: _FakeResponse,
+    **claim_overrides: object,
+):
+    _patch_client(monkeypatch, get_result=jwks_ok)
     handler = HandlerGatewayAttach(
         config=config,
         session_store=store,
         secret_resolver=secret_resolver,  # type: ignore[arg-type]
     )
+    token = sign_claims(tenant_key, _claims(**claim_overrides))
+    return await handler.handle(
+        ModelGatewayAttachRequest(access_token=token, edge_instance_id="edge-201")
+    )
 
-    response = await handler.handle(
-        ModelGatewayAttachRequest(access_token=_fake_jwt(), edge_instance_id="edge-201")
+
+# --------------------------------------------------------------------------- #
+# Attach
+# --------------------------------------------------------------------------- #
+
+
+async def test_attach_registers_active_session(
+    config: ModelGatewayAttachConfig,
+    secret_resolver: _FakeSecretResolver,
+    monkeypatch: pytest.MonkeyPatch,
+    tenant_key,
+    jwks_ok: _FakeResponse,
+) -> None:
+    store = StoreGatewaySessionMemory()
+    response = await _attach(
+        config, secret_resolver, store, monkeypatch, tenant_key, jwks_ok
     )
 
     assert response.session.status is EnumGatewaySessionStatus.ACTIVE
@@ -158,43 +265,42 @@ async def test_attach_registers_active_session(
 async def test_attach_rejects_expired_token(
     config: ModelGatewayAttachConfig,
     secret_resolver: _FakeSecretResolver,
+    monkeypatch: pytest.MonkeyPatch,
+    tenant_key,
+    jwks_ok: _FakeResponse,
 ) -> None:
     store = StoreGatewaySessionMemory()
-    handler = HandlerGatewayAttach(
-        config=config,
-        session_store=store,
-        secret_resolver=secret_resolver,  # type: ignore[arg-type]
-    )
-
     with pytest.raises(TokenValidationError):
-        await handler.handle(
-            ModelGatewayAttachRequest(
-                access_token=_fake_jwt(exp=0), edge_instance_id="edge-201"
-            )
+        await _attach(
+            config,
+            secret_resolver,
+            store,
+            monkeypatch,
+            tenant_key,
+            jwks_ok,
+            exp=1,
         )
-    # Nothing was ever registered for the rejected token.
     assert store._sessions == {}
 
 
 async def test_attach_rejects_mismatched_issuer(
     config: ModelGatewayAttachConfig,
     secret_resolver: _FakeSecretResolver,
+    monkeypatch: pytest.MonkeyPatch,
+    tenant_key,
+    jwks_ok: _FakeResponse,
 ) -> None:
-    """R3: HandlerGatewayAttach resolves keycloak_issuer_ref and rejects a
-    token whose iss claim does not match, end-to-end through the handler."""
+    """R3 (pre-existing): iss must match the resolved configured issuer."""
     store = StoreGatewaySessionMemory()
-    handler = HandlerGatewayAttach(
-        config=config,
-        session_store=store,
-        secret_resolver=secret_resolver,  # type: ignore[arg-type]
-    )
-
-    with pytest.raises(TokenValidationError, match="issuer"):
-        await handler.handle(
-            ModelGatewayAttachRequest(
-                access_token=_fake_jwt(iss="https://attacker.example/realms/evil"),
-                edge_instance_id="edge-201",
-            )
+    with pytest.raises(TokenValidationError, match=r"issuer|verification"):
+        await _attach(
+            config,
+            secret_resolver,
+            store,
+            monkeypatch,
+            tenant_key,
+            jwks_ok,
+            iss="https://attacker.example/realms/evil",
         )
     assert store._sessions == {}
 
@@ -202,56 +308,99 @@ async def test_attach_rejects_mismatched_issuer(
 async def test_attach_accepts_matching_issuer(
     config: ModelGatewayAttachConfig,
     secret_resolver: _FakeSecretResolver,
+    monkeypatch: pytest.MonkeyPatch,
+    tenant_key,
+    jwks_ok: _FakeResponse,
 ) -> None:
-    """R3 happy path: a token whose iss matches the resolved configured
-    issuer attaches successfully end-to-end through the handler."""
     store = StoreGatewaySessionMemory()
+    response = await _attach(
+        config, secret_resolver, store, monkeypatch, tenant_key, jwks_ok, iss=ISSUER
+    )
+    assert response.session.status is EnumGatewaySessionStatus.ACTIVE
+
+
+async def test_attach_rejects_forged_signature(
+    config: ModelGatewayAttachConfig,
+    secret_resolver: _FakeSecretResolver,
+    monkeypatch: pytest.MonkeyPatch,
+    attacker_key,
+    jwks_ok: _FakeResponse,
+) -> None:
+    """OMN-15918 R1: a structurally-perfect token signed by a key that is NOT
+    in the tenant's real JWKS must never attach -- this is the forged-token
+    gap CodeRabbit flagged and the pre-hardening ``decode_claims`` missed
+    entirely (it never referenced the signature segment at all)."""
+    store = StoreGatewaySessionMemory()
+    _patch_client(monkeypatch, get_result=jwks_ok)
     handler = HandlerGatewayAttach(
         config=config,
         session_store=store,
         secret_resolver=secret_resolver,  # type: ignore[arg-type]
     )
+    forged = sign_claims(attacker_key, _claims())
 
-    response = await handler.handle(
-        ModelGatewayAttachRequest(
-            access_token=_fake_jwt(iss="https://keycloak.example/realms/omninode"),
-            edge_instance_id="edge-201",
+    with pytest.raises(TokenValidationError):
+        await handler.handle(
+            ModelGatewayAttachRequest(access_token=forged, edge_instance_id="edge-201")
         )
-    )
+    assert store._sessions == {}
 
-    assert response.session.status is EnumGatewaySessionStatus.ACTIVE
+
+async def test_attach_jwks_outage_raises_unavailable(
+    config: ModelGatewayAttachConfig,
+    secret_resolver: _FakeSecretResolver,
+    monkeypatch: pytest.MonkeyPatch,
+    tenant_key,
+) -> None:
+    """OMN-15918 R4: a JWKS-endpoint outage must surface as
+    InfraUnavailableError (retry-able), never silently accept the token."""
+    store = StoreGatewaySessionMemory()
+    _patch_client(monkeypatch, get_result=httpx.ConnectError("unreachable"))
+    handler = HandlerGatewayAttach(
+        config=config,
+        session_store=store,
+        secret_resolver=secret_resolver,  # type: ignore[arg-type]
+    )
+    token = sign_claims(tenant_key, _claims())
+
+    with pytest.raises(InfraUnavailableError):
+        await handler.handle(
+            ModelGatewayAttachRequest(access_token=token, edge_instance_id="edge-201")
+        )
+    assert store._sessions == {}
+
+
+# --------------------------------------------------------------------------- #
+# Heartbeat
+# --------------------------------------------------------------------------- #
 
 
 async def test_heartbeat_active_token_keeps_session_active(
     monkeypatch: pytest.MonkeyPatch,
     config: ModelGatewayAttachConfig,
     secret_resolver: _FakeSecretResolver,
+    tenant_key,
+    jwks_ok: _FakeResponse,
 ) -> None:
     store = StoreGatewaySessionMemory()
-    attach = HandlerGatewayAttach(
-        config=config,
-        session_store=store,
-        secret_resolver=secret_resolver,  # type: ignore[arg-type]
-    )
-    attach_response = await attach.handle(
-        ModelGatewayAttachRequest(access_token=_fake_jwt(), edge_instance_id="edge-201")
+    attach_response = await _attach(
+        config, secret_resolver, store, monkeypatch, tenant_key, jwks_ok
     )
 
-    monkeypatch.setattr(
-        httpx,
-        "AsyncClient",
-        lambda **_: _FakeAsyncClient(
-            _FakeResponse(200, {"active": True, "client_id": "gw-tenant-acme"})
-        ),
+    _patch_client(
+        monkeypatch,
+        get_result=jwks_ok,
+        post_result=_FakeResponse(200, {"active": True, "client_id": "gw-tenant-acme"}),
     )
     heartbeat = HandlerGatewayHeartbeat(
         config=config,
         session_store=store,
         secret_resolver=secret_resolver,  # type: ignore[arg-type]
     )
+    hb_token = sign_claims(tenant_key, _claims())
     hb_response = await heartbeat.handle(
         ModelGatewayHeartbeatRequest(
-            session_id=attach_response.session.session_id, access_token=_fake_jwt()
+            session_id=attach_response.session.session_id, access_token=hb_token
         )
     )
 
@@ -266,40 +415,37 @@ async def test_heartbeat_after_keycloak_revocation_tears_down_session(
     monkeypatch: pytest.MonkeyPatch,
     config: ModelGatewayAttachConfig,
     secret_resolver: _FakeSecretResolver,
+    tenant_key,
+    jwks_ok: _FakeResponse,
 ) -> None:
     """The revocation proof: introspection active:false kills the session."""
     store = StoreGatewaySessionMemory()
-    attach = HandlerGatewayAttach(
-        config=config,
-        session_store=store,
-        secret_resolver=secret_resolver,  # type: ignore[arg-type]
-    )
-    attach_response = await attach.handle(
-        ModelGatewayAttachRequest(access_token=_fake_jwt(), edge_instance_id="edge-201")
+    attach_response = await _attach(
+        config, secret_resolver, store, monkeypatch, tenant_key, jwks_ok
     )
     session_id = attach_response.session.session_id
     assert await store.get(session_id) is not None
 
     # Simulate: operator disabled the tenant's Keycloak client between attach
     # and this heartbeat tick.
-    monkeypatch.setattr(
-        httpx,
-        "AsyncClient",
-        lambda **_: _FakeAsyncClient(_FakeResponse(200, {"active": False})),
+    _patch_client(
+        monkeypatch,
+        get_result=jwks_ok,
+        post_result=_FakeResponse(200, {"active": False}),
     )
     heartbeat = HandlerGatewayHeartbeat(
         config=config,
         session_store=store,
         secret_resolver=secret_resolver,  # type: ignore[arg-type]
     )
+    hb_token = sign_claims(tenant_key, _claims())
     hb_response = await heartbeat.handle(
-        ModelGatewayHeartbeatRequest(session_id=session_id, access_token=_fake_jwt())
+        ModelGatewayHeartbeatRequest(session_id=session_id, access_token=hb_token)
     )
 
     assert hb_response.revoked is True
     assert hb_response.session.status is EnumGatewaySessionStatus.REVOKED
     assert hb_response.session_event.event_type is EnumGatewaySessionEventType.REVOKED
-    # Session is gone from the store -- a subsequent heartbeat/detach on it 404s.
     assert await store.get(session_id) is None
 
 
@@ -313,47 +459,279 @@ async def test_heartbeat_unknown_session_raises() -> None:
     )
     with pytest.raises(HeartbeatSessionNotFoundError):
         await heartbeat.handle(
-            ModelGatewayHeartbeatRequest(session_id=uuid4(), access_token=_fake_jwt())
+            ModelGatewayHeartbeatRequest(session_id=uuid4(), access_token="whatever")
         )
+
+
+async def test_heartbeat_rejects_identity_mismatch(
+    monkeypatch: pytest.MonkeyPatch,
+    config: ModelGatewayAttachConfig,
+    secret_resolver: _FakeSecretResolver,
+    tenant_key,
+    jwks_ok: _FakeResponse,
+) -> None:
+    """OMN-15918 R2: a validly-signed token for a DIFFERENT tenant/principal
+    must never re-validate someone else's session, even though it decodes
+    and verifies cleanly on its own. Introspection must never even run."""
+    store = StoreGatewaySessionMemory()
+    attach_response = await _attach(
+        config, secret_resolver, store, monkeypatch, tenant_key, jwks_ok
+    )
+    session_id = attach_response.session.session_id
+
+    # POST is intentionally left unscripted (None): if the handler reached
+    # introspection despite the identity mismatch, this test fails loudly.
+    _patch_client(monkeypatch, get_result=jwks_ok, post_result=None)
+    heartbeat = HandlerGatewayHeartbeat(
+        config=config,
+        session_store=store,
+        secret_resolver=secret_resolver,  # type: ignore[arg-type]
+    )
+    mismatched_token = sign_claims(
+        tenant_key,
+        _claims(
+            tenant_id=str(OTHER_TENANT_ID),
+            principal_id="t-attacker",
+            azp="gw-tenant-other",
+        ),
+    )
+
+    with pytest.raises(TokenValidationError, match="identity"):
+        await heartbeat.handle(
+            ModelGatewayHeartbeatRequest(
+                session_id=session_id, access_token=mismatched_token
+            )
+        )
+    # Session is untouched -- rejection, not resurrection or revocation.
+    stored = await store.get(session_id)
+    assert stored is not None
+    assert stored.status is EnumGatewaySessionStatus.ACTIVE
+
+
+async def test_heartbeat_transport_outage_does_not_revoke_session(
+    monkeypatch: pytest.MonkeyPatch,
+    config: ModelGatewayAttachConfig,
+    secret_resolver: _FakeSecretResolver,
+    tenant_key,
+    jwks_ok: _FakeResponse,
+) -> None:
+    """OMN-15918 R4: a transport error talking to Keycloak introspection must
+    raise InfraUnavailableError and leave the session exactly as it was --
+    never mass-revoke on an outage."""
+    store = StoreGatewaySessionMemory()
+    attach_response = await _attach(
+        config, secret_resolver, store, monkeypatch, tenant_key, jwks_ok
+    )
+    session_id = attach_response.session.session_id
+
+    _patch_client(
+        monkeypatch, get_result=jwks_ok, post_result=httpx.ConnectError("unreachable")
+    )
+    heartbeat = HandlerGatewayHeartbeat(
+        config=config,
+        session_store=store,
+        secret_resolver=secret_resolver,  # type: ignore[arg-type]
+    )
+    hb_token = sign_claims(tenant_key, _claims())
+
+    with pytest.raises(InfraUnavailableError):
+        await heartbeat.handle(
+            ModelGatewayHeartbeatRequest(session_id=session_id, access_token=hb_token)
+        )
+    stored = await store.get(session_id)
+    assert stored is not None
+    assert stored.status is EnumGatewaySessionStatus.ACTIVE
+
+
+async def test_heartbeat_introspection_non200_does_not_revoke_session(
+    monkeypatch: pytest.MonkeyPatch,
+    config: ModelGatewayAttachConfig,
+    secret_resolver: _FakeSecretResolver,
+    tenant_key,
+    jwks_ok: _FakeResponse,
+) -> None:
+    store = StoreGatewaySessionMemory()
+    attach_response = await _attach(
+        config, secret_resolver, store, monkeypatch, tenant_key, jwks_ok
+    )
+    session_id = attach_response.session.session_id
+
+    _patch_client(monkeypatch, get_result=jwks_ok, post_result=_FakeResponse(500, {}))
+    heartbeat = HandlerGatewayHeartbeat(
+        config=config,
+        session_store=store,
+        secret_resolver=secret_resolver,  # type: ignore[arg-type]
+    )
+    hb_token = sign_claims(tenant_key, _claims())
+
+    with pytest.raises(InfraUnavailableError):
+        await heartbeat.handle(
+            ModelGatewayHeartbeatRequest(session_id=session_id, access_token=hb_token)
+        )
+    stored = await store.get(session_id)
+    assert stored is not None
+    assert stored.status is EnumGatewaySessionStatus.ACTIVE
+
+
+async def test_heartbeat_does_not_resurrect_concurrently_detached_session(
+    monkeypatch: pytest.MonkeyPatch,
+    config: ModelGatewayAttachConfig,
+    secret_resolver: _FakeSecretResolver,
+    tenant_key,
+    jwks_ok: _FakeResponse,
+) -> None:
+    """OMN-15918 R3 (the ticket's required concurrency proof): a detach that
+    lands between heartbeat's read and its final write must not be
+    resurrected. Deterministically simulated (no timing/flakiness) by
+    deleting the session out from under the store exactly at the moment
+    ``put_if_present`` would otherwise resurrect it."""
+
+    class _ResurrectionRaceStore(StoreGatewaySessionMemory):
+        def __init__(self) -> None:
+            super().__init__()
+            self.detach_before_next_write = False
+
+        async def put_if_present(self, session):  # type: ignore[override]
+            if self.detach_before_next_write:
+                self.detach_before_next_write = False
+                await self.delete(session.session_id)
+            return await super().put_if_present(session)
+
+    store = _ResurrectionRaceStore()
+    attach_response = await _attach(
+        config, secret_resolver, store, monkeypatch, tenant_key, jwks_ok
+    )
+    session_id = attach_response.session.session_id
+
+    _patch_client(
+        monkeypatch,
+        get_result=jwks_ok,
+        post_result=_FakeResponse(200, {"active": True, "client_id": "gw-tenant-acme"}),
+    )
+    heartbeat = HandlerGatewayHeartbeat(
+        config=config,
+        session_store=store,
+        secret_resolver=secret_resolver,  # type: ignore[arg-type]
+    )
+    store.detach_before_next_write = True
+    hb_token = sign_claims(tenant_key, _claims())
+
+    with pytest.raises(HeartbeatSessionNotFoundError):
+        await heartbeat.handle(
+            ModelGatewayHeartbeatRequest(session_id=session_id, access_token=hb_token)
+        )
+    # The critical assertion: NOT resurrected. Pre-R3, an unconditional
+    # `put()` here would have silently recreated the just-detached session.
+    assert await store.get(session_id) is None
+
+
+# --------------------------------------------------------------------------- #
+# Detach
+# --------------------------------------------------------------------------- #
 
 
 async def test_detach_removes_session(
     config: ModelGatewayAttachConfig,
     secret_resolver: _FakeSecretResolver,
+    monkeypatch: pytest.MonkeyPatch,
+    tenant_key,
+    jwks_ok: _FakeResponse,
 ) -> None:
     store = StoreGatewaySessionMemory()
-    attach = HandlerGatewayAttach(
+    attach_response = await _attach(
+        config, secret_resolver, store, monkeypatch, tenant_key, jwks_ok
+    )
+    session_id = attach_response.session.session_id
+
+    _patch_client(monkeypatch, get_result=jwks_ok)
+    detach = HandlerGatewayDetach(
         config=config,
         session_store=store,
         secret_resolver=secret_resolver,  # type: ignore[arg-type]
     )
-    attach_response = await attach.handle(
-        ModelGatewayAttachRequest(access_token=_fake_jwt(), edge_instance_id="edge-201")
-    )
-    session_id = attach_response.session.session_id
-
-    detach = HandlerGatewayDetach(session_store=store)
+    detach_token = sign_claims(tenant_key, _claims())
     detach_response = await detach.handle(
-        ModelGatewayDetachRequest(session_id=session_id, reason="edge shutdown")
+        ModelGatewayDetachRequest(
+            session_id=session_id, access_token=detach_token, reason="edge shutdown"
+        )
     )
 
     assert detach_response.status is EnumGatewaySessionStatus.DETACHED
     assert await store.get(session_id) is None
 
 
-async def test_detach_unknown_session_raises() -> None:
+async def test_detach_unknown_session_raises(
+    config: ModelGatewayAttachConfig,
+) -> None:
     store = StoreGatewaySessionMemory()
-    detach = HandlerGatewayDetach(session_store=store)
-    with pytest.raises(SessionNotFoundError):
-        await detach.handle(ModelGatewayDetachRequest(session_id=uuid4(), reason="x"))
+    detach = HandlerGatewayDetach(
+        config=config,
+        session_store=store,
+        secret_resolver=_FakeSecretResolver({}),  # type: ignore[arg-type]
+    )
+    with pytest.raises(DetachSessionNotFoundError):
+        await detach.handle(
+            ModelGatewayDetachRequest(
+                session_id=uuid4(), access_token="whatever", reason="x"
+            )
+        )
+
+
+async def test_detach_rejects_identity_mismatch(
+    config: ModelGatewayAttachConfig,
+    secret_resolver: _FakeSecretResolver,
+    monkeypatch: pytest.MonkeyPatch,
+    tenant_key,
+    jwks_ok: _FakeResponse,
+) -> None:
+    """OMN-15918 R2: any caller holding a session_id could previously detach
+    any tenant's session (zero credential check at all). A validly-signed
+    token for a different identity must be rejected, and the session must
+    survive the attempt."""
+    store = StoreGatewaySessionMemory()
+    attach_response = await _attach(
+        config, secret_resolver, store, monkeypatch, tenant_key, jwks_ok
+    )
+    session_id = attach_response.session.session_id
+
+    _patch_client(monkeypatch, get_result=jwks_ok)
+    detach = HandlerGatewayDetach(
+        config=config,
+        session_store=store,
+        secret_resolver=secret_resolver,  # type: ignore[arg-type]
+    )
+    mismatched_token = sign_claims(
+        tenant_key,
+        _claims(
+            tenant_id=str(OTHER_TENANT_ID),
+            principal_id="t-attacker",
+            azp="gw-tenant-other",
+        ),
+    )
+
+    with pytest.raises(TokenValidationError, match="identity"):
+        await detach.handle(
+            ModelGatewayDetachRequest(
+                session_id=session_id,
+                access_token=mismatched_token,
+                reason="malicious detach attempt",
+            )
+        )
+    assert await store.get(session_id) is not None
+
+
+# --------------------------------------------------------------------------- #
+# Introspection transport-level coverage
+# --------------------------------------------------------------------------- #
 
 
 class TestHeartbeatIntrospection:
-    """Transport-level fail-closed coverage for ``HandlerGatewayHeartbeat._introspect``.
+    """Transport-level coverage for ``HandlerGatewayHeartbeat._introspect``.
 
-    Moved here from test_service_keycloak_token_validator.py when the RFC 7662
-    HTTP call relocated from a freestanding services/ module into this
-    handler (imperative-contract-guard's handlers/-only I/O boundary).
+    OMN-15918 R4: a transport error or non-200 now raises
+    ``InfraUnavailableError`` instead of the pre-hardening fail-closed
+    ``False`` return -- that old behavior is exactly the bug (an outage
+    silently reading as "revoked").
     """
 
     async def test_client_id_mismatch_returns_false(
@@ -362,11 +740,13 @@ class TestHeartbeatIntrospection:
         config: ModelGatewayAttachConfig,
         secret_resolver: _FakeSecretResolver,
     ) -> None:
-        response = _FakeResponse(
-            200, {"active": True, "client_id": "gw-tenant-someone-else"}
-        )
-        monkeypatch.setattr(
-            httpx, "AsyncClient", lambda **_: _FakeAsyncClient(response)
+        """A clean 200 response with a MISMATCHED client_id is genuine
+        revocation-class, not an outage -- still returns False."""
+        _patch_client(
+            monkeypatch,
+            post_result=_FakeResponse(
+                200, {"active": True, "client_id": "gw-tenant-someone-else"}
+            ),
         )
         heartbeat = HandlerGatewayHeartbeat(
             config=config,
@@ -378,47 +758,62 @@ class TestHeartbeatIntrospection:
         )
         assert result is False
 
-    async def test_transport_error_fails_closed(
+    async def test_transport_error_raises_unavailable(
         self,
         monkeypatch: pytest.MonkeyPatch,
         config: ModelGatewayAttachConfig,
         secret_resolver: _FakeSecretResolver,
     ) -> None:
-        class _RaisingAsyncClient(_FakeAsyncClient):
-            async def post(self, *args: object, **kwargs: object) -> _FakeResponse:
-                raise httpx.ConnectError("unreachable")
-
-        monkeypatch.setattr(
-            httpx,
-            "AsyncClient",
-            lambda **_: _RaisingAsyncClient(_FakeResponse(200, {})),
-        )
+        _patch_client(monkeypatch, post_result=httpx.ConnectError("unreachable"))
         heartbeat = HandlerGatewayHeartbeat(
             config=config,
             session_store=StoreGatewaySessionMemory(),
             secret_resolver=secret_resolver,  # type: ignore[arg-type]
         )
-        result = await heartbeat._introspect(
-            access_token="tok", client_id="gw-tenant-acme"
-        )
-        assert result is False
+        with pytest.raises(InfraUnavailableError):
+            await heartbeat._introspect(access_token="tok", client_id="gw-tenant-acme")
 
-    async def test_non_200_fails_closed(
+    async def test_non_200_raises_unavailable(
         self,
         monkeypatch: pytest.MonkeyPatch,
         config: ModelGatewayAttachConfig,
         secret_resolver: _FakeSecretResolver,
     ) -> None:
-        response = _FakeResponse(500, {})
-        monkeypatch.setattr(
-            httpx, "AsyncClient", lambda **_: _FakeAsyncClient(response)
-        )
+        _patch_client(monkeypatch, post_result=_FakeResponse(500, {}))
         heartbeat = HandlerGatewayHeartbeat(
             config=config,
             session_store=StoreGatewaySessionMemory(),
             secret_resolver=secret_resolver,  # type: ignore[arg-type]
         )
-        result = await heartbeat._introspect(
-            access_token="tok", client_id="gw-tenant-acme"
+        with pytest.raises(InfraUnavailableError):
+            await heartbeat._introspect(access_token="tok", client_id="gw-tenant-acme")
+
+    async def test_repeated_transport_failures_open_circuit(
+        self,
+        monkeypatch: pytest.MonkeyPatch,
+        config: ModelGatewayAttachConfig,
+        secret_resolver: _FakeSecretResolver,
+    ) -> None:
+        """After ``circuit_breaker_threshold`` failures, the breaker itself
+        opens and short-circuits further calls -- still InfraUnavailableError,
+        proving the circuit breaker is actually wired, not just individual
+        try/except handling around each call."""
+        _patch_client(monkeypatch, post_result=httpx.ConnectError("unreachable"))
+        heartbeat = HandlerGatewayHeartbeat(
+            config=config,
+            session_store=StoreGatewaySessionMemory(),
+            secret_resolver=secret_resolver,  # type: ignore[arg-type]
         )
-        assert result is False
+        for _ in range(config.circuit_breaker_threshold):
+            with pytest.raises(InfraUnavailableError):
+                await heartbeat._introspect(
+                    access_token="tok", client_id="gw-tenant-acme"
+                )
+        assert heartbeat._introspection_circuit._circuit_breaker_open is True
+        # One more call: circuit is open, must fail fast without even
+        # attempting a POST (post_result stays scripted the same way, so
+        # this alone doesn't distinguish -- the fast-fail is asserted via
+        # the breaker's own open state above, which _check_circuit_breaker
+        # reads before any transport call is attempted).
+        with pytest.raises(InfraUnavailableError):
+            await heartbeat._introspect(access_token="tok", client_id="gw-tenant-acme")
