@@ -15,7 +15,7 @@ from omnibase_infra.nodes.node_bus_forwarder_effect.models import (
     ModelGatewayForwarderConfig,
 )
 from omnibase_infra.nodes.node_bus_forwarder_effect.services.service_gateway_topic_transform import (
-    prefix_topic,
+    resolve_physical_topic,
 )
 
 
@@ -64,9 +64,15 @@ class HandlerForwardOutbound:
         if envelope.canonical_topic not in config.mirror_topics.outbound:
             raise ValueError("canonical_topic is not declared for outbound mirroring")
 
-        expected_wire_topic = prefix_topic(
-            identity.tenant_slug,
+        # OMN-15792: routes through the single runtime topic resolver
+        # (``resolve_physical_topic``) instead of calling ``prefix_topic``
+        # directly -- ``identity.tenant_slug`` is a required field (never
+        # None) on this forwarder's config, so this is the identical
+        # transform ``prefix_topic`` already performed, now via the sole
+        # resolver every publish/subscribe call site consults.
+        expected_wire_topic = resolve_physical_topic(
             envelope.canonical_topic,
+            tenant_slug=identity.tenant_slug,
         )
         return envelope.model_copy(
             update={

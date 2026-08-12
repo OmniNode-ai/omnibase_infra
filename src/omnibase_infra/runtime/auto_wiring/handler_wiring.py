@@ -96,6 +96,9 @@ from omnibase_infra.event_bus.model_topic_readiness_config import (
 from omnibase_infra.event_bus.model_topic_set_readiness import (
     ModelTopicSetReadiness,
 )
+from omnibase_infra.nodes.node_bus_forwarder_effect.services.service_gateway_topic_transform import (
+    resolve_tenant_from_wire_topic,
+)
 from omnibase_infra.protocols.protocol_dispatch_result_applier import (
     ProtocolDispatchResultApplier,
 )
@@ -4704,9 +4707,6 @@ def _make_event_bus_callback(
     return callback
 
 
-_TENANT_WIRE_PREFIX_RE = re.compile(r"^tenant-([a-z][a-z0-9-]{1,61}[a-z0-9])\.")
-
-
 def _stamp_tenant_id_from_topic_prefix(
     topic: str,
     envelope: ModelEventEnvelope[object],
@@ -4719,13 +4719,22 @@ def _stamp_tenant_id_from_topic_prefix(
     payload completely untouched -- never a defaulted or guessed tenant
     (Stage-1 warn semantics; a missing/self-reported value is handled by the
     existing OMN-14058 flow downstream, not masked here).
+
+    OMN-15792: this is the subscribe/dispatch-side call site of the single
+    runtime topic resolver. ``resolve_tenant_from_wire_topic`` is the same
+    resolver the gateway forwarder's publish-side ``HandlerForwardOutbound``
+    resolves through (via ``prefix_topic``) -- previously this function
+    hand-rolled its own regex extraction with no slug validation, which is
+    exactly the two-independent-resolvers-disagreeing class OMN-15757/
+    OMN-15778 hit. A reserved or malformed slug embedded in a prefix-shaped
+    topic now raises (routed to the existing swallowed-exception boundary
+    handling below) instead of being silently stamped.
     """
-    match = _TENANT_WIRE_PREFIX_RE.match(topic)
-    if match is None:
+    slug, _canonical_topic = resolve_tenant_from_wire_topic(topic)
+    if slug is None:
         return envelope
     if not isinstance(envelope.payload, dict):
         return envelope
-    slug = match.group(1)
     # OMN-14367: route through the single canonical stamp so this producer and
     # the gateway forwarder's consume_inbound cannot diverge on the shape again.
     stamped_payload = stamp_verified_tenant_slug(envelope.payload, slug)
