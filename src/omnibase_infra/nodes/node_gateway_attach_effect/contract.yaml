@@ -132,6 +132,6 @@ metadata:
     - tenant-isolation
   known_gaps:
     - "Session store is in-process (StoreGatewaySessionMemory) for the first slice — a multi-pod deployment needs a shared backend (Valkey) behind the same ProtocolGatewaySessionStore seam. Tracked as follow-on, not built in OMN-15750."
-    - "Handlers still take config/services as direct constructor args instead of resolving through ModelONEXContainer.get_service(...) (OMN-15918 ticket item 1, DI container). Deferred: needs the node's DI wiring to register ProtocolGatewaySessionStore/SecretResolver/ModelGatewayAttachConfig as container services first, out of scope for the OMN-15918 hardening slice landed here."
+    - "Runtime wiring materializes one shared StoreGatewaySessionMemory, SecretResolver, and ModelGatewayAttachConfig for all three handlers. A future container-owned registration can replace this explicit dependency map when the store moves to a shared Valkey backend."
     - "JWKS keys are fetched fresh on every attach/heartbeat/detach call (no in-process cache/TTL). Acceptable for the first slice's call volume; a cache would reduce Keycloak load under sustained heartbeat traffic. Tracked as follow-on, not built here."
     - "No dedicated unattended pairing/renewal contract exists yet for a persistent runtime to re-mint an attach token across the 900-second client-credentials token expiry without a browser session in the loop -- tracked as OMN-15952, blocking OMN-15877."
