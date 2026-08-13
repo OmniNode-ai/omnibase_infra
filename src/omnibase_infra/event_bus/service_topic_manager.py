@@ -988,12 +988,19 @@ class TopicProvisioner:
                         topic_name, ModelTopicSpec(suffix=topic_name)
                     )
                 )
-                resolved = self._resolve_spec(effective_spec)
+                # Record the exact effective spec handed to the broker. The
+                # dev/stability partition cap is part of creation semantics;
+                # retaining the uncapped spec here makes the subsequent
+                # readiness check expect (for example) 6 partitions after we
+                # deliberately created 1, so a cold-start consumer can never
+                # attach until the process restarts and treats the topic as
+                # pre-existing (OMN-15978 live finding).
+                resolved = self._creation_spec(effective_spec)
                 created_spec = resolved
                 requested_replication_factor = resolved.replication_factor
                 new_topic = NewTopic(
                     name=topic_name,
-                    num_partitions=self._creation_partitions(resolved),
+                    num_partitions=resolved.partitions,
                     replication_factor=resolved.replication_factor,
                     topic_configs=dict(resolved.kafka_config)
                     if resolved.kafka_config
