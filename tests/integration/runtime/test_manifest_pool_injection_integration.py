@@ -27,6 +27,27 @@ from omnibase_infra.runtime.auto_wiring.models import (
 )
 from omnibase_infra.runtime.service_kernel import _build_runtime_handler_dependencies
 
+_GATEWAY_RESOLVER_CONFIG = """\
+enable_convention_fallback: false
+mappings:
+  - logical_name: gateway.attach.keycloak.issuer
+    source: {source_type: env, source_path: TEST_ISSUER}
+  - logical_name: gateway.attach.keycloak.introspection
+    source: {source_type: env, source_path: TEST_INTROSPECTION}
+  - logical_name: gateway.attach.keycloak.admin_client_credentials.client_id
+    source: {source_type: env, source_path: TEST_CLIENT_ID}
+  - logical_name: gateway.attach.keycloak.admin_client_credentials.client_secret
+    source: {source_type: env, source_path: TEST_CLIENT_SECRET}
+  - logical_name: gateway.attach.keycloak.jwks
+    source: {source_type: env, source_path: TEST_JWKS}
+"""
+
+
+def _write_gateway_resolver_config(tmp_path: Path) -> Path:
+    config_path = tmp_path / "secret_resolver.yaml"
+    config_path.write_text(_GATEWAY_RESOLVER_CONFIG, encoding="utf-8")
+    return config_path
+
 
 def _make_pool_backed_contract(
     *,
@@ -229,11 +250,7 @@ def test_runtime_handler_dependencies_share_gateway_state_and_resolver(
     tmp_path: Path,
 ) -> None:
     """All gateway lifecycle operations use one session authority and resolver."""
-    config_path = tmp_path / "secret_resolver.yaml"
-    config_path.write_text(
-        "enable_convention_fallback: false\nmappings: []\n",
-        encoding="utf-8",
-    )
+    config_path = _write_gateway_resolver_config(tmp_path)
 
     result = _build_runtime_handler_dependencies(
         None,
@@ -266,6 +283,26 @@ def test_gateway_runtime_dependencies_fail_closed_on_invalid_config(
 
 
 @pytest.mark.integration
+def test_gateway_runtime_dependencies_fail_closed_on_missing_mapping(
+    tmp_path: Path,
+) -> None:
+    """A partial resolver artifact cannot defer an auth failure to first traffic."""
+    from omnibase_infra.errors import ProtocolConfigurationError
+
+    config_path = tmp_path / "secret_resolver.yaml"
+    config_path.write_text(
+        "enable_convention_fallback: false\nmappings: []\n",
+        encoding="utf-8",
+    )
+
+    with pytest.raises(ProtocolConfigurationError, match="missing explicit"):
+        _build_runtime_handler_dependencies(
+            None,
+            gateway_secret_resolver_config_path=config_path,
+        )
+
+
+@pytest.mark.integration
 @pytest.mark.asyncio
 async def test_real_gateway_contract_wires_in_strict_mode(
     tmp_path: Path,
@@ -278,11 +315,7 @@ async def test_real_gateway_contract_wires_in_strict_mode(
         Path(__file__).parents[3]
         / "src/omnibase_infra/nodes/node_gateway_attach_effect/contract.yaml"
     )
-    config_path = tmp_path / "secret_resolver.yaml"
-    config_path.write_text(
-        "enable_convention_fallback: false\nmappings: []\n",
-        encoding="utf-8",
-    )
+    config_path = _write_gateway_resolver_config(tmp_path)
     monkeypatch.setenv("ONEX_WIRING_STRICT_MODE", "1")
 
     report = await wire_from_manifest(

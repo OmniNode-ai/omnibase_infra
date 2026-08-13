@@ -514,6 +514,23 @@ def _build_runtime_handler_dependencies(
             ) from exc
 
         gateway_config = ModelGatewayAttachConfig()
+        required_gateway_refs = {
+            gateway_config.keycloak_issuer_ref,
+            gateway_config.keycloak_introspection_ref,
+            gateway_config.keycloak_jwks_ref,
+            f"{gateway_config.keycloak_admin_client_ref}.client_id",
+            f"{gateway_config.keycloak_admin_client_ref}.client_secret",
+        }
+        mapped_refs = {
+            mapping.logical_name for mapping in secret_resolver_config.mappings
+        }
+        missing_refs = sorted(required_gateway_refs - mapped_refs)
+        if missing_refs:
+            raise ProtocolConfigurationError(
+                "Gateway attach dependency wiring is missing explicit "
+                f"secret-resolver mappings: {', '.join(missing_refs)}"
+            )
+
         session_store = StoreGatewaySessionMemory()
         secret_resolver = SecretResolver(config=secret_resolver_config)
         shared_dependencies = {
