@@ -80,6 +80,7 @@ handler_routing:
   routing_strategy: "operation_match"
   handlers:
     - operation: "gateway.attach"
+      topic: "onex.cmd.omnibase-infra.gateway-attach-request.v1"
       handler:
         name: "HandlerGatewayAttach"
         module: "omnibase_infra.nodes.node_gateway_attach_effect.handlers.handler_gateway_attach"
@@ -88,6 +89,7 @@ handler_routing:
         Verify a client-credentials access token's signature against Keycloak's JWKS keyset, then validate its claims (issuer, audience, tenant_id/tenant_slug/principal_id), register a new tenant-bound session, return the session plus the ATTACHED session_event.
 
     - operation: "gateway.heartbeat"
+      topic: "onex.cmd.omnibase-infra.gateway-heartbeat-request.v1"
       handler:
         name: "HandlerGatewayHeartbeat"
         module: "omnibase_infra.nodes.node_gateway_attach_effect.handlers.handler_gateway_heartbeat"
@@ -96,6 +98,7 @@ handler_routing:
         Verify the presented token's signature and bind it to the stored session's tenant/principal/client identity, then re-validate via Keycloak RFC 7662 introspection. A disabled tenant client makes introspection return active:false on the next call, which tears the session down and emits a REVOKED session_event -- this is the revocation mechanism, not a separate admin call against this node. A Keycloak/JWKS outage raises InfraUnavailableError and leaves the session untouched rather than revoking it.
 
     - operation: "gateway.detach"
+      topic: "onex.cmd.omnibase-infra.gateway-detach-request.v1"
       handler:
         name: "HandlerGatewayDetach"
         module: "omnibase_infra.nodes.node_gateway_attach_effect.handlers.handler_gateway_detach"
