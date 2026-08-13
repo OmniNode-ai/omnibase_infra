@@ -10,6 +10,9 @@ from omnibase_infra.nodes.node_gateway_attach_effect.models.enum_gateway_session
 from omnibase_infra.nodes.node_gateway_attach_effect.models.enum_gateway_session_status import (
     EnumGatewaySessionStatus,
 )
+from omnibase_infra.nodes.node_gateway_attach_effect.models.enum_gateway_session_termination_reason import (
+    EnumGatewaySessionTerminationReason,
+)
 from omnibase_infra.nodes.node_gateway_attach_effect.models.model_gateway_attach_config import (
     ModelGatewayAttachConfig,
 )
@@ -41,6 +44,7 @@ from omnibase_infra.nodes.node_gateway_attach_effect.models.model_gateway_sessio
 __all__ = [
     "EnumGatewaySessionEventType",
     "EnumGatewaySessionStatus",
+    "EnumGatewaySessionTerminationReason",
     "ModelGatewayAttachConfig",
     "ModelGatewayAttachRequest",
     "ModelGatewayAttachResponse",

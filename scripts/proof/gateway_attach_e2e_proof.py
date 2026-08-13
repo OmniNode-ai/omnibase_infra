@@ -85,7 +85,8 @@ STAGE_SURFACES: tuple[tuple[str, str], ...] = (
     (
         "heartbeat_active",
         "publish ModelGatewayHeartbeatRequest to {heartbeat_request_topic}; "
-        "assert session_event.event_type == HEARTBEAT_OK, revoked == False",
+        "assert session_event.event_type == HEARTBEAT_OK, "
+        "termination_reason is None",
     ),
     (
         "revoke",
@@ -97,7 +98,8 @@ STAGE_SURFACES: tuple[tuple[str, str], ...] = (
         "heartbeat_after_revoke",
         "publish another ModelGatewayHeartbeatRequest to "
         "{heartbeat_request_topic}; assert session_event.event_type == "
-        "REVOKED, revoked == True, and that the session no longer answers a "
+        "REVOKED, termination_reason == REVOKED, and that the session no "
+        "longer answers a "
         "subsequent detach with anything but SessionNotFoundError",
     ),
 )
