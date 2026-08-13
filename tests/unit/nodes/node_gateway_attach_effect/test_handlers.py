@@ -33,6 +33,7 @@ for each CodeRabbit-flagged gap):
 from __future__ import annotations
 
 import logging
+import time
 from datetime import UTC, datetime, timedelta
 from typing import Any
 from uuid import UUID, uuid4
@@ -101,6 +102,13 @@ ISSUER = "https://keycloak.example/realms/omninode"
 
 
 def _claims(**overrides: object) -> dict[str, object]:
+    """A token shaped the way the real ga-* Keycloak client mints them.
+
+    OMN-16023: a 900s window with a real ``iat``, replacing a year-2286
+    ``exp`` with no ``iat``. The validator now asserts the token's own
+    lifetime, so fixtures have to be tokens an IdP could actually issue.
+    """
+    issued_at = int(time.time())
     base: dict[str, object] = {
         "iss": ISSUER,
         "sub": "svc-acct-abc",
@@ -109,7 +117,8 @@ def _claims(**overrides: object) -> dict[str, object]:
         "tenant_slug": "acme",
         "principal_id": "t-11111111111111111111111111111111",
         "azp": "gw-tenant-acme",
-        "exp": 9999999999,
+        "iat": issued_at,
+        "exp": issued_at + 900,
     }
     base.update(overrides)
     return base
