@@ -47,17 +47,22 @@
 #     extending a live ceiling on the strength of a heartbeat would let a
 #     credential the IdP has stopped authorizing hold a session open one
 #     heartbeat at a time.
+#   - OMN-16023: validator-side assertion strictness. aud is checked as
+#     exact set equality (not membership/denylist) and exp - iat is bounded
+#     by the new max_attach_token_lifetime_seconds. Bumps minor:
+#     ModelGatewayAttachConfig gains a field and previously-accepted
+#     dual-audience / over-long tokens are now rejected.
 name: "node_gateway_attach_effect"
 contract_name: "node_gateway_attach_effect"
 node_name: "node_gateway_attach_effect"
 node_type: "EFFECT_GENERIC"
 contract_version:
   major: 0
-  minor: 4
+  minor: 5
   patch: 0
 node_version:
   major: 0
-  minor: 3
+  minor: 4
   patch: 0
 runtime_profiles:
   - effects
@@ -94,6 +99,7 @@ config:
     keycloak_admin_client_ref: "gateway.attach.keycloak.admin_client_credentials"
     keycloak_jwks_ref: "gateway.attach.keycloak.jwks"
     required_audience: "gateway-attach"
+    max_attach_token_lifetime_seconds: 900
     heartbeat_interval_seconds: 15
     session_degraded_after_seconds: 60
     max_session_ttl_seconds: 3600
@@ -112,7 +118,7 @@ handler_routing:
         module: "omnibase_infra.nodes.node_gateway_attach_effect.handlers.handler_gateway_attach"
         handler_type: "INFRA"
       description: >
-        Verify a client-credentials access token's signature against Keycloak's JWKS keyset, then validate its claims (issuer, audience, tenant_id/tenant_slug/principal_id), register a new tenant-bound session, return the session plus the ATTACHED session_event and the renewal directive. The directive carries the contract-declared renewal cycle for this session -- mode RE_ATTACH, the jitter window [renew_not_before, renew_at], and the immutable session_expires_at those race -- so an unattended runtime is told how to survive its own ceiling instead of inferring a policy it was never given.
+        Verify a client-credentials access token's signature against Keycloak's JWKS keyset, then validate its claims (issuer, audience, tenant_id/tenant_slug/principal_id), register a new tenant-bound session, return the session plus the ATTACHED session_event and the renewal directive. The directive carries the contract-declared renewal cycle for this session -- mode RE_ATTACH, the jitter window [renew_not_before, renew_at], and the immutable session_expires_at those race -- so an unattended runtime is told how to survive its own ceiling instead of inferring a policy it was never given. Audience is asserted as exact set equality against required_audience -- a dual-audience token is rejected even when it carries the expected audience -- and exp - iat is rejected above max_attach_token_lifetime_seconds, so an IdP-side mapper or token-lifespan change fails closed here instead of silently widening every token minted thereafter (OMN-16023).
 
     - operation: "gateway.heartbeat"
       topic: "onex.cmd.omnibase-infra.gateway-heartbeat-request.v1"
@@ -135,6 +141,8 @@ handler_routing:
 capabilities:
   - name: "client_credentials_attach"
     description: "Verifies per-tenant Keycloak confidential-client access tokens (client_credentials grant) against the realm's JWKS keyset, then validates claims, at attach time."
+  - name: "validator_asserted_token_shape"
+    description: "The audience set and the token lifetime are asserted by the relying party on every presented token (exact aud set equality; exp - iat <= max_attach_token_lifetime_seconds), not merely configured at mint -- so an IdP-side audience-mapper or accessTokenLifespan change cannot silently widen what this node accepts."
   - name: "introspection_revocation"
     description: "Heartbeat re-validation via RFC 7662 introspection makes Keycloak-side client revocation observable within one heartbeat interval, independent of the token's own exp."
   - name: "tenant_bound_session"

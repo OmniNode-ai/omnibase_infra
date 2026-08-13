@@ -106,6 +106,8 @@ def _claims(*, expires_in_seconds: int) -> dict[str, object]:
         "tenant_slug": "acme",
         "principal_id": "t-11111111111111111111111111111111",
         "azp": "ga-tenant-acme",
+        # OMN-16023: iat is a required claim — the validator bounds exp - iat.
+        "iat": int(datetime.now(UTC).timestamp()),
         "exp": int(datetime.now(UTC).timestamp()) + expires_in_seconds,
     }
 
