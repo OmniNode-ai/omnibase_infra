@@ -233,6 +233,7 @@ from omnibase_infra.event_bus.models import (
     ModelEventBusReadiness,
     ModelEventHeaders,
     ModelEventMessage,
+    ModelPublishReceipt,
 )
 from omnibase_infra.event_bus.models.config import ModelKafkaEventBusConfig
 from omnibase_infra.event_bus.topic_violation_alerter import TopicViolationAlerter
@@ -886,17 +887,35 @@ class EventBusKafka(
         key: bytes | None,
         value: bytes,
         headers: ModelEventHeaders | None = None,
-    ) -> None:
-        """Publish message to topic.
+    ) -> ModelPublishReceipt:
+        """Publish message to topic and return its durability coordinate.
 
         Publishes a message to the specified Kafka topic with retry and
         circuit breaker protection.
+
+        Returns the broker-assigned ``(partition, offset)`` as a
+        ``ModelPublishReceipt`` (OMN-15861). Before this change the method
+        returned ``None`` and the ``record_metadata`` the broker handed back was
+        written to a debug log and discarded, so a caller could not tell "the
+        produce call did not raise" from "the record is at a coordinate I can
+        read back" -- and every durable-outbox ack in the platform was built on
+        the former while claiming the latter.
+
+        The receipt is NOT itself a durability claim. Canonical invariant 7: a
+        publish return is not durability. To make a durable claim, pass the
+        receipt to a ``ProtocolConfirmationStrategy``
+        (``omnibase_infra.event_bus.confirmation``), which reads the coordinate
+        back off an authoritative surface.
 
         Args:
             topic: Target topic name
             key: Optional message key (for partitioning)
             value: Message payload as bytes
-            headers: Optional event headers with metadata
+            headers: Optional event headers with metadata. ``idempotency_key``,
+                when set, is carried onto the wire and onto the receipt.
+
+        Returns:
+            ModelPublishReceipt: The coordinate the broker assigned.
 
         Raises:
             InfraUnavailableError: If the bus has not been started
@@ -941,7 +960,7 @@ class EventBusKafka(
         kafka_headers = self._model_headers_to_kafka(headers)
 
         # Publish with retry
-        await self._publish_with_retry(topic, key, value, kafka_headers, headers)
+        return await self._publish_with_retry(topic, key, value, kafka_headers, headers)
 
     async def _ensure_producer(self, correlation_id: UUID) -> None:
         """Lazily recreate the Kafka producer if it was destroyed.
@@ -1081,7 +1100,7 @@ class EventBusKafka(
         value: bytes,
         kafka_headers: list[tuple[str, bytes]],
         headers: ModelEventHeaders,
-    ) -> None:
+    ) -> ModelPublishReceipt:
         """Publish message with exponential backoff retry.
 
         Args:
@@ -1090,6 +1109,12 @@ class EventBusKafka(
             value: Message payload
             kafka_headers: Kafka-formatted headers
             headers: Original headers model
+
+        Returns:
+            ModelPublishReceipt: Coordinate from the successful attempt's
+            ``record_metadata``. Only a completed produce yields a receipt; every
+            other path raises, so a returned receipt always corresponds to a
+            broker acknowledgement under the configured ``acks`` policy.
 
         Raises:
             InfraConnectionError: If publish fails after all retries
@@ -1192,7 +1217,19 @@ class EventBusKafka(
                         "correlation_id": str(headers.correlation_id),
                     },
                 )
-                return
+                # OMN-15861: surface the coordinate instead of logging and
+                # discarding it. `record_metadata.topic` is preferred over the
+                # requested `topic` so the receipt names the topic the broker
+                # actually wrote to.
+                return ModelPublishReceipt(
+                    topic=str(getattr(record_metadata, "topic", topic) or topic),
+                    partition=int(record_metadata.partition),
+                    offset=int(record_metadata.offset),
+                    cluster=self._bootstrap_servers,
+                    produced_at=datetime.now(UTC),
+                    transport=EnumInfraTransportType.KAFKA,
+                    idempotency_key=headers.idempotency_key,
+                )
 
             except TimeoutError as e:
                 # Clean up producer on timeout to prevent resource leak (thread-safe)
@@ -2894,6 +2931,10 @@ class EventBusKafka(
         if headers.partition_key:
             kafka_headers.append(
                 ("partition_key", headers.partition_key.encode("utf-8"))
+            )
+        if headers.idempotency_key:
+            kafka_headers.append(
+                ("idempotency_key", headers.idempotency_key.encode("utf-8"))
             )
         if headers.ttl_seconds is not None:
             kafka_headers.append(

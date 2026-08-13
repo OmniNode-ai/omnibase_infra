@@ -20,6 +20,7 @@ Exports:
     EnumChainViolationType: Chain violation types for correlation/causation validation
     EnumCircuitState: Circuit breaker states (CLOSED, OPEN, HALF_OPEN)
     EnumConfirmationEventType: Registration confirmation event types
+    EnumConfirmationState: Durability confirmation tri-state (CONFIRMED, UNCONFIRMED, UNKNOWN)
     EnumConsumerGroupPurpose: Consumer group purpose (CONSUME, INTROSPECTION, REPLAY, AUDIT, BACKFILL)
     EnumContextSectionCategory: Semantic categories for static context sections (CONFIG, RULES, TOPOLOGY, etc.)
     EnumContractCheckType: Runtime contract check types (REGISTRATION, SUBSCRIPTION, PUBLICATION, etc.)
@@ -81,6 +82,7 @@ from omnibase_infra.enums.enum_check_severity import EnumCheckSeverity
 from omnibase_infra.enums.enum_checkpoint_phase import EnumCheckpointPhase
 from omnibase_infra.enums.enum_circuit_state import EnumCircuitState
 from omnibase_infra.enums.enum_confirmation_event_type import EnumConfirmationEventType
+from omnibase_infra.enums.enum_confirmation_state import EnumConfirmationState
 from omnibase_infra.enums.enum_consumer_group_purpose import EnumConsumerGroupPurpose
 from omnibase_infra.enums.enum_context_section_category import (
     EnumContextSectionCategory,
@@ -186,6 +188,7 @@ __all__: list[str] = [
     "EnumHandlerType",
     "EnumHandlerTypeCategory",
     "EnumInfraResourceType",
+    "EnumConfirmationState",
     "EnumInfraTransportType",
     "EnumIntrospectionReason",
     "EnumKafkaAcks",
