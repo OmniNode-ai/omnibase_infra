@@ -164,7 +164,10 @@ from omnibase_infra.runtime.protocol_domain_plugin import (
     RegistryDomainPlugin,
 )
 from omnibase_infra.runtime.runtime_host_process import RuntimeHostProcess
-from omnibase_infra.runtime.runtime_profile import load_runtime_profile
+from omnibase_infra.runtime.runtime_profile import (
+    load_runtime_profile,
+    resolve_secret_resolver_config_path,
+)
 from omnibase_infra.runtime.util_container_wiring import (
     wire_infrastructure_services,
 )
@@ -450,8 +453,14 @@ def resolve_topic_readiness_config() -> ModelTopicReadinessConfig:
 def _build_runtime_handler_dependencies(
     postgres_pool: object | None,
     kafka_bootstrap_servers: str | None = None,
+    gateway_secret_resolver_config_path: Path | None = None,
 ) -> dict[str, dict[str, object]] | None:
-    """Build constructor dependencies for runtime-owned handlers."""
+    """Build constructor dependencies for runtime-owned handlers.
+
+    Gateway session handlers must share one session store and one resolver.
+    The resolver is built from the deploy-rendered, typed configuration artifact;
+    no handler may infer secret names or read secret values directly.
+    """
     dependencies: dict[str, dict[str, object]] = {}
     if postgres_pool is not None:
         dependencies.update(
@@ -479,6 +488,46 @@ def _build_runtime_handler_dependencies(
             "producer": DLQProducer(dlq_replay_config),
             "quarantine_producer": DLQQuarantineProducer(dlq_replay_config),
         }
+
+    if gateway_secret_resolver_config_path:
+        from omnibase_infra.nodes.node_gateway_attach_effect.models.model_gateway_attach_config import (
+            ModelGatewayAttachConfig,
+        )
+        from omnibase_infra.nodes.node_gateway_attach_effect.services.store_gateway_session_memory import (
+            StoreGatewaySessionMemory,
+        )
+        from omnibase_infra.runtime.models.model_secret_resolver_config import (
+            ModelSecretResolverConfig,
+        )
+        from omnibase_infra.runtime.secret_resolver import SecretResolver
+
+        config_path = gateway_secret_resolver_config_path
+        try:
+            raw_config = yaml.safe_load(config_path.read_text(encoding="utf-8"))
+            secret_resolver_config = ModelSecretResolverConfig.model_validate(
+                raw_config
+            )
+        except (OSError, ValueError, yaml.YAMLError) as exc:
+            raise ProtocolConfigurationError(
+                "Gateway attach dependency wiring requires a valid rendered "
+                f"secret-resolver config at {config_path}"
+            ) from exc
+
+        gateway_config = ModelGatewayAttachConfig()
+        session_store = StoreGatewaySessionMemory()
+        secret_resolver = SecretResolver(config=secret_resolver_config)
+        shared_dependencies = {
+            "config": gateway_config,
+            "session_store": session_store,
+            "secret_resolver": secret_resolver,
+        }
+        dependencies.update(
+            {
+                "HandlerGatewayAttach": dict(shared_dependencies),
+                "HandlerGatewayHeartbeat": dict(shared_dependencies),
+                "HandlerGatewayDetach": dict(shared_dependencies),
+            }
+        )
 
     if not dependencies:
         return None
@@ -2852,9 +2901,17 @@ async def bootstrap() -> int:
                             correlation_id,
                         )
 
+                gateway_secret_resolver_config_path_raw = (
+                    resolve_secret_resolver_config_path()
+                )
                 runtime_handler_dependencies = _build_runtime_handler_dependencies(
                     registration_service.postgres_pool,
                     kafka_bootstrap_servers if use_kafka else None,
+                    gateway_secret_resolver_config_path=(
+                        Path(gateway_secret_resolver_config_path_raw)
+                        if gateway_secret_resolver_config_path_raw
+                        else None
+                    ),
                 )
 
                 # 5. Wire handlers into dispatch engine
