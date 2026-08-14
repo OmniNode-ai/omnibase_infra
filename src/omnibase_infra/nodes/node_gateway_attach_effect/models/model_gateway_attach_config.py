@@ -76,6 +76,33 @@ class ModelGatewayAttachConfig(BaseModel):
     # design doc rev-3 correction in section 2 -- conflating the two is
     # exactly the error this pair of constants exists to prevent.
     max_unverified_session_seconds: int = Field(default=900, gt=0)
+    # OMN-15952 renewal cycle -- the contract-declared terms an unattended
+    # runtime must obey to survive its own session ceiling. These are
+    # CLIENT-facing policy (handed back at attach in
+    # ModelGatewayRenewalDirective), not server-side bounds: nothing on this
+    # node tears a session down because of them.
+    #
+    # How early re-grant + re-attach must be COMPLETE, ahead of the
+    # session's expires_at. 120s against a 900s attach token leaves ~87% of
+    # the token's life before renewal starts, while still covering the three
+    # things that have to fit inside the margin: worst-case clock skew
+    # between the runtime, Keycloak and this node; the round trip of the
+    # token grant plus the attach call plus this node's own JWKS
+    # verification; and at least one backoff-retry of a transient failure.
+    # A margin sized only to the happy-path round trip is the classic
+    # expiry-boundary defect -- the token is valid when the request is sent
+    # and expired when it is validated.
+    renewal_margin_seconds: int = Field(default=120, gt=0)
+    # Width of the decorrelation window that opens before renewal_margin.
+    # A fleet provisioned in one bootstrap batch shares an attach instant,
+    # so without jitter it also shares a renewal instant and stampedes
+    # Keycloak's token endpoint every cycle, forever -- the synchronization
+    # is self-sustaining because a batch that renews together stays
+    # together. Each runtime picks its own moment uniformly in
+    # [renew_not_before, renew_at]. Zero is permitted (ge=0) so a
+    # single-runtime deployment can opt out of spreading it does not need,
+    # which is why this is not gt=0 like the margin.
+    renewal_jitter_seconds: int = Field(default=30, ge=0)
     # Circuit breaker (MixinAsyncCircuitBreaker) thresholds shared by the
     # JWKS fetch (attach + heartbeat) and RFC 7662 introspection (heartbeat)
     # HTTP calls to Keycloak -- OMN-15918 R4: distinguishes "Keycloak
