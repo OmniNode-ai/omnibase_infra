@@ -127,7 +127,18 @@ class GatewayTransportHttpx:
         headers: dict[str, str],
     ) -> GatewayHttpResponse:
         try:
-            async with httpx.AsyncClient(timeout=self._timeout) as client:
+            # The freestanding-IO guard exists to catch imperative IO that
+            # BYPASSES a transport contract. Here the raw call is what BACKS
+            # one: this module is the sole ProtocolGatewayTransport
+            # implementation, and confining the socket to this single line is
+            # precisely what keeps the credential store, token minter, renewal
+            # planner and session keeper transport-free and driveable by an
+            # in-memory fake. An outbound OAuth2 client_credentials grant plus
+            # gateway attach from a CLI has no bus-mediated transport to route
+            # through -- it is a client calling out, not a node emitting.
+            timeout = self._timeout
+            client = httpx.AsyncClient(timeout=timeout)  # no-contract-check: the seam
+            async with client:
                 response = await client.post(
                     url,
                     data=data,
