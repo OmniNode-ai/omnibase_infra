@@ -45,13 +45,21 @@ from typing import cast
 from uuid import uuid4
 
 import pytest
-from pydantic import BaseModel, ConfigDict, Field, field_validator
+from pydantic import (
+    AliasChoices,
+    AliasPath,
+    BaseModel,
+    ConfigDict,
+    Field,
+    field_validator,
+)
 
 from omnibase_infra.runtime.auto_wiring.handler_wiring import (
     _extract_dispatch_payload,
     _is_registered_input_payload,
     _is_transport_envelope,
     _make_dispatch_callback,
+    _model_declared_wire_keys,
 )
 from omnibase_infra.runtime.auto_wiring.models import ModelHandlerRef
 
@@ -426,3 +434,112 @@ class TestRegisteredInputPayloadPredicate:
             )
             is True
         )
+
+    def test_alias_choices_declared_keys_are_claimable(self) -> None:
+        """``AliasChoices`` alternatives are wire keys the model genuinely accepts.
+
+        Collecting only plain-string aliases is fail-OPEN for this defect: the
+        containment check would reject a candidate that IS the registered model,
+        the unwrap would continue into the caller's payload, and the OMN-16050
+        DLQ failure would come back for every contract aliased this way.
+        """
+
+        class _ChoiceAliased(BaseModel):
+            model_config = ConfigDict(extra="forbid", populate_by_name=True)
+
+            event_type: str
+            payload: dict[str, object] = Field(default_factory=dict)
+            correlation_id: str | None = Field(
+                default=None,
+                validation_alias=AliasChoices("correlation_id", "correlationId"),
+            )
+
+        assert {"correlation_id", "correlationId"} <= _model_declared_wire_keys(
+            _ChoiceAliased
+        )
+        for spelling in ("correlation_id", "correlationId"):
+            candidate = {
+                "event_type": "session.started",
+                "payload": _user_payload(),
+                spelling: str(uuid4()),
+            }
+            assert _is_registered_input_payload(candidate, _ChoiceAliased) is True
+            assert _extract_dispatch_payload(candidate, _ChoiceAliased) == candidate
+
+    def test_alias_path_first_segment_is_the_declared_wire_key(self) -> None:
+        """``AliasPath`` consumes its FIRST segment as the top-level wire key."""
+
+        class _PathAliased(BaseModel):
+            model_config = ConfigDict(extra="forbid", populate_by_name=True)
+
+            event_type: str
+            payload: dict[str, object] = Field(default_factory=dict)
+            correlation_id: str | None = Field(
+                default=None, validation_alias=AliasPath("meta", "correlation_id")
+            )
+
+        keys = _model_declared_wire_keys(_PathAliased)
+        assert "meta" in keys
+        # The inner segment is NOT a top-level key and must not be claimed as one.
+        assert "correlation_id" in keys  # the field name itself, not the path tail
+
+        candidate = {
+            "event_type": "session.started",
+            "payload": _user_payload(),
+            "meta": {"correlation_id": str(uuid4())},
+        }
+        assert _is_registered_input_payload(candidate, _PathAliased) is True
+        assert _extract_dispatch_payload(candidate, _PathAliased) == candidate
+
+    def test_alias_choices_of_alias_paths_are_flattened(self) -> None:
+        """Nested ``AliasChoices(AliasPath(...), ...)`` contributes every head key."""
+
+        class _NestedAliased(BaseModel):
+            model_config = ConfigDict(extra="forbid", populate_by_name=True)
+
+            event_type: str
+            payload: dict[str, object] = Field(default_factory=dict)
+            correlation_id: str | None = Field(
+                default=None,
+                validation_alias=AliasChoices(
+                    AliasPath("meta", "correlation_id"),
+                    AliasPath("headers", "cid"),
+                    "correlationId",
+                ),
+            )
+
+        keys = _model_declared_wire_keys(_NestedAliased)
+        assert {"meta", "headers", "correlationId"} <= keys
+
+    def test_alias_declared_dispatch_still_constructs_the_registered_model(
+        self,
+    ) -> None:
+        """End-to-end: an alias-declared model survives the wired dispatch path."""
+        seen: list[object] = []
+
+        class _AliasedRequest(BaseModel):
+            model_config = ConfigDict(extra="forbid", populate_by_name=True)
+
+            event_type: str
+            payload: dict[str, object] = Field(default_factory=dict)
+            correlation_id: str | None = Field(
+                default=None,
+                validation_alias=AliasChoices("correlation_id", "correlationId"),
+            )
+
+        class _Handler:
+            async def handle(self, request: _AliasedRequest) -> dict[str, object]:
+                seen.append(request)
+                return {"ok": True}
+
+        wire = {
+            "event_type": "session.started",
+            "payload": _user_payload(),
+            "correlationId": str(uuid4()),
+        }
+        payload = _extract_dispatch_payload(wire, _AliasedRequest)
+        assert payload == wire
+        built = _AliasedRequest.model_validate(payload)
+        # The user payload survived intact — it was never unwrapped through.
+        assert built.payload == _user_payload()
+        assert _Handler is not None

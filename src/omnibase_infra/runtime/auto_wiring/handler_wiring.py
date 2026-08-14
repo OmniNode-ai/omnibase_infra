@@ -50,7 +50,7 @@ from typing import (
 )
 from uuid import UUID, uuid4
 
-from pydantic import BaseModel, ValidationError
+from pydantic import AliasChoices, AliasPath, BaseModel, ValidationError
 
 from omnibase_core.enums.enum_core_error_code import EnumCoreErrorCode
 from omnibase_core.enums.enum_database_grant_object_type import (
@@ -1453,6 +1453,33 @@ def _is_transport_envelope(value: object) -> bool:
     )
 
 
+def _validation_alias_wire_keys(alias: object) -> set[str]:
+    """Top-level wire keys a pydantic ``validation_alias`` can consume.
+
+    ``validation_alias`` has three shapes and only the plain-string one is a
+    single key. ``AliasPath("meta", "id")`` consumes the TOP-LEVEL key ``meta``
+    (the remaining segments index inside that value), and ``AliasChoices`` holds
+    a list of alternatives, each itself a string or an ``AliasPath``.
+
+    Missing the non-string shapes is fail-OPEN for OMN-16050: a model aliased
+    that way would fail ``_is_registered_input_payload``'s key-containment check
+    even when the candidate IS the registered model, the unwrap would continue
+    into the caller's payload, and the DLQ defect would return for exactly the
+    contracts that use richer aliases.
+    """
+    if isinstance(alias, str):
+        return {alias}
+    if isinstance(alias, AliasPath):
+        first = alias.path[0] if alias.path else None
+        return {first} if isinstance(first, str) else set()
+    if isinstance(alias, AliasChoices):
+        keys: set[str] = set()
+        for choice in alias.choices:
+            keys |= _validation_alias_wire_keys(choice)
+        return keys
+    return set()
+
+
 @lru_cache(maxsize=512)
 def _model_declared_wire_keys(model: type[BaseModel]) -> frozenset[str]:
     """Every wire key ``model`` can accept: field names plus their input aliases."""
@@ -1461,8 +1488,7 @@ def _model_declared_wire_keys(model: type[BaseModel]) -> frozenset[str]:
         keys.add(field_name)
         if isinstance(model_field.alias, str):
             keys.add(model_field.alias)
-        if isinstance(model_field.validation_alias, str):
-            keys.add(model_field.validation_alias)
+        keys |= _validation_alias_wire_keys(model_field.validation_alias)
     return frozenset(keys)
 
 
