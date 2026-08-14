@@ -1,0 +1,61 @@
+# docker-compose.pypi-canary.yml
+# OMN-14027 C1 — PyPI pull-through cache CANARY override (NOT the fleet).
+#
+# Wires a SMALL, NAMED SUBSET of runners at the devpi pull-through cache, leaving
+# every other runner on direct PyPI egress. This is the "step 3" artifact of
+# docs/runbooks/pypi-cache-egress-rollout.md: it is how a canary is expressed as
+# config-as-code instead of as a hand-typed shell command on the runner host.
+#
+# WHY THIS FILE EXISTS AS A TRACKED ARTIFACT (do not delete it and go back to an
+# ad-hoc command):
+#
+#   1. The runbook's original step-3 recipe — prefixing `docker compose up` with
+#      `UV_DEFAULT_INDEX=... PIP_INDEX_URL=...` shell variables — is a NO-OP.
+#      Compose only injects a variable into a container when the service's
+#      `environment:` block names it; the fleet block in
+#      docker-compose.runners.yml is deliberately commented out, so nothing
+#      consumes those shell variables. A canary run that way silently stays on
+#      direct egress while reporting itself as a cache canary — a vacuous green.
+#      Proven by rendering `docker compose config` both ways; see the runbook's
+#      "Canary wiring mechanism" section for the readback.
+#
+#   2. A canary that lives only as an untracked file on the runner host does not
+#      survive. Every fleet tool (scripts/deploy-runners.sh, the host's
+#      remote_roll.sh, and docker/runners/runner-monitor.sh auto-repair) recreates
+#      containers from docker-compose.runners.yml ALONE. Any of them silently
+#      reverts the canary to direct egress with no signal, mid-soak. That is what
+#      happened to the first canary attempt: the override was authored on the host
+#      2026-08-08 and the wiring was gone by 2026-08-10 with no record.
+#      docker/runners/runner-monitor.sh now layers the override files listed in
+#      docker/compose-overrides.env so auto-repair preserves canary wiring.
+#
+# Applied via (from the runner-host deploy directory):
+#   docker compose -f docker-compose.runners.yml -f docker-compose.pypi-canary.yml \
+#     up -d --no-deps --force-recreate \
+#     omninode-runner-2 omninode-runner-4 omninode-runner-5
+#
+# Verify the wiring actually landed (NEVER skip this — see reason 1 above):
+#   docker inspect omninode-runner-2 --format '{{range .Config.Env}}{{println .}}{{end}}' \
+#     | grep -E '^(UV_DEFAULT_INDEX|PIP_INDEX_URL)='
+#
+# PyPI stays configured as the fallback index (PIP_EXTRA_INDEX_URL +
+# UV_INDEX_STRATEGY=unsafe-best-match) so a cache miss or a cache outage DEGRADES
+# to direct egress rather than failing the job closed.
+#
+# Endpoint source of truth: config/runner_fleet.yaml -> pypi_cache:
+# Rollout / rollback procedure: docs/runbooks/pypi-cache-egress-rollout.md
+x-pypi-cache-env: &pypi-cache-env
+  UV_DEFAULT_INDEX: "http://omninode-pc.tail75df5e.ts.net:3141/root/pypi/+simple/"
+  UV_INDEX_STRATEGY: "unsafe-best-match"
+  PIP_INDEX_URL: "http://omninode-pc.tail75df5e.ts.net:3141/root/pypi/+simple/"
+  PIP_EXTRA_INDEX_URL: "https://pypi.org/simple/"
+services:
+  omninode-runner-2:
+    environment:
+      !!merge <<: *pypi-cache-env
+  omninode-runner-4:
+    environment:
+      !!merge <<: *pypi-cache-env
+  omninode-runner-5:
+    environment:
+      !!merge <<: *pypi-cache-env
