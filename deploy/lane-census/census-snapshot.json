@@ -3,7 +3,7 @@
   "event_type": "lane-census-drift",
   "topic": "onex.evt.infra.lane-census-drift.v1",
   "host": "omninode-pc.tail75df5e.ts.net",
-  "emitted_at": "2026-07-22T21:57:05.783732+00:00",
+  "emitted_at": "2026-08-08T19:39:02.027888+00:00",
   "severity": "critical",
   "lanes_checked": [
     "stability-test",
@@ -11,8 +11,15 @@
     "judge",
     "dev"
   ],
-  "drift_count": 9,
+  "drift_count": 11,
   "findings": [
+    {
+      "lane": "stability-test",
+      "kind": "oneshot_failed",
+      "container": "omnibase-infra-stability-test-forward-migration",
+      "detail": "migration/init container 'omnibase-infra-stability-test-forward-migration' Exited non-zero (code 3): Exited (3) 46 hours ago",
+      "severity": "critical"
+    },
     {
       "lane": "stability-test",
       "kind": "container_absent",
@@ -75,9 +82,16 @@
       "container": "omninode-prod-contract-resolver",
       "detail": "required service container 'omninode-prod-contract-resolver' is not running (desired replicas=1); lane 'prod' is degraded",
       "severity": "critical"
+    },
+    {
+      "lane": "dev",
+      "kind": "unexpected_container",
+      "container": "omnibase-infra-forward-migration",
+      "detail": "container 'omnibase-infra-forward-migration' carries com.omninode.lane='dev' but is not declared in the lane manifest",
+      "severity": "warning"
     }
   ],
-  "alert_key": "lane-census-drift:omninode-pc.tail75df5e.ts.net:d608e21fee5031ab",
-  "ticket_title": "fix(infra): lane drift [prod, stability-test] \u2014 9x container_absent",
-  "ticket_body": "## Lane census drift detected\n\nHost: `omninode-pc.tail75df5e.ts.net`\nLanes checked: stability-test, prod, judge, dev\n\nThe desired-state lane census (deploy/lane-census/lane-manifest.yaml)\ndoes not match the live runtime. Drift items below name exactly what is\nmissing or extra. This is the regression class the lane-census ratchet\n(OMN-13011) exists to catch \u2014 it would have fired on 2026-06-11 when prod\nruntime containers and the broker network were silently absent.\n\n## Findings\n\n- **[critical] container_absent** `omninode-stability-test-agent-actions-consumer` (stability-test): required service container 'omninode-stability-test-agent-actions-consumer' is not running (desired replicas=1); lane 'stability-test' is degraded\n- **[critical] container_absent** `omninode-stability-test-skill-lifecycle-consumer` (stability-test): required service container 'omninode-stability-test-skill-lifecycle-consumer' is not running (desired replicas=1); lane 'stability-test' is degraded\n- **[critical] container_absent** `omnibase-stability-test-intelligence-api` (stability-test): required service container 'omnibase-stability-test-intelligence-api' is not running (desired replicas=1); lane 'stability-test' is degraded\n- **[critical] container_absent** `omninode-stability-test-contract-resolver` (stability-test): required service container 'omninode-stability-test-contract-resolver' is not running (desired replicas=1); lane 'stability-test' is degraded\n- **[critical] container_absent** `omninode-prod-runtime-worker` (prod): required service container 'omninode-prod-runtime-worker' is not running (desired replicas=1); lane 'prod' is degraded\n- **[critical] container_absent** `omninode-prod-agent-actions-consumer` (prod): required service container 'omninode-prod-agent-actions-consumer' is not running (desired replicas=1); lane 'prod' is degraded\n- **[critical] container_absent** `omninode-prod-skill-lifecycle-consumer` (prod): required service container 'omninode-prod-skill-lifecycle-consumer' is not running (desired replicas=1); lane 'prod' is degraded\n- **[critical] container_absent** `omnibase-prod-intelligence-api` (prod): required service container 'omnibase-prod-intelligence-api' is not running (desired replicas=1); lane 'prod' is degraded\n- **[critical] container_absent** `omninode-prod-contract-resolver` (prod): required service container 'omninode-prod-contract-resolver' is not running (desired replicas=1); lane 'prod' is degraded\n\n## Action\nBring the lane back to declared state (compose up the absent containers / reattach the network), or update the lane manifest in the same PR if the desired state legitimately changed. Do not silence the check."
+  "alert_key": "lane-census-drift:omninode-pc.tail75df5e.ts.net:5098b00154cea5af",
+  "ticket_title": "fix(infra): lane drift [dev, prod, stability-test] \u2014 9x container_absent, 1x oneshot_failed, 1x unexpected_container",
+  "ticket_body": "## Lane census drift detected\n\nHost: `omninode-pc.tail75df5e.ts.net`\nLanes checked: stability-test, prod, judge, dev\n\nThe desired-state lane census (deploy/lane-census/lane-manifest.yaml)\ndoes not match the live runtime. Drift items below name exactly what is\nmissing or extra. This is the regression class the lane-census ratchet\n(OMN-13011) exists to catch \u2014 it would have fired on 2026-06-11 when prod\nruntime containers and the broker network were silently absent.\n\n## Findings\n\n- **[critical] oneshot_failed** `omnibase-infra-stability-test-forward-migration` (stability-test): migration/init container 'omnibase-infra-stability-test-forward-migration' Exited non-zero (code 3): Exited (3) 46 hours ago\n- **[critical] container_absent** `omninode-stability-test-agent-actions-consumer` (stability-test): required service container 'omninode-stability-test-agent-actions-consumer' is not running (desired replicas=1); lane 'stability-test' is degraded\n- **[critical] container_absent** `omninode-stability-test-skill-lifecycle-consumer` (stability-test): required service container 'omninode-stability-test-skill-lifecycle-consumer' is not running (desired replicas=1); lane 'stability-test' is degraded\n- **[critical] container_absent** `omnibase-stability-test-intelligence-api` (stability-test): required service container 'omnibase-stability-test-intelligence-api' is not running (desired replicas=1); lane 'stability-test' is degraded\n- **[critical] container_absent** `omninode-stability-test-contract-resolver` (stability-test): required service container 'omninode-stability-test-contract-resolver' is not running (desired replicas=1); lane 'stability-test' is degraded\n- **[critical] container_absent** `omninode-prod-runtime-worker` (prod): required service container 'omninode-prod-runtime-worker' is not running (desired replicas=1); lane 'prod' is degraded\n- **[critical] container_absent** `omninode-prod-agent-actions-consumer` (prod): required service container 'omninode-prod-agent-actions-consumer' is not running (desired replicas=1); lane 'prod' is degraded\n- **[critical] container_absent** `omninode-prod-skill-lifecycle-consumer` (prod): required service container 'omninode-prod-skill-lifecycle-consumer' is not running (desired replicas=1); lane 'prod' is degraded\n- **[critical] container_absent** `omnibase-prod-intelligence-api` (prod): required service container 'omnibase-prod-intelligence-api' is not running (desired replicas=1); lane 'prod' is degraded\n- **[critical] container_absent** `omninode-prod-contract-resolver` (prod): required service container 'omninode-prod-contract-resolver' is not running (desired replicas=1); lane 'prod' is degraded\n- **[warning] unexpected_container** `omnibase-infra-forward-migration` (dev): container 'omnibase-infra-forward-migration' carries com.omninode.lane='dev' but is not declared in the lane manifest\n\n## Action\nBring the lane back to declared state (compose up the absent containers / reattach the network), or update the lane manifest in the same PR if the desired state legitimately changed. Do not silence the check."
 }

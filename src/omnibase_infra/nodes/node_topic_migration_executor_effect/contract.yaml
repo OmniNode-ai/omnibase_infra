@@ -24,7 +24,7 @@ node_version:
   patch: 0
 node_type: "EFFECT_GENERIC"
 description: >
-  Effect node that executes a topic migration declared by a ModelTopicMigrationContract. Provisions the new topic via TopicProvisioner, mints the new consumer group via compute_consumer_group_id, and advances the migration through DUAL_WRITE -> DUAL_READ -> CUTOVER -> COMPLETE phases. The drain-proof gate blocks CUTOVER/COMPLETE until the old consumer group has fully drained the old topic. Emits a ModelTopicMigrationLifecycleEvent per advanced phase.
+  Effect node that executes a topic migration declared by a ModelTopicMigrationContract. Provisions the new topic via TopicProvisioner, passing the command-declared ModelTopicSpec (partitions + replication_factor) through to creation so the new topic is created to the migration's declared durability rather than a provisioner default. ModelTopicProvisioningPolicy resolves an undeclared replication_factor to the target profile's default (the managed durability floor on MSK, never 1) and REFUSES any value below that floor; on a cluster whose measured broker count cannot host the declared value it reduces to the measured capacity, at WARNING (OMN-15395). Mints the new consumer group via compute_consumer_group_id, and advances the migration through DUAL_WRITE -> DUAL_READ -> CUTOVER -> COMPLETE phases. The drain-proof gate blocks CUTOVER/COMPLETE until the old consumer group has fully drained the old topic. Emits a ModelTopicMigrationLifecycleEvent per advanced phase.
 
 event_bus:
   version:
@@ -75,7 +75,7 @@ io_operations:
 dependencies:
   - name: "topic_provisioner"
     type: "service"
-    description: "TopicProvisioner for new-topic creation via ModelTopicSpec"
+    description: "TopicProvisioner for new-topic creation; the executor passes its built ModelTopicSpec through (spec=), so declared partitions/replication reach CreateTopics (OMN-15395)"
     required: true
   - name: "drain_proof_gate"
     type: "service"

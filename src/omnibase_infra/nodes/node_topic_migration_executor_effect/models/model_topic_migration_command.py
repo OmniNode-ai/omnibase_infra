@@ -47,10 +47,15 @@ class ModelTopicMigrationCommand(BaseModel):
         ge=1,
         description="Partition count to provision for the new topic",
     )
-    new_topic_replication_factor: int = Field(
-        default=1,
+    new_topic_replication_factor: int | None = Field(
+        default=None,
         ge=1,
-        description="Replication factor to provision for the new topic",
+        description=(
+            "Replication factor to provision for the new topic. None means the "
+            "command declares none, and the environment's replication policy "
+            "resolves it — or refuses, on a managed cluster. It is NOT silently "
+            "1 (OMN-15395)."
+        ),
     )
     dual_publish: bool = Field(
         default=False,

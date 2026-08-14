@@ -11,7 +11,10 @@ Usage:
     # Create app with container (required)
     from omnibase_core.container import ModelONEXContainer
     container = ModelONEXContainer()
-    app = create_app(container=container, cors_origins=["http://localhost:3000"])
+    app = create_app(
+        container=container,
+        cors_origins=["https://dashboard.example.invalid"],
+    )
 
     # Run with uvicorn
     uvicorn.run(app, host="0.0.0.0", port=8091)
@@ -116,7 +119,7 @@ def create_app(
         >>> from omnibase_infra.services.contract_resolver import create_app
         >>> from omnibase_core.container import ModelONEXContainer
         >>> container = ModelONEXContainer()
-        >>> app = create_app(container=container, cors_origins=["http://localhost:3000"])
+        >>> app = create_app(container=container, cors_origins=["https://dashboard.example.invalid"])
         >>> # Run with: uvicorn module:app --host 0.0.0.0 --port 8091
     """
     app = FastAPI(
@@ -143,7 +146,7 @@ def create_app(
                 "CORS_ORIGINS must be configured. "
                 "Set the CORS_ORIGINS environment variable (comma-separated list of "
                 "allowed origins) or pass cors_origins parameter to create_app(). "
-                "Example: CORS_ORIGINS=http://localhost:3000,https://dashboard.example.com",
+                "Example: CORS_ORIGINS=https://dashboard.example.invalid",
                 context=context,
             )
         origins = [o.strip() for o in env_origins.split(",") if o.strip()]
@@ -204,7 +207,7 @@ def create_app(
 #     container = ModelONEXContainer()
 #     app = create_app(
 #         container=container,
-#         cors_origins=["http://localhost:3000"],
+#         cors_origins=["https://dashboard.example.invalid"],
 #     )
 #     uvicorn.run(app, host="0.0.0.0", port=8091)
 app: FastAPI | None = None

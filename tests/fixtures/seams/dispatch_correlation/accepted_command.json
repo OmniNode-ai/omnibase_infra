@@ -1,0 +1,21 @@
+{
+  "_comment": "Seam fixture for OMN-15474 / OMN-15546. One ingress-ACCEPTED delegation command, exactly as the gateway hands it to the runtime. `ingress_correlation_id` is the AUTHORITY: it is assigned at ingress and every command/event emitted downstream must carry it byte-identical. The dispatcher must never mint one, and must never emit the command more than once.",
+  "ticket": "OMN-15474",
+  "also_used_by": "OMN-15546",
+  "seam": "ingress accept -> auto-wiring subscription attach -> dispatch engine -> emitted command",
+  "topic": "onex.cmd.omnibase-infra.delegation-request.v1",
+  "ingress_correlation_id": "a4000001-0000-4000-8000-000000000001",
+  "expected_emitted_command_count": 1,
+  "envelope": {
+    "correlation_id": "a4000001-0000-4000-8000-000000000001",
+    "event_type": "delegation-request",
+    "source_tool": "onex-gateway-ingress",
+    "envelope_timestamp": "2026-07-30T04:49:47.000000Z",
+    "payload": {
+      "correlation_id": "a4000001-0000-4000-8000-000000000001",
+      "workflow_id": "5f90f524-52f7-4b32-a654-d5aa68e58a80",
+      "task_type": "test",
+      "prompt": "seam probe: one accepted command must execute exactly once"
+    }
+  }
+}

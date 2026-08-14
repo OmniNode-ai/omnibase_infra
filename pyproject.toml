@@ -4,7 +4,7 @@ build-backend = "hatchling.build"
 
 [project]
 name = "omnibase_infra"
-version = "0.38.4"
+version = "0.38.5"
 description = "ONEX Infrastructure - Service integration and database infrastructure tools"
 authors = [{ name = "OmniNode.ai", email = "contact@omninode.ai" }]
 license = {text = "MIT"}
@@ -55,10 +55,13 @@ dependencies = [
     #   - SHAs provide audit trail and tamper-evidence
     # Core dependencies
     "pydantic>=2.11.7,<3.0.0",
-    "fastapi>=0.120.1,<0.140.0",
-    "uvicorn>=0.32.0,<0.52.0",
+    "fastapi>=0.120.1,<0.142.0",
+    "uvicorn>=0.32.0,<0.53.0",
     "pyyaml>=6.0.2,<7.0.0",
-    "aiohttp>=3.9.0,<4.0.0",
+    # OMN-15688 (2026-08-04): floor raised to 3.14.3 to clear CVE-2026-69244
+    # (HIGH, out-of-bounds heap read in the C HTTP response parser error path
+    # on malformed responses). 3.9.0 was reachable and the lock resolved 3.14.1.
+    "aiohttp>=3.14.3,<4.0.0",
     # Database dependencies (for PostgreSQL connection manager)
     "asyncpg>=0.29.0,<0.32.0",
     "psycopg2-binary>=2.9.10,<3.0.0",
@@ -82,7 +85,20 @@ dependencies = [
     # Constraint: >=46.0.3,<47.0.0 (compatible release within the 46.x series).
     # Security: CVE-2024-26130 (42.0.4), CVE-2024-12797 (44.0.1) - both addressed by 46.x.
     # See docs/decisions/adr-cryptography-upgrade-46.md for full rationale.
-    "cryptography>=46.0.3,<50.0.0",
+    # OMN-15688 (2026-08-04): this ceiling is KNOWINGLY one major BELOW what the
+    # runtime image ships. Trivy flags cryptography 48.0.1 for CVE-2026-69247
+    # (PKCS#7 EnvelopedData Bleichenbacher oracle, fixed 50.0.0) and
+    # CVE-2026-69249 (exponential cert path-building, fixed 49.0.0), so
+    # docker/Dockerfile.runtime force-installs cryptography>=50.0.0 after the
+    # plugin installs. Raising the declared ceiling HERE is blocked on a
+    # published omnibase-core release: omnibase-core==0.46.8 on PyPI declares
+    # cryptography>=46.0.3,<51.0.0, and `uv lock` fails closed --
+    #   Because omnibase-core>=0.46.8 depends on cryptography>=46.0.3,<51.0.0
+    #   and your project depends on cryptography>=50.0.0,<51.0.0 [...]
+    #   your project's requirements are unsatisfiable.
+    # The core-side raise is omnibase_core PR (OMN-15688); this line moves to
+    # >=50.0.0,<51.0.0 in the same commit that bumps omnibase-core off 0.46.8.
+    "cryptography>=46.0.3,<51.0.0",
     "sigstore>=4.0.0,<5.0.0",
     # packaging: PEP 440 version parsing/comparison for the release-identity
     # fitness node (node_release_identity_compute, OMN-14471). Previously a
@@ -94,18 +110,18 @@ dependencies = [
     # Tracing and observability dependencies
     "sqlparse>=0.4.4,<0.6.0", # For secure SQL query sanitization in tracing
     "structlog>=23.2.0,<27.0.0", # Structured logging
-    "prometheus-client>=0.19.0,<0.26.0", # Metrics collection
+    "prometheus-client>=0.19.0,<0.27.0", # Metrics collection
     "opentelemetry-api>=1.27.0,<2.0.0", # OpenTelemetry API
     "opentelemetry-sdk>=1.27.0,<2.0.0", # OpenTelemetry SDK
     "opentelemetry-exporter-otlp-proto-http>=1.27.0,<2.0.0", # OTLP HTTP exporter (Phoenix uses HTTP, not gRPC)
     "opentelemetry-instrumentation>=0.48b0,<0.66", # Base instrumentation
-    "opentelemetry-instrumentation-fastapi>=0.48b0,<0.64", # FastAPI tracing
+    "opentelemetry-instrumentation-fastapi>=0.48b0,<0.66", # FastAPI tracing
     "opentelemetry-instrumentation-asyncpg>=0.48b0,<0.66", # AsyncPG tracing
     "opentelemetry-instrumentation-aiohttp-client>=0.48b0,<0.66", # AIOHTTP tracing
     "opentelemetry-instrumentation-kafka-python>=0.48b0,<0.66", # Kafka tracing
     "opentelemetry-instrumentation-redis>=0.48b0,<0.66", # Redis tracing
     # MCP (Model Context Protocol) integration
-    "mcp>=1.25.0,<2.0.0", # Anthropic MCP SDK for streamable HTTP transport
+    "mcp>=1.25.0,<3.0.0", # Anthropic MCP SDK for streamable HTTP transport
     # Additional infrastructure dependencies
     "httpx>=0.28.1,<0.29.0", # Modern HTTP client (>=0.27.1 required by MCP SDK)
     "tenacity>=9.0.0,<10.0.0", # Retry and resilience patterns
@@ -114,7 +130,7 @@ dependencies = [
     "pydantic-settings>=2.2.1,<3.0.0", # Settings management
     "jsonschema>=4.20.0,<5.0.0", # JSON schema validation
     "watchdog>=4.0.0", # Filesystem event monitoring (HandlerContractFileWatcher, OMN-3940)
-    "a2a-sdk>=0.3.4,<1.0.0", # Real A2A client/server protocol support for remote-agent invocation
+    "a2a-sdk>=0.3.4,<2.0.0", # Real A2A client/server protocol support for remote-agent invocation
     # Security: CVE-2026-32597 (HIGH) - PyJWT <2.12.0 accepts unknown `crit` header extensions.
     # Security: CVE-2026-48526 (HIGH) - PyJWT <2.13.0 authentication bypass via forged tokens.
     # Transitive dependency (via mcp/httpx/authlib). Explicitly declared to enforce minimum version.
@@ -133,6 +149,8 @@ packages = ["src/omnibase_infra"]
 [project.scripts]
 omni-infra = "omnibase_infra.cli.commands:cli"
 onex-runtime = "omnibase_infra.runtime.kernel:main"
+onex-gateway-forwarder = "omnibase_infra.runtime.gateway_forwarder:main"
+onex-gateway-canary-probe = "omnibase_infra.runtime.gateway_canary_probe:main"
 onex-infra-test = "omnibase_infra.cli.infra_test.cli:cli"
 onex-git-hook-relay = "omnibase_infra.cli.git_hook_relay:main"
 onex-linear-relay = "omnibase_infra.cli.linear_relay:main"
@@ -163,7 +181,7 @@ dev = [
     "pytest-xdist>=3.5.0,<4.0.0",  # Parallel test execution
     "pytest-timeout>=2.3.0,<3.0.0",  # Test timeout support
     "mypy>=1.13.0,<3.0.0",
-    "ruff>=0.14.7,<0.16.0",  # Ruff handles both formatting and linting (replaces black + isort)
+    "ruff>=0.14.7,<0.17.0",  # Ruff handles both formatting and linting (replaces black + isort)
     "types-pyyaml>=6.0.12.20250822,<7.0.0",
     "pre-commit>=4.3.0,<5.0.0",
     "deepdiff>=8.0.0,<10.0.0",  # OMN-12623: direct use in tests/replay topic-migration equivalence harness
@@ -201,29 +219,18 @@ onex-change-control = { git = "https://github.com/OmniNode-ai/onex_change_contro
 # omnibase-core/omnibase-spi were DELETED here and the version pins bumped to
 # the released exact versions, restoring a fully PyPI-sourced reproducible lock.
 #
-# OMN-14758 (epic OMN-14717, S6): TEMPORARY dev-build pin advanced from S3's
-# aca32f24 to core dev HEAD (a2562165), a strict descendant (verified
-# `git merge-base --is-ancestor`). S6 wires the delegation command spine onto
-# S4 RuntimeDispatch, which is DEV-ONLY / UNRELEASED (latest core release is
-# 0.46.7). This pin carries S1 transport protocols + ModelTransportMessage
-# (#1463), S2 InMemoryTransport + TransportConformanceSuite (#1464), S4
-# RuntimeDispatch + DispatchRoute + runtime_envelope_router + EnumDeliveryDisposition
-# (#1466), and S3 conformance (#1467). a2562165 is version 0.46.8, so the
-# ==0.46.8 pins above stay consistent. Not on PyPI.
-#
-# OMN-15186: bumped a2562165 -> 3f2998b3 (core dev tip at bump time), a strict
-# descendant (verified `git merge-base --is-ancestor`). a2562165 predates core
-# commit 9449083a, which adds
-# omnibase_core/models/delegation/wire/model_delegation_completed.py; the
-# co-installed omnimarket node-skill package imports that module, so any
-# omnibase_infra venv pinned at a2562165 hard-crashes with ModuleNotFoundError
-# on `onex node node_delegate_skill_orchestrator` before the handler even
-# constructs (blocks OMN-15170's live delegation driver). 3f2998b3 is still
-# version 0.46.8 (core has not cut a new release across this range), so the
-# ==0.46.8 pins above stay consistent. Not on PyPI.
-# REMOVE WHEN RELEASED: once core publishes a version containing S1/S2/S4, delete
-# this override and `uv lock`.
-omnibase-core = { git = "https://github.com/OmniNode-ai/omnibase_core.git", rev = "3f2998b3337e4050b4758e0dd2a0fe1061ce0d98" }  # raw-override-ok: OMN-14758
+# OMN-14628 (2026-08-01): the omnibase-core git-rev override is DELETED. Its own
+# exit condition ("REMOVE WHEN RELEASED: once core publishes a version containing
+# S1/S2/S4") is met — omnibase-core 0.46.8 is published on PyPI and is a content
+# SUPERSET of the last override rev (3d51b047): it carries every module that rev
+# carried, plus enum_delegation_terminal_failure_cause and
+# enum_quality_score_comparison, plus the typed execution_scope field. Verified by
+# tree diff of the published wheel against `git archive 3d51b047 -- src/omnibase_core`
+# (nothing existed only in the rev). The lock is once again fully PyPI-sourced.
+# The seam is now held mechanically, not by this comment:
+# tests/unit/runtime/test_seam_released_core_pin.py asserts the frozen symbol and
+# field-TYPE surface in tests/fixtures/seams/core_release/.
+# Do NOT reintroduce a git-rev or branch pin here.
 
 [tool.ruff]
 target-version = "py312"
@@ -345,6 +352,8 @@ ignore = [
 "tests/integration/runtime/db/test_postgres_repository_runtime_integration.py" = ["S608"]
 # Migration discovery integration test - controlled view/id names (OMN-12559)
 "tests/integration/migrations/test_node_migration_discovery_applies.py" = ["S608"]
+# Domain-adapter proof script - module-level constant table name, no external input (OMN-15421)
+"docker/domain-adapter-proof/prove.py" = ["S608"]
 # S106: Hardcoded password in function arg - test fixtures only
 # Production secrets managed via Infisical/Vault (OMN-2287, OMN-2736)
 # T201: Print statements OK in tests
@@ -383,7 +392,26 @@ split-on-trailing-comma = true
 
 [tool.pytest.ini_options]
 pythonpath = ["src", "."]
-testpaths = ["tests"]
+# OMN-15410: `testpaths` is the SINGLE SOURCE OF TRUTH for what CI collects.
+# The full-suite job in .github/workflows/ci.yml deliberately passes NO
+# positional path to pytest so it inherits this list verbatim; previously it
+# hardcoded `pytest tests/`, which meant a root added here would still never
+# run. scripts/validation/validate_test_root_collection.py fails closed on
+# both halves of that seam (a tests/ dir absent from this list, and a ci.yml
+# full-suite step that re-introduces a positional path).
+#
+# The four non-`tests/` entries are collocated roots that were uncollected by
+# every CI job until OMN-15410 (the OMN-15378 class). They cannot be folded
+# into tests/ as-is: scripts/tests/ and the agent_actions root declare their
+# own packages, and moving them would break their relative imports for no
+# collection benefit now that this list governs.
+testpaths = [
+    "tests",
+    "scripts/ci/tests",
+    "scripts/tests",
+    "scripts/runtime_build/tests",
+    "src/omnibase_infra/services/observability/agent_actions/tests",
+]
 python_files = ["test_*.py", "*_test.py"]
 python_classes = ["Test*"]
 python_functions = ["test_*"]
@@ -549,6 +577,7 @@ node_dlq_replay_effect = "omnibase_infra.nodes.node_dlq_replay_effect"
 node_emit_daemon_runtime = "omnibase_infra.nodes.node_emit_daemon_runtime"
 node_event_bus_wiring_effect = "omnibase_infra.nodes.node_event_bus_wiring_effect"
 node_event_forward_effect = "omnibase_infra.nodes.node_event_forward_effect"
+node_gateway_attach_effect = "omnibase_infra.nodes.node_gateway_attach_effect"
 node_github_pr_poller_effect = "omnibase_infra.nodes.node_github_pr_poller_effect"
 node_gmail_archive_cleanup_effect = "omnibase_infra.nodes.node_gmail_archive_cleanup_effect"
 node_gmail_intent_poller_effect = "omnibase_infra.nodes.node_gmail_intent_poller_effect"

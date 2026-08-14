@@ -166,6 +166,25 @@ x-runtime-env: &runtime-env
   BIFROST_CONTRACT_PATH: /app/data/delegation/bifrost_delegation.yaml
   BIFROST_SOURCE_CONTRACT_PATH: ${BIFROST_SOURCE_CONTRACT_PATH:-}
   BIFROST_VERIFY_ENDPOINTS: ${BIFROST_VERIFY_ENDPOINTS:?runtime policy contract must set BIFROST_VERIFY_ENDPOINTS}
+  # OMN-15645: Hardcoded default — same locus/reason as BIFROST_CONTRACT_PATH
+  # above (OMN-12864: no ${VAR:-} ambient-override footgun). omnimarket#2000
+  # (OMN-15628) removed the packaged-default fallback in the delegation routing
+  # reducer, so an unbound key now fails boot with ProtocolConfigurationError
+  # instead of silently defaulting. The value is NOT a literal python3.X
+  # site-packages path (that trap is exactly what OMN-15628's runtime
+  # entrypoint self-heal exists to correct for a *stale* pin) — it is a fixed,
+  # version-independent location that docker/Dockerfile.runtime bakes into the
+  # image at build time from the installed omnimarket package's own configs/
+  # directory (glob-derived, never a hardcoded interpreter minor version).
+  # /app/config/ (not /app/contracts/) deliberately: the runtime services
+  # bind-mount ../contracts:/app/contracts:ro (host content that would shadow
+  # anything baked into that path at image-build time); /app/config/ carries
+  # no volume/bind-mount entry anywhere in these compose lane files.
+  # Services that have no delegation-routing surface (projection-api,
+  # contract-resolver) explicitly set DELEGATION_ROUTING_TIERS_PATH: "" in
+  # their own environment blocks below, mirroring the BIFROST_CONTRACT_PATH
+  # opt-out.
+  DELEGATION_ROUTING_TIERS_PATH: /app/config/delegation/routing_tiers.yaml
   ONEX_SECRET_RESOLVER_CONFIG_PATH: ${DEV_RUNTIME_MAIN_SECRET_RESOLVER_CONFIG_PATH:?runtime policy contract must set DEV_RUNTIME_MAIN_SECRET_RESOLVER_CONFIG_PATH}
   ONEX_SECRET_RESOLVER_CONFIG_JSON: ${DEV_RUNTIME_MAIN_SECRET_RESOLVER_CONFIG_JSON:?runtime policy contract must set DEV_RUNTIME_MAIN_SECRET_RESOLVER_CONFIG_JSON}
   # Restrict the runtime surface to first-party infra + marketplace packages.
@@ -174,10 +193,15 @@ x-runtime-env: &runtime-env
   ONEX_RUNTIME_CONTRACTS_DIR: /app/contracts/runtime
   ONEX_LOG_LEVEL: ${ONEX_LOG_LEVEL:-INFO}
   ONEX_ENVIRONMENT: ${ONEX_ENVIRONMENT:-local}
+  ONEX_DATABASE_TOPOLOGY_PROFILE: local
   # Local Docker Redpanda uses a bounded single-shard broker. Cap default topic
   # creation to one partition unless an operator explicitly opts into wider
   # contract-declared partition counts.
   ONEX_TOPIC_PROVISIONER_MAX_PARTITIONS: ${ONEX_TOPIC_PROVISIONER_MAX_PARTITIONS:-1}
+  ONEX_BOUNDARY_DLQ_ENABLED: ${DEV_BOUNDARY_DLQ_ENABLED:?runtime policy contract must set DEV_BOUNDARY_DLQ_ENABLED}
+  ONEX_SINGLE_OWNER_COMMAND_TOPICS: ${ONEX_SINGLE_OWNER_COMMAND_TOPICS:-0}
+  ONEX_TOPIC_ENFORCEMENT_MODE: ${ONEX_TOPIC_ENFORCEMENT_MODE:-warn}
+  ONEX_WIRING_STRICT_MODE: ${ONEX_WIRING_STRICT_MODE:-0}
   # Linear API for build loop ticket fetching
   LINEAR_API_KEY: ${LINEAR_API_KEY:?LINEAR_API_KEY must be set}
   # GitHub API/CLI auth for runtime-owned PR lifecycle inventory and merge gates.
@@ -185,6 +209,30 @@ x-runtime-env: &runtime-env
   # read GITHUB_TOKEN.
   GITHUB_TOKEN: ${GITHUB_TOKEN:?GITHUB_TOKEN must be set}
   GH_TOKEN: ${GITHUB_TOKEN:?GITHUB_TOKEN must be set}
+  # OMN-15529 (OMN-15362 blocker 3 cutover): OnexBot-OCC-Writer App identity for
+  # the OCC companion producer (node_occ_companion_effect / OccCompanionEmitter).
+  # This anchor is an ALLOWLIST, not a host-env pass-through — a credential in
+  # ~/.omnibase/.env is invisible to the container unless it is named here.
+  #
+  # Optional by design, NOT a silent fallback: the App key is provisioned only on
+  # hosts the operator has minted it onto (.201 today), and every other lane must
+  # render and run unchanged without it. Empty is the safe, inert state on both
+  # consumers, verified field-by-field against omnimarket@dev:
+  #   * handler_occ_companion_effect.py:187 and occ_companion_emitter.py:208 read
+  #     `os.environ.get("OMNI_OCC_GITHUB_AUTH_MODE", "pat").strip().lower() or "pat"`
+  #     — "" coalesces to PAT mode, the current behaviour, unchanged.
+  #   * github_app_auth.py resolves both credentials through
+  #     `resolve_api_key(..., required=False)`, which treats an empty value as
+  #     absent and raises GitHubAppCredentialMissingError in app mode rather than
+  #     falling back to the shared PAT.
+  # `:?` is therefore wrong here — it would wedge every lane that has no App key.
+  ONEXBOT_OCC_APP_ID: ${ONEXBOT_OCC_APP_ID:-}
+  ONEXBOT_OCC_PRIVATE_KEY: ${ONEXBOT_OCC_PRIVATE_KEY:-}
+  OMNI_OCC_GITHUB_AUTH_MODE: ${OMNI_OCC_GITHUB_AUTH_MODE:-}
+  # OMN-15009: node_redeploy_deploy_effect signs rebuild commands before they
+  # cross the runtime/deploy-agent trust boundary. The deploy agent rejects
+  # unsigned commands, so an absent secret must fail at compose render time.
+  DEPLOY_AGENT_HMAC_SECRET: ${DEPLOY_AGENT_HMAC_SECRET:?DEPLOY_AGENT_HMAC_SECRET must be set in ~/.omnibase/.env}
   # --- Infisical config (OMN-5382: removed from base env — injected per-bundle) ---
   # Infisical vars are only present when the secrets bundle is selected.
   # --- Container-internal service addresses (OMN-5381: same invariant as OMN-3431 for Kafka) ---
@@ -359,9 +407,17 @@ services:
       - redpanda
       - start
       - --kafka-addr internal://0.0.0.0:9092,external://0.0.0.0:19092
-      - --advertise-kafka-addr internal://redpanda:9092,external://${DEV_REDPANDA_ADVERTISE_HOST:-localhost}:${REDPANDA_EXTERNAL_PORT:-19092}
+      # OMN-15173: DEV_REDPANDA_ADVERTISE_HOST has NO silent default. A silent
+      # ${VAR:-localhost} default rendered a broker address unreachable by any
+      # off-host client (CI runner, another machine) whenever the operator
+      # forgot to export the var — the client-side symptom (connection refused
+      # / timeout against a "localhost" the client cannot resolve to the actual
+      # host) surfaces far from this file. Fail fast instead: set it explicitly
+      # to localhost for pure single-host dev, or to the reachable host/IP for
+      # off-host clients.
+      - --advertise-kafka-addr internal://redpanda:9092,external://${DEV_REDPANDA_ADVERTISE_HOST:?DEV_REDPANDA_ADVERTISE_HOST is required - use localhost for single-host dev or the reachable host/IP for off-host clients}:${REDPANDA_EXTERNAL_PORT:-19092}
       - --pandaproxy-addr internal://0.0.0.0:8082,external://0.0.0.0:18082
-      - --advertise-pandaproxy-addr internal://redpanda:8082,external://${DEV_REDPANDA_ADVERTISE_HOST:-localhost}:${REDPANDA_PANDAPROXY_PORT:-18082}
+      - --advertise-pandaproxy-addr internal://redpanda:8082,external://${DEV_REDPANDA_ADVERTISE_HOST:?DEV_REDPANDA_ADVERTISE_HOST is required - use localhost for single-host dev or the reachable host/IP for off-host clients}:${REDPANDA_PANDAPROXY_PORT:-18082}
       - --schema-registry-addr internal://0.0.0.0:8081,external://0.0.0.0:18081
       - --rpc-addr redpanda:33145
       - --advertise-rpc-addr redpanda:33145
@@ -952,6 +1008,11 @@ services:
       # Projection API serves materialized read models and has no runtime data
       # volume for the rendered Bifrost delegation contract.
       BIFROST_CONTRACT_PATH: ""
+      # OMN-15645: Projection API is a read-only materialized-view server; it
+      # never invokes the delegation routing reducer, so it deliberately has no
+      # delegation-routing surface (mirrors the BIFROST_CONTRACT_PATH opt-out
+      # above).
+      DELEGATION_ROUTING_TIERS_PATH: ""
     ports:
       - "${PROJECTION_API_PORT:-3002}:3002"
     healthcheck:
@@ -973,9 +1034,25 @@ services:
   # retries (5) because Kafka consumer groups are joined sequentially at
   # startup. Autoheal uses a workspace-wide 2400s grace period so main,
   # effects, and workers can all finish contract wiring before restart checks.
-  # OMN-7569: Default replicas=0 — workers join the same per-topic consumer groups
-  # as the main runtime on 1-partition topics, causing a constant rebalance storm.
-  # Scale to 0 until the kernel supports profile-based subscription filtering.
+  # OMN-7569 (SUPERSEDED by OMN-14968): this block used to default replicas to 0
+  # via a bare ${WORKER_REPLICAS:-0}, because workers joined the same per-topic
+  # consumer groups as the main runtime on 1-partition topics and caused a constant
+  # rebalance storm — "scale to 0 UNTIL the kernel supports profile-based
+  # subscription filtering". That filtering shipped: each lane process now carries a
+  # disjoint capability set (this service resolves DEV_RUNTIME_WORKER_CAPABILITIES =
+  # workflow.dispatch,contract.update,runtime.worker, disjoint from the main
+  # runtime's market.skill-proof,workflow.orchestration,runtime.main), and OMN-12990
+  # pinned worker replicas to 1 for EVERY lane in
+  # contracts/services/runtime_policy.contract.yaml.
+  #
+  # OMN-12988 / OMN-12990 converted the stability-test and prod overlays to the
+  # lane-prefixed fail-closed form but left this base line bare, so the dev lane
+  # (which has no overlay — this file IS the dev lane) still resolved to 0: a plain
+  # `up -d --no-deps runtime-worker` exited 0 creating nothing, while
+  # deploy-runtime.sh's RUNTIME_SERVICES / RT-6 deploy readback requires a running
+  # container, aborting and auto-restoring every dev-lane deploy. deploy.replicas
+  # below is now lane-prefixed and fail-closed, exactly like the sibling
+  # DEV_RUNTIME_WORKER_* vars in this same service block.
   runtime-worker:
     !!merge <<: *runtime-base
     profiles: ["runtime", "full"]
@@ -1014,7 +1091,7 @@ services:
       start_period: 1200s
     deploy:
       mode: replicated
-      replicas: ${WORKER_REPLICAS:-0}
+      replicas: ${DEV_WORKER_REPLICAS:?runtime policy contract must set DEV_WORKER_REPLICAS (source docker/runtime-policy.env)}
       resources:
         limits:
           cpus: '0.5'
@@ -1315,6 +1392,12 @@ services:
       # Contract resolver does not mount /app/data, so it must not render the
       # Bifrost delegation contract into the shared runtime data path.
       BIFROST_CONTRACT_PATH: ""
+      # OMN-15645: Contract resolver is a synchronous HTTP bridge for
+      # NodeContractResolveCompute (contract *resolution*, not delegation
+      # *routing*); it never invokes the delegation routing reducer, so it
+      # deliberately has no delegation-routing surface (mirrors the
+      # BIFROST_CONTRACT_PATH opt-out above).
+      DELEGATION_ROUTING_TIERS_PATH: ""
       CORS_ORIGINS: ${CONTRACT_RESOLVER_CORS_ORIGINS:-http://localhost:3000,http://localhost:3001,http://localhost:8085}
       CONTRACT_RESOLVER_PORT: "8091"
       ONEX_LOG_LEVEL: ${ONEX_LOG_LEVEL:-INFO}

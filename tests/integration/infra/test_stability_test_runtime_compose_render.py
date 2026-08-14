@@ -6,6 +6,7 @@ from __future__ import annotations
 
 import json
 import os
+import re
 import shutil
 import subprocess
 import sys
@@ -19,6 +20,11 @@ COMPOSE_FILES = (
     "docker/docker-compose.infra.yml",
     "docker/docker-compose.stability-test.yml",
 )
+# OMN-14013: kept in sync with STABILITY_TEST_TOPIC_PARTITIONS_PER_SHARD in
+# tests/unit/infra/test_stability_test_runtime_lane.py -- see that constant's
+# docstring for why the durable committed value is raised above the base
+# redpanda.yaml default (7000).
+STABILITY_TEST_TOPIC_PARTITIONS_PER_SHARD = 15000
 REQUIRED_RUNTIME_SERVICES = {
     "omninode-runtime",
     "runtime-effects",
@@ -118,6 +124,7 @@ COMPOSE_RENDER_ENV = {
     "INFISICAL_REDIS_URL": "redis://:render-only-valkey-password@valkey:6379",
     "CI_CALLBACK_TOKEN": "deploy-agent-compose-parse-only",
     "GITHUB_TOKEN": "render-only-github-token",
+    "DEPLOY_AGENT_HMAC_SECRET": "render-only-deploy-agent-hmac-secret",
     "KEYCLOAK_ADMIN_CLIENT_SECRET": "render-only-admin-client-secret",
     "LINEAR_API_KEY": "render-only-linear-api-key",
     "LINEAR_WEBHOOK_SECRET": "deploy-agent-compose-parse-only",
@@ -150,6 +157,12 @@ COMPOSE_RENDER_ENV = {
         "postgresql://postgres:postgres@postgres:5432/omnidash_analytics"
     ),
     "POSTGRES_PASSWORD": "postgres",
+    # OMN-15263: `:?`-required in the base infra file (OMN-15173) and
+    # interpolated by this layered render even though the stability overlay
+    # replaces redpanda's `command:`. `localhost` is deliberate: it keeps the
+    # `"localhost:19092" not in redpanda_command` overlay-leak assertion below
+    # able to catch a base command that stops being overridden.
+    "DEV_REDPANDA_ADVERTISE_HOST": "localhost",  # kafka-fallback-ok — test fixture
     "REDPANDA_ADVERTISE_HOST": "192.168.86.201",
     "STABILITY_TEST_POSTGRES_EXTERNAL_PORT": "15436",
     "STABILITY_TEST_VALKEY_EXTERNAL_PORT": "26379",
@@ -421,12 +434,52 @@ def test_stability_lane_render_contains_isolated_runtime_identity() -> None:
 
 
 @pytest.mark.integration
+def test_stability_lane_delegation_routing_tiers_path_binding() -> None:
+    """OMN-15645: DELEGATION_ROUTING_TIERS_PATH must be bound on every runtime
+    service in the stability-test lane, to a fixed, non-version-embedded
+    in-image path.
+
+    omnimarket#2000 (OMN-15628) removed the packaged-default fallback for this
+    key in the delegation routing reducer's ``_get_config()`` singleton; an
+    unbound key now raises ``ProtocolConfigurationError`` at first config read.
+    See ``test_dev_lane_delegation_routing_tiers_path_binding`` in
+    ``test_dev_runtime_compose_render.py`` for the full seam citation.
+    """
+    rendered_config = _compose_config_json()
+    services = rendered_config["services"]
+
+    expected_path = "/app/config/delegation/routing_tiers.yaml"
+    for service_name in REQUIRED_RUNTIME_SERVICES:
+        environment = services[service_name]["environment"]
+        assert environment.get("DELEGATION_ROUTING_TIERS_PATH") == expected_path, (
+            f"Service '{service_name}' must bind DELEGATION_ROUTING_TIERS_PATH="
+            f"{expected_path!r}; got "
+            f"{environment.get('DELEGATION_ROUTING_TIERS_PATH')!r}"
+        )
+
+    # NOTE: omninode-contract-resolver is not rendered under --profile runtime
+    # for this lane (observed live via docker compose config, 2026-08-02);
+    # only projection-api is checked unconditionally.
+    for service_name in ("projection-api", "omninode-contract-resolver"):
+        service = services.get(service_name)
+        if service is None:
+            continue
+        environment = service["environment"]
+        assert environment.get("DELEGATION_ROUTING_TIERS_PATH", "") == "", (
+            f"Service '{service_name}' deliberately has no delegation-routing "
+            "surface and must not bind DELEGATION_ROUTING_TIERS_PATH; got "
+            f"{environment.get('DELEGATION_ROUTING_TIERS_PATH')!r}"
+        )
+
+
+@pytest.mark.integration
 def test_stability_lane_render_pins_worker_replicas_to_one() -> None:
     """The stability worker must render with deploy.replicas == 1 (OMN-12988).
 
-    The base infra compose defaults runtime-worker to replicas 0
-    (``${WORKER_REPLICAS:-0}``); without a hard pin in the stability override a
-    plain compose recreate silently drops the worker (4-container census). This
+    The base infra compose used to default runtime-worker to replicas 0 via a
+    bare ``${WORKER_REPLICAS:-0}`` (lane-prefixed and fail-closed since
+    OMN-14968); without a hard pin in the stability override a plain compose
+    recreate silently drops the worker (4-container census). This
     ratchet fails if the override regresses to 0 or to an env-interpolation
     default that resolves to anything other than 1.
     """
@@ -482,17 +535,51 @@ def test_stability_projection_api_has_separate_infra_and_analytics_dsns() -> Non
 
 
 @pytest.mark.integration
-def test_stability_lane_render_inherits_failing_runtime_healthcheck() -> None:
+def test_stability_lane_render_resolves_strict_semantic_healthcheck() -> None:
+    """The *rendered* lane must run the semantic probe with autoheal disarmed.
+
+    OMN-15217. The unit test reads the overlay file; this reads what compose
+    actually resolves after merging base + overlay, which is the only surface
+    that can catch a merge-semantics mistake. Two merge behaviours make that
+    distinction load-bearing:
+
+    * ``healthcheck`` is replaced wholesale, so a mis-authored override shows up
+      here as the inherited ``curl -sf`` probe rather than as a file diff.
+    * ``labels`` are *appended*, so the base service's ``autoheal=true`` survives
+      a plain ``labels:`` block. Only ``labels: !override`` disarms it, and the
+      overlay file alone cannot prove that — the parsed overlay looks identical
+      either way.
+
+    Strict health plus autoheal is the harmful combination: semantic degradation
+    is typically restart-immune (contracts that fail to import will fail again),
+    so an armed autoheal would convert an honest unhealthy signal into a restart
+    loop and destroy the forensic state this lane exists to preserve.
+    """
     rendered_config = _compose_config_json()
     services = rendered_config["services"]
 
     for service_name in REQUIRED_RUNTIME_SERVICES:
-        assert services[service_name]["healthcheck"]["test"] == [
+        healthcheck = services[service_name]["healthcheck"]
+
+        assert healthcheck["test"] == [
             "CMD",
-            "curl",
-            "-sf",
-            "http://localhost:8085/health",
-        ]
+            "python",
+            "/usr/local/bin/onex-container-healthcheck",
+            "--degraded-policy",
+            "fail",
+        ], (
+            f"{service_name}: rendered lane must run the strict semantic check; "
+            "the shallow curl probe passes a DEGRADED runtime (200 by design)"
+        )
+
+        assert _label_value(services[service_name], "autoheal") is None, (
+            f"{service_name}: autoheal survived into the rendered lane — compose "
+            "appends label sequences, so `labels:` must be `labels: !override`. "
+            "Strict health + autoheal restart-loops a restart-immune defect."
+        )
+        assert _label_value(services[service_name], "com.omninode.lane") == (
+            "stability-test"
+        )
 
 
 @pytest.mark.integration
@@ -534,12 +621,35 @@ def test_stability_lane_render_does_not_expose_production_ports_or_services() ->
     assert "localhost:19092" not in redpanda_command
     assert "STABILITY_TEST_REDPANDA_ADVERTISE_HOST" not in redpanda_command
     assert "REDPANDA_ADVERTISE_HOST" not in redpanda_command
+    # OMN-14013: belt #2 (redpanda's own startup flag) must be present (this
+    # lane's `command: !override` previously dropped it entirely) and agree
+    # numerically with belt #3 below -- a substring check alone is not
+    # sufficient here since the rendered command string also carries this
+    # lane's own commented history of prior/stopgap cap values.
+    redpanda_set_flag_match = re.search(
+        r"topic_partitions_per_shard=(\d+)", redpanda_command
+    )
+    assert redpanda_set_flag_match is not None, redpanda_command
+    assert int(redpanda_set_flag_match.group(1)) == (
+        STABILITY_TEST_TOPIC_PARTITIONS_PER_SHARD
+    )
 
     partition_cap_command = "\n".join(services["redpanda-partition-cap"]["command"])
     assert "/usr/bin/rpk -X brokers=redpanda:9092" in partition_cap_command
     assert "admin.hosts=redpanda:9644" in partition_cap_command
     assert "topic_partitions_per_shard" in partition_cap_command
-    assert "7000" in partition_cap_command
+    # Extract the literal value passed to `rpk cluster config set`, not a bare
+    # substring match (this rendered command string also contains this lane's
+    # own comment mentioning superseded values -- see docker-compose.stability-
+    # test.yml's OMN-14013 comment block).
+    partition_cap_match = re.search(
+        r"cluster config set topic_partitions_per_shard\s+(\d+)",
+        partition_cap_command,
+    )
+    assert partition_cap_match is not None, partition_cap_command
+    assert int(partition_cap_match.group(1)) == (
+        STABILITY_TEST_TOPIC_PARTITIONS_PER_SHARD
+    )
     assert "topic_memory_per_partition" in partition_cap_command
     assert "1048576" in partition_cap_command
 

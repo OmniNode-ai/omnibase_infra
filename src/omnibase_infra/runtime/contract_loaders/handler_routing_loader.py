@@ -337,12 +337,24 @@ def load_and_validate_contract_yaml(contract_path: Path) -> ModelContractNodeTyp
 
 
 # Valid routing strategies for handler routing contracts.
-# Currently only "payload_type_match" is implemented. Additional strategies
-# such as "first_match" or "all_match" may be added in future versions.
-# Unknown strategies will trigger a warning and fall back to "payload_type_match".
+# "payload_type_match" and "topic_match" (OMN-15215) are both contract-legal
+# values live in the auto_wiring consumer-attach path
+# (omnibase_infra.runtime.auto_wiring.models.ModelHandlerRouting,
+# OMN-14580/OMN-13825/OMN-14594) — node_ledger_projection_compute has declared
+# routing_strategy: "topic_match" since OMN-14594. This module's
+# ModelRoutingSubcontract does NOT carry topic_match's per-entry topic
+# disambiguation (see model_routing_subcontract.py docstring); it only backs
+# the informational RuntimeContractConfigLoader boot-summary pass. Prior to
+# OMN-15215 this set omitted "topic_match", so every boot logged a false
+# "Unknown routing_strategy 'topic_match' ... Using 'payload_type_match' as
+# default" warning for that contract — confirmed live on a fresh
+# omnibase-infra-stability-test boot, 2026-07-27. Additional strategies such
+# as "first_match" or "all_match" may be added in future versions. Unknown
+# strategies still trigger a warning and fall back to "payload_type_match".
 VALID_ROUTING_STRATEGIES: frozenset[str] = frozenset(
     {
-        "payload_type_match",  # Match by payload type (default and only implemented)
+        "payload_type_match",  # Match by payload type (default)
+        "topic_match",  # Match by contract-declared per-entry topic (OMN-14594)
     }
 )
 

@@ -1,0 +1,214 @@
+# SPDX-FileCopyrightText: 2025 OmniNode.ai Inc.
+# SPDX-License-Identifier: MIT
+#
+# Managed-staging proof kit -- machine-readable field manifest.
+#
+# Tickets: OMN-15123 (frozen one-tenant contract), OMN-15124 (candidate-in-isolation
+# compatibility proof), OMN-15125 (Aug-5 readiness/rollback go/no-go packet),
+# OMN-10858 (end-to-end cloud workflow proof harness).
+#
+# THIS FILE IS THE SEAM. Three surfaces are matched field-by-field against it:
+#
+#   1. the ticket acceptance criteria (pinned verbatim in
+#      tests/ci/test_managed_staging_proof_kit_seam.py::REQUIRED_FIELDS),
+#   2. the markdown packet templates under docs/runbooks/ (one table row per field
+#      id, with a non-placeholder evidence source), and
+#   3. the executable harness scripts/proof/e2e_cloud_workflow_harness.py
+#      (one stage function per harness stage id).
+#
+# A field added here without a template row, or a stage added here without a
+# harness stage function, fails the seam test. Placeholder evidence sources
+# (TBD / TODO / FIXME / ??? / N/A) fail the seam test: the whole point of the
+# packet is that every field names the surface that proves it BEFORE the run.
+#
+# `value` is deliberately absent from this manifest. The manifest owns WHAT must
+# be proven and HOW it is read back; the filled-in packet (a dated copy of the
+# template committed under docs/evidence/) owns the observed values.
+schema_version: "1.0.0"
+packets:
+  one_tenant_contract_freeze:
+    ticket: "OMN-15123"
+    plan_row: "rolling plan §3 B3"
+    template: "docs/runbooks/managed-staging-one-tenant-contract-freeze.md"
+    description: >-
+      The immutable canary tuple. Frozen once, before the B11 canary run; any change mints a new epoch rather than editing the frozen artifact.
+    fields:
+      - id: aws_account
+        label: "AWS account"
+        evidence_source: "aws sts get-caller-identity --query Account --output text"
+      - id: aws_region
+        label: "AWS region"
+        evidence_source: "aws configure get region  # cross-check against the cluster ARN in msk_cluster_arn"
+      - id: k8s_namespace
+        label: "Kubernetes namespace (single canary namespace)"
+        evidence_source: "kubectl get ns <ns> -o jsonpath='{.metadata.name}{\"\\t\"}{.metadata.uid}'"
+      - id: msk_cluster_arn
+        label: "MSK cluster ARN"
+        evidence_source: "aws kafka list-clusters-v2 --query 'ClusterInfoList[?ClusterName==`omninode-dev-msk`].ClusterArn' --output text"
+      - id: rds_instance_identifier
+        label: "RDS instance identifier"
+        evidence_source: "aws rds describe-db-instances --db-instance-identifier omninode-dev-postgres --query 'DBInstances[0].[DBInstanceIdentifier,Endpoint.Address]' --output text"
+      - id: gateway_endpoint
+        label: "The one gateway (exactly one ingress path into the canary)"
+        evidence_source: "kubectl -n <ns> get svc,ingress -o jsonpath='{range .items[*]}{.kind}/{.metadata.name}{\"\\n\"}{end}'  # must resolve to exactly one externally reachable gateway"
+      - id: synthetic_tenant_id
+        label: "The one synthetic tenant (UUID)"
+        evidence_source: "psql \"$CANARY_DSN\" -Atc \"select distinct tenant_id from delivery_replay_canary_projection\"  # see docs/runbooks/managed-staging-canary-postgres-provisioning.md §3.4"
+      - id: source_digest
+        label: "Candidate source digest (git commit the image was built from)"
+        evidence_source: "git -C <candidate repo> rev-parse HEAD  # cross-check the image label: docker image inspect <image> --format '{{index .Config.Labels \"org.opencontainers.image.revision\"}}'"
+      - id: image_digest
+        label: "Candidate image digest (immutable, by digest not tag)"
+        evidence_source: "aws ecr describe-images --repository-name <repo> --image-ids imageTag=<tag> --query 'imageDetails[0].imageDigest' --output text"
+      - id: config_digest
+        label: "Rendered runtime config digest"
+        evidence_source: "kubectl -n <ns> get cm <configmap> -o json | jq -S '.data' | shasum -a 256"
+      - id: topic_catalog
+        label: "Approved onex.mstg1. topic/group catalog (full generated list)"
+        evidence_source: "uv run python -c 'from omnibase_infra.topics.managed_staging_canary_catalog import build_canary_catalog_from_candidate as b; c=b(); print(\"\\n\".join(sorted(c.topics)))'  # generator: src/omnibase_infra/topics/managed_staging_canary_catalog.py (OMN-14727)"
+      - id: zero_collision_readback
+        label: "Zero-collision readback against live topics + consumer groups"
+        evidence_source: "uv run python -c 'from omnibase_infra.topics.managed_staging_canary_catalog import verify_zero_collision'  # run against the live topic/group snapshot; see the module's \"Zero-collision readback\" docstring"
+      - id: msk_epoch
+        label: "Unique MSK epoch (namespace segment; bump to re-run)"
+        evidence_source: "src/omnibase_infra/topics/managed_staging_canary_catalog_namespace.yaml -> epoch"
+      - id: group_start_reset_policy
+        label: "Signed consumer-group start / reset policy"
+        evidence_source: "src/omnibase_infra/topics/managed_staging_canary_catalog_namespace.yaml -> group_start_policy (+ the operator signature line in the filled packet)"
+      - id: rollback_authority
+        label: "Named rollback authority (who may execute the revert)"
+        evidence_source: "docs/runbooks/managed-staging-canary-teardown-rollback.md §0 ownership table + §4 rollback path"
+      - id: zero_prod_diff
+        label: "Zero-prod-diff assertion (no prod resource in the tuple)"
+        evidence_source: "grep -nE 'omnibase-infra-prod|:28085|:28086' <this packet>  # must return no matches; prod lanes are named in CLAUDE.md's .201 lane table"
+      - id: omnidash_exclusion
+        label: "Omnidash exclusion (omnidash carries no canary authority)"
+        evidence_source: "kubectl -n <ns> get deploy -o jsonpath='{range .items[*]}{.metadata.name}{\"\\n\"}{end}'  # must contain no omnidash workload"
+      - id: freeze_signature
+        label: "Freeze signature (operator + UTC timestamp the tuple became immutable)"
+        evidence_source: "git log -1 --format='%H %aI %an' -- <path of the filled packet>  # the commit that landed the packet IS the freeze event"
+      - id: plan_row_binding
+        label: "Rolling plan §3 B3 bound to OMN-15123"
+        evidence_source: "git -C $OMNI_HOME/omni_home log -p -- docs/plans/ROLLING_SEVEN_DAY_PLAN.md | grep -n 'OMN-15123'  # cite the plan diff that replaced the 'unverifiable by construction' tag"
+  candidate_isolation_compatibility:
+    ticket: "OMN-15124"
+    plan_row: "rolling plan §3 B5"
+    template: "docs/runbooks/managed-staging-candidate-isolation-compatibility-proof.md"
+    description: >-
+      Proves the candidate image speaks MSK/RDS correctly IN ISOLATION, with negative controls, before it is pointed at the staging lane.
+    fields:
+      - id: isolation_lane
+        label: "Named isolation lane/host (zero staging + zero prod mutation)"
+        evidence_source: "hostname && kubectl config current-context  # record both; the lane must be named in the packet before the run"
+      - id: candidate_image_digest
+        label: "Candidate image digest under test (must equal one_tenant_contract_freeze.image_digest)"
+        evidence_source: "kubectl -n <ns> get pod <pod> -o jsonpath='{.status.containerStatuses[0].imageID}'"
+      - id: msk_iam_signer
+        label: "MSK IAM/TLS signer actually used (not plaintext, not a fallback)"
+        evidence_source: "uv run python -c 'from omnibase_infra.event_bus.kafka_auth import build_aiokafka_auth_kwargs_from_env as f; print({k: (type(v).__name__ if k==\"sasl_oauth_token_provider\" else v) for k,v in f().items()})'  # src/omnibase_infra/event_bus/kafka_auth.py:105"
+      - id: token_refresh_cycle
+        label: "At least one observed IAM token-refresh cycle (>=2 token mints, same session)"
+        evidence_source: "kubectl -n <ns> logs <pod> --since=<soak window> | grep -iE 'token|refresh|expiry'  # two distinct mint timestamps in one uninterrupted session"
+      - id: auto_create_off
+        label: "Broker auto-create is OFF"
+        evidence_source: "aws kafka describe-configuration-revision --arn <config-arn> --revision <n> --query ServerProperties --output text | base64 -d | grep auto.create.topics.enable"
+      - id: explicit_topic_bootstrap
+        label: "Explicit topic bootstrap succeeded (every catalog topic created deliberately)"
+        evidence_source: "kafka-topics --bootstrap-server <b> --command-config <iam.properties> --list | grep '^onex.mstg1.'  # compare set-equal against one_tenant_contract_freeze.topic_catalog"
+      - id: negative_control_out_of_catalog
+        label: "NEGATIVE CONTROL: out-of-catalog topic/group name is denied"
+        evidence_source: "kafka-topics --bootstrap-server <b> --command-config <iam.properties> --create --topic notonex.mstg1.denied.v1  # MUST fail with AccessDenied/TopicAuthorizationException; paste the error verbatim"
+      - id: broker_group_perms
+        label: "Broker + consumer-group permissions scoped to the catalog patterns"
+        evidence_source: "aws iam get-role-policy --role-name <node-role> --policy-name <policy> --query 'PolicyDocument.Statement[?contains(Action, `kafka-cluster:*`)]'  # patterns must be onex.* / omninode.*"
+      - id: rds_verify_full
+        label: "RDS connection proven sslmode=verify-full"
+        evidence_source: "psql \"$CANARY_DSN\" -Atc \"select ssl, version, cipher from pg_stat_ssl join pg_stat_activity using (pid) where pid = pg_backend_pid()\"  # plus the DSN readback showing sslmode=verify-full and a pinned root CA"
+      - id: typed_config_authority
+        label: "Typed config authority (config comes from the typed model, not ad-hoc env reads)"
+        evidence_source: "uv run python -c 'from omnibase_infra.event_bus.kafka_auth import build_aiokafka_auth_kwargs_from_env; print(build_aiokafka_auth_kwargs_from_env.__module__)'  # plus scripts/check_required_env_vars.py output for the candidate's env contract"
+      - id: no_raw_endpoint_fallback
+        label: "NEGATIVE CONTROL: no raw-endpoint / plaintext fallback path was exercised"
+        evidence_source: "unset the IAM env, start the candidate, and show it FAILS CLOSED rather than falling back; static half: scripts/check_no_cloud_bus_wrapper.sh and grep -rn 'PLAINTEXT' src/omnibase_infra/event_bus/"
+      - id: dashboard_zero_authority
+        label: "Dashboard holds zero broker/RDS authority in the candidate config"
+        evidence_source: "kubectl -n <ns> get cm,secret -o yaml | grep -nE 'omnidash'  # must show no broker bootstrap or RDS DSN granted to any dashboard surface"
+      - id: plan_row_binding
+        label: "Rolling plan §3 B5 bound to OMN-15124"
+        evidence_source: "git -C $OMNI_HOME/omni_home log -p -- docs/plans/ROLLING_SEVEN_DAY_PLAN.md | grep -n 'OMN-15124'"
+  aug5_readiness_rollback:
+    ticket: "OMN-15125"
+    plan_row: "rolling plan §3 B7"
+    template: "docs/runbooks/managed-staging-aug5-readiness-rollback-packet.md"
+    description: >-
+      The immutable go/no-go packet assembled BEFORE the Aug-5 window. Aug 5 is a target, not a forecast, until the blocker graph + dated chain + T20 handoff are attached.
+    fields:
+      - id: source_digest
+        label: "Source digest being promoted"
+        evidence_source: "git -C <candidate repo> rev-parse HEAD  # must equal one_tenant_contract_freeze.source_digest"
+      - id: previous_digest
+        label: "Previous digest (the rollback target)"
+        evidence_source: "kubectl -n <ns> rollout history deploy/<name> && kubectl -n <ns> get deploy/<name> -o jsonpath='{.spec.template.spec.containers[0].image}'  # record the currently-serving digest BEFORE promotion"
+      - id: amd64_manifest
+        label: "linux/amd64 manifest present for the promoted digest"
+        evidence_source: "docker manifest inspect <image>@<digest> | jq '.manifests[].platform'  # must include {\"architecture\":\"amd64\",\"os\":\"linux\"}"
+      - id: config_hash
+        label: "Rendered config hash"
+        evidence_source: "kubectl -n <ns> get cm <configmap> -o json | jq -S '.data' | shasum -a 256  # must equal one_tenant_contract_freeze.config_digest"
+      - id: policy_hash
+        label: "IAM/broker policy hash"
+        evidence_source: "aws iam get-role-policy --role-name <node-role> --policy-name <policy> --query PolicyDocument | jq -S . | shasum -a 256"
+      - id: vulnerability_result
+        label: "Vulnerability scan result for the promoted digest"
+        evidence_source: "aws ecr describe-image-scan-findings --repository-name <repo> --image-id imageDigest=<digest> --query 'imageScanFindingsSummary.findingSeverityCounts'"
+      - id: a6_thresholds_with_live_samples
+        label: "A6 numeric thresholds loaded, each with a live sample value"
+        evidence_source: "B10 wiring readback (OMN-14735/OMN-14948) -- one row per threshold: signal, numeric threshold, live sampled value, timestamp. A threshold with no live sample is unloaded."
+      - id: monitoring_owner_actions
+        label: "Staffed monitoring owner + the action each breach triggers"
+        evidence_source: "docs/runbooks/managed-staging-canary-teardown-rollback.md §3 (abort path, owner + sequence); name the on-call human and the window they are staffed for"
+      - id: b12_psql_readback
+        label: "B12 psql readback proving the landing table exists"
+        evidence_source: "docs/runbooks/managed-staging-canary-postgres-provisioning.md §3.4 -- paste the psql \\d+ delivery_replay_canary_projection output"
+      - id: teardown_readback
+        label: "OMN-14772 teardown readback"
+        evidence_source: "docs/runbooks/managed-staging-canary-teardown-rollback.md §2 T-4..T-8 -- paste the post-teardown steady-state assertion output (OMN-14772)"
+      - id: executable_rollback
+        label: "Executable rollback procedure, proven by dry-run (not asserted)"
+        evidence_source: "docs/runbooks/managed-staging-canary-teardown-rollback.md §4.1 rollback tuple; dry-run: kubectl -n <ns> rollout undo deploy/<name> --to-revision=<n> --dry-run=server"
+      - id: reconciled_blocker_graph
+        label: "Reconciled blocker graph (every open blocker, with its owner)"
+        evidence_source: "Linear: children of OMN-14724 with statusType != completed, plus their blockedBy edges -- attach the query output, not a paraphrase"
+      - id: dated_chain_with_slack
+        label: "Dated critical-path chain with explicit slack"
+        evidence_source: "one row per chained item: item, owner, start date, end date, slack days; slack computed against the Aug-5 window (soak Aug 6)"
+      - id: t20_handoff
+        label: "T20 handoff (final linux/amd64 build + digest handoff from the contractor lane)"
+        evidence_source: "the contractor handoff artifact under docs/plans/ or docs/handoff/ naming the T20/B1 final build; cite path + commit"
+      - id: go_no_go_decision
+        label: "Go / no-go decision, decider, UTC timestamp"
+        evidence_source: "operator decision recorded in this packet + the corresponding row in docs/tracking/ROLLING_WORK_LEDGER.md"
+      - id: plan_row_binding
+        label: "Rolling plan §3 B7 bound to OMN-15125"
+        evidence_source: "git -C $OMNI_HOME/omni_home log -p -- docs/plans/ROLLING_SEVEN_DAY_PLAN.md | grep -n 'OMN-15125'"
+harness:
+  ticket: "OMN-10858"
+  script: "scripts/proof/e2e_cloud_workflow_harness.py"
+  description: >-
+    End-to-end cloud workflow proof: login -> tenant -> submit -> terminal readback -> cross-tenant denial. Every assertion is stubbed against the real endpoint/topic named below and is gated behind --live, which defaults OFF.
+  stages:
+    - id: login
+      label: "Authenticate to the gateway and obtain a scoped token"
+      surface: "gateway: POST {gateway_base_url}/auth/token (Keycloak-backed); tenant-scoped claim required"
+    - id: tenant
+      label: "Resolve/assert the synthetic tenant context"
+      surface: "gateway: GET {gateway_base_url}/v1/tenants/{tenant_id} -- must match one_tenant_contract_freeze.synthetic_tenant_id"
+    - id: submit
+      label: "Submit the reference workflow command"
+      surface: "topic: {topic_prefix}onex.cmd.omnimarket.alpha-text-analysis-requested.v1 (payload: prompt, max_tokens, tenant_id, correlation_id)"
+    - id: terminal_readback
+      label: "Read back the terminal event + projection row, correlation-linked"
+      surface: "topic: {topic_prefix}onex.evt.omnimarket.alpha-text-analysis-completed.v1 (or ...-failed.v1); table: alpha_workflow_results"
+    - id: cross_tenant_denial
+      label: "NEGATIVE CONTROL: tenant B cannot read tenant A's workflow status or stream"
+      surface: "gateway: GET {gateway_base_url}/v1/workflows/{workflow_id} with tenant B's token -- MUST be 403/404, never 200"

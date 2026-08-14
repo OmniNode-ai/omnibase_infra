@@ -65,3 +65,22 @@ def test_health_server_uses_runtime_pending_mode_before_attach() -> None:
 
     assert "container=container" in start_block
     assert "runtime=runtime" not in start_block
+
+
+@pytest.mark.integration
+def test_failed_plugin_consumer_result_is_not_reported_as_started() -> None:
+    """A returned failure must branch before the consumer-started log."""
+    source = _read_service_kernel_source()
+    pass_two_start = source.index(
+        "# --- Pass 2: Start consumers for ready plugins only ---"
+    )
+    pass_two = source[
+        pass_two_start : source.index("plugin_activation_duration =", pass_two_start)
+    ]
+
+    result_idx = pass_two.index("consumer_result = await plugin.start_consumers")
+    failure_idx = pass_two.index("if not consumer_result.success:")
+    continue_idx = pass_two.index("continue", failure_idx)
+    started_idx = pass_two.index("consumers started", continue_idx)
+
+    assert result_idx < failure_idx < continue_idx < started_idx

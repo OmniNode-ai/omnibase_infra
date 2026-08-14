@@ -49,6 +49,17 @@ class ModelRunnerFleetSnapshot(BaseModel):
         default_factory=tuple,
         description="Queued/in-progress runs observed past the wedge-age threshold.",
     )
+    host_disk_used_percent: float | None = Field(
+        default=None,
+        ge=0.0,
+        description=(
+            "Used percentage of the runner host's Docker/work filesystem "
+            "(OMN-15255). Host-scoped, not per-runner: every container on the "
+            "host shares it, so a full disk fails the DISK_CAPACITY readiness "
+            "signal for the whole fleet at once. None means the probe could "
+            "not determine it."
+        ),
+    )
     buildx_available: bool | None = Field(
         default=None,
         description=(

@@ -1,0 +1,125 @@
+-- onex-create-database: omnidash_analytics
+-- =============================================================================
+-- TOMBSTONE (OMN-15819, 2026-08-10): this file is UNDELIVERABLE via the k8s
+-- Job that applies docker/migrations/forward/*.sql
+-- (omninode_infra/k8s/migrations/omnibase-infra-migrate.yaml). That Job owns
+-- only the omnibase_infra database; its flat loop's `psql -f` apply is
+-- gated on `directive_db == $DB_NAME` and is UNREACHABLE for this file's
+-- `\connect omnidash_analytics` below, in that loop or any other in the
+-- runner. It has never executed anywhere -- live-confirmed 2026-08-10
+-- (omninode_internal schema exists, out-of-band-created, but this file's
+-- own CREATE SCHEMA statement is not why). Kept in place, byte-unchanged
+-- below this header, as ledgered history (migration files are append-only)
+-- -- do NOT delete it and do NOT try to make it deliverable in place; the
+-- fix is the node-owned migration under
+-- docker/migrations/forward/nodes/node_projection_live_events/, which
+-- ASSERTS (does not create) this schema as a guarded precondition of the
+-- table it owns (0002_create_omninode_internal_live_events.sql) -- the
+-- schema itself is operator-provisioned out-of-band, not created by that
+-- replacement or by this file's own CREATE SCHEMA on any path that
+-- actually executes. Runner honesty for
+-- this class of file (no silent false-"applied" ledger row; fail-closed for
+-- any FUTURE cross-DB flat file) is the companion PR in omninode_infra.
+-- Static pre-merge enforcement in THIS repo:
+-- tests/ci/test_flat_migration_no_foreign_connect_gate.py /
+-- docker/migrations/forward/cross-database-flat-migrations.yaml.
+-- =============================================================================
+-- MIGRATION: physically create the omninode_internal schema (empty, additive)
+-- =============================================================================
+-- Ticket: OMN-15359 (P2-P4 build classified schemas and migrate internal,
+--         control-plane, catalog, and tenant targets)
+-- Related: OMN-15426 (P5 cut internal projections to the omninode_runtime
+--          identity — the consumer this migration unblocks), OMN-15423 (P0
+--          relation inventory/classification, the omninode_runtime TABLE
+--          grant list this migration's companion physical-schema-mapping
+--          change is derived from), OMN-15355 (one-DB domain separation)
+-- Version: 1.0.0
+--
+-- WHAT THIS FILE DOES
+--   `CREATE SCHEMA IF NOT EXISTS omninode_internal` inside `omnidash_analytics`
+--   (the physical database backing the unified "application" topology
+--   database — `docker/catalog/database-topology/*.yaml` `physical_name`).
+--   That is the ENTIRE mutation. No table is created, moved, or altered by
+--   this file, and no role is created or granted.
+--
+-- WHY THIS IS NEEDED NOW (live gap, not speculative)
+--   `docker/catalog/database-topology/*.yaml` declares an `omninode_internal`
+--   schema (`domain: OMNINODE_INTERNAL`) and a 41-table TABLE-grant list for
+--   the `omninode_runtime` principal against it, identical across all 7
+--   shipped profiles. Every one of those 41 tables is created, unqualified,
+--   by its own node migration (e.g.
+--   `nodes/node_projection_registration/0000_create_node_service_registry.sql`)
+--   and therefore physically lands in `public` — the schema those grants
+--   target has never existed anywhere in the migration corpus. OMN-15426's
+--   live evidence lane (2026-08-03T19:2xZ, rolling ledger) confirmed the
+--   consequence directly: `handler_wiring.py` issues schema-qualified SQL
+--   against the contract-declared `omninode_internal` target for this table
+--   set, and it fails with "relation does not exist" — not a permission
+--   error, because the schema itself is absent. A grant was deliberately
+--   withheld pending this fix.
+--
+-- WHY ADDITIVE-ONLY, NOT A TABLE MOVE, IN THIS FILE
+--   This ticket's own scope text is explicit: "Preserve source relations
+--   until family-level parity and migration proof complete. Do not use
+--   ALTER TABLE ... SET SCHEMA on sources." Moving 41 tables requires a
+--   per-family transformation receipt (counts/keys/hashes/FKs/sequences/
+--   grants reconciled) produced through the OMN-15420 cutover-journal
+--   machinery (`omnibase_infra.migration.cutover`), which is P5 territory
+--   (OMN-15426/OMN-15360), not this P2-P4 schema-build ticket. This file
+--   builds the empty target the family-by-family copy will land in; it does
+--   not perform that copy. See the companion transformation-receipt note at
+--   `docs/migrations/2026-08-06-omninode-internal-schema-transformation-receipt.md`
+--   for the full disposition and explicit deferred-work list (physical table
+--   copy, `owner_omninode_internal`/`omninode_runtime` role creation, and
+--   the full reconciliation proof).
+--
+-- CONCURRENT BRIDGE (same PR)
+--   `src/omnibase_infra/topology/physical_schema_mapping.py` gains
+--   `INTERNAL_TABLES_PHYSICALLY_IN_PUBLIC_UNTIL_OMN15359`, mirroring the
+--   already-shipped `TENANT_TABLES_PHYSICALLY_IN_PUBLIC_UNTIL_OMN15359`
+--   pattern. Grant/handler-wiring derivation continues to resolve these 41
+--   tables against `public` (their real physical location) until each
+--   family's copy lands, instead of failing closed against a schema that
+--   exists but holds nothing yet.
+--
+-- DATABASE CONTEXT
+--   The forward runner applies `docker/migrations/forward/*.sql` against
+--   POSTGRES_DB (`omnibase_infra`), so this file switches with
+--   `\connect omnidash_analytics` — the established in-repo pattern (083,
+--   096, 097). The `onex-create-database` directive on line 1 is honoured by
+--   `ensure_directive_database` in `scripts/run-forward-migrations.sh`, so
+--   the `\connect` cannot fail on a cluster that has not been through
+--   `000_create_multiple_databases.sh`.
+--
+-- IDEMPOTENCY
+--   `CREATE SCHEMA IF NOT EXISTS` is idempotent by definition. No role
+--   attribute, ownership, or privilege statement appears in this file, so
+--   there is nothing here that is a privilege demand on re-apply (contrast
+--   094/097's ALTER ROLE guard discussion — not applicable, this file issues
+--   no ALTER of any kind).
+--
+-- EXECUTING-ROLE REQUIREMENTS
+--   CREATE SCHEMA requires CREATE privilege on the database (or ownership).
+--   On compose lanes that is `postgres`; on the managed instance it is the
+--   per-database migration principal (OMN-15335). No CREATEROLE and no
+--   superuser is required by this file.
+--
+-- ROLLBACK
+--   See rollback/rollback_098_create_omninode_internal_schema.sql. Rollback
+--   is `DROP SCHEMA omninode_internal` and is safe only while the schema
+--   remains empty (RESTRICT, not CASCADE) — it must never run once any table
+--   has been copied into it.
+-- =============================================================================
+
+\connect omnidash_analytics
+
+CREATE SCHEMA IF NOT EXISTS omninode_internal;
+
+-- Post-condition. Statically provable (no DO/RAISE), matching the
+-- OMN-15361 application-database gate's requirement for deployable SQL.
+SELECT 1 / count(*) AS omninode_internal_schema_exists_assertion
+  FROM (
+    SELECT 1
+      FROM pg_catalog.pg_namespace
+     WHERE nspname = 'omninode_internal'
+  ) AS assertion;

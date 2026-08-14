@@ -4,10 +4,14 @@
 
 from __future__ import annotations
 
+import contextlib
 import os
+import re
 import shutil
+import signal
 import subprocess
 import tempfile
+import time
 from pathlib import Path
 
 import pytest
@@ -16,6 +20,16 @@ SCRIPTS_DIR = Path(__file__).resolve().parents[3] / "scripts"
 PULL_ALL = SCRIPTS_DIR / "pull-all.sh"
 PLIST = SCRIPTS_DIR / "ai.omninode.bare-clone-sync.plist"
 INSTALL_SCRIPT = SCRIPTS_DIR / "install-bare-clone-sync.sh"
+
+# OMN-15590: the caller-checkable terminal completion signal. A caller must be
+# able to distinguish {clean, drift-timeout, drift-fail} runs from ONE
+# machine-parseable line, without reading prose banners.
+RESULT_LINE_PREFIX = "PULL-ALL-RESULT: "
+
+# Harness-side backstop for the bounding tests. NOT the mechanism under test:
+# the assertions require pull-all.sh to return on its own well inside this.
+# It exists so an UNBOUNDED script fails the suite instead of wedging it.
+HARNESS_BACKSTOP_SECONDS = 90.0
 
 
 def _hermetic_git_env() -> dict[str, str]:
@@ -152,10 +166,116 @@ def _make_versioned_cache(
     return cache
 
 
+def _make_simple_repo_source(root: Path, name: str) -> Path:
+    """Create a minimal `<root>/<name>` repo with main+dev branches and a bare
+    `<root>/<name>.git` upstream, so pull-all.sh can fetch+fast-forward it and
+    report "OK". No plugins/onex scaffolding -- used for repos other than
+    omniclaude where the plugin-cache-refresh content is irrelevant.
+    """
+    repo = root / name
+    repo.mkdir(parents=True)
+    (repo / "README.md").write_text(f"# {name}\n")
+
+    _git(["init", "-q", "--initial-branch=main"], cwd=repo)
+    assert (repo / ".git").is_dir(), (
+        f"OMN-14744 guard: `git init` did not create {repo / '.git'}"
+    )
+    _git(["-c", "user.email=t@t", "-c", "user.name=t", "add", "."], cwd=repo)
+    _git(
+        ["-c", "user.email=t@t", "-c", "user.name=t", "commit", "-q", "-m", "init"],
+        cwd=repo,
+    )
+
+    upstream = root / f"{name}.git"
+    _git(["init", "-q", "--bare", "--initial-branch=main", str(upstream)], cwd=root)
+    _git(["remote", "add", "origin", str(upstream)], cwd=repo)
+    _git(["push", "-q", "-u", "origin", "main"], cwd=repo)
+    _git(["switch", "-q", "-c", "dev"], cwd=repo)
+    _git(["push", "-q", "-u", "origin", "dev"], cwd=repo)
+    _git(["switch", "-q", "main"], cwd=repo)
+    return repo
+
+
+def _make_fake_infra_with_drift_stub(
+    omni_home: Path,
+    *,
+    behavior: str = "ok",
+    with_venv: bool = True,
+    hang_seconds: int = 300,
+) -> tuple[Path, Path]:
+    """Create `$OMNI_HOME/omnibase_infra/scripts/check-omnimarket-venv-drift.sh`
+    as a recording stub (never the real script -- the real script's own
+    detect/repair logic is covered by tests/scripts/test_check_omnimarket_venv_drift.py;
+    this only proves pull-all.sh's WIRING: does it invoke the drift script at
+    the right time, with the right args, and handle failure without aborting).
+
+    `behavior`:
+      * ``"ok"``    -> stub exits 0.
+      * ``"fail"``  -> stub exits 1.
+      * ``"hang"``  -> stub sleeps ``hang_seconds`` (far past any test bound)
+        and never returns on its own. Models the OMN-15590 field failure.
+      * ``"hang_with_grandchild"`` -> stub spawns a DETACHED grandchild that
+        also sleeps ``hang_seconds``, records that grandchild's pid to
+        ``<infra_dir>/.drift-grandchild.pid``, then sleeps itself. Models the
+        real process shape (``pull-all.sh`` -> drift script -> ``uv``/``git``)
+        so orphan cleanup is proven against a grandchild, not just the direct
+        child -- killing only the direct child is exactly the OMN-15590
+        orphaning defect (PIDs 61908/62077/62078 in the field report).
+
+    `with_venv`: when False, no `.venv/bin/python` is created (skip-guard case).
+    `hang_seconds`: sleep length for the hanging behaviors.
+
+    Returns (infra_dir, calls_log) -- calls_log records one line per
+    invocation ("<args> | OMNI_HOME=<value>") so tests can assert whether/how
+    the stub fired without depending on real venv or network state.
+    """
+    infra_dir = omni_home / "omnibase_infra"
+    scripts_dir = infra_dir / "scripts"
+    scripts_dir.mkdir(parents=True)
+    calls_log = infra_dir / ".drift-repair-calls.log"
+    grandchild_pid_file = infra_dir / ".drift-grandchild.pid"
+
+    record = f'echo "$@ | OMNI_HOME=$OMNI_HOME" >> "{calls_log}"\n'
+    if behavior == "hang":
+        body = f"sleep {hang_seconds}\n"
+    elif behavior == "hang_with_grandchild":
+        body = (
+            f"( sleep {hang_seconds} ) &\n"
+            f'echo "$!" > "{grandchild_pid_file}"\n'
+            f"sleep {hang_seconds}\n"
+        )
+    elif behavior == "fail":
+        body = "exit 1\n"
+    else:
+        body = "exit 0\n"
+
+    stub = scripts_dir / "check-omnimarket-venv-drift.sh"
+    stub.write_text("#!/usr/bin/env bash\n" + record + body)
+    stub.chmod(0o755)
+
+    if with_venv:
+        venv_python = infra_dir / ".venv" / "bin" / "python"
+        venv_python.parent.mkdir(parents=True)
+        venv_python.write_text("#!/usr/bin/env bash\nexit 0\n")
+        venv_python.chmod(0o755)
+
+    return infra_dir, calls_log
+
+
 def _run_pull_all(
-    omni_home: Path, fake_home: Path, repos: list[str] | None = None
+    omni_home: Path,
+    fake_home: Path,
+    repos: list[str] | None = None,
+    extra_env: dict[str, str] | None = None,
+    timeout: float | None = None,
 ) -> subprocess.CompletedProcess[str]:
-    """Invoke pull-all.sh with controlled OMNI_HOME and HOME."""
+    """Invoke pull-all.sh with controlled OMNI_HOME and HOME.
+
+    ``timeout`` is a TEST-HARNESS backstop only: if pull-all.sh itself is
+    unbounded, the test must fail rather than wedge the suite forever. It is
+    deliberately NOT the mechanism under test -- the assertions check that the
+    script returns on its own, well inside this backstop.
+    """
     # Build from the hermetic (GIT_*-stripped) env: pull-all.sh shells out to git
     # on repos under OMNI_HOME, so an inherited GIT_DIR from a pre-push hook would
     # likewise redirect its git ops onto the real worktree. (OMN-14744)
@@ -169,8 +289,36 @@ def _run_pull_all(
     }
     # Drop CLAUDE_PLUGIN_ROOT so the auto-detection path is exercised.
     env.pop("CLAUDE_PLUGIN_ROOT", None)
+    if extra_env:
+        env.update(extra_env)
     args = ["bash", str(PULL_ALL), *(repos or ["omniclaude"])]
-    return subprocess.run(args, capture_output=True, text=True, env=env, check=False)
+    return subprocess.run(
+        args, capture_output=True, text=True, env=env, check=False, timeout=timeout
+    )
+
+
+def _parse_result_line(stdout: str) -> dict[str, str]:
+    """Parse pull-all.sh's machine-checkable terminal result line (OMN-15590 AC4).
+
+    Shape: ``PULL-ALL-RESULT: overall=OK repos_ok=1 ... drift_repair=OK ...``
+    Returns the key=value pairs as a dict; empty dict when the line is absent
+    (which is itself the AC4 failure mode -- a run whose completion a caller
+    cannot determine without parsing prose).
+    """
+    for line in stdout.splitlines():
+        if line.startswith(RESULT_LINE_PREFIX):
+            fields = line[len(RESULT_LINE_PREFIX) :].split()
+            return dict(f.split("=", 1) for f in fields if "=" in f)
+    return {}
+
+
+def _pid_alive(pid: int) -> bool:
+    """True when ``pid`` still exists (signal 0 probe)."""
+    try:
+        os.kill(pid, 0)
+    except (ProcessLookupError, OSError):
+        return False
+    return True
 
 
 @pytest.mark.unit
@@ -614,3 +762,544 @@ class TestPreCommitHookInstall:
         assert result.returncode == 0
         assert "HOOK     omniclaude" not in result.stdout
         assert not self._hook_path(omniclaude).exists()
+
+
+@pytest.mark.unit
+class TestOmnimarketDriftRepair:
+    """pull-all.sh wires check-omnimarket-venv-drift.sh --repair after an
+    omnimarket pull (OMN-15242).
+
+    Root cause this closes: the OMN-14060 pre-flight guard detects venv drift
+    against the canonical omnibase_infra venv but never repairs it, and the
+    canonical `git pull` on omnimarket IS the event that creates the drift.
+    Two same-day 2026-07-27 incidents bricked every onex CLI consumer on this
+    Mac until a human ran the repair by hand. Scope: interactive/session path
+    only -- preregistered battery runs use the frozen-environment mechanism
+    (OMN-15265) and must never be auto-repaired mid-run; this hook lives only
+    in pull-all.sh, never in a battery driver.
+
+    Every fixture here stubs check-omnimarket-venv-drift.sh (see
+    `_make_fake_infra_with_drift_stub`) rather than using the real script --
+    the real script's detect/repair correctness is covered by
+    tests/scripts/test_check_omnimarket_venv_drift.py. These tests only prove
+    pull-all.sh's wiring: invoked at the right time, with the right args, and
+    fail-loud-but-not-fatal on repair failure.
+    """
+
+    def test_repairs_omnimarket_venv_drift_after_successful_pull(
+        self, tmp_path: Path
+    ) -> None:
+        """A successful omnimarket pull triggers --repair against the
+        canonical omnibase_infra venv, and the invocation is logged/attributable.
+        """
+        omni_home = tmp_path / "omni_home"
+        omni_home.mkdir()
+        fake_home = tmp_path / "home"
+        fake_home.mkdir()
+
+        _make_simple_repo_source(omni_home, "omnimarket")
+        infra_dir, calls_log = _make_fake_infra_with_drift_stub(omni_home)
+
+        result = _run_pull_all(omni_home, fake_home, repos=["omnimarket"])
+
+        assert result.returncode == 0, (
+            f"stdout={result.stdout!r} stderr={result.stderr!r}"
+        )
+        assert calls_log.exists(), (
+            "check-omnimarket-venv-drift.sh was never invoked after the "
+            f"omnimarket pull; stdout={result.stdout!r}"
+        )
+        call = calls_log.read_text()
+        assert "--repair" in call
+        assert str(infra_dir / ".venv" / "bin" / "python") in call
+        assert f"OMNI_HOME={omni_home}" in call
+        # Attributable: pull-all.sh's own stdout names the action.
+        assert "omnimarket venv drift" in result.stdout.lower()
+
+    def test_repair_failure_prints_loud_banner_and_is_fatal(
+        self, tmp_path: Path
+    ) -> None:
+        """A repair failure prints an unmissable banner naming the manual
+        command and the ticket, AND propagates a non-zero exit (OMN-15590 AC2b).
+
+        CONTRACT CHANGE (OMN-15590): this test previously asserted
+        ``returncode == 0`` -- "fail-loud-but-not-fatal". That was the defect:
+        a drift-repair failure printed a banner, fell through without touching
+        ``FAILED[]``, and produced an exit-0, green-looking run indistinguishable
+        from a complete sync. A caller running the documented "sync first" step
+        had no way to tell. The repo pull itself still succeeded, so the repo
+        line stays ``OK`` -- what changed is that the STAGE failure is now
+        carried into the terminal summary and the exit code.
+        """
+        omni_home = tmp_path / "omni_home"
+        omni_home.mkdir()
+        fake_home = tmp_path / "home"
+        fake_home.mkdir()
+
+        _make_simple_repo_source(omni_home, "omnimarket")
+        _make_fake_infra_with_drift_stub(omni_home, behavior="fail")
+
+        result = _run_pull_all(
+            omni_home, fake_home, repos=["omnimarket"], timeout=HARNESS_BACKSTOP_SECONDS
+        )
+
+        assert result.returncode != 0, (
+            "a drift-repair failure must surface as a non-zero exit (AC2b); "
+            f"stdout={result.stdout!r} stderr={result.stderr!r}"
+        )
+        assert "OMN-15242" in result.stdout
+        assert "check-omnimarket-venv-drift.sh --repair" in result.stdout
+        # The repo pull itself succeeded -- only the drift STAGE failed.
+        assert "OK       omnimarket" in result.stdout
+
+    def test_skip_guard_when_omnibase_infra_absent(self, tmp_path: Path) -> None:
+        """No local omnibase_infra clone at all -- clean no-op, no crash."""
+        omni_home = tmp_path / "omni_home"
+        omni_home.mkdir()
+        fake_home = tmp_path / "home"
+        fake_home.mkdir()
+
+        _make_simple_repo_source(omni_home, "omnimarket")
+        # No omnibase_infra directory created at all.
+
+        result = _run_pull_all(omni_home, fake_home, repos=["omnimarket"])
+
+        assert result.returncode == 0, (
+            f"stdout={result.stdout!r} stderr={result.stderr!r}"
+        )
+        assert not (omni_home / "omnibase_infra").exists()
+
+    def test_skip_guard_when_infra_venv_absent(self, tmp_path: Path) -> None:
+        """omnibase_infra clone present but no canonical venv -- skip, no crash."""
+        omni_home = tmp_path / "omni_home"
+        omni_home.mkdir()
+        fake_home = tmp_path / "home"
+        fake_home.mkdir()
+
+        _make_simple_repo_source(omni_home, "omnimarket")
+        _infra_dir, calls_log = _make_fake_infra_with_drift_stub(
+            omni_home, with_venv=False
+        )
+
+        result = _run_pull_all(omni_home, fake_home, repos=["omnimarket"])
+
+        assert result.returncode == 0, (
+            f"stdout={result.stdout!r} stderr={result.stderr!r}"
+        )
+        assert not calls_log.exists(), (
+            "drift script must not be invoked when the canonical venv is absent"
+        )
+
+    def test_no_repair_when_omnimarket_not_in_this_run(self, tmp_path: Path) -> None:
+        """omnimarket absent from the requested repo list -- never triggers,
+        even though a fully-wired omnibase_infra + venv is present."""
+        omni_home = tmp_path / "omni_home"
+        omni_home.mkdir()
+        fake_home = tmp_path / "home"
+        fake_home.mkdir()
+
+        _make_omniclaude_source(omni_home)
+        _infra_dir, calls_log = _make_fake_infra_with_drift_stub(omni_home)
+
+        result = _run_pull_all(omni_home, fake_home, repos=["omniclaude"])
+
+        assert result.returncode == 0, (
+            f"stdout={result.stdout!r} stderr={result.stderr!r}"
+        )
+        assert not calls_log.exists()
+
+    def test_no_repair_when_omnimarket_pull_fails(self, tmp_path: Path) -> None:
+        """A dirty (FAILED) omnimarket pull must not trigger a repair -- there
+        is no fresh canonical SHA to repair against."""
+        omni_home = tmp_path / "omni_home"
+        omni_home.mkdir()
+        fake_home = tmp_path / "home"
+        fake_home.mkdir()
+
+        omnimarket = _make_simple_repo_source(omni_home, "omnimarket")
+        (omnimarket / "dirty.txt").write_text("uncommitted\n")
+        _infra_dir, calls_log = _make_fake_infra_with_drift_stub(omni_home)
+
+        result = _run_pull_all(omni_home, fake_home, repos=["omnimarket"])
+
+        assert result.returncode != 0
+        assert "dirty worktree" in result.stdout
+        assert not calls_log.exists()
+
+
+@pytest.mark.unit
+class TestDriftRepairBounding:
+    """The drift-repair stage is bounded, fatal on failure, orphan-free, and
+    every run ends with a caller-checkable completion signal (OMN-15590).
+
+    Field failure this closes (remote-gate-readiness run ``wf_c69db51c-74d``,
+    2026-07-31, host ``stickybeatz-studio``): the stage at pull-all.sh:246 was
+    invoked with no bound of any kind. It overran the caller's 3-minute
+    timeout, left three orphaned bash processes behind, and never reached the
+    plugin-cache / pre-commit / summary stages -- so a caller running the
+    documented "sync first" step saw a partially-executed sync with NO failure
+    surfaced. Its failure path was independently non-fatal: a non-zero drift
+    exit printed a banner and fell through without touching ``FAILED[]``.
+
+    ROOT CAUSE (AC6), established by controlled experiment on the gate host
+    2026-08-02 -- not inferred: the repair chain terminates in
+    ``uv pip install --python <canonical infra venv>``, and uv takes an
+    EXCLUSIVE flock on ``<venv>/.lock`` for the whole install. uv has no
+    lock-acquisition timeout and prints nothing at default verbosity while it
+    waits. Holding that lock from a second process made an otherwise-2-second
+    install sit silent and running past 30s, then complete in milliseconds the
+    instant the lock was released. ``.200`` runs many sessions against that one
+    shared canonical venv, so any concurrent uv operation (including a peer's
+    own pull-all.sh, which the readiness probe itself runs) blocks this stage
+    for the peer's entire duration, unbounded. Resolve/network was excluded by
+    measurement on the same host: step-1 git+HTTPS resolve 1.93s, step-2 leaf
+    resolve 43ms, ``git ls-remote`` 0.19s.
+
+    Mechanism note: macOS ships neither coreutils ``timeout``/``gtimeout`` nor
+    ``setsid`` (verified on the gate host), and GNU ``timeout`` would in any
+    case only signal the direct child -- leaving the uv/git grandchildren
+    orphaned, which is the exact field symptom. pull-all.sh therefore runs the
+    stage under bash job control so it owns its own process group, and kills
+    the GROUP on timeout.
+    """
+
+    # Short bound so the suite stays fast; the value is the script's declared
+    # env override, which is itself part of the contract (AC1: "an explicit
+    # timeout with a declared value").
+    BOUND_SECONDS = 5
+
+    def _fixture(self, tmp_path: Path) -> tuple[Path, Path]:
+        omni_home = tmp_path / "omni_home"
+        omni_home.mkdir()
+        fake_home = tmp_path / "home"
+        fake_home.mkdir()
+        _make_simple_repo_source(omni_home, "omnimarket")
+        return omni_home, fake_home
+
+    def _env(self) -> dict[str, str]:
+        return {
+            "PULL_ALL_DRIFT_REPAIR_TIMEOUT_SECONDS": str(self.BOUND_SECONDS),
+        }
+
+    def test_ac1_hanging_drift_repair_returns_within_bound(
+        self, tmp_path: Path
+    ) -> None:
+        """AC1 -- with the drift script stubbed to sleep far past the bound,
+        pull-all.sh returns within ``bound + delta``, not indefinitely."""
+        omni_home, fake_home = self._fixture(tmp_path)
+        _make_fake_infra_with_drift_stub(omni_home, behavior="hang")
+
+        started = time.monotonic()
+        result = _run_pull_all(
+            omni_home,
+            fake_home,
+            repos=["omnimarket"],
+            extra_env=self._env(),
+            # Harness backstop only. Generous vs. the bound so a SLOW return
+            # still fails on the elapsed assertion below (a real signal) rather
+            # than on a TimeoutExpired (which would also be a failure, just a
+            # noisier one).
+            timeout=HARNESS_BACKSTOP_SECONDS,
+        )
+        elapsed = time.monotonic() - started
+
+        # delta budget: the watchdog's 1s poll granularity + its TERM->KILL
+        # escalation grace + the remaining stages of the script.
+        assert elapsed < self.BOUND_SECONDS + 60, (
+            f"drift-repair stage was not bounded: pull-all.sh took {elapsed:.1f}s "
+            f"against a declared {self.BOUND_SECONDS}s bound; "
+            f"stdout={result.stdout!r}"
+        )
+
+    def test_ac2a_timeout_named_in_summary_and_exits_nonzero(
+        self, tmp_path: Path
+    ) -> None:
+        """AC2a -- a stub that sleeps past the bound: the terminal summary
+        names the drift stage as failed AND the exit code is non-zero."""
+        omni_home, fake_home = self._fixture(tmp_path)
+        _make_fake_infra_with_drift_stub(omni_home, behavior="hang")
+
+        result = _run_pull_all(
+            omni_home,
+            fake_home,
+            repos=["omnimarket"],
+            extra_env=self._env(),
+            timeout=HARNESS_BACKSTOP_SECONDS,
+        )
+
+        assert result.returncode != 0, (
+            f"a timed-out drift stage must exit non-zero; stdout={result.stdout!r}"
+        )
+        fields = _parse_result_line(result.stdout)
+        assert fields.get("drift_repair") == "TIMEOUT", (
+            f"summary must name the drift stage as timed out; fields={fields!r} "
+            f"stdout={result.stdout!r}"
+        )
+        assert fields.get("overall") == "FAILED", f"fields={fields!r}"
+        assert str(self.BOUND_SECONDS) in result.stdout, (
+            "the bound's value must be stated in the output (AC1: declared value)"
+        )
+
+    def test_ac2b_nonzero_drift_exit_named_in_summary_and_exits_nonzero(
+        self, tmp_path: Path
+    ) -> None:
+        """AC2b -- a stub that exits 1 immediately: same outcome as AC2a.
+
+        RED against pre-fix behavior: today the banner prints and pull-all.sh
+        exits 0 with the stage absent from every aggregate.
+        """
+        omni_home, fake_home = self._fixture(tmp_path)
+        _make_fake_infra_with_drift_stub(omni_home, behavior="fail")
+
+        result = _run_pull_all(
+            omni_home,
+            fake_home,
+            repos=["omnimarket"],
+            extra_env=self._env(),
+            timeout=HARNESS_BACKSTOP_SECONDS,
+        )
+
+        assert result.returncode != 0, (
+            f"a failed drift stage must exit non-zero; stdout={result.stdout!r}"
+        )
+        fields = _parse_result_line(result.stdout)
+        assert fields.get("drift_repair") == "FAILED", (
+            f"summary must name the drift stage as failed; fields={fields!r} "
+            f"stdout={result.stdout!r}"
+        )
+        assert fields.get("overall") == "FAILED", f"fields={fields!r}"
+        # The repo pull itself succeeded; the aggregate must not misreport it.
+        assert fields.get("repos_failed") == "0", f"fields={fields!r}"
+
+    def test_ac3_no_orphaned_descendants_after_timeout(self, tmp_path: Path) -> None:
+        """AC3 -- after the timeout case, no descendant of the timed-out stage
+        survives. Proven against a GRANDCHILD, because killing only the direct
+        child is precisely the field defect (3 orphaned bash PIDs)."""
+        omni_home, fake_home = self._fixture(tmp_path)
+        infra_dir, _calls_log = _make_fake_infra_with_drift_stub(
+            omni_home, behavior="hang_with_grandchild"
+        )
+        pid_file = infra_dir / ".drift-grandchild.pid"
+
+        result = _run_pull_all(
+            omni_home,
+            fake_home,
+            repos=["omnimarket"],
+            extra_env=self._env(),
+            timeout=HARNESS_BACKSTOP_SECONDS,
+        )
+
+        assert pid_file.exists(), (
+            "stub never recorded its grandchild pid -- the fixture did not "
+            f"exercise the orphan path; stdout={result.stdout!r}"
+        )
+        grandchild_pid = int(pid_file.read_text().strip())
+
+        # Give the KILL escalation a moment to be reaped, then assert absence.
+        deadline = time.monotonic() + 15
+        while _pid_alive(grandchild_pid) and time.monotonic() < deadline:
+            time.sleep(0.5)
+
+        alive = _pid_alive(grandchild_pid)
+        if alive:  # pragma: no cover - only on regression
+            # Best-effort cleanup so a failing assertion does not leak the
+            # very orphan it is complaining about into the CI runner.
+            with contextlib.suppress(OSError):
+                os.kill(grandchild_pid, signal.SIGKILL)
+        assert not alive, (
+            f"grandchild pid {grandchild_pid} survived the bounded stage -- the "
+            "timeout killed only the direct child, leaving an orphan (AC3)"
+        )
+
+    def test_ac4_result_line_distinguishes_clean_timeout_and_fail(
+        self, tmp_path: Path
+    ) -> None:
+        """AC4 -- one machine-parseable completion line is emitted on EVERY
+        exit path and correctly distinguishes the three run classes."""
+        seen: dict[str, dict[str, str]] = {}
+        for case, behavior in (
+            ("clean", "ok"),
+            ("timeout", "hang"),
+            ("fail", "fail"),
+        ):
+            case_root = tmp_path / case
+            case_root.mkdir()
+            omni_home, fake_home = self._fixture(case_root)
+            _make_fake_infra_with_drift_stub(omni_home, behavior=behavior)
+            result = _run_pull_all(
+                omni_home,
+                fake_home,
+                repos=["omnimarket"],
+                extra_env=self._env(),
+                timeout=HARNESS_BACKSTOP_SECONDS,
+            )
+            fields = _parse_result_line(result.stdout)
+            assert fields, (
+                f"[{case}] no {RESULT_LINE_PREFIX!r} line -- a caller cannot "
+                f"determine completion without parsing prose; "
+                f"stdout={result.stdout!r}"
+            )
+            seen[case] = fields
+
+        assert seen["clean"]["overall"] == "OK", seen
+        assert seen["clean"]["drift_repair"] == "OK", seen
+        assert seen["timeout"]["drift_repair"] == "TIMEOUT", seen
+        assert seen["fail"]["drift_repair"] == "FAILED", seen
+        # The three are mutually distinguishable, not merely present.
+        assert len({tuple(sorted(f.items())) for f in seen.values()}) == 3, seen
+
+    def test_ac5_later_stages_reported_when_drift_stage_fails(
+        self, tmp_path: Path
+    ) -> None:
+        """AC5 -- plugin-cache refresh and pre-commit install are not silently
+        skipped when the drift stage fails: their disposition is stated."""
+        for behavior in ("hang", "fail"):
+            case_root = tmp_path / behavior
+            case_root.mkdir()
+            omni_home, fake_home = self._fixture(case_root)
+            _make_fake_infra_with_drift_stub(omni_home, behavior=behavior)
+
+            result = _run_pull_all(
+                omni_home,
+                fake_home,
+                repos=["omnimarket"],
+                extra_env=self._env(),
+                timeout=HARNESS_BACKSTOP_SECONDS,
+            )
+            fields = _parse_result_line(result.stdout)
+            for stage in ("plugin_cache", "precommit_hooks"):
+                assert stage in fields, (
+                    f"[{behavior}] stage {stage!r} absent from the completion "
+                    f"line -- silently skipped; fields={fields!r}"
+                )
+                assert fields[stage] != "PENDING", (
+                    f"[{behavior}] stage {stage!r} never ran after the drift "
+                    f"stage failed (silent skip); fields={fields!r}"
+                )
+
+    def test_clean_run_still_exits_zero_with_ok_result_line(
+        self, tmp_path: Path
+    ) -> None:
+        """Regression guard: the new fatality must not make healthy runs red."""
+        omni_home, fake_home = self._fixture(tmp_path)
+        _make_fake_infra_with_drift_stub(omni_home, behavior="ok")
+
+        result = _run_pull_all(
+            omni_home,
+            fake_home,
+            repos=["omnimarket"],
+            extra_env=self._env(),
+            timeout=HARNESS_BACKSTOP_SECONDS,
+        )
+
+        assert result.returncode == 0, (
+            f"stdout={result.stdout!r} stderr={result.stderr!r}"
+        )
+        fields = _parse_result_line(result.stdout)
+        assert fields.get("overall") == "OK", f"fields={fields!r}"
+        assert fields.get("drift_repair") == "OK", f"fields={fields!r}"
+
+    def test_bound_default_is_declared_in_the_script(self) -> None:
+        """AC1 -- the bound is an explicit, declared value in the script, not
+        an implicit or caller-supplied one."""
+        source = PULL_ALL.read_text()
+        assert "PULL_ALL_DRIFT_REPAIR_TIMEOUT_SECONDS" in source, (
+            "the bound must be a named, overridable, declared value"
+        )
+        match = re.search(
+            r"PULL_ALL_DRIFT_REPAIR_TIMEOUT_SECONDS:-(\d+)\}",
+            source,
+        )
+        assert match, "no declared default for the drift-repair bound"
+        assert int(match.group(1)) > 0
+
+    def test_plugin_content_hash_uses_batched_exec(self) -> None:
+        r"""Regression guard for the SECOND unbounded stall found while proving
+        this ticket (OMN-15590).
+
+        ``_plugin_content_hash`` used ``find ... -exec shasum {} \;`` -- one
+        ``shasum`` (perl) process per file. The live plugin cache on the gate
+        host holds 53,057 files, so that form forked ~53k interpreters and the
+        stage ran past 10 minutes without finishing, wedging pull-all.sh after
+        the drift stage. The batched ``+`` form hashes the same tree in 7.9s
+        and produces identical output. Reintroducing ``\;`` silently restores
+        a multi-minute-to-unbounded stage, so it is asserted mechanically.
+        """
+        source = PULL_ALL.read_text()
+        assert "-exec shasum {} +" in source, (
+            "plugin content hash must batch (`-exec shasum {} +`)"
+        )
+        assert r"-exec shasum {} \;" not in source, (
+            r"the per-file `-exec shasum {} \;` form spawns one process per "
+            "file (53k on the gate host) and stalls the plugin-cache stage"
+        )
+
+    def test_every_unbounded_call_site_has_a_declared_bound(self) -> None:
+        """All three long-running / network-bound stages carry an explicit,
+        named, overridable bound -- not just the one the ticket names."""
+        source = PULL_ALL.read_text()
+        for var in (
+            "PULL_ALL_DRIFT_REPAIR_TIMEOUT_SECONDS",
+            "PULL_ALL_HOOK_ENV_TIMEOUT_SECONDS",
+            "PULL_ALL_PLUGIN_HASH_TIMEOUT_SECONDS",
+        ):
+            assert re.search(rf"{var}:-\d+\}}", source), (
+                f"{var} has no declared default bound"
+            )
+
+    def test_precommit_stage_reports_warn_when_install_fails(
+        self, tmp_path: Path
+    ) -> None:
+        """The completion line must not report ``precommit_hooks=OK`` on a run
+        whose hook installs failed (OMN-15590).
+
+        Found on the gate host: a real run printed seven
+        ``WARN <repo> (pre-commit install failed ...)`` lines and still
+        summarised the stage as OK, because the install runs in a subshell that
+        cannot assign to the parent's stage variable. That is the same
+        "green-looking incomplete run" defect this ticket closes, one stage
+        over -- so it is asserted, not assumed.
+        """
+        omni_home, fake_home = self._fixture(tmp_path)
+        _make_fake_infra_with_drift_stub(omni_home, behavior="ok")
+        # omnimarket ships no .pre-commit-config.yaml in the fixture; add one so
+        # the stage has something to act on. It must be COMMITTED (an
+        # uncommitted file trips the dirty-worktree refusal) and it must be on
+        # DEV (pull-all.sh leaves every repo on dev, and the hook loop runs
+        # after that switch -- a config committed only on main is invisible).
+        repo = omni_home / "omnimarket"
+        _git(["switch", "-q", "dev"], cwd=repo)
+        _commit_file(repo, ".pre-commit-config.yaml", "repos: []\n", "pre-commit cfg")
+        _git(["push", "-q", "origin", "dev"], cwd=repo)
+        _git(["switch", "-q", "main"], cwd=repo)
+
+        # PATH shim: a `pre-commit` that exists (so the stage is not skipped as
+        # UNAVAILABLE) but fails on `install`.
+        shim_dir = tmp_path / "shim"
+        shim_dir.mkdir()
+        shim = shim_dir / "pre-commit"
+        shim.write_text("#!/usr/bin/env bash\nexit 1\n")
+        shim.chmod(0o755)
+
+        result = _run_pull_all(
+            omni_home,
+            fake_home,
+            repos=["omnimarket"],
+            extra_env={
+                **self._env(),
+                "PATH": f"{shim_dir}:{os.environ.get('PATH', '')}",
+            },
+            timeout=HARNESS_BACKSTOP_SECONDS,
+        )
+
+        assert "pre-commit install failed" in result.stdout, (
+            f"fixture did not exercise the failure path; stdout={result.stdout!r}"
+        )
+        fields = _parse_result_line(result.stdout)
+        assert fields.get("precommit_hooks") == "WARN", (
+            "a run with failed hook installs must not summarise the stage as "
+            f"OK; fields={fields!r}"
+        )
+        # Still non-fatal: hook install is a convenience layer, not the sync's
+        # core job. Visibility changed, fatality did not.
+        assert result.returncode == 0, f"stdout={result.stdout!r}"

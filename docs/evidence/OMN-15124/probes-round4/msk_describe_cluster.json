@@ -1,0 +1,111 @@
+{
+    "ClusterInfo": {
+        "BrokerNodeGroupInfo": {
+            "BrokerAZDistribution": "DEFAULT",
+            "ClientSubnets": [
+                "subnet-0f35663430d232833",
+                "subnet-06fe4fab38749131b"
+            ],
+            "InstanceType": "kafka.m5.large",
+            "SecurityGroups": [
+                "sg-0183e3c660adf6ef1"
+            ],
+            "StorageInfo": {
+                "EbsStorageInfo": {
+                    "VolumeSize": 100
+                }
+            },
+            "ConnectivityInfo": {
+                "PublicAccess": {
+                    "Type": "DISABLED"
+                },
+                "VpcConnectivity": {
+                    "ClientAuthentication": {
+                        "Sasl": {
+                            "Scram": {
+                                "Enabled": false
+                            },
+                            "Iam": {
+                                "Enabled": false
+                            }
+                        },
+                        "Tls": {
+                            "Enabled": false
+                        }
+                    }
+                },
+                "NetworkType": "IPV4"
+            },
+            "ZoneIds": [
+                "use1-az2",
+                "use1-az1"
+            ]
+        },
+        "ClientAuthentication": {
+            "Sasl": {
+                "Scram": {
+                    "Enabled": false
+                },
+                "Iam": {
+                    "Enabled": true
+                }
+            },
+            "Unauthenticated": {
+                "Enabled": false
+            }
+        },
+        "ClusterArn": "arn:aws:kafka:us-east-1:272493677981:cluster/omninode-dev-msk/88ad72bc-f70c-4549-93bc-c392b965f424-14",
+        "ClusterName": "omninode-dev-msk",
+        "CreationTime": "2026-06-19T21:55:58.133000+00:00",
+        "CurrentBrokerSoftwareInfo": {
+            "ConfigurationArn": "arn:aws:kafka:us-east-1:272493677981:configuration/omninode-dev-msk-config/930d30cc-105c-4c3e-ab2a-aa6cfb0a5b0b-14",
+            "ConfigurationRevision": 2,
+            "KafkaVersion": "3.9.x"
+        },
+        "CurrentVersion": "K27OOP63XLO9TI",
+        "EncryptionInfo": {
+            "EncryptionAtRest": {
+                "DataVolumeKMSKeyId": "arn:aws:kms:us-east-1:272493677981:key/3523ae04-ec42-4104-967e-cbb3eacf0bd6"
+            },
+            "EncryptionInTransit": {
+                "ClientBroker": "TLS",
+                "InCluster": true
+            }
+        },
+        "EnhancedMonitoring": "PER_TOPIC_PER_BROKER",
+        "OpenMonitoring": {
+            "Prometheus": {
+                "JmxExporter": {
+                    "EnabledInBroker": true
+                },
+                "NodeExporter": {
+                    "EnabledInBroker": true
+                }
+            }
+        },
+        "LoggingInfo": {
+            "BrokerLogs": {
+                "CloudWatchLogs": {
+                    "Enabled": true,
+                    "LogGroup": "/aws/msk/omninode-dev"
+                }
+            }
+        },
+        "NumberOfBrokerNodes": 6,
+        "State": "ACTIVE",
+        "Tags": {
+            "Project": "omninode",
+            "Repository": "omninode_infra",
+            "ManagedBy": "terraform",
+            "Environment": "staging",
+            "Option": "B",
+            "Component": "managed-kafka",
+            "Module": "cluster-dev",
+            "Name": "omninode-staging-msk"
+        },
+        "ZookeeperConnectString": "z-1.omninodedevmsk.7ozyd3.c14.kafka.us-east-1.amazonaws.com:2181,z-3.omninodedevmsk.7ozyd3.c14.kafka.us-east-1.amazonaws.com:2181,z-2.omninodedevmsk.7ozyd3.c14.kafka.us-east-1.amazonaws.com:2181",
+        "ZookeeperConnectStringTls": "z-1.omninodedevmsk.7ozyd3.c14.kafka.us-east-1.amazonaws.com:2182,z-3.omninodedevmsk.7ozyd3.c14.kafka.us-east-1.amazonaws.com:2182,z-2.omninodedevmsk.7ozyd3.c14.kafka.us-east-1.amazonaws.com:2182",
+        "StorageMode": "LOCAL",
+        "CustomerActionStatus": "NONE"
+    }
+}

@@ -35,6 +35,10 @@ from omnibase_infra.cli.model_skill_arg_spec import ModelSkillArgSpec
 from omnibase_infra.cli.model_skill_classifier import ModelSkillClassifier
 from omnibase_infra.cli.model_skill_mapping import ModelSkillMapping
 from omnibase_infra.cli.model_skill_mapping_registry import ModelSkillMappingRegistry
+from omnibase_infra.cli.omnimarket_drift_guard import (
+    DRIFT_OVERRIDE_ENV,
+    check_omnimarket_drift,
+)
 
 pytestmark = pytest.mark.unit
 
@@ -1524,3 +1528,91 @@ def test_redeploy_dev_lane_unaffected_off_omninode_pc(
     )
     assert result.exit_code == 0, result.output
     assert captured["node_name"] == "node_redeploy_orchestrator"
+
+
+# ---------------------------------------------------------------------------
+# Drift-override env binding (OMN-13930)
+# ---------------------------------------------------------------------------
+#
+# The env var is the operator-facing contract; the guard function itself only
+# ever sees a bool. That makes the click ``envvar=`` binding load-bearing --
+# exactly the surface OMN-14531 proved can silently no-op (``--omni-home``
+# existed but was unbound, so the guard received None and never fired). These
+# tests drive the REAL env var through the REAL command and assert the
+# refusal actually flips, rather than asserting the option merely exists.
+
+_DRIFT_SEAM_SHA = "dddddddddddddddddddddddddddddddddddddddd"
+
+
+def _force_drift(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Restore the real guard (the autouse fixture stubs it) in a drifted state."""
+    monkeypatch.setattr(cli_skill, "check_omnimarket_drift", check_omnimarket_drift)
+    monkeypatch.setattr(
+        "omnibase_infra.cli.omnimarket_drift_guard.installed_omnimarket_commit",
+        lambda: None,
+    )
+    monkeypatch.setattr(
+        "omnibase_infra.cli.omnimarket_drift_guard.canonical_local_omnimarket_commit",
+        lambda omni_home=None: _DRIFT_SEAM_SHA,
+    )
+
+
+def test_drift_override_env_unset_still_refuses(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Baseline for the two tests below: without the env var, dispatch refuses."""
+    monkeypatch.delenv(DRIFT_OVERRIDE_ENV, raising=False)
+    _force_drift(monkeypatch)
+
+    result = CliRunner().invoke(
+        run_skill_by_name,
+        ["definitely_not_a_real_skill", "--omni-home", "/fake/omni_home"],
+    )
+
+    assert result.exit_code != 0
+    assert "NOT INSTALLED" in result.output + str(result.exception or "")
+
+
+def test_drift_override_env_is_actually_bound_to_the_flag(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Setting ONLY the env var (no flag) must clear the refusal.
+
+    If the ``envvar=`` binding were missing, this would still refuse -- the
+    override would be documented and unreachable. Asserted via the DIFFERENT
+    downstream error (unknown skill), proving execution got PAST the guard
+    rather than merely exiting non-zero for a new reason.
+    """
+    monkeypatch.setenv(DRIFT_OVERRIDE_ENV, "1")
+    _force_drift(monkeypatch)
+
+    result = CliRunner().invoke(
+        run_skill_by_name,
+        ["definitely_not_a_real_skill", "--omni-home", "/fake/omni_home"],
+    )
+
+    combined = result.output + str(result.exception or "")
+    assert "NOT INSTALLED" not in combined
+    assert "Unknown skill" in combined
+
+
+@pytest.mark.parametrize("value", ["0", "false"])
+def test_drift_override_env_falsey_values_still_refuse(
+    monkeypatch: pytest.MonkeyPatch, value: str
+) -> None:
+    """``=0`` / ``=false`` mean "do NOT override" and must not disable the guard.
+
+    A bare presence check would read both as consent, silently disabling the
+    guard for anyone who left the variable exported from an earlier session.
+    Ambiguity fails closed.
+    """
+    monkeypatch.setenv(DRIFT_OVERRIDE_ENV, value)
+    _force_drift(monkeypatch)
+
+    result = CliRunner().invoke(
+        run_skill_by_name,
+        ["definitely_not_a_real_skill", "--omni-home", "/fake/omni_home"],
+    )
+
+    assert result.exit_code != 0
+    assert "NOT INSTALLED" in result.output + str(result.exception or "")

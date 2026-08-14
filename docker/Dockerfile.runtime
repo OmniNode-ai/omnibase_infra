@@ -458,11 +458,25 @@ RUN --mount=type=cache,target=/root/.cache/uv,sharing=locked \
 RUN --mount=type=cache,target=/root/.cache/uv,sharing=locked \
     uv-with-retry pip install "setuptools>=78.1.1"
 
-# Security: upgrade cryptography to clear GHSA-537c-gmf6-5ccf (HIGH, fixed in >=48.0.1).
-# cryptography 46.0.7 (from transitive deps) is flagged by Trivy scan (ignore-unfixed: true).
+# Security: upgrade cryptography to clear GHSA-537c-gmf6-5ccf (HIGH, fixed in
+# >=48.0.1) and, as of OMN-15688 (2026-08-04), CVE-2026-69247 (PKCS#7
+# EnvelopedData decryption exposes a Bleichenbacher oracle through
+# distinguishable errors, fixed in >=50.0.0) and CVE-2026-69249 (duplicate
+# self-signed intermediates cause exponential path-building, fixed in >=49.0.0).
+# cryptography from transitive deps is flagged by Trivy scan (ignore-unfixed:
+# true) -- both new CVEs report Status: fixed, so ignore-unfixed does not
+# suppress them. The 48.0.1 floor that cleared the 2026-06 finding was measured
+# RED again by build-workspace-candidate-runtime.yml run 30878868464.
 # Force upgrade here after all plugin installs to ensure the patched version is present.
 RUN --mount=type=cache,target=/root/.cache/uv,sharing=locked \
-    uv-with-retry pip install "cryptography>=48.0.1"
+    uv-with-retry pip install "cryptography>=50.0.0"
+
+# Security: upgrade aiohttp to clear CVE-2026-69244 (HIGH, out-of-bounds heap
+# read in the C HTTP response parser error path on malformed responses, fixed in
+# >=3.14.3). The lock resolved 3.14.1; flagged by the same run 30878868464 scan.
+# Force upgrade here after all plugin installs -- a plugin may pull an older pin.
+RUN --mount=type=cache,target=/root/.cache/uv,sharing=locked \
+    uv-with-retry pip install "aiohttp>=3.14.3"
 
 # OMN-15147: upgrade pyasn1 to clear CVE-2026-59885/CVE-2026-59886 (DoS via
 # crafted ASN.1 OBJECT IDENTIFIER / REAL values, fixed in >=0.6.4) and
@@ -742,6 +756,16 @@ RUN set -eu; \
 # /usr/lib/node_modules/npm/node_modules/ are flagged CRITICAL/HIGH by Trivy
 # (severity CRITICAL,HIGH, ignore-unfixed):
 #   cross-spawn 7.0.3  -> CVE-2024-21538                 (fixed 7.0.5)
+#                         REMOVED from the pack loop in OMN-15688: npm 11.18.0
+#                         does not bundle cross-spawn AT ALL. Measured against
+#                         `node:20-slim` + `npm install -g npm@11.18.0`:
+#                         `find $(npm root -g)/npm/node_modules -type d -name
+#                         cross-spawn` returns NOTHING, at any depth. The loop's
+#                         `rm -rf` was a no-op and the `tar -xzf` was creating a
+#                         brand-new, unreferenced top-level copy that nothing
+#                         resolves — dead weight since the npm 10 -> 11 upgrade.
+#                         Trivy does not flag cross-spawn on this image, which is
+#                         consistent: there is no copy of it to flag.
 #   glob        10.4.2 -> CVE-2025-64756                 (fixed 10.5.0/11.1.0)
 #   minimatch   9.0.5  -> CVE-2026-26996/27903/27904     (fixed >=9.0.7 / 10.2.x)
 #   tar         6.2.1  -> CVE-2026-23745/23950/24842/
@@ -749,16 +773,31 @@ RUN set -eu; \
 #   brace-expansion 5.0.7 -> CVE-2026-14257 (HIGH, DoS via crafted pattern,
 #                            fixed 5.0.8) — pulled in transitively by the
 #                            minimatch/glob bundles above; added OMN-15147.
+#   brace-expansion 5.0.8 -> CVE-2026-69152 (HIGH, DoS via unbounded intermediate
+#                            arrays that BYPASSES the CVE-2026-14257 mitigation,
+#                            fixed 5.0.9) — OMN-15688.
+#   ip-address      10.2.0 -> CVE-2026-69192 (HIGH, Address4 decodes leading-zero
+#                            octets as decimal while resolvers decode them as
+#                            octal, fixed 10.3.1) — bundled transitively via
+#                            npm's socks-proxy-agent -> socks chain; added
+#                            OMN-15688.
 #
 # Remediation is two-step because these are *bundled inside npm itself*:
 #   1. Upgrade npm to 11.18.0 (exact pin — reproducible + satisfies
 #      scripts/check_dockerfile_pins.py; npm@<tag> is rejected). npm 11 already
 #      bundles the patched cross-spawn 7.0.6.
-#   2. Overwrite npm's OWN bundled copies of the four flagged packages with the
+#   2. Overwrite npm's OWN bundled copies of the flagged packages with the
 #      patched releases. `npm install -g <pkg>@x` installs a SEPARATE global
 #      package and leaves npm's bundled vulnerable copy in place (Trivy would
 #      still flag it), so instead `npm pack` each patched release and extract it
 #      directly over the bundled copy under $(npm root -g)/npm/node_modules.
+#      The loop is guarded by a presence assert (OMN-15688): every package it
+#      overwrites must ALREADY exist at that exact path. Without the assert, a
+#      package npm does not bundle there gets a fresh unreferenced copy while any
+#      real vulnerable copy survives elsewhere — a green scan over a still-
+#      vulnerable image. The assert is what caught the dead cross-spawn entry
+#      above. Verified on npm 11.18.0 that the remaining five are flat top-level
+#      entries with no nested duplicates.
 #      Exact versions keep the image reproducible (npm pack is not an
 #      `npm install -g` global-CLI install, so it is outside the pin-check).
 # The Node CLI itself is retained — it backs runtime coding-agent delegation
@@ -767,8 +806,14 @@ RUN set -eu; \
     npm install -g npm@11.18.0; \
     npm cache clean --force; \
     NPM_MODULES="$(npm root -g)/npm/node_modules"; \
+    for pkg in glob minimatch tar brace-expansion ip-address; do \
+        test -d "${NPM_MODULES}/${pkg}" || { \
+            echo "ERROR: no bundled ${pkg} at ${NPM_MODULES}/${pkg} — npm's bundle layout changed; extracting there would create an unreferenced copy and leave the vulnerable one in place" >&2; \
+            exit 1; \
+        }; \
+    done; \
     tmp="$(mktemp -d)"; \
-    for spec in cross-spawn@7.0.6 glob@13.0.6 minimatch@10.2.5 tar@7.5.19 brace-expansion@5.0.8; do \
+    for spec in glob@13.0.6 minimatch@10.2.5 tar@7.5.19 brace-expansion@5.0.9 ip-address@10.3.1; do \
         pkg="${spec%@*}"; \
         npm pack "$spec" --pack-destination "$tmp" >/dev/null; \
         tb="$(ls "$tmp/${pkg}"-*.tgz)"; \
@@ -777,7 +822,7 @@ RUN set -eu; \
         tar -xzf "$tb" -C "${NPM_MODULES}/${pkg}" --strip-components=1; \
     done; \
     rm -rf "$tmp"; \
-    for pkg in cross-spawn glob minimatch tar brace-expansion; do \
+    for pkg in glob minimatch tar brace-expansion ip-address; do \
         v="$(node -p "require('${NPM_MODULES}/${pkg}/package.json').version")"; \
         echo "npm bundled ${pkg} patched to ${v}"; \
     done
@@ -848,12 +893,61 @@ COPY --from=builder --chown=omniinfra:omniinfra \
     /app/.venv/lib/python*/site-packages/omnibase_core/contracts/runtime_data/ \
     /app/contracts/runtime/
 
+# OMN-15645: Copy the packaged omnimarket routing_tiers.yaml from the installed
+# venv into a stable, non-version-embedded in-image path so
+# DELEGATION_ROUTING_TIERS_PATH can be pinned in compose (docker-compose.infra.yml
+# x-runtime-env) to a fixed literal -- mirroring BIFROST_CONTRACT_PATH (OMN-12864)
+# -- instead of a literal python3.X site-packages path that silently breaks on a
+# base-image Python version bump (the exact trap OMN-15628's runtime entrypoint
+# self-heal, below, exists to correct for a *stale* pin). The `python*` glob
+# above is the same technique already used for the omnibase_core runtime
+# contracts copy, so this never hardcodes the interpreter minor version either.
+# Destination is /app/config/, deliberately NOT /app/contracts/ -- the runtime
+# services bind-mount ../contracts:/app/contracts:ro (host content), which
+# would shadow anything baked into that path at image-build time. /app/config/
+# carries no volume/bind-mount entry anywhere in the compose lane files, so the
+# image-baked content is never hidden or overridden at container start.
+COPY --from=builder --chown=omniinfra:omniinfra \
+    /app/.venv/lib/python*/site-packages/omnimarket/configs/routing_tiers.yaml \
+    /app/config/delegation/routing_tiers.yaml
+
+# OMN-15676: Bake the runner-fleet config into the image. This file is tracked
+# in the repo and every source-level check passed, but no COPY shipped it, so
+# the deployed runtime raised
+#   FileNotFoundError: Runner fleet config not found: /app/config/runner_fleet.yaml
+# HandlerRunnerFleetSnapshot.__init__ calls load_runner_fleet_config(), which
+# raises rather than falling back to embedded lab values (deliberately -- a
+# missing config is a deployment error), and the handler is instantiated during
+# auto-wiring, so under ONEX_WIRING_STRICT_MODE=1 this is a boot failure.
+# default_runner_fleet_config_path() resolves repo-root-relative from the module
+# file; under this image's PYTHONPATH=/app/src that lands on
+# /app/config/runner_fleet.yaml, which is exactly the destination below.
+# Same /app/config/ rationale as the routing_tiers.yaml COPY above: no lane file
+# and no onex-dev manifest mounts anything over /app/config/, so the baked
+# content cannot be shadowed at container start. A bind-mount would NOT fix this
+# -- the deployed pods have no such mount.
+# scripts/ci/assert_image_config_paths.py asserts this path (and every other
+# entry in the typed registry) inside the built image before the push step.
+COPY --chown=omniinfra:omniinfra config/runner_fleet.yaml /app/config/runner_fleet.yaml
+
 # Copy workspace/release provenance manifest generated by the builder stage.
 COPY --from=builder --chown=omniinfra:omniinfra /app/build-provenance.json /app/build-provenance.json
 
 # Copy entrypoint script that stamps schema fingerprint before kernel start
 COPY --chown=omniinfra:omniinfra docker/entrypoint-runtime.sh /app/entrypoint-runtime.sh
 RUN chmod +x /app/entrypoint-runtime.sh
+
+# OMN-15217: semantic container healthcheck, installed at a stable path.
+# Same file as omnibase_infra/runtime/health/container_healthcheck.py — copied
+# rather than invoked via `python -m` on purpose: importing the omnibase_infra
+# package costs ~6.8s inside this image (measured in-container 2026-07-27),
+# which against a 10s healthcheck timeout is a flap waiting to happen. The
+# module imports nothing but the standard library, so running it as a plain
+# file starts in ~0.12s. tests/unit/runtime/health/test_container_healthcheck.py
+# pins the stdlib-only property so this stays true.
+COPY --chown=omniinfra:omniinfra \
+    src/omnibase_infra/runtime/health/container_healthcheck.py \
+    /usr/local/bin/onex-container-healthcheck
 
 # Create runtime directories with proper permissions.
 # Avoid a recursive chown over /app here: the venv and copied artifacts already
@@ -870,15 +964,28 @@ USER root
 # This should match the port your runtime listens on for health checks
 EXPOSE 8085
 
-# Health check using the runtime's health endpoint. The endpoint returns a
-# failing status while runtime_attached=false or is_running=false, so plain
-# curl --fail cannot mark a degraded runtime as Docker healthy.
+# OMN-15217: semantic health check.
+#
+# The previous check was `curl --fail --silent .../health`, and the comment here
+# claimed it "cannot mark a degraded runtime as Docker healthy". That was wrong,
+# and the stability lane proved it: on 2026-07-27T12:58Z
+# omninode-stability-test-runtime showed `Up 3 hours (healthy)` while logging
+# `Runtime health check: status=DEGRADED contracts=296 errors=4` every five
+# minutes. /health returns HTTP 200 for a *running* degraded runtime by design
+# (see ServiceHealth._handle_health), so `curl --fail` — which asserts only
+# "status code < 400" — is a liveness probe, not a health check.
+#
+# onex-container-healthcheck reads the runtime's own verdict out of the response
+# body (details.runtime_health, published by ServiceRuntimeHealthMonitor) and
+# exits non-zero when the runtime reports DEGRADED/CRITICAL.
 # - interval: Check every 30 seconds
-# - timeout: Fail if check takes more than 10 seconds
-# - start-period: Allow 120 seconds for startup (Kafka consumer init is slow)
+# - timeout: 10 seconds (the check itself starts in ~0.12s; stdlib-only)
+# - start-period: 120 seconds — the monitor's first verdict lands one check
+#   interval (default 300s) after boot, and an absent verdict passes, so a
+#   booting runtime never flaps on a verdict that has not been computed yet
 # - retries: Mark unhealthy after 3 consecutive failures
 HEALTHCHECK --interval=30s --timeout=10s --start-period=120s --retries=3 \
-    CMD curl --fail --silent http://localhost:8085/health || exit 1
+    CMD python /usr/local/bin/onex-container-healthcheck || exit 1
 
 # Use tini as init to properly handle signals (PID 1 problem)
 # Without tini, signals like SIGTERM aren't properly forwarded to the Python process,

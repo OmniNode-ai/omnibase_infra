@@ -3,6 +3,10 @@
 
 """Shared fixtures for ``tests/unit/cli/``.
 
+Restores the complete process environment after every CLI test because receipt
+mode intentionally imports an env file into ``os.environ`` and these tests run
+that process boundary in-process (OMN-15572).
+
 Neutralizes the ``onex node``/``onex run`` omnimarket pre-flight drift guard
 (OMN-14560, mirroring OMN-14531's ``onex skill`` fix) so CLI-wiring tests
 across this directory stay hermetic regardless of the ambient developer
@@ -22,9 +26,28 @@ scope (see ``test_drift_guard_fires_before_unknown_node_lookup`` in
 
 from __future__ import annotations
 
+import os
+from collections.abc import Generator
+
 import pytest
 
 from omnibase_infra.cli import cli_node
+
+
+@pytest.fixture(autouse=True)
+def _restore_process_environment_after_cli_test() -> Generator[None, None, None]:
+    """Keep in-process CLI environment loading inside each CLI test.
+
+    Receipt mode deliberately loads values from ``OMNIBASE_ENV_FILE`` directly
+    into ``os.environ``. Those writes bypass pytest's ``monkeypatch`` ledger, so
+    the complete process environment must be restored at the package boundary.
+    """
+    environment_before = dict(os.environ)
+    try:
+        yield
+    finally:
+        os.environ.clear()
+        os.environ.update(environment_before)
 
 
 @pytest.fixture(autouse=True)

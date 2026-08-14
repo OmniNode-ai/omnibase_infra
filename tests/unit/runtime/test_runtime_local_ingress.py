@@ -8,16 +8,25 @@ import json
 from datetime import UTC, datetime
 from pathlib import Path
 from types import SimpleNamespace
-from typing import cast
+from typing import Annotated, cast
 from unittest.mock import AsyncMock
-from uuid import uuid4
+from uuid import UUID, uuid4
 
 import pytest
-from pydantic import ValidationError
+from pydantic import (
+    AliasChoices,
+    AliasPath,
+    BaseModel,
+    ConfigDict,
+    Field,
+    Strict,
+    ValidationError,
+)
 
 from omnibase_core.models.dispatch.model_dispatch_bus_terminal_result import (
     ModelDispatchBusTerminalResult,
 )
+from omnibase_core.types import JsonType
 from omnibase_infra.runtime.models import (
     ModelLocalRuntimeIngressConfig,
     ModelLocalRuntimeIngressRequest,
@@ -29,6 +38,7 @@ from omnibase_infra.runtime.runtime_local_ingress import (
     RuntimeLocalIngressServer,
     discover_runtime_local_ingress_routes,
     parse_active_runtime_packages,
+    validate_runtime_local_ingress_payload,
 )
 from tests.helpers.runtime_helpers import make_runtime_config, seed_mock_handlers
 
@@ -37,6 +47,76 @@ pytestmark = pytest.mark.unit
 _SESSION_ORCHESTRATOR_CONTRACT_PATH = (
     "/var/lib/omninode/node_session_orchestrator/contract.yaml"
 )
+
+
+class _IngressPayloadWithDefaultCorrelation(BaseModel):
+    model_config = ConfigDict(frozen=True, extra="forbid")
+
+    prompt: str
+    correlation_id: UUID = Field(default_factory=uuid4)
+
+
+class _IngressPayloadWithoutCorrelation(BaseModel):
+    model_config = ConfigDict(frozen=True, extra="forbid")
+
+    prompt: str
+
+
+class _IngressPayloadWithStringCorrelation(BaseModel):
+    model_config = ConfigDict(frozen=True, extra="forbid", strict=True)
+
+    prompt: str
+    correlation_id: str | None = None
+
+
+class _IngressPayloadWithSerializedCorrelationAlias(BaseModel):
+    model_config = ConfigDict(
+        frozen=True,
+        extra="forbid",
+        serialize_by_alias=True,
+    )
+
+    prompt: str
+    correlation_id: UUID = Field(serialization_alias="correlationId")
+
+
+class _IngressPayloadWithNestedAnnotatedOptionalCorrelation(BaseModel):
+    model_config = ConfigDict(frozen=True, extra="forbid", strict=True)
+
+    prompt: str
+    correlation_id: Annotated[UUID, Strict()] | None = None
+
+
+class _IngressPayloadWithCorrelationAliasChoices(BaseModel):
+    model_config = ConfigDict(frozen=True, extra="forbid", populate_by_name=True)
+
+    prompt: str
+    correlation_id: UUID = Field(
+        validation_alias=AliasChoices("correlation_id", "correlationId")
+    )
+
+
+class _IngressPayloadWithCorrelationAlias(BaseModel):
+    model_config = ConfigDict(frozen=True, extra="forbid")
+
+    prompt: str
+    correlation_id: UUID = Field(alias="correlationId")
+
+
+class _IngressPayloadWithCorrelationAliasPath(BaseModel):
+    model_config = ConfigDict(frozen=True, extra="forbid")
+
+    prompt: str
+    correlation_id: UUID = Field(validation_alias=AliasPath("trace", "correlation_id"))
+
+
+class _IngressPayloadWithIndexedCorrelationAliasPath(BaseModel):
+    model_config = ConfigDict(frozen=True, extra="forbid")
+
+    prompt: str
+    correlation_id: UUID = Field(
+        validation_alias=AliasPath("trace", 0, "correlation_id")
+    )
 
 
 def _session_orchestrator_route() -> ModelRuntimeLocalIngressRoute:
@@ -48,6 +128,20 @@ def _session_orchestrator_route() -> ModelRuntimeLocalIngressRoute:
         terminal_event="onex.evt.omnimarket.session-orchestrator-completed.v1",
         contract_path=_SESSION_ORCHESTRATOR_CONTRACT_PATH,
         package_name="omnimarket",
+    )
+
+
+def _correlated_ingress_route() -> ModelRuntimeLocalIngressRoute:
+    return ModelRuntimeLocalIngressRoute(
+        node_name="node_correlated_ingress",
+        contract_name="correlated_ingress",
+        command_topic="onex.cmd.test.correlated-ingress.v1",
+        event_type="test.correlated-ingress",
+        terminal_event="onex.evt.test.correlated-ingress-completed.v1",
+        contract_path="/fake/correlated_ingress_contract.yaml",
+        package_name="tests",
+        input_model_module=__name__,
+        input_model_name="_IngressPayloadWithDefaultCorrelation",
     )
 
 
@@ -131,6 +225,288 @@ def test_local_runtime_ingress_config_accepts_yaml_list_package_names() -> None:
 
     assert config.package_names == ("omnibase_infra", "omnimarket")
     assert config.enabled_profiles == ("main",)
+
+
+def test_validate_runtime_local_ingress_payload_accepts_matching_correlation() -> None:
+    correlation_id = uuid4()
+
+    normalized = validate_runtime_local_ingress_payload(
+        _correlated_ingress_route(),
+        {
+            "prompt": "write tests",
+            "correlation_id": str(correlation_id),
+        },
+        correlation_id=correlation_id,
+    )
+
+    assert normalized["correlation_id"] == str(correlation_id)
+
+
+@pytest.mark.parametrize("payload_correlation_id", [None, "not-a-uuid"])
+def test_validate_runtime_local_ingress_payload_rejects_malformed_correlation(
+    payload_correlation_id: str | None,
+) -> None:
+    with pytest.raises(ValueError, match="correlation_id must be a valid UUID"):
+        validate_runtime_local_ingress_payload(
+            _correlated_ingress_route(),
+            {
+                "prompt": "write tests",
+                "correlation_id": payload_correlation_id,
+            },
+            correlation_id=uuid4(),
+        )
+
+
+def test_validate_runtime_local_ingress_payload_preserves_model_without_correlation() -> (
+    None
+):
+    route = _correlated_ingress_route().model_copy(
+        update={"input_model_name": "_IngressPayloadWithoutCorrelation"}
+    )
+
+    normalized = validate_runtime_local_ingress_payload(
+        route,
+        {"prompt": "write tests"},
+        correlation_id=uuid4(),
+    )
+
+    assert normalized == {"prompt": "write tests"}
+
+
+def test_validate_runtime_local_ingress_payload_stamps_declared_string_correlation() -> (
+    None
+):
+    correlation_id = uuid4()
+    route = _correlated_ingress_route().model_copy(
+        update={"input_model_name": "_IngressPayloadWithStringCorrelation"}
+    )
+
+    normalized = validate_runtime_local_ingress_payload(
+        route,
+        {"prompt": "write tests"},
+        correlation_id=correlation_id,
+    )
+
+    assert normalized["correlation_id"] == str(correlation_id)
+
+
+def test_validate_runtime_local_ingress_payload_dumps_correlation_by_field_name() -> (
+    None
+):
+    correlation_id = uuid4()
+    route = _correlated_ingress_route().model_copy(
+        update={"input_model_name": "_IngressPayloadWithSerializedCorrelationAlias"}
+    )
+
+    normalized = validate_runtime_local_ingress_payload(
+        route,
+        {"prompt": "write tests"},
+        correlation_id=correlation_id,
+    )
+
+    assert normalized["correlation_id"] == str(correlation_id)
+    assert "correlationId" not in normalized
+
+
+def test_validate_runtime_local_ingress_payload_stamps_nested_annotated_optional_uuid() -> (
+    None
+):
+    correlation_id = uuid4()
+    route = _correlated_ingress_route().model_copy(
+        update={
+            "input_model_name": (
+                "_IngressPayloadWithNestedAnnotatedOptionalCorrelation"
+            )
+        }
+    )
+
+    normalized = validate_runtime_local_ingress_payload(
+        route,
+        {"prompt": "write tests"},
+        correlation_id=correlation_id,
+    )
+
+    assert normalized["correlation_id"] == str(correlation_id)
+
+
+def test_validate_runtime_local_ingress_payload_accepts_equivalent_alias_choice() -> (
+    None
+):
+    correlation_id = uuid4()
+    route = _correlated_ingress_route().model_copy(
+        update={"input_model_name": "_IngressPayloadWithCorrelationAliasChoices"}
+    )
+
+    normalized = validate_runtime_local_ingress_payload(
+        route,
+        {
+            "prompt": "write tests",
+            "correlationId": str(correlation_id),
+        },
+        correlation_id=correlation_id,
+    )
+
+    assert normalized["correlation_id"] == str(correlation_id)
+    assert "correlationId" not in normalized
+
+
+def test_validate_runtime_local_ingress_payload_rejects_conflicting_alias_choice() -> (
+    None
+):
+    correlation_id = uuid4()
+    route = _correlated_ingress_route().model_copy(
+        update={"input_model_name": "_IngressPayloadWithCorrelationAliasChoices"}
+    )
+
+    with pytest.raises(ValueError, match="correlation_id conflicts"):
+        validate_runtime_local_ingress_payload(
+            route,
+            {
+                "prompt": "write tests",
+                "correlationId": str(uuid4()),
+            },
+            correlation_id=correlation_id,
+        )
+
+
+def test_validate_runtime_local_ingress_payload_rejects_divergent_duplicate_aliases() -> (
+    None
+):
+    correlation_id = uuid4()
+    route = _correlated_ingress_route().model_copy(
+        update={"input_model_name": "_IngressPayloadWithCorrelationAliasChoices"}
+    )
+
+    with pytest.raises(ValueError, match="correlation_id conflicts"):
+        validate_runtime_local_ingress_payload(
+            route,
+            {
+                "prompt": "write tests",
+                "correlation_id": str(correlation_id),
+                "correlationId": str(uuid4()),
+            },
+            correlation_id=correlation_id,
+        )
+
+
+def test_validate_runtime_local_ingress_payload_accepts_equivalent_duplicate_aliases() -> (
+    None
+):
+    correlation_id = uuid4()
+    route = _correlated_ingress_route().model_copy(
+        update={"input_model_name": "_IngressPayloadWithCorrelationAliasChoices"}
+    )
+
+    normalized = validate_runtime_local_ingress_payload(
+        route,
+        {
+            "prompt": "write tests",
+            "correlation_id": str(correlation_id),
+            "correlationId": str(correlation_id),
+        },
+        correlation_id=correlation_id,
+    )
+
+    assert normalized["correlation_id"] == str(correlation_id)
+    assert "correlationId" not in normalized
+
+
+def test_validate_runtime_local_ingress_payload_rejects_malformed_alias_choice() -> (
+    None
+):
+    route = _correlated_ingress_route().model_copy(
+        update={"input_model_name": "_IngressPayloadWithCorrelationAliasChoices"}
+    )
+
+    with pytest.raises(ValueError, match="correlation_id must be a valid UUID"):
+        validate_runtime_local_ingress_payload(
+            route,
+            {
+                "prompt": "write tests",
+                "correlationId": None,
+            },
+            correlation_id=uuid4(),
+        )
+
+
+def test_validate_runtime_local_ingress_payload_stamps_alias_only_model() -> None:
+    correlation_id = uuid4()
+    route = _correlated_ingress_route().model_copy(
+        update={"input_model_name": "_IngressPayloadWithCorrelationAlias"}
+    )
+
+    normalized = validate_runtime_local_ingress_payload(
+        route,
+        {"prompt": "write tests"},
+        correlation_id=correlation_id,
+    )
+
+    assert normalized["correlation_id"] == str(correlation_id)
+
+
+def test_validate_runtime_local_ingress_payload_stamps_alias_path_model() -> None:
+    correlation_id = uuid4()
+    route = _correlated_ingress_route().model_copy(
+        update={"input_model_name": "_IngressPayloadWithCorrelationAliasPath"}
+    )
+
+    normalized = validate_runtime_local_ingress_payload(
+        route,
+        {"prompt": "write tests"},
+        correlation_id=correlation_id,
+    )
+
+    assert normalized["correlation_id"] == str(correlation_id)
+
+
+def test_validate_runtime_local_ingress_payload_rejects_conflicting_alias_path() -> (
+    None
+):
+    correlation_id = uuid4()
+    route = _correlated_ingress_route().model_copy(
+        update={"input_model_name": "_IngressPayloadWithCorrelationAliasPath"}
+    )
+
+    with pytest.raises(ValueError, match="correlation_id conflicts"):
+        validate_runtime_local_ingress_payload(
+            route,
+            {
+                "prompt": "write tests",
+                "trace": {"correlation_id": str(uuid4())},
+            },
+            correlation_id=correlation_id,
+        )
+
+
+def test_validate_runtime_local_ingress_payload_stamps_indexed_alias_path_model() -> (
+    None
+):
+    correlation_id = uuid4()
+    route = _correlated_ingress_route().model_copy(
+        update={"input_model_name": "_IngressPayloadWithIndexedCorrelationAliasPath"}
+    )
+
+    normalized = validate_runtime_local_ingress_payload(
+        route,
+        {"prompt": "write tests"},
+        correlation_id=correlation_id,
+    )
+
+    assert normalized["correlation_id"] == str(correlation_id)
+
+
+def test_validate_runtime_local_ingress_payload_preserves_payload_without_model() -> (
+    None
+):
+    payload: dict[str, JsonType] = {"prompt": "write tests"}
+
+    normalized = validate_runtime_local_ingress_payload(
+        _session_orchestrator_route(),
+        payload,
+        correlation_id=uuid4(),
+    )
+
+    assert normalized is payload
 
 
 @pytest.mark.asyncio
@@ -660,6 +1036,7 @@ async def test_runtime_host_process_dispatch_local_ingress_rejects_invalid_paylo
 async def test_runtime_host_process_dispatch_local_ingress_publishes_validated_payload() -> (
     None
 ):
+    correlation_id = uuid4()
     route = ModelRuntimeLocalIngressRoute(
         node_name="node_session_orchestrator",
         contract_name="session_orchestrator",
@@ -677,7 +1054,7 @@ async def test_runtime_host_process_dispatch_local_ingress_publishes_validated_p
         status="completed",
         payload={"status": "complete"},
         completed_at=datetime.now(UTC),
-        correlation_id=uuid4(),
+        correlation_id=correlation_id,
     )
     broker = SimpleNamespace(
         dispatch_request=AsyncMock(return_value=(route, dispatch_result))
@@ -696,16 +1073,86 @@ async def test_runtime_host_process_dispatch_local_ingress_publishes_validated_p
                 "command_name": "inner-command",
                 "payload": {"dry_run": True},
             },
+            correlation_id=correlation_id,
         )
     )
 
     assert response.ok is True
     command = broker.dispatch_request.await_args.args[0]
+    assert command.correlation_id == correlation_id
     assert command.payload == {
         "command_name": "inner-command",
+        "correlation_id": str(correlation_id),
         "payload": {"dry_run": True},
         "timeout_ms": 300_000,
     }
+
+
+@pytest.mark.asyncio
+async def test_runtime_host_process_injects_authoritative_correlation_before_payload_validation() -> (
+    None
+):
+    correlation_id = uuid4()
+    route = _correlated_ingress_route()
+    dispatch_result = ModelDispatchBusTerminalResult(
+        status="completed",
+        payload={"status": "complete"},
+        completed_at=datetime.now(UTC),
+        correlation_id=correlation_id,
+    )
+    broker = SimpleNamespace(
+        dispatch_request=AsyncMock(return_value=(route, dispatch_result))
+    )
+    process = RuntimeHostProcess(
+        config=make_runtime_config(), dispatch_engine=AsyncMock()
+    )
+    process._is_running = True
+    process._local_ingress_routes = {route.contract_name: route}
+    process._pattern_b_broker = cast("object", broker)
+
+    response = await process._dispatch_local_ingress_request(
+        ModelLocalRuntimeIngressRequest(
+            command_name=route.contract_name,
+            payload={"prompt": "write tests"},
+            correlation_id=correlation_id,
+        )
+    )
+
+    assert response.ok is True
+    command = broker.dispatch_request.await_args.args[0]
+    assert command.correlation_id == correlation_id
+    assert command.payload["correlation_id"] == str(correlation_id)
+
+
+@pytest.mark.asyncio
+async def test_runtime_host_process_rejects_conflicting_payload_correlation_before_broker() -> (
+    None
+):
+    correlation_id = uuid4()
+    route = _correlated_ingress_route()
+    broker = SimpleNamespace(dispatch_request=AsyncMock())
+    process = RuntimeHostProcess(
+        config=make_runtime_config(), dispatch_engine=AsyncMock()
+    )
+    process._is_running = True
+    process._local_ingress_routes = {route.contract_name: route}
+    process._pattern_b_broker = cast("object", broker)
+
+    response = await process._dispatch_local_ingress_request(
+        ModelLocalRuntimeIngressRequest(
+            command_name=route.contract_name,
+            payload={
+                "prompt": "write tests",
+                "correlation_id": str(uuid4()),
+            },
+            correlation_id=correlation_id,
+        )
+    )
+
+    assert response.ok is False
+    assert response.error is not None
+    assert response.error.code == "validation_error"
+    broker.dispatch_request.assert_not_awaited()
 
 
 @pytest.mark.asyncio
@@ -893,3 +1340,138 @@ async def test_runtime_health_includes_local_ingress_details() -> None:
     assert "components" in health
     components = cast("list[dict[str, object]]", health["components"])
     assert any(component["name"] == "local_ingress" for component in components)
+
+
+# --------------------------------------------------------------------------- #
+# OMN-15468: runtime_dispatch.terminal_events must reach the ingress route.
+#
+# 51 contracts declare their FAILURE terminal only under
+# ``runtime_dispatch.terminal_events`` (the address the dashboard and other
+# external clients dispatch through) -- measured over the raw corpus of 384
+# ``src/omnimarket/nodes/*/contract.yaml`` at
+# omnimarket@aea0c33dd89fb82fdca33aac7149992a21c46d43 (origin/dev, 2026-07-30),
+# no discovery filter applied. Route discovery read only the TOP-LEVEL
+# ``terminal_event`` / ``terminal_events`` keys, so the Pattern B broker -- which
+# is already built to race every declared terminal topic (OMN-13118/13128) --
+# was only ever handed the success topic. A node that correctly published its
+# failure terminal therefore produced either a bogus ``completed`` (when the
+# def-B wiring republished the returned model onto the success topic) or a
+# spurious ``timeout``. Live reproduction on the .201 dev lane: correlation
+# 4a5e0730-0000-4000-8000-000000000002 returned ok=true / status=completed with
+# contract_passed=false in the very payload it carried.
+# --------------------------------------------------------------------------- #
+
+_GENERATION_CONSUMER_SHAPED_CONTRACT = """
+name: gen_demo
+event_bus:
+  subscribe_topics:
+    - onex.cmd.demo.generation-requested.v1
+  publish_topics:
+    - onex.evt.demo.generation-completed.v1
+    - onex.evt.demo.generation-failed.v1
+terminal_event: onex.evt.demo.generation-completed.v1
+runtime_dispatch:
+  command_topic: onex.cmd.demo.generation-requested.v1
+  terminal_events:
+    success: onex.evt.demo.generation-completed.v1
+    failure: onex.evt.demo.generation-failed.v1
+  default_timeout_ms: 120000
+handler_routing:
+  handlers:
+    - operation: gen_demo.run
+""".strip()
+
+# 30 of those 51 declare NO top-level ``terminal_event`` or ``terminal_events``
+# at all, so discovery gave them an EMPTY terminal-topic tuple and the broker
+# rejected the command outright ("Route '<name>' does not declare terminal
+# events"). 17 of the 30 also clear the route-discovery filter (an ``event_bus``
+# mapping whose ``subscribe_topics`` yield a ``.cmd.`` command topic), i.e. 17
+# were live undispatchable /skill routes and 13 were latent declarations.
+# Same corpus/sha/date as the block above; re-derive, do not copy forward --
+# the pre-correction figure here was an unsourced "24 of the 51" that
+# reproduces under no framing (see _extract_terminal_events PROVENANCE note).
+_PLURAL_ONLY_CONTRACT = """
+name: plural_only_demo
+event_bus:
+  subscribe_topics:
+    - onex.cmd.demo.plural-only-requested.v1
+  publish_topics:
+    - onex.evt.demo.plural-only-completed.v1
+    - onex.evt.demo.plural-only-failed.v1
+runtime_dispatch:
+  command_topic: onex.cmd.demo.plural-only-requested.v1
+  terminal_events:
+    failure: onex.evt.demo.plural-only-failed.v1
+    success: onex.evt.demo.plural-only-completed.v1
+handler_routing:
+  handlers:
+    - operation: plural_only_demo.run
+""".strip()
+
+
+def _write_single_node_package(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    *,
+    node_dir: str,
+    contract_body: str,
+) -> None:
+    package_root = tmp_path / "fakepkg"
+    (package_root / "nodes" / node_dir).mkdir(parents=True)
+    (package_root / "__init__.py").write_text("", encoding="utf-8")
+    (package_root / "nodes" / node_dir / "contract.yaml").write_text(
+        contract_body,
+        encoding="utf-8",
+    )
+    monkeypatch.setattr(
+        "omnibase_infra.runtime.runtime_local_ingress.importlib.import_module",
+        lambda _name: SimpleNamespace(__file__=str(package_root / "__init__.py")),
+    )
+
+
+def test_discover_routes_reads_runtime_dispatch_failure_terminal(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """A failure terminal declared ONLY under runtime_dispatch must reach the route."""
+    _write_single_node_package(
+        tmp_path,
+        monkeypatch,
+        node_dir="node_gen_demo",
+        contract_body=_GENERATION_CONSUMER_SHAPED_CONTRACT,
+    )
+
+    route = discover_runtime_local_ingress_routes(("fakepkg",))["gen_demo"]
+
+    assert route.terminal_event == "onex.evt.demo.generation-completed.v1"
+    assert route.terminal_events == (
+        "onex.evt.demo.generation-completed.v1",
+        "onex.evt.demo.generation-failed.v1",
+    )
+
+
+def test_discover_routes_orders_runtime_dispatch_success_terminal_first(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """With no top-level terminal_event, success must still be terminal_events[0].
+
+    ``_status_for_terminal_topic`` falls back to ``terminal_topics[0]`` as the
+    success topic when ``terminal_event`` is None, so the success entry must be
+    hoisted explicitly rather than left to YAML mapping order.
+    """
+    _write_single_node_package(
+        tmp_path,
+        monkeypatch,
+        node_dir="node_plural_only_demo",
+        contract_body=_PLURAL_ONLY_CONTRACT,
+    )
+
+    route = discover_runtime_local_ingress_routes(("fakepkg",))["plural_only_demo"]
+
+    assert route.terminal_event is None
+    # ``failure`` is declared BEFORE ``success`` in the YAML above on purpose.
+    assert route.terminal_events == (
+        "onex.evt.demo.plural-only-completed.v1",
+        "onex.evt.demo.plural-only-failed.v1",
+    )

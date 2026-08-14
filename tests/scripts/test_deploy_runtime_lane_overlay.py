@@ -99,14 +99,63 @@ def test_defines_lane_overlay_resolver_functions() -> None:
 
 
 @pytest.mark.unit
-def test_dev_project_gets_no_overlay() -> None:
-    """The bare dev project runs from infra.yml alone (fixed dev names are correct)."""
+def test_dev_project_layers_only_the_dev_lane_overlay() -> None:
+    """The bare dev project gets infra.yml + the dev-lane overlay, nothing else.
+
+    Changed by OMN-15379 (operator ruling 15). It used to be infra.yml ALONE —
+    the dev lane's fixed container names are correct in the base, so it needed
+    no overlay. It now layers ``docker-compose.dev-lane.yml``, whose entire
+    content is ``ONEX_MIGRATION_LANE=dev`` on forward-migration: the lane
+    indicator that releases the node_projection_registration trio (0000 CREATE /
+    0001 heartbeat / 0002 ENABLE + FORCE ROW LEVEL SECURITY) from the operator
+    fence, making the lab lane the FORCE proving ground.
+
+    Why a separate file rather than a line in the base: every non-dev lane
+    overlay MERGES infra.yml, and stability-test's forward-migration override is
+    a single ``container_name:`` line, so it inherits the base ``environment:``
+    block wholesale. The indicator in the base would therefore be inherited by
+    stability-test, prod, judge and any lane added later — fail-OPEN. Inverted
+    this way, a lane that does not load the dev overlay carries no indicator and
+    the runner applies the FULL fence.
+    """
     result = _run_overlay_resolver("omnibase-infra")
     assert result.returncode == 0, result.stderr
     out = result.stdout.strip()
-    assert out == "-f /DEPLOY/docker/docker-compose.infra.yml", out
+    assert out == (
+        "-f /DEPLOY/docker/docker-compose.infra.yml "
+        "-f /DEPLOY/docker/docker-compose.dev-lane.yml"
+    ), out
+    # infra.yml first, so the dev overlay's environment merges on top of it.
+    assert out.index("docker-compose.infra.yml") < out.index(
+        "docker-compose.dev-lane.yml"
+    )
     assert "stability-test" not in out
     assert "prod" not in out
+
+
+@pytest.mark.unit
+@pytest.mark.parametrize(
+    "compose_project",
+    [
+        "omnibase-infra-stability-test",
+        "omnibase-infra-prod",
+        "omnibase-infra-judge",
+    ],
+)
+def test_no_non_dev_lane_ever_loads_the_dev_lane_overlay(compose_project: str) -> None:
+    """OMN-15379: the lane indicator must be unreachable from every other lane.
+
+    The negative half of the pair above, and the load-bearing one: the dev
+    overlay is the ONLY thing that releases the fenced registration migrations,
+    so a lane that loaded it would apply FORCE ROW LEVEL SECURITY to
+    node_service_registry unattended — precisely the class of unattended posture
+    change the operator fence exists to prevent.
+    """
+    result = _run_overlay_resolver(compose_project)
+    assert result.returncode == 0, result.stderr
+    assert "dev-lane" not in result.stdout, (
+        f"{compose_project} loads the dev-lane overlay: {result.stdout.strip()}"
+    )
 
 
 @pytest.mark.unit

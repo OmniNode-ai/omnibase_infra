@@ -7,16 +7,16 @@ node_type: "EFFECT_GENERIC"
 contract_version:
   major: 0
   minor: 1
-  patch: 0
+  patch: 1
 node_version:
   major: 0
   minor: 1
-  patch: 0
+  patch: 2
 description: >
-  Trust-boundary effect node that mirrors contract-declared tenant gateway topics between a local runtime bus and the hosted cloud Kafka edge. The node owns all publishes; handlers only validate and return transformed envelopes.
+  Trust-boundary effect node that mirrors contract-declared tenant gateway topics between a local runtime bus and the hosted cloud Kafka edge. The node owns all publishes; handlers only validate and return transformed envelopes. OMN-15792: the outbound handler resolves its physical wire topic through the single runtime topic resolver (resolve_physical_topic) instead of calling the prefix_topic primitive directly -- internal implementation change, wire format and behavior unchanged.
 
 runtime_profiles:
-  - effects
+  - canary
 input_model:
   name: "ModelGatewayEnvelope"
   module: "omnibase_infra.nodes.node_bus_forwarder_effect.models.model_gateway_envelope"
@@ -36,10 +36,11 @@ config:
       transport: "kafka"
       broker_provider_id: "22222222-2222-2222-2222-222222222222"
       cloud_broker_ref: "gateway.cloud.kafka.broker"
-      cloud_auth_ref: "gateway.cloud.kafka.oauth"
+      cloud_auth_ref: "gateway.cloud.kafka.msk_iam"
       acl_provisioner_ref: "gateway.cloud.kafka.authorization"
-      client_id_ref: "gateway.cloud.kafka.oauth.client_id"
-      client_secret_api_key_ref: "gateway.cloud.kafka.oauth.client_secret"
+      msk_region_ref: "gateway.cloud.kafka.msk_region"
+      security_protocol: "SASL_SSL"
+      sasl_mechanism: "AWS_MSK_IAM"
     local_leg:
       supported_flavors:
         - "containerized"
@@ -51,26 +52,43 @@ config:
         - "onex.evt.omnibase-infra.gateway-heartbeat.v1"
       outbound:
         - "onex.evt.omnibase-infra.inference-response.v1"
+        - "onex.evt.omnibase-infra.delegation-completed.v1"
+        - "onex.evt.omnibase-infra.delegation-failed.v1"
+        - "onex.evt.omniintelligence.llm-call-completed.v1"
+        - "onex.evt.omnibase-infra.llm-call-completed.v1"
         - "onex.evt.omnibase-infra.gateway-heartbeat.v1"
+    canary:
+      # OMN-15741 (G1): dedicated topic for the path-verifying healthcheck probe.
+      # Never mirrored, never carries tenant traffic -- the probe produces a tiny
+      # record here and reads it back across each leg using the same transport
+      # and credentials as real traffic, so the healthcheck can tell "connected
+      # and forwarding" apart from "started once, now silently broken" (the
+      # 2026-08-04 failure: ready-file present, forwarding 0% for 4 days).
+      topic: "onex.evt.omnibase-infra.gateway-canary.v1"
+      cadence_seconds: 30
+      produce_deadline_seconds: 8
+      readback_deadline_seconds: 12
     liveness:
       heartbeat_interval_seconds: 15
       max_silence_window_seconds: 60
       lag_threshold_messages: 500
       lag_threshold_seconds: 120
       drain_deadline_seconds: 30
+      reconnect_backoff_initial_seconds: 1
+      reconnect_backoff_max_seconds: 30
+      reconnect_backoff_jitter_seconds: 0.5
+      degraded_after_seconds: 60
     dedupe:
+      key: "envelope_id"
+      store: "sqlite"
+      store_path_required: true
       retention_hours: 24
-event_bus:
-  subscribe_topics:
-    - "onex.cmd.omnibase-infra.delegation-inference-request.v1"
-    - "onex.cmd.omnibase-infra.delegation-request.v1"
-    - "onex.evt.omnibase-infra.inference-response.v1"
-    - "onex.evt.omnibase-infra.gateway-heartbeat.v1"
-  publish_topics:
-    - "onex.cmd.omnibase-infra.delegation-inference-request.v1"
-    - "onex.cmd.omnibase-infra.delegation-request.v1"
-    - "onex.evt.omnibase-infra.inference-response.v1"
-    - "onex.evt.omnibase-infra.gateway-heartbeat.v1"
+    delivery:
+      semantics: "at_least_once"
+      source_offset_acknowledgement: "after_destination_ack_and_durable_marker"
+      auto_commit: false
+      retry_initial_seconds: 1
+      retry_max_seconds: 30
 handler_routing:
   routing_strategy: "operation_match"
   handlers:
@@ -80,7 +98,7 @@ handler_routing:
         module: "omnibase_infra.nodes.node_bus_forwarder_effect.handlers.handler_forward_outbound"
         handler_type: "COMPUTE"
       description: >
-        Canonical handle() dispatch entrypoint accepts a typed or serialized outer event envelope, normalizes it, validates the local bare topic, and delegates to the tenant cloud wire-prefix transform.
+        Pure transform entrypoint for validating a local canonical envelope and attaching the configured tenant wire prefix. The dedicated gateway process owns transport subscriptions and publishing.
 
     - operation: "gateway.consume_inbound"
       handler:
@@ -88,7 +106,7 @@ handler_routing:
         module: "omnibase_infra.nodes.node_bus_forwarder_effect.handlers.handler_consume_inbound"
         handler_type: "COMPUTE"
       description: >
-        Canonical handle() dispatch entrypoint accepts a typed or serialized outer event envelope, normalizes it, validates the tenant-prefixed cloud topic, strips it to the bare local topic, and stamps the verified gateway tenant slug into payload["tenant_id"] (via the shared omnibase_infra.shared.tenant_stamp.stamp_verified_tenant_slug helper) before republish.
+        Pure transform entrypoint for validating an attached cloud tenant, stripping the wire prefix, and stamping the verified tenant slug. The dedicated gateway process owns transport subscriptions and publishing.
 
 capabilities:
   - name: "tenant_prefix_transform"
@@ -97,6 +115,8 @@ capabilities:
     description: "Rejects any canonical topic not declared in mirror topic sets."
   - name: "node_owned_publish"
     description: "Handlers never publish; the effect node owns both bus legs."
+  - name: "durable_source_acknowledgement"
+    description: "Source offsets commit only after destination broker acknowledgement and a durable envelope_id marker; acknowledged redelivery is suppressed across restarts."
   - name: "raw_dispatch_envelope_normalization"
     description: "Handlers deserialize serialized outer event envelopes before reading payload."
   - name: "verified_inbound_payload_tenant_stamp"
@@ -105,7 +125,7 @@ metadata:
   description: "Hybrid gateway local runtime bus forwarder"
   author: "OmniNode Team"
   created: "2026-06-10"
-  updated: "2026-07-14"
+  updated: "2026-08-08"
   tags:
     - gateway
     - event-bus

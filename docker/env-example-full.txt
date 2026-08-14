@@ -180,11 +180,20 @@ POSTGRES_PASSWORD=__REPLACE_WITH_SECURE_PASSWORD__
 # Consumer group ID for effects runtime
 # ONEX_EFFECTS_GROUP_ID=onex-runtime-effects
 
+# HMAC-SHA256 key shared by runtime-effects and deploy-agent. Required for
+# signed rebuild commands; generate once and store in ~/.omnibase/.env.
+# DEPLOY_AGENT_HMAC_SECRET=__REPLACE_WITH_SECURE_RANDOM_SECRET__
+
 # =============================================================================
 # Worker Runtime Service Configuration
 # =============================================================================
-# Number of worker replicas (for horizontal scaling)
-# WORKER_REPLICAS=2
+# Number of worker replicas (for horizontal scaling). OMN-14968: this is the
+# lane-prefixed DEV_WORKER_REPLICAS and it is `:?`-required in
+# docker-compose.infra.yml -- the compose render FAILS when it is unset rather
+# than silently scaling the worker to zero. The ledgered value is rendered into
+# docker/runtime-policy.env from contracts/services/runtime_policy.contract.yaml;
+# set it here only to override that pin.
+# DEV_WORKER_REPLICAS=2
 
 # Kafka topics for worker runtime
 # ONEX_WORKER_INPUT_TOPIC=worker-requests
@@ -300,6 +309,9 @@ POSTGRES_PASSWORD=__REPLACE_WITH_SECURE_PASSWORD__
 # External port mappings for infrastructure services
 # These map host ports to internal container ports
 # POSTGRES_EXTERNAL_PORT=5436
+# OMN-15173: DEV_REDPANDA_ADVERTISE_HOST is REQUIRED (no silent default) -
+# compose config render fails fast when unset. 'localhost' is only correct
+# for pure single-host dev; set the reachable host/IP for off-host clients.
 # DEV_REDPANDA_ADVERTISE_HOST=localhost
 # REDPANDA_EXTERNAL_PORT=19092
 # REDPANDA_PANDAPROXY_PORT=18082

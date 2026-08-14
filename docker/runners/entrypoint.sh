@@ -114,18 +114,77 @@ LISTENER_RESTART_MAX="${LISTENER_RESTART_MAX:-50}"
 # recycle NEVER fires while a Runner.Worker is executing a job.
 #
 # The KILL threshold is deliberately DECOUPLED from the healthcheck's ALERT
-# threshold (RUNNER_HEALTH_MAX_DIAG_AGE_SECONDS, 900s). Live readback
+# threshold (RUNNER_HEALTH_MAX_DIAG_AGE_SECONDS). Live readback
 # 2026-07-23T05:25-06:02Z: a fleet-wide broker-quiet window silenced _diag on
 # 53/64 listeners for 35-50 min while GitHub kept every one of them online
 # and docker-"unhealthy" runners were actively EXECUTING jobs (runners 4 and
 # 40 busy while heartbeat-stale); runner-2 and runner-45 both resumed on
 # their own after ~37 min blocked in the same token-refresh path that hangs
-# the true zombies forever. Killing at 900s would have mass-recycled ~50
-# healthy-but-quiet listeners mid-window. 3600s clears the observed benign
-# ceiling (~50 min) with margin while still recovering a true AAD-deadlock
-# zombie in ~1h instead of the 6 days the 2026-07-16..23 incident took.
+# the true zombies forever. Killing at the then-current 900s alert threshold
+# would have mass-recycled ~50 healthy-but-quiet listeners mid-window. 3600s
+# clears the observed benign ceiling (~50 min) with margin while still
+# recovering a true AAD-deadlock zombie in ~1h instead of the 6 days the
+# 2026-07-16..23 incident took.
+#
+# OMN-15233 flipped the ORDER of the two thresholds, not their independence:
+# the alert threshold is now 4500s, ABOVE this 3600s kill threshold. That is
+# intentional. This watchdog is the narrower signal — it additionally requires
+# LISTENER_HEARTBEAT_MISSES consecutive ticks and refuses to fire while a
+# Runner.Worker is executing — so it can afford to act on staleness the
+# unconditional, retry-free healthcheck must not flag. Do NOT "restore
+# ordering" by dropping the alert threshold back toward 900s: that is the
+# arithmetic false positive OMN-15233 removed.
+#
+# RE-DERIVATION ATTEMPT (2026-08-10, omn15776-wedge-verify): OMN-15776 asked
+# whether this threshold could be tightened toward sub-900s to close the gap
+# between GitHub's ~600s broker-dispatch-wedge orphan timeout and this
+# watchdog's eventual recycle (see scripts/ci/runner_broker_dispatch_wedge_rerun.sh
+# for that mechanism). Measured LIVE, read-only, against 5 healthy fleet
+# runners' own _diag/Runner_*.log inter-line gaps (not a hypothetical):
+#
+#   runner  log window (real)        max observed gap
+#   -----   ------------------------  -----------------
+#   19      04:50-08:09 UTC (~19.7h)  3007s (~50.1min)
+#   20      Aug8 22:14-Aug9 08:09     3009s (~50.2min)
+#   29      04:04-08:09 UTC (~4.1h)   2960s (~49.3min)
+#   2, 4    partial windows (fleet    319-508s (windows
+#           under load, no full            did not span a
+#           idle cycle observed)           full idle cycle)
+#
+# Max observed normal-idle gap across the sample: 3009s. This corroborates,
+# not contradicts, the 2026-07-23 finding above (~50min benign ceiling) and
+# the independent OMN-15233 healthcheck.sh derivation (~50min OAuth/AAD
+# token-refresh cadence while idle). CONCLUSION: sub-900s detection is NOT
+# supported by evidence — a threshold anywhere near 900s-3000s would
+# reproduce the exact mass-recycle false-positive class OMN-15233 fixed,
+# just on this watchdog's KILL path instead of the healthcheck's ALERT path.
+# 3600s already sits ~590-600s (~20%) above the measured ceiling, which is
+# the intended margin, not slack to cut. Threshold left UNCHANGED at 3600s.
+# The broker-dispatch-wedge false-red this was evaluated against is instead
+# closed by scripts/ci/runner_broker_dispatch_wedge_rerun.sh's targeted
+# rerun, which does not depend on this watchdog's timing.
 LISTENER_HEARTBEAT_MAX_AGE_SECONDS="${LISTENER_HEARTBEAT_MAX_AGE_SECONDS:-3600}"
 LISTENER_HEARTBEAT_MISSES="${LISTENER_HEARTBEAT_MISSES:-3}"
+
+# ---------------------------------------------------------------------------
+# Orphan reap before respawn (OMN-15233)
+# ---------------------------------------------------------------------------
+# Incident (2026-07-27, runners 1/43/55/57): a Runner.Listener survived the
+# death of its wrapper tree, was reparented to PPID 1, and kept holding this
+# runner's GitHub broker session. This loop then spawned a REPLACEMENT listener
+# on top of it, which crash-looped every ~5 min on
+# TaskAgentSessionConflictException — the orphan still owned the session. Each
+# crash minted a fresh Runner_*.log, so the _diag mtime heartbeat read HEALTHY
+# forever and no signal surfaced the state (88-234 log files vs 3-7 normal).
+#
+# Spawn-without-reap is what MANUFACTURES the session conflict. Reaping is
+# therefore unconditional and precedes every run.sh spawn, not just the
+# watchdog-recycle path: any listener still matching this runner home's pattern
+# at the top of the loop is by definition left over from a previous
+# incarnation (the loop only ever gets here after the previous run.sh exited or
+# was recycled), so it is killed and confirmed gone before a replacement is
+# started.
+LISTENER_REAP_TIMEOUT_SECONDS="${LISTENER_REAP_TIMEOUT_SECONDS:-30}"
 
 # ---------------------------------------------------------------------------
 # Credential cache helpers
@@ -283,6 +342,18 @@ LISTENER_PGREP_PATTERN="${LISTENER_PGREP_PATTERN:-${RUNNER_HOME//./\\.}/bin/Runn
 # Worker pattern (OMN-14564): a Runner.Worker process means a job is executing
 # — the heartbeat watchdog must NEVER recycle mid-job.
 WORKER_PGREP_PATTERN="${WORKER_PGREP_PATTERN:-${RUNNER_HOME//./\\.}/bin/Runner\.Worker}"
+# run-helper pattern (OMN-15776): match THIS runner home's run.sh->run-helper.sh
+# wrapper (the direct parent of Runner.Listener — see healthcheck.sh's process
+# tree comment). MUST be RUNNER_HOME-anchored like the two patterns above: an
+# unanchored "run-helper" pkill matches ANY process on the host whose cmdline
+# contains that substring, including the real fleet runner's own run-helper.sh
+# when a nested/synthetic entrypoint.sh (e.g. the functional tests in
+# tests/ci/test_runner_listener_liveness.py) runs in the same PID namespace —
+# this is the confirmed root cause of self-hosted CI jobs mid-run receiving an
+# out-of-band shutdown signal ("[HostContext] Runner will be shutdown for
+# UserCancelled") while test_entrypoint_recycles_hung_listener exercises this
+# recycle path elsewhere in the same container.
+RUN_HELPER_PGREP_PATTERN="${RUN_HELPER_PGREP_PATTERN:-${RUNNER_HOME//./\\.}.*run-helper}"
 
 # OMN-14564: same find-mmin condition as healthcheck.sh layer 2 — returns 0
 # (stale) when no _diag *.log was modified within
@@ -308,12 +379,45 @@ _listener_heartbeat_stale() {
 _recycle_runner_tree() {
     local pid="${1}"
     kill -TERM "${pid}" 2>/dev/null || true
-    pkill -TERM -f "run-helper" 2>/dev/null || true
+    pkill -TERM -f "${RUN_HELPER_PGREP_PATTERN}" 2>/dev/null || true
     pkill -TERM -f "${LISTENER_PGREP_PATTERN}" 2>/dev/null || true
     sleep 10
     kill -KILL "${pid}" 2>/dev/null || true
-    pkill -KILL -f "run-helper" 2>/dev/null || true
+    pkill -KILL -f "${RUN_HELPER_PGREP_PATTERN}" 2>/dev/null || true
     pkill -KILL -f "${LISTENER_PGREP_PATTERN}" 2>/dev/null || true
+}
+
+# OMN-15233: reap any listener left over from a previous incarnation BEFORE
+# spawning a replacement. Returns 0 when no listener remains (safe to spawn),
+# 1 when one survived even SIGKILL (the caller must not spawn into a contested
+# session). TERM first so a healthy-but-stranded listener can deregister its
+# session cleanly; escalate to KILL after LISTENER_REAP_TIMEOUT_SECONDS because
+# a listener deadlocked in its token-refresh call ignores TERM (OMN-14564).
+_reap_orphaned_listeners() {
+    local pids
+    pids=$(pgrep -f "${LISTENER_PGREP_PATTERN}" 2>/dev/null || true)
+    if [[ -z "${pids}" ]]; then
+        return 0
+    fi
+    echo "[entrypoint] REAP: Runner.Listener survived from a previous incarnation (pids: ${pids//$'\n'/ }) — killing before spawning a replacement (OMN-15233: spawn-without-reap manufactures TaskAgentSessionConflictException)"
+    pkill -TERM -f "${LISTENER_PGREP_PATTERN}" 2>/dev/null || true
+    local waited=0
+    while pgrep -f "${LISTENER_PGREP_PATTERN}" >/dev/null 2>&1; do
+        if [[ ${waited} -ge ${LISTENER_REAP_TIMEOUT_SECONDS} ]]; then
+            echo "[entrypoint] REAP: listener ignored TERM for ${waited}s — escalating to KILL"
+            pkill -KILL -f "${LISTENER_PGREP_PATTERN}" 2>/dev/null || true
+            sleep 2
+            break
+        fi
+        sleep 1
+        waited=$((waited + 1))
+    done
+    if pgrep -f "${LISTENER_PGREP_PATTERN}" >/dev/null 2>&1; then
+        echo "[entrypoint] REAP: FAILED — a Runner.Listener survived SIGKILL; refusing to spawn a replacement into a contested session"
+        return 1
+    fi
+    echo "[entrypoint] REAP: no Runner.Listener remains — safe to spawn replacement"
+    return 0
 }
 
 # Check for credentials in priority order:
@@ -340,6 +444,16 @@ fi
 attempt=0
 listener_restarts=0
 while true; do
+    # OMN-15233: never spawn on top of a surviving listener. A leftover listener
+    # still owns the GitHub broker session, so the replacement would crash-loop
+    # on TaskAgentSessionConflictException while keeping _diag fresh enough to
+    # read HEALTHY. Exiting here surfaces the state to the container restart
+    # policy + runner-monitor instead of hiding it in a silent loop.
+    if ! _reap_orphaned_listeners; then
+        echo "[entrypoint] REAP: unreapable listener — exiting so the container restart policy replaces the whole PID namespace"
+        exit 1
+    fi
+
     echo "[entrypoint] Starting runner (attempt $((attempt + 1)))"
     set +e
     _as_runner "${RUNNER_HOME}/run.sh" > >(tee "${LOG_FILE}") 2>&1 &

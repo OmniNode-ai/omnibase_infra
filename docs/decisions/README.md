@@ -30,6 +30,7 @@ ADRs are immutable once accepted. Superseded decisions are marked but not delete
 | [ADR-007](adr-007-vault-to-infisical-migration.md) | Vault to Infisical Migration | Accepted |
 | [ADR-008](adr-008-realm-agnostic-topics.md) | Realm-Agnostic Topic Format | Accepted |
 | [ADR-009](adr-009-llm-cost-tracking-spi.md) | LLM Cost Tracking at the Infrastructure Layer | Accepted |
+| [ADR-010](adr-010-authoritative-environment-topology-owner.md) | OmniBase Infra Owns Authoritative Environment Topology | Accepted |
 
 ### Topic-Based ADRs
 
@@ -75,6 +76,7 @@ ADRs are immutable once accepted. Superseded decisions are marked but not delete
 - ADR-007: Security + Configuration (Vault to Infisical migration)
 - ADR-008: Event Bus (realm-agnostic topic format)
 - ADR-009: Data Layer (LLM cost tracking SPI)
+- ADR-010: Architecture + Configuration (authoritative environment topology owner)
 - The canonical publish interface policy ADR is also Architecture.
 
 ## Writing ADRs

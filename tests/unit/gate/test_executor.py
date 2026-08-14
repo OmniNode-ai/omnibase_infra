@@ -112,6 +112,29 @@ class TestExecuteChecks:
         expected_digest = hashlib.sha256(output.encode("utf-8")).hexdigest()
         assert results[0].stdout_hash == f"sha256:{expected_digest}"
 
+    def test_ambient_lc_all_cannot_contaminate_captured_stderr(
+        self,
+        tmp_path: Path,
+        monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
+        """Ambient locale defects must not alter command evidence."""
+        monkeypatch.setenv("LC_ALL", "onex-invalid-locale")
+        output = "command_error"
+        config = _config(
+            checks=(
+                ModelOmniGateCheck(
+                    name="stderr",
+                    run=f"printf {output!r} >&2",
+                ),
+            ),
+        )
+
+        results = execute_checks(config, tmp_path)
+
+        assert results[0].stdout_preview == output
+        expected_digest = hashlib.sha256(output.encode("utf-8")).hexdigest()
+        assert results[0].stdout_hash == f"sha256:{expected_digest}"
+
     def test_caps_stdout_preview_but_hashes_full_output(self, tmp_path: Path) -> None:
         output = "x" * 5000
         config = _config(

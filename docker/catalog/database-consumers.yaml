@@ -1,0 +1,47 @@
+schema_version: "1.0"
+environment: local
+consumers:
+  forward-migration:
+    physical_database_envs:
+      - NODE_POSTGRES_DB
+  migration-gate:
+    physical_database_envs:
+      - NODE_POSTGRES_DB
+  omnidash:
+    bindings:
+      - app_dashboard
+  omnimarket-projection-delegation:
+    bindings:
+      - tenant_projection
+  omnimarket-projection-llm-cost:
+    bindings:
+      - tenant_projection
+  omnimarket-projection-savings:
+    bindings:
+      - tenant_projection
+  omnimarket-projection-session-outcome:
+    bindings:
+      - tenant_projection
+  projection-api:
+    bindings:
+      - app_dashboard
+deferred_consumers:
+  omnimarket-projection-baselines:
+    tracking_ticket: OMN-15360
+    reason: Baseline-family domain ownership is resolved by the dedicated P6 ticket.
+  omnimarket-projection-cost-by-repo:
+    tracking_ticket: OMN-15423
+    reason: Repository-cost ownership remains blocked on total relation classification.
+  omnimarket-projection-live-events:
+    tracking_ticket: OMN-15423
+    reason: >-
+      live_events is a global, platform-wide operational event stream with no tenant_id column (omninode_internal domain per the OMN-15423 relation inventory), not per-tenant business data -- same internal-domain classification block as omnimarket-projection-registration.
+  omnimarket-projection-registration:
+    tracking_ticket: OMN-15423
+    reason: Registry tables require the source-backed internal-domain classification.
+  omninode-runtime:
+    tracking_ticket: OMN-15421
+    reason: The mixed-domain runtime must split tenant and internal adapters before binding.
+  runtime-canary:
+    tracking_ticket: OMN-15421
+    reason: The canary inherits the mixed-domain runtime adapter split.

@@ -1,0 +1,33 @@
+[
+  {
+    "sequence": 0,
+    "event_type": "topic_event_published",
+    "topic": "onex.evt.steel-onslaught.match-terminal.v1",
+    "source_node": "steel_onslaught.bus.kafka_forwarder.KafkaTerminalEventForwarder"
+  },
+  {
+    "sequence": 1,
+    "event_type": "contract_subscribes_topic",
+    "source_node": "node_ledger_projection_compute",
+    "ticket": "OMN-15168"
+  },
+  {
+    "sequence": 2,
+    "event_type": "dispatch_routed",
+    "source_node": "message_dispatch_engine",
+    "handler": "HandlerLedgerProjection",
+    "operation": "ledger.project"
+  },
+  {
+    "sequence": 3,
+    "event_type": "ledger_append_intent_emitted",
+    "source_node": "node_ledger_projection_compute",
+    "intent_type": "ledger.append"
+  },
+  {
+    "sequence": 4,
+    "event_type": "ledger_row_persisted",
+    "source_node": "node_ledger_write_effect",
+    "table": "event_ledger"
+  }
+]

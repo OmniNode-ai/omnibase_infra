@@ -90,14 +90,15 @@ class ModelNodeRegistrationRecord(ModelRegistrationRecordBase):
         ...     ModelNodeMetadata,
         ... )
         >>> now = datetime.now(UTC)
+        >>> resolved_health_endpoint = "<routing-authority-resolved-health-endpoint>"
         >>> record = ModelNodeRegistrationRecord(
         ...     node_id=uuid4(),
         ...     node_type=EnumNodeKind.EFFECT,
         ...     node_version=ModelSemVer(major=1, minor=0, patch=0),
         ...     capabilities=ModelNodeCapabilities(postgres=True),
-        ...     endpoints={"health": "http://localhost:8080/health"},
+        ...     endpoints={"health": resolved_health_endpoint},
         ...     metadata=ModelNodeMetadata(environment="production"),
-        ...     health_endpoint="http://localhost:8080/health",
+        ...     health_endpoint=resolved_health_endpoint,
         ...     registered_at=now,
         ...     updated_at=now,
         ... )

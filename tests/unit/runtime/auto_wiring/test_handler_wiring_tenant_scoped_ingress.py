@@ -34,8 +34,32 @@ class _FakeDispatchEngine:
     calls: list[tuple[str, ModelEventEnvelope[object]]] = field(default_factory=list)
     is_frozen: bool = True
 
-    async def dispatch(self, topic: str, envelope: ModelEventEnvelope[object]) -> None:
+    async def dispatch(
+        self,
+        topic: str,
+        envelope: ModelEventEnvelope[object],
+    ) -> None:
         self.calls.append((topic, envelope))
+
+    async def dispatch_scoped(
+        self,
+        topic: str,
+        envelope: ModelEventEnvelope[object],
+        *,
+        allowed_dispatcher_ids: object,
+    ) -> None:
+        del allowed_dispatcher_ids
+        await self.dispatch(topic, envelope)
+
+    async def dispatch_with_transaction(
+        self,
+        *,
+        topic: str,
+        envelope: ModelEventEnvelope[object],
+        tx: object,
+    ) -> None:
+        del tx
+        await self.dispatch(topic, envelope)
 
 
 @dataclass(frozen=True)
@@ -62,6 +86,7 @@ async def test_tenant_scoped_stamps_verified_slug_overwriting_forged_payload() -
         "tenant-acme.onex.cmd.omnimarket.delegate-skill.v1",
         engine,
         tenant_scoped=True,
+        allowed_dispatcher_ids={"tenant-test-dispatcher"},
     )
 
     await callback(_raw_message({"prompt": "hi", "tenant_id": "evil-forged-tenant"}))
@@ -80,6 +105,7 @@ async def test_tenant_scoped_stamps_slug_when_payload_omits_tenant_id() -> None:
         "tenant-beta.onex.cmd.omnimarket.delegate-skill.v1",
         engine,
         tenant_scoped=True,
+        allowed_dispatcher_ids={"tenant-test-dispatcher"},
     )
 
     await callback(_raw_message({"prompt": "hi"}))
@@ -99,6 +125,7 @@ async def test_tenant_scoped_never_stamps_a_default_on_non_prefixed_topic() -> N
         "onex.cmd.omnimarket.delegate-skill.v1",  # bare, no tenant prefix
         engine,
         tenant_scoped=True,
+        allowed_dispatcher_ids={"tenant-test-dispatcher"},
     )
 
     await callback(_raw_message({"prompt": "hi", "tenant_id": "self-reported"}))
@@ -116,6 +143,7 @@ async def test_tenant_scoped_off_by_default_is_a_true_no_op() -> None:
         "tenant-acme.onex.cmd.omnimarket.delegate-skill.v1",
         engine,
         # tenant_scoped omitted -- defaults False
+        allowed_dispatcher_ids={"tenant-test-dispatcher"},
     )
 
     await callback(_raw_message({"prompt": "hi"}))
@@ -124,16 +152,34 @@ async def test_tenant_scoped_off_by_default_is_a_true_no_op() -> None:
     assert "tenant_id" not in envelope.payload
 
 
-async def test_tenant_scoped_rejects_malformed_slug_without_stamping() -> None:
-    """A prefix that doesn't match the DNS-slug convention is treated as absent."""
+async def test_tenant_scoped_rejects_malformed_slug_topic() -> None:
+    """A ``tenant-`` prefixed topic that doesn't match the DNS-slug shape is
+    routed to the swallowed-exception boundary, not silently dispatched.
+
+    OMN-15792 correction: previously this scenario was "treated as absent"
+    (dispatched unstamped) because the resolver only validated a slug it had
+    already extracted, and simply skipped extraction on a shape mismatch.
+    That was the same divergence class as the reserved-slug case
+    (OMN-15757/15778): ``validate_canonical_topic`` already forbids any bare
+    contract topic from starting with ``tenant-``, so a string that DOES
+    start with ``tenant-`` is by construction an attempted tenant-wire topic
+    -- publish-side (``event_bus_kafka._enforce_onex_topic_format`` via
+    ``util_onex_topic_format``) already REJECTS this exact string as
+    INVALID, so the subscribe side silently accepting it (even unstamped)
+    was a live publish-reject / subscribe-accept disagreement. The two
+    directions must agree: malformed-shape ``tenant-`` prefixes are now
+    rejected on both sides, exactly like reserved slugs.
+    """
     engine = _FakeDispatchEngine()
     callback = _make_event_bus_callback(
         "tenant-NOT_VALID!.onex.cmd.omnimarket.delegate-skill.v1",
         engine,
         tenant_scoped=True,
+        allowed_dispatcher_ids={"tenant-test-dispatcher"},
     )
 
     await callback(_raw_message({"prompt": "hi"}))
 
-    _, envelope = engine.calls[0]
-    assert "tenant_id" not in envelope.payload
+    # Routed to the swallowed-exception boundary: never dispatched, never
+    # stamped.
+    assert engine.calls == []

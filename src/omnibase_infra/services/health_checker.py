@@ -83,6 +83,15 @@ from omnibase_infra.errors import (
     ProtocolConfigurationError,
     RuntimeHostError,
 )
+from omnibase_infra.event_bus.enum_runtime_readiness_state import (
+    EnumRuntimeReadinessState,
+)
+from omnibase_infra.runtime.health.runtime_health_block import (
+    RUNTIME_HEALTH_DETAIL_KEY,
+    build_runtime_health_block,
+    fold_attach_readiness_into_status,
+    fold_runtime_verdict_into_status,
+)
 from omnibase_infra.runtime.models.model_component_health import ModelComponentHealth
 from omnibase_infra.runtime.models.model_detailed_health_response import (
     ModelDetailedHealthResponse,
@@ -96,7 +105,15 @@ from omnibase_infra.runtime.models.model_local_runtime_ingress_request import (
 from omnibase_infra.utils.correlation import generate_correlation_id
 
 if TYPE_CHECKING:
+    from collections.abc import Callable
+
     from omnibase_core.container import ModelONEXContainer
+    from omnibase_infra.event_bus.model_runtime_attach_readiness import (
+        ModelRuntimeAttachReadiness,
+    )
+    from omnibase_infra.models.health.model_runtime_health_check_event import (
+        ModelRuntimeHealthCheckEvent,
+    )
     from omnibase_infra.runtime.auto_wiring.models.model_auto_wiring_manifest import (
         ModelAutoWiringManifest,
     )
@@ -143,6 +160,27 @@ def _get_port_from_env(default: int) -> int:
             e,
         )
         return default
+
+
+def _read_runtime_health_verdict(
+    provider: Callable[[], ModelRuntimeHealthCheckEvent | None] | None,
+) -> ModelRuntimeHealthCheckEvent | None:
+    """Read the latest monitor verdict, never raising into a health probe.
+
+    A best-effort verdict source must not be able to take liveness down with it:
+    a raising provider is reported as "no verdict", which consumers treat as
+    unknown (OMN-15217).
+    """
+    if provider is None:
+        return None
+    try:
+        return provider()
+    except Exception:  # noqa: BLE001 — boundary: verdict is best-effort
+        logger.warning(
+            "Runtime health verdict provider raised; reporting verdict as absent",
+            exc_info=True,
+        )
+        return None
 
 
 class ServiceHealth:
@@ -311,6 +349,20 @@ class ServiceHealth:
         # OMN-11198: Manifest attached after startup for introspection endpoint
         self._manifest: ModelAutoWiringManifest | None = None
 
+        # OMN-15512: boot attach-readiness aggregate, attached by the kernel via
+        # attach_readiness(). Read ONLY to surface two counts on the EXISTING
+        # /health/detailed components map — the authoritative, queryable copy is
+        # the runtime_manifests projection. No new producer is created here.
+        self._attach_readiness: ModelRuntimeAttachReadiness | None = None
+
+        # OMN-15217: provider for the ServiceRuntimeHealthMonitor verdict. Set by
+        # the kernel via set_runtime_health_provider(). Without it /health can
+        # only report process liveness, which is how a runtime logging
+        # status=DEGRADED served status=healthy for hours.
+        self._runtime_health_provider: (
+            Callable[[], ModelRuntimeHealthCheckEvent | None] | None
+        ) = None
+
         # OMN-519: Track last successful health check timestamps per component
         self._last_healthy_timestamps: dict[str, str] = {}
         # Track health phase transitions so frequent probes do not flood logs.
@@ -434,6 +486,27 @@ class ServiceHealth:
         logger.info(
             "ServiceHealth attached manifest (%d contracts)",
             manifest.total_discovered,
+            extra={"port": self._port, "host": self._host},
+        )
+
+    def attach_readiness(self, readiness: ModelRuntimeAttachReadiness) -> None:
+        """Attach the boot attach-readiness aggregate (OMN-15512).
+
+        Feeds the ``runtime_wiring`` entry on /health/detailed's existing
+        components map with ``not_ready_contract_count`` and
+        ``registered_handler_count``. Green liveness is provably not evidence
+        that consumers attached — on 2026-07-30 the dev lane served ``/health``
+        200 ``healthy:true`` while NOT-READY warnings were still firing — so
+        the counts sit next to the other components instead of staying
+        implicit. The topic-level detail is NOT served here; it is queried from
+        the ``runtime_manifests`` projection.
+        """
+        self._attach_readiness = readiness
+        logger.info(
+            "ServiceHealth attached boot readiness (state=%s, attached=%d/%d)",
+            readiness.state.value,
+            readiness.attached_contracts,
+            readiness.required_contracts,
             extra={"port": self._port, "host": self._host},
         )
 
@@ -861,6 +934,24 @@ class ServiceHealth:
             correlation_id,
         )
 
+    def set_runtime_health_provider(
+        self,
+        provider: Callable[[], ModelRuntimeHealthCheckEvent | None] | None,
+    ) -> None:
+        """Attach the runtime health monitor verdict source (OMN-15217).
+
+        Args:
+            provider: Zero-arg callable returning the monitor's latest
+                ``ModelRuntimeHealthCheckEvent``, or ``None`` when no cycle has
+                completed. Pass ``None`` to detach.
+
+        Notes:
+            The provider is called on every ``/health`` request, so it must be
+            cheap and non-blocking — it reads a cached event, it does not run a
+            health check.
+        """
+        self._runtime_health_provider = provider
+
     async def _handle_health(self, request: web.Request) -> web.Response:
         """Handle GET /health requests (liveness probe).
 
@@ -987,6 +1078,11 @@ class ServiceHealth:
                             "is_running": False,
                             "runtime_attached": False,
                             "startup_phase": "runtime_pending",
+                            # OMN-15217: the verdict key is always present in the
+                            # payload — explicitly null while unknown — so a
+                            # consumer can distinguish "no verdict yet" from
+                            # "this build does not publish verdicts at all".
+                            RUNTIME_HEALTH_DETAIL_KEY: None,
                         },
                     ),
                 )
@@ -1054,6 +1150,50 @@ class ServiceHealth:
                 status = "unhealthy"
                 http_status = 503
 
+            # OMN-15217: join the ServiceRuntimeHealthMonitor verdict (contract
+            # discovery, consumer-group coverage, topic coverage) onto this
+            # payload. RuntimeHostProcess.health_check() only sees process-local
+            # state, so without this fold a runtime with four contracts failing
+            # to load reports healthy=true/degraded=false — verified on the
+            # stability lane 2026-07-27T12:58Z while the monitor logged
+            # status=DEGRADED every five minutes.
+            #
+            # The HTTP status code is deliberately NOT folded. /health is also
+            # the liveness probe watched by autoheal, and a semantic degradation
+            # is typically restart-immune (a contract that fails to import will
+            # fail to import again), so flipping the code here would convert a
+            # visible degradation into a restart loop. The body carries the
+            # truth; strict container health is a per-lane opt-in via
+            # omnibase_infra.runtime.health.container_healthcheck.
+            verdict = _read_runtime_health_verdict(self._runtime_health_provider)
+            runtime_health_block = build_runtime_health_block(verdict)
+            status = fold_runtime_verdict_into_status(
+                status, verdict.status if verdict is not None else None
+            )
+            # OMN-15642 (remediation): boot attach-readiness is DELIBERATELY NOT
+            # folded into this endpoint's gated `status`, unlike the runtime-verdict
+            # fold above. `/health` is the liveness probe that four real automated
+            # gates hard-fail on with no DEGRADED tolerance --
+            # .github/workflows/reusable-runtime-boot.yml (`jq -e '.status ==
+            # "healthy" ...' || exit 1`), scripts/deploy-agent/deploy_agent/executor.py
+            # (`_runtime_health_passed`), and the deploy-readiness checks in
+            # scripts/runtime_build/verify_stability_refresh.py and
+            # verify_dev_refresh.py. `ModelRuntimeAttachReadiness`'s own docstring
+            # (omnibase_infra.event_bus.model_runtime_attach_readiness) states "The
+            # readiness endpoint reports attach status ONLY -- it is not a source of
+            # truth for contract lifecycle", and OMN-13237 deliberately designed a
+            # NOT-READY/DEGRADED contract to be recorded and skipped, never fatal,
+            # never a restart/redeploy trigger (service_kernel.py's boot-walk
+            # comment: "it never recycles the process"). A single unprovisioned
+            # topic -- a documented live condition on onex-dev (OMN-15330) -- would
+            # therefore have turned a deliberately-non-fatal per-contract skip into a
+            # hard boot/deploy failure on every future boot. The aggregate is still
+            # fully visible without that risk: enriched_details["components"]
+            # ["runtime_wiring"] below (pre-existing, OMN-15512) and
+            # /health/detailed's own `status` (fold_attach_readiness_into_status,
+            # below in _handle_health_detailed -- that endpoint is not a probe
+            # target for any of the four consumers above).
+
             self._log_health_transition(
                 status=status,
                 runtime_attached=runtime_attached,
@@ -1063,9 +1203,16 @@ class ServiceHealth:
             )
 
             # OMN-519: Add component breakdown to health response details
-            components = self._build_component_health(health_details)
+            components = build_component_health(
+                health_details,
+                last_healthy_timestamps=self._last_healthy_timestamps,
+                attach_readiness=self._attach_readiness,
+            )
             enriched_details = dict(health_details)
-            enriched_details["degraded"] = is_degraded
+            enriched_details["degraded"] = is_degraded or status == "degraded"
+            enriched_details[RUNTIME_HEALTH_DETAIL_KEY] = cast(
+                "JsonType", runtime_health_block
+            )
             enriched_details["startup_in_progress"] = startup_in_progress
             enriched_details["runtime_attached"] = runtime_attached
             enriched_details["components"] = {
@@ -1378,97 +1525,6 @@ class ServiceHealth:
             content_type="application/json",
         )
 
-    def _build_component_health(
-        self,
-        health_details: dict[str, object],
-    ) -> dict[str, ModelComponentHealth]:
-        """Build per-component health status from runtime health details.
-
-        Extracts component-level health information from the runtime's
-        health_check() response and constructs typed ModelComponentHealth
-        instances for each component.
-
-        OMN-519: Component-level health diagnostics.
-
-        Args:
-            health_details: The raw health check dict from RuntimeHostProcess.
-
-        Returns:
-            Dictionary mapping component name to ModelComponentHealth.
-        """
-        now = datetime.now(tz=UTC).isoformat()
-        components: dict[str, ModelComponentHealth] = {}
-
-        # Event bus health
-        event_bus_healthy = bool(health_details.get("event_bus_healthy", False))
-        event_bus_data = health_details.get("event_bus", {})
-        if event_bus_healthy:
-            self._last_healthy_timestamps["event_bus"] = now
-        event_bus_details: dict[str, JsonType] | None = None
-        if isinstance(event_bus_data, dict):
-            event_bus_details = cast("dict[str, JsonType]", event_bus_data)
-        if event_bus_healthy:
-            components["event_bus"] = ModelComponentHealth.healthy(
-                name="event_bus",
-                last_healthy=self._last_healthy_timestamps.get("event_bus"),
-                details=event_bus_details,
-            )
-        else:
-            error_msg = ""
-            if isinstance(event_bus_data, dict):
-                error_msg = str(event_bus_data.get("error", "unhealthy"))
-            else:
-                error_msg = "unhealthy"
-            components["event_bus"] = ModelComponentHealth.unhealthy(
-                name="event_bus",
-                error=error_msg,
-                last_healthy=self._last_healthy_timestamps.get("event_bus"),
-                details=event_bus_details,
-            )
-
-        # Per-handler health
-        handlers_data = health_details.get("handlers", {})
-        if isinstance(handlers_data, dict):
-            for handler_type, handler_health in handlers_data.items():
-                handler_healthy = False
-                handler_details: dict[str, JsonType] | None = None
-                handler_error: str | None = None
-
-                if isinstance(handler_health, dict):
-                    handler_healthy = bool(handler_health.get("healthy", False))
-                    handler_details = cast("dict[str, JsonType]", handler_health)
-                    if not handler_healthy:
-                        handler_error = str(
-                            handler_health.get("error", "health check failed")
-                        )
-
-                if handler_healthy:
-                    self._last_healthy_timestamps[handler_type] = now
-                    components[handler_type] = ModelComponentHealth.healthy(
-                        name=handler_type,
-                        last_healthy=self._last_healthy_timestamps.get(handler_type),
-                        details=handler_details,
-                    )
-                else:
-                    components[handler_type] = ModelComponentHealth.unhealthy(
-                        name=handler_type,
-                        error=handler_error or "health check failed",
-                        last_healthy=self._last_healthy_timestamps.get(handler_type),
-                        details=handler_details,
-                    )
-
-        # Failed handlers (degraded components)
-        failed_handlers = health_details.get("failed_handlers", {})
-        if isinstance(failed_handlers, dict):
-            for handler_type, error_msg_raw in failed_handlers.items():
-                components[handler_type] = ModelComponentHealth.degraded(
-                    name=handler_type,
-                    error=str(error_msg_raw),
-                    last_healthy=self._last_healthy_timestamps.get(handler_type),
-                )
-
-        return components
-
     async def _handle_health_detailed(self, request: web.Request) -> web.Response:
         """Handle GET /health/detailed requests (verbose diagnostics).
 
@@ -1533,8 +1589,37 @@ class ServiceHealth:
                 status = "unhealthy"
                 http_status = 503
 
+            # OMN-15642: fold the boot attach-readiness aggregate into THIS
+            # endpoint's status -- deliberately NOT into /health's (see the long
+            # comment in _handle_health for why). /health/detailed is not a probe
+            # target for any automated boot/deploy gate (verified: no k8s manifest,
+            # CI workflow, or deploy script under this repo or omninode_infra reads
+            # this path), so it is safe here and matches this endpoint's own
+            # documented contract (503 for "unhealthy"). Without this fold,
+            # /health/detailed's own status/http_status pair stayed green while
+            # attach_readiness.state != READY was visible only inside the nested
+            # components.runtime_wiring detail below.
+            status = fold_attach_readiness_into_status(
+                status,
+                self._attach_readiness.state
+                if self._attach_readiness is not None
+                else None,
+            )
+            # Only "unhealthy" can change http_status here: fold_attach_readiness_
+            # into_status() early-returns unchanged for an already-"unhealthy"
+            # payload_status, and every pre-fold path that yields "healthy" or
+            # "degraded" already set http_status=200 above -- so a post-fold
+            # "degraded" never needs (or gets) a different http_status than it
+            # already had.
+            if status == "unhealthy":
+                http_status = 503
+
             checked_at = datetime.now(tz=UTC).isoformat()
-            components = self._build_component_health(health_details)
+            components = build_component_health(
+                health_details,
+                last_healthy_timestamps=self._last_healthy_timestamps,
+                attach_readiness=self._attach_readiness,
+            )
 
             # Add overall check latency to details
             enriched_details = dict(health_details)
@@ -1604,6 +1689,151 @@ class ServiceHealth:
             status=200,
             content_type="application/json",
         )
+
+
+def build_component_health(
+    health_details: dict[str, object],
+    *,
+    last_healthy_timestamps: dict[str, str],
+    attach_readiness: ModelRuntimeAttachReadiness | None = None,
+) -> dict[str, ModelComponentHealth]:
+    """Build per-component health status from runtime health details.
+
+    Extracts component-level health information from the runtime's
+    health_check() response and constructs typed ModelComponentHealth
+    instances for each component.
+
+    OMN-519: Component-level health diagnostics.
+    OMN-15512: boot wiring counts as a ``runtime_wiring`` component.
+
+    Args:
+        health_details: The raw health check dict from RuntimeHostProcess.
+        last_healthy_timestamps: Mutable per-component last-healthy map, updated
+            in place for every component observed healthy on this call.
+        attach_readiness: Boot attach-readiness aggregate, or None before the
+            kernel has attached it.
+
+    Returns:
+        Dictionary mapping component name to ModelComponentHealth.
+    """
+    now = datetime.now(tz=UTC).isoformat()
+    components: dict[str, ModelComponentHealth] = {}
+
+    # Event bus health
+    event_bus_healthy = bool(health_details.get("event_bus_healthy", False))
+    event_bus_data = health_details.get("event_bus", {})
+    if event_bus_healthy:
+        last_healthy_timestamps["event_bus"] = now
+    event_bus_details: dict[str, JsonType] | None = None
+    if isinstance(event_bus_data, dict):
+        event_bus_details = cast("dict[str, JsonType]", event_bus_data)
+    if event_bus_healthy:
+        components["event_bus"] = ModelComponentHealth.healthy(
+            name="event_bus",
+            last_healthy=last_healthy_timestamps.get("event_bus"),
+            details=event_bus_details,
+        )
+    else:
+        error_msg = ""
+        if isinstance(event_bus_data, dict):
+            error_msg = str(event_bus_data.get("error", "unhealthy"))
+        else:
+            error_msg = "unhealthy"
+        components["event_bus"] = ModelComponentHealth.unhealthy(
+            name="event_bus",
+            error=error_msg,
+            last_healthy=last_healthy_timestamps.get("event_bus"),
+            details=event_bus_details,
+        )
+
+    # Per-handler health
+    handlers_data = health_details.get("handlers", {})
+    if isinstance(handlers_data, dict):
+        for handler_type, handler_health in handlers_data.items():
+            handler_healthy = False
+            handler_details: dict[str, JsonType] | None = None
+            handler_error: str | None = None
+
+            if isinstance(handler_health, dict):
+                handler_healthy = bool(handler_health.get("healthy", False))
+                handler_details = cast("dict[str, JsonType]", handler_health)
+                if not handler_healthy:
+                    handler_error = str(
+                        handler_health.get("error", "health check failed")
+                    )
+
+            if handler_healthy:
+                last_healthy_timestamps[handler_type] = now
+                components[handler_type] = ModelComponentHealth.healthy(
+                    name=handler_type,
+                    last_healthy=last_healthy_timestamps.get(handler_type),
+                    details=handler_details,
+                )
+            else:
+                components[handler_type] = ModelComponentHealth.unhealthy(
+                    name=handler_type,
+                    error=handler_error or "health check failed",
+                    last_healthy=last_healthy_timestamps.get(handler_type),
+                    details=handler_details,
+                )
+
+    # Failed handlers (degraded components)
+    failed_handlers = health_details.get("failed_handlers", {})
+    if isinstance(failed_handlers, dict):
+        for handler_type, error_msg_raw in failed_handlers.items():
+            components[handler_type] = ModelComponentHealth.degraded(
+                name=handler_type,
+                error=str(error_msg_raw),
+                last_healthy=last_healthy_timestamps.get(handler_type),
+            )
+
+    # Boot wiring counts (OMN-15512). Present only once the kernel has
+    # attached the aggregate — absent during early startup, exactly like
+    # the introspection manifest.
+    readiness = attach_readiness
+    if readiness is not None:
+        registered = health_details.get("registered_handlers", [])
+        registered_handler_count = (
+            len(registered) if isinstance(registered, list | tuple) else 0
+        )
+        not_ready_contract_count = len(readiness.not_ready_results)
+        wiring_details: dict[str, JsonType] = {
+            "state": readiness.state.value,
+            "required_contracts": readiness.required_contracts,
+            "attached_contracts": readiness.attached_contracts,
+            "not_ready_contract_count": not_ready_contract_count,
+            "registered_handler_count": registered_handler_count,
+        }
+        if readiness.state is EnumRuntimeReadinessState.READY:
+            last_healthy_timestamps["runtime_wiring"] = now
+            components["runtime_wiring"] = ModelComponentHealth.healthy(
+                name="runtime_wiring",
+                last_healthy=last_healthy_timestamps.get("runtime_wiring"),
+                details=wiring_details,
+            )
+        else:
+            # DEGRADED aggregate -> degraded component; FAILED -> unhealthy.
+            # Deliberately does NOT change the endpoint's HTTP status: a
+            # runtime stays live with NOT_READY contracts by design
+            # (OMN-13237). This only stops green liveness from implying
+            # that every consumer attached.
+            factory = (
+                ModelComponentHealth.degraded
+                if readiness.state is EnumRuntimeReadinessState.DEGRADED
+                else ModelComponentHealth.unhealthy
+            )
+            components["runtime_wiring"] = factory(
+                name="runtime_wiring",
+                error=(
+                    f"{not_ready_contract_count} contract(s) did not attach "
+                    f"(state={readiness.state.value}); query the "
+                    f"runtime_manifests projection for the per-topic detail"
+                ),
+                last_healthy=last_healthy_timestamps.get("runtime_wiring"),
+                details=wiring_details,
+            )
+
+    return components
 
 
 __all__: list[str] = ["DEFAULT_HTTP_HOST", "DEFAULT_HTTP_PORT", "ServiceHealth"]

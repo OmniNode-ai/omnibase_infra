@@ -1,14 +1,26 @@
 # SPDX-FileCopyrightText: 2025 OmniNode.ai Inc.
 # SPDX-License-Identifier: MIT
 # ONEX Node Contract - Runtime Manifest Reducer Node (OMN-11197)
+#
+# OMN-15512 (contract_version 1.1.0): the emitted intent payload
+#   ModelPayloadInsertRuntimeManifest gained one optional field,
+#   `attach_readiness: ModelRuntimeAttachReadiness | None` (default None),
+#   carrying the boot attach-readiness blocker set on the SAME
+#   runtime-manifest-published envelope this node already subscribes to.
+#   HandlerPostgresRuntimeManifestInsert flattens it across four new
+#   runtime_manifests columns (attach_state, attach_required_contracts,
+#   attach_attached_contracts, attach_not_ready_contracts) added by forward
+#   migration 095. Additive and backward-compatible: the field is optional and
+#   a payload omitting it writes attach_state='unknown' (never 'ready'). No
+#   change to subscribe_topics, handler routing, or the target table. (2026-07-30)
 contract_version:
   major: 1
-  minor: 0
+  minor: 1
   patch: 0
-node_version: "1.0.0"
+node_version: "1.1.0"
 name: "node_runtime_manifest_reducer"
 node_type: "REDUCER_GENERIC"
-description: "Append-only reducer that persists runtime manifests to PostgreSQL. Receives runtime-manifest-published events and inserts one row per startup into runtime_manifests."
+description: "Append-only reducer that persists runtime manifests to PostgreSQL. Receives runtime-manifest-published events and inserts one row per startup into runtime_manifests, including the boot attach-readiness blocker set (OMN-15512)."
 input_model:
   name: "ModelReducerInput"
   module: "omnibase_core.models.reducer.model_reducer_input"
@@ -35,7 +47,7 @@ intent_emission:
       target_pattern: "postgres://runtime_manifests/{runtime_profile}"
       payload_model: "ModelPayloadInsertRuntimeManifest"
       payload_module: "omnibase_infra.nodes.node_runtime_manifest_reducer.models.model_payload_insert_runtime_manifest"
-      description: "INSERT runtime manifest row into PostgreSQL runtime_manifests table (append-only, never UPDATE)"
+      description: "INSERT runtime manifest row into PostgreSQL runtime_manifests table (append-only, never UPDATE). Writes 17 columns: the 13 base manifest columns plus the four OMN-15512 attach-readiness columns flattened from the payload's optional attach_readiness field — attach_state (EnumRuntimeReadinessState value — ready/degraded/failed — or 'unknown' when the aggregate is absent), attach_required_contracts and attach_attached_contracts (counts), and attach_not_ready_contracts (JSON array of the blocker-set results). Dedup key (runtime_profile, topology_hash, started_at) is unchanged."
 node_capabilities:
   processing: true
 dependencies:
@@ -48,15 +60,18 @@ health_check:
   endpoint: "/health"
   interval_seconds: 30
 metadata:
-  description: "Append-only reducer persisting runtime startup manifests to PostgreSQL."
+  description: "Append-only reducer persisting runtime startup manifests to PostgreSQL. OMN-15512 (contract_version 1.1.0): the intent payload carries an optional attach_readiness aggregate that the handler flattens into four runtime_manifests columns, making the boot NOT-READY blocker set durably queryable instead of log-only."
   author: "OmniNode Team"
   created: "2026-05-17"
-  updated: "2026-05-17"
+  updated: "2026-07-30"
   tags:
     - "reducer"
     - "runtime-manifest"
     - "projection"
     - "append-only"
+    - "attach-readiness"
   related_tickets:
     - "OMN-11197"
     - "OMN-11188"
+    - "OMN-15512"
+    - "OMN-15508"

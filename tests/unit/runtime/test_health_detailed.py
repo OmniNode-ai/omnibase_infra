@@ -546,3 +546,156 @@ class TestServiceHealthDetailedIntegration:
         finally:
             await server.stop()
             assert not server.is_running
+
+
+# ---------------------------------------------------------------------------
+# OMN-15512: boot wiring counts on the existing components map
+# ---------------------------------------------------------------------------
+
+
+def _readiness(*, attached: int, not_ready: int):  # type: ignore[no-untyped-def]
+    """Build an attach-readiness aggregate with ``not_ready`` blockers."""
+    from omnibase_infra.event_bus.enum_contract_attach_status import (
+        EnumContractAttachStatus,
+    )
+    from omnibase_infra.event_bus.model_contract_attach_result import (
+        ModelContractAttachResult,
+    )
+    from omnibase_infra.event_bus.model_runtime_attach_readiness import (
+        ModelRuntimeAttachReadiness,
+    )
+
+    results = tuple(
+        ModelContractAttachResult(
+            contract_name=f"node_ok_{i}",
+            status=EnumContractAttachStatus.ATTACHED,
+        )
+        for i in range(attached)
+    ) + tuple(
+        ModelContractAttachResult(
+            contract_name=f"node_blocked_{i}",
+            status=EnumContractAttachStatus.NOT_READY,
+            detail="topic metadata did not converge",
+        )
+        for i in range(not_ready)
+    )
+    return ModelRuntimeAttachReadiness.from_results(results)
+
+
+def _healthy_runtime(registered: list[str]) -> MagicMock:
+    mock_runtime = MagicMock()
+    mock_runtime.health_check = AsyncMock(
+        return_value={
+            "healthy": True,
+            "degraded": False,
+            "is_running": True,
+            "event_bus_healthy": True,
+            "event_bus": {"healthy": True},
+            "handlers": {"http": {"healthy": True}},
+            "failed_handlers": {},
+            "registered_handlers": registered,
+        }
+    )
+    return mock_runtime
+
+
+@pytest.mark.unit
+class TestRuntimeWiringComponent:
+    """The two counts OMN-15512 puts on /health/detailed.
+
+    These exist because green liveness is provably not evidence that consumers
+    attached: on 2026-07-30 the dev lane served /health 200 healthy:true with
+    registered_handlers ["db","http"] while NOT-READY warnings were still
+    firing. The endpoint reports COUNTS only — the per-topic blocker detail is
+    queried from the runtime_manifests projection, not served here.
+    """
+
+    @pytest.mark.asyncio
+    async def test_absent_before_the_kernel_attaches_it(self) -> None:
+        """No aggregate yet -> no component, exactly like the manifest."""
+        server = ServiceHealth(runtime=_healthy_runtime(["http"]), version="1.0.0")
+        response = await server._handle_health_detailed(MagicMock(spec=web.Request))
+        data = json.loads(response.text)
+
+        assert "runtime_wiring" not in data["components"]
+
+    @pytest.mark.asyncio
+    async def test_reports_both_counts(self) -> None:
+        server = ServiceHealth(runtime=_healthy_runtime(["db", "http"]), version="1.0")
+        server.attach_readiness(_readiness(attached=3, not_ready=2))
+
+        response = await server._handle_health_detailed(MagicMock(spec=web.Request))
+        data = json.loads(response.text)
+        details = data["components"]["runtime_wiring"]["details"]
+
+        assert details["not_ready_contract_count"] == 2
+        assert details["registered_handler_count"] == 2
+        assert details["required_contracts"] == 5
+        assert details["attached_contracts"] == 3
+
+    @pytest.mark.asyncio
+    async def test_degraded_wiring_under_a_green_endpoint(self) -> None:
+        """OMN-15642: the false-green case this component ORIGINALLY only
+
+        half-fixed. Until OMN-15642, ``data["status"]`` stayed "healthy" here
+        — only the nested ``components.runtime_wiring`` said otherwise, which
+        nothing read either. ``fold_attach_readiness_into_status`` now folds
+        the aggregate into this endpoint's top-level ``status`` too, the same
+        way OMN-15217 already folds the runtime-health-monitor verdict. The
+        HTTP status code stays 200 — a runtime is designed to stay live with
+        NOT_READY contracts (OMN-13237) — but `status` itself is now honest.
+
+        NOTE (remediation): this fold lives on ``/health/detailed`` only, not
+        ``/health`` — neither endpoint is read by ``deploy-onex-staging``
+        (verified: that workflow probes k8s `/ready`, omnidash's
+        `/api/health/data-sources`, and consumer-group health, never
+        `/health` or `/health/detailed`), and ``/health``'s gated `status` is
+        a hard, no-DEGRADED-tolerance boot/deploy gate for four OTHER
+        automated consumers (see
+        ``tests/unit/runtime/test_service_health_attach_readiness.py``'s
+        module docstring) that this fold must not touch.
+        """
+        server = ServiceHealth(runtime=_healthy_runtime(["db", "http"]), version="1.0")
+        server.attach_readiness(_readiness(attached=3, not_ready=2))
+
+        response = await server._handle_health_detailed(MagicMock(spec=web.Request))
+        data = json.loads(response.text)
+
+        assert response.status == 200
+        assert data["status"] == "degraded"
+        assert data["components"]["runtime_wiring"]["status"] == "degraded"
+        assert (
+            "2 contract(s) did not attach"
+            in (data["components"]["runtime_wiring"]["error"])
+        )
+
+    @pytest.mark.asyncio
+    async def test_all_attached_is_healthy_component(self) -> None:
+        server = ServiceHealth(runtime=_healthy_runtime(["http"]), version="1.0.0")
+        server.attach_readiness(_readiness(attached=4, not_ready=0))
+
+        response = await server._handle_health_detailed(MagicMock(spec=web.Request))
+        data = json.loads(response.text)
+
+        assert data["components"]["runtime_wiring"]["status"] == "healthy"
+        assert (
+            data["components"]["runtime_wiring"]["details"]["not_ready_contract_count"]
+            == 0
+        )
+
+    @pytest.mark.asyncio
+    async def test_error_line_points_at_the_projection_not_the_logs(self) -> None:
+        """Net-negative surface: the pointer must be the queryable surface.
+
+        If this message sends an operator back to `docker logs | grep`, the
+        manual step OMN-15512 exists to retire has not been retired.
+        """
+        server = ServiceHealth(runtime=_healthy_runtime(["http"]), version="1.0.0")
+        server.attach_readiness(_readiness(attached=0, not_ready=1))
+
+        response = await server._handle_health_detailed(MagicMock(spec=web.Request))
+        data = json.loads(response.text)
+        error = data["components"]["runtime_wiring"]["error"]
+
+        assert "runtime_manifests" in error
+        assert "docker logs" not in error

@@ -106,6 +106,10 @@ def _make_dispatch_engine() -> MagicMock:
     engine._container = None
     engine.register_dispatcher = MagicMock()
     engine.register_route = MagicMock()
+    engine.dispatch_scoped = AsyncMock()
+    engine.validate_contract_dispatcher_scope = MagicMock(
+        side_effect=lambda _contract_name, dispatcher_ids: frozenset(dispatcher_ids)
+    )
     engine.freeze = MagicMock()
     return engine
 

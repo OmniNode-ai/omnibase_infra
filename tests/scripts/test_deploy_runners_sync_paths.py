@@ -30,9 +30,9 @@ from __future__ import annotations
 
 import importlib.util
 import re
-import shutil
 import subprocess
 import sys
+import tempfile
 from pathlib import Path
 from typing import Any
 
@@ -128,37 +128,26 @@ def _run_rsync_artifacts() -> list[str]:
             "rsync_artifacts",
         ]
     )
-    result = subprocess.run(
-        ["bash", "-c", harness],
-        capture_output=True,
-        text=True,
-        check=False,
-        env={
-            "PATH": f"{Path(__file__).resolve().parent / '_stub_bin'}:/usr/bin:/bin",
-        },
-    )
+    with tempfile.TemporaryDirectory(prefix="rsync-stub-") as stub_dir_name:
+        stub_dir = Path(stub_dir_name)
+        stub_rsync = stub_dir / "rsync"
+        stub_rsync.write_text(
+            "#!/usr/bin/env bash\nprintf '%s\\n' \"$@\"\n", encoding="utf-8"
+        )
+        stub_rsync.chmod(0o755)
+        result = subprocess.run(
+            ["bash", "-c", harness],
+            capture_output=True,
+            text=True,
+            check=False,
+            env={
+                "PATH": f"{stub_dir}:/usr/bin:/bin",
+            },
+        )
     assert result.returncode == 0, (
         f"rsync_artifacts() harness failed:\nstdout={result.stdout}\nstderr={result.stderr}"
     )
     return result.stdout.splitlines()
-
-
-@pytest.fixture(scope="module", autouse=True)
-def _stub_rsync_binary() -> Any:
-    """Install a stub ``rsync`` on a fixed PATH dir that just echoes its argv.
-
-    Fixed path (not tmp_path per-test) because the harness's PATH is built as
-    a literal string inside the bash -c invocation above.
-    """
-    stub_dir = Path(__file__).resolve().parent / "_stub_bin"
-    stub_dir.mkdir(exist_ok=True)
-    stub_rsync = stub_dir / "rsync"
-    stub_rsync.write_text(
-        "#!/usr/bin/env bash\nprintf '%s\\n' \"$@\"\n", encoding="utf-8"
-    )
-    stub_rsync.chmod(0o755)
-    yield
-    shutil.rmtree(stub_dir, ignore_errors=True)
 
 
 @pytest.mark.parametrize("required_path", _REQUIRED_OMNI_CURL_PATHS)

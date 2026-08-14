@@ -621,3 +621,62 @@ def test_zero_populated_endpoints_raises_loud_error(tmp_path: Path) -> None:
             environ={},  # No LLM_*_URL vars — all backends stay unpopulated.
             force_reseed=True,  # Bypass cache so we reach the rendering path.
         )
+
+
+# ==========================================================================
+# OMN-15628 (remediation) — no silent target-path default
+# ==========================================================================
+
+
+@pytest.mark.unit
+def test_unbound_contract_path_refuses_naming_the_key(tmp_path: Path) -> None:
+    """RED-before/GREEN-after: at the pre-fix head, an unbound
+    BIFROST_CONTRACT_PATH with no explicit target_path silently resolved to
+    ``_DEFAULT_TARGET_PATH`` (``/app/data/delegation/bifrost_delegation.yaml``)
+    and rendered there with no attributable cause — the write-side twin of the
+    read-side silent-fallback defect this ticket kills on the reducer. Post-fix
+    it refuses, naming the missing key (CLAUDE.md rule 8)."""
+    source = _source_contract(tmp_path / "source.yaml")
+
+    with pytest.raises(ProtocolConfigurationError, match="BIFROST_CONTRACT_PATH"):
+        render_bifrost_delegation_contract(
+            source_path=source,
+            target_path=None,
+            environ={"LLM_CODER_URL": _http_url("coder.local:8000")},
+        )
+
+
+@pytest.mark.unit
+def test_explicit_empty_contract_path_still_disables_render(tmp_path: Path) -> None:
+    """The pre-existing "explicit empty string = deliberately skip rendering"
+    signal (used by projection-api) must be unaffected by the unbound-refusal
+    fix above — only the fully-ABSENT-key case changed."""
+    source = _source_contract(tmp_path / "source.yaml", required=True)
+
+    rendered = render_bifrost_delegation_contract(
+        source_path=source,
+        target_path=None,
+        environ={"BIFROST_CONTRACT_PATH": ""},
+    )
+
+    assert rendered is None
+
+
+@pytest.mark.unit
+def test_explicit_target_path_bypasses_env_resolution(tmp_path: Path) -> None:
+    """Passing target_path explicitly must still short-circuit env resolution
+    entirely (unchanged behavior — callers that supply their own target never
+    hit the BIFROST_CONTRACT_PATH refusal)."""
+    source = _source_contract(tmp_path / "source.yaml")
+    target = tmp_path / "rendered.yaml"
+
+    rendered = render_bifrost_delegation_contract(
+        source_path=source,
+        target_path=target,
+        # BIFROST_CONTRACT_PATH absent — must not raise; only LLM_CODER_URL is
+        # needed so the render itself succeeds (target_path resolution is
+        # what's under test here, not endpoint population).
+        environ={"LLM_CODER_URL": _http_url("coder.local:8000")},
+    )
+
+    assert rendered == target

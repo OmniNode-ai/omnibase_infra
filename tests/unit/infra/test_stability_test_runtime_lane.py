@@ -4,6 +4,7 @@
 
 from __future__ import annotations
 
+import re
 from pathlib import Path
 from typing import Any
 
@@ -15,6 +16,20 @@ BASE_COMPOSE_FILE = REPO_ROOT / "docker" / "docker-compose.infra.yml"
 OVERLAY_FILE = REPO_ROOT / "docker" / "docker-compose.stability-test.yml"
 RUNTIME_POLICY_ENV_FILE = REPO_ROOT / "docker" / "runtime-policy.env"
 RUNBOOK_FILE = REPO_ROOT / "docs" / "runbooks" / "stability-test-runtime-lane.md"
+
+# OMN-14013: the durable, committed partition-cap value for the stability-test
+# lane. This is deliberately ABOVE the base redpanda.yaml default (7000) --
+# stability-test has historically accumulated ~4x dev's topic count with no
+# retirement process, and a cap raised only via a live `rpk cluster config
+# set` does NOT survive this lane's redeploys (warm_broker_topic_provisioning()
+# in deploy-runtime.sh force-recreates the redpanda-partition-cap one-shot on
+# every redeploy, re-running whatever value is hardcoded in the compose
+# override below). Both belts that declare this value in
+# docker-compose.stability-test.yml -- the `redpanda` service's `--set
+# topic_partitions_per_shard=...` startup flag and the `redpanda-partition-cap`
+# service's `rpk cluster config set topic_partitions_per_shard ...` call --
+# must agree with this constant, or the assertions below fail.
+STABILITY_TEST_TOPIC_PARTITIONS_PER_SHARD = 15000
 
 RUNTIME_SERVICES = ("omninode-runtime", "runtime-effects", "runtime-worker")
 RUNTIME_ADDRESS_PREFIX = "runtime://omninode-pc/stability-test/"
@@ -144,7 +159,8 @@ def test_stability_lane_runtime_services_do_not_reuse_production_names() -> None
 def test_stability_lane_runtime_worker_is_not_scaled_to_zero() -> None:
     """OMN-12990: the worker replica count must fail-fast on the ledgered value.
 
-    The base compose default is ``${WORKER_REPLICAS:-0}``; a soft ``:-1`` default
+    The base compose default used to be a bare ``${WORKER_REPLICAS:-0}``
+    (lane-prefixed and fail-closed since OMN-14968); a soft ``:-1`` default
     here would silently re-introduce the silent-drop hole on any recreate that
     omitted the policy env. The override must reference the contract-rendered
     ``STABILITY_TEST_WORKER_REPLICAS`` with the ``:?`` fail-fast form so a missing
@@ -297,6 +313,35 @@ def test_stability_lane_redpanda_requires_connected_network_advertise_host() -> 
     )
 
 
+def _extract_partition_cap_value(text: str) -> int:
+    """Parse the literal N from `... cluster config set topic_partitions_per_shard N`.
+
+    A bare substring check (`"15000" in text`) is a trap here: this same
+    command string also carries prose comments/history that mention other
+    numbers (e.g. "reset to 7000", "raised to 8000 as a stopgap") -- those
+    would make a substring assertion pass even if the actual `rpk` invocation
+    regressed to a stale value. Extract the value the shell would actually
+    pass to `rpk`, not just any digit sequence that appears in the text.
+    """
+    match = re.search(r"cluster config set topic_partitions_per_shard\s+(\d+)", text)
+    assert match is not None, (
+        f"no 'cluster config set topic_partitions_per_shard N' found in: {text!r}"
+    )
+    return int(match.group(1))
+
+
+def _extract_partition_cap_set_flag_value(command_tokens: list[str]) -> int:
+    """Parse the literal N from a `--set topic_partitions_per_shard=N` compose
+    command token list (handles both a single joined token and a `--set` /
+    `topic_partitions_per_shard=N` token pair)."""
+    joined = " ".join(command_tokens)
+    match = re.search(r"topic_partitions_per_shard=(\d+)", joined)
+    assert match is not None, (
+        f"no '--set topic_partitions_per_shard=N' flag found in: {command_tokens!r}"
+    )
+    return int(match.group(1))
+
+
 @pytest.mark.unit
 def test_stability_lane_sets_redpanda_partition_capacity_before_runtime() -> None:
     overlay = _load_overlay()
@@ -310,11 +355,39 @@ def test_stability_lane_sets_redpanda_partition_capacity_before_runtime() -> Non
     assert partition_cap_service["entrypoint"] == ["/bin/sh", "-c"]
     assert "set -eu" in command
     assert "topic_partitions_per_shard" in command
-    assert "7000" in command
+    assert (
+        _extract_partition_cap_value(command)
+        == STABILITY_TEST_TOPIC_PARTITIONS_PER_SHARD
+    )
     assert "topic_memory_per_partition" in command
     assert "1048576" in command
     assert partition_cap_service["depends_on"]["redpanda"]["condition"] == (
         "service_healthy"
+    )
+
+
+@pytest.mark.unit
+def test_stability_lane_redpanda_startup_flag_matches_partition_cap_service() -> None:
+    """OMN-14013 regression guard: the lane's `redpanda` service overrides
+    `command:` wholesale (Docker Compose replaces, not merges, a scalar-list
+    key across `-f` files), which had silently DROPPED the base's `--set
+    topic_partitions_per_shard=...` startup flag for this lane entirely (belt
+    #2 of the documented 3-belt cap design was never applied here). Assert
+    both belts are present here AND numerically agree -- a future edit to one
+    without the other is exactly the kind of silent belt-drift this lane's
+    partition-cap regressions came from."""
+    overlay = _load_overlay()
+    services = overlay["services"]
+    redpanda_command = services["redpanda"]["command"]
+    partition_cap_command = services["redpanda-partition-cap"]["command"][0]
+
+    assert (
+        _extract_partition_cap_set_flag_value(redpanda_command)
+        == STABILITY_TEST_TOPIC_PARTITIONS_PER_SHARD
+    )
+    assert (
+        _extract_partition_cap_value(partition_cap_command)
+        == STABILITY_TEST_TOPIC_PARTITIONS_PER_SHARD
     )
     assert (
         services["omninode-runtime"]["depends_on"]["redpanda-partition-cap"][
@@ -408,19 +481,71 @@ def test_stability_lane_runtime_services_define_session_health_contract() -> Non
 
 
 @pytest.mark.unit
-def test_stability_lane_runtime_healthchecks_fail_on_http_503() -> None:
-    """Stability lane inherits curl --fail probes from runtime compose services."""
+def test_stability_lane_runtime_healthchecks_are_semantic_not_shallow() -> None:
+    """Every runtime container on the proof lane must override the shallow probe.
+
+    OMN-15217. The base compose probe is ``curl -sf http://localhost:8085/health``,
+    which asserts one property: HTTP status < 400. ``/health`` returns 200 for a
+    running-but-DEGRADED runtime *by design* (degraded containers stay in rotation
+    rather than triggering cascading restarts), so the base probe is a liveness
+    check wearing a health check's name. Live proof of the mask on this lane,
+    2026-07-27: all three runtime containers read ``Up 4 hours (healthy)`` while
+    their monitors logged ``status=DEGRADED``.
+
+    This lane's Docker health is what gets cited as stability-proof for prod
+    promotion (OMN-13418), so the assertion is *replacement*, not addition: an
+    overlay that merely appended a strict probe alongside the inherited one, or
+    that covered two of three containers, would leave the lane able to lie.
+    """
     base = _load_base_compose()
     overlay = _load_overlay()
 
     for service_name in RUNTIME_SERVICES:
-        assert "healthcheck" not in overlay["services"][service_name]
+        # The mask this override exists to close is still the base default —
+        # dev/prod keep the shallow probe pending this lane's canary.
         assert base["services"][service_name]["healthcheck"]["test"] == [
             "CMD",
             "curl",
             "-sf",
             "http://localhost:8085/health",
-        ]
+        ], f"{service_name}: base probe changed; re-derive what this lane overrides"
+
+        healthcheck = overlay["services"][service_name]["healthcheck"]
+
+        # Exact list, not a substring/`in` check: the probe is what Docker
+        # executes, so a partial match would accept an extra shallow fallback.
+        assert healthcheck["test"] == [
+            "CMD",
+            "python",
+            "/usr/local/bin/onex-container-healthcheck",
+            "--degraded-policy",
+            "fail",
+        ], f"{service_name}: proof lane must run the strict semantic check"
+
+        # The override must actually displace the inherited probe. Compose
+        # replaces `healthcheck` wholesale, so curl surviving anywhere in the
+        # resolved probe would mean the override was authored wrong.
+        assert "curl" not in healthcheck["test"], (
+            f"{service_name}: shallow curl probe survived the strict override"
+        )
+
+        # --degraded-policy fail is the load-bearing flag: without it the check
+        # degrades to the same pass-on-DEGRADED semantics as curl -sf.
+        assert healthcheck["test"][-2:] == ["--degraded-policy", "fail"], (
+            f"{service_name}: strict policy flag missing — probe would pass DEGRADED"
+        )
+
+        # Flap budget. The monitor's first verdict lands ~one
+        # RUNTIME_HEALTH_CHECK_INTERVAL (300s) after boot; retries must outlast
+        # a single missed interval, and start_period must not shrink below the
+        # base service's own budget or boot would flap on an absent verdict.
+        assert healthcheck["interval"] == "30s"
+        assert healthcheck["timeout"] == "10s"
+        assert healthcheck["retries"] == 5
+        assert (
+            healthcheck["start_period"]
+            == base["services"][service_name]["healthcheck"]["start_period"]
+        ), f"{service_name}: strict probe must keep the base start_period budget"
 
 
 @pytest.mark.unit

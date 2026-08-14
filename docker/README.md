@@ -75,6 +75,8 @@ cp .env.example .env
 #    - POSTGRES_PASSWORD: openssl rand -hex 32
 #    - INFISICAL_ENCRYPTION_KEY (secrets profile): openssl rand -hex 32
 #    - INFISICAL_AUTH_SECRET (secrets profile): openssl rand -hex 32
+#    - DEV_REDPANDA_ADVERTISE_HOST: 'localhost' for single-host dev, or the
+#      reachable host/IP for off-host clients (OMN-15173: required, no default)
 
 # 3. Deploy via the canonical script (DO NOT use docker compose up directly)
 cd .. && ./scripts/deploy-runtime.sh --execute --restart
@@ -191,8 +193,13 @@ docker compose -f docker-compose.infra.yml --profile runtime up -d --build
 # Scale workers manually
 docker compose -f docker-compose.infra.yml --profile runtime up -d --scale runtime-worker=4
 
-# Or set via environment variable
-WORKER_REPLICAS=8 docker compose -f docker-compose.infra.yml --profile runtime up -d
+# Or set via environment variable. NOTE (OMN-14968): the knob is the
+# lane-prefixed DEV_WORKER_REPLICAS, and it is fail-closed -- the render aborts
+# if it is unset, so source the ledgered policy env (which pins it to 1)
+# rather than relying on a default. The bare WORKER_REPLICAS name no longer
+# exists; it silently resolved to 0 and dropped the worker.
+source runtime-policy.env  # supplies DEV_WORKER_REPLICAS=1
+DEV_WORKER_REPLICAS=8 docker compose -f docker-compose.infra.yml --profile runtime up -d
 ```
 
 #### Consul Profile (Service Discovery)
@@ -514,6 +521,7 @@ These variables must be set explicitly. The runtime will fail to start if they a
 | `OMNIBASE_INFRA_DB_URL`  | Full PostgreSQL DSN for omnibase_infra. Required for CLI/scripts. For Docker-only usage, `POSTGRES_PASSWORD` alone suffices (the fallback constructs the DSN automatically). Set this explicitly if your password contains special characters (`@`, `:`, `/`, `%`, `#`) since the Docker fallback cannot URL-encode. | Secret | (default) |
 | `INFISICAL_ENCRYPTION_KEY`| Hex-encoded AES key (32 or 64 hex chars)            | Secret         | secrets    |
 | `INFISICAL_AUTH_SECRET`   | JWT signing secret for authentication               | Secret         | secrets    |
+| `DEV_REDPANDA_ADVERTISE_HOST` | Dev lane external Redpanda advertise host (OMN-15173: no silent default — `docker compose config` fails fast when unset). Use `localhost` for pure single-host dev; use the reachable host/IP for off-host clients. | Non-secret | (default) |
 
 ### Optional Variables (With Defaults)
 
@@ -521,7 +529,6 @@ These variables must be set explicitly. The runtime will fail to start if they a
 |------------------------------|------------------------------------|----------------------------------------|
 | **Kafka/Redpanda**           |                                    |                                        |
 | `KAFKA_BOOTSTRAP_SERVERS`    | `localhost:19092`                  | Kafka/Redpanda broker addresses (host); containers use `redpanda:9092` |
-| `DEV_REDPANDA_ADVERTISE_HOST` | `localhost`                       | Dev lane external Redpanda advertise host |
 | Stability-test Redpanda advertise host | Contract overlay | Stability-test uses `x-omninode-contract-overlay` in `docker-compose.stability-test.yml`; do not configure it through environment variables |
 | `PROD_REDPANDA_ADVERTISE_HOST` | Required for prod overlay         | Prod external Redpanda advertise host |
 | **PostgreSQL**               |                                    |                                        |

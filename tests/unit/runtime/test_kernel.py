@@ -767,6 +767,125 @@ class TestBootstrap:
         assert call_kwargs["kafka_bootstrap_servers"] == "kafka:9092"
         assert call_kwargs["environment"] == "dev"
 
+    @staticmethod
+    def _never_wiring_manifest() -> ModelAutoWiringManifest:
+        """Three contracts, three ordinary reasons not to wire (OMN-15474).
+
+        No ``handler_routing`` (declares no local handler), no
+        ``subscribe_topics`` (consumes nothing), and ``plugin_managed`` (a
+        domain plugin owns the subscription, OMN-10864). None is an error
+        state; all three are shapes the live discovered manifest carries at
+        steady state, and none of them may vanish from the wiring report.
+        """
+
+        def _c(name: str, **overrides: object) -> ModelDiscoveredContract:
+            return ModelDiscoveredContract(
+                name=name,
+                node_type="COMPUTE_GENERIC",
+                contract_version=ModelContractVersion(major=1, minor=0, patch=0),
+                contract_path=Path("/fake") / f"{name}.yaml",
+                entry_point_name=name,
+                package_name="omnibase_infra",
+                **overrides,  # type: ignore[arg-type]
+            )
+
+        return ModelAutoWiringManifest(
+            contracts=(
+                _c("node_totality_boot_no_handler_routing"),
+                _c(
+                    "node_totality_boot_no_subscribe_topics",
+                    event_bus=ModelEventBusWiring(
+                        subscribe_topics=(), publish_topics=()
+                    ),
+                ),
+                _c(
+                    "node_totality_boot_plugin_managed",
+                    event_bus=ModelEventBusWiring(
+                        subscribe_topics=("onex.evt.platform.totality-boot.v1",),
+                        publish_topics=(),
+                        plugin_managed=True,
+                    ),
+                ),
+            ),
+            errors=(),
+        )
+
+    async def test_bootstrap_completes_when_auto_wiring_reports_no_wired_contracts(
+        self,
+        mock_wire_infrastructure: MagicMock,
+        mock_inmemory_runtime_config: MagicMock,
+        mock_runtime_host: MagicMock,
+        mock_event_bus: MagicMock,
+        mock_health_server: MagicMock,
+    ) -> None:
+        """OMN-15474 regression: a boot that wires nothing must not abort.
+
+        This is the failure that took 24 kernel tests down: discovery finds
+        contracts, the wiring engine wires none of them, and
+        ``subscribe_wired_contract_topics`` compares a real manifest against a
+        report that reached no verdict on any of it. The report is required to
+        be TOTAL — every contract carries an explicit skipped-with-a-reason
+        row — so the bijection holds and boot proceeds with zero
+        subscriptions.
+
+        ``subscribe_wired_contract_topics`` and ``MessageDispatchEngine`` are
+        real here; only the wiring engine is the suite's shared stand-in. The
+        seam under test is therefore the product's, not the fixture's.
+        """
+        with (
+            patch(
+                "omnibase_infra.runtime.auto_wiring.discover_contracts",
+                return_value=self._never_wiring_manifest(),
+            ),
+            patch("omnibase_infra.runtime.service_kernel.asyncio.Event") as mock_event,
+        ):
+            event_instance = MagicMock()
+            event_instance.wait = AsyncMock(return_value=None)
+            mock_event.return_value = event_instance
+
+            exit_code = await bootstrap()
+
+        assert exit_code == 0
+
+    async def test_bootstrap_completes_with_the_real_wiring_engine(
+        self,
+        mock_wire_infrastructure: MagicMock,
+        mock_inmemory_runtime_config: MagicMock,
+        mock_runtime_host: MagicMock,
+        mock_event_bus: MagicMock,
+        mock_health_server: MagicMock,
+    ) -> None:
+        """The same boot with the wiring engine UNSTUBBED (OMN-15474).
+
+        ``mock_wire_infrastructure`` patches ``wire_from_manifest`` out; this
+        test puts the real one back so discover -> wire -> freeze -> subscribe
+        is product code end to end. It is the artifact that runs: the engine's
+        totality post-condition and the subscription identity check are
+        exercised against each other with no fixture in between.
+        """
+        from omnibase_infra.runtime.auto_wiring.handler_wiring import (
+            wire_from_manifest as real_wire_from_manifest,
+        )
+
+        with (
+            patch(
+                "omnibase_infra.runtime.auto_wiring.discover_contracts",
+                return_value=self._never_wiring_manifest(),
+            ),
+            patch(
+                "omnibase_infra.runtime.auto_wiring.wire_from_manifest",
+                new=real_wire_from_manifest,
+            ),
+            patch("omnibase_infra.runtime.service_kernel.asyncio.Event") as mock_event,
+        ):
+            event_instance = MagicMock()
+            event_instance.wait = AsyncMock(return_value=None)
+            mock_event.return_value = event_instance
+
+            exit_code = await bootstrap()
+
+        assert exit_code == 0
+
     async def test_bootstrap_defers_auto_wiring_subscriptions_until_after_freeze(
         self,
         mock_wire_infrastructure: MagicMock,

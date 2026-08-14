@@ -70,6 +70,12 @@ from uuid import UUID
 import yaml
 
 if TYPE_CHECKING:
+    from omnibase_core.models.core.model_deployment_topology import (
+        ModelDeploymentTopology,
+    )
+    from omnibase_infra.event_bus.model_runtime_attach_readiness import (
+        ModelRuntimeAttachReadiness as ModelRuntimeAttachReadinessType,
+    )
     from omnibase_infra.event_bus.model_topic_readiness_config import (
         ModelTopicReadinessConfig,
     )
@@ -96,6 +102,7 @@ from omnibase_infra.errors import (
     SchemaFingerprintMismatchError,
     SchemaFingerprintMissingError,
     ServiceResolutionError,
+    TopicReplicationPolicyError,
 )
 
 # OMN-7077: EventBusInmemory is migrating to omnibase_core.
@@ -157,7 +164,10 @@ from omnibase_infra.runtime.protocol_domain_plugin import (
     RegistryDomainPlugin,
 )
 from omnibase_infra.runtime.runtime_host_process import RuntimeHostProcess
-from omnibase_infra.runtime.runtime_profile import load_runtime_profile
+from omnibase_infra.runtime.runtime_profile import (
+    load_runtime_profile,
+    resolve_secret_resolver_config_path,
+)
 from omnibase_infra.runtime.util_container_wiring import (
     wire_infrastructure_services,
 )
@@ -355,6 +365,32 @@ def _get_contracts_dir() -> Path:
     return Path(DEFAULT_CONTRACTS_DIR)
 
 
+def _load_runtime_database_topology() -> ModelDeploymentTopology | None:
+    """Resolve only the explicit application-database topology profile.
+
+    ``ONEX_ENVIRONMENT`` and ``KAFKA_ENVIRONMENT`` are event namespaces and are
+    intentionally not consulted here. An absent profile leaves non-database
+    runtimes unchanged; a runtime that owns a ``db_io`` contract is rejected
+    after discovery unless this function returned a checked-in topology.
+    """
+    profile = os.environ.get("ONEX_DATABASE_TOPOLOGY_PROFILE")
+    if profile is None:
+        return None
+
+    from omnibase_infra.topology import load_topology_profile
+
+    return load_topology_profile(profile)
+
+
+def _should_auto_create_missing_topics(
+    *,
+    validation_is_valid: bool,
+    universe_warm_enabled: bool,
+) -> bool:
+    """Keep the universe-wide auto-create retry behind the universe-warm gate."""
+    return universe_warm_enabled and not validation_is_valid
+
+
 def resolve_topic_readiness_config() -> ModelTopicReadinessConfig:
     """Resolve the per-contract boot-interleave readiness knobs (OMN-13237).
 
@@ -417,8 +453,14 @@ def resolve_topic_readiness_config() -> ModelTopicReadinessConfig:
 def _build_runtime_handler_dependencies(
     postgres_pool: object | None,
     kafka_bootstrap_servers: str | None = None,
+    gateway_secret_resolver_config_path: Path | None = None,
 ) -> dict[str, dict[str, object]] | None:
-    """Build constructor dependencies for runtime-owned handlers."""
+    """Build constructor dependencies for runtime-owned handlers.
+
+    Gateway session handlers must share one session store and one resolver.
+    The resolver is built from the deploy-rendered, typed configuration artifact;
+    no handler may infer secret names or read secret values directly.
+    """
     dependencies: dict[str, dict[str, object]] = {}
     if postgres_pool is not None:
         dependencies.update(
@@ -446,6 +488,63 @@ def _build_runtime_handler_dependencies(
             "producer": DLQProducer(dlq_replay_config),
             "quarantine_producer": DLQQuarantineProducer(dlq_replay_config),
         }
+
+    if gateway_secret_resolver_config_path:
+        from omnibase_infra.nodes.node_gateway_attach_effect.models.model_gateway_attach_config import (
+            ModelGatewayAttachConfig,
+        )
+        from omnibase_infra.nodes.node_gateway_attach_effect.services.store_gateway_session_memory import (
+            StoreGatewaySessionMemory,
+        )
+        from omnibase_infra.runtime.models.model_secret_resolver_config import (
+            ModelSecretResolverConfig,
+        )
+        from omnibase_infra.runtime.secret_resolver import SecretResolver
+
+        config_path = gateway_secret_resolver_config_path
+        try:
+            raw_config = yaml.safe_load(config_path.read_text(encoding="utf-8"))
+            secret_resolver_config = ModelSecretResolverConfig.model_validate(
+                raw_config
+            )
+        except (OSError, ValueError, yaml.YAMLError) as exc:
+            raise ProtocolConfigurationError(
+                "Gateway attach dependency wiring requires a valid rendered "
+                f"secret-resolver config at {config_path}"
+            ) from exc
+
+        gateway_config = ModelGatewayAttachConfig()
+        required_gateway_refs = {
+            gateway_config.keycloak_issuer_ref,
+            gateway_config.keycloak_introspection_ref,
+            gateway_config.keycloak_jwks_ref,
+            f"{gateway_config.keycloak_admin_client_ref}.client_id",
+            f"{gateway_config.keycloak_admin_client_ref}.client_secret",
+        }
+        mapped_refs = {
+            mapping.logical_name for mapping in secret_resolver_config.mappings
+        }
+        missing_refs = sorted(required_gateway_refs - mapped_refs)
+        if missing_refs:
+            raise ProtocolConfigurationError(
+                "Gateway attach dependency wiring is missing explicit "
+                f"secret-resolver mappings: {', '.join(missing_refs)}"
+            )
+
+        session_store = StoreGatewaySessionMemory()
+        secret_resolver = SecretResolver(config=secret_resolver_config)
+        shared_dependencies = {
+            "config": gateway_config,
+            "session_store": session_store,
+            "secret_resolver": secret_resolver,
+        }
+        dependencies.update(
+            {
+                "HandlerGatewayAttach": dict(shared_dependencies),
+                "HandlerGatewayHeartbeat": dict(shared_dependencies),
+                "HandlerGatewayDetach": dict(shared_dependencies),
+            }
+        )
 
     if not dependencies:
         return None
@@ -857,6 +956,7 @@ async def bootstrap() -> int:
     llm_health_service: ServiceLlmEndpointHealth | None = None
     wiring_health_checker: WiringHealthChecker | None = None
     wiring_health_task: asyncio.Task[None] | None = None
+    not_ready_reconciliation_task: asyncio.Task[None] | None = None
     triage_unsub: Callable[[], Awaitable[None]] | None = None
     build_loop_db_handler = None  # HandlerDb | None, assigned inside try block
     baselines_task: asyncio.Task[None] | None = None
@@ -970,6 +1070,7 @@ async def bootstrap() -> int:
         # Pass correlation_id for consistent tracing across initialization sequence
         config_start_time = time.time()
         config = load_runtime_config(contracts_dir, correlation_id=correlation_id)
+        deployment_topology = _load_runtime_database_topology()
         config_duration = time.time() - config_start_time
         # Log only safe config fields (no credentials or sensitive data)
         # Full config.model_dump() could leak passwords, API keys, connection strings
@@ -1231,6 +1332,9 @@ async def bootstrap() -> int:
         # per-contract confirm carries all owned consumers (W2 evidence). The
         # provisioner instance is reused by the Phase B interleave.
         topic_provisioner: object | None = None
+        _universe_warm_enabled = (
+            os.environ.get("ONEX_BOOT_UNIVERSE_PROVISION", "1") != "0"
+        )
         if use_kafka:
             _contracts_root = _get_contracts_dir()
             _skill_manifests_root: Path | None = None
@@ -1275,9 +1379,6 @@ async def bootstrap() -> int:
                 )
                 # OMN-13237: universe warm is best-effort and demoted; the
                 # per-contract confirm (Phase B) gates consumer attach.
-                _universe_warm_enabled = (
-                    os.environ.get("ONEX_BOOT_UNIVERSE_PROVISION", "1") != "0"
-                )
                 if not _universe_warm_enabled:
                     logger.info(
                         "Topic provisioning: universe warm DISABLED "
@@ -1308,6 +1409,11 @@ async def bootstrap() -> int:
                         provisioning_result["failed"] or "none",
                         correlation_id,
                     )
+            except TopicReplicationPolicyError:
+                # OMN-15395: a durability-policy violation is fail-closed and
+                # must escape this best-effort boundary — the whole point of the
+                # distinct error class is that it is not degradable to a warning.
+                raise
             except Exception:  # noqa: BLE001 — boundary: logs warning and degrades
                 logger.warning(
                     "Topic provisioning failed (best-effort, non-blocking) "
@@ -1336,7 +1442,10 @@ async def bootstrap() -> int:
                     correlation_id=correlation_id,
                     log_missing=False,
                 )
-                if not validation_result.is_valid:
+                if _should_auto_create_missing_topics(
+                    validation_is_valid=validation_result.is_valid,
+                    universe_warm_enabled=_universe_warm_enabled,
+                ):
                     # OMN-7810: Auto-create missing topics before failing strict
                     # validation. This handles topics that were added to the
                     # provisioning registry but not yet created on the broker
@@ -1375,6 +1484,9 @@ async def bootstrap() -> int:
                                 "(correlation_id=%s)",
                                 correlation_id,
                             )
+                    except TopicReplicationPolicyError:
+                        # OMN-15395: fail-closed past the best-effort boundary.
+                        raise
                     except Exception:  # noqa: BLE001
                         logger.warning(
                             "Auto-create missing topics failed (best-effort) "
@@ -1383,17 +1495,17 @@ async def bootstrap() -> int:
                             exc_info=True,
                         )
 
-                    if strict_topic_validation:
-                        raise RuntimeError(
-                            f"Missing topics: {validation_result.missing_topics}"
-                        )
-                    if not validation_result.is_valid:
-                        logger.warning(
-                            "Topic validation: %d missing (non-blocking) "
-                            "(correlation_id=%s)",
-                            len(validation_result.missing_topics),
-                            correlation_id,
-                        )
+                if strict_topic_validation and not validation_result.is_valid:
+                    raise RuntimeError(
+                        f"Missing topics: {validation_result.missing_topics}"
+                    )
+                if not validation_result.is_valid:
+                    logger.warning(
+                        "Topic validation: %d missing (non-blocking) "
+                        "(correlation_id=%s)",
+                        len(validation_result.missing_topics),
+                        correlation_id,
+                    )
             except RuntimeError:
                 raise
             except Exception:  # noqa: BLE001 — boundary: logs warning and degrades
@@ -1634,6 +1746,12 @@ async def bootstrap() -> int:
                 _savings_topic = _savings_config.produce_topic
 
                 _savings_input_topics = list(_savings_config.consumed_topics)
+                _savings_node_identity = ModelNodeIdentity(
+                    env=environment,
+                    service=config.name or "onex-kernel",
+                    node_name="savings-estimator",
+                    version="v1",
+                )
 
                 async def _savings_consumer_loop() -> None:
                     """Consume input events and produce savings estimates."""
@@ -1655,8 +1773,8 @@ async def bootstrap() -> int:
 
                             await event_bus.subscribe(
                                 _input_topic,
+                                node_identity=_savings_node_identity,
                                 on_message=_savings_on_message,
-                                group_id=f"savings-estimator.{_input_topic}",
                             )
                         except Exception:  # noqa: BLE001
                             logger.warning(
@@ -2463,6 +2581,11 @@ async def bootstrap() -> int:
         auto_wiring_manifest_for_subscriptions = None
         auto_wiring_manifest_discovered = None  # OMN-11198: full discovery result
         lifecycle_executor = None
+        # OMN-15512: boot attach-readiness aggregate, hoisted to bootstrap scope
+        # so step 9.8 can fold it onto the runtime-manifest snapshot. Stays None
+        # when the per-contract interleave never ran, which is distinct from
+        # "ran and everything attached" (that carries a READY aggregate).
+        attach_readiness: ModelRuntimeAttachReadinessType | None = None
         try:
             from omnibase_infra.runtime.auto_wiring import (
                 LifecycleHookExecutor,
@@ -2583,6 +2706,18 @@ async def bootstrap() -> int:
                     errors=manifest.errors,
                 )
                 auto_wiring_manifest_for_subscriptions = filtered_manifest
+                db_io_contracts = tuple(
+                    contract.name
+                    for contract in filtered_manifest.contracts
+                    if contract.db_io is not None and contract.db_io.db_tables
+                )
+                if db_io_contracts and deployment_topology is None:
+                    raise RuntimeHostError(
+                        "Auto-wiring discovered db_io contracts but "
+                        "ONEX_DATABASE_TOPOLOGY_PROFILE is not set; an explicit "
+                        "checked-in database topology profile is required for: "
+                        f"{sorted(db_io_contracts)}"
+                    )
 
                 # OMN-12409: Wire result appliers for all manifest contracts that
                 # declare published_events but are not yet in auto_wiring_result_appliers.
@@ -2783,9 +2918,17 @@ async def bootstrap() -> int:
                             correlation_id,
                         )
 
+                gateway_secret_resolver_config_path_raw = (
+                    resolve_secret_resolver_config_path()
+                )
                 runtime_handler_dependencies = _build_runtime_handler_dependencies(
                     registration_service.postgres_pool,
                     kafka_bootstrap_servers if use_kafka else None,
+                    gateway_secret_resolver_config_path=(
+                        Path(gateway_secret_resolver_config_path_raw)
+                        if gateway_secret_resolver_config_path_raw
+                        else None
+                    ),
                 )
 
                 # 5. Wire handlers into dispatch engine
@@ -2798,6 +2941,7 @@ async def bootstrap() -> int:
                     subscribe_immediately=False,
                     result_appliers_by_contract=auto_wiring_result_appliers,
                     materialized_explicit_dependencies=(runtime_handler_dependencies),
+                    topology=deployment_topology,
                 )
 
                 auto_wiring_duration = time.time() - auto_wiring_start
@@ -2891,6 +3035,21 @@ async def bootstrap() -> int:
             port=http_port,
             version=KERNEL_VERSION,
         )
+        # OMN-15217: publish the runtime health monitor's verdict on /health.
+        # The monitor is started above (step 3) and owns the semantic view of
+        # runtime health — contract discovery errors, consumer-group coverage,
+        # topic coverage. Without this line that verdict never leaves the
+        # container logs and /health reports a DEGRADED runtime as healthy.
+        # When the monitor did not start (non-Kafka profiles, startup failure)
+        # the provider is left unset and the payload carries a null verdict.
+        if runtime_health_monitor is not None:
+            health_server.set_runtime_health_provider(
+                lambda: (
+                    runtime_health_monitor.latest_event
+                    if runtime_health_monitor is not None
+                    else None
+                )
+            )
         health_start_time = time.time()
         await health_server.start()
         health_start_duration = time.time() - health_start_time
@@ -3087,6 +3246,9 @@ async def bootstrap() -> int:
             runtime_node_graph_config=node_graph_config,
             # OMN-10587: Wire prefetch policy from runtime profile.
             prefetch_policy=kernel_profile.prefetch_policy,
+            # OMN-15418: Thread the same checked-in topology used by cold boot
+            # into post-freeze Kafka contract materialization.
+            deployment_topology=deployment_topology,
         )
         runtime_create_duration = time.time() - runtime_create_start_time
         logger.debug(
@@ -3123,6 +3285,36 @@ async def bootstrap() -> int:
             else auto_wiring_manifest_discovered
         )
         if _introspection_manifest is not None:
+            # OMN-10856: bind runtime profile + image/deployment SHA identity
+            # onto the served manifest so a reported topology can be tied to
+            # a specific deployed build. contracts/errors are carried through
+            # unchanged (single source — see bind_introspection_manifest_identity).
+            # Env reads happen HERE, not in the auto_wiring package, because
+            # this file is the approved env-read boundary
+            # (scripts/check-env-reads.sh). ONEX_IMAGE_DIGEST reuses the same
+            # var already read below at publish_runtime_manifest(image_digest=...)
+            # (OMN-11196/OMN-11197) rather than inventing a second name for
+            # the same concept.
+            from omnibase_infra.runtime.auto_wiring.introspection_manifest_identity import (
+                ENV_VAR_DEPLOYMENT_SHA,
+                ENV_VAR_IMAGE_SHA,
+                bind_introspection_manifest_identity,
+            )
+            from omnibase_infra.runtime.auto_wiring.models.model_runtime_build_sha import (
+                ModelRuntimeBuildSha,
+            )
+
+            _introspection_manifest = bind_introspection_manifest_identity(
+                _introspection_manifest,
+                runtime_profile=kernel_profile.name,
+                image_sha=ModelRuntimeBuildSha.from_raw(
+                    os.environ.get(ENV_VAR_IMAGE_SHA), source_name=ENV_VAR_IMAGE_SHA
+                ),
+                deployment_sha=ModelRuntimeBuildSha.from_raw(
+                    os.environ.get(ENV_VAR_DEPLOYMENT_SHA),
+                    source_name=ENV_VAR_DEPLOYMENT_SHA,
+                ),
+            )
             health_server.attach_manifest(_introspection_manifest)
 
         # OMN-13768: the long-running Kafka subscription work (per-contract
@@ -3142,6 +3334,9 @@ async def bootstrap() -> int:
             # process. The aggregate tri-state is logged for operator visibility.
             from typing import cast as _cast
 
+            from omnibase_infra.event_bus.enum_contract_attach_status import (
+                EnumContractAttachStatus,
+            )
             from omnibase_infra.event_bus.model_contract_attach_result import (
                 ModelContractAttachResult,
             )
@@ -3196,6 +3391,16 @@ async def bootstrap() -> int:
             _attach_readiness = ModelRuntimeAttachReadiness.from_results(
                 tuple(_attach_results)
             )
+            # OMN-15512: hand the aggregate to the enclosing bootstrap scope so
+            # step 9.8 folds it onto the runtime-manifest snapshot. Before this
+            # it died at the logger.info below, so the only way to read the
+            # NOT-READY blocker set was `docker logs | grep NOT-READY` — which
+            # is literally how OMN-15508 had to be diagnosed.
+            attach_readiness = _attach_readiness
+            # Counts also go onto the EXISTING /health/detailed components map.
+            # No new endpoint and no new producer: the authoritative, queryable
+            # copy is the runtime_manifests projection, not this endpoint.
+            health_server.attach_readiness(_attach_readiness)
             logger.info(
                 "Per-contract boot interleave: state=%s attached=%d/%d "
                 "(OMN-13237) (correlation_id=%s)",
@@ -3262,6 +3467,63 @@ async def bootstrap() -> int:
                     correlation_id,
                 )
 
+            # OMN-15215: the boot interleave above makes exactly ONE
+            # provision->confirm->attach attempt per contract; a contract left
+            # NOT_READY (transient broker topic-metadata-convergence race,
+            # OMN-13237) is otherwise skipped for the rest of the process
+            # lifetime — no consumer group is ever created for it. Schedule a
+            # bounded background retry so "runtime stays live" is actually
+            # recoverable instead of a permanent skip.
+            _not_ready_at_boot = tuple(
+                r
+                for r in _attach_results
+                if r.status is EnumContractAttachStatus.NOT_READY
+            )
+            if _not_ready_at_boot:
+                from omnibase_infra.runtime.auto_wiring.handler_wiring import (
+                    run_not_ready_reconciliation_loop,
+                )
+
+                async def _reconcile_not_ready_contracts() -> None:
+                    assert auto_wiring_manifest_for_subscriptions is not None
+                    try:
+                        await run_not_ready_reconciliation_loop(
+                            auto_wiring_manifest_for_subscriptions,
+                            _not_ready_at_boot,
+                            dispatch_engine,
+                            event_bus,
+                            environment,
+                            auto_wiring_result_appliers,
+                            provisioner=_cast(
+                                "ProtocolTopicProvisioner | None",
+                                topic_provisioner,
+                            ),
+                            readiness_config=resolve_topic_readiness_config(),
+                            core_runtime_topics=core_runtime_topics,
+                            core_runtime_owners=core_runtime_owners,
+                        )
+                    except asyncio.CancelledError:
+                        raise
+                    except Exception:  # noqa: BLE001 — boundary: background reconciliation must never crash boot
+                        logger.warning(
+                            "NOT_READY reconciliation loop raised, giving up "
+                            "for this boot (correlation_id=%s)",
+                            correlation_id,
+                            exc_info=True,
+                        )
+
+                not_ready_reconciliation_task = asyncio.create_task(
+                    _reconcile_not_ready_contracts(),
+                    name="not-ready-contract-reconciliation",
+                )
+                logger.info(
+                    "NOT_READY reconciliation scheduled for %d contract(s): "
+                    "%s (OMN-15215, correlation_id=%s)",
+                    len(_not_ready_at_boot),
+                    sorted(r.contract_name for r in _not_ready_at_boot),
+                    correlation_id,
+                )
+
         # --- Pass 2: Start consumers for ready plugins only ---
         # ready_plugins is a subset of activated_plugins: only plugins that
         # completed wire_handlers() successfully. This prevents starting
@@ -3270,7 +3532,17 @@ async def bootstrap() -> int:
             plugin_id = plugin.plugin_id
             try:
                 consumer_result = await plugin.start_consumers(plugin_config)
-                if consumer_result and consumer_result.unsubscribe_callbacks:
+                if not consumer_result.success:
+                    logger.warning(
+                        "Plugin '%s' failed to start consumers: %s (correlation_id=%s)",
+                        plugin_id,
+                        consumer_result.get_error_message_or_default(
+                            consumer_result.message or "unknown"
+                        ),
+                        correlation_id,
+                    )
+                    continue
+                if consumer_result.unsubscribe_callbacks:
                     plugin_unsubscribe_callbacks.extend(
                         consumer_result.unsubscribe_callbacks
                     )
@@ -3789,16 +4061,19 @@ async def bootstrap() -> int:
         # 9.8. Emit runtime manifest snapshot (OMN-11196).
         # Published once per startup after all phases complete.
         # Non-fatal: failures are logged and the kernel continues.
+        #
+        # OMN-15512: the snapshot now also carries the boot attach-readiness
+        # aggregate, so the NOT-READY blocker set (contract + the topics whose
+        # readiness confirm failed) lands in the runtime_manifests projection
+        # instead of only the log stream. Same event, same table, same row —
+        # no second producer.
         if (
             auto_wiring_report is not None
             and auto_wiring_manifest_for_subscriptions is not None
         ):
             try:
-                from omnibase_core.models.events.model_event_envelope import (
-                    ModelEventEnvelope,
-                )
                 from omnibase_infra.runtime.manifest_builder import (
-                    build_runtime_manifest,
+                    publish_runtime_manifest,
                 )
                 from omnibase_infra.topics import SUFFIX_RUNTIME_MANIFEST_PUBLISHED
 
@@ -3806,27 +4081,31 @@ async def bootstrap() -> int:
                     SUFFIX_RUNTIME_MANIFEST_PUBLISHED,
                     correlation_id=correlation_id,
                 )
-                _runtime_profile_for_manifest = os.getenv("RUNTIME_PROFILE", "main")
-                _image_digest = os.getenv("ONEX_IMAGE_DIGEST")
-                _runtime_manifest = build_runtime_manifest(
+                _published_manifest = await publish_runtime_manifest(
+                    event_bus=event_bus,
                     report=auto_wiring_report,
                     manifest=auto_wiring_manifest_for_subscriptions,
-                    runtime_profile=_runtime_profile_for_manifest,
-                    image_digest=_image_digest,
-                )
-                _manifest_envelope: ModelEventEnvelope[object] = ModelEventEnvelope(
-                    payload=_runtime_manifest,
-                    correlation_id=correlation_id,
-                    event_type="runtime-manifest-published",
-                    source_tool="service_kernel",
-                )
-                await event_bus.publish_envelope(
-                    envelope=_manifest_envelope,
+                    runtime_profile=os.getenv("RUNTIME_PROFILE", "main"),
                     topic=_manifest_topic,
+                    correlation_id=correlation_id,
+                    image_digest=os.getenv("ONEX_IMAGE_DIGEST"),
+                    attach_readiness=attach_readiness,
                 )
+                _published_readiness = _published_manifest.attach_readiness
                 logger.info(
-                    "Runtime manifest published (topic=%s, correlation_id=%s)",
+                    "Runtime manifest published (topic=%s, attach_state=%s, "
+                    "not_ready_contracts=%d, correlation_id=%s)",
                     _manifest_topic,
+                    (
+                        _published_readiness.state.value
+                        if _published_readiness is not None
+                        else "unknown"
+                    ),
+                    (
+                        len(_published_readiness.results)
+                        if _published_readiness is not None
+                        else 0
+                    ),
                     correlation_id,
                 )
             except ImportError:
@@ -4002,6 +4281,19 @@ async def bootstrap() -> int:
                 correlation_id,
             )
             wiring_health_task = None
+
+        # Stop NOT_READY contract reconciliation loop (OMN-15215)
+        if not_ready_reconciliation_task is not None:
+            not_ready_reconciliation_task.cancel()
+            try:
+                await not_ready_reconciliation_task
+            except asyncio.CancelledError:
+                pass
+            logger.debug(
+                "NOT_READY reconciliation loop stopped (correlation_id=%s)",
+                correlation_id,
+            )
+            not_ready_reconciliation_task = None
 
         # Stop baselines batch compute loop and close its pool
         if baselines_task is not None:
@@ -4257,6 +4549,14 @@ async def bootstrap() -> int:
             wiring_health_task.cancel()
             try:
                 await wiring_health_task
+            except (asyncio.CancelledError, Exception):  # noqa: BLE001
+                pass
+
+        # Cleanup NOT_READY contract reconciliation loop (OMN-15215)
+        if not_ready_reconciliation_task is not None:
+            not_ready_reconciliation_task.cancel()
+            try:
+                await not_ready_reconciliation_task
             except (asyncio.CancelledError, Exception):  # noqa: BLE001
                 pass
 

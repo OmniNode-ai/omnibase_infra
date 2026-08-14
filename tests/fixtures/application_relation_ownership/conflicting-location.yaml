@@ -1,0 +1,13 @@
+# SPDX-FileCopyrightText: 2025 OmniNode.ai Inc.
+# SPDX-License-Identifier: MIT
+
+name: node_conflicting_delegation_owner
+node_type: EFFECT_GENERIC
+db_io:
+  db_tables:
+    - name: delegation_events
+      database_ref: application
+      schema: omninode_internal
+      migration: conflict.sql
+      access: read_write
+      role: conflicting_events

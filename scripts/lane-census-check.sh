@@ -25,7 +25,10 @@
 #   ./scripts/lane-census-check.sh --dry-run        # print event/plan, do NOT publish
 #   ./scripts/lane-census-check.sh --json           # emit the plan JSON to stdout
 #
-# Exit codes: 0 no drift, 30 drift detected (event emitted), 2 bad args, 3 missing deps.
+# Exit codes: 0 no drift, 30 drift detected (event emitted), 2 bad args, 3 missing deps,
+#             4 inventory unobservable (BOTH Engine API and bounded CLI failed —
+#               fail-loud, NO drift event; deliberately distinct from 30 so a host
+#               we cannot see is never reported as a host that is down. OMN-15466).
 #
 # Runs on .201 via the SHARED onex-disk-gc.timer (4th ExecStart — coordinated with
 # OMN-13008 rather than a second timer). Log: ~/.local/log/onex/lane-census.log
@@ -38,6 +41,8 @@ DRY_RUN=false
 EMIT_JSON=false
 LOG_FILE="${HOME}/.local/log/onex/lane-census.log"
 DRIFT_TOPIC="onex.evt.infra.lane-census-drift.v1"
+# Inventory unobservable — NOT drift. See the exit-code table above (OMN-15466).
+EXIT_INVENTORY_UNAVAILABLE=4
 
 while [[ $# -gt 0 ]]; do
   case "$1" in
@@ -59,40 +64,42 @@ HOST="${LANE_CENSUS_HOST:-$(hostname)}"
 log "Starting (lane=${LANE:-ALL}, host=$HOST, $( [[ "$DRY_RUN" == true ]] && echo DRY-RUN || echo LIVE ))"
 
 # ---------------------------------------------------------------------------
-# Gather actual state. Inventory goes to per-run scratch files (never /tmp) and
-# is handed to the pure planner on stdin as a JSON envelope. No env-var size
-# limit, no decision logic in bash.
+# Gather actual state via the fail-loud collector (scripts/lane_census_inventory.py):
+# Docker Engine API first, bounded docker-CLI fallback, hard failure if neither
+# can see the host. No decision logic in bash.
+#
+# OMN-15466: this replaced `docker ps -a --format '{{json .}}' ... || : >file`,
+# which (a) made the CLI request size=1, forcing daemon-side snapshotter.Usage
+# per container — 90.363 s vs 0.150 s for the same inventory over the Engine API
+# on .201's 111 containers — and (b) truncated the inventory to EMPTY on any
+# docker failure, which the planner cannot distinguish from a genuine total
+# outage (32 critical findings, published as real drift). A host we cannot
+# observe must never be reported as a host that is down.
 # ---------------------------------------------------------------------------
 SCRATCH="$(mktemp -d "$(dirname "$LOG_FILE")/lane-census.XXXXXX")"
 trap 'rm -rf "$SCRATCH"' EXIT
-
-docker ps -a --no-trunc --format '{{json .}}' >"$SCRATCH/ps.ndjson" 2>/dev/null || : >"$SCRATCH/ps.ndjson"
-docker network ls --format '{{.Name}}' >"$SCRATCH/networks.txt" 2>/dev/null || : >"$SCRATCH/networks.txt"
 
 # Resolve the runtime tag from the deploy-agent runtime version when available
 # (relaxes to the default pattern if unresolvable — see the planner).
 RUNTIME_TAG="${RUNTIME_TAG:-}"
 
+set +e
 ENVELOPE_JSON="$(
-  SCRATCH_DIR="$SCRATCH" LANE="$LANE" RUNTIME_TAG="$RUNTIME_TAG" python3 -c '
-import json, os
-d = os.environ["SCRATCH_DIR"]
-lane = os.environ.get("LANE") or None
-containers = []
-with open(os.path.join(d, "ps.ndjson")) as fh:
-    for line in fh:
-        line = line.strip()
-        if line:
-            containers.append(json.loads(line))
-networks = [n.strip() for n in open(os.path.join(d, "networks.txt")) if n.strip()]
-print(json.dumps({
-    "lane": lane,
-    "containers": containers,
-    "networks": networks,
-    "runtime_tag": os.environ.get("RUNTIME_TAG") or None,
-}))
-'
+  LANE="$LANE" RUNTIME_TAG="$RUNTIME_TAG" \
+    python3 "${SCRIPT_DIR}/lane_census_inventory.py" 2>"$SCRATCH/inventory.err"
 )"
+INVENTORY_RC=$?
+set -e
+
+if [[ $INVENTORY_RC -ne 0 ]]; then
+  while IFS= read -r line; do [[ -n "$line" ]] && log "$line"; done <"$SCRATCH/inventory.err"
+  log "ABORT: docker inventory could not be observed (exit $INVENTORY_RC). \
+Publishing NO drift event — an unobservable host is not a drifted host."
+  exit "$EXIT_INVENTORY_UNAVAILABLE"
+fi
+
+# Surface any fallback/degradation notices without changing the exit policy.
+while IFS= read -r line; do [[ -n "$line" ]] && log "$line"; done <"$SCRATCH/inventory.err"
 
 PLAN_JSON="$(echo "$ENVELOPE_JSON" | python3 "${SCRIPT_DIR}/lane_census_plan.py")"
 

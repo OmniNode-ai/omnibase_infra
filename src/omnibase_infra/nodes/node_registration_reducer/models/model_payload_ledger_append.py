@@ -34,8 +34,10 @@ from pydantic import BaseModel, ConfigDict, Field
 
 from omnibase_core.types import JsonType
 
-# NOTE: ModelIntentPayloadBase was removed in omnibase_core 0.6.2
-# Using pydantic.BaseModel directly as the base class
+# NOTE: This infra-local payload DTO extends pydantic.BaseModel directly (repo
+# convention; see docs/standards/ONEX_TERMINOLOGY.md). omnibase_core's
+# ModelIntentPayloadBase was never removed — it still exists and bases core's
+# closed-set intent payloads.
 
 
 class ModelPayloadLedgerAppend(BaseModel):

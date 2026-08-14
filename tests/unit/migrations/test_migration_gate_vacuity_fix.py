@@ -214,6 +214,25 @@ class TestWaitForPostgresGuard:
         # Use an empty migrations dir so the runner stops after the wait loop.
         migrations_dir = tmp_path / "migrations"
         migrations_dir.mkdir()
+        # OMN-15349: the runner unconditionally requires the fence manifest
+        # to exist under MIGRATIONS_DIR before it ever reaches the wait loop
+        # this test targets.
+        (migrations_dir / "fenced-node-migrations.yaml").write_text(
+            "fenced_node_migrations: []\n", encoding="utf-8"
+        )
+        # OMN-15336 item 4 repair (D1): the runner also unconditionally
+        # requires the FORCE-RLS grandfather manifest to exist under
+        # MIGRATIONS_DIR, same discipline as the fence manifest above. This
+        # fixture predates that requirement (a853500ab3) and was never
+        # updated for it, so the runner FATALed before ever reaching the
+        # wait-for-postgres loop this test targets -- undetected because the
+        # change-aware selector did not reach tests/unit/migrations/ for a
+        # scripts/ change until the MIGRATION_TREE_PREFIX fix (OMN-15336
+        # item 4 repair follow-up) started selecting the whole tests/unit/
+        # tree again.
+        (migrations_dir / "grandfathered-force-rls-migrations.yaml").write_text(
+            "grandfathered_force_rls_migrations: []\n", encoding="utf-8"
+        )
 
         result = subprocess.run(
             ["sh", str(RUNNER)],
@@ -313,6 +332,11 @@ class TestSkipManifest:
 
         migrations_dir = tmp_path / "migrations" / "forward"
         migrations_dir.mkdir(parents=True)
+        # OMN-15349: the runner unconditionally requires the fence manifest
+        # to exist under MIGRATIONS_DIR.
+        (migrations_dir / "fenced-node-migrations.yaml").write_text(
+            "fenced_node_migrations: []\n", encoding="utf-8"
+        )
 
         # One migration that is listed in the skip-manifest.
         skip_sql = migrations_dir / "001_should_be_skipped.sql"

@@ -27,12 +27,17 @@ from types import MappingProxyType
 
 from pydantic import BaseModel, ConfigDict, Field, field_validator
 
-# Canonical defaults for platform topic creation.
-# These live here (not in service_topic_manager) to avoid a circular import:
+# Canonical partition default for platform topic creation.
+# This lives here (not in service_topic_manager) to avoid a circular import:
 #   topics/__init__ -> model_topic_spec -> service_topic_manager -> topics/__init__
-# service_topic_manager re-imports these constants for its own fallback path.
+#
+# OMN-15395: there is deliberately NO replication-factor constant here any more.
+# ``DEFAULT_EVENT_TOPIC_REPLICATION_FACTOR = 1`` used to be applied silently
+# whenever the owning contract declared nothing, which is how 519 RF1 topics
+# were created on MSK against a broker whose own default is RF2. Replication is
+# now resolved exclusively by ``ModelTopicProvisioningPolicy``, which fails
+# closed on a managed cluster instead of defaulting.
 DEFAULT_EVENT_TOPIC_PARTITIONS: int = 6
-DEFAULT_EVENT_TOPIC_REPLICATION_FACTOR: int = 1
 
 
 class ModelTopicSpec(BaseModel):
@@ -41,7 +46,11 @@ class ModelTopicSpec(BaseModel):
     Attributes:
         suffix: Full ONEX 5-segment topic name (e.g., "onex.evt.platform.node-registration.v1").  # onex-topic-allow: pending contract auto-wiring
         partitions: Number of partitions for the topic.
-        replication_factor: Replication factor for the topic.
+        replication_factor: Replication factor declared by the owning contract.
+            ``None`` means **the contract declared none** — it does NOT mean 1.
+            Resolution to an explicit value (or a fail-closed refusal) is
+            :class:`~omnibase_infra.topics.model_topic_provisioning_policy.ModelTopicProvisioningPolicy`'s
+            job and happens on the creation path, never here (OMN-15395).
         kafka_config: Optional Kafka topic config overrides (e.g., {"cleanup.policy": "compact"}).
         provisioning_priority: Lower values are provisioned first.
     """
@@ -50,7 +59,7 @@ class ModelTopicSpec(BaseModel):
 
     suffix: str
     partitions: int = DEFAULT_EVENT_TOPIC_PARTITIONS
-    replication_factor: int = DEFAULT_EVENT_TOPIC_REPLICATION_FACTOR
+    replication_factor: int | None = Field(default=None, ge=1)
     kafka_config: Mapping[str, str] | None = Field(default=None)
     provisioning_priority: int = 100
 
@@ -67,6 +76,5 @@ class ModelTopicSpec(BaseModel):
 
 __all__: list[str] = [
     "DEFAULT_EVENT_TOPIC_PARTITIONS",
-    "DEFAULT_EVENT_TOPIC_REPLICATION_FACTOR",
     "ModelTopicSpec",
 ]

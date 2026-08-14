@@ -422,7 +422,7 @@ def main() -> int:
         "--addr",
         default=os.environ.get(
             "INFISICAL_ADDR",
-            "http://localhost:8880",  # fallback-ok: local provisioning default
+            "http://localhost:8880",  # url-authority-ok: INFISICAL_ADDR is bootstrap-only by registry contract, and a resolver cannot reach Infisical before this provisioning tool creates it.
         ),
         help="Infisical server address (default: http://localhost:8880)",
     )

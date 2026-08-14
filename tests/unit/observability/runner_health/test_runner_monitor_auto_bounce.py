@@ -39,6 +39,10 @@ from pathlib import Path
 
 import pytest
 
+from tests.unit.observability.runner_health._resolve_modern_bash import (
+    resolve_modern_bash,
+)
+
 REPO_ROOT = Path(__file__).parents[4]
 MONITOR_SCRIPT = REPO_ROOT / "docker" / "runners" / "runner-monitor.sh"
 
@@ -50,6 +54,14 @@ pytestmark = pytest.mark.unit
 
 
 def _require_tools() -> None:
+    # OMN-15617: resolve a bash>=5 interpreter FIRST, before any
+    # tool-availability skip below. A missing secondary tool (jq/flock) must
+    # never short-circuit this assertion via pytest.skip -- that would
+    # silently mask the exact wrong-interpreter host class this ticket
+    # targets (skip-before-assert is green-by-absence, not a real pass).
+    # Fails loud (pytest.fail via resolve_modern_bash) when no bash>=5 is
+    # resolvable.
+    resolve_modern_bash()
     # `timeout` is mocked as a transparent passthrough in _make_mock_bin, so it
     # is not required on the host (macOS ships no GNU timeout by default).
     for tool in ("bash", "jq", "flock"):
@@ -268,6 +280,11 @@ def _run_monitor(
     if extra_env:
         env.update(extra_env)
 
+    # OMN-15617: resolve a bash>=5 interpreter explicitly rather than trusting
+    # ambient PATH order (see the sibling wedge-detection module for the full
+    # rationale).
+    modern_bash = resolve_modern_bash()
+
     wrapper = tmp_path / "run.sh"
     wrapper.write_text(
         textwrap.dedent(
@@ -275,7 +292,7 @@ def _run_monitor(
             #!/usr/bin/env bash
             set -euo pipefail
             sed 's#^STATE_FILE=.*#STATE_FILE="{state_file}"#' "{MONITOR_SCRIPT}" > "{tmp_path}/monitor.sh"
-            bash "{tmp_path}/monitor.sh"
+            "{modern_bash}" "{tmp_path}/monitor.sh"
             """
         ),
         encoding="utf-8",
@@ -283,7 +300,7 @@ def _run_monitor(
     wrapper.chmod(wrapper.stat().st_mode | stat.S_IEXEC)
 
     result = subprocess.run(
-        ["bash", str(wrapper)],
+        [modern_bash, str(wrapper)],
         env=env,
         capture_output=True,
         text=True,

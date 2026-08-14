@@ -749,10 +749,16 @@ class TestPrepareHandlerWiringDelegatesToResolver:
             quality_contract_mode="extend_task_class",
             acceptance_criteria=(),
             tenant_id="omn-14628-regression-tenant",
+            system_prompt=None,
+            temperature=None,
+            response_format=None,
         )
 
         assert result["status"] == "completed"
         assert captured_payloads[0]["tenant_id"] == "omn-14628-regression-tenant"
+        assert "system_prompt" not in captured_payloads[0]
+        assert "temperature" not in captured_payloads[0]
+        assert "response_format" not in captured_payloads[0]
 
 
 # ---------------------------------------------------------------------------

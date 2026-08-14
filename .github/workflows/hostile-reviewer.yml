@@ -26,11 +26,20 @@ name: Hostile Reviewer
 on:
   pull_request:
     branches: [main, dev]
-    types: [opened, synchronize, reopened]
+    # OMN-14241: `edited` added so a PR-body-only edit (e.g. stamping
+    # `Evidence-Source: OCC#<n>`) retriggers this workflow's own
+    # `occ-preflight` job -- see ci.yml's identical trigger for the full
+    # rationale. Without it, `occ-preflight / eligibility` (workflowName
+    # "Hostile Reviewer") sits at a stale pre-stamp FAILURE forever.
+    types: [opened, edited, synchronize, reopened]
 
 permissions:
   pull-requests: write
   contents: read
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
 
 jobs:
   occ-preflight:
@@ -38,14 +47,14 @@ jobs:
     # omnibase_infra has no local occ-preflight.yml (unlike omnibase_core, which
     # hosts the reusable) -- reference it remotely, matching the pinned SHA
     # already used by this repo's own call-occ-preflight.yml / auto-merge.yml.
-    uses: OmniNode-ai/omnibase_core/.github/workflows/occ-preflight.yml@79c620f904526f773f6b92eb98743b011fe2eb12
+    uses: OmniNode-ai/omnibase_core/.github/workflows/occ-preflight.yml@de01ec0964a2e666d739835b02957ae0f06d6a25
     permissions:
       contents: read
       pull-requests: read
     with:
       contracts-dir: contracts
       receipts-dir: drift/dod_receipts
-      core-ref: 8a47e092002dd1338599fa0733feda469436acbf
+      core-ref: dev
 
   hostile-review:
     needs: occ-preflight
@@ -54,8 +63,7 @@ jobs:
     runs-on: >-
       ${{
         (github.event_name == 'pull_request' &&
-         (github.event.pull_request.head.repo.full_name != github.repository ||
-          github.event.pull_request.base.ref == 'dev'))
+         github.event.pull_request.head.repo.full_name != github.repository)
         && fromJSON(vars.OMNI_PUBLIC_PR_RUNS_ON_JSON || '["ubuntu-latest"]')
         || fromJSON(vars.OMNI_TRUSTED_CI_RUNS_ON_JSON || '["self-hosted","omnibase-ci"]')
       }}
@@ -433,8 +441,7 @@ jobs:
     runs-on: >-
       ${{
         (github.event_name == 'pull_request' &&
-         (github.event.pull_request.head.repo.full_name != github.repository ||
-          github.event.pull_request.base.ref == 'dev'))
+         github.event.pull_request.head.repo.full_name != github.repository)
         && fromJSON(vars.OMNI_PUBLIC_PR_RUNS_ON_JSON || '["ubuntu-latest"]')
         || fromJSON(vars.OMNI_TRUSTED_CI_RUNS_ON_JSON || '["self-hosted","omnibase-ci"]')
       }}

@@ -1,0 +1,98 @@
+name: Deploy Agent Tests (OMN-15378)
+
+# OMN-15378: scripts/deploy-agent is a standalone uv sub-project (its own
+# pyproject.toml + uv.lock, deployed onto the .201 host independently of the
+# main omnibase_infra dependency tree — see scripts/deploy-agent/pyproject.toml
+# and scripts/deploy-agent/deploy/deploy-agent.service.d). Its tests
+# (scripts/deploy-agent/tests/) were never wired into ANY CI job: the main
+# suite only ever collects `tests/` (pyproject.toml testpaths = ["tests"]),
+# and folding these files into that tree is not a drop-in move — both trees
+# declare a top-level `tests` package (tests/__init__.py vs
+# scripts/deploy-agent/tests/__init__.py), so collecting them together in one
+# pytest session raises ImportPathMismatchError (verified locally 2026-07-29).
+# The tests sat completely uncollected for ~5 weeks; one of them (RED against
+# the OMN-12988->OMN-12990 superseded literal) went unnoticed the entire time
+# and was only fixed by hand, incidentally, in PR #2536 (OMN-14968).
+#
+# This workflow runs them the same way their own `dod_evidence` proof commands
+# always have — `uv run --project scripts/deploy-agent`, using deploy-agent's
+# OWN pyproject.toml/uv.lock, not the root project's. This is deliberate: the
+# deploy-agent runtime on the .201 host has its own minimal dependency set,
+# and testing it through the main repo's heavier venv could mask a real
+# dependency mismatch between test and deploy environments.
+#
+# scripts/validation/validate_test_root_collection.py (wired into the main
+# suite via tests/ci/test_validate_test_root_collection.py) registers this
+# workflow as the CI wiring behind scripts/deploy-agent's
+# STANDALONE_PROJECT_ROOTS entry — if this file is renamed/removed without
+# updating that registration, the guard fails closed.
+#
+# OMN-15378 AC3 (enforcement, not just visibility): this workflow is
+# `workflow_call`-only and is invoked by the `deploy-agent-tests` job in
+# .github/workflows/ci.yml, so its job surfaces in ci.yml's OWN run as the
+# check-run "Deploy Agent Tests (OMN-15378) / deploy-agent-tests" and is
+# registered in scripts/ci/ci_summary_gate.py STRICT_GATE_JOBS. That is what
+# makes it GATE merge: the CI Summary poller reads
+# `actions/runs/${RUN_ID}/jobs` for its own run only, so while these tests
+# lived in a separately-triggered workflow a RED result left the sole required
+# context ("CI Summary") green — the tests ran but blocked nothing.
+#
+# DO NOT re-add `pull_request:`/`push:`/`merge_group:` triggers here — the
+# caller in ci.yml already covers those events, and self-triggering would run
+# the suite twice per PR (duplicate producer). DO NOT rename this file or the
+# `deploy-agent-tests` job: the file path is the guard's registration key and
+# the job name is the second segment of the STRICT_GATE_JOBS entry.
+#
+# The caller's path filters are also deliberately gone: the previous
+# `paths: [scripts/deploy-agent/**]` filter meant a change ANYWHERE ELSE that
+# broke these tests produced no signal at all. The suite is 201 tests in ~6s,
+# so it now runs unconditionally on every ci.yml event.
+#
+# No `concurrency:` block: in a called workflow `github.workflow` resolves to
+# the CALLER's workflow name, so a group key here would shadow ci.yml's own
+# (already-correct) PR-keyed cancel-in-progress group.
+
+on:
+  workflow_call:
+  workflow_dispatch:
+
+env:
+  UV_VERSION: "0.6.14"
+  PYTHON_VERSION: "3.12"
+  CACHE_VERSION: "0.6.0"
+
+jobs:
+  deploy-agent-tests:
+    name: deploy-agent-tests
+    permissions:
+      contents: read
+    # OMNI_RUNNER_SELECTOR_V1 — trusted CI defaults to self-hosted omnibase-ci; public forks default to ubuntu-latest
+    runs-on: >-
+      ${{
+        (github.event_name == 'pull_request' &&
+         github.event.pull_request.head.repo.full_name != github.repository)
+        && fromJSON(vars.OMNI_PUBLIC_PR_RUNS_ON_JSON || '["ubuntu-latest"]')
+        || fromJSON(vars.OMNI_TRUSTED_CI_RUNS_ON_JSON || '["self-hosted","omnibase-ci"]')
+      }}
+    timeout-minutes: 10
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v6
+        with:
+          persist-credentials: false
+
+      - name: Setup Python and uv (deploy-agent sub-project)
+        uses: ./.github/actions/setup-python-uv
+        with:
+          python-version: ${{ env.PYTHON_VERSION }}
+          uv-version: ${{ env.UV_VERSION }}
+          cache-version: ${{ env.CACHE_VERSION }}
+          cache-enabled: "false"
+          working-directory: scripts/deploy-agent
+          install-args: "--extra dev"
+
+      - name: Run deploy-agent unit tests (OMN-15378)
+        run: |
+          uv run --project scripts/deploy-agent --extra dev \
+            pytest scripts/deploy-agent/tests -v --tb=short

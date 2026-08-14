@@ -1,0 +1,1054 @@
+# SPDX-FileCopyrightText: 2025 OmniNode.ai Inc.
+# SPDX-License-Identifier: MIT
+"""OMN-15509 -- the .201 system-health Slack reporter must see every lane's runtime.
+
+WHAT IS UNDER TEST
+    ``deploy/maintenance/omninode-system-slack-report.sh`` -- the real bash
+    artifact that root runs on ``.201`` via
+    ``/etc/cron.d/omninode-system-slack-report``. Every test here drives that
+    file itself, not a Python re-implementation of it: a surrogate would prove
+    nothing about the thing that actually alarms (memory
+    ``feedback_test_the_artifact_that_runs``).
+
+THE RED-BEFORE IS REAL, NOT ASSERTED
+    ``tests/fixtures/omn15509/omninode-system-slack-report.as-deployed-20260730.sh``
+    is a byte-for-byte capture of the version that was live on ``.201`` during
+    the 2026-07-30T16:19-16:45Z outage. ``test_as_deployed_reports_green_on_the
+    _replayed_outage`` drives THAT file against the replayed outage state and
+    asserts it reports the dev runtime nowhere and every runtime endpoint as
+    HTTP 200 -- the false green. The paired test drives the fixed file against
+    the identical state and asserts CRITICAL naming the dev runtime.
+
+HERMETICITY
+    ``docker``/``curl``/``df``/``hostname``/``sha256sum``/``flock`` are replaced
+    by stubs on PATH. Both scripts pin ``PATH=`` at the top, so the harness
+    injects one identical line after that assignment in BOTH scripts. The
+    transformation is symmetric by construction (same helper, same regex), so a
+    difference in outcome can only come from the scripts' own logic.
+"""
+
+from __future__ import annotations
+
+import hashlib
+import json
+import os
+import re
+import shutil
+import subprocess
+from pathlib import Path
+from typing import Any
+
+import pytest
+
+REPO_ROOT = Path(__file__).resolve().parents[3]
+FIXED_SCRIPT = REPO_ROOT / "deploy" / "maintenance" / "omninode-system-slack-report.sh"
+AS_DEPLOYED_SCRIPT = (
+    REPO_ROOT
+    / "tests"
+    / "fixtures"
+    / "omn15509"
+    / "omninode-system-slack-report.as-deployed-20260730.sh.captured"
+)
+# sha256 of the copy read off .201:/data/maintenance/bin/omninode-system-slack-report.sh
+# at 2026-07-30T17:0xZ. Asserted below: if anyone edits the fixture, the
+# "byte-for-byte capture" claim stops being true and the RED-before proof
+# stops meaning anything, so the edit must fail loudly rather than pass.
+# The `.captured` suffix keeps the SPDX-header hook off the file for the same
+# reason -- a stamped header would no longer be the artifact that ran.
+AS_DEPLOYED_SHA256 = "5fe6e5a61d6074922142006f5fc905e146bc4a1dcc18dbe4e0da99ddaec209da"
+CRON_UNIT = (
+    REPO_ROOT / "deploy" / "maintenance" / "cron.d" / "omninode-system-slack-report"
+)
+RUNTIME_POLICY_ENV = REPO_ROOT / "docker" / "runtime-policy.env"
+
+# Lane -> the runtime-policy.env key that carries its MAIN runtime port.
+# Dropping a row here is the regression this module exists to catch, so the map
+# is asserted against the rendered policy rather than trusted.
+LANE_PORT_KEYS = {
+    "dev": "DEV_RUNTIME_MAIN_PORT",
+    "stability-test": "STABILITY_TEST_RUNTIME_MAIN_PORT",
+    "prod": "PROD_RUNTIME_MAIN_PORT",
+}
+
+pytestmark = pytest.mark.skipif(
+    shutil.which("bash") is None or shutil.which("jq") is None,
+    reason="bash + jq are required to drive the real reporter artifact",
+)
+
+
+def test_as_deployed_fixture_is_the_unmodified_201_capture() -> None:
+    """Provenance guard for the RED-before artifact."""
+    digest = hashlib.sha256(AS_DEPLOYED_SCRIPT.read_bytes()).hexdigest()
+    assert digest == AS_DEPLOYED_SHA256, (
+        "the as-deployed fixture no longer matches the copy captured from "
+        ".201:/data/maintenance/bin/omninode-system-slack-report.sh on 2026-07-30; "
+        "the RED-before proof is only meaningful against the unmodified artifact"
+    )
+
+
+def _policy_port(key: str) -> str:
+    """Read one key out of the rendered runtime policy, same idiom as the script."""
+    value = ""
+    for line in RUNTIME_POLICY_ENV.read_text().splitlines():
+        if line.startswith(f"{key}="):
+            value = line.split("=", 1)[1].strip().strip("\"'")
+    assert value, f"{key} missing from {RUNTIME_POLICY_ENV}"
+    return value
+
+
+def _write(path: Path, body: str, *, executable: bool = False) -> None:
+    path.write_text(body)
+    if executable:
+        path.chmod(0o755)
+
+
+def _make_stub_bin(
+    tmp_path: Path,
+    *,
+    http: dict[str, tuple[int, str]],
+    docker_state: dict[str, Any],
+) -> Path:
+    """Build a stub bin dir. ``http`` maps port -> (status_code, body)."""
+    bin_dir = tmp_path / "stubbin"
+    bin_dir.mkdir()
+    spec = tmp_path / "spec.json"
+    spec.write_text(
+        json.dumps(
+            {"http": {str(k): v for k, v in http.items()}, "docker": docker_state}
+        )
+    )
+
+    # curl: honours -o <file> and -w '%{http_code}'. A port absent from the spec
+    # is a connection failure (empty output, non-zero exit) exactly like a real
+    # refused connection, so "endpoint not reachable" is never silently a pass.
+    _write(
+        bin_dir / "curl",
+        f"""#!/usr/bin/env bash
+SPEC={spec}
+out=""; url=""
+args=("$@")
+for ((i=0; i<${{#args[@]}}; i++)); do
+  case "${{args[$i]}}" in
+    -o) out="${{args[$((i+1))]}}" ;;
+    http://*|https://*) url="${{args[$i]}}" ;;
+  esac
+done
+port=$(sed -E 's|.*:([0-9]+)/.*|\\1|' <<<"$url")
+read -r code body < <(python3 - "$SPEC" "$port" <<'PY'
+import json,sys
+spec=json.load(open(sys.argv[1]))
+e=spec["http"].get(sys.argv[2])
+print("NONE","" ) if e is None else print(e[0], json.dumps(e[1]))
+PY
+)
+if [[ "$code" == "NONE" ]]; then
+  [[ -n "$out" ]] && : >"$out"
+  printf '%s' ''
+  exit 7
+fi
+decoded=$(python3 -c 'import json,sys; print(json.loads(sys.argv[1]))' "$body")
+[[ -n "$out" ]] && printf '%s' "$decoded" >"$out"
+printf '%s' "$code"
+exit 0
+""",
+        executable=True,
+    )
+
+    _write(
+        bin_dir / "docker",
+        f"""#!/usr/bin/env bash
+SPEC={spec}
+python3 - "$SPEC" "$@" <<'PY'
+import json,sys
+spec=json.load(open(sys.argv[1]))["docker"]
+a=sys.argv[2:]
+def ps_all():
+    return [(c["name"], c["status"]) for c in spec["containers"]]
+def running():
+    return [c for c in spec["containers"] if c["status"].startswith("Up")]
+if a[0]=="ps" and "-a" in a:
+    for n,s in ps_all(): print(f"{{n}}\\t{{s}}")
+elif a[0]=="ps" and "health=starting" in " ".join(a):
+    for c in running():
+        if "health: starting" in c["status"]: print(c["name"])
+elif a[0]=="ps":
+    for c in running(): print(c["name"])
+elif a[0]=="inspect":
+    name=a[-1]
+    c=next((c for c in spec["containers"] if c["name"]==name), None)
+    if c is None: sys.exit(1)
+    fmt=a[a.index("-f")+1]
+    print(c["started_at"] if "StartedAt" in fmt else c.get("start_period_ns",0))
+elif a[0]=="volume":
+    for v in spec.get("dangling", []): print(v)
+PY
+""",
+        executable=True,
+    )
+
+    _write(
+        bin_dir / "df",
+        """#!/usr/bin/env bash
+echo "Filesystem 1G-blocks Used Avail Use% Mounted"
+echo "target 1832G 75G 1664G 5%"
+""",
+        executable=True,
+    )
+    _write(
+        bin_dir / "hostname", "#!/usr/bin/env bash\necho omninode-pc\n", executable=True
+    )
+    _write(bin_dir / "flock", "#!/usr/bin/env bash\nexit 0\n", executable=True)
+    if shutil.which("sha256sum") is None:
+        _write(
+            bin_dir / "sha256sum",
+            "#!/usr/bin/env bash\nshasum -a 256\n",
+            executable=True,
+        )
+    return bin_dir
+
+
+def _stage(script: Path, tmp_path: Path, bin_dir: Path) -> Path:
+    """Copy ``script`` and redirect it at the sandbox.
+
+    Two textual transformations, applied by the SAME code to the fixed script
+    and to the as-deployed fixture so neither is advantaged:
+
+    1. inject the stub bin after the pinned ``PATH=`` assignment;
+    2. repoint the ``/data/maintenance`` state/log/lock paths at ``tmp_path``.
+
+    (2) is only needed because the as-deployed version hardcodes those paths
+    with no env override -- the fixed version reads them from the environment,
+    so for it the rewrite is equivalent to the env vars ``_run`` already sets.
+    Neither transformation touches probe selection, status classification, or
+    message formatting, which is all these tests assert on.
+    """
+    staged = tmp_path / f"staged-{script.name}"
+    lines = script.read_text().splitlines(keepends=True)
+    for index, line in enumerate(lines):
+        if line.startswith("PATH="):
+            lines.insert(index + 1, f'PATH="{bin_dir}:$PATH"\n')
+            break
+    else:  # pragma: no cover - both artifacts pin PATH; a miss is a real defect
+        raise AssertionError(f"no PATH assignment found in {script}")
+    patched = "".join(lines)
+    sandbox = tmp_path / "sandbox"
+    for var, sub in (
+        ("STATE_DIR", sandbox / "state"),
+        ("LOG_DIR", sandbox / "logs"),
+        ("LOCK_FILE", sandbox / "lock"),
+        ("ENV_FILE", sandbox / "absent.env"),
+    ):
+        patched = re.sub(
+            rf"^{var}=.*$", f"{var}={sub}", patched, count=1, flags=re.MULTILINE
+        )
+    staged.write_text(patched)
+    staged.chmod(0o755)
+    return staged
+
+
+def _run(
+    script: Path,
+    tmp_path: Path,
+    bin_dir: Path,
+    *,
+    extra_env: dict[str, str] | None = None,
+) -> str:
+    env = dict(os.environ)
+    env.update(
+        {
+            "OMNINODE_ALERT_ENV_FILE": str(tmp_path / "absent.env"),
+            "OMNINODE_ALERT_STATE_DIR": str(tmp_path / "state"),
+            "OMNINODE_ALERT_LOG_DIR": str(tmp_path / "logs"),
+            "OMNINODE_ALERT_LOCK_FILE": str(tmp_path / "lock"),
+            "OMNINODE_INFRA_REPO_ROOT": str(REPO_ROOT),
+            "OMNINODE_RUNTIME_POLICY_ENV": str(RUNTIME_POLICY_ENV),
+            "SLACK_BOT_TOKEN": "test-token",
+            "SLACK_CHANNEL_ID": "C-TEST",
+        }
+    )
+    if extra_env:
+        env.update(extra_env)
+    staged = _stage(script, tmp_path, bin_dir)
+    proc = subprocess.run(
+        ["bash", str(staged), "--mode", "dry-run"],
+        capture_output=True,
+        text=True,
+        env=env,
+        timeout=120,
+        check=False,
+    )
+    out = proc.stdout
+    if not out.strip():
+        # The as-deployed script redirects stdout into its log file even in
+        # dry-run; read the report back from there.
+        logs = sorted((tmp_path / "sandbox" / "logs").glob("*.log"))
+        if logs:
+            out = logs[-1].read_text()
+    assert out.strip(), (
+        f"no report produced: rc={proc.returncode} stderr={proc.stderr[-2000:]}"
+    )
+    return out
+
+
+# --------------------------------------------------------------------------
+# The 2026-07-30T16:19-16:45Z outage state, replayed verbatim.
+#   dev :8085      -> 503, healthy=false, is_running=false, no handlers
+#   dev :8086      -> connection refused (container never started)
+#   stability 18085-> 200 healthy
+#   prod 28085     -> 200 healthy
+#   everything else 200, all infra containers healthy
+# --------------------------------------------------------------------------
+DEV_503_BODY = json.dumps(
+    {
+        "status": "unhealthy",
+        "healthy": False,
+        "is_running": False,
+        "registered_handlers": [],
+        "config_prefetch_status": "pending",
+    }
+)
+# A REALISTIC healthy runtime body (OMN-15525).
+#
+# The original fixture here was `{"status":"healthy","healthy":true,
+# "version":"0.38.4"}` -- 63 bytes. Every real `/health` body on .201 is 2644
+# bytes, and `check_runtime_lane` truncated the body to 180 bytes before handing
+# it to jq. Under the short fixture the truncation never bit, so the suite was
+# green while the deployed artifact reported CRITICAL for all three lanes
+# against a fully healthy fleet. The fixture must cross the excerpt boundary or
+# it cannot see that class of defect at all.
+#
+# Shape mirrors the live body: top-level status/version/details, with the
+# health-bearing booleans inside `details` and enough sibling keys to push the
+# payload well past any display-truncation limit.
+HEALTHY_BODY = json.dumps(
+    {
+        "status": "healthy",
+        "version": "0.38.4",
+        "details": {
+            "healthy": True,
+            "degraded": False,
+            "startup_in_progress": False,
+            "is_running": True,
+            "is_draining": False,
+            "pending_message_count": 0,
+            "max_concurrent_handlers": 32,
+            "handler_pool_size": 8,
+            "in_flight_tasks": 0,
+            "event_bus_healthy": True,
+            "event_bus": "kafka",
+            "runtime_attached": True,
+            "runtime_health": "healthy",
+            "local_ingress": True,
+            "no_handlers_registered": False,
+            "config_prefetch_status": "complete",
+            "batch_response_enabled": True,
+            "batch_response_pending": 0,
+            "failed_handlers": [],
+            "skipped_handlers": [],
+            "registered_handlers": [
+                "handler_node_registration_effect",
+                "handler_session_state_reducer",
+            ],
+            "handler_pools": {"default": {"size": 8, "busy": 0}},
+            "components": {
+                "postgres": "healthy",
+                "redpanda": "healthy",
+                "valkey": "healthy",
+            },
+            "handlers": {"registered": 2, "failed": 0, "skipped": 0},
+        },
+    }
+)
+# Guard the guard: if someone shrinks this fixture the truncation defect becomes
+# invisible again, so assert the property the fixture exists to provide.
+assert len(HEALTHY_BODY) > 180, (
+    "HEALTHY_BODY must exceed the reporter's display-excerpt limit or the "
+    "OMN-15525 truncation regression cannot be observed"
+)
+
+
+def _outage_http(
+    dev_port: str, stability_port: str, prod_port: str
+) -> dict[str, tuple[int, str]]:
+    return {
+        dev_port: (503, DEV_503_BODY),
+        stability_port: (200, HEALTHY_BODY),
+        prod_port: (200, HEALTHY_BODY),
+        "13002": (200, json.dumps({"status": "ok"})),
+        "8099": (200, json.dumps({"state": "idle"})),
+        "3003": (200, "<html>ok</html>"),
+    }
+
+
+def _outage_docker() -> dict[str, Any]:
+    return {
+        "containers": [
+            {
+                "name": "omninode-runtime",
+                "status": "Up 26 minutes (health: starting)",
+                "started_at": "2026-07-30T16:19:00Z",
+                "start_period_ns": 120 * 10**9,
+            },
+            {
+                "name": "omnibase-infra-redpanda",
+                "status": "Up 40 minutes (healthy)",
+                "started_at": "2026-07-30T16:05:00Z",
+            },
+            {
+                "name": "omnibase-infra-postgres",
+                "status": "Up 40 minutes (healthy)",
+                "started_at": "2026-07-30T16:05:00Z",
+            },
+            {
+                "name": "omnibase-infra-valkey",
+                "status": "Up 40 minutes (healthy)",
+                "started_at": "2026-07-30T16:05:00Z",
+            },
+        ],
+        "dangling": [],
+    }
+
+
+@pytest.fixture
+def lane_ports() -> dict[str, str]:
+    return {lane: _policy_port(key) for lane, key in LANE_PORT_KEYS.items()}
+
+
+# --------------------------------------------------------------------------
+# AC 6 -- RED-before / GREEN-after against the artifact that actually runs.
+# --------------------------------------------------------------------------
+
+
+def test_as_deployed_reports_green_on_the_replayed_outage(
+    tmp_path: Path, lane_ports: dict[str, str]
+) -> None:
+    """RED-before: the live 2026-07-30 script never looked at the dev runtime."""
+    bin_dir = _make_stub_bin(
+        tmp_path,
+        http=_outage_http(
+            lane_ports["dev"], lane_ports["stability-test"], lane_ports["prod"]
+        ),
+        docker_state=_outage_docker(),
+    )
+    report = _run(AS_DEPLOYED_SCRIPT, tmp_path, bin_dir)
+
+    endpoints = report.split("*Runtime endpoints*", 1)[1].split("*Active issues*", 1)[0]
+    # Endpoint labels are backtick-delimited, so match the whole label rather
+    # than the bare port: "8085" is a substring of "runtime-18085".
+    probed_labels = re.findall(r"- `([^`]+)`: HTTP", endpoints)
+    assert probed_labels, endpoints
+    assert not [
+        label
+        for label in probed_labels
+        if re.search(rf"(?<!\d){lane_ports['dev']}$", label)
+    ], (
+        f"fixture is not the pre-fix artifact: it already probes the dev runtime ({probed_labels})"
+    )
+    # ...and every endpoint it does list is a green 200.
+    assert "CRITICAL" not in endpoints and "WARNING" not in endpoints
+    assert f"runtime-{lane_ports['stability-test']}`: HTTP 200 (OK)" in endpoints
+    assert f"runtime-{lane_ports['prod']}`: HTTP 200 (OK)" in endpoints
+    # ...and `health: starting` never registered: the container_issues line is
+    # OK and the whole report claims zero critical, zero warning.
+    assert re.search(r"container_issues`: [^\n]*\(OK\)", report), report
+    assert "Issues: *0 critical*, *0 warning*" in report, report
+    assert "- No active warning/critical checks" in report, report
+
+
+def test_fixed_reports_red_and_names_the_dev_runtime_on_the_same_state(
+    tmp_path: Path, lane_ports: dict[str, str]
+) -> None:
+    """GREEN-after: identical replayed state, fixed artifact, RED naming dev."""
+    bin_dir = _make_stub_bin(
+        tmp_path,
+        http=_outage_http(
+            lane_ports["dev"], lane_ports["stability-test"], lane_ports["prod"]
+        ),
+        docker_state=_outage_docker(),
+    )
+    report = _run(FIXED_SCRIPT, tmp_path, bin_dir)
+
+    assert f"runtime-dev-{lane_ports['dev']}`: HTTP 503 (CRITICAL)" in report
+    assert (
+        f"runtime-stability-test-{lane_ports['stability-test']}`: HTTP 200 (OK)"
+        in report
+    )
+    assert f"runtime-prod-{lane_ports['prod']}`: HTTP 200 (OK)" in report
+    assert re.search(r"Issues: \*[1-9]\d* critical\*", report), report
+
+
+# --------------------------------------------------------------------------
+# AC 7 -- the omission cannot silently reappear.
+# --------------------------------------------------------------------------
+
+
+def test_every_lane_main_runtime_port_is_in_the_probe_set(
+    tmp_path: Path, lane_ports: dict[str, str]
+) -> None:
+    """Drop a lane from RUNTIME_LANE_SPECS and this fails."""
+    http = dict.fromkeys(lane_ports.values(), (200, HEALTHY_BODY))
+    http.update(
+        {
+            "13002": (200, '{"status":"ok"}'),
+            "8099": (200, '{"state":"idle"}'),
+            "3003": (200, "ok"),
+        }
+    )
+    bin_dir = _make_stub_bin(
+        tmp_path, http=http, docker_state={"containers": [], "dangling": []}
+    )
+    report = _run(FIXED_SCRIPT, tmp_path, bin_dir)
+
+    endpoints = report.split("*Runtime endpoints*", 1)[1].split("*Active issues*", 1)[0]
+    for lane, port in lane_ports.items():
+        assert f"runtime-{lane}-{port}" in endpoints, (
+            f"lane {lane} (:{port}) is not probed -- a lane's MAIN runtime health "
+            f"endpoint was dropped from the alert (OMN-15509 AC2/AC7)"
+        )
+
+
+def test_lane_specs_are_sourced_from_the_rendered_runtime_policy() -> None:
+    """The map is config-driven; hardcoding a port per call site regresses AC2."""
+    body = FIXED_SCRIPT.read_text()
+    for lane, key in LANE_PORT_KEYS.items():
+        assert f"{lane}|{key}" in body, f"lane {lane} not declared against {key}"
+    assert "policy_env_value" in body
+
+
+def test_lane_specs_carry_no_hardcoded_fallback_ports() -> None:
+    """OMN-15525: the spec table must not smuggle literal ports back in.
+
+    The OMN-15509 revision declared ``dev|DEV_RUNTIME_MAIN_PORT|8085`` and
+    substituted that literal whenever the policy lookup came back empty, so a
+    renamed key or an unrendered policy file silently probed a guessed port.
+    """
+    source = FIXED_SCRIPT.read_text()
+    specs = re.search(r"RUNTIME_LANE_SPECS=\((.*?)\n\)", source, re.DOTALL)
+    assert specs, "RUNTIME_LANE_SPECS table not found"
+    for raw in specs.group(1).strip().splitlines():
+        entry = raw.strip().strip('"')
+        if not entry:
+            continue
+        fields = entry.split("|")
+        assert len(fields) == 2, (
+            f"lane spec {entry!r} carries more than lane|key -- a third field is "
+            "the hardcoded fallback port OMN-15525 removed"
+        )
+        assert not re.fullmatch(r"\d+", fields[1]), entry
+
+
+def test_cron_unit_points_at_the_versioned_script_name() -> None:
+    unit = CRON_UNIT.read_text()
+    assert "omninode-system-slack-report.sh" in unit
+    assert "--mode alert" in unit and "--mode digest" in unit
+
+
+# --------------------------------------------------------------------------
+# AC 3 -- 200 with a non-healthy body is RED.
+# --------------------------------------------------------------------------
+
+
+def test_http_200_with_unhealthy_body_is_critical(
+    tmp_path: Path, lane_ports: dict[str, str]
+) -> None:
+    http = dict.fromkeys(lane_ports.values(), (200, HEALTHY_BODY))
+    # 200 but the body says otherwise -- the exact case substring matching missed.
+    http[lane_ports["dev"]] = (
+        200,
+        json.dumps({"status": "degraded", "healthy": False}),
+    )
+    http.update(
+        {
+            "13002": (200, '{"status":"ok"}'),
+            "8099": (200, '{"state":"idle"}'),
+            "3003": (200, "ok"),
+        }
+    )
+    bin_dir = _make_stub_bin(
+        tmp_path, http=http, docker_state={"containers": [], "dangling": []}
+    )
+    report = _run(FIXED_SCRIPT, tmp_path, bin_dir)
+    assert f"runtime-dev-{lane_ports['dev']}`: HTTP 200 (CRITICAL)" in report
+
+
+def test_http_200_with_unresolvable_body_fails_closed(
+    tmp_path: Path, lane_ports: dict[str, str]
+) -> None:
+    http = dict.fromkeys(lane_ports.values(), (200, HEALTHY_BODY))
+    http[lane_ports["dev"]] = (200, "OK")  # not JSON, no resolvable status
+    http.update(
+        {
+            "13002": (200, '{"status":"ok"}'),
+            "8099": (200, '{"state":"idle"}'),
+            "3003": (200, "ok"),
+        }
+    )
+    bin_dir = _make_stub_bin(
+        tmp_path, http=http, docker_state={"containers": [], "dangling": []}
+    )
+    report = _run(FIXED_SCRIPT, tmp_path, bin_dir)
+    assert f"runtime-dev-{lane_ports['dev']}`: HTTP 200 (CRITICAL)" in report
+
+
+# --------------------------------------------------------------------------
+# AC 5 -- an endpoint that cannot be probed is RED, never omitted.
+# --------------------------------------------------------------------------
+
+
+def test_unreachable_runtime_endpoint_is_critical_not_skipped(
+    tmp_path: Path, lane_ports: dict[str, str]
+) -> None:
+    http = dict.fromkeys(lane_ports.values(), (200, HEALTHY_BODY))
+    del http[lane_ports["dev"]]  # connection refused
+    http.update(
+        {
+            "13002": (200, '{"status":"ok"}'),
+            "8099": (200, '{"state":"idle"}'),
+            "3003": (200, "ok"),
+        }
+    )
+    bin_dir = _make_stub_bin(
+        tmp_path, http=http, docker_state={"containers": [], "dangling": []}
+    )
+    report = _run(FIXED_SCRIPT, tmp_path, bin_dir)
+    assert f"runtime-dev-{lane_ports['dev']}`: HTTP 000 (CRITICAL)" in report
+
+
+# --------------------------------------------------------------------------
+# AC 4 -- `health: starting` past start_period alarms; AC 5 -- Exit(0) does not.
+# --------------------------------------------------------------------------
+
+
+def _all_green_http(lane_ports: dict[str, str]) -> dict[str, tuple[int, str]]:
+    http = dict.fromkeys(lane_ports.values(), (200, HEALTHY_BODY))
+    http.update(
+        {
+            "13002": (200, '{"status":"ok"}'),
+            "8099": (200, '{"state":"idle"}'),
+            "3003": (200, "ok"),
+        }
+    )
+    return http
+
+
+def test_container_starting_past_start_period_is_critical(
+    tmp_path: Path, lane_ports: dict[str, str]
+) -> None:
+    docker_state = {
+        "containers": [
+            {
+                "name": "omninode-runtime",
+                "status": "Up 26 minutes (health: starting)",
+                "started_at": "2026-07-30T16:19:00Z",
+                "start_period_ns": 120 * 10**9,
+            }
+        ],
+        "dangling": [],
+    }
+    bin_dir = _make_stub_bin(
+        tmp_path, http=_all_green_http(lane_ports), docker_state=docker_state
+    )
+    report = _run(FIXED_SCRIPT, tmp_path, bin_dir)
+    assert "starting_past_start_period=omninode-runtime" in report
+    assert "container_issues" in report
+    assert re.search(r"Issues: \*[1-9]\d* critical\*", report), report
+
+
+def test_container_still_inside_start_period_does_not_alarm(
+    tmp_path: Path, lane_ports: dict[str, str]
+) -> None:
+    """A genuinely-still-booting container is not a page."""
+    from datetime import UTC, datetime
+
+    docker_state = {
+        "containers": [
+            {
+                "name": "omninode-runtime",
+                "status": "Up 3 seconds (health: starting)",
+                "started_at": datetime.now(UTC).strftime("%Y-%m-%dT%H:%M:%SZ"),
+                "start_period_ns": 600 * 10**9,
+            }
+        ],
+        "dangling": [],
+    }
+    bin_dir = _make_stub_bin(
+        tmp_path, http=_all_green_http(lane_ports), docker_state=docker_state
+    )
+    report = _run(FIXED_SCRIPT, tmp_path, bin_dir)
+    assert "starting_past_start_period=none" in report
+    assert "Issues: *0 critical*" in report
+
+
+def test_expected_exit_zero_oneshot_does_not_alarm(
+    tmp_path: Path, lane_ports: dict[str, str]
+) -> None:
+    docker_state = {
+        "containers": [
+            {
+                "name": "omnibase-infra-migration",
+                "status": "Exited (0) 4 minutes ago",
+                "started_at": "2026-07-30T16:05:00Z",
+            }
+        ],
+        "dangling": [],
+    }
+    bin_dir = _make_stub_bin(
+        tmp_path, http=_all_green_http(lane_ports), docker_state=docker_state
+    )
+    report = _run(FIXED_SCRIPT, tmp_path, bin_dir)
+    assert "exited_nonzero=none" in report
+    assert "Issues: *0 critical*" in report
+
+
+def test_nonzero_exit_alarms(tmp_path: Path, lane_ports: dict[str, str]) -> None:
+    docker_state = {
+        "containers": [
+            {
+                "name": "omninode-runtime-effects",
+                "status": "Exited (1) 2 minutes ago",
+                "started_at": "2026-07-30T16:05:00Z",
+            }
+        ],
+        "dangling": [],
+    }
+    bin_dir = _make_stub_bin(
+        tmp_path, http=_all_green_http(lane_ports), docker_state=docker_state
+    )
+    report = _run(FIXED_SCRIPT, tmp_path, bin_dir)
+    assert "exited_nonzero=omninode-runtime-effects" in report
+    assert re.search(r"Issues: \*[1-9]\d* critical\*", report), report
+
+
+# --------------------------------------------------------------------------
+# Prod stays read-only.
+# --------------------------------------------------------------------------
+
+
+def test_prod_lane_is_probed_with_a_plain_get_only() -> None:
+    body = FIXED_SCRIPT.read_text()
+    assert re.search(r"curl .*-X GET .*/health", body), (
+        "runtime probe must be an explicit GET"
+    )
+    for verb in ("-X POST", "-X PUT", "-X DELETE", "-X PATCH"):
+        assert verb not in body, f"reporter must never issue {verb}"
+
+
+# --------------------------------------------------------------------------
+# OMN-15525 -- the two false-green/false-RED defects found by DEPLOYING the
+# OMN-15509 fix to .201 (installed 18:12Z, rolled back 18:13:29Z after it
+# reported CRITICAL on all three demonstrably healthy lanes).
+# --------------------------------------------------------------------------
+
+
+def test_healthy_lane_with_a_realistic_body_is_not_critical(
+    tmp_path: Path, lane_ports: dict[str, str]
+) -> None:
+    """A 200 + healthy body larger than the display excerpt must read OK.
+
+    RED-before: `check_runtime_lane` truncated the body to 180 bytes and then
+    parsed THAT with jq. A real .201 body is 2644 bytes, so jq always failed
+    ("Unfinished string at EOF"), the verdict was always "unresolvable", and
+    fail-closed reported CRITICAL for every lane on a healthy fleet.
+    """
+    assert len(HEALTHY_BODY) > 180, "fixture must cross the excerpt boundary"
+    bin_dir = _make_stub_bin(
+        tmp_path,
+        http=_all_green_http(lane_ports),
+        docker_state={"containers": [], "dangling": []},
+    )
+    report = _run(FIXED_SCRIPT, tmp_path, bin_dir)
+
+    for lane, port in lane_ports.items():
+        assert f"runtime-{lane}-{port}`: HTTP 200 (OK)" in report, (
+            f"lane {lane} went non-OK on a healthy 200 whose body merely exceeds "
+            f"the display excerpt -- the body is being parsed after truncation "
+            f"(OMN-15525):\n{report}"
+        )
+    assert "could not be resolved from body" not in report, report
+    assert "Issues: *0 critical*, *0 warning*" in report, report
+
+
+def test_verdict_is_independent_of_the_display_excerpt_size(
+    tmp_path: Path, lane_ports: dict[str, str]
+) -> None:
+    """Shrinking the reported excerpt must not change any lane's status.
+
+    This is the invariant the defect violated: display truncation is cosmetic,
+    so driving it to an absurdly small value must leave every verdict intact.
+    """
+    bin_dir = _make_stub_bin(
+        tmp_path,
+        http=_all_green_http(lane_ports),
+        docker_state={"containers": [], "dangling": []},
+    )
+    baseline = _run(FIXED_SCRIPT, tmp_path, bin_dir)
+
+    tiny_path = tmp_path / "tiny"
+    tiny_path.mkdir()
+    tiny_bin = _make_stub_bin(
+        tiny_path,
+        http=_all_green_http(lane_ports),
+        docker_state={"containers": [], "dangling": []},
+    )
+    tiny = _run(
+        FIXED_SCRIPT,
+        tiny_path,
+        tiny_bin,
+        extra_env={"OMNINODE_ALERT_BODY_EXCERPT_BYTES": "12"},
+    )
+
+    def _statuses(report: str) -> list[tuple[str, str]]:
+        section = report.split("*Runtime endpoints*", 1)[1].split("*Active issues*", 1)[
+            0
+        ]
+        return re.findall(r"- `([^`]+)`: HTTP \d+ \((\w+)\)", section)
+
+    assert _statuses(baseline) == _statuses(tiny), (
+        f"verdicts moved when only the display excerpt changed:\n"
+        f"{_statuses(baseline)}\nvs\n{_statuses(tiny)}"
+    )
+    # Guard against a vacuous pass: "all CRITICAL == all CRITICAL" also
+    # satisfies the equality above, and that is precisely the broken state.
+    # The fleet here is healthy, so every verdict must be OK.
+    assert _statuses(baseline), baseline
+    assert all(status == "OK" for _, status in _statuses(baseline)), (
+        f"stability check is vacuous -- the healthy baseline is not all OK:\n{baseline}"
+    )
+
+
+def test_missing_runtime_policy_file_is_critical_not_a_hardcoded_port(
+    tmp_path: Path, lane_ports: dict[str, str]
+) -> None:
+    """Rule 8: an absent policy file must alarm, not fall back to 8085/18085/28085.
+
+    RED-before: `policy_env_value` returned success on a missing file and
+    `lane_main_port` substituted the literal port, so the reporter kept probing
+    guessed ports and reported green with no indication the lane map had
+    stopped resolving.
+    """
+    bin_dir = _make_stub_bin(
+        tmp_path,
+        http=_all_green_http(lane_ports),
+        docker_state={"containers": [], "dangling": []},
+    )
+    report = _run(
+        FIXED_SCRIPT,
+        tmp_path,
+        bin_dir,
+        extra_env={"OMNINODE_RUNTIME_POLICY_ENV": str(tmp_path / "no-such-policy.env")},
+    )
+
+    for lane in LANE_PORT_KEYS:
+        assert f"runtime-{lane}-unresolved" in report, (
+            f"lane {lane} did not report an unresolvable port with the policy "
+            f"file absent -- it fell back to a hardcoded port (OMN-15525):\n{report}"
+        )
+    for lane, port in lane_ports.items():
+        assert f"runtime-{lane}-{port}" not in report, (
+            f"lane {lane} probed literal :{port} with no policy file present"
+        )
+    assert re.search(r"Issues: \*[1-9]\d* critical\*", report), report
+
+
+def test_renamed_policy_key_is_critical(
+    tmp_path: Path, lane_ports: dict[str, str]
+) -> None:
+    """A policy file that exists but no longer carries the key must alarm."""
+    partial = tmp_path / "partial-policy.env"
+    partial.write_text(
+        f"DEV_RUNTIME_MAIN_PORT_RENAMED={lane_ports['dev']}\n"
+        f"STABILITY_TEST_RUNTIME_MAIN_PORT={lane_ports['stability-test']}\n"
+        f"PROD_RUNTIME_MAIN_PORT={lane_ports['prod']}\n"
+    )
+    bin_dir = _make_stub_bin(
+        tmp_path,
+        http=_all_green_http(lane_ports),
+        docker_state={"containers": [], "dangling": []},
+    )
+    report = _run(
+        FIXED_SCRIPT,
+        tmp_path,
+        bin_dir,
+        extra_env={"OMNINODE_RUNTIME_POLICY_ENV": str(partial)},
+    )
+
+    assert "runtime-dev-unresolved" in report, report
+    assert f"runtime-dev-{lane_ports['dev']}" not in report, report
+    # The lanes whose keys still resolve are unaffected.
+    assert (
+        f"runtime-stability-test-{lane_ports['stability-test']}`: HTTP 200 (OK)"
+        in report
+    ), report
+    assert re.search(r"Issues: \*[1-9]\d* critical\*", report), report
+
+
+# --------------------------------------------------------------------------
+# OMN-15525 -- `--mode alert` is the path that actually pages, and it had NO
+# behavioural coverage at all. Both prior revisions rendered a CRITICAL lane
+# into the digest TEXT while computing an EMPTY `$issues`, so the alert branch
+# took "clean" and posted nothing. Fixing the probe (OMN-15509) and the
+# truncation is worthless if the alert still cannot fire.
+# --------------------------------------------------------------------------
+
+_SLACK_CURL = """#!/usr/bin/env bash
+# Slack-aware curl: records chat.postMessage payloads, delegates everything
+# else to the real stub so endpoint probing is unchanged.
+is_slack=0
+payload=""
+args=("$@")
+for ((i=0; i<${#args[@]}; i++)); do
+  case "${args[$i]}" in
+    https://slack.com/*) is_slack=1 ;;
+    -d) payload="${args[$((i+1))]}" ;;
+  esac
+done
+if (( is_slack )); then
+  # One file per post: the payload is multi-line JSON (jq -n pretty-prints), so
+  # appending to a shared file would not round-trip.
+  mkdir -p "__POSTS__"
+  printf '%s' "$payload" > "__POSTS__/$(date +%s%N)-$$.json"
+  printf '%s' '{"ok":true}'
+  exit 0
+fi
+exec "__REALCURL__" "$@"
+"""
+
+
+def _run_alert(
+    script: Path,
+    tmp_path: Path,
+    bin_dir: Path,
+    *,
+    extra_env: dict[str, str] | None = None,
+) -> tuple[str, list[str]]:
+    """Drive ``script`` in ``--mode alert``; return (log text, Slack post texts)."""
+    posts = tmp_path / "slack-posts"
+    real_curl = bin_dir / "curl-http"
+    (bin_dir / "curl").rename(real_curl)
+    _write(
+        bin_dir / "curl",
+        _SLACK_CURL.replace("__POSTS__", str(posts)).replace(
+            "__REALCURL__", str(real_curl)
+        ),
+        executable=True,
+    )
+
+    env = dict(os.environ)
+    env.update(
+        {
+            "OMNINODE_ALERT_ENV_FILE": str(tmp_path / "absent.env"),
+            "OMNINODE_INFRA_REPO_ROOT": str(REPO_ROOT),
+            "OMNINODE_RUNTIME_POLICY_ENV": str(RUNTIME_POLICY_ENV),
+            "SLACK_BOT_TOKEN": "test-token",
+            "SLACK_CHANNEL_ID": "C-TEST",
+        }
+    )
+    if extra_env:
+        env.update(extra_env)
+    staged = _stage(script, tmp_path, bin_dir)
+    proc = subprocess.run(
+        ["bash", str(staged), "--mode", "alert"],
+        capture_output=True,
+        text=True,
+        env=env,
+        timeout=120,
+        check=False,
+    )
+    assert proc.returncode == 0, (
+        f"alert run failed rc={proc.returncode} stderr={proc.stderr[-2000:]}"
+    )
+    logs = sorted((tmp_path / "sandbox" / "logs").glob("*.log"))
+    log_text = logs[-1].read_text() if logs else proc.stdout
+    post_texts: list[str] = []
+    if posts.is_dir():
+        for payload in sorted(posts.glob("*.json")):
+            post_texts.append(json.loads(payload.read_text()).get("text", ""))
+    return log_text, post_texts
+
+
+def test_alert_mode_pages_when_a_runtime_lane_is_down(
+    tmp_path: Path, lane_ports: dict[str, str]
+) -> None:
+    """A 503 dev lane must produce a Slack alert naming that lane.
+
+    RED-before: `$issues` was selected with `$2=="CRITICAL"`, but endpoint rows
+    carry their status in `$1`. With only endpoints failing, `$issues` was
+    empty, the alert branch wrote "clean" to the state file, and nothing was
+    ever posted -- while the digest text simultaneously listed the lane as
+    CRITICAL. The reporter could see the dead runtime and still not page.
+    """
+    bin_dir = _make_stub_bin(
+        tmp_path,
+        http=_outage_http(
+            lane_ports["dev"], lane_ports["stability-test"], lane_ports["prod"]
+        ),
+        docker_state={"containers": [], "dangling": []},
+    )
+    log_text, posts = _run_alert(FIXED_SCRIPT, tmp_path, bin_dir)
+
+    assert posts, (
+        "no Slack post was attempted while the dev runtime lane was 503 -- the "
+        f"alert branch took the 'clean' path (OMN-15525).\nlog:\n{log_text}"
+    )
+    joined = "\n".join(posts)
+    assert f"runtime-dev-{lane_ports['dev']}" in joined, (
+        f"alert fired but never named the dead dev lane:\n{joined}"
+    )
+    assert re.search(r"Issues: \*[1-9]\d* critical\*", joined), joined
+
+    state = (tmp_path / "sandbox" / "state" / "omninode-system-alert.hash").read_text()
+    assert state.strip() != "clean", (
+        "alert run recorded the fleet as clean while a lane was 503"
+    )
+
+
+def test_alert_mode_stays_quiet_on_a_healthy_fleet(
+    tmp_path: Path, lane_ports: dict[str, str]
+) -> None:
+    """Control for the test above: an all-green fleet must post nothing.
+
+    Without this, `test_alert_mode_pages_when_a_runtime_lane_is_down` could pass
+    against a script that posts unconditionally.
+    """
+    bin_dir = _make_stub_bin(
+        tmp_path,
+        http=_all_green_http(lane_ports),
+        docker_state={"containers": [], "dangling": []},
+    )
+    log_text, posts = _run_alert(FIXED_SCRIPT, tmp_path, bin_dir)
+
+    assert not posts, (
+        f"alert posted against a fully healthy fleet:\n{posts}\n{log_text}"
+    )
+    state = (tmp_path / "sandbox" / "state" / "omninode-system-alert.hash").read_text()
+    assert state.strip() == "clean", f"healthy fleet not recorded clean: {state!r}"
+
+
+def test_endpoint_failures_are_counted_in_the_header(
+    tmp_path: Path, lane_ports: dict[str, str]
+) -> None:
+    """The header count must agree with the *Active issues* list.
+
+    The two were computed by different awk programs over different columns, so
+    the digest could say `0 critical` directly above three CRITICAL lanes --
+    observed verbatim on .201 against the merged OMN-15509 revision.
+    """
+    bin_dir = _make_stub_bin(
+        tmp_path,
+        http=_outage_http(
+            lane_ports["dev"], lane_ports["stability-test"], lane_ports["prod"]
+        ),
+        docker_state={"containers": [], "dangling": []},
+    )
+    report = _run(FIXED_SCRIPT, tmp_path, bin_dir)
+
+    header = re.search(r"Issues: \*(\d+) critical\*, \*(\d+) warning\*", report)
+    assert header, report
+    listed_critical = len(
+        re.findall(r"^- CRITICAL ", report.split("*Active issues*", 1)[1], re.MULTILINE)
+    )
+    assert int(header.group(1)) == listed_critical, (
+        f"header claims {header.group(1)} critical but {listed_critical} are "
+        f"listed under *Active issues*:\n{report}"
+    )
+    assert listed_critical > 0, report

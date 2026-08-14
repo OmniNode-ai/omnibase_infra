@@ -312,6 +312,54 @@ async def test_runtime_delegation_dispatch_port_defaults_quality_contract_kwargs
     assert payloads[0]["acceptance_criteria"] == []
 
 
+@pytest.mark.asyncio
+async def test_runtime_delegation_dispatch_port_accepts_absent_optional_bus_features(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Handler compatibility kwargs must not break the existing bus route."""
+    _, payloads, _, _ = await _dispatch_with_fake_broker(
+        monkeypatch,
+        backend_id=None,
+        response_contract=None,
+        system_prompt=None,
+        temperature=None,
+        response_format=None,
+    )
+
+    assert "backend_id" not in payloads[0]
+    assert "response_contract" not in payloads[0]
+    assert "system_prompt" not in payloads[0]
+    assert "temperature" not in payloads[0]
+    assert "response_format" not in payloads[0]
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    ("dispatch_kwargs", "unsupported_feature"),
+    [
+        ({"backend_id": "local-coder-mlx"}, "backend_id"),
+        (
+            {"response_contract": {"type": "object"}},
+            "response_contract",
+        ),
+        ({"system_prompt": "Answer tersely."}, "system_prompt"),
+        ({"temperature": 0.2}, "temperature"),
+        (
+            {"response_format": {"type": "json_object"}},
+            "response_format",
+        ),
+    ],
+)
+async def test_runtime_delegation_dispatch_port_rejects_unsupported_bus_features(
+    monkeypatch: pytest.MonkeyPatch,
+    dispatch_kwargs: dict[str, object],
+    unsupported_feature: str,
+) -> None:
+    """Explicit bus-only feature requests fail closed instead of being dropped."""
+    with pytest.raises(NotImplementedError, match=unsupported_feature):
+        await _dispatch_with_fake_broker(monkeypatch, **dispatch_kwargs)
+
+
 def test_normalize_result_payload_flattens_delegation_event_shape() -> None:
     payload = {
         "topic": "onex.evt.omnibase-infra.delegation-completed.v1",
@@ -338,3 +386,235 @@ def test_normalize_result_payload_flattens_delegation_event_shape() -> None:
     assert normalized["input_tokens"] == 3
     assert normalized["output_tokens"] == 4
     assert normalized["delegation_latency_ms"] == 125
+
+
+@pytest.mark.parametrize(
+    ("payload", "expected_cost_usd"),
+    [
+        (
+            {
+                "final_attempt_cost": 0.00137,
+                "cumulative_attempt_cost": 0.00182,
+                "cost_usd": 0.0,
+            },
+            0.00182,
+        ),
+        ({"final_attempt_cost": 0.00137}, 0.00137),
+        (
+            {
+                "final_attempt_cost": 0.00137,
+                "cumulative_attempt_cost": 0.0,
+            },
+            0.00137,
+        ),
+        (
+            {
+                "final_attempt_cost": 0.0,
+                "cumulative_attempt_cost": 0.0,
+            },
+            0.0,
+        ),
+    ],
+)
+def test_normalize_result_payload_promotes_measured_attempt_cost(
+    payload: dict[str, object],
+    expected_cost_usd: float,
+) -> None:
+    """The delegate-skill boundary exposes the workflow's measured actual cost.
+
+    ``cumulative_attempt_cost`` owns total actual cost when present, including an
+    explicit zero.  A terminal from a single-attempt workflow only carries
+    ``final_attempt_cost``, which is the compatible fallback.
+    """
+    normalized = _normalize_result_payload(
+        status="completed",
+        payload=payload,
+        error_message=None,
+    )
+
+    assert normalized["cost_usd"] == pytest.approx(expected_cost_usd)
+
+
+# ---------------------------------------------------------------------------
+# OMN-15471: provider provenance must never be the hardcoded literal "local".
+#
+# These drive the real normalizer (`_normalize_result_payload`) with the real
+# wire shape of `onex.evt.omnibase-infra.delegation-completed.v1` as read back
+# from the onex-dev lane, because the defect only appears for a payload that
+# has NO `provider` key -- which is every genuine terminal. A fixture that
+# supplies `provider` cannot reproduce it.
+# ---------------------------------------------------------------------------
+
+_GEMINI_ENDPOINT = (
+    "https://generativelanguage.googleapis.com/v1beta/openai/chat/completions"
+)
+
+# Verbatim field set of the live delegation-completed payload for correlation
+# a4000001-0000-4000-8000-000000000001 (onex-dev, 2026-07-30T04:49:52Z),
+# trimmed to the fields this normalizer reads. Note: no "provider" key.
+_LIVE_CLOUD_TERMINAL: dict[str, object] = {
+    "correlation_id": "a4000001-0000-4000-8000-000000000001",
+    "task_type": "test",
+    "model_used": "gemini-2.5-flash",
+    "endpoint_url": _GEMINI_ENDPOINT,
+    "quality_passed": True,
+    "quality_score": 1.0,
+    "latency_ms": 4188,
+    "prompt_tokens": 115,
+    "completion_tokens": 130,
+    "cost_tier_name": "cheap_cloud",
+    "final_attempt_cost": 0.00049,
+}
+
+
+def test_cloud_routed_terminal_never_reports_local_provenance() -> None:
+    """A Gemini-routed terminal must not be stamped as a local-provider run.
+
+    RED before OMN-15471: `_normalize_result_payload` defaulted
+    `delegated_to` to the literal "local" whenever the payload had no
+    `provider` key, so this asserted "local" != "local" and failed.
+    """
+    normalized = _normalize_result_payload(
+        status="completed",
+        payload=dict(_LIVE_CLOUD_TERMINAL),
+        error_message=None,
+    )
+
+    # The load-bearing assertion: the false claim is gone.
+    assert normalized["delegated_to"] != "local"
+    # And the value is the actual resolved endpoint, not a fabricated class.
+    assert normalized["delegated_to"] == _GEMINI_ENDPOINT
+    # The rest of the flattening is unchanged.
+    assert normalized["model_name"] == "gemini-2.5-flash"
+    assert normalized["quality_gate_passed"] is True
+
+
+def test_cloud_routed_terminal_provenance_survives_the_nested_wire_shape() -> None:
+    """The same guarantee holds through the legacy double-nested envelope."""
+    normalized = _normalize_result_payload(
+        status="completed",
+        payload={
+            "topic": "onex.evt.omnibase-infra.delegation-completed.v1",
+            "payload": dict(_LIVE_CLOUD_TERMINAL),
+        },
+        error_message=None,
+    )
+
+    assert normalized["delegated_to"] != "local"
+    assert normalized["delegated_to"] == _GEMINI_ENDPOINT
+
+
+def test_local_routed_terminal_still_resolves_to_the_local_endpoint() -> None:
+    """The fix is not "always say cloud" -- a local backend stays identifiable."""
+    normalized = _normalize_result_payload(
+        status="completed",
+        payload={
+            "model_used": "Qwen3.6-35B-A3B",
+            "endpoint_url": "http://127.0.0.1:8001/v1/chat/completions",
+            "cost_tier_name": "local",
+            "quality_passed": True,
+        },
+        error_message=None,
+    )
+
+    assert normalized["delegated_to"] == "http://127.0.0.1:8001/v1/chat/completions"
+    assert "generativelanguage.googleapis.com" not in str(normalized["delegated_to"])
+
+
+def test_explicit_upstream_provider_stamp_wins() -> None:
+    """An explicit producer-supplied `provider` is authoritative."""
+    normalized = _normalize_result_payload(
+        status="completed",
+        payload={
+            "provider": "cloud-gemini-pro",
+            "endpoint_url": _GEMINI_ENDPOINT,
+            "cost_tier_name": "cheap_cloud",
+        },
+        error_message=None,
+    )
+
+    assert normalized["delegated_to"] == "cloud-gemini-pro"
+
+
+def test_provenance_falls_back_to_the_resolved_tier_when_endpoint_is_absent() -> None:
+    """With no endpoint identity, the routing tier is the remaining real fact."""
+    normalized = _normalize_result_payload(
+        status="completed",
+        payload={"model_used": "gemini-2.5-flash", "cost_tier_name": "cheap_cloud"},
+        error_message=None,
+    )
+
+    assert normalized["delegated_to"] == "cheap_cloud"
+
+
+def test_absent_provenance_stays_absent_rather_than_fabricated() -> None:
+    """No provenance signal must yield an empty value, not a deployment class.
+
+    An empty string is falsy, so
+    `handler_delegate_skill._response_from_result` (`delegated_to or
+    endpoint_url or ""`) still falls through its own chain. A fabricated
+    "local" would short-circuit it -- that was the OMN-15471 mechanism.
+    """
+    normalized = _normalize_result_payload(
+        status="failed",
+        payload={"failure_reason": "no configured endpoint"},
+        error_message="no configured endpoint",
+    )
+
+    assert normalized["delegated_to"] == ""
+    assert normalized["delegated_to"] != "local"
+
+
+def test_existing_delegated_to_is_never_overwritten() -> None:
+    """The local dispatch port already stamps `delegated_to`; preserve it."""
+    normalized = _normalize_result_payload(
+        status="completed",
+        payload={
+            "delegated_to": "local-qwen-coder-30b",
+            "endpoint_url": _GEMINI_ENDPOINT,
+        },
+        error_message=None,
+    )
+
+    assert normalized["delegated_to"] == "local-qwen-coder-30b"
+
+
+def test_no_hardcoded_deployment_class_default_in_the_normalizer() -> None:
+    """Mechanism guard: the literal default cannot be reintroduced silently.
+
+    Per the rule-vs-mechanism standard, the behavioural tests above are
+    necessary but not sufficient -- a future edit could reinstate the literal
+    on a sibling field and every assertion above would still pass.
+
+    This walks the module AST rather than grepping text, so it pins the
+    executable construct (``<mapping>.get(<key>, "local"|"cloud")`` fed into a
+    ``setdefault``) and is not satisfied or broken by prose that merely quotes
+    the removed line -- the docstring of ``_resolve_delegation_provenance``
+    deliberately does quote it.
+    """
+    import ast
+    from pathlib import Path
+
+    import omnibase_infra.runtime.service_delegation_dispatch_port as module
+
+    tree = ast.parse(Path(module.__file__).read_text(encoding="utf-8"))
+    fabricated = {"local", "cloud", "remote", "unknown"}
+    offending: list[str] = []
+
+    for node in ast.walk(tree):
+        if not isinstance(node, ast.Call):
+            continue
+        func = node.func
+        if not isinstance(func, ast.Attribute) or func.attr != "get":
+            continue
+        if len(node.args) != 2:
+            continue
+        default = node.args[1]
+        if isinstance(default, ast.Constant) and default.value in fabricated:
+            offending.append(ast.unparse(node))
+
+    assert offending == [], (
+        "OMN-15471: provenance must be derived from the terminal payload's own "
+        "resolved fields, never defaulted to a fabricated deployment class; "
+        f"found {offending}"
+    )

@@ -159,3 +159,69 @@ class TestDiskGcPlanSafety:
         ]
         plan = disk_gc_plan.build_plan(KEEP_LIST, images, [], set(), now=NOW)
         assert plan["remove_image_ids"].count(dup) == 1
+
+
+@pytest.mark.unit
+class TestDiskGcPlanMultiTagAndInUseMatching:
+    """OMN-15804 recurrence-prevention tests.
+
+    The native onex-disk-gc timer ran 3+ cycles identifying ~101 candidates and
+    removed ZERO: `docker rmi <id>` fails "must be forced - referenced in
+    multiple repositories" on any image with more than one repo:tag, and the
+    in-use match had a short-id vs full-id gap (containers started by short ID
+    never matched the full `sha256:...` id from `docker image ls --no-trunc`).
+    """
+
+    def test_multi_tag_candidate_plan_surfaces_all_refs_for_untag_then_remove(
+        self,
+    ) -> None:
+        # Three generations of a kept repo (keep_generations=2): the two newest
+        # are retained; the oldest generation carries TWO repo:tag rows (a
+        # multi-tag image) and must be the one removed.
+        shared_id = "sha256:" + "a" * 64
+        images = [
+            _img("g1", "omninode-runtime", "v0.41.0", days_ago=4),
+            _img("g2", "omninode-runtime", "v0.40.0", days_ago=10),
+            _img(shared_id, "omninode-runtime", "sha-abc123", days_ago=20),
+            _img(shared_id, "omninode-runtime", "pr-999", days_ago=20),
+        ]
+        plan = disk_gc_plan.build_plan(KEEP_LIST, images, [], set(), now=NOW)
+        # RED against the old rmi-by-id-only logic: the plan must expose every
+        # repo:tag ref that points at this image id, not just the bare id, so
+        # the executor can untag each ref before the final `docker rmi <id>`.
+        assert shared_id in plan["remove_image_ids"]
+        assert "remove_image_refs" in plan
+        refs = set(plan["remove_image_refs"].get(shared_id, []))
+        assert refs == {"omninode-runtime:sha-abc123", "omninode-runtime:pr-999"}
+
+    def test_dangling_candidate_has_empty_refs_list(self) -> None:
+        # A dangling (untagged) image has no repo:tag to untag — refs must be
+        # an empty list, not absent, so the executor's untag loop is a no-op
+        # and it falls straight through to `docker rmi <id>`.
+        images = [_img("sha-dangle2", "<none>", "<none>", days_ago=10)]
+        plan = disk_gc_plan.build_plan(KEEP_LIST, images, [], set(), now=NOW)
+        assert plan["remove_image_refs"].get("sha-dangle2", []) == []
+
+    def test_in_use_image_protected_via_short_container_id(self) -> None:
+        # A container started by short (12-hex) image ID: docker ps prints the
+        # short form while `docker image ls --no-trunc` gives the full
+        # `sha256:<64hex>` id. The old exact-membership match missed this.
+        full_id = "sha256:" + "b" * 64
+        short_id = ("b" * 64)[:12]
+        images = [_img(full_id, "omninode-runtime", "v0.41.0", days_ago=30)]
+        inuse = {short_id}  # what `docker ps --format {{.Image}}` prints for a
+        # container started directly by (short) image ID, not by tag.
+        plan = disk_gc_plan.build_plan(KEEP_LIST, images, [], inuse, now=NOW)
+        assert full_id not in plan["remove_image_ids"]
+        assert full_id in plan["kept_reasons"]
+
+    def test_keep_list_still_respected_alongside_multi_tag_refs(self) -> None:
+        # A multi-tag image where one of the tags is a keep_image_tags entry
+        # must be kept in full — keep wins regardless of ref count.
+        shared_id = "sha256:" + "c" * 64
+        images = [
+            _img(shared_id, "omninode-runtime", "latest", days_ago=400),
+            _img(shared_id, "omninode-runtime", "sha-def456", days_ago=400),
+        ]
+        plan = disk_gc_plan.build_plan(KEEP_LIST, images, [], set(), now=NOW)
+        assert shared_id not in plan["remove_image_ids"]

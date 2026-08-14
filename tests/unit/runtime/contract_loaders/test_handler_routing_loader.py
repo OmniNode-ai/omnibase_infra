@@ -793,15 +793,23 @@ class TestValidRoutingStrategies:
     tests could still pass. See test_loader_uses_valid_routing_strategies_constant.
     """
 
-    def test_valid_routing_strategies_contains_only_payload_type_match(self) -> None:
-        """Test that VALID_ROUTING_STRATEGIES only contains 'payload_type_match'.
+    def test_valid_routing_strategies_contains_payload_type_match_and_topic_match(
+        self,
+    ) -> None:
+        """Test VALID_ROUTING_STRATEGIES contains exactly the two implemented
+        strategies.
 
-        Currently only 'payload_type_match' is implemented. Other strategies
-        like 'first_match' or 'all_match' may be added in future versions.
+        OMN-15215: 'topic_match' is a real, contract-declared strategy live in
+        the auto_wiring consumer-attach path since OMN-14594
+        (node_ledger_projection_compute) — this loader must not flag it as
+        unknown. Other strategies like 'first_match' or 'all_match' may be
+        added in future versions.
         """
         from omnibase_infra.runtime.contract_loaders import VALID_ROUTING_STRATEGIES
 
-        assert frozenset({"payload_type_match"}) == VALID_ROUTING_STRATEGIES
+        assert frozenset({"payload_type_match", "topic_match"}) == (
+            VALID_ROUTING_STRATEGIES
+        )
 
     def test_valid_routing_strategies_is_frozenset(self) -> None:
         """Test that VALID_ROUTING_STRATEGIES is an immutable frozenset."""
@@ -809,21 +817,57 @@ class TestValidRoutingStrategies:
 
         assert isinstance(VALID_ROUTING_STRATEGIES, frozenset)
 
-    def test_valid_routing_strategies_has_exactly_one_entry(self) -> None:
-        """Test that VALID_ROUTING_STRATEGIES has exactly one entry.
+    def test_valid_routing_strategies_has_exactly_two_entries(self) -> None:
+        """Test that VALID_ROUTING_STRATEGIES has exactly two entries.
 
         This test will fail if additional strategies are added, reminding
-        developers to add corresponding tests for new strategies.
+        developers to add corresponding tests for new strategies. OMN-15215
+        widened this from one ('payload_type_match') to two, adding
+        'topic_match'.
         """
         from omnibase_infra.runtime.contract_loaders import VALID_ROUTING_STRATEGIES
 
-        assert len(VALID_ROUTING_STRATEGIES) == 1
+        assert len(VALID_ROUTING_STRATEGIES) == 2
 
     def test_payload_type_match_in_valid_strategies(self) -> None:
         """Test that 'payload_type_match' is in VALID_ROUTING_STRATEGIES."""
         from omnibase_infra.runtime.contract_loaders import VALID_ROUTING_STRATEGIES
 
         assert "payload_type_match" in VALID_ROUTING_STRATEGIES
+
+    def test_topic_match_in_valid_strategies(self) -> None:
+        """Test that 'topic_match' is in VALID_ROUTING_STRATEGIES (OMN-15215)."""
+        from omnibase_infra.runtime.contract_loaders import VALID_ROUTING_STRATEGIES
+
+        assert "topic_match" in VALID_ROUTING_STRATEGIES
+
+    def test_topic_match_does_not_trigger_unknown_strategy_warning(
+        self, tmp_path: Path
+    ) -> None:
+        """OMN-15215: a topic_match contract must not log the misleading
+        "Unknown routing_strategy" warning — confirmed live on a fresh
+        omnibase-infra-stability-test boot, 2026-07-27, for
+        node_ledger_projection_compute (routing_strategy: topic_match since
+        OMN-14594)."""
+        from omnibase_infra.runtime.contract_loaders import (
+            load_handler_routing_subcontract,
+        )
+
+        contract_path = tmp_path / "contract.yaml"
+        contract_path.write_text(
+            "handler_routing:\n"
+            "  routing_strategy: topic_match\n"
+            "  handlers:\n"
+            "    - topic: onex.evt.omn15215.fixture.v1\n"
+            "      event_model:\n"
+            "        name: ModelEventMessage\n"
+            "      handler:\n"
+            "        name: HandlerFixture\n"
+        )
+
+        result = load_handler_routing_subcontract(contract_path)
+
+        assert result.routing_strategy == "topic_match"
 
     def test_first_match_not_in_valid_strategies(self) -> None:
         """Test that 'first_match' is NOT in VALID_ROUTING_STRATEGIES.

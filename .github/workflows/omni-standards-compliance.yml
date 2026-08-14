@@ -42,9 +42,8 @@ jobs:
     # OMNI_RUNNER_SELECTOR_V1 — trusted CI defaults to self-hosted omnibase-ci; public forks default to ubuntu-latest
     runs-on: >-
       ${{
-        ((github.event_name == 'pull_request' && github.base_ref == 'dev') ||
-         (github.event_name == 'pull_request' &&
-          github.event.pull_request.head.repo.full_name != github.repository))
+        (github.event_name == 'pull_request' &&
+         github.event.pull_request.head.repo.full_name != github.repository)
         && fromJSON(vars.OMNI_PUBLIC_PR_RUNS_ON_JSON || '["ubuntu-latest"]')
         || fromJSON(vars.OMNI_TRUSTED_CI_RUNS_ON_JSON || '["self-hosted","omnibase-ci"]')
       }}
@@ -78,9 +77,8 @@ jobs:
     # OMNI_RUNNER_SELECTOR_V1 — trusted CI defaults to self-hosted omnibase-ci; public forks default to ubuntu-latest
     runs-on: >-
       ${{
-        ((github.event_name == 'pull_request' && github.base_ref == 'dev') ||
-         (github.event_name == 'pull_request' &&
-          github.event.pull_request.head.repo.full_name != github.repository))
+        (github.event_name == 'pull_request' &&
+         github.event.pull_request.head.repo.full_name != github.repository)
         && fromJSON(vars.OMNI_PUBLIC_PR_RUNS_ON_JSON || '["ubuntu-latest"]')
         || fromJSON(vars.OMNI_TRUSTED_CI_RUNS_ON_JSON || '["self-hosted","omnibase-ci"]')
       }}
@@ -108,9 +106,8 @@ jobs:
     name: Handler Contract Compliance
     runs-on: >-
       ${{
-        ((github.event_name == 'pull_request' && github.base_ref == 'dev') ||
-         (github.event_name == 'pull_request' &&
-          github.event.pull_request.head.repo.full_name != github.repository))
+        (github.event_name == 'pull_request' &&
+         github.event.pull_request.head.repo.full_name != github.repository)
         && fromJSON(vars.OMNI_PUBLIC_PR_RUNS_ON_JSON || '["ubuntu-latest"]')
         || fromJSON(vars.OMNI_TRUSTED_CI_RUNS_ON_JSON || '["self-hosted","omnibase-ci"]')
       }}
@@ -119,7 +116,7 @@ jobs:
         uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
 
       - name: Set up Python
-        uses: actions/setup-python@v6
+        uses: actions/setup-python@v7
         with:
           python-version: ${{ env.PYTHON_VERSION }}
 
@@ -207,9 +204,8 @@ jobs:
     # OMNI_RUNNER_SELECTOR_V1 — trusted CI defaults to self-hosted omnibase-ci; public forks default to ubuntu-latest
     runs-on: >-
       ${{
-        ((github.event_name == 'pull_request' && github.base_ref == 'dev') ||
-         (github.event_name == 'pull_request' &&
-          github.event.pull_request.head.repo.full_name != github.repository))
+        (github.event_name == 'pull_request' &&
+         github.event.pull_request.head.repo.full_name != github.repository)
         && fromJSON(vars.OMNI_PUBLIC_PR_RUNS_ON_JSON || '["ubuntu-latest"]')
         || fromJSON(vars.OMNI_TRUSTED_CI_RUNS_ON_JSON || '["self-hosted","omnibase-ci"]')
       }}
@@ -246,9 +242,8 @@ jobs:
     name: CI Naming Convention
     runs-on: >-
       ${{
-        ((github.event_name == 'pull_request' && github.base_ref == 'dev') ||
-         (github.event_name == 'pull_request' &&
-          github.event.pull_request.head.repo.full_name != github.repository))
+        (github.event_name == 'pull_request' &&
+         github.event.pull_request.head.repo.full_name != github.repository)
         && fromJSON(vars.OMNI_PUBLIC_PR_RUNS_ON_JSON || '["ubuntu-latest"]')
         || fromJSON(vars.OMNI_TRUSTED_CI_RUNS_ON_JSON || '["self-hosted","omnibase-ci"]')
       }}

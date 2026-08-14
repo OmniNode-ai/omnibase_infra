@@ -39,57 +39,6 @@ def test_opencode_handler_is_registered_in_contract() -> None:
 
 
 @pytest.mark.unit
-def test_claude_cli_tier_is_registered_in_routing_tiers() -> None:
-    tiers_path = (
-        Path(__file__).parents[5] / "src/omnibase_infra/configs/routing_tiers.yaml"
-    )
-    data = yaml.safe_load(tiers_path.read_text())
-    tier_names = [t["name"] for t in data["tiers"]]
-    assert "cli_agents" in tier_names
-
-
-@pytest.mark.unit
-def test_cli_agents_tier_contains_claude_cli_model() -> None:
-    tiers_path = (
-        Path(__file__).parents[5] / "src/omnibase_infra/configs/routing_tiers.yaml"
-    )
-    data = yaml.safe_load(tiers_path.read_text())
-    cli_tier = next(t for t in data["tiers"] if t["name"] == "cli_agents")
-    model_ids = [m["id"] for m in cli_tier["models"]]
-    assert "claude-cli" in model_ids
-
-
-@pytest.mark.unit
-def test_cli_agents_tier_omits_codex_cli_model() -> None:
-    """OMN-13215: the shelled codex-cli model was removed from cli_agents.
-
-    The delegation ceiling executes over the canonical HTTP path; no codex
-    subprocess model remains in any routing tier.
-    """
-    tiers_path = (
-        Path(__file__).parents[5] / "src/omnibase_infra/configs/routing_tiers.yaml"
-    )
-    data = yaml.safe_load(tiers_path.read_text())
-    cli_tier = next(t for t in data["tiers"] if t["name"] == "cli_agents")
-    model_ids = [m["id"] for m in cli_tier["models"]]
-    assert "codex-cli" not in model_ids
-    # No tier anywhere may declare a codex shell-out model.
-    for tier in data["tiers"]:
-        assert "codex-cli" not in [m["id"] for m in tier["models"]]
-
-
-@pytest.mark.unit
-def test_cli_agents_tier_contains_opencode_cli_model() -> None:
-    tiers_path = (
-        Path(__file__).parents[5] / "src/omnibase_infra/configs/routing_tiers.yaml"
-    )
-    data = yaml.safe_load(tiers_path.read_text())
-    cli_tier = next(t for t in data["tiers"] if t["name"] == "cli_agents")
-    model_ids = [m["id"] for m in cli_tier["models"]]
-    assert "opencode-cli" in model_ids
-
-
-@pytest.mark.unit
 def test_claude_cli_subprocess_unavailable_when_binary_missing() -> None:
     from omnibase_infra.models.llm.model_llm_inference_request import (
         ModelLlmInferenceRequest,

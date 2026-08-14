@@ -167,6 +167,142 @@ CREATE TABLE IF NOT EXISTS llm_cost_aggregates (
     )
 );
 
+-- ---- BEGIN OMN-15655 legacy shape reconciliation: llm_cost_aggregates ----
+-- CREATE TABLE IF NOT EXISTS no-ops when a legacy table with this name already
+-- exists. Converge the table before column-dependent indexes/comments run, while
+-- preserving pre-existing rows and failing loudly if required columns cannot be
+-- made NOT NULL without inventing data.
+ALTER TABLE llm_cost_aggregates ADD COLUMN IF NOT EXISTS id UUID;
+ALTER TABLE llm_cost_aggregates ALTER COLUMN id SET DEFAULT gen_random_uuid();
+ALTER TABLE llm_cost_aggregates ADD COLUMN IF NOT EXISTS aggregation_key VARCHAR(512);
+ALTER TABLE llm_cost_aggregates ADD COLUMN IF NOT EXISTS "window" cost_aggregation_window;
+ALTER TABLE llm_cost_aggregates ADD COLUMN IF NOT EXISTS total_cost_usd NUMERIC(14, 6) DEFAULT 0;
+ALTER TABLE llm_cost_aggregates ADD COLUMN IF NOT EXISTS total_tokens BIGINT DEFAULT 0;
+ALTER TABLE llm_cost_aggregates ADD COLUMN IF NOT EXISTS call_count INTEGER DEFAULT 0;
+ALTER TABLE llm_cost_aggregates ADD COLUMN IF NOT EXISTS estimated_coverage_pct NUMERIC(5, 2);
+ALTER TABLE llm_cost_aggregates ADD COLUMN IF NOT EXISTS created_at TIMESTAMPTZ DEFAULT NOW();
+ALTER TABLE llm_cost_aggregates ADD COLUMN IF NOT EXISTS updated_at TIMESTAMPTZ DEFAULT NOW();
+
+DO $$
+DECLARE
+    v_rows BIGINT;
+BEGIN
+    LOOP
+        WITH batch AS (
+            SELECT ctid
+            FROM llm_cost_aggregates
+            WHERE id IS NULL
+            LIMIT 10000
+        )
+        UPDATE llm_cost_aggregates AS target
+        SET id = gen_random_uuid()
+        FROM batch
+        WHERE target.ctid = batch.ctid;
+
+        GET DIAGNOSTICS v_rows = ROW_COUNT;
+        EXIT WHEN v_rows = 0;
+    END LOOP;
+END$$;
+
+DO $$
+DECLARE
+    v_col TEXT;
+    v_nulls BIGINT;
+BEGIN
+    FOREACH v_col IN ARRAY ARRAY['id', 'aggregation_key', 'window', 'total_cost_usd', 'total_tokens', 'call_count', 'created_at', 'updated_at']
+    LOOP
+        EXECUTE format(
+            'SELECT count(*) FROM %s WHERE %I IS NULL', 'llm_cost_aggregates'::regclass, v_col
+        ) INTO v_nulls;
+        IF v_nulls = 0 THEN
+            EXECUTE format(
+                'ALTER TABLE %s ALTER COLUMN %I SET NOT NULL', 'llm_cost_aggregates'::regclass, v_col
+            );
+        ELSE
+            RAISE EXCEPTION
+                'OMN-15655: cannot converge llm_cost_aggregates.% to NOT NULL -- % pre-existing row(s) hold NULL. This needs a data ruling; the migration refuses to guess.',
+                v_col, v_nulls;
+        END IF;
+    END LOOP;
+END$$;
+
+DO $$
+DECLARE
+    v_pk_columns TEXT[];
+BEGIN
+    SELECT array_agg(a.attname::text ORDER BY k.ordinality) INTO v_pk_columns
+    FROM pg_constraint c
+    CROSS JOIN LATERAL unnest(c.conkey) WITH ORDINALITY AS k(attnum, ordinality)
+    JOIN pg_attribute a ON a.attrelid = c.conrelid AND a.attnum = k.attnum
+    WHERE c.conrelid = 'llm_cost_aggregates'::regclass
+      AND c.contype = 'p';
+
+    IF v_pk_columns IS NULL THEN
+        ALTER TABLE llm_cost_aggregates ADD CONSTRAINT llm_cost_aggregates_pkey PRIMARY KEY (id);
+    ELSIF v_pk_columns <> ARRAY['id']::text[] THEN
+        RAISE EXCEPTION
+            'OMN-15655: llm_cost_aggregates primary key covers %, expected {id}; operator schema ruling required.',
+            v_pk_columns;
+    END IF;
+END$$;
+
+DO $$
+BEGIN
+    IF NOT EXISTS (
+        SELECT 1 FROM pg_constraint c
+        WHERE c.conrelid = 'llm_cost_aggregates'::regclass
+          AND c.contype IN ('p', 'u')
+          AND (
+              SELECT array_agg(a.attname::text ORDER BY a.attname)
+              FROM unnest(c.conkey) AS k(attnum)
+              JOIN pg_attribute a ON a.attrelid = c.conrelid AND a.attnum = k.attnum
+          ) = ARRAY['aggregation_key', 'window']::text[]
+    ) THEN
+        ALTER TABLE llm_cost_aggregates ADD CONSTRAINT unique_aggregation_key_window UNIQUE (aggregation_key, "window");
+    END IF;
+END$$;
+
+DO $$
+BEGIN
+    IF NOT EXISTS (
+        SELECT 1 FROM pg_constraint
+        WHERE conrelid = 'llm_cost_aggregates'::regclass AND conname = 'non_negative_total_cost_usd'
+    ) THEN
+        ALTER TABLE llm_cost_aggregates ADD CONSTRAINT non_negative_total_cost_usd CHECK (total_cost_usd >= 0);
+    END IF;
+END$$;
+
+DO $$
+BEGIN
+    IF NOT EXISTS (
+        SELECT 1 FROM pg_constraint
+        WHERE conrelid = 'llm_cost_aggregates'::regclass AND conname = 'non_negative_agg_total_tokens'
+    ) THEN
+        ALTER TABLE llm_cost_aggregates ADD CONSTRAINT non_negative_agg_total_tokens CHECK (total_tokens >= 0);
+    END IF;
+END$$;
+
+DO $$
+BEGIN
+    IF NOT EXISTS (
+        SELECT 1 FROM pg_constraint
+        WHERE conrelid = 'llm_cost_aggregates'::regclass AND conname = 'non_negative_call_count'
+    ) THEN
+        ALTER TABLE llm_cost_aggregates ADD CONSTRAINT non_negative_call_count CHECK (call_count >= 0);
+    END IF;
+END$$;
+
+DO $$
+BEGIN
+    IF NOT EXISTS (
+        SELECT 1 FROM pg_constraint
+        WHERE conrelid = 'llm_cost_aggregates'::regclass AND conname = 'valid_estimated_coverage_pct'
+    ) THEN
+        ALTER TABLE llm_cost_aggregates ADD CONSTRAINT valid_estimated_coverage_pct CHECK (estimated_coverage_pct IS NULL OR (estimated_coverage_pct >= 0.00 AND estimated_coverage_pct <= 100.00));
+    END IF;
+END$$;
+-- ---- END OMN-15655 legacy shape reconciliation: llm_cost_aggregates ----
+
 -- ============================================================================
 -- INDEXES: llm_call_metrics
 -- ============================================================================

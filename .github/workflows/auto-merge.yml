@@ -58,6 +58,22 @@ permissions:
   contents: write
   pull-requests: write
 
+concurrency:
+  # OMN-15730 / CodeRabbit: check_suite runs do not populate
+  # github.event.pull_request, so the || github.ref fallback resolves to the
+  # default branch ref for EVERY check_suite-triggered run regardless of
+  # which PR's checks completed -- unrelated PRs' auto-merge attempts landed
+  # in one shared group and cancelled each other. Use the check_suite PR
+  # list explicitly before falling back to the run id.
+  group: >-
+    ${{ github.workflow }}-${{
+      github.event.pull_request.number ||
+      github.event.inputs.pr_number ||
+      (github.event.check_suite.pull_requests[0].number) ||
+      github.run_id
+    }}
+  cancel-in-progress: true
+
 jobs:
   auto-merge:
     timeout-minutes: 30
@@ -127,7 +143,7 @@ jobs:
 
       - name: Set up Python 3.12
         if: steps.resolve.outputs.skip != 'true' && steps.resolve.outputs.actor == 'jonahgabriel'
-        uses: actions/setup-python@v5
+        uses: actions/setup-python@v7
         with:
           python-version: "3.12"
 

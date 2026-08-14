@@ -120,11 +120,28 @@ def _make_contract(
 
 
 def _make_dispatch_engine() -> MagicMock:
+    """A dispatch-engine double that answers the contract-scope question honestly.
+
+    OMN-15474 made subscription contract-scoped: before attaching a consumer,
+    ``_subscribe_contract_topics`` asks the LIVE engine which dispatchers the
+    contract owns and refuses to attach on an empty answer, because a
+    zero-owner consumer would dispatch process-globally. A bare ``MagicMock``
+    answers that question with an auto-created attribute whose iteration yields
+    nothing, so the double silently claims the contract owns no dispatcher and
+    the refusal fires on a contract that just registered one. Return the
+    dispatcher ids the caller registered — what the real
+    ``MessageDispatchEngine`` returns — so this test exercises the wiring
+    behaviour it is named for instead of the scope guard.
+    """
     engine = MagicMock()
     engine._routes = {}
     engine._container = None
     engine.register_dispatcher = MagicMock()
     engine.register_route = MagicMock()
+    engine.dispatch_scoped = AsyncMock()
+    engine.validate_contract_dispatcher_scope = MagicMock(
+        side_effect=lambda _contract_name, dispatcher_ids: frozenset(dispatcher_ids)
+    )
     engine.freeze = MagicMock()
     return engine
 

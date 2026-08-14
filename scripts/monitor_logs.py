@@ -52,6 +52,7 @@ import time
 import urllib.request
 import uuid
 from collections import deque
+from dataclasses import dataclass
 from datetime import UTC, datetime
 from pathlib import Path
 
@@ -85,7 +86,83 @@ def _load_omnibase_env() -> None:
         pass
 
 
-_load_omnibase_env()
+@dataclass(frozen=True, slots=True)
+class _MonitorEnvironmentConfig:
+    """Environment-derived configuration cached by monitor helpers."""
+
+    warning_cooldown_seconds: int
+    restart_hwm_file: Path
+    onex_state_dir: Path
+    default_file_logs: tuple[str, ...]
+
+
+def _resolve_monitor_environment_config() -> _MonitorEnvironmentConfig:
+    """Resolve every module-level value derived from the process environment."""
+    onex_state_dir = Path(
+        os.environ.get("ONEX_STATE_DIR", str(Path.home() / ".onex_state"))
+    )
+    return _MonitorEnvironmentConfig(
+        warning_cooldown_seconds=int(
+            os.environ.get("MONITOR_WARNING_COOLDOWN", "1800")
+        ),
+        restart_hwm_file=Path(
+            os.environ.get(
+                "MONITOR_RESTART_HWM_FILE",
+                str(Path.home() / ".omnibase" / "monitor-restart-hwm.json"),
+            )
+        ),
+        onex_state_dir=onex_state_dir,
+        default_file_logs=(
+            str(onex_state_dir / "logs" / "env-sync.log"),
+            str(onex_state_dir / "logs" / "hooks.log"),
+            str(onex_state_dir / "logs" / "pipeline-trace.log"),
+        ),
+    )
+
+
+_MONITOR_ENV_CONFIG: _MonitorEnvironmentConfig
+WARNING_COOLDOWN_SECONDS: int
+_RESTART_HWM_FILE: Path
+_ONEX_STATE_DIR: Path
+_DEFAULT_FILE_LOGS: list[str]
+
+
+def _apply_monitor_environment_config(config: _MonitorEnvironmentConfig) -> None:
+    """Publish one resolved config to the compatibility module globals."""
+    global WARNING_COOLDOWN_SECONDS  # noqa: PLW0603 -- compatibility global
+    global _DEFAULT_FILE_LOGS, _MONITOR_ENV_CONFIG  # noqa: PLW0603
+    global _ONEX_STATE_DIR, _RESTART_HWM_FILE  # noqa: PLW0603
+
+    _MONITOR_ENV_CONFIG = config
+    WARNING_COOLDOWN_SECONDS = config.warning_cooldown_seconds
+    _RESTART_HWM_FILE = config.restart_hwm_file
+    _ONEX_STATE_DIR = config.onex_state_dir
+    _DEFAULT_FILE_LOGS = list(config.default_file_logs)
+
+
+_MONITOR_HOME_ENV_LOADED = False
+
+
+def _bootstrap_monitor_environment() -> _MonitorEnvironmentConfig:
+    """Load operator env once and refresh every cached environment value."""
+    global _MONITOR_HOME_ENV_LOADED  # noqa: PLW0603 -- one-time bootstrap state
+
+    if not _MONITOR_HOME_ENV_LOADED:
+        _load_omnibase_env()
+        _MONITOR_HOME_ENV_LOADED = True
+    config = _resolve_monitor_environment_config()
+    _apply_monitor_environment_config(config)
+    return config
+
+
+if __name__ == "__main__":
+    # Direct execution still loads operator config before the module-level
+    # environment-derived constants below are evaluated. Library imports must
+    # remain side-effect-free in their caller's process.
+    _load_omnibase_env()
+    _MONITOR_HOME_ENV_LOADED = True
+
+_apply_monitor_environment_config(_resolve_monitor_environment_config())
 
 # ---------------------------------------------------------------------------
 # Persistent cooldown (survives monitor restarts / launchd KeepAlive bounces)
@@ -176,8 +253,6 @@ WARNING_PATTERN = re.compile(
     r"|HandlerConsul.*ConnectionError"
     r")"
 )
-
-WARNING_COOLDOWN_SECONDS = int(os.environ.get("MONITOR_WARNING_COOLDOWN", "1800"))
 
 # Backoff for warnings: 30m → 60m → cap at 60m
 _WARNING_BACKOFF_BASE = 1800  # 30 minutes
@@ -1070,7 +1145,7 @@ def _load_monitor_alert_topic() -> str:
         # MonitorAlertEmitter._init_clients() will log the degradation.
         return ""
     try:
-        import yaml  # type: ignore[import-untyped]
+        import yaml
     except ImportError as exc:
         raise RuntimeError(
             "PyYAML is required to load monitor_alert_contract.yaml "
@@ -1232,12 +1307,6 @@ class MonitorAlertEmitter:
 # Restart watcher (OMN-3596)
 # ---------------------------------------------------------------------------
 
-_RESTART_HWM_FILE = Path(
-    os.environ.get(
-        "MONITOR_RESTART_HWM_FILE",
-        str(Path.home() / ".omnibase" / "monitor-restart-hwm.json"),
-    )
-)
 _restart_hwm_lock = threading.Lock()
 
 # Default restart-count delta that triggers an alert.
@@ -1680,14 +1749,6 @@ class ContainerTailer(threading.Thread):
 # ---------------------------------------------------------------------------
 
 # Default file log sources (colon-separated env var MONITOR_FILE_LOGS overrides)
-_ONEX_STATE_DIR = Path(
-    os.environ.get("ONEX_STATE_DIR", str(Path.home() / ".onex_state"))
-)
-_DEFAULT_FILE_LOGS = [
-    str(_ONEX_STATE_DIR / "logs" / "env-sync.log"),
-    str(_ONEX_STATE_DIR / "logs" / "hooks.log"),
-    str(_ONEX_STATE_DIR / "logs" / "pipeline-trace.log"),
-]
 
 # Default journal units (comma-separated env var MONITOR_JOURNALS overrides)
 _DEFAULT_JOURNALS = ["deploy-agent.service"]
@@ -2359,6 +2420,7 @@ class LogMonitor:
 
 
 def main() -> None:
+    _bootstrap_monitor_environment()
     parser = argparse.ArgumentParser(
         description="Monitor OmniNode container logs and post errors to Slack"
     )

@@ -10,14 +10,22 @@ import json
 import logging
 import os
 import stat
-from collections.abc import Awaitable, Callable, Iterable, Sequence
+import typing
+from collections.abc import Awaitable, Callable, Sequence
+from copy import deepcopy
 from pathlib import Path
-from typing import cast
+from types import UnionType
+from typing import cast, get_args, get_origin
+from uuid import UUID
 
 import yaml
-from pydantic import BaseModel, ConfigDict, ValidationError
+from pydantic import AliasChoices, AliasPath, BaseModel, ConfigDict, ValidationError
 
 from omnibase_core.types import JsonType
+from omnibase_infra.runtime.contract_terminal_events import (
+    extract_terminal_event_topics,
+    terminal_event_topics_from_declaration,
+)
 from omnibase_infra.runtime.event_bus_subcontract_wiring import (
     EventBusSubcontractWiring,
 )
@@ -32,6 +40,9 @@ from omnibase_infra.runtime.models.model_local_runtime_ingress_response import (
 )
 
 logger = logging.getLogger(__name__)
+
+_RuntimeIngressAliasPath = tuple[object, ...]
+_MISSING_ALIAS_VALUE = object()
 
 
 def _preferred_request_name(raw: object) -> str:
@@ -318,28 +329,77 @@ def _local_ingress_routes_equivalent(
     )
 
 
+def _terminal_event_topics_from_declaration(declaration: object) -> tuple[str, ...]:
+    """Normalize one ``terminal_events`` declaration into success-first topics.
+
+    Delegates to the shared reader in
+    :mod:`omnibase_infra.runtime.contract_terminal_events` (OMN-15468). The
+    normalization itself is unchanged; it moved so the def-B auto-wiring can ask
+    the SAME question about the SAME contract and cannot answer it differently
+    from the broker's subscription set.
+    """
+
+    return terminal_event_topics_from_declaration(declaration)
+
+
 def _extract_terminal_events(raw: dict[object, object]) -> tuple[str, ...]:
-    """Return all contract-declared terminal topics for local ingress waits."""
+    """Return all contract-declared terminal topics for local ingress waits.
 
-    terminal_events: list[str] = []
-    terminal_event = _safe_optional_string(raw.get("terminal_event"))
-    if terminal_event is not None:
-        terminal_events.append(terminal_event)
+    Reads three declaration sites, in success-first order:
 
-    raw_terminal_events = raw.get("terminal_events")
-    if isinstance(raw_terminal_events, dict):
-        values: Iterable[object] = raw_terminal_events.values()
-    elif isinstance(raw_terminal_events, list | tuple):
-        values = raw_terminal_events
-    else:
-        values = ()
+    1. top-level ``terminal_event`` (single success topic),
+    2. top-level ``terminal_events`` (mapping or sequence),
+    3. ``runtime_dispatch.terminal_events`` (OMN-15468).
 
-    for value in values:
-        topic = _safe_optional_string(value)
-        if topic is not None:
-            terminal_events.append(topic)
+    Site 3 is the address external clients — the dashboard included — dispatch
+    through, and it is where **51** contracts declare their FAILURE terminal and
+    nowhere else. It was previously unread, so those routes reached the Pattern B
+    broker carrying only their success topic even though the broker is built to
+    race every declared terminal concurrently (OMN-13118/13128). The
+    consequences were both wrong and indistinguishable from each other: a node
+    that correctly published its failure terminal either timed out (the broker
+    was not subscribed to the topic the terminal landed on) or was reported as
+    ``completed`` (the def-B wiring republishes the returned model onto the
+    contract's success ``terminal_event`` irrespective of the payload verdict).
 
-    return tuple(dict.fromkeys(terminal_events))
+    Of those 51, **30** declare no top-level ``terminal_event`` *or*
+    ``terminal_events``, so this function returned an EMPTY tuple for them and
+    the broker rejected the command outright with "does not declare terminal
+    events"; the other 21 kept a working success topic and lost only the failure
+    one. **17** of the 30 also clear the route-discovery filter in
+    ``discover_runtime_local_ingress_routes`` above (a mapping ``event_bus``
+    whose ``subscribe_topics`` yield a ``_select_command_topic``), so 17 were
+    live, undispatchable ``/skill`` routes; the remaining 13 are latent
+    declarations discovery never reaches.
+
+    PROVENANCE — every number above is a measurement, not a constant. Framing:
+    the RAW corpus of 384 ``src/omnimarket/nodes/*/contract.yaml`` files at
+    ``omnimarket@aea0c33dd89fb82fdca33aac7149992a21c46d43`` (``origin/dev``),
+    measured 2026-07-30, no discovery filter applied except where "17" says so.
+    Re-derive rather than copy forward: 51 = contracts whose
+    ``runtime_dispatch.terminal_events`` normalizes non-empty (all 51 carry an
+    explicit ``failure`` key and at least one topic absent from the top level);
+    30 = those 51 whose top-level ``terminal_event`` and ``terminal_events`` are
+    both empty; 17 = those 30 for which ``_select_command_topic`` returns a
+    topic. These drift as contracts land. An earlier revision of this docstring
+    asserted an unsourced "24 of the 51", which reproduces under no framing —
+    the defect was the missing provenance, not only the wrong digit.
+
+    Live reproduction that motivated this (.201 dev lane, 2026-07-30): correlation
+    ``4a5e0730-0000-4000-8000-000000000002`` returned outer ``ok=true`` /
+    ``status=completed`` while the payload it carried held
+    ``contract_passed=false`` with empty ``contract_yaml``/``handler_source``, and
+    two correct failure terminals sat unread on
+    ``onex.evt.omnimarket.node-generation-failed.v1``.
+
+    Reader body lifted to
+    :func:`omnibase_infra.runtime.contract_terminal_events.extract_terminal_event_topics`
+    (OMN-15468 slice 2) so route discovery and the def-B publish seam read the
+    contract through ONE function. This wrapper is the discovery-side name and
+    stays as the route builder's call site.
+    """
+
+    return extract_terminal_event_topics(raw)
 
 
 def _package_scoped_route_aliases(
@@ -458,15 +518,283 @@ def _handler_event_type(
 def validate_runtime_local_ingress_payload(
     route: ModelRuntimeLocalIngressRoute,
     payload: dict[str, JsonType],
+    *,
+    correlation_id: UUID,
 ) -> dict[str, JsonType]:
-    """Validate and JSON-normalize an ingress payload against its route contract."""
+    """Validate and JSON-normalize a payload under ingress correlation authority.
+
+    The outer local-ingress request owns the correlation identifier. When the
+    route's typed input model declares ``correlation_id``, stamp that authority
+    before validation so a model default factory cannot mint a second workflow
+    identity. A caller-supplied value is accepted only when it is the same UUID.
+    """
 
     model_cls = _load_route_input_model(route)
     if model_cls is None:
         return payload
 
-    model = model_cls.model_validate(payload)
-    return cast("dict[str, JsonType]", model.model_dump(mode="json", exclude_none=True))
+    if "correlation_id" not in model_cls.model_fields:
+        model = model_cls.model_validate(payload)
+        return cast(
+            "dict[str, JsonType]", model.model_dump(mode="json", exclude_none=True)
+        )
+
+    correlation_field = model_cls.model_fields["correlation_id"]
+    validation_alias_paths = _validation_alias_paths(correlation_field.validation_alias)
+    correlation_alias_path_candidates: list[_RuntimeIngressAliasPath] = [
+        ("correlation_id",)
+    ]
+    if isinstance(correlation_field.alias, str):
+        correlation_alias_path_candidates.append((correlation_field.alias,))
+    correlation_alias_path_candidates.extend(validation_alias_paths)
+    correlation_alias_paths = tuple(dict.fromkeys(correlation_alias_path_candidates))
+
+    for alias_path in correlation_alias_paths:
+        raw_correlation_id = _read_alias_path(payload, alias_path)
+        if raw_correlation_id is _MISSING_ALIAS_VALUE:
+            continue
+        try:
+            payload_correlation_id = UUID(str(raw_correlation_id))
+        except ValueError as exc:
+            raise ValueError(
+                "Local ingress payload correlation_id must be a valid UUID"
+            ) from exc
+        if payload_correlation_id != correlation_id:
+            raise ValueError(
+                "Local ingress payload correlation_id conflicts with the "
+                "authoritative request correlation_id"
+            )
+
+    declares_uuid = _annotation_contains_uuid(correlation_field.annotation)
+    authoritative_correlation_id: object = (
+        correlation_id if declares_uuid else str(correlation_id)
+    )
+    validate_by_alias = model_cls.model_config.get("validate_by_alias") is not False
+    injection_path = (
+        validation_alias_paths[0]
+        if validate_by_alias and validation_alias_paths
+        else ("correlation_id",)
+    )
+    authoritative_payload = cast("dict[str, object]", deepcopy(payload))
+
+    removable_alias_paths: list[_RuntimeIngressAliasPath] = []
+    for alias_path in correlation_alias_paths:
+        if alias_path == injection_path:
+            continue
+        if (
+            len(alias_path) > 1
+            and len(injection_path) > 1
+            and alias_path[0] == injection_path[0]
+        ):
+            if _read_alias_path(authoritative_payload, alias_path) is not (
+                _MISSING_ALIAS_VALUE
+            ):
+                _write_alias_path(
+                    authoritative_payload,
+                    alias_path,
+                    authoritative_correlation_id,
+                )
+            continue
+        removable_alias_paths.append(alias_path)
+    _remove_alias_paths(authoritative_payload, tuple(removable_alias_paths))
+    _write_alias_path(
+        authoritative_payload,
+        injection_path,
+        authoritative_correlation_id,
+    )
+
+    model = model_cls.model_validate(authoritative_payload)
+    normalized_payload = cast(
+        "dict[str, JsonType]",
+        model.model_dump(mode="json", exclude_none=True, by_alias=False),
+    )
+    try:
+        validated_correlation_id = UUID(str(normalized_payload.get("correlation_id")))
+    except ValueError as exc:
+        raise ValueError(
+            "Validated local ingress correlation_id must be a valid UUID"
+        ) from exc
+    if validated_correlation_id != correlation_id:
+        raise ValueError(
+            "Validated local ingress correlation_id conflicts with the "
+            "authoritative request correlation_id"
+        )
+    return normalized_payload
+
+
+def _annotation_contains_uuid(annotation: object) -> bool:
+    """Return whether an annotation accepts ``UUID`` as a top-level value."""
+
+    if annotation is UUID:
+        return True
+    origin = get_origin(annotation)
+    if origin is typing.Annotated:
+        annotation_args = get_args(annotation)
+        return bool(annotation_args) and _annotation_contains_uuid(annotation_args[0])
+    if origin in (typing.Union, UnionType):
+        return any(_annotation_contains_uuid(arg) for arg in get_args(annotation))
+    return False
+
+
+def _validation_alias_paths(alias: object) -> tuple[_RuntimeIngressAliasPath, ...]:
+    """Return the concrete input paths represented by one Pydantic alias."""
+
+    if alias is None:
+        return ()
+    if isinstance(alias, str):
+        return ((alias,),)
+    if isinstance(alias, AliasPath):
+        return (tuple(alias.path),)
+    if isinstance(alias, AliasChoices):
+        return tuple(tuple(path) for path in alias.convert_to_aliases())
+    raise TypeError(
+        "Local ingress correlation_id declares an unsupported validation alias"
+    )
+
+
+def _read_alias_path(
+    payload: object,
+    alias_path: _RuntimeIngressAliasPath,
+) -> object:
+    """Read an alias path without treating a present ``None`` as missing."""
+
+    current = payload
+    for segment in alias_path:
+        if isinstance(segment, str):
+            if not isinstance(current, dict) or segment not in current:
+                return _MISSING_ALIAS_VALUE
+            current = current[segment]
+            continue
+        if not isinstance(segment, int):
+            raise TypeError(
+                "Local ingress correlation alias segments must be str or int"
+            )
+        if not isinstance(current, list):
+            return _MISSING_ALIAS_VALUE
+        try:
+            current = current[segment]
+        except IndexError:
+            return _MISSING_ALIAS_VALUE
+    return current
+
+
+def _remove_alias_paths(
+    payload: object,
+    alias_paths: tuple[_RuntimeIngressAliasPath, ...],
+) -> None:
+    """Remove alternate correlation aliases while preserving sibling payload data."""
+
+    grouped: dict[object, list[_RuntimeIngressAliasPath]] = {}
+    for alias_path in alias_paths:
+        if alias_path:
+            grouped.setdefault(alias_path[0], []).append(alias_path[1:])
+
+    if isinstance(payload, dict):
+        for segment, tails in grouped.items():
+            if not isinstance(segment, str) or segment not in payload:
+                continue
+            if any(not tail for tail in tails):
+                payload.pop(segment)
+                continue
+            child = payload[segment]
+            _remove_alias_paths(child, tuple(tail for tail in tails if tail))
+            if isinstance(child, (dict, list)) and not child:
+                payload.pop(segment)
+        return
+
+    if not isinstance(payload, list):
+        return
+    indexed_tails: dict[int, list[_RuntimeIngressAliasPath]] = {}
+    for segment, tails in grouped.items():
+        if not isinstance(segment, int):
+            continue
+        index = segment if segment >= 0 else len(payload) + segment
+        if 0 <= index < len(payload):
+            indexed_tails.setdefault(index, []).extend(tails)
+    for index in sorted(indexed_tails, reverse=True):
+        tails = indexed_tails[index]
+        if any(not tail for tail in tails):
+            payload.pop(index)
+            continue
+        child = payload[index]
+        _remove_alias_paths(child, tuple(tail for tail in tails if tail))
+        if isinstance(child, (dict, list)) and not child:
+            payload.pop(index)
+
+
+def _write_alias_path(
+    payload: dict[str, object],
+    alias_path: _RuntimeIngressAliasPath,
+    value: object,
+) -> None:
+    """Write the authoritative value through a Pydantic validation alias path."""
+
+    if not alias_path or not isinstance(alias_path[0], str):
+        raise TypeError(
+            "Local ingress correlation_id validation alias must start with a string"
+        )
+
+    current: object = payload
+    for position, segment in enumerate(alias_path):
+        is_leaf = position == len(alias_path) - 1
+        if isinstance(segment, str):
+            if not isinstance(current, dict):
+                raise ValueError(
+                    "Local ingress payload correlation_id alias path conflicts "
+                    "with the payload structure"
+                )
+            if is_leaf:
+                current[segment] = value
+                return
+            next_segment = alias_path[position + 1]
+            if segment not in current:
+                current[segment] = [] if isinstance(next_segment, int) else {}
+            child = current[segment]
+            expected_type = list if isinstance(next_segment, int) else dict
+            if not isinstance(child, expected_type):
+                raise ValueError(
+                    "Local ingress payload correlation_id alias path conflicts "
+                    "with the payload structure"
+                )
+            current = child
+            continue
+
+        if not isinstance(segment, int):
+            raise TypeError(
+                "Local ingress correlation alias segments must be str or int"
+            )
+        if not isinstance(current, list):
+            raise ValueError(
+                "Local ingress payload correlation_id alias path conflicts "
+                "with the payload structure"
+            )
+        if segment < 0:
+            missing_slots = max(0, -segment - len(current))
+            if missing_slots:
+                current[:0] = [None] * missing_slots
+            index = len(current) + segment
+        else:
+            missing_slots = max(0, segment + 1 - len(current))
+            if missing_slots:
+                current.extend([None] * missing_slots)
+            index = segment
+        if is_leaf:
+            current[index] = value
+            return
+        next_segment = alias_path[position + 1]
+        child = current[index]
+        expected_type = list if isinstance(next_segment, int) else dict
+        if child is None:
+            child = [] if expected_type is list else {}
+            current[index] = child
+        if not isinstance(child, expected_type):
+            raise ValueError(
+                "Local ingress payload correlation_id alias path conflicts "
+                "with the payload structure"
+            )
+        current = child
+
+    raise AssertionError("unreachable correlation_id alias path write")
 
 
 def _load_route_input_model(

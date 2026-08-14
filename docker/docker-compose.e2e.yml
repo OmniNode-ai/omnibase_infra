@@ -19,7 +19,7 @@
 #   docker compose -f docker/docker-compose.e2e.yml down -v
 #
 # Network:
-#   Uses omnibase-infra-network (created automatically).
+#   Uses omnibase-infra-e2e-network (created automatically).
 #   All services communicate over this internal Docker network.
 #
 # Ports Exposed (for host access during testing):
@@ -30,7 +30,30 @@
 #   - Infisical: 8880
 #   - Valkey: 6379
 #   - Runtime Health: 8085 (when runtime profile enabled)
-name: ${OMNIBASE_INFRA_COMPOSE_PROJECT:-omnibase-infra}
+#
+#   NOTE: these HOST port defaults still overlap live .201 lane bindings
+#   (19092/18082/8880/8085). Any caller that runs this stack on a shared host
+#   MUST override POSTGRES_PORT / KAFKA_PORT / REDPANDA_ADMIN_PORT /
+#   REDPANDA_SCHEMA_REGISTRY_PORT / REDPANDA_PANDAPROXY_PORT / VALKEY_PORT with
+#   free ports -- see .github/workflows/nightly-integration.yml and
+#   .github/workflows/reusable-runtime-boot.yml, which both allocate them
+#   dynamically. A port clash is a loud bind failure, not silent lane damage.
+# ==========================================================================
+# OMN-15565 -- LANE ISOLATION. Every default below is namespaced under
+# `omnibase-infra-e2e`, NOT `omnibase-infra`. The previous default resolved
+# this ephemeral test stack into the *live lab/dev lane's* compose project, so
+# `docker compose -f docker/docker-compose.e2e.yml down -v --remove-orphans`
+# (nightly-integration.yml) deleted the lab lane's containers AND its Postgres/
+# Redpanda/Valkey data volumes every night. The project name, container_names,
+# volume names and network name are ALL part of that aliasing -- container,
+# volume and network names are global to the Docker daemon and are not scoped
+# by the compose project -- so all four are re-namespaced together.
+#
+# Guarded by tests/unit/docker/test_e2e_compose_lane_isolation.py, which
+# derives the protected lane namespaces from deploy/lane-census/lane-manifest.yaml
+# and the lane compose files rather than hardcoding them.
+# ==========================================================================
+name: ${OMNIBASE_INFRA_COMPOSE_PROJECT:-omnibase-infra-e2e}
 # ==========================================================================
 # IMPORTANT: Requires Docker Compose v2.20+ (nested variable expansion).
 # Older versions will SILENTLY produce malformed DSNs.
@@ -52,7 +75,7 @@ services:
   # ==========================================================================
   postgres:
     image: postgres:16-alpine
-    container_name: ${OMNIBASE_INFRA_POSTGRES_CONTAINER:-omnibase-infra-postgres}
+    container_name: ${OMNIBASE_INFRA_POSTGRES_CONTAINER:-omnibase-infra-e2e-postgres}
     environment:
       POSTGRES_USER: postgres
       # NOTE: Unlike docker-compose.infra.yml which fails fast when POSTGRES_PASSWORD
@@ -87,7 +110,7 @@ services:
   # ==========================================================================
   redpanda:
     image: redpandadata/redpanda:v24.2.7
-    container_name: ${OMNIBASE_INFRA_REDPANDA_CONTAINER:-omnibase-infra-redpanda}
+    container_name: ${OMNIBASE_INFRA_REDPANDA_CONTAINER:-omnibase-infra-e2e-redpanda}
     command:
       - redpanda
       - start
@@ -137,7 +160,7 @@ services:
   # ==========================================================================
   redpanda-topic-manager:
     image: redpandadata/redpanda:v24.2.7
-    container_name: ${OMNIBASE_INFRA_TOPIC_MANAGER_CONTAINER:-omnibase-infra-topic-manager}
+    container_name: ${OMNIBASE_INFRA_TOPIC_MANAGER_CONTAINER:-omnibase-infra-e2e-topic-manager}
     depends_on:
       redpanda:
         condition: service_healthy
@@ -204,7 +227,7 @@ services:
   # ==========================================================================
   valkey:
     image: valkey/valkey:8.0-alpine
-    container_name: ${OMNIBASE_INFRA_VALKEY_CONTAINER:-omnibase-infra-valkey}
+    container_name: ${OMNIBASE_INFRA_VALKEY_CONTAINER:-omnibase-infra-e2e-valkey}
     ports:
       - "${VALKEY_PORT:-6379}:6379"
     networks:
@@ -224,7 +247,7 @@ services:
   # ==========================================================================
   infisical:
     image: infisical/infisical:v0.146.0-postgres
-    container_name: ${OMNIBASE_INFRA_INFISICAL_CONTAINER:-omnibase-infra-infisical}
+    container_name: ${OMNIBASE_INFRA_INFISICAL_CONTAINER:-omnibase-infra-e2e-infisical}
     depends_on:
       postgres:
         condition: service_healthy
@@ -259,7 +282,7 @@ services:
     build:
       context: ..
       dockerfile: docker/Dockerfile.runtime
-    container_name: ${OMNIBASE_INFRA_RUNTIME_CONTAINER:-omnibase-infra-runtime}
+    container_name: ${OMNIBASE_INFRA_RUNTIME_CONTAINER:-omnibase-infra-e2e-runtime}
     profiles: ["runtime"]
     depends_on:
       postgres:
@@ -291,9 +314,16 @@ services:
       VALKEY_PORT: 6379
       # Runtime configuration
       ONEX_ENVIRONMENT: test
+      ONEX_DATABASE_TOPOLOGY_PROFILE: test
       ONEX_LOG_LEVEL: ${ONEX_LOG_LEVEL:-DEBUG}
       ONEX_GROUP_ID: onex-runtime-e2e
       ONEX_CONTRACTS_DIR: /app/contracts
+      # OMN-15628: standalone e2e lane — it does not layer
+      # docker-compose.infra.yml, so it inherits nothing from that file's
+      # x-runtime-env anchor and needs its own routing-tiers pin. Same image
+      # (docker/Dockerfile.runtime), same in-image path, same fail-closed
+      # consumer in omnimarket's routing reducer.
+      DELEGATION_ROUTING_TIERS_PATH: /app/config/delegation/routing_tiers.yaml
     ports:
       - "${RUNTIME_PORT:-8085}:8085"
     networks:
@@ -313,17 +343,17 @@ services:
 # ==========================================================================
 networks:
   omnibase-infra-network:
-    name: ${OMNIBASE_INFRA_NETWORK:-omnibase-infra-network}
+    name: ${OMNIBASE_INFRA_NETWORK:-omnibase-infra-e2e-network}
     driver: bridge
 # ==========================================================================
 # Volumes
 # ==========================================================================
 volumes:
   postgres_data:
-    name: ${OMNIBASE_INFRA_POSTGRES_VOLUME:-omnibase-infra-postgres-data}
+    name: ${OMNIBASE_INFRA_POSTGRES_VOLUME:-omnibase-infra-e2e-postgres-data}
   redpanda_data:
-    name: ${OMNIBASE_INFRA_REDPANDA_VOLUME:-omnibase-infra-redpanda-data}
+    name: ${OMNIBASE_INFRA_REDPANDA_VOLUME:-omnibase-infra-e2e-redpanda-data}
   valkey_data:
-    name: ${OMNIBASE_INFRA_VALKEY_VOLUME:-omnibase-infra-valkey-data}
+    name: ${OMNIBASE_INFRA_VALKEY_VOLUME:-omnibase-infra-e2e-valkey-data}
   runtime_logs:
-    name: ${OMNIBASE_INFRA_RUNTIME_LOG_VOLUME:-omnibase-infra-runtime-logs}
+    name: ${OMNIBASE_INFRA_RUNTIME_LOG_VOLUME:-omnibase-infra-e2e-runtime-logs}

@@ -28,6 +28,8 @@ from concurrent.futures import ThreadPoolExecutor, as_completed
 from uuid import UUID, uuid4
 
 import pytest
+import yaml
+from pydantic import ValidationError
 
 from omnibase_core.models.errors import ModelOnexError
 from omnibase_core.models.events import (
@@ -1154,20 +1156,19 @@ class TestMarketNodeHandlerResolution:
 
         assert descriptor.handler_class == f"{self._MODULE}.{self._CLASS}"
 
-    def test_resolves_from_top_level_handler(self) -> None:
-        """Top-level fallback: handler.{module,class} when routing is absent."""
+    def test_rejects_legacy_top_level_handler(self) -> None:
+        """The typed contract rejects the undeclared legacy handler block."""
         parser = ContractYamlParser(environment="dev")
         contract_yaml = _market_contract_yaml(
             top_level_module=self._MODULE,
             top_level_class=self._CLASS,
         )
 
-        descriptor = parser.parse("node_aislop_sweep", contract_yaml, uuid4())
+        with pytest.raises(ValidationError, match="handler"):
+            parser.parse("node_aislop_sweep", contract_yaml, uuid4())
 
-        assert descriptor.handler_class == f"{self._MODULE}.{self._CLASS}"
-
-    def test_routing_form_preferred_over_top_level(self) -> None:
-        """Routing form wins when both forms are present."""
+    def test_routing_does_not_hide_legacy_top_level_handler(self) -> None:
+        """Strict validation rejects extras even when canonical routing exists."""
         parser = ContractYamlParser(environment="dev")
         contract_yaml = _market_contract_yaml(
             routing_module=self._MODULE,
@@ -1176,9 +1177,8 @@ class TestMarketNodeHandlerResolution:
             top_level_class="HandlerOther",
         )
 
-        descriptor = parser.parse("node_aislop_sweep", contract_yaml, uuid4())
-
-        assert descriptor.handler_class == f"{self._MODULE}.{self._CLASS}"
+        with pytest.raises(ValidationError, match="handler"):
+            parser.parse("node_aislop_sweep", contract_yaml, uuid4())
 
     def test_unresolvable_handler_class_is_none(self) -> None:
         """No metadata.handler_class and no handler block -> handler_class is None."""
@@ -1188,3 +1188,118 @@ class TestMarketNodeHandlerResolution:
         descriptor = parser.parse("node_aislop_sweep", contract_yaml, uuid4())
 
         assert descriptor.handler_class is None
+
+    def test_materialization_preserves_typed_db_io(self) -> None:
+        """Kafka registration validates and materializes strict table locations."""
+        contract_yaml = _market_contract_yaml(
+            routing_module=self._MODULE,
+            routing_class=self._CLASS,
+        )
+        contract_yaml += """
+db_io:
+  db_tables:
+    - name: delegation_events
+      database_ref: application
+      schema: tenant
+      migration: nodes/node_projection_delegation/0001.sql
+      access: read_write
+      role: events
+"""
+        parser = ContractYamlParser(environment="dev")
+        descriptor = parser.parse("node_aislop_sweep", contract_yaml, uuid4())
+        source = KafkaContractSource(environment="dev", graceful_mode=False)
+
+        contract = source._build_materialization_contract(
+            node_name="node_aislop_sweep",
+            descriptor=descriptor,
+            environment="dev",
+        )
+
+        assert contract.db_io is not None
+        assert contract.db_io.db_tables[0].database_ref == "application"
+        assert contract.db_io.db_tables[0].schema == "tenant"
+
+    def test_registry_payload_preserves_runtime_extensions_without_versions(
+        self,
+    ) -> None:
+        """Exact registry subsets survive strict shell parsing and materialization."""
+        contract_yaml = _market_contract_yaml(
+            routing_module=self._MODULE,
+            routing_class=self._CLASS,
+        ).replace(
+            "  version:\n    major: 1\n    minor: 0\n    patch: 0\n",
+            "",
+        )
+        contract_yaml = contract_yaml.replace(
+            '    - operation: "sweep"\n',
+            '    - operation: "sweep"\n'
+            '      event_model: "omnimarket.models.ModelSweepRequested"\n',
+        )
+        contract_yaml += """
+event_bus:
+  subscribe_topics: [onex.cmd.omnimarket.sweep.v1]
+  publish_topics: [onex.evt.omnimarket.swept.v1]
+  dlq_topics: [onex.dlq.omnimarket.sweep.v1]
+  consumer_group: omnimarket.sweep.consume.v1
+  consumer_purpose: consume
+  plugin_managed: false
+  tenant_scoped_ingress: false
+  terminal_event: onex.evt.omnimarket.swept.v1
+db_io:
+  db_tables:
+    - name: delegation_events
+      database_ref: application
+      schema: tenant
+      migration: nodes/node_projection_delegation/0001.sql
+      access: read_write
+      role: events
+"""
+        descriptor = ContractYamlParser(environment="dev").parse(
+            "node_aislop_sweep", contract_yaml, uuid4()
+        )
+        contract = KafkaContractSource(
+            environment="dev", graceful_mode=False
+        )._build_materialization_contract(
+            node_name="node_aislop_sweep",
+            descriptor=descriptor,
+            environment="dev",
+        )
+
+        assert descriptor.contract_config is not None
+        assert descriptor.contract_config == yaml.safe_load(contract_yaml)
+        assert contract.event_bus is not None
+        assert contract.event_bus.dlq_topics == ("onex.dlq.omnimarket.sweep.v1",)
+        assert contract.event_bus.consumer_group == "omnimarket.sweep.consume.v1"
+        assert contract.terminal_event == "onex.evt.omnimarket.swept.v1"
+        assert contract.handler_routing is not None
+        assert contract.handler_routing.handlers[0].event_model is not None
+        assert (
+            contract.handler_routing.handlers[0].event_model.module
+            == "omnimarket.models"
+        )
+        assert (
+            contract.handler_routing.handlers[0].event_model.name
+            == "ModelSweepRequested"
+        )
+
+    def test_kafka_registration_rejects_parallel_database_location(self) -> None:
+        contract_yaml = _market_contract_yaml(
+            routing_module=self._MODULE,
+            routing_class=self._CLASS,
+        )
+        contract_yaml += """
+db_io:
+  db_tables:
+    - name: delegation_events
+      database: omnidash_analytics
+      database_ref: application
+      schema: tenant
+      migration: nodes/node_projection_delegation/0001.sql
+      access: read_write
+      role: events
+"""
+
+        with pytest.raises(ValidationError, match="database"):
+            ContractYamlParser(environment="dev").parse(
+                "node_aislop_sweep", contract_yaml, uuid4()
+            )

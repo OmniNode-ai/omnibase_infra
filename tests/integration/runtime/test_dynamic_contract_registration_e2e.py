@@ -20,6 +20,7 @@ from uuid import uuid4
 
 import pytest
 
+from omnibase_infra.enums.enum_message_category import EnumMessageCategory
 from omnibase_infra.event_bus.event_bus_inmemory import EventBusInmemory
 from omnibase_infra.runtime.enums.enum_materialization_rejection import (
     EnumMaterializationRejection,
@@ -36,7 +37,7 @@ pytestmark = pytest.mark.integration
 
 # ---------------------------------------------------------------------------
 # Minimal contract YAML for a Noop in-process handler.
-# handler_class in metadata so ContractYamlParser can extract it.
+# handler_class is top-level because ModelHandlerContract now owns it directly.
 # NOTE: topic strings here are contract-declared per ONEX convention.
 # ---------------------------------------------------------------------------
 
@@ -52,12 +53,12 @@ descriptor:
 input_model: omnibase_infra.models.types.JsonDict
 output_model: omnibase_core.models.dispatch.model_handler_output.ModelHandlerOutput
 description: E2E test for dynamic contract registration
-metadata:
-  handler_class: tests.fixtures.handler_noop.HandlerNoop
-event_bus:
-  subscribe_topics:
-    - onex.evt.test.e2e-dynamic.v1
-  publish_topics: []
+handler_class: tests.fixtures.handler_noop.HandlerNoop
+metadata: {}
+yaml_consumed_events:
+  - event_type: onex.evt.test.e2e-dynamic.v1
+    handler_function: handle
+yaml_published_events: []
 handler_routing:
   version:
     major: 1
@@ -68,6 +69,7 @@ handler_routing:
     - handler:
         name: HandlerNoop
         module: tests.fixtures.handler_noop
+      topic: onex.evt.test.e2e-dynamic.v1
 """
 
 _EVIL_MODULE_CONTRACT_YAML = (
@@ -161,6 +163,46 @@ async def test_register_then_materialize_wires_dispatcher_and_topic() -> None:
 
     # Step 5: result.subscribed_topics reflects the wiring.
     assert "onex.evt.test.e2e-dynamic.v1" in result.subscribed_topics
+
+
+@pytest.mark.asyncio
+async def test_existing_contract_owner_rejects_before_dynamic_engine_mutation() -> None:
+    """A stale same-owner dispatcher must fail before dynamic commit side effects."""
+    source = _make_source()
+    engine = _make_engine()
+    bus = _make_bus()
+
+    async def stale_handler(envelope: object) -> None:
+        del envelope
+
+    engine.register_dispatcher(
+        dispatcher_id="stale-node-e2e-dynamic-dispatcher",
+        dispatcher=stale_handler,
+        category=EnumMessageCategory.EVENT,
+        owner_contract_name="node_e2e_dynamic",
+    )
+    engine.freeze()
+    source.on_contract_registered(
+        node_name="node_e2e_dynamic",
+        contract_yaml=_NOOP_CONTRACT_YAML,
+        correlation_id=uuid4(),
+    )
+
+    dispatchers_before = frozenset(engine._dispatchers)
+    routes_before = frozenset(engine._routes)
+    topics_before = await bus.get_topics()
+
+    result = await source.materialize_cached_contract(
+        node_name="node_e2e_dynamic",
+        dispatch_engine=engine,
+        event_bus=bus,
+        environment="test",
+    )
+
+    assert result.status == EnumMaterializationStatus.REJECTED
+    assert frozenset(engine._dispatchers) == dispatchers_before
+    assert frozenset(engine._routes) == routes_before
+    assert await bus.get_topics() == topics_before
 
 
 # ---------------------------------------------------------------------------

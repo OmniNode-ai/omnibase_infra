@@ -1,0 +1,13 @@
+# SPDX-FileCopyrightText: 2025 OmniNode.ai Inc.
+# SPDX-License-Identifier: MIT
+
+name: node_delegation_reader
+node_type: COMPUTE_GENERIC
+db_io:
+  db_tables:
+    - name: delegation_events
+      database_ref: application
+      schema: tenant
+      migration: nodes/node_delegation_reader/0001.sql
+      access: read
+      role: events_reader

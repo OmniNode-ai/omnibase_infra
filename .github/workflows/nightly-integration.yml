@@ -37,7 +37,6 @@ env:
   OMNI_INFRA_HOST: "localhost"
   POSTGRES_HOST: "localhost"
   REDPANDA_ADVERTISE_HOST: "localhost"
-  INTEGRATION_POSTGRES_PORT: "5433"
   INTEGRATION_POSTGRES_USER: "postgres"
   # NB: "test-password" is the default in docker/docker-compose.e2e.yml
   # (POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-test-password}) — this is NOT a
@@ -47,9 +46,13 @@ env:
   # checkov:skip=CKV_SECRET_4:Test-only ephemeral docker-compose.e2e.yml password
   INTEGRATION_POSTGRES_PASSWORD: ${{ secrets.INTEGRATION_POSTGRES_PASSWORD || 'test-password' }}
   INTEGRATION_POSTGRES_DB: "omnibase_infra"
-  OMNIBASE_INFRA_DB_URL: ${{ secrets.OMNIBASE_INFRA_DB_URL || format('postgresql://postgres:{0}@localhost:5433/omnibase_infra', secrets.INTEGRATION_POSTGRES_PASSWORD || 'test-password') }}
-  # E2E kafka exposed on host port
-  KAFKA_BOOTSTRAP_SERVERS: "localhost:19092"
+  # OMN-15565: INTEGRATION_POSTGRES_PORT / KAFKA_BOOTSTRAP_SERVERS /
+  # OMNIBASE_INFRA_DB_URL are deliberately NOT pinned here. The e2e stack's
+  # former defaults (5433 / 19092) collide with live .201 lane bindings on this
+  # shared self-hosted runner host, so the ports are allocated free at run time
+  # by the "Derive isolated e2e namespace" step below and exported via
+  # $GITHUB_ENV. Re-pinning them here would be shadowed by that step and would
+  # only mislead a reader into thinking the ports are fixed.
   ONEX_EVENT_BUS_TYPE: "kafka"
   ONEX_ENVIRONMENT: "test"
   LLM_ENDPOINT_CIDR_ALLOWLIST: "10.0.0.0/8"
@@ -95,7 +98,32 @@ jobs:
         && fromJSON(vars.OMNI_PUBLIC_PR_RUNS_ON_JSON || '["ubuntu-latest"]')
         || fromJSON(vars.OMNI_TRUSTED_CI_RUNS_ON_JSON || '["self-hosted","omnibase-ci"]')
       }}
-    timeout-minutes: 60
+    # OMN-15567: was 60. The single `pytest tests/integration/` step now has
+    # up to three independent full-Dockerfile.runtime build invocations that
+    # can each legitimately run right up to their own pytest-timeout ceiling
+    # before this job-level timeout would matter --
+    # test_build_succeeds_with_public_deps, test_build_uses_buildkit_cache_mounts
+    # (both explicit, in TestDockerBuild), and the module-scoped
+    # built_test_image fixture's build (shared by TestDockerSecurity /
+    # TestDockerRuntime / TestDockerHealthCheck / TestDockerImageLabels, but
+    # only actually built once per module, by whichever of those is the
+    # first consumer). Worst-case budget sum, using the per-test ceiling
+    # each build test is marked with (BUILD_TIMEOUT=1200s default +
+    # BUILD_TEST_TIMEOUT_MARGIN_SECONDS=60s = 1260s), not the empirically
+    # observed cache-warm durations that D2 already showed are not safe to
+    # assume:
+    #   3 x 1260s (worst-case cold build each)         = 3780s (63.0 min)
+    # + rest-of-suite baseline, ~793s observed 2026-08-04
+    #   (993s total "Run integration tests" step minus
+    #   the 200.88s attributed to test_build_succeeds_with_public_deps),
+    #   rounded up for headroom against suite growth   =  900s (15.0 min)
+    # + fixed step overhead observed the same run
+    #   (checkout/python/uv/deps/e2e-stack-up/health-wait
+    #   + teardown/upload, ~60s + ~3s), rounded up      =  120s ( 2.0 min)
+    # ------------------------------------------------------------------
+    #   worst-case total                                = 4800s (80.0 min)
+    # 90 gives ~10 minutes of margin above that worst-case sum.
+    timeout-minutes: 90
 
     steps:
       - name: Checkout code
@@ -104,7 +132,7 @@ jobs:
           fetch-depth: 0
 
       - name: Set up Python
-        uses: actions/setup-python@v6
+        uses: actions/setup-python@v7
         with:
           python-version: ${{ env.PYTHON_VERSION }}
 
@@ -122,26 +150,311 @@ jobs:
       - name: Install dependencies
         run: uv sync --reinstall-package omnibase-core --reinstall-package omnibase-spi
 
+      # OMN-15565: this workflow runs on a self-hosted runner that shares the
+      # .201 Docker daemon with the live lab/dev lane. Before this step existed,
+      # the compose invocations below carried no project name, so they resolved
+      # to docker-compose.e2e.yml's default project -- which WAS the lab lane's
+      # own project `omnibase-infra`. The teardown's `down -v --remove-orphans`
+      # then deleted the lane's containers and its data volumes, nightly.
+      #
+      # Everything the Docker daemon namespaces globally (project, container
+      # names, volume names, network name) is derived from a run-scoped id here,
+      # mirroring .github/workflows/reusable-runtime-boot.yml. Host ports are
+      # allocated free because the e2e defaults (19092/18082/...) are bound by
+      # the live lane.
+      - name: Derive isolated e2e namespace
+        run: |
+          set -euo pipefail
+          e2e_id="e2e-${GITHUB_RUN_ID:-local}-${GITHUB_RUN_ATTEMPT:-1}"
+          e2e_id="$(echo "$e2e_id" | tr '[:upper:]' '[:lower:]' | tr -cs 'a-z0-9_-' '-')"
+          project="omnibase-infra-${e2e_id}"
+
+          pick_free_port() {
+            python3 - <<'PY'
+          import socket
+
+          with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as sock:
+              sock.bind(("127.0.0.1", 0))
+              print(sock.getsockname()[1])
+          PY
+          }
+
+          postgres_port="$(pick_free_port)"
+          kafka_port="$(pick_free_port)"
+
+          db_url="postgresql://postgres:${INTEGRATION_POSTGRES_PASSWORD}@localhost:${postgres_port}/omnibase_infra"
+
+          # KAFKA_BOOTSTRAP_SERVERS / OMNIBASE_INFRA_DB_URL / INTEGRATION_POSTGRES_HOST
+          # below are "localhost" defaults, matching the historical (pre-OMN-15567)
+          # shape so test_nightly_database_url_uses_the_ephemeral_postgres_port
+          # keeps passing unmodified. OMN-15567: on this self-hosted runner
+          # "localhost" is not reliably reachable from the runner process, so the
+          # later "Resolve reachable e2e connectivity host" step re-derives and
+          # overrides all of these (later $GITHUB_ENV writes win) once the actual
+          # stack is up and its real reachability has been probed.
+          {
+            echo "OMNIBASE_INFRA_COMPOSE_PROJECT=${project}"
+            echo "OMNIBASE_INFRA_POSTGRES_CONTAINER=${project}-postgres"
+            echo "OMNIBASE_INFRA_REDPANDA_CONTAINER=${project}-redpanda"
+            echo "OMNIBASE_INFRA_TOPIC_MANAGER_CONTAINER=${project}-topic-manager"
+            echo "OMNIBASE_INFRA_VALKEY_CONTAINER=${project}-valkey"
+            echo "OMNIBASE_INFRA_INFISICAL_CONTAINER=${project}-infisical"
+            echo "OMNIBASE_INFRA_RUNTIME_CONTAINER=${project}-runtime"
+            echo "OMNIBASE_INFRA_NETWORK=${project}-network"
+            echo "OMNIBASE_INFRA_POSTGRES_VOLUME=${project}-postgres-data"
+            echo "OMNIBASE_INFRA_REDPANDA_VOLUME=${project}-redpanda-data"
+            echo "OMNIBASE_INFRA_VALKEY_VOLUME=${project}-valkey-data"
+            echo "OMNIBASE_INFRA_RUNTIME_LOG_VOLUME=${project}-runtime-logs"
+            echo "POSTGRES_PORT=${postgres_port}"
+            echo "KAFKA_PORT=${kafka_port}"
+            echo "REDPANDA_ADMIN_PORT=$(pick_free_port)"
+            echo "REDPANDA_SCHEMA_REGISTRY_PORT=$(pick_free_port)"
+            echo "REDPANDA_PANDAPROXY_PORT=$(pick_free_port)"
+            echo "VALKEY_PORT=$(pick_free_port)"
+            echo "INTEGRATION_POSTGRES_PORT=${postgres_port}"
+            echo "KAFKA_BOOTSTRAP_SERVERS=localhost:${kafka_port}"
+            echo "OMNIBASE_INFRA_DB_URL=${db_url}"
+          } >> "$GITHUB_ENV"
+
+          echo "e2e compose project: ${project}"
+          echo "e2e postgres port: ${postgres_port}, kafka port: ${kafka_port}"
+
+      # OMN-15567: reusable-runtime-boot.yml:250-270 documents that this class
+      # of self-hosted runner executes inside a container sharing the host
+      # Docker daemon, so host-published ports are not reachable at
+      # "localhost" from the runner process -- only from the actual Docker
+      # host. nightly-integration.yml never detected or handled this. Mirror
+      # reusable-runtime-boot.yml's detection here (same runner_container_id
+      # heuristic, same /proc/net/route default-gateway read) so redpanda's
+      # external listener can advertise the Docker host gateway instead of
+      # "localhost" when that fallback is needed by the probe below.
+      - name: Detect runner network topology
+        run: |
+          set -euo pipefail
+          runner_container_id=""
+          # NB: intentionally NOT `mapfile`/`readarray` -- those are bash 4+
+          # builtins. This step's shell is invoked directly by pytest in
+          # tests/unit/docker/test_nightly_e2e_runner_connectivity.py via
+          # `bash -c`, and the system `/bin/bash` on macOS gate hosts is
+          # 3.2.57 (Apple ships no newer bash for licensing reasons). A
+          # `while read` loop reading from the same process substitution is
+          # bash-3-compatible and behaves identically on the Linux runner.
+          runner_candidates=()
+          while IFS= read -r candidate; do
+            runner_candidates+=("$candidate")
+          done < <(
+            {
+              grep -Eo '[0-9a-f]{64}' /proc/self/cgroup 2>/dev/null || true
+              hostname
+            } | awk 'NF && !seen[$0]++'
+          )
+          # bash 3.2 (unlike 4.4+) raises "unbound variable" under `set -u`
+          # when expanding "${arr[@]}" on a zero-length array, even one that
+          # was explicitly declared empty -- guard the count first.
+          if [[ ${#runner_candidates[@]} -gt 0 ]]; then
+            for candidate in "${runner_candidates[@]}"; do
+              if docker inspect --type container "$candidate" >/dev/null 2>&1; then
+                runner_container_id="$(docker inspect --type container --format '{{.Id}}' "$candidate")"
+                break
+              fi
+            done
+          fi
+
+          e2e_advertise_host="localhost"
+          if [[ -n "$runner_container_id" ]]; then
+            docker_host_gateway="$(
+              python3 - <<'PY'
+          import socket
+          import struct
+
+          try:
+              with open("/proc/net/route", encoding="utf-8") as route_file:
+                  next(route_file)
+                  for line in route_file:
+                      fields = line.split()
+                      if len(fields) >= 3 and fields[1] == "00000000":
+                          gateway = int(fields[2], 16)
+                          print(socket.inet_ntoa(struct.pack("<L", gateway)))
+                          break
+          except OSError:
+              pass
+          PY
+            )"
+            if [[ -n "$docker_host_gateway" ]]; then
+              e2e_advertise_host="${docker_host_gateway}"
+            fi
+            echo "Runner container ID: ${runner_container_id}"
+          fi
+
+          # Same live-host guard as "Reject if ANY host variable targets
+          # .201": the value computed here is dynamic and did not exist yet
+          # when that static check ran, so it needs its own assertion.
+          if [[ "$e2e_advertise_host" == "192.168.86.201" ]]; then
+            echo "::error::detected Docker host gateway resolves to the live .201 instance; refusing to advertise it"
+            exit 1
+          fi
+
+          echo "e2e Redpanda advertise host: ${e2e_advertise_host}"
+          {
+            echo "OMNIBASE_INFRA_RUNNER_CONTAINER_ID=${runner_container_id}"
+            echo "E2E_REDPANDA_ADVERTISE_HOST=${e2e_advertise_host}"
+          } >> "$GITHUB_ENV"
+
+      # Fail closed at run time, not just at review time: the protected set is
+      # read from the lane census manifest, so a lane added later is covered
+      # without editing this workflow.
+      - name: Assert e2e project is not a live lane
+        run: |
+          set -euo pipefail
+          uv run python - <<'PY'
+          import os
+          import sys
+
+          import yaml
+
+          project = os.environ["OMNIBASE_INFRA_COMPOSE_PROJECT"]
+          manifest = yaml.safe_load(open("deploy/lane-census/lane-manifest.yaml", encoding="utf-8"))
+          protected = {
+              lane["compose_project"]
+              for lane in manifest["lanes"].values()
+              if lane.get("compose_project")
+          }
+          if project in protected:
+              sys.exit(
+                  f"::error::refusing to run the e2e stack in live lane project "
+                  f"{project!r} (censused lanes: {sorted(protected)})"
+              )
+          print(f"e2e project {project!r} is not a censused lane (checked {sorted(protected)})")
+          PY
+
       - name: Spin up e2e stack
         run: |
-          docker compose -f docker/docker-compose.e2e.yml up -d \
+          docker compose -p "${OMNIBASE_INFRA_COMPOSE_PROJECT}" \
+            -f docker/docker-compose.e2e.yml up -d \
             postgres redpanda valkey redpanda-topic-manager
 
       - name: Wait for health checks
         run: |
           echo "Waiting for postgres..."
-          timeout 120 bash -c 'until docker exec omnibase-infra-postgres pg_isready -U postgres -d omnibase_infra; do sleep 2; done'
+          timeout 120 bash -c 'until docker exec "$OMNIBASE_INFRA_POSTGRES_CONTAINER" pg_isready -U postgres -d omnibase_infra; do sleep 2; done'
 
           echo "Waiting for redpanda..."
-          timeout 120 bash -c 'until docker exec omnibase-infra-redpanda rpk cluster health 2>/dev/null | grep -q "Healthy:.*true"; do sleep 2; done'
+          timeout 120 bash -c 'until docker exec "$OMNIBASE_INFRA_REDPANDA_CONTAINER" rpk cluster health 2>/dev/null | grep -q "Healthy:.*true"; do sleep 2; done'
 
           echo "Waiting for valkey..."
-          timeout 60 bash -c 'until docker exec omnibase-infra-valkey valkey-cli ping | grep -q PONG; do sleep 2; done'
+          timeout 60 bash -c 'until docker exec "$OMNIBASE_INFRA_VALKEY_CONTAINER" valkey-cli ping | grep -q PONG; do sleep 2; done'
 
           echo "Waiting for topic manager to complete..."
-          timeout 60 bash -c 'until [ "$(docker inspect -f "{{.State.Status}}" omnibase-infra-topic-manager 2>/dev/null)" = "exited" ]; do sleep 2; done'
+          timeout 60 bash -c 'until [ "$(docker inspect -f "{{.State.Status}}" "$OMNIBASE_INFRA_TOPIC_MANAGER_CONTAINER" 2>/dev/null)" = "exited" ]; do sleep 2; done'
 
           echo "All services healthy"
+
+      # OMN-15567: the stack being Healthy (previous step) does not prove the
+      # runner process itself can reach it -- "Wait for health checks" only
+      # probes from inside the containers via `docker exec`. Confirmed live:
+      # on runs 30681782952 (workflow_dispatch) and 30685774570 (schedule),
+      # both post-OMN-15565, redpanda/postgres came up Healthy in ~5s but the
+      # runner's own connection to "localhost:<host-published-port>" failed
+      # outright (aiokafka KafkaConnectionError / asyncpg OSError "Connect
+      # call failed"), because this runner does not share a network namespace
+      # with the Docker host. Mirror reusable-runtime-boot.yml's connectivity
+      # probe: try Docker DNS (compose network) first, then localhost, then
+      # the Docker host gateway; fail closed with diagnostics if none work
+      # instead of letting pytest fail on opaque connection-refused errors.
+      - name: Resolve reachable e2e connectivity host
+        run: |
+          set -euo pipefail
+
+          can_connect() {
+            python3 - "$1" "$2" <<'PY'
+          import socket
+          import sys
+
+          host = sys.argv[1]
+          port = int(sys.argv[2])
+          try:
+              with socket.create_connection((host, port), timeout=2):
+                  pass
+          except OSError:
+              raise SystemExit(1)
+          PY
+          }
+
+          runner_on_compose_network=false
+          if [[ -n "${OMNIBASE_INFRA_RUNNER_CONTAINER_ID:-}" ]]; then
+            docker network connect "${OMNIBASE_INFRA_NETWORK}" "${OMNIBASE_INFRA_RUNNER_CONTAINER_ID}" 2>/dev/null || true
+            if docker inspect --type container --format '{{json .NetworkSettings.Networks}}' "${OMNIBASE_INFRA_RUNNER_CONTAINER_ID}" \
+              | grep -q "\"${OMNIBASE_INFRA_NETWORK}\""; then
+              runner_on_compose_network=true
+            fi
+          fi
+
+          # resolved_host is the POSTGRES host; resolved_kafka_host is the
+          # REDPANDA host. In the localhost/gateway branches these are always
+          # the same value (one Docker-published endpoint, disambiguated only
+          # by port). The Docker DNS branch is the one case where postgres
+          # and redpanda are DIFFERENT container names on the compose
+          # network -- a single shared variable there previously cross-wired
+          # REDPANDA_ADVERTISE_HOST/OMNI_INFRA_HOST to the *postgres*
+          # container name.
+          resolved_host=""
+          resolved_kafka_host=""
+          resolved_pg_port=""
+          if $runner_on_compose_network \
+            && can_connect "${OMNIBASE_INFRA_POSTGRES_CONTAINER}" 5432 \
+            && can_connect "${OMNIBASE_INFRA_REDPANDA_CONTAINER}" 9092; then
+            echo "e2e stack reachable by generated container names (Docker DNS)"
+            resolved_host="${OMNIBASE_INFRA_POSTGRES_CONTAINER}"
+            resolved_kafka_host="${OMNIBASE_INFRA_REDPANDA_CONTAINER}"
+            resolved_pg_port="5432"
+            kafka_host_port="${OMNIBASE_INFRA_REDPANDA_CONTAINER}:9092"
+            pg_host_port="${OMNIBASE_INFRA_POSTGRES_CONTAINER}:5432"
+          elif can_connect localhost "${POSTGRES_PORT}" && can_connect localhost "${KAFKA_PORT}"; then
+            echo "e2e stack reachable by host-published ports (localhost)"
+            resolved_host="localhost"
+            resolved_kafka_host="localhost"
+            resolved_pg_port="${POSTGRES_PORT}"
+            kafka_host_port="localhost:${KAFKA_PORT}"
+            pg_host_port="localhost:${POSTGRES_PORT}"
+          elif [[ "${E2E_REDPANDA_ADVERTISE_HOST}" != "localhost" ]] \
+            && can_connect "${E2E_REDPANDA_ADVERTISE_HOST}" "${POSTGRES_PORT}" \
+            && can_connect "${E2E_REDPANDA_ADVERTISE_HOST}" "${KAFKA_PORT}"; then
+            echo "e2e stack reachable by Docker host gateway (${E2E_REDPANDA_ADVERTISE_HOST})"
+            resolved_host="${E2E_REDPANDA_ADVERTISE_HOST}"
+            resolved_kafka_host="${E2E_REDPANDA_ADVERTISE_HOST}"
+            resolved_pg_port="${POSTGRES_PORT}"
+            kafka_host_port="${E2E_REDPANDA_ADVERTISE_HOST}:${KAFKA_PORT}"
+            pg_host_port="${E2E_REDPANDA_ADVERTISE_HOST}:${POSTGRES_PORT}"
+          else
+            echo "::error::e2e stack is Healthy but unreachable from the runner by Docker DNS, localhost, or Docker host gateway"
+            echo "runner_container_id=${OMNIBASE_INFRA_RUNNER_CONTAINER_ID:-<none>} runner_on_compose_network=${runner_on_compose_network} e2e_redpanda_advertise_host=${E2E_REDPANDA_ADVERTISE_HOST}"
+            exit 1
+          fi
+
+          if [[ "$resolved_host" == "192.168.86.201" || "$resolved_kafka_host" == "192.168.86.201" ]]; then
+            echo "::error::resolved e2e connectivity host is the live .201 instance; refusing"
+            exit 1
+          fi
+
+          {
+            echo "KAFKA_BOOTSTRAP_SERVERS=${kafka_host_port}"
+            echo "OMNIBASE_INFRA_DB_URL=postgresql://postgres:${INTEGRATION_POSTGRES_PASSWORD}@${pg_host_port}/omnibase_infra"
+            echo "INTEGRATION_POSTGRES_HOST=${resolved_host}"
+            echo "INTEGRATION_POSTGRES_PORT=${resolved_pg_port}"
+            echo "OMNI_INFRA_HOST=${resolved_kafka_host}"
+            echo "POSTGRES_HOST=${resolved_host}"
+            # OMN-15567 remediation round 2: POSTGRES_PORT was set once, in
+            # the earlier "Derive isolated e2e namespace" step, to the
+            # ephemeral host-published port, and never re-emitted here, so it
+            # stayed paired with the ORIGINAL host even after POSTGRES_HOST
+            # was overridden to resolved_host above -- an invalid host/port
+            # pair under the Docker-DNS and gateway branches. Consumers:
+            # tests/integration/test_dispatch_roundtrip.py,
+            # tests/integration/injection_effectiveness/conftest.py,
+            # tests/integration/migrations/test_node_migration_shape_drift_omn15376.py.
+            echo "POSTGRES_PORT=${resolved_pg_port}"
+            echo "REDPANDA_ADVERTISE_HOST=${resolved_kafka_host}"
+          } >> "$GITHUB_ENV"
 
       - name: Run integration tests
         run: |
@@ -155,9 +468,74 @@ jobs:
             --timeout=300 \
             --timeout-method=thread
 
+      # OMN-15565: the explicit -p is load-bearing. `-v --remove-orphans` against
+      # the default project is exactly what deleted the lab lane's containers and
+      # data volumes every night; scoped to the run-scoped project it can only
+      # delete this run's own resources. Because this step uses `if: always()`, it
+      # independently re-derives this run's immutable project and rejects empty,
+      # unexpected, or censused live-lane targets before the destructive down.
       - name: Tear down e2e stack
         if: always()
-        run: docker compose -f docker/docker-compose.e2e.yml down -v --remove-orphans
+        run: |
+          set -euo pipefail
+          project="${OMNIBASE_INFRA_COMPOSE_PROJECT:-}"
+          e2e_id="e2e-${GITHUB_RUN_ID:-local}-${GITHUB_RUN_ATTEMPT:-1}"
+          e2e_id="$(echo "$e2e_id" | tr '[:upper:]' '[:lower:]' | tr -cs 'a-z0-9_-' '-')"
+          expected_project="omnibase-infra-${e2e_id}"
+          if [[ -z "$project" ]]; then
+            echo "::error::OMNIBASE_INFRA_COMPOSE_PROJECT is unset - refusing to run a project-less teardown"
+            exit 1
+          fi
+          if [[ "$project" != "$expected_project" ]]; then
+            echo "::error::refusing to tear down unexpected compose project '$project' (expected '$expected_project' for this run)"
+            exit 1
+          fi
+          uv run python - "$project" <<'PY'
+          import sys
+
+          import yaml
+
+          project = sys.argv[1]
+          manifest = yaml.safe_load(open("deploy/lane-census/lane-manifest.yaml", encoding="utf-8"))
+          protected = {
+              lane["compose_project"]
+              for lane in manifest["lanes"].values()
+              if lane.get("compose_project")
+          }
+          if project in protected:
+              sys.exit(
+                  f"::error::refusing to tear down live lane project {project!r} "
+                  f"(censused lanes: {sorted(protected)})"
+              )
+          PY
+
+          # OMN-15567: "Resolve reachable e2e connectivity host" attaches the
+          # long-lived self-hosted runner container to this run's network
+          # (`docker network connect`) so it can reach containers by Docker
+          # DNS name. Nothing disconnected it before this fix -- every run
+          # leaked one network attachment (and the network delete below
+          # then failed with "Resource is still in use", silently, since
+          # `docker compose down` does not propagate that as a nonzero exit
+          # for an already-removed set of containers). Disconnect first so
+          # the network can actually be deleted.
+          if [[ -n "${OMNIBASE_INFRA_RUNNER_CONTAINER_ID:-}" && -n "${OMNIBASE_INFRA_NETWORK:-}" ]]; then
+            docker network disconnect "${OMNIBASE_INFRA_NETWORK}" "${OMNIBASE_INFRA_RUNNER_CONTAINER_ID}" 2>/dev/null || true
+            # OMN-15567 remediation round 2: the disconnect above swallows its
+            # own exit code on purpose -- a disconnect racing an
+            # already-gone container/network is benign and must not fail
+            # this always()-run teardown step -- but that made a REAL
+            # failure to detach just as silent as the original bug. Verify
+            # the runner is actually off the network's member list; if not,
+            # surface it loudly (non-fatal ::error:: annotation) instead of
+            # reproducing the silence this fix exists to close.
+            if docker network inspect "${OMNIBASE_INFRA_NETWORK}" \
+              --format '{{json .Containers}}' 2>/dev/null \
+              | grep -q "${OMNIBASE_INFRA_RUNNER_CONTAINER_ID}"; then
+              echo "::error::runner container ${OMNIBASE_INFRA_RUNNER_CONTAINER_ID} is still attached to ${OMNIBASE_INFRA_NETWORK} after docker network disconnect -- this run will leak the attachment"
+            fi
+          fi
+
+          docker compose -p "$project" -f docker/docker-compose.e2e.yml down -v --remove-orphans
 
       - name: Upload test results
         if: always()

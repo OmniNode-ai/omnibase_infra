@@ -7,15 +7,16 @@ via Kafka events instead of filesystem or registry polling.
 
 Part of OMN-1654: KafkaContractSource (cache + discovery).
 
-**Beta Implementation**: Cache-only model. Does NOT wire business subscriptions
-dynamically. Discovered contracts take effect on next restart.
+Validated registration events are cached first. The runtime may then materialize a
+cached contract into its live dispatch engine through the explicitly authorized
+post-freeze path; rejected contracts never mutate the engine.
 
 Contract Event Flow:
     1. External system publishes ModelContractRegisteredEvent to platform topic
     2. KafkaContractSource receives event via baseline-wired subscription
     3. Contract YAML is parsed and cached as ModelHandlerDescriptor
-    4. Next call to discover_handlers() returns cached descriptors
-    5. Runtime restart applies new handler configuration
+    4. The runtime delegates live materialization back to this source
+    5. Typed auto-wiring registers routes and subscriptions transactionally
 
 Event Topics (Platform Reserved):
     - Registration: {env}.{TOPIC_SUFFIX_CONTRACT_REGISTERED}
@@ -116,6 +117,9 @@ from omnibase_infra.runtime.models.model_dynamic_materialization import (
 )
 
 if TYPE_CHECKING:
+    from omnibase_core.models.core.model_deployment_topology import (
+        ModelDeploymentTopology,
+    )
     from omnibase_infra.runtime.auto_wiring.models import ModelDiscoveredContract
     from omnibase_infra.runtime.auto_wiring.models.model_event_bus_wiring import (
         ModelEventBusWiring,
@@ -146,21 +150,20 @@ def _resolve_handler_class_from_routing(
 
     Market node contracts do not declare ``metadata.handler_class`` (the form
     ModelHandlerContract reads). Instead they declare the handler module under
-    ``handler_routing.handlers[].handler.module`` and/or a top-level
-    ``handler.module``, with the class name under ``.name`` (routing form) or
-    ``.class`` (top-level form). This helper joins module + class into the
-    ``module.ClassName`` path the live materializer imports.
+    ``handler_routing.handlers[].handler.module``, with the class name under
+    ``.name``. This helper joins module + class into the ``module.ClassName``
+    path the live materializer imports.
 
-    The routing form is preferred over the top-level form because routing is the
-    canonical dispatch surface; the top-level ``handler`` block is a convenience
-    declaration.
+    A legacy top-level ``handler`` block is intentionally not accepted. The
+    canonical ``ModelHandlerContract`` rejects undeclared fields, so accepting
+    that block here would bypass the typed contract boundary.
 
     Args:
         contract_data: Parsed contract YAML as a mapping.
 
     Returns:
-        Fully qualified ``module.ClassName`` path, or None when neither the
-        routing nor the top-level handler block carries a resolvable module.
+        Fully qualified ``module.ClassName`` path, or None when the routing
+        declaration does not carry a resolvable module.
     """
 
     def _join(module: object, class_name: object) -> str | None:
@@ -185,13 +188,6 @@ def _resolve_handler_class_from_routing(
                     resolved = _join(handler.get("module"), handler.get("name"))
                     if resolved is not None:
                         return resolved
-
-    # Fall back to the top-level form: handler.{module,class}
-    top_level = contract_data.get("handler")
-    if isinstance(top_level, dict):
-        resolved = _join(top_level.get("module"), top_level.get("class"))
-        if resolved is not None:
-            return resolved
 
     return None
 
@@ -272,22 +268,58 @@ class ContractYamlParser:  # ai-slop-ok: pre-existing
         if not contract_data:
             raise ValueError("Contract YAML is empty or invalid")
 
-        # Validate against ModelHandlerContract
-        contract = ModelHandlerContract.model_validate(contract_data)
+        # Validate the canonical handler contract without discarding typed node
+        # extensions retained in ``contract_config``. Core deliberately forbids
+        # unknown root fields, including the retired top-level ``handler`` shape.
+        # Node contracts carry three infra-owned typed extensions which core's
+        # handler shell deliberately does not model. Validate them independently,
+        # retain their exact source payload in ``contract_config``, then strip them
+        # only from the strict core-shell validation view. The retired top-level
+        # ``handler`` shape remains unstripped and therefore fail-closed.
+        validation_data = contract_data
+        if isinstance(contract_data, dict):
+            from omnibase_core.models.contracts.subcontracts.model_db_ownership_subcontract import (
+                ModelDbOwnershipSubcontract,
+            )
+            from omnibase_infra.runtime.auto_wiring.discovery import (
+                _parse_handler_routing,
+            )
+            from omnibase_infra.runtime.auto_wiring.models.model_event_bus_wiring import (
+                ModelEventBusWiring,
+            )
 
-        # Extract handler_class from metadata section
-        # NOTE: handler_class is read from metadata for handler-shaped contracts
-        # (root-level extra fields are ignored by ModelHandlerContract).
-        handler_class = None
+            db_io_raw = contract_data.get("db_io")
+            if db_io_raw is not None:
+                ModelDbOwnershipSubcontract.model_validate(db_io_raw)
+            event_bus_raw = contract_data.get("event_bus")
+            if event_bus_raw is not None:
+                ModelEventBusWiring.model_validate(event_bus_raw)
+            handler_routing_raw = contract_data.get("handler_routing")
+            if handler_routing_raw is not None:
+                if not isinstance(handler_routing_raw, dict):
+                    raise ValueError("handler_routing must be a mapping")
+                _parse_handler_routing(handler_routing_raw)
+            validation_data = {
+                key: value
+                for key, value in contract_data.items()
+                if key not in {"db_io", "event_bus", "handler_routing"}
+            }
+
+        # Validate against ModelHandlerContract
+        contract = ModelHandlerContract.model_validate(validation_data)
+
+        # Extract handler_class from the typed field first, then fall back to
+        # legacy metadata for older dynamic-registration payloads.
+        handler_class = contract.handler_class
         if isinstance(contract_data, dict):
             metadata = contract_data.get("metadata", {})
-            if isinstance(metadata, dict):
+            if handler_class is None and isinstance(metadata, dict):
                 handler_class = metadata.get("handler_class")
 
         # Fallback for node-shaped (market) contracts: these declare the handler
-        # module under handler_routing.handlers[].handler.module (and/or a
-        # top-level handler.module) rather than metadata.handler_class. Join
-        # module + class into the fully qualified path the materializer imports.
+        # module under handler_routing.handlers[].handler.module rather than
+        # metadata.handler_class. Join module + class into the fully qualified
+        # path the materializer imports.
         if handler_class is None and isinstance(contract_data, dict):
             handler_class = _resolve_handler_class_from_routing(contract_data)
 
@@ -1191,105 +1223,51 @@ class KafkaContractSource(MixinTypedContractEvents, ProtocolContractSource):
         )
 
         eb_raw = config.get("event_bus")
-        if not isinstance(eb_raw, dict):
-            return None
+        if isinstance(eb_raw, dict):
+            return ModelEventBusWiring.model_validate(eb_raw)
 
-        sub_raw = eb_raw.get("subscribe_topics")
-        pub_raw = eb_raw.get("publish_topics")
-        cp_raw = eb_raw.get("consumer_purpose")
+        consumed_raw = config.get("yaml_consumed_events")
+        published_raw = config.get("yaml_published_events")
+        subscribe_topics = (
+            tuple(
+                str(item.get("event_type"))
+                for item in consumed_raw
+                if isinstance(item, dict) and item.get("event_type")
+            )
+            if isinstance(consumed_raw, list)
+            else ()
+        )
+        publish_topics = (
+            tuple(
+                str(item.get("event_type") or item.get("topic"))
+                for item in published_raw
+                if isinstance(item, dict)
+                and (item.get("event_type") or item.get("topic"))
+            )
+            if isinstance(published_raw, list)
+            else ()
+        )
+        if not subscribe_topics and not publish_topics:
+            return None
         return ModelEventBusWiring(
-            subscribe_topics=tuple(sub_raw) if isinstance(sub_raw, list) else (),
-            publish_topics=tuple(pub_raw) if isinstance(pub_raw, list) else (),
-            consumer_purpose=cp_raw if isinstance(cp_raw, str) else None,
-            plugin_managed=bool(eb_raw.get("plugin_managed", False)),
+            subscribe_topics=subscribe_topics,
+            publish_topics=publish_topics,
+            consumer_purpose=None,
+            plugin_managed=False,
         )
 
     @staticmethod
     def _build_handler_routing(
         config: Mapping[str, object],
     ) -> ModelHandlerRouting | None:
-        from omnibase_infra.runtime.auto_wiring.models.model_handler_ref import (
-            ModelHandlerRef,
-        )
-        from omnibase_infra.runtime.auto_wiring.models.model_handler_routing import (
-            ModelHandlerRouting,
-        )
-        from omnibase_infra.runtime.auto_wiring.models.model_handler_routing_entry import (
-            ModelHandlerRoutingEntry,
+        from omnibase_infra.runtime.auto_wiring.discovery import (
+            _parse_handler_routing,
         )
 
         hr_raw = config.get("handler_routing")
         if not isinstance(hr_raw, dict):
             return None
-
-        entries: list[ModelHandlerRoutingEntry] = []
-        handlers_raw = hr_raw.get("handlers")
-
-        # When a handlers list is present it takes priority.  When absent,
-        # fall back to the ``default_handler`` shorthand.
-        if not isinstance(handlers_raw, list):
-            default_handler = hr_raw.get("default_handler")
-            if (
-                isinstance(default_handler, str)
-                and default_handler
-                and ":" in default_handler
-            ):
-                module_ref, class_name = default_handler.rsplit(":", 1)
-                # Bare name (no dots) like ``handler`` is kept as-is; fully
-                # qualified paths (``pkg.sub.module``) are used verbatim.
-                entries.append(
-                    ModelHandlerRoutingEntry(
-                        handler=ModelHandlerRef(
-                            name=class_name.strip(),
-                            module=module_ref.strip(),
-                        ),
-                    )
-                )
-        else:
-            for handler_item in handlers_raw:
-                if not isinstance(handler_item, dict):
-                    continue
-                handler_data = handler_item.get("handler") or {}
-                if not isinstance(handler_data, dict):
-                    continue
-                event_model_ref = None
-                event_model_data = handler_item.get("event_model")
-                if isinstance(event_model_data, dict):
-                    event_model_ref = ModelHandlerRef(
-                        name=event_model_data.get("name", ""),
-                        module=event_model_data.get("module", ""),
-                    )
-                entries.append(
-                    ModelHandlerRoutingEntry(
-                        handler=ModelHandlerRef(
-                            name=handler_data.get("name", ""),
-                            module=handler_data.get("module", ""),
-                        ),
-                        event_model=event_model_ref,
-                        operation=handler_item.get("operation"),
-                        event_type=handler_item.get("event_type"),
-                        message_category=handler_item.get("message_category"),
-                        # OMN-15188: without this, a topic_match contract with
-                        # several handler_routing entries sharing the same
-                        # operation + handler across distinct topics (a
-                        # legitimate shape, e.g. node_codegen_outcome_reducer)
-                        # loses per-entry topic disambiguation on this
-                        # materialization path. _derive_handler_entry_key folds
-                        # topic into the dispatcher-ID digest only when it is
-                        # present (OMN-14580); every entry here would otherwise
-                        # collapse to the SAME operation-only key and crash
-                        # bootstrap with ONEX_CORE_064_DUPLICATE_REGISTRATION on
-                        # the 2nd handler_routing entry. Keep in parity with
-                        # discovery.py's _parse_handler_routing (OMN-13825),
-                        # which already threads this field through.
-                        topic=handler_item.get("topic"),
-                    )
-                )
-
-        return ModelHandlerRouting(
-            routing_strategy=hr_raw.get("routing_strategy", "payload_type_match"),
-            handlers=tuple(entries),
-        )
+        return _parse_handler_routing(hr_raw)
 
     def _build_materialization_contract(
         self,
@@ -1297,6 +1275,9 @@ class KafkaContractSource(MixinTypedContractEvents, ProtocolContractSource):
         descriptor: ModelHandlerDescriptor,
         environment: str | None,
     ) -> ModelDiscoveredContract:
+        from omnibase_core.models.contracts.subcontracts.model_db_ownership_subcontract import (
+            ModelDbOwnershipSubcontract,
+        )
         from omnibase_infra.runtime.auto_wiring.models import ModelDiscoveredContract
         from omnibase_infra.runtime.auto_wiring.models.model_contract_version import (
             ModelContractVersion,
@@ -1305,6 +1286,21 @@ class KafkaContractSource(MixinTypedContractEvents, ProtocolContractSource):
         ver = descriptor.version
         effective_env = environment or self._environment
         config = descriptor.contract_config or {}
+        db_io_raw = config.get("db_io")
+        db_io = (
+            ModelDbOwnershipSubcontract.model_validate(db_io_raw)
+            if db_io_raw is not None
+            else None
+        )
+        event_bus = self._build_event_bus_wiring(config)
+        root_terminal_event = config.get("terminal_event")
+        terminal_event = (
+            root_terminal_event
+            if isinstance(root_terminal_event, str)
+            else event_bus.terminal_event
+            if event_bus is not None
+            else None
+        )
         return ModelDiscoveredContract(
             name=node_name,
             node_type=descriptor.handler_kind,
@@ -1318,8 +1314,10 @@ class KafkaContractSource(MixinTypedContractEvents, ProtocolContractSource):
             contract_path=Path(f"/kafka/{effective_env}/{node_name}/contract.yaml"),
             entry_point_name=f"kafka.{node_name}",
             package_name="dynamic",
-            event_bus=self._build_event_bus_wiring(config),
+            terminal_event=terminal_event,
+            event_bus=event_bus,
             handler_routing=self._build_handler_routing(config),
+            db_io=db_io,
         )
 
     async def materialize_cached_contract(
@@ -1329,6 +1327,7 @@ class KafkaContractSource(MixinTypedContractEvents, ProtocolContractSource):
         event_bus: object | None = None,
         environment: str | None = None,
         container: object | None = None,
+        topology: ModelDeploymentTopology | None = None,
     ) -> ModelDynamicMaterializationResult:
         """Materialize a cached contract descriptor into the live dispatch engine.
 
@@ -1350,6 +1349,8 @@ class KafkaContractSource(MixinTypedContractEvents, ProtocolContractSource):
             event_bus: Optional event bus for Kafka subscriptions.
             environment: Override environment (defaults to self._environment).
             container: Optional DI container for handler resolution.
+            topology: Checked-in deployment topology. Required when the
+                dynamically registered contract declares ``db_io``.
 
         Returns:
             ModelDynamicMaterializationResult with enum status and topology data.
@@ -1417,6 +1418,8 @@ class KafkaContractSource(MixinTypedContractEvents, ProtocolContractSource):
                 event_bus=event_bus,
                 environment=effective_env,
                 container=container,
+                topology=topology,
+                dynamic_materialization_authorized=True,
             )
 
             if result.outcome == EnumWiringOutcome.WIRED:

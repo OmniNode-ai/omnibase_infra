@@ -1,0 +1,46 @@
+schema_version: "1.0.0"
+ticket_id: "OMN-14974"
+title: "Vendor the live-event lifecycle taxonomy backfill"
+summary: >
+  Vendors the node_projection_live_events 0001 lifecycle reclassification migration byte-identically from paired omnimarket PR #1983. The migration repairs durable rows whose inference, evaluation, or delegation lifecycle was previously collapsed into ROUTING or ACTION, and the paired source PR is blocked until this deployed forward-tree copy lands first.
+
+is_seam_ticket: false
+interface_change: false
+interfaces_touched: []
+emergency_bypass:
+  enabled: false
+  justification: ""
+  follow_up_ticket_id: ""
+dod_evidence:
+  - id: "dod-001"
+    description: >
+      The deployed forward-tree migration is byte-identical to the paired omnimarket PR #1983 source.
+
+    source: "manual"
+    checks:
+      - check_type: "command"
+        check_value: "cmp -s $OMNI_HOME/omni_worktrees/OMN-14974/omnimarket-event-type-taxonomy/src/omnimarket/nodes/node_projection_live_events/migrations/0001_reclassify_event_lifecycle_types.sql docker/migrations/forward/nodes/node_projection_live_events/0001_reclassify_event_lifecycle_types.sql"
+  - id: "dod-002"
+    description: >
+      The full vendored migration tree is in sync with the explicitly paired omnimarket source ref.
+
+    source: "manual"
+    checks:
+      - check_type: "command"
+        check_value: "OMNIMARKET_SRC=$OMNI_HOME/omni_worktrees/OMN-14974/omnimarket-event-type-taxonomy bash scripts/sync-node-migrations.sh --check"
+  - id: "dod-003"
+    description: >
+      Migration discovery, fence parity, and sequence validation tests pass with the new node migration.
+
+    source: "manual"
+    checks:
+      - check_type: "command"
+        check_value: "LC_ALL=C LANG=C uv run pytest tests/scripts/test_node_migration_fence_parity.py tests/ci/test_validate_migration_sequence.py -q"
+  - id: "dod-deploy"
+    description: >
+      Deploy-gate evidence: this PR adds one idempotent node-owned SQL migration to the deployed forward tree. It performs no deployment itself; the governed onex-dev redeploy will apply it through the existing namespaced migration runner before live readback.
+
+    source: "manual"
+    checks:
+      - check_type: "command"
+        check_value: "echo 'deploy-gate: OMN-14974 vendors one byte-identical idempotent node migration; apply only through governed onex-dev redeploy'"

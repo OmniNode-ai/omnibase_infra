@@ -838,9 +838,14 @@ def _bus_callback(callback: Any, applier: DispatchResultApplier) -> Any:
     """
 
     class _Engine:
-        async def dispatch(
-            self, topic: str, envelope: ModelEventEnvelope[object]
+        async def dispatch_scoped(
+            self,
+            topic: str,
+            envelope: ModelEventEnvelope[object],
+            *,
+            allowed_dispatcher_ids: object,
         ) -> Any:
+            del topic, allowed_dispatcher_ids
             return await callback(envelope)
 
     return _make_event_bus_callback(
@@ -848,6 +853,7 @@ def _bus_callback(callback: Any, applier: DispatchResultApplier) -> Any:
         cast("Any", _Engine()),
         cast("Any", applier),
         propagate_publish_failures=True,
+        allowed_dispatcher_ids={"state-io-test-dispatcher"},
     )
 
 
@@ -1194,14 +1200,22 @@ def test_non_outbox_boundary_still_swallows_unchanged() -> None:
     applier = _make_applier(bus)
 
     class _Engine:
-        async def dispatch(
-            self, topic: str, envelope: ModelEventEnvelope[object]
+        async def dispatch_scoped(
+            self,
+            topic: str,
+            envelope: ModelEventEnvelope[object],
+            *,
+            allowed_dispatcher_ids: object,
         ) -> Any:
+            del topic, allowed_dispatcher_ids
             return await callback(envelope)
 
     # DEFAULT flag (propagate_publish_failures NOT passed) = non-outbox behavior.
     on_message = _make_event_bus_callback(
-        TOPIC_INBOUND, cast("Any", _Engine()), cast("Any", applier)
+        TOPIC_INBOUND,
+        cast("Any", _Engine()),
+        cast("Any", applier),
+        allowed_dispatcher_ids={"state-io-test-dispatcher"},
     )
 
     raised: BaseException | None = None

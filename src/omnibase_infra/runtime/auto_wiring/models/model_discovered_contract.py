@@ -8,6 +8,9 @@ from pathlib import Path
 
 from pydantic import BaseModel, ConfigDict, Field, field_validator
 
+from omnibase_core.models.contracts.subcontracts.model_db_ownership_subcontract import (
+    ModelDbOwnershipSubcontract,
+)
 from omnibase_infra.runtime.auto_wiring.models.model_contract_version import (
     ModelContractVersion,
 )
@@ -76,6 +79,13 @@ class ModelDiscoveredContract(BaseModel):
     )
     handler_routing: ModelHandlerRouting | None = Field(
         default=None, description="Handler routing if declared"
+    )
+    db_io: ModelDbOwnershipSubcontract | None = Field(
+        default=None,
+        description=(
+            "Typed database ownership declarations. Table locations are validated "
+            "at discovery and never re-read as raw YAML during handler wiring."
+        ),
     )
 
     @field_validator("runtime_profiles", mode="before")

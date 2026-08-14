@@ -40,6 +40,7 @@ Exports:
     EventRegistryFingerprintMismatchError: Live event registry fingerprint != expected
     EventRegistryFingerprintMissingError: Event registry artifact file not found
     ProjectionError: Raised by NodeProjectionEffect when a synchronous projection write fails
+    ProjectionTenantContextError: Projection write refused — no tenant resolved under enforcement
 
 Correlation ID Assignment:
     All infrastructure errors support correlation_id for distributed tracing.
@@ -147,10 +148,16 @@ from omnibase_infra.errors.error_invariant_violation import InvariantViolation
 from omnibase_infra.errors.error_message_type_registry import MessageTypeRegistryError
 from omnibase_infra.errors.error_payload_registry import PayloadRegistryError
 from omnibase_infra.errors.error_policy_registry import PolicyRegistryError
-from omnibase_infra.errors.error_projection import ProjectionError
+from omnibase_infra.errors.error_projection import (
+    ProjectionError,
+    ProjectionTenantContextError,
+)
 from omnibase_infra.errors.error_schema_fingerprint import (
     SchemaFingerprintMismatchError,
     SchemaFingerprintMissingError,
+)
+from omnibase_infra.errors.error_topic_provisioning import (
+    TopicReplicationPolicyError,
 )
 from omnibase_infra.errors.repository import (
     RepositoryContractError,
@@ -171,6 +178,7 @@ __all__: list[str] = [
     "ArchitectureViolationError",
     # Projection errors (OMN-2510)
     "ProjectionError",
+    "ProjectionTenantContextError",
     # Binding resolution errors
     "BindingResolutionError",
     "ChainPropagationError",
@@ -225,6 +233,8 @@ __all__: list[str] = [
     "ServiceRegistrationError",
     "ServiceRegistryUnavailableError",
     "ServiceResolutionError",
+    # Topic provisioning policy errors (OMN-15395)
+    "TopicReplicationPolicyError",
     "UnknownHandlerTypeError",
     # Error catalog lookup (OMN-518)
     "get_resolution",

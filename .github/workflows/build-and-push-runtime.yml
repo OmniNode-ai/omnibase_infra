@@ -103,7 +103,7 @@ jobs:
           fi
 
       - name: Set up Python for AWS CLI
-        uses: actions/setup-python@v6
+        uses: actions/setup-python@v7
         with:
           python-version: ${{ env.PYTHON_VERSION }}
 
@@ -191,6 +191,26 @@ jobs:
           vuln-type: 'os,library'
           severity: 'CRITICAL,HIGH'
           version: 'v0.69.3'
+
+      # OMN-15676: prove the required config files are actually IN the image
+      # before it can be pushed. Three incidents (grants fixture, routing_tiers,
+      # runner_fleet) shipped images whose repo tree was perfectly correct and
+      # whose runtime boot-crashed on a missing /app/config file. The registry
+      # this reads is src/omnibase_infra/runtime/required_image_config_paths.py;
+      # it runs `test -f` INSIDE the built image, not against the checkout, and
+      # fails closed on a probe that cannot run.
+      - name: Assert required config paths exist in the built image (OMN-15676)
+        run: |
+          set -euo pipefail
+          # OMN-15860: this step's python3 is the bare interpreter set up by
+          # "Setup Python for AWS CLI" above -- no uv/dependency-install
+          # infrastructure exists anywhere else in this job. required_image_config_paths.py
+          # (imported by the script below) imports pydantic; without this install
+          # every run since OMN-15676 added that import has crashed here with
+          # ModuleNotFoundError, before the image is ever pushed to ECR.
+          python3 -m pip install --quiet "pydantic>=2.11.7,<3.0.0"
+          python3 scripts/ci/assert_image_config_paths.py \
+            --image "${{ steps.meta.outputs.image_repo }}:${{ github.sha }}"
 
       - name: Push image to Amazon ECR
         if: success()

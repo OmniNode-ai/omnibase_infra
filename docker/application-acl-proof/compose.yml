@@ -1,0 +1,30 @@
+# SPDX-License-Identifier: MIT
+services:
+  postgres:
+    build:
+      context: ../..
+      dockerfile: docker/application-acl-proof/Dockerfile
+      target: postgres
+    environment:
+      POSTGRES_DB: omnidash_analytics
+      POSTGRES_PASSWORD: acl-proof-admin-only # pragma: allowlist secret
+    tmpfs:
+      - /var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U postgres -d omnidash_analytics"]
+      interval: 1s
+      timeout: 3s
+      retries: 30
+  proof:
+    build:
+      context: ../..
+      dockerfile: docker/application-acl-proof/Dockerfile
+      target: proof
+    depends_on:
+      postgres:
+        condition: service_healthy
+    environment:
+      ADMIN_DSN: postgresql://postgres:acl-proof-admin-only@postgres:5432/omnidash_analytics # pragma: allowlist secret
+      UPDATE_PRECHANGE: ${UPDATE_PRECHANGE:-false}
+    volumes:
+      - ./generated:/output

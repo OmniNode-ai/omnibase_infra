@@ -62,12 +62,13 @@ class ModelNodeRegistration(BaseModel):
         >>> from datetime import datetime, UTC
         >>> from uuid import uuid4
         >>> now = datetime.now(UTC)
+        >>> resolved_health_endpoint = "https://routing-authority.resolved.example/health"  # url-authority-ok: docstring example value, not a runtime literal
         >>> registration = ModelNodeRegistration(
         ...     node_id=uuid4(),
         ...     node_type="effect",
         ...     capabilities={"postgres": True},
-        ...     endpoints={"health": "http://localhost:8080/health"},
-        ...     health_endpoint="http://localhost:8080/health",
+        ...     endpoints={"health": resolved_health_endpoint},
+        ...     health_endpoint=resolved_health_endpoint,
         ...     registered_at=now,
         ...     updated_at=now,
         ... )

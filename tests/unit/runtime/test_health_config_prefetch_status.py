@@ -109,7 +109,7 @@ class TestHealthCheckIncludesConfigPrefetchStatus:
         mock_requirements.errors = ()  # no extraction errors → degraded_no_requirements
         mock_extractor.return_value.extract_from_paths.return_value = mock_requirements
 
-        with patch(_EXTRACTOR_PATH, mock_extractor):
+        with patch(_LOAD_ENV_PATH), patch(_EXTRACTOR_PATH, mock_extractor):
             process = _make_process()
             await process._prefetch_config_from_infisical()
 
@@ -146,6 +146,7 @@ class TestHealthCheckIncludesConfigPrefetchStatus:
         mock_handler_cls.return_value = mock_handler_instance
 
         with (
+            patch(_LOAD_ENV_PATH),
             patch(_EXTRACTOR_PATH, mock_extractor),
             patch(_PREFETCHER_PATH, mock_prefetcher),
             patch(_HANDLER_PATH, mock_handler_cls),
@@ -164,7 +165,10 @@ class TestHealthCheckIncludesConfigPrefetchStatus:
         monkeypatch.setenv("INFISICAL_ADDR", "http://localhost:8880")
 
         # Make the extractor raise to trigger the outer except
-        with patch(_EXTRACTOR_PATH, side_effect=RuntimeError("connection refused")):
+        with (
+            patch(_LOAD_ENV_PATH),
+            patch(_EXTRACTOR_PATH, side_effect=RuntimeError("connection refused")),
+        ):
             process = _make_process()
             await process._prefetch_config_from_infisical()
 
@@ -207,6 +211,7 @@ class TestHealthCheckIncludesConfigPrefetchStatus:
         mock_handler_cls.return_value = mock_handler_instance
 
         with (
+            patch(_LOAD_ENV_PATH),
             patch(_EXTRACTOR_PATH, mock_extractor),
             patch(_PREFETCHER_PATH, mock_prefetcher),
             patch(_HANDLER_PATH, mock_handler_cls),

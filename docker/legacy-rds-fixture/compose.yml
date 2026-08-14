@@ -1,0 +1,41 @@
+# SPDX-FileCopyrightText: 2025 OmniNode.ai Inc.
+# SPDX-License-Identifier: MIT
+services:
+  fresh-postgres:
+    build:
+      context: ../..
+      dockerfile: docker/legacy-rds-fixture/Dockerfile
+      target: fresh
+    environment:
+      POSTGRES_HOST_AUTH_METHOD: trust
+    tmpfs:
+      - /var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U postgres -d postgres"]
+      interval: 2s
+      timeout: 2s
+      retries: 30
+  legacy-postgres:
+    build:
+      context: ../..
+      dockerfile: docker/legacy-rds-fixture/Dockerfile
+      target: legacy
+    environment:
+      POSTGRES_HOST_AUTH_METHOD: trust
+    tmpfs:
+      - /var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U postgres -d postgres"]
+      interval: 2s
+      timeout: 2s
+      retries: 30
+  proof:
+    build:
+      context: ../..
+      dockerfile: docker/legacy-rds-fixture/Dockerfile
+      target: proof
+    depends_on:
+      fresh-postgres:
+        condition: service_healthy
+      legacy-postgres:
+        condition: service_healthy

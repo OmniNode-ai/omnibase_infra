@@ -6,27 +6,6 @@
 
 ---
 
-## Table of Contents
-
-1. [Repo Invariants](#repo-invariants)
-2. [Non-Goals](#non-goals)
-3. [Service Catalog Architecture](#service-catalog-architecture)
-4. [Quick Reference](#quick-reference)
-5. [Architecture: Four-Node Pattern](#architecture-four-node-pattern)
-6. [Declarative Nodes](#declarative-nodes)
-7. [Handler System](#handler-system)
-8. [Intent Model Architecture](#intent-model-architecture)
-9. [Error Handling](#error-handling)
-10. [Infrastructure Patterns](#infrastructure-patterns)
-11. [Pydantic Model Standards](#pydantic-model-standards)
-12. [Testing and CI](#testing-and-ci)
-13. [Contract-Driven Config Discovery](#contract-driven-config-discovery)
-14. [Agent-Driven Development](#agent-driven-development)
-15. [Common Pitfalls](#common-pitfalls)
-16. [Release Process](#release-process)
-
----
-
 ## Repo Invariants
 
 These are non-negotiable architectural truths:
@@ -45,206 +24,49 @@ These are non-negotiable architectural truths:
 
 We explicitly do **NOT** optimize for:
 
-- **Backwards compatibility** - This repo has no external consumers. Schemas, APIs, and interfaces may change without deprecation periods. If something needs to change, change it. No `_deprecated` suffixes, no shims, no compatibility layers.
+- **Backwards compatibility** - This repo has no external consumers. Schemas, APIs, and interfaces may change without deprecation periods. No `_deprecated` suffixes, no shims, no compatibility layers.
 - **Convenience over correctness** - Contract violations fail loudly
 - **Business logic in nodes** - Nodes coordinate; handlers compute
 - **Dynamic runtime behavior** - All behavior must be contract-declared
-- **Implicit state** - All state transitions are explicit and auditable
-- **Tight coupling** - Protocol-based DI enforces loose coupling
 - **Versioned directories** - NEVER create `v1_0_0/`, `v2/` directories; version through `contract.yaml` fields only
 
-**When you see deprecated or unused code: DELETE IT.** Do not:
-- Leave it "for reference"
-- Comment it out
-- Add deprecation warnings
-- Create compatibility shims
-- Keep old function signatures with forwarding
+**When you see deprecated or unused code: DELETE IT.** Do not leave it "for reference", comment it out, add deprecation warnings, create compatibility shims, or keep old function signatures with forwarding.
 
 ---
 
-## Install Model
+## Install Model & Service Catalog
 
-`omnibase_infra` ships as both a **pip-installable package** and a **cloneable repository**.
-The two serve different purposes.
+`omnibase_infra` ships as both a pip package (library + runtime CLIs; entry points are
+declared in `pyproject.toml [project.scripts]`) and a cloneable repo (the operational
+`scripts/` are NOT bundled in the pip package — they need a clone). All Docker
+infrastructure is generated from typed YAML manifests: `docker/catalog/services/*.yaml`
+grouped by `docker/catalog/bundles.yaml`, driven by the `onex` CLI
+(`src/omnibase_infra/docker/catalog/cli.py` — `generate` / `validate` / `up` / `down`).
+Never hand-edit the generated compose file; never bypass the catalog with raw
+`docker compose -f <path>`.
 
-### Pip Package (library + runtime CLIs)
+Full walkthrough (install decision table, bundle composition, adding a new service):
+`docs/patterns/service_catalog.md`.
 
-Install via pip for:
-- Using `omnibase_infra` as a library dependency in other ONEX services
-- Running the bundled runtime CLIs
-
-```bash
-pip install omnibase-infra
-# or
-uv add omnibase-infra
-```
-
-**Bundled CLI entry points** (available after `pip install omnibase-infra`):
-
-| Command | Entry Point | Purpose |
-|---------|-------------|---------|
-| `omni-infra` | `omnibase_infra.cli.commands:cli` | General CLI |
-| `onex-runtime` | `omnibase_infra.runtime.kernel:main` | Start ONEX runtime |
-| `onex-infra-test` | `omnibase_infra.cli.infra_test.cli:cli` | Infra test runner |
-| `onex-git-hook-relay` | `omnibase_infra.cli.git_hook_relay:main` | Git hook relay |
-| `onex-linear-relay` | `omnibase_infra.cli.linear_relay:main` | Linear relay |
-| `onex-status` | `omnibase_infra.tui.__main__:run_status_tui` | Status TUI |
-
-### Local Clone (operational scripts)
-
-A **local clone is required** to run the operational scripts in `scripts/`. These scripts
-are **not bundled** in the pip package — they live only in the repository source tree.
-
-```bash
-git clone https://github.com/OmniNode-ai/omnibase_infra.git
-cd omnibase_infra
-uv sync
-```
-
-**Scripts that require a local clone:**
-
-| Script | Purpose | Requires Clone |
-|--------|---------|---------------|
-| `scripts/seed-infisical.py` | Populate Infisical from contract YAMLs | Yes |
-| `scripts/bootstrap-infisical.sh` | Full first-time bootstrap sequence | Yes |
-| `scripts/provision-infisical.py` | Create machine identities, write credentials back to `~/.omnibase/.env` | Yes |
-| `scripts/setup-infisical-identity.sh` | Create runtime/admin machine identities | Yes |
-| `scripts/create_kafka_topics.py` | Create Kafka/Redpanda topics | Yes |
-| `scripts/validate.py` | Run ONEX validators | Yes |
-| All other `scripts/*.py` | Operational, CI, or dev tooling | Yes |
-
-**Why scripts require a clone:** These scripts scan the repository source tree directly
-(e.g., `seed-infisical.py` iterates over `src/omnibase_infra/nodes/*/contract.yaml`),
-write back to `~/.omnibase/.env`, or depend on shell tooling co-located with the repo.
-
-### Decision Summary
-
-| Use Case | Install Method |
-|----------|---------------|
-| Add `omnibase_infra` as a library dependency | `pip install omnibase-infra` |
-| Run ONEX runtime services | `pip install omnibase-infra` → `onex-runtime` |
-| Bootstrap Infisical (first-time setup) | Clone + `scripts/bootstrap-infisical.sh` |
-| Seed Infisical from contracts | Clone + `uv run python scripts/seed-infisical.py` |
-| Provision machine identities | Clone + `uv run python scripts/provision-infisical.py` |
-| Run CI validators | Clone + `uv run python scripts/validate.py` |
-| Develop nodes and handlers | Clone (full dev environment) |
-
-> **Note on `sync-omnibase-env.py`**: This script is **not** part of
-> `omnibase_infra`. Use the separately installed environment-sync tooling
-> available in your workspace.
-
----
-
-## Service Catalog Architecture
-
-The service catalog is the authoritative source for all Docker infrastructure.
-Every deployable unit is a typed YAML manifest; the compose file is generated, not hand-edited.
-
-### Concepts
-
-| Term | Description |
-|------|-------------|
-| **Manifest** | Typed YAML declaration of a single deployable service (`docker/catalog/services/<name>.yaml`) |
-| **Bundle** | Named group of manifests deployed together (`docker/catalog/bundles.yaml`) |
-| **Resolver** | Loads manifests + bundles, resolves transitive `includes`, returns `ResolvedStack` |
-| **Generator** | Renders `ResolvedStack` → `docker-compose.generated.yml` |
-| **Validator** | Checks that all `required_env` vars are present before start |
-
-### Bundle Definitions
-
-| Bundle | Contents | Purpose |
-|--------|----------|---------|
-| `core` | postgres, redpanda, valkey, infisical | Always-on infrastructure |
-| `runtime` | (composed) | Full ONEX runtime stack — includes `core`, `tracing`, and the four sub-bundles below |
-| `runtime-core` | omninode-runtime, runtime-effects, agent-actions-consumer, skill-lifecycle-consumer, context-audit-consumer, omninode-contract-resolver, intelligence-api | 7 services with no env requirements beyond the 0.34.0 baseline; deploy correctness fixes without needing new secrets |
-| `runtime-integrations` | ci-relay, linear-relay, waitlist-signup-notifier | External-integration services; needs `CI_CALLBACK_TOKEN`, `LINEAR_WEBHOOK_SECRET`, `WAITLIST_NOTIFIER_SLACK_*` |
-| `runtime-observability-projections` | injection-effectiveness-consumer, savings-estimation-consumer, llm-cost-aggregation-consumer, consumer-health-projection, decision-store-consumer | Postgres projection consumers; needs `OMNIBASE_INFRA_INJECTION_EFFECTIVENESS_POSTGRES_DSN` |
-| `runtime-infrastructure` | forward-migration, migration-gate, intelligence-migration, runtime-worker, retry-worker, autoheal | Migrations, workers, container autoheal |
-| `memgraph` | omnibase-infra-memgraph | Graph memory — injects `OMNIMEMORY_*` env vars |
-| `observability` | phoenix | LLM observability (Phoenix traces/evals) |
-| `tracing` | (none) + observability | Injects OTEL env vars; phoenix pulled in transitively |
-| `secrets` | infisical | Secrets management — injects `INFISICAL_ADDR` |
-| `auth` | keycloak | Local OIDC/auth |
-
-**Transitive resolution**: `runtime` includes `core`, `tracing`, and the four runtime sub-bundles; `tracing` includes `observability`. The resolver expands all `includes` before collecting services.
-
-**Incremental rollout**: when new runtime services land with new secret requirements, operators can deploy `onex up runtime-core` to pick up correctness fixes without also needing those secrets. Once the secrets are seeded (Infisical or `~/.omnibase/.env`), bring up the remaining sub-bundles with `onex up runtime-integrations`, `onex up runtime-observability-projections`, or `onex up runtime-infrastructure`.
-
-**Env injection**: Each bundle may declare `inject_env` (hardcoded values injected into generated compose) and `inject_required_env` (vars that must be present in the operator environment at start time).
-
-### onex CLI Commands
-
-The `onex` CLI (`src/omnibase_infra/docker/catalog/cli.py`) is the primary operator interface.
-
-```bash
-# Generate compose file for one or more bundles
-uv run python -m omnibase_infra.docker.catalog.cli generate core
-uv run python -m omnibase_infra.docker.catalog.cli generate runtime memgraph
-
-# Validate env completeness before starting
-uv run python -m omnibase_infra.docker.catalog.cli validate runtime
-uv run python -m omnibase_infra.docker.catalog.cli validate runtime memgraph
-
-# Start a bundle (generate + validate + docker compose up)
-uv run python -m omnibase_infra.docker.catalog.cli up core
-uv run python -m omnibase_infra.docker.catalog.cli up runtime memgraph tracing
-
-# Stop a running bundle
-uv run python -m omnibase_infra.docker.catalog.cli down core
-```
-
-The shell functions `infra-up`, `infra-up-runtime`, `infra-up-memory`, and `infra-down` (defined in `~/.zshrc`) are backwards-compatible wrappers around `onex up/down`. They remain the preferred operator interface — do not bypass them with raw `docker compose -f <path>`.
-
-### Shell Function → onex Mapping
-
-| Shell Function | Equivalent onex Command |
-|----------------|------------------------|
-| `infra-up` | `onex up core` |
-| `infra-up-runtime` | `onex up runtime` |
-| `infra-up-memory` | `onex up runtime memgraph` |
-| `infra-down` | `onex down <active-bundles>` |
-
-### Adding a New Service
-
-1. Create `docker/catalog/services/<name>.yaml` using an existing manifest as template.
-2. Set `layer` to one of: `infrastructure`, `runtime`, `observability`, `auth`, `secrets`.
-3. Declare all `required_env` vars that the container needs from the operator environment.
-4. Add hardcoded container-internal addresses under `hardcoded_env` (never pass host-side env vars for internal addressing).
-5. Add the service name to the appropriate bundle(s) in `docker/catalog/bundles.yaml`.
-6. Run `uv run python -m omnibase_infra.docker.catalog.cli validate <bundle>` to confirm env contract.
-
-### Env Var Contract
-
-Three categories of env vars in the catalog:
-
-| Category | Location | Behavior |
-|----------|----------|----------|
-| `required_env` | Per-manifest YAML | Must be set in operator env; validated before start |
-| `hardcoded_env` | Per-manifest YAML | Container-internal addresses; never overrideable |
-| `inject_env` | Per-bundle in `bundles.yaml` | Injected only when that bundle is selected |
-
-**Rule**: Container-to-container addresses (e.g. `redpanda:9092`, `valkey:6379`) must live in `hardcoded_env`, never in `required_env`. Operator-supplied secrets (`POSTGRES_PASSWORD`, API keys) belong in `required_env`.
+**Env var rule (trap)**: Container-to-container addresses (e.g. `redpanda:9092`,
+`valkey:6379`) must live in `hardcoded_env`, never in `required_env`. Operator-supplied
+secrets (`POSTGRES_PASSWORD`, API keys) belong in `required_env`.
 
 ---
 
 ## Quick Reference
 
 ```bash
-# Setup
-uv sync && pre-commit install
-
-# Testing
-uv run pytest tests/                      # All tests
-uv run pytest tests/ -n auto              # Parallel execution
-uv run pytest tests/ -m unit              # Unit tests only
-uv run pytest tests/ -m integration       # Integration tests only
-uv run pytest tests/ --cov                # With coverage (60% minimum)
-
-# Code Quality
+uv sync && pre-commit install             # Setup
+uv run pytest tests/ -n auto              # Tests (parallel)
+uv run pytest tests/ -m unit              # Unit only; -m integration for integration
 uv run mypy src/omnibase_infra/           # Type checking
 uv run ruff check src/ tests/             # Linting
-pre-commit run --all-files                    # All hooks
+pre-commit run --all-files                # All hooks
 ```
+
+Coverage minimum is enforced via `fail_under` in `pyproject.toml` — read it there, don't
+trust a copied number.
 
 ## SPDX Headers
 
@@ -270,11 +92,8 @@ Canonical spec: `omnibase_core/docs/conventions/FILE_HEADERS.md`
 
 ### Autonomous mode safety rails
 
-When operating autonomously in this repo:
-- Never disable pre-commit hooks, CI checks, or type checkers to make code pass.
-  Fix the code instead.
-- Never write state files to `~/.claude/`; use the workspace `.onex_state/`
-  directory.
+- Never disable pre-commit hooks, CI checks, or type checkers to make code pass. Fix the code instead.
+- Never write state files to `~/.claude/`; use the workspace `.onex_state/` directory.
 - Friction logs go under `.onex_state/friction/` for external observability.
 
 ### Contract-first topic definitions
@@ -286,8 +105,8 @@ When adding a new Kafka topic:
 1. Declare it in the node's contract YAML under `event_bus.publish_topics` or `subscribe_topics`
 2. Add the topic to the relevant `topics.yaml` skill file if it is a skill-emitted topic
 3. Reference the contract-declared topic name in code via the contract loader
-4. Never hardcode topic strings like `"onex.evt.foo.bar.v1"` in Python modules
-5. The CI check `check-arch-invariants` enforces this -- hardcoded topic strings will fail CI
+4. Never hardcode topic strings like `"onex.evt.foo.bar.v1"` in Python modules — the
+   `arch-invariants` job in `.github/workflows/ci.yml` fails CI on hardcoded topic strings
 
 ---
 
@@ -302,8 +121,6 @@ When adding a new Kafka topic:
 
 **Data Flow**: Unidirectional left-to-right. No backwards dependencies.
 
-### Node Types
-
 | Node | Contract Type | Purpose | Primary Output |
 |------|--------------|---------|----------------|
 | **EFFECT** | `EFFECT_GENERIC` | External I/O (APIs, DB, files) | `events[]` |
@@ -311,24 +128,8 @@ When adding a new Kafka topic:
 | **REDUCER** | `REDUCER_GENERIC` | FSM state management | `projections[]` |
 | **ORCHESTRATOR** | `ORCHESTRATOR_GENERIC` | Workflow coordination | `events[]`, `intents[]` |
 
-### Import Path
-
-```python
-from omnibase_core.nodes import (
-    NodeEffect,        # External I/O operations
-    NodeCompute,       # Pure transformations
-    NodeReducer,       # FSM-driven state
-    NodeOrchestrator,  # Workflow coordination
-)
-```
-
-### Layer Responsibilities
-
-| Layer | Responsibility |
-|-------|---------------|
-| `omnibase_core` | Node archetypes, I/O models, enums |
-| `omnibase_spi` | Protocol definitions |
-| `omnibase_infra` | Infrastructure implementations |
+Base classes: `from omnibase_core.nodes import NodeEffect, NodeCompute, NodeReducer, NodeOrchestrator`.
+Layering: `omnibase_core` = archetypes/models/enums, `omnibase_spi` = protocols, `omnibase_infra` = implementations.
 
 ---
 
@@ -336,111 +137,29 @@ from omnibase_core.nodes import (
 
 **ALL nodes MUST be declarative - no custom Python logic in node.py**
 
-```python
-# CORRECT - Declarative node (extends base, no custom logic)
-from omnibase_core.nodes import NodeOrchestrator
-from omnibase_core.models.container.model_onex_container import ModelONEXContainer
-
-class NodeRegistrationOrchestrator(NodeOrchestrator):
-    """Declarative orchestrator - all behavior defined in contract.yaml."""
-
-    def __init__(self, container: ModelONEXContainer) -> None:
-        super().__init__(container)
-    # No custom code - driven entirely by contract
-```
-
-### Declarative Pattern Requirements
-
-1. Extend base class from `omnibase_core.nodes`
-2. Use `container: ModelONEXContainer` for dependency injection
+1. Extend the base class from `omnibase_core.nodes`
+2. Use `container: ModelONEXContainer` for dependency injection (call `super().__init__(container)`)
 3. Define all behavior in `contract.yaml` (handlers, routing, workflows)
 4. `node.py` contains ONLY the class definition extending base - no custom logic
 
-### Canonical Node Directory Structure
-
-```text
-nodes/<node_name>/
-├── __init__.py           # Public exports
-├── contract.yaml         # ONEX contract (REQUIRED)
-├── node.py              # Declarative node class (REQUIRED)
-├── models/              # Node-specific Pydantic models
-│   ├── __init__.py
-│   └── model_<name>.py
-├── registry/            # Dependency injection registry
-│   ├── __init__.py
-│   └── registry_infra_<node_name>.py
-├── handlers/            # Handler implementations (optional)
-│   ├── __init__.py
-│   └── handler_<name>.py
-└── dispatchers/         # Dispatcher adapters (optional)
-    ├── __init__.py
-    └── dispatcher_<name>.py
-```
-
-### Contract Requirements
-
-| Field | Type | Required | Description |
-|-------|------|----------|-------------|
-| `name` | string | Yes | Node identifier |
-| `node_type` | string | Yes | `EFFECT_GENERIC`, `COMPUTE_GENERIC`, `REDUCER_GENERIC`, `ORCHESTRATOR_GENERIC` |
-| `contract_version` | object | Yes | `{major, minor, patch}` |
-| `node_version` | string/object | Yes | Semantic version |
-| `description` | string | Yes | Node purpose |
-| `input_model` | object | Yes | `{name, module, description}` |
-| `output_model` | object | Yes | `{name, module, description}` |
+For the canonical node directory layout and required contract fields, copy an existing
+node under `src/omnibase_infra/nodes/` rather than working from a prose description.
 
 ---
 
 ## Handler System
 
-### Handler Protocols
+Two protocols: `ProtocolHandler` (request/response I/O: `ModelProtocolRequest` →
+`ModelProtocolResponse`) and `ProtocolMessageHandler` (dispatch: `ModelEventEnvelope` →
+`ModelHandlerOutput`).
 
-| Protocol | Purpose | Input/Output |
-|----------|---------|--------------|
-| `ProtocolHandler` | Request/response I/O (HTTP, DB, Kafka) | `ModelProtocolRequest` → `ModelProtocolResponse` |
-| `ProtocolMessageHandler` | Category-based (dispatch) | `ModelEventEnvelope` → `ModelHandlerOutput` |
+Two routing strategies in `handler_routing` contract blocks:
+- `payload_type_match` — routes on event payload model type (orchestrator handlers)
+- `operation_match` — routes on envelope operation (infrastructure handlers)
 
-### Handler Routing Strategies
-
-**`payload_type_match`** - Routes based on event payload model type (orchestrator handlers):
-```yaml
-handler_routing:
-  routing_strategy: "payload_type_match"
-  handlers:
-    - event_model:
-        name: "ModelNodeIntrospectionEvent"
-        module: "omnibase_infra.models.registration.model_node_introspection_event"
-      handler:
-        name: "HandlerNodeIntrospected"
-        module: "omnibase_infra.nodes.node_registration_orchestrator.handlers.handler_node_introspected"
-```
-
-**`operation_match`** - Routes based on envelope operation (infrastructure handlers):
-```yaml
-handler_routing:
-  routing_strategy: "operation_match"
-  handlers:
-    - operation: "register_node"
-      handler:
-        name: "HandlerConsulRegister"
-        module: "omnibase_infra.nodes.node_registry_effect.handlers.handler_consul_register"
-```
-
-### Handler Classification
-
-Handlers expose two classification properties:
-
-```python
-@property
-def handler_type(self) -> EnumHandlerType:
-    """Architectural role: INFRA_HANDLER, NODE_HANDLER, PROJECTION_HANDLER"""
-    return EnumHandlerType.INFRA_HANDLER
-
-@property
-def handler_category(self) -> EnumHandlerTypeCategory:
-    """Behavioral classification: EFFECT, COMPUTE, NONDETERMINISTIC_COMPUTE"""
-    return EnumHandlerTypeCategory.EFFECT
-```
+See `docs/patterns/operation_routing.md` and existing node contracts for the YAML shape.
+Handlers expose `handler_type` (`EnumHandlerType`) and `handler_category`
+(`EnumHandlerTypeCategory`) classification properties.
 
 ### Handler No-Publish Constraint
 
@@ -456,121 +175,28 @@ def handler_category(self) -> EnumHandlerTypeCategory:
 
 ## Intent Model Architecture
 
-**Overview**: Reducers emit intents that orchestrators route to Effect layer nodes. Payload models extend `BaseModel` directly (since omnibase_core 0.6.2).
+Reducers emit intents that orchestrators route to Effect layer nodes.
 
-### Two-Layer Intent Structure
-
-| Layer | Model | Purpose |
-|-------|-------|---------|
-| 1. Typed Payload | `ModelPayloadConsulRegister` | Domain-specific Pydantic model with `intent_type` field |
-| 2. Outer Container | `ModelIntent` | Standard intent envelope with `intent_type="extension"` |
-
-### Defining Typed Payload Models
-
-```python
-# In nodes/reducers/models/model_payload_consul_register.py
-from pydantic import BaseModel, ConfigDict, Field
-from typing import Literal
-from uuid import UUID
-
-class ModelPayloadConsulRegister(BaseModel):
-    """Typed payload for Consul service registration.
-
-    Note: Extends BaseModel directly (ModelIntentPayloadBase was removed in
-    omnibase_core 0.6.2).
-    """
-    model_config = ConfigDict(frozen=True, extra="forbid")
-
-    intent_type: Literal["consul.register"] = Field(default="consul.register")
-    correlation_id: UUID
-    service_id: str
-    service_name: str
-    tags: list[str]
-    health_check: dict[str, str] | None = None
-```
-
-### Building Intents in Reducers
-
-```python
-from omnibase_core.models.reducer.model_intent import ModelIntent
-
-# Build typed payload with domain data
-consul_payload = ModelPayloadConsulRegister(
-    correlation_id=correlation_id,
-    service_id=f"onex-{node_type}-{node_id}",
-    service_name=f"onex-{node_type}",
-    tags=["node_type:effect"],
-)
-
-# Return as ModelIntent from reducer
-return ModelIntent(
-    intent_type="extension",
-    target=f"consul://service/{service_name}",
-    payload=consul_payload,
-)
-```
-
-### Intent Type Routing
-
-- `ModelIntent.intent_type` is always `"extension"` for infrastructure intents
-- `payload.intent_type` contains the specific routing key (e.g., `"consul.register"`)
-- Effect layer routes based on `payload.intent_type`
-
-### Target URI Convention
-
-Format: `{protocol}://{resource}/{identifier}`
-
-Examples:
-- `postgres://node_registrations/{node_id}`
-- `consul://service/{service_name}`
+- **Two layers**: a typed payload model (e.g. `ModelPayloadConsulRegister`, with its own
+  `intent_type` literal field like `"consul.register"`) wrapped in the standard
+  `ModelIntent` envelope with `intent_type="extension"`.
+- **Routing**: the Effect layer routes on `payload.intent_type`, not the outer envelope.
+- **Target URI convention**: `{protocol}://{resource}/{identifier}` (e.g.
+  `postgres://node_registrations/{node_id}`, `consul://service/{service_name}`).
+- **Trap**: infra payload models extend `BaseModel` directly (repo convention — see
+  `docs/standards/ONEX_TERMINOLOGY.md`). Do NOT justify this as "`ModelIntentPayloadBase`
+  was removed in omnibase_core 0.6.2" — that claim is false: the class exists in live
+  core (`omnibase_core.models.reducer.payloads`, present at v0.6.2 and every version
+  since) and bases core's own closed-set intent payloads. The real 0.6.2 change was
+  `ModelIntent.payload: dict[str, Any]` → `ProtocolIntentPayload` (OMN-1256).
 
 ---
 
 ## Error Handling
 
-### Error Hierarchy
-
-```text
-ModelOnexError (omnibase_core)
-└── RuntimeHostError (base infrastructure error)
-    ├── ProtocolConfigurationError
-    ├── SecretResolutionError
-    ├── InfraConnectionError (transport-aware codes)
-    │   ├── InfraConsulError
-    │   └── InfraVaultError
-    ├── InfraTimeoutError
-    ├── InfraAuthenticationError
-    ├── InfraRateLimitedError
-    ├── InfraUnavailableError
-    ├── EnvelopeValidationError
-    ├── UnknownHandlerTypeError
-    ├── ContainerWiringError
-    │   ├── ServiceRegistrationError
-    │   ├── ServiceResolutionError
-    │   └── ContainerValidationError
-    ├── ChainPropagationError
-    ├── ArchitectureViolationError
-    ├── BindingResolutionError
-    ├── RepositoryError
-    │   ├── RepositoryContractError
-    │   ├── RepositoryValidationError
-    │   ├── RepositoryExecutionError
-    │   └── RepositoryTimeoutError
-    └── ContractPublisherError
-```
-
-### Error Class Selection
-
-| Scenario | Error Class |
-|----------|-------------|
-| Config invalid | `ProtocolConfigurationError` |
-| Connection failed | `InfraConnectionError` |
-| Timeout | `InfraTimeoutError` |
-| Auth failed | `InfraAuthenticationError` |
-| Rate limited | `InfraRateLimitedError` |
-| Unavailable | `InfraUnavailableError` |
-| Repository operation | `RepositoryError` (or subclass) |
-| Container wiring | `ContainerWiringError` (or subclass) |
+The infra error hierarchy roots at `RuntimeHostError` (itself under `ModelOnexError`);
+see `omnibase_infra.errors` for the concrete tree — pick the narrowest matching class
+(`InfraConnectionError`, `InfraTimeoutError`, `RepositoryError`, `ContainerWiringError`, ...).
 
 ### Error Context Factory (MANDATORY)
 
@@ -578,117 +204,54 @@ ModelOnexError (omnibase_core)
 from omnibase_infra.errors import InfraConnectionError, ModelInfraErrorContext
 from omnibase_infra.enums import EnumInfraTransportType
 
-# Auto-generate correlation_id (new error, no existing ID)
+# Auto-generates correlation_id; pass correlation_id=... to propagate an existing one
 context = ModelInfraErrorContext.with_correlation(
     transport_type=EnumInfraTransportType.DATABASE,
     operation="execute_query",
 )
-
-# Propagate existing correlation_id (preserve trace chain)
-context = ModelInfraErrorContext.with_correlation(
-    correlation_id=request.correlation_id,
-    transport_type=EnumInfraTransportType.DATABASE,
-    operation="execute_query",
-)
-
 raise InfraConnectionError("Failed to connect", context=context) from e
 ```
 
 ### Error Sanitization
 
-**NEVER include**: passwords, API keys, PII, connection strings with credentials
-
-**SAFE to include**: service names, operation names, correlation IDs, ports
-
-Use utility functions from `omnibase_infra.utils.util_error_sanitization`:
-- `sanitize_error_message()` - For DLQ/logs
-- `sanitize_secret_path()` - For Vault paths
-- `sanitize_consul_key()` - For Consul keys
+**NEVER include**: passwords, API keys, PII, connection strings with credentials.
+Use `sanitize_error_message()` / `sanitize_secret_path()` / `sanitize_consul_key()` from
+`omnibase_infra.utils.util_error_sanitization`.
 
 ---
 
 ## Infrastructure Patterns
 
-### Transport Types
+Transport types are enumerated in `EnumInfraTransportType` — read the enum, not a copied
+table.
 
-| Type | Value | Handler/Service |
-|------|-------|-----------------|
-| `HTTP` | `"http"` | `HandlerHTTP`, `ServiceHealth` |
-| `DATABASE` | `"db"` | `HandlerDb`, `PostgresRepositoryRuntime` |
-| `KAFKA` | `"kafka"` | `EventBusKafka`, `AdapterProtocolEventPublisherKafka` |
-| `CONSUL` | `"consul"` | `HandlerConsul` |
-| `VAULT` | `"vault"` | `HandlerVault` |
-| `VALKEY` | `"valkey"` | (Planned) |
-| `GRPC` | `"grpc"` | (Planned) |
-| `RUNTIME` | `"runtime"` | `RuntimeHostProcess` |
-| `MCP` | `"mcp"` | `HandlerMCP` |
-| `FILESYSTEM` | `"filesystem"` | `HandlerFileSystem` |
-| `INMEMORY` | `"inmemory"` | `EventBusInmemory` |
-| `QDRANT` | `"qdrant"` | `HandlerQdrant` |
-| `GRAPH` | `"graph"` | (Planned - Memgraph/Neo4j) |
+### Circuit Breaker & Dispatcher Resilience
 
-### Circuit Breaker
+Use `MixinAsyncCircuitBreaker` for external service integrations (see
+`docs/patterns/circuit_breaker_implementation.md`).
 
-Use `MixinAsyncCircuitBreaker` for external service integrations:
-
-```python
-class MyAdapter(MixinAsyncCircuitBreaker):
-    def __init__(self, config):
-        self._init_circuit_breaker(
-            threshold=5,
-            reset_timeout=60.0,
-            service_name="my-service",
-            transport_type=EnumInfraTransportType.HTTP,
-            half_open_successes=1,
-        )
-
-    async def connect(self):
-        async with self._circuit_breaker_lock:
-            await self._check_circuit_breaker("connect", correlation_id)
-        # ... operation ...
-```
-
-**States**: CLOSED → OPEN (after threshold failures) → HALF_OPEN (after timeout) → CLOSED (on success)
-
-### Dispatcher Resilience
-
-**Dispatchers own their own resilience** - the `MessageDispatchEngine` does NOT wrap dispatchers with circuit breakers.
-
-Each dispatcher should:
-- Implement `MixinAsyncCircuitBreaker` for external service calls
-- Configure thresholds appropriate to their transport type
-- Raise `InfraUnavailableError` when circuit opens
+**Dispatchers own their own resilience** - the `MessageDispatchEngine` does NOT wrap
+dispatchers with circuit breakers. Each dispatcher implements `MixinAsyncCircuitBreaker`
+for external service calls, configures thresholds appropriate to its transport type, and
+raises `InfraUnavailableError` when the circuit opens. See
+`docs/patterns/dispatcher_resilience.md`.
 
 ### Correlation ID Rules
 
-1. Always propagate from incoming requests
-2. Auto-generate with `uuid4()` if missing
-3. Include in all error context
+Always propagate from incoming requests; auto-generate with `uuid4()` if missing; include
+in all error context.
 
 ---
 
 ## Pydantic Model Standards
 
-### File & Class Naming
-
-| Type | File Pattern | Class Pattern |
-|------|-------------|---------------|
-| Model | `model_<name>.py` | `Model<Name>` |
-| Adapter | `adapter_<name>.py` | `Adapter<Name>` |
-| Dispatcher | `dispatcher_<name>.py` | `Dispatcher<Name>` |
-| Enum | `enum_<name>.py` | `Enum<Name>` |
-| Mixin | `mixin_<name>.py` | `Mixin<Name>` |
-| Protocol | `protocol_<name>.py` | `Protocol<Name>` |
-| Service | `service_<name>.py` | `Service<Name>` |
-| Store | `store_<name>.py` | `Store<Purpose><Backend>` |
-| Validator | `validator_<name>.py` | `Validator<Name>` |
-| Registry (node) | `registry_infra_<name>.py` | `RegistryInfra<Name>` |
-| Registry (standalone) | `registry_<purpose>.py` | `Registry<Purpose>` |
-
-### ConfigDict Requirements
+File/class naming is mechanical: `model_<name>.py` → `Model<Name>`, `enum_<name>.py` →
+`Enum<Name>`, and likewise for `adapter_`, `dispatcher_`, `mixin_`, `protocol_`,
+`service_`, `store_`, `validator_` prefixes. Node registries: `registry_infra_<name>.py`
+→ `RegistryInfra<Name>`.
 
 ```python
-# Standard pattern (most common)
+# Standard ConfigDict (most common)
 model_config = ConfigDict(
     frozen=True,           # Immutability for thread safety
     extra="forbid",        # Strict validation
@@ -696,105 +259,22 @@ model_config = ConfigDict(
 )
 ```
 
-### Field Patterns
-
-```python
-# Required field
-field_name: FieldType = Field(..., description="Clear description")
-
-# Optional field (prefer empty string over None for strings)
-error_message: str = Field(default="", description="Empty if no error")
-
-# Collections - use default_factory for mutable defaults
-items: list[str] = Field(default_factory=list)
-
-# Immutable collections - use tuple for frozen models
-errors: tuple[ModelError, ...] = Field(default_factory=tuple)
-```
-
-### Custom `__bool__` for Result Models
-
-Result models may override `__bool__` for idiomatic conditional checks:
-
-```python
-def __bool__(self) -> bool:
-    """Allow using result in boolean context.
-
-    Warning:
-        **Non-standard __bool__ behavior**: Returns ``True`` only when
-        ``is_valid`` is True. Differs from typical Pydantic behavior.
-    """
-    return self.is_valid
-```
-
-**Documentation requirement**: Always include a `Warning` section explaining non-standard behavior.
+Prefer empty string over `None` for optional strings; use `default_factory` for
+collections; use `tuple` for collections on frozen models. A model overriding `__bool__`
+must document the non-standard behavior in a `Warning` docstring section.
 
 ---
 
 ## Testing and CI
 
-### Test Directory Structure
-
-```text
-tests/
-├── conftest.py              # Root conftest with shared fixtures
-├── helpers/                 # Test helper utilities
-├── unit/                    # Auto-marked with `unit` marker
-├── integration/             # Auto-marked with `integration` marker
-├── chaos/                   # Auto-marked with `chaos` marker
-├── replay/                  # Auto-marked with `replay` marker
-├── performance/             # Auto-marked with `performance` marker
-└── ci/                      # CI/CD specific tests
-```
-
-### Pytest Markers
-
-| Marker | Description | Auto-applied |
-|--------|-------------|--------------|
-| `unit` | Unit tests in isolation | Yes |
-| `integration` | Multi-component tests | Yes |
-| `slow` | Tests >1s execution | No |
-| `chaos` | Chaos engineering tests | Yes |
-| `performance` | Performance/benchmark tests | Yes |
-| `consul` | Tests requiring real Consul | No |
-| `postgres` | Tests requiring PostgreSQL | No |
-| `kafka` | Tests requiring Kafka | No |
-| `serial` | Non-parallel tests | No |
-
-### Running Tests
+Test tree: `tests/{unit,integration,chaos,replay,performance}` — directory placement
+auto-applies the matching pytest marker; the full marker list lives in `pyproject.toml`.
+Service-dependent markers (`consul`, `postgres`, `kafka`) and `slow`/`serial` are manual.
 
 ```bash
-# All tests
-uv run pytest tests/
-
-# With coverage (60% minimum required)
-uv run pytest tests/ --cov=omnibase_infra --cov-report=html
-
-# By category
-uv run pytest -m unit                    # Unit tests only
-uv run pytest -m integration             # Integration tests only
-uv run pytest -m "not slow"              # Exclude slow tests
-
-# Parallel execution
-uv run pytest tests/ -n auto
-
-# Debug mode (no parallelism)
-uv run pytest tests/ -n 0 -xvs
+uv run pytest tests/ -n auto     # Parallel
+uv run pytest tests/ -n 0 -xvs   # Debug mode (no parallelism)
 ```
-
-### Coverage Requirement
-
-**Minimum 60% coverage required** (`fail_under = 60` in pyproject.toml)
-
-### Common Fixtures
-
-| Fixture | Purpose |
-|---------|---------|
-| `mock_container` | MagicMock ONEX container |
-| `container_with_registries` | Real ModelONEXContainer with wired services |
-| `event_bus` | In-memory event bus with cleanup |
-| `cleanup_consul_test_services` | Cleans Consul test registrations |
-| `cleanup_postgres_test_projections` | Cleans PostgreSQL test rows |
 
 ### Runtime Startup is a First-Class CI Gate
 
@@ -806,8 +286,8 @@ Any PR that touches `auto_wiring/`, `service_kernel.py`, handler `__init__` sign
 
 CI must additionally boot `omninode-runtime` in a compose sandbox and assert:
 
-- the container reaches Docker healthy state within the configured compose `start_period` (currently 600s for `omninode-runtime`, see `docker/docker-compose.infra.yml`), and
-- `RestartCount == 0` at the health-ready checkpoint — not a fixed 45s wall-clock window.
+- the container reaches Docker healthy state within the compose `start_period` configured for `omninode-runtime` in `docker/docker-compose.infra.yml`, and
+- `RestartCount == 0` at the health-ready checkpoint — not a fixed wall-clock window.
 
 Ad-hoc short timeouts are forbidden: any PR that shortens the gate below `start_period` must also update the compose healthcheck in the same PR, with justification.
 
@@ -819,83 +299,20 @@ Ad-hoc short timeouts are forbidden: any PR that shortens the gate below `start_
 
 ## Contract-Driven Config Discovery
 
-Infisical-backed configuration management.
+Infisical-backed configuration management: config requirements are extracted from ONEX
+contract YAMLs (`metadata.transport_type`, handler-level transport types, and
+`dependencies[].type == "environment"`) and resolved from Infisical at runtime.
+Implementation lives under `src/omnibase_infra/runtime/config_discovery/`.
 
-### Overview
-
-The config discovery system extracts configuration requirements from ONEX
-contract YAML files and resolves them from Infisical at runtime. It scans
-three Pydantic-backed contract fields:
-
-1. `metadata.transport_type` -- the transport type declared in metadata
-2. `handler_routing.handlers[].handler_type` -- handler-level transport types
-3. `dependencies[].type == "environment"` -- explicit env var dependencies
-
-### Components
-
-| Component | Location | Purpose |
-|-----------|----------|---------|
-| `TransportConfigMap` | `runtime/config_discovery/transport_config_map.py` | Maps transport types to Infisical paths |
-| `ContractConfigExtractor` | `runtime/config_discovery/contract_config_extractor.py` | Scans contracts for config requirements |
-| `ConfigPrefetcher` | `runtime/config_discovery/config_prefetcher.py` | Prefetches values through HandlerInfisical |
-| `ModelTransportConfigSpec` | `runtime/config_discovery/models/model_transport_config_spec.py` | Spec for transport config in Infisical |
-| `ModelConfigRequirements` | `runtime/config_discovery/models/model_config_requirements.py` | Aggregated requirements from contracts |
-
-### Infisical Path Convention
-
-```text
-Shared:      /shared/<transport>/KEY
-Per-service: /services/<service>/<transport>/KEY
-```
-
-### Bootstrap Sequence
-
-```text
-Step 1: PostgreSQL starts (POSTGRES_PASSWORD from .env)
-Step 2: Valkey starts
-Step 3: Infisical starts (depends_on: postgres + valkey healthy)
-Step 4: Identity provisioning (first-time only)
-Step 5: Seed runs (populates Infisical from contracts + .env values)
-Step 6: Runtime services start (prefetch from Infisical)
-```
-
-### Scripts
-
-| Script | Purpose |
-|--------|---------|
-| `scripts/bootstrap-infisical.sh` | Orchestrates the full bootstrap sequence |
-| `scripts/seed-infisical.py` | Populates Infisical from contracts (safe by default, `--dry-run`) |
-| `scripts/setup-infisical-identity.sh` | Creates machine identities (runtime=read-only, admin=read-write) |
-
-### Opt-In Behavior
-
-Config prefetch is **opt-in**: it only runs when `INFISICAL_ADDR` is set in the
-environment. Without it, the runtime falls back to standard environment variable
-resolution. This means local development works without Infisical.
-
-### .env Reduction
-
-The `.env.example` has been reduced from ~660 lines to ~30 lines (bootstrap-only).
-The full pre-Infisical config is preserved in `docs/env-example-full.txt`.
-
----
-
-## Agent-Driven Development
-
-**ALL CODING TASKS MUST USE SUB-AGENTS - NO EXCEPTIONS**
-
-| Task Type | Agent |
-|-----------|-------|
-| Simple tasks | Direct specialist (`agent-commit`, `agent-testing`, `agent-contract-validator`) |
-| Complex workflows | `agent-onex-coordinator` → `agent-workflow-coordinator` |
-| Multi-domain | `agent-ticket-manager` for planning, orchestrators for execution |
-
-**Prefer `subagent_type: "general-purpose"`** for ONEX development workflows.
-
-### Critical Policies
-
-- **NEVER** use `run_in_background: true` for Task tool
-- Parallel execution: call multiple Task tools in a **single message**
+- **Path convention**: shared config at `/shared/<transport>/KEY`, per-service at
+  `/services/<service>/<transport>/KEY`.
+- **Opt-in (trap)**: config prefetch only runs when `INFISICAL_ADDR` is set in the
+  environment. Without it, the runtime falls back to standard environment variable
+  resolution — local development works without Infisical.
+- **Bootstrap**: `scripts/bootstrap-infisical.sh` orchestrates the full first-time
+  sequence (identity provisioning + seeding); `scripts/seed-infisical.py` is safe by
+  default and supports `--dry-run`. The full pre-Infisical env reference is preserved in
+  `docs/env-example-full.txt`.
 
 ---
 
@@ -903,126 +320,58 @@ The full pre-Infisical config is preserved in `docs/env-example-full.txt`.
 
 ### Do NOT
 
-1. **Skip base class initialization**
-   ```python
-   def __init__(self, container):
-       pass  # WRONG - missing super().__init__(container)
-   ```
-
-2. **Add custom logic to declarative nodes**
-   ```python
-   class MyNode(NodeOrchestrator):
-       def process(self, data):  # WRONG - nodes are declarative only
-           return self._custom_logic(data)
-   ```
-
+1. **Skip base class initialization** — node `__init__` without `super().__init__(container)` is wrong
+2. **Add custom logic to declarative nodes** — no `process()`/business methods on node classes
 3. **Return result from ORCHESTRATOR**
    ```python
    return ModelHandlerOutput.for_orchestrator(result={"status": "done"})  # ValueError!
    ```
-
-4. **Use ModelIntentPayloadBase** (removed in omnibase_core 0.6.2)
+4. **Base infra payload DTOs on ModelIntentPayloadBase** — extend `BaseModel` directly
+   (repo convention). The class itself was never removed: it lives in
+   `omnibase_core.models.reducer.payloads` and bases core's closed-set intent payloads.
    ```python
-   from omnibase_core.models.reducer.payloads import ModelIntentPayloadBase  # WRONG
-   # Use: from pydantic import BaseModel
+   class ModelPayloadExample(BaseModel):  # infra convention; do not subclass core's base
    ```
 
 ### DO
 
 1. Always call `super().__init__(container)` in node constructors
-2. Use `ModelONEXContainer` for dependency injection
-3. Use protocol names for DI: `container.get_service("ProtocolEventBus")`
-4. Keep nodes declarative - all logic in handlers
-5. Use `ModelInfraErrorContext.with_correlation()` for error context
+2. Use protocol names for DI: `container.get_service("ProtocolEventBus")`
+3. Keep nodes declarative - all logic in handlers
+4. Use `ModelInfraErrorContext.with_correlation()` for error context
 
 ---
 
 ## Handler Plugin Loader
 
-The runtime uses **plugin-based handler loading** from YAML contracts.
+The runtime uses plugin-based handler loading from YAML contracts
+(see `docs/patterns/handler_plugin_loader.md`).
 
-### Contract-Based Handler Declaration
-
-```yaml
-handler_routing:
-  routing_strategy: "payload_type_match"
-  handlers:
-    - event_model: "ModelNodeIntrospectionEvent"
-      handler_class: "HandlerNodeIntrospected"
-      handler_module: "omnibase_infra.handlers.handler_node_introspected"
-```
-
-### Contract File Precedence
-
-| Filename | Purpose |
-|----------|---------|
-| `handler_contract.yaml` | Dedicated handler contract (preferred) |
-| `contract.yaml` | General ONEX contract with handler fields |
-
-**FAIL-FAST**: When both files exist in the same directory, loader raises `AMBIGUOUS_CONTRACT_CONFIGURATION` error.
-
-### Error Codes
-
-| Code | Description |
-|------|-------------|
-| `HANDLER_LOADER_006` | `PROTOCOL_NOT_IMPLEMENTED` |
-| `HANDLER_LOADER_010` | `MODULE_NOT_FOUND` |
-| `HANDLER_LOADER_011` | `CLASS_NOT_FOUND` |
-| `HANDLER_LOADER_012` | `IMPORT_ERROR` |
-| `HANDLER_LOADER_013` | `NAMESPACE_NOT_ALLOWED` |
-| `HANDLER_LOADER_040` | `AMBIGUOUS_CONTRACT_CONFIGURATION` |
-
-### Security: Namespace Allowlisting
-
-```python
-# Restrict to trusted namespaces (recommended for production)
-loader = HandlerPluginLoader(
-    allowed_namespaces=["omnibase_infra.", "omnibase_core.", "myapp.handlers."]
-)
-```
+- **Contract file precedence**: `handler_contract.yaml` (dedicated, preferred) vs
+  `contract.yaml` (general contract with handler fields).
+- **FAIL-FAST (trap)**: when both files exist in the same directory, the loader raises
+  `AMBIGUOUS_CONTRACT_CONFIGURATION` — it does not silently pick one.
+- **Security**: restrict loading with `HandlerPluginLoader(allowed_namespaces=[...])`
+  in production.
 
 ---
 
 ## Release Process
 
-### Version Compatibility Matrix
+`src/omnibase_infra/runtime/version_compatibility.py` checks at runtime that installed
+`omnibase_core` / `omnibase_spi` versions match the constraints in `pyproject.toml`.
+`VERSION_MATRIX` is derived automatically from `pyproject.toml` at import time;
+`_FALLBACK_MATRIX` (used when no source tree is present) is kept in sync by
+`scripts/update_version_matrix.py`.
 
-`src/omnibase_infra/runtime/version_compatibility.py` maintains a runtime
-check that verified installed `omnibase_core` and `omnibase_spi` versions match
-the constraints declared in `pyproject.toml`.
+**Dependency bump checklist:**
 
-**How it works:**
+1. Update `pyproject.toml` bounds, then `uv sync`.
+2. `uv run pytest tests/unit/runtime/test_version_compatibility.py` — `test_matrix_matches_pyproject` catches drift.
+3. The release workflow runs `scripts/update_version_matrix.py --check` as a pre-build gate (run without `--check` to update the fallback in-place).
 
-`VERSION_MATRIX` is derived **automatically at import time** from `pyproject.toml`.
-No manual update is required when bumping dependency versions — just update
-`pyproject.toml` and the matrix follows.
-
-A `_FALLBACK_MATRIX` with hardcoded values is used when `pyproject.toml` is
-not present (e.g. installed package without source tree).  The fallback is kept
-in sync with the `scripts/update_version_matrix.py` script.
-
-**Release checklist for dependency bumps:**
-
-1. Update `pyproject.toml` with new `>=X.Y.Z,<A.B.C` bounds.
-2. Run `uv sync` to update `uv.lock`.
-3. Run `uv run pytest tests/unit/runtime/test_version_compatibility.py` — the
-   `test_matrix_matches_pyproject` test will catch any remaining drift.
-4. The release workflow runs `scripts/update_version_matrix.py --check` as a
-   pre-build gate; it also updates the fallback in-place if needed.
-
-**Scripts:**
-
-```bash
-# Check that _FALLBACK_MATRIX matches pyproject.toml (CI mode — exits 1 on drift)
-uv run python scripts/update_version_matrix.py --check
-
-# Update _FALLBACK_MATRIX in-place
-uv run python scripts/update_version_matrix.py
-```
-
-**What NOT to do:** Do not manually edit the `VERSION_MATRIX` or
-`_FALLBACK_MATRIX` in `version_compatibility.py`.  Let `pyproject.toml` be the
-single source of truth.
+**What NOT to do:** Do not manually edit `VERSION_MATRIX` or `_FALLBACK_MATRIX` in
+`version_compatibility.py`. Let `pyproject.toml` be the single source of truth.
 
 ---
 
@@ -1040,36 +389,31 @@ single source of truth.
 | Security Patterns | `docs/patterns/security_patterns.md` |
 | Handler Plugin Loader | `docs/patterns/handler_plugin_loader.md` |
 | Mixin Dependencies | `docs/patterns/mixin_dependencies.md` |
+| Service Catalog & Install Model | `docs/patterns/service_catalog.md` |
 
 ---
 
-## Branch protection
+## Branch Protection
 
-Before any `gh api --method PUT .../branches/main/protection` mutation, run the dry-run audit first to confirm the current state:
+Never assert branch-protection state from memory or docs — probe it. Before any
+`gh api --method PUT .../branches/<branch>/protection` mutation, dry-run the audit:
 
 ```bash
 bash scripts/audit-branch-protection.sh --repo <repo> --dry-run
 ```
 
-The script checks two invariants: (A) `required_approving_review_count` must be 0 (solo-dev workflow), and (B) every required status check context must match a check-run name seen on the last 5 commits. A periodic CI job (`.github/workflows/branch-protection-audit.yml`, schedule `23 */4 * * *`) runs this automatically and fails the workflow on any violation.
-
-### Enforcement + merge-policy parity ratchet (OMN-14288, REPORT-ONLY)
-
-The two checks above only cover the **ORPHANED** direction (a required context that no longer reports). They do **not** catch the **MISSING** direction — a load-bearing gate that `CLAUDE.md`/doctrine *claims* is enforced but is absent from live `required_status_checks` (the exact hole that left `deploy-gate` + `reject-skip` unenforced on omnimarket/omniclaude `dev`) — nor **merge-policy drift** (a live merge-queue/strict setting that diverges from the decided policy). The parity ratchet closes both:
+For enforcement + merge-policy parity (MISSING gates, needs-closure, queue/strict drift):
 
 ```bash
 uv run python scripts/audit_required_context_parity_cli.py report --owner OmniNode-ai
 ```
 
-It reads the single, machine-asserted `scripts/enforcement_parity_manifest.yaml` — one `{repo → branch → {load_bearing_gates[], merge_policy}}` file encoding the **full** deterministic branch-protection policy as config-as-data — fetches live branch-protection + aggregator-workflow + merge-queue state, and reports:
-
-- **Enforcement dimension** (`load_bearing_gates[]`, each `coverage: direct | needs_child`): **MISSING** (declared direct gate absent from `required_status_checks`), **NEEDS_CLOSURE** (a `needs_child` gate not in its aggregator's transitive `needs:` closure), **UNPROTECTED** (declared branch with no protection object).
-- **Merge-policy dimension** (`merge_policy: {queue: enabled|disabled, strict: bool}`): **QUEUE_DRIFT** (live merge-queue state ≠ declared) and **STRICT_DRIFT** (live require-branches-up-to-date ≠ declared). The decided policy is **queue disabled on all dev branches** (a merge queue's only unique value is the `merge_group` re-test-against-latest-base, which wedges the saturated self-hosted fleet; required contexts fire on `pull_request`, so disabling loses no enforcement) with **strict on the two dashboards** as the lighter combine-breakage guard.
-
-The assertion logic lives in `audit_branch_protection_lib.py` (pure, unit-tested); the CLI is the thin `gh`/YAML I/O shell. It runs as a **non-blocking, report-only** step in `branch-protection-audit.yml` — it never mutates branch protection and always exits 0 (report-then-enforce rollout; the enforcing per-PR gate lands separately). This manifest is the machine-checked replacement for the per-repo, honor-system `.github/required-checks.yaml` prose manifests **and** the recurring manual "re-verify branch protection after merges" ritual.
+The declared policy lives in `scripts/enforcement_parity_manifest.yaml` (config-as-data:
+`{repo → branch → {load_bearing_gates[], merge_policy}}`); assertion logic is in
+`scripts/audit_branch_protection_lib.py`. Both audits run on a schedule via
+`.github/workflows/branch-protection-audit.yml` (the parity ratchet is report-only and
+never mutates protection).
 
 ---
 
-**Python**: 3.12+ | **Ready?** → Check `docs/patterns/` for implementation guides
-
-**Bottom Line**: Declarative nodes, container injection, agent-driven development. No backwards compatibility, no custom node logic.
+**Bottom Line**: Declarative nodes, container injection, contracts as source of truth. No backwards compatibility, no custom node logic.

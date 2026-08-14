@@ -22,6 +22,7 @@ Ticket: OMN-13915
 
 from __future__ import annotations
 
+import gzip
 import http.server
 import json
 import os
@@ -51,12 +52,47 @@ CANARY_WORKFLOW = REPO_ROOT / ".github" / "workflows" / "runner-fleet-canary.yml
 FLEET_CONFIG = REPO_ROOT / "config" / "runner_fleet.yaml"
 RUNBOOK = REPO_ROOT / "docs" / "runbooks" / "runner-fleet-listener-liveness.md"
 
+# A byte-faithful contiguous tail of a REAL production listener log:
+# omninode-runner-10's Runner_20260727-170542-utc.log on omninode-pc, captured
+# 2026-07-28 while the container was `Up (healthy)` and the runner was
+# registry-ONLINE. Committed gzipped (163 KB -> 8.8 KB) and never edited --
+# the point of the fixture is that it is the input distribution the artifact
+# actually sees, not a hand-written approximation of it.
+REAL_LISTENER_TAIL = (
+    REPO_ROOT / "tests" / "ci" / "fixtures" / "runner_diag_real_tail.log.gz"
+)
 
-def _run_healthcheck(runner_home: Path) -> subprocess.CompletedProcess[str]:
+
+def _run_healthcheck(
+    runner_home: Path,
+    max_diag_age: str | None = "900",
+    window_minutes: str | None = None,
+    max_starts_per_hour: str | None = None,
+    max_session_broken: str | None = None,
+    session_state_check: str | None = None,
+) -> subprocess.CompletedProcess[str]:
+    """Run healthcheck.sh against ``runner_home``.
+
+    Any tunable passed as ``None`` is left UNSET so the script's own default is
+    what gets exercised (OMN-15233 — the defaults are the thing that was
+    miscalibrated; a test that always pins a threshold can never catch that).
+    Ambient values are actively popped, so an operator env on the test host
+    cannot silently change what is being asserted.
+    """
     env = dict(os.environ)
     env["RUNNER_HOME"] = str(runner_home)
     env["RUNNER_HEALTH_EGRESS_CHECK"] = "0"  # offline determinism
-    env["RUNNER_HEALTH_MAX_DIAG_AGE_SECONDS"] = "900"
+    for name, value in (
+        ("RUNNER_HEALTH_MAX_DIAG_AGE_SECONDS", max_diag_age),
+        ("RUNNER_HEALTH_LOG_RATE_WINDOW_MINUTES", window_minutes),
+        ("RUNNER_HEALTH_MAX_LOG_STARTS_PER_HOUR", max_starts_per_hour),
+        ("RUNNER_HEALTH_MAX_SESSION_BROKEN_SECONDS", max_session_broken),
+        ("RUNNER_HEALTH_SESSION_STATE_CHECK", session_state_check),
+    ):
+        if value is None:
+            env.pop(name, None)
+        else:
+            env[name] = value
     return subprocess.run(
         ["bash", str(HEALTHCHECK)],
         check=False,
@@ -70,6 +106,11 @@ def _run_healthcheck(runner_home: Path) -> subprocess.CompletedProcess[str]:
 @pytest.fixture
 def synthetic_runner_home(tmp_path: Path) -> Path:
     """A fake RUNNER_HOME with a bin/Runner.Listener sleeper and fresh _diag."""
+    if os.getpid() == 1:
+        pytest.skip(
+            "pytest is PID 1 in this harness, so every synthetic listener would "
+            "inherit PPID 1 and be indistinguishable from an OMN-15233 orphan"
+        )
     home = tmp_path / "actions-runner"
     (home / "bin").mkdir(parents=True)
     (home / "_diag").mkdir()
@@ -158,6 +199,826 @@ class TestHealthcheckSyntheticKill:
         )
 
 
+def _spawn_orphan(command: Path) -> int:
+    """Spawn ``command`` detached so this test process is NOT its parent.
+
+    The intermediate shell exits immediately, so the child is reparented (to
+    PID 1 on macOS/Linux without a subreaper) — the exact orphan shape from the
+    OMN-15233 incident. Returns the orphan's pid.
+    """
+    spawn = subprocess.run(
+        ["bash", "-c", f'"{command}" >/dev/null 2>&1 & echo $!'],
+        check=True,
+        capture_output=True,
+        text=True,
+        timeout=30,
+    )
+    return int(spawn.stdout.strip())
+
+
+def _ppid_of(pid: int) -> int | None:
+    result = subprocess.run(
+        ["ps", "-o", "ppid=", "-p", str(pid)],
+        check=False,
+        capture_output=True,
+        text=True,
+    )
+    raw = result.stdout.strip()
+    return int(raw) if raw.isdigit() else None
+
+
+def _kill_pid(pid: int) -> None:
+    try:
+        os.kill(pid, signal.SIGKILL)
+    except ProcessLookupError:
+        pass
+
+
+class TestHealthcheckIdleThresholdRecalibration:
+    """OMN-15233 (a): the default threshold must clear the IDLE _diag cadence.
+
+    When a runner is idle the ONLY thing writing ``_diag`` is the OAuth/AAD
+    token refresh, on a ~50-minute cadence; the minutes-scale cadence holds
+    only while jobs run. The shipped 900s default therefore read unhealthy for
+    ~35 of every 50 idle minutes with nothing degraded — the 2026-07-27
+    "13 -> 37 -> 59 unhealthy growth" while the GitHub registry reported 64/64
+    online throughout (59 -> 4 resolved with 8 restarts; the untouched control
+    group self-healed).
+    """
+
+    def test_idle_runner_past_old_900s_window_reads_healthy(
+        self, synthetic_runner_home: Path
+    ) -> None:
+        """45 min of idle _diag silence is HEALTHY under the script default."""
+        listener = synthetic_runner_home / "bin" / "Runner.Listener"
+        proc = subprocess.Popen([str(listener)])
+        try:
+            time.sleep(0.5)
+            diag_log = (
+                synthetic_runner_home / "_diag" / "Runner_20260703-000000-utc.log"
+            )
+            idle = time.time() - 2700  # 45 min — inside the idle OAuth cadence
+            os.utime(diag_log, (idle, idle))
+
+            result = _run_healthcheck(synthetic_runner_home, max_diag_age=None)
+            assert result.returncode == 0, (
+                "an idle runner 45 min past its last _diag write must read "
+                "HEALTHY on the script default (the 900s default flagged it by "
+                f"arithmetic): rc={result.returncode} out={result.stdout}"
+            )
+        finally:
+            proc.kill()
+
+    def test_recalibration_did_not_disable_the_check(
+        self, synthetic_runner_home: Path
+    ) -> None:
+        """Past the recalibrated window, silence is still UNHEALTHY."""
+        listener = synthetic_runner_home / "bin" / "Runner.Listener"
+        proc = subprocess.Popen([str(listener)])
+        try:
+            time.sleep(0.5)
+            diag_log = (
+                synthetic_runner_home / "_diag" / "Runner_20260703-000000-utc.log"
+            )
+            dead = time.time() - 9000  # 2.5 h — well past any benign cadence
+            os.utime(diag_log, (dead, dead))
+
+            result = _run_healthcheck(synthetic_runner_home, max_diag_age=None)
+            assert result.returncode == 1, (
+                f"2.5 h of silence must still fail: out={result.stdout}"
+            )
+            assert "heartbeat" in result.stdout
+        finally:
+            proc.kill()
+
+    @pytest.mark.parametrize(
+        ("idle_minutes", "expect_healthy"),
+        [
+            (16, True),  # just past the old 900s default — must no longer flag
+            (50, True),  # the observed idle OAuth/AAD refresh cadence ceiling
+            (70, True),  # still inside the recalibrated window
+            (80, False),  # past it — recalibration did not disarm the layer
+        ],
+    )
+    def test_default_threshold_brackets_the_idle_cadence(
+        self,
+        synthetic_runner_home: Path,
+        idle_minutes: int,
+        expect_healthy: bool,
+    ) -> None:
+        """Behavioral bracket of the SHIPPED default (nothing pinned).
+
+        Replaces a source-text assertion on the literal ``4500`` that a
+        comment-only edit could satisfy. Driving the real script with the
+        threshold unset means the calibration itself is what is under test: at
+        a 900s default the 16/50/70-minute cases all fail, and any "clear the
+        idle cadence by disabling the check" regression fails the 80-minute
+        case.
+        """
+        listener = synthetic_runner_home / "bin" / "Runner.Listener"
+        proc = subprocess.Popen([str(listener)])
+        try:
+            time.sleep(0.5)
+            diag_log = (
+                synthetic_runner_home / "_diag" / "Runner_20260703-000000-utc.log"
+            )
+            aged = time.time() - idle_minutes * 60
+            os.utime(diag_log, (aged, aged))
+
+            result = _run_healthcheck(synthetic_runner_home, max_diag_age=None)
+            expected_rc = 0 if expect_healthy else 1
+            assert result.returncode == expected_rc, (
+                f"{idle_minutes} min of idle _diag silence must read "
+                f"{'HEALTHY' if expect_healthy else 'UNHEALTHY'} on the script "
+                f"default: rc={result.returncode} out={result.stdout}"
+            )
+            if not expect_healthy:
+                assert "heartbeat" in result.stdout
+        finally:
+            proc.kill()
+
+
+class TestHealthcheckOrphanInversion:
+    """OMN-15233 (b): the zombie shape #2194 exists to catch scored HEALTHY.
+
+    An orphaned ``Runner.Listener`` reparented to PPID 1 keeps holding the
+    GitHub session; the watchdog's replacement crash-loops every ~5 min on
+    ``TaskAgentSessionConflictException``; every crash mints a fresh
+    ``Runner_*.log``, which keeps the ``_diag`` mtime heartbeat fresh — so the
+    mtime-only check read HEALTHY forever. Runners 1/43/55/57 sat in this state
+    with 88-234 log files (vs 3-7 normal) and were found only by process scan.
+    """
+
+    def test_duplicate_listeners_read_unhealthy(
+        self, synthetic_runner_home: Path
+    ) -> None:
+        """Two listeners = a contested broker session, whatever _diag says."""
+        listener = synthetic_runner_home / "bin" / "Runner.Listener"
+        first = subprocess.Popen([str(listener)])
+        second = subprocess.Popen([str(listener)])
+        try:
+            time.sleep(0.5)
+            result = _run_healthcheck(synthetic_runner_home, max_diag_age=None)
+            assert result.returncode == 1, (
+                "duplicate Runner.Listener processes with a fresh _diag must "
+                f"read UNHEALTHY: rc={result.returncode} out={result.stdout}"
+            )
+            assert "duplicate" in result.stdout.lower()
+        finally:
+            first.kill()
+            second.kill()
+
+    def test_orphaned_ppid1_listener_reads_unhealthy(
+        self, synthetic_runner_home: Path
+    ) -> None:
+        """A single listener reparented to PPID 1 is an orphan, not health."""
+        listener = synthetic_runner_home / "bin" / "Runner.Listener"
+        orphan_pid = _spawn_orphan(listener)
+        try:
+            ppid = None
+            for _ in range(50):
+                ppid = _ppid_of(orphan_pid)
+                if ppid == 1:
+                    break
+                time.sleep(0.1)
+            if ppid != 1:
+                pytest.skip(
+                    f"host did not reparent the orphan to PID 1 (ppid={ppid}); "
+                    "a subreaper is active, so the incident precondition cannot "
+                    "be reproduced here"
+                )
+            result = _run_healthcheck(synthetic_runner_home, max_diag_age=None)
+            assert result.returncode == 1, (
+                "a PPID-1 orphan with a fresh _diag must read UNHEALTHY — this "
+                "is the exact state that scored HEALTHY on runners 1/43/55/57: "
+                f"rc={result.returncode} out={result.stdout}"
+            )
+            assert "PPID 1" in result.stdout
+        finally:
+            _kill_pid(orphan_pid)
+
+
+class TestHealthcheckCrashLoopRate:
+    """OMN-15233 (b): crash-loop detection must be RATE-based, not cumulative."""
+
+    def test_crash_loop_rate_flags_but_history_does_not(
+        self, synthetic_runner_home: Path
+    ) -> None:
+        listener = synthetic_runner_home / "bin" / "Runner.Listener"
+        proc = subprocess.Popen([str(listener)])
+        diag = synthetic_runner_home / "_diag"
+        try:
+            time.sleep(0.5)
+
+            # (1) A long-lived clean runner: 234 historical Runner_*.log files
+            #     (the observed zombie-runner count) all aged 10 days, plus the
+            #     one active log. A CUMULATIVE count would flag this forever.
+            old = time.time() - 10 * 86400
+            for i in range(234):
+                path = diag / f"Runner_2026070{i % 10}-{i:06d}-utc.log"
+                path.write_text("historical\n", encoding="utf-8")
+                os.utime(path, (old, old))
+            result = _run_healthcheck(synthetic_runner_home, max_diag_age=None)
+            assert result.returncode == 0, (
+                "234 historical logs with one active log must read HEALTHY — a "
+                "cumulative count would red-line every long-lived container: "
+                f"rc={result.returncode} out={result.stdout}"
+            )
+
+            # (2) The crash-loop shape: a replacement listener restarting every
+            #     ~5 min mints ~12 fresh Runner_*.log files per hour.
+            for i in range(12):
+                path = diag / f"Runner_20260727-{i:06d}-utc.log"
+                path.write_text("crash\n", encoding="utf-8")
+            result = _run_healthcheck(synthetic_runner_home, max_diag_age=None)
+            assert result.returncode == 1, (
+                "12 listener starts inside the rate window must read UNHEALTHY: "
+                f"rc={result.returncode} out={result.stdout}"
+            )
+            assert "crash-looping" in result.stdout
+        finally:
+            proc.kill()
+
+    def test_identical_logs_flip_the_verdict_purely_by_window_membership(
+        self, synthetic_runner_home: Path
+    ) -> None:
+        """Rate, not cumulative — proven behaviorally on the SAME files.
+
+        Replaces a grep for the string ``NOT CUMULATIVE``. The file set is held
+        constant and only its mtime moves: 12 logs aged past the window read
+        healthy, the same 12 touched into the window read unhealthy. A
+        cumulative implementation cannot produce the first verdict.
+        """
+        listener = synthetic_runner_home / "bin" / "Runner.Listener"
+        proc = subprocess.Popen([str(listener)])
+        diag = synthetic_runner_home / "_diag"
+        try:
+            time.sleep(0.5)
+            crash_logs = []
+            outside = time.time() - 45 * 60  # outside a 30m window
+            for i in range(12):
+                path = diag / f"Runner_20260727-{i:06d}-utc.log"
+                path.write_text("crash\n", encoding="utf-8")
+                os.utime(path, (outside, outside))
+                crash_logs.append(path)
+
+            result = _run_healthcheck(
+                synthetic_runner_home, max_diag_age=None, window_minutes="30"
+            )
+            assert result.returncode == 0, (
+                "12 listener starts that all fall OUTSIDE the rate window must "
+                f"read HEALTHY: rc={result.returncode} out={result.stdout}"
+            )
+
+            now = time.time()
+            for path in crash_logs:
+                os.utime(path, (now, now))
+            result = _run_healthcheck(
+                synthetic_runner_home, max_diag_age=None, window_minutes="30"
+            )
+            assert result.returncode == 1, (
+                "the same 12 logs touched INSIDE the window must read "
+                f"UNHEALTHY: rc={result.returncode} out={result.stdout}"
+            )
+            assert "crash-looping" in result.stdout
+        finally:
+            proc.kill()
+
+    @pytest.mark.parametrize(
+        ("window_minutes", "extra_fresh_logs", "expect_healthy"),
+        [
+            # Default 6/hour. Allowance = ceil(6 * window / 60).
+            ("30", 2, True),  # 3 starts in 30m == 6/hour — at the allowance
+            ("30", 3, False),  # 4 starts in 30m == 8/hour — over it
+            ("120", 11, True),  # 12 starts in 120m == 6/hour — at the allowance
+            ("120", 12, False),  # 13 starts in 120m — over it
+        ],
+    )
+    def test_threshold_is_normalized_to_the_rate_window(
+        self,
+        synthetic_runner_home: Path,
+        window_minutes: str,
+        extra_fresh_logs: int,
+        expect_healthy: bool,
+    ) -> None:
+        """A per-HOUR threshold must be scaled to the window it is counted over.
+
+        The pre-remediation code compared a window-scoped count directly against
+        the per-hour threshold, which is only correct at the 60m default: a 30m
+        window enforced 6-per-30m (= 12/hour, double the intended budget) and a
+        120m window enforced 6-per-120m (= 3/hour, half of it). Every case here
+        is a RED against that arithmetic — ``("30", 3, False)`` reads healthy
+        unnormalized (4 > 6 is false) and ``("120", 11, True)`` reads unhealthy
+        unnormalized (12 > 6 is true).
+
+        The fixture already ships one fresh ``Runner_*.log``, so the total start
+        count is ``extra_fresh_logs + 1``.
+        """
+        listener = synthetic_runner_home / "bin" / "Runner.Listener"
+        proc = subprocess.Popen([str(listener)])
+        diag = synthetic_runner_home / "_diag"
+        try:
+            time.sleep(0.5)
+            for i in range(extra_fresh_logs):
+                (diag / f"Runner_20260727-{i:06d}-utc.log").write_text(
+                    "start\n", encoding="utf-8"
+                )
+
+            result = _run_healthcheck(
+                synthetic_runner_home,
+                max_diag_age=None,
+                window_minutes=window_minutes,
+            )
+            expected_rc = 0 if expect_healthy else 1
+            assert result.returncode == expected_rc, (
+                f"{extra_fresh_logs + 1} starts in a {window_minutes}m window "
+                f"must read {'HEALTHY' if expect_healthy else 'UNHEALTHY'} "
+                f"against the default 6/hour budget: rc={result.returncode} "
+                f"out={result.stdout}"
+            )
+            if not expect_healthy:
+                assert "crash-looping" in result.stdout
+        finally:
+            proc.kill()
+
+    @pytest.mark.parametrize(
+        ("window_minutes", "max_starts_per_hour"),
+        [("0", None), ("abc", None), (None, "-1"), (None, "six")],
+    )
+    def test_unusable_rate_tunables_fail_closed(
+        self,
+        synthetic_runner_home: Path,
+        window_minutes: str | None,
+        max_starts_per_hour: str | None,
+    ) -> None:
+        """A window/threshold the script cannot normalize must not read healthy.
+
+        Integer normalization on unvalidated input is how a check silently
+        stops checking: a zero or non-numeric window would otherwise produce a
+        zero-or-garbage allowance and a permanently green (or permanently red)
+        layer.
+        """
+        listener = synthetic_runner_home / "bin" / "Runner.Listener"
+        proc = subprocess.Popen([str(listener)])
+        try:
+            time.sleep(0.5)
+            result = _run_healthcheck(
+                synthetic_runner_home,
+                max_diag_age=None,
+                window_minutes=window_minutes,
+                max_starts_per_hour=max_starts_per_hour,
+            )
+            assert result.returncode == 1, (
+                "an unusable crash-loop tunable must fail closed: "
+                f"rc={result.returncode} out={result.stdout} err={result.stderr}"
+            )
+            assert "fail closed" in result.stdout
+        finally:
+            proc.kill()
+
+
+SESSION_STAMP_NAME = ".session_broken_since"
+
+_CONNECT_ERROR_LINES = (
+    "[2026-07-27 17:26:03Z ERR  GitHubActionsRunner] Runner connect error: "
+    "The HTTP request timed out. Retrying until reconnected.\n"
+    "[2026-07-27 17:26:24Z ERR  GitHubActionsRunner] "
+    "System.Net.Sockets.SocketException (125): Operation canceled\n"
+)
+_RECONNECT_LINE = (
+    "[2026-07-27 17:31:11Z INFO GitHubActionsRunner] Runner reconnected.\n"
+)
+_LISTENING_LINE = "[2026-07-27 15:14:35Z INFO GitHubActionsRunner] Listening for Jobs\n"
+
+
+def _write_session_log(
+    runner_home: Path,
+    body: str,
+    name: str = "Runner_20260727-170000-utc.log",
+) -> Path:
+    """Write a Runner_*.log and make it the NEWEST one in _diag.
+
+    The layer reads the newest listener log, so the fixture's own
+    ``Runner_20260703-000000-utc.log`` is aged back to keep the ordering
+    unambiguous rather than relying on same-second mtime ties.
+    """
+    diag = runner_home / "_diag"
+    older = time.time() - 600
+    for existing in diag.glob("Runner_*.log"):
+        os.utime(existing, (older, older))
+    path = diag / name
+    path.write_text(body, encoding="utf-8")
+    return path
+
+
+def _age_stamp(runner_home: Path, seconds: float) -> Path:
+    stamp = runner_home / "_diag" / SESSION_STAMP_NAME
+    stamp.write_text("", encoding="utf-8")
+    aged = time.time() - seconds
+    os.utime(stamp, (aged, aged))
+    return stamp
+
+
+class TestHealthcheckBrokerSessionState:
+    """OMN-15311: the FOURTH state — broker session broken, everything else fine.
+
+    Measured live 2026-07-27 during the OMN-15233 fan-out. A transient
+    host<->GitHub network fault left runners 36/38/56 registry-OFFLINE for ~20
+    minutes while the container read exit 0 on every existing layer: one live
+    non-orphaned listener, ``_diag`` kept FRESH by the listener's own reconnect
+    RETRY traffic, normal listener start rate, ``github.com`` reachable. Docker
+    counted them as capacity and ``runner-monitor.sh`` suppressed auto-bounce on
+    local-listener evidence, so they absorbed zero jobs until restarted.
+
+    Layers 1-5 assert that a listener exists, is singular, is parented, is
+    writing, and has egress. None of them assert that it HOLDS A LIVE BROKER
+    SESSION, which is the only property that makes a runner able to take a job.
+    """
+
+    def test_persistently_broken_session_reads_unhealthy(
+        self, synthetic_runner_home: Path
+    ) -> None:
+        """THE reproduction. RED against origin/dev, which exits 0 on this input.
+
+        Every input here satisfies every pre-OMN-15311 layer: single live
+        non-orphaned listener, fresh ``_diag``, one listener start, egress
+        skipped. The only thing wrong is that the listener's last session marker
+        is a connect error with no re-establish after it, and it has been that
+        way past the grace window.
+        """
+        listener = synthetic_runner_home / "bin" / "Runner.Listener"
+        proc = subprocess.Popen([str(listener)])
+        try:
+            time.sleep(0.5)
+            _write_session_log(
+                synthetic_runner_home, _LISTENING_LINE + _CONNECT_ERROR_LINES
+            )
+            _age_stamp(synthetic_runner_home, 1800)
+
+            result = _run_healthcheck(synthetic_runner_home, max_diag_age=None)
+            assert result.returncode == 1, (
+                "a listener whose broker session has been broken for 30 min "
+                "must read UNHEALTHY even though the process, heartbeat, start "
+                f"rate and egress layers all pass: rc={result.returncode} "
+                f"out={result.stdout}"
+            )
+            assert "broker session" in result.stdout.lower()
+        finally:
+            proc.kill()
+
+    def test_transient_drop_inside_the_grace_reads_healthy(
+        self, synthetic_runner_home: Path
+    ) -> None:
+        """A blip must not flap 64 runners; the first observation only stamps.
+
+        Reconnects are routine and fast. If a single observation of a dropped
+        session failed the check, every ordinary network hiccup would red-line
+        the fleet — the exact false-positive class OMN-15233 spent a rollout
+        removing.
+        """
+        listener = synthetic_runner_home / "bin" / "Runner.Listener"
+        proc = subprocess.Popen([str(listener)])
+        stamp = synthetic_runner_home / "_diag" / SESSION_STAMP_NAME
+        try:
+            time.sleep(0.5)
+            _write_session_log(
+                synthetic_runner_home, _LISTENING_LINE + _CONNECT_ERROR_LINES
+            )
+            assert not stamp.exists()
+
+            # First observation: nothing has been measured yet.
+            result = _run_healthcheck(synthetic_runner_home, max_diag_age=None)
+            assert result.returncode == 0, (
+                "the FIRST observation of a broken session must not fail — the "
+                f"grace has not elapsed: rc={result.returncode} out={result.stdout}"
+            )
+            assert stamp.exists(), (
+                "a broken session must be stamped on first observation, or the "
+                "grace window can never elapse and the layer never fires"
+            )
+
+            # Still inside the grace on a later check.
+            _age_stamp(synthetic_runner_home, 60)
+            result = _run_healthcheck(synthetic_runner_home, max_diag_age=None)
+            assert result.returncode == 0, (
+                f"60s of broken session is inside the 900s grace: {result.stdout}"
+            )
+        finally:
+            proc.kill()
+
+    def test_recovery_clears_the_stamp(self, synthetic_runner_home: Path) -> None:
+        """Recovery must reset the clock, not leave an ancient stamp armed.
+
+        Without the clear, the next unrelated blip would inherit a stamp older
+        than the grace and fail on its FIRST observation — turning the
+        persistence gate into the instant check it exists to avoid.
+        """
+        listener = synthetic_runner_home / "bin" / "Runner.Listener"
+        proc = subprocess.Popen([str(listener)])
+        stamp = synthetic_runner_home / "_diag" / SESSION_STAMP_NAME
+        try:
+            time.sleep(0.5)
+            _write_session_log(
+                synthetic_runner_home,
+                _LISTENING_LINE + _CONNECT_ERROR_LINES + _RECONNECT_LINE,
+            )
+            _age_stamp(synthetic_runner_home, 1800)
+
+            result = _run_healthcheck(synthetic_runner_home, max_diag_age=None)
+            assert result.returncode == 0, (
+                "a session that RECONNECTED after the errors is healthy however "
+                f"old the stamp is: rc={result.returncode} out={result.stdout}"
+            )
+            assert not stamp.exists(), (
+                "recovery must delete the stamp so the grace clock restarts "
+                "from the next drop"
+            )
+        finally:
+            proc.kill()
+
+    @pytest.mark.parametrize(
+        ("body", "expect_healthy", "case"),
+        [
+            (
+                _LISTENING_LINE + _CONNECT_ERROR_LINES + _RECONNECT_LINE,
+                True,
+                "errors then reconnect — session is up",
+            ),
+            (
+                _LISTENING_LINE + _RECONNECT_LINE + _CONNECT_ERROR_LINES,
+                False,
+                "reconnect then errors — session is down",
+            ),
+        ],
+    )
+    def test_verdict_follows_marker_ORDER_not_presence(
+        self,
+        synthetic_runner_home: Path,
+        body: str,
+        expect_healthy: bool,
+        case: str,
+    ) -> None:
+        """The same lines, reordered, must flip the verdict.
+
+        This is what separates a session-STATE signal from "grep the log for an
+        error string". Essentially every long-lived healthy runner has connect
+        errors somewhere in its log; a presence check would red-line the fleet.
+        Both parametrizations carry an identical multiset of lines, so any
+        implementation that keys on presence returns the same verdict for both
+        and fails one of them.
+        """
+        listener = synthetic_runner_home / "bin" / "Runner.Listener"
+        proc = subprocess.Popen([str(listener)])
+        try:
+            time.sleep(0.5)
+            _write_session_log(synthetic_runner_home, body)
+            _age_stamp(synthetic_runner_home, 1800)
+
+            result = _run_healthcheck(synthetic_runner_home, max_diag_age=None)
+            expected_rc = 0 if expect_healthy else 1
+            assert result.returncode == expected_rc, (
+                f"{case}: expected "
+                f"{'HEALTHY' if expect_healthy else 'UNHEALTHY'}, got "
+                f"rc={result.returncode} out={result.stdout}"
+            )
+        finally:
+            proc.kill()
+
+    def test_marker_free_log_reads_healthy(self, synthetic_runner_home: Path) -> None:
+        """No session markers at all is not evidence of a broken session.
+
+        Absence of a BROKEN marker is the healthy case; the fail-closed posture
+        applies to a probe that could not run (no listener log at all — see
+        below), not to a log that simply has not logged a session transition
+        inside its retained content.
+        """
+        listener = synthetic_runner_home / "bin" / "Runner.Listener"
+        proc = subprocess.Popen([str(listener)])
+        try:
+            time.sleep(0.5)
+            _write_session_log(synthetic_runner_home, "polling\npolling\n")
+            result = _run_healthcheck(synthetic_runner_home, max_diag_age=None)
+            assert result.returncode == 0, (
+                f"a marker-free listener log must read HEALTHY: {result.stdout}"
+            )
+        finally:
+            proc.kill()
+
+    def test_no_listener_log_fails_closed(self, synthetic_runner_home: Path) -> None:
+        """A live listener with zero Runner_*.log files is unreadable, not fine.
+
+        A registered listener always mints ``Runner_<timestamp>-utc.log`` at
+        start, so its absence means the matched process never registered — the
+        same divergence class the missing-``_diag`` branch already fails on.
+        ``_diag`` keeps a non-listener log so the heartbeat layer still passes
+        and this layer is what produces the verdict.
+        """
+        listener = synthetic_runner_home / "bin" / "Runner.Listener"
+        proc = subprocess.Popen([str(listener)])
+        diag = synthetic_runner_home / "_diag"
+        try:
+            time.sleep(0.5)
+            for existing in diag.glob("Runner_*.log"):
+                existing.unlink()
+            (diag / "Worker_20260727-170000-utc.log").write_text(
+                "worker\n", encoding="utf-8"
+            )
+            result = _run_healthcheck(synthetic_runner_home, max_diag_age=None)
+            assert result.returncode == 1, (
+                "a live listener with no Runner_*.log must fail closed: "
+                f"rc={result.returncode} out={result.stdout}"
+            )
+            assert "Runner_*.log" in result.stdout
+        finally:
+            proc.kill()
+
+    def test_kill_switch_disables_the_layer(self, synthetic_runner_home: Path) -> None:
+        """The layer must be disarmable by env without a fleet file swap.
+
+        ``healthcheck.sh`` reaches the 64-runner fleet through a bind mount, so
+        a misfiring layer would otherwise need a file rollout to disarm. The
+        input here is the exact one that fails in the first test.
+        """
+        listener = synthetic_runner_home / "bin" / "Runner.Listener"
+        proc = subprocess.Popen([str(listener)])
+        try:
+            time.sleep(0.5)
+            _write_session_log(
+                synthetic_runner_home, _LISTENING_LINE + _CONNECT_ERROR_LINES
+            )
+            _age_stamp(synthetic_runner_home, 1800)
+
+            result = _run_healthcheck(
+                synthetic_runner_home,
+                max_diag_age=None,
+                session_state_check="0",
+            )
+            assert result.returncode == 0, (
+                "RUNNER_HEALTH_SESSION_STATE_CHECK=0 must skip the layer: "
+                f"rc={result.returncode} out={result.stdout}"
+            )
+        finally:
+            proc.kill()
+
+    @pytest.mark.parametrize("grace", ["0", "abc", "-1"])
+    def test_unusable_grace_fails_closed(
+        self, synthetic_runner_home: Path, grace: str
+    ) -> None:
+        """A grace the script cannot normalize must not read healthy."""
+        listener = synthetic_runner_home / "bin" / "Runner.Listener"
+        proc = subprocess.Popen([str(listener)])
+        try:
+            time.sleep(0.5)
+            result = _run_healthcheck(
+                synthetic_runner_home,
+                max_diag_age=None,
+                max_session_broken=grace,
+            )
+            assert result.returncode == 1, (
+                "an unusable broker-session grace must fail closed: "
+                f"rc={result.returncode} out={result.stdout} err={result.stderr}"
+            )
+            assert "fail closed" in result.stdout
+        finally:
+            proc.kill()
+
+    def test_default_grace_brackets_the_observed_recovery_window(
+        self, synthetic_runner_home: Path
+    ) -> None:
+        """Behavioral bracket of the SHIPPED default — nothing pinned.
+
+        The 2026-07-27 fault's recoverable drops cleared inside a single poll;
+        the unrecovered cohort held ~20 min. The default must therefore read
+        healthy at 10 min of broken session and unhealthy at 20.
+        """
+        listener = synthetic_runner_home / "bin" / "Runner.Listener"
+        proc = subprocess.Popen([str(listener)])
+        try:
+            time.sleep(0.5)
+            _write_session_log(
+                synthetic_runner_home, _LISTENING_LINE + _CONNECT_ERROR_LINES
+            )
+
+            _age_stamp(synthetic_runner_home, 600)
+            result = _run_healthcheck(synthetic_runner_home, max_diag_age=None)
+            assert result.returncode == 0, (
+                f"10 min broken must be inside the default grace: {result.stdout}"
+            )
+
+            _age_stamp(synthetic_runner_home, 1200)
+            result = _run_healthcheck(synthetic_runner_home, max_diag_age=None)
+            assert result.returncode == 1, (
+                "20 min broken — the observed unrecovered cohort's dwell — must "
+                f"be outside the default grace: {result.stdout}"
+            )
+        finally:
+            proc.kill()
+
+
+class TestHealthcheckAgainstARealListenerLog:
+    """OMN-15311 regression: the marker VOCABULARY, pinned to real fleet data.
+
+    The synthetic session fixtures above are 3-4 hand-written lines each. They
+    exercise the artifact that runs; they do not exercise the input distribution
+    that runs, and that gap shipped a fleet-wide false positive: `SocketException`
+    was in ``session_broken_patterns``, but `BrokerServer` emits
+    ``System.Net.Sockets.SocketException (125): Operation canceled`` ~45-150x per
+    log as ordinary long-poll cancellation, while the connected markers only fire
+    at session establishment / job assignment. On any runner idle for >15 min the
+    retry noise is therefore the LAST marker, so marker ORDERING -- the design's
+    whole defence against a false positive -- did not help. Measured over all 64
+    live listeners on omninode-pc, every one Up-healthy and registry-online:
+    64/64 classified broken with `SocketException` in the set, 0/64 without it.
+
+    These tests are RED against that vocabulary and GREEN against the corrected
+    one. Every future marker-vocabulary change has to survive a real log.
+    """
+
+    def test_real_healthy_listener_log_reads_healthy(
+        self, synthetic_runner_home: Path
+    ) -> None:
+        """THE regression. A real log from a healthy, registry-ONLINE runner.
+
+        RED with `SocketException` in ``session_broken_patterns`` (the whole
+        64-runner fleet flips Docker-unhealthy 15 min after the OMN-15233
+        bind-mount swap); GREEN without it.
+        """
+        body = gzip.decompress(REAL_LISTENER_TAIL.read_bytes()).decode("utf-8")
+        listener = synthetic_runner_home / "bin" / "Runner.Listener"
+        proc = subprocess.Popen([str(listener)])
+        try:
+            time.sleep(0.5)
+            _write_session_log(synthetic_runner_home, body)
+            # Aged well past the 900s grace: if the layer classifies this log as
+            # broken at all, the grace cannot mask it.
+            _age_stamp(synthetic_runner_home, 3600)
+
+            result = _run_healthcheck(synthetic_runner_home, max_diag_age=None)
+            assert result.returncode == 0, (
+                "a real listener log from a healthy, registry-ONLINE runner must "
+                "read HEALTHY -- a marker set that fails this red-lines all 64 "
+                f"runners on the next healthcheck swap: rc={result.returncode} "
+                f"out={result.stdout}"
+            )
+        finally:
+            proc.kill()
+
+    def test_the_real_log_fixture_is_not_vacuous(self) -> None:
+        """The fixture only proves anything if it CONTAINS the retry noise.
+
+        Guards against someone quietly swapping in a clean log and keeping the
+        test green: the last connect-class line must come AFTER the last
+        connected marker, which is exactly the shape that produced the 64/64
+        false positive.
+        """
+        lines = (
+            gzip.decompress(REAL_LISTENER_TAIL.read_bytes())
+            .decode("utf-8")
+            .splitlines()
+        )
+        connected = re.compile(
+            r"Listening for Jobs|Runner reconnected|Job message received"
+        )
+        last_connected = max(
+            (i for i, line in enumerate(lines) if connected.search(line)),
+            default=None,
+        )
+        assert last_connected is not None, (
+            "the fixture must contain a session-established marker, or it proves "
+            "nothing about ordering"
+        )
+        noise_after = [
+            i
+            for i, line in enumerate(lines)
+            if "SocketException" in line and i > last_connected
+        ]
+        assert len(noise_after) >= 10, (
+            "the fixture must carry the long-poll SocketException churn AFTER "
+            "the last connected marker -- that ordering is the false positive "
+            f"under test; found {len(noise_after)} such lines"
+        )
+
+    def test_socketexception_is_not_a_broken_session_marker(self) -> None:
+        """Vocabulary guard with the measurement attached, so it cannot re-land.
+
+        The execution test above is the real proof; this one names the offender
+        so a future edit that re-adds it fails with the reason rather than with
+        an opaque real-log diff.
+        """
+        content = HEALTHCHECK.read_text(encoding="utf-8")
+        match = re.search(r"^\s*session_broken_patterns='([^']*)'", content, re.M)
+        assert match is not None, "session_broken_patterns must be assigned literally"
+        patterns = match.group(1).split("|")
+        assert "SocketException" not in patterns, (
+            "SocketException is ordinary BrokerServer long-poll cancellation and "
+            "is the LAST marker on every idle runner: it classified 64/64 live "
+            "healthy registry-online listeners as broken (OMN-15311)"
+        )
+        # The genuinely-broken markers must survive the narrowing.
+        assert "Runner connect error" in patterns
+        assert "TaskAgentSessionConflictException" in patterns
+
+
 class TestEntrypointWatchdog:
     """The entrypoint must supervise the listener, not just the wrapper tree."""
 
@@ -179,6 +1040,57 @@ class TestEntrypointWatchdog:
         content = ENTRYPOINT.read_text(encoding="utf-8")
         assert "${RUNNER_HOME//./" in content, (
             "watchdog pgrep pattern must be derived from RUNNER_HOME"
+        )
+
+    def test_recycle_run_helper_pkill_is_runner_home_anchored(self) -> None:
+        """OMN-15776: an unanchored ``pkill -f "run-helper"`` inside
+        ``_recycle_runner_tree`` matches ANY process on the host whose cmdline
+        contains that substring — including the real fleet runner's own
+        ``run.sh -> run-helper.sh -> Runner.Listener`` wrapper (see
+        healthcheck.sh's process-tree comment) — when a nested/synthetic
+        entrypoint.sh runs the recycle path in the same PID namespace (no
+        docker-in-docker isolation on the self-hosted fleet). This is the
+        confirmed mechanism behind self-hosted CI jobs receiving an
+        out-of-band "[HostContext] Runner will be shutdown for UserCancelled"
+        signal mid-run while TestEntrypointHungListenerWatchdog exercises
+        this same recycle path elsewhere in the container.
+
+        RED against the unanchored literal; GREEN once the pkill target is
+        derived from RUNNER_HOME like LISTENER_PGREP_PATTERN/
+        WORKER_PGREP_PATTERN already are.
+        """
+        content = ENTRYPOINT.read_text(encoding="utf-8")
+        recycle = content[content.index("_recycle_runner_tree() {") :]
+        recycle = recycle[: recycle.index("\n}\n")]
+        assert 'pkill -TERM -f "run-helper"' not in recycle, (
+            "unanchored run-helper pkill would kill the real fleet runner's "
+            "own wrapper tree from inside a nested/synthetic entrypoint.sh "
+            "run sharing the same PID namespace"
+        )
+        assert 'pkill -KILL -f "run-helper"' not in recycle, (
+            "unanchored run-helper pkill would kill the real fleet runner's "
+            "own wrapper tree from inside a nested/synthetic entrypoint.sh "
+            "run sharing the same PID namespace"
+        )
+        assert "RUN_HELPER_PGREP_PATTERN" in recycle, (
+            "_recycle_runner_tree must pkill the run-helper wrapper via a "
+            "RUNNER_HOME-anchored pattern variable, not a bare substring"
+        )
+        pattern_line = next(
+            (
+                line
+                for line in content.splitlines()
+                if line.strip().startswith('RUN_HELPER_PGREP_PATTERN="')
+            ),
+            None,
+        )
+        assert pattern_line is not None, (
+            "RUN_HELPER_PGREP_PATTERN must have a default assignment"
+        )
+        assert "${RUNNER_HOME//." in pattern_line, (
+            "RUN_HELPER_PGREP_PATTERN default must be anchored to RUNNER_HOME, "
+            f"matching the LISTENER_PGREP_PATTERN/WORKER_PGREP_PATTERN convention: "
+            f"{pattern_line}"
         )
 
     def test_entrypoint_bash_syntax(self) -> None:
@@ -274,13 +1186,20 @@ class TestEntrypointHungListenerWatchdog:
         assert "LISTENER_HEARTBEAT_MISSES" in content
         assert "_listener_heartbeat_stale" in content
 
-    def test_kill_threshold_decoupled_and_above_alert_threshold(self) -> None:
-        """The watchdog KILL threshold must exceed the healthcheck ALERT
-        threshold (900s). Live 2026-07-23T05:25-06:02Z readback: a fleet-wide
-        broker-quiet window silenced _diag on 53/64 listeners for 35-50 min
-        while GitHub kept them online and docker-"unhealthy" runners were
-        actively executing jobs — killing at the 900s alert threshold would
-        have mass-recycled ~50 healthy-but-quiet listeners mid-window."""
+    def test_kill_threshold_clears_the_benign_broker_quiet_ceiling(self) -> None:
+        """The watchdog KILL threshold must clear the observed benign
+        broker-quiet ceiling (~50 min). Live 2026-07-23T05:25-06:02Z readback:
+        a fleet-wide broker-quiet window silenced _diag on 53/64 listeners for
+        35-50 min while GitHub kept them online and docker-"unhealthy" runners
+        were actively executing jobs — killing at the then-current 900s alert
+        threshold would have mass-recycled ~50 healthy-but-quiet listeners
+        mid-window.
+
+        OMN-15233 note: the alert threshold is now 4500s, i.e. ABOVE this kill
+        threshold. The ordering flipped on purpose — this watchdog additionally
+        requires LISTENER_HEARTBEAT_MISSES consecutive ticks and never fires
+        while a Runner.Worker runs, so it is the narrower signal. What must
+        hold is the >= 3600s floor, not an ordering between the two."""
         content = ENTRYPOINT.read_text(encoding="utf-8")
         match = re.search(r"LISTENER_HEARTBEAT_MAX_AGE_SECONDS:-(\d+)", content)
         assert match, "LISTENER_HEARTBEAT_MAX_AGE_SECONDS default missing"
@@ -376,6 +1295,139 @@ class TestEntrypointHungListenerWatchdog:
         finally:
             worker.kill()
             worker.wait(timeout=10)
+            if proc is not None and proc.poll() is None:
+                os.killpg(proc.pid, signal.SIGKILL)
+            subprocess.run(["pkill", "-KILL", "-f", str(home)], check=False)
+
+
+@pytest.fixture
+def synthetic_reap_home(tmp_path: Path) -> Path:
+    """A RUNNER_HOME whose ``run.sh`` reproduces the session-conflict failure.
+
+    The real ``run.sh`` cannot register while a surviving listener still owns
+    this runner's GitHub broker session — it dies on
+    ``TaskAgentSessionConflictException``. This stub asserts the same
+    precondition: if a listener for this home is already running when run.sh
+    starts, it prints that exception and exits non-zero. So the ONLY way the
+    entrypoint gets a clean start is by reaping first.
+    """
+    home = tmp_path / "actions-runner"
+    (home / "bin").mkdir(parents=True)
+    (home / "_diag").mkdir()
+    listener = home / "bin" / "Runner.Listener"
+    _make_executable(listener, "#!/bin/bash\nsleep 300\n")
+    _make_executable(
+        home / "run.sh",
+        "#!/bin/bash\n"
+        f'if pgrep -f "{listener}" >/dev/null 2>&1; then\n'
+        '  echo "TaskAgentSessionConflictException: session held by another listener"\n'
+        "  exit 1\n"
+        "fi\n"
+        f'"{listener}" &\n'
+        "wait $!\n",
+    )
+    (home / ".runner").write_text("{}\n", encoding="utf-8")
+    (home / ".credentials").write_text("{}\n", encoding="utf-8")
+    (home / "_diag" / "Runner_20260727-000000-utc.log").write_text(
+        "heartbeat\n", encoding="utf-8"
+    )
+    return home
+
+
+class TestEntrypointOrphanReap:
+    """OMN-15233: reap the orphan BEFORE spawning a replacement.
+
+    Spawn-without-reap is what manufactures ``TaskAgentSessionConflictException``
+    in the first place: the orphaned listener still owns the session, so every
+    replacement dies within ~5 min and mints a fresh ``Runner_*.log`` that keeps
+    the ``_diag`` heartbeat looking healthy.
+
+    Reap-BEFORE-spawn ordering is asserted behaviorally, not by source position:
+    ``test_entrypoint_reaps_orphan_and_replacement_sees_no_session_conflict``
+    starts the entrypoint with an orphan already holding the session against a
+    ``run.sh`` that fails with ``TaskAgentSessionConflictException`` whenever a
+    listener is alive at spawn time. Spawning first is therefore observable in
+    ``LOG_FILE``; a source-order grep (which a comment-only edit could satisfy)
+    would prove strictly less and has been removed rather than kept.
+    """
+
+    def test_reap_escalates_term_to_kill(self) -> None:
+        """A listener deadlocked in token refresh ignores TERM (OMN-14564)."""
+        content = ENTRYPOINT.read_text(encoding="utf-8")
+        reap = content[content.index("_reap_orphaned_listeners() {") :]
+        reap = reap[: reap.index("\n}\n")]
+        assert 'pkill -TERM -f "${LISTENER_PGREP_PATTERN}"' in reap
+        assert 'pkill -KILL -f "${LISTENER_PGREP_PATTERN}"' in reap
+        assert "LISTENER_REAP_TIMEOUT_SECONDS" in reap
+
+    @pytest.mark.skipif(
+        os.getuid() == 0, reason="entrypoint takes root-only paths (gosu/groupmod)"
+    )
+    def test_entrypoint_reaps_orphan_and_replacement_sees_no_session_conflict(
+        self, synthetic_reap_home: Path, tmp_path: Path
+    ) -> None:
+        """Functional: orphan present at start → reaped → clean replacement.
+
+        DoD: "kill the parent and confirm no TaskAgentSessionConflictException
+        in the replacement's logs."
+        """
+        home = synthetic_reap_home
+        orphan_pid = _spawn_orphan(home / "bin" / "Runner.Listener")
+        time.sleep(0.5)
+        assert _ppid_of(orphan_pid) is not None, "orphan failed to start"
+
+        env = dict(os.environ)
+        env.update(
+            {
+                "RUNNER_NAME": "synthetic-runner",
+                "RUNNER_LABELS": "synthetic",
+                "GITHUB_ORG_URL": "https://github.com/OmniNode-ai",
+                "RUNNER_HOME": str(home),
+                "LOG_FILE": str(tmp_path / "listener.log"),
+                "LISTENER_SUPERVISE_INTERVAL": "1",
+                "LISTENER_REAP_TIMEOUT_SECONDS": "5",
+            }
+        )
+        stdout_path = tmp_path / "entrypoint-stdout.log"
+        proc = None
+        try:
+            with stdout_path.open("wb") as stdout_file:
+                proc = subprocess.Popen(
+                    ["bash", str(ENTRYPOINT)],
+                    stdout=stdout_file,
+                    stderr=subprocess.STDOUT,
+                    env=env,
+                    start_new_session=True,
+                )
+                deadline = time.time() + 60
+                output = ""
+                while time.time() < deadline:
+                    output = stdout_path.read_text(encoding="utf-8")
+                    if "REAP: no Runner.Listener remains" in output:
+                        break
+                    if proc.poll() is not None:
+                        break
+                    time.sleep(0.5)
+            output = stdout_path.read_text(encoding="utf-8")
+            assert "REAP: no Runner.Listener remains" in output, (
+                f"entrypoint never reaped the orphan before spawning: {output}"
+            )
+            # Give run.sh time to clear its session-conflict guard and spawn.
+            # Assert against LOG_FILE (the tee'd run.sh output), NOT the
+            # entrypoint stdout — the entrypoint's own REAP banner names the
+            # exception, so asserting on stdout would be vacuous.
+            time.sleep(2)
+            replacement_log = (tmp_path / "listener.log").read_text(encoding="utf-8")
+            assert "TaskAgentSessionConflictException" not in replacement_log, (
+                f"replacement spawned into a contested session: {replacement_log}"
+            )
+            output = stdout_path.read_text(encoding="utf-8")
+            assert proc.poll() is None, (
+                f"entrypoint exited instead of running the replacement: {output}"
+            )
+            assert _ppid_of(orphan_pid) is None, "the orphan survived the reap"
+        finally:
+            _kill_pid(orphan_pid)
             if proc is not None and proc.poll() is None:
                 os.killpg(proc.pid, signal.SIGKILL)
             subprocess.run(["pkill", "-KILL", "-f", str(home)], check=False)
@@ -565,3 +1617,15 @@ class TestRunbook:
         assert "NOT sufficient" in content
         assert "canary" in content.lower()
         assert "OMN-13915" in content
+
+    def test_runbook_records_registry_crosscheck_before_restart_sweep(self) -> None:
+        """OMN-15233 interim rule: the Docker-unhealthy count is not a
+        degradation metric on this fleet. An operator who restart-sweeps off it
+        alone repeats the 2026-07-27 false-positive sweep."""
+        content = RUNBOOK.read_text(encoding="utf-8")
+        assert "OMN-15233" in content
+        assert "before ANY restart sweep" in content
+        assert "actions/runners" in content, (
+            "the runbook must name the registry probe the operator runs, not "
+            "just tell them to 'cross-check'"
+        )

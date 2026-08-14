@@ -1,0 +1,139 @@
+# docker-compose.dev-lane.yml
+# OMN-15379 — dev/lab lane overlay. Operator ruling 15 (2026-07-29).
+#
+# WHAT THIS IS FOR
+# ----------------
+# It carries exactly ONE thing: the lane indicator that lets the compose
+# forward-migration runner apply the node_projection_registration trio
+# (0000 CREATE / 0001 heartbeat columns / 0002 ENABLE + FORCE ROW LEVEL
+# SECURITY) on the lab lane, which operator ruling 15 designates as the FORCE
+# proving ground. Every other fenced node migration stays fenced here too — the
+# delegation 0023-0026 tenant-RLS hold is a different, still-pending ruling.
+#
+# WHY IT IS A SEPARATE FILE AND NOT A LINE IN docker-compose.infra.yml
+# --------------------------------------------------------------------
+# This is the whole fail-closed mechanism, so it is worth being explicit.
+#
+# docker-compose.infra.yml is the BASE that every lane merges: stability-test,
+# prod and judge each layer their overlay ON TOP of it and override only what
+# they need (stability-test's forward-migration override is a single
+# `container_name:` line — it inherits the base `environment:` block wholesale).
+# So `ONEX_MIGRATION_LANE: dev` written into the base would be INHERITED by
+# stability-test, by prod, by judge, and — the part that matters — by any lane
+# added in future by someone who has never heard of this fence. That is
+# fail-OPEN, and silently so.
+#
+# Inverting it makes the default safe: the base says nothing, the runner treats
+# "nothing" as the FULL fence, and the dev lane opts in by loading this file.
+# A lane that does not load it (stability-test, prod, judge, CI, a raw
+# `docker compose -f docker/docker-compose.infra.yml up` against a fresh volume,
+# and every future lane) is fully fenced without having to know this file
+# exists.
+#
+# WHO LOADS IT
+# ------------
+# The dev lane's `-f` list, in the two places that own lane -> compose-file
+# mapping and are kept matched:
+#   * scripts/deploy-runtime.sh          resolve_compose_file_args()
+#   * scripts/deploy-agent/deploy_agent/executor.py  _LANE_CONFIGS[DEV]
+# Manually:
+#   docker compose -p omnibase-infra \
+#     -f docker/docker-compose.infra.yml \
+#     -f docker/docker-compose.dev-lane.yml \
+#     --profile runtime up -d
+#
+# Deliberately NO `name:` key: the project comes from `-p omnibase-infra` (or
+# from the base file), and pinning it here would make this overlay unusable in
+# any context that names the project itself.
+#
+# Ticket: OMN-15379 (cold compose lane blocked by the registration trio)
+# Ruling: operator ruling 15, 2026-07-29 — FORCE on node_service_registry is
+#         lab-lane-only; the omninode_infra k8s fence is unchanged at 7 ids.
+# =============================================================================
+# LAB-LANE ANALYTICS CONNECTION IDENTITY (OMN-15363)
+# =============================================================================
+# WHAT THIS IS FOR
+# ----------------
+# The base file gives every runtime service the same analytics DSN:
+#
+#   docker-compose.infra.yml:
+#     OMNIDASH_ANALYTICS_DB_URL:
+#       "postgresql://${POSTGRES_USER:-postgres}:${POSTGRES_PASSWORD}@postgres:5432/omnidash_analytics"
+#
+# `postgres` is the table OWNER and carries `rolsuper`+`rolbypassrls`. Postgres
+# exempts owners and BYPASSRLS roles from row-level security UNCONDITIONALLY —
+# FORCE included. So while this lane connects as `postgres`, the FORCE ROW LEVEL
+# SECURITY that operator ruling 15 designates this lane to prove is INERT against
+# every connection the database actually sees, and any "no RLS errors" reading
+# taken here is a false clean rather than evidence.
+#
+# Live readback that established this, .201 lab lane, 2026-07-31T03:33Z: 400
+# consecutive pg_stat_activity samples on `omnidash_analytics` returned exactly
+# one client — `postgres`, from the projection-api container. There was no
+# non-exempt connection to enforce anything against.
+#
+# These overrides connect the lane's analytics consumers as `role_omnidash`
+# instead: non-owner, NOSUPERUSER, NOBYPASSRLS. Authorization for that role is
+# provisioned by docker/migrations/forward/096_grant_role_omnidash_omnidash_analytics.sql;
+# its LOGIN + password stay deployment-owned (ROLE_OMNIDASH_PASSWORD, consumed by
+# docker/migrations/forward/000_create_multiple_databases.sh — no credential
+# material lives in a migration).
+#
+# WHY THE ROLE IS SPELLED OUT PER SERVICE INSTEAD OF PARAMETERISED IN THE BASE
+# ---------------------------------------------------------------------------
+# Same fail-closed inversion the lane indicator above uses, and for the same
+# reason. A `${OMNIDASH_ANALYTICS_DB_USER:-postgres}` seam in the base would be
+# resolved from the HOST environment — and `.201` runs the lab, stability-test,
+# judge and prod lanes from one `~/.omnibase/.env`, so setting that variable
+# would repoint every lane's analytics connection at the next recreate. Writing
+# the identity here, in the file only the dev/lab project loads, makes leaking it
+# to another lane structurally impossible rather than merely unlikely.
+#
+# It is also the readable form: an operator reading this deploy config sees WHICH
+# ROLE CONNECTS, not a variable name that has to be resolved against a host env
+# file to find out.
+#
+# `:?` and not `:-`: an unset ROLE_OMNIDASH_PASSWORD must fail at compose render,
+# not silently fall back to a DSN with an empty password (or, worse, to the
+# superuser). This lane is the proving ground; a silent fallback here is the
+# false-clean this whole block exists to remove.
+#
+# SCOPE
+# -----
+# Every service in the base file that merges the `x-runtime-env` anchor, i.e.
+# every service that carries OMNIDASH_ANALYTICS_DB_URL at all. Overriding only
+# the one service observed connecting today would leave the other four able to
+# open a BYPASSRLS session against the same tables the moment their dispatch path
+# changes — a partial cutover proves nothing.
+#
+# Ticket: OMN-15363. Gate this enables: OMN-15416 (prove FORCE-RLS with real
+# non-owner pools). Unchanged by this block: no FORCE/RLS state on any table, no
+# migration fence, no other lane.
+x-dev-lane-analytics-env: &dev_lane_analytics_env
+  OMNIDASH_ANALYTICS_DB_URL: "postgresql://role_omnidash:${ROLE_OMNIDASH_PASSWORD:?ROLE_OMNIDASH_PASSWORD must be set — the lab lane connects to omnidash_analytics as the non-BYPASSRLS role_omnidash (OMN-15363), never as the postgres superuser}@postgres:5432/omnidash_analytics"
+services:
+  forward-migration:
+    environment:
+      # Consumed by scripts/run-forward-migrations.sh. `dev` is the only value
+      # that releases anything; unset/unknown = full fence. The release SET is
+      # committed in the runner, not supplied here — this names a policy, it
+      # does not carry migration ids.
+      ONEX_MIGRATION_LANE: dev
+    labels:
+      - "com.omninode.lane=dev"
+      - "com.omninode.ticket=OMN-15379"
+  omninode-runtime:
+    environment:
+      !!merge <<: *dev_lane_analytics_env
+  runtime-effects:
+    environment:
+      !!merge <<: *dev_lane_analytics_env
+  projection-api:
+    environment:
+      !!merge <<: *dev_lane_analytics_env
+  runtime-worker:
+    environment:
+      !!merge <<: *dev_lane_analytics_env
+  omninode-contract-resolver:
+    environment:
+      !!merge <<: *dev_lane_analytics_env

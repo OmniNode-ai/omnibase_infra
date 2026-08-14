@@ -69,6 +69,33 @@ class TestKernelBootTopicProvisioning:
             getattr(TopicProvisioner, "ensure_provisioned_topics_exist", None)
         )
 
+    @pytest.mark.parametrize(
+        ("validation_is_valid", "universe_warm_enabled", "expected"),
+        [
+            (False, True, True),
+            (False, False, False),
+            (True, True, False),
+            (True, False, False),
+        ],
+    )
+    def test_missing_topic_auto_create_respects_universe_warm_gate(
+        self,
+        validation_is_valid: bool,
+        universe_warm_enabled: bool,
+        expected: bool,
+    ) -> None:
+        from omnibase_infra.runtime.service_kernel import (
+            _should_auto_create_missing_topics,
+        )
+
+        assert (
+            _should_auto_create_missing_topics(
+                validation_is_valid=validation_is_valid,
+                universe_warm_enabled=universe_warm_enabled,
+            )
+            is expected
+        )
+
     @pytest.mark.asyncio
     async def test_provisioner_best_effort_on_failure(
         self,

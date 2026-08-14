@@ -55,12 +55,15 @@
 # OMN-14941 PR merges (the SHA does not exist yet), so `@dev` is the only
 # viable resolvable pin today.
 #
-# SEQUENCING: this pin resolves only AFTER the omniclaude OMN-14941 PR (adding
-# call-occ-companion-effect-reusable.yml) merges to omniclaude dev. Until
-# then, this workflow fails at parse ("workflow was not found") and the
-# tests/ci/test_workflow_uses_refs_resolve.py gate is RED on this repo —
-# merge the omniclaude PR first. That gate enforces the ordering
-# mechanically instead of by convention.
+# SEQUENCING (SATISFIED — OMN-15248): this pin resolved only AFTER the
+# omniclaude OMN-14941 PR (adding call-occ-companion-effect-reusable.yml)
+# merged to omniclaude dev. That merge has happened — verified 2026-07-27:
+# `gh api repos/OmniNode-ai/omniclaude/contents/.github/workflows/call-occ-companion-effect-reusable.yml?ref=dev`
+# -> 200, blob c540d981 (autobind sibling -> 5f8f64e4). The resolution gate
+# (tests/integration/ci/test_workflow_uses_refs_resolve_live.py, live half;
+# tests/ci/test_workflow_uses_refs_resolve.py, static half) is therefore
+# expected GREEN. A red there now means a pin genuinely broke — re-pin it;
+# there is no standing red-authorization for this workflow.
 #
 # RE-PIN FOLLOW-UP (OMN-14812-style): once the reusable promotes to omniclaude
 # main, re-pin this `uses:` to `@main` or a main SHA so the caller no longer
