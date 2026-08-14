@@ -84,6 +84,17 @@ seed_workspace_from_mirror() {
         esac
     fi
 
+    # The runner invokes this hook with cwd == GITHUB_WORKSPACE, and the reset
+    # above `rm -rf`s exactly that directory. `mkdir -p` then recreates the
+    # PATH, but this shell's cwd is still the old, now-deleted inode -- so every
+    # subsequent git invocation dies with
+    #   fatal: Unable to read current working directory: No such file or directory
+    # before it ever opens a connection. That is what produced the field
+    # "no mirror" report on omnibase_infra job 94699283129 (07:07:05Z); it was
+    # never a transient mirror outage. Re-enter the recreated directory (falling
+    # back to / so this can never itself be the thing that fails).
+    cd "${workspace_dir}" 2>/dev/null || cd / || return 0
+
     local repo_name="${GITHUB_REPOSITORY##*/}"
     local mirror_url="git://${_C2_MIRROR_HOST}:${_C2_MIRROR_PORT}/${repo_name}.git"
     local origin_url="${GITHUB_SERVER_URL:-https://github.com}/${GITHUB_REPOSITORY}"
