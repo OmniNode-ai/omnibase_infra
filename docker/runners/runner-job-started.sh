@@ -25,6 +25,138 @@
 
 set -euo pipefail
 
+# ---------------------------------------------------------------------------
+# OMN-14027 C2 -- local git-mirror pre-seed (fail-open by construction)
+# ---------------------------------------------------------------------------
+#
+# THE PROBLEM THIS SOLVES. The workspace reset above is correct but it has a
+# cost: because the workspace is destroyed before every job, `actions/checkout`
+# can never reuse an existing object store, so EVERY job cold-clones the entire
+# repository from github.com. With 72 runners on one home uplink that is 72
+# simultaneous full clones of the same five repos, which is what produces the
+# `RPC failed; curl 56 GnuTLS recv error (-54)` / `fatal: early EOF` kills.
+#
+# THE FIX. Re-create the "warm workspace" that checkout knows how to exploit,
+# but hydrate it from a bare mirror served over the docker bridge instead of
+# from stale on-disk state. After this function runs the workspace is a real
+# git repo whose `remote.origin.url` is exactly the URL checkout expects, with
+# HEAD detached at the mirror's default-branch tip.
+#
+# WHY THIS CANNOT FAIL A JOB, even with a stale mirror. The mirror is never a
+# source of truth. checkout still fetches the exact requested SHA from
+# github.com over its own authenticated remote; the only thing the pre-seed
+# changes is that git's fetch negotiation now has a local "have" (the detached
+# HEAD commit) to offer, so the server sends a small delta instead of the whole
+# object graph. A mirror that is minutes behind costs a slightly larger delta.
+# A mirror that is missing, unreachable, or corrupt costs nothing: every step
+# below is guarded and returns 0, leaving the workspace exactly as this hook
+# would have left it before this change.
+#
+# The detached checkout is load-bearing, not cosmetic: checkout's
+# `prepareExistingDirectory` runs `git checkout --detach` on the existing repo
+# and wipes the directory if that fails, which it would on an unborn HEAD.
+_C2_MIRROR_HOST="${OMNI_GIT_MIRROR_HOST:-172.18.0.1}"
+_C2_MIRROR_PORT="${OMNI_GIT_MIRROR_PORT:-9418}"
+# Space-separated RUNNER_NAME allowlist, or ALL. Canary rollouts narrow this on
+# the host copy of this file (it is bind-mounted, so no container recreate is
+# needed); the committed default is the post-canary fleet-wide value.
+_C2_MIRROR_RUNNERS="${OMNI_GIT_MIRROR_RUNNERS:-ALL}"
+_C2_SEED_TIMEOUT="${OMNI_GIT_MIRROR_SEED_TIMEOUT:-180}"
+
+seed_workspace_from_mirror() {
+    local workspace_dir="$1"
+
+    # NOTE: written as `if`, not `[[ ... ]] && return 0`. This script runs under
+    # `set -e`; a bare AND-list whose left side is false returns non-zero and
+    # would kill the hook -- i.e. fail every job -- the moment the kill switch
+    # was NOT set. The kill switch must never be able to break the thing it is
+    # there to protect.
+    if [[ "${OMNI_GIT_MIRROR_DISABLE:-0}" == "1" ]]; then
+        return 0
+    fi
+    [[ -n "${GITHUB_REPOSITORY:-}" ]] || return 0
+    command -v git >/dev/null 2>&1 || return 0
+
+    if [[ "${_C2_MIRROR_RUNNERS}" != "ALL" ]]; then
+        case " ${_C2_MIRROR_RUNNERS} " in
+            *" ${RUNNER_NAME:-} "*) ;;
+            *) return 0 ;;
+        esac
+    fi
+
+    local repo_name="${GITHUB_REPOSITORY##*/}"
+    local mirror_url="git://${_C2_MIRROR_HOST}:${_C2_MIRROR_PORT}/${repo_name}.git"
+    local origin_url="${GITHUB_SERVER_URL:-https://github.com}/${GITHUB_REPOSITORY}"
+
+    # Probe first so an unreachable/absent mirror costs ~1s, not a fetch timeout.
+    # Two attempts: a single probe failure was observed in the field
+    # (omnibase_infra, 2026-08-14T06:48:00Z) that was not reproducible seconds
+    # later from the same container, so treat one miss as transient. The probe's
+    # stderr is echoed rather than swallowed -- a silent "no mirror" line makes
+    # the difference between "mirror is down" and "this repo is not mirrored"
+    # undiagnosable from the job log, which is the only surface that matters
+    # once the fleet is running unattended.
+    local probe_err probe_ok=0 attempt
+    probe_err="$(mktemp)"
+    for attempt in 1 2; do
+        if timeout 10 git ls-remote --heads "${mirror_url}" >/dev/null 2>"${probe_err}"; then
+            probe_ok=1
+            break
+        fi
+        sleep 1
+    done
+    if [[ "${probe_ok}" -ne 1 ]]; then
+        echo "[c2-mirror] no usable mirror for ${repo_name} at ${mirror_url} after 2 probes; leaving workspace cold (fail-open path, job is unaffected). git said: $(tr '\n' ' ' <"${probe_err}")"
+        rm -f "${probe_err}"
+        return 0
+    fi
+    rm -f "${probe_err}"
+
+    local seed_start seed_end
+    seed_start="$(date +%s)"
+
+    (
+        set +e
+        git init --quiet "${workspace_dir}" || exit 0
+        # `origin` must match byte-for-byte what actions/checkout computes
+        # (`${GITHUB_SERVER_URL}/${owner}/${repo}`, no .git suffix) or checkout
+        # decides the directory belongs to a different repo and deletes it.
+        git -C "${workspace_dir}" remote add origin "${origin_url}" 2>/dev/null \
+            || git -C "${workspace_dir}" remote set-url origin "${origin_url}"
+        # Branch heads + tags only. refs/pull/* is deliberately NOT fetched:
+        # the objects are shared with the branch graph anyway, and the ref
+        # explosion would cost more than it saves.
+        timeout "${_C2_SEED_TIMEOUT}" git -C "${workspace_dir}" fetch --quiet --prune "${mirror_url}" \
+            '+refs/heads/*:refs/remotes/origin/*' '+refs/tags/*:refs/tags/*' || exit 0
+
+        # Anchor HEAD on the mirror's default branch so checkout's detach
+        # succeeds and so fetch negotiation has a "have" to offer.
+        local head_ref head_sha
+        head_ref="$(timeout 10 git ls-remote --symref "${mirror_url}" HEAD 2>/dev/null | awk '/^ref:/ {print $2; exit}')"
+        head_sha=""
+        if [[ -n "${head_ref}" ]]; then
+            head_sha="$(git -C "${workspace_dir}" rev-parse --verify --quiet "refs/remotes/origin/${head_ref##refs/heads/}")"
+        fi
+        if [[ -z "${head_sha}" ]]; then
+            for candidate in dev main master; do
+                head_sha="$(git -C "${workspace_dir}" rev-parse --verify --quiet "refs/remotes/origin/${candidate}")"
+                [[ -n "${head_sha}" ]] && break
+            done
+        fi
+        [[ -n "${head_sha}" ]] || exit 0
+        timeout "${_C2_SEED_TIMEOUT}" git -C "${workspace_dir}" checkout --quiet --detach "${head_sha}" || exit 0
+        exit 0
+    ) || true
+
+    seed_end="$(date +%s)"
+    if git -C "${workspace_dir}" rev-parse --verify --quiet HEAD >/dev/null 2>&1; then
+        echo "[c2-mirror] pre-seeded ${repo_name} from ${mirror_url} at $(git -C "${workspace_dir}" rev-parse --short HEAD) in $((seed_end - seed_start))s -- checkout will fetch a delta, not a full clone."
+    else
+        echo "[c2-mirror] pre-seed of ${repo_name} did not complete; leaving workspace cold (fail-open)."
+    fi
+    return 0
+}
+
 RUNNER_HOME="${RUNNER_HOME:-/home/runner/actions-runner}"
 RUNNER_WORK_DIR="${RUNNER_WORK_DIR:-_work}"
 WORK_ROOT="${RUNNER_HOME}/${RUNNER_WORK_DIR}"
@@ -63,6 +195,7 @@ trap 'rm -f "${err_file}"' EXIT
 
 if rm -rf -- "${canonical_workspace}" 2>"${err_file}"; then
     mkdir -p -- "${canonical_workspace}"
+    seed_workspace_from_mirror "${canonical_workspace}"
     exit 0
 fi
 
@@ -86,6 +219,7 @@ if ! command -v sudo >/dev/null 2>&1; then
 elif sudo -n /bin/rm -rf -- "${canonical_workspace}" 2>"${err_file}"; then
     echo "[runner-job-started] Root-owned debris removed via scoped sudo fallback." >&2
     mkdir -p -- "${canonical_workspace}"
+    seed_workspace_from_mirror "${canonical_workspace}"
     exit 0
 else
     echo "[runner-job-started] ERROR: scoped sudo fallback also failed:" >&2
