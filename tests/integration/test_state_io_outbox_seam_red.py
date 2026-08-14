@@ -114,6 +114,7 @@ from omnibase_core.models.delegation.wire.model_delegation_result import (
 from omnibase_core.models.dispatch.model_handler_output import ModelHandlerOutput
 from omnibase_core.models.events.model_event_envelope import ModelEventEnvelope
 from omnibase_infra.runtime.auto_wiring.handler_wiring import (
+    BoundaryApplyPublishError,
     _make_event_bus_callback,
     _make_stateful_dispatch_callback,
 )
@@ -1181,20 +1182,59 @@ def test_has_bus_wrapper_publish_failure_propagates_for_redelivery() -> None:
     assert "broker rejected publish" in str(raised)
 
 
-@pytest.mark.integration
-def test_non_outbox_boundary_still_swallows_unchanged() -> None:
-    """Decision 3 regression guard: a NON-outbox contract is UNCHANGED.
+# ---------------------------------------------------------------------------
+# OMN-14498 SUPERSESSION of the P3b "Decision 3" guard.
+#
+# The predecessor test here — ``test_non_outbox_boundary_still_swallows_
+# unchanged`` — asserted that a NON-outbox contract's ``result_applier.apply()``
+# publish failure was STILL log-and-discarded (ACK) at the default flag state.
+# That assertion was never a statement that swallowing is CORRECT: its own
+# docstring scoped it as "P3b must not broaden the un-swallow to every
+# auto-wired contract (the platform-wide hole is OMN-14498/OMN-14507's, not
+# this ticket's)". It was a deliberate scope fence naming OMN-14498 as the
+# ticket that owns closing the hole.
+#
+# This IS OMN-14498, and the hole is now closed, so the fence is retired
+# rather than kept green: a non-outbox apply() publish failure now takes an
+# UNCONDITIONAL best-effort DLQ route (``_route_apply_publish_failure``),
+# not the flag-gated ``_route_swallowed_exception``.
+#
+# The fence's REAL invariant — "do not broaden the un-swallow into blanket
+# propagation for every auto-wired contract" — is still live and is what the
+# second test below pins. The discriminator simply moved: it is no longer
+# "outbox vs non-outbox", it is "was the record durably captured". A
+# non-outbox contract still ACKs (returns normally, offset advances) whenever
+# the DLQ durably takes the record; it withholds the offset only when there
+# is nothing durable to hand the record to. Nothing is silently dropped in
+# either arm — which is exactly what the predecessor allowed and the ticket
+# forbids.
+# ---------------------------------------------------------------------------
 
-    The boundary no-swallow is scoped to the outbox path by
-    ``propagate_publish_failures``. With the flag at its default (off), a publish
-    failure is STILL log-and-discarded exactly as before P3b — P3b must not
-    broaden the un-swallow to every auto-wired contract (the platform-wide hole
-    is OMN-14498/OMN-14507's, not this ticket's). This is the mirror image of
-    ``test_publish_exception_mid_batch_propagates...`` with the flag OFF.
-    """
+
+class _DlqCapableRecordingBus(_RecordingBus):
+    """``_RecordingBus`` plus the ``_publish_raw_to_dlq`` seam the boundary
+    probes for. Records DLQ writes so the ACK arm can prove the record was
+    durably captured rather than merely dropped quietly."""
+
+    def __init__(
+        self, fail_at_index: int | None = None, *, dlq_persists: bool = True
+    ) -> None:
+        super().__init__(fail_at_index=fail_at_index)
+        self.dlq_persists = dlq_persists
+        self.dlq_writes: list[dict[str, Any]] = []
+
+    async def _publish_raw_to_dlq(self, **kwargs: Any) -> bool:
+        self.dlq_writes.append(kwargs)
+        return self.dlq_persists
+
+
+def _run_non_outbox_boundary(bus: _RecordingBus) -> BaseException | None:
+    """Drive the REAL auto-wired boundary for a non-outbox contract
+    (``propagate_publish_failures`` NOT passed = default/non-outbox) with a
+    result applier whose publish fails mid-batch. Returns what escaped the
+    boundary, or None if it returned normally (an ACK)."""
     store = _DurableRows()
     adapter = _FakeStateStoreAdapter(store)
-    bus = _RecordingBus(fail_at_index=1)  # event 0 lands, event 1 is rejected
     handler = _FanOutHandler(_fanout_batch())
     callback = _stateful_callback(handler, adapter)  # no bus → external applier
     applier = _make_applier(bus)
@@ -1210,12 +1250,12 @@ def test_non_outbox_boundary_still_swallows_unchanged() -> None:
             del topic, allowed_dispatcher_ids
             return await callback(envelope)
 
-    # DEFAULT flag (propagate_publish_failures NOT passed) = non-outbox behavior.
     on_message = _make_event_bus_callback(
         TOPIC_INBOUND,
         cast("Any", _Engine()),
         cast("Any", applier),
         allowed_dispatcher_ids={"state-io-test-dispatcher"},
+        event_bus=cast("Any", bus),
     )
 
     raised: BaseException | None = None
@@ -1228,14 +1268,55 @@ def test_non_outbox_boundary_still_swallows_unchanged() -> None:
             raised = exc
 
     asyncio.run(_run())
+    return raised
+
+
+@pytest.mark.integration
+def test_non_outbox_boundary_nacks_when_no_durable_dlq_route() -> None:
+    """OMN-14498: the seam the predecessor fence deliberately left open.
+
+    A non-outbox contract at the DEFAULT ``ONEX_BOUNDARY_DLQ_ENABLED`` state
+    whose ``result_applier.apply()`` publish fails, with NO DLQ-capable bus
+    wired, must withhold the offset (raise) rather than return normally.
+    Returning normally IS an ACK at the Kafka boundary, so the old behavior
+    advanced past a record that was never published and never persisted
+    anywhere — the silent drop this ticket exists to close.
+    """
+    bus = _RecordingBus(fail_at_index=1)  # event 0 lands, event 1 is rejected
+    raised = _run_non_outbox_boundary(bus)
+
+    assert len(bus.published) == 1, "precondition: the batch really did fail mid-way"
+    assert isinstance(raised, BoundaryApplyPublishError), (
+        "SILENT DROP: a non-outbox contract's publish failure with no durable "
+        "DLQ route must withhold the offset (BoundaryApplyPublishError), not "
+        f"return normally (ACK). Got: {raised!r}"
+    )
+
+
+@pytest.mark.integration
+def test_non_outbox_boundary_acks_when_dlq_durably_captures() -> None:
+    """The P3b fence's surviving invariant, restated for the closed seam.
+
+    OMN-14498 must NOT broaden the un-swallow into blanket propagation for
+    every auto-wired contract. When the unconditional DLQ route durably takes
+    the record, a non-outbox contract still ACKs — the boundary returns
+    normally and the offset advances, exactly as before — because nothing was
+    lost. Only the no-durable-route case (test above) withholds the offset.
+    """
+    bus = _DlqCapableRecordingBus(fail_at_index=1, dlq_persists=True)
+    raised = _run_non_outbox_boundary(bus)
 
     assert len(bus.published) == 1, "precondition: the batch really did fail mid-way"
     assert raised is None, (
-        "REGRESSION: a non-outbox contract's publish failure must STILL be "
-        "swallowed at the boundary (flag default off) — P3b must not broaden the "
-        "un-swallow to every auto-wired contract. Only the outbox path (flag on) "
-        "propagates (see test_publish_exception_mid_batch_propagates...)."
+        "OVER-BROADENED: with the record durably DLQ'd there is nothing to "
+        "redeliver, so a non-outbox contract must still ACK. Propagating here "
+        f"would broaden the un-swallow to every auto-wired contract. Got: {raised!r}"
     )
+    assert len(bus.dlq_writes) == 1, (
+        "the ACK above is only honest if the record was actually captured — "
+        "exactly one unconditional DLQ write must have happened"
+    )
+    assert bus.dlq_writes[0]["original_topic"] == TOPIC_INBOUND
 
 
 # ---------------------------------------------------------------------------
