@@ -4,12 +4,14 @@
 
 from __future__ import annotations
 
+import re
 import subprocess
 from pathlib import Path
 
 import pytest
 
 from scripts.ci.check_application_database_sql import (
+    changed_sql_paths,
     validate_changed_sql,
     violation_key,
 )
@@ -563,3 +565,82 @@ def test_violation_key_is_content_addressed_not_positional() -> None:
     assert violation_key(same) == violation_key(same)
     assert violation_key(same) != violation_key(same.replace("a.sql", "b.sql"))
     assert violation_key(same) != violation_key(same.replace("'x'", "'y'"))
+
+
+# ---------------------------------------------------------------------------
+# OMN-16076: push-event base-revision resolution. The trusted CI step has no
+# pull_request/merge_group base on a push event; its fallback must be push
+# event.before, never a hardcoded SHA. The old pin was reachable only through
+# a since-deleted stacked branch, so the first main-push run of the gate died
+# on a raw git fatal ("Invalid symmetric difference expression") instead of a
+# verdict. These tests hold both the script's error contract and the workflow
+# expression itself.
+# ---------------------------------------------------------------------------
+
+
+def _two_commit_repository(tmp_path: Path) -> tuple[Path, str, str]:
+    repository = tmp_path / "repository"
+    repository.mkdir()
+    _git(repository, "init", "--initial-branch=main")
+    (repository / "seed.sql").write_text(
+        "CREATE TABLE tenant.seed_table (id uuid);\n", encoding="utf-8"
+    )
+    base = _commit(repository, "baseline")
+    (repository / "next.sql").write_text(
+        "CREATE TABLE tenant.next_table (id uuid);\n", encoding="utf-8"
+    )
+    head = _commit(repository, "next")
+    return repository, base, head
+
+
+def test_push_event_previous_commit_base_resolves_changed_sql(
+    tmp_path: Path,
+) -> None:
+    repository, base, head = _two_commit_repository(tmp_path)
+    changed = changed_sql_paths(repository, base, head)
+    assert [path.name for path in changed] == ["next.sql"]
+
+
+def test_an_empty_base_revision_fails_with_remediation(tmp_path: Path) -> None:
+    repository, _base, head = _two_commit_repository(tmp_path)
+    with pytest.raises(RuntimeError, match="event context"):
+        changed_sql_paths(repository, "", head)
+
+
+def test_a_zero_base_revision_fails_with_remediation(tmp_path: Path) -> None:
+    repository, _base, head = _two_commit_repository(tmp_path)
+    with pytest.raises(RuntimeError, match="event context"):
+        changed_sql_paths(repository, "0" * 40, head)
+
+
+def test_an_unreachable_base_revision_fails_with_remediation(
+    tmp_path: Path,
+) -> None:
+    repository, _base, head = _two_commit_repository(tmp_path)
+    unreachable = "7228ce0c0934ae096dd6effd0f84ff1913fec6c0"
+    with pytest.raises(RuntimeError) as excinfo:
+        changed_sql_paths(repository, unreachable, head)
+    message = str(excinfo.value)
+    assert "not reachable in this checkout" in message
+    assert "hardcoded pin" in message
+    assert "Invalid symmetric difference" not in message
+
+
+def test_ci_workflow_base_revision_has_no_hardcoded_pin() -> None:
+    workflow = (_ROOT / ".github" / "workflows" / "ci.yml").read_text(encoding="utf-8")
+    lines = workflow.splitlines()
+    expression_lines: list[str] = []
+    for index, line in enumerate(lines):
+        if "APPLICATION_SQL_BASE_REVISION" not in line:
+            continue
+        expression_lines.extend(lines[index : index + 2])
+    assert expression_lines, "trusted step no longer sets the base revision"
+    for line in expression_lines:
+        assert not re.search(r"[0-9a-f]{40}", line), (
+            "APPLICATION_SQL_BASE_REVISION must resolve from event context, "
+            f"never a hardcoded SHA: {line.strip()}"
+        )
+    assert any("github.event.before" in line for line in expression_lines), (
+        "push events have no pull_request/merge_group base; the fallback "
+        "must be github.event.before"
+    )

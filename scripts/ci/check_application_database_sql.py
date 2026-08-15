@@ -204,12 +204,45 @@ def _is_legacy_default_schema_sql_path(relative_path: Path) -> bool:
     return relative_path in _LEGACY_DEFAULT_SCHEMA_SQL_EXACT_PATHS
 
 
+_ZERO_REVISION = "0" * 40
+
+# The trusted CI step resolves the diff base from workflow event context:
+# pull_request.base.sha, merge_group.base_sha, or push event.before. A pinned
+# fallback SHA is forbidden -- a commit reachable only through a since-deleted
+# stacked branch is absent from every checkout, so the first push-event run of
+# this gate crashed on a raw git fatal instead of a diagnosable verdict
+# (OMN-16076). Validate the base up front and fail with the remediation.
+
+
+def _assert_base_revision_resolvable(repository: Path, base_revision: str) -> None:
+    if not base_revision or base_revision == _ZERO_REVISION:
+        raise RuntimeError(
+            "no usable base revision for changed-SQL linting: got "
+            f"{base_revision!r}; the workflow event context must supply "
+            "pull_request.base.sha, merge_group.base_sha, or push event.before"
+        )
+    probe = subprocess.run(
+        ["git", "rev-parse", "--verify", "--quiet", f"{base_revision}^{{commit}}"],
+        cwd=repository,
+        capture_output=True,
+        check=False,
+    )
+    if probe.returncode != 0:
+        raise RuntimeError(
+            f"base revision {base_revision} is not reachable in this checkout; "
+            "it must come from the workflow event context "
+            "(pull_request.base.sha, merge_group.base_sha, or push "
+            "event.before), never a hardcoded pin"
+        )
+
+
 def changed_sql_paths(
     repository: Path,
     base_revision: str,
     head_revision: str,
 ) -> tuple[Path, ...]:
     """Return changed deployable SQL, excluding the exact ephemeral proof seed."""
+    _assert_base_revision_resolvable(repository, base_revision)
     result = subprocess.run(
         [
             "git",
