@@ -43,7 +43,6 @@ def test_omniweb_user_identity_claim_contract() -> None:
 
     assert "gateway-attach-audience" not in mappers
     assert all(
-        mapper.get("config", {}).get("included.custom.audience")
-        != "gateway-attach"
+        mapper.get("config", {}).get("included.custom.audience") != "gateway-attach"
         for mapper in mappers.values()
     )
