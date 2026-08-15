@@ -14,6 +14,8 @@ Exports:
     ModelKafkaEventBusConfig: Configuration model for EventBusKafka
     ModelDlqEvent: DLQ event model for callback payloads
     ModelDlqMetrics: Aggregate metrics for DLQ operations
+    ModelDurabilityConfirmation: Verdict on whether a published record is durable
+    ModelPublishReceipt: Broker-reported durability coordinate returned by publish
 """
 
 from __future__ import annotations
@@ -21,17 +23,25 @@ from __future__ import annotations
 from omnibase_infra.event_bus.models.config import ModelKafkaEventBusConfig
 from omnibase_infra.event_bus.models.model_dlq_event import ModelDlqEvent
 from omnibase_infra.event_bus.models.model_dlq_metrics import ModelDlqMetrics
+from omnibase_infra.event_bus.models.model_durability_confirmation import (
+    ModelDurabilityConfirmation,
+)
 from omnibase_infra.event_bus.models.model_event_bus_readiness import (
     ModelEventBusReadiness,
 )
 from omnibase_infra.event_bus.models.model_event_headers import ModelEventHeaders
 from omnibase_infra.event_bus.models.model_event_message import ModelEventMessage
+from omnibase_infra.event_bus.models.model_publish_receipt import (
+    ModelPublishReceipt,
+)
 
 __all__: list[str] = [
     "ModelDlqEvent",
     "ModelDlqMetrics",
+    "ModelDurabilityConfirmation",
     "ModelEventBusReadiness",
     "ModelEventHeaders",
     "ModelEventMessage",
     "ModelKafkaEventBusConfig",
+    "ModelPublishReceipt",
 ]

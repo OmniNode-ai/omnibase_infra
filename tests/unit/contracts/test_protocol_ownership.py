@@ -52,6 +52,10 @@ KNOWN_INFRA_PROTOCOLS: dict[str, str] = {
     "ProtocolContainerAware": "protocols/protocol_container_aware.py",
     # ProtocolDispatchEngine relocated to omnibase_spi.protocols.runtime (OMN-12549).
     "ProtocolEventBusLike": "protocols/protocol_event_bus_like.py",
+    "ProtocolConfirmationStrategy": "protocols/protocol_confirmation_strategy.py",  # [RUNTIME] OMN-15861 durability verdict layer; decides whether a publish receipt authorises a durable claim. Infra-local because it is bound to the infra bus/transport surface (ModelPublishReceipt, EnumInfraTransportType), not a cross-repo contract
+    "ProtocolReadbackSource": "protocols/protocol_readback_source.py",  # [RUNTIME] OMN-15861 fact-reporting half of the confirmation seam; one authoritative surface answering "is the record at this coordinate there?"
+    "ProtocolInmemoryHistorySource": "event_bus/confirmation/readback_source_inmemory.py",  # [RUNTIME] OMN-15861 one-method narrowing of the in-memory bus so the zero-infra readback source does not depend on the whole bus surface
+    "ProtocolSeekableConsumer": "event_bus/confirmation/readback_source_kafka.py",  # [RUNTIME] OMN-15861 five-call narrowing of AIOKafkaConsumer (assign/seek/end_offsets/getone) so the coordinate readback loop is testable without a broker
     "ProtocolEventProjector": "protocols/protocol_event_projector.py",
     "ProtocolIdempotencyStore": "protocols/protocol_idempotency_store.py",
     "ProtocolLedgerSink": "protocols/protocol_ledger_sink.py",
