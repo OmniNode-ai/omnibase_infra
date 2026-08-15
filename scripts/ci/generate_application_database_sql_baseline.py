@@ -7,12 +7,14 @@ frozen, so the dev->main promotion boundary does not re-litigate the whole
 migration corpus. See the ratchet comment in ``check_application_database_sql``.
 
 Deterministic by construction: entries are content-keyed and emitted in sorted
-order, so regenerating against an unchanged tree reproduces the file byte for
-byte and the freeze is auditable in review.
+order, so regenerating against an unchanged tree reproduces the same entry set
+and the freeze is auditable in review.
 
 The baseline is SHRINK-ONLY. Regenerate to *remove* entries after fixing
 violations; never to absorb new ones. Run with ``--check`` in CI or locally to
-assert the committed file matches what the current tree produces.
+assert the committed file matches what the current tree produces -- that check
+compares the entry KEY SET, not raw bytes, because the repo's yamlfmt hook
+reflows this file on commit.
 
     uv run python scripts/ci/generate_application_database_sql_baseline.py \\
         --base-revision origin/main \\
@@ -22,6 +24,7 @@ assert the committed file matches what the current tree produces.
 from __future__ import annotations
 
 import argparse
+import json
 import sys
 from datetime import UTC, datetime
 from pathlib import Path
@@ -88,25 +91,31 @@ def _parser() -> argparse.ArgumentParser:
 
 
 def render_baseline(violations: tuple[str, ...], *, generated_at: str) -> str:
-    """Render the baseline document; sorted and content-keyed, so it is stable."""
-    lines = [_HEADER, f'generated_at: "{generated_at}"', f"count: {len(violations)}"]
+    """Render the baseline document; sorted and content-keyed, so it is stable.
+
+    Scalars are emitted with ``json.dumps``: violation messages routinely embed
+    single quotes around relation names, and Python ``repr`` escapes those with
+    backslashes, which YAML does not accept. JSON string syntax is a subset of
+    YAML's double-quoted style, so this round-trips. Getting this wrong is
+    quiet rather than loud -- an unparseable snapshot makes the loader fail
+    closed to empty, which grandfathers nothing and looks like "the baseline
+    did not take" instead of a render bug.
+    """
+    lines = [
+        _HEADER,
+        f"generated_at: {json.dumps(generated_at)}",
+        f"count: {len(violations)}",
+    ]
     if not violations:
         lines.append("violations: []")
         return "\n".join(lines) + "\n"
     lines.append("violations:")
     for violation in sorted(violations):
         path, _, message = violation.partition(": ")
-        lines.append(f'  - key: "{violation_key(violation)}"')
-        lines.append(f'    path: "{path}"')
-        lines.append(f"    violation: {message.strip()!r}")
+        lines.append(f"  - key: {json.dumps(violation_key(violation))}")
+        lines.append(f"    path: {json.dumps(path)}")
+        lines.append(f"    violation: {json.dumps(message.strip())}")
     return "\n".join(lines) + "\n"
-
-
-def _without_stamp(text: str) -> str:
-    """Drop the generated_at line; it is provenance, not semantic content."""
-    return "\n".join(
-        line for line in text.splitlines() if not line.startswith("generated_at:")
-    )
 
 
 def main() -> int:
@@ -131,16 +140,22 @@ def main() -> int:
     grew = sorted(fresh_keys - set(existing))
 
     if args.check:
-        rendered = render_baseline(outcome.violations, generated_at="")
-        committed = (
-            args.output.read_text(encoding="utf-8") if args.output.exists() else ""
-        )
-        if _without_stamp(rendered) != _without_stamp(committed):
+        # Compare the KEY SET, not the rendered bytes. The repo's yamlfmt hook
+        # reflows this file on commit, so a byte comparison would report drift
+        # for pure formatting and train people to ignore this check.
+        committed_keys = set(existing)
+        if fresh_keys != committed_keys:
+            stale = sorted(committed_keys - fresh_keys)
             print(
                 f"application_database_sql_baseline=DRIFT: {args.output.name} does not "
-                f"match this tree ({len(outcome.violations)} raw violations). "
-                "Regenerate it, and confirm the change only SHRINKS the list."
+                f"match this tree. {len(grew)} entr{'y' if len(grew) == 1 else 'ies'} "
+                f"missing from it, {len(stale)} no longer firing. Regenerate, and "
+                "confirm the change only SHRINKS the list."
             )
+            for key in grew[:5]:
+                print(f"  + {key[:12]} (not baselined)")
+            for key in stale[:5]:
+                print(f"  - {key[:12]} (stale)")
             return 1
         print(
             f"application_database_sql_baseline=OK ({len(outcome.violations)} entries)"
