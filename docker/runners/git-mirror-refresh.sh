@@ -55,6 +55,26 @@ started_at="$(date -Is)"
 echo "[git-mirror-refresh] start ${started_at} root=${MIRROR_ROOT}"
 
 rc=0
+# OMN-16063 C2b -- serving settings every mirror must carry.
+#
+# allowFilter: the runner-side rewrite gate (wire_uv_git_mirror_rewrite in
+#   runner-job-started.sh) proves a pinned commit is servable with a
+#   `--filter=tree:0 --depth=1` fetch before it redirects uv at this daemon.
+#   Without allowFilter that probe fails, the gate reads "absent", and every
+#   job silently forgoes the mirror and clones from github.com instead.
+# allowAnySHA1InWant: uv fetches an exact pinned SHA, which is ordinarily a
+#   mid-history commit rather than a ref tip. Without this, upload-pack
+#   refuses the request as "not our ref" even though the object is right here.
+#
+# Applied on every pass, not just at clone time: these are cheap idempotent
+# writes, and applying them unconditionally means a mirror that was cloned
+# before this existed -- or re-cloned by the branch below -- cannot end up
+# quietly unable to serve the thing the whole component depends on.
+apply_mirror_serving_config() {
+    git -C "$1" config uploadpack.allowFilter true
+    git -C "$1" config uploadpack.allowAnySHA1InWant true
+}
+
 for repo in "${MIRROR_REPOS[@]}"; do
     mirror_dir="${MIRROR_ROOT}/${repo}.git"
     upstream="https://github.com/${GITHUB_ORG}/${repo}.git"
@@ -67,6 +87,7 @@ for repo in "${MIRROR_REPOS[@]}"; do
             # Repacking 72 job-serving mirrors on an unpredictable schedule would
             # spike host IO mid-wave; `git gc` is run explicitly by the runbook.
             git -C "${mirror_dir}" config gc.auto 0
+            apply_mirror_serving_config "${mirror_dir}"
         else
             echo "[git-mirror-refresh] ${repo}: CLONE FAILED" >&2
             rm -rf "${mirror_dir}.tmp"
@@ -74,6 +95,8 @@ for repo in "${MIRROR_REPOS[@]}"; do
         fi
         continue
     fi
+
+    apply_mirror_serving_config "${mirror_dir}"
 
     # --prune keeps deleted branches/PR refs from accumulating forever.
     if timeout "${FETCH_TIMEOUT_SECONDS}" git -C "${mirror_dir}" fetch --quiet --prune origin '+refs/*:refs/*'; then
