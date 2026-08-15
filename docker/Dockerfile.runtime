@@ -937,6 +937,29 @@ COPY --from=builder --chown=omniinfra:omniinfra /app/build-provenance.json /app/
 COPY --chown=omniinfra:omniinfra docker/entrypoint-runtime.sh /app/entrypoint-runtime.sh
 RUN chmod +x /app/entrypoint-runtime.sh
 
+# OMN-16026: Keycloak realm reconciler, invoked as a batch Job -- NOT by the
+# runtime kernel. omninode_infra's k8s/onex-dev/jobs/seed-keycloak-clients-job.yaml
+# runs `python scripts/seed-keycloak-clients.py` with workingDir /app against
+# this same digest-pinned image, which is why the file has to live here rather
+# than only in the build context.
+#
+# Until this COPY existed the Job could not run at all: the `runtime` stage
+# carried no `scripts/` directory, so every execution died on
+# "python: can't open file '/app/scripts/seed-keycloak-clients.py'" (observed
+# live on onex-dev 2026-08-13). The earlier attempt to close this,
+# omnibase_infra#2661, was closed without merging, and the stale ordering note
+# in that Job manifest kept pointing at it.
+#
+# Copied as a plain file rather than exposed via `python -m`, for the same
+# reason as onex-container-healthcheck above: the module imports nothing but
+# the standard library (argparse/json/os/subprocess/sys/urllib/pathlib), so
+# running it directly avoids the multi-second omnibase_infra package import.
+# tests/unit/scripts/test_seed_keycloak_clients_stdlib_only.py pins the
+# stdlib-only property so this stays true.
+COPY --chown=omniinfra:omniinfra \
+    scripts/seed-keycloak-clients.py \
+    /app/scripts/seed-keycloak-clients.py
+
 # OMN-15217: semantic container healthcheck, installed at a stable path.
 # Same file as omnibase_infra/runtime/health/container_healthcheck.py — copied
 # rather than invoked via `python -m` on purpose: importing the omnibase_infra

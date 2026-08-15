@@ -53,6 +53,9 @@ from omnibase_infra.nodes.node_gateway_attach_effect.models.model_gateway_sessio
     ModelGatewaySessionEvent,
 )
 from omnibase_infra.nodes.node_gateway_attach_effect.services import (
+    service_gateway_renewal_policy as renewal_policy,
+)
+from omnibase_infra.nodes.node_gateway_attach_effect.services import (
     service_keycloak_token_validator as token_validator,
 )
 from omnibase_infra.nodes.node_gateway_attach_effect.services.protocol_gateway_session_store import (
@@ -143,9 +146,18 @@ class HandlerGatewayAttach(MixinAsyncCircuitBreaker):
             edge_instance_id=session.edge_instance_id,
             emitted_at=now,
         )
+        # OMN-15952: hand the runtime its renewal cycle in the same response
+        # that gives it the session. The alternative -- publishing the terms
+        # in documentation and hoping each client implements them -- is what
+        # left an unattended runtime with no defined behaviour at expiry in
+        # the first place. Computed from the session just stamped, so the
+        # directive can never disagree with the ceiling it is racing.
+        renewal = renewal_policy.build_renewal_directive(session, config=self._config)
+
         return ModelGatewayAttachResponse(
             session=session,
             heartbeat_interval_seconds=self._config.heartbeat_interval_seconds,
+            renewal=renewal,
             session_event=event,
         )
 
