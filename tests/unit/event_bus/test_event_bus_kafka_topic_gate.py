@@ -44,6 +44,16 @@ class TestOnexTopicEnforcementGate:
         )
 
     @pytest.mark.asyncio
+    async def test_tenant_gateway_wire_topic_passes_in_reject_mode(
+        self, make_bus
+    ) -> None:
+        bus = make_bus("reject")
+        await bus._enforce_onex_topic_format(
+            "tenant-beta-gateway-canary.onex.cmd.omnibase-infra.delegation-request.v1",
+            uuid4(),
+        )
+
+    @pytest.mark.asyncio
     async def test_invalid_topic_raises_in_reject_mode(self, make_bus) -> None:
         """Invalid topics should raise ProtocolConfigurationError in reject mode."""
         bus = make_bus("reject")

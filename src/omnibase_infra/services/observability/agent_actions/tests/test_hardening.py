@@ -486,11 +486,23 @@ class TestConsumerMetricsEnhancements:
 
 
 class TestDLQConfiguration:
-    """Test DLQ configuration defaults and overrides."""
+    """Test DLQ configuration defaults and overrides.
+
+    OMN-15410: ``kafka_bootstrap_servers`` is a REQUIRED field — OMN-7227
+    (#1127, 2026-04-02) replaced its ``default="localhost:19092"`` with
+    ``Field(...)`` to kill the silent-fallback class. These constructions had
+    no such argument and have raised ``ValidationError`` ever since; the
+    failure was invisible because this whole ``tests/`` root was uncollected
+    by every CI job (OMN-15378 class). Supplied explicitly here — same literal
+    the already-passing ``_make_health_consumer`` helper in this module uses —
+    rather than relaxing the field, because fail-fast on missing Kafka wiring
+    is the behavior OMN-7227 deliberately bought.
+    """
 
     def test_default_dlq_config(self) -> None:
         """Default DLQ configuration should have sensible defaults."""
         config = ConfigAgentActionsConsumer(
+            kafka_bootstrap_servers="localhost:19092",
             postgres_dsn="postgresql://test:test@localhost:5432/test",
         )
         assert config.dlq_enabled is True
@@ -500,6 +512,7 @@ class TestDLQConfiguration:
     def test_dlq_disabled(self) -> None:
         """DLQ can be disabled via config."""
         config = ConfigAgentActionsConsumer(
+            kafka_bootstrap_servers="localhost:19092",
             postgres_dsn="postgresql://test:test@localhost:5432/test",
             dlq_enabled=False,
         )
@@ -512,11 +525,17 @@ class TestDLQConfiguration:
 
 
 class TestHealthCheckHostDefault:
-    """Test health check host default changed from 0.0.0.0 to 127.0.0.1."""
+    """Test health check host default changed from 0.0.0.0 to 127.0.0.1.
+
+    OMN-15410: ``kafka_bootstrap_servers`` supplied for the same reason as in
+    :class:`TestDLQConfiguration` — the field became required in OMN-7227 and
+    these constructions have been RED-but-uncollected since 2026-04-02.
+    """
 
     def test_default_health_check_host_is_localhost(self) -> None:
         """Default health check host should be 127.0.0.1 for security."""
         config = ConfigAgentActionsConsumer(
+            kafka_bootstrap_servers="localhost:19092",
             postgres_dsn="postgresql://test:test@localhost:5432/test",
         )
         assert config.health_check_host == "127.0.0.1"
@@ -525,6 +544,7 @@ class TestHealthCheckHostDefault:
         """Health check host can be overridden to 0.0.0.0 for containers."""
         all_interfaces = "0.0.0.0"  # noqa: S104 - test verifying container override
         config = ConfigAgentActionsConsumer(
+            kafka_bootstrap_servers="localhost:19092",
             postgres_dsn="postgresql://test:test@localhost:5432/test",
             health_check_host=all_interfaces,
         )

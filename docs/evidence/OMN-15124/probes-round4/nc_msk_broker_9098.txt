@@ -1,0 +1,2 @@
+Connection to b-1.omninodedevmsk.7ozyd3.c14.kafka.us-east-1.amazonaws.com port 9098 [tcp/*] succeeded!
+exit=0

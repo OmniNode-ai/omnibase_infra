@@ -511,7 +511,24 @@ def _resolve_target_path(
         return target_path
     configured_path = env.get("BIFROST_CONTRACT_PATH")
     if configured_path is None:
-        return _DEFAULT_TARGET_PATH
+        # OMN-15628: no silent target-path default. The previous body
+        # returned _DEFAULT_TARGET_PATH here, so a caller that forgot to bind
+        # BIFROST_CONTRACT_PATH (or a direct-call bypass of the
+        # entrypoint-runtime.sh `[ -n "${BIFROST_CONTRACT_PATH:-}" ]` guard)
+        # would still render/write a contract with no attributable cause —
+        # the exact write-side half of the silent-fallback defect class the
+        # read-side reducer fix (this ticket) closes. A service that
+        # deliberately skips rendering binds BIFROST_CONTRACT_PATH="" (the
+        # existing, still-supported "explicit empty = disabled" signal
+        # below) rather than leaving the key unset.
+        raise ProtocolConfigurationError(
+            "BIFROST_CONTRACT_PATH is not bound; render_bifrost_delegation_contract "
+            "refuses to fall back to the packaged default target path "
+            f"({_DEFAULT_TARGET_PATH}) (CLAUDE.md rule 8 — no silent config "
+            "fallback, OMN-15628). Set BIFROST_CONTRACT_PATH explicitly "
+            "(empty string to deliberately skip rendering for this service), "
+            "or pass target_path explicitly."
+        )
     stripped_path = configured_path.strip()
     if not stripped_path:
         return None
@@ -533,10 +550,12 @@ def render_bifrost_delegation_contract(
         source_path: Path to the packaged bifrost_delegation.yaml source.
             Defaults to the omnimarket-bundled copy.
         target_path: Path to write the rendered contract on the runtime volume.
-            Defaults to /app/data/delegation/bifrost_delegation.yaml.
-            Pass ``None`` to accept the env-configured target; returns None
-            when BIFROST_CONTRACT_PATH resolves to an empty path (services
-            that deliberately skip rendering, e.g. projection-api).
+            Pass ``None`` to accept the env-configured target: resolves to
+            ``Path(BIFROST_CONTRACT_PATH)`` when that env var is a non-empty
+            string, returns ``None`` when it is bound to an explicit empty
+            string (services that deliberately skip rendering, e.g.
+            projection-api), and raises ``ProtocolConfigurationError`` when it
+            is unbound entirely (OMN-15628 — no silent default target path).
         environ: Mapping used for env-var reads. Defaults to os.environ.
         verify_endpoints: When True, probe each populated endpoint via
             GET /v1/models and reject backends whose model is not listed.
@@ -554,8 +573,11 @@ def render_bifrost_delegation_contract(
 
     Raises:
         ProtocolConfigurationError: On any rendering failure — missing source,
-            malformed YAML, schema validation failure, or zero populated
-            endpoints (OMN-12814: fail-loud, never returns a silent empty result).
+            malformed YAML, schema validation failure, zero populated
+            endpoints (OMN-12814: fail-loud, never returns a silent empty
+            result), or an unbound BIFROST_CONTRACT_PATH when ``target_path``
+            is not passed explicitly (OMN-15628: no silent default target
+            path).
         FileNotFoundError: If the source contract cannot be found.
         ValueError: If the source YAML fails schema validation.
     """

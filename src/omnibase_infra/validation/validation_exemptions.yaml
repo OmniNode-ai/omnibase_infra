@@ -3789,6 +3789,99 @@ pattern_exemptions:
       target_id is polymorphic across recommendation types: a runner name string (RESTART_RUNNER) or a GitHub Actions run id rendered as str (CANCEL_RUN). Neither is a UUID.
 
     ticket: OMN-13942
+  # ==========================================================================
+  # Hybrid gateway wire identity exemptions (OMN-12912)
+  # ==========================================================================
+  - file_pattern: 'model_gateway_tenant_identity\.py'
+    violation_pattern: "Field 'principal_id' should use UUID"
+    reason: >
+      principal_id is the canonical MSK tenant principal t-<tenant UUID hex>, whose t- prefix makes UUID an invalid representation. The underlying tenant_id remains strongly typed as UUID.
+
+    ticket: OMN-12912
+  - file_pattern: 'model_gateway_heartbeat\.py'
+    violation_pattern: "Field 'tenant_id' should use UUID"
+    reason: >
+      The heartbeat crosses the tenant-prefixed wire boundary and therefore carries the validated DNS-safe tenant slug used in Kafka topic names.
+
+    ticket: OMN-12912
+  - file_pattern: 'model_gateway_heartbeat\.py'
+    violation_pattern: "Field 'principal_id' should use UUID"
+    reason: >
+      principal_id is the canonical MSK tenant principal t-<tenant UUID hex>, whose t- prefix makes UUID an invalid representation.
+
+    ticket: OMN-12912
+  # ==========================================================================
+  # Gateway attach/session control-plane exemptions (OMN-15750)
+  # ==========================================================================
+  - file_pattern: 'model_gateway_session\.py'
+    violation_pattern: "Field 'principal_id' should use UUID type instead of str"
+    reason: >
+      Same t-<tenant UUID hex> canonical MSK principal as model_gateway_tenant_identity.py; the t- prefix makes UUID an invalid representation. The underlying tenant_id field remains strongly typed as UUID.
+
+    ticket: OMN-15750
+  - file_pattern: 'model_gateway_session\.py'
+    violation_pattern: "Field 'keycloak_client_id' should use UUID type instead of str"
+    reason: >
+      Keycloak clientId is an arbitrary realm-scoped string (this node sets it to the immutable principal_id, itself non-UUID -- see above), not a UUID.
+
+    ticket: OMN-15750
+  - file_pattern: 'model_gateway_session\.py'
+    violation_pattern: "Field 'edge_instance_id' should use UUID type instead of str"
+    reason: >
+      Caller-declared host label for observability/bookkeeping only, never used for authorization (that is derived entirely from the validated token claims). Free-form string, not a UUID.
+
+    ticket: OMN-15750
+  - file_pattern: 'model_gateway_attach_request\.py'
+    violation_pattern: "Field 'edge_instance_id' should use UUID type instead of str"
+    reason: >
+      Same caller-declared host label as model_gateway_session.py's edge_instance_id.
+
+    ticket: OMN-15750
+  - file_pattern: 'model_gateway_session_event\.py'
+    violation_pattern: "Field 'principal_id' should use UUID type instead of str"
+    reason: >
+      Same t-<tenant UUID hex> canonical MSK principal as model_gateway_tenant_identity.py.
+
+    ticket: OMN-15750
+  - file_pattern: 'model_gateway_session_event\.py'
+    violation_pattern: "Field 'edge_instance_id' should use UUID type instead of str"
+    reason: >
+      Same caller-declared host label as model_gateway_session.py's edge_instance_id.
+
+    ticket: OMN-15750
+  # ==========================================================================
+  # Gateway auth client exemptions (OMN-15922)
+  # ==========================================================================
+  # The client half of the OMN-15750 attach contract. These mirror the
+  # already-granted server-side exemptions above field-for-field -- the client
+  # holds the same identifiers the node does, so a divergent type here would be
+  # a contract mismatch, not a tightening.
+  - file_pattern: 'model_gateway_credential\.py'
+    violation_pattern: "Field 'client_id' should use UUID type instead of str"
+    reason: >
+      Keycloak clientId is an arbitrary realm-scoped string (e.g. "ga-acme") and IS the principal_id the gateway resolves authority from. Same field as model_gateway_session.py's keycloak_client_id, which carries the identical OMN-15750 exemption; typing it UUID here would make the credential unable to represent a real Keycloak client.
+
+    ticket: OMN-15922
+  - file_pattern: 'model_gateway_credential\.py'
+    violation_pattern: "Field 'edge_instance_id' should use UUID type instead of str"
+    reason: >
+      Same caller-declared host label as model_gateway_session.py's edge_instance_id -- observability/bookkeeping only, never used for authorization. Defaults to the machine hostname, which is not a UUID.
+
+    ticket: OMN-15922
+  - file_pattern: 'cli_auth\.py'
+    method_pattern: "Function 'auth_login'"
+    violation_pattern: 'has \d+ parameters'
+    reason: >
+      The parameters ARE the command-line surface -- click binds one function parameter per --option, so the count is fixed by the six flags 'onex auth login' accepts. Collapsing them into a model would not remove any input; it would add an assembly step between click and the store while leaving the same six flags on the CLI.
+
+    ticket: OMN-15922
+  - file_pattern: 'store_gateway_credential\.py'
+    class_pattern: "Class 'StoreGatewayCredential'"
+    violation_pattern: 'has \d+ methods'
+    reason: >
+      Three public operations (load/save/clear) over two on-disk files, plus the private readers/writers those files require and two path properties. Every method is bound to the same ~/.onex config.yaml + credentials.json pair; splitting the class would put the by-reference invariant (secret value in the 0600 file, never in config.yaml) across two objects that must then agree, which is the coupling the single owner exists to prevent.
+
+    ticket: OMN-15922
 # These handle one-model-per-file violations for domain-grouped protocols
 architecture_exemptions:
   # ==========================================================================

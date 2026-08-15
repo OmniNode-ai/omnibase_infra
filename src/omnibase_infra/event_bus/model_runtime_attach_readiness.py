@@ -7,6 +7,8 @@ for contract lifecycle.
 
 Related Tickets:
     - OMN-13237: Per-contract scoped topic provisioning at runtime boot.
+    - OMN-15512: Ride the existing runtime-manifest event/projection so the
+      NOT-READY blocker set is durably queryable instead of log-only.
 """
 
 from __future__ import annotations
@@ -75,6 +77,32 @@ class ModelRuntimeAttachReadiness(BaseModel):
             attached_contracts=attached,
             results=results,
         )
+
+    @property
+    def not_ready_results(self) -> tuple[ModelContractAttachResult, ...]:
+        """The blocker set: every contract whose consumer did NOT attach.
+
+        Covers both ``NOT_READY`` (readiness confirm failed, attach skipped)
+        and ``FAILED`` (attach raised after readiness passed). Order follows
+        ``results``, which is boot-walk order.
+        """
+        return tuple(
+            r for r in self.results if r.status is not EnumContractAttachStatus.ATTACHED
+        )
+
+    def blockers_only(self) -> ModelRuntimeAttachReadiness:
+        """Return a copy whose ``results`` hold ONLY the blocker set.
+
+        Used for the published/persisted copy (OMN-15512). The counts are
+        preserved, so ``required_contracts - attached_contracts`` still equals
+        ``len(results)`` on the narrowed copy and no information is lost:
+        contracts that DID attach are already enumerated on the same
+        runtime-manifest payload (``contracts`` / ``handlers`` / the
+        subscribed-topic set). Re-emitting several hundred attached results
+        would roughly double the envelope for zero added signal, and boot walks
+        475+ contracts today.
+        """
+        return self.model_copy(update={"results": self.not_ready_results})
 
 
 __all__: list[str] = ["ModelRuntimeAttachReadiness"]

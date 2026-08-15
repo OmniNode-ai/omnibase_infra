@@ -24,6 +24,7 @@ from __future__ import annotations
 
 import asyncio
 import concurrent.futures
+import contextlib
 import hashlib
 import importlib
 import inspect
@@ -34,9 +35,10 @@ import os
 import re
 import time
 from collections import defaultdict
-from collections.abc import Awaitable, Callable, Mapping, Sequence
+from collections.abc import Awaitable, Callable, Collection, Iterator, Mapping, Sequence
 from dataclasses import dataclass, field
 from datetime import UTC, datetime
+from functools import lru_cache
 from pathlib import Path
 from typing import (
     TYPE_CHECKING,
@@ -48,13 +50,25 @@ from typing import (
 )
 from uuid import UUID, uuid4
 
-from pydantic import BaseModel, ValidationError
+from pydantic import AliasChoices, AliasPath, BaseModel, ValidationError
 
 from omnibase_core.enums.enum_core_error_code import EnumCoreErrorCode
+from omnibase_core.enums.enum_database_grant_object_type import (
+    EnumDatabaseGrantObjectType,
+)
+from omnibase_core.enums.enum_database_privilege import EnumDatabasePrivilege
+from omnibase_core.enums.enum_database_schema_domain import EnumDatabaseSchemaDomain
 from omnibase_core.enums.enum_handler_resolution_outcome import (
     EnumHandlerResolutionOutcome,
 )
 from omnibase_core.enums.enum_node_kind import EnumNodeKind
+from omnibase_core.models.contracts.subcontracts.model_db_table_declaration import (
+    ModelDbTableDeclaration,
+)
+from omnibase_core.models.core.model_deployment_topology import ModelDeploymentTopology
+from omnibase_core.models.core.model_deployment_topology_database import (
+    ModelDeploymentTopologyDatabase,
+)
 from omnibase_core.models.errors import ModelOnexError
 from omnibase_core.models.resolver.model_handler_resolver_context import (
     ModelHandlerResolverContext,
@@ -67,6 +81,7 @@ from omnibase_core.services.service_handler_resolver import ServiceHandlerResolv
 from omnibase_core.services.service_local_handler_ownership_query import (
     ServiceLocalHandlerOwnershipQuery,
 )
+from omnibase_infra.errors import TopicReplicationPolicyError
 from omnibase_infra.event_bus.enum_contract_attach_status import (
     EnumContractAttachStatus,
 )
@@ -81,6 +96,9 @@ from omnibase_infra.event_bus.model_topic_readiness_config import (
 )
 from omnibase_infra.event_bus.model_topic_set_readiness import (
     ModelTopicSetReadiness,
+)
+from omnibase_infra.nodes.node_bus_forwarder_effect.services.service_gateway_topic_transform import (
+    resolve_tenant_from_wire_topic,
 )
 from omnibase_infra.protocols.protocol_dispatch_result_applier import (
     ProtocolDispatchResultApplier,
@@ -112,8 +130,24 @@ from omnibase_infra.runtime.auto_wiring.report import (
     ModelSkippedEntry,
     ModelWiringOutcome,
 )
+from omnibase_infra.runtime.contract_terminal_events import (
+    envelope_terminal_payload,
+    load_terminal_event_topics,
+)
+from omnibase_infra.runtime.dispatch_envelope_context import (
+    current_dispatch_envelope,
+    current_projection_tenant_authority,
+)
 from omnibase_infra.runtime.models.model_postgres_pool_config import (
     ModelPostgresPoolConfig,
+)
+from omnibase_infra.runtime.projection_tenant_authority import (
+    VerifiedProjectionTenantAuthority,
+    assert_projection_tenant_authority_matches_event,
+    parse_canonical_tenant_uuid,
+)
+from omnibase_infra.runtime.protocols.protocol_contract_scoped_dispatch_engine import (
+    ProtocolContractScopedDispatchEngine,
 )
 from omnibase_infra.runtime.providers.provider_postgres_pool import ProviderPostgresPool
 from omnibase_infra.runtime.state_io.state_store_adapter import (
@@ -122,11 +156,46 @@ from omnibase_infra.runtime.state_io.state_store_adapter import (
     StateStoreAdapter,
 )
 from omnibase_infra.shared.tenant_stamp import stamp_verified_tenant_slug
+from omnibase_infra.tools.contract_topic_extractor import read_projection_api_topics
+from omnibase_infra.topology.physical_schema_mapping import (
+    physical_grant_schema_for_table,
+)
 from omnibase_infra.utils.util_retry_optimistic import (
     OptimisticConflictError,
     retry_on_optimistic_conflict,
 )
 from omnibase_infra.utils.util_topic_event_type import derive_event_type_from_topic
+
+
+class BoundaryDlqNotPersistedError(Exception):
+    """Marks a boundary failure whose DLQ write was NOT confirmed durable.
+
+    OMN-14498 (Lane C): ``_route_swallowed_exception`` used to return normally
+    even when ``_publish_raw_to_dlq`` reported non-persistence via its
+    documented ``False`` return. A callback that returns normally IS an ACK --
+    ``EventBusKafka._dispatch_to_subscriber`` reads "no exception" as success
+    and lets the offset advance -- so the message was acknowledged while
+    existing nowhere durable. That made the OMN-15232 rewind path
+    (``_rewind_after_unpersisted_dlq``) structurally unreachable for every
+    auto-wired handler: the boundary swallowed its own failure before the
+    consumer loop could see it.
+
+    Raising this type in that ONE case (DLQ enabled AND the write confirmed
+    non-durable) restores the invariant a NACK is supposed to carry: the
+    offset is withheld and Kafka redelivers. It is deliberately NOT raised
+    when the DLQ write succeeded, when the flag is off, or when no
+    DLQ-capable bus is wired -- those paths keep their prior semantics.
+    """
+
+    def __init__(self, topic: str, correlation_id: object, cause: Exception) -> None:
+        super().__init__(
+            f"boundary DLQ write not persisted; offset must not advance "
+            f"(topic={topic} correlation_id={correlation_id} "
+            f"cause={type(cause).__name__})"
+        )
+        self.topic = topic
+        self.correlation_id = correlation_id
+        self.cause = cause
 
 
 class BoundaryPublishError(Exception):
@@ -731,7 +800,12 @@ def _make_dispatch_callback(
             else:
                 target_model = _resolve_def_b_input_model_type(handle_method)
                 if target_model is not None:
-                    payload = _extract_dispatch_payload(envelope)
+                    # OMN-16050: pass the registered input model so the unwrap
+                    # STOPS at it. ``ModelEmitRequest`` declares ``payload`` plus
+                    # four transport markers, so a marker-only heuristic unwrapped
+                    # through it and handed the handler the caller's inner
+                    # payload — every node_event_emit_effect command DLQ'd.
+                    payload = _extract_dispatch_payload(envelope, target_model)
                     if isinstance(payload, target_model):
                         dispatch_arg = payload
                     elif isinstance(payload, Mapping):
@@ -764,7 +838,13 @@ def _make_dispatch_callback(
                 raw_result, envelope, None, handler_node_kind, published_event_names
             )
 
-        payload = _extract_dispatch_payload(envelope)
+        # OMN-16050: resolve the contract-declared event model BEFORE extracting so
+        # the unwrap can stop at it (same fail-closed rule as the def-B branch
+        # above). Resolution failure is not fatal here — the existing try/except
+        # below owns that path — so the hint degrades to None and the extraction
+        # keeps its pre-OMN-16050 structural behaviour.
+        payload_target_model = _safe_import_event_model_class(event_model)
+        payload = _extract_dispatch_payload(envelope, payload_target_model)
         handler_takes_envelope = _handler_accepts_event_envelope(
             cast("Callable[..., object]", handle_method)
         )
@@ -1003,6 +1083,24 @@ def _import_event_model_class(event_model: ModelHandlerRef) -> type[BaseModel]:
     return cast("type[BaseModel]", model_cls)
 
 
+def _safe_import_event_model_class(
+    event_model: ModelHandlerRef | None,
+) -> type[BaseModel] | None:
+    """``_import_event_model_class`` that yields None instead of raising (OMN-16050).
+
+    Used only to hint ``_extract_dispatch_payload`` with the contract-declared
+    target type. An unimportable/malformed ``event_model`` must not change dispatch
+    control flow from this call site — the caller's own
+    ``_import_event_model_class`` inside its try/except still owns that failure.
+    """
+    if event_model is None:
+        return None
+    try:
+        return _import_event_model_class(event_model)
+    except Exception:  # noqa: BLE001 — hint-only resolution, never fatal here
+        return None
+
+
 def _handler_accepts_event_envelope(handle_method: object) -> bool:
     """Return true when a handler's first parameter is envelope-shaped."""
     try:
@@ -1138,6 +1236,55 @@ def _coerce_uuid_or_none(value: object) -> object | None:
     return None
 
 
+def _ingress_correlation_id(message: object) -> UUID | None:
+    """Recover the ingress correlation id from a message's TRANSPORT surface.
+
+    OMN-14498: the consume boundary must be able to establish lineage without
+    decoding the body, because the body is exactly what is unavailable for a
+    poisoned message. Three transport shapes are supported, in order:
+
+    * ``ModelEventMessage`` -- ``headers.correlation_id`` (a real ``UUID``);
+      this is what ``EventBusKafka`` hands the callback in production.
+    * a raw aiokafka ``ConsumerRecord`` -- ``headers`` as an iterable of
+      ``(str, bytes)`` pairs, matching the ``correlation_id`` header both
+      ``MixinKafkaDlq`` and ``DLQProducer.replay_message`` write.
+    * a ``ModelEventEnvelope`` passed directly (legacy in-process call shape)
+      -- its own ``correlation_id``.
+
+    Returns ``None`` when no lineage is present on the transport, leaving the
+    caller to fall back to the body and then to minting a fresh id. Never
+    raises: a malformed header must not take down the consume boundary.
+    """
+    from uuid import UUID as _UUID
+
+    headers = getattr(message, "headers", None)
+
+    header_corr = getattr(headers, "correlation_id", None)
+    coerced = _coerce_uuid_or_none(header_corr)
+    if isinstance(coerced, _UUID):
+        return coerced
+
+    if headers is not None and not isinstance(headers, (str, bytes)):
+        try:
+            for entry in headers:
+                key, value = entry
+                if key != "correlation_id":
+                    continue
+                decoded = (
+                    value.decode("utf-8", errors="replace")
+                    if isinstance(value, bytes)
+                    else value
+                )
+                coerced = _coerce_uuid_or_none(decoded)
+                if isinstance(coerced, _UUID):
+                    return coerced
+        except (TypeError, ValueError):
+            pass
+
+    coerced = _coerce_uuid_or_none(getattr(message, "correlation_id", None))
+    return coerced if isinstance(coerced, _UUID) else None
+
+
 def _coerce_datetime_or_none(value: object) -> object | None:
     from datetime import UTC, datetime
 
@@ -1263,11 +1410,21 @@ def _materialize_typed_event_envelope(
 # Transport-envelope keys the runtime adds around the domain payload. When the
 # dispatch engine materializes a ModelEventEnvelope to a dict it nests the domain
 # fields under ``payload`` and carries routing metadata (``partition_key`` etc.)
-# alongside. Domain models never declare these keys, so a mapping that carries a
-# ``payload`` mapping plus any marker is a transport envelope to unwrap. Mirrors
-# omnimarket's ``_ENVELOPE_MARKER_KEYS`` predicate (OMN-12935/12936); the
-# auto-wiring kernel unwraps here because it constructs the typed model itself,
-# upstream of the handler's own coercion (OMN-12940).
+# alongside, so a mapping that carries a ``payload`` mapping plus any marker MAY
+# be a transport envelope to unwrap. Mirrors omnimarket's
+# ``_ENVELOPE_MARKER_KEYS`` predicate (OMN-12935/12936); the auto-wiring kernel
+# unwraps here because it constructs the typed model itself, upstream of the
+# handler's own coercion (OMN-12940).
+#
+# OMN-16050 — this marker set is a NECESSARY, NOT SUFFICIENT signal. The earlier
+# text here asserted "domain models never declare these keys"; that invariant is
+# FALSE. ``ModelEmitRequest`` (node_event_emit_effect) declares ``payload`` plus
+# four of these markers (``event_type``, ``correlation_id``, ``partition_key``,
+# ``event_id``), is structurally indistinguishable from a transport envelope, and
+# was therefore unwrapped THROUGH — the handler got the caller's inner payload,
+# ``model_validate`` raised, and every command DLQ'd. The registered-input-model
+# stop condition below (``_is_registered_input_payload``) is what makes the
+# heuristic safe: structure alone can never decide this.
 _ENVELOPE_MARKER_KEYS: frozenset[str] = frozenset(
     {
         "partition_key",
@@ -1281,11 +1438,13 @@ _ENVELOPE_MARKER_KEYS: frozenset[str] = frozenset(
 
 
 def _is_transport_envelope(value: object) -> bool:
-    """True when ``value`` is a transport envelope wrapping a domain payload.
+    """True when ``value`` is envelope-SHAPED: a ``payload`` mapping plus a marker.
 
-    A transport envelope is a mapping that carries a ``payload`` mapping plus at
-    least one transport marker key. Requiring a marker avoids over-unwrapping a
-    legitimate domain model that happens to declare its own ``payload`` field.
+    Structural precondition only. A domain model may legitimately declare both a
+    ``payload`` mapping and transport-plausible marker fields (OMN-16050), so this
+    predicate is never sufficient on its own to justify an unwrap — see
+    ``_is_registered_input_payload``, the fail-closed stop condition applied by
+    ``_extract_dispatch_payload``.
     """
     return (
         isinstance(value, Mapping)
@@ -1294,16 +1453,101 @@ def _is_transport_envelope(value: object) -> bool:
     )
 
 
-def _extract_dispatch_payload(envelope: object) -> object:
+def _validation_alias_wire_keys(alias: object) -> set[str]:
+    """Top-level wire keys a pydantic ``validation_alias`` can consume.
+
+    ``validation_alias`` has three shapes and only the plain-string one is a
+    single key. ``AliasPath("meta", "id")`` consumes the TOP-LEVEL key ``meta``
+    (the remaining segments index inside that value), and ``AliasChoices`` holds
+    a list of alternatives, each itself a string or an ``AliasPath``.
+
+    Missing the non-string shapes is fail-OPEN for OMN-16050: a model aliased
+    that way would fail ``_is_registered_input_payload``'s key-containment check
+    even when the candidate IS the registered model, the unwrap would continue
+    into the caller's payload, and the DLQ defect would return for exactly the
+    contracts that use richer aliases.
+    """
+    if isinstance(alias, str):
+        return {alias}
+    if isinstance(alias, AliasPath):
+        first = alias.path[0] if alias.path else None
+        return {first} if isinstance(first, str) else set()
+    if isinstance(alias, AliasChoices):
+        keys: set[str] = set()
+        for choice in alias.choices:
+            keys |= _validation_alias_wire_keys(choice)
+        return keys
+    return set()
+
+
+@lru_cache(maxsize=512)
+def _model_declared_wire_keys(model: type[BaseModel]) -> frozenset[str]:
+    """Every wire key ``model`` can accept: field names plus their input aliases."""
+    keys: set[str] = set()
+    for field_name, model_field in model.model_fields.items():
+        keys.add(field_name)
+        if isinstance(model_field.alias, str):
+            keys.add(model_field.alias)
+        keys |= _validation_alias_wire_keys(model_field.validation_alias)
+    return frozenset(keys)
+
+
+def _is_registered_input_payload(
+    candidate: object, target_model: type[BaseModel] | None
+) -> bool:
+    """True when ``candidate`` IS the dispatcher's registered input model on the wire.
+
+    The fail-closed stop condition for the recursive unwrap (OMN-16050). A
+    candidate is claimed by the registered model only when BOTH hold:
+
+    1. **Key containment** — every key present on the candidate is a declared
+       field (or input alias) of ``target_model``. A real transport envelope
+       always carries at least one routing/marker key the domain model does not
+       declare (``source_tool``, ``envelope_id``, ``__debug_trace``,
+       ``__bindings``, ``envelope_timestamp``, ...), so this alone keeps the
+       OMN-12940 double-wrapped case unwrapping.
+    2. **Full validation** — the candidate validates as ``target_model``, so a
+       partial structural coincidence never halts the unwrap short of the domain.
+
+    The cheap set check runs first; ``model_validate`` executes only for the rare
+    candidate whose keys are entirely owned by the target model.
+
+    Deliberately NOT a marker denylist: dropping ``event_type``/``correlation_id``
+    from ``_ENVELOPE_MARKER_KEYS`` would fix ``ModelEmitRequest`` and silently
+    break every genuine envelope that carries only those markers. This predicate
+    keys on the CONTRACT-registered target type instead of on key spelling.
+    """
+    if target_model is None or not isinstance(candidate, Mapping):
+        return False
+    if not candidate.keys() <= _model_declared_wire_keys(target_model):
+        return False
+    try:
+        target_model.model_validate(dict(candidate))
+    except Exception:  # noqa: BLE001 — any validation failure means "not the model"
+        return False
+    return True
+
+
+def _extract_dispatch_payload(
+    envelope: object, target_model: type[BaseModel] | None = None
+) -> object:
     # The runtime may deliver a DOUBLE- (or deeper-) wrapped envelope, e.g.
     # ``{"payload": {"payload": {domain}, ...markers}, "partition_key": None}``.
     # Unwrap recursively until the domain payload is reached so the kernel's
     # ``model_validate`` (and the post-handler correlation read) operate on the
     # domain, not on an intermediate envelope (OMN-12940).
+    #
+    # OMN-16050: stop the moment the candidate IS the dispatcher's registered
+    # input model. ``target_model`` is the contract-declared type the kernel is
+    # about to construct (the def-B ``handle()`` annotation, or the handler's
+    # declared ``event_model``); when it is None the caller has no registered
+    # type in scope and the pre-existing structural behaviour is unchanged.
     candidate: object = envelope
     if not isinstance(candidate, Mapping):
         candidate = getattr(candidate, "payload", candidate)
-    while _is_transport_envelope(candidate):
+    while _is_transport_envelope(candidate) and not _is_registered_input_payload(
+        candidate, target_model
+    ):
         candidate = cast("Mapping[str, object]", candidate)["payload"]
     return candidate
 
@@ -1622,7 +1866,297 @@ _DB_URL_ENV_MAP: dict[str, str] = {
     "omnidash_analytics": "OMNIDASH_ANALYTICS_DB_URL",
 }
 
-_OPTIONAL_PROJECTION_DATABASES: frozenset[str] = frozenset({"omnidash_analytics"})
+
+@dataclass(frozen=True)
+class ProjectionDatabaseBindingTarget:
+    """One topology-declared workload identity and its secret-free DSN key."""
+
+    binding_ref: str
+    database_ref: str
+    physical_database: str
+    principal: str
+    dsn_env: str
+
+
+@dataclass(frozen=True)
+class ProjectionCatalogBindingPolicy:
+    """Composition-root choice of existing topology catalog identities."""
+
+    read_binding: str | None = None
+    write_binding: str | None = None
+
+
+@dataclass(frozen=True)
+class ProjectionTableTarget:
+    """Topology-resolved location for one typed table declaration."""
+
+    table: ModelDbTableDeclaration
+    database_ref: str
+    physical_database: str
+    schema: str
+    domain: EnumDatabaseSchemaDomain
+    read_binding: ProjectionDatabaseBindingTarget | None
+    write_binding: ProjectionDatabaseBindingTarget | None
+
+
+@dataclass(frozen=True)
+class ProjectionDatabaseTarget:
+    """Topology-resolved, per-operation pools for one projection handler."""
+
+    tables: tuple[ModelDbTableDeclaration, ...]
+    table_targets: tuple[ProjectionTableTarget, ...]
+    physical_database: str
+
+    @property
+    def database_refs(self) -> tuple[str, ...]:
+        """Return the declared logical database references in stable order."""
+        return tuple(sorted({target.database_ref for target in self.table_targets}))
+
+    @property
+    def schemas(self) -> tuple[str, ...]:
+        """Return the declared schemas in stable order."""
+        return tuple(sorted({target.schema for target in self.table_targets}))
+
+    @property
+    def domains(self) -> tuple[EnumDatabaseSchemaDomain, ...]:
+        """Return the topology-derived domains in stable enum-value order."""
+        return tuple(
+            sorted(
+                {target.domain for target in self.table_targets},
+                key=lambda domain: domain.value,
+            )
+        )
+
+    @property
+    def bindings(self) -> tuple[ProjectionDatabaseBindingTarget, ...]:
+        """Return every selected operation binding in stable order."""
+        by_ref: dict[str, ProjectionDatabaseBindingTarget] = {}
+        for table_target in self.table_targets:
+            for binding in (table_target.read_binding, table_target.write_binding):
+                if binding is not None:
+                    by_ref[binding.binding_ref] = binding
+        return tuple(by_ref[key] for key in sorted(by_ref))
+
+    @property
+    def dsn_envs(self) -> tuple[str, ...]:
+        """Return every required DSN environment key in stable order."""
+        return tuple(sorted({binding.dsn_env for binding in self.bindings}))
+
+
+_TENANT_PROJECTION_BINDING = "tenant_projection"
+_INTERNAL_PROJECTION_BINDING = "omninode_runtime_service"
+
+
+def _resolve_projection_binding(
+    database: ModelDeploymentTopologyDatabase,
+    database_ref: str,
+    binding_ref: str,
+) -> ProjectionDatabaseBindingTarget:
+    """Resolve one explicit workload binding without a physical-DB fallback."""
+    binding = database.bindings.get(binding_ref)
+    if binding is None:
+        raise ValueError(
+            f"Projection binding {binding_ref!r} is not declared for "
+            f"database_ref {database_ref!r}"
+        )
+    if binding.database_ref != database_ref:
+        raise ValueError(
+            f"Projection binding {binding_ref!r} resolves to database_ref "
+            f"{binding.database_ref!r}, expected {database_ref!r}"
+        )
+    principal = database.principals.get(binding.principal)
+    if principal is None:
+        raise ValueError(
+            f"Projection binding {binding_ref!r} references unknown principal "
+            f"{binding.principal!r}"
+        )
+    if not principal.login or principal.bypass_rls:
+        raise ValueError(
+            f"Projection principal {binding.principal!r} must be LOGIN and NOBYPASSRLS"
+        )
+    return ProjectionDatabaseBindingTarget(
+        binding_ref=binding_ref,
+        database_ref=database_ref,
+        physical_database=database.physical_name,
+        principal=binding.principal,
+        dsn_env=binding.dsn_env,
+    )
+
+
+def _require_projection_binding_privileges(
+    database: ModelDeploymentTopologyDatabase,
+    binding: ProjectionDatabaseBindingTarget,
+    table: ModelDbTableDeclaration,
+    *,
+    operation: str,
+) -> None:
+    """Prove the selected topology principal can perform the exact operation."""
+    principal = database.principals[binding.principal]
+    grant_schema = physical_grant_schema_for_table(table.schema, table.name)
+    has_schema_usage = any(
+        grant.object_type is EnumDatabaseGrantObjectType.SCHEMA
+        and grant.schema == grant_schema
+        and EnumDatabasePrivilege.USAGE in grant.privileges
+        for grant in principal.grants
+    )
+    required_table_privileges = (
+        {EnumDatabasePrivilege.SELECT}
+        if operation == "read"
+        else {
+            # PostgreSQL requires SELECT as well as INSERT/UPDATE for the
+            # adapter's INSERT ... ON CONFLICT DO UPDATE statement.
+            EnumDatabasePrivilege.SELECT,
+            EnumDatabasePrivilege.INSERT,
+            EnumDatabasePrivilege.UPDATE,
+        }
+    )
+    granted_table_privileges = {
+        privilege
+        for grant in principal.grants
+        if grant.object_type is EnumDatabaseGrantObjectType.TABLE
+        and grant.schema == grant_schema
+        and table.name in grant.objects
+        for privilege in grant.privileges
+    }
+    missing_table_privileges = sorted(
+        required_table_privileges - granted_table_privileges,
+        key=lambda privilege: privilege.value,
+    )
+    if not has_schema_usage or missing_table_privileges:
+        missing = []
+        if not has_schema_usage:
+            missing.append(f"USAGE on schema {grant_schema!r}")
+        if missing_table_privileges:
+            names = ", ".join(privilege.value for privilege in missing_table_privileges)
+            missing.append(f"{names} on table {table.schema}.{table.name}")
+        raise ValueError(
+            f"Projection binding {binding.binding_ref!r} principal "
+            f"{binding.principal!r} lacks declared {operation} privileges: "
+            + "; ".join(missing)
+        )
+
+
+def _projection_operation_bindings(
+    *,
+    table: ModelDbTableDeclaration,
+    database: ModelDeploymentTopologyDatabase,
+    domain: EnumDatabaseSchemaDomain,
+    catalog_read_binding: str | None,
+    catalog_write_binding: str | None,
+) -> tuple[
+    ProjectionDatabaseBindingTarget | None,
+    ProjectionDatabaseBindingTarget | None,
+]:
+    """Select explicit read/write identities from domain and table access."""
+    needs_read = table.access in {"read", "read_write"}
+    needs_write = table.access in {"write", "read_write"}
+    if domain is EnumDatabaseSchemaDomain.TENANT:
+        binding_ref = _TENANT_PROJECTION_BINDING
+        read_ref = binding_ref if needs_read else None
+        write_ref = binding_ref if needs_write else None
+    elif domain is EnumDatabaseSchemaDomain.OMNINODE_INTERNAL:
+        binding_ref = _INTERNAL_PROJECTION_BINDING
+        read_ref = binding_ref if needs_read else None
+        write_ref = binding_ref if needs_write else None
+    elif domain is EnumDatabaseSchemaDomain.PLATFORM_CATALOG:
+        read_ref = catalog_read_binding if needs_read else None
+        write_ref = catalog_write_binding if needs_write else None
+        if needs_read and read_ref is None:
+            raise ValueError(
+                f"Catalog table {table.name!r} requires an explicit reader binding"
+            )
+        if needs_write and write_ref is None:
+            raise ValueError(
+                f"Catalog table {table.name!r} requires an explicit writer binding"
+            )
+    else:  # pragma: no cover - enum exhaustiveness guard
+        raise ValueError(f"Unsupported projection database domain {domain!r}")
+
+    read_binding = (
+        _resolve_projection_binding(database, table.database_ref, read_ref)
+        if read_ref is not None
+        else None
+    )
+    write_binding = (
+        _resolve_projection_binding(database, table.database_ref, write_ref)
+        if write_ref is not None
+        else None
+    )
+    if read_binding is not None:
+        _require_projection_binding_privileges(
+            database,
+            read_binding,
+            table,
+            operation="read",
+        )
+    if write_binding is not None:
+        _require_projection_binding_privileges(
+            database,
+            write_binding,
+            table,
+            operation="write",
+        )
+    return read_binding, write_binding
+
+
+def _resolve_projection_database_target(
+    db_tables: Sequence[ModelDbTableDeclaration],
+    topology: ModelDeploymentTopology,
+    *,
+    catalog_read_binding: str | None = None,
+    catalog_write_binding: str | None = None,
+) -> ProjectionDatabaseTarget:
+    """Resolve typed table declarations through the authoritative topology."""
+    tables = tuple(db_tables)
+    if not tables:
+        raise ValueError("Projection database target requires at least one db_table")
+
+    names = [table.name for table in tables]
+    duplicates = sorted({name for name in names if names.count(name) > 1})
+    if duplicates:
+        raise ValueError(f"Duplicate db_table declarations: {duplicates!r}")
+
+    table_targets: list[ProjectionTableTarget] = []
+    databases_by_physical_name: dict[str, ModelDeploymentTopologyDatabase] = {}
+    for table in tables:
+        database = topology.databases.get(table.database_ref)
+        if database is None:
+            raise ValueError(f"Unknown database_ref '{table.database_ref}'")
+        domain = topology.schema_domain(table.database_ref, table.schema)
+        physical_database = database.physical_name
+        databases_by_physical_name[physical_database] = database
+        read_binding, write_binding = _projection_operation_bindings(
+            table=table,
+            database=database,
+            domain=domain,
+            catalog_read_binding=catalog_read_binding,
+            catalog_write_binding=catalog_write_binding,
+        )
+        table_targets.append(
+            ProjectionTableTarget(
+                table=table,
+                database_ref=table.database_ref,
+                physical_database=physical_database,
+                schema=table.schema,
+                domain=domain,
+                read_binding=read_binding,
+                write_binding=write_binding,
+            )
+        )
+
+    physical_databases = tuple(sorted(databases_by_physical_name))
+    if len(physical_databases) != 1:
+        raise ValueError(
+            "Projection handler db_tables require more than one physical database "
+            f"connection, got {physical_databases!r}; split the handler or provide "
+            "an explicit multi-adapter boundary"
+        )
+    return ProjectionDatabaseTarget(
+        tables=tables,
+        table_targets=tuple(table_targets),
+        physical_database=physical_databases[0],
+    )
+
 
 _TOPIC_TO_EVENT_TYPE: dict[str, str] = {
     "node-heartbeat": "heartbeat",
@@ -1703,6 +2237,16 @@ def _extract_projection_payload(envelope: object) -> object:
     return getattr(envelope, "payload", None)
 
 
+def _extract_projection_envelope_id(envelope: object) -> object | None:
+    """Return the typed, stable identity of the dispatched event envelope."""
+    value = (
+        envelope.get("envelope_id")
+        if isinstance(envelope, dict)
+        else getattr(envelope, "envelope_id", None)
+    )
+    return _coerce_uuid_or_none(value)
+
+
 def _is_raw_event_projection_contract(contract: ModelDiscoveredContract) -> bool:
     if contract.event_bus is None:
         return False
@@ -1726,36 +2270,16 @@ def _raw_event_projection_enabled(
     )
 
 
-def _read_db_io_tables(contract_path: Path) -> list[dict[str, str]]:
-    """Read db_io.db_tables from a contract YAML. Returns [] if db_io is absent.
-
-    Raises on YAML parse errors or unexpected file I/O failures so the caller
-    can mark the contract as broken rather than silently falling back to the
-    non-projection wiring path.
-    """
-    try:
-        # Why: Optional integration dependency is validated at runtime but ships incomplete typing.
-        import yaml  # type: ignore[import-untyped]
-
-        with open(contract_path) as f:
-            raw = yaml.safe_load(f)
-    except FileNotFoundError:
-        return []
-    if not isinstance(raw, dict):
-        return []
-    db_io = raw.get("db_io") or {}
-    return list(db_io.get("db_tables") or [])
-
-
 def _read_dlq_topics(contract_path: Path) -> list[str]:
     """Read ``event_bus.dlq_topics`` from a contract YAML. Returns [] if absent.
 
     OMN-13548 (D-03): projection handlers declare the DLQ destination for
     malformed inbound events under ``event_bus.dlq_topics`` (the same field the
     omnimarket projection runners read). The typed ``ModelEventBusSubcontract``
-    does not carry this field, so the wiring reads it from the raw contract YAML
-    exactly as ``_read_db_io_tables`` reads ``db_io.db_tables``. The DLQ topic is
-    therefore resolved from the contract — never hardcoded in this module.
+    does not carry this field, so the wiring reads only this event-bus extension
+    from the raw contract YAML. Database table locations are already typed on
+    ``ModelDiscoveredContract`` and are never re-read here. The DLQ topic is
+    resolved from the contract — never hardcoded in this module.
 
     Raises on YAML parse / file I/O failures so a broken contract is surfaced
     rather than silently degrading to a no-DLQ projection wiring.
@@ -1777,16 +2301,16 @@ def _read_dlq_topics(contract_path: Path) -> list[str]:
 
 
 def _contract_declares_db_io(contract: ModelDiscoveredContract) -> bool:
-    return bool(_read_db_io_tables(contract.contract_path))
+    return bool(contract.db_io is not None and contract.db_io.db_tables)
 
 
 def _read_state_io(contract_path: Path) -> dict[str, object]:
     """Read the top-level ``state_io`` block from a contract YAML.
 
     Returns ``{}`` if ``state_io`` is absent. Raises on YAML parse errors or
-    unexpected file I/O failures — same fail-loud contract as
-    ``_read_db_io_tables`` — so a malformed contract is surfaced as a broken
-    contract rather than silently treated as "no state_io".
+    unexpected file I/O failures, so a malformed contract is surfaced as a
+    broken contract rather than silently treated as "no state_io". Unlike
+    ``db_io``, this legacy state subcontract does not yet have a core model.
 
     Shape (OMN-14208 opt-in runtime dispatch seam)::
 
@@ -1817,112 +2341,420 @@ def _contract_declares_state_io(contract: ModelDiscoveredContract) -> bool:
     return bool(_read_state_io(contract.contract_path))
 
 
-def _build_sync_db_adapter(db_url: str) -> object:
-    """Build a synchronous psycopg2-backed DatabaseAdapter from a DSN.
+# Tenant-scoped projection tables compare ``tenant_id`` with this
+# transaction-local setting in both USING and WITH CHECK policies.
+_TENANT_GUC = "app.tenant_id"
 
-    Separated from _make_projection_dispatch_callback to allow test patching.
-    """
-    # Why: Optional integration dependency is validated at runtime but ships incomplete typing.
-    import psycopg2  # type: ignore[import-untyped]
 
-    # Why: Optional integration dependency is validated at runtime but ships incomplete typing.
-    import psycopg2.extras  # type: ignore[import-untyped]
+def _projection_tenant_context_error(message: str) -> Exception:
+    from omnibase_infra.errors.error_projection import ProjectionTenantContextError
 
-    class SyncPsycopg2Adapter:
-        _conn: object
+    return ProjectionTenantContextError(message)
 
-        def __init__(self, dsn: str) -> None:
-            self._dsn = dsn
-            self._conn = None
 
-        def _get_conn(self) -> object:
-            if self._conn is None or getattr(self._conn, "closed", False):
-                conn = psycopg2.connect(self._dsn)
-                conn.autocommit = True
-                self._conn = conn
-            return self._conn
+def _reject_canonical_tenant_field(
+    values: Mapping[str, object] | None, *, domain: EnumDatabaseSchemaDomain
+) -> None:
+    if values is not None and "tenant_id" in values:
+        raise ValueError(
+            f"{domain.value} operation rejects canonical tenant_id; "
+            "only tenant-domain operations may carry it"
+        )
 
-        def upsert(self, table: str, conflict_key: str, row: dict[str, object]) -> bool:
-            if not _TABLE_NAME_RE.match(table):
-                raise ValueError(f"Invalid table name: {table!r}")
-            conflict_keys = [
-                key.strip() for key in conflict_key.split(",") if key.strip()
-            ]
-            if not conflict_keys:
-                raise ValueError("conflict_key must contain at least one column")
-            bad_conflict_keys = [
-                key for key in conflict_keys if not _TABLE_NAME_RE.match(key)
-            ]
-            if bad_conflict_keys:
-                raise ValueError(f"Invalid conflict key: {conflict_key!r}")
-            conn = self._get_conn()
-            cols = list(row.keys())
-            bad_cols = [c for c in cols if not _TABLE_NAME_RE.match(str(c))]
-            if bad_cols:
-                raise ValueError(f"Invalid column names: {bad_cols!r}")
-            missing_conflict_keys = [key for key in conflict_keys if key not in row]
-            if missing_conflict_keys:
-                raise KeyError(
-                    f"row missing conflict key(s): {missing_conflict_keys!r}"
-                )
-            quoted_cols = ", ".join(f'"{c}"' for c in cols)
-            placeholders = ", ".join(f"%({c})s" for c in cols)
-            conflict_key_set = set(conflict_keys)
-            updates = ", ".join(
-                f'"{c}" = EXCLUDED."{c}"' for c in cols if c not in conflict_key_set
+
+class ProjectionTableOperation:
+    """Shared SQL mechanics for one topology-resolved table declaration."""
+
+    def __init__(
+        self,
+        adapter: ProjectionDatabaseOperations,
+        target: ProjectionTableTarget,
+    ) -> None:
+        self._adapter = adapter
+        self._target = target
+
+    def _assert_write_declared(self) -> None:
+        if self._target.table.access not in {"write", "read_write"}:
+            raise PermissionError(
+                f"{self._target.schema}.{self._target.table.name} declares "
+                f"access={self._target.table.access!r}; write refused"
             )
-            conflict_columns = ", ".join(f'"{key}"' for key in conflict_keys)
-            # JSONB adaptation: a dict is always JSON-adapted. A list is
-            # JSON-adapted per _should_jsonb_wrap_list (suffix convention,
-            # allowlist, or the OMN-14494 structural any-element-is-dict/list
-            # heuristic) and otherwise passed raw so genuine Postgres text[]
-            # ARRAY columns (e.g. swarm_runs.models_used / machines_used)
-            # keep their array semantics. A JSONB list sent as a Postgres
-            # ARRAY literal fails the INSERT — which is what silently
-            # dropped node-generation-completed events before this fix.
-            adapted_row = {
-                key: (
-                    psycopg2.extras.Json(value)
-                    if isinstance(value, dict)
-                    or (isinstance(value, list) and _should_jsonb_wrap_list(key, value))
-                    else value
+
+    def _assert_read_declared(self) -> None:
+        if self._target.table.access not in {"read", "read_write"}:
+            raise PermissionError(
+                f"{self._target.schema}.{self._target.table.name} declares "
+                f"access={self._target.table.access!r}; read refused"
+            )
+
+    def upsert(self, conflict_key: str, row: dict[str, object]) -> bool:
+        self._assert_write_declared()
+        return self._adapter._execute_upsert(
+            self._target, conflict_key, row, tenant_context=None
+        )
+
+    def query(
+        self, filters: dict[str, object] | None = None
+    ) -> list[dict[str, object]]:
+        self._assert_read_declared()
+        return self._adapter._execute_query(self._target, filters, tenant_context=None)
+
+
+class TenantProjectionTableOperation(ProjectionTableOperation):
+    """Tenant operation whose only authority is a verified capability."""
+
+    def _context(self) -> VerifiedProjectionTenantAuthority:
+        return self._adapter._bound_tenant_context()
+
+    def _assert_supplied_tenant(
+        self,
+        supplied_tenant: object,
+        context: VerifiedProjectionTenantAuthority,
+        *,
+        operation: str,
+    ) -> None:
+        if isinstance(supplied_tenant, UUID):
+            supplied_uuid = supplied_tenant
+        elif isinstance(supplied_tenant, str):
+            supplied_uuid = parse_canonical_tenant_uuid(
+                supplied_tenant,
+                authority=f"{self._target.table.name} {operation} compatibility field",
+            )
+        else:
+            raise _projection_tenant_context_error(
+                f"{self._target.table.name} {operation} tenant_id does not match "
+                "verified projection authority"
+            )
+        if supplied_uuid != context.tenant_id:
+            raise _projection_tenant_context_error(
+                f"{self._target.table.name} {operation} tenant_id does not match "
+                "verified projection authority"
+            )
+
+    def upsert(self, conflict_key: str, row: dict[str, object]) -> bool:
+        self._assert_write_declared()
+        context = self._context()
+        attributed_row = dict(row)
+        supplied_tenant = attributed_row.get("tenant_id")
+        if supplied_tenant is not None:
+            self._assert_supplied_tenant(supplied_tenant, context, operation="row")
+        attributed_row["tenant_id"] = context.tenant_id
+        return self._adapter._execute_upsert(
+            self._target,
+            conflict_key,
+            attributed_row,
+            tenant_context=context,
+        )
+
+    def query(
+        self, filters: dict[str, object] | None = None
+    ) -> list[dict[str, object]]:
+        self._assert_read_declared()
+        context = self._context()
+        attributed_filters = dict(filters or {})
+        supplied_tenant = attributed_filters.get("tenant_id")
+        if supplied_tenant is not None:
+            self._assert_supplied_tenant(supplied_tenant, context, operation="query")
+        attributed_filters["tenant_id"] = context.tenant_id
+        return self._adapter._execute_query(
+            self._target,
+            attributed_filters,
+            tenant_context=context,
+        )
+
+
+class InternalProjectionTableOperation(ProjectionTableOperation):
+    """Internal operation that never resolves or sets tenant context."""
+
+    def upsert(self, conflict_key: str, row: dict[str, object]) -> bool:
+        _reject_canonical_tenant_field(row, domain=self._target.domain)
+        conflict_keys = {key.strip() for key in conflict_key.split(",")}
+        if "source_tenant_id" in conflict_keys:
+            raise ValueError(
+                "Internal source_tenant_id is provenance only and cannot be an "
+                "upsert conflict key"
+            )
+        return super().upsert(conflict_key, row)
+
+    def query(
+        self, filters: dict[str, object] | None = None
+    ) -> list[dict[str, object]]:
+        _reject_canonical_tenant_field(filters, domain=self._target.domain)
+        return super().query(filters)
+
+
+class CatalogProjectionTableOperation(ProjectionTableOperation):
+    """Catalog operation enforcing the declaration's explicit access mode."""
+
+    def upsert(self, conflict_key: str, row: dict[str, object]) -> bool:
+        _reject_canonical_tenant_field(row, domain=self._target.domain)
+        return super().upsert(conflict_key, row)
+
+    def query(
+        self, filters: dict[str, object] | None = None
+    ) -> list[dict[str, object]]:
+        _reject_canonical_tenant_field(filters, domain=self._target.domain)
+        return super().query(filters)
+
+
+class ProjectionBindingConnections:
+    """Own per-binding connections, identity attestation, and transactions."""
+
+    def __init__(
+        self,
+        db_urls: Mapping[str, str],
+        target: ProjectionDatabaseTarget,
+        psycopg2_module: object,
+    ) -> None:
+        required_bindings = {binding.binding_ref for binding in target.bindings}
+        supplied_bindings = set(db_urls)
+        if supplied_bindings != required_bindings:
+            raise ValueError(
+                "Projection DSN bindings must exactly match the topology target: "
+                f"required={sorted(required_bindings)!r}, "
+                f"supplied={sorted(supplied_bindings)!r}"
+            )
+        if any(not isinstance(url, str) or not url for url in db_urls.values()):
+            raise ValueError("Projection DSN binding values must be non-empty strings")
+        self._db_urls = dict(db_urls)
+        self._connections: dict[str, object] = {}
+        self._closed = False
+        self._psycopg2 = psycopg2_module
+
+    @property
+    def connections(self) -> dict[str, object]:
+        """Expose live connections for narrow diagnostics and cleanup proofs."""
+        return self._connections
+
+    def get(self, binding: ProjectionDatabaseBindingTarget | None) -> object:
+        """Return an attested connection for one exact topology binding."""
+        self.ensure_open()
+        if binding is None:
+            raise PermissionError(
+                "Projection operation has no declared workload binding"
+            )
+        conn = self._connections.get(binding.binding_ref)
+        if conn is None or getattr(conn, "closed", False):
+            connect = self._psycopg2.connect  # type: ignore[attr-defined]
+            conn = connect(self._db_urls[binding.binding_ref])
+            try:
+                conn.autocommit = True
+                with conn.cursor() as cursor:  # type: ignore[attr-defined]
+                    cursor.execute("SELECT current_user, current_database()")
+                    identity = cursor.fetchone()
+                expected_identity = (binding.principal, binding.physical_database)
+                if (
+                    not isinstance(identity, (tuple, list))
+                    or tuple(identity) != expected_identity
+                ):
+                    raise PermissionError(
+                        f"Projection binding {binding.binding_ref!r} connected as "
+                        f"{identity!r}, expected {expected_identity!r}"
+                    )
+            except BaseException:
+                conn.close()  # type: ignore[attr-defined]
+                raise
+            self._connections[binding.binding_ref] = conn
+        return conn
+
+    def close(self) -> None:
+        """Deterministically close every per-binding connection."""
+        if self._closed:
+            return
+        self._closed = True
+        connections = tuple(self._connections.values())
+        self._connections.clear()
+        for conn in connections:
+            if not getattr(conn, "closed", False):
+                conn.close()  # type: ignore[attr-defined]
+
+    def ensure_open(self) -> None:
+        if self._closed:
+            raise RuntimeError("Projection database adapter is closed")
+
+    @contextlib.contextmanager
+    def tenant_transaction(
+        self, conn: object, context: VerifiedProjectionTenantAuthority
+    ) -> Iterator[None]:
+        """Set the GUC locally from a validated context, then always end it."""
+        conn.autocommit = False  # type: ignore[attr-defined]
+        try:
+            with conn.cursor() as cursor:  # type: ignore[attr-defined]
+                cursor.execute(
+                    "SELECT set_config(%s, %s, true)",
+                    (_TENANT_GUC, str(context.tenant_id)),
                 )
-                for key, value in row.items()
-            }
-            # table/conflict_key/cols validated by _TABLE_NAME_RE — not raw user input
-            parts = [
-                f'INSERT INTO "{table}" ({quoted_cols})',
+            yield
+            conn.commit()  # type: ignore[attr-defined]
+        except BaseException:
+            conn.rollback()  # type: ignore[attr-defined]
+            raise
+        finally:
+            conn.autocommit = True  # type: ignore[attr-defined]
+
+
+class ProjectionDatabaseOperations:
+    """Router over separate table operations selected from typed topology."""
+
+    def __init__(
+        self,
+        db_urls: Mapping[str, str],
+        target: ProjectionDatabaseTarget,
+        tenant_authority: VerifiedProjectionTenantAuthority | None,
+        tenant_event: object | None,
+        psycopg2_module: object,
+        extras_module: object,
+    ) -> None:
+        self._binding_connections = ProjectionBindingConnections(
+            db_urls,
+            target,
+            psycopg2_module,
+        )
+        # Kept as a read-only diagnostic seam for existing runtime proofs.
+        self._connections = self._binding_connections.connections
+        self._extras = extras_module
+        self._tenant_authority = tenant_authority
+        self._tenant_event = tenant_event
+        operation_types: dict[
+            EnumDatabaseSchemaDomain, type[ProjectionTableOperation]
+        ] = {
+            EnumDatabaseSchemaDomain.TENANT: TenantProjectionTableOperation,
+            EnumDatabaseSchemaDomain.OMNINODE_INTERNAL: InternalProjectionTableOperation,
+            EnumDatabaseSchemaDomain.PLATFORM_CATALOG: CatalogProjectionTableOperation,
+        }
+        self._operations = {
+            table_target.table.name: operation_types[table_target.domain](
+                self, table_target
+            )
+            for table_target in target.table_targets
+        }
+
+    def _bound_tenant_context(self) -> VerifiedProjectionTenantAuthority:
+        """Return the already-verified authority or fail before connecting."""
+        self._binding_connections.ensure_open()
+        if self._tenant_authority is None:
+            raise _projection_tenant_context_error(
+                "Tenant projection has no cryptographically verified authority"
+            )
+        assert_projection_tenant_authority_matches_event(
+            self._tenant_authority,
+            self._tenant_event,
+        )
+        return self._tenant_authority
+
+    def close(self) -> None:
+        """Release authority and deterministically close every connection."""
+        self._tenant_authority = None
+        self._tenant_event = None
+        self._binding_connections.close()
+
+    def _operation(self, table: str) -> ProjectionTableOperation:
+        self._binding_connections.ensure_open()
+        operation = self._operations.get(table)
+        if operation is None:
+            raise ValueError(
+                f"Projection table {table!r} is not declared by the typed db_io contract"
+            )
+        return operation
+
+    def _adapt_row(self, row: Mapping[str, object]) -> dict[str, object]:
+        json_adapter = self._extras.Json  # type: ignore[attr-defined]
+        return {
+            key: (
+                json_adapter(value)
+                if isinstance(value, dict)
+                or (isinstance(value, list) and _should_jsonb_wrap_list(key, value))
+                else value
+            )
+            for key, value in row.items()
+        }
+
+    def _execute_upsert(
+        self,
+        target: ProjectionTableTarget,
+        conflict_key: str,
+        row: dict[str, object],
+        *,
+        tenant_context: VerifiedProjectionTenantAuthority | None,
+    ) -> bool:
+        conflict_keys = [key.strip() for key in conflict_key.split(",") if key.strip()]
+        if not conflict_keys:
+            raise ValueError("conflict_key must contain at least one column")
+        if any(not _TABLE_NAME_RE.fullmatch(key) for key in conflict_keys):
+            raise ValueError(f"Invalid conflict key: {conflict_key!r}")
+        cols = list(row)
+        bad_cols = [column for column in cols if not _TABLE_NAME_RE.fullmatch(column)]
+        if bad_cols:
+            raise ValueError(f"Invalid column names: {bad_cols!r}")
+        missing = [key for key in conflict_keys if key not in row]
+        if missing:
+            raise KeyError(f"row missing conflict key(s): {missing!r}")
+        quoted_cols = ", ".join(f'"{column}"' for column in cols)
+        placeholders = ", ".join(f"%({column})s" for column in cols)
+        conflict_columns = ", ".join(f'"{key}"' for key in conflict_keys)
+        conflict_set = set(conflict_keys)
+        updates = ", ".join(
+            f'"{column}" = EXCLUDED."{column}"'
+            for column in cols
+            if column not in conflict_set
+        )
+        action = f"DO UPDATE SET {updates}" if updates else "DO NOTHING"
+        insert_sql = " ".join(
+            (
+                f'INSERT INTO "{target.schema}"."{target.table.name}" ({quoted_cols})',
                 f"VALUES ({placeholders})",
-                f"ON CONFLICT ({conflict_columns}) DO UPDATE SET {updates}",
+                f"ON CONFLICT ({conflict_columns}) {action}",
+            )
+        )
+        conn = self._binding_connections.get(target.write_binding)
+        adapted_row = self._adapt_row(row)
+        if tenant_context is None:
+            with conn.cursor() as cursor:  # type: ignore[attr-defined]
+                cursor.execute(insert_sql, adapted_row)
+        else:
+            with self._binding_connections.tenant_transaction(conn, tenant_context):
+                with conn.cursor() as cursor:  # type: ignore[attr-defined]
+                    cursor.execute(insert_sql, adapted_row)
+        return True
+
+    def _execute_query(
+        self,
+        target: ProjectionTableTarget,
+        filters: dict[str, object] | None,
+        *,
+        tenant_context: VerifiedProjectionTenantAuthority | None,
+    ) -> list[dict[str, object]]:
+        # Schema/table originate in validated typed declarations, never request data.
+        select_sql = f'SELECT * FROM "{target.schema}"."{target.table.name}"'  # noqa: S608
+        params: list[object] = []
+        if filters:
+            bad_keys = [
+                key for key in filters if not _TABLE_NAME_RE.fullmatch(str(key))
             ]
-            insert_sql = " ".join(parts)
-            # Why: Control flow narrows this union at runtime before the attribute access.
-            with conn.cursor() as cur:  # type: ignore[union-attr, attr-defined]
-                cur.execute(insert_sql, adapted_row)
-            return True
+            if bad_keys:
+                raise ValueError(f"Invalid filter keys: {bad_keys!r}")
+            select_sql += " WHERE " + " AND ".join(f'"{key}" = %s' for key in filters)
+            params = list(filters.values())
+        conn = self._binding_connections.get(target.read_binding)
 
-        def query(
-            self, table: str, filters: dict[str, object] | None = None
-        ) -> list[dict[str, object]]:
-            if not _TABLE_NAME_RE.match(table):
-                raise ValueError(f"Invalid table name: {table!r}")
-            conn = self._get_conn()
-            # table validated by _TABLE_NAME_RE — not user input
-            select_sql = f'SELECT * FROM "{table}"'  # noqa: S608
-            params: list[object] = []
-            if filters:
-                bad_keys = [k for k in filters if not _TABLE_NAME_RE.match(str(k))]
-                if bad_keys:
-                    raise ValueError(f"Invalid filter keys: {bad_keys!r}")
-                clauses = [f'"{k}" = %s' for k in filters]
-                select_sql += " WHERE " + " AND ".join(clauses)
-                params = list(filters.values())
-            # Why: Control flow narrows this union at runtime before the attribute access.
-            with conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor) as cur:  # type: ignore[union-attr, attr-defined]
-                cur.execute(select_sql, params or None)
-                return [dict(r) for r in cur.fetchall()]
+        def _query() -> list[dict[str, object]]:
+            cursor_factory = self._extras.RealDictCursor  # type: ignore[attr-defined]
+            with conn.cursor(cursor_factory=cursor_factory) as cursor:  # type: ignore[attr-defined]
+                cursor.execute(select_sql, params or None)
+                return [dict(record) for record in cursor.fetchall()]
 
-    return SyncPsycopg2Adapter(db_url)
+        if tenant_context is None:
+            return _query()
+        with self._binding_connections.tenant_transaction(conn, tenant_context):
+            return _query()
+
+    def upsert(self, table: str, conflict_key: str, row: dict[str, object]) -> bool:
+        return self._operation(table).upsert(conflict_key, row)
+
+    def query(
+        self, table: str, filters: dict[str, object] | None = None
+    ) -> list[dict[str, object]]:
+        return self._operation(table).query(filters)
 
 
 def _connect_projection_runner_db_if_needed(handler_instance: object) -> None:
@@ -2112,7 +2944,7 @@ class ProjectionDispatchSinks:
 
 def _make_projection_dispatch_callback(
     handler_instance: object,
-    db_tables: list[dict[str, str]],
+    target: ProjectionDatabaseTarget,
     subscribe_topics: tuple[str, ...],
     sinks: ProjectionDispatchSinks | None = None,
 ) -> DispatcherFunc:
@@ -2144,45 +2976,55 @@ def _make_projection_dispatch_callback(
     terminal_event = sinks.terminal_event
     dlq_topics = list(sinks.dlq_topics)
     handler_name = type(handler_instance).__name__
-    database = (
-        db_tables[0].get("database", "omnidash_analytics")
-        if db_tables
-        else "omnidash_analytics"
+    is_projection_runner = _is_projection_runner_handler(handler_instance)
+    db_urls = (
+        {}
+        if is_projection_runner
+        else {
+            binding.binding_ref: os.environ.get(binding.dsn_env, "")
+            for binding in target.bindings
+        }
     )
-    if database not in _DB_URL_ENV_MAP:
+    missing_bindings = [
+        binding
+        for binding in target.bindings
+        if not is_projection_runner and not db_urls[binding.binding_ref]
+    ]
+    if missing_bindings:
         raise ValueError(
-            f"Unknown database {database!r} in contract db_io — "
-            f"must be one of {sorted(_DB_URL_ENV_MAP)!r}"
+            "Projection handler requires topology bindings with configured DSNs: "
+            + ", ".join(
+                f"{binding.binding_ref}:{binding.dsn_env}"
+                for binding in missing_bindings
+            )
         )
-    db_url_env = _DB_URL_ENV_MAP[database]
 
     async def _callback(
         envelope: ModelEventEnvelope[object],
     ) -> ModelDispatchResult | None:
-        if _is_projection_runner_handler(handler_instance):
+        if is_projection_runner:
             logger.debug(
                 "Projection runner skipped by DB-injection auto-wiring: handler=%s topic=%s",
                 type(handler_instance).__name__,
                 _extract_projection_topic(envelope) or "unknown",
             )
             return None
-        db_url = os.environ.get(db_url_env, "")
-        if not db_url:
-            log_level = (
-                logging.INFO
-                if database in _OPTIONAL_PROJECTION_DATABASES
-                else logging.ERROR
-            )
-            logger.log(
-                log_level,
-                "Projection handler inactive: %s not set (database=%s)",
-                db_url_env,
-                database,
-            )
-            return None
         projected = False
+        adapter: object | None = None
         try:
-            adapter = _build_sync_db_adapter(db_url)
+            # MessageDispatchEngine hands callbacks a JSON-safe materialization.
+            # The original typed envelope is retained only for stable transport
+            # identity; it is never a tenant-authentication source.  Tenant
+            # operations require the separate cryptographically verified
+            # capability bound by trusted ingress.
+            typed_envelope = current_dispatch_envelope() or envelope
+            tenant_authority = current_projection_tenant_authority()
+            adapter = _build_projection_db_adapter(
+                db_urls,
+                target,
+                tenant_authority,
+                typed_envelope,
+            )
             topic = _extract_projection_topic(envelope)
             event_type = _derive_projection_event_type(
                 topic,
@@ -2199,6 +3041,12 @@ def _make_projection_dispatch_callback(
             input_data["_db"] = adapter
             input_data["_event_type"] = event_type
             input_data["_topic"] = topic
+            envelope_id = _extract_projection_envelope_id(typed_envelope)
+            if envelope_id is not None:
+                # Preserve the UUID at the transport boundary. Projection
+                # handlers may use it as their durable idempotency key instead
+                # of inventing a fresh identity for every Kafka redelivery.
+                input_data["_envelope_id"] = envelope_id
 
             def _invoke_projection_handler() -> object:
                 _connect_projection_runner_db_if_needed(handler_instance)
@@ -2275,6 +3123,11 @@ def _make_projection_dispatch_callback(
                 handler_name,
                 f"{type(exc).__name__}: {_sanitize_exc(exc)}",
             )
+        finally:
+            if adapter is not None:
+                close = getattr(adapter, "close", None)
+                if callable(close):
+                    close()
 
         if projected and event_bus is not None and terminal_event is not None:
             await _emit_projection_terminal_event(event_bus, terminal_event, envelope)
@@ -2282,6 +3135,41 @@ def _make_projection_dispatch_callback(
         return None
 
     return _callback
+
+
+def _build_projection_db_adapter(
+    db_urls: Mapping[str, str],
+    target: ProjectionDatabaseTarget,
+    tenant_authority: VerifiedProjectionTenantAuthority | None,
+    tenant_event: object | None,
+) -> object:
+    """Build a router whose operations come only from typed topology targets."""
+    # Why: Optional integration dependency ships incomplete typing.
+    import psycopg2  # type: ignore[import-untyped]
+
+    # Why: Optional integration dependency ships incomplete typing.
+    import psycopg2.extras  # type: ignore[import-untyped]
+
+    # Keep UUIDs typed through the adapter and teach psycopg2 the final wire
+    # conversion, instead of stringifying correlation/tenant IDs in row data.
+    psycopg2.extras.register_uuid()
+
+    logger.debug(
+        "Selecting projection adapter: database_refs=%s physical_database=%s "
+        "schemas=%s domains=%s",
+        target.database_refs,
+        target.physical_database,
+        target.schemas,
+        [domain.value for domain in target.domains],
+    )
+    return ProjectionDatabaseOperations(
+        db_urls,
+        target,
+        tenant_authority,
+        tenant_event,
+        psycopg2,
+        psycopg2.extras,
+    )
 
 
 async def _emit_projection_terminal_event(
@@ -2472,8 +3360,8 @@ def _make_stateful_dispatch_callback(
         raise StateIoUnconfiguredError(
             f"handler_wiring: contract declares state_io (table={table!r}) "
             f"but {db_url_env} is unset. state_io is a REQUIRED durability "
-            "seam (OMN-14208) — unlike the optional db_io projection path, "
-            "it fails closed at wiring time rather than degrading silently."
+            "seam (OMN-14208) and fails closed at wiring time. Projection "
+            "db_io topology bindings are likewise wiring-time requirements."
         )
     # Resolved once, at wiring time, not on every dispatch — mirrors the
     # fail-fast intent of every other _import_handler_class call in this
@@ -3195,6 +4083,333 @@ def _raise_if_silent_dispatch_failure(
     )
 
 
+def _normalize_contract_dispatcher_scope(
+    dispatcher_ids: Collection[str] | None,
+    *,
+    contract_name: str,
+    allow_empty: bool,
+) -> frozenset[str]:
+    """Return a canonical unique dispatcher scope without trusting transport state.
+
+    A contract-owned Kafka callback must never fall back to process-global
+    dispatch. Two contracts can intentionally consume the same topic under
+    distinct groups; global fan-out from each callback executes both contracts'
+    handlers once per group (OMN-15474). The live engine owner registry, not a
+    serialized wiring report, is authoritative for completeness.
+    """
+    if dispatcher_ids is None:
+        raise ModelOnexError(
+            message=(
+                "handler_wiring: contract-scoped subscription is missing its "
+                f"dispatcher scope for contract {contract_name!r}; refusing "
+                "process-global fan-out."
+            ),
+            error_code=EnumCoreErrorCode.INVALID_CONFIGURATION,
+        )
+    raw_dispatcher_ids = tuple(dispatcher_ids)
+    seen: set[str] = set()
+    duplicate_ids: set[str] = set()
+    for dispatcher_id in raw_dispatcher_ids:
+        if dispatcher_id in seen:
+            duplicate_ids.add(dispatcher_id)
+        seen.add(dispatcher_id)
+    if (
+        (not raw_dispatcher_ids and not allow_empty)
+        or any(
+            not dispatcher_id or dispatcher_id != dispatcher_id.strip()
+            for dispatcher_id in raw_dispatcher_ids
+        )
+        or duplicate_ids
+    ):
+        raise ModelOnexError(
+            message=(
+                "handler_wiring: contract-scoped subscription has an empty or "
+                f"invalid dispatcher scope for contract {contract_name!r} "
+                f"(duplicates={sorted(duplicate_ids)}); "
+                "refusing process-global fan-out."
+            ),
+            error_code=EnumCoreErrorCode.INVALID_CONFIGURATION,
+        )
+    return frozenset(raw_dispatcher_ids)
+
+
+def _require_contract_dispatcher_scope(
+    dispatcher_ids: Collection[str] | None,
+    *,
+    contract_name: str,
+) -> frozenset[str]:
+    """Return a canonical non-empty dispatcher scope before subscribing."""
+    return _normalize_contract_dispatcher_scope(
+        dispatcher_ids,
+        contract_name=contract_name,
+        allow_empty=False,
+    )
+
+
+def _require_unique_canonical_contract_names(
+    contract_names: Sequence[str],
+    *,
+    identity_source: str,
+) -> frozenset[str]:
+    """Return an exact identity set or reject aliases and duplicate rows."""
+    raw_names = tuple(contract_names)
+    noncanonical_names = tuple(
+        sorted(
+            {
+                contract_name
+                for contract_name in raw_names
+                if not contract_name or contract_name != contract_name.strip()
+            }
+        )
+    )
+    if noncanonical_names:
+        raise ModelOnexError(
+            message=(
+                f"handler_wiring: noncanonical {identity_source} contract names "
+                f"are not valid subscription identities: {noncanonical_names}"
+            ),
+            error_code=EnumCoreErrorCode.INVALID_CONFIGURATION,
+        )
+
+    seen: set[str] = set()
+    duplicate_names: set[str] = set()
+    for contract_name in raw_names:
+        if contract_name in seen:
+            duplicate_names.add(contract_name)
+        seen.add(contract_name)
+    if duplicate_names:
+        raise ModelOnexError(
+            message=(
+                f"handler_wiring: duplicate {identity_source} contract names "
+                "would collapse or schedule repeated consumer attachment: "
+                f"{sorted(duplicate_names)}"
+            ),
+            error_code=EnumCoreErrorCode.INVALID_CONFIGURATION,
+        )
+    return frozenset(raw_names)
+
+
+def _validate_initial_subscription_contract_identities(
+    manifest: ModelAutoWiringManifest,
+    report: ModelAutoWiringReport,
+) -> None:
+    """Require a canonical, exact bijection between report and manifest names.
+
+    OMN-15474 ruling 4 (re-affirmed by OMN-15621 after PR #2609 narrowed this
+    to a report-subset-of-manifest check, contrary to the ruling). Both
+    directions are load-bearing for single-owner dispatch:
+
+    1. **Uniqueness** on each side. A repeated contract name would schedule a
+       repeated consumer attachment for one identity — the same
+       execute-the-command-twice class this ticket exists to close.
+    2. **report ⊆ manifest.** A report row naming a contract the manifest never
+       declared is an identity error: it would attach a consumer for a contract
+       this boot does not own.
+    3. **manifest ⊆ report.** A manifest contract with no report row at all is
+       indistinguishable from one that silently vanished from the wiring
+       pass — exactly the class of bug that produced process-global dispatch
+       (OMN-15474). This direction is safe to assert unconditionally because
+       the report is contractually TOTAL over the manifest it was built from:
+       :func:`wire_from_manifest` backfills one explicit SKIPPED row per
+       uncovered contract via :func:`build_unwired_contract_results` before it
+       returns (see the "OMN-15474 totality post-condition" comment there), so
+       a contract that failed to wire, was resolver-skipped, or was
+       quarantined still produces a row — it is simply not ``WIRED``. A
+       missing row is therefore never legitimate; it means some caller handed
+       this function a report that was never produced by the real producer
+       (e.g. a hand-truncated report in a test), or a manifest that differs
+       from the one the report was built against. Both are boot-time bugs.
+
+    A prior revision of this docstring claimed the reverse direction "refused
+    the boot outright against the full shipped manifest (missing_from_report
+    = 118 contracts)". That is not reproducible against the current producer:
+    a live run of the real main-profile manifest (118 contracts) through
+    :func:`wire_from_manifest` yields a report that is already exactly total
+    (0 missing, 0 unexpected) before this check ever runs. The 118 in that
+    docstring was the full manifest size, not a genuine gap — see OMN-15621.
+    """
+    manifest_names = _require_unique_canonical_contract_names(
+        tuple(contract.name for contract in manifest.contracts),
+        identity_source="manifest",
+    )
+    report_names = _require_unique_canonical_contract_names(
+        tuple(result.contract_name for result in report.results),
+        identity_source="report",
+    )
+    if report_names != manifest_names:
+        raise ModelOnexError(
+            message=(
+                "handler_wiring: report and manifest contract-name mismatch; "
+                "initial subscription requires an exact bijection "
+                f"(missing_from_report={sorted(manifest_names - report_names)}, "
+                f"unexpected_in_report={sorted(report_names - manifest_names)})"
+            ),
+            error_code=EnumCoreErrorCode.INVALID_CONFIGURATION,
+        )
+
+
+def _validate_not_ready_contract_identities(
+    manifest: ModelAutoWiringManifest,
+    not_ready_results: Sequence[ModelContractAttachResult],
+) -> tuple[ModelContractAttachResult, ...]:
+    """Return uniquely named NOT_READY rows forming a valid manifest subset."""
+    manifest_names = _require_unique_canonical_contract_names(
+        tuple(contract.name for contract in manifest.contracts),
+        identity_source="manifest",
+    )
+    pending_results = tuple(
+        result
+        for result in not_ready_results
+        if result.status is EnumContractAttachStatus.NOT_READY
+    )
+    not_ready_names = _require_unique_canonical_contract_names(
+        tuple(result.contract_name for result in pending_results),
+        identity_source="NOT_READY",
+    )
+    unexpected_names = not_ready_names.difference(manifest_names)
+    if unexpected_names:
+        raise ModelOnexError(
+            message=(
+                "handler_wiring: NOT_READY and manifest contract-name mismatch; "
+                "reattach identities must be a manifest subset "
+                f"(unexpected={sorted(unexpected_names)})"
+            ),
+            error_code=EnumCoreErrorCode.INVALID_CONFIGURATION,
+        )
+    return pending_results
+
+
+def _require_contract_scoped_dispatch_engine(
+    dispatch_engine: object,
+    *,
+    contract_name: str,
+) -> ProtocolContractScopedDispatchEngine:
+    """Resolve the explicit scoped-dispatch capability before consumer attach."""
+    scoped_dispatch = getattr(dispatch_engine, "dispatch_scoped", None)
+    if not callable(scoped_dispatch):
+        raise ModelOnexError(
+            message=(
+                "handler_wiring: contract-scoped subscription requires an "
+                f"explicit scoped dispatch capability for contract {contract_name!r}; "
+                "refusing to attach a consumer that could fail after delivery."
+            ),
+            error_code=EnumCoreErrorCode.INVALID_CONFIGURATION,
+        )
+    return cast("ProtocolContractScopedDispatchEngine", dispatch_engine)
+
+
+def _validate_registered_contract_dispatcher_scope(
+    dispatch_engine: object,
+    dispatcher_scope: frozenset[str],
+    *,
+    contract_name: str,
+) -> frozenset[str]:
+    """Compare one normalized scope with the complete live engine owner set."""
+    scoped_engine = _require_contract_scoped_dispatch_engine(
+        dispatch_engine,
+        contract_name=contract_name,
+    )
+    ownership_validator = getattr(
+        dispatch_engine,
+        "validate_contract_dispatcher_scope",
+        None,
+    )
+    if not callable(ownership_validator):
+        raise ModelOnexError(
+            message=(
+                "handler_wiring: contract-scoped subscription requires a "
+                "dispatcher ownership validation capability for contract "
+                f"{contract_name!r}; refusing to attach without proving "
+                "current engine membership."
+            ),
+            error_code=EnumCoreErrorCode.INVALID_CONFIGURATION,
+        )
+    return scoped_engine.validate_contract_dispatcher_scope(
+        contract_name,
+        dispatcher_scope,
+    )
+
+
+def _require_registered_contract_dispatcher_scope(
+    dispatch_engine: object,
+    dispatcher_ids: Collection[str] | None,
+    *,
+    contract_name: str,
+) -> frozenset[str]:
+    """Require one non-empty exact scope to exist on the current engine."""
+    dispatcher_scope = _require_contract_dispatcher_scope(
+        dispatcher_ids,
+        contract_name=contract_name,
+    )
+    return _validate_registered_contract_dispatcher_scope(
+        dispatch_engine,
+        dispatcher_scope,
+        contract_name=contract_name,
+    )
+
+
+def _validate_contract_dispatcher_ownership(
+    dispatch_engine: object,
+    dispatcher_scopes: Sequence[tuple[str, Collection[str]]],
+    *,
+    allow_empty_scopes: bool = False,
+) -> None:
+    """Validate current engine membership and one-contract ownership.
+
+    Reports and persisted NOT_READY results are typed transport artifacts, not
+    engine authority. Validate every referenced dispatcher before provisioning
+    or attaching any consumer. One contract may own multiple unique dispatcher
+    IDs; one dispatcher ID may never be claimed by multiple contracts.
+    """
+    normalized_scopes: list[tuple[str, frozenset[str]]] = []
+    owners_by_dispatcher: dict[str, set[str]] = defaultdict(set)
+    for contract_name, dispatcher_ids in dispatcher_scopes:
+        dispatcher_scope = _normalize_contract_dispatcher_scope(
+            dispatcher_ids,
+            contract_name=contract_name,
+            allow_empty=allow_empty_scopes,
+        )
+        normalized_scopes.append((contract_name, dispatcher_scope))
+        for dispatcher_id in dispatcher_scope:
+            owners_by_dispatcher[dispatcher_id].add(contract_name)
+
+    multiply_owned = {
+        dispatcher_id: tuple(sorted(owners))
+        for dispatcher_id, owners in owners_by_dispatcher.items()
+        if len(owners) > 1
+    }
+    if multiply_owned:
+        raise ModelOnexError(
+            message=(
+                "handler_wiring: contract-scoped subscription assigns "
+                "dispatcher IDs to multiple contracts; refusing consumer "
+                f"attach: {multiply_owned}"
+            ),
+            error_code=EnumCoreErrorCode.INVALID_CONFIGURATION,
+        )
+
+    for contract_name, dispatcher_scope in normalized_scopes:
+        _validate_registered_contract_dispatcher_scope(
+            dispatch_engine,
+            dispatcher_scope,
+            contract_name=contract_name,
+        )
+
+
+async def _dispatch_to_contract_scope(
+    dispatch_engine: ProtocolContractScopedDispatchEngine,
+    topic: str,
+    envelope: ModelEventEnvelope[object],
+    allowed_dispatcher_ids: frozenset[str],
+) -> ModelDispatchResult:
+    """Dispatch through the engine while preserving callback ownership."""
+    return await dispatch_engine.dispatch_scoped(
+        topic,
+        envelope,
+        allowed_dispatcher_ids=allowed_dispatcher_ids,
+    )
+
+
 def _make_event_bus_callback(
     topic: str,
     dispatch_engine: ProtocolDispatchEngine,
@@ -3203,6 +4418,7 @@ def _make_event_bus_callback(
     tenant_scoped: bool = False,
     event_bus: object | None = None,
     propagate_publish_failures: bool = False,
+    allowed_dispatcher_ids: Collection[str] | None = None,
 ) -> Callable[..., Awaitable[None]]:
     """Create a Kafka on_message callback that deserializes and dispatches to engine.
 
@@ -3232,6 +4448,15 @@ def _make_event_bus_callback(
     import json
 
     from omnibase_core.models.events.model_event_envelope import ModelEventEnvelope
+
+    dispatcher_scope = _require_contract_dispatcher_scope(
+        allowed_dispatcher_ids,
+        contract_name=topic,
+    )
+    scoped_dispatch_engine = _require_contract_scoped_dispatch_engine(
+        dispatch_engine,
+        contract_name=topic,
+    )
 
     def _derive_event_type_from_topic(topic: str) -> str | None:
         parts = topic.split(".")
@@ -3281,7 +4506,12 @@ def _make_event_bus_callback(
             try:
                 if not await _wait_for_dispatch_engine_freeze(topic, dispatch_engine):
                     return
-                result = await dispatch_engine.dispatch(topic, envelope)
+                result = await _dispatch_to_contract_scope(
+                    scoped_dispatch_engine,
+                    topic,
+                    envelope,
+                    dispatcher_scope,
+                )
                 if result_applier is not None and result is not None:
                     try:
                         await result_applier.apply(result, envelope.correlation_id)
@@ -3477,7 +4707,15 @@ def _make_event_bus_callback(
                     correlation_id,
                 )
                 _increment_message_lost_counter()
-        except Exception as dlq_exc:  # noqa: BLE001 — DLQ publish is itself a boundary; never let it crash the consumer
+                # OMN-14498: a NACK must never ACK the offset. Returning
+                # normally here IS an ACK -- _dispatch_to_subscriber reads
+                # "no exception" as success and lets the offset advance --
+                # so the record would be acknowledged while existing nowhere
+                # durable, and the OMN-15232 rewind path would never see it.
+                raise BoundaryDlqNotPersistedError(topic, correlation_id, exc)
+        except BoundaryDlqNotPersistedError:
+            raise
+        except Exception as dlq_exc:
             # Best-effort DLQ failed too -- the message IS lost here (gap G1).
             # Loud, not silent, but not prevented -- see gap G3 above.
             logger.error(
@@ -3491,11 +4729,27 @@ def _make_event_bus_callback(
                 correlation_id,
             )
             _increment_message_lost_counter()
+            # Same invariant as the False-return branch above: the DLQ write
+            # is not durable, so the offset must be withheld rather than
+            # advanced over a message that exists nowhere.
+            raise BoundaryDlqNotPersistedError(topic, correlation_id, exc) from dlq_exc
 
     async def callback(message: object) -> None:
         from uuid import uuid4
 
-        correlation_id: UUID = uuid4()
+        # OMN-14498: seed lineage from the INGRESS transport headers before
+        # anything can fail. The body is not a reliable lineage source -- a
+        # poisoned message (truncated/undecodable JSON) raises inside
+        # json.loads below, before either body-derived recovery
+        # (envelope.correlation_id / data["correlation_id"]) can run, and the
+        # boundary then fell through to the DLQ still holding a freshly
+        # minted uuid4. That produced a VALID id with the WRONG lineage: the
+        # DLQ record, and every faithful replay of it, carried a fabricated
+        # ancestry, so the resulting terminal joined to nothing upstream.
+        # Precedence is ingress header -> body -> mint, so a decodable
+        # envelope still wins (it is the authoritative in-band value) and a
+        # message with no lineage anywhere still gets a usable id.
+        correlation_id: UUID = _ingress_correlation_id(message) or uuid4()
         try:
             raw = getattr(message, "value", None)
             if raw is not None:
@@ -3580,9 +4834,6 @@ def _make_event_bus_callback(
     return callback
 
 
-_TENANT_WIRE_PREFIX_RE = re.compile(r"^tenant-([a-z][a-z0-9-]{1,61}[a-z0-9])\.")
-
-
 def _stamp_tenant_id_from_topic_prefix(
     topic: str,
     envelope: ModelEventEnvelope[object],
@@ -3595,13 +4846,22 @@ def _stamp_tenant_id_from_topic_prefix(
     payload completely untouched -- never a defaulted or guessed tenant
     (Stage-1 warn semantics; a missing/self-reported value is handled by the
     existing OMN-14058 flow downstream, not masked here).
+
+    OMN-15792: this is the subscribe/dispatch-side call site of the single
+    runtime topic resolver. ``resolve_tenant_from_wire_topic`` is the same
+    resolver the gateway forwarder's publish-side ``HandlerForwardOutbound``
+    resolves through (via ``prefix_topic``) -- previously this function
+    hand-rolled its own regex extraction with no slug validation, which is
+    exactly the two-independent-resolvers-disagreeing class OMN-15757/
+    OMN-15778 hit. A reserved or malformed slug embedded in a prefix-shaped
+    topic now raises (routed to the existing swallowed-exception boundary
+    handling below) instead of being silently stamped.
     """
-    match = _TENANT_WIRE_PREFIX_RE.match(topic)
-    if match is None:
+    slug, _canonical_topic = resolve_tenant_from_wire_topic(topic)
+    if slug is None:
         return envelope
     if not isinstance(envelope.payload, dict):
         return envelope
-    slug = match.group(1)
     # OMN-14367: route through the single canonical stamp so this producer and
     # the gateway forwarder's consume_inbound cannot diverge on the shape again.
     stamped_payload = stamp_verified_tenant_slug(envelope.payload, slug)
@@ -3612,10 +4872,21 @@ def _make_raw_event_projection_callback(
     topic: str,
     dispatch_engine: ProtocolDispatchEngine,
     result_applier: ProtocolDispatchResultApplier,
+    *,
+    allowed_dispatcher_ids: Collection[str] | None = None,
 ) -> Callable[..., Awaitable[None]]:
     """Create a callback for raw Kafka `ModelEventMessage` projection contracts."""
     from omnibase_core.models.events.model_event_envelope import ModelEventEnvelope
     from omnibase_infra.event_bus.models.model_event_message import ModelEventMessage
+
+    dispatcher_scope = _require_contract_dispatcher_scope(
+        allowed_dispatcher_ids,
+        contract_name=topic,
+    )
+    scoped_dispatch_engine = _require_contract_scoped_dispatch_engine(
+        dispatch_engine,
+        contract_name=topic,
+    )
 
     async def callback(message: object) -> None:
         try:
@@ -3636,7 +4907,12 @@ def _make_raw_event_projection_callback(
                 ),
                 source_tool=raw_message.headers.source,
             )
-            result = await dispatch_engine.dispatch(topic, envelope)
+            result = await _dispatch_to_contract_scope(
+                scoped_dispatch_engine,
+                topic,
+                envelope,
+                dispatcher_scope,
+            )
             if result is not None:
                 await result_applier.apply(result, envelope.correlation_id)
         except Exception as exc:  # noqa: BLE001 — consumer boundary; log and continue
@@ -3919,6 +5195,7 @@ def _make_sync_event_publisher(
     *,
     event_bus: object,
     handler_name: str,
+    terminal_topics: frozenset[str] = frozenset(),
 ) -> Callable[[str, bytes], None]:
     """Adapt async runtime event-bus publish to legacy sync handler publishers.
 
@@ -3937,6 +5214,27 @@ def _make_sync_event_publisher(
     delays (OMN-13658). Scheduling the coroutine back onto the owning kernel loop
     via ``asyncio.run_coroutine_threadsafe`` keeps every Future on its loop, so
     the publish completes immediately from any thread.
+
+    ``terminal_topics`` (OMN-15468) carries the publishing contract's declared
+    terminal topics — every site: ``terminal_event``, ``terminal_events`` and
+    ``runtime_dispatch.terminal_events``, read through the same function route
+    discovery uses. A publish to one of those topics is a TERMINAL emission and
+    is wrapped in a ``ModelEventEnvelope`` here, at the one factory that hands
+    every def-B handler its publisher.
+
+    Why here and not in the handlers: the other half of this same wiring
+    (``DispatchResultApplier``) already publishes the def-B return value as a
+    full envelope, so before this change a single contract emitted its SUCCESS
+    terminal enveloped and its handler-emitted FAILURE terminal raw — and the
+    Pattern B broker's terminal path decodes envelopes. Live on the ``.201`` dev
+    lane at merged ``5dc68190`` (2026-07-30T17:13Z), with #2560 already
+    subscribing the broker to the failure topic, a forced node-generation
+    failure still returned ``ok=true`` / ``status=completed`` / ``error=null``,
+    byte-identical to the success control, because the record waiting on the
+    failure topic was raw. Fixing that per node would mean editing every handler
+    that self-publishes a terminal; fixing it here covers the whole declared-
+    terminal set at once. Any topic that is not a declared terminal is forwarded
+    byte-for-byte unchanged.
     """
     publish = getattr(event_bus, "publish", None)
     if not callable(publish):
@@ -3956,6 +5254,11 @@ def _make_sync_event_publisher(
         ) from exc
 
     def _publish(topic: str, payload: bytes) -> None:
+        payload = envelope_terminal_payload(
+            topic=topic,
+            payload=payload,
+            terminal_topics=terminal_topics,
+        )
         result = publish(topic, None, payload)
         if not inspect.isawaitable(result):
             return
@@ -4125,6 +5428,7 @@ def _materialize_known_handler_dependencies(
     event_bus: object | None,
     container: object | None,
     ownership_query: object | None,
+    terminal_topics: frozenset[str] = frozenset(),
 ) -> dict[str, dict[str, object]] | None:
     """Materialize infra-known constructor deps for core resolver Step 2.
 
@@ -4168,6 +5472,7 @@ def _materialize_known_handler_dependencies(
         available["event_publisher"] = _make_sync_event_publisher(
             event_bus=event_bus,
             handler_name=handler_name,
+            terminal_topics=terminal_topics,
         )
     if requires_event_consumer and event_bus is not None:
         available["event_consumer"] = _make_sync_event_consumer(
@@ -4457,6 +5762,74 @@ def _live_message_types(pcw: PreparedContractWiring) -> set[str]:
     return message_types
 
 
+def _preflight_prepared_registration_ids(
+    prepared_contracts: Sequence[PreparedContractWiring],
+    dispatch_engine: object,
+    *,
+    dynamic_materialization_authorized: bool = False,
+) -> None:
+    """Validate every derived dispatcher/route ID before the first commit.
+
+    Preparation is deliberately side-effect-free. Preserve that transaction
+    boundary by detecting cross-contract, same-contract, and normalization
+    collisions across the complete manifest before any engine registration or
+    Kafka subscription becomes visible.
+    """
+    dispatcher_origins: dict[str, list[str]] = defaultdict(list)
+    dispatcher_owners: dict[str, str] = {}
+    route_origins: dict[str, list[str]] = defaultdict(list)
+    for prepared_contract in prepared_contracts:
+        if prepared_contract.skip_result is not None:
+            continue
+        contract_name = prepared_contract.contract.name
+        for prepared in prepared_contract.prepared_wirings:
+            if prepared.is_skip or prepared.is_quarantined:
+                continue
+            origin = f"{contract_name}:{prepared.handler_name}"
+            dispatcher_origins[prepared.dispatcher_id].append(origin)
+            dispatcher_owners[prepared.dispatcher_id] = contract_name
+            for route_id in prepared.route_ids:
+                route_origins[route_id].append(origin)
+
+    duplicate_dispatcher_ids = {
+        dispatcher_id: tuple(origins)
+        for dispatcher_id, origins in dispatcher_origins.items()
+        if len(origins) > 1
+    }
+    if duplicate_dispatcher_ids:
+        raise ModelOnexError(
+            message=(
+                "handler_wiring: duplicate prepared dispatcher IDs across the "
+                f"manifest: {duplicate_dispatcher_ids}"
+            ),
+            error_code=EnumCoreErrorCode.DUPLICATE_REGISTRATION,
+        )
+
+    duplicate_route_ids = {
+        route_id: tuple(origins)
+        for route_id, origins in route_origins.items()
+        if len(origins) > 1
+    }
+    if duplicate_route_ids:
+        raise ModelOnexError(
+            message=(
+                "handler_wiring: duplicate prepared route IDs across the manifest "
+                f"(including normalized topic IDs): {duplicate_route_ids}"
+            ),
+            error_code=EnumCoreErrorCode.DUPLICATE_REGISTRATION,
+        )
+
+    from omnibase_infra.runtime.message_dispatch_engine import MessageDispatchEngine
+
+    if isinstance(dispatch_engine, MessageDispatchEngine):
+        dispatch_engine.validate_registration_batch(
+            tuple(dispatcher_origins),
+            tuple(route_origins),
+            dispatcher_owners=dispatcher_owners,
+            allow_frozen=dynamic_materialization_authorized,
+        )
+
+
 def _collect_orchestrator_dispatcher_coverage_gaps(
     prepared_contracts: list[PreparedContractWiring],
     failed_gaps: list[str] | None = None,
@@ -4495,6 +5868,114 @@ def _assert_orchestrator_dispatcher_coverage(
             "Strict dispatcher coverage failed for orchestrator start topics: "
             + "; ".join(gaps)
         )
+
+
+ENV_SINGLE_OWNER_COMMAND_TOPICS = "ONEX_SINGLE_OWNER_COMMAND_TOPICS"
+
+
+def _single_owner_command_topics_strict() -> bool:
+    """True when the OMN-15474 single-owner command-topic gate must fail closed."""
+    return os.environ.get(ENV_SINGLE_OWNER_COMMAND_TOPICS, "").strip().lower() in (
+        "1",
+        "true",
+    )
+
+
+def _assert_single_owner_command_topics(
+    manifest: ModelAutoWiringManifest,
+) -> None:
+    """Fail closed when a COMMAND topic has more than one in-process consumer.
+
+    OMN-15474. A command is an instruction to execute exactly once. Every wired
+    contract joins its own consumer group (``compute_consumer_group_id`` keys on
+    node identity), so two contracts subscribed to one ``onex.cmd.*`` topic in
+    one process means the broker delivers the accepted command to BOTH: the
+    whole reducer chain runs twice, both executions carry the SAME ingress
+    correlation id, and every terminal event, projection row, LLM judge call and
+    cost line is doubled. That is the live defect measured on ``onex-dev``
+    (73 duplicated ``(correlation_id, topic)`` pairs in 48h; two quality-gate
+    evaluations returning DIFFERENT scores for one command).
+
+    ``_detect_duplicate_topics`` already SAW this — it logged
+    ``Duplicate topic ownership detected`` on every affected boot — but it ran
+    AFTER Phase 2 had already committed the subscriptions, and only at WARNING.
+    Detection that arrives after the side effect and cannot fail the boot is not
+    enforcement ([[feedback_a_rule_is_not_a_mechanism]]). This is the mechanism:
+    a preflight, before any subscription is attached.
+
+    EVENT topics are deliberately untouched. Fan-out is their contract — many
+    independent consumers legitimately observe one event on their own groups.
+    Only the command category carries the execute-exactly-once obligation.
+
+    STRICT MODE IS OFF BY DEFAULT, and that is deliberate. This repo's standing
+    rule is that a strict invariant "lands AFTER all downstream consumers are
+    compliant... if a strict gate must ship first, it ships behind an env flag
+    (default OFF) and is flipped in a separate PR once compliance is merged"
+    (CLAUDE.md, Testing and CI). Compliance is NOT met today. Measured
+    2026-08-01 by running THIS gate's own detection over
+    ``discover_contracts()`` (109 contracts, omnibase_infra only —
+    ``omnimarket`` is not installed in that venv, so its contracts are not
+    discoverable and are NOT counted here), 3 command topics have more than
+    one in-process owner:
+
+    - ``onex.cmd.omnibase-infra.build-loop-append.v1``
+      -> node_build_loop_write_effect, node_ledger_projection_compute
+    - ``onex.cmd.omnibase-infra.chain-learn.v1``
+      -> node_chain_orchestrator, node_chain_retrieval_effect
+    - ``onex.cmd.platform.request-introspection.v1``
+      -> node_ledger_projection_compute, node_registration_orchestrator
+
+    An earlier revision of this docstring claimed "8 (1 in omnibase_infra;
+    7 in omnimarket)". That is not reproducible: infra alone is 3, not 1. The
+    omnimarket figure cannot be measured from this repo's venv at all. A raw,
+    unfiltered ``contract.yaml`` scan across the infra worktree plus the
+    canonical omnimarket clone yields 16 topics with >1 declared subscriber,
+    but that is a strict superset (it applies none of the discovery, package-
+    activation, or plugin_managed filtering the gate applies). Re-measure with
+    the gate's own code path in the target deployment before flipping the flag;
+    do not trust any count in this docstring as the deployed number.
+
+    Raising unconditionally here would refuse the runtime boot on
+    the very next deploy. So: OFF ⇒ log an ERROR naming every violation
+    (louder than the pre-existing post-commit WARNING, and now emitted BEFORE
+    the subscriptions attach); ON ⇒ raise before any side effect. Flip
+    ``ONEX_SINGLE_OWNER_COMMAND_TOPICS=1`` in a follow-up once those 8 are
+    resolved.
+    """
+    from omnibase_infra.enums import EnumMessageCategory
+
+    command_topic_owners: dict[str, list[str]] = defaultdict(list)
+    for contract in manifest.contracts:
+        if contract.event_bus is None:
+            continue
+        for topic in contract.event_bus.subscribe_topics:
+            if _derive_message_category(topic) == EnumMessageCategory.COMMAND.value:
+                command_topic_owners[topic].append(contract.name)
+
+    violations = [
+        f"{topic} owned by {sorted(owners)}"
+        for topic, owners in sorted(command_topic_owners.items())
+        if len(owners) > 1
+    ]
+    if not violations:
+        return
+
+    detail = (
+        "Command topics are single-owner: a command must execute exactly once, "
+        "but these command topics have more than one in-process consumer, so "
+        "every accepted command is dispatched once per owner, under one "
+        f"correlation id (OMN-15474): {'; '.join(violations)}. Give each "
+        "command topic exactly one owning contract, or move the additional "
+        "consumers onto an event topic."
+    )
+    if _single_owner_command_topics_strict():
+        raise ModelOnexError(detail, error_code=EnumCoreErrorCode.INVALID_STATE)
+    logger.error(
+        "%s (non-strict — set %s=1 to refuse the boot instead of doubling "
+        "every accepted command on these topics)",
+        detail,
+        ENV_SINGLE_OWNER_COMMAND_TOPICS,
+    )
 
 
 def _detect_duplicate_topics(
@@ -4540,6 +6021,59 @@ def _detect_duplicate_topics(
     return duplicates
 
 
+UNWIRED_BACKFILL_REASON = (
+    "no wiring result produced for this manifest contract "
+    "(wiring-report totality backfill, OMN-15474)"
+)
+
+
+def build_unwired_contract_results(
+    manifest: ModelAutoWiringManifest,
+    *,
+    reason: str,
+    already_reported: Collection[str] = (),
+) -> tuple[ModelContractWiringResult, ...]:
+    """Return one explicit "did not wire" row per uncovered manifest contract.
+
+    The wiring report consumed by :func:`subscribe_wired_contract_topics` is
+    TOTAL over the manifest: every discovered contract either wired, failed, or
+    carries an explicit :attr:`EnumWiringOutcome.SKIPPED` row naming why it did
+    not. Totality is what makes the initial-subscription identity check
+    (:func:`_validate_initial_subscription_contract_identities`) a decision
+    instead of a guess — a report that merely *omits* a contract is
+    indistinguishable from one where the contract silently vanished, and
+    silently-vanished contracts are exactly the class of bug that produced
+    process-global dispatch (OMN-15474).
+
+    This is the canonical constructor for those rows. Every producer of a
+    :class:`ModelAutoWiringReport` — including test doubles standing in for the
+    wiring engine — MUST use it rather than emitting a partial report, so the
+    "did not wire" set is derived from the manifest the runtime actually holds
+    rather than hand-mirrored against it.
+
+    Args:
+        manifest: The manifest the report must be total over.
+        reason: Human-readable reason recorded on each synthesized row.
+        already_reported: Contract names that already have a result row.
+
+    Returns:
+        One SKIPPED result per manifest contract absent from
+        ``already_reported``, in manifest order. Empty when the report is
+        already total.
+    """
+    covered = frozenset(already_reported)
+    return tuple(
+        ModelContractWiringResult(
+            contract_name=contract.name,
+            package_name=contract.package_name,
+            outcome=EnumWiringOutcome.SKIPPED,
+            reason=reason,
+        )
+        for contract in manifest.contracts
+        if contract.name not in covered
+    )
+
+
 async def wire_from_manifest(
     manifest: ModelAutoWiringManifest,
     dispatch_engine: ProtocolDispatchEngine,
@@ -4551,6 +6085,8 @@ async def wire_from_manifest(
     result_appliers_by_contract: Mapping[str, ProtocolDispatchResultApplier]
     | None = None,
     materialized_explicit_dependencies: dict[str, dict[str, object]] | None = None,
+    topology: ModelDeploymentTopology | None = None,
+    catalog_binding_policy: ProjectionCatalogBindingPolicy | None = None,
 ) -> ModelAutoWiringReport:
     """Wire all discovered contracts into the dispatch engine and event bus.
 
@@ -4586,10 +6122,19 @@ async def wire_from_manifest(
             outputs from auto-wired callbacks.
         materialized_explicit_dependencies: Optional pre-built constructor
             dependencies keyed by handler name for resolver Step 2.
+        topology: Checked-in deployment topology loaded by the composition
+            boundary. Required for every contract that declares ``db_io``.
+        catalog_binding_policy: Explicit topology binding names for catalog read
+            and write operations. Missing choices fail catalog wiring closed.
 
     Returns:
         A :class:`ModelAutoWiringReport` with per-contract outcomes.
     """
+    _require_unique_canonical_contract_names(
+        tuple(contract.name for contract in manifest.contracts),
+        identity_source="manifest",
+    )
+
     # Construct the resolver + ownership query ONCE per wiring pass from the
     # manifest itself (OMN-9201). The ownership query is set-membership
     # against the locally discovered node_name set — no I/O, no SQL. See
@@ -4662,6 +6207,8 @@ async def wire_from_manifest(
                 else None,
                 result_appliers_by_contract=result_appliers_by_contract,
                 materialized_explicit_dependencies=materialized_explicit_dependencies,
+                topology=topology,
+                catalog_binding_policy=catalog_binding_policy,
             )
             prepared_contracts.append(prepared)
         except TypeError:
@@ -4723,6 +6270,13 @@ async def wire_from_manifest(
             dispatcher_coverage_failed_gaps,
         )
 
+    # OMN-15474: single-owner command topics, asserted BEFORE Phase 2 commits any
+    # subscription. Must stay above the commit loop — the post-commit
+    # _detect_duplicate_topics warning below is diagnosis, not a gate.
+    _assert_single_owner_command_topics(manifest)
+
+    _preflight_prepared_registration_ids(prepared_contracts, dispatch_engine)
+
     # Phase 2: All contracts validated — commit registrations and subscriptions.
     # Failed contracts are included in results so total_failed is accurate.
     # service_kernel respects the flag before asserting total_failed == 0.
@@ -4736,6 +6290,33 @@ async def wire_from_manifest(
             result_applier=(result_appliers_by_contract or {}).get(pcw.contract.name),
         )
         results.append(result)
+
+    # OMN-15474 totality post-condition. Phase 1 + Phase 2 above are written so
+    # that every manifest contract yields exactly one row (a prepared contract
+    # commits a row, a preparation failure collects one). That is a property of
+    # two loops, not of this function's signature, so a future refactor can
+    # break it silently — and the only downstream symptom would be
+    # subscribe_wired_contract_topics aborting the kernel at boot on a
+    # report/manifest bijection failure. Backfill instead: any manifest
+    # contract with no row gets an explicit SKIPPED row naming why, so the
+    # report this function returns is TOTAL by contract rather than by
+    # accident. This does NOT relax the downstream identity check — that check
+    # is unchanged and still rejects report rows with no manifest contract,
+    # which is the direction no backfill can repair.
+    unwired_backfill = build_unwired_contract_results(
+        manifest,
+        reason=UNWIRED_BACKFILL_REASON,
+        already_reported=tuple(r.contract_name for r in results),
+    )
+    if unwired_backfill:
+        logger.error(
+            "Auto-wiring produced no result row for %d manifest contract(s); "
+            "backfilling explicit unwired rows to keep the report total "
+            "(OMN-15474). This is a wiring-engine bug, not a contract bug: %s",
+            len(unwired_backfill),
+            sorted(r.contract_name for r in unwired_backfill),
+        )
+        results.extend(unwired_backfill)
 
     duplicates = _detect_duplicate_topics(manifest)
 
@@ -4790,18 +6371,82 @@ async def wire_from_manifest(
 
 
 def _contract_provision_topics(contract: ModelDiscoveredContract) -> tuple[str, ...]:
-    """Return the topic set this contract owns at boot (OMN-13237, §3.6).
+    """Return the topic set this contract owns at boot (OMN-13237 §3.6, OMN-15330,
+    OMN-15832).
 
     Subscribe topics (the consumers that attach) UNION the contract's owned
-    publish topics it must guarantee exist. Names come from the contract's
-    ``event_bus`` declarations only — never a Python literal. DLQ topics are
-    handled by the best-effort universe warm (covered across runtimes per §3.6).
+    publish topics UNION its declared ``event_bus.dlq_topics`` UNION its served
+    ``projection_api`` topics. Names come from the contract's own declarations
+    only — never a Python literal.
+
+    OMN-15330 — DLQ topics used to be excluded here and left to the best-effort
+    universe warm. That delegation broke the moment the warm was switched off:
+    ``ONEX_BOOT_UNIVERSE_PROVISION=0`` is the standing onex-dev setting (added
+    after the 2026-07-27 >1000-topic broker near-meltdown), and with the warm
+    off NOTHING created the declared DLQ topics. The first malformed event then
+    hit ``[ONEX_CORE_041_INVALID_CONFIGURATION] Topic '<dlq>' not found on
+    broker`` inside ``_route_projection_error_to_dlq`` and the record was
+    dropped — observed live on onex-dev 2026-07-28T16:29Z for
+    ``onex.dlq.omnimarket.projection-delegation-inference-response-malformed.v1``
+    and four siblings.
+
+    The DLQ names are read with ``_read_dlq_topics`` — the SAME reader the
+    projection auto-wiring uses to build ``ModelProjectionSinks.dlq_topics`` —
+    so the provisioned string is byte-identical to the routing target by
+    construction, rather than by a second parser that can drift. DLQ topics
+    enter the readiness confirm alongside the rest: attaching a consumer whose
+    dead-letter sink is not ready guarantees silent loss on the first malformed
+    event, so this fails closed (a NOT_READY contract is retried by the
+    OMN-15215 reconciliation loop).
+
+    OMN-15832 — the same universe-warm-off gap applies to ``projection_api``
+    (``onex.snapshot.*``) topics: nothing else creates them at boot, and the
+    contract's ``event_bus`` union above never scanned that section at all.
+    ``read_projection_api_topics`` (``omnibase_infra.tools.contract_topic_extractor``)
+    is the SAME parser ``ContractTopicExtractor.extract``'s global scan uses —
+    one source of parsing truth, scoped to ``expose: true`` AND
+    ``bus_backed: true`` exposures, so the boot provision set can never diverge
+    from what ``omnimarket.projection.discovery.build_projection_topic_map``
+    will actually serve. Explicitly NOT a fix to re-enable
+    ``ONEX_BOOT_UNIVERSE_PROVISION`` or to have the consumer
+    (``SnapshotCache``) self-provision its own topics — both remain out of
+    scope by standing decision; this stays a governed, boot-side, per-contract
+    addition to the same confirm path DLQ topics already use.
     """
     if contract.event_bus is None:
         return ()
     ordered = list(contract.event_bus.subscribe_topics)
     ordered.extend(contract.event_bus.publish_topics)
-    return tuple(dict.fromkeys(ordered))
+    typed_dlq_topics = getattr(contract.event_bus, "dlq_topics", ())
+    if typed_dlq_topics:
+        ordered.extend(typed_dlq_topics)
+    else:
+        try:
+            ordered.extend(_read_dlq_topics(contract.contract_path))
+        except Exception:  # noqa: BLE001 — per-contract boot boundary
+            # ``_interleave_contract`` runs under ``asyncio.gather(...)`` with no
+            # ``return_exceptions=True``, so a raise here would abort the ENTIRE
+            # boot subscribe pass for every contract. Degrading this one contract
+            # to its pre-OMN-15330 behaviour (no DLQ provisioning) is strictly less
+            # bad, and the warning names the contract that needs fixing.
+            logger.warning(
+                "Could not read event_bus.dlq_topics for contract '%s' from %s — "
+                "its DLQ topics will NOT be provisioned at boot (OMN-15330)",
+                contract.name,
+                contract.contract_path,
+                exc_info=True,
+            )
+    try:
+        ordered.extend(read_projection_api_topics(contract.contract_path))
+    except Exception:  # noqa: BLE001 — per-contract boot boundary, see DLQ comment above
+        logger.warning(
+            "Could not read projection_api topics for contract '%s' from %s — "
+            "its snapshot topics will NOT be provisioned at boot (OMN-15832)",
+            contract.name,
+            contract.contract_path,
+            exc_info=True,
+        )
+    return tuple(dict.fromkeys(t for t in ordered if t and t.strip()))
 
 
 async def subscribe_wired_contract_topics(
@@ -4840,13 +6485,24 @@ async def subscribe_wired_contract_topics(
     actually subscribed). Backward-compatible: with no *provisioner* the
     behavior is the original concurrent subscribe (no readiness gate).
     """
+    _validate_initial_subscription_contract_identities(manifest, report)
     if event_bus is None:
         return {}
+
+    report_dispatcher_scopes = tuple(
+        (result.contract_name, result.dispatchers_registered)
+        for result in report.results
+    )
+    _validate_contract_dispatcher_ownership(
+        dispatch_engine,
+        report_dispatcher_scopes,
+        allow_empty_scopes=True,
+    )
 
     contract_by_name = {contract.name: contract for contract in manifest.contracts}
 
     # Collect eligible contracts in priority order (projection appliers first).
-    eligible: list[tuple[str, ModelDiscoveredContract]] = []
+    eligible: list[tuple[ModelContractWiringResult, ModelDiscoveredContract]] = []
     for result in _prioritize_subscription_results(
         report,
         result_appliers_by_contract,
@@ -4855,6 +6511,18 @@ async def subscribe_wired_contract_topics(
             continue
         contract = contract_by_name.get(result.contract_name)
         if contract is None:
+            continue
+        if not result.dispatchers_registered:
+            # Resolver-owned skips and quarantines intentionally register no
+            # local dispatcher. They therefore own no consume callback. The
+            # old path still subscribed them and a process-global dispatch
+            # could execute some other contract's matching handler; keeping
+            # them unsubscribed is the only truthful zero-owner state.
+            logger.info(
+                "Auto-wiring (deferred): skipping Kafka subscription for "
+                "contract '%s' because it owns zero dispatchers (OMN-15474)",
+                contract.name,
+            )
             continue
         if _is_raw_event_projection_contract(contract) and (
             result_appliers_by_contract is None
@@ -4869,7 +6537,7 @@ async def subscribe_wired_contract_topics(
                 contract.name,
             )
             continue
-        eligible.append((result.contract_name, contract))
+        eligible.append((result, contract))
 
     knobs = readiness_config or ModelTopicReadinessConfig()
     # Bounded parallelism across contracts; each contract keeps its own
@@ -4877,16 +6545,20 @@ async def subscribe_wired_contract_topics(
     semaphore = asyncio.Semaphore(knobs.max_concurrent_contract_attach)
 
     async def _provision_ready_attach(
-        name: str, contract: ModelDiscoveredContract
+        result: ModelContractWiringResult,
+        contract: ModelDiscoveredContract,
     ) -> ModelContractAttachResult:
         async with semaphore:
             return await _interleave_contract(
-                name=name,
+                name=result.contract_name,
                 contract=contract,
                 dispatch_engine=dispatch_engine,
                 event_bus=event_bus,
                 environment=environment,
-                result_applier=(result_appliers_by_contract or {}).get(name),
+                result_applier=(result_appliers_by_contract or {}).get(
+                    result.contract_name
+                ),
+                allowed_dispatcher_ids=result.dispatchers_registered,
                 provisioner=provisioner,
                 readiness_config=knobs,
                 core_runtime_topics=core_runtime_topics,
@@ -4894,7 +6566,7 @@ async def subscribe_wired_contract_topics(
             )
 
     attach_results = await asyncio.gather(
-        *(_provision_ready_attach(name, contract) for name, contract in eligible)
+        *(_provision_ready_attach(result, contract) for result, contract in eligible)
     )
 
     if attach_results_out is not None:
@@ -4915,6 +6587,7 @@ async def _interleave_contract(
     event_bus: object,
     environment: str,
     result_applier: ProtocolDispatchResultApplier | None,
+    allowed_dispatcher_ids: Collection[str] | None,
     provisioner: ProtocolTopicProvisioner | None,
     readiness_config: ModelTopicReadinessConfig,
     core_runtime_topics: frozenset[str] = frozenset(),
@@ -4925,6 +6598,11 @@ async def _interleave_contract(
     The order invariant is enforced here: every ``ensure_topic_exists`` for the
     contract precedes its readiness confirm, which precedes consumer attach.
     """
+    dispatcher_scope = _require_registered_contract_dispatcher_scope(
+        dispatch_engine,
+        allowed_dispatcher_ids,
+        contract_name=name,
+    )
     provision_topics = _contract_provision_topics(contract)
 
     readiness: ModelTopicSetReadiness | None = None
@@ -4933,6 +6611,13 @@ async def _interleave_contract(
         for topic in provision_topics:
             try:
                 await provisioner.ensure_topic_exists(topic_name=topic)
+            except TopicReplicationPolicyError:
+                # OMN-15395: a durability-policy violation is fail-closed and
+                # must escape this best-effort boundary. Attaching a consumer to
+                # a contract whose topics were silently skipped because one of
+                # them declares RF1 on MSK is the exact outcome the policy
+                # exists to prevent.
+                raise
             except Exception:  # noqa: BLE001 — boundary: per-contract, never fatal
                 logger.warning(
                     "Topic provisioning failed for contract '%s' topic '%s' "
@@ -4970,6 +6655,7 @@ async def _interleave_contract(
             return ModelContractAttachResult(
                 contract_name=name,
                 status=EnumContractAttachStatus.NOT_READY,
+                dispatcher_ids=tuple(sorted(dispatcher_scope)),
                 readiness=readiness,
                 detail=f"readiness {readiness.status.value}",
             )
@@ -4982,6 +6668,7 @@ async def _interleave_contract(
             event_bus=event_bus,
             environment=environment,
             result_applier=result_applier,
+            allowed_dispatcher_ids=dispatcher_scope,
             core_runtime_topics=core_runtime_topics,
             core_runtime_owners=core_runtime_owners,
         )
@@ -4995,6 +6682,7 @@ async def _interleave_contract(
         return ModelContractAttachResult(
             contract_name=name,
             status=EnumContractAttachStatus.FAILED,
+            dispatcher_ids=tuple(sorted(dispatcher_scope)),
             readiness=readiness,
             detail=type(exc).__name__,
         )
@@ -5002,9 +6690,227 @@ async def _interleave_contract(
     return ModelContractAttachResult(
         contract_name=name,
         status=EnumContractAttachStatus.ATTACHED,
+        dispatcher_ids=tuple(sorted(dispatcher_scope)),
         topics_subscribed=tuple(topics_subscribed),
         readiness=readiness,
     )
+
+
+# Bounded background NOT_READY reconciliation (OMN-15215, OMN-13237 follow-up).
+DEFAULT_NOT_READY_RETRY_INITIAL_DELAY_SECONDS: float = 30.0
+DEFAULT_NOT_READY_RETRY_BACKOFF_SECONDS: float = 30.0
+DEFAULT_NOT_READY_RETRY_MAX_ATTEMPTS: int = 5
+
+
+async def reattach_not_ready_contracts(
+    manifest: ModelAutoWiringManifest,
+    not_ready_results: Sequence[ModelContractAttachResult],
+    dispatch_engine: ProtocolDispatchEngine,
+    event_bus: object | None,
+    environment: str = "dev",
+    result_appliers_by_contract: Mapping[str, ProtocolDispatchResultApplier]
+    | None = None,
+    *,
+    provisioner: ProtocolTopicProvisioner | None = None,
+    readiness_config: ModelTopicReadinessConfig | None = None,
+    core_runtime_topics: frozenset[str] = frozenset(),
+    core_runtime_owners: Mapping[str, str] | None = None,
+) -> tuple[dict[str, tuple[str, ...]], tuple[ModelContractAttachResult, ...]]:
+    """Re-attempt provision -> confirm-ready -> attach for contracts still NOT_READY.
+
+    OMN-15215 (CONFIRMED root cause): ``subscribe_wired_contract_topics`` makes
+    exactly ONE provision->confirm->attach attempt per contract via
+    ``_interleave_contract``. A contract whose topic metadata has not converged
+    within the bounded readiness poll (``ModelTopicReadinessConfig``, 30s/60
+    attempts by default) is recorded NOT_READY and its consumer attach is
+    skipped — PERMANENTLY, for the rest of the process lifetime, because
+    nothing ever calls ``_interleave_contract`` for it again. For a
+    wide-topic-count contract (e.g. ``node_ledger_projection_compute``'s 26
+    topics, OMN-15006/OMN-15168) a transient cold-broker topic-creation race on
+    a handful of just-provisioned topics starves the ENTIRE contract's
+    consumer: since ``_subscribe_contract_topics`` subscribes a contract's
+    topics as one all-or-nothing unit, zero of its 26 topics ever get a Kafka
+    consumer group — not even the ones unrelated to the race. Live evidence
+    (fresh stability-test boot, 2026-07-27): ``NOT-READY: topic metadata did
+    not converge (status=not_ready failures=[4 OCC governance topics])``
+    logged exactly once at boot, followed by a ZERO count of "Auto-wired
+    subscription ... node=node_ledger_projection_compute" log lines across the
+    container's entire observed lifetime (3 separate contract-discovery
+    passes, ~11 minutes) — the OMN-13237 "runtime stays live" framing implies
+    eventual recoverability that was never actually implemented.
+
+    This is NOT the ``handler_routing_loader`` "Unknown routing_strategy
+    'topic_match'" fallback warning (that code path is a separate, informational
+    ``RuntimeContractConfigLoader`` boot-summary pass — its output is never
+    consumed by ``auto_wiring``'s wire/attach decision, confirmed by a real,
+    unmocked repro: the current ``discovery.py`` + ``handler_wiring.py`` path
+    already wires and attaches 26/26 topic_match entries for
+    ``node_ledger_projection_compute`` via the topic-folded dispatcher-ID
+    derivation from OMN-14580/OMN-13825). Fixing the loader's
+    ``VALID_ROUTING_STRATEGIES`` alone would NOT have unblocked OMN-15169 —
+    only closing this NOT_READY-has-no-retry gap does.
+
+    Re-runs the SAME provision->confirm->attach interleave
+    (``_interleave_contract``) for each contract still in NOT_READY status,
+    returning newly-attached topics and updated per-contract results. Callers
+    invoke this repeatedly (bounded, with backoff — see
+    ``run_not_ready_reconciliation_loop``) until every contract attaches or a
+    bounded retry budget is exhausted.
+    """
+    pending_results = _validate_not_ready_contract_identities(
+        manifest,
+        not_ready_results,
+    )
+    if event_bus is None:
+        return {}, ()
+
+    contract_by_name = {contract.name: contract for contract in manifest.contracts}
+    still_not_ready_names = tuple(result.contract_name for result in pending_results)
+    if not still_not_ready_names:
+        return {}, ()
+
+    _validate_contract_dispatcher_ownership(
+        dispatch_engine,
+        tuple(
+            (result.contract_name, result.dispatcher_ids) for result in pending_results
+        ),
+    )
+
+    knobs = readiness_config or ModelTopicReadinessConfig()
+    semaphore = asyncio.Semaphore(knobs.max_concurrent_contract_attach)
+
+    not_ready_by_name = {result.contract_name: result for result in pending_results}
+
+    async def _retry_one(name: str) -> ModelContractAttachResult | None:
+        contract = contract_by_name.get(name)
+        previous_result = not_ready_by_name.get(name)
+        if contract is None or previous_result is None:
+            return None
+        async with semaphore:
+            return await _interleave_contract(
+                name=name,
+                contract=contract,
+                dispatch_engine=dispatch_engine,
+                event_bus=event_bus,
+                environment=environment,
+                result_applier=(result_appliers_by_contract or {}).get(name),
+                allowed_dispatcher_ids=previous_result.dispatcher_ids,
+                provisioner=provisioner,
+                readiness_config=knobs,
+                core_runtime_topics=core_runtime_topics,
+                core_runtime_owners=core_runtime_owners,
+            )
+
+    retried = await asyncio.gather(
+        *(_retry_one(name) for name in still_not_ready_names)
+    )
+    results = tuple(r for r in retried if r is not None)
+
+    newly_subscribed: dict[str, tuple[str, ...]] = {
+        r.contract_name: r.topics_subscribed
+        for r in results
+        if r.status is EnumContractAttachStatus.ATTACHED
+    }
+    return newly_subscribed, results
+
+
+async def run_not_ready_reconciliation_loop(
+    manifest: ModelAutoWiringManifest,
+    initial_not_ready: Sequence[ModelContractAttachResult],
+    dispatch_engine: ProtocolDispatchEngine,
+    event_bus: object | None,
+    environment: str = "dev",
+    result_appliers_by_contract: Mapping[str, ProtocolDispatchResultApplier]
+    | None = None,
+    *,
+    provisioner: ProtocolTopicProvisioner | None = None,
+    readiness_config: ModelTopicReadinessConfig | None = None,
+    core_runtime_topics: frozenset[str] = frozenset(),
+    core_runtime_owners: Mapping[str, str] | None = None,
+    initial_delay_seconds: float = DEFAULT_NOT_READY_RETRY_INITIAL_DELAY_SECONDS,
+    backoff_seconds: float = DEFAULT_NOT_READY_RETRY_BACKOFF_SECONDS,
+    max_attempts: int = DEFAULT_NOT_READY_RETRY_MAX_ATTEMPTS,
+    on_attempt: Callable[
+        [dict[str, tuple[str, ...]], tuple[ModelContractAttachResult, ...]], None
+    ]
+    | None = None,
+    sleep: Callable[[float], Awaitable[None]] = asyncio.sleep,
+) -> tuple[ModelContractAttachResult, ...]:
+    """Bounded background retry of NOT_READY contracts (OMN-15215).
+
+    Sleeps ``initial_delay_seconds``, then re-attempts every still-NOT_READY
+    contract via ``reattach_not_ready_contracts``, up to ``max_attempts`` times
+    with ``backoff_seconds`` between attempts. Stops early once every contract
+    has attached. Never raises on a still-NOT_READY outcome — this preserves
+    the OMN-13237 fail-open boot contract (a contract that never converges
+    stays degraded, not crash-looping); this loop makes "runtime stays live"
+    actually recoverable instead of a permanent skip. ``on_attempt`` is an
+    optional caller hook (e.g. to fold newly-subscribed topics into shared
+    boot-time bookkeeping such as topic-collision detection) invoked after
+    each attempt with ``(newly_subscribed, results)``. ``sleep`` is injectable
+    so tests can drive the loop without real wall-clock delay.
+    """
+    validated_not_ready = _validate_not_ready_contract_identities(
+        manifest,
+        initial_not_ready,
+    )
+    _validate_contract_dispatcher_ownership(
+        dispatch_engine,
+        tuple(
+            (result.contract_name, result.dispatcher_ids)
+            for result in validated_not_ready
+        ),
+    )
+    pending: dict[str, ModelContractAttachResult] = {
+        r.contract_name: r for r in validated_not_ready
+    }
+    if not pending:
+        return ()
+
+    await sleep(initial_delay_seconds)
+    latest: dict[str, ModelContractAttachResult] = {}
+    for attempt in range(1, max_attempts + 1):
+        if not pending:
+            break
+        newly_subscribed, results = await reattach_not_ready_contracts(
+            manifest,
+            tuple(pending.values()),
+            dispatch_engine,
+            event_bus,
+            environment,
+            result_appliers_by_contract,
+            provisioner=provisioner,
+            readiness_config=readiness_config,
+            core_runtime_topics=core_runtime_topics,
+            core_runtime_owners=core_runtime_owners,
+        )
+        for result in results:
+            latest[result.contract_name] = result
+            if result.status is EnumContractAttachStatus.ATTACHED:
+                pending.pop(result.contract_name, None)
+            else:
+                pending[result.contract_name] = result
+        if on_attempt is not None:
+            on_attempt(newly_subscribed, results)
+        logger.info(
+            "NOT_READY reconciliation attempt %d/%d: resolved=%d remaining=%d "
+            "(OMN-15215)",
+            attempt,
+            max_attempts,
+            len(newly_subscribed),
+            len(pending),
+        )
+        if pending and attempt < max_attempts:
+            await sleep(backoff_seconds)
+
+    if pending:
+        logger.warning(
+            "NOT_READY reconciliation exhausted after %d attempts, still "
+            "not-ready: %s (OMN-15215/OMN-13237, runtime stays live degraded)",
+            max_attempts,
+            sorted(pending),
+        )
+    return tuple(latest.values())
 
 
 def _prioritize_subscription_results(
@@ -5048,6 +6954,8 @@ def _prepare_contract_wiring(
     pre_resolved_handlers: dict[str, object] | None = None,
     result_appliers_by_contract: Mapping[str, ProtocolDispatchResultApplier]
     | None = None,
+    topology: ModelDeploymentTopology | None = None,
+    catalog_binding_policy: ProjectionCatalogBindingPolicy | None = None,
 ) -> PreparedContractWiring:
     """Prepare one contract for wiring — NO side effects.
 
@@ -5149,6 +7057,8 @@ def _prepare_contract_wiring(
                 container=container,
                 materialized_explicit_dependencies=materialized_explicit_dependencies,
                 pre_resolved_handlers=pre_resolved_handlers,
+                topology=topology,
+                catalog_binding_policy=catalog_binding_policy,
             )
             prepared_wirings.append(prepared)
         except TypeError:
@@ -5210,6 +7120,7 @@ async def _commit_contract_wiring(
     *,
     subscribe_immediately: bool = True,
     result_applier: ProtocolDispatchResultApplier | None = None,
+    dynamic_materialization_authorized: bool = False,
 ) -> ModelContractWiringResult:
     """Commit a validated PreparedContractWiring to the engine and event bus.
 
@@ -5233,7 +7144,12 @@ async def _commit_contract_wiring(
     quarantined: list[ModelQuarantinedWiring] = []
 
     for prepared in pcw.prepared_wirings:
-        dispatcher_id, route_ids = _commit_handler_wiring(prepared, dispatch_engine)
+        dispatcher_id, route_ids = _commit_handler_wiring(
+            prepared,
+            dispatch_engine,
+            owner_contract_name=contract.name,
+            dynamic_materialization_authorized=dynamic_materialization_authorized,
+        )
         if prepared.is_quarantined:
             assert prepared.quarantine_reason is not None  # narrow for mypy
             quarantined.append(
@@ -5298,7 +7214,12 @@ async def _commit_contract_wiring(
             quarantined_handlers=tuple(quarantined),
         )
 
-    if subscribe_immediately and event_bus is not None and pcw.subscription_topics:
+    if (
+        subscribe_immediately
+        and event_bus is not None
+        and pcw.subscription_topics
+        and dispatchers_registered
+    ):
         topics_subscribed.extend(
             await _subscribe_contract_topics(
                 contract=contract,
@@ -5306,7 +7227,19 @@ async def _commit_contract_wiring(
                 event_bus=event_bus,
                 environment=pcw.environment,
                 result_applier=result_applier,
+                allowed_dispatcher_ids=dispatchers_registered,
             )
+        )
+    elif (
+        subscribe_immediately
+        and event_bus is not None
+        and pcw.subscription_topics
+        and not dispatchers_registered
+    ):
+        logger.info(
+            "Auto-wiring: skipping Kafka subscription for contract '%s' "
+            "because it owns zero dispatchers (OMN-15474)",
+            contract.name,
         )
 
     # OMN-9457: when every prepared handler was quarantined, report SKIPPED
@@ -5353,6 +7286,7 @@ async def _subscribe_contract_topics(
     event_bus: object,
     environment: str,
     result_applier: ProtocolDispatchResultApplier | None = None,
+    allowed_dispatcher_ids: Collection[str] | None = None,
     core_runtime_topics: frozenset[str] = frozenset(),
     core_runtime_owners: Mapping[str, str] | None = None,
 ) -> list[str]:
@@ -5374,6 +7308,12 @@ async def _subscribe_contract_topics(
     owner_by_topic = dict(core_runtime_owners or {})
     if contract.event_bus is None or not contract.event_bus.subscribe_topics:
         return []
+
+    dispatcher_scope = _require_registered_contract_dispatcher_scope(
+        dispatch_engine,
+        allowed_dispatcher_ids,
+        contract_name=contract.name,
+    )
 
     from omnibase_infra.enums import EnumConsumerGroupPurpose
     from omnibase_infra.models import ModelNodeIdentity
@@ -5416,6 +7356,15 @@ async def _subscribe_contract_topics(
             output_topic=output_topic,
             output_topic_map=output_topic_map,
             allowed_output_topics=contract.event_bus.publish_topics,
+            # OMN-15468 AC2: hand the applier the contract's DECLARED failure
+            # terminal so a returned model that states a failure verdict cannot
+            # be republished onto the success terminal by map-miss fallback.
+            # Read through the same single reader the Pattern B broker's
+            # subscription set is built from, so the two cannot disagree about
+            # which topics are terminal for this contract.
+            failure_terminal_topics=_declared_failure_terminal_topics(
+                contract, success_topic=output_topic
+            ),
         )
     node_identity = ModelNodeIdentity(
         env=environment,
@@ -5465,6 +7414,7 @@ async def _subscribe_contract_topics(
                 # Why: Runtime wiring validates and narrows this payload shape before use.
                 dispatch_engine,  # type: ignore[arg-type]
                 effective_result_applier,
+                allowed_dispatcher_ids=dispatcher_scope,
             )
         else:
             callback = _make_event_bus_callback(
@@ -5481,6 +7431,7 @@ async def _subscribe_contract_topics(
                 # (redeliver) instead of being log-and-discarded. Non-state_io
                 # contracts keep the historical swallow behavior unchanged.
                 propagate_publish_failures=_contract_declares_state_io(contract),
+                allowed_dispatcher_ids=dispatcher_scope,
             )
         topic_callbacks.append((topic, callback))
 
@@ -5511,6 +7462,38 @@ async def _subscribe_contract_topics(
     return topics_subscribed
 
 
+def _declared_failure_terminal_topics(
+    contract: ModelDiscoveredContract,
+    *,
+    success_topic: str,
+) -> tuple[str, ...]:
+    """Return the contract's declared FAILURE terminal topics (OMN-15468 AC2).
+
+    A failure terminal is any contract-declared terminal topic that is (a) not
+    the success terminal the applier falls back to and (b) actually publishable
+    by this contract. Both conditions matter: publishing to an undeclared topic
+    would violate the contract's own publish allowlist, and re-routing to the
+    success terminal would be a no-op.
+
+    Read through :func:`load_terminal_event_topics` — the SAME reader the
+    Pattern B broker's subscription set is built from — so the applier's idea of
+    which topics are terminal cannot drift from the broker's. A second
+    hand-rolled reader here is exactly the seam mismatch that produced this
+    ticket.
+    """
+    if contract.event_bus is None or not contract.event_bus.publish_topics:
+        return ()
+    publishable = set(contract.event_bus.publish_topics)
+    declared = load_terminal_event_topics(contract.contract_path)
+    return tuple(
+        sorted(
+            topic
+            for topic in declared
+            if topic != success_topic and topic in publishable
+        )
+    )
+
+
 def _select_dispatch_result_output_topic(
     contract: ModelDiscoveredContract,
 ) -> str | None:
@@ -5536,6 +7519,9 @@ async def _wire_single_contract(
     event_bus: object | None,
     environment: str,
     container: object | None = None,
+    topology: ModelDeploymentTopology | None = None,
+    catalog_binding_policy: ProjectionCatalogBindingPolicy | None = None,
+    dynamic_materialization_authorized: bool = False,
 ) -> ModelContractWiringResult:
     """Wire a single discovered contract into the dispatch engine.
 
@@ -5560,8 +7546,20 @@ async def _wire_single_contract(
         event_bus=event_bus,
         environment=environment,
         container=container,
+        topology=topology,
+        catalog_binding_policy=catalog_binding_policy,
     )
-    return await _commit_contract_wiring(prepared, dispatch_engine, event_bus)
+    _preflight_prepared_registration_ids(
+        (prepared,),
+        dispatch_engine,
+        dynamic_materialization_authorized=dynamic_materialization_authorized,
+    )
+    return await _commit_contract_wiring(
+        prepared,
+        dispatch_engine,
+        event_bus,
+        dynamic_materialization_authorized=dynamic_materialization_authorized,
+    )
 
 
 def _prepare_handler_wiring(
@@ -5575,6 +7573,8 @@ def _prepare_handler_wiring(
     container: object | None = None,
     materialized_explicit_dependencies: (dict[str, dict[str, object]] | None) = None,
     pre_resolved_handlers: dict[str, object] | None = None,
+    topology: ModelDeploymentTopology | None = None,
+    catalog_binding_policy: ProjectionCatalogBindingPolicy | None = None,
 ) -> PreparedWiring:
     """Prepare one handler entry — delegates construction to the resolver.
 
@@ -5681,6 +7681,11 @@ def _prepare_handler_wiring(
         event_bus=event_bus,
         container=_effective_container,
         ownership_query=ownership_query,
+        # OMN-15468: the publishing contract's own declared terminal topics,
+        # read through the same function route discovery uses, so the wiring's
+        # notion of "this publish is a terminal" cannot drift from the set the
+        # Pattern B broker subscribes to.
+        terminal_topics=load_terminal_event_topics(contract.contract_path),
     )
 
     def _quarantine_prepared(
@@ -5836,7 +7841,7 @@ def _prepare_handler_wiring(
     # after boundary hook and returns a normal ModelDispatchResult through
     # the standard result-applier path. A contract declaring both is a
     # wiring-time contract defect, not a case to silently prioritize one arm.
-    db_tables = _read_db_io_tables(contract.contract_path)
+    db_tables = tuple(contract.db_io.db_tables) if contract.db_io is not None else ()
     state_io = _read_state_io(contract.contract_path)
     if db_tables and state_io:
         raise ModelOnexError(
@@ -5845,6 +7850,18 @@ def _prepare_handler_wiring(
             "(OMN-14208); a contract must declare exactly one."
         )
     if db_tables:
+        if topology is None:
+            raise ModelOnexError(
+                f"handler_wiring: contract {contract.name!r} declares db_io but "
+                "wire_from_manifest received no checked-in ModelDeploymentTopology"
+            )
+        catalog_policy = catalog_binding_policy or ProjectionCatalogBindingPolicy()
+        target = _resolve_projection_database_target(
+            db_tables,
+            topology,
+            catalog_read_binding=catalog_policy.read_binding,
+            catalog_write_binding=catalog_policy.write_binding,
+        )
         subscribe_topics = (
             contract.event_bus.subscribe_topics if contract.event_bus else ()
         )
@@ -5856,13 +7873,21 @@ def _prepare_handler_wiring(
             else None
         )
         # OMN-13548 (D-03): resolve the malformed-event DLQ destination from the
-        # contract's event_bus.dlq_topics (not the typed subcontract, which omits
-        # the field) so a projection handler error routes to the bus instead of
-        # being logged + dropped. Never hardcoded here.
-        projection_dlq_topics = _read_dlq_topics(contract.contract_path)
+        # contract's typed event-bus declaration. Filesystem-discovered legacy
+        # contracts retain the raw-YAML fallback during the migration window.
+        typed_dlq_topics = (
+            getattr(contract.event_bus, "dlq_topics", ())
+            if contract.event_bus is not None
+            else ()
+        )
+        projection_dlq_topics = (
+            list(typed_dlq_topics)
+            if typed_dlq_topics
+            else _read_dlq_topics(contract.contract_path)
+        )
         callback = _make_projection_dispatch_callback(
             handler_instance,
-            db_tables,
+            target,
             subscribe_topics,
             sinks=ProjectionDispatchSinks(
                 event_bus=event_bus,
@@ -5874,7 +7899,7 @@ def _prepare_handler_wiring(
             "Auto-wired projection handler with DB injection: handler=%s db_tables=%s "
             "terminal_event=%s dlq_topics=%s",
             handler_ref.name,
-            [t.get("name") for t in db_tables],
+            [table.name for table in target.tables],
             projection_terminal_event,
             projection_dlq_topics,
         )
@@ -5993,6 +8018,8 @@ def _prepare_handler_wiring(
 def _commit_handler_wiring(
     prepared: PreparedWiring,
     dispatch_engine: object,
+    *,
+    owner_contract_name: str | None = None,
     dynamic_materialization_authorized: bool = False,
 ) -> tuple[str, list[str]]:
     """Register a prepared handler wiring with the dispatch engine (side effects only).
@@ -6012,6 +8039,9 @@ def _commit_handler_wiring(
     the private dynamic registration methods are used instead of the standard
     ones. This flag MUST only be set by ``materialize_cached_contract()`` after
     full contract validation — never by general application code (OMN-11246).
+    ``owner_contract_name`` records the contract provenance used by the
+    pre-subscribe ownership validator. Auto-wiring callers always supply it;
+    direct/manual registrations remain deliberately unowned.
 
     Returns:
         Tuple of (dispatcher_id, list of route_ids registered). Returns
@@ -6041,6 +8071,7 @@ def _commit_handler_wiring(
                 category=prepared.category,
                 message_types=prepared.message_types,
                 payload_type_matcher=prepared.payload_type_matcher,
+                owner_contract_name=owner_contract_name,
             )
             for route in prepared.routes:
                 engine._register_route_dynamic(route)
@@ -6051,6 +8082,7 @@ def _commit_handler_wiring(
                 category=prepared.category,
                 message_types=prepared.message_types,
                 payload_type_matcher=prepared.payload_type_matcher,
+                owner_contract_name=owner_contract_name,
             )
             for route in prepared.routes:
                 engine.register_route(route)
@@ -6065,6 +8097,8 @@ def _wire_handler_entry(
     dispatch_engine: object,
     event_bus: object | None = None,
     container: object | None = None,
+    topology: ModelDeploymentTopology | None = None,
+    catalog_binding_policy: ProjectionCatalogBindingPolicy | None = None,
 ) -> tuple[str, list[str]]:
     """Prepare and immediately commit one handler entry (single-contract shortcut).
 
@@ -6086,5 +8120,11 @@ def _wire_handler_entry(
         ownership_query=ownership_query,
         event_bus=event_bus,
         container=container,
+        topology=topology,
+        catalog_binding_policy=catalog_binding_policy,
     )
-    return _commit_handler_wiring(prepared, dispatch_engine)
+    return _commit_handler_wiring(
+        prepared,
+        dispatch_engine,
+        owner_contract_name=contract.name,
+    )

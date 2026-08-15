@@ -7,7 +7,7 @@ for the Qdrant HTTP endpoint the upsert/search handlers (and the registry-api
 health probe) connect to (OMN-13558 Wave-1 endpoint→overlay migration). It is
 declared with the ``${env.VAR}`` overlay convention so an operator overlay / the
 per-lane service env supplies the real endpoint per lane — never a hardcoded
-``http://localhost:6333`` in source.
+loopback endpoint in source.
 
 Resolution goes through ``expand_contract_env_refs`` — the one sanctioned
 env-reading boundary in the overlay package — so the handlers never read
@@ -40,10 +40,9 @@ def contract_qdrant_url(contract_path: Path = _CONTRACT) -> str:
     """Return the resolved ``descriptor.qdrant_url`` for the vector-store node.
 
     The value is contract-declared (overridable by an operator overlay contract)
-    via the ``${env.QDRANT_URL}`` convention — never hardcoded in source. Fails
-    closed: raises ``ValueError`` when the field is absent or resolves to an empty
-    string, so the vector handlers never silently fall back to
-    ``http://localhost:6333`` when ``QDRANT_URL`` is unset.
+    via the ``${env.QDRANT_URL}`` convention — never hardcoded in source. It fails
+    closed when the field is absent or resolves to an empty string, so vector
+    handlers never silently fall back to an undeclared local endpoint.
     """
     raw = _load_contract(contract_path)
     descriptor = raw.get("descriptor")
@@ -65,7 +64,7 @@ def contract_qdrant_url(contract_path: Path = _CONTRACT) -> str:
             "descriptor.qdrant_url resolved empty — set QDRANT_URL (the Qdrant "
             "HTTP endpoint the vector-store effect connects to). The vector-store "
             "effect fails closed rather than silently default to "
-            "http://localhost:6333."
+            "an undeclared local endpoint."
         )
     return resolved
 

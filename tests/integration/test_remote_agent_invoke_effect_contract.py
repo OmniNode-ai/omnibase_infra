@@ -33,7 +33,7 @@ import importlib
 from datetime import UTC, datetime
 from pathlib import Path
 from typing import cast
-from uuid import uuid4
+from uuid import UUID, uuid4
 
 import pytest
 import yaml
@@ -45,6 +45,7 @@ from omnibase_core.models.delegation.model_agent_task_lifecycle_event import (
 from omnibase_core.models.delegation.model_invocation_command import (
     ModelInvocationCommand,
 )
+from omnibase_core.types import JsonType
 from omnibase_infra.runtime.runtime_local_ingress import (
     ModelRuntimeLocalIngressRoute,
     validate_runtime_local_ingress_payload,
@@ -91,7 +92,7 @@ def _first_enum_value(annotation: object) -> object:
     raise AssertionError(f"no Enum member found in annotation {annotation!r}")
 
 
-def _producer_invocation_payload() -> dict[str, object]:
+def _producer_invocation_payload() -> dict[str, JsonType]:
     """The RICH ModelInvocationCommand the producer publishes on remote-agent-invoke.v1."""
     kind = _first_enum_value(
         ModelInvocationCommand.model_fields["invocation_kind"].annotation
@@ -165,7 +166,11 @@ class TestRemoteAgentInvokeEffectContract:
         agent_id / forbidden extras); GREEN against the canonical contract."""
         route = _ingress_route_from_contract()
         payload = _producer_invocation_payload()
-        normalized = validate_runtime_local_ingress_payload(route, payload)
+        normalized = validate_runtime_local_ingress_payload(
+            route,
+            payload,
+            correlation_id=UUID(str(payload["correlation_id"])),
+        )
         # No field drop: the rich invocation fields survive validation.
         for field in ("task_id", "invocation_kind", "target_ref"):
             assert field in normalized, f"{field} dropped by input_model validation"

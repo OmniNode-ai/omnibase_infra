@@ -14,6 +14,7 @@ from omnibase_infra.nodes.node_bus_forwarder_effect.services.service_gateway_top
 )
 
 _TENANT_SLUG_RE = re.compile(r"^[a-z][a-z0-9-]{1,61}[a-z0-9]$")
+_PRINCIPAL_ID_RE = re.compile(r"^t-[0-9a-f]{32}$")
 
 
 class ModelGatewayTenantIdentity(BaseModel):
@@ -23,7 +24,8 @@ class ModelGatewayTenantIdentity(BaseModel):
 
     tenant_id: UUID
     tenant_slug: str
-    principal_id: UUID
+    # Canonical MSK principal is t-<tenant UUID hex>, not a UUID field.
+    principal_id: str
 
     @field_validator("tenant_slug")
     @classmethod
@@ -34,3 +36,13 @@ class ModelGatewayTenantIdentity(BaseModel):
         if not _TENANT_SLUG_RE.match(slug) or "--" in slug:
             raise ValueError("tenant_slug must be DNS-compatible lowercase slug")
         return slug
+
+    @field_validator("principal_id")
+    @classmethod
+    def _validate_principal_id(cls, value: str) -> str:
+        principal_id = value.strip()
+        if not _PRINCIPAL_ID_RE.fullmatch(principal_id):
+            raise ValueError(
+                "principal_id must use the canonical t-<32 lowercase hex> form"
+            )
+        return principal_id

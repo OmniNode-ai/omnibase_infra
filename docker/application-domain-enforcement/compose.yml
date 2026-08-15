@@ -1,0 +1,32 @@
+# SPDX-License-Identifier: MIT
+services:
+  postgres:
+    build:
+      context: ../..
+      dockerfile: docker/application-domain-enforcement/Dockerfile
+      target: postgres
+    environment:
+      POSTGRES_DB: omnidash_analytics
+      POSTGRES_PASSWORD: domain-proof-admin-only # pragma: allowlist secret
+    tmpfs:
+      - /var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U postgres -d omnidash_analytics"]
+      interval: 1s
+      timeout: 3s
+      retries: 30
+  proof:
+    build:
+      context: ../..
+      dockerfile: docker/application-domain-enforcement/Dockerfile
+      target: proof
+    depends_on:
+      postgres:
+        condition: service_healthy
+    environment:
+      ADMIN_DSN: postgresql://postgres:domain-proof-admin-only@postgres:5432/omnidash_analytics # pragma: allowlist secret
+      OWNERSHIP_MANIFEST: /app/proof/ownership.yaml
+      POOL_DSN_ONEX_API: postgresql://onex_api:domain-proof-only@postgres:5432/omnidash_analytics # pragma: allowlist secret
+      POOL_DSN_TENANT_PROJECTION: postgresql://tenant_projection_writer:domain-proof-only@postgres:5432/omnidash_analytics # pragma: allowlist secret
+      POOL_DSN_APP_DASHBOARD: postgresql://app_dashboard:domain-proof-only@postgres:5432/omnidash_analytics # pragma: allowlist secret
+      POOL_DSN_OMNINODE_RUNTIME_SERVICE: postgresql://omninode_runtime:domain-proof-only@postgres:5432/omnidash_analytics # pragma: allowlist secret

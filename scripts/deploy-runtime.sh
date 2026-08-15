@@ -101,6 +101,12 @@ readonly DEPLOY_ROOT="${HOME}/.omnibase/infra"
 readonly REGISTRY_FILE="${DEPLOY_ROOT}/registry.json"
 readonly LOCK_DIR="${DEPLOY_ROOT}/.deploy.lock"
 
+# OMN-15218: env-var NAMES the lane-deploy attribution preflight reads. Held as
+# names (not values) so the guard's error text and the Python preflight can never
+# drift into naming two different knobs.
+readonly ONEX_DEPLOY_REASON_VAR="ONEX_DEPLOY_REASON"
+readonly ONEX_DEPLOY_GRANT_ACK_VAR="ONEX_DEPLOY_GRANT_ACK"
+
 # Maximum number of deployed versions to retain. Older deployments are pruned
 # after each successful deployment. The currently active deployment (tracked in
 # registry.json) is never removed regardless of age.
@@ -211,6 +217,14 @@ readonly HEALTH_CHECK_INTERVAL=4
 MODE="dry-run"           # dry-run | execute
 FORCE=false
 RESTART=false
+# OMN-15218: the raw argv this invocation was called with, captured before
+# parse_args consumes it, so the attribution record names the exact command that
+# mutated the lane instead of a reconstruction.
+DEPLOY_INVOCATION_ARGS=()
+# OMN-15218: the attribution record emitted by the lane-deploy preflight, folded
+# into registry.json by write_registry() so "who/what/why" is readable from the
+# same file that already answers "what version is deployed".
+LANE_ATTRIBUTION_RECORD_JSON=""
 # Set after rsync to enable automatic cleanup of orphaned deployment directories
 # on failure. If this is non-empty and the deployment directory is NOT the active
 # deployment in registry.json, the trap handler will remove it.
@@ -253,6 +267,20 @@ MIGRATION_TREE_SNAPSHOT_DIR=""
 # Set to true only when ALL deployment phases complete successfully.
 # Used by cleanup_on_exit to determine if the --force backup can be safely removed.
 DEPLOYMENT_COMPLETE=false
+# OMN-15352: path to a file recording each RUNTIME_BUILD_SERVICES image's
+# pre-build `:latest` id (or empty if none existed), taken by
+# snapshot_latest_image_tags() right before build_images() runs. On a failed
+# deploy, cleanup_on_exit() restores every snapshotted tag (or removes an
+# unverified tag that had no prior state) so a later `docker compose up -d`
+# without --build can never silently resolve an untested image (F3). Empty
+# until the snapshot is taken; the snapshot file is removed on exit.
+LATEST_TAG_SNAPSHOT_FILE=""
+# OMN-15352: compose project name, mirrored into a global right after
+# resolve_compose_project() resolves it in main(). cleanup_on_exit() is an
+# EXIT-trap handler with no arguments, so it cannot receive compose_project as
+# a parameter -- it reads this global to resolve the same image names
+# snapshot_latest_image_tags() recorded them under.
+DEPLOY_COMPOSE_PROJECT=""
 
 # =============================================================================
 # Logging
@@ -328,10 +356,28 @@ OPTIONS
                         origin/main. Also honored via ONEX_DEPLOY_LANE=prod.
     --help              Show this help message and exit.
 
+ATTRIBUTION + GRANT INTERLOCK (OMN-15218)
+    ONEX_DEPLOY_REASON      REQUIRED for the governed lanes (stability-test, prod,
+                            judge). A real justification, ideally naming a ticket;
+                            placeholders are rejected. Recorded durably with the
+                            actor (user/uid/host/ssh peer/parent command) and the
+                            invoking command line.
+    ONEX_DEPLOY_TICKET      Optional explicit OMN-#### (otherwise parsed from the
+                            reason).
+    ONEX_DEPLOY_GRANT_ACK   Comma-separated grant ids. A stability-test deploy is
+                            REFUSED while unconsumed, unexpired prod-promotion
+                            grants exist at onex_change_control@main; proceeding
+                            requires naming EVERY live grant id here (or the token
+                            'unreadable-grant-state' when grant state cannot be
+                            resolved — which also fails closed). The
+                            acknowledgement is written into the record.
+
 DEPLOYMENT ROOT
     ~/.omnibase/infra/
     +-- .deploy.lock/                       mkdir-based concurrency guard
     +-- registry.json                       tracks active deployment
+    +-- deploy-log.jsonl                    append-only lane-deploy attribution log
+    +-- deploy-attribution/                 per-run attribution records
     +-- deployed/
         +-- {version}/                      build directory
             +-- pyproject.toml
@@ -496,6 +542,26 @@ resolve_compose_project() {
 # scripts/deploy-agent/deploy_agent/executor.py (_LANE_CONFIGS): stability-test
 # layers docker-compose.stability-test.yml, prod layers docker-compose.prod.yml,
 # judge layers docker-compose.judge.yml. The dev project gets no overlay.
+resolve_lane_name() {
+    # Echo the LANE name derived from a compose project (OMN-15218).
+    #   omnibase-infra                -> dev
+    #   omnibase-infra-stability-test -> stability-test
+    #   omnibase-infra-prod           -> prod
+    #   omnibase-infra-judge          -> judge
+    # Single derivation shared by the hot-patch preflight and the lane-deploy
+    # attribution guard, so one deploy can never be recorded under two different
+    # lane names. Unknown suffixes echo through unchanged; the callers that must
+    # fail closed on an unknown lane (resolve_lane_overlay_filename) do their own
+    # allowlist check.
+    local compose_project="$1"
+    local lane="${compose_project#omnibase-infra}"
+    lane="${lane#-}"
+    if [[ -z "${lane}" ]]; then
+        lane="dev"
+    fi
+    echo "${lane}"
+}
+
 resolve_lane_overlay_filename() {
     # Echo the overlay compose FILENAME (relative to docker/) for a compose
     # project, or nothing for the bare dev project. Fails closed: an unknown
@@ -541,17 +607,28 @@ resolve_compose_file_args() {
     #   local -a compose_args
     #   resolve_compose_file_args compose_args "${deploy_target}" "${compose_project}"
     #   docker compose -p "${compose_project}" "${compose_args[@]}" ...
-    local -n _out_args="$1"
+    local _out_args_name="$1"
     local deploy_target="$2"
     local compose_project="$3"
 
     local docker_dir="${deploy_target}/docker"
-    _out_args=("-f" "${docker_dir}/docker-compose.infra.yml")
+    eval "${_out_args_name}=(-f $(printf '%q' "${docker_dir}/docker-compose.infra.yml"))"
 
     local overlay_filename
     overlay_filename="$(resolve_lane_overlay_filename "${compose_project}")"
     if [[ -n "${overlay_filename}" ]]; then
-        _out_args+=("-f" "${docker_dir}/${overlay_filename}")
+        eval "${_out_args_name}+=( -f $(printf '%q' "${docker_dir}/${overlay_filename}") )"
+    else
+        # Dev/lab lane (bare omnibase-infra project). OMN-15379: layer the
+        # dev-lane overlay, whose ONLY content is ONEX_MIGRATION_LANE=dev for
+        # forward-migration — the lane indicator that releases the
+        # node_projection_registration trio (operator ruling 15, lab lane is the
+        # FORCE proving ground). It is a separate file precisely so no non-dev
+        # lane can inherit it from the base: see the header of
+        # docker/docker-compose.dev-lane.yml. Unset indicator = FULL fence, so
+        # omitting this file degrades safely (the lane comes up without
+        # node_service_registry) rather than dangerously.
+        eval "${_out_args_name}+=( -f $(printf '%q' "${docker_dir}/docker-compose.dev-lane.yml") )"
     fi
 }
 
@@ -1043,6 +1120,85 @@ guard_prod_promotion_lineage() {
     log_info "Prod promotion-lineage guard passed: source clean + promoted."
 }
 
+guard_lane_deploy_attribution() {
+    # Lane-deploy ATTRIBUTION + live-grant INTERLOCK preflight (OMN-15218).
+    #
+    # Runs BEFORE any mutation (and in dry-run, so an operator sees the refusal
+    # during preview rather than after a build starts). Delegates every rule to
+    # scripts/preflight_lane_deploy_attribution.py — one tested source of truth
+    # for: mandatory ONEX_DEPLOY_REASON on governed lanes (stability-test / prod
+    # / judge), durable actor+command+ticket capture, and the refuse-by-default
+    # interlock when live, unconsumed prod-promotion grants at
+    # onex_change_control@main pin the stability lane's proof.
+    #
+    # The preflight prints its human summary on stderr and the JSON attribution
+    # record on stdout; the record is captured here and folded into registry.json
+    # by write_registry().
+    local repo_root="$1"
+    local compose_project="$2"
+
+    local lane
+    lane="$(resolve_lane_name "${compose_project}")"
+
+    log_step "Lane Deploy Attribution + Grant Interlock (OMN-15218)"
+
+    local preflight="${repo_root}/scripts/preflight_lane_deploy_attribution.py"
+    if [[ ! -f "${preflight}" ]]; then
+        log_error "Lane-deploy attribution preflight not found: ${preflight}"
+        log_error "Refusing to deploy lane '${lane}' with no attribution mechanism."
+        log_error "  Two unattributed stability rebuilds in two days (2026-07-26, 2026-07-27)"
+        log_error "  are exactly what this preflight exists to make impossible (OMN-15218)."
+        exit 1
+    fi
+
+    local python_bin=""
+    if [[ -x "${repo_root}/.venv/bin/python" ]]; then
+        python_bin="${repo_root}/.venv/bin/python"
+    elif command -v uv &>/dev/null; then
+        python_bin="uv-run"
+    elif command -v python3 &>/dev/null; then
+        python_bin="python3"
+    else
+        log_error "No Python interpreter available to run the lane-deploy attribution preflight."
+        exit 1
+    fi
+
+    local preflight_args=(
+        --lane "${lane}"
+        --compose-project "${compose_project}"
+        --source "deploy-runtime.sh"
+        --invoking-command "${SCRIPT_NAME} ${DEPLOY_INVOCATION_ARGS[*]}"
+    )
+    # Dry-run evaluates and reports but writes no durable record — nothing was
+    # deployed, so nothing is attributed; the verdict is still shown.
+    if [[ "${MODE}" != "execute" ]]; then
+        preflight_args+=(--check-only)
+    fi
+
+    log_cmd "${preflight} ${preflight_args[*]}"
+
+    local preflight_exit=0
+    if [[ "${python_bin}" == "uv-run" ]]; then
+        LANE_ATTRIBUTION_RECORD_JSON="$(uv run --project "${repo_root}" python "${preflight}" \
+            "${preflight_args[@]}")" || preflight_exit=$?
+    else
+        LANE_ATTRIBUTION_RECORD_JSON="$("${python_bin}" "${preflight}" \
+            "${preflight_args[@]}")" || preflight_exit=$?
+    fi
+
+    if [[ "${preflight_exit}" -ne 0 ]]; then
+        log_error "Lane-deploy attribution preflight REFUSED this deploy (exit ${preflight_exit})."
+        log_error "  Lane: ${lane} (${compose_project})"
+        log_error "  Set ${ONEX_DEPLOY_REASON_VAR} to a real justification, and — when live"
+        log_error "  prod-promotion grants pin this lane — acknowledge each grant id via"
+        log_error "  ${ONEX_DEPLOY_GRANT_ACK_VAR}. Both are recorded in the attribution record."
+        log_error "  Never route around this by calling docker compose directly (OMN-15218)."
+        exit 1
+    fi
+
+    log_info "Lane-deploy attribution recorded; grant interlock clear."
+}
+
 guard_hotpatch_ledger() {
     # Hot-patch ledger rebuild preflight (OMN-13014, retro B-1).
     #
@@ -1075,11 +1231,8 @@ guard_hotpatch_ledger() {
 
     # Lane = compose project suffix (omnibase-infra-stability-test -> stability-test);
     # the bare dev project (omnibase-infra) maps to lane 'dev'.
-    local lane="${compose_project#omnibase-infra}"
-    lane="${lane#-}"
-    if [[ -z "${lane}" ]]; then
-        lane="dev"
-    fi
+    local lane
+    lane="$(resolve_lane_name "${compose_project}")"
 
     # Workspace builds vendor sibling repos from OMNI_HOME clones; the gate
     # resolves each ledger row's repo build ref (clone HEAD unless overridden
@@ -1293,8 +1446,12 @@ cleanup_on_exit() {
                 # backup's stale snapshot (which dropped a forward migration in
                 # the 2026-06-19 stability redeploy).
                 restore_migration_tree_after_revert "${original_dir}"
-                log_warn "NOTE: registry.json may contain stale metadata (git_sha, deployed_at)"
-                log_warn "from the failed deployment. Verify or re-deploy to restore consistency."
+                # OMN-15352: registry.json is no longer stale here. write_registry()
+                # is now commit-on-success -- it only runs after every phase that
+                # can fail has passed, so on any non-success exit (including this
+                # restore branch) it never ran this invocation, and registry.json
+                # still holds whatever it held before this deploy started.
+                log_info "registry.json is unaffected by this restore (written only on full deploy success, OMN-15352)."
             fi
         else
             # Full deployment succeeded -- backup is stale, clean it up.
@@ -1303,6 +1460,19 @@ cleanup_on_exit() {
         fi
         FORCE_BACKUP_DIR=""
     fi
+
+    # OMN-15352 F3: restore every RUNTIME_BUILD_SERVICES `:latest` tag to its
+    # pre-build state on any non-success exit. This is independent of whether a
+    # --force backup exists -- a build/restart/verify/readback failure can leave
+    # `:latest` pointed at an unverified image even on a first-ever (non-force)
+    # deploy, so it is not covered by the FORCE_BACKUP_DIR branch above.
+    if [[ "${DEPLOYMENT_COMPLETE}" != "true" ]]; then
+        restore_latest_image_tags
+    fi
+    if [[ -n "${LATEST_TAG_SNAPSHOT_FILE}" && -f "${LATEST_TAG_SNAPSHOT_FILE}" ]]; then
+        rm -f "${LATEST_TAG_SNAPSHOT_FILE}" 2>/dev/null || true
+    fi
+    LATEST_TAG_SNAPSHOT_FILE=""
 
     # OMN-13364: remove the migration-tree snapshot taken after sync_files.
     if [[ -n "${MIGRATION_TREE_SNAPSHOT_DIR}" && -d "${MIGRATION_TREE_SNAPSHOT_DIR}" ]]; then
@@ -1634,19 +1804,19 @@ resolve_core_contracts_dir() {
     # `local resolved=""` here produced an empty resolved-dir output AND
     # incorrectly returned success on the fail-closed case once the caller's
     # own variable was also named "resolved".
-    local -n _out_probed="$1"
-    local -n _out_resolved="$2"
-    _out_resolved=""
+    local _out_probed_name="$1"
+    local _out_resolved_name="$2"
+    eval "${_out_resolved_name}=''"
     local _resolve_ccd_dir=""
 
     if [[ -n "${OMNI_HOME:-}" ]]; then
         local fs_candidate="${OMNI_HOME}/omnibase_core/src/omnibase_core/contracts/runtime_data"
-        _out_probed+=("${fs_candidate}")
+        eval "${_out_probed_name}+=( $(printf '%q' "${fs_candidate}") )"
         if [[ -d "${fs_candidate}" ]]; then
             _resolve_ccd_dir="${fs_candidate}"
         fi
     else
-        _out_probed+=("<OMNI_HOME unset -- cannot probe the sibling clone filesystem path>")
+        eval "${_out_probed_name}+=( $(printf '%q' "<OMNI_HOME unset -- cannot probe the sibling clone filesystem path>") )"
     fi
 
     if [[ -z "${_resolve_ccd_dir}" ]]; then
@@ -1664,15 +1834,15 @@ if spec and spec.origin:
         print(runtime_data)
 " 2>/dev/null || true)"
         if [[ -n "${py_candidate}" ]]; then
-            _out_probed+=("${py_candidate} (python find_spec('omnibase_core') resolution)")
+            eval "${_out_probed_name}+=( $(printf '%q' "${py_candidate} (python find_spec('omnibase_core') resolution)") )"
             _resolve_ccd_dir="${py_candidate}"
         else
-            _out_probed+=("<python find_spec('omnibase_core') returned no importable spec/origin>")
+            eval "${_out_probed_name}+=( $(printf '%q' "<python find_spec('omnibase_core') returned no importable spec/origin>") )"
         fi
     fi
 
     if [[ -n "${_resolve_ccd_dir}" ]]; then
-        _out_resolved="${_resolve_ccd_dir}"
+        eval "${_out_resolved_name}=$(printf '%q' "${_resolve_ccd_dir}")"
         return 0
     fi
     return 1
@@ -1763,6 +1933,24 @@ sync_files() {
         log_error "src/omnibase_core/contracts/runtime_data), or that omnibase_core is"
         log_error "installed: uv pip install omnibase-core"
         exit 1
+    fi
+
+    # 3c. Config (repo-tracked deploy-time config baked into the image)
+    # OMN-15696: Dockerfile.runtime COPYs config/runner_fleet.yaml (OMN-15676),
+    # but sync_files() never rsynced config/ into the deployed build context, so
+    # any --force redeploy or cold bring-up that recreates deployed/<version>/
+    # fails the image build with "failed to calculate checksum of ref
+    # ...:/config/runner_fleet.yaml: not found" -- the same COPY-without-matching-
+    # rsync class OMN-12987 fixed for workspace/. Sync the whole directory (not
+    # just runner_fleet.yaml) so a future config/ COPY addition doesn't reopen
+    # the same gap.
+    if [[ -d "${repo_root}/config/" ]]; then
+        log_info "Syncing config/..."
+        log_cmd "rsync -a --delete config/ -> deployed"
+        rsync -a --delete \
+            "${repo_root}/config/" "${deploy_target}/config/"
+    else
+        log_info "No config/ directory present, skipping config sync."
     fi
 
     # 4. Docker files -- with preserve allowlist
@@ -2013,6 +2201,19 @@ write_registry() {
     old_umask="$(umask)"
     umask 077
 
+    # OMN-15218: carry the attribution record (actor, reason, ticket, invoking
+    # command, grant-interlock verdict + any acknowledgement) into registry.json.
+    # Before this, registry.json answered "what is deployed" but nothing on the
+    # box answered "who deployed it and why" — the exact gap that made two
+    # stability rebuilds unattributable. Defensive: if the record is missing or
+    # not valid JSON, write `null` rather than corrupting the registry (the
+    # preflight already hard-failed the deploy if it could not produce one).
+    local attribution_json="null"
+    if [[ -n "${LANE_ATTRIBUTION_RECORD_JSON}" ]] \
+        && jq -e . >/dev/null 2>&1 <<<"${LANE_ATTRIBUTION_RECORD_JSON}"; then
+        attribution_json="${LANE_ATTRIBUTION_RECORD_JSON}"
+    fi
+
     jq -n \
         --arg active_version "${version}" \
         --arg git_sha "${git_sha}" \
@@ -2021,6 +2222,7 @@ write_registry() {
         --arg deployed_at "${deployed_at}" \
         --arg compose_project "${compose_project}" \
         --arg profile "${COMPOSE_PROFILE}" \
+        --argjson attribution "${attribution_json}" \
         '{
             active_version: $active_version,
             git_sha: $git_sha,
@@ -2028,7 +2230,8 @@ write_registry() {
             source_repo: $source_repo,
             deployed_at: $deployed_at,
             compose_project: $compose_project,
-            profile: $profile
+            profile: $profile,
+            attribution: $attribution
         }' > "${tmp_file}"
 
     # Restore original umask before continuing
@@ -2042,6 +2245,77 @@ write_registry() {
     log_info "  git_sha:         ${git_sha}"
     log_info "  deployed_at:     ${deployed_at}"
     log_info "  compose_project: ${compose_project}"
+    if [[ "${attribution_json}" != "null" ]]; then
+        log_info "  actor:           $(jq -r '.actor.identity // "unknown"' <<<"${attribution_json}")"
+        log_info "  reason:          $(jq -r '.reason // ""' <<<"${attribution_json}")"
+        log_info "  grant verdict:   $(jq -r '.grant_guard.verdict // "unknown"' <<<"${attribution_json}")"
+    fi
+}
+
+# =============================================================================
+# Image tag snapshot -- protect `:latest` from a failed build (OMN-15352 F3)
+# =============================================================================
+
+snapshot_latest_image_tags() {
+    # Record the pre-build `:latest` image id for every RUNTIME_BUILD_SERVICES
+    # member, so a failed deploy can restore each tag to what it resolved to
+    # before this invocation (or remove a tag that had no prior state). Runs
+    # unconditionally right before build_images(): `docker compose build` only
+    # (re)tags `:latest` on a SUCCESSFUL build, so whatever we capture here is
+    # always a correct pre-image of the tag regardless of how this run ends.
+    local compose_project="$1"
+
+    local snapshot_file
+    snapshot_file="$(mktemp "${DEPLOY_ROOT}/.latest-tag-snapshot.XXXXXX" 2>/dev/null || true)"
+    if [[ -z "${snapshot_file}" ]]; then
+        log_warn "Could not create :latest tag snapshot file; :latest rollback protection is disabled for this run."
+        return 0
+    fi
+
+    local service image_name prior_id
+    for service in "${RUNTIME_BUILD_SERVICES[@]}"; do
+        image_name="${compose_project}-${service}"
+        prior_id="$(docker image inspect "${image_name}:latest" --format '{{.Id}}' 2>/dev/null || true)"
+        printf '%s\t%s\n' "${service}" "${prior_id}" >>"${snapshot_file}"
+    done
+
+    LATEST_TAG_SNAPSHOT_FILE="${snapshot_file}"
+    log_info "Snapshotted pre-build :latest image ids for ${#RUNTIME_BUILD_SERVICES[@]} service(s) (rollback safety)."
+}
+
+restore_latest_image_tags() {
+    # Restore every RUNTIME_BUILD_SERVICES `:latest` tag to its pre-build state
+    # (OMN-15352 F3). Called only from cleanup_on_exit() on a non-success exit.
+    # A service that had no prior `:latest` image (recorded as an empty id by
+    # snapshot_latest_image_tags()) has its now-unverified tag removed instead
+    # of being left resolvable by a later `docker compose up -d` without
+    # --build.
+    if [[ -z "${LATEST_TAG_SNAPSHOT_FILE}" || ! -f "${LATEST_TAG_SNAPSHOT_FILE}" ]]; then
+        return 0
+    fi
+    if [[ -z "${DEPLOY_COMPOSE_PROJECT}" ]]; then
+        log_warn "DEPLOY_COMPOSE_PROJECT is unset; cannot restore :latest image tags."
+        return 0
+    fi
+
+    local service prior_id image_name
+    while IFS=$'\t' read -r service prior_id; do
+        [[ -n "${service}" ]] || continue
+        image_name="${DEPLOY_COMPOSE_PROJECT}-${service}"
+        if [[ -n "${prior_id}" ]]; then
+            if docker tag "${prior_id}" "${image_name}:latest" 2>/dev/null; then
+                log_warn "Restored ${image_name}:latest to its pre-build image ${prior_id}."
+            else
+                log_error "Failed to restore ${image_name}:latest to pre-build image ${prior_id}."
+                log_error "Manual recovery: docker tag ${prior_id} ${image_name}:latest"
+            fi
+        else
+            # No prior :latest existed for this service -- remove the tag this
+            # failed run may have created rather than leave it pointing at an
+            # image that was never proven to deploy.
+            docker rmi "${image_name}:latest" 2>/dev/null || true
+        fi
+    done <"${LATEST_TAG_SNAPSHOT_FILE}"
 }
 
 # =============================================================================
@@ -2588,10 +2862,24 @@ readback_deployed_ref() {
     # and exits non-zero on any mismatch. It is NOT an optional flag -- it runs
     # unconditionally after every restart / cold bring-up. Without it,
     # "deployed" / "live-readback" proof classes are unfalsifiable.
+    #
+    # OMN-15348: verifies EXACTLY the services this run actually rebuilt/
+    # recreated -- RUNTIME_BUILD_SERVICES (which already resolves to the
+    # RUNTIME_BUILD_SERVICES_OVERRIDE subset when OMN-14873 scoping is in
+    # play, else the full RUNTIME_SERVICES set). Prior to this fix the
+    # readback was hardcoded to the single omninode-runtime container
+    # regardless of scope: a scoped rebuild of e.g. runtime-effects left
+    # omninode-runtime's stale label untouched, RT-6 read THAT container,
+    # false-FAILed, and auto-triggered restore-previous-deployment on a
+    # deploy that never touched omninode-runtime at all. Looping the
+    # verified set over RUNTIME_BUILD_SERVICES means an out-of-scope
+    # container's stale label is never probed, so it can neither fail the
+    # deploy nor trigger the restore.
     local git_sha="$1"
     local version="$2"
     local compose_project="$3"
     local repo_root="$4"
+    local deploy_target="$5"
 
     log_step "Deploy Readback (RT-6, fail-closed) [OMN-14469]"
 
@@ -2603,8 +2891,12 @@ readback_deployed_ref() {
         exit 1
     fi
 
-    local runtime_container_name
-    runtime_container_name="$(resolve_lane_runtime_container_name "${compose_project}")"
+    # Compose file args to resolve non-runtime service containers below by
+    # `docker compose ps -q <service>` -- robust to lanes/services (e.g.
+    # runtime-worker on the dev lane) that have no fixed container_name and
+    # get a compose-assigned one.
+    local -a compose_args
+    resolve_compose_file_args compose_args "${deploy_target}" "${compose_project}"
 
     # The readback script lives next to this script (sync_files does NOT copy
     # scripts/ into the deploy target), so resolve it from the repo root.
@@ -2627,30 +2919,61 @@ readback_deployed_ref() {
         exit 1
     fi
 
-    # Always assert the running container's revision == the intended git SHA.
-    # Also assert the runtime package version inside the container matches the
-    # built version (always true on every lane); operators can declare extra
-    # sibling versions to assert via READBACK_EXPECTED_VERSIONS.
+    # Always assert each in-scope container's revision == the intended git SHA.
+    # Also assert the runtime package version inside the primary
+    # omninode-runtime container matches the built version (always true on
+    # every lane, and only meaningful for that container's image); operators
+    # can declare extra sibling versions to assert via
+    # READBACK_EXPECTED_VERSIONS.
     local expected_versions="omnibase-infra=${version}"
     if [[ -n "${READBACK_EXPECTED_VERSIONS:-}" ]]; then
         expected_versions="${expected_versions},${READBACK_EXPECTED_VERSIONS}"
     fi
 
-    local readback_args=(
-        --container "${runtime_container_name}"
-        --expected-revision "${git_sha}"
-        --versions "${expected_versions}"
-    )
+    log_info "Verifying in-scope service(s): ${RUNTIME_BUILD_SERVICES[*]}"
 
-    log_cmd "${python_bin} ${readback} ${readback_args[*]}"
-    if ! "${python_bin}" "${readback}" "${readback_args[@]}"; then
-        log_error "Deploy readback FAILED (RT-6): the running container is NOT the intended ref ${git_sha}."
-        log_error "Deployed code != intended ref (stale / mis-targeted image, or version drift)."
-        log_error "Refusing to certify this deploy. Rebuild + recreate the lane's runtime and re-run."
-        exit 1
-    fi
+    local service
+    for service in "${RUNTIME_BUILD_SERVICES[@]}"; do
+        local container_name=""
+        if [[ "${service}" == "omninode-runtime" ]]; then
+            # Keep the pre-existing, individually-tested resolver for the
+            # primary runtime container (lane-prefixed container_name).
+            container_name="$(resolve_lane_runtime_container_name "${compose_project}")"
+        else
+            # Every other RUNTIME_SERVICES member either has no fixed
+            # container_name (e.g. dev-lane runtime-worker, compose-assigned)
+            # or a lane-prefix convention that differs per service
+            # (projection-api -> omnimarket-*, intelligence-api ->
+            # omnibase-*). Resolve live via the compose service key instead
+            # of hardcoding a second name map (OMN-13826-class lesson).
+            container_name="$(docker compose -p "${compose_project}" "${compose_args[@]}" ps -q "${service}" 2>/dev/null || true)"
+            if [[ -z "${container_name}" ]]; then
+                log_error "Deploy readback FAILED (RT-6): could not resolve a running container for in-scope service '${service}'."
+                log_error "Refusing to certify this deploy. Rebuild + recreate the lane's runtime and re-run."
+                exit 1
+            fi
+        fi
 
-    log_info "Deploy readback passed: ${runtime_container_name} revision == ${git_sha}, runtime version == ${version} (RT-6)."
+        local -a readback_args=(
+            --container "${container_name}"
+            --expected-revision "${git_sha}"
+        )
+        if [[ "${service}" == "omninode-runtime" ]]; then
+            readback_args+=(--versions "${expected_versions}")
+        fi
+
+        log_cmd "${python_bin} ${readback} ${readback_args[*]}"
+        if ! "${python_bin}" "${readback}" "${readback_args[@]}"; then
+            log_error "Deploy readback FAILED (RT-6): service '${service}' (container ${container_name}) is NOT the intended ref ${git_sha}."
+            log_error "Deployed code != intended ref (stale / mis-targeted image, or version drift)."
+            log_error "Refusing to certify this deploy. Rebuild + recreate the lane's runtime and re-run."
+            exit 1
+        fi
+
+        log_info "Deploy readback passed: ${service} (${container_name}) revision == ${git_sha} (RT-6)."
+    done
+
+    log_info "Deploy readback passed for all ${#RUNTIME_BUILD_SERVICES[@]} in-scope service(s) (RT-6)."
 }
 
 # =============================================================================
@@ -2805,6 +3128,9 @@ show_summary() {
 
 main() {
     # Orchestrate the full deployment workflow from validation through verification.
+    # OMN-15218: capture raw argv before parse_args consumes it so the attribution
+    # record carries the literal command that touched the lane.
+    DEPLOY_INVOCATION_ARGS=("$@")
     parse_args "$@"
 
     # Phase 1: Validate prerequisites
@@ -2856,15 +3182,20 @@ main() {
     # during preview, not after a build starts (OMN-12626, R1).
     guard_prod_promotion_lineage "${repo_root}"
 
-    # Prod lane: hard-fail on dirty/non-promoted source before any build/deploy.
-    # Runs in both dry-run and execute modes so operators see the rejection
-    # during preview, not after a build starts (OMN-12626, R1).
-    guard_prod_promotion_lineage "${repo_root}"
-
     # Compute paths
     local deploy_target="${DEPLOY_ROOT}/deployed/${version}"
     local compose_project
     compose_project="$(resolve_compose_project)"
+    # OMN-15352: mirror into the global cleanup_on_exit() (a no-argument EXIT
+    # trap handler) reads to resolve :latest image names on a failed deploy.
+    DEPLOY_COMPOSE_PROJECT="${compose_project}"
+
+    # Lane-deploy attribution + live-grant interlock (OMN-15218). FIRST gate that
+    # runs once the target lane is known and BEFORE anything is built, recreated,
+    # or restarted: an unattributed deploy must not get as far as touching an
+    # image, and a stability refresh must not silently erode the stability-proven
+    # premise of a live prod-promotion grant.
+    guard_lane_deploy_attribution "${repo_root}" "${compose_project}"
 
     # Hot-patch ledger preflight: refuse to rebuild over live in-container
     # hot-patches whose source PRs are not merged into the build ref.
@@ -2923,9 +3254,11 @@ main() {
     # deployed migrations to the backup's stale, pre-build snapshot.
     snapshot_migration_tree "${deploy_target}"
 
-    # Mark deployment directory for cleanup on failure. If registry write or
-    # build fails after rsync, cleanup_on_exit() will remove this orphaned
-    # directory (unless registry.json already points to it).
+    # Mark deployment directory for cleanup on failure. If the build or any
+    # later phase fails, cleanup_on_exit() will remove this orphaned directory
+    # (unless registry.json already points to it). OMN-15352: stays armed for
+    # the whole deploy now that the registry write is commit-on-success -- there
+    # is no longer an early point at which disarming it would be safe.
     DEPLOY_DIR_TO_CLEANUP="${deploy_target}"
 
     # Phase 7: Env setup -- REMOVED (F65 / OMN-6910)
@@ -2934,11 +3267,16 @@ main() {
     # Phase 8: Sanity check
     sanity_check "${deploy_target}" "${compose_project}"
 
-    # Phase 9: Registry
-    write_registry "${version}" "${git_sha}" "${deploy_target}" "${repo_root}" "${compose_project}"
+    # Phase 9: Registry write is DEFERRED to commit-on-success, after Phase 12
+    # (OMN-15352). Everything that can actually fail -- build, migration
+    # preflight, restart, readback -- runs first; registry.json is written only
+    # once none of it failed, so a failed deploy never leaves the registry
+    # asserting a version that was never running. See the write_registry() call
+    # near the deployment-complete marker below.
 
-    # Registry now points to this deployment -- disable partial cleanup
-    DEPLOY_DIR_TO_CLEANUP=""
+    # Snapshot the pre-build `:latest` image id for every service this build
+    # will retag, so a failed deploy can restore it (OMN-15352 F3).
+    snapshot_latest_image_tags "${compose_project}"
 
     # Phase 10: Build
     build_images "${deploy_target}" "${compose_project}" "${git_sha}"
@@ -2996,8 +3334,18 @@ main() {
         # only when this invocation actually started containers (there is nothing
         # to read back otherwise). A stale / mis-targeted running container is
         # rejected here instead of passing with only verify_deployment's warning.
-        readback_deployed_ref "${git_sha}" "${version}" "${compose_project}" "${repo_root}"
+        readback_deployed_ref "${git_sha}" "${version}" "${compose_project}" "${repo_root}" "${deploy_target}"
     fi
+
+    # Phase 9 (commit-on-success, OMN-15352): every phase that can fail --
+    # build, migration preflight, restart, readback -- has now passed. Write
+    # the registry only now, closing the write-ahead window that let a failed
+    # deploy leave registry.json asserting a version that was never actually
+    # running.
+    write_registry "${version}" "${git_sha}" "${deploy_target}" "${repo_root}" "${compose_project}"
+
+    # Registry now points to this deployment -- disable partial cleanup.
+    DEPLOY_DIR_TO_CLEANUP=""
 
     # All phases completed successfully. Mark deployment as complete so that
     # cleanup_on_exit knows the backup can be safely removed rather than restored.

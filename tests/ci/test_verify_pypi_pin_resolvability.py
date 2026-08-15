@@ -12,17 +12,27 @@ prove ``verify_pypi_pin_resolvability``:
 * fails RED (integration, real PyPI) on a deliberately-broken pin -- the
   exact OMN-14064 failure shape (a version that does not exist on PyPI), and
 * passes GREEN (integration, real PyPI) once the pin is a resolvable range.
+
+OMN-16047 adds the timeout dimension. The gate installs the whole transitive
+closure with ``--no-cache``, so on a saturated fleet it can exceed its wall-clock
+budget without any pin being wrong. The original code let
+``subprocess.TimeoutExpired`` escape, which (a) discarded the partial ``uv``
+output and (b) presented a throughput failure in language reserved for an
+unresolvable pin. These tests pin the distinction.
 """
 
 from __future__ import annotations
 
+import importlib
 import shutil
 import subprocess  # nosec B404 - invokes `uv build` with a fixed argv in tests
 from pathlib import Path
 
 import pytest
 
+import scripts.ci.verify_pypi_pin_resolvability as pin_gate
 from scripts.ci.verify_pypi_pin_resolvability import (
+    PinResolveTimeoutError,
     find_single_wheel,
     verify_pin_resolvability,
 )
@@ -121,3 +131,136 @@ def test_resolvable_pin_passes_green(tmp_path: Path) -> None:
     ok, log = verify_pin_resolvability(wheel)
 
     assert ok is True, log
+
+
+# ---------------------------------------------------------------------------
+# Timeout handling (OMN-16047) -- unit, no network
+# ---------------------------------------------------------------------------
+
+
+def _stub_runs(
+    monkeypatch: pytest.MonkeyPatch,
+    *,
+    install_raises: subprocess.TimeoutExpired | None,
+) -> None:
+    """Replace the module's ``subprocess.run`` so no real ``uv`` is invoked.
+
+    ``uv venv`` always succeeds (and its side effect of creating the venv
+    directory is irrelevant to these assertions); the ``uv pip install`` call
+    raises whatever the caller supplies.
+    """
+
+    def fake_run(argv: list[str], **kwargs: object) -> subprocess.CompletedProcess[str]:
+        if "venv" in argv:
+            return subprocess.CompletedProcess(argv, 0, "venv-created\n", "")
+        if install_raises is not None:
+            raise install_raises
+        return subprocess.CompletedProcess(argv, 0, "installed\n", "")
+
+    monkeypatch.setattr(pin_gate.subprocess, "run", fake_run)
+
+
+@pytest.mark.unit
+def test_install_timeout_raises_typed_error_and_keeps_partial_output(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """A slow install must surface as ``PinResolveTimeoutError`` carrying whatever
+    ``uv`` had already emitted -- not a bare ``TimeoutExpired`` traceback that
+    throws the diagnostic output away. This is the v0.38.4 failure shape.
+    """
+    wheel = tmp_path / "pkg-1.0-py3-none-any.whl"
+    wheel.write_bytes(b"")
+    _stub_runs(
+        monkeypatch,
+        install_raises=subprocess.TimeoutExpired(
+            cmd=["uv", "pip", "install"],
+            timeout=pin_gate._INSTALL_TIMEOUT_SECONDS,
+            output=b"Resolved 135 packages\nDownloading grpcio\n",
+        ),
+    )
+
+    with pytest.raises(PinResolveTimeoutError) as caught:
+        verify_pin_resolvability(wheel)
+
+    assert caught.value.step == "uv pip install"
+    assert caught.value.budget_seconds == pin_gate._INSTALL_TIMEOUT_SECONDS
+    assert "Downloading grpcio" in caught.value.partial_output
+    assert "venv-created" in caught.value.prior_output
+
+
+@pytest.mark.unit
+def test_timeout_is_not_reported_as_an_unresolvable_pin(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    """The whole point of this gate is to name a bad pin. A timeout says nothing
+    about the pins, so the report must not borrow that language -- otherwise a
+    saturated runner reads as a broken release, which is what sent v0.38.4's
+    diagnosis down the wrong path.
+    """
+    (tmp_path / "pkg-1.0-py3-none-any.whl").write_bytes(b"")
+    _stub_runs(
+        monkeypatch,
+        install_raises=subprocess.TimeoutExpired(
+            cmd=["uv", "pip", "install"], timeout=1800
+        ),
+    )
+
+    assert pin_gate.main([str(tmp_path)]) == 1
+
+    out = capsys.readouterr().out
+    assert "THROUGHPUT failure" in out
+    assert "do not resolve" not in out
+    assert pin_gate._INSTALL_TIMEOUT_ENV_VAR in out
+
+
+@pytest.mark.unit
+def test_venv_creation_has_its_own_smaller_budget(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """``uv venv`` is purely local work. It must not be able to consume the
+    install's (much larger) network budget before the install even starts.
+    """
+    assert pin_gate._VENV_TIMEOUT_SECONDS < pin_gate._INSTALL_TIMEOUT_SECONDS
+
+    wheel = tmp_path / "pkg-1.0-py3-none-any.whl"
+    wheel.write_bytes(b"")
+
+    def fake_run(argv: list[str], **kwargs: object) -> subprocess.CompletedProcess[str]:
+        assert kwargs["timeout"] == pin_gate._VENV_TIMEOUT_SECONDS
+        raise subprocess.TimeoutExpired(
+            cmd=argv, timeout=pin_gate._VENV_TIMEOUT_SECONDS
+        )
+
+    monkeypatch.setattr(pin_gate.subprocess, "run", fake_run)
+
+    with pytest.raises(PinResolveTimeoutError) as caught:
+        verify_pin_resolvability(wheel)
+
+    assert caught.value.step == "uv venv"
+
+
+@pytest.mark.unit
+def test_install_budget_is_overridable_from_the_environment(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """The fleet's throughput is not a property of this repo, so the budget has
+    to be tunable from the workflow without editing the script.
+    """
+    monkeypatch.setenv(pin_gate._INSTALL_TIMEOUT_ENV_VAR, "2400")
+    reloaded = importlib.reload(pin_gate)
+    try:
+        assert reloaded._INSTALL_TIMEOUT_SECONDS == 2400
+    finally:
+        monkeypatch.delenv(pin_gate._INSTALL_TIMEOUT_ENV_VAR, raising=False)
+        importlib.reload(pin_gate)
+
+
+@pytest.mark.unit
+def test_default_install_budget_clears_the_measured_fleet_floor() -> None:
+    """A *cached* uv sync on the omnibase-ci fleet was measured at 110-402s
+    (OMN-16047). An uncached 242 MB / 135-package install cannot fit inside the
+    old 300s ceiling, so the default must stay well clear of it.
+    """
+    assert pin_gate._INSTALL_TIMEOUT_SECONDS >= 1800

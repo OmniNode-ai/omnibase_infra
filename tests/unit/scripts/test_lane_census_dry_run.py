@@ -70,6 +70,10 @@ def _run(
 
     env = dict(os.environ)
     env["PATH"] = f"{bin_dir}:{env['PATH']}"
+    # OMN-15466: the collector prefers the Docker Engine API. Point it at a
+    # socket that cannot exist so these tests keep exercising the docker-CLI
+    # fallback against the shim, hermetically and on any host.
+    env["LANE_CENSUS_DOCKER_SOCKET"] = "/nonexistent/lane-census-test.sock"
     env["HOME"] = str(tmp_path)  # log dir under tmp, never ~
     env.pop("KAFKA_BOOTSTRAP_SERVERS", None)
     if broker:
@@ -88,9 +92,12 @@ def _run(
 
 # A prod lane with the runtime containers absent + network detached (tonight's
 # outage), so every live run here MUST detect drift.
+# Tab-delimited rows: Names \t State \t Status \t Image \t Labels. OMN-15466
+# replaced the `{{json .}}` inventory format, which silently requested per-
+# container size (90.363 s vs 0.150 s on .201's 111 containers).
 _PROD_OUTAGE_PS = (
-    '{"Names":"omnibase-infra-prod-postgres","State":"running",'
-    '"Status":"Up 2 hours","Image":"postgres:16","Labels":"com.omninode.lane=prod"}\n'
+    "omnibase-infra-prod-postgres\trunning\tUp 2 hours\tpostgres:16"
+    "\tcom.omninode.lane=prod\n"
 )
 _NO_NETWORKS = "bridge\nhost\n"
 
@@ -144,15 +151,10 @@ def test_clean_lane_exits_zero(tmp_path: Path) -> None:
         name = svc["name"]
         if svc.get("kind") == "oneshot":
             rows.append(
-                f'{{"Names":"{name}","State":"exited",'
-                '"Status":"Exited (0) 1 hour ago",'
-                '"Image":"x:1","Labels":"com.omninode.lane=prod"}'
+                f"{name}\texited\tExited (0) 1 hour ago\tx:1\tcom.omninode.lane=prod"
             )
         else:
-            rows.append(
-                f'{{"Names":"{name}","State":"running","Status":"Up 1 hour",'
-                '"Image":"x:1","Labels":"com.omninode.lane=prod"}'
-            )
+            rows.append(f"{name}\trunning\tUp 1 hour\tx:1\tcom.omninode.lane=prod")
     ps = "\n".join(rows) + "\n"
     networks = "omnibase-infra-prod-network\nbridge\n"
     proc, calls = _run(

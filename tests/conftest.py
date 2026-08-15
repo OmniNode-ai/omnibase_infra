@@ -76,6 +76,35 @@ from unittest.mock import AsyncMock, MagicMock
 import pytest
 from dotenv import load_dotenv
 
+
+def _strip_inherited_git_environment() -> None:
+    """Remove caller-owned Git process state before tests are collected.
+
+    Git hooks export repository and command-scoped ``GIT_*`` variables. Those
+    variables override both ``cwd`` and ``git -C`` in subprocesses, so a test
+    constructing a disposable repository can otherwise mutate the repository
+    whose hook launched pytest. Run this during pytest configuration so module-
+    level environment snapshots are also hermetic.
+    """
+    for key in tuple(os.environ):
+        if key.startswith("GIT_"):
+            os.environ.pop(key)
+
+
+def pytest_configure(config: pytest.Config) -> None:
+    """Make every test root independent of an invoking Git hook."""
+    del config
+    _strip_inherited_git_environment()
+
+
+@pytest.fixture(autouse=True)
+def _strip_test_local_git_environment(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Prevent one test's Git process state from leaking into the next test."""
+    for key in tuple(os.environ):
+        if key.startswith("GIT_"):
+            monkeypatch.delenv(key, raising=False)
+
+
 # Load environment variables from .env file at test session start
 # This enables tests to use infrastructure config (KAFKA_BOOTSTRAP_SERVERS, etc.)
 # without needing to set env vars on command line

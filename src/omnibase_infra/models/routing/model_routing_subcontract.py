@@ -27,7 +27,17 @@ class ModelRoutingSubcontract(BaseModel):
     Attributes:
         version: Semantic version of this routing configuration.
         routing_strategy: Strategy for matching events to handlers.
-            Currently only "payload_type_match" is supported.
+            "payload_type_match" and "topic_match" are both contract-legal
+            values (OMN-15215) — this model's ``handlers`` shape only carries
+            ``routing_key``/``handler_key`` and has no per-entry ``topic``
+            field, so it cannot represent topic_match's per-topic
+            disambiguation. That is expected: this model backs
+            ``handler_routing_loader``'s informational
+            ``RuntimeContractConfigLoader`` boot-summary pass, not the live
+            consumer-attach/dispatch decision — the real wiring path uses
+            ``omnibase_infra.runtime.auto_wiring.models.ModelHandlerRouting``
+            (an untyped ``routing_strategy: str`` with a per-entry ``topic``
+            field, OMN-14580/OMN-13825).
         handlers: List of routing entries mapping event models to handlers.
         default_handler: Optional fallback handler key for unmatched events.
 
@@ -51,7 +61,7 @@ class ModelRoutingSubcontract(BaseModel):
         default_factory=lambda: ModelSemVer(major=1, minor=0, patch=0),
         description="Semantic version of this routing configuration",
     )
-    routing_strategy: Literal["payload_type_match"] = Field(
+    routing_strategy: Literal["payload_type_match", "topic_match"] = Field(
         default="payload_type_match",
         description="Strategy for matching events to handlers",
     )

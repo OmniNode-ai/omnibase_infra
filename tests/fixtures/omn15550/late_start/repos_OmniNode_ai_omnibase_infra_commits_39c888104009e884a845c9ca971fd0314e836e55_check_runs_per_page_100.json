@@ -1,0 +1,760 @@
+{
+ "check_runs": [
+  {
+   "conclusion": "success",
+   "name": "Runtime Profiles / validate",
+   "started_at": "2026-07-30T23:08:22Z",
+   "status": "completed"
+  },
+  {
+   "conclusion": "success",
+   "name": "Deploy Agent Tests (OMN-15378) / deploy-agent-tests",
+   "started_at": "2026-07-30T23:08:24Z",
+   "status": "completed"
+  },
+  {
+   "conclusion": "success",
+   "name": "merge-hold-gate / evaluate",
+   "started_at": "2026-07-30T23:08:32Z",
+   "status": "completed"
+  },
+  {
+   "conclusion": "success",
+   "name": "occ-preflight / eligibility",
+   "started_at": "2026-07-30T23:25:19Z",
+   "status": "completed"
+  },
+  {
+   "conclusion": "success",
+   "name": "Enforce validator-requirements.yaml (OMN-13291)",
+   "started_at": "2026-07-30T23:08:24Z",
+   "status": "completed"
+  },
+  {
+   "conclusion": "success",
+   "name": "Test-Failure Ratchet Gate",
+   "started_at": "2026-07-30T23:34:03Z",
+   "status": "completed"
+  },
+  {
+   "conclusion": "success",
+   "name": "CI Tests Gate",
+   "started_at": "2026-07-30T23:34:01Z",
+   "status": "completed"
+  },
+  {
+   "conclusion": "success",
+   "name": "Tests (Split 14/15)",
+   "started_at": "2026-07-30T23:29:50Z",
+   "status": "completed"
+  },
+  {
+   "conclusion": "success",
+   "name": "Tests (Split 13/15)",
+   "started_at": "2026-07-30T23:29:50Z",
+   "status": "completed"
+  },
+  {
+   "conclusion": "success",
+   "name": "Tests (Split 15/15)",
+   "started_at": "2026-07-30T23:29:57Z",
+   "status": "completed"
+  },
+  {
+   "conclusion": "success",
+   "name": "Tests (Split 12/15)",
+   "started_at": "2026-07-30T23:29:50Z",
+   "status": "completed"
+  },
+  {
+   "conclusion": "success",
+   "name": "Tests (Split 11/15)",
+   "started_at": "2026-07-30T23:29:51Z",
+   "status": "completed"
+  },
+  {
+   "conclusion": "success",
+   "name": "Tests (Split 9/15)",
+   "started_at": "2026-07-30T23:29:56Z",
+   "status": "completed"
+  },
+  {
+   "conclusion": "success",
+   "name": "Tests (Split 4/15)",
+   "started_at": "2026-07-30T23:29:50Z",
+   "status": "completed"
+  },
+  {
+   "conclusion": "success",
+   "name": "Tests (Split 10/15)",
+   "started_at": "2026-07-30T23:29:52Z",
+   "status": "completed"
+  },
+  {
+   "conclusion": "success",
+   "name": "Tests (Split 8/15)",
+   "started_at": "2026-07-30T23:29:56Z",
+   "status": "completed"
+  },
+  {
+   "conclusion": "success",
+   "name": "Tests (Split 5/15)",
+   "started_at": "2026-07-30T23:29:55Z",
+   "status": "completed"
+  },
+  {
+   "conclusion": "success",
+   "name": "Tests (Split 7/15)",
+   "started_at": "2026-07-30T23:29:51Z",
+   "status": "completed"
+  },
+  {
+   "conclusion": "success",
+   "name": "Tests (Split 6/15)",
+   "started_at": "2026-07-30T23:29:50Z",
+   "status": "completed"
+  },
+  {
+   "conclusion": "success",
+   "name": "Tests (Split 1/15)",
+   "started_at": "2026-07-30T23:29:50Z",
+   "status": "completed"
+  },
+  {
+   "conclusion": "success",
+   "name": "Tests (Split 3/15)",
+   "started_at": "2026-07-30T23:29:54Z",
+   "status": "completed"
+  },
+  {
+   "conclusion": "success",
+   "name": "Integration Silent-Skip Guard (OMN-14172)",
+   "started_at": "2026-07-30T23:28:27Z",
+   "status": "completed"
+  },
+  {
+   "conclusion": "success",
+   "name": "Tests (Split 2/15)",
+   "started_at": "2026-07-30T23:29:50Z",
+   "status": "completed"
+  },
+  {
+   "conclusion": "success",
+   "name": "Migration Integration Test",
+   "started_at": "2026-07-30T23:28:27Z",
+   "status": "completed"
+  },
+  {
+   "conclusion": "success",
+   "name": "Detect Changes",
+   "started_at": "2026-07-30T23:29:24Z",
+   "status": "completed"
+  },
+  {
+   "conclusion": "success",
+   "name": "Cross-Repo Migration Conflicts",
+   "started_at": "2026-07-30T23:26:56Z",
+   "status": "completed"
+  },
+  {
+   "conclusion": "success",
+   "name": "Migration Freeze Check",
+   "started_at": "2026-07-30T23:28:07Z",
+   "status": "completed"
+  },
+  {
+   "conclusion": "success",
+   "name": "OCC Born-Path Trigger Coverage (OMN-14987)",
+   "started_at": "2026-07-30T23:27:18Z",
+   "status": "completed"
+  },
+  {
+   "conclusion": "success",
+   "name": "Demo Loop Gate",
+   "started_at": "2026-07-30T23:26:26Z",
+   "status": "completed"
+  },
+  {
+   "conclusion": "success",
+   "name": "Contract Path Pre-Flight",
+   "started_at": "2026-07-30T23:28:00Z",
+   "status": "completed"
+  },
+  {
+   "conclusion": "success",
+   "name": "Contract Compliance Check",
+   "started_at": "2026-07-30T23:27:50Z",
+   "status": "completed"
+  },
+  {
+   "conclusion": "success",
+   "name": "Plugin ENV->Service Completeness (OMN-4313)",
+   "started_at": "2026-07-30T23:26:14Z",
+   "status": "completed"
+  },
+  {
+   "conclusion": "success",
+   "name": "Topic Enum Drift Check",
+   "started_at": "2026-07-30T23:26:51Z",
+   "status": "completed"
+  },
+  {
+   "conclusion": "success",
+   "name": "Writer-Migration Coupling Check",
+   "started_at": "2026-07-30T23:27:51Z",
+   "status": "completed"
+  },
+  {
+   "conclusion": "success",
+   "name": "Topic Naming Lint",
+   "started_at": "2026-07-30T23:28:02Z",
+   "status": "completed"
+  },
+  {
+   "conclusion": "success",
+   "name": "Contract Sync Gate (Wave C) [OMN-8915]",
+   "started_at": "2026-07-30T23:26:51Z",
+   "status": "completed"
+  },
+  {
+   "conclusion": "success",
+   "name": "Effect-Assertion Gate (RT-5)",
+   "started_at": "2026-07-30T23:27:19Z",
+   "status": "completed"
+  },
+  {
+   "conclusion": "success",
+   "name": "Arch Invariants (OMN-3343)",
+   "started_at": "2026-07-30T23:28:11Z",
+   "status": "completed"
+  },
+  {
+   "conclusion": "success",
+   "name": "Version Pin Compliance",
+   "started_at": "2026-07-30T23:27:14Z",
+   "status": "completed"
+  },
+  {
+   "conclusion": "success",
+   "name": "Lint",
+   "started_at": "2026-07-30T23:26:18Z",
+   "status": "completed"
+  },
+  {
+   "conclusion": "success",
+   "name": "Compose Required-Env Coverage (OMN-5439)",
+   "started_at": "2026-07-30T23:26:51Z",
+   "status": "completed"
+  },
+  {
+   "conclusion": "success",
+   "name": "Contract Compliance",
+   "started_at": "2026-07-30T23:28:17Z",
+   "status": "completed"
+  },
+  {
+   "conclusion": "success",
+   "name": "Fingerprint Check",
+   "started_at": "2026-07-30T23:26:21Z",
+   "status": "completed"
+  },
+  {
+   "conclusion": "success",
+   "name": "Kafka Schema Handshake (OMN-3411)",
+   "started_at": "2026-07-30T23:26:51Z",
+   "status": "completed"
+  },
+  {
+   "conclusion": "success",
+   "name": "Topic Drift Check",
+   "started_at": "2026-07-30T23:28:17Z",
+   "status": "completed"
+  },
+  {
+   "conclusion": "success",
+   "name": "AI-Slop Pattern Check (strict, PR diff)",
+   "started_at": "2026-07-30T23:27:50Z",
+   "status": "completed"
+  },
+  {
+   "conclusion": "success",
+   "name": "ONEX Validators",
+   "started_at": "2026-07-30T23:26:57Z",
+   "status": "completed"
+  },
+  {
+   "conclusion": "success",
+   "name": "Infra Node Handler Ownership",
+   "started_at": "2026-07-30T23:26:21Z",
+   "status": "completed"
+  },
+  {
+   "conclusion": "success",
+   "name": "Kafka Boundary Compat (OMN-3256)",
+   "started_at": "2026-07-30T23:28:00Z",
+   "status": "completed"
+  },
+  {
+   "conclusion": "success",
+   "name": "zone-filter / Zone Filter (docs-only check)",
+   "started_at": "2026-07-30T23:26:37Z",
+   "status": "completed"
+  },
+  {
+   "conclusion": "success",
+   "name": "OCC Companion Merged Gate (OMN-15214)",
+   "started_at": "2026-07-30T23:08:23Z",
+   "status": "completed"
+  },
+  {
+   "conclusion": "success",
+   "name": "no-noncanonical-lifecycle-classes",
+   "started_at": "2026-07-30T23:08:23Z",
+   "status": "completed"
+  },
+  {
+   "conclusion": "success",
+   "name": "Hostile Review Gate",
+   "started_at": "2026-07-30T23:27:06Z",
+   "status": "completed"
+  },
+  {
+   "conclusion": "success",
+   "name": "call-reject-skip-token / scan / reject-skip-gate-token",
+   "started_at": "2026-07-30T23:26:13Z",
+   "status": "completed"
+  },
+  {
+   "conclusion": "success",
+   "name": "Hostile Reviewer (adversarial gate)",
+   "started_at": "2026-07-30T23:26:04Z",
+   "status": "completed"
+  },
+  {
+   "conclusion": "success",
+   "name": "call-reject-skip-token / occ-preflight / eligibility",
+   "started_at": "2026-07-30T23:25:21Z",
+   "status": "completed"
+  },
+  {
+   "conclusion": "success",
+   "name": "verify / verify",
+   "started_at": "2026-07-30T23:25:18Z",
+   "status": "completed"
+  },
+  {
+   "conclusion": "success",
+   "name": "occ-preflight / eligibility",
+   "started_at": "2026-07-30T23:25:15Z",
+   "status": "completed"
+  },
+  {
+   "conclusion": "success",
+   "name": "URL Authority Gate",
+   "started_at": "2026-07-30T23:25:19Z",
+   "status": "completed"
+  },
+  {
+   "conclusion": "success",
+   "name": "reason-graph",
+   "started_at": "2026-07-30T23:18:50Z",
+   "status": "completed"
+  },
+  {
+   "conclusion": "success",
+   "name": "call-reject-skip-token / scan / reject-skip-gate-token",
+   "started_at": "2026-07-30T23:18:34Z",
+   "status": "completed"
+  },
+  {
+   "conclusion": "success",
+   "name": "call-reject-skip-token / occ-preflight / eligibility",
+   "started_at": "2026-07-30T23:17:38Z",
+   "status": "completed"
+  },
+  {
+   "conclusion": "success",
+   "name": "verify / verify",
+   "started_at": "2026-07-30T23:17:31Z",
+   "status": "completed"
+  },
+  {
+   "conclusion": "success",
+   "name": "pr-title / check-title",
+   "started_at": "2026-07-30T23:17:31Z",
+   "status": "completed"
+  },
+  {
+   "conclusion": "success",
+   "name": "main-target-guard",
+   "started_at": "2026-07-30T23:17:38Z",
+   "status": "completed"
+  },
+  {
+   "conclusion": "success",
+   "name": "URL Authority Gate",
+   "started_at": "2026-07-30T23:17:28Z",
+   "status": "completed"
+  },
+  {
+   "conclusion": "success",
+   "name": "Canonical Inference Gate",
+   "started_at": "2026-07-30T23:17:28Z",
+   "status": "completed"
+  },
+  {
+   "conclusion": "success",
+   "name": "Duplication Sweep",
+   "started_at": "2026-07-30T23:17:28Z",
+   "status": "completed"
+  },
+  {
+   "conclusion": "success",
+   "name": "non-dev-base-guard",
+   "started_at": "2026-07-30T23:17:28Z",
+   "status": "completed"
+  },
+  {
+   "conclusion": "skipped",
+   "name": "occ-companion-effect-manual-replay",
+   "started_at": "2026-07-30T23:17:00Z",
+   "status": "completed"
+  },
+  {
+   "conclusion": "success",
+   "name": "required-check-skip-guard / check-skip-vectors",
+   "started_at": "2026-07-30T23:17:02Z",
+   "status": "completed"
+  },
+  {
+   "conclusion": "success",
+   "name": "occ-companion-effect / Publish occ-companion-effect command",
+   "started_at": "2026-07-30T23:17:02Z",
+   "status": "completed"
+  },
+  {
+   "conclusion": "success",
+   "name": "tests+coverage (shadow)",
+   "started_at": "2026-07-30T23:17:09Z",
+   "status": "completed"
+  },
+  {
+   "conclusion": "success",
+   "name": "typecheck (shadow)",
+   "started_at": "2026-07-30T23:17:03Z",
+   "status": "completed"
+  },
+  {
+   "conclusion": "success",
+   "name": "lint (shadow)",
+   "started_at": "2026-07-30T23:17:03Z",
+   "status": "completed"
+  },
+  {
+   "conclusion": "success",
+   "name": "Build Summary",
+   "started_at": "2026-07-30T23:13:19Z",
+   "status": "completed"
+  },
+  {
+   "conclusion": "skipped",
+   "name": "Docker Integration Tests",
+   "started_at": "2026-07-30T23:12:44Z",
+   "status": "completed"
+  },
+  {
+   "conclusion": "skipped",
+   "name": "Security Scan (Trivy)",
+   "started_at": "2026-07-30T23:12:44Z",
+   "status": "completed"
+  },
+  {
+   "conclusion": "skipped",
+   "name": "Image Size Analysis",
+   "started_at": "2026-07-30T23:12:44Z",
+   "status": "completed"
+  },
+  {
+   "conclusion": "success",
+   "name": "Attest Source Hash (OMN-9139) / Verify source hash attestation",
+   "started_at": "2026-07-30T23:12:46Z",
+   "status": "completed"
+  },
+  {
+   "conclusion": "success",
+   "name": "reason-graph",
+   "started_at": "2026-07-30T23:10:26Z",
+   "status": "completed"
+  },
+  {
+   "conclusion": "success",
+   "name": "Omni Standards Gate",
+   "started_at": "2026-07-30T23:09:47Z",
+   "status": "completed"
+  },
+  {
+   "conclusion": "success",
+   "name": "Build Runtime Image",
+   "started_at": "2026-07-30T23:08:47Z",
+   "status": "completed"
+  },
+  {
+   "conclusion": "skipped",
+   "name": "occ-companion-effect-manual-replay",
+   "started_at": "2026-07-30T23:08:19Z",
+   "status": "completed"
+  },
+  {
+   "conclusion": "success",
+   "name": "imperative-contract-guard / Imperative Contract Guard",
+   "started_at": "2026-07-30T23:08:22Z",
+   "status": "completed"
+  },
+  {
+   "conclusion": "success",
+   "name": "required-check-skip-guard / check-skip-vectors",
+   "started_at": "2026-07-30T23:08:23Z",
+   "status": "completed"
+  },
+  {
+   "conclusion": "success",
+   "name": "pr-title / check-title",
+   "started_at": "2026-07-30T23:08:23Z",
+   "status": "completed"
+  },
+  {
+   "conclusion": "success",
+   "name": "gate / CodeRabbit Thread Check",
+   "started_at": "2026-07-30T23:08:27Z",
+   "status": "completed"
+  },
+  {
+   "conclusion": "success",
+   "name": "occ-companion-effect / Publish occ-companion-effect command",
+   "started_at": "2026-07-30T23:08:24Z",
+   "status": "completed"
+  },
+  {
+   "conclusion": "success",
+   "name": "call / validate-docs",
+   "started_at": "2026-07-30T23:08:22Z",
+   "status": "completed"
+  },
+  {
+   "conclusion": "skipped",
+   "name": "verify",
+   "started_at": "2026-07-30T23:08:19Z",
+   "status": "completed"
+  },
+  {
+   "conclusion": "success",
+   "name": "dispatcher-route-coverage",
+   "started_at": "2026-07-30T23:08:28Z",
+   "status": "completed"
+  },
+  {
+   "conclusion": "success",
+   "name": "Runner Disk Preflight",
+   "started_at": "2026-07-30T23:08:22Z",
+   "status": "completed"
+  },
+  {
+   "conclusion": "success",
+   "name": "deployed-migration-tree-sync-logic",
+   "started_at": "2026-07-30T23:08:22Z",
+   "status": "completed"
+  },
+  {
+   "conclusion": "success",
+   "name": "Publish PR Webhook Event",
+   "started_at": "2026-07-30T23:08:29Z",
+   "status": "completed"
+  },
+  {
+   "conclusion": "success",
+   "name": "No bare compose teardown",
+   "started_at": "2026-07-30T23:08:22Z",
+   "status": "completed"
+  },
+  {
+   "conclusion": "success",
+   "name": "node-migration-sync",
+   "started_at": "2026-07-30T23:08:29Z",
+   "status": "completed"
+  },
+  {
+   "conclusion": "success",
+   "name": "Integration Test Removal Gate",
+   "started_at": "2026-07-30T23:08:22Z",
+   "status": "completed"
+  },
+  {
+   "conclusion": "success",
+   "name": "Integration Test Coverage",
+   "started_at": "2026-07-30T23:08:22Z",
+   "status": "completed"
+  },
+  {
+   "conclusion": "success",
+   "name": "Validate Dockerfile Plugin Pins",
+   "started_at": "2026-07-30T23:08:21Z",
+   "status": "completed"
+  },
+  {
+   "conclusion": "success",
+   "name": "terminal-cost-completeness",
+   "started_at": "2026-07-30T23:08:22Z",
+   "status": "completed"
+  },
+  {
+   "conclusion": "success",
+   "name": "sibling-lock-pins",
+   "started_at": "2026-07-30T23:08:22Z",
+   "status": "completed"
+  },
+  {
+   "conclusion": "success",
+   "name": "context-field-presence",
+   "started_at": "2026-07-30T23:08:23Z",
+   "status": "completed"
+  },
+  {
+   "conclusion": "success",
+   "name": "pinned-wheel-skew",
+   "started_at": "2026-07-30T23:08:22Z",
+   "status": "completed"
+  },
+  {
+   "conclusion": "success",
+   "name": "receipt-honesty",
+   "started_at": "2026-07-30T23:08:23Z",
+   "status": "completed"
+  },
+  {
+   "conclusion": "success",
+   "name": "shell-hygiene",
+   "started_at": "2026-07-30T23:08:22Z",
+   "status": "completed"
+  },
+  {
+   "conclusion": "success",
+   "name": "release-identity",
+   "started_at": "2026-07-30T23:08:23Z",
+   "status": "completed"
+  },
+  {
+   "conclusion": "success",
+   "name": "lint (shadow)",
+   "started_at": "2026-07-30T23:08:22Z",
+   "status": "completed"
+  },
+  {
+   "conclusion": "success",
+   "name": "tests+coverage (shadow)",
+   "started_at": "2026-07-30T23:08:22Z",
+   "status": "completed"
+  },
+  {
+   "conclusion": "success",
+   "name": "contract-validation",
+   "started_at": "2026-07-30T23:08:29Z",
+   "status": "completed"
+  },
+  {
+   "conclusion": "success",
+   "name": "typecheck (shadow)",
+   "started_at": "2026-07-30T23:08:30Z",
+   "status": "completed"
+  },
+  {
+   "conclusion": "success",
+   "name": "Check architecture handshake",
+   "started_at": "2026-07-30T23:08:22Z",
+   "status": "completed"
+  },
+  {
+   "conclusion": "success",
+   "name": "check-env-reads-gate",
+   "started_at": "2026-07-30T23:08:28Z",
+   "status": "completed"
+  },
+  {
+   "conclusion": "success",
+   "name": "main-target-guard",
+   "started_at": "2026-07-30T23:08:22Z",
+   "status": "completed"
+  },
+  {
+   "conclusion": "success",
+   "name": "Type Safety Validation",
+   "started_at": "2026-07-30T23:08:22Z",
+   "status": "completed"
+  },
+  {
+   "conclusion": "success",
+   "name": "Handler Contract Compliance",
+   "started_at": "2026-07-30T23:08:22Z",
+   "status": "completed"
+  },
+  {
+   "conclusion": "success",
+   "name": "PEP 604 Type Union Check (UP007)",
+   "started_at": "2026-07-30T23:08:22Z",
+   "status": "completed"
+  },
+  {
+   "conclusion": "success",
+   "name": "CI Naming Convention",
+   "started_at": "2026-07-30T23:08:22Z",
+   "status": "completed"
+  },
+  {
+   "conclusion": "success",
+   "name": "skill-node-mapping-sync",
+   "started_at": "2026-07-30T23:08:22Z",
+   "status": "completed"
+  },
+  {
+   "conclusion": "success",
+   "name": "non-dev-base-guard",
+   "started_at": "2026-07-30T23:08:29Z",
+   "status": "completed"
+  },
+  {
+   "conclusion": "success",
+   "name": "Dep Provenance Gate",
+   "started_at": "2026-07-30T23:08:29Z",
+   "status": "completed"
+  },
+  {
+   "conclusion": "success",
+   "name": "CodeQL",
+   "started_at": "2026-07-30T23:08:22Z",
+   "status": "completed"
+  },
+  {
+   "conclusion": "success",
+   "name": "Stale TODO Gate",
+   "started_at": "2026-07-30T23:08:22Z",
+   "status": "completed"
+  },
+  {
+   "conclusion": "success",
+   "name": "Duplication Sweep",
+   "started_at": "2026-07-30T23:08:22Z",
+   "status": "completed"
+  },
+  {
+   "conclusion": "success",
+   "name": "Precommit Parity Gate",
+   "started_at": "2026-07-30T23:08:28Z",
+   "status": "completed"
+  },
+  {
+   "conclusion": "success",
+   "name": "Canonical Inference Gate",
+   "started_at": "2026-07-30T23:08:22Z",
+   "status": "completed"
+  }
+ ]
+}

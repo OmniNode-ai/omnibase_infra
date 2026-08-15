@@ -3,6 +3,7 @@
 
 from __future__ import annotations
 
+from pathlib import Path
 from uuid import UUID, uuid4
 
 import pytest
@@ -13,6 +14,7 @@ from omnibase_infra.nodes.node_bus_forwarder_effect.handlers import (
     HandlerForwardOutbound,
 )
 from omnibase_infra.nodes.node_bus_forwarder_effect.models import (
+    ModelGatewayCanaryConfig,
     ModelGatewayCloudBusConfig,
     ModelGatewayEnvelope,
     ModelGatewayForwarderConfig,
@@ -22,7 +24,7 @@ from omnibase_infra.nodes.node_bus_forwarder_effect.models import (
 
 TENANT_ID = UUID("11111111-1111-1111-1111-111111111111")
 BROKER_PROVIDER_ID = UUID("22222222-2222-2222-2222-222222222222")
-PRINCIPAL_ID = UUID("33333333-3333-3333-3333-333333333333")
+PRINCIPAL_ID = "t-33333333333333333333333333333333"
 CORRELATION_ID = UUID("44444444-4444-4444-4444-444444444444")
 INBOUND_TOPIC = "onex.cmd.omnibase-infra.delegation-inference-request.v1"
 OUTBOUND_TOPIC = "onex.evt.omnibase-infra.inference-response.v1"
@@ -44,9 +46,16 @@ def _config() -> ModelGatewayForwarderConfig:
             client_secret_api_key_ref="infisical://gateway/redpanda-events",
         ),
         local_transport_flavor="containerized",
+        dedupe_store_path=Path.cwd() / "gateway-test.sqlite3",
         mirror_topics=ModelGatewayMirrorTopics(
             inbound=(INBOUND_TOPIC,),
             outbound=(OUTBOUND_TOPIC,),
+        ),
+        canary=ModelGatewayCanaryConfig(
+            topic="onex.evt.omnibase-infra.gateway-canary.v1",
+            cadence_seconds=30,
+            produce_deadline_seconds=8,
+            readback_deadline_seconds=12,
         ),
     )
 

@@ -124,7 +124,7 @@ class TestRunnerFleetHealthComputeDegraded:
             expected_count=3,
             runners=(
                 _fact("omninode-runner-1", docker_restart_count=9),
-                _fact("omninode-runner-2", diag_heartbeat_age_seconds=1200.0),
+                _fact("omninode-runner-2", diag_heartbeat_age_seconds=5400.0),
                 _fact("omninode-runner-3", github_busy=False),
             ),
         )
@@ -476,3 +476,186 @@ class TestRunnerFleetHealthComputeDeterminacy:
         )
         assert verdict.buildx_unavailable is True
         assert verdict.buildx_determinate is True
+
+
+@pytest.mark.unit
+class TestRunnerFleetHealthComputeIdleHeartbeatCadence:
+    """OMN-15234: the idle ``_diag`` cadence must not read as a zombie.
+
+    An idle runner writes ``_diag`` only on its ~50-minute OAuth/AAD token
+    refresh. OMN-15233 measured this live: on the old 900s threshold, control
+    runners flipped unhealthy at diag ages 1120-1237s while the GitHub registry
+    reported 64/64 online, busy=0, RestartCount=0.
+    """
+
+    @pytest.mark.parametrize("age_seconds", [1200.0, 2700.0, 4500.0])
+    @pytest.mark.asyncio
+    async def test_idle_cadence_heartbeat_ages_are_healthy(self, age_seconds):
+        """Ages inside the idle token-refresh cadence classify HEALTHY.
+
+        The threshold env var is left UNSET so the shipped default is what is
+        under test. 4500.0 is the boundary itself (``>`` threshold, not ``>=``).
+        """
+        snapshot = _snapshot(
+            expected_count=1,
+            runners=(
+                _fact("omninode-runner-1", diag_heartbeat_age_seconds=age_seconds),
+            ),
+        )
+        handler = HandlerRunnerFleetHealthEvaluate()
+        verdict = await handler.handle(
+            ModelRunnerFleetHealthEvaluateCommand(
+                correlation_id=snapshot.correlation_id, snapshot=snapshot
+            )
+        )
+        assert verdict.assessments[0].state == EnumRunnerFleetHealthState.HEALTHY
+        assert verdict.listener_zombie_count == 0
+        assert verdict.recommended_actions == ()
+
+    @pytest.mark.asyncio
+    async def test_recalibration_did_not_disable_the_zombie_check(self):
+        """5400s (90 min) is past even a slow refresh -- still LISTENER_ZOMBIE.
+
+        Brackets the default from the other side: a change that widened the
+        threshold far enough to silence the check fails here.
+        """
+        snapshot = _snapshot(
+            expected_count=1,
+            runners=(_fact("omninode-runner-1", diag_heartbeat_age_seconds=5400.0),),
+        )
+        handler = HandlerRunnerFleetHealthEvaluate()
+        verdict = await handler.handle(
+            ModelRunnerFleetHealthEvaluateCommand(
+                correlation_id=snapshot.correlation_id, snapshot=snapshot
+            )
+        )
+        assert (
+            verdict.assessments[0].state == EnumRunnerFleetHealthState.LISTENER_ZOMBIE
+        )
+        assert verdict.listener_zombie_count == 1
+
+
+@pytest.mark.unit
+class TestRunnerFleetHealthComputeZombieRestartCorroboration:
+    """OMN-15234: RESTART_RUNNER requires composite evidence, not the flag alone.
+
+    The classification threshold is a heuristic over a cadence that varies with
+    token-refresh timing, so LISTENER_ZOMBIE on its own is not sufficient
+    evidence to restart. Every test drives the real handler; the assertions are
+    on the emitted ``recommended_actions``, which is the surface a remediation
+    executor consumes.
+    """
+
+    @staticmethod
+    async def _actions_for(fact_overrides: dict, **snapshot_overrides):
+        snapshot = _snapshot(
+            expected_count=1,
+            runners=(
+                _fact(
+                    "omninode-runner-1",
+                    diag_heartbeat_age_seconds=5400.0,
+                    **fact_overrides,
+                ),
+            ),
+            **snapshot_overrides,
+        )
+        handler = HandlerRunnerFleetHealthEvaluate()
+        verdict = await handler.handle(
+            ModelRunnerFleetHealthEvaluateCommand(
+                correlation_id=snapshot.correlation_id, snapshot=snapshot
+            )
+        )
+        assert (
+            verdict.assessments[0].state == EnumRunnerFleetHealthState.LISTENER_ZOMBIE
+        )
+        return verdict, [
+            a for a in verdict.recommended_actions if a.target_id == "omninode-runner-1"
+        ]
+
+    @pytest.mark.asyncio
+    async def test_online_idle_runner_with_stale_heartbeat_is_not_restarted(self):
+        """The live false-positive: registry online, container running, 0 restarts."""
+        _, actions = await self._actions_for(
+            {
+                "github_status": "online",
+                "github_busy": False,
+                "docker_status": "running",
+            }
+        )
+        assert len(actions) == 1
+        assert actions[0].action_type == EnumRecommendedActionType.NONE
+        assert actions[0].confidence == 0.0
+        assert "not corroborated" in actions[0].reason
+
+    @pytest.mark.asyncio
+    async def test_registry_offline_corroborates_a_restart(self):
+        _, actions = await self._actions_for({"github_status": "offline"})
+        assert actions[0].action_type == EnumRecommendedActionType.RESTART_RUNNER
+        assert actions[0].confidence == 0.85
+        assert "github_status" in actions[0].reason
+
+    @pytest.mark.asyncio
+    async def test_container_not_running_corroborates_a_restart(self):
+        _, actions = await self._actions_for({"docker_status": "restarting"})
+        assert actions[0].action_type == EnumRecommendedActionType.RESTART_RUNNER
+        assert "docker_status" in actions[0].reason
+
+    @pytest.mark.asyncio
+    async def test_nonzero_restart_count_corroborates_a_restart(self):
+        """Below the crash-loop threshold, so this stays LISTENER_ZOMBIE."""
+        _, actions = await self._actions_for({"docker_restart_count": 2})
+        assert actions[0].action_type == EnumRecommendedActionType.RESTART_RUNNER
+        assert "docker_restart_count=2" in actions[0].reason
+
+    @pytest.mark.asyncio
+    async def test_busy_runner_is_never_restarted_on_heartbeat_staleness(self):
+        """Restarting a busy runner destroys the job it is running."""
+        _, actions = await self._actions_for(
+            {"github_busy": True, "docker_restart_count": 2}
+        )
+        assert actions[0].action_type == EnumRecommendedActionType.NONE
+        assert actions[0].confidence == 0.0
+
+    @pytest.mark.asyncio
+    async def test_indeterminate_sources_fail_closed_to_no_restart(self):
+        """OMN-14228 fail-closed: a failed probe is not zombie evidence."""
+        _, actions = await self._actions_for(
+            {"github_status": "offline"},
+            github_source_ok=False,
+            source_errors=("GitHub runners API exit code 1: rate limited",),
+        )
+        assert actions[0].action_type == EnumRecommendedActionType.NONE
+        assert actions[0].confidence == 0.0
+
+    @pytest.mark.asyncio
+    async def test_corroboration_facts_are_typed_fields_on_the_assessment(self):
+        """The evidence the recommendation used is published, not hidden.
+
+        A consumer must be able to re-derive the decision from the verdict
+        without regexing ``detail`` or re-reading the upstream snapshot.
+        """
+        verdict, _ = await self._actions_for(
+            {"github_status": "offline", "docker_status": "exited"}
+        )
+        assessment = verdict.assessments[0]
+        assert assessment.github_status == "offline"
+        assert assessment.github_busy is False
+        assert assessment.docker_status == "exited"
+        assert assessment.diag_heartbeat_age_seconds == 5400.0
+
+    @pytest.mark.asyncio
+    async def test_crash_looping_restart_recommendation_is_unchanged(self):
+        """Scope check: only the LISTENER_ZOMBIE mapping changed."""
+        snapshot = _snapshot(
+            expected_count=1,
+            runners=(_fact("omninode-runner-1", docker_restart_count=9),),
+        )
+        handler = HandlerRunnerFleetHealthEvaluate()
+        verdict = await handler.handle(
+            ModelRunnerFleetHealthEvaluateCommand(
+                correlation_id=snapshot.correlation_id, snapshot=snapshot
+            )
+        )
+        action = verdict.recommended_actions[0]
+        assert action.action_type == EnumRecommendedActionType.RESTART_RUNNER
+        assert action.confidence == 0.9

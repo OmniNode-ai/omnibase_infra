@@ -1,0 +1,257 @@
+# SPDX-FileCopyrightText: 2025 OmniNode.ai Inc.
+# SPDX-License-Identifier: MIT
+
+schema_version: "1.0"
+ticket: synthetic-proof
+database_ref: application
+physical_seed_database: omnidash_analytics
+ownership_authority: typed synthetic ACL proof inventory
+inventory_projection: generated; never an ownership allowlist
+completion_status: verified
+relation_counts:
+  table: 5
+  view: 1
+  materialized_view: 1
+  function: 7
+  procedure: 1
+  sequence: 1
+  extension: 0
+  type: 3
+relations:
+  - name: tenant_accounts
+    kind: table
+    target_schema: tenant
+    current_schema: [tenant]
+    domain: TENANT
+    owner_declaration: service:onex_api
+    readers: [onex-api]
+    writers: [onex-api]
+    classification_evidence: synthetic control-plane fixture
+    classification_status: classified
+    migration_root: proof
+  - name: delegation_events
+    kind: table
+    target_schema: tenant
+    current_schema: [tenant]
+    domain: TENANT
+    owner_declaration: node_projection_delegation
+    readers: [app-dashboard]
+    writers: [node_projection_delegation]
+    classification_evidence: synthetic tenant projection fixture
+    classification_status: classified
+    migration_root: proof
+  - name: partitioned_events
+    kind: table
+    target_schema: tenant
+    current_schema: [tenant]
+    domain: TENANT
+    owner_declaration: node_projection_delegation
+    readers: []
+    writers: []
+    classification_evidence: synthetic partitioned-table fixture
+    classification_status: classified
+    migration_root: proof
+  - name: runtime_state
+    kind: table
+    target_schema: omninode_internal
+    current_schema: [omninode_internal]
+    domain: OMNINODE_INTERNAL
+    owner_declaration: node_runtime_state_projection
+    readers: [node_runtime_state_projection]
+    writers: [node_runtime_state_projection]
+    classification_evidence: synthetic internal fixture
+    classification_status: classified
+    migration_root: proof
+  - name: plan_tiers
+    kind: table
+    target_schema: platform_catalog
+    current_schema: [platform_catalog]
+    domain: PLATFORM_CATALOG
+    owner_declaration: service:onex_api
+    readers: [onex-api, app-dashboard]
+    writers: []
+    classification_evidence: synthetic catalog fixture
+    classification_status: classified
+    migration_root: proof
+  - name: delegation_events_id_seq
+    kind: sequence
+    target_schema: tenant
+    current_schema: [tenant]
+    domain: TENANT
+    owner_declaration: node_projection_delegation
+    writers: [node_projection_delegation]
+    classification_evidence: synthetic sequence fixture
+    classification_status: classified
+    migration_root: proof
+  - name: delegation_event_count
+    kind: function
+    target_schema: tenant
+    current_schema: [tenant]
+    domain: TENANT
+    owner_declaration: node_projection_delegation
+    readers: [app-dashboard]
+    function_signature: "()"
+    classification_evidence: synthetic function fixture
+    classification_status: classified
+    migration_root: proof
+  - name: hostile_signature
+    kind: function
+    target_schema: tenant
+    current_schema: [tenant]
+    domain: TENANT
+    owner_declaration: service:onex_api
+    function_signature: '("arg''name%" integer)'
+    classification_evidence: synthetic quoted routine-identity fixture
+    classification_status: classified
+    migration_root: proof
+  - name: record_delegation
+    kind: procedure
+    target_schema: tenant
+    current_schema: [tenant]
+    domain: TENANT
+    owner_declaration: node_projection_delegation
+    writers: [node_projection_delegation]
+    function_signature: "(IN p_payload text)"
+    classification_evidence: synthetic procedure fixture
+    classification_status: classified
+    migration_root: proof
+  - name: tenant_account_names
+    kind: view
+    target_schema: tenant
+    current_schema: [tenant]
+    domain: TENANT
+    owner_declaration: service:onex_api
+    readers: [app-dashboard]
+    classification_evidence: synthetic view fixture
+    classification_status: classified
+    migration_root: proof
+  - name: plan_tier_snapshot
+    kind: materialized_view
+    target_schema: platform_catalog
+    current_schema: [platform_catalog]
+    domain: PLATFORM_CATALOG
+    owner_declaration: service:onex_api
+    readers: [app-dashboard]
+    classification_evidence: synthetic materialized-view fixture
+    classification_status: classified
+    migration_root: proof
+  - name: account_ref
+    kind: type
+    target_schema: tenant
+    current_schema: [tenant]
+    domain: TENANT
+    owner_declaration: service:onex_api
+    readers: [onex-api]
+    classification_evidence: synthetic composite-type fixture
+    classification_status: classified
+    migration_root: proof
+  - name: account_id_span
+    kind: range_type
+    target_schema: tenant
+    current_schema: [tenant]
+    domain: TENANT
+    owner_declaration: service:onex_api
+    readers: [onex-api]
+    classification_evidence: synthetic range-type fixture
+    classification_status: classified
+    migration_root: proof
+  - name: account_id_span_set
+    kind: multirange_type
+    target_schema: tenant
+    current_schema: [tenant]
+    domain: TENANT
+    owner_declaration: service:onex_api
+    readers: [onex-api]
+    classification_evidence: synthetic multirange-type fixture
+    classification_status: classified
+    migration_root: proof
+  - name: account_id_span
+    kind: function
+    target_schema: tenant
+    current_schema: [tenant]
+    domain: TENANT
+    owner_declaration: service:onex_api
+    function_signature: "(bigint, bigint)"
+    classification_evidence: synthetic range-constructor fixture
+    classification_status: classified
+    migration_root: proof
+  - name: account_id_span
+    kind: function
+    target_schema: tenant
+    current_schema: [tenant]
+    domain: TENANT
+    owner_declaration: service:onex_api
+    function_signature: "(bigint, bigint, text)"
+    classification_evidence: synthetic range-constructor fixture
+    classification_status: classified
+    migration_root: proof
+  - name: account_id_span_set
+    kind: function
+    target_schema: tenant
+    current_schema: [tenant]
+    domain: TENANT
+    owner_declaration: service:onex_api
+    function_signature: "()"
+    classification_evidence: synthetic multirange-constructor fixture
+    classification_status: classified
+    migration_root: proof
+  - name: account_id_span_set
+    kind: function
+    target_schema: tenant
+    current_schema: [tenant]
+    domain: TENANT
+    owner_declaration: service:onex_api
+    function_signature: "(VARIADIC tenant.account_id_span[])"
+    classification_evidence: synthetic multirange-constructor fixture
+    classification_status: classified
+    migration_root: proof
+  - name: account_id_span_set
+    kind: function
+    target_schema: tenant
+    current_schema: [tenant]
+    domain: TENANT
+    owner_declaration: service:onex_api
+    function_signature: "(tenant.account_id_span)"
+    classification_evidence: synthetic multirange-constructor fixture
+    classification_status: classified
+    migration_root: proof
+  - name: runtime_status
+    kind: type
+    target_schema: omninode_internal
+    current_schema: [omninode_internal]
+    domain: OMNINODE_INTERNAL
+    owner_declaration: node_runtime_state_projection
+    readers: [node_runtime_state_projection]
+    classification_evidence: synthetic type fixture
+    classification_status: classified
+    migration_root: proof
+  - name: runtime_code
+    kind: type
+    target_schema: omninode_internal
+    current_schema: [omninode_internal]
+    domain: OMNINODE_INTERNAL
+    owner_declaration: node_runtime_state_projection
+    readers: [node_runtime_state_projection]
+    classification_evidence: synthetic domain-type fixture
+    classification_status: classified
+    migration_root: proof
+blocked_relations: []
+retained_live_census:
+  observed_base_tables: 5
+  observed_views_and_materialized_views: 2
+  observed_sequences: 1
+  observed_functions: 7
+  observed_procedures: 1
+  observed_types: 5
+  observed_extensions: 0
+  parity_status: verified
+  reason: synthetic inventory is exact
+runtime_evidence:
+  dsn_key_provenance: {}
+  full_day_datname_usename_activity:
+    status: verified
+    reason: synthetic proof has no live activity claim
+    credentials_captured: false
+  live_catalog_parity:
+    status: verified
+    reason: synthetic object seed is exact

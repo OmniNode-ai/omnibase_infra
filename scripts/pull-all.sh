@@ -33,6 +33,160 @@ if [[ $# -gt 0 ]]; then
   REPOS=("$@")
 fi
 
+
+RESULTS_DIR=$(mktemp -d)
+
+# === Stage tracking + terminal completion signal (OMN-15590) ===
+# Field failure this closes (remote-gate-readiness run wf_c69db51c-74d,
+# 2026-07-31, host stickybeatz-studio): the drift-repair stage below ran
+# unbounded, overran the caller's 3-minute timeout, orphaned three bash
+# processes, and never reached the plugin-cache / pre-commit / summary stages.
+# A caller that runs the documented "sync first" step and sees no error got a
+# PARTIALLY-EXECUTED sync with nothing surfaced. Independently, the stage's
+# failure path printed a banner and fell through -- a clean drift-repair
+# FAILURE also produced a green-looking, exit-0 run.
+#
+# Every stage now carries an explicit status, the summary is emitted from an
+# EXIT trap (so it appears on every exit path, including early aborts), and one
+# machine-parseable line lets a caller distinguish a complete run from a
+# stopped-or-failed one without reading prose.
+STAGE_REPOS="PENDING"
+STAGE_DRIFT_REPAIR="PENDING"
+STAGE_PLUGIN_CACHE="PENDING"
+STAGE_PRECOMMIT_HOOKS="PENDING"
+STAGE_FAILURES=()
+SUMMARY_EMITTED=0
+
+# Aggregates are declared here (not at the aggregation step) so the EXIT-trap
+# summary can read them even when the script aborts before that step.
+OK=0
+FAILED=()
+WARNED=()
+
+# The bound for the drift-repair stage, in seconds. Explicit and declared;
+# overridable per-invocation for tests and for hosts with a slower canonical
+# venv. 300s is ~150x the measured healthy cost of the repair's two uv steps on
+# the gate host (1.93s resolve + 43ms leaf check, measured 2026-08-02), so it
+# only fires on a genuine stall, never on a slow-but-progressing install.
+DRIFT_REPAIR_TIMEOUT_SECONDS="${PULL_ALL_DRIFT_REPAIR_TIMEOUT_SECONDS:-300}"
+
+# Same bound, applied to the other unbounded network call on this script: the
+# best-effort `pre-commit install-hooks` env pre-build. Non-fatal either way
+# (the hook script is already written by then), but it must not be able to
+# stall the run past its terminal summary.
+HOOK_ENV_TIMEOUT_SECONDS="${PULL_ALL_HOOK_ENV_TIMEOUT_SECONDS:-300}"
+
+# Same bound for the plugin-cache content hash, which walks a 53k-file tree on
+# the gate host. See _plugin_content_hash for the process-per-file defect that
+# made this stage the SECOND unbounded stall found while proving OMN-15590.
+PLUGIN_HASH_TIMEOUT_SECONDS="${PULL_ALL_PLUGIN_HASH_TIMEOUT_SECONDS:-300}"
+
+_emit_summary() {
+  [[ "$SUMMARY_EMITTED" -eq 1 ]] && return 0
+  SUMMARY_EMITTED=1
+
+  local overall
+  if [[ "$STAGE_REPOS" == "PENDING" ]]; then
+    overall="ABORTED"
+  elif [[ ${#FAILED[@]} -gt 0 || ${#STAGE_FAILURES[@]} -gt 0 ]]; then
+    overall="FAILED"
+  elif [[ "$STAGE_PLUGIN_CACHE" == "PENDING" || "$STAGE_PRECOMMIT_HOOKS" == "PENDING" ]]; then
+    overall="INCOMPLETE"
+  else
+    overall="OK"
+  fi
+
+  echo ""
+  if [[ ${#WARNED[@]} -gt 0 ]]; then
+    echo "WARN: ${#WARNED[@]} repo(s) not found locally and were skipped:"
+    local w
+    for w in "${WARNED[@]}"; do
+      echo "  WARN     $w"
+    done
+  fi
+  echo "${OK} repo(s) up to date. ${#FAILED[@]} failed. ${#WARNED[@]} absent (skipped)."
+
+  echo ""
+  echo "== pull-all.sh stage summary =="
+  echo "  repos                  : $STAGE_REPOS"
+  echo "  omnimarket-drift-repair: $STAGE_DRIFT_REPAIR"
+  echo "  plugin-cache-refresh   : $STAGE_PLUGIN_CACHE"
+  echo "  pre-commit-hooks       : $STAGE_PRECOMMIT_HOOKS"
+  if [[ ${#STAGE_FAILURES[@]} -gt 0 ]]; then
+    local f
+    for f in "${STAGE_FAILURES[@]}"; do
+      echo "  STAGE FAILED           : $f"
+    done
+  fi
+
+  # Single machine-parseable completion signal. A caller checks this ONE line
+  # instead of parsing prose; its absence means the run did not reach the end.
+  echo "PULL-ALL-RESULT: overall=${overall} repos_ok=${OK} repos_failed=${#FAILED[@]} repos_absent=${#WARNED[@]} drift_repair=${STAGE_DRIFT_REPAIR} plugin_cache=${STAGE_PLUGIN_CACHE} precommit_hooks=${STAGE_PRECOMMIT_HOOKS}"
+}
+
+_on_exit() {
+  local rc=$?
+  _emit_summary || true
+  rm -rf "$RESULTS_DIR" || true
+  return "$rc"
+}
+trap _on_exit EXIT
+
+# Run a command under a hard wall-clock bound, in its OWN process group, so a
+# timeout kills the entire descendant tree. Returns the command's exit status,
+# or 124 on timeout (GNU timeout's convention).
+#
+# Why not `timeout(1)`: macOS ships neither coreutils `timeout`/`gtimeout` nor
+# `setsid` (verified on the .200 gate host, 2026-08-02), and GNU `timeout`
+# signals only its direct child by default -- which on this stage would leave
+# the git/uv/python grandchildren running. Those grandchildren ARE the field
+# symptom (orphaned PIDs 61908/62077/62078). Enabling job control (`set -m`)
+# makes the backgrounded job a process-group leader, so `kill -- -PGID` reaches
+# the whole tree.
+_run_bounded() {
+  local bound="$1"
+  shift
+
+  local marker cmd_pid watchdog_pid rc waited
+  marker=$(mktemp)
+
+  set -m
+  "$@" &
+  cmd_pid=$!
+  set +m
+
+  (
+    waited=0
+    while [[ "$waited" -lt "$bound" ]]; do
+      sleep 1
+      waited=$((waited + 1))
+      kill -0 "$cmd_pid" 2>/dev/null || exit 0
+    done
+    echo "timeout" > "$marker"
+    kill -TERM -"$cmd_pid" 2>/dev/null || kill -TERM "$cmd_pid" 2>/dev/null || true
+    sleep 5
+    kill -KILL -"$cmd_pid" 2>/dev/null || kill -KILL "$cmd_pid" 2>/dev/null || true
+  ) &
+  watchdog_pid=$!
+
+  rc=0
+  wait "$cmd_pid" || rc=$?
+
+  kill "$watchdog_pid" 2>/dev/null || true
+  wait "$watchdog_pid" 2>/dev/null || true
+
+  # Sweep the group unconditionally: a command can exit while leaving a
+  # backgrounded descendant behind, which is the same orphan class.
+  kill -KILL -"$cmd_pid" 2>/dev/null || true
+
+  if [[ -s "$marker" ]]; then
+    rc=124
+  fi
+  rm -f "$marker"
+  return "$rc"
+}
+# === End stage tracking ===
+
 # === Pre-pull validation: detect bare repo corruption (OMN-7600) ===
 # If core.bare=true, git pull updates refs but NOT the working tree, causing
 # stale files. This is corruption in omni_home — repos must be non-bare clones.
@@ -63,9 +217,6 @@ if [[ ${#BARE_REPOS[@]} -gt 0 ]]; then
   exit 1
 fi
 # === End bare repo validation ===
-
-RESULTS_DIR=$(mktemp -d)
-trap 'rm -rf "$RESULTS_DIR"' EXIT
 
 # Switch to a branch, creating it from origin/<branch> when needed, then
 # fast-forward it to the fetched remote branch.
@@ -182,11 +333,8 @@ done
 
 wait
 
-# Aggregate results
-OK=0
-FAILED=()
-WARNED=()
-
+# Aggregate results (OK / FAILED / WARNED are declared with the stage tracking
+# block above so the EXIT-trap summary can read them on any exit path).
 for repo in "${REPOS[@]}"; do
   result_file="$RESULTS_DIR/$repo"
   if [[ -f "$result_file" ]]; then
@@ -199,6 +347,124 @@ for repo in "${REPOS[@]}"; do
     esac
   fi
 done
+
+if [[ ${#FAILED[@]} -gt 0 ]]; then
+  STAGE_REPOS="FAILED"
+else
+  STAGE_REPOS="OK"
+fi
+
+# === Omnimarket venv drift auto-repair (OMN-15242) ===
+# The OMN-14060 pre-flight guard (src/omnibase_infra/cli/omnimarket_drift_guard.py)
+# detects when the canonical omnibase_infra venv's installed omnimarket has
+# fallen behind the just-advanced $OMNI_HOME/omnimarket clone -- but it only
+# detects and instructs, it never repairs. A canonical omnimarket pull (right
+# here, above) is the EXACT event that creates that drift. Two same-day
+# 2026-07-27 incidents (13:04Z and 19:23Z) bricked every onex CLI/skill
+# dispatch on this Mac until a human ran the repair by hand.
+#
+# INTERACTIVE-SESSION SCOPE ONLY. Preregistered battery runs use the frozen
+# execution-environment mechanism (OMN-15265) and must NEVER be auto-repaired
+# mid-run -- that would change the delegation stack version between seeds and
+# contaminate the run. This hook lives only in pull-all.sh (the interactive/
+# session sync entrypoint), never in a battery driver, so that boundary holds
+# structurally rather than by convention.
+#
+# Design guarantees:
+#   * Only triggers when omnimarket was part of THIS run and its pull result
+#     was OK -- a FAILED/MISSING/SKIPPED/not-requested omnimarket is untouched.
+#   * Skip-guarded -- a missing local omnibase_infra clone, missing drift
+#     script, or missing canonical venv is a clean no-op (nothing to repair
+#     against).
+#   * BOUNDED and FATAL (OMN-15590, revising OMN-15242's
+#     "fail-loud-but-not-fatal") -- the invocation runs under an explicit
+#     wall-clock bound in its own process group, and BOTH a timeout and a
+#     non-zero exit are carried into the terminal summary AND the exit code.
+#     The original non-fatal design meant a caller could not distinguish
+#     "sync completed" from "sync stopped or failed partway" -- and the
+#     unbounded call meant the run never reached the later stages at all.
+#   * Attributable -- the check/repair invocation and outcome are echoed
+#     inline in pull-all.sh's own stdout, the same log surface as every other
+#     step here.
+#
+# ROOT CAUSE of the observed hang (OMN-15590 AC6), established by controlled
+# experiment on stickybeatz-studio 2026-08-02, not inferred:
+#   The repair chain ends in `uv pip install --python <canonical infra venv>`.
+#   uv takes an EXCLUSIVE flock on `<venv>/.lock` for the duration of an
+#   install, has no lock-acquisition timeout, and prints nothing at default
+#   verbosity while it waits. Holding that lock from a second process made an
+#   otherwise 2-second install sit silent past 30s and then finish in
+#   milliseconds the instant the lock was released. `.200` runs many parallel
+#   sessions against ONE shared canonical venv -- including the readiness probe
+#   that itself runs pull-all.sh -- so a peer's uv operation blocks this stage
+#   for the peer's entire duration, unbounded. Resolve/network was excluded by
+#   measurement on the same host: step-1 git+HTTPS resolve 1.93s, step-2 leaf
+#   resolve 43ms, `git ls-remote` 0.19s.
+_omnimarket_result_file="$RESULTS_DIR/omnimarket"
+if [[ ! -f "$_omnimarket_result_file" || "$(cat "$_omnimarket_result_file")" != "OK" ]]; then
+  STAGE_DRIFT_REPAIR="SKIPPED"  # omnimarket not in this run, or its pull did not succeed
+else
+  _infra_dir="$OMNI_HOME/omnibase_infra"
+  _drift_script="$_infra_dir/scripts/check-omnimarket-venv-drift.sh"
+  _infra_venv_python="$_infra_dir/.venv/bin/python"
+
+  if [[ ! -d "$_infra_dir" || ! -x "$_drift_script" ]]; then
+    STAGE_DRIFT_REPAIR="SKIPPED"  # no local omnibase_infra clone (or drift script)
+  elif [[ ! -x "$_infra_venv_python" ]]; then
+    STAGE_DRIFT_REPAIR="SKIPPED"  # no canonical omnibase_infra venv to repair
+  else
+    echo ""
+    echo "== checking omnimarket venv drift against canonical omnibase_infra venv =="
+    echo "   (bounded at ${DRIFT_REPAIR_TIMEOUT_SECONDS}s -- OMN-15590; override with PULL_ALL_DRIFT_REPAIR_TIMEOUT_SECONDS)"
+    _drift_rc=0
+    _run_bounded "$DRIFT_REPAIR_TIMEOUT_SECONDS" \
+      env OMNI_HOME="$OMNI_HOME" bash "$_drift_script" --repair "$_infra_venv_python" \
+      || _drift_rc=$?
+
+    if [[ "$_drift_rc" -eq 0 ]]; then
+      STAGE_DRIFT_REPAIR="OK"
+      echo "  DRIFT-REPAIR omnimarket venv OK (canonical omnibase_infra venv)"
+    else
+      if [[ "$_drift_rc" -eq 124 ]]; then
+        STAGE_DRIFT_REPAIR="TIMEOUT"
+        STAGE_FAILURES+=("omnimarket-drift-repair timed out after ${DRIFT_REPAIR_TIMEOUT_SECONDS}s")
+      else
+        STAGE_DRIFT_REPAIR="FAILED"
+        STAGE_FAILURES+=("omnimarket-drift-repair exited ${_drift_rc}")
+      fi
+      echo ""
+      echo "############################################################"
+      if [[ "$STAGE_DRIFT_REPAIR" == "TIMEOUT" ]]; then
+        echo "# OMN-15590: omnimarket venv drift-repair TIMED OUT after ${DRIFT_REPAIR_TIMEOUT_SECONDS}s"
+        echo "#"
+        echo "# The stage was killed (whole process group) and this run is a"
+        echo "# FAILURE. Most likely cause: another process holds the exclusive"
+        echo "# uv lock on the canonical venv"
+        echo "#   $_infra_dir/.venv/.lock"
+        echo "# uv waits on that lock forever and prints nothing while waiting."
+        echo "# Check for a concurrent uv/pull-all/session on this host, then"
+        echo "# re-run. Raise PULL_ALL_DRIFT_REPAIR_TIMEOUT_SECONDS only if the"
+        echo "# repair is genuinely slow rather than blocked."
+      else
+        echo "# OMN-15242: omnimarket venv drift-repair FAILED (exit ${_drift_rc})"
+      fi
+      echo "#"
+      echo "# pull-all.sh just advanced the canonical omnimarket clone, but"
+      echo "# could not repair the canonical omnibase_infra venv against it."
+      echo "# Every onex CLI / skill dispatch command is now at risk of the"
+      echo "# OMN-14060 OmnimarketDriftError until this is fixed BY HAND:"
+      echo "#"
+      echo "#   OMNI_HOME=$OMNI_HOME bash $_drift_script --repair $_infra_venv_python"
+      echo "#"
+      echo "# See OMN-15590 / OMN-15242 / OMN-14060 for context."
+      echo "############################################################"
+      echo ""
+      echo "  (continuing to the remaining stages -- their disposition is"
+      echo "   reported in the terminal summary; nothing is silently skipped)"
+    fi
+  fi
+fi
+# === End omnimarket venv drift auto-repair ===
 
 # === Plugin cache refresh (Layer 2, OMN-7369) ===
 # When omniclaude was updated, refresh the Claude Code plugin cache.
@@ -232,6 +498,15 @@ fi
 # The hash is computed against RELATIVE paths so a repo-side and cache-side
 # computation of the same plugin tree yield the same hash (shasum emits
 # `hash  path` — absolute paths would otherwise break comparability).
+#
+# `-exec ... +` NOT `-exec ... \;` (OMN-15590). The per-file form spawned ONE
+# `shasum` (a perl script) process per file. Measured on the gate host
+# 2026-08-02: the live plugin cache holds 53,057 files, so the per-file form
+# forks ~53k perl interpreters and the stage ran >10 minutes without finishing
+# on a loaded host -- a second unbounded stall in this same script, hit while
+# proving the drift-repair bound. The batched form produces byte-identical
+# output (same `hash  ./path` lines, re-sorted downstream anyway) and completes
+# the same tree in 7.9s.
 _plugin_content_hash() {
   local root="$1"
   ( cd "${root}" && find . -type f \
@@ -239,10 +514,12 @@ _plugin_content_hash() {
       ! -path "*/__pycache__/*" \
       ! -name ".deployed-commit" \
       ! -name ".content-hash" \
-      -exec shasum {} \; 2>/dev/null | sort | shasum | cut -d' ' -f1 )
+      -exec shasum {} + 2>/dev/null | sort | shasum | cut -d' ' -f1 )
 }
 
+STAGE_PLUGIN_CACHE="SKIPPED"  # no cache and/or no omniclaude clone -- nothing to refresh
 if [[ -n "${_plugin_cache}" && -d "${_omniclaude_dir}" && -d "${_plugin_cache}" ]]; then
+  STAGE_PLUGIN_CACHE="UP-TO-DATE"
   _current=$(git -C "${_omniclaude_dir}" rev-parse HEAD 2>/dev/null)
   _deployed=""
   [[ -f "${_plugin_cache}/.deployed-commit" ]] && _deployed=$(cat "${_plugin_cache}/.deployed-commit" 2>/dev/null)
@@ -250,7 +527,14 @@ if [[ -n "${_plugin_cache}" && -d "${_omniclaude_dir}" && -d "${_plugin_cache}" 
   # Compare against repo content hash as a second signal beyond commit SHA.
   _repo_hash=""
   if [[ -d "${_omniclaude_dir}/plugins/onex" ]]; then
-    _repo_hash=$(_plugin_content_hash "${_omniclaude_dir}/plugins/onex")
+    # Bounded for the same reason as the drift stage: a stall here used to hang
+    # the run past its terminal summary. An empty hash on timeout fails toward
+    # "cache looks stale" (a refresh), never toward a silent skip.
+    _repo_hash=$(_run_bounded "$PLUGIN_HASH_TIMEOUT_SECONDS" _plugin_content_hash "${_omniclaude_dir}/plugins/onex") || {
+      echo "WARN: plugin content hash (repo) exceeded ${PLUGIN_HASH_TIMEOUT_SECONDS}s -- treating cache as stale."
+      STAGE_PLUGIN_CACHE="WARN"
+      _repo_hash=""
+    }
   fi
   _cache_hash=""
   [[ -f "${_plugin_cache}/.content-hash" ]] && _cache_hash=$(cat "${_plugin_cache}/.content-hash" 2>/dev/null)
@@ -270,14 +554,17 @@ if [[ -n "${_plugin_cache}" && -d "${_omniclaude_dir}" && -d "${_plugin_cache}" 
         cp -R "${_tmpdir}/plugins/onex/." "${_plugin_cache}/"
         echo "${_current}" > "${_plugin_cache}/.deployed-commit"
         # Recompute hash against the cache after refresh and persist.
-        _new_hash=$(_plugin_content_hash "${_plugin_cache}")
+        _new_hash=$(_run_bounded "$PLUGIN_HASH_TIMEOUT_SECONDS" _plugin_content_hash "${_plugin_cache}") || _new_hash=""
         echo "${_new_hash}" > "${_plugin_cache}/.content-hash"
         echo "Plugin cache refreshed (content hash ${_new_hash:0:8})."
+        STAGE_PLUGIN_CACHE="REFRESHED"
       else
         echo "WARN: Plugin cache refresh failed (archive missing plugins/onex/)."
+        STAGE_PLUGIN_CACHE="WARN"
       fi
     else
       echo "WARN: Plugin cache refresh failed (git archive error)."
+      STAGE_PLUGIN_CACHE="WARN"
     fi
     rm -rf "${_tmpdir}"
   fi
@@ -309,12 +596,20 @@ if ! command -v pre-commit >/dev/null 2>&1; then
   echo "WARN: 'pre-commit' not found on PATH -- local git hooks were NOT installed."
   echo "      Install it (e.g. 'brew install pre-commit') so pattern/static"
   echo "      defects fail at commit time instead of first failing in CI."
+  STAGE_PRECOMMIT_HOOKS="UNAVAILABLE"
 else
+  STAGE_PRECOMMIT_HOOKS="OK"
   for repo in "${REPOS[@]}"; do
     _pc_dir="$OMNI_HOME/$repo"
     [[ -d "$_pc_dir" ]] || continue
     [[ -f "$_pc_dir/.pre-commit-config.yaml" ]] || continue
-    (
+    # The install runs in a subshell (it `cd`s), so a failure inside it cannot
+    # assign to STAGE_PRECOMMIT_HOOKS directly. It signals with exit 3 and the
+    # parent downgrades the stage -- otherwise the summary would report
+    # `precommit_hooks=OK` on a run that printed a screenful of WARN lines,
+    # which is the same "green-looking incomplete run" defect this ticket
+    # exists to close, just moved one stage over. (OMN-15590)
+    if ! (
       cd "$_pc_dir" || exit 0
       # `git rev-parse --git-path hooks` resolves to the SHARED hooks dir (the
       # common git dir), so installing in the canonical clone covers all of its
@@ -329,22 +624,34 @@ else
         # Best-effort env pre-build so the first real commit is not slow. Runs
         # at most once per repo (guarded above); a failure here is non-fatal
         # because the hook script is already written and will still fire.
-        pre-commit install-hooks >/dev/null 2>&1 || true
+        #
+        # BOUNDED (OMN-15590): this is a network-bound call with no client
+        # timeout -- the same unbounded class as the drift-repair stage above,
+        # on the same script. It is bounded with the same mechanism so a hung
+        # hook-env build cannot stall the sync past its terminal summary.
+        _run_bounded "$HOOK_ENV_TIMEOUT_SECONDS" \
+          bash -c 'pre-commit install-hooks >/dev/null 2>&1' || true
         echo "  HOOK     $repo (pre-commit git hook installed)"
       else
         echo "  WARN     $repo (pre-commit install failed -- commit-time enforcement inactive)"
+        exit 3
       fi
-    )
+    ); then
+      STAGE_PRECOMMIT_HOOKS="WARN"
+    fi
   done
 fi
 # === End pre-commit hook installation ===
 
-echo ""
-if [[ ${#WARNED[@]} -gt 0 ]]; then
-  echo "WARN: ${#WARNED[@]} repo(s) not found locally and were skipped:"
-  for w in "${WARNED[@]}"; do
-    echo "  WARN     $w"
-  done
+# The terminal summary is emitted by the EXIT trap (_on_exit -> _emit_summary)
+# so it appears on EVERY exit path, including the early bare-repo abort and any
+# unexpected `set -e` failure -- not only on this happy path. All that remains
+# here is the exit code.
+#
+# A repo failure OR a failed/timed-out stage is a failed run (OMN-15590): a
+# caller running the documented "sync first" step must not read exit 0 off a
+# sync that stopped or failed partway.
+if [[ ${#FAILED[@]} -gt 0 || ${#STAGE_FAILURES[@]} -gt 0 ]]; then
+  exit 1
 fi
-echo "${OK} repo(s) up to date. ${#FAILED[@]} failed. ${#WARNED[@]} absent (skipped)."
-[[ ${#FAILED[@]} -eq 0 ]] || exit 1
+exit 0

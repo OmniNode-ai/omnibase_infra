@@ -1,0 +1,139 @@
+# fenced-node-migrations.yaml — Single source of truth for the node-migration
+# operator fence (OMN-15349, Option 1)
+#
+# Ticket: OMN-15349 (single-source the fence across omnibase_infra +
+#   omninode_infra — this file is that single source)
+# Predecessor: OMN-15336 (parity port that first gave the compose runner a
+#   fence at all; left the list duplicated in two repos, which this file
+#   removes)
+#
+# PURPOSE
+# This is the BASELINE operator fence over the shared node-migration id space
+# (node:<node>:<filename>, minted identically by both runners over the same
+# vendored docker/migrations/forward/nodes/ tree). It is consumed READ-ONLY by:
+#
+#   - omnibase_infra/scripts/run-forward-migrations.sh (every compose lane —
+#     dev, stability-test, judge, prod). Reads this file directly via the
+#     ${MIGRATIONS_DIR} bind mount (docker/docker-compose.infra.yml mounts
+#     ../docker/migrations/forward:/migrations/forward:ro).
+#   - omninode_infra/k8s/migrations/omnibase-infra-migrate.yaml (the k8s
+#     Job). The Job's copy-migrations initContainer already copies this
+#     entire directory (docker/Dockerfile.migrate: COPY docker/migrations/
+#     forward/ /migrations/forward/, recursive) out of the
+#     omnibase-infra-migrate image it pulls — no new image dependency, the
+#     coupling already existed for the SQL tree this file sits next to.
+#
+# BASELINE, NOT PER-LANE EFFECTIVE FENCE
+# This list is the maximal fence — every id both runners fence by default.
+# Each runner separately layers its OWN, independently operator-ruled,
+# lane-scoped RELEASE on top of this baseline (a strict subset carve-out,
+# never a widening):
+#
+#   - compose: ONEX_MIGRATION_LANE=dev releases the registration trio on the
+#     lab lane only (operator ruling 15, OMN-15379). Every other lane stays
+#     fully fenced. See the "LANE-SCOPED FENCE RELEASE" block in
+#     run-forward-migrations.sh.
+#   - k8s: releases the registration trio unconditionally, because that Job
+#     serves exactly one environment (staging/onex-dev) and operator ruling
+#     21 (OMN-15332 comment 1a067542, 2026-07-31T14:05Z GO) authorized a
+#     DURABLE release there, not an env-gated one. See the "k8s lane
+#     release" block in omnibase-infra-migrate.yaml.
+#
+# The release policies are deliberately NOT expressed in this file: they are
+# per-environment operator decisions, not shared fence DATA, and folding them
+# in would turn one shared baseline back into two hand-reconciled effective
+# lists. What this file guarantees is that both runners start from the same
+# baseline before either applies its own release — the seam OMN-15349 exists
+# to close.
+#
+# FORMAT
+# A flat list under `fenced_node_migrations`, each entry an `id:` (mandatory,
+# machine-parsed) plus a `ticket:` (advisory, for humans). Order is
+# significant — both runners preserve it. Parsed with a portable
+# sed one-liner (no yq/python dependency in either runner's shell):
+#
+#   sed -n 's/^[[:space:]]*-[[:space:]]*id:[[:space:]]*"\([^"]*\)".*/\1/p' \
+#     fenced-node-migrations.yaml
+#
+# Mirrors the parsing style already used for docker/migrations/skip-manifest.yaml.
+#
+# CHANGING THIS LIST
+# Editing this file changes the baseline for BOTH runners in one commit —
+# that is the point of single-sourcing it. It does NOT by itself change
+# either runner's effective (post-release) fence; a release policy change
+# (e.g. widening ruling 21's scope, or adding a new ruling-15-style lane
+# carve-out) is a separate, explicit edit to that runner's release block.
+#
+# WHY THESE NINE IDS (verbatim rationale, unchanged from the pre-OMN-15349
+# hand-maintained lists for the first seven; the eighth (node_pr_review_bot
+# 001) was added under OMN-15717/OMN-15376 and the ninth
+# (delegation_inference_response 0003) under OMN-15336 item 4 / OMN-15656 —
+# two independent PRs landing concurrently, both additive, not conflicting):
+#   delegation 0023-0026 — OMN-14974 / OMN-15313. Tenant-isolation RLS on
+#     live, actively-written delegation tables; un-gate only in a change that
+#     also proves the writer sets app.tenant_id per connection. No lane may
+#     release these (see the "delegation ids are not releasable" checks in
+#     both runners).
+#   registration 0000/0001/0002 — OMN-15335 / OMN-15088 / OMN-15343. All
+#     three ALTER node_service_registry; 0002 applies FORCE ROW LEVEL
+#     SECURITY. 0000 (CREATE) and 0002 (the dependent ALTER) must move
+#     together — a fence that gates one but not the other is worse than no
+#     fence (OMN-15379 postmortem: a cold compose lane with 0000 fenced and
+#     0002 not died with "relation node_service_registry does not exist").
+#   node_pr_review_bot 001 — OMN-15717 / OMN-15376. The CREATE TABLE IF NOT
+#     EXISTS for review_bot_bypass_log declares 7 columns with no ALTER TABLE
+#     ADD COLUMN IF NOT EXISTS reconciliation, tripping the OMN-15376 static
+#     shape-reconciliation gate (tests/ci/test_node_migration_shape_reconciliation.py).
+#     Editing the SQL to add the missing ALTER statements is NOT the fix here:
+#     it would change the file's content sha256 (currently
+#     63e2646a7f8767fad9ec969b224982e00b83aacb665107ab5b103964d5616e00), and
+#     that checksum is bound both by the application-migrations.tsv
+#     declaration and by dev's already-applied
+#     omnidash_analytics.platform_catalog.schema_migrations row
+#     (content_sha256, applied_at 2026-08-06) — a changed checksum makes
+#     scripts/run-forward-migrations.sh's migration_is_applied() check FATAL
+#     ("conflicting migration checksum") on that lane, since the runner has
+#     no path to reconcile a stored checksum against a changed file. Fencing
+#     is safe today, not merely convenient: read-only .201 probes (2026-08-10)
+#     confirm this migration is ALREADY applied on all four live lanes —
+#     dev via the content_sha256 row above, and stability-test/judge/prod via
+#     the legacy 'applied-by-runner' public.schema_migrations rows dated
+#     2026-06-10/06-11 — and review_bot_bypass_log's live columns already
+#     match the 7 declared columns exactly on every lane, so there is no
+#     shape drift to reconcile anywhere that exists today. Residual, accepted
+#     risk: a genuinely new future lane (never bootstrapped from any of the
+#     four) would skip creating this table until an operator adds a lane
+#     release, same accepted-tradeoff shape as the delegation ids above.
+#   delegation_inference_response 0003 — OMN-15336 item 4 / OMN-15656. FORCE
+#     ROW LEVEL SECURITY on projection_delegation_inference_response_text.
+#     Contract-declared tenant domain (node_projection_delegation_inference_
+#     response/contract.yaml db_io.schema), so the RLS posture itself is
+#     correctly classified — unlike node_service_registry below, this is not
+#     an internal-domain misclassification. It is held for the same reason
+#     the delegation quartet above is held: OMN-15301 found the projection
+#     writer never sets app.tenant_id per connection, so an un-gated FORCE
+#     apply here reproduces the identical false-clean (zero rows, no error)
+#     write-lockout hazard on a live, actively-written table. Was NEVER in
+#     this list on any runner before this entry — it applied unattended on
+#     the .201 dev lane (2026-07-31T06:44:32Z) purely because nothing here
+#     named it. Un-gate only in a change that also proves the writer sets
+#     app.tenant_id per connection, matching the delegation quartet's bar.
+fenced_node_migrations:
+  - id: "node:node_projection_delegation:0023_delegation_rls_tenant_isolation.sql"
+    ticket: "OMN-14974"
+  - id: "node:node_projection_delegation:0024_drop_unwired_routing_columns.sql"
+    ticket: "OMN-14974"
+  - id: "node:node_projection_delegation:0025_delegation_judge_verdict_events_tenant_id.sql"
+    ticket: "OMN-15313"
+  - id: "node:node_projection_delegation:0026_delegation_judge_verdict_events_rls_tenant_isolation.sql"
+    ticket: "OMN-15313"
+  - id: "node:node_projection_registration:0000_create_node_service_registry.sql"
+    ticket: "OMN-15335"
+  - id: "node:node_projection_registration:0001_add_heartbeat_columns.sql"
+    ticket: "OMN-15088"
+  - id: "node:node_projection_registration:0002_node_service_registry_tenant_rls.sql"
+    ticket: "OMN-15343"
+  - id: "node:node_pr_review_bot:001_create_review_bot_bypass_log.sql"
+    ticket: "OMN-15717"
+  - id: "node:node_projection_delegation_inference_response:0003_inference_response_text_rls_tenant_isolation.sql"
+    ticket: "OMN-15336"

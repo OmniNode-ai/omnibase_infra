@@ -89,3 +89,50 @@ class TestValidateOnexTopicFormat:
         result, reason = validate_onex_topic_format(topic)
         assert result == TopicValidationResult.SKIPPED_INTERNAL
         assert reason == ""
+
+    # ------------------------------------------------------------------
+    # Tenant wire topics (OMN-15792: delegates to the shared runtime
+    # resolver -- service_gateway_topic_transform.resolve_tenant_from_wire_topic
+    # -- instead of a private, independently-maintained regex.
+    # ------------------------------------------------------------------
+
+    def test_valid_tenant_wire_topic(self) -> None:
+        result, reason = validate_onex_topic_format(
+            "tenant-acme.onex.evt.omniclaude.session-started.v1"
+        )
+        assert result == TopicValidationResult.VALID_TENANT_WIRE
+        assert reason == ""
+
+    @pytest.mark.parametrize(
+        "topic",
+        [
+            # Reserved slug -- structurally valid shape, but reserved. This is
+            # the exact OMN-15757/OMN-15778 divergence: this module previously
+            # ALLOWED it (own regex, no RESERVED_TENANT_SLUGS check) while the
+            # subscribe-side resolver already rejected it.
+            "tenant-system.onex.evt.omniclaude.session-started.v1",
+            # Too short to be a valid DNS-compatible slug.
+            "tenant-ab.onex.evt.omniclaude.session-started.v1",
+            # Uppercase -- not a valid lowercase DNS-compatible slug.
+            "tenant-Acme.onex.evt.omniclaude.session-started.v1",
+        ],
+    )
+    def test_invalid_tenant_wire_topics_rejected(self, topic: str) -> None:
+        """Publish-enforce must agree with subscribe-resolve on every case.
+
+        Regression for the OMN-15792 corrective verify pass: a tenant-<slug>.
+        wire topic with an invalid embedded slug (reserved, malformed, wrong
+        case) is INVALID here -- the same verdict
+        ``resolve_tenant_from_wire_topic`` (the subscribe-side resolver)
+        reaches by raising ``ValueError`` for the identical string.
+        """
+        result, reason = validate_onex_topic_format(topic)
+        assert result == TopicValidationResult.INVALID
+        assert reason != ""
+
+        from omnibase_infra.nodes.node_bus_forwarder_effect.services.service_gateway_topic_transform import (
+            resolve_tenant_from_wire_topic,
+        )
+
+        with pytest.raises(ValueError):
+            resolve_tenant_from_wire_topic(topic)

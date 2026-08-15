@@ -161,6 +161,29 @@ if [ -n "${ONEX_SECRET_RESOLVER_CONFIG_PATH:-}" ]; then
   python -m omnibase_infra.runtime.render_secret_resolver_config
 fi
 
+if [ -n "${DELEGATION_ROUTING_TIERS_PATH:-}" ] && [ ! -f "${DELEGATION_ROUTING_TIERS_PATH}" ]; then
+  # OMN-15628 remediation: DELEGATION_ROUTING_TIERS_PATH is pinned in the k8s
+  # manifest as a literal string that embeds the venv's Python minor version
+  # (e.g. .../python3.12/site-packages/omnimarket/configs/routing_tiers.yaml).
+  # A base-image Python version bump silently breaks that pin with no signal
+  # until the routing reducer fails closed at first use. Self-heal here by
+  # re-deriving the path from the installed omnimarket package's OWN
+  # location, which always matches whatever Python is actually running in
+  # this image -- never a hardcoded guess. This is a best-effort correction,
+  # not a silent-fallback: if re-derivation also fails to find a real file,
+  # the original (possibly-stale) pinned value is left untouched and the
+  # routing reducer still fails closed with an attributable error, per
+  # CLAUDE.md rule 8.
+  echo "[entrypoint] WARNING: DELEGATION_ROUTING_TIERS_PATH=${DELEGATION_ROUTING_TIERS_PATH} does not exist -- attempting to re-derive from the installed omnimarket package"
+  RESOLVED_TIERS_PATH=$(python -c "import pathlib, omnimarket; print(pathlib.Path(omnimarket.__file__).resolve().parent / 'configs' / 'routing_tiers.yaml')" 2>/dev/null) || RESOLVED_TIERS_PATH=""
+  if [ -n "${RESOLVED_TIERS_PATH}" ] && [ -f "${RESOLVED_TIERS_PATH}" ]; then
+    echo "[entrypoint] Re-derived DELEGATION_ROUTING_TIERS_PATH=${RESOLVED_TIERS_PATH}"
+    export DELEGATION_ROUTING_TIERS_PATH="${RESOLVED_TIERS_PATH}"
+  else
+    echo "[entrypoint] WARNING: could not re-derive a valid routing_tiers.yaml path -- leaving DELEGATION_ROUTING_TIERS_PATH as pinned; the routing reducer fails closed with an attributable error if it truly does not exist (OMN-15628)"
+  fi
+fi
+
 echo "[entrypoint] Starting runtime kernel..."
 
 exec "$@"

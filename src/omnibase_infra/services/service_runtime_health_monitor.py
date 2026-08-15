@@ -29,7 +29,7 @@ import logging
 import math
 import os
 import time
-from collections.abc import Mapping
+from collections.abc import Mapping, Sequence
 from datetime import UTC, datetime
 from typing import TYPE_CHECKING, Literal, NamedTuple
 
@@ -296,6 +296,46 @@ _DEFAULT_BOOT_GRACE: float = 120.0  # 2 minutes — covers typical topic provisi
 _KAFKA_ADMIN_TIMEOUT_MS: int = 5_000
 
 
+# Cap on how many failing entry points are named in the discovery_errors detail.
+# The detail string is served on every /health response and shipped in every
+# health event; a runaway discovery failure must not turn it into a log dump.
+_MAX_NAMED_DISCOVERY_ERRORS = 8
+
+
+def _describe_discovery_errors(
+    manifest: ProtocolAutoWiringManifestLike, error_count: int
+) -> str:
+    """Build the discovery_errors detail, naming the failing entry points.
+
+    OMN-15217: the pre-existing detail was ``"4 contract(s) failed to load"`` —
+    a count with no identities, which forced every investigation to go back to
+    raw container logs to learn *which* contracts failed (and the boot-time
+    ``Failed to load entry point`` lines roll out of the log buffer long before
+    anyone looks). Naming them here makes the health surface itself
+    self-diagnosing.
+
+    ``ProtocolAutoWiringManifestLike`` only guarantees the counts, so the error
+    tuple is read defensively: any manifest that does not expose it degrades to
+    the original count-only detail rather than raising inside a health check.
+    """
+    errors = getattr(manifest, "errors", None)
+    names: list[str] = []
+    if isinstance(errors, Sequence) and not isinstance(errors, str | bytes):
+        for error in errors[:_MAX_NAMED_DISCOVERY_ERRORS]:
+            entry_point = getattr(error, "entry_point_name", None)
+            if entry_point:
+                names.append(str(entry_point))
+
+    base = f"{error_count} contract(s) failed to load"
+    if not names:
+        return base
+    listed = ", ".join(names)
+    remaining = error_count - len(names)
+    if remaining > 0:
+        listed = f"{listed}, +{remaining} more"
+    return f"{base}: {listed}"
+
+
 def _worst(statuses: list[_HealthStatus]) -> _HealthStatus:
     """Return the worst status from a list."""
     if "CRITICAL" in statuses:
@@ -370,6 +410,11 @@ class ServiceRuntimeHealthMonitor:
         self._boot_grace_seconds = boot_grace_seconds
         self._started_at: float | None = None
         self._boot_grace_complete_logged = boot_grace_seconds == 0
+        # OMN-15217: retain the latest verdict so the HTTP health surface can
+        # publish it. Before this the verdict existed only in logs and on the
+        # Kafka health topic, so /health reported healthy while the runtime was
+        # DEGRADED — see runtime_health_block for the full mask description.
+        self._latest_event: ModelRuntimeHealthCheckEvent | None = None
 
     async def start(self) -> None:
         """Start the background health check loop. Idempotent.
@@ -411,6 +456,16 @@ class ServiceRuntimeHealthMonitor:
             self._task = None
         logger.info("ServiceRuntimeHealthMonitor stopped")
 
+    @property
+    def latest_event(self) -> ModelRuntimeHealthCheckEvent | None:
+        """Return the most recent health-check event, or ``None`` before the first cycle.
+
+        ``None`` means "no verdict computed yet" — a distinct state from
+        HEALTHY. Consumers that need proof of health must fail closed on
+        ``None`` rather than reading absence as green (OMN-15217).
+        """
+        return self._latest_event
+
     async def run_once(self) -> ModelRuntimeHealthCheckEvent:
         """Run a single health check cycle and return the event.
 
@@ -448,7 +503,9 @@ class ServiceRuntimeHealthMonitor:
                     ModelRuntimeHealthDimension(
                         name="discovery_errors",
                         status="DEGRADED",
-                        detail=(f"{discovery_error_count} contract(s) failed to load"),
+                        detail=_describe_discovery_errors(
+                            manifest, discovery_error_count
+                        ),
                     )
                 )
             else:
@@ -655,6 +712,8 @@ class ServiceRuntimeHealthMonitor:
                         dim.status,
                         dim.detail,
                     )
+
+        self._latest_event = event
 
         await self._emit(event)
         return event

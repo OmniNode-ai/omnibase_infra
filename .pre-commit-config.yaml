@@ -107,11 +107,16 @@ repos:
   - repo: https://github.com/pre-commit/pre-commit-hooks
     rev: v6.0.0
     hooks:
+      # `\.captured$`: verbatim incident-replay artifacts (OMN-15547). These
+      # hooks are `types: [text]`, so they match on content and would append a
+      # newline to a captured HTTP body or API response -- silently voiding the
+      # sha256 that makes it evidence. Observed, not hypothetical: it happened
+      # to all three captures on their first commit and R1 rejected them.
       - id: trailing-whitespace
         args: [--markdown-linebreak-ext=md]
-        exclude: ^\.github/workflows/
+        exclude: ^\.github/workflows/|\.captured$
       - id: end-of-file-fixer
-        exclude: ^\.github/workflows/
+        exclude: ^\.github/workflows/|\.captured$
       - id: check-merge-conflict
       - id: check-added-large-files
         args: [--maxkb=1000]
@@ -190,6 +195,21 @@ repos:
         entry: uv run --frozen python scripts/lint_pricing_manifest.py
         language: system
         files: ^src/omnibase_infra/configs/pricing_manifest\.yaml$
+        pass_filenames: true
+        stages: [pre-commit]
+      # OMN-15538: reject a pin whose commit is not reachable from a protected
+      # branch of the target repo. Mirrors the required CI job
+      # "Pin Reachability (OMN-15538)"; catching a dead pin at commit time is
+      # what stops the OMN-15536 shape (ci.yml startup-fails, "CI Summary"
+      # never reports, the whole repo wedges) from reaching the remote at all.
+      # --allow-undetermined keeps an offline commit unblocked; the script
+      # REFUSES that flag under CI, so the enforcing surface stays fail-closed
+      # and the hook can never be the reason a bad pin merges.
+      - id: check-pin-reachability
+        name: Cross-repo pins must be reachable from dev/main (OMN-15538)
+        entry: uv run --frozen python scripts/ci/check_pin_reachability.py --allow-undetermined
+        language: system
+        files: ^(\.github/workflows/.*\.ya?ml|pyproject\.toml|uv\.lock)$
         pass_filenames: true
         stages: [pre-commit]
       - id: reject-node-implementations
@@ -325,6 +345,17 @@ repos:
         language: system
         pass_filenames: false
         always_run: false
+        stages: [pre-commit]
+      # OMN-15378: fail closed on any new `tests/` directory pytest can never
+      # collect (scripts/deploy-agent/tests/ sat uncollected + RED for ~5
+      # weeks with zero CI signal). always_run — a new stray root can appear
+      # anywhere in the tree, not just under files already staged.
+      - id: onex-validate-test-root-collection
+        name: ONEX Uncollected Test Root Check (OMN-15378)
+        entry: uv run --frozen python scripts/validation/validate_test_root_collection.py
+        language: system
+        pass_filenames: false
+        always_run: true
         stages: [pre-commit]
       # OMN-12559 / OMN-13124: vendored omnimarket node migrations must stay in
       # sync with source. MUST always_run — the prior files:-scoped trigger only
@@ -773,6 +804,19 @@ repos:
         entry: uv run --frozen python scripts/check_migration_required.py --pre-commit
         pass_filenames: false
         stages: [pre-commit]
+      # OMN-15717: every vendored node migration under docker/migrations/forward/nodes/
+      # must carry a checked-in stream/domain declaration BEFORE it can reach a
+      # runtime -- catches the class of gap that let node_pr_review_bot's
+      # 001_create_review_bot_bypass_log.sql ship undeclared and fail closed at
+      # bootstrap.sql deploy time instead of at PR time. Wires the pre-existing
+      # (previously unwired) scripts/validation/validate_application_migration_manifest.py.
+      - id: onex-check-node-migration-declarations
+        name: Node Migration Declaration Check
+        language: system
+        entry: uv run --frozen python scripts/validation/validate_application_migration_manifest.py
+        pass_filenames: false
+        files: ^docker/migrations/forward/(nodes/|_ledger/(application-migrations|application-migration-blocks|legacy-node-migrations)\.tsv)
+        stages: [pre-commit]
       # OMN-3617: Block planning docs (belong in omni_home/docs/plans/)
       - id: no-planning-docs
         name: Block planning docs (belong in omni_home/docs/plans/)
@@ -1007,6 +1051,21 @@ repos:
         always_run: true
         stages: [pre-commit]
         files: ^(\.pre-commit-config\.yaml|\.github/workflows/(canonical-inference-gate|url-authority-gate)\.yml)$
+      # Incident-replay coverage (OMN-15547): a guard that has never been run
+      # against the real thing it exists to catch is decorative. Fires on the
+      # two surfaces that can create the gap -- wiring a new guard (this config
+      # or a workflow) and editing the registry/fixtures themselves. Local
+      # because the failure it prevents is committed BEFORE CI sees it: the
+      # author who adds the hook line is the only person who still has the real
+      # artifact to hand.
+      - id: incident-replay-coverage
+        name: Incident-replay coverage (OMN-15547)
+        entry: uv run python scripts/ci/check_incident_replay_coverage.py
+        language: system
+        pass_filenames: false
+        always_run: true
+        stages: [pre-commit]
+        files: ^(\.pre-commit-config\.yaml|\.github/workflows/.*\.ya?ml|tests/incident_replays/.*|tests/fixtures/.*|scripts/.*\.(py|sh)|deploy/maintenance/.*)$
   # Governed impacted-test selector at PRE-PUSH (OMN-13973 / WS7 OMN-14655 fan-out;
   # canary = omnibase_core#1451). Runs the fast local IMPACTED SUBSET of the unit
   # suite once per `git push`, via the SAME selector CI uses

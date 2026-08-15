@@ -40,6 +40,11 @@ DELEGATION_VIEW = (
     / "node_projection_delegation"
     / "0010_create_delegation_dashboard_projection_views.sql"
 )
+DELEGATION_OBSERVABILITY_RECONCILE = (
+    NODES_DIR
+    / "node_projection_delegation"
+    / "0028_reconcile_delegation_observability_views.sql"
+)
 SAVINGS_VIEW = (
     NODES_DIR
     / "node_projection_savings"
@@ -56,6 +61,16 @@ REGISTRATION_CREATE = (
 )
 REGISTRATION_HEARTBEAT = (
     NODES_DIR / "node_projection_registration" / "0001_add_heartbeat_columns.sql"
+)
+REGISTRATION_OBSERVABILITY_RECONCILE = (
+    NODES_DIR
+    / "node_projection_registration"
+    / "0003_reconcile_heartbeat_observability.sql"
+)
+REGISTRATION_NO_FORCE_RLS = (
+    NODES_DIR
+    / "node_projection_registration"
+    / "0004_node_service_registry_no_force_rls.sql"
 )
 DEPLOYMENT_EVIDENCE_CREATE = (
     NODES_DIR
@@ -88,6 +103,41 @@ class TestVendoredViewMigrations:
         # Authoritative dashboard read views from PR #1005 / OMN-12489.
         assert "CREATE OR REPLACE VIEW projection_delegation_summary" in sql
         assert "CREATE OR REPLACE VIEW projection_delegation_model_routing" in sql
+
+    def test_delegation_observability_reconciliation_vendored(self) -> None:
+        assert DELEGATION_OBSERVABILITY_RECONCILE.is_file(), (
+            "the forward-only delegation observability reconciliation must be "
+            "vendored for warm databases whose migration ledger drifted ahead "
+            "of their materialized view shape"
+        )
+        sql = DELEGATION_OBSERVABILITY_RECONCILE.read_text(encoding="utf-8")
+        for view in (
+            "projection_delegation_summary",
+            "projection_delegation_model_routing",
+            "projection_delegation_quality_gate",
+            "projection_delegation_token_usage",
+        ):
+            assert f"CREATE OR REPLACE VIEW {view}" in sql
+
+    def test_registration_observability_reconciliation_vendored(self) -> None:
+        assert REGISTRATION_OBSERVABILITY_RECONCILE.is_file(), (
+            "the forward-only registration reconciliation must be vendored so "
+            "heartbeat writes cannot fail against a drifted warm database"
+        )
+        sql = REGISTRATION_OBSERVABILITY_RECONCILE.read_text(encoding="utf-8")
+        assert "to_regclass('public.node_service_registry') IS NOT NULL" in sql
+        assert "heartbeat reconciliation is a no-op" in sql
+        assert "ADD COLUMN IF NOT EXISTS last_heartbeat_at" in sql
+        assert "ADD COLUMN IF NOT EXISTS uptime_seconds" in sql
+        assert "idx_node_service_registry_last_heartbeat_at" in sql
+
+    def test_registration_force_rls_reversal_targets_public_table(self) -> None:
+        sql = REGISTRATION_NO_FORCE_RLS.read_text(encoding="utf-8")
+
+        assert "to_regclass('public.node_service_registry') IS NOT NULL" in sql
+        assert (
+            "ALTER TABLE public.node_service_registry NO FORCE ROW LEVEL SECURITY;"
+        ) in sql
 
     def test_savings_projection_view_vendored(self) -> None:
         assert SAVINGS_VIEW.is_file(), (
@@ -385,6 +435,20 @@ class TestNamespacedDiscoveryWiring:
     ) -> None:
         migrations_dir = tmp_path / "migrations"
         migrations_dir.mkdir()
+        # OMN-15349: the runner unconditionally requires the fence manifest
+        # to exist under MIGRATIONS_DIR.
+        (migrations_dir / "fenced-node-migrations.yaml").write_text(
+            "fenced_node_migrations: []\n", encoding="utf-8"
+        )
+        # OMN-15336 item 4 repair (D1): the runner also unconditionally
+        # requires the FORCE-RLS grandfather manifest to exist under
+        # MIGRATIONS_DIR, same discipline as the fence manifest above. This
+        # fixture predates that requirement (a853500ab3) and was never
+        # updated for it -- undetected for the same selector-reachability
+        # reason noted in test_migration_gate_vacuity_fix.py.
+        (migrations_dir / "grandfathered-force-rls-migrations.yaml").write_text(
+            "grandfathered_force_rls_migrations: []\n", encoding="utf-8"
+        )
         (migrations_dir / "001_bad_directive.sql").write_text(
             "--   onex-create-database: bad/name\nSELECT 1;\n",
             encoding="utf-8",
@@ -392,7 +456,25 @@ class TestNamespacedDiscoveryWiring:
         bin_dir = tmp_path / "bin"
         bin_dir.mkdir()
         psql = bin_dir / "psql"
-        psql.write_text("#!/bin/sh\nexit 0\n", encoding="utf-8")
+        # The stub must model the OMN-15291 advisory-lock contract, not just
+        # exit 0: the runner now refuses to touch migrations unless it can prove
+        # it holds the lock, so a psql that answers nothing is (correctly)
+        # treated as "lock not acquired" and aborts before directive validation.
+        psql.write_text(
+            "#!/bin/sh\n"
+            "# Held-ness probe: report the advisory lock as granted to us.\n"
+            'case "$*" in\n'
+            "  *pg_locks*) echo 1; exit 0;;\n"
+            "esac\n"
+            "# Lock-holder session: stay alive until killed. `exec` is\n"
+            "# load-bearing -- without it the stub shell is what gets killed\n"
+            "# and its `cat` child survives holding the runner's stdout open.\n"
+            'case "${PGAPPNAME:-}" in\n'
+            "  forward-migration-lock-*) exec cat >/dev/null;;\n"
+            "esac\n"
+            "exit 0\n",
+            encoding="utf-8",
+        )
         psql.chmod(0o755)
 
         result = subprocess.run(
@@ -462,4 +544,77 @@ class TestVendoredTreeMatchesSource:
         assert result.returncode == 0, (
             "vendored node migrations are out of sync with omnimarket:\n"
             f"stdout:\n{result.stdout}\nstderr:\n{result.stderr}"
+        )
+
+
+class TestLegacyDeclaredExemption:
+    """OMN-15717: a vendored file with a checked-in application-migrations.tsv
+    declaration is preserved applied history, not drift -- even after its
+    omnimarket source is deleted. An UNDECLARED file with a deleted source is
+    still flagged stale (the original 6th-occurrence drift class)."""
+
+    def _run_check(
+        self, tmp_path: Path, dest_root: Path, manifest: Path
+    ) -> subprocess.CompletedProcess[str]:
+        # Empty omnimarket source: no node migrations exist upstream, so
+        # every vendored file under dest_root is a candidate for "stale".
+        omk = tmp_path / "omnimarket-src"
+        (omk / "src" / "omnimarket" / "nodes").mkdir(parents=True)
+        return subprocess.run(
+            ["bash", str(SYNC_SCRIPT), "--check"],
+            cwd=str(REPO_ROOT),
+            env={
+                **os.environ,
+                "OMNIMARKET_SRC": str(omk),
+                "SYNC_NODE_MIGRATIONS_DEST_ROOT": str(dest_root),
+                "APPLICATION_MIGRATION_MANIFEST": str(manifest),
+            },
+            capture_output=True,
+            text=True,
+            timeout=60,
+            check=False,
+        )
+
+    def test_declared_vendored_file_with_no_upstream_source_is_not_stale(
+        self, tmp_path: Path
+    ) -> None:
+        dest_root = tmp_path / "nodes"
+        (dest_root / "node_pr_review_bot").mkdir(parents=True)
+        (
+            dest_root / "node_pr_review_bot" / "001_create_review_bot_bypass_log.sql"
+        ).write_text("-- historical migration\n")
+
+        manifest = tmp_path / "application-migrations.tsv"
+        manifest.write_text(
+            "nodes/node_pr_review_bot/001_create_review_bot_bypass_log.sql\t"
+            "node:node_pr_review_bot\tnode:node_pr_review_bot\tomninode_internal\t"
+            "node:node_pr_review_bot:001_create_review_bot_bypass_log.sql\t"
+            + ("a" * 64)
+            + "\n"
+        )
+
+        result = self._run_check(tmp_path, dest_root, manifest)
+
+        assert result.returncode == 0, result.stdout + result.stderr
+        assert "legacy-declared (OMN-15717), not stale" in result.stdout
+        assert "DRIFT" not in result.stderr
+
+    def test_undeclared_vendored_file_with_no_upstream_source_is_still_stale(
+        self, tmp_path: Path
+    ) -> None:
+        dest_root = tmp_path / "nodes"
+        (dest_root / "node_some_other_node").mkdir(parents=True)
+        (dest_root / "node_some_other_node" / "0001_orphan.sql").write_text(
+            "-- undeclared orphan\n"
+        )
+
+        manifest = tmp_path / "application-migrations.tsv"
+        manifest.write_text("")
+
+        result = self._run_check(tmp_path, dest_root, manifest)
+
+        assert result.returncode == 1
+        assert (
+            "DRIFT: stale vendored migration node_some_other_node/0001_orphan.sql"
+            in (result.stderr)
         )

@@ -105,11 +105,17 @@ def mock_wire_infrastructure() -> Generator[MagicMock, None, None]:
     This fixture mocks:
     1. wire_infrastructure_services - to be a no-op async function
     2. ModelONEXContainer - to have a mock service_registry with resolve_service
-    3. wire_from_manifest - to return a clean empty report (OMN-8735: auto-wiring
-       now raises on failure; kernel tests that don't test auto-wiring must skip it)
+    3. wire_from_manifest - to return a clean no-wiring report (OMN-8735:
+       auto-wiring now raises on failure; kernel tests that don't test
+       auto-wiring must skip it). The stand-in still honours the wiring-report
+       totality contract (OMN-15474) — see ``noop_wire_from_manifest``.
 
     Note: Returns a real RegistryProtocolBinding for handler registration to work.
     """
+    from omnibase_infra.runtime.auto_wiring import (
+        build_unwired_contract_results,
+    )
+    from omnibase_infra.runtime.auto_wiring.models import ModelAutoWiringManifest
     from omnibase_infra.runtime.auto_wiring.report import (
         ModelAutoWiringReport,
     )
@@ -134,12 +140,38 @@ def mock_wire_infrastructure() -> Generator[MagicMock, None, None]:
         return MagicMock()
 
     async def noop_wire_from_manifest(**kwargs: object) -> ModelAutoWiringReport:
-        """Return a clean no-wiring report.
+        """Return a TOTAL no-wiring report for the manifest the kernel holds.
 
         Kernel tests that don't test auto-wiring should not hit the real
         wire_from_manifest which now raises on any failure (OMN-8735).
+
+        OMN-15474: this stand-in must still satisfy the wiring-report totality
+        contract. ``discover_contracts`` is NOT mocked by this fixture, so
+        bootstrap holds a real manifest (>100 contracts); returning
+        ``results=()`` asserted the impossible — that discovery found those
+        contracts and wiring produced no verdict on any of them. The real
+        ``wire_from_manifest`` never does that (verified: 131/131 rows over the
+        live discovered manifest), and the initial-subscription identity check
+        correctly rejected the fixture's claim. The truthful encoding of "the
+        wiring engine was stubbed out and nothing wired" is one explicit
+        SKIPPED row per manifest contract, built from the manifest the kernel
+        actually passed via the product's own totality constructor — never a
+        hand-mirrored name list, which would just re-create the matched-pair
+        fixture that hid this in the first place.
         """
-        return ModelAutoWiringReport(results=(), duplicates=())
+        manifest = kwargs.get("manifest")
+        if not isinstance(manifest, ModelAutoWiringManifest):
+            return ModelAutoWiringReport(results=(), duplicates=())
+        return ModelAutoWiringReport(
+            results=build_unwired_contract_results(
+                manifest,
+                reason=(
+                    "auto-wiring engine stubbed out by the "
+                    "mock_wire_infrastructure test fixture"
+                ),
+            ),
+            duplicates=(),
+        )
 
     with patch(
         "omnibase_infra.runtime.service_kernel.wire_infrastructure_services"

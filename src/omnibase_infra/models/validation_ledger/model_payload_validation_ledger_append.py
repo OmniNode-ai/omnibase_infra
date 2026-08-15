@@ -37,9 +37,10 @@ from uuid import UUID
 
 from pydantic import BaseModel, ConfigDict, Field
 
-# NOTE: ModelIntentPayloadBase was removed in omnibase_core 0.6.2
-# Using pydantic.BaseModel directly as the base class, mirroring
-# ModelPayloadLedgerAppend.
+# NOTE: This infra-local payload DTO extends pydantic.BaseModel directly (repo
+# convention; see docs/standards/ONEX_TERMINOLOGY.md), mirroring
+# ModelPayloadLedgerAppend. omnibase_core's ModelIntentPayloadBase was never
+# removed — it still exists and bases core's closed-set intent payloads.
 
 
 class ModelPayloadValidationLedgerAppend(BaseModel):

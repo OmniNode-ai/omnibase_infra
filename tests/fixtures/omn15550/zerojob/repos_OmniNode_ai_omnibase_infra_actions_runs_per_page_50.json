@@ -1,0 +1,15 @@
+{
+ "workflow_runs": [
+  {
+   "conclusion": "failure",
+   "created_at": "2026-07-30T21:28:30Z",
+   "head_branch": "jonah/omn-15525-alert-body-truncation-and-drift-gate",
+   "head_sha": "2173c0c53a46624be1efd4cff91cd07f3f8df13b",
+   "id": 30583527197,
+   "name": ".github/workflows/ci.yml",
+   "path": ".github/workflows/ci.yml",
+   "status": "completed",
+   "updated_at": "2026-07-30T21:28:30Z"
+  }
+ ]
+}

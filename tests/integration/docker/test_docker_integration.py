@@ -16,6 +16,39 @@ Test categories:
 
 This test suite addresses PR #32 reviewer feedback requesting CI/CD
 integration tests for Docker infrastructure implementation.
+
+Cold-build timeout budget (OMN-15567)
+--------------------------------------
+The nightly suite runs under a blanket ``pytest --timeout=300``. Two kinds of
+test in this module actually invoke ``docker build`` and need a much larger
+budget than that:
+
+1. The two explicit build tests in ``TestDockerBuild``
+   (``test_build_succeeds_with_public_deps``,
+   ``test_build_uses_buildkit_cache_mounts``) carry their own function-level
+   ``@pytest.mark.timeout(BUILD_TIMEOUT + BUILD_TEST_TIMEOUT_MARGIN_SECONDS)``.
+2. The module-scoped ``built_test_image`` fixture (defined in ``conftest.py``)
+   does the same build for every other class below that consumes it. Because
+   the fixture is module-scoped, only the *first* test in the module that
+   requests it actually pays the build cost -- and pytest-timeout charges
+   that cost to whichever test item happens to be first (``func_only``
+   defaults to False, so the timer spans setup+call+teardown of that item,
+   not just its body).
+
+   Rather than mark only "the currently-first" consumer -- which would
+   silently regress the instant a test is added, removed, or reordered ahead
+   of it -- every class below that declares a fixture parameter typed
+   ``built_test_image: str`` carries its own class-level
+   ``pytestmark = [pytest.mark.timeout(BUILD_TIMEOUT + BUILD_TEST_TIMEOUT_MARGIN_SECONDS)]``.
+   ``pytest.Item.get_closest_marker("timeout")`` resolves per test item by
+   walking function -> class -> module, so no matter which member of one of
+   these classes pytest picks as the actual first consumer, that item's
+   closest "timeout" marker is always at least the cold-build budget. A
+   function-level marker (as in ``TestDockerBuild``'s two explicit build
+   tests) still wins over the class-level one where both are present, since
+   it is closer. This makes the budget invariant to collection/execution
+   order within the file, and any new test added to one of these classes
+   inherits it automatically instead of needing its own opt-in marker.
 """
 
 from __future__ import annotations
@@ -32,6 +65,11 @@ from pathlib import Path
 
 import pytest
 import yaml
+
+# OMN-15567: _run_subprocess_with_group_kill lives in conftest.py so the
+# built_test_image fixture and these explicit build tests share one
+# group-kill implementation -- see conftest.py's docstring on the function.
+from .conftest import _run_subprocess_with_group_kill
 
 # =============================================================================
 # Test Markers and Constants
@@ -51,6 +89,16 @@ BUILD_TIMEOUT = int(os.getenv("OMNI_DOCKER_BUILD_TIMEOUT_SECONDS", "1200"))
 CONTAINER_START_TIMEOUT = int(os.getenv("OMNI_DOCKER_CONTAINER_TIMEOUT_SECONDS", "180"))
 HEALTH_CHECK_TIMEOUT = 90
 SHUTDOWN_TIMEOUT = int(os.getenv("OMNI_DOCKER_SHUTDOWN_TIMEOUT_SECONDS", "120"))
+
+# Headroom above BUILD_TIMEOUT for the pytest-level per-test timeout marker.
+# OMN-15567: nightly-integration.yml invokes the whole suite with a blanket
+# `pytest --timeout=300 --timeout-method=thread`, sized for the rest of the
+# suite. Without a per-test `@pytest.mark.timeout(...)` override, that 300s
+# CLI ceiling silently pre-empts BUILD_TIMEOUT (default 1200s) and kills a
+# cold-cache `docker build` long before the subprocess-level timeout the test
+# was actually designed around ever fires. pytest-timeout's marker-level
+# setting takes precedence over the CLI flag for the tests that declare it.
+BUILD_TEST_TIMEOUT_MARGIN_SECONDS = 60
 
 
 # =============================================================================
@@ -95,7 +143,16 @@ def extract_profiles_from_compose(compose_path: Path) -> set[str]:
 class TestDockerBuild:
     """Tests for Docker image build process."""
 
+    # OMN-15567: test_build_produces_reasonable_image_size (below) consumes
+    # built_test_image and has no function-level timeout marker of its own;
+    # this class-level marker is its fallback budget. See the module
+    # docstring "Cold-build timeout budget" section for why.
+    pytestmark = [
+        pytest.mark.timeout(BUILD_TIMEOUT + BUILD_TEST_TIMEOUT_MARGIN_SECONDS)
+    ]
+
     @pytest.mark.slow
+    @pytest.mark.timeout(BUILD_TIMEOUT + BUILD_TEST_TIMEOUT_MARGIN_SECONDS)
     def test_build_succeeds_with_public_deps(
         self,
         docker_available: bool,
@@ -129,14 +186,10 @@ class TestDockerBuild:
             env = os.environ.copy()
             env["DOCKER_BUILDKIT"] = "1"
 
-            result = subprocess.run(
+            result = _run_subprocess_with_group_kill(
                 build_cmd,
-                capture_output=True,
-                text=True,
                 timeout=BUILD_TIMEOUT,
                 env=env,
-                check=False,
-                shell=False,
             )
 
             assert result.returncode == 0, (
@@ -156,6 +209,7 @@ class TestDockerBuild:
             )
 
     @pytest.mark.slow
+    @pytest.mark.timeout(BUILD_TIMEOUT + BUILD_TEST_TIMEOUT_MARGIN_SECONDS)
     def test_build_uses_buildkit_cache_mounts(
         self,
         buildkit_available: bool,
@@ -190,14 +244,10 @@ class TestDockerBuild:
                 str(project_root),
             ]
 
-            first_result = subprocess.run(
+            first_result = _run_subprocess_with_group_kill(
                 first_build_cmd,
-                capture_output=True,
-                text=True,
                 timeout=BUILD_TIMEOUT,
                 env=env,
-                check=False,
-                shell=False,
             )
 
             assert first_result.returncode == 0, "First build failed"
@@ -274,6 +324,15 @@ class TestDockerBuild:
 @pytest.mark.integration
 class TestDockerSecurity:
     """Tests for Docker security properties."""
+
+    # OMN-15567: one of this class's tests may be the first consumer of the
+    # module-scoped built_test_image fixture (order-dependent -- see the
+    # module docstring's "Cold-build timeout budget" section). This
+    # class-level marker guarantees the cold-build budget applies regardless
+    # of which one it is.
+    pytestmark = [
+        pytest.mark.timeout(BUILD_TIMEOUT + BUILD_TEST_TIMEOUT_MARGIN_SECONDS)
+    ]
 
     @pytest.mark.slow
     def test_container_runs_as_non_root_user(
@@ -443,6 +502,12 @@ class TestDockerSecurity:
 @pytest.mark.integration
 class TestDockerRuntime:
     """Tests for Docker container runtime behavior."""
+
+    # OMN-15567: see TestDockerSecurity above -- same module-scoped
+    # built_test_image first-consumer hazard.
+    pytestmark = [
+        pytest.mark.timeout(BUILD_TIMEOUT + BUILD_TEST_TIMEOUT_MARGIN_SECONDS)
+    ]
 
     @pytest.mark.slow
     def test_container_starts_successfully(
@@ -697,6 +762,12 @@ class TestDockerRuntime:
 @pytest.mark.integration
 class TestDockerHealthCheck:
     """Tests for Docker health check functionality."""
+
+    # OMN-15567: see TestDockerSecurity above -- same module-scoped
+    # built_test_image first-consumer hazard.
+    pytestmark = [
+        pytest.mark.timeout(BUILD_TIMEOUT + BUILD_TEST_TIMEOUT_MARGIN_SECONDS)
+    ]
 
     @pytest.mark.slow
     def test_health_endpoint_accessible(
@@ -1000,6 +1071,115 @@ class TestDockerResourceLimits:
 # =============================================================================
 
 
+_PG_DSN = "postgresql://postgres:test@postgres:5432/omnibase_infra"
+_INTEL_DSN = "postgresql://postgres:test@postgres:5432/omniintelligence"
+_LOCAL_LAN_CIDR = ".".join(("192", "168", "86", "0")) + "/24"
+_SECRET_RESOLVER_CONFIG_JSON = (
+    '{"enable_convention_fallback":false,"mappings":['
+    '{"logical_name":"llm.openrouter.api_key",'
+    '"source":{"source_path":"OPEN_ROUTER_API_KEY","source_type":"env"}},'
+    '{"logical_name":"llm.glm.api_key",'
+    '"source":{"source_path":"LLM_GLM_API_KEY","source_type":"env"}},'
+    '{"logical_name":"llm.gemini.api_key",'
+    '"source":{"source_path":"GEMINI_API_KEY","source_type":"env"}}]}'
+)
+_SECRET_RESOLVER_CONFIG_PATH = "/app/data/delegation/secret_resolver.yaml"
+
+# OMN-15263: module-level so tests/ci/test_compose_required_env_coverage.py can
+# extract this render fixture's env keys statically, the same way it extracts the
+# other compose-render fixtures. Keep every `:?`-required var in
+# docker/docker-compose.infra.yml represented here.
+COMPOSE_CONFIG_RENDER_ENV: dict[str, str] = {
+    "POSTGRES_PASSWORD": "test",
+    "VALKEY_PASSWORD": "test",
+    "INFISICAL_ENCRYPTION_KEY": "0" * 64,
+    "INFISICAL_AUTH_SECRET": "test-auth-secret",
+    "OMNIBASE_INFRA_DB_URL": _PG_DSN,
+    "OMNIINTELLIGENCE_DB_URL": _INTEL_DSN,
+    "INFISICAL_DB_CONNECTION_URI": "postgresql://postgres:test@postgres:5432/infisical_db",
+    "INFISICAL_REDIS_URL": "redis://:test@valkey:6379",
+    "OMNIBASE_INFRA_AGENT_ACTIONS_POSTGRES_DSN": _PG_DSN,
+    "OMNIBASE_INFRA_SKILL_LIFECYCLE_POSTGRES_DSN": _PG_DSN,
+    # OMN-5240: context-audit-consumer requires its own DSN
+    "OMNIBASE_INFRA_CONTEXT_AUDIT_POSTGRES_DSN": _PG_DSN,
+    # OMN-3299: Redpanda removed from local compose; KAFKA_BOOTSTRAP_SERVERS
+    # now uses :? fail-fast — must be set explicitly for config validation.
+    "KAFKA_BOOTSTRAP_SERVERS": "localhost:19092",  # kafka-fallback-ok — test fixture
+    # OMN-15173: dev-lane Redpanda advertise host now uses :? fail-fast
+    # (previously silently defaulted to localhost, breaking off-host clients).
+    "DEV_REDPANDA_ADVERTISE_HOST": "localhost",  # kafka-fallback-ok — test fixture
+    "ARCH_GRAPH_BOLT_URI": "bolt://omnibase-infra-memgraph:7687",
+    # OMN-5439: Keycloak / ONEX service auth vars added with :? fail-fast
+    "ONEX_REGISTRATION_AUTO_ACK": "true",
+    "ONEX_SERVICE_CLIENT_SECRET": "test-service-secret",
+    "LINEAR_API_KEY": "test-linear-api-key",
+    "GITHUB_TOKEN": "test-github-token",
+    "DEPLOY_AGENT_HMAC_SECRET": "render-only-deploy-agent-hmac-secret",
+    # OMN-7979: LLM endpoint URLs added with :? fail-fast to
+    # activate PluginLlm in runtime containers.
+    "LLM_CODER_URL": "http://llm-coder.test:8000",
+    "LLM_CODER_FAST_URL": "http://llm-coder-fast.test:8001",
+    "LLM_EMBEDDING_URL": "http://llm-embed.test:8100",
+    "LLM_DEEPSEEK_R1_URL": "http://llm-r1.test:8101",
+    "BIFROST_LOCAL_CODER_ENDPOINT_URL": (
+        "http://llm-coder.test:8000/v1/chat/completions"
+    ),
+    "BIFROST_LOCAL_REASONER_ENDPOINT_URL": (
+        "http://llm-coder-fast.test:8001/v1/chat/completions"
+    ),
+    "BIFROST_LOCAL_EMBEDDING_ENDPOINT_URL": (
+        "http://llm-embed.test:8100/v1/chat/completions"
+    ),
+    "BIFROST_LOCAL_DS_V4_FLASH_ENDPOINT_URL": (
+        "http://llm-r1.test:8101/v1/chat/completions"
+    ),
+    "LLM_GLM_URL": "http://llm-glm.test:8102",
+    "LLM_GLM_MODEL_NAME": "glm-4.5",
+    "LLM_GLM_API_KEY": "render-only-glm-api-key",
+    "GEMINI_API_KEY": "render-only-gemini-api-key",
+    "GOOGLE_API_KEY": "render-only-google-api-key",
+    "BIFROST_VERTEX_GEMINI_ENDPOINT_URL": (
+        "https://us-central1-aiplatform.googleapis.com/v1beta1/projects/"
+        "gen-lang-client-0084338881/locations/us-central1/endpoints/openapi/chat/completions"
+    ),
+    "GOOGLE_CLOUD_PROJECT": "gen-lang-client-0084338881",
+    "GOOGLE_CLOUD_LOCATION": "us-central1",
+    # OMN-10943: HTTP request signing and CIDR allowlist for the
+    # local LLM HTTP transport added with :? fail-fast.
+    "LOCAL_LLM_SHARED_SECRET": "render-only-local-llm-secret",
+    "LLM_ENDPOINT_CIDR_ALLOWLIST": _LOCAL_LAN_CIDR,
+    "LLM_CLOUD_ENDPOINT_HOST_ALLOWLIST": "generativelanguage.googleapis.com,api.z.ai",
+    # OMN-11673: runtime policy contract vars are required by
+    # compose even when docker/runtime-policy.env is also loaded.
+    "AUXILIARY_SERVICES_OMNIMEMORY_ENABLED": "false",
+    "BIFROST_VERIFY_ENDPOINTS": "1",
+    "DEV_RUNTIME_EFFECTS_CAPABILITIES": "effects.consumer,market.skill-proof,runtime.effects",
+    "DEV_RUNTIME_EFFECTS_PORT": "8086",
+    "DEV_RUNTIME_EFFECTS_SECRET_RESOLVER_CONFIG_JSON": _SECRET_RESOLVER_CONFIG_JSON,
+    "DEV_RUNTIME_EFFECTS_SECRET_RESOLVER_CONFIG_PATH": _SECRET_RESOLVER_CONFIG_PATH,
+    "DEV_RUNTIME_MAIN_CAPABILITIES": "market.skill-proof,workflow.orchestration,runtime.main",
+    "DEV_RUNTIME_MAIN_PORT": "8085",
+    "DEV_RUNTIME_MAIN_PUBLISH_INTROSPECTION": "true",
+    "DEV_RUNTIME_MAIN_SECRET_RESOLVER_CONFIG_JSON": _SECRET_RESOLVER_CONFIG_JSON,
+    "DEV_RUNTIME_MAIN_SECRET_RESOLVER_CONFIG_PATH": _SECRET_RESOLVER_CONFIG_PATH,
+    "DEV_RUNTIME_WORKER_CAPABILITIES": "workflow.dispatch,contract.update,runtime.worker",
+    "DEV_RUNTIME_WORKER_SECRET_RESOLVER_CONFIG_JSON": _SECRET_RESOLVER_CONFIG_JSON,
+    "DEV_RUNTIME_WORKER_SECRET_RESOLVER_CONFIG_PATH": _SECRET_RESOLVER_CONFIG_PATH,
+    # OMN-14551: dev-lane flipped ON 2026-08-05; kept in sync with the
+    # rendered docker/runtime-policy.env value (this fixture only needs to
+    # satisfy the compose `:?` fail-fast, but tracking the live value avoids
+    # a misleading fixture).
+    "DEV_BOUNDARY_DLQ_ENABLED": "true",
+    # OMN-14968: runtime-worker's deploy.replicas is `:?`-required on the
+    # lane-prefixed policy value (it was a bare ${WORKER_REPLICAS:-0} that no
+    # surface exported, so the dev lane silently rendered zero replicas).
+    "DEV_WORKER_REPLICAS": "1",
+    "OMNIMEMORY_ENABLED": "false",
+    "OMNIMEMORY_MEMGRAPH_PORT": "7687",
+    "ONEX_ACTIVE_RUNTIME_PACKAGES": "omnibase_infra,omnimarket",
+}
+
+
 @pytest.mark.integration
 class TestDockerComposeProfiles:
     """Tests for docker-compose profile configurations.
@@ -1071,98 +1251,8 @@ class TestDockerComposeProfiles:
         # All :? required vars must be set even for config validation; the PR
         # that removed nested expansion (OMN-3266) moved DSN/URL construction
         # out of compose into ~/.omnibase/.env, so these now use :? fail-fast.
-        _pg_dsn = "postgresql://postgres:test@postgres:5432/omnibase_infra"
-        _intel_dsn = "postgresql://postgres:test@postgres:5432/omniintelligence"
-        _local_lan_cidr = ".".join(("192", "168", "86", "0")) + "/24"
-        _secret_resolver_config_json = (
-            '{"enable_convention_fallback":false,"mappings":['
-            '{"logical_name":"llm.openrouter.api_key",'
-            '"source":{"source_path":"OPEN_ROUTER_API_KEY","source_type":"env"}},'
-            '{"logical_name":"llm.glm.api_key",'
-            '"source":{"source_path":"LLM_GLM_API_KEY","source_type":"env"}},'
-            '{"logical_name":"llm.gemini.api_key",'
-            '"source":{"source_path":"GEMINI_API_KEY","source_type":"env"}}]}'
-        )
-        _secret_resolver_config_path = "/app/data/delegation/secret_resolver.yaml"
         env = os.environ.copy()
-        env.update(
-            {
-                "POSTGRES_PASSWORD": "test",
-                "VALKEY_PASSWORD": "test",
-                "INFISICAL_ENCRYPTION_KEY": "0" * 64,
-                "INFISICAL_AUTH_SECRET": "test-auth-secret",
-                "OMNIBASE_INFRA_DB_URL": _pg_dsn,
-                "OMNIINTELLIGENCE_DB_URL": _intel_dsn,
-                "INFISICAL_DB_CONNECTION_URI": "postgresql://postgres:test@postgres:5432/infisical_db",
-                "INFISICAL_REDIS_URL": "redis://:test@valkey:6379",
-                "OMNIBASE_INFRA_AGENT_ACTIONS_POSTGRES_DSN": _pg_dsn,
-                "OMNIBASE_INFRA_SKILL_LIFECYCLE_POSTGRES_DSN": _pg_dsn,
-                # OMN-5240: context-audit-consumer requires its own DSN
-                "OMNIBASE_INFRA_CONTEXT_AUDIT_POSTGRES_DSN": _pg_dsn,
-                # OMN-3299: Redpanda removed from local compose; KAFKA_BOOTSTRAP_SERVERS
-                # now uses :? fail-fast — must be set explicitly for config validation.
-                "KAFKA_BOOTSTRAP_SERVERS": "localhost:19092",  # kafka-fallback-ok — test fixture
-                "ARCH_GRAPH_BOLT_URI": "bolt://omnibase-infra-memgraph:7687",
-                # OMN-5439: Keycloak / ONEX service auth vars added with :? fail-fast
-                "ONEX_REGISTRATION_AUTO_ACK": "true",
-                "ONEX_SERVICE_CLIENT_SECRET": "test-service-secret",
-                "LINEAR_API_KEY": "test-linear-api-key",
-                "GITHUB_TOKEN": "test-github-token",
-                # OMN-7979: LLM endpoint URLs added with :? fail-fast to
-                # activate PluginLlm in runtime containers.
-                "LLM_CODER_URL": "http://llm-coder.test:8000",
-                "LLM_CODER_FAST_URL": "http://llm-coder-fast.test:8001",
-                "LLM_EMBEDDING_URL": "http://llm-embed.test:8100",
-                "LLM_DEEPSEEK_R1_URL": "http://llm-r1.test:8101",
-                "BIFROST_LOCAL_CODER_ENDPOINT_URL": (
-                    "http://llm-coder.test:8000/v1/chat/completions"
-                ),
-                "BIFROST_LOCAL_REASONER_ENDPOINT_URL": (
-                    "http://llm-coder-fast.test:8001/v1/chat/completions"
-                ),
-                "BIFROST_LOCAL_EMBEDDING_ENDPOINT_URL": (
-                    "http://llm-embed.test:8100/v1/chat/completions"
-                ),
-                "BIFROST_LOCAL_DS_V4_FLASH_ENDPOINT_URL": (
-                    "http://llm-r1.test:8101/v1/chat/completions"
-                ),
-                "LLM_GLM_URL": "http://llm-glm.test:8102",
-                "LLM_GLM_MODEL_NAME": "glm-4.5",
-                "LLM_GLM_API_KEY": "render-only-glm-api-key",
-                "GEMINI_API_KEY": "render-only-gemini-api-key",
-                "GOOGLE_API_KEY": "render-only-google-api-key",
-                "BIFROST_VERTEX_GEMINI_ENDPOINT_URL": (
-                    "https://us-central1-aiplatform.googleapis.com/v1beta1/projects/"
-                    "gen-lang-client-0084338881/locations/us-central1/endpoints/openapi/chat/completions"
-                ),
-                "GOOGLE_CLOUD_PROJECT": "gen-lang-client-0084338881",
-                "GOOGLE_CLOUD_LOCATION": "us-central1",
-                # OMN-10943: HTTP request signing and CIDR allowlist for the
-                # local LLM HTTP transport added with :? fail-fast.
-                "LOCAL_LLM_SHARED_SECRET": "render-only-local-llm-secret",
-                "LLM_ENDPOINT_CIDR_ALLOWLIST": _local_lan_cidr,
-                "LLM_CLOUD_ENDPOINT_HOST_ALLOWLIST": "generativelanguage.googleapis.com,api.z.ai",
-                # OMN-11673: runtime policy contract vars are required by
-                # compose even when docker/runtime-policy.env is also loaded.
-                "AUXILIARY_SERVICES_OMNIMEMORY_ENABLED": "false",
-                "BIFROST_VERIFY_ENDPOINTS": "1",
-                "DEV_RUNTIME_EFFECTS_CAPABILITIES": "effects.consumer,market.skill-proof,runtime.effects",
-                "DEV_RUNTIME_EFFECTS_PORT": "8086",
-                "DEV_RUNTIME_EFFECTS_SECRET_RESOLVER_CONFIG_JSON": _secret_resolver_config_json,
-                "DEV_RUNTIME_EFFECTS_SECRET_RESOLVER_CONFIG_PATH": _secret_resolver_config_path,
-                "DEV_RUNTIME_MAIN_CAPABILITIES": "market.skill-proof,workflow.orchestration,runtime.main",
-                "DEV_RUNTIME_MAIN_PORT": "8085",
-                "DEV_RUNTIME_MAIN_PUBLISH_INTROSPECTION": "true",
-                "DEV_RUNTIME_MAIN_SECRET_RESOLVER_CONFIG_JSON": _secret_resolver_config_json,
-                "DEV_RUNTIME_MAIN_SECRET_RESOLVER_CONFIG_PATH": _secret_resolver_config_path,
-                "DEV_RUNTIME_WORKER_CAPABILITIES": "workflow.dispatch,contract.update,runtime.worker",
-                "DEV_RUNTIME_WORKER_SECRET_RESOLVER_CONFIG_JSON": _secret_resolver_config_json,
-                "DEV_RUNTIME_WORKER_SECRET_RESOLVER_CONFIG_PATH": _secret_resolver_config_path,
-                "OMNIMEMORY_ENABLED": "false",
-                "OMNIMEMORY_MEMGRAPH_PORT": "7687",
-                "ONEX_ACTIVE_RUNTIME_PACKAGES": "omnibase_infra,omnimarket",
-            }
-        )
+        env.update(COMPOSE_CONFIG_RENDER_ENV)
 
         result = subprocess.run(
             [
@@ -1194,6 +1284,12 @@ class TestDockerComposeProfiles:
 @pytest.mark.integration
 class TestDockerImageLabels:
     """Tests for Docker image OCI labels."""
+
+    # OMN-15567: see TestDockerSecurity above -- same module-scoped
+    # built_test_image first-consumer hazard.
+    pytestmark = [
+        pytest.mark.timeout(BUILD_TIMEOUT + BUILD_TEST_TIMEOUT_MARGIN_SECONDS)
+    ]
 
     @pytest.mark.slow
     def test_image_has_oci_labels(

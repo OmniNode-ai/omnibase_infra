@@ -1,0 +1,64 @@
+# OMN-15009 repo-local deploy contract. Canonical receipts live in
+# onex_change_control; this copy carries the product and deploy-gate evidence.
+schema_version: '1.0.0'
+ticket_id: OMN-15009
+title: 'Repair the post-merge runtime rebuild trigger with overlay-driven bus routing'
+summary: >-
+  The post-merge workflow could never publish because it required absent GitHub Kafka/SASL/HMAC secrets, and its historical payload contained fields rejected by the live extra=forbid ModelRedeployStartCommand consumer. Resolve the reviewable omnimarket dev-bus overlay on the trusted .200 runner, emit exactly the canonical redeploy-start command shape with the merge commit as git_ref, validate producer/consumer field compatibility before publishing, and fail on any transport or delivery error. Keep DEPLOY_AGENT_HMAC_SECRET at the correct downstream trust boundary by injecting it fail-closed into runtime-effects; the deploy effect signs rebuild-requested and the deploy agent verifies it.
+is_seam_ticket: true
+interface_change: true
+interfaces_touched:
+  - events
+  - topics
+  - protocols
+evidence_requirements:
+  - kind: tests
+    description: >-
+      Trigger tests prove strict payload compatibility, overlay resolution, transport selection, fail-closed delivery, and zero GitHub secret dependencies for the upstream command.
+    command: >-
+      uv run pytest tests/unit/scripts/test_pr_merged_rebuild_trigger.py tests/scripts/test_trigger_redeploy_start.py tests/scripts/test_trigger_producer_effect_assertion.py -q
+  - kind: tests
+    description: >-
+      Catalog, compose-anchor, and render-fixture tests prove runtime-effects receives DEPLOY_AGENT_HMAC_SECRET and fails before boot when it is absent.
+    command: >-
+      uv run pytest tests/unit/infra/test_catalog_generator.py tests/unit/infra/test_runtime_bundle_decomposition.py tests/ci/test_runtime_env_anchor.py tests/ci/test_compose_required_env_coverage.py -q && uv run pytest tests/scripts/test_check_required_env_vars.py -q
+  - kind: ci
+    description: CI pipeline green on the product PR.
+    command: gh pr checks <PR> --repo OmniNode-ai/omnibase_infra
+emergency_bypass:
+  enabled: false
+  justification: ''
+  follow_up_ticket_id: ''
+dod_evidence:
+  - id: dod-strict-redeploy-start-publisher
+    description: >-
+      The producer resolves the checked-in dev control-bus broker, supports the local plaintext Redpanda transport, validates against the canonical strict consumer model, emits the exact six-field command, and treats delivery timeout/error as failure.
+    source: generated
+    checks:
+      - check_type: command
+        check_value: >-
+          uv run pytest tests/unit/scripts/test_pr_merged_rebuild_trigger.py tests/scripts/test_trigger_redeploy_start.py tests/scripts/test_trigger_producer_effect_assertion.py -q
+  - id: dod-runtime-effects-hmac-boundary
+    description: >-
+      Both the catalog-generated compose and checked-in base compose require DEPLOY_AGENT_HMAC_SECRET for runtime-effects; all registered lane render fixtures include the contract so a future omission fails CI.
+    source: generated
+    checks:
+      - check_type: command
+        check_value: >-
+          uv run pytest tests/unit/infra/test_catalog_generator.py tests/unit/infra/test_runtime_bundle_decomposition.py tests/ci/test_runtime_env_anchor.py tests/ci/test_compose_required_env_coverage.py -q && uv run pytest tests/scripts/test_check_required_env_vars.py -q
+  - id: dod-pre-push-on-200
+    description: >-
+      The repository pre-push gate runs on stickybeatz-studio (.200), the same machine class and process environment as the trusted self-hosted runners.
+    source: manual
+    checks:
+      - check_type: command
+        check_value: >-
+          cd /Users/jonah/Code/omni_home/omni_worktrees/OMN-15009/omnibase_infra && pre-commit run --hook-stage pre-push --all-files
+  - id: dod-post-merge-live-activation
+    description: >-
+      After merge and explicit operator approval, recreate runtime-effects with the HMAC env, start the dev-lane deploy-agent service, publish one cumulative redeploy-start command, and verify authoritative terminal completion plus exact deployed git_ref. This evidence is intentionally pending; the PR does not authorize a .201 restart or deployment.
+    source: manual
+    checks:
+      - check_type: command
+        check_value: >-
+          operator-approved .201 activation and one-command post-merge readback

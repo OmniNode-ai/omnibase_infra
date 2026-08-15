@@ -101,6 +101,14 @@ async def test_async_pre_resolution_succeeds_when_sync_raises_runtime_error() ->
     dispatch_engine._container = None
     dispatch_engine.register_dispatcher = MagicMock()
     dispatch_engine.register_route = MagicMock()
+    # OMN-15474: contract-scoped subscription proves its dispatcher scope
+    # against the live engine. A bare MagicMock iterates EMPTY, which reads as
+    # a zero-owner scope and refuses the attach; mirror the real engine by
+    # echoing the scope back.
+    dispatch_engine.dispatch_scoped = AsyncMock()
+    dispatch_engine.validate_contract_dispatcher_scope = MagicMock(
+        side_effect=lambda _contract_name, dispatcher_ids: frozenset(dispatcher_ids)
+    )
     dispatch_engine.freeze = MagicMock()
 
     with patch(
@@ -170,6 +178,12 @@ async def test_async_pre_resolution_miss_falls_through_to_zero_arg() -> None:
     dispatch_engine = MagicMock()
     dispatch_engine._routes = {}
     dispatch_engine._container = None
+    # OMN-15474: see the note above — echo the scope back so the scoped-attach
+    # check sees a real owner set instead of MagicMock's empty iteration.
+    dispatch_engine.dispatch_scoped = AsyncMock()
+    dispatch_engine.validate_contract_dispatcher_scope = MagicMock(
+        side_effect=lambda _contract_name, dispatcher_ids: frozenset(dispatcher_ids)
+    )
 
     with patch(
         "omnibase_infra.runtime.auto_wiring.handler_wiring._import_handler_class",

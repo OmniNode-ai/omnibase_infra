@@ -17,6 +17,9 @@ reconciliation with:
   - Docker buildx availability probe (NEW -- closes an OMN-13932 blind spot)
   - Codeload-throttle failure-signature probe (NEW -- closes an OMN-13932
     blind spot)
+  - Container health status, Runner.Listener process/orphan topology, and
+    runner-host disk usage (OMN-15255) -- the three facts the composite
+    readiness signals need and that no prior probe gathered
 """
 
 from __future__ import annotations
@@ -44,6 +47,10 @@ from omnibase_infra.observability.runner_health.model_runner_fleet_config import
 
 logger = logging.getLogger(__name__)
 
+# Thresholds are overlay-resolved through ModelRunnerFleetConfig (OMN-15195);
+# the values below stay mirrored from runner-monitor.sh / healthcheck.sh
+# (OMN-13109, OMN-13912, OMN-13915) so the node and the bash surfaces agree on
+# what "stale"/"old" means during the trust-building period.
 _DEFAULT_WATCH_REPOS = (
     "OmniNode-ai/omnibase_infra",
     "OmniNode-ai/omnibase_core",
@@ -56,6 +63,21 @@ _CODELOAD_FAILURE_SIGNATURES = (
     "fetch-pack",
     "the remote end hung up unexpectedly",
 )
+
+
+def _optional_count(raw: str) -> int | None:
+    """Parse a probe count, mapping the ``-1``/unparseable sentinels to None.
+
+    ``None`` means "the probe could not look", which the readiness classifier
+    must render as UNKNOWN. Returning ``0`` here instead would assert "no
+    listener is running" on a failed exec -- a fabricated FAIL, the mirror of
+    the fail-open bug OMN-14228 fixed in the other direction.
+    """
+    try:
+        value = int(raw)
+    except (TypeError, ValueError):
+        return None
+    return None if value < 0 else value
 
 
 class HandlerRunnerFleetSnapshot:
@@ -116,13 +138,27 @@ class HandlerRunnerFleetSnapshot:
     async def _fetch_docker_facts(
         self,
     ) -> tuple[dict[str, dict[str, str]], str | None]:
-        """Fetch Docker container status + RestartCount + _diag heartbeat age via SSH.
+        """Fetch Docker status, RestartCount, health, listener topology, heartbeat.
 
         The heartbeat probe execs into the container to check
         ``${RUNNER_HOME}/_diag`` (default ``/home/runner/actions-runner``) --
         mirroring the anchored-path check OMN-13915 added to
         ``healthcheck.sh``. Reports ``-1`` when the container/probe cannot
         determine an age (treated as unknown, not zero, by the caller).
+
+        OMN-15255 adds two facts the composite readiness signals need and the
+        legacy probe never gathered:
+
+        * ``health`` -- the container's Docker healthcheck status. ``none``
+          when the image declares no healthcheck; empty is impossible here
+          because the inspect template always resolves to one of the two.
+        * ``listeners`` / ``orphans`` -- live ``Runner.Listener`` process count
+          and how many of them are reparented to PPID 1. Both report ``-1``
+          (unknown) rather than ``0`` when the exec fails, because "no
+          listener" and "could not look" must not classify the same.
+
+        Every added probe is read-only: ``inspect``, ``ps``, ``grep``. Nothing
+        in this command can mutate a container.
         """
         prefix = self._config.runner_name_prefix
         cmd = (
@@ -131,13 +167,27 @@ class HandlerRunnerFleetSnapshot:
             "status=$(docker inspect --format '{{.State.Status}}' \"$name\"); "
             "restart_count=$(docker inspect --format '{{.RestartCount}}' \"$name\"); "
             "uptime=$(docker ps -a --filter \"name=^/${name}$\" --format '{{.Status}}'); "
+            "health=$(docker inspect --format "
+            "'{{if .State.Health}}{{.State.Health.Status}}{{else}}none{{end}}' "
+            '"$name" 2>/dev/null | tail -1); '
+            '[ -n "$health" ] || health=unknown; '
+            'listeners=$(docker exec "$name" sh -c '
+            "'ps -eo ppid=,args= | grep -c \"[R]unner.Listener\" || true' "
+            "2>/dev/null | tail -1); "
+            '[ -n "$listeners" ] || listeners=-1; '
+            'orphans=$(docker exec "$name" sh -c '
+            '\'ps -eo ppid=,args= | grep "[R]unner.Listener" '
+            '| grep -c "^ *1 " || true\' '
+            "2>/dev/null | tail -1); "
+            '[ -n "$orphans" ] || orphans=-1; '
             'diag_age=$(docker exec "$name" bash -c '
             '\'f=$(ls -t "${RUNNER_HOME:-/home/runner/actions-runner}/_diag"/*.log '
             "2>/dev/null | head -1); "
             'if [ -n "$f" ]; then echo $(( $(date +%s) - $(stat -c %Y "$f") )); '
             "else echo -1; fi' 2>/dev/null || echo -1); "
-            'printf "%s\\t%s\\t%s\\t%s\\t%s\\n" '
-            '"$name" "$status" "$restart_count" "$uptime" "$diag_age"; '
+            'printf "%s\\t%s\\t%s\\t%s\\t%s\\t%s\\t%s\\t%s\\n" '
+            '"$name" "$status" "$restart_count" "$uptime" "$diag_age" '
+            '"$health" "$listeners" "$orphans"; '
             "done"
         )
         proc = await asyncio.create_subprocess_exec(
@@ -155,16 +205,55 @@ class HandlerRunnerFleetSnapshot:
             )
         result: dict[str, dict[str, str]] = {}
         for line in stdout.decode(errors="replace").strip().splitlines():
-            parts = line.split("\t", 4)
-            if len(parts) == 5:
-                name, status, restart_count, uptime, diag_age = parts
-                result[name] = {
-                    "status": status,
-                    "restart_count": restart_count,
-                    "uptime": uptime,
-                    "diag_age": diag_age,
-                }
+            parts = line.split("\t", 7)
+            if len(parts) < 5:
+                continue
+            # OMN-15255 fields are read positionally and default to the
+            # unknown sentinels when a shorter line arrives, so a host still
+            # running the pre-OMN-15255 probe degrades to UNKNOWN readiness
+            # signals rather than to a fabricated PASS.
+            padded = parts + ["unknown", "-1", "-1"][len(parts) - 5 :]
+            name, status, restart_count, uptime, diag_age = padded[:5]
+            health, listeners, orphans = padded[5:8]
+            result[name] = {
+                "status": status,
+                "restart_count": restart_count,
+                "uptime": uptime,
+                "diag_age": diag_age,
+                "health": health,
+                "listeners": listeners,
+                "orphans": orphans,
+            }
         return result, None
+
+    async def _fetch_host_disk_used_percent(self) -> tuple[float | None, str | None]:
+        """Probe used-percent of the runner host's Docker filesystem (OMN-15255).
+
+        Host-scoped by nature -- every runner container shares the host's
+        disk, so this single fact drives the DISK_CAPACITY readiness signal
+        for the whole fleet. Falls back to ``/`` when ``/var/lib/docker`` is
+        not a distinct mount. Returns ``None`` (unknown) on any probe failure;
+        never a fabricated 0.0.
+        """
+        proc = await asyncio.create_subprocess_exec(
+            "ssh",
+            self._config.runner_host,
+            "{ df -P /var/lib/docker 2>/dev/null || df -P /; } "
+            "| awk 'NR==2 {gsub(/%/, \"\", $5); print $5}'",
+            stdout=asyncio.subprocess.PIPE,
+            stderr=asyncio.subprocess.PIPE,
+        )
+        stdout, stderr = await proc.communicate()
+        if proc.returncode != 0:
+            return None, (
+                f"host disk probe SSH exit code {proc.returncode}: "
+                f"{stderr.decode(errors='replace').strip()[:200]}"
+            )
+        raw = stdout.decode(errors="replace").strip()
+        try:
+            return float(raw), None
+        except ValueError:
+            return None, f"unexpected host disk probe output: {raw!r}"
 
     async def _fetch_queue_facts(
         self,
@@ -326,18 +415,21 @@ class HandlerRunnerFleetSnapshot:
             queue_result,
             buildx_result,
             codeload_result,
+            disk_result,
         ) = await asyncio.gather(
             self._fetch_github_runners(),
             self._fetch_docker_facts(),
             self._fetch_queue_facts(),
             self._fetch_buildx_available(),
             self._fetch_codeload_throttle_signals(),
+            self._fetch_host_disk_used_percent(),
         )
         github_runners, gh_error = gh_result
         docker_facts, docker_error = docker_result
         oldest_queued_age, zombie_candidates, queue_error = queue_result
         buildx_available, buildx_error = buildx_result
         codeload_signal_count, codeload_examples, codeload_error = codeload_result
+        host_disk_used_percent, disk_error = disk_result
 
         source_errors: list[str] = []
         for error in (
@@ -346,6 +438,7 @@ class HandlerRunnerFleetSnapshot:
             queue_error,
             buildx_error,
             codeload_error,
+            disk_error,
         ):
             if error:
                 source_errors.append(error)
@@ -367,6 +460,9 @@ class HandlerRunnerFleetSnapshot:
                     "restart_count": "0",
                     "uptime": "",
                     "diag_age": "-1",
+                    "health": "unknown",
+                    "listeners": "-1",
+                    "orphans": "-1",
                 },
             )
             diag_age_raw = docker.get("diag_age", "-1")
@@ -375,6 +471,7 @@ class HandlerRunnerFleetSnapshot:
                 restart_count = int(docker.get("restart_count", "0"))
             except ValueError:
                 restart_count = 0
+            docker_health = docker.get("health", "unknown")
             facts.append(
                 ModelRunnerFleetRunnerFact(
                     name=name,
@@ -384,6 +481,13 @@ class HandlerRunnerFleetSnapshot:
                     docker_uptime=docker.get("uptime", ""),
                     docker_restart_count=restart_count,
                     diag_heartbeat_age_seconds=diag_age,
+                    docker_health="" if docker_health == "unknown" else docker_health,
+                    listener_process_count=_optional_count(
+                        docker.get("listeners", "-1")
+                    ),
+                    orphaned_listener_count=_optional_count(
+                        docker.get("orphans", "-1")
+                    ),
                 )
             )
 
@@ -400,6 +504,7 @@ class HandlerRunnerFleetSnapshot:
                 restart_count = int(docker_info.get("restart_count", "0"))
             except ValueError:
                 restart_count = 0
+            docker_health = docker_info.get("health", "unknown")
             facts.append(
                 ModelRunnerFleetRunnerFact(
                     name=docker_name,
@@ -409,6 +514,13 @@ class HandlerRunnerFleetSnapshot:
                     docker_uptime=docker_info.get("uptime", ""),
                     docker_restart_count=restart_count,
                     diag_heartbeat_age_seconds=diag_age,
+                    docker_health="" if docker_health == "unknown" else docker_health,
+                    listener_process_count=_optional_count(
+                        docker_info.get("listeners", "-1")
+                    ),
+                    orphaned_listener_count=_optional_count(
+                        docker_info.get("orphans", "-1")
+                    ),
                     stale_registration=True,
                     error="Docker container exists but not registered in GitHub",
                 )
@@ -422,6 +534,7 @@ class HandlerRunnerFleetSnapshot:
             runners=tuple(facts),
             oldest_queued_job_age_seconds=oldest_queued_age,
             zombie_run_candidates=zombie_candidates,
+            host_disk_used_percent=host_disk_used_percent,
             buildx_available=buildx_available,
             codeload_throttle_signal_count=codeload_signal_count,
             codeload_throttle_examples=codeload_examples,

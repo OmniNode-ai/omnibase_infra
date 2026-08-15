@@ -73,6 +73,10 @@ def _make_dispatcher(
             return _FakeProc(stdout=b"[]")
         if argv[0] == "ssh" and "buildx" in argv[2]:
             return _FakeProc(stdout=b"OK\n" if buildx_ok else b"FAIL\n")
+        if argv[0] == "ssh" and "df -P" in argv[2]:
+            # OMN-15255 host-disk probe; its own behavior is covered in
+            # test_runner_readiness_facts_effect_omn15255.py.
+            return _FakeProc(stdout=b"37\n")
         if argv[0] == "ssh":
             return _FakeProc(stdout=("\n".join(docker_lines)).encode())
         raise AssertionError(f"Unexpected subprocess call: {argv}")

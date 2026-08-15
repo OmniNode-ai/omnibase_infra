@@ -28,6 +28,7 @@ from __future__ import annotations
 
 import json
 import logging
+import os
 import signal
 import tempfile
 import time
@@ -55,10 +56,15 @@ from omnibase_infra.cli.cli_delegate import (
     resolve_default_bus,
     run_delegate,
 )
+from omnibase_infra.cli.omnimarket_drift_guard import (
+    DRIFT_OVERRIDE_ENV,
+    check_omnimarket_drift,
+)
 
 pytestmark = pytest.mark.unit
 
 KAFKA_BOOTSTRAP_ARG = "$KAFKA_BOOTSTRAP_SERVERS"
+_RECEIPT_ENV_SENTINEL = "OMN15569_DELEGATION_RECEIPT_TEST_SENTINEL"
 
 
 @pytest.fixture(autouse=True)
@@ -74,6 +80,23 @@ def _clear_kafka_bootstrap_by_default(monkeypatch: pytest.MonkeyPatch) -> None:
     that DO want to exercise the configured-broker path set it explicitly.
     """
     monkeypatch.delenv("KAFKA_BOOTSTRAP_SERVERS", raising=False)
+
+
+@pytest.fixture(autouse=True)
+def _no_omnimarket_drift_guard(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Neutralize the omnimarket pre-flight drift guard for this file (OMN-13930).
+
+    ``run_delegate`` dispatches ``node_delegate_skill_orchestrator`` -- an
+    omnimarket-provided node -- so it now runs the same guard ``onex skill``
+    and ``onex node`` run. Without this fixture every CLI-wiring test here
+    would pass or fail on the ambient shell's ``$OMNI_HOME`` and whether this
+    venv happens to have omnimarket co-installed. The guard's own behavior is
+    proven in ``test_omnimarket_drift_guard.py``; the delegate call-site
+    wiring is proven in ``test_drift_guard_fires_before_delegate_dispatch``,
+    which restores the real guard within its own scope.
+    """
+    monkeypatch.delenv("OMNI_HOME", raising=False)
+    monkeypatch.setattr(cli_delegate, "check_omnimarket_drift", lambda **_: None)
 
 
 # A proof contract that runs a deterministic in-process handler — no vLLM, no
@@ -122,6 +145,44 @@ class TestClassifyTaskType:
 
     def test_case_insensitive(self) -> None:
         assert classify_task_type("REFACTOR the LOOP") == "refactor"
+
+
+class TestReceiptEnvironmentIsolation:
+    """Receipt-mode env loading must not contaminate the next unit test."""
+
+    def test_01_receipt_mode_loads_controlled_env_file(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        env_file = tmp_path / "omnibase.env"
+        env_file.write_text(
+            f"{_RECEIPT_ENV_SENTINEL}=loaded-by-receipt-mode\n",
+            encoding="utf-8",
+        )
+        contract_path = tmp_path / "contract.yaml"
+        contract_path.write_text(_PROOF_NOOP_CONTRACT, encoding="utf-8")
+        monkeypatch.setenv("OMNIBASE_ENV_FILE", str(env_file))
+        monkeypatch.delenv(_RECEIPT_ENV_SENTINEL, raising=False)
+        monkeypatch.setattr(
+            cli_delegate,
+            "_resolve_packaged_contract",
+            lambda _name: contract_path,
+        )
+        monkeypatch.setenv("ONEX_ARTIFACT_STORE_ROOT", str(tmp_path / "artifacts"))
+
+        run_delegate(
+            prompt="implement an HTTP server",
+            task_type=None,
+            max_tokens=None,
+            state_root=tmp_path / "state",
+            timeout=60,
+            verbose=False,
+            emit_socket=tmp_path / "no-daemon.sock",
+        )
+
+        assert os.environ[_RECEIPT_ENV_SENTINEL] == "loaded-by-receipt-mode"
+
+    def test_02_receipt_environment_did_not_escape_previous_test(self) -> None:
+        assert _RECEIPT_ENV_SENTINEL not in os.environ
 
 
 class TestPayloadScratch:
@@ -1069,3 +1130,64 @@ class TestResolveDefaultBus:
 
         assert bus == "kafka"
         assert seen["bootstrap_servers"] == "override.example:9092"
+
+
+# ---------------------------------------------------------------------------
+# omnimarket drift guard wiring (OMN-13930)
+# ---------------------------------------------------------------------------
+
+_DRIFT_FAKE_SHA = "cccccccccccccccccccccccccccccccccccccccc"
+
+
+def test_drift_guard_fires_before_delegate_dispatch(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    """``onex delegate`` runs the same pre-flight guard as ``onex skill``/``onex node``.
+
+    ``DELEGATE_NODE_NAME`` (``node_delegate_skill_orchestrator``) is provided
+    by omnimarket, so the delegate CLI has always been exposed to the exact
+    stale/absent co-install failure the guard exists to catch -- yet it was
+    the one dispatch surface of the three with ZERO guard wiring. A drifted
+    venv surfaced there as a bare contract-resolution failure with no pointer
+    to the cause or the repair command.
+
+    Fails under the pre-fix ``cli_delegate.py``: with no
+    ``check_omnimarket_drift`` attribute on the module, the autouse fixture's
+    ``monkeypatch.setattr`` errors out before the test body runs.
+    """
+    monkeypatch.setattr(cli_delegate, "check_omnimarket_drift", check_omnimarket_drift)
+    monkeypatch.setattr(
+        "omnibase_infra.cli.omnimarket_drift_guard.installed_omnimarket_commit",
+        lambda: None,
+    )
+    monkeypatch.setattr(
+        "omnibase_infra.cli.omnimarket_drift_guard.canonical_local_omnimarket_commit",
+        lambda omni_home=None: _DRIFT_FAKE_SHA,
+    )
+
+    # Any dispatch past the guard is a bug -- prove the guard short-circuits
+    # FIRST rather than inferring it from a downstream error string.
+    def _must_not_run(**_: object) -> int:
+        raise AssertionError("dispatch ran despite a drifted omnimarket install")
+
+    monkeypatch.setattr(cli_delegate, "run_receipt_mode", _must_not_run)
+
+    runner = CliRunner()
+    result = runner.invoke(
+        cli_delegate.delegate_command,
+        [
+            "explain the router",
+            "--state-root",
+            str(tmp_path),
+            "--omni-home",
+            "/fake/omni_home",
+        ],
+    )
+
+    assert result.exit_code != 0
+    combined = result.output + str(result.exception or "")
+    assert "NOT INSTALLED" in combined
+    assert _DRIFT_FAKE_SHA[:12] in combined
+    assert "install-node-skill-package.sh --execute" in combined
+    # The refusal must carry the escape hatch, not just the diagnosis.
+    assert DRIFT_OVERRIDE_ENV in combined

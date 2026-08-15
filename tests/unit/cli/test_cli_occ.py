@@ -11,16 +11,28 @@ nothing is mocked. The two load-bearing behaviors the ticket requires are:
   ``Evidence-Ticket`` exits non-zero with an actionable message.
 * ``stamp`` is **idempotent** — re-running never produces a duplicate Evidence
   block (``stamp(stamp(x)) == stamp(x)``).
+
+Also covers ``compute-contract-hash`` (OMN-15711 / FM5): the load-bearing
+behavior there is that the CLI's output is byte-for-byte identical to calling
+``validator_receipt_gate``'s hash functions directly -- proving the CLI
+reimplements no hashing.
 """
 
 from __future__ import annotations
 
+import json
 from pathlib import Path
 
 import pytest
+import yaml
 from click.testing import CliRunner
 
+from omnibase_core.validation.validator_receipt_gate import (
+    compute_contract_entry_sha256,
+    compute_contract_sha256,
+)
 from omnibase_infra.cli.cli_occ import (
+    compute_receipt_contract_hashes,
     occ,
     parse_evidence_source_token,
     stamp_pr_body,
@@ -255,3 +267,120 @@ def test_cli_stamp_in_place_requires_file() -> None:
     )
     assert result.exit_code != 0
     assert "--in-place requires a FILE" in result.output
+
+
+# ---------------------------------------------------------------------------
+# compute-contract-hash (OMN-15711 / FM5)
+# ---------------------------------------------------------------------------
+
+_CONTRACT_YAML = """\
+ticket_id: OMN-15711
+schema_version: "1.0"
+title: Example contract for hash CLI tests
+dod_evidence:
+  - id: dod-omn-15711-example
+    description: Example evidence item.
+    check_command: "true"
+  - id: dod-omn-15711-second
+    description: Second evidence item.
+    check_command: "true"
+"""
+
+
+@pytest.fixture
+def contract_file(tmp_path: Path) -> Path:
+    path = tmp_path / "OMN-15711.yaml"
+    path.write_text(_CONTRACT_YAML, encoding="utf-8")
+    return path
+
+
+def test_compute_receipt_contract_hashes_matches_gate_whole_file_hash(
+    contract_file: Path,
+) -> None:
+    result = compute_receipt_contract_hashes(contract_file)
+    assert result == {
+        "contract_sha256": f"sha256:{compute_contract_sha256(contract_file)}"
+    }
+
+
+def test_compute_receipt_contract_hashes_matches_gate_entry_hash(
+    contract_file: Path,
+) -> None:
+    contract_data = yaml.safe_load(contract_file.read_text(encoding="utf-8"))
+    result = compute_receipt_contract_hashes(
+        contract_file, evidence_item_id="dod-omn-15711-example"
+    )
+    assert result == {
+        "contract_sha256": f"sha256:{compute_contract_sha256(contract_file)}",
+        "contract_entry_sha256": compute_contract_entry_sha256(
+            contract_data, "dod-omn-15711-example"
+        ),
+    }
+
+
+def test_compute_receipt_contract_hashes_unknown_entry_id_raises(
+    contract_file: Path,
+) -> None:
+    from omnibase_core.validation.validator_receipt_gate import (
+        ContractEntryNotFoundError,
+    )
+
+    with pytest.raises(ContractEntryNotFoundError):
+        compute_receipt_contract_hashes(
+            contract_file, evidence_item_id="does-not-exist"
+        )
+
+
+def test_cli_compute_contract_hash_whole_file_matches_gate(contract_file: Path) -> None:
+    result = CliRunner().invoke(occ, ["compute-contract-hash", str(contract_file)])
+    assert result.exit_code == 0, result.output
+    payload = json.loads(result.output)
+    assert payload == {
+        "contract_sha256": f"sha256:{compute_contract_sha256(contract_file)}"
+    }
+
+
+def test_cli_compute_contract_hash_with_entry_id_matches_gate(
+    contract_file: Path,
+) -> None:
+    contract_data = yaml.safe_load(contract_file.read_text(encoding="utf-8"))
+    result = CliRunner().invoke(
+        occ,
+        [
+            "compute-contract-hash",
+            str(contract_file),
+            "--evidence-item-id",
+            "dod-omn-15711-second",
+        ],
+    )
+    assert result.exit_code == 0, result.output
+    payload = json.loads(result.output)
+    assert payload == {
+        "contract_sha256": f"sha256:{compute_contract_sha256(contract_file)}",
+        "contract_entry_sha256": compute_contract_entry_sha256(
+            contract_data, "dod-omn-15711-second"
+        ),
+    }
+
+
+def test_cli_compute_contract_hash_unknown_entry_id_fails_closed(
+    contract_file: Path,
+) -> None:
+    result = CliRunner().invoke(
+        occ,
+        [
+            "compute-contract-hash",
+            str(contract_file),
+            "--evidence-item-id",
+            "does-not-exist",
+        ],
+    )
+    assert result.exit_code != 0
+    assert "does-not-exist" in result.output
+
+
+def test_cli_compute_contract_hash_missing_file_fails_closed(tmp_path: Path) -> None:
+    result = CliRunner().invoke(
+        occ, ["compute-contract-hash", str(tmp_path / "missing.yaml")]
+    )
+    assert result.exit_code != 0

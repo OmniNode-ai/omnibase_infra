@@ -24,9 +24,9 @@ GREEN proves the detached-by-SHA approach succeeds under the identical
 condition. A third test statically guards the actual script source so the
 collision-prone pattern cannot silently come back.
 
-Per reference_git_env_vars_override_c_and_cwd: strip GIT_DIR/GIT_INDEX_FILE/
-GIT_WORK_TREE from the subprocess env so an inherited pre-push hook export
-cannot redirect these git operations onto the real worktree.
+Per reference_git_env_vars_override_c_and_cwd: strip all ``GIT_*`` variables
+from the subprocess env so inherited repository, identity, and command-scoped
+configuration cannot redirect or mutate these disposable Git fixtures.
 """
 
 from __future__ import annotations
@@ -35,14 +35,24 @@ import os
 import subprocess
 from pathlib import Path
 
+import pytest
+
 REPO_ROOT = Path(__file__).resolve().parents[3]
 SCRIPT = REPO_ROOT / "scripts" / "runtime_build" / "refresh_stability_lane.sh"
 
-_HERMETIC_ENV = {
-    k: v
-    for k, v in os.environ.items()
-    if k not in {"GIT_DIR", "GIT_INDEX_FILE", "GIT_WORK_TREE"}
-}
+
+def _hermetic_git_env() -> dict[str, str]:
+    """Return subprocess state without any invoking Git-process authority.
+
+    Build this at call time rather than collection time. A governed pre-push
+    invocation exports ``GIT_CONFIG_PARAMETERS`` containing command-scoped
+    settings such as ``remote.origin.pushurl``. If a disposable fixture repo
+    inherits that value, its local ``git push origin dev`` is redirected to
+    the real product remote instead of its temporary bare origin.
+    """
+    return {
+        key: value for key, value in os.environ.items() if not key.startswith("GIT_")
+    }
 
 
 def _git(
@@ -51,11 +61,31 @@ def _git(
     return subprocess.run(
         ["git", *args],
         cwd=cwd,
-        env=_HERMETIC_ENV,
+        env=_hermetic_git_env(),
         capture_output=True,
         text=True,
         check=check,
     )
+
+
+def test_hermetic_git_env_scrubs_command_scoped_config(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Nested fixture repos must not inherit the invoking push's Git config."""
+    monkeypatch.setenv("GIT_CONFIG_COUNT", "1")
+    monkeypatch.setenv("GIT_CONFIG_KEY_0", "remote.origin.pushurl")
+    monkeypatch.setenv(
+        "GIT_CONFIG_VALUE_0",
+        "https://github.com/OmniNode-ai/must-not-be-used.git",
+    )
+    monkeypatch.setenv(
+        "GIT_CONFIG_PARAMETERS",
+        "'remote.origin.pushurl'='https://github.com/OmniNode-ai/must-not-be-used.git'",
+    )
+
+    child_env = _hermetic_git_env()
+
+    assert not any(key.startswith("GIT_") for key in child_env)
 
 
 def _build_busy_dev_fixture(tmp_path: Path) -> tuple[Path, Path, str]:

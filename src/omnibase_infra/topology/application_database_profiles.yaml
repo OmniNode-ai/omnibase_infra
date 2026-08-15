@@ -1,0 +1,41 @@
+# SPDX-FileCopyrightText: 2025 OmniNode.ai Inc.
+# SPDX-License-Identifier: MIT
+schema_version: "1.0"
+# This catalog binds database-topology profiles, not Kafka/event namespaces.
+# ONEX_ENVIRONMENT and KAFKA_ENVIRONMENT may legitimately contain other values
+# such as test-env; they never select a topology instance.
+profiles:
+  local:
+    instance: local
+    deployment_repository: OmniNode-ai/omnibase_infra
+    injection_path: docker/docker-compose.infra.yml
+    # The runtime-policy dev lane uses the base omnibase-infra compose project,
+    # whose database topology is explicitly local.
+    runtime_policy_profile: dev
+  test:
+    instance: local
+    deployment_repository: OmniNode-ai/omnibase_infra
+    injection_path: docker/docker-compose.e2e.yml
+  stability-test:
+    instance: local
+    deployment_repository: OmniNode-ai/omnibase_infra
+    injection_path: docker/docker-compose.stability-test.yml
+    runtime_policy_profile: stability-test
+  judge:
+    instance: local
+    deployment_repository: OmniNode-ai/omnibase_infra
+    injection_path: docker/docker-compose.judge.yml
+    runtime_policy_profile: judge
+  prod:
+    instance: local
+    deployment_repository: OmniNode-ai/omnibase_infra
+    injection_path: docker/docker-compose.prod.yml
+    runtime_policy_profile: prod
+  onex-dev:
+    instance: onex-dev
+    deployment_repository: OmniNode-ai/omninode_infra
+    injection_path: k8s/onex-dev/runtime/configmap.yaml
+  onex-prod:
+    instance: onex-prod
+    deployment_repository: OmniNode-ai/omninode_infra
+    injection_path: k8s/onex-prod/runtime/configmap.yaml

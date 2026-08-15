@@ -127,6 +127,22 @@ jobs:
           token: ${{ secrets.cross-repo-pat || secrets.CROSS_REPO_PAT }}
           fetch-depth: 1
 
+      # OMN-15604 AC4: `uv lock --upgrade-package` cannot move a
+      # [tool.uv.sources] git pin -- checked out into a side directory (the
+      # downstream-repo checkout above overwrote the job's default
+      # workspace, so this repo's own scripts/ are not otherwise present)
+      # so the "Create branch and upgrade lockfile" step below can fail loud
+      # BEFORE attempting a lock that is guaranteed to be a silent no-op.
+      - name: Checkout omnibase_infra dep-provenance script
+        if: steps.token_check.outputs.has_token == 'true'
+        uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+        with:
+          repository: OmniNode-ai/omnibase_infra
+          path: _dep_provenance_gate
+          sparse-checkout: |
+            scripts/check_dep_provenance.py
+          sparse-checkout-cone-mode: false
+
       - name: Set up uv
         if: steps.token_check.outputs.has_token == 'true'
         uses: astral-sh/setup-uv@v7
@@ -154,6 +170,21 @@ jobs:
 
           PKG_HYPHEN="${{ steps.vars.outputs.pkg_hyphen }}"
           VER="${{ steps.vars.outputs.version }}"
+
+          # OMN-15604 AC4: `uv lock --upgrade-package` cannot move a
+          # [tool.uv.sources] git pin -- uv always prefers an explicit
+          # source override over registry resolution, so re-locking against
+          # the SAME override typically re-resolves to a byte-identical
+          # uv.lock. Left unchecked, the SKIP branch below would misreport
+          # that as "already on latest" when this repo is actually still
+          # stuck on the git pin. Fail loud and explicit BEFORE attempting
+          # the (guaranteed no-op) lock, instead of after.
+          if ! python3 "${GITHUB_WORKSPACE}/_dep_provenance_gate/scripts/check_dep_provenance.py" \
+            --pyproject pyproject.toml \
+            --check-movable "$PKG_HYPHEN"; then
+            echo "::error::Dependency cascade cannot move ${PKG_HYPHEN} in ${{ matrix.repo }} -- it is pinned via a [tool.uv.sources] git override. 'uv lock --upgrade-package' will silently re-resolve against the SAME override and report no lockfile change, masking a no-op cascade (OMN-15604). Remove the [tool.uv.sources] override for ${PKG_HYPHEN} in ${{ matrix.repo }}'s pyproject.toml first, then re-run this cascade."
+            exit 1
+          fi
 
           # PyPI's upload -> public-index propagation can lag several minutes.
           # The old 12x10s (=120s) retry ceiling was too short and silently

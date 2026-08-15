@@ -271,6 +271,10 @@ ONEX_LOG_LEVEL=INFO
 # The same rule applies to any future ONEX_EFFECTS_*_TOPIC overrides.
 # ONEX_EFFECTS_GROUP_ID=onex-runtime-effects
 
+# HMAC-SHA256 key shared by runtime-effects and deploy-agent. Required for
+# signed rebuild commands; generate once and store in ~/.omnibase/.env.
+# DEPLOY_AGENT_HMAC_SECRET=__REPLACE_WITH_SECURE_RANDOM_SECRET__
+
 # Worker runtime Kafka topics (optional)
 # Default: worker-requests, worker-responses, onex-runtime-workers
 # ONEX_WORKER_INPUT_TOPIC=worker-requests
@@ -658,8 +662,11 @@ ONEX_LOG_LEVEL=INFO
 # RUNTIME_MAIN_PORT=8085
 # RUNTIME_EFFECTS_PORT=8086
 
-# Number of worker replicas for horizontal scaling
-# WORKER_REPLICAS=2
+# Number of worker replicas for horizontal scaling. OMN-14968: the knob is the
+# lane-prefixed DEV_WORKER_REPLICAS, `:?`-required in docker-compose.infra.yml
+# (the render fails closed when unset instead of silently rendering 0 replicas).
+# The ledgered pin lives in docker/runtime-policy.env.
+# DEV_WORKER_REPLICAS=2
 
 # =============================================================================
 # Agent Actions Consumer Configuration (Observability Profile)

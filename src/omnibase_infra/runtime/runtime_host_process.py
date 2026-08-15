@@ -84,6 +84,7 @@ from omnibase_infra.errors import (
     ProtocolConfigurationError,
     RuntimeHostError,
     SecretResolutionError,
+    TopicReplicationPolicyError,
     UnknownHandlerTypeError,
 )
 
@@ -178,6 +179,9 @@ from omnibase_infra.utils.util_runtime_packages import get_active_runtime_packag
 
 if TYPE_CHECKING:
     from omnibase_core.container import ModelONEXContainer
+    from omnibase_core.models.core.model_deployment_topology import (
+        ModelDeploymentTopology,
+    )
     from omnibase_core.models.envelope.model_message_envelope import (
         ModelMessageEnvelope,
     )
@@ -803,6 +807,7 @@ class RuntimeHostProcess:
         dispatch_engine: MessageDispatchEngine | None = None,
         runtime_node_graph_config: ModelRuntimeNodeGraphConfig | None = None,
         prefetch_policy: PrefetchPolicy = "disabled",
+        deployment_topology: ModelDeploymentTopology | None = None,
     ) -> None:
         """Initialize the runtime host process.
 
@@ -995,6 +1000,11 @@ class RuntimeHostProcess:
                     The dispatch engine must be frozen (freeze() called) before
                     RuntimeHostProcess.start() is invoked. The kernel handles this
                     by freezing after all plugins have registered their dispatchers.
+
+            deployment_topology: Authoritative checked-in application database
+                topology. Required for dynamic or filesystem-discovered contracts
+                that declare ``db_io``; event namespace configuration is never used
+                as a topology selector.
         """
         # Store container reference for dependency resolution
         self._container: ModelONEXContainer | None = container
@@ -1002,6 +1012,7 @@ class RuntimeHostProcess:
         # from runtime contract YAMLs instead of module-level DEFAULT_* constants.
         # Env-var override layer is handled by ModelRuntimeNodeGraphConfig.from_contracts_dir().
         self._runtime_node_graph_config = runtime_node_graph_config
+        self._deployment_topology = deployment_topology
         # Handler registry (container-based DI or singleton fallback)
         self._handler_registry: RegistryProtocolBinding | None = handler_registry
 
@@ -2529,6 +2540,7 @@ class RuntimeHostProcess:
             validated_payload = validate_runtime_local_ingress_payload(
                 route,
                 request.payload,
+                correlation_id=correlation_id,
             )
         except ValidationError as exc:
             return ModelLocalRuntimeIngressResponse(
@@ -3407,6 +3419,59 @@ class RuntimeHostProcess:
             Added as part of OMN-1989 live contract materialization.
         """
         try:
+            # Typed database projections use the same contract-driven wiring path
+            # as cold boot. The historical registry-only path below cannot inject
+            # projection database adapters and would therefore register a handler
+            # that is present but unusable. Both baseline and post-freeze callbacks
+            # reach this method only after KafkaContractSource has cached the exact
+            # descriptor, so delegate the whole transaction back to that source.
+            contract_config = descriptor.contract_config or {}
+            if contract_config.get("db_io") is not None:
+                source = getattr(self, "_kafka_contract_source", None)
+                dispatch_engine = getattr(self, "_dispatch_engine", None)
+                if source is None or dispatch_engine is None:
+                    logger.warning(
+                        "Cannot materialize db_io contract without Kafka source and "
+                        "dispatch engine",
+                        extra={
+                            "node_name": node_name,
+                            "correlation_id": str(correlation_id),
+                        },
+                    )
+                    return False
+
+                from omnibase_infra.runtime.enums.enum_materialization_status import (
+                    EnumMaterializationStatus,
+                )
+
+                materialization = await source.materialize_cached_contract(
+                    node_name=node_name,
+                    dispatch_engine=dispatch_engine,
+                    event_bus=getattr(self, "_event_bus", None),
+                    environment=source.environment,
+                    container=getattr(self, "_container", None),
+                    topology=getattr(self, "_deployment_topology", None),
+                )
+                accepted = materialization.status in {
+                    EnumMaterializationStatus.MATERIALIZED,
+                    EnumMaterializationStatus.ALREADY_MATERIALIZED,
+                }
+                if not accepted:
+                    logger.warning(
+                        "Typed db_io contract materialization rejected",
+                        extra={
+                            "node_name": node_name,
+                            "status": materialization.status.value,
+                            "reason": (
+                                materialization.reason.value
+                                if materialization.reason is not None
+                                else None
+                            ),
+                            "correlation_id": str(correlation_id),
+                        },
+                    )
+                return accepted
+
             # Step 1: Early-return if no handler_class
             if descriptor.handler_class is None:
                 logger.debug(
@@ -3694,6 +3759,10 @@ class RuntimeHostProcess:
                     for _topic in subcontract.subscribe_topics:
                         try:
                             await _provisioner.ensure_topic_exists(topic_name=_topic)
+                        except TopicReplicationPolicyError:
+                            # OMN-15395: durability violations are fail-closed
+                            # and must escape this best-effort boundary.
+                            raise
                         except Exception:  # noqa: BLE001 — boundary: best-effort
                             logger.warning(
                                 "Topic pre-provisioning failed for live contract "

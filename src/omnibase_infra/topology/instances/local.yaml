@@ -1,0 +1,274 @@
+# SPDX-FileCopyrightText: 2025 OmniNode.ai Inc.
+# SPDX-License-Identifier: MIT
+active_preset: application-local
+databases:
+  application:
+    bindings:
+      app_dashboard:
+        database_ref: application
+        dsn_env: OMNIDASH_ANALYTICS_DB_URL
+        principal: app_dashboard
+      omninode_runtime_service:
+        database_ref: application
+        dsn_env: OMNINODE_INTERNAL_DB_URL
+        principal: omninode_runtime
+      onex_api:
+        database_ref: application
+        dsn_env: OMNINODE_CLOUD_DB_URL
+        principal: onex_api
+      tenant_projection:
+        database_ref: application
+        dsn_env: OMNIDASH_ANALYTICS_DB_URL
+        principal: tenant_projection_writer
+    checksum_ledger: canonical
+    checksum_ledgers:
+      canonical:
+        checksum_column: checksum
+        domain_column: domain
+        relation: schema_migrations
+        schema: platform_catalog
+        stream_column: migration_stream
+        version_column: version
+    migration_stream: omnibase_infra.application
+    owners:
+      owner_omninode_internal:
+        login: false
+      owner_onex_tenant:
+        login: false
+      owner_platform_catalog:
+        login: false
+    physical_name: omnidash_analytics
+    principals:
+      app_dashboard:
+        bypass_rls: false
+        grants:
+          - object_type: DATABASE
+            privileges: [CONNECT]
+          - object_type: SCHEMA
+            privileges: [USAGE]
+            schema: tenant
+          - object_type: SCHEMA
+            privileges: [USAGE]
+            schema: platform_catalog
+        login: true
+      omninode_runtime:
+        bypass_rls: false
+        grants:
+          - object_type: DATABASE
+            privileges: [CONNECT]
+          - object_type: SCHEMA
+            privileges: [USAGE]
+            schema: omninode_internal
+          - object_type: SCHEMA
+            privileges: [USAGE]
+            schema: public
+          - object_type: TABLE
+            objects:
+              - live_events
+              - log_entries
+            privileges: [INSERT, SELECT, UPDATE]
+            schema: omninode_internal
+          - object_type: TABLE
+            objects:
+              - baselines_breakdown
+              - baselines_comparisons
+              - baselines_quality_snapshots
+              - baselines_roi_snapshots
+              - baselines_snapshots
+              - baselines_trend
+              - capsule_store
+              - contract_registry
+              - cost_by_repo_snapshots
+              - deployment_evidence_projection
+              - deployment_readiness_projection
+              - event_chain
+              - evidence_correlation_trace_projection
+              - evidence_dashboard_projection
+              - evidence_readiness_aggregate_projection
+              - gate_activity
+              - gate_metrics
+              - generation_events
+              - intent_classification_events
+              - llm_call_metrics
+              - llm_delegation_daily_projection
+              - llm_routing_decisions
+              - mcp_tools
+              - merge_state_transitions
+              - nightly_loop_decisions
+              - nightly_loop_iterations
+              - node_service_registry
+              - overnight_session_phases
+              - overnight_sessions
+              - pr_lifecycle_ledger_entries
+              - pr_merged_events
+              - receipt_gate_rows
+              - renderer_capability_projection
+              - sandbox_decisions
+              - session_outcomes
+              - session_replay_snapshots
+              - swarm_runs
+              - traces
+              - voice_sessions
+            privileges: [INSERT, SELECT, UPDATE]
+            schema: public
+          - object_type: TABLE
+            objects:
+              - nightly_loop_configs
+            privileges: [SELECT]
+            schema: public
+        login: true
+      onex_api:
+        bypass_rls: false
+        grants:
+          - object_type: DATABASE
+            privileges: [CONNECT]
+          - object_type: SCHEMA
+            privileges: [USAGE]
+            schema: tenant
+          - object_type: SCHEMA
+            privileges: [USAGE]
+            schema: platform_catalog
+        login: true
+      tenant_projection_writer:
+        bypass_rls: false
+        grants:
+          - object_type: DATABASE
+            privileges: [CONNECT]
+          - object_type: SCHEMA
+            privileges: [USAGE]
+            schema: tenant
+          - object_type: SCHEMA
+            privileges: [USAGE]
+            schema: public
+          - object_type: TABLE
+            objects:
+              - agent_routing_decisions
+              - capability_scores
+              - context_roi_scores
+              - delegation_budget_state
+              - delegation_events
+              - delegation_judge_verdict_events
+              - delegation_shadow_comparisons
+              - dep_health_findings
+              - instruction_eval_aggregate_snapshots
+              - llm_cost_aggregates
+              - pattern_learning_artifacts
+              - projection_delegation_inference_response_text
+              - savings_estimates
+              - skill_execution_snapshots
+            privileges: [INSERT, SELECT, UPDATE]
+            schema: public
+        login: true
+    schemas:
+      omninode_internal:
+        domain: OMNINODE_INTERNAL
+        owner: owner_omninode_internal
+      platform_catalog:
+        domain: PLATFORM_CATALOG
+        owner: owner_platform_catalog
+      public:
+        domain: TENANT
+        owner: owner_onex_tenant
+      tenant:
+        domain: TENANT
+        owner: owner_onex_tenant
+  omnibase_infra:
+    bindings:
+      omninode_runtime_service:
+        database_ref: omnibase_infra
+        dsn_env: OMNIBASE_INFRA_DB_URL
+        principal: role_omnibase_infra
+    checksum_ledger: service_owned
+    checksum_ledgers:
+      service_owned:
+        checksum_column: checksum
+        domain_column: domain
+        relation: schema_migrations
+        schema: public
+        stream_column: migration_stream
+        version_column: version
+    migration_stream: omnibase_infra.service
+    owners:
+      owner_omnibase_infra:
+        login: false
+    physical_name: omnibase_infra
+    principals:
+      role_omnibase_infra:
+        bypass_rls: false
+        grants:
+          - object_type: DATABASE
+            privileges: [CONNECT]
+          - object_type: SCHEMA
+            privileges: [USAGE]
+            schema: public
+          - object_type: TABLE
+            objects:
+              - delegation_workflow_state
+            privileges: [INSERT, SELECT, UPDATE]
+            schema: public
+        login: true
+    schemas:
+      public:
+        domain: OMNINODE_INTERNAL
+        owner: owner_omnibase_infra
+  omniintelligence:
+    bindings:
+      omninode_runtime_service:
+        database_ref: omniintelligence
+        dsn_env: OMNIINTELLIGENCE_DB_URL
+        principal: role_omniintelligence
+    checksum_ledger: service_owned
+    checksum_ledgers:
+      service_owned:
+        checksum_column: checksum
+        domain_column: domain
+        relation: schema_migrations
+        schema: public
+        stream_column: migration_stream
+        version_column: version
+    migration_stream: omniintelligence.service
+    owners:
+      owner_omniintelligence:
+        login: false
+    physical_name: omniintelligence
+    principals:
+      role_omniintelligence:
+        bypass_rls: false
+        grants:
+          - object_type: DATABASE
+            privileges: [CONNECT]
+          - object_type: SCHEMA
+            privileges: [USAGE]
+            schema: public
+          - object_type: TABLE
+            objects:
+              - dispatch_eval_results
+            privileges: [INSERT, SELECT, UPDATE]
+            schema: public
+        login: true
+    schemas:
+      public:
+        domain: OMNINODE_INTERNAL
+        owner: owner_omniintelligence
+presets:
+  application-local:
+    - postgres
+    - omnidash
+    - omninode_runtime
+schema_version: "2.0"
+services:
+  omnidash:
+    local:
+      compose_service: omnidash
+      host_port: 3000
+    mode: LOCAL
+  omninode_runtime:
+    local:
+      compose_service: omninode-runtime
+      host_port: 8085
+    mode: LOCAL
+  postgres:
+    local:
+      compose_service: omnibase-infra-postgres
+      host_port: 5436
+    mode: LOCAL

@@ -2,7 +2,8 @@
 -- MIGRATION: Create app_dashboard role (NOSUPERUSER, NOBYPASSRLS, non-owner)
 -- =============================================================================
 -- Ticket: OMN-14899 (blocks OMN-14894 — RLS across the projection tables)
--- Version: 1.0.0
+--         OMN-15343 (must apply under an ordinary, non-CREATEROLE role on RDS)
+-- Version: 1.1.0
 --
 -- PURPOSE:
 --   app_dashboard is the RUNTIME connection role for the dashboard/projection
@@ -18,25 +19,42 @@
 --     after the guarded CREATE), not just requested at create time. A
 --     pre-existing app_dashboard role with either flag set is corrected,
 --     never trusted.
---   * The SUPERUSER/REPLICATION/BYPASSRLS ALTER is privilege-guarded: only
---     the executing role's OWN attributes gate ALTER ROLE's ability to
---     change these three (Postgres core behavior, not this migration's
---     choice) — even reasserting an already-correct `false` requires the
---     executing role to already hold the attribute. RDS's master account
---     is CREATEROLE + CREATEDB but explicitly NOSUPERUSER/NOREPLICATION/
---     NOBYPASSRLS, so an unconditional ALTER of those three flags fails
---     `permission denied to alter role` on EVERY real RDS apply, not just
---     when the role pre-exists with an escalated flag. This migration only
---     attempts that ALTER when pg_roles shows one of the three already
---     set, and raises an explicit, actionable exception (naming the
---     escalated flag) rather than silently failing or silently succeeding
---     if the executing role also lacks the privilege to correct it — that
---     case needs a true superuser, by design, and must never pass quietly.
---   * NOLOGIN here: no credential material ever lives in a migration. The
---     LOGIN + password attach is a deployment-owned, operator-gated step
---     (AWS Secrets Manager per OMN-14899; local lanes may ALTER ROLE ...
---     LOGIN with lane-local credentials). Same convention as the
---     omnidash_app role in omnidash/db/migrations/0001_tenant_rls.sql.
+--   * EVERY privileged statement is gated on an OBSERVED DIVERGENCE. Postgres
+--     requires role-administration rights for ALTER ROLE, and the executing
+--     role's OWN attributes additionally gate SUPERUSER / REPLICATION /
+--     BYPASSRLS — even reasserting an already-correct `false`. An
+--     unconditional ALTER is therefore not "idempotent": it is a privilege
+--     demand made on every apply. This file reads pg_roles first and issues a
+--     statement only when observed state differs from required state. Two
+--     consequences, both proven by execution in
+--     tests/integration/migrations/test_094_app_dashboard_role.py:
+--       - RDS's master account (CREATEROLE + CREATEDB but explicitly
+--         NOSUPERUSER / NOREPLICATION / NOBYPASSRLS) applies this file
+--         cleanly on a fresh cluster.
+--       - An ORDINARY service role with NO CREATEROLE at all applies it
+--         cleanly when the role already exists in the required state. That is
+--         the live cloud case (OMN-15343): the k8s migration Job holds no
+--         cluster-admin credential on the managed instance by design, and the
+--         managed instance has no `postgres` role at all (live readback
+--         2026-07-29: `select count(*) from pg_roles where rolname='postgres'`
+--         -> 0), so this file has to be a true no-op there or it can never be
+--         recorded — and a migration that cannot be recorded blocks every
+--         later migration behind it.
+--     When a divergence IS observed and the executing role cannot correct it,
+--     this migration raises an explicit, actionable exception naming the flag.
+--     It never silently succeeds and never silently leaves an escalation in
+--     place.
+--   * NOLOGIN is a CREATE-TIME default, deliberately NOT re-asserted on a
+--     pre-existing role. No credential material ever lives in a migration: the
+--     LOGIN + password attach is a deployment-owned, operator-gated step (AWS
+--     Secrets Manager per OMN-14899; local lanes may ALTER ROLE ... LOGIN with
+--     lane-local credentials). Re-asserting NOLOGIN would REVOKE that
+--     deployment-owned attach — on the cloud instance app_dashboard already
+--     carries LOGIN (live readback 2026-07-29: rolcanlogin = t), so a blanket
+--     `ALTER ROLE app_dashboard NOLOGIN` here would break the dashboard's
+--     runtime connection as a side effect of recording a migration. LOGIN is
+--     not the isolation control for this role in any case: NOSUPERUSER,
+--     NOBYPASSRLS and non-ownership are, and all three are still enforced.
 --   * app_dashboard must NEVER own tables. Table creation stays with the
 --     migration/runtime role (postgres on compose lanes). Ownership would
 --     silently bypass ENABLE ROW LEVEL SECURITY.
@@ -48,40 +66,78 @@
 --     exists.
 --
 -- IDEMPOTENCY:
---   Safe to re-run: guarded CREATE ROLE (duplicate_object / unique_violation
---   both caught — roles are cluster-wide and two migration paths may race,
---   see omnidash 0001's OMN-10875 note); the unconditional ALTER is
---   idempotent; the privilege-gated ALTER only runs its EXECUTE branch when
---   pg_roles shows an actual escalation, so a correct role never touches it.
+--   Safe to re-run: the CREATE is skipped when pg_roles already shows the role
+--   AND still carries the duplicate_object / unique_violation guard for the
+--   genuine race (roles are cluster-wide and two migration paths may race, see
+--   omnidash 0001's OMN-10875 note); every ALTER runs only on an observed
+--   divergence, so a correct role touches none of them.
 --
 -- ROLLBACK:
 --   See rollback/rollback_094_create_app_dashboard_role.sql
 -- =============================================================================
 
+-- Guarded CREATE. The pg_roles pre-check is what makes this file runnable by a
+-- role WITHOUT CREATEROLE: Postgres checks create-role privilege BEFORE it
+-- checks whether the name is already taken, so an unconditional CREATE ROLE
+-- raises `permission denied to create role` (42501) rather than the
+-- duplicate_object the handler below is written for. The handler is retained
+-- for the genuine race: two migration paths creating the role concurrently.
 DO $$
 BEGIN
-  BEGIN
-    CREATE ROLE app_dashboard WITH
-      NOLOGIN
-      NOSUPERUSER
-      NOBYPASSRLS
-      NOCREATEDB
-      NOCREATEROLE
-      NOREPLICATION;
-  EXCEPTION
-    WHEN duplicate_object OR unique_violation THEN
-      NULL; -- role already exists (possibly created concurrently)
-  END;
+  IF NOT EXISTS (SELECT 1 FROM pg_roles WHERE rolname = 'app_dashboard') THEN
+    BEGIN
+      CREATE ROLE app_dashboard WITH
+        NOLOGIN
+        NOSUPERUSER
+        NOBYPASSRLS
+        NOCREATEDB
+        NOCREATEROLE
+        NOREPLICATION;
+    EXCEPTION
+      WHEN duplicate_object OR unique_violation THEN
+        NULL; -- role already exists (created concurrently)
+    END;
+  END IF;
 END;
 $$;
 
--- Enforce the non-privilege-gated flags unconditionally — these never
--- require the executing role to already hold them (RDS master account
--- compatible: CREATEROLE alone is sufficient).
-ALTER ROLE app_dashboard
-  NOLOGIN
-  NOCREATEDB
-  NOCREATEROLE;
+-- CREATEDB / CREATEROLE: not gated by the executing role's own attributes the
+-- way the three below are, but ALTER ROLE still demands role-administration
+-- rights, so this is gated on an observed divergence too. Immediately after the
+-- guarded CREATE, and on every re-run against a correct role, both flags are
+-- already false and no statement is issued at all.
+DO $$
+DECLARE
+  current_flags RECORD;
+BEGIN
+  SELECT rolcreatedb, rolcreaterole
+    INTO current_flags
+    FROM pg_roles
+   WHERE rolname = 'app_dashboard';
+
+  IF NOT FOUND THEN
+    RAISE EXCEPTION
+      'app_dashboard role does not exist and could not be created — the '
+      'executing role lacks CREATEROLE. On a managed instance the role is '
+      'provisioned at the provisioning seam (OMN-15343); this migration '
+      'refuses to record itself against a role that is not there.';
+  END IF;
+
+  IF current_flags.rolcreatedb OR current_flags.rolcreaterole THEN
+    BEGIN
+      EXECUTE 'ALTER ROLE app_dashboard NOCREATEDB NOCREATEROLE';
+    EXCEPTION
+      WHEN insufficient_privilege THEN
+        RAISE EXCEPTION
+          'app_dashboard carries an unexpected privilege (rolcreatedb=%, '
+          'rolcreaterole=%) and the executing role lacks the role-administration '
+          'rights to correct it — fix this role at the provisioning seam before '
+          'the dashboard read path can be trusted',
+          current_flags.rolcreatedb, current_flags.rolcreaterole;
+    END;
+  END IF;
+END;
+$$;
 
 -- SUPERUSER/BYPASSRLS/REPLICATION are privilege-gated by Postgres core: the
 -- executing role must already hold an attribute to ALTER it, even to

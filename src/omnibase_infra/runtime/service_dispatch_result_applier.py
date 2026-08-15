@@ -60,6 +60,9 @@ from omnibase_infra.errors.error_projection import ProjectionError
 from omnibase_infra.models.errors.model_infra_error_context import (
     ModelInfraErrorContext,
 )
+from omnibase_infra.runtime.contract_terminal_events import (
+    apply_failure_terminal_guard,
+)
 from omnibase_infra.topics import topic_keys
 from omnibase_infra.topics.service_topic_registry import ServiceTopicRegistry
 from omnibase_infra.utils import derive_event_type_from_topic, sanitize_error_message
@@ -180,6 +183,7 @@ class DispatchResultApplier:
         output_event_handler: Callable[[BaseModel], Awaitable[BaseModel | None]]
         | None = None,
         allowed_output_topics: Iterable[str] | None = None,
+        failure_terminal_topics: Iterable[str] | None = None,
     ) -> None:
         """Initialize the dispatch result applier.
 
@@ -214,6 +218,13 @@ class DispatchResultApplier:
                 topics. This should include ``event_bus.publish_topics`` so
                 per-instance embedded topics can select any declared terminal
                 topic, even when multiple terminal outcomes share one event model.
+            failure_terminal_topics: Optional contract-declared FAILURE terminal
+                topics (``runtime_dispatch.terminal_events.failure`` and the
+                non-success entries of a top-level ``terminal_events`` map).
+                When exactly one is declared, a returned model that resolves to
+                the contract's SUCCESS terminal but declares a failure verdict
+                is re-routed there instead (OMN-15468 AC2). Empty/absent ⇒ the
+                guard cannot fire and routing is byte-for-byte unchanged.
         """
         self._event_bus = event_bus
         self._output_topic = output_topic
@@ -228,6 +239,15 @@ class DispatchResultApplier:
             for topic in (allowed_output_topics or ())
             if isinstance(topic, str) and topic.strip()
         }
+        self._failure_terminal_topics: tuple[str, ...] = tuple(
+            dict.fromkeys(
+                topic.strip()
+                for topic in (failure_terminal_topics or ())
+                if isinstance(topic, str)
+                and topic.strip()
+                and topic.strip() != output_topic
+            )
+        )
 
     @property
     def published_events_map(self) -> dict[str, str]:
@@ -314,9 +334,17 @@ class DispatchResultApplier:
             The resolved topic string.
         """
         embedded_topic = self._resolve_embedded_output_topic(event)
-        if embedded_topic is not None:
-            return embedded_topic
-        return self._resolve_mapped_output_topic(event)
+        resolved = (
+            embedded_topic
+            if embedded_topic is not None
+            else self._resolve_mapped_output_topic(event)
+        )
+        return apply_failure_terminal_guard(
+            event,
+            resolved,
+            success_topic=self._output_topic,
+            failure_terminal_topics=self._failure_terminal_topics,
+        )
 
     def _resolve_embedded_output_topic(self, event: BaseModel) -> str | None:
         """Return a declared topic the event itself names, if present.
@@ -382,6 +410,7 @@ class DispatchResultApplier:
             *self._output_topic_map.values(),
             *self._topic_router.values(),
             *self._allowed_output_topic_set,
+            *self._failure_terminal_topics,
         }
 
     @staticmethod
@@ -703,6 +732,19 @@ class DispatchResultApplier:
                             type(output_event).__name__,
                             self._resolve_mapped_output_topic(output_event),
                         )
+                    )
+                    # OMN-15468 AC2: last stop before publish — a return value
+                    # that declares a failure verdict never leaves on the
+                    # contract's SUCCESS terminal. Applied here rather than only
+                    # inside _resolve_output_topic because this loop resolves
+                    # the topic inline (topic_router is consulted here and
+                    # nowhere else), so guarding only the helper would leave the
+                    # path that actually publishes unguarded.
+                    resolved_topic = apply_failure_terminal_guard(
+                        output_event,
+                        resolved_topic,
+                        success_topic=self._output_topic,
+                        failure_terminal_topics=self._failure_terminal_topics,
                     )
 
                     # OMN-12116: Derive event_type from the resolved topic so

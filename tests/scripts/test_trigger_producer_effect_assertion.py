@@ -28,6 +28,7 @@ from click.testing import CliRunner
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
 SCRIPT_PATH = REPO_ROOT / "scripts" / "trigger_rebuild_on_merge.py"
+RUNTIME_PATH_VALIDATOR = REPO_ROOT / "tests" / "fixtures" / "runtime_path_classifier.py"
 
 # Producers that MUST share the RT-5 fail-closed invariant. Extend as the publish
 # step / pin cascade / OCC publisher are wired onto the same assertion.
@@ -80,6 +81,25 @@ def _clear_publish_env(monkeypatch: pytest.MonkeyPatch) -> None:
         monkeypatch.delenv(name, raising=False)
 
 
+def _write_bus_contracts(tmp_path: Path) -> tuple[Path, Path]:
+    overlay = tmp_path / "ci_bus_lanes.yaml"
+    overlay.write_text(
+        "default: inmemory\nlanes:\n  dev:\n    broker: declared:19092\n"
+    )
+    consumer_model = tmp_path / "model_redeploy_start_command.py"
+    consumer_model.write_text(
+        "class ModelRedeployStartCommand(BaseModel):\n"
+        "    model_config = ConfigDict(frozen=True, extra='forbid')\n"
+        "    correlation_id: UUID = Field(...)\n"
+        "    scope: str = Field(default='full')\n"
+        "    git_ref: str = Field(default='origin/main')\n"
+        "    runtime_lane: str = Field(default='dev')\n"
+        "    build_source: str = Field(default='release')\n"
+        "    requested_by: str = Field(default='node_redeploy_orchestrator')\n"
+    )
+    return overlay, consumer_model
+
+
 # --------------------------------------------------------------------------- #
 # The acceptance bar: RED reproduces against exists-but-WRONG                  #
 # --------------------------------------------------------------------------- #
@@ -101,6 +121,8 @@ def test_runtime_change_with_broker_unset_fails_closed(
         [
             "--changed-files",
             _RUNTIME_CHANGE_FILE,
+            "--runtime-path-validator",
+            str(RUNTIME_PATH_VALIDATOR),
             "--base-branch",
             "dev",
             "--source-sha",
@@ -121,11 +143,11 @@ def test_runtime_change_with_broker_unset_fails_closed(
 
 @pytest.mark.unit
 def test_zero_delivery_emit_fails_closed(
-    trigger_module: Any, monkeypatch: pytest.MonkeyPatch
+    trigger_module: Any, monkeypatch: pytest.MonkeyPatch, tmp_path: Path
 ) -> None:
     """A completed publish that delivered zero commands must go RED."""
-    for name in _PUBLISH_CREDS_ENV:
-        monkeypatch.setenv(name, "present")
+    _clear_publish_env(monkeypatch)
+    overlay, consumer_model = _write_bus_contracts(tmp_path)
 
     def _fake_publish_zero(**_kwargs: Any) -> int:
         return 0
@@ -139,10 +161,18 @@ def test_zero_delivery_emit_fails_closed(
         [
             "--changed-files",
             _RUNTIME_CHANGE_FILE,
+            "--runtime-path-validator",
+            str(RUNTIME_PATH_VALIDATOR),
             "--base-branch",
             "dev",
             "--source-sha",
             "cafef00d",
+            "--bus-lane",
+            "dev",
+            "--bus-overlay",
+            str(overlay),
+            "--consumer-model",
+            str(consumer_model),
         ],
     )
 
@@ -167,6 +197,8 @@ def test_no_runtime_change_exits_zero(
         [
             "--changed-files",
             "README.md,docs/thing.md",
+            "--runtime-path-validator",
+            str(RUNTIME_PATH_VALIDATOR),
             "--base-branch",
             "dev",
             "--source-sha",
@@ -195,6 +227,8 @@ def test_dry_run_with_runtime_change_exits_zero(
         [
             "--changed-files",
             _RUNTIME_CHANGE_FILE,
+            "--runtime-path-validator",
+            str(RUNTIME_PATH_VALIDATOR),
             "--base-branch",
             "dev",
             "--source-sha",
@@ -209,11 +243,11 @@ def test_dry_run_with_runtime_change_exits_zero(
 
 @pytest.mark.unit
 def test_happy_path_publishes_and_exits_zero(
-    trigger_module: Any, monkeypatch: pytest.MonkeyPatch
+    trigger_module: Any, monkeypatch: pytest.MonkeyPatch, tmp_path: Path
 ) -> None:
     """All preconditions present + one command delivered => exit 0 (green)."""
-    for name in _PUBLISH_CREDS_ENV:
-        monkeypatch.setenv(name, "present")
+    _clear_publish_env(monkeypatch)
+    overlay, consumer_model = _write_bus_contracts(tmp_path)
 
     def _fake_publish_one(**_kwargs: Any) -> int:
         return 1
@@ -227,10 +261,18 @@ def test_happy_path_publishes_and_exits_zero(
         [
             "--changed-files",
             _RUNTIME_CHANGE_FILE,
+            "--runtime-path-validator",
+            str(RUNTIME_PATH_VALIDATOR),
             "--base-branch",
             "dev",
             "--source-sha",
             "feedface",
+            "--bus-lane",
+            "dev",
+            "--bus-overlay",
+            str(overlay),
+            "--consumer-model",
+            str(consumer_model),
         ],
     )
 

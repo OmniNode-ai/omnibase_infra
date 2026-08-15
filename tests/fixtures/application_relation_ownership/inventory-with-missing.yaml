@@ -1,0 +1,7 @@
+# SPDX-FileCopyrightText: 2025 OmniNode.ai Inc.
+# SPDX-License-Identifier: MIT
+
+schema_version: "1.0"
+relations:
+  - {name: delegation_events, database_ref: application, schema: tenant, kind: table, purpose: data}
+  - {name: undeclared_live_table, database_ref: application, schema: tenant, kind: table, purpose: data}

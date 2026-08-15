@@ -1,0 +1,117 @@
+# SPDX-FileCopyrightText: 2025 OmniNode.ai Inc.
+# SPDX-License-Identifier: MIT
+
+"""Temporary logical-to-physical schema mapping for application table grants."""
+
+from __future__ import annotations
+
+TENANT_TABLES_PHYSICALLY_IN_PUBLIC_UNTIL_OMN15359: frozenset[str] = frozenset(
+    {
+        "agent_routing_decisions",
+        "capability_scores",
+        "context_roi_scores",
+        "delegation_budget_state",
+        "delegation_events",
+        "delegation_judge_verdict_events",
+        "delegation_shadow_comparisons",
+        "dep_health_findings",
+        "instruction_eval_aggregate_snapshots",
+        "llm_cost_aggregates",
+        "pattern_learning_artifacts",
+        "projection_delegation_inference_response_text",
+        "savings_estimates",
+        "skill_execution_snapshots",
+    }
+)
+
+# OMN-15359 (P2-P4 build). The `omninode_internal` schema now physically exists
+# (docker/migrations/forward/098_create_omninode_internal_schema.sql), but the
+# tables that are logically OMNINODE_INTERNAL-domain per the shipped topology
+# (`omninode_runtime` principal's TABLE grants, identical across all 7 shipped
+# database-topology profiles as of this ticket) have not been copied into it —
+# every one of them is still physically created, unqualified, in `public` by
+# its node migration. This is the exact gap OMN-15426's live readback named:
+# handler_wiring issues schema-qualified SQL against `omninode_internal` for
+# these relations while they resolve nowhere, producing `relation does not
+# exist` rather than a permission error. Enumerated (not a blanket public->
+# internal rule) so a *new* table declared against `omninode_internal` after
+# this landed resolves to its real target schema, matching the precedent set
+# by TENANT_TABLES_PHYSICALLY_IN_PUBLIC_UNTIL_OMN15359 above.
+#
+# `live_events` is REMOVED from this set as of
+# docker/migrations/forward/099_create_omninode_internal_live_events.sql --
+# it is the first family individually transform-copied out of the bridge.
+# Post-099, physical_grant_schema_for_table('omninode_internal', 'live_events')
+# must return 'omninode_internal' (no override) so it agrees with the real
+# INSERT-target schema handler_wiring._resolve_projection_database_target
+# already resolves from the node contract's literal db_io.db_tables[0].schema.
+# Leaving it enumerated here after the physical table exists would silently
+# reintroduce the drift 099 exists to close: the grant-privilege check would
+# keep asserting against `public` while every write already lands in
+# `omninode_internal`.
+INTERNAL_TABLES_PHYSICALLY_IN_PUBLIC_UNTIL_OMN15359: frozenset[str] = frozenset(
+    {
+        "baselines_breakdown",
+        "baselines_comparisons",
+        "baselines_quality_snapshots",
+        "baselines_roi_snapshots",
+        "baselines_snapshots",
+        "baselines_trend",
+        "capsule_store",
+        "contract_registry",
+        "cost_by_repo_snapshots",
+        "deployment_evidence_projection",
+        "deployment_readiness_projection",
+        "event_chain",
+        "evidence_correlation_trace_projection",
+        "evidence_dashboard_projection",
+        "evidence_readiness_aggregate_projection",
+        "gate_activity",
+        "gate_metrics",
+        "generation_events",
+        "intent_classification_events",
+        "llm_call_metrics",
+        "llm_delegation_daily_projection",
+        "llm_routing_decisions",
+        "mcp_tools",
+        "merge_state_transitions",
+        "nightly_loop_configs",
+        "nightly_loop_decisions",
+        "nightly_loop_iterations",
+        "node_service_registry",
+        "overnight_session_phases",
+        "overnight_sessions",
+        "pr_lifecycle_ledger_entries",
+        "pr_merged_events",
+        "receipt_gate_rows",
+        "renderer_capability_projection",
+        "sandbox_decisions",
+        "session_outcomes",
+        "session_replay_snapshots",
+        "swarm_runs",
+        "traces",
+        "voice_sessions",
+    }
+)
+
+
+def physical_grant_schema_for_table(schema: str, table_name: str) -> str:
+    """Return the schema where PostgreSQL ACLs currently apply for a table.
+
+    OMN-15359 owns the physical ``public`` -> ``tenant``/``omninode_internal``
+    moves. Until each relation family is individually transform-copied and
+    proven, these tables remain physically in ``public`` even though their
+    contracts and runtime routing are logically tenant- or
+    omninode_internal-domain.
+    """
+    if (
+        schema == "tenant"
+        and table_name in TENANT_TABLES_PHYSICALLY_IN_PUBLIC_UNTIL_OMN15359
+    ):
+        return "public"
+    if (
+        schema == "omninode_internal"
+        and table_name in INTERNAL_TABLES_PHYSICALLY_IN_PUBLIC_UNTIL_OMN15359
+    ):
+        return "public"
+    return schema

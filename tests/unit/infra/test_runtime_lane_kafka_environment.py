@@ -65,12 +65,9 @@ def test_runtime_lanes_use_lane_specific_redpanda_advertise_hosts() -> None:
     )
     prod = _load_compose_yaml(REPO_ROOT / "docker" / "docker-compose.prod.yml")
 
-    assert "DEV_REDPANDA_ADVERTISE_HOST" in " ".join(
-        dev["services"]["redpanda"]["command"]
-    )
-    assert "${REDPANDA_ADVERTISE_HOST" not in " ".join(
-        dev["services"]["redpanda"]["command"]
-    )
+    dev_redpanda_command = " ".join(dev["services"]["redpanda"]["command"])
+    assert "DEV_REDPANDA_ADVERTISE_HOST" in dev_redpanda_command
+    assert "${REDPANDA_ADVERTISE_HOST" not in dev_redpanda_command
 
     stability_redpanda_command = " ".join(stability["services"]["redpanda"]["command"])
     assert "100.109.203.94:39092" in stability_redpanda_command
@@ -81,3 +78,27 @@ def test_runtime_lanes_use_lane_specific_redpanda_advertise_hosts() -> None:
     prod_redpanda_command = " ".join(prod["services"]["redpanda"]["command"])
     assert "PROD_REDPANDA_ADVERTISE_HOST" in prod_redpanda_command
     assert "${REDPANDA_ADVERTISE_HOST" not in prod_redpanda_command
+
+
+def test_dev_redpanda_advertise_host_fails_fast_when_unset() -> None:
+    """OMN-15173: unset DEV_REDPANDA_ADVERTISE_HOST must never silently render
+    a localhost advertise address.
+
+    Before the fix, an unset var silently defaulted to `localhost` via
+    `${DEV_REDPANDA_ADVERTISE_HOST:-localhost}` — a latent off-host regression
+    (CI runners / other machines get an advertised address they cannot reach).
+    The dev lane must use the Compose fail-fast form (`${VAR:?message}`),
+    matching the existing PROD_REDPANDA_ADVERTISE_HOST precedent in
+    docker-compose.prod.yml, so an unset var breaks the compose render loudly
+    instead of the client failing silently later.
+    """
+    dev = _load_compose_yaml(REPO_ROOT_COMPOSE)
+    dev_redpanda_command = " ".join(dev["services"]["redpanda"]["command"])
+
+    # The old silent-default form must be gone.
+    assert "${DEV_REDPANDA_ADVERTISE_HOST:-localhost}" not in dev_redpanda_command
+    assert "${DEV_REDPANDA_ADVERTISE_HOST:-}" not in dev_redpanda_command
+
+    # The Compose fail-fast form (colon-question-mark) must be present for
+    # both the Kafka and Pandaproxy advertise addresses.
+    assert dev_redpanda_command.count("${DEV_REDPANDA_ADVERTISE_HOST:?") == 2

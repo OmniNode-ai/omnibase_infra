@@ -1,0 +1,98 @@
+# SPDX-FileCopyrightText: 2025 OmniNode.ai Inc.
+# SPDX-License-Identifier: MIT
+
+schema_version: "2.0"
+services: {}
+presets: {}
+active_preset: null
+databases:
+  application:
+    physical_name: omnidash_analytics
+    schemas:
+      public:
+        domain: TENANT
+        owner: owner_onex_tenant
+      tenant:
+        domain: TENANT
+        owner: owner_onex_tenant
+      omninode_internal:
+        domain: OMNINODE_INTERNAL
+        owner: owner_omninode_internal
+      platform_catalog:
+        domain: PLATFORM_CATALOG
+        owner: owner_platform_catalog
+    owners:
+      owner_onex_tenant: {login: false}
+      owner_omninode_internal: {login: false}
+      owner_platform_catalog: {login: false}
+    principals:
+      app_dashboard:
+        login: true
+        bypass_rls: false
+        grants:
+          - object_type: SCHEMA
+            schema: platform_catalog
+            privileges: [USAGE]
+          - object_type: TABLE
+            schema: platform_catalog
+            objects: [plan_tiers]
+            privileges: [SELECT]
+      onex_api:
+        login: true
+        bypass_rls: false
+        grants:
+          - object_type: SCHEMA
+            schema: platform_catalog
+            privileges: [USAGE]
+      omninode_runtime:
+        login: true
+        bypass_rls: false
+        grants:
+          - object_type: SCHEMA
+            schema: omninode_internal
+            privileges: [USAGE]
+          - object_type: TABLE
+            schema: omninode_internal
+            objects: [future_internal_projection]
+            privileges: [SELECT, INSERT, UPDATE]
+      tenant_projection_writer:
+        login: true
+        bypass_rls: false
+        grants:
+          - object_type: SCHEMA
+            schema: public
+            privileges: [USAGE]
+          - object_type: SCHEMA
+            schema: tenant
+            privileges: [USAGE]
+          - object_type: TABLE
+            schema: public
+            objects: [delegation_events]
+            privileges: [SELECT, INSERT, UPDATE]
+    bindings:
+      app_dashboard:
+        database_ref: application
+        principal: app_dashboard
+        dsn_env: OMNIDASH_ANALYTICS_DB_URL
+      onex_api:
+        database_ref: application
+        principal: onex_api
+        dsn_env: OMNINODE_CLOUD_DB_URL
+      omninode_runtime_service:
+        database_ref: application
+        principal: omninode_runtime
+        dsn_env: OMNINODE_INTERNAL_DB_URL
+      tenant_projection:
+        database_ref: application
+        principal: tenant_projection_writer
+        dsn_env: OMNIDASH_ANALYTICS_DB_URL
+    migration_stream: omnibase_infra.application
+    checksum_ledgers:
+      canonical:
+        schema: omninode_internal
+        relation: schema_migrations
+        stream_column: migration_stream
+        domain_column: domain
+        version_column: version
+        checksum_column: checksum
+    checksum_ledger: canonical

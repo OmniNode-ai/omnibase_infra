@@ -160,6 +160,22 @@ UNCOVERED_MODELS: dict[str, str] = {
     "ModelProtocolRegistrationConfig": "Config with protocol enum dependencies",
     "ModelRuntimeConfig": "Top-level config aggregating many nested configs",
     "ModelRuntimeContractConfig": "Config with contract path dependencies",
+    # Not deferred work: this roundtrip is structurally impossible, and the
+    # cause is inherited from omnibase_core, not from omnibase_infra. The base
+    # ModelRuntimeManifest declares contract_hash / topology_hash as
+    # computed_field AND sets extra="forbid", so model_dump() emits two keys
+    # that model_validate() then rejects as extra inputs. A factory here would
+    # fail on the base model's shape, not on anything this subclass adds.
+    # Publish-side serialization IS covered end to end (dump -> envelope ->
+    # consumer-side coercion -> handler SQL args) in
+    # tests/integration/runtime/test_attach_readiness_publish_seam.py, which is
+    # the path that actually runs — nothing reconstructs this model from its
+    # own dump (OMN-15512).
+    "ModelRuntimeManifestPublished": (
+        "computed_field (contract_hash/topology_hash) + extra='forbid' inherited "
+        "from omnibase_core.ModelRuntimeManifest make dump->validate asymmetric; "
+        "wire path covered by test_attach_readiness_publish_seam.py"
+    ),
     "ModelRuntimePolicyContract": "Contract aggregate covered by runtime policy contract tests",
     "ModelRuntimeProcessPolicy": "Nested runtime policy model covered through ModelRuntimePolicyContract",
     "ModelRuntimeProfilePolicy": "Nested runtime policy model covered through ModelRuntimePolicyContract",

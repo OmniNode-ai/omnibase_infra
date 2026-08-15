@@ -206,6 +206,7 @@ from aiokafka.errors import (
     KafkaError,
     UnknownTopicOrPartitionError,
 )
+from aiokafka.structs import TopicPartition
 
 from omnibase_infra.enums import EnumConsumerGroupPurpose, EnumInfraTransportType
 from omnibase_infra.errors import (
@@ -223,7 +224,11 @@ from omnibase_infra.event_bus.kafka_auth import (
     build_aiokafka_auth_kwargs,
 )
 from omnibase_infra.event_bus.mixin_kafka_broadcast import MixinKafkaBroadcast
-from omnibase_infra.event_bus.mixin_kafka_dlq import MixinKafkaDlq
+from omnibase_infra.event_bus.mixin_kafka_dlq import (
+    _REPLAY_COUNT_HEADER,
+    _REPLAY_COUNT_PARSE_FAILURE_SENTINEL,
+    MixinKafkaDlq,
+)
 from omnibase_infra.event_bus.models import (
     ModelEventBusReadiness,
     ModelEventHeaders,
@@ -252,6 +257,11 @@ from omnibase_infra.utils.util_onex_topic_format import (
 from omnibase_infra.utils.util_topic_validation import validate_topic_name
 
 logger = logging.getLogger(__name__)
+
+# OMN-15232: pause between fail-closed rewinds so a persistently unreachable DLQ
+# does not turn the consume loop into a hot spin over the same offset. The
+# rewind itself is what keeps the data safe; this only bounds the retry rate.
+DLQ_UNPERSISTED_REWIND_BACKOFF_SECONDS: float = 1.0
 
 
 class EventBusKafka(
@@ -1309,6 +1319,7 @@ class EventBusKafka(
         group_id: str | None = None,
         purpose: EnumConsumerGroupPurpose = EnumConsumerGroupPurpose.CONSUME,
         required_for_readiness: bool = False,
+        auto_offset_reset: str | None = None,
     ) -> Callable[[], Awaitable[None]]:
         """Subscribe to topic with callback handler.
 
@@ -1338,6 +1349,21 @@ class EventBusKafka(
             required_for_readiness: Whether this subscription must have active
                 partition assignments for the runtime to report as ready via
                 ``/ready``. Defaults to False (does not block readiness).
+            auto_offset_reset: Optional per-subscription override of this
+                consumer's ``auto_offset_reset`` policy ("earliest"/"latest").
+                When ``None`` (the default, unchanged behavior), the bus-level
+                ``self._config.auto_offset_reset`` applies, as before this
+                parameter existed. Each ``(topic, group_id)`` pair already
+                gets its own dedicated ``AIOKafkaConsumer``
+                (``_start_consumer_for_topic_unlocked``), so this override is
+                scoped to exactly the one consumer this call creates -- it
+                does not affect any other subscription's offset-reset
+                behavior. Added for OMN-15789 so the
+                ``event_bus_substrate`` fixture's ``real_broker`` leg can
+                exercise the same per-call ``auto_offset_reset`` surface
+                ``EventBusSemanticFake`` (omnibase_core) already has, instead
+                of needing a separate ``EventBusKafka`` instance per offset
+                policy under test.
 
         Returns:
             Async unsubscribe function to remove this subscription
@@ -1420,7 +1446,9 @@ class EventBusKafka(
         # calls during cold start.  _pending_consumer_keys (set above under
         # the lock) guards against duplicate starts across concurrent callers.
         if need_consumer_start:
-            await self._start_consumer_for_topic_unlocked(topic, effective_group_id)
+            await self._start_consumer_for_topic_unlocked(
+                topic, effective_group_id, auto_offset_reset_override=auto_offset_reset
+            )
 
         async with self._lock:
             logger.debug(
@@ -1664,7 +1692,11 @@ class EventBusKafka(
         return f"{effective_group_id[:prefix_budget]}-{host_hash}"
 
     async def _start_consumer_for_topic_unlocked(
-        self, topic: str, group_id: str
+        self,
+        topic: str,
+        group_id: str,
+        *,
+        auto_offset_reset_override: str | None = None,
     ) -> None:
         """Start a Kafka consumer without holding the shared lock.
 
@@ -1690,6 +1722,11 @@ class EventBusKafka(
                 group ID (e.g. ``"my-group.__t.events"`` with
                 ``topic="events"``).
 
+            auto_offset_reset_override: Optional per-consumer override of
+                ``auto_offset_reset``. ``None`` (the default) preserves the
+                pre-OMN-15789 behavior of always using
+                ``self._config.auto_offset_reset``.
+
         Raises:
             ProtocolConfigurationError: If group_id is empty or contains only
                 whitespace (must be derived from compute_consumer_group_id or
@@ -1706,6 +1743,11 @@ class EventBusKafka(
             group_id, topic, correlation_id, consumer_key
         )
         resolved_group_instance_id = self._resolve_group_instance_id(effective_group_id)
+        resolved_auto_offset_reset = (
+            auto_offset_reset_override
+            if auto_offset_reset_override is not None
+            else self._config.auto_offset_reset
+        )
 
         # Apply consumer configuration from config model
         consumer = AIOKafkaConsumer(
@@ -1713,7 +1755,7 @@ class EventBusKafka(
             bootstrap_servers=self._bootstrap_servers,
             group_id=effective_group_id,
             group_instance_id=resolved_group_instance_id,
-            auto_offset_reset=self._config.auto_offset_reset,
+            auto_offset_reset=resolved_auto_offset_reset,
             enable_auto_commit=self._config.enable_auto_commit,
             session_timeout_ms=self._config.session_timeout_ms,
             heartbeat_interval_ms=self._config.heartbeat_interval_ms,
@@ -1840,7 +1882,7 @@ class EventBusKafka(
                     bootstrap_servers=self._bootstrap_servers,
                     group_id=effective_group_id,
                     group_instance_id=resolved_group_instance_id,
-                    auto_offset_reset=self._config.auto_offset_reset,
+                    auto_offset_reset=resolved_auto_offset_reset,
                     enable_auto_commit=self._config.enable_auto_commit,
                     session_timeout_ms=self._config.session_timeout_ms,
                     heartbeat_interval_ms=self._config.heartbeat_interval_ms,
@@ -2047,8 +2089,19 @@ class EventBusKafka(
         topic: str,
         group_id: str,
         correlation_id: UUID,
-    ) -> None:
-        """Invoke a single subscriber callback, routing to DLQ on exhausted retries."""
+    ) -> bool:
+        """Invoke a single subscriber callback, routing to DLQ on exhausted retries.
+
+        Returns:
+            ``True`` when it is safe for the partition offset to advance past
+            this message — the callback succeeded, retries remain (so the
+            message is still live), or the DLQ write for an exhausted message
+            was confirmed durable. ``False`` when retries were exhausted AND
+            the DLQ write was NOT confirmed: the message then exists nowhere
+            durable, so the caller must rewind rather than let the offset move
+            (OMN-15232, same discipline as the OMN-14936 gate in
+            ``runtime/event_bus_subcontract_wiring.py``).
+        """
         try:
             await callback(event_message)
         except Exception as e:
@@ -2072,13 +2125,42 @@ class EventBusKafka(
             )
 
             if retries_exhausted:
-                await self._publish_to_dlq(
+                dlq_result = await self._publish_to_dlq(
                     original_topic=topic,
                     failed_message=event_message,
                     error=e,
                     correlation_id=correlation_id,
                     consumer_group=group_id,
                 )
+                # OMN-15232: only an explicit ``False`` counts as a confirmed
+                # non-persist -- duck-typed hosts/test doubles that still
+                # return ``None`` keep their prior behavior, matching the
+                # allowance the OMN-14936 gate makes in
+                # runtime/event_bus_subcontract_wiring.py.
+                dlq_persisted = dlq_result is not False
+                if not dlq_persisted:
+                    # TRY400 suppressed below: the handler traceback was
+                    # already emitted by the logger.exception above; this line
+                    # reports the DLQ persistence outcome, not a second copy of
+                    # that stack.
+                    logger.error(  # noqa: TRY400
+                        "dlq_publish_not_persisted topic=%s subscription_id=%s "
+                        "correlation_id=%s error_type=%s -- retries exhausted and "
+                        "the DLQ write was NOT confirmed; offset will be rewound "
+                        "instead of advancing (OMN-15232)",
+                        topic,
+                        subscription_id,
+                        str(correlation_id),
+                        type(e).__name__,
+                        extra={
+                            "topic": topic,
+                            "group_id": group_id,
+                            "subscription_id": subscription_id,
+                            "correlation_id": str(correlation_id),
+                            "error_type": type(e).__name__,
+                        },
+                    )
+                return dlq_persisted
             else:
                 logger.warning(
                     f"Handler failed but retries available ({retry_count}/{max_retries})",
@@ -2089,6 +2171,110 @@ class EventBusKafka(
                         "max_retries": max_retries,
                     },
                 )
+
+        return True
+
+    async def _rewind_after_unpersisted_dlq(
+        self,
+        consumer: AIOKafkaConsumer,
+        msg: object,
+        topic: str,
+        group_id: str,
+        correlation_id: UUID,
+        failure_stage: str,
+    ) -> None:
+        """Withhold offset advancement after an unconfirmed DLQ write (OMN-15232).
+
+        The consumers this class builds run with
+        ``enable_auto_commit=self._config.enable_auto_commit``, which defaults
+        to ``True``: the client commits the *fetch position* on its own cadence,
+        and this loop never calls ``commit`` itself. So — unlike the manual-commit
+        path in ``runtime/event_bus_subcontract_wiring.py``, where the OMN-14936
+        gate simply returns without committing — merely declining to commit here
+        does nothing. The offset advances anyway and the message is lost.
+
+        The fail-closed action that works under BOTH commit models is a rewind of
+        the fetch position to the failed message's own offset
+        (``consumer.seek(tp, msg.offset)``) — the identical "does NOT advance the
+        committed offset" mechanism ``KafkaTransport.nack`` uses in
+        ``event_bus/kafka_transport.py``. Under auto-commit the committer then
+        commits the rewound position, which cannot be past the message; under
+        manual commit the message is simply refetched. Either way Kafka
+        redelivers and the DLQ write is retried instead of the record being
+        silently dropped.
+
+        Only the failed message's own partition is rewound; sibling partitions
+        are untouched (same per-partition discipline as OMN-14757).
+        """
+        msg_topic = getattr(msg, "topic", None) or topic
+        partition = getattr(msg, "partition", None)
+        offset = getattr(msg, "offset", None)
+
+        if partition is None or offset is None:
+            logger.error(
+                "dlq_unpersisted_rewind_impossible topic=%s stage=%s "
+                "correlation_id=%s -- message carries no partition/offset "
+                "coordinate, so offset advancement cannot be withheld; this "
+                "record may be lost (OMN-15232)",
+                topic,
+                failure_stage,
+                str(correlation_id),
+                extra={
+                    "topic": topic,
+                    "group_id": group_id,
+                    "correlation_id": str(correlation_id),
+                    "failure_stage": failure_stage,
+                },
+            )
+            return
+
+        try:
+            consumer.seek(TopicPartition(msg_topic, int(partition)), int(offset))
+        except Exception as seek_error:
+            logger.exception(
+                "dlq_unpersisted_rewind_failed topic=%s partition=%s offset=%s "
+                "stage=%s correlation_id=%s error=%s -- could NOT withhold offset "
+                "advancement after an unconfirmed DLQ write; this record may be "
+                "lost (OMN-15232)",
+                msg_topic,
+                partition,
+                offset,
+                failure_stage,
+                str(correlation_id),
+                str(seek_error),
+                extra={
+                    "topic": msg_topic,
+                    "group_id": group_id,
+                    "partition": partition,
+                    "offset": offset,
+                    "failure_stage": failure_stage,
+                    "correlation_id": str(correlation_id),
+                },
+            )
+            return
+
+        logger.error(
+            "dlq_unpersisted_offset_rewound topic=%s partition=%s offset=%s "
+            "stage=%s correlation_id=%s -- DLQ persistence was NOT confirmed; "
+            "fetch position rewound so the offset cannot advance past an "
+            "undelivered DLQ write (OMN-15232)",
+            msg_topic,
+            partition,
+            offset,
+            failure_stage,
+            str(correlation_id),
+            extra={
+                "topic": msg_topic,
+                "group_id": group_id,
+                "partition": partition,
+                "offset": offset,
+                "failure_stage": failure_stage,
+                "correlation_id": str(correlation_id),
+            },
+        )
+
+        if DLQ_UNPERSISTED_REWIND_BACKOFF_SECONDS > 0:
+            await asyncio.sleep(DLQ_UNPERSISTED_REWIND_BACKOFF_SECONDS)
 
     async def _emit_consume_loop_error_health_event(
         self,
@@ -2230,7 +2416,7 @@ class EventBusKafka(
                     )
                     # Deserialization errors are permanent failures - route to DLQ
                     # Create minimal message from raw Kafka data for DLQ context
-                    await self._publish_raw_to_dlq(
+                    dlq_result = await self._publish_raw_to_dlq(
                         original_topic=topic,
                         raw_msg=msg,
                         error=e,
@@ -2238,17 +2424,54 @@ class EventBusKafka(
                         failure_type="deserialization_error",
                         consumer_group=effective_consumer_group,
                     )
+                    # OMN-15232: an undeserializable message that did NOT reach
+                    # the DLQ exists nowhere durable. Skipping it here while the
+                    # client auto-commits the position is a silent, committed,
+                    # unrecoverable drop -- the OMN-14936 failure mode at a call
+                    # site that fix did not cover. Rewind instead so Kafka
+                    # redelivers and the DLQ write is retried. Only an explicit
+                    # ``False`` counts as a confirmed non-persist (duck-typed
+                    # hosts returning ``None`` keep prior behavior).
+                    if dlq_result is False:
+                        await self._rewind_after_unpersisted_dlq(
+                            consumer,
+                            msg,
+                            topic,
+                            group_id,
+                            correlation_id,
+                            "deserialization_error",
+                        )
                     continue  # Skip this message but continue consuming
 
                 # Dispatch to all subscribers
+                offset_may_advance = True
                 for _sub_group_id, subscription_id, callback in subscribers:
-                    await self._dispatch_to_subscriber(
+                    dispatch_offset_safe = await self._dispatch_to_subscriber(
                         callback,
                         subscription_id,
                         event_message,
                         topic,
                         group_id,
                         correlation_id,
+                    )
+                    # OMN-15232: same gate on the dispatch path. Every subscriber
+                    # still gets the message (one failing subscriber must not
+                    # starve the others), but if ANY of them exhausted retries
+                    # without a confirmed DLQ record, the offset must not move.
+                    # Redelivery may duplicate for the subscribers that
+                    # succeeded -- at-least-once, which is the delivery contract
+                    # here, and strictly preferable to losing the record.
+                    if dispatch_offset_safe is False:
+                        offset_may_advance = False
+
+                if not offset_may_advance:
+                    await self._rewind_after_unpersisted_dlq(
+                        consumer,
+                        msg,
+                        topic,
+                        group_id,
+                        correlation_id,
+                        "handler_retries_exhausted",
                     )
 
         except asyncio.CancelledError:
@@ -2597,6 +2820,7 @@ class EventBusKafka(
         result, reason = validate_onex_topic_format(topic)
         if result in (
             TopicValidationResult.VALID,
+            TopicValidationResult.VALID_TENANT_WIRE,
             TopicValidationResult.VALID_LEGACY_DLQ,
             TopicValidationResult.SKIPPED_INTERNAL,
         ):
@@ -2751,6 +2975,42 @@ class EventBusKafka(
         retry_count = self._parse_int_header(
             headers_dict.get("retry_count"), 0, "retry_count"
         )
+
+        # OMN-14551: a message republished by node_dlq_replay_effect carries
+        # x-replay-count instead of retry_count (see mixin_kafka_dlq.py's
+        # _REPLAY_COUNT_HEADER doc for the producer/reader contract). When
+        # present it is the authoritative replay lineage counter and wins
+        # over any stale "retry_count" header -- the replay engine never
+        # stamps "retry_count", so its presence here is unrelated/stale data.
+        # Every ModelEventMessage built from this method flows into
+        # _publish_raw_to_dlq (handler_exception / subcontract-wiring call
+        # sites) and _publish_to_dlq (typed path, reads
+        # failed_message.headers.retry_count directly) -- if this conversion
+        # drops the header, both paths reset replay lineage to 0 on every
+        # republish and should_replay's guard never trips (the 2026-08-05
+        # dev DLQ amplification incident).
+        replay_count_str = headers_dict.get(_REPLAY_COUNT_HEADER)
+        if replay_count_str is not None:
+            try:
+                parsed_replay_count = int(replay_count_str)
+            except (ValueError, TypeError):
+                logger.warning(
+                    "Malformed %s header %r, failing closed to stop replay",
+                    _REPLAY_COUNT_HEADER,
+                    replay_count_str,
+                )
+                retry_count = _REPLAY_COUNT_PARSE_FAILURE_SENTINEL
+            else:
+                if parsed_replay_count < 0:
+                    logger.warning(
+                        "Negative %s header value %d, failing closed to stop replay",
+                        _REPLAY_COUNT_HEADER,
+                        parsed_replay_count,
+                    )
+                    retry_count = _REPLAY_COUNT_PARSE_FAILURE_SENTINEL
+                else:
+                    retry_count = parsed_replay_count
+
         max_retries = self._parse_int_header(
             headers_dict.get("max_retries"), 3, "max_retries"
         )

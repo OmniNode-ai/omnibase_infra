@@ -18,6 +18,10 @@ from typing import Literal, Self
 
 from pydantic import BaseModel, ConfigDict, Field, model_validator
 
+from omnibase_infra.topics.model_topic_provisioning_policy import (
+    MANAGED_MINIMUM_REPLICATION_FACTOR,
+)
+
 
 def iam_pattern_authorizes(name: str, patterns: Iterable[str]) -> bool:
     """Return whether ``name`` is authorized by any MSK IAM resource pattern.
@@ -63,7 +67,11 @@ class ModelCanaryNamespace(BaseModel):
         group_start_policy: Consumer group start/reset policy for the canary.
         default_partitions: Conservative per-topic partition count. Final sizing
             is the SS2.8 partition-pressure decision applied at Phase 3.
-        default_replication_factor: Per-topic replication factor.
+        default_replication_factor: Per-topic replication factor. Floored at 2
+            (OMN-15395): this namespace only ever targets the managed cluster,
+            where RF1 is unrecoverable data loss on a single broker failure and
+            blocks broker updates. A regression to 1 fails model validation
+            rather than being caught downstream.
         candidate_contract_roots: Repo-relative roots scanned to extract the
             candidate's contract-owned topic suffixes + subscribing nodes.
     """
@@ -79,7 +87,10 @@ class ModelCanaryNamespace(BaseModel):
     iam_group_patterns: tuple[str, ...] = Field(..., min_length=1)
     group_start_policy: Literal["earliest", "latest", "none"] = "earliest"
     default_partitions: int = Field(default=1, ge=1)
-    default_replication_factor: int = Field(default=2, ge=1)
+    default_replication_factor: int = Field(
+        default=MANAGED_MINIMUM_REPLICATION_FACTOR,
+        ge=MANAGED_MINIMUM_REPLICATION_FACTOR,
+    )
     candidate_contract_roots: tuple[str, ...] = Field(default_factory=tuple)
 
     @model_validator(mode="after")

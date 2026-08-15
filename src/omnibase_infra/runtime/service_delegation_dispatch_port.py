@@ -102,6 +102,67 @@ def _select_delegation_route(
     )
 
 
+def _resolve_delegation_provenance(normalized: Mapping[str, object]) -> str:
+    """Resolve where the delegation actually ran, from the terminal's own fields.
+
+    OMN-15471: this used to be ``normalized.get("provider", "local")``. No real
+    ``delegation-completed.v1`` payload carries a ``provider`` key — that event
+    models the resolved serving endpoint as ``endpoint_url`` plus
+    ``cost_tier_name`` — so the literal default fired on EVERY bus-path
+    delegation and stamped ``provider="local"`` on the durable terminal. A
+    Gemini-routed result (``endpoint_url`` = the Google Generative Language API,
+    ``cost_tier_name`` = ``cheap_cloud``) was recorded as a local-provider run:
+    39/39 ``delegate-skill-completed.v1`` rows read ``local`` on the onex-dev
+    lane and not one of them ran on a local model.
+
+    Provenance is therefore derived ONLY from facts the terminal payload
+    actually carries, in descending order of how directly they identify the
+    serving endpoint:
+
+    1. ``provider`` — an explicit upstream stamp, if a producer ever sets one.
+    2. ``endpoint_url`` — the host that was really called. This is the strongest
+       available provenance fact: it cannot read as local for a cloud call, and
+       for a genuinely local backend it is the private/loopback address, so the
+       local case stays identifiable.
+    3. ``cost_tier_name`` / ``cost_tier_type`` — the resolved routing tier, used
+       only when no endpoint identity survived into the terminal.
+
+    When none of those resolve, the return is the empty string. That is
+    deliberate: an absent provenance must stay absent so the consumer
+    (``handler_delegate_skill._response_from_result``, which reads
+    ``delegated_to or endpoint_url or ""``) falls through its own chain instead
+    of inheriting a fabricated deployment class. Never invent one here.
+    """
+
+    for key in ("provider", "endpoint_url", "cost_tier_name", "cost_tier_type"):
+        value = normalized.get(key)
+        if isinstance(value, str) and value.strip():
+            return value.strip()
+    return ""
+
+
+def _resolve_measured_actual_cost(normalized: Mapping[str, object]) -> float | None:
+    """Resolve non-negative measured spend from the canonical terminal fields.
+
+    The cumulative total is authoritative for a current terminal, while the
+    final-attempt value keeps older/defaulted terminals compatible.  Taking the
+    maximum also enforces the domain invariant that total spend cannot be less
+    than the final attempt, without turning a genuine free-local ``0/0`` into an
+    absent measurement.
+    """
+
+    costs: list[float] = []
+    for key in ("cumulative_attempt_cost", "final_attempt_cost"):
+        value = normalized.get(key)
+        if (
+            isinstance(value, int | float)
+            and not isinstance(value, bool)
+            and value >= 0.0
+        ):
+            costs.append(float(value))
+    return max(costs) if costs else None
+
+
 def _normalize_result_payload(
     *,
     status: str,
@@ -125,13 +186,22 @@ def _normalize_result_payload(
     if error_message:
         normalized["error_message"] = error_message
     normalized.setdefault("model_name", normalized.get("model_used", ""))
-    normalized.setdefault("delegated_to", normalized.get("provider", "local"))
+    # OMN-15471: derive real provenance; never default to the literal "local".
+    normalized.setdefault("delegated_to", _resolve_delegation_provenance(normalized))
     normalized.setdefault(
         "quality_gate_passed", normalized.get("quality_passed", False)
     )
     normalized.setdefault("input_tokens", normalized.get("prompt_tokens", 0))
     normalized.setdefault("output_tokens", normalized.get("completion_tokens", 0))
     normalized.setdefault("delegation_latency_ms", normalized.get("latency_ms", 0))
+    # OMN-15520: the workflow terminal owns measured actual cost.  Total cost
+    # across an escalation ladder is cumulative; single-attempt/legacy
+    # terminals expose only the final attempt.  Preserve an explicit zero by
+    # checking for None rather than truthiness, and overwrite any stale
+    # consumer-shaped ``cost_usd`` with the upstream measurement when present.
+    actual_cost = _resolve_measured_actual_cost(normalized)
+    if actual_cost is not None:
+        normalized["cost_usd"] = actual_cost
     return normalized
 
 
@@ -169,7 +239,7 @@ class RuntimeDelegationDispatchPort:
         prompt: str,
         task_type: str,
         correlation_id: UUID,
-        max_tokens: int,
+        max_tokens: int | None,
         source_file_path: str | None,
         source_session_id: str | None,
         wait: bool,
@@ -177,8 +247,40 @@ class RuntimeDelegationDispatchPort:
         quality_contract_mode: str = "extend_task_class",
         acceptance_criteria: tuple[str, ...] = (),
         tenant_id: str | None = None,
+        backend_id: str | None = None,
+        response_contract: dict[str, object] | None = None,
+        system_prompt: str | None = None,
+        temperature: float | None = None,
+        response_format: dict[str, object] | None = None,
     ) -> dict[str, object]:
         """Dispatch a delegation request and return the terminal result payload."""
+
+        # OmniMarket's consumer-facing handler always supplies these optional
+        # arguments. The deployed bus model does not expose the completion-shaping
+        # fields yet, so None preserves the existing route while explicit requests
+        # fail closed instead of being silently dropped at this boundary.
+        for feature_name, feature_value in (
+            ("system_prompt", system_prompt),
+            ("temperature", temperature),
+            ("response_format", response_format),
+        ):
+            if feature_value is not None:
+                raise NotImplementedError(
+                    f"{feature_name} is not yet supported on the deployed bus "
+                    "dispatch path (RuntimeDelegationDispatchPort); threading it "
+                    "requires the canonical delegation request wire to carry it "
+                    "end to end (OMN-15482)"
+                )
+        if backend_id is not None:
+            raise NotImplementedError(
+                "backend_id pin is not yet supported on the deployed bus "
+                "dispatch path (RuntimeDelegationDispatchPort)"
+            )
+        if response_contract is not None:
+            raise NotImplementedError(
+                "response_contract is not yet supported on the deployed bus "
+                "dispatch path (RuntimeDelegationDispatchPort)"
+            )
 
         routes = self._resolved_routes()
         selected = _select_delegation_route(routes)

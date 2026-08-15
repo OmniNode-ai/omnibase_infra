@@ -20,6 +20,7 @@ Models:
 Stores:
     - StoreIdempotencyInmemory: In-memory store for testing (OMN-945)
     - StoreIdempotencyPostgres: Production PostgreSQL store (OMN-945)
+    - StoreIdempotencySqlite: Durable single-edge SQLite store
 
 Example - InMemory (Testing):
     >>> from omnibase_infra.idempotency import StoreIdempotencyInmemory
@@ -78,6 +79,7 @@ from omnibase_infra.idempotency.protocol_idempotency_store import (
 )
 from omnibase_infra.idempotency.store_inmemory import StoreIdempotencyInmemory
 from omnibase_infra.idempotency.store_postgres import StoreIdempotencyPostgres
+from omnibase_infra.idempotency.store_sqlite import StoreIdempotencySqlite
 
 __all__: list[str] = [
     # Stores
@@ -89,6 +91,7 @@ __all__: list[str] = [
     "ModelIdempotencyStoreMetrics",
     "ModelPostgresIdempotencyStoreConfig",
     "StoreIdempotencyPostgres",
+    "StoreIdempotencySqlite",
     # Protocol
     "ProtocolIdempotencyStore",
 ]

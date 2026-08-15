@@ -57,6 +57,7 @@ from importlib.metadata import PackageNotFoundError, distribution
 from pathlib import Path
 
 __all__ = [
+    "DRIFT_OVERRIDE_ENV",
     "OmnimarketDriftError",
     "canonical_local_omnimarket_commit",
     "check_omnimarket_drift",
@@ -64,6 +65,19 @@ __all__ = [
 ]
 
 logger = logging.getLogger(__name__)
+
+# The single supported way past a drift refusal (OMN-13930). Named in every
+# refusal message so the escape hatch is discoverable from the failure alone.
+#
+# This module NEVER reads it itself: the value arrives as the ``allow_drift``
+# argument, bound at the CLI boundary by click's ``envvar=`` (the same
+# mechanism ``--omni-home`` uses). That keeps this module a pure function of
+# its arguments and keeps the read out of ``src/`` where the
+# ``check-env-reads`` hook (correctly) forbids raw ``os.environ`` access.
+# Click's BOOL conversion is what makes the override fail closed: ``0`` /
+# ``false`` parse as False, and an unparseable value is a hard usage error,
+# so neither one silently disables the guard.
+DRIFT_OVERRIDE_ENV = "ONEX_ALLOW_OMNIMARKET_DRIFT"
 
 # Local `git rev-parse HEAD` only -- this never touches the network, so a
 # generous timeout still keeps the hot path fast.
@@ -126,42 +140,83 @@ def canonical_local_omnimarket_commit(omni_home: str | None = None) -> str | Non
     return sha if len(sha) == 40 else None
 
 
-def check_omnimarket_drift(omni_home: str | None = None) -> None:
+def check_omnimarket_drift(
+    omni_home: str | None = None, *, allow_drift: bool = False
+) -> None:
     """Fail fast if the current venv's omnimarket is missing or has drifted
     from the canonical local clone.
 
-    Fails OPEN (returns silently) only when the canonical local clone cannot
-    be determined -- see the module docstring for why. Never performs
-    network I/O.
+    Refusal is the DEFAULT and is never silently skipped. Two ways past it,
+    both deliberate:
+
+    * Fails OPEN (returns silently) when the canonical local clone cannot be
+      determined -- see the module docstring for why.
+    * Downgrades to a loud WARNING when ``allow_drift`` is True -- the
+      operator's explicit opt-out, bound at the CLI boundary to
+      ``ONEX_ALLOW_OMNIMARKET_DRIFT`` (:data:`DRIFT_OVERRIDE_ENV`,
+      OMN-13930). Every refusal message names that variable, so the escape
+      hatch is discoverable from the failure itself rather than requiring a
+      source read. Before it existed the only workaround was unsetting
+      ``$OMNI_HOME``, which disables the guard globally and SILENTLY --
+      strictly worse than a named, logged override.
+
+    Never performs network I/O.
+
+    Args:
+        omni_home: Canonical workspace root to resolve the reference clone
+            from. ``None`` (no ``$OMNI_HOME``) means "cannot determine" and
+            fails open.
+        allow_drift: Explicit operator opt-out. Keyword-only and defaulting
+            to False so refusal stays the default at EVERY call site,
+            including ones added later -- a forgotten argument fails closed.
 
     Raises:
-        OmnimarketDriftError: a canonical clone IS present locally, and
-            either (a) omnimarket is not installed from git in the current
-            interpreter at all (absent, or a non-VCS/PyPI install), or (b)
-            its installed commit does not match the canonical local clone's
-            HEAD commit.
+        OmnimarketDriftError: a canonical clone IS present locally,
+            ``allow_drift`` is False, and either (a) omnimarket is not
+            installed from git in the current interpreter at all (absent, or
+            a non-VCS/PyPI install), or (b) its installed commit does not
+            match the canonical local clone's HEAD commit.
     """
     canonical = canonical_local_omnimarket_commit(omni_home=omni_home)
     if canonical is None:
         return
     installed = installed_omnimarket_commit()
+    if installed == canonical:
+        return
+
     if installed is None:
-        raise OmnimarketDriftError(
+        detail = (
             "omnimarket is NOT INSTALLED from git in this interpreter "
             "(absent, or installed from PyPI/a non-VCS source), but a "
             f"canonical clone exists at $OMNI_HOME/omnimarket (HEAD "
-            f"{canonical[:12]}). 'onex skill'/'onex run' dispatch for "
-            "market-provided nodes (e.g. node_aislop_sweep) will fail with "
-            "'Unknown node'. Repair with: "
+            f"{canonical[:12]}). 'onex skill'/'onex run'/'onex delegate' "
+            "dispatch for market-provided nodes (e.g. node_aislop_sweep) "
+            "will fail with 'Unknown node'. Repair with: "
             "scripts/install-node-skill-package.sh --execute (or "
-            "scripts/check-omnimarket-venv-drift.sh --repair). "
-            "See docs/runbooks/node-skill-package-install.md."
+            "scripts/check-omnimarket-venv-drift.sh --repair)."
         )
-    if installed != canonical:
-        raise OmnimarketDriftError(
+    else:
+        detail = (
             f"omnimarket venv is STALE: installed commit {installed[:12]} != "
             f"canonical $OMNI_HOME/omnimarket HEAD {canonical[:12]}. Repair with: "
             "scripts/check-omnimarket-venv-drift.sh --repair (or re-run "
-            "scripts/install-node-skill-package.sh --execute directly). "
-            "See docs/runbooks/node-skill-package-install.md."
+            "scripts/install-node-skill-package.sh --execute directly)."
         )
+
+    if allow_drift:
+        # Loud on every dispatch, by design: a silent bypass would recreate
+        # the invisible-drift failure this guard exists to end.
+        logger.warning(
+            "%s DISPATCHING ANYWAY because %s is set -- results from "
+            "market-provided nodes come from an UNVERIFIED omnimarket build "
+            "and must not be treated as evidence.",
+            detail,
+            DRIFT_OVERRIDE_ENV,
+        )
+        return
+
+    raise OmnimarketDriftError(
+        f"{detail} To dispatch anyway despite the drift (results are NOT "
+        f"evidence), set {DRIFT_OVERRIDE_ENV}=1. "
+        "See docs/runbooks/node-skill-package-install.md."
+    )

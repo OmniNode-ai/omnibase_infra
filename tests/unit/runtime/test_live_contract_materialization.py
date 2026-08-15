@@ -18,9 +18,15 @@ from uuid import uuid4
 import pytest
 
 from omnibase_infra.models.handlers import ModelHandlerDescriptor
+from omnibase_infra.runtime.enums.enum_materialization_status import (
+    EnumMaterializationStatus,
+)
 from omnibase_infra.runtime.kafka_contract_source import (
     KafkaContractCache,
     KafkaContractSource,
+)
+from omnibase_infra.runtime.models.model_dynamic_materialization import (
+    ModelDynamicMaterializationResult,
 )
 from omnibase_infra.runtime.runtime_host_process import RuntimeHostProcess
 
@@ -90,6 +96,10 @@ def _make_runtime(**overrides: object) -> RuntimeHostProcess:
     runtime._materialized_resources = None
     runtime._dependency_resolver = None
     runtime._container = None
+    runtime._dispatch_engine = MagicMock()
+    runtime._event_bus = MagicMock()
+    runtime._deployment_topology = MagicMock()
+    runtime._kafka_contract_source = None
     runtime._handler_registry = MagicMock(spec=RegistryProtocolBinding)
 
     runtime._introspection_config = ModelRuntimeIntrospectionConfig()
@@ -154,6 +164,73 @@ class TestKafkaContractSourceGetCachedDescriptor:
 
 class TestMaterializeHandlerLive:
     """Tests for RuntimeHostProcess._materialize_handler_live()."""
+
+    @pytest.mark.asyncio
+    async def test_db_io_delegates_to_typed_kafka_materializer(self) -> None:
+        """Database projections never enter the legacy registry-only path."""
+        source = MagicMock(spec=KafkaContractSource)
+        source.environment = "test-env"
+        source.materialize_cached_contract = AsyncMock(
+            return_value=ModelDynamicMaterializationResult(
+                contract_name="test-node",
+                status=EnumMaterializationStatus.MATERIALIZED,
+            )
+        )
+        runtime = _make_runtime(_kafka_contract_source=source)
+        descriptor = _make_descriptor(
+            contract_config={
+                "db_io": {
+                    "db_tables": [
+                        {
+                            "name": "delegation_events",
+                            "database_ref": "application",
+                            "schema": "tenant",
+                            "migration": "0001.sql",
+                            "access": "read_write",
+                            "role": "events",
+                        }
+                    ]
+                }
+            }
+        )
+
+        result = await runtime._materialize_handler_live(
+            node_name="test-node",
+            descriptor=descriptor,
+            correlation_id=uuid4(),
+        )
+
+        assert result is True
+        source.materialize_cached_contract.assert_awaited_once_with(
+            node_name="test-node",
+            dispatch_engine=runtime._dispatch_engine,
+            event_bus=runtime._event_bus,
+            environment="test-env",
+            container=runtime._container,
+            topology=runtime._deployment_topology,
+        )
+
+    @pytest.mark.asyncio
+    async def test_db_io_rejection_does_not_fall_back_to_legacy_registry(self) -> None:
+        source = MagicMock(spec=KafkaContractSource)
+        source.environment = "test-env"
+        source.materialize_cached_contract = AsyncMock(
+            return_value=ModelDynamicMaterializationResult(
+                contract_name="test-node",
+                status=EnumMaterializationStatus.REJECTED,
+            )
+        )
+        runtime = _make_runtime(_kafka_contract_source=source)
+        descriptor = _make_descriptor(contract_config={"db_io": {"db_tables": []}})
+
+        result = await runtime._materialize_handler_live(
+            node_name="test-node",
+            descriptor=descriptor,
+            correlation_id=uuid4(),
+        )
+
+        assert result is False
+        assert runtime._handlers == {}
 
     @pytest.mark.asyncio
     async def test_materialize_happy_path(self) -> None:

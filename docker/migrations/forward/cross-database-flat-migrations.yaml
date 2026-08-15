@@ -1,0 +1,81 @@
+# SPDX-FileCopyrightText: 2025 OmniNode.ai Inc.
+# SPDX-License-Identifier: MIT
+#
+# Single-sourced ledger of top-level (flat, `docker/migrations/forward/*.sql`,
+# -maxdepth 1) migrations whose FIRST `\connect <db>` directive names a
+# database OTHER than `omnibase_infra` -- the one database the k8s Job that
+# applies this corpus (`omninode_infra` repo,
+# `k8s/migrations/omnibase-infra-migrate.yaml`, `DB_NAME="omnibase_infra"`)
+# ever connects to for the flat-loop `psql -f` apply.
+#
+# WHY THIS MATTERS (OMN-15819)
+#   That Job's flat loop is gated `directive_db == "$DB_NAME"` before it ever
+#   issues the `psql -f` apply -- a cross-DB file's apply step is
+#   unreachable, in that loop or any other in the runner. Before OMN-15819
+#   the skip branch UPSERTed a version/checksum row into `omnibase_infra`'s
+#   OWN `schema_migrations` anyway, so every ledger read said "already
+#   applied" for `098_create_omninode_internal_schema.sql` and
+#   `099_create_omninode_internal_live_events.sql` while
+#   `omnidash_analytics` (their real `\connect` target) never saw either
+#   file. The runner fix (companion PR, `omninode_infra`) stopped writing
+#   that false ledger row and now FATALs the Job for any cross-DB flat file
+#   NOT on its own tombstone allowlist, seeded with exactly those two
+#   entries.
+#
+# WHAT THIS FILE IS
+#   The STATIC counterpart, enforced pre-merge in THIS repo (where the flat
+#   SQL corpus actually lives and where a new file would be added):
+#   `tests/ci/test_flat_migration_no_foreign_connect_gate.py` /
+#   `scripts/ci/check_flat_migration_foreign_connect.py` reject any flat
+#   migration whose \connect targets a foreign database UNLESS it is listed
+#   here, by filename, with a citation. A file is added here in exactly two
+#   circumstances:
+#     * `disposition: undeliverable` -- OMN-15819-confirmed: no code path in
+#       the k8s Job delivers this file to its declared target. Must name the
+#       replacement (a node-owned migration under
+#       `docker/migrations/forward/nodes/<node>/`, which connects directly to
+#       the target database as its own role -- OMN-15819 step 2) if one
+#       exists.
+#     * `disposition: grandfathered` -- pre-existing at the moment this gate
+#       was authored (this PR). Its k8s-Job delivery status was NOT
+#       re-audited by this gate -- do not read a `grandfathered` entry as a
+#       claim that the file is actually delivered anywhere. It is here so
+#       the gate's introduction does not retroactively fail CI on migrations
+#       this PR did not investigate.
+#
+#   A NEW cross-DB flat file is a hard reject. Do not add it here to make
+#   the gate pass -- author a node-owned replacement instead (it is the only
+#   path that actually connects to the target database on the managed/RDS
+#   lane). Adding an entry here without a real citation defeats the point of
+#   the gate.
+#
+# Both directions are enforced: a live cross-DB flat file missing from this
+# manifest fails closed (AC2 -- cannot dodge review by omission), and a
+# manifest entry whose file no longer exists, or no longer targets a foreign
+# database, is a stale-entry failure (remove it).
+entries:
+  - file: 098_create_omninode_internal_schema.sql
+    connect_target: omnidash_analytics
+    disposition: undeliverable
+    citation: >-
+      OMN-15819 -- confirmed undeliverable via the k8s Job. Superseded by docker/migrations/forward/nodes/node_projection_live_events/ (asserts, does not create, the operator-provisioned omninode_internal schema as a guarded precondition of the table it owns).
+  - file: 099_create_omninode_internal_live_events.sql
+    connect_target: omnidash_analytics
+    disposition: undeliverable
+    citation: >-
+      OMN-15819 -- confirmed undeliverable via the k8s Job. Superseded by the node-owned replacement migration under docker/migrations/forward/nodes/node_projection_live_events/.
+  - file: 083_create_log_entries.sql
+    connect_target: omnidash_analytics
+    disposition: undeliverable
+    citation: >-
+      OMN-15846 -- re-audited (was grandfathered). Confirmed undeliverable via the k8s Job: to_regclass('public.log_entries') is NULL in both omnibase_infra and omnidash_analytics on onex-dev RDS (2026-08-10), and omnibase_infra's own schema_migrations carried a false "applied" row masking this. Superseded by docker/migrations/forward/nodes/node_log_persistence_effect/ (node-owned replacement, same content, delivered via the node-owned loop's role_omnidash connection).
+  - file: 096_grant_role_omnidash_omnidash_analytics.sql
+    connect_target: omnidash_analytics
+    disposition: undeliverable
+    citation: >-
+      OMN-15846 -- re-audited (was grandfathered). Confirmed undeliverable via the k8s Job: pg_default_acl for omnidash_analytics/public is empty on onex-dev RDS (2026-08-10), so this file's unconditional ALTER DEFAULT PRIVILEGES step never executed; the false "applied" ledger row masked this. Also unneeded on RDS: role_omnidash already owns 89/90 tables in omnidash_analytics.public there (OMN-15335 two-owner-split migration-principal model, live-verified), which strictly subsumes this file's named grants -- an owner is exempt from RLS and needs no such grant. No node-owned replacement is authored; OMN-15355 (P1, In Review) is the tracked systematic successor (generated ACL/default-privilege matrix covering role_omnidash-owned domains). File remains applicable, unchanged, on the .201 lab lane it was authored for (a different runner, unaffected by this k8s-Job-scoped classification).
+  - file: 097_grant_app_dashboard_connect_omnidash_analytics.sql
+    connect_target: omnidash_analytics
+    disposition: undeliverable
+    citation: >-
+      OMN-15846 -- re-audited (was grandfathered). Confirmed undeliverable via the k8s Job: app_dashboard's USAGE on schema public is granted by pg_database_owner/omninodeadmin, not role_omnibase_infra, on onex-dev RDS (2026-08-10); the false "applied" ledger row masked this. The CONNECT defect this file repairs is latent there today (PUBLIC's CONNECT has not been revoked -- pg_database.datacl still carries PUBLIC=Tc), per this file's own header framing ("the declared target state" pending OMN-15355). No node-owned replacement is authored; OMN-15355 (P1, In Review, explicit app_dashboard acceptance criterion) is the tracked systematic successor. File remains applicable, unchanged, on any lane whose own runner (scripts/run-forward-migrations.sh) can reach omnidash_analytics.

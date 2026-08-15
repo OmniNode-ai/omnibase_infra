@@ -75,6 +75,7 @@ KNOWN_INFRA_PROTOCOLS: dict[str, str] = {
     "DispatchTarget": "runtime/intent_effects/intent_effect_dispatch_bridge.py",  # [RUNTIME] OMN-14516 local bridge target for contract-derived projection intent dispatch
     "CoreTransport": "runtime/core_runtime/composition.py",  # [DI] OMN-14758 S6 combined consumer+producer transport face injected into the ONE core RuntimeDispatch
     "DefBTarget": "runtime/core_runtime/routing_map_builder.py",  # [DI] OMN-14758 S6 def-B handler target (handle(request)->response) returned by the injected handler resolver
+    "ProtocolCutoverJournalRepository": "migration/cutover/protocols/protocol_cutover_journal_repository.py",  # [DI] OMN-15420 cutover journal repository boundary injected into the cutover coordinator
     # === [DI] Dependency injection boundaries ===
     # ProtocolConsulClient removed in OMN-3540 (Consul removal)
     "ProtocolEffectIdempotencyStore": "nodes/node_registry_effect/protocols/protocol_effect_idempotency_store.py",
@@ -108,6 +109,8 @@ KNOWN_INFRA_PROTOCOLS: dict[str, str] = {
     "ProtocolRegistrationPersistence": "nodes/node_registration_storage_effect/protocols/protocol_registration_persistence.py",
     "ProtocolDiscoveryOperations": "nodes/node_service_discovery_effect/protocols/protocol_discovery_operations.py",
     "ProtocolLedgerPersistence": "nodes/node_ledger_write_effect/protocols/protocol_ledger_persistence.py",
+    "ProtocolGatewaySessionStore": "nodes/node_gateway_attach_effect/services/protocol_gateway_session_store.py",  # [NODE] OMN-15750 DI seam so the attach session-store backend (in-process for this slice, Valkey follow-on) is swappable without touching handlers
+    "ProtocolGatewayTransport": "protocols/protocol_gateway_transport.py",  # [NODE] OMN-15922 POST seam for the onex-auth gateway client; infra-internal (not a cross-repo contract, so not spi) and load-bearing as a seam because it is what lets the whole grant -> attach -> re-attach cycle run against an in-memory fake with no socket. Deliberately separate from ProtocolHttpClient: that one is runtime_checkable and already satisfied structurally by adapters implementing exactly get(), so adding a method would silently un-satisfy every one of them
     # [NODE] DI boundaries for NodeSetupOrchestrator — narrow effect interfaces injected via constructor
     "ProtocolPreflightEffect": "nodes/node_setup_orchestrator/protocols/protocol_preflight_effect.py",
     "ProtocolProvisionEffect": "nodes/node_setup_orchestrator/protocols/protocol_provision_effect.py",
@@ -127,8 +130,12 @@ KNOWN_INFRA_PROTOCOLS: dict[str, str] = {
     "ProtocolIntentEffect": "runtime/service_intent_executor.py",
     "ProtocolIntentPayload": "runtime/protocols/protocol_intent_payload.py",
     "ProtocolRuntimeScheduler": "runtime/protocols/protocol_runtime_scheduler.py",
+    "ProtocolContractScopedDispatchEngine": "runtime/protocols/protocol_contract_scoped_dispatch_engine.py",  # [RUNTIME] OMN-15474 exact contract-owned dispatcher scope capability
     "ProtocolSecretResolver": "runtime/config_discovery/models/protocol_secret_resolver.py",
     "ProtocolSecretResolverMetrics": "runtime/secret_resolver.py",
+    "ProtocolDbTableCatalogConnection": "runtime/auto_wiring/protocol_db_table_catalog_connection.py",  # [RUNTIME] OMN-15418 narrow asyncpg catalog-query boundary for typed table ownership validation
+    "ProtocolProjectionTenantBindingResolver": "runtime/projection_tenant_authority.py",  # [DI] OMN-15421 signer-scope-to-tenant authority binding injected at the verification boundary
+    "ProtocolApplicationDatabaseRoleAttributeState": "validation/application_database_acl.py",  # [DI] OMN-15355 shared read-only role-attribute shape for generated ACL policy and observed catalog state
     "ProtocolHandleable": "runtime/auto_wiring/handler_wiring.py",  # [RUNTIME] OMN-7656 auto-wiring dispatch
     "ProtocolDelegationDispatchPort": "runtime/protocols/protocol_delegation_dispatch_port.py",  # [RUNTIME] OMN-E0 delegation dispatch port interface — infra-internal, narrows dispatch surface for handler injection
     # OMN-13445: the 5 ProtocolLocalRuntime* protocols relocated to
@@ -161,8 +168,12 @@ KNOWN_INFRA_PROTOCOLS: dict[str, str] = {
     # [NODE] DI boundary for lifecycle event emission — lets the remote-agent effect
     # test lifecycle publication without coupling the handler to EventBusKafka (OMN-9637).
     "ProtocolLifecycleEventSink": "nodes/node_remote_agent_invoke_effect/services/lifecycle_event_sink.py",
-    # [NODE] OMN-12909 gateway forwarder bus adapter surface for local/cloud bus DI.
-    "ProtocolGatewayBus": "nodes/node_bus_forwarder_effect/services/service_gateway_forwarder.py",
+    # [NODE] OMN-12912 narrow pull-consumer boundary used to enforce explicit
+    # source-offset acknowledgement after durable cross-broker delivery.
+    "ProtocolGatewayConsumer": "nodes/node_bus_forwarder_effect/services/service_gateway_delivery.py",
+    # [NODE] OMN-12912 narrow destination publisher boundary used by the
+    # gateway forwarder without coupling the node service to KafkaTransport.
+    "ProtocolGatewayPublisher": "nodes/node_bus_forwarder_effect/services/service_gateway_forwarder.py",
     # [NODE] OMN-10392 replay compute narrows the AIOKafkaConsumer surface and
     # Kafka record/key shapes for isolated replay handler tests.
     "ProtocolKafkaMessage": "nodes/node_kafka_replay_compute/protocols/protocol_kafka_message.py",

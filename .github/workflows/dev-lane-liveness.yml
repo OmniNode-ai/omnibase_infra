@@ -1,0 +1,111 @@
+# dev-lane-liveness.yml — scheduled lab/dev lane liveness probe (OMN-15190)
+#
+# WHY THIS EXISTS
+#   The lab/dev lane (compose project `omnibase-infra` on the `.201` host) has
+#   been GC/idle-reclaimed to zero containers at least five times (2026-07-13,
+#   07-14, 07-24, 07-26 x2). Every single occurrence was discovered
+#   REACTIVELY, by whichever PR happened to hit the resulting org-wide
+#   occ-autobind / occ-companion-effect connection-refused cascade into
+#   occ-preflight / Receipt Gate. Nothing watched the lane.
+#
+#   Operator ruling 2026-07-29 (WS-4): the lab lane is KEEP-ALIVE — testing
+#   things live is the point of the lab — so lane-down is a DEFECT, not the
+#   ephemeral-by-design state OMN-13414 documented. This workflow is the
+#   surface that says so.
+#
+#   The probe logic is NOT new: `scripts/system_health_check.sh` is the repo's
+#   canonical health gate and already carried most of it. It had zero call
+#   sites. This wires it and adds the lane-specific check (`--lane` mode ->
+#   dev_lane_liveness + redpanda + runtime_containers).
+#
+# WHY A SEPARATE FILE FROM runner-fleet-canary.yml
+#   Same 15-minute cadence, adjacent concern, deliberately NOT the same file.
+#   The fleet canary carries an invariant asserted by
+#   tests/ci/test_runner_listener_liveness.py: EVERY job in that workflow runs
+#   on GitHub-hosted compute, because a canary that shares fate with the fleet
+#   it watches proves nothing. This job must run self-hosted (below), so
+#   folding it in would have meant narrowing that safety test inside a feature
+#   PR — the thing OMN-15234 explicitly split into its own ticket when it had
+#   to narrow a repo-wide gate. Separate file, guard untouched, and the two
+#   red signals stay distinguishable: "the fleet is dying" and "the lane is
+#   dying" are different pages.
+#
+# WHY SELF-HOSTED IS CORRECT HERE (this is not the fleet canary's mistake)
+#   The fate boundary that matters is COMPOSE PROJECT, not host. The watched
+#   thing is project `omnibase-infra`; the watcher is the `omnibase-deploy`
+#   runner in a different project on the same host. The lane has repeatedly
+#   died with the runner fully alive — that IS the observed failure mode.
+#   And it must probe from where the CI publishers actually publish: the
+#   lane's broker host-port is on the tailnet, unreachable from GitHub-hosted
+#   compute, so an ubuntu-latest job could only ever assert "I cannot see it."
+#   `omnibase-deploy` is the one runner with both docker.sock and the
+#   host-gateway alias (docker/docker-compose.runners.yml).
+#
+#   Residual, stated rather than hidden: if the whole `.201` host dies this
+#   job never gets scheduled and reports nothing. That case is covered by
+#   runner-fleet-canary.yml, which runs on GitHub-hosted compute and goes red
+#   on the same cadence.
+#
+# PR-TIME GUARD
+#   Deliberately no `pull_request` trigger: the deploy runner is not a PR
+#   runner, so a PR-triggered job could only skip its own probe. The PR-time
+#   guard is the hermetic suite `tests/ci/test_dev_lane_liveness.py`, which
+#   drives the real bash artifact and asserts this file's wiring (the `--lane`
+#   invocation, `LANE_PROBE_HOST`, `ONEX_LANE_KEEPALIVE`, the schedule, and
+#   the runs-on on both this job and the fleet canary's).
+name: dev-lane-liveness
+
+on:
+  schedule:
+    # Every 15 minutes, offset 7 past the quarter to avoid a thundering herd
+    # with runner-fleet-canary.yml (*/15) — repo cron convention.
+    - cron: "7,22,37,52 * * * *"
+  workflow_dispatch: {}
+
+permissions:
+  contents: read
+
+jobs:
+  dev-lane-liveness:
+    name: dev-lane-liveness
+    # See "WHY SELF-HOSTED IS CORRECT HERE" above before changing this.
+    runs-on: [self-hosted, omnibase-deploy]
+    timeout-minutes: 10
+    steps:
+      - name: Checkout (health gate script + rendered runtime policy)
+        uses: actions/checkout@v4
+        with:
+          # No git operations after checkout — do not leave the Actions token
+          # in local git config (zizmor artipacked).
+          persist-credentials: false
+
+      - name: Probe lab/dev lane liveness
+        env:
+          # Inside the deploy-runner container `localhost` is the container
+          # itself, so the script's on-host default would probe the wrong
+          # network namespace and manufacture a false RED. Set explicitly here
+          # rather than relying on the live container's compose env, which is
+          # only refreshed on recreate (OMN-14958 / OMN-14900).
+          LANE_PROBE_HOST: host.docker.internal
+          # Operator ruling 2026-07-29 (WS-4): lane-down is a defect.
+          ONEX_LANE_KEEPALIVE: "1"
+        run: |
+          set -euo pipefail
+          bash scripts/system_health_check.sh --lane --ci | tee lane-health.json
+
+      - name: Publish lane verdict to job summary
+        if: always()
+        run: |
+          set -uo pipefail
+          {
+            echo "## Lab/dev lane liveness (OMN-15190)"
+            echo ""
+            echo '```json'
+            cat lane-health.json 2>/dev/null \
+              || echo '{"overall":"unknown","detail":"probe produced no output"}'
+            echo '```'
+            echo ""
+            echo "RED here means the lab lane is down or degraded. It is KEEP-ALIVE"
+            echo "by operator ruling — recovery path:"
+            echo "\`docs/runbooks/cold-lane-full-bringup.md\`."
+          } >> "${GITHUB_STEP_SUMMARY}"

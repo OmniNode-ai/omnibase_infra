@@ -81,7 +81,11 @@ die() {
 # to prevent is a stalled/contended local machine, not an untrusted push.
 PREPUSH_200_HOSTNAME="${PREPUSH_200_HOSTNAME:-stickybeatz-studio}"
 guard_full_suite_host() {
-  local host lc_host lc_target
+  local host lc_host lc_target heavy_what
+  # OMN-15408: the caller names WHICH heavyweight run is being guarded, so the
+  # refusal names the real cause. Default preserves the OMN-15059 wording for
+  # the flag-driven escalation call sites, which pass no argument.
+  heavy_what="${1:-heavy fail-closed full-suite escalation}"
   host="$(hostname -s 2>/dev/null || true)"
   if [ -z "$host" ]; then
     log "WARNING: could not determine local hostname -- unable to verify this is the .200 build host; proceeding locally (fail-open: this guard is a routing optimization, not a security gate)."
@@ -93,17 +97,98 @@ guard_full_suite_host() {
     return 0
   fi
   if [ -n "${PREPUSH_ALLOW_LOCAL_FULL_SUITE:-}" ]; then
-    log "WARNING: DEGRADED-HOST OVERRIDE IN EFFECT (PREPUSH_ALLOW_LOCAL_FULL_SUITE set) -- running the full-suite fail-closed escalation on '${host}', NOT the designated .200 host ('${PREPUSH_200_HOSTNAME}'). This host has weaker isolation/headroom than .200; treat any evidence from this run as WEAKER than a .200-run gate. See docs/runbooks/200-build-lane-execution-pattern.md."
+    log "WARNING: DEGRADED-HOST OVERRIDE IN EFFECT (PREPUSH_ALLOW_LOCAL_FULL_SUITE set) -- running ${heavy_what} on '${host}', NOT the designated .200 host ('${PREPUSH_200_HOSTNAME}'). This host has weaker isolation/headroom than .200; treat any evidence from this run as WEAKER than a .200-run gate. See docs/runbooks/200-build-lane-execution-pattern.md."
     return 0
   fi
-  die "heavy fail-closed full-suite escalation triggered on host '${host}', not the designated .200 build host ('${PREPUSH_200_HOSTNAME}')" \
+  die "${heavy_what} triggered on host '${host}', not the designated .200 build host ('${PREPUSH_200_HOSTNAME}')" \
       "push from .200 instead (ssh jonah@stickybeatz-studio.tail75df5e.ts.net, wrap remote commands as zsh -lc \"...\"; see docs/runbooks/200-build-lane-execution-pattern.md for the full pattern), OR set PREPUSH_ALLOW_LOCAL_FULL_SUITE=1 to run the full suite on this host anyway (visible, degraded-evidence override -- do not use as a routine bypass)"
+}
+
+# -----------------------------------------------------------------------------
+# Heavyweight-SELECTION predicate (OMN-15408)
+# -----------------------------------------------------------------------------
+# The OMN-15059 guard above was wired to fire on the selector's `is_full_suite`
+# FLAG. That is the wrong key: the selector routinely emits
+# `is_full_suite=False` with a whole-suite path set -- the entire suite
+# arriving as an "impacted subset" -- and those runs sail straight past the
+# guard. Measured on host `omnibook` through real `git push` runs on
+# 2026-07-29: this repo selected `is_full_suite=False` and executed 2,429 tests
+# in 245s locally with the guard never invoked, and omnimarket (identical
+# predicate, `paths=[ tests/ ]`) executed 13,898 tests in 506s the same way.
+# The SAME selected work forced via `PREPUSH_FULL_SUITE=1` (`is_full_suite=True
+# reason=feature_flag_off paths=[ tests/ ]`) WAS refused, in this repo,
+# verbatim. Identical cost, opposite outcome, decided by a flag.
+#
+# SEAM -- what "heavyweight selection" means, exactly: the selection is
+# heavyweight when the paths pytest is about to be handed COVER THE ENTIRE
+# full-suite target this hook would run on a fail-closed escalation
+# (`$FULL_SUITE_TARGET` -- `tests/unit/` in this repo, since infra's escalation
+# is unit-scoped by design; defined next to the pytest invocation below so the
+# predicate and the actual run can never drift apart). Concretely: some
+# selected path is `$FULL_SUITE_TARGET` itself or a directory ANCESTOR of it
+# (so a bare `tests/` selection, which is strictly MORE than the escalation
+# target, is caught too). That is "the selection failed to be a proper
+# narrowing" expressed against the selector's own output -- NOT a parallel cost
+# model, no test counting, no timing heuristic, nothing this hook does not
+# already parse.
+#
+# The predicate is evaluated against the RUNNABLE path set (post
+# `filter_prepush_runnable_paths`), i.e. exactly the argv pytest receives --
+# never the pre-filter selection, which would let a deferred integration path
+# influence a local-cost decision it has no bearing on.
+#
+# A genuine narrow selection (`tests/unit/scripts/`, a single test module) is
+# strictly below the target and stays runnable locally -- the guard must not
+# brick every push from a developer's machine, only the ones that are the
+# full-suite run wearing a different label.
+#
+# Keep this function self-contained (target passed in, no globals): it is
+# extracted and EXECUTED directly by
+# tests/ci/test_prepush_hook_host_identity_guard.py.
+selection_is_whole_suite() {
+  local target normalized_target p normalized
+  target="$1"
+  shift
+  [ -n "$target" ] || return 1
+  normalized_target="${target%/}/"
+  for p in "$@"; do
+    [ -n "$p" ] || continue
+    normalized="${p%/}/"
+    case "$normalized_target" in
+      "$normalized"*) return 0 ;;
+    esac
+  done
+  return 1
 }
 
 REPO_ROOT="$(git rev-parse --show-toplevel 2>/dev/null)" \
   || die "not inside a git worktree" \
          "run 'git push' from within the omnibase_infra repository"
 cd "$REPO_ROOT"
+
+# =============================================================================
+# bash>=5 canary (OMN-15617)
+# =============================================================================
+# On stickybeatz-studio (.200, the rule-11a default gate host), non-interactive
+# ssh sessions resolve `bash` to the system 3.2.57 shell even though a modern
+# bash 5.x sits at /opt/homebrew/bin/bash -- it just is not first on PATH for
+# that session class. runner-monitor.sh (exercised end-to-end by
+# tests/unit/observability/runner_health/test_runner_monitor_*.py) uses
+# `declare -A`, which bash 3.2 does not support, so those tests fail SILENTLY
+# on every push from this host class -- a bash syntax error deep inside a
+# subprocess, not a resolvable "wrong interpreter" diagnostic.
+#
+# Resolve a bash>=5 interpreter EXPLICITLY here, independent of PATH order,
+# via the same resolver the pytest harness uses (single source of truth --
+# scripts/ci/resolve_modern_bash.sh -- so the two can never drift apart), and
+# export it so the harness does not have to re-discover it. Fail LOUD with a
+# pointed remediation message if none is resolvable anywhere -- never a quiet
+# skip, never a silent fallback to whatever "bash" happens to resolve first.
+MODERN_BASH="$(bash "${REPO_ROOT}/scripts/ci/resolve_modern_bash.sh")" \
+  || die "no bash>=5 interpreter resolvable on this host" \
+         "install a modern bash (e.g. 'brew install bash') and/or set OMNIBASE_INFRA_BASH_BIN to its absolute path; see scripts/ci/resolve_modern_bash.sh"
+export OMNIBASE_INFRA_BASH_BIN="$MODERN_BASH"
+log "bash>=5 canary: resolved ${MODERN_BASH}"
 
 BASE_REF="${PREPUSH_BASE_REF:-origin/dev}"
 
@@ -191,28 +276,97 @@ IS_FULL="$(read_sel is_full_suite)" \
          "the selector emitted non-JSON; inspect $SELECTION_FILE"
 REASON="$(read_sel full_suite_reason 2> /dev/null || true)"
 
-PATHS=()
-PATHS_STR=""
+# OMN-15245 SEAM: the selector now emits changed tests/integration/ paths -- a
+# changed test module is never dropped by narrowing (fail-closed invariant).
+# This hook is unit-scoped by design and passes --ignore=tests/integration to
+# pytest below: handing pytest a path it also ignores collects nothing from it,
+# and when it is the ONLY path pytest exits 5 ("no tests ran") and blocks the
+# push. Filter those out here, visibly -- they are deferred to CI, which runs
+# them. Keep this function self-contained (no globals): it is extracted and
+# EXECUTED by tests/unit/scripts/test_prepush_smart_tests_seam.py.
+filter_prepush_runnable_paths() {
+  local p
+  while IFS= read -r p; do
+    [ -n "$p" ] || continue
+    case "$p" in
+      tests/integration/*) continue ;;
+    esac
+    printf '%s\n' "$p"
+  done
+}
+
+ALL_PATHS=()
 while IFS= read -r p; do
   if [ -n "$p" ]; then
-    PATHS+=("$p")
-    PATHS_STR="${PATHS_STR}${p} "
+    ALL_PATHS+=("$p")
   fi
 done < <(read_sel selected_paths)
 
+PATHS=()
+PATHS_STR=""
+DEFERRED_STR=""
+# Guard the array expansions: bash 3.2 (macOS system bash) errors on
+# "${arr[@]}" for an empty array under `set -u`.
+if [ "${#ALL_PATHS[@]}" -gt 0 ]; then
+  while IFS= read -r p; do
+    if [ -n "$p" ]; then
+      PATHS+=("$p")
+      PATHS_STR="${PATHS_STR}${p} "
+    fi
+  done < <(printf '%s\n' "${ALL_PATHS[@]}" | filter_prepush_runnable_paths)
+  for p in "${ALL_PATHS[@]}"; do
+    case " $PATHS_STR " in
+      *" $p "*) ;;
+      *) DEFERRED_STR="${DEFERRED_STR}${p} " ;;
+    esac
+  done
+fi
+
 log "selection: is_full_suite=${IS_FULL} reason=${REASON:-none} paths=[ ${PATHS_STR}] (feature-flag=${FLAG})"
+if [ -n "$DEFERRED_STR" ]; then
+  log "deferred to CI (integration needs live services; this hook is unit-scoped): [ ${DEFERRED_STR}]"
+fi
 
 # Assemble the pytest target set. tests/integration is always ignored -- it needs
 # real services and stays a CI-only concern. On a fail-closed escalation we run
 # the full UNIT suite (tests/unit/), NOT all of tests/, so the pre-push hook stays
 # unit-scoped and service-free (infra seam-match).
 RC=0
+# SINGLE SOURCE OF TRUTH for "what the heavy run is" (OMN-15408): the
+# fail-closed escalation runs exactly this target, and `selection_is_whole_suite`
+# measures the impacted-subset selection against this same value. Changing the
+# escalation target automatically moves the guard predicate with it.
+FULL_SUITE_TARGET="tests/unit/"
+
+# OMN-15071: git EXPORTS repo-scoping variables into hook processes -- a live
+# `git push` from a worktree hands this hook
+# `GIT_DIR=<common>/worktrees/<name>` -- and those variables OVERRIDE both `-C`
+# and the cwd for every descendant `git` call (memory
+# `reference_git_env_vars_override_c_and_cwd`). Tests that build throwaway
+# repositories under `tmp_path` and commit into them therefore operate on THIS
+# worktree instead, and fail at setup. Unset them for the test run only: the
+# hook has already resolved everything it needs from git, and pytest must
+# rediscover the repository from its own cwd like any ordinary invocation.
+#
+# This is not a latent nicety. Until OMN-15071 chained the canonical-clone
+# guard into the real hook chain, `core.hooksPath` on `.200` meant this hook
+# never executed there at all, so the leak had no observable effect on the
+# documented default gate host. Turning the hook on without this unset would
+# hand every `.200` push a fail-closed pre-push that cannot pass.
+unset GIT_DIR GIT_WORK_TREE GIT_INDEX_FILE GIT_OBJECT_DIRECTORY GIT_COMMON_DIR GIT_PREFIX
+
 if [ "$IS_FULL" = "True" ] || [ "$IS_FULL" = "true" ]; then
   guard_full_suite_host
-  log "running FULL unit suite (fail-closed escalation): uv run pytest tests/unit/ --ignore=tests/integration ${PREPUSH_PYTEST_ARGS:-}"
+  log "running FULL unit suite (fail-closed escalation): uv run pytest ${FULL_SUITE_TARGET} --ignore=tests/integration ${PREPUSH_PYTEST_ARGS:-}"
   # shellcheck disable=SC2086
-  uv run pytest tests/unit/ --ignore=tests/integration --tb=short ${PREPUSH_PYTEST_ARGS:-} || RC=$?
+  uv run pytest "${FULL_SUITE_TARGET}" --ignore=tests/integration --tb=short ${PREPUSH_PYTEST_ARGS:-} || RC=$?
 elif [ "${#PATHS[@]}" -gt 0 ]; then
+  # OMN-15408: guard on the SELECTED WORK, not the is_full_suite flag. A
+  # selection that covers the whole full-suite target is the heavy run under
+  # another name and must be routed to .200 exactly as the flagged escalation is.
+  if selection_is_whole_suite "$FULL_SUITE_TARGET" "${PATHS[@]}"; then
+    guard_full_suite_host "whole-suite-equivalent impacted selection (is_full_suite=${IS_FULL}, selected paths [ ${PATHS_STR}] cover the entire '${FULL_SUITE_TARGET}' escalation target)"
+  fi
   log "running impacted subset: uv run pytest ${PATHS_STR}--ignore=tests/integration ${PREPUSH_PYTEST_ARGS:-}"
   # shellcheck disable=SC2086
   uv run pytest "${PATHS[@]}" --ignore=tests/integration --tb=short ${PREPUSH_PYTEST_ARGS:-} || RC=$?

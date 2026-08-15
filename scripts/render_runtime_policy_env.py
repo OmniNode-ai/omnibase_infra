@@ -116,8 +116,9 @@ def render_env(contract: ModelRuntimePolicyContract) -> dict[str, str]:
             if process_name == "worker":
                 # OMN-12990: pin the worker replica count in the ledgered config
                 # surface so a plain compose recreate cannot silently drop the
-                # worker via the base ${WORKER_REPLICAS:-0} default. The lane
-                # overrides reference ${<PROFILE>_WORKER_REPLICAS:?...} fail-fast.
+                # worker. Every lane compose surface -- the base infra file for
+                # dev (OMN-14968) and the stability-test/prod overlays -- resolves
+                # ${<PROFILE>_WORKER_REPLICAS:?...} fail-fast against these values.
                 env[f"{profile_prefix}_WORKER_REPLICAS"] = str(process.replicas)
             env[f"{prefix}_CAPABILITIES"] = ",".join(process.capabilities)
             env[f"{prefix}_BIFROST_VERIFY_ENDPOINTS"] = _bifrost_text(

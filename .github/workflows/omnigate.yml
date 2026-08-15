@@ -31,7 +31,7 @@ jobs:
           git cat-file -e "${{ github.event.pull_request.base.sha }}^{commit}"
           git cat-file -e "${{ github.event.pull_request.head.sha }}^{commit}"
 
-      - uses: actions/setup-python@v5
+      - uses: actions/setup-python@v7
         with:
           python-version: "3.12"
 

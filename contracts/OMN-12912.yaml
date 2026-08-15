@@ -1,0 +1,50 @@
+schema_version: "1.0.0"
+ticket_id: "OMN-12912"
+title: "Run the Hybrid Gateway as a real two-broker edge process"
+summary: >-
+  Replaces the dormant/private-envelope gateway prototype with a dedicated tenant-scoped process over canonical ModelEventEnvelope records, separate local and cloud Kafka configurations, fixed topic mirroring, tenant-bound admission, liveness heartbeats, and source-retaining destination retries. The production path uses explicit pull/commit transport semantics: destination acknowledgement is followed by a durable edge-local envelope_id marker before the source offset commits, and the marker survives container restart on a named volume to suppress acknowledged redelivery.
+is_seam_ticket: true
+interface_change: true
+interfaces_touched:
+  - "events"
+  - "protocols"
+  - "topics"
+evidence_requirements:
+  - kind: "tests"
+    description: "Gateway config, transform, service, runtime, and topic-gate tests pass."
+    command: >-
+      uv run pytest tests/unit/nodes/node_bus_forwarder_effect tests/unit/runtime/test_gateway_forwarder_runtime.py tests/unit/idempotency/test_store_sqlite.py tests/unit/event_bus/test_event_bus_kafka_topic_gate.py tests/integration/gateway/test_bus_forwarder_contract_integration.py -q
+  - kind: "tests"
+    description: "The forwarder node contract and the complete infra contract set validate."
+    command: >-
+      uv run --frozen python scripts/batch_validate_node_contracts.py --directory src/omnibase_infra/nodes/node_bus_forwarder_effect --verbose && uv run --frozen python scripts/validate.py contracts
+  - kind: "tests"
+    description: "The permanent gateway deployment requires Roles Anywhere, exposes no inbound port, and waits for container health."
+    command: >-
+      uv run pytest tests/unit/infra/test_gateway_compose_credentials.py -q
+emergency_bypass:
+  enabled: false
+  justification: ""
+  follow_up_ticket_id: ""
+dod_evidence:
+  - id: "dod-gateway-focused-suite"
+    description: "The complete changed gateway and durable delivery test surface passes."
+    source: "manual"
+    checks:
+      - check_type: "command"
+        check_value: >-
+          uv run pytest tests/unit/nodes/node_bus_forwarder_effect tests/unit/runtime/test_gateway_forwarder_runtime.py tests/unit/idempotency/test_store_sqlite.py tests/unit/event_bus/test_event_bus_kafka_topic_gate.py tests/integration/gateway/test_bus_forwarder_contract_integration.py -q
+  - id: "dod-gateway-contract-validation"
+    description: "The forwarder and full infrastructure contract sets validate."
+    source: "manual"
+    checks:
+      - check_type: "command"
+        check_value: >-
+          uv run --frozen python scripts/batch_validate_node_contracts.py --directory src/omnibase_infra/nodes/node_bus_forwarder_effect --verbose && uv run --frozen python scripts/validate.py contracts
+  - id: "dod-gateway-short-lived-credentials"
+    description: "The deployment surface rejects static AWS access keys, keeps the edge outbound-only, and is supervised by systemd."
+    source: "manual"
+    checks:
+      - check_type: "command"
+        check_value: >-
+          uv run pytest tests/unit/infra/test_gateway_compose_credentials.py -q

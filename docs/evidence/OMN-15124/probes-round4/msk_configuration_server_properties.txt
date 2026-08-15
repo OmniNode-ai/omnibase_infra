@@ -1,0 +1,6 @@
+auto.create.topics.enable=false
+default.replication.factor=2
+delete.topic.enable=true
+log.retention.hours=168
+min.insync.replicas=1
+num.partitions=3

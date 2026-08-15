@@ -35,6 +35,10 @@ from pathlib import Path
 
 import pytest
 
+from tests.unit.observability.runner_health._resolve_modern_bash import (
+    resolve_modern_bash,
+)
+
 REPO_ROOT = Path(__file__).parents[4]
 MONITOR_SCRIPT = REPO_ROOT / "docker" / "runners" / "runner-monitor.sh"
 FLEET_CONFIG = REPO_ROOT / "config" / "runner_fleet.yaml"
@@ -50,6 +54,13 @@ pytestmark = pytest.mark.unit
 
 
 def _require_tools() -> None:
+    # OMN-15617: resolve a bash>=5 interpreter FIRST, before any
+    # tool-availability skip below. A missing secondary tool (jq) must never
+    # short-circuit this assertion via pytest.skip -- that would silently
+    # mask the exact wrong-interpreter host class this ticket targets
+    # (skip-before-assert is green-by-absence, not a real pass). Fails loud
+    # (pytest.fail via resolve_modern_bash) when no bash>=5 is resolvable.
+    resolve_modern_bash()
     for tool in ("bash", "jq"):
         if shutil.which(tool) is None:
             pytest.skip(f"{tool} not available; shell detection test requires it")
@@ -303,6 +314,14 @@ def _run_monitor(
     if extra_env:
         env.update(extra_env)
 
+    # runner-monitor.sh uses `declare -A` (bash>=4). OMN-15617: resolve a
+    # bash>=5 interpreter EXPLICITLY rather than invoking bare "bash" and
+    # trusting PATH order -- on stickybeatz-studio (.200) non-interactive ssh
+    # resolves the system bash 3.2.57 first, which fails every predicate in
+    # this script silently (a bash syntax error, not a resolvable "wrong
+    # bash" diagnostic).
+    modern_bash = resolve_modern_bash()
+
     # The script reads STATE_FILE via a hardcoded default; override by editing
     # the env the script honors. The script defines STATE_FILE internally, so we
     # pass it through a wrapper that exports our value first.
@@ -315,7 +334,7 @@ def _run_monitor(
             # The script hardcodes STATE_FILE; rewrite that one line on the fly
             # into a temp copy so the test controls the output path.
             sed 's#^STATE_FILE=.*#STATE_FILE="{state_file}"#' "{MONITOR_SCRIPT}" > "{tmp_path}/monitor.sh"
-            bash "{tmp_path}/monitor.sh"
+            "{modern_bash}" "{tmp_path}/monitor.sh"
             """
         ),
         encoding="utf-8",
@@ -323,7 +342,7 @@ def _run_monitor(
     wrapper.chmod(wrapper.stat().st_mode | stat.S_IEXEC)
 
     result = subprocess.run(
-        ["bash", str(wrapper)],
+        [modern_bash, str(wrapper)],
         env=env,
         capture_output=True,
         text=True,

@@ -86,11 +86,22 @@ x-judge-runtime-env: &judge-runtime-env
   ONEX_LOG_LEVEL: ${ONEX_LOG_LEVEL:-INFO}
   ONEX_ENVIRONMENT: judge
   KAFKA_ENVIRONMENT: judge
+  ONEX_DATABASE_TOPOLOGY_PROFILE: judge
   ONEX_TOPIC_PROVISIONER_MAX_PARTITIONS: ${JUDGE_TOPIC_PROVISIONER_MAX_PARTITIONS:?runtime policy contract must set JUDGE_TOPIC_PROVISIONER_MAX_PARTITIONS}
   ONEX_STATE_ROOT: /app/data/.onex_state_judge
   ONEX_STATE_DIR: /app/data/.onex_state_judge
   ONEX_BOX_ID: judge-local
   BIFROST_CONTRACT_PATH: ${BIFROST_CONTRACT_PATH:-/app/data/delegation/bifrost_delegation.yaml}
+  # OMN-15628: judge redefines its own x-runtime-env anchor, so it must carry
+  # the routing-tiers pin explicitly alongside BIFROST_CONTRACT_PATH. Same
+  # in-image path and same fail-closed consumer as the base infra anchor
+  # (docker/docker-compose.infra.yml); see that comment for the full rationale.
+  # OMN-15628/OMN-15645: same canonical value as docker-compose.infra.yml's
+  # x-runtime-env. Judge owns a separate anchor, so it needs the binding
+  # explicitly; it builds from docker/Dockerfile.runtime, which bakes
+  # /app/config/delegation/routing_tiers.yaml from the installed omnimarket
+  # package (glob-derived, no interpreter minor version in the literal).
+  DELEGATION_ROUTING_TIERS_PATH: /app/config/delegation/routing_tiers.yaml
   BIFROST_SOURCE_CONTRACT_PATH: ${BIFROST_SOURCE_CONTRACT_PATH:-}
   LLM_CLOUD_ENDPOINT_HOST_ALLOWLIST: ${LLM_CLOUD_ENDPOINT_HOST_ALLOWLIST:?runtime policy contract must set LLM_CLOUD_ENDPOINT_HOST_ALLOWLIST}
   LLM_CODER_URL: ${LLM_CODER_URL:-https://generativelanguage.googleapis.com}
@@ -417,6 +428,11 @@ services:
       RUNTIME_PROFILE: projection-api
       OTEL_SERVICE_NAME: omnimarket-judge-projection-api
       BIFROST_CONTRACT_PATH: ""
+      # Projection API serves materialized read models and does not invoke the
+      # delegation routing reducer. Keep the judge overlay opt-out explicit so
+      # layered base+judge renders cannot inherit the runtime anchor's routing
+      # tiers path.
+      DELEGATION_ROUTING_TIERS_PATH: ""
     ports: !override
       - "${JUDGE_PROJECTION_API_PORT:-43002}:3002"
     volumes:

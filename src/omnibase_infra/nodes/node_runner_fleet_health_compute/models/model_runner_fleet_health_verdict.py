@@ -10,6 +10,12 @@ OMN-14228 Slice A adds ``github_source_ok``/``docker_source_ok``/
 ``buildx_determinate`` so a future remediation gate can fail CLOSED on
 indeterminate health instead of silently treating a source outage as a
 verified HEALTHY fleet.
+
+OMN-15255 (friction F-04) makes this model the single fleet view: composite
+per-runner readiness, the quarantine set, the bounce-eligible subset, and
+per-signal rollups. It replaces the manual comparison of three surfaces
+(GitHub registry vs ``docker ps`` vs per-container ``_diag`` mtimes) that had
+no adjudicating third surface.
 """
 
 from __future__ import annotations
@@ -19,6 +25,9 @@ from uuid import UUID
 
 from pydantic import BaseModel, ConfigDict, Field
 
+from omnibase_infra.nodes.node_runner_fleet_health_compute.models.model_readiness_signal_rollup import (
+    ModelReadinessSignalRollup,
+)
 from omnibase_infra.nodes.node_runner_fleet_health_compute.models.model_recommended_action import (
     ModelRecommendedAction,
 )
@@ -70,6 +79,49 @@ class ModelRunnerFleetHealthVerdict(BaseModel):
     )
     codeload_throttle_signal_count: int = Field(
         default=0, ge=0, description="Codeload-throttle failure signatures observed."
+    )
+    ready_count: int = Field(
+        default=0,
+        ge=0,
+        description=(
+            "Runners whose composite readiness is READY (OMN-15255). This -- "
+            "not `online_count` -- is the fleet's usable capacity. On "
+            "2026-07-27T16:40Z `online_count` was 64 while 53 containers read "
+            "docker-unhealthy; `ready_count` is the number that reconciles."
+        ),
+    )
+    not_ready_count: int = Field(
+        default=0, ge=0, description="Runners with at least one FAILing signal."
+    )
+    readiness_unknown_count: int = Field(
+        default=0,
+        ge=0,
+        description="Runners with no FAILing signal but at least one undetermined.",
+    )
+    fleet_ready: bool = Field(
+        default=False,
+        description=(
+            "True iff at least one runner is READY and none are NOT_READY. "
+            "A single quarantined runner makes the fleet not-ready as a whole "
+            "-- it does not mean CI is down, it means the fleet view has an "
+            "open item."
+        ),
+    )
+    quarantined_runners: tuple[str, ...] = Field(
+        default_factory=tuple,
+        description="Names of runners marked quarantined (readiness NOT_READY).",
+    )
+    bounce_eligible_runners: tuple[str, ...] = Field(
+        default_factory=tuple,
+        description=(
+            "Subset of `quarantined_runners` for which a force-recreate is a "
+            "defensible remedy. The ONLY source of RESTART_RUNNER "
+            "recommendations (OMN-15255)."
+        ),
+    )
+    readiness_signal_rollups: tuple[ModelReadinessSignalRollup, ...] = Field(
+        default_factory=tuple,
+        description="Per-signal FAIL/UNKNOWN counts across the fleet.",
     )
     recommended_actions: tuple[ModelRecommendedAction, ...] = Field(
         default_factory=tuple,

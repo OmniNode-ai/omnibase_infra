@@ -1,0 +1,344 @@
+# SPDX-FileCopyrightText: 2025 OmniNode.ai Inc.
+# SPDX-License-Identifier: MIT
+"""Non-mutating compose render checks for the dev lane's silent-default holes.
+
+Two fixes of the same class are proven here — a base-compose var with a soft
+`${VAR:-default}` that failed OPEN into a wrong-but-quiet render, replaced by
+the lane-prefixed fail-closed `${DEV_...:?}` form:
+
+OMN-15173 (`DEV_REDPANDA_ADVERTISE_HOST`): the dev lane defaulted its Redpanda
+advertise host to `localhost`, silently rendering an address unreachable by any
+off-host client (CI runner, another machine).
+
+OMN-14968 (`DEV_WORKER_REPLICAS`): the `runtime-worker` deploy block resolved a
+BARE `${WORKER_REPLICAS:-0}` that no surface exported, so the dev lane rendered
+`replicas: 0`. `docker compose up -d --no-deps runtime-worker` then exited 0
+creating NOTHING, while `deploy-runtime.sh`'s `RUNTIME_SERVICES` / RT-6 deploy
+readback requires a running container — so every dev-lane deploy aborted at the
+readback and auto-restored. The lane-prefixed value is the ledgered policy
+contract's (`DEV_WORKER_REPLICAS=1`, rendered from
+`contracts/services/runtime_policy.contract.yaml`), matching what OMN-12988 /
+OMN-12990 already did for the stability-test and prod overlays.
+
+This module only ever invokes `docker compose config` (a non-mutating render)
+— it never brings up, restarts, or otherwise mutates any lane.
+"""
+
+from __future__ import annotations
+
+import os
+import shutil
+import subprocess
+from pathlib import Path
+
+import pytest
+import yaml
+
+REPO_ROOT = Path(__file__).resolve().parents[3]
+COMPOSE_FILE = REPO_ROOT / "docker" / "docker-compose.infra.yml"
+_DEFAULT_POLICY_ENV_FILE = "docker/runtime-policy.env"
+POLICY_ENV_PATH = REPO_ROOT / "docker" / "runtime-policy.env"
+
+# NOTE: docker-compose.infra.yml (bare, no overlay) is the dev lane's own
+# compose file (scripts/deploy-runtime.sh: "Dev lane: infra.yml alone"). A
+# `docker compose config` render interpolates every service's env block
+# regardless of --profile, so every other :?-required var in the file must
+# still be supplied here even though this suite only cares about
+# DEV_REDPANDA_ADVERTISE_HOST. Kept in sync by the
+# tests/ci/test_compose_required_env_coverage.py CI gate, which since OMN-15263
+# checks EVERY registered compose-render fixture (not just the one in
+# tests/integration/docker/test_docker_integration.py). This module mirrors that
+# fixture rather than importing it, matching the existing per-file convention
+# used by test_prod_runtime_compose_render.py /
+# test_stability_test_runtime_compose_render.py.
+#
+# DEV_REDPANDA_ADVERTISE_HOST is deliberately absent below and is registered in
+# that gate as `intentionally_unset` for this module: supplying it here would
+# make test_dev_redpanda_advertise_host_fails_fast_when_unset vacuous.
+_PG_DSN = "postgresql://postgres:test@postgres:5432/omnibase_infra"
+_INTEL_DSN = "postgresql://postgres:test@postgres:5432/omniintelligence"
+_LOCAL_LAN_CIDR = ".".join(("192", "168", "86", "0")) + "/24"
+_SECRET_RESOLVER_CONFIG_JSON = (
+    '{"enable_convention_fallback":false,"mappings":['
+    '{"logical_name":"llm.openrouter.api_key",'
+    '"source":{"source_path":"OPEN_ROUTER_API_KEY","source_type":"env"}}]}'
+)
+_SECRET_RESOLVER_CONFIG_PATH = "/app/data/delegation/secret_resolver.yaml"
+
+# Every :?-required var in docker-compose.infra.yml EXCEPT
+# DEV_REDPANDA_ADVERTISE_HOST, which each test sets (or omits) explicitly.
+BASE_REQUIRED_ENV: dict[str, str] = {
+    "POSTGRES_PASSWORD": "test",
+    "VALKEY_PASSWORD": "test",
+    "INFISICAL_ENCRYPTION_KEY": "0" * 64,
+    "INFISICAL_AUTH_SECRET": "test-auth-secret",
+    "OMNIBASE_INFRA_DB_URL": _PG_DSN,
+    "OMNIINTELLIGENCE_DB_URL": _INTEL_DSN,
+    "INFISICAL_DB_CONNECTION_URI": "postgresql://postgres:test@postgres:5432/infisical_db",
+    "INFISICAL_REDIS_URL": "redis://:test@valkey:6379",
+    "OMNIBASE_INFRA_AGENT_ACTIONS_POSTGRES_DSN": _PG_DSN,
+    "OMNIBASE_INFRA_SKILL_LIFECYCLE_POSTGRES_DSN": _PG_DSN,
+    "OMNIBASE_INFRA_CONTEXT_AUDIT_POSTGRES_DSN": _PG_DSN,
+    "KAFKA_BOOTSTRAP_SERVERS": "localhost:19092",  # kafka-fallback-ok — test fixture
+    "ARCH_GRAPH_BOLT_URI": "bolt://omnibase-infra-memgraph:7687",
+    "ONEX_REGISTRATION_AUTO_ACK": "true",
+    "ONEX_SERVICE_CLIENT_SECRET": "test-service-secret",
+    "LINEAR_API_KEY": "test-linear-api-key",
+    "GITHUB_TOKEN": "test-github-token",
+    "DEPLOY_AGENT_HMAC_SECRET": "render-only-deploy-agent-hmac-secret",
+    "LLM_CODER_URL": "http://llm-coder.test:8000",
+    "LLM_CODER_FAST_URL": "http://llm-coder-fast.test:8001",
+    "LLM_EMBEDDING_URL": "http://llm-embed.test:8100",
+    "LLM_DEEPSEEK_R1_URL": "http://llm-r1.test:8101",
+    "BIFROST_LOCAL_CODER_ENDPOINT_URL": "http://llm-coder.test:8000/v1/chat/completions",
+    "BIFROST_LOCAL_REASONER_ENDPOINT_URL": (
+        "http://llm-coder-fast.test:8001/v1/chat/completions"
+    ),
+    "BIFROST_LOCAL_EMBEDDING_ENDPOINT_URL": (
+        "http://llm-embed.test:8100/v1/chat/completions"
+    ),
+    "BIFROST_LOCAL_DS_V4_FLASH_ENDPOINT_URL": "http://llm-r1.test:8101/v1/chat/completions",
+    "LLM_GLM_URL": "http://llm-glm.test:8102",
+    "LLM_GLM_MODEL_NAME": "glm-4.5",
+    "LLM_GLM_API_KEY": "render-only-glm-api-key",
+    "GEMINI_API_KEY": "render-only-gemini-api-key",
+    "GOOGLE_API_KEY": "render-only-google-api-key",
+    "BIFROST_VERTEX_GEMINI_ENDPOINT_URL": (
+        "https://us-central1-aiplatform.googleapis.com/v1beta1/projects/"
+        "gen-lang-client-0084338881/locations/us-central1/endpoints/openapi/chat/completions"
+    ),
+    "GOOGLE_CLOUD_PROJECT": "gen-lang-client-0084338881",
+    "GOOGLE_CLOUD_LOCATION": "us-central1",
+    "LOCAL_LLM_SHARED_SECRET": "render-only-local-llm-secret",
+    "LLM_ENDPOINT_CIDR_ALLOWLIST": _LOCAL_LAN_CIDR,
+    "LLM_CLOUD_ENDPOINT_HOST_ALLOWLIST": "generativelanguage.googleapis.com,api.z.ai",
+    "AUXILIARY_SERVICES_OMNIMEMORY_ENABLED": "false",
+    "BIFROST_VERIFY_ENDPOINTS": "1",
+    "DEV_RUNTIME_EFFECTS_CAPABILITIES": "effects.consumer,market.skill-proof,runtime.effects",
+    "DEV_RUNTIME_EFFECTS_PORT": "8086",
+    "DEV_RUNTIME_EFFECTS_SECRET_RESOLVER_CONFIG_JSON": _SECRET_RESOLVER_CONFIG_JSON,
+    "DEV_RUNTIME_EFFECTS_SECRET_RESOLVER_CONFIG_PATH": _SECRET_RESOLVER_CONFIG_PATH,
+    "DEV_RUNTIME_MAIN_CAPABILITIES": "market.skill-proof,workflow.orchestration,runtime.main",
+    "DEV_RUNTIME_MAIN_PORT": "8085",
+    "DEV_RUNTIME_MAIN_PUBLISH_INTROSPECTION": "true",
+    "DEV_RUNTIME_MAIN_SECRET_RESOLVER_CONFIG_JSON": _SECRET_RESOLVER_CONFIG_JSON,
+    "DEV_RUNTIME_MAIN_SECRET_RESOLVER_CONFIG_PATH": _SECRET_RESOLVER_CONFIG_PATH,
+    "DEV_RUNTIME_WORKER_CAPABILITIES": "workflow.dispatch,contract.update,runtime.worker",
+    "DEV_RUNTIME_WORKER_SECRET_RESOLVER_CONFIG_JSON": _SECRET_RESOLVER_CONFIG_JSON,
+    "DEV_RUNTIME_WORKER_SECRET_RESOLVER_CONFIG_PATH": _SECRET_RESOLVER_CONFIG_PATH,
+    "OMNIMEMORY_ENABLED": "false",
+    "OMNIMEMORY_MEMGRAPH_PORT": "7687",
+    "ONEX_ACTIVE_RUNTIME_PACKAGES": "omnibase_infra,omnimarket",
+}
+
+# RFC 5737 TEST-NET-2 documentation address — never a real host, avoids
+# asserting against any live LAN/Tailscale identity.
+_OFF_HOST_ADVERTISE_HOST = "198.51.100.50"
+
+
+def _docker_compose_available() -> bool:
+    if shutil.which("docker") is None:
+        return False
+    result = subprocess.run(
+        ["docker", "compose", "version"],
+        check=False,
+        capture_output=True,
+        text=True,
+    )
+    return result.returncode == 0
+
+
+def _render_env(**overrides: str) -> dict[str, str]:
+    env = {
+        "HOME": os.environ.get("HOME", ""),
+        "PATH": os.environ.get("PATH", ""),
+        "USER": os.environ.get("USER", ""),
+        **BASE_REQUIRED_ENV,
+    }
+    env.update(overrides)
+    return env
+
+
+def _run_compose_config(
+    env: dict[str, str],
+    *,
+    policy_env_file: str = _DEFAULT_POLICY_ENV_FILE,
+    profile: str = "",
+) -> subprocess.CompletedProcess[str]:
+    # NOTE: the default arm keeps the literal "--env-file",
+    # "docker/runtime-policy.env" pair on the command line, because
+    # tests/ci/test_compose_required_env_coverage.py discovers this fixture's
+    # env-file coverage by regex over that literal pair. Do not collapse the two
+    # arms into a single interpolated path.
+    command = ["docker", "compose"]
+    if policy_env_file == _DEFAULT_POLICY_ENV_FILE:
+        command += [
+            "--env-file",
+            "docker/runtime-policy.env",
+        ]
+    else:
+        command += ["--env-file", policy_env_file]
+    command += [
+        "-f",
+        str(COMPOSE_FILE),
+    ]
+    if profile:
+        command += ["--profile", profile]
+    command.append("config")
+    return subprocess.run(
+        command,
+        cwd=REPO_ROOT,
+        check=False,
+        capture_output=True,
+        env=env,
+        text=True,
+        timeout=60,
+    )
+
+
+pytestmark = pytest.mark.skipif(
+    not _docker_compose_available(),
+    reason="docker compose is required for non-mutating compose render validation",
+)
+
+
+@pytest.mark.integration
+def test_dev_redpanda_advertise_host_fails_fast_when_unset() -> None:
+    """Unset DEV_REDPANDA_ADVERTISE_HOST must fail the compose render, never
+    silently render a localhost advertise address."""
+    env = _render_env()
+    assert "DEV_REDPANDA_ADVERTISE_HOST" not in env
+
+    result = _run_compose_config(env)
+
+    assert result.returncode != 0, (
+        "docker compose config unexpectedly succeeded with "
+        "DEV_REDPANDA_ADVERTISE_HOST unset:\n" + result.stdout
+    )
+    assert "DEV_REDPANDA_ADVERTISE_HOST" in result.stderr
+
+
+@pytest.mark.integration
+def test_dev_redpanda_advertise_host_uses_explicit_value_when_set() -> None:
+    """An explicitly-set DEV_REDPANDA_ADVERTISE_HOST is honored verbatim —
+    never silently overridden with a localhost fallback."""
+    env = _render_env(DEV_REDPANDA_ADVERTISE_HOST=_OFF_HOST_ADVERTISE_HOST)
+
+    result = _run_compose_config(env)
+
+    assert result.returncode == 0, f"docker compose config failed:\n{result.stderr}"
+    assert f"{_OFF_HOST_ADVERTISE_HOST}:19092" in result.stdout
+    assert f"{_OFF_HOST_ADVERTISE_HOST}:18082" in result.stdout
+    assert "localhost:19092" not in result.stdout
+
+
+@pytest.mark.integration
+def test_dev_lane_renders_one_runtime_worker_replica() -> None:
+    """OMN-14968: the dev lane must render `runtime-worker` with replicas == 1.
+
+    The value is the ledgered policy contract's `DEV_WORKER_REPLICAS`, supplied
+    by `docker/runtime-policy.env`. A render of 0 reproduces the defect: compose
+    creates no container, `up` exits 0 with no output, and the RT-6 deploy
+    readback in `scripts/deploy-runtime.sh` then fails closed on an in-scope
+    service it can never resolve.
+    """
+    env = _render_env(DEV_REDPANDA_ADVERTISE_HOST=_OFF_HOST_ADVERTISE_HOST)
+
+    result = _run_compose_config(env, profile="runtime")
+
+    assert result.returncode == 0, f"docker compose config failed:\n{result.stderr}"
+    rendered = yaml.safe_load(result.stdout)
+    worker = rendered["services"]["runtime-worker"]
+    assert worker["deploy"]["replicas"] == 1, (
+        "dev-lane runtime-worker must render deploy.replicas == 1 (the ledgered "
+        f"DEV_WORKER_REPLICAS); got {worker['deploy']['replicas']!r}"
+    )
+
+
+@pytest.mark.integration
+def test_dev_lane_delegation_routing_tiers_path_binding() -> None:
+    """OMN-15645: DELEGATION_ROUTING_TIERS_PATH must be bound on every runtime
+    service in the dev lane, to a fixed, non-version-embedded in-image path.
+
+    omnimarket#2000 (OMN-15628) removed the packaged-default fallback for this
+    key in the delegation routing reducer's ``_get_config()`` singleton
+    (``resolve_required_path_config("DELEGATION_ROUTING_TIERS_PATH")`` —
+    omnimarket ``handler_delegation_routing.py:392-393``); an unbound key now
+    raises ``ProtocolConfigurationError`` at first config read instead of
+    silently defaulting. The bound value must never be a literal
+    ``python3.X`` site-packages path (a base-image Python version bump would
+    silently invalidate it) — ``docker/Dockerfile.runtime`` bakes the packaged
+    omnimarket ``routing_tiers.yaml`` into this exact fixed location at build
+    time via a glob-derived COPY, so the compose-declared value here is always
+    backed by a real file regardless of the interpreter minor version.
+    """
+    env = _render_env(DEV_REDPANDA_ADVERTISE_HOST=_OFF_HOST_ADVERTISE_HOST)
+
+    result = _run_compose_config(env, profile="runtime")
+
+    assert result.returncode == 0, f"docker compose config failed:\n{result.stderr}"
+    rendered = yaml.safe_load(result.stdout)
+    services = rendered["services"]
+
+    expected_path = "/app/config/delegation/routing_tiers.yaml"
+    for service_name in ("omninode-runtime", "runtime-effects", "runtime-worker"):
+        environment = services[service_name]["environment"]
+        assert environment.get("DELEGATION_ROUTING_TIERS_PATH") == expected_path, (
+            f"Service '{service_name}' must bind DELEGATION_ROUTING_TIERS_PATH="
+            f"{expected_path!r}; got "
+            f"{environment.get('DELEGATION_ROUTING_TIERS_PATH')!r}"
+        )
+        assert "python3." not in environment.get("DELEGATION_ROUTING_TIERS_PATH", ""), (
+            f"Service '{service_name}' binds a version-embedded python3.X literal "
+            "for DELEGATION_ROUTING_TIERS_PATH — the exact trap OMN-15628's "
+            "runtime self-heal exists to correct for a *stale* pin; the compose "
+            "default must be a stable, version-independent path instead."
+        )
+
+    # Services with no delegation-routing surface deliberately opt out (mirrors
+    # the BIFROST_CONTRACT_PATH opt-out pattern for the same two services).
+    for service_name in ("projection-api", "omninode-contract-resolver"):
+        environment = services[service_name]["environment"]
+        assert environment.get("DELEGATION_ROUTING_TIERS_PATH", "") == "", (
+            f"Service '{service_name}' deliberately has no delegation-routing "
+            "surface and must not bind DELEGATION_ROUTING_TIERS_PATH; got "
+            f"{environment.get('DELEGATION_ROUTING_TIERS_PATH')!r}"
+        )
+
+
+@pytest.mark.integration
+def test_dev_worker_replicas_fails_closed_when_policy_value_unset(
+    tmp_path: Path,
+) -> None:
+    """OMN-14968 counter-test: an unset DEV_WORKER_REPLICAS must FAIL the render.
+
+    This is the RED half of the fix. The old bare `${WORKER_REPLICAS:-0}` had no
+    exporter anywhere in the repo, so it always took the silent `0` branch and
+    the lane lost its worker with zero signal. The lane-prefixed `:?` form must
+    abort the render instead — never fall back to a replica count.
+    """
+    policy_without_worker_replicas = tmp_path / "runtime-policy-no-worker.env"
+    policy_without_worker_replicas.write_text(
+        "\n".join(
+            line
+            for line in POLICY_ENV_PATH.read_text(encoding="utf-8").splitlines()
+            if not line.startswith("DEV_WORKER_REPLICAS=")
+        )
+        + "\n",
+        encoding="utf-8",
+    )
+    env = _render_env(DEV_REDPANDA_ADVERTISE_HOST=_OFF_HOST_ADVERTISE_HOST)
+    assert "DEV_WORKER_REPLICAS" not in env
+
+    result = _run_compose_config(
+        env,
+        policy_env_file=str(policy_without_worker_replicas),
+        profile="runtime",
+    )
+
+    assert result.returncode != 0, (
+        "docker compose config unexpectedly succeeded with DEV_WORKER_REPLICAS "
+        "unset — the silent-zero hole is back:\n" + result.stdout
+    )
+    assert "DEV_WORKER_REPLICAS" in result.stderr
+    assert "replicas: 0" not in result.stdout

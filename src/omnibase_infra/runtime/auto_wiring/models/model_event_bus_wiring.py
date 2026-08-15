@@ -20,6 +20,14 @@ class ModelEventBusWiring(BaseModel):
         default_factory=tuple,
         description="Topics this node publishes to",
     )
+    dlq_topics: tuple[str, ...] = Field(
+        default_factory=tuple,
+        description="Contract-declared dead-letter topics",
+    )
+    consumer_group: str | None = Field(
+        default=None,
+        description="Optional contract-declared consumer group identifier",
+    )
     consumer_purpose: str | None = Field(
         default=None,
         description="Optional contract-declared consumer purpose",
@@ -44,4 +52,8 @@ class ModelEventBusWiring(BaseModel):
             "given a defaulted or guessed tenant. Off by default; zero "
             "behavior change for every non-opted-in contract."
         ),
+    )
+    terminal_event: str | None = Field(
+        default=None,
+        description="Optional terminal event topic declared by the event bus",
     )

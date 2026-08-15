@@ -17,10 +17,10 @@ from pathlib import Path
 import pytest
 
 from omnibase_infra.tools.contract_topic_extractor import ContractTopicExtractor
-from omnibase_infra.topics.model_topic_spec import (
-    DEFAULT_EVENT_TOPIC_PARTITIONS,
-    DEFAULT_EVENT_TOPIC_REPLICATION_FACTOR,
+from omnibase_infra.topics.model_topic_provisioning_policy import (
+    ModelTopicProvisioningPolicy,
 )
+from omnibase_infra.topics.model_topic_spec import DEFAULT_EVENT_TOPIC_PARTITIONS
 
 
 def _write_contract(tmp_path: Path, body: str) -> Path:
@@ -140,7 +140,17 @@ def test_spec_builder_maps_topic_config_into_topic_spec(
 
     defaulted = specs["onex.evt.platform.defaulted.v1"]
     assert defaulted.partitions == DEFAULT_EVENT_TOPIC_PARTITIONS
-    assert defaulted.replication_factor == DEFAULT_EVENT_TOPIC_REPLICATION_FACTOR
+    # OMN-15395: an undeclared replication factor stays None ("the contract
+    # declared nothing") instead of silently becoming 1. The environment policy
+    # is the only thing that turns it into a number — and on a managed cluster
+    # it refuses rather than defaulting.
+    assert defaulted.replication_factor is None
+    assert (
+        ModelTopicProvisioningPolicy.self_hosted()
+        .resolve_spec(defaulted)
+        .replication_factor
+        == 1
+    )
     assert defaulted.kafka_config is None
 
 

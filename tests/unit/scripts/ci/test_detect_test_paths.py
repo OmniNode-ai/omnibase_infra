@@ -3,9 +3,14 @@
 from pathlib import Path
 
 import pytest
+from pydantic import ValidationError
 
-from scripts.ci.detect_test_paths import compute_selection, resolve_test_paths
-from scripts.ci.test_selection_models import EnumFullSuiteReason
+from scripts.ci.detect_test_paths import (
+    COLLOCATED_TEST_ROOTS,
+    compute_selection,
+    resolve_test_paths,
+)
+from scripts.ci.test_selection_models import EnumFullSuiteReason, ModelTestSelection
 
 pytestmark = pytest.mark.unit
 
@@ -30,12 +35,17 @@ def test_test_only_change_runs_only_changed_test_dir() -> None:
     assert paths == ["tests/unit/nodes/"]
 
 
-def test_integration_test_only_change_does_not_select_unit_tests() -> None:
-    # Integration test changes do not contribute to unit-job selection;
-    # the integration job runs all integration tests on every PR anyway.
+def test_integration_test_change_selects_its_own_directory() -> None:
+    # OMN-15245. This test previously asserted `paths == []` on the premise
+    # that "the integration job runs all integration tests on every PR anyway".
+    # That premise is false: no CI job runs all of tests/integration/ on a PR.
+    # `test-parallel` is the only job that runs it, and in smart-selection mode
+    # it runs ONLY selected_paths -- so dropping integration paths here meant a
+    # changed integration module was never collected on its own PR (recorded
+    # live on OMN-15263 / omnibase_infra#2504).
     changed_files = ["tests/integration/nodes/test_foo.py"]
     paths = resolve_test_paths(changed_files, adjacency_path=ADJ)
-    assert paths == []
+    assert paths == ["tests/integration/nodes/"]
 
 
 def test_ci_process_change_selects_ci_tests() -> None:
@@ -45,6 +55,25 @@ def test_ci_process_change_selects_ci_tests() -> None:
         "config/runner_routing_policy.yaml",
     ]
     paths = resolve_test_paths(changed_files, adjacency_path=ADJ)
+    # tests/ci/ for the CI-process mapping, plus (OMN-15245) the two families
+    # that exercise scripts/ — scripts/ci/ci_summary_gate.py is a scripts/ file
+    # — plus (OMN-15410) the collocated roots that live inside scripts/ itself
+    # and are collected via pyproject testpaths.
+    assert paths == [
+        "scripts/ci/tests/",
+        "scripts/tests/",
+        "tests/ci/",
+        "tests/scripts/",
+        "tests/unit/scripts/",
+    ]
+
+
+def test_workflow_only_change_selects_ci_tests_alone() -> None:
+    # No scripts/ file in this diff → no scripts test families.
+    paths = resolve_test_paths(
+        [".github/workflows/ci.yml", "config/runner_routing_policy.yaml"],
+        adjacency_path=ADJ,
+    )
     assert paths == ["tests/ci/"]
 
 
@@ -171,10 +200,13 @@ def test_small_change_returns_smart_selection_no_reason() -> None:
 
 
 def test_no_matching_non_doc_files_falls_back_to_unit_root() -> None:
-    # An unclassified, non-doc change (no src/, tests/unit/, CI-process, or
-    # docs mapping) has no unit-test mapping → conservative fallback.
+    # An unclassified, non-doc change (no src/, tests/, scripts/, CI-process,
+    # or docs mapping) has no test mapping → conservative fallback.
+    # NOTE (OMN-15245): this used to be probed with a scripts/*.sh path, which
+    # is no longer unclassified — scripts/ now maps to the tests that actually
+    # exercise it. Probed here with a docker catalog manifest instead.
     selection = compute_selection(
-        changed_files=["scripts/some_new_uncategorized_tool.sh"],
+        changed_files=["docker/catalog/services/some_new_service.yaml"],
         adjacency_path=ADJ,
         ref_name="pr-branch",
     )
@@ -248,7 +280,7 @@ def test_docs_plus_unclassified_code_change_falls_back_not_exempt() -> None:
     selection = compute_selection(
         changed_files=[
             "docs/runbooks/foo.md",
-            "scripts/some_new_uncategorized_tool.sh",
+            "docker/catalog/services/some_new_service.yaml",
         ],
         adjacency_path=ADJ,
         ref_name="pr-branch",
@@ -318,3 +350,404 @@ def test_full_suite_split_count_is_15() -> None:
     )
     assert selection.split_count == 15
     assert len(selection.matrix) == 15
+
+
+# ---------------------------------------------------------------------------
+# OMN-15245: changed-test coverage invariant (fail-closed)
+#
+# Invariant: any CHANGED path under tests/ is covered by the emitted selection.
+# Narrowing may add tests, never drop a test file the diff itself touched.
+#
+# Two recorded live instances are replayed verbatim below. Both produced a green
+# CI run that never collected the changed test modules:
+#   * OMN-15218 / omnibase_infra#2493 -- scripts/ + tests/scripts/ diff selected
+#     ["tests/unit/"] (22053 tests, none of them the 47 new ones).
+#   * OMN-15263 / omnibase_infra#2504 -- six-test-file diff selected
+#     ["tests/ci/"] (run 30296123866, Detect Changes job 90082641865); the five
+#     changed tests/integration/** modules were never collected on the very PR
+#     that existed to repair them.
+# ---------------------------------------------------------------------------
+
+# Recorded diff, OMN-15218 / omnibase_infra#2493.
+OMN_15218_DIFF = [
+    "scripts/preflight_lane_deploy_attribution.py",
+    "scripts/deploy-runtime.sh",
+    "scripts/runtime_build/refresh_stability_lane.sh",
+    "tests/scripts/test_preflight_lane_deploy_attribution.py",
+    "tests/scripts/test_deploy_runtime_lane_attribution.py",
+]
+
+# Recorded diff, OMN-15263 / omnibase_infra#2504.
+OMN_15263_DIFF = [
+    "tests/ci/test_compose_required_env_coverage.py",
+    "tests/integration/docker/test_docker_integration.py",
+    "tests/integration/infra/test_dev_runtime_compose_render.py",
+    "tests/integration/infra/test_judge_compose_render.py",
+    "tests/integration/infra/test_prod_runtime_compose_render.py",
+    "tests/integration/infra/test_stability_test_runtime_compose_render.py",
+]
+
+
+def _is_collected_by(selected_paths: list[str], changed_path: str) -> bool:
+    """True when pytest, given `selected_paths`, would collect `changed_path`."""
+    return any(changed_path.startswith(sel) for sel in selected_paths)
+
+
+def test_omn15218_scripts_diff_selects_the_changed_test_modules() -> None:
+    selection = compute_selection(
+        changed_files=OMN_15218_DIFF,
+        adjacency_path=ADJ,
+        ref_name="pr-branch",
+    )
+    uncollected = [
+        p
+        for p in OMN_15218_DIFF
+        if p.startswith("tests/") and not _is_collected_by(selection.selected_paths, p)
+    ]
+    assert not uncollected, (
+        f"changed test files dropped by narrowing: {uncollected} "
+        f"(selection={selection.selected_paths})"
+    )
+    # The recorded fail-open output, asserted as a non-result.
+    assert selection.selected_paths != ["tests/unit/"]
+
+
+def test_omn15263_test_file_diff_selects_the_changed_integration_modules() -> None:
+    selection = compute_selection(
+        changed_files=OMN_15263_DIFF,
+        adjacency_path=ADJ,
+        ref_name="pr-branch",
+    )
+    # tests/integration/docker/ is excluded by design (see the docker carve-out
+    # test below); every other changed test path must be collected.
+    expected_collected = [
+        p for p in OMN_15263_DIFF if not p.startswith("tests/integration/docker/")
+    ]
+    uncollected = [
+        p
+        for p in expected_collected
+        if not _is_collected_by(selection.selected_paths, p)
+    ]
+    assert not uncollected, (
+        f"changed test files dropped by narrowing: {uncollected} "
+        f"(selection={selection.selected_paths})"
+    )
+    assert "tests/ci/" in selection.selected_paths
+    assert "tests/integration/infra/" in selection.selected_paths
+    # The recorded fail-open output, asserted as a non-result.
+    assert selection.selected_paths != ["tests/ci/"]
+
+
+@pytest.mark.parametrize(
+    "changed_test_path",
+    [
+        "tests/scripts/test_some_script.py",
+        "tests/integration/runtime/test_some_seam.py",
+        "tests/nodes/test_some_node.py",
+        "tests/services/test_some_service.py",
+        "tests/replay/test_some_replay.py",
+        "tests/audit/test_some_audit.py",
+        "tests/redeploy/test_some_redeploy.py",
+        "tests/ci/test_some_ci_gate.py",
+        "tests/unit/cli/test_some_cli.py",
+    ],
+)
+def test_changed_test_file_is_never_dropped_by_narrowing(
+    changed_test_path: str,
+) -> None:
+    selection = compute_selection(
+        changed_files=[changed_test_path],
+        adjacency_path=ADJ,
+        ref_name="pr-branch",
+    )
+    assert _is_collected_by(selection.selected_paths, changed_test_path), (
+        f"{changed_test_path} not collected by {selection.selected_paths}"
+    )
+
+
+def test_changed_test_file_survives_alongside_a_source_change() -> None:
+    # Mixed diff: the source mapping and the changed-test coverage must BOTH
+    # be present -- the test file is additive, not a replacement.
+    changed = [
+        "src/omnibase_infra/cli/foo.py",
+        "tests/integration/runtime/test_some_seam.py",
+    ]
+    selection = compute_selection(
+        changed_files=changed,
+        adjacency_path=ADJ,
+        ref_name="pr-branch",
+    )
+    assert "tests/unit/cli/" in selection.selected_paths
+    assert _is_collected_by(
+        selection.selected_paths, "tests/integration/runtime/test_some_seam.py"
+    )
+
+
+def test_changed_docker_integration_test_is_not_selected() -> None:
+    # Documented carve-out, NOT a fail-open: tests/integration/docker/ is
+    # --ignore'd by BOTH pytest steps in ci.yml (smart and full suite), so
+    # selecting it can never make it run -- it would only make pytest exit 5
+    # ("no tests ran") when it is the sole selected path. That family has its
+    # own gate: docker-build.yml runs tests/integration/docker/ on a paths
+    # filter that includes tests/integration/docker/**.
+    selection = compute_selection(
+        changed_files=["tests/integration/docker/test_docker_integration.py"],
+        adjacency_path=ADJ,
+        ref_name="pr-branch",
+    )
+    assert "tests/integration/docker/" not in selection.selected_paths
+    # Falls back to the conservative unit root rather than emitting nothing.
+    assert selection.selected_paths == ["tests/unit/"]
+
+
+def test_test_file_at_tests_root_escalates_to_full_suite() -> None:
+    # A changed test path directly under tests/ cannot be narrowed below
+    # "tests/" itself. Emitting "tests/" as a 1-split smart selection would run
+    # the whole suite on one shard with the smart step's timeouts; escalate to
+    # the real 15-split full suite instead.
+    selection = compute_selection(
+        changed_files=["tests/test_compose_profile_teardown_policy.py"],
+        adjacency_path=ADJ,
+        ref_name="pr-branch",
+    )
+    assert selection.is_full_suite is True
+    assert selection.full_suite_reason == EnumFullSuiteReason.CHANGED_TEST_UNNARROWABLE
+    assert selection.split_count == 15
+
+
+def test_markdown_under_tests_does_not_force_a_test_selection() -> None:
+    # The coverage invariant is about executable test modules. A .md file under
+    # tests/ is still provably inert (OMN-14753 docs-only exemption).
+    selection = compute_selection(
+        changed_files=["tests/replay/README.md"],
+        adjacency_path=ADJ,
+        ref_name="pr-branch",
+    )
+    assert selection.is_full_suite is False
+    assert selection.selected_paths == []
+
+
+# ---------------------------------------------------------------------------
+# OMN-15245: scripts/ family mapping
+# ---------------------------------------------------------------------------
+
+
+def test_scripts_change_selects_the_tests_that_exercise_scripts() -> None:
+    # scripts/ in this repo holds deploy-path and governance-guard code. Its
+    # tests live in tests/scripts/ and tests/unit/scripts/; before OMN-15245 a
+    # scripts/ change mapped to neither (it fell through to the blanket
+    # tests/unit/ fallback, which exercises none of them).
+    selection = compute_selection(
+        changed_files=["scripts/deploy-runtime.sh"],
+        adjacency_path=ADJ,
+        ref_name="pr-branch",
+    )
+    assert selection.is_full_suite is False
+    assert "tests/scripts/" in selection.selected_paths
+    assert "tests/unit/scripts/" in selection.selected_paths
+
+
+def test_migration_tree_change_selects_the_fence_parity_ratchet() -> None:
+    # OMN-15336 item 4 repair follow-up: docker/migrations/forward/ lives
+    # outside src/, scripts/, and tests/, so a change there (the grandfather
+    # manifest, a new node .sql, or its _ledger row) previously produced NO
+    # selection at all and fell through to the tests/unit/ fallback -- which
+    # does not contain tests/scripts/test_node_migration_fence_parity.py, the
+    # ratchet guarding the FORCE-RLS grandfather snapshot against a laundered
+    # addition. Reproduces the realistic breach set: the grandfather
+    # manifest, a new FORCE-RLS .sql, and its ledger row.
+    selection = compute_selection(
+        changed_files=[
+            "docker/migrations/forward/grandfathered-force-rls-migrations.yaml",
+            "docker/migrations/forward/nodes/node_projection_savings/"
+            "0099_new_force_rls_breach.sql",
+            "docker/migrations/forward/_ledger/application-migrations.tsv",
+        ],
+        adjacency_path=ADJ,
+        ref_name="pr-branch",
+    )
+    assert selection.is_full_suite is False
+    assert "tests/scripts/" in selection.selected_paths
+    # ADDITIVE fix-forward: tests/unit/ must ALSO be selected. The first cut
+    # of this mapping gave migration-tree changes their own non-empty
+    # selection, which silently suppressed `compute_selection`'s
+    # `if not selected: selected = ["tests/unit/"]` fallback -- turning an
+    # addition into a swap and dropping real tests/unit/ coverage
+    # (tests/unit/migrations/, test_schema_fingerprint.py, etc.) for exactly
+    # this class of change. See MIGRATION_TREE_PREFIX's comment.
+    assert "tests/unit/" in selection.selected_paths
+    # Still deliberately NOT tests/unit/scripts/ -- the ratchet lives only in
+    # tests/scripts/, and this keeps the ratchet-specific footprint to that
+    # directory (tests/unit/ above is the separately-justified blanket
+    # fallback restoration, not a scripts/-style targeted mapping).
+    assert "tests/unit/scripts/" not in selection.selected_paths
+
+
+def test_ordinary_migration_change_selects_both_ratchet_and_unit_fallback() -> None:
+    # OMN-15336 fix-forward: the common case is NOT a FORCE-RLS breach -- it's
+    # an ordinary new node migration .sql plus its _ledger row, no
+    # grandfather YAML involved. Before this fix, giving MIGRATION_TREE_PREFIX
+    # its own selection swapped this diff's coverage from the whole
+    # tests/unit/ tree down to tests/scripts/ alone (the exact
+    # under-selection false-green class the selector doctrine warns about).
+    # It must select both: the fence-parity ratchet AND the pre-existing
+    # tests/unit/ coverage this class of change always had via the
+    # conservative fallback.
+    selection = compute_selection(
+        changed_files=[
+            "docker/migrations/forward/nodes/node_projection_registration/"
+            "0004_node_service_registry_no_force_rls.sql",
+            "docker/migrations/forward/_ledger/application-migrations.tsv",
+        ],
+        adjacency_path=ADJ,
+        ref_name="pr-branch",
+    )
+    assert selection.is_full_suite is False
+    assert "tests/scripts/" in selection.selected_paths
+    assert "tests/unit/" in selection.selected_paths
+
+
+def test_scripts_ci_change_still_selects_ci_process_tests() -> None:
+    # No regression on the existing CI-process mapping: scripts/ci/ keeps
+    # selecting tests/ci/, and now also picks up the scripts test families.
+    selection = compute_selection(
+        changed_files=["scripts/ci/detect_test_paths.py"],
+        adjacency_path=ADJ,
+        ref_name="pr-branch",
+    )
+    assert "tests/ci/" in selection.selected_paths
+    assert "tests/unit/scripts/" in selection.selected_paths
+
+
+# ---------------------------------------------------------------------------
+# OMN-15410: collocated test roots must be selectable by a NARROWED run
+#
+# The four roots collected by OMN-15410 live next to their code, not under
+# tests/. Adding them to pyproject `testpaths` only makes the FULL suite run
+# them; a narrowed smart-selection run reaches nothing it is not explicitly
+# mapped to. Without these mappings the roots would be "collected" only in the
+# sense that an unrelated escalation might happen to run them — a weaker
+# guarantee than the OMN-15378 class demands.
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.parametrize(
+    ("changed_file", "expected_root"),
+    [
+        ("scripts/ci/ci_summary_gate.py", "scripts/ci/tests/"),
+        ("scripts/seed-keycloak-clients.py", "scripts/tests/"),
+        (
+            "scripts/runtime_build/refresh_stability_lane.sh",
+            "scripts/runtime_build/tests/",
+        ),
+        (
+            "src/omnibase_infra/services/observability/agent_actions/consumer.py",
+            "src/omnibase_infra/services/observability/agent_actions/tests/",
+        ),
+    ],
+)
+def test_collocated_root_is_selected_by_a_change_to_its_own_code(
+    changed_file: str, expected_root: str
+) -> None:
+    selection = compute_selection(
+        changed_files=[changed_file],
+        adjacency_path=ADJ,
+        ref_name="pr-branch",
+    )
+    assert selection.is_full_suite is False, (
+        "this case must prove NARROWED selection reaches the root, not that an "
+        "escalation ran everything"
+    )
+    assert expected_root in selection.selected_paths, (
+        f"{changed_file} did not select its collocated test root "
+        f"{expected_root} (selection={selection.selected_paths})"
+    )
+
+
+def test_selected_path_contract_admits_collocated_roots_but_not_source_dirs() -> None:
+    """OMN-15410 widened ``TestPath`` — prove it widened, and no further.
+
+    The original pattern accepted only ``tests/...``, so ``ModelTestSelection``
+    raised ``string_pattern_mismatch`` the moment the selector tried to emit a
+    collocated root. The replacement still requires the final path component to
+    be ``tests``, so the selector cannot hand pytest a source directory.
+    """
+    for root in COLLOCATED_TEST_ROOTS.values():
+        ModelTestSelection(
+            selected_paths=[root],
+            split_count=1,
+            is_full_suite=False,
+            matrix=[1],
+        )
+
+    for rejected in (
+        "src/omnibase_infra/services/",  # a source dir, not a tests dir
+        "scripts/ci/tests",  # missing trailing slash
+        "scripts/ci/testsuite/",  # `tests` must be the whole component
+    ):
+        with pytest.raises(ValidationError):
+            ModelTestSelection(
+                selected_paths=[rejected],
+                split_count=1,
+                is_full_suite=False,
+                matrix=[1],
+            )
+
+
+def test_collocated_test_roots_all_exist_on_disk() -> None:
+    # A mapping to a directory that does not exist would hand pytest a bad
+    # path; _resolve filters those out silently, so the mapping would be a
+    # no-op rather than an error. Assert the real thing instead.
+    for source_prefix, root in COLLOCATED_TEST_ROOTS.items():
+        assert (REPO_ROOT / root).is_dir(), (
+            f"COLLOCATED_TEST_ROOTS maps {source_prefix!r} -> {root!r}, which is "
+            "not a directory; the selector would silently drop it."
+        )
+
+
+# ---------------------------------------------------------------------------
+# OMN-15245: no-regression -- narrowing still works for pure src diffs
+# ---------------------------------------------------------------------------
+
+
+def test_pure_src_diff_still_narrows_to_module_tests() -> None:
+    selection = compute_selection(
+        changed_files=["src/omnibase_infra/cli/foo.py"],
+        adjacency_path=ADJ,
+        ref_name="pr-branch",
+    )
+    assert selection.is_full_suite is False
+    assert selection.full_suite_reason is None
+    assert selection.selected_paths == ["tests/unit/cli/"]
+    assert selection.split_count == 1
+
+
+def test_pure_src_diff_with_reverse_deps_still_narrows() -> None:
+    selection = compute_selection(
+        changed_files=["src/omnibase_infra/services/foo.py"],
+        adjacency_path=ADJ,
+        ref_name="pr-branch",
+    )
+    assert selection.is_full_suite is False
+    assert selection.selected_paths == sorted(
+        f"tests/unit/{m}/"
+        for m in ("services", "adapters", "dlq", "handlers", "runtime")
+    )
+    # The whole tests/ tree is NOT selected -- narrowing is still real.
+    assert "tests/" not in selection.selected_paths
+    assert not any(p.startswith("tests/integration/") for p in selection.selected_paths)
+
+
+def test_shared_module_escalation_unchanged_by_coverage_invariant() -> None:
+    # A shared-module diff that ALSO changes a test file still escalates to the
+    # full suite -- escalation outranks the additive coverage rule.
+    selection = compute_selection(
+        changed_files=[
+            "src/omnibase_infra/models/foo.py",
+            "tests/integration/runtime/test_some_seam.py",
+        ],
+        adjacency_path=ADJ,
+        ref_name="pr-branch",
+    )
+    assert selection.is_full_suite is True
+    assert selection.full_suite_reason == EnumFullSuiteReason.SHARED_MODULE

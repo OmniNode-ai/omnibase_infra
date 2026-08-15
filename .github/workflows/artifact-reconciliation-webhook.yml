@@ -21,14 +21,22 @@ on:
   pull_request:
     types: [opened, synchronize, closed, reopened]
 
+concurrency:
+  group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}
+  # OMN-15730 / CodeRabbit: this job publishes a durable Kafka event with no
+  # reconciliation/replay path downstream. cancel-in-progress:true can kill
+  # the publish step mid-flight on a rapid-fire event sequence (e.g.
+  # synchronize immediately followed by closed), permanently dropping that
+  # lifecycle event. Do not cancel in-flight runs of this workflow.
+  cancel-in-progress: false
+
 jobs:
   publish-pr-webhook:
     name: Publish PR Webhook Event
     runs-on: >-
       ${{
-        ((github.event_name == 'pull_request' && github.base_ref == 'dev') ||
-         (github.event_name == 'pull_request' &&
-          github.event.pull_request.head.repo.full_name != github.repository))
+        (github.event_name == 'pull_request' &&
+         github.event.pull_request.head.repo.full_name != github.repository)
         && fromJSON(vars.OMNI_PUBLIC_PR_RUNS_ON_JSON || '["ubuntu-latest"]')
         || fromJSON(vars.OMNI_TRUSTED_CI_RUNS_ON_JSON || '["self-hosted","omnibase-ci"]')
       }}
