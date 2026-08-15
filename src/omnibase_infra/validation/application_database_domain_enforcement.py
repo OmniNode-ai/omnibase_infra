@@ -574,6 +574,88 @@ def _leading_ctes(
     return recursive, tuple(definitions), statement[index:]
 
 
+_VIEW_HEAD_MODIFIERS: tuple[str, ...] = (
+    "or",
+    "replace",
+    "temp",
+    "temporary",
+    "unlogged",
+    "recursive",
+    "materialized",
+)
+
+
+def _view_query_offset(statement: str) -> int | None:
+    """Return the offset of the query body in a ``CREATE ... VIEW ... AS`` statement.
+
+    A view body may open with its own WITH clause, in which case the CTE names are
+    only reachable past the ``AS``. ``_leading_ctes`` matches a WITH at offset zero,
+    so without this the CTE names of a ``CREATE VIEW ... AS WITH ...`` statement are
+    never collected and every later reference to one is misread as an unqualified
+    application relation (OMN-15361).
+    """
+    index = _skip_whitespace(statement, 0)
+    create_index = _keyword_at(statement, index, "create")
+    if create_index is None:
+        return None
+    index = _skip_whitespace(statement, create_index)
+
+    while True:
+        for modifier in _VIEW_HEAD_MODIFIERS:
+            candidate = _keyword_at(statement, index, modifier)
+            if candidate is not None:
+                index = _skip_whitespace(statement, candidate)
+                break
+        else:
+            break
+
+    view_index = _keyword_at(statement, index, "view")
+    if view_index is None:
+        return None
+    index = _skip_whitespace(statement, view_index)
+
+    for guard in ("if", "not", "exists"):
+        candidate = _keyword_at(statement, index, guard)
+        if candidate is not None:
+            index = _skip_whitespace(statement, candidate)
+
+    identifier = _identifier_at(statement, index)
+    if identifier is None:
+        return None
+    _, index = identifier
+    index = _skip_whitespace(statement, index)
+    if index < len(statement) and statement[index] == ".":
+        qualified = _identifier_at(statement, _skip_whitespace(statement, index + 1))
+        if qualified is None:
+            return None
+        _, index = qualified
+        index = _skip_whitespace(statement, index)
+
+    if index < len(statement) and statement[index] == "(":
+        columns = _balanced_parenthesized(statement, index)
+        if columns is None:
+            return None
+        _, index = columns
+        index = _skip_whitespace(statement, index)
+
+    # ``WITH (security_invoker = true)`` is a view option list, not a CTE. It is only
+    # consumed when a parenthesis actually follows, so a CTE WITH is never eaten here.
+    options_index = _keyword_at(statement, index, "with")
+    if options_index is not None:
+        options_start = _skip_whitespace(statement, options_index)
+        if options_start < len(statement) and statement[options_start] == "(":
+            options = _balanced_parenthesized(statement, options_start)
+            if options is None:
+                return None
+            _, index = options
+            index = _skip_whitespace(statement, index)
+
+    as_index = _keyword_at(statement, index, "as")
+    if as_index is None:
+        return None
+    return _skip_whitespace(statement, as_index)
+
+
 def _is_sql_identifier_character(character: str) -> bool:
     """Return whether a character can continue an unquoted PostgreSQL name."""
     return (
@@ -1931,6 +2013,39 @@ def _analyze_sql_fragment(
             target_locations=target_locations,
         )
         return
+
+    view_offset = _view_query_offset(fragment)
+    if view_offset is not None:
+        view_body_ctes = _leading_ctes(fragment[view_offset:])
+        if view_body_ctes is not None:
+            recursive, definitions, tail = view_body_ctes
+            definition_names = {name for name, _ in definitions}
+            prior_names = set(visible_ctes)
+            for name, body in definitions:
+                body_names = (
+                    prior_names.union(definition_names)
+                    if recursive
+                    else set(prior_names)
+                )
+                _analyze_sql_fragment(
+                    body,
+                    visible_ctes=body_names,
+                    application_schemas=application_schemas,
+                    violations=violations,
+                    target_locations=target_locations,
+                )
+                prior_names.add(name)
+            # Re-join the view head to the post-WITH tail so the view's own name is
+            # still validated as a real relation target. Only the CTE definitions are
+            # elided here; they were each analyzed above under their own scope.
+            _analyze_sql_fragment(
+                f"{fragment[:view_offset]} {tail}",
+                visible_ctes=visible_ctes.union(definition_names),
+                application_schemas=application_schemas,
+                violations=violations,
+                target_locations=target_locations,
+            )
+            return
 
     explained = _explained_statement(target_fragment)
     main_dml_tail = _main_dml_tail(explained)
