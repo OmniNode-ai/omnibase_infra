@@ -21,15 +21,26 @@ from __future__ import annotations
 
 from pathlib import Path
 from unittest.mock import MagicMock
-from uuid import UUID
+from uuid import UUID, uuid4
 
 import pytest
+from pydantic import BaseModel, ConfigDict, Field
 
 from omnibase_infra.runtime.auto_wiring.discovery import discover_contracts
 from omnibase_infra.runtime.auto_wiring.handler_wiring import wire_from_manifest
+from omnibase_infra.runtime.auto_wiring.models import (
+    ModelAutoWiringManifest,
+    ModelContractVersion,
+    ModelDiscoveredContract,
+    ModelEventBusWiring,
+    ModelHandlerRef,
+    ModelHandlerRouting,
+    ModelHandlerRoutingEntry,
+)
 from omnibase_infra.runtime.auto_wiring.models.model_discovery_error import (
     ModelDiscoveryError,
 )
+from omnibase_infra.runtime.message_dispatch_engine import MessageDispatchEngine
 from omnibase_infra.runtime.service_intent_routing_loader import (
     load_intent_routing_table,
 )
@@ -178,3 +189,185 @@ async def test_real_manifest_wiring_has_no_failures() -> None:
     assert not error_results, "ModelOnexError found in wiring results:\n" + "\n".join(
         f"  {r.contract_name}: {r.reason}" for r in error_results
     )
+
+
+# ---------------------------------------------------------------------------
+# OMN-16050 — registered-input-model unwrap stop, proven on the REAL manifest
+# ---------------------------------------------------------------------------
+
+_OMN16050_TOPIC = "onex.cmd.omnibase-infra.omn16050-unwrap-probe.v1"
+_OMN16050_MODULE = "tests.integration.test_auto_wiring_real_manifest"
+
+
+class ModelOmn16050EmitRequest(BaseModel):
+    """Field-for-field mirror of omnimarket's ``ModelEmitRequest`` (OMN-16050).
+
+    Declares a ``payload`` mapping plus FOUR transport marker keys
+    (``event_type``, ``correlation_id``, ``partition_key``, ``event_id``), which
+    is precisely what made it indistinguishable from a transport envelope to the
+    old structural heuristic. ``extra="forbid"`` mirrors the real model, so an
+    over-unwrap fails totally — the live DLQ signature.
+
+    Lives here rather than in omnimarket because omnibase_infra is upstream of it
+    and cannot import it; the shape, not the identity, is what the defect keys on.
+    """
+
+    model_config = ConfigDict(frozen=True, extra="forbid")
+
+    event_type: str = Field(..., min_length=1)
+    payload: dict[str, object] = Field(default_factory=dict)
+    correlation_id: str | None = None
+    topic: str | None = None
+    partition_key: str | None = None
+    event_id: str = Field(default_factory=lambda: str(uuid4()), min_length=1)
+
+
+class HandlerOmn16050EmitProbe:
+    """Canonical def-B handler: ``handle(request: ModelX) -> None``.
+
+    Wired by the real ``wire_from_manifest`` path, so the callback under test is
+    the production-built one, not a hand-constructed ``_make_dispatch_callback``.
+    """
+
+    received: list[ModelOmn16050EmitRequest] = []
+
+    async def handle(self, request: ModelOmn16050EmitRequest) -> None:
+        type(self).received.append(request)
+
+
+def _omn16050_probe_contract() -> ModelDiscoveredContract:
+    """An ``operation_match`` def-B EFFECT contract shaped like node_event_emit_effect."""
+    return ModelDiscoveredContract(
+        name="node_omn16050_unwrap_probe",
+        node_type="EFFECT_GENERIC",
+        contract_version=ModelContractVersion(major=1, minor=0, patch=0),
+        contract_path=Path("/fake/omn16050/contract.yaml"),
+        entry_point_name="node_omn16050_unwrap_probe",
+        package_name="omnibase-infra",
+        event_bus=ModelEventBusWiring(
+            subscribe_topics=(_OMN16050_TOPIC,),
+            publish_topics=(),
+        ),
+        handler_routing=ModelHandlerRouting(
+            routing_strategy="operation_match",
+            handlers=(
+                ModelHandlerRoutingEntry(
+                    handler=ModelHandlerRef(
+                        name="HandlerOmn16050EmitProbe", module=_OMN16050_MODULE
+                    ),
+                    message_category="command",
+                    event_type="omnibase-infra.omn16050-unwrap-probe",
+                    operation="omn16050.probe",
+                ),
+            ),
+        ),
+    )
+
+
+def _omn16050_published_bytes() -> dict[str, object]:
+    """The live shape: one transport envelope wrapping a ModelEmitRequest.
+
+    Mirrors the in-pod capture on onex-dev (digest sha256:35099472…) verbatim:
+    ``RAW KEYS: ['event_type', 'correlation_id', 'source_tool', 'payload']``.
+    """
+    return {
+        "event_type": "session.started",
+        "correlation_id": "18a50ff5-c877-481c-b3c1-a183d8069762",
+        "source_tool": "defect-ab-probe",
+        "payload": {
+            "event_type": "session.started",
+            "correlation_id": "18a50ff5-c877-481c-b3c1-a183d8069762",
+            "partition_key": "session-1",
+            "event_id": "evt-defect-ab-probe",
+            "payload": {
+                "session_id": "18a50ff5-c877-481c-b3c1-a183d8069762",
+                "defect_ab_probe": True,
+                "emitted_at": "2026-08-13T02:46:13Z",
+            },
+        },
+    }
+
+
+@pytest.mark.integration
+@pytest.mark.asyncio
+async def test_real_manifest_wiring_preserves_registered_envelope_shaped_input_model() -> (
+    None
+):
+    """Runtime-startup gate for OMN-16050: real manifest + real wiring + real dispatch.
+
+    Satisfies the repo's Runtime Startup CI gate for a PR touching
+    ``auto_wiring/``: the manifest is the real one loaded from disk via
+    ``discover_contracts()``, ``wire_from_manifest`` runs with the kernel's
+    argument shape, and zero unexpected failures are asserted.
+
+    On top of that it proves the defect is closed through the production path:
+    one probe contract whose def-B handler declares an envelope-SHAPED input
+    model (``payload`` + four transport markers, ``extra="forbid"``) is wired
+    alongside the real contracts, and the dispatcher the wiring registered is
+    invoked with the exact bytes captured in-pod. Before the fix the callback
+    unwrapped through the domain model to the caller's inner payload and raised
+    ``ValidationError`` (``event_type`` Field required + 3x extra_forbidden) —
+    the live ``boundary_swallow_prevented`` / DLQ signature.
+    """
+    HandlerOmn16050EmitProbe.received.clear()
+
+    real_manifest = discover_contracts()
+    combined = ModelAutoWiringManifest(
+        contracts=(*real_manifest.contracts, _omn16050_probe_contract()),
+        errors=real_manifest.errors,
+    )
+    derived_appliers = {
+        contract.name: _StubResultApplier()
+        for contract in real_manifest.contracts
+        if load_intent_routing_table(Path(contract.contract_path))
+    }
+
+    engine = MessageDispatchEngine()
+    report = await wire_from_manifest(
+        manifest=combined,
+        dispatch_engine=engine,
+        event_bus=None,
+        subscribe_immediately=False,
+        result_appliers_by_contract=derived_appliers,
+    )
+
+    failed_names = {
+        r.contract_name for r in report.results if str(r.outcome).endswith("FAILED")
+    }
+    unexpected = failed_names - _KNOWN_UNWIRED_RAW_PROJECTIONS
+    assert not unexpected, (
+        "wire_from_manifest() reported unexpected failure(s) against the real "
+        f"manifest + the OMN-16050 probe contract: {sorted(unexpected)}"
+    )
+
+    probe_result = next(
+        r for r in report.results if r.contract_name == "node_omn16050_unwrap_probe"
+    )
+    assert str(probe_result.outcome).endswith("WIRED"), (
+        "the OMN-16050 probe contract must WIRE — a skipped/failed probe would "
+        f"make this gate vacuous (outcome={probe_result.outcome}, "
+        f"reason={probe_result.reason})"
+    )
+    assert len(probe_result.dispatchers_registered) == 1
+
+    dispatcher_id = probe_result.dispatchers_registered[0]
+    dispatcher = engine._dispatchers[dispatcher_id].dispatcher
+
+    await dispatcher(_omn16050_published_bytes())
+
+    assert len(HandlerOmn16050EmitProbe.received) == 1, (
+        "the wired dispatcher did not deliver to the handler — pre-fix this "
+        "raised ValidationError inside the callback and DLQ'd"
+    )
+    request = HandlerOmn16050EmitProbe.received[0]
+    assert isinstance(request, ModelOmn16050EmitRequest)
+    assert request.event_type == "session.started"
+    assert request.event_id == "evt-defect-ab-probe"
+    assert request.partition_key == "session-1"
+    # The load-bearing assertion: the handler owns the CALLER's payload, and the
+    # unwrap stopped at the registered model instead of walking through it.
+    assert request.payload == {
+        "session_id": "18a50ff5-c877-481c-b3c1-a183d8069762",
+        "defect_ab_probe": True,
+        "emitted_at": "2026-08-13T02:46:13Z",
+    }

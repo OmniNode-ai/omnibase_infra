@@ -4,6 +4,9 @@
 
 from __future__ import annotations
 
+from omnibase_infra.nodes.node_gateway_attach_effect.models.enum_gateway_renewal_mode import (
+    EnumGatewayRenewalMode,
+)
 from omnibase_infra.nodes.node_gateway_attach_effect.models.enum_gateway_session_event_type import (
     EnumGatewaySessionEventType,
 )
@@ -31,6 +34,9 @@ from omnibase_infra.nodes.node_gateway_attach_effect.models.model_gateway_heartb
 from omnibase_infra.nodes.node_gateway_attach_effect.models.model_gateway_heartbeat_response import (
     ModelGatewayHeartbeatResponse,
 )
+from omnibase_infra.nodes.node_gateway_attach_effect.models.model_gateway_renewal_directive import (
+    ModelGatewayRenewalDirective,
+)
 from omnibase_infra.nodes.node_gateway_attach_effect.models.model_gateway_session import (
     ModelGatewaySession,
 )
@@ -39,6 +45,7 @@ from omnibase_infra.nodes.node_gateway_attach_effect.models.model_gateway_sessio
 )
 
 __all__ = [
+    "EnumGatewayRenewalMode",
     "EnumGatewaySessionEventType",
     "EnumGatewaySessionStatus",
     "ModelGatewayAttachConfig",
@@ -48,6 +55,7 @@ __all__ = [
     "ModelGatewayDetachResponse",
     "ModelGatewayHeartbeatRequest",
     "ModelGatewayHeartbeatResponse",
+    "ModelGatewayRenewalDirective",
     "ModelGatewaySession",
     "ModelGatewaySessionEvent",
 ]

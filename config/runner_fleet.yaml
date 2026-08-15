@@ -21,14 +21,34 @@ burst_count: 72
 network_pool_capacity: 31
 network_pool_warn_ratio: 0.8
 # OMN-14027 C1 — PyPI pull-through cache (devpi) endpoint. Source of truth for the
-# egress cache the fleet points at. STATUS: pending-activation / INERT — the
-# devpi service (docker/docker-compose.pypi-cache.yml) is stood up and wired only
-# at the soak-gated rollout; recording the endpoint here does not activate it. The
-# matching UV_DEFAULT_INDEX / PIP_INDEX_URL wiring is kept commented in
-# docker/docker-compose.runners.yml until then. Runbook:
-# docs/runbooks/pypi-cache-egress-rollout.md.
+# egress cache the fleet points at.
+#
+# STATUS 2026-08-14: cache SERVICE LIVE, canary WIRED, fleet NOT yet activated.
+#   - devpi service is up and healthy on the runner host (container
+#     omninode-pypi-cache, 22G warmed corpus, index HTTP 200).
+#   - A 3-runner canary (omninode-runner-2/4/5) is wired via
+#     docker/docker-compose.pypi-canary.yml and verified by container-env
+#     readback. Runbook step 3 is DONE.
+#   - `active` stays false because it means FLEET-ACTIVE. Runbook step 5 gates
+#     the fleet on measured canary acceptance (hit rate >= target_hit_rate, p95
+#     `uv sync` wall time, zero UV_HTTP_TIMEOUT failures under high-concurrency
+#     load). The canary has proven the MECHANISM resolves through the cache but
+#     has NOT yet accumulated a soak under the 64/64-busy load the acceptance
+#     criteria are written against — the queue is serialized and the fleet is
+#     lightly loaded. Flipping this to true on mechanism-proof alone would skip
+#     the exact measurement the gate exists to take.
+#   - The matching UV_DEFAULT_INDEX / PIP_INDEX_URL wiring therefore stays
+#     commented in docker/docker-compose.runners.yml. Do not uncomment it here or
+#     there as a shortcut; graduate via the runbook.
+# Runbook: docs/runbooks/pypi-cache-egress-rollout.md.
 pypi_cache:
   active: false
+  # Runners currently wired at the cache via docker/docker-compose.pypi-canary.yml.
+  # Empty once the canary graduates to the fleet or is rolled back.
+  canary_runners:
+    - omninode-runner-2
+    - omninode-runner-4
+    - omninode-runner-5
   # Tailscale MagicDNS host + published port, matching runner_host above so the
   # endpoint does not depend on the runner host's current LAN/Tailscale IP.
   host: omninode-pc.tail75df5e.ts.net

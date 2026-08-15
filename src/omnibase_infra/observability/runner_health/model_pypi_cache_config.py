@@ -51,6 +51,17 @@ class ModelPyPICacheConfig(BaseModel):
         le=1.0,
         description="Steady-state wheel-cache hit-rate acceptance target.",
     )
+    canary_runners: tuple[str, ...] = Field(
+        default=(),
+        description=(
+            "Runner container names currently wired at the cache via "
+            "docker/docker-compose.pypi-canary.yml, while the rest of the fleet "
+            "stays on direct egress. Distinct from ``active``, which means "
+            "FLEET-active: a non-empty canary with active=False is the normal "
+            "mid-rollout state. Empty once the canary graduates to the fleet or "
+            "is rolled back."
+        ),
+    )
 
 
 __all__ = ["ModelPyPICacheConfig"]

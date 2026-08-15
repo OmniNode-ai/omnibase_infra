@@ -757,5 +757,14 @@ from omnibase_infra.cli.cli_env import env_group
 cli.add_command(env_group)
 
 
+# =============================================================================
+# Gateway Auth Commands (login, status, token, logout) [OMN-15922]
+# =============================================================================
+
+from omnibase_infra.cli.cli_auth import auth_group
+
+cli.add_command(auth_group)
+
+
 if __name__ == "__main__":
     cli()

@@ -58,6 +58,43 @@ COMPOSE_DIR="$HOME/.omnibase/runners/docker"
 COMPOSE_FILE="${COMPOSE_DIR}/docker-compose.runners.yml"
 RUNNER_FLEET_CONFIG_PATH="${RUNNER_FLEET_CONFIG_PATH:-$HOME/.omnibase/runners/config/runner_fleet.yaml}"
 
+# ---------------------------------------------------------------------------
+# Compose override layering (OMN-14027 C1)
+# ---------------------------------------------------------------------------
+# Auto-repair recreates containers from COMPOSE_FILE. Before this block it used
+# COMPOSE_FILE and nothing else, which made it a SILENT REVERTER: any runner
+# deliberately wired by an override file (e.g. the PyPI pull-through cache
+# canary, docker/docker-compose.pypi-canary.yml) lost that wiring the moment the
+# */10 auto-bounce cron recreated it — with no log line, no alert, and no diff.
+# The canary kept reporting itself as a canary while running on direct egress,
+# so its soak measurements were vacuous. That is exactly how the 2026-08-08
+# canary attempt was lost by 2026-08-10.
+#
+# COMPOSE_OVERRIDES_LIST is a newline-delimited list of override compose files
+# (relative to COMPOSE_DIR, or absolute). '#' starts a comment. Missing entries
+# WARN rather than fail so a stale list never wedges auto-repair — but a listed
+# override that IS present is always layered, so a recreate preserves it.
+#
+# Absent list file => COMPOSE_FILE_ARGS is exactly the previous behaviour.
+COMPOSE_OVERRIDES_LIST="${COMPOSE_OVERRIDES_LIST:-${COMPOSE_DIR}/compose-overrides.list}"
+COMPOSE_FILE_ARGS=(-f "${COMPOSE_FILE}")
+COMPOSE_FILE_ARGS_STR="-f ${COMPOSE_FILE}"
+if [[ -f "${COMPOSE_OVERRIDES_LIST}" ]]; then
+    while IFS= read -r _ovr_line || [[ -n "${_ovr_line}" ]]; do
+        _ovr="${_ovr_line%%#*}"
+        _ovr="${_ovr#"${_ovr%%[![:space:]]*}"}"
+        _ovr="${_ovr%"${_ovr##*[![:space:]]}"}"
+        [[ -z "${_ovr}" ]] && continue
+        [[ "${_ovr}" == /* ]] || _ovr="${COMPOSE_DIR}/${_ovr}"
+        if [[ -f "${_ovr}" ]]; then
+            COMPOSE_FILE_ARGS+=(-f "${_ovr}")
+            COMPOSE_FILE_ARGS_STR="${COMPOSE_FILE_ARGS_STR} -f ${_ovr}"
+        else
+            echo "[runner-monitor] $(date '+%H:%M:%S') WARNING: compose override listed in ${COMPOSE_OVERRIDES_LIST} but not found on disk: ${_ovr} (skipped)" >&2
+        fi
+    done < "${COMPOSE_OVERRIDES_LIST}"
+fi
+
 # Silent-wedge thresholds (OMN-13109). A fleet that is online + idle while jobs
 # have been queued for longer than WEDGE_QUEUE_AGE_SECONDS is wedged. Default
 # 10 minutes — long enough to ignore normal scheduling latency, short enough to
@@ -598,7 +635,7 @@ render_safe_bounce_cmd() {
 # on ${AUTO_BOUNCE_LOCKFILE} first (concurrent recreates race the daemon).
 TOKEN=\$(gh api --method POST /orgs/${RUNNER_ORG}/actions/runners/registration-token --jq .token)
 RUNNER_TOKEN="\$TOKEN" timeout ${timeout_seconds} \\
-  docker compose -f ${COMPOSE_FILE} up -d --force-recreate --no-deps ${target_list}
+  docker compose ${COMPOSE_FILE_ARGS_STR} up -d --force-recreate --no-deps ${target_list}
 RECIPE
 }
 
@@ -668,7 +705,7 @@ auto_bounce() {
             trap 'rmdir "${AUTO_BOUNCE_LOCKFILE}.d" 2>/dev/null || true' EXIT
         fi
         RUNNER_TOKEN="${token}" timeout "${timeout_seconds}" \
-            docker compose -f "${COMPOSE_FILE}" up -d --force-recreate --no-deps ${target_list} \
+            docker compose "${COMPOSE_FILE_ARGS[@]}" up -d --force-recreate --no-deps ${target_list} \
             >> /tmp/runner-monitor-bounce.log 2>&1
 
         svc=""
