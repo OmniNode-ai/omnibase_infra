@@ -147,6 +147,61 @@ def test_runner_fleet_config_pypi_cache_is_optional(tmp_path: Path) -> None:
     assert config.pypi_cache is None
 
 
+def test_runner_fleet_config_git_mirror_is_recorded() -> None:
+    """OMN-16053 (OMN-14027 C2): the host-local git-mirror component is recorded
+    as fleet source-of-truth and parses under the strict (extra='forbid')
+    fleet-config model. active=True reflects deployed reality: the daemon,
+    refresh timer, and fail-open pre-seed are live on the runner host.
+    """
+    config = load_runner_fleet_config(REPO_ROOT / "config" / "runner_fleet.yaml")
+
+    assert config.git_mirror is not None
+    assert config.git_mirror.active is True
+    # Docker bridge gateway ONLY — git:// is unauthenticated, so the mirrors of
+    # private repos must never be bound to a LAN/Tailscale address.
+    assert config.git_mirror.bind_address == "172.18.0.1"
+    assert config.git_mirror.port == 9418
+    assert config.git_mirror.serialized is True
+    assert config.git_mirror.refresh_interval_seconds == 120
+    assert "onex_change_control" in config.git_mirror.repos
+    assert config.git_mirror.kill_switch_env == "OMNI_GIT_MIRROR_DISABLE"
+
+
+def test_runner_fleet_config_tool_cache_durability_is_recorded() -> None:
+    """OMN-16053 (OMN-14027 C2): RUNNER_TOOL_CACHE lives in the container
+    filesystem (durable=False), so fleet recreates must be bracketed by the
+    recorded seed script. The record must name existing repo files.
+    """
+    config = load_runner_fleet_config(REPO_ROOT / "config" / "runner_fleet.yaml")
+
+    assert config.tool_cache is not None
+    assert config.tool_cache.durable is False
+    assert (REPO_ROOT / config.tool_cache.seed_script).is_file()
+    assert (REPO_ROOT / config.tool_cache.recreate_procedure).is_file()
+
+
+def test_runner_fleet_config_git_mirror_and_tool_cache_are_optional(
+    tmp_path: Path,
+) -> None:
+    """A fleet config predating the git-transport egress work must still
+    validate — both fields are optional and default to None."""
+    minimal = tmp_path / "runner_fleet.yaml"
+    minimal.write_text(
+        "version: '1.0'\n"
+        "github_org: OmniNode-ai\n"
+        "runner_host: example.ts.net\n"
+        "runner_group: omnibase-ci\n"
+        "runner_name_prefix: omninode-runner\n"
+        "expected_count: 64\n",
+        encoding="utf-8",
+    )
+
+    config = load_runner_fleet_config(minimal)
+
+    assert config.git_mirror is None
+    assert config.tool_cache is None
+
+
 def test_runner_scripts_do_not_embed_legacy_count() -> None:
     deploy_script = (REPO_ROOT / "scripts" / "deploy-runners.sh").read_text(
         encoding="utf-8"
