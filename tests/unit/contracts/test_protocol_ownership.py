@@ -110,6 +110,7 @@ KNOWN_INFRA_PROTOCOLS: dict[str, str] = {
     "ProtocolDiscoveryOperations": "nodes/node_service_discovery_effect/protocols/protocol_discovery_operations.py",
     "ProtocolLedgerPersistence": "nodes/node_ledger_write_effect/protocols/protocol_ledger_persistence.py",
     "ProtocolGatewaySessionStore": "nodes/node_gateway_attach_effect/services/protocol_gateway_session_store.py",  # [NODE] OMN-15750 DI seam so the attach session-store backend (in-process for this slice, Valkey follow-on) is swappable without touching handlers
+    "ProtocolGatewayTransport": "protocols/protocol_gateway_transport.py",  # [NODE] OMN-15922 POST seam for the onex-auth gateway client; infra-internal (not a cross-repo contract, so not spi) and load-bearing as a seam because it is what lets the whole grant -> attach -> re-attach cycle run against an in-memory fake with no socket. Deliberately separate from ProtocolHttpClient: that one is runtime_checkable and already satisfied structurally by adapters implementing exactly get(), so adding a method would silently un-satisfy every one of them
     # [NODE] DI boundaries for NodeSetupOrchestrator — narrow effect interfaces injected via constructor
     "ProtocolPreflightEffect": "nodes/node_setup_orchestrator/protocols/protocol_preflight_effect.py",
     "ProtocolProvisionEffect": "nodes/node_setup_orchestrator/protocols/protocol_provision_effect.py",
