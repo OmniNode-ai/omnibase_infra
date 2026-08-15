@@ -9,7 +9,10 @@ from pathlib import Path
 
 import pytest
 
-from scripts.ci.check_application_database_sql import validate_changed_sql
+from scripts.ci.check_application_database_sql import (
+    validate_changed_sql,
+    violation_key,
+)
 
 pytestmark = pytest.mark.unit
 
@@ -119,7 +122,7 @@ def test_gate_checks_only_real_changed_sql_files(tmp_path: Path) -> None:
         base_revision,
         green_head,
         ownership_manifest_paths=(manifest,),
-    )
+    ).violations
 
     (repository / "unqualified.sql").write_text(
         "SELECT * FROM changed_table;\n",
@@ -131,7 +134,7 @@ def test_gate_checks_only_real_changed_sql_files(tmp_path: Path) -> None:
         base_revision,
         red_head,
         ownership_manifest_paths=(manifest,),
-    )
+    ).violations
     assert any("unqualified.sql" in violation for violation in violations)
     assert any("schema-qualified" in violation for violation in violations)
     assert all("unchanged_legacy.sql" not in violation for violation in violations)
@@ -166,7 +169,7 @@ def test_gate_exempts_only_the_omn15503_legacy_node_migration_path(
         base_revision,
         exempt_head,
         ownership_manifest_paths=(),
-    )
+    ).violations
 
     adjacent = exempt.with_name("0030_adjacent_unqualified.sql")
     adjacent.write_text(
@@ -179,7 +182,7 @@ def test_gate_exempts_only_the_omn15503_legacy_node_migration_path(
         exempt_head,
         adjacent_head,
         ownership_manifest_paths=(),
-    )
+    ).violations
     assert any("0030_adjacent_unqualified.sql" in item for item in violations)
     assert any("schema-qualified" in item for item in violations)
 
@@ -210,7 +213,7 @@ def test_gate_exempts_omn15655_legacy_root_shape_repair_paths(
         base_revision,
         exempt_head,
         ownership_manifest_paths=(),
-    )
+    ).violations
 
     adjacent = migration_dir / "051_adjacent_unqualified.sql"
     adjacent.write_text(
@@ -223,7 +226,7 @@ def test_gate_exempts_omn15655_legacy_root_shape_repair_paths(
         exempt_head,
         adjacent_head,
         ownership_manifest_paths=(),
-    )
+    ).violations
     assert any("051_adjacent_unqualified.sql" in item for item in violations)
     assert any("schema-qualified" in item for item in violations)
 
@@ -247,7 +250,7 @@ def test_qualified_create_requires_an_authoritative_ownership_declaration(
         base_revision,
         head_revision,
         ownership_manifest_paths=(),
-    )
+    ).violations
     assert any("ownership declaration" in violation for violation in violations)
 
 
@@ -270,7 +273,7 @@ def test_qualified_non_create_target_requires_authoritative_ownership(
         base_revision,
         head_revision,
         ownership_manifest_paths=(),
-    )
+    ).violations
     assert any("exactly one ownership declaration" in item for item in violations)
 
 
@@ -305,7 +308,7 @@ def test_duplicate_or_conflicting_owner_declarations_fail_closed(
         base_revision,
         head_revision,
         ownership_manifest_paths=(first, second),
-    )
+    ).violations
     assert any("exactly one ownership declaration" in item for item in violations)
 
 
@@ -327,7 +330,7 @@ def test_red_control_wrong_routine_overload(tmp_path: Path) -> None:
         base_revision,
         head_revision,
         ownership_manifest_paths=(manifest,),
-    )
+    ).violations
     assert any("exact routine ownership declaration" in item for item in violations)
 
 
@@ -351,7 +354,7 @@ def test_red_control_wrong_object_kind(
         base_revision,
         head_revision,
         ownership_manifest_paths=(manifest,),
-    )
+    ).violations
     assert any("exact object-kind ownership declaration" in item for item in violations)
 
 
@@ -382,8 +385,181 @@ def test_omn15361_replay_rejects_real_unqualified_application_migration(
         base_revision,
         head_revision,
         ownership_manifest_paths=(),
-    )
+    ).violations
 
     rendered = "\n".join(violations)
     assert "0002_node_service_registry_tenant_rls.sql" in rendered
     assert "schema-qualified" in rendered
+
+
+# ---------------------------------------------------------------------------
+# OMN-15361 frozen-baseline ratchet. Mirrors the OMN-14443 deploy-gate
+# grandfather pattern: pre-existing violations soft-pass, everything else is
+# held to the full bar, and the list may only shrink.
+# ---------------------------------------------------------------------------
+
+
+def _baseline_repository(tmp_path: Path) -> tuple[Path, str, str, Path]:
+    """A repo whose changed SQL carries exactly one unqualified relation."""
+    repository = tmp_path / "repository"
+    repository.mkdir()
+    _git(repository, "init", "--initial-branch=main")
+    (repository / "seed.sql").write_text(
+        "CREATE TABLE tenant.seeded (id uuid);\n", encoding="utf-8"
+    )
+    base_revision = _commit(repository, "baseline")
+
+    (repository / "offender.sql").write_text(
+        "SELECT * FROM unqualified_relation;\n", encoding="utf-8"
+    )
+    manifest = _ownership_manifest(repository, "seeded")
+    head = _commit(repository, "offender")
+    return repository, base_revision, head, manifest
+
+
+def _write_baseline(path: Path, entries: list[tuple[str, str]]) -> Path:
+    lines = ['generated_at: "2026-08-15"', f"count: {len(entries)}", "violations:"]
+    for key, recorded_path in entries:
+        lines.append(f'  - key: "{key}"')
+        lines.append(f'    path: "{recorded_path}"')
+        lines.append('    violation: "recorded"')
+    path.write_text("\n".join(lines) + "\n", encoding="utf-8")
+    return path
+
+
+def test_unbaselined_violation_is_held_to_the_full_bar(tmp_path: Path) -> None:
+    repository, base, head, manifest = _baseline_repository(tmp_path)
+    empty = _write_baseline(tmp_path / "baseline.yaml", [])
+
+    outcome = validate_changed_sql(
+        repository,
+        base,
+        head,
+        ownership_manifest_paths=(manifest,),
+        baseline_path=empty,
+    )
+
+    assert any("unqualified_relation" in v for v in outcome.violations)
+    assert outcome.grandfathered == 0
+
+
+def test_baselined_violation_is_grandfathered_and_counted(tmp_path: Path) -> None:
+    repository, base, head, manifest = _baseline_repository(tmp_path)
+    raw = validate_changed_sql(
+        repository, base, head, ownership_manifest_paths=(manifest,)
+    )
+    offender = next(v for v in raw.violations if "unqualified_relation" in v)
+    baseline = _write_baseline(
+        tmp_path / "baseline.yaml", [(violation_key(offender), "offender.sql")]
+    )
+
+    outcome = validate_changed_sql(
+        repository,
+        base,
+        head,
+        ownership_manifest_paths=(manifest,),
+        baseline_path=baseline,
+    )
+
+    assert not any("unqualified_relation" in v for v in outcome.violations)
+    assert outcome.grandfathered == 1
+
+
+def test_a_corrupt_baseline_grandfathers_nothing(tmp_path: Path) -> None:
+    repository, base, head, manifest = _baseline_repository(tmp_path)
+    corrupt = tmp_path / "baseline.yaml"
+    corrupt.write_text("{ this is: not: valid yaml ][", encoding="utf-8")
+
+    outcome = validate_changed_sql(
+        repository,
+        base,
+        head,
+        ownership_manifest_paths=(manifest,),
+        baseline_path=corrupt,
+    )
+
+    assert any("unqualified_relation" in v for v in outcome.violations)
+    assert outcome.grandfathered == 0
+
+
+def test_a_missing_baseline_grandfathers_nothing(tmp_path: Path) -> None:
+    repository, base, head, manifest = _baseline_repository(tmp_path)
+
+    outcome = validate_changed_sql(
+        repository,
+        base,
+        head,
+        ownership_manifest_paths=(manifest,),
+        baseline_path=tmp_path / "does-not-exist.yaml",
+    )
+
+    assert any("unqualified_relation" in v for v in outcome.violations)
+    assert outcome.grandfathered == 0
+
+
+def test_a_baseline_entry_for_a_deleted_file_fails_stale(tmp_path: Path) -> None:
+    repository, base, head, manifest = _baseline_repository(tmp_path)
+    baseline = _write_baseline(
+        tmp_path / "baseline.yaml", [("deadbeefdeadbeef", "removed_migration.sql")]
+    )
+
+    outcome = validate_changed_sql(
+        repository,
+        base,
+        head,
+        ownership_manifest_paths=(manifest,),
+        baseline_path=baseline,
+    )
+
+    assert any(
+        "stale baseline entry" in v and "no longer exists" in v
+        for v in outcome.violations
+    )
+
+
+def test_a_no_longer_firing_baseline_entry_fails_stale(tmp_path: Path) -> None:
+    repository, base, head, manifest = _baseline_repository(tmp_path)
+    # offender.sql IS linted this run, but this key never fires against it.
+    baseline = _write_baseline(
+        tmp_path / "baseline.yaml", [("cafebabecafebabe", "offender.sql")]
+    )
+
+    outcome = validate_changed_sql(
+        repository,
+        base,
+        head,
+        ownership_manifest_paths=(manifest,),
+        baseline_path=baseline,
+    )
+
+    assert any(
+        "stale baseline entry" in v and "no longer fires" in v
+        for v in outcome.violations
+    )
+
+
+def test_an_entry_for_an_unscanned_file_is_not_reported_stale(tmp_path: Path) -> None:
+    """A dev PR touching two files must not mass-fail on the other 160 entries."""
+    repository, base, head, manifest = _baseline_repository(tmp_path)
+    # seed.sql exists but is NOT in this run's changed set, so its entry is
+    # unobservable — not stale.
+    baseline = _write_baseline(
+        tmp_path / "baseline.yaml", [("0123456789abcdef", "seed.sql")]
+    )
+
+    outcome = validate_changed_sql(
+        repository,
+        base,
+        head,
+        ownership_manifest_paths=(manifest,),
+        baseline_path=baseline,
+    )
+
+    assert not any("stale baseline entry" in v for v in outcome.violations)
+
+
+def test_violation_key_is_content_addressed_not_positional() -> None:
+    same = "a.sql: application relation target 'x' must be schema-qualified"
+    assert violation_key(same) == violation_key(same)
+    assert violation_key(same) != violation_key(same.replace("a.sql", "b.sql"))
+    assert violation_key(same) != violation_key(same.replace("'x'", "'y'"))
