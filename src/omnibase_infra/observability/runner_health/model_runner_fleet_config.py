@@ -11,8 +11,14 @@ from typing import cast
 import yaml
 from pydantic import BaseModel, ConfigDict, Field
 
+from omnibase_infra.observability.runner_health.model_git_mirror_config import (
+    ModelGitMirrorConfig,
+)
 from omnibase_infra.observability.runner_health.model_pypi_cache_config import (
     ModelPyPICacheConfig,
+)
+from omnibase_infra.observability.runner_health.model_tool_cache_config import (
+    ModelToolCacheConfig,
 )
 
 
@@ -55,6 +61,21 @@ class ModelRunnerFleetConfig(BaseModel):
             "OMN-14027 C1 — PyPI pull-through cache endpoint (devpi). Optional "
             "and inert until the soak-gated rollout sets active=True and wires "
             "the runner env. Absent in configs predating the egress-cache work."
+        ),
+    )
+    git_mirror: ModelGitMirrorConfig | None = Field(
+        default=None,
+        description=(
+            "OMN-16053 (OMN-14027 C2) — host-local bare git mirrors + fail-open "
+            "job-workspace pre-seed. Optional; absent in configs predating the "
+            "git-transport egress work."
+        ),
+    )
+    tool_cache: ModelToolCacheConfig | None = Field(
+        default=None,
+        description=(
+            "OMN-16053 (OMN-14027 C2) — Actions tool-cache durability record. "
+            "Optional; absent in configs predating the git-transport egress work."
         ),
     )
 

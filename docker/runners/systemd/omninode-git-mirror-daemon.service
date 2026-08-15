@@ -1,0 +1,45 @@
+# OMN-14027 C2 — serve the local bare mirrors to the runner containers.
+#
+# Bound to the docker bridge gateway address ONLY (172.18.0.1, the
+# `docker_default` network all 72 runners sit on). It is NOT reachable from the
+# LAN or from Tailscale, so the unauthenticated git:// transport never exposes
+# the private mirrors beyond containers that already receive an authenticated
+# checkout of the same code. `--export-all` is safe for the same reason and
+# avoids having to touch every mirror with a git-daemon-export-ok marker.
+#
+# Why git:// and not a bind-mounted file:// path: mounting the mirror root into
+# the runners would require recreating all 72 containers, which kills every
+# in-flight job. The daemon is reachable from the existing containers with zero
+# recreate, so this component can roll out mid-wave.
+[Unit]
+Description=OmniNode runner-fleet git mirror daemon (OMN-14027 C2)
+Documentation=https://github.com/OmniNode-ai/omnibase_infra/blob/dev/docs/runbooks/c2-git-mirror-egress-rollout.md
+After=docker.service network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=jonah
+Group=jonah
+Environment=HOME=/home/jonah
+ExecStart=/usr/lib/git-core/git-daemon \
+    --verbose \
+    --reuseaddr \
+    --export-all \
+    --base-path=/home/jonah/.omnibase/runners/git-mirror \
+    --listen=172.18.0.1 \
+    --port=9418 \
+    --timeout=60 \
+    --max-connections=96 \
+    /home/jonah/.omnibase/runners/git-mirror
+Restart=always
+RestartSec=5
+# Read-only exposure: the daemon never gets receive-pack, so a compromised
+# container cannot write to the mirrors.
+NoNewPrivileges=true
+ProtectSystem=strict
+ReadWritePaths=/home/jonah/.omnibase/runners/git-mirror
+PrivateTmp=true
+
+[Install]
+WantedBy=multi-user.target

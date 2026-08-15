@@ -1,0 +1,29 @@
+# OMN-14027 C2 — one upstream fetch per repo per interval, for the whole fleet.
+#
+# Type=oneshot is load-bearing: systemd will not start a second instance while
+# this one is still running, which (together with the flock inside the script)
+# guarantees the "N jobs, 1 upstream transfer" property the mirror exists for.
+[Unit]
+Description=OmniNode runner-fleet git mirror refresh (OMN-14027 C2)
+Documentation=https://github.com/OmniNode-ai/omnibase_infra/blob/dev/docs/runbooks/c2-git-mirror-egress-rollout.md
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=oneshot
+User=jonah
+Group=jonah
+Environment=HOME=/home/jonah
+# Deployed copy, not the git checkout -- same staging convention the runner
+# compose bind-mounts use (/home/jonah/.omnibase/runners/docker/runners/*.sh),
+# so a half-pulled checkout can never change what the fleet executes.
+ExecStart=/home/jonah/.omnibase/runners/docker/runners/git-mirror-refresh.sh
+# A failed upstream fetch leaves a stale-but-usable mirror; the runner-side
+# pre-seed is fail-open, so a non-zero exit must not escalate.
+SuccessExitStatus=0 1
+TimeoutStartSec=900
+Nice=10
+IOSchedulingClass=idle
+
+[Install]
+WantedBy=multi-user.target
