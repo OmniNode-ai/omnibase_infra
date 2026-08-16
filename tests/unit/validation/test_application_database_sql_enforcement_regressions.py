@@ -373,3 +373,147 @@ def test_escape_string_before_select_into_preserves_the_created_target() -> None
         (identity.schema, identity.name, identity.kind.value)
         for identity in application_database_created_catalog_identities(sql)
     ) == (("tenant", "events_copy", "table"),)
+
+
+# ---------------------------------------------------------------------------
+# OMN-15361: a view body may open its own WITH clause. The CTE names live past
+# the `AS`, so a leading-WITH-only parse never collected them and every later
+# reference to one was misread as an unqualified application relation.
+# ---------------------------------------------------------------------------
+
+_VIEW_BODY_CTE_STATEMENTS: tuple[tuple[str, str], ...] = (
+    (
+        "plain",
+        "CREATE VIEW tenant.v AS WITH totals AS (SELECT 1 AS n) "
+        "SELECT totals.n FROM totals;",
+    ),
+    (
+        "or-replace",
+        "CREATE OR REPLACE VIEW tenant.v AS WITH totals AS (SELECT 1 AS n) "
+        "SELECT totals.n FROM totals;",
+    ),
+    (
+        "materialized",
+        "CREATE MATERIALIZED VIEW tenant.v AS WITH totals AS (SELECT 1 AS n) "
+        "SELECT totals.n FROM totals;",
+    ),
+    (
+        "recursive-cte",
+        "CREATE VIEW tenant.v AS WITH RECURSIVE walk AS ("
+        "SELECT 1 AS n UNION ALL SELECT n + 1 FROM walk WHERE n < 5) "
+        "SELECT walk.n FROM walk;",
+    ),
+    (
+        "column-list",
+        "CREATE VIEW tenant.v (n) AS WITH totals AS (SELECT 1 AS n) "
+        "SELECT totals.n FROM totals;",
+    ),
+    (
+        "security-invoker-option-list",
+        "CREATE OR REPLACE VIEW tenant.v WITH (security_invoker = true) AS "
+        "WITH totals AS (SELECT 1 AS n) SELECT totals.n FROM totals;",
+    ),
+    (
+        "chained-ctes-cross-joined",
+        "CREATE OR REPLACE VIEW tenant.v AS WITH totals AS (SELECT 1 AS n), "
+        "failure_categories AS (SELECT 2 AS rows), "
+        "tokens_by_model AS (SELECT 3 AS tokens) "
+        "SELECT totals.n, failure_categories.rows AS failure_categories, "
+        "tokens_by_model.tokens FROM totals "
+        "CROSS JOIN failure_categories CROSS JOIN tokens_by_model;",
+    ),
+)
+
+
+@pytest.mark.parametrize(
+    ("shape", "statement"),
+    _VIEW_BODY_CTE_STATEMENTS,
+    ids=[shape for shape, _ in _VIEW_BODY_CTE_STATEMENTS],
+)
+def test_view_body_cte_names_are_not_misread_as_relations(
+    shape: str,
+    statement: str,
+) -> None:
+    assert lint_application_database_sql(statement, _TOPOLOGY) == ()
+
+
+def test_view_body_cte_parse_matches_the_observed_promotion_failure() -> None:
+    """The exact shape that failed the gate on the dev->main promotion.
+
+    Reduced from 0028_reconcile_delegation_observability_views.sql, keeping the
+    parts that mattered: a CREATE OR REPLACE VIEW whose body opens a three-CTE
+    WITH chain, a jsonb aggregate with its own nested parentheses and ORDER BY,
+    and a trailing column alias that shadows one of the CTE names.
+    """
+    sql = """
+CREATE OR REPLACE VIEW tenant.projection_delegation_quality_gate AS
+WITH totals AS (
+    SELECT COALESCE(AVG(actual_score), 0)::float AS avg_actual_score
+    FROM tenant.delegation_events
+),
+failure_categories AS (
+    SELECT COALESCE(
+        jsonb_agg(
+            jsonb_build_object('category', quality_gate_detail)
+            ORDER BY quality_gate_detail DESC
+        ),
+        '[]'::jsonb
+    ) AS rows
+    FROM tenant.delegation_events
+),
+tokens_by_model AS (
+    SELECT COALESCE(jsonb_agg(jsonb_build_object('model', model)), '[]'::jsonb) AS rows
+    FROM tenant.delegation_events
+)
+SELECT
+    totals.avg_actual_score,
+    failure_categories.rows AS failure_categories,
+    tokens_by_model.rows AS tokens_by_model
+FROM totals
+CROSS JOIN failure_categories
+CROSS JOIN tokens_by_model;
+"""
+
+    assert lint_application_database_sql(sql, _TOPOLOGY) == ()
+
+
+@pytest.mark.parametrize(
+    ("statement", "expected"),
+    [
+        # An unqualified relation in the post-WITH tail still fails.
+        (
+            "CREATE VIEW tenant.v AS WITH totals AS (SELECT 1 AS n) "
+            "SELECT * FROM totals CROSS JOIN delegation_events;",
+            "'delegation_events' must be schema-qualified",
+        ),
+        # An unqualified relation inside a CTE body still fails.
+        (
+            "CREATE VIEW tenant.v AS WITH totals AS "
+            "(SELECT * FROM delegation_events) SELECT * FROM totals;",
+            "'delegation_events' must be schema-qualified",
+        ),
+        # The view's own name is still a real relation target.
+        (
+            "CREATE VIEW unqualified_view AS WITH totals AS (SELECT 1 AS n) "
+            "SELECT totals.n FROM totals;",
+            "'unqualified_view' must be schema-qualified",
+        ),
+        # A CTE name is only in scope for its own statement, never the next one.
+        (
+            "CREATE VIEW tenant.v AS WITH totals AS (SELECT 1 AS n) "
+            "SELECT totals.n FROM totals; SELECT * FROM totals;",
+            "'totals' must be schema-qualified",
+        ),
+        # A later CTE is not visible to an earlier sibling's body.
+        (
+            "CREATE VIEW tenant.v AS WITH first_cte AS (SELECT * FROM second_cte), "
+            "second_cte AS (SELECT 1 AS n) SELECT * FROM first_cte;",
+            "'second_cte' must be schema-qualified",
+        ),
+    ],
+)
+def test_view_body_cte_recognition_never_exempts_a_real_relation(
+    statement: str,
+    expected: str,
+) -> None:
+    assert expected in "\n".join(lint_application_database_sql(statement, _TOPOLOGY))

@@ -26,7 +26,11 @@ from omnibase_infra.errors import (
     ProtocolConfigurationError,
 )
 from omnibase_infra.event_bus.event_bus_kafka import EventBusKafka
-from omnibase_infra.event_bus.models import ModelEventHeaders, ModelEventMessage
+from omnibase_infra.event_bus.models import (
+    ModelEventHeaders,
+    ModelEventMessage,
+    ModelPublishReceipt,
+)
 from omnibase_infra.event_bus.models.config import ModelKafkaEventBusConfig
 from omnibase_infra.nodes.node_dlq_replay_effect.engine_dlq_replay import (
     ModelDlqReplayEngineConfig,
@@ -3893,9 +3897,16 @@ class TestKafkaEventBusProducerRecreation:
             ]
             results = await asyncio.gather(*tasks, return_exceptions=True)
 
-            # All should succeed (no exceptions)
+            # All should succeed (no exceptions).
+            # OMN-15861 INVERTED: this assertion used to be `result is None`,
+            # which encoded the very anti-pattern this ticket removes -- a
+            # publish that returns nothing cannot tell a caller where the record
+            # landed. A successful publish now returns a ModelPublishReceipt;
+            # `None` here would mean the durability coordinate was lost again.
             for i, result in enumerate(results):
-                assert result is None, f"Publish {i} failed: {result}"
+                assert isinstance(result, ModelPublishReceipt), (
+                    f"Publish {i} failed: {result}"
+                )
 
             # Exactly 2 producers total: 1 original + 1 recreation
             assert producer_create_count == 2

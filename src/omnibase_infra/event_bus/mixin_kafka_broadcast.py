@@ -37,6 +37,9 @@ from datetime import UTC, datetime
 from typing import Protocol, runtime_checkable
 
 from omnibase_infra.event_bus.models import ModelEventHeaders
+from omnibase_infra.event_bus.models.model_publish_receipt import (
+    ModelPublishReceipt,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -57,8 +60,16 @@ class ProtocolKafkaBroadcastHost(Protocol):
         key: bytes | None,
         value: bytes,
         headers: ModelEventHeaders | None = None,
-    ) -> None:
-        """Publish message to topic."""
+    ) -> ModelPublishReceipt | None:
+        """Publish message to topic.
+
+        OMN-15861: widened from ``-> None`` because ``EventBusKafka.publish`` now
+        returns a ``ModelPublishReceipt``. Optional rather than required so the
+        test doubles and sinks that also satisfy this protocol -- and genuinely
+        have no coordinate to report -- stay valid instead of being forced to
+        invent one. ``None`` means "this transport cannot support a durable
+        claim" and fails closed in every confirmation strategy.
+        """
         ...
 
 

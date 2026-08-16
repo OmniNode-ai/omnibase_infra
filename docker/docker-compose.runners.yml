@@ -1,6 +1,6 @@
 # docker-compose.runners.yml
 # OmniNode self-hosted GitHub Actions runners
-# Ticket: OMN-3276 / Epic: OMN-3273 | Scaled: OMN-3714 | Reconciled to live 48: OMN-12582 | Phase-A scale to 64: OMN-14029
+# Ticket: OMN-3276 / Epic: OMN-3273 | Scaled: OMN-3714 | Reconciled to live 48: OMN-12582 | Phase-A scale to 64: OMN-14029 | Saturation scale to 72: OMN-15978
 #
 # Runs the full steady-state runner fleet. The fleet count is owned by
 # config/runner_fleet.yaml (expected_count). Each runner registers with GitHub
@@ -34,10 +34,10 @@
 # Verify: cat /proc/sys/fs/inotify/max_user_watches
 #
 # Resource allocation per runner (RTX 5090 host with ample RAM):
-#   mem_limit: 6g     - per-runner memory limit (not a reservation); 64 runners
+#   mem_limit: 6g     - per-runner memory limit (not a reservation); 72 runners
 #                       share the host's 91 GB, peak usage ~24 GB observed live
 #   memswap_limit: 12g - bounded swap headroom for large CI spikes
-#   cpus: "2.0"       - per-runner CFS quota (not a reservation); 64 runners
+#   cpus: "2.0"       - per-runner CFS quota (not a reservation); 72 runners
 #                       share the host's 32 vCPUs (over-subscription tolerated)
 #   pids_limit: 4096  - prevents fork bombs from runaway test processes
 #
@@ -57,7 +57,7 @@ x-runner-base: &runner-base
     RUNNER_GROUP: omnibase-ci
     ACTIONS_RUNNER_HOOK_JOB_STARTED: /usr/local/bin/runner-job-started.sh
     # OMN-14027 C3 — fleet-wide uv download stampede cap.
-    # 64 runners NAT through one home uplink and share one anonymous egress
+    # 72 runners NAT through one home uplink and share one anonymous egress
     # budget. The hardened setup-python-uv composite serializes downloads to 1 in
     # its OWN step, but the 18 workflows that bypass it (OMN-14193) run raw
     # `uv sync` at uv's built-in concurrency default — 64x in parallel — and
@@ -84,7 +84,7 @@ x-runner-base: &runner-base
     # fleet at a cache host that is not yet up would force every runner onto the
     # PyPI fallback. Per the OMN-14027 rollout, devpi is stood up first
     # (docker/docker-compose.pypi-cache.yml) and ONE canary runner is wired via
-    # its own container env, leaving the other 63 on direct egress until the
+    # its own container env, leaving the other 71 on direct egress until the
     # canary is measured green. PyPI stays as the fallback index so a cache
     # miss/outage degrades, not fails-closed. Cache endpoint + activation steps:
     # config/runner_fleet.yaml (pypi_cache:) and
@@ -886,12 +886,108 @@ services:
       - ./runners/runner-job-started.sh:/usr/local/bin/runner-job-started.sh:ro
       - ./runners/healthcheck.sh:/usr/local/bin/healthcheck.sh:ro
       - runner-64-creds:/home/runner/.runner-creds
+  omninode-runner-65:
+    !!merge <<: *runner-base
+    container_name: omninode-runner-65
+    environment:
+      !!merge <<: *runner-env
+      RUNNER_NAME: omninode-runner-65
+    volumes:
+      - /var/run/docker.sock:/var/run/docker.sock
+      - ./runners/entrypoint.sh:/usr/local/bin/entrypoint.sh:ro
+      - ./runners/runner-job-started.sh:/usr/local/bin/runner-job-started.sh:ro
+      - ./runners/healthcheck.sh:/usr/local/bin/healthcheck.sh:ro
+      - runner-65-creds:/home/runner/.runner-creds
+  omninode-runner-66:
+    !!merge <<: *runner-base
+    container_name: omninode-runner-66
+    environment:
+      !!merge <<: *runner-env
+      RUNNER_NAME: omninode-runner-66
+    volumes:
+      - /var/run/docker.sock:/var/run/docker.sock
+      - ./runners/entrypoint.sh:/usr/local/bin/entrypoint.sh:ro
+      - ./runners/runner-job-started.sh:/usr/local/bin/runner-job-started.sh:ro
+      - ./runners/healthcheck.sh:/usr/local/bin/healthcheck.sh:ro
+      - runner-66-creds:/home/runner/.runner-creds
+  omninode-runner-67:
+    !!merge <<: *runner-base
+    container_name: omninode-runner-67
+    environment:
+      !!merge <<: *runner-env
+      RUNNER_NAME: omninode-runner-67
+    volumes:
+      - /var/run/docker.sock:/var/run/docker.sock
+      - ./runners/entrypoint.sh:/usr/local/bin/entrypoint.sh:ro
+      - ./runners/runner-job-started.sh:/usr/local/bin/runner-job-started.sh:ro
+      - ./runners/healthcheck.sh:/usr/local/bin/healthcheck.sh:ro
+      - runner-67-creds:/home/runner/.runner-creds
+  omninode-runner-68:
+    !!merge <<: *runner-base
+    container_name: omninode-runner-68
+    environment:
+      !!merge <<: *runner-env
+      RUNNER_NAME: omninode-runner-68
+    volumes:
+      - /var/run/docker.sock:/var/run/docker.sock
+      - ./runners/entrypoint.sh:/usr/local/bin/entrypoint.sh:ro
+      - ./runners/runner-job-started.sh:/usr/local/bin/runner-job-started.sh:ro
+      - ./runners/healthcheck.sh:/usr/local/bin/healthcheck.sh:ro
+      - runner-68-creds:/home/runner/.runner-creds
+  omninode-runner-69:
+    !!merge <<: *runner-base
+    container_name: omninode-runner-69
+    environment:
+      !!merge <<: *runner-env
+      RUNNER_NAME: omninode-runner-69
+    volumes:
+      - /var/run/docker.sock:/var/run/docker.sock
+      - ./runners/entrypoint.sh:/usr/local/bin/entrypoint.sh:ro
+      - ./runners/runner-job-started.sh:/usr/local/bin/runner-job-started.sh:ro
+      - ./runners/healthcheck.sh:/usr/local/bin/healthcheck.sh:ro
+      - runner-69-creds:/home/runner/.runner-creds
+  omninode-runner-70:
+    !!merge <<: *runner-base
+    container_name: omninode-runner-70
+    environment:
+      !!merge <<: *runner-env
+      RUNNER_NAME: omninode-runner-70
+    volumes:
+      - /var/run/docker.sock:/var/run/docker.sock
+      - ./runners/entrypoint.sh:/usr/local/bin/entrypoint.sh:ro
+      - ./runners/runner-job-started.sh:/usr/local/bin/runner-job-started.sh:ro
+      - ./runners/healthcheck.sh:/usr/local/bin/healthcheck.sh:ro
+      - runner-70-creds:/home/runner/.runner-creds
+  omninode-runner-71:
+    !!merge <<: *runner-base
+    container_name: omninode-runner-71
+    environment:
+      !!merge <<: *runner-env
+      RUNNER_NAME: omninode-runner-71
+    volumes:
+      - /var/run/docker.sock:/var/run/docker.sock
+      - ./runners/entrypoint.sh:/usr/local/bin/entrypoint.sh:ro
+      - ./runners/runner-job-started.sh:/usr/local/bin/runner-job-started.sh:ro
+      - ./runners/healthcheck.sh:/usr/local/bin/healthcheck.sh:ro
+      - runner-71-creds:/home/runner/.runner-creds
+  omninode-runner-72:
+    !!merge <<: *runner-base
+    container_name: omninode-runner-72
+    environment:
+      !!merge <<: *runner-env
+      RUNNER_NAME: omninode-runner-72
+    volumes:
+      - /var/run/docker.sock:/var/run/docker.sock
+      - ./runners/entrypoint.sh:/usr/local/bin/entrypoint.sh:ro
+      - ./runners/runner-job-started.sh:/usr/local/bin/runner-job-started.sh:ro
+      - ./runners/healthcheck.sh:/usr/local/bin/healthcheck.sh:ro
+      - runner-72-creds:/home/runner/.runner-creds
   # omninode-deploy-runner -- OMN-14889: dedicated runner for the
   # release-train-lab.yml tag-cut/deploy jobs (cut_release_train_tag.sh,
   # refresh_stability_lane.sh, refresh_dev_lane.sh). These scripts need real
   # host-path git access to OMNI_HOME sibling clones (they `git fetch`/
   # `checkout --detach`/tag the clones directly and run deploy-runtime.sh's
-  # BUILD_SOURCE=workspace path against them) -- the shared 48-64 omnibase-ci
+  # BUILD_SOURCE=workspace path against them) -- the shared 72-runner omnibase-ci
   # fleet above deliberately does NOT have this (docker.sock only, no
   # OMNI_HOME bind mount) so that a compromised/buggy CI job from the general
   # fleet cannot mutate host git state or lane containers. Fork 1 (OMN-14889
@@ -992,7 +1088,7 @@ services:
         # gid 1001 belongs to a DIFFERENT real user -- daniyal -- so that
         # would have handed him direct read access to operator secrets), and
         # does not touch the runner uid/Dockerfile shared with the other
-        # 64-runner fleet. Re-copied on every container start/recreate, so a
+        # 72-runner fleet. Re-copied on every container start/recreate, so a
         # host-side env rotation is picked up on next restart.
         mkdir -p /home/runner/.runner-creds
         chown "$${runner_uid}:$${runner_gid}" /home/runner/.runner-creds
@@ -1218,3 +1314,19 @@ volumes:
     name: omninode-runner-63-creds
   runner-64-creds:
     name: omninode-runner-64-creds
+  runner-65-creds:
+    name: omninode-runner-65-creds
+  runner-66-creds:
+    name: omninode-runner-66-creds
+  runner-67-creds:
+    name: omninode-runner-67-creds
+  runner-68-creds:
+    name: omninode-runner-68-creds
+  runner-69-creds:
+    name: omninode-runner-69-creds
+  runner-70-creds:
+    name: omninode-runner-70-creds
+  runner-71-creds:
+    name: omninode-runner-71-creds
+  runner-72-creds:
+    name: omninode-runner-72-creds

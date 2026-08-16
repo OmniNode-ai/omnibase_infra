@@ -49,6 +49,9 @@ class ModelEventHeaders(BaseModel):
         max_retries: Maximum MESSAGE-LEVEL retry attempts allowed (application-level).
             When retry_count >= max_retries, message should be sent to DLQ.
         ttl_seconds: Message time-to-live in seconds.
+        idempotency_key: Stable per-logical-event key for durability readback
+            and dedupe (OMN-15861). Optional; ``None`` means positional-only
+            confirmation is possible.
 
     Example:
         ```python
@@ -108,6 +111,15 @@ class ModelEventHeaders(BaseModel):
         ),
     )
     ttl_seconds: int | None = Field(default=None)
+    idempotency_key: str | None = Field(
+        default=None,
+        description=(
+            "Stable per-logical-event key (OMN-15861). Carried onto the wire so a "
+            "durability readback or projection lookup can match this record by "
+            "identity rather than by position, which is what makes replay after a "
+            "producer crash safe. Surfaced on ModelPublishReceipt.idempotency_key."
+        ),
+    )
 
     model_config = ConfigDict(frozen=True, extra="forbid", from_attributes=True)
 

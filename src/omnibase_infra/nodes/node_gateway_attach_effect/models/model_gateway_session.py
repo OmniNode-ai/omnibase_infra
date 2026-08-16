@@ -30,9 +30,21 @@ class ModelGatewaySession(BaseModel):
     edge_instance_id: str
     status: EnumGatewaySessionStatus
     attached_at: datetime
+    # Time of the last SUCCESSFUL validation of this session, not the time
+    # the last heartbeat request arrived. It is seeded at attach (where the
+    # token's signature and claims were verified against JWKS) and advanced
+    # only by a heartbeat whose introspection returned active. A heartbeat
+    # that arrives during a Keycloak outage deliberately leaves it
+    # untouched -- that is what lets OMN-16022's
+    # max_unverified_session_seconds ceiling measure real revalidation
+    # staleness rather than mere request traffic, and it is why an attacker
+    # who can partition gateway<->Keycloak cannot hold the clock still by
+    # continuing to send heartbeats.
     last_heartbeat_at: datetime
     # Never later than the underlying access token's exp claim, clamped by
-    # ModelGatewayAttachConfig.max_session_ttl_seconds.
+    # ModelGatewayAttachConfig.max_session_ttl_seconds. Enforced on every
+    # session-consuming path since OMN-16022 (it was previously written at
+    # attach and read by nothing).
     expires_at: datetime
 
 

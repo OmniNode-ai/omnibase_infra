@@ -15,6 +15,9 @@ from omnibase_infra.observability.runner_health.janitor_docker_network import (
     JanitorDockerNetwork,
     classify_network,
 )
+from omnibase_infra.observability.runner_health.model_git_mirror_config import (
+    ModelGitMirrorConfig,
+)
 from omnibase_infra.observability.runner_health.model_network_decision import (
     ModelNetworkDecision,
 )
@@ -51,6 +54,9 @@ from omnibase_infra.observability.runner_health.model_runner_health_snapshot imp
 from omnibase_infra.observability.runner_health.model_runner_status import (
     ModelRunnerStatus,
 )
+from omnibase_infra.observability.runner_health.model_tool_cache_config import (
+    ModelToolCacheConfig,
+)
 
 __all__ = [
     "DEFAULT_OWNERSHIP_RULES",
@@ -63,11 +69,13 @@ __all__ = [
     "ModelNetworkJanitorResult",
     "ModelNetworkOwnershipRule",
     "ModelNetworkPoolAlert",
+    "ModelGitMirrorConfig",
     "ModelNetworkPoolStatus",
     "ModelPyPICacheConfig",
     "ModelRunnerFleetConfig",
     "ModelRunnerHealthAlert",
     "ModelRunnerHealthSnapshot",
+    "ModelToolCacheConfig",
     "ModelRunnerStatus",
     "build_pool_alert_if_pressured",
     "classify_network",

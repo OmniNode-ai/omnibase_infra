@@ -67,7 +67,11 @@ from omnibase_infra.errors import (
     ModelInfraErrorContext,
     ProtocolConfigurationError,
 )
-from omnibase_infra.event_bus.models import ModelEventHeaders, ModelEventMessage
+from omnibase_infra.event_bus.models import (
+    ModelEventHeaders,
+    ModelEventMessage,
+    ModelPublishReceipt,
+)
 from omnibase_infra.models import ModelNodeIdentity
 
 if TYPE_CHECKING:
@@ -157,7 +161,7 @@ class EventBusInmemory(_CoreEventBusInmemory):
         key: bytes | None,
         value: bytes,
         headers: ModelEventHeaders | None = None,
-    ) -> None:
+    ) -> ModelPublishReceipt:
         """Publish a message, delivering infra-typed ``ModelEventMessage``.
 
         Overrides the core publish so the bus emits the infra
@@ -166,6 +170,20 @@ class EventBusInmemory(_CoreEventBusInmemory):
         core models (``schema_version: ModelSemVer``). State (offsets, history,
         per-subscriber circuit breaker) is the inherited core state; only the
         message construction and the not-started error type differ.
+
+        Returns the assigned ``(partition, offset)`` as a
+        ``ModelPublishReceipt`` (OMN-15861), matching ``EventBusKafka.publish``.
+        Parity here is what makes the zero-infra durability proof meaningful:
+        the same durable-outbox code path can be driven end to end with no
+        broker, because this bus reports a real coordinate that
+        ``InmemoryReadbackSource`` can independently read back out of history.
+
+        The receipt is minted from the offset assigned under the lock, BEFORE
+        subscriber fan-out. That ordering is deliberate: the record is in this
+        bus's history at that point, so it is durable *with respect to this
+        bus* regardless of whether a downstream subscriber then fails. A
+        subscriber's failure is a delivery problem, not a produce problem, and
+        conflating them would make the in-memory proof diverge from Kafka.
         """
         if not self._started:
             context = ModelInfraErrorContext(
@@ -207,6 +225,15 @@ class EventBusInmemory(_CoreEventBusInmemory):
             # receive the infra model. Drops to a re-export once core aligns.
             self._event_history.append(message)  # type: ignore[arg-type]
             subscribers = list(self._subscribers.get(topic, []))
+            receipt = ModelPublishReceipt(
+                topic=topic,
+                partition=0,
+                offset=offset,
+                cluster=f"inmemory.{self._environment}",
+                produced_at=datetime.now(UTC),
+                transport=EnumInfraTransportType.INMEMORY,
+                idempotency_key=headers.idempotency_key,
+            )
 
         # Deliver outside the lock; mirror the inherited circuit-breaker policy.
         for group_id, callback in subscribers:
@@ -250,6 +277,8 @@ class EventBusInmemory(_CoreEventBusInmemory):
                         "correlation_id": str(headers.correlation_id),
                     },
                 )
+
+        return receipt
 
     async def publish_envelope(
         self,
