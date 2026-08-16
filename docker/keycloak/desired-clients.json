@@ -1,5 +1,4 @@
 {
-  "$schema": "internal:desired-clients-v1",
   "realm": "omninode",
   "clients": [
     {
