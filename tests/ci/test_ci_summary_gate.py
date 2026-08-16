@@ -802,6 +802,180 @@ class TestActorConditionalExternalContexts:
 
 
 # --------------------------------------------------------------------------
+# OMN-15979 — "Integration Test Removal Gate" (OMN-8732) admitted as an
+# external context.
+#
+# Same residual class as OMN-15496: the job's own header says "No override
+# mechanism", but before this admission it was reachable by neither branch
+# protection (dev requires only `CI Summary`) nor this poller — grep for
+# "integration test removal|test-removal" over the pre-OMN-15979 module
+# returned nothing. PR #2720 merged 2026-08-11T04:47:58Z with this context
+# `failure`.
+# --------------------------------------------------------------------------
+
+ITRG_CONTEXT = "Integration Test Removal Gate"
+
+OMN15979_FIXTURE = (
+    REPO_ROOT
+    / "tests"
+    / "ci"
+    / "fixtures"
+    / "omn15979_merge_time_external_check_runs.json"
+)
+
+
+def _load_omn15979_fixture() -> dict[str, Any]:
+    loaded = json.loads(OMN15979_FIXTURE.read_text(encoding="utf-8"))
+    assert isinstance(loaded, dict)
+    return loaded
+
+
+def _omn15979_check_runs(pr: str) -> list[dict[str, object]]:
+    """Merge-time external check-runs for one real merged dev PR (OMN-15979 window)."""
+    entry = _load_omn15979_fixture()["pull_requests"][pr]
+    runs = entry["check_runs"]
+    assert isinstance(runs, list) and runs
+    return [dict(row) for row in runs]
+
+
+class TestIntegrationTestRemovalGateExternalContext:
+    """OMN-15979 — admission proof + regression fixture for ITRG."""
+
+    def test_context_is_admitted(self) -> None:
+        assert ITRG_CONTEXT in EXPECTED_EXTERNAL_CONTEXTS
+
+    def test_every_sampled_pr_reports_the_full_expected_set(self) -> None:
+        """Admission rule, enforced: 100% merge-time presence over this window too.
+
+        Same check as OMN-15496's ``test_every_admitted_context_reported_on_
+        every_sampled_pr``, replayed against the OMN-15979 window (#2705…#2720)
+        rather than the OMN-15496 window (#2546…#2567) — two independent
+        16-PR samples, not one restated.
+        """
+        fixture = _load_omn15979_fixture()
+        missing: dict[str, list[str]] = {}
+        for pr, entry in fixture["pull_requests"].items():
+            observed = latest_check_run_by_name(entry["check_runs"])
+            absent = [c for c in EXPECTED_EXTERNAL_CONTEXTS if c not in observed]
+            if absent:
+                missing[pr] = absent
+        assert missing == {}, (
+            "a context absent from any PR in the OMN-15979 sample window does "
+            f"not report on every PR shape: {missing}"
+        )
+
+    def test_no_wedge_replay_over_this_window(self) -> None:
+        """Replaying the current window must block exactly the real red.
+
+        16 dev PRs merged 2026-08-09T23:11:14Z → 2026-08-11T04:47:58Z
+        (#2705…#2720): every context in :data:`EXPECTED_EXTERNAL_CONTEXTS` must
+        resolve green on 15 of them and the block must be exactly #2720 on
+        exactly ``Integration Test Removal Gate`` — not deploy-gate, not verify,
+        not a second, unrelated context riding along.
+        """
+        fixture = _load_omn15979_fixture()
+        blocked: dict[str, list[str]] = {}
+        for pr, entry in fixture["pull_requests"].items():
+            failures, unresolved = evaluate_external_contexts(
+                entry["check_runs"], EXPECTED_EXTERNAL_CONTEXTS
+            )
+            if failures or unresolved:
+                blocked[pr] = failures + unresolved
+
+        assert len(fixture["pull_requests"]) == 16
+        assert blocked == {"2720": [ITRG_CONTEXT]}, (
+            "seed membership changed the no-wedge profile for the OMN-15979 "
+            f"window; got {blocked}"
+        )
+
+    def test_red_at_merge_blocks_the_real_pr(self) -> None:
+        """Live proof: #2720's real payload must FAIL the required rollup.
+
+        This is the exact PR the ticket's evidence cites as merging past a red
+        ``Integration Test Removal Gate`` — replayed here to prove that, with
+        this entry wired, the identical payload would have been blocked
+        end-to-end rather than merged.
+        """
+        jobs = _all_gates("success")
+        # Pre-condition: the run-scoped verdict alone is SUCCESS on this head —
+        # the in-run jobs are unaffected, so only the external assertion can
+        # catch this.
+        assert evaluate(jobs)[0] == EXIT_SUCCESS
+
+        payload = _omn15979_check_runs("2720")
+        itrg_rows = [row for row in payload if row["name"] == ITRG_CONTEXT]
+        assert [row["conclusion"] for row in itrg_rows] == ["failure"]
+
+        code, report = evaluate(
+            jobs,
+            check_runs=payload,
+            external_contexts=EXPECTED_EXTERNAL_CONTEXTS,
+        )
+        assert code == EXIT_FAILURE
+        assert ITRG_CONTEXT in report
+
+    def test_falsification_control_tuple_entry_is_load_bearing(self) -> None:
+        """Drop the context from the tuple and the SAME real-red payload greens.
+
+        Without this, the FAILURE above could come from an unrelated context
+        (e.g. ``verify / verify``'s early reruns) rather than from ITRG itself.
+        """
+        remaining = tuple(c for c in EXPECTED_EXTERNAL_CONTEXTS if c != ITRG_CONTEXT)
+        assert len(remaining) == len(EXPECTED_EXTERNAL_CONTEXTS) - 1
+        code, report = evaluate(
+            _all_gates("success"),
+            check_runs=_omn15979_check_runs("2720"),
+            external_contexts=remaining,
+        )
+        assert code == EXIT_SUCCESS, report
+
+    def test_synthetic_red_flips_a_clean_pr_to_failure(self) -> None:
+        """AC — a synthetic red on an otherwise-clean real PR flips the verdict.
+
+        Starts from PR #2719's genuinely all-green merge-time payload, flips
+        only ``Integration Test Removal Gate`` to ``failure`` in place (the
+        rest of the real payload is untouched), and asserts CI Summary's
+        verdict flips from SUCCESS to FAILURE — and back to SUCCESS once the
+        synthetic row is reverted. This is the fixture the ticket's AC calls
+        for: a synthetic red proven to flip the verdict once wired.
+        """
+        clean_payload = _omn15979_check_runs("2719")
+        code, _ = evaluate(
+            _all_gates("success"),
+            check_runs=clean_payload,
+            external_contexts=EXPECTED_EXTERNAL_CONTEXTS,
+        )
+        assert code == EXIT_SUCCESS
+
+        reddened = [dict(row) for row in clean_payload]
+        flipped = False
+        for row in reddened:
+            if row["name"] == ITRG_CONTEXT:
+                row["conclusion"] = "failure"
+                flipped = True
+        assert flipped, "fixture no longer carries an ITRG row to synthetically redden"
+
+        code, report = evaluate(
+            _all_gates("success"),
+            check_runs=reddened,
+            external_contexts=EXPECTED_EXTERNAL_CONTEXTS,
+        )
+        assert code == EXIT_FAILURE
+        assert ITRG_CONTEXT in report
+
+    def test_measurement_windows_are_disjoint_from_the_original_seed(self) -> None:
+        """Guard the premise: this is a second independent sample, not a restatement.
+
+        If the two fixtures ever collapsed onto the same PR set, the "two
+        independent windows" claim in the module docstring would be false.
+        """
+        omn15496_prs = set(_load_external_fixture()["pull_requests"])
+        omn15979_prs = set(_load_omn15979_fixture()["pull_requests"])
+        assert omn15496_prs.isdisjoint(omn15979_prs)
+        assert len(omn15979_prs) == 16
+
+
+# --------------------------------------------------------------------------
 # OMN-15731 — label-gated CI pilot (omnibase_infra + onex_change_control).
 #
 # `test-parallel` (the heavy split-matrix run) is gated behind the `ci:ready`
