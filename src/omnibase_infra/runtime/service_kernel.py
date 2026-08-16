@@ -513,7 +513,28 @@ def _build_runtime_handler_dependencies(
                 f"secret-resolver config at {config_path}"
             ) from exc
 
-        gateway_config = ModelGatewayAttachConfig()
+        # The node's contract.yaml is the source of truth for this config
+        # (its own description says "resolved from contract overlays"); a
+        # bare ModelGatewayAttachConfig() here made every config.gateway_attach
+        # edit a silent runtime no-op because the renewal builder and session
+        # policy only ever saw field defaults.
+        import omnibase_infra.nodes.node_gateway_attach_effect as _gateway_attach_pkg
+
+        gateway_contract_path = (
+            Path(str(_gateway_attach_pkg.__file__)).parent / "contract.yaml"
+        )
+        try:
+            raw_contract = yaml.safe_load(
+                gateway_contract_path.read_text(encoding="utf-8")
+            )
+            gateway_config = ModelGatewayAttachConfig.model_validate(
+                raw_contract["config"]["gateway_attach"]
+            )
+        except (OSError, KeyError, TypeError, ValueError, yaml.YAMLError) as exc:
+            raise ProtocolConfigurationError(
+                "Gateway attach dependency wiring requires the contract-declared "
+                f"config.gateway_attach block at {gateway_contract_path}"
+            ) from exc
         required_gateway_refs = {
             gateway_config.keycloak_issuer_ref,
             gateway_config.keycloak_introspection_ref,
