@@ -22,6 +22,8 @@ services:
       - /app/config/gateway-forwarder.yaml
       - --ready-file
       - /tmp/gateway-forwarder-ready
+      - --broker-ref-map
+      - /run/gateway/broker-ref-map.yaml
     environment:
       AWS_PROFILE: "${GATEWAY_AWS_PROFILE:-gateway}"
       AWS_CONFIG_FILE: "/run/aws/config"
@@ -41,15 +43,22 @@ services:
       - ${GATEWAY_AWS_CERTIFICATE_FILE:?GATEWAY_AWS_CERTIFICATE_FILE is required}:/run/aws/certificate.pem:ro
       - ${GATEWAY_AWS_PRIVATE_KEY_FILE:?GATEWAY_AWS_PRIVATE_KEY_FILE is required}:/run/aws/private-key.tss:ro
       - ${GATEWAY_AWS_SIGNING_HELPER_FILE:?GATEWAY_AWS_SIGNING_HELPER_FILE is required}:/usr/local/bin/aws_signing_helper:ro
+      # OMN-15743: the cloud broker endpoint is resolved from the node
+      # contract's cloud_broker_ref at the effect boundary (see
+      # gateway_forwarder._materialize_cloud_broker_ref), not hardcoded into
+      # this compose file. This map is an operator-supplied artifact --
+      # today it carries the bastion-IP-derived FQDN mapping; once the
+      # OMN-15739 §6.2 Route53 private-hosted-zone migration lands, this
+      # same ref resolves to a plain DNS-resolvable bootstrap_servers value
+      # and no per-host IP override is needed at all. No broker
+      # address/IP is committed to this repo.
+      - ${GATEWAY_BROKER_REF_MAP_FILE:?GATEWAY_BROKER_REF_MAP_FILE is required}:/run/gateway/broker-ref-map.yaml:ro
     devices:
       # The wrapped private key is usable only through the .201 TPM. The raw
       # signing key never exists in a host file or inside the container.
       - ${GATEWAY_TPM_DEVICE:?GATEWAY_TPM_DEVICE is required}:/dev/tpmrm0
     networks:
       - gateway-runtime
-    extra_hosts:
-      - "b-1.omninodedevmsk.7ozyd3.c14.kafka.us-east-1.amazonaws.com:100.53.215.198"
-      - "b-2.omninodedevmsk.7ozyd3.c14.kafka.us-east-1.amazonaws.com:100.53.215.198"
     restart: unless-stopped
     stop_grace_period: 30s
     healthcheck:
@@ -62,7 +71,11 @@ services:
       # for 4 days). Real checks are cadence-bound (contract
       # `gateway_forwarder.canary.cadence_seconds`, default 30s) via
       # --state-file so this does not hit the brokers on every 15s tick.
-      test: ["CMD", "onex-gateway-canary-probe", "--config", "/app/config/gateway-forwarder.yaml", "--state-file", "/tmp/gateway-canary-probe-state.json"]
+      # --broker-ref-map (OMN-15743): the probe resolves cloud_bus.bootstrap_servers
+      # the same fail-closed way the main process does, from the operator-supplied
+      # map already mounted at /run/gateway/broker-ref-map.yaml above -- it does not
+      # re-derive or hardcode a broker endpoint of its own.
+      test: ["CMD", "onex-gateway-canary-probe", "--config", "/app/config/gateway-forwarder.yaml", "--state-file", "/tmp/gateway-canary-probe-state.json", "--broker-ref-map", "/run/gateway/broker-ref-map.yaml"]
       interval: 15s
       timeout: 25s
       retries: 4

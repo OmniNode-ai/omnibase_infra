@@ -51,14 +51,22 @@ def load_gateway_forwarder_runtime_config(
     config_path: Path,
     *,
     contract_path: Path = _DEFAULT_GATEWAY_CONTRACT_PATH,
+    broker_ref_map_path: Path,
 ) -> ModelGatewayForwarderRuntimeConfig:
-    """Load and validate one explicit two-leg forwarder configuration."""
+    """Load and validate one explicit two-leg forwarder configuration.
+
+    ``broker_ref_map_path`` is required (no default): the cloud broker
+    endpoint is resolved from the node contract's ``cloud_broker_ref`` at
+    this effect boundary, never hardcoded into compose or tenant config. See
+    ``_materialize_cloud_broker_ref`` for the fail-closed resolution rules.
+    """
     raw_object: object = yaml.safe_load(config_path.read_text(encoding="utf-8"))
     if not isinstance(raw_object, dict):
         raise ValueError("gateway forwarder config must be a YAML mapping")
     raw: dict[str, object] = {str(key): value for key, value in raw_object.items()}
     _materialize_contract_mirror_topics(raw, contract_path)
     _materialize_contract_canary_config(raw, contract_path)
+    _materialize_cloud_broker_ref(raw, contract_path, broker_ref_map_path)
     return ModelGatewayForwarderRuntimeConfig.model_validate(raw)
 
 
@@ -154,6 +162,103 @@ def _materialize_contract_canary_config(
             "gateway node contract is missing config.gateway_forwarder.canary"
         )
     forwarder["canary"] = {str(key): value for key, value in canary_object.items()}
+
+
+def _materialize_cloud_broker_ref(
+    raw: dict[str, object],
+    contract_path: Path,
+    broker_ref_map_path: Path,
+) -> None:
+    """Resolve ``cloud_bus.bootstrap_servers`` from the contract's cloud broker ref.
+
+    Mirrors ``_materialize_contract_mirror_topics``: the node contract's
+    ``gateway_forwarder.cloud_leg.cloud_broker_ref`` is the sole authority for
+    which cloud broker endpoint applies. Resolved tenant YAML may declare
+    ``forwarder.cloud_bus.cloud_broker_ref`` (it must match the contract
+    verbatim) but must never carry a ``bootstrap_servers`` literal -- the
+    actual address is resolved here, at the effect boundary, from an
+    operator-supplied broker-ref map. This replaces the previous hardcoded
+    Docker ``extra_hosts``/``bootstrap_servers`` literal (OMN-15743).
+
+    Fails closed: raises ``ValueError`` if the resolved config redeclares the
+    literal, if the declared ref does not match the contract, or if the map
+    is missing/unreadable/has no entry for the ref. There is no hardcoded
+    fallback endpoint.
+    """
+    cloud_bus_object = raw.get("cloud_bus")
+    if not isinstance(cloud_bus_object, dict):
+        raise ValueError("gateway forwarder config requires a cloud_bus mapping")
+    cloud_bus: dict[str, object] = {
+        str(key): value for key, value in cloud_bus_object.items()
+    }
+    raw["cloud_bus"] = cloud_bus
+    if "bootstrap_servers" in cloud_bus:
+        raise ValueError(
+            "resolved gateway config must not declare cloud_bus.bootstrap_servers "
+            "as a literal; the cloud broker endpoint is resolved from the node "
+            "contract's cloud_broker_ref at the effect boundary"
+        )
+
+    forwarder_object = raw.get("forwarder")
+    if not isinstance(forwarder_object, dict):
+        raise ValueError("gateway forwarder config requires a forwarder mapping")
+    declared_cloud_bus_object = forwarder_object.get("cloud_bus")
+    if not isinstance(declared_cloud_bus_object, dict):
+        raise ValueError("gateway forwarder config requires forwarder.cloud_bus")
+    declared_ref = declared_cloud_bus_object.get("cloud_broker_ref")
+    if not isinstance(declared_ref, str) or not declared_ref:
+        raise ValueError(
+            "gateway forwarder config forwarder.cloud_bus.cloud_broker_ref must "
+            "be a non-empty string"
+        )
+
+    contract_object: object = yaml.safe_load(contract_path.read_text(encoding="utf-8"))
+    if not isinstance(contract_object, dict):
+        raise ValueError("gateway node contract must be a YAML mapping")
+    contract: dict[str, object] = {
+        str(key): value for key, value in contract_object.items()
+    }
+    contract_config = contract.get("config")
+    if not isinstance(contract_config, dict):
+        raise ValueError("gateway node contract is missing config")
+    gateway_config = contract_config.get("gateway_forwarder")
+    if not isinstance(gateway_config, dict):
+        raise ValueError("gateway node contract is missing gateway_forwarder")
+    cloud_leg = gateway_config.get("cloud_leg")
+    if not isinstance(cloud_leg, dict):
+        raise ValueError("gateway node contract is missing gateway_forwarder.cloud_leg")
+    contract_ref = cloud_leg.get("cloud_broker_ref")
+    if not isinstance(contract_ref, str) or not contract_ref:
+        raise ValueError(
+            "gateway node contract cloud_leg.cloud_broker_ref must be a "
+            "non-empty string"
+        )
+    if declared_ref != contract_ref:
+        raise ValueError(
+            f"resolved forwarder.cloud_bus.cloud_broker_ref {declared_ref!r} "
+            "does not match the node contract's cloud_leg.cloud_broker_ref "
+            f"{contract_ref!r}"
+        )
+
+    if not broker_ref_map_path.is_file():
+        raise ValueError(
+            f"no broker-ref map was found at {broker_ref_map_path!s}; the "
+            "gateway process refuses to start without a resolvable "
+            "cloud_broker_ref (fail-closed -- there is no hardcoded fallback "
+            "broker endpoint)"
+        )
+    map_object: object = yaml.safe_load(broker_ref_map_path.read_text(encoding="utf-8"))
+    if not isinstance(map_object, dict):
+        raise ValueError(
+            f"broker-ref map at {broker_ref_map_path!s} must be a YAML mapping"
+        )
+    resolved = map_object.get(contract_ref)
+    if not isinstance(resolved, str) or not resolved.strip():
+        raise ValueError(
+            f"broker-ref map at {broker_ref_map_path!s} has no resolvable "
+            f"entry for cloud_broker_ref={contract_ref!r}"
+        )
+    cloud_bus["bootstrap_servers"] = resolved.strip()
 
 
 async def run_gateway_forwarder(
@@ -495,11 +600,25 @@ def _build_parser() -> argparse.ArgumentParser:
             "and delivery loops start"
         ),
     )
+    parser.add_argument(
+        "--broker-ref-map",
+        type=Path,
+        required=True,
+        help=(
+            "Path to the operator-supplied broker-ref resolution map (YAML "
+            "mapping of contract cloud_broker_ref names to resolved "
+            "bootstrap_servers strings). Resolved at the effect boundary; "
+            "required, no default -- the process fails closed without it"
+        ),
+    )
     return parser
 
 
 async def _async_main(args: argparse.Namespace) -> None:
-    config = load_gateway_forwarder_runtime_config(args.config)
+    config = load_gateway_forwarder_runtime_config(
+        args.config,
+        broker_ref_map_path=args.broker_ref_map,
+    )
     shutdown_event = asyncio.Event()
     loop = asyncio.get_running_loop()
     for sig in (signal.SIGINT, signal.SIGTERM):
