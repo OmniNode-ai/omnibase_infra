@@ -22,6 +22,7 @@ from omnibase_infra.nodes.node_bus_forwarder_effect.handlers.handler_forward_out
     HandlerForwardOutbound,
 )
 from omnibase_infra.nodes.node_bus_forwarder_effect.models import (
+    ModelGatewayCanaryConfig,
     ModelGatewayCloudBusConfig,
     ModelGatewayEnvelope,
     ModelGatewayForwarderConfig,
@@ -58,6 +59,12 @@ def _config() -> ModelGatewayForwarderConfig:
         mirror_topics=ModelGatewayMirrorTopics(
             inbound=(INBOUND_TOPIC,),
             outbound=(OUTBOUND_TOPIC,),
+        ),
+        canary=ModelGatewayCanaryConfig(
+            topic="onex.evt.omnibase-infra.gateway-canary.v1",
+            cadence_seconds=30,
+            produce_deadline_seconds=8,
+            readback_deadline_seconds=12,
         ),
     )
 

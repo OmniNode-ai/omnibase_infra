@@ -23,6 +23,9 @@ from omnibase_infra.runtime.auto_wiring.handler_wiring import (
     _resolve_projection_database_target,
 )
 from omnibase_infra.topology import load_topology_profile
+from omnibase_infra.topology.physical_schema_mapping import (
+    physical_grant_schema_for_table,
+)
 
 
 @lru_cache(maxsize=1)
@@ -44,10 +47,23 @@ ProjectionAccess = Literal["read", "write", "read_write"]
 def _shipped_table_grant_exists(
     topology: ModelDeploymentTopology, principal: str, schema: str, table: str
 ) -> bool:
+    """Return whether the shipped topology already grants ``table`` to ``principal``.
+
+    Compares against the PHYSICAL grant schema
+    (``physical_grant_schema_for_table``), not the caller-supplied logical
+    schema: the shipped generator already applies the tenant/omninode_internal
+    physical bridge when it writes TABLE grants, so a table pending its
+    family's copy migration is checked-in with ``schema: public`` even though
+    its logical domain is ``tenant``/``omninode_internal``. Comparing against
+    the raw logical schema here would silently stop detecting an
+    already-shipped grant for every bridged table -- exactly the false
+    negative this helper exists to prevent.
+    """
     database = topology.databases["application"]
+    physical_schema = physical_grant_schema_for_table(schema, table)
     return any(
         grant.object_type is EnumDatabaseGrantObjectType.TABLE
-        and grant.schema == schema
+        and grant.schema == physical_schema
         and table in grant.objects
         for grant in database.principals[principal].grants
     )

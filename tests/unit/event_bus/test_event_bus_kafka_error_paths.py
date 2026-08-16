@@ -432,3 +432,50 @@ class TestEventBusKafkaSubscribeErrors:
             assert len(bus._subscribers["onex.evt.test.sub.v1"]) == 1
             await unsubscribe()
             assert len(bus._subscribers["onex.evt.test.sub.v1"]) == 0
+
+    @pytest.mark.asyncio
+    async def test_subscribe_threads_auto_offset_reset_override_to_consumer_start(
+        self, started_bus: tuple[EventBusKafka, AsyncMock]
+    ) -> None:
+        """OMN-15789: a per-subscribe auto_offset_reset reaches consumer startup.
+
+        Proves the seam the event_bus_substrate fixture's real_broker leg
+        depends on: subscribe(..., auto_offset_reset="earliest") must pass
+        that value through as _start_consumer_for_topic_unlocked's
+        auto_offset_reset_override, not silently fall back to the bus-level
+        config. A None override (the default, pre-existing call sites) must
+        NOT be widened to a truthy value.
+        """
+        bus, _ = started_bus
+
+        async def handler(msg: object) -> None:
+            pass
+
+        with patch.object(
+            bus, "_start_consumer_for_topic_unlocked", new=AsyncMock()
+        ) as mock_start:
+            await bus.subscribe(
+                "onex.evt.test.offset-override.v1",
+                group_id="test-group-override",
+                on_message=handler,
+                auto_offset_reset="earliest",
+            )
+            mock_start.assert_awaited_once_with(
+                "onex.evt.test.offset-override.v1",
+                "test-group-override",
+                auto_offset_reset_override="earliest",
+            )
+
+        with patch.object(
+            bus, "_start_consumer_for_topic_unlocked", new=AsyncMock()
+        ) as mock_start_default:
+            await bus.subscribe(
+                "onex.evt.test.offset-default.v1",
+                group_id="test-group-default",
+                on_message=handler,
+            )
+            mock_start_default.assert_awaited_once_with(
+                "onex.evt.test.offset-default.v1",
+                "test-group-default",
+                auto_offset_reset_override=None,
+            )

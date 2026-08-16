@@ -13,6 +13,38 @@ on:
   merge_group:
     types: [checks_requested]
 
+concurrency:
+  # OMN-15730 / CodeRabbit: issue_comment and merge_group events do not
+  # populate github.event.pull_request, so the || github.ref fallback
+  # resolved to one shared identity (default branch ref, or the merge_group
+  # ref) across unrelated PRs' comment/merge-queue-triggered runs, letting
+  # them cancel each other. Use the event-specific identity before falling
+  # back to the run id.
+  #
+  # OMN-15815: that fix still coalesces a pull_request run and an
+  # issue_comment run on the SAME PR into one group (both resolve to the
+  # same PR number), with no github.event_name discriminator. When
+  # CodeRabbit edits its summary comment (an issue_comment event) while the
+  # real pull_request-triggered gate run is still in flight,
+  # cancel-in-progress cancels that in-flight run; the CodeRabbit-actored
+  # run then skips its own gate job (see the `if:` actor filter below), so
+  # no replacement check-run is ever emitted and the required
+  # "gate / CodeRabbit Thread Check" context is left stuck cancelled with
+  # no successor. Prefix the group with github.event_name so pull_request,
+  # issue_comment, pull_request_review, pull_request_review_comment, and
+  # merge_group runs of this workflow can never share a concurrency group
+  # with each other, while same-event-type runs on the same PR still
+  # coalesce (two rapid pushes to one PR still supersede each other; rapid
+  # consecutive comment edits on one PR still dedup among themselves).
+  group: >-
+    ${{ github.workflow }}-${{ github.event_name }}-${{
+      github.event.pull_request.number ||
+      github.event.issue.number ||
+      github.event.merge_group.head_sha ||
+      github.run_id
+    }}
+  cancel-in-progress: true
+
 jobs:
   gate:
     if: >-
@@ -26,7 +58,10 @@ jobs:
       github.actor != 'github-actions[bot]' &&
       !contains(github.actor, 'coderabbit'))
     concurrency:
-      group: cr-thread-gate-${{ github.event.pull_request.number || github.event.issue.number || github.event.merge_group.head_sha || github.run_id }}
+      # OMN-15815: same event-scoping as the workflow-level group above —
+      # this job-level group predates OMN-15730 and was never touched by
+      # that fix, so it carried the identical same-PR cross-event collision.
+      group: cr-thread-gate-${{ github.event_name }}-${{ github.event.pull_request.number || github.event.issue.number || github.event.merge_group.head_sha || github.run_id }}
       cancel-in-progress: true
     uses: OmniNode-ai/omniclaude/.github/workflows/cr-thread-gate.yml@80de61fd1fee04abdeb6918e7f91cf820717e6a8
     with:

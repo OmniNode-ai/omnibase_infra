@@ -21,8 +21,11 @@ use DIFFERENT k8s surfaces, and the reverse walk is deliberately single-file):
   ``envFrom``-s ``onex-runtime-config``) plus keys bound inline on ALL THREE
   runtime Deployments. A key bound inline on only one workload does NOT satisfy
   it — see ``test_k8s_family_surface_requires_all_runtime_deployments``.
-* REVERSE is scoped to ``docker-compose.infra.yml`` only, and asks the weaker
-  question "does this key reach ANY compose container at all?", so it uses the
+* REVERSE is scoped to ``docker-compose.infra.yml`` plus the typed service
+  manifests under ``docker/catalog/services/`` (rendered by the catalog CLI into
+  ``docker/docker-compose.generated.yml``, which is not committed — see
+  ``extract_catalog_bound_keys``), and asks the weaker question "does this key
+  reach ANY compose container at all?", so it uses the
   UNION of every k8s workload's bindings. ``infra.yml`` is the base file that
   ``resolve_compose_file_args`` layers first for every deployed lane, so a key
   bound there reaches all of them. The standalone lanes (``judge``, ``e2e``)
@@ -62,6 +65,11 @@ import yaml
 _REPO_ROOT = Path(__file__).parent.parent.parent
 
 COMPOSE_PATH = _REPO_ROOT / "docker" / "docker-compose.infra.yml"
+
+# Typed service manifests the catalog CLI renders into
+# docker/docker-compose.generated.yml. Second compose-binding surface for the
+# reverse walk — see extract_catalog_bound_keys.
+CATALOG_SERVICES_DIR = _REPO_ROOT / "docker" / "catalog" / "services"
 
 # CONFIGMAP_PATH: omninode_infra may live as a sibling in several layouts:
 #   1. Local worktrees: /Volumes/.../omni_worktrees/<ticket>/omnibase_infra/ →
@@ -313,6 +321,50 @@ K8S_ONLY_KEYS: frozenset[str] = frozenset(
         # Cluster Infisical bootstrap toggle; the compose lanes gate Infisical on
         # INFISICAL_ADDR being set instead (see config_discovery docs).
         "INFISICAL_REQUIRED",
+        # OMN-15750 gateway-attach ingress (omninode_infra#886). Same cluster-DNS
+        # category as the block above — both values are *.svc.cluster.local:
+        #   GATEWAY_ATTACH_KEYCLOAK_INTROSPECTION_URL=
+        #     http://keycloak.auth.svc.cluster.local/realms/omninode/protocol/openid-connect/token/introspect
+        #   GATEWAY_ATTACH_KEYCLOAK_JWKS_URL=
+        #     http://keycloak.auth.svc.cluster.local/realms/omninode/protocol/openid-connect/certs
+        # They address the Keycloak in the cluster's OWN `auth` namespace, which
+        # has no compose analogue: docker-compose.infra.yml's `keycloak` service
+        # is a dev bootstrap on the compose network (KEYCLOAK_ADMIN_URL=
+        # http://keycloak:8080), seeded from docker/keycloak/omninode-realm.json.
+        #
+        # Binding these in compose would ALSO be wrong on two independent counts,
+        # so this is not debt deferred for convenience:
+        #   1. No compose lane resolves these refs. node_gateway_attach_effect
+        #      reads them by LOGICAL ref (contract.yaml keycloak_introspection_ref
+        #      = "gateway.attach.keycloak.introspection", keycloak_jwks_ref =
+        #      "gateway.attach.keycloak.jwks") through the secret resolver. The
+        #      k8s ConfigMap's ONEX_SECRET_RESOLVER_CONFIG_JSON maps those two
+        #      logical names onto these env vars; the compose dev/lab/stability/
+        #      prod resolver config (docker/runtime-policy.env
+        #      DEV_RUNTIME_*_SECRET_RESOLVER_CONFIG_JSON) declares only llm.* and
+        #      slack.bot_token — no gateway.attach.* mapping exists, so no compose
+        #      container ever asks for either key.
+        #   2. The gateway ingress is not in a deployed compose lane at all.
+        #      resolve_compose_file_args (scripts/deploy-runtime.sh) layers
+        #      docker-compose.infra.yml + one lane overlay; the gateway services
+        #      live in docker-compose.gateway.yml / .gateway-attach-test-lane.yml,
+        #      which no lane layers. And OMN-15750's own acceptance criteria
+        #      forbid the binding outright: "No broker/Keycloak URL literal in
+        #      source, docker-compose, or env — resolved from contract ref at the
+        #      effect boundary."
+        "GATEWAY_ATTACH_KEYCLOAK_INTROSPECTION_URL",
+        "GATEWAY_ATTACH_KEYCLOAK_JWKS_URL",
+        # k8s readiness/liveness probe plumbing for the three standalone
+        # omnimarket projection-writer Deployments (OMN-15905). Values are 8093
+        # (live-events), 8094 (registration), 8095 (delegation) — each is the
+        # port that Deployment's OWN readinessProbe (httpGet /ready) and
+        # livenessProbe (tcpSocket) target, so the binding exists only to serve
+        # the kubelet. The compose counterparts of those three workloads are
+        # catalog services (docker/catalog/services/omnimarket-projection-*.yaml)
+        # which declare `healthcheck: null` and `ports: null` — there is no probe
+        # to answer, so BaseProjectionRunner's opt-in health server stays off and
+        # the key has no compose counterpart by construction.
+        "PROJECTION_RUNNER_HEALTH_PORT",
     }
 )
 
@@ -544,6 +596,51 @@ def extract_compose_bound_keys(compose_path: Path) -> set[str]:
     keys: set[str] = set()
     for service in compose_services(compose_path).values():
         keys |= _service_env_keys(service)
+    return keys
+
+
+def extract_catalog_bound_keys(catalog_services_dir: Path) -> set[str]:
+    """Extract every env key the service catalog binds on a generated container.
+
+    The reverse walk's question is "does this key reach ANY compose container at
+    all?", and ``docker-compose.infra.yml`` is not the whole answer. Services in
+    ``docker/catalog/services/*.yaml`` are compose services too — the catalog CLI
+    (``src/omnibase_infra/docker/catalog/cli.py``) renders them into
+    ``docker/docker-compose.generated.yml``, which is how ``onex up <bundle>``
+    starts them. That generated file is NOT committed, so the manifests are the
+    tracked surface and the only one CI can read.
+
+    Without this term the walk reports a false positive for any key bound on a
+    workload that exists in the catalog but not in ``infra.yml``. The three
+    standalone omnimarket projection writers are exactly that shape: k8s runs
+    them as their own Deployments, compose runs them from the
+    ``omnimarket-projections`` bundle, and ``infra.yml`` has no projection-writer
+    service at all (only ``projection-api``). ``KAFKA_CONSUMER_GROUP`` was
+    reported as drift on that basis while
+    ``docker/catalog/services/omnimarket-projection-delegation.yaml`` had bound it
+    the whole time — and NEITHER classification bucket could honestly absorb it:
+    K8S_ONLY_KEYS asserts "no docker-compose counterpart by construction" and
+    COMPOSE_PARITY_DEBT_KEYS asserts "the compose lanes run without this
+    setting", both false claims here. An incomplete surface has to be fixed at
+    the surface, not papered over with a classification.
+
+    The key set mirrors ``generator.py``'s ``environment`` assembly exactly —
+    ``hardcoded_env`` | ``operational_defaults`` | ``catalog_env`` |
+    ``required_env`` — so a manifest field that reaches a container is visible
+    here, and one that does not is not.
+    """
+    keys: set[str] = set()
+    for manifest_path in sorted(catalog_services_dir.glob("*.yaml")):
+        manifest = yaml.safe_load(manifest_path.read_text())
+        if not isinstance(manifest, dict):
+            continue
+        for field in ("hardcoded_env", "operational_defaults", "catalog_env"):
+            mapping = manifest.get(field)
+            if isinstance(mapping, dict):
+                keys |= {str(k) for k in mapping}
+        required = manifest.get("required_env")
+        if isinstance(required, list):
+            keys |= {str(item) for item in required}
     return keys
 
 
@@ -782,11 +879,17 @@ def test_k8s_bound_keys_are_bound_in_compose() -> None:
 
     To fix a failure, choose one of:
       1. Bind the key in docker/docker-compose.infra.yml (preferred — put it on
-         the ``x-runtime-env`` anchor if every runtime service needs it)
+         the ``x-runtime-env`` anchor if every runtime service needs it), or on
+         the owning docker/catalog/services/*.yaml manifest when the workload is
+         a catalog service rather than an infra.yml one
       2. Add it to K8S_ONLY_KEYS with a value-backed justification if it
          describes cluster topology or a managed data plane
       3. Add it to COMPOSE_PARITY_DEBT_KEYS only if the compose binding is
          genuinely blocked (and file/cite a ticket)
+
+    Before reaching for 2 or 3, check whether the key is already bound on a
+    compose surface this walk does not read — a false positive is fixed at the
+    surface, never by a classification that states something untrue.
 
     Keys in REPO_DELETED_FLAG_KEYS are exempt and CANNOT be classified by any of
     the three remedies above -- the dead-flag audit rejects their names anywhere
@@ -809,14 +912,25 @@ def test_k8s_bound_keys_are_bound_in_compose() -> None:
         "Has the services block been restructured?"
     )
 
+    catalog_keys = extract_catalog_bound_keys(CATALOG_SERVICES_DIR)
+    assert catalog_keys, (
+        f"No env keys extracted from the service catalog at {CATALOG_SERVICES_DIR}. "
+        "Have the manifests moved, or has the env field naming changed?"
+    )
+
     accounted_for = (
-        compose_keys | K8S_ONLY_KEYS | COMPOSE_PARITY_DEBT_KEYS | REPO_DELETED_FLAG_KEYS
+        compose_keys
+        | catalog_keys
+        | K8S_ONLY_KEYS
+        | COMPOSE_PARITY_DEBT_KEYS
+        | REPO_DELETED_FLAG_KEYS
     )
     missing = {k: v for k, v in k8s_bound.items() if k not in accounted_for}
 
     assert not missing, (
         "Keys bound in the onex-dev k8s manifests but bound in NO "
-        f"docker-compose service ({COMPOSE_PATH.name}), and not classified as "
+        f"docker-compose service ({COMPOSE_PATH.name}) and no service-catalog "
+        f"manifest ({CATALOG_SERVICES_DIR.name}/), and not classified as "
         "K8S_ONLY_KEYS or COMPOSE_PARITY_DEBT_KEYS:\n"
         + "\n".join(
             f"  {k}  (k8s source: {', '.join(sorted(missing[k]))})"

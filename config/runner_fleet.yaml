@@ -9,11 +9,11 @@ github_org: OmniNode-ai
 runner_host: omninode-pc.tail75df5e.ts.net
 runner_group: omnibase-ci
 runner_name_prefix: omninode-runner
-# Phase-A scale-up (OMN-14029): 64 always-on steady-state runners, extending the
-# reconciled .201 fleet from 48. All 64 are steady (no burst
+# Phase-A scale-up (OMN-14029), extended for saturation recovery (OMN-15978):
+# 72 always-on steady-state runners. All 72 are steady (no burst
 # profiles), so burst_count == expected_count (no separate burst tier).
-expected_count: 64
-burst_count: 64
+expected_count: 72
+burst_count: 72
 # Docker subnet-pool alerting (OMN-12566). The runner host's default address
 # pool can subnet a bounded number of networks before `docker network create`
 # fails with "all predefined address pools have been fully subnetted". Alert at
@@ -21,14 +21,34 @@ burst_count: 64
 network_pool_capacity: 31
 network_pool_warn_ratio: 0.8
 # OMN-14027 C1 — PyPI pull-through cache (devpi) endpoint. Source of truth for the
-# egress cache the fleet points at. STATUS: pending-activation / INERT — the
-# devpi service (docker/docker-compose.pypi-cache.yml) is stood up and wired only
-# at the soak-gated rollout; recording the endpoint here does not activate it. The
-# matching UV_DEFAULT_INDEX / PIP_INDEX_URL wiring is kept commented in
-# docker/docker-compose.runners.yml until then. Runbook:
-# docs/runbooks/pypi-cache-egress-rollout.md.
+# egress cache the fleet points at.
+#
+# STATUS 2026-08-14: cache SERVICE LIVE, canary WIRED, fleet NOT yet activated.
+#   - devpi service is up and healthy on the runner host (container
+#     omninode-pypi-cache, 22G warmed corpus, index HTTP 200).
+#   - A 3-runner canary (omninode-runner-2/4/5) is wired via
+#     docker/docker-compose.pypi-canary.yml and verified by container-env
+#     readback. Runbook step 3 is DONE.
+#   - `active` stays false because it means FLEET-ACTIVE. Runbook step 5 gates
+#     the fleet on measured canary acceptance (hit rate >= target_hit_rate, p95
+#     `uv sync` wall time, zero UV_HTTP_TIMEOUT failures under high-concurrency
+#     load). The canary has proven the MECHANISM resolves through the cache but
+#     has NOT yet accumulated a soak under the 64/64-busy load the acceptance
+#     criteria are written against — the queue is serialized and the fleet is
+#     lightly loaded. Flipping this to true on mechanism-proof alone would skip
+#     the exact measurement the gate exists to take.
+#   - The matching UV_DEFAULT_INDEX / PIP_INDEX_URL wiring therefore stays
+#     commented in docker/docker-compose.runners.yml. Do not uncomment it here or
+#     there as a shortcut; graduate via the runbook.
+# Runbook: docs/runbooks/pypi-cache-egress-rollout.md.
 pypi_cache:
   active: false
+  # Runners currently wired at the cache via docker/docker-compose.pypi-canary.yml.
+  # Empty once the canary graduates to the fleet or is rolled back.
+  canary_runners:
+    - omninode-runner-2
+    - omninode-runner-4
+    - omninode-runner-5
   # Tailscale MagicDNS host + published port, matching runner_host above so the
   # endpoint does not depend on the runner host's current LAN/Tailscale IP.
   host: omninode-pc.tail75df5e.ts.net
@@ -39,3 +59,71 @@ pypi_cache:
   fallback_index_url: https://pypi.org/simple/
   # Acceptance target before fleet-wide rollout (OMN-14027 metrics).
   target_hit_rate: 0.90
+# OMN-14027 C2 — local git mirrors (git transport egress).
+#
+# STATUS: ACTIVE on the runner host. Unlike the C1 block above this is not a
+# staged-inert endpoint: the mirrors, the git-daemon, and the 2-minute refresh
+# timer are running, and the runner-side pre-seed in
+# docker/runners/runner-job-started.sh consumes them.
+#
+# WHAT IT FIXES. runner-job-started.sh destroys the workspace before every job
+# (correct: it prevents stale sparse-checkout state leaking between jobs), which
+# means actions/checkout could never reuse an object store and every job
+# cold-cloned the whole repo from github.com. 72 runners x one uplink = the
+# `RPC failed; curl 56 GnuTLS recv error` / `fatal: early EOF` checkout kills.
+# The pre-seed hydrates the workspace from the local mirror first, so the
+# authenticated github.com fetch that actions/checkout still performs is a
+# delta. Measured on onex_change_control, 2026-08-14: 128351 objects / 32.63 MiB
+# / 8.35s from github.com cold, versus 3.82s over loopback plus a 0.95s upstream
+# fetch that received zero objects.
+#
+# The mirror is NEVER a source of truth: checkout still resolves the exact SHA
+# against github.com over its own authenticated remote. A stale mirror costs a
+# larger delta; a missing or unreachable mirror costs nothing (the pre-seed is
+# fail-open and the job proceeds exactly as it did before C2).
+git_mirror:
+  active: true
+  # Bound to the docker bridge gateway only. NOT the Tailscale/LAN hostname used
+  # by pypi_cache above: git:// is unauthenticated, so the mirrors of private
+  # repos must not be reachable beyond the runner containers, which already hold
+  # an authenticated checkout of the same code.
+  bind_address: 172.18.0.1
+  docker_network: docker_default
+  port: 9418
+  mirror_root: /home/jonah/.omnibase/runners/git-mirror
+  refresh_interval_seconds: 120
+  # One upstream fetch per repo per interval, for the whole fleet. Enforced
+  # twice: systemd Type=oneshot will not overlap runs, and the refresh script
+  # takes an flock. That serialization is the entire point of the component.
+  serialized: true
+  repos:
+    - onex_change_control
+    - omnibase_infra
+    - omnibase_core
+    - omnimarket
+    - omniclaude
+  # Space-separated RUNNER_NAME allowlist consumed by the pre-seed, or ALL.
+  # Narrowed on the deployed copy of the hook during canary; the committed
+  # default is the post-canary fleet-wide value.
+  runner_allowlist: ALL
+  # Per-job kill switch, honoured by the pre-seed: OMNI_GIT_MIRROR_DISABLE=1.
+  kill_switch_env: OMNI_GIT_MIRROR_DISABLE
+# OMN-14027 C2 — Actions tool cache (RUNNER_TOOL_CACHE).
+#
+# MEASURED STATE 2026-08-14, not an aspiration: 72/72 runners are already warm
+# (CPython 3.12.13 or 3.12.14 plus 3.13.15; uv 0.6.14/0.8.3/0.12.3/0.12.4), and
+# tonight's failing jobs show setup-uv restoring from cache rather than reaching
+# codeload. The tool cache is therefore NOT the current failure driver -- the
+# runner-native action tarball download is (see residual_risks below).
+#
+# THE REAL HAZARD IS DURABILITY. This path lives in the container filesystem,
+# not a volume, so any `--force-recreate` of the fleet wipes the warm cache on
+# all 72 runners at once and hands the next wave a 72-way cold CPython+uv
+# download -- manufacturing the exact stampede C2 exists to prevent. Every fleet
+# recreate must be bracketed by docker/runners/toolcache-seed.sh.
+tool_cache:
+  path: /home/runner/actions-runner/_work/_tool
+  durable: false
+  snapshot_root: /home/jonah/.omnibase/runners/toolcache-seed
+  seed_script: docker/runners/toolcache-seed.sh
+  recreate_procedure: docs/runbooks/c2-git-mirror-egress-rollout.md

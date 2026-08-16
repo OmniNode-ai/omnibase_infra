@@ -47,10 +47,11 @@ class ModelUpdateRegistrationRequest(BaseModel):
         >>> from omnibase_infra.nodes.node_registration_storage_effect.models import (
         ...     ModelRegistrationUpdate,
         ... )
+        >>> resolved_health_endpoint = "<routing-authority-resolved-health-endpoint>"
         >>> request = ModelUpdateRegistrationRequest(
         ...     node_id=uuid4(),
         ...     updates=ModelRegistrationUpdate(
-        ...         endpoints={"health": "http://localhost:8080/health"},
+        ...         endpoints={"health": resolved_health_endpoint},
         ...     ),
         ...     correlation_id=uuid4(),
         ... )

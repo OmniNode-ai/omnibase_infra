@@ -33,16 +33,26 @@ from pydantic import BaseModel
 from omnibase_core.models.dispatch.model_dispatch_bus_terminal_result import (
     ModelDispatchBusTerminalResult,
 )
-from omnibase_infra.enums import EnumDispatchStatus
 
 # -- Event bus models --
+from omnibase_infra.enums import (
+    EnumConfirmationState,
+    EnumDispatchStatus,
+    EnumInfraTransportType,
+)
 from omnibase_infra.event_bus.models.model_dlq_event import ModelDlqEvent
 from omnibase_infra.event_bus.models.model_dlq_metrics import ModelDlqMetrics
+from omnibase_infra.event_bus.models.model_durability_confirmation import (
+    ModelDurabilityConfirmation,
+)
 from omnibase_infra.event_bus.models.model_event_bus_readiness import (
     ModelEventBusReadiness,
 )
 from omnibase_infra.event_bus.models.model_event_headers import ModelEventHeaders
 from omnibase_infra.event_bus.models.model_event_message import ModelEventMessage
+from omnibase_infra.event_bus.models.model_publish_receipt import (
+    ModelPublishReceipt,
+)
 from omnibase_infra.models.dispatch.model_dispatch_result import ModelDispatchResult
 
 # -- Runtime models --
@@ -220,6 +230,41 @@ def _make_event_headers() -> ModelEventHeaders:
         source="test-service",
         event_type="test.event.created",
         timestamp=datetime.now(UTC),
+    )
+
+
+def _make_publish_receipt() -> ModelPublishReceipt:
+    """A durability coordinate (OMN-15861).
+
+    Covered by a real factory rather than dispositioned as uncovered: this model
+    crosses the producer/consumer boundary of the durable-outbox seam, so a
+    serialization regression here would silently break durability confirmation
+    between repos -- exactly the class of boundary this suite exists to pin.
+    """
+    return ModelPublishReceipt(
+        topic="onex.evt.roundtrip.v1",
+        partition=2,
+        offset=17,
+        cluster="redpanda:9092",
+        produced_at=datetime.now(UTC),
+        transport=EnumInfraTransportType.KAFKA,
+        idempotency_key="logical-event-1",
+    )
+
+
+def _make_durability_confirmation() -> ModelDurabilityConfirmation:
+    """A durability verdict (OMN-15861).
+
+    Built in the UNCONFIRMED state on purpose: it is the state that carries the
+    mandatory ``detail`` field, so the roundtrip exercises the model's
+    cross-field validator rather than only its happy path.
+    """
+    return ModelDurabilityConfirmation(
+        state=EnumConfirmationState.UNCONFIRMED,
+        strategy="broker_readback",
+        receipt=_make_publish_receipt(),
+        checked_at=datetime.now(UTC),
+        detail="record was not observed within the readback deadline",
     )
 
 
@@ -448,6 +493,8 @@ MODEL_FACTORIES: dict[type[BaseModel], Any] = {
     ModelDlqMetrics: _make_dlq_metrics,
     ModelEventBusReadiness: _make_event_bus_readiness,
     ModelEventMessage: _make_event_message,
+    ModelPublishReceipt: _make_publish_receipt,
+    ModelDurabilityConfirmation: _make_durability_confirmation,
     # Runtime models (13/59 covered)
     ModelBatchPublisherConfig: _make_batch_publisher_config,
     ModelBatchPublisherMetrics: _make_batch_publisher_metrics,

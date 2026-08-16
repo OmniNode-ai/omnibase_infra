@@ -15,6 +15,7 @@ forwarder:
     sasl_mechanism: "AWS_MSK_IAM"
   local_transport_flavor: "containerized"
   mirror_topic_set: "node_bus_forwarder_effect"
+  canary_topic_set: "node_bus_forwarder_effect"
   heartbeat_interval_seconds: 15
   max_silence_window_seconds: 60
   lag_threshold_messages: 500
@@ -28,14 +29,22 @@ local_bus:
   bootstrap_servers: "redpanda:9092"
   environment: "beta-gateway-local"
   timeout_seconds: 30
-  auto_offset_reset: "latest"
+  # OMN-15781: "latest" silently drops any backlog produced while the
+  # consumer group was unjoined (crash/LeaveGroup/cold restart before
+  # rejoin); enable_auto_commit=false alone does not protect against this
+  # since it only preserves offsets already inside the read window. The
+  # runtime-config model_validator (ModelGatewayForwarderRuntimeConfig)
+  # fails closed on anything other than "earliest" on either leg.
+  auto_offset_reset: "earliest"
   enable_auto_commit: false
   security_protocol: "PLAINTEXT"
 cloud_bus:
   bootstrap_servers: "b-1.omninodedevmsk.7ozyd3.c14.kafka.us-east-1.amazonaws.com:9098,b-2.omninodedevmsk.7ozyd3.c14.kafka.us-east-1.amazonaws.com:9098"
   environment: "beta-gateway-cloud"
   timeout_seconds: 60
-  auto_offset_reset: "latest"
+  # OMN-15781: see local_bus.auto_offset_reset comment above -- same hazard,
+  # both legs are pull-based at-least-once consumers.
+  auto_offset_reset: "earliest"
   enable_auto_commit: false
   security_protocol: "SASL_SSL"
   sasl_mechanism: "AWS_MSK_IAM"

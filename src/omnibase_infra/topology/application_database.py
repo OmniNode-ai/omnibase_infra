@@ -54,6 +54,26 @@ _OMNIINTELLIGENCE_BINDING_DSN_ENVS = {
     "omninode_runtime_service": "OMNIINTELLIGENCE_DB_URL"
 }
 
+# OMN-15337 (operator ruling R-q, 2026-08-05): the flat forward-migration set
+# (POSTGRES_DB=omnibase_infra in docker-compose.infra.yml's forward-migration
+# service, docs/patterns/db_url_contract.md's OMNIBASE_INFRA_DB_URL row) is
+# omnibase_infra's own runtime database -- distinct from the "application"
+# pair and from omniintelligence. delegation_workflow_state
+# (docker/migrations/forward/090_create_delegation_workflow_state.sql) is
+# ruled OMNINODE_INTERNAL: its tenant_id column is retained as denormalized
+# provenance only (never an authorization key), and FORCE-RLS on the
+# runtime's own FSM state store would break non-tenant-context access
+# (recovery/retries/sweeps). Declared here so the physical database this
+# table already lives in has a typed home, the same way OMN-15655 AC-2 gave
+# omniintelligence one.
+OMNIBASE_INFRA_DATABASE_REF = "omnibase_infra"
+OMNIBASE_INFRA_DATABASE_PHYSICAL_NAME = "omnibase_infra"
+_OMNIBASE_INFRA_SCHEMAS = {"public": EnumDatabaseSchemaDomain.OMNINODE_INTERNAL}
+_OMNIBASE_INFRA_SCHEMA_OWNERS = {"public": "owner_omnibase_infra"}
+_OMNIBASE_INFRA_BINDING_PRINCIPALS = {"omninode_runtime_service": "role_omnibase_infra"}
+# One DSN key across every instance, per docs/patterns/db_url_contract.md.
+_OMNIBASE_INFRA_BINDING_DSN_ENVS = {"omninode_runtime_service": "OMNIBASE_INFRA_DB_URL"}
+
 _EXPECTED_PROFILE_INSTANCE_MAP = {
     "local": "local",
     "test": "local",
@@ -231,6 +251,7 @@ def load_topology_profile(
     )
     validate_application_database_invariants(topology, binding.instance)
     validate_omniintelligence_database_invariants(topology)
+    validate_omnibase_infra_database_invariants(topology)
     return topology
 
 
@@ -389,6 +410,75 @@ def validate_omniintelligence_database_invariants(
         if binding.dsn_env != expected_dsn_env:
             raise ValueError(
                 f"omniintelligence binding '{binding_name}' dsn_env drift: "
+                f"expected '{expected_dsn_env}', got '{binding.dsn_env}'"
+            )
+
+
+def validate_omnibase_infra_database_invariants(
+    topology: ModelDeploymentTopology,
+) -> None:
+    """Fail on drift in the omnibase_infra runtime-database declaration.
+
+    ``delegation_workflow_state`` (OMN-14208 durable FSM state) is read and
+    written through the legacy ``state_io`` contract subcontract, which
+    resolves its DSN directly from ``_DB_URL_ENV_MAP`` rather than through a
+    ``db_io.db_tables`` binding. Pinning the declaration here means a silent
+    edit to the instance YAML fails the topology loader in CI, the same
+    protection ``validate_omniintelligence_database_invariants`` gives the
+    contract-driven path.
+    """
+    database = topology.databases.get(OMNIBASE_INFRA_DATABASE_REF)
+    if database is None:
+        raise ValueError(
+            "Topology must declare the 'omnibase_infra' runtime database; "
+            "delegation_workflow_state and the flat forward-migration set "
+            "live there and OMNIBASE_INFRA_DB_URL resolves against it"
+        )
+    if database.physical_name != OMNIBASE_INFRA_DATABASE_PHYSICAL_NAME:
+        raise ValueError(
+            "omnibase_infra database must resolve to "
+            f"'{OMNIBASE_INFRA_DATABASE_PHYSICAL_NAME}', got "
+            f"'{database.physical_name}'"
+        )
+
+    actual_schemas = {name: schema.domain for name, schema in database.schemas.items()}
+    if actual_schemas != _OMNIBASE_INFRA_SCHEMAS:
+        raise ValueError(
+            "omnibase_infra schema/domain drift: expected "
+            f"{_OMNIBASE_INFRA_SCHEMAS}, got {actual_schemas}"
+        )
+    actual_owners = {name: schema.owner for name, schema in database.schemas.items()}
+    if actual_owners != _OMNIBASE_INFRA_SCHEMA_OWNERS:
+        raise ValueError(
+            "omnibase_infra schema-owner drift: expected "
+            f"{_OMNIBASE_INFRA_SCHEMA_OWNERS}, got {actual_owners}"
+        )
+
+    if set(database.bindings) != set(_OMNIBASE_INFRA_BINDING_PRINCIPALS):
+        raise ValueError(
+            "omnibase_infra binding drift: expected "
+            f"{sorted(_OMNIBASE_INFRA_BINDING_PRINCIPALS)}, got "
+            f"{sorted(database.bindings)}"
+        )
+    for (
+        binding_name,
+        expected_principal,
+    ) in _OMNIBASE_INFRA_BINDING_PRINCIPALS.items():
+        binding = database.bindings[binding_name]
+        if binding.database_ref != OMNIBASE_INFRA_DATABASE_REF:
+            raise ValueError(
+                f"Binding '{binding_name}' must resolve to database_ref "
+                f"'{OMNIBASE_INFRA_DATABASE_REF}'"
+            )
+        if binding.principal != expected_principal:
+            raise ValueError(
+                f"omnibase_infra binding '{binding_name}' principal drift: "
+                f"expected '{expected_principal}', got '{binding.principal}'"
+            )
+        expected_dsn_env = _OMNIBASE_INFRA_BINDING_DSN_ENVS[binding_name]
+        if binding.dsn_env != expected_dsn_env:
+            raise ValueError(
+                f"omnibase_infra binding '{binding_name}' dsn_env drift: "
                 f"expected '{expected_dsn_env}', got '{binding.dsn_env}'"
             )
 
@@ -612,6 +702,7 @@ def validate_docker_catalog_parity(
 
 __all__ = [
     "APPLICATION_DATABASE_REF",
+    "OMNIBASE_INFRA_DATABASE_REF",
     "OMNIINTELLIGENCE_DATABASE_REF",
     "SUPPORTED_ENVIRONMENTS",
     "SUPPORTED_TOPOLOGY_PROFILES",
@@ -623,6 +714,7 @@ __all__ = [
     "validate_database_projection",
     "validate_docker_catalog_parity",
     "validate_docker_topology_profile_injections",
+    "validate_omnibase_infra_database_invariants",
     "validate_omniintelligence_database_invariants",
     "write_database_projection",
 ]

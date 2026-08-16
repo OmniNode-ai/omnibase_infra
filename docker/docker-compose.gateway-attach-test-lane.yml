@@ -1,0 +1,63 @@
+# SPDX-FileCopyrightText: 2025 OmniNode.ai Inc.
+# SPDX-License-Identifier: MIT
+#
+# Edge-side test-lane attach connector (OMN-15752).
+#
+# Parallel to, and independent of, docker/docker-compose.gateway.yml (the live
+# bastion-path forwarder -- untouched by this file, per the operator's "do not
+# touch the bastion" directive). This overlay is the .201-side client half of
+# the OMN-15750 attach control plane: it dials OUT to
+# node_gateway_attach_effect's command topics with a per-tenant Keycloak
+# client-credentials token and never learns a broker hostname or holds an MSK
+# credential -- unlike the bastion path, this connector has NO extra_hosts,
+# NO TPM device, and NO AWS_* environment, because attach/session validation
+# never touches Kafka directly (candidate A's whole point: customers, and our
+# own house tenant proving the same path, never see brokers).
+#
+# Usage:
+#   docker compose -f docker/docker-compose.gateway-attach-test-lane.yml \
+#     --profile test-lane up
+#
+# This does not start by default (no `up -d` without --profile) so it can
+# never collide with, or be mistaken for, the live gateway-forwarder service.
+services:
+  gateway-attach-test-lane:
+    image: "${GATEWAY_ATTACH_TEST_LANE_IMAGE:?GATEWAY_ATTACH_TEST_LANE_IMAGE is required}"
+    pull_policy: never
+    build:
+      context: ..
+      dockerfile: docker/Dockerfile.runtime
+      args:
+        BUILD_SOURCE: "${BUILD_SOURCE:-release}"
+        EXPECTED_BUILD_SOURCE: "${EXPECTED_BUILD_SOURCE:-release}"
+    container_name: omninode-gateway-attach-test-lane
+    profiles:
+      - test-lane
+    command:
+      - python
+      - -m
+      - scripts.proof.gateway_attach_e2e_proof
+      - "--live"
+      - "--edge-instance-id=${GATEWAY_ATTACH_EDGE_INSTANCE_ID:?GATEWAY_ATTACH_EDGE_INSTANCE_ID is required}"
+      - "--bootstrap-servers=${GATEWAY_ATTACH_TEST_LANE_BOOTSTRAP_SERVERS:?GATEWAY_ATTACH_TEST_LANE_BOOTSTRAP_SERVERS is required}"
+      - "--attach-request-topic=onex.cmd.omnibase-infra.gateway-attach-request.v1"
+      - "--heartbeat-request-topic=onex.cmd.omnibase-infra.gateway-heartbeat-request.v1"
+      - "--detach-request-topic=onex.cmd.omnibase-infra.gateway-detach-request.v1"
+      - "--session-event-topic=onex.evt.omnibase-infra.gateway-session.v1"
+    environment:
+      # Tenant client-credentials secret -- ref only, resolved at container
+      # start from Infisical by the shared secret-resolver bootstrap. Never a
+      # literal secret in this file or in an env_file checked into git.
+      GATEWAY_ATTACH_TENANT_CLIENT_CREDENTIALS_REF: "${GATEWAY_ATTACH_TENANT_CLIENT_CREDENTIALS_REF:?GATEWAY_ATTACH_TENANT_CLIENT_CREDENTIALS_REF is required}"
+      ONEX_TOPIC_ENFORCEMENT_MODE: "reject"
+    networks:
+      - gateway-runtime
+    restart: "no"
+    labels:
+      - "com.omninode.service=gateway-attach-test-lane"
+      - "com.omninode.layer=gateway"
+      - "com.omninode.ticket=OMN-15752"
+networks:
+  gateway-runtime:
+    external: true
+    name: omnibase-infra-network

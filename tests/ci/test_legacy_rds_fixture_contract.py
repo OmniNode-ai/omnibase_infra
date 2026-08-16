@@ -197,6 +197,9 @@ def test_proof_runs_real_migrations_twice_and_pins_the_blocked_upgrade() -> None
     dockerfile = DOCKERFILE.read_text(encoding="utf-8")
     assert "ledger-control/" in dockerfile
     assert "ledger-control/forward/fenced-node-migrations.yaml" in dockerfile
+    assert (
+        "ledger-control/forward/grandfathered-force-rls-migrations.yaml" in dockerfile
+    )
     assert "ledger-control/forward/_ledger/bootstrap.sql" in dockerfile
 
 

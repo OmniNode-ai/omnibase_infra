@@ -81,6 +81,17 @@ class TestHandlerEventForward:
         assert "refused" in result.error_message
 
     @pytest.mark.asyncio
+    async def test_missing_backend_configuration_fails_closed(self) -> None:
+        """The handler never substitutes an undeclared local endpoint."""
+        handler = HandlerEventForward(http_client=AsyncMock(spec=httpx.AsyncClient))
+
+        with patch.dict("os.environ", {}, clear=True):
+            with pytest.raises(
+                ValueError, match=r"descriptor\.backend_url resolved empty"
+            ):
+                await handler.handle(_make_request())
+
+    @pytest.mark.asyncio
     async def test_category_routing(self) -> None:
         mock_response = httpx.Response(
             200,

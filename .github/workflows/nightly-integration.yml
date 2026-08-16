@@ -98,7 +98,32 @@ jobs:
         && fromJSON(vars.OMNI_PUBLIC_PR_RUNS_ON_JSON || '["ubuntu-latest"]')
         || fromJSON(vars.OMNI_TRUSTED_CI_RUNS_ON_JSON || '["self-hosted","omnibase-ci"]')
       }}
-    timeout-minutes: 60
+    # OMN-15567: was 60. The single `pytest tests/integration/` step now has
+    # up to three independent full-Dockerfile.runtime build invocations that
+    # can each legitimately run right up to their own pytest-timeout ceiling
+    # before this job-level timeout would matter --
+    # test_build_succeeds_with_public_deps, test_build_uses_buildkit_cache_mounts
+    # (both explicit, in TestDockerBuild), and the module-scoped
+    # built_test_image fixture's build (shared by TestDockerSecurity /
+    # TestDockerRuntime / TestDockerHealthCheck / TestDockerImageLabels, but
+    # only actually built once per module, by whichever of those is the
+    # first consumer). Worst-case budget sum, using the per-test ceiling
+    # each build test is marked with (BUILD_TIMEOUT=1200s default +
+    # BUILD_TEST_TIMEOUT_MARGIN_SECONDS=60s = 1260s), not the empirically
+    # observed cache-warm durations that D2 already showed are not safe to
+    # assume:
+    #   3 x 1260s (worst-case cold build each)         = 3780s (63.0 min)
+    # + rest-of-suite baseline, ~793s observed 2026-08-04
+    #   (993s total "Run integration tests" step minus
+    #   the 200.88s attributed to test_build_succeeds_with_public_deps),
+    #   rounded up for headroom against suite growth   =  900s (15.0 min)
+    # + fixed step overhead observed the same run
+    #   (checkout/python/uv/deps/e2e-stack-up/health-wait
+    #   + teardown/upload, ~60s + ~3s), rounded up      =  120s ( 2.0 min)
+    # ------------------------------------------------------------------
+    #   worst-case total                                = 4800s (80.0 min)
+    # 90 gives ~10 minutes of margin above that worst-case sum.
+    timeout-minutes: 90
 
     steps:
       - name: Checkout code

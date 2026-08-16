@@ -547,6 +547,66 @@ def test_scripts_change_selects_the_tests_that_exercise_scripts() -> None:
     assert "tests/unit/scripts/" in selection.selected_paths
 
 
+def test_migration_tree_change_selects_the_fence_parity_ratchet() -> None:
+    # OMN-15336 item 4 repair follow-up: docker/migrations/forward/ lives
+    # outside src/, scripts/, and tests/, so a change there (the grandfather
+    # manifest, a new node .sql, or its _ledger row) previously produced NO
+    # selection at all and fell through to the tests/unit/ fallback -- which
+    # does not contain tests/scripts/test_node_migration_fence_parity.py, the
+    # ratchet guarding the FORCE-RLS grandfather snapshot against a laundered
+    # addition. Reproduces the realistic breach set: the grandfather
+    # manifest, a new FORCE-RLS .sql, and its ledger row.
+    selection = compute_selection(
+        changed_files=[
+            "docker/migrations/forward/grandfathered-force-rls-migrations.yaml",
+            "docker/migrations/forward/nodes/node_projection_savings/"
+            "0099_new_force_rls_breach.sql",
+            "docker/migrations/forward/_ledger/application-migrations.tsv",
+        ],
+        adjacency_path=ADJ,
+        ref_name="pr-branch",
+    )
+    assert selection.is_full_suite is False
+    assert "tests/scripts/" in selection.selected_paths
+    # ADDITIVE fix-forward: tests/unit/ must ALSO be selected. The first cut
+    # of this mapping gave migration-tree changes their own non-empty
+    # selection, which silently suppressed `compute_selection`'s
+    # `if not selected: selected = ["tests/unit/"]` fallback -- turning an
+    # addition into a swap and dropping real tests/unit/ coverage
+    # (tests/unit/migrations/, test_schema_fingerprint.py, etc.) for exactly
+    # this class of change. See MIGRATION_TREE_PREFIX's comment.
+    assert "tests/unit/" in selection.selected_paths
+    # Still deliberately NOT tests/unit/scripts/ -- the ratchet lives only in
+    # tests/scripts/, and this keeps the ratchet-specific footprint to that
+    # directory (tests/unit/ above is the separately-justified blanket
+    # fallback restoration, not a scripts/-style targeted mapping).
+    assert "tests/unit/scripts/" not in selection.selected_paths
+
+
+def test_ordinary_migration_change_selects_both_ratchet_and_unit_fallback() -> None:
+    # OMN-15336 fix-forward: the common case is NOT a FORCE-RLS breach -- it's
+    # an ordinary new node migration .sql plus its _ledger row, no
+    # grandfather YAML involved. Before this fix, giving MIGRATION_TREE_PREFIX
+    # its own selection swapped this diff's coverage from the whole
+    # tests/unit/ tree down to tests/scripts/ alone (the exact
+    # under-selection false-green class the selector doctrine warns about).
+    # It must select both: the fence-parity ratchet AND the pre-existing
+    # tests/unit/ coverage this class of change always had via the
+    # conservative fallback.
+    selection = compute_selection(
+        changed_files=[
+            "docker/migrations/forward/nodes/node_projection_registration/"
+            "0004_node_service_registry_no_force_rls.sql",
+            "docker/migrations/forward/_ledger/application-migrations.tsv",
+        ],
+        adjacency_path=ADJ,
+        ref_name="pr-branch",
+    )
+    assert selection.is_full_suite is False
+    assert "tests/scripts/" in selection.selected_paths
+    assert "tests/unit/" in selection.selected_paths
+
+
 def test_scripts_ci_change_still_selects_ci_process_tests() -> None:
     # No regression on the existing CI-process mapping: scripts/ci/ keeps
     # selecting tests/ci/, and now also picks up the scripts test families.

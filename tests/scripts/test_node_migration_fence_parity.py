@@ -172,7 +172,9 @@ from __future__ import annotations
 import hashlib
 import os
 import re
+import shutil
 import subprocess
+import tempfile
 import time
 from pathlib import Path
 from typing import TYPE_CHECKING
@@ -189,6 +191,8 @@ RUNNER = _advisory_lock.RUNNER
 PgTarget = _advisory_lock.PgTarget
 _find_pg_binary = _advisory_lock._find_pg_binary
 _psql = _advisory_lock._psql
+_free_port = _advisory_lock._free_port
+_unavailable = _advisory_lock._unavailable
 pg_target = _advisory_lock.pg_target
 
 if TYPE_CHECKING:
@@ -200,6 +204,33 @@ FENCE_BEGIN = "# ---- BEGIN operator fence — node migration ids (OMN-15336) --
 FENCE_END = "# ---- END operator fence — node migration ids (OMN-15336) ----"
 SKIP_BEGIN = "# ---- BEGIN fenced-id skip (OMN-15336) ----"
 SKIP_END = "# ---- END fenced-id skip (OMN-15336) ----"
+# OMN-15336 item 4: the unclassified-FORCE-RLS guard. Two blocks — the
+# predicate's own definition (sits beside is_fenced_node_migration) and the
+# call site (sits in the node loop, after the already-applied probe).
+FORCE_RLS_GUARD_DEF_BEGIN = (
+    "# ---- BEGIN unclassified FORCE ROW LEVEL SECURITY guard (OMN-15336 item 4) ----"
+)
+FORCE_RLS_GUARD_DEF_END = (
+    "# ---- END unclassified FORCE ROW LEVEL SECURITY guard (OMN-15336 item 4) ----"
+)
+FORCE_RLS_GUARD_CALL_BEGIN = (
+    "# ---- BEGIN unclassified FORCE ROW LEVEL SECURITY guard call "
+    "(OMN-15336 item 4) ----"
+)
+FORCE_RLS_GUARD_CALL_END = (
+    "# ---- END unclassified FORCE ROW LEVEL SECURITY guard call "
+    "(OMN-15336 item 4) ----"
+)
+# OMN-15336 item 4 repair (D1, 2026-08-05): the grandfather-snapshot block —
+# the fix for the guard's over-fire against the established, pre-guard tree.
+GRANDFATHER_BLOCK_BEGIN = (
+    "# ---- BEGIN FORCE ROW LEVEL SECURITY grandfather snapshot "
+    "(OMN-15336 item 4 repair) ----"
+)
+GRANDFATHER_BLOCK_END = (
+    "# ---- END FORCE ROW LEVEL SECURITY grandfather snapshot "
+    "(OMN-15336 item 4 repair) ----"
+)
 
 # --- OMN-15349 single-sourced manifest ---------------------------------------
 MANIFEST_RELPATH = "docker/migrations/forward/fenced-node-migrations.yaml"
@@ -257,11 +288,87 @@ FENCED_REGISTRATION_IDS = (
     "node:node_projection_registration:0001_add_heartbeat_columns.sql",
     "node:node_projection_registration:0002_node_service_registry_tenant_rls.sql",
 )
+# The OMN-15717/OMN-15376 node_pr_review_bot id. Fenced (not SQL-edited) to
+# satisfy the OMN-15376 shape-reconciliation gate without changing the file's
+# content sha256, which is bound to an already-applied production row (see
+# fenced-node-migrations.yaml's own rationale comment for the full argument).
+# Not releasable on any lane today — no ONEX_MIGRATION_LANE value un-gates it.
+FENCED_PR_REVIEW_BOT_IDS = (
+    "node:node_pr_review_bot:001_create_review_bot_bypass_log.sql",
+)
+# OMN-15336 item 4 / OMN-15656: contract-declared TENANT domain (unlike
+# node_service_registry, this is not a misclassification), held for the same
+# OMN-15301 writer-tenant-context reason as the delegation quartet. Was never
+# in this manifest on any runner before this entry — see the manifest's own
+# docstring for the incident.
+FENCED_INFERENCE_RESPONSE_IDS = (
+    "node:node_projection_delegation_inference_response:"
+    "0003_inference_response_text_rls_tenant_isolation.sql",
+)
 # Pinned expectation for the manifest content (OMN-15349): the baseline fence,
 # exact and in order. A manifest edit that moves this must update the pin in
 # the same PR — same change-control friction the pre-OMN-15349 shell-literal
 # pin gave, now pointed at the actual single source instead of a copy of it.
-EXPECTED_FENCE = FENCED_DELEGATION_IDS + FENCED_REGISTRATION_IDS
+EXPECTED_FENCE = (
+    FENCED_DELEGATION_IDS
+    + FENCED_REGISTRATION_IDS
+    + FENCED_PR_REVIEW_BOT_IDS
+    + FENCED_INFERENCE_RESPONSE_IDS
+)
+
+# --- OMN-15336 item 4 repair (D1, 2026-08-05): FORCE-RLS grandfather snapshot
+# --------------------------------------------------------------------------
+# See docker/migrations/forward/grandfathered-force-rls-migrations.yaml's own
+# header for what this is and why it is a snapshot, not an allowlist. Pinned
+# here with the SAME change-control friction as EXPECTED_FENCE: growing this
+# tuple without a corresponding manifest edit (or vice versa) fails
+# test_grandfather_pins_the_snapshot_baseline closed.
+GRANDFATHER_MANIFEST_RELPATH = (
+    "docker/migrations/forward/grandfathered-force-rls-migrations.yaml"
+)
+GRANDFATHER_MANIFEST_PATH = REPO_ROOT / GRANDFATHER_MANIFEST_RELPATH
+
+EXPECTED_GRANDFATHER = (
+    "node:node_canary_score_reducer:0002_capability_scores_tenant_id_and_rls.sql",
+    "node:node_projection_context_roi:003_context_roi_scores_tenant_id_and_rls.sql",
+    "node:node_projection_cost_summary:0002_llm_cost_aggregates_tenant_id_and_rls.sql",
+    "node:node_projection_dep_health:002_dep_health_findings_tenant_id_and_rls.sql",
+    "node:node_projection_instruction_eval:"
+    "0002_instruction_eval_aggregate_snapshots_tenant_id_and_rls.sql",
+    "node:node_projection_pattern_learning:"
+    "0001_pattern_learning_artifacts_tenant_id_and_rls.sql",
+    "node:node_projection_routing_decision:"
+    "0022_agent_routing_decisions_tenant_id_and_rls.sql",
+    "node:node_projection_savings:081_savings_estimates_rls_tenant_isolation.sql",
+    "node:node_projection_skill_executions:"
+    "0002_skill_execution_snapshots_tenant_id_and_rls.sql",
+)
+
+
+def _load_grandfather_manifest() -> list[dict[str, str]]:
+    """Independent oracle: a real YAML parse of the grandfather manifest."""
+    doc = yaml.safe_load(GRANDFATHER_MANIFEST_PATH.read_text(encoding="utf-8"))
+    assert isinstance(doc, dict) and "grandfathered_force_rls_migrations" in doc, (
+        f"{GRANDFATHER_MANIFEST_RELPATH} must be a mapping with a top-level "
+        "'grandfathered_force_rls_migrations' key"
+    )
+    entries = doc["grandfathered_force_rls_migrations"]
+    assert isinstance(entries, list) and entries, (
+        f"{GRANDFATHER_MANIFEST_RELPATH}'s grandfathered_force_rls_migrations "
+        "must be a non-empty list"
+    )
+    for i, entry in enumerate(entries):
+        assert isinstance(entry, dict) and "id" in entry, (
+            f"{GRANDFATHER_MANIFEST_RELPATH} entry {i} is not a mapping with "
+            f"an 'id' key: {entry!r}"
+        )
+    return entries
+
+
+def grandfather_manifest_ids() -> tuple[str, ...]:
+    """Ordered ids from the grandfather manifest, via the YAML-parse oracle."""
+    return tuple(entry["id"] for entry in _load_grandfather_manifest())
+
 
 # --- OMN-15349 k8s-side release (operator ruling 21, OMN-15332 comment
 # 1a067542, 2026-07-31T14:05Z GO) --------------------------------------------
@@ -349,6 +456,52 @@ def _extract_marked(text: str, begin: str, end: str) -> str:
         )
         raise AssertionError(msg)
     return "\n".join(lines[starts[0] + 1 : ends[0]]) + "\n"
+
+
+def extract_force_rls_guard_def(text: str | None = None) -> str:
+    """Return the unclassified-FORCE-RLS predicate's own definition block."""
+    return _extract_marked(
+        text if text is not None else _runner_text(),
+        FORCE_RLS_GUARD_DEF_BEGIN,
+        FORCE_RLS_GUARD_DEF_END,
+    )
+
+
+def extract_force_rls_guard_call(text: str | None = None) -> str:
+    """Return the in-loop call site of the unclassified-FORCE-RLS guard."""
+    return _extract_marked(
+        text if text is not None else _runner_text(),
+        FORCE_RLS_GUARD_CALL_BEGIN,
+        FORCE_RLS_GUARD_CALL_END,
+    )
+
+
+def extract_grandfather_block(text: str | None = None) -> str:
+    """Return the FORCE-RLS grandfather-snapshot block, markers stripped."""
+    return _extract_marked(
+        text if text is not None else _runner_text(),
+        GRANDFATHER_BLOCK_BEGIN,
+        GRANDFATHER_BLOCK_END,
+    )
+
+
+def strip_force_rls_guard(text: str) -> str:
+    """The pre-OMN-15336-item-4 runner: byte-identical minus the guard.
+
+    Derived from the shipped artifact, same discipline as ``strip_fence``
+    above, so the RED-control-for-the-RED-control can never drift from the
+    thing it is the control for.
+    """
+    out = text
+    for begin, end in (
+        (FORCE_RLS_GUARD_DEF_BEGIN, FORCE_RLS_GUARD_DEF_END),
+        (FORCE_RLS_GUARD_CALL_BEGIN, FORCE_RLS_GUARD_CALL_END),
+    ):
+        lines = out.splitlines(keepends=True)
+        start = next(i for i, ln in enumerate(lines) if ln.strip() == begin)
+        stop = next(i for i, ln in enumerate(lines) if ln.strip() == end)
+        out = "".join(lines[:start] + lines[stop + 1 :])
+    return out
 
 
 def strip_fence(text: str) -> str:
@@ -441,8 +594,16 @@ def test_manifest_pins_the_known_baseline_fence() -> None:
     assert found[: len(FENCED_DELEGATION_IDS)] == FENCED_DELEGATION_IDS, (
         "the OMN-14974 delegation fence was disturbed"
     )
-    assert found[len(FENCED_DELEGATION_IDS) :] == FENCED_REGISTRATION_IDS, (
-        "the OMN-15335/OMN-15343 registration hold is not the exact expected trio"
+    registration_end = len(FENCED_DELEGATION_IDS) + len(FENCED_REGISTRATION_IDS)
+    assert (
+        found[len(FENCED_DELEGATION_IDS) : registration_end] == FENCED_REGISTRATION_IDS
+    ), "the OMN-15335/OMN-15343 registration hold is not the exact expected trio"
+    pr_review_bot_end = registration_end + len(FENCED_PR_REVIEW_BOT_IDS)
+    assert found[registration_end:pr_review_bot_end] == FENCED_PR_REVIEW_BOT_IDS, (
+        "the OMN-15717/OMN-15376 node_pr_review_bot hold is not the exact expected id"
+    )
+    assert found[pr_review_bot_end:] == FENCED_INFERENCE_RESPONSE_IDS, (
+        "the OMN-15336 item-4 inference-response hold is not the expected id"
     )
 
 
@@ -551,6 +712,62 @@ def test_fenced_skip_never_records_a_ledger_row() -> None:
     assert "NODE_SKIPPED=$((NODE_SKIPPED + 1))" in branch, (
         "the skip must be RECORDED in the run's skipped counter, so a fenced "
         "run is distinguishable from a run that discovered nothing"
+    )
+
+
+def test_unclassified_force_rls_guard_is_defined() -> None:
+    """OMN-15336 item 4: the predicate and its call site both exist."""
+    definition = extract_force_rls_guard_def()
+    assert "migration_declares_unclassified_force_rls()" in definition, (
+        "the guard predicate must be defined"
+    )
+    call = extract_force_rls_guard_call()
+    assert "migration_declares_unclassified_force_rls" in call, (
+        "the node loop must call the guard predicate"
+    )
+    assert "exit 1" in call, "the guard must FATAL, not warn, on a match"
+
+
+def test_unclassified_force_rls_guard_excludes_no_force_statements() -> None:
+    """`NO FORCE ROW LEVEL SECURITY` (a disabling statement) must never trip
+    the guard — otherwise a future FORCE-strip migration could never ship.
+    """
+    definition = extract_force_rls_guard_def()
+    assert "NO[[:space:]]+FORCE" in definition, (
+        "the predicate must explicitly exclude the NO FORCE (disabling) form"
+    )
+
+
+def test_unclassified_force_rls_guard_is_checked_only_for_unfenced_ids() -> None:
+    """The guard must not re-litigate an id someone already classified.
+
+    Both the fenced-and-held and the fenced-and-released cases must bypass
+    it: the manifest entry itself is the classification the guard exists to
+    require, whether or not this lane also carries a release for it.
+    """
+    call = extract_force_rls_guard_call()
+    assert re.search(r"!\s*is_fenced_node_migration\s+\"\$\{migration_id\}\"", call), (
+        "the guard must be gated on `! is_fenced_node_migration ...`"
+    )
+
+
+def test_unclassified_force_rls_guard_runs_after_the_already_applied_probe() -> None:
+    """Ordering is load-bearing the OTHER way from the fence-skip check above:
+    this guard must run AFTER ``migration_is_applied`` returns false, never
+    before — a guard that ran earlier would FATAL on every subsequent run of
+    a lane where an unclassified id already applied before this guard
+    existed (e.g. the real .201 dev lane's 0003/081), bricking that lane's
+    every future deploy over already-committed history it cannot undo.
+    """
+    text = _runner_text()
+    node_loop = text[text.index("Auto-discover and apply node-owned migrations") :]
+    probe = node_loop.index("if migration_is_applied")
+    guard_call = node_loop.index('if ! is_fenced_node_migration "${migration_id}" \\')
+    apply_sql = node_loop.index('-v ON_ERROR_STOP=1 -f "$migration_file"')
+    assert probe < guard_call < apply_sql, (
+        "the unclassified-FORCE-RLS guard must run strictly between the "
+        "already-applied probe and the apply "
+        f"(node-loop offsets: probe={probe} guard={guard_call} apply={apply_sql})"
     )
 
 
@@ -965,10 +1182,15 @@ def test_fence_matches_omninode_infra_k8s_runner() -> None:
         f"baseline does not cover: {stray}"
     )
     effective_k8s_fence = tuple(i for i in baseline if i not in k8s_release)
-    assert effective_k8s_fence == FENCED_DELEGATION_IDS, (
+    expected_effective_k8s_fence = (
+        FENCED_DELEGATION_IDS + FENCED_PR_REVIEW_BOT_IDS + FENCED_INFERENCE_RESPONSE_IDS
+    )
+    assert effective_k8s_fence == expected_effective_k8s_fence, (
         "the k8s Job's effective (post-release) fence no longer equals the "
-        "delegation quartet — either the shared manifest baseline or the "
-        f"k8s release changed: {effective_k8s_fence}"
+        "delegation quartet plus the OMN-15717 node_pr_review_bot hold plus "
+        "the OMN-15336 item-4 inference-response hold — either the shared "
+        "manifest baseline or the k8s release changed: "
+        f"{effective_k8s_fence}"
     )
 
 
@@ -1004,6 +1226,7 @@ def node_tree(tmp_path: Path) -> Path:
             f"CREATE TABLE public.{_marker_for(migration_id)} (id INT);\n"
         )
     _write_fence_manifest(forward, EXPECTED_FENCE)
+    _write_grandfather_manifest(forward)
     _write_application_ledger_contract(forward)
     return forward
 
@@ -1022,6 +1245,26 @@ def _write_fence_manifest(forward: Path, ids: tuple[str, ...]) -> None:
     for migration_id in ids:
         lines.append(f'  - id: "{migration_id}"')
     (forward / "fenced-node-migrations.yaml").write_text(
+        "\n".join(lines) + "\n", encoding="utf-8"
+    )
+
+
+def _write_grandfather_manifest(forward: Path, ids: tuple[str, ...] = ()) -> None:
+    """Write a synthetic FORCE-RLS grandfather snapshot into a test harness's
+    migrations tree (OMN-15336 item 4 repair).
+
+    The shipped runner unconditionally requires
+    ``${MIGRATIONS_DIR}/grandfathered-force-rls-migrations.yaml`` now, same
+    discipline as ``_write_fence_manifest`` above. Defaults to an empty list:
+    none of the synthetic fixtures in this module vendor real FORCE-RLS SQL
+    bodies (their marker files are plain ``CREATE TABLE ... (id INT);``), so
+    an empty grandfather snapshot is correct unless a fixture explicitly
+    passes ids.
+    """
+    lines = ["grandfathered_force_rls_migrations:"]
+    for migration_id in ids:
+        lines.append(f'  - id: "{migration_id}"')
+    (forward / "grandfathered-force-rls-migrations.yaml").write_text(
         "\n".join(lines) + "\n", encoding="utf-8"
     )
 
@@ -1062,6 +1305,12 @@ def _write_application_ledger_contract(forward: Path) -> None:
     )
     (ledger_dir / "application-migration-blocks.tsv").write_text("", encoding="utf-8")
     (ledger_dir / "cloud-migration-aliases.tsv").write_text("", encoding="utf-8")
+    # OMN-15717 (#2678) added LEGACY_NODE_MIGRATION_DECLARATIONS as a fourth
+    # unconditionally-required manifest file in validate_application_migration_
+    # manifest() -- empty is valid (mirrors the two files above: the awk
+    # per-record validators never fire on zero input lines, so an empty file
+    # passes every format/duplicate/overlap check untouched).
+    (ledger_dir / "legacy-node-migrations.tsv").write_text("", encoding="utf-8")
 
 
 @pytest.fixture
@@ -1313,6 +1562,7 @@ def real_registration_tree(tmp_path: Path) -> Path:
         f"CREATE TABLE public.{_marker_for(delegation_id)} (id INT);\n"
     )
     _write_fence_manifest(forward, EXPECTED_FENCE)
+    _write_grandfather_manifest(forward)
     _write_application_ledger_contract(forward)
     return forward
 
@@ -1486,3 +1736,587 @@ def test_unknown_lane_value_fails_closed_to_the_full_fence(
         "failing closed silently is still a silent failure — the runner must "
         f"say it did not recognise the lane:\n{result.stderr}"
     )
+
+
+# --------------------------------------------------------------------------
+# OMN-15336 item 4 — unclassified FORCE ROW LEVEL SECURITY guard. Live half.
+#
+# The required-fix item this closes: "Reconsider whether 0003/081/0002
+# belong in the fence list — they carry the same hazard and are currently
+# ungated on every runner." 0002 was added by OMN-15379/OMN-15349; this
+# guard is the durable mechanism so the NEXT one (there is no reason to
+# believe 0003/081 are the last) is refused instead of silently applying —
+# closing the gap the proof stage found: nothing in either runner, and
+# nothing wired into omnibase_infra CI, inspected a migration's SQL text to
+# block an unfenced FORCE ROW LEVEL SECURITY statement.
+# --------------------------------------------------------------------------
+
+UNCLASSIFIED_FORCE_RLS_CONTROL_ID = (
+    "node:node_projection_delegation:0098_unclassified_force_rls_control.sql"
+)
+
+
+@pytest.fixture
+def unclassified_force_rls_tree(tmp_path: Path) -> Path:
+    """``node_tree`` plus one migration that enables FORCE ROW LEVEL SECURITY
+    and is deliberately ABSENT from the fence manifest — the exact OMN-15336
+    item-4 scenario that produced the real, ungated 0003 and 081 incidents:
+    a live hazard with no classification at all (as opposed to a classified
+    id someone has reviewed and either held or released).
+    """
+    forward = tmp_path / "migrations" / "forward"
+    forward.mkdir(parents=True)
+    (forward / "001_noop.sql").write_text("SELECT 1;\n")
+
+    for migration_id in (*EXPECTED_FENCE, UNFENCED_CONTROL_ID):
+        _, node_name, filename = migration_id.split(":", 2)
+        node_dir = forward / "nodes" / node_name
+        node_dir.mkdir(parents=True, exist_ok=True)
+        (node_dir / filename).write_text(
+            f"CREATE TABLE public.{_marker_for(migration_id)} (id INT);\n"
+        )
+
+    _, control_node, control_filename = UNCLASSIFIED_FORCE_RLS_CONTROL_ID.split(":", 2)
+    control_dir = forward / "nodes" / control_node
+    control_dir.mkdir(parents=True, exist_ok=True)
+    marker = _marker_for(UNCLASSIFIED_FORCE_RLS_CONTROL_ID)
+    control_dir.joinpath(control_filename).write_text(
+        "-- a real DDL shape, matching the actual 0003/081 migrations: a\n"
+        "-- prose comment mentioning FORCE ROW LEVEL SECURITY must NOT alone\n"
+        "-- trip the guard (comment-blind matching), only the DDL below does.\n"
+        f"CREATE TABLE public.{marker} (id INT, tenant_id TEXT);\n"
+        f"ALTER TABLE public.{marker} ENABLE ROW LEVEL SECURITY;\n"
+        f"ALTER TABLE public.{marker} FORCE ROW LEVEL SECURITY;\n"
+    )
+
+    _write_fence_manifest(forward, EXPECTED_FENCE)
+    _write_grandfather_manifest(forward)
+    _write_application_ledger_contract(forward)
+    return forward
+
+
+@pytest.mark.integration
+def test_unclassified_force_rls_migration_is_refused(
+    pg_target: PgTarget,
+    unclassified_force_rls_tree: Path,
+    node_db: str,
+) -> None:
+    """RED control: a node migration enabling FORCE ROW LEVEL SECURITY with
+    no fence entry at all must be REFUSED, not applied.
+
+    Before this guard, this is exactly what happened to
+    node_projection_delegation_inference_response/0003 and
+    node_projection_savings/081 — neither was ever in the fence manifest on
+    any runner, and both applied unattended on the .201 dev lane (see the
+    module docstring's incident description and OMN-15336's required-fix
+    item 4).
+    """
+    result = _run(RUNNER, pg_target, unclassified_force_rls_tree, node_db)
+    combined = result.stdout + result.stderr
+    assert result.returncode != 0, (
+        "the runner must refuse an unclassified FORCE ROW LEVEL SECURITY "
+        f"migration, not apply it silently:\n{combined}"
+    )
+    assert UNCLASSIFIED_FORCE_RLS_CONTROL_ID in combined, (
+        f"the FATAL must name the offending migration id:\n{combined}"
+    )
+    assert "FATAL" in combined and "FORCE ROW LEVEL SECURITY" in combined, (
+        f"expected a FATAL naming the FORCE ROW LEVEL SECURITY hazard:\n{combined}"
+    )
+    assert not _table_exists(
+        pg_target, node_db, _marker_for(UNCLASSIFIED_FORCE_RLS_CONTROL_ID)
+    ), "FENCE BREACH: the unclassified FORCE RLS migration was APPLIED"
+    ledger = _ledger_ids(pg_target, node_db)
+    assert UNCLASSIFIED_FORCE_RLS_CONTROL_ID not in ledger, (
+        "a refused migration must not be recorded as applied — that would "
+        "make later classification a silent no-op"
+    )
+
+
+@pytest.mark.integration
+def test_guard_free_runner_applies_the_unclassified_migration(
+    pg_target: PgTarget,
+    unclassified_force_rls_tree: Path,
+    node_db: str,
+    tmp_path: Path,
+) -> None:
+    """RED control FOR the RED control: without the guard, the exact same
+    scenario reproduces the OMN-15336 item-4 incident — silent apply.
+
+    Without this, ``test_unclassified_force_rls_migration_is_refused`` could
+    be passing for an unrelated reason (a checksum mismatch, a missing
+    manifest declaration) and still look like proof the guard works.
+    """
+    legacy = tmp_path / "run-forward-migrations.preguard.sh"
+    legacy.write_text(strip_force_rls_guard(_runner_text()))
+
+    result = _run(legacy, pg_target, unclassified_force_rls_tree, node_db)
+    assert result.returncode == 0, result.stdout + result.stderr
+    assert _table_exists(
+        pg_target, node_db, _marker_for(UNCLASSIFIED_FORCE_RLS_CONTROL_ID)
+    ), (
+        "the guard-free runner was expected to apply the unclassified FORCE "
+        f"RLS migration, reproducing the item-4 incident:\n{result.stdout}"
+    )
+    ledger = _ledger_ids(pg_target, node_db)
+    assert UNCLASSIFIED_FORCE_RLS_CONTROL_ID in ledger, (
+        f"the guard-free runner did not record the migration either: {sorted(ledger)}"
+    )
+
+
+# ==============================================================================
+# OMN-15336 item 4 REPAIR (D1, empirically reproduced 2026-08-05)
+# ==============================================================================
+# Defect: the guard above fires for ANY FORCE-enabling node migration absent
+# from the operator fence, with no notion of "already part of the tree." The
+# vendored tree carries 13 FORCE-enabling node migrations; the fence
+# classifies only 4. The other 9 were ordinary, already-shipped migrations
+# that had been applying on every warm lane since before the guard existed —
+# but the guard could not distinguish them from a brand-new, unreviewed one.
+# Reproduced live: shipped runner against a virgin PG16 -> exit 1, FATAL at
+# node:node_canary_score_reducer:0002 (the first of the 9 in sort order), 1
+# node migration applied, 87 withheld. A cold lane bring-up (CI, a fresh
+# compose volume) could never converge.
+#
+# Fix: docker/migrations/forward/grandfathered-force-rls-migrations.yaml, a
+# frozen snapshot (not a rolling allowlist) of exactly those 9 ids, consulted
+# by the guard as a SECOND, independent bypass alongside the fence. See that
+# file's own header and the "FORCE ROW LEVEL SECURITY grandfather snapshot"
+# block in scripts/run-forward-migrations.sh for the full rationale.
+#
+# GUARD_INTRODUCTION_COMMIT is the commit that first shipped the unclassified-
+# FORCE-RLS guard; every grandfathered id must have existed in the tree at its
+# PARENT (i.e. immediately before the guard could ever have fired for it).
+#
+# OMN-15831: this constant has now rotted to an unreachable commit TWICE
+# (bbac5205 -> 7a957a0a -> 90cd78a5) because each prior pin named a #2666
+# BRANCH commit that squash-merge + branch deletion later orphaned (no ref
+# contains it, `merge-base --is-ancestor` fails). The value below is the
+# #2666 SQUASH MERGE commit itself, which is permanent history on `dev` and
+# cannot be orphaned by branch cleanup the way a branch-tip commit can.
+# `test_guard_introduction_commit_is_reachable` (below) makes this a fail-
+# closed, self-diagnosing assertion instead of a silent future recurrence.
+GUARD_INTRODUCTION_COMMIT = "3bc7fcaf2e0858b04dda5f3fd3e695a7df88b754"
+
+
+def _sql_declares_unclassified_force_rls(sql_text: str) -> bool:
+    """Python mirror of migration_declares_unclassified_force_rls()'s pipeline.
+
+    Kept as an independent re-implementation (not a subprocess call into the
+    shell function) so a bug shared between the shell predicate and this
+    oracle cannot hide a mis-scoped grandfather entry from both.
+    """
+    stripped = re.sub(r"--.*$", "", sql_text, flags=re.MULTILINE)
+    force_lines = [
+        line
+        for line in stripped.splitlines()
+        if re.search(r"FORCE[ \t]+ROW[ \t]+LEVEL[ \t]+SECURITY", line, re.IGNORECASE)
+    ]
+    qualifying = [
+        line
+        for line in force_lines
+        if not re.search(
+            r"NO[ \t]+FORCE[ \t]+ROW[ \t]+LEVEL[ \t]+SECURITY", line, re.IGNORECASE
+        )
+    ]
+    return len(qualifying) > 0
+
+
+def test_grandfather_manifest_pins_the_snapshot_baseline() -> None:
+    """The ratchet: the grandfather manifest's content is pinned, exact and IN
+    ORDER. Growing this list — the only way to widen what the guard silently
+    lets through — requires editing BOTH the committed manifest AND this pin
+    in the same PR, exactly the friction EXPECTED_FENCE gives the operator
+    fence. A manifest edit that is not matched here fails CI closed.
+    """
+    found = grandfather_manifest_ids()
+    assert found == EXPECTED_GRANDFATHER, (
+        "grandfathered-force-rls-migrations.yaml drifted from the pinned "
+        "snapshot baseline. If this is a deliberate change it must be "
+        "justified same as any other change to what the FORCE-RLS guard lets "
+        "through unclassified — update EXPECTED_GRANDFATHER in the same PR.\n"
+        f"  found:    {found}\n"
+        f"  expected: {EXPECTED_GRANDFATHER}"
+    )
+
+
+def test_grandfather_manifest_shell_parse_matches_yaml_parse() -> None:
+    """The sed one-liner the shipped runner actually executes must extract the
+    same ids as a real YAML parse — same hazard class as the fence manifest's
+    own parity test.
+    """
+    text = GRANDFATHER_MANIFEST_PATH.read_text(encoding="utf-8")
+    assert parse_shell_manifest_ids(text) == grandfather_manifest_ids()
+
+
+def test_every_grandfathered_id_names_a_real_vendored_sql_file() -> None:
+    for grandfathered in EXPECTED_GRANDFATHER:
+        _, node_name, filename = grandfathered.split(":", 2)
+        path = (
+            REPO_ROOT
+            / "docker"
+            / "migrations"
+            / "forward"
+            / "nodes"
+            / node_name
+            / filename
+        )
+        assert path.is_file(), f"grandfathered id names a missing file: {path}"
+
+
+def test_grandfathered_ids_actually_declare_force_rls() -> None:
+    """Every grandfathered id must genuinely need grandfathering — i.e. its
+    vendored SQL must trip the same predicate the guard tests. An id that
+    does NOT declare FORCE ROW LEVEL SECURITY has no business on this list;
+    it would be dead weight at best and a laundering vector at worst (padding
+    the snapshot with ids that don't need it, making a REAL future addition
+    look like "just one more" in review).
+    """
+    for grandfathered in EXPECTED_GRANDFATHER:
+        _, node_name, filename = grandfathered.split(":", 2)
+        path = (
+            REPO_ROOT
+            / "docker"
+            / "migrations"
+            / "forward"
+            / "nodes"
+            / node_name
+            / filename
+        )
+        assert _sql_declares_unclassified_force_rls(path.read_text(encoding="utf-8")), (
+            f"{grandfathered} is grandfathered but its SQL does not declare "
+            "FORCE ROW LEVEL SECURITY — remove it from the snapshot"
+        )
+
+
+def test_guard_introduction_commit_is_reachable() -> None:
+    """OMN-15831: fail closed with a DIAGNOSIS, not a mystery, the moment
+    GUARD_INTRODUCTION_COMMIT next rots.
+
+    This pin has already gone unreachable twice (bbac5205 -> 7a957a0a ->
+    90cd78a5) because each prior value named a PR-branch commit that a later
+    squash-merge + branch deletion orphaned — `git show <pin>~1:<path>` then
+    fails on any fresh checkout with no stale local objects, and the bare
+    `returncode == 0` assert in test_grandfathered_ids_predate_the_guard_commit
+    gave no hint why. This test runs first (alphabetically before
+    ...predate...) and asserts the pin is an ancestor of HEAD before anything
+    downstream tries to dereference it.
+    """
+    result = subprocess.run(
+        ["git", "merge-base", "--is-ancestor", GUARD_INTRODUCTION_COMMIT, "HEAD"],
+        cwd=REPO_ROOT,
+        capture_output=True,
+        text=True,
+        check=False,
+    )
+    assert result.returncode == 0, (
+        f"GUARD_INTRODUCTION_COMMIT ({GUARD_INTRODUCTION_COMMIT}) is not an "
+        "ancestor of HEAD — this is the squash-orphaning failure mode "
+        "documented at OMN-15831 (third occurrence in the OMN-15336 lane: "
+        "the pin named a PR-branch commit that was squash-merged and "
+        "then had its branch deleted, so the commit object is unreachable "
+        "from any ref. Repoint GUARD_INTRODUCTION_COMMIT to the SQUASH MERGE "
+        "commit SHA for the PR that introduced the guard (verify with "
+        "`git merge-base --is-ancestor <candidate> origin/dev`), not a "
+        "branch-tip commit that will be deleted after merge.\n"
+        f"stderr: {result.stderr}"
+    )
+
+
+def test_grandfathered_ids_predate_the_guard_commit() -> None:
+    """Entry criterion #2 from the manifest's own header: every grandfathered
+    id must have existed in the tree BEFORE the guard could ever have fired
+    for it. Checked against the actual git history, not by assertion.
+    """
+    for grandfathered in EXPECTED_GRANDFATHER:
+        _, node_name, filename = grandfathered.split(":", 2)
+        relpath = f"docker/migrations/forward/nodes/{node_name}/{filename}"
+        result = subprocess.run(
+            ["git", "show", f"{GUARD_INTRODUCTION_COMMIT}~1:{relpath}"],
+            cwd=REPO_ROOT,
+            capture_output=True,
+            text=True,
+            check=False,
+        )
+        assert result.returncode == 0, (
+            f"{grandfathered} is grandfathered but did not exist at "
+            f"{GUARD_INTRODUCTION_COMMIT}~1 ({relpath}) — a genuinely new "
+            "migration must go through the operator fence, not the "
+            f"grandfather snapshot:\n{result.stderr}"
+        )
+
+
+def test_grandfathered_ids_are_disjoint_from_the_fence() -> None:
+    """The two lists are independent mechanisms with different semantics (a
+    frozen historical fact vs. an operator-editable gate). An id on both
+    would be dead code on whichever list is checked second and would blur the
+    line the manifest's own header draws between them.
+    """
+    overlap = set(EXPECTED_GRANDFATHER) & set(EXPECTED_FENCE)
+    assert not overlap, (
+        f"ids present in BOTH the fence and the grandfather list: {overlap}"
+    )
+
+
+def test_runner_carries_the_grandfather_snapshot() -> None:
+    """Static structural check: the grandfather block exists, is unconditional
+    (FATAL if the manifest file is missing), and is committed-file-only (no
+    operator env-var fallback) — same discipline as the fence manifest.
+    """
+    block = extract_grandfather_block()
+    assert "GRANDFATHER_MANIFEST=" in block
+    assert 'if [ ! -f "${GRANDFATHER_MANIFEST}" ]; then' in block
+    assert "is_grandfathered_force_rls_migration" in block
+    offenders = [
+        ln
+        for ln in block.splitlines()
+        if re.search(
+            r"GRANDFATHERED_FORCE_RLS_IDS=\$?\{?GRANDFATHERED_FORCE_RLS_IDS", ln
+        )
+        or re.search(r'GRANDFATHERED_FORCE_RLS_IDS="\$\{', ln)
+    ]
+    assert not offenders, (
+        "the grandfather list must be assigned unconditionally from the "
+        f"committed manifest, never from an operator env var: {offenders}"
+    )
+
+
+def test_grandfather_guard_is_consulted_at_the_call_site() -> None:
+    """The call site must check BOTH the fence and the grandfather snapshot
+    before FATALing — this is the actual repair, so it is asserted directly
+    against the call site text, not just inferred from the live proofs below.
+    """
+    call = extract_force_rls_guard_call()
+    assert "is_fenced_node_migration" in call
+    assert "is_grandfathered_force_rls_migration" in call
+    # Both must be negated conditions ANDed together ahead of the FATAL — a
+    # call site that checked is_grandfathered_force_rls_migration but forgot
+    # the `!` would silently invert the repair into "only grandfathered ids
+    # are ever refused."
+    assert re.search(
+        r"!\s*is_fenced_node_migration.*\n.*!\s*is_grandfathered_force_rls_migration",
+        call,
+    ), f"expected both checks negated and ANDed ahead of the FATAL:\n{call}"
+
+
+@pytest.fixture
+def virgin_pg_target() -> Iterator[PgTarget]:
+    """A GENUINELY empty scratch database — deliberately NOT the shared
+    ``pg_target`` fixture from the OMN-15291 advisory-lock module.
+
+    That fixture's ``SETUP_SQL`` pre-seeds a minimal ``public.db_metadata`` /
+    ``public.apply_probe`` / ``public.schema_migrations`` specifically so the
+    lock-race tests can treat the runner's own bootstrap DDL as a no-op —
+    exactly the opposite of what a "does the real tree converge on a virgin
+    database" proof needs. Reusing it here made
+    ``029_create_db_metadata.sql`` see a pre-existing, schema-incompatible
+    ``db_metadata`` and fail on a missing ``owner_service`` column — a
+    fixture mismatch, not a FORCE-RLS defect. This fixture applies nothing
+    before yielding: same connection/bring-up logic as ``pg_target``,
+    minus the seed.
+    """
+    if not _find_pg_binary("psql"):
+        _unavailable("psql client not available")
+
+    host = os.environ.get("MIGRATION_LOCK_TEST_HOST")
+    if host:
+        admin = PgTarget(
+            host=host,
+            port=int(os.environ.get("MIGRATION_LOCK_TEST_PORT", "5432")),
+            user=os.environ.get("MIGRATION_LOCK_TEST_USER", "postgres"),
+            password=os.environ.get("MIGRATION_LOCK_TEST_PASSWORD", "postgres"),
+            dbname=os.environ.get("MIGRATION_LOCK_TEST_DB", "postgres"),
+        )
+        scratch = f"omn15336_virgin_{int(time.time() * 1000) % 100_000_000}"
+        _psql(admin, f'CREATE DATABASE "{scratch}"')
+        scoped = PgTarget(
+            host=admin.host,
+            port=admin.port,
+            user=admin.user,
+            password=admin.password,
+            dbname=scratch,
+        )
+        try:
+            yield scoped
+        finally:
+            _psql(admin, f'DROP DATABASE IF EXISTS "{scratch}" WITH (FORCE)')
+        return
+
+    initdb = _find_pg_binary("initdb")
+    pg_ctl = _find_pg_binary("pg_ctl")
+    if not initdb or not pg_ctl:
+        _unavailable(
+            "no MIGRATION_LOCK_TEST_HOST and no local initdb/pg_ctl to start an "
+            "ephemeral cluster"
+        )
+        return
+
+    with tempfile.TemporaryDirectory(dir="/tmp", prefix="omn15336-virgin-") as base:
+        datadir = Path(base) / "pgdata"
+        subprocess.run(
+            [initdb, "-D", str(datadir), "-U", "postgres", "--auth=trust", "--no-sync"],
+            check=True,
+            capture_output=True,
+        )
+        port = _free_port()
+        subprocess.run(
+            [
+                pg_ctl,
+                "-D",
+                str(datadir),
+                "-l",
+                str(Path(base) / "pg.log"),
+                "-o",
+                f"-p {port} -c listen_addresses=127.0.0.1 "
+                f"-c unix_socket_directories={base}",
+                "-w",
+                "start",
+            ],
+            check=True,
+            capture_output=True,
+        )
+        target = PgTarget(
+            host="127.0.0.1",
+            port=port,
+            user="postgres",
+            password="postgres",
+            dbname="postgres",
+        )
+        try:
+            yield target
+        finally:
+            subprocess.run(
+                [pg_ctl, "-D", str(datadir), "-m", "immediate", "-w", "stop"],
+                check=False,
+                capture_output=True,
+            )
+
+
+@pytest.fixture
+def virgin_node_db(virgin_pg_target: PgTarget) -> Iterator[str]:
+    """A separate node database against ``virgin_pg_target``'s coordinates —
+    mirrors ``node_db`` above, but bound to the un-seeded target so both
+    databases in the pair are genuinely virgin.
+
+    Named LITERALLY ``omnidash_analytics``, not randomly: several REAL flat
+    migrations (e.g. ``083_create_log_entries.sql``) hardcode
+    ``\\connect omnidash_analytics`` rather than reading ``NODE_POSTGRES_DB``
+    -- a pre-existing production assumption (that database is provisioned
+    ahead of the migration run, same as ``omnibase_infra``'s own PGDB) that
+    has nothing to do with this ticket's FORCE-RLS guard. A random name here
+    would make ``\\connect`` fail with "database ... does not exist" for an
+    unrelated reason, not prove or disprove the guard fix. ``virgin_pg_target``
+    (a private ephemeral cluster, or a scratch external server used by one
+    test at a time) makes the literal name safe.
+    """
+    admin = PgTarget(
+        host=virgin_pg_target.host,
+        port=virgin_pg_target.port,
+        user=virgin_pg_target.user,
+        password=virgin_pg_target.password,
+        dbname="postgres",
+    )
+    name = "omnidash_analytics"
+    _psql(admin, f'CREATE DATABASE "{name}"')
+    try:
+        yield name
+    finally:
+        _psql(admin, f'DROP DATABASE IF EXISTS "{name}" WITH (FORCE)')
+
+
+# --- Live proofs against the REAL vendored tree -----------------------------
+# Everything above is static/structural. These two are the acceptance proof
+# itself, automated: the shipped runner, unmodified, against
+# docker/migrations/forward exactly as committed (no synthetic stand-in tree),
+# on a virgin database. Without these, every static check above could pass
+# while the runner still FATALs on a cold lane — which is exactly what
+# happened: the pre-repair guard passed all 30 of its own synthetic tests
+# while failing against the real tree it actually runs against in production.
+REAL_FORWARD_DIR = REPO_ROOT / "docker" / "migrations" / "forward"
+
+
+@pytest.mark.integration
+def test_virgin_database_applies_the_full_real_vendored_tree(
+    virgin_pg_target: PgTarget,
+    virgin_node_db: str,
+) -> None:
+    """THE acceptance proof: a virgin database converges cleanly against the
+    real, committed migration tree. Before the repair this FATALed at
+    node:node_canary_score_reducer:0002 with 1 node migration applied and 87
+    withheld; after the repair it must reach the sentinel.
+    """
+    result = _run(RUNNER, virgin_pg_target, REAL_FORWARD_DIR, virgin_node_db)
+    combined = result.stdout + result.stderr
+    assert result.returncode == 0, (
+        "the shipped runner must converge a virgin database against the real "
+        f"vendored tree without any guard FATAL:\n{combined}"
+    )
+    assert "FATAL" not in combined, f"unexpected FATAL in an exit-0 run:\n{combined}"
+    assert "Sentinel set. Migration gate will report HEALTHY." in combined, (
+        f"expected the sentinel to be set at the end of a clean run:\n{combined}"
+    )
+    # Confirm the fix is real DDL, not a silent skip: at least one previously
+    # ungated grandfathered table must actually carry FORCE ROW LEVEL SECURITY.
+    assert (
+        _psql(
+            PgTarget(
+                host=virgin_pg_target.host,
+                port=virgin_pg_target.port,
+                user=virgin_pg_target.user,
+                password=virgin_pg_target.password,
+                dbname=virgin_node_db,
+            ),
+            "SELECT relforcerowsecurity FROM pg_class WHERE relname = "
+            "'capability_scores'",
+        )
+        == "t"
+    ), "capability_scores must have FORCE ROW LEVEL SECURITY actually applied"
+
+
+@pytest.mark.integration
+def test_virgin_database_still_refuses_a_new_unfenced_force_rls_migration(
+    virgin_pg_target: PgTarget,
+    virgin_node_db: str,
+    tmp_path: Path,
+) -> None:
+    """The original RED control, re-run against a copy of the REAL vendored
+    tree (not the minimal synthetic fixture) plus one genuinely new,
+    unclassified FORCE-RLS migration. Proves the repair narrows the guard's
+    blind spot to exactly the pre-existing 9 — it does not disable the guard.
+    """
+    forward = tmp_path / "forward"
+    shutil.copytree(REAL_FORWARD_DIR, forward)
+
+    control_id = "node:node_projection_zz_new_control:0001_new_unfenced_force_rls.sql"
+    control_node, control_file = (
+        "node_projection_zz_new_control",
+        "0001_new_unfenced_force_rls.sql",
+    )
+    control_dir = forward / "nodes" / control_node
+    control_dir.mkdir(parents=True)
+    control_sql = (
+        "CREATE TABLE public.zz_new_control_marker (id INT, tenant_id TEXT);\n"
+        "ALTER TABLE public.zz_new_control_marker ENABLE ROW LEVEL SECURITY;\n"
+        "ALTER TABLE public.zz_new_control_marker FORCE ROW LEVEL SECURITY;\n"
+    )
+    (control_dir / control_file).write_text(control_sql, encoding="utf-8")
+    checksum = hashlib.sha256(control_sql.encode("utf-8")).hexdigest()
+    with (forward / "_ledger" / "application-migrations.tsv").open(
+        "a", encoding="utf-8"
+    ) as ledger:
+        ledger.write(
+            f"nodes/{control_node}/{control_file}\t{control_id.rsplit(':', 1)[0]}\t"
+            f"{control_id.rsplit(':', 1)[0]}\ttenant\t{control_id}\t{checksum}\n"
+        )
+
+    result = _run(RUNNER, virgin_pg_target, forward, virgin_node_db)
+    combined = result.stdout + result.stderr
+    assert result.returncode != 0, (
+        f"a genuinely new unfenced FORCE-RLS migration must still be refused:\n{combined}"
+    )
+    assert control_id in combined and "FATAL" in combined, (
+        f"expected a FATAL naming the new control migration:\n{combined}"
+    )
+    assert not _table_exists(
+        virgin_pg_target, virgin_node_db, "zz_new_control_marker"
+    ), "FENCE BREACH: the new unfenced FORCE RLS migration was APPLIED"

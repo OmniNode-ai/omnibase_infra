@@ -1,4 +1,56 @@
 -- =============================================================================
+-- TOMBSTONE (OMN-15846, 2026-08-10): this file is UNDELIVERABLE via the k8s
+-- Job that applies docker/migrations/forward/*.sql
+-- (omninode_infra/k8s/migrations/omnibase-infra-migrate.yaml) and, on the
+-- one target where it matters (onex-dev RDS), UNNEEDED besides.
+--
+-- UNDELIVERABLE: that Job owns only the omnibase_infra database; its flat
+-- loop's `psql -f` apply is gated on `directive_db == $DB_NAME` and is
+-- UNREACHABLE for this file's `\connect omnidash_analytics` below, in that
+-- loop or any other in the runner. It has never executed there --
+-- live-confirmed 2026-08-10 (omninode-dev-postgres RDS):
+-- `pg_default_acl` for omnidash_analytics/public is EMPTY (zero rows) --
+-- this file's own unconditional step 6
+-- `ALTER DEFAULT PRIVILEGES IN SCHEMA public GRANT ... TO role_omnidash`
+-- would ALWAYS leave a pg_default_acl entry if it had ever run to
+-- completion under ANY executing role; none exists. omnibase_infra's own
+-- schema_migrations carried a false "applied" row for this file
+-- (applied_at 2026-08-01T22:00:18Z, checksum byte-identical to this file's
+-- live content) -- the same OMN-15819 masking class OMN-15846's
+-- classification-ordering fix unmasked for 098/099.
+--
+-- UNNEEDED ON RDS: this file's OWN header below documents its purpose as a
+-- FORCE-RLS non-owner-pool repair for the `.201 lab lane` specifically
+-- (compose project `omnibase-infra`) -- read the "PURPOSE" section that
+-- follows, unchanged. On onex-dev RDS, role_omnidash is not a marginal
+-- non-owner role at all: it is the RDS migration principal (OMN-15335
+-- two-owner split) and OWNS 89 of 90 tables in omnidash_analytics.public
+-- (live-verified via pg_tables.tableowner, 2026-08-10) -- an owner is
+-- exempt from RLS regardless of rolsuper/rolbypassrls (this file's own
+-- step 7 assertion states the same fact), and an owner needs no SELECT/
+-- INSERT/UPDATE grant this file would add. role_omnidash's CREATE on
+-- schema public and its one non-owned-table grant (generation_events) are
+-- both live-verified as granted BY `pg_database_owner`/omninodeadmin (the
+-- provisioning-seam path), not by role_omnibase_infra (the identity this
+-- file would have executed under) -- a second, independent confirmation
+-- this file never delivered anything on this database. OMN-15355 (P1, "In
+-- Review" as of 2026-08-10) is the tracked, systematic successor: it
+-- generates the complete ACL/default-privilege matrix from contracts
+-- across every database/schema/table, explicitly scoped to include
+-- role_omnidash-owned domains and app_dashboard's access boundary --
+-- superseding this file's stopgap intent rather than leaving a gap next
+-- to it.
+--
+-- Kept in place, byte-unchanged below this header, as ledgered history
+-- (migration files are append-only) -- do NOT delete it and do NOT try to
+-- make it deliverable in place; it remains applicable, unchanged, to the
+-- .201 lab lane it was authored for (that lane's own runner,
+-- scripts/run-forward-migrations.sh, is a different code path from the
+-- k8s Job this tombstone concerns and is unaffected by it). Static
+-- pre-merge enforcement in THIS repo:
+-- tests/ci/test_flat_migration_no_foreign_connect_gate.py /
+-- docker/migrations/forward/cross-database-flat-migrations.yaml.
+-- =============================================================================
 -- MIGRATION: role_omnidash authorization on omnidash_analytics (warm-volume safe)
 -- =============================================================================
 -- Ticket: OMN-15363 (open question 1 — "should the compose lane provision
