@@ -38,6 +38,7 @@ from collections import defaultdict
 from collections.abc import Awaitable, Callable, Collection, Iterator, Mapping, Sequence
 from dataclasses import dataclass, field
 from datetime import UTC, datetime
+from functools import lru_cache
 from pathlib import Path
 from typing import (
     TYPE_CHECKING,
@@ -49,7 +50,7 @@ from typing import (
 )
 from uuid import UUID, uuid4
 
-from pydantic import BaseModel, ValidationError
+from pydantic import AliasChoices, AliasPath, BaseModel, ValidationError
 
 from omnibase_core.enums.enum_core_error_code import EnumCoreErrorCode
 from omnibase_core.enums.enum_database_grant_object_type import (
@@ -799,7 +800,12 @@ def _make_dispatch_callback(
             else:
                 target_model = _resolve_def_b_input_model_type(handle_method)
                 if target_model is not None:
-                    payload = _extract_dispatch_payload(envelope)
+                    # OMN-16050: pass the registered input model so the unwrap
+                    # STOPS at it. ``ModelEmitRequest`` declares ``payload`` plus
+                    # four transport markers, so a marker-only heuristic unwrapped
+                    # through it and handed the handler the caller's inner
+                    # payload — every node_event_emit_effect command DLQ'd.
+                    payload = _extract_dispatch_payload(envelope, target_model)
                     if isinstance(payload, target_model):
                         dispatch_arg = payload
                     elif isinstance(payload, Mapping):
@@ -832,7 +838,13 @@ def _make_dispatch_callback(
                 raw_result, envelope, None, handler_node_kind, published_event_names
             )
 
-        payload = _extract_dispatch_payload(envelope)
+        # OMN-16050: resolve the contract-declared event model BEFORE extracting so
+        # the unwrap can stop at it (same fail-closed rule as the def-B branch
+        # above). Resolution failure is not fatal here — the existing try/except
+        # below owns that path — so the hint degrades to None and the extraction
+        # keeps its pre-OMN-16050 structural behaviour.
+        payload_target_model = _safe_import_event_model_class(event_model)
+        payload = _extract_dispatch_payload(envelope, payload_target_model)
         handler_takes_envelope = _handler_accepts_event_envelope(
             cast("Callable[..., object]", handle_method)
         )
@@ -1069,6 +1081,24 @@ def _import_event_model_class(event_model: ModelHandlerRef) -> type[BaseModel]:
             "does not expose model_validate"
         )
     return cast("type[BaseModel]", model_cls)
+
+
+def _safe_import_event_model_class(
+    event_model: ModelHandlerRef | None,
+) -> type[BaseModel] | None:
+    """``_import_event_model_class`` that yields None instead of raising (OMN-16050).
+
+    Used only to hint ``_extract_dispatch_payload`` with the contract-declared
+    target type. An unimportable/malformed ``event_model`` must not change dispatch
+    control flow from this call site — the caller's own
+    ``_import_event_model_class`` inside its try/except still owns that failure.
+    """
+    if event_model is None:
+        return None
+    try:
+        return _import_event_model_class(event_model)
+    except Exception:  # noqa: BLE001 — hint-only resolution, never fatal here
+        return None
 
 
 def _handler_accepts_event_envelope(handle_method: object) -> bool:
@@ -1380,11 +1410,21 @@ def _materialize_typed_event_envelope(
 # Transport-envelope keys the runtime adds around the domain payload. When the
 # dispatch engine materializes a ModelEventEnvelope to a dict it nests the domain
 # fields under ``payload`` and carries routing metadata (``partition_key`` etc.)
-# alongside. Domain models never declare these keys, so a mapping that carries a
-# ``payload`` mapping plus any marker is a transport envelope to unwrap. Mirrors
-# omnimarket's ``_ENVELOPE_MARKER_KEYS`` predicate (OMN-12935/12936); the
-# auto-wiring kernel unwraps here because it constructs the typed model itself,
-# upstream of the handler's own coercion (OMN-12940).
+# alongside, so a mapping that carries a ``payload`` mapping plus any marker MAY
+# be a transport envelope to unwrap. Mirrors omnimarket's
+# ``_ENVELOPE_MARKER_KEYS`` predicate (OMN-12935/12936); the auto-wiring kernel
+# unwraps here because it constructs the typed model itself, upstream of the
+# handler's own coercion (OMN-12940).
+#
+# OMN-16050 — this marker set is a NECESSARY, NOT SUFFICIENT signal. The earlier
+# text here asserted "domain models never declare these keys"; that invariant is
+# FALSE. ``ModelEmitRequest`` (node_event_emit_effect) declares ``payload`` plus
+# four of these markers (``event_type``, ``correlation_id``, ``partition_key``,
+# ``event_id``), is structurally indistinguishable from a transport envelope, and
+# was therefore unwrapped THROUGH — the handler got the caller's inner payload,
+# ``model_validate`` raised, and every command DLQ'd. The registered-input-model
+# stop condition below (``_is_registered_input_payload``) is what makes the
+# heuristic safe: structure alone can never decide this.
 _ENVELOPE_MARKER_KEYS: frozenset[str] = frozenset(
     {
         "partition_key",
@@ -1398,11 +1438,13 @@ _ENVELOPE_MARKER_KEYS: frozenset[str] = frozenset(
 
 
 def _is_transport_envelope(value: object) -> bool:
-    """True when ``value`` is a transport envelope wrapping a domain payload.
+    """True when ``value`` is envelope-SHAPED: a ``payload`` mapping plus a marker.
 
-    A transport envelope is a mapping that carries a ``payload`` mapping plus at
-    least one transport marker key. Requiring a marker avoids over-unwrapping a
-    legitimate domain model that happens to declare its own ``payload`` field.
+    Structural precondition only. A domain model may legitimately declare both a
+    ``payload`` mapping and transport-plausible marker fields (OMN-16050), so this
+    predicate is never sufficient on its own to justify an unwrap — see
+    ``_is_registered_input_payload``, the fail-closed stop condition applied by
+    ``_extract_dispatch_payload``.
     """
     return (
         isinstance(value, Mapping)
@@ -1411,16 +1453,101 @@ def _is_transport_envelope(value: object) -> bool:
     )
 
 
-def _extract_dispatch_payload(envelope: object) -> object:
+def _validation_alias_wire_keys(alias: object) -> set[str]:
+    """Top-level wire keys a pydantic ``validation_alias`` can consume.
+
+    ``validation_alias`` has three shapes and only the plain-string one is a
+    single key. ``AliasPath("meta", "id")`` consumes the TOP-LEVEL key ``meta``
+    (the remaining segments index inside that value), and ``AliasChoices`` holds
+    a list of alternatives, each itself a string or an ``AliasPath``.
+
+    Missing the non-string shapes is fail-OPEN for OMN-16050: a model aliased
+    that way would fail ``_is_registered_input_payload``'s key-containment check
+    even when the candidate IS the registered model, the unwrap would continue
+    into the caller's payload, and the DLQ defect would return for exactly the
+    contracts that use richer aliases.
+    """
+    if isinstance(alias, str):
+        return {alias}
+    if isinstance(alias, AliasPath):
+        first = alias.path[0] if alias.path else None
+        return {first} if isinstance(first, str) else set()
+    if isinstance(alias, AliasChoices):
+        keys: set[str] = set()
+        for choice in alias.choices:
+            keys |= _validation_alias_wire_keys(choice)
+        return keys
+    return set()
+
+
+@lru_cache(maxsize=512)
+def _model_declared_wire_keys(model: type[BaseModel]) -> frozenset[str]:
+    """Every wire key ``model`` can accept: field names plus their input aliases."""
+    keys: set[str] = set()
+    for field_name, model_field in model.model_fields.items():
+        keys.add(field_name)
+        if isinstance(model_field.alias, str):
+            keys.add(model_field.alias)
+        keys |= _validation_alias_wire_keys(model_field.validation_alias)
+    return frozenset(keys)
+
+
+def _is_registered_input_payload(
+    candidate: object, target_model: type[BaseModel] | None
+) -> bool:
+    """True when ``candidate`` IS the dispatcher's registered input model on the wire.
+
+    The fail-closed stop condition for the recursive unwrap (OMN-16050). A
+    candidate is claimed by the registered model only when BOTH hold:
+
+    1. **Key containment** — every key present on the candidate is a declared
+       field (or input alias) of ``target_model``. A real transport envelope
+       always carries at least one routing/marker key the domain model does not
+       declare (``source_tool``, ``envelope_id``, ``__debug_trace``,
+       ``__bindings``, ``envelope_timestamp``, ...), so this alone keeps the
+       OMN-12940 double-wrapped case unwrapping.
+    2. **Full validation** — the candidate validates as ``target_model``, so a
+       partial structural coincidence never halts the unwrap short of the domain.
+
+    The cheap set check runs first; ``model_validate`` executes only for the rare
+    candidate whose keys are entirely owned by the target model.
+
+    Deliberately NOT a marker denylist: dropping ``event_type``/``correlation_id``
+    from ``_ENVELOPE_MARKER_KEYS`` would fix ``ModelEmitRequest`` and silently
+    break every genuine envelope that carries only those markers. This predicate
+    keys on the CONTRACT-registered target type instead of on key spelling.
+    """
+    if target_model is None or not isinstance(candidate, Mapping):
+        return False
+    if not candidate.keys() <= _model_declared_wire_keys(target_model):
+        return False
+    try:
+        target_model.model_validate(dict(candidate))
+    except Exception:  # noqa: BLE001 — any validation failure means "not the model"
+        return False
+    return True
+
+
+def _extract_dispatch_payload(
+    envelope: object, target_model: type[BaseModel] | None = None
+) -> object:
     # The runtime may deliver a DOUBLE- (or deeper-) wrapped envelope, e.g.
     # ``{"payload": {"payload": {domain}, ...markers}, "partition_key": None}``.
     # Unwrap recursively until the domain payload is reached so the kernel's
     # ``model_validate`` (and the post-handler correlation read) operate on the
     # domain, not on an intermediate envelope (OMN-12940).
+    #
+    # OMN-16050: stop the moment the candidate IS the dispatcher's registered
+    # input model. ``target_model`` is the contract-declared type the kernel is
+    # about to construct (the def-B ``handle()`` annotation, or the handler's
+    # declared ``event_model``); when it is None the caller has no registered
+    # type in scope and the pre-existing structural behaviour is unchanged.
     candidate: object = envelope
     if not isinstance(candidate, Mapping):
         candidate = getattr(candidate, "payload", candidate)
-    while _is_transport_envelope(candidate):
+    while _is_transport_envelope(candidate) and not _is_registered_input_payload(
+        candidate, target_model
+    ):
         candidate = cast("Mapping[str, object]", candidate)["payload"]
     return candidate
 

@@ -112,11 +112,15 @@ def test_runner_compose_pypi_index_wiring_stays_inert() -> None:
     assert "# UV_DEFAULT_INDEX:" in raw
 
 
-def test_runner_fleet_config_pypi_cache_is_recorded_but_inert() -> None:
+def test_runner_fleet_config_pypi_cache_is_recorded_but_fleet_inert() -> None:
     """OMN-14027 C1: the PyPI pull-through cache endpoint is recorded as fleet
-    source-of-truth but stays inert (active=False) until the soak-gated rollout
-    wires the runner env. Proves the shovel-ready record parses under the
-    strict (extra='forbid') fleet-config model and does not activate the cache.
+    source-of-truth and stays FLEET-inert (active=False) until the soak-gated
+    step-5 rollout wires the fleet env. Proves the record parses under the strict
+    (extra='forbid') fleet-config model and does not activate the cache fleet-wide.
+
+    ``active`` means FLEET-active. A non-empty ``canary_runners`` with
+    ``active=False`` is the normal mid-rollout state and is asserted separately
+    below — do not read a live canary as fleet activation.
     """
     config = load_runner_fleet_config(REPO_ROOT / "config" / "runner_fleet.yaml")
 
@@ -126,6 +130,77 @@ def test_runner_fleet_config_pypi_cache_is_recorded_but_inert() -> None:
     assert config.pypi_cache.port == 3141
     assert config.pypi_cache.simple_index_url.endswith("/root/pypi/+simple/")
     assert config.pypi_cache.fallback_index_url == "https://pypi.org/simple/"
+
+
+def test_pypi_canary_membership_matches_override_file() -> None:
+    """OMN-14027 C1: ``pypi_cache.canary_runners`` must name exactly the services
+    wired in docker/docker-compose.pypi-canary.yml.
+
+    Without this gate the two drift silently and the recorded canary membership
+    stops describing what is actually wired — the same class of failure as the
+    canary that reverted unnoticed, just in the config plane instead of the
+    runtime plane.
+    """
+    config = load_runner_fleet_config(REPO_ROOT / "config" / "runner_fleet.yaml")
+    assert config.pypi_cache is not None
+
+    override_path = REPO_ROOT / "docker" / "docker-compose.pypi-canary.yml"
+    override = yaml.safe_load(override_path.read_text(encoding="utf-8"))
+    wired = set(override["services"])
+
+    assert set(config.pypi_cache.canary_runners) == wired, (
+        "config/runner_fleet.yaml pypi_cache.canary_runners "
+        f"({sorted(config.pypi_cache.canary_runners)}) does not match the services "
+        f"wired in {override_path.name} ({sorted(wired)})"
+    )
+
+    # Every canary member must be a real steady-state runner service.
+    compose = yaml.safe_load(
+        (REPO_ROOT / "docker" / "docker-compose.runners.yml").read_text(
+            encoding="utf-8"
+        )
+    )
+    assert wired <= set(compose["services"]), (
+        "canary override names services absent from the fleet compose file: "
+        f"{sorted(wired - set(compose['services']))}"
+    )
+
+    # Each wired runner must actually carry the cache index env, pointed at the
+    # configured endpoint, with PyPI retained as the fallback so a cache
+    # miss/outage degrades rather than failing the job closed.
+    for name in sorted(wired):
+        env = override["services"][name]["environment"]
+        assert env["UV_DEFAULT_INDEX"] == config.pypi_cache.simple_index_url
+        assert env["PIP_INDEX_URL"] == config.pypi_cache.simple_index_url
+        assert env["PIP_EXTRA_INDEX_URL"] == config.pypi_cache.fallback_index_url
+        assert env["UV_INDEX_STRATEGY"] == "unsafe-best-match"
+
+
+def test_pypi_canary_override_is_layered_by_auto_repair() -> None:
+    """OMN-14027 C1: the canary override must be listed in
+    docker/compose-overrides.list, and runner-monitor.sh must consume that list.
+
+    The auto-bounce cron recreates runner containers unattended. If it recreates
+    from docker-compose.runners.yml alone, canary wiring is stripped with no log
+    line and no alert, and the soak keeps reporting on runners that silently
+    reverted to direct egress. This gate keeps that path wired.
+    """
+    overrides_list = REPO_ROOT / "docker" / "compose-overrides.list"
+    entries = {
+        line.split("#", 1)[0].strip()
+        for line in overrides_list.read_text(encoding="utf-8").splitlines()
+        if line.split("#", 1)[0].strip()
+    }
+    assert "docker-compose.pypi-canary.yml" in entries
+
+    monitor = (REPO_ROOT / "docker" / "runners" / "runner-monitor.sh").read_text(
+        encoding="utf-8"
+    )
+    assert "COMPOSE_OVERRIDES_LIST" in monitor
+    # The force-recreate call sites must use the layered args, not COMPOSE_FILE
+    # alone — that regression is exactly what strips the canary.
+    assert 'docker compose "${COMPOSE_FILE_ARGS[@]}" up -d --force-recreate' in monitor
+    assert 'docker compose -f "${COMPOSE_FILE}" up -d --force-recreate' not in monitor
 
 
 def test_runner_fleet_config_pypi_cache_is_optional(tmp_path: Path) -> None:
@@ -145,6 +220,61 @@ def test_runner_fleet_config_pypi_cache_is_optional(tmp_path: Path) -> None:
     config = load_runner_fleet_config(minimal)
 
     assert config.pypi_cache is None
+
+
+def test_runner_fleet_config_git_mirror_is_recorded() -> None:
+    """OMN-16053 (OMN-14027 C2): the host-local git-mirror component is recorded
+    as fleet source-of-truth and parses under the strict (extra='forbid')
+    fleet-config model. active=True reflects deployed reality: the daemon,
+    refresh timer, and fail-open pre-seed are live on the runner host.
+    """
+    config = load_runner_fleet_config(REPO_ROOT / "config" / "runner_fleet.yaml")
+
+    assert config.git_mirror is not None
+    assert config.git_mirror.active is True
+    # Docker bridge gateway ONLY — git:// is unauthenticated, so the mirrors of
+    # private repos must never be bound to a LAN/Tailscale address.
+    assert config.git_mirror.bind_address == "172.18.0.1"
+    assert config.git_mirror.port == 9418
+    assert config.git_mirror.serialized is True
+    assert config.git_mirror.refresh_interval_seconds == 120
+    assert "onex_change_control" in config.git_mirror.repos
+    assert config.git_mirror.kill_switch_env == "OMNI_GIT_MIRROR_DISABLE"
+
+
+def test_runner_fleet_config_tool_cache_durability_is_recorded() -> None:
+    """OMN-16053 (OMN-14027 C2): RUNNER_TOOL_CACHE lives in the container
+    filesystem (durable=False), so fleet recreates must be bracketed by the
+    recorded seed script. The record must name existing repo files.
+    """
+    config = load_runner_fleet_config(REPO_ROOT / "config" / "runner_fleet.yaml")
+
+    assert config.tool_cache is not None
+    assert config.tool_cache.durable is False
+    assert (REPO_ROOT / config.tool_cache.seed_script).is_file()
+    assert (REPO_ROOT / config.tool_cache.recreate_procedure).is_file()
+
+
+def test_runner_fleet_config_git_mirror_and_tool_cache_are_optional(
+    tmp_path: Path,
+) -> None:
+    """A fleet config predating the git-transport egress work must still
+    validate — both fields are optional and default to None."""
+    minimal = tmp_path / "runner_fleet.yaml"
+    minimal.write_text(
+        "version: '1.0'\n"
+        "github_org: OmniNode-ai\n"
+        "runner_host: example.ts.net\n"
+        "runner_group: omnibase-ci\n"
+        "runner_name_prefix: omninode-runner\n"
+        "expected_count: 64\n",
+        encoding="utf-8",
+    )
+
+    config = load_runner_fleet_config(minimal)
+
+    assert config.git_mirror is None
+    assert config.tool_cache is None
 
 
 def test_runner_scripts_do_not_embed_legacy_count() -> None:
