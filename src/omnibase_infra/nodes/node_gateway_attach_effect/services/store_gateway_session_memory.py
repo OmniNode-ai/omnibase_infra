@@ -31,5 +31,12 @@ class StoreGatewaySessionMemory:
         async with self._lock:
             self._sessions.pop(session_id, None)
 
+    async def put_if_present(self, session: ModelGatewaySession) -> bool:
+        async with self._lock:
+            if session.session_id not in self._sessions:
+                return False
+            self._sessions[session.session_id] = session
+            return True
+
 
 __all__ = ["StoreGatewaySessionMemory"]

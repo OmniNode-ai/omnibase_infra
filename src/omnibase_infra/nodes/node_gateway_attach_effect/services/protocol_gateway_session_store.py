@@ -28,5 +28,20 @@ class ProtocolGatewaySessionStore(Protocol):
 
     async def delete(self, session_id: UUID) -> None: ...
 
+    async def put_if_present(self, session: ModelGatewaySession) -> bool:
+        """Atomically overwrite a session iff it is still present.
+
+        OMN-15918 R2: closes the heartbeat resurrection race. A handler that
+        reads a session, awaits network I/O (introspection), and then writes
+        the refreshed session back must not blindly overwrite -- if a
+        concurrent detach removed the session during that I/O gap, an
+        unconditional ``put`` would silently resurrect it (an observable
+        half-state: the caller detached, but the session reappears ACTIVE on
+        the next read). ``put_if_present`` performs the presence check and
+        the write as one atomic step and returns ``False`` (no-op) instead of
+        resurrecting the row when the session is no longer present.
+        """
+        ...
+
 
 __all__ = ["ProtocolGatewaySessionStore"]

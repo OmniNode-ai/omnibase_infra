@@ -13,6 +13,11 @@ class EnumGatewaySessionEventType(str, Enum):
     HEARTBEAT_DEGRADED = "HEARTBEAT_DEGRADED"
     REVOKED = "REVOKED"
     DETACHED = "DETACHED"
+    # OMN-16022: the two enforced-teardown outcomes. Both are emitted by
+    # the heartbeat handler, which is the only path that both notices the
+    # bound and can return a thin-publish payload for the projection.
+    EXPIRED = "EXPIRED"
+    QUARANTINED = "QUARANTINED"
 
 
 __all__ = ["EnumGatewaySessionEventType"]

@@ -11,6 +11,9 @@ from typing import Protocol, runtime_checkable
 from omnibase_infra.enums.enum_consumer_group_purpose import EnumConsumerGroupPurpose
 from omnibase_infra.event_bus.models.model_event_headers import ModelEventHeaders
 from omnibase_infra.event_bus.models.model_event_message import ModelEventMessage
+from omnibase_infra.event_bus.models.model_publish_receipt import (
+    ModelPublishReceipt,
+)
 from omnibase_infra.models import ModelNodeIdentity
 
 
@@ -24,7 +27,13 @@ class ProtocolPatternBBrokerTransport(Protocol):
         key: bytes | None,
         value: bytes,
         headers: ModelEventHeaders | None = None,
-    ) -> None:
+    ) -> ModelPublishReceipt | None:
+        """Publish message to topic.
+
+        OMN-15861: widened from ``-> None``. See
+        ``ProtocolEventBusLike.publish`` for why the protocol is optional while
+        the concrete buses return a non-optional receipt.
+        """
         raise NotImplementedError
 
     async def subscribe(

@@ -327,8 +327,103 @@ remediation; all three affected runners cleared on restart.
 Coverage: `tests/ci/test_runner_listener_liveness.py` —
 `TestHealthcheckBrokerSessionState`.
 
+## Reconnect-gap churn — why `offline` flaps, and why it is NOT capacity loss (OMN-16030, measured 2026-08-14)
+
+The `offline` count in the org registry is **not** a liveness signal on this
+fleet, and a red `runner-fleet-canary` is not by itself evidence of an outage.
+This section supersedes any reading of layer 4 as authoritative-on-its-own; it
+is the same conclusion OMN-15255 already reached ("`ready_count` — usable
+capacity. **This, not `online_count`**") and OMN-14057 recorded as status-lag
+corroboration, now with a measured mechanism.
+
+**Measurement (72-runner fleet, 2026-08-14, 02:00–10:30Z, 7136 jobs):**
+
+| Observation | Value |
+|---|---|
+| Runners reporting `offline` at any instant | 11–16 of 72, membership rotating between 20s polls |
+| `missing` (lost registrations), every sample | **0** |
+| Docker `RestartCount`, all 72 containers | **0** |
+| Jobs served by the 13 persistently-offline-labelled runners (2h40m) | **153** (mean 11.8/runner vs 14.7 online — ~80% of nominal) |
+| Correlation of offline count with concurrent job count | Pearson **r = +0.55** (n=7) |
+
+Direct disproof of "offline = dead": `runner-51` completed a job at 10:24:22Z
+and `runner-67` at 10:25:20Z **while both were labelled offline**; `runner-30`
+held an in-progress job while labelled offline; `ps` inside `runner-23` showed
+`Runner.Worker` running `uv sync` while the registry reported it offline.
+
+**Mechanism — the same reconnect gap as OMN-15776.** Every job completion
+triggers a `TaskCanceledException`/`SocketException(125)` retry storm on the
+listener's broker long-poll, with 5–12s backoff. During that gap the runner has
+no active broker session, so the registry reports it `offline`. This is the same
+window in which OMN-15776 dispatches are dropped — the two are one phenomenon
+observed from two sides:
+
+> Of the 13 runners labelled offline at 10:17Z, **10** had an OMN-15776
+> dispatch-wedge hit in the same window (expected 3.1 if independent;
+> **P(≥10 by chance) = 7.5e-06**).
+
+So `offline` tracks **reconnect churn**, which rises with job turnover — hence
+the *positive* correlation with fleet load. The runners that flap offline most
+are the ones cycling jobs fastest, i.e. the healthiest-utilised ones.
+
+**Operational consequence: do not bounce on this signal.** A force-recreate
+forces *more* reconnects, kills in-flight jobs, and wipes the warm tool cache
+the C2 git-mirror pre-seed depends on. On 2026-08-14 a proposed fleet
+"recovery" targeted 12 runners that were actively serving jobs, on the strength
+of a red canary alone; the claimed dead core (runners 4/18/19/24/27/59/61) was
+verified `online` **and** `busy` at that moment. Two landing sweeps were halted
+for nothing.
+
+**Residual real cost (this is the part worth fixing).** The wedge itself is
+still occurring and is *not* fixed by the git mirror: 18 jobs matched the exact
+OMN-15776 fingerprint (zero steps, 600–601s) in the 8h sample, 13 of them after
+the mirror went live at 07:30Z, spread across 17 distinct runners with almost no
+repeats — a fleet-wide GitHub-side race, not a per-runner defect. Example
+citations: `omnibase_infra` job 94704437780 (runner-19, 07:32:28Z),
+`onex_change_control` job 94729303340 (runner-28, 09:30:38Z), `omnibase_infra`
+job 94726673643 (runner-55, 09:20:47Z). Layer-5
+(`runner-broker-dispatch-wedge-rerun`, running ~every 30 min, all green) reruns
+them so they do not block, but it is remediation, not prevention — the standing
+cost is ~2 wasted job slots/hour plus rerun latency.
+
+### Triage: check throughput, not status labels
+
+```bash
+# THE DECIDING CHECK — are jobs completing on self-hosted runners right now?
+gh api "repos/OmniNode-ai/omnibase_infra/actions/runs?per_page=20" --jq '.workflow_runs[].id' \
+  | while read -r id; do
+      gh api "repos/OmniNode-ai/omnibase_infra/actions/runs/$id/jobs?per_page=100" \
+        --jq '.jobs[] | select(.runner_name|startswith("omninode-runner"))
+              | "\(.completed_at // "RUNNING")\t\(.runner_name)\t\(.conclusion // .status)"'
+    done | sort -r | head -30
+```
+
+Healthy baseline (2026-08-14, post-mirror): ~77 jobs completed per 30 min, ~40
+in progress at any instant, ~44 distinct runners active per 30 min — *while
+11–16 runners were labelled offline.* Declare a real outage only if job
+completions have collapsed **and** `missing > 0`.
+
+### Ruled out (do not re-litigate without new evidence)
+
+- **DNS.** OMN-15736 proposes a local DNS cache on the premise of "no local
+  resolver cache" and a single-upstream chokepoint. Measured on the host
+  2026-08-14: 60 concurrent lookups of `files.pythonhosted.org` in **5ms**;
+  `pypi.org` 1ms and `files.pythonhosted.org` 0ms (cache hits — `systemd-resolved`
+  is already caching); zero resolution failures under burst. The premise is
+  falsified as stated, and DNS is upstream of nothing in the reconnect-gap path.
+- **Egress bandwidth saturation** as a checkout-failure cause. The C2 git-mirror
+  pre-seed took checkout failures from 21/5111 jobs (0.41%) pre-07:30Z to
+  **0/1873 (0.00%)** after; queue-wait median 166s → 130s, p90 1009s → 859s.
+- **Container crash-looping.** `RestartCount == 0` fleet-wide, `missing == 0` in
+  every sample.
+
 ## Operator response to a canary failure
 
+0. **First: is this a real outage?** Run the throughput check in the
+   reconnect-gap section above. A red canary with jobs still completing is a
+   status-flap, not an outage — do not bounce anything. Since OMN-16030 the
+   canary only *fails* on `missing > 0` or offline-and-idle ≥ 50% of fleet; the
+   old advisory band now WARNs on a green run.
 1. Read the failed `runner-fleet-canary` run summary — it lists offline runner names.
 2. Do **NOT** `docker restart` runners (crash-loops: cached creds + expired baked token — OMN-13109).
 3. Safe bounce, named services only, fresh token, detached:
