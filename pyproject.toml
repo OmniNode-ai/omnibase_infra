@@ -4,7 +4,7 @@ build-backend = "hatchling.build"
 
 [project]
 name = "omnibase_infra"
-version = "0.38.4"
+version = "0.38.7"
 description = "ONEX Infrastructure - Service integration and database infrastructure tools"
 authors = [{ name = "OmniNode.ai", email = "contact@omninode.ai" }]
 license = {text = "MIT"}
@@ -150,6 +150,7 @@ packages = ["src/omnibase_infra"]
 omni-infra = "omnibase_infra.cli.commands:cli"
 onex-runtime = "omnibase_infra.runtime.kernel:main"
 onex-gateway-forwarder = "omnibase_infra.runtime.gateway_forwarder:main"
+onex-gateway-canary-probe = "omnibase_infra.runtime.gateway_canary_probe:main"
 onex-infra-test = "omnibase_infra.cli.infra_test.cli:cli"
 onex-git-hook-relay = "omnibase_infra.cli.git_hook_relay:main"
 onex-linear-relay = "omnibase_infra.cli.linear_relay:main"
@@ -351,6 +352,8 @@ ignore = [
 "tests/integration/runtime/db/test_postgres_repository_runtime_integration.py" = ["S608"]
 # Migration discovery integration test - controlled view/id names (OMN-12559)
 "tests/integration/migrations/test_node_migration_discovery_applies.py" = ["S608"]
+# Domain-adapter proof script - module-level constant table name, no external input (OMN-15421)
+"docker/domain-adapter-proof/prove.py" = ["S608"]
 # S106: Hardcoded password in function arg - test fixtures only
 # Production secrets managed via Infisical/Vault (OMN-2287, OMN-2736)
 # T201: Print statements OK in tests
@@ -574,6 +577,7 @@ node_dlq_replay_effect = "omnibase_infra.nodes.node_dlq_replay_effect"
 node_emit_daemon_runtime = "omnibase_infra.nodes.node_emit_daemon_runtime"
 node_event_bus_wiring_effect = "omnibase_infra.nodes.node_event_bus_wiring_effect"
 node_event_forward_effect = "omnibase_infra.nodes.node_event_forward_effect"
+node_gateway_attach_effect = "omnibase_infra.nodes.node_gateway_attach_effect"
 node_github_pr_poller_effect = "omnibase_infra.nodes.node_github_pr_poller_effect"
 node_gmail_archive_cleanup_effect = "omnibase_infra.nodes.node_gmail_archive_cleanup_effect"
 node_gmail_intent_poller_effect = "omnibase_infra.nodes.node_gmail_intent_poller_effect"

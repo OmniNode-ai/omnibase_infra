@@ -1,5 +1,49 @@
 -- onex-create-database: omnidash_analytics
 -- =============================================================================
+-- TOMBSTONE (OMN-15846, 2026-08-10): this file is UNDELIVERABLE via the k8s
+-- Job that applies docker/migrations/forward/*.sql
+-- (omninode_infra/k8s/migrations/omnibase-infra-migrate.yaml) and, on
+-- onex-dev RDS today, LATENT rather than live-broken besides.
+--
+-- UNDELIVERABLE: that Job owns only the omnibase_infra database; its flat
+-- loop's `psql -f` apply is gated on `directive_db == $DB_NAME` and is
+-- UNREACHABLE for this file's `\connect omnidash_analytics` below, in that
+-- loop or any other in the runner. It has never executed there --
+-- live-confirmed 2026-08-10 (omninode-dev-postgres RDS): app_dashboard's
+-- USAGE on schema public is granted BY `pg_database_owner`
+-- (`nspacl: app_dashboard=U/pg_database_owner`), never by
+-- role_omnibase_infra (the identity this file would have executed under)
+-- -- this file's own step 3 `GRANT USAGE ON SCHEMA public TO app_dashboard`
+-- left no trace. omnibase_infra's own schema_migrations carried a false
+-- "applied" row for this file (applied_at 2026-08-01T22:00:19Z, checksum
+-- byte-identical to this file's live content) -- the same OMN-15819
+-- masking class OMN-15846's classification-ordering fix unmasked for
+-- 098/099.
+--
+-- LATENT, NOT LIVE-BROKEN: this file's own header (the "THE DEFECT" section
+-- below, unchanged) documents that the CONNECT gap it repairs is latent
+-- until PUBLIC's CONNECT is revoked platform-wide (OMN-15355) -- "not an
+-- edge case being defended against ... the declared target state." Live
+-- readback 2026-08-10 confirms PUBLIC's CONNECT on omnidash_analytics has
+-- NOT been revoked on this RDS instance (`pg_database.datacl` carries
+-- `=Tc/omninodeadmin`, i.e. PUBLIC still holds CONNECT), so app_dashboard
+-- connects today via that still-live PUBLIC default, not via this file.
+-- OMN-15355 (P1, "In Review" as of 2026-08-10, explicit acceptance
+-- criterion naming app_dashboard by name) is the tracked, systematic
+-- successor that will retire PUBLIC's default CONNECT under its own
+-- generated ACL matrix and change-window gate -- it is the correct owner
+-- of app_dashboard's post-revocation CONNECT grant, not a flat migration
+-- this k8s Job cannot deliver.
+--
+-- Kept in place, byte-unchanged below this header, as ledgered history
+-- (migration files are append-only) -- do NOT delete it and do NOT try to
+-- make it deliverable in place; it remains applicable, unchanged, on any
+-- lane whose own runner (scripts/run-forward-migrations.sh, a different
+-- code path from the k8s Job this tombstone concerns) can actually reach
+-- omnidash_analytics. Static pre-merge enforcement in THIS repo:
+-- tests/ci/test_flat_migration_no_foreign_connect_gate.py /
+-- docker/migrations/forward/cross-database-flat-migrations.yaml.
+-- =============================================================================
 -- MIGRATION: app_dashboard CONNECT + policy-gated read grants on omnidash_analytics
 -- =============================================================================
 -- Ticket: OMN-15297 (the grant chain never grants CONNECT — the read role

@@ -32,6 +32,10 @@ deferred_consumers:
   omnimarket-projection-cost-by-repo:
     tracking_ticket: OMN-15423
     reason: Repository-cost ownership remains blocked on total relation classification.
+  omnimarket-projection-live-events:
+    tracking_ticket: OMN-15423
+    reason: >-
+      live_events is a global, platform-wide operational event stream with no tenant_id column (omninode_internal domain per the OMN-15423 relation inventory), not per-tenant business data -- same internal-domain classification block as omnimarket-projection-registration.
   omnimarket-projection-registration:
     tracking_ticket: OMN-15423
     reason: Registry tables require the source-backed internal-domain classification.

@@ -1,0 +1,13 @@
+{
+    "Sasl": {
+        "Scram": {
+            "Enabled": false
+        },
+        "Iam": {
+            "Enabled": true
+        }
+    },
+    "Unauthenticated": {
+        "Enabled": false
+    }
+}

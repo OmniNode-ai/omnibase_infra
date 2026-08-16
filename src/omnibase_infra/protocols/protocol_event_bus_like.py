@@ -31,6 +31,10 @@ from __future__ import annotations
 
 from typing import Protocol, runtime_checkable
 
+from omnibase_infra.event_bus.models.model_publish_receipt import (
+    ModelPublishReceipt,
+)
+
 
 @runtime_checkable
 class ProtocolEventBusLike(Protocol):
@@ -115,7 +119,7 @@ class ProtocolEventBusLike(Protocol):
         topic: str,
         key: bytes | None,
         value: bytes,
-    ) -> None:
+    ) -> ModelPublishReceipt | None:
         """Publish raw bytes to a topic (fallback method).
 
         Thread Safety:
@@ -126,6 +130,27 @@ class ProtocolEventBusLike(Protocol):
             topic: The topic to publish to.
             key: Optional message key as bytes.
             value: The message value as bytes.
+
+        Returns:
+            ModelPublishReceipt | None: The durability coordinate the transport
+            assigned, or ``None`` for a transport that cannot report one
+            (OMN-15861).
+
+            The return is deliberately OPTIONAL at the protocol level while the
+            concrete buses (``EventBusKafka``, infra ``EventBusInmemory``) return
+            a non-optional receipt. Two reasons, both load-bearing:
+
+            1. Many implementations of this structural protocol are sinks and
+               test doubles with no coordinate to report. Widening the protocol
+               rather than the implementations keeps them valid instead of
+               forcing every one of them to invent a fake coordinate -- and an
+               invented coordinate is precisely the false durable claim this
+               work exists to remove.
+            2. ``None`` is therefore a real, meaningful value on this seam: it
+               means *this transport cannot support a durable claim at all*.
+               Confirmation strategies resolve it to
+               ``EnumConfirmationState.UNKNOWN``, which fails closed. A caller
+               that needs durability MUST NOT treat ``None`` as success.
         """
         ...
 

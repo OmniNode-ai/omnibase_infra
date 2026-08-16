@@ -21,6 +21,7 @@ import pytest
 from omnibase_infra.event_bus.event_bus_inmemory import EventBusInmemory
 from omnibase_infra.event_bus.models.model_event_headers import ModelEventHeaders
 from omnibase_infra.event_bus.models.model_event_message import ModelEventMessage
+from omnibase_infra.models import ModelNodeIdentity
 from omnibase_infra.services.observability.savings_estimation.config import (
     ConfigSavingsEstimation,
 )
@@ -534,8 +535,13 @@ async def test_real_bus_delivers_typed_message_to_consumer(
 
         await bus.subscribe(
             topic,
+            node_identity=ModelNodeIdentity(
+                env="onex-dev",
+                service="omnibase-infra",
+                node_name="savings-estimator",
+                version="v1",
+            ),
             on_message=_savings_on_message,
-            group_id=f"savings-estimator.{topic}",
         )
 
         payload = {

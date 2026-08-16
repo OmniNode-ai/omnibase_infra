@@ -51,6 +51,22 @@
 # copy already exists here at dev tip — so a new drift-causing merge can no
 # longer land in omnimarket in the first place.
 #
+# LEGACY-DECLARED EXEMPTION (OMN-15717): a vendored file that no longer has
+# a source in omnimarket (the owning node was deleted/rebuilt upstream) is
+# NOT "stale" if it carries a checked-in row in
+# docker/migrations/forward/_ledger/application-migrations.tsv. Operator
+# ruling 2026-08-04 (OMN-15695) requires applied migration history to be
+# preserved permanently, never deleted or rewritten — a live database can
+# still carry a legacy-applied ledger row for a since-deleted node migration,
+# and bootstrap.sql's adoption path needs that file's checked-in bytes to
+# verify the historical checksum. Removing the vendored file the moment
+# omnimarket deletes its source would re-open exactly the gap OMN-15717
+# fixed: an applied-but-undeclared migration bootstrap.sql cannot resolve.
+# A file counts as "legacy-declared" only if application-migrations.tsv
+# carries a row for it; an UNDECLARED file with no current omnimarket source
+# is still flagged stale (that combination is 6th-occurrence-class drift,
+# not preserved history).
+#
 # USAGE
 #   scripts/sync-node-migrations.sh            # vendor (writes files)
 #   scripts/sync-node-migrations.sh --check    # CI mode: fail if drift exists
@@ -70,7 +86,19 @@ fi
 # Repo root = parent of this script's directory.
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
 REPO_ROOT="$(cd "${SCRIPT_DIR}/.." && pwd)"
-DEST_ROOT="${REPO_ROOT}/docker/migrations/forward/nodes"
+DEST_ROOT="${SYNC_NODE_MIGRATIONS_DEST_ROOT:-${REPO_ROOT}/docker/migrations/forward/nodes}"
+APPLICATION_MIGRATION_MANIFEST="${APPLICATION_MIGRATION_MANIFEST:-${REPO_ROOT}/docker/migrations/forward/_ledger/application-migrations.tsv}"
+
+# OMN-15717: a vendored file with a checked-in application-migrations.tsv row
+# is preserved applied history, not drift — see the LEGACY-DECLARED EXEMPTION
+# note above. Match on the manifest's artifact_path column (relative to the
+# forward-migration root, i.e. "nodes/<node>/<file>.sql").
+is_legacy_declared() {
+  node_and_filename="$1" # "<node>/<file>.sql"
+  [ -f "${APPLICATION_MIGRATION_MANIFEST}" ] || return 1
+  awk -F '\t' -v path="nodes/${node_and_filename}" '$1 == path { found=1 } END { exit !found }' \
+    "${APPLICATION_MIGRATION_MANIFEST}"
+}
 
 resolve_omnimarket_src() {
   if [ -n "${OMNIMARKET_SRC:-}" ] && [ -d "${OMNIMARKET_SRC}/src/omnimarket/nodes" ]; then
@@ -177,16 +205,24 @@ sort -o "${EXPECTED_LIST}" "${EXPECTED_LIST}"
 if [ "${CHECK_MODE}" -eq 1 ]; then
   while IFS= read -r extra_file; do
     if [ -n "${extra_file}" ] && ! grep -Fxq "${extra_file}" "${EXPECTED_LIST}"; then
-      echo "[sync-node-migrations] DRIFT: stale vendored migration ${extra_file}" >&2
-      DRIFT=1
+      if is_legacy_declared "${extra_file}"; then
+        echo "[sync-node-migrations] legacy-declared (OMN-15717), not stale: ${extra_file}"
+      else
+        echo "[sync-node-migrations] DRIFT: stale vendored migration ${extra_file}" >&2
+        DRIFT=1
+      fi
     fi
   done < "${ACTUAL_LIST}"
 else
   while IFS= read -r extra_file; do
     if [ -n "${extra_file}" ] && ! grep -Fxq "${extra_file}" "${EXPECTED_LIST}"; then
-      rm -f "${DEST_ROOT}/${extra_file}"
-      echo "[sync-node-migrations]   removed stale ${extra_file}"
-      COPIED=$((COPIED + 1))
+      if is_legacy_declared "${extra_file}"; then
+        echo "[sync-node-migrations]   kept legacy-declared (OMN-15717) ${extra_file}"
+      else
+        rm -f "${DEST_ROOT}/${extra_file}"
+        echo "[sync-node-migrations]   removed stale ${extra_file}"
+        COPIED=$((COPIED + 1))
+      fi
     fi
   done < "${ACTUAL_LIST}"
 fi

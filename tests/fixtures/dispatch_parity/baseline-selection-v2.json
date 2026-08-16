@@ -404,6 +404,63 @@
       "package": "omnibase_infra",
       "type_scoped": false
     },
+    "dispatcher.auto.node_gateway_attach_effect.HandlerGatewayAttach.gateway_attach_c72af942": {
+      "category": "command",
+      "contract_name": "node_gateway_attach_effect",
+      "event_model_module": null,
+      "event_model_name": null,
+      "handler_id": "dispatcher.auto.node_gateway_attach_effect.HandlerGatewayAttach.gateway_attach_c72af942",
+      "handler_module": "omnibase_infra.nodes.node_gateway_attach_effect.handlers.handler_gateway_attach",
+      "handler_name": "HandlerGatewayAttach",
+      "message_types": [
+        "omnibase-infra.gateway-attach-request",
+        "omnibase-infra.gateway-detach-request",
+        "omnibase-infra.gateway-heartbeat-request",
+        "onex.cmd.omnibase-infra.gateway-attach-request.v1",
+        "onex.cmd.omnibase-infra.gateway-detach-request.v1",
+        "onex.cmd.omnibase-infra.gateway-heartbeat-request.v1"
+      ],
+      "package": "omnibase_infra",
+      "type_scoped": false
+    },
+    "dispatcher.auto.node_gateway_attach_effect.HandlerGatewayDetach.gateway_detach_e5dfdba5": {
+      "category": "command",
+      "contract_name": "node_gateway_attach_effect",
+      "event_model_module": null,
+      "event_model_name": null,
+      "handler_id": "dispatcher.auto.node_gateway_attach_effect.HandlerGatewayDetach.gateway_detach_e5dfdba5",
+      "handler_module": "omnibase_infra.nodes.node_gateway_attach_effect.handlers.handler_gateway_detach",
+      "handler_name": "HandlerGatewayDetach",
+      "message_types": [
+        "omnibase-infra.gateway-attach-request",
+        "omnibase-infra.gateway-detach-request",
+        "omnibase-infra.gateway-heartbeat-request",
+        "onex.cmd.omnibase-infra.gateway-attach-request.v1",
+        "onex.cmd.omnibase-infra.gateway-detach-request.v1",
+        "onex.cmd.omnibase-infra.gateway-heartbeat-request.v1"
+      ],
+      "package": "omnibase_infra",
+      "type_scoped": false
+    },
+    "dispatcher.auto.node_gateway_attach_effect.HandlerGatewayHeartbeat.gateway_heartbeat_9ace454d": {
+      "category": "command",
+      "contract_name": "node_gateway_attach_effect",
+      "event_model_module": null,
+      "event_model_name": null,
+      "handler_id": "dispatcher.auto.node_gateway_attach_effect.HandlerGatewayHeartbeat.gateway_heartbeat_9ace454d",
+      "handler_module": "omnibase_infra.nodes.node_gateway_attach_effect.handlers.handler_gateway_heartbeat",
+      "handler_name": "HandlerGatewayHeartbeat",
+      "message_types": [
+        "omnibase-infra.gateway-attach-request",
+        "omnibase-infra.gateway-detach-request",
+        "omnibase-infra.gateway-heartbeat-request",
+        "onex.cmd.omnibase-infra.gateway-attach-request.v1",
+        "onex.cmd.omnibase-infra.gateway-detach-request.v1",
+        "onex.cmd.omnibase-infra.gateway-heartbeat-request.v1"
+      ],
+      "package": "omnibase_infra",
+      "type_scoped": false
+    },
     "dispatcher.auto.node_github_pr_poller_effect.HandlerGitHubApiPoll.github_poll_prs_7786448a": {
       "category": "intent",
       "contract_name": "node_github_pr_poller_effect",
@@ -3173,15 +3230,15 @@
     "corpus": {
       "contracts_by_package": {
         "omnibase_core": 15,
-        "omnibase_infra": 112,
+        "omnibase_infra": 113,
         "onex-change-control": 4
       },
-      "contracts_discovered": 131,
+      "contracts_discovered": 132,
       "discovery_errors": 0,
-      "distinct_subscribe_topics": 105,
-      "probe_count": 1040,
-      "registered_dispatchers": 111,
-      "registered_routes": 121,
+      "distinct_subscribe_topics": 108,
+      "probe_count": 1046,
+      "registered_dispatchers": 114,
+      "registered_routes": 124,
       "type_scoped_dispatchers": 69
     },
     "duplicate_winners": [],
@@ -3222,7 +3279,7 @@
       "omnimemory"
     ],
     "fixture_version": "v2",
-    "generated_at_utc": "2026-07-26T13:21:53.606701+00:00",
+    "generated_at_utc": "2026-08-13T00:51:20.726285+00:00",
     "installed_package_versions": {
       "omnibase-core": "0.46.8",
       "omnibase-infra": "0.38.4",
@@ -3405,6 +3462,57 @@
         "status": "no_dispatcher"
       },
       "topic": "onex.cmd.omnibase-infra.coding-agent-workspace-validate.v1"
+    },
+    "P1a::onex.cmd.omnibase-infra.gateway-attach-request.v1": {
+      "family": "P1_topic_event_type_matrix",
+      "input": {
+        "event_type": "omnibase-infra.gateway-attach-request",
+        "payload": "_DictPayload"
+      },
+      "selection": {
+        "dispatcher_ids": [
+          "dispatcher.auto.node_gateway_attach_effect.HandlerGatewayAttach.gateway_attach_c72af942"
+        ],
+        "dlq_topic": null,
+        "message_category": "command",
+        "message_type": "omnibase-infra.gateway-attach-request",
+        "status": "success"
+      },
+      "topic": "onex.cmd.omnibase-infra.gateway-attach-request.v1"
+    },
+    "P1a::onex.cmd.omnibase-infra.gateway-detach-request.v1": {
+      "family": "P1_topic_event_type_matrix",
+      "input": {
+        "event_type": "omnibase-infra.gateway-detach-request",
+        "payload": "_DictPayload"
+      },
+      "selection": {
+        "dispatcher_ids": [
+          "dispatcher.auto.node_gateway_attach_effect.HandlerGatewayDetach.gateway_detach_e5dfdba5"
+        ],
+        "dlq_topic": null,
+        "message_category": "command",
+        "message_type": "omnibase-infra.gateway-detach-request",
+        "status": "success"
+      },
+      "topic": "onex.cmd.omnibase-infra.gateway-detach-request.v1"
+    },
+    "P1a::onex.cmd.omnibase-infra.gateway-heartbeat-request.v1": {
+      "family": "P1_topic_event_type_matrix",
+      "input": {
+        "event_type": "omnibase-infra.gateway-heartbeat-request",
+        "payload": "_DictPayload"
+      },
+      "selection": {
+        "dispatcher_ids": [
+          "dispatcher.auto.node_gateway_attach_effect.HandlerGatewayHeartbeat.gateway_heartbeat_9ace454d"
+        ],
+        "dlq_topic": null,
+        "message_category": "command",
+        "message_type": "omnibase-infra.gateway-heartbeat-request",
+        "status": "success"
+      },
+      "topic": "onex.cmd.omnibase-infra.gateway-heartbeat-request.v1"
     },
     "P1a::onex.cmd.omnibase-infra.llm-completion-request.v1": {
       "family": "P1_topic_event_type_matrix",
@@ -5051,6 +5159,51 @@
         "status": "no_dispatcher"
       },
       "topic": "onex.cmd.omnibase-infra.coding-agent-workspace-validate.v1"
+    },
+    "P1b::onex.cmd.omnibase-infra.gateway-attach-request.v1": {
+      "family": "P1_topic_event_type_matrix",
+      "input": {
+        "event_type": null,
+        "payload": "_DictPayload"
+      },
+      "selection": {
+        "dispatcher_ids": [],
+        "dlq_topic": "onex.dlq.omnibase-infra.commands.v1",
+        "message_category": "command",
+        "message_type": "_DictPayload",
+        "status": "no_dispatcher"
+      },
+      "topic": "onex.cmd.omnibase-infra.gateway-attach-request.v1"
+    },
+    "P1b::onex.cmd.omnibase-infra.gateway-detach-request.v1": {
+      "family": "P1_topic_event_type_matrix",
+      "input": {
+        "event_type": null,
+        "payload": "_DictPayload"
+      },
+      "selection": {
+        "dispatcher_ids": [],
+        "dlq_topic": "onex.dlq.omnibase-infra.commands.v1",
+        "message_category": "command",
+        "message_type": "_DictPayload",
+        "status": "no_dispatcher"
+      },
+      "topic": "onex.cmd.omnibase-infra.gateway-detach-request.v1"
+    },
+    "P1b::onex.cmd.omnibase-infra.gateway-heartbeat-request.v1": {
+      "family": "P1_topic_event_type_matrix",
+      "input": {
+        "event_type": null,
+        "payload": "_DictPayload"
+      },
+      "selection": {
+        "dispatcher_ids": [],
+        "dlq_topic": "onex.dlq.omnibase-infra.commands.v1",
+        "message_category": "command",
+        "message_type": "_DictPayload",
+        "status": "no_dispatcher"
+      },
+      "topic": "onex.cmd.omnibase-infra.gateway-heartbeat-request.v1"
     },
     "P1b::onex.cmd.omnibase-infra.llm-completion-request.v1": {
       "family": "P1_topic_event_type_matrix",
@@ -22890,6 +23043,36 @@
       "route_id": "route.auto.node_event_forward_effect.HandlerEventForward.event_forward_27292950.onex_evt_omnibase_infra_tool_update_v1",
       "topic": "onex.evt.omnibase-infra.tool-update.v1",
       "topic_pattern": "*.evt.omnibase-infra.tool-update.*",
+      "type_scoped": false
+    },
+    {
+      "contract_name": "node_gateway_attach_effect",
+      "dispatcher_id": "dispatcher.auto.node_gateway_attach_effect.HandlerGatewayAttach.gateway_attach_c72af942",
+      "handler_id": "dispatcher.auto.node_gateway_attach_effect.HandlerGatewayAttach.gateway_attach_c72af942",
+      "message_category": "command",
+      "route_id": "route.auto.node_gateway_attach_effect.HandlerGatewayAttach.gateway_attach_c72af942.onex_cmd_omnibase_infra_gateway_attach_request_v1",
+      "topic": "onex.cmd.omnibase-infra.gateway-attach-request.v1",
+      "topic_pattern": "*.cmd.omnibase-infra.gateway-attach-request.*",
+      "type_scoped": false
+    },
+    {
+      "contract_name": "node_gateway_attach_effect",
+      "dispatcher_id": "dispatcher.auto.node_gateway_attach_effect.HandlerGatewayDetach.gateway_detach_e5dfdba5",
+      "handler_id": "dispatcher.auto.node_gateway_attach_effect.HandlerGatewayDetach.gateway_detach_e5dfdba5",
+      "message_category": "command",
+      "route_id": "route.auto.node_gateway_attach_effect.HandlerGatewayDetach.gateway_detach_e5dfdba5.onex_cmd_omnibase_infra_gateway_detach_request_v1",
+      "topic": "onex.cmd.omnibase-infra.gateway-detach-request.v1",
+      "topic_pattern": "*.cmd.omnibase-infra.gateway-detach-request.*",
+      "type_scoped": false
+    },
+    {
+      "contract_name": "node_gateway_attach_effect",
+      "dispatcher_id": "dispatcher.auto.node_gateway_attach_effect.HandlerGatewayHeartbeat.gateway_heartbeat_9ace454d",
+      "handler_id": "dispatcher.auto.node_gateway_attach_effect.HandlerGatewayHeartbeat.gateway_heartbeat_9ace454d",
+      "message_category": "command",
+      "route_id": "route.auto.node_gateway_attach_effect.HandlerGatewayHeartbeat.gateway_heartbeat_9ace454d.onex_cmd_omnibase_infra_gateway_heartbeat_request_v1",
+      "topic": "onex.cmd.omnibase-infra.gateway-heartbeat-request.v1",
+      "topic_pattern": "*.cmd.omnibase-infra.gateway-heartbeat-request.*",
       "type_scoped": false
     },
     {

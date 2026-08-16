@@ -1,0 +1,83 @@
+# SPDX-FileCopyrightText: 2025 OmniNode.ai Inc.
+# SPDX-License-Identifier: MIT
+#
+# OMN-15384 flat-vs-node dual-producer shape-parity ledger.
+#
+# OMN-15376 closed shape drift WITHIN the node-migration corpus (a table's own
+# fresh-create path vs its own drifted-pre-existing path). It said nothing
+# about a table declared by BOTH a flat migration (docker/migrations/forward/
+# *.sql, applied against the omnibase_infra DB) and a node migration
+# (docker/migrations/forward/nodes/<node>/*.sql, applied against that node's
+# own DB) drifting from EACH OTHER. This file is the record for that second
+# axis: every table name this repo's migrations declare on both sides, and
+# whether the two declared shapes currently agree.
+#
+# Read and enforced by tests/ci/test_flat_node_migration_shape_parity.py:
+#   * every table this test discovers as dual-produced (present as a guarded
+#     `CREATE TABLE IF NOT EXISTS` in at least one flat file AND at least one
+#     node file) MUST have an entry here -- an undeclared dual-producer table
+#     fails the gate outright, so a NEW overlap can't appear silently.
+#   * status: identical  -- the two sides' column sets + normalized types must
+#     match EXACTLY. If they ever diverge, the gate goes red until this file
+#     is updated (either by converging the SQL, or by flipping the entry to
+#     accepted_divergence with a reason).
+#   * status: accepted_divergence -- the two sides are recorded as
+#     DIFFERENT ON PURPOSE, with `reason` stating why. The gate asserts the
+#     entry is still divergent (a stale accepted_divergence entry whose
+#     shapes now agree is also a gate failure -- it means the record no
+#     longer describes reality and must be corrected to `identical`).
+#
+# Do not delete an entry to make the gate pass. The gate diffs LIVE discovery
+# against this file's key set and fails on any mismatch either direction.
+#
+# Ticket: OMN-15384
+tables:
+  agent_routing_decisions:
+    status: identical
+  capability_scores:
+    status: identical
+  evidence_correlation_trace_projection:
+    status: identical
+  evidence_dashboard_projection:
+    status: identical
+  evidence_readiness_aggregate_projection:
+    status: identical
+  live_events:
+    status: identical
+  llm_call_metrics:
+    status: identical
+  llm_cost_aggregates:
+    status: identical
+  llm_routing_decisions:
+    status: identical
+  log_entries:
+    status: identical
+  swarm_runs:
+    status: identical
+  baselines_comparisons:
+    status: accepted_divergence
+    reason: >
+      Flat producer (050_create_baselines_tables.sql) declares the original, narrower shape against the omnibase_infra DB. Node producer (node_projection_baselines/0001_create_baselines_tables.sql + 0002_realign_child_tables_to_producer_schema.sql) is the OMN-15302 shape that superseded it for that node's own DB: 14 additional comparison-detail columns (pattern_id, pattern_name, snapshot_id, window_start/end, rationale, recommendation, the *_delta columns, confidence) plus id UUID->TEXT and every REAL metric widened to DOUBLE PRECISION. The two are independently-evolving declarations against different physical databases, not an accidental drift of one shared shape. Convergence (retiring the flat side, or backporting the node shape into it) is a product decision OMN-15384 deliberately did not make -- see its "current live risk: LOW" framing. This entry exists so future drift on TOP of the current gap is caught, not to claim the gap itself is resolved.
+
+  baselines_breakdown:
+    status: accepted_divergence
+    reason: >
+      Same root cause and same two producers as baselines_comparisons above: node's 0001/0002 pair adds action, avg_confidence, count, snapshot_id, projected_at, and widens id/pattern_id from UUID to TEXT and the *_rate / roi_pct metrics from REAL to DOUBLE PRECISION. Tracked, not resolved, for the same reason.
+
+  baselines_trend:
+    status: accepted_divergence
+    reason: >
+      Same root cause and same two producers as baselines_comparisons above: node's 0001/0002 pair adds avg_cost_savings, avg_outcome_improvement, comparisons_evaluated, date, projected_at, snapshot_id, and widens id from UUID to TEXT and the avg_*/roi_pct/success_rate metrics from REAL to DOUBLE PRECISION. Tracked, not resolved, for the same reason.
+
+  savings_estimates:
+    status: accepted_divergence
+    reason: >
+      Flat producer (074_create_savings_estimates.sql) uses bounded VARCHAR(n) / NUMERIC(14,6) columns for the omnibase_infra DB. Node producer (node_projection_savings/074_create_savings_estimates.sql) widens machine_id/model_cloud_baseline/model_local/repo_name/ session_id from VARCHAR to TEXT, widens the three cost/savings columns from NUMERIC(14,6) to NUMERIC(18,6), and adds an updated_at column the flat side does not have. Different DBs, independently evolved; convergence not attempted in this ticket.
+
+  session_outcomes:
+    status: accepted_divergence
+    reason: >
+      Flat producer (063_create_session_outcomes.sql) declares correlation_id, which the node producer (node_projection_session_outcome/0021_session_outcomes.sql) does not carry; the node side instead declares created_at and updated_at, which the flat side does not carry. This is a genuine column-set divergence in both directions between the two DBs, not a formatting artifact. Convergence not attempted in this ticket.
+
+
+# end of ledger

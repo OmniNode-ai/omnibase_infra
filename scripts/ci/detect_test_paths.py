@@ -35,6 +35,41 @@ CI_PROCESS_TEST_PATHS = (
     "config/runner_routing_policy.yaml",
 )
 
+# OMN-15336 item 4 repair follow-up: the vendored node-migration tree lives
+# under neither src/, scripts/, nor tests/, so a change there (a new
+# migration .sql, its _ledger row, or the FORCE-RLS fence/grandfather
+# manifests) produced NO selection at all and fell through to the
+# conservative tests/unit/ fallback -- which does not contain
+# tests/scripts/test_node_migration_fence_parity.py. That test is the ratchet
+# guarding against a future FORCE-RLS migration being laundered onto the
+# grandfather snapshot; it is unreachable by the everyday change-aware
+# selector on exactly the class of change that would breach it (verified:
+# a grandfather-manifest + new .sql + ledger-row diff selected only
+# tests/unit/ before this mapping existed).
+#
+# ADDITIVE, not a swap (2026-08-05 fix-forward). The first cut of this mapping
+# added ONLY "tests/scripts/". Because `compute_selection`'s conservative
+# fallback (`if not selected: selected = ["tests/unit/"]`) only fires when
+# `_resolve()` returns nothing at all, giving migration-tree changes their own
+# non-empty selection SUPPRESSED that fallback -- an ordinary migration diff
+# (new .sql + ledger row, no YAML) went from selecting the whole tests/unit/
+# tree to selecting tests/scripts/ ONLY. That is a real coverage regression,
+# not a narrowing-to-something-equivalent swap like the scripts/ mapping
+# above: tests/unit/migrations/, tests/unit/topology/, test_schema_fingerprint,
+# test_db_ownership, and test_adversarial_fingerprint_drift all live under
+# tests/unit/ (outside tests/unit/scripts/) and genuinely exercise migration
+# .sql/ledger changes -- unlike scripts/, where tests/unit/ never covered the
+# code plain-blanket-fallback was standing in for. So this branch selects
+# BOTH tests/scripts/ (the fence-parity ratchet) AND tests/unit/ (the
+# pre-existing real coverage) rather than trading one for the other. Any
+# future prefix branch added here must make the same "does the blanket
+# tests/unit/ fallback carry real coverage for this path class?" check before
+# assuming a narrower, targeted selection is safe to swap in -- the
+# fallback-suppression trap in `compute_selection` (a non-empty `_resolve()`
+# result silently defeats the safety net for the whole diff, not just the
+# part the new branch understands) is structural, not specific to migrations.
+MIGRATION_TREE_PREFIX = "docker/migrations/forward/"
+
 # OMN-15410: pytest roots that live NEXT TO the code they cover instead of
 # under tests/. They are collected by the full suite (pyproject.toml
 # `testpaths`), but the full suite is only one of two pytest steps — a
@@ -210,6 +245,28 @@ def _resolve(
             # omnibase_infra#2493). Note this is an `if`, not an `elif`:
             # scripts/ci/ keeps its tests/ci/ CI-process mapping AND gains these.
             selected.update(SCRIPTS_TEST_PREFIXES)
+
+        if path.startswith(MIGRATION_TREE_PREFIX):
+            # OMN-15336 item 4 repair follow-up: see MIGRATION_TREE_PREFIX's
+            # own comment above. Deliberately NOT routed through
+            # COLLOCATED_TEST_ROOTS -- tests/scripts/ is already collected via
+            # the plain "tests" testpaths entry, so adding it as a
+            # COLLOCATED_TEST_ROOTS value would trip
+            # check_collocated_selector_coverage's parity assertion in
+            # scripts/validation/validate_test_root_collection.py (that check
+            # is scoped to roots requiring their OWN testpaths entry, which
+            # tests/scripts/ does not).
+            selected.add("tests/scripts/")
+            # ADDITIVE fix-forward (see MIGRATION_TREE_PREFIX comment): also
+            # keep the blanket tests/unit/ coverage this path class relied on
+            # via the `if not selected` fallback before this mapping existed.
+            # Unlike scripts/ above, tests/unit/ genuinely exercises migration
+            # .sql/ledger changes (tests/unit/migrations/, tests/unit/topology/,
+            # test_schema_fingerprint.py, test_db_ownership.py,
+            # test_adversarial_fingerprint_drift.py), so giving this branch its
+            # own non-empty selection must not silently drop that coverage by
+            # suppressing the fallback.
+            selected.add(TEST_UNIT_PREFIX)
 
         # OMN-15410: collocated roots (tests living beside their code rather
         # than under tests/). Independent of every branch above — a path can

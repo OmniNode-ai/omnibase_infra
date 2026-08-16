@@ -5,6 +5,19 @@ on:
     branches: [main]
   pull_request:
     branches: [main, dev]
+    # OMN-14241: `edited` is required so a PR-body-only edit (the common case
+    # is stamping `Evidence-Source: OCC#<n>` after the companion OCC PR
+    # merges) retriggers this workflow's `occ-preflight` job. The reusable
+    # occ-preflight.yml already live-fetches the current PR body via
+    # `gh pr view` on every run -- the defect was never a frozen-body read,
+    # it was that no new run fired at all, so the last commit-triggered
+    # FAILURE (correct at that instant, before the stamp existed) sat as the
+    # permanent status for `occ-preflight / eligibility` and CI Summary
+    # failed closed on it forever (live case: infra#2696, #2694). GitHub's
+    # implicit default when `types:` is omitted is
+    # [opened, synchronize, reopened], which is what this workflow ran on
+    # before this fix.
+    types: [opened, edited, synchronize, reopened]
   merge_group:
   workflow_dispatch:
 
@@ -25,11 +38,21 @@ env:
   # OMN-12564 canary: trusted self-hosted CI reuses an immutable host-local
   # dependency environment keyed by uv.lock/tool versions instead of resolving
   # dependencies independently in every job. Public fork PRs keep isolated setup.
+  # OMN-16073: the expression previously also disabled the shared env for
+  # same-repo PRs targeting dev — correct while internal PR CI ran on
+  # ubuntu-latest (no host-local env exists there), stale once OMN-15699
+  # rerouted internal PRs onto the trusted self-hosted fleet. That leftover
+  # forced every dev PR job down the isolated `uv sync --no-cache` path
+  # (fleet-measured setup median 317s / max 613s per job, n=38). Trusted
+  # same-repo PRs now use the shared env exactly as push/merge_group already
+  # do. Lineage stays honest by construction: the env digest
+  # (scripts/ci/ci_env_digest.py) includes pyproject.toml + uv.lock, so a
+  # dependency-pin move produces a new digest and a cold install of the new
+  # pin — a stale env can never mask a pin change.
   OMNI_CI_SHARED_ENV_ENABLED: >-
     ${{
       (github.event_name == 'pull_request' &&
-       (github.event.pull_request.head.repo.full_name != github.repository ||
-        github.event.pull_request.base.ref == 'dev'))
+       github.event.pull_request.head.repo.full_name != github.repository)
       && 'false'
       || 'true'
     }}
@@ -66,7 +89,7 @@ jobs:
     with:
       contracts-dir: contracts
       receipts-dir: drift/dod_receipts
-      core-ref: 8a47e092002dd1338599fa0733feda469436acbf
+      core-ref: dev
 
   # =============================================================================
   # Phase 0 - Zone filter (OMN-10475)
@@ -578,7 +601,7 @@ jobs:
         && fromJSON(vars.OMNI_PUBLIC_PR_RUNS_ON_JSON || '["ubuntu-latest"]')
         || fromJSON((github.event_name == 'merge_group' && vars.OMNI_REQUIRED_CI_RUNS_ON_JSON) || vars.OMNI_TRUSTED_CI_RUNS_ON_JSON || '["self-hosted","omnibase-ci"]')
       }}
-    timeout-minutes: 10
+    timeout-minutes: 15
 
     steps:
       - name: Checkout code
@@ -677,7 +700,7 @@ jobs:
         && fromJSON(vars.OMNI_PUBLIC_PR_RUNS_ON_JSON || '["ubuntu-latest"]')
         || fromJSON((github.event_name == 'merge_group' && vars.OMNI_REQUIRED_CI_RUNS_ON_JSON) || vars.OMNI_TRUSTED_CI_RUNS_ON_JSON || '["self-hosted","omnibase-ci"]')
       }}
-    timeout-minutes: 10
+    timeout-minutes: 15
 
     steps:
       - name: Checkout code
@@ -731,7 +754,35 @@ jobs:
         && fromJSON(vars.OMNI_PUBLIC_PR_RUNS_ON_JSON || '["ubuntu-latest"]')
         || fromJSON((github.event_name == 'merge_group' && vars.OMNI_REQUIRED_CI_RUNS_ON_JSON) || vars.OMNI_TRUSTED_CI_RUNS_ON_JSON || '["self-hosted","omnibase-ci"]')
       }}
-    timeout-minutes: 10
+    # Raised from 10 to 18 (2026-08-07, PR #2679 comment 5211687650): a
+    # 38-run fleet measurement of THIS job found setup time (job start ->
+    # script step start) alone had median 317s and max 613s under the
+    # existing cache-enabled: "false" -- 6/38 runs were killed by the old
+    # timeout-minutes: 10 (600s) DURING setup, before the script step ever
+    # ran. ``cache-enabled: "false"`` is intentionally NOT flipped here: this
+    # repo's self-hosted-fleet CI already replaced the per-job uv cache with
+    # the shared host-local dependency-environment canary (see
+    # ``docs/ci/versioned-ci-env-canary.md``), which explicitly says "Do not
+    # enable setup-uv cache save for direct jobs that intentionally run
+    # ``uv sync --no-cache``; the post-job cache upload can outlive the
+    # actual check and cancel merge-group CI while adding no useful reuse" --
+    # and ``tests/ci/test_ci_workflow_resilience.py::test_short_gates_can_disable_uv_cache_cleanup``
+    # enforces ``cache-enabled: "false"`` on every ci.yml job uniformly for
+    # exactly that reason. The fix here is timeout-minutes alone; the
+    # derivation below is built on the measured fleet MAX (not an assumed
+    # cache improvement) so it is correct with or without any future cache
+    # change:
+    #   613s (measured max setup, fleet n=38)
+    # + 150s (script _RUN_DEADLINE_SECONDS, see check_pin_reachability.py)
+    # + 150s (worst-case post-deadline tail: one in-flight rate-limited call,
+    #         3 * 30s timeouts + 2 * 30s capped backoffs)
+    # = 913s < 1080s, ~167s (~15%) real margin.
+    # See scripts/ci/check_pin_reachability.py's _RUN_DEADLINE_SECONDS
+    # comment for the full script-side derivation, and
+    # tests/ci/test_pin_reachability_omn15538.py::test_pin_reachability_job_timeout_covers_measured_budget
+    # for the binding test that parses this value from ci.yml and fails
+    # closed if it stops covering the budget (or is gamed absurdly high).
+    timeout-minutes: 18
 
     steps:
       - name: Checkout code
@@ -792,7 +843,7 @@ jobs:
         && fromJSON(vars.OMNI_PUBLIC_PR_RUNS_ON_JSON || '["ubuntu-latest"]')
         || fromJSON((github.event_name == 'merge_group' && vars.OMNI_REQUIRED_CI_RUNS_ON_JSON) || vars.OMNI_TRUSTED_CI_RUNS_ON_JSON || '["self-hosted","omnibase-ci"]')
       }}
-    timeout-minutes: 10
+    timeout-minutes: 15
 
     steps:
       - name: Checkout code
@@ -854,7 +905,7 @@ jobs:
       }}
     # The drift scan is short, but self-hosted post-job cache/archive cleanup
     # has exceeded 5 minutes under runner pressure.
-    timeout-minutes: 10
+    timeout-minutes: 15
 
     steps:
       - name: Checkout omnibase_infra
@@ -1102,7 +1153,7 @@ jobs:
         && fromJSON(vars.OMNI_PUBLIC_PR_RUNS_ON_JSON || '["ubuntu-latest"]')
         || fromJSON((github.event_name == 'merge_group' && vars.OMNI_REQUIRED_CI_RUNS_ON_JSON) || vars.OMNI_TRUSTED_CI_RUNS_ON_JSON || '["self-hosted","omnibase-ci"]')
       }}
-    timeout-minutes: 10
+    timeout-minutes: 15
 
     steps:
       - name: Checkout code
@@ -1494,7 +1545,7 @@ jobs:
         && fromJSON(vars.OMNI_PUBLIC_PR_RUNS_ON_JSON || '["ubuntu-latest"]')
         || fromJSON((github.event_name == 'merge_group' && vars.OMNI_REQUIRED_CI_RUNS_ON_JSON) || vars.OMNI_TRUSTED_CI_RUNS_ON_JSON || '["self-hosted","omnibase-ci"]')
       }}
-    timeout-minutes: 10
+    timeout-minutes: 15
 
     steps:
       - name: Checkout code
@@ -1564,7 +1615,7 @@ jobs:
         && fromJSON(vars.OMNI_PUBLIC_PR_RUNS_ON_JSON || '["ubuntu-latest"]')
         || fromJSON((github.event_name == 'merge_group' && vars.OMNI_REQUIRED_CI_RUNS_ON_JSON) || vars.OMNI_TRUSTED_CI_RUNS_ON_JSON || '["self-hosted","omnibase-ci"]')
       }}
-    timeout-minutes: 10
+    timeout-minutes: 15
 
     steps:
       - name: Checkout code
@@ -1776,7 +1827,7 @@ jobs:
     # Run on PRs and merge_group events whenever there were actual test runs.
     # Also run when docs-only so we detect ratchet-baseline staleness.
     if:  needs.occ-preflight.result == 'success' && (always() && (github.event_name == 'pull_request' || github.event_name == 'merge_group'))
-    timeout-minutes: 10
+    timeout-minutes: 15
 
     steps:
       - name: Checkout code (dev branch baseline)
@@ -2062,7 +2113,7 @@ jobs:
         && fromJSON(vars.OMNI_PUBLIC_PR_RUNS_ON_JSON || '["ubuntu-latest"]')
         || fromJSON((github.event_name == 'merge_group' && vars.OMNI_REQUIRED_CI_RUNS_ON_JSON) || vars.OMNI_TRUSTED_CI_RUNS_ON_JSON || '["self-hosted","omnibase-ci"]')
       }}
-    timeout-minutes: 10
+    timeout-minutes: 15
 
     steps:
       - name: Checkout omnibase_infra
@@ -2120,7 +2171,7 @@ jobs:
         && fromJSON(vars.OMNI_PUBLIC_PR_RUNS_ON_JSON || '["ubuntu-latest"]')
         || fromJSON((github.event_name == 'merge_group' && vars.OMNI_REQUIRED_CI_RUNS_ON_JSON) || vars.OMNI_TRUSTED_CI_RUNS_ON_JSON || '["self-hosted","omnibase-ci"]')
       }}
-    timeout-minutes: 10
+    timeout-minutes: 15
     steps:
       - name: Checkout code
         uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
@@ -2403,8 +2454,16 @@ jobs:
           github.event_name != 'pull_request' ||
           github.event.pull_request.head.repo.full_name == github.repository
         env:
+          # OMN-16076: no hardcoded fallback SHA. The old pin was a squash
+          # commit reachable only through a since-deleted stacked branch, so
+          # the first push-event run of this step (post-merge on main, which
+          # never has a pull_request/merge_group base) could not resolve it
+          # and crashed. push event.before is the previous main tip -- for a
+          # promotion merge that is exactly the promotion PR's base, so the
+          # push verdict reproduces the proven PR verdict. An empty or
+          # unreachable base fails loudly inside the script with remediation.
           APPLICATION_SQL_BASE_REVISION: >-
-            ${{ github.event.pull_request.base.sha || github.event.merge_group.base_sha || '7228ce0c0934ae096dd6effd0f84ff1913fec6c0' }}
+            ${{ github.event.pull_request.base.sha || github.event.merge_group.base_sha || github.event.before }}
         run: >-
           uv run python scripts/ci/check_application_database_sql.py
           --base-revision "$APPLICATION_SQL_BASE_REVISION"
@@ -2829,6 +2888,46 @@ jobs:
       - name: Check writer-migration coupling
         run: uv run python scripts/check_migration_required.py --ci
 
+  # Node migration declaration check -- every vendored node migration under
+  # docker/migrations/forward/nodes/ must carry a checked-in stream/domain
+  # declaration (application-migrations.tsv), explicit block
+  # (application-migration-blocks.tsv), or audited historical declaration
+  # (legacy-node-migrations.tsv) BEFORE it can reach a runtime.
+  # scripts/validation/validate_application_migration_manifest.py already
+  # implemented this exact check (plus checksum + duplicate + shape
+  # validation) but was never wired anywhere -- only its own test file
+  # exercised it directly. OMN-15717: node_pr_review_bot's
+  # 001_create_review_bot_bypass_log.sql shipped undeclared and this
+  # pre-existing, unwired validator would have caught it; it only failed
+  # closed at a live bootstrap.sql deploy, weeks after merge.
+  node-migration-declaration-check:
+    needs: occ-preflight
+    timeout-minutes: 30
+    name: Node Migration Declaration Check
+    runs-on: >-
+      ${{
+        (github.event_name == 'pull_request' &&
+         github.event.pull_request.head.repo.full_name != github.repository)
+        && fromJSON(vars.OMNI_PUBLIC_PR_RUNS_ON_JSON || '["ubuntu-latest"]')
+        || fromJSON((github.event_name == 'merge_group' && vars.OMNI_REQUIRED_CI_RUNS_ON_JSON) || vars.OMNI_TRUSTED_CI_RUNS_ON_JSON || '["self-hosted","omnibase-ci"]')
+      }}
+    steps:
+      - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+        with:
+          fetch-depth: 0
+
+      - name: Setup Python and uv
+        uses: ./.github/actions/setup-python-uv
+        with:
+          python-version: ${{ env.PYTHON_VERSION }}
+          uv-version: ${{ env.UV_VERSION }}
+          cache-version: ${{ env.CACHE_VERSION }}
+          cache-enabled: "false"
+          install-args: '--reinstall-package omnibase-core --reinstall-package omnibase-spi --frozen'
+
+      - name: Check node migration declarations
+        run: uv run python scripts/validation/validate_application_migration_manifest.py
+
   # Migration integration test -- spins up real Postgres, applies all migrations,
   # and asserts every manifest table exists (OMN-3529)
   migration-integration:
@@ -2842,7 +2941,7 @@ jobs:
         && fromJSON(vars.OMNI_PUBLIC_PR_RUNS_ON_JSON || '["ubuntu-latest"]')
         || fromJSON((github.event_name == 'merge_group' && vars.OMNI_REQUIRED_CI_RUNS_ON_JSON) || vars.OMNI_TRUSTED_CI_RUNS_ON_JSON || '["self-hosted","omnibase-ci"]')
       }}
-    timeout-minutes: 10
+    timeout-minutes: 15
     services:
       postgres:
         image: postgres:16-alpine

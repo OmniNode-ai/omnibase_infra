@@ -102,6 +102,16 @@ fi
 MIN_AGE_DAYS="$(echo "$PLAN_JSON" | python3 -c 'import json,sys;print(json.load(sys.stdin)["min_age_days"])')"
 IMAGE_IDS="$(echo "$PLAN_JSON" | python3 -c 'import json,sys;[print(i) for i in json.load(sys.stdin)["remove_image_ids"]]')"
 CONTAINER_IDS="$(echo "$PLAN_JSON" | python3 -c 'import json,sys;[print(c) for c in json.load(sys.stdin)["remove_container_ids"]]')"
+# OMN-15804: id<TAB>ref1,ref2,... — one line per removal-candidate image id, refs
+# comma-joined (empty string when the id is dangling / has no repo:tag to untag).
+IMAGE_REFS_TSV="$(echo "$PLAN_JSON" | python3 -c '
+import json, sys
+plan = json.load(sys.stdin)
+refs = plan.get("remove_image_refs", {})
+for iid in plan["remove_image_ids"]:
+    joined = ",".join(refs.get(iid, []))
+    print(f"{iid}\t{joined}")
+')"
 
 log "Plan: $(echo "$IMAGE_IDS" | grep -c . || true) image(s), $(echo "$CONTAINER_IDS" | grep -c . || true) stopped container(s), builder cache > ${MIN_AGE_DAYS}d"
 
@@ -124,13 +134,75 @@ if [[ -n "$CONTAINER_IDS" ]]; then
   done <<< "$CONTAINER_IDS"
 fi
 
-if [[ -n "$IMAGE_IDS" ]]; then
-  while IFS= read -r iid; do
+if [[ -n "$IMAGE_REFS_TSV" ]]; then
+  while IFS=$'\t' read -r iid refs_csv; do
     [[ -z "$iid" ]] && continue
-    if docker rmi "$iid" >>"$LOG_FILE" 2>&1; then log "removed image $iid"; else log "kept/failed image $iid (likely still referenced)"; fi
-  done <<< "$IMAGE_IDS"
+
+    # OMN-15804 fresh in-use re-check: the plan's protect_running decision was
+    # made against a docker-inventory SNAPSHOT taken before the builder-cache
+    # prune / stopped-container removal above ran. Re-derive liveness right
+    # before deletion via docker's own `ancestor` filter, which resolves an
+    # image id or repo:tag to every container (running OR stopped) built from
+    # it — closing the snapshot-staleness + short-vs-full-id gaps a static
+    # substring match against a pre-captured `docker ps` list cannot catch.
+    if [[ -n "$(docker ps -a --filter "ancestor=${iid}" --format '{{.ID}}' 2>/dev/null)" ]]; then
+      log "kept image $iid (fresh in-use re-check: referenced by a container)"
+      continue
+    fi
+
+    # OMN-15804: untag every repo:tag ref before the final by-id remove.
+    # `docker rmi <id>` alone fails "must be forced - referenced in multiple
+    # repositories" whenever more than one repo:tag points at the same id —
+    # this was why the native timer identified ~101 candidates and removed
+    # ZERO across 3+ cycles. Untagging each ref first (never -f) drops the
+    # tag; the final `docker rmi <id>` (or the last untag itself) frees the
+    # underlying image once no ref remains.
+    untag_failed=false
+    if [[ -n "$refs_csv" ]]; then
+      IFS=',' read -ra refs_arr <<< "$refs_csv"
+      for ref in "${refs_arr[@]}"; do
+        [[ -z "$ref" ]] && continue
+        if docker rmi "$ref" >>"$LOG_FILE" 2>&1; then
+          log "untagged $ref"
+        else
+          log "FAILED to untag $ref"
+          untag_failed=true
+        fi
+      done
+    fi
+
+    if [[ "$untag_failed" == true ]]; then
+      log "kept/failed image $iid (one or more tag refs failed to untag; not force-removing)"
+      continue
+    fi
+
+    # Dangling images (no refs) or an id whose underlying layers survived
+    # untagging (should not happen once every ref above succeeded, but the
+    # `docker image ls` id may still resolve if this id was ALSO a parent
+    # layer of another image) still need this final by-id remove.
+    if docker image inspect "$iid" >/dev/null 2>&1; then
+      if docker rmi "$iid" >>"$LOG_FILE" 2>&1; then
+        log "removed image $iid"
+      else
+        log "kept/failed image $iid (likely still referenced)"
+      fi
+    else
+      log "removed image $iid (freed by untag)"
+    fi
+  done <<< "$IMAGE_REFS_TSV"
 fi
 
 log "Done. df after:"
-df -h /data 2>/dev/null | tee -a "$LOG_FILE" >&2 || df -h / | tee -a "$LOG_FILE" >&2
+DF_OUT="$(df -h /data 2>/dev/null || df -h /)"
+echo "$DF_OUT" | tee -a "$LOG_FILE" >&2
+
+# OMN-15804: surface the watermark threshold (shared with disk-watermark-check.sh,
+# no new alerting path — this is a log-line-only warning) directly in the GC
+# summary so a breach is visible without cross-referencing a second log file.
+DF_USED_PCT="$(echo "$DF_OUT" | awk 'NR==2 {gsub(/%/,"",$5); print $5}')"
+WATERMARK_WARN_PCT=85
+if [[ "$DF_USED_PCT" =~ ^[0-9]+$ ]] && [[ "$DF_USED_PCT" -ge "$WATERMARK_WARN_PCT" ]]; then
+  log "WARNING: disk usage ${DF_USED_PCT}% >= watermark ${WATERMARK_WARN_PCT}% — see disk-watermark-check.sh"
+fi
+
 exit 0

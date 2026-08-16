@@ -167,8 +167,8 @@ class AdapterLlmProviderOpenai:
     This adapter supports all OpenAI-compatible inference servers including
     vLLM, text-generation-inference, and the OpenAI API itself.
 
-    Falls back to the ``LLM_CODER_URL`` environment variable (default:
-    ``http://localhost:8000``) if ``base_url`` is not provided at construction.
+    Falls back to the contract-provided ``LLM_CODER_URL`` when ``base_url`` is
+    not provided at construction.
 
     Attributes:
         _provider_name: Provider identifier.
@@ -182,8 +182,9 @@ class AdapterLlmProviderOpenai:
         _capabilities_cache: Cached model capabilities.
 
     Example:
+        >>> resolved_endpoint = "routing-authority-provided endpoint"
         >>> adapter = AdapterLlmProviderOpenai(
-        ...     base_url="http://localhost:8000",
+        ...     base_url=resolved_endpoint,
         ...     default_model="qwen2.5-coder-14b",
         ... )
         >>> response = await adapter.generate_async(request)

@@ -15,6 +15,7 @@ from omnibase_core.models.delegation.wire import ModelDelegationRequest
 from omnibase_core.models.events.model_event_envelope import ModelEventEnvelope
 from omnibase_infra.errors import InfraUnavailableError
 from omnibase_infra.nodes.node_bus_forwarder_effect.models import (
+    ModelGatewayCanaryConfig,
     ModelGatewayCloudBusConfig,
     ModelGatewayForwarderConfig,
     ModelGatewayMirrorTopics,
@@ -41,6 +42,15 @@ WIRE_OUTBOUND_TOPIC = f"tenant-acme.{OUTBOUND_TOPIC}"
 # (delegation-inference-request.v1), which is an intermediate intent topic.
 DELEGATION_REQUEST_TOPIC = "onex.cmd.omnibase-infra.delegation-request.v1"
 WIRE_DELEGATION_REQUEST_TOPIC = f"tenant-acme.{DELEGATION_REQUEST_TOPIC}"
+
+
+def _canary() -> ModelGatewayCanaryConfig:
+    return ModelGatewayCanaryConfig(
+        topic="onex.evt.omnibase-infra.gateway-canary.v1",
+        cadence_seconds=30,
+        produce_deadline_seconds=8,
+        readback_deadline_seconds=12,
+    )
 
 
 @dataclass(frozen=True)
@@ -116,6 +126,7 @@ def _config() -> ModelGatewayForwarderConfig:
             inbound=(INBOUND_TOPIC,),
             outbound=(OUTBOUND_TOPIC,),
         ),
+        canary=_canary(),
     )
 
 
@@ -240,6 +251,74 @@ async def test_heartbeat_is_tenant_bound_and_published_to_cloud_wire_topic() -> 
     assert envelope.payload["principal_id"] == PRINCIPAL_ID
     assert envelope.payload["status"] == "active"
     assert envelope.metadata.tags["gateway_direction"] == "local-to-cloud"
+
+
+async def test_publish_status_degraded_goes_to_local_bus_not_cloud() -> None:
+    """OMN-15742: DEGRADED must stay observable while the cloud leg is down.
+
+    ``publish_status`` is the reconnect-supervision status channel used by
+    ``runtime/gateway_forwarder.py``'s backoff loop. It must publish on the
+    local bus (not the cloud wire that ``publish_heartbeat`` uses), or a
+    DEGRADED event caused by the cloud leg being unreachable could never
+    itself be delivered.
+    """
+    local_bus = _MockGatewayBus()
+    cloud_bus = _MockGatewayBus()
+    config = _config().model_copy(
+        update={
+            "mirror_topics": ModelGatewayMirrorTopics(
+                inbound=(INBOUND_TOPIC,),
+                outbound=(OUTBOUND_TOPIC, HEARTBEAT_TOPIC),
+            )
+        }
+    )
+    service = ServiceGatewayForwarder(
+        config=config,
+        local_bus=local_bus,
+        cloud_bus=cloud_bus,
+    )
+
+    await service.publish_status(
+        "degraded",
+        consecutive_failures=4,
+        detail="InfraUnavailableError: boom",
+    )
+
+    assert cloud_bus.published == []
+    assert len(local_bus.published) == 1
+    message = local_bus.published[0]
+    assert message.topic == HEARTBEAT_TOPIC
+    envelope = ModelEventEnvelope[dict[str, object]].model_validate_json(message.value)
+    assert envelope.payload["status"] == "degraded"
+    assert envelope.payload["consecutive_failures"] == 4
+    assert envelope.payload["detail"] == "InfraUnavailableError: boom"
+
+
+async def test_publish_status_active_defaults_zero_failures_and_no_detail() -> None:
+    local_bus = _MockGatewayBus()
+    cloud_bus = _MockGatewayBus()
+    config = _config().model_copy(
+        update={
+            "mirror_topics": ModelGatewayMirrorTopics(
+                inbound=(INBOUND_TOPIC,),
+                outbound=(OUTBOUND_TOPIC, HEARTBEAT_TOPIC),
+            )
+        }
+    )
+    service = ServiceGatewayForwarder(
+        config=config,
+        local_bus=local_bus,
+        cloud_bus=cloud_bus,
+    )
+
+    await service.publish_status("active")
+
+    envelope = ModelEventEnvelope[dict[str, object]].model_validate_json(
+        local_bus.published[0].value
+    )
+    assert envelope.payload["status"] == "active"
+    assert envelope.payload["consecutive_failures"] == 0
+    assert envelope.payload["detail"] == ""
 
 
 async def test_inbound_payload_gets_verified_tenant_slug_not_forged_or_missing() -> (
@@ -431,6 +510,7 @@ def _config_with_delegation_request() -> ModelGatewayForwarderConfig:
             inbound=(INBOUND_TOPIC, DELEGATION_REQUEST_TOPIC),
             outbound=(OUTBOUND_TOPIC,),
         ),
+        canary=_canary(),
     )
 
 

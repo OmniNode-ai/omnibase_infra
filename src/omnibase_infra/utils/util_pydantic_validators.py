@@ -188,12 +188,12 @@ def _sanitize_url_for_logging(url: str, parsed: ParseResult | None = None) -> st
         URL with password redacted (if present), or original URL if no password.
 
     Example:
-        >>> _sanitize_url_for_logging("http://user:secret@localhost:8080/path")
-        'http://user:****@localhost:8080/path'
-        >>> _sanitize_url_for_logging("http://localhost:8080/path")
-        'http://localhost:8080/path'
-        >>> _sanitize_url_for_logging("user:secret@localhost:5432")
-        'user:****@localhost:5432'
+        >>> _sanitize_url_for_logging("https://user:secret@api.example.invalid/path")
+        'https://user:****@api.example.invalid/path'
+        >>> _sanitize_url_for_logging("https://api.example.invalid/path")
+        'https://api.example.invalid/path'
+        >>> _sanitize_url_for_logging("user:secret@db.example.invalid:5432")
+        'user:****@db.example.invalid:5432'
     """
     if parsed is None:
         parsed = urlparse(url)
@@ -256,15 +256,15 @@ def validate_endpoint_urls_dict(endpoints: dict[str, str]) -> dict[str, str]:
         >>> from omnibase_infra.utils import validate_endpoint_urls_dict
         >>>
         >>> # Valid endpoints
-        >>> endpoints = {"api": "http://localhost:8080", "grpc": "grpc://localhost:9090"}
+        >>> endpoints = {"api": "https://api.example.invalid", "grpc": "grpc://grpc.example.invalid"}
         >>> validate_endpoint_urls_dict(endpoints) == endpoints
         True
         >>>
         >>> # Invalid: missing scheme
-        >>> validate_endpoint_urls_dict({"api": "localhost:8080"})  # doctest: +ELLIPSIS
+        >>> validate_endpoint_urls_dict({"api": "api.example.invalid:8080"})  # doctest: +ELLIPSIS
         Traceback (most recent call last):
         ...
-        ValueError: Invalid URL for endpoint 'api': localhost:8080
+        ValueError: Invalid URL for endpoint 'api': api.example.invalid:8080
 
     Usage in Pydantic model:
         @field_validator("endpoints")

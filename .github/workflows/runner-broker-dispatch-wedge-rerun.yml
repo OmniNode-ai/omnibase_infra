@@ -1,0 +1,53 @@
+# runner-broker-dispatch-wedge-rerun.yml — targeted signature rerun (OMN-15776)
+#
+# Scans recent self-hosted-runner jobs across the fleet's repos for the
+# proven GitHub Actions broker-dispatch/reconnect race signature (job
+# assigned to a self-hosted runner, conclusion failure/cancelled, ZERO
+# steps recorded, duration in a tight band around the observed fixed
+# ~10m0-1s GitHub-side orphan timeout) and reissues ONLY the matched job.
+#
+# This is not a blanket retry-on-red policy — a job with real steps or a
+# duration outside the narrow signature band is never touched, so a genuine
+# content failure is never laundered into a rerun.
+#
+# HARD REQUIREMENT: runs on GitHub-hosted compute (ubuntu-latest), never
+# self-hosted — same rationale as runner-fleet-canary.yml: this must not
+# share fate with the fleet it remediates (and specifically must not be
+# vulnerable to the exact broker-dispatch race it exists to detect).
+name: runner-broker-dispatch-wedge-rerun
+
+on:
+  schedule:
+    - cron: "*/10 * * * *"
+  workflow_dispatch:
+    inputs:
+      dry_run:
+        description: "Scan and report candidates without issuing reruns"
+        required: false
+        default: "false"
+
+permissions:
+  contents: read
+  actions: write # required to POST /actions/jobs/{id}/rerun
+
+jobs:
+  wedge-rerun:
+    name: wedge-rerun
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - name: Checkout (script only)
+        uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+
+      - name: Scan for broker-dispatch-wedge signature and rerun matches
+        env:
+          RUNNER_GITHUB_TOKEN: ${{ secrets.RUNNER_FLEET_STATUS_TOKEN || secrets.CROSS_REPO_PAT }}
+          REPOS_CSV: "omnibase_infra,omnibase_core,omniclaude,omnimarket,onex_change_control"
+        run: |
+          ARGS=""
+          if [[ "${{ github.event.inputs.dry_run }}" == "true" ]]; then
+            ARGS="--dry-run"
+          fi
+          bash scripts/ci/runner_broker_dispatch_wedge_rerun.sh ${ARGS}

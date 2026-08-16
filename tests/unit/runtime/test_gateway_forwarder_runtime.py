@@ -13,6 +13,7 @@ import yaml
 
 from omnibase_infra.event_bus.models.config import ModelKafkaEventBusConfig
 from omnibase_infra.nodes.node_bus_forwarder_effect.models import (
+    ModelGatewayCanaryConfig,
     ModelGatewayCloudBusConfig,
     ModelGatewayForwarderConfig,
     ModelGatewayForwarderRuntimeConfig,
@@ -47,11 +48,18 @@ def _runtime_config() -> ModelGatewayForwarderRuntimeConfig:
                     "onex.evt.omnibase-infra.gateway-heartbeat.v1",
                 ),
             ),
+            canary=ModelGatewayCanaryConfig(
+                topic="onex.evt.omnibase-infra.gateway-canary.v1",
+                cadence_seconds=30,
+                produce_deadline_seconds=8,
+                readback_deadline_seconds=12,
+            ),
         ),
         local_bus=ModelKafkaEventBusConfig(
             bootstrap_servers="redpanda:9092",
             environment="gateway-local",
             enable_auto_commit=False,
+            auto_offset_reset="earliest",
         ),
         cloud_bus=ModelKafkaEventBusConfig(
             bootstrap_servers="b-1.example.kafka.amazonaws.com:9098",
@@ -60,6 +68,7 @@ def _runtime_config() -> ModelGatewayForwarderRuntimeConfig:
             sasl_mechanism="AWS_MSK_IAM",
             msk_region="us-east-1",
             enable_auto_commit=False,
+            auto_offset_reset="earliest",
         ),
     )
 
@@ -104,6 +113,45 @@ def test_runtime_config_rejects_source_auto_commit() -> None:
         )
 
 
+def test_runtime_config_rejects_latest_auto_offset_reset_on_local_leg() -> None:
+    """OMN-15781: a `latest` local leg drops any backlog produced during an outage.
+
+    ``enable_auto_commit=false`` means offsets commit only after durable
+    destination delivery -- but that guarantee is moot if the consumer starts
+    reading from ``latest`` on rejoin, since the backlog produced while the
+    consumer group was unjoined is never in the read window at all.
+    """
+    config = _runtime_config()
+    latest_local = config.local_bus.model_copy(update={"auto_offset_reset": "latest"})
+
+    with pytest.raises(ValueError, match="auto_offset_reset=earliest"):
+        ModelGatewayForwarderRuntimeConfig(
+            forwarder=config.forwarder,
+            local_bus=latest_local,
+            cloud_bus=config.cloud_bus,
+        )
+
+
+def test_runtime_config_rejects_latest_auto_offset_reset_on_cloud_leg() -> None:
+    """OMN-15781: same hazard on the cloud leg -- both legs are pull-based."""
+    config = _runtime_config()
+    latest_cloud = config.cloud_bus.model_copy(update={"auto_offset_reset": "latest"})
+
+    with pytest.raises(ValueError, match="auto_offset_reset=earliest"):
+        ModelGatewayForwarderRuntimeConfig(
+            forwarder=config.forwarder,
+            local_bus=config.local_bus,
+            cloud_bus=latest_cloud,
+        )
+
+
+def test_runtime_config_accepts_earliest_auto_offset_reset() -> None:
+    """Sanity: the correct value is not itself rejected."""
+    config = _runtime_config()
+    assert config.local_bus.auto_offset_reset == "earliest"
+    assert config.cloud_bus.auto_offset_reset == "earliest"
+
+
 def test_runtime_config_loader_round_trips_yaml(tmp_path: Path) -> None:
     config = _runtime_config()
     path = tmp_path / "gateway.yaml"
@@ -112,7 +160,9 @@ def test_runtime_config_loader_round_trips_yaml(tmp_path: Path) -> None:
     dumped["local_bus"].pop("acks_aiokafka")
     dumped["cloud_bus"].pop("acks_aiokafka")
     mirror_topics = dumped["forwarder"].pop("mirror_topics")
+    canary = dumped["forwarder"].pop("canary")
     dumped["forwarder"]["mirror_topic_set"] = "node_bus_forwarder_effect"
+    dumped["forwarder"]["canary_topic_set"] = "node_bus_forwarder_effect"
     path.write_text(
         yaml.safe_dump(dumped),
         encoding="utf-8",
@@ -121,7 +171,12 @@ def test_runtime_config_loader_round_trips_yaml(tmp_path: Path) -> None:
         yaml.safe_dump(
             {
                 "contract_name": "node_bus_forwarder_effect",
-                "config": {"gateway_forwarder": {"mirror_topics": mirror_topics}},
+                "config": {
+                    "gateway_forwarder": {
+                        "mirror_topics": mirror_topics,
+                        "canary": canary,
+                    }
+                },
             }
         ),
         encoding="utf-8",
@@ -146,6 +201,33 @@ def test_runtime_config_rejects_inline_mirror_topic_literals(tmp_path: Path) -> 
         gateway_forwarder.load_gateway_forwarder_runtime_config(path)
 
 
+def test_runtime_config_rejects_inline_canary_literals(tmp_path: Path) -> None:
+    config = _runtime_config()
+    path = tmp_path / "gateway.yaml"
+    contract_path = tmp_path / "contract.yaml"
+    dumped = config.model_dump(mode="json")
+    dumped["local_bus"].pop("acks_aiokafka")
+    dumped["cloud_bus"].pop("acks_aiokafka")
+    mirror_topics = dumped["forwarder"].pop("mirror_topics")
+    dumped["forwarder"]["mirror_topic_set"] = "node_bus_forwarder_effect"
+    # canary is left inline (not popped) -- the redeclare that must be rejected.
+    path.write_text(yaml.safe_dump(dumped), encoding="utf-8")
+    contract_path.write_text(
+        yaml.safe_dump(
+            {
+                "contract_name": "node_bus_forwarder_effect",
+                "config": {"gateway_forwarder": {"mirror_topics": mirror_topics}},
+            }
+        ),
+        encoding="utf-8",
+    )
+
+    with pytest.raises(ValueError, match="must name canary_topic_set"):
+        gateway_forwarder.load_gateway_forwarder_runtime_config(
+            path, contract_path=contract_path
+        )
+
+
 def test_staging_canary_resolves_topics_from_node_contract() -> None:
     repo_root = Path(__file__).parents[3]
 
@@ -156,6 +238,17 @@ def test_staging_canary_resolves_topics_from_node_contract() -> None:
     assert len(loaded.forwarder.mirror_topics.inbound) == 3
     assert len(loaded.forwarder.mirror_topics.outbound) == 6
     assert loaded.local_bus.bootstrap_servers == "redpanda:9092"
+    # OMN-15781: deployed config must resolve to "earliest" on both legs, not
+    # the model default -- a "latest" resolved leg here silently drops any
+    # backlog produced while the consumer group was unjoined (crash/rejoin
+    # window), and this is the exact deployed config the production process
+    # loads. The runtime-config validator also fails closed on "latest" (see
+    # test_runtime_config_rejects_latest_auto_offset_reset_on_*_leg above),
+    # so a regression here would fail at load time, not just this assertion.
+    assert loaded.local_bus.auto_offset_reset == "earliest"
+    assert loaded.cloud_bus.auto_offset_reset == "earliest"
+    assert loaded.forwarder.canary.topic == "onex.evt.omnibase-infra.gateway-canary.v1"
+    assert loaded.forwarder.canary.cadence_seconds == 30
 
 
 @pytest.mark.asyncio
@@ -223,6 +316,141 @@ async def test_heartbeat_loop_emits_immediately_and_stops() -> None:
     )
 
     assert forwarder.calls == 1
+
+
+class _FakeSupervisedDelivery:
+    """Fakes ``NodeGatewayDelivery`` for ``_supervise_gateway_delivery`` tests.
+
+    ``wait()`` raises each queued exception in order, then blocks forever
+    (an unset ``asyncio.Event``) to represent a healthy running loop.
+    """
+
+    def __init__(self, failures: Sequence[Exception]) -> None:
+        self._failures = list(failures)
+        self._never = asyncio.Event()
+        self.start_calls = 0
+        self.stop_calls = 0
+
+    async def wait(self) -> None:
+        if self._failures:
+            raise self._failures.pop(0)
+        await self._never.wait()
+
+    async def start(self) -> None:
+        self.start_calls += 1
+
+    async def stop(self) -> None:
+        self.stop_calls += 1
+
+
+class _FakeStatusForwarder:
+    def __init__(self) -> None:
+        self.calls: list[tuple[str, int, str]] = []
+
+    async def publish_status(
+        self,
+        status: str,
+        *,
+        consecutive_failures: int = 0,
+        detail: str = "",
+    ) -> None:
+        self.calls.append((status, consecutive_failures, detail))
+
+
+async def _never_ending_heartbeat(shutdown_event: asyncio.Event) -> None:
+    await shutdown_event.wait()
+
+
+@pytest.mark.asyncio
+async def test_supervise_gateway_delivery_retries_without_raising() -> None:
+    """OMN-15742: a cloud-leg failure retries with backoff, never propagates."""
+    shutdown_event = asyncio.Event()
+    delivery = _FakeSupervisedDelivery([ValueError("boom-1"), ValueError("boom-2")])
+    forwarder = _FakeStatusForwarder()
+    heartbeat_task = asyncio.create_task(_never_ending_heartbeat(shutdown_event))
+    config = _runtime_config().forwarder.model_copy(
+        update={
+            "reconnect_backoff_initial_seconds": 0.01,
+            "reconnect_backoff_max_seconds": 0.01,
+            "reconnect_backoff_jitter_seconds": 0.0,
+            "degraded_after_seconds": 1000,
+            "heartbeat_interval_seconds": 1,
+        }
+    )
+
+    async def _stop_after_recovery() -> None:
+        # Two failed attempts + one full recovery-confirm window
+        # (heartbeat_interval_seconds) is enough time for the loop to have
+        # restarted twice and reset its failure window; extra margin for
+        # scheduling jitter on a loaded CI host.
+        await asyncio.sleep(1.8)
+        shutdown_event.set()
+
+    stopper = asyncio.create_task(_stop_after_recovery())
+    try:
+        await gateway_forwarder._supervise_gateway_delivery(
+            forwarder=forwarder,  # type: ignore[arg-type]
+            delivery=delivery,  # type: ignore[arg-type]
+            heartbeat_task=heartbeat_task,
+            shutdown_event=shutdown_event,
+            config=config,
+        )
+    finally:
+        heartbeat_task.cancel()
+        await asyncio.gather(heartbeat_task, return_exceptions=True)
+        await stopper
+
+    assert delivery.start_calls == 2
+    assert delivery.stop_calls == 2
+    assert forwarder.calls == []  # degraded_after_seconds never crossed
+
+
+@pytest.mark.asyncio
+async def test_supervise_gateway_delivery_emits_degraded_then_recovers() -> None:
+    """OMN-15742: sustained failure crosses the contract degradation window."""
+    shutdown_event = asyncio.Event()
+    delivery = _FakeSupervisedDelivery(
+        [ValueError("boom-1"), ValueError("boom-2"), ValueError("boom-3")]
+    )
+    forwarder = _FakeStatusForwarder()
+    heartbeat_task = asyncio.create_task(_never_ending_heartbeat(shutdown_event))
+    config = _runtime_config().forwarder.model_copy(
+        update={
+            "reconnect_backoff_initial_seconds": 0.5,
+            "reconnect_backoff_max_seconds": 0.5,
+            "reconnect_backoff_jitter_seconds": 0.0,
+            "degraded_after_seconds": 1,
+            "heartbeat_interval_seconds": 1,
+        }
+    )
+
+    async def _stop_when_recovered() -> None:
+        # 3 failures spaced ~0.5s apart cross the 1s degraded window;
+        # +1s recovery-confirm window after the loop stabilizes; extra
+        # margin for scheduling jitter on a loaded CI host.
+        await asyncio.sleep(3.5)
+        shutdown_event.set()
+
+    stopper = asyncio.create_task(_stop_when_recovered())
+    try:
+        await gateway_forwarder._supervise_gateway_delivery(
+            forwarder=forwarder,  # type: ignore[arg-type]
+            delivery=delivery,  # type: ignore[arg-type]
+            heartbeat_task=heartbeat_task,
+            shutdown_event=shutdown_event,
+            config=config,
+        )
+    finally:
+        heartbeat_task.cancel()
+        await asyncio.gather(heartbeat_task, return_exceptions=True)
+        await stopper
+
+    assert delivery.start_calls == 3
+    statuses = [call[0] for call in forwarder.calls]
+    assert statuses == ["degraded", "active"]
+    degraded_call = forwarder.calls[0]
+    assert degraded_call[1] == 3  # consecutive_failures at emission
+    assert "boom-3" in degraded_call[2]
 
 
 class _FakeTransport:

@@ -394,6 +394,12 @@ def migrations_dir(tmp_path: Path) -> Path:
     (forward / "fenced-node-migrations.yaml").write_text(
         "fenced_node_migrations: []\n", encoding="utf-8"
     )
+    # OMN-15336 item 4 repair: the runner also unconditionally requires the
+    # FORCE-RLS grandfather snapshot to exist under MIGRATIONS_DIR now; this
+    # fixture has no node migrations at all, so an empty list is correct.
+    (forward / "grandfathered-force-rls-migrations.yaml").write_text(
+        "grandfathered_force_rls_migrations: []\n", encoding="utf-8"
+    )
     return forward
 
 
@@ -644,6 +650,12 @@ def two_migrations_dir(tmp_path: Path) -> Path:
     # exist under MIGRATIONS_DIR; none of this fixture's ids need gating.
     (forward / "fenced-node-migrations.yaml").write_text(
         "fenced_node_migrations: []\n", encoding="utf-8"
+    )
+    # OMN-15336 item 4 repair: the runner also unconditionally requires the
+    # FORCE-RLS grandfather snapshot to exist under MIGRATIONS_DIR now; this
+    # fixture has no node migrations at all, so an empty list is correct.
+    (forward / "grandfathered-force-rls-migrations.yaml").write_text(
+        "grandfathered_force_rls_migrations: []\n", encoding="utf-8"
     )
     return forward
 

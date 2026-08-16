@@ -2269,6 +2269,32 @@ class TestDriftIsReportedAgainstTheResolvedSpec:
 class TestReadinessSpecPassThrough:
     """(c) The resolved spec reaches the readiness path for topics we created."""
 
+    async def test_single_topic_readiness_uses_capped_creation_spec(
+        self,
+        tmp_path: Path,
+        monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
+        """Cold-start readiness must compare against what creation requested.
+
+        The per-contract boot interleave provisions one topic at a time through
+        ``ensure_topic_exists``. On capped dev lanes it creates one partition
+        for a six-partition contract; recording the uncapped contract spec made
+        every readiness poll fail until a process restart forgot that spec.
+        """
+        monkeypatch.setenv("ONEX_TOPIC_PROVISIONER_MAX_PARTITIONS", "1")
+        _use_self_hosted(monkeypatch)
+        _write_contract(tmp_path, replication_factor=1, partitions=6)
+        provisioner = _provisioner(tmp_path)
+        recorder = _AdminRecorder(reported_partitions=1, reported_replicas=1)
+
+        with _patched_admin(recorder):
+            created = await provisioner.ensure_topic_exists(topic_name=TOPIC)
+            readiness = await provisioner.confirm_topics_ready([TOPIC])
+
+        assert created is True
+        assert recorder.created_spec(TOPIC).num_partitions == 1
+        assert readiness.is_ready
+
     async def test_created_topic_readiness_asserts_created_spec(
         self,
         tmp_path: Path,

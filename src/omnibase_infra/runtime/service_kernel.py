@@ -164,7 +164,10 @@ from omnibase_infra.runtime.protocol_domain_plugin import (
     RegistryDomainPlugin,
 )
 from omnibase_infra.runtime.runtime_host_process import RuntimeHostProcess
-from omnibase_infra.runtime.runtime_profile import load_runtime_profile
+from omnibase_infra.runtime.runtime_profile import (
+    load_runtime_profile,
+    resolve_secret_resolver_config_path,
+)
 from omnibase_infra.runtime.util_container_wiring import (
     wire_infrastructure_services,
 )
@@ -450,8 +453,14 @@ def resolve_topic_readiness_config() -> ModelTopicReadinessConfig:
 def _build_runtime_handler_dependencies(
     postgres_pool: object | None,
     kafka_bootstrap_servers: str | None = None,
+    gateway_secret_resolver_config_path: Path | None = None,
 ) -> dict[str, dict[str, object]] | None:
-    """Build constructor dependencies for runtime-owned handlers."""
+    """Build constructor dependencies for runtime-owned handlers.
+
+    Gateway session handlers must share one session store and one resolver.
+    The resolver is built from the deploy-rendered, typed configuration artifact;
+    no handler may infer secret names or read secret values directly.
+    """
     dependencies: dict[str, dict[str, object]] = {}
     if postgres_pool is not None:
         dependencies.update(
@@ -479,6 +488,84 @@ def _build_runtime_handler_dependencies(
             "producer": DLQProducer(dlq_replay_config),
             "quarantine_producer": DLQQuarantineProducer(dlq_replay_config),
         }
+
+    if gateway_secret_resolver_config_path:
+        from omnibase_infra.nodes.node_gateway_attach_effect.models.model_gateway_attach_config import (
+            ModelGatewayAttachConfig,
+        )
+        from omnibase_infra.nodes.node_gateway_attach_effect.services.store_gateway_session_memory import (
+            StoreGatewaySessionMemory,
+        )
+        from omnibase_infra.runtime.models.model_secret_resolver_config import (
+            ModelSecretResolverConfig,
+        )
+        from omnibase_infra.runtime.secret_resolver import SecretResolver
+
+        config_path = gateway_secret_resolver_config_path
+        try:
+            raw_config = yaml.safe_load(config_path.read_text(encoding="utf-8"))
+            secret_resolver_config = ModelSecretResolverConfig.model_validate(
+                raw_config
+            )
+        except (OSError, ValueError, yaml.YAMLError) as exc:
+            raise ProtocolConfigurationError(
+                "Gateway attach dependency wiring requires a valid rendered "
+                f"secret-resolver config at {config_path}"
+            ) from exc
+
+        # The node's contract.yaml is the source of truth for this config
+        # (its own description says "resolved from contract overlays"); a
+        # bare ModelGatewayAttachConfig() here made every config.gateway_attach
+        # edit a silent runtime no-op because the renewal builder and session
+        # policy only ever saw field defaults.
+        import omnibase_infra.nodes.node_gateway_attach_effect as _gateway_attach_pkg
+
+        gateway_contract_path = (
+            Path(str(_gateway_attach_pkg.__file__)).parent / "contract.yaml"
+        )
+        try:
+            raw_contract = yaml.safe_load(
+                gateway_contract_path.read_text(encoding="utf-8")
+            )
+            gateway_config = ModelGatewayAttachConfig.model_validate(
+                raw_contract["config"]["gateway_attach"]
+            )
+        except (OSError, KeyError, TypeError, ValueError, yaml.YAMLError) as exc:
+            raise ProtocolConfigurationError(
+                "Gateway attach dependency wiring requires the contract-declared "
+                f"config.gateway_attach block at {gateway_contract_path}"
+            ) from exc
+        required_gateway_refs = {
+            gateway_config.keycloak_issuer_ref,
+            gateway_config.keycloak_introspection_ref,
+            gateway_config.keycloak_jwks_ref,
+            f"{gateway_config.keycloak_admin_client_ref}.client_id",
+            f"{gateway_config.keycloak_admin_client_ref}.client_secret",
+        }
+        mapped_refs = {
+            mapping.logical_name for mapping in secret_resolver_config.mappings
+        }
+        missing_refs = sorted(required_gateway_refs - mapped_refs)
+        if missing_refs:
+            raise ProtocolConfigurationError(
+                "Gateway attach dependency wiring is missing explicit "
+                f"secret-resolver mappings: {', '.join(missing_refs)}"
+            )
+
+        session_store = StoreGatewaySessionMemory()
+        secret_resolver = SecretResolver(config=secret_resolver_config)
+        shared_dependencies = {
+            "config": gateway_config,
+            "session_store": session_store,
+            "secret_resolver": secret_resolver,
+        }
+        dependencies.update(
+            {
+                "HandlerGatewayAttach": dict(shared_dependencies),
+                "HandlerGatewayHeartbeat": dict(shared_dependencies),
+                "HandlerGatewayDetach": dict(shared_dependencies),
+            }
+        )
 
     if not dependencies:
         return None
@@ -1680,6 +1767,12 @@ async def bootstrap() -> int:
                 _savings_topic = _savings_config.produce_topic
 
                 _savings_input_topics = list(_savings_config.consumed_topics)
+                _savings_node_identity = ModelNodeIdentity(
+                    env=environment,
+                    service=config.name or "onex-kernel",
+                    node_name="savings-estimator",
+                    version="v1",
+                )
 
                 async def _savings_consumer_loop() -> None:
                     """Consume input events and produce savings estimates."""
@@ -1701,8 +1794,8 @@ async def bootstrap() -> int:
 
                             await event_bus.subscribe(
                                 _input_topic,
+                                node_identity=_savings_node_identity,
                                 on_message=_savings_on_message,
-                                group_id=f"savings-estimator.{_input_topic}",
                             )
                         except Exception:  # noqa: BLE001
                             logger.warning(
@@ -2846,9 +2939,17 @@ async def bootstrap() -> int:
                             correlation_id,
                         )
 
+                gateway_secret_resolver_config_path_raw = (
+                    resolve_secret_resolver_config_path()
+                )
                 runtime_handler_dependencies = _build_runtime_handler_dependencies(
                     registration_service.postgres_pool,
                     kafka_bootstrap_servers if use_kafka else None,
+                    gateway_secret_resolver_config_path=(
+                        Path(gateway_secret_resolver_config_path_raw)
+                        if gateway_secret_resolver_config_path_raw
+                        else None
+                    ),
                 )
 
                 # 5. Wire handlers into dispatch engine
@@ -3205,6 +3306,36 @@ async def bootstrap() -> int:
             else auto_wiring_manifest_discovered
         )
         if _introspection_manifest is not None:
+            # OMN-10856: bind runtime profile + image/deployment SHA identity
+            # onto the served manifest so a reported topology can be tied to
+            # a specific deployed build. contracts/errors are carried through
+            # unchanged (single source — see bind_introspection_manifest_identity).
+            # Env reads happen HERE, not in the auto_wiring package, because
+            # this file is the approved env-read boundary
+            # (scripts/check-env-reads.sh). ONEX_IMAGE_DIGEST reuses the same
+            # var already read below at publish_runtime_manifest(image_digest=...)
+            # (OMN-11196/OMN-11197) rather than inventing a second name for
+            # the same concept.
+            from omnibase_infra.runtime.auto_wiring.introspection_manifest_identity import (
+                ENV_VAR_DEPLOYMENT_SHA,
+                ENV_VAR_IMAGE_SHA,
+                bind_introspection_manifest_identity,
+            )
+            from omnibase_infra.runtime.auto_wiring.models.model_runtime_build_sha import (
+                ModelRuntimeBuildSha,
+            )
+
+            _introspection_manifest = bind_introspection_manifest_identity(
+                _introspection_manifest,
+                runtime_profile=kernel_profile.name,
+                image_sha=ModelRuntimeBuildSha.from_raw(
+                    os.environ.get(ENV_VAR_IMAGE_SHA), source_name=ENV_VAR_IMAGE_SHA
+                ),
+                deployment_sha=ModelRuntimeBuildSha.from_raw(
+                    os.environ.get(ENV_VAR_DEPLOYMENT_SHA),
+                    source_name=ENV_VAR_DEPLOYMENT_SHA,
+                ),
+            )
             health_server.attach_manifest(_introspection_manifest)
 
         # OMN-13768: the long-running Kafka subscription work (per-contract

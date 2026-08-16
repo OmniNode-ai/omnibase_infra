@@ -20,7 +20,14 @@ concurrency:
 
 jobs:
   release:
-    timeout-minutes: 30
+    # OMN-16047: 60, not 30. The pin-resolvability gate below installs the built
+    # wheel's whole transitive closure with --no-cache (135 packages / 242 MB for
+    # this repo) and now budgets up to 1800s for it, because a *cached* uv sync on
+    # the self-hosted fleet already costs 110-402s. 30 minutes left no room for
+    # that install plus build + publish, so the job ceiling has to clear the step
+    # ceiling -- otherwise a slow install dies as an opaque job kill instead of the
+    # script's own diagnostic failure.
+    timeout-minutes: 60
     runs-on: >-
       ${{ fromJSON(vars.OMNI_TRUSTED_CI_RUNS_ON_JSON || '["self-hosted","omnibase-ci"]') }}
     outputs:
