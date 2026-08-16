@@ -51,7 +51,31 @@ class ModelGatewayAttachConfig(BaseModel):
     session_degraded_after_seconds: int = Field(default=60, gt=0)
     # Hard ceiling on session lifetime regardless of token exp -- bounds the
     # blast radius of a token whose exp claim is misconfigured too far out.
+    # Enforced (not merely stored) since OMN-16022: heartbeat and detach
+    # reject a session past the ``expires_at`` derived from this.
     max_session_ttl_seconds: int = Field(default=3600, gt=0)
+    # OMN-16022: bounded degraded mode. The maximum time a session may
+    # survive without a SUCCESSFUL Keycloak revalidation, after which it is
+    # torn down regardless of whether Keycloak is reachable.
+    #
+    # Why 900s: it is one attach-token lifetime. The per-tenant
+    # client-credentials token this node validates is minted with a 900s
+    # maximum TTL (invariant 2 of the OMN-15952 renewal design), so a
+    # session that has gone a full token lifetime without revalidation has
+    # already outlived the credential that justified it -- continuing to
+    # trust it past that point extends trust strictly beyond anything the
+    # IdP ever asserted. Choosing the token lifetime rather than a smaller
+    # number also keeps a routine Keycloak blip (seconds to minutes,
+    # absorbed by circuit_breaker_reset_timeout_seconds and by the
+    # OMN-15918 outage/revocation split) from ever reaching the ceiling:
+    # only a sustained partition does.
+    #
+    # This is deliberately NOT max_session_ttl_seconds. That is the 3600s
+    # *session* ceiling applied at attach; this is the *revalidation*
+    # bound, a different bound at a different layer. See the OMN-15952
+    # design doc rev-3 correction in section 2 -- conflating the two is
+    # exactly the error this pair of constants exists to prevent.
+    max_unverified_session_seconds: int = Field(default=900, gt=0)
     # OMN-15952 renewal cycle -- the contract-declared terms an unattended
     # runtime must obey to survive its own session ceiling. These are
     # CLIENT-facing policy (handed back at attach in
