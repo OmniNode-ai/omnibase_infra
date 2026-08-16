@@ -253,6 +253,28 @@ EXPECTED_EXTERNAL_CONTEXTS: tuple[str, ...] = (
     "dispatcher-route-coverage",
     "CodeQL",
     "required-check-skip-guard / check-skip-vectors",
+    # OMN-15979: the "Integration Test Removal Gate" job (OMN-8732,
+    # .github/workflows/integration-test-check.yml, job check-test-removal) hard-
+    # blocks a PR that deletes a tests/integration/*.py file without a
+    # replacement, and its own header says "No override mechanism" — but before
+    # this entry it was invisible to both branch protection (dev requires only
+    # `CI Summary`) and this poller, so a red run merged anyway. Live proof: PR
+    # #2720 (head ce4e88f8) merged 2026-08-11T04:47:58Z with this context =
+    # failure. Measured 16/16 present, 15/16 green over TWO independent 16-PR
+    # windows: the original OMN-15496 seed window 2026-07-29T23:04Z ->
+    # 2026-07-30T14:54Z (#2546...#2567, backfilled into
+    # omn15496_merge_time_external_check_runs.json — 16/16 green there) and the
+    # current window 2026-08-09T23:11Z -> 2026-08-11T04:47:58Z (#2705...#2720,
+    # omn15979_merge_time_external_check_runs.json — 15/16 green). The one red,
+    # #2720, is root-caused, not a repeat-flake pattern: its job (id
+    # 93668844708) recorded ZERO steps (no "Set up job"/checkout/script rows,
+    # unlike every green run's 6-step shape) — a self-hosted-runner dispatch
+    # failure, and PR #2720's diff touched only
+    # .github/workflows/build-and-push-runtime.yml (zero tests/integration
+    # files), so the gate's own substantive check was never at risk of a
+    # legitimate red. Fixture + regression:
+    # tests/ci/fixtures/omn15979_merge_time_external_check_runs.json.
+    "Integration Test Removal Gate",
     "Dep Provenance Gate",  # OMN-15737: 16/16 present, 16/16 green (#2546-#2567 AND #2646-#2669)
 )
 

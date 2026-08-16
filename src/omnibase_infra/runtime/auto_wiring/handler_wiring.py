@@ -221,6 +221,52 @@ class BoundaryPublishError(Exception):
     """
 
 
+class BoundaryApplyPublishError(Exception):
+    """Marks a non-outbox ``result_applier.apply()`` publish failure whose
+    unconditional best-effort DLQ route (``_route_apply_publish_failure``)
+    could not durably persist the record -- offset must not advance.
+
+    OMN-14498 (adversarial verify, Linear comment 3c6da9a0): at the DEFAULT
+    (unset) ``ONEX_BOUNDARY_DLQ_ENABLED`` state, a non-``state_io`` contract
+    (``propagate_publish_failures=False``) whose ``result_applier.apply()``
+    raised used to fall through to the flag-gated ``_route_swallowed_exception``
+    path, which -- with the flag off -- logs one line and returns normally.
+    A callback that returns normally IS an ACK
+    (``EventBusKafka._dispatch_to_subscriber`` reads "no exception" as
+    success and advances the offset), so the failed publish vanished with
+    nothing durable and nothing redelivered: the silent-drop class this
+    ticket exists to close.
+
+    Unlike a raw handler/dispatch exception (still legitimately staged
+    behind ``ONEX_BOUNDARY_DLQ_ENABLED`` -- see
+    ``test_boundary_dlq_omn14507.py::TestBoundaryDlqFlagOff``), a
+    result-applier publish failure is not an unvalidated/doubtful payload:
+    the dispatch already SUCCEEDED and produced a known-good result: only
+    its downstream delivery failed. ``_route_apply_publish_failure``
+    therefore attempts the DLQ write UNCONDITIONALLY -- mirroring the same
+    unconditional idiom ``_route_sync_publisher_failure`` already uses for
+    the sync-publisher leg (#2436 / OMN-15029) -- and this type is raised
+    only when that unconditional attempt itself could not durably persist
+    the record, so the boundary must withhold the offset (NACK) instead of
+    the historical swallow-and-ACK.
+
+    Deliberately NOT caught by ``_route_swallowed_exception`` /
+    ``_boundary_dlq_enabled()`` -- the auto-wired ``callback()`` routes this
+    type straight out of the boundary instead, so a second, flag-gated
+    swallow can never re-absorb it.
+    """
+
+    def __init__(self, topic: str, correlation_id: object, cause: Exception) -> None:
+        super().__init__(
+            f"result-applier publish failed and no durable DLQ route was "
+            f"available; offset must not advance (topic={topic} "
+            f"correlation_id={correlation_id} cause={type(cause).__name__})"
+        )
+        self.topic = topic
+        self.correlation_id = correlation_id
+        self.cause = cause
+
+
 class HandlerDispatchFailureError(Exception):
     """A handler/coercion failure the engine reported as a FAILED dispatch RESULT.
 
@@ -4410,6 +4456,103 @@ async def _dispatch_to_contract_scope(
     )
 
 
+async def _route_apply_publish_failure(
+    exc: Exception,
+    *,
+    event_bus: object | None,
+    topic: str,
+    message: object,
+    correlation_id: UUID,
+) -> None:
+    """Unconditional best-effort DLQ routing for a non-outbox
+    ``result_applier.apply()`` publish failure (OMN-14498, adversarial
+    verify comment 3c6da9a0).
+
+    Unlike ``_route_swallowed_exception``, this is NOT gated behind
+    ``_boundary_dlq_enabled()``: the dispatch already SUCCEEDED here --
+    only the downstream publish of its (already-computed) result failed --
+    so the record is not the doubtful/unvalidated payload the staged
+    rollout exists to hold back, it is a known-good result that failed to
+    land. Mirrors the same unconditional-DLQ idiom
+    ``_route_sync_publisher_failure`` uses for the sync-publisher leg
+    (#2436 / OMN-15029).
+
+    Unlike that fire-and-forget leg, THIS boundary owns a consume offset,
+    so (unlike ``_route_sync_publisher_failure``, which has nothing to
+    NACK) a failed/unavailable DLQ write here raises
+    ``BoundaryApplyPublishError`` instead of returning -- the caller
+    (``_make_event_bus_callback.callback``) propagates that unconditionally
+    so the offset is withheld rather than silently advanced. Never swallows
+    into a log-only return: either the record is durably DLQ'd (returns
+    normally, safe to ACK) or the offset must not advance (raises).
+    """
+    from omnibase_infra.event_bus.topic_constants import get_dlq_topic_for_original
+
+    publish_dlq_fn = (
+        getattr(event_bus, "_publish_raw_to_dlq", None)
+        if event_bus is not None
+        else None
+    )
+    if publish_dlq_fn is None or not callable(publish_dlq_fn):
+        logger.error(
+            "metric_name=boundary_swallow_observed dlq_routed=false "
+            "dlq_enabled=unconditional message_lost=true topic=%s "
+            "error_type=%s correlation_id=%s",
+            topic,
+            type(exc).__name__,
+            correlation_id,
+        )
+        raise BoundaryApplyPublishError(topic, correlation_id, exc)
+
+    try:
+        dlq_persisted = await publish_dlq_fn(
+            original_topic=topic,
+            raw_msg=message,
+            error=exc,
+            correlation_id=correlation_id,
+            failure_type="apply_publish_failed",
+            consumer_group="auto-wiring",
+            dlq_topic=get_dlq_topic_for_original(topic),
+        )
+    except Exception as dlq_exc:
+        logger.error(
+            "metric_name=boundary_swallow_observed dlq_routed=false "
+            "dlq_enabled=unconditional dlq_publish_failed=true "
+            "message_lost=true topic=%s error_type=%s dlq_error=%s "
+            "correlation_id=%s",
+            topic,
+            type(exc).__name__,
+            _sanitize_exc(dlq_exc),
+            correlation_id,
+        )
+        raise BoundaryApplyPublishError(topic, correlation_id, exc) from dlq_exc
+
+    if dlq_persisted:
+        logger.error(
+            "metric_name=boundary_swallow_prevented dlq_routed=true "
+            "dlq_enabled=unconditional topic=%s error_type=%s "
+            "correlation_id=%s",
+            topic,
+            type(exc).__name__,
+            correlation_id,
+        )
+        return
+
+    # OMN-14936-class False return: the publish did NOT durably persist
+    # (rejected input, producer unavailable, or the send itself
+    # failed/timed out) WITHOUT raising. Treated identically to the
+    # except-branch above -- not durable, so the offset must be withheld.
+    logger.error(
+        "metric_name=boundary_swallow_observed dlq_routed=false "
+        "dlq_enabled=unconditional dlq_publish_failed=true "
+        "message_lost=true topic=%s error_type=%s correlation_id=%s",
+        topic,
+        type(exc).__name__,
+        correlation_id,
+    )
+    raise BoundaryApplyPublishError(topic, correlation_id, exc)
+
+
 def _make_event_bus_callback(
     topic: str,
     dispatch_engine: ProtocolDispatchEngine,
@@ -4466,6 +4609,7 @@ def _make_event_bus_callback(
 
     async def _dispatch_with_bounded_retry(
         envelope: ModelEventEnvelope[object],
+        message: object,
     ) -> None:
         """Dispatch + apply, retrying a bounded number of times on failure.
 
@@ -4519,13 +4663,35 @@ def _make_event_bus_callback(
                         # OMN-14403 §4.3: on the outbox path a publish failure
                         # must PROPAGATE (redeliver), never be retried-then-
                         # swallowed. Tag it so the loop breaks and the outer
-                        # handler re-raises. Off the outbox path this is a no-op:
-                        # the original exception rides the generic retry arm.
+                        # handler re-raises.
                         if propagate_publish_failures:
                             raise BoundaryPublishError(
                                 "outbox publish failed"
                             ) from apply_exc
-                        raise
+                        # OMN-14498 (adversarial verify, comment 3c6da9a0): off
+                        # the outbox path this used to ride the generic retry
+                        # arm below and, on exhaustion, fall into the
+                        # flag-gated `_route_swallowed_exception` -- which at
+                        # the DEFAULT (unset) ONEX_BOUNDARY_DLQ_ENABLED state
+                        # logs one line and returns normally (an ACK), losing
+                        # the record silently. The dispatch already SUCCEEDED
+                        # here; only the downstream publish of its result
+                        # failed, so this is routed through an UNCONDITIONAL
+                        # best-effort DLQ attempt instead of the staged-
+                        # rollout flag (mirrors the sync-publisher leg's own
+                        # unconditional route, #2436 / OMN-15029). Raises
+                        # BoundaryApplyPublishError -- never retried, never
+                        # re-absorbed by `_route_swallowed_exception` -- when
+                        # that attempt cannot durably persist the record, so
+                        # the offset is withheld instead of silently advanced.
+                        await _route_apply_publish_failure(
+                            apply_exc,
+                            event_bus=event_bus,
+                            topic=topic,
+                            message=message,
+                            correlation_id=envelope.correlation_id or uuid4(),
+                        )
+                        return
                 # OMN-14716: the engine catch-all converts a dispatcher crash (a
                 # def-B handler AttributeError, a boundary coercion failure) into a
                 # FAILED result instead of re-raising, and the applier silently
@@ -4539,13 +4705,19 @@ def _make_event_bus_callback(
                 PydanticValidationError,
                 ProtocolConfigurationError,
                 BoundaryPublishError,
+                BoundaryApplyPublishError,
                 HandlerDispatchFailureError,
             ) as exc:
                 # Non-retryable: deterministic content/config error, an outbox
-                # publish failure that must propagate (not retry), or a FAILED
+                # publish failure that must propagate (not retry), a FAILED
                 # dispatch result the engine already produced deterministically
-                # (OMN-14716). No backoff, no further attempts -- see docstring
-                # gap G2 + OMN-14403 §4.3.
+                # (OMN-14716), or an already-exhausted unconditional DLQ
+                # attempt for a non-outbox apply() publish failure (OMN-14498)
+                # -- the handler already dispatched successfully once;
+                # re-invoking it on retry would only risk duplicate side
+                # effects for a downstream-publish problem retrying the
+                # handler itself cannot fix. No backoff, no further attempts
+                # -- see docstring gap G2 + OMN-14403 §4.3.
                 last_exc = exc
                 break
             except Exception as exc:  # noqa: BLE001 — bounded-retry loop; re-raised below on exhaustion
@@ -4805,7 +4977,19 @@ def _make_event_bus_callback(
                 envelope = message
             if envelope.correlation_id is not None:
                 correlation_id = envelope.correlation_id
-            await _dispatch_with_bounded_retry(envelope)
+            await _dispatch_with_bounded_retry(envelope, message)
+        except BoundaryApplyPublishError as exc:
+            # OMN-14498 (adversarial verify, comment 3c6da9a0): this marks an
+            # already-exhausted UNCONDITIONAL DLQ attempt for a non-outbox
+            # result-applier publish failure (see
+            # `_route_apply_publish_failure`) -- it must never be re-routed
+            # through the flag-gated `_route_swallowed_exception`, which
+            # would silently ACK when ONEX_BOUNDARY_DLQ_ENABLED is unset
+            # (the exact silent-drop this ticket exists to close). Propagate
+            # unconditionally, un-unwrapped -- same shape as
+            # BoundaryDlqNotPersistedError's propagation on the sibling
+            # flag-gated path -- so the offset is withheld instead.
+            raise
         except (OptimisticConflictError, BoundaryPublishError) as exc:
             # OMN-14403 §4.3, OMN-14600 CORRECTION: this except-tuple's
             # OptimisticConflictError arm is effectively DEAD for a dispatcher
