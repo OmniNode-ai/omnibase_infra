@@ -127,3 +127,28 @@ tool_cache:
   snapshot_root: /home/jonah/.omnibase/runners/toolcache-seed
   seed_script: docker/runners/toolcache-seed.sh
   recreate_procedure: docs/runbooks/c2-git-mirror-egress-rollout.md
+# OMN-15736 — local caching DNS resolver (unbound) endpoint. Scaling
+# precondition #1 (capacity probe: [mergesweep-0808-capacity]). STATUS:
+# pending-activation / INERT — the cache service
+# (docker/docker-compose.dns-cache.yml) is stood up and wired only at the
+# operator-gated rollout; recording the endpoint here does not activate it.
+# The matching canary `dns:` wiring lives in
+# docker/docker-compose.dns-canary.yml (non-default override, not applied by
+# any default deploy path). Runbook:
+# docs/runbooks/runner-dns-cache-rollout.md.
+dns_cache:
+  active: false
+  # `dns:` (the compose/Docker container directive) requires a raw IP, not a
+  # Tailscale MagicDNS hostname, so this is the runner host's LAN IP rather
+  # than runner_host above.
+  host: 192.168.86.201
+  port: 53
+  # Existing systemd-resolved upstream + fallback, unchanged — the cache
+  # forwards to these, it does not replace them.
+  upstream_forwarders:
+    - 192.168.86.1
+    - 1.1.1.1
+    - 8.8.8.8
+  # Acceptance targets before fleet-wide rollout (OMN-15736 AC3).
+  target_hit_rate: 0.80
+  target_dns_failure_count: 0

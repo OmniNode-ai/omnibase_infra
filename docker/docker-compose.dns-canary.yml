@@ -1,0 +1,46 @@
+# docker-compose.dns-canary.yml
+# OMN-15736 — DNS-cache canary override. NON-DEFAULT: this file is never
+# applied by any default deploy path (docker-compose.runners.yml alone brings
+# up the fleet unchanged). It is layered in explicitly, at rollout, on top of
+# the base runner compose file to repoint a small canary subset of runners at
+# the DNS cache (docker-compose.dns-cache.yml) instead of the LAN router.
+#
+# Pattern note: the OMN-14027 pypi-cache canary was wired live, ad hoc, via an
+# env-var-prefixed `docker compose ... --force-recreate` command
+# (docs/runbooks/pypi-cache-egress-rollout.md §3) rather than a checked-in
+# override file, and a matching override file
+# (docker-compose.pypi-canary.yml) exists only on .201, outside git. This
+# file intentionally deviates from that precedent by being a real, reviewable,
+# checked-in override — the DNS repoint is a `dns:` key change (compose has no
+# per-container env-var equivalent for the container-level `dns:` directive,
+# unlike the pypi-cache's env-var UV_DEFAULT_INDEX wiring), so an override
+# file is the natural mechanism here, not a deviation of convenience.
+#
+# Usage (operator-gated — do NOT run without explicit go):
+#   docker compose \
+#     -f docker/docker-compose.runners.yml \
+#     -f docker/docker-compose.dns-canary.yml \
+#     up -d --no-deps omninode-runner-1 omninode-runner-2
+#
+# `dns:` requires a raw IP (not a Tailscale MagicDNS hostname), so this points
+# at the runner host's LAN IP where docker-compose.dns-cache.yml publishes
+# port 53. Extend to a 3rd/4th canary runner (the ticket's 2-4 range) by
+# uncommenting the omninode-runner-3 / omninode-runner-4 blocks below and
+# adding the container names to the `up -d` command above.
+services:
+  omninode-runner-1:
+    dns:
+      - 192.168.86.201 # omninode-dns-cache (this host)
+      - 192.168.86.1 # router fallback — cache miss/outage degrades, not fails-closed
+  omninode-runner-2:
+    dns:
+      - 192.168.86.201
+      - 192.168.86.1
+  # omninode-runner-3:
+  #   dns:
+  #     - 192.168.86.201
+  #     - 192.168.86.1
+  # omninode-runner-4:
+  #   dns:
+  #     - 192.168.86.201
+  #     - 192.168.86.1
