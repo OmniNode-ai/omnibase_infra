@@ -200,3 +200,31 @@ def test_logout_removes_the_credential_and_status_then_fails_closed(
 
     after = runner.invoke(auth_group, ["status"])
     assert after.exit_code != 0
+
+
+def test_auth_group_is_registered_as_an_onex_cli_entry_point() -> None:
+    """``onex auth`` must resolve through the ``onex.cli`` extension group.
+
+    The DoD surface for this slice is ``onex auth login`` (OMN-15922 §DoD-1)
+    -- the marketplace skill and every harness shell out to ``onex``, not to
+    ``omni-infra``. Registering ``auth_group`` only on the ``omni-infra``
+    click CLI (the #2747 port's gap) leaves ``onex auth`` a phantom callable:
+    core's ``cli_commands`` loads extensions exclusively from the ``onex.cli``
+    entry-point group. This asserts the declaration in pyproject.toml, not
+    installed metadata, so it fails on the omission itself regardless of the
+    venv's install state.
+    """
+    import tomllib
+
+    import click
+
+    pyproject = Path(__file__).parents[3] / "pyproject.toml"
+    with pyproject.open("rb") as fh:
+        data = tomllib.load(fh)
+
+    entry_points = data["project"]["entry-points"]["onex.cli"]
+    assert entry_points.get("auth") == "omnibase_infra.cli.cli_auth:auth_group"
+
+    # The declared target must actually be the loadable click group.
+    assert isinstance(auth_group, click.Group)
+    assert set(auth_group.commands) == {"login", "status", "token", "logout"}
