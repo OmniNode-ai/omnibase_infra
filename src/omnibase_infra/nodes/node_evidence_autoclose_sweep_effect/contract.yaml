@@ -137,6 +137,7 @@ health_check:
 metadata:
   description: "Evidence autoclose sweep: companion-merge -> dod_verify -> governed Done flip (OMN-16106 first slice)"
   author: "OmniNode Team"
+  transport_type: "http"
   created: "2026-08-17"
   updated: "2026-08-17"
   tags:
