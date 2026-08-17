@@ -108,6 +108,23 @@ def _fake_docker(bin_dir: Path, prepatch_lines: list[str], rc: int = 0) -> str:
     return str(script)
 
 
+def _fake_docker_exec_fails(bin_dir: Path, stderr_text: str, rc: int = 1) -> str:
+    """Create a stub docker executable whose `exec` fails, writing stderr_text
+    to stderr -- for exercising tripwire_prepatch_files' failure branches
+    (OMN-16111: container-absent vs. every other exec failure)."""
+    script = bin_dir / "docker"
+    script.write_text(
+        "#!/bin/sh\n"
+        'if [ "$1" = "exec" ]; then\n'
+        f'  cat >&2 <<"EOF"\n{stderr_text}\nEOF\n'
+        f"  exit {rc}\n"
+        "fi\n"
+        "exit 0\n"
+    )
+    script.chmod(script.stat().st_mode | stat.S_IEXEC)
+    return str(script)
+
+
 @pytest.mark.unit
 class TestAncestorGate:
     def test_pass_when_merge_commit_in_build_ref(self, tmp_path: Path) -> None:
@@ -511,6 +528,77 @@ class TestTripwire:
                 str(ledger),
                 "--docker-cmd",
                 docker,
+            ]
+        )
+        assert rc == 1
+
+    # -- OMN-16111: cold-bring-up-aware container-absence handling ----------
+
+    def test_warm_absent_container_fails_unchanged(self, tmp_path: Path) -> None:
+        """Without --cold-start (every existing warm-refresh call site), a
+        container that does not exist stays a hard failure -- byte-for-byte
+        the pre-OMN-16111 behavior."""
+        ledger, _ = self._ledger_with_merged_row(tmp_path, "/app/x.py.prepatch")
+        docker = _fake_docker_exec_fails(
+            tmp_path, "Error response from daemon: No such container: c1"
+        )
+        rc = MODULE.main(
+            [
+                "--container",
+                "c1",
+                "--clones-root",
+                str(tmp_path),
+                "--ledger",
+                str(ledger),
+                "--docker-cmd",
+                docker,
+            ]
+        )
+        assert rc == 1
+
+    def test_cold_start_absent_container_is_skipped_not_failed(
+        self, tmp_path: Path, capsys: pytest.CaptureFixture[str]
+    ) -> None:
+        """With --cold-start, a ledgered container that does not exist yet
+        (this run is what creates it) is 0 .prepatch files, not a failure."""
+        ledger, _ = self._ledger_with_merged_row(tmp_path, "/app/x.py.prepatch")
+        docker = _fake_docker_exec_fails(
+            tmp_path, "Error response from daemon: No such container: c1"
+        )
+        rc = MODULE.main(
+            [
+                "--container",
+                "c1",
+                "--clones-root",
+                str(tmp_path),
+                "--ledger",
+                str(ledger),
+                "--docker-cmd",
+                docker,
+                "--cold-start",
+            ]
+        )
+        assert rc == 0
+        out = capsys.readouterr().out
+        assert "does not exist yet" in out
+
+    def test_cold_start_other_exec_error_still_fails(self, tmp_path: Path) -> None:
+        """--cold-start narrowly carves out container-absence only -- every
+        other exec failure (permission error, daemon hiccup, ...) stays a
+        hard failure even under --cold-start."""
+        ledger, _ = self._ledger_with_merged_row(tmp_path, "/app/x.py.prepatch")
+        docker = _fake_docker_exec_fails(tmp_path, "permission denied")
+        rc = MODULE.main(
+            [
+                "--container",
+                "c1",
+                "--clones-root",
+                str(tmp_path),
+                "--ledger",
+                str(ledger),
+                "--docker-cmd",
+                docker,
+                "--cold-start",
             ]
         )
         assert rc == 1

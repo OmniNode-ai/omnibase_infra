@@ -1262,6 +1262,13 @@ guard_hotpatch_ledger() {
         --clones-root "${clones_root}"
         --build-ref "omnibase_infra=${git_sha}"
     )
+    if [[ "${COLD_FULL_BRINGUP}" == true ]]; then
+        # OMN-16111: a from-scratch cold bring-up legitimately has ledgered
+        # containers that don't exist yet (this run is what creates them) --
+        # tell the gate so it skips-not-fails their tripwire probe instead of
+        # treating "container absent" as an unexpected warm-lane vanish.
+        gate_args+=(--cold-start)
+    fi
     log_cmd "${gate} ${gate_args[*]}"
     if [[ "${python_bin}" == "uv-run" ]]; then
         if ! uv run --project "${repo_root}" python "${gate}" "${gate_args[@]}"; then
