@@ -1,0 +1,117 @@
+# SPDX-FileCopyrightText: 2025 OmniNode.ai Inc.
+# SPDX-License-Identifier: MIT
+
+# dep-provenance-lineage-live-canary.yml — OMN-16096
+#
+# The live half of the OMN-15604 content-lineage gate
+# (tests/integration/ci/test_dep_provenance_lineage_live_omn15604.py) proves
+# scripts/check_dep_provenance.py's REST-based resolver (resolve_src_tree_sha)
+# against real GitHub commits. It used to run inside the merge-required
+# test-parallel split, which coupled merge eligibility to github.com egress
+# weather: two canary attempts on PR #2758 burned on `transport error: The
+# read operation timed out` during an evening egress-degraded window.
+#
+# The merge-required path is now hermetic: dep-provenance-lineage-gate (in
+# ci.yml) resolves through resolve_src_tree_sha_hermetic, which tries the
+# OMN-16053 host-level git mirror first and only falls back to the live REST
+# API when the mirror itself cannot serve the ref. This workflow keeps the
+# live-API proof alive as a scheduled, NON-required canary that alerts on
+# failure instead of blocking merges — it is excluded from the required split
+# via the `live_github_api` pytest marker (pyproject.toml) and is not named in
+# any required-status-check set.
+name: Dep Provenance Lineage Live Canary
+
+on:
+  schedule:
+    # Off-peak, every 6 hours, not on the hour per cron convention.
+    - cron: "23 */6 * * *"
+  workflow_dispatch: {}
+
+concurrency:
+  group: ${{ github.workflow }}
+  cancel-in-progress: false
+
+permissions:
+  contents: read
+
+jobs:
+  live-lineage-check:
+    name: live-lineage-check
+    # OMNI_RUNNER_SELECTOR_V1 — trusted CI defaults to self-hosted omnibase-ci.
+    runs-on: >-
+      ${{ fromJSON(vars.OMNI_TRUSTED_CI_RUNS_ON_JSON || '["self-hosted","omnibase-ci"]') }}
+    timeout-minutes: 15
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+        with:
+          # No git operations after checkout — do not leave the Actions token
+          # in local git config (zizmor artipacked).
+          persist-credentials: false
+
+      - name: Setup Python and uv
+        uses: ./.github/actions/setup-python-uv
+        with:
+          python-version: "3.12"
+          uv-version: "0.6.14"
+          cache-version: "0.6.0"
+          cache-enabled: "false"
+
+      - name: Run live GitHub-API lineage tests
+        env:
+          # Rate-limit headroom (5000 req/hr authenticated vs 60 req/hr
+          # anonymous) — same posture as dep-provenance-lineage-gate in
+          # ci.yml. LINEAR_API_KEY is optional graceful-degradation
+          # infrastructure for one sub-test (test_live_omn_15414_resolves_to_done);
+          # it is not provisioned as an org/repo secret today, so that test
+          # skips rather than fails.
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          LINEAR_API_KEY: ${{ secrets.LINEAR_API_KEY }}
+          CI: "true"
+        run: |
+          echo "================================================================"
+          echo "Dep Provenance Lineage Live Canary (OMN-16096)"
+          echo "================================================================"
+          uv run pytest tests/integration/ci/test_dep_provenance_lineage_live_omn15604.py \
+            -m live_github_api \
+            -v --tb=short \
+            --junitxml=live-lineage-canary.xml
+
+      - name: Upload test results
+        if: always()
+        uses: actions/upload-artifact@v7
+        with:
+          name: dep-provenance-lineage-live-canary-${{ github.run_id }}
+          path: live-lineage-canary.xml
+          retention-days: 14
+
+  notify-on-failure:
+    timeout-minutes: 10
+    name: Failure Alert
+    needs: [live-lineage-check]
+    if: failure()
+    # OMNI_RUNNER_SELECTOR_V1 — trusted CI defaults to self-hosted omnibase-ci.
+    runs-on: >-
+      ${{ fromJSON(vars.OMNI_TRUSTED_CI_RUNS_ON_JSON || '["self-hosted","omnibase-ci"]') }}
+
+    steps:
+      - name: Post Slack alert
+        if: ${{ env.SLACK_BOT_TOKEN != '' }}
+        env:
+          SLACK_BOT_TOKEN: ${{ secrets.SLACK_BOT_TOKEN }}
+        run: |
+          curl -sf -X POST https://slack.com/api/chat.postMessage \
+            -H "Authorization: Bearer $SLACK_BOT_TOKEN" \
+            -H "Content-Type: application/json" \
+            -d '{
+              "channel": "#ci-alerts",
+              "text": ":red_circle: *Dep Provenance Lineage Live Canary failed* on `omnibase_infra` (OMN-16096)\nThis is the live GitHub-API half of the OMN-15604 lineage check — non-required, alerts only. The merge-required gate (dep-provenance-lineage-gate) uses the hermetic OMN-16053 mirror-based resolver and is unaffected by this failure.\nRun: <${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}|View Run>"
+            }' || echo "Slack notify failed (non-fatal)"
+
+      - name: Post GitHub summary on failure
+        run: |
+          echo "## Dep Provenance Lineage Live Canary Failure" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "**Workflow run:** [${{ github.run_id }}](${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }})" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "Non-required scheduled canary (OMN-16096) — alerts only, never blocks merges." >> $GITHUB_STEP_SUMMARY

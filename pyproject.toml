@@ -447,6 +447,7 @@ markers = [
     "consul: Tests requiring a live Consul instance (legacy marker retained for existing tests — Consul removed in OMN-3995)",
     "ci: CI/CD parity and configuration tests that run without infrastructure (OMN-4307)",
     "linear: Tests requiring a real Linear API key (LINEAR_API_KEY env var)",
+    "live_github_api: Tests that call the live GitHub REST API directly (network-dependent) -- excluded from the merge-required test-parallel path and run on a scheduled, non-required canary instead (OMN-16096)",
 ]
 addopts = [
     "--strict-markers",
