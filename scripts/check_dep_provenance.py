@@ -68,6 +68,23 @@ unresolved rev/tag is reported as a lineage violation, not silently skipped —
 unless ``--allow-undetermined-lineage`` is passed, which is refused when ``CI``
 is set (same posture as ``check_pin_reachability.py``).
 
+**Merge-path resolution is hermetic (OMN-16096).** ``--check-lineage`` resolves
+through ``resolve_src_tree_sha_hermetic``, which tries the OMN-16053
+host-level git mirror first (``git://172.18.0.1:9418/<repo>.git``, reachable
+over the self-hosted runner's own docker bridge, never leaving the runner
+host) and falls back to the live GitHub REST API (``resolve_src_tree_sha``)
+only when the mirror itself has no route or does not carry the requested
+repo/ref. This closes the defect that produced two burned canary attempts on
+PR #2758 (`transport error: The read operation timed out` resolving a commit
+via the live API during an egress-degraded window): the merge-required gate
+no longer needs github.com to be reachable on the fleet where the mirror is
+served. The pure live-API half of this check (proving the REST resolver
+against real known commits) still exists, unchanged, as
+``tests/integration/ci/test_dep_provenance_lineage_live_omn15604.py`` — it now
+runs on a scheduled, non-required canary
+(``.github/workflows/dep-provenance-lineage-live-canary.yml``) that alerts on
+failure instead of gating merges.
+
 A non-exact declared constraint (a range like ``>=0.46.8,<0.47.0``, or no
 declared constraint at all) sitting next to a git override is ALSO a lineage
 violation, not a free pass: an earlier, single-operator-only version lookup
@@ -145,7 +162,9 @@ import argparse
 import json
 import os
 import re
+import subprocess
 import sys
+import tempfile
 import tomllib
 import urllib.error
 import urllib.parse
@@ -457,6 +476,134 @@ def resolve_src_tree_sha(repo: str, ref: str) -> tuple[str | None, str]:
         ):
             return entry["sha"], "ok"
     return None, f"no top-level 'src' tree entry found at {ref!r}"
+
+
+# ---------------------------------------------------------------------------
+# Hermetic mirror-based resolution (OMN-16096) -- the merge-required path must
+# not depend on live GitHub API reachability. See
+# docker/runners/git-mirror-refresh.sh (OMN-14027 C2) and the
+# `_C2_MIRROR_HOST`/`_C2_MIRROR_PORT` wiring in
+# docker/runners/runner-job-started.sh (OMN-16053) for the mirror this reuses.
+# ---------------------------------------------------------------------------
+
+# Host-level bare git mirror served over the self-hosted runner's own docker
+# bridge network -- reachable without ever leaving the runner host, so it is
+# immune to the github.com egress degradation that produced the
+# `transport error: The read operation timed out` failures this closes.
+# ubuntu-latest (public-fork PRs) has no route to this address at all;
+# `resolve_src_tree_sha_hermetic` below falls back to the live resolver there,
+# unchanged from pre-OMN-16096 behavior for that lane.
+_MIRROR_HOST = os.environ.get("OMNI_GIT_MIRROR_HOST", "172.18.0.1")
+_MIRROR_PORT = os.environ.get("OMNI_GIT_MIRROR_PORT", "9418")
+_MIRROR_TIMEOUT_SECONDS = 15.0
+# git subprocess calls talk only to the mirror (git:// protocol, no auth) --
+# disabling a terminal credential prompt is defense in depth, not a fix for
+# an observed hang.
+_MIRROR_GIT_ENV = {**os.environ, "GIT_TERMINAL_PROMPT": "0"}
+
+
+def resolve_src_tree_sha_via_mirror(
+    repo: str, ref: str, *, timeout: float = _MIRROR_TIMEOUT_SECONDS
+) -> tuple[str | None, str]:
+    """Resolve the git tree SHA of ``<ref>:src`` via the host-level git mirror.
+
+    Fetches exactly the requested ref from the runner-host bare mirror
+    (``git://<host>:<port>/<repo>.git``, OMN-16053) into a throwaway local
+    repo and resolves the tree SHA with local git plumbing
+    (``git rev-parse FETCH_HEAD:src``) -- no REST call, no github.com
+    reachability required at all. Tree objects are content-addressed, so this
+    returns the byte-identical SHA :func:`resolve_src_tree_sha` would compute
+    over the REST API for the same ref (the same invariant that function's own
+    docstring documents).
+
+    Returns ``(tree_sha, "ok (mirror)")`` on success, or ``(None, detail)``
+    describing why resolution failed (mirror unreachable, repo/ref not served
+    by this mirror, no top-level ``src/`` tree). Every failure mode returns
+    cleanly -- a missing ``git`` binary, a dead mirror, or an unmirrored repo
+    all yield ``(None, detail)`` rather than raising, so a caller can always
+    fall back to another resolver.
+    """
+    mirror_url = f"git://{_MIRROR_HOST}:{_MIRROR_PORT}/{repo}.git"
+    try:
+        with tempfile.TemporaryDirectory(prefix="dep-provenance-mirror-") as tmp:
+            init = subprocess.run(
+                ["git", "init", "--quiet", "--bare", tmp],
+                capture_output=True,
+                text=True,
+                timeout=timeout,
+                env=_MIRROR_GIT_ENV,
+                check=False,
+            )
+            if init.returncode != 0:
+                return (
+                    None,
+                    f"mirror resolution failed: git init error: {init.stderr.strip()}",
+                )
+
+            fetch = subprocess.run(
+                ["git", "-C", tmp, "fetch", "--quiet", "--depth=1", mirror_url, ref],
+                capture_output=True,
+                text=True,
+                timeout=timeout,
+                env=_MIRROR_GIT_ENV,
+                check=False,
+            )
+            if fetch.returncode != 0:
+                return (
+                    None,
+                    f"could not fetch {ref!r} from mirror {mirror_url}: "
+                    f"{fetch.stderr.strip() or 'unknown git error'}",
+                )
+
+            rev = subprocess.run(
+                [
+                    "git",
+                    "-C",
+                    tmp,
+                    "rev-parse",
+                    "--verify",
+                    "--quiet",
+                    "FETCH_HEAD:src",
+                ],
+                capture_output=True,
+                text=True,
+                timeout=timeout,
+                env=_MIRROR_GIT_ENV,
+                check=False,
+            )
+            tree_sha = rev.stdout.strip()
+            if rev.returncode != 0 or not tree_sha:
+                return (
+                    None,
+                    f"ref {ref!r} resolved via mirror {mirror_url} but has no "
+                    "top-level 'src' tree",
+                )
+            return tree_sha, "ok (mirror)"
+    except subprocess.TimeoutExpired:
+        return None, f"mirror resolution timed out after {timeout:.0f}s for {ref!r}"
+    except OSError as exc:
+        return None, f"mirror resolution failed: {exc}"
+
+
+def resolve_src_tree_sha_hermetic(repo: str, ref: str) -> tuple[str | None, str]:
+    """Merge-path resolver (OMN-16096): the host-level git mirror first,
+    falling back to the live GitHub REST API only when the mirror itself
+    cannot serve the ref (e.g. ubuntu-latest public-fork runners, which have
+    no route to the runner host's docker network at all, or a repo the mirror
+    does not yet carry).
+
+    This is the resolver ``--check-lineage`` uses by default. It removes the
+    merge-required gate's dependency on github.com reachability on the fleet
+    where the OMN-16053 mirror is actually served (self-hosted omnibase-ci);
+    it changes nothing on lanes that never had the mirror to begin with.
+    """
+    mirror_sha, mirror_detail = resolve_src_tree_sha_via_mirror(repo, ref)
+    if mirror_sha is not None:
+        return mirror_sha, mirror_detail
+    live_sha, live_detail = resolve_src_tree_sha(repo, ref)
+    if live_sha is not None:
+        return live_sha, live_detail
+    return None, f"mirror: {mirror_detail}; live API: {live_detail}"
 
 
 def find_lineage_violations(
@@ -841,8 +988,10 @@ def main(argv: list[str] | None = None) -> int:
             "Additionally run the content-lineage check (OMN-15604): fail if a "
             "[tool.uv.sources] git-pinned rev's src/ tree differs from the "
             "released tree of the version declared alongside it. Applies even "
-            "to lines carrying a valid raw-override-ok token. Makes GitHub "
-            "REST API calls — off by default; never invoked from pre-commit."
+            "to lines carrying a valid raw-override-ok token. Resolves via the "
+            "OMN-16053 host-level git mirror first, falling back to the "
+            "GitHub REST API only when the mirror cannot serve the ref "
+            "(OMN-16096) — off by default; never invoked from pre-commit."
         ),
     )
     parser.add_argument(
@@ -951,7 +1100,9 @@ def main(argv: list[str] | None = None) -> int:
     failed = False
 
     if args.check_lineage:
-        lineage_violations = find_lineage_violations(text)
+        lineage_violations = find_lineage_violations(
+            text, resolve=resolve_src_tree_sha_hermetic
+        )
         undetermined = [v for v in lineage_violations if "UNDETERMINED lineage" in v]
         diverged = [v for v in lineage_violations if v not in undetermined]
 

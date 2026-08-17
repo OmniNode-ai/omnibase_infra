@@ -2016,13 +2016,22 @@ sync_files() {
         "${repo_root}/workspace/sibling-vcs-provenance.json" \
         "${deploy_target}/workspace/sibling-vcs-provenance.json"
 
-    # 6. Migration scripts (bind-mounted by docker-compose.infra.yml)
+    # 6. Migration scripts (bind-mounted by docker-compose.infra.yml) plus the
+    # Keycloak realm reconciler docker/Dockerfile.runtime COPYs into the image
+    # (scripts/seed-keycloak-clients.py, OMN-16026). This include-list is the
+    # only rsync that ever touches scripts/ files outside scripts/runtime_build/
+    # (which has its own directory-wide sync above), so every file the runtime
+    # image or its Job manifests need out of scripts/ must be listed here
+    # explicitly -- tests/scripts/test_deploy_runtime_build_context.py derives
+    # the required set from docker/Dockerfile.runtime's COPY sources and fails
+    # CI if a future COPY isn't matched by an --include here.
     log_info "Syncing migration scripts..."
     mkdir -p "${deploy_target}/scripts"
     rsync -a \
         --include='run-forward-migrations.sh' \
         --include='check_migrations_complete.sh' \
         --include='run-intelligence-migrations.sh' \
+        --include='seed-keycloak-clients.py' \
         --exclude='*' \
         "${repo_root}/scripts/" "${deploy_target}/scripts/"
 

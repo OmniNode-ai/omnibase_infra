@@ -10,6 +10,7 @@ migration_audit mode.
 
 from __future__ import annotations
 
+import re
 from pathlib import Path
 from typing import Any
 from unittest.mock import patch
@@ -19,6 +20,20 @@ import yaml
 from click.testing import CliRunner
 
 from omnibase_infra.cli.commands import cli
+
+# Rich styles each token of the summary line separately, so the rendered output
+# is `\x1b[1;33mmode\x1b[0m\x1b[1m=\x1b[0m\x1b[1;35mstrict\x1b[0m` -- the literal
+# substring "mode=strict" never appears even though the CLI is behaving
+# correctly. Whether the codes are emitted at all depends on how Rich resolves
+# the console (terminal detection / FORCE_COLOR), so asserting on the raw output
+# makes this test pass or fail on the HOST rather than on the behaviour. Strip
+# the escapes and assert on the text.
+_ANSI_ESCAPE_RE = re.compile(r"\x1b\[[0-9;]*m")
+
+
+def _plain(text: str) -> str:
+    """Return ``text`` with ANSI SGR escape sequences removed."""
+    return _ANSI_ESCAPE_RE.sub("", text)
 
 
 def _clean_effect_contract(name: str = "node_foo_effect") -> dict[str, Any]:
@@ -99,7 +114,7 @@ class TestValidateContractsModeFlag:
             ["validate", "contracts", str(tmp_path)],
         )
         assert result.exit_code == 0, result.output
-        assert "mode=strict" in result.output.lower()
+        assert "mode=strict" in _plain(result.output).lower()
 
     def test_validate_contracts_uses_batch_validator(self, tmp_path: Path) -> None:
         _write_node_contract(tmp_path, _clean_effect_contract())
