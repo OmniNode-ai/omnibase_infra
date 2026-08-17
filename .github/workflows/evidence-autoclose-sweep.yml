@@ -1,0 +1,110 @@
+# SPDX-FileCopyrightText: 2026 OmniNode.ai Inc.
+# SPDX-License-Identifier: MIT
+#
+# evidence-autoclose-sweep.yml — OMN-16106 first slice
+#
+# Scheduled companion-merge -> dod_verify -> governed Done flip sweep.
+# Enumerates onex_change_control PRs merged in a lookback window, extracts
+# each merged companion's Evidence-Ticket binding, re-runs the EXISTING
+# `onex skill dod_verify <ticket>` verifier exactly as the controller does,
+# and would flip the bound Linear ticket Done (or post the honest gap) via
+# `onex skill evidence_autoclose_sweep`.
+#
+# DRY-RUN ONLY. `apply` is intentionally NEVER passed here — the sweep logs
+# every decision it would make but calls zero Linear mutation. Flipping this
+# workflow to `--apply` is a later, deliberate change (a separate PR), not a
+# flag flip buried in this file. The kill switch (ONEX_AUTOCLOSE_DISABLED)
+# is honored by the node itself unconditionally, independent of this
+# workflow's config, so it is not (and must not be) surfaced as an input
+# here — set it as a repo/environment secret-free variable to halt every run
+# without touching this file.
+#
+# omnimarket co-install is DELIBERATELY NOT wired here yet. `onex skill
+# dod_verify` dispatches to a node that ships in omnimarket, composed into
+# the omnibase_infra venv at runtime via the install-node-skill-package
+# installer under scripts/ (never a build dependency). Without that
+# co-install, every dod_verify
+# subprocess call in this workflow fails closed with a non-zero exit, which
+# the sweep records as ERROR_VERIFY_NONZERO_EXIT per ticket — safe, honest,
+# and proves the mechanism (enumerate -> bind -> attempt-verify -> fail
+# closed) without a green dod_verify. Wiring the co-install (and its own
+# incident-replay-covered enforcement story, OMN-15547) is a later,
+# deliberate change, same as flipping --apply.
+#
+# No new scripts/** file: scripts/** is DEFAULT-DENY for new files (OMN-14475
+# canonical-form guard). Every step below is a direct `uv run onex ...`
+# invocation of code that already lives under src/.
+
+name: Evidence Autoclose Sweep
+
+on:
+  schedule:
+    # Every 30 minutes. lookback-hours below intentionally exceeds the
+    # interval so a missed/failed run never drops a companion merge.
+    - cron: '*/30 * * * *'
+  workflow_dispatch:
+    inputs:
+      lookback_hours:
+        description: 'Scan companions merged within this many hours of now.'
+        required: false
+        default: '2'
+
+env:
+  UV_VERSION: "0.8.3"
+  PYTHON_VERSION: "3.12"
+
+jobs:
+  evidence-autoclose-sweep:
+    name: Evidence Autoclose Sweep (DRY-RUN)
+    # Trusted runner required: needs LINEAR_API_KEY and an authenticated gh.
+    # OMNI_RUNNER_SELECTOR_V1 — trusted CI defaults to self-hosted omnibase-ci; public forks default to ubuntu-latest
+    runs-on: >-
+      ${{
+        (github.event_name == 'pull_request' &&
+         github.event.pull_request.head.repo.full_name != github.repository)
+        && fromJSON(vars.OMNI_PUBLIC_PR_RUNS_ON_JSON || '["ubuntu-latest"]')
+        || fromJSON(vars.OMNI_TRUSTED_CI_RUNS_ON_JSON || '["self-hosted","omnibase-ci"]')
+      }}
+    timeout-minutes: 20
+    permissions:
+      contents: read
+
+    steps:
+      - name: Checkout omnibase_infra
+        uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+        with:
+          fetch-depth: 1
+
+      - name: Set up Python
+        uses: actions/setup-python@v7
+        with:
+          python-version: ${{ env.PYTHON_VERSION }}
+
+      - name: Install uv
+        uses: astral-sh/setup-uv@v7
+        with:
+          version: ${{ env.UV_VERSION }}
+          enable-cache: true
+          cache-dependency-glob: "uv.lock"
+
+      - name: Install dependencies
+        run: uv sync
+
+      - name: Run evidence autoclose sweep (DRY-RUN — apply is never passed here)
+        env:
+          LINEAR_API_KEY: ${{ secrets.LINEAR_API_KEY }}
+          GH_TOKEN: ${{ secrets.OMNI_GITHUB_TOKEN || github.token }}
+        run: |
+          set -euo pipefail
+          uv run onex skill evidence_autoclose_sweep \
+            --lookback-hours "${{ github.event.inputs.lookback_hours || '2' }}" \
+            --output receipt
+
+      - name: Post summary
+        if: always()
+        run: |
+          echo "## Evidence Autoclose Sweep (OMN-16106, DRY-RUN)" >> "$GITHUB_STEP_SUMMARY"
+          echo "" >> "$GITHUB_STEP_SUMMARY"
+          echo "Enumerated merged onex_change_control companions, re-ran dod_verify," >> "$GITHUB_STEP_SUMMARY"
+          echo "and logged every flip/gap decision it WOULD make. No Linear mutation" >> "$GITHUB_STEP_SUMMARY"
+          echo "was performed — this workflow never passes --apply." >> "$GITHUB_STEP_SUMMARY"

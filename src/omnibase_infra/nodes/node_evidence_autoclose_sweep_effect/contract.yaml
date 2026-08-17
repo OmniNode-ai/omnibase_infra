@@ -1,0 +1,148 @@
+# SPDX-FileCopyrightText: 2025 OmniNode.ai Inc.
+# SPDX-License-Identifier: MIT
+# ONEX Node Contract - Evidence Autoclose Sweep Effect
+#
+# OMN-16106 first slice: companion-merge -> dod_verify -> governed Done flip.
+#
+# Enumerates onex_change_control PRs merged in a lookback window, extracts
+# each merged companion's Evidence-Ticket binding, re-runs the EXISTING
+# `onex skill dod_verify <ticket>` verifier exactly as the controller does
+# for governed flips, and either flips the bound Linear ticket Done (all
+# ACs receipt-proven, zero failed) or posts the honest gap as a comment
+# (never flips on any gap). DRY-RUN by default (apply=false); ANY ambiguity
+# (missing binding, ambiguous multi-ticket companion, dod_verify non-zero
+# exit, Linear API error) fails closed.
+#
+# Related Tickets:
+#   - OMN-16106: this ticket (first slice)
+#   - OMN-13856: dod_verify / DurableEvidenceGate mechanical no-fake-Done guard
+#
+name: "node_evidence_autoclose_sweep_effect"
+node_type: "EFFECT_GENERIC"
+contract_version:
+  major: 1
+  minor: 0
+  patch: 0
+node_version: "1.0.0"
+description: >
+  Scheduled sweep wiring companion-merge -> dod_verify -> governed Done flip. Enumerates merged onex_change_control evidence companions, extracts their Evidence-Ticket binding, re-runs dod_verify, and flips Done or posts a gap comment via the Linear API. DRY-RUN by default; ONEX_AUTOCLOSE_DISABLED kill switch checked first.
+
+input_model:
+  name: "ModelEvidenceAutocloseSweepRequest"
+  module: "omnibase_infra.nodes.node_evidence_autoclose_sweep_effect.models.model_evidence_autoclose_sweep_request"
+  description: "Sweep configuration: repo, lookback window, apply flag, safety caps."
+output_model:
+  name: "ModelEvidenceAutocloseSweepResult"
+  module: "omnibase_infra.nodes.node_evidence_autoclose_sweep_effect.models.model_evidence_autoclose_sweep_result"
+  description: "Per-ticket outcomes (flipped/gap/skipped/errored) and run-level counts."
+# Top-level handler block: RuntimeLocal's single-shot "compute execution path"
+# (no terminal_event / no event bus, mirrors node_dod_verify's own contract
+# shape) resolves the handler + its input model from THIS block, not from
+# handler_routing below. Without it `onex node`/`onex skill` dispatch fails
+# closed with "Workflow contract missing 'terminal_event' topic and no
+# handler spec found" (RuntimeLocal._resolve_handler_spec /_run_compute).
+handler:
+  module: "omnibase_infra.nodes.node_evidence_autoclose_sweep_effect.handlers.handler_evidence_autoclose_sweep"
+  class: "HandlerEvidenceAutocloseSweep"
+  input_model: "omnibase_infra.nodes.node_evidence_autoclose_sweep_effect.models.model_evidence_autoclose_sweep_request.ModelEvidenceAutocloseSweepRequest"
+handler_routing:
+  routing_strategy: "operation_match"
+  handlers:
+    - operation: "sweep_evidence_autoclose"
+      handler:
+        name: "HandlerEvidenceAutocloseSweep"
+        module: "omnibase_infra.nodes.node_evidence_autoclose_sweep_effect.handlers.handler_evidence_autoclose_sweep"
+      description: "gh api enumerate -> extract binding -> dod_verify -> Linear flip/comment"
+      output_fields:
+        - companions_scanned
+        - bindings_extracted
+        - tickets_flipped
+        - tickets_gap_posted
+        - tickets_skipped
+        - tickets_errored
+        - outcomes
+error_handling:
+  retry_policy:
+    max_retries: 0
+    initial_delay_ms: 0
+    max_delay_ms: 0
+    exponential_base: 1
+    retry_on: []
+  error_types:
+    - name: "GITHUB_ENUMERATION_FAILED"
+      description: "gh api PR enumeration failed — sweep-level failure, no tickets processed."
+      recoverable: true
+      retry_strategy: "none"
+    - name: "LINEAR_NOT_CONFIGURED"
+      description: "LINEAR_API_KEY not set — every ticket fails closed as ERROR_LINEAR_API."
+      recoverable: false
+      retry_strategy: "none"
+    - name: "DOD_VERIFY_NONZERO_EXIT"
+      description: "`onex skill dod_verify <ticket>` exited non-zero — fail closed, never flip."
+      recoverable: true
+      retry_strategy: "none"
+io_operations:
+  - operation: "sweep_evidence_autoclose"
+    description: "Enumerate merged companions, verify, flip Done or post gap comments."
+    input_fields:
+      - occ_repo
+      - lookback_hours
+      - apply
+      - max_companions
+      - dispatch_cwd
+      - dod_verify_timeout_seconds
+      - close_if_done_label
+    output_fields:
+      - companions_scanned
+      - bindings_extracted
+      - tickets_flipped
+      - tickets_gap_posted
+      - tickets_skipped
+      - tickets_errored
+      - outcomes
+      - correlation_id
+# Dependencies
+# NOTE: the dependency schema's `type` enum (environment/library/service/...)
+# has no "external CLI tool" member, so the two runtime tool requirements are
+# documented here in prose rather than as invalid schema entries:
+#   - `gh` (GitHub CLI), authenticated — paginated PR/file enumeration.
+#   - `uv run onex skill dod_verify <ticket>` — the EXISTING verifier,
+#     invoked verbatim, from a locality where that dispatch already resolves
+#     (see omnimarket_drift_guard / scripts/install-node-skill-package.sh).
+dependencies:
+  - name: "linear_api_key"
+    type: "environment"
+    env_var: "LINEAR_API_KEY"
+    description: "Linear API key for issue read + issueUpdate/commentCreate mutations."
+    required: true
+  - name: "autoclose_kill_switch"
+    type: "environment"
+    env_var: "ONEX_AUTOCLOSE_DISABLED"
+    description: "Checked first, unconditionally. When set (any non-empty value), the sweep performs zero I/O."
+    required: false
+  - name: "httpx"
+    type: "library"
+    library: "httpx"
+    description: "Async HTTP client for the Linear GraphQL API."
+# Health check
+health_check:
+  enabled: true
+  endpoint: "/health"
+  interval_seconds: 300
+  checks:
+    - name: "linear_configured"
+      check_type: "environment"
+      env_var: "LINEAR_API_KEY"
+      description: "Verify LINEAR_API_KEY is set."
+metadata:
+  description: "Evidence autoclose sweep: companion-merge -> dod_verify -> governed Done flip (OMN-16106 first slice)"
+  author: "OmniNode Team"
+  created: "2026-08-17"
+  updated: "2026-08-17"
+  tags:
+    - "effect"
+    - "linear"
+    - "github"
+    - "dod-verify"
+    - "evidence-autoclose"
+    - "scheduled-sweep"

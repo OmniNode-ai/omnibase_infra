@@ -55,6 +55,16 @@ APPROVED_INFIX_PATTERNS=(
     # the per-name grandfathering below handles that case on its own, so the
     # allowlist no longer has to be widened to maintain an existing read.
     # Rule 10: narrow the matcher, do not allowlist past it.
+    # OMN-16106: the evidence-autoclose sweep dispatches via RuntimeLocal's
+    # single-shot compute path (_run_compute — no terminal_event / event
+    # bus), which only auto-injects state_root/event_bus into a handler's
+    # constructor (see RuntimeLocal._instantiate_handler). There is no
+    # config-prefetch/overlay seam reachable from that path for a node's own
+    # secret (LINEAR_API_KEY) or its kill switch (ONEX_AUTOCLOSE_DISABLED) —
+    # same class of "no injection seam, so the boundary reads env" as the
+    # /cli/receipt_mode.py entry above. Declares required_secrets per the
+    # OMN-14951 gap-2 check below.
+    "/nodes/node_evidence_autoclose_sweep_effect/handlers/handler_evidence_autoclose_sweep.py"
 )
 
 ENV_READ_PATTERNS='os\.environ\[|os\.environ\.get|os\.getenv|from os import environ|from os import getenv'
