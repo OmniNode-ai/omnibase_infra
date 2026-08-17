@@ -155,13 +155,20 @@ jobs:
           PR: ${{ steps.resolve.outputs.pr }}
         run: |
           set -euo pipefail
-          # OMN-13214: dev is queue-controlled — the merge method is set by the merge
-          # queue, so passing an explicit --squash is rejected ("The merge strategy for
-          # dev is set by the merge queue") and the PR is NEVER enqueued (sits CLEAN +
-          # auto-merge armed forever). Use bare --auto and let the queue pick the method.
-          # Arming alone does not enqueue — the explicit enqueue + verify step below
-          # closes that gap. Do NOT exit here on success.
-          if output=$(gh pr merge "$PR" --repo "$GH_REPO" --auto 2>&1); then
+          # OMN-16108: OMN-13214's bare `--auto` assumed dev was queue-controlled
+          # (queue picks the method, explicit --squash rejected). The "Merge Queue"
+          # ruleset (id 13269702) is disabled — no OmniNode repo has a dev queue
+          # today (see Merge Queue Policy in CLAUDE.md) — so bare `--auto` now
+          # deterministically fails gh CLI's own non-interactive check
+          # ("--merge, --rebase, or --squash required when not running
+          # interactively") on every PR. omnibase_infra is squash-only
+          # (allow_auto_merge=true, live-verified 2026-08-12) — pass --squash
+          # explicitly, per the documented no-queue method-flag rule. Live-verified
+          # 2026-08-17 against PR #2765: `--auto --squash` arms cleanly
+          # (mergeMethod: SQUASH), no rejection. Arming alone does not enqueue on a
+          # queue repo — the explicit enqueue + verify step below still closes that
+          # gap if a queue is ever re-enabled. Do NOT exit here on success.
+          if output=$(gh pr merge "$PR" --repo "$GH_REPO" --auto --squash 2>&1); then
             echo "auto-merge enabled: $output"
           elif echo "$output" | grep -qiE "already enqueued|already queued|auto-merge already enabled"; then
             echo "auto-merge not newly enabled (expected): $output"
