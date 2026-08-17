@@ -223,6 +223,73 @@ seed_workspace_from_mirror() {
 # treated as a miss and simply forgoes the speedup.
 _C2B_REWRITE_REPOS="${OMNI_GIT_MIRROR_REWRITE_REPOS:-onex_change_control}"
 
+# ---------------------------------------------------------------------------
+# Shared rewrite accumulator (OMN-16063 C2b + OMN-16114 C2c)
+# ---------------------------------------------------------------------------
+#
+# GIT_CONFIG_COUNT is a single flat index namespace in the job's environment.
+# The two mechanisms below (the uv git-dependency rewrite, and the OMN-16114
+# sibling actions/checkout rewrite further down) each discover their own set
+# of fetch-only insteadOf pairs to install. If each wrote its own
+# `GIT_CONFIG_COUNT=N` line to GITHUB_ENV independently, the SECOND write
+# would win -- GITHUB_ENV lines just set env vars, a later same-named write
+# replaces rather than merges, silently dropping the first mechanism's
+# GIT_CONFIG_KEY_0/VALUE_0 entries even though both lines are present in the
+# file. Both mechanisms append to this shared accumulator instead; exactly
+# one flush, after both have run, writes the combined set.
+declare -a _C2_REWRITE_ENV_LINES=()
+_C2_REWRITE_COUNT=0
+
+# Adds one fetch-only redirect: fetches of $2 (upstream) resolve to $1
+# (mirror); pushes to $2 stay pinned at $2 via an identity pushInsteadOf
+# (git resolves pushInsteadOf before insteadOf, so this pins the push path
+# back on github.com without touching the fetch redirect -- see the "Push is
+# pinned back on github.com" note in docker/runners/README-c2b-uv-git-mirror.md
+# for the field verification this relies on).
+_c2_rewrite_add_pair() {
+    local mirror_url="$1" upstream_url="$2"
+    _C2_REWRITE_ENV_LINES+=("GIT_CONFIG_KEY_${_C2_REWRITE_COUNT}=url.${mirror_url}.insteadOf")
+    _C2_REWRITE_ENV_LINES+=("GIT_CONFIG_VALUE_${_C2_REWRITE_COUNT}=${upstream_url}")
+    _C2_REWRITE_COUNT=$((_C2_REWRITE_COUNT + 1))
+    _C2_REWRITE_ENV_LINES+=("GIT_CONFIG_KEY_${_C2_REWRITE_COUNT}=url.${upstream_url}.pushInsteadOf")
+    _C2_REWRITE_ENV_LINES+=("GIT_CONFIG_VALUE_${_C2_REWRITE_COUNT}=${upstream_url}")
+    _C2_REWRITE_COUNT=$((_C2_REWRITE_COUNT + 1))
+}
+
+_c2_rewrite_flush() {
+    if [[ "${_C2_REWRITE_COUNT}" -eq 0 ]]; then
+        return 0
+    fi
+    if [[ -z "${GITHUB_ENV:-}" || ! -w "${GITHUB_ENV}" ]]; then
+        echo "[c2-mirror-rewrite] GITHUB_ENV unwritable; ${_C2_REWRITE_COUNT} discovered rewrite pair(s) not applied (fail-open)."
+        return 0
+    fi
+    {
+        printf '%s\n' "${_C2_REWRITE_ENV_LINES[@]}"
+        echo "GIT_CONFIG_COUNT=${_C2_REWRITE_COUNT}"
+    } >>"${GITHUB_ENV}" 2>/dev/null || {
+        echo "[c2-mirror-rewrite] GITHUB_ENV write failed; job unaffected (fail-open)."
+        return 0
+    }
+    return 0
+}
+
+# Fetches GITHUB_SHA into the pre-seeded own-repo workspace, once, so both
+# mechanisms below can read files (uv.lock, workflow YAML) EXACTLY as they
+# exist at the commit this job builds -- not the mirror's default-branch tip,
+# which a PR may have bumped away from. Idempotent: a second call with the
+# object already present is a fast no-op fetch, not a re-clone.
+_c2_head_sha_fetched=0
+_c2_ensure_head_sha_fetched() {
+    local workspace_dir="$1" infra_mirror="$2"
+    if [[ "${_c2_head_sha_fetched}" -eq 1 ]]; then
+        return 0
+    fi
+    _c2_head_sha_fetched=1
+    [[ -n "${GITHUB_SHA:-}" ]] || return 0
+    timeout 60 git -C "${workspace_dir}" fetch --quiet "${infra_mirror}" "${GITHUB_SHA}" 2>/dev/null || true
+}
+
 wire_uv_git_mirror_rewrite() {
     local workspace_dir="$1"
 
@@ -247,11 +314,10 @@ wire_uv_git_mirror_rewrite() {
     # default-branch tip: a PR that bumps the pin would otherwise be verified
     # against the wrong SHA. The pre-seed left full default-branch history in
     # the workspace, so fetching GITHUB_SHA is a small delta, not a clone.
+    _c2_ensure_head_sha_fetched "${workspace_dir}" "${infra_mirror}"
     local lock_blob=""
     if [[ -n "${GITHUB_SHA:-}" ]]; then
-        if timeout 60 git -C "${workspace_dir}" fetch --quiet "${infra_mirror}" "${GITHUB_SHA}" 2>/dev/null; then
-            lock_blob="$(git -C "${workspace_dir}" cat-file -p "${GITHUB_SHA}:uv.lock" 2>/dev/null || true)"
-        fi
+        lock_blob="$(git -C "${workspace_dir}" cat-file -p "${GITHUB_SHA}:uv.lock" 2>/dev/null || true)"
     fi
     if [[ -z "${lock_blob}" ]]; then
         # Deliberately NOT falling back to the seeded default-branch uv.lock.
@@ -263,8 +329,7 @@ wire_uv_git_mirror_rewrite() {
         return 0
     fi
 
-    local repo pin rewrite_count=0
-    local -a env_lines=()
+    local repo pin
     for repo in ${_C2B_REWRITE_REPOS}; do
         # Never rewrite the job's own repository -- that is checkout's remote.
         if [[ "${repo}" == "${own_repo}" ]]; then
@@ -307,46 +372,253 @@ wire_uv_git_mirror_rewrite() {
             continue
         fi
 
-        # Only the `.git` form -- see the scoping note above.
+        # Only the `.git` form -- see the scoping note above. FETCH-ONLY: see
+        # _c2_rewrite_add_pair for why an identity pushInsteadOf is also
+        # installed (`insteadOf` on its own ALSO rewrites the push URL -- this
+        # is documented git behaviour, not an edge case; verified in
+        # docker/runners/README-c2b-uv-git-mirror.md that an unpinned push
+        # dies with "access denied or repository not exported" against the
+        # daemon, which deliberately serves no receive-pack).
         local upstream_url="https://github.com/${GITHUB_REPOSITORY%%/*}/${repo}.git"
-        env_lines+=("GIT_CONFIG_KEY_${rewrite_count}=url.${repo_mirror}.insteadOf")
-        env_lines+=("GIT_CONFIG_VALUE_${rewrite_count}=${upstream_url}")
-        rewrite_count=$((rewrite_count + 1))
-
-        # Make the redirect FETCH-ONLY. `insteadOf` on its own ALSO rewrites the
-        # push URL -- this is documented git behaviour, not an edge case, and it
-        # was verified here: with only the insteadOf above installed,
-        # `git remote -v` reported
-        #     origin  git://172.18.0.1:9418/onex_change_control.git (push)
-        # and a push died with "access denied or repository not exported"
-        # because the daemon deliberately serves no receive-pack. Any job that
-        # pushed to the `.git`-suffixed URL would have failed CLOSED -- exactly
-        # the class of outcome the rest of this function is gated to prevent.
-        #
-        # git resolves a push URL against pushInsteadOf rules FIRST and only
-        # falls back to insteadOf when none match, so an IDENTITY pushInsteadOf
-        # (upstream -> itself) pins pushes back on github.com while leaving the
-        # fetch redirect fully intact. Verified in a throwaway container off
-        # omninode-runner:latest: fetch -> git://172.18.0.1:9418/..., push ->
-        # https://github.com/..., and the by-SHA fetch uv performs still rc=0.
-        env_lines+=("GIT_CONFIG_KEY_${rewrite_count}=url.${upstream_url}.pushInsteadOf")
-        env_lines+=("GIT_CONFIG_VALUE_${rewrite_count}=${upstream_url}")
-        rewrite_count=$((rewrite_count + 1))
-
+        _c2_rewrite_add_pair "${repo_mirror}" "${upstream_url}"
         echo "[c2-mirror-rewrite] ${repo} pin ${pin:0:12} present on mirror; uv git fetch -> ${repo_mirror} (fetch-only; push and actions/checkout stay on github.com)."
     done
 
-    if [[ "${rewrite_count}" -eq 0 ]]; then
+    return 0
+}
+
+# ---------------------------------------------------------------------------
+# OMN-16114 C2c -- extend the fetch-only rewrite to sibling actions/checkout
+# steps
+# ---------------------------------------------------------------------------
+#
+# THE GAP THIS CLOSES. C2's pre-seed (seed_workspace_from_mirror) only warms
+# the workspace for the job's OWN repository -- it is keyed off
+# GITHUB_REPOSITORY alone and never looks at a step's `repository:` input.
+# C2b's rewrite above only rewrites the `.git`-suffixed URL form uv's git
+# dependencies use. Neither mechanism ever touches a SIBLING `actions/checkout`
+# step -- a second checkout in the same job with an explicit `repository:`
+# different from GITHUB_REPOSITORY, e.g. dispatcher-route-coverage.yml's
+# "Checkout omnimarket (sibling)" step. Those go straight to github.com with
+# zero acceleration even when the target repo is already mirrored. Confirmed
+# root cause of ~27% of `dispatcher-route-coverage` job runs timing out at the
+# 30-minute budget (RPC 408 / GnuTLS -110 / empty-reply, retried unbounded
+# until the job timeout kills it) -- see OMN-16114.
+#
+# WHY THIS CANNOT BE A SINGLE UNCONDITIONAL insteadOf. Unlike C2b, which
+# rewrites ONE well-known dependency with a pin resolvable from uv.lock,
+# sibling checkouts are numerous, per-workflow, and fetch a mix of branch
+# names (`ref: dev`), historical exact SHAs, and refs computed by an earlier
+# step in the SAME job (unresolvable here, before any step has run).
+# `insteadOf` has NO server fallback (verified in
+# docker/runners/README-c2b-uv-git-mirror.md): once a URL is rewritten, a
+# fetch the mirror cannot serve fails outright -- git does not then retry the
+# un-rewritten URL. A blanket per-repo rewrite would therefore convert "mirror
+# is stale for this one ref" into a hard failure, worse than the flakiness
+# this component exists to remove. So this function does not trust the mirror
+# by default -- it discovers exactly which (repo, ref) pairs THIS job's steps
+# will request and proves the mirror can serve every one of them first.
+#
+# DISCOVERY MECHANISM. GITHUB_WORKFLOW_REF (a standard Actions env var, e.g.
+# "OmniNode-ai/omnibase_infra/.github/workflows/ci.yml@refs/heads/dev") names
+# the exact workflow file for this run; GITHUB_JOB names the exact job. Both
+# are read from the OWN repo's checkout at GITHUB_SHA (the delta fetch shared
+# with C2b via _c2_ensure_head_sha_fetched, so a PR that edits its own
+# workflow file is scanned as it exists on THIS commit, not the mirror's
+# stale default-branch copy). The job's YAML block is scanned for
+# `repository: OmniNode-ai/<repo>` / `ref: <value>` pairs with plain text
+# matching, not a YAML parser -- this repo's workflow files use a regular,
+# predictable indentation shape, and a text scan avoids adding a new
+# interpreter dependency to a hook that runs before every job on the fleet.
+#
+# CONJUNCTIVE PER-REPO GATING. `insteadOf` operates on the URL, not on a
+# specific ref -- once a repo's rewrite is installed, it applies to EVERY
+# fetch against that URL for the rest of the job, including ones this
+# function never saw. So a repo is only made rewrite-eligible when EVERY
+# (repo, ref) pair discovered for it in this job's block is individually
+# proven servable:
+#   - a 40-hex-char ref is treated as an exact SHA and probed exactly like
+#     C2b's uv pin (`fetch --depth=1 --filter=tree:0`). This is the empirical
+#     answer to "does an exact-SHA fetch fall through to origin if the mirror
+#     lacks it" the ticket asked to verify, not assume: it does not -- so
+#     this must be proven true before any rewrite is installed. A miss here
+#     disqualifies the WHOLE repo for this job, not just that one occurrence
+#     (ci.yml's application-database-domain-enforcement job checks out
+#     omnibase_infra twice at two different pinned SHAs; both must be
+#     servable or neither checkout is redirected).
+#   - any other literal (branch/tag name, e.g. `dev`) is probed with
+#     `git ls-remote --exit-code`, which the 120s-refreshed mirror
+#     (config/runner_fleet.yaml git_mirror.refresh_interval_seconds) almost
+#     always answers.
+#   - a ref containing a GitHub Actions expression (`${{ ... }}`) or with no
+#     `ref:` line at all (defaults to the target repo's default branch,
+#     unknowable here) is unresolvable and disqualifies the repo outright --
+#     never installed on a guess.
+#
+# NEVER THE JOB'S OWN REPOSITORY. `own_repo` is excluded unconditionally, by
+# construction, even where it appears under an explicit `repository:` key
+# (ci.yml's `.proof-dependencies` job checks out omnibase_infra-the-repo
+# twice more, at older pinned SHAs, from an omnibase_infra job). Both the
+# primary checkout and these self-referential sibling checkouts share the
+# identical no-`.git`-suffix URL form actions/checkout always computes
+# (`${GITHUB_SERVER_URL}/${owner}/${repo}`), so a rewrite keyed on that URL
+# cannot tell them apart. The primary checkout fetches GITHUB_SHA -- the PR's
+# own, possibly seconds-old head commit -- which the 120s-refresh mirror can
+# easily not have yet; redirecting it with no fallback would break every job
+# on every fresh push. Losing acceleration on the rare same-repo sibling
+# checkout is the accepted, deliberate cost of that safety margin.
+_C2C_SIBLING_PROBE_TIMEOUT="${OMNI_GIT_MIRROR_CHECKOUT_PROBE_TIMEOUT:-20}"
+
+wire_sibling_checkout_mirror_rewrite() {
+    local workspace_dir="$1"
+
+    # `if`, not an AND-list: same `set -e` reasoning as every kill switch
+    # above -- a false AND-list would return non-zero and kill the hook.
+    if [[ "${OMNI_GIT_MIRROR_CHECKOUT_REWRITE_DISABLE:-0}" == "1" ]]; then
+        return 0
+    fi
+    if [[ "${OMNI_GIT_MIRROR_DISABLE:-0}" == "1" ]]; then
+        return 0
+    fi
+    if [[ -z "${GITHUB_ENV:-}" || ! -w "${GITHUB_ENV}" ]]; then
+        return 0
+    fi
+    command -v git >/dev/null 2>&1 || return 0
+    [[ -d "${workspace_dir}/.git" ]] || return 0
+    [[ -n "${GITHUB_JOB:-}" ]] || return 0
+
+    local workflow_path="${GITHUB_WORKFLOW_REF:-}"
+    workflow_path="${workflow_path%%@*}"
+    case "${workflow_path}" in
+        "${GITHUB_REPOSITORY:-}"/*)
+            workflow_path="${workflow_path#"${GITHUB_REPOSITORY}"/}"
+            ;;
+        *)
+            return 0
+            ;;
+    esac
+
+    local own_repo="${GITHUB_REPOSITORY##*/}"
+    local infra_mirror="git://${_C2_MIRROR_HOST}:${_C2_MIRROR_PORT}/${own_repo}.git"
+
+    _c2_ensure_head_sha_fetched "${workspace_dir}" "${infra_mirror}"
+    local workflow_blob=""
+    if [[ -n "${GITHUB_SHA:-}" ]]; then
+        workflow_blob="$(git -C "${workspace_dir}" cat-file -p "${GITHUB_SHA}:${workflow_path}" 2>/dev/null || true)"
+    fi
+    if [[ -z "${workflow_blob}" ]]; then
+        echo "[c2-mirror-rewrite] could not read ${workflow_path} at ${GITHUB_SHA:-<unset>}; no sibling checkout rewrite this job (fail-open)."
         return 0
     fi
 
-    {
-        printf '%s\n' "${env_lines[@]}"
-        echo "GIT_CONFIG_COUNT=${rewrite_count}"
-    } >>"${GITHUB_ENV}" 2>/dev/null || {
-        echo "[c2-mirror-rewrite] GITHUB_ENV write failed; job unaffected (fail-open)."
-        return 0
-    }
+    # Isolate this job's own block: a top-level (2-space-indented) key
+    # matching GITHUB_JOB up to the next top-level key. Workflow files with
+    # many jobs (ci.yml has 40+) would otherwise pay a probe round-trip per
+    # job on every single run, most of which have no sibling checkout at all.
+    local job_block
+    job_block="$(printf '%s\n' "${workflow_blob}" | awk -v job="${GITHUB_JOB}" '
+        $0 ~ "^  " job ":[[:space:]]*$" { injob=1; next }
+        injob && /^  [A-Za-z0-9_.-]+:[[:space:]]*$/ { injob=0 }
+        injob { print }
+    ')"
+    [[ -n "${job_block}" ]] || return 0
+
+    # (repo, ref) pairs in encounter order, TSV. A `repository:` line starts
+    # a pending pair; the next `ref:` line completes it; hitting the next
+    # step boundary (`- name:` / `- uses:`) with no `ref:` seen completes it
+    # with an empty ref (unresolved -- defaults to the repo's default branch).
+    local pins
+    pins="$(printf '%s\n' "${job_block}" | awk '
+        /repository:[[:space:]]*OmniNode-ai\// {
+            repo = $0
+            sub(/.*OmniNode-ai\//, "", repo)
+            gsub(/[[:space:]]*#.*/, "", repo)
+            gsub(/[[:space:]]+$/, "", repo)
+            pending_repo = repo
+            next
+        }
+        pending_repo != "" && /^[[:space:]]*ref:/ {
+            r = $0
+            sub(/^[[:space:]]*ref:[[:space:]]*/, "", r)
+            gsub(/[[:space:]]*#.*$/, "", r)
+            gsub(/[[:space:]]+$/, "", r)
+            print pending_repo "\t" r
+            pending_repo = ""
+            next
+        }
+        pending_repo != "" && /^[[:space:]]*-[[:space:]]*(name|uses):/ {
+            print pending_repo "\t"
+            pending_repo = ""
+        }
+        END {
+            if (pending_repo != "") print pending_repo "\t"
+        }
+    ')"
+    [[ -n "${pins}" ]] || return 0
+
+    local pins_file
+    pins_file="$(mktemp)"
+    printf '%s\n' "${pins}" >"${pins_file}"
+
+    local repo
+    for repo in $(cut -f1 "${pins_file}" | sort -u); do
+        if [[ "${repo}" == "${own_repo}" ]]; then
+            continue
+        fi
+
+        local repo_mirror="git://${_C2_MIRROR_HOST}:${_C2_MIRROR_PORT}/${repo}.git"
+        local all_ok=1 ref
+        while IFS= read -r ref; do
+            if [[ -z "${ref}" ]]; then
+                all_ok=0
+                break
+            fi
+            case "${ref}" in
+                *'${{'*)
+                    all_ok=0
+                    break
+                    ;;
+            esac
+
+            if [[ "${ref}" =~ ^[0-9a-f]{40}$ ]]; then
+                # Exact SHA -- same by-SHA servability probe C2b uses for the
+                # uv pin (see the long comment above this function for why
+                # this specific check exists).
+                local probe_dir probe_ok=0
+                probe_dir="$(mktemp -d)"
+                if git -C "${probe_dir}" init --quiet 2>/dev/null \
+                    && timeout "${_C2C_SIBLING_PROBE_TIMEOUT}" git -C "${probe_dir}" fetch --quiet --depth=1 --filter=tree:0 \
+                           "${repo_mirror}" "${ref}" >/dev/null 2>&1; then
+                    probe_ok=1
+                fi
+                rm -rf "${probe_dir}"
+                if [[ "${probe_ok}" -ne 1 ]]; then
+                    echo "[c2-mirror-rewrite] ${repo}@${ref:0:12} (exact SHA) not served by ${repo_mirror}; leaving ${repo} sibling checkout(s) on github.com (fail-open)."
+                    all_ok=0
+                    break
+                fi
+            else
+                # Branch/tag literal -- confirm the mirror currently
+                # advertises it.
+                if ! timeout "${_C2C_SIBLING_PROBE_TIMEOUT}" git ls-remote --exit-code "${repo_mirror}" "${ref}" >/dev/null 2>&1; then
+                    echo "[c2-mirror-rewrite] ${repo}@${ref} not advertised by ${repo_mirror}; leaving ${repo} sibling checkout(s) on github.com (fail-open)."
+                    all_ok=0
+                    break
+                fi
+            fi
+        done < <(awk -F'\t' -v r="${repo}" '$1==r{print $2}' "${pins_file}")
+
+        if [[ "${all_ok}" -eq 1 ]]; then
+            # No `.git` suffix -- see the scoping note in the header comment
+            # above this function; this is the exact URL form actions/checkout
+            # computes (`${GITHUB_SERVER_URL}/${owner}/${repo}`).
+            local upstream_url="${GITHUB_SERVER_URL:-https://github.com}/${GITHUB_REPOSITORY%%/*}/${repo}"
+            _c2_rewrite_add_pair "${repo_mirror}" "${upstream_url}"
+            echo "[c2-mirror-rewrite] ${repo}: every sibling-checkout ref for job ${GITHUB_JOB} served by ${repo_mirror}; actions/checkout -> mirror (fetch-only)."
+        fi
+    done
+
+    rm -f "${pins_file}"
     return 0
 }
 
@@ -544,6 +816,8 @@ if rm -rf -- "${canonical_workspace}" 2>"${err_file}"; then
     mkdir -p -- "${canonical_workspace}"
     seed_workspace_from_mirror "${canonical_workspace}"
     wire_uv_git_mirror_rewrite "${canonical_workspace}" || true
+    wire_sibling_checkout_mirror_rewrite "${canonical_workspace}" || true
+    _c2_rewrite_flush || true
     exit 0
 fi
 
@@ -569,6 +843,8 @@ elif sudo -n /bin/rm -rf -- "${canonical_workspace}" 2>"${err_file}"; then
     mkdir -p -- "${canonical_workspace}"
     seed_workspace_from_mirror "${canonical_workspace}"
     wire_uv_git_mirror_rewrite "${canonical_workspace}" || true
+    wire_sibling_checkout_mirror_rewrite "${canonical_workspace}" || true
+    _c2_rewrite_flush || true
     exit 0
 else
     echo "[runner-job-started] ERROR: scoped sudo fallback also failed:" >&2

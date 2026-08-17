@@ -106,6 +106,23 @@ _LEGACY_DEFAULT_SCHEMA_SQL_EXACT_PATHS = frozenset(
             "docker/migrations/forward/nodes/node_projection_skill_executions/"
             "0002_skill_execution_snapshots_tenant_id_and_rls.sql"
         ),
+        # OMN-16090: node_hook_event_capture is a new node-owned relation whose
+        # physical table intentionally remains in `public` until the governed
+        # OMN-15359 schema cutover -- same posture as every sibling exemption
+        # above (node_canary_score_reducer, node_projection_delegation, et al).
+        # 0001 creates the unqualified table + trigger function; 0002 is the
+        # split-out tenant-RLS file and, per the same sibling pattern, refers to
+        # the table as `public.hook_events` explicitly. Neither file moves or
+        # widens application-database authority -- the CREATE's ownership is
+        # still proven via the (separate, unconditional) created-object check.
+        Path(
+            "docker/migrations/forward/nodes/node_hook_event_capture/"
+            "0001_create_hook_events.sql"
+        ),
+        Path(
+            "docker/migrations/forward/nodes/node_hook_event_capture/"
+            "0002_hook_events_tenant_rls.sql"
+        ),
         # OMN-15655 also reconciles historical root migration shapes for
         # fixture parity. These are legacy default-schema repair paths, not new
         # application-database authority, and they must retain compatibility with

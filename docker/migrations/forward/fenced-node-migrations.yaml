@@ -64,11 +64,12 @@
 # (e.g. widening ruling 21's scope, or adding a new ruling-15-style lane
 # carve-out) is a separate, explicit edit to that runner's release block.
 #
-# WHY THESE NINE IDS (verbatim rationale, unchanged from the pre-OMN-15349
+# WHY THESE TEN IDS (verbatim rationale, unchanged from the pre-OMN-15349
 # hand-maintained lists for the first seven; the eighth (node_pr_review_bot
-# 001) was added under OMN-15717/OMN-15376 and the ninth
+# 001) was added under OMN-15717/OMN-15376, the ninth
 # (delegation_inference_response 0003) under OMN-15336 item 4 / OMN-15656 —
-# two independent PRs landing concurrently, both additive, not conflicting):
+# two independent PRs landing concurrently, both additive, not conflicting —
+# and the tenth (hook_event_capture 0002) under OMN-16090):
 #   delegation 0023-0026 — OMN-14974 / OMN-15313. Tenant-isolation RLS on
 #     live, actively-written delegation tables; un-gate only in a change that
 #     also proves the writer sets app.tenant_id per connection. No lane may
@@ -118,6 +119,29 @@
 #     the .201 dev lane (2026-07-31T06:44:32Z) purely because nothing here
 #     named it. Un-gate only in a change that also proves the writer sets
 #     app.tenant_id per connection, matching the delegation quartet's bar.
+#   hook_event_capture 0002 — OMN-16090. FORCE ROW LEVEL SECURITY on
+#     hook_events, a NEW table (nothing is live on any lane yet), split out of
+#     its own CREATE migration precisely so the create can apply unfenced while
+#     the RLS posture is held here. Fenced on ARRIVAL rather than after the
+#     fact — the delegation_inference_response entry above records the opposite
+#     history, where an unnamed FORCE applied unattended on the .201 dev lane
+#     purely because nothing listed it.
+#
+#     WORTH KNOWING WHEN THIS IS RECONSIDERED: the OMN-15301 hazard quoted for
+#     the entries above — "the projection writer never sets app.tenant_id per
+#     connection" — does NOT apply to this node's writer. Its handler passes
+#     `tenant=<row tenant>` explicitly to AsyncpgAdapter.execute(), which
+#     issues set_config('app.tenant_id', ...) on the same connection inside the
+#     same transaction as the INSERT, using the tenant the row itself carries
+#     (the OMN-15919 shape, adopted to avoid exactly the read-path/write-path
+#     resolver split that produced "new row violates row-level security policy"
+#     on the delegation writes). That is the bar this file names for un-gating.
+#     It is fenced anyway, because a fence RELEASE is a per-lane operator
+#     decision with live-data consequences, not a call the change introducing
+#     the table may take for itself — and because releasing it while every
+#     sibling stays fenced would make this the only RLS-enforcing relation on
+#     the surface, an inconsistency worth deciding deliberately rather than
+#     inheriting from whichever change happened to land last.
 fenced_node_migrations:
   - id: "node:node_projection_delegation:0023_delegation_rls_tenant_isolation.sql"
     ticket: "OMN-14974"
@@ -137,3 +161,5 @@ fenced_node_migrations:
     ticket: "OMN-15717"
   - id: "node:node_projection_delegation_inference_response:0003_inference_response_text_rls_tenant_isolation.sql"
     ticket: "OMN-15336"
+  - id: "node:node_hook_event_capture:0002_hook_events_tenant_rls.sql"
+    ticket: "OMN-16090"

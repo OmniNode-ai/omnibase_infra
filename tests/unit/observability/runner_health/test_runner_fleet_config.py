@@ -242,6 +242,31 @@ def test_runner_fleet_config_git_mirror_is_recorded() -> None:
     assert config.git_mirror.kill_switch_env == "OMNI_GIT_MIRROR_DISABLE"
 
 
+def test_runner_fleet_config_git_mirror_covers_all_nine_repos() -> None:
+    """OMN-16056: the C2 git mirror's original 5-repo set (OMN-16053) left
+    omniweb, omnimemory, omnibase_compat, and knowledge-base doing full remote
+    fetches -- exposed to the same GnuTLS/early-EOF checkout-failure class the
+    mirror exists to remove (one of the 21 pre-mirror OMN-16030 failures was
+    exactly a sibling fetch of one of these: omnimarket's `Clone
+    omnibase_compat` step). This asserts the fix's full coverage, not just
+    membership of one repo.
+    """
+    config = load_runner_fleet_config(REPO_ROOT / "config" / "runner_fleet.yaml")
+
+    assert config.git_mirror is not None
+    assert set(config.git_mirror.repos) == {
+        "onex_change_control",
+        "omnibase_infra",
+        "omnibase_core",
+        "omnimarket",
+        "omniclaude",
+        "omniweb",
+        "omnimemory",
+        "omnibase_compat",
+        "knowledge-base",
+    }
+
+
 def test_runner_fleet_config_tool_cache_durability_is_recorded() -> None:
     """OMN-16053 (OMN-14027 C2): RUNNER_TOOL_CACHE lives in the container
     filesystem (durable=False), so fleet recreates must be bracketed by the
