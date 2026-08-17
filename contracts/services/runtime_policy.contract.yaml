@@ -88,6 +88,10 @@ profiles:
       # introspection and jwks are genuinely new (no dev-lane equivalent
       # existed), named GATEWAY_ATTACH_KEYCLOAK_{INTROSPECTION,JWKS}_URL to
       # match the K8s exemplar's own naming for those two.
+      # OMN-16110 duplicated this same dev-profile addition before OMN-15918
+      # (#2845) merged; deduped here on rebase -- the mapping entries below are
+      # shared by both tickets. OMN-16110's actual scope is extending the same
+      # 5 mappings to the stability-test and judge profiles, below.
       - logical_name: gateway.attach.keycloak.issuer
         source:
           source_type: env
@@ -188,6 +192,28 @@ profiles:
         source:
           source_type: env
           source_path: SLACK_BOT_TOKEN
+      # OMN-16110: see the dev profile's identical block above for the full
+      # rationale on these 5 gateway.attach.keycloak.* mappings.
+      - logical_name: gateway.attach.keycloak.issuer
+        source:
+          source_type: env
+          source_path: KEYCLOAK_ISSUER
+      - logical_name: gateway.attach.keycloak.introspection
+        source:
+          source_type: env
+          source_path: GATEWAY_ATTACH_KEYCLOAK_INTROSPECTION_URL
+      - logical_name: gateway.attach.keycloak.jwks
+        source:
+          source_type: env
+          source_path: GATEWAY_ATTACH_KEYCLOAK_JWKS_URL
+      - logical_name: gateway.attach.keycloak.admin_client_credentials.client_id
+        source:
+          source_type: env
+          source_path: KEYCLOAK_ADMIN_CLIENT_ID
+      - logical_name: gateway.attach.keycloak.admin_client_credentials.client_secret
+        source:
+          source_type: env
+          source_path: KEYCLOAK_ADMIN_CLIENT_SECRET
     services:
       main:
         runtime_id: stability-test-main
@@ -264,6 +290,28 @@ profiles:
         source:
           source_type: env
           source_path: SLACK_BOT_TOKEN
+      # OMN-16110: see the dev profile's identical block above for the full
+      # rationale on these 5 gateway.attach.keycloak.* mappings.
+      - logical_name: gateway.attach.keycloak.issuer
+        source:
+          source_type: env
+          source_path: KEYCLOAK_ISSUER
+      - logical_name: gateway.attach.keycloak.introspection
+        source:
+          source_type: env
+          source_path: GATEWAY_ATTACH_KEYCLOAK_INTROSPECTION_URL
+      - logical_name: gateway.attach.keycloak.jwks
+        source:
+          source_type: env
+          source_path: GATEWAY_ATTACH_KEYCLOAK_JWKS_URL
+      - logical_name: gateway.attach.keycloak.admin_client_credentials.client_id
+        source:
+          source_type: env
+          source_path: KEYCLOAK_ADMIN_CLIENT_ID
+      - logical_name: gateway.attach.keycloak.admin_client_credentials.client_secret
+        source:
+          source_type: env
+          source_path: KEYCLOAK_ADMIN_CLIENT_SECRET
     services:
       main:
         runtime_id: judge-main
