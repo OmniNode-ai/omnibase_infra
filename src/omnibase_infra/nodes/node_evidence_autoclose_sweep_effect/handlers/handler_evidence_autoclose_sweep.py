@@ -118,6 +118,25 @@ mutation CreateComment($issueId: String!, $body: String!) {
 """
 
 
+async def _reap_timed_out_process(proc: asyncio.subprocess.Process) -> None:
+    """Kill and reap a subprocess whose ``communicate()`` await timed out.
+
+    ``asyncio.wait_for`` cancels the *await*, not the child process: without
+    this, a `gh`/`onex` invocation that hangs past its timeout keeps running
+    with its stdout/stderr pipes held open, leaking a process per timeout on
+    every scheduled sweep tick.
+    """
+    if proc.returncode is not None:
+        return
+    proc.kill()
+    try:
+        await asyncio.wait_for(proc.wait(), timeout=5)
+    except TimeoutError:
+        logger.warning(
+            "Timed-out subprocess (pid=%s) did not exit after kill()", proc.pid
+        )
+
+
 def _as_int(value: object) -> int:
     """Best-effort int coercion for a loosely-typed dod_verify JSON field."""
     if isinstance(value, bool):
@@ -292,16 +311,18 @@ class HandlerEvidenceAutocloseSweep:
     async def _run_gh_command_real(
         self, args: list[str], timeout: float
     ) -> tuple[object | None, str]:
+        proc = await asyncio.create_subprocess_exec(
+            *args,
+            stdout=asyncio.subprocess.PIPE,
+            stderr=asyncio.subprocess.PIPE,
+        )
         try:
-            proc = await asyncio.create_subprocess_exec(
-                *args,
-                stdout=asyncio.subprocess.PIPE,
-                stderr=asyncio.subprocess.PIPE,
-            )
             stdout, stderr = await asyncio.wait_for(proc.communicate(), timeout=timeout)
         except TimeoutError:
+            await _reap_timed_out_process(proc)
             return None, f"Timeout running: {' '.join(args)}"
         except OSError as exc:
+            await _reap_timed_out_process(proc)
             return None, f"OS error running {' '.join(args)}: {exc}"
         if proc.returncode != 0:
             return None, stderr.decode(errors="replace").strip()
@@ -314,17 +335,19 @@ class HandlerEvidenceAutocloseSweep:
         self, ticket_id: str, cwd: str, timeout: float
     ) -> tuple[dict[str, object] | None, int, str]:
         args = ["uv", "run", "onex", "skill", "dod_verify", ticket_id]
+        proc = await asyncio.create_subprocess_exec(
+            *args,
+            cwd=cwd or None,
+            stdout=asyncio.subprocess.PIPE,
+            stderr=asyncio.subprocess.PIPE,
+        )
         try:
-            proc = await asyncio.create_subprocess_exec(
-                *args,
-                cwd=cwd or None,
-                stdout=asyncio.subprocess.PIPE,
-                stderr=asyncio.subprocess.PIPE,
-            )
             stdout, stderr = await asyncio.wait_for(proc.communicate(), timeout=timeout)
         except TimeoutError:
+            await _reap_timed_out_process(proc)
             return None, -1, f"Timeout running dod_verify for {ticket_id}"
         except OSError as exc:
+            await _reap_timed_out_process(proc)
             return None, -1, f"OS error running dod_verify for {ticket_id}: {exc}"
         exit_code = proc.returncode if proc.returncode is not None else -1
         if exit_code != 0:
@@ -375,18 +398,28 @@ class HandlerEvidenceAutocloseSweep:
                 break
         return merged, ""
 
-    async def _fetch_pr_files(self, repo: str, number: int) -> list[str]:
+    async def _fetch_pr_files(self, repo: str, number: int) -> tuple[list[str], str]:
+        """Fetch a PR's changed-file paths. Never silently degrades to empty.
+
+        Returns ``(files, error)``. On a genuine fetch failure ``error`` is
+        non-empty and ``files`` is empty — callers MUST treat that as
+        ERROR_GITHUB_API, never as "this companion touched zero files" (which
+        would fall through to a title-only binding match a real file listing
+        might have disambiguated or contradicted).
+        """
         path = f"repos/{repo}/pulls/{number}/files?per_page=100"
-        data, _error = await self._run_gh_command(
+        data, error = await self._run_gh_command(
             ["gh", "api", path], self._gh_timeout_seconds
         )
+        if data is None:
+            return [], error or f"gh api returned no data for {repo}#{number} files"
         if not isinstance(data, list):
-            return []
+            return [], f"gh api returned non-list files payload for {repo}#{number}"
         return [
             str(item["path"])
             for item in data
             if isinstance(item, dict) and item.get("path")
-        ]
+        ], ""
 
     # -- main entrypoint ---------------------------------------------------
 
@@ -432,7 +465,17 @@ class HandlerEvidenceAutocloseSweep:
             number = _as_int(pr.get("number"))
             url = str(pr.get("html_url") or "")
             title = str(pr.get("title") or "")
-            files = await self._fetch_pr_files(request.occ_repo, number)
+            files, files_error = await self._fetch_pr_files(request.occ_repo, number)
+            if files_error:
+                outcomes.append(
+                    ModelEvidenceAutocloseOutcome(
+                        companion_pr_number=number,
+                        companion_pr_url=url,
+                        decision=EnumEvidenceAutocloseDecision.ERROR_GITHUB_API,
+                        reason=f"Could not fetch changed-file list: {files_error}",
+                    )
+                )
+                continue
             ticket_id, ambiguous = _extract_ticket_binding(title, files)
 
             if ambiguous:
@@ -502,6 +545,7 @@ class HandlerEvidenceAutocloseSweep:
                 EnumEvidenceAutocloseDecision.ERROR_VERIFY_NONZERO_EXIT,
                 EnumEvidenceAutocloseDecision.ERROR_VERIFY_UNPARSEABLE,
                 EnumEvidenceAutocloseDecision.ERROR_LINEAR_API,
+                EnumEvidenceAutocloseDecision.ERROR_GITHUB_API,
             )
         )
 

@@ -37,6 +37,12 @@ class EnumEvidenceAutocloseDecision(StrEnum):
     # Linear read (issue/state lookup) or write (issueUpdate/commentCreate)
     # call failed or returned GraphQL errors.
     ERROR_LINEAR_API = "error_linear_api"
+    # The companion's changed-file list could not be fetched from GitHub
+    # (transport/API failure). Never silently treated as "zero files" -- that
+    # would let a transient fetch failure masquerade as SKIPPED_NO_BINDING or
+    # fall back to a title-only match that a real file listing might have
+    # disambiguated or contradicted.
+    ERROR_GITHUB_API = "error_github_api"
 
 
 __all__ = ["EnumEvidenceAutocloseDecision"]

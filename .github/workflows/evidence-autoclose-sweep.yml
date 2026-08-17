@@ -96,6 +96,14 @@ jobs:
           GH_TOKEN: ${{ secrets.OMNI_GITHUB_TOKEN || github.token }}
         run: |
           set -euo pipefail
+          # Fail fast on a missing secret rather than letting every ticket in
+          # the run degrade to a per-ticket ERROR_LINEAR_API outcome, which
+          # would silently mask a configuration problem as N unrelated
+          # per-ticket failures.
+          if [ -z "${LINEAR_API_KEY:-}" ]; then
+            echo "::error::LINEAR_API_KEY is not set — refusing to run the sweep with a missing secret."
+            exit 1
+          fi
           uv run onex skill evidence_autoclose_sweep \
             --lookback-hours "${{ github.event.inputs.lookback_hours || '2' }}" \
             --output receipt

@@ -107,12 +107,18 @@ def _issue(
 
 
 def _make_gh_fake(
-    companions: list[dict[str, object]], files_by_pr: dict[int, list[str]]
+    companions: list[dict[str, object]],
+    files_by_pr: dict[int, list[str]],
+    files_error_by_pr: dict[int, str] | None = None,
 ):
+    files_error_by_pr = files_error_by_pr or {}
+
     async def fake_run_gh_command(args: list[str], timeout: float):
         path = args[2]
         if "/files" in path:
             number = int(path.split("/pulls/")[1].split("/files")[0])
+            if number in files_error_by_pr:
+                return None, files_error_by_pr[number]
             files = files_by_pr.get(number, [])
             return [{"path": f} for f in files], ""
         # PR-list page.
@@ -240,6 +246,28 @@ class TestBindingSkips:
             result.outcomes[0].decision
             == EnumEvidenceAutocloseDecision.SKIPPED_AMBIGUOUS_BINDING
         )
+
+    async def test_file_fetch_failure_fails_closed_never_falls_back_to_title(self):
+        """A GitHub file-fetch failure must never be treated as 'zero files'.
+
+        Regression coverage: _fetch_pr_files silently returning [] on error
+        would let _extract_ticket_binding fall through to a title-only match
+        that a real file listing might have disambiguated or contradicted.
+        """
+        gh_fake = _make_gh_fake(
+            companions=[_merged_pr(1, "evidence(OMN-9999): x", "OMN-9999")],
+            files_by_pr={},
+            files_error_by_pr={1: "gh api rate limited"},
+        )
+        handler = HandlerEvidenceAutocloseSweep(
+            linear_client=FakeLinearClient(), run_gh_command=gh_fake
+        )
+        result = await handler.handle(_request())
+        assert (
+            result.outcomes[0].decision
+            == EnumEvidenceAutocloseDecision.ERROR_GITHUB_API
+        )
+        assert result.bindings_extracted == 0
 
 
 @pytest.mark.unit
@@ -516,3 +544,49 @@ class TestSweepLevel:
         )
         result = await handler.handle(_request(max_companions=2))
         assert result.companions_scanned == 2
+
+
+@pytest.mark.unit
+class TestRealSubprocessReaping:
+    """Regression coverage for CodeRabbit finding: a timed-out subprocess must
+    actually be killed, not just have its ``communicate()`` await cancelled
+    (which leaves the child running with its pipes held open)."""
+
+    async def test_timed_out_gh_subprocess_is_killed(self):
+        handler = HandlerEvidenceAutocloseSweep(linear_client=FakeLinearClient())
+        # `sleep 5` outlives the 0.1s timeout; the real runner must kill it.
+        data, error = await handler._run_gh_command_real(["sleep", "5"], timeout=0.1)
+        assert data is None
+        assert "Timeout" in error
+
+    async def test_reap_helper_kills_a_still_running_process(self):
+        import asyncio
+
+        from omnibase_infra.nodes.node_evidence_autoclose_sweep_effect.handlers.handler_evidence_autoclose_sweep import (
+            _reap_timed_out_process,
+        )
+
+        proc = await asyncio.create_subprocess_exec(
+            "sleep",
+            "30",
+            stdout=asyncio.subprocess.PIPE,
+            stderr=asyncio.subprocess.PIPE,
+        )
+        assert proc.returncode is None
+        await _reap_timed_out_process(proc)
+        await proc.wait()  # reap the zombie so the test doesn't leak it
+        assert proc.returncode is not None
+
+    async def test_reap_helper_is_a_noop_for_an_already_exited_process(self):
+        import asyncio
+
+        from omnibase_infra.nodes.node_evidence_autoclose_sweep_effect.handlers.handler_evidence_autoclose_sweep import (
+            _reap_timed_out_process,
+        )
+
+        proc = await asyncio.create_subprocess_exec(
+            "true", stdout=asyncio.subprocess.PIPE, stderr=asyncio.subprocess.PIPE
+        )
+        await proc.wait()
+        # Must not raise (e.g. ProcessLookupError from killing an exited proc).
+        await _reap_timed_out_process(proc)
