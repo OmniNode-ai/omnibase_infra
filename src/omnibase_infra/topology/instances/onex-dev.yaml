@@ -158,6 +158,11 @@ databases:
               - skill_execution_snapshots
             privileges: [INSERT, SELECT, UPDATE]
             schema: public
+          - object_type: TABLE
+            objects:
+              - hook_events
+            privileges: [INSERT, SELECT, UPDATE]
+            schema: tenant
         login: true
     schemas:
       omninode_internal:
