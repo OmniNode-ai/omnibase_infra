@@ -29,11 +29,11 @@
 -- SCOPE DISCLOSURE (read before trusting lag_messages/lag_seconds):
 --   The contract also declares lag_threshold_messages (500) and
 --   lag_threshold_seconds (120), but no producer in this codebase publishes
---   lag data on the heartbeat topic today -- ModelGatewayHeartbeat carries
---   only tenant_id/principal_id/emitted_at/local_transport_flavor. G1
---   (OMN-15741, path-verifying healthcheck) and G2 (OMN-15742, reconnect
---   supervision) are the lanes that would add that telemetry; neither has
---   merged as of this ticket. lag_messages/lag_seconds are therefore always
+--   lag data on the heartbeat topic today. G1 (OMN-15741, path-verifying
+--   healthcheck) and G2 (OMN-15742, reconnect supervision) have both since
+--   merged, but neither added lag telemetry: G2 widened
+--   ModelGatewayHeartbeat with status/consecutive_failures/detail, not with
+--   lag_messages/lag_seconds. lag_messages/lag_seconds are therefore always
 --   NULL today, and gateway_link_health_status only evaluates the
 --   silence-window threshold it can actually observe -- a NULL lag column
 --   never contributes a false HEALTHY/UNHEALTHY verdict (NULL comparisons

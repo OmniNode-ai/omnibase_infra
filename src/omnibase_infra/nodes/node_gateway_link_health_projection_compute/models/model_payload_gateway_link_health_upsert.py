@@ -19,8 +19,10 @@ only what ``ModelGatewayHeartbeat`` publishes today -- ``tenant_id``,
 lines 59-63) also declares ``lag_threshold_messages`` /
 ``lag_threshold_seconds``, but no producer in this codebase publishes lag
 data on the heartbeat topic (G1/G2 -- OMN-15741/OMN-15742 -- are the lanes
-that would add reconnect/lag telemetry; neither has merged as of this
-ticket). ``lag_messages`` / ``lag_seconds`` are therefore always ``None`` on
+that would add reconnect/lag telemetry; both have since merged, but G2 added
+``status`` / ``consecutive_failures`` / ``detail`` to the heartbeat rather
+than lag fields, and this payload does not yet carry those either).
+``lag_messages`` / ``lag_seconds`` are therefore always ``None`` on
 this payload; the write-effect persists them as nullable columns and the
 status view only evaluates the silence-window threshold it can actually
 observe. See the module docstring on the status view for the exact
