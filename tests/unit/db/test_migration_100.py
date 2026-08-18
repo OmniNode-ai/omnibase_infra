@@ -1,7 +1,7 @@
 # SPDX-FileCopyrightText: 2025 OmniNode.ai Inc.
 # SPDX-License-Identifier: MIT
 
-"""Unit checks for migration 098 gateway_link_health + liveness-threshold drift.
+"""Unit checks for migration 100 gateway_link_health + liveness-threshold drift.
 
 OMN-15570 (G3) hardcodes the ``gateway_link_health_status`` view's health
 thresholds (``max_silence_window_seconds`` / ``lag_threshold_messages`` /
@@ -33,14 +33,14 @@ FORWARD = (
     / "docker"
     / "migrations"
     / "forward"
-    / "098_create_gateway_link_health.sql"
+    / "100_create_gateway_link_health.sql"
 )
 ROLLBACK = (
     REPO_ROOT
     / "docker"
     / "migrations"
     / "rollback"
-    / "rollback_098_create_gateway_link_health.sql"
+    / "rollback_100_create_gateway_link_health.sql"
 )
 CONTRACT = (
     REPO_ROOT
@@ -62,7 +62,7 @@ def _contract_liveness() -> dict[str, int]:
     }
 
 
-def test_098_forward_creates_table_and_view() -> None:
+def test_100_forward_creates_table_and_view() -> None:
     sql = FORWARD.read_text(encoding="utf-8").lower()
 
     assert "create table if not exists public.gateway_link_health" in sql
@@ -70,14 +70,14 @@ def test_098_forward_creates_table_and_view() -> None:
     assert "primary key (tenant_id)" in sql
 
 
-def test_098_rollback_drops_view_and_table() -> None:
+def test_100_rollback_drops_view_and_table() -> None:
     sql = ROLLBACK.read_text(encoding="utf-8").lower()
 
     assert "drop view if exists public.gateway_link_health_status" in sql
     assert "drop table if exists public.gateway_link_health" in sql
 
 
-def test_098_view_liveness_thresholds_match_contract_omn_15762() -> None:
+def test_100_view_liveness_thresholds_match_contract_omn_15762() -> None:
     """Fail-closed drift guard (OMN-15762): the migration's hardcoded
     thresholds must match node_bus_forwarder_effect/contract.yaml's
     liveness block. This is the 4th copy of these numbers (contract,
@@ -95,11 +95,11 @@ def test_098_view_liveness_thresholds_match_contract_omn_15762() -> None:
     )
     assert silence_match is not None, (
         "expected an `INTERVAL '<n> seconds'` silence-window comparison in "
-        "098_create_gateway_link_health.sql -- update this regex if the "
+        "100_create_gateway_link_health.sql -- update this regex if the "
         "view's SQL shape changed"
     )
     assert int(silence_match.group(1)) == contract["max_silence_window_seconds"], (
-        "098_create_gateway_link_health.sql's silence-window literal has "
+        "100_create_gateway_link_health.sql's silence-window literal has "
         "drifted from node_bus_forwarder_effect/contract.yaml's "
         "gateway_forwarder.liveness.max_silence_window_seconds (OMN-15762 "
         "4th-copy class) -- update the migration's hardcoded literal (a new "
@@ -114,7 +114,7 @@ def test_098_view_liveness_thresholds_match_contract_omn_15762() -> None:
     )
     assert lag_messages_match is not None
     assert int(lag_messages_match.group(1)) == contract["lag_threshold_messages"], (
-        "098_create_gateway_link_health.sql's lag_threshold_messages "
+        "100_create_gateway_link_health.sql's lag_threshold_messages "
         "literal has drifted from the contract (OMN-15762 4th-copy class)"
     )
 
@@ -124,6 +124,6 @@ def test_098_view_liveness_thresholds_match_contract_omn_15762() -> None:
     )
     assert lag_seconds_match is not None
     assert int(lag_seconds_match.group(1)) == contract["lag_threshold_seconds"], (
-        "098_create_gateway_link_health.sql's lag_threshold_seconds literal "
+        "100_create_gateway_link_health.sql's lag_threshold_seconds literal "
         "has drifted from the contract (OMN-15762 4th-copy class)"
     )

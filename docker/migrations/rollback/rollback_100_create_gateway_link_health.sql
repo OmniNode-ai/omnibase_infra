@@ -1,4 +1,4 @@
--- OMN-15570: Rollback for 098_create_gateway_link_health.sql.
+-- OMN-15570: Rollback for 100_create_gateway_link_health.sql.
 --
 -- Reverses creation of the gateway_link_health_status view, the
 -- gateway_link_health latest-known-state projection table, and its

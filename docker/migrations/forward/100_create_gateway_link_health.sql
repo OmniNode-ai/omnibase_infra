@@ -59,7 +59,7 @@
 --   loader's _materialize_contract_* functions resolve at process start
 --   against a live YAML file; a CREATE OR REPLACE VIEW body is baked in
 --   once, at migration-apply time, and this table is already live). Rather
---   than leave the drift silent, tests/unit/db/test_migration_098.py pins
+--   than leave the drift silent, tests/unit/db/test_migration_100.py pins
 --   these three literals against the contract's declared values and fails
 --   the suite the moment they diverge -- see OMN-15762 for the tracked
 --   de-duplication fix (a single materialized-config source all 4 copies
@@ -71,7 +71,7 @@
 --   - CREATE OR REPLACE VIEW is safe to re-run.
 --
 -- ROLLBACK:
---   docker/migrations/rollback/rollback_098_create_gateway_link_health.sql
+--   docker/migrations/rollback/rollback_100_create_gateway_link_health.sql
 -- =============================================================================
 
 CREATE TABLE IF NOT EXISTS public.gateway_link_health (
