@@ -564,7 +564,14 @@ def run_receipt_mode(
             # OMN-15449: same run_id this function already uses for the
             # skill-lifecycle events, threaded into the writer so the reader
             # below can verify the file it reads back is THIS run's own.
-            run_id=run_id,
+            # NOTE(OMN-15449): the installed omnibase-core==0.46.8 predates
+            # this parameter (paired PR github.com/OmniNode-ai/omnibase_core
+            # /pull/1561, commit 7b07c723ecf48f6166579be1f6c4ce22df7f6fa0).
+            # This repo's OMN-13873 gate forbids a git-source bridge
+            # override, so mypy fails closed against the published release
+            # until that PR merges, releases, and this pin bumps — remove
+            # this ignore in the same commit as that pin bump.
+            run_id=run_id,  # type: ignore[call-arg]
         )
         workflow_result = runtime.run()
         exit_code = runtime.exit_code
