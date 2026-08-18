@@ -194,7 +194,8 @@ class _Harness:
             "GATEWAY_TPM_DEVICE=/dev/null\n"
             "GATEWAY_TPM_GROUP_ID=105\n"
             "GATEWAY_CONTAINER_UID=1000\n"
-            "GATEWAY_CONTAINER_GID=1000\n",
+            "GATEWAY_CONTAINER_GID=1000\n"
+            "GATEWAY_BROKER_REF_MAP_FILE=/dev/null\n",
             encoding="utf-8",
         )
         # Simulates a container already running this digest before the

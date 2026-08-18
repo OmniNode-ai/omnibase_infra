@@ -11,6 +11,9 @@ from typing import cast
 import yaml
 from pydantic import BaseModel, ConfigDict, Field
 
+from omnibase_infra.observability.runner_health.model_dns_cache_config import (
+    ModelDnsCacheConfig,
+)
 from omnibase_infra.observability.runner_health.model_git_mirror_config import (
     ModelGitMirrorConfig,
 )
@@ -76,6 +79,15 @@ class ModelRunnerFleetConfig(BaseModel):
         description=(
             "OMN-16053 (OMN-14027 C2) — Actions tool-cache durability record. "
             "Optional; absent in configs predating the git-transport egress work."
+        ),
+    )
+    dns_cache: ModelDnsCacheConfig | None = Field(
+        default=None,
+        description=(
+            "OMN-15736 — local caching DNS resolver (unbound) endpoint. "
+            "Optional and inert until the operator-gated rollout sets "
+            "active=True and repoints canary runners' `dns:` directive. "
+            "Absent in configs predating this work."
         ),
     )
 

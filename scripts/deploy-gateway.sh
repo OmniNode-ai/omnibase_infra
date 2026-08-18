@@ -103,8 +103,13 @@ REQUIRED ENVIRONMENT (--execute only)
     requires (GATEWAY_AWS_PROFILE, GATEWAY_AWS_CONFIG_FILE,
     GATEWAY_AWS_CERTIFICATE_FILE, GATEWAY_AWS_PRIVATE_KEY_FILE,
     GATEWAY_AWS_SIGNING_HELPER_FILE, GATEWAY_TPM_DEVICE, GATEWAY_TPM_GROUP_ID,
-    GATEWAY_CONTAINER_UID, GATEWAY_CONTAINER_GID). This script does not invent
-    these -- it reads the same file the systemd unit already reads.
+    GATEWAY_CONTAINER_UID, GATEWAY_CONTAINER_GID, GATEWAY_BROKER_REF_MAP_FILE).
+    This script does not invent these -- it reads the same file the systemd
+    unit already reads. GATEWAY_BROKER_REF_MAP_FILE (OMN-15743) points at an
+    operator-supplied YAML mapping of contract cloud_broker_ref names to
+    resolved bootstrap_servers strings, resolved by the forwarder process at
+    startup; it replaces the previous hardcoded compose extra_hosts entry
+    and is not a value this script or the repo hardcodes.
 
     BUILD_SOURCE=workspace additionally requires OMNI_HOME to be set (same
     convention as deploy-runtime.sh) so sibling repos can be staged from the

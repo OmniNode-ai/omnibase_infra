@@ -117,8 +117,16 @@ def test_checked_in_manifest_is_exact_and_all_blockers_are_explicit() -> None:
     # +1 for OMN-15846's nodes/node_log_persistence_effect/0000_create_log_entries.sql
     # -- the node-owned replacement that delivers log_entries through the
     # node-owned loop, since the flat 083_create_log_entries.sql migration has
-    # the same no-execution-path defect (cross-DB \connect).
-    assert len(result.declarations) == 99
+    # the same no-execution-path defect (cross-DB \connect),
+    # +2 for OMN-16090's node_hook_event_capture pair --
+    # 0001_create_hook_events.sql (the table; applies unfenced) and
+    # 0002_hook_events_tenant_rls.sql (the RLS posture; FENCED on arrival in
+    # fenced-node-migrations.yaml, because the forward runner refuses any new
+    # unfenced FORCE-RLS migration). Both are DECLARED here regardless of the
+    # fence: a fenced migration is skipped by the runner, not undeclared --
+    # dropping its declaration would make the eventual un-fence land an
+    # unbound file.
+    assert len(result.declarations) == 101
     assert result.blocked == ()
     assert len(result.legacy_node_declarations) == 2
     assert len(result.cloud_aliases) == 30

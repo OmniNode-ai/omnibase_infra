@@ -39,7 +39,12 @@ local_bus:
   enable_auto_commit: false
   security_protocol: "PLAINTEXT"
 cloud_bus:
-  bootstrap_servers: "b-1.omninodedevmsk.7ozyd3.c14.kafka.us-east-1.amazonaws.com:9098,b-2.omninodedevmsk.7ozyd3.c14.kafka.us-east-1.amazonaws.com:9098"
+  # bootstrap_servers is deliberately absent: OMN-15743 resolves it from the
+  # node contract's gateway_forwarder.cloud_leg.cloud_broker_ref at the
+  # effect boundary (gateway_forwarder._materialize_cloud_broker_ref), via
+  # the operator-supplied broker-ref map mounted at
+  # /run/gateway/broker-ref-map.yaml (GATEWAY_BROKER_REF_MAP_FILE). A
+  # literal here is rejected fail-closed by the loader.
   environment: "beta-gateway-cloud"
   timeout_seconds: 60
   # OMN-15781: see local_bus.auto_offset_reset comment above -- same hazard,
