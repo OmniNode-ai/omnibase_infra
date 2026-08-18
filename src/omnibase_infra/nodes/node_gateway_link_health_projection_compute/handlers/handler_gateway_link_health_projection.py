@@ -68,6 +68,31 @@ def _require_str(
     )
 
 
+def _require_non_negative_int(
+    body: dict[str, JsonType],
+    key: str,
+    correlation_id: UUID | None,
+) -> int:
+    """Return a required non-negative int field, or raise RuntimeHostError.
+
+    ``bool`` is rejected explicitly: it is an ``int`` subclass in Python, so
+    a producer sending ``true`` would otherwise be silently recorded as 1.
+    """
+    value = body.get(key)
+    if isinstance(value, int) and not isinstance(value, bool) and value >= 0:
+        return value
+    context = ModelInfraErrorContext.with_correlation(
+        correlation_id=correlation_id,
+        transport_type=EnumInfraTransportType.KAFKA,
+        operation="gateway_link_health_projection.extract_payload",
+    )
+    raise RuntimeHostError(
+        f"Gateway heartbeat event missing required non-negative int field '{key}'",
+        error_code=EnumCoreErrorCode.INVALID_INPUT,
+        context=context,
+    )
+
+
 class HandlerGatewayLinkHealthProjection:
     """COMPUTE handler that projects gateway heartbeat events into write intents."""
 
@@ -131,11 +156,22 @@ class HandlerGatewayLinkHealthProjection:
     ) -> ModelPayloadGatewayLinkHealthUpsert:
         """Extract heartbeat fields into a ModelPayloadGatewayLinkHealthUpsert.
 
-        Required: tenant_id, principal_id, local_transport_flavor, and a
-        parseable emitted_at -- a heartbeat without an identifiable tenant
-        edge is a producer bug, not a partial-data case. lag_messages /
-        lag_seconds are always absent from ModelGatewayHeartbeat today (see
-        the payload module docstring) and default to None.
+        Required: tenant_id, principal_id, local_transport_flavor, a
+        parseable emitted_at, status, and consecutive_failures -- a heartbeat
+        without an identifiable tenant edge is a producer bug, not a
+        partial-data case.
+
+        status and consecutive_failures are required rather than defaulted
+        (OMN-15742/G2 put both on every ModelGatewayHeartbeat). Defaulting a
+        missing status to "active" would let a malformed or non-canonical
+        producer be scored HEALTHY, which is the one failure mode this
+        projection must not have: silence is already visible as staleness,
+        but a wrongly-healthy verdict is invisible. Raising instead surfaces
+        the producer bug.
+
+        lag_messages / lag_seconds are still always absent from
+        ModelGatewayHeartbeat (see the payload module docstring) and default
+        to None.
         """
         headers = message.headers
         header_correlation_id = headers.correlation_id if headers else None
@@ -177,6 +213,10 @@ class HandlerGatewayLinkHealthProjection:
             body, "local_transport_flavor", header_correlation_id
         )
         last_seen_at = self._extract_timestamp(body)
+        reported_status = _require_str(body, "status", header_correlation_id)
+        consecutive_failures = _require_non_negative_int(
+            body, "consecutive_failures", header_correlation_id
+        )
         lag_messages_raw = body.get("lag_messages")
         lag_messages = (
             lag_messages_raw
@@ -197,6 +237,8 @@ class HandlerGatewayLinkHealthProjection:
             principal_id=principal_id,
             local_transport_flavor=local_transport_flavor,
             last_seen_at=last_seen_at,
+            reported_status=reported_status,
+            consecutive_failures=consecutive_failures,
             lag_messages=lag_messages,
             lag_seconds=lag_seconds,
         )

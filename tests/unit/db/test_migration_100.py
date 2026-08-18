@@ -127,3 +127,37 @@ def test_100_view_liveness_thresholds_match_contract_omn_15762() -> None:
         "100_create_gateway_link_health.sql's lag_threshold_seconds literal "
         "has drifted from the contract (OMN-15762 4th-copy class)"
     )
+
+
+def test_100_view_ranks_self_reported_degraded_above_lag_and_below_stale() -> None:
+    """Pin the CASE arm ORDER, not just its presence (OMN-15742/G2).
+
+    The live-apply proof in
+    tests/integration/migrations/test_100_gateway_link_health_verdicts.py is
+    what actually executes these arms. This is the cheap always-runs guard for
+    the case where that suite is skipped because Postgres tooling is absent:
+    it fails if someone reorders the arms, since CASE stops at the first TRUE
+    and the order IS the precedence.
+    """
+    sql = FORWARD.read_text(encoding="utf-8")
+    # Anchor on the CASE expression itself. Splitting on the CREATE statement
+    # is not enough: the header comment carries an example query containing
+    # 'HEALTHY', which would be found ahead of the real arms.
+    case_block = sql.split("    CASE\n", 1)[1].split("END AS health_status", 1)[0]
+
+    stale = case_block.index("'UNHEALTHY'")
+    self_reported = case_block.index("'DEGRADED_SELF_REPORTED'")
+    lag = case_block.index("'DEGRADED_LAG'")
+    healthy = case_block.index("'HEALTHY'")
+
+    assert stale < self_reported < lag < healthy
+
+
+def test_100_table_and_view_carry_the_self_reported_status_columns() -> None:
+    sql = FORWARD.read_text(encoding="utf-8").lower()
+
+    assert "reported_status text not null" in sql
+    assert "consecutive_failures integer not null" in sql
+    # Anything that is not 'active' is degraded -- an equality test against a
+    # closed set would score an unrecognised future status HEALTHY by omission.
+    assert "reported_status <> 'active'" in sql

@@ -16,13 +16,14 @@
 #   - OMN-15739 / OMN-15692: parent connectivity-brief tickets. G3 depends on
 #     G1 (OMN-15741, path-verifying healthcheck) and G2 (OMN-15742, reconnect
 #     supervision + DEGRADED bus state) per the lift plan's dependency order,
-#     both of which have since merged. This node still consumes ONLY the
-#     heartbeat topic (tenant_id/principal_id/emitted_at/
-#     local_transport_flavor). It does not depend on G1/G2 code; it is scoped
-#     down to what the current heartbeat payload carries. G2 added
-#     status/consecutive_failures/detail to the heartbeat, which this node
-#     does NOT yet read -- a degraded-but-heartbeating edge still projects as
-#     healthy-by-recency. Tracked as follow-up, not closed by this node. See
+#     both of which have since merged. This node consumes ONLY the heartbeat
+#     topic; it does not depend on G1/G2 code, only on the payload they
+#     produce. G2 widened that payload with status/consecutive_failures, and
+#     this node reads both: the edge's own verdict is persisted and outranks
+#     recency in gateway_link_health_status, so an edge that heartbeats on
+#     schedule while reporting itself degraded scores
+#     DEGRADED_SELF_REPORTED, never HEALTHY. Lag remains the one declared
+#     threshold family no producer populates. See
 #     ModelPayloadGatewayLinkHealthUpsert's module docstring for the exact
 #     field-level gap (lag_messages/lag_seconds always None today).
 name: "node_gateway_link_health_projection_compute"

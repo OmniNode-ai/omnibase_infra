@@ -79,6 +79,8 @@ CREATE TABLE IF NOT EXISTS public.gateway_link_health (
     principal_id TEXT NOT NULL,
     local_transport_flavor TEXT NOT NULL,
     last_seen_at TIMESTAMPTZ NOT NULL,
+    reported_status TEXT NOT NULL,
+    consecutive_failures INTEGER NOT NULL,
     lag_messages BIGINT,
     lag_seconds DOUBLE PRECISION,
     updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
@@ -99,6 +101,21 @@ COMMENT ON COLUMN public.gateway_link_health.last_seen_at IS
     'Producer-supplied ModelGatewayHeartbeat.emitted_at -- the freshness '
     'stamp gateway_link_health_status diffs against NOW().';
 
+COMMENT ON COLUMN public.gateway_link_health.reported_status IS
+    'The edge''s OWN verdict on itself, verbatim from '
+    'ModelGatewayHeartbeat.status (OMN-15742/G2). Stored as free TEXT, not a '
+    'CHECK-constrained enum, deliberately: gateway_link_health_status treats '
+    'any value other than ''active'' as degraded, so a status the producer '
+    'adds later (e.g. a drain state) is read as not-healthy rather than '
+    'crashing the projection or being silently scored HEALTHY.';
+
+COMMENT ON COLUMN public.gateway_link_health.consecutive_failures IS
+    'ModelGatewayHeartbeat.consecutive_failures -- the evidence behind a '
+    'degraded reported_status. Recorded so an operator can tell a single '
+    'blip from a sustained one without consulting process memory. It drives '
+    'no verdict arm of its own: the producer already folds it into '
+    'reported_status, and re-deriving it here would let the two disagree.';
+
 COMMENT ON COLUMN public.gateway_link_health.lag_messages IS
     'Consumer lag in messages, when a producer supplies it. Always NULL '
     'today -- see migration header SCOPE DISCLOSURE.';
@@ -116,18 +133,32 @@ COMMENT ON COLUMN public.gateway_link_health.lag_seconds IS
 --   SELECT tenant_id, health_status, seconds_since_last_seen
 --   FROM gateway_link_health_status
 --   WHERE health_status != 'HEALTHY';
+-- PRECEDENCE (fixed, deterministic -- the same row always yields the same
+-- verdict, and exactly one arm can win because CASE stops at the first TRUE):
+--   1. UNHEALTHY               -- stale beyond the silence window. Ranked
+--      above the edge's self-report on purpose: if the edge has stopped
+--      talking, its last self-report is stale too and cannot be trusted to
+--      still describe reality.
+--   2. DEGRADED_SELF_REPORTED  -- the edge is heartbeating on schedule and
+--      says it is NOT well. Ranked above lag because it is a direct
+--      first-party statement, not an inference from a derived metric.
+--   3. DEGRADED_LAG            -- inferred from lag columns (inert today).
+--   4. HEALTHY                 -- fresh, self-reporting active, no lag breach.
 CREATE OR REPLACE VIEW public.gateway_link_health_status AS
 SELECT
     tenant_id,
     principal_id,
     local_transport_flavor,
     last_seen_at,
+    reported_status,
+    consecutive_failures,
     lag_messages,
     lag_seconds,
     updated_at,
     EXTRACT(EPOCH FROM (NOW() - last_seen_at)) AS seconds_since_last_seen,
     CASE
         WHEN NOW() - last_seen_at > INTERVAL '60 seconds' THEN 'UNHEALTHY'
+        WHEN reported_status <> 'active' THEN 'DEGRADED_SELF_REPORTED'
         WHEN lag_messages IS NOT NULL AND lag_messages > 500 THEN 'DEGRADED_LAG'
         WHEN lag_seconds IS NOT NULL AND lag_seconds > 120 THEN 'DEGRADED_LAG'
         ELSE 'HEALTHY'
@@ -139,5 +170,8 @@ COMMENT ON VIEW public.gateway_link_health_status IS
     'flips to UNHEALTHY once a row goes stale beyond '
     'max_silence_window_seconds (60s, node_bus_forwarder_effect/contract.yaml:61) '
     'without the row ever disappearing -- absence of progress is visible as '
-    'a stale row, not a missing one. DEGRADED_LAG arms are inert until a '
-    'producer populates lag_messages/lag_seconds (OMN-15570 scope gap).';
+    'a stale row, not a missing one. An edge that IS heartbeating on time but '
+    'reports itself degraded scores DEGRADED_SELF_REPORTED, never HEALTHY. '
+    'Precedence is fixed (stale > self-reported > lag) and documented above '
+    'the view body. DEGRADED_LAG arms remain inert until a producer '
+    'populates lag_messages/lag_seconds.';

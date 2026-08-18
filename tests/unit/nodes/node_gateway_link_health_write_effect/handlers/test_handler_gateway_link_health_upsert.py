@@ -73,6 +73,8 @@ def make_minimal_payload(
         "principal_id": "t-abc123",
         "local_transport_flavor": "containerized",
         "last_seen_at": datetime.now(UTC),
+        "reported_status": "active",
+        "consecutive_failures": 0,
     }
     defaults.update(overrides)
     return ModelPayloadGatewayLinkHealthUpsert(**defaults)
@@ -183,8 +185,8 @@ class TestHandlerGatewayLinkHealthUpsertLagFields:
         db_handler.execute.assert_awaited_once()
         (envelope,), _ = db_handler.execute.call_args
         parameters = envelope["payload"]["parameters"]
-        assert parameters[4] == 12
-        assert parameters[5] == 3.5
+        assert parameters[6] == 12
+        assert parameters[7] == 3.5
 
     @pytest.mark.asyncio
     async def test_upsert_defaults_lag_fields_to_none(self) -> None:
@@ -200,8 +202,8 @@ class TestHandlerGatewayLinkHealthUpsertLagFields:
 
         (envelope,), _ = db_handler.execute.call_args
         parameters = envelope["payload"]["parameters"]
-        assert parameters[4] is None
-        assert parameters[5] is None
+        assert parameters[6] is None
+        assert parameters[7] is None
 
 
 class TestHandlerGatewayLinkHealthUpsertHandle:
@@ -254,3 +256,48 @@ class TestHandlerGatewayLinkHealthUpsertHandle:
         )
 
         assert output.correlation_id is not None
+
+
+class TestHandlerGatewayLinkHealthUpsertSelfReportedStatus:
+    """The self-reported status must reach the row, not stop at the payload.
+
+    The status view derives DEGRADED_SELF_REPORTED from the persisted column,
+    so a write path that silently dropped these two fields would leave every
+    degraded edge reading HEALTHY — the exact failure the G2 fields exist to
+    prevent.
+    """
+
+    @pytest.mark.asyncio
+    async def test_upsert_sends_status_fields_as_sql_parameters(self) -> None:
+        handler, db_handler = make_handler_with_mock_db()
+        db_handler.execute = AsyncMock(
+            return_value=make_db_result(rows=[{"was_insert": True}])
+        )
+        payload = make_minimal_payload(
+            reported_status="degraded", consecutive_failures=4
+        )
+
+        await handler.upsert(payload)
+
+        (envelope,), _ = db_handler.execute.call_args
+        parameters = envelope["payload"]["parameters"]
+        assert parameters[4] == "degraded"
+        assert parameters[5] == 4
+
+    @pytest.mark.asyncio
+    async def test_upsert_statement_writes_both_status_columns(self) -> None:
+        handler, db_handler = make_handler_with_mock_db()
+        db_handler.execute = AsyncMock(
+            return_value=make_db_result(rows=[{"was_insert": True}])
+        )
+
+        await handler.upsert(make_minimal_payload())
+
+        (envelope,), _ = db_handler.execute.call_args
+        sql = envelope["payload"]["sql"]
+        assert "reported_status" in sql
+        assert "consecutive_failures" in sql
+        # Latest-known-state: a refresh must overwrite the previous verdict,
+        # otherwise a recovered edge would stay degraded forever.
+        assert "reported_status          = EXCLUDED.reported_status" in sql
+        assert "consecutive_failures     = EXCLUDED.consecutive_failures" in sql

@@ -12,8 +12,11 @@ Test coverage:
       last_seen_at from a ModelGatewayHeartbeat-shaped body
     - lag_messages/lag_seconds default to None when absent (today's real
       producer shape) and round-trip when present (forward-compat)
+    - Round-trips the edge's self-reported status and consecutive_failures
+      (OMN-15742/G2), including a status value the producer adds later
     - Raises RuntimeHostError when tenant_id/principal_id/
-      local_transport_flavor is missing
+      local_transport_flavor/status/consecutive_failures is missing, rather
+      than defaulting a missing status to "active"
     - Unwraps ModelEventEnvelope-style wrappers when payload is nested
     - Raises RuntimeHostError on unparseable JSON and non-object root
     - Emits ModelIntent with intent_type='gateway_link_health.upsert' and a
@@ -76,6 +79,7 @@ def test_project_extracts_canonical_fields(
         "tenant_id": "beta-gateway-canary-79afa7263852",
         "principal_id": "t-abc123",
         "status": "active",
+        "consecutive_failures": 0,
         "emitted_at": ts,
         "local_transport_flavor": "containerized",
     }
@@ -107,6 +111,8 @@ def test_project_round_trips_lag_fields_when_present(
         "tenant_id": "beta-gateway-canary-79afa7263852",
         "principal_id": "t-abc123",
         "local_transport_flavor": "lightweight",
+        "status": "active",
+        "consecutive_failures": 0,
         "lag_messages": 12,
         "lag_seconds": 3.5,
     }
@@ -126,6 +132,8 @@ def test_project_unwraps_envelope_payload(
         "tenant_id": "tenant-a",
         "principal_id": "t-a",
         "local_transport_flavor": "containerized",
+        "status": "active",
+        "consecutive_failures": 0,
     }
     envelope_shaped = {"envelope_id": str(uuid4()), "payload": inner}
 
@@ -144,6 +152,8 @@ def test_project_falls_back_to_now_when_emitted_at_missing(
                 "tenant_id": "tenant-b",
                 "principal_id": "t-b",
                 "local_transport_flavor": "containerized",
+                "status": "active",
+                "consecutive_failures": 0,
             }
         )
     )
@@ -212,6 +222,8 @@ async def test_handle_drives_dispatch_shaped_entry_point(
         "tenant_id": "beta-gateway-canary-79afa7263852",
         "principal_id": "t-abc123",
         "local_transport_flavor": "containerized",
+        "status": "active",
+        "consecutive_failures": 0,
     }
     message = _from_dict(body)
 
@@ -233,6 +245,8 @@ async def test_handle_accepts_dict_shaped_envelope(
         "tenant_id": "beta-gateway-canary-79afa7263852",
         "principal_id": "t-abc123",
         "local_transport_flavor": "lightweight",
+        "status": "active",
+        "consecutive_failures": 0,
     }
     raw_event_message: dict[str, Any] = {
         "topic": "onex.evt.omnibase-infra.gateway-heartbeat.v1",
@@ -255,3 +269,92 @@ async def test_handle_accepts_dict_shaped_envelope(
     assert isinstance(payload, ModelPayloadGatewayLinkHealthUpsert)
     assert payload.tenant_id == "beta-gateway-canary-79afa7263852"
     assert payload.local_transport_flavor == "lightweight"
+
+
+# ---------------------------------------------------------------------------
+# Self-reported status (OMN-15742/G2 fields)
+# ---------------------------------------------------------------------------
+# G2 added status/consecutive_failures to every ModelGatewayHeartbeat. These
+# assert the projection carries them rather than dropping them on the floor —
+# a dropped status is what let a degraded edge project as healthy.
+
+
+def _canonical_body(**overrides: Any) -> dict[str, Any]:
+    body: dict[str, Any] = {
+        "tenant_id": "tenant-status",
+        "principal_id": "t-status",
+        "local_transport_flavor": "containerized",
+        "status": "active",
+        "consecutive_failures": 0,
+    }
+    body.update(overrides)
+    return body
+
+
+def test_project_round_trips_degraded_status(
+    handler: HandlerGatewayLinkHealthProjection,
+) -> None:
+    intent = handler.project(
+        _from_dict(_canonical_body(status="degraded", consecutive_failures=3))
+    )
+
+    payload = intent.payload
+    assert isinstance(payload, ModelPayloadGatewayLinkHealthUpsert)
+    assert payload.reported_status == "degraded"
+    assert payload.consecutive_failures == 3
+
+
+def test_project_round_trips_unrecognised_status_verbatim(
+    handler: HandlerGatewayLinkHealthProjection,
+) -> None:
+    """An unknown status must reach the projection unchanged, not be rejected.
+
+    The status view is what decides such a value is not-healthy. Failing
+    validation here instead would stall the whole projection the moment the
+    producer grows a new state.
+    """
+    intent = handler.project(_from_dict(_canonical_body(status="draining")))
+
+    payload = intent.payload
+    assert isinstance(payload, ModelPayloadGatewayLinkHealthUpsert)
+    assert payload.reported_status == "draining"
+
+
+def test_project_raises_when_status_missing(
+    handler: HandlerGatewayLinkHealthProjection,
+) -> None:
+    """Never default a missing status to 'active'.
+
+    Defaulting would score a malformed producer HEALTHY, and a wrongly-healthy
+    verdict is invisible — unlike silence, which shows up as staleness.
+    """
+    body = _canonical_body()
+    del body["status"]
+
+    with pytest.raises(RuntimeHostError):
+        handler.project(_from_dict(body))
+
+
+def test_project_raises_when_consecutive_failures_missing(
+    handler: HandlerGatewayLinkHealthProjection,
+) -> None:
+    body = _canonical_body()
+    del body["consecutive_failures"]
+
+    with pytest.raises(RuntimeHostError):
+        handler.project(_from_dict(body))
+
+
+def test_project_raises_when_consecutive_failures_is_boolean(
+    handler: HandlerGatewayLinkHealthProjection,
+) -> None:
+    """bool is an int subclass in Python — true would silently record as 1."""
+    with pytest.raises(RuntimeHostError):
+        handler.project(_from_dict(_canonical_body(consecutive_failures=True)))
+
+
+def test_project_raises_when_consecutive_failures_is_negative(
+    handler: HandlerGatewayLinkHealthProjection,
+) -> None:
+    with pytest.raises(RuntimeHostError):
+        handler.project(_from_dict(_canonical_body(consecutive_failures=-1)))

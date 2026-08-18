@@ -13,20 +13,24 @@ existing row (evaluated live by the ``gateway_link_health_status`` view), not
 as a missing row.
 
 SCOPE DISCLOSURE (OMN-15570 / G3, gateway lift Phase 0): this payload carries
-only what ``ModelGatewayHeartbeat`` publishes today -- ``tenant_id``,
-``principal_id``, ``emitted_at``, ``local_transport_flavor``. The contract's
+what ``ModelGatewayHeartbeat`` publishes today -- ``tenant_id``,
+``principal_id``, ``emitted_at``, ``local_transport_flavor``, and the
+``status`` / ``consecutive_failures`` pair that G2 (OMN-15742) added.
+
+The one declared threshold family still unobservable is lag. The contract's
 ``gateway_forwarder.liveness`` block (``node_bus_forwarder_effect/contract.yaml``
-lines 59-63) also declares ``lag_threshold_messages`` /
-``lag_threshold_seconds``, but no producer in this codebase publishes lag
-data on the heartbeat topic (G1/G2 -- OMN-15741/OMN-15742 -- are the lanes
-that would add reconnect/lag telemetry; both have since merged, but G2 added
-``status`` / ``consecutive_failures`` / ``detail`` to the heartbeat rather
-than lag fields, and this payload does not yet carry those either).
-``lag_messages`` / ``lag_seconds`` are therefore always ``None`` on
-this payload; the write-effect persists them as nullable columns and the
-status view only evaluates the silence-window threshold it can actually
-observe. See the module docstring on the status view for the exact
-consequence.
+lines 59-63) declares ``lag_threshold_messages`` / ``lag_threshold_seconds``,
+but no producer in this codebase publishes lag data on the heartbeat topic --
+G1/G2 (OMN-15741/OMN-15742) were the lanes that would have, and both landed
+without it. ``lag_messages`` / ``lag_seconds`` are therefore always ``None``
+here; the write-effect persists them as nullable columns and the status
+view's lag arms stay inert (a ``NULL`` comparison is neither TRUE nor FALSE
+in SQL, so they never contribute a verdict).
+
+This is a materially smaller gap than lag-plus-status was. Silence is
+observable through ``last_seen_at``, and an unwell-but-talking edge is now
+observable through ``status`` -- the case that previously scored HEALTHY
+because nothing carried the edge's own opinion of itself.
 """
 
 from __future__ import annotations
@@ -53,6 +57,16 @@ class ModelPayloadGatewayLinkHealthUpsert(BaseModel):
         last_seen_at: Producer-supplied ``emitted_at`` timestamp of the
             heartbeat -- the freshness stamp the status view diffs against
             ``NOW()``.
+        reported_status: The edge's own verdict on itself, verbatim from
+            ``ModelGatewayHeartbeat.status`` (OMN-15742/G2). Carried as a
+            plain ``str`` rather than a ``Literal`` so that a status the
+            producer adds later does not fail validation here and stall the
+            projection; the status view treats anything other than
+            ``"active"`` as degraded, so an unrecognised value is read as
+            not-healthy rather than silently scored healthy.
+        consecutive_failures: ``ModelGatewayHeartbeat.consecutive_failures``
+            -- the evidence behind a degraded ``reported_status``. Persisted
+            as explanation, not as a verdict input.
         lag_messages: Consumer lag in messages, when a producer supplies it.
             Always ``None`` today -- see module docstring.
         lag_seconds: Consumer lag in seconds, when a producer supplies it.
@@ -84,6 +98,22 @@ class ModelPayloadGatewayLinkHealthUpsert(BaseModel):
     last_seen_at: datetime = Field(
         ...,
         description="Producer-supplied heartbeat emission time.",
+    )
+    reported_status: str = Field(
+        ...,
+        min_length=1,
+        description=(
+            "The edge's own status verbatim from the heartbeat. Anything "
+            "other than 'active' is treated as degraded by the status view."
+        ),
+    )
+    consecutive_failures: int = Field(
+        ...,
+        ge=0,
+        description=(
+            "Consecutive failure count from the heartbeat; evidence behind a "
+            "degraded reported_status, not a verdict input of its own."
+        ),
     )
     lag_messages: int | None = Field(
         default=None,

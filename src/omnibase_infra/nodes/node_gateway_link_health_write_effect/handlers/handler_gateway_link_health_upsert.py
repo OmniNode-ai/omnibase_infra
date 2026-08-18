@@ -55,16 +55,20 @@ INSERT INTO public.gateway_link_health (
     principal_id,
     local_transport_flavor,
     last_seen_at,
+    reported_status,
+    consecutive_failures,
     lag_messages,
     lag_seconds,
     updated_at
 ) VALUES (
-    $1, $2, $3, $4, $5, $6, NOW()
+    $1, $2, $3, $4, $5, $6, $7, $8, NOW()
 )
 ON CONFLICT (tenant_id) DO UPDATE SET
     principal_id            = EXCLUDED.principal_id,
     local_transport_flavor  = EXCLUDED.local_transport_flavor,
     last_seen_at             = EXCLUDED.last_seen_at,
+    reported_status          = EXCLUDED.reported_status,
+    consecutive_failures     = EXCLUDED.consecutive_failures,
     lag_messages             = EXCLUDED.lag_messages,
     lag_seconds              = EXCLUDED.lag_seconds,
     updated_at                = NOW()
@@ -176,8 +180,10 @@ class HandlerGatewayLinkHealthUpsert:
             payload.principal_id,  # $2
             payload.local_transport_flavor,  # $3
             payload.last_seen_at,  # $4
-            payload.lag_messages,  # $5
-            payload.lag_seconds,  # $6
+            payload.reported_status,  # $5
+            payload.consecutive_failures,  # $6
+            payload.lag_messages,  # $7
+            payload.lag_seconds,  # $8
         ]
 
         envelope: dict[str, object] = {
