@@ -343,15 +343,63 @@ def _extract_correlation_id(workflow_data: dict[str, JsonValue]) -> uuid.UUID:
     return uuid.uuid4()
 
 
+WORKFLOW_RESULT_FILENAME = "workflow_result.json"
+
+
 def _load_workflow_data(state_root: Path) -> dict[str, JsonValue]:
     """Read ``workflow_result.json`` if the runtime wrote one."""
-    result_path = state_root / "workflow_result.json"
+    result_path = state_root / WORKFLOW_RESULT_FILENAME
     if not result_path.exists():
         return {}
     parsed: object = json.loads(result_path.read_text(encoding="utf-8"))
     if not isinstance(parsed, dict):
         return {}
     return cast("dict[str, JsonValue]", parsed)
+
+
+def _verify_workflow_data_identity(
+    workflow_data: dict[str, JsonValue], run_id: uuid.UUID
+) -> tuple[dict[str, JsonValue], str | None]:
+    """Fail-closed anchor join against ``workflow_result.json`` (OMN-15449).
+
+    ``workflow_result.json`` lives at a FIXED path shared by every ``onex``
+    invocation against the same ``state_root``. Reading it back after
+    ``runtime.run()`` returns and simply trusting its content is the
+    mechanism behind a reported false-Done class: a concurrent invocation
+    against the same ``state_root`` (or a ``RuntimeLocal`` exit path that
+    returns without writing state at all) can leave a DIFFERENT run's
+    content there, and nothing in the old read path could tell — a receipt
+    could report ``status=success`` with a fully green, fully populated
+    ``result`` table that belongs to a different ticket/run than the one
+    just requested, while this run's own capture log correctly names what
+    it actually resolved.
+
+    ``RuntimeLocal`` (OMN-15449, omnibase_core) now stamps its own
+    ``run_id`` into every write. This function is the join: content is
+    trusted ONLY when its ``run_id`` field equals the run_id THIS process
+    generated for THIS invocation.
+
+    Returns ``(workflow_data, None)`` unchanged when the file is empty
+    (nothing to distrust — a genuinely fresh state_root, or a run that
+    legitimately produced no workflow data) or when its ``run_id`` matches.
+    Returns ``({}, reason)`` — discarding the untrusted content entirely —
+    on any mismatch, INCLUDING an absent ``run_id`` field: an old writer
+    that predates this stamp is indistinguishable from a mismatch and must
+    fail closed the same way (UNKNOWN reads as untrustworthy, never as
+    fresh — the same discipline OMN-15396 AC5 applies to freshness).
+    """
+    if not workflow_data:
+        return workflow_data, None
+    stamped = workflow_data.get("run_id")
+    if stamped == str(run_id):
+        return workflow_data, None
+    reason = (
+        f"OMN-15449 anchor-join refusal: {WORKFLOW_RESULT_FILENAME} run_id "
+        f"{stamped!r} does not match this invocation's run_id {str(run_id)!r} "
+        "— discarding untrusted workflow data instead of serving another "
+        "run's result as this run's own."
+    )
+    return {}, reason
 
 
 def _load_merge_sweep_handler_result(
@@ -513,6 +561,10 @@ def run_receipt_mode(
             backend_overrides=backend_overrides,
             input_path=input_path,
             timeout=timeout,
+            # OMN-15449: same run_id this function already uses for the
+            # skill-lifecycle events, threaded into the writer so the reader
+            # below can verify the file it reads back is THIS run's own.
+            run_id=run_id,
         )
         workflow_result = runtime.run()
         exit_code = runtime.exit_code
@@ -536,6 +588,19 @@ def run_receipt_mode(
         capture_path.read_text(encoding="utf-8") if capture_path.exists() else ""
     )
     workflow_data = _load_workflow_data(state_root)
+    workflow_data, identity_refusal = _verify_workflow_data_identity(
+        workflow_data, run_id
+    )
+    if identity_refusal:
+        logger.error(identity_refusal)
+        if not runtime_error:
+            runtime_error = identity_refusal
+            runtime_error_type = "WorkflowResultIdentityMismatch"
+            # AC3 (OMN-15449): "refuse (non-verified, non-zero exit)" — a
+            # RuntimeLocal that itself returned COMPLETED/exit 0 must not
+            # let that success code escape once the anchor join has decided
+            # its own workflow data cannot be trusted.
+            exit_code = 1
     correlation_id = _extract_correlation_id(workflow_data)
     handler_result_model_name: str | None = (
         _fully_qualified_name(handler_result_obj)
