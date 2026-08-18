@@ -973,3 +973,188 @@ class TestIntegrationTestRemovalGateExternalContext:
         omn15979_prs = set(_load_omn15979_fixture()["pull_requests"])
         assert omn15496_prs.isdisjoint(omn15979_prs)
         assert len(omn15979_prs) == 16
+
+
+# --------------------------------------------------------------------------
+# OMN-16216 — draft-state CI admission gate (mirrors onex_change_control PR
+# #6686 / OMN-15731). omnibase_infra's own `ci:ready` label-gate pilot
+# (OMN-15731, infra#2693) was still OPEN/unmerged when this ticket was built
+# -- there was nothing merged to "migrate from" the way OCC's #6216 -> #6686
+# revision had. This class instead ships BOTH admission arms in one PR:
+# native PR draft state as the PRIMARY signal, `ci:ready` retained as a
+# transition-window dual-accept fallback for forward compatibility with
+# #2693 (or any future equivalent), even though no producer of that label
+# currently exists on this repo's live dev.
+#
+# `test-parallel` (the heavy split-matrix run, the actual expensive workload)
+# is the load-bearing target. The trap this pins (AC(b) on OMN-16216):
+# `tests-gate` ("CI Tests Gate", a STRICT_GATE_JOBS member) already treats a
+# `skipped` test-parallel result as pass for the pre-existing docs-only
+# exemption. Without the fix below, a draft, non-docs-only PR would hit that
+# exact same skip-is-pass path and read CI Summary = SUCCESS with zero tests
+# run. `deploy-gate`, `codeql`, and `hostile-review` are also gated -- each
+# verified against its own fail-closed (or non-gating) path per the module
+# docstring's OMN-15496 external-context mechanism, not asserted blind.
+# --------------------------------------------------------------------------
+
+
+DEPLOY_GATE_WORKFLOW = REPO_ROOT / ".github" / "workflows" / "deploy-gate.yml"
+SECURITY_SCAN_WORKFLOW = REPO_ROOT / ".github" / "workflows" / "security-scan.yml"
+HOSTILE_REVIEWER_WORKFLOW = REPO_ROOT / ".github" / "workflows" / "hostile-reviewer.yml"
+
+
+class TestDraftStateAdmissionGateOmn16216:
+    def test_ci_yml_pull_request_trigger_includes_ready_for_review(self) -> None:
+        """A draft->ready flip must re-evaluate the gate on the current head
+        without requiring a new push (root brief invariant)."""
+        workflow = _load_workflow(CI_WORKFLOW)
+        # PyYAML's default (YAML 1.1) resolver parses the bare `on:` key as
+        # the boolean True, not the string "on" -- this is not a typo.
+        pr_trigger = workflow[True]["pull_request"]
+        for event_type in ("labeled", "unlabeled", "ready_for_review"):
+            assert event_type in pr_trigger["types"], (
+                f"ci.yml pull_request.types is missing {event_type!r}; a "
+                "label change or draft->ready flip would not retrigger the "
+                "workflow"
+            )
+
+    def test_test_parallel_if_has_both_admission_arms_dual_accept(self) -> None:
+        job = _load_workflow(CI_WORKFLOW)["jobs"]["test-parallel"]
+        condition = str(job["if"])
+        assert "!github.event.pull_request.draft" in condition
+        assert "contains(github.event.pull_request.labels.*.name, 'ci:ready')" in (
+            condition
+        )
+        # Non-pull_request events (push, merge_group, workflow_dispatch) carry
+        # no PR draft/label state and must remain unaffected.
+        assert "github.event_name != 'pull_request'" in condition
+        # Main-boundary carve-out (CLAUDE.md rule 4): the dev->main promotion
+        # boundary is never narrowed, so any PR targeting main must run the
+        # full fleet unconditionally regardless of draft/ci:ready state.
+        assert "github.base_ref != 'dev'" in condition
+        # Both arms sit inside the same top-level `||` group, not nested
+        # under an `&&` that would make one a precondition for the other.
+        or_clause_start = condition.index("(github.event_name")
+        or_clause = condition[or_clause_start:]
+        assert or_clause.count("||") >= 3, (
+            "expected a flat OR chain (event_name / base_ref / !draft / "
+            f"ci:ready) -- got: {or_clause}"
+        )
+
+    def test_tests_gate_distinguishes_docs_only_skip_from_admission_skip(
+        self,
+    ) -> None:
+        """The mechanism that closes the AC(b) trap must exist in ci.yml, not
+        just in this poller's already-generic STRICT-gate failure path."""
+        job = _load_workflow(CI_WORKFLOW)["jobs"]["tests-gate"]
+        step = next(
+            s
+            for s in job["steps"]
+            if "Check test matrix results" in str(s.get("name", ""))
+        )
+        run = str(step["run"])
+        env = step["env"]
+        assert "DOCS_ONLY" in env
+        assert "ADMITTED" in env
+        assert "!github.event.pull_request.draft" in str(env["ADMITTED"])
+        assert "github.base_ref != 'dev'" in str(env["ADMITTED"])
+        assert '[ "$DOCS_ONLY" = "true" ]' in run
+        assert '[ "$ADMITTED" != "true" ]' in run
+        # The admission-skip branch must exit non-zero (fail closed), distinct
+        # from the docs-only branch which must not.
+        assert "exit 1" in run
+        assert "zone-filter" in job["needs"]
+
+    def test_unadmitted_skip_reported_as_ci_tests_gate_failure_fails_closed(
+        self,
+    ) -> None:
+        """Simulates the exact live outcome once tests-gate's bash exits 1 for
+        an admission-skip: "CI Tests Gate" reports `failure`, and the
+        poller's pre-existing (unmodified) STRICT-gate logic must fail the
+        whole summary closed -- proving no new poller mechanism was needed."""
+        gates = _all_gates("success")
+        for gate in gates:
+            if gate["name"] == "CI Tests Gate":
+                gate["conclusion"] = "failure"
+        code, report = evaluate(gates + [_job("Detect Changes", "success")])
+        assert code == EXIT_FAILURE, report
+        assert "CI Tests Gate" in report
+
+    def test_docs_only_skip_is_still_success(self) -> None:
+        """Control: the pre-existing docs-only exemption must be unaffected --
+        "CI Tests Gate" reporting `success` (as it does when the bash
+        script's docs-only branch completes without exiting 1) still
+        passes."""
+        code, report = evaluate(
+            _all_gates("success") + [_job("Detect Changes", "success")]
+        )
+        assert code == EXIT_SUCCESS, report
+
+    def test_deploy_gate_job_if_has_both_admission_arms(self) -> None:
+        workflow = _load_workflow(DEPLOY_GATE_WORKFLOW)
+        job = workflow["jobs"]["deploy-gate"]
+        condition = str(job["if"])
+        assert "!github.event.pull_request.draft" in condition
+        assert "contains(github.event.pull_request.labels.*.name, 'ci:ready')" in (
+            condition
+        )
+        assert "github.event_name != 'pull_request'" in condition
+        assert "github.base_ref != 'dev'" in condition
+        for event_type in ("labeled", "unlabeled", "ready_for_review"):
+            assert event_type in workflow[True]["pull_request"]["types"]
+        # "deploy-gate / deploy-gate" must stay a registered external context
+        # so a skip fails closed via the EXPECTED_EXTERNAL_CONTEXTS path.
+        assert "deploy-gate / deploy-gate" in EXPECTED_EXTERNAL_CONTEXTS
+
+    def test_codeql_job_if_has_both_admission_arms(self) -> None:
+        workflow = _load_workflow(SECURITY_SCAN_WORKFLOW)
+        job = workflow["jobs"]["codeql"]
+        condition = str(job["if"])
+        assert "!github.event.pull_request.draft" in condition
+        assert "contains(github.event.pull_request.labels.*.name, 'ci:ready')" in (
+            condition
+        )
+        assert "github.event_name != 'pull_request'" in condition
+        assert "github.base_ref != 'dev'" in condition
+        for event_type in ("labeled", "unlabeled", "ready_for_review"):
+            assert event_type in workflow[True]["pull_request"]["types"]
+        assert "CodeQL" in EXPECTED_EXTERNAL_CONTEXTS
+
+    def test_hostile_review_job_if_has_both_admission_arms(self) -> None:
+        workflow = _load_workflow(HOSTILE_REVIEWER_WORKFLOW)
+        job = workflow["jobs"]["hostile-review"]
+        condition = str(job["if"])
+        assert "!github.event.pull_request.draft" in condition
+        assert "contains(github.event.pull_request.labels.*.name, 'ci:ready')" in (
+            condition
+        )
+        assert "github.event_name != 'pull_request'" in condition
+        assert "github.base_ref != 'dev'" in condition
+        for event_type in ("labeled", "unlabeled", "ready_for_review"):
+            assert event_type in workflow[True]["pull_request"]["types"]
+        # Hostile Review Gate is deliberately absent from every gating
+        # surface -- pure runner-cost win, not a fail-closed claim.
+        assert "Hostile Review Gate" not in STRICT_GATE_JOBS
+        assert "Hostile Review Gate" not in SKIPPABLE_GATE_JOBS
+        assert "Hostile Review Gate" not in EXPECTED_EXTERNAL_CONTEXTS
+
+    def test_red_control_pre_migration_test_parallel_shape_had_no_draft_arm(
+        self,
+    ) -> None:
+        """RED-before control: pins that the pre-OMN-16216 `test-parallel`
+        condition string had no draft-state clause at all -- a draft PR was
+        previously ADMITTED (main/non-dev events aside) purely because no
+        admission gate existed. This is the state this ticket replaces; it is
+        not a live assertion against ci.yml (which now has the arm) -- it
+        pins the pre-migration string so a future revert is caught by drift,
+        not by eyeballing history."""
+        pre_migration_condition = (
+            "needs.occ-preflight.result == 'success' && "
+            "(needs.zone-filter.outputs.docs_only != 'true')"
+        )
+        assert "!github.event.pull_request.draft" not in pre_migration_condition
+        live_condition = str(_load_workflow(CI_WORKFLOW)["jobs"]["test-parallel"]["if"])
+        assert live_condition != pre_migration_condition, (
+            "live ci.yml test-parallel condition must have moved past the "
+            "pre-migration shape captured above"
+        )

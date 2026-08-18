@@ -87,8 +87,26 @@ gates:
     caller_workflow: deploy-gate.yml
     caller_job: deploy-gate
     cross_repo_ref: "OmniNode-ai/omniclaude/.github/workflows/deploy-gate-reusable.yml@ff230264ac3300d7ced43564dc921f44558110fe"
-    skip_semantics: never
-    rationale: "Runtime-change PRs must cite a ticket with deploy evidence (OMN-8912/DGM-Phase6). Caller job has no if:, no path filter, pull_request+merge_group trigger present."
+    # OMN-16216 draft-state CI admission gate: the caller job now carries
+    # `if: github.event_name != 'pull_request' || github.base_ref != 'dev' ||
+    # !github.event.pull_request.draft ||
+    # contains(github.event.pull_request.labels.*.name, 'ci:ready')`.
+    # neutral_ok, not never, because a skip here does not weaken enforcement:
+    # when the caller is skipped the reusable workflow never starts, so
+    # "deploy-gate / deploy-gate" is ABSENT from commits/{sha}/check-runs --
+    # and this context is also an EXPECTED_EXTERNAL_CONTEXTS member in
+    # scripts/ci/ci_summary_gate.py, whose own docstring states
+    # missing/still-running resolves to PENDING, converted to FAILURE at the
+    # poller's deadline -- never SUCCESS. A draft PR's sole required context
+    # ("CI Summary") therefore still fails closed; undrafting (or, during the
+    # transition window, applying ci:ready) restores the caller's trigger and
+    # the context reports normally. merge_group is unaffected
+    # (github.event_name != 'pull_request' short-circuits the check), and any
+    # PR targeting main is unaffected (github.base_ref != 'dev'
+    # short-circuits it, so main-targeting PRs always run the full fleet
+    # regardless of draft/ci:ready state).
+    skip_semantics: neutral_ok
+    rationale: "OMN-16216: draft-state CI admission gate (dual-accept with ci:ready during the OMN-15731 transition window). Runtime-change PRs must still cite a ticket with deploy evidence (OMN-8912/DGM-Phase6) once the PR is out of draft; a draft PR is not exempted -- it is PENDING/FAILURE via the EXPECTED_EXTERNAL_CONTEXTS absent-context path in CI Summary, never green-by-skip. See comment above for the full chain."
   - name: "Topic Enum Drift Check"
     mode: REQUIRED
     producer_kind: local
