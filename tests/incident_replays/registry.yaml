@@ -89,6 +89,13 @@ scope:
     - scripts/ci/check_integration_skips.py
     - scripts/ci/check_occ_companion_merged.py
     - scripts/ci/check_shell_hygiene.sh
+    # OMN-16229: a genuinely new preventive control, not a replay of an
+    # existing bad state -- .trivyignore never existed in this repo before
+    # this ticket, so there are no real historical bytes of a malformed or
+    # expired entry to capture (fabricating one would violate R2's
+    # re-fetchable-origin rule: an invented "this once happened" fixture has
+    # no locator that resolves). Honest debt, not a case.
+    - scripts/ci/check_trivyignore_expiry.py
     - scripts/ci/ci_env_digest.py
     - scripts/ci/ci_summary_gate.py
     - scripts/ci/detect_test_paths.py

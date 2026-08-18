@@ -1669,6 +1669,65 @@ class AuditLogger:
 
 ---
 
+## Container Image CVE Ignore Policy
+
+Every runtime image build (`build-and-push-runtime.yml`, the prod path; and
+`build-workspace-candidate-runtime.yml`, the stability-candidate path) runs a
+Trivy scan with `exit-code: 1`, `ignore-unfixed: true`, `severity:
+'CRITICAL,HIGH'`. That is a hard block: a fixable CRITICAL/HIGH finding
+always fails the build, unconditionally.
+
+`ignore-unfixed: true` already means a CVE with no published fix never blocks
+the build on its own — but it does so silently and permanently, with no
+ticket, no reviewer, and no forced re-triage date. OMN-16229 (born from the
+2026-08-18 sqlparse/Trivy incident, OMN-16170) replaces that silent, forever
+exemption with a committed, auditable, **time-bounded** one: `.trivyignore`
+at the repo root.
+
+### Rules
+
+1. **Only for fix-unavailable CVEs.** A fix-available finding must never be
+   silenced via `.trivyignore`. Trivy's own `ignore-unfixed: true` already
+   refuses to suppress those regardless of what the file contains, and
+   `scripts/ci/check_trivyignore_expiry.py` independently fails the build if
+   an entry's `# reason:` is anything other than exactly `no-upstream-fix`.
+2. **Every entry carries mandatory metadata** — a 4-line comment block
+   immediately above the bare vulnerability id Trivy reads:
+
+   ```text
+   # CVE: CVE-2024-12345
+   # reason: no-upstream-fix
+   # ticket: OMN-12345
+   # expires: 2026-12-31
+   CVE-2024-12345
+   ```
+
+   `# CVE:` must match the id line below it, `# ticket:` must be a real
+   `OMN-<digits>` tracking ticket, and `# expires:` must be an ISO-8601 date
+   strictly in the future.
+3. **Expiry is enforced, not advisory.** `scripts/ci/check_trivyignore_expiry.py`
+   runs as a required step ahead of every Trivy scan in both image-build
+   workflows, and as a fast, dependency-free PR-time check in `ci.yml`
+   (`trivyignore-expiry-check`, registered in `STRICT_GATE_JOBS`). A
+   malformed entry, or one whose `# expires:` date has passed, fails the
+   build. There is no way for an ignore to become permanent by accident —
+   someone must actively re-triage and bump the date (or remove the entry,
+   if a fix has since shipped) under the same tracking ticket.
+4. **Negative control.** A fix-available CVE always blocks regardless of
+   anything in `.trivyignore` — this is a policy TUNE, not a gate weakening.
+   Trivy's `ignore-unfixed: true` is the enforcement point for that
+   guarantee; `.trivyignore` metadata validation never overrides it.
+
+### Adding an entry
+
+Only add an entry after confirming via the upstream advisory (GHSA/CVE
+record) that no fixed version exists yet. Cite the tracking ticket in the
+`# ticket:` field and set `# expires:` to a re-triage date reasonable for the
+CVE's severity — do not set it years out; the whole point is a forced
+periodic look, not a one-time bypass.
+
+---
+
 ## Production Security Checklist
 
 Use this checklist before deploying to production:
