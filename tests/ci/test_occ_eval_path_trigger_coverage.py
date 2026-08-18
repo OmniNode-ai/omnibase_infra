@@ -205,7 +205,15 @@ def test_eval_path_workflow_has_a_self_heal_path(workflow_name: str) -> None:
     assert workflow_path.is_file(), f"expected workflow file at {workflow_path}"
     types = _pull_request_trigger_types(workflow_path)
     has_own_trigger = not (REQUIRED_EVAL_PATH_PR_EVENT_TYPES - types)
-    healer_covered = workflow_name in HEALER_COVERED_WORKFLOWS
+    # Membership in HEALER_COVERED_WORKFLOWS is a claim, not evidence. Deleting
+    # occ-preflight-heal.yml while leaving this tuple alone must not leave a
+    # workflow with no self-heal path certified as having one -- that is exactly
+    # the vacuous-gate shape (a guard that passes by reading its own
+    # configuration rather than the world) this module must not become.
+    healer_covered = (
+        workflow_name in HEALER_COVERED_WORKFLOWS
+        and (WORKFLOWS_DIR / HEAL_WORKFLOW).is_file()
+    )
     assert has_own_trigger or healer_covered, (
         f"{workflow_name} has NO self-heal path: it does not list `edited` "
         f"(types={sorted(types)}) and is not in HEALER_COVERED_WORKFLOWS. A PR "
