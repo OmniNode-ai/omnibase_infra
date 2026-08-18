@@ -34,9 +34,3 @@
 # No entries below are currently exempted -- this file ships empty on
 # purpose (OMN-16229 DoD: do not pre-populate an ignore for any current
 # CVE).
-
-# CVE: CVE-2020-00000
-# reason: no-upstream-fix
-# ticket: OMN-16229
-# expires: 2027-01-01
-CVE-2020-00000
