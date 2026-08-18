@@ -848,7 +848,19 @@ jobs:
         && fromJSON(vars.OMNI_PUBLIC_PR_RUNS_ON_JSON || '["ubuntu-latest"]')
         || fromJSON((github.event_name == 'merge_group' && vars.OMNI_REQUIRED_CI_RUNS_ON_JSON) || vars.OMNI_TRUSTED_CI_RUNS_ON_JSON || '["self-hosted","omnibase-ci"]')
       }}
-    timeout-minutes: 5
+    # Raised from 5 (2026-08-18, live proof run on PR #2793): the DoD's
+    # "under ~2 min" budget is about the scan's own runtime, not fleet setup
+    # variance. Under contended-fleet conditions the SAME shared
+    # setup-python-uv composite this job shares with every other job in this
+    # file measured 6m42s before completing on a live run -- the job was
+    # cancelled by the old 5-minute ceiling before osv-scanner ever ran, a
+    # false-red unrelated to this job's own logic. Same shape as pin-
+    # reachability's own timeout history (raised 10->18 for the identical
+    # reason, see that job's comment above). 15 minutes matches the baseline
+    # every other lightweight gate in this file already uses
+    # (fingerprint-check, demo-loop-gate, etc.) for the same setup-variance
+    # headroom; the scan itself remains fast.
+    timeout-minutes: 15
 
     steps:
       - name: Checkout code
