@@ -94,21 +94,32 @@ class TestInfisicalInCoreBundle:
             "can discover Infisical."
         )
 
-    def test_core_requires_infisical_bootstrap_vars(
+    def test_core_requires_only_locally_generatable_secrets(
         self, bundles: dict[str, Any]
     ) -> None:
-        """Core bundle must require Infisical bootstrap credentials."""
+        """Core may require Infisical's own secrets, never a machine identity.
+
+        OMN-16187: the encryption key and auth secret are minted locally with
+        openssl and are what the Infisical container needs to boot. The machine
+        identity is minted *against* that container afterwards, so requiring it
+        to start core was a chicken-and-egg gate; it now sits on the runtime
+        bundle, whose ``runtime_host_process`` is its only consumer.
+        """
         core = bundles["core"]
         assert isinstance(core, dict)
-        required = core.get("inject_required_env", [])
-        for var in [
+        required = set(core.get("inject_required_env", []))
+        assert {"INFISICAL_ENCRYPTION_KEY", "INFISICAL_AUTH_SECRET"} <= required, (
+            "core must still require the secrets Infisical needs to boot"
+        )
+        identity = {
             "INFISICAL_CLIENT_ID",
             "INFISICAL_CLIENT_SECRET",
             "INFISICAL_PROJECT_ID",
-        ]:
-            assert var in required, (
-                f"{var} must be in core bundle's inject_required_env"
-            )
+        }
+        assert not (identity & required), (
+            "core bundle must not require Infisical machine-identity credentials; "
+            "they cannot exist before the first bring-up (OMN-16187)."
+        )
 
     def test_infisical_catalog_requires_authenticated_redis_url(
         self, service_manifests: dict[str, dict[str, Any]]
