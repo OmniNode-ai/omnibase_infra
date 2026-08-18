@@ -66,6 +66,7 @@ databases:
             objects:
               - live_events
               - log_entries
+              - projection_watermarks
             privileges: [INSERT, SELECT, UPDATE]
             schema: omninode_internal
           - object_type: TABLE

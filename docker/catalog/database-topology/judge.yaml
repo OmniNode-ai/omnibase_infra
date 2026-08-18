@@ -77,6 +77,7 @@ databases:
             objects:
               - live_events
               - log_entries
+              - projection_watermarks
             privileges:
               - INSERT
               - SELECT
@@ -182,7 +183,6 @@ databases:
               - delegation_judge_verdict_events
               - delegation_shadow_comparisons
               - dep_health_findings
-              - hook_events
               - instruction_eval_aggregate_snapshots
               - llm_cost_aggregates
               - pattern_learning_artifacts
@@ -194,6 +194,14 @@ databases:
               - SELECT
               - UPDATE
             schema: public
+          - object_type: TABLE
+            objects:
+              - hook_events
+            privileges:
+              - INSERT
+              - SELECT
+              - UPDATE
+            schema: tenant
         login: true
     schemas:
       omninode_internal:
@@ -309,5 +317,5 @@ source:
   profile_catalog_path: src/omnibase_infra/topology/application_database_profiles.yaml
   profile_catalog_sha256: 759f32da77ad41b874fbb05d2824c44f9de4c64e9d269d99da21445225a90ca1
   repository: OmniNode-ai/omnibase_infra
-  sha256: ccdcc096ad296576a63e9bf479dd0f509636324c1675cb2bde5cd7c3bf4abe93
+  sha256: b8b999a951215c1755ba8f0cf76bec71387c7fab9ace125c2a5932c539ed04d5
 topology_instance: local
