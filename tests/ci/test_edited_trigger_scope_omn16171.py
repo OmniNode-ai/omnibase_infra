@@ -78,7 +78,14 @@ MUST_LIST_EDITED: tuple[str, ...] = (
     "call-reject-skip.yml",
     "main-target-guard.yml",
     "non-dev-base-guard.yml",
-    "ci.yml",
+    # `ci.yml` is deliberately absent from BOTH lists. It is an occ-preflight
+    # eval-path caller, so it needs a self-heal for a post-open Evidence-Source
+    # stamp -- but as of OMN-16171 that heal comes from `occ-preflight-heal.yml`
+    # re-running the failed jobs in place, not from an `edited` trigger that
+    # re-ran its whole ~48-job matrix. Requiring `edited` here would contradict
+    # that; forbidding it here would duplicate a rule that
+    # test_occ_eval_path_trigger_coverage.py already owns, with a better
+    # question (does a self-heal path EXIST) than this module's.
     "hostile-reviewer.yml",
 )
 

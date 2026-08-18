@@ -1,9 +1,30 @@
 # SPDX-FileCopyrightText: 2025 OmniNode.ai Inc.
 # SPDX-License-Identifier: MIT
 
-"""Regression guard: occ-preflight EVAL-path caller workflows must listen for
-the `edited` PR event, or a stamp-only `Evidence-Source:` body edit never
-re-validates (OMN-14241).
+"""Regression guard: occ-preflight EVAL-path caller workflows must be able to
+re-validate after a stamp-only `Evidence-Source:` body edit (OMN-14241).
+
+AMENDED BY OMN-16171 -- the invariant is now the OUTCOME, not one mechanism.
+This module originally required the literal `edited` trigger on every eval-path
+caller. That is still one valid way to satisfy it (and `hostile-reviewer.yml`,
+at four jobs, still uses it), but on `ci.yml` it meant a brand-new run of the
+whole ~48-job matrix per PR-body edit, and -- because that workflow's
+concurrency group cancels in progress -- each edit also killed whatever matrix
+was mid-flight. Measured on #2784, one unchanged head SHA 7993b115: waves at
+13:28:50Z (42 workflows), 13:50:09Z (10) and 13:51:33Z (8), against an org-wide
+backlog of 247 queued jobs. The edits are frequent because OCC's own bots
+author the stamps with a minted App token, which does emit
+`pull_request: edited` (GitHub's recursion guard suppresses only edits made by
+the ambient GITHUB_TOKEN). `ci.yml` therefore returned to the default trigger
+types and is now healed by `occ-preflight-heal.yml`, which re-runs the failed
+jobs of the EXISTING run in place. Both mechanisms are accepted below; a
+workflow with NEITHER is still the failure this module exists to catch.
+
+Note on the alternative that was rejected: skipping the heavy jobs on an
+edited-triggered run does not work, because a job skipped by an `if:` still
+publishes a `skipped` check run, which branch protection counts as passing --
+vector 2 of the required-check skip-vector guard, i.e. a body-edit-shaped way
+to green a red required context.
 
 Sibling gate to ``test_occ_born_path_trigger_coverage.py`` (OMN-14987), which
 guards the born-path publishers (``call-occ-autobind.yml`` /
@@ -79,6 +100,16 @@ EVAL_PATH_WORKFLOWS: tuple[str, ...] = (
     "hostile-reviewer.yml",
 )
 
+# OMN-16171. The second way to satisfy the self-heal requirement: instead of
+# firing a whole new run on `edited`, re-run the failed jobs of the run that
+# already exists. `ci.yml` uses this because its `edited` trigger cost a full
+# ~48-job matrix per PR-body edit, and (via `cancel-in-progress`) killed the
+# matrix that was mid-flight. Membership here is a claim that the healer really
+# does cover the workflow -- the tests below check the healer's shape and its
+# name/job pins against the live files rather than taking this tuple's word.
+HEAL_WORKFLOW = "occ-preflight-heal.yml"
+HEALER_COVERED_WORKFLOWS: tuple[str, ...] = ("ci.yml",)
+
 
 def _pull_request_trigger_types(workflow_path: Path) -> set[str]:
     """Extract ``on.pull_request.types`` from a workflow file as a set."""
@@ -148,24 +179,90 @@ def test_extraction_handles_implicit_default_types_fixture(tmp_path: Path) -> No
 
 @pytest.mark.unit
 @pytest.mark.parametrize("workflow_name", EVAL_PATH_WORKFLOWS)
-def test_eval_path_workflow_listens_for_edited(workflow_name: str) -> None:
-    """OMN-14241: a PR body edit that adds `Evidence-Source: OCC#<n>` after
-    opening must re-trigger the occ-preflight eligibility check. Missing
-    `edited` here means the check-run from the last commit-triggered run --
-    which legitimately failed before the stamp existed -- sits as the
-    latest, permanently-stale status for `occ-preflight / eligibility`, and
-    `CI Summary` fails closed on it forever (live case: infra#2696, #2694).
+def test_eval_path_workflow_has_a_self_heal_path(workflow_name: str) -> None:
+    """OMN-14241, as amended by OMN-16171.
+
+    The invariant is the OUTCOME, not the mechanism: a PR body edit that adds
+    `Evidence-Source: OCC#<n>` after opening must be able to clear the stale
+    pre-stamp `occ-preflight / eligibility` FAILURE. Otherwise that check-run
+    stays the latest status forever and `CI Summary` fails closed on it (live
+    cases: infra#2696, #2694).
+
+    Two mechanisms satisfy it, and this gate accepts either:
+
+    * the workflow lists `edited` itself, so the edit produces a fresh run; or
+    * the workflow is healed in place by `occ-preflight-heal.yml`, which fires
+      on `edited` and re-runs the FAILED JOBS of the existing run, keeping the
+      run id -- which is what `CI Summary` needs, since it polls its own run's
+      job list rather than the SHA's check-runs.
+
+    `ci.yml` moved to the second mechanism because the first cost a full ~48-job
+    matrix per body edit (and, via `cancel-in-progress`, killed whatever matrix
+    was mid-flight). `hostile-reviewer.yml` stays on the first: it is four jobs,
+    so the trigger is cheaper than the indirection.
     """
     workflow_path = WORKFLOWS_DIR / workflow_name
     assert workflow_path.is_file(), f"expected workflow file at {workflow_path}"
     types = _pull_request_trigger_types(workflow_path)
-    missing = REQUIRED_EVAL_PATH_PR_EVENT_TYPES - types
-    assert not missing, (
-        f"{workflow_name} on.pull_request.types is missing {sorted(missing)} -- "
-        f"a PR body edit (e.g. adding the Evidence-Source stamp) will NEVER "
-        f"retrigger this workflow's occ-preflight job (OMN-14241 failure "
-        f"class: the stale pre-stamp FAILURE is never superseded, blocking "
-        f"merge indefinitely without a manual empty-commit retrigger)."
+    has_own_trigger = not (REQUIRED_EVAL_PATH_PR_EVENT_TYPES - types)
+    healer_covered = workflow_name in HEALER_COVERED_WORKFLOWS
+    assert has_own_trigger or healer_covered, (
+        f"{workflow_name} has NO self-heal path: it does not list `edited` "
+        f"(types={sorted(types)}) and is not in HEALER_COVERED_WORKFLOWS. A PR "
+        f"body edit adding the Evidence-Source stamp will never clear this "
+        f"workflow's stale pre-stamp occ-preflight FAILURE, blocking merge "
+        f"indefinitely without a manual empty-commit retrigger. Restore the "
+        f"`edited` trigger, or cover it in {HEAL_WORKFLOW}."
+    )
+
+
+@pytest.mark.unit
+def test_healer_fires_on_edited_and_reruns_only_failed_jobs() -> None:
+    """The healer is the mechanism `ci.yml` now depends on; pin its shape.
+
+    Three properties matter. It must fire on `edited` (nothing else clears a
+    body-only stamp). It must re-run the failed jobs of the EXISTING run rather
+    than dispatch a new one -- a new run would recreate the full-matrix cost the
+    healer exists to avoid, and would not update the run `CI Summary` polls. And
+    it must gate on occ-preflight specifically, so an unrelated body edit does
+    not re-queue genuine test failures.
+    """
+    heal_path = WORKFLOWS_DIR / HEAL_WORKFLOW
+    assert heal_path.is_file(), f"expected the healer at {heal_path}"
+    assert _pull_request_trigger_types(heal_path) == {"edited"}, (
+        f"{HEAL_WORKFLOW} must fire on exactly `edited` -- broadening it "
+        f"reintroduces per-push cost, narrowing it disables the heal"
+    )
+    body = heal_path.read_text(encoding="utf-8")
+    assert "--failed" in body and "gh run rerun" in body, (
+        f"{HEAL_WORKFLOW} must heal via `gh run rerun ... --failed` (same run "
+        f"id, failed jobs only). A fresh dispatch reintroduces the full-matrix "
+        f"cost and leaves the run CI Summary polls untouched."
+    )
+    assert "PREFLIGHT_JOB_PREFIX: occ-preflight" in body, (
+        f"{HEAL_WORKFLOW} must gate the rerun on a failed occ-preflight job"
+    )
+
+
+@pytest.mark.unit
+def test_healer_targets_the_workflow_name_ci_actually_publishes() -> None:
+    """The healer finds its run by workflow NAME, so a rename silently disables it.
+
+    This is the same class of failure the module guards elsewhere: the break is
+    silence (no rerun) rather than a red check. Pin the two strings against the
+    live files instead of trusting the comment next to them.
+    """
+    heal_body = (WORKFLOWS_DIR / HEAL_WORKFLOW).read_text(encoding="utf-8")
+    ci_data = yaml.safe_load((WORKFLOWS_DIR / "ci.yml").read_text(encoding="utf-8"))
+
+    assert f"CI_WORKFLOW_NAME: {ci_data['name']}" in heal_body, (
+        f"{HEAL_WORKFLOW} looks for a run named CI_WORKFLOW_NAME, which must "
+        f"equal ci.yml's `name:` ({ci_data['name']!r}); it does not"
+    )
+    jobs = ci_data.get("jobs") or {}
+    assert "occ-preflight" in jobs, (
+        "ci.yml no longer declares a job id `occ-preflight`, so the healer's "
+        "PREFLIGHT_JOB_PREFIX can never match a failed job"
     )
 
 
