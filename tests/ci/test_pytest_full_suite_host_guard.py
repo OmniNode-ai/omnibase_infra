@@ -228,11 +228,33 @@ def _write_synthetic_project(tmp_path: Path) -> Path:
     return project
 
 
+def _hermetic_subprocess_env(env_overrides: dict[str, str]) -> dict[str, str]:
+    """Base env for a guard-subprocess test, with ambient CI signals stripped.
+
+    The guard's ``is_ci_environment()`` check short-circuits BEFORE the host
+    check (CI runners are never gated -- by design). If this OUTER test
+    process is itself running under CI (as it does in this repo's own CI
+    pipeline), ``dict(os.environ)`` would carry ``CI``/``GITHUB_ACTIONS``
+    into the subprocess and mask the host-check assertions below regardless
+    of ``PREPUSH_200_HOSTNAME`` -- the subprocess would exit 0 via the CI
+    bypass, never reaching the code path under test. Strip both here so
+    subprocess behavior depends only on the explicit ``env_overrides``, not
+    on whether this test itself happens to run under CI. Tests that want the
+    CI-bypass behavior (e.g. ``test_direct_invocation_allowed_under_ci_env``)
+    still get it -- they set ``CI``/``GITHUB_ACTIONS`` explicitly via
+    ``env_overrides``, applied after this strip.
+    """
+    env = dict(os.environ)
+    env.pop("CI", None)
+    env.pop("GITHUB_ACTIONS", None)
+    env.update(env_overrides)
+    return env
+
+
 def _run_pytest(
     project: Path, *extra_args: str, env_overrides: dict[str, str]
 ) -> subprocess.CompletedProcess[str]:
-    env = dict(os.environ)
-    env.update(env_overrides)
+    env = _hermetic_subprocess_env(env_overrides)
     return subprocess.run(
         [sys.executable, "-m", "pytest", "tests", *extra_args],
         cwd=project,
@@ -292,8 +314,9 @@ def test_direct_invocation_allowed_with_narrow_target_on_non_200_host(
     (project / "tests" / "sub" / "test_y.py").write_text(
         "def test_y():\n    assert True\n", encoding="utf-8"
     )
-    env = dict(os.environ)
-    env["PREPUSH_200_HOSTNAME"] = _GUARANTEED_NON_MATCHING_HOSTNAME
+    env = _hermetic_subprocess_env(
+        {"PREPUSH_200_HOSTNAME": _GUARANTEED_NON_MATCHING_HOSTNAME}
+    )
     result = subprocess.run(
         [sys.executable, "-m", "pytest", "tests/sub"],
         cwd=project,
