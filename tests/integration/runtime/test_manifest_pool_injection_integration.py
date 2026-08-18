@@ -13,6 +13,7 @@ from pathlib import Path
 from unittest.mock import MagicMock, patch
 
 import pytest
+import yaml
 
 from omnibase_infra.runtime.auto_wiring.discovery import discover_contracts_from_paths
 from omnibase_infra.runtime.auto_wiring.handler_wiring import wire_from_manifest
@@ -266,6 +267,38 @@ def test_runtime_handler_dependencies_share_gateway_state_and_resolver(
     assert attach["session_store"] is detach["session_store"]
     assert attach["secret_resolver"] is heartbeat["secret_resolver"]
     assert attach["secret_resolver"] is detach["secret_resolver"]
+
+
+@pytest.mark.integration
+def test_gateway_runtime_dependencies_resolve_config_from_contract(
+    tmp_path: Path,
+) -> None:
+    """The wired gateway config carries contract.yaml values, not field defaults.
+
+    Drives the real seam: a config.gateway_attach edit in the node's
+    contract.yaml must reach the renewal builder and session policy through
+    the kernel wiring. A bare ModelGatewayAttachConfig() made that edit a
+    silent runtime no-op.
+    """
+    import omnibase_infra.nodes.node_gateway_attach_effect as gateway_attach_pkg
+
+    contract_path = Path(str(gateway_attach_pkg.__file__)).parent / "contract.yaml"
+    declared = yaml.safe_load(contract_path.read_text(encoding="utf-8"))["config"][
+        "gateway_attach"
+    ]
+
+    result = _build_runtime_handler_dependencies(
+        None,
+        gateway_secret_resolver_config_path=_write_gateway_resolver_config(tmp_path),
+    )
+
+    assert result is not None
+    config = result["HandlerGatewayAttach"]["config"]
+    for field_name, declared_value in declared.items():
+        assert getattr(config, field_name) == declared_value, (
+            f"contract.yaml config.gateway_attach.{field_name} did not reach the "
+            "wired ModelGatewayAttachConfig"
+        )
 
 
 @pytest.mark.integration

@@ -24,17 +24,40 @@
 #     breaker. Bumps minor: ModelGatewayDetachRequest gains a required
 #     access_token field (wire-breaking) and ModelGatewayAttachConfig gains
 #     keycloak_jwks_ref + circuit_breaker_* fields.
+#   - OMN-16022: session-expiry enforcement + bounded degraded mode. Bumps
+#     minor: ModelGatewayAttachConfig gains max_unverified_session_seconds
+#     and ModelGatewayHeartbeatResponse replaces `revoked: bool` with
+#     `termination_reason` (wire-breaking -- a boolean cannot name the
+#     three terminal outcomes the heartbeat path now has).
+#   - OMN-15952: unattended pairing/renewal contract. The renewal cycle a
+#     persistent/headless runtime must run to survive its own session
+#     ceiling is now a declared contract term rather than client folklore.
+#     Bumps minor: ModelGatewayAttachConfig gains renewal_margin_seconds +
+#     renewal_jitter_seconds, and ModelGatewayAttachResponse gains a
+#     REQUIRED renewal directive (wire-additive but non-optional -- a
+#     response without it does not validate).
+#
+#     The mechanism is RE_ATTACH, and that word is load-bearing. expires_at
+#     is stamped once at attach from min(token exp, max_session_ttl_seconds)
+#     and no later call moves it; a heartbeat proves liveness and
+#     non-revocation, it does not buy time. A runtime that wants to keep
+#     working past expires_at performs a fresh client_credentials grant
+#     against Keycloak and attaches again, minting a NEW session_id. There
+#     is no in-place renewal to implement here -- it is refused, because
+#     extending a live ceiling on the strength of a heartbeat would let a
+#     credential the IdP has stopped authorizing hold a session open one
+#     heartbeat at a time.
 name: "node_gateway_attach_effect"
 contract_name: "node_gateway_attach_effect"
 node_name: "node_gateway_attach_effect"
 node_type: "EFFECT_GENERIC"
 contract_version:
   major: 0
-  minor: 2
+  minor: 4
   patch: 0
 node_version:
   major: 0
-  minor: 2
+  minor: 3
   patch: 0
 runtime_profiles:
   - effects
@@ -74,6 +97,9 @@ config:
     heartbeat_interval_seconds: 15
     session_degraded_after_seconds: 60
     max_session_ttl_seconds: 3600
+    max_unverified_session_seconds: 900
+    renewal_margin_seconds: 120
+    renewal_jitter_seconds: 30
     circuit_breaker_threshold: 5
     circuit_breaker_reset_timeout_seconds: 30.0
 handler_routing:
@@ -86,7 +112,7 @@ handler_routing:
         module: "omnibase_infra.nodes.node_gateway_attach_effect.handlers.handler_gateway_attach"
         handler_type: "INFRA"
       description: >
-        Verify a client-credentials access token's signature against Keycloak's JWKS keyset, then validate its claims (issuer, audience, tenant_id/tenant_slug/principal_id), register a new tenant-bound session, return the session plus the ATTACHED session_event.
+        Verify a client-credentials access token's signature against Keycloak's JWKS keyset, then validate its claims (issuer, audience, tenant_id/tenant_slug/principal_id), register a new tenant-bound session, return the session plus the ATTACHED session_event and the renewal directive. The directive carries the contract-declared renewal cycle for this session -- mode RE_ATTACH, the jitter window [renew_not_before, renew_at], and the immutable session_expires_at those race -- so an unattended runtime is told how to survive its own ceiling instead of inferring a policy it was never given.
 
     - operation: "gateway.heartbeat"
       topic: "onex.cmd.omnibase-infra.gateway-heartbeat-request.v1"
@@ -95,7 +121,7 @@ handler_routing:
         module: "omnibase_infra.nodes.node_gateway_attach_effect.handlers.handler_gateway_heartbeat"
         handler_type: "INFRA"
       description: >
-        Verify the presented token's signature and bind it to the stored session's tenant/principal/client identity, then re-validate via Keycloak RFC 7662 introspection. A disabled tenant client makes introspection return active:false on the next call, which tears the session down and emits a REVOKED session_event -- this is the revocation mechanism, not a separate admin call against this node. A Keycloak/JWKS outage raises InfraUnavailableError and leaves the session untouched rather than revoking it.
+        Verify the presented token's signature and bind it to the stored session's tenant/principal/client identity, then re-validate via Keycloak RFC 7662 introspection. A disabled tenant client makes introspection return active:false on the next call, which tears the session down and emits a REVOKED session_event -- this is the revocation mechanism, not a separate admin call against this node. A Keycloak/JWKS outage raises InfraUnavailableError and leaves the session untouched rather than revoking it -- but no longer indefinitely: a session past its stored expires_at, or past max_unverified_session_seconds with no successful revalidation, is torn down here (EXPIRED / QUARANTINED) before any network call is attempted, and entry into degraded mode is alarmed when it starts.
 
     - operation: "gateway.detach"
       topic: "onex.cmd.omnibase-infra.gateway-detach-request.v1"
@@ -104,7 +130,7 @@ handler_routing:
         module: "omnibase_infra.nodes.node_gateway_attach_effect.handlers.handler_gateway_detach"
         handler_type: "INFRA"
       description: >
-        Explicit edge-initiated session teardown. Requires a signature-verified access token bound to the stored session's tenant/principal/client identity -- a caller cannot detach a session it does not hold the matching credential for.
+        Explicit edge-initiated session teardown. Requires a signature-verified access token bound to the stored session's tenant/principal/client identity -- a caller cannot detach a session it does not hold the matching credential for. A session already past expires_at is removed and reported as expired rather than detached (OMN-16022): expiry is enforced on every session-consuming path, not only on heartbeat.
 
 capabilities:
   - name: "client_credentials_attach"
@@ -113,6 +139,10 @@ capabilities:
     description: "Heartbeat re-validation via RFC 7662 introspection makes Keycloak-side client revocation observable within one heartbeat interval, independent of the token's own exp."
   - name: "tenant_bound_session"
     description: "Every session carries the immutable tenant_id/principal_id derived from the signature-verified token; handlers never trust caller-declared tenant identity, and heartbeat/detach bind the presented token back to the stored session's identity before acting."
+  - name: "bounded_session_lifetime"
+    description: "expires_at (min(token exp, max_session_ttl_seconds)) is enforced on every session-consuming path, and a session that goes longer than max_unverified_session_seconds without a successful Keycloak revalidation is quarantined -- so fail-open during an IdP outage is bounded in time and cannot be held open indefinitely by a gateway-to-Keycloak partition."
+  - name: "unattended_renewal_cycle"
+    description: "Every attach response declares the renewal cycle its client must run (OMN-15952): mode RE_ATTACH, a jitter window opening at renew_not_before and closing at renew_at, and the session ceiling both are strictly before. Renewal is a fresh client_credentials grant plus a fresh attach minting a NEW session_id -- expires_at is stamped once at attach and no path in this node ever moves it, so a persistent/headless runtime never needs a browser session and never gets a lifetime extension from a heartbeat."
   - name: "outage_revocation_distinction"
     description: "MixinAsyncCircuitBreaker-guarded Keycloak calls (JWKS fetch, introspection) raise InfraUnavailableError on transport failure/non-200/malformed body instead of treating an unreachable IdP as revocation -- a Keycloak outage no longer mass-revokes every active session."
   - name: "node_owned_publish"
@@ -122,7 +152,7 @@ metadata:
   transport_type: "HTTP"
   author: "OmniNode Team"
   created: "2026-08-08"
-  updated: "2026-08-12"
+  updated: "2026-08-14"
   tags:
     - gateway
     - ingress
@@ -134,4 +164,6 @@ metadata:
     - "Session store is in-process (StoreGatewaySessionMemory) for the first slice — a multi-pod deployment needs a shared backend (Valkey) behind the same ProtocolGatewaySessionStore seam. Tracked as follow-on, not built in OMN-15750."
     - "Runtime wiring materializes one shared StoreGatewaySessionMemory, SecretResolver, and ModelGatewayAttachConfig for all three handlers. A future container-owned registration can replace this explicit dependency map when the store moves to a shared Valkey backend."
     - "JWKS keys are fetched fresh on every attach/heartbeat/detach call (no in-process cache/TTL). Acceptable for the first slice's call volume; a cache would reduce Keycloak load under sustained heartbeat traffic. Tracked as follow-on, not built here."
-    - "No dedicated unattended pairing/renewal contract exists yet for a persistent runtime to re-mint an attach token across the 900-second client-credentials token expiry without a browser session in the loop -- tracked as OMN-15952, blocking OMN-15877."
+    - "Attach performs no RFC 7662 introspection -- it verifies signature, issuer, audience and exp only. A Keycloak client disabled while one of its tokens is still within exp can therefore still attach, and is caught on the first heartbeat rather than at attach. Revocation latency at the attach boundary is bounded by heartbeat_interval_seconds, not zero."
+    - "The renewal contract (OMN-15952) is declared and served here, but the client half is not in this repo: the persistent runtime's own re-grant loop (credential store, issuer pinning, backoff, the failure ladder separating a Keycloak outage from a real revocation) is the consumer's to implement against this directive. This node states the cycle and proves it is served; it cannot prove a given runtime obeys it."
+    - "Credential delivery for the unattended case -- provisioning the per-tenant ga-* client and revealing its secret at tenant bootstrap -- lives in the onex-api control plane, not here. Until that lands, the renewal cycle this node declares can be exercised with a manually-provisioned client but not obtained end-to-end by a new tenant (OMN-15952 design section 4.1/4.2)."

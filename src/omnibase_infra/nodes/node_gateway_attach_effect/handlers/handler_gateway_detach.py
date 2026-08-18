@@ -45,6 +45,9 @@ from omnibase_infra.nodes.node_gateway_attach_effect.models.model_gateway_sessio
     ModelGatewaySessionEvent,
 )
 from omnibase_infra.nodes.node_gateway_attach_effect.services import (
+    service_gateway_session_policy as session_policy,
+)
+from omnibase_infra.nodes.node_gateway_attach_effect.services import (
     service_keycloak_token_validator as token_validator,
 )
 from omnibase_infra.nodes.node_gateway_attach_effect.services.protocol_gateway_session_store import (
@@ -92,6 +95,24 @@ class HandlerGatewayDetach(MixinAsyncCircuitBreaker):
         session = await self._session_store.get(request.session_id)
         if session is None:
             raise SessionNotFoundError(f"no session {request.session_id}")
+
+        # OMN-16022: detach is a session-consuming path and gets the same
+        # expiry enforcement heartbeat does -- otherwise an expired session
+        # stays a usable session on every path that merely reads one.
+        #
+        # The check runs before the credential check, and deletes the row,
+        # on purpose. An expired session is inert: it can no longer
+        # authorize anything, so removing it costs an attacker nothing to
+        # gain and closes the leak that rejecting-without-deleting would
+        # open (a row nothing can ever detach again). The caller is told
+        # the session was expired rather than detached, because those are
+        # different facts and the remedy for the first is re-attach.
+        if session_policy.is_expired(session, now=datetime.now(UTC)):
+            await self._session_store.delete(request.session_id)
+            raise session_policy.SessionExpiredError(
+                f"session {request.session_id} expired at "
+                f"{session.expires_at.isoformat()} and was removed; re-attach"
+            )
 
         issuer_secret = await self._secret_resolver.get_secret_async(
             self._config.keycloak_issuer_ref, required=True

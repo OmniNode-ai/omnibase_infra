@@ -29,8 +29,14 @@ class ProtocolCutoverJournalRepository(Protocol):
         """Register an immutable family contract or reject drift."""
         ...
 
-    async def record_receipt(self, receipt: ModelTransformationReceipt) -> None:
-        """Persist a receipt and block only its family on mismatch."""
+    async def record_receipt(
+        self, receipt: ModelTransformationReceipt
+    ) -> ModelTransformationReceipt:
+        """Persist a receipt and block only its family on mismatch.
+
+        Idempotent on ``(family_id, idempotency_key)``: returns the original
+        persisted receipt on a retried call with identical content.
+        """
         ...
 
     async def append_event(
@@ -45,7 +51,22 @@ class ProtocolCutoverJournalRepository(Protocol):
         self,
         proof: ModelReverseDeltaProof,
     ) -> None:
-        """Persist complete reverse-delta coverage for later journal attestation."""
+        """Persist complete reverse-delta coverage for later journal attestation.
+
+        Requires every entry's inverse artifact and the proof's behavioral
+        readback ref to dereference to an artifact durably registered via
+        ``register_reverse_delta_artifact`` and hash-bound to its declared
+        before-image.
+        """
+        ...
+
+    async def register_reverse_delta_artifact(
+        self,
+        family_id: UUID,
+        artifact_ref: str,
+        content: dict[str, object],
+    ) -> str:
+        """Durably register one dereferenceable reverse-delta artifact."""
         ...
 
     async def get_state(self, family_id: UUID) -> ModelCutoverFamilyState:

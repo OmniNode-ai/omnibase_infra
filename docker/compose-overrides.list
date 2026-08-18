@@ -1,0 +1,21 @@
+# Runner-fleet compose override layering (OMN-14027 C1).
+#
+# Newline-delimited list of compose override files that MUST be layered on top of
+# docker-compose.runners.yml by every tool that recreates runner containers, so a
+# deliberate non-default wiring survives auto-repair and rolls.
+#
+# Consumed by docker/runners/runner-monitor.sh (auto-bounce / offline-idle
+# recreate). Paths are relative to the compose directory unless absolute.
+# '#' starts a comment. A listed-but-missing file WARNs and is skipped; it never
+# wedges auto-repair.
+#
+# WHY: before this list existed, auto-repair recreated containers from
+# docker-compose.runners.yml alone and silently stripped canary wiring mid-soak,
+# with no log line and no alert. See docs/runbooks/pypi-cache-egress-rollout.md
+# ("Durability trap") and the header of docker/docker-compose.pypi-canary.yml.
+#
+# REMOVE the canary entry below when the C1 canary ends — either because the
+# rollout graduated to the fleet (the wiring then belongs in
+# docker-compose.runners.yml itself) or because it was rolled back.
+
+docker-compose.pypi-canary.yml

@@ -1,0 +1,19 @@
+# OMN-14027 C2 — refresh cadence for the local git mirrors.
+#
+# 2 minutes is a deliberate trade: the pre-seed is a *delta reducer*, not a
+# source of truth (actions/checkout still fetches the exact SHA from github.com
+# over the authenticated remote), so mirror staleness costs a few extra KiB of
+# delta, never a failed job. There is no correctness pressure to go faster, and
+# going faster would put more of the very upstream load on the uplink that this
+# component exists to remove.
+[Unit]
+Description=OmniNode runner-fleet git mirror refresh timer (OMN-14027 C2)
+
+[Timer]
+OnBootSec=2min
+OnUnitInactiveSec=2min
+AccuracySec=15s
+Unit=omninode-git-mirror-refresh.service
+
+[Install]
+WantedBy=timers.target

@@ -51,7 +51,58 @@ class ModelGatewayAttachConfig(BaseModel):
     session_degraded_after_seconds: int = Field(default=60, gt=0)
     # Hard ceiling on session lifetime regardless of token exp -- bounds the
     # blast radius of a token whose exp claim is misconfigured too far out.
+    # Enforced (not merely stored) since OMN-16022: heartbeat and detach
+    # reject a session past the ``expires_at`` derived from this.
     max_session_ttl_seconds: int = Field(default=3600, gt=0)
+    # OMN-16022: bounded degraded mode. The maximum time a session may
+    # survive without a SUCCESSFUL Keycloak revalidation, after which it is
+    # torn down regardless of whether Keycloak is reachable.
+    #
+    # Why 900s: it is one attach-token lifetime. The per-tenant
+    # client-credentials token this node validates is minted with a 900s
+    # maximum TTL (invariant 2 of the OMN-15952 renewal design), so a
+    # session that has gone a full token lifetime without revalidation has
+    # already outlived the credential that justified it -- continuing to
+    # trust it past that point extends trust strictly beyond anything the
+    # IdP ever asserted. Choosing the token lifetime rather than a smaller
+    # number also keeps a routine Keycloak blip (seconds to minutes,
+    # absorbed by circuit_breaker_reset_timeout_seconds and by the
+    # OMN-15918 outage/revocation split) from ever reaching the ceiling:
+    # only a sustained partition does.
+    #
+    # This is deliberately NOT max_session_ttl_seconds. That is the 3600s
+    # *session* ceiling applied at attach; this is the *revalidation*
+    # bound, a different bound at a different layer. See the OMN-15952
+    # design doc rev-3 correction in section 2 -- conflating the two is
+    # exactly the error this pair of constants exists to prevent.
+    max_unverified_session_seconds: int = Field(default=900, gt=0)
+    # OMN-15952 renewal cycle -- the contract-declared terms an unattended
+    # runtime must obey to survive its own session ceiling. These are
+    # CLIENT-facing policy (handed back at attach in
+    # ModelGatewayRenewalDirective), not server-side bounds: nothing on this
+    # node tears a session down because of them.
+    #
+    # How early re-grant + re-attach must be COMPLETE, ahead of the
+    # session's expires_at. 120s against a 900s attach token leaves ~87% of
+    # the token's life before renewal starts, while still covering the three
+    # things that have to fit inside the margin: worst-case clock skew
+    # between the runtime, Keycloak and this node; the round trip of the
+    # token grant plus the attach call plus this node's own JWKS
+    # verification; and at least one backoff-retry of a transient failure.
+    # A margin sized only to the happy-path round trip is the classic
+    # expiry-boundary defect -- the token is valid when the request is sent
+    # and expired when it is validated.
+    renewal_margin_seconds: int = Field(default=120, gt=0)
+    # Width of the decorrelation window that opens before renewal_margin.
+    # A fleet provisioned in one bootstrap batch shares an attach instant,
+    # so without jitter it also shares a renewal instant and stampedes
+    # Keycloak's token endpoint every cycle, forever -- the synchronization
+    # is self-sustaining because a batch that renews together stays
+    # together. Each runtime picks its own moment uniformly in
+    # [renew_not_before, renew_at]. Zero is permitted (ge=0) so a
+    # single-runtime deployment can opt out of spreading it does not need,
+    # which is why this is not gt=0 like the margin.
+    renewal_jitter_seconds: int = Field(default=30, ge=0)
     # Circuit breaker (MixinAsyncCircuitBreaker) thresholds shared by the
     # JWKS fetch (attach + heartbeat) and RFC 7662 introspection (heartbeat)
     # HTTP calls to Keycloak -- OMN-15918 R4: distinguishes "Keycloak

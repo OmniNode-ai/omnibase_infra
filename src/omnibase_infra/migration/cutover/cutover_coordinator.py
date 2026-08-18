@@ -11,6 +11,7 @@ from omnibase_infra.migration.cutover.models import (
     ModelCutoverFamilyContract,
     ModelCutoverJournalEvent,
     ModelCutoverJournalRequest,
+    ModelReconciliationInput,
     ModelReverseDeltaProof,
     ModelRollbackDecision,
     ModelTransformationEvidence,
@@ -45,11 +46,23 @@ class CutoverCoordinator:
         source: ModelTransformationEvidence,
         target: ModelTransformationEvidence,
         continuity: ModelCutoverContinuityEvidence,
+        idempotency_key: str,
     ) -> ModelTransformationReceipt:
-        """Build and durably persist a complete PASS-or-FAIL receipt."""
-        receipt = self._receipt_service.build(contract, source, target, continuity)
-        await self._repository.record_receipt(receipt)
-        return receipt
+        """Build and durably persist a complete PASS-or-FAIL receipt.
+
+        Idempotent on ``idempotency_key``: retrying with the same key and
+        identical inputs returns the original persisted receipt.
+        """
+        receipt = self._receipt_service.build(
+            ModelReconciliationInput(
+                contract=contract,
+                source=source,
+                target=target,
+                continuity=continuity,
+                idempotency_key=idempotency_key,
+            )
+        )
+        return await self._repository.record_receipt(receipt)
 
     async def append(
         self,
@@ -65,6 +78,17 @@ class CutoverCoordinator:
     ) -> None:
         """Persist complete reverse-delta coverage before attesting it."""
         await self._repository.record_reverse_delta_proof(proof)
+
+    async def register_reverse_delta_artifact(
+        self,
+        family_id: UUID,
+        artifact_ref: str,
+        content: dict[str, object],
+    ) -> str:
+        """Durably register one dereferenceable reverse-delta artifact."""
+        return await self._repository.register_reverse_delta_artifact(
+            family_id, artifact_ref, content
+        )
 
     async def evaluate_direct_rollback(
         self,

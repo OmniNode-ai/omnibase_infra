@@ -32,6 +32,8 @@ for each CodeRabbit-flagged gap):
 
 from __future__ import annotations
 
+import logging
+from datetime import UTC, datetime, timedelta
 from typing import Any
 from uuid import UUID, uuid4
 
@@ -61,6 +63,9 @@ from omnibase_infra.nodes.node_gateway_attach_effect.models.enum_gateway_session
 from omnibase_infra.nodes.node_gateway_attach_effect.models.enum_gateway_session_status import (
     EnumGatewaySessionStatus,
 )
+from omnibase_infra.nodes.node_gateway_attach_effect.models.enum_gateway_session_termination_reason import (
+    EnumGatewaySessionTerminationReason,
+)
 from omnibase_infra.nodes.node_gateway_attach_effect.models.model_gateway_attach_config import (
     ModelGatewayAttachConfig,
 )
@@ -72,6 +77,9 @@ from omnibase_infra.nodes.node_gateway_attach_effect.models.model_gateway_detach
 )
 from omnibase_infra.nodes.node_gateway_attach_effect.models.model_gateway_heartbeat_request import (
     ModelGatewayHeartbeatRequest,
+)
+from omnibase_infra.nodes.node_gateway_attach_effect.services.service_gateway_session_policy import (
+    SessionExpiredError,
 )
 from omnibase_infra.nodes.node_gateway_attach_effect.services.service_keycloak_token_validator import (
     TokenValidationError,
@@ -404,7 +412,7 @@ async def test_heartbeat_active_token_keeps_session_active(
         )
     )
 
-    assert hb_response.revoked is False
+    assert hb_response.termination_reason is None
     assert hb_response.session.status is EnumGatewaySessionStatus.ACTIVE
     assert (
         hb_response.session_event.event_type is EnumGatewaySessionEventType.HEARTBEAT_OK
@@ -443,7 +451,7 @@ async def test_heartbeat_after_keycloak_revocation_tears_down_session(
         ModelGatewayHeartbeatRequest(session_id=session_id, access_token=hb_token)
     )
 
-    assert hb_response.revoked is True
+    assert hb_response.termination_reason is EnumGatewaySessionTerminationReason.REVOKED
     assert hb_response.session.status is EnumGatewaySessionStatus.REVOKED
     assert hb_response.session_event.event_type is EnumGatewaySessionEventType.REVOKED
     assert await store.get(session_id) is None
@@ -516,8 +524,16 @@ async def test_heartbeat_transport_outage_does_not_revoke_session(
     jwks_ok: _FakeResponse,
 ) -> None:
     """OMN-15918 R4: a transport error talking to Keycloak introspection must
-    raise InfraUnavailableError and leave the session exactly as it was --
-    never mass-revoke on an outage."""
+    raise InfraUnavailableError and must never revoke -- the session
+    survives the outage.
+
+    OMN-16022 narrowed what "leave the session as it was" means. The
+    load-bearing half of R4 is unchanged and asserted below: the session is
+    still present and is NOT REVOKED. What changed is that the session is
+    now marked DEGRADED on entry to the revocation-blind window, so the
+    state is observable while the outage is happening. DEGRADED is a
+    survival state, not a teardown -- the session keeps working and
+    recovers to ACTIVE on the next successful introspection."""
     store = StoreGatewaySessionMemory()
     attach_response = await _attach(
         config, secret_resolver, store, monkeypatch, tenant_key, jwks_ok
@@ -539,8 +555,9 @@ async def test_heartbeat_transport_outage_does_not_revoke_session(
             ModelGatewayHeartbeatRequest(session_id=session_id, access_token=hb_token)
         )
     stored = await store.get(session_id)
-    assert stored is not None
-    assert stored.status is EnumGatewaySessionStatus.ACTIVE
+    assert stored is not None, "an outage must never tear a session down"
+    assert stored.status is not EnumGatewaySessionStatus.REVOKED
+    assert stored.status is EnumGatewaySessionStatus.DEGRADED
 
 
 async def test_heartbeat_introspection_non200_does_not_revoke_session(
@@ -569,8 +586,9 @@ async def test_heartbeat_introspection_non200_does_not_revoke_session(
             ModelGatewayHeartbeatRequest(session_id=session_id, access_token=hb_token)
         )
     stored = await store.get(session_id)
-    assert stored is not None
-    assert stored.status is EnumGatewaySessionStatus.ACTIVE
+    assert stored is not None, "an outage must never tear a session down"
+    assert stored.status is not EnumGatewaySessionStatus.REVOKED
+    assert stored.status is EnumGatewaySessionStatus.DEGRADED
 
 
 async def test_heartbeat_does_not_resurrect_concurrently_detached_session(
@@ -817,3 +835,453 @@ class TestHeartbeatIntrospection:
         # reads before any transport call is attempted).
         with pytest.raises(InfraUnavailableError):
             await heartbeat._introspect(access_token="tok", client_id="gw-tenant-acme")
+
+
+# --------------------------------------------------------------------------- #
+# OMN-16022: session expiry enforcement + bounded degraded mode
+#
+# RED-first. Every test in this section fails against the pre-OMN-16022
+# handlers, and each failure is behavioral (a wrong outcome), not an
+# ImportError against a symbol that does not exist yet:
+#   - expiry: the handler happily revalidates a session whose ``expires_at``
+#     is in the past and leaves it in the store.
+#   - ceiling: an introspection outage raises InfraUnavailableError forever,
+#     so a session survives un-revalidated for the entire outage.
+#   - degraded entry: nothing marks the session DEGRADED and nothing alarms.
+#   - detach: an expired session detaches normally instead of being rejected.
+# --------------------------------------------------------------------------- #
+
+
+async def test_heartbeat_rejects_session_past_expires_at(
+    monkeypatch: pytest.MonkeyPatch,
+    config: ModelGatewayAttachConfig,
+    secret_resolver: _FakeSecretResolver,
+    tenant_key,
+    jwks_ok: _FakeResponse,
+) -> None:
+    """OMN-16022 AC (a): ``expires_at`` is stored but never enforced.
+
+    Keycloak is scripted fully healthy here (JWKS resolves, introspection
+    returns ``active: true``) so the ONLY thing under test is the stored
+    expiry. Pre-fix the handler returns a normal HEARTBEAT_OK response and
+    the session stays in the store forever -- the stored ceiling is
+    declarative only.
+    """
+    store = StoreGatewaySessionMemory()
+    attach_response = await _attach(
+        config, secret_resolver, store, monkeypatch, tenant_key, jwks_ok
+    )
+    session_id = attach_response.session.session_id
+    await store.put(
+        attach_response.session.model_copy(
+            update={"expires_at": datetime.now(UTC) - timedelta(seconds=1)}
+        )
+    )
+
+    _patch_client(
+        monkeypatch,
+        get_result=jwks_ok,
+        post_result=_FakeResponse(200, {"active": True, "client_id": "gw-tenant-acme"}),
+    )
+    heartbeat = HandlerGatewayHeartbeat(
+        config=config,
+        session_store=store,
+        secret_resolver=secret_resolver,  # type: ignore[arg-type]
+    )
+    hb_token = sign_claims(tenant_key, _claims())
+    response = await heartbeat.handle(
+        ModelGatewayHeartbeatRequest(session_id=session_id, access_token=hb_token)
+    )
+
+    assert response.termination_reason is EnumGatewaySessionTerminationReason.EXPIRED
+    assert response.session.status is EnumGatewaySessionStatus.EXPIRED
+    assert response.session_event.event_type is EnumGatewaySessionEventType.EXPIRED
+    assert await store.get(session_id) is None
+
+
+async def test_heartbeat_quarantines_session_past_unverified_ceiling(
+    monkeypatch: pytest.MonkeyPatch,
+    config: ModelGatewayAttachConfig,
+    secret_resolver: _FakeSecretResolver,
+    tenant_key,
+    jwks_ok: _FakeResponse,
+) -> None:
+    """OMN-16022 AC (b): unbounded fail-open is a revocation-suppression vector.
+
+    The session was last successfully revalidated 1000s ago (longer than the
+    degraded-mode ceiling) and Keycloak is unreachable. Pre-fix the handler
+    raises InfraUnavailableError and leaves the session ACTIVE -- it survives
+    un-revalidated for as long as the outage (or an attacker-induced
+    partition) lasts.
+    """
+    store = StoreGatewaySessionMemory()
+    attach_response = await _attach(
+        config, secret_resolver, store, monkeypatch, tenant_key, jwks_ok
+    )
+    session_id = attach_response.session.session_id
+    await store.put(
+        attach_response.session.model_copy(
+            update={
+                "last_heartbeat_at": datetime.now(UTC)
+                - timedelta(seconds=config.max_unverified_session_seconds + 60)
+            }
+        )
+    )
+
+    _patch_client(
+        monkeypatch, get_result=jwks_ok, post_result=httpx.ConnectError("unreachable")
+    )
+    heartbeat = HandlerGatewayHeartbeat(
+        config=config,
+        session_store=store,
+        secret_resolver=secret_resolver,  # type: ignore[arg-type]
+    )
+    hb_token = sign_claims(tenant_key, _claims())
+    response = await heartbeat.handle(
+        ModelGatewayHeartbeatRequest(session_id=session_id, access_token=hb_token)
+    )
+
+    assert (
+        response.termination_reason
+        is EnumGatewaySessionTerminationReason.UNVERIFIED_CEILING
+    )
+    assert response.session.status is EnumGatewaySessionStatus.QUARANTINED
+    assert response.session_event.event_type is EnumGatewaySessionEventType.QUARANTINED
+    assert await store.get(session_id) is None
+
+
+async def test_heartbeat_alarms_on_entry_to_degraded_mode(
+    monkeypatch: pytest.MonkeyPatch,
+    config: ModelGatewayAttachConfig,
+    secret_resolver: _FakeSecretResolver,
+    tenant_key,
+    jwks_ok: _FakeResponse,
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    """OMN-16022 AC (b): alarm on ENTRY to degraded mode, not only on breach.
+
+    Below the ceiling the OMN-15918 invariant is preserved exactly -- an
+    outage still raises InfraUnavailableError and still never revokes. What
+    is missing pre-fix is that entering degraded mode is invisible: the
+    session stays ACTIVE and nothing is logged, so the operator learns about
+    a revocation-blind window only when the ceiling finally fires.
+    """
+    store = StoreGatewaySessionMemory()
+    attach_response = await _attach(
+        config, secret_resolver, store, monkeypatch, tenant_key, jwks_ok
+    )
+    session_id = attach_response.session.session_id
+
+    _patch_client(
+        monkeypatch, get_result=jwks_ok, post_result=httpx.ConnectError("unreachable")
+    )
+    heartbeat = HandlerGatewayHeartbeat(
+        config=config,
+        session_store=store,
+        secret_resolver=secret_resolver,  # type: ignore[arg-type]
+    )
+    hb_token = sign_claims(tenant_key, _claims())
+
+    with caplog.at_level(logging.WARNING):
+        with pytest.raises(InfraUnavailableError):
+            await heartbeat.handle(
+                ModelGatewayHeartbeatRequest(
+                    session_id=session_id, access_token=hb_token
+                )
+            )
+
+    stored = await store.get(session_id)
+    assert stored is not None, "an outage must never revoke (OMN-15918 R4)"
+    assert stored.status is EnumGatewaySessionStatus.DEGRADED
+    assert any("degraded" in record.getMessage().lower() for record in caplog.records)
+
+
+async def test_detach_rejects_session_past_expires_at(
+    monkeypatch: pytest.MonkeyPatch,
+    config: ModelGatewayAttachConfig,
+    secret_resolver: _FakeSecretResolver,
+    tenant_key,
+    jwks_ok: _FakeResponse,
+) -> None:
+    """OMN-16022 AC (a): detach is a session-consuming path too.
+
+    Pre-fix detach reads the expired session, spends a JWKS round-trip on
+    it, and reports a normal DETACHED outcome -- an expired session is
+    still a usable session on every path that reads one.
+    """
+    store = StoreGatewaySessionMemory()
+    attach_response = await _attach(
+        config, secret_resolver, store, monkeypatch, tenant_key, jwks_ok
+    )
+    session_id = attach_response.session.session_id
+    await store.put(
+        attach_response.session.model_copy(
+            update={"expires_at": datetime.now(UTC) - timedelta(seconds=1)}
+        )
+    )
+
+    _patch_client(monkeypatch, get_result=jwks_ok)
+    detach = HandlerGatewayDetach(
+        config=config,
+        session_store=store,
+        secret_resolver=secret_resolver,  # type: ignore[arg-type]
+    )
+    detach_token = sign_claims(tenant_key, _claims())
+
+    with pytest.raises(SessionExpiredError, match="expired"):
+        await detach.handle(
+            ModelGatewayDetachRequest(
+                session_id=session_id, access_token=detach_token, reason="edge shutdown"
+            )
+        )
+    assert await store.get(session_id) is None
+
+
+async def test_healthy_runtime_reattaches_after_enforced_expiry(
+    monkeypatch: pytest.MonkeyPatch,
+    config: ModelGatewayAttachConfig,
+    secret_resolver: _FakeSecretResolver,
+    tenant_key,
+    jwks_ok: _FakeResponse,
+) -> None:
+    """OMN-16022 AC (c): enforced expiry stays compatible with OMN-15952.
+
+    The remedy for an enforced expiry is re-attach, and re-attach must
+    remain cheap and automatic for a runtime whose credential is still
+    good -- that asymmetry (healthy re-attaches, revoked cannot) is what
+    makes the ceiling safe to enforce at all.
+    """
+    store = StoreGatewaySessionMemory()
+    attach_response = await _attach(
+        config, secret_resolver, store, monkeypatch, tenant_key, jwks_ok
+    )
+    first_session_id = attach_response.session.session_id
+    await store.put(
+        attach_response.session.model_copy(
+            update={"expires_at": datetime.now(UTC) - timedelta(seconds=1)}
+        )
+    )
+
+    _patch_client(
+        monkeypatch,
+        get_result=jwks_ok,
+        post_result=_FakeResponse(200, {"active": True, "client_id": "gw-tenant-acme"}),
+    )
+    heartbeat = HandlerGatewayHeartbeat(
+        config=config,
+        session_store=store,
+        secret_resolver=secret_resolver,  # type: ignore[arg-type]
+    )
+    await heartbeat.handle(
+        ModelGatewayHeartbeatRequest(
+            session_id=first_session_id,
+            access_token=sign_claims(tenant_key, _claims()),
+        )
+    )
+    assert await store.get(first_session_id) is None
+
+    reattach_response = await _attach(
+        config, secret_resolver, store, monkeypatch, tenant_key, jwks_ok
+    )
+    assert reattach_response.session.session_id != first_session_id
+    assert reattach_response.session.status is EnumGatewaySessionStatus.ACTIVE
+    assert await store.get(reattach_response.session.session_id) is not None
+
+
+async def test_ceiling_fires_even_when_keycloak_is_healthy(
+    monkeypatch: pytest.MonkeyPatch,
+    config: ModelGatewayAttachConfig,
+    secret_resolver: _FakeSecretResolver,
+    tenant_key,
+    jwks_ok: _FakeResponse,
+) -> None:
+    """The ceiling measures revalidation staleness, not Keycloak reachability.
+
+    Introspection is scripted fully healthy here. A session that has gone
+    longer than the ceiling without a successful revalidation is still torn
+    down -- at a 15s heartbeat cadence that is 60+ consecutive missed
+    heartbeats, i.e. a dead edge, and the remedy is the same cheap
+    re-attach. Tying the ceiling to "is Keycloak up right now" would put
+    the bound back under the control of whoever can take Keycloak down.
+    """
+    store = StoreGatewaySessionMemory()
+    attach_response = await _attach(
+        config, secret_resolver, store, monkeypatch, tenant_key, jwks_ok
+    )
+    session_id = attach_response.session.session_id
+    await store.put(
+        attach_response.session.model_copy(
+            update={
+                "last_heartbeat_at": datetime.now(UTC)
+                - timedelta(seconds=config.max_unverified_session_seconds + 1)
+            }
+        )
+    )
+
+    _patch_client(
+        monkeypatch,
+        get_result=jwks_ok,
+        post_result=_FakeResponse(200, {"active": True, "client_id": "gw-tenant-acme"}),
+    )
+    heartbeat = HandlerGatewayHeartbeat(
+        config=config,
+        session_store=store,
+        secret_resolver=secret_resolver,  # type: ignore[arg-type]
+    )
+    response = await heartbeat.handle(
+        ModelGatewayHeartbeatRequest(
+            session_id=session_id, access_token=sign_claims(tenant_key, _claims())
+        )
+    )
+
+    assert (
+        response.termination_reason
+        is EnumGatewaySessionTerminationReason.UNVERIFIED_CEILING
+    )
+    assert await store.get(session_id) is None
+
+
+async def test_degraded_alarm_fires_once_not_every_tick(
+    monkeypatch: pytest.MonkeyPatch,
+    config: ModelGatewayAttachConfig,
+    secret_resolver: _FakeSecretResolver,
+    tenant_key,
+    jwks_ok: _FakeResponse,
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    """Alarm on ENTRY means entry, not every heartbeat for the whole outage.
+
+    A fleet riding out a multi-minute Keycloak outage would otherwise emit
+    one record per session per heartbeat interval, which is how an alarm
+    stops being read at exactly the moment it matters.
+    """
+    store = StoreGatewaySessionMemory()
+    attach_response = await _attach(
+        config, secret_resolver, store, monkeypatch, tenant_key, jwks_ok
+    )
+    session_id = attach_response.session.session_id
+
+    _patch_client(
+        monkeypatch, get_result=jwks_ok, post_result=httpx.ConnectError("unreachable")
+    )
+    heartbeat = HandlerGatewayHeartbeat(
+        config=config,
+        session_store=store,
+        secret_resolver=secret_resolver,  # type: ignore[arg-type]
+    )
+    hb_token = sign_claims(tenant_key, _claims())
+
+    with caplog.at_level(logging.WARNING):
+        for _ in range(3):
+            with pytest.raises(InfraUnavailableError):
+                await heartbeat.handle(
+                    ModelGatewayHeartbeatRequest(
+                        session_id=session_id, access_token=hb_token
+                    )
+                )
+
+    entries = [
+        record
+        for record in caplog.records
+        if getattr(record, "alarm", None) == "gateway.session.degraded_entered"
+    ]
+    assert len(entries) == 1
+    assert entries[0].degraded_reason == "introspection_unavailable"  # type: ignore[attr-defined]
+    stored = await store.get(session_id)
+    assert stored is not None
+    assert stored.status is EnumGatewaySessionStatus.DEGRADED
+
+
+async def test_revoked_runtime_cannot_hold_a_session_after_reattach(
+    monkeypatch: pytest.MonkeyPatch,
+    config: ModelGatewayAttachConfig,
+    secret_resolver: _FakeSecretResolver,
+    tenant_key,
+    jwks_ok: _FakeResponse,
+) -> None:
+    """OMN-16022 AC (c), negative half: re-attach is not a revocation bypass.
+
+    Honest scope: attach itself does not introspect (it checks signature,
+    issuer, audience and exp only), so a client disabled while one of its
+    tokens is still unexpired CAN complete a re-attach. What it cannot do
+    is keep the session -- the first heartbeat introspects and tears it
+    down. Revocation latency at the attach boundary is therefore bounded by
+    heartbeat_interval_seconds, not zero; that residual is recorded in the
+    node contract's known_gaps.
+    """
+    store = StoreGatewaySessionMemory()
+    reattach = await _attach(
+        config, secret_resolver, store, monkeypatch, tenant_key, jwks_ok
+    )
+    session_id = reattach.session.session_id
+
+    _patch_client(
+        monkeypatch,
+        get_result=jwks_ok,
+        post_result=_FakeResponse(200, {"active": False}),
+    )
+    heartbeat = HandlerGatewayHeartbeat(
+        config=config,
+        session_store=store,
+        secret_resolver=secret_resolver,  # type: ignore[arg-type]
+    )
+    response = await heartbeat.handle(
+        ModelGatewayHeartbeatRequest(
+            session_id=session_id, access_token=sign_claims(tenant_key, _claims())
+        )
+    )
+
+    assert response.termination_reason is EnumGatewaySessionTerminationReason.REVOKED
+    assert await store.get(session_id) is None
+
+
+async def test_degraded_session_recovers_to_active_when_keycloak_returns(
+    monkeypatch: pytest.MonkeyPatch,
+    config: ModelGatewayAttachConfig,
+    secret_resolver: _FakeSecretResolver,
+    tenant_key,
+    jwks_ok: _FakeResponse,
+) -> None:
+    """DEGRADED is a survival state, not a one-way trip to teardown.
+
+    Asserts the claim the two OMN-15918 outage tests now lean on: marking a
+    session DEGRADED during an outage does not doom it. The next heartbeat
+    that actually reaches Keycloak restores ACTIVE and, critically,
+    advances last_heartbeat_at -- which resets the ceiling clock, so a
+    recovered session is not quarantined for time it spent degraded.
+    """
+    store = StoreGatewaySessionMemory()
+    attach_response = await _attach(
+        config, secret_resolver, store, monkeypatch, tenant_key, jwks_ok
+    )
+    session_id = attach_response.session.session_id
+    hb_token = sign_claims(tenant_key, _claims())
+    heartbeat = HandlerGatewayHeartbeat(
+        config=config,
+        session_store=store,
+        secret_resolver=secret_resolver,  # type: ignore[arg-type]
+    )
+
+    _patch_client(
+        monkeypatch, get_result=jwks_ok, post_result=httpx.ConnectError("unreachable")
+    )
+    with pytest.raises(InfraUnavailableError):
+        await heartbeat.handle(
+            ModelGatewayHeartbeatRequest(session_id=session_id, access_token=hb_token)
+        )
+    degraded = await store.get(session_id)
+    assert degraded is not None
+    assert degraded.status is EnumGatewaySessionStatus.DEGRADED
+
+    _patch_client(
+        monkeypatch,
+        get_result=jwks_ok,
+        post_result=_FakeResponse(200, {"active": True, "client_id": "gw-tenant-acme"}),
+    )
+    recovered = await heartbeat.handle(
+        ModelGatewayHeartbeatRequest(session_id=session_id, access_token=hb_token)
+    )
+
+    assert recovered.termination_reason is None
+    assert recovered.session.status is EnumGatewaySessionStatus.ACTIVE
+    assert recovered.session.last_heartbeat_at > degraded.last_heartbeat_at

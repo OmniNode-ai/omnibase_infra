@@ -38,6 +38,7 @@ from collections import defaultdict
 from collections.abc import Awaitable, Callable, Collection, Iterator, Mapping, Sequence
 from dataclasses import dataclass, field
 from datetime import UTC, datetime
+from functools import lru_cache
 from pathlib import Path
 from typing import (
     TYPE_CHECKING,
@@ -49,7 +50,7 @@ from typing import (
 )
 from uuid import UUID, uuid4
 
-from pydantic import BaseModel, ValidationError
+from pydantic import AliasChoices, AliasPath, BaseModel, ValidationError
 
 from omnibase_core.enums.enum_core_error_code import EnumCoreErrorCode
 from omnibase_core.enums.enum_database_grant_object_type import (
@@ -218,6 +219,52 @@ class BoundaryPublishError(Exception):
     state_io in_flight-lock branch self-heals inline for that reason instead
     of depending on redelivery.
     """
+
+
+class BoundaryApplyPublishError(Exception):
+    """Marks a non-outbox ``result_applier.apply()`` publish failure whose
+    unconditional best-effort DLQ route (``_route_apply_publish_failure``)
+    could not durably persist the record -- offset must not advance.
+
+    OMN-14498 (adversarial verify, Linear comment 3c6da9a0): at the DEFAULT
+    (unset) ``ONEX_BOUNDARY_DLQ_ENABLED`` state, a non-``state_io`` contract
+    (``propagate_publish_failures=False``) whose ``result_applier.apply()``
+    raised used to fall through to the flag-gated ``_route_swallowed_exception``
+    path, which -- with the flag off -- logs one line and returns normally.
+    A callback that returns normally IS an ACK
+    (``EventBusKafka._dispatch_to_subscriber`` reads "no exception" as
+    success and advances the offset), so the failed publish vanished with
+    nothing durable and nothing redelivered: the silent-drop class this
+    ticket exists to close.
+
+    Unlike a raw handler/dispatch exception (still legitimately staged
+    behind ``ONEX_BOUNDARY_DLQ_ENABLED`` -- see
+    ``test_boundary_dlq_omn14507.py::TestBoundaryDlqFlagOff``), a
+    result-applier publish failure is not an unvalidated/doubtful payload:
+    the dispatch already SUCCEEDED and produced a known-good result: only
+    its downstream delivery failed. ``_route_apply_publish_failure``
+    therefore attempts the DLQ write UNCONDITIONALLY -- mirroring the same
+    unconditional idiom ``_route_sync_publisher_failure`` already uses for
+    the sync-publisher leg (#2436 / OMN-15029) -- and this type is raised
+    only when that unconditional attempt itself could not durably persist
+    the record, so the boundary must withhold the offset (NACK) instead of
+    the historical swallow-and-ACK.
+
+    Deliberately NOT caught by ``_route_swallowed_exception`` /
+    ``_boundary_dlq_enabled()`` -- the auto-wired ``callback()`` routes this
+    type straight out of the boundary instead, so a second, flag-gated
+    swallow can never re-absorb it.
+    """
+
+    def __init__(self, topic: str, correlation_id: object, cause: Exception) -> None:
+        super().__init__(
+            f"result-applier publish failed and no durable DLQ route was "
+            f"available; offset must not advance (topic={topic} "
+            f"correlation_id={correlation_id} cause={type(cause).__name__})"
+        )
+        self.topic = topic
+        self.correlation_id = correlation_id
+        self.cause = cause
 
 
 class HandlerDispatchFailureError(Exception):
@@ -799,7 +846,12 @@ def _make_dispatch_callback(
             else:
                 target_model = _resolve_def_b_input_model_type(handle_method)
                 if target_model is not None:
-                    payload = _extract_dispatch_payload(envelope)
+                    # OMN-16050: pass the registered input model so the unwrap
+                    # STOPS at it. ``ModelEmitRequest`` declares ``payload`` plus
+                    # four transport markers, so a marker-only heuristic unwrapped
+                    # through it and handed the handler the caller's inner
+                    # payload — every node_event_emit_effect command DLQ'd.
+                    payload = _extract_dispatch_payload(envelope, target_model)
                     if isinstance(payload, target_model):
                         dispatch_arg = payload
                     elif isinstance(payload, Mapping):
@@ -832,7 +884,13 @@ def _make_dispatch_callback(
                 raw_result, envelope, None, handler_node_kind, published_event_names
             )
 
-        payload = _extract_dispatch_payload(envelope)
+        # OMN-16050: resolve the contract-declared event model BEFORE extracting so
+        # the unwrap can stop at it (same fail-closed rule as the def-B branch
+        # above). Resolution failure is not fatal here — the existing try/except
+        # below owns that path — so the hint degrades to None and the extraction
+        # keeps its pre-OMN-16050 structural behaviour.
+        payload_target_model = _safe_import_event_model_class(event_model)
+        payload = _extract_dispatch_payload(envelope, payload_target_model)
         handler_takes_envelope = _handler_accepts_event_envelope(
             cast("Callable[..., object]", handle_method)
         )
@@ -1069,6 +1127,24 @@ def _import_event_model_class(event_model: ModelHandlerRef) -> type[BaseModel]:
             "does not expose model_validate"
         )
     return cast("type[BaseModel]", model_cls)
+
+
+def _safe_import_event_model_class(
+    event_model: ModelHandlerRef | None,
+) -> type[BaseModel] | None:
+    """``_import_event_model_class`` that yields None instead of raising (OMN-16050).
+
+    Used only to hint ``_extract_dispatch_payload`` with the contract-declared
+    target type. An unimportable/malformed ``event_model`` must not change dispatch
+    control flow from this call site — the caller's own
+    ``_import_event_model_class`` inside its try/except still owns that failure.
+    """
+    if event_model is None:
+        return None
+    try:
+        return _import_event_model_class(event_model)
+    except Exception:  # noqa: BLE001 — hint-only resolution, never fatal here
+        return None
 
 
 def _handler_accepts_event_envelope(handle_method: object) -> bool:
@@ -1380,11 +1456,21 @@ def _materialize_typed_event_envelope(
 # Transport-envelope keys the runtime adds around the domain payload. When the
 # dispatch engine materializes a ModelEventEnvelope to a dict it nests the domain
 # fields under ``payload`` and carries routing metadata (``partition_key`` etc.)
-# alongside. Domain models never declare these keys, so a mapping that carries a
-# ``payload`` mapping plus any marker is a transport envelope to unwrap. Mirrors
-# omnimarket's ``_ENVELOPE_MARKER_KEYS`` predicate (OMN-12935/12936); the
-# auto-wiring kernel unwraps here because it constructs the typed model itself,
-# upstream of the handler's own coercion (OMN-12940).
+# alongside, so a mapping that carries a ``payload`` mapping plus any marker MAY
+# be a transport envelope to unwrap. Mirrors omnimarket's
+# ``_ENVELOPE_MARKER_KEYS`` predicate (OMN-12935/12936); the auto-wiring kernel
+# unwraps here because it constructs the typed model itself, upstream of the
+# handler's own coercion (OMN-12940).
+#
+# OMN-16050 — this marker set is a NECESSARY, NOT SUFFICIENT signal. The earlier
+# text here asserted "domain models never declare these keys"; that invariant is
+# FALSE. ``ModelEmitRequest`` (node_event_emit_effect) declares ``payload`` plus
+# four of these markers (``event_type``, ``correlation_id``, ``partition_key``,
+# ``event_id``), is structurally indistinguishable from a transport envelope, and
+# was therefore unwrapped THROUGH — the handler got the caller's inner payload,
+# ``model_validate`` raised, and every command DLQ'd. The registered-input-model
+# stop condition below (``_is_registered_input_payload``) is what makes the
+# heuristic safe: structure alone can never decide this.
 _ENVELOPE_MARKER_KEYS: frozenset[str] = frozenset(
     {
         "partition_key",
@@ -1398,11 +1484,13 @@ _ENVELOPE_MARKER_KEYS: frozenset[str] = frozenset(
 
 
 def _is_transport_envelope(value: object) -> bool:
-    """True when ``value`` is a transport envelope wrapping a domain payload.
+    """True when ``value`` is envelope-SHAPED: a ``payload`` mapping plus a marker.
 
-    A transport envelope is a mapping that carries a ``payload`` mapping plus at
-    least one transport marker key. Requiring a marker avoids over-unwrapping a
-    legitimate domain model that happens to declare its own ``payload`` field.
+    Structural precondition only. A domain model may legitimately declare both a
+    ``payload`` mapping and transport-plausible marker fields (OMN-16050), so this
+    predicate is never sufficient on its own to justify an unwrap — see
+    ``_is_registered_input_payload``, the fail-closed stop condition applied by
+    ``_extract_dispatch_payload``.
     """
     return (
         isinstance(value, Mapping)
@@ -1411,16 +1499,101 @@ def _is_transport_envelope(value: object) -> bool:
     )
 
 
-def _extract_dispatch_payload(envelope: object) -> object:
+def _validation_alias_wire_keys(alias: object) -> set[str]:
+    """Top-level wire keys a pydantic ``validation_alias`` can consume.
+
+    ``validation_alias`` has three shapes and only the plain-string one is a
+    single key. ``AliasPath("meta", "id")`` consumes the TOP-LEVEL key ``meta``
+    (the remaining segments index inside that value), and ``AliasChoices`` holds
+    a list of alternatives, each itself a string or an ``AliasPath``.
+
+    Missing the non-string shapes is fail-OPEN for OMN-16050: a model aliased
+    that way would fail ``_is_registered_input_payload``'s key-containment check
+    even when the candidate IS the registered model, the unwrap would continue
+    into the caller's payload, and the DLQ defect would return for exactly the
+    contracts that use richer aliases.
+    """
+    if isinstance(alias, str):
+        return {alias}
+    if isinstance(alias, AliasPath):
+        first = alias.path[0] if alias.path else None
+        return {first} if isinstance(first, str) else set()
+    if isinstance(alias, AliasChoices):
+        keys: set[str] = set()
+        for choice in alias.choices:
+            keys |= _validation_alias_wire_keys(choice)
+        return keys
+    return set()
+
+
+@lru_cache(maxsize=512)
+def _model_declared_wire_keys(model: type[BaseModel]) -> frozenset[str]:
+    """Every wire key ``model`` can accept: field names plus their input aliases."""
+    keys: set[str] = set()
+    for field_name, model_field in model.model_fields.items():
+        keys.add(field_name)
+        if isinstance(model_field.alias, str):
+            keys.add(model_field.alias)
+        keys |= _validation_alias_wire_keys(model_field.validation_alias)
+    return frozenset(keys)
+
+
+def _is_registered_input_payload(
+    candidate: object, target_model: type[BaseModel] | None
+) -> bool:
+    """True when ``candidate`` IS the dispatcher's registered input model on the wire.
+
+    The fail-closed stop condition for the recursive unwrap (OMN-16050). A
+    candidate is claimed by the registered model only when BOTH hold:
+
+    1. **Key containment** — every key present on the candidate is a declared
+       field (or input alias) of ``target_model``. A real transport envelope
+       always carries at least one routing/marker key the domain model does not
+       declare (``source_tool``, ``envelope_id``, ``__debug_trace``,
+       ``__bindings``, ``envelope_timestamp``, ...), so this alone keeps the
+       OMN-12940 double-wrapped case unwrapping.
+    2. **Full validation** — the candidate validates as ``target_model``, so a
+       partial structural coincidence never halts the unwrap short of the domain.
+
+    The cheap set check runs first; ``model_validate`` executes only for the rare
+    candidate whose keys are entirely owned by the target model.
+
+    Deliberately NOT a marker denylist: dropping ``event_type``/``correlation_id``
+    from ``_ENVELOPE_MARKER_KEYS`` would fix ``ModelEmitRequest`` and silently
+    break every genuine envelope that carries only those markers. This predicate
+    keys on the CONTRACT-registered target type instead of on key spelling.
+    """
+    if target_model is None or not isinstance(candidate, Mapping):
+        return False
+    if not candidate.keys() <= _model_declared_wire_keys(target_model):
+        return False
+    try:
+        target_model.model_validate(dict(candidate))
+    except Exception:  # noqa: BLE001 — any validation failure means "not the model"
+        return False
+    return True
+
+
+def _extract_dispatch_payload(
+    envelope: object, target_model: type[BaseModel] | None = None
+) -> object:
     # The runtime may deliver a DOUBLE- (or deeper-) wrapped envelope, e.g.
     # ``{"payload": {"payload": {domain}, ...markers}, "partition_key": None}``.
     # Unwrap recursively until the domain payload is reached so the kernel's
     # ``model_validate`` (and the post-handler correlation read) operate on the
     # domain, not on an intermediate envelope (OMN-12940).
+    #
+    # OMN-16050: stop the moment the candidate IS the dispatcher's registered
+    # input model. ``target_model`` is the contract-declared type the kernel is
+    # about to construct (the def-B ``handle()`` annotation, or the handler's
+    # declared ``event_model``); when it is None the caller has no registered
+    # type in scope and the pre-existing structural behaviour is unchanged.
     candidate: object = envelope
     if not isinstance(candidate, Mapping):
         candidate = getattr(candidate, "payload", candidate)
-    while _is_transport_envelope(candidate):
+    while _is_transport_envelope(candidate) and not _is_registered_input_payload(
+        candidate, target_model
+    ):
         candidate = cast("Mapping[str, object]", candidate)["payload"]
     return candidate
 
@@ -4283,6 +4456,103 @@ async def _dispatch_to_contract_scope(
     )
 
 
+async def _route_apply_publish_failure(
+    exc: Exception,
+    *,
+    event_bus: object | None,
+    topic: str,
+    message: object,
+    correlation_id: UUID,
+) -> None:
+    """Unconditional best-effort DLQ routing for a non-outbox
+    ``result_applier.apply()`` publish failure (OMN-14498, adversarial
+    verify comment 3c6da9a0).
+
+    Unlike ``_route_swallowed_exception``, this is NOT gated behind
+    ``_boundary_dlq_enabled()``: the dispatch already SUCCEEDED here --
+    only the downstream publish of its (already-computed) result failed --
+    so the record is not the doubtful/unvalidated payload the staged
+    rollout exists to hold back, it is a known-good result that failed to
+    land. Mirrors the same unconditional-DLQ idiom
+    ``_route_sync_publisher_failure`` uses for the sync-publisher leg
+    (#2436 / OMN-15029).
+
+    Unlike that fire-and-forget leg, THIS boundary owns a consume offset,
+    so (unlike ``_route_sync_publisher_failure``, which has nothing to
+    NACK) a failed/unavailable DLQ write here raises
+    ``BoundaryApplyPublishError`` instead of returning -- the caller
+    (``_make_event_bus_callback.callback``) propagates that unconditionally
+    so the offset is withheld rather than silently advanced. Never swallows
+    into a log-only return: either the record is durably DLQ'd (returns
+    normally, safe to ACK) or the offset must not advance (raises).
+    """
+    from omnibase_infra.event_bus.topic_constants import get_dlq_topic_for_original
+
+    publish_dlq_fn = (
+        getattr(event_bus, "_publish_raw_to_dlq", None)
+        if event_bus is not None
+        else None
+    )
+    if publish_dlq_fn is None or not callable(publish_dlq_fn):
+        logger.error(
+            "metric_name=boundary_swallow_observed dlq_routed=false "
+            "dlq_enabled=unconditional message_lost=true topic=%s "
+            "error_type=%s correlation_id=%s",
+            topic,
+            type(exc).__name__,
+            correlation_id,
+        )
+        raise BoundaryApplyPublishError(topic, correlation_id, exc)
+
+    try:
+        dlq_persisted = await publish_dlq_fn(
+            original_topic=topic,
+            raw_msg=message,
+            error=exc,
+            correlation_id=correlation_id,
+            failure_type="apply_publish_failed",
+            consumer_group="auto-wiring",
+            dlq_topic=get_dlq_topic_for_original(topic),
+        )
+    except Exception as dlq_exc:
+        logger.error(
+            "metric_name=boundary_swallow_observed dlq_routed=false "
+            "dlq_enabled=unconditional dlq_publish_failed=true "
+            "message_lost=true topic=%s error_type=%s dlq_error=%s "
+            "correlation_id=%s",
+            topic,
+            type(exc).__name__,
+            _sanitize_exc(dlq_exc),
+            correlation_id,
+        )
+        raise BoundaryApplyPublishError(topic, correlation_id, exc) from dlq_exc
+
+    if dlq_persisted:
+        logger.error(
+            "metric_name=boundary_swallow_prevented dlq_routed=true "
+            "dlq_enabled=unconditional topic=%s error_type=%s "
+            "correlation_id=%s",
+            topic,
+            type(exc).__name__,
+            correlation_id,
+        )
+        return
+
+    # OMN-14936-class False return: the publish did NOT durably persist
+    # (rejected input, producer unavailable, or the send itself
+    # failed/timed out) WITHOUT raising. Treated identically to the
+    # except-branch above -- not durable, so the offset must be withheld.
+    logger.error(
+        "metric_name=boundary_swallow_observed dlq_routed=false "
+        "dlq_enabled=unconditional dlq_publish_failed=true "
+        "message_lost=true topic=%s error_type=%s correlation_id=%s",
+        topic,
+        type(exc).__name__,
+        correlation_id,
+    )
+    raise BoundaryApplyPublishError(topic, correlation_id, exc)
+
+
 def _make_event_bus_callback(
     topic: str,
     dispatch_engine: ProtocolDispatchEngine,
@@ -4339,6 +4609,7 @@ def _make_event_bus_callback(
 
     async def _dispatch_with_bounded_retry(
         envelope: ModelEventEnvelope[object],
+        message: object,
     ) -> None:
         """Dispatch + apply, retrying a bounded number of times on failure.
 
@@ -4392,13 +4663,35 @@ def _make_event_bus_callback(
                         # OMN-14403 §4.3: on the outbox path a publish failure
                         # must PROPAGATE (redeliver), never be retried-then-
                         # swallowed. Tag it so the loop breaks and the outer
-                        # handler re-raises. Off the outbox path this is a no-op:
-                        # the original exception rides the generic retry arm.
+                        # handler re-raises.
                         if propagate_publish_failures:
                             raise BoundaryPublishError(
                                 "outbox publish failed"
                             ) from apply_exc
-                        raise
+                        # OMN-14498 (adversarial verify, comment 3c6da9a0): off
+                        # the outbox path this used to ride the generic retry
+                        # arm below and, on exhaustion, fall into the
+                        # flag-gated `_route_swallowed_exception` -- which at
+                        # the DEFAULT (unset) ONEX_BOUNDARY_DLQ_ENABLED state
+                        # logs one line and returns normally (an ACK), losing
+                        # the record silently. The dispatch already SUCCEEDED
+                        # here; only the downstream publish of its result
+                        # failed, so this is routed through an UNCONDITIONAL
+                        # best-effort DLQ attempt instead of the staged-
+                        # rollout flag (mirrors the sync-publisher leg's own
+                        # unconditional route, #2436 / OMN-15029). Raises
+                        # BoundaryApplyPublishError -- never retried, never
+                        # re-absorbed by `_route_swallowed_exception` -- when
+                        # that attempt cannot durably persist the record, so
+                        # the offset is withheld instead of silently advanced.
+                        await _route_apply_publish_failure(
+                            apply_exc,
+                            event_bus=event_bus,
+                            topic=topic,
+                            message=message,
+                            correlation_id=envelope.correlation_id or uuid4(),
+                        )
+                        return
                 # OMN-14716: the engine catch-all converts a dispatcher crash (a
                 # def-B handler AttributeError, a boundary coercion failure) into a
                 # FAILED result instead of re-raising, and the applier silently
@@ -4412,13 +4705,19 @@ def _make_event_bus_callback(
                 PydanticValidationError,
                 ProtocolConfigurationError,
                 BoundaryPublishError,
+                BoundaryApplyPublishError,
                 HandlerDispatchFailureError,
             ) as exc:
                 # Non-retryable: deterministic content/config error, an outbox
-                # publish failure that must propagate (not retry), or a FAILED
+                # publish failure that must propagate (not retry), a FAILED
                 # dispatch result the engine already produced deterministically
-                # (OMN-14716). No backoff, no further attempts -- see docstring
-                # gap G2 + OMN-14403 §4.3.
+                # (OMN-14716), or an already-exhausted unconditional DLQ
+                # attempt for a non-outbox apply() publish failure (OMN-14498)
+                # -- the handler already dispatched successfully once;
+                # re-invoking it on retry would only risk duplicate side
+                # effects for a downstream-publish problem retrying the
+                # handler itself cannot fix. No backoff, no further attempts
+                # -- see docstring gap G2 + OMN-14403 §4.3.
                 last_exc = exc
                 break
             except Exception as exc:  # noqa: BLE001 — bounded-retry loop; re-raised below on exhaustion
@@ -4678,7 +4977,19 @@ def _make_event_bus_callback(
                 envelope = message
             if envelope.correlation_id is not None:
                 correlation_id = envelope.correlation_id
-            await _dispatch_with_bounded_retry(envelope)
+            await _dispatch_with_bounded_retry(envelope, message)
+        except BoundaryApplyPublishError as exc:
+            # OMN-14498 (adversarial verify, comment 3c6da9a0): this marks an
+            # already-exhausted UNCONDITIONAL DLQ attempt for a non-outbox
+            # result-applier publish failure (see
+            # `_route_apply_publish_failure`) -- it must never be re-routed
+            # through the flag-gated `_route_swallowed_exception`, which
+            # would silently ACK when ONEX_BOUNDARY_DLQ_ENABLED is unset
+            # (the exact silent-drop this ticket exists to close). Propagate
+            # unconditionally, un-unwrapped -- same shape as
+            # BoundaryDlqNotPersistedError's propagation on the sibling
+            # flag-gated path -- so the offset is withheld instead.
+            raise
         except (OptimisticConflictError, BoundaryPublishError) as exc:
             # OMN-14403 §4.3, OMN-14600 CORRECTION: this except-tuple's
             # OptimisticConflictError arm is effectively DEAD for a dispatcher

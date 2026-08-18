@@ -32,10 +32,31 @@ OMN-15918 hardening in this handler:
     or open circuit breaker is an *outage* -- ``InfraUnavailableError`` is
     raised and the session is left untouched (retry-able), never treated as
     revoked.
+
+OMN-16022 adds the two time bounds that R4 left unbounded, without
+weakening R4 itself:
+
+  - ``expires_at``, written at attach and previously read by nothing, is
+    now enforced here. A session past it is torn down and the runtime
+    re-attaches.
+  - Degraded mode is bounded by ``max_unverified_session_seconds``. R4's
+    fail-open is still the default and a Keycloak blip still revokes
+    nothing -- but a session that has gone a full attach-token lifetime
+    with no successful revalidation is quarantined rather than trusted
+    indefinitely, because otherwise anyone able to partition the gateway
+    from Keycloak could hold revocation open for as long as they liked,
+    including against a credential the operator had just rotated. Only the
+    CEILING terminates; the outage never does.
+
+Both bounds are evaluated before any network I/O, so enforcement does not
+depend on the reachability of the service whose unreachability is the
+threat. Entry into degraded mode is alarmed when it starts (once, not per
+tick), not only when the ceiling finally fires.
 """
 
 from __future__ import annotations
 
+import logging
 from datetime import UTC, datetime
 from uuid import UUID
 
@@ -54,6 +75,9 @@ from omnibase_infra.nodes.node_gateway_attach_effect.models.enum_gateway_session
 from omnibase_infra.nodes.node_gateway_attach_effect.models.enum_gateway_session_status import (
     EnumGatewaySessionStatus,
 )
+from omnibase_infra.nodes.node_gateway_attach_effect.models.enum_gateway_session_termination_reason import (
+    EnumGatewaySessionTerminationReason,
+)
 from omnibase_infra.nodes.node_gateway_attach_effect.models.model_gateway_attach_config import (
     ModelGatewayAttachConfig,
 )
@@ -63,8 +87,14 @@ from omnibase_infra.nodes.node_gateway_attach_effect.models.model_gateway_heartb
 from omnibase_infra.nodes.node_gateway_attach_effect.models.model_gateway_heartbeat_response import (
     ModelGatewayHeartbeatResponse,
 )
+from omnibase_infra.nodes.node_gateway_attach_effect.models.model_gateway_session import (
+    ModelGatewaySession,
+)
 from omnibase_infra.nodes.node_gateway_attach_effect.models.model_gateway_session_event import (
     ModelGatewaySessionEvent,
+)
+from omnibase_infra.nodes.node_gateway_attach_effect.services import (
+    service_gateway_session_policy as session_policy,
 )
 from omnibase_infra.nodes.node_gateway_attach_effect.services import (
     service_keycloak_token_validator as token_validator,
@@ -75,6 +105,8 @@ from omnibase_infra.nodes.node_gateway_attach_effect.services.protocol_gateway_s
 from omnibase_infra.runtime.secret_resolver import SecretResolver
 
 __all__ = ["HandlerGatewayHeartbeat"]
+
+logger = logging.getLogger(__name__)
 
 
 class SessionNotFoundError(Exception):
@@ -140,6 +172,59 @@ class HandlerGatewayHeartbeat:
         if session is None:
             raise SessionNotFoundError(f"no session {request.session_id}")
 
+        now = datetime.now(UTC)
+
+        # OMN-16022: both lifetime bounds are evaluated here, before token
+        # verification and before any network call. A session that has
+        # breached one is over no matter what the presented token says or
+        # what Keycloak would say about it, and checking after the JWKS
+        # fetch would make enforcement depend on the reachability of the
+        # very service whose unreachability the ceiling exists to bound.
+        if session_policy.is_expired(session, now=now):
+            logger.warning(
+                "gateway session rejected: past expires_at",
+                extra={
+                    "alarm": "gateway.session.expired",
+                    "session_id": str(session.session_id),
+                    "tenant_id": str(session.tenant_id),
+                    "tenant_slug": session.tenant_slug,
+                    "edge_instance_id": session.edge_instance_id,
+                    "expires_at": session.expires_at.isoformat(),
+                },
+            )
+            return await self._terminate(
+                session,
+                now=now,
+                reason=EnumGatewaySessionTerminationReason.EXPIRED,
+                status=EnumGatewaySessionStatus.EXPIRED,
+                event_type=EnumGatewaySessionEventType.EXPIRED,
+            )
+
+        if session_policy.exceeds_unverified_ceiling(
+            session, now=now, config=self._config
+        ):
+            logger.error(
+                "gateway session quarantined: degraded-mode ceiling breached",
+                extra={
+                    "alarm": "gateway.session.unverified_ceiling_breached",
+                    "session_id": str(session.session_id),
+                    "tenant_id": str(session.tenant_id),
+                    "tenant_slug": session.tenant_slug,
+                    "edge_instance_id": session.edge_instance_id,
+                    "unverified_seconds": session_policy.unverified_seconds(
+                        session, now=now
+                    ),
+                    "ceiling_seconds": self._config.max_unverified_session_seconds,
+                },
+            )
+            return await self._terminate(
+                session,
+                now=now,
+                reason=EnumGatewaySessionTerminationReason.UNVERIFIED_CEILING,
+                status=EnumGatewaySessionStatus.QUARANTINED,
+                event_type=EnumGatewaySessionEventType.QUARANTINED,
+            )
+
         # R1 + R2: verify the presented token's signature, then bind it to
         # the STORED session identity -- never trust caller-supplied claims
         # in isolation. A token that verifies clean but names a different
@@ -152,7 +237,16 @@ class HandlerGatewayHeartbeat:
             raise token_validator.TokenValidationError(
                 "Keycloak issuer secret ref resolved to None despite required=True"
             )
-        jwks_keys = await self._fetch_jwks()
+        try:
+            jwks_keys = await self._fetch_jwks()
+        except InfraUnavailableError:
+            # Same outage class as an unreachable introspection endpoint --
+            # this heartbeat could not re-verify the credential, so the
+            # revocation-blind window opens here too. TokenValidationError
+            # is deliberately not caught: a token that fails verification
+            # against a JWKS we DID fetch is a rejection, not an outage.
+            await self._enter_degraded(session, reason="jwks_unavailable")
+            raise
         claims = token_validator.verify_and_decode_claims(
             request.access_token,
             jwks_keys,
@@ -169,37 +263,45 @@ class HandlerGatewayHeartbeat:
                 "(tenant/principal/client binding mismatch)"
             )
 
-        now = datetime.now(UTC)
-        is_active = await self._introspect(
-            access_token=request.access_token,
-            client_id=session.keycloak_client_id,
-            correlation_id=session.session_id,
-        )
+        try:
+            is_active = await self._introspect(
+                access_token=request.access_token,
+                client_id=session.keycloak_client_id,
+                correlation_id=session.session_id,
+            )
+        except InfraUnavailableError:
+            # OMN-15918 R4 is unchanged: an unreachable Keycloak is not
+            # revocation, the session is left alive, and the caller retries.
+            # OMN-16022 adds only that entering this revocation-blind window
+            # is recorded on the session and alarmed once, so the operator
+            # sees it start rather than inferring it from a later teardown.
+            # The ceiling checked at the top of this method is what
+            # eventually ends it.
+            await self._enter_degraded(session, reason="introspection_unavailable")
+            raise
 
         if not is_active:
-            await self._session_store.delete(session.session_id)
-            revoked_session = session.model_copy(
-                update={"status": EnumGatewaySessionStatus.REVOKED}
-            )
-            event = ModelGatewaySessionEvent(
+            return await self._terminate(
+                session,
+                now=now,
+                reason=EnumGatewaySessionTerminationReason.REVOKED,
+                status=EnumGatewaySessionStatus.REVOKED,
                 event_type=EnumGatewaySessionEventType.REVOKED,
-                session_id=session.session_id,
-                tenant_id=session.tenant_id,
-                tenant_slug=session.tenant_slug,
-                principal_id=session.principal_id,
-                edge_instance_id=session.edge_instance_id,
-                emitted_at=now,
-            )
-            return ModelGatewayHeartbeatResponse(
-                session=revoked_session, revoked=True, session_event=event
             )
 
-        elapsed = (now - session.last_heartbeat_at).total_seconds()
+        elapsed = session_policy.unverified_seconds(session, now=now)
         status = (
             EnumGatewaySessionStatus.DEGRADED
             if elapsed > self._config.session_degraded_after_seconds
             else EnumGatewaySessionStatus.ACTIVE
         )
+        if (
+            status is EnumGatewaySessionStatus.DEGRADED
+            and session.status is not EnumGatewaySessionStatus.DEGRADED
+        ):
+            self._log_degraded_entry(
+                session, reason="heartbeat_gap", unverified_for=elapsed
+            )
         updated_session = session.model_copy(
             update={"status": status, "last_heartbeat_at": now}
         )
@@ -228,7 +330,95 @@ class HandlerGatewayHeartbeat:
             emitted_at=now,
         )
         return ModelGatewayHeartbeatResponse(
-            session=updated_session, revoked=False, session_event=event
+            session=updated_session, termination_reason=None, session_event=event
+        )
+
+    async def _terminate(
+        self,
+        session: ModelGatewaySession,
+        *,
+        now: datetime,
+        reason: EnumGatewaySessionTerminationReason,
+        status: EnumGatewaySessionStatus,
+        event_type: EnumGatewaySessionEventType,
+    ) -> ModelGatewayHeartbeatResponse:
+        """Remove the session and return the matching terminal response.
+
+        One teardown path for all three terminal outcomes (revocation,
+        enforced expiry, ceiling breach) so none of them can drift into
+        deleting the row without reporting it, or reporting it without
+        deleting the row. The delete happens before the response is built,
+        so a caller that sees a ``termination_reason`` is guaranteed the
+        session is already gone.
+        """
+        await self._session_store.delete(session.session_id)
+        terminated_session = session.model_copy(update={"status": status})
+        event = ModelGatewaySessionEvent(
+            event_type=event_type,
+            session_id=session.session_id,
+            tenant_id=session.tenant_id,
+            tenant_slug=session.tenant_slug,
+            principal_id=session.principal_id,
+            edge_instance_id=session.edge_instance_id,
+            emitted_at=now,
+        )
+        return ModelGatewayHeartbeatResponse(
+            session=terminated_session,
+            termination_reason=reason,
+            session_event=event,
+        )
+
+    async def _enter_degraded(
+        self, session: ModelGatewaySession, *, reason: str
+    ) -> None:
+        """Mark a session DEGRADED and alarm, once, on the transition into it.
+
+        Called only from the introspection-outage path, where the session
+        deliberately survives. Re-entry is a no-op: a fleet riding out a
+        long Keycloak outage would otherwise emit one alarm per session per
+        heartbeat interval, which is how an alarm stops being read.
+
+        The write uses ``put_if_present`` rather than ``put`` for the same
+        reason the success path does (OMN-15918 R3): a detach that landed
+        during the introspection await must not be undone by this handler
+        marking the row degraded.
+        """
+        if session.status is EnumGatewaySessionStatus.DEGRADED:
+            return
+        degraded_session = session.model_copy(
+            update={"status": EnumGatewaySessionStatus.DEGRADED}
+        )
+        await self._session_store.put_if_present(degraded_session)
+        self._log_degraded_entry(
+            session,
+            reason=reason,
+            unverified_for=session_policy.unverified_seconds(
+                session, now=datetime.now(UTC)
+            ),
+        )
+
+    def _log_degraded_entry(
+        self, session: ModelGatewaySession, *, reason: str, unverified_for: float
+    ) -> None:
+        """Structured alarm on ENTRY to degraded mode.
+
+        Entry, not breach: the window in which this gateway cannot observe
+        a revocation opens here, and the operator needs it while there is
+        still time to act, not once the ceiling has already torn sessions
+        down.
+        """
+        logger.warning(
+            "gateway session entered degraded mode",
+            extra={
+                "alarm": "gateway.session.degraded_entered",
+                "session_id": str(session.session_id),
+                "tenant_id": str(session.tenant_id),
+                "tenant_slug": session.tenant_slug,
+                "edge_instance_id": session.edge_instance_id,
+                "degraded_reason": reason,
+                "unverified_seconds": unverified_for,
+                "ceiling_seconds": self._config.max_unverified_session_seconds,
+            },
         )
 
     async def _fetch_jwks(self) -> list[dict[str, object]]:
