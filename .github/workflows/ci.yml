@@ -896,8 +896,20 @@ jobs:
           echo "relevant=$result" >> "$GITHUB_OUTPUT"
           echo "Scan relevant: $result"
 
-      # Pinned by ghcr.io digest (osv-scanner v2.5.1, resolved 2026-08-18) --
-      # same reproducibility posture as the Trivy commit-SHA pin below.
+      # Runs the pinned+checksummed linux_amd64 binary directly, NOT via
+      # `docker run -v $PWD:/src` (the first cut of this step, live-proof-run
+      # defect found 2026-08-18 on PR #2793: self-hosted `omnibase-ci`
+      # runners are themselves containerized -- Docker-outside-of-Docker --
+      # so `$PWD` inside the runner container does not resolve to a real
+      # path the HOST docker daemon can bind-mount. osv-scanner's own error
+      # was unambiguous: "failed to resolve path: stat /src/uv.lock: no such
+      # file or directory" -- the mount silently pointed at an empty
+      # directory. A native binary has no mount boundary to get wrong, and
+      # this repo already downloads pinned artifacts by URL+checksum
+      # elsewhere rather than assuming Docker is available/DooD-safe on
+      # every runner class (ubuntu-latest public-fork runners included).
+      # SHA256 pinned from the release's own `osv-scanner_SHA256SUMS` file,
+      # verified 2026-08-18 against a fresh download of both files.
       # Single retry on a transport/execution failure only (not on findings --
       # osv-scanner exits non-zero when it finds ANY vulnerability, which is
       # an expected outcome here, not a transient failure). Consistent with
@@ -906,12 +918,15 @@ jobs:
       - name: Run osv-scanner
         if: steps.relevant.outputs.relevant == 'true'
         env:
-          OSV_SCANNER_IMAGE: "ghcr.io/google/osv-scanner@sha256:8108ae94eadea5a02c9bec6e646909d5b790b44bd62d7f5b7f0b1d6d0ffc7734" # v2.5.1
+          OSV_SCANNER_URL: "https://github.com/google/osv-scanner/releases/download/v2.5.1/osv-scanner_linux_amd64"
+          OSV_SCANNER_SHA256: "f9f25499a2c8cc367b3af45df2ea7eeca7fbccceab9c35079968f4b3652194be"
         run: |
           set -uo pipefail
+          curl -sSL --fail "$OSV_SCANNER_URL" -o /tmp/osv-scanner
+          echo "${OSV_SCANNER_SHA256}  /tmp/osv-scanner" | sha256sum -c -
+          chmod +x /tmp/osv-scanner
           attempt_scan() {
-            docker run --rm -v "$PWD":/src -w /src "$OSV_SCANNER_IMAGE" \
-              scan --lockfile=uv.lock --format=json > osv-results.json 2> osv-scan.log
+            /tmp/osv-scanner scan --lockfile=uv.lock --format=json > osv-results.json 2> osv-scan.log
           }
           valid_json() {
             python3 -c "import json; json.load(open('osv-results.json'))" 2>/dev/null
