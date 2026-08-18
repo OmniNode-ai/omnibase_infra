@@ -8,6 +8,10 @@ import re
 
 from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
 
+from omnibase_infra.migration.cutover.models.model_connection_identity import (
+    ModelConnectionIdentity,
+)
+
 _SHA256_PATTERN = r"^[0-9a-f]{64}$"
 
 
@@ -23,6 +27,8 @@ class ModelTransformationEvidence(BaseModel):
 
     label: str = Field(..., min_length=1)
     evidence_contract_hash: str = Field(..., pattern=_SHA256_PATTERN)
+    binding_ref: str = Field(..., min_length=1, max_length=200)
+    connection_identity: ModelConnectionIdentity
     keys: tuple[str, ...]
     row_count: int = Field(..., ge=0)
     transformed_row_hashes: tuple[str, ...]
