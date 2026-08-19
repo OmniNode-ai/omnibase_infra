@@ -1,0 +1,10 @@
+# SPDX-FileCopyrightText: 2025 OmniNode.ai Inc.
+# SPDX-License-Identifier: MIT
+#
+# Test fixture only -- NOT the runtime resolution source. Mirrors the
+# operator-supplied broker-ref map format consumed by
+# gateway_forwarder._materialize_cloud_broker_ref (OMN-15743) so unit tests
+# can exercise the resolved beta-gateway-canary.yaml tenant config without a
+# live compose deployment. Real deployments mount this file's shape from
+# GATEWAY_BROKER_REF_MAP_FILE, never from a path checked into this repo.
+gateway.cloud.kafka.broker: "b-1.omninodedevmsk.7ozyd3.c14.kafka.us-east-1.amazonaws.com:9098,b-2.omninodedevmsk.7ozyd3.c14.kafka.us-east-1.amazonaws.com:9098"

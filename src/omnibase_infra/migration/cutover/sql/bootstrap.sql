@@ -36,8 +36,10 @@ CREATE TABLE IF NOT EXISTS omninode_internal.transformation_receipts (
     receipt_hash TEXT NOT NULL CHECK (receipt_hash ~ '^[0-9a-f]{64}$'),
     receipt_json JSONB NOT NULL CHECK (jsonb_typeof(receipt_json) = 'object'),
     generated_at TIMESTAMPTZ NOT NULL,
+    idempotency_key TEXT NOT NULL,
     UNIQUE (family_id, receipt_hash),
-    UNIQUE (family_id, receipt_id)
+    UNIQUE (family_id, receipt_id),
+    UNIQUE (family_id, idempotency_key)
 );
 
 CREATE TABLE IF NOT EXISTS omninode_internal.cutover_journal (
@@ -57,9 +59,57 @@ CREATE TABLE IF NOT EXISTS omninode_internal.cutover_journal (
     previous_event_hash TEXT NOT NULL CHECK (previous_event_hash ~ '^[0-9a-f]{64}$'),
     event_hash TEXT NOT NULL CHECK (event_hash ~ '^[0-9a-f]{64}$'),
     occurred_at TIMESTAMPTZ NOT NULL,
+    idempotency_key TEXT NOT NULL,
     UNIQUE (family_id, sequence),
     UNIQUE (family_id, event_hash),
-    UNIQUE (family_id, event_id)
+    UNIQUE (family_id, event_id),
+    UNIQUE (family_id, idempotency_key)
+);
+
+CREATE TABLE IF NOT EXISTS omninode_internal.application_path_write_proofs (
+    family_id UUID NOT NULL REFERENCES omninode_internal.cutover_family_contracts(family_id),
+    target_sequence BIGINT NOT NULL CHECK (target_sequence > 0),
+    database_ref TEXT NOT NULL,
+    principal TEXT NOT NULL,
+    schema_ref TEXT NOT NULL,
+    verification_query_hash TEXT NOT NULL CHECK (verification_query_hash ~ '^[0-9a-f]{64}$'),
+    write_result_hash TEXT NOT NULL CHECK (write_result_hash ~ '^[0-9a-f]{64}$'),
+    connection_database TEXT NOT NULL,
+    backend_pid BIGINT NOT NULL CHECK (backend_pid > 0),
+    collected_at TIMESTAMPTZ NOT NULL,
+    verified_at TIMESTAMPTZ NOT NULL DEFAULT clock_timestamp(),
+    PRIMARY KEY (family_id, target_sequence)
+);
+
+-- GAP 1 (round 4): the exact relation(s) -- not merely the schema(s) -- a
+-- target binding ref's evidence collection legitimately reads, derived once
+-- from PostgreSQL's own EXPLAIN plan of the target evidence collection's
+-- data-bearing queries in collect_pair(), never from a caller-typed schema
+-- string. Keyed by (target_binding_ref, evidence_contract_hash) rather than
+-- target_binding_ref alone: evidence_contract_hash is the same
+-- content-addressed hash of the query set that lands in the family
+-- contract's immutable target_evidence_contract_hash field, so a later
+-- collect_pair() call for the same ref with different (e.g. attacker-typed)
+-- query content is content-addressed into a distinct row instead of
+-- overwriting the row a registered family actually depends on.
+-- verify_application_path_write() refuses any write proof whose schema or
+-- relation is not a member of the row matching the *proving family's own*
+-- registered target_evidence_contract_hash.
+CREATE TABLE IF NOT EXISTS omninode_internal.target_binding_schemas (
+    target_binding_ref TEXT NOT NULL,
+    evidence_contract_hash TEXT NOT NULL CHECK (evidence_contract_hash ~ '^[0-9a-f]{64}$'),
+    relation_names TEXT[] NOT NULL CHECK (array_length(relation_names, 1) > 0),
+    registered_at TIMESTAMPTZ NOT NULL DEFAULT clock_timestamp(),
+    PRIMARY KEY (target_binding_ref, evidence_contract_hash)
+);
+
+CREATE TABLE IF NOT EXISTS omninode_internal.reverse_delta_artifacts (
+    family_id UUID NOT NULL REFERENCES omninode_internal.cutover_family_contracts(family_id),
+    artifact_ref TEXT NOT NULL,
+    content_hash TEXT NOT NULL CHECK (content_hash ~ '^[0-9a-f]{64}$'),
+    content_json JSONB NOT NULL,
+    registered_at TIMESTAMPTZ NOT NULL DEFAULT clock_timestamp(),
+    PRIMARY KEY (family_id, artifact_ref)
 );
 
 CREATE TABLE IF NOT EXISTS omninode_internal.reverse_delta_proofs (

@@ -11,6 +11,9 @@ from typing import cast
 import yaml
 from pydantic import BaseModel, ConfigDict, Field
 
+from omnibase_infra.observability.runner_health.model_dns_cache_config import (
+    ModelDnsCacheConfig,
+)
 from omnibase_infra.observability.runner_health.model_git_mirror_config import (
     ModelGitMirrorConfig,
 )
@@ -55,6 +58,20 @@ class ModelRunnerFleetConfig(BaseModel):
             "subnet pool is exhausted (OMN-12566)."
         ),
     )
+    wedge_queue_age_seconds: int = Field(
+        default=600,
+        ge=0,
+        description="Queued-run age threshold for runner-fleet wedge classification.",
+    )
+    codeload_scan_limit: int = Field(
+        default=5,
+        ge=1,
+        description="Recent failed runs per watched repo scanned for codeload throttling.",
+    )
+    watch_repos: tuple[str, ...] = Field(
+        default=(),
+        description="Repos watched for queued/zombie runs; empty uses the built-in OmniNode defaults.",
+    )
     pypi_cache: ModelPyPICacheConfig | None = Field(
         default=None,
         description=(
@@ -76,6 +93,15 @@ class ModelRunnerFleetConfig(BaseModel):
         description=(
             "OMN-16053 (OMN-14027 C2) — Actions tool-cache durability record. "
             "Optional; absent in configs predating the git-transport egress work."
+        ),
+    )
+    dns_cache: ModelDnsCacheConfig | None = Field(
+        default=None,
+        description=(
+            "OMN-15736 — local caching DNS resolver (unbound) endpoint. "
+            "Optional and inert until the operator-gated rollout sets "
+            "active=True and repoints canary runners' `dns:` directive. "
+            "Absent in configs predating this work."
         ),
     )
 

@@ -66,6 +66,7 @@ databases:
             objects:
               - live_events
               - log_entries
+              - projection_watermarks
             privileges: [INSERT, SELECT, UPDATE]
             schema: omninode_internal
           - object_type: TABLE
@@ -150,6 +151,7 @@ databases:
               - delegation_judge_verdict_events
               - delegation_shadow_comparisons
               - dep_health_findings
+              - hook_events
               - instruction_eval_aggregate_snapshots
               - llm_cost_aggregates
               - pattern_learning_artifacts

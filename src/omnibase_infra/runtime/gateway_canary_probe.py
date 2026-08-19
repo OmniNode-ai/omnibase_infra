@@ -258,6 +258,17 @@ def _build_parser() -> argparse.ArgumentParser:
         action="store_true",
         help="Bypass the cadence cache and always run a real produce+readback check",
     )
+    parser.add_argument(
+        "--broker-ref-map",
+        type=Path,
+        required=True,
+        help=(
+            "Path to the operator-supplied broker-ref resolution map (OMN-15743). "
+            "Same file the gateway-forwarder process itself is given -- required, "
+            "no default, since load_gateway_forwarder_runtime_config fails closed "
+            "without it"
+        ),
+    )
     return parser
 
 
@@ -268,7 +279,10 @@ def main(argv: Sequence[str] | None = None) -> None:
         format="%(asctime)s %(levelname)s %(name)s %(message)s",
     )
     args = _build_parser().parse_args(argv)
-    config = load_gateway_forwarder_runtime_config(args.config)
+    config = load_gateway_forwarder_runtime_config(
+        args.config,
+        broker_ref_map_path=args.broker_ref_map,
+    )
     passed, report = asyncio.run(
         probe(config, state_path=args.state_file, force=args.force)
     )

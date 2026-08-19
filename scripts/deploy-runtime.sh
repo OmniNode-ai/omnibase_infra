@@ -40,6 +40,14 @@ set -euo pipefail
 # deploy run 29977968728 before any build/compose action.
 SCRIPT_DIR_FOR_ENV="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 REPO_ROOT_FOR_ENV="$(cd "${SCRIPT_DIR_FOR_ENV}/.." && pwd)"
+
+# OMN-15718: bounded compose-up deadline + stranded-container reconciliation,
+# shared with refresh_stability_lane.sh. Sourced early -- its functions are
+# only CALLED later, but sourcing here keeps every helper file load in one
+# place near the top of the script.
+# shellcheck source=./runtime_build/compose_wait_timeout.sh
+source "${SCRIPT_DIR_FOR_ENV}/runtime_build/compose_wait_timeout.sh"
+
 OPERATOR_OMNI_HOME="${OMNI_HOME:-}"
 OPERATOR_HEALTH_CHECK_URL="${HEALTH_CHECK_URL:-}"
 OMNIBASE_OPERATOR_ENV_FILE="${OMNIBASE_OPERATOR_ENV_FILE:-${HOME}/.omnibase/.env}"
@@ -1262,6 +1270,13 @@ guard_hotpatch_ledger() {
         --clones-root "${clones_root}"
         --build-ref "omnibase_infra=${git_sha}"
     )
+    if [[ "${COLD_FULL_BRINGUP}" == true ]]; then
+        # OMN-16111: a from-scratch cold bring-up legitimately has ledgered
+        # containers that don't exist yet (this run is what creates them) --
+        # tell the gate so it skips-not-fails their tripwire probe instead of
+        # treating "container absent" as an unexpected warm-lane vanish.
+        gate_args+=(--cold-start)
+    fi
     log_cmd "${gate} ${gate_args[*]}"
     if [[ "${python_bin}" == "uv-run" ]]; then
         if ! uv run --project "${repo_root}" python "${gate}" "${gate_args[@]}"; then
@@ -1468,6 +1483,14 @@ cleanup_on_exit() {
     # deploy, so it is not covered by the FORCE_BACKUP_DIR branch above.
     if [[ "${DEPLOYMENT_COMPLETE}" != "true" ]]; then
         restore_latest_image_tags
+        # OMN-15718: retagging `:latest` does not touch running container
+        # state. A restart_services()/bringup_full_stack() call that failed or
+        # timed out partway through can leave RUNTIME_BUILD_SERVICES containers
+        # stranded in 'Created' (never started). Reconcile every one of them
+        # back to running, or explicitly tear it down if it cannot recover --
+        # never leave the lane in an ambiguous state that needs manual `docker
+        # start`/`docker ps` forensics.
+        reconcile_runtime_container_start_state
     fi
     if [[ -n "${LATEST_TAG_SNAPSHOT_FILE}" && -f "${LATEST_TAG_SNAPSHOT_FILE}" ]]; then
         rm -f "${LATEST_TAG_SNAPSHOT_FILE}" 2>/dev/null || true
@@ -2016,13 +2039,22 @@ sync_files() {
         "${repo_root}/workspace/sibling-vcs-provenance.json" \
         "${deploy_target}/workspace/sibling-vcs-provenance.json"
 
-    # 6. Migration scripts (bind-mounted by docker-compose.infra.yml)
+    # 6. Migration scripts (bind-mounted by docker-compose.infra.yml) plus the
+    # Keycloak realm reconciler docker/Dockerfile.runtime COPYs into the image
+    # (scripts/seed-keycloak-clients.py, OMN-16026). This include-list is the
+    # only rsync that ever touches scripts/ files outside scripts/runtime_build/
+    # (which has its own directory-wide sync above), so every file the runtime
+    # image or its Job manifests need out of scripts/ must be listed here
+    # explicitly -- tests/scripts/test_deploy_runtime_build_context.py derives
+    # the required set from docker/Dockerfile.runtime's COPY sources and fails
+    # CI if a future COPY isn't matched by an --include here.
     log_info "Syncing migration scripts..."
     mkdir -p "${deploy_target}/scripts"
     rsync -a \
         --include='run-forward-migrations.sh' \
         --include='check_migrations_complete.sh' \
         --include='run-intelligence-migrations.sh' \
+        --include='seed-keycloak-clients.py' \
         --exclude='*' \
         "${repo_root}/scripts/" "${deploy_target}/scripts/"
 
@@ -2318,6 +2350,42 @@ restore_latest_image_tags() {
     done <"${LATEST_TAG_SNAPSHOT_FILE}"
 }
 
+reconcile_runtime_container_start_state() {
+    # OMN-15718: companion to restore_latest_image_tags() -- retagging
+    # `:latest` only fixes what a FUTURE `docker compose up` would build/pull;
+    # it does nothing for containers THIS run already force-recreated (or
+    # attempted to) and that are now stranded in 'Created' because a
+    # depends_on:condition:service_healthy dependency (e.g. migration-gate)
+    # can never become healthy. Reconcile every RUNTIME_BUILD_SERVICES
+    # container back to running, or explicitly tear it down.
+    #
+    # Best-effort: needs DEPLOY_COMPOSE_PROJECT (set once main() resolves the
+    # compose project) and DEPLOY_DIR_TO_CLEANUP (set once main() resolves
+    # deploy_target; reset to "" only on full success, so it is still the
+    # correct deploy_target here on any failure path). If either is unset --
+    # a failure early enough in main() that neither had been resolved yet --
+    # there is nothing to reconcile because no compose call could have run.
+    if [[ -z "${DEPLOY_COMPOSE_PROJECT}" || -z "${DEPLOY_DIR_TO_CLEANUP}" || ! -d "${DEPLOY_DIR_TO_CLEANUP}" ]]; then
+        return 0
+    fi
+
+    local -a compose_args
+    resolve_compose_file_args compose_args "${DEPLOY_DIR_TO_CLEANUP}" "${DEPLOY_COMPOSE_PROJECT}" || return 0
+
+    local service container_id
+    for service in "${RUNTIME_BUILD_SERVICES[@]}"; do
+        container_id="$(docker compose -p "${DEPLOY_COMPOSE_PROJECT}" "${compose_args[@]}" --profile "${COMPOSE_PROFILE}" ps -q "${service}" 2>/dev/null || true)"
+        if [[ -z "${container_id}" ]]; then
+            continue
+        fi
+        # Guarded (`|| true`): this runs inside the EXIT trap, under `set -e`
+        # -- reconcile_container_running_state returning 1 (it had to tear a
+        # container down) must not abort the rest of cleanup_on_exit (lock
+        # release etc).
+        reconcile_container_running_state "${container_id}" "${service}" || true
+    done
+}
+
 # =============================================================================
 # Build -- docker compose build with VCS_REF label
 # =============================================================================
@@ -2504,12 +2572,15 @@ ensure_core_infra_ready() {
         -p "${compose_project}"
         "${compose_args[@]}"
         --profile "${COMPOSE_PROFILE}"
-        up -d --no-deps --wait
+        up -d --no-deps --wait --wait-timeout "${RUNTIME_COMPOSE_WAIT_TIMEOUT_SECONDS}"
         "${CORE_INFRA_SERVICES[@]}"
     )
     log_info "Ensuring core infra healthy before preflight: ${CORE_INFRA_SERVICES[*]}"
     log_cmd "${core_up_cmd[*]}"
-    if ! "${core_up_cmd[@]}"; then
+    # OMN-15718: bounded, not just guarded -- a stuck compose-internal wait
+    # (e.g. a dependency that can never become healthy) must fail fast with a
+    # typed timeout, not hang the whole deploy indefinitely.
+    if ! compose_up_bounded "${RUNTIME_COMPOSE_WAIT_TIMEOUT_SECONDS}" "${core_up_cmd[@]}"; then
         log_error "Core infra (${CORE_INFRA_SERVICES[*]}) did not become healthy."
         log_error "Migration preflight needs a live Postgres; aborting before it"
         log_error "wastes the 30x2s readiness budget and triggers a rollback (OMN-13594)."
@@ -2550,12 +2621,15 @@ warm_broker_topic_provisioning() {
         -p "${compose_project}"
         "${compose_args[@]}"
         --profile "${COMPOSE_PROFILE}"
-        up -d --no-deps --wait
+        up -d --no-deps --wait --wait-timeout "${RUNTIME_COMPOSE_WAIT_TIMEOUT_SECONDS}"
         "${BROKER_READINESS_SERVICE}"
     )
     log_info "Ensuring broker is healthy: ${BROKER_READINESS_SERVICE}"
     log_cmd "${broker_up_cmd[*]}"
-    if ! "${broker_up_cmd[@]}"; then
+    # OMN-15718: bounded as well as guarded -- a name-collision false-fail must
+    # stay non-fatal (rpk probe below decides), but a genuinely stuck wait must
+    # still fail fast with a typed timeout instead of hanging this guard open.
+    if ! compose_up_bounded "${RUNTIME_COMPOSE_WAIT_TIMEOUT_SECONDS}" "${broker_up_cmd[@]}"; then
         log_warn "Broker compose up --wait did not report healthy (possible"
         log_warn "name-prefix collision or already-present broker). Falling back"
         log_warn "to a direct broker-reachability probe before deciding."
@@ -2581,12 +2655,22 @@ warm_broker_topic_provisioning() {
     )
     log_info "Applying broker partition cap: ${BROKER_PARTITION_CAP_SERVICE}"
     log_cmd "${cap_up_cmd[*]}"
-    "${cap_up_cmd[@]}"
+    # OMN-15718: bounded (not guarded -- a real failure here must still abort
+    # under set -e exactly as before; only the hang risk is closed).
+    compose_up_bounded "${RUNTIME_COMPOSE_WAIT_TIMEOUT_SECONDS}" "${cap_up_cmd[@]}"
 
     local cap_container="${compose_project}-${BROKER_PARTITION_CAP_SERVICE}"
-    local cap_wait_cmd=(docker wait "${cap_container}")
+    # OMN-15718: `docker wait` blocks until the container exits, with no
+    # deadline of its own -- bound it the same way as the `up` calls above so
+    # a stuck one-shot fails typed instead of hanging this step forever.
+    local cap_wait_cmd=(timeout --kill-after=15 "${RUNTIME_COMPOSE_WAIT_TIMEOUT_SECONDS}" docker wait "${cap_container}")
     log_cmd "${cap_wait_cmd[*]}"
-    if [[ "$("${cap_wait_cmd[@]}")" != "0" ]]; then
+    local cap_wait_exit_code
+    cap_wait_exit_code="$("${cap_wait_cmd[@]}")" || true
+    if [[ "${cap_wait_exit_code}" != "0" ]]; then
+        if [[ -z "${cap_wait_exit_code}" ]]; then
+            log_error "COMPOSE_UP_TIMEOUT: 'docker wait ${cap_container}' did not complete within ${RUNTIME_COMPOSE_WAIT_TIMEOUT_SECONDS}s -- killed."
+        fi
         log_error "${BROKER_PARTITION_CAP_SERVICE} did not complete successfully."
         log_error "Broker partition cap not applied; cold-start topic provisioning may crash-loop the runtime."
         return 1
@@ -2614,7 +2698,9 @@ run_runtime_migration_preflight() {
         )
         log_info "Refreshing migration service: ${service}"
         log_cmd "${cmd[*]}"
-        "${cmd[@]}"
+        # OMN-15718: bounded (not guarded -- a real failure here must still
+        # abort under set -e exactly as before; only the hang risk is closed).
+        compose_up_bounded "${RUNTIME_COMPOSE_WAIT_TIMEOUT_SECONDS}" "${cmd[@]}"
         # One-shot migrations (forward-migration, intelligence-migration) run to
         # completion and must exit 0 before the dependent schema/runtime work
         # proceeds. migration-gate is a long-running healthcheck keepalive, NOT a
@@ -2634,9 +2720,16 @@ run_runtime_migration_preflight() {
         done
         if [[ "${is_oneshot}" == true ]]; then
             local migration_container="${compose_project}-${service}"
-            local wait_cmd=(docker wait "${migration_container}")
+            # OMN-15718: bound the wait itself, same reasoning as the
+            # partition-cap wait above.
+            local wait_cmd=(timeout --kill-after=15 "${RUNTIME_COMPOSE_WAIT_TIMEOUT_SECONDS}" docker wait "${migration_container}")
             log_cmd "${wait_cmd[*]}"
-            if [[ "$("${wait_cmd[@]}")" != "0" ]]; then
+            local migration_wait_result
+            migration_wait_result="$("${wait_cmd[@]}")" || true
+            if [[ "${migration_wait_result}" != "0" ]]; then
+                if [[ -z "${migration_wait_result}" ]]; then
+                    log_error "COMPOSE_UP_TIMEOUT: 'docker wait ${migration_container}' did not complete within ${RUNTIME_COMPOSE_WAIT_TIMEOUT_SECONDS}s -- killed."
+                fi
                 log_error "${service} did not complete successfully."
                 return 1
             fi
@@ -2705,7 +2798,12 @@ bringup_full_stack() {
     log_info "Bringing the FULL ${COMPOSE_PROFILE}-profile project up: ${compose_project}"
     log_cmd "${cmd[*]}"
 
-    "${cmd[@]}"
+    # OMN-15718: bounded (not guarded -- a real failure here must still abort
+    # under set -e exactly as before; only the hang risk is closed). This
+    # honors the full depends_on chain (no --no-deps), which is precisely the
+    # path that can block indefinitely on a dependency that never becomes
+    # healthy.
+    compose_up_bounded "${RUNTIME_COMPOSE_WAIT_TIMEOUT_SECONDS}" "${cmd[@]}"
 
     log_info "Full project up."
 }
@@ -2731,7 +2829,15 @@ restart_services() {
     log_info "Restarting services: ${RUNTIME_BUILD_SERVICES[*]}"
     log_cmd "${cmd[*]}"
 
-    "${cmd[@]}"
+    # OMN-15718: bounded (not guarded -- a real failure here must still abort
+    # under set -e exactly as before; only the hang risk is closed). --no-deps
+    # skips STARTING dependencies but compose still honors a target service's
+    # own depends_on:condition:service_healthy before creating/starting it
+    # (e.g. migration-gate for runtime-effects/runtime-worker) -- if that
+    # dependency can never become healthy this call would otherwise hang
+    # indefinitely instead of failing fast (the exact 2026-08-05 defect,
+    # OMN-15718).
+    compose_up_bounded "${RUNTIME_COMPOSE_WAIT_TIMEOUT_SECONDS}" "${cmd[@]}"
 
     log_info "Services restarted."
 }

@@ -86,7 +86,7 @@ gates:
     producer_kind: cross_repo
     caller_workflow: deploy-gate.yml
     caller_job: deploy-gate
-    cross_repo_ref: "OmniNode-ai/omniclaude/.github/workflows/deploy-gate-reusable.yml@ff230264ac3300d7ced43564dc921f44558110fe"
+    cross_repo_ref: "OmniNode-ai/omniclaude/.github/workflows/deploy-gate-reusable.yml@fcbc85f5642f07e15fe1d6b1c168c96883d16ac3"
     skip_semantics: never
     rationale: "Runtime-change PRs must cite a ticket with deploy evidence (OMN-8912/DGM-Phase6). Caller job has no if:, no path filter, pull_request+merge_group trigger present."
   - name: "Topic Enum Drift Check"
