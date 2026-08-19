@@ -26,6 +26,7 @@ from omnibase_infra.migration.cutover.models.model_transformation_evidence impor
 )
 
 _SHA256_PATTERN = r"^[0-9a-f]{64}$"
+_IDEMPOTENCY_KEY_PATTERN = r"^[A-Za-z0-9][A-Za-z0-9._:/-]*$"
 
 
 def calculate_transformation_receipt_hash(
@@ -68,6 +69,9 @@ class ModelTransformationReceipt(BaseModel):
 
     receipt_id: UUID
     family_id: UUID
+    idempotency_key: str = Field(
+        ..., min_length=1, max_length=200, pattern=_IDEMPOTENCY_KEY_PATTERN
+    )
     family_contract_hash: str = Field(..., pattern=_SHA256_PATTERN)
     generated_at: datetime
     source: ModelTransformationEvidence

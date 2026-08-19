@@ -117,11 +117,16 @@ def test_compose_wait_failure_is_tolerated_not_fatal() -> None:
     assert match is not None, "warm_broker_topic_provisioning function not found"
     body = match.group("body")
     # The broker compose-up must be guarded (if ! ...; then) rather than called
-    # bare, so its failure does not bubble up under set -e.
-    assert 'if ! "${broker_up_cmd[@]}"; then' in body, (
+    # bare, so its failure does not bubble up under set -e. OMN-15718 wraps the
+    # call in compose_up_bounded() for a bounded deadline; the guard itself
+    # must still wrap that bounded call, not the raw command array.
+    assert (
+        'if ! compose_up_bounded "${RUNTIME_COMPOSE_WAIT_TIMEOUT_SECONDS}" "${broker_up_cmd[@]}"; then'
+        in body
+    ), (
         "The broker compose up --wait must be guarded so a name-prefix-collision "
         "failure is tolerated and the rpk reachability probe decides readiness "
-        "(OMN-13364)."
+        "(OMN-13364), and bounded via compose_up_bounded() (OMN-15718)."
     )
     # And the warmup must still hard-fail when the broker is genuinely unreachable.
     assert "assert_broker_reachable" in body
