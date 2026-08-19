@@ -305,6 +305,14 @@ FENCED_INFERENCE_RESPONSE_IDS = (
     "node:node_projection_delegation_inference_response:"
     "0003_inference_response_text_rls_tenant_isolation.sql",
 )
+# OMN-16090: FORCE ROW LEVEL SECURITY on hook_events, a NEW table with nothing
+# live on any lane. Split out of its own CREATE migration so the create applies
+# unfenced while the RLS posture is held here — fenced on ARRIVAL rather than
+# after the fact, unlike the inference-response entry above, which applied
+# unattended on the .201 dev lane purely because nothing named it.
+FENCED_HOOK_EVENT_CAPTURE_IDS = (
+    "node:node_hook_event_capture:0002_hook_events_tenant_rls.sql",
+)
 # Pinned expectation for the manifest content (OMN-15349): the baseline fence,
 # exact and in order. A manifest edit that moves this must update the pin in
 # the same PR — same change-control friction the pre-OMN-15349 shell-literal
@@ -314,6 +322,7 @@ EXPECTED_FENCE = (
     + FENCED_REGISTRATION_IDS
     + FENCED_PR_REVIEW_BOT_IDS
     + FENCED_INFERENCE_RESPONSE_IDS
+    + FENCED_HOOK_EVENT_CAPTURE_IDS
 )
 
 # --- OMN-15336 item 4 repair (D1, 2026-08-05): FORCE-RLS grandfather snapshot
@@ -602,8 +611,12 @@ def test_manifest_pins_the_known_baseline_fence() -> None:
     assert found[registration_end:pr_review_bot_end] == FENCED_PR_REVIEW_BOT_IDS, (
         "the OMN-15717/OMN-15376 node_pr_review_bot hold is not the exact expected id"
     )
-    assert found[pr_review_bot_end:] == FENCED_INFERENCE_RESPONSE_IDS, (
-        "the OMN-15336 item-4 inference-response hold is not the expected id"
+    inference_response_end = pr_review_bot_end + len(FENCED_INFERENCE_RESPONSE_IDS)
+    assert (
+        found[pr_review_bot_end:inference_response_end] == FENCED_INFERENCE_RESPONSE_IDS
+    ), "the OMN-15336 item-4 inference-response hold is not the expected id"
+    assert found[inference_response_end:] == FENCED_HOOK_EVENT_CAPTURE_IDS, (
+        "the OMN-16090 hook_event_capture hold is not the expected id"
     )
 
 

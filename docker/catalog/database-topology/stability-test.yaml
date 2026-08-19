@@ -77,6 +77,7 @@ databases:
             objects:
               - live_events
               - log_entries
+              - projection_watermarks
             privileges:
               - INSERT
               - SELECT
@@ -182,6 +183,7 @@ databases:
               - delegation_judge_verdict_events
               - delegation_shadow_comparisons
               - dep_health_findings
+              - hook_events
               - instruction_eval_aggregate_snapshots
               - llm_cost_aggregates
               - pattern_learning_artifacts
@@ -308,5 +310,5 @@ source:
   profile_catalog_path: src/omnibase_infra/topology/application_database_profiles.yaml
   profile_catalog_sha256: 759f32da77ad41b874fbb05d2824c44f9de4c64e9d269d99da21445225a90ca1
   repository: OmniNode-ai/omnibase_infra
-  sha256: 0994b80a5eb48f72c08d393d3120a2807f47dd26dc85ade47fc7c880b4a9228f
+  sha256: 96d84f297b03aff39799911299f7e4fc119f0483f7818f294c64c01b9313f1a3
 topology_instance: local

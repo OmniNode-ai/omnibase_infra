@@ -1450,6 +1450,17 @@ jobs:
         # GH_TOKEN into the test step"); it reads GH_TOKEN or GITHUB_TOKEN. No
         # test in this suite skips on token presence, so this only authenticates
         # existing requests — it does not activate new ones.
+        #
+        # OMN-16096: `not live_github_api` excludes
+        # tests/integration/ci/test_dep_provenance_lineage_live_omn15604.py,
+        # which resolves dep-provenance lineage through the live GitHub REST
+        # API by design (proving the REST resolver against real commits) and
+        # burned two canary attempts on `transport error: The read operation
+        # timed out` during an egress-degraded window. It still runs,
+        # unmodified, on the scheduled non-required
+        # dep-provenance-lineage-live-canary.yml workflow. The
+        # merge-required equivalent (dep-provenance-lineage-gate below) now
+        # resolves through the OMN-16053 host-level git mirror instead.
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
@@ -1469,7 +1480,7 @@ jobs:
           fi
           uv run pytest $paths \
             --ignore=tests/integration/docker \
-            -m "not slow and not chaos and not kafka and not performance" \
+            -m "not slow and not chaos and not kafka and not performance and not live_github_api" \
             --splits ${{ needs.detect-changes.outputs.split_count }} \
             --group ${{ matrix.split }} \
             -n 2 --dist loadgroup \
@@ -1500,7 +1511,7 @@ jobs:
         run: |
           uv run pytest \
             --ignore=tests/integration/docker \
-            -m "not slow and not chaos and not kafka and not performance" \
+            -m "not slow and not chaos and not kafka and not performance and not live_github_api" \
             --splits ${{ needs.detect-changes.outputs.split_count }} \
             --group ${{ matrix.split }} \
             -n 2 --dist loadgroup \

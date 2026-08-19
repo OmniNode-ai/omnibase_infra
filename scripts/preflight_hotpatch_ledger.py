@@ -49,6 +49,24 @@ DEFAULT_LEDGER_PATH = "/data/omninode/hotpatch-ledger/ledger.yaml"
 BYPASS_PATTERN = re.compile(r"^# skip-token-allowed: (\S+)$")
 TRIPWIRE_SEARCH_PATHS = ("/app", "/usr/local/lib", "/usr/lib/python3", "/opt")
 SUPPORTED_SCHEMA = 1
+# Docker's own daemon error text for `docker exec` against a container name/id
+# that does not exist, e.g. "Error response from daemon: No such container:
+# omninode-stability-test-runtime-effects". Matched case-insensitively against
+# stderr to distinguish "this container was never created" (OMN-16111 --
+# expected on a --cold-start bring-up) from every other exec failure
+# (permission error, daemon hiccup, ...), which must stay a hard failure.
+_NO_SUCH_CONTAINER_RE = re.compile(r"no such container", re.IGNORECASE)
+
+
+class ContainerAbsentError(ValueError):
+    """Raised by ``tripwire_prepatch_files`` when the target container does
+    not exist at all (Docker's "No such container" daemon error).
+
+    Deliberately a ``ValueError`` subclass so any caller that still catches
+    the broad ``ValueError`` (pre-OMN-16111 behavior) keeps working exactly
+    as before; ``run_preflight`` catches this narrower type first to apply
+    the ``--cold-start`` skip-not-fail carve-out (OMN-16111).
+    """
 
 
 def fail(message: str, *, code: int = 1) -> int:
@@ -173,7 +191,16 @@ def candidate_commits(value: Any) -> list[str]:
 
 
 def tripwire_prepatch_files(container: str, docker_cmd: str) -> list[str]:
-    """Return every ``.prepatch`` path found inside the running container."""
+    """Return every ``.prepatch`` path found inside the running container.
+
+    Raises:
+        ContainerAbsentError: ``docker exec`` reports the container does not
+            exist at all. Distinct from any other exec failure so
+            ``run_preflight`` can skip-not-fail this outcome under
+            ``--cold-start`` (OMN-16111) while every other failure mode
+            (permission error, daemon hiccup, ...) stays a hard failure.
+        ValueError: any other exec failure.
+    """
     find_cmd = " ".join(
         f'find {path} -name "*.prepatch" 2>/dev/null;' for path in TRIPWIRE_SEARCH_PATHS
     )
@@ -184,9 +211,14 @@ def tripwire_prepatch_files(container: str, docker_cmd: str) -> list[str]:
         check=False,
     )
     if result.returncode != 0:
+        stderr = result.stderr.strip()
+        if _NO_SUCH_CONTAINER_RE.search(stderr):
+            raise ContainerAbsentError(
+                f"tripwire probe could not exec into container {container!r} "
+                f"— it does not exist: {stderr}"
+            )
         raise ValueError(
-            f"tripwire probe could not exec into container {container!r}: "
-            f"{result.stderr.strip()}"
+            f"tripwire probe could not exec into container {container!r}: {stderr}"
         )
     return [line.strip() for line in result.stdout.splitlines() if line.strip()]
 
@@ -317,6 +349,21 @@ def run_preflight(args: argparse.Namespace) -> int:
         for container in containers:
             try:
                 found = tripwire_prepatch_files(container, args.docker_cmd)
+            except ContainerAbsentError as exc:
+                if args.cold_start:
+                    # OMN-16111: a from-scratch cold bring-up legitimately has
+                    # not created this container yet. A container that does
+                    # not exist cannot carry a live hot-patch — vacuously 0
+                    # .prepatch files, nothing to check. Warm-lane behavior
+                    # (no --cold-start) is byte-for-byte unchanged below.
+                    print(
+                        f"HOTPATCH-PREFLIGHT: tripwire {container}: container "
+                        "does not exist yet (--cold-start bring-up) — 0 "
+                        ".prepatch file(s), nothing to check."
+                    )
+                    continue
+                failures.append(str(exc))
+                continue
             except ValueError as exc:
                 failures.append(str(exc))
                 continue
@@ -389,6 +436,18 @@ def build_parser() -> argparse.ArgumentParser:
         "--post-rebuild",
         action="store_true",
         help="post-rebuild mode: any surviving .prepatch file is a failure",
+    )
+    parser.add_argument(
+        "--cold-start",
+        action="store_true",
+        help=(
+            "from-scratch cold bring-up (OMN-16111): a ledgered container "
+            "that does not exist yet is 0 .prepatch files, not a failure. "
+            "Every existing warm-refresh call site must NOT pass this flag "
+            "-- absence there means a container that should already be up "
+            "unexpectedly vanished, which stays a hard failure exactly as "
+            "before this flag existed."
+        ),
     )
     return parser
 

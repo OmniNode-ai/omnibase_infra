@@ -102,6 +102,10 @@ git_mirror:
     - omnibase_core
     - omnimarket
     - omniclaude
+    - omniweb
+    - omnimemory
+    - omnibase_compat
+    - knowledge-base
   # Space-separated RUNNER_NAME allowlist consumed by the pre-seed, or ALL.
   # Narrowed on the deployed copy of the hook during canary; the committed
   # default is the post-canary fleet-wide value.
