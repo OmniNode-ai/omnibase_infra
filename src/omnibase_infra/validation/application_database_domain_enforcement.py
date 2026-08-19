@@ -20,6 +20,10 @@ from omnibase_core.models.core.model_deployment_topology import ModelDeploymentT
 from omnibase_core.models.core.model_deployment_topology_database import (
     ModelDeploymentTopologyDatabase,
 )
+from omnibase_infra.topology.physical_schema_mapping import (
+    INTERNAL_TABLES_PHYSICALLY_IN_PUBLIC_UNTIL_OMN15359,
+    TENANT_TABLES_PHYSICALLY_IN_PUBLIC_UNTIL_OMN15359,
+)
 from omnibase_infra.validation.application_relation_ownership import (
     load_service_ownership_manifest,
 )
@@ -67,6 +71,18 @@ _SQL_IDENTIFIER = (
 )
 _OPTIONAL_ONLY_TARGET = r"(?:only\s+(?:\(\s*)?)?"
 _SYSTEM_READ_SCHEMAS = frozenset({"information_schema", "pg_catalog"})
+# OMN-16237: the static schema-qualification lint below must agree with the
+# runtime grants system's physical_grant_schema_for_table() on which tables
+# are logically tenant/omninode_internal domain but still physically created
+# in `public` pending their OMN-15359 migration. This is the SAME allowlist
+# (imported, never copied) -- a table only passes unqualified or explicitly
+# public-qualified by being enumerated in one of these two frozensets; it is
+# a narrow, enumerated pass-through, never a blanket public exemption.
+_PHYSICALLY_PUBLIC_APPLICATION_TABLES: frozenset[str] = (
+    TENANT_TABLES_PHYSICALLY_IN_PUBLIC_UNTIL_OMN15359.union(
+        INTERNAL_TABLES_PHYSICALLY_IN_PUBLIC_UNTIL_OMN15359
+    )
+)
 _RELATION_OBJECT_KINDS = frozenset(
     {
         EnumApplicationInventoryObjectKind.TABLE,
@@ -1040,6 +1056,8 @@ def _record_sql_target(
             name in cte_names or remaining.lstrip().startswith("(")
         ):
             return
+        if name in _PHYSICALLY_PUBLIC_APPLICATION_TABLES:
+            return
         violations.append(
             f"application relation target {name!r} must be schema-qualified"
         )
@@ -1047,6 +1065,8 @@ def _record_sql_target(
     schema = _unquote_identifier(schema_token)
     target = f"{schema}.{name}"
     if schema == "public":
+        if name in _PHYSICALLY_PUBLIC_APPLICATION_TABLES:
+            return
         violations.append(
             f"application relation target {target!r} is prohibited in public"
         )
