@@ -2,6 +2,12 @@
 # SPDX-License-Identifier: MIT
 """Typed transformation receipt and cutover journal models."""
 
+from omnibase_infra.migration.cutover.models.model_application_path_write_proof import (
+    ModelApplicationPathWriteProof,
+)
+from omnibase_infra.migration.cutover.models.model_connection_identity import (
+    ModelConnectionIdentity,
+)
 from omnibase_infra.migration.cutover.models.model_control_plane_delta_evidence import (
     ModelControlPlaneDeltaEvidence,
 )
@@ -29,6 +35,9 @@ from omnibase_infra.migration.cutover.models.model_projection_replay_evidence im
 from omnibase_infra.migration.cutover.models.model_receipt_check import (
     ModelReceiptCheck,
 )
+from omnibase_infra.migration.cutover.models.model_reconciliation_input import (
+    ModelReconciliationInput,
+)
 from omnibase_infra.migration.cutover.models.model_reverse_delta_entry import (
     ModelReverseDeltaEntry,
 )
@@ -47,6 +56,8 @@ from omnibase_infra.migration.cutover.models.model_transformation_receipt import
 )
 
 __all__ = [
+    "ModelApplicationPathWriteProof",
+    "ModelConnectionIdentity",
     "ModelControlPlaneDeltaEvidence",
     "ModelCutoverContinuityEvidence",
     "ModelCutoverFamilyContract",
@@ -56,6 +67,7 @@ __all__ = [
     "ModelPostgresEvidenceQuerySet",
     "ModelProjectionReplayEvidence",
     "ModelReceiptCheck",
+    "ModelReconciliationInput",
     "ModelReverseDeltaEntry",
     "ModelReverseDeltaProof",
     "ModelRollbackDecision",
