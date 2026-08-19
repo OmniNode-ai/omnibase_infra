@@ -7,7 +7,7 @@
 # runner-job-started.sh `rm -rf`s the workspace before each job (a correctness
 # fix for stale sparse-checkout state) and therefore guarantees a from-scratch
 # clone every single time. Under wave load that is 72 simultaneous full clones
-# of the same five repos across one uplink -> `RPC failed; curl 56 GnuTLS recv
+# of the same repos across one uplink -> `RPC failed; curl 56 GnuTLS recv
 # error` / `fatal: early EOF` (the C2 failure class in the OMN-14027 design).
 #
 # This script performs exactly ONE upstream fetch per repo per interval. The
@@ -40,6 +40,10 @@ MIRROR_REPOS=(
     omnibase_core
     omnimarket
     omniclaude
+    omniweb
+    omnimemory
+    omnibase_compat
+    knowledge-base
 )
 
 mkdir -p "${MIRROR_ROOT}"

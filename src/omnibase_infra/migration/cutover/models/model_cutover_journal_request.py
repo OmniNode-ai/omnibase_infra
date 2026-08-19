@@ -10,6 +10,11 @@ from uuid import UUID
 from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
 
 from omnibase_infra.migration.cutover.enums import EnumCutoverEventKind
+from omnibase_infra.migration.cutover.models.model_application_path_write_proof import (
+    ModelApplicationPathWriteProof,
+)
+
+_IDEMPOTENCY_KEY_PATTERN = r"^[A-Za-z0-9][A-Za-z0-9._:/-]*$"
 
 _RECEIPT_EVENTS = {
     EnumCutoverEventKind.BACKFILL_COMPLETED,
@@ -29,12 +34,13 @@ class ModelCutoverJournalRequest(BaseModel):
     kind: EnumCutoverEventKind
     occurred_at: datetime
     evidence_ref: str = Field(..., min_length=1, max_length=500)
+    idempotency_key: str = Field(
+        ..., min_length=1, max_length=200, pattern=_IDEMPOTENCY_KEY_PATTERN
+    )
     receipt_id: UUID | None = None
     source_binding_ref: str = Field(default="", max_length=200)
     target_binding_ref: str = Field(default="", max_length=200)
-    database_ref: str = Field(default="", max_length=200)
-    principal: str = Field(default="", max_length=160)
-    schema_ref: str = Field(default="", max_length=160)
+    application_path_write_proof: ModelApplicationPathWriteProof | None = None
     target_sequence: int | None = Field(default=None, ge=1)
     dual_write_expires_at: datetime | None = None
     observation_ends_at: datetime | None = None
@@ -57,13 +63,10 @@ class ModelCutoverJournalRequest(BaseModel):
                 raise ValueError("writer checkpoint requires source/target bindings")
 
         if self.kind is EnumCutoverEventKind.APPLICATION_PATH_WRITE_PROVEN:
-            if not all((self.database_ref, self.principal, self.schema_ref)):
+            if self.application_path_write_proof is None:
                 raise ValueError(
-                    "application-path write proof requires database, principal, and schema"
-                )
-            if self.target_sequence is None:
-                raise ValueError(
-                    "application-path write proof requires target_sequence"
+                    "application-path write proof requires an independently "
+                    "verified application_path_write_proof"
                 )
 
         if self.kind is EnumCutoverEventKind.DUAL_WRITE_STARTED:
@@ -88,13 +91,14 @@ class ModelCutoverJournalRequest(BaseModel):
             EnumCutoverEventKind.WRITER_CHECKPOINT
         ):
             raise ValueError("binding refs are only valid on writer checkpoint")
-        if any(
-            (self.database_ref, self.principal, self.schema_ref)
-        ) and self.kind is not (EnumCutoverEventKind.APPLICATION_PATH_WRITE_PROVEN):
-            raise ValueError("database/principal/schema are only valid on write proof")
-        if self.target_sequence is not None and self.kind not in (
-            EnumCutoverEventKind.APPLICATION_PATH_WRITE_PROVEN,
-            EnumCutoverEventKind.WRITER_QUIESCED,
+        if self.application_path_write_proof is not None and self.kind is not (
+            EnumCutoverEventKind.APPLICATION_PATH_WRITE_PROVEN
+        ):
+            raise ValueError(
+                "application_path_write_proof is only valid on write-proof events"
+            )
+        if self.target_sequence is not None and self.kind is not (
+            EnumCutoverEventKind.WRITER_QUIESCED
         ):
             raise ValueError("target_sequence is not valid for this event")
         if self.dual_write_expires_at is not None and self.kind is not (

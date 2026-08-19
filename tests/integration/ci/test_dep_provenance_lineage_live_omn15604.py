@@ -22,6 +22,22 @@ What this proves, against the REAL commits (not synthetic values, per memory
 2. **GREEN on a pin that IS the release.** Pinning tag ``v0.46.8``'s own
    resolved commit against declared version ``0.46.8`` must report no
    violation -- content identical, by construction.
+
+**Merge-path decoupling (OMN-16096).** Every test in this module is marked
+``live_github_api`` and is EXCLUDED from the merge-required
+``test-parallel`` split in ``.github/workflows/ci.yml`` (see that job's
+``-m`` filter). The module still runs, unmodified, on a scheduled canary
+(``.github/workflows/dep-provenance-lineage-live-canary.yml``) that alerts on
+failure instead of blocking merges -- two canary attempts on PR #2758 burned
+on ``transport error: The read operation timed out`` from this module's live
+GitHub calls during an egress-degraded window, coupling merge eligibility to
+network weather. The actual merge-required gate
+(``dep-provenance-lineage-gate`` in ``ci.yml``) now resolves lineage through
+``resolve_src_tree_sha_hermetic`` (the OMN-16053 host-level git mirror,
+falling back to this module's same live REST resolver only when the mirror
+cannot serve the ref) -- so it no longer needs github.com reachability on the
+fleet where the mirror is served. Nothing about this module's own assertions
+or resolution transport changed; only its position in the CI graph did.
 """
 
 from __future__ import annotations
@@ -31,6 +47,8 @@ import os
 from pathlib import Path
 
 import pytest
+
+pytestmark = pytest.mark.live_github_api
 
 _SCRIPT = Path(__file__).resolve().parents[3] / "scripts" / "check_dep_provenance.py"
 _IN_CI = bool(os.environ.get("CI"))
