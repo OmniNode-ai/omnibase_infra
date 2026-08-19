@@ -11,6 +11,7 @@ paths (flip, gap) in both DRY-RUN and apply modes, plus the kill switch.
 
 from __future__ import annotations
 
+from datetime import UTC, datetime, timedelta
 from uuid import uuid4
 
 import pytest
@@ -30,12 +31,19 @@ _OCC_REPO = "OmniNode-ai/onex_change_control"
 
 
 def _merged_pr(number: int, title: str, ticket: str) -> dict[str, object]:
+    # Merge timestamp must stay inside the handler's real-clock lookback
+    # window (default 24h, see `_request()` below) regardless of when the
+    # test suite runs — a fixed wall-clock literal here is a time bomb that
+    # ages out of the window and starts failing days after being written.
+    recently_merged = (datetime.now(tz=UTC) - timedelta(hours=1)).strftime(
+        "%Y-%m-%dT%H:%M:%SZ"
+    )
     return {
         "number": number,
         "html_url": f"https://github.com/{_OCC_REPO}/pull/{number}",
         "title": title,
-        "updated_at": "2026-08-17T00:00:00Z",
-        "merged_at": "2026-08-17T00:00:00Z",
+        "updated_at": recently_merged,
+        "merged_at": recently_merged,
     }
 
 
