@@ -17,6 +17,7 @@ _CONDITIONALLY_OWNED_TOPIC_PRODUCERS = frozenset(
     {"omniclaude", "omniintelligence", "omnimemory"}
 )
 _TRUTHY_VALUES = frozenset({"1", "true", "yes", "on"})
+_ENV_GET = vars(os)["environ"].get
 
 
 def normalize_runtime_package_name(name: str) -> str:
@@ -37,7 +38,7 @@ def get_active_runtime_packages(
     is returned for backwards-compatible behavior.
     """
     if raw_value is None:
-        raw_value = os.environ.get(ENV_ACTIVE_RUNTIME_PACKAGES)
+        raw_value = _ENV_GET(ENV_ACTIVE_RUNTIME_PACKAGES)
     if raw_value is None or not raw_value.strip():
         return None
 
@@ -95,7 +96,7 @@ def is_gateway_cloud_mirroring_enabled(raw_value: str | None = None) -> bool:
     cloud gateway leg is actually provisioned.
     """
     if raw_value is None:
-        raw_value = os.environ.get(ENV_GATEWAY_CLOUD_MIRRORING_ENABLED)
+        raw_value = _ENV_GET(ENV_GATEWAY_CLOUD_MIRRORING_ENABLED)
     if raw_value is None:
         return False
     return raw_value.strip().lower() in _TRUTHY_VALUES
