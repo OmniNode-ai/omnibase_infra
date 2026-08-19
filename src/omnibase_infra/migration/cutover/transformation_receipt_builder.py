@@ -18,6 +18,7 @@ from omnibase_infra.migration.cutover.models import (
     ModelCutoverContinuityEvidence,
     ModelCutoverFamilyContract,
     ModelReceiptCheck,
+    ModelReconciliationInput,
     ModelTransformationEvidence,
     ModelTransformationReceipt,
     calculate_transformation_receipt_hash,
@@ -40,12 +41,14 @@ class TransformationReceiptBuilder:
 
     def build(
         self,
-        contract: ModelCutoverFamilyContract,
-        source: ModelTransformationEvidence,
-        target: ModelTransformationEvidence,
-        continuity: ModelCutoverContinuityEvidence,
+        request: ModelReconciliationInput,
     ) -> ModelTransformationReceipt:
         """Build a PASS only when every required invariant is proven."""
+        contract = request.contract
+        source = request.source
+        target = request.target
+        continuity = request.continuity
+        self._require_atomic_connection_identity(source, target)
         comparisons = self._comparisons(contract, source, target, continuity)
         checks = tuple(
             self._check(dimension, *comparisons[dimension])
@@ -73,6 +76,7 @@ class TransformationReceiptBuilder:
         return ModelTransformationReceipt(
             receipt_id=receipt_id,
             family_id=contract.family_id,
+            idempotency_key=request.idempotency_key,
             family_contract_hash=family_contract_hash,
             generated_at=generated_at,
             source=source,
@@ -82,6 +86,29 @@ class TransformationReceiptBuilder:
             status=status,
             receipt_hash=receipt_hash,
         )
+
+    @staticmethod
+    def _require_atomic_connection_identity(
+        source: ModelTransformationEvidence,
+        target: ModelTransformationEvidence,
+    ) -> None:
+        """Refuse evidence not captured on one atomic connection snapshot.
+
+        ``PostgresTransformationEvidenceCollector.collect_pair`` always stamps
+        both sides of a genuine collection with the identical, server-verified
+        connection identity read once inside a single repeatable-read
+        transaction. Two independently or hand-assembled
+        ``ModelTransformationEvidence`` objects -- even if every other
+        dimension is internally self-consistent -- are refused the instant
+        their identities diverge, closing the gap where a caller could pair
+        evidence collected on two different connections (or two different
+        instants) and have it accepted as one atomic snapshot.
+        """
+        if source.connection_identity != target.connection_identity:
+            raise ValueError(
+                "source and target evidence were not captured on the same "
+                "atomic connection snapshot (connection_identity mismatch)"
+            )
 
     def _comparisons(
         self,

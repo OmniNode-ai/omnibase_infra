@@ -20,12 +20,15 @@ from omnibase_infra.migration.cutover.enums import (
     EnumReverseDeltaOperation,
 )
 from omnibase_infra.migration.cutover.models import (
+    ModelApplicationPathWriteProof,
+    ModelConnectionIdentity,
     ModelControlPlaneDeltaEvidence,
     ModelCutoverContinuityEvidence,
     ModelCutoverFamilyContract,
     ModelCutoverJournalRequest,
     ModelPostgresEvidenceQuerySet,
     ModelProjectionReplayEvidence,
+    ModelReconciliationInput,
     ModelReverseDeltaEntry,
     ModelReverseDeltaProof,
     ModelTransformationEvidence,
@@ -82,10 +85,26 @@ def _contract(
     )
 
 
+def _connection_identity(*, backend_pid: int = 4242) -> ModelConnectionIdentity:
+    """Fixed, deterministic identity so two calls with the same ``backend_pid``
+    compare equal -- mirroring ``collect_pair``, which reads the server clock
+    exactly once and stamps the identical identity onto both evidence sides.
+    A fresh ``datetime.now(UTC)`` per call would make source/target evidence
+    diverge by construction even when nothing in the test intends a mismatch.
+    """
+    return ModelConnectionIdentity(
+        database="application",
+        backend_pid=backend_pid,
+        collected_at=datetime(2026, 1, 1, tzinfo=UTC),
+    )
+
+
 def _evidence(label: str = "source") -> ModelTransformationEvidence:
     return ModelTransformationEvidence(
         label=label,
         evidence_contract_hash=_hash(f"query-contract:{label}"),
+        binding_ref=f"application.{label}",
+        connection_identity=_connection_identity(),
         keys=("00000000-0000-0000-0000-000000000001", "row-b"),
         row_count=2,
         transformed_row_hashes=tuple(sorted((_hash("row-a"), _hash("row-b")))),
@@ -136,12 +155,31 @@ def _control_continuity(
     )
 
 
+def _reconciliation_input(
+    contract: ModelCutoverFamilyContract,
+    source: ModelTransformationEvidence,
+    target: ModelTransformationEvidence,
+    continuity: ModelCutoverContinuityEvidence,
+    idempotency_key: str,
+) -> ModelReconciliationInput:
+    return ModelReconciliationInput(
+        contract=contract,
+        source=source,
+        target=target,
+        continuity=continuity,
+        idempotency_key=idempotency_key,
+    )
+
+
 def test_projection_receipt_is_complete_and_passes() -> None:
     receipt = TransformationReceiptBuilder().build(
-        _contract(),
-        _evidence("source"),
-        _evidence("target"),
-        _projection_continuity(),
+        _reconciliation_input(
+            _contract(),
+            _evidence("source"),
+            _evidence("target"),
+            _projection_continuity(),
+            "idempotency-key:projection-receipt",
+        )
     )
 
     assert receipt.status is EnumReceiptStatus.PASS
@@ -161,10 +199,13 @@ def test_receipt_refuses_unregistered_evidence_query_contract() -> None:
     )
 
     receipt = TransformationReceiptBuilder().build(
-        _contract(),
-        _evidence("source"),
-        target,
-        _projection_continuity(),
+        _reconciliation_input(
+            _contract(),
+            _evidence("source"),
+            target,
+            _projection_continuity(),
+            "idempotency-key:unregistered-contract",
+        )
     )
 
     assert receipt.status is EnumReceiptStatus.FAIL
@@ -181,16 +222,22 @@ def test_control_plane_receipt_requires_snapshot_and_final_delta_parity() -> Non
     service = TransformationReceiptBuilder()
 
     green = service.build(
-        contract,
-        _evidence("source"),
-        _evidence("target"),
-        _control_continuity(),
+        _reconciliation_input(
+            contract,
+            _evidence("source"),
+            _evidence("target"),
+            _control_continuity(),
+            "idempotency-key:control-plane-green",
+        )
     )
     red = service.build(
-        contract,
-        _evidence("source"),
-        _evidence("target"),
-        _control_continuity(target_delta_hash=_hash("wrong-delta")),
+        _reconciliation_input(
+            contract,
+            _evidence("source"),
+            _evidence("target"),
+            _control_continuity(target_delta_hash=_hash("wrong-delta")),
+            "idempotency-key:control-plane-red",
+        )
     )
 
     assert green.status is EnumReceiptStatus.PASS
@@ -296,16 +343,45 @@ def test_each_seeded_red_dimension_fails_closed(
     continuity: ModelCutoverContinuityEvidence,
 ) -> None:
     receipt = TransformationReceiptBuilder().build(
-        _contract(),
-        _evidence("source"),
-        target,
-        continuity,
+        _reconciliation_input(
+            _contract(),
+            _evidence("source"),
+            target,
+            continuity,
+            f"idempotency-key:red-{dimension.value}",
+        )
     )
 
     assert receipt.status is EnumReceiptStatus.FAIL
     check = next(check for check in receipt.checks if check.dimension is dimension)
     assert not check.passed
     assert check.detail.startswith("MISMATCH:")
+
+
+def test_receipt_builder_refuses_evidence_with_mismatched_connection_identity() -> None:
+    """GAP 3 forgery-refusal: source/target evidence not collected atomically.
+
+    ``PostgresTransformationEvidenceCollector.collect_pair`` always stamps
+    both sides with one server-verified identity read inside a single
+    repeatable-read transaction. Two evidence objects with divergent
+    ``connection_identity`` values could not have come from a genuine
+    ``collect_pair`` call -- they must be refused before any dimension
+    comparison runs, not silently reconciled.
+    """
+    source = _evidence("source")
+    target = _evidence("target").model_copy(
+        update={"connection_identity": _connection_identity(backend_pid=9999)}
+    )
+    with pytest.raises(ValueError, match="connection_identity mismatch"):
+        TransformationReceiptBuilder().build(
+            _reconciliation_input(
+                _contract(),
+                source,
+                target,
+                _projection_continuity(),
+                "idempotency-key:mismatched-connection-identity",
+            )
+        )
 
 
 def test_query_contract_rejects_mutation_and_missing_dimensions() -> None:
@@ -356,22 +432,105 @@ def test_journal_requests_refuse_unbounded_dual_write_and_weak_write_proof() -> 
             kind=EnumCutoverEventKind.DUAL_WRITE_STARTED,
             occurred_at=now,
             evidence_ref="proof/dual-write",
+            idempotency_key="dual-write:unbounded",
         )
-    with pytest.raises(ValidationError, match="database, principal, and schema"):
+    with pytest.raises(
+        ValidationError, match="independently verified application_path_write_proof"
+    ):
         ModelCutoverJournalRequest(
             kind=EnumCutoverEventKind.APPLICATION_PATH_WRITE_PROVEN,
             occurred_at=now,
             evidence_ref="proof/app-write",
-            target_sequence=1,
+            idempotency_key="app-write:missing-proof",
+        )
+    with pytest.raises(ValidationError, match="idempotency_key"):
+        ModelCutoverJournalRequest(
+            kind=EnumCutoverEventKind.BACKFILL_STARTED,
+            occurred_at=now,
+            evidence_ref="proof/backfill",
+            idempotency_key="",
         )
 
     bounded = ModelCutoverJournalRequest(
         kind=EnumCutoverEventKind.DUAL_WRITE_STARTED,
         occurred_at=now,
         evidence_ref="proof/dual-write",
+        idempotency_key="dual-write:bounded",
         dual_write_expires_at=now + timedelta(seconds=30),
     )
     assert bounded.dual_write_expires_at is not None
+
+    proof = ModelApplicationPathWriteProof(
+        family_id=uuid4(),
+        database_ref="application",
+        principal="onex_api",
+        schema_ref="tenant",
+        target_sequence=1,
+        verification_query_hash=_hash("select 1"),
+        write_result_hash=_hash("row-1"),
+        connection_identity=_connection_identity(),
+    )
+    write_proven = ModelCutoverJournalRequest(
+        kind=EnumCutoverEventKind.APPLICATION_PATH_WRITE_PROVEN,
+        occurred_at=now,
+        evidence_ref="proof/app-write",
+        idempotency_key="app-write:proven",
+        application_path_write_proof=proof,
+    )
+    assert write_proven.application_path_write_proof is not None
+    assert write_proven.application_path_write_proof.principal == "onex_api"
+
+
+def test_connection_identity_requires_timezone_aware_readback() -> None:
+    with pytest.raises(ValidationError, match="timezone-aware"):
+        ModelConnectionIdentity(
+            database="application",
+            backend_pid=4242,
+            collected_at=datetime.now(),
+        )
+
+
+def test_evidence_requires_binding_ref_and_connection_identity() -> None:
+    with pytest.raises(ValidationError, match="binding_ref"):
+        ModelTransformationEvidence(
+            **{
+                **_evidence("source").model_dump(),
+                "binding_ref": "",
+            }
+        )
+    with pytest.raises(ValidationError, match="connection_identity"):
+        ModelTransformationEvidence(
+            **{
+                k: v
+                for k, v in _evidence("source").model_dump().items()
+                if k != "connection_identity"
+            }
+        )
+
+
+def test_application_path_write_proof_requires_every_verified_field() -> None:
+    with pytest.raises(ValidationError, match="database_ref"):
+        ModelApplicationPathWriteProof(
+            family_id=uuid4(),
+            database_ref="",
+            principal="onex_api",
+            schema_ref="tenant",
+            target_sequence=1,
+            verification_query_hash=_hash("select 1"),
+            write_result_hash=_hash("row-1"),
+            connection_identity=_connection_identity(),
+        )
+    with pytest.raises(ValidationError):
+        ModelApplicationPathWriteProof(
+            family_id=uuid4(),
+            database_ref="application",
+            principal="onex_api",
+            schema_ref="tenant",
+            target_sequence=1,
+            verification_query_hash="not-a-sha256",
+            write_result_hash=_hash("row-1"),
+            connection_identity=_connection_identity(),
+        )
 
 
 def test_reverse_delta_proof_refuses_sequence_gaps() -> None:

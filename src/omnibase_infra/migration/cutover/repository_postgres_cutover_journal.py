@@ -19,6 +19,7 @@ from omnibase_infra.migration.cutover.enums import (
     EnumReceiptStatus,
 )
 from omnibase_infra.migration.cutover.models import (
+    ModelApplicationPathWriteProof,
     ModelCutoverFamilyContract,
     ModelCutoverFamilyState,
     ModelCutoverJournalEvent,
@@ -26,6 +27,15 @@ from omnibase_infra.migration.cutover.models import (
     ModelReverseDeltaProof,
     ModelRollbackDecision,
     ModelTransformationReceipt,
+)
+
+_RECEIPT_CONTENT_FIELDS = (
+    "family_contract_hash",
+    "source",
+    "target",
+    "continuity",
+    "checks",
+    "status",
 )
 
 _ZERO_HASH = "0" * 64
@@ -43,6 +53,19 @@ def _canonical_json(value: object) -> str:
 
 def _sha256(value: object) -> str:
     return hashlib.sha256(_canonical_json(value).encode("utf-8")).hexdigest()
+
+
+def _receipt_content_signature(receipt: ModelTransformationReceipt) -> str:
+    """Canonical signature of a receipt's deterministic content only.
+
+    Excludes ``receipt_id``, ``generated_at``, and ``receipt_hash`` -- fields
+    that are fresh on every build call even when the underlying reconciliation
+    inputs are identical. Two receipts built from identical inputs must
+    produce the same signature so a retried ``reconcile`` call can be proven
+    idempotent instead of minting a second, distinct receipt.
+    """
+    dumped = receipt.model_dump(mode="json")
+    return _canonical_json({field: dumped[field] for field in _RECEIPT_CONTENT_FIELDS})
 
 
 class RepositoryPostgresCutoverJournal:
@@ -91,11 +114,43 @@ FOR UPDATE
                     "register a new family/version instead of rewriting history"
                 )
 
-    async def record_receipt(self, receipt: ModelTransformationReceipt) -> None:
-        """Persist a receipt and block only the mismatching family."""
+    async def record_receipt(
+        self, receipt: ModelTransformationReceipt
+    ) -> ModelTransformationReceipt:
+        """Persist a receipt and block only the mismatching family.
+
+        Idempotent on ``(family_id, idempotency_key)``: a retried
+        reconciliation carrying the same key and identical deterministic
+        content returns the original persisted receipt (its own
+        ``receipt_id``/``generated_at``/``receipt_hash``) instead of minting
+        a second, distinct receipt for the same inputs.
+        """
         receipt_json = _canonical_json(receipt.model_dump(mode="json"))
+        content_signature = _receipt_content_signature(receipt)
         async with self._connection.transaction():
             family = await self._lock_family(receipt.family_id)
+
+            keyed = await self._connection.fetchrow(
+                """
+SELECT receipt_json
+FROM omninode_internal.transformation_receipts
+WHERE family_id = $1 AND idempotency_key = $2
+""",
+                receipt.family_id,
+                receipt.idempotency_key,
+            )
+            if keyed is not None:
+                raw = keyed["receipt_json"]
+                stored = ModelTransformationReceipt.model_validate_json(
+                    raw if isinstance(raw, str) else _canonical_json(raw)
+                )
+                if _receipt_content_signature(stored) != content_signature:
+                    raise ValueError(
+                        "idempotency key already used with different "
+                        "reconciliation content"
+                    )
+                return stored
+
             if receipt.family_contract_hash != family["contract_hash"]:
                 raise ValueError(
                     "receipt is not bound to the registered family contract"
@@ -116,7 +171,7 @@ WHERE receipt_id = $1
                     raise ValueError(
                         "receipt UUID is already bound to different evidence"
                     )
-                return
+                return receipt
 
             latest_generated_at = await self._connection.fetchval(
                 """
@@ -135,8 +190,9 @@ WHERE family_id = $1
             await self._connection.execute(
                 """
 INSERT INTO omninode_internal.transformation_receipts
-  (receipt_id, family_id, status, receipt_hash, receipt_json, generated_at)
-VALUES ($1, $2, $3, $4, $5::jsonb, $6)
+  (receipt_id, family_id, status, receipt_hash, receipt_json, generated_at,
+   idempotency_key)
+VALUES ($1, $2, $3, $4, $5::jsonb, $6, $7)
 """,
                 receipt.receipt_id,
                 receipt.family_id,
@@ -144,6 +200,7 @@ VALUES ($1, $2, $3, $4, $5::jsonb, $6)
                 receipt.receipt_hash,
                 receipt_json,
                 receipt.generated_at,
+                receipt.idempotency_key,
             )
             if receipt.status is EnumReceiptStatus.PASS:
                 await self._connection.execute(
@@ -169,15 +226,51 @@ WHERE family_id = $1
             # Keep the row lock live until the receipt and state update commit.
             if family["family_id"] != receipt.family_id:
                 raise AssertionError("locked family identity changed")
+            return receipt
 
     async def append_event(
         self,
         family_id: UUID,
         request: ModelCutoverJournalRequest,
     ) -> ModelCutoverJournalEvent:
-        """Validate, hash-chain, and append one family-local event atomically."""
+        """Validate, hash-chain, and append one family-local event atomically.
+
+        Idempotent on ``(family_id, idempotency_key)``: a retried append with
+        the same key and an identical request returns the already-durable
+        event (its original ``event_id``/``sequence``/hashes) rather than
+        minting a second event or advancing the sequence a second time.
+        """
+        request_json = _canonical_json(request.model_dump(mode="json"))
         async with self._connection.transaction():
             row = await self._lock_family(family_id)
+
+            keyed = await self._connection.fetchrow(
+                """
+SELECT event_id, sequence, previous_event_hash, event_hash, request_json
+FROM omninode_internal.cutover_journal
+WHERE family_id = $1 AND idempotency_key = $2
+""",
+                family_id,
+                request.idempotency_key,
+            )
+            if keyed is not None:
+                raw = keyed["request_json"]
+                stored_json = _canonical_json(
+                    json.loads(raw) if isinstance(raw, str) else raw
+                )
+                if stored_json != request_json:
+                    raise ValueError(
+                        "idempotency key already used with a different request"
+                    )
+                return ModelCutoverJournalEvent(
+                    event_id=keyed["event_id"],
+                    family_id=family_id,
+                    sequence=int(keyed["sequence"]),
+                    previous_event_hash=keyed["previous_event_hash"],
+                    event_hash=keyed["event_hash"],
+                    request=request,
+                )
+
             contract = self._contract_from_row(row)
             await self._validate_transition(row, contract, request)
 
@@ -204,18 +297,19 @@ WHERE family_id = $1
                 """
 INSERT INTO omninode_internal.cutover_journal
   (event_id, family_id, sequence, event_kind, request_json, receipt_id,
-   previous_event_hash, event_hash, occurred_at)
-VALUES ($1, $2, $3, $4, $5::jsonb, $6, $7, $8, $9)
+   previous_event_hash, event_hash, occurred_at, idempotency_key)
+VALUES ($1, $2, $3, $4, $5::jsonb, $6, $7, $8, $9, $10)
 """,
                 event.event_id,
                 family_id,
                 sequence,
                 request.kind.value,
-                _canonical_json(request.model_dump(mode="json")),
+                request_json,
                 request.receipt_id,
                 previous_hash,
                 event_hash,
                 request.occurred_at,
+                request.idempotency_key,
             )
             await self._project_transition(row, contract, event)
             return event
@@ -269,6 +363,43 @@ WHERE event_id = $1 AND family_id = $2 AND event_kind = 'writer_quiesced'
             )
             if proof.proven_at < reconciled_at:
                 raise ValueError("reverse-delta proof predates its reconciliation")
+
+            readback_artifact = await self._connection.fetchrow(
+                """
+SELECT content_hash
+FROM omninode_internal.reverse_delta_artifacts
+WHERE family_id = $1 AND artifact_ref = $2
+""",
+                proof.family_id,
+                proof.behavioral_readback_ref,
+            )
+            if readback_artifact is None:
+                raise ValueError(
+                    "behavioral readback ref does not dereference to a "
+                    "durably registered artifact"
+                )
+            for entry in proof.entries:
+                artifact = await self._connection.fetchrow(
+                    """
+SELECT content_hash
+FROM omninode_internal.reverse_delta_artifacts
+WHERE family_id = $1 AND artifact_ref = $2
+""",
+                    proof.family_id,
+                    entry.inverse_artifact_ref,
+                )
+                if artifact is None:
+                    raise ValueError(
+                        f"reverse-delta entry at sequence {entry.target_sequence} "
+                        "cites an inverse artifact that is not durably registered"
+                    )
+                if artifact["content_hash"] != entry.before_image_hash:
+                    raise ValueError(
+                        f"reverse-delta entry at sequence {entry.target_sequence} "
+                        "inverse artifact does not hash-bind to its declared "
+                        "before-image"
+                    )
+
             await self._connection.execute(
                 """
 INSERT INTO omninode_internal.reverse_delta_proofs
@@ -298,6 +429,51 @@ VALUES ($1, $2, $3, $4, $5::jsonb)
                     entry.target_sequence,
                     _canonical_json(entry.model_dump(mode="json")),
                 )
+
+    async def register_reverse_delta_artifact(
+        self,
+        family_id: UUID,
+        artifact_ref: str,
+        content: dict[str, object],
+    ) -> str:
+        """Durably register one dereferenceable artifact; return its hash.
+
+        A reverse-delta entry's ``inverse_artifact_ref`` and a proof's
+        ``behavioral_readback_ref`` must dereference to an artifact registered
+        here before ``record_reverse_delta_proof`` accepts them -- a bare
+        string ref with no durable, hash-bound backing is refused.
+        """
+        content_json = _canonical_json(content)
+        content_hash = _sha256(content)
+        async with self._connection.transaction():
+            await self._lock_family(family_id)
+            await self._connection.execute(
+                """
+INSERT INTO omninode_internal.reverse_delta_artifacts
+  (family_id, artifact_ref, content_hash, content_json)
+VALUES ($1, $2, $3, $4::jsonb)
+ON CONFLICT (family_id, artifact_ref) DO NOTHING
+""",
+                family_id,
+                artifact_ref,
+                content_hash,
+                content_json,
+            )
+            stored_hash = await self._connection.fetchval(
+                """
+SELECT content_hash
+FROM omninode_internal.reverse_delta_artifacts
+WHERE family_id = $1 AND artifact_ref = $2
+""",
+                family_id,
+                artifact_ref,
+            )
+            if stored_hash != content_hash:
+                raise ValueError(
+                    f"artifact ref {artifact_ref!r} is already bound to "
+                    "different content"
+                )
+            return content_hash
 
     async def get_state(self, family_id: UUID) -> ModelCutoverFamilyState:
         """Read the family-local state projection."""
@@ -549,6 +725,9 @@ WHERE receipt_id = $1 AND family_id = $2 AND status = 'pass'
                 raise ValueError("checkpoint target binding differs from contract")
         elif kind is EnumCutoverEventKind.APPLICATION_PATH_WRITE_PROVEN:
             self._require_previous(previous, EnumCutoverEventKind.WRITER_CHECKPOINT)
+            await self._require_durable_write_proof(
+                contract.family_id, request.application_path_write_proof
+            )
         elif kind is EnumCutoverEventKind.READER_CUTOVER:
             self._require_previous(
                 previous,
@@ -571,8 +750,16 @@ WHERE receipt_id = $1 AND family_id = $2 AND status = 'pass'
             observation_ends_at = row["observation_ends_at"]
             if observation_ends_at is None:
                 raise ValueError("declared observation deadline is not durable")
-            if request.occurred_at < observation_ends_at:
-                raise ValueError("observation window has not reached its deadline")
+            # Server-clock-authoritative: gate on the database's own
+            # clock_timestamp(), never on the caller-supplied occurred_at.
+            # A caller can claim any occurred_at; only the server's live
+            # clock proves the window has actually elapsed in real time.
+            server_now = await self._connection.fetchval("SELECT clock_timestamp()")
+            if server_now < observation_ends_at:
+                raise ValueError(
+                    "observation window has not reached its deadline per the "
+                    "server clock"
+                )
         elif kind is EnumCutoverEventKind.WRITER_QUIESCED:
             if row["first_target_write_event_id"] is None:
                 raise ValueError("writer cannot quiesce before target-only write proof")
@@ -612,6 +799,60 @@ WHERE event_id = $1 AND family_id = $2
                 raise ValueError(
                     "direct pre-checkpoint rollback after target write refused"
                 )
+
+    async def _require_durable_write_proof(
+        self,
+        family_id: UUID,
+        proof: ModelApplicationPathWriteProof | None,
+    ) -> None:
+        """Refuse a write proof unless it matches a durably verified record.
+
+        A shape-valid ``ModelApplicationPathWriteProof`` is not sufficient --
+        it must dereference to the row
+        ``PostgresTransformationEvidenceCollector.verify_application_path_write``
+        wrote to ``omninode_internal.application_path_write_proofs`` and match
+        it field-for-field -- including ``connection_identity.database``,
+        which is persisted independently of ``database_ref`` (both are
+        derived from the same live readback at mint time, but nothing
+        upstream of this check enforces that the two stay equal on a
+        hand-copied/tampered proof) -- a proof that never passed through the
+        collector, or was altered after it did, has no matching durable row
+        and is rejected here.
+        """
+        if proof is None:
+            raise ValueError("application-path write proof is missing")
+        if proof.family_id != family_id:
+            raise ValueError("application-path write proof belongs to another family")
+        durable = await self._connection.fetchrow(
+            """
+SELECT database_ref, principal, schema_ref, verification_query_hash,
+       write_result_hash, connection_database, backend_pid, collected_at
+FROM omninode_internal.application_path_write_proofs
+WHERE family_id = $1 AND target_sequence = $2
+""",
+            family_id,
+            proof.target_sequence,
+        )
+        if durable is None:
+            raise ValueError(
+                "application-path write proof was never durably verified by "
+                "the evidence collector"
+            )
+        mismatch = (
+            durable["database_ref"] != proof.database_ref
+            or durable["principal"] != proof.principal
+            or durable["schema_ref"] != proof.schema_ref
+            or durable["verification_query_hash"] != proof.verification_query_hash
+            or durable["write_result_hash"] != proof.write_result_hash
+            or durable["connection_database"] != proof.connection_identity.database
+            or int(durable["backend_pid"]) != proof.connection_identity.backend_pid
+            or durable["collected_at"] != proof.connection_identity.collected_at
+        )
+        if mismatch:
+            raise ValueError(
+                "application-path write proof does not match its durably "
+                "verified record"
+            )
 
     @staticmethod
     def _require_previous(
@@ -707,8 +948,13 @@ WHERE proof_id = $1 AND family_id = $2
             projected["checkpoint_event_id"] = event.event_id
             projected["status"] = EnumCutoverFamilyStatus.CHECKPOINTED.value
         elif kind is EnumCutoverEventKind.APPLICATION_PATH_WRITE_PROVEN:
+            proof = request.application_path_write_proof
+            if proof is None:
+                raise AssertionError(
+                    "application-path write proof is missing after validation"
+                )
             projected["first_target_write_event_id"] = event.event_id
-            projected["first_target_sequence"] = request.target_sequence
+            projected["first_target_sequence"] = proof.target_sequence
         elif kind is EnumCutoverEventKind.OBSERVATION_WINDOW_STARTED:
             projected["status"] = EnumCutoverFamilyStatus.OBSERVING.value
             projected["observation_ends_at"] = request.observation_ends_at

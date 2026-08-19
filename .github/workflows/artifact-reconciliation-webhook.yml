@@ -48,10 +48,26 @@ jobs:
       pull-requests: read
 
     steps:
+      - name: Check webhook credentials
+        id: webhook-credentials
+        env:
+          KAFKA_BOOTSTRAP_SERVERS: ${{ secrets.KAFKA_BOOTSTRAP_SERVERS }}
+          KAFKA_SASL_USERNAME: ${{ secrets.KAFKA_SASL_USERNAME }}
+          KAFKA_SASL_PASSWORD: ${{ secrets.KAFKA_SASL_PASSWORD }}
+        run: |
+          if [[ -z "${KAFKA_BOOTSTRAP_SERVERS:-}" || -z "${KAFKA_SASL_USERNAME:-}" || -z "${KAFKA_SASL_PASSWORD:-}" ]]; then
+            echo "enabled=false" >> "$GITHUB_OUTPUT"
+            echo "::notice title=PR webhook not published::Kafka webhook secrets are unavailable on this runner/event; skipping non-authoritative PR webhook publication."
+            exit 0
+          fi
+          echo "enabled=true" >> "$GITHUB_OUTPUT"
+
       - name: Checkout code
+        if: ${{ steps.webhook-credentials.outputs.enabled == 'true' }}
         uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
 
       - name: Get changed files
+        if: ${{ steps.webhook-credentials.outputs.enabled == 'true' }}
         id: changed-files
         env:
           GH_TOKEN: ${{ github.token }}
@@ -59,8 +75,11 @@ jobs:
           PR_REPO: ${{ github.repository }}
         run: |
           python3 - <<'PY'
+          import http.client
           import json
           import os
+          import time
+          import urllib.error
           import urllib.request
 
           repo = os.environ["PR_REPO"]
@@ -69,6 +88,19 @@ jobs:
           output_path = os.environ["GITHUB_OUTPUT"]
           files = []
           page = 1
+
+          def load_json_with_retry(request):
+              last_error = None
+              for attempt in range(1, 4):
+                  try:
+                      with urllib.request.urlopen(request, timeout=30) as response:
+                          return json.load(response)
+                  except (TimeoutError, http.client.IncompleteRead, urllib.error.URLError) as error:
+                      last_error = error
+                      if attempt == 3:
+                          break
+                      time.sleep(attempt * 2)
+              raise RuntimeError(f"GitHub PR files request failed after retries: {last_error}") from last_error
 
           while True:
               url = (
@@ -83,8 +115,7 @@ jobs:
                       "X-GitHub-Api-Version": "2022-11-28",
                   },
               )
-              with urllib.request.urlopen(request, timeout=30) as response:
-                  payload = json.load(response)
+              payload = load_json_with_retry(request)
               if not payload:
                   break
               files.extend(item["filename"] for item in payload)
@@ -93,20 +124,6 @@ jobs:
           with open(output_path, "a", encoding="utf-8") as output:
               output.write(f"all_changed_files={','.join(files)}\n")
           PY
-
-      - name: Check webhook credentials
-        id: webhook-credentials
-        env:
-          KAFKA_BOOTSTRAP_SERVERS: ${{ secrets.KAFKA_BOOTSTRAP_SERVERS }}
-          KAFKA_SASL_USERNAME: ${{ secrets.KAFKA_SASL_USERNAME }}
-          KAFKA_SASL_PASSWORD: ${{ secrets.KAFKA_SASL_PASSWORD }}
-        run: |
-          if [[ -z "${KAFKA_BOOTSTRAP_SERVERS:-}" || -z "${KAFKA_SASL_USERNAME:-}" || -z "${KAFKA_SASL_PASSWORD:-}" ]]; then
-            echo "enabled=false" >> "$GITHUB_OUTPUT"
-            echo "::notice title=PR webhook not published::Kafka webhook secrets are unavailable on this runner/event; skipping non-authoritative PR webhook publication."
-            exit 0
-          fi
-          echo "enabled=true" >> "$GITHUB_OUTPUT"
 
       - name: Set up CI Python environment
         if: ${{ steps.webhook-credentials.outputs.enabled == 'true' }}
