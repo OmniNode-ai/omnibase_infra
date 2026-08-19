@@ -77,6 +77,7 @@ databases:
             objects:
               - live_events
               - log_entries
+              - projection_watermarks
             privileges:
               - INSERT
               - SELECT
@@ -309,5 +310,5 @@ source:
   profile_catalog_path: src/omnibase_infra/topology/application_database_profiles.yaml
   profile_catalog_sha256: 759f32da77ad41b874fbb05d2824c44f9de4c64e9d269d99da21445225a90ca1
   repository: OmniNode-ai/omnibase_infra
-  sha256: ccdcc096ad296576a63e9bf479dd0f509636324c1675cb2bde5cd7c3bf4abe93
+  sha256: 96d84f297b03aff39799911299f7e4fc119f0483f7818f294c64c01b9313f1a3
 topology_instance: local
