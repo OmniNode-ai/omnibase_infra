@@ -894,3 +894,117 @@ class TestKafkaEventBusBroadcast:
         assert payload["payload"]["items"] == [1, 2, 3]
 
         await unsubscribe()
+
+
+# =============================================================================
+# Message Size Boundary Tests (OMN-16267) - live-readback proof
+# =============================================================================
+#
+# Scope note: these probes run against whatever broker KAFKA_BOOTSTRAP_SERVERS
+# points at for this test run (the .201 dev-lane RedPanda, per repo docs) --
+# NOT independently against the AWS MSK broker cited in OMN-16267, which is
+# not reachable from a build-lane session (MSK public access is disabled and
+# no private path exists as of OMN-15694). That MSK boundary (0.9MB accepted,
+# 1.0MB rejected -> effective limit 1,048,588 bytes) was already measured
+# live by fault-inject-1 and is cited verbatim in the ticket; it is not
+# re-derived here.
+#
+# What these probes DO prove live: the client-side max_request_size check in
+# aiokafka's AIOKafkaProducer.send() -> _serialize() fires purely from the
+# configured max_request_size, before any network I/O -- so it is
+# broker-agnostic. Proving it here against a real, reachable broker with the
+# SAME 1,048,588 ceiling the platform now ships as its default demonstrates
+# the exact behavior the DoD requires: a payload at/under the boundary is
+# durably accepted, and a payload over the boundary is rejected on the FIRST
+# attempt (no retry-budget burn) with the new EventPayloadTooLargeError.
+
+
+class TestKafkaEventBusMessageSizeLimits:
+    """OMN-16267 live-readback: publish probes at the aligned size boundary."""
+
+    @pytest.mark.asyncio
+    async def test_publish_at_configured_boundary_is_durably_accepted(
+        self,
+        kafka_bootstrap_servers: str,
+        created_unique_topic: str,
+    ) -> None:
+        """A payload comfortably under the new 1,048,588-byte ceiling publishes
+        successfully against a live broker and returns a real durability
+        coordinate (partition/offset), not just "did not raise"."""
+        from omnibase_infra.event_bus.event_bus_kafka import EventBusKafka
+        from omnibase_infra.event_bus.models.config import ModelKafkaEventBusConfig
+
+        config = ModelKafkaEventBusConfig(
+            bootstrap_servers=kafka_bootstrap_servers,
+            environment="local",
+            timeout_seconds=TEST_TIMEOUT_SECONDS,
+            max_retry_attempts=2,
+            retry_backoff_base=0.5,
+        )
+        assert config.max_request_size == 1_048_588, (
+            "boundary probe must run against the shipped default, not a "
+            "test-local override -- otherwise this proves nothing about "
+            "the actual platform config"
+        )
+        bus = EventBusKafka(config=config)
+        await bus.start()
+        try:
+            # Leave headroom below max_request_size for the key + Kafka
+            # record-batch framing overhead aiokafka's size estimate
+            # includes on top of the raw value bytes.
+            payload = b"x" * 1_000_000
+            receipt = await bus.publish(created_unique_topic, b"boundary-key", payload)
+            assert receipt.topic == created_unique_topic
+            assert receipt.offset >= 0
+            assert receipt.partition >= 0
+        finally:
+            await bus.close()
+
+    @pytest.mark.asyncio
+    async def test_publish_above_configured_boundary_fails_fast_live(
+        self,
+        kafka_bootstrap_servers: str,
+        created_unique_topic: str,
+    ) -> None:
+        """A payload over the ceiling is rejected on the FIRST send() attempt
+        against a live broker -- proving the retry-budget-burn defect is
+        fixed end-to-end, not just in a mocked unit test."""
+        from omnibase_infra.errors import EventPayloadTooLargeError
+        from omnibase_infra.event_bus.event_bus_kafka import EventBusKafka
+        from omnibase_infra.event_bus.models.config import ModelKafkaEventBusConfig
+
+        # Deliberately slow backoff: if the fix regresses and this retries,
+        # the elapsed-time assertion below catches it even if the call-count
+        # were unobservable from outside the bus (unlike the unit test,
+        # which patches the producer and can assert call_count directly).
+        config = ModelKafkaEventBusConfig(
+            bootstrap_servers=kafka_bootstrap_servers,
+            environment="local",
+            timeout_seconds=TEST_TIMEOUT_SECONDS,
+            max_retry_attempts=3,
+            retry_backoff_base=3.0,
+        )
+        bus = EventBusKafka(config=config)
+        await bus.start()
+        try:
+            oversized_payload = (
+                b"x" * 2_000_000
+            )  # over 1_048_588, under RedPanda's own 4MiB cap
+            start = asyncio.get_event_loop().time()
+            with pytest.raises(EventPayloadTooLargeError) as exc_info:
+                await bus.publish(created_unique_topic, None, oversized_payload)
+            elapsed = asyncio.get_event_loop().time() - start
+
+            assert exc_info.value.payload_size_bytes == len(oversized_payload)
+            assert exc_info.value.max_request_size_bytes == config.max_request_size
+
+            # A retry-burn regression with retry_backoff_base=3.0 and 3
+            # retries would sleep >= 3 + 6 + 12 = 21s (before jitter) between
+            # attempts. A fail-fast rejection is a synchronous, in-process
+            # check with no network round trip and no sleep at all.
+            assert elapsed < 5.0, (
+                f"publish took {elapsed:.2f}s -- looks like it retried "
+                "instead of failing fast on the first attempt"
+            )
+        finally:
+            await bus.close()

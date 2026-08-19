@@ -313,12 +313,22 @@ class ModelKafkaEventBusConfig(BaseModel):
         description="Enable producer idempotence for exactly-once semantics",
     )
     max_request_size: int = Field(
-        default=4 * 1024 * 1024,  # 4 MB
+        default=1_048_588,  # OMN-16267: aligned to broker message.max.bytes, not 4 MiB
         description=(
             "Maximum size in bytes for a Kafka produce request. "
             "Passed to AIOKafkaProducer(max_request_size=...). "
-            "Must also align with broker-side max.message.bytes. "
-            "Override via KAFKA_MAX_REQUEST_SIZE."
+            "Must equal the broker-side message.max.bytes so an oversized "
+            "payload is rejected client-side (fail-fast, no network round "
+            "trip) instead of passing client validation and burning the "
+            "retry budget against a guaranteed broker rejection (OMN-16267). "
+            "Default 1_048_588 is the measured effective MSK broker limit "
+            "(binary-searched empirically: 0.9MB accepted, 1.0MB rejected; "
+            "1,048,588 is also stock Kafka's own message.max.bytes default, "
+            "confirming the broker was never customized above it). Raising "
+            "the broker limit instead is out of scope here -- MSK is not "
+            "Terraform-managed in this repo and mutating a shared cluster "
+            "config is an infra change with its own approval path, not a "
+            "producer-config PR. Override via KAFKA_MAX_REQUEST_SIZE."
         ),
         ge=1024,  # 1 KB minimum
         le=52428800,  # 50 MB maximum

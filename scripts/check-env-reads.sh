@@ -143,8 +143,27 @@ resolve_base_commit() {
 
 # OMN-15234: env-var names read from a blob of Python source on stdin.
 # Deliberately literal-only -- see ENV_NAME_READ_PATTERN.
+#
+# OMN-16267: `grep -oE` matches within a single line -- it cannot see a
+# read whose opening `os.getenv(`/`os.environ.get(`/`os.environ[` is on one
+# line and whose quoted name is on the next (a common ruff-format output
+# shape for a call with a long default expression, e.g.
+#     x = os.getenv(
+#         "SOME_NAME", "default"
+#     )
+# ). Un-caught, this silently drops such reads from `base_names`, so
+# grandfathering (OMN-15234's "default/whitespace/format edit on an
+# existing read -> ALLOW" rule) never fires for them -- editing ONLY the
+# default value of a pre-existing multi-line-formatted read was
+# indistinguishable from introducing a brand new one. `tr '\n' ' '` joins
+# continuation lines into the same "line" before matching, which is
+# sufficient because the pattern already tolerates arbitrary whitespace
+# (`[[:space:]]*`) between the call-open token and the quote -- it does
+# not depend on GNU-only `grep -P`/`-z`, so it stays portable across the
+# BSD grep on this Mac and the GNU grep in CI/.200.
 extract_env_names() {
-    grep -oE "$ENV_NAME_READ_PATTERN" \
+    tr '\n' ' ' \
+        | grep -oE "$ENV_NAME_READ_PATTERN" \
         | grep -oE "${_Q}[A-Za-z_][A-Za-z0-9_]*${_Q}" \
         | tr -d "\"'" \
         | sort -u
