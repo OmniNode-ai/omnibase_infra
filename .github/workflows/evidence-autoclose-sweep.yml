@@ -105,8 +105,7 @@ jobs:
             exit 1
           fi
           uv run onex skill evidence_autoclose_sweep \
-            --lookback-hours "${{ github.event.inputs.lookback_hours || '2' }}" \
-            --output receipt
+            --lookback-hours "${{ github.event.inputs.lookback_hours || '2' }}"
 
       - name: Post summary
         if: always()
