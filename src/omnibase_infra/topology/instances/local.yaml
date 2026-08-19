@@ -151,7 +151,6 @@ databases:
               - delegation_judge_verdict_events
               - delegation_shadow_comparisons
               - dep_health_findings
-              - hook_events
               - instruction_eval_aggregate_snapshots
               - llm_cost_aggregates
               - pattern_learning_artifacts
@@ -161,6 +160,11 @@ databases:
               - tenant_inference_credentials
             privileges: [INSERT, SELECT, UPDATE]
             schema: public
+          - object_type: TABLE
+            objects:
+              - hook_events
+            privileges: [INSERT, SELECT, UPDATE]
+            schema: tenant
         login: true
     schemas:
       omninode_internal:
