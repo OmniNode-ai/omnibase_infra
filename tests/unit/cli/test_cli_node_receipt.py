@@ -51,29 +51,6 @@ from omnibase_infra.cli.receipt_mode import (
 
 pytestmark = pytest.mark.unit
 
-# OMN-15449: run_receipt_mode now passes RuntimeLocal(run_id=...) on every
-# call, so EVERY test in this file that drives the real dispatch path
-# (_invoke_receipt -> run_node_by_name -> run_receipt_mode -> RuntimeLocal)
-# raises TypeError against the currently-published omnibase-core==0.46.8,
-# which predates that parameter. The paired core PR
-# (github.com/OmniNode-ai/omnibase_core/pull/1561, commit
-# 7b07c723ecf48f6166579be1f6c4ce22df7f6fa0) adds it; this repo's
-# pre-commit gate OMN-13873 forbids a git-source bridge override, so this
-# PR pins the current release and is expected-red here until that core PR
-# merges, a release is cut, and this repo's pin is bumped -- verified
-# GREEN locally against the real paired-PR commit via a temporary,
-# never-committed local dev override before this commit landed. xfail
-# rather than skip so an unexpected pass (e.g. the pin bumping without the
-# markers being removed) fails the suite (strict=True) instead of going
-# unnoticed.
-_OMN_15449_XFAIL_REASON = (
-    "OMN-15449: blocked on paired omnibase_core PR #1561 "
-    "(7b07c723ecf48f6166579be1f6c4ce22df7f6fa0) adding RuntimeLocal(run_id=...); "
-    "this repo's OMN-13873 gate forbids a bridge override so CI pins the "
-    "current release and this test is expected-red until that PR merges, "
-    "releases, and this repo's pin is bumped."
-)
-
 _PROOF_NOOP_CONTRACT = (
     "---\n"
     "name: proof_noop\n"
@@ -164,7 +141,6 @@ def _parse_single_receipt(stdout: str) -> dict[str, object]:
 
 
 class TestReceiptModeSuccess:
-    @pytest.mark.xfail(reason=_OMN_15449_XFAIL_REASON, strict=True)
     def test_stdout_is_exactly_one_validated_skill_result(
         self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
     ) -> None:
@@ -184,7 +160,6 @@ class TestReceiptModeSuccess:
         assert str(payload["result_model"]).endswith("ModelProofNoopResult")
         assert receipt.artifact_refs, "capture log must be artifact-backed"
 
-    @pytest.mark.xfail(reason=_OMN_15449_XFAIL_REASON, strict=True)
     def test_zero_runtime_log_lines_on_stdout_or_stderr(
         self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
     ) -> None:
@@ -199,7 +174,6 @@ class TestReceiptModeSuccess:
         capture_text = captures[0].read_text(encoding="utf-8")
         assert "RuntimeLocal" in capture_text
 
-    @pytest.mark.xfail(reason=_OMN_15449_XFAIL_REASON, strict=True)
     def test_onex_state_dir_is_bound_to_state_root_during_runtime(
         self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
     ) -> None:
@@ -213,7 +187,6 @@ class TestReceiptModeSuccess:
         assert env_record["ONEX_STATE_DIR"] == str(state_root.resolve())
         assert os.environ["ONEX_STATE_DIR"] == str(previous_state_dir)
 
-    @pytest.mark.xfail(reason=_OMN_15449_XFAIL_REASON, strict=True)
     def test_artifacts_are_retrievable_and_hash_verified(
         self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
     ) -> None:
@@ -238,7 +211,6 @@ class TestReceiptModeSuccess:
         assert capture_file.read_bytes() in blobs
         assert json.dumps(payload["result"]).encode("utf-8") in blobs
 
-    @pytest.mark.xfail(reason=_OMN_15449_XFAIL_REASON, strict=True)
     def test_events_spooled_when_daemon_unreachable(
         self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
     ) -> None:
@@ -272,7 +244,6 @@ class TestReceiptModeSuccess:
             assert field in tool_record["payload"], field
         assert tool_record["payload"]["suppression_decision"] == "receipt_mode"
 
-    @pytest.mark.xfail(reason=_OMN_15449_XFAIL_REASON, strict=True)
     def test_events_emitted_when_daemon_available(
         self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
     ) -> None:
@@ -347,7 +318,6 @@ class TestSkillLifecycleEvents:
     _STARTED_TOPIC = "onex.evt.omniclaude.skill-started.v1"
     _COMPLETED_TOPIC = "onex.evt.omniclaude.skill-completed.v1"
 
-    @pytest.mark.xfail(reason=_OMN_15449_XFAIL_REASON, strict=True)
     def test_started_and_completed_share_ids_and_shape(
         self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
     ) -> None:
@@ -448,7 +418,6 @@ class TestSkillLifecycleEvents:
         # Daemon accepted the started emit, so no orphan flag.
         assert completed["started_emit_failed"] is False
 
-    @pytest.mark.xfail(reason=_OMN_15449_XFAIL_REASON, strict=True)
     def test_lifecycle_events_spooled_when_daemon_unreachable(
         self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
     ) -> None:
@@ -488,7 +457,6 @@ class TestArtifactStoreRootDefault:
     and the receipt path failed OPEN — receipts were silently never captured.
     """
 
-    @pytest.mark.xfail(reason=_OMN_15449_XFAIL_REASON, strict=True)
     def test_unset_env_captures_under_state_root_default(
         self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
     ) -> None:
@@ -517,7 +485,6 @@ class TestArtifactStoreRootDefault:
             store.read_blob(ref)  # re-hashes; raises on mismatch
             assert store.read_meta(ref).source_system == "onex_cli"
 
-    @pytest.mark.xfail(reason=_OMN_15449_XFAIL_REASON, strict=True)
     def test_explicit_env_override_wins_over_default(
         self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
     ) -> None:
@@ -536,7 +503,6 @@ class TestArtifactStoreRootDefault:
 
 
 class TestReceiptModeFailureAsymmetry:
-    @pytest.mark.xfail(reason=_OMN_15449_XFAIL_REASON, strict=True)
     def test_genuine_write_failure_prints_full_output_not_receipt(
         self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
     ) -> None:
@@ -660,7 +626,6 @@ class TestWorkflowResultIdentityAnchor:
         assert verified == {}
         assert reason is not None
 
-    @pytest.mark.xfail(reason=_OMN_15449_XFAIL_REASON, strict=True)
     def test_real_dispatch_path_never_leaks_a_foreign_runs_result(
         self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
     ) -> None:
