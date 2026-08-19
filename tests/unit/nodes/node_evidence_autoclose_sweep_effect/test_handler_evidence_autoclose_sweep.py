@@ -598,3 +598,34 @@ class TestRealSubprocessReaping:
         await proc.wait()
         # Must not raise (e.g. ProcessLookupError from killing an exited proc).
         await _reap_timed_out_process(proc)
+
+
+@pytest.mark.unit
+class TestRealSubprocessCreationFailure:
+    """Regression coverage for CodeRabbit finding: `asyncio.create_subprocess_exec`
+    itself can raise OSError (e.g. FileNotFoundError for a missing `gh`/`uv`
+    binary) *before* there is any process to `communicate()` with or reap.
+    Both real runners must catch that and return their fail-closed error
+    tuple instead of letting the OSError escape uncaught."""
+
+    _MISSING_BINARY = "__definitely_missing_executable_for_omn_16106_tests__"
+
+    async def test_gh_runner_returns_error_tuple_on_missing_executable(self):
+        handler = HandlerEvidenceAutocloseSweep(linear_client=FakeLinearClient())
+        data, error = await handler._run_gh_command_real(
+            [self._MISSING_BINARY, "api", "x"], timeout=1.0
+        )
+        assert data is None
+        assert "OS error" in error
+        assert self._MISSING_BINARY in error
+
+    async def test_dod_verify_runner_returns_error_tuple_on_missing_cwd(self):
+        # A cwd that does not exist makes process creation itself raise
+        # FileNotFoundError, same failure class as a missing executable.
+        handler = HandlerEvidenceAutocloseSweep(linear_client=FakeLinearClient())
+        result, exit_code, error = await handler._run_dod_verify_command_real(
+            "OMN-9999", cwd="/definitely/does/not/exist/omn-16106", timeout=1.0
+        )
+        assert result is None
+        assert exit_code == -1
+        assert "OS error" in error

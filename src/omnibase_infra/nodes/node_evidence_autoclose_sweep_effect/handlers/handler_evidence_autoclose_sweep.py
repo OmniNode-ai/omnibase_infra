@@ -311,11 +311,17 @@ class HandlerEvidenceAutocloseSweep:
     async def _run_gh_command_real(
         self, args: list[str], timeout: float
     ) -> tuple[object | None, str]:
-        proc = await asyncio.create_subprocess_exec(
-            *args,
-            stdout=asyncio.subprocess.PIPE,
-            stderr=asyncio.subprocess.PIPE,
-        )
+        try:
+            proc = await asyncio.create_subprocess_exec(
+                *args,
+                stdout=asyncio.subprocess.PIPE,
+                stderr=asyncio.subprocess.PIPE,
+            )
+        except OSError as exc:
+            # Process creation itself can raise (missing executable, invalid
+            # cwd) before there is any `proc` to reap — must be caught here,
+            # not only around `communicate()` below.
+            return None, f"OS error launching {' '.join(args)}: {exc}"
         try:
             stdout, stderr = await asyncio.wait_for(proc.communicate(), timeout=timeout)
         except TimeoutError:
@@ -335,12 +341,18 @@ class HandlerEvidenceAutocloseSweep:
         self, ticket_id: str, cwd: str, timeout: float
     ) -> tuple[dict[str, object] | None, int, str]:
         args = ["uv", "run", "onex", "skill", "dod_verify", ticket_id]
-        proc = await asyncio.create_subprocess_exec(
-            *args,
-            cwd=cwd or None,
-            stdout=asyncio.subprocess.PIPE,
-            stderr=asyncio.subprocess.PIPE,
-        )
+        try:
+            proc = await asyncio.create_subprocess_exec(
+                *args,
+                cwd=cwd or None,
+                stdout=asyncio.subprocess.PIPE,
+                stderr=asyncio.subprocess.PIPE,
+            )
+        except OSError as exc:
+            # Process creation itself can raise (missing executable, invalid
+            # cwd) before there is any `proc` to reap — must be caught here,
+            # not only around `communicate()` below.
+            return None, -1, f"OS error launching dod_verify for {ticket_id}: {exc}"
         try:
             stdout, stderr = await asyncio.wait_for(proc.communicate(), timeout=timeout)
         except TimeoutError:
