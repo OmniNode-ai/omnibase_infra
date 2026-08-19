@@ -83,6 +83,7 @@ INTERNAL_TABLES_PHYSICALLY_IN_PUBLIC_UNTIL_OMN15359: frozenset[str] = frozenset(
         "overnight_sessions",
         "pr_lifecycle_ledger_entries",
         "pr_merged_events",
+        "projection_watermarks",
         "receipt_gate_rows",
         "renderer_capability_projection",
         "sandbox_decisions",
