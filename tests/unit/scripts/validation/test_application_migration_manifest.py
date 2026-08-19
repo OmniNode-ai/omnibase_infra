@@ -136,7 +136,14 @@ def test_checked_in_manifest_is_exact_and_all_blockers_are_explicit() -> None:
     # `tenant` (per-tenant credential data, not omninode_internal per the
     # house-tenant ruling); landed in omnibase_infra first per the
     # node-migration-vendor-parity-gate ordering, ahead of omnimarket#2117.
-    assert len(result.declarations) == 103
+    # +1 for OMN-14751's nodes/node_projection_intent_classification/
+    # 0001_intent_classification_agent_source.sql -- adds the nullable
+    # agent_source column to intent_classification_events (the projection
+    # half of the OMN-14749 parity seam; the producer half, OMN-14750,
+    # landed the field on the wire in omnibase_core). A separate forward
+    # migration rather than an edit to 0000_create_intent_classification_events.sql
+    # because that file's content SHA-256 is already pinned in the ledger.
+    assert len(result.declarations) == 104
     assert result.blocked == ()
     assert len(result.legacy_node_declarations) == 2
     assert len(result.cloud_aliases) == 30
