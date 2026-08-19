@@ -66,6 +66,7 @@ databases:
             objects:
               - live_events
               - log_entries
+              - projection_watermarks
             privileges: [INSERT, SELECT, UPDATE]
             schema: omninode_internal
           - object_type: TABLE
@@ -101,7 +102,6 @@ databases:
               - overnight_sessions
               - pr_lifecycle_ledger_entries
               - pr_merged_events
-              - projection_watermarks
               - receipt_gate_rows
               - renderer_capability_projection
               - sandbox_decisions

@@ -77,6 +77,7 @@ databases:
             objects:
               - live_events
               - log_entries
+              - projection_watermarks
             privileges:
               - INSERT
               - SELECT
@@ -115,7 +116,6 @@ databases:
               - overnight_sessions
               - pr_lifecycle_ledger_entries
               - pr_merged_events
-              - projection_watermarks
               - receipt_gate_rows
               - renderer_capability_projection
               - sandbox_decisions
@@ -310,5 +310,5 @@ source:
   profile_catalog_path: src/omnibase_infra/topology/application_database_profiles.yaml
   profile_catalog_sha256: 759f32da77ad41b874fbb05d2824c44f9de4c64e9d269d99da21445225a90ca1
   repository: OmniNode-ai/omnibase_infra
-  sha256: 8e9553bedabe94c891673b46f112c3580532c17daf749dbeffdd669abd0ff96a
+  sha256: 96d84f297b03aff39799911299f7e4fc119f0483f7818f294c64c01b9313f1a3
 topology_instance: local
