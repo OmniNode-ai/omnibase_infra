@@ -91,6 +91,7 @@ io_operations:
       - max_companions
       - dispatch_cwd
       - dod_verify_timeout_seconds
+      - gh_timeout_seconds
       - close_if_done_label
     output_fields:
       - companions_scanned
