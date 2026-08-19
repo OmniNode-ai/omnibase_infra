@@ -1,0 +1,140 @@
+# SPDX-FileCopyrightText: 2025 OmniNode.ai Inc.
+# SPDX-License-Identifier: MIT
+# Copyright (c) 2026 OmniNode Team
+#
+# ONEX Node Contract
+# Node: NodeFaultInjectFixtureCompute
+#
+# Permanent, zero-blast-radius fixture for proving the offset-withholding
+# half of OMN-14498's result-applier fix: BoundaryApplyPublishError
+# propagating (so the consumer offset is withheld) when BOTH the primary
+# result publish AND the DLQ write for that result fail.
+#
+# The command/result topic pair below is owned exclusively by this fixture —
+# never shared with a real workflow. The DLQ leg is a deployment-time
+# concern (see metadata.fault_injection below and the runbook it points at):
+# a dedicated runtime deployment for this node sets
+# KAFKA_DEAD_LETTER_TOPIC to a private, deliberately-unprovisioned topic
+# (ModelKafkaEventBusConfig.dead_letter_topic takes precedence over the
+# category-derived shared DLQ topic — mixin_kafka_dlq.py:264-265), so a
+# double-failure run never touches onex.dlq.omnibase-infra.commands.v1 or
+# any other contract's traffic.
+#
+# Related Tickets:
+#   - OMN-16265: this fixture
+#   - OMN-14498: the result-applier fix this fixture validates
+name: "node_fault_inject_fixture_compute"
+contract_name: "node_fault_inject_fixture_compute"
+node_name: "node_fault_inject_fixture_compute"
+contract_version:
+  major: 1
+  minor: 0
+  patch: 0
+node_version:
+  major: 1
+  minor: 0
+  patch: 0
+node_type: "COMPUTE_GENERIC"
+description: >
+  Permanent fault-injection fixture (OMN-14498 follow-on). Pure COMPUTE handler returns a result whose serialized size is controlled by the command's inflate_result_bytes field, reproducing the OMN-14498 live-probe technique (small input, handler-amplified output) deterministically. Deployed with a private, unprovisioned dead_letter_topic override, a sufficiently large inflate_result_bytes drives both the primary publish failure AND the DLQ-leg failure, producing BoundaryApplyPublishError / offset withholding on demand with zero effect on any other contract's traffic or DLQ topic.
+
+runtime_profiles:
+  - effects
+event_bus:
+  version:
+    major: 1
+    minor: 0
+    patch: 0
+  subscribe_topics:
+    - "onex.cmd.omnibase-infra.fault-inject-fixture.v1"
+  publish_topics:
+    - "onex.evt.omnibase-infra.fault-inject-fixture-completed.v1"
+input_model:
+  name: "ModelFaultInjectFixtureCommand"
+  module: "omnibase_infra.nodes.node_fault_inject_fixture_compute.models.model_fault_inject_fixture_command"
+  description: "Command with correlation_id and the size-controlling inflate_result_bytes field."
+output_model:
+  name: "ModelFaultInjectFixtureResult"
+  module: "omnibase_infra.nodes.node_fault_inject_fixture_compute.models.model_fault_inject_fixture_result"
+  description: "Deterministic, size-controlled result (padding sized to inflate_result_bytes)."
+handler_routing:
+  routing_strategy: "operation_match"
+  handlers:
+    - operation: "fault_inject.run"
+      handler:
+        name: "HandlerFaultInjectFixture"
+        module: "omnibase_infra.nodes.node_fault_inject_fixture_compute.handlers.handler_fault_inject_fixture"
+      description: >
+        Pure compute: returns a result sized to the command's inflate_result_bytes. No I/O, no side effects — the runtime's own boundary-apply-publish path is what turns a large result into a primary-publish failure.
+
+      supported_operations:
+        - "fault_inject.run"
+      input_model:
+        name: "ModelFaultInjectFixtureCommand"
+        module: "omnibase_infra.nodes.node_fault_inject_fixture_compute.models.model_fault_inject_fixture_command"
+        description: "Typed def-B request for one fixture run."
+      output_fields:
+        - correlation_id
+        - inflate_result_bytes
+        - padding
+        - padding_byte_length
+io_operations:
+  - operation: "fault_inject.run"
+    description: "Produce a deterministic, size-controlled result for double-publish-failure fault injection."
+    input_fields:
+      - correlation_id
+      - inflate_result_bytes
+      - marker
+    output_fields:
+      - correlation_id
+      - inflate_result_bytes
+      - padding
+      - padding_byte_length
+capabilities:
+  - name: "fault_inject.run"
+    description: "Deterministically produce an oversized result to drive primary-publish + DLQ-leg failure for boundary-behavior regression testing."
+error_handling:
+  retry_policy:
+    max_retries: 0
+    initial_delay_ms: 0
+    max_delay_ms: 0
+    exponential_base: 1
+    retry_on: []
+  error_types: []
+health_check:
+  enabled: true
+  endpoint: "/health"
+  interval_seconds: 60
+  checks:
+    - name: "fault_inject_handler_loaded"
+      type: "handler"
+      critical: true
+# Metadata
+metadata:
+  description: >
+    Permanent, reusable fault-injection fixture (OMN-14498 follow-on). Not a one-off probe — this node and its dedicated deployment (private command/result topics + private, unprovisioned dead_letter_topic override) are meant to outlive OMN-16265 as a boundary-behavior regression surface.
+
+  author: "OmniNode Team"
+  license: "MIT"
+  created: "2026-08-19"
+  updated: "2026-08-19"
+  tags:
+    - compute
+    - fault-injection
+    - dlq
+    - kafka
+    - fixture
+    - regression
+  related_tickets:
+    - "OMN-16265"
+    - "OMN-14498"
+  fault_injection:
+    purpose: >
+      Reusable double-publish-failure fixture. Deploy this node in its own dedicated runtime process (see docker/catalog/services/fault-inject-fixture.yaml) so ModelKafkaEventBusConfig.dead_letter_topic (env KAFKA_DEAD_LETTER_TOPIC) can be overridden to a private, deliberately-unprovisioned topic without affecting any shared runtime's DLQ routing for other contracts.
+
+    dead_letter_topic_override: "onex.dlq.omnibase-infra.fault-inject-fixture.v1"
+    dead_letter_topic_provisioned: false
+    how_to_drive_double_failure: >
+      Publish ModelFaultInjectFixtureCommand to onex.cmd.omnibase-infra.fault-inject-fixture.v1 with inflate_result_bytes tuned past the live broker's message.max.bytes / producer max_request_size (OMN-14498 measured ~1,048,588 bytes on onex-dev; re-probe live before reuse, it is broker-config-dependent). The primary publish to onex.evt.omnibase-infra.fault-inject-fixture-completed.v1 fails; the runtime's _route_apply_publish_failure DLQ write then also fails because dead_letter_topic_override is unprovisioned, producing BoundaryApplyPublishError and observable offset withholding.
+
+    runbook: "docs/runbooks/fault-inject-fixture-dlq-offset-withholding.md"
