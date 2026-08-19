@@ -78,6 +78,15 @@ _SYSTEM_READ_SCHEMAS = frozenset({"information_schema", "pg_catalog"})
 # (imported, never copied) -- a table only passes unqualified or explicitly
 # public-qualified by being enumerated in one of these two frozensets; it is
 # a narrow, enumerated pass-through, never a blanket public exemption.
+# TRAP: use frozenset.union(), never the `|` operator, to combine these two
+# sets. `validate_infra_union_usage`'s AST checker (omnibase_core
+# UnionUsageChecker.visit_BinOp) flags ANY `ast.BinOp` with a `BitOr` operator
+# as a type union candidate -- it cannot distinguish a runtime set-union
+# expression from `X | Y` in an annotation. `A | B` here reads as a two-type
+# non-Optional union and pushes the repo-wide INFRA_MAX_UNIONS threshold over
+# by one, failing an unrelated gate for a reason that has nothing to do with
+# type complexity. `.union()` is semantically identical and invisible to that
+# checker.
 _PHYSICALLY_PUBLIC_APPLICATION_TABLES: frozenset[str] = (
     TENANT_TABLES_PHYSICALLY_IN_PUBLIC_UNTIL_OMN15359.union(
         INTERNAL_TABLES_PHYSICALLY_IN_PUBLIC_UNTIL_OMN15359
