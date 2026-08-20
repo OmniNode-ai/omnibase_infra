@@ -16,10 +16,15 @@ from unittest.mock import AsyncMock, MagicMock, patch
 from uuid import UUID, uuid4
 
 import pytest
-from aiokafka.errors import KafkaError, UnknownTopicOrPartitionError
+from aiokafka.errors import (
+    KafkaError,
+    MessageSizeTooLargeError,
+    UnknownTopicOrPartitionError,
+)
 from pydantic import BaseModel
 
 from omnibase_infra.errors import (
+    EventPayloadTooLargeError,
     InfraConnectionError,
     InfraTimeoutError,
     InfraUnavailableError,
@@ -972,6 +977,160 @@ class TestKafkaEventBusPublishRetry:
                 await event_bus.publish("test-topic", None, b"test")
 
             assert "after 3 attempts" in str(exc_info.value)  # initial + 2 retries
+
+            await event_bus.close()
+
+
+class TestKafkaEventBusPublishOversizedPayload:
+    """OMN-16267: oversized payloads must fail fast, not burn the retry budget.
+
+    Before this fix, ``MessageSizeTooLargeError`` (aiokafka's client-side,
+    pre-network-I/O rejection when a payload exceeds ``max_request_size``) was
+    caught by the generic ``except KafkaError`` branch in
+    ``_publish_with_retry`` and retried like any transient broker error --
+    burning the full ``max_retry_attempts + 1`` budget with exponential
+    backoff sleeps against a rejection that is deterministic on the payload's
+    size and can never succeed on retry. The empirical symptom (OMN-16267,
+    fault-inject-1, 2026-08-19): every payload between the broker's real
+    ~1MB limit and the producer's misconfigured 4MiB ceiling passed client
+    validation, then burned 4 send attempts before failing.
+    """
+
+    @pytest.fixture
+    def mock_producer(self) -> AsyncMock:
+        """Create mock Kafka producer that can fail."""
+        producer = AsyncMock()
+        producer.start = AsyncMock()
+        producer.stop = AsyncMock()
+        producer._closed = False
+        return producer
+
+    @pytest.mark.asyncio
+    async def test_oversized_payload_fails_on_first_attempt_no_retry_burn(
+        self, mock_producer: AsyncMock
+    ) -> None:
+        """send() is called exactly once -- no retry budget burned."""
+        call_count = 0
+
+        async def mock_send(*args: object, **kwargs: object) -> None:
+            nonlocal call_count
+            call_count += 1
+            raise MessageSizeTooLargeError(
+                "The message is 2097152 bytes when serialized which is larger "
+                "than the maximum request size you have configured with the "
+                "max_request_size configuration"
+            )
+
+        mock_producer.send = AsyncMock(side_effect=mock_send)
+
+        with patch(
+            "omnibase_infra.event_bus.event_bus_kafka.AIOKafkaProducer",
+            return_value=mock_producer,
+        ):
+            config = ModelKafkaEventBusConfig(
+                bootstrap_servers=TEST_BOOTSTRAP_SERVERS,
+                max_retry_attempts=3,  # would be 4 total send attempts if retried
+                retry_backoff_base=5.0,  # deliberately slow -- a retry would make this test slow
+            )
+            event_bus = EventBusKafka(config=config)
+            await event_bus.start()
+
+            with pytest.raises(EventPayloadTooLargeError):
+                await event_bus.publish("test-topic", None, b"x" * 2_097_152)
+
+            # The core assertion: exactly ONE send() call, not
+            # max_retry_attempts + 1 (4). A retry-burn regression would call
+            # send() 4 times and (with retry_backoff_base=5.0) this test
+            # would also take several seconds instead of being near-instant.
+            assert call_count == 1
+
+            await event_bus.close()
+
+    @pytest.mark.asyncio
+    async def test_oversized_payload_raises_event_payload_too_large_error(
+        self, mock_producer: AsyncMock
+    ) -> None:
+        """Raises the correctly-attributed error type, not a generic connection error."""
+
+        async def mock_send(*args: object, **kwargs: object) -> None:
+            raise MessageSizeTooLargeError("message too large")
+
+        mock_producer.send = AsyncMock(side_effect=mock_send)
+
+        with patch(
+            "omnibase_infra.event_bus.event_bus_kafka.AIOKafkaProducer",
+            return_value=mock_producer,
+        ):
+            config = ModelKafkaEventBusConfig(
+                bootstrap_servers=TEST_BOOTSTRAP_SERVERS,
+                max_retry_attempts=3,
+                retry_backoff_base=0.01,
+            )
+            event_bus = EventBusKafka(config=config)
+            await event_bus.start()
+
+            payload = b"x" * 1_500_000
+            with pytest.raises(EventPayloadTooLargeError) as exc_info:
+                await event_bus.publish("test-topic", None, payload)
+
+            assert exc_info.value.payload_size_bytes == len(payload)
+            assert exc_info.value.max_request_size_bytes == config.max_request_size
+            assert exc_info.value.topic == "test-topic"
+            assert str(len(payload)) in str(exc_info.value)
+            assert str(config.max_request_size) in str(exc_info.value)
+
+            await event_bus.close()
+
+    @pytest.mark.asyncio
+    async def test_oversized_payload_does_not_open_circuit_breaker(
+        self, mock_producer: AsyncMock
+    ) -> None:
+        """A size rejection is not broker-health evidence -- must not trip the breaker.
+
+        Same rationale already applied to UnknownTopicOrPartitionError: a
+        healthy-broker size rejection must not degrade a subsequent,
+        differently-sized publish to a topic the broker is perfectly able to
+        serve.
+        """
+        call_log: list[bytes] = []
+        mock_record_metadata = MagicMock()
+        mock_record_metadata.partition = 0
+        mock_record_metadata.offset = 1
+        mock_record_metadata.topic = "test-topic"
+
+        async def mock_send(
+            topic: str, value: bytes, **kwargs: object
+        ) -> asyncio.Future[object]:
+            call_log.append(value)
+            if len(value) > 1_048_588:
+                raise MessageSizeTooLargeError("message too large")
+            future = asyncio.get_running_loop().create_future()
+            future.set_result(mock_record_metadata)
+            return future
+
+        mock_producer.send = AsyncMock(side_effect=mock_send)
+
+        with patch(
+            "omnibase_infra.event_bus.event_bus_kafka.AIOKafkaProducer",
+            return_value=mock_producer,
+        ):
+            config = ModelKafkaEventBusConfig(
+                bootstrap_servers=TEST_BOOTSTRAP_SERVERS,
+                max_retry_attempts=3,
+                retry_backoff_base=0.01,
+                circuit_breaker_threshold=1,  # trips on the FIRST recorded failure
+            )
+            event_bus = EventBusKafka(config=config)
+            await event_bus.start()
+
+            with pytest.raises(EventPayloadTooLargeError):
+                await event_bus.publish("test-topic", None, b"x" * 2_000_000)
+
+            # A normal-sized publish right after must still succeed -- proves
+            # the size rejection above did not trip the circuit breaker.
+            receipt = await event_bus.publish("test-topic", None, b"small")
+            assert receipt.partition == 0
+            assert receipt.offset == 1
 
             await event_bus.close()
 
