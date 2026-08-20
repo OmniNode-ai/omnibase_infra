@@ -62,7 +62,6 @@ composite corroborating evidence -- see ``_zombie_restart_corroboration``.
 from __future__ import annotations
 
 import logging
-import os
 from datetime import UTC, datetime
 
 from omnibase_infra.enums import EnumHandlerType, EnumHandlerTypeCategory
@@ -105,20 +104,22 @@ from omnibase_infra.nodes.node_runner_health_snapshot_effect.models.model_runner
 
 logger = logging.getLogger(__name__)
 
-# Same env-overridable defaults as the EFFECT + the legacy bash surfaces
-# (runner-monitor.sh, healthcheck.sh) so all three surfaces agree on
-# thresholds during the trust-building period (OMN-13109/OMN-13912/OMN-13915/OMN-15233).
-_CRASHLOOP_RESTART_THRESHOLD = int(os.environ.get("CRASHLOOP_RESTART_THRESHOLD", "5"))
+# Same defaults as the EFFECT + the legacy bash surfaces (runner-monitor.sh,
+# healthcheck.sh) so all three surfaces agree on thresholds during the
+# trust-building period (OMN-13109/OMN-13912/OMN-13915/OMN-15233).
+#
+# OMN-15195 removed the env-read form of these three thresholds: they are
+# plain constants, not overlay-resolved reads. Nothing constructs this handler
+# with overrides, so the values are unchanged by the removal.
+_CRASHLOOP_RESTART_THRESHOLD = 5
 # 4500s (75 min) matches docker/runners/healthcheck.sh exactly (OMN-15233). An
 # IDLE runner writes _diag only on its ~50-minute OAuth/AAD token refresh, so
 # the previous 900s default sat below the healthy idle cadence and classified
 # idle-but-healthy runners as LISTENER_ZOMBIE for ~35 of every 50 minutes.
 # Keep this value equal to healthcheck.sh's -- a divergence means the node
 # verdict and the container healthcheck disagree about what "stale" means.
-_RUNNER_HEALTH_MAX_DIAG_AGE_SECONDS = int(
-    os.environ.get("RUNNER_HEALTH_MAX_DIAG_AGE_SECONDS", "4500")
-)
-_WEDGE_QUEUE_AGE_SECONDS = int(os.environ.get("WEDGE_QUEUE_AGE_SECONDS", "600"))
+_RUNNER_HEALTH_MAX_DIAG_AGE_SECONDS = 4500
+_WEDGE_QUEUE_AGE_SECONDS = 600
 # OMN-15255: ceiling on runner-host disk usage. A host past this is out of
 # space for checkouts/caches; every container on it is unfit for work even
 # though each one still registers online and reports a fresh heartbeat.

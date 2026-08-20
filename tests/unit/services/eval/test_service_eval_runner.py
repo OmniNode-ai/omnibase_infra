@@ -11,10 +11,11 @@ from pathlib import Path
 from unittest.mock import patch
 
 import pytest
-from onex_change_control.enums.enum_eval_metric_type import EnumEvalMetricType
-from onex_change_control.enums.enum_eval_mode import EnumEvalMode
-from onex_change_control.models.model_eval_task import ModelEvalSuite, ModelEvalTask
 
+from omnibase_core.enums.governance.enum_eval_metric_type import EnumEvalMetricType
+from omnibase_core.enums.governance.enum_eval_mode import EnumEvalMode
+from omnibase_core.models.governance.model_eval_suite import ModelEvalSuite
+from omnibase_core.models.governance.model_eval_task import ModelEvalTask
 from omnibase_infra.services.eval.service_eval_runner import (
     ServiceEvalRunner,
     _capture_env_snapshot,

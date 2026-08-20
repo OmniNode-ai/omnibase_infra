@@ -52,7 +52,7 @@ a still-saturated uplink.
 
 ## Rollout (gated — run only after the gate trips)
 
-Run on the runner host (`.201` / `omninode-pc.tail75df5e.ts.net`). This is a NEW
+Run on the runner host (`.201` / `<onex-host>`). This is a NEW
 service; it does not mutate any prod daemon or the runner containers.
 
 ### 1. Freeze the pins
