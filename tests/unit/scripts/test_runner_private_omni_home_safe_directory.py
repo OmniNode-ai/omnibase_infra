@@ -391,12 +391,16 @@ def test_compose_deploy_runner_has_no_shared_gid_and_has_init_wrapper() -> None:
 # 4. ensure_runner_clones.sh behavioral (file:// bare fixtures)
 # ---------------------------------------------------------------------------
 
+# OMN-16296: onex_change_control removed from sibling_clone_manifest.sh, so
+# ensure_runner_clones.sh no longer provisions it. The GIT_CONFIG safe.directory
+# assertion above is deliberately left intact -- that covers git trust for
+# clones the compose runner config declares, which is a separate concern from
+# which siblings the runtime build stages.
 _ENSURE_REPOS = (
     "omnibase_infra",
     "omnibase_core",
     "omnibase_spi",
     "omnibase_compat",
-    "onex_change_control",
     "omnimarket",
 )
 
