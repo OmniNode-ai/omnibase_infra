@@ -58,6 +58,20 @@ class ModelRunnerFleetConfig(BaseModel):
             "subnet pool is exhausted (OMN-12566)."
         ),
     )
+    wedge_queue_age_seconds: int = Field(
+        default=600,
+        ge=0,
+        description="Queued-run age threshold for runner-fleet wedge classification.",
+    )
+    codeload_scan_limit: int = Field(
+        default=5,
+        ge=1,
+        description="Recent failed runs per watched repo scanned for codeload throttling.",
+    )
+    watch_repos: tuple[str, ...] = Field(
+        default=(),
+        description="Repos watched for queued/zombie runs; empty uses the built-in OmniNode defaults.",
+    )
     pypi_cache: ModelPyPICacheConfig | None = Field(
         default=None,
         description=(

@@ -126,7 +126,11 @@ def test_checked_in_manifest_is_exact_and_all_blockers_are_explicit() -> None:
     # fence: a fenced migration is skipped by the runner, not undeclared --
     # dropping its declaration would make the eventual un-fence land an
     # unbound file.
-    assert len(result.declarations) == 101
+    # +1 for OMN-16146's node_projection_registration/0005_create_projection_watermarks.sql
+    # -- vendors the watermark-persistence table BaseProjectionRunner's shared
+    # _update_watermark() path needs; landed in omnibase_infra first per the
+    # node-migration-vendor-parity-gate ordering, ahead of omnimarket#2092.
+    assert len(result.declarations) == 102
     assert result.blocked == ()
     assert len(result.legacy_node_declarations) == 2
     assert len(result.cloud_aliases) == 30
