@@ -136,7 +136,11 @@ def test_checked_in_manifest_is_exact_and_all_blockers_are_explicit() -> None:
     # `tenant` (per-tenant credential data, not omninode_internal per the
     # house-tenant ruling); landed in omnibase_infra first per the
     # node-migration-vendor-parity-gate ordering, ahead of omnimarket#2117.
-    assert len(result.declarations) == 103
+    # +1 for OMN-16293's node_savings_estimation_compute/0001_create_savings_signal_tables.sql
+    # -- new node-owned migration creating savings_injection_signals /
+    # savings_validator_catch_signals, the Postgres "projection surface" the
+    # savings-correlation periodic batch reads instead of an in-memory buffer.
+    assert len(result.declarations) == 104
     assert result.blocked == ()
     assert len(result.legacy_node_declarations) == 2
     assert len(result.cloud_aliases) == 30

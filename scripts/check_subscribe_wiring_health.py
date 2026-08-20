@@ -87,6 +87,13 @@ _EXTERNAL_PUBLISHER_ALLOWLIST: dict[str, str] = {
     # not a contract-declared node publisher. The script publishes to this topic to trigger the
     # node_baselines_batch_compute effect node. (OMN-11177)
     "onex.cmd.omnibase-infra.baselines-batch-compute.v1": "Published by scripts/run_baselines_batch_compute.py CLI trigger, not a contract-declared node | owner: jonah | expiry: 2026-12-01",
+    # Savings correlation batch compute — same self-only-command-topic shape as
+    # baselines-batch-compute above, but triggered directly by an in-process
+    # asyncio loop in service_kernel.py (HandlerSavingsCorrelation.
+    # run_correlation_batch), never published to over Kafka at all. Declared
+    # purely so operation_match auto-wiring resolves a real handler for the
+    # node's savings.correlation_batch_compute capability. (OMN-16293)
+    "onex.cmd.omnibase-infra.savings-correlation-batch-compute.v1": "Triggered directly by an in-process periodic asyncio loop in service_kernel.py (HandlerSavingsCorrelation), never published over Kafka | owner: jonah | expiry: 2026-12-01",
     # Gateway attach control-plane command topics (OMN-15750) — published by the
     # edge-side dialer (customer-premise / .201 test-lane connector,
     # docker/docker-compose.gateway-attach-test-lane.yml +
