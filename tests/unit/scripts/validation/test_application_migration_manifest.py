@@ -130,7 +130,11 @@ def test_checked_in_manifest_is_exact_and_all_blockers_are_explicit() -> None:
     # -- vendors the watermark-persistence table BaseProjectionRunner's shared
     # _update_watermark() path needs; landed in omnibase_infra first per the
     # node-migration-vendor-parity-gate ordering, ahead of omnimarket#2092.
-    assert len(result.declarations) == 102
+    # +1 for OMN-15631's node_delegation_routing_reducer/0001_create_delegation_routing_tenant_overlay.sql
+    # -- vendors the v1(a) per-tenant delegation routing overlay table (tenant
+    # domain, additive, no RLS in v1(a)); landed in omnibase_infra first per
+    # the node-migration-vendor-parity-gate ordering, ahead of omnimarket#2116.
+    assert len(result.declarations) == 103
     assert result.blocked == ()
     assert len(result.legacy_node_declarations) == 2
     assert len(result.cloud_aliases) == 30
