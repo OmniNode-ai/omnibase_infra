@@ -1,6 +1,6 @@
 # Git-transport + Actions egress: local mirrors and tool-cache durability — OMN-14027 C2
 
-**Status:** ACTIVE on the runner host (`omninode-pc.tail75df5e.ts.net`) as of
+**Status:** ACTIVE on the runner host (`<onex-host>`) as of
 2026-08-14. Sibling of `pypi-cache-egress-rollout.md` (C1, wheels) and the §3.19
 Docker Hub mirror (images). This one covers **git transport and the Actions tool
 cache** — the class the C1 design explicitly listed as "not covered by C1, not
@@ -51,13 +51,13 @@ Two distinct failures are visible there and they need different fixes:
   omninode-git-mirror-refresh.timer -> .service -> git-mirror-refresh.sh
                           |
                           v
-   /home/jonah/.omnibase/runners/git-mirror/<repo>.git   (bare mirrors)
+   ~/.omnibase/runners/git-mirror/<repo>.git   (bare mirrors)
                           |
-                          |  git-daemon, bound to 172.18.0.1:9418 (bridge only)
+                          |  git-daemon, bound to <docker-bridge-gateway>:9418 (bridge only)
                           v
   omninode-git-mirror-daemon.service
                           |
-                          |  git://172.18.0.1:9418/<repo>.git
+                          |  git://<docker-bridge-gateway>:9418/<repo>.git
                           v
    runner-job-started.sh  ->  seeds $GITHUB_WORKSPACE, detached HEAD
                           |
@@ -69,12 +69,12 @@ Two distinct failures are visible there and they need different fixes:
 
 | Path / unit | Role |
 |---|---|
-| `/home/jonah/.omnibase/runners/git-mirror/<repo>.git` | bare mirrors (351 MiB total for the five repos) |
-| `/etc/systemd/system/omninode-git-mirror-daemon.service` | `git-daemon`, `--listen=172.18.0.1 --port=9418 --export-all`, read-only (no receive-pack) |
+| `~/.omnibase/runners/git-mirror/<repo>.git` | bare mirrors (351 MiB total for the five repos) |
+| `/etc/systemd/system/omninode-git-mirror-daemon.service` | `git-daemon`, `--listen=<docker-bridge-gateway> --port=9418 --export-all`, read-only (no receive-pack) |
 | `/etc/systemd/system/omninode-git-mirror-refresh.{service,timer}` | 2-minute refresh, `Type=oneshot` |
-| `/home/jonah/.omnibase/runners/docker/runners/git-mirror-refresh.sh` | deployed refresh script (`ExecStart` target) |
-| `/home/jonah/.omnibase/runners/docker/runners/runner-job-started.sh` | deployed job hook containing the pre-seed |
-| `/home/jonah/.omnibase/runners/toolcache-seed/` | canonical tool-cache snapshot (4.8 GiB) |
+| `~/.omnibase/runners/docker/runners/git-mirror-refresh.sh` | deployed refresh script (`ExecStart` target) |
+| `~/.omnibase/runners/docker/runners/runner-job-started.sh` | deployed job hook containing the pre-seed |
+| `~/.omnibase/runners/toolcache-seed/` | canonical tool-cache snapshot (4.8 GiB) |
 
 In-repo sources: `docker/runners/{git-mirror-refresh.sh,toolcache-seed.sh,runner-job-started.sh}`,
 `docker/runners/systemd/*`, `config/runner_fleet.yaml` (`git_mirror:` / `tool_cache:`).
@@ -97,7 +97,7 @@ job copies the object pack over the bridge (~33 MiB, ~4 s, ~97 MiB/s) instead of
 hardlinking it; removing that copy is the `--reference`/alternates upgrade noted
 in §5.
 
-Binding to `172.18.0.1` (the `docker_default` gateway, the network all 72 runners
+Binding to `<docker-bridge-gateway>` (the `docker_default` gateway, the network all 72 runners
 sit on) rather than the Tailscale hostname is a security requirement, not a
 detail: `git://` is unauthenticated, so the mirrors of private repos must not be
 reachable from the LAN or the tailnet.
@@ -153,7 +153,7 @@ exists to remove.
 Bracket every fleet recreate:
 
 ```bash
-D=/home/jonah/.omnibase/runners/docker/runners
+D=~/.omnibase/runners/docker/runners
 $D/toolcache-seed.sh report     # capture the before-state
 $D/toolcache-seed.sh snapshot   # union of all runners -> host snapshot
 # ... recreate ...
@@ -181,7 +181,7 @@ keeps the inode):
 
 ```bash
 cp /path/to/new/runner-job-started.sh \
-   /home/jonah/.omnibase/runners/docker/runners/runner-job-started.sh
+   ~/.omnibase/runners/docker/runners/runner-job-started.sh
 ```
 
 If the inode has already been orphaned, it can be recovered **without** a
@@ -235,18 +235,18 @@ sudo journalctl -u omninode-git-mirror-refresh --no-pager -n 20
 # every mirror answers over the bridge
 for r in onex_change_control omnibase_infra omnibase_core omnimarket omniclaude; do
   printf '%s heads=' "$r"
-  timeout 10 git ls-remote --heads git://172.18.0.1:9418/$r.git | wc -l
+  timeout 10 git ls-remote --heads git://<docker-bridge-gateway>:9418/$r.git | wc -l
 done
 
 # a runner container can reach the daemon
 docker exec -u runner omninode-runner-1 \
-  bash -c 'timeout 10 git ls-remote --heads git://172.18.0.1:9418/onex_change_control.git | wc -l'
+  bash -c 'timeout 10 git ls-remote --heads git://<docker-bridge-gateway>:9418/onex_change_control.git | wc -l'
 ```
 
 Job-log evidence: a seeded job prints
 
 ```
-[c2-mirror] pre-seeded <repo> from git://172.18.0.1:9418/<repo>.git at <sha> in <n>s -- checkout will fetch a delta, not a full clone.
+[c2-mirror] pre-seeded <repo> from git://<docker-bridge-gateway>:9418/<repo>.git at <sha> in <n>s -- checkout will fetch a delta, not a full clone.
 ```
 
 and the subsequent `actions/checkout` "Fetching the repository" group shows no
@@ -266,8 +266,8 @@ The pre-seed is additive; removing it returns the fleet to direct egress.
 3. **Stop serving:** `sudo systemctl disable --now omninode-git-mirror-daemon
    omninode-git-mirror-refresh.timer`. The pre-seed's probe then fails and every
    job takes the fail-open path — i.e. exactly the pre-C2 behaviour.
-4. **Reclaim disk:** `rm -rf /home/jonah/.omnibase/runners/git-mirror` (351 MiB)
-   and `/home/jonah/.omnibase/runners/toolcache-seed` (4.8 GiB). Keep the
+4. **Reclaim disk:** `rm -rf ~/.omnibase/runners/git-mirror` (351 MiB)
+   and `~/.omnibase/runners/toolcache-seed` (4.8 GiB). Keep the
    tool-cache snapshot unless you are certain no recreate is pending — §4a.
 
 ## 8. References

@@ -83,7 +83,7 @@ Do not set `STABILITY_TEST_REDPANDA_ADVERTISE_HOST` or any
 Operators should then bootstrap with the same connected-network endpoint:
 
 ```bash
-export KAFKA_BOOTSTRAP_SERVERS=100.109.203.94:39092
+export KAFKA_BOOTSTRAP_SERVERS=<onex-host>:39092
 kcat -L -b "$KAFKA_BOOTSTRAP_SERVERS" | sed -n '1,5p'
 ```
 
@@ -96,7 +96,7 @@ but fail when Kafka redirects them to the advertised broker address.
 Render the config only:
 
 ```bash
-STABILITY_TEST_REDPANDA_ADVERTISE_HOST=100.109.203.94 \
+STABILITY_TEST_REDPANDA_ADVERTISE_HOST=<onex-host> \
 docker compose \
   -f docker/docker-compose.infra.yml \
   -f docker/docker-compose.stability-test.yml \
@@ -111,7 +111,7 @@ List the rendered services and confirm the stability-test runtime services are
 present:
 
 ```bash
-STABILITY_TEST_REDPANDA_ADVERTISE_HOST=100.109.203.94 \
+STABILITY_TEST_REDPANDA_ADVERTISE_HOST=<onex-host> \
 docker compose \
   -f docker/docker-compose.infra.yml \
   -f docker/docker-compose.stability-test.yml \
