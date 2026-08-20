@@ -14,6 +14,7 @@ a live runtime.
 
 from __future__ import annotations
 
+import importlib.metadata
 import json
 import os
 import tomllib
@@ -191,13 +192,37 @@ def _omnimarket_declared_nodes(omnimarket_root: Path) -> frozenset[str]:
     return frozenset(entry_points.keys())
 
 
+def _infra_declared_nodes() -> frozenset[str]:
+    """omnibase_infra's OWN ``onex.nodes`` entry points (self-hosted nodes).
+
+    Unlike the omnimarket catalog, this is always resolvable: omnibase_infra
+    is the package under test, so its own entry points are live-installed in
+    this exact venv (OMN-16106 — the evidence-autoclose sweep is node-backed
+    IN omnibase_infra itself, not omnimarket, because it shells out to
+    ``uv run onex skill dod_verify`` and must therefore run from the same
+    locality that dispatch already resolves from).
+    """
+    eps = importlib.metadata.entry_points(group="onex.nodes")
+    return frozenset(
+        ep.name
+        for ep in eps
+        if ep.dist is not None and ep.dist.name == "omnibase_infra"
+    )
+
+
 def test_every_mapped_node_resolves_in_omnimarket_catalog() -> None:
-    """Every skill_mapping.yaml node_name exists in the canonical node catalog.
+    """Every skill_mapping.yaml node_name exists in a canonical node catalog.
 
     Guards against the stale skill->node mapping class of bug (OMN-13531): a
     dispatch entry that points at a node which no longer exists in the catalog
     surfaces only at dispatch time as `Unknown node <name>`. This pins the
     whole table — pr_review, pr_review_bot, hostile_reviewer, and the rest.
+
+    The catalog is the UNION of omnimarket's declared nodes (the sibling-
+    checkout source of truth for every omnimarket-backed skill) and
+    omnibase_infra's own live-installed entry points (for the handful of
+    skills, like OMN-16106's evidence_autoclose_sweep, that are node-backed
+    in omnibase_infra itself).
     """
     omnimarket_root = _resolve_omnimarket_src()
     if omnimarket_root is None:
@@ -206,7 +231,9 @@ def test_every_mapped_node_resolves_in_omnimarket_catalog() -> None:
             "(set OMNIMARKET_SRC or OMNI_HOME); CI wires the sibling checkout"
         )
 
-    declared_nodes = _omnimarket_declared_nodes(omnimarket_root)
+    declared_nodes = (
+        _omnimarket_declared_nodes(omnimarket_root) | _infra_declared_nodes()
+    )
     assert declared_nodes, (
         "parsed zero onex.nodes entry points from omnimarket pyproject.toml at "
         f"{omnimarket_root}; the catalog source-of-truth could not be read"
@@ -220,8 +247,8 @@ def test_every_mapped_node_resolves_in_omnimarket_catalog() -> None:
     }
     assert not unresolved, (
         "skill_mapping.yaml references node_name(s) absent from the canonical "
-        "omnimarket onex.nodes catalog — `onex skill <name>` will fail with "
-        f"`Unknown node ...` at dispatch time: {unresolved}"
+        "omnimarket/omnibase_infra onex.nodes catalog — `onex skill <name>` "
+        f"will fail with `Unknown node ...` at dispatch time: {unresolved}"
     )
 
 
