@@ -218,6 +218,27 @@ _LEGACY_DEFAULT_SCHEMA_SQL_EXACT_PATHS = frozenset(
             "docker/migrations/forward/nodes/node_projection_registration/"
             "0004_node_service_registry_no_force_rls.sql"
         ),
+        # OMN-14751: node_projection_intent_classification's contract declares
+        # db_io.db_tables[0].schema: omninode_internal (the logical/target
+        # domain for the governed OMN-15359 cutover), but its
+        # projection_api reads both declare schema: public, and 0000's
+        # `CREATE TABLE IF NOT EXISTS intent_classification_events` is itself
+        # unqualified -- the table physically lives in public today, same
+        # logical-vs-physical split as every sibling exemption above
+        # (node_hook_event_capture, node_projection_registration, et al). An
+        # earlier revision of this file schema-qualified the ALTER as
+        # `omninode_internal.intent_classification_events`, matching the
+        # contract's db_io declaration instead of physical reality, and was
+        # reverted when that mismatch was found -- ALTER TABLE
+        # omninode_internal.intent_classification_events fails outright
+        # against a public-schema table. node-migration-sync (OMN-13332)
+        # forces this file to be vendored verbatim from omnimarket dev
+        # regardless of this gate, so exempting it here (not editing the SQL)
+        # is the canonical fix, same as every entry above.
+        Path(
+            "docker/migrations/forward/nodes/node_projection_intent_classification/"
+            "0001_intent_classification_agent_source.sql"
+        ),
     }
 )
 
