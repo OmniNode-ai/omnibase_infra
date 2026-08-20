@@ -9,8 +9,9 @@ between modes and records environment state per run.
 
 Related:
     - OMN-6773: Build eval runner service
-    - OMN-6770: ModelEvalTask / ModelEvalSuite (onex_change_control)
-    - OMN-6771: ModelEvalRun / EnumEvalMode (onex_change_control)
+    - OMN-6770: ModelEvalTask / ModelEvalSuite (omnibase_core.models.governance)
+    - OMN-6771: ModelEvalRun / EnumEvalMode (omnibase_core.models.governance /
+      omnibase_core.enums.governance)
 """
 
 from __future__ import annotations
@@ -23,10 +24,12 @@ from datetime import UTC, datetime
 from pathlib import Path
 from uuid import uuid4
 
-from onex_change_control.enums.enum_eval_metric_type import EnumEvalMetricType
-from onex_change_control.enums.enum_eval_mode import EnumEvalMode
-from onex_change_control.models.model_eval_run import ModelEvalMetric, ModelEvalRun
-from onex_change_control.models.model_eval_task import ModelEvalSuite, ModelEvalTask
+from omnibase_core.enums.governance.enum_eval_metric_type import EnumEvalMetricType
+from omnibase_core.enums.governance.enum_eval_mode import EnumEvalMode
+from omnibase_core.models.governance.model_eval_metric import ModelEvalMetric
+from omnibase_core.models.governance.model_eval_run import ModelEvalRun
+from omnibase_core.models.governance.model_eval_suite import ModelEvalSuite
+from omnibase_core.models.governance.model_eval_task import ModelEvalTask
 
 logger = logging.getLogger(__name__)
 

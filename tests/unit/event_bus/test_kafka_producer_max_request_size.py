@@ -18,7 +18,7 @@ class TestProducerMaxRequestSize:
 
     @pytest.mark.asyncio
     async def test_producer_receives_max_request_size_default(self) -> None:
-        """AIOKafkaProducer gets default max_request_size (4MB) from config."""
+        """AIOKafkaProducer gets default max_request_size (1_048_588, OMN-16267) from config."""
         config = ModelKafkaEventBusConfig()
         bus = EventBusKafka(config=config)
 
@@ -32,7 +32,7 @@ class TestProducerMaxRequestSize:
             await bus.start()
 
             call_kwargs = mock_producer_cls.call_args.kwargs
-            assert call_kwargs["max_request_size"] == 4 * 1024 * 1024
+            assert call_kwargs["max_request_size"] == 1_048_588
 
     @pytest.mark.asyncio
     async def test_producer_receives_custom_max_request_size(self) -> None:

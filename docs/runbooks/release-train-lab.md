@@ -148,18 +148,18 @@ appear in the log before trusting any rollback path for this run.
 Read these five fields in this order — each one is a necessary, not
 sufficient, condition for trusting the deploy:
 
-1. **`http://192.168.86.201:18085/health`** and **`:18086`** (effects port)
+1. **`http://<onex-host>:18085/health`** and **`:18086`** (effects port)
    both healthy — the log line `[deploy] Health check passed.` confirms
    18085; 18086 is asserted inside the same health-gate pass (not shown
    separately in this run's log — verify with a direct probe if in doubt:
-   `curl -sf http://192.168.86.201:18086/health`).
+   `curl -sf http://<onex-host>:18086/health`).
 2. **Contract count** (`manifest_count`) — 292 ≥ floor 288. Never trust a
    PASS if this number is at or below the floor from the *previous* known
    run; a flat or falling contract count on a merge that should have added
    nodes is a silent regression the floor alone won't catch.
 3. **`discovery_errors` baseline** — not surfaced as a top-level health-gate
    field in this receipt shape; read it from the manifest endpoint directly
-   post-deploy: `curl -s http://192.168.86.201:18085/v1/introspection/manifest | jq '.discovery_errors // empty'`.
+   post-deploy: `curl -s http://<onex-host>:18085/v1/introspection/manifest | jq '.discovery_errors // empty'`.
    Treat any non-empty result as a regression even if `overall: PASS`.
 4. **Consumer groups** — every declared group in
    `consumer_groups_stability.yaml` reads `Stable` or an expected `Empty`
@@ -515,9 +515,9 @@ read back true — not when the workflow run shows green alone:
       `"consumer_groups_stable": true`, `"revision_readback_ok": true`
 - [ ] `manifest_count` is ≥ the floor (288) **and** ≥ the previous known-good
       run's count (a flat/falling count is a silent regression even at PASS)
-- [ ] `curl -sf http://192.168.86.201:18085/health` and
-      `curl -sf http://192.168.86.201:18086/health` both return healthy
-- [ ] `curl -s http://192.168.86.201:18085/v1/introspection/manifest | jq '.discovery_errors // empty'`
+- [ ] `curl -sf http://<onex-host>:18085/health` and
+      `curl -sf http://<onex-host>:18086/health` both return healthy
+- [ ] `curl -s http://<onex-host>:18085/v1/introspection/manifest | jq '.discovery_errors // empty'`
       is empty
 - [ ] Every service's `revision_label` in the health-gate JSON equals the
       cut commit SHA (`git rev-parse <ref>` at cut time)
