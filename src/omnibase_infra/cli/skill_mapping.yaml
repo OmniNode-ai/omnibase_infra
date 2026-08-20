@@ -200,6 +200,7 @@ skills:
       - {name: max-companions, payload_field: max_companions, arg_type: integer}
       - {name: dispatch-cwd, payload_field: dispatch_cwd, arg_type: string}
       - {name: dod-verify-timeout-seconds, payload_field: dod_verify_timeout_seconds, arg_type: integer}
+      - {name: gh-timeout-seconds, payload_field: gh_timeout_seconds, arg_type: integer}
       - {name: close-if-done-label, payload_field: close_if_done_label, arg_type: string}
   - skill_name: duplication_sweep
     node_name: node_duplication_sweep

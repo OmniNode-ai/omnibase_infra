@@ -276,7 +276,6 @@ class HandlerEvidenceAutocloseSweep:
     def __init__(
         self,
         linear_client: _LinearClient | None = None,
-        gh_timeout_seconds: float = 30.0,
         autoclose_disabled: bool | None = None,
         run_gh_command: TypeRunGhCommand | None = None,
         run_dod_verify_command: TypeRunDodVerifyCommand | None = None,
@@ -285,8 +284,12 @@ class HandlerEvidenceAutocloseSweep:
         # __init__ precedent: read at construction time, override injectable
         # for tests. Re-checked defensively at the top of handle() too so a
         # zero-arg contract-driven construction can never silently skip it.
+        #
+        # `gh api` timeout is NOT stored here (unlike a prior revision) --
+        # it is contract-exposed as request.gh_timeout_seconds and threaded
+        # through at each call site, the same pattern already used for
+        # request.dod_verify_timeout_seconds below. See OMN-16106.
         self._linear = linear_client if linear_client is not None else _LinearClient()
-        self._gh_timeout_seconds = gh_timeout_seconds
         self._autoclose_disabled_ctor = (
             autoclose_disabled
             if autoclose_disabled is not None
@@ -375,7 +378,7 @@ class HandlerEvidenceAutocloseSweep:
     # -- GitHub enumeration ----------------------------------------------
 
     async def _fetch_merged_companions(
-        self, repo: str, since_iso: str, max_companions: int
+        self, repo: str, since_iso: str, max_companions: int, gh_timeout_seconds: int
     ) -> tuple[list[dict[str, object]], str]:
         """Paginated `gh api` enumeration of merged PRs, newest-updated-first."""
         merged: list[dict[str, object]] = []
@@ -387,7 +390,7 @@ class HandlerEvidenceAutocloseSweep:
                 f"&direction=desc&per_page={per_page}&page={page}"
             )
             batch, error = await self._run_gh_command(
-                ["gh", "api", path], self._gh_timeout_seconds
+                ["gh", "api", path], gh_timeout_seconds
             )
             if batch is None:
                 return merged, error
@@ -410,7 +413,9 @@ class HandlerEvidenceAutocloseSweep:
                 break
         return merged, ""
 
-    async def _fetch_pr_files(self, repo: str, number: int) -> tuple[list[str], str]:
+    async def _fetch_pr_files(
+        self, repo: str, number: int, gh_timeout_seconds: int
+    ) -> tuple[list[str], str]:
         """Fetch a PR's changed-file paths. Never silently degrades to empty.
 
         Returns ``(files, error)``. On a genuine fetch failure ``error`` is
@@ -421,7 +426,7 @@ class HandlerEvidenceAutocloseSweep:
         """
         path = f"repos/{repo}/pulls/{number}/files?per_page=100"
         data, error = await self._run_gh_command(
-            ["gh", "api", path], self._gh_timeout_seconds
+            ["gh", "api", path], gh_timeout_seconds
         )
         if data is None:
             return [], error or f"gh api returned no data for {repo}#{number} files"
@@ -459,7 +464,10 @@ class HandlerEvidenceAutocloseSweep:
         ).strftime("%Y-%m-%dT%H:%M:%SZ")
 
         companions, enum_error = await self._fetch_merged_companions(
-            request.occ_repo, since_iso, request.max_companions
+            request.occ_repo,
+            since_iso,
+            request.max_companions,
+            request.gh_timeout_seconds,
         )
         if enum_error:
             return ModelEvidenceAutocloseSweepResult(
@@ -477,7 +485,9 @@ class HandlerEvidenceAutocloseSweep:
             number = _as_int(pr.get("number"))
             url = str(pr.get("html_url") or "")
             title = str(pr.get("title") or "")
-            files, files_error = await self._fetch_pr_files(request.occ_repo, number)
+            files, files_error = await self._fetch_pr_files(
+                request.occ_repo, number, request.gh_timeout_seconds
+            )
             if files_error:
                 outcomes.append(
                     ModelEvidenceAutocloseOutcome(

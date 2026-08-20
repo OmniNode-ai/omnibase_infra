@@ -56,6 +56,17 @@ class ModelEvidenceAutocloseSweepRequest(BaseModel):
         le=1800,
         description="Timeout for each `onex skill dod_verify` subprocess call.",
     )
+    gh_timeout_seconds: int = Field(
+        default=90,
+        ge=1,
+        le=1800,
+        description=(
+            "Timeout for each `gh api` subprocess call (PR-list enumeration "
+            "and per-PR file listing). Raised from a prior hardcoded 30.0s "
+            "default that timed out in CI (OMN-16106: duration_ms==30048 on "
+            "a live self-hosted-runner GitHub enumeration)."
+        ),
+    )
     close_if_done_label: str = Field(
         default="close-if-done",
         description=(

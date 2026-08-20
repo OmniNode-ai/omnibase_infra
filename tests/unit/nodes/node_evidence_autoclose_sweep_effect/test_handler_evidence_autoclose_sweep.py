@@ -553,6 +553,53 @@ class TestSweepLevel:
         result = await handler.handle(_request(max_companions=2))
         assert result.companions_scanned == 2
 
+    async def test_gh_timeout_seconds_defaults_to_90_when_not_overridden(self):
+        # Regression coverage for OMN-16106: the CI sweep timed out at a
+        # hardcoded 30.0s `gh api` timeout (duration_ms == 30048 in the live
+        # failing run) that was not contract-exposed. The default must come
+        # from the request model, not a hardcoded literal in the handler.
+        captured_timeouts: list[float] = []
+
+        async def fake_run_gh_command(args: list[str], timeout: float):
+            captured_timeouts.append(timeout)
+            return [], ""
+
+        handler = HandlerEvidenceAutocloseSweep(
+            linear_client=FakeLinearClient(), run_gh_command=fake_run_gh_command
+        )
+        await handler.handle(_request())
+        assert captured_timeouts == [90]
+
+    async def test_gh_timeout_seconds_is_plumbed_from_the_request(self):
+        # Proves the timeout used for BOTH gh api call sites (PR-list
+        # enumeration and per-PR file listing) comes from
+        # request.gh_timeout_seconds, not fixed instance/constructor state.
+        captured_timeouts: list[float] = []
+
+        async def fake_run_gh_command(args: list[str], timeout: float):
+            captured_timeouts.append(timeout)
+            path = args[2]
+            if "/files" in path:
+                return [{"path": "contracts/OMN-9500.yaml"}], ""
+            page = int(path.rsplit("page=", 1)[1])
+            if page == 1:
+                return [_merged_pr(1, "evidence(OMN-9500): x", "OMN-9500")], ""
+            return [], ""
+
+        linear = FakeLinearClient(issues={"OMN-9500": _issue()})
+        dod_fake = _make_dod_verify_fake(
+            {"OMN-9500": (_dod_verify_ok(total=1, verified=1, failed=0), 0, "")}
+        )
+        handler = HandlerEvidenceAutocloseSweep(
+            linear_client=linear,
+            run_gh_command=fake_run_gh_command,
+            run_dod_verify_command=dod_fake,
+        )
+        result = await handler.handle(_request(gh_timeout_seconds=8))
+        assert result.companions_scanned == 1
+        assert captured_timeouts, "gh command was never invoked"
+        assert all(t == 8 for t in captured_timeouts)
+
 
 @pytest.mark.unit
 class TestRealSubprocessReaping:
