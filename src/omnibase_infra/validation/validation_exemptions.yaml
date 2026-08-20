@@ -1149,6 +1149,30 @@ pattern_exemptions:
       - PEP 8 - Naming Conventions (https://peps.python.org/pep-0008/#naming-conventions)
       - CLAUDE.md (File & Class Naming Conventions)
     ticket: OMN-811
+  - file_pattern: 'node_evidence_autoclose_sweep_effect/handlers/handler_evidence_autoclose_sweep\.py'
+    class_pattern: "Class name '_LinearClient'"
+    violation_pattern: "should use PascalCase"
+    reason: >
+      _LinearClient IS valid PascalCase for a private class (same class of exemption as _MetricsTimer above). The underscore prefix indicates private visibility, and "LinearClient" follows PascalCase. The validator regex doesn't account for underscore-prefixed private classes.
+
+    documentation:
+      - PEP 8 - Naming Conventions (https://peps.python.org/pep-0008/#naming-conventions)
+      - CLAUDE.md (File & Class Naming Conventions)
+    ticket: OMN-16106
+  # ==========================================================================
+  # Evidence Autoclose Sweep Exemptions (OMN-16106)
+  # ==========================================================================
+  # ticket_id is a Linear human-readable identifier ("OMN-16106"), never a
+  # UUID -- same class of exemption as plugin_id/policy_id/dispatcher_id
+  # above. Matches both new node models that carry the field.
+  - file_pattern: 'node_evidence_autoclose_sweep_effect/models/model_evidence_autoclose_outcome\.py'
+    violation_pattern: "Field 'ticket_id' should use UUID type instead of str"
+    reason: >
+      ticket_id holds a Linear human-readable ticket identifier (e.g. "OMN-16106"), never a UUID. Consistent with the plugin_id/policy_id/dispatcher_id semantic-identifier exemption pattern above.
+
+    documentation:
+      - CLAUDE.md (Registry Naming Conventions)
+    ticket: OMN-16106
   # ==========================================================================
   # Plugin Models Exemptions (OMN-811)
   # ==========================================================================

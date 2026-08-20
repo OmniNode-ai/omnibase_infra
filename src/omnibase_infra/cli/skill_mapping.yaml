@@ -183,6 +183,24 @@ skills:
       - {name: ticket-id, payload_field: ticket_id, arg_type: string, positional: true, required: true}
       - {name: contract-path, payload_field: contract_path, arg_type: string}
       - {name: dry-run, payload_field: dry_run, arg_type: boolean, default: false}
+  # OMN-16106 first slice: companion-merge -> dod_verify -> governed Done
+  # flip. Node-backed in omnibase_infra itself (not omnimarket) — the sweep
+  # shells out to `uv run onex skill dod_verify <ticket>` verbatim per
+  # ticket, so it must run from a locality where THAT dispatch already
+  # resolves (the omnibase_infra clone, same as every other `onex skill`
+  # invocation here). apply defaults false (DRY-RUN); pass --apply to let
+  # the sweep call the Linear mutation API for real.
+  - skill_name: evidence_autoclose_sweep
+    node_name: node_evidence_autoclose_sweep_effect
+    result_model: omnibase_infra.nodes.node_evidence_autoclose_sweep_effect.models.model_evidence_autoclose_sweep_result.ModelEvidenceAutocloseSweepResult
+    args:
+      - {name: occ-repo, payload_field: occ_repo, arg_type: string}
+      - {name: lookback-hours, payload_field: lookback_hours, arg_type: integer}
+      - {name: apply, payload_field: apply, arg_type: boolean, default: false}
+      - {name: max-companions, payload_field: max_companions, arg_type: integer}
+      - {name: dispatch-cwd, payload_field: dispatch_cwd, arg_type: string}
+      - {name: dod-verify-timeout-seconds, payload_field: dod_verify_timeout_seconds, arg_type: integer}
+      - {name: close-if-done-label, payload_field: close_if_done_label, arg_type: string}
   - skill_name: duplication_sweep
     node_name: node_duplication_sweep
     result_model: omnimarket.nodes.node_duplication_sweep.handlers.handler_duplication_sweep.DuplicationSweepResult
