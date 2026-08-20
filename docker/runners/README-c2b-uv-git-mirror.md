@@ -1,6 +1,6 @@
 # C2b — routing uv's git dependency at the local mirror (OMN-16063)
 
-Deployed 2026-08-15T01:37Z on the runner host (`omninode-pc`, 192.168.86.201).
+Deployed 2026-08-15T01:37Z on the runner host (`omninode-pc`, `<onex-host>`).
 Extends the OMN-14027 C2 git-mirror component. Host-side only: no workflow file
 changes, no container recreate, no image rebuild.
 
@@ -52,7 +52,7 @@ keep their authenticated github.com fetch and their exact-ref semantics.
 Verified with `GIT_TRACE=1` in a container off `omninode-runner:latest`:
 
     no-suffix  -> git-remote-https https://github.com/OmniNode-ai/onex_change_control
-    .git       -> From git://172.18.0.1:9418/onex_change_control
+    .git       -> From git://<docker-bridge-gateway>:9418/onex_change_control
 
 There is no blanket github.com rewrite.
 
@@ -64,8 +64,8 @@ were untouched. **That was wrong**, and it was corrected on 2026-08-15.
 behaviour, not an edge case. Measured with only the insteadOf installed:
 
     $ git remote -v
-    origin  git://172.18.0.1:9418/onex_change_control.git (fetch)
-    origin  git://172.18.0.1:9418/onex_change_control.git (push)
+    origin  git://<docker-bridge-gateway>:9418/onex_change_control.git (fetch)
+    origin  git://<docker-bridge-gateway>:9418/onex_change_control.git (push)
     $ git push ...
     fatal: remote error: access denied or repository not exported: /onex_change_control.git
 
@@ -78,7 +78,7 @@ git resolves a push URL against `pushInsteadOf` rules FIRST and falls back to
 rule per rewritten repo (upstream -> itself), which pins pushes back on
 github.com while leaving the fetch redirect intact:
 
-    GIT_CONFIG_KEY_0=url.git://172.18.0.1:9418/onex_change_control.git.insteadOf
+    GIT_CONFIG_KEY_0=url.git://<docker-bridge-gateway>:9418/onex_change_control.git.insteadOf
     GIT_CONFIG_VALUE_0=https://github.com/OmniNode-ai/onex_change_control.git
     GIT_CONFIG_KEY_1=url.https://github.com/OmniNode-ai/onex_change_control.git.pushInsteadOf
     GIT_CONFIG_VALUE_1=https://github.com/OmniNode-ai/onex_change_control.git
@@ -86,7 +86,7 @@ github.com while leaving the fetch redirect intact:
 
 Verified in a container off `omninode-runner:latest`:
 
-    origin  git://172.18.0.1:9418/onex_change_control.git (fetch)
+    origin  git://<docker-bridge-gateway>:9418/onex_change_control.git (fetch)
     origin  https://github.com/OmniNode-ai/onex_change_control.git (push)
     by-SHA fetch of the pin -> rc=0 (still served by the mirror)
 
@@ -154,20 +154,20 @@ To enable it anyway (accepting the above), set on the host:
 
 ## Files changed on the host
 
-    /home/jonah/.omnibase/runners/docker/runners/runner-job-started.sh
+    ~/.omnibase/runners/docker/runners/runner-job-started.sh
       backup: runner-job-started.sh.bak.pre-c2b-20260815T013533Z      (pre-C2b)
       backup: runner-job-started.sh.bak.pre-pushfix-20260815T022031Z  (pre-push-fix)
-    /home/jonah/.omnibase/runners/docker/runners/git-mirror-refresh.sh
+    ~/.omnibase/runners/docker/runners/git-mirror-refresh.sh
       backup: git-mirror-refresh.sh.bak.pre-c2b-20260815T013834Z
-    /home/jonah/.omnibase/runners/docker/runners/hook-mount-drift-check.sh
+    ~/.omnibase/runners/docker/runners/hook-mount-drift-check.sh
       backup: hook-mount-drift-check.sh.bak.pre-deployrunner-20260815T022152Z
 
 ## Revert
 
 One line, then propagate to the running containers:
 
-    cat /home/jonah/.omnibase/runners/docker/runners/runner-job-started.sh.bak.pre-c2b-20260815T013533Z \
-      > /home/jonah/.omnibase/runners/docker/runners/runner-job-started.sh
+    cat ~/.omnibase/runners/docker/runners/runner-job-started.sh.bak.pre-c2b-20260815T013533Z \
+      > ~/.omnibase/runners/docker/runners/runner-job-started.sh
 
 To disable without editing anything, set `OMNI_GIT_MIRROR_REWRITE_DISABLE=1`
 (the C2 kill switch `OMNI_GIT_MIRROR_DISABLE=1` also disables it).
@@ -186,7 +186,7 @@ executing the previous content.
 This happened during this very deploy: `install` was used at 01:35Z and split
 the inode for all 72 runners. Always write **in place**:
 
-    cat <new-content> > /home/jonah/.omnibase/runners/docker/runners/runner-job-started.sh
+    cat <new-content> > ~/.omnibase/runners/docker/runners/runner-job-started.sh
 
 If the inode is already split, repair it through a container's mount — one
 write fixes every container that shares the stale inode, and it neither
@@ -195,20 +195,20 @@ restarts a container nor disturbs an in-flight job:
     pid=$(docker inspect -f '{{.State.Pid}}' omninode-runner-1)
     sudo nsenter -t "$pid" -m -- mount -o remount,bind,rw /usr/local/bin/runner-job-started.sh
     sudo nsenter -t "$pid" -m -- tee /usr/local/bin/runner-job-started.sh \
-      < /home/jonah/.omnibase/runners/docker/runners/runner-job-started.sh >/dev/null
+      < ~/.omnibase/runners/docker/runners/runner-job-started.sh >/dev/null
     sudo nsenter -t "$pid" -m -- mount -o remount,bind,ro /usr/local/bin/runner-job-started.sh
 
 Containers recreated at different times may hold *different* stale inodes
 (runner-5 did), so always finish with:
 
-    bash /home/jonah/.omnibase/runners/docker/runners/hook-mount-drift-check.sh
+    bash ~/.omnibase/runners/docker/runners/hook-mount-drift-check.sh
 
 and repeat the repair for any container still listed. Post-deploy this reported
 `OK 216 mount(s) checked, all match the host copy`.
 
 ## Log lines to grep in a job
 
-    [c2-mirror-rewrite] onex_change_control pin <sha12> present on mirror; uv git fetch -> git://172.18.0.1:9418/onex_change_control.git (actions/checkout unaffected).
+    [c2-mirror-rewrite] onex_change_control pin <sha12> present on mirror; uv git fetch -> git://<docker-bridge-gateway>:9418/onex_change_control.git (actions/checkout unaffected).
     [c2-mirror-rewrite] onex_change_control pin <sha12> not served by ...; leaving uv on github.com (fail-open).
     [c2-mirror-rewrite] could not read uv.lock at <sha>; leaving uv on github.com (fail-open).
 
@@ -228,8 +228,8 @@ above.
 
 See above. One-line revert:
 
-    cat /home/jonah/.omnibase/runners/docker/runners/runner-job-started.sh.bak.pre-pushfix-20260815T022031Z \
-      > /home/jonah/.omnibase/runners/docker/runners/runner-job-started.sh
+    cat ~/.omnibase/runners/docker/runners/runner-job-started.sh.bak.pre-pushfix-20260815T022031Z \
+      > ~/.omnibase/runners/docker/runners/runner-job-started.sh
 
 (then propagate to containers -- see "bind-mounts are by inode" above).
 
@@ -264,8 +264,8 @@ even at next restart; it was repaired the same way.
 
 Revert:
 
-    cat /home/jonah/.omnibase/runners/docker/runners/hook-mount-drift-check.sh.bak.pre-deployrunner-20260815T022152Z \
-      > /home/jonah/.omnibase/runners/docker/runners/hook-mount-drift-check.sh
+    cat ~/.omnibase/runners/docker/runners/hook-mount-drift-check.sh.bak.pre-deployrunner-20260815T022152Z \
+      > ~/.omnibase/runners/docker/runners/hook-mount-drift-check.sh
 
 Note this checker runs from cron every 15 minutes
 (`>> /tmp/hook-mount-drift.log`), so reverting it re-blinds that cron to the
@@ -285,5 +285,5 @@ Post-fix state: `OK 219 mount(s) checked, all match the host copy`.
   missing-SHA case: `pin ... not served by ...; leaving uv on github.com
   (fail-open)`, **no** `GIT_CONFIG_*` written, hook rc=0. The job degrades to
   github.com; it does not fail.
-- Scoping: `.git` URL -> `From git://172.18.0.1:9418/...`; no-suffix URL ->
+- Scoping: `.git` URL -> `From git://<docker-bridge-gateway>:9418/...`; no-suffix URL ->
   `git-remote-https https://github.com/...`; push -> github.com.
