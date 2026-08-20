@@ -34,7 +34,7 @@ jobs:
     # (github.event_name != 'pull_request' short-circuits). Main-boundary
     # carve-out unchanged: any PR targeting main always runs this job.
     if: github.event_name != 'pull_request' || github.base_ref != 'dev' || !github.event.pull_request.draft || contains(github.event.pull_request.labels.*.name, 'ci:ready')
-    uses: OmniNode-ai/omniclaude/.github/workflows/deploy-gate-reusable.yml@70718ddb45f6df5eb5e07159f2ae812efb1da7db
+    uses: OmniNode-ai/omniclaude/.github/workflows/deploy-gate-reusable.yml@fcbc85f5642f07e15fe1d6b1c168c96883d16ac3
     secrets: inherit
     with:
       contracts-dir: contracts

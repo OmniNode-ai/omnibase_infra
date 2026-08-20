@@ -100,5 +100,12 @@ acks: "${KAFKA_ACKS:-all}"
 # Recommended for exactly-once semantics
 enable_idempotence: ${KAFKA_ENABLE_IDEMPOTENCE:-true}
 # Maximum size in bytes for a Kafka produce request (passed to AIOKafkaProducer)
-# Must align with broker-side max.message.bytes
-max_request_size: ${KAFKA_MAX_REQUEST_SIZE:-4194304}
+# Must equal broker-side message.max.bytes (OMN-16267). Was 4194304 (4 MiB),
+# which did not match the broker's actual ~1MB limit -- every payload between
+# ~1MB and 4MiB passed this client-side check, then burned the full retry
+# budget against a guaranteed broker rejection before failing. 1048588 is the
+# measured effective MSK broker limit (binary-searched: 0.9MB accepted, 1.0MB
+# rejected) and is also stock Kafka's own message.max.bytes default -- the
+# broker was never customized above it. Raising the broker limit instead is a
+# separate AWS/MSK infra change with its own approval path, out of scope here.
+max_request_size: ${KAFKA_MAX_REQUEST_SIZE:-1048588}

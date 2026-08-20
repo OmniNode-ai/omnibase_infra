@@ -86,7 +86,7 @@ gates:
     producer_kind: cross_repo
     caller_workflow: deploy-gate.yml
     caller_job: deploy-gate
-    cross_repo_ref: "OmniNode-ai/omniclaude/.github/workflows/deploy-gate-reusable.yml@ff230264ac3300d7ced43564dc921f44558110fe"
+    cross_repo_ref: "OmniNode-ai/omniclaude/.github/workflows/deploy-gate-reusable.yml@fcbc85f5642f07e15fe1d6b1c168c96883d16ac3"
     # OMN-16216 draft-state CI admission gate: the caller job now carries
     # `if: github.event_name != 'pull_request' || github.base_ref != 'dev' ||
     # !github.event.pull_request.draft ||
