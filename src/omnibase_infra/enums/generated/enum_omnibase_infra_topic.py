@@ -38,6 +38,7 @@ class EnumOmnibaseInfraTopic(str, Enum):
     CMD_RUNNER_FLEET_HEALTH_EVALUATE_V1 = "onex.cmd.omnibase-infra.runner-fleet-health-evaluate.v1"  # onex.cmd.omnibase-infra.runner-fleet-health-evaluate.v1
     CMD_RUNNER_FLEET_MAINTAIN_START_V1 = "onex.cmd.omnibase-infra.runner-fleet-maintain-start.v1"  # onex.cmd.omnibase-infra.runner-fleet-maintain-start.v1
     CMD_RUNNER_FLEET_SNAPSHOT_GATHER_V1 = "onex.cmd.omnibase-infra.runner-fleet-snapshot-gather.v1"  # onex.cmd.omnibase-infra.runner-fleet-snapshot-gather.v1
+    CMD_SAVINGS_CORRELATION_BATCH_COMPUTE_V1 = "onex.cmd.omnibase-infra.savings-correlation-batch-compute.v1"  # onex.cmd.omnibase-infra.savings-correlation-batch-compute.v1
     CMD_TOPIC_MIGRATION_EXECUTE_V1 = "onex.cmd.omnibase-infra.topic-migration-execute.v1"  # onex.cmd.omnibase-infra.topic-migration-execute.v1
     CMD_VALIDATION_LEDGER_APPEND_V1 = "onex.cmd.omnibase-infra.validation-ledger-append.v1"  # onex.cmd.omnibase-infra.validation-ledger-append.v1
     CMD_VECTOR_STORE_REQUEST_V1 = "onex.cmd.omnibase-infra.vector-store-request.v1"  # onex.cmd.omnibase-infra.vector-store-request.v1

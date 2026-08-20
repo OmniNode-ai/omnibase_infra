@@ -2960,8 +2960,23 @@
       "package": "omnibase_infra",
       "type_scoped": false
     },
+    "dispatcher.auto.node_savings_estimation_compute.HandlerSavingsCorrelation.savings_correlation_batch_compute_0c4be80d": {
+      "category": "command",
+      "contract_name": "node_savings_estimation_compute",
+      "event_model_module": null,
+      "event_model_name": null,
+      "handler_id": "dispatcher.auto.node_savings_estimation_compute.HandlerSavingsCorrelation.savings_correlation_batch_compute_0c4be80d",
+      "handler_module": "omnibase_infra.nodes.node_savings_estimation_compute.handlers.handler_savings_correlation",
+      "handler_name": "HandlerSavingsCorrelation",
+      "message_types": [
+        "omnibase-infra.savings-correlation-batch-compute",
+        "onex.cmd.omnibase-infra.savings-correlation-batch-compute.v1"
+      ],
+      "package": "omnibase_infra",
+      "type_scoped": false
+    },
     "dispatcher.auto.node_savings_estimation_compute.HandlerSavingsEstimation.savings_estimate_548c2375": {
-      "category": "event",
+      "category": "command",
       "contract_name": "node_savings_estimation_compute",
       "event_model_module": null,
       "event_model_name": null,
@@ -2969,20 +2984,8 @@
       "handler_module": "omnibase_infra.nodes.node_savings_estimation_compute.handlers.handler_savings_estimation",
       "handler_name": "HandlerSavingsEstimation",
       "message_types": [
-        "omniclaude.context-injected",
-        "omniclaude.pattern-enforcement",
-        "omniclaude.session-ended",
-        "omniclaude.session-outcome",
-        "omniclaude.validator-catch",
-        "omniintelligence.dispatch-outcome-evaluated",
-        "omniintelligence.llm-call-completed",
-        "onex.evt.omniclaude.context-injected.v1",
-        "onex.evt.omniclaude.pattern-enforcement.v1",
-        "onex.evt.omniclaude.session-ended.v1",
-        "onex.evt.omniclaude.session-outcome.v1",
-        "onex.evt.omniclaude.validator-catch.v1",
-        "onex.evt.omniintelligence.dispatch-outcome-evaluated.v1",
-        "onex.evt.omniintelligence.llm-call-completed.v1"
+        "omnibase-infra.savings-correlation-batch-compute",
+        "onex.cmd.omnibase-infra.savings-correlation-batch-compute.v1"
       ],
       "package": "omnibase_infra",
       "type_scoped": false
@@ -3235,10 +3238,10 @@
       },
       "contracts_discovered": 133,
       "discovery_errors": 0,
-      "distinct_subscribe_topics": 108,
-      "probe_count": 1046,
-      "registered_dispatchers": 114,
-      "registered_routes": 124,
+      "distinct_subscribe_topics": 103,
+      "probe_count": 1036,
+      "registered_dispatchers": 115,
+      "registered_routes": 119,
       "type_scoped_dispatchers": 69
     },
     "duplicate_winners": [],
@@ -3279,7 +3282,7 @@
       "omnimemory"
     ],
     "fixture_version": "v2",
-    "generated_at_utc": "2026-08-19T17:23:46.955055+00:00",
+    "generated_at_utc": "2026-08-20T13:24:31.887400+00:00",
     "installed_package_versions": {
       "omnibase-core": "0.46.8",
       "omnibase-infra": "0.38.7",
@@ -3659,6 +3662,24 @@
         "status": "no_dispatcher"
       },
       "topic": "onex.cmd.omnibase-infra.runner-fleet-snapshot-gather.v1"
+    },
+    "P1a::onex.cmd.omnibase-infra.savings-correlation-batch-compute.v1": {
+      "family": "P1_topic_event_type_matrix",
+      "input": {
+        "event_type": "omnibase-infra.savings-correlation-batch-compute",
+        "payload": "_DictPayload"
+      },
+      "selection": {
+        "dispatcher_ids": [
+          "dispatcher.auto.node_savings_estimation_compute.HandlerSavingsEstimation.savings_estimate_548c2375",
+          "dispatcher.auto.node_savings_estimation_compute.HandlerSavingsCorrelation.savings_correlation_batch_compute_0c4be80d"
+        ],
+        "dlq_topic": null,
+        "message_category": "command",
+        "message_type": "omnibase-infra.savings-correlation-batch-compute",
+        "status": "success"
+      },
+      "topic": "onex.cmd.omnibase-infra.savings-correlation-batch-compute.v1"
     },
     "P1a::onex.cmd.omnibase-infra.topic-migration-execute.v1": {
       "family": "P1_topic_event_type_matrix",
@@ -4421,108 +4442,6 @@
       },
       "topic": "onex.evt.omnibase-infra.topic-migration-lifecycle.v1"
     },
-    "P1a::onex.evt.omniclaude.context-injected.v1": {
-      "family": "P1_topic_event_type_matrix",
-      "input": {
-        "event_type": "omniclaude.context-injected",
-        "payload": "_DictPayload"
-      },
-      "selection": {
-        "dispatcher_ids": [
-          "dispatcher.auto.node_savings_estimation_compute.HandlerSavingsEstimation.savings_estimate_548c2375"
-        ],
-        "dlq_topic": null,
-        "message_category": "event",
-        "message_type": "omniclaude.context-injected",
-        "status": "success"
-      },
-      "topic": "onex.evt.omniclaude.context-injected.v1"
-    },
-    "P1a::onex.evt.omniclaude.pattern-enforcement.v1": {
-      "family": "P1_topic_event_type_matrix",
-      "input": {
-        "event_type": "omniclaude.pattern-enforcement",
-        "payload": "_DictPayload"
-      },
-      "selection": {
-        "dispatcher_ids": [
-          "dispatcher.auto.node_savings_estimation_compute.HandlerSavingsEstimation.savings_estimate_548c2375"
-        ],
-        "dlq_topic": null,
-        "message_category": "event",
-        "message_type": "omniclaude.pattern-enforcement",
-        "status": "success"
-      },
-      "topic": "onex.evt.omniclaude.pattern-enforcement.v1"
-    },
-    "P1a::onex.evt.omniclaude.session-ended.v1": {
-      "family": "P1_topic_event_type_matrix",
-      "input": {
-        "event_type": "omniclaude.session-ended",
-        "payload": "_DictPayload"
-      },
-      "selection": {
-        "dispatcher_ids": [
-          "dispatcher.auto.node_savings_estimation_compute.HandlerSavingsEstimation.savings_estimate_548c2375"
-        ],
-        "dlq_topic": null,
-        "message_category": "event",
-        "message_type": "omniclaude.session-ended",
-        "status": "success"
-      },
-      "topic": "onex.evt.omniclaude.session-ended.v1"
-    },
-    "P1a::onex.evt.omniclaude.session-outcome.v1": {
-      "family": "P1_topic_event_type_matrix",
-      "input": {
-        "event_type": "omniclaude.session-outcome",
-        "payload": "_DictPayload"
-      },
-      "selection": {
-        "dispatcher_ids": [
-          "dispatcher.auto.node_savings_estimation_compute.HandlerSavingsEstimation.savings_estimate_548c2375"
-        ],
-        "dlq_topic": null,
-        "message_category": "event",
-        "message_type": "omniclaude.session-outcome",
-        "status": "success"
-      },
-      "topic": "onex.evt.omniclaude.session-outcome.v1"
-    },
-    "P1a::onex.evt.omniclaude.validator-catch.v1": {
-      "family": "P1_topic_event_type_matrix",
-      "input": {
-        "event_type": "omniclaude.validator-catch",
-        "payload": "_DictPayload"
-      },
-      "selection": {
-        "dispatcher_ids": [
-          "dispatcher.auto.node_savings_estimation_compute.HandlerSavingsEstimation.savings_estimate_548c2375"
-        ],
-        "dlq_topic": null,
-        "message_category": "event",
-        "message_type": "omniclaude.validator-catch",
-        "status": "success"
-      },
-      "topic": "onex.evt.omniclaude.validator-catch.v1"
-    },
-    "P1a::onex.evt.omniintelligence.dispatch-outcome-evaluated.v1": {
-      "family": "P1_topic_event_type_matrix",
-      "input": {
-        "event_type": "omniintelligence.dispatch-outcome-evaluated",
-        "payload": "_DictPayload"
-      },
-      "selection": {
-        "dispatcher_ids": [
-          "dispatcher.auto.node_savings_estimation_compute.HandlerSavingsEstimation.savings_estimate_548c2375"
-        ],
-        "dlq_topic": null,
-        "message_category": "event",
-        "message_type": "omniintelligence.dispatch-outcome-evaluated",
-        "status": "success"
-      },
-      "topic": "onex.evt.omniintelligence.dispatch-outcome-evaluated.v1"
-    },
     "P1a::onex.evt.omniintelligence.llm-call-completed.v1": {
       "family": "P1_topic_event_type_matrix",
       "input": {
@@ -4531,7 +4450,6 @@
       },
       "selection": {
         "dispatcher_ids": [
-          "dispatcher.auto.node_savings_estimation_compute.HandlerSavingsEstimation.savings_estimate_548c2375",
           "dispatcher.auto.node_waste_detection_compute.HandlerWasteDetection.waste_detect_53946f25"
         ],
         "dlq_topic": null,
@@ -5340,6 +5258,21 @@
       },
       "topic": "onex.cmd.omnibase-infra.runner-fleet-snapshot-gather.v1"
     },
+    "P1b::onex.cmd.omnibase-infra.savings-correlation-batch-compute.v1": {
+      "family": "P1_topic_event_type_matrix",
+      "input": {
+        "event_type": null,
+        "payload": "_DictPayload"
+      },
+      "selection": {
+        "dispatcher_ids": [],
+        "dlq_topic": "onex.dlq.omnibase-infra.commands.v1",
+        "message_category": "command",
+        "message_type": "_DictPayload",
+        "status": "no_dispatcher"
+      },
+      "topic": "onex.cmd.omnibase-infra.savings-correlation-batch-compute.v1"
+    },
     "P1b::onex.cmd.omnibase-infra.topic-migration-execute.v1": {
       "family": "P1_topic_event_type_matrix",
       "input": {
@@ -6059,96 +5992,6 @@
         "status": "no_dispatcher"
       },
       "topic": "onex.evt.omnibase-infra.topic-migration-lifecycle.v1"
-    },
-    "P1b::onex.evt.omniclaude.context-injected.v1": {
-      "family": "P1_topic_event_type_matrix",
-      "input": {
-        "event_type": null,
-        "payload": "_DictPayload"
-      },
-      "selection": {
-        "dispatcher_ids": [],
-        "dlq_topic": "onex.dlq.omnibase-infra.events.v1",
-        "message_category": "event",
-        "message_type": "_DictPayload",
-        "status": "no_dispatcher"
-      },
-      "topic": "onex.evt.omniclaude.context-injected.v1"
-    },
-    "P1b::onex.evt.omniclaude.pattern-enforcement.v1": {
-      "family": "P1_topic_event_type_matrix",
-      "input": {
-        "event_type": null,
-        "payload": "_DictPayload"
-      },
-      "selection": {
-        "dispatcher_ids": [],
-        "dlq_topic": "onex.dlq.omnibase-infra.events.v1",
-        "message_category": "event",
-        "message_type": "_DictPayload",
-        "status": "no_dispatcher"
-      },
-      "topic": "onex.evt.omniclaude.pattern-enforcement.v1"
-    },
-    "P1b::onex.evt.omniclaude.session-ended.v1": {
-      "family": "P1_topic_event_type_matrix",
-      "input": {
-        "event_type": null,
-        "payload": "_DictPayload"
-      },
-      "selection": {
-        "dispatcher_ids": [],
-        "dlq_topic": "onex.dlq.omnibase-infra.events.v1",
-        "message_category": "event",
-        "message_type": "_DictPayload",
-        "status": "no_dispatcher"
-      },
-      "topic": "onex.evt.omniclaude.session-ended.v1"
-    },
-    "P1b::onex.evt.omniclaude.session-outcome.v1": {
-      "family": "P1_topic_event_type_matrix",
-      "input": {
-        "event_type": null,
-        "payload": "_DictPayload"
-      },
-      "selection": {
-        "dispatcher_ids": [],
-        "dlq_topic": "onex.dlq.omnibase-infra.events.v1",
-        "message_category": "event",
-        "message_type": "_DictPayload",
-        "status": "no_dispatcher"
-      },
-      "topic": "onex.evt.omniclaude.session-outcome.v1"
-    },
-    "P1b::onex.evt.omniclaude.validator-catch.v1": {
-      "family": "P1_topic_event_type_matrix",
-      "input": {
-        "event_type": null,
-        "payload": "_DictPayload"
-      },
-      "selection": {
-        "dispatcher_ids": [],
-        "dlq_topic": "onex.dlq.omnibase-infra.events.v1",
-        "message_category": "event",
-        "message_type": "_DictPayload",
-        "status": "no_dispatcher"
-      },
-      "topic": "onex.evt.omniclaude.validator-catch.v1"
-    },
-    "P1b::onex.evt.omniintelligence.dispatch-outcome-evaluated.v1": {
-      "family": "P1_topic_event_type_matrix",
-      "input": {
-        "event_type": null,
-        "payload": "_DictPayload"
-      },
-      "selection": {
-        "dispatcher_ids": [],
-        "dlq_topic": "onex.dlq.omnibase-infra.events.v1",
-        "message_category": "event",
-        "message_type": "_DictPayload",
-        "status": "no_dispatcher"
-      },
-      "topic": "onex.evt.omniintelligence.dispatch-outcome-evaluated.v1"
     },
     "P1b::onex.evt.omniintelligence.llm-call-completed.v1": {
       "family": "P1_topic_event_type_matrix",
@@ -23717,72 +23560,22 @@
     },
     {
       "contract_name": "node_savings_estimation_compute",
-      "dispatcher_id": "dispatcher.auto.node_savings_estimation_compute.HandlerSavingsEstimation.savings_estimate_548c2375",
-      "handler_id": "dispatcher.auto.node_savings_estimation_compute.HandlerSavingsEstimation.savings_estimate_548c2375",
-      "message_category": "event",
-      "route_id": "route.auto.node_savings_estimation_compute.HandlerSavingsEstimation.savings_estimate_548c2375.onex_evt_omniclaude_context_injected_v1",
-      "topic": "onex.evt.omniclaude.context-injected.v1",
-      "topic_pattern": "*.evt.omniclaude.context-injected.*",
+      "dispatcher_id": "dispatcher.auto.node_savings_estimation_compute.HandlerSavingsCorrelation.savings_correlation_batch_compute_0c4be80d",
+      "handler_id": "dispatcher.auto.node_savings_estimation_compute.HandlerSavingsCorrelation.savings_correlation_batch_compute_0c4be80d",
+      "message_category": "command",
+      "route_id": "route.auto.node_savings_estimation_compute.HandlerSavingsCorrelation.savings_correlation_batch_compute_0c4be80d.onex_cmd_omnibase_infra_savings_correlation_batch_compute_v1",
+      "topic": "onex.cmd.omnibase-infra.savings-correlation-batch-compute.v1",
+      "topic_pattern": "*.cmd.omnibase-infra.savings-correlation-batch-compute.*",
       "type_scoped": false
     },
     {
       "contract_name": "node_savings_estimation_compute",
       "dispatcher_id": "dispatcher.auto.node_savings_estimation_compute.HandlerSavingsEstimation.savings_estimate_548c2375",
       "handler_id": "dispatcher.auto.node_savings_estimation_compute.HandlerSavingsEstimation.savings_estimate_548c2375",
-      "message_category": "event",
-      "route_id": "route.auto.node_savings_estimation_compute.HandlerSavingsEstimation.savings_estimate_548c2375.onex_evt_omniclaude_pattern_enforcement_v1",
-      "topic": "onex.evt.omniclaude.pattern-enforcement.v1",
-      "topic_pattern": "*.evt.omniclaude.pattern-enforcement.*",
-      "type_scoped": false
-    },
-    {
-      "contract_name": "node_savings_estimation_compute",
-      "dispatcher_id": "dispatcher.auto.node_savings_estimation_compute.HandlerSavingsEstimation.savings_estimate_548c2375",
-      "handler_id": "dispatcher.auto.node_savings_estimation_compute.HandlerSavingsEstimation.savings_estimate_548c2375",
-      "message_category": "event",
-      "route_id": "route.auto.node_savings_estimation_compute.HandlerSavingsEstimation.savings_estimate_548c2375.onex_evt_omniclaude_session_ended_v1",
-      "topic": "onex.evt.omniclaude.session-ended.v1",
-      "topic_pattern": "*.evt.omniclaude.session-ended.*",
-      "type_scoped": false
-    },
-    {
-      "contract_name": "node_savings_estimation_compute",
-      "dispatcher_id": "dispatcher.auto.node_savings_estimation_compute.HandlerSavingsEstimation.savings_estimate_548c2375",
-      "handler_id": "dispatcher.auto.node_savings_estimation_compute.HandlerSavingsEstimation.savings_estimate_548c2375",
-      "message_category": "event",
-      "route_id": "route.auto.node_savings_estimation_compute.HandlerSavingsEstimation.savings_estimate_548c2375.onex_evt_omniclaude_session_outcome_v1",
-      "topic": "onex.evt.omniclaude.session-outcome.v1",
-      "topic_pattern": "*.evt.omniclaude.session-outcome.*",
-      "type_scoped": false
-    },
-    {
-      "contract_name": "node_savings_estimation_compute",
-      "dispatcher_id": "dispatcher.auto.node_savings_estimation_compute.HandlerSavingsEstimation.savings_estimate_548c2375",
-      "handler_id": "dispatcher.auto.node_savings_estimation_compute.HandlerSavingsEstimation.savings_estimate_548c2375",
-      "message_category": "event",
-      "route_id": "route.auto.node_savings_estimation_compute.HandlerSavingsEstimation.savings_estimate_548c2375.onex_evt_omniclaude_validator_catch_v1",
-      "topic": "onex.evt.omniclaude.validator-catch.v1",
-      "topic_pattern": "*.evt.omniclaude.validator-catch.*",
-      "type_scoped": false
-    },
-    {
-      "contract_name": "node_savings_estimation_compute",
-      "dispatcher_id": "dispatcher.auto.node_savings_estimation_compute.HandlerSavingsEstimation.savings_estimate_548c2375",
-      "handler_id": "dispatcher.auto.node_savings_estimation_compute.HandlerSavingsEstimation.savings_estimate_548c2375",
-      "message_category": "event",
-      "route_id": "route.auto.node_savings_estimation_compute.HandlerSavingsEstimation.savings_estimate_548c2375.onex_evt_omniintelligence_dispatch_outcome_evaluated_v1",
-      "topic": "onex.evt.omniintelligence.dispatch-outcome-evaluated.v1",
-      "topic_pattern": "*.evt.omniintelligence.dispatch-outcome-evaluated.*",
-      "type_scoped": false
-    },
-    {
-      "contract_name": "node_savings_estimation_compute",
-      "dispatcher_id": "dispatcher.auto.node_savings_estimation_compute.HandlerSavingsEstimation.savings_estimate_548c2375",
-      "handler_id": "dispatcher.auto.node_savings_estimation_compute.HandlerSavingsEstimation.savings_estimate_548c2375",
-      "message_category": "event",
-      "route_id": "route.auto.node_savings_estimation_compute.HandlerSavingsEstimation.savings_estimate_548c2375.onex_evt_omniintelligence_llm_call_completed_v1",
-      "topic": "onex.evt.omniintelligence.llm-call-completed.v1",
-      "topic_pattern": "*.evt.omniintelligence.llm-call-completed.*",
+      "message_category": "command",
+      "route_id": "route.auto.node_savings_estimation_compute.HandlerSavingsEstimation.savings_estimate_548c2375.onex_cmd_omnibase_infra_savings_correlation_batch_compute_v1",
+      "topic": "onex.cmd.omnibase-infra.savings-correlation-batch-compute.v1",
+      "topic_pattern": "*.cmd.omnibase-infra.savings-correlation-batch-compute.*",
       "type_scoped": false
     },
     {
