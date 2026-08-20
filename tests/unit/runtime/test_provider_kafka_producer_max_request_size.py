@@ -22,7 +22,7 @@ class TestProviderKafkaProducerMaxRequestSize:
 
     @pytest.mark.asyncio
     async def test_default_max_request_size_passed(self) -> None:
-        """AIOKafkaProducer gets default 4 MB max_request_size."""
+        """AIOKafkaProducer gets default MSK-aligned max_request_size (OMN-16267)."""
         config = ModelKafkaProducerConfig()
         provider = ProviderKafkaProducer(config)
 
@@ -34,7 +34,7 @@ class TestProviderKafkaProducerMaxRequestSize:
             await provider.create()
 
             call_kwargs = mock_cls.call_args.kwargs
-            assert call_kwargs["max_request_size"] == 4 * 1024 * 1024
+            assert call_kwargs["max_request_size"] == 1_048_588
 
     @pytest.mark.asyncio
     async def test_custom_max_request_size_passed(self) -> None:

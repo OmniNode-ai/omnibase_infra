@@ -19,6 +19,7 @@ Exports:
     InfraRateLimitedError: Infrastructure rate limit errors
     InfraRequestRejectedError: Request rejected by provider (400/422)
     InfraProtocolError: Invalid response format from provider
+    EventPayloadTooLargeError: Publish payload exceeds max_request_size (fail-fast, no retry)
     EnvelopeValidationError: Envelope validation errors (pre-dispatch)
     UnknownHandlerTypeError: Unknown handler type prefix errors
     PolicyRegistryError: Policy registry operation errors
@@ -131,6 +132,7 @@ from omnibase_infra.errors.error_event_registry_fingerprint import (
 )
 from omnibase_infra.errors.error_infra import (
     EnvelopeValidationError,
+    EventPayloadTooLargeError,
     InfraAuthenticationError,
     InfraConnectionError,
     InfraProtocolError,
@@ -193,6 +195,8 @@ __all__: list[str] = [
     # Error catalog (OMN-518)
     "ErrorResolution",
     "EventBusRegistryError",
+    # Payload-size errors (OMN-16267)
+    "EventPayloadTooLargeError",
     # Event registry fingerprint errors
     "EventRegistryFingerprintMismatchError",
     "EventRegistryFingerprintMissingError",
