@@ -27,7 +27,6 @@ from __future__ import annotations
 import asyncio
 import json
 import logging
-import os
 from datetime import UTC, datetime
 from uuid import UUID
 
@@ -48,10 +47,10 @@ from omnibase_infra.observability.runner_health.model_runner_fleet_config import
 
 logger = logging.getLogger(__name__)
 
-# Env-overridable thresholds, defaults mirrored from runner-monitor.sh /
-# healthcheck.sh (OMN-13109, OMN-13912, OMN-13915) so the node and the bash
-# surfaces agree on what "stale"/"old" means during the trust-building period.
-_WEDGE_QUEUE_AGE_SECONDS = int(os.environ.get("WEDGE_QUEUE_AGE_SECONDS", "600"))
+# Thresholds are overlay-resolved through ModelRunnerFleetConfig (OMN-15195);
+# the values below stay mirrored from runner-monitor.sh / healthcheck.sh
+# (OMN-13109, OMN-13912, OMN-13915) so the node and the bash surfaces agree on
+# what "stale"/"old" means during the trust-building period.
 _DEFAULT_WATCH_REPOS = (
     "OmniNode-ai/omnibase_infra",
     "OmniNode-ai/omnibase_core",
@@ -64,7 +63,6 @@ _CODELOAD_FAILURE_SIGNATURES = (
     "fetch-pack",
     "the remote end hung up unexpectedly",
 )
-_CODELOAD_SCAN_LIMIT = int(os.environ.get("RUNNER_CODELOAD_SCAN_LIMIT", "5"))
 
 
 def _optional_count(raw: str) -> int | None:
@@ -82,13 +80,6 @@ def _optional_count(raw: str) -> int | None:
     return None if value < 0 else value
 
 
-def _watch_repos() -> tuple[str, ...]:
-    raw = os.environ.get("WEDGE_WATCH_REPOS", "")
-    if not raw:
-        return _DEFAULT_WATCH_REPOS
-    return tuple(raw.split())
-
-
 class HandlerRunnerFleetSnapshot:
     """Gathers a read-only, facts-only runner-fleet snapshot.
 
@@ -101,7 +92,7 @@ class HandlerRunnerFleetSnapshot:
 
     def __init__(self, config: ModelRunnerFleetConfig | None = None) -> None:
         self._config = config or load_runner_fleet_config()
-        self._watch_repos = _watch_repos()
+        self._watch_repos = self._config.watch_repos or _DEFAULT_WATCH_REPOS
 
     @property
     def handler_type(self) -> EnumHandlerType:
@@ -270,7 +261,7 @@ class HandlerRunnerFleetSnapshot:
         """Fetch oldest-queued-job age + zombie-run candidates across watched repos.
 
         Cross-references OMN-13109's SILENT-WEDGE signal: a queued job aged
-        past ``WEDGE_QUEUE_AGE_SECONDS`` is a zombie-run candidate regardless
+        past the configured wedge queue age is a zombie-run candidate regardless
         of per-runner state; the health COMPUTE node decides what (if
         anything) to recommend.
         """
@@ -308,7 +299,7 @@ class HandlerRunnerFleetSnapshot:
                 age = (now - created).total_seconds()
                 if oldest_age is None or age > oldest_age:
                     oldest_age = age
-                if age >= _WEDGE_QUEUE_AGE_SECONDS:
+                if age >= self._config.wedge_queue_age_seconds:
                     candidates.append(
                         ModelZombieRunCandidate(
                             repo=repo,
@@ -361,7 +352,7 @@ class HandlerRunnerFleetSnapshot:
                 "--status",
                 "failure",
                 "--limit",
-                str(_CODELOAD_SCAN_LIMIT),
+                str(self._config.codeload_scan_limit),
                 "--json",
                 "databaseId,displayTitle",
                 stdout=asyncio.subprocess.PIPE,

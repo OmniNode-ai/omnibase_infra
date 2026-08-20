@@ -17,9 +17,16 @@ class TestMaxRequestSizeConfig:
     """Tests for max_request_size config field."""
 
     def test_max_request_size_default(self) -> None:
-        """max_request_size defaults to 4MB."""
+        """max_request_size defaults to the measured MSK broker limit (OMN-16267).
+
+        Was 4MB (4,194,304), which drifted from the broker's actual effective
+        message.max.bytes (~1MB) -- every payload between ~1MB and 4MiB passed
+        this client-side check, then burned the full retry budget against a
+        guaranteed broker rejection. 1,048,588 is both the measured effective
+        MSK limit and stock Kafka's own message.max.bytes default.
+        """
         config = ModelKafkaEventBusConfig()
-        assert config.max_request_size == 4 * 1024 * 1024  # 4,194,304
+        assert config.max_request_size == 1_048_588
 
     def test_max_request_size_env_override(
         self, monkeypatch: pytest.MonkeyPatch
