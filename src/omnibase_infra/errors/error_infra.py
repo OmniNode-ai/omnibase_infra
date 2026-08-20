@@ -18,6 +18,7 @@ Error Hierarchy:
         ├── InfraRateLimitedError
         ├── InfraRequestRejectedError
         ├── InfraProtocolError
+        ├── EventPayloadTooLargeError
         ├── EnvelopeValidationError
         ├── UnknownHandlerTypeError
         └── ProtocolDependencyResolutionError
@@ -760,6 +761,81 @@ class InfraProtocolError(RuntimeHostError):
         self.status_code = status_code
         self.content_type = content_type
         self.response_body = _sanitized_body
+
+
+class EventPayloadTooLargeError(RuntimeHostError):
+    """Raised when a publish payload exceeds the configured producer size limit.
+
+    Distinct from ``InfraConnectionError`` / ``ProtocolConfigurationError`` because:
+    - The rejection is deterministic on the payload's size, not the broker's
+      availability -- retrying the same payload can never succeed, so callers
+      (and ``EventBusKafka._publish_with_retry``) must NOT burn the bus-level
+      retry budget on it. Every retry attempt would re-raise the identical
+      error at identical cost, purely wasting latency and broker-adjacent load.
+    - It must not count toward circuit-breaker failure thresholds: an
+      oversized payload says nothing about broker health (same rationale as
+      the existing ``UnknownTopicOrPartitionError`` no-retry carve-out).
+
+    Carries ``payload_size_bytes`` and ``max_request_size_bytes`` so the
+    caller/log line can attribute the rejection to the exact size delta
+    without re-deriving it from the message string.
+
+    Example:
+        >>> context = ModelInfraErrorContext(
+        ...     transport_type=EnumInfraTransportType.KAFKA,
+        ...     operation="publish",
+        ...     target_name="kafka.dev",
+        ... )
+        >>> raise EventPayloadTooLargeError(
+        ...     "Payload 2097152 bytes exceeds max_request_size 1048588 bytes",
+        ...     context=context,
+        ...     payload_size_bytes=2097152,
+        ...     max_request_size_bytes=1048588,
+        ...     topic="onex.evt.example.v1",
+        ... )
+
+    .. versionadded:: OMN-16267
+        Producer max_request_size / broker message.max.bytes drift fix --
+        oversized payloads now fail fast instead of burning the retry budget.
+    """
+
+    def __init__(
+        self,
+        message: str,
+        context: ModelInfraErrorContext | None = None,
+        payload_size_bytes: int | None = None,
+        max_request_size_bytes: int | None = None,
+        topic: str | None = None,
+        **extra_context: object,
+    ) -> None:
+        """Initialize EventPayloadTooLargeError.
+
+        Args:
+            message: Human-readable error message
+            context: Bundled infrastructure context
+            payload_size_bytes: The actual (approximate) size of the rejected payload
+            max_request_size_bytes: The configured producer max_request_size ceiling
+            topic: The target topic the publish was rejected for
+            **extra_context: Additional context information
+        """
+        if payload_size_bytes is not None:
+            extra_context = {**extra_context, "payload_size_bytes": payload_size_bytes}
+        if max_request_size_bytes is not None:
+            extra_context = {
+                **extra_context,
+                "max_request_size_bytes": max_request_size_bytes,
+            }
+        if topic is not None:
+            extra_context = {**extra_context, "topic": topic}
+        super().__init__(
+            message=message,
+            error_code=EnumCoreErrorCode.PARAMETER_OUT_OF_RANGE,
+            context=context,
+            **extra_context,
+        )
+        self.payload_size_bytes = payload_size_bytes
+        self.max_request_size_bytes = max_request_size_bytes
+        self.topic = topic
 
 
 class EnvelopeValidationError(RuntimeHostError):
