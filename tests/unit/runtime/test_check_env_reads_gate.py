@@ -600,6 +600,49 @@ class TestCheckEnvReadsGrandfatheredReadEdits:
         assert code == 1
         assert "BLOCKED" in output
 
+    def test_default_value_edit_on_a_multiline_formatted_read_is_allowed(
+        self, tmp_path: Path
+    ) -> None:
+        """OMN-16267: the read's base form splits `os.getenv(` and the quoted
+        name across two lines (a common ruff-format output shape for a call
+        whose default is a non-trivial expression) -- base-name extraction
+        must still see the name, or grandfathering silently never fires for
+        any multi-line-formatted read's default-value maintenance.
+
+        Reproduces the exact shape that blocked a real OMN-16267 commit:
+        `check-env-reads.sh` reported "env-var name 'KAFKA_MAX_REQUEST_SIZE'
+        is not read in this file at HEAD" even though the name WAS read
+        there, just split across lines by ruff-format.
+        """
+        base = 'import os\nA = os.getenv(\n    "SOME_NAME", str(4 * 1024 * 1024)\n)\n'
+        # The edit collapses to one line (ruff-format's typical output once
+        # the default value shortens) -- this is the shape that actually
+        # broke: the diff-side line matches cleanly, only the base-side
+        # multi-line extraction was blind to the name.
+        changed = 'import os\nA = os.getenv("SOME_NAME", str(1_048_588))\n'
+        code, output = _run_change(
+            tmp_path,
+            {"src/mod.py": base},
+            {"src/mod.py": changed},
+        )
+        assert code == 0, output
+
+    def test_new_name_on_a_multiline_formatted_read_is_still_blocked(
+        self, tmp_path: Path
+    ) -> None:
+        """Bidirectional proof: the multi-line fix narrows, it does not
+        blanket-allow every multi-line-formatted read in a changed file."""
+        base = 'import os\nA = os.getenv(\n    "SOME_NAME", "900"\n)\n'
+        changed = base + 'B = os.environ["A_BRAND_NEW_MULTILINE_NAME"]\n'
+        code, output = _run_change(
+            tmp_path,
+            {"src/mod.py": base},
+            {"src/mod.py": changed},
+        )
+        assert code == 1
+        assert "A_BRAND_NEW_MULTILINE_NAME" in output
+        assert "'SOME_NAME' is not read" not in output
+
     def test_a_second_name_added_alongside_a_grandfathered_one_on_one_line(
         self, tmp_path: Path
     ) -> None:
