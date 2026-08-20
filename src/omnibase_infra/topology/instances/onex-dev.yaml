@@ -160,6 +160,11 @@ databases:
               - skill_execution_snapshots
             privileges: [INSERT, SELECT, UPDATE]
             schema: public
+          - object_type: TABLE
+            objects:
+              - delegation_routing_tenant_overlay
+            privileges: [INSERT, SELECT, UPDATE]
+            schema: tenant
         login: true
     schemas:
       omninode_internal:
