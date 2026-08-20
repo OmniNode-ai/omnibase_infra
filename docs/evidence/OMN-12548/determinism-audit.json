@@ -1,103 +1,57 @@
 {
   "epic": "OMN-12525",
   "gate_posture": "Report-only at S0 (design D3). Each entry is a real multi-match tie resolved by registration/insertion order \u2014 a latent production hazard ticketed under OMN-12525, NOT gate-blocking in this parity PR.",
-  "generated_at_utc": "2026-07-02T18:41:20.832207+00:00",
-  "order_sensitive_count": 4,
+  "generated_at_utc": "2026-08-20T13:24:34.823914+00:00",
+  "order_sensitive_count": 2,
   "order_sensitive_probes": [
     {
       "canonical": {
         "dispatcher_ids": [
-          "dispatcher.auto.node_github_pr_poller_effect.HandlerGitHubApiPoll.github_poll_prs_7786448a",
-          "dispatcher.auto.node_registration_orchestrator.HandlerRuntimeTick"
+          "dispatcher.auto.node_savings_estimation_compute.HandlerSavingsEstimation.savings_estimate_548c2375",
+          "dispatcher.auto.node_waste_detection_compute.HandlerWasteDetection.waste_detect_53946f25"
         ],
         "dlq_topic": null,
-        "message_category": "intent",
-        "message_type": "platform.runtime-tick",
+        "message_category": "event",
+        "message_type": "omniintelligence.llm-call-completed",
         "status": "success"
       },
       "permuted": {
         "dispatcher_ids": [
-          "dispatcher.auto.node_registration_orchestrator.HandlerRuntimeTick",
-          "dispatcher.auto.node_github_pr_poller_effect.HandlerGitHubApiPoll.github_poll_prs_7786448a"
+          "dispatcher.auto.node_waste_detection_compute.HandlerWasteDetection.waste_detect_53946f25",
+          "dispatcher.auto.node_savings_estimation_compute.HandlerSavingsEstimation.savings_estimate_548c2375"
         ],
         "dlq_topic": null,
-        "message_category": "intent",
-        "message_type": "platform.runtime-tick",
+        "message_category": "event",
+        "message_type": "omniintelligence.llm-call-completed",
         "status": "success"
       },
-      "probe_id": "P4::dispatcher.auto.node_github_pr_poller_effect.HandlerGitHubApiPoll.github_poll_prs_7786448a::onex.intent.platform.runtime-tick.v1"
+      "probe_id": "P1a::onex.evt.omniintelligence.llm-call-completed.v1"
     },
     {
       "canonical": {
         "dispatcher_ids": [
-          "dispatcher.auto.node_ledger_projection_compute.HandlerLedgerProjection.ledger_project_c56fe78d",
-          "dispatcher.auto.node_registration_orchestrator.HandlerNodeHeartbeat"
+          "dispatcher.auto.node_chain_orchestrator.HandlerChainLearnInitiate",
+          "dispatcher.auto.node_chain_retrieval_effect.HandlerChainRetrieval.chain_retrieve_489f06d3"
         ],
         "dlq_topic": null,
-        "message_category": "event",
-        "message_type": "platform.node-heartbeat",
+        "message_category": "command",
+        "message_type": "omnibase-infra.chain-learn",
         "status": "success"
       },
       "permuted": {
         "dispatcher_ids": [
-          "dispatcher.auto.node_registration_orchestrator.HandlerNodeHeartbeat",
-          "dispatcher.auto.node_ledger_projection_compute.HandlerLedgerProjection.ledger_project_c56fe78d"
+          "dispatcher.auto.node_chain_retrieval_effect.HandlerChainRetrieval.chain_retrieve_489f06d3",
+          "dispatcher.auto.node_chain_orchestrator.HandlerChainLearnInitiate"
         ],
         "dlq_topic": null,
-        "message_category": "event",
-        "message_type": "platform.node-heartbeat",
+        "message_category": "command",
+        "message_type": "omnibase-infra.chain-learn",
         "status": "success"
       },
-      "probe_id": "P4::dispatcher.auto.node_registration_orchestrator.HandlerNodeHeartbeat::onex.evt.platform.node-heartbeat.v1"
-    },
-    {
-      "canonical": {
-        "dispatcher_ids": [
-          "dispatcher.auto.node_ledger_projection_compute.HandlerLedgerProjection.ledger_project_c56fe78d",
-          "dispatcher.auto.node_registration_orchestrator.HandlerNodeIntrospected"
-        ],
-        "dlq_topic": null,
-        "message_category": "event",
-        "message_type": "platform.node-introspection",
-        "status": "success"
-      },
-      "permuted": {
-        "dispatcher_ids": [
-          "dispatcher.auto.node_registration_orchestrator.HandlerNodeIntrospected",
-          "dispatcher.auto.node_ledger_projection_compute.HandlerLedgerProjection.ledger_project_c56fe78d"
-        ],
-        "dlq_topic": null,
-        "message_category": "event",
-        "message_type": "platform.node-introspection",
-        "status": "success"
-      },
-      "probe_id": "P4::dispatcher.auto.node_registration_orchestrator.HandlerNodeIntrospected::onex.evt.platform.node-introspection.v1"
-    },
-    {
-      "canonical": {
-        "dispatcher_ids": [
-          "dispatcher.auto.node_github_pr_poller_effect.HandlerGitHubApiPoll.github_poll_prs_7786448a",
-          "dispatcher.auto.node_registration_orchestrator.HandlerRuntimeTick"
-        ],
-        "dlq_topic": null,
-        "message_category": "intent",
-        "message_type": "platform.runtime-tick",
-        "status": "success"
-      },
-      "permuted": {
-        "dispatcher_ids": [
-          "dispatcher.auto.node_registration_orchestrator.HandlerRuntimeTick",
-          "dispatcher.auto.node_github_pr_poller_effect.HandlerGitHubApiPoll.github_poll_prs_7786448a"
-        ],
-        "dlq_topic": null,
-        "message_category": "intent",
-        "message_type": "platform.runtime-tick",
-        "status": "success"
-      },
-      "probe_id": "P4::dispatcher.auto.node_registration_orchestrator.HandlerRuntimeTick::onex.intent.platform.runtime-tick.v1"
+      "probe_id": "P4::dispatcher.auto.node_chain_orchestrator.HandlerChainLearnInitiate::onex.cmd.omnibase-infra.chain-learn.v1"
     }
   ],
-  "probe_count": 305,
+  "probe_count": 1046,
   "seed": 1,
   "ticket": "OMN-12548"
 }

@@ -37,12 +37,16 @@ class ModelKafkaProducerConfig(BaseModel):
         description="Producer acknowledgment policy",
     )
     max_request_size: int = Field(
-        default=4 * 1024 * 1024,  # 4 MB
+        default=1_048_588,  # OMN-16267: aligned to broker message.max.bytes, not 4 MiB
         ge=1024,
         le=52428800,
         description=(
             "Maximum size in bytes for a Kafka produce request. "
             "Passed to AIOKafkaProducer(max_request_size=...). "
+            "Must equal the broker-side message.max.bytes -- see "
+            "ModelKafkaEventBusConfig.max_request_size (same OMN-16267 "
+            "rationale: this is the second, contract-DI producer surface "
+            "and must not drift from the event-bus producer's limit). "
             "Override via KAFKA_MAX_REQUEST_SIZE env var."
         ),
     )
@@ -69,9 +73,7 @@ class ModelKafkaProducerConfig(BaseModel):
             acks_raw = os.getenv(
                 "KAFKA_ACKS", "all"
             )  # kafka-fallback-ok: tuning param, not broker address
-            max_request_size_raw = os.getenv(
-                "KAFKA_MAX_REQUEST_SIZE", str(4 * 1024 * 1024)
-            )
+            max_request_size_raw = os.getenv("KAFKA_MAX_REQUEST_SIZE", str(1_048_588))
             return cls(
                 bootstrap_servers=bootstrap,
                 timeout_seconds=float(timeout_ms) / 1000.0,
