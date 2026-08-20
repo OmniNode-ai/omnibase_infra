@@ -9,16 +9,52 @@ import json
 from datetime import UTC, datetime
 
 import pytest
-from onex_change_control.models.model_eval_report import (
-    ModelEvalReport,
-    ModelEvalSummary,
-)
 
+from omnibase_core.enums.governance.enum_eval_mode import EnumEvalMode
+from omnibase_core.enums.governance.enum_eval_verdict import EnumEvalVerdict
+from omnibase_core.models.governance.model_eval_report import ModelEvalReport
+from omnibase_core.models.governance.model_eval_run import ModelEvalRun
+from omnibase_core.models.governance.model_eval_run_pair import ModelEvalRunPair
+from omnibase_core.models.governance.model_eval_summary import ModelEvalSummary
 from omnibase_infra.services.eval.eval_event_emitter import (
     EVAL_COMPLETED_TOPIC,
     build_eval_completed_payload,
     serialize_eval_event,
 )
+
+
+def _make_run(task_id: str, mode: EnumEvalMode) -> ModelEvalRun:
+    return ModelEvalRun(
+        run_id=f"run-{task_id}-{mode.value}",
+        task_id=task_id,
+        mode=mode,
+        started_at=datetime(2026, 1, 1, tzinfo=UTC),
+        success=True,
+        git_sha="abc123",
+    )
+
+
+def _make_pairs(better: int, worse: int, neutral: int) -> list[ModelEvalRunPair]:
+    """Build minimal, unique-task_id pairs whose verdicts match the given
+    better/worse/neutral counts, so pair verdicts stay consistent with the
+    report summary (ModelEvalReport.validate_summary_alignment requires
+    summary.total_tasks == len(pairs); this also keeps the per-verdict
+    breakdown honest rather than defaulting every pair to NEUTRAL).
+    """
+    verdicts = (
+        [EnumEvalVerdict.ONEX_BETTER] * better
+        + [EnumEvalVerdict.ONEX_WORSE] * worse
+        + [EnumEvalVerdict.NEUTRAL] * neutral
+    )
+    return [
+        ModelEvalRunPair(
+            task_id=f"task-{i}",
+            onex_on_run=_make_run(f"task-{i}", EnumEvalMode.ONEX_ON),
+            onex_off_run=_make_run(f"task-{i}", EnumEvalMode.ONEX_OFF),
+            verdict=verdict,
+        )
+        for i, verdict in enumerate(verdicts)
+    ]
 
 
 @pytest.fixture
@@ -28,7 +64,7 @@ def sample_report() -> ModelEvalReport:
         suite_id="test-suite",
         suite_version="1.0.0",
         generated_at=datetime(2026, 1, 1, tzinfo=UTC),
-        pairs=[],
+        pairs=_make_pairs(better=6, worse=2, neutral=2),
         summary=ModelEvalSummary(
             total_tasks=10,
             onex_better_count=6,
