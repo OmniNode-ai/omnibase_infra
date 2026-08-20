@@ -17,9 +17,10 @@ from __future__ import annotations
 
 import logging
 
-from onex_change_control.enums.enum_eval_verdict import EnumEvalVerdict
-from onex_change_control.models.model_eval_report import ModelEvalReport
 from pydantic import BaseModel, ConfigDict
+
+from omnibase_core.enums.governance.enum_eval_verdict import EnumEvalVerdict
+from omnibase_core.models.governance.model_eval_report import ModelEvalReport
 
 logger = logging.getLogger(__name__)
 

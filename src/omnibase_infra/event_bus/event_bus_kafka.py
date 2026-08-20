@@ -204,12 +204,14 @@ from aiokafka.errors import (
     BrokerNotAvailableError,
     InvalidPartitionsError,
     KafkaError,
+    MessageSizeTooLargeError,
     UnknownTopicOrPartitionError,
 )
 from aiokafka.structs import TopicPartition
 
 from omnibase_infra.enums import EnumConsumerGroupPurpose, EnumInfraTransportType
 from omnibase_infra.errors import (
+    EventPayloadTooLargeError,
     InfraConnectionError,
     InfraTimeoutError,
     InfraUnavailableError,
@@ -1275,7 +1277,33 @@ class EventBusKafka(
                 )
                 break  # No retry benefit; fall through to error raise
 
-            except KafkaError as e:  # NOTE: UnknownTopicOrPartitionError IS-A KafkaError — its handler MUST appear before this block
+            except MessageSizeTooLargeError as e:
+                # OMN-16267: the payload exceeds the configured max_request_size.
+                # aiokafka raises this synchronously in producer.send()'s
+                # _serialize() step, BEFORE any network I/O -- it is a
+                # deterministic function of the payload's byte size, so
+                # retrying the identical payload can never succeed. Do NOT
+                # record a circuit failure (an oversized payload says nothing
+                # about broker health) and do NOT burn the retry budget with
+                # exponential backoff sleeps (same no-retry-benefit rationale
+                # as the UnknownTopicOrPartitionError branch above).
+                last_exception = e
+                logger.warning(
+                    "Publish payload exceeds max_request_size — skipping retry "
+                    "and circuit failure record (attempt %d, no retry benefit; "
+                    "size is deterministic): %s",
+                    attempt + 1,
+                    topic,
+                    extra={
+                        "topic": topic,
+                        "payload_size_bytes": len(value),
+                        "max_request_size_bytes": self._config.max_request_size,
+                        "correlation_id": str(headers.correlation_id),
+                    },
+                )
+                break  # No retry benefit; fall through to error raise
+
+            except KafkaError as e:  # NOTE: UnknownTopicOrPartitionError IS-A KafkaError, MessageSizeTooLargeError IS-A KafkaError — both handlers MUST appear before this block
                 last_exception = e
                 async with self._circuit_breaker_lock:
                     await self._record_circuit_failure(
@@ -1339,6 +1367,21 @@ class EventBusKafka(
                 context=context,
                 parameter="topic",
                 value=topic,
+            ) from last_exception
+        if isinstance(last_exception, MessageSizeTooLargeError):
+            # OMN-16267: payload exceeds max_request_size — raise as a distinct,
+            # correctly-attributed error rather than InfraConnectionError so
+            # callers can tell "payload too large" from "broker unreachable"
+            # without string-matching the message.
+            payload_size = len(value)
+            raise EventPayloadTooLargeError(
+                f"Publish to topic '{topic}' rejected: payload is {payload_size} "
+                f"bytes, exceeding the configured max_request_size of "
+                f"{self._config.max_request_size} bytes.",
+                context=context,
+                payload_size_bytes=payload_size,
+                max_request_size_bytes=self._config.max_request_size,
+                topic=topic,
             ) from last_exception
         raise InfraConnectionError(
             f"Failed to publish to topic {topic} after {self._max_retry_attempts + 1} attempts",
@@ -1798,6 +1841,14 @@ class EventBusKafka(
             heartbeat_interval_ms=self._config.heartbeat_interval_ms,
             max_poll_interval_ms=self._config.max_poll_interval_ms,
             retry_backoff_ms=self._config.reconnect_backoff_ms,
+            # OMN-16267: must be >= producer max_request_size. aiokafka's own
+            # default (1_048_576) is smaller than this repo's producer default
+            # (1_048_588), so a record at the producer's ceiling would trip
+            # RecordTooLargeError / silent skip-and-advance on the consumer
+            # side otherwise. Keep aligned to the same config field the
+            # producer reads (self._config.max_request_size) rather than a
+            # second independently-tunable value.
+            max_partition_fetch_bytes=self._config.max_request_size,
             **self._build_client_version_kwargs(AIOKafkaConsumer),
             **self._build_auth_kwargs(),
         )
@@ -1925,6 +1976,8 @@ class EventBusKafka(
                     heartbeat_interval_ms=self._config.heartbeat_interval_ms,
                     max_poll_interval_ms=self._config.max_poll_interval_ms,
                     retry_backoff_ms=self._config.reconnect_backoff_ms,
+                    # OMN-16267: see rationale on the initial construction above.
+                    max_partition_fetch_bytes=self._config.max_request_size,
                     **self._build_client_version_kwargs(AIOKafkaConsumer),
                     **self._build_auth_kwargs(),
                 )

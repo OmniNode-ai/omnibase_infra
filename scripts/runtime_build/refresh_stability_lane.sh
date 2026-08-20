@@ -54,6 +54,18 @@
 #                           those grants rest on. Proceeding requires naming EVERY
 #                           live grant id (the acknowledgement is recorded).
 #
+# Optional environment:
+#   RUNTIME_COMPOSE_WAIT_TIMEOUT_SECONDS (OMN-15718)  Bounded wall-clock
+#                           deadline (seconds, default 300) applied to every
+#                           `docker compose ... up ...` call this script and
+#                           deploy-runtime.sh issue (scripts/runtime_build/
+#                           compose_wait_timeout.sh). Closes the 2026-08-05
+#                           defect where the rollback's targeted recreate hung
+#                           indefinitely on a depends_on:condition:service_healthy
+#                           dependency (migration-gate) that could never become
+#                           healthy, never reaching the health-gate/receipt
+#                           stage.
+#
 # Usage:
 #   refresh_stability_lane.sh [--ref <ref>] [--min-contracts <n>] [--execute]
 #
@@ -61,7 +73,12 @@
 #   0  plan printed (dry-run) or refresh SUCCEEDED (health-gate PASS)
 #   1  refresh FAILED and rollback restored a healthy lane (FAILED_ROLLED_BACK)
 #   2  refresh FAILED and rollback ALSO could not restore health -- STOP AND
-#      REPORT, do not retry-until-green
+#      REPORT, do not retry-until-green. Includes FAILED_ROLLBACK_STRANDED_CONTAINERS
+#      (OMN-15718): the rollback recreate timed out or otherwise could not
+#      bring every core-service container back to running, and at least one
+#      was explicitly torn down (docker rm -f) rather than left stranded in
+#      'Created' -- see rollback.stranded_services / rollback.census in the
+#      receipt for exactly which service(s) and pre/post container state.
 #   64 usage / precondition error
 
 set -euo pipefail
@@ -69,6 +86,12 @@ set -euo pipefail
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 REPO_ROOT="$(cd "${SCRIPT_DIR}/../.." && pwd)"
 DEPLOY_RUNTIME="${DEPLOY_RUNTIME:-${REPO_ROOT}/scripts/deploy-runtime.sh}"
+
+# OMN-15718: bounded compose-up deadline + stranded-container reconciliation,
+# shared with deploy-runtime.sh. See that file for RUNTIME_COMPOSE_WAIT_TIMEOUT_SECONDS,
+# compose_up_bounded, reconcile_container_running_state, container_status.
+# shellcheck source=./compose_wait_timeout.sh
+source "${SCRIPT_DIR}/compose_wait_timeout.sh"
 VERIFY_SCRIPT="${SCRIPT_DIR}/verify_stability_refresh.py"
 CONSUMER_GROUPS_FILE="${SCRIPT_DIR}/consumer_groups_stability.yaml"
 
@@ -383,6 +406,11 @@ OMNI_HOME="${OMNI_HOME}" bash "${SCRIPT_DIR}/ensure_runner_clones.sh"
 log "=== Capture pre-state ==="
 
 declare -A PRE_IMAGE_IDS
+# OMN-15718: pre-attempt container STATE census, alongside the pre-attempt
+# image-id census above. Used post-rollback to prove the rollback restored
+# every core service to its pre-attempt running state, not merely that image
+# tags point at the right digest again.
+declare -A PRE_CONTAINER_STATUS
 for svc in "${CORE_SERVICES[@]}"; do
     container="${CORE_CONTAINERS[${svc}]}"
     image_id="$(docker inspect "${container}" --format '{{.Image}}' 2>/dev/null || true)"
@@ -391,7 +419,8 @@ for svc in "${CORE_SERVICES[@]}"; do
         exit 64
     fi
     PRE_IMAGE_IDS["${svc}"]="${image_id}"
-    log "  ${svc} (${container}): pre_image_id=${image_id}"
+    PRE_CONTAINER_STATUS["${svc}"]="$(container_status "${container}")"
+    log "  ${svc} (${container}): pre_image_id=${image_id} pre_status=${PRE_CONTAINER_STATUS[${svc}]}"
 done
 
 OLD_INFRA_REVISION="$(docker inspect "${CORE_CONTAINERS[omninode-runtime]}" \
@@ -525,7 +554,13 @@ GATE1_OVERALL="$(jq -r '.overall // "INFRA_ERROR"' "${GATE1_JSON}" 2>/dev/null |
 log "health-gate result: ${GATE1_OVERALL} (exit ${GATE_EXIT})"
 cat "${GATE1_JSON}" >&2
 
+# OMN-15718: declared here (not just inside the rollback branch below) so
+# receipt assembly at the bottom of the script can reference them under
+# `set -u` even on the no-rollback (health-gate PASS) path.
 ROLLBACK_TRIGGERED=false
+ROLLBACK_RECREATE_TIMED_OUT=false
+STRANDED_SERVICES=()
+declare -A POST_CONTAINER_STATUS
 GATE2_JSON=""
 RESULT="FAILED"
 
@@ -555,15 +590,71 @@ else
     # Guarded (never let a compose failure here abort the script under set -e
     # -- a rollback-recreate failure must still reach the health-gate +
     # receipt below, not crash silently with no receipt at all).
+    #
+    # OMN-15718: bounded via compose_up_bounded(). `--no-deps` skips STARTING
+    # dependencies, but compose still honors each target service's own
+    # depends_on:condition:service_healthy before creating/starting it (e.g.
+    # migration-gate for runtime-effects/runtime-worker) -- observed live
+    # 2026-08-05: that dependency can never become healthy once
+    # forward-migration has failed, and the unbounded `up` call hung
+    # indefinitely instead of failing fast, never reaching the health-gate or
+    # writing a receipt.
     ROLLBACK_RECREATE_EXIT=0
-    docker compose -p "${COMPOSE_PROJECT}" \
+    ROLLBACK_RECREATE_TIMED_OUT=false
+    compose_up_bounded "${RUNTIME_COMPOSE_WAIT_TIMEOUT_SECONDS}" \
+        docker compose -p "${COMPOSE_PROJECT}" \
         -f "${INFRA_CLONE}/docker/docker-compose.infra.yml" \
         -f "${INFRA_CLONE}/docker/docker-compose.stability-test.yml" \
         --profile runtime \
         up -d --no-deps --no-build --force-recreate \
         "${CORE_SERVICES[@]}" || ROLLBACK_RECREATE_EXIT=$?
-    if [[ "${ROLLBACK_RECREATE_EXIT}" -ne 0 ]]; then
+    if [[ "${ROLLBACK_RECREATE_EXIT}" -eq 124 ]]; then
+        ROLLBACK_RECREATE_TIMED_OUT=true
+        err "ROLLBACK_RECREATE_TIMEOUT: targeted recreate did not complete within ${RUNTIME_COMPOSE_WAIT_TIMEOUT_SECONDS}s -- killed."
+        err "  Proceeding to container-state reconciliation below instead of hanging (OMN-15718)."
+    elif [[ "${ROLLBACK_RECREATE_EXIT}" -ne 0 ]]; then
         err "rollback targeted-recreate exited ${ROLLBACK_RECREATE_EXIT} -- proceeding to health-gate anyway (it will report the true state)"
+    fi
+
+    # OMN-15718: reconcile every core-service container back to running (or
+    # explicitly tear it down) BEFORE the health-gate re-verify below -- a
+    # container merely 'Created' (never started) is not a lane the health-gate
+    # can fairly judge, and it is exactly the state a timed-out or partial
+    # recreate can leave behind. Never leave a container stranded requiring
+    # manual `docker start`/`docker ps` forensics.
+    log "=== Reconciling core-service container state post-rollback ==="
+    STRANDED_SERVICES=()
+    for svc in "${CORE_SERVICES[@]}"; do
+        container="${CORE_CONTAINERS[${svc}]}"
+        if ! reconcile_container_running_state "${container}" "${svc}"; then
+            STRANDED_SERVICES+=("${svc}")
+        fi
+    done
+
+    # OMN-15718: verify the post-rollback container-state census matches the
+    # pre-attempt census (step 1) -- proves the rollback restored actual
+    # container start state, not merely image tags.
+    log "=== Post-rollback container-state census ==="
+    declare -A POST_CONTAINER_STATUS
+    CENSUS_MATCHES=true
+    for svc in "${CORE_SERVICES[@]}"; do
+        container="${CORE_CONTAINERS[${svc}]}"
+        POST_CONTAINER_STATUS["${svc}"]="$(container_status "${container}")"
+        if [[ "${POST_CONTAINER_STATUS[${svc}]}" == "${PRE_CONTAINER_STATUS[${svc}]}" ]]; then
+            log "  ${svc}: pre=${PRE_CONTAINER_STATUS[${svc}]} post=${POST_CONTAINER_STATUS[${svc}]} (match)"
+        else
+            err "  ${svc}: pre=${PRE_CONTAINER_STATUS[${svc}]} post=${POST_CONTAINER_STATUS[${svc}]} (MISMATCH)"
+            CENSUS_MATCHES=false
+        fi
+    done
+    if [[ "${CENSUS_MATCHES}" == true ]]; then
+        log "Post-rollback census MATCHES pre-attempt census for all ${#CORE_SERVICES[@]} core services."
+    else
+        err "Post-rollback census does NOT fully match pre-attempt census (see per-service lines above)."
+    fi
+    if [[ "${#STRANDED_SERVICES[@]}" -gt 0 ]]; then
+        err "STRANDED_CONTAINERS_TORN_DOWN: ${STRANDED_SERVICES[*]} could not be recovered to running and were torn down (docker rm -f)."
+        err "  The rollback did NOT fully restore prior container start state for these services -- a full recreate (not just an image-tag rollback) is required."
     fi
 
     log "=== Re-verifying health after rollback ==="
@@ -625,6 +716,20 @@ else
         err "        images ALSO failed health-gate. Manual intervention required."
         err "=============================================================="
     fi
+
+    # OMN-15718: a torn-down (stranded) container means the rollback did NOT
+    # fully restore prior container start state regardless of what the
+    # health-gate concluded -- override to a distinct, typed RESULT so a
+    # caller can act on this specific failure mode (a targeted recreate is
+    # needed, not just a re-run) without manual docker start/docker ps
+    # forensics. Takes priority over FAILED_ROLLED_BACK: a lane missing a
+    # service is not actually "rolled back to healthy" even if a
+    # not-yet-comprehensive health probe happened to pass.
+    if [[ "${#STRANDED_SERVICES[@]}" -gt 0 ]]; then
+        RESULT="FAILED_ROLLBACK_STRANDED_CONTAINERS"
+        err "RESULT overridden to FAILED_ROLLBACK_STRANDED_CONTAINERS: ${STRANDED_SERVICES[*]}"
+        err "  were torn down and are not running. See rollback.stranded_services in the receipt."
+    fi
 fi
 
 # =============================================================================
@@ -638,6 +743,14 @@ ROLLBACK_GATE_JSON="null"
 if [[ -n "${GATE2_JSON}" && -f "${GATE2_JSON}" ]]; then
     ROLLBACK_GATE_JSON="$(cat "${GATE2_JSON}")"
 fi
+# OMN-15718: rollback container-state reconciliation detail -- pre/post
+# census per core service, which (if any) were torn down, and whether the
+# rollback recreate itself hit the bounded timeout. Present (possibly empty)
+# on every run so a receipt reader never has to special-case the no-rollback
+# path.
+STRANDED_SERVICES_JSON="$(printf '%s\n' "${STRANDED_SERVICES[@]:-}" | jq -R 'select(length > 0)' | jq -s '.')"
+PRE_STATUS_JSON="$(for svc in "${CORE_SERVICES[@]}"; do printf '%s\t%s\n' "${svc}" "${PRE_CONTAINER_STATUS[${svc}]:-unknown}"; done | jq -Rn '[inputs | split("\t") | {(.[0]): .[1]}] | add')"
+POST_STATUS_JSON="$(for svc in "${CORE_SERVICES[@]}"; do printf '%s\t%s\n' "${svc}" "${POST_CONTAINER_STATUS[${svc}]:-unknown}"; done | jq -Rn '[inputs | split("\t") | {(.[0]): .[1]}] | add')"
 
 RECEIPT_PATH="${HISTORY_DIR}/${UTC_NOW}-${NEW_INFRA_SHA_SHORT}.json"
 jq -n \
@@ -651,6 +764,10 @@ jq -n \
     --slurpfile health_gate "${GATE1_JSON}" \
     --argjson rollback_triggered "${ROLLBACK_TRIGGERED}" \
     --argjson rollback_gate "${ROLLBACK_GATE_JSON}" \
+    --argjson rollback_recreate_timed_out "${ROLLBACK_RECREATE_TIMED_OUT}" \
+    --argjson rollback_stranded_services "${STRANDED_SERVICES_JSON}" \
+    --argjson rollback_census_pre "${PRE_STATUS_JSON}" \
+    --argjson rollback_census_post "${POST_STATUS_JSON}" \
     --argjson attribution "${ATTRIBUTION_RECORD_JSON}" \
     --arg result "${RESULT}" \
     '{
@@ -661,7 +778,13 @@ jq -n \
         ancestry_proof: {merge_base_is_ancestor: $ancestry_ok, commands: $ancestry_cmds},
         build_scope: $build_scope,
         health_gate: $health_gate[0],
-        rollback: {triggered: $rollback_triggered, gate: $rollback_gate},
+        rollback: {
+            triggered: $rollback_triggered,
+            gate: $rollback_gate,
+            recreate_timed_out: $rollback_recreate_timed_out,
+            stranded_services: $rollback_stranded_services,
+            census: {pre: $rollback_census_pre, post: $rollback_census_post}
+        },
         attribution: $attribution,
         result: $result
     }' > "${RECEIPT_PATH}"
