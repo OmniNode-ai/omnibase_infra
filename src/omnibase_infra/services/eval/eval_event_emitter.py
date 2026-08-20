@@ -17,8 +17,7 @@ import json
 import logging
 from datetime import UTC, datetime
 
-from onex_change_control.models.model_eval_report import ModelEvalReport
-
+from omnibase_core.models.governance.model_eval_report import ModelEvalReport
 from omnibase_infra.topics import SUFFIX_EVAL_COMPLETED
 
 logger = logging.getLogger(__name__)
