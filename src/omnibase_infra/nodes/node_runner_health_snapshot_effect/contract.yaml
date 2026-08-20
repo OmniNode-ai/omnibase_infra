@@ -33,15 +33,22 @@
 #     reported as unknown (empty health, None counts, None disk) and are never
 #     defaulted to a passing value, so a failed probe becomes an UNKNOWN readiness
 #     signal downstream rather than a fabricated PASS.
+#   - OMN-15195: replaced this handler's direct env reads (WEDGE_QUEUE_AGE_SECONDS,
+#     RUNNER_CODELOAD_SCAN_LIMIT, WEDGE_WATCH_REPOS) with the typed
+#     ModelRunnerFleetConfig (observability.runner_health.model_runner_fleet_config),
+#     loaded once at construction via load_runner_fleet_config() from
+#     config/runner_fleet.yaml. wedge_queue_age_seconds / codeload_scan_limit /
+#     watch_repos are now config-model fields, not per-call env reads; defaults
+#     are unchanged (600s / 5 / built-in OmniNode repo list).
 name: "node_runner_health_snapshot_effect"
 contract_version:
   major: 1
   minor: 1
-  patch: 0
+  patch: 1
 node_version:
   major: 1
   minor: 1
-  patch: 0
+  patch: 1
 node_type: "EFFECT_GENERIC"
 description: >
   Effect node for runner-fleet snapshot gathering. Publishes read-only, facts-only health snapshots from GitHub Actions runners + Docker inspection via the event bus, including container health status, Runner.Listener process/orphan topology, and runner-host disk usage (OMN-15255). Completed for OMN-13942 (was a contract stub since OMN-6091).
@@ -103,8 +110,8 @@ metadata:
   author: "OmniNode Team"
   license: "MIT"
   created: "2026-03-31"
-  updated: "2026-07-27"
-  ticket: "OMN-15255"
+  updated: "2026-07-26"
+  ticket: "OMN-15195"
   tags:
     - effect
     - health

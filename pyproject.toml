@@ -108,7 +108,7 @@ dependencies = [
     "aiofiles>=23.2.1,<26.0.0",
     "dependency-injector>=4.48.1,<5.0.0", # Enhanced dependency injection
     # Tracing and observability dependencies
-    "sqlparse>=0.4.4,<0.6.0", # For secure SQL query sanitization in tracing
+    "sqlparse>=0.6.0,<0.7.0", # For secure SQL query sanitization in tracing; floor raised to 0.6.0 to fix CVE-2026-54284/59893/71491 (OMN-16170)
     "structlog>=23.2.0,<27.0.0", # Structured logging
     "prometheus-client>=0.19.0,<0.27.0", # Metrics collection
     "opentelemetry-api>=1.27.0,<2.0.0", # OpenTelemetry API
@@ -579,6 +579,7 @@ node_dlq_replay_effect = "omnibase_infra.nodes.node_dlq_replay_effect"
 node_emit_daemon_runtime = "omnibase_infra.nodes.node_emit_daemon_runtime"
 node_event_bus_wiring_effect = "omnibase_infra.nodes.node_event_bus_wiring_effect"
 node_event_forward_effect = "omnibase_infra.nodes.node_event_forward_effect"
+node_evidence_autoclose_sweep_effect = "omnibase_infra.nodes.node_evidence_autoclose_sweep_effect"
 node_gateway_attach_effect = "omnibase_infra.nodes.node_gateway_attach_effect"
 node_gateway_link_health_projection_compute = "omnibase_infra.nodes.node_gateway_link_health_projection_compute"
 node_gateway_link_health_write_effect = "omnibase_infra.nodes.node_gateway_link_health_write_effect"

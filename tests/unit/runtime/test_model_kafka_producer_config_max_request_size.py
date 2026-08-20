@@ -16,10 +16,15 @@ from omnibase_infra.runtime.models.model_kafka_producer_config import (
 class TestModelKafkaProducerConfigMaxRequestSize:
     """Verify max_request_size field on ModelKafkaProducerConfig."""
 
-    def test_default_is_4mb(self) -> None:
-        """Default max_request_size is 4 MB."""
+    def test_default_is_msk_broker_limit(self) -> None:
+        """Default max_request_size matches the measured MSK broker limit (OMN-16267).
+
+        Was 4MB, which drifted from the broker's actual effective
+        message.max.bytes (~1MB) -- see OMN-16267 for the measured value and
+        the fail-fast retry-budget consequence of the mismatch.
+        """
         config = ModelKafkaProducerConfig()
-        assert config.max_request_size == 4 * 1024 * 1024
+        assert config.max_request_size == 1_048_588
 
     def test_custom_value_accepted(self) -> None:
         """Explicit max_request_size within valid range is accepted."""
@@ -45,7 +50,7 @@ class TestModelKafkaProducerConfigMaxRequestSize:
         assert config.max_request_size == 8_388_608
 
     def test_from_env_default_when_unset(self, monkeypatch: pytest.MonkeyPatch) -> None:
-        """from_env() uses 4 MB default when env var is not set."""
+        """from_env() uses the MSK-aligned default (1_048_588) when env var is not set."""
         monkeypatch.delenv("KAFKA_MAX_REQUEST_SIZE", raising=False)
         config = ModelKafkaProducerConfig.from_env()
-        assert config.max_request_size == 4 * 1024 * 1024
+        assert config.max_request_size == 1_048_588

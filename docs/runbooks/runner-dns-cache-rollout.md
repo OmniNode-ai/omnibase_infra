@@ -8,7 +8,7 @@ it in-repo means the rollout is reviewable before it runs.
 ## What this is
 
 All 64+ self-hosted runner containers resolve DNS through `systemd-resolved`
-pointed at a single LAN-router upstream (`192.168.86.1`, with `8.8.8.8` as
+pointed at a single LAN-router upstream (`<lan-gateway>`, with `8.8.8.8` as
 fallback) — there is no local caching layer. Under a 64+ concurrent job-start
 burst (all runners cold-starting `uv sync` / `actions/checkout` near
 simultaneously), every container fires its own upstream query for the same
@@ -44,7 +44,7 @@ runner count — the other three preconditions are independent gates.
 
 ## Rollout (gated — run only after explicit operator go)
 
-Run on the runner host (`.201` / `192.168.86.201`). This is a NEW service; it
+Run on the runner host (`.201` / `<onex-host>`). This is a NEW service; it
 does not mutate any prod daemon or the runner containers on its own.
 
 ### 1. Freeze the pins
@@ -60,7 +60,7 @@ docker compose -f docker/docker-compose.dns-cache.yml up -d --build
 # wait for healthy:
 docker inspect --format '{{.State.Health.Status}}' omninode-dns-cache
 # prove it actually resolves through itself:
-dig +time=3 +tries=1 @192.168.86.201 files.pythonhosted.org
+dig +time=3 +tries=1 @<onex-host> files.pythonhosted.org
 ```
 
 ### 3. Wire 2-4 canary runners (leave the rest on direct router DNS)
@@ -79,7 +79,7 @@ docker compose \
 Default is 2 canary runners (`omninode-runner-1`, `omninode-runner-2`); extend
 to 3-4 by uncommenting `omninode-runner-3`/`omninode-runner-4` in
 `docker-compose.dns-canary.yml` and adding them to the command above. The
-router (`192.168.86.1`) stays as the 2nd `dns:` entry on every canary
+router (`<lan-gateway>`) stays as the 2nd `dns:` entry on every canary
 container, so a cache miss/outage degrades (falls through to the router), not
 fails-closed.
 
@@ -95,7 +95,7 @@ fails-closed.
   hostnames more than once before this number is meaningful.
 - **Routing verification** (AC2): confirm via `docker exec
   omninode-runner-1 cat /etc/resolv.conf` (or container logs) that DNS
-  queries route through `192.168.86.201`, not the router directly.
+  queries route through `<onex-host>`, not the router directly.
 - **Zero DNS-class failures** (AC3): zero occurrences of the
   `files.pythonhosted.org`-style `Temporary failure in name resolution`
   signature on canary-runner job logs over a stated busy-window observation
