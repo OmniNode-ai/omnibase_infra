@@ -1,0 +1,121 @@
+# docker-compose.gate-runner.yml
+# OMN-16295 — bounded pre-push gate-runner target on .201.
+#
+# WHAT THIS IS FOR
+# ----------------
+# `.200` (Stickybeatz-Studio) is the rule-11a default host for pre-push
+# governed-selector runs and the promotion-boundary full suite. Under
+# concurrent session load it saturates (measured 2026-08-20: load 32-34
+# against 24 cores, an 89-93 minute full-suite run, orphaned pytest
+# processes). This service is the SECOND target the OMN-15059 host guard
+# (guard_full_suite_host() in scripts/hooks/prepush_smart_tests.sh) routes to
+# when it measures `.200` as loaded — never the default, never a `.200`
+# replacement. See docs/runbooks/200-build-lane-execution-pattern.md for the
+# `.200` recipe this mirrors and OMN-16295 for the ticket.
+#
+# WHY IT MUST BE HARD-CAPPED
+# ---------------------------
+# `.201` (omninode-pc) hosts the 88-runner self-hosted CI fleet
+# (docker-compose.runners.yml) plus the prod / stability-test / judge / dev
+# omnibase_infra lanes. Prod is untouchable and the runner fleet + runtime
+# lanes keep priority unconditionally — this surface must never be able to
+# starve either. It uses the SAME non-swarm Compose v2 resource-cap keys as
+# docker-compose.runners.yml (mem_limit / cpus / pids_limit — NOT
+# deploy.resources, which is swarm-only and silently ignored under plain
+# `docker compose up`).
+#
+# Cap sizing (live headroom measured 2026-08-20 via `ssh jonah@192.168.86.201`
+# — nproc=32, load average 12.33/12.88/14.28, 91GB RAM with 59GB available):
+#   cpus: "4.0"     - matches the pre-push hook's own pytest -n4 parallelism
+#                     (PREPUSH_TIMEOUT_FLAGS in prepush_smart_tests.sh), so the
+#                     cap and the workload it bounds are sized 1:1. Leaves the
+#                     runner fleet's 72 x 2.0 cpu quota entries and every
+#                     runtime lane untouched — this is ~12.5% of the host's 32
+#                     vCPUs, a fraction of the ~18-core headroom measured live.
+#   mem_limit: 8g   - bounds a full local pytest run (observed ~2,429 tests /
+#                     245s on omnibase_infra, ~13,898 tests / 506s on
+#                     omnimarket, both well inside 8GB); memswap_limit gives a
+#                     bounded overflow buffer without letting a runaway test
+#                     process eat the host's already-committed 50GB swap.
+#   pids_limit: 8192 - a full suite forks more transient workers than a single
+#                      CI job; sized above the runner default (4096) with the
+#                      same fork-bomb backstop intent.
+#
+# Usage (OMNI_HOME MUST be the symlink-resolved real path -- see trap below):
+#   OMNI_HOME="$(readlink -f "$OMNI_HOME")" \
+#     docker compose -f docker/docker-compose.gate-runner.yml up -d
+#   docker compose -f docker/docker-compose.gate-runner.yml exec gate-runner \
+#     bash -lc '<command>'
+#   docker compose -f docker/docker-compose.gate-runner.yml down
+#
+# SYMLINK TRAP (found live, 2026-08-20, proving this on `.201`): on `.201`,
+# `/home/jonah/Code/omni_home` is itself a symlink to `/data/omninode/omni_home`.
+# `git worktree add` always canonicalizes and stores the REAL (symlink-resolved)
+# path in each worktree's `.git` pointer file -- never the symlink path the
+# operator typed -- so a bind mount at the symlink path leaves every worktree's
+# `.git` pointer referencing a path that does not exist inside the container
+# (`fatal: not a git repository: /data/omninode/omni_home/...`, `git
+# rev-parse --show-toplevel` fails, and the hook's own `not inside a git
+# worktree` guard fires before it ever reaches the selector). Always resolve
+# OMNI_HOME with `readlink -f` (or equivalent) before passing it here -- do not
+# assume the conventional `/home/<user>/Code/omni_home` path is real on every
+# host.
+#
+# Validate the caps are not silently dropped:
+#   docker compose -f docker/docker-compose.gate-runner.yml config
+#
+# OMNI_HOME is REQUIRED (no default) — CLAUDE.md rule 8 (fail-fast on missing
+# env, not a silent fallback to a machine-specific path). `docker compose`
+# fails loudly with "variable is not set" if it is unset, which is the correct
+# behavior here.
+#
+# EXPLICIT PROJECT NAME (required — do not remove): without it, Compose infers
+# the project name from the invoking shell's cwd basename, which collided
+# with docker-compose.runners.yml's own inferred project the first time this
+# file was brought up from an ad-hoc build directory (both happened to
+# resolve to "docker"), and Compose then listed the entire 88-runner fleet as
+# "orphan containers" of THIS project. Nothing was removed that time (no
+# `down` was run), but a future `docker compose down` / `--remove-orphans`
+# against a colliding project name absolutely would touch the runner fleet or
+# a runtime lane. An explicit `name:` makes this project self-contained
+# regardless of the invoking cwd — this is not this repo's catalog-driven
+# generated compose (docker/catalog/); it is a standalone ops utility file in
+# the same class as docker-compose.runners.yml / docker-compose.dns-cache.yml.
+name: omninode-gate-runner
+services:
+  gate-runner:
+    image: omninode-gate-runner:latest
+    build:
+      context: ..
+      dockerfile: docker/Dockerfile.gate-runner
+    container_name: omninode-gate-runner
+    # Stable identity matching PREPUSH_201_GATE_RUNNER_HOSTNAME's default in
+    # scripts/hooks/prepush_smart_tests.sh (all three seam-matched copies) --
+    # without this, `hostname -s` inside the container returns the random
+    # docker container ID, which would never match the guard's identity check
+    # and every real pre-push run from inside this container would need an
+    # explicit override to be recognized as the designated .201 target.
+    hostname: gate-runner-201
+    restart: unless-stopped
+    mem_limit: 8g
+    memswap_limit: 12g
+    cpus: "4.0"
+    pids_limit: 8192
+    environment:
+      # Deliberately empty, not unset — makes the clean-PYTHONPATH invariant
+      # visible in `docker compose config` / `docker inspect` rather than
+      # relying on the image never having set one.
+      PYTHONPATH: ""
+      # Per-worktree venvs live under a container-only path so they can never
+      # collide with a host-built .venv (different interpreter path/ABI).
+      # scripts/ci/run_on_gate_runner.sh sets this per-invocation relative to
+      # the worktree it targets; the default here only covers an interactive
+      # `docker compose exec` with no override.
+      UV_PROJECT_ENVIRONMENT: /workspace/.venv-gate-runner
+    volumes:
+      # Bind-mount the host's canonical omni_home tree read-write at the SAME
+      # absolute path so worktrees created on the host
+      # ($OMNI_HOME/omni_worktrees/<ticket>/<repo>) are addressable inside the
+      # container without any path translation.
+      - ${OMNI_HOME:?set OMNI_HOME to the omni_home path on this host}:${OMNI_HOME:?set OMNI_HOME to the omni_home path on this host}
+    working_dir: ${OMNI_HOME:?set OMNI_HOME to the omni_home path on this host}
