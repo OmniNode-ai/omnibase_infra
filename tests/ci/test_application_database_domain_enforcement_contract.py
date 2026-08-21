@@ -344,6 +344,51 @@ def test_private_ownership_pin_is_pat_authenticated_and_fork_fail_closed() -> No
     assert "config/application_database_domain_proof_ownership.yaml" not in fork_step
 
 
+def test_cross_repo_pat_lane_is_dependabot_fail_closed_too() -> None:
+    """OMN-16152: GitHub withholds ALL repo secrets from dependabot-triggered
+    `pull_request` runs, regardless of whether the head branch is a fork. The
+    "trusted" lane's `if:` only tested for fork-vs-same-repo, so a dependabot
+    PR (same-repo branch, not a fork) was routed into the CROSS_REPO_PAT
+    checkout with an empty token -- actions/checkout then fails hard with
+    "Input required and not supplied: token" instead of falling back to
+    github.token, because an explicitly-passed empty string is not "unset".
+
+    Dependabot must take the same narrow, already-proven fail-closed lane as
+    a fork PR: skip the CROSS_REPO_PAT-gated omninode_infra checkout and
+    validate against only the public omnimarket ownership manifest.
+    """
+    workflow = _CI_WORKFLOW.read_text(encoding="utf-8")
+
+    checkout_step = workflow.split(
+        "- name: Checkout exact service ownership dependency",
+        maxsplit=1,
+    )[1].split("- name:", maxsplit=1)[0]
+    assert "github.actor != 'dependabot[bot]'" in checkout_step, (
+        "the CROSS_REPO_PAT-gated omninode_infra checkout must not run for "
+        "dependabot[bot] -- GitHub withholds secrets.CROSS_REPO_PAT from "
+        "dependabot pull_request runs even on a same-repo (non-fork) branch"
+    )
+
+    trusted_step = workflow.split(
+        "- name: Enforce schema qualification in changed SQL (trusted)",
+        maxsplit=1,
+    )[1].split("- name:", maxsplit=1)[0]
+    assert "github.actor != 'dependabot[bot]'" in trusted_step, (
+        "the trusted SQL-enforcement step depends on the omninode_infra "
+        "checkout above and must not run for dependabot[bot] either"
+    )
+
+    fork_step = workflow.split(
+        "- name: Enforce schema qualification in changed SQL (public fork, fail closed)",
+        maxsplit=1,
+    )[1].split("- name:", maxsplit=1)[0]
+    assert "github.actor == 'dependabot[bot]'" in fork_step, (
+        "the fail-closed lane must explicitly cover dependabot[bot] too, "
+        "not just the fork condition, so dependabot PRs still get a real "
+        "SQL-enforcement pass instead of silently skipping both lanes"
+    )
+
+
 def test_live_omnimarket_head_resolution_survives_fork_prs_without_org_secrets() -> (
     None
 ):

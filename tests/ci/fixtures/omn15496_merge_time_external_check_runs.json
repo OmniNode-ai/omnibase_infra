@@ -3,7 +3,7 @@
   "ticket": "OMN-15496",
   "captured_utc": "2026-07-30",
   "source": "GET /repos/OmniNode-ai/omnibase_infra/commits/{sha}/check-runs?per_page=100 (paginated)",
-  "filter": "rows whose name is in EXPECTED_EXTERNAL_CONTEXTS AND whose started_at <= the PR's mergedAt (merge-time state; post-merge runs excluded). Backfilled 2026-08-12 (OMN-15979) with 'Integration Test Removal Gate' rows for this same 16-PR window, admitted into EXPECTED_EXTERNAL_CONTEXTS after that ticket's independent 16/16-present measurement over a later window (#2705...#2720, see omn15979_merge_time_external_check_runs.json).",
+  "filter": "rows whose name is in EXPECTED_EXTERNAL_CONTEXTS AND whose started_at <= the PR's mergedAt (merge-time state; post-merge runs excluded). Backfilled 2026-08-12 (OMN-15979) with 'Integration Test Removal Gate' rows for this same 16-PR window, admitted into EXPECTED_EXTERNAL_CONTEXTS after that ticket's independent 16/16-present measurement over a later window (#2705...#2720, see omn15979_merge_time_external_check_runs.json). Backfilled again (OMN-15737) with 'Dep Provenance Gate' rows for this same 16-PR window, admitted into EXPECTED_EXTERNAL_CONTEXTS after that ticket's 16/16-present measurement (#2546...#2567 and #2646...#2669).",
   "note": "unedited API rows, reduced to the fields the resolver reads"
  },
  "pull_requests": {
@@ -255,6 +255,13 @@
      "conclusion": "success",
      "started_at": "2026-07-30T14:30:07Z",
      "id": 90902738151
+    },
+    {
+     "name": "Dep Provenance Gate",
+     "status": "completed",
+     "conclusion": "success",
+     "started_at": "2026-07-30T13:49:04Z",
+     "id": 90891358462
     }
    ]
   },
@@ -499,6 +506,13 @@
      "conclusion": "success",
      "started_at": "2026-07-30T09:18:00Z",
      "id": 90830219481
+    },
+    {
+     "name": "Dep Provenance Gate",
+     "status": "completed",
+     "conclusion": "success",
+     "started_at": "2026-07-30T07:38:24Z",
+     "id": 90809348342
     }
    ]
   },
@@ -743,6 +757,13 @@
      "conclusion": "success",
      "started_at": "2026-07-30T07:07:50Z",
      "id": 90803890325
+    },
+    {
+     "name": "Dep Provenance Gate",
+     "status": "completed",
+     "conclusion": "success",
+     "started_at": "2026-07-30T06:52:13Z",
+     "id": 90801000864
     }
    ]
   },
@@ -931,6 +952,13 @@
      "conclusion": "success",
      "started_at": "2026-07-30T07:01:42Z",
      "id": 90802739834
+    },
+    {
+     "name": "Dep Provenance Gate",
+     "status": "completed",
+     "conclusion": "success",
+     "started_at": "2026-07-30T06:00:02Z",
+     "id": 90792713691
     }
    ]
   },
@@ -1119,6 +1147,13 @@
      "conclusion": "success",
      "started_at": "2026-07-30T06:22:20Z",
      "id": 90796137171
+    },
+    {
+     "name": "Dep Provenance Gate",
+     "status": "completed",
+     "conclusion": "success",
+     "started_at": "2026-07-30T06:12:30Z",
+     "id": 90794644660
     }
    ]
   },
@@ -1531,6 +1566,13 @@
      "conclusion": "success",
      "started_at": "2026-07-30T07:01:49Z",
      "id": 90802760706
+    },
+    {
+     "name": "Dep Provenance Gate",
+     "status": "completed",
+     "conclusion": "success",
+     "started_at": "2026-07-30T05:32:49Z",
+     "id": 90788724787
     }
    ]
   },
@@ -1831,6 +1873,13 @@
      "conclusion": "success",
      "started_at": "2026-07-30T07:01:47Z",
      "id": 90802751911
+    },
+    {
+     "name": "Dep Provenance Gate",
+     "status": "completed",
+     "conclusion": "success",
+     "started_at": "2026-07-30T05:26:27Z",
+     "id": 90787770778
     }
    ]
   },
@@ -2019,6 +2068,13 @@
      "conclusion": "success",
      "started_at": "2026-07-30T05:15:46Z",
      "id": 90786240076
+    },
+    {
+     "name": "Dep Provenance Gate",
+     "status": "completed",
+     "conclusion": "success",
+     "started_at": "2026-07-30T05:15:03Z",
+     "id": 90786135472
     }
    ]
   },
@@ -2214,6 +2270,13 @@
      "conclusion": "success",
      "started_at": "2026-07-30T03:58:42Z",
      "id": 90775632676
+    },
+    {
+     "name": "Dep Provenance Gate",
+     "status": "completed",
+     "conclusion": "success",
+     "started_at": "2026-07-30T03:37:06Z",
+     "id": 90772851201
     }
    ]
   },
@@ -2402,6 +2465,13 @@
      "conclusion": "success",
      "started_at": "2026-07-30T04:14:42Z",
      "id": 90777847706
+    },
+    {
+     "name": "Dep Provenance Gate",
+     "status": "completed",
+     "conclusion": "success",
+     "started_at": "2026-07-30T04:00:08Z",
+     "id": 90775807468
     }
    ]
   },
@@ -2590,6 +2660,13 @@
      "conclusion": "success",
      "started_at": "2026-07-30T02:42:38Z",
      "id": 90765378634
+    },
+    {
+     "name": "Dep Provenance Gate",
+     "status": "completed",
+     "conclusion": "success",
+     "started_at": "2026-07-30T02:42:05Z",
+     "id": 90765288206
     }
    ]
   },
@@ -2834,6 +2911,13 @@
      "conclusion": "success",
      "started_at": "2026-07-30T02:56:50Z",
      "id": 90767260311
+    },
+    {
+     "name": "Dep Provenance Gate",
+     "status": "completed",
+     "conclusion": "success",
+     "started_at": "2026-07-30T02:38:09Z",
+     "id": 90764800552
     }
    ]
   },
@@ -3078,6 +3162,13 @@
      "conclusion": "success",
      "started_at": "2026-07-30T01:39:11Z",
      "id": 90756516507
+    },
+    {
+     "name": "Dep Provenance Gate",
+     "status": "completed",
+     "conclusion": "success",
+     "started_at": "2026-07-30T01:36:58Z",
+     "id": 90756203680
     }
    ]
   },
@@ -3322,6 +3413,13 @@
      "conclusion": "success",
      "started_at": "2026-07-30T00:47:28Z",
      "id": 90748884866
+    },
+    {
+     "name": "Dep Provenance Gate",
+     "status": "completed",
+     "conclusion": "success",
+     "started_at": "2026-07-30T00:44:47Z",
+     "id": 90748472666
     }
    ]
   },
@@ -3510,6 +3608,13 @@
      "conclusion": "success",
      "started_at": "2026-07-30T00:35:37Z",
      "id": 90747033832
+    },
+    {
+     "name": "Dep Provenance Gate",
+     "status": "completed",
+     "conclusion": "success",
+     "started_at": "2026-07-29T23:55:32Z",
+     "id": 90740599189
     }
    ]
   },
@@ -3971,6 +4076,13 @@
      "conclusion": "success",
      "started_at": "2026-07-29T23:00:04Z",
      "id": 90731344845
+    },
+    {
+     "name": "Dep Provenance Gate",
+     "status": "completed",
+     "conclusion": "success",
+     "started_at": "2026-07-29T22:16:54Z",
+     "id": 90722748844
     }
    ]
   }
