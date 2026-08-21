@@ -3,7 +3,7 @@
   "ticket": "OMN-15979",
   "captured_utc": "2026-08-12",
   "source": "GET /repos/OmniNode-ai/omnibase_infra/commits/{sha}/check-runs?per_page=100 (paginated)",
-  "filter": "rows whose name is in EXPECTED_EXTERNAL_CONTEXTS (post-admission, 18 names incl. Integration Test Removal Gate) AND whose started_at <= the PR's mergedAt (merge-time state; post-merge runs excluded)",
+  "filter": "rows whose name is in EXPECTED_EXTERNAL_CONTEXTS (post-admission, 18 names incl. Integration Test Removal Gate) AND whose started_at <= the PR's mergedAt (merge-time state; post-merge runs excluded) Backfilled (OMN-15737) with 'Dep Provenance Gate' rows for this same 16-PR window (16/16 present, merge-time), captured live 2026-08-16 via GET /commits/{sha}/check-runs?check_name=Dep+Provenance+Gate.",
   "note": "unedited API rows, reduced to the fields the resolver reads. Window: the 16 omnibase_infra dev PRs merged 2026-08-09T23:11:14Z -> 2026-08-11T04:47:58Z (#2705...#2720), i.e. the last-16-merged-dev-PRs window at ticket-authoring time (2026-08-12)."
  },
  "pull_requests": {
@@ -353,6 +353,13 @@
      "conclusion": "success",
      "started_at": "2026-08-11T04:06:59Z",
      "id": 93674142163
+    },
+    {
+     "name": "Dep Provenance Gate",
+     "status": "completed",
+     "conclusion": "success",
+     "started_at": "2026-08-11T03:32:24Z",
+     "id": 93668844155
     }
    ]
   },
@@ -485,6 +492,13 @@
      "conclusion": "success",
      "started_at": "2026-08-11T02:03:45Z",
      "id": 93655787290
+    },
+    {
+     "name": "Dep Provenance Gate",
+     "status": "completed",
+     "conclusion": "success",
+     "started_at": "2026-08-11T02:03:45Z",
+     "id": 93655786015
     }
    ]
   },
@@ -617,6 +631,13 @@
      "conclusion": "success",
      "started_at": "2026-08-11T00:27:08Z",
      "id": 93640503428
+    },
+    {
+     "name": "Dep Provenance Gate",
+     "status": "completed",
+     "conclusion": "success",
+     "started_at": "2026-08-11T00:27:08Z",
+     "id": 93640502754
     }
    ]
   },
@@ -749,6 +770,13 @@
      "conclusion": "success",
      "started_at": "2026-08-10T21:12:57Z",
      "id": 93599917738
+    },
+    {
+     "name": "Dep Provenance Gate",
+     "status": "completed",
+     "conclusion": "success",
+     "started_at": "2026-08-10T21:12:57Z",
+     "id": 93599907513
     }
    ]
   },
@@ -909,6 +937,13 @@
      "conclusion": "success",
      "started_at": "2026-08-10T17:34:42Z",
      "id": 93540861039
+    },
+    {
+     "name": "Dep Provenance Gate",
+     "status": "completed",
+     "conclusion": "success",
+     "started_at": "2026-08-10T17:34:44Z",
+     "id": 93540859396
     }
    ]
   },
@@ -1097,6 +1132,13 @@
      "conclusion": "success",
      "started_at": "2026-08-10T15:42:42Z",
      "id": 93509174826
+    },
+    {
+     "name": "Dep Provenance Gate",
+     "status": "completed",
+     "conclusion": "success",
+     "started_at": "2026-08-10T15:41:44Z",
+     "id": 93508952787
     }
    ]
   },
@@ -1327,6 +1369,13 @@
      "conclusion": "success",
      "started_at": "2026-08-10T15:10:18Z",
      "id": 93499436926
+    },
+    {
+     "name": "Dep Provenance Gate",
+     "status": "completed",
+     "conclusion": "success",
+     "started_at": "2026-08-10T15:08:00Z",
+     "id": 93498745892
     }
    ]
   },
@@ -1515,6 +1564,13 @@
      "conclusion": "success",
      "started_at": "2026-08-10T14:12:36Z",
      "id": 93481945627
+    },
+    {
+     "name": "Dep Provenance Gate",
+     "status": "completed",
+     "conclusion": "success",
+     "started_at": "2026-08-10T14:10:52Z",
+     "id": 93481434993
     }
    ]
   },
@@ -1703,6 +1759,13 @@
      "conclusion": "success",
      "started_at": "2026-08-10T13:39:34Z",
      "id": 93472314103
+    },
+    {
+     "name": "Dep Provenance Gate",
+     "status": "completed",
+     "conclusion": "success",
+     "started_at": "2026-08-10T13:38:12Z",
+     "id": 93471405490
     }
    ]
   },
@@ -1891,6 +1954,13 @@
      "conclusion": "success",
      "started_at": "2026-08-10T13:37:12Z",
      "id": 93471675118
+    },
+    {
+     "name": "Dep Provenance Gate",
+     "status": "completed",
+     "conclusion": "success",
+     "started_at": "2026-08-10T13:19:37Z",
+     "id": 93466662776
     }
    ]
   },
@@ -2135,6 +2205,13 @@
      "conclusion": "success",
      "started_at": "2026-08-10T10:02:33Z",
      "id": 93419563195
+    },
+    {
+     "name": "Dep Provenance Gate",
+     "status": "completed",
+     "conclusion": "success",
+     "started_at": "2026-08-10T09:48:26Z",
+     "id": 93416219775
     }
    ]
   },
@@ -2435,6 +2512,13 @@
      "conclusion": "success",
      "started_at": "2026-08-10T06:39:29Z",
      "id": 93374911327
+    },
+    {
+     "name": "Dep Provenance Gate",
+     "status": "completed",
+     "conclusion": "success",
+     "started_at": "2026-08-10T04:45:00Z",
+     "id": 93356378682
     }
    ]
   },
@@ -2567,6 +2651,13 @@
      "conclusion": "success",
      "started_at": "2026-08-10T04:40:50Z",
      "id": 93356378155
+    },
+    {
+     "name": "Dep Provenance Gate",
+     "status": "completed",
+     "conclusion": "success",
+     "started_at": "2026-08-10T04:40:50Z",
+     "id": 93356377702
     }
    ]
   },
@@ -2811,6 +2902,13 @@
      "conclusion": "success",
      "started_at": "2026-08-10T03:16:49Z",
      "id": 93344875987
+    },
+    {
+     "name": "Dep Provenance Gate",
+     "status": "completed",
+     "conclusion": "success",
+     "started_at": "2026-08-10T03:07:37Z",
+     "id": 93343260929
     }
    ]
   },
@@ -2943,6 +3041,13 @@
      "conclusion": "success",
      "started_at": "2026-08-09T23:03:08Z",
      "id": 93314425680
+    },
+    {
+     "name": "Dep Provenance Gate",
+     "status": "completed",
+     "conclusion": "success",
+     "started_at": "2026-08-09T23:03:47Z",
+     "id": 93314424962
     }
    ]
   },
@@ -3131,6 +3236,13 @@
      "conclusion": "success",
      "started_at": "2026-08-09T21:49:42Z",
      "id": 93306487062
+    },
+    {
+     "name": "Dep Provenance Gate",
+     "status": "completed",
+     "conclusion": "success",
+     "started_at": "2026-08-09T21:46:51Z",
+     "id": 93305898922
     }
    ]
   }
