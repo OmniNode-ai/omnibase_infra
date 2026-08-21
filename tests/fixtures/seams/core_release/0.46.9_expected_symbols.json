@@ -8,7 +8,7 @@
     "Update procedure: bump core, re-run the seam test, and record the new",
     "surface here only after confirming every consumer still type-checks."
   ],
-  "core_version": "0.46.8",
+  "core_version": "0.46.9",
   "source": "pypi",
   "modules": {
     "omnibase_core.models.delegation.wire": [
