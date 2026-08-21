@@ -112,19 +112,38 @@ PREPUSH_201_SSH_TARGET="${PREPUSH_201_SSH_TARGET:-jonah@192.168.86.201}"  # onex
 # `.200` snapshots above (1.33x and 2.3x) as over threshold.
 PREPUSH_LOAD_THRESHOLD="${PREPUSH_LOAD_THRESHOLD:-1.0}"
 
-# Cross-platform (Linux `.201` / macOS `.200`) load probe: os.getloadavg()[0]
-# and os.cpu_count() are both POSIX-portable via the stdlib, which sidesteps
-# needing separate /proc/loadavg-vs-sysctl branches (and their escaping) in
-# both the local AND the remote-via-ssh cases below. No quote characters
-# appear in this snippet -- it is embedded inside a single-quoted remote
-# command string in the ssh branch, so it must stay that way.
-_PREPUSH_LOAD_PROBE_PY='import os,sys
-n=os.cpu_count() or 0
-sys.exit(1) if n<=0 else print(os.getloadavg()[0], n)'
+# Cross-platform (Linux `.201` / macOS `.200`) load probe, printing
+# "<load1> <nproc>". Deliberately interpreter-free: OMN-14953's pinned-
+# interpreter gate (tests/ci/test_prepush_hook_pinned_interpreter.py) requires
+# every python/python3 invocation under scripts/hooks/ to route through
+# `uv run`, and the two ssh branches below cannot -- `.201` has no `uv` binary
+# at all (probed 2026-08-20). Dropping the interpreter satisfies that gate
+# rather than carving an exception out of it, and keeps interpreter startup
+# off the pre-push critical path.
+#
+# Two portability constraints, both load-bearing:
+#   1. Field extraction uses cut(1), NOT `set -- $(...)` word splitting.
+#      `.200`'s remote login shell is zsh, which does not word-split unquoted
+#      command substitution, so `set --` would collapse the whole line into $1
+#      there while working fine on `.201`'s bash.
+#   2. This snippet is handed to ssh(1) as the remote command and executed by
+#      whatever login shell the remote user has, so it stays POSIX and carries
+#      no single quotes (it is itself a single-quoted assignment here).
+# shellcheck disable=SC2016  # intentionally unexpanded: evaluated by the local
+# `sh -c` / the remote login shell, not by this script.
+_PREPUSH_LOAD_PROBE_SH='n=$(getconf _NPROCESSORS_ONLN 2>/dev/null || echo 0)
+[ "$n" -gt 0 ] || exit 1
+if [ -r /proc/loadavg ]; then
+  l=$(cut -d" " -f1 /proc/loadavg)
+else
+  l=$(sysctl -n vm.loadavg 2>/dev/null | cut -d" " -f2)
+fi
+[ -n "$l" ] || exit 1
+printf "%s %s\n" "$l" "$n"'
 
 # Prefer GNU coreutils timeout(1); fall back to gtimeout(1) (Homebrew name on
 # macOS); fall back to no wrapper at all (ssh -o ConnectTimeout already bounds
-# the connection phase, and the remote command is a single fast python3 -c).
+# the connection phase, and the remote command is a single fast shell probe).
 _prepush_timeout_cmd() {
   if command -v timeout > /dev/null 2>&1; then
     printf 'timeout'
@@ -147,7 +166,7 @@ host_load_ratio() {
     if [ -n "${PREPUSH_LOAD_OVERRIDE_LOCAL:-}" ]; then
       raw="$PREPUSH_LOAD_OVERRIDE_LOCAL"
     else
-      raw="$(python3 -c "$_PREPUSH_LOAD_PROBE_PY" 2> /dev/null)" || return 1
+      raw="$(sh -c "$_PREPUSH_LOAD_PROBE_SH" 2> /dev/null)" || return 1
     fi
   else
     if [ -n "${PREPUSH_LOAD_OVERRIDE_REMOTE:-}" ]; then
@@ -156,10 +175,10 @@ host_load_ratio() {
       timeout_cmd="$(_prepush_timeout_cmd)"
       if [ -n "$timeout_cmd" ]; then
         raw="$("$timeout_cmd" 6 ssh -o ConnectTimeout=3 -o BatchMode=yes -o StrictHostKeyChecking=accept-new \
-          "$target" "python3 -c '${_PREPUSH_LOAD_PROBE_PY}'" 2> /dev/null)" || return 1
+          "$target" "$_PREPUSH_LOAD_PROBE_SH" 2> /dev/null)" || return 1
       else
         raw="$(ssh -o ConnectTimeout=3 -o BatchMode=yes -o StrictHostKeyChecking=accept-new \
-          "$target" "python3 -c '${_PREPUSH_LOAD_PROBE_PY}'" 2> /dev/null)" || return 1
+          "$target" "$_PREPUSH_LOAD_PROBE_SH" 2> /dev/null)" || return 1
       fi
     fi
   fi
