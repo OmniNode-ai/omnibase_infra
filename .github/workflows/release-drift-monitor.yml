@@ -25,8 +25,9 @@
 # deploy-onex-dev.yml's push trigger only fires on main/m7/**, never dev (the
 # repo's actual default branch). Scope is onex-dev only -- never prod.
 #
-# Token: uses CROSS_REPO_PAT when configured (needed to read the sibling repos
-# via the GitHub API). With only GITHUB_TOKEN, sibling probes fail and the
+# Token: mints a onexbot-occ-writer App token when configured (OMN-16373;
+# needed to read the sibling repos via the GitHub API). With only
+# GITHUB_TOKEN, sibling probes fail and the
 # monitor exits 2 (BLIND) rather than a false green -- a visibility gap is never
 # reported as clean. Design: docs/plans/2026-07-12-mechanical-release-trains.md §4.
 
@@ -62,21 +63,34 @@ jobs:
       - name: Set up uv
         uses: astral-sh/setup-uv@v7
 
-      - name: Check CROSS_REPO_PAT is configured
+      - name: Check onexbot-occ-writer App credentials are configured
         env:
-          CROSS_REPO_PAT: ${{ secrets.CROSS_REPO_PAT }}
+          APP_ID: ${{ secrets.ONEXBOT_OCC_APP_ID }}
+          APP_PRIVATE_KEY: ${{ secrets.ONEXBOT_OCC_PRIVATE_KEY }}
         run: |
-          if [ -z "$CROSS_REPO_PAT" ]; then
-            echo "::warning::CROSS_REPO_PAT is not set — sibling-repo probes will"
+          if [ -z "$APP_ID" ] || [ -z "$APP_PRIVATE_KEY" ]; then
+            echo "::warning::ONEXBOT_OCC_APP_ID / ONEXBOT_OCC_PRIVATE_KEY are not configured — sibling-repo probes will"
             echo "::warning::fail and the monitor will exit 2 (BLIND), not a false green."
           fi
+
+      # OMN-16373: CROSS_REPO_PAT retirement — mint a short-lived
+      # onexbot-occ-writer App installation token for the sibling-repo reads
+      # this monitor performs.
+      - name: Mint onexbot-occ-writer app token
+        id: app-token
+        uses: actions/create-github-app-token@d72941d797fd3113feb6b93fd0dec494b13a2547 # v1
+        with:
+          app-id: ${{ secrets.ONEXBOT_OCC_APP_ID }}
+          private-key: ${{ secrets.ONEXBOT_OCC_PRIVATE_KEY }}
+          owner: OmniNode-ai
 
       - name: Run release/deploy drift monitor (fail-loud)
         id: monitor
         env:
-          # CROSS_REPO_PAT has org read scope; GITHUB_TOKEN is this-repo-only and
-          # will make sibling probes fail (surfaced as BLIND, never silent-green).
-          GH_TOKEN: ${{ secrets.CROSS_REPO_PAT || secrets.GITHUB_TOKEN }}
+          # The minted App token has org read scope; GITHUB_TOKEN is
+          # this-repo-only and will make sibling probes fail (surfaced as
+          # BLIND, never silent-green).
+          GH_TOKEN: ${{ steps.app-token.outputs.token || secrets.GITHUB_TOKEN }}
         run: |
           set +e
           uv run --no-project --with packaging --with pyyaml \
