@@ -147,7 +147,7 @@ host_load_ratio() {
     if [ -n "${PREPUSH_LOAD_OVERRIDE_LOCAL:-}" ]; then
       raw="$PREPUSH_LOAD_OVERRIDE_LOCAL"
     else
-      raw="$(python3 -c "$_PREPUSH_LOAD_PROBE_PY" 2> /dev/null)" || return 1
+      raw="$(uv run python3 -c "$_PREPUSH_LOAD_PROBE_PY" 2> /dev/null)" || return 1
     fi
   else
     if [ -n "${PREPUSH_LOAD_OVERRIDE_REMOTE:-}" ]; then
