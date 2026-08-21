@@ -26,7 +26,8 @@ second implementation.
 
 Class ``TestRepoDigestsOnContainerIsRealDockerFailureMode`` executes the
 actual docker CLI against a real, disposable container to pin the underlying
-docker semantic (skipped when no real docker daemon is reachable -- runs on
+docker semantic (skipped when no real docker daemon is reachable, or when
+that daemon cannot produce the base container within budget -- runs on
 self-hosted CI / omninode-pc, per feedback_test_the_artifact_that_runs). The
 mock-based classes below assert the real command/format-string shape emitted
 by our source, not just that some digest was returned.
@@ -74,35 +75,78 @@ requires_docker = pytest.mark.skipif(
 )
 
 
+_PULL_TIMEOUT_SECONDS = 90
+_CREATE_TIMEOUT_SECONDS = 90
+_REMOVE_TIMEOUT_SECONDS = 60
+
+# Substrings that identify a `docker create` refusal caused by the base image
+# never becoming available locally (registry unreachable / pull timed out),
+# as opposed to a genuine docker semantic this fixture should surface.
+_IMAGE_UNAVAILABLE_MARKERS = (
+    "no such image",
+    "not found",
+    "manifest unknown",
+    "pull access denied",
+    "error response from daemon: pull",
+)
+
+
+def _docker(args: list[str], timeout: int) -> subprocess.CompletedProcess[str] | None:
+    """Run a docker command, returning ``None`` if it exceeds ``timeout``.
+
+    Every docker call in this fixture already passes ``check=False`` -- a
+    non-zero exit is the fixture's business to interpret, not an error. But
+    ``subprocess.run`` raises ``TimeoutExpired`` regardless of ``check``, so
+    the one failure mode the fixture could not absorb was the one that
+    actually fires: docker-daemon and registry contention on the shared
+    self-hosted fleet (OMN-15749). Collapsing a timeout to ``None`` puts it
+    back under the fixture's control, same reasoning as OMN-16317.
+    """
+    try:
+        return subprocess.run(
+            args,
+            capture_output=True,
+            text=True,
+            timeout=timeout,
+            check=False,
+        )
+    except subprocess.TimeoutExpired:
+        return None
+
+
 @pytest.fixture
 def real_container():
     """A real, disposable container -- exercises actual docker inspect semantics."""
     name = f"omn15181-digest-fixture-{uuid.uuid4().hex[:12]}"
-    subprocess.run(
-        ["docker", "pull", "busybox:latest"],
-        capture_output=True,
-        text=True,
-        timeout=90,
-        check=False,
-    )
-    create = subprocess.run(
+    # Best-effort warm-up: a timeout here is not fatal, the image is often
+    # already cached on the runner and `docker create` is the real gate.
+    _docker(["docker", "pull", "busybox:latest"], _PULL_TIMEOUT_SECONDS)
+
+    create = _docker(
         ["docker", "create", "--name", name, "busybox:latest"],
-        capture_output=True,
-        text=True,
-        timeout=30,
-        check=False,
+        _CREATE_TIMEOUT_SECONDS,
     )
-    assert create.returncode == 0, create.stderr
+    if create is None:
+        pytest.skip(
+            "docker create exceeded "
+            f"{_CREATE_TIMEOUT_SECONDS}s -- docker daemon contention, not a "
+            "statement about docker inspect semantics (OMN-15749)"
+        )
+    if create.returncode != 0:
+        stderr = create.stderr.lower()
+        if any(marker in stderr for marker in _IMAGE_UNAVAILABLE_MARKERS):
+            pytest.skip(
+                "busybox:latest never became available locally: "
+                f"{create.stderr.strip()} (OMN-15749)"
+            )
+        # Any other non-zero exit is a real docker semantic -- surface it.
+        raise AssertionError(create.stderr)
     try:
         yield name
     finally:
-        subprocess.run(
-            ["docker", "rm", "-f", name],
-            capture_output=True,
-            text=True,
-            timeout=30,
-            check=False,
-        )
+        # The name is uuid-unique, so a container leaked by a teardown
+        # timeout cannot collide with a later run.
+        _docker(["docker", "rm", "-f", name], _REMOVE_TIMEOUT_SECONDS)
 
 
 @requires_docker
