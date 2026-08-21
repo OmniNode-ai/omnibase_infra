@@ -167,15 +167,6 @@ skills:
       - {name: no-launch, payload_field: no_launch, arg_type: boolean, default: false}
       - {name: plan-only, payload_field: plan_only, arg_type: boolean, default: false}
       - {name: dry-run, payload_field: dry_run, arg_type: boolean, default: false}
-  - skill_name: doc_freshness_sweep
-    node_name: node_doc_freshness_sweep
-    result_model: omnimarket.nodes.node_doc_freshness_sweep.handlers.handler_doc_freshness_sweep.DocFreshnessSweepResult
-    args:
-      - {name: omni-home, payload_field: omni_home, arg_type: string}
-      - {name: repos, payload_field: repos, arg_type: string_list}
-      - {name: claude-md-only, payload_field: claude_md_only, arg_type: boolean, default: false}
-      - {name: broken-only, payload_field: broken_only, arg_type: boolean, default: false}
-      - {name: dry-run, payload_field: dry_run, arg_type: boolean, default: false}
   - skill_name: dod_verify
     node_name: node_dod_verify
     result_model: omnimarket.nodes.node_dod_verify.models.model_dod_verify_state.ModelDodVerifyState

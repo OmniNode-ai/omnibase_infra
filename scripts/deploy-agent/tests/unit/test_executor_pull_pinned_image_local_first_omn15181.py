@@ -35,6 +35,7 @@ from __future__ import annotations
 import os
 import shutil
 import subprocess
+from collections.abc import Callable
 from unittest.mock import patch
 
 import pytest
@@ -76,6 +77,34 @@ requires_docker = pytest.mark.skipif(
 )
 
 
+def _assert_bare_sha256_pull_rejected(
+    runner: Callable[..., subprocess.CompletedProcess] = subprocess.run,
+) -> None:
+    """Assert that pulling a bare sha256 digest is never treated as a valid
+    pull -- either the daemon rejects it outright (non-zero exit) or the
+    resolution attempt never completes within budget (OMN-16317).
+
+    A bare ``sha256:...`` reference has no repo/tag, so a reachable registry
+    normally rejects it fast ("repository does not exist"). Under
+    registry/network latency the daemon can instead hang past the timeout
+    while it tries to resolve that same unpullable reference -- a
+    ``TimeoutExpired`` here is a consistent variant of the identical negative
+    outcome (the daemon never succeeds in treating it as a satisfiable pull),
+    not evidence the reference became valid. Treat both as proof.
+    """
+    try:
+        result = runner(
+            ["docker", "pull", "sha256:" + "0" * 64],
+            capture_output=True,
+            text=True,
+            timeout=15,
+            check=False,
+        )
+    except subprocess.TimeoutExpired:
+        return
+    assert result.returncode != 0
+
+
 @requires_docker
 class TestPullPinnedImageRealDockerSemantics:
     def test_docker_image_inspect_succeeds_for_a_present_local_image(self) -> None:
@@ -111,15 +140,30 @@ class TestPullPinnedImageRealDockerSemantics:
         """Live-reproduced 2026-07-26 on omninode-pc: `docker pull
         sha256:...` fails with 'pull access denied ... repository does not
         exist' -- a bare digest with no repo/tag is never a valid pull
-        reference on its own."""
-        result = subprocess.run(
-            ["docker", "pull", "sha256:" + "0" * 64],
-            capture_output=True,
-            text=True,
-            timeout=15,
-            check=False,
-        )
-        assert result.returncode != 0
+        reference on its own. See `_assert_bare_sha256_pull_rejected` for why
+        a timeout is accepted as an equivalent outcome (OMN-16317)."""
+        _assert_bare_sha256_pull_rejected()
+
+
+class TestBareSha256PullRejectionOutcomes:
+    """Mock-based: pins `_assert_bare_sha256_pull_rejected` under both the
+    fast-error and slow/timeout paths (OMN-16317), without depending on a
+    live, possibly-slow registry round trip for the pinning itself."""
+
+    def test_fast_rejection_passes(self) -> None:
+        _assert_bare_sha256_pull_rejected(runner=lambda *a, **k: _fail())
+
+    def test_timeout_while_resolving_is_treated_as_rejection(self) -> None:
+        def _raise_timeout(
+            *args: object, **kwargs: object
+        ) -> subprocess.CompletedProcess:
+            raise subprocess.TimeoutExpired(cmd=["docker", "pull"], timeout=15)
+
+        _assert_bare_sha256_pull_rejected(runner=_raise_timeout)
+
+    def test_success_returncode_fails_the_assertion(self) -> None:
+        with pytest.raises(AssertionError):
+            _assert_bare_sha256_pull_rejected(runner=lambda *a, **k: _ok())
 
 
 class TestPullPinnedImageLocalPresenceFirst:

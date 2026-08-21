@@ -1,0 +1,54 @@
+# syntax=docker/dockerfile:1.4
+# SPDX-License-Identifier: MIT
+# Copyright (c) 2026 OmniNode Team
+#
+# OMN-16295 — bounded pre-push gate-runner target on .201.
+#
+# Purpose: a small, hard-capped execution surface for the OMN-15059 pre-push
+# host-guard's heavy (full-suite) escalation, selected ONLY when .200
+# (Stickybeatz-Studio) is under load per guard_full_suite_host()'s live-load
+# check in scripts/hooks/prepush_smart_tests.sh. Never a build/publish image,
+# never exposed on any port, never a runner-fleet or runtime-lane substitute.
+#
+# The container carries no application source of its own — worktrees are
+# bind-mounted in at run time (see docker-compose.gate-runner.yml) from the
+# host's canonical omni_home layout, matching how runners resolve their own
+# workspace. `uv` resolves and builds each repo's venv fresh inside the
+# container on first use (UV_PROJECT_ENVIRONMENT pins it to a container-only
+# path so it can never collide with a host-built .venv whose interpreter path
+# differs).
+#
+# Build:
+#   docker build -f docker/Dockerfile.gate-runner -t omninode-gate-runner:latest .
+FROM python:3.13-slim-bookworm
+
+# Minimal toolchain: git (worktree ops), curl (uv installer), build-essential
+# (a handful of transitive deps still build from sdist), ca-certificates.
+RUN apt-get update \
+    && apt-get install -y --no-install-recommends \
+       git curl ca-certificates build-essential \
+    && rm -rf /var/lib/apt/lists/*
+
+# Pin uv via the official static installer (matches the pattern already used
+# for Dockerfile.runtime's UV_VERSION build-arg convention).
+ARG UV_VERSION=0.11.5
+RUN curl -LsSf "https://astral.sh/uv/${UV_VERSION}/install.sh" | UV_INSTALL_DIR=/usr/local/bin sh
+
+# Non-root execution — same posture as Dockerfile.runtime. uid/gid 1000
+# matches the host `jonah` account on omninode-pc so bind-mounted worktree
+# files stay writable without a chown dance.
+RUN groupadd -g 1000 gaterunner && useradd -m -u 1000 -g gaterunner gaterunner
+USER gaterunner
+WORKDIR /workspace
+
+# PYTHONPATH is deliberately unset (never inherited from a build-arg or the
+# image's own ENV) — the whole point of this surface is a clean interpreter
+# environment; CLAUDE.md rule 11a names an ambient PYTHONPATH shadowing
+# worktree source as a known local-Mac failure mode this container must not
+# reproduce.
+ENV PYTHONDONTWRITEBYTECODE=1 \
+    PYTHONUNBUFFERED=1
+
+# Idle by design — docker-compose.gate-runner.yml keeps this container running
+# so `docker compose exec` overhead is paid once, not per pre-push run.
+CMD ["sleep", "infinity"]
