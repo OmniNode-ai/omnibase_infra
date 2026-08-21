@@ -228,6 +228,13 @@ SOFT_ALLOWLIST: frozenset[str] = frozenset(
 # finished 24.9 min after `CI Summary` started, well inside the caller's 90 min
 # poll deadline, so waiting on these cannot time the poller out.
 # Fixture + regression: tests/ci/fixtures/omn15496_merge_time_external_check_runs.json.
+#
+# OMN-15737 (successor to OMN-13873, whose own DoD required this context be
+# "required on infra dev/main branch protection" but never followed through):
+# `Dep Provenance Gate` (dep-provenance-gate.yml) was separately re-measured
+# 16/16 present, 16/16 green over the SAME #2546…#2567 window (job has no
+# job-level `if:` — it always executes and reports, even when pyproject.toml is
+# unchanged) and folded into the same fixture rows above.
 EXPECTED_EXTERNAL_CONTEXTS: tuple[str, ...] = (
     "deploy-gate / deploy-gate",  # 16/16 present, 15/16 green (#2555 red AT MERGE)
     "verify / verify",  # Receipt Gate
@@ -268,6 +275,7 @@ EXPECTED_EXTERNAL_CONTEXTS: tuple[str, ...] = (
     # legitimate red. Fixture + regression:
     # tests/ci/fixtures/omn15979_merge_time_external_check_runs.json.
     "Integration Test Removal Gate",
+    "Dep Provenance Gate",  # OMN-15737: 16/16 present, 16/16 green (#2546-#2567 AND #2646-#2669)
 )
 
 # Contexts that were MEASURED and deliberately NOT enforced. Recorded as data —
