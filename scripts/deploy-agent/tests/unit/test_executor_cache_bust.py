@@ -6,7 +6,7 @@ Without this, Docker's layer cache silently serves stale COPY src/ layers even w
 git is at the correct SHA (root cause of PR #1231 verification failure).
 
 Also covers OMN-10728 / OMN-11542: OMNIBASE_COMPAT_REF, OMNIMARKET_REF, and
-ONEX_CHANGE_CONTROL_REF must be passed as full commit SHAs so the uv cache mount
+OMNIBASE_COMPAT_REF/OMNIMARKET_REF must be passed as full commit SHAs so the uv cache mount
 (keyed on URL) misses when main advances.
 """
 
@@ -244,8 +244,16 @@ class TestUvCacheBustPluginRefs:
             f"Expected OMNIBASE_COMPAT_REF={sentinel_sha!r} in build args; got {build_args}"
         )
 
-    def test_compose_build_passes_onex_change_control_ref_build_arg(self) -> None:
-        """_compose_build must include --build-arg ONEX_CHANGE_CONTROL_REF=<sha>."""
+    def test_compose_build_omits_onex_change_control_ref_build_arg(self) -> None:
+        """_compose_build must NOT pass ONEX_CHANGE_CONTROL_REF (OMN-16296).
+
+        onex_change_control is no longer installed into the runtime image, so
+        Dockerfile.runtime declares no such ARG. Passing it would be a dead
+        build-arg -- docker warns "One or more build-args were not consumed",
+        and the pin would silently read as meaningful when nothing consumes it.
+        This asserts the removal rather than merely deleting the old positive
+        test, so a future re-add has to be deliberate.
+        """
         executor = DeployExecutor()
         sentinel_sha = "dead0000beef1111"
 
@@ -277,8 +285,10 @@ class TestUvCacheBustPluginRefs:
             for i, tok in enumerate(build_cmd)
             if tok == "--build-arg" and i + 1 < len(build_cmd)
         }
-        assert f"ONEX_CHANGE_CONTROL_REF={sentinel_sha}" in build_args, (
-            f"Expected ONEX_CHANGE_CONTROL_REF={sentinel_sha!r} in build args; got {build_args}"
+        occ_args = {a for a in build_args if a.startswith("ONEX_CHANGE_CONTROL_REF=")}
+        assert not occ_args, (
+            "ONEX_CHANGE_CONTROL_REF must not be passed: onex_change_control is "
+            f"not installed into the runtime image (OMN-16296); got {occ_args}"
         )
 
     def test_resolve_plugin_ref_returns_sha_from_git(self) -> None:
@@ -341,6 +351,8 @@ class TestUvCacheBustPluginRefs:
         assert "OMNIBASE_COMPAT_REF=main" in build_args, (
             f"Expected OMNIBASE_COMPAT_REF=main when OMNI_HOME unset; got {build_args}"
         )
-        assert "ONEX_CHANGE_CONTROL_REF=main" in build_args, (
-            f"Expected ONEX_CHANGE_CONTROL_REF=main when OMNI_HOME unset; got {build_args}"
+        occ_args = {a for a in build_args if a.startswith("ONEX_CHANGE_CONTROL_REF=")}
+        assert not occ_args, (
+            "ONEX_CHANGE_CONTROL_REF must not be passed even when OMNI_HOME is "
+            f"unset (OMN-16296); got {occ_args}"
         )
