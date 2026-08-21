@@ -181,6 +181,7 @@ databases:
               - delegation_budget_state
               - delegation_events
               - delegation_judge_verdict_events
+              - delegation_routing_tenant_overlay
               - delegation_shadow_comparisons
               - dep_health_findings
               - hook_events
@@ -310,5 +311,5 @@ source:
   profile_catalog_path: src/omnibase_infra/topology/application_database_profiles.yaml
   profile_catalog_sha256: 759f32da77ad41b874fbb05d2824c44f9de4c64e9d269d99da21445225a90ca1
   repository: OmniNode-ai/omnibase_infra
-  sha256: e603817f0925f161d9b49a9629a6b2fa09316beb01860756026f3c790d486a54
+  sha256: a0db2a7446043ce8923f22f3e56bfdc926d412eebdd677a79bee92f1ce7a040c
 topology_instance: onex-prod
