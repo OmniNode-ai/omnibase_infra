@@ -27,10 +27,12 @@ PROVENANCE_SCRIPT = (
 )
 SCHEMA_FILE = REPO_ROOT / "scripts" / "runtime_build" / "build-provenance-schema.json"
 
+# OMN-16296: onex_change_control is no longer staged into the runtime image,
+# so it is absent from stage_workspace.sh's SIBLING_REPOS and from the
+# per-repo provenance this asserts.
 SIBLING_REPOS = (
     "omnibase_core",
     "omnibase_compat",
-    "onex_change_control",
     "omnimarket",
 )
 
