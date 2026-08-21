@@ -330,7 +330,11 @@ def test_exact_domain_adapter_predecessor_is_checked_out_and_executed() -> None:
 def test_private_ownership_pin_is_pat_authenticated_and_fork_fail_closed() -> None:
     workflow = _CI_WORKFLOW.read_text(encoding="utf-8")
 
-    assert "token: ${{ secrets.CROSS_REPO_PAT }}" in workflow
+    # OMN-16373: CROSS_REPO_PAT retired in favor of a minted onexbot-occ-writer
+    # App installation token (steps.app-token-proof), same private-repo
+    # authentication requirement -- an empty App token on a fork PR fails
+    # the same way an empty PAT did.
+    assert "token: ${{ steps.app-token-proof.outputs.token }}" in workflow
     assert "Enforce schema qualification in changed SQL (trusted)" in workflow
     assert (
         "Enforce schema qualification in changed SQL (public fork, fail closed)"
@@ -409,15 +413,19 @@ def test_live_omnimarket_head_resolution_survives_fork_prs_without_org_secrets()
         maxsplit=1,
     )[1].split("- name:", maxsplit=1)[0]
 
-    # Must not hard-depend on CROSS_REPO_PAT alone -- a fork PR run has no
-    # org secrets, so a bare `${{ secrets.CROSS_REPO_PAT }}` here means an
-    # empty GH_TOKEN and an unauthenticated `gh api` failure under
+    # Must not hard-depend on the minted App token alone (OMN-16373:
+    # CROSS_REPO_PAT retired) -- a fork PR run has no org secrets, so a bare
+    # `${{ steps.app-token-proof.outputs.token }}` here means an empty
+    # GH_TOKEN and an unauthenticated `gh api` failure under
     # `set -euo pipefail`.
-    assert "GH_TOKEN: ${{ secrets.CROSS_REPO_PAT }}" not in live_resolve_step
+    assert (
+        "GH_TOKEN: ${{ steps.app-token-proof.outputs.token }}" not in live_resolve_step
+    )
     # Must fall back to the always-present github.token so the fork lane
     # keeps resolving (omnimarket is public; no elevated scope is needed).
     assert (
-        "GH_TOKEN: ${{ secrets.CROSS_REPO_PAT || github.token }}" in live_resolve_step
+        "GH_TOKEN: ${{ steps.app-token-proof.outputs.token || github.token }}"
+        in live_resolve_step
     )
     # Fail-closed behavior is preserved: no mutable-tag/latest/dev-ref
     # fallback, hard exit on invalid resolution, still gated to the
