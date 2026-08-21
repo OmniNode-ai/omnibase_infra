@@ -164,20 +164,35 @@ jobs:
       # This is a non-force push of an already-proven dev SHA (release
       # tags are cut from dev; dev CI + this job already validated it).
       # Promotion PRs to main are retired -- main protection now empties
-      # required_status_checks on main and restricts pushes to this job's
-      # automation identity, so no separate token/secret is needed: the
-      # same GITHUB_TOKEN persisted by the checkout step above already
-      # authenticates this push.
+      # required_status_checks on main and restricts pushes to a named
+      # automation identity. The workflow's default GITHUB_TOKEN cannot
+      # satisfy that restriction (proven live on omnibase_core: GH006
+      # "protected branch update failed", 2026-08-21), so this push mints
+      # a short-lived installation token for the org-owned GitHub App
+      # onexbot-occ-writer (org secrets ONEXBOT_OCC_APP_ID /
+      # ONEXBOT_OCC_PRIVATE_KEY) and pushes as that app identity instead.
+      # See OMN-16343.
+      - name: Mint onexbot-occ-writer app token (release main-sync push identity)
+        id: app-token
+        if: ${{ !contains(steps.tag.outputs.tag, 'rc') }}
+        uses: actions/create-github-app-token@d72941d797fd3113feb6b93fd0dec494b13a2547 # v1
+        with:
+          app-id: ${{ secrets.ONEXBOT_OCC_APP_ID }}
+          private-key: ${{ secrets.ONEXBOT_OCC_PRIVATE_KEY }}
+          owner: OmniNode-ai
+          repositories: omnibase_infra
+
       - name: Sync main to release tag
         if: ${{ !contains(steps.tag.outputs.tag, 'rc') }}
         env:
           RELEASE_TAG: ${{ steps.tag.outputs.tag }}
+          APP_TOKEN: ${{ steps.app-token.outputs.token }}
         run: |
           set -euo pipefail
           TAG="$RELEASE_TAG"
           TAG_SHA=$(git rev-list -n 1 "$TAG")
           echo "Resolved tag $TAG -> commit $TAG_SHA"
-          git push origin "${TAG_SHA}:refs/heads/main"
+          git push "https://x-access-token:${APP_TOKEN}@github.com/${{ github.repository }}.git" "${TAG_SHA}:refs/heads/main"
           echo "main fast-forwarded to $TAG_SHA ($TAG)"
 
   # ---------------------------------------------------------------------------

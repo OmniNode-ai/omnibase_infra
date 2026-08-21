@@ -76,7 +76,12 @@ dependencies = [
     "grpcio>=1.62.0,<2.0.0", # Explicit lower bound: fixes EnumTypeWrapper|None runtime error [OMN-3548]
     "neo4j>=5.15.0,<7.0.0", # Bolt/Cypher client for Memgraph graph database
     # CLI Dependencies
-    "click>=8.1.0,<9.0.0",
+    # Floor raised 8.1.0 -> 8.3.3 (OMN-16355): 8.3.2 and below carry
+    # CVE-2026-7246 / PYSEC-2026-2132 (HIGH, CVSS 7.2) -- command injection in
+    # click.edit(), which shelled the editor command out via subprocess with
+    # shell=True. 8.3.3 splits pager/editor commands with shlex.split() into an
+    # argv list and drops shell=True. Blocks Lockfile CVE Scan (OMN-16228).
+    "click>=8.3.3,<9.0.0",
     "rich>=13.7.0,<16.0.0",
     "textual>=0.89.0,<9.0.0", # Terminal UI framework for onex-status TUI (OMN-2657)
     # System utilities
@@ -190,7 +195,25 @@ dev = [
     # Test infrastructure dependencies
     "locust>=2.31.8,<3.0.0",  # Load testing framework for postgres adapter tests
     "testcontainers>=4.9.0,<5.0.0",  # Integration testing with real database containers
-    "kafka-python>=2.0.2,<4.0.0",  # Kafka client for integration testing
+    # Floor raised 2.0.2 -> 2.3.2 (OMN-16355): 2.3.1 and below carry
+    # CVE-2026-10142 / PYSEC-2026-2190 (unbounded 4-byte protocol frame length ->
+    # multi-GB allocation or a connection-wedging ValueError) and CVE-2026-10143 /
+    # PYSEC-2026-2191 (broker-supplied SCRAM iteration count passed straight to
+    # hashlib.pbkdf2_hmac() -> frozen client event loop). Both are malicious- or
+    # MITM-broker DoS vectors. 2.3.2 carries exactly those two fixes (upstream
+    # #3019 frame-size validation + #3026 SCRAM iteration validation).
+    #
+    # Ceiling tightened 4.0.0 -> 3.0.0 deliberately: kafka-python 3.0.0 is a
+    # breaking major (producer defaults flip to enable_idempotence=True/acks='all',
+    # consumer session_timeout_ms 10s->45s, api_version_auto_timeout_ms renamed to
+    # bootstrap_timeout_ms, Serializer/Partitioner signatures changed, KafkaError
+    # no longer subclasses RuntimeError, NoBrokersAvailableError removed, kafka.sasl
+    # -> kafka.net.sasl, kafka.client_async/kafka.conn deleted). Our consumers are
+    # scripts/deploy-agent/ (KafkaProducer/KafkaConsumer on the live deploy control
+    # bus) plus tests/integration/test_dispatch_roundtrip.py; the runtime itself is
+    # on aiokafka, not this client. A 3.x migration is its own change with its own
+    # proof, not a rider on a CVE unblock. Ceiling lifts when that migration lands.
+    "kafka-python>=2.3.2,<3.0.0",  # Kafka client for integration testing
     "pytest-httpserver>=1.1.0,<2.0.0",  # Local mock HTTP server for integration tests
 
     # Additional type stubs for better mypy coverage
