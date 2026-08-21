@@ -59,7 +59,9 @@ _EXPECTED_SKILLS = frozenset(
         "create_ticket",
         "database_sweep",
         "design_to_plan",
-        "doc_freshness_sweep",
+        # OMN-16191 deletes node_doc_freshness_sweep from omnimarket (it never
+        # had a real implementation of its own); the skill_mapping.yaml entry
+        # for doc_freshness_sweep is removed in the same change.
         "dod_verify",
         "duplication_sweep",
         # OMN-13995: node_dep_cascade_dedup_orchestrator was in the omnimarket
