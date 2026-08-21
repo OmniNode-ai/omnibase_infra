@@ -5,19 +5,31 @@ on:
     branches: [main]
   pull_request:
     branches: [main, dev]
-    # OMN-14241: `edited` is required so a PR-body-only edit (the common case
-    # is stamping `Evidence-Source: OCC#<n>` after the companion OCC PR
-    # merges) retriggers this workflow's `occ-preflight` job. The reusable
-    # occ-preflight.yml already live-fetches the current PR body via
-    # `gh pr view` on every run -- the defect was never a frozen-body read,
-    # it was that no new run fired at all, so the last commit-triggered
-    # FAILURE (correct at that instant, before the stamp existed) sat as the
-    # permanent status for `occ-preflight / eligibility` and CI Summary
-    # failed closed on it forever (live case: infra#2696, #2694). GitHub's
-    # implicit default when `types:` is omitted is
-    # [opened, synchronize, reopened], which is what this workflow ran on
-    # before this fix.
-    types: [opened, edited, synchronize, reopened]
+    # OMN-16171: `edited` REMOVED, and the OMN-14241 self-heal it provided is
+    # now served by .github/workflows/occ-preflight-heal.yml instead.
+    #
+    # OMN-14241 was right about the defect: a PR-body-only edit stamping
+    # `Evidence-Source: OCC#<n>` has to re-validate, or the pre-stamp
+    # `occ-preflight / eligibility` FAILURE stands forever and CI Summary
+    # fails closed on it (live cases: #2696, #2694). But paying for it with a
+    # trigger type meant a brand-new run of this entire ~48-job matrix on
+    # every body edit -- and because the concurrency group below cancels in
+    # progress, each edit also killed whatever matrix was mid-flight and
+    # restarted it from zero. Measured on #2784, one unchanged head SHA
+    # 7993b115: waves at 13:28:50Z (42 workflows), 13:50:09Z (10) and
+    # 13:51:33Z (8), while the org-wide backlog stood at 247 queued jobs.
+    #
+    # The heal workflow re-runs only the FAILED JOBS of this run, in place,
+    # keeping the run id -- which is what CI Summary needs, since it polls its
+    # own run's job list. Two jobs move instead of forty-eight, nothing
+    # in-flight is cancelled, and the trigger set here returns to GitHub's
+    # implicit default.
+    #
+    # Skipping the heavy jobs on an edited run was NOT an option: a job
+    # skipped by an `if:` still publishes a `skipped` check run, which branch
+    # protection counts as passing -- vector 2 of the required-check
+    # skip-vector guard, i.e. a body-edit-shaped bypass of a red gate.
+    types: [opened, synchronize, reopened]
   merge_group:
   workflow_dispatch:
 
