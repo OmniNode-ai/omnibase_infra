@@ -61,6 +61,7 @@ jobs:
           app-id: ${{ secrets.ONEXBOT_OCC_APP_ID }}
           private-key: ${{ secrets.ONEXBOT_OCC_PRIVATE_KEY }}
           owner: OmniNode-ai
+          permission-contents: write
 
       - name: Setup Python and uv
         uses: ./.github/actions/setup-python-uv
@@ -107,6 +108,7 @@ jobs:
           app-id: ${{ secrets.ONEXBOT_OCC_APP_ID }}
           private-key: ${{ secrets.ONEXBOT_OCC_PRIVATE_KEY }}
           owner: OmniNode-ai
+          permission-contents: write
 
       - name: Setup Python and uv
         uses: ./.github/actions/setup-python-uv
@@ -157,6 +159,7 @@ jobs:
           app-id: ${{ secrets.ONEXBOT_OCC_APP_ID }}
           private-key: ${{ secrets.ONEXBOT_OCC_PRIVATE_KEY }}
           owner: OmniNode-ai
+          permission-contents: write
 
       - name: Install onex_change_control (pinned)
         env:

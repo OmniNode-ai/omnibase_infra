@@ -56,6 +56,7 @@ jobs:
           private-key: ${{ secrets.ONEXBOT_OCC_PRIVATE_KEY }}
           owner: OmniNode-ai
           repositories: omninode_infra
+          permission-contents: write
 
       - name: Checkout omninode_infra (sibling — provides k8s ConfigMap)
         # GITHUB_TOKEN is scoped to omnibase_infra and cannot access the private

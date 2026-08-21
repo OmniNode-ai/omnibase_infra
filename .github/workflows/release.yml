@@ -269,6 +269,7 @@ jobs:
           private-key: ${{ secrets.ONEXBOT_OCC_PRIVATE_KEY }}
           owner: OmniNode-ai
           repositories: omninode_infra
+          permission-contents: write
 
       - name: Dispatch runtime rebuild to omninode_infra
         if: steps.token_check.outputs.has_token == 'true'

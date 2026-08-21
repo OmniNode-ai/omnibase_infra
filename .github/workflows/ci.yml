@@ -1727,6 +1727,7 @@ jobs:
           private-key: ${{ secrets.ONEXBOT_OCC_PRIVATE_KEY }}
           owner: OmniNode-ai
           repositories: onex_change_control
+          permission-contents: write
 
       - name: Checkout onex_change_control standards
         uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
@@ -1897,6 +1898,7 @@ jobs:
           app-id: ${{ secrets.ONEXBOT_OCC_APP_ID }}
           private-key: ${{ secrets.ONEXBOT_OCC_PRIVATE_KEY }}
           owner: OmniNode-ai
+          permission-contents: write
       - uses: OmniNode-ai/onex_change_control/.github/actions/validate-boundaries@main
         id: migration_conflicts
         env:
@@ -1932,6 +1934,7 @@ jobs:
           private-key: ${{ secrets.ONEXBOT_OCC_PRIVATE_KEY }}
           owner: OmniNode-ai
           repositories: onex_change_control
+          permission-contents: write
       - name: Checkout onex_change_control
         uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
         with:
@@ -2552,6 +2555,7 @@ jobs:
           app-id: ${{ secrets.ONEXBOT_OCC_APP_ID }}
           private-key: ${{ secrets.ONEXBOT_OCC_PRIVATE_KEY }}
           owner: OmniNode-ai
+          permission-contents: write
 
       - name: Checkout exact sanitized legacy fixture dependency
         uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
