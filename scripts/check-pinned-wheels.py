@@ -7,8 +7,12 @@ and the latest published GitHub releases.
 
 Checks three classes of pin:
 
-1. Dockerfile ARG git-ref pins (OMNIBASE_COMPAT_REF, ONEX_CHANGE_CONTROL_REF,
-   OMNIMARKET_REF) — compared against the latest release tag on GitHub.
+1. Dockerfile ARG git-ref pins (OMNIBASE_COMPAT_REF, OMNIMARKET_REF) — compared
+   against the latest release tag on GitHub. ONEX_CHANGE_CONTROL_REF is absent
+   by design since OMN-16296: onex_change_control is not installed into the
+   runtime image, so it has no Dockerfile ARG to pin. Its pyproject
+   [tool.uv.sources] rev IS still checked below, because infra keeps it as a
+   dev/governance-tooling dependency.
 2. pyproject.toml [tool.uv.sources] git rev/tag pins (omnibase-core,
    omnibase-spi, onex-change-control) — compared against latest release tag.
 3. Dockerfile ``uv pip install --no-deps`` PyPI range pins (omninode-claude,
@@ -173,7 +177,9 @@ _ARG_RE = re.compile(r'^ARG\s+(\w+)="?([^"\s]+)"?', re.MULTILINE)
 # Maps Dockerfile ARG name → (canonical package name, pin type)
 _DOCKERFILE_ARG_PINS: dict[str, tuple[str, str]] = {
     "OMNIBASE_COMPAT_REF": ("omnibase_compat", "commit_sha"),
-    "ONEX_CHANGE_CONTROL_REF": ("onex_change_control", "branch_or_sha"),
+    # OMN-16296: ONEX_CHANGE_CONTROL_REF removed. onex_change_control is no
+    # longer installed into the runtime image in either build mode, so there is
+    # no ARG left to pin and nothing here to validate.
     "OMNIMARKET_REF": ("omnimarket", "branch_or_sha"),
 }
 
