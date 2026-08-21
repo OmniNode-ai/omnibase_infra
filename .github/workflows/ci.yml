@@ -824,6 +824,147 @@ jobs:
           # so an unresolvable pin fails the gate instead of skipping silently.
           uv run python scripts/ci/check_pin_reachability.py --min-pins 5
 
+  # Lockfile CVE scan (OMN-16228) -- born from the 2026-08-18 sqlparse/Trivy
+  # incident (OMN-16170): three HIGH sqlparse CVEs (fixed in 0.6.0) were only
+  # caught by the Trivy scan on the built runtime IMAGE, deep in the deploy
+  # pipeline, with a staging rollout batch queued behind the one-line fix.
+  # This shifts detection left to dependency-pin time, on the PR that
+  # introduces or keeps the vulnerable pin.
+  #
+  # Tool: osv-scanner (not pip-audit) -- osv-scanner parses uv.lock natively
+  # (confirmed against the upstream supported-lockfiles list: Pipfile.lock,
+  # poetry.lock, requirements.txt, pdm.lock, pylock.toml, uv.lock). pip-audit
+  # has no uv.lock parser and would need an extra `uv export` translation
+  # step. Pinned by ghcr.io digest (not a floating tag) for the same
+  # reproducibility reason Trivy is pinned by commit SHA below.
+  #
+  # STRICT_GATE_JOBS + no job-level `if:` (fail-closed-on-skip): this job
+  # always runs and always completes success/failure -- it never reports
+  # `skipped`, which is invisible to a poller expecting `success` and reads
+  # as SUCCESS when unregistered (the OMN-16225-class fail-open-by-skip
+  # trap). Path relevance (does this PR touch pyproject.toml/uv.lock) is
+  # decided by scripts/ci/check_lockfile_cve.py's `relevant` subcommand and
+  # threaded through step-level `if:` guards via $GITHUB_OUTPUT -- the same
+  # shape `detect-changes` already uses below -- so only the STEPS skip, the
+  # job conclusion is always a real success/failure. See
+  # scripts/ci/check_lockfile_cve.py's module docstring for the full
+  # severity-classification + fix-availability + blocking-decision design.
+  lockfile-cve-scan:
+    needs: occ-preflight
+    name: Lockfile CVE Scan (OMN-16228)
+    # OMNI_RUNNER_SELECTOR_V1 — trusted CI defaults to self-hosted omnibase-ci; public forks default to ubuntu-latest
+    runs-on: >-
+      ${{
+        (github.event_name == 'pull_request' &&
+         github.event.pull_request.head.repo.full_name != github.repository)
+        && fromJSON(vars.OMNI_PUBLIC_PR_RUNS_ON_JSON || '["ubuntu-latest"]')
+        || fromJSON((github.event_name == 'merge_group' && vars.OMNI_REQUIRED_CI_RUNS_ON_JSON) || vars.OMNI_TRUSTED_CI_RUNS_ON_JSON || '["self-hosted","omnibase-ci"]')
+      }}
+    # Raised from 5 (2026-08-18, live proof run on PR #2793): the DoD's
+    # "under ~2 min" budget is about the scan's own runtime, not fleet setup
+    # variance. Under contended-fleet conditions the SAME shared
+    # setup-python-uv composite this job shares with every other job in this
+    # file measured 6m42s before completing on a live run -- the job was
+    # cancelled by the old 5-minute ceiling before osv-scanner ever ran, a
+    # false-red unrelated to this job's own logic. Same shape as pin-
+    # reachability's own timeout history (raised 10->18 for the identical
+    # reason, see that job's comment above). 15 minutes matches the baseline
+    # every other lightweight gate in this file already uses
+    # (fingerprint-check, demo-loop-gate, etc.) for the same setup-variance
+    # headroom; the scan itself remains fast.
+    timeout-minutes: 15
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+        with:
+          fetch-depth: 0
+
+      - name: Setup Python and uv
+        uses: ./.github/actions/setup-python-uv
+        with:
+          python-version: ${{ env.PYTHON_VERSION }}
+          uv-version: ${{ env.UV_VERSION }}
+          cache-version: ${{ env.CACHE_VERSION }}
+          cache-enabled: "false"
+
+      - name: Compute changed files
+        id: diff
+        run: |
+          if [ "${{ github.event_name }}" = "pull_request" ]; then
+            base="${{ github.event.pull_request.base.sha }}"
+            git fetch --no-tags --depth=1 origin "$base" || true
+            git diff --name-only "$base"...HEAD > changed.txt
+          else
+            git diff --name-only HEAD~1 HEAD > changed.txt || echo "" > changed.txt
+          fi
+
+      - name: Determine scan relevance
+        id: relevant
+        run: |
+          result=$(uv run python -m scripts.ci.check_lockfile_cve relevant \
+            --changed-files-from changed.txt \
+            --event-name "${{ github.event_name }}")
+          echo "relevant=$result" >> "$GITHUB_OUTPUT"
+          echo "Scan relevant: $result"
+
+      # Runs the pinned+checksummed linux_amd64 binary directly, NOT via
+      # `docker run -v $PWD:/src` (the first cut of this step, live-proof-run
+      # defect found 2026-08-18 on PR #2793: self-hosted `omnibase-ci`
+      # runners are themselves containerized -- Docker-outside-of-Docker --
+      # so `$PWD` inside the runner container does not resolve to a real
+      # path the HOST docker daemon can bind-mount. osv-scanner's own error
+      # was unambiguous: "failed to resolve path: stat /src/uv.lock: no such
+      # file or directory" -- the mount silently pointed at an empty
+      # directory. A native binary has no mount boundary to get wrong, and
+      # this repo already downloads pinned artifacts by URL+checksum
+      # elsewhere rather than assuming Docker is available/DooD-safe on
+      # every runner class (ubuntu-latest public-fork runners included).
+      # SHA256 pinned from the release's own `osv-scanner_SHA256SUMS` file,
+      # verified 2026-08-18 against a fresh download of both files.
+      # Single retry on a transport/execution failure only (not on findings --
+      # osv-scanner exits non-zero when it finds ANY vulnerability, which is
+      # an expected outcome here, not a transient failure). Consistent with
+      # the "single retry, then red" network-flakiness norm used elsewhere in
+      # this workflow.
+      - name: Run osv-scanner
+        if: steps.relevant.outputs.relevant == 'true'
+        env:
+          OSV_SCANNER_URL: "https://github.com/google/osv-scanner/releases/download/v2.5.1/osv-scanner_linux_amd64"
+          OSV_SCANNER_SHA256: "f9f25499a2c8cc367b3af45df2ea7eeca7fbccceab9c35079968f4b3652194be"
+        run: |
+          set -uo pipefail
+          curl -sSL --fail "$OSV_SCANNER_URL" -o /tmp/osv-scanner
+          echo "${OSV_SCANNER_SHA256}  /tmp/osv-scanner" | sha256sum -c -
+          chmod +x /tmp/osv-scanner
+          attempt_scan() {
+            /tmp/osv-scanner scan --lockfile=uv.lock --format=json > osv-results.json 2> osv-scan.log
+          }
+          valid_json() {
+            python3 -c "import json; json.load(open('osv-results.json'))" 2>/dev/null
+          }
+          attempt_scan || true
+          if ! valid_json; then
+            echo "osv-scanner did not produce valid JSON on attempt 1 -- retrying once:"
+            cat osv-scan.log || true
+            attempt_scan || true
+          fi
+          if ! valid_json; then
+            echo "osv-scanner failed on both attempts -- treating as a real scan failure, not a clean result."
+            cat osv-scan.log || true
+            exit 1
+          fi
+          echo "osv-scanner produced valid JSON output."
+
+      - name: Evaluate lockfile CVE findings
+        if: steps.relevant.outputs.relevant == 'true'
+        run: |
+          uv run python -m scripts.ci.check_lockfile_cve evaluate --osv-json osv-results.json
+
+      - name: No relevant lockfile changes
+        if: steps.relevant.outputs.relevant != 'true'
+        run: echo "pyproject.toml/uv.lock unchanged in this diff -- skipping the substantive scan (job still reports success, not skipped)."
+
   # Dep-provenance content-lineage gate (OMN-15604) -- a [tool.uv.sources]
   # git-pinned rev must build the SAME src/ tree as the released tag its
   # PyPI version string declares, even when the line carries a
