@@ -130,8 +130,7 @@ WHAT --execute DOES, IN ORDER
     4. Build the image with the same OCI provenance build-args every
        omnibase-infra runtime container gets (VCS_REF, RUNTIME_VERSION,
        BUILD_DATE, COMPOSE_PROJECT, RUNTIME_SOURCE_HASH, PROMOTION_CLASS,
-       NON_MAIN_LINEAGE, OMNIBASE_COMPAT_REF, OMNIMARKET_REF,
-       ONEX_CHANGE_CONTROL_REF).
+       NON_MAIN_LINEAGE, OMNIBASE_COMPAT_REF, OMNIMARKET_REF).
     5. Resolve the built image's digest (sha256:<64 hex>).
     6. Sync docker/docker-compose.gateway.yml and
        docker/gateway/beta-gateway-canary.yaml from this checkout into
@@ -339,22 +338,23 @@ resolve_build_args() {
         promotion_class="stability-candidate"
         non_main_lineage="true"
     fi
-    # OMN-15521 remediation: these three sibling-ref build-args are NOT
-    # optional extras -- deploy-runtime.sh's build_images() passes them
-    # unconditionally on every build_source (scripts/deploy-runtime.sh
-    # resolve+pass at build_images()). Omitting them silently falls back to
-    # the Dockerfile's hardcoded ARG defaults (OMNIBASE_COMPAT_REF=v0.5.5,
-    # ONEX_CHANGE_CONTROL_REF=v0.5.3, OMNIMARKET_REF=dev), which is exactly
-    # how the gateway image drifted from the omnibase-infra runtime image's
-    # onex-change-control pin on the same box (0.5.3 vs 0.5.1).
+    # OMN-15521 remediation: these sibling-ref build-args are NOT optional
+    # extras -- deploy-runtime.sh's build_images() passes them unconditionally
+    # on every build_source (scripts/deploy-runtime.sh resolve+pass at
+    # build_images()). Omitting them silently falls back to the Dockerfile's
+    # hardcoded ARG defaults (OMNIBASE_COMPAT_REF=v0.5.5, OMNIMARKET_REF=dev),
+    # which is how the gateway image previously drifted from the
+    # omnibase-infra runtime image on the same box.
+    #
+    # OMN-16296: ONEX_CHANGE_CONTROL_REF was one of these and is now gone --
+    # onex_change_control is no longer installed into the runtime image, so the
+    # ARG it fed no longer exists and there is no pin left to drift.
     local omni_home="${OMNI_HOME:-}"
     local compat_ref="main"
     local omnimarket_ref="dev"
-    local occ_ref="main"
     if [[ -n "${omni_home}" ]]; then
         compat_ref="$(read_repo_ref_or_main "${omni_home}/omnibase_compat" "main")"
         omnimarket_ref="$(read_repo_ref_or_main "${omni_home}/omnimarket" "dev")"
-        occ_ref="$(read_repo_ref_or_main "${omni_home}/onex_change_control" "main")"
     fi
     cat <<EOF
 GIT_SHA=${git_sha}
@@ -370,7 +370,6 @@ NON_MAIN_LINEAGE=${non_main_lineage}
 OMNI_HOME=${omni_home}
 OMNIBASE_COMPAT_REF=${compat_ref}
 OMNIMARKET_REF=${omnimarket_ref}
-ONEX_CHANGE_CONTROL_REF=${occ_ref}
 EOF
     unset repo_root
 }

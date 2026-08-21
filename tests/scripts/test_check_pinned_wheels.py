@@ -173,7 +173,10 @@ def test_check_dockerfile_args_flags_main_ref(tmp_path: Path) -> None:
     main_results = [r for r in results if r.pinned == "main"]
     assert all(r.drifted for r in main_results), "floating 'main' refs must be drifted"
     names = {r.name for r in main_results}
-    assert "ONEX_CHANGE_CONTROL_REF" in names
+    # OMN-16296: ONEX_CHANGE_CONTROL_REF is no longer a Dockerfile ARG --
+    # onex_change_control is not installed into the runtime image -- so the
+    # checker must not expect or flag it.
+    assert "ONEX_CHANGE_CONTROL_REF" not in names
     assert "OMNIMARKET_REF" in names
 
 
