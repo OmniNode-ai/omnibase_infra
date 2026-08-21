@@ -2,7 +2,7 @@
 # SPDX-License-Identifier: MIT
 """Regression test for OMN-12424.
 
-`Dockerfile.runtime` installs the cross-repo ONEX packages onex_change_control
+`Dockerfile.runtime` installs the cross-repo ONEX packages
 and omnimarket from *moving* git refs (`@main` / `@dev`) under a persistent
 BuildKit uv cache mount (`--mount=type=cache,target=/root/.cache/uv`).
 
@@ -33,7 +33,6 @@ _DOCKERFILE = _REPO_ROOT / "docker" / "Dockerfile.runtime"
 # omnibase_compat is intentionally excluded: it is installed from a SHA-pinned,
 # immutable archive tarball and therefore needs no refresh.
 _MOVING_REF_GIT_PACKAGES: dict[str, str] = {
-    "onex_change_control": "onex-change-control",
     "omnimarket": "omnimarket",
 }
 
