@@ -2426,10 +2426,19 @@ jobs:
           path: .proof-dependencies/omnimarket
           persist-credentials: false
 
+      # OMN-16152: GitHub withholds ALL repo secrets from dependabot-triggered
+      # pull_request runs even when the head branch is same-repo, not a fork
+      # -- the fork check alone let dependabot through into a checkout whose
+      # only token source (CROSS_REPO_PAT) is unconditionally empty there.
+      # actions/checkout treats an explicitly-passed empty token as "unset
+      # and required", so it hard-failed instead of falling back to
+      # github.token. Route dependabot into the same narrow fail-closed lane
+      # already proven for forks below.
       - name: Checkout exact service ownership dependency
         if: >-
           github.event_name != 'pull_request' ||
-          github.event.pull_request.head.repo.full_name == github.repository
+          (github.event.pull_request.head.repo.full_name == github.repository &&
+           github.actor != 'dependabot[bot]')
         uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
         with:
           repository: OmniNode-ai/omninode_infra
@@ -2475,7 +2484,8 @@ jobs:
       - name: Enforce schema qualification in changed SQL (trusted)
         if: >-
           github.event_name != 'pull_request' ||
-          github.event.pull_request.head.repo.full_name == github.repository
+          (github.event.pull_request.head.repo.full_name == github.repository &&
+           github.actor != 'dependabot[bot]')
         env:
           # OMN-16076: no hardcoded fallback SHA. The old pin was a squash
           # commit reachable only through a since-deleted stacked branch, so
@@ -2495,15 +2505,19 @@ jobs:
           --ownership-manifest .proof-dependencies/omninode-infra/db/migrations/application-relation-ownership.yaml
           --ownership-manifest .proof-dependencies/omninode-infra/k8s/migrations/application-relation-ownership.yaml
 
-      # Public-fork pull_request jobs cannot receive organization secrets. The
-      # fork lane deliberately omits the private manifest authority: any changed
-      # SQL targeting one of those objects is rejected as undeclared. The
+      # Public-fork pull_request jobs cannot receive organization secrets, and
+      # (OMN-16152) neither can dependabot-triggered pull_request jobs even
+      # on a same-repo branch -- GitHub withholds repo secrets from
+      # dependabot by design, independent of the fork check. Both lanes
+      # deliberately omit the private manifest authority: any changed SQL
+      # targeting one of those objects is rejected as undeclared. The
       # synthetic Docker-proof authority is also isolated from both production
       # lanes and is proved independently by mandatory source and Docker gates.
       - name: Enforce schema qualification in changed SQL (public fork, fail closed)
         if: >-
           github.event_name == 'pull_request' &&
-          github.event.pull_request.head.repo.full_name != github.repository
+          (github.event.pull_request.head.repo.full_name != github.repository ||
+           github.actor == 'dependabot[bot]')
         env:
           APPLICATION_SQL_BASE_REVISION: ${{ github.event.pull_request.base.sha }}
         run: >-
