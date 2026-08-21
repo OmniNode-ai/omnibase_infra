@@ -216,7 +216,6 @@ def test_manifest_uses_infra_vcs_ref_and_folds_vcs_provenance(tmp_path: Path) ->
     for repo in (
         "omnibase_core",
         "omnibase_compat",
-        "onex_change_control",
         "omnimarket",
     ):
         (sib_dir / repo).mkdir(parents=True)

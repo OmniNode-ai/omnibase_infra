@@ -65,7 +65,6 @@ except ModuleNotFoundError:  # pragma: no cover - exercised only without packagi
 # mode provisions. Mirrors WORKSPACE_PACKAGES in compute_workspace_provenance.py.
 SIBLING_DISTRIBUTIONS: dict[str, str] = {
     "omnibase_compat": "omnibase-compat",
-    "onex_change_control": "onex-change-control",
     "omnimarket": "omnimarket",
 }
 
