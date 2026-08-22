@@ -181,8 +181,11 @@ def test_migration_conflict_action_is_blocking() -> None:
         == "omniclaude,omnidash,omniintelligence,omnibase_core,omnimemory"
     )
     assert "omnibase_infra" not in validate_step["with"]["repos"].split(",")
+    # OMN-16373: CROSS_REPO_PAT retired in favor of a minted
+    # onexbot-occ-writer App installation token.
     assert (
-        validate_step["env"]["OMNI_REPO_CLONE_TOKEN"] == "${{ secrets.CROSS_REPO_PAT }}"
+        validate_step["env"]["OMNI_REPO_CLONE_TOKEN"]
+        == "${{ steps.app-token.outputs.token }}"
     )
 
     report_steps = [
@@ -477,8 +480,11 @@ def test_contract_compliance_uv_sync_is_bounded_and_retried() -> None:
     checkout_occ = next(
         step for step in steps if step.get("name") == "Checkout onex_change_control"
     )
+    # OMN-16373: CROSS_REPO_PAT retired in favor of a minted
+    # onexbot-occ-writer App installation token.
     assert (
-        checkout_occ["with"]["token"] == "${{ secrets.CROSS_REPO_PAT || github.token }}"
+        checkout_occ["with"]["token"]
+        == "${{ steps.app-token.outputs.token || github.token }}"
     )
 
     setup_uv = next(
@@ -796,9 +802,11 @@ def test_omni_standards_uv_jobs_use_authenticated_composite_action() -> None:
         )
         assert setup_step["with"]["install-args"] == "--all-extras"
         assert setup_step["with"]["cache-enabled"] == "false"
+        # OMN-16373: CROSS_REPO_PAT retired in favor of a minted
+        # onexbot-occ-writer App installation token.
         assert (
             setup_step["with"]["github-token"]
-            == "${{ secrets.CROSS_REPO_PAT || github.token }}"
+            == "${{ steps.app-token.outputs.token || github.token }}"
         )
         # No raw unauthenticated uv sync left behind.
         assert not any(
@@ -812,9 +820,11 @@ def test_omni_standards_uv_jobs_use_authenticated_composite_action() -> None:
         for step in occ_steps
         if step.get("name") == "Install onex_change_control (pinned)"
     )
+    # OMN-16373: CROSS_REPO_PAT retired in favor of a minted
+    # onexbot-occ-writer App installation token.
     assert (
         install_step["env"]["GIT_FETCH_TOKEN"]
-        == "${{ secrets.CROSS_REPO_PAT || github.token }}"
+        == "${{ steps.app-token.outputs.token || github.token }}"
     )
     assert "export GIT_CONFIG_COUNT=1" in install_step["run"]
     assert 'export UV_HTTP_TIMEOUT="${UV_HTTP_TIMEOUT:-600}"' in install_step["run"]
