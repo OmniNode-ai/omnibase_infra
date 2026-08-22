@@ -74,7 +74,9 @@
 --   docker/migrations/rollback/rollback_100_create_gateway_link_health.sql
 -- =============================================================================
 
-CREATE TABLE IF NOT EXISTS public.gateway_link_health (
+CREATE SCHEMA IF NOT EXISTS omninode_internal;
+
+CREATE TABLE IF NOT EXISTS omninode_internal.gateway_link_health (
     tenant_id TEXT NOT NULL,
     principal_id TEXT NOT NULL,
     local_transport_flavor TEXT NOT NULL,
@@ -88,20 +90,20 @@ CREATE TABLE IF NOT EXISTS public.gateway_link_health (
 );
 
 CREATE INDEX IF NOT EXISTS idx_gateway_link_health_last_seen_at
-    ON public.gateway_link_health (last_seen_at);
+    ON omninode_internal.gateway_link_health (last_seen_at);
 
-COMMENT ON TABLE public.gateway_link_health IS
+COMMENT ON TABLE omninode_internal.gateway_link_health IS
     'Latest-known-state projection of gateway tenant-edge heartbeats '
     '(OMN-15570, G3). One row per tenant_id, upserted on every heartbeat; '
     'never deleted. Query gateway_link_health_status for live health, not '
     'this table directly -- health is a function of NOW() - last_seen_at, '
     'not a stored column.';
 
-COMMENT ON COLUMN public.gateway_link_health.last_seen_at IS
+COMMENT ON COLUMN omninode_internal.gateway_link_health.last_seen_at IS
     'Producer-supplied ModelGatewayHeartbeat.emitted_at -- the freshness '
     'stamp gateway_link_health_status diffs against NOW().';
 
-COMMENT ON COLUMN public.gateway_link_health.reported_status IS
+COMMENT ON COLUMN omninode_internal.gateway_link_health.reported_status IS
     'The edge''s OWN verdict on itself, verbatim from '
     'ModelGatewayHeartbeat.status (OMN-15742/G2). Stored as free TEXT, not a '
     'CHECK-constrained enum, deliberately: gateway_link_health_status treats '
@@ -109,18 +111,18 @@ COMMENT ON COLUMN public.gateway_link_health.reported_status IS
     'adds later (e.g. a drain state) is read as not-healthy rather than '
     'crashing the projection or being silently scored HEALTHY.';
 
-COMMENT ON COLUMN public.gateway_link_health.consecutive_failures IS
+COMMENT ON COLUMN omninode_internal.gateway_link_health.consecutive_failures IS
     'ModelGatewayHeartbeat.consecutive_failures -- the evidence behind a '
     'degraded reported_status. Recorded so an operator can tell a single '
     'blip from a sustained one without consulting process memory. It drives '
     'no verdict arm of its own: the producer already folds it into '
     'reported_status, and re-deriving it here would let the two disagree.';
 
-COMMENT ON COLUMN public.gateway_link_health.lag_messages IS
+COMMENT ON COLUMN omninode_internal.gateway_link_health.lag_messages IS
     'Consumer lag in messages, when a producer supplies it. Always NULL '
     'today -- see migration header SCOPE DISCLOSURE.';
 
-COMMENT ON COLUMN public.gateway_link_health.lag_seconds IS
+COMMENT ON COLUMN omninode_internal.gateway_link_health.lag_seconds IS
     'Consumer lag in seconds, when a producer supplies it. Always NULL '
     'today -- see migration header SCOPE DISCLOSURE.';
 
@@ -144,7 +146,7 @@ COMMENT ON COLUMN public.gateway_link_health.lag_seconds IS
 --      first-party statement, not an inference from a derived metric.
 --   3. DEGRADED_LAG            -- inferred from lag columns (inert today).
 --   4. HEALTHY                 -- fresh, self-reporting active, no lag breach.
-CREATE OR REPLACE VIEW public.gateway_link_health_status AS
+CREATE OR REPLACE VIEW omninode_internal.gateway_link_health_status AS
 SELECT
     tenant_id,
     principal_id,
@@ -163,9 +165,9 @@ SELECT
         WHEN lag_seconds IS NOT NULL AND lag_seconds > 120 THEN 'DEGRADED_LAG'
         ELSE 'HEALTHY'
     END AS health_status
-FROM public.gateway_link_health;
+FROM omninode_internal.gateway_link_health;
 
-COMMENT ON VIEW public.gateway_link_health_status IS
+COMMENT ON VIEW omninode_internal.gateway_link_health_status IS
     'Read-time health evaluation over gateway_link_health. health_status '
     'flips to UNHEALTHY once a row goes stale beyond '
     'max_silence_window_seconds (60s, node_bus_forwarder_effect/contract.yaml:61) '

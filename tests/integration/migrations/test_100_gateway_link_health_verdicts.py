@@ -85,7 +85,7 @@ def _upsert(
     with conn.cursor() as cur:
         cur.execute(
             """
-            INSERT INTO public.gateway_link_health (
+            INSERT INTO omninode_internal.gateway_link_health (
                 tenant_id, principal_id, local_transport_flavor, last_seen_at,
                 reported_status, consecutive_failures, lag_messages, lag_seconds
             ) VALUES (%s, %s, %s, %s, %s, %s, %s, %s)
@@ -113,7 +113,7 @@ def _upsert(
 def _verdict(conn: psycopg2.extensions.connection, tenant_id: str) -> str:
     with conn.cursor() as cur:
         cur.execute(
-            "SELECT health_status FROM public.gateway_link_health_status "
+            "SELECT health_status FROM omninode_internal.gateway_link_health_status "
             "WHERE tenant_id = %s",
             (tenant_id,),
         )
@@ -139,7 +139,7 @@ def test_silent_edge_is_unhealthy(
     assert _verdict(applied, "silent") == "UNHEALTHY"
 
     with applied.cursor() as cur:
-        cur.execute("SELECT count(*) FROM public.gateway_link_health_status")
+        cur.execute("SELECT count(*) FROM omninode_internal.gateway_link_health_status")
         assert cur.fetchone()[0] == 1, "the stale row must still be present"
 
 
@@ -267,7 +267,7 @@ def test_recovery_flips_the_verdict_back(
     assert _verdict(applied, "recovers") == "HEALTHY"
     with applied.cursor() as cur:
         cur.execute(
-            "SELECT count(*) FROM public.gateway_link_health WHERE tenant_id = %s",
+            "SELECT count(*) FROM omninode_internal.gateway_link_health WHERE tenant_id = %s",
             ("recovers",),
         )
         assert cur.fetchone()[0] == 1, "recovery must update in place, not insert"
@@ -308,7 +308,7 @@ def test_consecutive_failures_is_recorded_but_drives_no_verdict(
     assert _verdict(applied, "blips") == "HEALTHY"
     with applied.cursor() as cur:
         cur.execute(
-            "SELECT consecutive_failures FROM public.gateway_link_health_status "
+            "SELECT consecutive_failures FROM omninode_internal.gateway_link_health_status "
             "WHERE tenant_id = %s",
             ("blips",),
         )
@@ -333,7 +333,9 @@ def test_rollback_removes_both_objects(
     assert result.returncode == 0, result.stderr
 
     with applied.cursor() as cur:
-        cur.execute("SELECT to_regclass('public.gateway_link_health')")
+        cur.execute("SELECT to_regclass('omninode_internal.gateway_link_health')")
         assert cur.fetchone()[0] is None
-        cur.execute("SELECT to_regclass('public.gateway_link_health_status')")
+        cur.execute(
+            "SELECT to_regclass('omninode_internal.gateway_link_health_status')"
+        )
         assert cur.fetchone()[0] is None

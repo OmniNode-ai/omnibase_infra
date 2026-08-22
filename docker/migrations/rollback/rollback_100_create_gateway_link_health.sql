@@ -5,6 +5,6 @@
 -- last_seen_at index. Manual execution only -- never auto-applied (rollback/
 -- is not mounted to docker-entrypoint-initdb.d).
 
-DROP VIEW IF EXISTS public.gateway_link_health_status;
-DROP INDEX IF EXISTS public.idx_gateway_link_health_last_seen_at;
-DROP TABLE IF EXISTS public.gateway_link_health;
+DROP VIEW IF EXISTS omninode_internal.gateway_link_health_status;
+DROP INDEX IF EXISTS omninode_internal.idx_gateway_link_health_last_seen_at;
+DROP TABLE IF EXISTS omninode_internal.gateway_link_health;

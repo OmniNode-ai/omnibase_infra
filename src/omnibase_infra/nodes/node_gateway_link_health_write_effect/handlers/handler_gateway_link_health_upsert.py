@@ -50,7 +50,7 @@ HANDLER_ID_GATEWAY_LINK_HEALTH_UPSERT: str = "gateway-link-health-upsert-handler
 # (was_insert=True) from an UPDATE via the ON CONFLICT branch -- same idiom
 # as HandlerPrStateUpsert's _SQL_UPSERT.
 _SQL_UPSERT = """
-INSERT INTO public.gateway_link_health (
+INSERT INTO omninode_internal.gateway_link_health (
     tenant_id,
     principal_id,
     local_transport_flavor,
@@ -77,7 +77,7 @@ RETURNING (xmax = 0) AS was_insert
 
 
 class HandlerGatewayLinkHealthUpsert:
-    """EFFECT handler that UPSERTs one row into public.gateway_link_health."""
+    """EFFECT handler that UPSERTs one row into gateway_link_health."""
 
     def __init__(
         self,

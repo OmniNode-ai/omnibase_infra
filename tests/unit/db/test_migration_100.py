@@ -65,16 +65,16 @@ def _contract_liveness() -> dict[str, int]:
 def test_100_forward_creates_table_and_view() -> None:
     sql = FORWARD.read_text(encoding="utf-8").lower()
 
-    assert "create table if not exists public.gateway_link_health" in sql
-    assert "create or replace view public.gateway_link_health_status" in sql
+    assert "create table if not exists omninode_internal.gateway_link_health" in sql
+    assert "create or replace view omninode_internal.gateway_link_health_status" in sql
     assert "primary key (tenant_id)" in sql
 
 
 def test_100_rollback_drops_view_and_table() -> None:
     sql = ROLLBACK.read_text(encoding="utf-8").lower()
 
-    assert "drop view if exists public.gateway_link_health_status" in sql
-    assert "drop table if exists public.gateway_link_health" in sql
+    assert "drop view if exists omninode_internal.gateway_link_health_status" in sql
+    assert "drop table if exists omninode_internal.gateway_link_health" in sql
 
 
 def test_100_view_liveness_thresholds_match_contract_omn_15762() -> None:

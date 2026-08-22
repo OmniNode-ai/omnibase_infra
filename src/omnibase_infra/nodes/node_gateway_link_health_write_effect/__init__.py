@@ -5,7 +5,7 @@
 
 Declarative EFFECT node that consumes ModelPayloadGatewayLinkHealthUpsert
 intents emitted by NodeGatewayLinkHealthProjectionCompute and UPSERTs them
-into the public.gateway_link_health latest-known-state table.
+into the omninode_internal.gateway_link_health latest-known-state table.
 
 Ticket: OMN-15570 (G3, gateway lift Phase 0)
 """

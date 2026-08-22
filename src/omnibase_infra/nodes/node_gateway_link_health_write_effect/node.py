@@ -4,7 +4,7 @@
 """NodeGatewayLinkHealthWriteEffect - declarative EFFECT node.
 
 Persists ModelPayloadGatewayLinkHealthUpsert intents into the
-public.gateway_link_health latest-known-state table. All persistence logic
+omninode_internal.gateway_link_health latest-known-state table. All persistence logic
 lives in HandlerGatewayLinkHealthUpsert per the ONEX declarative pattern.
 
 Ticket: OMN-15570 (G3, gateway lift Phase 0)

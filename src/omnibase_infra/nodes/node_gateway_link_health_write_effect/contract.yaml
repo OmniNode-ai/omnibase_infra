@@ -21,7 +21,7 @@ contract_version:
   patch: 0
 node_version: "0.1.0"
 description: >
-  Capability-oriented EFFECT node for gateway_link_health persistence. Consumes ModelPayloadGatewayLinkHealthUpsert intents and UPSERTs one row per tenant_id into the public.gateway_link_health latest-known-state table via ON CONFLICT DO UPDATE, so the table always reflects the most recently observed heartbeat per tenant edge and never drops a row on silence -- the gateway_link_health_status view (docker/migrations/forward/098_create_gateway_link_health.sql) evaluates staleness against the contract-declared liveness thresholds at read time.
+  Capability-oriented EFFECT node for gateway_link_health persistence. Consumes ModelPayloadGatewayLinkHealthUpsert intents and UPSERTs one row per tenant_id into the omninode_internal.gateway_link_health latest-known-state table via ON CONFLICT DO UPDATE, so the table always reflects the most recently observed heartbeat per tenant edge and never drops a row on silence -- the gateway_link_health_status view (docker/migrations/forward/100_create_gateway_link_health.sql) evaluates staleness against the contract-declared liveness thresholds at read time.
 
 # Strongly typed I/O models
 input_model:
@@ -106,7 +106,7 @@ health_check:
       critical: true
 metadata:
   description: >
-    Capability-oriented EFFECT node that persists gateway heartbeat projections into the latest-known-state public.gateway_link_health table. HandlerGatewayLinkHealthUpsert composes its database dependency internally from the runtime container, matching the OMN-14140 auto-wiring pattern.
+    Capability-oriented EFFECT node that persists gateway heartbeat projections into the latest-known-state omninode_internal.gateway_link_health table. HandlerGatewayLinkHealthUpsert composes its database dependency internally from the runtime container, matching the OMN-14140 auto-wiring pattern.
 
   author: "OmniNode Team"
   license: "MIT"
