@@ -1362,10 +1362,11 @@ class DeployExecutor:
         Without this arg, Docker serves a cached layer even after git pull, so
         the running container silently ships pre-pull code (root cause: PR #1231).
 
-        Also passes OMNIBASE_COMPAT_REF, OMNIMARKET_REF, and
-        ONEX_CHANGE_CONTROL_REF as full commit SHAs so the uv cache mount
-        (keyed on URL) misses and fetches fresh code every time main advances
-        (OMN-10728 / OMN-11542).
+        Also passes OMNIBASE_COMPAT_REF and OMNIMARKET_REF as full commit SHAs
+        so the uv cache mount (keyed on URL) misses and fetches fresh code every
+        time main advances (OMN-10728 / OMN-11542). ONEX_CHANGE_CONTROL_REF was
+        a third such ref until OMN-16296 removed onex_change_control from the
+        runtime image; the Dockerfile ARG it fed no longer exists.
 
         For BUILD_SOURCE=workspace, stages sibling repos into the build context
         via stage_workspace.sh before invoking docker compose build (OMN-9470).
@@ -1405,17 +1406,11 @@ class DeployExecutor:
             if omni_home
             else "main"
         )
-        occ_ref = (
-            self._resolve_plugin_ref(f"{omni_home}/onex_change_control")
-            if omni_home
-            else "main"
-        )
         logger.info(
-            "_compose_build: BUILD_SOURCE=%s OMNIBASE_COMPAT_REF=%s OMNIMARKET_REF=%s ONEX_CHANGE_CONTROL_REF=%s",
+            "_compose_build: BUILD_SOURCE=%s OMNIBASE_COMPAT_REF=%s OMNIMARKET_REF=%s",
             selected_source.value,
             compat_ref[:12],
             omnimarket_ref[:12],
-            occ_ref[:12],
         )
 
         import datetime
@@ -1445,8 +1440,6 @@ class DeployExecutor:
             f"OMNIBASE_COMPAT_REF={compat_ref}",
             "--build-arg",
             f"OMNIMARKET_REF={omnimarket_ref}",
-            "--build-arg",
-            f"ONEX_CHANGE_CONTROL_REF={occ_ref}",
         ]
         cmd.extend(validated_args)
         result = _run(cmd, timeout=timeout, env=_compose_env())

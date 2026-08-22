@@ -284,9 +284,22 @@ COPY workspace/sibling-pin-comparison.json /workspace/sibling-pin-comparison.jso
 # deploy verifiers. Release mode ignores it.
 COPY workspace/sibling-vcs-provenance.json /workspace/sibling-vcs-provenance.json
 
-# workspace mode installs omnibase_core, omnibase_compat, onex_change_control,
-# omnimarket from the staged local trees.  release mode installs from pinned
-# remote sources (core stays from omnibase_infra/uv.lock — correct for a release).
+# workspace mode installs omnibase_core, omnibase_compat, omnimarket from the
+# staged local trees.  release mode installs from pinned remote sources (core
+# stays from omnibase_infra/uv.lock — correct for a release).
+#
+# OMN-16296: onex_change_control is deliberately NOT installed into the runtime
+# image, in either mode. Nothing in the runtime imports it — omnibase_infra has
+# zero live `onex_change_control` imports in src/, tests/, scripts/ or docker/,
+# static or dynamic — and OMN-16191 cut the last product-repo runtime dependency
+# on it. infra still declares onex-change-control in [dependency-groups], but
+# that is a dev/governance-tooling group for CI and pre-commit validators, not
+# [project] dependencies, so it has no bearing on image contents.
+#
+# Prod-grant resolution is unaffected: the prod-promotion gate fetches
+# onex_change_control@main over the NETWORK at check time and never imports the
+# installed package, so the @main anchor that makes the gate un-self-issuable
+# does not depend on anything being baked in here.
 #
 # OMN-13405: workspace mode reinstalls omnibase_core FIRST from the staged dev-HEAD
 # clone. `uv sync` above already installed omnibase-core from omnibase_infra/uv.lock,
@@ -313,8 +326,6 @@ COPY workspace/sibling-vcs-provenance.json /workspace/sibling-vcs-provenance.jso
 # branch ever runs; the other branch's install artifacts never enter the image.
 ARG OMNIBASE_COMPAT_REF="v0.5.5"
 ARG OMNIBASE_COMPAT_SOURCE="https://github.com/OmniNode-ai/omnibase_compat/archive/v0.5.5.tar.gz"
-# Pin to the onex_change_control v0.5.3 release tag.
-ARG ONEX_CHANGE_CONTROL_REF=v0.5.3
 # OMN-12195: default branch is dev, not main — use dev to avoid stale SHA from
 # Docker's git cache resolving @main to an older commit.
 ARG OMNIMARKET_REF=dev
@@ -332,7 +343,7 @@ ARG OMNIMARKET_REF=dev
 # current HEAD of the tracked branch. omnibase_compat is a SHA-pinned immutable
 # tarball, so it needs no refresh.
 #
-# OMN-14262: compat / onex_change_control / omnimarket workspace installs ALSO use
+# OMN-14262: compat / omnimarket workspace installs ALSO use
 # the forced `uv pip uninstall` + `--no-cache --reinstall-package "<pkg> @ file://…"`
 # form (mirroring core above). A bare `uv pip install --no-deps <path>` no-ops
 # ("Audited 1 package") whenever the staged dev-tree version already equals the
@@ -367,7 +378,7 @@ ARG OMNIMARKET_REF=dev
 RUN --mount=type=cache,target=/root/.cache/uv,sharing=locked \
     set -eu; \
     if [ "${BUILD_SOURCE}" = "workspace" ]; then \
-        for repo in omnibase_core omnibase_compat onex_change_control omnimarket; do \
+        for repo in omnibase_core omnibase_compat omnimarket; do \
             p="/workspace/sibling-repos/${repo}"; \
             if [ ! -d "${p}" ]; then \
                 echo "workspace mode: missing staged repo ${p}" >&2; exit 2; \
@@ -381,10 +392,6 @@ RUN --mount=type=cache,target=/root/.cache/uv,sharing=locked \
         ( cd / && VIRTUAL_ENV=/app/.venv uv-with-retry pip install --python /app/.venv/bin/python \
             --no-deps --no-sources --no-cache --reinstall-package omnibase-compat \
             "omnibase-compat @ file:///workspace/sibling-repos/omnibase_compat" ); \
-        uv-with-retry pip uninstall onex-change-control; \
-        ( cd / && VIRTUAL_ENV=/app/.venv uv-with-retry pip install --python /app/.venv/bin/python \
-            --no-deps --no-sources --no-cache --reinstall-package onex-change-control \
-            "onex-change-control @ file:///workspace/sibling-repos/onex_change_control" ); \
         uv-with-retry pip uninstall omnimarket; \
         ( cd / && VIRTUAL_ENV=/app/.venv uv-with-retry pip install --python /app/.venv/bin/python \
             --no-deps --no-sources --no-cache --reinstall-package omnimarket \
@@ -392,8 +399,6 @@ RUN --mount=type=cache,target=/root/.cache/uv,sharing=locked \
     else \
         uv-with-retry pip install --no-deps \
             "https://github.com/OmniNode-ai/omnibase_compat/archive/${OMNIBASE_COMPAT_REF}.tar.gz"; \
-        uv-with-retry pip install --no-deps --refresh-package onex-change-control \
-            "git+https://github.com/OmniNode-ai/onex_change_control.git@${ONEX_CHANGE_CONTROL_REF}#egg=onex-change-control"; \
         uv-with-retry pip install --no-deps --refresh-package omnimarket \
             "git+https://github.com/OmniNode-ai/omnimarket.git@${OMNIMARKET_REF}#egg=omnimarket"; \
     fi
@@ -813,7 +818,7 @@ RUN set -eu; \
         }; \
     done; \
     tmp="$(mktemp -d)"; \
-    for spec in glob@13.0.6 minimatch@10.2.5 tar@7.5.19 brace-expansion@5.0.9 ip-address@10.3.1; do \
+    for spec in glob@13.0.6 minimatch@10.2.5 tar@7.5.21 brace-expansion@5.0.9 ip-address@10.3.1; do \
         pkg="${spec%@*}"; \
         npm pack "$spec" --pack-destination "$tmp" >/dev/null; \
         tb="$(ls "$tmp/${pkg}"-*.tgz)"; \

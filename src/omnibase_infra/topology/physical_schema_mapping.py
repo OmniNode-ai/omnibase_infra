@@ -21,6 +21,19 @@ TENANT_TABLES_PHYSICALLY_IN_PUBLIC_UNTIL_OMN15359: frozenset[str] = frozenset(
         "projection_delegation_inference_response_text",
         "savings_estimates",
         "skill_execution_snapshots",
+        # OMN-16316: node_projection_tenant_credentials' BYOK inference-
+        # credential ref catalog. Same bridge as delegation_events/
+        # delegation_routing_tenant_overlay above -- logically tenant-domain
+        # (per-tenant credential-ref rows, house-tenant ruling), physically
+        # created bare in `public` because no `tenant` Postgres schema exists
+        # on any lane today. Enumerated here so
+        # physical_grant_schema_for_table('tenant',
+        # 'tenant_inference_credentials') resolves to 'public' and the
+        # application_database_sql_gate accepts the migration's bare
+        # CREATE TABLE, matching its actual physical location. No RLS in v1,
+        # same dev/beta-only posture as its siblings -- promotable later once
+        # the tenant-schema RLS foundation (OMN-14894/OMN-15356) lands.
+        "tenant_inference_credentials",
     }
 )
 

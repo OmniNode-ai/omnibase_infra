@@ -27,9 +27,10 @@ narrow exception (OMN-13403): a sibling whose clone version EXACTLY equals the
 locked version and whose clone HEAD is a git DESCENDANT of the locked SHA -- i.e.
 the clone is strictly AHEAD of the lock -- is recorded as a non-fatal
 ``clone_ahead`` note rather than aborting the build. This is the unavoidable
-steady state for a real runtime sibling like ``onex_change_control`` whose dev
-branch advances on every receipt PR (including the receipt PRs that pin-bump PRs
-themselves require), so an exact lock pin can never durably converge. The
+steady state for a fast-moving runtime sibling whose dev branch advances between
+pin bumps, so an exact lock pin can never durably converge. (``onex_change_control``
+was the original motivating example; OMN-16296 removed it from this manifest
+entirely, since it is no longer installed into the runtime image.) The
 2026-06-11 crash this guard prevents was the OPPOSITE direction -- a STALE clone
 that was BEHIND the lock with a MISMATCHED version -- which stays FATAL.
 
@@ -90,7 +91,6 @@ DEFAULT_PACKAGE_REPO_DIRS: dict[str, str] = {
     "omnibase-core": "omnibase_core",
     "omnibase-spi": "omnibase_spi",
     "omnibase-compat": "omnibase_compat",
-    "onex-change-control": "onex_change_control",
     "omnimarket": "omnimarket",
 }
 

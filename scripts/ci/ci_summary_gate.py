@@ -163,6 +163,16 @@ STRICT_GATE_JOBS: tuple[str, ...] = (
     # CONTEXTS) because it is a job inside ci.yml's own run, observable
     # without the external-context admission rule's historical measurement.
     "Dep Provenance Lineage Gate (OMN-15604)",
+    # OMN-16228: born from the 2026-08-18 sqlparse/Trivy incident (OMN-16170)
+    # -- shift lockfile CVE detection left to dependency-pin time (this job)
+    # instead of image-build time (the Trivy gate, deep in the deploy
+    # pipeline). THIS LINE IS THE MECHANISM, not the job's presence in
+    # ci.yml: the job has no job-level `if:` (path relevance is decided
+    # internally via step-level `if:` guards, see
+    # scripts/ci/check_lockfile_cve.py's module docstring), so it always
+    # completes success/failure and a skip/absence here is anomalous --
+    # correctly fails closed.
+    "Lockfile CVE Scan (OMN-16228)",
 )
 
 # Gates the old ci-summary accepted as ``success`` OR ``skipped``. Each carries
@@ -228,6 +238,13 @@ SOFT_ALLOWLIST: frozenset[str] = frozenset(
 # finished 24.9 min after `CI Summary` started, well inside the caller's 90 min
 # poll deadline, so waiting on these cannot time the poller out.
 # Fixture + regression: tests/ci/fixtures/omn15496_merge_time_external_check_runs.json.
+#
+# OMN-15737 (successor to OMN-13873, whose own DoD required this context be
+# "required on infra dev/main branch protection" but never followed through):
+# `Dep Provenance Gate` (dep-provenance-gate.yml) was separately re-measured
+# 16/16 present, 16/16 green over the SAME #2546…#2567 window (job has no
+# job-level `if:` — it always executes and reports, even when pyproject.toml is
+# unchanged) and folded into the same fixture rows above.
 EXPECTED_EXTERNAL_CONTEXTS: tuple[str, ...] = (
     "deploy-gate / deploy-gate",  # 16/16 present, 15/16 green (#2555 red AT MERGE)
     "verify / verify",  # Receipt Gate
@@ -268,6 +285,7 @@ EXPECTED_EXTERNAL_CONTEXTS: tuple[str, ...] = (
     # legitimate red. Fixture + regression:
     # tests/ci/fixtures/omn15979_merge_time_external_check_runs.json.
     "Integration Test Removal Gate",
+    "Dep Provenance Gate",  # OMN-15737: 16/16 present, 16/16 green (#2546-#2567 AND #2646-#2669)
 )
 
 # Contexts that were MEASURED and deliberately NOT enforced. Recorded as data —
