@@ -623,6 +623,169 @@ wire_sibling_checkout_mirror_rewrite() {
 }
 
 # ---------------------------------------------------------------------------
+# OMN-16363 -- pre-job disk-admission gate (write-amplification loop breaker)
+# ---------------------------------------------------------------------------
+#
+# THE MECHANISM THIS BREAKS. Per OMN-16360: when /data runs low, a job
+# assigned to a runner fails almost instantly with ENOSPC -- but not before
+# actions/checkout, uv sync, and docker build/layer writes have already landed
+# a partial write on disk (ENOSPC is only raised once a write actually cannot
+# complete; every byte written before that point is real, already-committed
+# disk consumption). With dozens of runners cycling through repeated
+# instant-fail-and-reassign, the AGGREGATE partial-write throughput across the
+# fleet outpaces docker builder/image prune, turning a recoverable low-disk
+# condition into a self-perpetuating write-amplification loop that drives free
+# space to literal zero bytes within roughly 15-20 minutes (confirmed
+# 2026-08-21, recurred twice more on 2026-08-22).
+#
+# THE FIX. Check free disk BEFORE any of the write-heavy steps in this hook's
+# main body (workspace rm -rf + mirror reseed, uv/checkout mirror-rewrite
+# discovery, wire_pypi_cache). Below the floor, fail the job here -- the SAME
+# "instant fail" outcome ENOSPC already produces, but capped at a single `df`
+# call's worth of I/O instead of however many megabytes a partial
+# checkout/cache-write burns before the kernel actually returns ENOSPC. This
+# is fix direction #1 from OMN-16363: "a minimum-free-disk gate before
+# accepting a new job -- refuse/defer job acceptance below some threshold ...
+# rather than accepting and immediately ENOSPC-failing."
+#
+# WHAT THIS DOES NOT CLAIM TO FIX. A self-hosted runner has no API to
+# decline/requeue a job GitHub has already dispatched to it (there is no such
+# endpoint in the Actions runner protocol), so GitHub will still reassign this
+# runner a new job immediately after this one fails. The rapid-reassignment
+# CYCLING is therefore not eliminated by this gate alone -- only the WRITE
+# COST of each cycle is, which is exactly the amplification variable the
+# incident evidence identifies (write throughput outpacing reclamation, not
+# reassignment frequency by itself). disk_admission_self_pause() below is the
+# secondary mechanism that also reduces cycling frequency, per fix direction
+# #2 ("backoff-on-repeated-instant-setup-failure guard").
+#
+# THRESHOLD CONSISTENCY (OMN-16363 AC3). Same default (5 GB) as
+# .github/workflows/runner-disk-preflight.yml's RUNNER_DISK_WARN_GB. The two
+# checks run in different execution contexts (this one host-side pre-job on
+# .201; that one inside the GH Actions job on whichever runner picked up the
+# work) and cannot share a single config file, so the default is kept in sync
+# by comment cross-reference, not by import -- the same pattern already used
+# for the WEDGE_QUEUE_AGE_SECONDS-style thresholds in runner-monitor.sh.
+_C3_DISK_ADMISSION_MIN_FREE_GB="${RUNNER_DISK_ADMISSION_MIN_FREE_GB:-5}"
+# Consecutive-admission-failure backoff (fix direction #2). State is a plain
+# counter file under RUNNER_HOME -- container-local, NOT a host bind mount --
+# so it survives across jobs on the SAME persistent container (this fleet
+# never recreates containers per-job) and resets naturally on a container
+# recreate, which is correct: a freshly recreated runner has observed no disk
+# pressure yet.
+_C3_DISK_ADMISSION_BACKOFF_N="${RUNNER_DISK_ADMISSION_BACKOFF_N:-3}"
+_C3_DISK_ADMISSION_STATE_DIR="${RUNNER_DISK_ADMISSION_STATE_DIR:-${RUNNER_HOME:-/home/runner/actions-runner}/.onex-disk-admission}"
+# Durable pause-marker directory. Bind-mounted host-side
+# (docker-compose.runners.yml) so a host-side companion
+# (scripts/runner-disk-admission-restore.sh) can see which runners this gate
+# paused and safely bring them back once disk recovers. Fails open (self-pause
+# skipped, the per-job gate above still blocks each individual job) when the
+# mount is absent -- e.g. before the fleet is recreated to pick up the new
+# compose volume; see the rollout note in docs/runbooks/runner-disk-admission-gate.md.
+_C3_DISK_ADMISSION_PAUSE_DIR="${RUNNER_DISK_ADMISSION_PAUSE_DIR:-/home/runner/.onex-disk-admission-pause}"
+# The runner's own workspace/tool-cache mount -- the same volume actions/checkout,
+# uv, and docker builds all write to inside this container.
+_C3_DISK_ADMISSION_MOUNT="${RUNNER_DISK_ADMISSION_MOUNT:-/home/runner/actions-runner}"
+
+# _c3_avail_kb -- test seam: DISK_ADMISSION_DF_OVERRIDE_KB lets tests inject an
+# exact avail-KB reading without needing a real near-full filesystem.
+_c3_avail_kb() {
+    if [[ -n "${DISK_ADMISSION_DF_OVERRIDE_KB:-}" ]]; then
+        echo "${DISK_ADMISSION_DF_OVERRIDE_KB}"
+        return 0
+    fi
+    df -Pk "${_C3_DISK_ADMISSION_MOUNT}" 2>/dev/null | awk 'NR==2 {print $4}'
+}
+
+# disk_admission_gate -- returns 1 (job must fail) when free space on
+# _C3_DISK_ADMISSION_MOUNT is below the admission floor; returns 0 (job
+# proceeds) otherwise, INCLUDING when disk usage cannot be read at all (fail
+# OPEN -- a broken `df` must never itself become a fleet-wide outage; the
+# existing ENOSPC failure mode remains the backstop in that case).
+disk_admission_gate() {
+    local avail_kb avail_gb_frac min_free_kb runner="${RUNNER_NAME:-unknown}"
+    avail_kb="$(_c3_avail_kb)"
+    if ! [[ "${avail_kb}" =~ ^[0-9]+$ ]]; then
+        echo "[disk-admission] could not read free space on ${_C3_DISK_ADMISSION_MOUNT}; gate fails open, job proceeds."
+        return 0
+    fi
+
+    min_free_kb=$(( _C3_DISK_ADMISSION_MIN_FREE_GB * 1024 * 1024 ))
+    if [[ "${avail_kb}" -ge "${min_free_kb}" ]]; then
+        # Healthy -- clear any prior consecutive-failure streak.
+        rm -f "${_C3_DISK_ADMISSION_STATE_DIR}/consecutive_failures" 2>/dev/null || true
+        return 0
+    fi
+
+    avail_gb_frac="$(awk "BEGIN {printf \"%.2f\", ${avail_kb}/1024/1024}")"
+    echo "::error title=RUNNER-DISK-ADMISSION:${avail_gb_frac}GB::Runner '${runner}' has only ${avail_gb_frac} GB free on ${_C3_DISK_ADMISSION_MOUNT} (below the ${_C3_DISK_ADMISSION_MIN_FREE_GB} GB admission floor). Refusing this job BEFORE workspace reset/checkout/dependency writes to avoid contributing to the OMN-16360 write-amplification loop. This is an infra failure, not a domain defect."
+
+    mkdir -p "${_C3_DISK_ADMISSION_STATE_DIR}" 2>/dev/null || true
+    local count_file="${_C3_DISK_ADMISSION_STATE_DIR}/consecutive_failures"
+    local prev_count=0
+    [[ -f "${count_file}" ]] && prev_count="$(cat "${count_file}" 2>/dev/null || echo 0)"
+    [[ "${prev_count}" =~ ^[0-9]+$ ]] || prev_count=0
+    local new_count=$(( prev_count + 1 ))
+    echo "${new_count}" > "${count_file}" 2>/dev/null || true
+    echo "[disk-admission] consecutive admission failures on ${runner}: ${new_count} (backoff threshold ${_C3_DISK_ADMISSION_BACKOFF_N})"
+
+    if [[ "${new_count}" -ge "${_C3_DISK_ADMISSION_BACKOFF_N}" ]]; then
+        disk_admission_self_pause "${runner}" "${avail_gb_frac}"
+    fi
+
+    return 1
+}
+
+# disk_admission_self_pause -- fix direction #2 ("backoff-on-repeated-instant-
+# setup-failure guard"). Stops THIS container via the already-bind-mounted
+# docker socket (docker-compose.runners.yml mounts /var/run/docker.sock into
+# every runner) so its Runner.Listener stops polling GitHub entirely -- the
+# only way a self-hosted runner can actually "not accept new job assignments"
+# (there is no requeue/decline API). `docker stop` (never `docker restart`/
+# recreate) on a container whose compose restart policy is `unless-stopped`
+# does NOT auto-restart -- that policy means "restart on unexpected exit", not
+# "always running"; an explicit stop is honored. Backgrounded with a short
+# delay so it runs AFTER this hook (and therefore this job's failure) has
+# fully exited, never mid-hook.
+#
+# Fails open by construction: without the pause-dir bind mount (pre-rollout,
+# or any container not yet recreated with the new compose volume), this is a
+# silent no-op and ONLY the per-job admission gate above is active -- which is
+# already the primary, immediately-effective mechanism and requires no
+# recreate to roll out fleet-wide (this whole file is bind-mounted read-only
+# from the host; editing the host copy changes behaviour on every runner at
+# its NEXT job start, same as every other mechanism in this file).
+disk_admission_self_pause() {
+    local runner="$1" avail_gb_frac="$2"
+    if [[ ! -d "${_C3_DISK_ADMISSION_PAUSE_DIR}" ]]; then
+        echo "[disk-admission] self-pause skipped: ${_C3_DISK_ADMISSION_PAUSE_DIR} not mounted (fleet not yet rolled out to this container)."
+        return 0
+    fi
+    if ! command -v docker >/dev/null 2>&1; then
+        echo "[disk-admission] self-pause skipped: docker CLI unavailable in container."
+        return 0
+    fi
+
+    local marker="${_C3_DISK_ADMISSION_PAUSE_DIR}/${runner}"
+    if [[ -f "${marker}" ]]; then
+        echo "[disk-admission] self-pause skipped: ${runner} already has a pause marker (previous pause not yet restored)."
+        return 0
+    fi
+
+    {
+        echo "runner=${runner}"
+        echo "avail_gb=${avail_gb_frac}"
+        echo "paused_at=$(date -u +%Y-%m-%dT%H:%M:%SZ)"
+        echo "reason=consecutive_disk_admission_failures"
+    } > "${marker}.tmp" 2>/dev/null || return 0
+    mv "${marker}.tmp" "${marker}" 2>/dev/null || return 0
+
+    echo "[disk-admission] PAUSING ${runner}: ${_C3_DISK_ADMISSION_BACKOFF_N} consecutive disk-admission failures. Stopping this container so its listener stops polling GitHub; scripts/runner-disk-admission-restore.sh will restart it once /data recovers (slope-plus-canary)."
+    nohup sh -c "sleep 2; docker stop '${runner}' >/dev/null 2>&1" >/dev/null 2>&1 &
+    disown 2>/dev/null || true
+}
+
+# ---------------------------------------------------------------------------
 # OMN-14027 C1 -- devpi PyPI pull-through cache wiring (host layer, fail-open)
 # ---------------------------------------------------------------------------
 #
@@ -770,6 +933,15 @@ wire_pypi_cache() {
     _c1_audit "${ctx} WIRED index=${_C1_PYPI_INDEX} pip-fallback=${_C1_PYPI_FALLBACK} beacon=UV_HTTP_TIMEOUT:601"
     return 0
 }
+
+# OMN-16363 -- disk-admission gate runs FIRST, before every other step in this
+# hook (including wire_pypi_cache and the workspace reset below). This is the
+# one call site in this file that is allowed to fail the job: every other
+# mechanism here is `|| true` fail-open by design, but the whole point of this
+# gate is to fail fast, before any write-heavy step, when disk is critically
+# low. See the OMN-16363 comment block above disk_admission_gate() for why this
+# ordering is load-bearing.
+disk_admission_gate || exit 1
 
 # Deliberately called before the workspace-reset logic below, and guarded with
 # `|| true`, so neither an unset GITHUB_WORKSPACE nor a workspace-reset failure

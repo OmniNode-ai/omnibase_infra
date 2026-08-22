@@ -149,7 +149,6 @@ databases:
               - delegation_budget_state
               - delegation_events
               - delegation_judge_verdict_events
-              - delegation_routing_tenant_overlay
               - delegation_shadow_comparisons
               - dep_health_findings
               - hook_events
