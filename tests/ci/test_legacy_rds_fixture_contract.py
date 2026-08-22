@@ -6,6 +6,7 @@
 from __future__ import annotations
 
 import json
+import re
 from pathlib import Path
 
 import pytest
@@ -257,3 +258,58 @@ def test_cutover_extension_is_durable_and_red_proven_in_the_rebuilt_image() -> N
         "cutover_durable_journal",
     ):
         assert signature in proof
+
+
+def _not_null_columns(bootstrap: str, table: str) -> set[str]:
+    """Column names declared ``NOT NULL`` on ``table`` in ``bootstrap``."""
+    match = re.search(
+        rf"CREATE TABLE IF NOT EXISTS omninode_internal\.{table}\s*\((.*?)\n\);",
+        bootstrap,
+        re.DOTALL,
+    )
+    assert match, f"could not locate the {table} DDL in bootstrap.sql"
+    columns: set[str] = set()
+    for line in match.group(1).splitlines():
+        stripped = line.strip()
+        column = re.match(r"^([a-z_]+)\s+[A-Z]", stripped)
+        if column and "NOT NULL" in stripped:
+            columns.add(column.group(1))
+    assert columns, f"parsed zero NOT NULL columns for {table} — parser is vacuous"
+    return columns
+
+
+def _inserted_columns(proof: str, table: str) -> list[set[str]]:
+    """Column lists of every ``INSERT INTO`` ``table`` in the proof script."""
+    return [
+        {c.strip() for c in match.group(1).replace("\n", " ").split(",")}
+        for match in re.finditer(
+            rf"INSERT INTO omninode_internal\.{table}\s*\(([^)]*)\)",
+            proof,
+        )
+    ]
+
+
+@pytest.mark.parametrize("table", [("transformation_receipts"), ("cutover_journal")])
+def test_fixture_seeds_every_not_null_column_the_schema_requires(table: str) -> None:
+    """The fixture's seed INSERTs must supply every NOT NULL column.
+
+    OMN-16337: OMN-15420 added ``idempotency_key TEXT NOT NULL`` to both
+    tables in bootstrap.sql without touching the fixture that seeds them.
+    The drift was invisible to static review and only surfaced inside the
+    5-minute dockerised proof, which then failed on 25 consecutive runs
+    across six unrelated branches before anyone traced it. This asserts the
+    parity in seconds so the next schema hardening cannot drift silently.
+    """
+    bootstrap = CUTOVER_BOOTSTRAP.read_text(encoding="utf-8")
+    proof = CUTOVER_PROOF.read_text(encoding="utf-8")
+
+    required = _not_null_columns(bootstrap, table)
+    insert_column_lists = _inserted_columns(proof, table)
+    assert insert_column_lists, f"no INSERT INTO {table} found in the proof script"
+
+    for index, inserted in enumerate(insert_column_lists):
+        missing = required - inserted
+        assert not missing, (
+            f"INSERT #{index + 1} into {table} omits NOT NULL column(s) "
+            f"{sorted(missing)}; bootstrap.sql requires {sorted(required)}"
+        )

@@ -7,6 +7,7 @@ from pathlib import Path
 from uuid import UUID
 
 import pytest
+import yaml
 from pydantic import ValidationError
 
 from omnibase_infra.nodes.node_bus_forwarder_effect.models import (
@@ -19,6 +20,79 @@ from omnibase_infra.nodes.node_bus_forwarder_effect.models import (
 
 BROKER_PROVIDER_ID = UUID("22222222-2222-2222-2222-222222222222")
 PRINCIPAL_ID = "t-33333333333333333333333333333333"
+
+CONTRACT_PATH = (
+    Path(__file__).parents[4]
+    / "src"
+    / "omnibase_infra"
+    / "nodes"
+    / "node_bus_forwarder_effect"
+    / "contract.yaml"
+)
+
+# OMN-16204: operator OD-9 ruling 2026-08-18 ~12:40Z allows EXACTLY this bare
+# session-lifecycle pair (session id + timestamps, content-free) to cross to
+# cloud via node_bus_forwarder_effect's mirror_topics.outbound.
+OD9_ALLOWED_SESSION_LIFECYCLE_TOPICS = (
+    "onex.evt.omniclaude.session-started.v1",
+    "onex.evt.omniclaude.session-ended.v1",
+)
+
+# Content-bearing omniclaude topics that OD-9 explicitly keeps DENIED pending
+# the scrubbing/projection-transform layer OMN-14323 still owns.
+OD9_DENIED_OMNICLAUDE_TOPICS = (
+    "onex.evt.omniclaude.prompt-submitted.v1",
+    "onex.evt.omniclaude.tool-executed.v1",
+    "onex.evt.omniclaude.skill-started.v1",
+    "onex.evt.omniclaude.skill-completed.v1",
+    "onex.evt.omniclaude.tool-output-captured.v1",
+)
+
+
+@pytest.mark.parametrize("topic", OD9_ALLOWED_SESSION_LIFECYCLE_TOPICS)
+def test_mirror_topics_model_accepts_od9_session_lifecycle_topic(topic: str) -> None:
+    """Per-topic proof: each OD-9-allowed session-lifecycle topic independently
+    passes ``ModelGatewayMirrorTopics`` shape validation as an outbound entry."""
+    mirror_topics = ModelGatewayMirrorTopics(
+        inbound=("onex.cmd.omnibase-infra.delegation-request.v1",),
+        outbound=("onex.evt.omnibase-infra.inference-response.v1", topic),
+    )
+    assert topic in mirror_topics.outbound
+
+
+@pytest.mark.parametrize("topic", OD9_ALLOWED_SESSION_LIFECYCLE_TOPICS)
+def test_contract_declares_od9_session_lifecycle_topic_in_outbound(
+    topic: str,
+) -> None:
+    """Per-topic proof against the REAL contract.yaml on disk: each OD-9
+    session-lifecycle topic is declared exactly once under
+    ``config.gateway_forwarder.mirror_topics.outbound``."""
+    contract = yaml.safe_load(CONTRACT_PATH.read_text(encoding="utf-8"))
+    outbound = contract["config"]["gateway_forwarder"]["mirror_topics"]["outbound"]
+    assert outbound.count(topic) == 1
+
+
+@pytest.mark.parametrize("topic", OD9_DENIED_OMNICLAUDE_TOPICS)
+def test_contract_does_not_widen_beyond_od9_session_lifecycle_pair(
+    topic: str,
+) -> None:
+    """OMN-16204 scope guard: no other omniclaude topic (prompt/tool/skill
+    content) may be added to mirror_topics.outbound by this change -- those
+    stay DENIED pending OMN-14323's scrubbing layer, per OD-9."""
+    contract = yaml.safe_load(CONTRACT_PATH.read_text(encoding="utf-8"))
+    outbound = contract["config"]["gateway_forwarder"]["mirror_topics"]["outbound"]
+    assert topic not in outbound
+
+
+def test_contract_outbound_gains_exactly_two_new_topics() -> None:
+    """Falsifiable count check: outbound grew from the pre-OMN-16204 baseline
+    of 6 topics to exactly 8 -- proving nothing beyond the two OD-9 topics
+    was added."""
+    contract = yaml.safe_load(CONTRACT_PATH.read_text(encoding="utf-8"))
+    outbound = contract["config"]["gateway_forwarder"]["mirror_topics"]["outbound"]
+    assert len(outbound) == 8
+    for topic in OD9_ALLOWED_SESSION_LIFECYCLE_TOPICS:
+        assert topic in outbound
 
 
 def _cloud_bus() -> ModelGatewayCloudBusConfig:
