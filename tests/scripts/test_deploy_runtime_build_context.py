@@ -597,9 +597,17 @@ def test_deploy_runtime_uses_current_lock_pin_preflight_interface() -> None:
         "omnibase-core",
         "omnibase-spi",
         "omnibase-compat",
-        "onex-change-control",
     ):
         assert f'--repo "{package}=' in deploy_script
+
+    # OMN-16296 removed onex_change_control from the runtime image and from
+    # check_sibling_lock_pins.py's DEFAULT_PACKAGE_REPO_DIRS (commit 018c64a14),
+    # but left this preflight's guard_args pinned to the removed package,
+    # which fails argparse validation
+    # (``error: argument --repo: unknown package 'onex-change-control'``) on
+    # every workspace-mode deploy. OMN-16390 fixes the residual. Pin the
+    # absence so a future re-add has to be deliberate.
+    assert '--repo "onex-change-control=' not in deploy_script
 
     # The OMN-12977 operator override must be honored via --allow-drift.
     assert "ALLOW_SIBLING_PIN_DRIFT" in deploy_script

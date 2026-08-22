@@ -51,6 +51,23 @@ REPOS=(
   onex_change_control
 )
 
+# Known, approved one-time merge-commit exceptions (short SHA -> ticket
+# reference). Do NOT add an entry here casually — it silences a real bypass
+# signal for the life of the --depth window. Only add SHAs that were
+# reviewed and approved as legitimate ancestry/migration exceptions; cite
+# the approving ticket so the exemption itself is auditable.
+#
+# OMN-16107: without this allowlist, the two OMN-15028 ancestry-bridge
+# commits below re-flagged this audit red on every ~4-6h scheduled run for
+# 10+ days straight (2026-08-07 through at least 2026-08-17), which is the
+# actual mechanism behind "the audit is always red so it gets tuned out" —
+# not a missing/expired CROSS_REPO_PAT (verified present + functioning on
+# every sampled run in that window).
+declare -A ALLOWLISTED_TWO_PARENT_SHAS=(
+  ["11a040da"]="OMN-15028 — ancestry bridge, one-time merge-commit exception"
+  ["d6ef368d"]="OMN-15028 — record main ancestry for promotion"
+)
+
 usage() {
   sed -n '2,30p' "$0"
 }
@@ -105,16 +122,26 @@ FAILED=0
 TOTAL_BYPASS=0
 AUDITED=0
 
+GH_STDERR_FILE=$(mktemp)
+trap 'rm -f "$GH_STDERR_FILE"' EXIT
+
 for repo in "${REPOS[@]}"; do
   query=$(build_query "$repo")
-  if ! response=$(gh api graphql -f query="$query" 2>/dev/null); then
-    echo "SKIP  $repo: GraphQL query failed (token scope or repo missing)" >&2
+  # OMN-16107: capture stderr instead of discarding it — a bare `2>/dev/null`
+  # here turned every real cause (rate limit, transient network error, token
+  # scope) into the same opaque "token scope or repo missing" guess, with no
+  # way to tell which one actually happened on a given run.
+  : >"$GH_STDERR_FILE"
+  if ! response=$(gh api graphql -f query="$query" 2>"$GH_STDERR_FILE"); then
+    gh_err=$(tr '\n' ' ' <"$GH_STDERR_FILE")
+    echo "SKIP  $repo: gh api graphql failed: ${gh_err:-<no stderr captured>}" >&2
     continue
   fi
 
   # GraphQL may return HTTP 200 with an `errors` array; skip such repos.
   if jq -e '(.errors // []) | length > 0' >/dev/null <<<"$response"; then
-    echo "SKIP  $repo: GraphQL returned errors (token scope or repo access)" >&2
+    gql_errors=$(jq -c '.errors' <<<"$response")
+    echo "SKIP  $repo: GraphQL returned errors: $gql_errors" >&2
     continue
   fi
 
@@ -135,14 +162,36 @@ for repo in "${REPOS[@]}"; do
     continue
   fi
 
-  # Filter out merge-queue batching commits if any (queue creates a squashed
-  # single-parent commit per PR — true 2-parent commits should not appear).
-  # Currently no allowlist is needed; any 2-parent commit on main is flagged.
-  count=$(echo "$two_parent" | wc -l | tr -d ' ')
+  # Split out approved one-time exceptions (ALLOWLISTED_TWO_PARENT_SHAS)
+  # from genuine unexplained 2-parent commits. An allowlisted commit is
+  # still reported (visibility), just not counted as a failure.
+  unallowed=""
+  allowed=""
+  while IFS= read -r line; do
+    [[ -z "$line" ]] && continue
+    sha="${line%%  *}"
+    if [[ -n "${ALLOWLISTED_TWO_PARENT_SHAS[$sha]+set}" ]]; then
+      allowed+="$line  [ALLOWLISTED: ${ALLOWLISTED_TWO_PARENT_SHAS[$sha]}]"$'\n'
+    else
+      unallowed+="$line"$'\n'
+    fi
+  done <<<"$two_parent"
+
+  if [[ -n "$allowed" ]]; then
+    echo "ALLOW $repo: approved one-time merge-commit exception(s):"
+    printf '%s' "$allowed" | sed 's/^/      /'
+  fi
+
+  if [[ -z "$unallowed" ]]; then
+    echo "OK    $repo: no unexplained 2-parent commits in last $DEPTH on main"
+    continue
+  fi
+
+  count=$(printf '%s' "$unallowed" | sed '/^$/d' | wc -l | tr -d ' ')
   TOTAL_BYPASS=$((TOTAL_BYPASS + count))
   FAILED=1
   echo "FAIL  $repo: $count 2-parent commit(s) detected (admin-bypass suspected):"
-  echo "$two_parent" | sed 's/^/      /'
+  printf '%s' "$unallowed" | sed '/^$/d; s/^/      /'
 done
 
 # Fail if zero repos were auditable — this indicates a token scope problem
