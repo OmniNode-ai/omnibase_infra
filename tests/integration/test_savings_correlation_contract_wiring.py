@@ -28,7 +28,7 @@ from omnibase_infra.runtime.auto_wiring.report import EnumWiringOutcome
 from omnibase_infra.runtime.message_dispatch_engine import MessageDispatchEngine
 
 CONTRACT = (
-    Path(__file__).resolve().parents[3]
+    Path(__file__).resolve().parents[2]
     / "src/omnibase_infra/nodes/node_savings_estimation_compute/contract.yaml"
 )
 
