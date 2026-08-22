@@ -73,6 +73,7 @@ DEFAULT_BLOCK_POLL_SECONDS = 30.0
 #: before a single wave. A gate that can block forever is indistinguishable
 #: from a hang; this raises QueueDepthTimeoutError instead of proceeding.
 DEFAULT_MAX_BLOCK_SECONDS = 1800.0
+DEFAULT_GH_TIMEOUT_SECONDS = 120.0
 
 VALID_OPERATIONS = (
     "update-branch",
@@ -125,6 +126,14 @@ class BulkRunReport:
     waves: tuple[WaveReceipt, ...]
 
 
+class PartialBulkRunError(BulkPrThrottleError):
+    """Raised when a bulk run aborts after one or more receiptable waves."""
+
+    def __init__(self, message: str, report: BulkRunReport) -> None:
+        super().__init__(message)
+        self.report = report
+
+
 # ---------------------------------------------------------------------------
 # Wave partitioning
 # ---------------------------------------------------------------------------
@@ -157,15 +166,26 @@ def validate_total_prs(
     max_total_prs: int,
     explicit_max_total_prs: bool,
 ) -> None:
-    """Refuse to process more than ``max_total_prs`` PRs unless the caller
-    explicitly raised the cap (``explicit_max_total_prs=True``)."""
-    if len(pr_numbers) > max_total_prs and not explicit_max_total_prs:
+    """Refuse to process more than ``max_total_prs`` PRs.
+
+    ``explicit_max_total_prs`` changes the refusal wording only. It is not a
+    bypass; a caller can raise the cap explicitly, but the raised cap remains a
+    real ceiling.
+    """
+    if len(pr_numbers) <= max_total_prs:
+        return
+    if explicit_max_total_prs:
         raise TotalPrLimitExceededError(
-            f"refusing to process {len(pr_numbers)} PRs against the default "
+            f"refusing to process {len(pr_numbers)} PRs against the explicit "
             f"cap of {max_total_prs}. Pass --max-total-prs {len(pr_numbers)} "
-            "(or higher) explicitly to raise the cap — this is a fail-fast "
-            "guard against an accidental unthrottled burst, not a hard limit."
+            "(or higher) explicitly if this larger batch is intentional."
         )
+    raise TotalPrLimitExceededError(
+        f"refusing to process {len(pr_numbers)} PRs against the default "
+        f"cap of {max_total_prs}. Pass --max-total-prs {len(pr_numbers)} "
+        "(or higher) explicitly to raise the cap — this is a fail-fast "
+        "guard against an accidental unthrottled burst, not a hard limit."
+    )
 
 
 # ---------------------------------------------------------------------------
@@ -188,6 +208,8 @@ def wait_for_queue_depth(
     queue never drops within ``max_wait_seconds`` — a persistently saturated
     fleet is exactly the condition this tool must refuse to dispatch into.
     """
+    if poll_seconds <= 0:
+        raise ValueError(f"poll_seconds must be > 0, got {poll_seconds}")
     waited = 0.0
     depth = get_queue_depth()
     while depth > threshold:
@@ -292,16 +314,33 @@ def run_bulk_operation(
         )
 
     wave_receipts: list[WaveReceipt] = []
+
+    def partial_report() -> BulkRunReport:
+        return BulkRunReport(
+            owner=owner,
+            repo=repo,
+            operation=operation,
+            wave_size=wave_size,
+            queue_depth_threshold=queue_depth_threshold,
+            dry_run=False,
+            waves=tuple(wave_receipts),
+        )
+
     for idx, wave in enumerate(waves, start=1):
         started_at = now_fn().isoformat()
-        depth_before = wait_for_queue_depth(
-            get_queue_depth=get_queue_depth,
-            threshold=queue_depth_threshold,
-            poll_seconds=poll_seconds,
-            max_wait_seconds=max_wait_seconds,
-            sleep_fn=sleep_fn,
-            log=log,
-        )
+        try:
+            depth_before = wait_for_queue_depth(
+                get_queue_depth=get_queue_depth,
+                threshold=queue_depth_threshold,
+                poll_seconds=poll_seconds,
+                max_wait_seconds=max_wait_seconds,
+                sleep_fn=sleep_fn,
+                log=log,
+            )
+        except BulkPrThrottleError as exc:
+            if wave_receipts:
+                raise PartialBulkRunError(str(exc), partial_report()) from exc
+            raise
         log(
             f"[bulk-pr-throttle] wave {idx}/{len(waves)}: depth_before={depth_before} "
             f"count={len(wave)} prs={list(wave)} operation={operation}"
@@ -312,8 +351,24 @@ def run_bulk_operation(
                 f"[bulk-pr-throttle]   pr={outcome.pr_number} "
                 f"success={outcome.success} detail={outcome.detail}"
             )
-        depth_after = get_queue_depth()
         completed_at = now_fn().isoformat()
+        try:
+            depth_after = get_queue_depth()
+        except BulkPrThrottleError as exc:
+            wave_receipts.append(
+                WaveReceipt(
+                    wave_index=idx,
+                    pr_numbers=wave,
+                    operation=operation,
+                    dry_run=False,
+                    queue_depth_before=depth_before,
+                    queue_depth_after=None,
+                    started_at=started_at,
+                    completed_at=completed_at,
+                    outcomes=outcomes,
+                )
+            )
+            raise PartialBulkRunError(str(exc), partial_report()) from exc
         log(f"[bulk-pr-throttle] wave {idx}/{len(waves)}: depth_after={depth_after}")
         wave_receipts.append(
             WaveReceipt(
@@ -378,9 +433,21 @@ def write_receipt(report: BulkRunReport, path: Path) -> None:
 
 
 def _run_gh(args: list[str]) -> subprocess.CompletedProcess[str]:
-    return subprocess.run(  # nosec B603 - fixed argv, no shell, trusted gh binary
-        ["gh", *args], capture_output=True, text=True, check=False
-    )
+    try:
+        return subprocess.run(  # nosec B603 - fixed argv, no shell, trusted gh binary
+            ["gh", *args],
+            capture_output=True,
+            text=True,
+            check=False,
+            timeout=DEFAULT_GH_TIMEOUT_SECONDS,
+        )
+    except subprocess.TimeoutExpired as exc:
+        return subprocess.CompletedProcess(
+            args=["gh", *args],
+            returncode=124,
+            stdout=exc.stdout or "",
+            stderr=f"gh command timed out after {DEFAULT_GH_TIMEOUT_SECONDS:.0f}s",
+        )
 
 
 def gh_queue_depth(owner: str, repo: str) -> int:
@@ -478,31 +545,59 @@ def _gh_rerun_failed(owner: str, repo: str, pr_number: int) -> PrOutcome:
             detail=f"could not parse head SHA: {exc}",
         )
 
-    runs_result = _run_gh(
-        ["api", f"repos/{owner}/{repo}/actions/runs?head_sha={head_sha}&per_page=50"]
-    )
-    if runs_result.returncode != 0:
-        return PrOutcome(
-            pr_number=pr_number,
-            success=False,
-            detail=f"run list failed: {runs_result.stderr.strip()}",
+    runs: list[dict[str, object]] = []
+    page = 1
+    total_count: int | None = None
+    while total_count is None or len(runs) < total_count:
+        runs_result = _run_gh(
+            [
+                "api",
+                f"repos/{owner}/{repo}/actions/runs?head_sha={head_sha}&per_page=100&page={page}",
+            ]
         )
-    try:
-        runs = json.loads(runs_result.stdout).get("workflow_runs", [])
-    except json.JSONDecodeError as exc:
-        return PrOutcome(
-            pr_number=pr_number,
-            success=False,
-            detail=f"could not parse run list: {exc}",
-        )
+        if runs_result.returncode != 0:
+            return PrOutcome(
+                pr_number=pr_number,
+                success=False,
+                detail=f"run list failed: {runs_result.stderr.strip()}",
+            )
+        try:
+            payload = json.loads(runs_result.stdout)
+        except json.JSONDecodeError as exc:
+            return PrOutcome(
+                pr_number=pr_number,
+                success=False,
+                detail=f"could not parse run list: {exc}",
+            )
+        page_runs = payload.get("workflow_runs", [])
+        if not isinstance(page_runs, list):
+            return PrOutcome(
+                pr_number=pr_number,
+                success=False,
+                detail="could not parse run list: workflow_runs is not a list",
+            )
+        if total_count is None:
+            raw_total_count = payload.get("total_count", len(page_runs))
+            total_count = (
+                raw_total_count if isinstance(raw_total_count, int) else len(page_runs)
+            )
+        if not page_runs:
+            break
+        runs.extend(page_runs)
+        page += 1
 
     rerunnable_conclusions = {"failure", "cancelled"}
     failed_run_ids = [
-        r["id"] for r in runs if r.get("conclusion") in rerunnable_conclusions
+        r["id"]
+        for r in runs
+        if r.get("status") == "completed"
+        and r.get("conclusion") in rerunnable_conclusions
     ]
     if not failed_run_ids:
         return PrOutcome(
-            pr_number=pr_number, success=True, detail="no failed runs to rerun"
+            pr_number=pr_number,
+            success=True,
+            detail="no completed failed or cancelled runs to rerun",
         )
 
     reran: list[int] = []
@@ -594,6 +689,14 @@ def main(argv: list[str] | None = None) -> int:
     max_total_prs = (
         args.max_total_prs if explicit_max_total_prs else DEFAULT_MAX_TOTAL_PRS
     )
+    receipt_path = args.receipt
+    if receipt_path is None:
+        ts = datetime.now(UTC).strftime("%Y%m%dT%H%M%SZ")
+        receipt_path = (
+            Path(".onex_state")
+            / "bulk-pr-throttle"
+            / f"{args.owner}-{args.repo}-{ts}.json"
+        )
 
     try:
         report = run_bulk_operation(
@@ -613,18 +716,15 @@ def main(argv: list[str] | None = None) -> int:
             poll_seconds=args.poll_seconds,
             max_wait_seconds=args.max_wait_seconds,
         )
+    except PartialBulkRunError as exc:
+        write_receipt(exc.report, receipt_path)
+        print(f"[bulk-pr-throttle] receipt written to {receipt_path}")
+        print(f"[bulk-pr-throttle] REFUSED: {exc}", file=sys.stderr)
+        return 1
     except (BulkPrThrottleError, ValueError) as exc:
         print(f"[bulk-pr-throttle] REFUSED: {exc}", file=sys.stderr)
         return 1
 
-    receipt_path = args.receipt
-    if receipt_path is None:
-        ts = datetime.now(UTC).strftime("%Y%m%dT%H%M%SZ")
-        receipt_path = (
-            Path(".onex_state")
-            / "bulk-pr-throttle"
-            / f"{args.owner}-{args.repo}-{ts}.json"
-        )
     write_receipt(report, receipt_path)
     print(f"[bulk-pr-throttle] receipt written to {receipt_path}")
 

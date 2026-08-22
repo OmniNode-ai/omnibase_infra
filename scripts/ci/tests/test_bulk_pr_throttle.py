@@ -114,6 +114,16 @@ class TestRefusalPaths:
             explicit_max_total_prs=True,
         )  # no raise
 
+    def test_exceeds_explicit_cap_with_explicit_flag_raises(self):
+        from bulk_pr_throttle import TotalPrLimitExceededError, validate_total_prs
+
+        with pytest.raises(TotalPrLimitExceededError, match="explicit cap"):
+            validate_total_prs(
+                list(range(1, 201)),
+                max_total_prs=100,
+                explicit_max_total_prs=True,
+            )
+
     def test_run_bulk_operation_rejects_empty_owner(self):
         from bulk_pr_throttle import BulkPrThrottleError, run_bulk_operation
 
@@ -270,6 +280,17 @@ class TestWaitForQueueDepth:
         # polls until waited >= max_wait_seconds, never silently proceeds
         assert sum(sleeps) >= 25.0
 
+    def test_rejects_non_positive_poll_seconds(self):
+        from bulk_pr_throttle import wait_for_queue_depth
+
+        with pytest.raises(ValueError, match="poll_seconds"):
+            wait_for_queue_depth(
+                get_queue_depth=lambda: 999,
+                threshold=150,
+                poll_seconds=0.0,
+                max_wait_seconds=25.0,
+            )
+
     def test_no_bypass_flag_exists_for_the_gate(self):
         """The gate has no force/skip parameter — this is the mechanical guard."""
         import inspect
@@ -408,6 +429,34 @@ class TestRunBulkOperationFlow:
         assert "depth_after=5" in out
         assert "6751" in out and "6752" in out and "6753" in out
 
+    def test_later_wave_timeout_preserves_completed_wave_receipt(self):
+        from bulk_pr_throttle import PartialBulkRunError, PrOutcome, run_bulk_operation
+
+        depth_sequence = iter([10, 10, 999, 999])
+
+        with pytest.raises(PartialBulkRunError) as exc_info:
+            run_bulk_operation(
+                owner="OmniNode-ai",
+                repo="onex_change_control",
+                pr_numbers=[1, 2, 3, 4],
+                operation="rerun-failed",
+                wave_size=2,
+                queue_depth_threshold=150,
+                dry_run=False,
+                get_queue_depth=lambda: next(depth_sequence),
+                apply_pr_operation=lambda o, r, pr, op: PrOutcome(
+                    pr_number=pr, success=True, detail="ok"
+                ),
+                poll_seconds=1.0,
+                max_wait_seconds=1.0,
+                sleep_fn=lambda seconds: None,
+            )
+
+        report = exc_info.value.report
+        assert len(report.waves) == 1
+        assert report.waves[0].pr_numbers == (1, 2)
+        assert report.waves[0].queue_depth_after == 10
+
 
 # ---------------------------------------------------------------------------
 # Receipt file
@@ -468,6 +517,17 @@ class TestWriteReceipt:
 
 
 class TestGhIntegration:
+    def test_run_gh_times_out_as_failed_completed_process(self, monkeypatch):
+        import bulk_pr_throttle
+
+        def fake_subprocess_run(*args, **kwargs):
+            raise subprocess.TimeoutExpired(cmd=args[0], timeout=kwargs["timeout"])
+
+        monkeypatch.setattr(subprocess, "run", fake_subprocess_run)
+        result = bulk_pr_throttle._run_gh(["api", "repos/owner/repo/actions/runs"])
+        assert result.returncode == 124
+        assert "timed out" in result.stderr
+
     def test_gh_queue_depth_parses_jq_output(self, monkeypatch):
         import bulk_pr_throttle
 
@@ -549,7 +609,7 @@ class TestGhIntegration:
                 return subprocess.CompletedProcess(
                     args=args,
                     returncode=0,
-                    stdout=json.dumps({"workflow_runs": []}),
+                    stdout=json.dumps({"total_count": 0, "workflow_runs": []}),
                     stderr="",
                 )
             raise AssertionError(f"unexpected gh call: {args}")
@@ -559,7 +619,7 @@ class TestGhIntegration:
             "OmniNode-ai", "onex_change_control", 6751, "rerun-failed"
         )
         assert outcome.success is True
-        assert "no failed runs" in outcome.detail
+        assert "no completed failed or cancelled runs" in outcome.detail
 
     def test_gh_rerun_failed_reruns_matching_runs(self, monkeypatch):
         import bulk_pr_throttle
@@ -580,11 +640,29 @@ class TestGhIntegration:
                     returncode=0,
                     stdout=json.dumps(
                         {
+                            "total_count": 4,
                             "workflow_runs": [
-                                {"id": 111, "conclusion": "failure"},
-                                {"id": 222, "conclusion": "success"},
-                                {"id": 333, "conclusion": "failure"},
-                            ]
+                                {
+                                    "id": 111,
+                                    "status": "completed",
+                                    "conclusion": "failure",
+                                },
+                                {
+                                    "id": 222,
+                                    "status": "completed",
+                                    "conclusion": "success",
+                                },
+                                {
+                                    "id": 333,
+                                    "status": "completed",
+                                    "conclusion": "failure",
+                                },
+                                {
+                                    "id": 444,
+                                    "status": "in_progress",
+                                    "conclusion": "failure",
+                                },
+                            ],
                         }
                     ),
                     stderr="",
@@ -605,6 +683,7 @@ class TestGhIntegration:
         assert any("111" in c for c in rerun_calls)
         assert any("333" in c for c in rerun_calls)
         assert not any("222" in c for c in rerun_calls)
+        assert not any("444" in c for c in rerun_calls)
 
     def test_gh_rerun_failed_reruns_terminal_cancelled_runs(self, monkeypatch):
         import bulk_pr_throttle
@@ -625,11 +704,29 @@ class TestGhIntegration:
                     returncode=0,
                     stdout=json.dumps(
                         {
+                            "total_count": 4,
                             "workflow_runs": [
-                                {"id": 111, "conclusion": "cancelled"},
-                                {"id": 222, "conclusion": "success"},
-                                {"id": 333, "conclusion": None},
-                            ]
+                                {
+                                    "id": 111,
+                                    "status": "completed",
+                                    "conclusion": "cancelled",
+                                },
+                                {
+                                    "id": 222,
+                                    "status": "completed",
+                                    "conclusion": "success",
+                                },
+                                {
+                                    "id": 333,
+                                    "status": "completed",
+                                    "conclusion": None,
+                                },
+                                {
+                                    "id": 444,
+                                    "status": "in_progress",
+                                    "conclusion": "cancelled",
+                                },
+                            ],
                         }
                     ),
                     stderr="",
@@ -650,6 +747,67 @@ class TestGhIntegration:
         assert any("111" in c for c in rerun_calls)
         assert not any("222" in c for c in rerun_calls)
         assert not any("333" in c for c in rerun_calls)
+        assert not any("444" in c for c in rerun_calls)
+
+    def test_gh_rerun_failed_paginates_workflow_runs(self, monkeypatch):
+        import bulk_pr_throttle
+
+        rerun_calls = []
+
+        def fake_run_gh(args):
+            if args[:2] == ["pr", "view"]:
+                return subprocess.CompletedProcess(
+                    args=args,
+                    returncode=0,
+                    stdout=json.dumps({"headRefOid": "deadbeef"}),
+                    stderr="",
+                )
+            if args[0] == "api" and "actions/runs?head_sha=" in args[1]:
+                if "&page=1" in args[1]:
+                    payload = {
+                        "total_count": 2,
+                        "workflow_runs": [
+                            {
+                                "id": 111,
+                                "status": "completed",
+                                "conclusion": "failure",
+                            }
+                        ],
+                    }
+                elif "&page=2" in args[1]:
+                    payload = {
+                        "total_count": 2,
+                        "workflow_runs": [
+                            {
+                                "id": 222,
+                                "status": "completed",
+                                "conclusion": "cancelled",
+                            }
+                        ],
+                    }
+                else:
+                    raise AssertionError(f"unexpected page: {args}")
+                return subprocess.CompletedProcess(
+                    args=args,
+                    returncode=0,
+                    stdout=json.dumps(payload),
+                    stderr="",
+                )
+            if args[:2] == ["api", "-X"] and "rerun-failed-jobs" in args[-1]:
+                rerun_calls.append(args[-1])
+                return subprocess.CompletedProcess(
+                    args=args, returncode=0, stdout="", stderr=""
+                )
+            raise AssertionError(f"unexpected gh call: {args}")
+
+        monkeypatch.setattr(bulk_pr_throttle, "_run_gh", fake_run_gh)
+        outcome = bulk_pr_throttle.gh_apply_pr_operation(
+            "OmniNode-ai", "onex_change_control", 6751, "rerun-failed"
+        )
+        assert outcome.success is True
+        assert len(rerun_calls) == 2
+        assert any("111" in c for c in rerun_calls)
+        assert any("222" in c for c in rerun_calls)
 
 
 # ---------------------------------------------------------------------------
@@ -772,6 +930,69 @@ class TestMainCli:
         assert result == 1
         err = capsys.readouterr().err
         assert "REFUSED" in err
+
+    def test_partial_run_error_writes_completed_wave_receipt(
+        self, monkeypatch, tmp_path
+    ):
+        import bulk_pr_throttle
+        from bulk_pr_throttle import (
+            BulkRunReport,
+            PartialBulkRunError,
+            PrOutcome,
+            WaveReceipt,
+            main,
+        )
+
+        partial = BulkRunReport(
+            owner="OmniNode-ai",
+            repo="onex_change_control",
+            operation="rerun-failed",
+            wave_size=10,
+            queue_depth_threshold=150,
+            dry_run=False,
+            waves=(
+                WaveReceipt(
+                    wave_index=1,
+                    pr_numbers=(1, 2),
+                    operation="rerun-failed",
+                    dry_run=False,
+                    queue_depth_before=5,
+                    queue_depth_after=None,
+                    started_at="2026-08-22T00:00:00+00:00",
+                    completed_at="2026-08-22T00:00:01+00:00",
+                    outcomes=(
+                        PrOutcome(pr_number=1, success=True, detail="ok"),
+                        PrOutcome(pr_number=2, success=True, detail="ok"),
+                    ),
+                ),
+            ),
+        )
+
+        def fake_run_bulk_operation(**kwargs):
+            raise PartialBulkRunError("queue depth probe failed", partial)
+
+        monkeypatch.setattr(
+            bulk_pr_throttle, "run_bulk_operation", fake_run_bulk_operation
+        )
+        receipt = tmp_path / "partial.json"
+        result = main(
+            [
+                "--owner",
+                "OmniNode-ai",
+                "--repo",
+                "onex_change_control",
+                "--prs",
+                "1,2,3",
+                "--operation",
+                "rerun-failed",
+                "--receipt",
+                str(receipt),
+            ]
+        )
+        assert result == 1
+        data = json.loads(receipt.read_text())
+        assert data["waves"][0]["pr_numbers"] == [1, 2]
+        assert data["waves"][0]["queue_depth_after"] is None
 
     def test_explicit_max_total_prs_flag_allows_large_batch(self, capsys):
         from bulk_pr_throttle import DEFAULT_MAX_TOTAL_PRS, main

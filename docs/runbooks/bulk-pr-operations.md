@@ -21,8 +21,8 @@ only in prose and did not bind — same failure class documented in memory
 
 ## The mandatory path
 
-**Every bulk PR operation — update-branch, arming/auto-merge sweeps, mass
-reruns, mass PR-body edits — routes through
+**Every supported bulk PR operation — update-branch, arming/auto-merge sweeps,
+and mass reruns — routes through
 `scripts/ci/bulk_pr_throttle.py`.** Do not hand-roll a `for pr in $prs; do gh
 ... ; done` loop for more than a small handful of PRs. That loop is exactly
 the failure mode this ticket exists to close.
@@ -49,7 +49,7 @@ uv run scripts/ci/bulk_pr_throttle.py \
 | --- | --- |
 | `update-branch` | `PUT /repos/{owner}/{repo}/pulls/{pr}/update-branch` — triggers a fresh check-suite. The single highest-cost operation; this is what caused the incident. |
 | `arm-automerge` | `gh pr merge <pr> --squash --auto` |
-| `rerun-failed` | Resolves the PR's head SHA, lists its workflow runs, and reruns the failed-jobs of any run with `conclusion == failure`. |
+| `rerun-failed` | Resolves the PR's head SHA, lists completed workflow runs, and reruns failed jobs for runs with `conclusion` equal to `failure` or `cancelled`. |
 | `noop-dry-run` | No-op outcome, always succeeds — for exercising wave/threshold logic without touching `gh` at all. |
 
 ### Flags
@@ -100,10 +100,10 @@ PR numbers, queue depth before and after, start/completion timestamps, and
 the per-PR outcome (`success`, `detail`). Wave progress is also logged to
 stdout as it happens:
 
-```
+```text
 [bulk-pr-throttle] wave 1/1: depth_before=5 count=3 prs=[6751, 6752, 6753] operation=rerun-failed
 [bulk-pr-throttle]   pr=6751 success=True detail=reran=[98765432]
-[bulk-pr-throttle]   pr=6752 success=True detail=no failed runs to rerun
+[bulk-pr-throttle]   pr=6752 success=True detail=no completed failed or cancelled runs to rerun
 [bulk-pr-throttle]   pr=6753 success=True detail=reran=[98765440]
 [bulk-pr-throttle] wave 1/1: depth_after=6
 ```
