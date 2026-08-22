@@ -140,6 +140,14 @@ _BASELINE_DEAD_LETTER_ALLOWLIST: dict[str, str] = {
     "onex.cmd.omnibase-infra.build-loop-start.v1": "Triggered by cron-buildloop.sh via claude -p, not Kafka | owner: jonah | expiry: 2026-12-01",
     "onex.cmd.omnibase-infra.build-loop-append.v1": "Routed via intent from node_build_loop_projection_compute, not Kafka publish | owner: jonah | expiry: 2026-09-01",
     "onex.cmd.omnibase-infra.pr-state-upsert.v1": "Routed via intent from node_pr_state_projection_compute, not Kafka publish | owner: jonah | expiry: 2026-09-01",
+    "onex.cmd.omnibase-infra.gateway-link-health-upsert.v1": "Routed via intent from node_gateway_link_health_projection_compute, not Kafka publish (OMN-15570) | owner: jonah | expiry: 2026-12-01",
+    # Gateway heartbeat — published imperatively by ServiceGatewayForwarder.publish_heartbeat
+    # (node_bus_forwarder_effect/services/service_gateway_forwarder.py), not via a
+    # contract-declared event_bus.publish_topics entry -- node_bus_forwarder_effect's
+    # own contract only declares mirror_topics (this checker reads publish_topics
+    # only), which the 2026-08-08 gateway lift architecture assessment already flags
+    # as a gap in that node's own contract, not something OMN-15570 introduces.
+    "onex.evt.omnibase-infra.gateway-heartbeat.v1": "Published imperatively by ServiceGatewayForwarder.publish_heartbeat, not via contract publish_topics (OMN-15570 adds the first contract-declared consumer) | owner: jonah | expiry: 2026-12-01",
     "onex.cmd.omnibase-infra.validation-ledger-append.v1": "Routed via intent from node_validation_ledger_projection_compute, not Kafka publish | owner: jonah | expiry: 2026-12-01",
     # Chain learning — publisher nodes not yet implemented
     "onex.cmd.omnibase-infra.chain-learn.v1": "Chain learning publisher not yet wired | owner: jonah | expiry: 2026-09-01",

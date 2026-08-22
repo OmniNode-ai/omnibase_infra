@@ -113,6 +113,26 @@ def test_select_into_emits_an_exact_created_table_identity() -> None:
     ) == (("tenant", "events_copy", "table"),)
 
 
+def test_view_case_expression_with_extract_from_is_not_a_relation_target() -> None:
+    """A SELECT-list EXTRACT(... FROM ...) must not make CASE look like a table."""
+    sql = """
+    CREATE OR REPLACE VIEW omninode_internal.gateway_link_health_status AS
+    SELECT
+        EXTRACT(EPOCH FROM (NOW() - last_seen_at)) AS seconds_since_last_seen,
+        CASE
+            WHEN NOW() - last_seen_at > INTERVAL '60 seconds' THEN 'UNHEALTHY'
+            ELSE 'HEALTHY'
+        END AS health_status
+    FROM omninode_internal.gateway_link_health;
+    """
+
+    violations = lint_application_database_sql(sql, _TOPOLOGY)
+
+    assert "application relation target 'case' must be schema-qualified" not in (
+        "\n".join(violations)
+    )
+
+
 @pytest.mark.parametrize(
     ("statement", "expected_locations"),
     [

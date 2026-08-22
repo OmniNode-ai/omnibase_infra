@@ -418,7 +418,13 @@ repos:
       # hyphen-separated variants).
       - id: no-env-file
         name: Reject committed .env files (anywhere in tree)
-        entry: 'bash -c ''if git diff --cached --name-only | grep -qE "(^|/)\.env([._-].+)?$"; then echo "BLOCKED: .env staged — use ~/.omnibase/.env (root and subdir .env files rejected)"; exit 1; fi'''
+        # OMN-16187: exclude the committed templates. The matcher below treats
+        # `.env.example` as a real env file, so ANY edit to the tracked
+        # `.env.example` (or a sample/template alongside it) was rejected even
+        # though the repo ships it and `make setup` copies it. Narrowing the
+        # matcher rather than allowlisting past the hook — real `.env`,
+        # `.env.local`, `.env.prod` etc. are still rejected anywhere in the tree.
+        entry: 'bash -c ''if git diff --cached --name-only | grep -vE "(^|/)\.env\.(example|sample|template)$" | grep -qE "(^|/)\.env([._-].+)?$"; then echo "BLOCKED: .env staged — use ~/.omnibase/.env (root and subdir .env files rejected)"; exit 1; fi'''
         language: system
         pass_filenames: false
         always_run: true

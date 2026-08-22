@@ -224,7 +224,24 @@ class ServiceGatewayForwarder:
         return envelope, canonical_topic
 
     async def publish_heartbeat(self) -> None:
-        """Publish one tenant-scoped liveness event onto the cloud wire topic."""
+        """Publish one tenant-scoped liveness event onto the cloud wire topic
+        and mirror the same, untransformed envelope onto the local bus's
+        canonical topic.
+
+        OMN-15570 (G3): the local mirror exists because
+        NodeGatewayLinkHealthProjectionCompute subscribes to
+        ``onex.evt.omnibase-infra.gateway-heartbeat.v1`` on the LOCAL bus
+        (bus-is-transport: in-cluster consumers read local canonical
+        topics, never the tenant-prefixed cloud wire topic) -- before this
+        fix, heartbeats only ever reached the cloud leg, so the projection
+        never saw a live event. This is the minimal doctrinally-correct
+        fix: it reuses the exact dual-publish shape ``publish_status``
+        (OMN-15742/G2) already established for the DEGRADED transition,
+        rather than inventing a second mechanism, and publishes the SAME
+        envelope object both places so envelope_id/correlation_id stay
+        identical across legs instead of minting two envelopes for one
+        liveness tick.
+        """
         identity = self._config.tenant_identity
         envelope, canonical_topic = self._build_status_envelope("active")
         # OMN-15740: _prepare_outbound returns (transformed_envelope, wire_topic) --
@@ -237,6 +254,12 @@ class ServiceGatewayForwarder:
             topic=wire_topic,
             key=str(identity.tenant_id).encode("utf-8"),
             value=self._encode_envelope(transformed),
+        )
+        await self._publish_with_delivery_retry(
+            bus=self._local_bus,
+            topic=canonical_topic,
+            key=str(identity.tenant_id).encode("utf-8"),
+            value=self._encode_envelope(envelope),
         )
 
     async def publish_status(

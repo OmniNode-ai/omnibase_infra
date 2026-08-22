@@ -1715,12 +1715,26 @@ jobs:
       - name: Checkout code
         uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
 
+      # OMN-16373: CROSS_REPO_PAT retirement — mint a short-lived
+      # onexbot-occ-writer App installation token, scoped to the one
+      # sibling repo this job reads.
+      - name: Mint onexbot-occ-writer app token
+        id: app-token
+        continue-on-error: true
+        uses: actions/create-github-app-token@d72941d797fd3113feb6b93fd0dec494b13a2547 # v1
+        with:
+          app-id: ${{ secrets.ONEXBOT_OCC_APP_ID }}
+          private-key: ${{ secrets.ONEXBOT_OCC_PRIVATE_KEY }}
+          owner: OmniNode-ai
+          repositories: onex_change_control
+          permission-contents: write
+
       - name: Checkout onex_change_control standards
         uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
         continue-on-error: true
         with:
           repository: OmniNode-ai/onex_change_control
-          token: ${{ secrets.CROSS_REPO_PAT }}
+          token: ${{ steps.app-token.outputs.token }}
           path: onex_change_control
           sparse-checkout: |
             standards/
@@ -1874,10 +1888,21 @@ jobs:
         || fromJSON((github.event_name == 'merge_group' && vars.OMNI_REQUIRED_CI_RUNS_ON_JSON) || vars.OMNI_TRUSTED_CI_RUNS_ON_JSON || '["self-hosted","omnibase-ci"]')
       }}
     steps:
+      # OMN-16373: CROSS_REPO_PAT retirement — mint a short-lived
+      # onexbot-occ-writer App installation token for the multi-repo
+      # sibling reads this boundary check performs.
+      - name: Mint onexbot-occ-writer app token
+        id: app-token
+        uses: actions/create-github-app-token@d72941d797fd3113feb6b93fd0dec494b13a2547 # v1
+        with:
+          app-id: ${{ secrets.ONEXBOT_OCC_APP_ID }}
+          private-key: ${{ secrets.ONEXBOT_OCC_PRIVATE_KEY }}
+          owner: OmniNode-ai
+          permission-contents: write
       - uses: OmniNode-ai/onex_change_control/.github/actions/validate-boundaries@main
         id: migration_conflicts
         env:
-          OMNI_REPO_CLONE_TOKEN: ${{ secrets.CROSS_REPO_PAT }}
+          OMNI_REPO_CLONE_TOKEN: ${{ steps.app-token.outputs.token }}
         with:
           checks: "migration-conflicts"
           repos: "omniclaude,omnidash,omniintelligence,omnibase_core,omnimemory"
@@ -1898,6 +1923,18 @@ jobs:
     if: needs.occ-preflight.result == 'success' && (github.event_name == 'pull_request' || github.event_name == 'merge_group' || github.event_name == 'push')
     steps:
       - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+      # OMN-16373: CROSS_REPO_PAT retirement — mint a short-lived
+      # onexbot-occ-writer App installation token, scoped to the one
+      # sibling repo this job reads.
+      - name: Mint onexbot-occ-writer app token
+        id: app-token
+        uses: actions/create-github-app-token@d72941d797fd3113feb6b93fd0dec494b13a2547 # v1
+        with:
+          app-id: ${{ secrets.ONEXBOT_OCC_APP_ID }}
+          private-key: ${{ secrets.ONEXBOT_OCC_PRIVATE_KEY }}
+          owner: OmniNode-ai
+          repositories: onex_change_control
+          permission-contents: write
       - name: Checkout onex_change_control
         uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
         with:
@@ -1908,7 +1945,7 @@ jobs:
           # checkout makes this gate a function of whatever OCC's dev happens to be.
           ref: 7352cb2dc634a7223877bfbbf3498303c9662700
           path: onex_change_control
-          token: ${{ secrets.CROSS_REPO_PAT || github.token }}
+          token: ${{ steps.app-token.outputs.token || github.token }}
 
       - uses: astral-sh/setup-uv@v7
         with:
@@ -2506,6 +2543,20 @@ jobs:
           fetch-depth: 0
           persist-credentials: false
 
+      # OMN-16373: CROSS_REPO_PAT retirement. continue-on-error because
+      # fork-triggered pull_request runs receive no org secrets (App id/key
+      # are empty), and the live-resolve step below already has a
+      # github.token fallback for exactly that case.
+      - name: Mint onexbot-occ-writer app token
+        id: app-token-proof
+        continue-on-error: true
+        uses: actions/create-github-app-token@d72941d797fd3113feb6b93fd0dec494b13a2547 # v1
+        with:
+          app-id: ${{ secrets.ONEXBOT_OCC_APP_ID }}
+          private-key: ${{ secrets.ONEXBOT_OCC_PRIVATE_KEY }}
+          owner: OmniNode-ai
+          permission-contents: write
+
       - name: Checkout exact sanitized legacy fixture dependency
         uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
         with:
@@ -2536,10 +2587,11 @@ jobs:
         # exit) rather than silently falling back to a stale pin.
         #
         # Token: fork-triggered pull_request runs receive no org secrets, so
-        # secrets.CROSS_REPO_PAT is empty there and this step must not
-        # hard-depend on it. omnimarket is a PUBLIC repo, so reading its
+        # the minted onexbot-occ-writer App token is empty there and this
+        # step must not hard-depend on it (OMN-16373: CROSS_REPO_PAT
+        # retired). omnimarket is a PUBLIC repo, so reading its
         # commits API needs no elevated scope -- github.token (always present,
-        # including on fork PRs) is sufficient. Prefer CROSS_REPO_PAT when
+        # including on fork PRs) is sufficient. Prefer the App token when
         # present (same-repo/trusted runs) to stay on the higher, shared
         # cross-repo rate-limit budget those runs already use elsewhere in
         # this workflow (see lines ~1508/1665/1696); fall back to
@@ -2549,7 +2601,7 @@ jobs:
         if: steps.resolve-omnimarket-ref.outputs.ref == 'dev'
         shell: bash
         env:
-          GH_TOKEN: ${{ secrets.CROSS_REPO_PAT || github.token }}
+          GH_TOKEN: ${{ steps.app-token-proof.outputs.token || github.token }}
         run: |
           set -euo pipefail
           sha="$(gh api repos/OmniNode-ai/omnimarket/commits/dev --jq .sha)"
@@ -2570,11 +2622,12 @@ jobs:
       # OMN-16152: GitHub withholds ALL repo secrets from dependabot-triggered
       # pull_request runs even when the head branch is same-repo, not a fork
       # -- the fork check alone let dependabot through into a checkout whose
-      # only token source (CROSS_REPO_PAT) is unconditionally empty there.
-      # actions/checkout treats an explicitly-passed empty token as "unset
-      # and required", so it hard-failed instead of falling back to
-      # github.token. Route dependabot into the same narrow fail-closed lane
-      # already proven for forks below.
+      # only token source (the minted App token, OMN-16373) is
+      # unconditionally empty there. actions/checkout treats an
+      # explicitly-passed empty token as "unset and required", so it
+      # hard-failed instead of falling back to github.token. Route
+      # dependabot into the same narrow fail-closed lane already proven for
+      # forks below.
       - name: Checkout exact service ownership dependency
         if: >-
           github.event_name != 'pull_request' ||
@@ -2583,9 +2636,9 @@ jobs:
         uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
         with:
           repository: OmniNode-ai/omninode_infra
-          ref: 39033d55147ef22a061b665345b506246d3aa543
+          ref: db90c19241eb2b58779e18a1ddf7b9a0e11c9c7c
           path: .proof-dependencies/omninode-infra
-          token: ${{ secrets.CROSS_REPO_PAT }}
+          token: ${{ steps.app-token-proof.outputs.token }}
           persist-credentials: false
 
       - name: Setup Python and uv
