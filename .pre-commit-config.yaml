@@ -864,13 +864,14 @@ repos:
         pass_filenames: false
         files: (platform_topic_suffixes\.py|contract\.yaml|topics\.yaml)
         stages: [pre-commit]
-      # OMN-5440/OMN-11673: Verify required docker-compose env vars are set in
-      # contract-rendered policy env or operator env.
+      # OMN-5440/OMN-11673/OMN-15537: Verify required docker-compose env vars are
+      # declared in the checked-in manifest (never against the invoking host's
+      # environment — see OMN-15537 for why the host-env-reading shape was a defect).
       - id: check-required-env-vars
-        name: Check required env vars are set in configured env files
+        name: Check required env vars are declared in the manifest
         entry: python scripts/check_required_env_vars.py
         language: python
-        files: docker/docker-compose\.infra\.yml
+        files: docker/(docker-compose\.infra\.yml|required-env-vars\.manifest\.txt)
         pass_filenames: false
       # OMN-4857: Block Consul references in source (decommissioned service)
       # Prevents reintroduction of CONSUL_HOST or consul.connect.io references in src/.

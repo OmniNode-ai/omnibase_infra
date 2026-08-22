@@ -50,14 +50,18 @@ VALUES
   );
 
 INSERT INTO omninode_internal.transformation_receipts
-  (receipt_id, family_id, status, receipt_hash, receipt_json, generated_at)
+  (receipt_id, family_id, status, receipt_hash, receipt_json, generated_at,
+   idempotency_key)
 VALUES
   ('10000000-0000-0000-0000-000000000001', '30000000-0000-0000-0000-000000000001', 'pass',
-   repeat('a', 64), '{"status":"pass","dimensions":14}', clock_timestamp()),
+   repeat('a', 64), '{"status":"pass","dimensions":14}', clock_timestamp(),
+   'fixture-receipt-family1-pass'),
   ('20000000-0000-0000-0000-000000000001', '30000000-0000-0000-0000-000000000002', 'fail',
-   repeat('b', 64), '{"status":"fail","red":"owner_mismatch"}', clock_timestamp()),
+   repeat('b', 64), '{"status":"fail","red":"owner_mismatch"}', clock_timestamp(),
+   'fixture-receipt-family2-fail'),
   ('20000000-0000-0000-0000-000000000002', '30000000-0000-0000-0000-000000000002', 'pass',
-   repeat('c', 64), '{"status":"pass","dimensions":14}', clock_timestamp());
+   repeat('c', 64), '{"status":"pass","dimensions":14}', clock_timestamp(),
+   'fixture-receipt-family2-pass');
 
 UPDATE omninode_internal.cutover_family_contracts
 SET status = 'blocked',
@@ -92,19 +96,21 @@ psql -X -q -h "$host" -p "$port" -U postgres -d "$database" \
   -v ON_ERROR_STOP=1 <<'EOSQL'
 INSERT INTO omninode_internal.cutover_journal
   (event_id, family_id, sequence, event_kind, request_json, receipt_id,
-   previous_event_hash, event_hash, occurred_at)
+   previous_event_hash, event_hash, occurred_at, idempotency_key)
 VALUES
   ('11000000-0000-0000-0000-000000000001', '30000000-0000-0000-0000-000000000001', 1,
    'writer_checkpoint', '{"checkpoint":"source-to-target"}',
    '10000000-0000-0000-0000-000000000001', repeat('0', 64), repeat('3', 64),
-   clock_timestamp()),
+   clock_timestamp(), 'fixture-journal-family1-checkpoint'),
   ('11000000-0000-0000-0000-000000000002', '30000000-0000-0000-0000-000000000001', 2,
    'application_path_write_proven',
    '{"database_ref":"application","principal":"tenant_projection_writer","schema":"tenant","target_sequence":7}',
-   NULL, repeat('3', 64), repeat('4', 64), clock_timestamp()),
+   NULL, repeat('3', 64), repeat('4', 64), clock_timestamp(),
+   'fixture-journal-family1-app-write'),
   ('11000000-0000-0000-0000-000000000003', '30000000-0000-0000-0000-000000000001', 3,
    'writer_quiesced', '{"target_sequence":8}', NULL,
-   repeat('4', 64), repeat('5', 64), clock_timestamp());
+   repeat('4', 64), repeat('5', 64), clock_timestamp(),
+   'fixture-journal-family1-quiesced');
 UPDATE omninode_internal.cutover_family_contracts
 SET status = 'checkpointed',
     checkpoint_event_id = '11000000-0000-0000-0000-000000000001',
@@ -173,20 +179,21 @@ psql -X -q -h "$host" -p "$port" -U postgres -d "$database" \
   -v ON_ERROR_STOP=1 <<'EOSQL'
 INSERT INTO omninode_internal.cutover_journal
   (event_id, family_id, sequence, event_kind, request_json, receipt_id,
-   previous_event_hash, event_hash, occurred_at)
+   previous_event_hash, event_hash, occurred_at, idempotency_key)
 VALUES
   ('21000000-0000-0000-0000-000000000001', '30000000-0000-0000-0000-000000000002', 1,
    'writer_checkpoint', '{"checkpoint":"source-to-target"}',
    '20000000-0000-0000-0000-000000000002', repeat('0', 64), repeat('6', 64),
-   clock_timestamp()),
+   clock_timestamp(), 'fixture-journal-family2-checkpoint'),
   ('21000000-0000-0000-0000-000000000002', '30000000-0000-0000-0000-000000000002', 2,
    'application_path_write_proven',
    '{"database_ref":"application","principal":"onex_api","schema":"tenant","target_sequence":1}',
-   NULL, repeat('6', 64), repeat('7', 64), clock_timestamp()),
+   NULL, repeat('6', 64), repeat('7', 64), clock_timestamp(),
+   'fixture-journal-family2-app-write'),
   ('21000000-0000-0000-0000-000000000003', '30000000-0000-0000-0000-000000000002', 3,
    'forward_fix_recorded', '{"runbook":"runbooks/control-plane-forward-fix.md"}',
    '20000000-0000-0000-0000-000000000002', repeat('7', 64), repeat('8', 64),
-   clock_timestamp());
+   clock_timestamp(), 'fixture-journal-family2-forward-fix');
 UPDATE omninode_internal.cutover_family_contracts
 SET status = 'checkpointed',
     blocked_receipt_id = NULL,

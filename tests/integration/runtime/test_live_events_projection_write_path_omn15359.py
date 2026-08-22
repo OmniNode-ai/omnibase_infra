@@ -260,7 +260,7 @@ def test_live_events_write_lands_in_and_reads_back_from_omninode_internal(
     )
     target = _resolve_projection_database_target((declaration,), application_topology())
 
-    assert target.table_targets[0].schema == "omninode_internal"
+    assert target.table_targets[0].physical_schema == "omninode_internal"
     assert target.table_targets[0].write_binding is not None
     assert (
         target.table_targets[0].write_binding.binding_ref == "omninode_runtime_service"
@@ -310,7 +310,7 @@ def test_grant_derivation_schema_agrees_with_the_insert_target_schema() -> None:
         role="live_events",
     )
     target = _resolve_projection_database_target((declaration,), application_topology())
-    insert_target_schema = target.table_targets[0].schema
+    insert_target_schema = target.table_targets[0].physical_schema
 
     grant_check_schema = physical_grant_schema_for_table(
         "omninode_internal", "live_events"

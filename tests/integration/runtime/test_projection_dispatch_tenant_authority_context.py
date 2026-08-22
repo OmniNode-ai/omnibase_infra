@@ -156,7 +156,9 @@ async def test_dispatch_engine_keeps_verified_authority_out_of_band(
         "SELECT set_config(%s, %s, true)",
         ("app.tenant_id", str(tenant_id)),
     )
-    assert 'INSERT INTO "tenant"."delegation_events"' in calls[2][0]
+    # OMN-16239: physical schema, not the declared one -- delegation_events is
+    # still bridged to public until OMN-15359 relocates the tenant family.
+    assert 'INSERT INTO "public"."delegation_events"' in calls[2][0]
     assert calls[2][1]["correlation_id"] == envelope.envelope_id  # type: ignore[index]
     assert calls[2][1]["tenant_id"] == tenant_id  # type: ignore[index]
     assert connection.close_calls == 1
@@ -222,4 +224,8 @@ async def test_mixed_target_internal_operation_does_not_resolve_tenant_authority
 
     connect.assert_called_once_with("postgresql://internal")
     assert all("set_config" not in sql for sql, _params in calls)
-    assert any('"omninode_internal"."generation_events"' in sql for sql, _ in calls)
+    # OMN-16239: generation_events is still under the OMN-15359 bridge, so the
+    # internal write resolves to public. The point of this assertion is that the
+    # internal table was written at all on the internal binding -- the schema it
+    # is qualified with must be the physical one.
+    assert any('"public"."generation_events"' in sql for sql, _ in calls)

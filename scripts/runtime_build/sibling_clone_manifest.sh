@@ -47,7 +47,6 @@ SIBLING_CLONE_MANIFEST=(
     "omnibase_core"
     "omnibase_spi"
     "omnibase_compat"
-    "onex_change_control"
     "omnimarket"
 )
 
@@ -57,6 +56,5 @@ SIBLING_CLONE_MANIFEST_DIST_NAMES=(
     "omnibase-core"
     "omnibase-spi"
     "omnibase-compat"
-    "onex-change-control"
     "omnimarket"
 )

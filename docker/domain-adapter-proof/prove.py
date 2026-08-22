@@ -57,7 +57,7 @@ CATALOG_ROLE = "app_dashboard"
 ROLE_PASSWORD = "domain-adapter-proof-only"  # pragma: allowlist secret
 TENANT_A = UUID("aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa")
 TENANT_B = UUID("bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb")
-TENANT_TABLE = "delegation_events"
+TENANT_TABLE = "future_tenant_projection"
 INTERNAL_TABLE = "future_internal_projection"
 CATALOG_TABLE = "plan_tiers"
 
@@ -305,7 +305,7 @@ def _prove_real_rls_with_check() -> None:
             _raises(
                 psycopg2.errors.InsufficientPrivilege,
                 lambda: cursor.execute(
-                    "INSERT INTO tenant.delegation_events VALUES (%s, %s, %s)",
+                    "INSERT INTO tenant.future_tenant_projection VALUES (%s, %s, %s)",
                     (uuid4(), "unset-context", TENANT_A),
                 ),
             )
@@ -316,7 +316,7 @@ def _prove_real_rls_with_check() -> None:
             _raises(
                 psycopg2.errors.InsufficientPrivilege,
                 lambda: cursor.execute(
-                    "INSERT INTO tenant.delegation_events VALUES (%s, %s, %s)",
+                    "INSERT INTO tenant.future_tenant_projection VALUES (%s, %s, %s)",
                     (uuid4(), "wrong-insert", TENANT_B),
                 ),
             )
@@ -326,7 +326,7 @@ def _prove_real_rls_with_check() -> None:
         with conn.cursor() as cursor:
             cursor.execute("SET LOCAL app.tenant_id = %s", (str(TENANT_A),))
             cursor.execute(
-                "INSERT INTO tenant.delegation_events VALUES (%s, %s, %s)",
+                "INSERT INTO tenant.future_tenant_projection VALUES (%s, %s, %s)",
                 (correlation_id, "valid-a", TENANT_A),
             )
         conn.commit()
@@ -335,7 +335,7 @@ def _prove_real_rls_with_check() -> None:
             _raises(
                 psycopg2.errors.InsufficientPrivilege,
                 lambda: cursor.execute(
-                    "UPDATE tenant.delegation_events SET tenant_id = %s "
+                    "UPDATE tenant.future_tenant_projection SET tenant_id = %s "
                     "WHERE correlation_id = %s",
                     (TENANT_B, correlation_id),
                 ),
@@ -539,7 +539,7 @@ def main() -> None:
 
     for dsn, sql in (
         (TENANT_DSN, f"SELECT * FROM omninode_internal.{INTERNAL_TABLE}"),
-        (INTERNAL_DSN, "SELECT * FROM tenant.delegation_events"),
+        (INTERNAL_DSN, "SELECT * FROM tenant.future_tenant_projection"),
         (
             CATALOG_DSN,
             "INSERT INTO platform_catalog.plan_tiers VALUES ('x', 'X')",
@@ -571,7 +571,7 @@ def main() -> None:
     )
 
     rows = _admin_rows(
-        "SELECT tenant_id FROM tenant.delegation_events ORDER BY tenant_id"
+        "SELECT tenant_id FROM tenant.future_tenant_projection ORDER BY tenant_id"
     )
     assert TENANT_A in {row[0] for row in rows}
     assert TENANT_B in {row[0] for row in rows}
