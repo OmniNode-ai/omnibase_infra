@@ -144,6 +144,93 @@ ALTER TABLE delegation_routing_tenant_overlay ADD COLUMN IF NOT EXISTS timeout_m
 ALTER TABLE delegation_routing_tenant_overlay ADD COLUMN IF NOT EXISTS max_tokens INTEGER;
 ALTER TABLE delegation_routing_tenant_overlay ADD COLUMN IF NOT EXISTS created_at TIMESTAMPTZ DEFAULT NOW();
 ALTER TABLE delegation_routing_tenant_overlay ADD COLUMN IF NOT EXISTS updated_at TIMESTAMPTZ DEFAULT NOW();
+
+CREATE SEQUENCE IF NOT EXISTS delegation_routing_tenant_overlay_id_seq
+    OWNED BY delegation_routing_tenant_overlay.id;
+ALTER TABLE delegation_routing_tenant_overlay
+    ALTER COLUMN id SET DEFAULT nextval('delegation_routing_tenant_overlay_id_seq');
+
+UPDATE delegation_routing_tenant_overlay
+SET id = nextval('delegation_routing_tenant_overlay_id_seq')
+WHERE id IS NULL;
+
+WITH duplicate_ids AS (
+    SELECT ctid, row_number() OVER (PARTITION BY id ORDER BY ctid) AS duplicate_rank
+    FROM delegation_routing_tenant_overlay
+)
+UPDATE delegation_routing_tenant_overlay AS overlay
+SET id = nextval('delegation_routing_tenant_overlay_id_seq')
+FROM duplicate_ids
+WHERE overlay.ctid = duplicate_ids.ctid
+  AND duplicate_ids.duplicate_rank > 1;
+
+SELECT setval(
+    'delegation_routing_tenant_overlay_id_seq',
+    COALESCE((SELECT max(id) FROM delegation_routing_tenant_overlay), 0) + 1,
+    false
+);
+
+UPDATE delegation_routing_tenant_overlay
+SET
+    tenant_id = COALESCE(NULLIF(tenant_id, ''), '__reconciled_missing_tenant_' || id::TEXT),
+    task_type = COALESCE(NULLIF(task_type, ''), '__reconciled_missing_task_' || id::TEXT),
+    backend_id = COALESCE(NULLIF(backend_id, ''), '__reconciled_missing_backend_' || id::TEXT),
+    endpoint_url = COALESCE(NULLIF(endpoint_url, ''), 'disabled://reconciled-missing-endpoint/' || id::TEXT),
+    model_name = COALESCE(NULLIF(model_name, ''), '__reconciled_missing_model_' || id::TEXT),
+    created_at = COALESCE(created_at, NOW()),
+    updated_at = COALESCE(updated_at, NOW());
+
+WITH duplicate_overlay_keys AS (
+    SELECT
+        ctid,
+        id,
+        row_number() OVER (PARTITION BY tenant_id, task_type ORDER BY id, ctid) AS duplicate_rank
+    FROM delegation_routing_tenant_overlay
+)
+UPDATE delegation_routing_tenant_overlay AS overlay
+SET task_type = overlay.task_type || '__reconciled_duplicate_' || duplicate_overlay_keys.id::TEXT
+FROM duplicate_overlay_keys
+WHERE overlay.ctid = duplicate_overlay_keys.ctid
+  AND duplicate_overlay_keys.duplicate_rank > 1;
+
+ALTER TABLE delegation_routing_tenant_overlay
+    ALTER COLUMN id SET NOT NULL,
+    ALTER COLUMN tenant_id SET NOT NULL,
+    ALTER COLUMN task_type SET NOT NULL,
+    ALTER COLUMN backend_id SET NOT NULL,
+    ALTER COLUMN endpoint_url SET NOT NULL,
+    ALTER COLUMN model_name SET NOT NULL,
+    ALTER COLUMN created_at SET DEFAULT NOW(),
+    ALTER COLUMN created_at SET NOT NULL,
+    ALTER COLUMN updated_at SET DEFAULT NOW(),
+    ALTER COLUMN updated_at SET NOT NULL;
+
+DO $$
+BEGIN
+    IF NOT EXISTS (
+        SELECT 1
+        FROM pg_constraint
+        WHERE conrelid = 'delegation_routing_tenant_overlay'::regclass
+          AND contype = 'p'
+    ) THEN
+        ALTER TABLE delegation_routing_tenant_overlay
+            ADD CONSTRAINT delegation_routing_tenant_overlay_pkey PRIMARY KEY (id);
+    END IF;
+END $$;
+
+DO $$
+BEGIN
+    IF NOT EXISTS (
+        SELECT 1
+        FROM pg_constraint
+        WHERE conrelid = 'delegation_routing_tenant_overlay'::regclass
+          AND conname = 'delegation_routing_tenant_overlay_tenant_task_uq'
+    ) THEN
+        ALTER TABLE delegation_routing_tenant_overlay
+            ADD CONSTRAINT delegation_routing_tenant_overlay_tenant_task_uq
+                UNIQUE (tenant_id, task_type);
+    END IF;
+END $$;
 -- ---- END OMN-15376 shape reconciliation: delegation_routing_tenant_overlay ----
 
 CREATE INDEX IF NOT EXISTS idx_delegation_routing_tenant_overlay_tenant_id
