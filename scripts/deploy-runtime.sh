@@ -2424,11 +2424,9 @@ build_images() {
     non_main_lineage="$(resolve_non_main_lineage "${build_source}")"
     local compat_ref="main"
     local omnimarket_ref="dev"
-    local occ_ref="main"
     if [[ -n "${omni_home}" ]]; then
         compat_ref="$(read_repo_ref_or_main "${omni_home}/omnibase_compat")"
         omnimarket_ref="$(read_repo_ref_or_main "${omni_home}/omnimarket")"
-        occ_ref="$(read_repo_ref_or_main "${omni_home}/onex_change_control")"
     fi
 
     # Build timeout in seconds (default: 15 minutes). Prevents the known issue
@@ -2456,7 +2454,6 @@ build_images() {
         --build-arg "OMNI_HOME=${omni_home}"
         --build-arg "OMNIBASE_COMPAT_REF=${compat_ref}"
         --build-arg "OMNIMARKET_REF=${omnimarket_ref}"
-        --build-arg "ONEX_CHANGE_CONTROL_REF=${occ_ref}"
         # OMN-14873: scope the build to RUNTIME_BUILD_SERVICES (defaults to the full
         # RUNTIME_SERVICES fan-out; see the override comment above its declaration).
         "${RUNTIME_BUILD_SERVICES[@]}"
@@ -2465,7 +2462,7 @@ build_images() {
     log_info "Building images with VCS_REF=${git_sha} RUNTIME_VERSION=${runtime_version} RUNTIME_SOURCE_HASH=${git_sha} COMPOSE_PROJECT=${compose_project}..."
     log_info "Build scope: ${RUNTIME_BUILD_SERVICES[*]}"
     log_info "Build source: BUILD_SOURCE=${build_source} EXPECTED_BUILD_SOURCE=${expected_build_source} PROMOTION_CLASS=${promotion_class} NON_MAIN_LINEAGE=${non_main_lineage} OMNI_HOME=${omni_home}"
-    log_info "Plugin refs: OMNIBASE_COMPAT_REF=${compat_ref} OMNIMARKET_REF=${omnimarket_ref} ONEX_CHANGE_CONTROL_REF=${occ_ref}"
+    log_info "Plugin refs: OMNIBASE_COMPAT_REF=${compat_ref} OMNIMARKET_REF=${omnimarket_ref}"
     log_info "Build timeout: ${build_timeout}s (set DOCKER_BUILD_TIMEOUT_SECONDS to override)"
     log_cmd "${cmd[*]}"
 
@@ -3111,11 +3108,9 @@ print_compose_commands() {
     non_main_lineage="$(resolve_non_main_lineage "${build_source}")"
     local compat_ref="main"
     local omnimarket_ref="dev"
-    local occ_ref="main"
     if [[ -n "${omni_home}" ]]; then
         compat_ref="$(read_repo_ref_or_main "${omni_home}/omnibase_compat")"
         omnimarket_ref="$(read_repo_ref_or_main "${omni_home}/omnimarket")"
-        occ_ref="$(read_repo_ref_or_main "${omni_home}/onex_change_control")"
     fi
 
     log_step "Compose Commands"
@@ -3139,8 +3134,7 @@ print_compose_commands() {
     log_info "    --build-arg NON_MAIN_LINEAGE=${non_main_lineage} \\"
     log_info "    --build-arg OMNI_HOME=${omni_home} \\"
     log_info "    --build-arg OMNIBASE_COMPAT_REF=${compat_ref} \\"
-    log_info "    --build-arg OMNIMARKET_REF=${omnimarket_ref} \\"
-    log_info "    --build-arg ONEX_CHANGE_CONTROL_REF=${occ_ref}"
+    log_info "    --build-arg OMNIMARKET_REF=${omnimarket_ref}"
     log_info ""
     log_info "Restart runtime services:"
     log_info "  docker compose \\"

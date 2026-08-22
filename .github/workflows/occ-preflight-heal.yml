@@ -1,0 +1,123 @@
+name: OCC Preflight Heal
+
+# OMN-16171 / OMN-14241. Targeted replacement for `edited` on ci.yml.
+#
+# THE PROBLEM OMN-14241 SOLVED, AND WHY IT COST SO MUCH
+# A PR that gains its `Evidence-Source: OCC#<n>` line by a body edit after
+# opening leaves `occ-preflight / eligibility` FAILURE from the pre-stamp run.
+# `CI Summary` -- dev's sole required context -- polls `ci.yml`'s OWN run job
+# list, so it fails closed on that stale result forever. OMN-14241 fixed it by
+# adding `edited` to ci.yml's trigger types, which produced a brand-new run of
+# the whole ~48-job matrix on every PR-body edit. Because ci.yml's concurrency
+# is `cancel-in-progress: true` keyed on PR number, each such edit also
+# CANCELLED whatever matrix was mid-flight and restarted it from zero.
+# Measured 2026-08-18 on #2784, one unchanged head SHA 7993b115: waves at
+# 13:28:50Z (42 workflows), 13:50:09Z (10, incl. a fresh full CI) and
+# 13:51:33Z (8), against an org-wide backlog of 247 queued jobs. The stamps
+# are frequent because OCC's own bots author them with a minted App token,
+# which does emit `pull_request: edited` (GitHub's recursion guard suppresses
+# only edits made by the ambient GITHUB_TOKEN).
+#
+# WHY NOT JUST SKIP THE HEAVY JOBS ON AN EDITED RUN
+# A job skipped by an `if:` still publishes a check run with conclusion
+# `skipped`, which GitHub branch protection counts as PASSING -- that would
+# turn "edit the PR body" into a way to green a red required context. It is
+# also the exact shape vector 2 of the required-check skip-vector guard exists
+# to reject. So an edited event may produce a genuinely full run, or no run at
+# all. There is no safe middle.
+#
+# WHAT THIS DOES INSTEAD
+# ci.yml goes back to the default trigger types, and the self-heal happens
+# here: on a body edit, re-run the FAILED JOBS OF THE EXISTING ci.yml RUN, in
+# place. `gh run rerun --failed` keeps the same run id, so `CI Summary`
+# re-polls the same job list it always polls and observes occ-preflight's new
+# result. Cost is the two jobs that actually need to move rather than ~48, no
+# in-flight matrix is cancelled, and every job that already passed keeps its
+# result.
+#
+# It only acts when there is something to heal: the newest ci.yml run for the
+# current head SHA must be COMPLETED and must have `occ-preflight` among its
+# failed jobs. Once healed, that precondition is false, so repeated edits do
+# nothing. A rerun does not emit `edited`, so this cannot recurse.
+#
+# This workflow is deliberately NOT a required status check and must never
+# become one: it reports on whether a heal was attempted, not on whether the
+# PR is good.
+
+on:
+  pull_request:
+    branches: [main, dev]
+    types: [edited]
+
+concurrency:
+  group: occ-preflight-heal-${{ github.event.pull_request.number }}
+  cancel-in-progress: true
+
+permissions:
+  actions: write
+  contents: read
+  pull-requests: read
+
+jobs:
+  heal:
+    name: Heal stale occ-preflight
+    timeout-minutes: 5
+    # OMNI_RUNNER_SELECTOR_V1 - trusted CI defaults to self-hosted omnibase-ci; public forks default to ubuntu-latest.
+    # This job is a handful of API calls, so it is cheap on either runner, and
+    # it only does work when there is actually a stale preflight to heal.
+    runs-on: >-
+      ${{
+        (github.event_name == 'pull_request' &&
+         github.event.pull_request.head.repo.full_name != github.repository)
+        && fromJSON(vars.OMNI_PUBLIC_PR_RUNS_ON_JSON || '["ubuntu-latest"]')
+        || fromJSON(vars.OMNI_TRUSTED_CI_RUNS_ON_JSON || '["self-hosted","omnibase-ci"]')
+      }}
+    steps:
+      - name: Re-run failed jobs of the current CI run when occ-preflight is stale
+        env:
+          GH_TOKEN: ${{ github.token }}
+          REPO: ${{ github.repository }}
+          HEAD_SHA: ${{ github.event.pull_request.head.sha }}
+          # Must match ci.yml's `name:` and its occ-preflight job id. Renaming
+          # either without updating these silently disables the heal, which is
+          # why tests/ci/test_occ_eval_path_trigger_coverage.py pins both.
+          CI_WORKFLOW_NAME: CI
+          PREFLIGHT_JOB_PREFIX: occ-preflight
+        run: |
+          set -euo pipefail
+
+          run_id="$(gh api \
+            "repos/${REPO}/actions/runs?head_sha=${HEAD_SHA}&per_page=100" \
+            --jq "[.workflow_runs[]
+                   | select(.name == \"${CI_WORKFLOW_NAME}\")]
+                  | sort_by(.created_at)
+                  | last
+                  | .id // empty")"
+
+          if [ -z "${run_id}" ]; then
+            echo "No ${CI_WORKFLOW_NAME} run found for ${HEAD_SHA}; nothing to heal."
+            exit 0
+          fi
+
+          status="$(gh api "repos/${REPO}/actions/runs/${run_id}" --jq '.status')"
+          if [ "${status}" != "completed" ]; then
+            echo "Run ${run_id} is ${status}; a rerun is only valid on a completed run. Nothing to do."
+            exit 0
+          fi
+
+          # Only heal the case this workflow exists for. Re-running every failed
+          # job on any body edit would re-queue genuine test failures too.
+          failed_preflight="$(gh api "repos/${REPO}/actions/runs/${run_id}/jobs?per_page=100" \
+            --paginate \
+            --jq "[.jobs[]
+                   | select(.conclusion == \"failure\")
+                   | select(.name | startswith(\"${PREFLIGHT_JOB_PREFIX}\"))]
+                  | length")"
+
+          if [ "${failed_preflight}" -eq 0 ]; then
+            echo "Run ${run_id} has no failed ${PREFLIGHT_JOB_PREFIX} job; nothing to heal."
+            exit 0
+          fi
+
+          echo "Run ${run_id} has a failed ${PREFLIGHT_JOB_PREFIX} job; re-running failed jobs in place."
+          gh run rerun "${run_id}" --failed --repo "${REPO}"

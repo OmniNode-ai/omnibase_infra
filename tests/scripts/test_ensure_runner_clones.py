@@ -49,7 +49,6 @@ EXPECTED_REPOS = (
     "omnibase_core",
     "omnibase_spi",
     "omnibase_compat",
-    "onex_change_control",
     "omnimarket",
 )
 
@@ -114,7 +113,7 @@ def _run_ensure_clones(
 
 @pytest.fixture
 def upstream(tmp_path: Path) -> Path:
-    """A directory of real bare git repos for all 6 canonical siblings."""
+    """A directory of real bare git repos for all canonical siblings."""
     root = tmp_path / "upstream"
     root.mkdir()
     for repo in EXPECTED_REPOS:
@@ -122,14 +121,14 @@ def upstream(tmp_path: Path) -> Path:
     return root
 
 
-def test_manifest_declares_all_six_canonical_siblings() -> None:
+def test_manifest_declares_all_canonical_siblings() -> None:
     """sibling_clone_manifest.sh enumerates the full set, including spi."""
     text = MANIFEST.read_text(encoding="utf-8")
     for repo in EXPECTED_REPOS:
         assert f'"{repo}"' in text, f"{repo} missing from sibling_clone_manifest.sh"
 
 
-def test_ensure_runner_clones_provisions_all_six_including_spi(
+def test_ensure_runner_clones_provisions_all_canonical_including_spi(
     tmp_path: Path, upstream: Path
 ) -> None:
     """RED against the exact OMN-15137 gap: omnibase_spi must be cloned."""
@@ -139,7 +138,10 @@ def test_ensure_runner_clones_provisions_all_six_including_spi(
     result = _run_ensure_clones(omni_home, f"file://{upstream}")
 
     assert result.returncode == 0, result.stderr
-    assert "all 6 private clones present and operable" in result.stderr
+    assert (
+        f"all {len(EXPECTED_REPOS)} private clones present and operable"
+        in result.stderr
+    ), result.stderr
 
     for repo in EXPECTED_REPOS:
         clone = omni_home / repo

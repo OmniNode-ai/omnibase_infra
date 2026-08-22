@@ -55,11 +55,10 @@ set -euo pipefail
 # added by OMN-13234/OMN-12846). Without this, `uv sync` installs the lock-pinned
 # enum-LESS core wheel and omnimarket (installed --no-deps) imports a missing enum,
 # crash-looping projection-api + the runtime kernel. Order matters: core must be
-# staged/installed before compat/occ/omnimarket so it is the resolved core for all.
+# staged/installed before compat/omnimarket so it is the resolved core for all.
 SIBLING_REPOS=(
     "omnibase_core"
     "omnibase_compat"
-    "onex_change_control"
     "omnimarket"
 )
 

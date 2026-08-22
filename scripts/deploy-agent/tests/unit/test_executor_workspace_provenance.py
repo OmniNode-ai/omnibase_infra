@@ -248,7 +248,7 @@ def test_provenance_script_passes_with_valid_local_installs(
 ) -> None:
     """Provenance script writes manifest and exits 0 when all packages are local installs."""
     sibling_dir = tmp_path / "workspace" / "sibling-repos"
-    for repo in ("omnibase_compat", "onex_change_control", "omnimarket"):
+    for repo in ("omnibase_compat", "omnimarket"):
         repo_dir = sibling_dir / repo
         repo_dir.mkdir(parents=True)
         (repo_dir / "pyproject.toml").write_text(
@@ -309,9 +309,7 @@ def test_provenance_script_passes_with_valid_local_installs(
     manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
     assert manifest["build_source"] == "workspace"
     assert "proofs" in manifest
-    assert len(manifest["proofs"]) == len(
-        ["omnibase_compat", "onex_change_control", "omnimarket"]
-    )
+    assert len(manifest["proofs"]) == len(["omnibase_compat", "omnimarket"])
     for proof in manifest["proofs"]:
         assert "workspace_digest" in proof
         assert len(proof["workspace_digest"]) == 64  # SHA-256 hex

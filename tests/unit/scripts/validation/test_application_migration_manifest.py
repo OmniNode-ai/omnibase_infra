@@ -130,7 +130,13 @@ def test_checked_in_manifest_is_exact_and_all_blockers_are_explicit() -> None:
     # -- vendors the watermark-persistence table BaseProjectionRunner's shared
     # _update_watermark() path needs; landed in omnibase_infra first per the
     # node-migration-vendor-parity-gate ordering, ahead of omnimarket#2092.
-    assert len(result.declarations) == 102
+    # +1 for OMN-16316's
+    # node_projection_tenant_credentials/0000_create_tenant_inference_credentials.sql
+    # -- vendors the BYOK inference-credential-ref catalog table, domain
+    # `tenant` (per-tenant credential data, not omninode_internal per the
+    # house-tenant ruling); landed in omnibase_infra first per the
+    # node-migration-vendor-parity-gate ordering, ahead of omnimarket#2117.
+    assert len(result.declarations) == 103
     assert result.blocked == ()
     assert len(result.legacy_node_declarations) == 2
     assert len(result.cloud_aliases) == 30
