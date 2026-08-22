@@ -606,6 +606,51 @@ class TestGhIntegration:
         assert any("333" in c for c in rerun_calls)
         assert not any("222" in c for c in rerun_calls)
 
+    def test_gh_rerun_failed_reruns_terminal_cancelled_runs(self, monkeypatch):
+        import bulk_pr_throttle
+
+        rerun_calls = []
+
+        def fake_run_gh(args):
+            if args[:2] == ["pr", "view"]:
+                return subprocess.CompletedProcess(
+                    args=args,
+                    returncode=0,
+                    stdout=json.dumps({"headRefOid": "deadbeef"}),
+                    stderr="",
+                )
+            if args[0] == "api" and "actions/runs?head_sha=" in args[1]:
+                return subprocess.CompletedProcess(
+                    args=args,
+                    returncode=0,
+                    stdout=json.dumps(
+                        {
+                            "workflow_runs": [
+                                {"id": 111, "conclusion": "cancelled"},
+                                {"id": 222, "conclusion": "success"},
+                                {"id": 333, "conclusion": None},
+                            ]
+                        }
+                    ),
+                    stderr="",
+                )
+            if args[:2] == ["api", "-X"] and "rerun-failed-jobs" in args[-1]:
+                rerun_calls.append(args[-1])
+                return subprocess.CompletedProcess(
+                    args=args, returncode=0, stdout="", stderr=""
+                )
+            raise AssertionError(f"unexpected gh call: {args}")
+
+        monkeypatch.setattr(bulk_pr_throttle, "_run_gh", fake_run_gh)
+        outcome = bulk_pr_throttle.gh_apply_pr_operation(
+            "OmniNode-ai", "onex_change_control", 6751, "rerun-failed"
+        )
+        assert outcome.success is True
+        assert len(rerun_calls) == 1
+        assert any("111" in c for c in rerun_calls)
+        assert not any("222" in c for c in rerun_calls)
+        assert not any("333" in c for c in rerun_calls)
+
 
 # ---------------------------------------------------------------------------
 # PR-number parsing

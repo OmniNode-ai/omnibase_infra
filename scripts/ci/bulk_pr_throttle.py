@@ -443,7 +443,15 @@ def gh_apply_pr_operation(
 
 
 def _gh_rerun_failed(owner: str, repo: str, pr_number: int) -> PrOutcome:
-    """Find the PR's head-SHA workflow runs and rerun the failed ones."""
+    """Find the PR's head-SHA workflow runs and rerun failed terminal runs.
+
+    GitHub Actions exposes runner-loss / timeout incident-window reds as both
+    ``failure`` and ``cancelled`` workflow-run conclusions. The operation name
+    intentionally stays ``rerun-failed`` because GitHub's endpoint is
+    ``rerun-failed-jobs``; the selector includes terminal cancelled runs so the
+    throttle can clear the exact cancellation-heavy incident class it was built
+    to control.
+    """
     head_result = _run_gh(
         [
             "pr",
@@ -488,7 +496,10 @@ def _gh_rerun_failed(owner: str, repo: str, pr_number: int) -> PrOutcome:
             detail=f"could not parse run list: {exc}",
         )
 
-    failed_run_ids = [r["id"] for r in runs if r.get("conclusion") == "failure"]
+    rerunnable_conclusions = {"failure", "cancelled"}
+    failed_run_ids = [
+        r["id"] for r in runs if r.get("conclusion") in rerunnable_conclusions
+    ]
     if not failed_run_ids:
         return PrOutcome(
             pr_number=pr_number, success=True, detail="no failed runs to rerun"
