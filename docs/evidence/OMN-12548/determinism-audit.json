@@ -1,103 +1,632 @@
 {
   "epic": "OMN-12525",
   "gate_posture": "Report-only at S0 (design D3). Each entry is a real multi-match tie resolved by registration/insertion order \u2014 a latent production hazard ticketed under OMN-12525, NOT gate-blocking in this parity PR.",
-  "generated_at_utc": "2026-07-02T18:41:20.832207+00:00",
-  "order_sensitive_count": 4,
+  "generated_at_utc": "2026-08-20T13:40:04.122324+00:00",
+  "order_sensitive_count": 27,
   "order_sensitive_probes": [
     {
       "canonical": {
         "dispatcher_ids": [
-          "dispatcher.auto.node_github_pr_poller_effect.HandlerGitHubApiPoll.github_poll_prs_7786448a",
-          "dispatcher.auto.node_registration_orchestrator.HandlerRuntimeTick"
+          "dispatcher.auto.node_chain_orchestrator.HandlerChainLearnInitiate",
+          "dispatcher.auto.node_chain_retrieval_effect.HandlerChainRetrieval.chain_retrieve_489f06d3"
         ],
         "dlq_topic": null,
-        "message_category": "intent",
-        "message_type": "platform.runtime-tick",
+        "message_category": "command",
+        "message_type": "omnibase-infra.chain-learn",
         "status": "success"
       },
       "permuted": {
         "dispatcher_ids": [
-          "dispatcher.auto.node_registration_orchestrator.HandlerRuntimeTick",
-          "dispatcher.auto.node_github_pr_poller_effect.HandlerGitHubApiPoll.github_poll_prs_7786448a"
+          "dispatcher.auto.node_chain_retrieval_effect.HandlerChainRetrieval.chain_retrieve_489f06d3",
+          "dispatcher.auto.node_chain_orchestrator.HandlerChainLearnInitiate"
         ],
         "dlq_topic": null,
-        "message_category": "intent",
-        "message_type": "platform.runtime-tick",
+        "message_category": "command",
+        "message_type": "omnibase-infra.chain-learn",
         "status": "success"
       },
-      "probe_id": "P4::dispatcher.auto.node_github_pr_poller_effect.HandlerGitHubApiPoll.github_poll_prs_7786448a::onex.intent.platform.runtime-tick.v1"
+      "probe_id": "P4::dispatcher.auto.node_chain_orchestrator.HandlerChainLearnInitiate::onex.cmd.omnibase-infra.chain-learn.v1"
     },
     {
       "canonical": {
         "dispatcher_ids": [
-          "dispatcher.auto.node_ledger_projection_compute.HandlerLedgerProjection.ledger_project_c56fe78d",
-          "dispatcher.auto.node_registration_orchestrator.HandlerNodeHeartbeat"
+          "dispatcher.auto.node_dlq_replay_effect.HandlerDlqReplay.replay_dlq_156fb150",
+          "dispatcher.auto.node_ledger_projection_compute.HandlerLedgerProjection.ledger_project_a132611f"
         ],
         "dlq_topic": null,
         "message_category": "event",
-        "message_type": "platform.node-heartbeat",
+        "message_type": "omnibase-infra.events",
         "status": "success"
       },
       "permuted": {
         "dispatcher_ids": [
-          "dispatcher.auto.node_registration_orchestrator.HandlerNodeHeartbeat",
-          "dispatcher.auto.node_ledger_projection_compute.HandlerLedgerProjection.ledger_project_c56fe78d"
+          "dispatcher.auto.node_ledger_projection_compute.HandlerLedgerProjection.ledger_project_a132611f",
+          "dispatcher.auto.node_dlq_replay_effect.HandlerDlqReplay.replay_dlq_156fb150"
         ],
         "dlq_topic": null,
         "message_category": "event",
-        "message_type": "platform.node-heartbeat",
+        "message_type": "omnibase-infra.events",
         "status": "success"
       },
-      "probe_id": "P4::dispatcher.auto.node_registration_orchestrator.HandlerNodeHeartbeat::onex.evt.platform.node-heartbeat.v1"
+      "probe_id": "P4::dispatcher.auto.node_ledger_projection_compute.HandlerLedgerProjection.ledger_project_09114b86::onex.dlq.omnibase-infra.events.v1"
     },
     {
       "canonical": {
         "dispatcher_ids": [
-          "dispatcher.auto.node_ledger_projection_compute.HandlerLedgerProjection.ledger_project_c56fe78d",
-          "dispatcher.auto.node_registration_orchestrator.HandlerNodeIntrospected"
+          "dispatcher.auto.node_dlq_replay_effect.HandlerDlqReplay.replay_dlq_156fb150",
+          "dispatcher.auto.node_ledger_projection_compute.HandlerLedgerProjection.ledger_project_a132611f"
         ],
         "dlq_topic": null,
         "message_category": "event",
-        "message_type": "platform.node-introspection",
+        "message_type": "omnibase-infra.events",
         "status": "success"
       },
       "permuted": {
         "dispatcher_ids": [
-          "dispatcher.auto.node_registration_orchestrator.HandlerNodeIntrospected",
-          "dispatcher.auto.node_ledger_projection_compute.HandlerLedgerProjection.ledger_project_c56fe78d"
+          "dispatcher.auto.node_ledger_projection_compute.HandlerLedgerProjection.ledger_project_a132611f",
+          "dispatcher.auto.node_dlq_replay_effect.HandlerDlqReplay.replay_dlq_156fb150"
         ],
         "dlq_topic": null,
         "message_category": "event",
-        "message_type": "platform.node-introspection",
+        "message_type": "omnibase-infra.events",
         "status": "success"
       },
-      "probe_id": "P4::dispatcher.auto.node_registration_orchestrator.HandlerNodeIntrospected::onex.evt.platform.node-introspection.v1"
+      "probe_id": "P4::dispatcher.auto.node_ledger_projection_compute.HandlerLedgerProjection.ledger_project_106cf59a::onex.dlq.omnibase-infra.events.v1"
     },
     {
       "canonical": {
         "dispatcher_ids": [
-          "dispatcher.auto.node_github_pr_poller_effect.HandlerGitHubApiPoll.github_poll_prs_7786448a",
-          "dispatcher.auto.node_registration_orchestrator.HandlerRuntimeTick"
+          "dispatcher.auto.node_dlq_replay_effect.HandlerDlqReplay.replay_dlq_156fb150",
+          "dispatcher.auto.node_ledger_projection_compute.HandlerLedgerProjection.ledger_project_a132611f"
         ],
         "dlq_topic": null,
-        "message_category": "intent",
-        "message_type": "platform.runtime-tick",
+        "message_category": "event",
+        "message_type": "omnibase-infra.events",
         "status": "success"
       },
       "permuted": {
         "dispatcher_ids": [
-          "dispatcher.auto.node_registration_orchestrator.HandlerRuntimeTick",
-          "dispatcher.auto.node_github_pr_poller_effect.HandlerGitHubApiPoll.github_poll_prs_7786448a"
+          "dispatcher.auto.node_ledger_projection_compute.HandlerLedgerProjection.ledger_project_a132611f",
+          "dispatcher.auto.node_dlq_replay_effect.HandlerDlqReplay.replay_dlq_156fb150"
         ],
         "dlq_topic": null,
-        "message_category": "intent",
-        "message_type": "platform.runtime-tick",
+        "message_category": "event",
+        "message_type": "omnibase-infra.events",
         "status": "success"
       },
-      "probe_id": "P4::dispatcher.auto.node_registration_orchestrator.HandlerRuntimeTick::onex.intent.platform.runtime-tick.v1"
+      "probe_id": "P4::dispatcher.auto.node_ledger_projection_compute.HandlerLedgerProjection.ledger_project_20b031bf::onex.dlq.omnibase-infra.events.v1"
+    },
+    {
+      "canonical": {
+        "dispatcher_ids": [
+          "dispatcher.auto.node_dlq_replay_effect.HandlerDlqReplay.replay_dlq_156fb150",
+          "dispatcher.auto.node_ledger_projection_compute.HandlerLedgerProjection.ledger_project_a132611f"
+        ],
+        "dlq_topic": null,
+        "message_category": "event",
+        "message_type": "omnibase-infra.events",
+        "status": "success"
+      },
+      "permuted": {
+        "dispatcher_ids": [
+          "dispatcher.auto.node_ledger_projection_compute.HandlerLedgerProjection.ledger_project_a132611f",
+          "dispatcher.auto.node_dlq_replay_effect.HandlerDlqReplay.replay_dlq_156fb150"
+        ],
+        "dlq_topic": null,
+        "message_category": "event",
+        "message_type": "omnibase-infra.events",
+        "status": "success"
+      },
+      "probe_id": "P4::dispatcher.auto.node_ledger_projection_compute.HandlerLedgerProjection.ledger_project_3579d375::onex.dlq.omnibase-infra.events.v1"
+    },
+    {
+      "canonical": {
+        "dispatcher_ids": [
+          "dispatcher.auto.node_dlq_replay_effect.HandlerDlqReplay.replay_dlq_156fb150",
+          "dispatcher.auto.node_ledger_projection_compute.HandlerLedgerProjection.ledger_project_a132611f"
+        ],
+        "dlq_topic": null,
+        "message_category": "event",
+        "message_type": "omnibase-infra.events",
+        "status": "success"
+      },
+      "permuted": {
+        "dispatcher_ids": [
+          "dispatcher.auto.node_ledger_projection_compute.HandlerLedgerProjection.ledger_project_a132611f",
+          "dispatcher.auto.node_dlq_replay_effect.HandlerDlqReplay.replay_dlq_156fb150"
+        ],
+        "dlq_topic": null,
+        "message_category": "event",
+        "message_type": "omnibase-infra.events",
+        "status": "success"
+      },
+      "probe_id": "P4::dispatcher.auto.node_ledger_projection_compute.HandlerLedgerProjection.ledger_project_3bd91ec3::onex.dlq.omnibase-infra.events.v1"
+    },
+    {
+      "canonical": {
+        "dispatcher_ids": [
+          "dispatcher.auto.node_dlq_replay_effect.HandlerDlqReplay.replay_dlq_156fb150",
+          "dispatcher.auto.node_ledger_projection_compute.HandlerLedgerProjection.ledger_project_a132611f"
+        ],
+        "dlq_topic": null,
+        "message_category": "event",
+        "message_type": "omnibase-infra.events",
+        "status": "success"
+      },
+      "permuted": {
+        "dispatcher_ids": [
+          "dispatcher.auto.node_ledger_projection_compute.HandlerLedgerProjection.ledger_project_a132611f",
+          "dispatcher.auto.node_dlq_replay_effect.HandlerDlqReplay.replay_dlq_156fb150"
+        ],
+        "dlq_topic": null,
+        "message_category": "event",
+        "message_type": "omnibase-infra.events",
+        "status": "success"
+      },
+      "probe_id": "P4::dispatcher.auto.node_ledger_projection_compute.HandlerLedgerProjection.ledger_project_4180e0d9::onex.dlq.omnibase-infra.events.v1"
+    },
+    {
+      "canonical": {
+        "dispatcher_ids": [
+          "dispatcher.auto.node_dlq_replay_effect.HandlerDlqReplay.replay_dlq_156fb150",
+          "dispatcher.auto.node_ledger_projection_compute.HandlerLedgerProjection.ledger_project_a132611f"
+        ],
+        "dlq_topic": null,
+        "message_category": "event",
+        "message_type": "omnibase-infra.events",
+        "status": "success"
+      },
+      "permuted": {
+        "dispatcher_ids": [
+          "dispatcher.auto.node_ledger_projection_compute.HandlerLedgerProjection.ledger_project_a132611f",
+          "dispatcher.auto.node_dlq_replay_effect.HandlerDlqReplay.replay_dlq_156fb150"
+        ],
+        "dlq_topic": null,
+        "message_category": "event",
+        "message_type": "omnibase-infra.events",
+        "status": "success"
+      },
+      "probe_id": "P4::dispatcher.auto.node_ledger_projection_compute.HandlerLedgerProjection.ledger_project_50a2a9ec::onex.dlq.omnibase-infra.events.v1"
+    },
+    {
+      "canonical": {
+        "dispatcher_ids": [
+          "dispatcher.auto.node_dlq_replay_effect.HandlerDlqReplay.replay_dlq_156fb150",
+          "dispatcher.auto.node_ledger_projection_compute.HandlerLedgerProjection.ledger_project_a132611f"
+        ],
+        "dlq_topic": null,
+        "message_category": "event",
+        "message_type": "omnibase-infra.events",
+        "status": "success"
+      },
+      "permuted": {
+        "dispatcher_ids": [
+          "dispatcher.auto.node_ledger_projection_compute.HandlerLedgerProjection.ledger_project_a132611f",
+          "dispatcher.auto.node_dlq_replay_effect.HandlerDlqReplay.replay_dlq_156fb150"
+        ],
+        "dlq_topic": null,
+        "message_category": "event",
+        "message_type": "omnibase-infra.events",
+        "status": "success"
+      },
+      "probe_id": "P4::dispatcher.auto.node_ledger_projection_compute.HandlerLedgerProjection.ledger_project_520a72c1::onex.dlq.omnibase-infra.events.v1"
+    },
+    {
+      "canonical": {
+        "dispatcher_ids": [
+          "dispatcher.auto.node_dlq_replay_effect.HandlerDlqReplay.replay_dlq_156fb150",
+          "dispatcher.auto.node_ledger_projection_compute.HandlerLedgerProjection.ledger_project_a132611f"
+        ],
+        "dlq_topic": null,
+        "message_category": "event",
+        "message_type": "omnibase-infra.events",
+        "status": "success"
+      },
+      "permuted": {
+        "dispatcher_ids": [
+          "dispatcher.auto.node_ledger_projection_compute.HandlerLedgerProjection.ledger_project_a132611f",
+          "dispatcher.auto.node_dlq_replay_effect.HandlerDlqReplay.replay_dlq_156fb150"
+        ],
+        "dlq_topic": null,
+        "message_category": "event",
+        "message_type": "omnibase-infra.events",
+        "status": "success"
+      },
+      "probe_id": "P4::dispatcher.auto.node_ledger_projection_compute.HandlerLedgerProjection.ledger_project_58404bf7::onex.dlq.omnibase-infra.events.v1"
+    },
+    {
+      "canonical": {
+        "dispatcher_ids": [
+          "dispatcher.auto.node_dlq_replay_effect.HandlerDlqReplay.replay_dlq_156fb150",
+          "dispatcher.auto.node_ledger_projection_compute.HandlerLedgerProjection.ledger_project_a132611f"
+        ],
+        "dlq_topic": null,
+        "message_category": "event",
+        "message_type": "omnibase-infra.events",
+        "status": "success"
+      },
+      "permuted": {
+        "dispatcher_ids": [
+          "dispatcher.auto.node_ledger_projection_compute.HandlerLedgerProjection.ledger_project_a132611f",
+          "dispatcher.auto.node_dlq_replay_effect.HandlerDlqReplay.replay_dlq_156fb150"
+        ],
+        "dlq_topic": null,
+        "message_category": "event",
+        "message_type": "omnibase-infra.events",
+        "status": "success"
+      },
+      "probe_id": "P4::dispatcher.auto.node_ledger_projection_compute.HandlerLedgerProjection.ledger_project_6ef6ade1::onex.dlq.omnibase-infra.events.v1"
+    },
+    {
+      "canonical": {
+        "dispatcher_ids": [
+          "dispatcher.auto.node_dlq_replay_effect.HandlerDlqReplay.replay_dlq_156fb150",
+          "dispatcher.auto.node_ledger_projection_compute.HandlerLedgerProjection.ledger_project_a132611f"
+        ],
+        "dlq_topic": null,
+        "message_category": "event",
+        "message_type": "omnibase-infra.events",
+        "status": "success"
+      },
+      "permuted": {
+        "dispatcher_ids": [
+          "dispatcher.auto.node_ledger_projection_compute.HandlerLedgerProjection.ledger_project_a132611f",
+          "dispatcher.auto.node_dlq_replay_effect.HandlerDlqReplay.replay_dlq_156fb150"
+        ],
+        "dlq_topic": null,
+        "message_category": "event",
+        "message_type": "omnibase-infra.events",
+        "status": "success"
+      },
+      "probe_id": "P4::dispatcher.auto.node_ledger_projection_compute.HandlerLedgerProjection.ledger_project_77066b28::onex.dlq.omnibase-infra.events.v1"
+    },
+    {
+      "canonical": {
+        "dispatcher_ids": [
+          "dispatcher.auto.node_dlq_replay_effect.HandlerDlqReplay.replay_dlq_156fb150",
+          "dispatcher.auto.node_ledger_projection_compute.HandlerLedgerProjection.ledger_project_a132611f"
+        ],
+        "dlq_topic": null,
+        "message_category": "event",
+        "message_type": "omnibase-infra.events",
+        "status": "success"
+      },
+      "permuted": {
+        "dispatcher_ids": [
+          "dispatcher.auto.node_ledger_projection_compute.HandlerLedgerProjection.ledger_project_a132611f",
+          "dispatcher.auto.node_dlq_replay_effect.HandlerDlqReplay.replay_dlq_156fb150"
+        ],
+        "dlq_topic": null,
+        "message_category": "event",
+        "message_type": "omnibase-infra.events",
+        "status": "success"
+      },
+      "probe_id": "P4::dispatcher.auto.node_ledger_projection_compute.HandlerLedgerProjection.ledger_project_7dc2dc0c::onex.dlq.omnibase-infra.events.v1"
+    },
+    {
+      "canonical": {
+        "dispatcher_ids": [
+          "dispatcher.auto.node_dlq_replay_effect.HandlerDlqReplay.replay_dlq_156fb150",
+          "dispatcher.auto.node_ledger_projection_compute.HandlerLedgerProjection.ledger_project_a132611f"
+        ],
+        "dlq_topic": null,
+        "message_category": "event",
+        "message_type": "omnibase-infra.events",
+        "status": "success"
+      },
+      "permuted": {
+        "dispatcher_ids": [
+          "dispatcher.auto.node_ledger_projection_compute.HandlerLedgerProjection.ledger_project_a132611f",
+          "dispatcher.auto.node_dlq_replay_effect.HandlerDlqReplay.replay_dlq_156fb150"
+        ],
+        "dlq_topic": null,
+        "message_category": "event",
+        "message_type": "omnibase-infra.events",
+        "status": "success"
+      },
+      "probe_id": "P4::dispatcher.auto.node_ledger_projection_compute.HandlerLedgerProjection.ledger_project_85d7b3d6::onex.dlq.omnibase-infra.events.v1"
+    },
+    {
+      "canonical": {
+        "dispatcher_ids": [
+          "dispatcher.auto.node_dlq_replay_effect.HandlerDlqReplay.replay_dlq_156fb150",
+          "dispatcher.auto.node_ledger_projection_compute.HandlerLedgerProjection.ledger_project_a132611f"
+        ],
+        "dlq_topic": null,
+        "message_category": "event",
+        "message_type": "omnibase-infra.events",
+        "status": "success"
+      },
+      "permuted": {
+        "dispatcher_ids": [
+          "dispatcher.auto.node_ledger_projection_compute.HandlerLedgerProjection.ledger_project_a132611f",
+          "dispatcher.auto.node_dlq_replay_effect.HandlerDlqReplay.replay_dlq_156fb150"
+        ],
+        "dlq_topic": null,
+        "message_category": "event",
+        "message_type": "omnibase-infra.events",
+        "status": "success"
+      },
+      "probe_id": "P4::dispatcher.auto.node_ledger_projection_compute.HandlerLedgerProjection.ledger_project_8d5b772c::onex.dlq.omnibase-infra.events.v1"
+    },
+    {
+      "canonical": {
+        "dispatcher_ids": [
+          "dispatcher.auto.node_dlq_replay_effect.HandlerDlqReplay.replay_dlq_156fb150",
+          "dispatcher.auto.node_ledger_projection_compute.HandlerLedgerProjection.ledger_project_a132611f"
+        ],
+        "dlq_topic": null,
+        "message_category": "event",
+        "message_type": "omnibase-infra.events",
+        "status": "success"
+      },
+      "permuted": {
+        "dispatcher_ids": [
+          "dispatcher.auto.node_ledger_projection_compute.HandlerLedgerProjection.ledger_project_a132611f",
+          "dispatcher.auto.node_dlq_replay_effect.HandlerDlqReplay.replay_dlq_156fb150"
+        ],
+        "dlq_topic": null,
+        "message_category": "event",
+        "message_type": "omnibase-infra.events",
+        "status": "success"
+      },
+      "probe_id": "P4::dispatcher.auto.node_ledger_projection_compute.HandlerLedgerProjection.ledger_project_982021ab::onex.dlq.omnibase-infra.events.v1"
+    },
+    {
+      "canonical": {
+        "dispatcher_ids": [
+          "dispatcher.auto.node_dlq_replay_effect.HandlerDlqReplay.replay_dlq_156fb150",
+          "dispatcher.auto.node_ledger_projection_compute.HandlerLedgerProjection.ledger_project_a132611f"
+        ],
+        "dlq_topic": null,
+        "message_category": "event",
+        "message_type": "omnibase-infra.events",
+        "status": "success"
+      },
+      "permuted": {
+        "dispatcher_ids": [
+          "dispatcher.auto.node_ledger_projection_compute.HandlerLedgerProjection.ledger_project_a132611f",
+          "dispatcher.auto.node_dlq_replay_effect.HandlerDlqReplay.replay_dlq_156fb150"
+        ],
+        "dlq_topic": null,
+        "message_category": "event",
+        "message_type": "omnibase-infra.events",
+        "status": "success"
+      },
+      "probe_id": "P4::dispatcher.auto.node_ledger_projection_compute.HandlerLedgerProjection.ledger_project_9e34c3f2::onex.dlq.omnibase-infra.events.v1"
+    },
+    {
+      "canonical": {
+        "dispatcher_ids": [
+          "dispatcher.auto.node_dlq_replay_effect.HandlerDlqReplay.replay_dlq_156fb150",
+          "dispatcher.auto.node_ledger_projection_compute.HandlerLedgerProjection.ledger_project_a132611f"
+        ],
+        "dlq_topic": null,
+        "message_category": "event",
+        "message_type": "omnibase-infra.events",
+        "status": "success"
+      },
+      "permuted": {
+        "dispatcher_ids": [
+          "dispatcher.auto.node_ledger_projection_compute.HandlerLedgerProjection.ledger_project_a132611f",
+          "dispatcher.auto.node_dlq_replay_effect.HandlerDlqReplay.replay_dlq_156fb150"
+        ],
+        "dlq_topic": null,
+        "message_category": "event",
+        "message_type": "omnibase-infra.events",
+        "status": "success"
+      },
+      "probe_id": "P4::dispatcher.auto.node_ledger_projection_compute.HandlerLedgerProjection.ledger_project_a0d95493::onex.dlq.omnibase-infra.events.v1"
+    },
+    {
+      "canonical": {
+        "dispatcher_ids": [
+          "dispatcher.auto.node_dlq_replay_effect.HandlerDlqReplay.replay_dlq_156fb150",
+          "dispatcher.auto.node_ledger_projection_compute.HandlerLedgerProjection.ledger_project_a132611f"
+        ],
+        "dlq_topic": null,
+        "message_category": "event",
+        "message_type": "omnibase-infra.events",
+        "status": "success"
+      },
+      "permuted": {
+        "dispatcher_ids": [
+          "dispatcher.auto.node_ledger_projection_compute.HandlerLedgerProjection.ledger_project_a132611f",
+          "dispatcher.auto.node_dlq_replay_effect.HandlerDlqReplay.replay_dlq_156fb150"
+        ],
+        "dlq_topic": null,
+        "message_category": "event",
+        "message_type": "omnibase-infra.events",
+        "status": "success"
+      },
+      "probe_id": "P4::dispatcher.auto.node_ledger_projection_compute.HandlerLedgerProjection.ledger_project_a132611f::onex.dlq.omnibase-infra.events.v1"
+    },
+    {
+      "canonical": {
+        "dispatcher_ids": [
+          "dispatcher.auto.node_dlq_replay_effect.HandlerDlqReplay.replay_dlq_156fb150",
+          "dispatcher.auto.node_ledger_projection_compute.HandlerLedgerProjection.ledger_project_a132611f"
+        ],
+        "dlq_topic": null,
+        "message_category": "event",
+        "message_type": "omnibase-infra.events",
+        "status": "success"
+      },
+      "permuted": {
+        "dispatcher_ids": [
+          "dispatcher.auto.node_ledger_projection_compute.HandlerLedgerProjection.ledger_project_a132611f",
+          "dispatcher.auto.node_dlq_replay_effect.HandlerDlqReplay.replay_dlq_156fb150"
+        ],
+        "dlq_topic": null,
+        "message_category": "event",
+        "message_type": "omnibase-infra.events",
+        "status": "success"
+      },
+      "probe_id": "P4::dispatcher.auto.node_ledger_projection_compute.HandlerLedgerProjection.ledger_project_a997bbff::onex.dlq.omnibase-infra.events.v1"
+    },
+    {
+      "canonical": {
+        "dispatcher_ids": [
+          "dispatcher.auto.node_dlq_replay_effect.HandlerDlqReplay.replay_dlq_156fb150",
+          "dispatcher.auto.node_ledger_projection_compute.HandlerLedgerProjection.ledger_project_a132611f"
+        ],
+        "dlq_topic": null,
+        "message_category": "event",
+        "message_type": "omnibase-infra.events",
+        "status": "success"
+      },
+      "permuted": {
+        "dispatcher_ids": [
+          "dispatcher.auto.node_ledger_projection_compute.HandlerLedgerProjection.ledger_project_a132611f",
+          "dispatcher.auto.node_dlq_replay_effect.HandlerDlqReplay.replay_dlq_156fb150"
+        ],
+        "dlq_topic": null,
+        "message_category": "event",
+        "message_type": "omnibase-infra.events",
+        "status": "success"
+      },
+      "probe_id": "P4::dispatcher.auto.node_ledger_projection_compute.HandlerLedgerProjection.ledger_project_b1cf841e::onex.dlq.omnibase-infra.events.v1"
+    },
+    {
+      "canonical": {
+        "dispatcher_ids": [
+          "dispatcher.auto.node_dlq_replay_effect.HandlerDlqReplay.replay_dlq_156fb150",
+          "dispatcher.auto.node_ledger_projection_compute.HandlerLedgerProjection.ledger_project_a132611f"
+        ],
+        "dlq_topic": null,
+        "message_category": "event",
+        "message_type": "omnibase-infra.events",
+        "status": "success"
+      },
+      "permuted": {
+        "dispatcher_ids": [
+          "dispatcher.auto.node_ledger_projection_compute.HandlerLedgerProjection.ledger_project_a132611f",
+          "dispatcher.auto.node_dlq_replay_effect.HandlerDlqReplay.replay_dlq_156fb150"
+        ],
+        "dlq_topic": null,
+        "message_category": "event",
+        "message_type": "omnibase-infra.events",
+        "status": "success"
+      },
+      "probe_id": "P4::dispatcher.auto.node_ledger_projection_compute.HandlerLedgerProjection.ledger_project_ba940a93::onex.dlq.omnibase-infra.events.v1"
+    },
+    {
+      "canonical": {
+        "dispatcher_ids": [
+          "dispatcher.auto.node_dlq_replay_effect.HandlerDlqReplay.replay_dlq_156fb150",
+          "dispatcher.auto.node_ledger_projection_compute.HandlerLedgerProjection.ledger_project_a132611f"
+        ],
+        "dlq_topic": null,
+        "message_category": "event",
+        "message_type": "omnibase-infra.events",
+        "status": "success"
+      },
+      "permuted": {
+        "dispatcher_ids": [
+          "dispatcher.auto.node_ledger_projection_compute.HandlerLedgerProjection.ledger_project_a132611f",
+          "dispatcher.auto.node_dlq_replay_effect.HandlerDlqReplay.replay_dlq_156fb150"
+        ],
+        "dlq_topic": null,
+        "message_category": "event",
+        "message_type": "omnibase-infra.events",
+        "status": "success"
+      },
+      "probe_id": "P4::dispatcher.auto.node_ledger_projection_compute.HandlerLedgerProjection.ledger_project_cb26001f::onex.dlq.omnibase-infra.events.v1"
+    },
+    {
+      "canonical": {
+        "dispatcher_ids": [
+          "dispatcher.auto.node_dlq_replay_effect.HandlerDlqReplay.replay_dlq_156fb150",
+          "dispatcher.auto.node_ledger_projection_compute.HandlerLedgerProjection.ledger_project_a132611f"
+        ],
+        "dlq_topic": null,
+        "message_category": "event",
+        "message_type": "omnibase-infra.events",
+        "status": "success"
+      },
+      "permuted": {
+        "dispatcher_ids": [
+          "dispatcher.auto.node_ledger_projection_compute.HandlerLedgerProjection.ledger_project_a132611f",
+          "dispatcher.auto.node_dlq_replay_effect.HandlerDlqReplay.replay_dlq_156fb150"
+        ],
+        "dlq_topic": null,
+        "message_category": "event",
+        "message_type": "omnibase-infra.events",
+        "status": "success"
+      },
+      "probe_id": "P4::dispatcher.auto.node_ledger_projection_compute.HandlerLedgerProjection.ledger_project_ccb60a8d::onex.dlq.omnibase-infra.events.v1"
+    },
+    {
+      "canonical": {
+        "dispatcher_ids": [
+          "dispatcher.auto.node_dlq_replay_effect.HandlerDlqReplay.replay_dlq_156fb150",
+          "dispatcher.auto.node_ledger_projection_compute.HandlerLedgerProjection.ledger_project_a132611f"
+        ],
+        "dlq_topic": null,
+        "message_category": "event",
+        "message_type": "omnibase-infra.events",
+        "status": "success"
+      },
+      "permuted": {
+        "dispatcher_ids": [
+          "dispatcher.auto.node_ledger_projection_compute.HandlerLedgerProjection.ledger_project_a132611f",
+          "dispatcher.auto.node_dlq_replay_effect.HandlerDlqReplay.replay_dlq_156fb150"
+        ],
+        "dlq_topic": null,
+        "message_category": "event",
+        "message_type": "omnibase-infra.events",
+        "status": "success"
+      },
+      "probe_id": "P4::dispatcher.auto.node_ledger_projection_compute.HandlerLedgerProjection.ledger_project_d9e78fa2::onex.dlq.omnibase-infra.events.v1"
+    },
+    {
+      "canonical": {
+        "dispatcher_ids": [
+          "dispatcher.auto.node_dlq_replay_effect.HandlerDlqReplay.replay_dlq_156fb150",
+          "dispatcher.auto.node_ledger_projection_compute.HandlerLedgerProjection.ledger_project_a132611f"
+        ],
+        "dlq_topic": null,
+        "message_category": "event",
+        "message_type": "omnibase-infra.events",
+        "status": "success"
+      },
+      "permuted": {
+        "dispatcher_ids": [
+          "dispatcher.auto.node_ledger_projection_compute.HandlerLedgerProjection.ledger_project_a132611f",
+          "dispatcher.auto.node_dlq_replay_effect.HandlerDlqReplay.replay_dlq_156fb150"
+        ],
+        "dlq_topic": null,
+        "message_category": "event",
+        "message_type": "omnibase-infra.events",
+        "status": "success"
+      },
+      "probe_id": "P4::dispatcher.auto.node_ledger_projection_compute.HandlerLedgerProjection.ledger_project_dfa36ec6::onex.dlq.omnibase-infra.events.v1"
+    },
+    {
+      "canonical": {
+        "dispatcher_ids": [
+          "dispatcher.auto.node_dlq_replay_effect.HandlerDlqReplay.replay_dlq_156fb150",
+          "dispatcher.auto.node_ledger_projection_compute.HandlerLedgerProjection.ledger_project_a132611f"
+        ],
+        "dlq_topic": null,
+        "message_category": "event",
+        "message_type": "omnibase-infra.events",
+        "status": "success"
+      },
+      "permuted": {
+        "dispatcher_ids": [
+          "dispatcher.auto.node_ledger_projection_compute.HandlerLedgerProjection.ledger_project_a132611f",
+          "dispatcher.auto.node_dlq_replay_effect.HandlerDlqReplay.replay_dlq_156fb150"
+        ],
+        "dlq_topic": null,
+        "message_category": "event",
+        "message_type": "omnibase-infra.events",
+        "status": "success"
+      },
+      "probe_id": "P4::dispatcher.auto.node_ledger_projection_compute.HandlerLedgerProjection.ledger_project_e1f3db33::onex.dlq.omnibase-infra.events.v1"
     }
   ],
-  "probe_count": 305,
+  "probe_count": 1050,
   "seed": 1,
   "ticket": "OMN-12548"
 }
