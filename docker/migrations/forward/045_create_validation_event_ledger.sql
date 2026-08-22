@@ -29,19 +29,27 @@
 --      Both are NOT NULL for audit completeness.
 
 -- =============================================================================
--- EXTENSION: pgcrypto
+-- EXTENSION: pgcrypto (REMOVED, OMN-16385)
 -- =============================================================================
--- Ensures gen_random_uuid() is available for the DEFAULT on the id column.
--- In PostgreSQL 13+ gen_random_uuid() is built-in, but declaring the
--- extension preserves backwards compatibility with PostgreSQL 12 and earlier.
+-- gen_random_uuid() below is PostgreSQL 13+ CORE (pg_catalog), not a pgcrypto
+-- function -- pgcrypto is not required to satisfy the DEFAULT on the id
+-- column on any target this repo runs against (postgres:16.4 runner image /
+-- RDS omnibase_infra). The CREATE EXTENSION statement previously here was
+-- therefore dead weight that only added a failure mode: on a managed
+-- instance (RDS) the migration role does not own the database (the master
+-- user does), so CREATE EXTENSION fails closed with "permission denied to
+-- create extension \"pgcrypto\"" even though nothing in this file needs the
+-- extension. This is what silently/loudly wedged deploy-onex-staging's
+-- omnibase-infra-migrate job at this file (OMN-16385 root-cause pass,
+-- live-reproduced 2026-08-22T18:53-18:55Z, run 32584529033 rerun instrumented
+-- with kubectl-ssm.sh: "psql:/work/045_create_validation_event_ledger.sql:44:
+-- ERROR: permission denied to create extension \"pgcrypto\"").
 --
--- NOTE: This statement requires CREATE privilege on the database (or superuser
--- in PG < 15). If running migrations under a limited-privilege application
--- user, ensure the extension is pre-created by a DBA:
---     CREATE EXTENSION IF NOT EXISTS "pgcrypto";
+-- If a FUTURE migration in this file (or a later one) needs an actual
+-- pgcrypto function (digest/crypt/hmac/pgp_*, not gen_random_uuid()), it must
+-- be pre-created by a DBA against the target database out-of-band -- not by
+-- this unattended, non-owning migration role. See docs/rds-postgres-cutover.md.
 -- =============================================================================
-
-CREATE EXTENSION IF NOT EXISTS "pgcrypto";
 
 -- =============================================================================
 -- TABLE: validation_event_ledger
