@@ -97,7 +97,6 @@ VCS_PROVENANCE_PATH = Path("/workspace/sibling-vcs-provenance.json")
 WORKSPACE_PACKAGES: dict[str, str] = {
     "omnibase_core": "omnibase-core",
     "omnibase_compat": "omnibase-compat",
-    "onex_change_control": "onex-change-control",
     "omnimarket": "omnimarket",
 }
 
@@ -440,7 +439,6 @@ def main() -> int:
             lock_path=lock_path,
             siblings={
                 "omnibase-compat": SIBLING_REPOS_DIR / "omnibase_compat",
-                "onex-change-control": SIBLING_REPOS_DIR / "onex_change_control",
                 "omnimarket": SIBLING_REPOS_DIR / "omnimarket",
             },
         )
