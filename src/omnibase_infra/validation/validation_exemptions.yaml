@@ -3900,6 +3900,24 @@ pattern_exemptions:
       Three public operations (load/save/clear) over two on-disk files, plus the private readers/writers those files require and two path properties. Every method is bound to the same ~/.onex config.yaml + credentials.json pair; splitting the class would put the by-reference invariant (secret value in the 0600 file, never in config.yaml) across two objects that must then agree, which is the coupling the single owner exists to prevent.
 
     ticket: OMN-15922
+  - file_pattern: 'model_payload_gateway_link_health_upsert\.py'
+    violation_pattern: "Field 'tenant_id' should use UUID"
+    reason: >
+      Same seam as model_gateway_heartbeat.py: this payload carries the ModelGatewayHeartbeat.tenant_id field verbatim (the validated DNS-safe tenant slug used in Kafka topic names), not the underlying UUID.
+
+    ticket: OMN-15570
+  - file_pattern: 'model_payload_gateway_link_health_upsert\.py'
+    violation_pattern: "Field 'principal_id' should use UUID"
+    reason: >
+      Same seam as model_gateway_heartbeat.py: this payload carries the ModelGatewayHeartbeat.principal_id field verbatim -- the canonical MSK tenant principal t-<tenant UUID hex>, whose t- prefix makes UUID an invalid representation.
+
+    ticket: OMN-15570
+  - file_pattern: 'model_gateway_link_health_upsert_result\.py'
+    violation_pattern: "Field 'tenant_id' should use UUID"
+    reason: >
+      Same seam as model_gateway_heartbeat.py: this result echoes back the tenant_id key persisted into gateway_link_health, keyed on the DNS-safe tenant slug, not the underlying UUID.
+
+    ticket: OMN-15570
 # These handle one-model-per-file violations for domain-grouped protocols
 architecture_exemptions:
   # ==========================================================================

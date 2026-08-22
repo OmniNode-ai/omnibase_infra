@@ -598,6 +598,91 @@ def test_reconciliation_preserves_pre_existing_rows(server: Server) -> None:
         _drop_database(server, database)
 
 
+def test_delegation_routing_overlay_reconciliation_enforces_declared_shape(
+    server: Server,
+) -> None:
+    """OMN-15631: drifted overlay rows converge before constraints are enforced."""
+    path = _migration_path(
+        "node_delegation_routing_reducer",
+        "0001_create_delegation_routing_tenant_overlay.sql",
+    )
+    database = _new_database(server)
+    try:
+        seeded = _psql(
+            server,
+            database,
+            "-v",
+            "ON_ERROR_STOP=1",
+            "-c",
+            """
+            CREATE TABLE delegation_routing_tenant_overlay (
+                tenant_id TEXT,
+                task_type TEXT
+            );
+            INSERT INTO delegation_routing_tenant_overlay (tenant_id, task_type)
+            VALUES
+                (NULL, NULL),
+                ('tenant-a', 'summarize'),
+                ('tenant-a', 'summarize');
+            """,
+        )
+        assert seeded.returncode == 0, seeded.stderr
+
+        result = _psql(server, database, "-v", "ON_ERROR_STOP=1", "-f", str(path))
+        assert result.returncode == 0, result.stdout + result.stderr
+
+        shape = _psql(
+            server,
+            database,
+            "-t",
+            "-A",
+            "-F",
+            "|",
+            "-v",
+            "ON_ERROR_STOP=1",
+            "-c",
+            """
+            SELECT
+                count(*) FILTER (WHERE id IS NULL),
+                count(*) FILTER (WHERE tenant_id IS NULL),
+                count(*) FILTER (WHERE task_type IS NULL),
+                count(*) FILTER (WHERE backend_id IS NULL),
+                count(*) FILTER (WHERE endpoint_url IS NULL),
+                count(*) FILTER (WHERE model_name IS NULL),
+                count(*) FILTER (WHERE created_at IS NULL),
+                count(*) FILTER (WHERE updated_at IS NULL),
+                count(*) - count(DISTINCT (tenant_id, task_type))
+            FROM delegation_routing_tenant_overlay;
+            """,
+        )
+        assert shape.stdout.strip() == "0|0|0|0|0|0|0|0|0", shape.stdout
+
+        constraints = _psql(
+            server,
+            database,
+            "-t",
+            "-A",
+            "-v",
+            "ON_ERROR_STOP=1",
+            "-c",
+            """
+            SELECT string_agg(conname || ':' || contype, ',' ORDER BY conname)
+            FROM pg_constraint
+            WHERE conrelid = 'delegation_routing_tenant_overlay'::regclass
+              AND conname IN (
+                'delegation_routing_tenant_overlay_pkey',
+                'delegation_routing_tenant_overlay_tenant_task_uq'
+              );
+            """,
+        )
+        assert constraints.stdout.strip() == (
+            "delegation_routing_tenant_overlay_pkey:p,"
+            "delegation_routing_tenant_overlay_tenant_task_uq:u"
+        )
+    finally:
+        _drop_database(server, database)
+
+
 def test_whole_corpus_converges_from_drifted_shapes(server: Server) -> None:
     """The load-bearing claim: fresh and drifted end at the SAME schema."""
     corpus = _corpus()

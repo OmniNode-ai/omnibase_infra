@@ -1032,7 +1032,6 @@ check_sibling_lock_pins() {
         --repo "omnibase-core=${omni_home}/omnibase_core"
         --repo "omnibase-spi=${omni_home}/omnibase_spi"
         --repo "omnibase-compat=${omni_home}/omnibase_compat"
-        --repo "onex-change-control=${omni_home}/onex_change_control"
         --output "${provenance_out}"
         --build-source workspace
     )

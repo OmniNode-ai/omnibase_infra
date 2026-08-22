@@ -1,0 +1,43 @@
+# SPDX-FileCopyrightText: 2025 OmniNode.ai Inc.
+# SPDX-License-Identifier: MIT
+#
+# onex-runner-disk-guard.service — restores runners paused by the OMN-16363
+# disk-admission gate once /data has recovered (slope-plus-canary criterion).
+#
+# A systemd USER unit (NOT a lane container). One-shot pass, triggered by
+# onex-runner-disk-guard.timer every 2 minutes — MUCH tighter than the hourly
+# onex-disk-gc.timer, because the incident evidence this exists to respond to
+# (OMN-16360/OMN-16363) shows /data going from healthy to 0 bytes free in
+# roughly 15-20 minutes once the write-amplification loop starts. This unit
+# only ever RESTARTS previously-paused runners; it never stops one — pausing
+# happens synchronously inside docker/runners/runner-job-started.sh at the
+# moment a runner crosses its own consecutive-admission-failure threshold.
+#
+# Install (on .201, as the runtime user — NO sudo, user scope):
+#   bash deploy/disk-gc/install-runner-disk-guard.sh
+#
+# Check:
+#   systemctl --user status onex-runner-disk-guard.timer
+#   journalctl --user -u onex-runner-disk-guard.service -f
+
+[Unit]
+Description=ONEX .201 runner-disk-admission restore guard (OMN-16363)
+Documentation=https://github.com/OmniNode-ai/omnibase_infra
+After=docker.service
+
+[Service]
+Type=oneshot
+
+Environment="OMNI_HOME=%h/Code/omni_home"
+Environment="PATH=/usr/local/bin:/usr/bin:/bin"
+
+ExecStartPre=/bin/mkdir -p %h/.local/log/onex %h/.local/state/onex
+
+ExecStart=/bin/bash %h/Code/omni_home/omnibase_infra/scripts/runner-disk-admission-restore.sh --mount /data
+
+StandardOutput=journal
+StandardError=journal
+SyslogIdentifier=onex-runner-disk-guard
+
+[Install]
+WantedBy=default.target
