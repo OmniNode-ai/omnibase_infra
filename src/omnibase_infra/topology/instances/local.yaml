@@ -158,7 +158,6 @@ databases:
               - projection_delegation_inference_response_text
               - savings_estimates
               - skill_execution_snapshots
-              - tenant_inference_credentials
             privileges: [INSERT, SELECT, UPDATE]
             schema: public
         login: true
