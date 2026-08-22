@@ -84,7 +84,7 @@ def test_delegation_workflow_state_relation_resolves_on_every_shipped_profile(
     )
     assert target.physical_database == "omnibase_infra"
     assert target.database_refs == (OMNIBASE_INFRA_DATABASE_REF,)
-    assert target.schemas == ("public",)
+    assert target.physical_schemas == ("public",)
     assert target.domains == (EnumDatabaseSchemaDomain.OMNINODE_INTERNAL,)
 
 

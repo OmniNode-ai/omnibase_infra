@@ -33,19 +33,18 @@ from omnibase_infra.docker.catalog.validator_healthcheck_start_period import (
     validate_migration_gate_start_period,
 )
 
-_OMNIBASE_ENV = Path.home() / ".omnibase" / ".env"
+# Default paths relative to repo root
+_REPO_ROOT = Path(__file__).resolve().parents[4]
+
+_HOME_ENV = Path.home() / ".omnibase" / ".env"
+_REPO_ENV = _REPO_ROOT / ".env"
 
 
-def _load_omnibase_env() -> None:
-    """Load ~/.omnibase/.env into os.environ if it exists.
-
-    Only sets vars not already present in the environment (existing values
-    take precedence). This makes the CLI self-contained without requiring
-    the caller to manually ``source ~/.omnibase/.env``.
-    """
-    if not _OMNIBASE_ENV.exists():
+def _load_env_file(env_file: Path) -> None:
+    """Load one env file into os.environ, never overwriting an existing value."""
+    if not env_file.exists():
         return
-    with open(_OMNIBASE_ENV) as f:
+    with open(env_file) as f:
         for line in f:
             line = line.strip()
             if not line or line.startswith("#"):
@@ -53,14 +52,28 @@ def _load_omnibase_env() -> None:
             if "=" not in line:
                 continue
             key, _, value = line.partition("=")
-            key = key.strip()
+            key = key.strip().removeprefix("export ").strip()
             value = value.strip().strip("'\"")
             if key and key not in os.environ:
                 os.environ[key] = value
 
 
-# Default paths relative to repo root
-_REPO_ROOT = Path(__file__).resolve().parents[4]
+def _load_omnibase_env() -> None:
+    """Load the operator's env files into os.environ.
+
+    Reads ``~/.omnibase/.env`` first, then the repo-local ``.env`` that
+    ``install.sh`` and ``make setup`` create from ``.env.example`` and tell the
+    operator to fill in. Before OMN-16187 only the former was read, so a new
+    operator who followed the documented steps exactly still hit "Cannot start:
+    missing required env vars" — the file they had just edited was never loaded.
+
+    Values already in the environment always win, and the home file beats the
+    repo file, so this only ever fills gaps for existing operators.
+    """
+    _load_env_file(_HOME_ENV)
+    _load_env_file(_REPO_ENV)
+
+
 _CATALOG_DIR = str(_REPO_ROOT / "docker" / "catalog")
 _DEFAULT_OUTPUT = str(_REPO_ROOT / "docker" / "docker-compose.generated.yml")
 _STACK_FILE = str(_REPO_ROOT / ".onex" / "stack.yml")

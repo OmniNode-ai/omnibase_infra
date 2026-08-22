@@ -161,8 +161,14 @@ def test_gate_exempts_only_the_omn15503_legacy_node_migration_path(
         / "0029_delegation_terminal_failure_cause.sql"
     )
     exempt.parent.mkdir(parents=True)
+    # OMN-16237: uses unmapped_events, not delegation_events -- delegation_events
+    # is enumerated in the shared physical-schema-mapping allowlist and now
+    # passes unqualified everywhere, which would make this file-path-exemption
+    # test pass for the wrong reason. unmapped_events is deliberately NOT in
+    # that allowlist, so the "adjacent" assertion below still proves the
+    # exemption is scoped to this one file path, not to the table name.
     exempt.write_text(
-        "ALTER TABLE delegation_events ADD COLUMN terminal_ok boolean;\n",
+        "ALTER TABLE unmapped_events ADD COLUMN terminal_ok boolean;\n",
         encoding="utf-8",
     )
     exempt_head = _commit(repository, "exempt legacy migration")
@@ -175,7 +181,7 @@ def test_gate_exempts_only_the_omn15503_legacy_node_migration_path(
 
     adjacent = exempt.with_name("0030_adjacent_unqualified.sql")
     adjacent.write_text(
-        "ALTER TABLE delegation_events ADD COLUMN still_blocked text;\n",
+        "ALTER TABLE unmapped_events ADD COLUMN still_blocked text;\n",
         encoding="utf-8",
     )
     adjacent_head = _commit(repository, "adjacent legacy migration")
@@ -360,10 +366,27 @@ def test_red_control_wrong_object_kind(
     assert any("exact object-kind ownership declaration" in item for item in violations)
 
 
-def test_omn15361_replay_rejects_real_unqualified_application_migration(
+def test_omn15361_replay_of_node_service_registry_migration_is_now_allowlisted(
     tmp_path: Path,
 ) -> None:
-    """Replay the real node_service_registry migration shape that motivated the gate."""
+    """Replay the real node_service_registry migration shape that motivated the gate.
+
+    OMN-16237: node_service_registry is enumerated in the shared physical-
+    schema-mapping allowlist (INTERNAL_TABLES_PHYSICALLY_IN_PUBLIC_UNTIL_
+    OMN15359) -- the same allowlist the runtime grants system already
+    consults via physical_grant_schema_for_table(). This fixture's unqualified
+    references to node_service_registry (ALTER TABLE, CREATE INDEX, GRANT,
+    CREATE/DROP POLICY) therefore no longer trip the schema-qualification
+    lint. This replaces the prior version of this test
+    (test_omn15361_replay_rejects_real_unqualified_application_migration),
+    whose premise -- that this exact migration must fail as unqualified --
+    no longer holds now the gate consults the allowlist.
+
+    The fixture's leading DO block (a guarded role-existence check) is
+    unrelated dynamic SQL and is still, correctly, rejected on its own
+    grounds -- proving this fix narrowly targets schema-qualification only,
+    not a blanket pass for the whole file.
+    """
     repository = tmp_path / "repository"
     repository.mkdir()
     _git(repository, "init", "--initial-branch=main")
@@ -389,9 +412,39 @@ def test_omn15361_replay_rejects_real_unqualified_application_migration(
         ownership_manifest_paths=(),
     ).violations
 
-    rendered = "\n".join(violations)
-    assert "0002_node_service_registry_tenant_rls.sql" in rendered
-    assert "schema-qualified" in rendered
+    assert not any(
+        "schema-qualified" in violation or "prohibited in public" in violation
+        for violation in violations
+    )
+    assert any("dynamic SQL" in violation for violation in violations)
+
+
+def test_unqualified_non_allowlisted_internal_table_migration_still_fails(
+    tmp_path: Path,
+) -> None:
+    """A table absent from the physical-schema-mapping allowlist must still fail.
+
+    OMN-16237's allowlist consultation is a narrow, enumerated pass-through --
+    never a blanket exemption for legacy-shaped unqualified migrations.
+    """
+    repository = tmp_path / "repository"
+    repository.mkdir()
+    _git(repository, "init", "--initial-branch=main")
+    (repository / "baseline.txt").write_text("baseline\n", encoding="utf-8")
+    base_revision = _commit(repository, "baseline")
+    (repository / "unqualified_not_allowlisted.sql").write_text(
+        "ALTER TABLE not_an_allowlisted_table ADD COLUMN tenant_id uuid;\n",
+        encoding="utf-8",
+    )
+    head_revision = _commit(repository, "unqualified non-allowlisted table")
+
+    violations = validate_changed_sql(
+        repository,
+        base_revision,
+        head_revision,
+        ownership_manifest_paths=(),
+    ).violations
+    assert any("schema-qualified" in violation for violation in violations)
 
 
 # ---------------------------------------------------------------------------
