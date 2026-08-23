@@ -2529,7 +2529,7 @@ jobs:
   # protection treats as never-satisfied — every omnibase_infra dev PR based on
   # 27478af4 or later was unmergeable until this repin.
   #
-  # 54356a83 is the current reusable workflow's pinned dev commit, reachable from
+  # d3182b6f is the current reusable workflow's pinned dev commit, reachable from
   # `dev` forever.
   merge-hold-gate:
     permissions:
@@ -2537,7 +2537,7 @@ jobs:
       pull-requests: read
     uses: OmniNode-ai/omnimarket/.github/workflows/merge-hold-gate-reusable.yml@d3182b6fb59b421383c793fcfea86a46b06b7b43
     with:
-      vocabulary_ref: 54356a831e3d8876c69373cac884a3df2a5653f7
+      vocabulary_ref: d3182b6fb59b421383c793fcfea86a46b06b7b43
       context_name: merge-hold-gate / evaluate
   # OMN-15361: P0/P8 fail-closed application database domain enforcement.
   # Unconditional after OCC eligibility and STRICT in ci_summary_gate.py: validators,
