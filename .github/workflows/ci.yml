@@ -1891,8 +1891,19 @@ jobs:
       # OMN-16373: CROSS_REPO_PAT retirement — mint a short-lived
       # onexbot-occ-writer App installation token for the multi-repo
       # sibling reads this boundary check performs.
+      #
+      # OMN-16414: continue-on-error is REQUIRED here, not optional polish.
+      # Fork-triggered pull_request runs receive no org secrets (app-id/
+      # private-key resolve empty), and create-github-app-token hard-fails
+      # the step ("Input required and not supplied: app-id") when that
+      # happens. Falling back to github.token below is sufficient because
+      # every repo in `repos:` (omniclaude, omnidash, omniintelligence,
+      # omnibase_core, omnimemory) is PUBLIC (verified via
+      # `gh api repos/OmniNode-ai/<repo> --jq .private`) -- reading them
+      # needs no elevated scope.
       - name: Mint onexbot-occ-writer app token
         id: app-token
+        continue-on-error: true
         uses: actions/create-github-app-token@d72941d797fd3113feb6b93fd0dec494b13a2547 # v1
         with:
           app-id: ${{ secrets.ONEXBOT_OCC_APP_ID }}
@@ -1902,7 +1913,7 @@ jobs:
       - uses: OmniNode-ai/onex_change_control/.github/actions/validate-boundaries@main
         id: migration_conflicts
         env:
-          OMNI_REPO_CLONE_TOKEN: ${{ steps.app-token.outputs.token }}
+          OMNI_REPO_CLONE_TOKEN: ${{ steps.app-token.outputs.token || github.token }}
         with:
           checks: "migration-conflicts"
           repos: "omniclaude,omnidash,omniintelligence,omnibase_core,omnimemory"
@@ -1926,8 +1937,19 @@ jobs:
       # OMN-16373: CROSS_REPO_PAT retirement — mint a short-lived
       # onexbot-occ-writer App installation token, scoped to the one
       # sibling repo this job reads.
+      #
+      # OMN-16414: continue-on-error is REQUIRED here, not optional polish.
+      # Fork-triggered pull_request runs receive no org secrets (app-id/
+      # private-key resolve empty), and create-github-app-token hard-fails
+      # the step ("Input required and not supplied: app-id") when that
+      # happens. Without this guard the job died right here even though the
+      # checkout step below already had a `|| github.token` fallback -- dead
+      # code until this line let the step fail soft. onex_change_control is
+      # PUBLIC (verified via `gh api repos/OmniNode-ai/onex_change_control
+      # --jq .private`), so github.token is sufficient to read it.
       - name: Mint onexbot-occ-writer app token
         id: app-token
+        continue-on-error: true
         uses: actions/create-github-app-token@d72941d797fd3113feb6b93fd0dec494b13a2547 # v1
         with:
           app-id: ${{ secrets.ONEXBOT_OCC_APP_ID }}
