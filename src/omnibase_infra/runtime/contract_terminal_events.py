@@ -207,6 +207,23 @@ def load_terminal_event_topics(contract_path: Path | None) -> frozenset[str]:
     return frozenset(extract_terminal_event_topics(raw))
 
 
+def _read_field(source: object, name: str) -> object:
+    """Read ``name`` off either a Pydantic model (pre-wire) or a decoded Mapping (post-wire).
+
+    ``resolve_terminal_verdict`` is called on both sides of the publish: the
+    live ``BaseModel`` instance inside ``DispatchResultApplier`` before
+    serialization, and the plain ``dict`` a broker gets back from
+    ``json.loads`` / ``ModelEventEnvelope[object].model_validate_json`` after a
+    terminal round-trips the bus. A ``dict`` has no attributes, so a
+    ``getattr``-only reader silently returns ``None`` for every field on the
+    consume side — this is the one reader both call sites go through so that
+    gap cannot reopen.
+    """
+    if isinstance(source, Mapping):
+        return source.get(name)
+    return getattr(source, name, None)
+
+
 def resolve_terminal_verdict(event: object) -> bool | None:
     """Read a returned model's OWN terminal verdict. ``None`` means unknown.
 
@@ -217,6 +234,10 @@ def resolve_terminal_verdict(event: object) -> bool | None:
     onto ``node-generation-completed.v1``, and the Pattern B broker, which
     derives status purely from the arrival topic, reported ``ok=true`` for a run
     that had failed. This function is the missing read.
+
+    Accepts either a live ``BaseModel`` (the applier's pre-publish side) or a
+    decoded ``Mapping`` (the broker's post-publish side) via :func:`_read_field`
+    — the same reader closes the verdict gap on both ends of the wire.
 
     Fields are consulted in decreasing order of explicitness. Each is a field
     ONEX producers already carry; nothing new is required of a handler to be
@@ -234,11 +255,11 @@ def resolve_terminal_verdict(event: object) -> bool | None:
     correction for models that state a failure, never a guess about models that
     state nothing.
     """
-    cause = getattr(event, "terminal_failure_cause", None)
+    cause = _read_field(event, "terminal_failure_cause")
     if cause is not None:
         return False
 
-    status = getattr(event, "status", None)
+    status = _read_field(event, "status")
     if isinstance(status, str):
         normalized = status.strip().lower()
         if normalized in _FAILED_STATUS_VALUES:
@@ -247,7 +268,7 @@ def resolve_terminal_verdict(event: object) -> bool | None:
             return True
 
     for attribute in ("ok", "success", "contract_passed"):
-        value = getattr(event, attribute, None)
+        value = _read_field(event, attribute)
         if isinstance(value, bool):
             return value
 

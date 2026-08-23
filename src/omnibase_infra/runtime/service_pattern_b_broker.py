@@ -29,6 +29,7 @@ from omnibase_infra.event_bus.models.model_event_message import ModelEventMessag
 from omnibase_infra.protocols.protocol_pattern_b_broker_transport import (
     ProtocolPatternBBrokerTransport,
 )
+from omnibase_infra.runtime.contract_terminal_events import resolve_terminal_verdict
 from omnibase_infra.runtime.runtime_local_ingress import ModelRuntimeLocalIngressRoute
 from omnibase_infra.utils.util_error_sanitization import (
     sanitize_error_message,
@@ -568,7 +569,7 @@ class RuntimePatternBBroker:
                 error_message=sanitize_error_message(exc),
             )
 
-        status = _status_for_terminal_topic(route, terminal.topic)
+        status = _status_for_terminal_topic(route, terminal.topic, terminal.payload)
         return route, ModelDispatchBusTerminalResult(
             correlation_id=correlation_id,
             status=status,
@@ -807,12 +808,45 @@ def _terminal_topics(route: ModelRuntimeLocalIngressRoute) -> tuple[str, ...]:
     return tuple(topics)
 
 
-def _status_for_terminal_topic(route: ModelRuntimeLocalIngressRoute, topic: str) -> str:
+def _status_for_terminal_topic(
+    route: ModelRuntimeLocalIngressRoute,
+    topic: str,
+    payload: object = None,
+) -> str:
+    """Derive completed/failed for a terminal, topic-first with a payload backstop.
+
+    OMN-15468. Topic identity alone is correct only when every contract has a
+    distinct, unambiguous failure terminal to land a failure-verdict payload
+    on. ``apply_failure_terminal_guard`` (contract_terminal_events.py) re-routes
+    there when the contract declares EXACTLY ONE — but 274 of 275
+    terminal-declaring contracts (measured on this ticket) declare only ONE
+    terminal topic total, with no distinct failure destination at all. For
+    those, a failure-verdict return value has nowhere to go but the sole
+    topic, and topic-only derivation reported ``completed`` for it — the
+    live 2026-07-30 ``.201`` reproduction this ticket opened against.
+
+    ``payload`` is the terminal's DECODED body (whatever the wire actually
+    carried — a dict off ``json.loads``/``model_validate_json``, not the
+    producer's in-memory model). ``resolve_terminal_verdict`` is the same
+    reader the applier-side guard uses, so this and the guard cannot disagree
+    about what a given payload states.
+
+    Only the false-success direction is corrected: a topic that resolves to
+    ``completed`` is downgraded to ``failed`` when the payload states an
+    explicit failure. The reverse is never done — a topic that already
+    resolves to ``failed`` stays ``failed`` regardless of payload, and a
+    payload with no verdict (``resolve_terminal_verdict`` returns ``None``,
+    the common case) leaves topic-derived status untouched. This is a
+    fail-closed backstop, not a second, independent classifier.
+    """
     success_topic = route.terminal_event
     if success_topic is None:
         terminal_topics = _terminal_topics(route)
         success_topic = terminal_topics[0] if terminal_topics else ""
-    return "completed" if topic == success_topic else "failed"
+    topic_status = "completed" if topic == success_topic else "failed"
+    if topic_status == "completed" and resolve_terminal_verdict(payload) is False:
+        return "failed"
+    return topic_status
 
 
 def _terminal_error_message(payload: object) -> str | None:
