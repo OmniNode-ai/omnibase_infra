@@ -354,7 +354,7 @@ class HandlerSavingsCorrelation:
             await set_statement_timeout(conn, self._query_timeout * 1000)
             await conn.execute(
                 """
-                INSERT INTO savings_injection_signals
+                INSERT INTO omninode_internal.savings_injection_signals
                     (session_id, tokens_injected, patterns_count)
                 VALUES ($1, $2, $3)
                 """,
@@ -381,7 +381,7 @@ class HandlerSavingsCorrelation:
             await set_statement_timeout(conn, self._query_timeout * 1000)
             await conn.execute(
                 """
-                INSERT INTO savings_validator_catch_signals
+                INSERT INTO omninode_internal.savings_validator_catch_signals
                     (session_id, severity, validator_type, source_event_type)
                 VALUES ($1, $2, $3, $4)
                 """,
@@ -434,9 +434,9 @@ class HandlerSavingsCorrelation:
             WITH candidate_sessions AS (
                 SELECT session_id, MIN(created_at) AS earliest_signal_at
                 FROM (
-                    SELECT session_id, created_at FROM savings_injection_signals
+                    SELECT session_id, created_at FROM omninode_internal.savings_injection_signals
                     UNION ALL
-                    SELECT session_id, created_at FROM savings_validator_catch_signals
+                    SELECT session_id, created_at FROM omninode_internal.savings_validator_catch_signals
                     UNION ALL
                     SELECT session_id, created_at FROM llm_call_metrics
                         WHERE session_id IS NOT NULL
@@ -480,12 +480,12 @@ class HandlerSavingsCorrelation:
             await set_statement_timeout(conn, self._query_timeout * 1000)
             injection_rows = await conn.fetch(
                 "SELECT tokens_injected, patterns_count "
-                "FROM savings_injection_signals WHERE session_id = $1 "
+                "FROM omninode_internal.savings_injection_signals WHERE session_id = $1 "
                 "ORDER BY created_at",
                 session_id,
             )
             validator_rows = await conn.fetch(
-                "SELECT severity FROM savings_validator_catch_signals "
+                "SELECT severity FROM omninode_internal.savings_validator_catch_signals "
                 "WHERE session_id = $1 ORDER BY created_at",
                 session_id,
             )

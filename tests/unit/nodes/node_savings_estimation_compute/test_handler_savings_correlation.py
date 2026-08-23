@@ -161,7 +161,7 @@ class TestIngest:
         # "SET LOCAL ..." and once for the INSERT — assert on the INSERT,
         # the last call.
         sql, *params = conn.execute.call_args.args
-        assert "INSERT INTO savings_injection_signals" in sql
+        assert "INSERT INTO omninode_internal.savings_injection_signals" in sql
         assert params == ["s1", 100, 3]
 
     @pytest.mark.asyncio
@@ -191,7 +191,7 @@ class TestIngest:
         )
         conn = mock_pool._test_conn
         sql, *params = conn.execute.call_args.args
-        assert "INSERT INTO savings_validator_catch_signals" in sql
+        assert "INSERT INTO omninode_internal.savings_validator_catch_signals" in sql
         assert params == ["s1", "critical", "lint", "pattern-enforcement"]
 
     @pytest.mark.asyncio
