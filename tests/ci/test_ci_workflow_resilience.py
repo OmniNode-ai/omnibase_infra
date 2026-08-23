@@ -183,9 +183,16 @@ def test_migration_conflict_action_is_blocking() -> None:
     assert "omnibase_infra" not in validate_step["with"]["repos"].split(",")
     # OMN-16373: CROSS_REPO_PAT retired in favor of a minted
     # onexbot-occ-writer App installation token.
+    #
+    # OMN-16414: the mint step itself now carries continue-on-error (fork PRs
+    # get no org secrets, so minting fails there) and this env now falls back
+    # to github.token -- safe because every repo in `repos` above is PUBLIC.
+    # This does not weaken "blocking": the fallback only changes which token
+    # authenticates the read; warn-only stays "false" and this step keeps no
+    # continue-on-error of its own, so a real conflict still fails the job.
     assert (
         validate_step["env"]["OMNI_REPO_CLONE_TOKEN"]
-        == "${{ steps.app-token.outputs.token }}"
+        == "${{ steps.app-token.outputs.token || github.token }}"
     )
 
     report_steps = [
