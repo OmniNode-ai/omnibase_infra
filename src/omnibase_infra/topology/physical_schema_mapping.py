@@ -114,6 +114,23 @@ INTERNAL_TABLES_PHYSICALLY_IN_PUBLIC_UNTIL_OMN15359: frozenset[str] = frozenset(
         "swarm_runs",
         "traces",
         "voice_sessions",
+        # OMN-16385: validation_event_ledger (docker/migrations/forward/
+        # 045_create_validation_event_ledger.sql, applied since 2026-02).
+        # Same bridge as event_chain/gate_activity/receipt_gate_rows above --
+        # logically OMNINODE_INTERNAL-domain durable audit/replay evidence (no
+        # tenant_id column; run_id/repo_id/event_type identify a cross-repo
+        # validation event, not a tenant), physically created bare in `public`
+        # since the table predates the omninode_internal schema (098) by
+        # months. Every read/write path
+        # (src/omnibase_infra/runtime/db/postgres_validation_ledger_repository.py)
+        # queries it unqualified against the connection's default search_path
+        # -- actually moving the physical table would break every one of
+        # those ~15 call sites, which this PR (a dead pgcrypto CREATE
+        # EXTENSION statement removal) does not touch. Enumerated here so the
+        # application_database_sql_gate accepts the migration's pre-existing
+        # bare CREATE TABLE, matching its real physical location, the same
+        # way it already does for node_service_registry and friends.
+        "validation_event_ledger",
     }
 )
 

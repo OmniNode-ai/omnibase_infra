@@ -134,45 +134,24 @@ CREATE INDEX IF NOT EXISTS idx_validation_ledger_repo_run
 -- =============================================================================
 -- COMMENTS
 -- =============================================================================
+-- OMN-16385: per-column COMMENT ON COLUMN statements were folded into this
+-- single table comment. `COMMENT ON COLUMN <table>.<column>` is syntactically
+-- indistinguishable from `COMMENT ON COLUMN <schema>.<table>` to the static
+-- application_database_sql_gate (OMN-15361) when, as here, the table is
+-- deliberately unqualified (see physical_schema_mapping.py's
+-- INTERNAL_TABLES_PHYSICALLY_IN_PUBLIC_UNTIL_OMN15359 bridge) -- the gate has
+-- no accepting form for that ambiguity. Every column is still documented
+-- inline next to its definition above; this consolidation loses no
+-- information, only the separate pg_description catalog rows.
 
 COMMENT ON TABLE validation_event_ledger IS
-    'Durable, append-only ledger of cross-repo validation events consumed from Kafka. Provides replay capability, integrity verification via envelope_hash, and idempotency guarantees.';
-
-COMMENT ON COLUMN validation_event_ledger.id IS
-    'Auto-generated UUID primary key for this ledger entry';
-
-COMMENT ON COLUMN validation_event_ledger.run_id IS
-    'Validation run correlation ID linking all events in a single validation run';
-
-COMMENT ON COLUMN validation_event_ledger.repo_id IS
-    'Identifier of the repository being validated';
-
-COMMENT ON COLUMN validation_event_ledger.event_type IS
-    'Fully qualified event type (e.g., onex.evt.validation.cross-repo-run-started.v1)';
-
-COMMENT ON COLUMN validation_event_ledger.event_version IS
-    'Schema version of the event type for forward/backward compatibility';
-
-COMMENT ON COLUMN validation_event_ledger.occurred_at IS
-    'Timestamp from the event payload indicating when the validation event occurred';
-
-COMMENT ON COLUMN validation_event_ledger.kafka_topic IS
-    'Kafka topic from which the event was consumed';
-
-COMMENT ON COLUMN validation_event_ledger.kafka_partition IS
-    'Kafka partition number (idempotency key component)';
-
-COMMENT ON COLUMN validation_event_ledger.kafka_offset IS
-    'Kafka offset within the partition (idempotency key component)';
-
-COMMENT ON COLUMN validation_event_ledger.envelope_bytes IS
-    'Raw envelope bytes stored as BYTEA for bit-level deterministic replay';
-
-COMMENT ON COLUMN validation_event_ledger.envelope_hash IS
-    'SHA-256 hex digest of envelope_bytes for integrity verification during replay';
-
-COMMENT ON COLUMN validation_event_ledger.created_at IS
-    'Timestamp when this entry was persisted to the ledger (database server time)';
+    'Durable, append-only ledger of cross-repo validation events consumed from Kafka. Provides replay capability, integrity verification via envelope_hash, and idempotency guarantees. '
+    'Columns: id (auto-generated UUID primary key); run_id (validation run correlation ID linking all events in a single run); '
+    'repo_id (identifier of the repository being validated); event_type (fully qualified event type, e.g. onex.evt.validation.cross-repo-run-started.v1); '
+    'event_version (schema version of the event type for forward/backward compatibility); occurred_at (timestamp from the event payload indicating when the validation event occurred); '
+    'kafka_topic/kafka_partition/kafka_offset (idempotency key component triple identifying the source Kafka message); '
+    'envelope_bytes (raw envelope bytes stored as BYTEA for bit-level deterministic replay); envelope_hash (SHA-256 hex digest of envelope_bytes for integrity verification during replay); '
+    'created_at (timestamp when this entry was persisted to the ledger, database server time).';
 
 COMMENT ON CONSTRAINT uk_validation_ledger_kafka_position ON validation_event_ledger IS
     'Idempotency constraint: ensures each Kafka message is recorded exactly once';
