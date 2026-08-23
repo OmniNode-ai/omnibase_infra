@@ -2326,51 +2326,6 @@
       "package": "omnibase_infra",
       "type_scoped": false
     },
-    "dispatcher.auto.node_llm_inference_effect.HandlerLlmCliSubprocess.inference_claude_cli_419d77e2": {
-      "category": "command",
-      "contract_name": "node_llm_inference_effect",
-      "event_model_module": null,
-      "event_model_name": null,
-      "handler_id": "dispatcher.auto.node_llm_inference_effect.HandlerLlmCliSubprocess.inference_claude_cli_419d77e2",
-      "handler_module": "omnibase_infra.nodes.node_llm_inference_effect.handlers.handler_llm_cli_subprocess",
-      "handler_name": "HandlerLlmCliSubprocess",
-      "message_types": [
-        "omnibase-infra.llm-inference-request",
-        "onex.cmd.omnibase-infra.llm-inference-request.v1"
-      ],
-      "package": "omnibase_infra",
-      "type_scoped": false
-    },
-    "dispatcher.auto.node_llm_inference_effect.HandlerLlmCliSubprocess.inference_gemini_cli_fb462661": {
-      "category": "command",
-      "contract_name": "node_llm_inference_effect",
-      "event_model_module": null,
-      "event_model_name": null,
-      "handler_id": "dispatcher.auto.node_llm_inference_effect.HandlerLlmCliSubprocess.inference_gemini_cli_fb462661",
-      "handler_module": "omnibase_infra.nodes.node_llm_inference_effect.handlers.handler_llm_cli_subprocess",
-      "handler_name": "HandlerLlmCliSubprocess",
-      "message_types": [
-        "omnibase-infra.llm-inference-request",
-        "onex.cmd.omnibase-infra.llm-inference-request.v1"
-      ],
-      "package": "omnibase_infra",
-      "type_scoped": false
-    },
-    "dispatcher.auto.node_llm_inference_effect.HandlerLlmCliSubprocess.inference_opencode_cli_a90c169f": {
-      "category": "command",
-      "contract_name": "node_llm_inference_effect",
-      "event_model_module": null,
-      "event_model_name": null,
-      "handler_id": "dispatcher.auto.node_llm_inference_effect.HandlerLlmCliSubprocess.inference_opencode_cli_a90c169f",
-      "handler_module": "omnibase_infra.nodes.node_llm_inference_effect.handlers.handler_llm_cli_subprocess",
-      "handler_name": "HandlerLlmCliSubprocess",
-      "message_types": [
-        "omnibase-infra.llm-inference-request",
-        "onex.cmd.omnibase-infra.llm-inference-request.v1"
-      ],
-      "package": "omnibase_infra",
-      "type_scoped": false
-    },
     "dispatcher.auto.node_llm_inference_effect.HandlerLlmInferenceCommand.inference_command_cb168568": {
       "category": "command",
       "contract_name": "node_llm_inference_effect",
@@ -3267,8 +3222,8 @@
       "discovery_errors": 0,
       "distinct_subscribe_topics": 110,
       "probe_count": 1050,
-      "registered_dispatchers": 116,
-      "registered_routes": 126,
+      "registered_dispatchers": 113,
+      "registered_routes": 123,
       "type_scoped_dispatchers": 69
     },
     "duplicate_winners": [],
@@ -3309,10 +3264,10 @@
       "omnimemory"
     ],
     "fixture_version": "v2",
-    "generated_at_utc": "2026-08-20T13:40:01.215388+00:00",
+    "generated_at_utc": "2026-08-22T21:25:18.558487+00:00",
     "installed_package_versions": {
-      "omnibase-core": "0.46.8",
-      "omnibase-infra": "0.38.7",
+      "omnibase-core": "0.46.9",
+      "omnibase-infra": "0.38.10",
       "omniclaude": null,
       "omniintelligence": null,
       "omnimarket": null,
@@ -3603,10 +3558,7 @@
       },
       "selection": {
         "dispatcher_ids": [
-          "dispatcher.auto.node_llm_inference_effect.HandlerLlmOpenaiCompatible.inference_openai_compatible_2587ad5b",
-          "dispatcher.auto.node_llm_inference_effect.HandlerLlmCliSubprocess.inference_gemini_cli_fb462661",
-          "dispatcher.auto.node_llm_inference_effect.HandlerLlmCliSubprocess.inference_claude_cli_419d77e2",
-          "dispatcher.auto.node_llm_inference_effect.HandlerLlmCliSubprocess.inference_opencode_cli_a90c169f"
+          "dispatcher.auto.node_llm_inference_effect.HandlerLlmOpenaiCompatible.inference_openai_compatible_2587ad5b"
         ],
         "dlq_topic": null,
         "message_category": "command",
@@ -20588,10 +20540,7 @@
       "selection": {
         "dispatcher_ids": [
           "dispatcher.auto.node_llm_inference_effect.HandlerLlmInferenceCommand.inference_command_cb168568",
-          "dispatcher.auto.node_llm_inference_effect.HandlerLlmOpenaiCompatible.inference_openai_compatible_2587ad5b",
-          "dispatcher.auto.node_llm_inference_effect.HandlerLlmCliSubprocess.inference_gemini_cli_fb462661",
-          "dispatcher.auto.node_llm_inference_effect.HandlerLlmCliSubprocess.inference_claude_cli_419d77e2",
-          "dispatcher.auto.node_llm_inference_effect.HandlerLlmCliSubprocess.inference_opencode_cli_a90c169f"
+          "dispatcher.auto.node_llm_inference_effect.HandlerLlmOpenaiCompatible.inference_openai_compatible_2587ad5b"
         ],
         "dlq_topic": null,
         "message_category": "command",
@@ -23507,36 +23456,6 @@
       "route_id": "route.auto.node_llm_embedding_effect.HandlerEmbeddingOpenaiCompatible.embedding_openai_compatible_581ca969.onex_cmd_omnibase_infra_llm_embedding_request_v1",
       "topic": "onex.cmd.omnibase-infra.llm-embedding-request.v1",
       "topic_pattern": "*.cmd.omnibase-infra.llm-embedding-request.*",
-      "type_scoped": false
-    },
-    {
-      "contract_name": "node_llm_inference_effect",
-      "dispatcher_id": "dispatcher.auto.node_llm_inference_effect.HandlerLlmCliSubprocess.inference_claude_cli_419d77e2",
-      "handler_id": "dispatcher.auto.node_llm_inference_effect.HandlerLlmCliSubprocess.inference_claude_cli_419d77e2",
-      "message_category": "command",
-      "route_id": "route.auto.node_llm_inference_effect.HandlerLlmCliSubprocess.inference_claude_cli_419d77e2.onex_cmd_omnibase_infra_llm_inference_request_v1",
-      "topic": "onex.cmd.omnibase-infra.llm-inference-request.v1",
-      "topic_pattern": "*.cmd.omnibase-infra.llm-inference-request.*",
-      "type_scoped": false
-    },
-    {
-      "contract_name": "node_llm_inference_effect",
-      "dispatcher_id": "dispatcher.auto.node_llm_inference_effect.HandlerLlmCliSubprocess.inference_gemini_cli_fb462661",
-      "handler_id": "dispatcher.auto.node_llm_inference_effect.HandlerLlmCliSubprocess.inference_gemini_cli_fb462661",
-      "message_category": "command",
-      "route_id": "route.auto.node_llm_inference_effect.HandlerLlmCliSubprocess.inference_gemini_cli_fb462661.onex_cmd_omnibase_infra_llm_inference_request_v1",
-      "topic": "onex.cmd.omnibase-infra.llm-inference-request.v1",
-      "topic_pattern": "*.cmd.omnibase-infra.llm-inference-request.*",
-      "type_scoped": false
-    },
-    {
-      "contract_name": "node_llm_inference_effect",
-      "dispatcher_id": "dispatcher.auto.node_llm_inference_effect.HandlerLlmCliSubprocess.inference_opencode_cli_a90c169f",
-      "handler_id": "dispatcher.auto.node_llm_inference_effect.HandlerLlmCliSubprocess.inference_opencode_cli_a90c169f",
-      "message_category": "command",
-      "route_id": "route.auto.node_llm_inference_effect.HandlerLlmCliSubprocess.inference_opencode_cli_a90c169f.onex_cmd_omnibase_infra_llm_inference_request_v1",
-      "topic": "onex.cmd.omnibase-infra.llm-inference-request.v1",
-      "topic_pattern": "*.cmd.omnibase-infra.llm-inference-request.*",
       "type_scoped": false
     },
     {
