@@ -1149,6 +1149,30 @@ pattern_exemptions:
       - PEP 8 - Naming Conventions (https://peps.python.org/pep-0008/#naming-conventions)
       - CLAUDE.md (File & Class Naming Conventions)
     ticket: OMN-811
+  - file_pattern: 'node_evidence_autoclose_sweep_effect/handlers/handler_evidence_autoclose_sweep\.py'
+    class_pattern: "Class name '_LinearClient'"
+    violation_pattern: "should use PascalCase"
+    reason: >
+      _LinearClient IS valid PascalCase for a private class (same class of exemption as _MetricsTimer above). The underscore prefix indicates private visibility, and "LinearClient" follows PascalCase. The validator regex doesn't account for underscore-prefixed private classes.
+
+    documentation:
+      - PEP 8 - Naming Conventions (https://peps.python.org/pep-0008/#naming-conventions)
+      - CLAUDE.md (File & Class Naming Conventions)
+    ticket: OMN-16106
+  # ==========================================================================
+  # Evidence Autoclose Sweep Exemptions (OMN-16106)
+  # ==========================================================================
+  # ticket_id is a Linear human-readable identifier ("OMN-16106"), never a
+  # UUID -- same class of exemption as plugin_id/policy_id/dispatcher_id
+  # above. Matches both new node models that carry the field.
+  - file_pattern: 'node_evidence_autoclose_sweep_effect/models/model_evidence_autoclose_outcome\.py'
+    violation_pattern: "Field 'ticket_id' should use UUID type instead of str"
+    reason: >
+      ticket_id holds a Linear human-readable ticket identifier (e.g. "OMN-16106"), never a UUID. Consistent with the plugin_id/policy_id/dispatcher_id semantic-identifier exemption pattern above.
+
+    documentation:
+      - CLAUDE.md (Registry Naming Conventions)
+    ticket: OMN-16106
   # ==========================================================================
   # Plugin Models Exemptions (OMN-811)
   # ==========================================================================
@@ -2690,12 +2714,6 @@ pattern_exemptions:
       'handle' is the canonical ONEX handler method name (definition B, OMN-14355/OMN-14407) that the shared runtime adapter binds. This node was refactored from the legacy scripts/check_release_identity.py gate into the canonical CONTRACT+NODE+HANDLER shape, which requires the core method be named 'handle'.
 
     ticket: OMN-14471
-  - file_pattern: 'handler_llm_cli_subprocess\.py'
-    violation_pattern: "Function name 'handle' is too generic"
-    reason: >
-      'handle' is the canonical ONEX def-B dispatch entrypoint name that auto-wiring's _make_dispatch_callback binds; a handler exposing neither handle nor handle_async is bound to _missing_handle and raises ModelOnexError on every dispatch (OMN-14510 missing-handle burn-down). HandlerLlmCliSubprocess was regenerated to def-B under OMN-14804 to add this entrypoint, matching the ProtocolMessageHandler convention used by every other node handler on node_llm_inference_effect.
-
-    ticket: OMN-14804
   - file_pattern: 'handler_auth_gate\.py'
     violation_pattern: "Function name 'handle' is too generic"
     reason: >
@@ -3882,6 +3900,24 @@ pattern_exemptions:
       Three public operations (load/save/clear) over two on-disk files, plus the private readers/writers those files require and two path properties. Every method is bound to the same ~/.onex config.yaml + credentials.json pair; splitting the class would put the by-reference invariant (secret value in the 0600 file, never in config.yaml) across two objects that must then agree, which is the coupling the single owner exists to prevent.
 
     ticket: OMN-15922
+  - file_pattern: 'model_payload_gateway_link_health_upsert\.py'
+    violation_pattern: "Field 'tenant_id' should use UUID"
+    reason: >
+      Same seam as model_gateway_heartbeat.py: this payload carries the ModelGatewayHeartbeat.tenant_id field verbatim (the validated DNS-safe tenant slug used in Kafka topic names), not the underlying UUID.
+
+    ticket: OMN-15570
+  - file_pattern: 'model_payload_gateway_link_health_upsert\.py'
+    violation_pattern: "Field 'principal_id' should use UUID"
+    reason: >
+      Same seam as model_gateway_heartbeat.py: this payload carries the ModelGatewayHeartbeat.principal_id field verbatim -- the canonical MSK tenant principal t-<tenant UUID hex>, whose t- prefix makes UUID an invalid representation.
+
+    ticket: OMN-15570
+  - file_pattern: 'model_gateway_link_health_upsert_result\.py'
+    violation_pattern: "Field 'tenant_id' should use UUID"
+    reason: >
+      Same seam as model_gateway_heartbeat.py: this result echoes back the tenant_id key persisted into gateway_link_health, keyed on the DNS-safe tenant slug, not the underlying UUID.
+
+    ticket: OMN-15570
 # These handle one-model-per-file violations for domain-grouped protocols
 architecture_exemptions:
   # ==========================================================================

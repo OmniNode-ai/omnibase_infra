@@ -1934,12 +1934,21 @@ class ProjectionCatalogBindingPolicy:
 
 @dataclass(frozen=True)
 class ProjectionTableTarget:
-    """Topology-resolved location for one typed table declaration."""
+    """Topology-resolved location for one typed table declaration.
+
+    Every field beside ``table`` is a *resolution*; ``table`` alone carries the
+    raw declaration. ``physical_schema`` is the schema resolution exactly as
+    ``physical_database`` is the database resolution -- the schema PostgreSQL
+    actually holds the relation in, which during the OMN-15359 migration window
+    differs from the logically-declared ``table.schema``. Emitted SQL must
+    qualify with this field; anything reasoning about the declaration (domain,
+    contract-facing errors) reads ``table.schema``.
+    """
 
     table: ModelDbTableDeclaration
     database_ref: str
     physical_database: str
-    schema: str
+    physical_schema: str
     domain: EnumDatabaseSchemaDomain
     read_binding: ProjectionDatabaseBindingTarget | None
     write_binding: ProjectionDatabaseBindingTarget | None
@@ -1959,9 +1968,9 @@ class ProjectionDatabaseTarget:
         return tuple(sorted({target.database_ref for target in self.table_targets}))
 
     @property
-    def schemas(self) -> tuple[str, ...]:
-        """Return the declared schemas in stable order."""
-        return tuple(sorted({target.schema for target in self.table_targets}))
+    def physical_schemas(self) -> tuple[str, ...]:
+        """Return the schemas SQL is actually issued against, in stable order."""
+        return tuple(sorted({target.physical_schema for target in self.table_targets}))
 
     @property
     def domains(self) -> tuple[EnumDatabaseSchemaDomain, ...]:
@@ -2035,10 +2044,16 @@ def _require_projection_binding_privileges(
     table: ModelDbTableDeclaration,
     *,
     operation: str,
+    grant_schema: str,
 ) -> None:
-    """Prove the selected topology principal can perform the exact operation."""
+    """Prove the selected topology principal can perform the exact operation.
+
+    ``grant_schema`` is the caller's already-resolved physical schema, not a
+    second resolution of its own: the schema whose ACLs are checked here and
+    the schema the emitted SQL qualifies with are the same value by
+    construction (OMN-16239).
+    """
     principal = database.principals[binding.principal]
-    grant_schema = physical_grant_schema_for_table(table.schema, table.name)
     has_schema_usage = any(
         grant.object_type is EnumDatabaseGrantObjectType.SCHEMA
         and grant.schema == grant_schema
@@ -2087,6 +2102,7 @@ def _projection_operation_bindings(
     table: ModelDbTableDeclaration,
     database: ModelDeploymentTopologyDatabase,
     domain: EnumDatabaseSchemaDomain,
+    physical_schema: str,
     catalog_read_binding: str | None,
     catalog_write_binding: str | None,
 ) -> tuple[
@@ -2134,6 +2150,7 @@ def _projection_operation_bindings(
             read_binding,
             table,
             operation="read",
+            grant_schema=physical_schema,
         )
     if write_binding is not None:
         _require_projection_binding_privileges(
@@ -2141,6 +2158,7 @@ def _projection_operation_bindings(
             write_binding,
             table,
             operation="write",
+            grant_schema=physical_schema,
         )
     return read_binding, write_binding
 
@@ -2171,10 +2189,16 @@ def _resolve_projection_database_target(
         domain = topology.schema_domain(table.database_ref, table.schema)
         physical_database = database.physical_name
         databases_by_physical_name[physical_database] = database
+        # OMN-16239: resolve the physical schema exactly once, here, and feed
+        # both the grant check and the emitted SQL from it. Domain resolution
+        # above deliberately keeps using the declared schema -- the domain is a
+        # governance fact about the contract, not about physical placement.
+        physical_schema = physical_grant_schema_for_table(table.schema, table.name)
         read_binding, write_binding = _projection_operation_bindings(
             table=table,
             database=database,
             domain=domain,
+            physical_schema=physical_schema,
             catalog_read_binding=catalog_read_binding,
             catalog_write_binding=catalog_write_binding,
         )
@@ -2183,7 +2207,7 @@ def _resolve_projection_database_target(
                 table=table,
                 database_ref=table.database_ref,
                 physical_database=physical_database,
-                schema=table.schema,
+                physical_schema=physical_schema,
                 domain=domain,
                 read_binding=read_binding,
                 write_binding=write_binding,
@@ -2419,17 +2443,19 @@ class ProjectionTableOperation:
         self._adapter = adapter
         self._target = target
 
+    # Both refusals name the DECLARED schema: they report what the contract
+    # says, so they must read the way the contract reads.
     def _assert_write_declared(self) -> None:
         if self._target.table.access not in {"write", "read_write"}:
             raise PermissionError(
-                f"{self._target.schema}.{self._target.table.name} declares "
+                f"{self._target.table.schema}.{self._target.table.name} declares "
                 f"access={self._target.table.access!r}; write refused"
             )
 
     def _assert_read_declared(self) -> None:
         if self._target.table.access not in {"read", "read_write"}:
             raise PermissionError(
-                f"{self._target.schema}.{self._target.table.name} declares "
+                f"{self._target.table.schema}.{self._target.table.name} declares "
                 f"access={self._target.table.access!r}; read refused"
             )
 
@@ -2747,7 +2773,7 @@ class ProjectionDatabaseOperations:
         action = f"DO UPDATE SET {updates}" if updates else "DO NOTHING"
         insert_sql = " ".join(
             (
-                f'INSERT INTO "{target.schema}"."{target.table.name}" ({quoted_cols})',
+                f'INSERT INTO "{target.physical_schema}"."{target.table.name}" ({quoted_cols})',
                 f"VALUES ({placeholders})",
                 f"ON CONFLICT ({conflict_columns}) {action}",
             )
@@ -2771,7 +2797,7 @@ class ProjectionDatabaseOperations:
         tenant_context: VerifiedProjectionTenantAuthority | None,
     ) -> list[dict[str, object]]:
         # Schema/table originate in validated typed declarations, never request data.
-        select_sql = f'SELECT * FROM "{target.schema}"."{target.table.name}"'  # noqa: S608
+        select_sql = f'SELECT * FROM "{target.physical_schema}"."{target.table.name}"'  # noqa: S608
         params: list[object] = []
         if filters:
             bad_keys = [
@@ -3202,10 +3228,10 @@ def _build_projection_db_adapter(
 
     logger.debug(
         "Selecting projection adapter: database_refs=%s physical_database=%s "
-        "schemas=%s domains=%s",
+        "physical_schemas=%s domains=%s",
         target.database_refs,
         target.physical_database,
-        target.schemas,
+        target.physical_schemas,
         [domain.value for domain in target.domains],
     )
     return ProjectionDatabaseOperations(
@@ -5173,11 +5199,11 @@ def _derive_route_id(
     that share a common segment (OMN-8735).
 
     When two routing entries reference the same handler class for different
-    operations (e.g. ``HandlerLlmCliSubprocess`` for both ``inference.gemini_cli``
-    and ``inference.codex_cli``) and subscribe to the same topic, the
-    ``handler + topic`` pair alone produces a collision.  The handler entry key
-    includes the sanitized operation suffix when present, guaranteeing each
-    entry gets a distinct route ID (OMN-9461 / OMN-10447).
+    operations (e.g. one handler bound to both ``inference.variant_a`` and
+    ``inference.variant_b`` on the same contract) and subscribe to the same
+    topic, the ``handler + topic`` pair alone produces a collision.  The
+    handler entry key includes the sanitized operation suffix when present,
+    guaranteeing each entry gets a distinct route ID (OMN-9461 / OMN-10447).
     """
     safe_topic = re.sub(r"[.\-]", "_", topic)
     return f"route.auto.{contract_name}.{handler_key}.{safe_topic}"
@@ -5187,8 +5213,8 @@ def _derive_dispatcher_id(contract_name: str, handler_key: str) -> str:
     """Derive a dispatcher ID from contract name and handler entry key.
 
     When two routing entries in the same contract reference the same handler
-    class (e.g. ``HandlerLlmCliSubprocess`` wired for both ``inference.gemini_cli``
-    and ``inference.codex_cli``), the plain handler name alone produces a
+    class (e.g. one handler wired for both ``inference.variant_a`` and
+    ``inference.variant_b``), the plain handler name alone produces a
     collision.  The entry key includes the sanitized operation suffix and keeps
     dispatcher IDs distinct (OMN-9461 / OMN-10447).
     """

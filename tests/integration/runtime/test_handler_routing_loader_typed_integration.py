@@ -36,8 +36,12 @@ class TestHandlerRoutingLoaderRealContracts:
 
     @pytest.mark.skipif(_NODES_ROOT is None, reason="project root not found")
     def test_compute_contract_returns_typed_model(self) -> None:
+        # node_baseline_comparison_compute: a stable COMPUTE_GENERIC example.
+        # (node_savings_estimation_compute moved to EFFECT_GENERIC in
+        # OMN-16293 — it now performs real I/O (Postgres correlation + Kafka
+        # publish), so it is no longer a COMPUTE fixture.)
         contract_path = (
-            _NODES_ROOT / "node_savings_estimation_compute" / "contract.yaml"
+            _NODES_ROOT / "node_baseline_comparison_compute" / "contract.yaml"
         )
         assert contract_path.exists(), f"Contract not found: {contract_path}"
         result = load_and_validate_contract_yaml(contract_path)
@@ -54,8 +58,12 @@ class TestHandlerRoutingLoaderRealContracts:
 
     @pytest.mark.skipif(_NODES_ROOT is None, reason="project root not found")
     def test_result_preserves_raw_dict(self) -> None:
+        # node_baseline_comparison_compute: a stable COMPUTE_GENERIC example.
+        # (node_savings_estimation_compute moved to EFFECT_GENERIC in
+        # OMN-16293 — it now performs real I/O (Postgres correlation + Kafka
+        # publish), so it is no longer a COMPUTE fixture.)
         contract_path = (
-            _NODES_ROOT / "node_savings_estimation_compute" / "contract.yaml"
+            _NODES_ROOT / "node_baseline_comparison_compute" / "contract.yaml"
         )
         result = load_and_validate_contract_yaml(contract_path)
         assert isinstance(result.raw, dict)

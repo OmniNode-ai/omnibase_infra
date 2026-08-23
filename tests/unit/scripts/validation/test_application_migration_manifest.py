@@ -126,7 +126,25 @@ def test_checked_in_manifest_is_exact_and_all_blockers_are_explicit() -> None:
     # fence: a fenced migration is skipped by the runner, not undeclared --
     # dropping its declaration would make the eventual un-fence land an
     # unbound file.
-    assert len(result.declarations) == 101
+    # +1 for OMN-16146's node_projection_registration/0005_create_projection_watermarks.sql
+    # -- vendors the watermark-persistence table BaseProjectionRunner's shared
+    # _update_watermark() path needs; landed in omnibase_infra first per the
+    # node-migration-vendor-parity-gate ordering, ahead of omnimarket#2092.
+    # +1 for OMN-15631's node_delegation_routing_reducer/0001_create_delegation_routing_tenant_overlay.sql
+    # -- vendors the v1(a) per-tenant delegation routing overlay table (tenant
+    # domain, additive, no RLS in v1(a)); landed in omnibase_infra first per
+    # the node-migration-vendor-parity-gate ordering, ahead of omnimarket#2116.
+    # +1 for OMN-16316's
+    # node_projection_tenant_credentials/0000_create_tenant_inference_credentials.sql
+    # -- vendors the BYOK inference-credential-ref catalog table, domain
+    # `tenant` (per-tenant credential data, not omninode_internal per the
+    # house-tenant ruling); landed in omnibase_infra first per the
+    # node-migration-vendor-parity-gate ordering, ahead of omnimarket#2117.
+    # +1 for OMN-16293's node_savings_estimation_compute/0001_create_savings_signal_tables.sql
+    # -- new node-owned migration creating savings_injection_signals /
+    # savings_validator_catch_signals, the Postgres "projection surface" the
+    # savings-correlation periodic batch reads instead of an in-memory buffer.
+    assert len(result.declarations) == 105
     assert result.blocked == ()
     assert len(result.legacy_node_declarations) == 2
     assert len(result.cloud_aliases) == 30

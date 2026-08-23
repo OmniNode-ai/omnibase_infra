@@ -13,6 +13,16 @@ TENANT_TABLES_PHYSICALLY_IN_PUBLIC_UNTIL_OMN15359: frozenset[str] = frozenset(
         "delegation_budget_state",
         "delegation_events",
         "delegation_judge_verdict_events",
+        # OMN-15631: node_delegation_routing_reducer's tenant overlay table.
+        # Same bridge as its sibling delegation_events above -- logically
+        # tenant-domain per contract.yaml (ADR-0027), physically created bare
+        # in `public` because no `tenant` Postgres schema exists on any lane
+        # today (live-confirmed 2026-08-19, see delegation_events' own
+        # comment). Enumerated here so
+        # physical_grant_schema_for_table('tenant',
+        # 'delegation_routing_tenant_overlay') resolves to 'public', matching
+        # the migration's actual bare CREATE TABLE.
+        "delegation_routing_tenant_overlay",
         "delegation_shadow_comparisons",
         "dep_health_findings",
         "instruction_eval_aggregate_snapshots",
@@ -21,6 +31,19 @@ TENANT_TABLES_PHYSICALLY_IN_PUBLIC_UNTIL_OMN15359: frozenset[str] = frozenset(
         "projection_delegation_inference_response_text",
         "savings_estimates",
         "skill_execution_snapshots",
+        # OMN-16316: node_projection_tenant_credentials' BYOK inference-
+        # credential ref catalog. Same bridge as delegation_events/
+        # delegation_routing_tenant_overlay above -- logically tenant-domain
+        # (per-tenant credential-ref rows, house-tenant ruling), physically
+        # created bare in `public` because no `tenant` Postgres schema exists
+        # on any lane today. Enumerated here so
+        # physical_grant_schema_for_table('tenant',
+        # 'tenant_inference_credentials') resolves to 'public' and the
+        # application_database_sql_gate accepts the migration's bare
+        # CREATE TABLE, matching its actual physical location. No RLS in v1,
+        # same dev/beta-only posture as its siblings -- promotable later once
+        # the tenant-schema RLS foundation (OMN-14894/OMN-15356) lands.
+        "tenant_inference_credentials",
     }
 )
 
@@ -91,6 +114,23 @@ INTERNAL_TABLES_PHYSICALLY_IN_PUBLIC_UNTIL_OMN15359: frozenset[str] = frozenset(
         "swarm_runs",
         "traces",
         "voice_sessions",
+        # OMN-16385: validation_event_ledger (docker/migrations/forward/
+        # 045_create_validation_event_ledger.sql, applied since 2026-02).
+        # Same bridge as event_chain/gate_activity/receipt_gate_rows above --
+        # logically OMNINODE_INTERNAL-domain durable audit/replay evidence (no
+        # tenant_id column; run_id/repo_id/event_type identify a cross-repo
+        # validation event, not a tenant), physically created bare in `public`
+        # since the table predates the omninode_internal schema (098) by
+        # months. Every read/write path
+        # (src/omnibase_infra/runtime/db/postgres_validation_ledger_repository.py)
+        # queries it unqualified against the connection's default search_path
+        # -- actually moving the physical table would break every one of
+        # those ~15 call sites, which this PR (a dead pgcrypto CREATE
+        # EXTENSION statement removal) does not touch. Enumerated here so the
+        # application_database_sql_gate accepts the migration's pre-existing
+        # bare CREATE TABLE, matching its real physical location, the same
+        # way it already does for node_service_registry and friends.
+        "validation_event_ledger",
     }
 )
 

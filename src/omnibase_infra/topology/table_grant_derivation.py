@@ -59,6 +59,7 @@ __all__ = [
     "WRITE_PRIVILEGES",
     "DOMAIN_PROJECTION_BINDINGS",
     "STATE_IO_TABLE_DECLARATIONS",
+    "LEGACY_MIGRATION_TABLE_DECLARATIONS",
     "TENANT_TABLES_PHYSICALLY_IN_PUBLIC_UNTIL_OMN15359",
     "INTERNAL_TABLES_PHYSICALLY_IN_PUBLIC_UNTIL_OMN15359",
     "physical_grant_schema_for_table",
@@ -124,6 +125,35 @@ STATE_IO_TABLE_DECLARATIONS: tuple[ContractTableDeclaration, ...] = (
             ),
             access="read_write",
             role="state",
+        ),
+    ),
+)
+
+# Some migration-owned projection relations landed before their producing node's
+# ``db_io.db_tables`` contract is available in the omnimarket contracts root
+# consumed by this repo's CI. They still participate in the same grant
+# derivation path because runtime wiring validates the topology grant before the
+# physical-schema bridge can resolve the insert target (OMN-16316). Keeping this
+# as an explicit supplemental manifest is preferable to hand-maintaining the
+# generated YAML: ``--check`` continues to prove every shipped instance and
+# rendered catalog against one auditable derivation source.
+LEGACY_MIGRATION_TABLE_DECLARATIONS: tuple[ContractTableDeclaration, ...] = (
+    ContractTableDeclaration(
+        node="legacy_migration:tenant_inference_credentials",
+        contract_path=Path(
+            "docker/migrations/forward/nodes/node_projection_tenant_credentials/"
+            "0000_create_tenant_inference_credentials.sql"
+        ),
+        table=ModelDbTableDeclaration(
+            name="tenant_inference_credentials",
+            database_ref="application",
+            schema="tenant",
+            migration=(
+                "docker/migrations/forward/nodes/node_projection_tenant_credentials/"
+                "0000_create_tenant_inference_credentials.sql"
+            ),
+            access="write",
+            role="credentials",
         ),
     ),
 )

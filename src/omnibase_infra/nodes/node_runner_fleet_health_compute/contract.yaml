@@ -48,15 +48,22 @@
 #     records action NONE with the reason. Assessment gains the typed
 #     corroboration facts (github_status / github_busy / docker_status). Still no
 #     executor and no fleet mutation -- recommendations only.
+#   - OMN-15195: removed the env-read form of the three classification
+#     thresholds (CRASHLOOP_RESTART_THRESHOLD, RUNNER_HEALTH_MAX_DIAG_AGE_SECONDS,
+#     WEDGE_QUEUE_AGE_SECONDS). They are now plain module constants (5 / 4500 /
+#     600), not overlay-resolved env reads -- nothing constructed this handler
+#     with overrides, so no default value changed. This closes the last
+#     env-overridable surface on this node; see OMN-15234's per-name
+#     check-env-reads grandfathering for the companion enforcement change.
 name: "node_runner_fleet_health_compute"
 contract_version:
   major: 1
   minor: 1
-  patch: 0
-node_version: "1.1.0"
+  patch: 1
+node_version: "1.1.1"
 node_type: "COMPUTE_GENERIC"
 description: >
-  Pure, deterministic classifier of a runner-fleet snapshot into a typed health verdict: composite per-runner readiness over six signals, the quarantine set and its bounce-eligible subset, precedence health state, fleet aggregates, and recorded (never executed) recommended actions. Uses the canonical def-B typed ModelRunnerFleetHealthEvaluateCommand handler entrypoint. Heartbeat-staleness classification threshold (RUNNER_HEALTH_MAX_DIAG_AGE_SECONDS, env-overridable) defaults to 4500s as of OMN-15233 (1.0.2), raised from 900s. 900s sat below the ~50-minute IDLE _diag write cadence, so this classifier emitted LISTENER_ZOMBIE -> RESTART_RUNNER at confidence 0.85 for idle-but-healthy runners. The default is held identical to docker/runners/healthcheck.sh and runner-monitor.sh so all three surfaces agree on what "stale" means. OMN-15234 (1.1.0) makes the restart recommendation composite rather than flag-driven: a lone stale heartbeat on an otherwise online, idle, running, zero-restart runner is not bounce-eligible. The per-runner assessment carries the typed corroboration facts it was derived from (github_status, github_busy, docker_status) alongside the existing re-arm signals.
+  Pure, deterministic classifier of a runner-fleet snapshot into a typed health verdict: composite per-runner readiness over six signals, the quarantine set and its bounce-eligible subset, precedence health state, fleet aggregates, and recorded (never executed) recommended actions. Uses the canonical def-B typed ModelRunnerFleetHealthEvaluateCommand handler entrypoint. Heartbeat-staleness classification threshold (RUNNER_HEALTH_MAX_DIAG_AGE_SECONDS) is 4500s as of OMN-15233, raised from 900s; as of OMN-15195 this is a fixed module constant, not env-overridable. 900s sat below the ~50-minute IDLE _diag write cadence, so this classifier emitted LISTENER_ZOMBIE -> RESTART_RUNNER at confidence 0.85 for idle-but-healthy runners. The value is held identical to docker/runners/healthcheck.sh and runner-monitor.sh so all three surfaces agree on what "stale" means. OMN-15234 (1.1.0) makes the restart recommendation composite rather than flag-driven: a lone stale heartbeat on an otherwise online, idle, running, zero-restart runner is not bounce-eligible. The per-runner assessment carries the typed corroboration facts it was derived from (github_status, github_busy, docker_status) alongside the existing re-arm signals.
 
 input_model:
   name: "ModelRunnerFleetHealthEvaluateCommand"
@@ -105,8 +112,8 @@ metadata:
   author: "OmniNode Team"
   license: "MIT"
   created: "2026-07-04"
-  updated: "2026-07-27"
-  ticket: "OMN-15255"
+  updated: "2026-07-26"
+  ticket: "OMN-15195"
   tags:
     - compute
     - def-b

@@ -28,6 +28,8 @@ allowlist:
     reason: OMN-12957 baseline freeze; remediate via OMN-12982 (assign correct runtime lane or document runtime-exempt)
   - node_id: node_merge_sweep_workflow_orchestrator
     reason: OMN-12957 baseline freeze; remediate via OMN-12982 (assign correct runtime lane or document runtime-exempt)
+  - node_id: node_savings_estimation_compute
+    reason: OMN-16293 — node_type changed COMPUTE_GENERIC -> EFFECT_GENERIC and gained a self-only onex.cmd.* subscribe_topics entry (savings.correlation_batch_compute, triggered directly by a periodic asyncio task in service_kernel.py, not real bus traffic — same pattern as the already-allowlisted node_baselines_batch_compute above). Deploy-lane assignment deferred to the same OMN-12982 remediation sweep as its sibling.
   - node_id: node_onboarding_orchestrator
     reason: OMN-12957 baseline freeze; remediate via OMN-12982 (assign correct runtime lane or document runtime-exempt)
   - node_id: node_registration_orchestrator
