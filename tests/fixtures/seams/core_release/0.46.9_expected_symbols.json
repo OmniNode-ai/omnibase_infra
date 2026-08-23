@@ -1,6 +1,6 @@
 {
   "_comment": [
-    "OMN-14628 seam fixture. Freezes the omnibase-core RELEASED (PyPI) 0.46.8",
+    "OMN-14628 seam fixture. Freezes the omnibase-core RELEASED (PyPI) 0.46.9",
     "surface that omnibase_infra's delegation dispatch path consumes.",
     "This exists so that a core pin move (git-rev -> published release, or a",
     "release bump) fails LOUDLY on the exact symbols and field TYPES infra",
