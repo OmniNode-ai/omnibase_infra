@@ -454,6 +454,13 @@ jobs:
             # tests/integration/migrations/test_node_migration_shape_drift_omn15376.py.
             echo "POSTGRES_PORT=${resolved_pg_port}"
             echo "REDPANDA_ADVERTISE_HOST=${resolved_kafka_host}"
+            # OMN-16412: that last consumer hard-rejects a non-loopback ambient
+            # OMNIBASE_INFRA_DB_URL/POSTGRES_HOST unless explicitly opted in.
+            # resolved_host can legitimately be a Docker DNS container name or
+            # the Docker host gateway (branches above) -- this is this run's
+            # OWN dockerized e2e stack, already confirmed above to not be the
+            # live .201 instance, so it gets the explicit opt-in.
+            echo "OMN15376_ALLOW_REMOTE_PG=1"
           } >> "$GITHUB_ENV"
 
       - name: Run integration tests
