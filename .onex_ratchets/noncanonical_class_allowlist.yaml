@@ -81,7 +81,6 @@ allowlist:
   - "omnibase_infra.services.observability.injection_effectiveness.service_batch_compute_effectiveness:ServiceBatchComputeEffectivenessMetrics"
   - "omnibase_infra.services.observability.injection_effectiveness.service_effectiveness_invalidation_notifier:ServiceEffectivenessInvalidationNotifier"
   - "omnibase_infra.services.observability.llm_cost_aggregation.consumer:ServiceLlmCostAggregator"
-  - "omnibase_infra.services.observability.savings_estimation.consumer:ServiceSavingsEstimator"
   - "omnibase_infra.services.observability.static_context_attribution.service_attribution_reporter:ServiceAttributionReporter"
   - "omnibase_infra.services.observability.static_context_attribution.service_llm_category_augmenter:ServiceLlmCategoryAugmenter"
   - "omnibase_infra.services.observability.static_context_attribution.service_static_context_parser:ServiceStaticContextParser"
