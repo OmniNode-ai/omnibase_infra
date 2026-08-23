@@ -48,7 +48,7 @@ CR_THREAD_GATE_CALLER_WORKFLOW = (
 )
 CHECKOUT_V7_SHA = "9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0"
 CODEQL_V4_SHA = "dc73d59c2d7bd4f8194098a91219eeee6d8a1719"
-OMNICLAUDE_REJECT_SKIP_NO_CHECKOUT_SHA = "80de61fd1fee04abdeb6918e7f91cf820717e6a8"
+OMNICLAUDE_REJECT_SKIP_NO_CHECKOUT_SHA = "b441ff9d979e248ac20c51a00c135a3ce273cef2"
 
 
 def _load_yaml(path: Path) -> dict[str, Any]:
@@ -181,8 +181,18 @@ def test_migration_conflict_action_is_blocking() -> None:
         == "omniclaude,omnidash,omniintelligence,omnibase_core,omnimemory"
     )
     assert "omnibase_infra" not in validate_step["with"]["repos"].split(",")
+    # OMN-16373: CROSS_REPO_PAT retired in favor of a minted
+    # onexbot-occ-writer App installation token.
+    #
+    # OMN-16414: the mint step itself now carries continue-on-error (fork PRs
+    # get no org secrets, so minting fails there) and this env now falls back
+    # to github.token -- safe because every repo in `repos` above is PUBLIC.
+    # This does not weaken "blocking": the fallback only changes which token
+    # authenticates the read; warn-only stays "false" and this step keeps no
+    # continue-on-error of its own, so a real conflict still fails the job.
     assert (
-        validate_step["env"]["OMNI_REPO_CLONE_TOKEN"] == "${{ secrets.CROSS_REPO_PAT }}"
+        validate_step["env"]["OMNI_REPO_CLONE_TOKEN"]
+        == "${{ steps.app-token.outputs.token || github.token }}"
     )
 
     report_steps = [
@@ -477,8 +487,11 @@ def test_contract_compliance_uv_sync_is_bounded_and_retried() -> None:
     checkout_occ = next(
         step for step in steps if step.get("name") == "Checkout onex_change_control"
     )
+    # OMN-16373: CROSS_REPO_PAT retired in favor of a minted
+    # onexbot-occ-writer App installation token.
     assert (
-        checkout_occ["with"]["token"] == "${{ secrets.CROSS_REPO_PAT || github.token }}"
+        checkout_occ["with"]["token"]
+        == "${{ steps.app-token.outputs.token || github.token }}"
     )
 
     setup_uv = next(
@@ -796,9 +809,11 @@ def test_omni_standards_uv_jobs_use_authenticated_composite_action() -> None:
         )
         assert setup_step["with"]["install-args"] == "--all-extras"
         assert setup_step["with"]["cache-enabled"] == "false"
+        # OMN-16373: CROSS_REPO_PAT retired in favor of a minted
+        # onexbot-occ-writer App installation token.
         assert (
             setup_step["with"]["github-token"]
-            == "${{ secrets.CROSS_REPO_PAT || github.token }}"
+            == "${{ steps.app-token.outputs.token || github.token }}"
         )
         # No raw unauthenticated uv sync left behind.
         assert not any(
@@ -812,9 +827,11 @@ def test_omni_standards_uv_jobs_use_authenticated_composite_action() -> None:
         for step in occ_steps
         if step.get("name") == "Install onex_change_control (pinned)"
     )
+    # OMN-16373: CROSS_REPO_PAT retired in favor of a minted
+    # onexbot-occ-writer App installation token.
     assert (
         install_step["env"]["GIT_FETCH_TOKEN"]
-        == "${{ secrets.CROSS_REPO_PAT || github.token }}"
+        == "${{ steps.app-token.outputs.token || github.token }}"
     )
     assert "export GIT_CONFIG_COUNT=1" in install_step["run"]
     assert 'export UV_HTTP_TIMEOUT="${UV_HTTP_TIMEOUT:-600}"' in install_step["run"]

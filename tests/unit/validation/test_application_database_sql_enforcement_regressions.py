@@ -7,6 +7,9 @@ from __future__ import annotations
 import pytest
 
 from omnibase_infra.topology.application_database import load_topology_profile
+from omnibase_infra.topology.physical_schema_mapping import (
+    INTERNAL_TABLES_PHYSICALLY_IN_PUBLIC_UNTIL_OMN15359,
+)
 from omnibase_infra.validation.application_database_domain_enforcement import (
     application_database_created_catalog_identities,
     application_database_sql_target_requirements,
@@ -108,6 +111,26 @@ def test_select_into_emits_an_exact_created_table_identity() -> None:
         (identity.schema, identity.name, identity.kind.value)
         for identity in application_database_created_catalog_identities(sql)
     ) == (("tenant", "events_copy", "table"),)
+
+
+def test_view_case_expression_with_extract_from_is_not_a_relation_target() -> None:
+    """A SELECT-list EXTRACT(... FROM ...) must not make CASE look like a table."""
+    sql = """
+    CREATE OR REPLACE VIEW omninode_internal.gateway_link_health_status AS
+    SELECT
+        EXTRACT(EPOCH FROM (NOW() - last_seen_at)) AS seconds_since_last_seen,
+        CASE
+            WHEN NOW() - last_seen_at > INTERVAL '60 seconds' THEN 'UNHEALTHY'
+            ELSE 'HEALTHY'
+        END AS health_status
+    FROM omninode_internal.gateway_link_health;
+    """
+
+    violations = lint_application_database_sql(sql, _TOPOLOGY)
+
+    assert "application relation target 'case' must be schema-qualified" not in (
+        "\n".join(violations)
+    )
 
 
 @pytest.mark.parametrize(
@@ -480,17 +503,22 @@ CROSS JOIN tokens_by_model;
 @pytest.mark.parametrize(
     ("statement", "expected"),
     [
-        # An unqualified relation in the post-WITH tail still fails.
+        # An unqualified relation in the post-WITH tail still fails. Uses
+        # unmapped_events (not delegation_events) -- OMN-16237 makes
+        # delegation_events itself pass unqualified, since it is enumerated
+        # in the shared physical-schema-mapping allowlist; this table name
+        # is deliberately NOT in that allowlist so the CTE-scoping behavior
+        # under test stays independent of the allowlist pass-through.
         (
             "CREATE VIEW tenant.v AS WITH totals AS (SELECT 1 AS n) "
-            "SELECT * FROM totals CROSS JOIN delegation_events;",
-            "'delegation_events' must be schema-qualified",
+            "SELECT * FROM totals CROSS JOIN unmapped_events;",
+            "'unmapped_events' must be schema-qualified",
         ),
         # An unqualified relation inside a CTE body still fails.
         (
             "CREATE VIEW tenant.v AS WITH totals AS "
-            "(SELECT * FROM delegation_events) SELECT * FROM totals;",
-            "'delegation_events' must be schema-qualified",
+            "(SELECT * FROM unmapped_events) SELECT * FROM totals;",
+            "'unmapped_events' must be schema-qualified",
         ),
         # The view's own name is still a real relation target.
         (
@@ -516,4 +544,66 @@ def test_view_body_cte_recognition_never_exempts_a_real_relation(
     statement: str,
     expected: str,
 ) -> None:
+    assert expected in "\n".join(lint_application_database_sql(statement, _TOPOLOGY))
+
+
+# ---------------------------------------------------------------------------
+# OMN-16237: the static schema-qualification lint must consult the SAME
+# physical-schema allowlist the runtime grants system already trusts
+# (physical_grant_schema_for_table / INTERNAL_TABLES_PHYSICALLY_IN_PUBLIC_
+# UNTIL_OMN15359, TENANT_TABLES_PHYSICALLY_IN_PUBLIC_UNTIL_OMN15359) instead
+# of unconditionally rejecting every unqualified or public-qualified
+# application relation. A table only satisfies the allowlist pass-through by
+# being enumerated there -- it must never become a blanket public exemption.
+# ---------------------------------------------------------------------------
+
+
+def test_intent_classification_events_is_enumerated_in_the_shared_allowlist() -> None:
+    """Guard against the two allowlists drifting apart (import-shared, not copied)."""
+    assert (
+        "intent_classification_events"
+        in INTERNAL_TABLES_PHYSICALLY_IN_PUBLIC_UNTIL_OMN15359
+    )
+
+
+@pytest.mark.parametrize(
+    "statement",
+    [
+        "ALTER TABLE intent_classification_events ADD COLUMN agent_source text;",
+        "ALTER TABLE public.intent_classification_events ADD COLUMN agent_source text;",
+    ],
+)
+def test_allowlisted_physically_public_table_passes_unqualified_or_public(
+    statement: str,
+) -> None:
+    """OMN-16237: a table enumerated in the physical-schema-mapping allowlist
+    satisfies schema-qualification whether referenced unqualified (matching
+    its real physical location) or explicitly public-qualified. This is the
+    exact shape OMN-14751's 0001_intent_classification_agent_source.sql
+    ships -- an unqualified ALTER on a table whose contract is logically
+    omninode_internal but physically public pending the OMN-15359 migration.
+    """
+    assert lint_application_database_sql(statement, _TOPOLOGY) == ()
+
+
+@pytest.mark.parametrize(
+    ("statement", "expected"),
+    [
+        (
+            "ALTER TABLE not_an_allowlisted_table ADD COLUMN x text;",
+            "'not_an_allowlisted_table' must be schema-qualified",
+        ),
+        (
+            "ALTER TABLE public.not_an_allowlisted_table ADD COLUMN x text;",
+            "'public.not_an_allowlisted_table' is prohibited in public",
+        ),
+    ],
+)
+def test_non_allowlisted_table_in_public_still_fails(
+    statement: str,
+    expected: str,
+) -> None:
+    """The allowlist is a narrow, enumerated pass-through, never a blanket
+    public/unqualified exemption -- a table absent from the shared allowlist
+    must still be rejected exactly as before."""
     assert expected in "\n".join(lint_application_database_sql(statement, _TOPOLOGY))

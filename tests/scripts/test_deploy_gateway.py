@@ -423,7 +423,10 @@ def test_build_command_stamps_sibling_ref_build_args(harness: _Harness) -> None:
     assert result.returncode == 0, result.stderr
     assert "--build-arg OMNIBASE_COMPAT_REF=main" in result.stdout
     assert "--build-arg OMNIMARKET_REF=dev" in result.stdout
-    assert "--build-arg ONEX_CHANGE_CONTROL_REF=main" in result.stdout
+    # OMN-16296: ONEX_CHANGE_CONTROL_REF is deliberately NOT stamped any more --
+    # the Dockerfile ARG it fed was removed with onex_change_control itself, so
+    # passing it would be a dead build-arg docker warns about as unconsumed.
+    assert "ONEX_CHANGE_CONTROL_REF" not in result.stdout
 
 
 @pytest.mark.unit

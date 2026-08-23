@@ -182,7 +182,7 @@ class TestDeriveIds:
     def test_route_id_with_operation(self) -> None:
         """OMN-9461: operation suffix disambiguates repeated handler references."""
         handler_key = _derive_handler_entry_key(
-            self._entry("HandlerLlmCliSubprocess", "inference.gemini_cli")
+            self._entry("HandlerRoutingExample", "inference.example_op")
         )
 
         assert (
@@ -191,7 +191,7 @@ class TestDeriveIds:
                 handler_key,
                 "onex.cmd.omnibase-infra.llm-inference-request.v1",
             )
-            == "route.auto.my_node.HandlerLlmCliSubprocess.inference_gemini_cli_fb462661.onex_cmd_omnibase_infra_llm_inference_request_v1"
+            == "route.auto.my_node.HandlerRoutingExample.inference_example_op_d1904b8c.onex_cmd_omnibase_infra_llm_inference_request_v1"
         )
 
     def test_route_id_without_operation_unchanged(self) -> None:
@@ -214,7 +214,7 @@ class TestDeriveIds:
     def test_dispatcher_id_with_operation(self) -> None:
         """OMN-9461: operation suffix disambiguates repeated handler references."""
         handler_key = _derive_handler_entry_key(
-            self._entry("HandlerLlmCliSubprocess", "inference.gemini_cli")
+            self._entry("HandlerRoutingExample", "inference.example_op")
         )
 
         assert (
@@ -222,7 +222,7 @@ class TestDeriveIds:
                 "node_llm_inference_effect",
                 handler_key,
             )
-            == "dispatcher.auto.node_llm_inference_effect.HandlerLlmCliSubprocess.inference_gemini_cli_fb462661"
+            == "dispatcher.auto.node_llm_inference_effect.HandlerRoutingExample.inference_example_op_d1904b8c"
         )
 
     def test_dispatcher_id_collision_safe(self) -> None:
@@ -964,9 +964,9 @@ class TestWireFromManifest:
         """OMN-9461: two entries referencing the same handler class for different
         operations must wire without duplicate dispatcher or route ID collisions.
 
-        Mirrors the real node_llm_inference_effect contract which lists
-        HandlerLlmCliSubprocess for both ``inference.gemini_cli`` and
-        ``inference.claude_cli``.
+        Synthetic regression fixture: a shared handler class bound to two
+        distinct operations on the same contract (the general shape this
+        guards, independent of any specific live contract).
         """
         from omnibase_infra.runtime.message_dispatch_engine import (
             MessageDispatchEngine,
@@ -977,12 +977,12 @@ class TestWireFromManifest:
             ModelHandlerRoutingEntry(
                 handler=ModelHandlerRef(name="HandlerShared", module="fake.module"),
                 event_model=None,
-                operation="inference.gemini_cli",
+                operation="inference.variant_a",
             ),
             ModelHandlerRoutingEntry(
                 handler=ModelHandlerRef(name="HandlerShared", module="fake.module"),
                 event_model=None,
-                operation="inference.claude_cli",
+                operation="inference.variant_b",
             ),
         )
         handler_routing = ModelHandlerRouting(
@@ -990,7 +990,7 @@ class TestWireFromManifest:
             handlers=handler_entries,
         )
         contract = _make_contract(
-            name="node_llm_inference_effect",
+            name="node_test_shared_handler",
             subscribe_topics=("onex.cmd.omnibase-infra.llm-inference-request.v1",),
             handler_routing=handler_routing,
         )

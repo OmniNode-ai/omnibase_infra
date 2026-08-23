@@ -69,6 +69,10 @@ databases:
             schema: public
             objects: [delegation_events]
             privileges: [SELECT, INSERT, UPDATE]
+          - object_type: TABLE
+            schema: tenant
+            objects: [future_tenant_projection]
+            privileges: [SELECT, INSERT, UPDATE]
     bindings:
       app_dashboard:
         database_ref: application

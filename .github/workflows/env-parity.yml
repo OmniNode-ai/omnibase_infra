@@ -39,21 +39,53 @@ jobs:
     # cleanup has exceeded 5 minutes under runner pressure.
     timeout-minutes: 10
 
+    # OMN-16414: this job cannot degrade to a token-less run the way the
+    # other app-token consumers in this repo can, because the sibling repo
+    # it checks out (omninode_infra) is PRIVATE (verified via
+    # `gh api repos/OmniNode-ai/omninode_infra --jq .private`) -- unlike
+    # onex_change_control / omniclaude / omnidash / omniintelligence /
+    # omnibase_core / omnimemory, which are all public and where a
+    # `continue-on-error` + `github.token` fallback is sufficient (see
+    # ci.yml's contract-compliance / migration-conflict-check jobs and
+    # omni-standards-compliance.yml). A fork-triggered pull_request run gets
+    # no org secrets, so the mint step would fail and the checkout below
+    # would then fail again on an unauthenticated private-repo clone --
+    # there is no token that makes this job succeed on a fork. Skip it
+    # cleanly (neutral, not red) instead of failing on infrastructure the
+    # fork contributor cannot fix. Same-repo PRs, merge_group, push, and
+    # workflow_dispatch are unaffected.
+    if: >-
+      github.event_name != 'pull_request' ||
+      github.event.pull_request.head.repo.full_name == github.repository
+
     steps:
       - name: Checkout omnibase_infra
         uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
         with:
           path: omnibase_infra
 
+      # OMN-16373: CROSS_REPO_PAT retirement — mint a short-lived
+      # onexbot-occ-writer App installation token, scoped to the one
+      # sibling repo this job reads.
+      - name: Mint onexbot-occ-writer app token
+        id: app-token
+        uses: actions/create-github-app-token@d72941d797fd3113feb6b93fd0dec494b13a2547 # v1
+        with:
+          app-id: ${{ secrets.ONEXBOT_OCC_APP_ID }}
+          private-key: ${{ secrets.ONEXBOT_OCC_PRIVATE_KEY }}
+          owner: OmniNode-ai
+          repositories: omninode_infra
+          permission-contents: write
+
       - name: Checkout omninode_infra (sibling — provides k8s ConfigMap)
         # GITHUB_TOKEN is scoped to omnibase_infra and cannot access the private
-        # omninode_infra repo. Prefer the org-wide cross-repo token used by
-        # sibling-repo workflows, then fall back to the legacy token name.
+        # omninode_infra repo. Prefer the minted App token, then fall back to
+        # the legacy token name.
         uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
         with:
           repository: OmniNode-ai/omninode_infra
           path: omninode_infra
-          token: ${{ secrets.CROSS_REPO_PAT || secrets.OMNI_GITHUB_TOKEN || github.token }}
+          token: ${{ steps.app-token.outputs.token || secrets.OMNI_GITHUB_TOKEN || github.token }}
 
       - name: Setup Python and uv
         uses: ./omnibase_infra/.github/actions/setup-python-uv

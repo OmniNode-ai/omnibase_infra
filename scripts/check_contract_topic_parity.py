@@ -427,12 +427,29 @@ _LEGACY_ALLOWLIST: dict[str, str] = {
     "onex.evt.omnibase-infra.llm-endpoint-health.v1": "pre-existing parity gap; declared in services/topics.yaml (service-emitted, not node-owned); needs contract.yaml producer | owner: jonah | expiry: 2026-09-01 | epic: OMN-13188",
     "onex.evt.omnibase-infra.routing-decided.v1": "pre-existing parity gap; routing decision event; needs contract.yaml producer | owner: jonah | expiry: 2026-09-01 | epic: OMN-13188",
     "onex.evt.omniclaude.context-enrichment.v1": "pre-existing parity gap; omniclaude hook event (cross-repo); contract.yaml owned in omniclaude | owner: jonah | expiry: 2026-09-01 | epic: OMN-13188",
-    # OMN-13533: hook-context-injected.v1, validator-catch.v1, pattern-enforcement.v1,
-    # session-outcome.v1, dispatch-outcome-evaluated.v1 are now declared in
-    # node_savings_estimation_compute/contract.yaml subscribe_topics (the savings
-    # estimation consumer's real subscriptions), so they are contract-covered and
-    # no longer need allowlisting. The contract-driven provisioner now creates them
-    # on the broker, fixing the consumer-start "topic not found in cluster" storm.
+    # OMN-16293 correction to the OMN-13533 comment below: node_savings_estimation_compute
+    # is no longer the contract-driven provisioning source for these 5 topics.
+    # OMN-13533's fix put them in that node's event_bus.subscribe_topics so the
+    # provisioner would create them — but that same declaration is what caused
+    # the auto-wiring runtime to open a live, permanently-dead consumer group on
+    # each of them (OMN-16292/OMN-16293 finding: the operation_match handler
+    # never matches a raw domain event, so the subscription joins and consumes
+    # real broker traffic for zero output). OMN-16293 moved raw ingestion of
+    # context-injected/validator-catch/pattern-enforcement to a direct
+    # service_kernel.py subscription (bypassing event_bus.subscribe_topics /
+    # auto-wiring entirely — HandlerSavingsCorrelation.ingest_injection_event /
+    # ingest_validator_catch_event), and stopped consuming session-outcome.v1 /
+    # dispatch-outcome-evaluated.v1 raw at all (session-outcome is read from the
+    # already-projected session_outcomes table; dispatch-outcome-evaluated is
+    # out of scope, owned by the OMN-15800 workstream). All 5 topics remain
+    # provisioned on the broker from prior deploys; re-declaring them in ANY
+    # node's event_bus.subscribe_topics would recreate the exact dead-consumer-
+    # group defect this ticket fixes, so they are allowlisted here instead.
+    "onex.evt.omniclaude.context-injected.v1": "OMN-16293: raw-ingested directly by service_kernel.py (HandlerSavingsCorrelation), not via contract auto-wiring; topic remains broker-provisioned from prior deploys | owner: jonah | expiry: 2026-09-01 | epic: OMN-16293",
+    "onex.evt.omniclaude.validator-catch.v1": "OMN-16293: raw-ingested directly by service_kernel.py (HandlerSavingsCorrelation), not via contract auto-wiring; topic remains broker-provisioned from prior deploys | owner: jonah | expiry: 2026-09-01 | epic: OMN-16293",
+    "onex.evt.omniclaude.pattern-enforcement.v1": "OMN-16293: raw-ingested directly by service_kernel.py (HandlerSavingsCorrelation), not via contract auto-wiring; topic remains broker-provisioned from prior deploys | owner: jonah | expiry: 2026-09-01 | epic: OMN-16293",
+    "onex.evt.omniclaude.session-outcome.v1": "OMN-16293: no longer raw-subscribed by omnibase_infra — savings correlation reads the already-projected session_outcomes table (omnimarket node_projection_session_outcome); topic remains broker-provisioned from prior deploys | owner: jonah | expiry: 2026-09-01 | epic: OMN-16293",
+    "onex.evt.omniintelligence.dispatch-outcome-evaluated.v1": "OMN-16293: dispatch-eval savings correlation branch dropped from node_savings_estimation_compute's scope (owned by the active OMN-15800 savings.v1 workstream); topic remains broker-provisioned from prior deploys | owner: jonah | expiry: 2026-09-01 | epic: OMN-16293",
     "onex.evt.omniclaude.injection-recorded.v1": "pre-existing parity gap; omniclaude hook event (cross-repo); contract.yaml owned in omniclaude | owner: jonah | expiry: 2026-09-01 | epic: OMN-13188",
     "onex.evt.omniweb.waitlist-signup.v1": "pre-existing parity gap; omniweb waitlist signup event (cross-repo); consumer: waitlist-signup-notifier | owner: jonah | expiry: 2026-09-01 | epic: OMN-13188",
 }

@@ -247,7 +247,10 @@ def test_red_control_nonlocal_tenant_guc() -> None:
         "SELECT set_config(%s, %s, true)",
         ("app.tenant_id", str(tenant_id)),
     )
-    assert 'INSERT INTO "tenant"."delegation_events"' in calls[2].args[0]
+    # OMN-16239: qualified with the PHYSICAL schema. delegation_events is still
+    # under the OMN-15359 bridge and lives in public; the pre-fix assertion here
+    # named "tenant", a schema the analytics database does not even have.
+    assert 'INSERT INTO "public"."delegation_events"' in calls[2].args[0]
     assert calls[2].args[1]["tenant_id"] == tenant_id
     assert isinstance(calls[2].args[1]["tenant_id"], UUID)
     conn.commit.assert_called_once_with()

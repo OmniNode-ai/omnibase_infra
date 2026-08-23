@@ -51,6 +51,27 @@ jobs:
       - name: Checkout code
         uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
 
+      # OMN-16373: CROSS_REPO_PAT retirement — mint a short-lived
+      # onexbot-occ-writer App installation token for the sibling-repo
+      # reads this job's uv/pip install performs.
+      # OMN-16414: continue-on-error is REQUIRED here, not optional polish.
+      # Fork-triggered pull_request runs receive no org secrets (app-id/
+      # private-key resolve empty), and create-github-app-token hard-fails
+      # the step ("Input required and not supplied: app-id") when that
+      # happens. Without this guard the job dies right here even though
+      # every downstream step already falls back to `github.token`
+      # (`steps.app-token.outputs.token || github.token`) -- the fallback
+      # was unreachable dead code until this line let the step fail soft.
+      - name: Mint onexbot-occ-writer app token
+        id: app-token
+        continue-on-error: true
+        uses: actions/create-github-app-token@d72941d797fd3113feb6b93fd0dec494b13a2547 # v1
+        with:
+          app-id: ${{ secrets.ONEXBOT_OCC_APP_ID }}
+          private-key: ${{ secrets.ONEXBOT_OCC_PRIVATE_KEY }}
+          owner: OmniNode-ai
+          permission-contents: write
+
       - name: Setup Python and uv
         uses: ./.github/actions/setup-python-uv
         with:
@@ -59,7 +80,7 @@ jobs:
           cache-enabled: "false"
           cache-key-prefix: uv-type-safety
           install-args: --all-extras
-          github-token: ${{ secrets.CROSS_REPO_PAT || github.token }}
+          github-token: ${{ steps.app-token.outputs.token || github.token }}
           sync-attempts: "3"
           sync-retry-delay-seconds: "10"
 
@@ -86,6 +107,27 @@ jobs:
       - name: Checkout code
         uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
 
+      # OMN-16373: CROSS_REPO_PAT retirement — mint a short-lived
+      # onexbot-occ-writer App installation token for the sibling-repo
+      # reads this job's uv/pip install performs.
+      # OMN-16414: continue-on-error is REQUIRED here, not optional polish.
+      # Fork-triggered pull_request runs receive no org secrets (app-id/
+      # private-key resolve empty), and create-github-app-token hard-fails
+      # the step ("Input required and not supplied: app-id") when that
+      # happens. Without this guard the job dies right here even though
+      # every downstream step already falls back to `github.token`
+      # (`steps.app-token.outputs.token || github.token`) -- the fallback
+      # was unreachable dead code until this line let the step fail soft.
+      - name: Mint onexbot-occ-writer app token
+        id: app-token
+        continue-on-error: true
+        uses: actions/create-github-app-token@d72941d797fd3113feb6b93fd0dec494b13a2547 # v1
+        with:
+          app-id: ${{ secrets.ONEXBOT_OCC_APP_ID }}
+          private-key: ${{ secrets.ONEXBOT_OCC_PRIVATE_KEY }}
+          owner: OmniNode-ai
+          permission-contents: write
+
       - name: Setup Python and uv
         uses: ./.github/actions/setup-python-uv
         with:
@@ -94,7 +136,7 @@ jobs:
           cache-enabled: "false"
           cache-key-prefix: uv-type-union
           install-args: --all-extras
-          github-token: ${{ secrets.CROSS_REPO_PAT || github.token }}
+          github-token: ${{ steps.app-token.outputs.token || github.token }}
           sync-attempts: "3"
           sync-retry-delay-seconds: "10"
 
@@ -125,9 +167,30 @@ jobs:
         with:
           version: ${{ env.UV_VERSION }}
 
+      # OMN-16373: CROSS_REPO_PAT retirement — mint a short-lived
+      # onexbot-occ-writer App installation token for the sibling-repo
+      # reads this job's uv/pip install performs.
+      # OMN-16414: continue-on-error is REQUIRED here, not optional polish.
+      # Fork-triggered pull_request runs receive no org secrets (app-id/
+      # private-key resolve empty), and create-github-app-token hard-fails
+      # the step ("Input required and not supplied: app-id") when that
+      # happens. Without this guard the job dies right here even though
+      # every downstream step already falls back to `github.token`
+      # (`steps.app-token.outputs.token || github.token`) -- the fallback
+      # was unreachable dead code until this line let the step fail soft.
+      - name: Mint onexbot-occ-writer app token
+        id: app-token
+        continue-on-error: true
+        uses: actions/create-github-app-token@d72941d797fd3113feb6b93fd0dec494b13a2547 # v1
+        with:
+          app-id: ${{ secrets.ONEXBOT_OCC_APP_ID }}
+          private-key: ${{ secrets.ONEXBOT_OCC_PRIVATE_KEY }}
+          owner: OmniNode-ai
+          permission-contents: write
+
       - name: Install onex_change_control (pinned)
         env:
-          GIT_FETCH_TOKEN: ${{ secrets.CROSS_REPO_PAT || github.token }}
+          GIT_FETCH_TOKEN: ${{ steps.app-token.outputs.token || github.token }}
         run: |
           set -euo pipefail
           # Authenticate the git+https fetch so it isn't anonymous-rate-limited
