@@ -1,7 +1,7 @@
 {
   "epic": "OMN-12525",
   "gate_posture": "Report-only at S0 (design D3). Each entry is a real multi-match tie resolved by registration/insertion order \u2014 a latent production hazard ticketed under OMN-12525, NOT gate-blocking in this parity PR.",
-  "generated_at_utc": "2026-08-22T21:53:40.545802+00:00",
+  "generated_at_utc": "2026-08-23T00:04:39.456652+00:00",
   "order_sensitive_count": 27,
   "order_sensitive_probes": [
     {
