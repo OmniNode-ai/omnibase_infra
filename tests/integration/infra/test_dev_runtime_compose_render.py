@@ -76,6 +76,12 @@ BASE_REQUIRED_ENV: dict[str, str] = {
     "OMNIINTELLIGENCE_DB_URL": _INTEL_DSN,
     "INFISICAL_DB_CONNECTION_URI": "postgresql://postgres:test@postgres:5432/infisical_db",
     "INFISICAL_REDIS_URL": "redis://:test@valkey:6379",
+    "GATEWAY_ATTACH_KEYCLOAK_INTROSPECTION_URL": (
+        "http://keycloak:8080/realms/omninode/protocol/openid-connect/token/introspect"
+    ),
+    "GATEWAY_ATTACH_KEYCLOAK_JWKS_URL": (
+        "http://keycloak:8080/realms/omninode/protocol/openid-connect/certs"
+    ),
     "OMNIBASE_INFRA_AGENT_ACTIONS_POSTGRES_DSN": _PG_DSN,
     "OMNIBASE_INFRA_SKILL_LIFECYCLE_POSTGRES_DSN": _PG_DSN,
     "OMNIBASE_INFRA_CONTEXT_AUDIT_POSTGRES_DSN": _PG_DSN,

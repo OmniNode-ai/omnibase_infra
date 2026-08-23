@@ -1110,6 +1110,12 @@ COMPOSE_CONFIG_RENDER_ENV: dict[str, str] = {
     "DEV_REDPANDA_ADVERTISE_HOST": "localhost",  # kafka-fallback-ok — test fixture
     "ARCH_GRAPH_BOLT_URI": "bolt://omnibase-infra-memgraph:7687",
     # OMN-5439: Keycloak / ONEX service auth vars added with :? fail-fast
+    "GATEWAY_ATTACH_KEYCLOAK_INTROSPECTION_URL": (
+        "http://keycloak:8080/realms/omninode/protocol/openid-connect/token/introspect"
+    ),
+    "GATEWAY_ATTACH_KEYCLOAK_JWKS_URL": (
+        "http://keycloak:8080/realms/omninode/protocol/openid-connect/certs"
+    ),
     "ONEX_REGISTRATION_AUTO_ACK": "true",
     "ONEX_SERVICE_CLIENT_SECRET": "test-service-secret",
     "LINEAR_API_KEY": "test-linear-api-key",
