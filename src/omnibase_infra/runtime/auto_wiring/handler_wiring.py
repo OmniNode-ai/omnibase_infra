@@ -6854,13 +6854,31 @@ async def _interleave_contract(
                 status=EnumTopicReadinessStatus.UNAVAILABLE,
             )
         if not readiness.is_ready:
+            # OMN-15578: carry the classified reason (EnumTopicReadinessFailureReason,
+            # OMN-13237) and human-readable detail per topic — not just the bare
+            # topic name — so a NOT-READY boot outcome is root-causable from logs
+            # alone. Structured via extra= (OMN-14492 discipline) so the data is
+            # grep/query-able rather than buried in a formatted string.
+            failure_details = [
+                {
+                    "topic": f.topic,
+                    "reason": f.reason.value,
+                    "detail": f.detail,
+                }
+                for f in readiness.failures
+            ]
             logger.warning(
                 "Contract '%s' NOT-READY: topic metadata did not converge "
                 "(status=%s failures=%s) — skipping consumer attach, runtime "
                 "stays live (OMN-13237)",
                 name,
                 readiness.status.value,
-                [f.topic for f in readiness.failures],
+                failure_details,
+                extra={
+                    "contract_name": name,
+                    "readiness_status": readiness.status.value,
+                    "readiness_failures": failure_details,
+                },
             )
             return ModelContractAttachResult(
                 contract_name=name,
@@ -7114,11 +7132,31 @@ async def run_not_ready_reconciliation_loop(
             await sleep(backoff_seconds)
 
     if pending:
+        # OMN-15578: same discipline as the NOT-READY warning above — carry
+        # per-contract reason+detail (from each still-pending result's
+        # readiness.failures), not just the bare contract name, so a
+        # reconciliation-exhaustion outcome is root-causable from logs alone.
+        failure_details = {
+            contract_name: [
+                {
+                    "topic": f.topic,
+                    "reason": f.reason.value,
+                    "detail": f.detail,
+                }
+                for f in (result.readiness.failures if result.readiness else ())
+            ]
+            for contract_name, result in pending.items()
+        }
         logger.warning(
             "NOT_READY reconciliation exhausted after %d attempts, still "
             "not-ready: %s (OMN-15215/OMN-13237, runtime stays live degraded)",
             max_attempts,
-            sorted(pending),
+            failure_details,
+            extra={
+                "max_attempts": max_attempts,
+                "pending_contracts": sorted(pending),
+                "readiness_failures": failure_details,
+            },
         )
     return tuple(latest.values())
 
