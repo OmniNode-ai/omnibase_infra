@@ -123,6 +123,34 @@ class _FakeUnreachableTransport(_FakeHealthyTransport):
         raise ConnectionError("no route to broker")
 
 
+class _FakeAdminClient:
+    """Records ``create_topics`` calls instead of dialing a real broker."""
+
+    created: list[str] = []
+
+    def __init__(self, *, bootstrap_servers: str, **_auth_kwargs: object) -> None:
+        self.bootstrap_servers = bootstrap_servers
+        self.started = False
+        self.closed = False
+
+    async def start(self) -> None:
+        self.started = True
+
+    async def close(self) -> None:
+        self.closed = True
+
+    async def create_topics(self, new_topics: Sequence[object]) -> None:
+        for new_topic in new_topics:
+            _FakeAdminClient.created.append(new_topic.name)  # type: ignore[attr-defined]
+
+
+class _FailingAdminClient(_FakeAdminClient):
+    """Simulates a broker that rejects topic creation -- must not block the leg check."""
+
+    async def create_topics(self, new_topics: Sequence[object]) -> None:
+        raise RuntimeError("admin API unreachable")
+
+
 @pytest.mark.asyncio
 async def test_check_canary_leg_passes_on_real_round_trip() -> None:
     result = await gateway_canary_probe.check_canary_leg(
@@ -131,6 +159,7 @@ async def test_check_canary_leg_passes_on_real_round_trip() -> None:
         topic=CANARY_TOPIC,
         canary=_canary(),
         transport_factory=_FakeHealthyTransport,
+        admin_factory=_FakeAdminClient,
     )
     assert result.passed is True
     assert "local" in result.detail
@@ -144,6 +173,7 @@ async def test_check_canary_leg_fails_on_readback_timeout() -> None:
         topic=CANARY_TOPIC,
         canary=_canary(readback_deadline_seconds=0.1),
         transport_factory=_FakeDeadTransport,
+        admin_factory=_FakeAdminClient,
     )
     assert result.passed is False
     assert "cloud" in result.detail
@@ -158,9 +188,41 @@ async def test_check_canary_leg_fails_on_connect_error() -> None:
         topic=CANARY_TOPIC,
         canary=_canary(),
         transport_factory=_FakeUnreachableTransport,
+        admin_factory=_FakeAdminClient,
     )
     assert result.passed is False
     assert "connect failed" in result.detail
+
+
+@pytest.mark.asyncio
+async def test_check_canary_leg_provisions_missing_topic_before_probing() -> None:
+    """OMN-15810 / OMN-16420: the leg check must ensure its topic exists first."""
+    _FakeAdminClient.created = []
+    result = await gateway_canary_probe.check_canary_leg(
+        leg="local",
+        bus_config=_bus_config(),
+        topic=CANARY_TOPIC,
+        canary=_canary(),
+        transport_factory=_FakeHealthyTransport,
+        admin_factory=_FakeAdminClient,
+    )
+    assert result.passed is True
+    assert _FakeAdminClient.created == [CANARY_TOPIC]
+
+
+@pytest.mark.asyncio
+async def test_check_canary_leg_survives_topic_provisioning_failure() -> None:
+    """Provisioning is best-effort -- a broker-side rejection must not itself
+    fail the leg check; the subsequent produce/readback is the real signal."""
+    result = await gateway_canary_probe.check_canary_leg(
+        leg="local",
+        bus_config=_bus_config(),
+        topic=CANARY_TOPIC,
+        canary=_canary(),
+        transport_factory=_FakeHealthyTransport,
+        admin_factory=_FailingAdminClient,
+    )
+    assert result.passed is True
 
 
 @pytest.mark.asyncio
@@ -214,6 +276,7 @@ async def test_run_canary_check_distinguishes_local_healthy_cloud_dead(
             topic=topic,
             canary=canary,
             transport_factory=factory,
+            admin_factory=_FakeAdminClient,
         )
 
     monkeypatch.setattr(gateway_canary_probe, "check_canary_leg", _fake_check)
@@ -276,6 +339,7 @@ async def test_probe_reports_overall_fail_when_either_leg_fails(
             topic=topic,
             canary=canary,
             transport_factory=factory,
+            admin_factory=_FakeAdminClient,
         )
 
     monkeypatch.setattr(gateway_canary_probe, "check_canary_leg", _fake_check)
@@ -351,6 +415,81 @@ async def test_probe_serves_cached_result_within_cadence(tmp_path: Path) -> None
     assert calls["count"] == 0
     assert passed is True
     assert report == "PASS: cached"
+
+
+@pytest.mark.asyncio
+async def test_probe_never_serves_a_cached_failure(tmp_path: Path) -> None:
+    """OMN-16420: a cached FAIL must never be replayed -- it always triggers
+    an immediate fresh real check, so a cleared condition is never masked by
+    a stale verdict for the rest of the cadence window."""
+    state_path = tmp_path / "state.json"
+    state_path.write_text(
+        json.dumps(
+            {"checked_at": time.time(), "passed": False, "report": "FAIL: stale"}
+        ),
+        encoding="utf-8",
+    )
+
+    async def _fresh_pass(
+        *args: object, **kwargs: object
+    ) -> tuple[
+        gateway_canary_probe.ModelCanaryLegResult,
+        gateway_canary_probe.ModelCanaryLegResult,
+    ]:
+        return (
+            gateway_canary_probe.ModelCanaryLegResult(
+                leg="local", passed=True, detail="local leg produce+readback confirmed"
+            ),
+            gateway_canary_probe.ModelCanaryLegResult(
+                leg="cloud", passed=True, detail="cloud leg produce+readback confirmed"
+            ),
+        )
+
+    original = gateway_canary_probe.run_canary_check
+    gateway_canary_probe.run_canary_check = _fresh_pass  # type: ignore[assignment]
+    try:
+        config = ModelGatewayForwarderRuntimeConfig(
+            forwarder=ModelGatewayForwarderConfig(
+                tenant_identity=ModelGatewayTenantIdentity(
+                    tenant_id=UUID("11111111-1111-1111-1111-111111111111"),
+                    tenant_slug="acme",
+                    principal_id="t-33333333333333333333333333333333",
+                ),
+                cloud_bus=ModelGatewayCloudBusConfig(
+                    broker_provider_id=UUID("22222222-2222-2222-2222-222222222222"),
+                    cloud_broker_ref="gateway.cloud.kafka.broker",
+                    cloud_auth_ref="gateway.cloud.kafka.msk_iam",
+                    acl_provisioner_ref="gateway.cloud.kafka.authorization",
+                    msk_region_ref="gateway.cloud.kafka.msk_region",
+                    sasl_mechanism="AWS_MSK_IAM",
+                ),
+                local_transport_flavor="containerized",
+                dedupe_store_path=Path.cwd() / "gateway-test.sqlite3",
+                mirror_topics=ModelGatewayMirrorTopics(
+                    inbound=("onex.cmd.omnibase-infra.delegation-request.v1",),
+                    outbound=("onex.evt.omnibase-infra.gateway-heartbeat.v1",),
+                ),
+                canary=_canary(cadence_seconds=300),
+            ),
+            local_bus=_bus_config(),
+            cloud_bus=ModelKafkaEventBusConfig(
+                bootstrap_servers="b-1.example.kafka.amazonaws.com:9098",
+                environment="gateway-cloud",
+                security_protocol="SASL_SSL",
+                sasl_mechanism="AWS_MSK_IAM",
+                msk_region="us-east-1",
+                enable_auto_commit=False,
+                auto_offset_reset="earliest",
+            ),
+        )
+        passed, report = await gateway_canary_probe.probe(config, state_path=state_path)
+    finally:
+        gateway_canary_probe.run_canary_check = original  # type: ignore[assignment]
+
+    # The cached FAIL was NOT replayed -- a fresh real check ran and reported PASS.
+    assert passed is True
+    assert "CANARY_STALE_FAILURE_CACHED" not in report
+    assert "FAIL: stale" not in report
 
 
 def test_canary_config_rejects_empty_topic() -> None:
