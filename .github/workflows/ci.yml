@@ -3320,6 +3320,14 @@ jobs:
           # Fail-closed inside the suite: with a Postgres in hand, a SKIP is a
           # vacuous green and is treated as an error.
           OMN15376_REQUIRE_PG: "1"
+          # OMN-16412: the fixture hard-rejects a non-loopback ambient DSN
+          # unless explicitly opted in. On this fleet's self-hosted runners
+          # the job itself executes inside a container, so the "Resolve
+          # Postgres service host" step above falls through past 127.0.0.1 to
+          # the Docker bridge gateway (observed live: 172.18.0.1) -- that's
+          # this job's OWN freshly-provisioned `services.postgres` container,
+          # not a stray ambient var, so it gets the explicit opt-in here.
+          OMN15376_ALLOW_REMOTE_PG: "1"
         run: |
           uv run pytest \
             tests/integration/migrations/test_node_migration_shape_drift_omn15376.py \
