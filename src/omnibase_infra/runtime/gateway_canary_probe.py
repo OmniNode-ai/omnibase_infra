@@ -34,11 +34,15 @@ import json
 import logging
 import sys
 import time
-from collections.abc import Sequence
+from collections.abc import Callable, Sequence
 from pathlib import Path
 from typing import NamedTuple
 from uuid import uuid4
 
+from aiokafka.admin import AIOKafkaAdminClient, NewTopic
+from aiokafka.errors import TopicAlreadyExistsError
+
+from omnibase_infra.event_bus.kafka_auth import build_aiokafka_auth_kwargs
 from omnibase_infra.event_bus.kafka_transport import KafkaTransport
 from omnibase_infra.event_bus.models.config import ModelKafkaEventBusConfig
 from omnibase_infra.nodes.node_bus_forwarder_effect.models import (
@@ -50,6 +54,9 @@ from omnibase_infra.nodes.node_bus_forwarder_effect.services.service_gateway_top
 )
 from omnibase_infra.runtime.gateway_forwarder import (
     load_gateway_forwarder_runtime_config,
+)
+from omnibase_infra.topics.model_topic_provisioning_policy import (
+    ModelTopicProvisioningPolicy,
 )
 
 logger = logging.getLogger(__name__)
@@ -66,6 +73,63 @@ class ModelCanaryLegResult(NamedTuple):
     detail: str
 
 
+async def _ensure_topic_exists(
+    bus_config: ModelKafkaEventBusConfig,
+    topic: str,
+    *,
+    admin_factory: Callable[..., AIOKafkaAdminClient] = AIOKafkaAdminClient,
+) -> None:
+    """Best-effort idempotent creation of the dedicated canary topic.
+
+    OMN-15810 / OMN-16420: on a lane where the canary topic was never
+    provisioned, every real check failed with "not found in cluster
+    metadata" -- a permanent false negative on an otherwise-healthy leg. The
+    canary topic never carries real gateway traffic (it is scratch space
+    dedicated to this probe alone), so provisioning it here -- rather than
+    routing through the runtime's full contract-driven ``TopicProvisioner``
+    -- keeps this probe a standalone process that dials brokers directly,
+    matching the rest of this module's design.
+
+    Provisioning failure is never fatal to the probe: if the topic genuinely
+    cannot be created (e.g. insufficient broker permissions, or a cloud
+    cluster's replication-factor policy rejects ``replication_factor=1``),
+    the caller's own produce/readback attempt fails right after this with a
+    clear connect/produce error -- that is the real, honest signal.
+    """
+    admin = admin_factory(
+        bootstrap_servers=bus_config.bootstrap_servers,
+        **build_aiokafka_auth_kwargs(bus_config),
+    )
+    try:
+        await admin.start()
+        # OMN-15395: replication factor must resolve through the policy seam,
+        # never a hardcoded literal (the canary topic has no owning contract,
+        # so `declared=None` -- the policy still resolves it: RF2 on a managed
+        # MSK cluster, RF1 on an unmeasured self-hosted broker).
+        policy = ModelTopicProvisioningPolicy.from_kafka_config(bus_config)
+        replication_factor = policy.resolve_replication_factor(
+            topic=topic, declared=None
+        )
+        await admin.create_topics(
+            [
+                NewTopic(
+                    name=topic,
+                    num_partitions=1,
+                    replication_factor=replication_factor,
+                )
+            ],
+        )
+    except TopicAlreadyExistsError:
+        pass
+    except Exception:  # noqa: BLE001 -- best-effort; the leg check below is the real signal
+        logger.warning("canary probe: failed to ensure topic %s exists", topic)
+    finally:
+        try:
+            await admin.close()
+        except Exception:  # noqa: BLE001 -- cleanup must not mask the real result
+            logger.warning("canary probe: admin client close failed for %s", topic)
+
+
 async def check_canary_leg(
     *,
     leg: str,
@@ -73,6 +137,7 @@ async def check_canary_leg(
     topic: str,
     canary: ModelGatewayCanaryConfig,
     transport_factory: type[KafkaTransport] = KafkaTransport,
+    admin_factory: Callable[..., AIOKafkaAdminClient] = AIOKafkaAdminClient,
 ) -> ModelCanaryLegResult:
     """Produce one tiny canary record to ``topic`` and confirm readback.
 
@@ -81,6 +146,7 @@ async def check_canary_leg(
     it just produced, never replays history, so repeated runs cannot build up
     unbounded lag on the dedicated canary topic.
     """
+    await _ensure_topic_exists(bus_config, topic, admin_factory=admin_factory)
     correlation_id = uuid4().hex.encode("ascii")
     group = f"gateway-canary-probe-{leg}-{uuid4().hex}"
     transport = transport_factory(
@@ -180,8 +246,20 @@ async def run_canary_check(
     return local_result, cloud_result
 
 
-def _load_cached_state(state_path: Path, cadence_seconds: int) -> str | None:
-    """Return the cached report if it is still within cadence, else ``None``."""
+def _load_cached_passing_state(state_path: Path, cadence_seconds: int) -> str | None:
+    """Return the cached report only if it was a PASS still within cadence.
+
+    OMN-16420: the prior version of this helper also served cached FAILURES,
+    prefixed with a ``CANARY_STALE_FAILURE_CACHED`` marker, for the entire
+    cadence window. Docker calls the healthcheck far more often than
+    ``cadence_seconds``, so once one real check failed, every subsequent tick
+    replayed that same stale failure verbatim -- a live recovery (e.g. a
+    transient broker blip clearing) stayed invisible in the health log until
+    the cache happened to expire. A cached PASS is still safe to replay (it
+    only ever avoids redundant spam on the already-healthy path); a cached
+    FAIL is never replayed -- ``probe()`` always runs a fresh real check
+    instead, so the reported verdict is never staler than "right now."
+    """
     try:
         raw = json.loads(state_path.read_text(encoding="utf-8"))
     except (OSError, ValueError):
@@ -189,13 +267,13 @@ def _load_cached_state(state_path: Path, cadence_seconds: int) -> str | None:
     checked_at = raw.get("checked_at")
     passed = raw.get("passed")
     report = raw.get("report")
-    if not isinstance(checked_at, (int, float)) or not isinstance(passed, bool):
+    if not isinstance(checked_at, (int, float)) or passed is not True:
         return None
     if not isinstance(report, str):
         return None
     if time.time() - checked_at >= cadence_seconds:
         return None
-    return report if passed else f"CANARY_STALE_FAILURE_CACHED\n{report}"
+    return report
 
 
 def _write_state(
@@ -217,12 +295,16 @@ async def probe(
     state_path: Path,
     force: bool = False,
 ) -> tuple[bool, str]:
-    """Return ``(passed, report)``, consulting/refreshing the cadence cache."""
+    """Return ``(passed, report)``, consulting/refreshing the cadence cache.
+
+    Only a cached PASS may be served early; a cached FAIL always triggers an
+    immediate fresh real check (OMN-16420 -- see ``_load_cached_passing_state``).
+    """
     canary = config.forwarder.canary
     if not force:
-        cached = _load_cached_state(state_path, canary.cadence_seconds)
+        cached = _load_cached_passing_state(state_path, canary.cadence_seconds)
         if cached is not None:
-            return not cached.startswith("CANARY_STALE_FAILURE_CACHED"), cached
+            return True, cached
 
     local_result, cloud_result = await run_canary_check(config)
     passed = local_result.passed and cloud_result.passed
