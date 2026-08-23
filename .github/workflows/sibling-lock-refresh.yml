@@ -83,6 +83,33 @@ jobs:
 
       - name: Refresh sibling package locks
         id: refresh
+        env:
+          # OMN-16433: this job's `runs-on` (OMNI_RUNNER_SELECTOR_V1, above)
+          # routes trusted runs to the shared self-hosted `omnibase-ci` pool,
+          # 3 of whose 68 runners (omninode-runner-2/4/5) are wired per
+          # docker/docker-compose.pypi-canary.yml (OMN-14027 C1 PyPI
+          # pull-through-cache canary) with container-level
+          # UV_DEFAULT_INDEX/PIP_INDEX_URL pointed at a Tailscale-only devpi
+          # mirror (http://omninode-pc.tail75df5e.ts.net:3141/root/pypi/+simple/),
+          # for install-SPEED only. `uv lock` records whichever index actually
+          # resolved each package straight into the COMMITTED uv.lock's
+          # `source =`/`sdist =`/wheel `url =` fields — so a run that lands on
+          # a canary runner bakes that private mirror into the PR's lockfile
+          # diff, independent of any repo/org Actions variable. Live-proven:
+          # omnibase_infra#2848/#2840 both landed 100% mirror-URL churn with
+          # ZERO real sibling-version delta. A merged lockfile in that state
+          # guarantees `uv sync --locked` failure for every GitHub-hosted job
+          # and any external-fork PR that checks it out — the same failure
+          # class OMN-16428 diagnosed and fixed on the CONSUMER side for
+          # onex_change_control's own contaminated lockfile. Pinning here
+          # fixes it at the PRODUCER: this step's OUTPUT is a committed
+          # artifact, so it must resolve against the canonical public index
+          # regardless of which of the 68 pool runners executes it. Does NOT
+          # touch `runs-on` (deliberate repo-wide self-hosted policy) or the
+          # OMN-14027 canary itself (separate, soak-gated, intentional).
+          UV_DEFAULT_INDEX: "https://pypi.org/simple"
+          UV_INDEX_URL: "https://pypi.org/simple"
+          PIP_INDEX_URL: "https://pypi.org/simple"
         run: |
           set -euo pipefail
           # Default sibling set. Git/tag-pinned siblings are safe to include:
@@ -97,6 +124,14 @@ jobs:
           done
           echo "Refreshing: ${ARGS[*]}"
           uv lock "${ARGS[@]}"
+          # OMN-16433 belt-and-braces: fail LOUD, not silent, if the lockfile
+          # somehow still embeds the internal mirror host despite the env pin
+          # above (a canary expansion, a future uv version reading a different
+          # var) — never open a PR with a non-portable committed lockfile.
+          if grep -q 'tail75df5e\.ts\.net' uv.lock; then
+            echo "::error::uv.lock still contains the internal Tailscale-only mirror host (tail75df5e.ts.net) after the UV_DEFAULT_INDEX/UV_INDEX_URL/PIP_INDEX_URL override — refusing to open a non-portable PR. See OMN-16433." >&2
+            exit 1
+          fi
           if git diff --quiet -- uv.lock; then
             echo "changed=false" >> "$GITHUB_OUTPUT"
             echo "uv.lock unchanged — all sibling pins already fresh."
