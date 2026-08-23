@@ -4,6 +4,9 @@
 # Copyright (c) 2026 OmniNode Team
 """Models for the savings estimation compute node."""
 
+from omnibase_infra.nodes.node_savings_estimation_compute.models.enum_catch_severity import (
+    EnumCatchSeverity,
+)
 from omnibase_infra.nodes.node_savings_estimation_compute.models.enum_model_tier import (
     MODEL_PRICING_INPUT,
     MODEL_PRICING_OUTPUT,
@@ -20,6 +23,12 @@ from omnibase_infra.nodes.node_savings_estimation_compute.models.model_effective
 from omnibase_infra.nodes.node_savings_estimation_compute.models.model_savings_category import (
     ModelSavingsCategory,
 )
+from omnibase_infra.nodes.node_savings_estimation_compute.models.model_savings_correlation_batch_command import (
+    ModelSavingsCorrelationBatchCommand,
+)
+from omnibase_infra.nodes.node_savings_estimation_compute.models.model_savings_correlation_batch_output import (
+    ModelSavingsCorrelationBatchOutput,
+)
 from omnibase_infra.nodes.node_savings_estimation_compute.models.model_savings_estimate import (
     ModelSavingsEstimate,
 )
@@ -28,9 +37,12 @@ from omnibase_infra.nodes.node_savings_estimation_compute.models.model_savings_e
 )
 
 __all__: list[str] = [
+    "EnumCatchSeverity",
     "EnumModelTier",
     "EnumSavingsCategory",
     "ModelEffectivenessEntry",
+    "ModelSavingsCorrelationBatchCommand",
+    "ModelSavingsCorrelationBatchOutput",
     "ModelSavingsEstimationInput",
     "ModelSavingsCategory",
     "ModelSavingsEstimate",

@@ -12,20 +12,25 @@
 # Related Tickets:
 #   - OMN-6964: Token savings emitter
 #   - OMN-7494: Heuristic savings from validator catches, counterfactual model
+#   - OMN-16293: Wire real multi-topic correlation; node_type COMPUTE_GENERIC
+#     -> EFFECT_GENERIC (the node now performs real I/O: Postgres signal
+#     capture/correlation + Kafka publish via HandlerSavingsCorrelation).
+#     The original pure savings.estimate capability (HandlerSavingsEstimation)
+#     is unchanged and is invoked in-process by the correlator.
 name: "node_savings_estimation_compute"
 contract_name: "node_savings_estimation_compute"
 node_name: "node_savings_estimation_compute"
 contract_version:
   major: 0
-  minor: 3
+  minor: 4
   patch: 0
 node_version:
   major: 0
-  minor: 3
+  minor: 4
   patch: 0
-node_type: "COMPUTE_GENERIC"
+node_type: "EFFECT_GENERIC"
 description: >
-  Compute node for token savings estimation. Takes injection effectiveness data (utilization scores, pattern counts, tokens saved per session) and computes cost savings using tiered model pricing (Opus $15/M input, Sonnet $3/M input). Produces a ModelSavingsEstimate for Kafka emission to onex.evt.omnibase-infra.savings-estimated.v1.
+  EFFECT node for token savings estimation. HandlerSavingsCorrelation ingests raw injection-effectiveness / validator-catch signals into Postgres (no in-memory buffering), periodically correlates them per session by joining against llm_call_metrics and session_outcomes (owned by omnimarket's projection nodes), and calls the pure HandlerSavingsEstimation (tiered model pricing: Opus $15/M input, Sonnet $3/M input) to produce a ModelSavingsEstimate for Kafka emission to onex.evt.omnibase-infra.savings-estimated.v1.
 
 input_model:
   name: "ModelSavingsEstimationInput"
@@ -38,6 +43,8 @@ output_model:
 capabilities:
   - name: "savings.estimate"
     description: "Compute token and cost savings from injection effectiveness data"
+  - name: "savings.correlation_batch_compute"
+    description: "Periodically correlate raw savings signals into savings estimates"
 handler_routing:
   routing_strategy: "operation_match"
   handlers:
@@ -50,26 +57,37 @@ handler_routing:
         name: "ModelSavingsEstimationInput"
         module: "omnibase_infra.nodes.node_savings_estimation_compute.models"
         description: "Injection effectiveness data for savings computation."
+    - operation: "savings.correlation_batch_compute"
+      handler:
+        name: "HandlerSavingsCorrelation"
+        module: "omnibase_infra.nodes.node_savings_estimation_compute.handlers.handler_savings_correlation"
+      description: >
+        Periodic batch step: finds sessions with unfinalized savings signals that are ready (session-outcome past grace window, or timed out), correlates them, and publishes savings-estimated.v1. Triggered directly by a periodic asyncio task in service_kernel.py (mirrors node_baselines_batch_compute), not by real bus traffic on this self-only command topic.
+
+      input_model:
+        name: "ModelSavingsCorrelationBatchCommand"
+        module: "omnibase_infra.nodes.node_savings_estimation_compute.models"
+        description: "Command to trigger one savings-correlation batch tick."
+# OMN-16293: raw ingestion of the three signal topics with no existing
+# Postgres projection (context-injected, validator-catch, pattern-enforcement)
+# is done via HandlerSavingsCorrelation.ingest_injection_event /
+# ingest_validator_catch_event, wired directly by service_kernel.py — NOT
+# through event_bus.subscribe_topics / operation_match auto-wiring. None of
+# those raw domain events carry a matching `operation` field, so declaring
+# them here previously produced a live, real, but permanently-dead consumer
+# group (OMN-16292/OMN-16293 finding) that received traffic and computed
+# nothing. llm-call-completed and session-outcome are NOT ingested here at
+# all — they are already projected by omnimarket's node_projection_llm_cost /
+# node_projection_session_outcome into llm_call_metrics / session_outcomes,
+# read directly by the correlation batch (cross-repo read-only, same pattern
+# node_baselines_batch_compute uses for tables it does not own).
 event_bus:
   version:
     major: 1
     minor: 0
     patch: 0
-  # OMN-13533: declare every topic the savings-estimation runtime consumer
-  # actually subscribes to (see services/observability/savings_estimation/
-  # config.py::_default_consumed_topics). Prior to this the contract declared
-  # only session-ended.v1, so the contract-driven topic provisioner
-  # (scripts/create_kafka_topics.py) never created validator-catch.v1 or
-  # hook-context-injected.v1 on the broker — the consumer's subscribe loop then
-  # error-stormed "topic not found in cluster" on every fresh redeploy.
   subscribe_topics:
-    - "onex.evt.omniclaude.session-ended.v1"
-    - "onex.evt.omniintelligence.llm-call-completed.v1"
-    - "onex.evt.omniintelligence.dispatch-outcome-evaluated.v1"
-    - "onex.evt.omniclaude.session-outcome.v1"
-    - "onex.evt.omniclaude.context-injected.v1"
-    - "onex.evt.omniclaude.validator-catch.v1"
-    - "onex.evt.omniclaude.pattern-enforcement.v1"
+    - "onex.cmd.omnibase-infra.savings-correlation-batch-compute.v1"
   publish_topics:
     - "onex.evt.omnibase-infra.savings-estimated.v1"
 topics:
@@ -78,20 +96,18 @@ topics:
       description: "Token savings estimation events"
       schema: "ModelSavingsEstimate"
   consumes:
-    - topic: "onex.evt.omniclaude.session-ended.v1"
-      description: "Session ended events that trigger savings estimation computation"
-    - topic: "onex.evt.omniintelligence.llm-call-completed.v1"
-      description: "LLM call completion events correlated by session_id for cost attribution"
-    - topic: "onex.evt.omniintelligence.dispatch-outcome-evaluated.v1"
-      description: "Dispatch outcome evaluation events correlated by session_id"
-    - topic: "onex.evt.omniclaude.session-outcome.v1"
-      description: "Session outcome events that trigger finalization of a savings estimate"
     - topic: "onex.evt.omniclaude.context-injected.v1"
-      description: "Hook context injection signals accumulated into injection effectiveness"
+      description: >
+        Hook context injection signals, ingested directly (not auto-wired) into savings_injection_signals by HandlerSavingsCorrelation.
+
     - topic: "onex.evt.omniclaude.validator-catch.v1"
-      description: "Validator catch events contributing heuristic avoided-rework savings"
+      description: >
+        Validator catch events, ingested directly (not auto-wired) into savings_validator_catch_signals by HandlerSavingsCorrelation.
+
     - topic: "onex.evt.omniclaude.pattern-enforcement.v1"
-      description: "Pattern enforcement events contributing heuristic avoided-rework savings"
+      description: >
+        Pattern enforcement events, ingested directly (not auto-wired) into savings_validator_catch_signals by HandlerSavingsCorrelation.
+
 error_handling:
   retry_policy:
     max_retries: 0

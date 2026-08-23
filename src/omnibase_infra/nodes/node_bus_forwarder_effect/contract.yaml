@@ -7,13 +7,13 @@ node_type: "EFFECT_GENERIC"
 contract_version:
   major: 0
   minor: 1
-  patch: 1
+  patch: 2
 node_version:
   major: 0
   minor: 1
   patch: 2
 description: >
-  Trust-boundary effect node that mirrors contract-declared tenant gateway topics between a local runtime bus and the hosted cloud Kafka edge. The node owns all publishes; handlers only validate and return transformed envelopes. OMN-15792: the outbound handler resolves its physical wire topic through the single runtime topic resolver (resolve_physical_topic) instead of calling the prefix_topic primitive directly -- internal implementation change, wire format and behavior unchanged.
+  Trust-boundary effect node that mirrors contract-declared tenant gateway topics between a local runtime bus and the hosted cloud Kafka edge. The node owns all publishes; handlers only validate and return transformed envelopes. OMN-15792: the outbound handler resolves its physical wire topic through the single runtime topic resolver (resolve_physical_topic) instead of calling the prefix_topic primitive directly -- internal implementation change, wire format and behavior unchanged. OMN-16204: mirror_topics.outbound widened with the bare omniclaude session-started/session-ended.v1 lifecycle pair (content-free, per operator OD-9 ruling 2026-08-18) -- contract-armed only, actual cloud delivery still gated behind OMN-14323 gate 1 (MSK network/IAM).
 
 runtime_profiles:
   - canary
@@ -57,6 +57,16 @@ config:
         - "onex.evt.omniintelligence.llm-call-completed.v1"
         - "onex.evt.omnibase-infra.llm-call-completed.v1"
         - "onex.evt.omnibase-infra.gateway-heartbeat.v1"
+        # OMN-16204: bare session-lifecycle pair only (session id + timestamps,
+        # content-free) -- operator OD-9 ruling 2026-08-18 ~12:40Z allows
+        # exactly this pair to cross to cloud; all other omniclaude topics
+        # (prompt-submitted, tool-executed, skill-started/completed,
+        # tool-output-captured) remain DENIED pending the scrubbing layer
+        # OMN-14323 still owns. Cloud delivery itself stays gated behind
+        # OMN-14323 gate 1 (AWS lab->MSK network/IAM) until that lands
+        # separately -- this only arms the contract-declared mirror set.
+        - "onex.evt.omniclaude.session-started.v1"
+        - "onex.evt.omniclaude.session-ended.v1"
     canary:
       # OMN-15741 (G1): dedicated topic for the path-verifying healthcheck probe.
       # Never mirrored, never carries tenant traffic -- the probe produces a tiny
@@ -125,7 +135,7 @@ metadata:
   description: "Hybrid gateway local runtime bus forwarder"
   author: "OmniNode Team"
   created: "2026-06-10"
-  updated: "2026-08-08"
+  updated: "2026-08-18"
   tags:
     - gateway
     - event-bus

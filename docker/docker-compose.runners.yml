@@ -1,6 +1,6 @@
 # docker-compose.runners.yml
 # OmniNode self-hosted GitHub Actions runners
-# Ticket: OMN-3276 / Epic: OMN-3273 | Scaled: OMN-3714 | Reconciled to live 48: OMN-12582 | Phase-A scale to 64: OMN-14029 | Saturation scale to 72: OMN-15978
+# Ticket: OMN-3276 / Epic: OMN-3273 | Scaled: OMN-3714 | Reconciled to live 48: OMN-12582 | Phase-A scale to 64: OMN-14029 | Saturation scale to 72: OMN-15978 | Reconciled to live 88: OMN-15978
 #
 # Runs the full steady-state runner fleet. The fleet count is owned by
 # config/runner_fleet.yaml (expected_count). Each runner registers with GitHub
@@ -34,10 +34,11 @@
 # Verify: cat /proc/sys/fs/inotify/max_user_watches
 #
 # Resource allocation per runner (RTX 5090 host with ample RAM):
-#   mem_limit: 6g     - per-runner memory limit (not a reservation); 72 runners
+#   mem_limit: 6g     - per-runner memory limit (not a reservation); 88 runners
 #                       share the host's 91 GB, peak usage ~24 GB observed live
+#                       at 72 runners -- re-measure at 88 (residual, not blocking)
 #   memswap_limit: 12g - bounded swap headroom for large CI spikes
-#   cpus: "2.0"       - per-runner CFS quota (not a reservation); 72 runners
+#   cpus: "2.0"       - per-runner CFS quota (not a reservation); 88 runners
 #                       share the host's 32 vCPUs (over-subscription tolerated)
 #   pids_limit: 4096  - prevents fork bombs from runaway test processes
 #
@@ -57,7 +58,7 @@ x-runner-base: &runner-base
     RUNNER_GROUP: omnibase-ci
     ACTIONS_RUNNER_HOOK_JOB_STARTED: /usr/local/bin/runner-job-started.sh
     # OMN-14027 C3 — fleet-wide uv download stampede cap.
-    # 72 runners NAT through one home uplink and share one anonymous egress
+    # 88 runners NAT through one home uplink and share one anonymous egress
     # budget. The hardened setup-python-uv composite serializes downloads to 1 in
     # its OWN step, but the 18 workflows that bypass it (OMN-14193) run raw
     # `uv sync` at uv's built-in concurrency default — 64x in parallel — and
@@ -98,6 +99,15 @@ x-runner-base: &runner-base
     - ./runners/entrypoint.sh:/usr/local/bin/entrypoint.sh:ro
     - ./runners/runner-job-started.sh:/usr/local/bin/runner-job-started.sh:ro
     - ./runners/healthcheck.sh:/usr/local/bin/healthcheck.sh:ro
+    # OMN-16363 — disk-admission self-pause marker dir (host-durable, read-write).
+    # A SINGLE shared host directory across all 88 runners; each container only
+    # ever writes its own ${RUNNER_NAME} marker file inside it, so one bind mount
+    # suffices (no per-runner subdirectory needed). Requires a container recreate
+    # to take effect — see docs/runbooks/runner-disk-admission-gate.md rollout
+    # section. Until recreated, docker/runners/runner-job-started.sh's
+    # disk_admission_self_pause() fails open (no-op) on the missing mount; the
+    # primary per-job admission gate is unaffected and needs no recreate.
+    - ${RUNNER_DISK_ADMISSION_PAUSE_HOST_DIR:-./state/disk-admission-pause}:/home/runner/.onex-disk-admission-pause
   group_add:
     - "984" # Match host Docker socket GID for DinD access
   # OMN-12433 / OMN-13915: healthcheck proves BOTH the listener is alive AND
@@ -129,6 +139,7 @@ services:
       - ./runners/entrypoint.sh:/usr/local/bin/entrypoint.sh:ro
       - ./runners/runner-job-started.sh:/usr/local/bin/runner-job-started.sh:ro
       - ./runners/healthcheck.sh:/usr/local/bin/healthcheck.sh:ro
+      - ${RUNNER_DISK_ADMISSION_PAUSE_HOST_DIR:-./state/disk-admission-pause}:/home/runner/.onex-disk-admission-pause
       - runner-1-creds:/home/runner/.runner-creds
   omninode-runner-2:
     !!merge <<: *runner-base
@@ -141,6 +152,7 @@ services:
       - ./runners/entrypoint.sh:/usr/local/bin/entrypoint.sh:ro
       - ./runners/runner-job-started.sh:/usr/local/bin/runner-job-started.sh:ro
       - ./runners/healthcheck.sh:/usr/local/bin/healthcheck.sh:ro
+      - ${RUNNER_DISK_ADMISSION_PAUSE_HOST_DIR:-./state/disk-admission-pause}:/home/runner/.onex-disk-admission-pause
       - runner-2-creds:/home/runner/.runner-creds
   omninode-runner-3:
     !!merge <<: *runner-base
@@ -153,6 +165,7 @@ services:
       - ./runners/entrypoint.sh:/usr/local/bin/entrypoint.sh:ro
       - ./runners/runner-job-started.sh:/usr/local/bin/runner-job-started.sh:ro
       - ./runners/healthcheck.sh:/usr/local/bin/healthcheck.sh:ro
+      - ${RUNNER_DISK_ADMISSION_PAUSE_HOST_DIR:-./state/disk-admission-pause}:/home/runner/.onex-disk-admission-pause
       - runner-3-creds:/home/runner/.runner-creds
   omninode-runner-4:
     !!merge <<: *runner-base
@@ -165,6 +178,7 @@ services:
       - ./runners/entrypoint.sh:/usr/local/bin/entrypoint.sh:ro
       - ./runners/runner-job-started.sh:/usr/local/bin/runner-job-started.sh:ro
       - ./runners/healthcheck.sh:/usr/local/bin/healthcheck.sh:ro
+      - ${RUNNER_DISK_ADMISSION_PAUSE_HOST_DIR:-./state/disk-admission-pause}:/home/runner/.onex-disk-admission-pause
       - runner-4-creds:/home/runner/.runner-creds
   omninode-runner-5:
     !!merge <<: *runner-base
@@ -177,6 +191,7 @@ services:
       - ./runners/entrypoint.sh:/usr/local/bin/entrypoint.sh:ro
       - ./runners/runner-job-started.sh:/usr/local/bin/runner-job-started.sh:ro
       - ./runners/healthcheck.sh:/usr/local/bin/healthcheck.sh:ro
+      - ${RUNNER_DISK_ADMISSION_PAUSE_HOST_DIR:-./state/disk-admission-pause}:/home/runner/.onex-disk-admission-pause
       - runner-5-creds:/home/runner/.runner-creds
   omninode-runner-6:
     !!merge <<: *runner-base
@@ -189,6 +204,7 @@ services:
       - ./runners/entrypoint.sh:/usr/local/bin/entrypoint.sh:ro
       - ./runners/runner-job-started.sh:/usr/local/bin/runner-job-started.sh:ro
       - ./runners/healthcheck.sh:/usr/local/bin/healthcheck.sh:ro
+      - ${RUNNER_DISK_ADMISSION_PAUSE_HOST_DIR:-./state/disk-admission-pause}:/home/runner/.onex-disk-admission-pause
       - runner-6-creds:/home/runner/.runner-creds
   omninode-runner-7:
     !!merge <<: *runner-base
@@ -201,6 +217,7 @@ services:
       - ./runners/entrypoint.sh:/usr/local/bin/entrypoint.sh:ro
       - ./runners/runner-job-started.sh:/usr/local/bin/runner-job-started.sh:ro
       - ./runners/healthcheck.sh:/usr/local/bin/healthcheck.sh:ro
+      - ${RUNNER_DISK_ADMISSION_PAUSE_HOST_DIR:-./state/disk-admission-pause}:/home/runner/.onex-disk-admission-pause
       - runner-7-creds:/home/runner/.runner-creds
   omninode-runner-8:
     !!merge <<: *runner-base
@@ -213,6 +230,7 @@ services:
       - ./runners/entrypoint.sh:/usr/local/bin/entrypoint.sh:ro
       - ./runners/runner-job-started.sh:/usr/local/bin/runner-job-started.sh:ro
       - ./runners/healthcheck.sh:/usr/local/bin/healthcheck.sh:ro
+      - ${RUNNER_DISK_ADMISSION_PAUSE_HOST_DIR:-./state/disk-admission-pause}:/home/runner/.onex-disk-admission-pause
       - runner-8-creds:/home/runner/.runner-creds
   omninode-runner-9:
     !!merge <<: *runner-base
@@ -225,6 +243,7 @@ services:
       - ./runners/entrypoint.sh:/usr/local/bin/entrypoint.sh:ro
       - ./runners/runner-job-started.sh:/usr/local/bin/runner-job-started.sh:ro
       - ./runners/healthcheck.sh:/usr/local/bin/healthcheck.sh:ro
+      - ${RUNNER_DISK_ADMISSION_PAUSE_HOST_DIR:-./state/disk-admission-pause}:/home/runner/.onex-disk-admission-pause
       - runner-9-creds:/home/runner/.runner-creds
   omninode-runner-10:
     !!merge <<: *runner-base
@@ -237,6 +256,7 @@ services:
       - ./runners/entrypoint.sh:/usr/local/bin/entrypoint.sh:ro
       - ./runners/runner-job-started.sh:/usr/local/bin/runner-job-started.sh:ro
       - ./runners/healthcheck.sh:/usr/local/bin/healthcheck.sh:ro
+      - ${RUNNER_DISK_ADMISSION_PAUSE_HOST_DIR:-./state/disk-admission-pause}:/home/runner/.onex-disk-admission-pause
       - runner-10-creds:/home/runner/.runner-creds
   omninode-runner-11:
     !!merge <<: *runner-base
@@ -249,6 +269,7 @@ services:
       - ./runners/entrypoint.sh:/usr/local/bin/entrypoint.sh:ro
       - ./runners/runner-job-started.sh:/usr/local/bin/runner-job-started.sh:ro
       - ./runners/healthcheck.sh:/usr/local/bin/healthcheck.sh:ro
+      - ${RUNNER_DISK_ADMISSION_PAUSE_HOST_DIR:-./state/disk-admission-pause}:/home/runner/.onex-disk-admission-pause
       - runner-11-creds:/home/runner/.runner-creds
   omninode-runner-12:
     !!merge <<: *runner-base
@@ -261,6 +282,7 @@ services:
       - ./runners/entrypoint.sh:/usr/local/bin/entrypoint.sh:ro
       - ./runners/runner-job-started.sh:/usr/local/bin/runner-job-started.sh:ro
       - ./runners/healthcheck.sh:/usr/local/bin/healthcheck.sh:ro
+      - ${RUNNER_DISK_ADMISSION_PAUSE_HOST_DIR:-./state/disk-admission-pause}:/home/runner/.onex-disk-admission-pause
       - runner-12-creds:/home/runner/.runner-creds
   omninode-runner-13:
     !!merge <<: *runner-base
@@ -273,6 +295,7 @@ services:
       - ./runners/entrypoint.sh:/usr/local/bin/entrypoint.sh:ro
       - ./runners/runner-job-started.sh:/usr/local/bin/runner-job-started.sh:ro
       - ./runners/healthcheck.sh:/usr/local/bin/healthcheck.sh:ro
+      - ${RUNNER_DISK_ADMISSION_PAUSE_HOST_DIR:-./state/disk-admission-pause}:/home/runner/.onex-disk-admission-pause
       - runner-13-creds:/home/runner/.runner-creds
   omninode-runner-14:
     !!merge <<: *runner-base
@@ -285,6 +308,7 @@ services:
       - ./runners/entrypoint.sh:/usr/local/bin/entrypoint.sh:ro
       - ./runners/runner-job-started.sh:/usr/local/bin/runner-job-started.sh:ro
       - ./runners/healthcheck.sh:/usr/local/bin/healthcheck.sh:ro
+      - ${RUNNER_DISK_ADMISSION_PAUSE_HOST_DIR:-./state/disk-admission-pause}:/home/runner/.onex-disk-admission-pause
       - runner-14-creds:/home/runner/.runner-creds
   omninode-runner-15:
     !!merge <<: *runner-base
@@ -297,6 +321,7 @@ services:
       - ./runners/entrypoint.sh:/usr/local/bin/entrypoint.sh:ro
       - ./runners/runner-job-started.sh:/usr/local/bin/runner-job-started.sh:ro
       - ./runners/healthcheck.sh:/usr/local/bin/healthcheck.sh:ro
+      - ${RUNNER_DISK_ADMISSION_PAUSE_HOST_DIR:-./state/disk-admission-pause}:/home/runner/.onex-disk-admission-pause
       - runner-15-creds:/home/runner/.runner-creds
   omninode-runner-16:
     !!merge <<: *runner-base
@@ -309,6 +334,7 @@ services:
       - ./runners/entrypoint.sh:/usr/local/bin/entrypoint.sh:ro
       - ./runners/runner-job-started.sh:/usr/local/bin/runner-job-started.sh:ro
       - ./runners/healthcheck.sh:/usr/local/bin/healthcheck.sh:ro
+      - ${RUNNER_DISK_ADMISSION_PAUSE_HOST_DIR:-./state/disk-admission-pause}:/home/runner/.onex-disk-admission-pause
       - runner-16-creds:/home/runner/.runner-creds
   omninode-runner-17:
     !!merge <<: *runner-base
@@ -321,6 +347,7 @@ services:
       - ./runners/entrypoint.sh:/usr/local/bin/entrypoint.sh:ro
       - ./runners/runner-job-started.sh:/usr/local/bin/runner-job-started.sh:ro
       - ./runners/healthcheck.sh:/usr/local/bin/healthcheck.sh:ro
+      - ${RUNNER_DISK_ADMISSION_PAUSE_HOST_DIR:-./state/disk-admission-pause}:/home/runner/.onex-disk-admission-pause
       - runner-17-creds:/home/runner/.runner-creds
   omninode-runner-18:
     !!merge <<: *runner-base
@@ -333,6 +360,7 @@ services:
       - ./runners/entrypoint.sh:/usr/local/bin/entrypoint.sh:ro
       - ./runners/runner-job-started.sh:/usr/local/bin/runner-job-started.sh:ro
       - ./runners/healthcheck.sh:/usr/local/bin/healthcheck.sh:ro
+      - ${RUNNER_DISK_ADMISSION_PAUSE_HOST_DIR:-./state/disk-admission-pause}:/home/runner/.onex-disk-admission-pause
       - runner-18-creds:/home/runner/.runner-creds
   omninode-runner-19:
     !!merge <<: *runner-base
@@ -345,6 +373,7 @@ services:
       - ./runners/entrypoint.sh:/usr/local/bin/entrypoint.sh:ro
       - ./runners/runner-job-started.sh:/usr/local/bin/runner-job-started.sh:ro
       - ./runners/healthcheck.sh:/usr/local/bin/healthcheck.sh:ro
+      - ${RUNNER_DISK_ADMISSION_PAUSE_HOST_DIR:-./state/disk-admission-pause}:/home/runner/.onex-disk-admission-pause
       - runner-19-creds:/home/runner/.runner-creds
   omninode-runner-20:
     !!merge <<: *runner-base
@@ -357,6 +386,7 @@ services:
       - ./runners/entrypoint.sh:/usr/local/bin/entrypoint.sh:ro
       - ./runners/runner-job-started.sh:/usr/local/bin/runner-job-started.sh:ro
       - ./runners/healthcheck.sh:/usr/local/bin/healthcheck.sh:ro
+      - ${RUNNER_DISK_ADMISSION_PAUSE_HOST_DIR:-./state/disk-admission-pause}:/home/runner/.onex-disk-admission-pause
       - runner-20-creds:/home/runner/.runner-creds
   omninode-runner-21:
     !!merge <<: *runner-base
@@ -369,6 +399,7 @@ services:
       - ./runners/entrypoint.sh:/usr/local/bin/entrypoint.sh:ro
       - ./runners/runner-job-started.sh:/usr/local/bin/runner-job-started.sh:ro
       - ./runners/healthcheck.sh:/usr/local/bin/healthcheck.sh:ro
+      - ${RUNNER_DISK_ADMISSION_PAUSE_HOST_DIR:-./state/disk-admission-pause}:/home/runner/.onex-disk-admission-pause
       - runner-21-creds:/home/runner/.runner-creds
   omninode-runner-22:
     !!merge <<: *runner-base
@@ -381,6 +412,7 @@ services:
       - ./runners/entrypoint.sh:/usr/local/bin/entrypoint.sh:ro
       - ./runners/runner-job-started.sh:/usr/local/bin/runner-job-started.sh:ro
       - ./runners/healthcheck.sh:/usr/local/bin/healthcheck.sh:ro
+      - ${RUNNER_DISK_ADMISSION_PAUSE_HOST_DIR:-./state/disk-admission-pause}:/home/runner/.onex-disk-admission-pause
       - runner-22-creds:/home/runner/.runner-creds
   omninode-runner-23:
     !!merge <<: *runner-base
@@ -393,6 +425,7 @@ services:
       - ./runners/entrypoint.sh:/usr/local/bin/entrypoint.sh:ro
       - ./runners/runner-job-started.sh:/usr/local/bin/runner-job-started.sh:ro
       - ./runners/healthcheck.sh:/usr/local/bin/healthcheck.sh:ro
+      - ${RUNNER_DISK_ADMISSION_PAUSE_HOST_DIR:-./state/disk-admission-pause}:/home/runner/.onex-disk-admission-pause
       - runner-23-creds:/home/runner/.runner-creds
   omninode-runner-24:
     !!merge <<: *runner-base
@@ -405,6 +438,7 @@ services:
       - ./runners/entrypoint.sh:/usr/local/bin/entrypoint.sh:ro
       - ./runners/runner-job-started.sh:/usr/local/bin/runner-job-started.sh:ro
       - ./runners/healthcheck.sh:/usr/local/bin/healthcheck.sh:ro
+      - ${RUNNER_DISK_ADMISSION_PAUSE_HOST_DIR:-./state/disk-admission-pause}:/home/runner/.onex-disk-admission-pause
       - runner-24-creds:/home/runner/.runner-creds
   omninode-runner-25:
     !!merge <<: *runner-base
@@ -417,6 +451,7 @@ services:
       - ./runners/entrypoint.sh:/usr/local/bin/entrypoint.sh:ro
       - ./runners/runner-job-started.sh:/usr/local/bin/runner-job-started.sh:ro
       - ./runners/healthcheck.sh:/usr/local/bin/healthcheck.sh:ro
+      - ${RUNNER_DISK_ADMISSION_PAUSE_HOST_DIR:-./state/disk-admission-pause}:/home/runner/.onex-disk-admission-pause
       - runner-25-creds:/home/runner/.runner-creds
   omninode-runner-26:
     !!merge <<: *runner-base
@@ -429,6 +464,7 @@ services:
       - ./runners/entrypoint.sh:/usr/local/bin/entrypoint.sh:ro
       - ./runners/runner-job-started.sh:/usr/local/bin/runner-job-started.sh:ro
       - ./runners/healthcheck.sh:/usr/local/bin/healthcheck.sh:ro
+      - ${RUNNER_DISK_ADMISSION_PAUSE_HOST_DIR:-./state/disk-admission-pause}:/home/runner/.onex-disk-admission-pause
       - runner-26-creds:/home/runner/.runner-creds
   omninode-runner-27:
     !!merge <<: *runner-base
@@ -441,6 +477,7 @@ services:
       - ./runners/entrypoint.sh:/usr/local/bin/entrypoint.sh:ro
       - ./runners/runner-job-started.sh:/usr/local/bin/runner-job-started.sh:ro
       - ./runners/healthcheck.sh:/usr/local/bin/healthcheck.sh:ro
+      - ${RUNNER_DISK_ADMISSION_PAUSE_HOST_DIR:-./state/disk-admission-pause}:/home/runner/.onex-disk-admission-pause
       - runner-27-creds:/home/runner/.runner-creds
   omninode-runner-28:
     !!merge <<: *runner-base
@@ -453,6 +490,7 @@ services:
       - ./runners/entrypoint.sh:/usr/local/bin/entrypoint.sh:ro
       - ./runners/runner-job-started.sh:/usr/local/bin/runner-job-started.sh:ro
       - ./runners/healthcheck.sh:/usr/local/bin/healthcheck.sh:ro
+      - ${RUNNER_DISK_ADMISSION_PAUSE_HOST_DIR:-./state/disk-admission-pause}:/home/runner/.onex-disk-admission-pause
       - runner-28-creds:/home/runner/.runner-creds
   omninode-runner-29:
     !!merge <<: *runner-base
@@ -465,6 +503,7 @@ services:
       - ./runners/entrypoint.sh:/usr/local/bin/entrypoint.sh:ro
       - ./runners/runner-job-started.sh:/usr/local/bin/runner-job-started.sh:ro
       - ./runners/healthcheck.sh:/usr/local/bin/healthcheck.sh:ro
+      - ${RUNNER_DISK_ADMISSION_PAUSE_HOST_DIR:-./state/disk-admission-pause}:/home/runner/.onex-disk-admission-pause
       - runner-29-creds:/home/runner/.runner-creds
   omninode-runner-30:
     !!merge <<: *runner-base
@@ -477,6 +516,7 @@ services:
       - ./runners/entrypoint.sh:/usr/local/bin/entrypoint.sh:ro
       - ./runners/runner-job-started.sh:/usr/local/bin/runner-job-started.sh:ro
       - ./runners/healthcheck.sh:/usr/local/bin/healthcheck.sh:ro
+      - ${RUNNER_DISK_ADMISSION_PAUSE_HOST_DIR:-./state/disk-admission-pause}:/home/runner/.onex-disk-admission-pause
       - runner-30-creds:/home/runner/.runner-creds
   omninode-runner-31:
     !!merge <<: *runner-base
@@ -489,6 +529,7 @@ services:
       - ./runners/entrypoint.sh:/usr/local/bin/entrypoint.sh:ro
       - ./runners/runner-job-started.sh:/usr/local/bin/runner-job-started.sh:ro
       - ./runners/healthcheck.sh:/usr/local/bin/healthcheck.sh:ro
+      - ${RUNNER_DISK_ADMISSION_PAUSE_HOST_DIR:-./state/disk-admission-pause}:/home/runner/.onex-disk-admission-pause
       - runner-31-creds:/home/runner/.runner-creds
   omninode-runner-32:
     !!merge <<: *runner-base
@@ -501,6 +542,7 @@ services:
       - ./runners/entrypoint.sh:/usr/local/bin/entrypoint.sh:ro
       - ./runners/runner-job-started.sh:/usr/local/bin/runner-job-started.sh:ro
       - ./runners/healthcheck.sh:/usr/local/bin/healthcheck.sh:ro
+      - ${RUNNER_DISK_ADMISSION_PAUSE_HOST_DIR:-./state/disk-admission-pause}:/home/runner/.onex-disk-admission-pause
       - runner-32-creds:/home/runner/.runner-creds
   omninode-runner-33:
     !!merge <<: *runner-base
@@ -513,6 +555,7 @@ services:
       - ./runners/entrypoint.sh:/usr/local/bin/entrypoint.sh:ro
       - ./runners/runner-job-started.sh:/usr/local/bin/runner-job-started.sh:ro
       - ./runners/healthcheck.sh:/usr/local/bin/healthcheck.sh:ro
+      - ${RUNNER_DISK_ADMISSION_PAUSE_HOST_DIR:-./state/disk-admission-pause}:/home/runner/.onex-disk-admission-pause
       - runner-33-creds:/home/runner/.runner-creds
   omninode-runner-34:
     !!merge <<: *runner-base
@@ -525,6 +568,7 @@ services:
       - ./runners/entrypoint.sh:/usr/local/bin/entrypoint.sh:ro
       - ./runners/runner-job-started.sh:/usr/local/bin/runner-job-started.sh:ro
       - ./runners/healthcheck.sh:/usr/local/bin/healthcheck.sh:ro
+      - ${RUNNER_DISK_ADMISSION_PAUSE_HOST_DIR:-./state/disk-admission-pause}:/home/runner/.onex-disk-admission-pause
       - runner-34-creds:/home/runner/.runner-creds
   omninode-runner-35:
     !!merge <<: *runner-base
@@ -537,6 +581,7 @@ services:
       - ./runners/entrypoint.sh:/usr/local/bin/entrypoint.sh:ro
       - ./runners/runner-job-started.sh:/usr/local/bin/runner-job-started.sh:ro
       - ./runners/healthcheck.sh:/usr/local/bin/healthcheck.sh:ro
+      - ${RUNNER_DISK_ADMISSION_PAUSE_HOST_DIR:-./state/disk-admission-pause}:/home/runner/.onex-disk-admission-pause
       - runner-35-creds:/home/runner/.runner-creds
   omninode-runner-36:
     !!merge <<: *runner-base
@@ -549,6 +594,7 @@ services:
       - ./runners/entrypoint.sh:/usr/local/bin/entrypoint.sh:ro
       - ./runners/runner-job-started.sh:/usr/local/bin/runner-job-started.sh:ro
       - ./runners/healthcheck.sh:/usr/local/bin/healthcheck.sh:ro
+      - ${RUNNER_DISK_ADMISSION_PAUSE_HOST_DIR:-./state/disk-admission-pause}:/home/runner/.onex-disk-admission-pause
       - runner-36-creds:/home/runner/.runner-creds
   omninode-runner-37:
     !!merge <<: *runner-base
@@ -561,6 +607,7 @@ services:
       - ./runners/entrypoint.sh:/usr/local/bin/entrypoint.sh:ro
       - ./runners/runner-job-started.sh:/usr/local/bin/runner-job-started.sh:ro
       - ./runners/healthcheck.sh:/usr/local/bin/healthcheck.sh:ro
+      - ${RUNNER_DISK_ADMISSION_PAUSE_HOST_DIR:-./state/disk-admission-pause}:/home/runner/.onex-disk-admission-pause
       - runner-37-creds:/home/runner/.runner-creds
   omninode-runner-38:
     !!merge <<: *runner-base
@@ -573,6 +620,7 @@ services:
       - ./runners/entrypoint.sh:/usr/local/bin/entrypoint.sh:ro
       - ./runners/runner-job-started.sh:/usr/local/bin/runner-job-started.sh:ro
       - ./runners/healthcheck.sh:/usr/local/bin/healthcheck.sh:ro
+      - ${RUNNER_DISK_ADMISSION_PAUSE_HOST_DIR:-./state/disk-admission-pause}:/home/runner/.onex-disk-admission-pause
       - runner-38-creds:/home/runner/.runner-creds
   omninode-runner-39:
     !!merge <<: *runner-base
@@ -585,6 +633,7 @@ services:
       - ./runners/entrypoint.sh:/usr/local/bin/entrypoint.sh:ro
       - ./runners/runner-job-started.sh:/usr/local/bin/runner-job-started.sh:ro
       - ./runners/healthcheck.sh:/usr/local/bin/healthcheck.sh:ro
+      - ${RUNNER_DISK_ADMISSION_PAUSE_HOST_DIR:-./state/disk-admission-pause}:/home/runner/.onex-disk-admission-pause
       - runner-39-creds:/home/runner/.runner-creds
   omninode-runner-40:
     !!merge <<: *runner-base
@@ -597,6 +646,7 @@ services:
       - ./runners/entrypoint.sh:/usr/local/bin/entrypoint.sh:ro
       - ./runners/runner-job-started.sh:/usr/local/bin/runner-job-started.sh:ro
       - ./runners/healthcheck.sh:/usr/local/bin/healthcheck.sh:ro
+      - ${RUNNER_DISK_ADMISSION_PAUSE_HOST_DIR:-./state/disk-admission-pause}:/home/runner/.onex-disk-admission-pause
       - runner-40-creds:/home/runner/.runner-creds
   omninode-runner-41:
     !!merge <<: *runner-base
@@ -609,6 +659,7 @@ services:
       - ./runners/entrypoint.sh:/usr/local/bin/entrypoint.sh:ro
       - ./runners/runner-job-started.sh:/usr/local/bin/runner-job-started.sh:ro
       - ./runners/healthcheck.sh:/usr/local/bin/healthcheck.sh:ro
+      - ${RUNNER_DISK_ADMISSION_PAUSE_HOST_DIR:-./state/disk-admission-pause}:/home/runner/.onex-disk-admission-pause
       - runner-41-creds:/home/runner/.runner-creds
   omninode-runner-42:
     !!merge <<: *runner-base
@@ -621,6 +672,7 @@ services:
       - ./runners/entrypoint.sh:/usr/local/bin/entrypoint.sh:ro
       - ./runners/runner-job-started.sh:/usr/local/bin/runner-job-started.sh:ro
       - ./runners/healthcheck.sh:/usr/local/bin/healthcheck.sh:ro
+      - ${RUNNER_DISK_ADMISSION_PAUSE_HOST_DIR:-./state/disk-admission-pause}:/home/runner/.onex-disk-admission-pause
       - runner-42-creds:/home/runner/.runner-creds
   omninode-runner-43:
     !!merge <<: *runner-base
@@ -633,6 +685,7 @@ services:
       - ./runners/entrypoint.sh:/usr/local/bin/entrypoint.sh:ro
       - ./runners/runner-job-started.sh:/usr/local/bin/runner-job-started.sh:ro
       - ./runners/healthcheck.sh:/usr/local/bin/healthcheck.sh:ro
+      - ${RUNNER_DISK_ADMISSION_PAUSE_HOST_DIR:-./state/disk-admission-pause}:/home/runner/.onex-disk-admission-pause
       - runner-43-creds:/home/runner/.runner-creds
   omninode-runner-44:
     !!merge <<: *runner-base
@@ -645,6 +698,7 @@ services:
       - ./runners/entrypoint.sh:/usr/local/bin/entrypoint.sh:ro
       - ./runners/runner-job-started.sh:/usr/local/bin/runner-job-started.sh:ro
       - ./runners/healthcheck.sh:/usr/local/bin/healthcheck.sh:ro
+      - ${RUNNER_DISK_ADMISSION_PAUSE_HOST_DIR:-./state/disk-admission-pause}:/home/runner/.onex-disk-admission-pause
       - runner-44-creds:/home/runner/.runner-creds
   omninode-runner-45:
     !!merge <<: *runner-base
@@ -657,6 +711,7 @@ services:
       - ./runners/entrypoint.sh:/usr/local/bin/entrypoint.sh:ro
       - ./runners/runner-job-started.sh:/usr/local/bin/runner-job-started.sh:ro
       - ./runners/healthcheck.sh:/usr/local/bin/healthcheck.sh:ro
+      - ${RUNNER_DISK_ADMISSION_PAUSE_HOST_DIR:-./state/disk-admission-pause}:/home/runner/.onex-disk-admission-pause
       - runner-45-creds:/home/runner/.runner-creds
   omninode-runner-46:
     !!merge <<: *runner-base
@@ -669,6 +724,7 @@ services:
       - ./runners/entrypoint.sh:/usr/local/bin/entrypoint.sh:ro
       - ./runners/runner-job-started.sh:/usr/local/bin/runner-job-started.sh:ro
       - ./runners/healthcheck.sh:/usr/local/bin/healthcheck.sh:ro
+      - ${RUNNER_DISK_ADMISSION_PAUSE_HOST_DIR:-./state/disk-admission-pause}:/home/runner/.onex-disk-admission-pause
       - runner-46-creds:/home/runner/.runner-creds
   omninode-runner-47:
     !!merge <<: *runner-base
@@ -681,6 +737,7 @@ services:
       - ./runners/entrypoint.sh:/usr/local/bin/entrypoint.sh:ro
       - ./runners/runner-job-started.sh:/usr/local/bin/runner-job-started.sh:ro
       - ./runners/healthcheck.sh:/usr/local/bin/healthcheck.sh:ro
+      - ${RUNNER_DISK_ADMISSION_PAUSE_HOST_DIR:-./state/disk-admission-pause}:/home/runner/.onex-disk-admission-pause
       - runner-47-creds:/home/runner/.runner-creds
   omninode-runner-48:
     !!merge <<: *runner-base
@@ -693,6 +750,7 @@ services:
       - ./runners/entrypoint.sh:/usr/local/bin/entrypoint.sh:ro
       - ./runners/runner-job-started.sh:/usr/local/bin/runner-job-started.sh:ro
       - ./runners/healthcheck.sh:/usr/local/bin/healthcheck.sh:ro
+      - ${RUNNER_DISK_ADMISSION_PAUSE_HOST_DIR:-./state/disk-admission-pause}:/home/runner/.onex-disk-admission-pause
       - runner-48-creds:/home/runner/.runner-creds
   omninode-runner-49:
     !!merge <<: *runner-base
@@ -705,6 +763,7 @@ services:
       - ./runners/entrypoint.sh:/usr/local/bin/entrypoint.sh:ro
       - ./runners/runner-job-started.sh:/usr/local/bin/runner-job-started.sh:ro
       - ./runners/healthcheck.sh:/usr/local/bin/healthcheck.sh:ro
+      - ${RUNNER_DISK_ADMISSION_PAUSE_HOST_DIR:-./state/disk-admission-pause}:/home/runner/.onex-disk-admission-pause
       - runner-49-creds:/home/runner/.runner-creds
   omninode-runner-50:
     !!merge <<: *runner-base
@@ -717,6 +776,7 @@ services:
       - ./runners/entrypoint.sh:/usr/local/bin/entrypoint.sh:ro
       - ./runners/runner-job-started.sh:/usr/local/bin/runner-job-started.sh:ro
       - ./runners/healthcheck.sh:/usr/local/bin/healthcheck.sh:ro
+      - ${RUNNER_DISK_ADMISSION_PAUSE_HOST_DIR:-./state/disk-admission-pause}:/home/runner/.onex-disk-admission-pause
       - runner-50-creds:/home/runner/.runner-creds
   omninode-runner-51:
     !!merge <<: *runner-base
@@ -729,6 +789,7 @@ services:
       - ./runners/entrypoint.sh:/usr/local/bin/entrypoint.sh:ro
       - ./runners/runner-job-started.sh:/usr/local/bin/runner-job-started.sh:ro
       - ./runners/healthcheck.sh:/usr/local/bin/healthcheck.sh:ro
+      - ${RUNNER_DISK_ADMISSION_PAUSE_HOST_DIR:-./state/disk-admission-pause}:/home/runner/.onex-disk-admission-pause
       - runner-51-creds:/home/runner/.runner-creds
   omninode-runner-52:
     !!merge <<: *runner-base
@@ -741,6 +802,7 @@ services:
       - ./runners/entrypoint.sh:/usr/local/bin/entrypoint.sh:ro
       - ./runners/runner-job-started.sh:/usr/local/bin/runner-job-started.sh:ro
       - ./runners/healthcheck.sh:/usr/local/bin/healthcheck.sh:ro
+      - ${RUNNER_DISK_ADMISSION_PAUSE_HOST_DIR:-./state/disk-admission-pause}:/home/runner/.onex-disk-admission-pause
       - runner-52-creds:/home/runner/.runner-creds
   omninode-runner-53:
     !!merge <<: *runner-base
@@ -753,6 +815,7 @@ services:
       - ./runners/entrypoint.sh:/usr/local/bin/entrypoint.sh:ro
       - ./runners/runner-job-started.sh:/usr/local/bin/runner-job-started.sh:ro
       - ./runners/healthcheck.sh:/usr/local/bin/healthcheck.sh:ro
+      - ${RUNNER_DISK_ADMISSION_PAUSE_HOST_DIR:-./state/disk-admission-pause}:/home/runner/.onex-disk-admission-pause
       - runner-53-creds:/home/runner/.runner-creds
   omninode-runner-54:
     !!merge <<: *runner-base
@@ -765,6 +828,7 @@ services:
       - ./runners/entrypoint.sh:/usr/local/bin/entrypoint.sh:ro
       - ./runners/runner-job-started.sh:/usr/local/bin/runner-job-started.sh:ro
       - ./runners/healthcheck.sh:/usr/local/bin/healthcheck.sh:ro
+      - ${RUNNER_DISK_ADMISSION_PAUSE_HOST_DIR:-./state/disk-admission-pause}:/home/runner/.onex-disk-admission-pause
       - runner-54-creds:/home/runner/.runner-creds
   omninode-runner-55:
     !!merge <<: *runner-base
@@ -777,6 +841,7 @@ services:
       - ./runners/entrypoint.sh:/usr/local/bin/entrypoint.sh:ro
       - ./runners/runner-job-started.sh:/usr/local/bin/runner-job-started.sh:ro
       - ./runners/healthcheck.sh:/usr/local/bin/healthcheck.sh:ro
+      - ${RUNNER_DISK_ADMISSION_PAUSE_HOST_DIR:-./state/disk-admission-pause}:/home/runner/.onex-disk-admission-pause
       - runner-55-creds:/home/runner/.runner-creds
   omninode-runner-56:
     !!merge <<: *runner-base
@@ -789,6 +854,7 @@ services:
       - ./runners/entrypoint.sh:/usr/local/bin/entrypoint.sh:ro
       - ./runners/runner-job-started.sh:/usr/local/bin/runner-job-started.sh:ro
       - ./runners/healthcheck.sh:/usr/local/bin/healthcheck.sh:ro
+      - ${RUNNER_DISK_ADMISSION_PAUSE_HOST_DIR:-./state/disk-admission-pause}:/home/runner/.onex-disk-admission-pause
       - runner-56-creds:/home/runner/.runner-creds
   omninode-runner-57:
     !!merge <<: *runner-base
@@ -801,6 +867,7 @@ services:
       - ./runners/entrypoint.sh:/usr/local/bin/entrypoint.sh:ro
       - ./runners/runner-job-started.sh:/usr/local/bin/runner-job-started.sh:ro
       - ./runners/healthcheck.sh:/usr/local/bin/healthcheck.sh:ro
+      - ${RUNNER_DISK_ADMISSION_PAUSE_HOST_DIR:-./state/disk-admission-pause}:/home/runner/.onex-disk-admission-pause
       - runner-57-creds:/home/runner/.runner-creds
   omninode-runner-58:
     !!merge <<: *runner-base
@@ -813,6 +880,7 @@ services:
       - ./runners/entrypoint.sh:/usr/local/bin/entrypoint.sh:ro
       - ./runners/runner-job-started.sh:/usr/local/bin/runner-job-started.sh:ro
       - ./runners/healthcheck.sh:/usr/local/bin/healthcheck.sh:ro
+      - ${RUNNER_DISK_ADMISSION_PAUSE_HOST_DIR:-./state/disk-admission-pause}:/home/runner/.onex-disk-admission-pause
       - runner-58-creds:/home/runner/.runner-creds
   omninode-runner-59:
     !!merge <<: *runner-base
@@ -825,6 +893,7 @@ services:
       - ./runners/entrypoint.sh:/usr/local/bin/entrypoint.sh:ro
       - ./runners/runner-job-started.sh:/usr/local/bin/runner-job-started.sh:ro
       - ./runners/healthcheck.sh:/usr/local/bin/healthcheck.sh:ro
+      - ${RUNNER_DISK_ADMISSION_PAUSE_HOST_DIR:-./state/disk-admission-pause}:/home/runner/.onex-disk-admission-pause
       - runner-59-creds:/home/runner/.runner-creds
   omninode-runner-60:
     !!merge <<: *runner-base
@@ -837,6 +906,7 @@ services:
       - ./runners/entrypoint.sh:/usr/local/bin/entrypoint.sh:ro
       - ./runners/runner-job-started.sh:/usr/local/bin/runner-job-started.sh:ro
       - ./runners/healthcheck.sh:/usr/local/bin/healthcheck.sh:ro
+      - ${RUNNER_DISK_ADMISSION_PAUSE_HOST_DIR:-./state/disk-admission-pause}:/home/runner/.onex-disk-admission-pause
       - runner-60-creds:/home/runner/.runner-creds
   omninode-runner-61:
     !!merge <<: *runner-base
@@ -849,6 +919,7 @@ services:
       - ./runners/entrypoint.sh:/usr/local/bin/entrypoint.sh:ro
       - ./runners/runner-job-started.sh:/usr/local/bin/runner-job-started.sh:ro
       - ./runners/healthcheck.sh:/usr/local/bin/healthcheck.sh:ro
+      - ${RUNNER_DISK_ADMISSION_PAUSE_HOST_DIR:-./state/disk-admission-pause}:/home/runner/.onex-disk-admission-pause
       - runner-61-creds:/home/runner/.runner-creds
   omninode-runner-62:
     !!merge <<: *runner-base
@@ -861,6 +932,7 @@ services:
       - ./runners/entrypoint.sh:/usr/local/bin/entrypoint.sh:ro
       - ./runners/runner-job-started.sh:/usr/local/bin/runner-job-started.sh:ro
       - ./runners/healthcheck.sh:/usr/local/bin/healthcheck.sh:ro
+      - ${RUNNER_DISK_ADMISSION_PAUSE_HOST_DIR:-./state/disk-admission-pause}:/home/runner/.onex-disk-admission-pause
       - runner-62-creds:/home/runner/.runner-creds
   omninode-runner-63:
     !!merge <<: *runner-base
@@ -873,6 +945,7 @@ services:
       - ./runners/entrypoint.sh:/usr/local/bin/entrypoint.sh:ro
       - ./runners/runner-job-started.sh:/usr/local/bin/runner-job-started.sh:ro
       - ./runners/healthcheck.sh:/usr/local/bin/healthcheck.sh:ro
+      - ${RUNNER_DISK_ADMISSION_PAUSE_HOST_DIR:-./state/disk-admission-pause}:/home/runner/.onex-disk-admission-pause
       - runner-63-creds:/home/runner/.runner-creds
   omninode-runner-64:
     !!merge <<: *runner-base
@@ -885,6 +958,7 @@ services:
       - ./runners/entrypoint.sh:/usr/local/bin/entrypoint.sh:ro
       - ./runners/runner-job-started.sh:/usr/local/bin/runner-job-started.sh:ro
       - ./runners/healthcheck.sh:/usr/local/bin/healthcheck.sh:ro
+      - ${RUNNER_DISK_ADMISSION_PAUSE_HOST_DIR:-./state/disk-admission-pause}:/home/runner/.onex-disk-admission-pause
       - runner-64-creds:/home/runner/.runner-creds
   omninode-runner-65:
     !!merge <<: *runner-base
@@ -897,6 +971,7 @@ services:
       - ./runners/entrypoint.sh:/usr/local/bin/entrypoint.sh:ro
       - ./runners/runner-job-started.sh:/usr/local/bin/runner-job-started.sh:ro
       - ./runners/healthcheck.sh:/usr/local/bin/healthcheck.sh:ro
+      - ${RUNNER_DISK_ADMISSION_PAUSE_HOST_DIR:-./state/disk-admission-pause}:/home/runner/.onex-disk-admission-pause
       - runner-65-creds:/home/runner/.runner-creds
   omninode-runner-66:
     !!merge <<: *runner-base
@@ -909,6 +984,7 @@ services:
       - ./runners/entrypoint.sh:/usr/local/bin/entrypoint.sh:ro
       - ./runners/runner-job-started.sh:/usr/local/bin/runner-job-started.sh:ro
       - ./runners/healthcheck.sh:/usr/local/bin/healthcheck.sh:ro
+      - ${RUNNER_DISK_ADMISSION_PAUSE_HOST_DIR:-./state/disk-admission-pause}:/home/runner/.onex-disk-admission-pause
       - runner-66-creds:/home/runner/.runner-creds
   omninode-runner-67:
     !!merge <<: *runner-base
@@ -921,6 +997,7 @@ services:
       - ./runners/entrypoint.sh:/usr/local/bin/entrypoint.sh:ro
       - ./runners/runner-job-started.sh:/usr/local/bin/runner-job-started.sh:ro
       - ./runners/healthcheck.sh:/usr/local/bin/healthcheck.sh:ro
+      - ${RUNNER_DISK_ADMISSION_PAUSE_HOST_DIR:-./state/disk-admission-pause}:/home/runner/.onex-disk-admission-pause
       - runner-67-creds:/home/runner/.runner-creds
   omninode-runner-68:
     !!merge <<: *runner-base
@@ -933,6 +1010,7 @@ services:
       - ./runners/entrypoint.sh:/usr/local/bin/entrypoint.sh:ro
       - ./runners/runner-job-started.sh:/usr/local/bin/runner-job-started.sh:ro
       - ./runners/healthcheck.sh:/usr/local/bin/healthcheck.sh:ro
+      - ${RUNNER_DISK_ADMISSION_PAUSE_HOST_DIR:-./state/disk-admission-pause}:/home/runner/.onex-disk-admission-pause
       - runner-68-creds:/home/runner/.runner-creds
   omninode-runner-69:
     !!merge <<: *runner-base
@@ -945,6 +1023,7 @@ services:
       - ./runners/entrypoint.sh:/usr/local/bin/entrypoint.sh:ro
       - ./runners/runner-job-started.sh:/usr/local/bin/runner-job-started.sh:ro
       - ./runners/healthcheck.sh:/usr/local/bin/healthcheck.sh:ro
+      - ${RUNNER_DISK_ADMISSION_PAUSE_HOST_DIR:-./state/disk-admission-pause}:/home/runner/.onex-disk-admission-pause
       - runner-69-creds:/home/runner/.runner-creds
   omninode-runner-70:
     !!merge <<: *runner-base
@@ -957,6 +1036,7 @@ services:
       - ./runners/entrypoint.sh:/usr/local/bin/entrypoint.sh:ro
       - ./runners/runner-job-started.sh:/usr/local/bin/runner-job-started.sh:ro
       - ./runners/healthcheck.sh:/usr/local/bin/healthcheck.sh:ro
+      - ${RUNNER_DISK_ADMISSION_PAUSE_HOST_DIR:-./state/disk-admission-pause}:/home/runner/.onex-disk-admission-pause
       - runner-70-creds:/home/runner/.runner-creds
   omninode-runner-71:
     !!merge <<: *runner-base
@@ -969,6 +1049,7 @@ services:
       - ./runners/entrypoint.sh:/usr/local/bin/entrypoint.sh:ro
       - ./runners/runner-job-started.sh:/usr/local/bin/runner-job-started.sh:ro
       - ./runners/healthcheck.sh:/usr/local/bin/healthcheck.sh:ro
+      - ${RUNNER_DISK_ADMISSION_PAUSE_HOST_DIR:-./state/disk-admission-pause}:/home/runner/.onex-disk-admission-pause
       - runner-71-creds:/home/runner/.runner-creds
   omninode-runner-72:
     !!merge <<: *runner-base
@@ -981,7 +1062,216 @@ services:
       - ./runners/entrypoint.sh:/usr/local/bin/entrypoint.sh:ro
       - ./runners/runner-job-started.sh:/usr/local/bin/runner-job-started.sh:ro
       - ./runners/healthcheck.sh:/usr/local/bin/healthcheck.sh:ro
+      - ${RUNNER_DISK_ADMISSION_PAUSE_HOST_DIR:-./state/disk-admission-pause}:/home/runner/.onex-disk-admission-pause
       - runner-72-creds:/home/runner/.runner-creds
+  omninode-runner-73:
+    !!merge <<: *runner-base
+    container_name: omninode-runner-73
+    environment:
+      !!merge <<: *runner-env
+      RUNNER_NAME: omninode-runner-73
+    volumes:
+      - /var/run/docker.sock:/var/run/docker.sock
+      - ./runners/entrypoint.sh:/usr/local/bin/entrypoint.sh:ro
+      - ./runners/runner-job-started.sh:/usr/local/bin/runner-job-started.sh:ro
+      - ./runners/healthcheck.sh:/usr/local/bin/healthcheck.sh:ro
+      - ${RUNNER_DISK_ADMISSION_PAUSE_HOST_DIR:-./state/disk-admission-pause}:/home/runner/.onex-disk-admission-pause
+      - runner-73-creds:/home/runner/.runner-creds
+  omninode-runner-74:
+    !!merge <<: *runner-base
+    container_name: omninode-runner-74
+    environment:
+      !!merge <<: *runner-env
+      RUNNER_NAME: omninode-runner-74
+    volumes:
+      - /var/run/docker.sock:/var/run/docker.sock
+      - ./runners/entrypoint.sh:/usr/local/bin/entrypoint.sh:ro
+      - ./runners/runner-job-started.sh:/usr/local/bin/runner-job-started.sh:ro
+      - ./runners/healthcheck.sh:/usr/local/bin/healthcheck.sh:ro
+      - ${RUNNER_DISK_ADMISSION_PAUSE_HOST_DIR:-./state/disk-admission-pause}:/home/runner/.onex-disk-admission-pause
+      - runner-74-creds:/home/runner/.runner-creds
+  omninode-runner-75:
+    !!merge <<: *runner-base
+    container_name: omninode-runner-75
+    environment:
+      !!merge <<: *runner-env
+      RUNNER_NAME: omninode-runner-75
+    volumes:
+      - /var/run/docker.sock:/var/run/docker.sock
+      - ./runners/entrypoint.sh:/usr/local/bin/entrypoint.sh:ro
+      - ./runners/runner-job-started.sh:/usr/local/bin/runner-job-started.sh:ro
+      - ./runners/healthcheck.sh:/usr/local/bin/healthcheck.sh:ro
+      - ${RUNNER_DISK_ADMISSION_PAUSE_HOST_DIR:-./state/disk-admission-pause}:/home/runner/.onex-disk-admission-pause
+      - runner-75-creds:/home/runner/.runner-creds
+  omninode-runner-76:
+    !!merge <<: *runner-base
+    container_name: omninode-runner-76
+    environment:
+      !!merge <<: *runner-env
+      RUNNER_NAME: omninode-runner-76
+    volumes:
+      - /var/run/docker.sock:/var/run/docker.sock
+      - ./runners/entrypoint.sh:/usr/local/bin/entrypoint.sh:ro
+      - ./runners/runner-job-started.sh:/usr/local/bin/runner-job-started.sh:ro
+      - ./runners/healthcheck.sh:/usr/local/bin/healthcheck.sh:ro
+      - ${RUNNER_DISK_ADMISSION_PAUSE_HOST_DIR:-./state/disk-admission-pause}:/home/runner/.onex-disk-admission-pause
+      - runner-76-creds:/home/runner/.runner-creds
+  omninode-runner-77:
+    !!merge <<: *runner-base
+    container_name: omninode-runner-77
+    environment:
+      !!merge <<: *runner-env
+      RUNNER_NAME: omninode-runner-77
+    volumes:
+      - /var/run/docker.sock:/var/run/docker.sock
+      - ./runners/entrypoint.sh:/usr/local/bin/entrypoint.sh:ro
+      - ./runners/runner-job-started.sh:/usr/local/bin/runner-job-started.sh:ro
+      - ./runners/healthcheck.sh:/usr/local/bin/healthcheck.sh:ro
+      - ${RUNNER_DISK_ADMISSION_PAUSE_HOST_DIR:-./state/disk-admission-pause}:/home/runner/.onex-disk-admission-pause
+      - runner-77-creds:/home/runner/.runner-creds
+  omninode-runner-78:
+    !!merge <<: *runner-base
+    container_name: omninode-runner-78
+    environment:
+      !!merge <<: *runner-env
+      RUNNER_NAME: omninode-runner-78
+    volumes:
+      - /var/run/docker.sock:/var/run/docker.sock
+      - ./runners/entrypoint.sh:/usr/local/bin/entrypoint.sh:ro
+      - ./runners/runner-job-started.sh:/usr/local/bin/runner-job-started.sh:ro
+      - ./runners/healthcheck.sh:/usr/local/bin/healthcheck.sh:ro
+      - ${RUNNER_DISK_ADMISSION_PAUSE_HOST_DIR:-./state/disk-admission-pause}:/home/runner/.onex-disk-admission-pause
+      - runner-78-creds:/home/runner/.runner-creds
+  omninode-runner-79:
+    !!merge <<: *runner-base
+    container_name: omninode-runner-79
+    environment:
+      !!merge <<: *runner-env
+      RUNNER_NAME: omninode-runner-79
+    volumes:
+      - /var/run/docker.sock:/var/run/docker.sock
+      - ./runners/entrypoint.sh:/usr/local/bin/entrypoint.sh:ro
+      - ./runners/runner-job-started.sh:/usr/local/bin/runner-job-started.sh:ro
+      - ./runners/healthcheck.sh:/usr/local/bin/healthcheck.sh:ro
+      - ${RUNNER_DISK_ADMISSION_PAUSE_HOST_DIR:-./state/disk-admission-pause}:/home/runner/.onex-disk-admission-pause
+      - runner-79-creds:/home/runner/.runner-creds
+  omninode-runner-80:
+    !!merge <<: *runner-base
+    container_name: omninode-runner-80
+    environment:
+      !!merge <<: *runner-env
+      RUNNER_NAME: omninode-runner-80
+    volumes:
+      - /var/run/docker.sock:/var/run/docker.sock
+      - ./runners/entrypoint.sh:/usr/local/bin/entrypoint.sh:ro
+      - ./runners/runner-job-started.sh:/usr/local/bin/runner-job-started.sh:ro
+      - ./runners/healthcheck.sh:/usr/local/bin/healthcheck.sh:ro
+      - ${RUNNER_DISK_ADMISSION_PAUSE_HOST_DIR:-./state/disk-admission-pause}:/home/runner/.onex-disk-admission-pause
+      - runner-80-creds:/home/runner/.runner-creds
+  omninode-runner-81:
+    !!merge <<: *runner-base
+    container_name: omninode-runner-81
+    environment:
+      !!merge <<: *runner-env
+      RUNNER_NAME: omninode-runner-81
+    volumes:
+      - /var/run/docker.sock:/var/run/docker.sock
+      - ./runners/entrypoint.sh:/usr/local/bin/entrypoint.sh:ro
+      - ./runners/runner-job-started.sh:/usr/local/bin/runner-job-started.sh:ro
+      - ./runners/healthcheck.sh:/usr/local/bin/healthcheck.sh:ro
+      - ${RUNNER_DISK_ADMISSION_PAUSE_HOST_DIR:-./state/disk-admission-pause}:/home/runner/.onex-disk-admission-pause
+      - runner-81-creds:/home/runner/.runner-creds
+  omninode-runner-82:
+    !!merge <<: *runner-base
+    container_name: omninode-runner-82
+    environment:
+      !!merge <<: *runner-env
+      RUNNER_NAME: omninode-runner-82
+    volumes:
+      - /var/run/docker.sock:/var/run/docker.sock
+      - ./runners/entrypoint.sh:/usr/local/bin/entrypoint.sh:ro
+      - ./runners/runner-job-started.sh:/usr/local/bin/runner-job-started.sh:ro
+      - ./runners/healthcheck.sh:/usr/local/bin/healthcheck.sh:ro
+      - ${RUNNER_DISK_ADMISSION_PAUSE_HOST_DIR:-./state/disk-admission-pause}:/home/runner/.onex-disk-admission-pause
+      - runner-82-creds:/home/runner/.runner-creds
+  omninode-runner-83:
+    !!merge <<: *runner-base
+    container_name: omninode-runner-83
+    environment:
+      !!merge <<: *runner-env
+      RUNNER_NAME: omninode-runner-83
+    volumes:
+      - /var/run/docker.sock:/var/run/docker.sock
+      - ./runners/entrypoint.sh:/usr/local/bin/entrypoint.sh:ro
+      - ./runners/runner-job-started.sh:/usr/local/bin/runner-job-started.sh:ro
+      - ./runners/healthcheck.sh:/usr/local/bin/healthcheck.sh:ro
+      - ${RUNNER_DISK_ADMISSION_PAUSE_HOST_DIR:-./state/disk-admission-pause}:/home/runner/.onex-disk-admission-pause
+      - runner-83-creds:/home/runner/.runner-creds
+  omninode-runner-84:
+    !!merge <<: *runner-base
+    container_name: omninode-runner-84
+    environment:
+      !!merge <<: *runner-env
+      RUNNER_NAME: omninode-runner-84
+    volumes:
+      - /var/run/docker.sock:/var/run/docker.sock
+      - ./runners/entrypoint.sh:/usr/local/bin/entrypoint.sh:ro
+      - ./runners/runner-job-started.sh:/usr/local/bin/runner-job-started.sh:ro
+      - ./runners/healthcheck.sh:/usr/local/bin/healthcheck.sh:ro
+      - ${RUNNER_DISK_ADMISSION_PAUSE_HOST_DIR:-./state/disk-admission-pause}:/home/runner/.onex-disk-admission-pause
+      - runner-84-creds:/home/runner/.runner-creds
+  omninode-runner-85:
+    !!merge <<: *runner-base
+    container_name: omninode-runner-85
+    environment:
+      !!merge <<: *runner-env
+      RUNNER_NAME: omninode-runner-85
+    volumes:
+      - /var/run/docker.sock:/var/run/docker.sock
+      - ./runners/entrypoint.sh:/usr/local/bin/entrypoint.sh:ro
+      - ./runners/runner-job-started.sh:/usr/local/bin/runner-job-started.sh:ro
+      - ./runners/healthcheck.sh:/usr/local/bin/healthcheck.sh:ro
+      - ${RUNNER_DISK_ADMISSION_PAUSE_HOST_DIR:-./state/disk-admission-pause}:/home/runner/.onex-disk-admission-pause
+      - runner-85-creds:/home/runner/.runner-creds
+  omninode-runner-86:
+    !!merge <<: *runner-base
+    container_name: omninode-runner-86
+    environment:
+      !!merge <<: *runner-env
+      RUNNER_NAME: omninode-runner-86
+    volumes:
+      - /var/run/docker.sock:/var/run/docker.sock
+      - ./runners/entrypoint.sh:/usr/local/bin/entrypoint.sh:ro
+      - ./runners/runner-job-started.sh:/usr/local/bin/runner-job-started.sh:ro
+      - ./runners/healthcheck.sh:/usr/local/bin/healthcheck.sh:ro
+      - ${RUNNER_DISK_ADMISSION_PAUSE_HOST_DIR:-./state/disk-admission-pause}:/home/runner/.onex-disk-admission-pause
+      - runner-86-creds:/home/runner/.runner-creds
+  omninode-runner-87:
+    !!merge <<: *runner-base
+    container_name: omninode-runner-87
+    environment:
+      !!merge <<: *runner-env
+      RUNNER_NAME: omninode-runner-87
+    volumes:
+      - /var/run/docker.sock:/var/run/docker.sock
+      - ./runners/entrypoint.sh:/usr/local/bin/entrypoint.sh:ro
+      - ./runners/runner-job-started.sh:/usr/local/bin/runner-job-started.sh:ro
+      - ./runners/healthcheck.sh:/usr/local/bin/healthcheck.sh:ro
+      - ${RUNNER_DISK_ADMISSION_PAUSE_HOST_DIR:-./state/disk-admission-pause}:/home/runner/.onex-disk-admission-pause
+      - runner-87-creds:/home/runner/.runner-creds
+  omninode-runner-88:
+    !!merge <<: *runner-base
+    container_name: omninode-runner-88
+    environment:
+      !!merge <<: *runner-env
+      RUNNER_NAME: omninode-runner-88
+    volumes:
+      - /var/run/docker.sock:/var/run/docker.sock
+      - ./runners/entrypoint.sh:/usr/local/bin/entrypoint.sh:ro
+      - ./runners/runner-job-started.sh:/usr/local/bin/runner-job-started.sh:ro
+      - ./runners/healthcheck.sh:/usr/local/bin/healthcheck.sh:ro
+      - ${RUNNER_DISK_ADMISSION_PAUSE_HOST_DIR:-./state/disk-admission-pause}:/home/runner/.onex-disk-admission-pause
+      - runner-88-creds:/home/runner/.runner-creds
   # omninode-deploy-runner -- OMN-14889: dedicated runner for the
   # release-train-lab.yml tag-cut/deploy jobs (cut_release_train_tag.sh,
   # refresh_stability_lane.sh, refresh_dev_lane.sh). These scripts need real
@@ -1330,3 +1620,35 @@ volumes:
     name: omninode-runner-71-creds
   runner-72-creds:
     name: omninode-runner-72-creds
+  runner-73-creds:
+    name: omninode-runner-73-creds
+  runner-74-creds:
+    name: omninode-runner-74-creds
+  runner-75-creds:
+    name: omninode-runner-75-creds
+  runner-76-creds:
+    name: omninode-runner-76-creds
+  runner-77-creds:
+    name: omninode-runner-77-creds
+  runner-78-creds:
+    name: omninode-runner-78-creds
+  runner-79-creds:
+    name: omninode-runner-79-creds
+  runner-80-creds:
+    name: omninode-runner-80-creds
+  runner-81-creds:
+    name: omninode-runner-81-creds
+  runner-82-creds:
+    name: omninode-runner-82-creds
+  runner-83-creds:
+    name: omninode-runner-83-creds
+  runner-84-creds:
+    name: omninode-runner-84-creds
+  runner-85-creds:
+    name: omninode-runner-85-creds
+  runner-86-creds:
+    name: omninode-runner-86-creds
+  runner-87-creds:
+    name: omninode-runner-87-creds
+  runner-88-creds:
+    name: omninode-runner-88-creds

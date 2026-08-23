@@ -84,7 +84,7 @@ def test_node_handler_test_change_without_contract_change_passes():
     """Unit tests under tests/unit/nodes are not production handler changes."""
     result = run_script(
         [
-            "tests/unit/nodes/node_llm_inference_effect/handlers/test_handler_llm_cli_subprocess_execution.py",
+            "tests/unit/nodes/node_llm_inference_effect/handlers/test_handler_llm_openai_compatible.py",
         ]
     )
     assert result.returncode == 0, (

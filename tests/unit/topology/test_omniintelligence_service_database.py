@@ -70,7 +70,7 @@ def test_bridge_effect_relation_resolves_on_every_shipped_profile(
     )
     assert target.physical_database == "omniintelligence"
     assert target.database_refs == (OMNIINTELLIGENCE_DATABASE_REF,)
-    assert target.schemas == ("public",)
+    assert target.physical_schemas == ("public",)
     assert target.domains == (EnumDatabaseSchemaDomain.OMNINODE_INTERNAL,)
 
 

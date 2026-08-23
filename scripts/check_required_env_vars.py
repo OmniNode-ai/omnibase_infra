@@ -1,19 +1,27 @@
 # SPDX-FileCopyrightText: 2025 OmniNode.ai Inc.
 # SPDX-License-Identifier: MIT
-"""Check that required compose env vars are set in configured env files.
+"""Check that docker-compose required env vars are declared in the in-repo manifest.
 
-Parses the compose file for ${VARNAME:?...} required-var patterns and validates that each
-var is present with a non-empty value in at least one configured env file.
+Parses the compose file for ``${VARNAME:?...}`` required-var patterns and diffs that set
+against a checked-in, reviewable manifest of declared names (``docker/required-env-vars.manifest.txt``
+by default). This validates a property of the two committed files — never the invoking
+host's process environment or any local env file — so the result is identical on every
+build host and in CI (OMN-15537).
 
 Exit codes:
-  0 — all required vars are set
-  1 — one or more required vars are missing
+  0 — the compose file's required-var set matches the manifest exactly
+  1 — the compose file and the manifest have diverged (additions and/or removals)
+  2 — the compose file or the manifest file is missing
+
+This hook intentionally does NOT check whether required vars have real values on the
+invoking machine. That is a host-provisioning/bootstrap concern — see
+``scripts/bootstrap-infisical.sh`` — not something a commit-time diff gate can honestly
+assert (see OMN-15537 for why the prior host-environment-reading shape was a defect).
 """
 
 from __future__ import annotations
 
 import argparse
-import os
 import re
 import sys
 from pathlib import Path
@@ -30,26 +38,27 @@ def _parse_compose_vars(compose_path: Path) -> set[str]:
     return set(_VAR_PATTERN.findall(content))
 
 
-def _parse_env_file(env_path: Path) -> set[str]:
-    """Return variable names that are set (non-empty) in *env_path*."""
-    if not env_path.exists():
-        return set()
-    set_vars: set[str] = set()
-    for raw_line in env_path.read_text(encoding="utf-8").splitlines():
+def _parse_manifest_vars(manifest_path: Path) -> set[str]:
+    """Return the set of variable names declared in *manifest_path*.
+
+    One name per line; blank lines and ``#``-prefixed comment lines are ignored.
+    """
+    declared: set[str] = set()
+    for raw_line in manifest_path.read_text(encoding="utf-8").splitlines():
         line = raw_line.strip()
-        if not line or line.startswith("#") or "=" not in line:
+        if not line or line.startswith("#"):
             continue
-        key, _, value = line.partition("=")
-        key = key.strip()
-        value = value.strip()
-        if key and value:
-            set_vars.add(key)
-    return set_vars
+        declared.add(line)
+    return declared
 
 
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(
-        description="Verify that docker-compose required env vars are set in configured env files",
+        description=(
+            "Verify that docker-compose required env vars (${VAR:?...}) are declared in "
+            "the checked-in required-env-vars manifest — never against the invoking "
+            "host's environment."
+        ),
     )
     parser.add_argument(
         "--compose-file",
@@ -57,58 +66,63 @@ def main(argv: list[str] | None = None) -> int:
         help="Path to the docker-compose file to inspect (default: docker/docker-compose.infra.yml)",
     )
     parser.add_argument(
-        "--env-file",
-        action="append",
-        default=None,
-        help=(
-            "Path to an env file to validate against. Repeatable. Defaults to "
-            "docker/runtime-policy.env and ~/.omnibase/.env."
-        ),
+        "--manifest-file",
+        default="docker/required-env-vars.manifest.txt",
+        help="Path to the declared-var manifest (default: docker/required-env-vars.manifest.txt)",
     )
     args = parser.parse_args(argv)
 
     compose_path = Path(args.compose_file)
-    env_paths = (
-        [Path("docker/runtime-policy.env"), Path("~/.omnibase/.env")]
-        if args.env_file is None
-        else [Path(path) for path in args.env_file]
-    )
-    env_paths = [path.expanduser() for path in env_paths]
+    manifest_path = Path(args.manifest_file)
 
     if not compose_path.exists():
         print(f"ERROR: compose file not found: {compose_path}", file=sys.stderr)
-        return 1
+        return 2
+    if not manifest_path.exists():
+        print(f"ERROR: manifest file not found: {manifest_path}", file=sys.stderr)
+        return 2
 
     required_vars = _parse_compose_vars(compose_path)
-    # Docker Compose resolves the invoking process environment before env files.
-    # Honor the same input surface so CI can provide short-lived render values
-    # without persisting real runtime secrets on a build machine.
-    set_vars: set[str] = {key for key, value in os.environ.items() if value}
-    for env_path in env_paths:
-        set_vars.update(_parse_env_file(env_path))
+    declared_vars = _parse_manifest_vars(manifest_path)
 
-    missing = sorted(required_vars - set_vars)
+    undeclared = sorted(required_vars - declared_vars)
+    stale = sorted(declared_vars - required_vars)
 
-    if not missing:
-        env_path_text = ", ".join(str(path) for path in env_paths)
+    if not undeclared and not stale:
         print(
-            f"OK: all {len(required_vars)} env vars referenced in {compose_path} are set in {env_path_text}"
+            f"OK: all {len(required_vars)} env vars referenced in {compose_path} are "
+            f"declared in {manifest_path}"
         )
         return 0
 
-    env_path_text = ", ".join(str(path) for path in env_paths)
     print(
-        f"ERROR: {len(missing)} env var(s) referenced in {compose_path} are "
-        f"missing from the process environment and {env_path_text}:",
+        f"ERROR: {compose_path} and {manifest_path} have diverged:",
         file=sys.stderr,
     )
-    for var in missing:
-        print(f"  {var}", file=sys.stderr)
+    if undeclared:
+        print(
+            f"  {len(undeclared)} var(s) required by {compose_path} but not declared in "
+            f"{manifest_path}:",
+            file=sys.stderr,
+        )
+        for var in undeclared:
+            print(f"    + {var}", file=sys.stderr)
+    if stale:
+        print(
+            f"  {len(stale)} var(s) declared in {manifest_path} but no longer required by "
+            f"{compose_path}:",
+            file=sys.stderr,
+        )
+        for var in stale:
+            print(f"    - {var}", file=sys.stderr)
     print(file=sys.stderr)
-    print("Remediation — add the missing vars to your env file:", file=sys.stderr)
-    env_path = env_paths[-1]
-    for var in missing:
-        print(f"  echo '{var}=<set_me>' >> {env_path}", file=sys.stderr)
+    print(
+        f"Remediation — edit {manifest_path} to match the ${{VAR:?}} names in "
+        f"{compose_path} (add new names, remove stale ones). This manifest declares "
+        "names only, never values — it never touches ~/.omnibase/.env or any other "
+        "runtime env file.",
+        file=sys.stderr,
+    )
     return 1
 
 
