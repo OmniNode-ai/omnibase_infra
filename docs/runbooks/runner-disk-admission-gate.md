@@ -3,6 +3,64 @@
 Structural fix for the `.201` runner-fleet ENOSPC write-amplification loop
 (OMN-16360, recurred twice on 2026-08-22 — see comments on OMN-16363).
 
+## Layer 0: filesystem reserve
+
+**What:** `.201`'s `/data` volume (`/dev/nvme2n1p1`, 3.6TB ext4, backs the
+entire runner fleet's Docker storage) ships with ext4's default 5%
+root-reserved-blocks allocation — space `mkfs.ext4` sets aside that only
+`root` can write into, even when `df` reports the volume as full to
+non-root processes. On a 3.6TB volume, 5% is ~180GB permanently
+inaccessible to the non-root users that own the runner-fleet Docker writes.
+On 2026-08-22 ~22:1xZ, during the live ENOSPC write-amplification incident
+(see below), incident responder `disk-recovery-201-4` ran:
+
+```bash
+sudo tune2fs -m 1 /dev/nvme2n1p1
+```
+
+dropping the reserve from 5% to 1% and surfacing roughly 150GB that
+non-root CI writers could not previously touch. This ended the incident's
+**hard-zero ENOSPC** condition — writers were hitting a hard 0 bytes
+available while `tune2fs -l` showed ~190GB of the volume still existed,
+root-reserved. **Operator ruling (2026-08-23): KEEP the 1% reserve and
+formalize it as Layer 0** — it is the precondition underneath Layers 1/2
+below; a runner mount at the 5% default reaches its effective-zero
+condition ~150GB sooner than the same physical fill level does at 1%.
+
+**Why 1% and not 0%:** ext4's root reserve exists so root-owned recovery
+tooling (fsck, log rotation, emergency cleanup) can still write when a
+volume is nominally full — dropping to 0% would remove that margin
+entirely. 1% of 3.6TB (~36GB) preserves a working reserve for root while
+still returning the vast majority of the previously-locked space to
+non-root writers; this repo's own runner fleet, disk-admission gate
+(Layer 1 below), and disk-GC timers all run as non-root.
+
+**When this applies / fault signature:** if `.201`'s `/data` volume is
+ever recreated, reformatted, or replaced (new drive, RAID rebuild, fresh
+`mkfs.ext4`), the reserve resets to ext4's 5% default and this fix must be
+reapplied — it is a filesystem property, not something any of the
+Docker/compose/runner-fleet layers persist. Diagnose a reserve-related
+false "out of space" the same way the live incident was diagnosed: `df -h
+/data` reports 0 (or near-0) bytes available to a non-root check while
+`sudo tune2fs -l /dev/nvme2n1p1 | grep -i reserved` shows a nonzero
+`Reserved block count` well above what 1% of the volume should be — that
+gap is inaccessible-to-non-root space, not real exhaustion, and a
+`resize2fs`/disk-add will not fix it (only `tune2fs -m` will).
+
+**Revert (if ever needed):**
+
+```bash
+sudo tune2fs -m 5 /dev/nvme2n1p1
+```
+
+Reverting restores ext4's 5% default and re-locks ~150GB from non-root
+writers — this reintroduces the exact effective-capacity shortfall that
+triggered the 2026-08-22 incident, so only do this on an explicit operator
+decision, not as routine maintenance.
+
+**Verification:** `sudo tune2fs -l /dev/nvme2n1p1 | grep -i 'block count\|reserved block count'` —
+`Reserved block count` should be ~1% of `Block count`, not ~5%.
+
 ## The mechanism this breaks
 
 When the shared Docker storage volume backing the runner fleet runs low, a
@@ -83,6 +141,11 @@ unaffected and is already the primary, immediately-effective mechanism.
 
 ## Rollout
 
+0. **Layer 0 (already applied live on `.201`, no action needed unless the
+   `/data` volume is ever recreated)**: `sudo tune2fs -m 1 /dev/nvme2n1p1`
+   was run during the 2026-08-22 incident and confirmed by operator ruling
+   to stay in place. Re-verify with the command in the Verification
+   subsection above if `/data` is ever rebuilt.
 1. **Layer 1 (do this first, low risk, no recreate)**: copy the updated
    `docker/runners/runner-job-started.sh` to the host bind-mount path on
    `.201` (`~/.omnibase/runners/docker/runners/runner-job-started.sh`).
