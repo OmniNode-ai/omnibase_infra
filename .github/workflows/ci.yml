@@ -5,19 +5,31 @@ on:
     branches: [main]
   pull_request:
     branches: [main, dev]
-    # OMN-14241: `edited` is required so a PR-body-only edit (the common case
-    # is stamping `Evidence-Source: OCC#<n>` after the companion OCC PR
-    # merges) retriggers this workflow's `occ-preflight` job. The reusable
-    # occ-preflight.yml already live-fetches the current PR body via
-    # `gh pr view` on every run -- the defect was never a frozen-body read,
-    # it was that no new run fired at all, so the last commit-triggered
-    # FAILURE (correct at that instant, before the stamp existed) sat as the
-    # permanent status for `occ-preflight / eligibility` and CI Summary
-    # failed closed on it forever (live case: infra#2696, #2694). GitHub's
-    # implicit default when `types:` is omitted is
-    # [opened, synchronize, reopened], which is what this workflow ran on
-    # before this fix.
-    types: [opened, edited, synchronize, reopened]
+    # OMN-16171: `edited` REMOVED, and the OMN-14241 self-heal it provided is
+    # now served by .github/workflows/occ-preflight-heal.yml instead.
+    #
+    # OMN-14241 was right about the defect: a PR-body-only edit stamping
+    # `Evidence-Source: OCC#<n>` has to re-validate, or the pre-stamp
+    # `occ-preflight / eligibility` FAILURE stands forever and CI Summary
+    # fails closed on it (live cases: #2696, #2694). But paying for it with a
+    # trigger type meant a brand-new run of this entire ~48-job matrix on
+    # every body edit -- and because the concurrency group below cancels in
+    # progress, each edit also killed whatever matrix was mid-flight and
+    # restarted it from zero. Measured on #2784, one unchanged head SHA
+    # 7993b115: waves at 13:28:50Z (42 workflows), 13:50:09Z (10) and
+    # 13:51:33Z (8), while the org-wide backlog stood at 247 queued jobs.
+    #
+    # The heal workflow re-runs only the FAILED JOBS of this run, in place,
+    # keeping the run id -- which is what CI Summary needs, since it polls its
+    # own run's job list. Two jobs move instead of forty-eight, nothing
+    # in-flight is cancelled, and the trigger set here returns to GitHub's
+    # implicit default.
+    #
+    # Skipping the heavy jobs on an edited run was NOT an option: a job
+    # skipped by an `if:` still publishes a `skipped` check run, which branch
+    # protection counts as passing -- vector 2 of the required-check
+    # skip-vector guard, i.e. a body-edit-shaped bypass of a red gate.
+    types: [opened, synchronize, reopened]
   merge_group:
   workflow_dispatch:
 
@@ -841,6 +853,147 @@ jobs:
       - name: Validate .trivyignore expiry
         run: python3 scripts/ci/check_trivyignore_expiry.py .trivyignore
 
+  # Lockfile CVE scan (OMN-16228) -- born from the 2026-08-18 sqlparse/Trivy
+  # incident (OMN-16170): three HIGH sqlparse CVEs (fixed in 0.6.0) were only
+  # caught by the Trivy scan on the built runtime IMAGE, deep in the deploy
+  # pipeline, with a staging rollout batch queued behind the one-line fix.
+  # This shifts detection left to dependency-pin time, on the PR that
+  # introduces or keeps the vulnerable pin.
+  #
+  # Tool: osv-scanner (not pip-audit) -- osv-scanner parses uv.lock natively
+  # (confirmed against the upstream supported-lockfiles list: Pipfile.lock,
+  # poetry.lock, requirements.txt, pdm.lock, pylock.toml, uv.lock). pip-audit
+  # has no uv.lock parser and would need an extra `uv export` translation
+  # step. Pinned by ghcr.io digest (not a floating tag) for the same
+  # reproducibility reason Trivy is pinned by commit SHA below.
+  #
+  # STRICT_GATE_JOBS + no job-level `if:` (fail-closed-on-skip): this job
+  # always runs and always completes success/failure -- it never reports
+  # `skipped`, which is invisible to a poller expecting `success` and reads
+  # as SUCCESS when unregistered (the OMN-16225-class fail-open-by-skip
+  # trap). Path relevance (does this PR touch pyproject.toml/uv.lock) is
+  # decided by scripts/ci/check_lockfile_cve.py's `relevant` subcommand and
+  # threaded through step-level `if:` guards via $GITHUB_OUTPUT -- the same
+  # shape `detect-changes` already uses below -- so only the STEPS skip, the
+  # job conclusion is always a real success/failure. See
+  # scripts/ci/check_lockfile_cve.py's module docstring for the full
+  # severity-classification + fix-availability + blocking-decision design.
+  lockfile-cve-scan:
+    needs: occ-preflight
+    name: Lockfile CVE Scan (OMN-16228)
+    # OMNI_RUNNER_SELECTOR_V1 — trusted CI defaults to self-hosted omnibase-ci; public forks default to ubuntu-latest
+    runs-on: >-
+      ${{
+        (github.event_name == 'pull_request' &&
+         github.event.pull_request.head.repo.full_name != github.repository)
+        && fromJSON(vars.OMNI_PUBLIC_PR_RUNS_ON_JSON || '["ubuntu-latest"]')
+        || fromJSON((github.event_name == 'merge_group' && vars.OMNI_REQUIRED_CI_RUNS_ON_JSON) || vars.OMNI_TRUSTED_CI_RUNS_ON_JSON || '["self-hosted","omnibase-ci"]')
+      }}
+    # Raised from 5 (2026-08-18, live proof run on PR #2793): the DoD's
+    # "under ~2 min" budget is about the scan's own runtime, not fleet setup
+    # variance. Under contended-fleet conditions the SAME shared
+    # setup-python-uv composite this job shares with every other job in this
+    # file measured 6m42s before completing on a live run -- the job was
+    # cancelled by the old 5-minute ceiling before osv-scanner ever ran, a
+    # false-red unrelated to this job's own logic. Same shape as pin-
+    # reachability's own timeout history (raised 10->18 for the identical
+    # reason, see that job's comment above). 15 minutes matches the baseline
+    # every other lightweight gate in this file already uses
+    # (fingerprint-check, demo-loop-gate, etc.) for the same setup-variance
+    # headroom; the scan itself remains fast.
+    timeout-minutes: 15
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+        with:
+          fetch-depth: 0
+
+      - name: Setup Python and uv
+        uses: ./.github/actions/setup-python-uv
+        with:
+          python-version: ${{ env.PYTHON_VERSION }}
+          uv-version: ${{ env.UV_VERSION }}
+          cache-version: ${{ env.CACHE_VERSION }}
+          cache-enabled: "false"
+
+      - name: Compute changed files
+        id: diff
+        run: |
+          if [ "${{ github.event_name }}" = "pull_request" ]; then
+            base="${{ github.event.pull_request.base.sha }}"
+            git fetch --no-tags --depth=1 origin "$base" || true
+            git diff --name-only "$base"...HEAD > changed.txt
+          else
+            git diff --name-only HEAD~1 HEAD > changed.txt || echo "" > changed.txt
+          fi
+
+      - name: Determine scan relevance
+        id: relevant
+        run: |
+          result=$(uv run python -m scripts.ci.check_lockfile_cve relevant \
+            --changed-files-from changed.txt \
+            --event-name "${{ github.event_name }}")
+          echo "relevant=$result" >> "$GITHUB_OUTPUT"
+          echo "Scan relevant: $result"
+
+      # Runs the pinned+checksummed linux_amd64 binary directly, NOT via
+      # `docker run -v $PWD:/src` (the first cut of this step, live-proof-run
+      # defect found 2026-08-18 on PR #2793: self-hosted `omnibase-ci`
+      # runners are themselves containerized -- Docker-outside-of-Docker --
+      # so `$PWD` inside the runner container does not resolve to a real
+      # path the HOST docker daemon can bind-mount. osv-scanner's own error
+      # was unambiguous: "failed to resolve path: stat /src/uv.lock: no such
+      # file or directory" -- the mount silently pointed at an empty
+      # directory. A native binary has no mount boundary to get wrong, and
+      # this repo already downloads pinned artifacts by URL+checksum
+      # elsewhere rather than assuming Docker is available/DooD-safe on
+      # every runner class (ubuntu-latest public-fork runners included).
+      # SHA256 pinned from the release's own `osv-scanner_SHA256SUMS` file,
+      # verified 2026-08-18 against a fresh download of both files.
+      # Single retry on a transport/execution failure only (not on findings --
+      # osv-scanner exits non-zero when it finds ANY vulnerability, which is
+      # an expected outcome here, not a transient failure). Consistent with
+      # the "single retry, then red" network-flakiness norm used elsewhere in
+      # this workflow.
+      - name: Run osv-scanner
+        if: steps.relevant.outputs.relevant == 'true'
+        env:
+          OSV_SCANNER_URL: "https://github.com/google/osv-scanner/releases/download/v2.5.1/osv-scanner_linux_amd64"
+          OSV_SCANNER_SHA256: "f9f25499a2c8cc367b3af45df2ea7eeca7fbccceab9c35079968f4b3652194be"
+        run: |
+          set -uo pipefail
+          curl -sSL --fail "$OSV_SCANNER_URL" -o /tmp/osv-scanner
+          echo "${OSV_SCANNER_SHA256}  /tmp/osv-scanner" | sha256sum -c -
+          chmod +x /tmp/osv-scanner
+          attempt_scan() {
+            /tmp/osv-scanner scan --lockfile=uv.lock --format=json > osv-results.json 2> osv-scan.log
+          }
+          valid_json() {
+            python3 -c "import json; json.load(open('osv-results.json'))" 2>/dev/null
+          }
+          attempt_scan || true
+          if ! valid_json; then
+            echo "osv-scanner did not produce valid JSON on attempt 1 -- retrying once:"
+            cat osv-scan.log || true
+            attempt_scan || true
+          fi
+          if ! valid_json; then
+            echo "osv-scanner failed on both attempts -- treating as a real scan failure, not a clean result."
+            cat osv-scan.log || true
+            exit 1
+          fi
+          echo "osv-scanner produced valid JSON output."
+
+      - name: Evaluate lockfile CVE findings
+        if: steps.relevant.outputs.relevant == 'true'
+        run: |
+          uv run python -m scripts.ci.check_lockfile_cve evaluate --osv-json osv-results.json
+
+      - name: No relevant lockfile changes
+        if: steps.relevant.outputs.relevant != 'true'
+        run: echo "pyproject.toml/uv.lock unchanged in this diff -- skipping the substantive scan (job still reports success, not skipped)."
+
   # Dep-provenance content-lineage gate (OMN-15604) -- a [tool.uv.sources]
   # git-pinned rev must build the SAME src/ tree as the released tag its
   # PyPI version string declares, even when the line carries a
@@ -1591,12 +1744,26 @@ jobs:
       - name: Checkout code
         uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
 
+      # OMN-16373: CROSS_REPO_PAT retirement — mint a short-lived
+      # onexbot-occ-writer App installation token, scoped to the one
+      # sibling repo this job reads.
+      - name: Mint onexbot-occ-writer app token
+        id: app-token
+        continue-on-error: true
+        uses: actions/create-github-app-token@d72941d797fd3113feb6b93fd0dec494b13a2547 # v1
+        with:
+          app-id: ${{ secrets.ONEXBOT_OCC_APP_ID }}
+          private-key: ${{ secrets.ONEXBOT_OCC_PRIVATE_KEY }}
+          owner: OmniNode-ai
+          repositories: onex_change_control
+          permission-contents: write
+
       - name: Checkout onex_change_control standards
         uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
         continue-on-error: true
         with:
           repository: OmniNode-ai/onex_change_control
-          token: ${{ secrets.CROSS_REPO_PAT }}
+          token: ${{ steps.app-token.outputs.token }}
           path: onex_change_control
           sparse-checkout: |
             standards/
@@ -1750,10 +1917,32 @@ jobs:
         || fromJSON((github.event_name == 'merge_group' && vars.OMNI_REQUIRED_CI_RUNS_ON_JSON) || vars.OMNI_TRUSTED_CI_RUNS_ON_JSON || '["self-hosted","omnibase-ci"]')
       }}
     steps:
+      # OMN-16373: CROSS_REPO_PAT retirement — mint a short-lived
+      # onexbot-occ-writer App installation token for the multi-repo
+      # sibling reads this boundary check performs.
+      #
+      # OMN-16414: continue-on-error is REQUIRED here, not optional polish.
+      # Fork-triggered pull_request runs receive no org secrets (app-id/
+      # private-key resolve empty), and create-github-app-token hard-fails
+      # the step ("Input required and not supplied: app-id") when that
+      # happens. Falling back to github.token below is sufficient because
+      # every repo in `repos:` (omniclaude, omnidash, omniintelligence,
+      # omnibase_core, omnimemory) is PUBLIC (verified via
+      # `gh api repos/OmniNode-ai/<repo> --jq .private`) -- reading them
+      # needs no elevated scope.
+      - name: Mint onexbot-occ-writer app token
+        id: app-token
+        continue-on-error: true
+        uses: actions/create-github-app-token@d72941d797fd3113feb6b93fd0dec494b13a2547 # v1
+        with:
+          app-id: ${{ secrets.ONEXBOT_OCC_APP_ID }}
+          private-key: ${{ secrets.ONEXBOT_OCC_PRIVATE_KEY }}
+          owner: OmniNode-ai
+          permission-contents: write
       - uses: OmniNode-ai/onex_change_control/.github/actions/validate-boundaries@main
         id: migration_conflicts
         env:
-          OMNI_REPO_CLONE_TOKEN: ${{ secrets.CROSS_REPO_PAT }}
+          OMNI_REPO_CLONE_TOKEN: ${{ steps.app-token.outputs.token || github.token }}
         with:
           checks: "migration-conflicts"
           repos: "omniclaude,omnidash,omniintelligence,omnibase_core,omnimemory"
@@ -1774,6 +1963,29 @@ jobs:
     if: needs.occ-preflight.result == 'success' && (github.event_name == 'pull_request' || github.event_name == 'merge_group' || github.event_name == 'push')
     steps:
       - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+      # OMN-16373: CROSS_REPO_PAT retirement — mint a short-lived
+      # onexbot-occ-writer App installation token, scoped to the one
+      # sibling repo this job reads.
+      #
+      # OMN-16414: continue-on-error is REQUIRED here, not optional polish.
+      # Fork-triggered pull_request runs receive no org secrets (app-id/
+      # private-key resolve empty), and create-github-app-token hard-fails
+      # the step ("Input required and not supplied: app-id") when that
+      # happens. Without this guard the job died right here even though the
+      # checkout step below already had a `|| github.token` fallback -- dead
+      # code until this line let the step fail soft. onex_change_control is
+      # PUBLIC (verified via `gh api repos/OmniNode-ai/onex_change_control
+      # --jq .private`), so github.token is sufficient to read it.
+      - name: Mint onexbot-occ-writer app token
+        id: app-token
+        continue-on-error: true
+        uses: actions/create-github-app-token@d72941d797fd3113feb6b93fd0dec494b13a2547 # v1
+        with:
+          app-id: ${{ secrets.ONEXBOT_OCC_APP_ID }}
+          private-key: ${{ secrets.ONEXBOT_OCC_PRIVATE_KEY }}
+          owner: OmniNode-ai
+          repositories: onex_change_control
+          permission-contents: write
       - name: Checkout onex_change_control
         uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
         with:
@@ -1784,7 +1996,7 @@ jobs:
           # checkout makes this gate a function of whatever OCC's dev happens to be.
           ref: 7352cb2dc634a7223877bfbbf3498303c9662700
           path: onex_change_control
-          token: ${{ secrets.CROSS_REPO_PAT || github.token }}
+          token: ${{ steps.app-token.outputs.token || github.token }}
 
       - uses: astral-sh/setup-uv@v7
         with:
@@ -2382,6 +2594,20 @@ jobs:
           fetch-depth: 0
           persist-credentials: false
 
+      # OMN-16373: CROSS_REPO_PAT retirement. continue-on-error because
+      # fork-triggered pull_request runs receive no org secrets (App id/key
+      # are empty), and the live-resolve step below already has a
+      # github.token fallback for exactly that case.
+      - name: Mint onexbot-occ-writer app token
+        id: app-token-proof
+        continue-on-error: true
+        uses: actions/create-github-app-token@d72941d797fd3113feb6b93fd0dec494b13a2547 # v1
+        with:
+          app-id: ${{ secrets.ONEXBOT_OCC_APP_ID }}
+          private-key: ${{ secrets.ONEXBOT_OCC_PRIVATE_KEY }}
+          owner: OmniNode-ai
+          permission-contents: write
+
       - name: Checkout exact sanitized legacy fixture dependency
         uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
         with:
@@ -2412,10 +2638,11 @@ jobs:
         # exit) rather than silently falling back to a stale pin.
         #
         # Token: fork-triggered pull_request runs receive no org secrets, so
-        # secrets.CROSS_REPO_PAT is empty there and this step must not
-        # hard-depend on it. omnimarket is a PUBLIC repo, so reading its
+        # the minted onexbot-occ-writer App token is empty there and this
+        # step must not hard-depend on it (OMN-16373: CROSS_REPO_PAT
+        # retired). omnimarket is a PUBLIC repo, so reading its
         # commits API needs no elevated scope -- github.token (always present,
-        # including on fork PRs) is sufficient. Prefer CROSS_REPO_PAT when
+        # including on fork PRs) is sufficient. Prefer the App token when
         # present (same-repo/trusted runs) to stay on the higher, shared
         # cross-repo rate-limit budget those runs already use elsewhere in
         # this workflow (see lines ~1508/1665/1696); fall back to
@@ -2425,7 +2652,7 @@ jobs:
         if: steps.resolve-omnimarket-ref.outputs.ref == 'dev'
         shell: bash
         env:
-          GH_TOKEN: ${{ secrets.CROSS_REPO_PAT || github.token }}
+          GH_TOKEN: ${{ steps.app-token-proof.outputs.token || github.token }}
         run: |
           set -euo pipefail
           sha="$(gh api repos/OmniNode-ai/omnimarket/commits/dev --jq .sha)"
@@ -2443,16 +2670,26 @@ jobs:
           path: .proof-dependencies/omnimarket
           persist-credentials: false
 
+      # OMN-16152: GitHub withholds ALL repo secrets from dependabot-triggered
+      # pull_request runs even when the head branch is same-repo, not a fork
+      # -- the fork check alone let dependabot through into a checkout whose
+      # only token source (the minted App token, OMN-16373) is
+      # unconditionally empty there. actions/checkout treats an
+      # explicitly-passed empty token as "unset and required", so it
+      # hard-failed instead of falling back to github.token. Route
+      # dependabot into the same narrow fail-closed lane already proven for
+      # forks below.
       - name: Checkout exact service ownership dependency
         if: >-
           github.event_name != 'pull_request' ||
-          github.event.pull_request.head.repo.full_name == github.repository
+          (github.event.pull_request.head.repo.full_name == github.repository &&
+           github.actor != 'dependabot[bot]')
         uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
         with:
           repository: OmniNode-ai/omninode_infra
-          ref: 39033d55147ef22a061b665345b506246d3aa543
+          ref: db90c19241eb2b58779e18a1ddf7b9a0e11c9c7c
           path: .proof-dependencies/omninode-infra
-          token: ${{ secrets.CROSS_REPO_PAT }}
+          token: ${{ steps.app-token-proof.outputs.token }}
           persist-credentials: false
 
       - name: Setup Python and uv
@@ -2492,7 +2729,8 @@ jobs:
       - name: Enforce schema qualification in changed SQL (trusted)
         if: >-
           github.event_name != 'pull_request' ||
-          github.event.pull_request.head.repo.full_name == github.repository
+          (github.event.pull_request.head.repo.full_name == github.repository &&
+           github.actor != 'dependabot[bot]')
         env:
           # OMN-16076: no hardcoded fallback SHA. The old pin was a squash
           # commit reachable only through a since-deleted stacked branch, so
@@ -2512,15 +2750,19 @@ jobs:
           --ownership-manifest .proof-dependencies/omninode-infra/db/migrations/application-relation-ownership.yaml
           --ownership-manifest .proof-dependencies/omninode-infra/k8s/migrations/application-relation-ownership.yaml
 
-      # Public-fork pull_request jobs cannot receive organization secrets. The
-      # fork lane deliberately omits the private manifest authority: any changed
-      # SQL targeting one of those objects is rejected as undeclared. The
+      # Public-fork pull_request jobs cannot receive organization secrets, and
+      # (OMN-16152) neither can dependabot-triggered pull_request jobs even
+      # on a same-repo branch -- GitHub withholds repo secrets from
+      # dependabot by design, independent of the fork check. Both lanes
+      # deliberately omit the private manifest authority: any changed SQL
+      # targeting one of those objects is rejected as undeclared. The
       # synthetic Docker-proof authority is also isolated from both production
       # lanes and is proved independently by mandatory source and Docker gates.
       - name: Enforce schema qualification in changed SQL (public fork, fail closed)
         if: >-
           github.event_name == 'pull_request' &&
-          github.event.pull_request.head.repo.full_name != github.repository
+          (github.event.pull_request.head.repo.full_name != github.repository ||
+           github.actor == 'dependabot[bot]')
         env:
           APPLICATION_SQL_BASE_REVISION: ${{ github.event.pull_request.base.sha }}
         run: >-

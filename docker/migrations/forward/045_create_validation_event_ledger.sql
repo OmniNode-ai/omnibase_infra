@@ -29,19 +29,27 @@
 --      Both are NOT NULL for audit completeness.
 
 -- =============================================================================
--- EXTENSION: pgcrypto
+-- EXTENSION: pgcrypto (REMOVED, OMN-16385)
 -- =============================================================================
--- Ensures gen_random_uuid() is available for the DEFAULT on the id column.
--- In PostgreSQL 13+ gen_random_uuid() is built-in, but declaring the
--- extension preserves backwards compatibility with PostgreSQL 12 and earlier.
+-- gen_random_uuid() below is PostgreSQL 13+ CORE (pg_catalog), not a pgcrypto
+-- function -- pgcrypto is not required to satisfy the DEFAULT on the id
+-- column on any target this repo runs against (postgres:16.4 runner image /
+-- RDS omnibase_infra). The CREATE EXTENSION statement previously here was
+-- therefore dead weight that only added a failure mode: on a managed
+-- instance (RDS) the migration role does not own the database (the master
+-- user does), so CREATE EXTENSION fails closed with "permission denied to
+-- create extension \"pgcrypto\"" even though nothing in this file needs the
+-- extension. This is what silently/loudly wedged deploy-onex-staging's
+-- omnibase-infra-migrate job at this file (OMN-16385 root-cause pass,
+-- live-reproduced 2026-08-22T18:53-18:55Z, run 32584529033 rerun instrumented
+-- with kubectl-ssm.sh: "psql:/work/045_create_validation_event_ledger.sql:44:
+-- ERROR: permission denied to create extension \"pgcrypto\"").
 --
--- NOTE: This statement requires CREATE privilege on the database (or superuser
--- in PG < 15). If running migrations under a limited-privilege application
--- user, ensure the extension is pre-created by a DBA:
---     CREATE EXTENSION IF NOT EXISTS "pgcrypto";
+-- If a FUTURE migration in this file (or a later one) needs an actual
+-- pgcrypto function (digest/crypt/hmac/pgp_*, not gen_random_uuid()), it must
+-- be pre-created by a DBA against the target database out-of-band -- not by
+-- this unattended, non-owning migration role. See docs/rds-postgres-cutover.md.
 -- =============================================================================
-
-CREATE EXTENSION IF NOT EXISTS "pgcrypto";
 
 -- =============================================================================
 -- TABLE: validation_event_ledger
@@ -126,45 +134,24 @@ CREATE INDEX IF NOT EXISTS idx_validation_ledger_repo_run
 -- =============================================================================
 -- COMMENTS
 -- =============================================================================
+-- OMN-16385: per-column COMMENT ON COLUMN statements were folded into this
+-- single table comment. `COMMENT ON COLUMN <table>.<column>` is syntactically
+-- indistinguishable from `COMMENT ON COLUMN <schema>.<table>` to the static
+-- application_database_sql_gate (OMN-15361) when, as here, the table is
+-- deliberately unqualified (see physical_schema_mapping.py's
+-- INTERNAL_TABLES_PHYSICALLY_IN_PUBLIC_UNTIL_OMN15359 bridge) -- the gate has
+-- no accepting form for that ambiguity. Every column is still documented
+-- inline next to its definition above; this consolidation loses no
+-- information, only the separate pg_description catalog rows.
 
 COMMENT ON TABLE validation_event_ledger IS
-    'Durable, append-only ledger of cross-repo validation events consumed from Kafka. Provides replay capability, integrity verification via envelope_hash, and idempotency guarantees.';
-
-COMMENT ON COLUMN validation_event_ledger.id IS
-    'Auto-generated UUID primary key for this ledger entry';
-
-COMMENT ON COLUMN validation_event_ledger.run_id IS
-    'Validation run correlation ID linking all events in a single validation run';
-
-COMMENT ON COLUMN validation_event_ledger.repo_id IS
-    'Identifier of the repository being validated';
-
-COMMENT ON COLUMN validation_event_ledger.event_type IS
-    'Fully qualified event type (e.g., onex.evt.validation.cross-repo-run-started.v1)';
-
-COMMENT ON COLUMN validation_event_ledger.event_version IS
-    'Schema version of the event type for forward/backward compatibility';
-
-COMMENT ON COLUMN validation_event_ledger.occurred_at IS
-    'Timestamp from the event payload indicating when the validation event occurred';
-
-COMMENT ON COLUMN validation_event_ledger.kafka_topic IS
-    'Kafka topic from which the event was consumed';
-
-COMMENT ON COLUMN validation_event_ledger.kafka_partition IS
-    'Kafka partition number (idempotency key component)';
-
-COMMENT ON COLUMN validation_event_ledger.kafka_offset IS
-    'Kafka offset within the partition (idempotency key component)';
-
-COMMENT ON COLUMN validation_event_ledger.envelope_bytes IS
-    'Raw envelope bytes stored as BYTEA for bit-level deterministic replay';
-
-COMMENT ON COLUMN validation_event_ledger.envelope_hash IS
-    'SHA-256 hex digest of envelope_bytes for integrity verification during replay';
-
-COMMENT ON COLUMN validation_event_ledger.created_at IS
-    'Timestamp when this entry was persisted to the ledger (database server time)';
+    'Durable, append-only ledger of cross-repo validation events consumed from Kafka. Provides replay capability, integrity verification via envelope_hash, and idempotency guarantees. '
+    'Columns: id (auto-generated UUID primary key); run_id (validation run correlation ID linking all events in a single run); '
+    'repo_id (identifier of the repository being validated); event_type (fully qualified event type, e.g. onex.evt.validation.cross-repo-run-started.v1); '
+    'event_version (schema version of the event type for forward/backward compatibility); occurred_at (timestamp from the event payload indicating when the validation event occurred); '
+    'kafka_topic/kafka_partition/kafka_offset (idempotency key component triple identifying the source Kafka message); '
+    'envelope_bytes (raw envelope bytes stored as BYTEA for bit-level deterministic replay); envelope_hash (SHA-256 hex digest of envelope_bytes for integrity verification during replay); '
+    'created_at (timestamp when this entry was persisted to the ledger, database server time).';
 
 COMMENT ON CONSTRAINT uk_validation_ledger_kafka_position ON validation_event_ledger IS
     'Idempotency constraint: ensures each Kafka message is recorded exactly once';
