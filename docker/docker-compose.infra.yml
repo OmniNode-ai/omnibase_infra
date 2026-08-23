@@ -289,14 +289,14 @@ x-runtime-env: &runtime-env
   # Introspection (RFC 7662) and JWKS (RFC 7517) endpoints for the same
   # in-network Keycloak this block already targets via KEYCLOAK_ADMIN_URL --
   # container-to-container, never the browser-facing KEYCLOAK_ISSUER host.
-  # Defaults are computed from that same internal address + realm so no new
-  # .201 .env entry is required for the default-realm case; override BOTH
-  # this var and KEYCLOAK_REALM explicitly for a non-default realm topology.
-  # OMN-16426: the default literally embeds "omninode" (matching KEYCLOAK_REALM's
-  # own default above) rather than substituting KEYCLOAK_REALM's own fallback
-  # expression inside this one -- a variable expansion nested inside another
-  # silently produces wrong values on Docker Compose < v2.20 and is rejected by
-  # tests/ci/test_compose_no_nested_expansion.py.
+  # Defaults are computed from that same internal address + KEYCLOAK_REALM so
+  # no new .201 .env entry is required; override only for a non-default realm
+  # topology.
+  # Nested KEYCLOAK_REALM substitution inlined to the literal default below:
+  # test_compose_no_nested_expansion.py forbids a var-with-fallback nested
+  # inside another var's fallback (Compose < v2.20 silently mis-resolves it
+  # -- OMN-15547 incident class). A non-default realm overrides these two
+  # outer vars directly, same as the comment above already says.
   GATEWAY_ATTACH_KEYCLOAK_INTROSPECTION_URL: ${GATEWAY_ATTACH_KEYCLOAK_INTROSPECTION_URL:-http://keycloak:8080/realms/omninode/protocol/openid-connect/token/introspect}
   GATEWAY_ATTACH_KEYCLOAK_JWKS_URL: ${GATEWAY_ATTACH_KEYCLOAK_JWKS_URL:-http://keycloak:8080/realms/omninode/protocol/openid-connect/certs}
   ONEX_SERVICE_CLIENT_ID: ${ONEX_SERVICE_CLIENT_ID:-onex-service}
