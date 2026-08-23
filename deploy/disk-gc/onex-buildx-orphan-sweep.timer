@@ -1,0 +1,36 @@
+# SPDX-FileCopyrightText: 2025 OmniNode.ai Inc.
+# SPDX-License-Identifier: MIT
+#
+# onex-buildx-orphan-sweep.timer — triggers the OMN-16406 buildx orphan
+# reclaim pass.
+#
+# Systemd USER timer. 15-minute interval: the leak this exists to reclaim is
+# continuous but low-grade (a few GB per orphan, one orphan roughly per CI
+# job on the affected workflow) rather than the acute 15-20 minute
+# write-amplification window onex-runner-disk-guard.timer (2-minute cadence)
+# exists for — a 15-minute cadence reclaims the leak faster than it
+# accumulates without adding meaningful `docker inspect`/`docker stats` load
+# to a fleet host that already runs dozens of containers.
+#
+# Install on .201 (user scope, no sudo):
+#   bash deploy/disk-gc/install-buildx-orphan-sweep.sh
+#
+# Check:
+#   systemctl --user list-timers onex-buildx-orphan-sweep.timer
+#   systemctl --user status onex-buildx-orphan-sweep.timer
+
+[Unit]
+Description=ONEX .201 buildx ephemeral-builder orphan sweep timer (OMN-16406)
+Documentation=https://github.com/OmniNode-ai/omnibase_infra
+
+[Timer]
+# First run 5 min after the user manager starts (let docker + the runner
+# fleet settle before the first sweep).
+OnStartupSec=5min
+# Then every 15 minutes.
+OnUnitActiveSec=15min
+Persistent=true
+Unit=onex-buildx-orphan-sweep.service
+
+[Install]
+WantedBy=timers.target
