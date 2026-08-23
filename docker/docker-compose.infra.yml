@@ -289,16 +289,10 @@ x-runtime-env: &runtime-env
   # Introspection (RFC 7662) and JWKS (RFC 7517) endpoints for the same
   # in-network Keycloak this block already targets via KEYCLOAK_ADMIN_URL --
   # container-to-container, never the browser-facing KEYCLOAK_ISSUER host.
-  # Defaults are computed from that same internal address + KEYCLOAK_REALM so
-  # no new .201 .env entry is required; override only for a non-default realm
-  # topology.
-  # Nested KEYCLOAK_REALM substitution inlined to the literal default below:
-  # test_compose_no_nested_expansion.py forbids a var-with-fallback nested
-  # inside another var's fallback (Compose < v2.20 silently mis-resolves it
-  # -- OMN-15547 incident class). A non-default realm overrides these two
-  # outer vars directly, same as the comment above already says.
-  GATEWAY_ATTACH_KEYCLOAK_INTROSPECTION_URL: ${GATEWAY_ATTACH_KEYCLOAK_INTROSPECTION_URL:-http://keycloak:8080/realms/omninode/protocol/openid-connect/token/introspect}
-  GATEWAY_ATTACH_KEYCLOAK_JWKS_URL: ${GATEWAY_ATTACH_KEYCLOAK_JWKS_URL:-http://keycloak:8080/realms/omninode/protocol/openid-connect/certs}
+  # Keep the URLs explicit so compose interpolation stays single-pass and the
+  # runtime contract owns the deployed topology.
+  GATEWAY_ATTACH_KEYCLOAK_INTROSPECTION_URL: ${GATEWAY_ATTACH_KEYCLOAK_INTROSPECTION_URL:?GATEWAY_ATTACH_KEYCLOAK_INTROSPECTION_URL must be set in ~/.omnibase/.env}
+  GATEWAY_ATTACH_KEYCLOAK_JWKS_URL: ${GATEWAY_ATTACH_KEYCLOAK_JWKS_URL:?GATEWAY_ATTACH_KEYCLOAK_JWKS_URL must be set in ~/.omnibase/.env}
   ONEX_SERVICE_CLIENT_ID: ${ONEX_SERVICE_CLIENT_ID:-onex-service}
   ONEX_SERVICE_CLIENT_SECRET: ${ONEX_SERVICE_CLIENT_SECRET:?ONEX_SERVICE_CLIENT_SECRET must be set in ~/.omnibase/.env}
   # --- Registration lifecycle (OMN-3446) ---
