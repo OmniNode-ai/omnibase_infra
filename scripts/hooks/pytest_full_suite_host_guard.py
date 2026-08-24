@@ -31,8 +31,15 @@ Design mirrors the bash guard's documented posture exactly (see
   * CI runners are never gated -- this guard exists to keep a contended local
     Mac from being driven to a load spike by a runaway full suite; a
     short-lived, isolated CI runner is not that failure mode.
-  * ``PREPUSH_ALLOW_LOCAL_FULL_SUITE`` is the same escape hatch the bash hook
-    honors -- a single override name for both entry points, not two.
+  * The escape hatch is the same one the bash hook uses -- one mechanism for
+    both entry points, not two. As of OMN-16480 that mechanism is a single-use,
+    repo+HEAD-scoped, TTL-bounded, receipted grant token
+    (``scripts/hooks/prepush_override_grant.py``), NOT an environment variable.
+    Any ``PREPUSH_ALLOW_*`` variable present in the environment is now a HARD
+    REFUSAL here, exactly as it is in the bash hook: an env var is inherited by
+    every descendant process, so honoring one let a single leak disarm the gate
+    for a whole process tree and recursively spawn a second 44,064-test suite
+    (~9h03m lost, friction report F-01/F-04). See that module's docstring.
   * Only fires on an UNNARROWED collection targeting the full-suite root (or
     an ancestor of it) -- a targeted/narrow run (a single test file, a
     ``-k``/``-m`` filter) always stays runnable locally. Gating every
@@ -48,6 +55,15 @@ from __future__ import annotations
 
 import os
 import socket
+
+from scripts.hooks.prepush_override_grant import (
+    consume,
+    env_rejection_message,
+    has_active_override,
+    inherited_override_env_vars,
+    resolve_head_sha,
+    resolve_repo_root,
+)
 
 DEFAULT_PREPUSH_200_HOSTNAME = "stickybeatz-studio"
 
@@ -107,7 +123,7 @@ def full_suite_host_violation_message(
     *,
     host: str,
     target_hostname: str,
-    allow_override: bool,
+    override_authorized: bool,
 ) -> str | None:
     """Return a refusal message, or None if this run may proceed.
 
@@ -115,12 +131,18 @@ def full_suite_host_violation_message(
     testable without subprocess/monkeypatch machinery. ``host`` "" means
     "could not be determined" and fails OPEN (returns None), matching the
     bash guard's documented routing-optimization posture verbatim.
+
+    ``override_authorized`` is resolved by the caller from a consumed grant
+    token, never from the environment (OMN-16480). It used to be
+    ``allow_override``, read straight off ``PREPUSH_ALLOW_LOCAL_FULL_SUITE``;
+    the rename is the point, not cosmetic -- the input is now a spent,
+    scope-checked authorization rather than an ambient, inheritable flag.
     """
     if not host:
         return None
     if host.lower() == target_hostname.lower():
         return None
-    if allow_override:
+    if override_authorized:
         return None
     return (
         f"direct full-suite pytest invocation refused on host '{host}', not the "
@@ -129,10 +151,48 @@ def full_suite_host_violation_message(
         "guard (scripts/hooks/prepush_smart_tests.sh) entirely, so the .200-default "
         "host-check was never consulted. Run from .200 instead "
         "(ssh jonah@stickybeatz-studio.tail75df5e.ts.net; see "
-        "docs/runbooks/200-build-lane-execution-pattern.md), OR set "
-        "PREPUSH_ALLOW_LOCAL_FULL_SUITE=1 to run the full suite on this host anyway "
-        "(visible, degraded-evidence override -- do not use as a routine bypass)."
+        "docs/runbooks/200-build-lane-execution-pattern.md), OR mint a single-use "
+        "override grant to run the full suite on this host anyway (visible, "
+        "receipted, degraded-evidence -- do not use as a routine bypass): "
+        "`uv run python scripts/hooks/prepush_override_grant.py mint "
+        "--reason '<why>'`."
     )
+
+
+def override_authorization(*, context: str) -> bool:
+    """Whether a scoped override authorizes THIS full-suite run.
+
+    Two ways in, in priority order:
+
+    1. An **activation record** already covering this process -- the bash hook
+       consumed a grant and then spawned this pytest as its child. Without this
+       leg the hook would consume the one grant for itself and its own child
+       pytest would then refuse, so the authorized run could never actually
+       execute. It is checked first precisely so the hand-off does not burn a
+       second grant.
+    2. A **grant** minted for this repo and this HEAD, claimed here and spent.
+       That is the direct-``pytest``-invocation path, where no hook ran at all.
+
+    Fails CLOSED on anything indeterminate (not a git worktree, git
+    unavailable, unreadable state): a guard that cannot prove authorization
+    must behave exactly like one that was denied it.
+    """
+    try:
+        repo_root = resolve_repo_root()
+        head_sha = resolve_head_sha(repo_root)
+    except Exception:  # noqa: BLE001 -- see fail-closed note below
+        # Blanket by design, both here and below. This runs inside
+        # pytest_configure on EVERY invocation: an unexpected exception must
+        # become "not authorized", never a traceback that breaks collection for
+        # everyone. Narrowing the clause would trade a fail-closed refusal for a
+        # crash in the one path that must not crash.
+        return False
+    try:
+        if has_active_override(repo_root=repo_root, head_sha=head_sha):
+            return True
+        return consume(repo_root=repo_root, head_sha=head_sha, context=context).accepted
+    except Exception:  # noqa: BLE001 -- fail closed, never crash collection
+        return False
 
 
 def enforce(config: object, full_suite_target: str) -> None:
@@ -150,7 +210,6 @@ def enforce(config: object, full_suite_target: str) -> None:
     """
     if is_ci_environment():
         return
-    allow_override = bool(os.environ.get("PREPUSH_ALLOW_LOCAL_FULL_SUITE"))
     option = config.option  # type: ignore[attr-defined]
     if not is_full_suite_target(
         args=list(config.args),  # type: ignore[attr-defined]
@@ -160,17 +219,43 @@ def enforce(config: object, full_suite_target: str) -> None:
         full_suite_target=full_suite_target,
     ):
         return
+
+    import pytest
+
+    # OMN-16480: a leaked PREPUSH_ALLOW_* variable is a REFUSAL, not a bypass.
+    # Checked after the narrowing test (a targeted run is never gated) but
+    # before the host check, so the leak is reported on the host where it
+    # actually causes damage -- and so the OMN-16425 recursion terminates here
+    # instead of spawning another full suite.
+    leaked = inherited_override_env_vars(os.environ)
+    if leaked:
+        pytest.exit(env_rejection_message(leaked), returncode=1)
+
     host = resolve_local_hostname()
     target_hostname = os.environ.get(
         "PREPUSH_200_HOSTNAME", DEFAULT_PREPUSH_200_HOSTNAME
     )
+    if (
+        full_suite_host_violation_message(
+            host=host,
+            target_hostname=target_hostname,
+            override_authorized=False,
+        )
+        is None
+    ):
+        return
+    # Host mismatch. Only NOW look for an override -- resolving one has side
+    # effects (it spends a grant and writes a receipt), so it must never run on
+    # a path that was going to be allowed anyway.
+    if override_authorization(
+        context=f"direct full-suite pytest invocation on host '{host}'"
+    ):
+        return
     message = full_suite_host_violation_message(
         host=host,
         target_hostname=target_hostname,
-        allow_override=allow_override,
+        override_authorized=False,
     )
-    if message is None:
-        return
-    import pytest
+    assert message is not None
 
     pytest.exit(message, returncode=1)

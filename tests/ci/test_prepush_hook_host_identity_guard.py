@@ -96,9 +96,25 @@ def test_guard_fails_open_when_hostname_cannot_be_determined() -> None:
 
 
 def test_guard_has_a_visible_degraded_host_override() -> None:
+    """The escape hatch must exist, be loud, and be a SCOPED SINGLE-USE GRANT.
+
+    Updated by OMN-16480. This used to assert the hatch was
+    ``PREPUSH_ALLOW_LOCAL_FULL_SUITE`` -- a plain environment variable, and
+    therefore inherited by every descendant process, bound to no repo or
+    commit, never expiring, and leaving no receipt. On 2026-08-23 that shape
+    turned one correct use of the hatch into a recursive 44,064-test suite and
+    ~9h03m of loss (friction report F-01/F-04). The hatch is now a grant token
+    consumed by the guard; the variable is refused, not honored.
+    """
     script_text = HOOK_SCRIPT.read_text(encoding="utf-8")
-    assert "PREPUSH_ALLOW_LOCAL_FULL_SUITE" in script_text, (
-        "expected a documented PREPUSH_ALLOW_LOCAL_FULL_SUITE escape hatch"
+    assert "consume_override_grant" in script_text, (
+        "expected the override to be a consumed single-use grant "
+        "(scripts/hooks/prepush_override_grant.py), not an env var"
+    )
+    assert "reject_inherited_env_overrides" in script_text, (
+        "expected inheritable PREPUSH_ALLOW_* variables to be REJECTED at hook "
+        "entry -- honoring one lets a single leak disarm the gate for an entire "
+        "process tree, silently"
     )
     assert "DEGRADED-HOST OVERRIDE" in script_text, (
         "expected the override to print a loud, visible warning naming the "

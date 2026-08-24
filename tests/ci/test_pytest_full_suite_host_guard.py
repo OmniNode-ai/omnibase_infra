@@ -37,6 +37,7 @@ from pathlib import Path
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
 GUARD_MODULE = REPO_ROOT / "scripts" / "hooks" / "pytest_full_suite_host_guard.py"
+GRANT_MODULE = REPO_ROOT / "scripts" / "hooks" / "prepush_override_grant.py"
 ROOT_CONFTEST = REPO_ROOT / "conftest.py"
 
 sys.path.insert(0, str(REPO_ROOT / "scripts" / "hooks"))
@@ -156,7 +157,7 @@ def test_violation_message_none_when_host_undetermined() -> None:
         guard.full_suite_host_violation_message(
             host="",
             target_hostname="stickybeatz-studio",
-            allow_override=False,
+            override_authorized=False,
         )
         is None
     )
@@ -167,18 +168,22 @@ def test_violation_message_none_when_host_matches_case_insensitive() -> None:
         guard.full_suite_host_violation_message(
             host="Stickybeatz-Studio",
             target_hostname="stickybeatz-studio",
-            allow_override=False,
+            override_authorized=False,
         )
         is None
     )
 
 
-def test_violation_message_none_when_override_set() -> None:
+def test_violation_message_none_when_override_authorized() -> None:
+    """``override_authorized`` is resolved by the caller from a CONSUMED grant
+    token, never read off the environment (OMN-16480). The rename from
+    ``allow_override`` is the point: the input is a spent, scope-checked
+    authorization, not an ambient inheritable flag."""
     assert (
         guard.full_suite_host_violation_message(
             host="omnibook",
             target_hostname="stickybeatz-studio",
-            allow_override=True,
+            override_authorized=True,
         )
         is None
     )
@@ -188,12 +193,19 @@ def test_violation_message_present_on_real_mismatch() -> None:
     message = guard.full_suite_host_violation_message(
         host="omnibook",
         target_hostname="stickybeatz-studio",
-        allow_override=False,
+        override_authorized=False,
     )
     assert message is not None
     assert "omnibook" in message
     assert "stickybeatz-studio" in message
-    assert "PREPUSH_ALLOW_LOCAL_FULL_SUITE" in message
+    assert "prepush_override_grant.py mint" in message, (
+        "the refusal must name the supported override path; a refusal with no "
+        "alternative is how a gate gets disabled outright"
+    )
+    assert "PREPUSH_ALLOW_LOCAL_FULL_SUITE" not in message, (
+        "the message must not advertise the retired inheritable env var -- it "
+        "is now refused, not honored"
+    )
 
 
 # =============================================================================
@@ -208,12 +220,14 @@ def _write_synthetic_project(tmp_path: Path) -> Path:
     project = tmp_path / "proj"
     hooks_dir = project / "scripts" / "hooks"
     hooks_dir.mkdir(parents=True)
-    (hooks_dir / "pytest_full_suite_host_guard.py").write_text(
-        GUARD_MODULE.read_text(encoding="utf-8"), encoding="utf-8"
-    )
+    for module in (GUARD_MODULE, GRANT_MODULE):
+        (hooks_dir / module.name).write_text(
+            module.read_text(encoding="utf-8"), encoding="utf-8"
+        )
     (project / "conftest.py").write_text(
         "import sys\n"
         "from pathlib import Path\n"
+        "sys.path.insert(0, str(Path(__file__).parent))\n"
         "sys.path.insert(0, str(Path(__file__).parent / 'scripts' / 'hooks'))\n"
         "from pytest_full_suite_host_guard import enforce\n\n"
         "def pytest_configure(config):\n"
@@ -249,7 +263,7 @@ def _hermetic_subprocess_env(env_overrides: dict[str, str]) -> dict[str, str]:
     ``PREPUSH_ALLOW_LOCAL_FULL_SUITE`` or ``PYTEST_ADDOPTS`` can bypass the
     refusal path the subprocess tests are proving.
     """
-    env = dict(os.environ)
+    env = _no_git_env()
     for name in (
         "CI",
         "GITHUB_ACTIONS",
@@ -261,6 +275,49 @@ def _hermetic_subprocess_env(env_overrides: dict[str, str]) -> dict[str, str]:
         env.pop(name, None)
     env.update(env_overrides)
     return env
+
+
+#: A live `git push` exports these into hook children, and they override both
+#: `-C` and cwd for every descendant `git` call (memory
+#: reference_git_env_vars_override_c_and_cwd). Left set, a synthetic-repo test
+#: would operate on THIS worktree instead -- the same leak the real hook unsets
+#: for its pytest run.
+_GIT_SCOPING_ENV_VARS = (
+    "GIT_DIR",
+    "GIT_WORK_TREE",
+    "GIT_INDEX_FILE",
+    "GIT_OBJECT_DIRECTORY",
+    "GIT_COMMON_DIR",
+    "GIT_PREFIX",
+)
+
+
+def _no_git_env() -> dict[str, str]:
+    env = dict(os.environ)
+    for name in _GIT_SCOPING_ENV_VARS:
+        env.pop(name, None)
+    return env
+
+
+def _git_init(project: Path) -> None:
+    """Make the synthetic project a real git repo with one commit.
+
+    The grant is bound to a repo root and a HEAD sha, both resolved from git by
+    the shipped module itself (never from a caller argument -- a forgeable
+    scope binds nothing). So the behavioral grant test needs a real, if
+    minimal, worktree rather than a bare directory.
+    """
+    env = _no_git_env()
+    for args in (
+        ["init", "-q"],
+        ["config", "user.email", "test@example.com"],
+        ["config", "user.name", "test"],
+        ["add", "-A"],
+        ["commit", "-q", "-m", "synthetic project", "--no-gpg-sign"],
+    ):
+        subprocess.run(
+            ["git", *args], cwd=project, env=env, capture_output=True, check=True
+        )
 
 
 def _run_pytest(
@@ -364,7 +421,19 @@ def test_direct_invocation_allowed_under_ci_env(tmp_path: Path) -> None:
     assert "1 passed" in result.stdout, f"stdout={result.stdout!r}"
 
 
-def test_direct_invocation_allowed_with_override_env(tmp_path: Path) -> None:
+def test_direct_invocation_refused_when_override_env_is_present(
+    tmp_path: Path,
+) -> None:
+    """INVERTED by OMN-16480. This test previously asserted that
+    ``PREPUSH_ALLOW_LOCAL_FULL_SUITE=1`` bypasses the guard -- which is exactly
+    the behavior that let one leaked variable recursively spawn a second
+    44,064-test suite and burn ~9h03m (friction report F-01/F-04).
+
+    An environment variable is inherited by every descendant process, so
+    honoring one means the guard is disarmed for a whole process tree,
+    silently, with no receipt. The variable is now a REFUSAL: the leak
+    terminates here instead of arming the next level of recursion.
+    """
     project = _write_synthetic_project(tmp_path)
     result = _run_pytest(
         project,
@@ -373,9 +442,75 @@ def test_direct_invocation_allowed_with_override_env(tmp_path: Path) -> None:
             "PREPUSH_ALLOW_LOCAL_FULL_SUITE": "1",
         },
     )
-    assert result.returncode == 0, (
-        f"expected PREPUSH_ALLOW_LOCAL_FULL_SUITE=1 to bypass the guard; got "
-        f"exit {result.returncode}. stdout={result.stdout!r} "
+    assert result.returncode != 0, (
+        "expected an inherited PREPUSH_ALLOW_* variable to be REFUSED, not "
+        f"honored; got exit {result.returncode}. stdout={result.stdout!r} "
         f"stderr={result.stderr!r}"
     )
-    assert "1 passed" in result.stdout, f"stdout={result.stdout!r}"
+    combined = result.stdout + result.stderr
+    assert "PREPUSH_ALLOW_LOCAL_FULL_SUITE" in combined, f"output={combined!r}"
+    assert "REJECTED" in combined, f"output={combined!r}"
+    assert "1 passed" not in result.stdout, (
+        "the refusal must land before any test executes"
+    )
+
+
+def test_direct_invocation_allowed_with_a_minted_grant(tmp_path: Path) -> None:
+    """End-to-end proof that the replacement escape path actually works, and
+    that it is single-use.
+
+    Without this, the fix could ship as a gate with no usable override at all
+    -- which gets the gate itself disabled within a week (the verbatim
+    rationale the OMN-15059 guard was written under). The second run proves the
+    grant is spent: a nested invocation cannot replay it, which is the property
+    that terminates the OMN-16425 recursion.
+    """
+    project = _write_synthetic_project(tmp_path)
+    _git_init(project)
+
+    mint = subprocess.run(
+        [
+            sys.executable,
+            str(project / "scripts" / "hooks" / "prepush_override_grant.py"),
+            "mint",
+            "--reason",
+            "behavioral proof for OMN-16480",
+            "--ttl-minutes",
+            "5",
+        ],
+        cwd=project,
+        env=_no_git_env(),
+        capture_output=True,
+        text=True,
+        check=False,
+    )
+    assert mint.returncode == 0, f"mint failed: {mint.stderr!r}"
+
+    allowed = _run_pytest(
+        project,
+        env_overrides={"PREPUSH_200_HOSTNAME": _GUARANTEED_NON_MATCHING_HOSTNAME},
+    )
+    assert allowed.returncode == 0, (
+        "expected a minted single-use grant to authorize this run; got exit "
+        f"{allowed.returncode}. stdout={allowed.stdout!r} "
+        f"stderr={allowed.stderr!r}"
+    )
+    assert "1 passed" in allowed.stdout, f"stdout={allowed.stdout!r}"
+
+    refused = _run_pytest(
+        project,
+        env_overrides={"PREPUSH_200_HOSTNAME": _GUARANTEED_NON_MATCHING_HOSTNAME},
+    )
+    assert refused.returncode != 0, (
+        "the grant must be SPENT after one use -- a reusable grant is an "
+        "environment variable with extra steps"
+    )
+    assert "not the designated .200 build host" in refused.stderr
+
+    receipts = (
+        project / ".onex_state" / "prepush_override" / "receipts.jsonl"
+    ).read_text(encoding="utf-8")
+    assert "prepush_override_consumed" in receipts, (
+        "every override use must leave a receipt -- an invisible override is "
+        "the F-04 defect regardless of how it is spelled"
+    )
