@@ -238,11 +238,28 @@ jobs:
             PROMOTION_CLASS=stability-candidate
             NON_MAIN_LINEAGE=true
 
+      # OMN-16229: same unignored audit as the prod build path
+      # (build-and-push-runtime.yml). The policy check must prove every ignore
+      # is present in this exact image and has no fixed version.
+      - name: Generate unignored Trivy audit report (OMN-16229)
+        uses: aquasecurity/trivy-action@ed142fd0673e97e23eac54620cfb913e5ce36c25  # v0.34.2
+        with:
+          image-ref: '${{ steps.meta.outputs.image_repo }}:${{ steps.meta.outputs.candidate_tag }}'
+          format: 'json'
+          output: 'trivy-unignored.json'
+          exit-code: '0'
+          ignore-unfixed: false
+          vuln-type: 'os,library'
+          severity: 'CRITICAL,HIGH'
+          version: 'v0.69.3'
+
       # OMN-16229: same expiring-ignore policy check as the prod build path
-      # (build-and-push-runtime.yml) -- an expired or malformed .trivyignore
-      # entry fails the build here too.
-      - name: Validate .trivyignore expiry (OMN-16229)
-        run: python3 scripts/ci/check_trivyignore_expiry.py .trivyignore
+      # (build-and-push-runtime.yml) -- an expired, malformed, stale, or
+      # fix-available .trivyignore entry fails the build here too.
+      - name: Validate .trivyignore policy (OMN-16229)
+        run: >-
+          python3 scripts/ci/check_trivyignore_expiry.py .trivyignore
+          --trivy-json trivy-unignored.json
 
       # SAME Trivy scan as the prod build path — CRITICAL,HIGH, --ignore-unfixed,
       # exit-code 1. NOT weakened, NOT advisory. A finding fails the build before

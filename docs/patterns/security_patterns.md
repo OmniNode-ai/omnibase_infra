@@ -1687,10 +1687,12 @@ at the repo root.
 ### Rules
 
 1. **Only for fix-unavailable CVEs.** A fix-available finding must never be
-   silenced via `.trivyignore`. Trivy's own `ignore-unfixed: true` already
-   refuses to suppress those regardless of what the file contains, and
-   `scripts/ci/check_trivyignore_expiry.py` independently fails the build if
-   an entry's `# reason:` is anything other than exactly `no-upstream-fix`.
+   silenced via `.trivyignore`. Both image workflows first run an unignored
+   JSON Trivy audit for the exact built image, then
+   `scripts/ci/check_trivyignore_expiry.py --trivy-json trivy-unignored.json`
+   fails the build unless every `.trivyignore` entry appears in that report
+   with no `FixedVersion`. The same script also fails if an entry's
+   `# reason:` is anything other than exactly `no-upstream-fix`.
 2. **Every entry carries mandatory metadata** — a 4-line comment block
    immediately above the bare vulnerability id Trivy reads:
 
@@ -1715,8 +1717,9 @@ at the repo root.
    if a fix has since shipped) under the same tracking ticket.
 4. **Negative control.** A fix-available CVE always blocks regardless of
    anything in `.trivyignore` — this is a policy TUNE, not a gate weakening.
-   Trivy's `ignore-unfixed: true` is the enforcement point for that
-   guarantee; `.trivyignore` metadata validation never overrides it.
+   The unignored JSON audit is the enforcement point for that guarantee:
+   any ignored ID with a non-empty `FixedVersion` fails before the blocking
+   `.trivyignore` scan runs.
 
 ### Adding an entry
 

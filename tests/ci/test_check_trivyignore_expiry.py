@@ -4,8 +4,9 @@
 
 from __future__ import annotations
 
-from datetime import date
+from datetime import date, datetime
 from pathlib import Path
+from unittest.mock import patch
 
 from scripts.ci.check_trivyignore_expiry import evaluate_trivyignore, main
 
@@ -149,6 +150,83 @@ class TestEvaluateTrivyignore:
         text = _valid_block(cve="GHSA-f2ff-p2ww-7p4p", expires="2027-01-01")
         verdict = evaluate_trivyignore(text, today=_TODAY)
         assert verdict.passed
+
+    def test_inline_trivy_expiry_syntax_fails_closed(self) -> None:
+        text = (
+            "# CVE: CVE-2024-12345\n"
+            "# reason: no-upstream-fix\n"
+            "# ticket: OMN-12345\n"
+            "# expires: 2027-01-01\n"
+            "CVE-2024-12345 exp:2027-01-01\n"
+        )
+        verdict = evaluate_trivyignore(text, today=_TODAY)
+        assert not verdict.passed
+        assert "unsupported .trivyignore line" in verdict.violations[0].reason
+
+    def test_default_today_uses_utc_date(self) -> None:
+        class FixedDateTime:
+            @classmethod
+            def now(cls, tz: object = None) -> datetime:
+                assert tz is not None
+                return datetime(2026, 8, 18)
+
+        text = _valid_block(expires="2026-08-18")
+        with patch("scripts.ci.check_trivyignore_expiry.datetime", FixedDateTime):
+            verdict = evaluate_trivyignore(text)
+
+        assert not verdict.passed
+        assert "today is 2026-08-18" in verdict.violations[0].reason
+
+    def test_trivy_report_unfixed_entry_passes(self) -> None:
+        report = {
+            "Results": [
+                {
+                    "Vulnerabilities": [
+                        {
+                            "VulnerabilityID": "CVE-2024-12345",
+                            "FixedVersion": "",
+                        }
+                    ]
+                }
+            ]
+        }
+        verdict = evaluate_trivyignore(
+            _valid_block(expires="2027-01-01"),
+            today=_TODAY,
+            trivy_report=report,
+        )
+        assert verdict.passed
+
+    def test_trivy_report_fixed_entry_fails(self) -> None:
+        report = {
+            "Results": [
+                {
+                    "Vulnerabilities": [
+                        {
+                            "VulnerabilityID": "CVE-2024-12345",
+                            "FixedVersion": "1.2.3",
+                        }
+                    ]
+                }
+            ]
+        }
+        verdict = evaluate_trivyignore(
+            _valid_block(expires="2027-01-01"),
+            today=_TODAY,
+            trivy_report=report,
+        )
+        assert not verdict.passed
+        assert "fixed version" in verdict.violations[0].reason
+
+    def test_trivy_report_missing_entry_fails_as_stale(self) -> None:
+        report = {"Results": [{"Vulnerabilities": []}]}
+        verdict = evaluate_trivyignore(
+            _valid_block(expires="2027-01-01"),
+            today=_TODAY,
+            trivy_report=report,
+        )
+        assert not verdict.passed
+        assert "not present" in verdict.violations[0].reason
 
 
 class TestCliMain:

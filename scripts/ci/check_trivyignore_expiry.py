@@ -35,10 +35,9 @@ Rules, each independently checked and reported:
   block (catches copy-paste drift between the metadata and what Trivy
   actually ignores).
 * ``# reason:`` MUST be exactly ``no-upstream-fix`` -- the only reason this
-  file exists to record. A fix-available CVE must never be silenced here;
-  Trivy's own ``ignore-unfixed: true`` already refuses to suppress those
-  regardless of what this file contains, so a malformed/absent reason field
-  is a metadata defect, not a bypass.
+  file exists to record. A fix-available CVE must never be silenced here; when
+  ``--trivy-json`` is supplied, this module proves every ignored ID appears in
+  the unignored image scan with no fixed version.
 * ``# ticket:`` MUST match ``OMN-<digits>`` -- every exemption traces to a
   tracking ticket, never a bare justification in prose.
 * ``# expires:`` MUST be an ISO-8601 date (``YYYY-MM-DD``) STRICTLY IN THE
@@ -48,10 +47,11 @@ Rules, each independently checked and reported:
 * A bare vulnerability-id line with NO preceding metadata block is malformed
   (no reason/ticket/expiry to check) and fails.
 
-This module does not talk to Trivy or interpret scan output -- it only
-validates the committed ``.trivyignore`` file's shape and expiry. Whether a
-CVE has a fix is Trivy's job (``ignore-unfixed: true``); whether a
-fix-unavailable ignore is still valid is this module's job.
+Without ``--trivy-json``, this module validates the committed
+``.trivyignore`` file's shape and expiry. With ``--trivy-json``, it also
+interprets an unignored Trivy report for the exact image being scanned and
+fails any stale or fix-available ignore before the blocking scan can apply
+``.trivyignore``.
 
 Exit codes: ``0`` every entry valid (or the file is empty/header-only) |
 ``1`` at least one malformed or expired entry.
@@ -60,11 +60,13 @@ Exit codes: ``0`` every entry valid (or the file is empty/header-only) |
 from __future__ import annotations
 
 import argparse
+import json
 import re
 import sys
 from dataclasses import dataclass
-from datetime import date, datetime
+from datetime import UTC, date, datetime, timezone
 from pathlib import Path
+from typing import Any, cast
 
 _CVE_FIELD_RE = re.compile(r"^#\s*CVE:\s*(\S+)\s*$")
 _REASON_FIELD_RE = re.compile(r"^#\s*reason:\s*(\S+)\s*$")
@@ -105,7 +107,9 @@ class ModelTrivyIgnoreVerdict:
         return not self.violations
 
 
-def _parse_entries(lines: list[str]) -> list[ModelTrivyIgnoreEntry]:
+def _parse_entries(
+    lines: list[str],
+) -> tuple[list[ModelTrivyIgnoreEntry], list[ModelTrivyIgnoreViolation]]:
     """Group ``.trivyignore`` lines into (metadata block, id line) entries.
 
     A metadata block is a contiguous run of ``# CVE:``/``# reason:``/
@@ -116,6 +120,7 @@ def _parse_entries(lines: list[str]) -> list[ModelTrivyIgnoreEntry]:
     as malformed rather than silently skipped.
     """
     entries: list[ModelTrivyIgnoreEntry] = []
+    violations: list[ModelTrivyIgnoreViolation] = []
     pending: dict[str, str] = {}
 
     for idx, raw_line in enumerate(lines, start=1):
@@ -163,11 +168,20 @@ def _parse_entries(lines: list[str]) -> list[ModelTrivyIgnoreEntry]:
             pending = {}
             continue
 
-        # A non-comment, non-id, non-blank line: leave pending as-is (Trivy
-        # ignores unrecognized lines too) but do not attach it to anything.
+        # A non-comment, non-id, non-blank line may still be meaningful to
+        # Trivy, for example legacy inline expiry syntax. Fail closed so every
+        # active ignore line is covered by the repository policy block above it.
+        violations.append(
+            ModelTrivyIgnoreViolation(
+                idx,
+                f"{stripped!r}: unsupported .trivyignore line -- every "
+                "non-comment entry MUST be a bare vulnerability id with the "
+                "required metadata block immediately above it.",
+            )
+        )
         pending = {}
 
-    return entries
+    return entries, violations
 
 
 def _validate_entry(
@@ -222,16 +236,84 @@ def _validate_entry(
     return None
 
 
+def _vulnerabilities_by_id(report: dict[str, Any]) -> dict[str, list[dict[str, Any]]]:
+    results = report.get("Results", [])
+    if not isinstance(results, list):
+        raise ValueError("Trivy JSON report `Results` must be a list")
+
+    by_id: dict[str, list[dict[str, Any]]] = {}
+    for result in results:
+        if not isinstance(result, dict):
+            continue
+        vulnerabilities = result.get("Vulnerabilities", [])
+        if vulnerabilities is None:
+            continue
+        if not isinstance(vulnerabilities, list):
+            raise ValueError("Trivy JSON report `Vulnerabilities` must be a list")
+        for vulnerability in vulnerabilities:
+            if not isinstance(vulnerability, dict):
+                continue
+            vuln_id = vulnerability.get("VulnerabilityID")
+            if not isinstance(vuln_id, str):
+                continue
+            by_id.setdefault(vuln_id, []).append(cast("dict[str, Any]", vulnerability))
+    return by_id
+
+
+def _validate_unignored_trivy_report(
+    entries: tuple[ModelTrivyIgnoreEntry, ...],
+    report: dict[str, Any],
+) -> tuple[ModelTrivyIgnoreViolation, ...]:
+    """Require ignored IDs to be present and unfixed in the unignored image scan."""
+    vulnerabilities = _vulnerabilities_by_id(report)
+    violations: list[ModelTrivyIgnoreViolation] = []
+    for entry in entries:
+        matches = vulnerabilities.get(entry.vuln_id, [])
+        if not matches:
+            violations.append(
+                ModelTrivyIgnoreViolation(
+                    entry.line_number,
+                    f"{entry.vuln_id}: not present in the unignored Trivy JSON "
+                    "report for this image; remove the stale .trivyignore entry.",
+                )
+            )
+            continue
+        fixed_versions = sorted(
+            {
+                str(match.get("FixedVersion", "")).strip()
+                for match in matches
+                if str(match.get("FixedVersion", "")).strip()
+            }
+        )
+        if fixed_versions:
+            violations.append(
+                ModelTrivyIgnoreViolation(
+                    entry.line_number,
+                    f"{entry.vuln_id}: unignored Trivy JSON reports fixed "
+                    f"version(s) {', '.join(fixed_versions)}; .trivyignore may "
+                    "only suppress fix-unavailable findings.",
+                )
+            )
+    return tuple(violations)
+
+
 def evaluate_trivyignore(
-    text: str, today: date | None = None
+    text: str, today: date | None = None, trivy_report: dict[str, Any] | None = None
 ) -> ModelTrivyIgnoreVerdict:
     """Parse and validate a ``.trivyignore`` file's text."""
     if today is None:
-        today = datetime.now(tz=None).date()
-    entries = tuple(_parse_entries(text.splitlines(keepends=True)))
+        today = datetime.now(UTC).date()
+    parsed_entries, parse_violations = _parse_entries(text.splitlines(keepends=True))
+    entries = tuple(parsed_entries)
     violations = tuple(
-        v for e in entries if (v := _validate_entry(e, today)) is not None
+        [*parse_violations]
+        + [v for e in entries if (v := _validate_entry(e, today)) is not None]
     )
+    if trivy_report is not None:
+        violations = violations + _validate_unignored_trivy_report(
+            entries,
+            trivy_report,
+        )
     return ModelTrivyIgnoreVerdict(entries=entries, violations=violations)
 
 
@@ -253,6 +335,15 @@ def main(argv: list[str] | None = None) -> int:
         description="Expiring-ignore policy check for .trivyignore (OMN-16229)"
     )
     parser.add_argument("path", nargs="?", default=".trivyignore")
+    parser.add_argument(
+        "--trivy-json",
+        type=Path,
+        help=(
+            "Unignored Trivy JSON report for the exact image being scanned. "
+            "When supplied, every .trivyignore entry must appear in this report "
+            "with no FixedVersion."
+        ),
+    )
     args = parser.parse_args(argv)
 
     path = Path(args.path)
@@ -261,7 +352,13 @@ def main(argv: list[str] | None = None) -> int:
         print(f"{path} does not exist -- nothing to validate.")
         return 0
 
-    verdict = evaluate_trivyignore(path.read_text())
+    trivy_report = None
+    if args.trivy_json is not None:
+        trivy_report = json.loads(args.trivy_json.read_text(encoding="utf-8"))
+        if not isinstance(trivy_report, dict):
+            raise ValueError("Trivy JSON report must be a mapping")
+
+    verdict = evaluate_trivyignore(path.read_text(), trivy_report=trivy_report)
     print(_format_report(verdict))
     return 0 if verdict.passed else 1
 

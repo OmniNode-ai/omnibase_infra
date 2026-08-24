@@ -181,14 +181,28 @@ jobs:
             RUNTIME_SOURCE_HASH=${{ github.sha }}
             UV_VERSION=${{ env.UV_VERSION }}
 
+      # OMN-16229: produce an unignored report first. The validator below uses
+      # it to prove every .trivyignore entry is present in this exact image and
+      # has no fixed version before the blocking scan is allowed to suppress it.
+      - name: Generate unignored Trivy audit report (OMN-16229)
+        uses: aquasecurity/trivy-action@ed142fd0673e97e23eac54620cfb913e5ce36c25  # v0.34.2 (pinned 2026-03-04)
+        with:
+          image-ref: '${{ steps.meta.outputs.image_repo }}:${{ github.sha }}'
+          format: 'json'
+          output: 'trivy-unignored.json'
+          exit-code: '0'
+          ignore-unfixed: false
+          vuln-type: 'os,library'
+          severity: 'CRITICAL,HIGH'
+          version: 'v0.69.3'
+
       # OMN-16229: every .trivyignore entry must carry CVE id / reason /
-      # ticket / expiry, and an expired-or-malformed entry fails the build.
-      # `ignore-unfixed: true` on the Trivy step below already means a
-      # fix-AVAILABLE CVE can never be silenced by this file; this check is
-      # what stops a fix-UNAVAILABLE exemption from living forever with no
-      # ticket, no reviewer, and no forced re-triage date.
-      - name: Validate .trivyignore expiry (OMN-16229)
-        run: python3 scripts/ci/check_trivyignore_expiry.py .trivyignore
+      # ticket / expiry, and must still be fix-unavailable in the unignored
+      # report for this exact built image.
+      - name: Validate .trivyignore policy (OMN-16229)
+        run: >-
+          python3 scripts/ci/check_trivyignore_expiry.py .trivyignore
+          --trivy-json trivy-unignored.json
 
       - name: Run Trivy vulnerability scanner
         uses: aquasecurity/trivy-action@ed142fd0673e97e23eac54620cfb913e5ce36c25  # v0.34.2 (pinned 2026-03-04)
