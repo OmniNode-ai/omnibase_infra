@@ -310,3 +310,58 @@ def test_dev_boundary_dlq_wired_fail_fast() -> None:
         "expected the flag wired fail-fast on the shared runtime-env anchor"
     )
     assert "${DEV_BOUNDARY_DLQ_ENABLED:-" not in dev_text
+
+
+def test_secret_resolver_mappings_satisfy_gateway_boot_check(tmp_path: Path) -> None:
+    """OMN-16110: every profile that sets ``secret_resolver_config_path`` must
+    declare every ``gateway.attach.keycloak.*`` mapping that
+    ``service_kernel.py::_build_runtime_handler_dependencies`` hard-requires at
+    boot whenever a secret-resolver config path is configured (raises
+    ``ProtocolConfigurationError`` otherwise -- introduced by OMN-15918 PR
+    #2731, missed by this contract until OMN-16110). This drives the real
+    boot-time function against each profile's contract-declared mappings, so
+    the next time that function's required-ref set changes, CI fails here
+    instead of a live lane crashing at container boot.
+    """
+    from omnibase_infra.runtime.service_kernel import (
+        _build_runtime_handler_dependencies,
+    )
+
+    contract = _load_contract()
+    exercised_profiles: list[str] = []
+    for profile_name, profile in contract.profiles.items():
+        if not profile.secret_resolver_config_path.strip():
+            # No secret-resolver config path -> gateway_secret_resolver_config_path
+            # resolves to None at boot and this check never runs for this profile
+            # (e.g. prod today -- see runtime_profile.resolve_secret_resolver_config_path).
+            continue
+        exercised_profiles.append(profile_name)
+
+        config_path = tmp_path / f"{profile_name}-secret-resolver.yaml"
+        config_payload = {
+            "enable_convention_fallback": False,
+            "mappings": [
+                mapping.model_dump(mode="json")
+                for mapping in profile.secret_resolver_mappings
+            ],
+        }
+        config_path.write_text(yaml.safe_dump(config_payload), encoding="utf-8")
+
+        try:
+            _build_runtime_handler_dependencies(
+                postgres_pool=None,
+                kafka_bootstrap_servers=None,
+                gateway_secret_resolver_config_path=config_path,
+            )
+        except Exception as exc:  # noqa: BLE001 -- surface exactly what boot sees
+            pytest.fail(
+                f"profile {profile_name!r}'s secret_resolver_mappings do not "
+                "satisfy the real service_kernel gateway-attach boot check "
+                f"(this profile would crash at container boot): {exc}"
+            )
+
+    # Guard the guard: fail loudly if a future contract edit removes every
+    # secret_resolver_config_path, silently turning this test into a no-op.
+    assert exercised_profiles, (
+        "expected at least one runtime profile to set secret_resolver_config_path"
+    )
