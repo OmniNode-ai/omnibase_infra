@@ -132,7 +132,11 @@ def test_projection_target_exposes_typed_database_schema_and_domain() -> None:
 
     assert target.database_refs == ("application",)
     assert target.physical_database == "omnidash_analytics"
-    assert target.schemas == ("tenant",)
+    # OMN-16239: the declaration stays logical while the resolved placement is
+    # physical. delegation_events is still under the OMN-15359 bridge, so these
+    # two deliberately differ; asserting both keeps the seam visible.
+    assert target.table_targets[0].table.schema == "tenant"
+    assert target.physical_schemas == ("public",)
     assert target.domains == (EnumDatabaseSchemaDomain.TENANT,)
     assert target.dsn_envs == ("OMNIDASH_ANALYTICS_DB_URL",)
     assert [binding.binding_ref for binding in target.bindings] == ["tenant_projection"]
@@ -174,7 +178,10 @@ def test_projection_target_preserves_multiple_schemas_in_one_database() -> None:
     target = _resolve_projection_database_target(tables, topology)
 
     assert target.physical_database == "omnidash_analytics"
-    assert target.schemas == ("omninode_internal", "tenant")
+    # One bridged relation and one not: delegation_events is still physically in
+    # public, future_internal_projection is not enumerated so it resolves to its
+    # declared schema (OMN-16239).
+    assert target.physical_schemas == ("omninode_internal", "public")
     assert target.domains == (
         EnumDatabaseSchemaDomain.OMNINODE_INTERNAL,
         EnumDatabaseSchemaDomain.TENANT,

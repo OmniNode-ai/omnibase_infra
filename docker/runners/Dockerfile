@@ -12,6 +12,7 @@
 ARG RUNNER_VERSION=2.336.0
 ARG GH_VERSION=2.67.0
 ARG KUBECTL_VERSION=1.32.1
+ARG AWSCLI_VERSION=2.36.29
 # uv pinned to the shared CI env (canary) version so the image binding is truthful.
 ARG UV_VERSION=0.6.14
 # Bound runner image identity (binding, not a human label). Pass via:
@@ -28,6 +29,7 @@ FROM ubuntu:22.04@sha256:3ba65aa20f86a0fad9df2b2c259c613df006b2e6d0bfcc8a146afb8
 ARG RUNNER_VERSION
 ARG GH_VERSION
 ARG KUBECTL_VERSION
+ARG AWSCLI_VERSION
 ARG UV_VERSION
 ARG OMNI_RUNNER_IMAGE_IDENTITY
 ARG OMNI_RUNNER_IMAGE_VERSION
@@ -39,6 +41,7 @@ ARG OMNI_CI_ENV_ROOT
 LABEL org.omninode.runner.version="${RUNNER_VERSION}"
 LABEL org.omninode.gh.version="${GH_VERSION}"
 LABEL org.omninode.kubectl.version="${KUBECTL_VERSION}"
+LABEL org.omninode.awscli.version="${AWSCLI_VERSION}"
 LABEL org.omninode.uv.version="${UV_VERSION}"
 # Bound identity (binding, not a label-by-convention): the digest folds base
 # image + manifest + python + uv + shared-env + image version (OMN-12567).
@@ -176,6 +179,21 @@ RUN tmp_dir="$(mktemp -d)" \
 RUN omni-curl -o /usr/local/bin/kubectl \
     "https://dl.k8s.io/release/v${KUBECTL_VERSION}/bin/linux/amd64/kubectl" \
     && chmod +x /usr/local/bin/kubectl
+
+# Install AWS CLI v2
+# OMN-16444: ECR-publishing workflows that land on this fleet (e.g. omniclaude
+# build-and-push-migrate-image.yml) run `aws sts get-caller-identity` after
+# configure-aws-credentials. Some hosts had the CLI out-of-band and some did
+# not, so job outcomes depended on runner placement — the image must carry it
+# so the fleet is uniform. `aws --version` at the end fails the build (not a
+# live job) if the installed binary does not execute.
+RUN tmp_dir="$(mktemp -d)" \
+    && omni-curl -o "${tmp_dir}/awscliv2.zip" \
+        "https://awscli.amazonaws.com/awscli-exe-linux-x86_64-${AWSCLI_VERSION}.zip" \
+    && unzip -q "${tmp_dir}/awscliv2.zip" -d "${tmp_dir}" \
+    && "${tmp_dir}/aws/install" --bin-dir /usr/local/bin \
+    && rm -rf "${tmp_dir}" \
+    && aws --version
 
 # Create non-root runner user and add to docker group for socket access
 RUN groupadd --gid 1001 runner \

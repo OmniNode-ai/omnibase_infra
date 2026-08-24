@@ -5,9 +5,13 @@
 #
 # Adversarial multi-model code review gate on every pull request (OMN-8468).
 #
-# Invokes omniintelligence.review_pairing.cli_review (node-based path via
-# HandlerLlmCliSubprocess / adapter_ai_reviewer) with the two currently-live
-# local models (qwen3-review on the 5090, qwen3-review-b on the 4090 --
+# Invokes omniintelligence.review_pairing.cli_review directly (a standalone
+# module calling model endpoints over HTTP; it does not import or route
+# through any omnibase_infra handler -- OMN-15959 corrected this stale
+# doc-comment, which named a since-deleted HandlerLlmCliSubprocess class that
+# omniintelligence.review_pairing.cli_review never actually imported) with
+# the two currently-live local models (qwen3-review on the 5090,
+# qwen3-review-b on the 4090 --
 # OMN-14176; deepseek-r1 no longer serves on the local fleet). Codex is
 # excluded from the initial pilot -- add --model codex once non-interactive
 # OAuth auth is confirmed on the omnibase-ci runner (OMN-8524).
@@ -419,7 +423,7 @@ jobs:
               '| `blocked` | CRITICAL findings found | **Yes** |',
               '| `degraded` | All models unavailable (infra) | No (pilot) |',
               '',
-              '_Powered by [omniintelligence.review_pairing.cli_review](https://github.com/OmniNode-ai/omniintelligence) — node-based adversarial review via HandlerLlmCliSubprocess (OMN-8468/OMN-8524)_',
+              '_Powered by [omniintelligence.review_pairing.cli_review](https://github.com/OmniNode-ai/omniintelligence) — multi-model adversarial review (OMN-8468/OMN-8524)_',
             ].join('\n');
 
             const { data: comments } = await github.rest.issues.listComments({

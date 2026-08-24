@@ -25,9 +25,11 @@ class EnumOmnibaseInfraTopic(str, Enum):
     CMD_CODING_AGENT_INVOKE_V1 = "onex.cmd.omnibase-infra.coding-agent-invoke.v1"  # onex.cmd.omnibase-infra.coding-agent-invoke.v1
     CMD_CODING_AGENT_WORKSPACE_VALIDATE_V1 = "onex.cmd.omnibase-infra.coding-agent-workspace-validate.v1"  # onex.cmd.omnibase-infra.coding-agent-workspace-validate.v1
     CMD_CONSUMER_RESTART_V1 = "onex.cmd.omnibase-infra.consumer-restart.v1"  # onex.cmd.omnibase-infra.consumer-restart.v1
+    CMD_FAULT_INJECT_FIXTURE_V1 = "onex.cmd.omnibase-infra.fault-inject-fixture.v1"  # onex.cmd.omnibase-infra.fault-inject-fixture.v1
     CMD_GATEWAY_ATTACH_REQUEST_V1 = "onex.cmd.omnibase-infra.gateway-attach-request.v1"  # onex.cmd.omnibase-infra.gateway-attach-request.v1
     CMD_GATEWAY_DETACH_REQUEST_V1 = "onex.cmd.omnibase-infra.gateway-detach-request.v1"  # onex.cmd.omnibase-infra.gateway-detach-request.v1
     CMD_GATEWAY_HEARTBEAT_REQUEST_V1 = "onex.cmd.omnibase-infra.gateway-heartbeat-request.v1"  # onex.cmd.omnibase-infra.gateway-heartbeat-request.v1
+    CMD_GATEWAY_LINK_HEALTH_UPSERT_V1 = "onex.cmd.omnibase-infra.gateway-link-health-upsert.v1"  # onex.cmd.omnibase-infra.gateway-link-health-upsert.v1
     CMD_LLM_COMPLETION_REQUEST_V1 = "onex.cmd.omnibase-infra.llm-completion-request.v1"  # onex.cmd.omnibase-infra.llm-completion-request.v1
     CMD_LLM_EMBEDDING_REQUEST_V1 = "onex.cmd.omnibase-infra.llm-embedding-request.v1"  # onex.cmd.omnibase-infra.llm-embedding-request.v1
     CMD_LLM_INFERENCE_REQUEST_V1 = "onex.cmd.omnibase-infra.llm-inference-request.v1"  # onex.cmd.omnibase-infra.llm-inference-request.v1
@@ -38,6 +40,7 @@ class EnumOmnibaseInfraTopic(str, Enum):
     CMD_RUNNER_FLEET_HEALTH_EVALUATE_V1 = "onex.cmd.omnibase-infra.runner-fleet-health-evaluate.v1"  # onex.cmd.omnibase-infra.runner-fleet-health-evaluate.v1
     CMD_RUNNER_FLEET_MAINTAIN_START_V1 = "onex.cmd.omnibase-infra.runner-fleet-maintain-start.v1"  # onex.cmd.omnibase-infra.runner-fleet-maintain-start.v1
     CMD_RUNNER_FLEET_SNAPSHOT_GATHER_V1 = "onex.cmd.omnibase-infra.runner-fleet-snapshot-gather.v1"  # onex.cmd.omnibase-infra.runner-fleet-snapshot-gather.v1
+    CMD_SAVINGS_CORRELATION_BATCH_COMPUTE_V1 = "onex.cmd.omnibase-infra.savings-correlation-batch-compute.v1"  # onex.cmd.omnibase-infra.savings-correlation-batch-compute.v1
     CMD_TOPIC_MIGRATION_EXECUTE_V1 = "onex.cmd.omnibase-infra.topic-migration-execute.v1"  # onex.cmd.omnibase-infra.topic-migration-execute.v1
     CMD_VALIDATION_LEDGER_APPEND_V1 = "onex.cmd.omnibase-infra.validation-ledger-append.v1"  # onex.cmd.omnibase-infra.validation-ledger-append.v1
     CMD_VECTOR_STORE_REQUEST_V1 = "onex.cmd.omnibase-infra.vector-store-request.v1"  # onex.cmd.omnibase-infra.vector-store-request.v1
@@ -69,6 +72,8 @@ class EnumOmnibaseInfraTopic(str, Enum):
     EVT_CONSUMER_HEALTH_V1 = "onex.evt.omnibase-infra.consumer-health.v1"  # onex.evt.omnibase-infra.consumer-health.v1
     EVT_DB_ERROR_V1 = "onex.evt.omnibase-infra.db-error.v1"  # onex.evt.omnibase-infra.db-error.v1
     EVT_EVENT_FORWARDED_V1 = "onex.evt.omnibase-infra.event-forwarded.v1"  # onex.evt.omnibase-infra.event-forwarded.v1
+    EVT_FAULT_INJECT_FIXTURE_COMPLETED_V1 = "onex.evt.omnibase-infra.fault-inject-fixture-completed.v1"  # onex.evt.omnibase-infra.fault-inject-fixture-completed.v1
+    EVT_GATEWAY_HEARTBEAT_V1 = "onex.evt.omnibase-infra.gateway-heartbeat.v1"  # onex.evt.omnibase-infra.gateway-heartbeat.v1
     EVT_GATEWAY_SESSION_V1 = "onex.evt.omnibase-infra.gateway-session.v1"  # onex.evt.omnibase-infra.gateway-session.v1
     EVT_GMAIL_INTENT_RECEIVED_V1 = "onex.evt.omnibase-infra.gmail-intent-received.v1"  # onex.evt.omnibase-infra.gmail-intent-received.v1
     EVT_INFERENCE_RESPONSE_V1 = "onex.evt.omnibase-infra.inference-response.v1"  # onex.evt.omnibase-infra.inference-response.v1

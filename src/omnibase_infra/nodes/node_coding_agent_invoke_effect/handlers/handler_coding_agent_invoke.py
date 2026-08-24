@@ -2,10 +2,11 @@
 # SPDX-License-Identifier: MIT
 """Coding-agent invoke EFFECT handler (OMN-13247, plan §5.1 / §5.7).
 
-The ONLY I/O node in the workflow. Ported from
-``node_llm_inference_effect.handlers.handler_llm_cli_subprocess`` and upgraded
-from read-only single-shot inference to a workspace-write agentic invocation with
-git-derived diff capture:
+The ONLY I/O node in the workflow. Originally ported from
+``node_llm_inference_effect.handlers.handler_llm_cli_subprocess`` (deleted
+under OMN-15959 — that handler's shell-out architecture was superseded by this
+node, not merely duplicated) and upgraded from read-only single-shot inference
+to a workspace-write agentic invocation with git-derived diff capture:
 
   - ``shutil.which`` availability gate (UNAVAILABLE if the CLI is missing).
   - structured failure classes (UNAVAILABLE / TIMEOUT / SUBPROCESS_ERROR /

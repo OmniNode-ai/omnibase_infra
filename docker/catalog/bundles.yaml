@@ -12,10 +12,13 @@ core:
   includes: []
   inject_env:
     INFISICAL_ADDR: "http://infisical:8080"
+  # Only vars an operator can supply BEFORE the first bring-up belong here
+  # (OMN-16187). The Infisical machine identity is minted by
+  # scripts/setup-infisical-identity.sh at step 4 of bootstrap-infisical.sh,
+  # against the Infisical container these very services start — requiring it
+  # here made local bring-up impossible for a self-hosting operator. It now
+  # gates the runtime bundle, where its only consumer lives.
   inject_required_env:
-    - INFISICAL_CLIENT_ID
-    - INFISICAL_CLIENT_SECRET
-    - INFISICAL_PROJECT_ID
     - INFISICAL_ENCRYPTION_KEY
     - INFISICAL_AUTH_SECRET
 runtime-core:
@@ -83,7 +86,14 @@ runtime:
     - runtime-observability-projections
     - runtime-infrastructure
   inject_env: {}
-  inject_required_env: []
+  # OMN-16187: the Infisical machine identity gates the runtime lane, not core.
+  # runtime_host_process is its only consumer (config prefetch); requiring it
+  # here keeps the operator contract that the runtime never starts with prefetch
+  # silently skipped, while leaving `onex up core` bringable with local secrets.
+  inject_required_env:
+    - INFISICAL_CLIENT_ID
+    - INFISICAL_CLIENT_SECRET
+    - INFISICAL_PROJECT_ID
 observability:
   description: "LLM observability — Phoenix traces and evals"
   services:
@@ -159,6 +169,16 @@ canary:
   description: "ONEX canary runtime — loads contracts with runtime_profiles=[canary] for ADR canary orchestrator demo path (OMN-10729). Use `onex up canary` to bring up alongside core."
   services:
     - runtime-canary
+  includes:
+    - core
+  inject_env: {}
+  inject_required_env: []
+fault-injection:
+  description: >
+    Permanent DLQ fault-injection fixture (OMN-16265, OMN-14498 follow-on). Deliberately NOT included in the `runtime` bundle — this is an opt-in, on-demand deployment for driving primary-publish + DLQ-leg failures against node_fault_inject_fixture_compute's own private topics, never part of the always-on runtime surface. The service depends_on omninode-runtime + redpanda, which this bundle does not itself provide (only `core`) — bring it up alongside the `runtime` bundle (e.g. `onex up runtime fault-injection`) only when actively running a boundary-behavior regression check; see docs/runbooks/fault-inject-fixture-dlq-offset-withholding.md.
+
+  services:
+    - fault-inject-fixture
   includes:
     - core
   inject_env: {}

@@ -24,7 +24,7 @@ contract_version:
 node_version:
   major: 1
   minor: 0
-  patch: 1
+  patch: 2
 node_type: "EFFECT_GENERIC"
 description: >
   Effect node that drains a DLQ topic (onex.dlq.omnibase-infra.<category>.v1) from the persistent onex-dlq-replay consumer group, replays eligible messages back to their original topic exactly once, and quarantines non-replayable messages to onex.dlq.omnibase-infra.quarantine.v1 (never dropping them). Reuses should_replay() for eligibility and records every terminal outcome in dlq_replay_history.
@@ -157,12 +157,12 @@ quarantine:
 # Metadata
 metadata:
   description: >
-    Contract-native DLQ replay + quarantine node. Persistent consumer group onex-dlq-replay; quarantine to onex.dlq.omnibase-infra.quarantine.v1 ends silent loss. OMN-15021 (node_version 1.0.1): HandlerDlqReplay.handle() dispatch-boundary id extraction hardened against the runtime auto-wiring materialized dispatch-dict shape (no behavior change to the DLQ drain itself).
+    Contract-native DLQ replay + quarantine node. Persistent consumer group onex-dlq-replay; quarantine to onex.dlq.omnibase-infra.quarantine.v1 ends silent loss. OMN-15021 (node_version 1.0.1): HandlerDlqReplay.handle() dispatch-boundary id extraction hardened against the runtime auto-wiring materialized dispatch-dict shape (no behavior change to the DLQ drain itself). OMN-16422 (node_version 1.0.2): this node is auto-wired as a PER-MESSAGE trigger on the DLQ topic but HandlerDlqReplay.run() is a whole-topic batch drain -- a self-feeding DLQ topic never went idle, so a single invocation never committed and starved the outer trigger consumer's heartbeat, and every DLQ arrival independently piled another unbounded drain on top. Fixed by bounding every run() invocation by record count (max_records_per_run) and wall-clock (max_run_duration_seconds) and committing incrementally every commit_every_n_records instead of only after the loop goes idle.
 
   author: "OmniNode Team"
   license: "MIT"
   created: "2026-06-02"
-  updated: "2026-07-24"
+  updated: "2026-08-23"
   tags:
     - effect
     - dlq

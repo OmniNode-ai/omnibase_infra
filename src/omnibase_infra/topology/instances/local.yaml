@@ -149,6 +149,7 @@ databases:
               - delegation_budget_state
               - delegation_events
               - delegation_judge_verdict_events
+              - delegation_routing_tenant_overlay
               - delegation_shadow_comparisons
               - dep_health_findings
               - hook_events
@@ -158,6 +159,7 @@ databases:
               - projection_delegation_inference_response_text
               - savings_estimates
               - skill_execution_snapshots
+              - tenant_inference_credentials
             privileges: [INSERT, SELECT, UPDATE]
             schema: public
         login: true

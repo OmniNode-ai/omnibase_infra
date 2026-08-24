@@ -31,16 +31,23 @@ import shutil
 import socket
 import tempfile
 import threading
+import uuid
 from pathlib import Path
 
 import pytest
 from click.testing import CliRunner, Result
+from pydantic import JsonValue
 
 from omnibase_core.artifacts.artifact_store import ArtifactStore
 from omnibase_core.models.artifacts.model_artifact_ref import ModelArtifactRef
 from omnibase_core.models.dispatch.model_skill_result import ModelSkillResult
 from omnibase_infra.cli.cli_node import run_node_by_name
-from omnibase_infra.cli.receipt_mode import CAPTURE_DIR_NAME, SPOOL_DIR_NAME
+from omnibase_infra.cli.receipt_mode import (
+    CAPTURE_DIR_NAME,
+    SPOOL_DIR_NAME,
+    WORKFLOW_RESULT_FILENAME,
+    _verify_workflow_data_identity,
+)
 
 pytestmark = pytest.mark.unit
 
@@ -140,7 +147,7 @@ class TestReceiptModeSuccess:
         result, _ = _invoke_receipt(tmp_path, monkeypatch)
         assert result.exit_code == 0, result.output
         payload = _parse_single_receipt(result.stdout)
-        receipt = ModelSkillResult.model_validate(payload)
+        receipt: ModelSkillResult[object] = ModelSkillResult.model_validate(payload)
         assert receipt.node_name == "proof_noop"
         assert receipt.status.is_success_like
         assert receipt.exit_code == 0
@@ -461,7 +468,7 @@ class TestArtifactStoreRootDefault:
         assert "no hidden loss" not in result.stderr
         # Exactly one receipt JSON on stdout (capture succeeded).
         payload = _parse_single_receipt(result.stdout)
-        receipt = ModelSkillResult.model_validate(payload)
+        receipt: ModelSkillResult[object] = ModelSkillResult.model_validate(payload)
         assert receipt.status.is_success_like
         assert receipt.artifact_refs, "capture must be artifact-backed via default"
 
@@ -470,7 +477,9 @@ class TestArtifactStoreRootDefault:
         assert default_store_root.is_dir()
         store = ArtifactStore()  # reads the env var the CLI just defaulted
         assert store.root == default_store_root.resolve()
-        for raw_ref in payload["artifact_refs"]:  # type: ignore[union-attr]
+        artifact_refs = payload["artifact_refs"]
+        assert isinstance(artifact_refs, list)
+        for raw_ref in artifact_refs:
             assert isinstance(raw_ref, dict)
             ref = ModelArtifactRef.model_validate(raw_ref)
             store.read_blob(ref)  # re-hashes; raises on mismatch
@@ -524,7 +533,7 @@ class TestReceiptModeFailureAsymmetry:
         )
         assert result.exit_code != 0
         payload = _parse_single_receipt(result.stdout)
-        receipt = ModelSkillResult.model_validate(payload)
+        receipt: ModelSkillResult[object] = ModelSkillResult.model_validate(payload)
         assert not receipt.status.is_success_like
         result_body = payload["result"]
         assert isinstance(result_body, dict)
@@ -561,3 +570,121 @@ class TestDefaultModeUnchanged:
         # No single-JSON receipt contract in default mode (behavior preserved).
         with pytest.raises(json.JSONDecodeError):
             json.loads(result.stdout.strip() or "not-json")
+
+
+class TestWorkflowResultIdentityAnchor:
+    """OMN-15449: ``_verify_workflow_data_identity`` — the fail-closed join.
+
+    ``workflow_result.json`` is a FIXED path shared by every invocation
+    against the same ``state_root``. These tests cover the pure join
+    function directly (no RuntimeLocal needed — it only needs a dict and a
+    run_id), then a full real-dispatch-path test proving the join actually
+    protects the printed receipt.
+    """
+
+    def test_matching_run_id_passes_through_unchanged(self) -> None:
+        run_id = uuid.uuid4()
+        data: dict[str, JsonValue] = {
+            "run_id": str(run_id),
+            "handler_result": {"ticket_id": "OMN-1"},
+        }
+        verified, reason = _verify_workflow_data_identity(data, run_id)
+        assert verified == data
+        assert reason is None
+
+    def test_empty_workflow_data_passes_through_with_no_reason(self) -> None:
+        """Nothing to distrust: a genuinely empty result is not a mismatch."""
+        verified, reason = _verify_workflow_data_identity({}, uuid.uuid4())
+        assert verified == {}
+        assert reason is None
+
+    def test_mismatched_run_id_is_discarded_with_a_reason(self) -> None:
+        """A DIFFERENT run's content must never be handed back as if it were ours."""
+        foreign_run_id = uuid.uuid4()
+        this_run_id = uuid.uuid4()
+        data: dict[str, JsonValue] = {
+            "run_id": str(foreign_run_id),
+            "handler_result": {"ticket_id": "OMN-FOREIGN"},
+        }
+        verified, reason = _verify_workflow_data_identity(data, this_run_id)
+        assert verified == {}
+        assert reason is not None
+        assert str(foreign_run_id) in reason
+        assert str(this_run_id) in reason
+
+    def test_absent_run_id_fails_closed_same_as_a_mismatch(self) -> None:
+        """An old-writer file with no run_id field is UNKNOWN, not fresh.
+
+        UNKNOWN freshness must never read as fresh (same discipline as the
+        OMN-15396 AC5 health gate) — an absent field is indistinguishable
+        from "this belongs to some other run" and must refuse the same way.
+        """
+        data: dict[str, JsonValue] = {
+            "handler_result": {"ticket_id": "OMN-PRE-FIX-WRITER"}
+        }
+        verified, reason = _verify_workflow_data_identity(data, uuid.uuid4())
+        assert verified == {}
+        assert reason is not None
+
+    def test_real_dispatch_path_never_leaks_a_foreign_runs_result(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """End-to-end proof, driving the REAL CLI + RuntimeLocal (OMN-15449).
+
+        Simulates the reported failure mode: something else finishes writing
+        to the SAME shared ``state_root`` in the window between this run's
+        ``RuntimeLocal.run()`` returning and receipt_mode reading the file
+        back — a concurrent ``onex`` invocation for a different ticket/run is
+        the live-observed cause, reproduced here by monkeypatching the same
+        read function to plant foreign content immediately before it reads.
+
+        Pre-fix (no run_id stamp, no join): the foreign content is served as
+        if it were this run's own — the exact false-Done shape reported.
+        Post-fix: the join refuses it and the receipt reflects THIS run's
+        real (successful, correct) result instead.
+        """
+        from omnibase_infra.cli import receipt_mode as receipt_mode_module
+
+        real_load = receipt_mode_module._load_workflow_data
+
+        def _load_and_plant_foreign_write(state_root: Path) -> dict[str, JsonValue]:
+            foreign: dict[str, JsonValue] = {
+                "result": "completed",
+                "exit_code": 0,
+                "workflow": "a-different-concurrent-invocation",
+                "run_id": str(uuid.uuid4()),
+                "terminal_payload": {
+                    "correlation_id": str(uuid.uuid4()),
+                    "ticket_id": "OMN-FOREIGN",
+                },
+                "handler_result": {
+                    "status": "success",
+                    "echoed_name": "someone-elses-ticket",
+                    "echoed_count": 999,
+                },
+            }
+            (state_root / WORKFLOW_RESULT_FILENAME).write_text(
+                json.dumps(foreign), encoding="utf-8"
+            )
+            return real_load(state_root)
+
+        monkeypatch.setattr(
+            receipt_mode_module, "_load_workflow_data", _load_and_plant_foreign_write
+        )
+
+        result, _ = _invoke_receipt(tmp_path, monkeypatch)
+
+        payload = _parse_single_receipt(result.stdout)
+        assert payload["result"] != {
+            "status": "success",
+            "echoed_name": "someone-elses-ticket",
+            "echoed_count": 999,
+        }, "receipt must never carry a foreign run's result"
+        # Refused, not silently degraded: non-zero exit, ERROR status, and
+        # the refusal reason is visible rather than swallowed.
+        assert result.exit_code != 0
+        receipt: ModelSkillResult[object] = ModelSkillResult.model_validate(payload)
+        assert not receipt.status.is_success_like
+        result_body = payload["result"]
+        assert isinstance(result_body, dict)
+        assert "anchor-join refusal" in str(result_body.get("error", ""))

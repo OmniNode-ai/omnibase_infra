@@ -329,7 +329,31 @@ def test_staging_canary_resolves_topics_from_node_contract() -> None:
     )
 
     assert len(loaded.forwarder.mirror_topics.inbound) == 3
-    assert len(loaded.forwarder.mirror_topics.outbound) == 6
+    assert len(loaded.forwarder.mirror_topics.outbound) == 8
+    # OMN-16204: the bare omniclaude session-lifecycle pair, and only that
+    # pair, must resolve from the real node contract.yaml -- per-topic proof
+    # that config.gateway_forwarder.mirror_topics.outbound is correctly
+    # declared, not just a count check. Operator OD-9 ruling 2026-08-18
+    # ~12:40Z allows exactly session-started/session-ended (session id +
+    # timestamps, content-free) to cross; every other omniclaude topic must
+    # stay absent.
+    assert (
+        "onex.evt.omniclaude.session-started.v1"
+        in loaded.forwarder.mirror_topics.outbound
+    )
+    assert (
+        "onex.evt.omniclaude.session-ended.v1"
+        in loaded.forwarder.mirror_topics.outbound
+    )
+    denied_omniclaude_topics = (
+        "onex.evt.omniclaude.prompt-submitted.v1",
+        "onex.evt.omniclaude.tool-executed.v1",
+        "onex.evt.omniclaude.skill-started.v1",
+        "onex.evt.omniclaude.skill-completed.v1",
+        "onex.evt.omniclaude.tool-output-captured.v1",
+    )
+    for denied_topic in denied_omniclaude_topics:
+        assert denied_topic not in loaded.forwarder.mirror_topics.outbound
     assert loaded.local_bus.bootstrap_servers == "redpanda:9092"
     # OMN-15781: deployed config must resolve to "earliest" on both legs, not
     # the model default -- a "latest" resolved leg here silently drops any

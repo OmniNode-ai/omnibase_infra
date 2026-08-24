@@ -982,7 +982,8 @@ async def bootstrap() -> int:
     build_loop_db_handler = None  # HandlerDb | None, assigned inside try block
     baselines_task: asyncio.Task[None] | None = None
     _baselines_pool = None  # asyncpg.Pool | None, assigned inside try block
-    savings_task: asyncio.Task[None] | None = None
+    savings_correlation_task: asyncio.Task[None] | None = None
+    _savings_correlation_pool = None  # asyncpg.Pool | None, assigned inside try block
     runtime_health_monitor = None  # ServiceRuntimeHealthMonitor | None
     correlation_id = generate_correlation_id()
     bootstrap_start_time = time.time()
@@ -1744,117 +1745,171 @@ async def bootstrap() -> int:
                 )
                 baselines_task = None
 
-        # 3.9. Wire savings estimation consumer
-        # Correlates session events and produces savings-estimated.v1 events.
-        # (savings_task pre-declared before try block)
+        # 3.9. Wire savings estimation correlation (OMN-16293)
+        # Ingests raw injection/validator-catch signals directly into
+        # Postgres (no in-memory buffering — see HandlerSavingsCorrelation
+        # module docstring) and periodically correlates+publishes savings
+        # estimates. Mirrors the §3.8 baselines batch compute wiring shape.
+        # Supersedes the legacy ServiceSavingsEstimator in-memory-buffer
+        # consumer (deleted in the same change).
+        # (savings_correlation_task / _savings_correlation_pool pre-declared
+        # before try block)
         if use_kafka:
             try:
+                import asyncpg as _savings_asyncpg
+
                 from omnibase_core.models.events.model_event_envelope import (
                     ModelEventEnvelope,
                 )
-                from omnibase_infra.services.observability.savings_estimation.config import (
-                    ConfigSavingsEstimation,
-                )
-                from omnibase_infra.services.observability.savings_estimation.consumer import (
-                    ServiceSavingsEstimator,
+                from omnibase_infra.nodes.node_savings_estimation_compute.handlers.handler_savings_correlation import (
+                    HandlerSavingsCorrelation,
                     decode_event_message,
                 )
-
-                _savings_config = ConfigSavingsEstimation()
-                _savings_estimator = ServiceSavingsEstimator(
-                    config=_savings_config,
+                from omnibase_infra.nodes.node_savings_estimation_compute.models.model_savings_correlation_batch_command import (
+                    ModelSavingsCorrelationBatchCommand,
                 )
-                _savings_topic = _savings_config.produce_topic
-
-                _savings_input_topics = list(_savings_config.consumed_topics)
-                _savings_node_identity = ModelNodeIdentity(
-                    env=environment,
-                    service=config.name or "onex-kernel",
-                    node_name="savings-estimator",
-                    version="v1",
+                from omnibase_infra.topics import (
+                    SUFFIX_OMNICLAUDE_HOOK_CONTEXT_INJECTED,
+                    SUFFIX_OMNICLAUDE_PATTERN_ENFORCEMENT,
+                    SUFFIX_OMNICLAUDE_VALIDATOR_CATCH,
+                    SUFFIX_SAVINGS_ESTIMATED,
                 )
 
-                async def _savings_consumer_loop() -> None:
-                    """Consume input events and produce savings estimates."""
-                    _poll_interval = 2.0
+                _savings_dsn = os.environ.get(  # url-authority-ok: Postgres DSN is an operator-supplied secret (required_env), not a service routing URL — same established pattern as node_baselines_batch_compute's identical DSN read above.
+                    "OMNIBASE_INFRA_DB_URL", ""
+                ).strip()
+                if _savings_dsn:
+                    _savings_interval = float(
+                        os.environ.get("SAVINGS_CORRELATION_INTERVAL", "60")
+                    )
+                    _savings_correlation_pool = await _savings_asyncpg.create_pool(
+                        _savings_dsn, min_size=1, max_size=2
+                    )
 
-                    for _input_topic in _savings_input_topics:
+                    async def _savings_publish(
+                        event_type: str,
+                        payload: object,
+                        topic: str | None,
+                        correlation_id: object,
+                        **kwargs: object,
+                    ) -> bool:
+                        """Publisher callback for savings correlation."""
+                        _env: ModelEventEnvelope[object] = ModelEventEnvelope(
+                            payload=payload,
+                            # Why: Runtime wiring validates and narrows this payload shape before use.
+                            correlation_id=correlation_id,  # type: ignore[arg-type]
+                            event_type=event_type,
+                            source="savings_correlation",
+                        )
+                        await event_bus.publish_envelope(
+                            # Why: Runtime wiring validates and narrows this payload shape before use.
+                            _env,  # type: ignore[arg-type]
+                            topic=topic or SUFFIX_SAVINGS_ESTIMATED,
+                        )
+                        return True
+
+                    _savings_correlation_handler = HandlerSavingsCorrelation(
+                        pool=_savings_correlation_pool,
+                        publisher=_savings_publish,
+                    )
+                    _savings_node_identity = ModelNodeIdentity(
+                        env=environment,
+                        service=config.name or "onex-kernel",
+                        node_name="node_savings_estimation_compute",
+                        version="v1",
+                    )
+
+                    async def _savings_on_injection_message(
+                        message: ModelEventMessage,
+                    ) -> None:
+                        _topic, _payload = decode_event_message(message)
+                        await _savings_correlation_handler.ingest_injection_event(
+                            _payload
+                        )
+
+                    async def _savings_on_validator_catch_message(
+                        message: ModelEventMessage,
+                    ) -> None:
+                        _topic, _payload = decode_event_message(message)
+                        await _savings_correlation_handler.ingest_validator_catch_event(
+                            _topic, _payload
+                        )
+
+                    for _signal_topic, _on_message in (
+                        (
+                            SUFFIX_OMNICLAUDE_HOOK_CONTEXT_INJECTED,
+                            _savings_on_injection_message,
+                        ),
+                        (
+                            SUFFIX_OMNICLAUDE_VALIDATOR_CATCH,
+                            _savings_on_validator_catch_message,
+                        ),
+                        (
+                            SUFFIX_OMNICLAUDE_PATTERN_ENFORCEMENT,
+                            _savings_on_validator_catch_message,
+                        ),
+                    ):
                         try:
-
-                            async def _savings_on_message(
-                                message: ModelEventMessage,
-                            ) -> None:
-                                # The event bus delivers a typed ModelEventMessage,
-                                # not a raw dict/str. decode_event_message reads the
-                                # JSON payload off the typed `.value` field — it
-                                # must never call `.get()` on the message, which
-                                # has no such method (OMN-13149).
-                                _topic, _payload = decode_event_message(message)
-                                _savings_estimator.ingest_event(_topic, _payload)
-
                             await event_bus.subscribe(
-                                _input_topic,
+                                _signal_topic,
                                 node_identity=_savings_node_identity,
-                                on_message=_savings_on_message,
+                                on_message=_on_message,
                             )
                         except Exception:  # noqa: BLE001
                             logger.warning(
-                                "Could not subscribe to %s for savings estimation",
-                                _input_topic,
+                                "Could not subscribe to %s for savings correlation",
+                                _signal_topic,
                                 exc_info=True,
                             )
 
-                    while True:
-                        try:
-                            await asyncio.sleep(_poll_interval)
-                            estimates = (
-                                await _savings_estimator.finalize_ready_sessions()
-                            )
-                            for estimate in estimates:
-                                try:
-                                    _envelope: ModelEventEnvelope[object] = (
-                                        ModelEventEnvelope(
-                                            payload=estimate,
-                                            correlation_id=str(
-                                                estimate.get("correlation_id", "")
-                                            ),
-                                            event_type="savings.estimated",
-                                            source="savings_estimation_consumer",
-                                        )
-                                    )
-                                    await event_bus.publish_envelope(
-                                        # Why: Runtime wiring validates and narrows this payload shape before use.
-                                        _envelope,  # type: ignore[arg-type]
-                                        topic=_savings_topic,
-                                    )
-                                except Exception:  # noqa: BLE001
-                                    logger.warning(
-                                        "Failed to emit savings estimate",
-                                        exc_info=True,
-                                    )
-                        except asyncio.CancelledError:
-                            break
-                        except Exception:  # noqa: BLE001 — never crash the loop
-                            logger.warning(
-                                "Savings estimation loop iteration failed",
-                                exc_info=True,
-                            )
+                    async def _savings_correlation_loop() -> None:
+                        """Periodic savings-correlation batch loop."""
+                        while True:
+                            try:
+                                await asyncio.sleep(_savings_interval)
+                                _cmd = ModelSavingsCorrelationBatchCommand(
+                                    correlation_id=generate_correlation_id(),
+                                )
+                                _output = await _savings_correlation_handler.run_correlation_batch(
+                                    _cmd
+                                )
+                                logger.info(
+                                    "Savings correlation batch completed "
+                                    "(finalized=%d, errors=%d, correlation_id=%s)",
+                                    _output.sessions_finalized,
+                                    len(_output.errors),
+                                    _cmd.correlation_id,
+                                )
+                            except asyncio.CancelledError:
+                                break
+                            except Exception:  # noqa: BLE001 — never crash the loop
+                                logger.warning(
+                                    "Savings correlation batch failed (will retry in %ds)",
+                                    int(_savings_interval),
+                                    exc_info=True,
+                                )
 
-                savings_task = asyncio.create_task(
-                    _savings_consumer_loop(), name="savings-estimation-consumer"
-                )
-                logger.info(
-                    "Savings estimation consumer started (correlation_id=%s)",
-                    correlation_id,
-                )
+                    savings_correlation_task = asyncio.create_task(
+                        _savings_correlation_loop(), name="savings-correlation-batch"
+                    )
+                    logger.info(
+                        "Savings correlation started (interval=%ds, correlation_id=%s)",
+                        int(_savings_interval),
+                        correlation_id,
+                    )
+                else:
+                    logger.debug(
+                        "OMNIBASE_INFRA_DB_URL not set, skipping savings correlation "
+                        "(correlation_id=%s)",
+                        correlation_id,
+                    )
             except Exception:
                 logger.exception(
-                    "Failed to start savings estimation consumer — pipeline will write zero rows "
-                    "(correlation_id=%s). Check OMNIBASE_INFRA_SAVINGS_KAFKA_BOOTSTRAP_SERVERS "
-                    "or KAFKA_BOOTSTRAP_SERVERS env vars.",
+                    "Failed to start savings correlation — pipeline will write zero rows "
+                    "(correlation_id=%s). Check OMNIBASE_INFRA_DB_URL.",
                     correlation_id,
                 )
-                savings_task = None
+                savings_correlation_task = None
 
         # 3.10. Start runtime health monitor (OMN-8623)
         # Runs every 5 minutes and emits runtime-health-check.v1 events.
@@ -4335,18 +4390,24 @@ async def bootstrap() -> int:
                 pass
             _baselines_pool = None
 
-        # Stop savings estimation consumer
-        if savings_task is not None:
-            savings_task.cancel()
+        # Stop savings correlation loop and close its pool
+        if savings_correlation_task is not None:
+            savings_correlation_task.cancel()
             try:
-                await savings_task
+                await savings_correlation_task
             except asyncio.CancelledError:
                 pass
             logger.debug(
-                "Savings estimation consumer stopped (correlation_id=%s)",
+                "Savings correlation loop stopped (correlation_id=%s)",
                 correlation_id,
             )
-            savings_task = None
+            savings_correlation_task = None
+        if _savings_correlation_pool is not None:
+            try:
+                await _savings_correlation_pool.close()
+            except Exception:  # noqa: BLE001 — best-effort cleanup
+                pass
+            _savings_correlation_pool = None
 
         # Stop ServiceLlmEndpointHealth (OMN-6135)
         if llm_health_service is not None:
@@ -4594,11 +4655,16 @@ async def bootstrap() -> int:
             except (asyncio.CancelledError, Exception):  # noqa: BLE001
                 pass
 
-        # Cleanup savings estimation consumer
-        if savings_task is not None:
-            savings_task.cancel()
+        # Cleanup savings correlation loop and pool
+        if savings_correlation_task is not None:
+            savings_correlation_task.cancel()
             try:
-                await savings_task
+                await savings_correlation_task
+            except (asyncio.CancelledError, Exception):  # noqa: BLE001
+                pass
+        if _savings_correlation_pool is not None:
+            try:
+                await _savings_correlation_pool.close()
             except (asyncio.CancelledError, Exception):  # noqa: BLE001
                 pass
 

@@ -90,6 +90,8 @@ _DUMMY_BOOTSTRAP_ENV: dict[str, str] = dict.fromkeys(
         "LLM_CODER_URL",
         "LLM_GLM_URL",
         "ONEX_SERVICE_CLIENT_SECRET",
+        "GATEWAY_ATTACH_KEYCLOAK_INTROSPECTION_URL",
+        "GATEWAY_ATTACH_KEYCLOAK_JWKS_URL",
         "LOCAL_LLM_SHARED_SECRET",
         "LLM_GLM_MODEL_NAME",
         "LLM_GLM_API_KEY",
@@ -103,6 +105,8 @@ _DUMMY_BOOTSTRAP_ENV: dict[str, str] = dict.fromkeys(
         "INFISICAL_REDIS_URL",
         "INFISICAL_ENCRYPTION_KEY",
         "INFISICAL_AUTH_SECRET",
+        "GATEWAY_ATTACH_KEYCLOAK_INTROSPECTION_URL",
+        "GATEWAY_ATTACH_KEYCLOAK_JWKS_URL",
         "PROD_REDPANDA_ADVERTISE_HOST",
         # OMN-15378: docker-compose.infra.yml (merged as the base file for
         # EVERY lane, including prod) hard-requires DEV_REDPANDA_ADVERTISE_HOST
