@@ -174,6 +174,18 @@ def test_violation_message_none_when_host_matches_case_insensitive() -> None:
     )
 
 
+def test_violation_message_none_when_host_matches_201_gate_runner() -> None:
+    assert (
+        guard.full_suite_host_violation_message(
+            host="gate-runner-201",
+            target_hostname="stickybeatz-studio",
+            additional_target_hostnames=("gate-runner-201",),
+            override_authorized=False,
+        )
+        is None
+    )
+
+
 def test_violation_message_none_when_override_authorized() -> None:
     """``override_authorized`` is resolved by the caller from a CONSUMED grant
     token, never read off the environment (OMN-16480). The rename from

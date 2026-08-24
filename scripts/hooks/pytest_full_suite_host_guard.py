@@ -66,6 +66,7 @@ from scripts.hooks.prepush_override_grant import (
 )
 
 DEFAULT_PREPUSH_200_HOSTNAME = "stickybeatz-studio"
+DEFAULT_PREPUSH_201_GATE_RUNNER_HOSTNAME = "gate-runner-201"
 
 
 def is_ci_environment(env: dict[str, str] | None = None) -> bool:
@@ -123,6 +124,7 @@ def full_suite_host_violation_message(
     *,
     host: str,
     target_hostname: str,
+    additional_target_hostnames: tuple[str, ...] = (),
     override_authorized: bool,
 ) -> str | None:
     """Return a refusal message, or None if this run may proceed.
@@ -140,13 +142,17 @@ def full_suite_host_violation_message(
     """
     if not host:
         return None
-    if host.lower() == target_hostname.lower():
+    allowed_hostnames = (target_hostname, *additional_target_hostnames)
+    if any(host.lower() == allowed.lower() for allowed in allowed_hostnames):
         return None
     if override_authorized:
         return None
     return (
         f"direct full-suite pytest invocation refused on host '{host}', not the "
-        f"designated .200 build host ('{target_hostname}'). This closes OMN-15977 "
+        f"designated .200 build host ('{target_hostname}') or approved .201 "
+        f"gate-runner host(s) "
+        f"({', '.join(repr(allowed) for allowed in additional_target_hostnames)}). "
+        "This closes OMN-15977 "
         "Hole 1: agent-launched direct `pytest tests/` runs bypass the git-push "
         "guard (scripts/hooks/prepush_smart_tests.sh) entirely, so the .200-default "
         "host-check was never consulted. Run from .200 instead "
@@ -235,10 +241,15 @@ def enforce(config: object, full_suite_target: str) -> None:
     target_hostname = os.environ.get(
         "PREPUSH_200_HOSTNAME", DEFAULT_PREPUSH_200_HOSTNAME
     )
+    gate_runner_hostname = os.environ.get(
+        "PREPUSH_201_GATE_RUNNER_HOSTNAME",
+        DEFAULT_PREPUSH_201_GATE_RUNNER_HOSTNAME,
+    )
     if (
         full_suite_host_violation_message(
             host=host,
             target_hostname=target_hostname,
+            additional_target_hostnames=(gate_runner_hostname,),
             override_authorized=False,
         )
         is None
@@ -254,6 +265,7 @@ def enforce(config: object, full_suite_target: str) -> None:
     message = full_suite_host_violation_message(
         host=host,
         target_hostname=target_hostname,
+        additional_target_hostnames=(gate_runner_hostname,),
         override_authorized=False,
     )
     assert message is not None
