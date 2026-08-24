@@ -824,6 +824,35 @@ jobs:
           # so an unresolvable pin fails the gate instead of skipping silently.
           uv run python scripts/ci/check_pin_reachability.py --min-pins 5
 
+  # Expiring-ignore policy for fix-unavailable CVEs in the Trivy image gate
+  # (OMN-16229, companion to OMN-16228). The Trivy scan itself only runs at
+  # image-build time (push to main / workspace-candidate dispatch), which is
+  # too late for PR-time feedback on a stale .trivyignore. This job runs the
+  # SAME check (scripts/ci/check_trivyignore_expiry.py) on every PR so an
+  # expired or malformed entry is caught before merge, not just at the next
+  # build. Unconditional (no job-level `if:`, no path filter) -- the file is
+  # tiny and the check is dependency-free stdlib Python, so there is no cost
+  # to running it on every PR regardless of what changed.
+  trivyignore-expiry-check:
+    needs: occ-preflight
+    name: Trivyignore Expiry Check (OMN-16229)
+    # OMNI_RUNNER_SELECTOR_V1 — trusted CI defaults to self-hosted omnibase-ci; public forks default to ubuntu-latest
+    runs-on: >-
+      ${{
+        (github.event_name == 'pull_request' &&
+         github.event.pull_request.head.repo.full_name != github.repository)
+        && fromJSON(vars.OMNI_PUBLIC_PR_RUNS_ON_JSON || '["ubuntu-latest"]')
+        || fromJSON((github.event_name == 'merge_group' && vars.OMNI_REQUIRED_CI_RUNS_ON_JSON) || vars.OMNI_TRUSTED_CI_RUNS_ON_JSON || '["self-hosted","omnibase-ci"]')
+      }}
+    timeout-minutes: 5
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+
+      - name: Validate .trivyignore expiry
+        run: python3 scripts/ci/check_trivyignore_expiry.py .trivyignore
+
   # Lockfile CVE scan (OMN-16228) -- born from the 2026-08-18 sqlparse/Trivy
   # incident (OMN-16170): three HIGH sqlparse CVEs (fixed in 0.6.0) were only
   # caught by the Trivy scan on the built runtime IMAGE, deep in the deploy

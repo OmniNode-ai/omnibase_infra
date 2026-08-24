@@ -118,6 +118,10 @@ ALLOWED_ROOT_FILES: frozenset[str] = frozenset(
         # Security
         ".secretresolver_allowlist",
         ".secrets.baseline",
+        # Trivy reads .trivyignore from the repo root by convention (OMN-16229);
+        # the expiring-ignore policy is enforced by
+        # scripts/ci/check_trivyignore_expiry.py, not by its location.
+        ".trivyignore",
         # Special files
         ".migration_freeze",
         ".mcp.json",
