@@ -2651,9 +2651,27 @@ warm_broker_topic_provisioning() {
     )
     log_info "Applying broker partition cap: ${BROKER_PARTITION_CAP_SERVICE}"
     log_cmd "${cap_up_cmd[*]}"
-    # OMN-15718: bounded (not guarded -- a real failure here must still abort
-    # under set -e exactly as before; only the hang risk is closed).
-    compose_up_bounded "${RUNTIME_COMPOSE_WAIT_TIMEOUT_SECONDS}" "${cap_up_cmd[@]}"
+    # OMN-16110: this `up` is bounded AND guarded -- its exit code is NOT the
+    # source of truth for whether the cap was applied. A stale daemon-phantom
+    # container record for this service (listed `Dead` by `docker ps -a`, but
+    # "No such container" on both `docker inspect` and `docker rm -f`; no
+    # backing directory under the daemon's containers dir) makes compose's
+    # convergence plan try to start the phantom AFTER it has already
+    # recreated and started the real one-shot; that trailing start fails the
+    # whole `up` with "No such container" even though the cap container is up
+    # and running (observed 2026-08-24 on the .201 dev lane; deterministic
+    # while the phantom record persists, and the record can only be cleared
+    # by a dockerd restart). Same doctrine as the broker `up --wait` above
+    # (OMN-13364): run the up best-effort, then decide success off the actual
+    # named container's run-to-completion (`docker wait` == 0) below, which
+    # remains fail-closed -- if the up truly created nothing, `docker wait`
+    # errors or times out and this step still aborts. The OMN-15718 bounded
+    # deadline is preserved.
+    if ! compose_up_bounded "${RUNTIME_COMPOSE_WAIT_TIMEOUT_SECONDS}" "${cap_up_cmd[@]}"; then
+        log_warn "Partition-cap compose up exited non-zero (possible stale/phantom"
+        log_warn "container record for ${BROKER_PARTITION_CAP_SERVICE} -- OMN-16110)."
+        log_warn "Deciding off the one-shot's own run-to-completion below."
+    fi
 
     local cap_container="${compose_project}-${BROKER_PARTITION_CAP_SERVICE}"
     # OMN-15718: `docker wait` blocks until the container exits, with no
