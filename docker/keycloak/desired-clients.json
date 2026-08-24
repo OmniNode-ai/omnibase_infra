@@ -95,6 +95,16 @@
       "defaultClientScopes": ["basic", "web-origins", "roles", "profile", "email"]
     },
     {
+      "clientId": "omniweb-signup-admin",
+      "publicClient": false,
+      "standardFlowEnabled": false,
+      "directAccessGrantsEnabled": false,
+      "serviceAccountsEnabled": true,
+      "secretEnv": "KEYCLOAK_SIGNUP_CLIENT_SECRET",
+      "realmRoles": ["realm-management:manage-users"],
+      "defaultClientScopes": ["basic", "web-origins", "roles", "profile", "email"]
+    },
+    {
       "clientId": "onex-service",
       "publicClient": false,
       "standardFlowEnabled": false,
