@@ -22,7 +22,10 @@
 # resulting image DIGEST (never a moving :latest tag -- the existing systemd
 # unit's ExecStartPre already asserts GATEWAY_IMAGE is a real sha256 digest),
 # and records a rollback target the same way the omnibase-infra lane does via
-# registry.json.
+# registry.json. It also builds the gateway-dns-bastion sidecar's image
+# (OMN-16449/OMN-16460) -- gateway-forwarder depends_on it, and the systemd
+# unit reloads with --no-build, so a host that has never built the sidecar
+# needs this script to build it, not a manual prerequisite step.
 #
 # Scope: this is the .201 gateway lane ONLY (compose project
 # `omninode-gateway`). It does not touch the omnibase-infra runtime lane, does
@@ -46,6 +49,16 @@ readonly COMPOSE_PROJECT="omninode-gateway"
 readonly SERVICE_NAME="gateway-forwarder"
 readonly CONTAINER_NAME="omninode-gateway-forwarder"
 readonly SYSTEMD_UNIT="onex-gateway-forwarder"
+
+# OMN-16449 added this sidecar to docker/docker-compose.gateway.yml --
+# gateway-forwarder now depends_on it (condition: service_healthy) via a
+# per-container `dns:` key. The systemd unit reloads with `--no-build`
+# (docker/gateway/onex-gateway-forwarder.service), so if this script never
+# builds the sidecar's image, a host that has never built it fails the
+# reload outright (OMN-16460). Its Dockerfile (docker/gateway/dns-bastion/)
+# takes no build args (plain `FROM alpine:3.20`), so it does not need the
+# OCI-provenance build-arg machinery gateway-forwarder's build uses.
+readonly SIDECAR_SERVICE_NAME="gateway-dns-bastion"
 
 # Host paths the running lane reads from. Overridable so tests can point them
 # at a scratch directory instead of the real root-owned locations.
@@ -132,20 +145,25 @@ WHAT --execute DOES, IN ORDER
        BUILD_DATE, COMPOSE_PROJECT, RUNTIME_SOURCE_HASH, PROMOTION_CLASS,
        NON_MAIN_LINEAGE, OMNIBASE_COMPAT_REF, OMNIMARKET_REF).
     5. Resolve the built image's digest (sha256:<64 hex>).
-    6. Sync docker/docker-compose.gateway.yml and
+    6. Build the ${SIDECAR_SERVICE_NAME} sidecar's image (OMN-16460).
+       gateway-forwarder depends_on it (condition: service_healthy) and the
+       systemd unit reloads with --no-build, so without this step a host
+       that has never built the sidecar fails the reload outright. No
+       OCI-provenance build-args -- its Dockerfile takes none.
+    7. Sync docker/docker-compose.gateway.yml and
        docker/gateway/beta-gateway-canary.yaml from this checkout into
        ${GATEWAY_HOST_DIR} (root-owned, mode 0444 -- same posture the files
        already have), replacing the hand-copied originals.
-    7. Rewrite ${GATEWAY_ENV_FILE}'s GATEWAY_IMAGE= line to the new digest,
+    8. Rewrite ${GATEWAY_ENV_FILE}'s GATEWAY_IMAGE= line to the new digest,
        preserving every other key untouched.
-    8. Record the previous digest + this deploy's identity in
+    9. Record the previous digest + this deploy's identity in
        ${GATEWAY_REGISTRY_FILE} (rollback target). rollback_command is null
        when no previous image was retained (first deploy, or the previous
        image had already been pruned) -- never a command built from an empty
        digest.
-    9. 'systemctl reload ${SYSTEMD_UNIT}' (force-recreates the container on
-       the new digest; requires sudo) unless --skip-reload.
-    10. Verify: the container is actually running the digest just built (not
+    10. 'systemctl reload ${SYSTEMD_UNIT}' (force-recreates the container on
+        the new digest; requires sudo) unless --skip-reload.
+    11. Verify: the container is actually running the digest just built (not
         just that labels are non-empty -- a reload that silently fails to
         recreate the container is caught here instead of reporting success),
         image labels are non-empty, and the two OMN-12912 files are present.
@@ -252,6 +270,7 @@ validate_repo_structure() {
     [[ -f "${repo_root}/docker/docker-compose.gateway.yml" ]] || missing+=("docker/docker-compose.gateway.yml")
     [[ -f "${repo_root}/docker/gateway/beta-gateway-canary.yaml" ]] || missing+=("docker/gateway/beta-gateway-canary.yaml")
     [[ -f "${repo_root}/docker/Dockerfile.runtime" ]] || missing+=("docker/Dockerfile.runtime")
+    [[ -f "${repo_root}/docker/gateway/dns-bastion/Dockerfile" ]] || missing+=("docker/gateway/dns-bastion/Dockerfile")
     [[ -d "${repo_root}/src/omnibase_infra/nodes/node_bus_forwarder_effect/services" ]] || missing+=("src/omnibase_infra/nodes/node_bus_forwarder_effect/services/")
     [[ -d "${repo_root}/src/omnibase_infra/idempotency" ]] || missing+=("src/omnibase_infra/idempotency/")
     if [[ ${#missing[@]} -gt 0 ]]; then
@@ -387,6 +406,16 @@ build_compose_cmd() {
     printf '%s\n' "${SERVICE_NAME}"
 }
 
+build_sidecar_compose_cmd() {
+    # build_sidecar_compose_cmd -- prints (one token per line) the full
+    # 'docker compose ... build' argv for the gateway-dns-bastion sidecar
+    # (OMN-16460). No --build-arg entries: the sidecar's Dockerfile declares
+    # none (plain `FROM alpine:3.20`), unlike gateway-forwarder's
+    # OCI-provenance build.
+    printf 'docker\ncompose\n-p\n%s\n-f\ndocker/docker-compose.gateway.yml\nbuild\n--progress=plain\n%s\n' \
+        "${COMPOSE_PROJECT}" "${SIDECAR_SERVICE_NAME}"
+}
+
 print_compose_commands() {
     # Portable stand-in for bash 4's `readarray`/`mapfile` (unavailable on
     # macOS's shipped /bin/bash 3.2 -- Apple has not updated it past 3.2 since
@@ -402,6 +431,13 @@ print_compose_commands() {
     done < <(build_compose_cmd "${repo_root}" "${git_sha}" "${version}")
     log_step "Build command (compose project: ${COMPOSE_PROJECT})"
     log_cmd "GATEWAY_IMAGE=${BUILD_IMAGE_TAG} ${cmd[*]}"
+
+    local -a sidecar_cmd=()
+    while IFS= read -r line; do
+        sidecar_cmd+=("${line}")
+    done < <(build_sidecar_compose_cmd)
+    log_step "Build command (sidecar: ${SIDECAR_SERVICE_NAME})"
+    log_cmd "GATEWAY_IMAGE=${BUILD_IMAGE_TAG} ${sidecar_cmd[*]}"
 }
 
 build_image() {
@@ -414,6 +450,28 @@ build_image() {
 
     log_step "Build Image"
     log_info "Building ${BUILD_IMAGE_TAG} with VCS_REF=${git_sha} RUNTIME_VERSION=${version}..."
+    log_cmd "${cmd[*]}"
+
+    (cd "${repo_root}" && GATEWAY_IMAGE="${BUILD_IMAGE_TAG}" "${cmd[@]}")
+}
+
+build_sidecar_image() {
+    # OMN-16460: build the gateway-dns-bastion sidecar image so the systemd
+    # unit's --no-build reload has an image to satisfy gateway-forwarder's
+    # depends_on. GATEWAY_IMAGE is exported the same way build_image() does
+    # it -- the whole compose file is interpolated even when only building
+    # this one service, so gateway-forwarder's `image:
+    # "${GATEWAY_IMAGE:?...}"` line must still resolve. Using BUILD_IMAGE_TAG
+    # rather than trusting gateway.env's existing value avoids depending on
+    # that file already holding a valid digest (e.g. the very first deploy).
+    local repo_root="$1"
+    local -a cmd=()
+    local line
+    while IFS= read -r line; do
+        cmd+=("${line}")
+    done < <(build_sidecar_compose_cmd)
+
+    log_step "Build Sidecar Image (${SIDECAR_SERVICE_NAME})"
     log_cmd "${cmd[*]}"
 
     (cd "${repo_root}" && GATEWAY_IMAGE="${BUILD_IMAGE_TAG}" "${cmd[@]}")
@@ -760,6 +818,7 @@ main() {
     if [[ "${MODE}" != "execute" ]]; then
         log_step "Dry Run (default) -- no mutation performed"
         print_compose_commands "${repo_root}" "${git_sha}" "${version}"
+        log_info "Would build sidecar image (${SIDECAR_SERVICE_NAME})"
         log_info "Would sync ${repo_root}/docker/docker-compose.gateway.yml -> ${GATEWAY_HOST_DIR}/docker-compose.gateway.yml"
         log_info "Would sync ${repo_root}/docker/gateway/beta-gateway-canary.yaml -> ${GATEWAY_HOST_DIR}/gateway/beta-gateway-canary.yaml"
         log_info "Would pin GATEWAY_IMAGE in ${GATEWAY_ENV_FILE} to the resolved build digest"
@@ -795,6 +854,8 @@ main() {
     local new_digest
     new_digest="$(resolve_image_digest "${BUILD_IMAGE_TAG}")"
     log_info "Built image digest: ${new_digest}"
+
+    build_sidecar_image "${repo_root}"
 
     sync_host_files "${repo_root}" "${GATEWAY_HOST_DIR}"
     verify_host_files_match "${repo_root}" "${GATEWAY_HOST_DIR}"
