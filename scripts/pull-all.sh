@@ -220,6 +220,25 @@ if [[ ${#BARE_REPOS[@]} -gt 0 ]]; then
 fi
 # === End bare repo validation ===
 
+# === Converge-script snapshot (OMN-16500 race fix) ===
+# _pull_one routes a non-fast-forwardable main through the sanctioned
+# convergence script in the canonical omniclaude clone -- but pull-all ITSELF
+# switches that clone between main (the release pointer, which can predate or
+# lack the script) and dev while the parallel pulls run. Reading the script
+# through the omniclaude working tree mid-run is therefore a race against our
+# own branch switching: the 2026-08-24 proof run lost omnimemory and
+# omnibase_spi to "script missing" precisely this way, while six sibling
+# repos converged fine. Snapshot the script ONCE, before any repo starts
+# moving, and invoke only the snapshot. A missing source at startup is
+# reported per-repo at the point of need, naming the source path.
+CONVERGE_SCRIPT_SOURCE="$OMNI_HOME/omniclaude/scripts/converge-canonical-clone.sh"
+CONVERGE_SCRIPT="$RESULTS_DIR/converge-canonical-clone.sh"
+if [[ -f "$CONVERGE_SCRIPT_SOURCE" ]]; then
+  cp "$CONVERGE_SCRIPT_SOURCE" "$CONVERGE_SCRIPT"
+  chmod +x "$CONVERGE_SCRIPT"
+fi
+# === End converge-script snapshot ===
+
 # Switch to a branch, creating it from origin/<branch> when needed, then
 # fast-forward it to the fetched remote branch.
 _checkout_and_ff() {
@@ -321,16 +340,15 @@ _pull_one() {
       echo "FAILED" > "$result_file"
       return
     fi
-    local converge_script="$OMNI_HOME/omniclaude/scripts/converge-canonical-clone.sh"
-    if [[ ! -f "$converge_script" ]]; then
-      echo "  FAILED   $repo (fast-forward main; sanctioned converge script missing: $converge_script)"
+    if [[ ! -f "$CONVERGE_SCRIPT" ]]; then
+      echo "  FAILED   $repo (fast-forward main; sanctioned converge script missing: $CONVERGE_SCRIPT_SOURCE)"
       echo "           $output"
       echo "FAILED" > "$result_file"
       return
     fi
     local converge_out
     if ! converge_out=$(env OMNI_HOME="$OMNI_HOME" \
-        bash "$converge_script" "$repo" --branch main --execute --lane pull-all 2>&1); then
+        bash "$CONVERGE_SCRIPT" "$repo" --branch main --execute --lane pull-all 2>&1); then
       echo "  FAILED   $repo (fast-forward main; converge-canonical-clone.sh --branch main failed)"
       echo "           $converge_out"
       echo "FAILED" > "$result_file"
