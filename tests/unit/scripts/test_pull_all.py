@@ -1303,3 +1303,305 @@ class TestDriftRepairBounding:
         # Still non-fatal: hook install is a convenience layer, not the sync's
         # core job. Visibility changed, fatality did not.
         assert result.returncode == 0, f"stdout={result.stdout!r}"
+
+
+def _make_diverged_main_repo(omni_home: Path, name: str) -> Path:
+    """A repo whose local main can never fast-forward again (OMN-16500).
+
+    Models the release-synced-main shape: local main holds an unpushed
+    "promotion" commit while origin/main was rewritten (force-pushed) to a
+    different history. Left checked out on dev, clean tree.
+    """
+    repo = _make_simple_repo_source(omni_home, name)
+    # local promotion commit on main -- never pushed, orphaned by the rewrite
+    _commit_file(repo, "promotion.txt", "promotion\n", "promotion commit")
+    # rewrite remote main to a history that does not contain that commit
+    _git(["switch", "-q", "dev"], cwd=repo)
+    _commit_file(repo, "dev-advance.txt", "dev\n", "dev advance")
+    _git(["push", "-q", "origin", "dev"], cwd=repo)
+    _git(["push", "-q", "-f", "origin", "dev:main"], cwd=repo)
+    return repo
+
+
+def _make_converge_stub(omni_home: Path, *, behavior: str = "ok") -> tuple[Path, Path]:
+    """Stub `$OMNI_HOME/omniclaude/scripts/converge-canonical-clone.sh`.
+
+    Never the real script -- its own behavior is covered by omniclaude's
+    tests/scripts/test_converge_canonical_clone.py; these tests prove only
+    pull-all.sh's WIRING (invoked at the right time, right args, failure
+    handled). The "ok" stub performs the one ref move the real script would.
+    Returns (stub_path, calls_log).
+    """
+    scripts_dir = omni_home / "omniclaude" / "scripts"
+    scripts_dir.mkdir(parents=True, exist_ok=True)
+    calls_log = omni_home / "omniclaude" / ".converge-calls.log"
+    stub = scripts_dir / "converge-canonical-clone.sh"
+    if behavior == "ok":
+        body = 'git -C "$OMNI_HOME/$1" branch -f main origin/main\n'
+    else:
+        body = "exit 1\n"
+    stub.write_text(
+        "#!/usr/bin/env bash\n"
+        f'echo "$@ | OMNI_HOME=$OMNI_HOME" >> "{calls_log}"\n' + body
+    )
+    stub.chmod(0o755)
+    return stub, calls_log
+
+
+@pytest.mark.unit
+class TestMainConvergeWiring:
+    """pull-all.sh routes a non-fast-forwardable main through the sanctioned
+    convergence script and continues to the dev pull (OMN-16500).
+
+    Field failure this closes: under the release-synced-main policy,
+    origin/main is rewritten to the release tag on every release, so the local
+    main of a canonical clone -- still carrying the pre-rewrite promotion
+    commits -- can NEVER fast-forward again. pull-all.sh failed at
+    "fast-forward main" in 9 of 12 registry clones (verified 2026-08-24) and
+    returned before pulling dev, breaking the documented "sync first" step.
+    main is a release-pointer branch never worked on locally, so converging is
+    always correct -- but the ref move must go through
+    converge-canonical-clone.sh --branch (canonical-clone guard, OMN-16496),
+    which preserves the orphaned commits first. dev stays strictly ff-only.
+    """
+
+    def test_nonff_main_is_converged_and_run_continues_to_dev(
+        self, tmp_path: Path
+    ) -> None:
+        omni_home = tmp_path / "omni_home"
+        omni_home.mkdir()
+        fake_home = tmp_path / "home"
+        fake_home.mkdir()
+
+        repo = _make_diverged_main_repo(omni_home, "omnimarket")
+        _stub, calls_log = _make_converge_stub(omni_home)
+        _make_fake_infra_with_drift_stub(omni_home)
+
+        result = _run_pull_all(
+            omni_home, fake_home, repos=["omnimarket"], timeout=HARNESS_BACKSTOP_SECONDS
+        )
+
+        assert result.returncode == 0, (
+            f"stdout={result.stdout!r} stderr={result.stderr!r}"
+        )
+        assert calls_log.exists(), (
+            f"converge script never invoked; stdout={result.stdout!r}"
+        )
+        call = calls_log.read_text()
+        assert "omnimarket --branch main --execute" in call
+        assert f"OMNI_HOME={omni_home}" in call
+
+        # main converged, dev pulled, repo left on dev, OK line says what happened
+        main_sha = subprocess.check_output(
+            ["git", "rev-parse", "main"], cwd=repo, text=True
+        ).strip()
+        origin_main_sha = subprocess.check_output(
+            ["git", "rev-parse", "origin/main"], cwd=repo, text=True
+        ).strip()
+        assert main_sha == origin_main_sha
+        assert (
+            subprocess.check_output(
+                ["git", "branch", "--show-current"], cwd=repo, text=True
+            ).strip()
+            == "dev"
+        )
+        assert "OK       omnimarket" in result.stdout
+        assert "main converged" in result.stdout
+        fields = _parse_result_line(result.stdout)
+        assert fields.get("overall") == "OK", f"fields={fields!r}"
+        assert fields.get("repos_failed") == "0", f"fields={fields!r}"
+
+    def test_converge_failure_fails_the_repo(self, tmp_path: Path) -> None:
+        omni_home = tmp_path / "omni_home"
+        omni_home.mkdir()
+        fake_home = tmp_path / "home"
+        fake_home.mkdir()
+
+        _make_diverged_main_repo(omni_home, "omnimarket")
+        _make_converge_stub(omni_home, behavior="fail")
+
+        result = _run_pull_all(
+            omni_home, fake_home, repos=["omnimarket"], timeout=HARNESS_BACKSTOP_SECONDS
+        )
+
+        assert result.returncode != 0, (
+            f"a failed convergence must fail the run; stdout={result.stdout!r}"
+        )
+        assert "FAILED   omnimarket" in result.stdout
+        assert "converge-canonical-clone.sh" in result.stdout
+
+    def test_missing_converge_script_fails_with_actionable_path(
+        self, tmp_path: Path
+    ) -> None:
+        omni_home = tmp_path / "omni_home"
+        omni_home.mkdir()
+        fake_home = tmp_path / "home"
+        fake_home.mkdir()
+
+        _make_diverged_main_repo(omni_home, "omnimarket")
+        # no omniclaude clone at all -> no sanctioned script to route through
+
+        result = _run_pull_all(
+            omni_home, fake_home, repos=["omnimarket"], timeout=HARNESS_BACKSTOP_SECONDS
+        )
+
+        assert result.returncode != 0
+        assert "FAILED   omnimarket" in result.stdout
+        assert "converge-canonical-clone.sh" in result.stdout, (
+            f"failure must name the missing sanctioned script; stdout={result.stdout!r}"
+        )
+
+    def test_nonff_dev_stays_strict_and_is_never_converged(
+        self, tmp_path: Path
+    ) -> None:
+        """A dev that cannot fast-forward is a real problem -- pull-all must
+        FAIL it, not converge it. Only main is a release pointer."""
+        omni_home = tmp_path / "omni_home"
+        omni_home.mkdir()
+        fake_home = tmp_path / "home"
+        fake_home.mkdir()
+
+        repo = _make_simple_repo_source(omni_home, "omnimarket")
+        upstream = omni_home / "omnimarket.git"
+        _stub, calls_log = _make_converge_stub(omni_home)
+
+        # local dev gains an unpushed commit; origin/dev advances independently
+        _git(["switch", "-q", "dev"], cwd=repo)
+        _commit_file(repo, "local-dev.txt", "local\n", "local dev commit")
+        writer = tmp_path / "writer"
+        _git(["clone", "-q", str(upstream), str(writer)], cwd=tmp_path)
+        _git(["switch", "-q", "--track", "-c", "dev", "origin/dev"], cwd=writer)
+        _commit_file(writer, "remote-dev.txt", "remote\n", "remote dev commit")
+        _git(["push", "-q", "origin", "dev"], cwd=writer)
+
+        local_dev_before = subprocess.check_output(
+            ["git", "rev-parse", "dev"], cwd=repo, text=True
+        ).strip()
+
+        result = _run_pull_all(
+            omni_home, fake_home, repos=["omnimarket"], timeout=HARNESS_BACKSTOP_SECONDS
+        )
+
+        assert result.returncode != 0, (
+            f"a diverged dev must fail the run; stdout={result.stdout!r}"
+        )
+        assert "FAILED   omnimarket" in result.stdout
+        assert "fast-forward dev" in result.stdout
+        # the converge script must never have been aimed at dev
+        if calls_log.exists():
+            assert "--branch dev" not in calls_log.read_text()
+        # and local dev must be exactly where the user left it
+        local_dev_after = subprocess.check_output(
+            ["git", "rev-parse", "dev"], cwd=repo, text=True
+        ).strip()
+        assert local_dev_after == local_dev_before
+
+
+@pytest.mark.unit
+class TestGuardManagedHooksPath:
+    """The pre-commit stage must not report guard-managed clones as broken
+    (OMN-16500).
+
+    On this fleet, canonical clones set ``core.hooksPath`` to the
+    canonical-clone guard directory; the guard CHAINS to the installed hook or
+    invokes ``pre-commit hook-impl`` itself (OMN-15071), so commit-time
+    enforcement is ACTIVE. ``pre-commit install`` refuses to write hook files
+    while ``core.hooksPath`` is set, so attempting it produced a false
+    ``WARN <repo> (pre-commit install failed -- commit-time enforcement
+    inactive)`` and downgraded the stage.
+    """
+
+    GUARD_MARKER = "Canonical-clone worktree-discipline guard"
+
+    def _repo_with_config_on_dev(self, omni_home: Path, name: str) -> Path:
+        repo = _make_simple_repo_source(omni_home, name)
+        _git(["switch", "-q", "dev"], cwd=repo)
+        _commit_file(repo, ".pre-commit-config.yaml", "repos: []\n", "cfg")
+        _git(["push", "-q", "origin", "dev"], cwd=repo)
+        _git(["switch", "-q", "main"], cwd=repo)
+        return repo
+
+    def _install_guard_hooks_path(self, omni_home: Path, repo: Path) -> None:
+        guard_dir = omni_home / "scripts" / "git-hooks" / "canonical-clone"
+        guard_dir.mkdir(parents=True, exist_ok=True)
+        hook = guard_dir / "pre-commit"
+        hook.write_text(
+            "#!/usr/bin/env bash\n"
+            f"# {self.GUARD_MARKER}, chained into the real hook chain\n"
+            "exit 0\n"
+        )
+        hook.chmod(0o755)
+        _git(["config", "core.hooksPath", str(guard_dir)], cwd=repo)
+
+    def test_guard_managed_repo_is_not_warned_and_stage_stays_ok(
+        self, tmp_path: Path
+    ) -> None:
+        omni_home = tmp_path / "omni_home"
+        omni_home.mkdir()
+        fake_home = tmp_path / "home"
+        fake_home.mkdir()
+
+        repo = self._repo_with_config_on_dev(omni_home, "omnimarket")
+        self._install_guard_hooks_path(omni_home, repo)
+        _make_fake_infra_with_drift_stub(omni_home)
+
+        # a pre-commit on PATH that FAILS on install proves the stage never
+        # attempts an install against a guard-managed clone
+        shim_dir = tmp_path / "shim"
+        shim_dir.mkdir()
+        shim = shim_dir / "pre-commit"
+        shim.write_text("#!/usr/bin/env bash\nexit 1\n")
+        shim.chmod(0o755)
+
+        result = _run_pull_all(
+            omni_home,
+            fake_home,
+            repos=["omnimarket"],
+            extra_env={"PATH": f"{shim_dir}:{os.environ.get('PATH', '')}"},
+            timeout=HARNESS_BACKSTOP_SECONDS,
+        )
+
+        assert result.returncode == 0, (
+            f"stdout={result.stdout!r} stderr={result.stderr!r}"
+        )
+        assert "pre-commit install failed" not in result.stdout, (
+            f"guard-managed clone falsely warned; stdout={result.stdout!r}"
+        )
+        fields = _parse_result_line(result.stdout)
+        assert fields.get("precommit_hooks") == "OK", f"fields={fields!r}"
+
+    def test_non_guard_hookspath_still_warns(self, tmp_path: Path) -> None:
+        """An arbitrary core.hooksPath (no guard, no chain) keeps the WARN --
+        there enforcement genuinely is inactive."""
+        omni_home = tmp_path / "omni_home"
+        omni_home.mkdir()
+        fake_home = tmp_path / "home"
+        fake_home.mkdir()
+
+        repo = self._repo_with_config_on_dev(omni_home, "omnimarket")
+        other_dir = tmp_path / "other-hooks"
+        other_dir.mkdir()
+        (other_dir / "pre-commit").write_text("#!/usr/bin/env bash\nexit 0\n")
+        (other_dir / "pre-commit").chmod(0o755)
+        _git(["config", "core.hooksPath", str(other_dir)], cwd=repo)
+        _make_fake_infra_with_drift_stub(omni_home)
+
+        shim_dir = tmp_path / "shim"
+        shim_dir.mkdir()
+        shim = shim_dir / "pre-commit"
+        shim.write_text("#!/usr/bin/env bash\nexit 1\n")
+        shim.chmod(0o755)
+
+        result = _run_pull_all(
+            omni_home,
+            fake_home,
+            repos=["omnimarket"],
+            extra_env={"PATH": f"{shim_dir}:{os.environ.get('PATH', '')}"},
+            timeout=HARNESS_BACKSTOP_SECONDS,
+        )
+
+        assert "pre-commit install failed" in result.stdout, (
+            f"non-guard hooksPath must keep warning; stdout={result.stdout!r}"
+        )
+        fields = _parse_result_line(result.stdout)
+        assert fields.get("precommit_hooks") == "WARN", f"fields={fields!r}"
