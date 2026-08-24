@@ -90,6 +90,28 @@ _LEGACY_DEFAULT_SCHEMA_SQL_EXACT_PATHS = frozenset(
             "docker/migrations/forward/nodes/node_projection_delegation/"
             "0030_delegation_budget_state_house_tenant_rekey.sql"
         ),
+        # OMN-15683: 0031 is the delegation_events sequel to
+        # node_canary_score_reducer/0003 above -- the same OMN-15356
+        # classified-TENANT tenant_id TEXT->UUID conversion, on a table in the
+        # same node stream that 0029 and 0030 above are already exempted for,
+        # for the identical reason (delegation_events is physically in the
+        # legacy default schema until the governed OMN-15359 schema cutover
+        # moves it; this file creates no new authority -- it DELETEs eight
+        # enumerated debris rows, converts one existing column's type, and
+        # recreates a policy/grant that migration 0023 already established).
+        # Its idempotency + fail-closed pre-guard live in a DO block, and
+        # `_requires_dynamic_sql_rejection` rejects every anonymous DO block
+        # outright, so the file cannot clear the lint without deleting the two
+        # guards the OMN-15683 ACs and its real-Postgres RED/GREEN proof are
+        # built on. node-migration-sync (OMN-13332) also forces this file to be
+        # vendored byte-identical from omnimarket dev, so editing the vendored
+        # copy would break vendor parity in the same push. Same adjudication as
+        # OMN-15732 recorded on the 0003 entry above: exempting here, not
+        # editing the SQL, is the canonical fix.
+        Path(
+            "docker/migrations/forward/nodes/node_projection_delegation/"
+            "0031_delegation_events_tenant_id_to_uuid.sql"
+        ),
         Path(
             "docker/migrations/forward/nodes/node_projection_dep_health/"
             "002_dep_health_findings_tenant_id_and_rls.sql"

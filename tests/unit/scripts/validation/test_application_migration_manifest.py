@@ -144,7 +144,14 @@ def test_checked_in_manifest_is_exact_and_all_blockers_are_explicit() -> None:
     # -- new node-owned migration creating savings_injection_signals /
     # savings_validator_catch_signals, the Postgres "projection surface" the
     # savings-correlation periodic batch reads instead of an in-memory buffer.
-    assert len(result.declarations) == 105
+    # +1 for OMN-15683's
+    # node_projection_delegation/0031_delegation_events_tenant_id_to_uuid.sql
+    # -- converts delegation_events.tenant_id from a legacy TEXT slug to the
+    # canonical UUID identity (domain `tenant`, same class as
+    # node_canary_score_reducer/0003_capability_scores_tenant_id_to_uuid.sql);
+    # landed in omnibase_infra first per the node-migration-vendor-parity-gate
+    # ordering, ahead of omnimarket#2106.
+    assert len(result.declarations) == 106
     assert result.blocked == ()
     assert len(result.legacy_node_declarations) == 2
     assert len(result.cloud_aliases) == 30
