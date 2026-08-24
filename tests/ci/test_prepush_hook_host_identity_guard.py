@@ -112,6 +112,19 @@ def test_guard_refuses_full_suite_escalation_on_non_200_host() -> None:
     guaranteed-non-matching host; the hook must exit non-zero and must NEVER
     reach the actual pytest invocation."""
     env = dict(os.environ)
+    # Scrub ambient leaky vars before setting the ones this test deliberately
+    # forces below (OMN-16425). PREPUSH_ALLOW_LOCAL_FULL_SUITE leaking in from
+    # an outer `git push` invocation routes the hook down the degraded-host
+    # override branch instead of refusing, letting it reach a nested pytest
+    # invocation that can recurse into this same test file.
+    for leaky in (
+        "PREPUSH_FULL_SUITE",
+        "PREPUSH_ALLOW_LOCAL_FULL_SUITE",
+        "ENABLE_SMART_TESTS",
+        "PREPUSH_ADJACENCY",
+        "PREPUSH_PYTEST_ARGS",
+    ):
+        env.pop(leaky, None)
     env["PREPUSH_FULL_SUITE"] = "1"
     env["PREPUSH_200_HOSTNAME"] = _GUARANTEED_NON_MATCHING_HOSTNAME
     result = subprocess.run(
