@@ -13,6 +13,10 @@ name: Deploy Gate
 on:
   pull_request:
     branches: [main, dev, develop]
+    # OMN-16216: labeled/unlabeled/ready_for_review so applying/removing
+    # ci:ready or a draft->ready flip retriggers this workflow's evaluation
+    # of the deploy-gate job's if:.
+    types: [opened, synchronize, reopened, labeled, unlabeled, ready_for_review]
   merge_group:
 
 concurrency:
@@ -21,6 +25,15 @@ concurrency:
 
 jobs:
   deploy-gate:
+    # OMN-16216 draft-state CI admission gate (mirrors onex_change_control
+    # PR #6686 / OMN-15731): "deploy-gate / deploy-gate" is an
+    # EXPECTED_EXTERNAL_CONTEXTS member in scripts/ci/ci_summary_gate.py,
+    # where EXTERNAL_GOOD_CONCLUSIONS = {"success"} -- a "skipped" conclusion
+    # already fails closed there with no poller code change needed.
+    # merge_group events carry no PR draft/label state and are unaffected
+    # (github.event_name != 'pull_request' short-circuits). Main-boundary
+    # carve-out unchanged: any PR targeting main always runs this job.
+    if: github.event_name != 'pull_request' || github.base_ref != 'dev' || !github.event.pull_request.draft || contains(github.event.pull_request.labels.*.name, 'ci:ready')
     uses: OmniNode-ai/omniclaude/.github/workflows/deploy-gate-reusable.yml@fcbc85f5642f07e15fe1d6b1c168c96883d16ac3
     secrets: inherit
     with:

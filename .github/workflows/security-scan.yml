@@ -12,6 +12,10 @@ on:
     branches: [main]
   pull_request:
     branches: [main, dev]
+    # OMN-16216: labeled/unlabeled/ready_for_review so applying/removing
+    # ci:ready or a draft->ready flip retriggers this workflow's evaluation
+    # of the codeql job's if:.
+    types: [opened, synchronize, reopened, labeled, unlabeled, ready_for_review]
   schedule:
     # Run weekly on Monday at 06:00 UTC
     - cron: "0 6 * * 1"
@@ -26,6 +30,14 @@ jobs:
   codeql:
     timeout-minutes: 30
     name: CodeQL
+    # OMN-16216 draft-state CI admission gate (mirrors onex_change_control
+    # PR #6686 / OMN-15731): "CodeQL" is an EXPECTED_EXTERNAL_CONTEXTS member
+    # in scripts/ci/ci_summary_gate.py, where EXTERNAL_GOOD_CONCLUSIONS =
+    # {"success"} -- a "skipped" conclusion already fails closed there with
+    # no code change needed, so gating this job on draft/ci:ready is safe
+    # as-is for pull_request events. push/schedule are unaffected (no PR to
+    # gate on). Main-boundary carve-out unchanged.
+    if: github.event_name != 'pull_request' || github.base_ref != 'dev' || !github.event.pull_request.draft || contains(github.event.pull_request.labels.*.name, 'ci:ready')
     runs-on: >-
       ${{
         (github.event_name == 'pull_request' &&

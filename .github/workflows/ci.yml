@@ -5,8 +5,9 @@ on:
     branches: [main]
   pull_request:
     branches: [main, dev]
-    # OMN-16171: `edited` REMOVED, and the OMN-14241 self-heal it provided is
-    # now served by .github/workflows/occ-preflight-heal.yml instead.
+    # OMN-16171: `edited` is NOT in this list, and must not be re-added. The
+    # OMN-14241 self-heal it used to provide now lives in
+    # .github/workflows/occ-preflight-heal.yml.
     #
     # OMN-14241 was right about the defect: a PR-body-only edit stamping
     # `Evidence-Source: OCC#<n>` has to re-validate, or the pre-stamp
@@ -21,15 +22,37 @@ on:
     #
     # The heal workflow re-runs only the FAILED JOBS of this run, in place,
     # keeping the run id -- which is what CI Summary needs, since it polls its
-    # own run's job list. Two jobs move instead of forty-eight, nothing
-    # in-flight is cancelled, and the trigger set here returns to GitHub's
-    # implicit default.
+    # own run's job list. Two jobs move instead of forty-eight, and nothing
+    # in-flight is cancelled.
     #
     # Skipping the heavy jobs on an edited run was NOT an option: a job
     # skipped by an `if:` still publishes a `skipped` check run, which branch
     # protection counts as passing -- vector 2 of the required-check
     # skip-vector guard, i.e. a body-edit-shaped bypass of a red gate.
-    types: [opened, synchronize, reopened]
+    #
+    # OMN-16216: the three admission-signal types below are added on top of
+    # GitHub's implicit default ([opened, synchronize, reopened]).
+    # `ready_for_review` is load-bearing for the PRIMARY arm -- a draft->ready
+    # flip must fire a full evaluation on the CURRENT head, because without it
+    # the gated jobs' last published conclusion stays `skipped`, which branch
+    # protection counts as passing (the same skip-vector shape OMN-16171 cites
+    # above, reached by undrafting instead of by editing).
+    # `labeled`/`unlabeled` serve the transition-window `ci:ready` fallback
+    # arm on the same reasoning. Both are orders of magnitude rarer than the
+    # body edits OMN-16171 measured -- label churn and a single undraft per
+    # PR, not one per Evidence-Source stamp by an App-token bot -- so the
+    # matrix-restart cost that motivated dropping `edited` does not transfer.
+    # Pinned by tests/ci/test_ci_summary_gate.py::
+    # test_ci_yml_pull_request_trigger_includes_ready_for_review.
+    types:
+      [
+        opened,
+        synchronize,
+        reopened,
+        labeled,
+        unlabeled,
+        ready_for_review,
+      ]
   merge_group:
   workflow_dispatch:
 
@@ -1569,7 +1592,19 @@ jobs:
   test-parallel:
     name: Tests (Split ${{ matrix.split }}/${{ needs.detect-changes.outputs.split_count }})
     needs: [occ-preflight, zone-filter, lint, onex-validation, migration-freeze, fingerprint-check, demo-loop-gate, topic-enum-drift, topic-naming-lint, topic-drift-check, arch-invariants, schema-handshake, plugin-env-service-completeness, compose-required-env-coverage, contract-path-preflight, contract-sync-gate, detect-changes]
-    if: needs.occ-preflight.result == 'success' && (needs.zone-filter.outputs.docs_only != 'true')
+    # OMN-16216: draft-state CI admission gate (mirrors onex_change_control
+    # PR #6686 / OMN-15731). The heavy split-matrix test run only dispatches
+    # once the PR is out of draft; `contains(...'ci:ready')` is retained as a
+    # transition-window dual-accept fallback (never remove in this PR -- a
+    # follow-up retires it once open ci:ready-labeled PRs have drained).
+    # Non-`pull_request` events (push, merge_group, workflow_dispatch) are
+    # unaffected -- they carry no PR draft/label state to gate on. Main-
+    # boundary carve-out (CLAUDE.md rule 4) is unchanged: any PR targeting
+    # main always runs the full fleet regardless of draft/label state.
+    # tests-gate (below) distinguishes this admission-skip from the
+    # pre-existing docs-only skip and fails closed rather than passing it
+    # through as a legitimate exemption.
+    if: needs.occ-preflight.result == 'success' && (needs.zone-filter.outputs.docs_only != 'true') && (github.event_name != 'pull_request' || github.base_ref != 'dev' || !github.event.pull_request.draft || contains(github.event.pull_request.labels.*.name, 'ci:ready'))
     # OMNI_RUNNER_SELECTOR_V1 — trusted CI defaults to self-hosted omnibase-ci; public forks default to ubuntu-latest
     runs-on: >-
       ${{
@@ -1882,20 +1917,40 @@ jobs:
         && fromJSON(vars.OMNI_PUBLIC_PR_RUNS_ON_JSON || '["ubuntu-latest"]')
         || fromJSON((github.event_name == 'merge_group' && vars.OMNI_REQUIRED_CI_RUNS_ON_JSON) || vars.OMNI_TRUSTED_CI_RUNS_ON_JSON || '["self-hosted","omnibase-ci"]')
       }}
-    needs: [occ-preflight, test-parallel, detect-changes]
+    needs: [occ-preflight, zone-filter, test-parallel, detect-changes]
     if:  needs.occ-preflight.result == 'success' && (always())
     steps:
+      # OMN-16216: `test-parallel` now legitimately skips for TWO different
+      # reasons -- a docs-only diff (pre-existing exemption) or a draft PR
+      # with no `ci:ready` fallback label (new admission gate). A docs-only
+      # skip stays a pass. An admission-skip must NOT be treated the same
+      # way, or a draft, non-docs-only PR would read "CI Tests Gate =
+      # success" via the exact skip-is-pass loophole this poller exists to
+      # close (STRICT_GATE_JOBS entry "CI Tests Gate" in
+      # scripts/ci/ci_summary_gate.py) -- this is the AC(b) trap named on
+      # OMN-16216. The admission check is re-evaluated here (not trusted from
+      # test-parallel's `if:`) so a single source of truth in this job's own
+      # env drives the verdict.
       - name: Check test matrix results
         env:
           TESTS_RESULT: ${{ needs.test-parallel.result }}
           SPLIT_COUNT: ${{ needs.detect-changes.outputs.split_count }}
+          DOCS_ONLY: ${{ needs.zone-filter.outputs.docs_only }}
+          ADMITTED: ${{ github.event_name != 'pull_request' || github.base_ref != 'dev' || !github.event.pull_request.draft || contains(github.event.pull_request.labels.*.name, 'ci:ready') }}
         run: |
-          if [ "$TESTS_RESULT" != "success" ] && [ "$TESTS_RESULT" != "skipped" ]; then
+          if [ "$TESTS_RESULT" = "skipped" ]; then
+            if [ "$DOCS_ONLY" = "true" ]; then
+              echo "Test matrix skipped - docs-only / declarative-evidence diff (legitimate exemption)"
+            elif [ "$ADMITTED" != "true" ]; then
+              echo "::error::Test matrix skipped - PR is draft and missing the 'ci:ready' fallback label (OMN-16216 draft-state CI admission gate). Mark the PR ready for review (or apply 'ci:ready' during the transition window) to run the full test matrix."
+              exit 1
+            else
+              echo "::error::Test matrix skipped despite admitted PR / non-PR event (result: $TESTS_RESULT) -- unexpected, treating as failure"
+              exit 1
+            fi
+          elif [ "$TESTS_RESULT" != "success" ]; then
             echo "::error::Test matrix failed (result: $TESTS_RESULT)"
             exit 1
-          fi
-          if [ "$TESTS_RESULT" = "skipped" ]; then
-            echo "Test matrix skipped - docs-only / declarative-evidence diff"
           else
             echo "All ${SPLIT_COUNT} test splits passed"
           fi
