@@ -713,7 +713,7 @@ repos:
       # Timeout: 60s prevents hanging if tests get stuck (normal runtime: <5s)
       - id: reducer-purity-check
         name: Reducer Purity Enforcement
-        entry: uv run --frozen pytest tests/unit/nodes/reducers/test_reducer_purity.py -v --tb=short --timeout=60 --timeout-method=thread
+        entry: uv run --frozen pytest tests/unit/nodes/reducers/test_reducer_purity.py -v --tb=short --timeout=60 --timeout-method=signal
         language: system
         types: [python]
         files: ^src/omnibase_infra/nodes/reducers/
@@ -725,7 +725,7 @@ repos:
       # revision rules cannot silently regress. Timeout protects against hangs.
       - id: prod-promotion-lineage-guard
         name: Prod promotion-lineage guard tests (OMN-12626)
-        entry: uv run --frozen pytest tests/scripts/test_check_prod_promotion_lineage.py tests/scripts/test_deploy_runtime_prod_lineage.py -q --tb=short --timeout=120 --timeout-method=thread
+        entry: uv run --frozen pytest tests/scripts/test_check_prod_promotion_lineage.py tests/scripts/test_deploy_runtime_prod_lineage.py -q --tb=short --timeout=120 --timeout-method=signal
         language: system
         pass_filenames: false
         files: ^(scripts/check_prod_promotion_lineage\.py|tests/scripts/test_(check_prod_promotion_lineage|deploy_runtime_prod_lineage)\.py|scripts/deploy-runtime\.sh|scripts/deploy-agent/deploy_agent/executor\.py)$

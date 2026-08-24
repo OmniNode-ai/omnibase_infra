@@ -1028,3 +1028,139 @@ def test_cr_thread_gate_caller_concurrency_group_is_event_scoped() -> None:
         assert pull_request_key != _render_cr_gate_group(
             template, event_name="pull_request", number=2666
         )
+
+
+_TIMEOUT_METHOD_RE = re.compile(r"--timeout-method=(\S+)")
+
+
+def _has_pytest_token(command_text: str) -> bool:
+    """True when a non-comment line of the command text invokes pytest."""
+    return any(
+        token == "pytest" or token.endswith("/pytest")
+        for line in command_text.splitlines()
+        if not line.lstrip().startswith("#")
+        for token in line.split()
+    )
+
+
+def _all_workflow_run_commands() -> list[tuple[str, str, str]]:
+    """Every ``(workflow file, job, run script)`` triple in .github/workflows."""
+    workflows_dir = CI_WORKFLOW.parent
+    commands: list[tuple[str, str, str]] = []
+    for path in sorted(workflows_dir.glob("*.yml")) + sorted(
+        workflows_dir.glob("*.yaml")
+    ):
+        data = yaml.safe_load(path.read_text(encoding="utf-8"))
+        if not isinstance(data, dict):
+            continue
+        jobs = data.get("jobs")
+        if not isinstance(jobs, dict):
+            continue
+        for job_name, job in jobs.items():
+            if not isinstance(job, dict):
+                continue
+            steps = job.get("steps")
+            if not isinstance(steps, list):
+                continue
+            for step in steps:
+                if isinstance(step, dict) and "run" in step:
+                    commands.append((path.name, str(job_name), str(step["run"])))
+    return commands
+
+
+def test_no_workflow_pytest_invocation_uses_thread_timeout_method() -> None:
+    """OMN-16348: every ``--timeout-method`` in any workflow must be ``signal``.
+
+    OMN-15977 (omnibase_core) banned pytest-timeout's ``thread`` method: its
+    watcher thread fires only when the GIL is released, so a CPU-bound
+    pure-Python runaway holds the GIL continuously and the declared
+    ``--timeout`` ceiling silently never fires (the config behind the
+    2026-08-12 46/53-minute pre-push runaways that needed manual SIGKILL).
+    The only remaining backstop is the job's ``timeout-minutes``, which
+    cancels the whole shard with no attributable test. The original guards
+    were per-file, which is exactly why additional surfaces stayed invisible
+    — so this assertion is per-invocation-surface: it scans every run step of
+    every workflow file, and none may pass ``--timeout-method=`` with any
+    value other than ``signal``.
+    """
+    commands = _all_workflow_run_commands()
+
+    # Positive control: the scanner must actually be seeing ci.yml's pytest
+    # steps — an empty scan would vacuously pass while enforcing nothing.
+    assert any(
+        source == CI_WORKFLOW.name and _has_pytest_token(run)
+        for source, _, run in commands
+    )
+
+    violations = [
+        f"{source}::{job}: {line.strip()}"
+        for source, job, run in commands
+        for line in run.splitlines()
+        for method in _TIMEOUT_METHOD_RE.findall(line)
+        if method != "signal"
+    ]
+    assert violations == [], (
+        "workflow passes a non-signal --timeout-method (banned by OMN-15977; "
+        "a CLI flag overrides any addopts signal default): "
+        f"{violations}"
+    )
+
+
+def test_no_precommit_or_script_surface_uses_thread_timeout_method() -> None:
+    """OMN-16348: the thread-method ban covers non-workflow command surfaces.
+
+    The workflow scan above cannot see the two other places this repo builds
+    pytest command lines: ``.pre-commit-config.yaml`` hook entries and the
+    committed operational scripts under ``scripts/`` (e.g.
+    ``publish_test_failure_baseline.py`` assembles a subprocess pytest command).
+    Each carried ``--timeout-method=thread`` until OMN-16348, which is exactly
+    the per-file-guard blind spot that let ci.yml keep the banned method after
+    OMN-15977 — so this scan is enumerated per command surface, not per file
+    that happened to be broken once.
+    """
+    banned = "--timeout-method=thread"
+
+    precommit = yaml.safe_load(
+        (REPO_ROOT / ".pre-commit-config.yaml").read_text(encoding="utf-8")
+    )
+    entries = [
+        str(hook.get("entry", ""))
+        for repo in precommit.get("repos", [])
+        if isinstance(repo, dict)
+        for hook in repo.get("hooks", [])
+        if isinstance(hook, dict)
+    ]
+    # Positive control: the config's pytest-running hooks must be visible to
+    # the scan — an empty entry list would vacuously pass.
+    assert any(_has_pytest_token(entry) for entry in entries)
+    entry_violations = [
+        entry
+        for entry in entries
+        for method in _TIMEOUT_METHOD_RE.findall(entry)
+        if method != "signal"
+    ]
+    assert entry_violations == [], (
+        "pre-commit hook entry passes a non-signal --timeout-method "
+        "(OMN-15977: the thread watcher never fires under a GIL-bound "
+        f"runaway): {entry_violations}"
+    )
+
+    script_files = [
+        path
+        for pattern in ("*.py", "*.sh")
+        for path in sorted((REPO_ROOT / "scripts").rglob(pattern))
+        if path.is_file()
+    ]
+    # Positive control: the surface OMN-16348 actually fixed must be scanned.
+    assert REPO_ROOT / "scripts" / "publish_test_failure_baseline.py" in script_files
+    # Scripts are arbitrary source text (quoted flags, list literals), so the
+    # scan is a literal ban on the banned flag rather than value extraction.
+    violations = [
+        str(path.relative_to(REPO_ROOT))
+        for path in script_files
+        if banned in path.read_text(encoding="utf-8", errors="ignore")
+    ]
+    assert violations == [], (
+        "committed script builds a pytest command with the banned "
+        f"--timeout-method=thread (OMN-15977/OMN-16348): {violations}"
+    )

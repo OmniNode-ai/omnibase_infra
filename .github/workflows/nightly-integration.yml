@@ -473,7 +473,7 @@ jobs:
             --tb=short \
             --junitxml=nightly-integration-junit.xml \
             --timeout=300 \
-            --timeout-method=thread
+            --timeout-method=signal
 
       # OMN-15565: the explicit -p is load-bearing. `-v --remove-orphans` against
       # the default project is exactly what deleted the lab lane's containers and

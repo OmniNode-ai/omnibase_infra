@@ -236,7 +236,7 @@ def run_test_suite() -> int:
         "-q",
         f"--junitxml={JUNIT_XML}",
         "--timeout=60",
-        "--timeout-method=thread",
+        "--timeout-method=signal",
         "-p",
         "no:cacheprovider",
     ]
