@@ -91,6 +91,11 @@ def test_runtime_policy_contract_controls_logical_secret_resolver_refs() -> None
     }
 
     assert logical_names == {
+        "gateway.attach.keycloak.admin_client_credentials.client_id",
+        "gateway.attach.keycloak.admin_client_credentials.client_secret",
+        "gateway.attach.keycloak.introspection",
+        "gateway.attach.keycloak.issuer",
+        "gateway.attach.keycloak.jwks",
         "llm.openrouter.api_key",
         "llm.glm.api_key",
         "llm.gemini.api_key",

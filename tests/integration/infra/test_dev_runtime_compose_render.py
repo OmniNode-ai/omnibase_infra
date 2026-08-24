@@ -76,6 +76,12 @@ BASE_REQUIRED_ENV: dict[str, str] = {
     "OMNIINTELLIGENCE_DB_URL": _INTEL_DSN,
     "INFISICAL_DB_CONNECTION_URI": "postgresql://postgres:test@postgres:5432/infisical_db",
     "INFISICAL_REDIS_URL": "redis://:test@valkey:6379",
+    "GATEWAY_ATTACH_KEYCLOAK_INTROSPECTION_URL": (
+        "http://keycloak:8080/realms/omninode/protocol/openid-connect/token/introspect"
+    ),
+    "GATEWAY_ATTACH_KEYCLOAK_JWKS_URL": (
+        "http://keycloak:8080/realms/omninode/protocol/openid-connect/certs"
+    ),
     "OMNIBASE_INFRA_AGENT_ACTIONS_POSTGRES_DSN": _PG_DSN,
     "OMNIBASE_INFRA_SKILL_LIFECYCLE_POSTGRES_DSN": _PG_DSN,
     "OMNIBASE_INFRA_CONTEXT_AUDIT_POSTGRES_DSN": _PG_DSN,
@@ -85,12 +91,6 @@ BASE_REQUIRED_ENV: dict[str, str] = {
     "ONEX_SERVICE_CLIENT_SECRET": "test-service-secret",
     "LINEAR_API_KEY": "test-linear-api-key",
     "GITHUB_TOKEN": "test-github-token",
-    "GATEWAY_ATTACH_KEYCLOAK_INTROSPECTION_URL": (
-        "http://keycloak:8080/realms/omninode/protocol/openid-connect/token/introspect"
-    ),
-    "GATEWAY_ATTACH_KEYCLOAK_JWKS_URL": (
-        "http://keycloak:8080/realms/omninode/protocol/openid-connect/certs"
-    ),
     "DEPLOY_AGENT_HMAC_SECRET": "render-only-deploy-agent-hmac-secret",
     "LLM_CODER_URL": "http://llm-coder.test:8000",
     "LLM_CODER_FAST_URL": "http://llm-coder-fast.test:8001",

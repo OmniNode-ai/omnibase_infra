@@ -173,3 +173,13 @@ canary:
     - core
   inject_env: {}
   inject_required_env: []
+fault-injection:
+  description: >
+    Permanent DLQ fault-injection fixture (OMN-16265, OMN-14498 follow-on). Deliberately NOT included in the `runtime` bundle — this is an opt-in, on-demand deployment for driving primary-publish + DLQ-leg failures against node_fault_inject_fixture_compute's own private topics, never part of the always-on runtime surface. The service depends_on omninode-runtime + redpanda, which this bundle does not itself provide (only `core`) — bring it up alongside the `runtime` bundle (e.g. `onex up runtime fault-injection`) only when actively running a boundary-behavior regression check; see docs/runbooks/fault-inject-fixture-dlq-offset-withholding.md.
+
+  services:
+    - fault-inject-fixture
+  includes:
+    - core
+  inject_env: {}
+  inject_required_env: []

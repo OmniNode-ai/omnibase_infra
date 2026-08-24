@@ -404,6 +404,21 @@
       "package": "omnibase_infra",
       "type_scoped": false
     },
+    "dispatcher.auto.node_fault_inject_fixture_compute.HandlerFaultInjectFixture.fault_inject_run_f93e0c90": {
+      "category": "command",
+      "contract_name": "node_fault_inject_fixture_compute",
+      "event_model_module": null,
+      "event_model_name": null,
+      "handler_id": "dispatcher.auto.node_fault_inject_fixture_compute.HandlerFaultInjectFixture.fault_inject_run_f93e0c90",
+      "handler_module": "omnibase_infra.nodes.node_fault_inject_fixture_compute.handlers.handler_fault_inject_fixture",
+      "handler_name": "HandlerFaultInjectFixture",
+      "message_types": [
+        "omnibase-infra.fault-inject-fixture",
+        "onex.cmd.omnibase-infra.fault-inject-fixture.v1"
+      ],
+      "package": "omnibase_infra",
+      "type_scoped": false
+    },
     "dispatcher.auto.node_gateway_attach_effect.HandlerGatewayAttach.gateway_attach_c72af942": {
       "category": "command",
       "contract_name": "node_gateway_attach_effect",
@@ -3218,15 +3233,15 @@
     "corpus": {
       "contracts_by_package": {
         "omnibase_core": 15,
-        "omnibase_infra": 116,
+        "omnibase_infra": 117,
         "onex-change-control": 4
       },
-      "contracts_discovered": 135,
+      "contracts_discovered": 136,
       "discovery_errors": 0,
-      "distinct_subscribe_topics": 105,
-      "probe_count": 1040,
-      "registered_dispatchers": 114,
-      "registered_routes": 118,
+      "distinct_subscribe_topics": 106,
+      "probe_count": 1042,
+      "registered_dispatchers": 115,
+      "registered_routes": 119,
       "type_scoped_dispatchers": 69
     },
     "duplicate_winners": [],
@@ -3267,7 +3282,7 @@
       "omnimemory"
     ],
     "fixture_version": "v2",
-    "generated_at_utc": "2026-08-23T00:04:38.685458+00:00",
+    "generated_at_utc": "2026-08-23T14:48:42.843077+00:00",
     "installed_package_versions": {
       "omnibase-core": "0.46.9",
       "omnibase-infra": "0.38.10",
@@ -3450,6 +3465,23 @@
         "status": "no_dispatcher"
       },
       "topic": "onex.cmd.omnibase-infra.coding-agent-workspace-validate.v1"
+    },
+    "P1a::onex.cmd.omnibase-infra.fault-inject-fixture.v1": {
+      "family": "P1_topic_event_type_matrix",
+      "input": {
+        "event_type": "omnibase-infra.fault-inject-fixture",
+        "payload": "_DictPayload"
+      },
+      "selection": {
+        "dispatcher_ids": [
+          "dispatcher.auto.node_fault_inject_fixture_compute.HandlerFaultInjectFixture.fault_inject_run_f93e0c90"
+        ],
+        "dlq_topic": null,
+        "message_category": "command",
+        "message_type": "omnibase-infra.fault-inject-fixture",
+        "status": "success"
+      },
+      "topic": "onex.cmd.omnibase-infra.fault-inject-fixture.v1"
     },
     "P1a::onex.cmd.omnibase-infra.gateway-attach-request.v1": {
       "family": "P1_topic_event_type_matrix",
@@ -5093,6 +5125,21 @@
         "status": "no_dispatcher"
       },
       "topic": "onex.cmd.omnibase-infra.coding-agent-workspace-validate.v1"
+    },
+    "P1b::onex.cmd.omnibase-infra.fault-inject-fixture.v1": {
+      "family": "P1_topic_event_type_matrix",
+      "input": {
+        "event_type": null,
+        "payload": "_DictPayload"
+      },
+      "selection": {
+        "dispatcher_ids": [],
+        "dlq_topic": "onex.dlq.omnibase-infra.commands.v1",
+        "message_category": "command",
+        "message_type": "_DictPayload",
+        "status": "no_dispatcher"
+      },
+      "topic": "onex.cmd.omnibase-infra.fault-inject-fixture.v1"
     },
     "P1b::onex.cmd.omnibase-infra.gateway-attach-request.v1": {
       "family": "P1_topic_event_type_matrix",
@@ -22929,6 +22976,16 @@
       "route_id": "route.auto.node_event_forward_effect.HandlerEventForward.event_forward_27292950.onex_evt_omnibase_infra_tool_update_v1",
       "topic": "onex.evt.omnibase-infra.tool-update.v1",
       "topic_pattern": "*.evt.omnibase-infra.tool-update.*",
+      "type_scoped": false
+    },
+    {
+      "contract_name": "node_fault_inject_fixture_compute",
+      "dispatcher_id": "dispatcher.auto.node_fault_inject_fixture_compute.HandlerFaultInjectFixture.fault_inject_run_f93e0c90",
+      "handler_id": "dispatcher.auto.node_fault_inject_fixture_compute.HandlerFaultInjectFixture.fault_inject_run_f93e0c90",
+      "message_category": "command",
+      "route_id": "route.auto.node_fault_inject_fixture_compute.HandlerFaultInjectFixture.fault_inject_run_f93e0c90.onex_cmd_omnibase_infra_fault_inject_fixture_v1",
+      "topic": "onex.cmd.omnibase-infra.fault-inject-fixture.v1",
+      "topic_pattern": "*.cmd.omnibase-infra.fault-inject-fixture.*",
       "type_scoped": false
     },
     {
