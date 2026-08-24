@@ -70,6 +70,13 @@ ALLOWED_ROOT_FILES: frozenset[str] = frozenset(
         "pyrightconfig.json",
         ".mypy.ini",
         "py.typed",
+        # Testing (pytest) -- OMN-15977: a root-level conftest.py is the ONLY
+        # conftest.py pytest loads for EVERY testpath declared in
+        # pyproject.toml's [tool.pytest.ini_options] testpaths (tests/,
+        # scripts/ci/tests, scripts/tests, scripts/runtime_build/tests,
+        # src/omnibase_infra/services/observability/agent_actions/tests) --
+        # a conftest.py under tests/ only loads for collections under tests/.
+        "conftest.py",
         # Linting/formatting
         ".pre-commit-config.yaml",
         ".yamlfmt",
