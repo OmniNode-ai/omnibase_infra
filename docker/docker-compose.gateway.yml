@@ -1,6 +1,46 @@
 # Standalone operator-edge gateway overlay. This process connects outbound to
 # staging MSK and to the .201 local Redpanda listener; it opens no inbound port.
 services:
+  # OMN-16449: scoped MSK-bastion DNS-override sidecar. Operator ruling
+  # (2026-08-24, verbatim): "the gateway on the cloud should be configurable
+  # to point at whatever env we want. we can use the forwarder to accelerate
+  # moving our work to the cloud, but it should be replaced with the https
+  # doors as soon as possible." This makes the forwarder's direct-MSK leg a
+  # SANCTIONED INTERIM BRIDGE, not a permanent fixture -- see
+  # gateway/dns-bastion/dnsmasq.conf for the full rationale. Referenced by
+  # ONLY the gateway-forwarder service's `dns:` key below; no other container
+  # on `gateway-runtime` is repointed at it, and the host's own DNS is
+  # untouched. Sunset: delete this service + gateway-forwarder's `dns:` key
+  # together once the HTTPS-ingest replacement (tracked separately, linked
+  # from OMN-15692) lands.
+  gateway-dns-bastion:
+    build:
+      context: ./gateway/dns-bastion
+    container_name: omninode-gateway-dns-bastion
+    environment:
+      # Operator-supplied; never a literal in this repo (OMN-15743's own
+      # guard forbids the bastion IP appearing in a tracked compose/config
+      # file). Sourced from gateway.env alongside GATEWAY_BROKER_REF_MAP_FILE.
+      GATEWAY_BASTION_IP: "${GATEWAY_BASTION_IP:?GATEWAY_BASTION_IP is required}"
+    networks:
+      gateway-runtime:
+        # Static IP so gateway-forwarder's `dns:` key (which requires a
+        # literal address, not a resolvable service name) has a fixed target.
+        # Chosen well clear of the network's live-assigned range at the time
+        # of writing (highest observed: .19) to avoid future collision with
+        # Docker's sequential auto-assignment.
+        ipv4_address: 172.19.0.250
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "dig", "+short", "+time=2", "@127.0.0.1", "b-1.omninodedevmsk.7ozyd3.c14.kafka.us-east-1.amazonaws.com"]
+      interval: 15s
+      timeout: 5s
+      retries: 3
+      start_period: 10s
+    labels:
+      - "com.omninode.service=gateway-dns-bastion"
+      - "com.omninode.layer=gateway"
+      - "com.omninode.ticket=OMN-16449"
   gateway-forwarder:
     image: "${GATEWAY_IMAGE:?GATEWAY_IMAGE is required}"
     pull_policy: never
@@ -59,6 +99,19 @@ services:
       - ${GATEWAY_TPM_DEVICE:?GATEWAY_TPM_DEVICE is required}:/dev/tpmrm0
     networks:
       - gateway-runtime
+    # OMN-16449: per-container DNS override so the MSK broker hostnames
+    # (unroutable private VPC IPs from .201's public DNS view) resolve
+    # through the live SNI-routing bastion instead. Deliberately scoped to
+    # THIS service only, not network-wide -- see gateway-dns-bastion above
+    # and gateway/dns-bastion/dnsmasq.conf for the full rationale + sunset
+    # condition. The sidecar itself forwards every other query to Docker's
+    # embedded resolver, so this does not change resolution for
+    # `redpanda:9092` (the local leg) or anything else this container needs.
+    dns:
+      - 172.19.0.250
+    depends_on:
+      gateway-dns-bastion:
+        condition: service_healthy
     restart: unless-stopped
     stop_grace_period: 30s
     healthcheck:
