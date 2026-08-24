@@ -1,0 +1,35 @@
+# SPDX-FileCopyrightText: 2025 OmniNode.ai Inc.
+# SPDX-License-Identifier: MIT
+#
+# onex-runner-disk-guard.timer — triggers the OMN-16363 restore pass.
+#
+# Systemd USER timer. 2-minute interval, deliberately far tighter than the
+# hourly onex-disk-gc.timer: the incident evidence (OMN-16360, recurred
+# OMN-16363-comment 2026-08-22) shows /data can go from healthy to 0 bytes
+# free in roughly 15-20 minutes once the write-amplification loop starts, so a
+# restore pass that only ran hourly would leave the fleet needlessly degraded
+# (paused runners not yet restored) for most of a recovery window. The pass
+# itself is cheap (one `df`, a marker-directory listing, at most one batch of
+# `docker start` calls) and idempotent, so a 2-minute cadence is safe.
+#
+# Install on .201 (user scope, no sudo):
+#   bash deploy/disk-gc/install-runner-disk-guard.sh
+#
+# Check:
+#   systemctl --user list-timers onex-runner-disk-guard.timer
+#   systemctl --user status onex-runner-disk-guard.timer
+
+[Unit]
+Description=ONEX .201 runner-disk-admission restore guard timer (OMN-16363)
+Documentation=https://github.com/OmniNode-ai/omnibase_infra
+
+[Timer]
+# First run 3 min after the user manager starts (let docker settle).
+OnStartupSec=3min
+# Then every 2 minutes.
+OnUnitActiveSec=2min
+Persistent=true
+Unit=onex-runner-disk-guard.service
+
+[Install]
+WantedBy=timers.target

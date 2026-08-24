@@ -326,7 +326,8 @@ _RELATION_LISTS: tuple[tuple[re.Pattern[str], bool, bool], ...] = (
         re.compile(
             r"\bfrom\s+(?P<targets>[\s\S]*?)"
             r"(?=\bwhere\b|\bjoin\b|\bgroup\s+by\b|\border\s+by\b|"
-            r"\blimit\b|\bunion\b|\breturning\b|\bfor\s+(?:update|share)\b|;|$)",
+            r"\blimit\b|\bunion\b|\breturning\b|\bcase\b|"
+            r"\bfor\s+(?:update|share)\b|;|$)",
             re.IGNORECASE,
         ),
         True,

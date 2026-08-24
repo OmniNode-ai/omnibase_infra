@@ -163,6 +163,14 @@ STRICT_GATE_JOBS: tuple[str, ...] = (
     # CONTEXTS) because it is a job inside ci.yml's own run, observable
     # without the external-context admission rule's historical measurement.
     "Dep Provenance Lineage Gate (OMN-15604)",
+    # OMN-16229: companion to OMN-16228, closing the other half of the
+    # 2026-08-18 sqlparse/Trivy incident (OMN-16170) -- an expiring-ignore
+    # policy for fix-unavailable CVEs in the Trivy image gate. THIS LINE IS
+    # THE MECHANISM, not the job's presence in ci.yml: the job has no
+    # job-level `if:` (unconditional, cheap, dependency-free), so it always
+    # completes success/failure and a skip/absence here is anomalous --
+    # correctly fails closed.
+    "Trivyignore Expiry Check (OMN-16229)",
     # OMN-16228: born from the 2026-08-18 sqlparse/Trivy incident (OMN-16170)
     # -- shift lockfile CVE detection left to dependency-pin time (this job)
     # instead of image-build time (the Trivy gate, deep in the deploy

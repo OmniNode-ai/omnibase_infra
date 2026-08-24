@@ -36,6 +36,12 @@ Postgres source, in order: an already-running server named by
 ``migration-integration`` job supplies one), else a hermetic ephemeral cluster
 from local ``initdb``. Skips only when neither exists.
 
+OMN-16412: a non-loopback ambient ``OMNIBASE_INFRA_DB_URL``/``POSTGRES_HOST``
+is a hard error unless ``OMN15376_ALLOW_REMOTE_PG=1`` is also set -- this
+suite creates/drops throwaway databases on whatever host it is handed, and a
+persistent dev-shell env var has silently pointed it at a live shared Postgres
+before. See ``_reject_unless_loopback_or_opted_in`` below.
+
 Run: uv run pytest tests/integration/migrations/test_node_migration_shape_drift_omn15376.py -v
 
 Ticket: OMN-15376 (class), OMN-15302 (second live instance)
@@ -43,6 +49,7 @@ Ticket: OMN-15376 (class), OMN-15302 (second live instance)
 
 from __future__ import annotations
 
+import ipaddress
 import os
 import re
 import shutil
@@ -140,11 +147,64 @@ class Server:
         return merged
 
 
+# OMN-16412: this suite creates and drops throwaway databases (`CREATE DATABASE
+# omn15376_<uuid>`) on whatever server it is handed, so silently adopting an
+# ambient OMNIBASE_INFRA_DB_URL/POSTGRES_HOST pointing at a shared/live host is
+# a real contamination vector -- a persistent dev-shell env var leaked several
+# local runs onto the live .201 stability-test Postgres with no indication
+# anything unusual was happening (35 leftover throwaway DBs found and dropped,
+# see the ticket). A loopback host (localhost/127.0.0.1/::1/a unix socket
+# path) is always this process's own box and stays allowed with no opt-in.
+# Anything else -- including a private-network address that LOOKS like it
+# could be "just Docker" -- requires the explicit OMN15376_ALLOW_REMOTE_PG=1
+# opt-in, because private-RFC1918 is exactly what the live .201 lane is too
+# (192.168.86.0/24): there is no way to tell "CI's own ephemeral service
+# container, reached via the Docker bridge gateway because this self-hosted
+# runner executes inside a container and 127.0.0.1 doesn't reach a sibling
+# container" apart from "someone's persistent dev-shell var pointing at a
+# shared live lane" by host shape alone. CI sets the opt-in explicitly, once,
+# in the one job/step that owns a Postgres it just spun up itself.
+#
+# Read fresh on every call (unlike ``_REQUIRE_PG`` below, which is frozen at
+# import time) so tests can toggle it via monkeypatch.
+def _allow_remote_pg() -> bool:
+    return os.environ.get("OMN15376_ALLOW_REMOTE_PG") == "1"
+
+
+def _is_loopback_host(host: str) -> bool:
+    """True only for hosts that never leave this machine."""
+    if host.startswith("/"):  # unix socket path
+        return True
+    if host == "localhost":
+        return True
+    try:
+        return ipaddress.ip_address(host).is_loopback
+    except ValueError:
+        return False  # a real DNS name (container name, LAN host, ...)
+
+
+def _reject_unless_loopback_or_opted_in(env_var: str, host: str) -> None:
+    if _is_loopback_host(host) or _allow_remote_pg():
+        return
+    raise AssertionError(
+        f"{env_var}={host!r} resolves to a non-loopback host. Refusing to "
+        "silently run node-migration shape-drift tests (which CREATE/DROP "
+        "throwaway databases) against it -- this is very likely a stray "
+        "ambient env var pointing at someone's shared/live Postgres, not a "
+        "sandbox meant for this suite (OMN-16412). If this is a genuinely "
+        "intentional live-integration run, set OMN15376_ALLOW_REMOTE_PG=1 to "
+        "opt in explicitly."
+    )
+
+
 def _server_from_env() -> Server | None:
     dsn = os.environ.get("OMNIBASE_INFRA_DB_URL", "")
     if dsn:
         parsed = urlparse(dsn)
         if parsed.hostname:
+            _reject_unless_loopback_or_opted_in(
+                "OMNIBASE_INFRA_DB_URL", parsed.hostname
+            )
             return Server(
                 host=parsed.hostname,
                 port=str(parsed.port or 5432),
@@ -153,6 +213,7 @@ def _server_from_env() -> Server | None:
             )
     host = os.environ.get("POSTGRES_HOST")
     if host:
+        _reject_unless_loopback_or_opted_in("POSTGRES_HOST", host)
         return Server(
             host=host,
             port=os.environ.get("POSTGRES_PORT", "5432"),
@@ -160,6 +221,124 @@ def _server_from_env() -> Server | None:
             password=os.environ.get("POSTGRES_PASSWORD", ""),
         )
     return None
+
+
+# OMN-16412: guard tests for the ambient-DSN host check. These are pure
+# env-var/parsing tests -- they never touch a real Postgres and do not use the
+# ``server`` fixture -- but they still live in this module (rather than in a
+# separate always-collected file) because the whole file is skipped at import
+# when ``psql`` is unavailable, matching every other test here.
+def test_server_from_env_accepts_loopback_ambient_dsn(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.delenv("POSTGRES_HOST", raising=False)
+    monkeypatch.delenv("OMN15376_ALLOW_REMOTE_PG", raising=False)
+    monkeypatch.setenv(
+        "OMNIBASE_INFRA_DB_URL",
+        "postgresql://postgres:secret@127.0.0.1:5432/omnibase_infra",
+    )
+
+    srv = _server_from_env()
+
+    assert srv is not None
+    assert srv.host == "127.0.0.1"
+    assert srv.port == "5432"
+
+
+def test_server_from_env_accepts_loopback_ambient_postgres_host(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.delenv("OMNIBASE_INFRA_DB_URL", raising=False)
+    monkeypatch.delenv("OMN15376_ALLOW_REMOTE_PG", raising=False)
+    monkeypatch.setenv("POSTGRES_HOST", "localhost")
+
+    srv = _server_from_env()
+
+    assert srv is not None
+    assert srv.host == "localhost"
+
+
+def test_server_from_env_rejects_non_loopback_ambient_dsn(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """A non-loopback ambient OMNIBASE_INFRA_DB_URL is a hard error, never a silent fallback.
+
+    This is the exact contamination vector from OMN-16412: a persistent
+    dev-shell OMNIBASE_INFRA_DB_URL pointed at the live .201 stability-test
+    Postgres and the fixture adopted it with no warning.
+    """
+    monkeypatch.delenv("POSTGRES_HOST", raising=False)
+    monkeypatch.delenv("OMN15376_ALLOW_REMOTE_PG", raising=False)
+    monkeypatch.setenv(
+        "OMNIBASE_INFRA_DB_URL",
+        "postgresql://postgres:secret@192.168.86.201:5436/omnibase_infra",
+    )
+
+    with pytest.raises(AssertionError, match="OMNIBASE_INFRA_DB_URL"):
+        _server_from_env()
+
+
+def test_server_from_env_rejects_non_loopback_ambient_postgres_host(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """The POSTGRES_HOST fallback path gets the identical guard as the DSN path."""
+    monkeypatch.delenv("OMNIBASE_INFRA_DB_URL", raising=False)
+    monkeypatch.delenv("OMN15376_ALLOW_REMOTE_PG", raising=False)
+    monkeypatch.setenv("POSTGRES_HOST", "192.168.86.201")
+
+    with pytest.raises(AssertionError, match="POSTGRES_HOST"):
+        _server_from_env()
+
+
+def test_server_from_env_allows_non_loopback_ambient_dsn_with_explicit_optin(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """OMN15376_ALLOW_REMOTE_PG=1 is the documented, explicit opt-in for a genuinely
+    intentional live-integration run (e.g. this repo's own nightly-integration.yml,
+    which resolves its dockerized e2e stack to a non-loopback Docker-bridge/DNS host)."""
+    monkeypatch.delenv("POSTGRES_HOST", raising=False)
+    monkeypatch.setenv("OMN15376_ALLOW_REMOTE_PG", "1")
+    monkeypatch.setenv(
+        "OMNIBASE_INFRA_DB_URL",
+        "postgresql://postgres:secret@192.168.86.201:5436/omnibase_infra",
+    )
+
+    srv = _server_from_env()
+
+    assert srv is not None
+    assert srv.host == "192.168.86.201"
+
+
+def test_server_from_env_returns_none_when_nothing_ambient_is_set(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """No ambient var at all is untouched by the guard -- falls through to the
+    ephemeral-cluster path exactly as before OMN-16412."""
+    monkeypatch.delenv("OMNIBASE_INFRA_DB_URL", raising=False)
+    monkeypatch.delenv("POSTGRES_HOST", raising=False)
+
+    assert _server_from_env() is None
+
+
+@pytest.mark.parametrize(
+    "host", ["localhost", "127.0.0.1", "::1", "/var/run/postgresql/.s.PGSQL.5432"]
+)
+def test_is_loopback_host_accepts_local_forms(host: str) -> None:
+    assert _is_loopback_host(host) is True
+
+
+@pytest.mark.parametrize(
+    "host",
+    [
+        "192.168.86.201",
+        "10.0.0.5",
+        "172.18.0.1",
+        "example.com",
+        "omnibase-infra-postgres",
+    ],
+)
+def test_is_loopback_host_rejects_remote_forms(host: str) -> None:
+    assert _is_loopback_host(host) is False
 
 
 @pytest.fixture(scope="module")
@@ -594,6 +773,91 @@ def test_reconciliation_preserves_pre_existing_rows(server: Server) -> None:
             "SELECT count(*) FROM llm_cost_aggregates",
         )
         assert rows.stdout.strip() == "2", rows.stdout
+    finally:
+        _drop_database(server, database)
+
+
+def test_delegation_routing_overlay_reconciliation_enforces_declared_shape(
+    server: Server,
+) -> None:
+    """OMN-15631: drifted overlay rows converge before constraints are enforced."""
+    path = _migration_path(
+        "node_delegation_routing_reducer",
+        "0001_create_delegation_routing_tenant_overlay.sql",
+    )
+    database = _new_database(server)
+    try:
+        seeded = _psql(
+            server,
+            database,
+            "-v",
+            "ON_ERROR_STOP=1",
+            "-c",
+            """
+            CREATE TABLE delegation_routing_tenant_overlay (
+                tenant_id TEXT,
+                task_type TEXT
+            );
+            INSERT INTO delegation_routing_tenant_overlay (tenant_id, task_type)
+            VALUES
+                (NULL, NULL),
+                ('tenant-a', 'summarize'),
+                ('tenant-a', 'summarize');
+            """,
+        )
+        assert seeded.returncode == 0, seeded.stderr
+
+        result = _psql(server, database, "-v", "ON_ERROR_STOP=1", "-f", str(path))
+        assert result.returncode == 0, result.stdout + result.stderr
+
+        shape = _psql(
+            server,
+            database,
+            "-t",
+            "-A",
+            "-F",
+            "|",
+            "-v",
+            "ON_ERROR_STOP=1",
+            "-c",
+            """
+            SELECT
+                count(*) FILTER (WHERE id IS NULL),
+                count(*) FILTER (WHERE tenant_id IS NULL),
+                count(*) FILTER (WHERE task_type IS NULL),
+                count(*) FILTER (WHERE backend_id IS NULL),
+                count(*) FILTER (WHERE endpoint_url IS NULL),
+                count(*) FILTER (WHERE model_name IS NULL),
+                count(*) FILTER (WHERE created_at IS NULL),
+                count(*) FILTER (WHERE updated_at IS NULL),
+                count(*) - count(DISTINCT (tenant_id, task_type))
+            FROM delegation_routing_tenant_overlay;
+            """,
+        )
+        assert shape.stdout.strip() == "0|0|0|0|0|0|0|0|0", shape.stdout
+
+        constraints = _psql(
+            server,
+            database,
+            "-t",
+            "-A",
+            "-v",
+            "ON_ERROR_STOP=1",
+            "-c",
+            """
+            SELECT string_agg(conname || ':' || contype, ',' ORDER BY conname)
+            FROM pg_constraint
+            WHERE conrelid = 'delegation_routing_tenant_overlay'::regclass
+              AND conname IN (
+                'delegation_routing_tenant_overlay_pkey',
+                'delegation_routing_tenant_overlay_tenant_task_uq'
+              );
+            """,
+        )
+        assert constraints.stdout.strip() == (
+            "delegation_routing_tenant_overlay_pkey:p,"
+            "delegation_routing_tenant_overlay_tenant_task_uq:u"
+        )
     finally:
         _drop_database(server, database)
 

@@ -36,7 +36,10 @@ from omnibase_infra.nodes.node_gateway_attach_effect.models.model_gateway_attach
     ModelGatewayAttachConfig,
 )
 
-_REQUIRED_CLAIMS = ("exp", "iss", "aud", "sub")
+# ``iat`` is required (OMN-16023) so the token's own lifetime is always
+# measurable. Without it the ``exp - iat`` bound below would silently not
+# apply to any token that simply omitted the claim.
+_REQUIRED_CLAIMS = ("exp", "iat", "iss", "aud", "sub")
 _REQUIRED_TENANT_CLAIMS = ("tenant_id", "tenant_slug", "principal_id", "azp")
 
 
@@ -74,6 +77,68 @@ def _resolve_signing_key(
         ) from exc
 
 
+def _assert_exact_audience(raw_audience: object, *, expected: str) -> None:
+    """Require ``aud`` to be exactly one audience: the expected one.
+
+    Set equality, not membership. Keycloak may serialize a single audience
+    as a bare string or a one-element array -- both are the same claim, so
+    both are normalized to a set before comparison; what is rejected is a
+    token carrying any audience beyond the expected one, whether that extra
+    audience is the known-bad broker audience or something nobody has
+    thought of yet.
+    """
+    if isinstance(raw_audience, str):
+        presented = {raw_audience}
+    elif isinstance(raw_audience, (list, tuple, set)):
+        presented = {str(entry) for entry in raw_audience}
+    else:
+        raise TokenValidationError(
+            f"access_token aud claim has unusable type {type(raw_audience).__name__}"
+        )
+
+    if presented != {expected}:
+        raise TokenValidationError(
+            "access_token audience set must be exactly "
+            f"{{{expected!r}}}, got {sorted(presented)!r} -- a token carrying "
+            "any additional audience is rejected"
+        )
+
+
+def _integer_timestamp_claim(claims: Mapping[str, object], name: str) -> int:
+    raw_claim = claims[name]
+    if isinstance(raw_claim, bool) or not isinstance(raw_claim, int):
+        raise TokenValidationError(
+            f"access_token {name} claim is not an integer timestamp"
+        )
+    return raw_claim
+
+
+def _assert_bounded_lifetime(
+    claims: Mapping[str, object], *, max_lifetime_seconds: int
+) -> None:
+    """Require ``exp - iat`` to be within the accepted attach-token lifetime.
+
+    ``_REQUIRED_CLAIMS`` guarantees both claims are present; this guards
+    their values. A non-positive lifetime is rejected as malformed rather
+    than merely useless -- ``exp <= iat`` describes no valid window, and
+    letting it through would leave the bound satisfied by arithmetic that
+    means nothing.
+    """
+    issued_at = _integer_timestamp_claim(claims, "iat")
+    expires_at = _integer_timestamp_claim(claims, "exp")
+
+    lifetime_seconds = expires_at - issued_at
+    if lifetime_seconds <= 0:
+        raise TokenValidationError(
+            f"access_token lifetime is non-positive (exp - iat = {lifetime_seconds}s)"
+        )
+    if lifetime_seconds > max_lifetime_seconds:
+        raise TokenValidationError(
+            f"access_token lifetime {lifetime_seconds}s exceeds the maximum "
+            f"accepted attach-token lifetime of {max_lifetime_seconds}s"
+        )
+
+
 def verify_and_decode_claims(
     access_token: str,
     jwks_keys: Sequence[Mapping[str, object]],
@@ -89,6 +154,23 @@ def verify_and_decode_claims(
     before any claim is trusted. ``alg: none`` tokens are rejected implicitly
     -- PyJWT never resolves a signing key for ``none`` and the explicit
     ``algorithms=`` allowlist below never includes it.
+
+    OMN-16023 added the two assertions PyJWT cannot make for us:
+
+      - ``aud`` is exact set equality against the single expected audience,
+        not membership. PyJWT's ``audience=`` argument is satisfied as soon
+        as the expected value appears anywhere in the claim, so it accepts
+        a dual-audience token; asserting the whole set means any widening
+        of the ga-* client's audience mappers fails closed here rather than
+        being discovered later.
+      - ``exp - iat`` is bounded by ``max_attach_token_lifetime_seconds``.
+        PyJWT validates that ``exp`` has not passed; nothing validates how
+        far out it was set in the first place.
+
+    Both are relying-party assertions on a presented token, deliberately
+    independent of how the IdP is configured -- configuration is not an
+    invariant, because a realm-level or mapper-level change silently
+    rewrites it for every token minted thereafter.
     """
     try:
         unverified_header = jwt.get_unverified_header(access_token)
@@ -121,6 +203,11 @@ def verify_and_decode_claims(
             f"access_token signature/claims verification failed: {exc}"
         ) from exc
 
+    _assert_exact_audience(claims.get("aud"), expected=config.required_audience)
+    _assert_bounded_lifetime(
+        claims, max_lifetime_seconds=config.max_attach_token_lifetime_seconds
+    )
+
     for required in _REQUIRED_TENANT_CLAIMS:
         if required not in claims:
             raise TokenValidationError(
@@ -140,7 +227,7 @@ def verify_and_decode_claims(
         tenant_slug=str(claims["tenant_slug"]),
         principal_id=str(claims["principal_id"]),
         client_id=str(claims["azp"]),
-        expires_at_epoch=int(claims["exp"]),
+        expires_at_epoch=_integer_timestamp_claim(claims, "exp"),
     )
 
 

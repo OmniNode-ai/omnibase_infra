@@ -28,6 +28,12 @@ LAYERED_RENDER_DUMMY_ENV = {
     # its `command:` block during the layered render.
     "DEV_REDPANDA_ADVERTISE_HOST": "localhost",  # kafka-fallback-ok — test fixture
     "GITHUB_TOKEN": "layered-render-dummy",
+    "GATEWAY_ATTACH_KEYCLOAK_INTROSPECTION_URL": (
+        "http://keycloak:8080/realms/omninode/protocol/openid-connect/token/introspect"
+    ),
+    "GATEWAY_ATTACH_KEYCLOAK_JWKS_URL": (
+        "http://keycloak:8080/realms/omninode/protocol/openid-connect/certs"
+    ),
     "DEPLOY_AGENT_HMAC_SECRET": "layered-render-dummy",
     "LINEAR_API_KEY": "layered-render-dummy",
     "ONEX_REGISTRATION_AUTO_ACK": "false",

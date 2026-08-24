@@ -1114,6 +1114,12 @@ COMPOSE_CONFIG_RENDER_ENV: dict[str, str] = {
     "ONEX_SERVICE_CLIENT_SECRET": "test-service-secret",
     "LINEAR_API_KEY": "test-linear-api-key",
     "GITHUB_TOKEN": "test-github-token",
+    "GATEWAY_ATTACH_KEYCLOAK_INTROSPECTION_URL": (
+        "http://keycloak:8080/realms/omninode/protocol/openid-connect/token/introspect"
+    ),
+    "GATEWAY_ATTACH_KEYCLOAK_JWKS_URL": (
+        "http://keycloak:8080/realms/omninode/protocol/openid-connect/certs"
+    ),
     "DEPLOY_AGENT_HMAC_SECRET": "render-only-deploy-agent-hmac-secret",
     # OMN-7979: LLM endpoint URLs added with :? fail-fast to
     # activate PluginLlm in runtime containers.

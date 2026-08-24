@@ -208,6 +208,17 @@ _LEGACY_DEFAULT_SCHEMA_SQL_EXACT_PATHS = frozenset(
             "docker/migrations/forward/nodes/node_log_persistence_effect/"
             "0000_create_log_entries.sql"
         ),
+        # OMN-16293: node_savings_estimation_compute's 0001 migration uses the
+        # identical schema-qualified EXECUTE format(...) NULL-check-then-
+        # SET-NOT-NULL idiom as node_log_persistence_effect/0000 above (both
+        # tables are fully schema-qualified as omninode_internal.<table> --
+        # this is not a legacy-unqualified case, it is the same dynamic-SQL
+        # provability limitation the log_entries entry already establishes as
+        # accepted for this corpus).
+        Path(
+            "docker/migrations/forward/nodes/node_savings_estimation_compute/"
+            "0001_create_savings_signal_tables.sql"
+        ),
         # OMN-15336 item 4 narrows the historical FORCE-RLS posture of the
         # existing node_service_registry table. The table is logically
         # omninode_internal but remains physically in the legacy default schema

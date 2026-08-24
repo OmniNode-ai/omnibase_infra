@@ -710,6 +710,8 @@ KEYCLOAK_REALM=omninode
 KEYCLOAK_ADMIN_CLIENT_ID=onex-admin
 KEYCLOAK_ADMIN_CLIENT_SECRET=          # restricted: /services/onex-api/auth/ in Infisical
 KEYCLOAK_ISSUER=http://localhost:28080/realms/omninode
+GATEWAY_ATTACH_KEYCLOAK_INTROSPECTION_URL=http://keycloak:8080/realms/omninode/protocol/openid-connect/token/introspect
+GATEWAY_ATTACH_KEYCLOAK_JWKS_URL=http://keycloak:8080/realms/omninode/protocol/openid-connect/certs
 ONEX_SERVICE_CLIENT_ID=onex-service
 ONEX_SERVICE_CLIENT_SECRET=            # restricted: /services/onex-api/auth/ in Infisical
 # KEYCLOAK_ADMIN_PASSWORD is NOT stored here (transient, bootstrap-only input)

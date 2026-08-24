@@ -43,7 +43,7 @@ import pytest
 _FIXTURE_DIR: Final[Path] = (
     Path(__file__).resolve().parents[2] / "fixtures" / "seams" / "core_release"
 )
-_SYMBOLS_FIXTURE: Final[Path] = _FIXTURE_DIR / "0.46.9_expected_symbols.json"
+_SYMBOLS_FIXTURE: Final[Path] = _FIXTURE_DIR / "0.46.11_expected_symbols.json"
 _DISPATCH_FIXTURE: Final[Path] = _FIXTURE_DIR / "dispatch_kwargs_frozen.json"
 
 

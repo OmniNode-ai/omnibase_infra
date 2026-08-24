@@ -130,6 +130,10 @@ def test_checked_in_manifest_is_exact_and_all_blockers_are_explicit() -> None:
     # -- vendors the watermark-persistence table BaseProjectionRunner's shared
     # _update_watermark() path needs; landed in omnibase_infra first per the
     # node-migration-vendor-parity-gate ordering, ahead of omnimarket#2092.
+    # +1 for OMN-15631's node_delegation_routing_reducer/0001_create_delegation_routing_tenant_overlay.sql
+    # -- vendors the v1(a) per-tenant delegation routing overlay table (tenant
+    # domain, additive, no RLS in v1(a)); landed in omnibase_infra first per
+    # the node-migration-vendor-parity-gate ordering, ahead of omnimarket#2116.
     # +1 for OMN-16316's
     # node_projection_tenant_credentials/0000_create_tenant_inference_credentials.sql
     # -- vendors the BYOK inference-credential-ref catalog table, domain
@@ -143,7 +147,11 @@ def test_checked_in_manifest_is_exact_and_all_blockers_are_explicit() -> None:
     # landed the field on the wire in omnibase_core). A separate forward
     # migration rather than an edit to 0000_create_intent_classification_events.sql
     # because that file's content SHA-256 is already pinned in the ledger.
-    assert len(result.declarations) == 104
+    # +1 for OMN-16293's node_savings_estimation_compute/0001_create_savings_signal_tables.sql
+    # -- new node-owned migration creating savings_injection_signals /
+    # savings_validator_catch_signals, the Postgres "projection surface" the
+    # savings-correlation periodic batch reads instead of an in-memory buffer.
+    assert len(result.declarations) == 106
     assert result.blocked == ()
     assert len(result.legacy_node_declarations) == 2
     assert len(result.cloud_aliases) == 30

@@ -40,8 +40,36 @@ class ModelGatewayAttachConfig(BaseModel):
     # trusted -- OMN-15918 R1: attach-time decode previously trusted claims
     # from a structurally-valid-but-unsigned/forged token.
     keycloak_jwks_ref: str = Field(default="gateway.attach.keycloak.jwks")
-    # Audience every attach token must carry.
+    # The audience every attach token must carry -- and, since OMN-16023,
+    # the ONLY audience it may carry. The validator asserts exact set
+    # equality rather than membership: a mapper that later adds a second
+    # audience to the ga-* client produces a dual-audience token, which a
+    # membership check (or a denylist of one known-bad broker audience)
+    # would pass and which invariant 4 of the OMN-15952 renewal design
+    # forbids outright.
     required_audience: str = Field(default="gateway-attach")
+    # OMN-16023: the maximum `exp - iat` this node will accept on a
+    # presented attach token, asserted by the validator regardless of what
+    # Keycloak was configured to issue. Without it, "900s max, never
+    # lengthened" is a convention an admin voids in one click: a realm
+    # accessTokenLifespan bump or a client-lifespan override silently
+    # widens every token minted thereafter and nothing on the validating
+    # side notices. Under the OMN-15952 re-grant loop that widening is
+    # re-minted roughly every 15 minutes per runtime, turning a one-time
+    # misconfiguration into continuous exposure.
+    #
+    # Three distinct bounds now live on this config and none of them is a
+    # synonym for another:
+    #   max_attach_token_lifetime_seconds (900s, here) -- the shape of a
+    #     presented TOKEN, asserted in the validator.
+    #   max_unverified_session_seconds (900s) -- how long a SESSION may go
+    #     un-revalidated, enforced in the heartbeat handler (OMN-16022).
+    #   max_session_ttl_seconds (3600s) -- how long a SESSION may live at
+    #     all, applied at attach.
+    # The first two share a value because both derive from the same fact
+    # (the ga-* client's 900s token lifetime); they are separate fields
+    # because they bound different things and are independently tunable.
+    max_attach_token_lifetime_seconds: int = Field(default=900, gt=0)
     # Session lifecycle. Heartbeat interval mirrors the forwarder's
     # liveness.heartbeat_interval_seconds (node_bus_forwarder_effect
     # contract.yaml) so link-health projections can share one cadence.

@@ -33,7 +33,7 @@ dependencies = [
     # below pulls the merged core #1439 (terminal delegation classes) AND the
     # merged core #1440 (runtime_fanout_resolver, OMN-14403) pre-release --
     # #1440 is a strict descendant of #1439 on core dev.
-    "omnibase-core==0.46.9",
+    "omnibase-core==0.46.11",
     "omnibase-spi==0.23.1",
     # OMN-14190: canonical OCC stamp schema lives in omnibase_compat (OMN-14223).
     "omnibase-compat==0.5.6",
@@ -227,7 +227,7 @@ dev = [
 
 [tool.uv]
 override-dependencies = [
-    "omnibase-core==0.46.9",
+    "omnibase-core==0.46.11",
     "omnibase-spi==0.23.1",
     "omnibase-compat==0.5.6",
 ]
@@ -604,6 +604,8 @@ node_event_bus_wiring_effect = "omnibase_infra.nodes.node_event_bus_wiring_effec
 node_event_forward_effect = "omnibase_infra.nodes.node_event_forward_effect"
 node_evidence_autoclose_sweep_effect = "omnibase_infra.nodes.node_evidence_autoclose_sweep_effect"
 node_gateway_attach_effect = "omnibase_infra.nodes.node_gateway_attach_effect"
+node_gateway_link_health_projection_compute = "omnibase_infra.nodes.node_gateway_link_health_projection_compute"
+node_gateway_link_health_write_effect = "omnibase_infra.nodes.node_gateway_link_health_write_effect"
 node_github_pr_poller_effect = "omnibase_infra.nodes.node_github_pr_poller_effect"
 node_gmail_archive_cleanup_effect = "omnibase_infra.nodes.node_gmail_archive_cleanup_effect"
 node_gmail_intent_poller_effect = "omnibase_infra.nodes.node_gmail_intent_poller_effect"

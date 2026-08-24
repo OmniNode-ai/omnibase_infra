@@ -164,10 +164,24 @@ jobs:
       # torch + uv-sync install; the previous ~8 min figure only held when the
       # same runner had a warm local cache. A shared registry cache lets any cold
       # runner import unchanged layers instead of rebuilding them.
+      #
+      # OMN-16406 (Layer 0b): pin a fixed builder `name` instead of letting
+      # setup-buildx-action generate a random one on every run. Without a
+      # pinned name, EVERY job on this self-hosted (non-ephemeral) fleet spun
+      # up its own `buildx_buildkit_<random>` container + `..._state` volume
+      # that was never torn down and never registered under a name any future
+      # job would reuse — invisible to `docker buildx ls` from that point on,
+      # and therefore unreachable by `docker builder prune`/`docker buildx
+      # prune`, which only reclaim cache belonging to a currently-registered
+      # builder. Pinning the name makes setup-buildx-action detect the
+      # existing instance and reuse it (idempotent `buildx use`) instead of
+      # creating a new one, so the fleet converges on ONE persistent,
+      # always-registered builder per driver instead of leaking one per job.
       - name: Set up Docker Buildx
         uses: docker/setup-buildx-action@v4
         with:
           driver: docker-container
+          name: onex-shared-buildkit
 
       - name: Verify Buildx driver
         run: |

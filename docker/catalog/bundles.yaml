@@ -12,10 +12,13 @@ core:
   includes: []
   inject_env:
     INFISICAL_ADDR: "http://infisical:8080"
+  # Only vars an operator can supply BEFORE the first bring-up belong here
+  # (OMN-16187). The Infisical machine identity is minted by
+  # scripts/setup-infisical-identity.sh at step 4 of bootstrap-infisical.sh,
+  # against the Infisical container these very services start — requiring it
+  # here made local bring-up impossible for a self-hosting operator. It now
+  # gates the runtime bundle, where its only consumer lives.
   inject_required_env:
-    - INFISICAL_CLIENT_ID
-    - INFISICAL_CLIENT_SECRET
-    - INFISICAL_PROJECT_ID
     - INFISICAL_ENCRYPTION_KEY
     - INFISICAL_AUTH_SECRET
 runtime-core:
@@ -83,7 +86,14 @@ runtime:
     - runtime-observability-projections
     - runtime-infrastructure
   inject_env: {}
-  inject_required_env: []
+  # OMN-16187: the Infisical machine identity gates the runtime lane, not core.
+  # runtime_host_process is its only consumer (config prefetch); requiring it
+  # here keeps the operator contract that the runtime never starts with prefetch
+  # silently skipped, while leaving `onex up core` bringable with local secrets.
+  inject_required_env:
+    - INFISICAL_CLIENT_ID
+    - INFISICAL_CLIENT_SECRET
+    - INFISICAL_PROJECT_ID
 observability:
   description: "LLM observability — Phoenix traces and evals"
   services:

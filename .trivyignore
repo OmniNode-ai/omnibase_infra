@@ -1,0 +1,36 @@
+# Expiring-ignore policy for fix-unavailable CVEs (OMN-16229).
+#
+# This file exists ONLY for vulnerabilities Trivy flags that have NO
+# upstream fix. A fix-available CVE must never be silenced here: Trivy's
+# image-build scan already runs with `ignore-unfixed: true`, so a fixed
+# vulnerability is never a candidate for this file in the first place, and
+# `scripts/ci/check_trivyignore_expiry.py` fails the build on any entry
+# whose `# reason:` is not exactly `no-upstream-fix`.
+#
+# Every entry is a 4-line metadata comment block IMMEDIATELY followed by the
+# bare vulnerability id Trivy reads. All four fields are mandatory and
+# validated by scripts/ci/check_trivyignore_expiry.py, wired as a required
+# step ahead of every Trivy scan (and as a fast PR-time check in ci.yml) --
+# a malformed OR expired entry fails the build:
+#
+#   # CVE: CVE-2024-12345
+#   # reason: no-upstream-fix
+#   # ticket: OMN-12345
+#   # expires: 2026-12-31
+#   CVE-2024-12345
+#
+# - `# CVE:` must equal the id line immediately below it (catches
+#   metadata/id drift).
+# - `# reason:` must be exactly `no-upstream-fix`.
+# - `# ticket:` must match `OMN-<digits>` -- every exemption traces to a
+#   tracking ticket.
+# - `# expires:` must be an ISO-8601 date STRICTLY in the future. Once it
+#   lapses, the build fails until a human re-triages: either the CVE still
+#   has no fix (bump `# expires:` under the same ticket) or a fix has
+#   shipped since (remove the entry and let Trivy's normal gate apply).
+#
+# Full policy: docs/patterns/security_patterns.md#container-image-cve-ignore-policy
+#
+# No entries below are currently exempted -- this file ships empty on
+# purpose (OMN-16229 DoD: do not pre-populate an ignore for any current
+# CVE).
