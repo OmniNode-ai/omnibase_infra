@@ -155,6 +155,9 @@ def test_hook_refuses_at_entry_when_an_override_var_is_inherited() -> None:
         "ENABLE_SMART_TESTS",
         "PREPUSH_ADJACENCY",
         "PREPUSH_PYTEST_ARGS",
+        # OMN-16489: this test exercises FIRST-entry behavior, so the recursion
+        # sentinel an outer hook run exports must not leak in.
+        "ONEX_PREPUSH_HOOK_ACTIVE",
     ):
         env.pop(leaky, None)
     # The variable under test, set deliberately.
@@ -190,7 +193,12 @@ def test_hook_rejection_matches_the_whole_prefix_class() -> None:
     """A future ``PREPUSH_ALLOW_SOMETHING_ELSE`` must be refused too, without
     anyone remembering to add it to a list."""
     env = dict(os.environ)
-    for leaky in ("PREPUSH_FULL_SUITE", "ENABLE_SMART_TESTS"):
+    for leaky in (
+        "PREPUSH_FULL_SUITE",
+        "ENABLE_SMART_TESTS",
+        # OMN-16489: first-entry behavior — strip the recursion sentinel.
+        "ONEX_PREPUSH_HOOK_ACTIVE",
+    ):
         env.pop(leaky, None)
     env["PREPUSH_ALLOW_NOT_YET_INVENTED"] = (
         "1"  # gate-override-read-ok: fixture arms the leak this test refuses
