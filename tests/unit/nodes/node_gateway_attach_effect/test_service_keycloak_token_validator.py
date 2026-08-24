@@ -320,8 +320,8 @@ class TestOmn16023ValidatorAssertions:
             ("iat", "1234567890"),
             ("iat", True),
             ("iat", 1234567890.5),
-            ("exp", str(int(time.time()) + 900)),
-            ("exp", int(time.time()) + 900.5),
+            ("exp", "4102444800"),
+            ("exp", 4102444800.5),
         ],
     )
     def test_rejects_non_integer_timestamp_claims(
