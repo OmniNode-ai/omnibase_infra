@@ -127,6 +127,18 @@ class ModelDlqReplayEngineConfig(BaseModel):
     limit: int | None = Field(default=None, gt=0)
     max_request_size: int = Field(default=10485760, gt=0)
     request_timeout_ms: int = Field(default=30000, gt=0)
+    # OMN-16422: this node is auto-wired as a PER-MESSAGE trigger on the DLQ
+    # topic (event_bus.subscribe_topics in contract.yaml) but HandlerDlqReplay
+    # is a whole-topic batch drain. On a self-feeding DLQ (replayed messages
+    # that keep failing land right back on the same topic) an unbounded run()
+    # never goes idle, never commits, and starves the outer trigger consumer's
+    # heartbeat. These three fields bound every invocation so it always
+    # returns quickly and always makes committed progress, regardless of how
+    # busy the topic is. Defaults apply to the live runtime construction
+    # (service_kernel.py) with no additional plumbing required.
+    max_records_per_run: int = Field(default=200, gt=0)
+    max_run_duration_seconds: float = Field(default=10.0, gt=0.0)
+    commit_every_n_records: int = Field(default=25, gt=0)
 
     @field_validator("bootstrap_servers")
     @classmethod
