@@ -314,6 +314,31 @@ class TestOmn16023ValidatorAssertions:
                 token, jwks, config, expected_issuer=EXPECTED_ISSUER
             )
 
+    @pytest.mark.parametrize(
+        ("claim_name", "claim_value"),
+        [
+            ("iat", "1234567890"),
+            ("iat", True),
+            ("iat", 1234567890.5),
+            ("exp", str(int(time.time()) + 900)),
+            ("exp", int(time.time()) + 900.5),
+        ],
+    )
+    def test_rejects_non_integer_timestamp_claims(
+        self,
+        config,
+        tenant_key,
+        jwks,
+        claim_name: str,
+        claim_value: object,
+    ) -> None:
+        """Signed tokens must carry real integer timestamps, not coercible values."""
+        token = sign_claims(tenant_key, _valid_claims(**{claim_name: claim_value}))
+        with pytest.raises(validator.TokenValidationError):
+            validator.verify_and_decode_claims(
+                token, jwks, config, expected_issuer=EXPECTED_ISSUER
+            )
+
     def test_lifetime_bound_is_not_the_session_ceiling(self, config) -> None:
         """The bound has its own constant, per the ticket's explicit requirement.
 

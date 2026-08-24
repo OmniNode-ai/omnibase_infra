@@ -104,6 +104,15 @@ def _assert_exact_audience(raw_audience: object, *, expected: str) -> None:
         )
 
 
+def _integer_timestamp_claim(claims: Mapping[str, object], name: str) -> int:
+    raw_claim = claims[name]
+    if isinstance(raw_claim, bool) or not isinstance(raw_claim, int):
+        raise TokenValidationError(
+            f"access_token {name} claim is not an integer timestamp"
+        )
+    return raw_claim
+
+
 def _assert_bounded_lifetime(
     claims: Mapping[str, object], *, max_lifetime_seconds: int
 ) -> None:
@@ -115,13 +124,8 @@ def _assert_bounded_lifetime(
     letting it through would leave the bound satisfied by arithmetic that
     means nothing.
     """
-    try:
-        issued_at = int(claims["iat"])  # type: ignore[call-overload]
-        expires_at = int(claims["exp"])  # type: ignore[call-overload]
-    except (TypeError, ValueError) as exc:
-        raise TokenValidationError(
-            "access_token iat/exp claims are not integer timestamps"
-        ) from exc
+    issued_at = _integer_timestamp_claim(claims, "iat")
+    expires_at = _integer_timestamp_claim(claims, "exp")
 
     lifetime_seconds = expires_at - issued_at
     if lifetime_seconds <= 0:
@@ -223,7 +227,7 @@ def verify_and_decode_claims(
         tenant_slug=str(claims["tenant_slug"]),
         principal_id=str(claims["principal_id"]),
         client_id=str(claims["azp"]),
-        expires_at_epoch=int(claims["exp"]),
+        expires_at_epoch=_integer_timestamp_claim(claims, "exp"),
     )
 
 
