@@ -470,6 +470,18 @@ def _new_database(srv: Server) -> str:
     name = f"omn15376_{uuid.uuid4().hex[:12]}"
     created = _psql(srv, "postgres", "-c", f"CREATE DATABASE {name}")
     assert created.returncode == 0, created.stderr
+    # Several node-owned migrations assert the operator-provisioned
+    # omninode_internal schema instead of creating it, matching the managed RDS
+    # lane where CREATE SCHEMA is not available to the migration role.
+    schema = _psql(
+        srv,
+        name,
+        "-v",
+        "ON_ERROR_STOP=1",
+        "-c",
+        "CREATE SCHEMA IF NOT EXISTS omninode_internal;",
+    )
+    assert schema.returncode == 0, schema.stderr
     for role in SEED_ROLES:
         # Roles are CLUSTER-wide; a shared CI server may already have them.
         # Passed as a psql variable rather than interpolated into the SQL text.
@@ -536,6 +548,12 @@ def _drift_seed_statements() -> list[str]:
     statements: list[str] = []
     for _migration_id, path in _corpus():
         for table in guarded_create_tables(path.read_text(encoding="utf-8")):
+            # This proof snapshots public-schema drift. Non-public tables carry
+            # separate topology/operator preconditions and assertions.
+            if "." in table.qualified_name and not table.qualified_name.startswith(
+                "public."
+            ):
+                continue
             if not table.columns or table.columns[0].generated:
                 continue
             first = table.columns[0]
