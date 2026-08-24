@@ -50,6 +50,15 @@
 #                        CI var name); default here is smart selection ON, because
 #                        the whole point of the local hook is the impacted subset.
 #   PREPUSH_FULL_SUITE   set non-empty to force the FULL suite.
+#
+# NOT an env override (OMN-16480): the host/capacity escape hatch. Any
+# `PREPUSH_ALLOW_*` variable found in the environment is REJECTED at entry --
+# see the rejection block below. The override is a single-use, repo+HEAD-scoped,
+# TTL-bounded, receipted grant minted with
+# `uv run python scripts/hooks/prepush_override_grant.py mint --reason '<why>'`.
+# Note the asymmetry: the two knobs above can only make the hook run MORE tests,
+# so they are not bypasses; an ALLOW override makes it accept WEAKER evidence,
+# which is why it may not be ambient.
 
 set -euo pipefail
 
@@ -58,6 +67,54 @@ die() {
   log "ERROR: $1"
   log "REMEDIATION: $2"
   exit 1
+}
+
+# =============================================================================
+# Inheritable env-var gate overrides are REJECTED AT ENTRY (OMN-16480)
+# =============================================================================
+# This gate's escape hatch used to BE an environment variable
+# (`PREPUSH_ALLOW_LOCAL_FULL_SUITE=1`). An environment variable is inherited by
+# every descendant process, is bound to no repo/commit/run, never expires, and
+# leaves no receipt -- so "permission to bypass the load gate once, for this
+# push" was really "permission for every process this shell ever spawns to
+# bypass this gate, silently". Same failure shape Rule 10 was hardened against
+# for `[skip-*` tokens (OMN-9731 / OMN-13388), one layer down.
+#
+# Measured: on 2026-08-23 that variable leaked from an operator shell into a
+# guard test's `env=dict(os.environ)` subprocess copy; this hook took its
+# degraded-override branch and recursively launched another full 44,064-test
+# suite, which reached the same test and recursed again -- ~9h03m, ~72% of all
+# serialized suite wall-clock in that window (friction report F-01/F-04).
+# Compliance was PERFECT that night: zero `[skip-*`, zero `--no-verify`. The
+# damage came from the sanctioned escape path being used correctly.
+#
+# So the variable is no longer an arming signal in either direction: its
+# presence is a HARD REFUSAL, not a bypass. That is what makes inheritance
+# harmless -- a leaked override can no longer arm anything, and it surfaces
+# immediately instead of silently disarming the gate for a whole process tree.
+# The supported path is a single-use, repo+HEAD-scoped, TTL-bounded, receipted
+# grant token: scripts/hooks/prepush_override_grant.py.
+#
+# Matched by PREFIX, not by one exact name, so a future
+# `PREPUSH_ALLOW_SOMETHING_ELSE` cannot quietly reopen the class.
+reject_inherited_env_overrides() {
+  local leaked
+  leaked="$(env | sed -n 's/^\(PREPUSH_ALLOW_[A-Za-z0-9_]*\)=..*/\1/p' | sort -u | tr '\n' ' ')"
+  leaked="${leaked% }"
+  [ -n "$leaked" ] || return 0
+  die "inheritable gate-override environment variable(s) present: ${leaked} -- these are REJECTED, never honored (OMN-16480)" \
+      "unset them in this shell (e.g. \`unset ${leaked%% *}\`), then, if this run genuinely must proceed on this host, mint a scoped single-use grant: \`uv run python scripts/hooks/prepush_override_grant.py mint --reason '<why>'\`. The grant is bound to this repo and this HEAD sha, expires in minutes, is consumed by the first guard that reads it (so no child process can reuse it), and appends a receipt line to .onex_state/prepush_override/receipts.jsonl"
+}
+reject_inherited_env_overrides
+
+# consume_override_grant CONTEXT -- 0 when a valid single-use grant was claimed
+# for this run, 1 otherwise. Delegates to the one implementation
+# (scripts/hooks/prepush_override_grant.py) that the pytest-side guard also
+# uses, so the two entry points can never drift apart on what a valid grant is.
+# Routed through `uv run` per the OMN-14953 pinned-interpreter gate.
+consume_override_grant() {
+  uv run python "${REPO_ROOT}/scripts/hooks/prepush_override_grant.py" \
+    consume --context "$1"
 }
 
 # =============================================================================
@@ -222,8 +279,8 @@ guard_full_suite_host() {
     if host_is_fit ""; then
       return 0
     fi
-    if [ -n "${PREPUSH_ALLOW_LOCAL_FULL_SUITE:-}" ]; then
-      log "WARNING: DEGRADED-CAPACITY OVERRIDE IN EFFECT (PREPUSH_ALLOW_LOCAL_FULL_SUITE set) -- running ${heavy_what} on '${host}' at/over the ${PREPUSH_LOAD_THRESHOLD}x-core load threshold. Treat any evidence from this run as WEAKER than a fit-host-run gate."
+    if consume_override_grant "degraded-capacity: ${heavy_what} on '${host}' at/over the ${PREPUSH_LOAD_THRESHOLD}x-core load threshold"; then
+      log "WARNING: DEGRADED-CAPACITY OVERRIDE IN EFFECT (single-use grant consumed) -- running ${heavy_what} on '${host}' at/over the ${PREPUSH_LOAD_THRESHOLD}x-core load threshold. Treat any evidence from this run as WEAKER than a fit-host-run gate."
       return 0
     fi
     local other_target other_label other_rc other_note
@@ -242,14 +299,14 @@ guard_full_suite_host() {
       *) other_note="${other_label} is ALSO at/over the load threshold" ;;
     esac
     die "${heavy_what} triggered on '${host}' (the designated host by identity), but its load is at/over the ${PREPUSH_LOAD_THRESHOLD}x-core threshold" \
-        "${other_note}. See docs/runbooks/200-build-lane-execution-pattern.md for the .201 gate-runner recipe, or set PREPUSH_ALLOW_LOCAL_FULL_SUITE=1 to run here anyway (degraded evidence -- do not use as a routine bypass)"
+        "${other_note}. See docs/runbooks/200-build-lane-execution-pattern.md for the .201 gate-runner recipe, or mint a single-use grant to run here anyway (degraded evidence -- do not use as a routine bypass): uv run python scripts/hooks/prepush_override_grant.py mint --reason '<why>'"
   fi
-  if [ -n "${PREPUSH_ALLOW_LOCAL_FULL_SUITE:-}" ]; then
-    log "WARNING: DEGRADED-HOST OVERRIDE IN EFFECT (PREPUSH_ALLOW_LOCAL_FULL_SUITE set) -- running ${heavy_what} on '${host}', NOT the designated .200 host ('${PREPUSH_200_HOSTNAME}'). This host has weaker isolation/headroom than .200; treat any evidence from this run as WEAKER than a .200-run gate. See docs/runbooks/200-build-lane-execution-pattern.md."
+  if consume_override_grant "degraded-host: ${heavy_what} on '${host}', not the designated .200 host '${PREPUSH_200_HOSTNAME}'"; then
+    log "WARNING: DEGRADED-HOST OVERRIDE IN EFFECT (single-use grant consumed) -- running ${heavy_what} on '${host}', NOT the designated .200 host ('${PREPUSH_200_HOSTNAME}'). This host has weaker isolation/headroom than .200; treat any evidence from this run as WEAKER than a .200-run gate. See docs/runbooks/200-build-lane-execution-pattern.md."
     return 0
   fi
   die "${heavy_what} triggered on host '${host}', not the designated .200 build host ('${PREPUSH_200_HOSTNAME}')" \
-      "push from .200 instead (ssh jonah@stickybeatz-studio.tail75df5e.ts.net, wrap remote commands as zsh -lc \"...\"; see docs/runbooks/200-build-lane-execution-pattern.md for the full pattern), OR set PREPUSH_ALLOW_LOCAL_FULL_SUITE=1 to run the full suite on this host anyway (visible, degraded-evidence override -- do not use as a routine bypass)"
+      "push from .200 instead (ssh jonah@stickybeatz-studio.tail75df5e.ts.net, wrap remote commands as zsh -lc \"...\"; see docs/runbooks/200-build-lane-execution-pattern.md for the full pattern), OR mint a single-use override grant to run the full suite on this host anyway (visible, receipted, degraded-evidence override -- do not use as a routine bypass): uv run python scripts/hooks/prepush_override_grant.py mint --reason '<why>'"
 }
 
 # -----------------------------------------------------------------------------
