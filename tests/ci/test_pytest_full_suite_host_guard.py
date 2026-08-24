@@ -229,7 +229,7 @@ def _write_synthetic_project(tmp_path: Path) -> Path:
 
 
 def _hermetic_subprocess_env(env_overrides: dict[str, str]) -> dict[str, str]:
-    """Base env for a guard-subprocess test, with ambient CI signals stripped.
+    """Base env for a guard-subprocess test, with ambient guard inputs stripped.
 
     The guard's ``is_ci_environment()`` check short-circuits BEFORE the host
     check (CI runners are never gated -- by design). If this OUTER test
@@ -237,16 +237,28 @@ def _hermetic_subprocess_env(env_overrides: dict[str, str]) -> dict[str, str]:
     pipeline), ``dict(os.environ)`` would carry ``CI``/``GITHUB_ACTIONS``
     into the subprocess and mask the host-check assertions below regardless
     of ``PREPUSH_200_HOSTNAME`` -- the subprocess would exit 0 via the CI
-    bypass, never reaching the code path under test. Strip both here so
+    bypass, never reaching the code path under test. Strip those here so
     subprocess behavior depends only on the explicit ``env_overrides``, not
     on whether this test itself happens to run under CI. Tests that want the
     CI-bypass behavior (e.g. ``test_direct_invocation_allowed_under_ci_env``)
     still get it -- they set ``CI``/``GITHUB_ACTIONS`` explicitly via
     ``env_overrides``, applied after this strip.
+
+    The subprocess must also discard the guard's local override and pytest's
+    ambient narrowing controls. Otherwise a developer shell exporting
+    ``PREPUSH_ALLOW_LOCAL_FULL_SUITE`` or ``PYTEST_ADDOPTS`` can bypass the
+    refusal path the subprocess tests are proving.
     """
     env = dict(os.environ)
-    env.pop("CI", None)
-    env.pop("GITHUB_ACTIONS", None)
+    for name in (
+        "CI",
+        "GITHUB_ACTIONS",
+        "PREPUSH_ALLOW_LOCAL_FULL_SUITE",
+        "PREPUSH_200_HOSTNAME",
+        "PYTEST_ADDOPTS",
+        "PYTEST_CURRENT_TEST",
+    ):
+        env.pop(name, None)
     env.update(env_overrides)
     return env
 

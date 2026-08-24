@@ -19,9 +19,8 @@ and confirmed as a live coverage hole in OMN-15977.
 This module is the SAME host-identity check the bash hook performs
 (``guard_full_suite_host`` in ``prepush_smart_tests.sh``), reimplemented so it
 can also fire for a bare/direct ``pytest`` invocation via
-``pytest_collection_modifyitems`` -- registered from the repo-root
-``conftest.py`` so it is loaded for every collection, regardless of which
-testpath is targeted.
+``pytest_configure`` -- registered from the repo-root ``conftest.py`` so it
+is loaded for every collection, regardless of which testpath is targeted.
 
 Design mirrors the bash guard's documented posture exactly (see
 ``prepush_smart_tests.sh`` OMN-15059 section):
