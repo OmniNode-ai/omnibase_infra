@@ -824,6 +824,35 @@ jobs:
           # so an unresolvable pin fails the gate instead of skipping silently.
           uv run python scripts/ci/check_pin_reachability.py --min-pins 5
 
+  # Expiring-ignore policy for fix-unavailable CVEs in the Trivy image gate
+  # (OMN-16229, companion to OMN-16228). The Trivy scan itself only runs at
+  # image-build time (push to main / workspace-candidate dispatch), which is
+  # too late for PR-time feedback on a stale .trivyignore. This job runs the
+  # SAME check (scripts/ci/check_trivyignore_expiry.py) on every PR so an
+  # expired or malformed entry is caught before merge, not just at the next
+  # build. Unconditional (no job-level `if:`, no path filter) -- the file is
+  # tiny and the check is dependency-free stdlib Python, so there is no cost
+  # to running it on every PR regardless of what changed.
+  trivyignore-expiry-check:
+    needs: occ-preflight
+    name: Trivyignore Expiry Check (OMN-16229)
+    # OMNI_RUNNER_SELECTOR_V1 — trusted CI defaults to self-hosted omnibase-ci; public forks default to ubuntu-latest
+    runs-on: >-
+      ${{
+        (github.event_name == 'pull_request' &&
+         github.event.pull_request.head.repo.full_name != github.repository)
+        && fromJSON(vars.OMNI_PUBLIC_PR_RUNS_ON_JSON || '["ubuntu-latest"]')
+        || fromJSON((github.event_name == 'merge_group' && vars.OMNI_REQUIRED_CI_RUNS_ON_JSON) || vars.OMNI_TRUSTED_CI_RUNS_ON_JSON || '["self-hosted","omnibase-ci"]')
+      }}
+    timeout-minutes: 5
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+
+      - name: Validate .trivyignore expiry
+        run: python3 scripts/ci/check_trivyignore_expiry.py .trivyignore
+
   # Lockfile CVE scan (OMN-16228) -- born from the 2026-08-18 sqlparse/Trivy
   # incident (OMN-16170): three HIGH sqlparse CVEs (fixed in 0.6.0) were only
   # caught by the Trivy scan on the built runtime IMAGE, deep in the deploy
@@ -2529,15 +2558,15 @@ jobs:
   # protection treats as never-satisfied — every omnibase_infra dev PR based on
   # 27478af4 or later was unmergeable until this repin.
   #
-  # 54356a83 is the current reusable workflow's pinned dev commit, reachable from
+  # d3182b6f is the current reusable workflow's pinned dev commit, reachable from
   # `dev` forever.
   merge-hold-gate:
     permissions:
       contents: read
       pull-requests: read
-    uses: OmniNode-ai/omnimarket/.github/workflows/merge-hold-gate-reusable.yml@54356a831e3d8876c69373cac884a3df2a5653f7
+    uses: OmniNode-ai/omnimarket/.github/workflows/merge-hold-gate-reusable.yml@d3182b6fb59b421383c793fcfea86a46b06b7b43
     with:
-      vocabulary_ref: 54356a831e3d8876c69373cac884a3df2a5653f7
+      vocabulary_ref: d3182b6fb59b421383c793fcfea86a46b06b7b43
       context_name: merge-hold-gate / evaluate
   # OMN-15361: P0/P8 fail-closed application database domain enforcement.
   # Unconditional after OCC eligibility and STRICT in ci_summary_gate.py: validators,
@@ -3320,6 +3349,14 @@ jobs:
           # Fail-closed inside the suite: with a Postgres in hand, a SKIP is a
           # vacuous green and is treated as an error.
           OMN15376_REQUIRE_PG: "1"
+          # OMN-16412: the fixture hard-rejects a non-loopback ambient DSN
+          # unless explicitly opted in. On this fleet's self-hosted runners
+          # the job itself executes inside a container, so the "Resolve
+          # Postgres service host" step above falls through past 127.0.0.1 to
+          # the Docker bridge gateway (observed live: 172.18.0.1) -- that's
+          # this job's OWN freshly-provisioned `services.postgres` container,
+          # not a stray ambient var, so it gets the explicit opt-in here.
+          OMN15376_ALLOW_REMOTE_PG: "1"
         run: |
           uv run pytest \
             tests/integration/migrations/test_node_migration_shape_drift_omn15376.py \

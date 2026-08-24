@@ -193,3 +193,54 @@ contexts — one runs inside the job on whichever runner picked it up, the
 other runs host-side pre-job); they are kept in sync by comment
 cross-reference, the same pattern already used for the wedge-detection
 thresholds in `docker/runners/runner-monitor.sh`.
+
+## Layer 0b: buildx ephemeral-builder orphan sweep (OMN-16406)
+
+A structurally separate leak found during the same 2026-08-22 incident
+chain, orthogonal to Layers 0-2 above: `docker/setup-buildx-action` (or a
+direct `docker buildx build --driver docker-container` invocation) with no
+pinned builder `name` creates a NEW `buildx_buildkit_<name>` container +
+`<name>_state` cache volume on every invocation. Self-hosted runners are not
+ephemeral VMs, so nothing tears that container down when the job exits, and
+because the name is never reused it is never registered again in
+`docker buildx ls` — making it invisible to and unreachable by
+`docker builder prune`/`docker buildx prune`, which only reclaim cache
+belonging to a currently-registered builder. Manual sweeps on
+2026-08-22/23 found 3-5 such orphans per pass, several GB each, recurring
+within ~20 minutes of the previous cleanup.
+
+**Two-part fix, same pattern as Layers 1/2 above (prevent + reclaim):**
+
+1. **Prevent new orphans** — `.github/workflows/docker-build.yml`'s
+   `docker/setup-buildx-action` step (the sole call site in this repo using
+   the `docker-container` driver, which is the only driver that creates a
+   backing container) now pins `name: onex-shared-buildkit`. A pinned name
+   makes the action detect and reuse the existing builder instance instead
+   of generating a random one every run, so the fleet converges on ONE
+   persistent, always-registered builder instead of leaking one per job.
+2. **Reclaim existing orphans** — `scripts/buildx-orphan-sweep.sh`, driven
+   by `deploy/disk-gc/onex-buildx-orphan-sweep.timer` (systemd USER unit,
+   same install pattern as `onex-runner-disk-guard.timer`: install via
+   `bash deploy/disk-gc/install-buildx-orphan-sweep.sh` on `.201`, no sudo).
+   Removes a `buildx_buildkit_*` container (and its own
+   `buildx_buildkit_`-prefixed state volume) only when ALL three hold —
+   the exact criteria used in the live manual sweeps:
+   - **Unregistered**: the node name embedded in the container name is not
+     currently listed under `docker buildx ls`.
+   - **Idle**: a stopped container is trivially idle; a running one must
+     show 0% CPU AND byte-identical cumulative block I/O across two
+     samples ~60s apart (never kill a builder mid-build).
+   - **>60 minutes old** (`docker inspect .Created`) — gives a
+     just-created builder time to be claimed or finish its first job.
+
+   15-minute cadence (looser than the 2-minute admission-guard timer above
+   — this leak is continuous but low-grade, not the acute 15-20 minute
+   write-amplification window Layer 2 exists for).
+
+**Verification:**
+- `systemctl --user status onex-buildx-orphan-sweep.timer` on `.201` shows
+  the timer firing every 15 minutes.
+- `bash scripts/buildx-orphan-sweep.sh` (dry-run, default) prints candidates
+  without mutating; `--execute` actually removes; `--json` for a
+  machine-readable plan/result.
+- Regression/simulation tests: `tests/scripts/test_buildx_orphan_sweep.py`.

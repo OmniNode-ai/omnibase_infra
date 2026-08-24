@@ -33,11 +33,11 @@ COMPOSE_RENDER_ENV = {
     "INFISICAL_ENCRYPTION_KEY": "render-only-infisical-encryption-key-32",
     "INFISICAL_REDIS_URL": "redis://valkey:6379",
     "GITHUB_TOKEN": "render-only-github-token",
-    "GATEWAY_ATTACH_KEYCLOAK_INTROSPECTION_URL": (
-        "http://keycloak:8080/realms/omninode/protocol/openid-connect/token/introspect"
+    "GATEWAY_ATTACH_KEYCLOAK_INTROSPECTION_URL": _http_url(
+        "keycloak:8080/realms/omninode/protocol/openid-connect/token/introspect"
     ),
-    "GATEWAY_ATTACH_KEYCLOAK_JWKS_URL": (
-        "http://keycloak:8080/realms/omninode/protocol/openid-connect/certs"
+    "GATEWAY_ATTACH_KEYCLOAK_JWKS_URL": _http_url(
+        "keycloak:8080/realms/omninode/protocol/openid-connect/certs"
     ),
     "DEPLOY_AGENT_HMAC_SECRET": "render-only-deploy-agent-hmac-secret",
     "LINEAR_API_KEY": "render-only-linear-api-key",

@@ -18,6 +18,7 @@ Truthfulness invariants:
 from __future__ import annotations
 
 import logging
+import time
 from collections.abc import Mapping
 from datetime import UTC, datetime
 from typing import TYPE_CHECKING
@@ -142,20 +143,65 @@ class HandlerDlqReplay:
         )
 
     async def run(self) -> ModelDlqReplayRunResult:
-        """Consume the DLQ topic, replaying or quarantining each message."""
+        """Consume the DLQ topic for one BOUNDED batch (OMN-16422).
+
+        This handler is auto-wired as a PER-MESSAGE trigger on the DLQ topic
+        (``event_bus.subscribe_topics`` in ``contract.yaml``), but drains via
+        a persistent, whole-topic-shaped consumer group. Before this fix, a
+        single invocation looped until the topic went quiet for
+        ``consumer_timeout_ms`` (5s) before committing anything at all. On a
+        self-feeding DLQ -- messages that get replayed, fail again downstream,
+        and land right back on the same DLQ topic -- the topic never went
+        quiet: the loop never returned, never committed, and starved the
+        OUTER trigger consumer's heartbeat (observed live as repeated
+        ``OffsetCommit`` ``UnknownMemberIdError``), while every new DLQ
+        arrival independently piled another effectively-unbounded drain
+        attempt on top (OMN-16422 / OMN-16418).
+
+        The fix bounds every invocation two ways -- record count
+        (``max_records_per_run``, additionally clamped by an explicit
+        ``limit`` when one is set) and wall-clock
+        (``max_run_duration_seconds``) -- and commits incrementally every
+        ``commit_every_n_records`` processed records instead of only after
+        the loop goes idle. A bounded invocation always returns quickly
+        (restoring the outer consumer's heartbeat) and always makes committed
+        progress: the persistent group's committed offset now advances even
+        while the topic is continuously self-feeding, instead of staying
+        perpetually uncommitted.
+        """
         started_dependencies = await self._ensure_runtime_dependencies_started()
         try:
             results: list[ModelDlqReplayResult] = []
             count = 0
+            uncommitted = 0
             limit = self._config.limit
+            max_records = self._config.max_records_per_run
+            effective_limit = max_records if limit is None else min(limit, max_records)
+            commit_every = self._config.commit_every_n_records
+            deadline = time.monotonic() + self._config.max_run_duration_seconds
 
             async for message in self._consumer.consume_messages():
-                if limit is not None and count >= limit:
+                if count >= effective_limit:
                     break
+                if time.monotonic() >= deadline:
+                    logger.warning(
+                        "DLQ replay run hit its wall-clock bound (%.1fs) after "
+                        "%d records -- returning this bounded batch instead of "
+                        "continuing to drain (OMN-16422).",
+                        self._config.max_run_duration_seconds,
+                        count,
+                    )
+                    break
+
                 results.append(await self._process_message(message))
                 count += 1
+                uncommitted += 1
 
-            if results and not self._config.dry_run:
+                if not self._config.dry_run and uncommitted >= commit_every:
+                    await self._consumer.commit()
+                    uncommitted = 0
+
+            if uncommitted and not self._config.dry_run:
                 await self._consumer.commit()
 
             return self._summarize(results)

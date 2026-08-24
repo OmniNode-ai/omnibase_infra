@@ -1,0 +1,41 @@
+# SPDX-FileCopyrightText: 2025 OmniNode.ai Inc.
+# SPDX-License-Identifier: MIT
+#
+# onex-buildx-orphan-sweep.service — reclaims orphaned `docker buildx`
+# ephemeral builder containers + their backing cache volumes (OMN-16406,
+# "Layer 0b" of the disk-guard architecture).
+#
+# A systemd USER unit (NOT a lane container). One-shot pass, triggered by
+# onex-buildx-orphan-sweep.timer every 15 minutes. Runs EXECUTE mode (not
+# dry-run) — the safe-removal criteria (unregistered + idle two-sample +
+# >60min old) are conservative enough that this is meant to actually reclaim,
+# the same way onex-disk-gc.service runs live rather than dry-run on its
+# timer.
+#
+# Install (on .201, as the runtime user — NO sudo, user scope):
+#   bash deploy/disk-gc/install-buildx-orphan-sweep.sh
+#
+# Check:
+#   systemctl --user status onex-buildx-orphan-sweep.timer
+#   journalctl --user -u onex-buildx-orphan-sweep.service -f
+
+[Unit]
+Description=ONEX .201 buildx ephemeral-builder orphan sweep (OMN-16406)
+Documentation=https://github.com/OmniNode-ai/omnibase_infra
+After=docker.service
+
+[Service]
+Type=oneshot
+
+Environment="PATH=/usr/local/bin:/usr/bin:/bin"
+
+ExecStartPre=/bin/mkdir -p %h/.local/log/onex
+
+ExecStart=/bin/bash %h/Code/omni_home/omnibase_infra/scripts/buildx-orphan-sweep.sh --execute
+
+StandardOutput=journal
+StandardError=journal
+SyslogIdentifier=onex-buildx-orphan-sweep
+
+[Install]
+WantedBy=default.target

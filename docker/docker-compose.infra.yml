@@ -289,8 +289,8 @@ x-runtime-env: &runtime-env
   # Introspection (RFC 7662) and JWKS (RFC 7517) endpoints for the same
   # in-network Keycloak this block already targets via KEYCLOAK_ADMIN_URL --
   # container-to-container, never the browser-facing KEYCLOAK_ISSUER host.
-  # Values are explicit env inputs so Compose does not need nested default
-  # expansion, which is version-sensitive across runner hosts.
+  # Keep the URLs explicit so compose interpolation stays single-pass; the
+  # runtime contract owns the deployed topology and rejects nested defaults.
   GATEWAY_ATTACH_KEYCLOAK_INTROSPECTION_URL: ${GATEWAY_ATTACH_KEYCLOAK_INTROSPECTION_URL:?GATEWAY_ATTACH_KEYCLOAK_INTROSPECTION_URL must be set in ~/.omnibase/.env}
   GATEWAY_ATTACH_KEYCLOAK_JWKS_URL: ${GATEWAY_ATTACH_KEYCLOAK_JWKS_URL:?GATEWAY_ATTACH_KEYCLOAK_JWKS_URL must be set in ~/.omnibase/.env}
   ONEX_SERVICE_CLIENT_ID: ${ONEX_SERVICE_CLIENT_ID:-onex-service}
