@@ -615,18 +615,20 @@ def test_stability_lane_volumes_do_not_reuse_production_names() -> None:
 
 @pytest.mark.unit
 def test_stability_runbook_is_validation_only() -> None:
-    """OMN-16557: pre-existing break from OMN-16307 (#2891, merged to dev), which
-    thinned this runbook to a knowledge-base pointer stub without updating this
-    test's content assertions -- caught here by the governed pre-push selector's
-    full-suite escalation, unrelated to this PR's own gateway-canary-probe scope.
-    The detailed validation-only claims this test used to assert against now
-    live in the knowledge base; this repo's own test can only assert that the
-    stub still points there, not the doctrine content itself.
+    """OMN-16307 (commit eee34b5c2, PR #2891) thinned this runbook to a
+    knowledge-base pointer stub. The validation-only prose this test used to
+    check line-by-line now lives in knowledge-base, out of this repo's test
+    authority (OMN-16556). What this repo can still assert: the legacy
+    operational claims the original runbook explicitly disclaimed must never
+    resurface locally, and the stub must genuinely point somewhere real
+    rather than just being empty or broken.
     """
     runbook = RUNBOOK_FILE.read_text(encoding="utf-8")
 
     assert "install-infra-watchdog" not in runbook
     assert "systemctl" not in runbook
-    assert "Migrated to the OmniNode knowledge base" in runbook
-    assert "stability-test-runtime-lane.md" in runbook
+    assert "`.201`" not in runbook
+
+    assert "knowledge base" in runbook.lower()
     assert "https://github.com/OmniNode-ai/knowledge-base" in runbook
+    assert "stability-test-runtime-lane" in runbook
