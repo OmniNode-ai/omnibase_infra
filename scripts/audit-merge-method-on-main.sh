@@ -63,10 +63,13 @@ REPOS=(
 # actual mechanism behind "the audit is always red so it gets tuned out" —
 # not a missing/expired CROSS_REPO_PAT (verified present + functioning on
 # every sampled run in that window).
-declare -A ALLOWLISTED_TWO_PARENT_SHAS=(
-  ["11a040da"]="OMN-15028 — ancestry bridge, one-time merge-commit exception"
-  ["d6ef368d"]="OMN-15028 — record main ancestry for promotion"
-)
+allowlisted_two_parent_reason() {
+  case "$1" in
+    11a040da) echo "OMN-15028 — ancestry bridge, one-time merge-commit exception" ;;
+    d6ef368d) echo "OMN-15028 — record main ancestry for promotion" ;;
+    *) return 1 ;;
+  esac
+}
 
 usage() {
   sed -n '2,30p' "$0"
@@ -170,8 +173,8 @@ for repo in "${REPOS[@]}"; do
   while IFS= read -r line; do
     [[ -z "$line" ]] && continue
     sha="${line%%  *}"
-    if [[ -n "${ALLOWLISTED_TWO_PARENT_SHAS[$sha]+set}" ]]; then
-      allowed+="$line  [ALLOWLISTED: ${ALLOWLISTED_TWO_PARENT_SHAS[$sha]}]"$'\n'
+    if reason="$(allowlisted_two_parent_reason "$sha")"; then
+      allowed+="$line  [ALLOWLISTED: $reason]"$'\n'
     else
       unallowed+="$line"$'\n'
     fi

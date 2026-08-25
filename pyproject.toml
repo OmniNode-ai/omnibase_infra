@@ -213,7 +213,7 @@ dev = [
     # bus) plus tests/integration/test_dispatch_roundtrip.py; the runtime itself is
     # on aiokafka, not this client. A 3.x migration is its own change with its own
     # proof, not a rider on a CVE unblock. Ceiling lifts when that migration lands.
-    "kafka-python>=2.3.2,<3.0.0",  # Kafka client for integration testing
+    "kafka-python>=2.3.2,<4.0.0",  # Kafka client for integration testing
     "pytest-httpserver>=1.1.0,<2.0.0",  # Local mock HTTP server for integration tests
 
     # Additional type stubs for better mypy coverage
