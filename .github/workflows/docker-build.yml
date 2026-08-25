@@ -3,6 +3,11 @@
 #
 # This workflow runs Docker-specific tests separately from the main test suite
 # to ensure proper Docker/BuildKit setup and avoid pytest-xdist worker crashes.
+#
+# OMN-16511 (Stage 0a canary): comment-only touch to qualify this file's own
+# pull_request path filter (`.github/workflows/docker-build.yml`) so the
+# repo-scoped OMNI_DOCKER_CI_RUNS_ON_JSON hosted-runner seam can be exercised
+# without editing any docker/** build content. No functional change.
 
 name: Docker Build
 

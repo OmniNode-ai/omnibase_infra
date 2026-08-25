@@ -3,6 +3,12 @@
 
 name: Application ACL PostgreSQL 16 Proof
 
+# OMN-16511 (Stage 0a canary): comment-only touch to qualify this file's own
+# pull_request path filter (`.github/workflows/application-acl-postgres16-proof.yml`)
+# so the repo-scoped OMNI_DOCKER_CI_RUNS_ON_JSON hosted-runner seam can be
+# exercised without editing any docker/** proof content. No functional
+# change.
+
 on:
   pull_request:
     branches: [main, dev, develop]
