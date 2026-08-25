@@ -181,6 +181,14 @@ STRICT_GATE_JOBS: tuple[str, ...] = (
     # completes success/failure and a skip/absence here is anomalous --
     # correctly fails closed.
     "Lockfile CVE Scan (OMN-16228)",
+    # OMN-16516: structural (tomllib) fail-closed backstop for the
+    # 2026-08-23 mirror-leak incident (OMN-16162) -- a committed uv.lock
+    # resolving any package from a non-public registry/git/artifact host.
+    # THIS LINE IS THE MECHANISM, not the job's presence in ci.yml: the job
+    # has no job-level `if:` (unconditional, cheap, dependency-free), so it
+    # always completes success/failure and a skip/absence here is anomalous
+    # -- correctly fails closed.
+    "Lockfile Registry Allowlist (OMN-16516)",
 )
 
 # Gates the old ci-summary accepted as ``success`` OR ``skipped``. Each carries

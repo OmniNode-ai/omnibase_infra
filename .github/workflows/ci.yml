@@ -1029,6 +1029,64 @@ jobs:
         if: steps.relevant.outputs.relevant != 'true'
         run: echo "pyproject.toml/uv.lock unchanged in this diff -- skipping the substantive scan (job still reports success, not skipped)."
 
+  # Lockfile registry-host allowlist (OMN-16516) -- structural (tomllib, not
+  # regex) fail-closed backstop for the 2026-08-23 mirror-leak incident
+  # (OMN-16162, docs/plans/2026-08-23-cloud-ci-offload-plan.md Stage 1): a
+  # single bot commit baked 783 `source = { registry = ... }` lines into
+  # onex_change_control/uv.lock pointing at the Tailscale-only devpi mirror
+  # omninode-pc.tail75df5e.ts.net:3141 -- 100% of the file's registry lines,
+  # 0 at pypi.org. Any runner without tailnet access hard-fails `uv sync
+  # --locked` at resolution, regardless of runner label or cache state.
+  #
+  # This gate is independent of, and does not substitute for, sanitizing the
+  # known lock-generating workflows (OMN-16517) or a repo-level public-index
+  # pin (OMN-16518) -- it catches a re-leaked lock from ANY channel,
+  # including ones not yet identified. THIS JOB HAS NO job-level `if:`
+  # (unconditional, cheap, dependency-free -- a single-file TOML parse), so
+  # it always completes success/failure; a skip/absence here is anomalous
+  # and correctly fails closed, same STRICT_GATE_JOBS shape as
+  # "Pin Reachability (OMN-15538)" and "Lockfile CVE Scan (OMN-16228)" above.
+  lockfile-registry-allowlist:
+    needs: occ-preflight
+    if: always()
+    name: Lockfile Registry Allowlist (OMN-16516)
+    # OMNI_RUNNER_SELECTOR_V1 — trusted CI defaults to self-hosted omnibase-ci; public forks default to ubuntu-latest
+    runs-on: >-
+      ${{
+        (github.event_name == 'pull_request' &&
+         github.event.pull_request.head.repo.full_name != github.repository)
+        && fromJSON(vars.OMNI_PUBLIC_PR_RUNS_ON_JSON || '["ubuntu-latest"]')
+        || fromJSON((github.event_name == 'merge_group' && vars.OMNI_REQUIRED_CI_RUNS_ON_JSON) || vars.OMNI_TRUSTED_CI_RUNS_ON_JSON || '["self-hosted","omnibase-ci"]')
+      }}
+    # Matches the lightweight-gate baseline used elsewhere in this file
+    # (fingerprint-check, demo-loop-gate, lockfile-cve-scan) for setup-variance
+    # headroom; the check itself is a single in-process TOML parse.
+    timeout-minutes: 15
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+
+      - name: Setup Python and uv
+        uses: ./.github/actions/setup-python-uv
+        with:
+          python-version: ${{ env.PYTHON_VERSION }}
+          uv-version: ${{ env.UV_VERSION }}
+          cache-version: ${{ env.CACHE_VERSION }}
+          cache-enabled: "false"
+
+      - name: Every uv.lock package source must resolve to an allowlisted public host
+        run: |
+          echo "================================================================"
+          echo "Lockfile Registry Allowlist (OMN-16516)"
+          echo "================================================================"
+          # --min-packages is the anti-vacuity floor (same shape as pin-
+          # reachability's --min-pins): this repo's uv.lock carries ~196
+          # packages at the time this gate was added, so 20 is a floor far
+          # below any plausible legitimate lockfile size, not a live count
+          # that needs updating on every dependency bump.
+          uv run python scripts/ci/check_lockfile_registry_allowlist.py uv.lock --min-packages 20
+
   # Dep-provenance content-lineage gate (OMN-15604) -- a [tool.uv.sources]
   # git-pinned rev must build the SAME src/ tree as the released tag its
   # PyPI version string declares, even when the line carries a
