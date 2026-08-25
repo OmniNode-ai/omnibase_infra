@@ -379,7 +379,7 @@ jobs:
         run: |
           uv run pytest tests/integration/docker/ \
             --timeout="${OMNI_DOCKER_BUILD_TIMEOUT_SECONDS}" \
-            --timeout-method=thread \
+            --timeout-method=signal \
             --tb=short \
             --junitxml=docker-tests.xml \
             -v

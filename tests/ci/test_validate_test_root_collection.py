@@ -398,7 +398,7 @@ def test_positional_pytest_args_ignores_options_and_gh_expressions() -> None:
         "  --group ${{ matrix.split }} \\\n"
         "  -n 2 --dist loadgroup \\\n"
         "  --timeout=60 \\\n"
-        "  --timeout-method=thread \\\n"
+        "  --timeout-method=signal \\\n"
         "  --tb=short \\\n"
         "  --store-durations \\\n"
         "  --junitxml=junit-${{ matrix.split }}.xml\n"

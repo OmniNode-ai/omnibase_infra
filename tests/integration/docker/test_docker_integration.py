@@ -92,7 +92,7 @@ SHUTDOWN_TIMEOUT = int(os.getenv("OMNI_DOCKER_SHUTDOWN_TIMEOUT_SECONDS", "120"))
 
 # Headroom above BUILD_TIMEOUT for the pytest-level per-test timeout marker.
 # OMN-15567: nightly-integration.yml invokes the whole suite with a blanket
-# `pytest --timeout=300 --timeout-method=thread`, sized for the rest of the
+# `pytest --timeout=300 --timeout-method=signal`, sized for the rest of the
 # suite. Without a per-test `@pytest.mark.timeout(...)` override, that 300s
 # CLI ceiling silently pre-empts BUILD_TIMEOUT (default 1200s) and kills a
 # cold-cache `docker build` long before the subprocess-level timeout the test

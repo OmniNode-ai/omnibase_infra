@@ -1702,7 +1702,7 @@ jobs:
             --group ${{ matrix.split }} \
             -n 2 --dist loadgroup \
             --timeout=60 \
-            --timeout-method=thread \
+            --timeout-method=signal \
             --tb=short \
             --junitxml=junit-${{ matrix.split }}.xml
 
@@ -1733,7 +1733,7 @@ jobs:
             --group ${{ matrix.split }} \
             -n 2 --dist loadgroup \
             --timeout=60 \
-            --timeout-method=thread \
+            --timeout-method=signal \
             --tb=short \
             --store-durations \
             --junitxml=junit-${{ matrix.split }}.xml

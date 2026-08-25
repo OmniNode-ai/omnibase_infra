@@ -83,7 +83,7 @@ jobs:
             -m "$FILTER" \
             -n 2 \
             --timeout=600 \
-            --timeout-method=thread \
+            --timeout-method=signal \
             --tb=short \
             --junitxml=nightly-junit.xml \
             -v
