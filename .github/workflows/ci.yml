@@ -3187,6 +3187,14 @@ jobs:
 
       - name: Run Kafka boundary compatibility tests
         working-directory: omnibase_infra
+        # ONEX_ALLOW_VENV_IMPURITY (OMN-15620): this job DELIBERATELY installs
+        # omniintelligence (and its transitive onex.nodes providers) editable
+        # into this venv, above, to run genuine cross-boundary compat tests --
+        # that is not the undeclared/hand-installed pollution the venv-purity
+        # gate (tests/conftest.py::pytest_configure) exists to catch, so this
+        # job opts out by name rather than the gate silently allowlisting it.
+        env:
+          ONEX_ALLOW_VENV_IMPURITY: "1"
         run: |
           echo "================================================================"
           echo "Kafka Boundary Compat Tests (OMN-3256)"

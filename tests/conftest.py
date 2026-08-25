@@ -92,9 +92,52 @@ def _strip_inherited_git_environment() -> None:
 
 
 def pytest_configure(config: pytest.Config) -> None:
-    """Make every test root independent of an invoking Git hook."""
+    """Make every test root independent of an invoking Git hook, and refuse
+    to collect a single test against an impure canonical venv.
+
+    The venv-purity check (OMN-15620) runs here -- before collection, before
+    any test module import, before any test executes -- so a hand-installed
+    sibling distribution (e.g. ``uv pip install omnimarket`` straight into
+    the canonical clone) surfaces as ONE named refusal instead of dozens of
+    unrelated ``DUPLICATE_REGISTRATION`` test failures with no pointer back
+    to the actual cause.
+
+    A small number of CI jobs (``kafka-boundary-compat``) DELIBERATELY
+    co-install a sibling ONEX repo into this exact venv to run genuine
+    cross-boundary tests (``tests/integration/event_bus/
+    test_kafka_boundary_compat.py``) -- that is not the undeclared-pollution
+    failure mode this gate exists to catch. Those jobs opt out by setting
+    ``ONEX_ALLOW_VENV_IMPURITY=1`` on the step that runs pytest, named and
+    logged loudly every time (never a silent bypass), mirroring
+    ``omnimarket_drift_guard.DRIFT_OVERRIDE_ENV``'s established pattern.
+    """
     del config
     _strip_inherited_git_environment()
+
+    from omnibase_infra.runtime.venv_purity import (
+        VENV_PURITY_OVERRIDE_ENV,
+        VenvPurityError,
+        assert_venv_purity,
+        find_undeclared_onex_providers,
+    )
+
+    if os.environ.get(VENV_PURITY_OVERRIDE_ENV) == "1":
+        undeclared = find_undeclared_onex_providers()
+        if undeclared:
+            names = ", ".join(f"{p.name}=={p.version}" for p in undeclared)
+            logging.getLogger(__name__).warning(
+                "OMN-15620 venv-purity gate OVERRIDDEN because %s=1 -- "
+                "proceeding with undeclared ONEX-node providers present: %s. "
+                "Results touching those providers' nodes are NOT gate evidence.",
+                VENV_PURITY_OVERRIDE_ENV,
+                names,
+            )
+        return
+
+    try:
+        assert_venv_purity()
+    except VenvPurityError as exc:
+        pytest.exit(f"OMN-15620 venv-purity gate: {exc}", returncode=1)
 
 
 @pytest.fixture(autouse=True)

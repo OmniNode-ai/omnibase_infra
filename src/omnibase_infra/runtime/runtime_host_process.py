@@ -1886,6 +1886,20 @@ class RuntimeHostProcess:
 
         log_and_verify_versions()
 
+        # Step 0b: Verify the canonical venv carries no undeclared ONEX-node
+        # provider (OMN-15620). Undeclared sibling co-installs collide with
+        # declared providers of the same node identity in auto-wiring
+        # discovery below and manufacture unexplained runtime failures; catch
+        # it here, named, before discovery ever runs. Deliberately NOT
+        # overridable via ONEX_ALLOW_VENV_IMPURITY (unlike the
+        # tests/conftest.py::pytest_configure collection-time gate, which a
+        # handful of CI jobs legitimately opt out of for cross-boundary
+        # tests) -- a REAL runtime boot should never tolerate an impure venv,
+        # test or production.
+        from omnibase_infra.runtime.venv_purity import assert_venv_purity
+
+        assert_venv_purity()
+
         # Step 1: Validate architecture compliance FIRST (OMN-1138)
         # This runs before event bus starts or handlers are wired to ensure
         # clean failure without partial state if validation fails
