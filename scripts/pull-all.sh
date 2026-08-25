@@ -317,11 +317,30 @@ _pull_one() {
   before_main=$(git -C "$dir" rev-parse --verify --quiet refs/heads/main || true)
   before_dev=$(git -C "$dir" rev-parse --verify --quiet refs/heads/dev || true)
 
-  if ! output=$(git -C "$dir" fetch --prune origin main dev 2>&1); then
-    echo "  FAILED   $repo (fetch main/dev)"
-    echo "           $output"
-    echo "FAILED" > "$result_file"
-    return
+  # OMN-16502: `git fetch origin main dev` fails WHOLESALE when either ref is
+  # absent on origin. Most registry repos carry both branches, but a few
+  # (e.g. omnigemini) are main-only -- probe before fetching so a genuinely
+  # main-only repo is fetched/ff'd on main alone and reported OK, instead of
+  # failing the fetch stage on every run.
+  local dev_on_remote=1
+  if ! git -C "$dir" ls-remote --exit-code --heads origin dev >/dev/null 2>&1; then
+    dev_on_remote=0
+  fi
+
+  if [[ "$dev_on_remote" == "1" ]]; then
+    if ! output=$(git -C "$dir" fetch --prune origin main dev 2>&1); then
+      echo "  FAILED   $repo (fetch main/dev)"
+      echo "           $output"
+      echo "FAILED" > "$result_file"
+      return
+    fi
+  else
+    if ! output=$(git -C "$dir" fetch --prune origin main 2>&1); then
+      echo "  FAILED   $repo (fetch main)"
+      echo "           $output"
+      echo "FAILED" > "$result_file"
+      return
+    fi
   fi
 
   if ! output=$(_checkout_and_ff "$dir" main 2>&1); then
@@ -355,6 +374,20 @@ _pull_one() {
       return
     fi
     main_converged=1
+  fi
+
+  # OMN-16502: origin has no dev ref for this repo -- there is no dev leg to
+  # pull or switch to. Report main's outcome and leave the repo on main.
+  if [[ "$dev_on_remote" == "0" ]]; then
+    local main_summary
+    if [[ "$main_converged" == "1" ]]; then
+      main_summary="main converged to origin/main (non-ff; orphaned commits preserved)"
+    else
+      main_summary=$(_branch_summary "$dir" main "$before_main")
+    fi
+    echo "  OK       $repo ($main_summary; no dev branch on origin -- main-only repo; left on main)"
+    echo "OK" > "$result_file"
+    return
   fi
 
   if output=$(_checkout_and_ff "$dir" dev 2>&1); then
