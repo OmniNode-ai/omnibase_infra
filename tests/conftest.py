@@ -92,9 +92,25 @@ def _strip_inherited_git_environment() -> None:
 
 
 def pytest_configure(config: pytest.Config) -> None:
-    """Make every test root independent of an invoking Git hook."""
+    """Make every test root independent of an invoking Git hook, and refuse
+    to collect a single test against an impure canonical venv.
+
+    The venv-purity check (OMN-15620) runs here -- before collection, before
+    any test module import, before any test executes -- so a hand-installed
+    sibling distribution (e.g. ``uv pip install omnimarket`` straight into
+    the canonical clone) surfaces as ONE named refusal instead of dozens of
+    unrelated ``DUPLICATE_REGISTRATION`` test failures with no pointer back
+    to the actual cause.
+    """
     del config
     _strip_inherited_git_environment()
+
+    from omnibase_infra.runtime.venv_purity import VenvPurityError, assert_venv_purity
+
+    try:
+        assert_venv_purity()
+    except VenvPurityError as exc:
+        pytest.exit(f"OMN-15620 venv-purity gate: {exc}", returncode=1)
 
 
 @pytest.fixture(autouse=True)
