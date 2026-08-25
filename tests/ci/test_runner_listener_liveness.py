@@ -1609,23 +1609,38 @@ class TestFleetCanaryWorkflow:
 
 
 class TestRunbook:
-    """DoD: runbook states Docker-healthy is NOT sufficient evidence."""
+    """DoD: runbook states Docker-healthy is NOT sufficient evidence.
+
+    OMN-16307 thinned this file to a knowledge-base pointer as part of the
+    Wave-2 docs consolidation (same class of drift OMN-16537 fixed for
+    tests/scripts/test_deploy_gateway.py's runbook-guidance test). The
+    authoritative content now lives in the KB, not this repo, so these
+    assertions accept EITHER the original inline detail (pre-migration) OR the
+    KB-pointer redirect (post-migration) -- never neither.
+    """
 
     def test_runbook_exists_with_authoritative_signal_note(self) -> None:
         assert RUNBOOK.exists()
         content = RUNBOOK.read_text(encoding="utf-8")
-        assert "NOT sufficient" in content
-        assert "canary" in content.lower()
-        assert "OMN-13915" in content
+        assert "knowledge-base" in content or (
+            "NOT sufficient" in content
+            and "canary" in content.lower()
+            and "OMN-13915" in content
+        ), (
+            "runbook must either carry the Docker-healthy-is-NOT-sufficient "
+            "signal note inline, or point at the migrated KB runbook"
+        )
 
     def test_runbook_records_registry_crosscheck_before_restart_sweep(self) -> None:
         """OMN-15233 interim rule: the Docker-unhealthy count is not a
         degradation metric on this fleet. An operator who restart-sweeps off it
         alone repeats the 2026-07-27 false-positive sweep."""
         content = RUNBOOK.read_text(encoding="utf-8")
-        assert "OMN-15233" in content
-        assert "before ANY restart sweep" in content
-        assert "actions/runners" in content, (
-            "the runbook must name the registry probe the operator runs, not "
-            "just tell them to 'cross-check'"
+        assert "knowledge-base" in content or (
+            "OMN-15233" in content
+            and "before ANY restart sweep" in content
+            and "actions/runners" in content
+        ), (
+            "runbook must either name the registry probe the operator runs "
+            "inline, or point at the migrated KB runbook"
         )

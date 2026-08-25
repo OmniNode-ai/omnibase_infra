@@ -117,7 +117,7 @@ jobs:
   # evidence is missing or red, no runner-heavy validation jobs fan out.
   occ-preflight:
     # self-gating-ok: target is in omnibase_core, not a required check on omnibase_infra main
-    uses: OmniNode-ai/omnibase_core/.github/workflows/occ-preflight.yml@de01ec0964a2e666d739835b02957ae0f06d6a25
+    uses: OmniNode-ai/omnibase_core/.github/workflows/occ-preflight.yml@3608b195f9183b03e5dc58b03f325462896f1c0d
     permissions:
       contents: read
       pull-requests: read
@@ -273,6 +273,18 @@ jobs:
       # (shrink-only). SYNC with pre-commit hook 'mixed-category-routing'.
       - name: Check mixed-category routing gate (OMN-14605)
         run: PYTHONPATH=src uv run python -m omnibase_infra.validators.mixed_category_routing src/omnibase_infra
+
+      # OMN-16088 (split from OMN-15978 AC4): an operation_match handler_routing entry
+      # (carries `operation:`) with no `topic:`/`event_type:` scoping falls through to
+      # _topics_for_handler_entry's unscoped branch and is assigned EVERY subscribe
+      # topic on the contract, so N operation-scoped handlers each register for all N
+      # topics — a message on ANY topic reaches every handler, and the ones whose
+      # `operation` does not match crash or misfire (the pre-fix
+      # node_gateway_attach_effect shape, OMN-15978). Ratchet frozen in
+      # config/validation/operation_match_fanout_baseline.yaml (shrink-only). SYNC with
+      # pre-commit hook 'operation-match-fanout'.
+      - name: Check operation_match fan-out gate (OMN-16088)
+        run: PYTHONPATH=src uv run python -m omnibase_infra.validators.operation_match_fanout src/omnibase_infra
 
       - name: Check type-ignore budget gate (OMN-10822)
         run: PYTHONPATH=src uv run python -m omnibase_infra.validators.type_ignore_budget --max-violations 74 src/omnibase_infra

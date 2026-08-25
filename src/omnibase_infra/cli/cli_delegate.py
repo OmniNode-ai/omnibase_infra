@@ -95,6 +95,7 @@ from omnibase_infra.cli.receipt_mode import (
     default_emit_socket_path,
     run_receipt_mode,
 )
+from omnibase_infra.topics.platform_topic_suffixes import SUFFIX_DELEGATION_REQUEST
 
 logger = logging.getLogger(__name__)
 
@@ -214,8 +215,23 @@ def resolve_default_bus(*, kafka_bootstrap: str | None = None) -> tuple[str, str
 
     Only called when ``--bus`` is NOT explicitly supplied — an explicit
     ``--bus`` (kafka or inmemory) is never second-guessed by this probe.
+
+    OMN-16529: ``authority_topic=SUFFIX_DELEGATION_REQUEST`` is passed so
+    ``probe_kafka``'s AUTHORITATIVE tier is decided by live consumer-group
+    liveness on the exact topic this delegation is about to publish to,
+    rather than by comparing the caller's dialed host string against the
+    broker's advertised listener host — a check that is structurally blind
+    for any off-box caller (a Tailscale/MagicDNS-fronted broker advertises
+    its MagicDNS hostname, never the caller's LAN IP, so the two strings
+    never match no matter how healthy the broker is). ``HEALTHY`` already
+    passed unconditionally before this change, so this does not alter
+    on-box behavior; off-box it upgrades a correct-but-mislabelled HEALTHY
+    determination to the AUTHORITATIVE state that actually reflects "a live
+    consumer is bound and ready to serve this request right now."
     """
-    probe = probe_kafka(bootstrap_servers=kafka_bootstrap)
+    probe = probe_kafka(
+        bootstrap_servers=kafka_bootstrap, authority_topic=SUFFIX_DELEGATION_REQUEST
+    )
     if probe.state in (EnumProbeState.HEALTHY, EnumProbeState.AUTHORITATIVE):
         return "kafka", probe.reason
     return DEFAULT_BUS, f"{probe.state.name}: {probe.reason}"

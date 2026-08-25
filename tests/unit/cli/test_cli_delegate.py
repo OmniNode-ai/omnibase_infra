@@ -60,6 +60,7 @@ from omnibase_infra.cli.omnimarket_drift_guard import (
     DRIFT_OVERRIDE_ENV,
     check_omnimarket_drift,
 )
+from omnibase_infra.topics.platform_topic_suffixes import SUFFIX_DELEGATION_REQUEST
 
 pytestmark = pytest.mark.unit
 
@@ -700,7 +701,7 @@ class TestBusSelection:
         monkeypatch.setattr(
             cli_delegate,
             "probe_kafka",
-            lambda *, bootstrap_servers: ModelProbeResult(
+            lambda *, bootstrap_servers, authority_topic=None: ModelProbeResult(
                 state=EnumProbeState.AUTHORITATIVE,
                 reason="stub healthy",
                 backend_label="event_bus_kafka",
@@ -745,7 +746,7 @@ class TestBusSelection:
         monkeypatch.setattr(
             cli_delegate,
             "probe_kafka",
-            lambda *, bootstrap_servers: ModelProbeResult(
+            lambda *, bootstrap_servers, authority_topic=None: ModelProbeResult(
                 state=EnumProbeState.DISCOVERED,
                 reason="TCP connect to unreachable.example:9092 failed",
                 backend_label="event_bus_kafka",
@@ -1052,7 +1053,7 @@ class TestResolveDefaultBus:
         monkeypatch.setattr(
             cli_delegate,
             "probe_kafka",
-            lambda *, bootstrap_servers: ModelProbeResult(
+            lambda *, bootstrap_servers, authority_topic=None: ModelProbeResult(
                 state=EnumProbeState.HEALTHY,
                 reason="stub healthy",
                 backend_label="event_bus_kafka",
@@ -1071,7 +1072,7 @@ class TestResolveDefaultBus:
         monkeypatch.setattr(
             cli_delegate,
             "probe_kafka",
-            lambda *, bootstrap_servers: ModelProbeResult(
+            lambda *, bootstrap_servers, authority_topic=None: ModelProbeResult(
                 state=EnumProbeState.AUTHORITATIVE,
                 reason="stub authoritative",
                 backend_label="event_bus_kafka",
@@ -1081,6 +1082,56 @@ class TestResolveDefaultBus:
         bus, _reason = resolve_default_bus()
 
         assert bus == "kafka"
+
+    def test_offbox_healthy_broker_passes_delegation_authority_topic(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """OMN-16529 regression: the off-box-healthy scenario.
+
+        Live-reproduced (OMN-16529): an off-box LAN caller reaching a
+        Tailscale/MagicDNS-fronted broker via its plain LAN IP gets
+        ``probe_kafka(...) == HEALTHY`` forever (broker-identity string
+        match can never pass — the broker advertises its MagicDNS hostname,
+        never the caller's dialed IP) even though a live, ``Stable``
+        consumer group is genuinely bound to the delegation-request topic
+        and ready to serve. ``resolve_default_bus`` must:
+          (a) still select ``kafka`` on the (pre-existing) HEALTHY floor, and
+          (b) pass the delegation command topic through as
+              ``authority_topic`` so ``probe_kafka`` can resolve the
+              *correct* determination (AUTHORITATIVE via consumer-group
+              liveness) instead of silently accepting the mislabelled
+              HEALTHY-forever off-box symptom.
+
+        Fails under the pre-OMN-16529 ``resolve_default_bus``: it called
+        ``probe_kafka(bootstrap_servers=...)`` with no topic argument at
+        all, so this assertion on the received kwarg would find nothing to
+        check the fix against.
+        """
+        # kafka-fallback-ok: live-reproduced OMN-16529 fixture, not a real fallback
+        offbox_broker = "192.168.86.201:19092"  # kafka-fallback-ok
+        monkeypatch.setenv("KAFKA_BOOTSTRAP_SERVERS", offbox_broker)
+        seen: dict[str, object] = {}
+
+        def _probe(
+            *, bootstrap_servers: str, authority_topic: str | None = None
+        ) -> ModelProbeResult:
+            seen["bootstrap_servers"] = bootstrap_servers
+            seen["authority_topic"] = authority_topic
+            # Mirrors the live off-box symptom exactly: HEALTHY, never
+            # AUTHORITATIVE, via the broker-mismatch reason text.
+            return ModelProbeResult(
+                state=EnumProbeState.HEALTHY,
+                reason="Kafka reachable with 1621 topics but broker mismatch",
+                backend_label="event_bus_kafka",
+            )
+
+        monkeypatch.setattr(cli_delegate, "probe_kafka", _probe)
+
+        bus, reason = resolve_default_bus()
+
+        assert bus == "kafka"
+        assert seen["authority_topic"] == SUFFIX_DELEGATION_REQUEST
+        assert "broker mismatch" in reason
 
     @pytest.mark.parametrize(
         "state", [EnumProbeState.DISCOVERED, EnumProbeState.REACHABLE]
@@ -1097,7 +1148,7 @@ class TestResolveDefaultBus:
         monkeypatch.setattr(
             cli_delegate,
             "probe_kafka",
-            lambda *, bootstrap_servers: ModelProbeResult(
+            lambda *, bootstrap_servers, authority_topic=None: ModelProbeResult(
                 state=state,
                 reason=f"TCP reachable but topic list failed for {bootstrap_servers}",
                 backend_label="event_bus_kafka",
@@ -1116,7 +1167,9 @@ class TestResolveDefaultBus:
         monkeypatch.setenv("KAFKA_BOOTSTRAP_SERVERS", "env-broker.example:9092")
         seen: dict[str, str] = {}
 
-        def _probe(*, bootstrap_servers: str) -> ModelProbeResult:
+        def _probe(
+            *, bootstrap_servers: str, authority_topic: str | None = None
+        ) -> ModelProbeResult:
             seen["bootstrap_servers"] = bootstrap_servers
             return ModelProbeResult(
                 state=EnumProbeState.HEALTHY,
