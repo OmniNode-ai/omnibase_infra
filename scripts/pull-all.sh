@@ -56,7 +56,7 @@ STAGE_PLUGIN_CACHE="PENDING"
 STAGE_PRECOMMIT_HOOKS="PENDING"
 STAGE_FAILURES=()
 SUMMARY_EMITTED=0
-ROOT_BASHPID="$BASHPID"
+ROOT_BASHPID="${BASHPID:-$$}"
 
 # Aggregates are declared here (not at the aggregation step) so the EXIT-trap
 # summary can read them even when the script aborts before that step.
@@ -127,7 +127,7 @@ _emit_summary() {
 
 _on_exit() {
   local rc=$?
-  [[ "$BASHPID" == "$ROOT_BASHPID" ]] || return "$rc"
+  [[ "${BASHPID:-$$}" == "$ROOT_BASHPID" ]] || return "$rc"
   _emit_summary || true
   rm -rf "$RESULTS_DIR" || true
   return "$rc"
