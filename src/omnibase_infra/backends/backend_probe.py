@@ -38,24 +38,89 @@ def _tcp_reachable(host: str, port: int, timeout: float = 2.0) -> bool:
         return False
 
 
+def _has_live_consumer_group(admin: object, topic: str, *, timeout: float) -> bool:
+    """Return True when a ``Stable`` consumer group is bound to ``topic``.
+
+    Group IDs minted by ``derive_consumer_group_id`` / ``derive_service_group_id``
+    (``omnibase_core.event_bus.util_consumer_group``) carry a ``.__t.<topic>``
+    scope suffix for every topic-scoped subscription (``TOPIC_SCOPE_INFIX``). A
+    live, ``Stable`` group ending in that suffix is real wiring-truth evidence
+    that *something* is actively consuming this topic right now — independent
+    of which service/node owns it, and independent of what host/IP the caller
+    used to reach the broker.
+
+    Best-effort and probe-safe: any failure (timeout, unsupported broker API,
+    permission error, missing optional dependency) returns ``False`` rather
+    than raising. "Cannot confirm liveness" is never conflated with
+    "confirmed dead" — callers must treat a ``False`` return as ambiguous and
+    fall back to a weaker signal, never as a negative health verdict on its
+    own (see :func:`probe_kafka`'s Stage 3 authority precedence).
+    """
+    try:
+        from omnibase_core.event_bus.util_consumer_group import TOPIC_SCOPE_INFIX
+
+        future = admin.list_consumer_groups(  # type: ignore[attr-defined]
+            request_timeout=timeout
+        )
+        listing = future.result(timeout=timeout + 1.0)
+    except Exception:  # noqa: BLE001 — probe must never raise
+        return False
+
+    suffix = f"{TOPIC_SCOPE_INFIX}{topic}"
+    for group in getattr(listing, "valid", []):
+        try:
+            if group.group_id.endswith(suffix) and group.state.name == "STABLE":
+                return True
+        except AttributeError:
+            continue
+    return False
+
+
 def probe_kafka(
     *,
     bootstrap_servers: str | None = None,
     timeout: float = 2.0,
+    authority_topic: str | None = None,
 ) -> ModelProbeResult:
     """Probe Kafka/Redpanda backend health.
 
     Probe stages:
         1. TCP connect to first broker → REACHABLE
         2. Topic list via confluent_kafka AdminClient → HEALTHY
-        3. Brokers match env config → AUTHORITATIVE
+        3. Authority check → AUTHORITATIVE, in precedence order:
+           3a. ``authority_topic`` given and a ``Stable`` consumer group is
+               bound to it (:func:`_has_live_consumer_group`) — real
+               wiring-truth liveness, works identically on-box or off-box.
+           3b. Otherwise, brokers returned by the cluster match the
+               configured host string (the original OMN-7075 check).
 
     Auth failure at any stage results in REACHABLE (not HEALTHY).
+
+    OMN-16529: stage 3b (broker-identity string match) is structurally blind
+    for any off-box caller reaching the broker via an address the broker does
+    not itself advertise — e.g. a Tailscale/MagicDNS-fronted broker dialed by
+    its plain LAN IP always advertises the MagicDNS hostname back, never the
+    caller's dialed IP, so ``returned_brokers & configured_hosts`` is empty
+    even when the broker is genuinely healthy and fully authoritative for
+    this caller (confirmed live against ``.201``'s dev-lane redpanda: probe
+    state pinned at HEALTHY, reason "broker mismatch", 100% reproducible).
+    That check compares an off-box-unreachable SURFACE (a hostname string),
+    not a real signal of whether traffic published here will actually be
+    served. Stage 3a fixes this for any caller that names the specific topic
+    it intends to use (``resolve_default_bus`` does, for the delegation path)
+    by checking actual consumer-group liveness instead — the node-liveness
+    doctrine's "consumer groups are wiring truth". Callers that omit
+    ``authority_topic`` keep the exact pre-OMN-16529 behavior (stage 3b only).
 
     Args:
         bootstrap_servers: Comma-separated broker addresses.
             Defaults to KAFKA_BOOTSTRAP_SERVERS env var.
         timeout: TCP connection timeout in seconds.
+        authority_topic: Optional topic name. When supplied, a live ``Stable``
+            consumer group bound to this topic is sufficient for
+            AUTHORITATIVE, ahead of (and independent of) the broker-identity
+            check. Pass the exact topic the caller is about to publish to —
+            liveness on a different topic proves nothing about this one.
 
     Returns:
         ModelProbeResult with probe state and reason.
@@ -134,7 +199,23 @@ def probe_kafka(
             backend_label=backend_name,
         )
 
-    # Stage 3: Authority check — brokers returned match env config
+    # Stage 3a: Authority check — live consumer-group liveness (OMN-16529).
+    # Takes precedence over the broker-identity check below because it is a
+    # real liveness signal rather than a string comparison that is
+    # structurally blind off-box (see the OMN-16529 docstring note above).
+    if authority_topic and _has_live_consumer_group(
+        admin, authority_topic, timeout=timeout
+    ):
+        return ModelProbeResult(
+            state=EnumProbeState.AUTHORITATIVE,
+            reason=(
+                f"Kafka healthy with {topic_count} topics; a Stable consumer "
+                f"group is bound to {authority_topic!r}"
+            ),
+            backend_label=backend_name,
+        )
+
+    # Stage 3b: Authority check — brokers returned match env config
     try:
         returned_brokers = {b.host for b in cluster_metadata.brokers.values()}
         configured_hosts = {

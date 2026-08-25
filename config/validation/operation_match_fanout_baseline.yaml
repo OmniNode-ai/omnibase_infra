@@ -1,0 +1,79 @@
+# SPDX-FileCopyrightText: 2025 OmniNode.ai Inc.
+# SPDX-License-Identifier: MIT
+# OMN-16088 — frozen burn-down baseline for the operation_match fan-out gate.
+#
+# INVARIANT (omnibase_infra.validators.operation_match_fanout):
+#   an operation_match handler_routing entry (one that carries `operation:`) MUST
+#   either be scoped to a topic (`topic:` or `event_type:`) or be the ONLY topic its
+#   contract subscribes to. Any entry that falls through to the unscoped
+#   `_topics_for_handler_entry` branch (`entry.event_model is None -> return topics`)
+#   is assigned EVERY subscribe topic on the contract. Every other operation_match
+#   entry on the same contract independently resolves the identical full topic set, so
+#   N operation-scoped handlers each register for all N topics — a message on ANY
+#   topic reaches every handler, and the ones whose `operation` does not match crash
+#   or misfire while the container boots green. This is the exact shape OMN-15978
+#   fixed contract-side for node_gateway_attach_effect (3 operation_match entries, 0
+#   topic scoping, 3 subscribe topics -> all 3 handlers registered on all 3 topics,
+#   permanent HANDLER_ERROR); this gate is the generic AC4 split from that ticket's
+#   close-out so no OTHER/new contract can reintroduce the same shape.
+#
+# THIS IS A RATCHET, NOT AN EXEMPTION. It is SHRINK-ONLY:
+#   * an entry NOT listed here that fans out      -> FAIL (no new instances, ever);
+#   * an entry listed here that no longer fans out -> FAIL until removed
+#     (a fixed entry still listed is STALE = FAIL, so the list cannot rot).
+#
+# node_gateway_attach_effect is intentionally NOT listed below — OMN-15978 already
+# fixed it (each entry pinned to its own `topic:`), and it must keep passing this gate
+# unchanged as the regression proof (tests/ci/test_operation_match_fanout_gate.py).
+#
+# Fix disposition per entry below is annotated inline. Burn-down owner: file
+# individual follow-up tickets per contract when picked up; this baseline only
+# tracks what already existed live at gate authoring time (2026-08-25) so the gate
+# can land now and block growth immediately. End state is an empty list, at which
+# point the gate hard-fails on any fan-through entry.
+known_fanout_entries:
+  # node_artifact_change_detector_effect — 3 handlers, none topic-pinned, 2 subscribe
+  # topics: the LIVE OMN-15978-class defect (multiple operation-scoped handlers each
+  # independently fanned to the full topic set). Already tracked as MISSING_HANDLE in
+  # mixed_category_routing_baseline.yaml (these 3 handlers expose neither handle() nor
+  # handle_async(), so the fan-out is currently masked by a separate dispatch-entrypoint
+  # defect, not proven harmless).
+  - contract: node_artifact_change_detector_effect
+    handler: HandlerContractFileWatcher
+    operation: artifact.watch_contracts
+  - contract: node_artifact_change_detector_effect
+    handler: HandlerManualTrigger
+    operation: artifact.manual_trigger
+  - contract: node_artifact_change_detector_effect
+    handler: HandlerPRWebhookIngestion
+    operation: artifact.ingest_pr_webhook
+  # node_coding_agent_orchestrator — single handler, 4 subscribe topics, no topic
+  # pinning. Also tracked in mixed_category_routing_baseline.yaml as CLEAN (handle()
+  # branches on event_type internally), so the sole-handler fan-out is currently
+  # masked by in-handler dispatch, not a proven live defect. Fix: add explicit
+  # `topic:`/`event_type:` per concern, matching the OMN-14594 split already noted
+  # for the mixed-category gate.
+  - contract: node_coding_agent_orchestrator
+    handler: HandlerCodingAgentOrchestrator
+    operation: coding_agent.orchestrate
+  # node_dlq_replay_effect — single handler, 3 subscribe topics (events/intents/
+  # commands DLQ categories), no topic pinning. The one handler already drains all 3
+  # DLQ category topics by design (see contract.yaml description), so today there is
+  # no OTHER handler to misroute to; still flagged because the shape is silently
+  # unsafe the moment a second operation_match handler entry is added to this
+  # contract. Fix: three per-category topic_match entries, or document the
+  # single-handler multi-topic drain as an explicit exemption once
+  # `_topics_for_handler_entry` grows one.
+  - contract: node_dlq_replay_effect
+    handler: HandlerDlqReplay
+    operation: replay_dlq
+  # node_event_forward_effect — single handler, 3 subscribe topics, no topic pinning.
+  # Same sole-handler-today shape as node_dlq_replay_effect above.
+  - contract: node_event_forward_effect
+    handler: HandlerEventForward
+    operation: event.forward
+  # node_validation_ledger_projection_compute — single handler, 3 subscribe topics, no
+  # topic pinning. Same sole-handler-today shape as node_dlq_replay_effect above.
+  - contract: node_validation_ledger_projection_compute
+    handler: HandlerValidationLedgerProjection
+    operation: validation_ledger.project
