@@ -349,6 +349,22 @@ cases:
     test: tests/ci/test_check_lockfile_cve.py::TestOmn16170IncidentReplay::test_real_sqlparse_0_4_4_pin_is_rejected
     why: >-
       On 2026-08-18 Trivy correctly blocked a runtime image rebuild on 3 HIGH sqlparse CVEs (fixed in 0.6.0), but detection happened at image-build time -- deep in the deploy pipeline, with an entire staging rollout batch queued behind the one-line pin fix (omnibase_infra#2783). Before this guard existed, PR CI ran no scan of uv.lock at all, so the PR that introduced or kept the vulnerable sqlparse pin was an implicit false green: nothing in PR CI could have said no. The fixture is the real, live osv.dev `/v1/query` response for `sqlparse==0.4.4` (POST body `{"package": {"name": "sqlparse", "ecosystem": "PyPI"}, "version": "0.4.4"}` against the public, unauthenticated OSV API, re-fetchable by anyone) -- not a hand-typed reconstruction. It carries GHSA-f2ff-p2ww-7p4p, GHSA-prg7-hcfm-mfcr and GHSA-pwgv-4x5q-6m9f, three real HIGH-severity advisories fixed at 0.6.0 (the exact incident-matching set), plus GHSA-2m57-hf25-phgg (HIGH, fixed 0.5.0), GHSA-27jp-wm6q-gp25 (MODERATE) and PYSEC-2026-1940. The replay wraps those real `vulns[]` bytes in the structural `results[].packages[].vulnerabilities[]` envelope osv-scanner's own `--format=json` emits (only the envelope keys are constructed; every vulnerability byte inside is the captured osv.dev response verbatim) and drives the real `evaluate_osv_results()` classifier, requiring it to reject the pin. The companion negative control (`test_real_sqlparse_0_6_0_pin_is_accepted`) proves the guard is not stuck open: a clean scan result (no vulnerabilities reported, the shape osv-scanner produces once the pin is at the fixed 0.6.0 version) passes.
+  - id: omn16162-lockfile-mirror-leak
+    guard: scripts/ci/check_lockfile_registry_allowlist.py
+    incident: OMN-16162
+    regression_class: false_green
+    guard_verdict_on_artifact: reject
+    artifact:
+      fixture: tests/fixtures/omn-16162-lockfile-mirror-leak/onex_change_control_uv.lock.captured
+      sha256: 20f34f35475d7e0e3f158ffcd2b5b424a219a6992bbfb918b760043e72632e98
+    capture:
+      method: git-object
+      source: git-object:OmniNode-ai/onex_change_control@d0ada7dc7d1f0e2b0f2ca1e4d1734c55b77d46ea:uv.lock
+      captured_at: "2026-08-25T10:56:00Z"
+      captured_by: cloud-ci-offload-plan Stage 1 build (OMN-16516)
+    test: tests/ci/test_check_lockfile_registry_allowlist.py::TestOmn16162IncidentReplay::test_real_poisoned_occ_lockfile_is_rejected
+    why: >-
+      On 2026-08-23 a single commit (d0ada7dc7, the sibling-lock-refresh dependency-cascade bot) baked 783 `source = { registry = ... }` lines into onex_change_control/uv.lock, 100% of them pointing at the Tailscale-only devpi mirror omninode-pc.tail75df5e.ts.net:3141 and 0 at pypi.org. Before this guard existed, PR CI ran no host validation of committed lockfiles at all, so the PR that introduced the poisoned lock was an implicit false green -- nothing in PR CI could have said no. Every `uv sync --locked` job checking out onex_change_control on a runner without tailnet access then hard-failed at resolution, regardless of runner label or cache state; four separate CI jobs failed the same day across four separate tickets (OMN-16413/16427/16428/16431), and three were "fixed" by routing work *toward* the LAN-bound fleet rather than at the root cause -- the opposite of this plan's own cloud-offload thesis. The actual root cause was repaired hours later by an unrelated lane (OMN-16162/#6928), which is what makes this fixture safely committable: it is the exact byte-for-byte content of onex_change_control/uv.lock as it stood at the incident commit (git-object capture, sha256-pinned), not a hand-typed reconstruction. The replay drives the real check_lockfile() function against those captured bytes and requires it to reject all 62 poisoned source.registry entries -- the same 62/62 ratio the plan's own §1.1 FACT recorded. This guard is deliberately the fail-closed BACKSTOP (docs/plans/2026-08-23-cloud-ci-offload-plan.md Stage 1): sanitizing the known lock-generating workflows (OMN-16517) and pinning a repo-level public index (OMN-16518) close the channels that produced this specific leak, but this guard catches a re-leaked lock from ANY channel, including ones not yet identified.
   - id: omn16494-omnimarket-2106-concurrency-wedge
     guard: scripts/ci/pr_ci_zombie_detector.py
     incident: OMN-16494
