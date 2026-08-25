@@ -196,6 +196,33 @@ def _make_simple_repo_source(root: Path, name: str) -> Path:
     return repo
 
 
+def _make_main_only_repo_source(root: Path, name: str) -> Path:
+    """Create a minimal `<root>/<name>` repo whose bare `<root>/<name>.git`
+    upstream carries ONLY `main` -- no `dev` ref exists locally or on origin
+    (OMN-16502). Models `omnigemini`, the one registry repo that never had a
+    `dev` branch cut, left checked out on `main`, clean tree.
+    """
+    repo = root / name
+    repo.mkdir(parents=True)
+    (repo / "README.md").write_text(f"# {name}\n")
+
+    _git(["init", "-q", "--initial-branch=main"], cwd=repo)
+    assert (repo / ".git").is_dir(), (
+        f"OMN-14744 guard: `git init` did not create {repo / '.git'}"
+    )
+    _git(["-c", "user.email=t@t", "-c", "user.name=t", "add", "."], cwd=repo)
+    _git(
+        ["-c", "user.email=t@t", "-c", "user.name=t", "commit", "-q", "-m", "init"],
+        cwd=repo,
+    )
+
+    upstream = root / f"{name}.git"
+    _git(["init", "-q", "--bare", "--initial-branch=main", str(upstream)], cwd=root)
+    _git(["remote", "add", "origin", str(upstream)], cwd=repo)
+    _git(["push", "-q", "-u", "origin", "main"], cwd=repo)
+    return repo
+
+
 def _make_fake_infra_with_drift_stub(
     omni_home: Path,
     *,
@@ -498,6 +525,102 @@ class TestPullAllScript:
             # The bare repo has no main ref and no remote, so it will
             # report FAILED — that's expected. The key is no crash.
             assert result.returncode in (0, 1)
+
+
+@pytest.mark.unit
+class TestMainOnlyRepo:
+    """A canonical repo whose origin carries only `main` -- no `dev` branch
+    exists anywhere (OMN-16502; `omnigemini` is the live instance).
+
+    Field failure this closes: `_pull_one` ran `git fetch --prune origin main
+    dev` unconditionally, which fails WHOLESALE ("fatal: couldn't find remote
+    ref dev") when either ref is absent -- so a main-only repo was marked
+    FAILED on every single pull-all.sh run (the sole failure in the OMN-16500
+    proof run, 2026-08-24T23:37Z), dragging down `repos_failed` and the
+    process exit code even though nothing was actually wrong with the repo.
+    """
+
+    def test_main_only_repo_reports_ok_and_stays_on_main(self, tmp_path: Path) -> None:
+        omni_home = tmp_path / "omni_home"
+        omni_home.mkdir()
+        fake_home = tmp_path / "home"
+        fake_home.mkdir()
+
+        repo = _make_main_only_repo_source(omni_home, "omnigemini")
+
+        # Advance origin/main so the fetch+fast-forward has something real to
+        # prove, not just a no-op.
+        writer = tmp_path / "writer"
+        _git(
+            ["clone", "-q", str(omni_home / "omnigemini.git"), str(writer)],
+            cwd=tmp_path,
+        )
+        _commit_file(writer, "main-advance.txt", "main\n", "main advance")
+        _git(["push", "-q", "origin", "main"], cwd=writer)
+
+        result = _run_pull_all(omni_home, fake_home, repos=["omnigemini"])
+
+        assert result.returncode == 0, (
+            f"stdout={result.stdout!r} stderr={result.stderr!r}"
+        )
+        assert "OK       omnigemini" in result.stdout
+        assert "main-only repo" in result.stdout
+        assert "FAILED" not in result.stdout
+
+        current_branch = subprocess.check_output(
+            ["git", "branch", "--show-current"], cwd=repo, text=True
+        ).strip()
+        assert current_branch == "main"
+
+        main_sha = subprocess.check_output(
+            ["git", "rev-parse", "main"], cwd=repo, text=True
+        ).strip()
+        origin_main_sha = subprocess.check_output(
+            ["git", "rev-parse", "origin/main"], cwd=repo, text=True
+        ).strip()
+        assert main_sha == origin_main_sha
+
+        # No dev branch is fabricated locally for a main-only repo.
+        dev_ref = subprocess.run(
+            ["git", "show-ref", "--verify", "--quiet", "refs/heads/dev"],
+            cwd=repo,
+            check=False,
+        )
+        assert dev_ref.returncode != 0, (
+            "no local dev branch should exist for a main-only repo"
+        )
+
+        fields = _parse_result_line(result.stdout)
+        assert fields.get("overall") == "OK", f"fields={fields!r}"
+        assert fields.get("repos_ok") == "1", f"fields={fields!r}"
+        assert fields.get("repos_failed") == "0", f"fields={fields!r}"
+
+    def test_main_only_repo_mixed_with_normal_repo_exits_zero(
+        self, tmp_path: Path
+    ) -> None:
+        """AC: a full pull-all.sh run with a main-only repo present exits 0,
+        alongside a normal main+dev repo (OMN-16502)."""
+        omni_home = tmp_path / "omni_home"
+        omni_home.mkdir()
+        fake_home = tmp_path / "home"
+        fake_home.mkdir()
+
+        _make_main_only_repo_source(omni_home, "omnigemini")
+        _make_simple_repo_source(omni_home, "omnibase_core")
+
+        result = _run_pull_all(
+            omni_home, fake_home, repos=["omnigemini", "omnibase_core"]
+        )
+
+        assert result.returncode == 0, (
+            f"stdout={result.stdout!r} stderr={result.stderr!r}"
+        )
+        assert "OK       omnigemini" in result.stdout
+        assert "OK       omnibase_core" in result.stdout
+        fields = _parse_result_line(result.stdout)
+        assert fields.get("overall") == "OK", f"fields={fields!r}"
+        assert fields.get("repos_ok") == "2", f"fields={fields!r}"
+        assert fields.get("repos_failed") == "0", f"fields={fields!r}"
 
 
 @pytest.mark.unit
