@@ -15,54 +15,64 @@
 # Python dependency was therefore red on this gate by construction (OMN-16080,
 # OMN-16354 both diagnosed the identical mechanism and both concluded "the PR
 # owner must regenerate it themselves" -- impossible advice for a Dependabot
-# branch). This workflow is that missing owner: it regenerates the lock file
-# and pushes the fix directly onto the Dependabot branch, using the same
-# onexbot-occ-writer App-token pattern already proven by sibling-lock-refresh.yml
-# (an App-authored push, unlike one from the default GITHUB_TOKEN, retriggers
-# downstream `pull_request` workflows so the smoke gate re-runs and goes green).
+# branch).
+#
+# Deliberately NOT event-triggered off the PR: the elevated-context PR event
+# trigger that would give a workflow direct access to a PR's own definition is
+# repo-policy-prohibited outright (`scripts/audit-runner-routing.py`,
+# `config/runner_routing_policy.yaml` -- "untrusted fork code must never reach
+# self-hosted runners"), and a plain `pull_request` run triggered by
+# `dependabot[bot]` receives zero repo secrets regardless of fork status
+# (OMN-16152), so it could never mint the write token it needs. Instead this
+# runs on a schedule (+ manual `workflow_dispatch` backfill) and lists open
+# Dependabot PRs itself via `gh pr list` -- the workflow definition and every
+# script it runs always come from this trusted branch, never from a PR. The
+# only PR-authored bytes ever read are `pyproject.toml`/`uv.lock`, via
+# `git show` (never executed) -- see `scripts/ci/dependabot_lock_refresh.py`
+# for the full trust-boundary writeup. An App-authored push (unlike one from
+# the default GITHUB_TOKEN) retriggers downstream `pull_request` workflows, so
+# `runner-image-build-smoke` re-runs and goes green after the fix lands.
 #
 # This does NOT weaken the identity gate itself -- it only gives Dependabot the
-# same remediation a human author already has.
-#
-# `pull_request_target` (not `pull_request`) is required to reach the App-token
-# secrets: GitHub withholds all repo secrets from Dependabot-triggered
-# `pull_request` runs even on a same-repo branch (OMN-16152). `pull_request_target`
-# runs the workflow definition from the base branch (trusted) while only the
-# already-open PR's manifest diff is read -- no PR-authored code is executed,
-# only `scripts/ci/runner_image_identity.py`, which is checked out from the PR
-# head but is a pure stdlib script with a small, auditable diff surface
-# (Dependabot bumps never touch it).
+# same remediation path a human author already has.
 
 name: Dependabot Runner Image Lock Refresh
 
 on:
-  pull_request_target:
-    branches: [main, dev, develop]
-    paths:
-      - 'pyproject.toml'
-      - 'uv.lock'
+  schedule:
+    # Every 30 minutes -- cheap (no docker build, no uv sync), and a
+    # Dependabot PR sitting red for up to half an hour is a acceptable
+    # trade-off against the cost/complexity of a lower-latency trigger.
+    - cron: "*/30 * * * *"
   workflow_dispatch:
     inputs:
       pr_number:
-        description: "PR number to backfill (manual remediation for an already-open PR)."
-        required: true
+        description: "Optional: limit to one PR number (manual backfill of an already-open PR)."
+        required: false
 
 permissions:
   contents: read
 
 concurrency:
-  group: dependabot-runner-image-lock-refresh-${{ github.event.pull_request.number || github.event.inputs.pr_number }}
+  group: dependabot-runner-image-lock-refresh
   cancel-in-progress: false
 
 jobs:
   refresh:
-    name: Refresh runner image lock on Dependabot branch
-    if: >-
-      github.event_name == 'workflow_dispatch' ||
-      (github.actor == 'dependabot[bot]' &&
-       github.event.pull_request.head.repo.full_name == github.repository)
-    runs-on: ubuntu-latest
-    timeout-minutes: 10
+    name: Refresh runner image lock on Dependabot branches
+    # OMNI_RUNNER_SELECTOR_V1 -- no `pull_request` event on this trigger set,
+    # so this always resolves to the trusted self-hosted pool (same as
+    # sibling-lock-refresh.yml, which uses the identical selector for the
+    # identical reason: a scheduled/dispatch-only bot job with no fork PR
+    # shape to route around).
+    runs-on: >-
+      ${{
+        (github.event_name == 'pull_request' &&
+         github.event.pull_request.head.repo.full_name != github.repository)
+        && fromJSON(vars.OMNI_PUBLIC_PR_RUNS_ON_JSON || '["ubuntu-latest"]')
+        || fromJSON(vars.OMNI_TRUSTED_CI_RUNS_ON_JSON || '["self-hosted","omnibase-ci"]')
+      }}
+    timeout-minutes: 15
     steps:
       # OMN-16373: CROSS_REPO_PAT retirement -- mint a short-lived
       # onexbot-occ-writer App installation token. A push authored by an App
@@ -80,82 +90,21 @@ jobs:
           permission-contents: write
           permission-pull-requests: write
 
-      # Resolve the target PR's head ref/repo from the API rather than trusting
-      # event context alone -- covers both trigger shapes (pull_request_target
-      # already carries it; workflow_dispatch only carries the PR number) with
-      # one code path, and re-derives head.repo.full_name freshly for the
-      # manual-dispatch fork/safety check below.
-      - name: Resolve target PR
-        id: pr
-        env:
-          GH_TOKEN: ${{ steps.app-token.outputs.token }}
-          PR_NUMBER: ${{ github.event.pull_request.number || github.event.inputs.pr_number }}
-        run: |
-          set -euo pipefail
-          data="$(gh pr view "${PR_NUMBER}" --repo "${GITHUB_REPOSITORY}" --json number,headRefName,headRepository,headRepositoryOwner,author)"
-          head_ref="$(echo "${data}" | python3 -c 'import json,sys; print(json.load(sys.stdin)["headRefName"])')"
-          head_owner="$(echo "${data}" | python3 -c 'import json,sys; print(json.load(sys.stdin)["headRepositoryOwner"]["login"])')"
-          head_repo_name="$(echo "${data}" | python3 -c 'import json,sys; print(json.load(sys.stdin)["headRepository"]["name"])')"
-          {
-            echo "number=${PR_NUMBER}"
-            echo "head_ref=${head_ref}"
-            echo "head_full_name=${head_owner}/${head_repo_name}"
-          } >> "$GITHUB_OUTPUT"
-
-      # Defense in depth, independent of the job-level `if:` above: this step
-      # holds a repo-write token, so it must refuse to touch anything that
-      # isn't unambiguously a same-repo Dependabot branch -- regardless of
-      # which trigger shape (auto or manual backfill) invoked the job. Uses a
-      # GH-native step `if:` (not a shell string comparison) so two GH
-      # expressions are never compared inside `[[ ]]`.
-      - name: Verify target is a same-repo Dependabot branch
-        if: >-
-          steps.pr.outputs.head_full_name != github.repository ||
-          !startsWith(steps.pr.outputs.head_ref, 'dependabot/')
-        run: |
-          echo "::error::PR #${{ steps.pr.outputs.number }} head '${{ steps.pr.outputs.head_full_name }}:${{ steps.pr.outputs.head_ref }}' failed the same-repo Dependabot-branch check -- refusing to push."
-          exit 1
-
-      - name: Checkout PR head (onexbot-occ-writer app token)
+      - name: Checkout (onexbot-occ-writer app token so bot pushes trigger CI)
         uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
         with:
           token: ${{ steps.app-token.outputs.token }}
-          ref: ${{ steps.pr.outputs.head_ref }}
           persist-credentials: true
 
-      # scripts/ci/runner_image_identity.py + scripts/ci/ci_env_digest.py are
-      # pure stdlib (argparse/hashlib/json/pathlib/platform) -- no `uv sync`,
-      # no venv, needed to run them.
-      - name: Regenerate runner image lock
-        id: regen
+      # Pure stdlib (argparse/hashlib/json/pathlib/platform/shutil/subprocess/
+      # tempfile) -- no `uv sync`, no venv, needed to run this.
+      - name: Refresh runner image lock on open Dependabot PRs
+        env:
+          GH_TOKEN: ${{ steps.app-token.outputs.token }}
         run: |
           set -euo pipefail
-          python3 scripts/ci/runner_image_identity.py --mode generate
-          if git diff --quiet -- docker/runners/runner-image.lock.json; then
-            echo "changed=false" >> "$GITHUB_OUTPUT"
-            echo "runner-image.lock.json already fresh -- nothing to push."
-          else
-            echo "changed=true" >> "$GITHUB_OUTPUT"
-            git --no-pager diff -- docker/runners/runner-image.lock.json
+          ARGS=(--repo "${GITHUB_REPOSITORY}")
+          if [[ -n "${{ github.event.inputs.pr_number }}" ]]; then
+            ARGS+=(--pr "${{ github.event.inputs.pr_number }}")
           fi
-
-      - name: Commit and push
-        if: steps.regen.outputs.changed == 'true'
-        env:
-          GH_TOKEN: ${{ steps.app-token.outputs.token }}
-        run: |
-          set -euo pipefail
-          git config user.name "omninode-bot"
-          git config user.email "bot@omninode.ai"
-          git add docker/runners/runner-image.lock.json
-          git commit -m "chore(OMN-16553): regenerate runner image lock for dependency bump [bot]"
-          git push origin "HEAD:${{ steps.pr.outputs.head_ref }}"
-
-      - name: Comment on PR
-        if: steps.regen.outputs.changed == 'true'
-        env:
-          GH_TOKEN: ${{ steps.app-token.outputs.token }}
-        run: |
-          set -euo pipefail
-          gh pr comment "${{ steps.pr.outputs.number }}" --repo "${{ github.repository }}" \
-            --body "Regenerated \`docker/runners/runner-image.lock.json\` (OMN-16553): this PR's dependency-manifest bump flipped the runner-image identity binding, and Dependabot can't run repo scripts to fix it itself. Pushed the regenerated lock so \`runner-image-build-smoke\` re-runs green."
+          python3 scripts/ci/dependabot_lock_refresh.py "${ARGS[@]}"
