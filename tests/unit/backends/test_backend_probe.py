@@ -144,6 +144,177 @@ class TestKafkaProbe:
             result = probe_kafka(bootstrap_servers="localhost:9092")
             assert result.state == EnumProbeState.AUTHORITATIVE
 
+    def test_offbox_broker_mismatch_stays_healthy_without_authority_topic(
+        self,
+    ) -> None:
+        """OMN-16529: broker-identity mismatch (the off-box symptom) with no
+        ``authority_topic`` supplied preserves the exact pre-OMN-16529
+        behavior — HEALTHY, not AUTHORITATIVE. Live-reproduced: a
+        Tailscale/MagicDNS-fronted broker dialed by its plain LAN IP always
+        advertises the MagicDNS hostname back, so ``returned_brokers &
+        configured_hosts`` is empty even though the broker is genuinely
+        healthy.
+        """
+        mock_broker = MagicMock()
+        mock_broker.host = "omninode-pc.tail75df5e.ts.net"  # advertised, not dialed
+
+        mock_metadata = MagicMock()
+        mock_metadata.topics = {"topic1": None}
+        mock_metadata.brokers = {0: mock_broker}
+
+        mock_admin = MagicMock()
+        mock_admin.list_topics.return_value = mock_metadata
+
+        with (
+            patch(
+                "omnibase_infra.backends.backend_probe._tcp_reachable",
+                return_value=True,
+            ),
+            patch(
+                "confluent_kafka.admin.AdminClient",
+                return_value=mock_admin,
+            ),
+        ):
+            result = probe_kafka(
+                bootstrap_servers="192.168.86.201:19092"  # kafka-fallback-ok: live-reproduced OMN-16529 fixture, not a real fallback
+            )
+            assert result.state == EnumProbeState.HEALTHY
+            assert "broker mismatch" in result.reason
+
+    def test_offbox_broker_mismatch_with_live_consumer_group_is_authoritative(
+        self,
+    ) -> None:
+        """OMN-16529 regression: the off-box-healthy scenario, fixed.
+
+        Same broker-identity mismatch as above (still fails stage 3b), but
+        ``authority_topic`` is supplied and a ``Stable`` consumer group is
+        genuinely bound to it (mirrors the live group name found on .201's
+        dev-lane redpanda: ``local.runtime_config.delegation-orchestrator
+        .consume.1.0.0.__i.runtime-main.__t.<topic>``). Stage 3a must win:
+        AUTHORITATIVE via real wiring-truth liveness, not the broken
+        hostname-string comparison.
+
+        Fails under the pre-OMN-16529 ``probe_kafka``: ``authority_topic``
+        was not an accepted keyword argument at all.
+        """
+        target_topic = "onex.cmd.omnibase-infra.delegation-request.v1"
+
+        mock_broker = MagicMock()
+        mock_broker.host = "omninode-pc.tail75df5e.ts.net"
+
+        mock_metadata = MagicMock()
+        mock_metadata.topics = {"topic1": None}
+        mock_metadata.brokers = {0: mock_broker}
+
+        mock_group = MagicMock()
+        mock_group.group_id = (
+            "local.runtime_config.delegation-orchestrator.consume.1.0.0"
+            f".__i.runtime-main.__t.{target_topic}"
+        )
+        mock_group.state.name = "STABLE"
+        mock_listing = MagicMock()
+        mock_listing.valid = [mock_group]
+        mock_future = MagicMock()
+        mock_future.result.return_value = mock_listing
+
+        mock_admin = MagicMock()
+        mock_admin.list_topics.return_value = mock_metadata
+        mock_admin.list_consumer_groups.return_value = mock_future
+
+        with (
+            patch(
+                "omnibase_infra.backends.backend_probe._tcp_reachable",
+                return_value=True,
+            ),
+            patch(
+                "confluent_kafka.admin.AdminClient",
+                return_value=mock_admin,
+            ),
+        ):
+            result = probe_kafka(
+                bootstrap_servers="192.168.86.201:19092",  # kafka-fallback-ok: live-reproduced OMN-16529 fixture, not a real fallback
+                authority_topic=target_topic,
+            )
+            assert result.state == EnumProbeState.AUTHORITATIVE
+            assert target_topic in result.reason
+
+    def test_authority_topic_with_no_matching_group_falls_back_to_broker_match(
+        self,
+    ) -> None:
+        """No Stable group bound to ``authority_topic`` -> falls through to
+        stage 3b unchanged (fail-closed: absence of a liveness signal is
+        never treated as a positive determination on its own)."""
+        target_topic = "onex.cmd.omnibase-infra.delegation-request.v1"
+
+        mock_broker = MagicMock()
+        mock_broker.host = "localhost"  # matches dialed host -> stage 3b passes
+
+        mock_metadata = MagicMock()
+        mock_metadata.topics = {"topic1": None}
+        mock_metadata.brokers = {0: mock_broker}
+
+        mock_group = MagicMock()
+        mock_group.group_id = "some-other-service.__t.a-completely-different-topic.v1"
+        mock_group.state.name = "STABLE"
+        mock_listing = MagicMock()
+        mock_listing.valid = [mock_group]
+        mock_future = MagicMock()
+        mock_future.result.return_value = mock_listing
+
+        mock_admin = MagicMock()
+        mock_admin.list_topics.return_value = mock_metadata
+        mock_admin.list_consumer_groups.return_value = mock_future
+
+        with (
+            patch(
+                "omnibase_infra.backends.backend_probe._tcp_reachable",
+                return_value=True,
+            ),
+            patch(
+                "confluent_kafka.admin.AdminClient",
+                return_value=mock_admin,
+            ),
+        ):
+            result = probe_kafka(
+                bootstrap_servers="localhost:9092",
+                authority_topic=target_topic,
+            )
+            # No live group bound to the target topic -> falls through to the
+            # (passing) broker-match check, not a false AUTHORITATIVE claim
+            # manufactured from the liveness check itself.
+            assert result.state == EnumProbeState.AUTHORITATIVE
+            assert target_topic not in result.reason
+
+    def test_consumer_group_check_failure_is_swallowed_and_falls_back(self) -> None:
+        """``list_consumer_groups`` raising must never crash the probe — it
+        falls back to stage 3b (fail-closed, probe-must-never-raise)."""
+        mock_broker = MagicMock()
+        mock_broker.host = "localhost"
+
+        mock_metadata = MagicMock()
+        mock_metadata.topics = {"topic1": None}
+        mock_metadata.brokers = {0: mock_broker}
+
+        mock_admin = MagicMock()
+        mock_admin.list_topics.return_value = mock_metadata
+        mock_admin.list_consumer_groups.side_effect = RuntimeError("broker too old")
+
+        with (
+            patch(
+                "omnibase_infra.backends.backend_probe._tcp_reachable",
+                return_value=True,
+            ),
+            patch(
+                "confluent_kafka.admin.AdminClient",
+                return_value=mock_admin,
+            ),
+        ):
+            result = probe_kafka(
+                bootstrap_servers="localhost:9092",
+                authority_topic="onex.cmd.omnibase-infra.delegation-request.v1",
+            )
+            assert result.state == EnumProbeState.AUTHORITATIVE
+
 
 class TestPostgresProbe:
     """Test Postgres probe function."""
