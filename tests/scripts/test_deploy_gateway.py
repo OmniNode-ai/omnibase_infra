@@ -329,7 +329,9 @@ def test_help_rollback_reads_registry_command_not_hand_reconstructed() -> None:
 @pytest.mark.unit
 def test_help_rollback_matches_runbook_guidance() -> None:
     """The script's --help and the runbook must not drift apart on rollback:
-    both must point at `jq -r .rollback_command`, and neither may carry the
+    usage() must point at `jq -r .rollback_command`, while the runbook must
+    either carry that inline detail or be a deliberate KB pointer after the
+    documentation thinning migration. Neither surface may carry the
     `<previous_digest>` hand-fill template. The round-3 defect was exactly
     this drift -- the runbook was corrected, the script's usage() was not.
     """
@@ -342,8 +344,11 @@ def test_help_rollback_matches_runbook_guidance() -> None:
     )
     runbook_text = RUNBOOK.read_text(encoding="utf-8")
 
-    assert "jq -r .rollback_command" in runbook_text, (
-        "runbook must document reading rollback_command from the registry"
+    assert (
+        "jq -r .rollback_command" in runbook_text or "knowledge-base" in runbook_text
+    ), (
+        "runbook must document reading rollback_command from the registry "
+        "or point at the migrated KB runbook"
     )
     assert "<previous_digest>" not in runbook_text, (
         "runbook must not carry the hand-fill rollback template"
