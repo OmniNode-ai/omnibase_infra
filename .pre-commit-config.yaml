@@ -645,6 +645,24 @@ repos:
         files: ^src/omnibase_infra/.*\.(py|yaml)$
         pass_filenames: false
         stages: [pre-commit]
+      # OMN-16088 (split from OMN-15978 AC4): an operation_match handler_routing entry
+      # (carries `operation:`) with no `topic:`/`event_type:` scoping falls through to
+      # _topics_for_handler_entry's unscoped branch and is assigned EVERY subscribe
+      # topic on the contract. Every other operation_match entry on the same contract
+      # independently resolves the same full set, so N operation-scoped handlers each
+      # register for all N topics — a message on ANY topic reaches every handler, and
+      # the ones whose `operation` does not match crash or misfire (the pre-fix
+      # node_gateway_attach_effect shape, OMN-15978). Triggers on contract.yaml too (a
+      # routing change needs no .py edit). Ratchet frozen in
+      # config/validation/operation_match_fanout_baseline.yaml (shrink-only). SYNC with
+      # the ci.yml step 'Check operation_match fan-out gate (OMN-16088)'.
+      - id: operation-match-fanout
+        name: No operation_match handler_routing entry falls through to full fan-out (OMN-16088)
+        entry: env PYTHONPATH=src uv run --frozen python -m omnibase_infra.validators.operation_match_fanout src/omnibase_infra
+        language: system
+        files: ^src/omnibase_infra/.*\.(py|yaml)$
+        pass_filenames: false
+        stages: [pre-commit]
       # OMN-10822: Budget gate for # type: ignore[arg-type] and [union-attr].
       # Budget: 74 (57 arg-type + 17 union-attr) — initial baseline 2026-05-22.
       # Decrement --max-violations as violations are fixed. Target: 0.

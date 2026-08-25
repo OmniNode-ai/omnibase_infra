@@ -365,6 +365,20 @@ K8S_ONLY_KEYS: frozenset[str] = frozenset(
         # to answer, so BaseProjectionRunner's opt-in health server stays off and
         # the key has no compose counterpart by construction.
         "PROJECTION_RUNNER_HEALTH_PORT",
+        # omniweb Auth.js v5 public callback origin (OMN-16205, promoted into the
+        # shared onex-dev ConfigMap by omninode_infra#947, merged 2026-08-25:
+        #   AUTH_URL="https://dev.app.omninode.ai"
+        # omniweb is not a docker-compose service in this repo at all --
+        # docker/docker-compose.infra.yml has no `omniweb` entry, only Postgres
+        # migrations that create its DB role (docker/migrations/forward/
+        # 052_create_role_omniweb.sql). AUTH_URL is consumed exclusively by the
+        # k8s-deployed omniweb NextAuth pod to derive its own public callback
+        # origin (see k8s/onex-dev/omniweb/deployment.yaml's valueFrom, and the
+        # OMN-15294/OMN-16209 background on why a bind/loopback address there is
+        # a live signup-breaking defect) -- no compose lane runs that workload,
+        # so there is nothing for this key to bind to by construction, not by
+        # deferred convenience.
+        "AUTH_URL",
     }
 )
 
