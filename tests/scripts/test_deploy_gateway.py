@@ -328,29 +328,25 @@ def test_help_rollback_reads_registry_command_not_hand_reconstructed() -> None:
 
 @pytest.mark.unit
 def test_help_rollback_matches_runbook_guidance() -> None:
-    """The script's --help and the runbook must not drift apart on rollback:
-    both must point at `jq -r .rollback_command`, and neither may carry the
-    `<previous_digest>` hand-fill template. The round-3 defect was exactly
-    this drift -- the runbook was corrected, the script's usage() was not.
+    """The rollback prose this test used to diff against (`jq -r
+    .rollback_command`, no `<previous_digest>` hand-fill template) now lives
+    in the knowledge base: OMN-16307 thinned docs/runbooks/gateway-lane-
+    deploy.md to a taxonomy pointer, the same Wave 2 KB migration omniclaude
+    applied to its own charter (OMN-16306, fix commit
+    "update charter invariant test for KB pointer content"). Asserting the
+    old prose against this repo's copy is no longer meaningful -- assert the
+    pointer is intact instead. `--help`'s own self-consistency (the same
+    `jq -r .rollback_command` / no-`<previous_digest>` guarantees) is
+    independently covered by
+    test_help_rollback_reads_registry_command_not_hand_reconstructed above,
+    so no coverage is lost.
     """
-    result = subprocess.run(
-        ["bash", str(DEPLOY_SCRIPT), "--help"],
-        cwd=REPO_ROOT,
-        capture_output=True,
-        text=True,
-        check=True,
-    )
     runbook_text = RUNBOOK.read_text(encoding="utf-8")
 
-    assert "jq -r .rollback_command" in runbook_text, (
-        "runbook must document reading rollback_command from the registry"
-    )
-    assert "<previous_digest>" not in runbook_text, (
-        "runbook must not carry the hand-fill rollback template"
-    )
-    assert "jq -r .rollback_command" in result.stdout, (
-        "usage() must mirror the runbook's rollback instruction"
-    )
+    assert (
+        "Full documentation → https://github.com/OmniNode-ai/knowledge-base"
+        in runbook_text
+    ), "runbook must point to the knowledge base for full rollback guidance (OMN-16307)"
 
 
 @pytest.mark.unit
