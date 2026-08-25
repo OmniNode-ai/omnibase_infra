@@ -1342,7 +1342,7 @@ def _make_converge_stub(omni_home: Path, *, behavior: str = "ok") -> tuple[Path,
         body = "exit 1\n"
     stub.write_text(
         "#!/usr/bin/env bash\n"
-        f'echo "$@ | OMNI_HOME=$OMNI_HOME" >> "{calls_log}"\n' + body
+        f'echo "invoked_as=$0 | $@ | OMNI_HOME=$OMNI_HOME" >> "{calls_log}"\n' + body
     )
     stub.chmod(0o755)
     return stub, calls_log
@@ -1390,6 +1390,18 @@ class TestMainConvergeWiring:
         call = calls_log.read_text()
         assert "omnimarket --branch main --execute" in call
         assert f"OMNI_HOME={omni_home}" in call
+        # Snapshot invocation (OMN-16500 race fix): pull-all itself switches
+        # the canonical omniclaude clone between main (the release pointer,
+        # which can predate or lack the script) and dev while the parallel
+        # pulls run, so the script must be invoked from a run-start snapshot,
+        # never through the omniclaude working tree mid-run. The 2026-08-24
+        # proof run lost omnimemory and omnibase_spi to exactly this race.
+        invoked_as = call.split("invoked_as=", 1)[1].split(" | ", 1)[0]
+        assert not invoked_as.startswith(str(omni_home / "omniclaude")), (
+            f"converge script was invoked through the omniclaude working tree "
+            f"({invoked_as}) instead of a run-start snapshot -- racy against "
+            f"pull-all's own omniclaude branch switching"
+        )
 
         # main converged, dev pulled, repo left on dev, OK line says what happened
         main_sha = subprocess.check_output(
