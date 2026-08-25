@@ -339,14 +339,29 @@ def test_help_rollback_matches_runbook_guidance() -> None:
     `jq -r .rollback_command` / no-`<previous_digest>` guarantees) is
     independently covered by
     test_help_rollback_reads_registry_command_not_hand_reconstructed above,
-    so no coverage is lost.
+    so no coverage is lost. The script's --help still must not drift from the
+    migrated guidance: usage() must point at `jq -r .rollback_command`, and
+    neither surface may carry the `<previous_digest>` hand-fill template.
     """
+    result = subprocess.run(
+        ["bash", str(DEPLOY_SCRIPT), "--help"],
+        cwd=REPO_ROOT,
+        capture_output=True,
+        text=True,
+        check=True,
+    )
     runbook_text = RUNBOOK.read_text(encoding="utf-8")
 
     assert (
         "Full documentation → https://github.com/OmniNode-ai/knowledge-base"
         in runbook_text
     ), "runbook must point to the knowledge base for full rollback guidance (OMN-16307)"
+    assert "<previous_digest>" not in runbook_text, (
+        "runbook must not carry the hand-fill rollback template"
+    )
+    assert "jq -r .rollback_command" in result.stdout, (
+        "usage() must mirror the runbook's rollback instruction"
+    )
 
 
 @pytest.mark.unit
