@@ -146,14 +146,11 @@ else
 fi
 
 if [ -n "${BIFROST_CONTRACT_PATH:-}" ]; then
-  # OMN-12945: Force re-seed from packaged source on every container restart.
-  # BIFROST_FORCE_RESEED=1 bypasses the stale-volume early-return path so the
-  # named-volume copy is always rebuilt from the committed packaged source
-  # merged with the lane-overlay BIFROST_LOCAL_* endpoint vars. This eliminates
-  # the volume-drift defect where a stale /app/data/delegation/bifrost_delegation.yaml
-  # silently survived image rebuilds and exposed wrong/missing backends.
-  echo "[entrypoint] Rendering Bifrost delegation contract (force-reseed)..."
-  BIFROST_FORCE_RESEED=1 python -m omnibase_infra.runtime.render_bifrost_delegation_contract
+  # OMN-15807: The renderer always rebuilds from the packaged base contract and
+  # the mounted typed lane overlay. No endpoint or model environment binding is
+  # accepted, so a stale volume or poisoned BIFROST_LOCAL_* value cannot route.
+  echo "[entrypoint] Rendering Bifrost delegation contract from typed overlay..."
+  python -m omnibase_infra.runtime.render_bifrost_delegation_contract
 fi
 
 if [ -n "${ONEX_SECRET_RESOLVER_CONFIG_PATH:-}" ]; then

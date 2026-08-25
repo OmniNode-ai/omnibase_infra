@@ -1,9 +1,6 @@
-# OMN-15807: Canonical local delegation contract overlay for the dev lab lane.
-#
-# This file is mounted directly by docker-compose.infra.yml and is deliberately
-# not rendered through dotenv. It owns the exact authorized .201 lab binding,
-# which the shared v2 parser enforces alongside port and URL shape.
-# onex-allow-internal-ip OMN-15807 reason="typed dev-lane delegation contract"
+# SPDX-FileCopyrightText: 2025 OmniNode.ai Inc.
+# SPDX-License-Identifier: MIT
+# Shared OMN-15807 parser parity fixture.
 schema_version: "bifrost_lane_overlay.v2"
 lane: dev
 backends:

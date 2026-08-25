@@ -524,9 +524,6 @@ def run_receipt_mode(
     capture_path = state_root / CAPTURE_DIR_NAME / f"{node_name}-{run_id}.log"
     spool_dir = state_root / SPOOL_DIR_NAME
     _configure_capture_logging(capture_path, verbose=verbose)
-    from omnibase_infra.runtime.runtime_host_process import _load_omnibase_env_file
-
-    _load_omnibase_env_file()
 
     # --- Skill lifecycle: skill-started (before the body runs) -------------
     # Emitted through the SAME emit daemon socket as the capture events; the

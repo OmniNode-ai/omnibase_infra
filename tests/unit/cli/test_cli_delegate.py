@@ -149,9 +149,9 @@ class TestClassifyTaskType:
 
 
 class TestReceiptEnvironmentIsolation:
-    """Receipt-mode env loading must not contaminate the next unit test."""
+    """Receipt-mode delegation must not load a home dotenv file."""
 
-    def test_01_receipt_mode_loads_controlled_env_file(
+    def test_01_receipt_mode_ignores_controlled_env_file(
         self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
     ) -> None:
         env_file = tmp_path / "omnibase.env"
@@ -180,7 +180,7 @@ class TestReceiptEnvironmentIsolation:
             emit_socket=tmp_path / "no-daemon.sock",
         )
 
-        assert os.environ[_RECEIPT_ENV_SENTINEL] == "loaded-by-receipt-mode"
+        assert _RECEIPT_ENV_SENTINEL not in os.environ
 
     def test_02_receipt_environment_did_not_escape_previous_test(self) -> None:
         assert _RECEIPT_ENV_SENTINEL not in os.environ

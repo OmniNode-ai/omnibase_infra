@@ -10,6 +10,8 @@ Validates that:
 
 from __future__ import annotations
 
+import os
+from pathlib import Path
 from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
@@ -26,7 +28,6 @@ _PREFETCHER_PATH = (
     "omnibase_infra.runtime.config_discovery.config_prefetcher.ConfigPrefetcher"
 )
 _HANDLER_PATH = "omnibase_infra.handlers.handler_infisical.HandlerInfisical"
-_LOAD_ENV_PATH = "omnibase_infra.runtime.runtime_host_process._load_omnibase_env_file"
 
 
 def _make_process(**kwargs: object) -> RuntimeHostProcess:
@@ -65,12 +66,29 @@ class TestHealthCheckIncludesConfigPrefetchStatus:
         """When INFISICAL_ADDR is not set, status should be 'skipped'."""
         monkeypatch.delenv("INFISICAL_ADDR", raising=False)
 
-        with patch(_LOAD_ENV_PATH):
-            process = _make_process()
-            await process._prefetch_config_from_infisical()
+        process = _make_process()
+        await process._prefetch_config_from_infisical()
 
         health = await process.health_check()
         assert health["config_prefetch_status"] == "skipped"
+
+    @pytest.mark.asyncio
+    async def test_prefetch_never_reads_a_home_dotenv_file(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """Receipt-mode runtime setup has no legacy home-env loading seam."""
+        from omnibase_infra.runtime import runtime_host_process
+
+        home_env = tmp_path / ".omnibase" / ".env"
+        home_env.parent.mkdir()
+        home_env.write_text("OMN15807_POISONED_DOTENV=loaded\n", encoding="utf-8")
+        monkeypatch.setattr(runtime_host_process.Path, "home", lambda: tmp_path)
+        monkeypatch.delenv("OMN15807_POISONED_DOTENV", raising=False)
+        monkeypatch.delenv("INFISICAL_ADDR", raising=False)
+
+        assert not hasattr(runtime_host_process, "_load_omnibase_env_file")
+        await _make_process()._prefetch_config_from_infisical()
+        assert "OMN15807_POISONED_DOTENV" not in os.environ
 
     @pytest.mark.asyncio
     async def test_status_skipped_when_credentials_missing(
@@ -89,7 +107,7 @@ class TestHealthCheckIncludesConfigPrefetchStatus:
         mock_requirements.errors = ()  # no extraction errors
         mock_extractor.return_value.extract_from_paths.return_value = mock_requirements
 
-        with patch(_LOAD_ENV_PATH), patch(_EXTRACTOR_PATH, mock_extractor):
+        with patch(_EXTRACTOR_PATH, mock_extractor):
             process = _make_process()
             await process._prefetch_config_from_infisical()
 
@@ -109,7 +127,7 @@ class TestHealthCheckIncludesConfigPrefetchStatus:
         mock_requirements.errors = ()  # no extraction errors → degraded_no_requirements
         mock_extractor.return_value.extract_from_paths.return_value = mock_requirements
 
-        with patch(_LOAD_ENV_PATH), patch(_EXTRACTOR_PATH, mock_extractor):
+        with patch(_EXTRACTOR_PATH, mock_extractor):
             process = _make_process()
             await process._prefetch_config_from_infisical()
 
@@ -146,7 +164,6 @@ class TestHealthCheckIncludesConfigPrefetchStatus:
         mock_handler_cls.return_value = mock_handler_instance
 
         with (
-            patch(_LOAD_ENV_PATH),
             patch(_EXTRACTOR_PATH, mock_extractor),
             patch(_PREFETCHER_PATH, mock_prefetcher),
             patch(_HANDLER_PATH, mock_handler_cls),
@@ -166,7 +183,6 @@ class TestHealthCheckIncludesConfigPrefetchStatus:
 
         # Make the extractor raise to trigger the outer except
         with (
-            patch(_LOAD_ENV_PATH),
             patch(_EXTRACTOR_PATH, side_effect=RuntimeError("connection refused")),
         ):
             process = _make_process()
@@ -211,7 +227,6 @@ class TestHealthCheckIncludesConfigPrefetchStatus:
         mock_handler_cls.return_value = mock_handler_instance
 
         with (
-            patch(_LOAD_ENV_PATH),
             patch(_EXTRACTOR_PATH, mock_extractor),
             patch(_PREFETCHER_PATH, mock_prefetcher),
             patch(_HANDLER_PATH, mock_handler_cls),

@@ -1,682 +1,178 @@
 # SPDX-FileCopyrightText: 2025 OmniNode.ai Inc.
 # SPDX-License-Identifier: MIT
-"""Tests for runtime Bifrost delegation contract rendering."""
+"""Tests for rendering Bifrost delegation solely from a typed overlay."""
 
 from __future__ import annotations
 
-import importlib.resources
-from collections.abc import Callable
+import inspect
 from pathlib import Path
-from unittest import mock
 
 import pytest
 import yaml
 
 from omnibase_infra.errors import ProtocolConfigurationError
 from omnibase_infra.runtime.render_bifrost_delegation_contract import (
-    _resolve_default_source_path,
     render_bifrost_delegation_contract,
 )
 
-
-def _http_url(authority: str) -> str:
-    return "http" + f"://{authority}/v1/chat/completions"
-
-
-def _base_http_url(authority: str) -> str:
-    return "http" + "://" + authority
+_ROOT = Path(__file__).resolve().parents[3]
+_OVERLAY = _ROOT / "docker" / "lane-overlays" / "dev.bifrost.yaml"
+_ENDPOINT = "http://192.168.86.201:8000/v1/chat/completions"
 
 
-def _backend(
-    *,
-    backend_id: str,
-    endpoint_url_env: str,
-    model_name: str,
-    capabilities: list[str],
-    required: bool = False,
-) -> dict[str, object]:
-    return {
-        "backend_id": backend_id,
-        "endpoint_url_env": endpoint_url_env,
-        "required": required,
-        "endpoint_url": "",
-        "model_name": model_name,
-        "tier": "local",
-        "timeout_ms": 30000,
-        "capabilities": capabilities,
-    }
+@pytest.mark.unit
+def test_renderer_has_only_the_overlay_contract_arguments() -> None:
+    assert tuple(inspect.signature(render_bifrost_delegation_contract).parameters) == (
+        "source_path",
+        "overlay_path",
+        "target_path",
+        "environ",
+        "verify_endpoints",
+        "endpoint_probe",
+    )
 
 
-def _contract_data(backends: list[dict[str, object]]) -> dict[str, object]:
-    return {
-        "config_version": "1.1.0",
-        "schema_version": "bifrost_delegation.v1",
-        "backends": backends,
-        "routing_rules": [
-            {
-                "rule_id": "d4e5f6a7-0001-4000-8000-000000000001",
-                "priority": 10,
-                "task_class": "test",
-                "task_class_contract_version": "1.0.0",
-                "backend_policy_version": "1.0.0",
-                "match_operation_types": ["chat_completion"],
-                "match_capabilities": ["code_generation"],
-                "latency_sla_ms": 30000,
-                "backend_ids": ["local-qwen-coder-30b"],
-                "fallback_policy": {
-                    "action": "return_error",
-                    "max_retries": 0,
-                    "on_exhaust": "return_error",
-                },
-                "shadow_policy_id": "e5f6a7b8-0001-4000-8000-000000000001",
-            }
-        ],
-        "default_backends": ["local-qwen-coder-30b"],
-        "circuit_breaker": {"failure_threshold": 5, "window_seconds": 30},
-        "failover": {"max_attempts": 3, "backoff_base_ms": 500},
-        "shadow_mode": {
-            "enabled": False,
-            "policy_version": "unknown",
-            "log_sample_rate": 1.0,
-            "comparison_logging_enabled": True,
-            "max_shadow_latency_ms": 5.0,
-        },
-    }
-
-
-def _write_contract(path: Path, data: dict[str, object]) -> Path:
+def _write_base_contract(path: Path, *, coder_model: str | None = "qwen3.8") -> None:
     path.write_text(
-        yaml.safe_dump(data, sort_keys=False),
+        yaml.safe_dump(
+            {
+                "backends": [
+                    {
+                        "backend_id": "local-coder",
+                        "model_name": coder_model,
+                        "endpoint_url_env": "LLM_CODER_URL",
+                        "required": True,
+                    },
+                    {
+                        "backend_id": "local-heavy-reasoning",
+                        "model_name": "qwen3.8",
+                        "endpoint_url_env": "BIFROST_LOCAL_REASONER_ENDPOINT_URL",
+                        "required": True,
+                    },
+                    {
+                        "backend_id": "local-reasoner",
+                        "model_name": "retired",
+                        "endpoint_url_env": "BIFROST_LOCAL_REASONER_ENDPOINT_URL",
+                    },
+                ]
+            },
+            sort_keys=False,
+        ),
         encoding="utf-8",
     )
-    return path
-
-
-def _source_contract(path: Path, *, required: bool = False) -> Path:
-    return _write_contract(
-        path,
-        _contract_data(
-            [
-                _backend(
-                    backend_id="local-qwen-coder-30b",
-                    endpoint_url_env="LLM_CODER_URL",
-                    required=required,
-                    model_name="qwen-test",
-                    capabilities=["code_generation"],
-                )
-            ]
-        ),
-    )
-
-
-def _source_contract_with_optional_backend(path: Path) -> Path:
-    return _write_contract(
-        path,
-        _contract_data(
-            [
-                _backend(
-                    backend_id="local-qwen-coder-30b",
-                    endpoint_url_env="LLM_CODER_URL",
-                    required=True,
-                    model_name="qwen-test",
-                    capabilities=["code_generation"],
-                ),
-                _backend(
-                    backend_id="local-deepseek-r1-14b",
-                    endpoint_url_env="LLM_DEEPSEEK_R1_URL",
-                    model_name="deepseek-test",
-                    capabilities=["research"],
-                ),
-            ]
-        ),
-    )
-
-
-def _cloud_backend() -> dict[str, object]:
-    return {
-        "backend_id": "cloud-glm",
-        "endpoint_url": _http_url("cloud.local:9000"),
-        "model_name": "glm-test",
-        "tier": "cloud",
-        "timeout_ms": 30000,
-        "capabilities": ["code_generation"],
-    }
 
 
 @pytest.mark.unit
-def test_render_populates_endpoint_from_declared_provider_env(tmp_path: Path) -> None:
-    source = _source_contract(tmp_path / "source.yaml")
-    target = tmp_path / "rendered" / "bifrost_delegation.yaml"
+def test_typed_overlay_wins_over_poisoned_model_and_endpoint_environment(
+    tmp_path: Path,
+) -> None:
+    source = tmp_path / "base.yaml"
+    target = tmp_path / "rendered.yaml"
+    _write_base_contract(source)
 
     rendered = render_bifrost_delegation_contract(
         source_path=source,
+        overlay_path=_OVERLAY,
         target_path=target,
-        environ={"LLM_CODER_URL": _http_url("coder.local:8000")},
+        environ={
+            "LLM_CODER_URL": "http://cloud.invalid/v1/chat/completions",
+            "LLM_CODER_MODEL_NAME": "poisoned",
+            "BIFROST_LOCAL_CODER_ENDPOINT_URL": "http://192.168.86.201:8001/v1/chat/completions",
+            "BIFROST_LOCAL_REASONER_ENDPOINT_URL": "http://cloud.invalid/v1/chat/completions",
+        },
     )
 
     assert rendered == target
-    data = yaml.safe_load(target.read_text(encoding="utf-8"))
-    assert data["backends"][0]["endpoint_url"] == _http_url("coder.local:8000")
+    contract = yaml.safe_load(target.read_text(encoding="utf-8"))
+    by_id = {backend["backend_id"]: backend for backend in contract["backends"]}
+    for backend_id in ("local-coder", "local-heavy-reasoning"):
+        assert by_id[backend_id]["endpoint_url"] == _ENDPOINT
+        assert by_id[backend_id]["model_name"] == "qwen3.8"
+        assert by_id[backend_id]["max_tokens"] == 65_536
+        assert by_id[backend_id]["timeout_ms"] == 300_000
+    assert all("endpoint_url_env" not in backend for backend in by_id.values())
+    assert all("required" not in backend for backend in by_id.values())
 
 
 @pytest.mark.unit
-def test_render_fails_for_missing_required_provider_env(tmp_path: Path) -> None:
-    source = _source_contract(tmp_path / "source.yaml", required=True)
+def test_missing_or_malformed_overlay_fails_before_dispatch(tmp_path: Path) -> None:
+    source = tmp_path / "base.yaml"
+    invalid_overlay = tmp_path / "invalid-overlay.yaml"
     target = tmp_path / "rendered.yaml"
+    _write_base_contract(source)
+    invalid_overlay.write_text(
+        "schema_version: bifrost_lane_overlay.v2\nlane: dev\nbackends: []\n",
+        encoding="utf-8",
+    )
 
-    with pytest.raises(ProtocolConfigurationError, match="LLM_CODER_URL"):
+    with pytest.raises(ProtocolConfigurationError, match="overlay is invalid"):
         render_bifrost_delegation_contract(
             source_path=source,
+            overlay_path=invalid_overlay,
             target_path=target,
-            environ={},
+        )
+    assert not target.exists()
+
+    with pytest.raises(ProtocolConfigurationError, match="overlay not found"):
+        render_bifrost_delegation_contract(
+            source_path=source,
+            overlay_path=tmp_path / "missing.yaml",
+            target_path=target,
         )
 
 
 @pytest.mark.unit
-def test_existing_populated_target_is_reused(tmp_path: Path) -> None:
-    source = _source_contract(tmp_path / "source.yaml", required=True)
-    target = _source_contract(tmp_path / "target.yaml")
-    data = yaml.safe_load(target.read_text(encoding="utf-8"))
-    data["backends"][0]["endpoint_url"] = _http_url("pre-rendered.local:8000")
-    target.write_text(yaml.safe_dump(data, sort_keys=False), encoding="utf-8")
-
-    rendered = render_bifrost_delegation_contract(
-        source_path=source,
-        target_path=target,
-        environ={},
-    )
-
-    assert rendered == target
-    loaded = yaml.safe_load(target.read_text(encoding="utf-8"))
-    assert loaded["backends"][0]["endpoint_url"] == _http_url("pre-rendered.local:8000")
-
-
-@pytest.mark.unit
-def test_existing_target_with_incomplete_endpoint_is_rerendered(
+def test_base_model_mismatch_fails_instead_of_dropping_served_id(
     tmp_path: Path,
 ) -> None:
-    source = _source_contract(tmp_path / "source.yaml", required=True)
-    target = _source_contract(tmp_path / "target.yaml")
-    data = yaml.safe_load(target.read_text(encoding="utf-8"))
-    data["backends"][0]["endpoint_url"] = _base_http_url("stale.local:8000")
-    target.write_text(yaml.safe_dump(data, sort_keys=False), encoding="utf-8")
+    source = tmp_path / "base.yaml"
+    _write_base_contract(source, coder_model="qwen3.8-27b")
 
-    rendered = render_bifrost_delegation_contract(
-        source_path=source,
-        target_path=target,
-        environ={"LLM_CODER_URL": _http_url("fresh.local:8000")},
-    )
-
-    assert rendered == target
-    loaded = yaml.safe_load(target.read_text(encoding="utf-8"))
-    assert loaded["backends"][0]["endpoint_url"] == _http_url("fresh.local:8000")
-
-
-@pytest.mark.unit
-def test_existing_cloud_populated_target_rerenders_declared_local_env_backends(
-    tmp_path: Path,
-) -> None:
-    source_backend = _backend(
-        backend_id="local-qwen-coder-30b",
-        endpoint_url_env="LLM_CODER_URL",
-        required=False,
-        model_name="qwen-test",
-        capabilities=["code_generation"],
-    )
-    source = _write_contract(
-        tmp_path / "source.yaml",
-        _contract_data([source_backend, _cloud_backend()]),
-    )
-    target = _write_contract(
-        tmp_path / "target.yaml",
-        _contract_data(
-            [
-                {
-                    **source_backend,
-                    "endpoint_url": "",
-                    "model_name": "",
-                },
-                _cloud_backend(),
-            ]
-        ),
-    )
-
-    rendered = render_bifrost_delegation_contract(
-        source_path=source,
-        target_path=target,
-        environ={"LLM_CODER_URL": _http_url("fresh.local:8000")},
-    )
-
-    assert rendered == target
-    loaded = yaml.safe_load(target.read_text(encoding="utf-8"))
-    local_backend = next(
-        backend
-        for backend in loaded["backends"]
-        if backend["backend_id"] == "local-qwen-coder-30b"
-    )
-    assert local_backend["endpoint_url"] == _http_url("fresh.local:8000")
-    assert local_backend["model_name"] == "qwen-test"
-    assert "endpoint_url_env" not in local_backend
-    assert "required" not in local_backend
-
-
-@pytest.mark.unit
-def test_verify_mode_rerenders_incomplete_target_from_source(
-    tmp_path: Path,
-) -> None:
-    source = _source_contract(tmp_path / "source.yaml", required=True)
-    target = _source_contract(tmp_path / "target.yaml")
-    data = yaml.safe_load(target.read_text(encoding="utf-8"))
-    data["backends"][0]["endpoint_url"] = _base_http_url("stale.local:8000")
-    target.write_text(yaml.safe_dump(data, sort_keys=False), encoding="utf-8")
-
-    rendered = render_bifrost_delegation_contract(
-        source_path=source,
-        target_path=target,
-        environ={"LLM_CODER_URL": _http_url("fresh.local:8000")},
-        verify_endpoints=True,
-        endpoint_probe=lambda _url, _model, _timeout: None,
-    )
-
-    assert rendered == target
-    loaded = yaml.safe_load(target.read_text(encoding="utf-8"))
-    assert loaded["backends"][0]["endpoint_url"] == _http_url("fresh.local:8000")
-
-
-@pytest.mark.unit
-def test_render_rejects_incomplete_endpoint_from_env(tmp_path: Path) -> None:
-    source = _source_contract(tmp_path / "source.yaml", required=True)
-    target = tmp_path / "rendered.yaml"
-
-    with pytest.raises(ProtocolConfigurationError, match="complete chat completion"):
+    with pytest.raises(ProtocolConfigurationError, match="does not match overlay"):
         render_bifrost_delegation_contract(
             source_path=source,
-            target_path=target,
-            environ={"LLM_CODER_URL": _base_http_url("coder.local:8000")},
-        )
-
-
-@pytest.mark.parametrize(
-    ("mutator", "match"),
-    [
-        (
-            lambda data: data.__setitem__("default_backends", [["not", "hashable"]]),
-            "default_backends entries",
-        ),
-        (
-            lambda data: data["routing_rules"][0].__setitem__("rule_id", ["bad"]),
-            "routing rule_id",
-        ),
-        (
-            lambda data: data["routing_rules"][0].__setitem__(
-                "backend_ids",
-                [["not", "hashable"]],
-            ),
-            "backend_ids entries",
-        ),
-    ],
-)
-@pytest.mark.unit
-def test_existing_populated_target_rejects_malformed_backend_ids(
-    tmp_path: Path,
-    mutator: Callable[[dict[str, object]], None],
-    match: str,
-) -> None:
-    source = _source_contract(tmp_path / "source.yaml", required=True)
-    target = _source_contract(tmp_path / "target.yaml")
-    data = yaml.safe_load(target.read_text(encoding="utf-8"))
-    data["backends"][0]["endpoint_url"] = _http_url("pre-rendered.local:8000")
-    mutator(data)
-    target.write_text(yaml.safe_dump(data, sort_keys=False), encoding="utf-8")
-
-    with pytest.raises(ProtocolConfigurationError, match=match):
-        render_bifrost_delegation_contract(
-            source_path=source,
-            target_path=target,
-            environ={},
+            overlay_path=_OVERLAY,
+            target_path=tmp_path / "rendered.yaml",
         )
 
 
 @pytest.mark.unit
-def test_empty_generated_target_is_replaced_from_source(tmp_path: Path) -> None:
-    source = _source_contract(tmp_path / "source.yaml")
-    target = tmp_path / "rendered" / "bifrost_delegation.yaml"
-    target.parent.mkdir(parents=True)
-    target.write_text("", encoding="utf-8")
+def test_unbound_base_model_is_materialized_from_the_typed_served_id(
+    tmp_path: Path,
+) -> None:
+    source = tmp_path / "base.yaml"
+    target = tmp_path / "rendered.yaml"
+    _write_base_contract(source, coder_model=None)
 
-    rendered = render_bifrost_delegation_contract(
+    render_bifrost_delegation_contract(
         source_path=source,
+        overlay_path=_OVERLAY,
         target_path=target,
-        environ={"LLM_CODER_URL": _http_url("coder.local:8000")},
-        verify_endpoints=True,
-        endpoint_probe=lambda _url, _model, _timeout: None,
     )
 
-    assert rendered == target
-    loaded = yaml.safe_load(target.read_text(encoding="utf-8"))
-    assert loaded["backends"][0]["endpoint_url"] == _http_url("coder.local:8000")
+    contract = yaml.safe_load(target.read_text(encoding="utf-8"))
+    by_id = {backend["backend_id"]: backend for backend in contract["backends"]}
+    assert by_id["local-coder"]["model_name"] == "qwen3.8"
 
 
 @pytest.mark.unit
-def test_required_endpoint_probe_failure_blocks_render(tmp_path: Path) -> None:
-    source = _source_contract(tmp_path / "source.yaml", required=True)
-    target = tmp_path / "rendered.yaml"
+def test_endpoint_probe_requires_advertised_served_id(tmp_path: Path) -> None:
+    source = tmp_path / "base.yaml"
+    _write_base_contract(source)
 
-    with pytest.raises(ProtocolConfigurationError, match="qwen-test"):
+    def rejected_probe(
+        endpoint_url: str, model_name: str, timeout: float
+    ) -> str | None:
+        assert endpoint_url == _ENDPOINT
+        assert model_name == "qwen3.8"
+        assert timeout > 0
+        return "model endpoint did not advertise qwen3.8"
+
+    with pytest.raises(ProtocolConfigurationError, match="failed verification"):
         render_bifrost_delegation_contract(
             source_path=source,
-            target_path=target,
-            environ={"LLM_CODER_URL": _http_url("coder.local:8000")},
+            overlay_path=_OVERLAY,
+            target_path=tmp_path / "rendered.yaml",
             verify_endpoints=True,
-            endpoint_probe=lambda _url, model, _timeout: f"missing model {model}",
+            endpoint_probe=rejected_probe,
         )
-
-
-@pytest.mark.unit
-def test_optional_endpoint_probe_failure_leaves_backend_unpopulated(
-    tmp_path: Path,
-) -> None:
-    source = _source_contract_with_optional_backend(tmp_path / "source.yaml")
-    target = tmp_path / "rendered.yaml"
-
-    def probe(url: str, _model: str, _timeout: float) -> str | None:
-        if url == _http_url("deepseek.local:8101"):
-            return "model endpoint timed out"
-        return None
-
-    render_bifrost_delegation_contract(
-        source_path=source,
-        target_path=target,
-        environ={
-            "LLM_CODER_URL": _http_url("coder.local:8000"),
-            "LLM_DEEPSEEK_R1_URL": _http_url("deepseek.local:8101"),
-        },
-        verify_endpoints=True,
-        endpoint_probe=probe,
-    )
-
-    loaded = yaml.safe_load(target.read_text(encoding="utf-8"))
-    assert loaded["backends"][0]["endpoint_url"] == _http_url("coder.local:8000")
-    assert loaded["backends"][1]["endpoint_url"] == ""
-
-
-@pytest.mark.unit
-def test_resolve_default_source_path_uses_omnimarket_when_available(
-    tmp_path: Path,
-) -> None:
-    """_resolve_default_source_path prefers omnimarket package when present."""
-    fake_yaml = tmp_path / "bifrost_delegation.yaml"
-    fake_yaml.write_text("backends: []\n", encoding="utf-8")
-
-    fake_traversable = mock.MagicMock()
-    fake_traversable.__str__ = mock.Mock(return_value=str(fake_yaml))
-
-    with mock.patch("importlib.resources.files") as mock_files:
-        mock_files.return_value.joinpath.return_value = fake_traversable
-        result = _resolve_default_source_path()
-
-    assert result == fake_yaml
-
-
-@pytest.mark.unit
-def test_resolve_default_source_path_falls_back_when_omnimarket_absent() -> None:
-    """_resolve_default_source_path falls back to legacy path when omnimarket missing."""
-    from omnibase_infra.runtime.render_bifrost_delegation_contract import (
-        _LEGACY_SOURCE_PATH,
-    )
-
-    with mock.patch("importlib.resources.files", side_effect=ModuleNotFoundError):
-        result = _resolve_default_source_path()
-
-    assert result == _LEGACY_SOURCE_PATH
-
-
-@pytest.mark.unit
-def test_empty_target_renders_from_omnimarket_source(tmp_path: Path) -> None:
-    """First-boot: 0-byte target is replaced using a source resolved from omnimarket."""
-    source = _source_contract(tmp_path / "source.yaml")
-    target = tmp_path / "rendered" / "bifrost_delegation.yaml"
-    target.parent.mkdir(parents=True)
-    target.write_text("", encoding="utf-8")
-
-    with mock.patch(
-        "omnibase_infra.runtime.render_bifrost_delegation_contract._DEFAULT_SOURCE_PATH",
-        source,
-    ):
-        rendered = render_bifrost_delegation_contract(
-            target_path=target,
-            environ={"LLM_CODER_URL": _http_url("coder.local:8000")},
-        )
-
-    assert rendered == target
-    loaded = yaml.safe_load(target.read_text(encoding="utf-8"))
-    assert loaded["backends"][0]["endpoint_url"] == _http_url("coder.local:8000")
-
-
-@pytest.mark.unit
-def test_empty_bifrost_source_env_uses_resolved_default(tmp_path: Path) -> None:
-    """Empty BIFROST_SOURCE_CONTRACT_PATH env var falls through to _DEFAULT_SOURCE_PATH."""
-    source = _source_contract(tmp_path / "source.yaml")
-    target = tmp_path / "rendered.yaml"
-
-    with mock.patch(
-        "omnibase_infra.runtime.render_bifrost_delegation_contract._DEFAULT_SOURCE_PATH",
-        source,
-    ):
-        rendered = render_bifrost_delegation_contract(
-            target_path=target,
-            environ={
-                "BIFROST_SOURCE_CONTRACT_PATH": "",
-                "LLM_CODER_URL": _http_url("coder.local:8000"),
-            },
-        )
-
-    assert rendered == target
-    loaded = yaml.safe_load(target.read_text(encoding="utf-8"))
-    assert loaded["backends"][0]["endpoint_url"] == _http_url("coder.local:8000")
-
-
-@pytest.mark.unit
-def test_empty_bifrost_contract_path_disables_render(tmp_path: Path) -> None:
-    source = _source_contract(tmp_path / "source.yaml", required=True)
-    rendered = render_bifrost_delegation_contract(
-        source_path=source,
-        environ={
-            "BIFROST_CONTRACT_PATH": "",
-            "BIFROST_VERIFY_ENDPOINTS": "1",
-        },
-        endpoint_probe=lambda _url, _model, _timeout: "should not run",
-    )
-
-    assert rendered is None
-
-
-# ==========================================================================
-# OMN-12945 — force_reseed bypasses stale-volume cache
-# ==========================================================================
-
-
-@pytest.mark.unit
-def test_force_reseed_overwrites_stale_volume_content(tmp_path: Path) -> None:
-    """force_reseed=True must re-render from source even when volume has populated endpoints.
-
-    This is the OMN-12945 fix: stale volume content surviving image rebuilds no
-    longer pins wrong backends after a container restart.
-    """
-    source = _source_contract(tmp_path / "source.yaml")
-    target = tmp_path / "rendered" / "bifrost_delegation.yaml"
-
-    # 1. Initial render seeds the volume.
-    render_bifrost_delegation_contract(
-        source_path=source,
-        target_path=target,
-        environ={"LLM_CODER_URL": _http_url("coder.local:8000")},
-    )
-    assert target.exists()
-
-    # 2. Mutate the volume copy to simulate drift (wrong endpoint).
-    loaded = yaml.safe_load(target.read_text(encoding="utf-8"))
-    loaded["backends"][0]["endpoint_url"] = _http_url("stale.local:9999")
-    target.write_text(yaml.safe_dump(loaded, sort_keys=False), encoding="utf-8")
-
-    # 3. Without force_reseed, the volume copy is reused (env still matches stale).
-    # We verify the stale value is NOT corrected here to confirm the cache path is real.
-    loaded_stale = yaml.safe_load(target.read_text(encoding="utf-8"))
-    assert loaded_stale["backends"][0]["endpoint_url"] == _http_url("stale.local:9999")
-
-    # 4. force_reseed=True re-renders from packaged source, replacing the stale copy.
-    rendered = render_bifrost_delegation_contract(
-        source_path=source,
-        target_path=target,
-        environ={"LLM_CODER_URL": _http_url("coder.local:8000")},
-        force_reseed=True,
-    )
-
-    assert rendered == target
-    loaded_fresh = yaml.safe_load(target.read_text(encoding="utf-8"))
-    assert loaded_fresh["backends"][0]["endpoint_url"] == _http_url("coder.local:8000")
-
-
-@pytest.mark.unit
-def test_bifrost_force_reseed_env_flag_triggers_reseed(tmp_path: Path) -> None:
-    """BIFROST_FORCE_RESEED=1 env flag triggers re-seed (OMN-12945 entrypoint path)."""
-    source = _source_contract(tmp_path / "source.yaml")
-    target = tmp_path / "rendered" / "bifrost_delegation.yaml"
-
-    # Seed initial content.
-    render_bifrost_delegation_contract(
-        source_path=source,
-        target_path=target,
-        environ={"LLM_CODER_URL": _http_url("coder.local:8000")},
-    )
-
-    # Drift the volume copy.
-    loaded = yaml.safe_load(target.read_text(encoding="utf-8"))
-    loaded["backends"][0]["endpoint_url"] = _http_url("stale.local:9999")
-    target.write_text(yaml.safe_dump(loaded, sort_keys=False), encoding="utf-8")
-
-    # BIFROST_FORCE_RESEED=1 in environ triggers re-seed.
-    rendered = render_bifrost_delegation_contract(
-        source_path=source,
-        target_path=target,
-        environ={
-            "LLM_CODER_URL": _http_url("coder.local:8000"),
-            "BIFROST_FORCE_RESEED": "1",
-        },
-    )
-
-    assert rendered == target
-    loaded_fresh = yaml.safe_load(target.read_text(encoding="utf-8"))
-    assert loaded_fresh["backends"][0]["endpoint_url"] == _http_url("coder.local:8000")
-
-
-@pytest.mark.unit
-def test_bifrost_force_reseed_env_false_does_not_override_cache(tmp_path: Path) -> None:
-    """BIFROST_FORCE_RESEED=0 must NOT bypass the cache — the flag only triggers on truthy values."""
-    source = _source_contract(tmp_path / "source.yaml")
-    target = tmp_path / "rendered" / "bifrost_delegation.yaml"
-
-    # Render with the real endpoint to seed the volume.
-    render_bifrost_delegation_contract(
-        source_path=source,
-        target_path=target,
-        environ={"LLM_CODER_URL": _http_url("coder.local:8000")},
-    )
-
-    # Re-render with BIFROST_FORCE_RESEED=0 and a different env endpoint.
-    # The cache path should win — the existing volume content is reused
-    # because the env endpoint matches the existing volume endpoint.
-    render_bifrost_delegation_contract(
-        source_path=source,
-        target_path=target,
-        environ={
-            "LLM_CODER_URL": _http_url("coder.local:8000"),
-            "BIFROST_FORCE_RESEED": "0",
-        },
-    )
-
-    loaded = yaml.safe_load(target.read_text(encoding="utf-8"))
-    # The cache path was used (endpoint unchanged from initial render).
-    assert loaded["backends"][0]["endpoint_url"] == _http_url("coder.local:8000")
-
-
-# ==========================================================================
-# OMN-12814 — fail-loud on zero populated endpoints
-# ==========================================================================
-
-
-@pytest.mark.unit
-def test_zero_populated_endpoints_raises_loud_error(tmp_path: Path) -> None:
-    """render_bifrost_delegation_contract must raise ProtocolConfigurationError
-    (not return empty) when no endpoint env vars are set (OMN-12814 fail-loud)."""
-    from omnibase_infra.errors import ProtocolConfigurationError
-
-    source = _source_contract(tmp_path / "source.yaml")
-    target = tmp_path / "rendered.yaml"
-
-    with pytest.raises(ProtocolConfigurationError, match="no populated endpoint_url"):
-        render_bifrost_delegation_contract(
-            source_path=source,
-            target_path=target,
-            environ={},  # No LLM_*_URL vars — all backends stay unpopulated.
-            force_reseed=True,  # Bypass cache so we reach the rendering path.
-        )
-
-
-# ==========================================================================
-# OMN-15628 (remediation) — no silent target-path default
-# ==========================================================================
-
-
-@pytest.mark.unit
-def test_unbound_contract_path_refuses_naming_the_key(tmp_path: Path) -> None:
-    """RED-before/GREEN-after: at the pre-fix head, an unbound
-    BIFROST_CONTRACT_PATH with no explicit target_path silently resolved to
-    ``_DEFAULT_TARGET_PATH`` (``/app/data/delegation/bifrost_delegation.yaml``)
-    and rendered there with no attributable cause — the write-side twin of the
-    read-side silent-fallback defect this ticket kills on the reducer. Post-fix
-    it refuses, naming the missing key (CLAUDE.md rule 8)."""
-    source = _source_contract(tmp_path / "source.yaml")
-
-    with pytest.raises(ProtocolConfigurationError, match="BIFROST_CONTRACT_PATH"):
-        render_bifrost_delegation_contract(
-            source_path=source,
-            target_path=None,
-            environ={"LLM_CODER_URL": _http_url("coder.local:8000")},
-        )
-
-
-@pytest.mark.unit
-def test_explicit_empty_contract_path_still_disables_render(tmp_path: Path) -> None:
-    """The pre-existing "explicit empty string = deliberately skip rendering"
-    signal (used by projection-api) must be unaffected by the unbound-refusal
-    fix above — only the fully-ABSENT-key case changed."""
-    source = _source_contract(tmp_path / "source.yaml", required=True)
-
-    rendered = render_bifrost_delegation_contract(
-        source_path=source,
-        target_path=None,
-        environ={"BIFROST_CONTRACT_PATH": ""},
-    )
-
-    assert rendered is None
-
-
-@pytest.mark.unit
-def test_explicit_target_path_bypasses_env_resolution(tmp_path: Path) -> None:
-    """Passing target_path explicitly must still short-circuit env resolution
-    entirely (unchanged behavior — callers that supply their own target never
-    hit the BIFROST_CONTRACT_PATH refusal)."""
-    source = _source_contract(tmp_path / "source.yaml")
-    target = tmp_path / "rendered.yaml"
-
-    rendered = render_bifrost_delegation_contract(
-        source_path=source,
-        target_path=target,
-        # BIFROST_CONTRACT_PATH absent — must not raise; only LLM_CODER_URL is
-        # needed so the render itself succeeds (target_path resolution is
-        # what's under test here, not endpoint population).
-        environ={"LLM_CODER_URL": _http_url("coder.local:8000")},
-    )
-
-    assert rendered == target
