@@ -615,18 +615,18 @@ def test_stability_lane_volumes_do_not_reuse_production_names() -> None:
 
 @pytest.mark.unit
 def test_stability_runbook_is_validation_only() -> None:
+    """OMN-16557: pre-existing break from OMN-16307 (#2891, merged to dev), which
+    thinned this runbook to a knowledge-base pointer stub without updating this
+    test's content assertions -- caught here by the governed pre-push selector's
+    full-suite escalation, unrelated to this PR's own gateway-canary-probe scope.
+    The detailed validation-only claims this test used to assert against now
+    live in the knowledge base; this repo's own test can only assert that the
+    stub still points there, not the doctrine content itself.
+    """
     runbook = RUNBOOK_FILE.read_text(encoding="utf-8")
 
     assert "install-infra-watchdog" not in runbook
     assert "systemctl" not in runbook
-    assert "does not deploy, restart, or change the runtime host" in runbook
-    assert "`.201`" not in runbook
-    assert "It does not run `docker compose up`." in runbook
-    assert "does not expose inherited production host ports" in runbook
-    assert "does not render inherited out-of-lane runtime services" in runbook
-    assert "config" in runbook
-    assert "--profile runtime" in runbook
-    assert "inherits the release runtime image build" in runbook
-    assert "runtime://omninode-pc/stability-test/main" in runbook
-    assert "runtime://omninode-pc/stability-test/effects" in runbook
-    assert "runtime://omninode-pc/stability-test/worker" in runbook
+    assert "Migrated to the OmniNode knowledge base" in runbook
+    assert "stability-test-runtime-lane.md" in runbook
+    assert "https://github.com/OmniNode-ai/knowledge-base" in runbook
