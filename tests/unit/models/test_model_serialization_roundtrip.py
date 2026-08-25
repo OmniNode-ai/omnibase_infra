@@ -62,6 +62,9 @@ from omnibase_infra.runtime.models.model_batch_publisher_config import (
 from omnibase_infra.runtime.models.model_batch_publisher_metrics import (
     ModelBatchPublisherMetrics,
 )
+from omnibase_infra.runtime.models.model_bifrost_lane_backend_binding import (
+    ModelBifrostLaneBackendBinding,
+)
 from omnibase_infra.runtime.models.model_component_health import ModelComponentHealth
 from omnibase_infra.runtime.models.model_detailed_health_response import (
     ModelDetailedHealthResponse,
@@ -483,6 +486,18 @@ def _make_pattern_b_broker_config() -> ModelPatternBBrokerConfig:
     )
 
 
+def _make_bifrost_lane_backend_binding() -> ModelBifrostLaneBackendBinding:
+    return ModelBifrostLaneBackendBinding(
+        backend_id="local-coder",
+        endpoint_url="http://192.168.86.201:8000/v1/chat/completions",
+        served_model_id="qwen3.8",
+        parameter_count="27B",
+        context_window=122_880,
+        max_tokens=8_192,
+        timeout_ms=30_000,
+    )
+
+
 # ============================================================================
 # Factory registry: maps model class -> factory callable
 # ============================================================================
@@ -498,6 +513,7 @@ MODEL_FACTORIES: dict[type[BaseModel], Any] = {
     # Runtime models (13/59 covered)
     ModelBatchPublisherConfig: _make_batch_publisher_config,
     ModelBatchPublisherMetrics: _make_batch_publisher_metrics,
+    ModelBifrostLaneBackendBinding: _make_bifrost_lane_backend_binding,
     ModelComponentHealth: _make_component_health,
     ModelDetailedHealthResponse: _make_detailed_health_response,
     ModelDuplicateResponse: _make_duplicate_response,
