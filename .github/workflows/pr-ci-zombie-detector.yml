@@ -1,0 +1,102 @@
+# SPDX-FileCopyrightText: 2025 OmniNode.ai Inc.
+# SPDX-License-Identifier: MIT
+#
+# Scheduled zombie-run detector for wedged PR CI concurrency groups (OMN-16494).
+#
+# `ready_for_review` (undraft) and a branch refresh (push/update-branch/
+# synchronize) both trigger CI for the same PR. Two independent mechanisms
+# can leave the CURRENT-head run stuck `status=queued` with zero scheduled
+# jobs forever, while an OLDER-head run for the same PR keeps holding the
+# shared concurrency group open: cancel-in-progress leaving 1-2 self-hosted
+# jobs alive past the cancel signal (onex_change_control ci.yml), or a
+# single-flight `cancel-in-progress: false` queue whose stale-head run stalls
+# on a straggler job (omnimarket ci.yml, OMN-14645). This workflow runs
+# `scripts/ci/pr_ci_zombie_detector.py --apply`, which force-cancels the
+# stale-head run once the newer-head run has genuinely wedged (queued, zero
+# jobs, past the staleness threshold) -- see the script's module docstring
+# for the full mechanism writeup and unit-tested decision logic.
+#
+# HARD REQUIREMENT: runs on GitHub-hosted compute (ubuntu-latest), never
+# self-hosted -- same rationale as runner-fleet-canary.yml and
+# runner-broker-dispatch-wedge-rerun.yml: this must not share fate with the
+# self-hosted runner fleet, since a self-hosted-runner cancel-signal survivor
+# is one of the two mechanisms it exists to detect. The script itself is
+# stdlib-only (argparse/json/subprocess/dataclasses) plus the `gh` CLI, both
+# preinstalled on GitHub-hosted runners -- no `uv sync` / venv needed.
+#
+# Token: uses CROSS_REPO_PAT (same convention as branch-protection-audit.yml
+# and runner-broker-dispatch-wedge-rerun.yml) because the target repos
+# (onex_change_control, omnimarket) are NOT this repo -- the default
+# GITHUB_TOKEN cannot force-cancel runs in another repo. Without
+# CROSS_REPO_PAT configured, this job SKIPS cleanly rather than failing --
+# that is expected and documented here so an on-call is not surprised by a
+# red required-less scheduled job.
+
+name: PR CI Zombie Detector
+
+on:
+  schedule:
+    # Every 10 minutes -- the observed incidents cost ~35 min of unattended
+    # wedge before manual force-cancel; a 10-min cadence against a 15-min
+    # staleness threshold (script default) catches a wedge within ~25 min
+    # without chasing ordinary queueing latency as a false positive.
+    - cron: "*/10 * * * *"
+  workflow_dispatch:
+    inputs:
+      apply:
+        description: "Force-cancel candidates (false = dry-run report only)"
+        type: boolean
+        default: true
+
+permissions:
+  contents: read
+
+jobs:
+  detect:
+    name: Detect and clear wedged PR concurrency groups
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+
+    steps:
+      - name: Checkout (script only)
+        uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+
+      - name: Check CROSS_REPO_PAT is configured
+        id: pat_check
+        env:
+          CROSS_REPO_PAT: ${{ secrets.CROSS_REPO_PAT }}
+        run: |
+          if [ -z "$CROSS_REPO_PAT" ]; then
+            echo "::warning::CROSS_REPO_PAT is not set -- zombie detector SKIPPED (cannot force-cancel runs in onex_change_control/omnimarket with a same-repo GITHUB_TOKEN)."
+            echo "has_pat=false" >> "$GITHUB_OUTPUT"
+          else
+            echo "has_pat=true" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Run zombie detector
+        if: steps.pat_check.outputs.has_pat == 'true'
+        env:
+          GH_TOKEN: ${{ secrets.CROSS_REPO_PAT }}
+          DO_APPLY: ${{ (github.event_name == 'workflow_dispatch' && inputs.apply == false) && 'false' || 'true' }}
+        run: |
+          args=(
+            --owner OmniNode-ai
+            --repo onex_change_control
+            --repo omnimarket
+            --stale-after-seconds 900
+            --report zombie-detector-report.json
+          )
+          if [ "$DO_APPLY" = "true" ]; then
+            args+=(--apply)
+          fi
+          python3 scripts/ci/pr_ci_zombie_detector.py "${args[@]}"
+
+      - name: Upload receipt
+        if: steps.pat_check.outputs.has_pat == 'true'
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7
+        with:
+          name: pr-ci-zombie-detector-report
+          path: zombie-detector-report.json
+          retention-days: 30
