@@ -87,4 +87,4 @@ Quick lookup for defects fixed on `dev` since 2026-06-01. If a deployed runtime 
 
 - [Architecture Documentation](../architecture/)
 - [Validation Documentation](../validation/)
-- [Message Dispatch Engine — terminal correlator](../architecture/MESSAGE_DISPATCH_ENGINE.md#terminal-correlator-pattern)
+- Message Dispatch Engine — terminal correlator: migrated to the knowledge base, see [../architecture/MESSAGE_DISPATCH_ENGINE.md](../architecture/MESSAGE_DISPATCH_ENGINE.md)
