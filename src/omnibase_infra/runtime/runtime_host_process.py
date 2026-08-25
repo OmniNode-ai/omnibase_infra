@@ -1890,7 +1890,12 @@ class RuntimeHostProcess:
         # provider (OMN-15620). Undeclared sibling co-installs collide with
         # declared providers of the same node identity in auto-wiring
         # discovery below and manufacture unexplained runtime failures; catch
-        # it here, named, before discovery ever runs.
+        # it here, named, before discovery ever runs. Deliberately NOT
+        # overridable via ONEX_ALLOW_VENV_IMPURITY (unlike the
+        # tests/conftest.py::pytest_configure collection-time gate, which a
+        # handful of CI jobs legitimately opt out of for cross-boundary
+        # tests) -- a REAL runtime boot should never tolerate an impure venv,
+        # test or production.
         from omnibase_infra.runtime.venv_purity import assert_venv_purity
 
         assert_venv_purity()

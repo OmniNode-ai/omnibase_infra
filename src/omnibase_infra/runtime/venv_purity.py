@@ -72,6 +72,7 @@ logger = logging.getLogger(__name__)
 
 __all__ = [
     "ENTRY_POINT_GROUP",
+    "VENV_PURITY_OVERRIDE_ENV",
     "UndeclaredProvider",
     "VenvPurityError",
     "assert_venv_purity",
@@ -83,6 +84,18 @@ __all__ = [
 # the auto-wiring subsystem it protects the test suite for, so it must not
 # depend on it. If that constant ever changes, update both.
 ENTRY_POINT_GROUP = "onex.nodes"
+
+# The single supported way past a purity refusal, named here (not read here --
+# see module docstring's boundary-discipline note and
+# ``omnimarket_drift_guard.DRIFT_OVERRIDE_ENV`` for the identical pattern).
+# Every CI job that DELIBERATELY co-installs a sibling ONEX repo into this
+# venv for cross-boundary testing (e.g. ``kafka-boundary-compat`` installing
+# ``omniintelligence`` editable to run
+# ``tests/integration/event_bus/test_kafka_boundary_compat.py``) sets this in
+# its own workflow step, naming why, rather than the check silently
+# special-casing "well-known" sibling packages -- an allowlist of package
+# names would just be a second, softer place for undeclared pollution to hide.
+VENV_PURITY_OVERRIDE_ENV = "ONEX_ALLOW_VENV_IMPURITY"
 
 
 class VenvPurityError(RuntimeError):
