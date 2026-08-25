@@ -212,6 +212,21 @@ repos:
         files: ^(\.github/workflows/.*\.ya?ml|pyproject\.toml|uv\.lock)$
         pass_filenames: true
         stages: [pre-commit]
+      # OMN-16516: structural (tomllib, not regex) guard against the
+      # 2026-08-23 mirror-leak incident (OMN-16162) -- a committed uv.lock
+      # that resolves any package from a non-public registry/git/artifact
+      # host. Mirrors the required CI job "Lockfile Registry Allowlist
+      # (OMN-16516)". Fail-closed backstop regardless of which channel
+      # produced the leak (sanitized generator env is OMN-16517; a repo
+      # index pin is OMN-16518) -- see the script's module docstring for the
+      # layered-defense rationale.
+      - id: check-lockfile-registry-allowlist
+        name: uv.lock package sources must resolve to a public host allowlist (OMN-16516)
+        entry: uv run --frozen python scripts/ci/check_lockfile_registry_allowlist.py --min-packages 20
+        language: system
+        files: ^uv\.lock$
+        pass_filenames: true
+        stages: [pre-commit]
       - id: reject-node-implementations
         name: Reject unallowlisted node handlers (belong in omnimarket)
         entry: bash scripts/ci/reject-node-implementations.sh --staged
