@@ -158,7 +158,14 @@ def test_checked_in_manifest_is_exact_and_all_blockers_are_explicit() -> None:
     # landed the field on the wire in omnibase_core). A separate forward
     # migration rather than an edit to 0000_create_intent_classification_events.sql
     # because that file's content SHA-256 is already pinned in the ledger.
-    assert len(result.declarations) == 107
+    # +1 for OMN-16324's
+    # node_projection_tenant_credentials/0001_relax_name_provider_not_null.sql
+    # -- relaxes name/provider to nullable so a revoke-before-register
+    # tombstone row (revoke arriving on a ref this projection has not yet
+    # seen a register for) can persist without violating NOT NULL; landed in
+    # omnibase_infra first per the node-migration-vendor-parity-gate
+    # ordering, ahead of omnimarket#2144.
+    assert len(result.declarations) == 108
     assert result.blocked == ()
     assert len(result.legacy_node_declarations) == 2
     assert len(result.cloud_aliases) == 30
