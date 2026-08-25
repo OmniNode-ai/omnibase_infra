@@ -4,6 +4,10 @@
 # CodeQL security and quality analysis for omnibase_infra.
 # Kept repo-local so CodeQL can use the repo config that excludes CI metadata.
 # OMN-5425
+#
+# OMN-16513 canary: this comment-only line exercises the codeql job's
+# OMNI_SECURITY_SCAN_RUNS_ON_JSON seam (§3.0b-M row #1, no path filter on
+# this job -- any same-repo PR qualifies).
 
 name: Security Scan
 
