@@ -128,9 +128,22 @@ services:
       # the same fail-closed way the main process does, from the operator-supplied
       # map already mounted at /run/gateway/broker-ref-map.yaml above -- it does not
       # re-derive or hardcode a broker endpoint of its own.
+      # OMN-16557: timeout was 25s -- BELOW the probe's own achievable
+      # worst-case single-leg budget even with no broker-side breakage
+      # (check_canary_leg() spends the contract-declared
+      # canary.produce_deadline_seconds TWICE in sequence -- connect, then
+      # produce -- before the separate readback wait: see
+      # ModelGatewayCanaryConfig.total_deadline_seconds). A live manual run
+      # on .201 (2026-08-25) reproduced this exactly: 24s elapsed against a
+      # 25s timeout with AWS behaving normally. 45s stays safely above the
+      # new contract-declared total (2*15 + 12 = 42s); keep this value >=
+      # that total_deadline_seconds if canary.produce_deadline_seconds or
+      # canary.readback_deadline_seconds change in contract.yaml (manual
+      # sync -- the compose file cannot reference the contract at build
+      # time, see OMN-15762).
       test: ["CMD", "onex-gateway-canary-probe", "--config", "/app/config/gateway-forwarder.yaml", "--state-file", "/tmp/gateway-canary-probe-state.json", "--broker-ref-map", "/run/gateway/broker-ref-map.yaml"]
       interval: 15s
-      timeout: 25s
+      timeout: 45s
       retries: 4
       start_period: 90s
     labels:

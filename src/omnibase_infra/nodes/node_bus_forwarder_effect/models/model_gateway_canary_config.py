@@ -45,8 +45,19 @@ class ModelGatewayCanaryConfig(BaseModel):
 
     @property
     def total_deadline_seconds(self) -> float:
-        """Upper bound on one full real check across a single leg."""
-        return self.produce_deadline_seconds + self.readback_deadline_seconds
+        """Upper bound on one full real check across a single leg.
+
+        OMN-16557: ``check_canary_leg`` (``runtime/gateway_canary_probe.py``)
+        spends ``produce_deadline_seconds`` on TWO separate sequential waits
+        -- ``transport.start()`` (connect), then ``transport.send()``
+        (produce) -- before the independent ``readback_deadline_seconds``
+        wait. The previous formula (``produce_deadline_seconds +
+        readback_deadline_seconds``) undercounted the real worst case by one
+        full ``produce_deadline_seconds``, which is how the Docker healthcheck
+        ``timeout`` in ``docker-compose.gateway.yml`` ended up set below what
+        the probe can legitimately take even with no broker-side breakage.
+        """
+        return (2 * self.produce_deadline_seconds) + self.readback_deadline_seconds
 
 
 __all__ = ["ModelGatewayCanaryConfig"]

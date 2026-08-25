@@ -123,6 +123,19 @@ class _FakeUnreachableTransport(_FakeHealthyTransport):
         raise ConnectionError("no route to broker")
 
 
+class _FakeEmptyMessageTransport(_FakeHealthyTransport):
+    """Fails to connect with an exception whose ``str()`` is empty.
+
+    OMN-16557: this is exactly what ``asyncio.wait_for`` raises on its own
+    internal cancellation (``TimeoutError``/``asyncio.TimeoutError`` with no
+    message) -- reproduces the live symptom
+    ``FAIL: cloud leg connect failed: `` (nothing after the colon).
+    """
+
+    async def start(self) -> None:
+        raise TimeoutError
+
+
 class _FakeAdminClient:
     """Records ``create_topics`` calls instead of dialing a real broker."""
 
@@ -192,6 +205,32 @@ async def test_check_canary_leg_fails_on_connect_error() -> None:
     )
     assert result.passed is False
     assert "connect failed" in result.detail
+
+
+@pytest.mark.asyncio
+async def test_check_canary_leg_never_swallows_empty_exception_message() -> None:
+    """OMN-16557: a connect failure whose exception has an empty ``str()``
+    (e.g. ``TimeoutError`` from ``asyncio.wait_for``'s own cancellation) must
+    still produce a diagnosable detail line -- the exception's type, at
+    minimum -- never the bare, uninformative ``"cloud leg connect failed: "``
+    the live healthcheck log was observed emitting."""
+    result = await gateway_canary_probe.check_canary_leg(
+        leg="cloud",
+        bus_config=_bus_config(),
+        topic=CANARY_TOPIC,
+        canary=_canary(),
+        transport_factory=_FakeEmptyMessageTransport,
+        admin_factory=_FakeAdminClient,
+    )
+    assert result.passed is False
+    assert "connect failed" in result.detail
+    # The exception type must be named -- this is what "never swallow the
+    # exception, log type+repr" means in practice: the reader can tell
+    # *what kind* of failure this was even when str(exc) carries nothing.
+    assert "TimeoutError" in result.detail
+    # And the detail must not degenerate into the empty-after-colon form
+    # observed live on .201.
+    assert not result.detail.rstrip().endswith("connect failed:")
 
 
 @pytest.mark.asyncio
@@ -500,3 +539,20 @@ def test_canary_config_rejects_empty_topic() -> None:
             produce_deadline_seconds=8,
             readback_deadline_seconds=12,
         )
+
+
+def test_canary_config_total_deadline_seconds_accounts_for_connect_and_send() -> None:
+    """OMN-16557: ``check_canary_leg`` spends ``produce_deadline_seconds`` TWICE
+    in sequence -- once on ``transport.start()`` (connect), once on
+    ``transport.send()`` (produce) -- before the separate readback wait. The
+    property must reflect that real worst case (2x produce + readback), not
+    undercount it as produce + readback, which is what let the Docker
+    healthcheck ``timeout`` get set below the probe's own achievable worst
+    case in the first place."""
+    canary = ModelGatewayCanaryConfig(
+        topic=CANARY_TOPIC,
+        cadence_seconds=30,
+        produce_deadline_seconds=15,
+        readback_deadline_seconds=12,
+    )
+    assert canary.total_deadline_seconds == pytest.approx(2 * 15 + 12)

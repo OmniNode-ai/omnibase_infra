@@ -65,6 +65,20 @@ _CANARY_HEADER_NAME = "canary-correlation-id"
 _POLL_SLICE_MS = 2000
 
 
+def _describe_exception(exc: BaseException) -> str:
+    """Render an exception for the health log without ever swallowing it.
+
+    OMN-16557: the live symptom was ``FAIL: cloud leg connect failed: `` with
+    nothing after the colon -- bare ``str(exc)`` on a ``TimeoutError`` raised
+    by ``asyncio.wait_for``'s own internal cancellation, whose ``str()`` is
+    empty by construction (no message was ever passed to it). Reporting the
+    exception's type name plus its ``repr()`` guarantees a non-empty,
+    diagnosable detail line regardless of whether the exception carries a
+    message.
+    """
+    return f"{type(exc).__name__}: {exc!r}"
+
+
 class ModelCanaryLegResult(NamedTuple):
     """Outcome of one leg's real produce+readback attempt."""
 
@@ -163,7 +177,9 @@ async def check_canary_leg(
             )
         except Exception as exc:  # noqa: BLE001 -- any failure here means the leg is dead
             return ModelCanaryLegResult(
-                leg=leg, passed=False, detail=f"{leg} leg connect failed: {exc}"
+                leg=leg,
+                passed=False,
+                detail=f"{leg} leg connect failed: {_describe_exception(exc)}",
             )
         started = True
 
@@ -179,7 +195,9 @@ async def check_canary_leg(
             )
         except Exception as exc:  # noqa: BLE001 -- any failure here means the leg is dead
             return ModelCanaryLegResult(
-                leg=leg, passed=False, detail=f"{leg} leg produce failed: {exc}"
+                leg=leg,
+                passed=False,
+                detail=f"{leg} leg produce failed: {_describe_exception(exc)}",
             )
 
         deadline_at = time.monotonic() + canary.readback_deadline_seconds
@@ -192,7 +210,9 @@ async def check_canary_leg(
                 )
             except Exception as exc:  # noqa: BLE001 -- any failure here means the leg is dead
                 return ModelCanaryLegResult(
-                    leg=leg, passed=False, detail=f"{leg} leg readback failed: {exc}"
+                    leg=leg,
+                    passed=False,
+                    detail=f"{leg} leg readback failed: {_describe_exception(exc)}",
                 )
             for message in messages:
                 if message.value == correlation_id:
