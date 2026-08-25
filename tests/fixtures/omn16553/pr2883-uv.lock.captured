@@ -2271,7 +2271,7 @@ requires-dist = [
 dev = [
     { name = "deepdiff", specifier = ">=8.0.0,<10.0.0" },
     { name = "hypothesis", specifier = ">=6.148.7,<7.0.0" },
-    { name = "kafka-python", specifier = ">=2.3.2,<4.0.0" },
+    { name = "kafka-python", specifier = ">=2.3.2,<3.0.0" },
     { name = "locust", specifier = ">=2.31.8,<3.0.0" },
     { name = "mypy", specifier = ">=1.13.0,<3.0.0" },
     { name = "onex-change-control", git = "https://github.com/OmniNode-ai/onex_change_control.git?rev=2dd26ade7caaa7131e532473ec9d8a207d0e77ab" },
