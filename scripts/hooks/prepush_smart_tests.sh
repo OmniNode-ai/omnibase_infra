@@ -51,6 +51,18 @@
 #                        the whole point of the local hook is the impacted subset.
 #   PREPUSH_FULL_SUITE   set non-empty to force the FULL suite.
 #
+# Heavy-escalation execution targets (in precedence order, see
+# docs/runbooks/prepush-remote-full-suite-verify.md):
+#   1. the local host, when it IS a designated gate host AND is under the load
+#      threshold -- `.200` (OMN-15059) or the `.201` gate-runner (OMN-16295)
+#   2. a GitHub-hosted FULL-suite CI run pinned to the exact HEAD sha
+#      (OMN-16688) -- consulted only when 1 is unavailable
+#   3. a single-use, receipted, degraded-evidence override grant
+#   4. refusal
+# Target 2 adds NO env override and cannot make the gate accept less work: the
+# run must be sha-pinned, green, and full-suite shaped, and an unresolvable
+# check counts as no evidence, not as a pass.
+#
 # NOT an env override (OMN-16480): the host/capacity escape hatch. Any
 # `PREPUSH_ALLOW_*` variable found in the environment is REJECTED at entry --
 # see the rejection block below. The override is a single-use, repo+HEAD-scoped,
@@ -283,6 +295,64 @@ host_is_fit() {
   awk -v r="$ratio" -v thr="$PREPUSH_LOAD_THRESHOLD" 'BEGIN { exit !(r <= thr + 0) }'
 }
 
+# =============================================================================
+# Remote full-suite verification -- third execution target (OMN-16688)
+# =============================================================================
+# `.200` and the `.201` gate-runner are the two LOCAL heavy targets. Both can be
+# over the load threshold at the same time, and on 2026-08-26 both were: `.201`
+# sat at load 74 against 32 cores (2.3x) with 50 of 53 self-hosted runners busy,
+# so every heavy escalation refused and the pre-push queue stalled outright --
+# not slow, stalled, because `host_is_fit` is a HOOK constraint and no amount of
+# queue depth can satisfy it.
+#
+# Every OmniNode repo is PUBLIC, so GitHub-hosted minutes are free and
+# unmetered, and `.github/workflows/ci.yml` ALREADY runs this same full sharded
+# suite on `ubuntu-latest`. When neither local host can take the work, a
+# GitHub-hosted run pinned to the exact sha being pushed is better evidence than
+# what we would otherwise accept -- a degraded-capacity override grant running a
+# contended local suite. This target is therefore an EVIDENCE UPGRADE over the
+# fallback it displaces, not a discount on it.
+#
+# NOT A BYPASS, and shaped so it cannot become one:
+#   * It is consulted ONLY on the paths that would otherwise `die` or fall back
+#     to a degraded-evidence override grant. Every currently-passing path
+#     behaves identically.
+#   * It accepts no PREPUSH_* override and reads no local artifact. The answer
+#     is re-derived live from the GitHub API each time, so there is no file on
+#     disk to forge.
+#   * It cannot make the gate accept LESS work: prepush_remote_verify.py
+#     requires the run to be sha-pinned, green, AND full-suite shaped (all
+#     `_FULL_SUITE_SPLIT_COUNT` shards green -- the constant is imported from
+#     the selector itself). A selector-narrowed run is rejected.
+#   * Exit 2 ("could not resolve", e.g. gh unavailable) is treated as NO
+#     evidence and falls through to the existing refusal -- never as a pass.
+#     Same fail-closed posture as the load probe above.
+REMOTE_FULL_SUITE_VERIFIED=0
+
+# remote_full_suite_verified HEAVY_WHAT -- 0 if a sha-pinned, green, full-suite
+# CI run already exists for HEAD; 1 otherwise. Sets REMOTE_FULL_SUITE_VERIFIED
+# on success so the caller can skip the local pytest invocation entirely.
+remote_full_suite_verified() {
+  local heavy_what="$1" head_sha rc=0 out
+  head_sha="$(git rev-parse HEAD 2> /dev/null || true)"
+  if [ -z "$head_sha" ]; then
+    return 1
+  fi
+  log "checking for a GitHub-hosted FULL-suite run pinned to ${head_sha} before refusing ${heavy_what}..."
+  out="$(uv run python "${REPO_ROOT}/scripts/hooks/prepush_remote_verify.py" \
+    check --head-sha "$head_sha" 2>&1)" || rc=$?
+  if [ "$rc" -eq 0 ]; then
+    log "REMOTE FULL-SUITE PASS accepted in place of ${heavy_what}: ${out}"
+    log "  evidence: the full suite ran to green on GitHub-hosted CI against this exact tree (${head_sha})."
+    REMOTE_FULL_SUITE_VERIFIED=1
+    return 0
+  fi
+  # rc 1 = resolved, no qualifying run. rc 2 = could not resolve at all. Both
+  # mean "no evidence"; only the operator-facing wording differs.
+  log "no remote full-suite evidence for ${head_sha}: ${out}"
+  return 1
+}
+
 guard_full_suite_host() {
   local host lc_host lc_target lc_201 heavy_what
   # OMN-15408: the caller names WHICH heavyweight run is being guarded, so the
@@ -302,6 +372,14 @@ guard_full_suite_host() {
     # OMN-16295: identity alone is not enough -- this known-good host must
     # also have capacity right now.
     if host_is_fit ""; then
+      return 0
+    fi
+    # OMN-16688: prefer a sha-pinned GitHub-hosted FULL-suite pass over running
+    # the heavy suite on a host we just measured as over-subscribed, and over
+    # the degraded-capacity override below. Checked BEFORE the grant because it
+    # is strictly stronger evidence: an uncontended full run on this exact tree
+    # versus a contended local one.
+    if remote_full_suite_verified "$heavy_what"; then
       return 0
     fi
     if consume_override_grant "degraded-capacity: ${heavy_what} on '${host}' at/over the ${PREPUSH_LOAD_THRESHOLD}x-core load threshold"; then
@@ -324,14 +402,20 @@ guard_full_suite_host() {
       *) other_note="${other_label} is ALSO at/over the load threshold" ;;
     esac
     die "${heavy_what} triggered on '${host}' (the designated host by identity), but its load is at/over the ${PREPUSH_LOAD_THRESHOLD}x-core threshold" \
-        "${other_note}. See docs/runbooks/200-build-lane-execution-pattern.md for the .201 gate-runner recipe, or mint a single-use grant to run here anyway (degraded evidence -- do not use as a routine bypass): uv run python scripts/hooks/prepush_override_grant.py mint --reason '<why>'"
+        "${other_note}. PREFERRED when both hosts are loaded: open/refresh the PR so GitHub-hosted CI runs the FULL suite on this exact sha, then re-push -- this hook will accept that run automatically (OMN-16688; check it yourself with 'uv run python scripts/hooks/prepush_remote_verify.py check --head-sha \$(git rev-parse HEAD)'). Otherwise see docs/runbooks/200-build-lane-execution-pattern.md for the .201 gate-runner recipe, or mint a single-use grant to run here anyway (degraded evidence -- do not use as a routine bypass): uv run python scripts/hooks/prepush_override_grant.py mint --reason '<why>'"
+  fi
+  # OMN-16688: same precedence on the wrong-host path -- a sha-pinned
+  # GitHub-hosted FULL-suite pass beats running the heavy suite on an
+  # undesignated host under a degraded-host grant.
+  if remote_full_suite_verified "$heavy_what"; then
+    return 0
   fi
   if consume_override_grant "degraded-host: ${heavy_what} on '${host}', not the designated .200 host '${PREPUSH_200_HOSTNAME}'"; then
     log "WARNING: DEGRADED-HOST OVERRIDE IN EFFECT (single-use grant consumed) -- running ${heavy_what} on '${host}', NOT the designated .200 host ('${PREPUSH_200_HOSTNAME}'). This host has weaker isolation/headroom than .200; treat any evidence from this run as WEAKER than a .200-run gate. See docs/runbooks/200-build-lane-execution-pattern.md."
     return 0
   fi
   die "${heavy_what} triggered on host '${host}', not the designated .200 build host ('${PREPUSH_200_HOSTNAME}')" \
-      "push from .200 instead (ssh jonah@stickybeatz-studio.tail75df5e.ts.net, wrap remote commands as zsh -lc \"...\"; see docs/runbooks/200-build-lane-execution-pattern.md for the full pattern), OR mint a single-use override grant to run the full suite on this host anyway (visible, receipted, degraded-evidence override -- do not use as a routine bypass): uv run python scripts/hooks/prepush_override_grant.py mint --reason '<why>'"
+      "push from .200 instead (ssh jonah@stickybeatz-studio.tail75df5e.ts.net, wrap remote commands as zsh -lc \"...\"; see docs/runbooks/200-build-lane-execution-pattern.md for the full pattern), OR let GitHub-hosted CI run the FULL suite on this exact sha and re-push -- this hook accepts a sha-pinned green full-suite run automatically (OMN-16688; check it with 'uv run python scripts/hooks/prepush_remote_verify.py check --head-sha \$(git rev-parse HEAD)'), OR mint a single-use override grant to run the full suite on this host anyway (visible, receipted, degraded-evidence override -- do not use as a routine bypass): uv run python scripts/hooks/prepush_override_grant.py mint --reason '<why>'"
 }
 
 # -----------------------------------------------------------------------------
@@ -611,13 +695,21 @@ scrub_prepush_override_env() {
 
 if [ "$IS_FULL" = "True" ] || [ "$IS_FULL" = "true" ]; then
   guard_full_suite_host
-  log "running FULL unit suite (fail-closed escalation): uv run pytest ${FULL_SUITE_TARGET} --ignore=tests/integration ${PREPUSH_PYTEST_ARGS:-}"
-  (
-    _pytest_extra_args="${PREPUSH_PYTEST_ARGS:-}"
-    scrub_prepush_override_env
-    # shellcheck disable=SC2086
-    exec uv run pytest "${FULL_SUITE_TARGET}" --ignore=tests/integration --tb=short ${_pytest_extra_args}
-  ) || RC=$?
+  if [ "$REMOTE_FULL_SUITE_VERIFIED" -eq 1 ]; then
+    # OMN-16688: the escalation is SATISFIED, not skipped -- the full suite ran
+    # to green on GitHub-hosted CI against this exact sha. Re-running it locally
+    # would re-execute the identical tests on the identical tree, which is why
+    # the local invocation is elided rather than merely deferred.
+    log "FULL unit suite satisfied by the remote GitHub-hosted full-suite pass; not re-running it locally."
+  else
+    log "running FULL unit suite (fail-closed escalation): uv run pytest ${FULL_SUITE_TARGET} --ignore=tests/integration ${PREPUSH_PYTEST_ARGS:-}"
+    (
+      _pytest_extra_args="${PREPUSH_PYTEST_ARGS:-}"
+      scrub_prepush_override_env
+      # shellcheck disable=SC2086
+      exec uv run pytest "${FULL_SUITE_TARGET}" --ignore=tests/integration --tb=short ${_pytest_extra_args}
+    ) || RC=$?
+  fi
 elif [ "${#PATHS[@]}" -gt 0 ]; then
   # OMN-15408: guard on the SELECTED WORK, not the is_full_suite flag. A
   # selection that covers the whole full-suite target is the heavy run under
@@ -625,13 +717,20 @@ elif [ "${#PATHS[@]}" -gt 0 ]; then
   if selection_is_whole_suite "$FULL_SUITE_TARGET" "${PATHS[@]}"; then
     guard_full_suite_host "whole-suite-equivalent impacted selection (is_full_suite=${IS_FULL}, selected paths [ ${PATHS_STR}] cover the entire '${FULL_SUITE_TARGET}' escalation target)"
   fi
-  log "running impacted subset: uv run pytest ${PATHS_STR}--ignore=tests/integration ${PREPUSH_PYTEST_ARGS:-}"
-  (
-    _pytest_extra_args="${PREPUSH_PYTEST_ARGS:-}"
-    scrub_prepush_override_env
-    # shellcheck disable=SC2086
-    exec uv run pytest "${PATHS[@]}" --ignore=tests/integration --tb=short ${_pytest_extra_args}
-  ) || RC=$?
+  if [ "$REMOTE_FULL_SUITE_VERIFIED" -eq 1 ]; then
+    # Only reachable when the selection was whole-suite-equivalent (the guard
+    # above is the sole setter), so the remote FULL suite strictly covers this
+    # selection -- it ran MORE tests than this invocation would have.
+    log "impacted selection is whole-suite-equivalent and is covered by the remote GitHub-hosted full-suite pass; not re-running it locally."
+  else
+    log "running impacted subset: uv run pytest ${PATHS_STR}--ignore=tests/integration ${PREPUSH_PYTEST_ARGS:-}"
+    (
+      _pytest_extra_args="${PREPUSH_PYTEST_ARGS:-}"
+      scrub_prepush_override_env
+      # shellcheck disable=SC2086
+      exec uv run pytest "${PATHS[@]}" --ignore=tests/integration --tb=short ${_pytest_extra_args}
+    ) || RC=$?
+  fi
 else
   log "no impacted unit tests mapped for this push (no source/test change contributed a target); nothing to run."
 fi
