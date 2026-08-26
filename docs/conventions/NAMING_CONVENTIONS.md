@@ -276,7 +276,7 @@ Example:
 utils/util_error_sanitization.py
 ```
 
-Functions: `sanitize_error_message()`, `sanitize_secret_path()`, `sanitize_consul_key()`
+Functions: `sanitize_error_message()`, `sanitize_secret_path()`
 
 ---
 
