@@ -63,6 +63,7 @@ __all__ = ["GatewaySessionKeeper"]
 
 _ATTACH_PATH: Final[str] = "/v1/gateway/attach"
 _HEARTBEAT_PATH: Final[str] = "/v1/gateway/heartbeat"
+_DETACH_PATH: Final[str] = "/v1/gateway/detach"
 
 # Seconds this client needs for a grant plus an attach plus one backoff-retry.
 # Checked against the directive's remaining lead before a renewal is attempted.
@@ -165,6 +166,49 @@ class GatewaySessionKeeper:
                 error_code=EnumCoreErrorCode.VALIDATION_FAILED,
             )
         return session
+
+    async def detach(self, *, now: datetime, reason: str) -> None:
+        """Tear the held session down explicitly (OMN-16036).
+
+        The counterpart to ``attach``, and the reason a caller can open a
+        session without leaving one behind: an onboarding check that proves a
+        credential, and a runtime shutting down cleanly, both need the session
+        gone at a known instant rather than left to age out against its
+        ceiling.
+
+        The token is NOT force-refreshed here. The gateway binds detach to the
+        stored session's tenant/principal/client identity, which the token
+        already cached for the attach carries -- a second grant would buy
+        nothing and cost a Keycloak round trip on every teardown.
+
+        Args:
+            now: Caller-supplied instant, as everywhere else in this class.
+            reason: Operator-facing teardown reason, recorded by the gateway
+                on the session event. Required by the ingress contract
+                (``ModelGatewayDetachRequest.reason``, min length 1).
+
+        Raises:
+            ModelOnexError: If no session is held, or the gateway refuses the
+                teardown. The held session is deliberately NOT forgotten on a
+                refusal: it may still be open server-side, and a client that
+                cleared its state would report a clean teardown that did not
+                happen.
+        """
+        attachment = self._require_attachment()
+        response = await self._post(
+            _DETACH_PATH,
+            payload={
+                "session_id": str(attachment.session.session_id),
+                "reason": reason,
+            },
+            now=now,
+        )
+        await self._require_ok(response, operation="detach")
+
+        # Only now: the session is gone server-side, so holding a reference to
+        # it locally would let ensure_attached hand back a dead session.
+        self._attachment = None
+        self._renew_at = None
 
     async def ensure_attached(self, *, now: datetime) -> ModelGatewayAttachment:
         """Return a session valid at ``now``, re-attaching when the cycle says to.

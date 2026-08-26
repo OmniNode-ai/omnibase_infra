@@ -5,11 +5,13 @@
 
 from __future__ import annotations
 
+from pathlib import Path
 from unittest.mock import AsyncMock, patch
 
 import pytest
 
 from omnibase_infra.nodes.node_onboarding_orchestrator.handlers.handler_onboarding import (
+    _execute_dag_step,
     handle_onboarding,
 )
 from omnibase_infra.nodes.node_onboarding_orchestrator.models.enum_onboarding_status import (
@@ -18,6 +20,7 @@ from omnibase_infra.nodes.node_onboarding_orchestrator.models.enum_onboarding_st
 from omnibase_infra.nodes.node_onboarding_orchestrator.models.model_onboarding_input import (
     ModelOnboardingInput,
 )
+from omnibase_infra.onboarding.model_onboarding_step import ModelOnboardingStep
 from omnibase_infra.onboarding.model_onboarding_step_verification import (
     ModelOnboardingStepVerification,
 )
@@ -71,3 +74,34 @@ async def test_verification_named_infra_steps_resolve_through_handler() -> None:
         "${REDPANDA_HOST}:${REDPANDA_PORT}",
         "uv run python -c \"from omnibase_infra.event_bus import get_bus; print('ok')\"",
     ]
+
+
+@pytest.mark.asyncio
+async def test_gateway_attach_dispatches_through_the_onboarding_step_executor(
+    tmp_path: Path,
+) -> None:
+    """OMN-16036 AC1, proven through the flow rather than through the table.
+
+    The onboarding executor dispatches on the raw ``check_type`` string and
+    raises ``ValueError: Unknown check_type`` for anything unregistered, so
+    running a real ``gateway_attach`` step through it is what proves the check
+    is reachable from onboarding. Nothing is mocked: the credential store
+    refuses before a socket is opened, so this asserts dispatch AND the
+    fail-closed surfacing (a failed step, never an exception out of the DAG).
+    """
+    step = ModelOnboardingStep(
+        step_key="prove_gateway_credential",
+        name="Prove Gateway Credential",
+        step_type="verification",
+        verification=ModelOnboardingStepVerification(
+            check_type="gateway_attach",
+            target=str(tmp_path / ".onex"),
+            timeout_seconds=5,
+        ),
+    )
+
+    result = await _execute_dag_step(step)
+
+    assert result.passed is False
+    assert "onex auth login" in result.message
+    assert result.step_key == "prove_gateway_credential"
