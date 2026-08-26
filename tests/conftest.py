@@ -142,10 +142,31 @@ def pytest_configure(config: pytest.Config) -> None:
 
 @pytest.fixture(autouse=True)
 def _strip_test_local_git_environment(monkeypatch: pytest.MonkeyPatch) -> None:
-    """Prevent one test's Git process state from leaking into the next test."""
+    """Prevent one test's Git process state from leaking into the next test.
+
+    Also blinds every git subprocess a test shells out to against the
+    developer's REAL user-level git config (OMN-16584). Deleting leaked
+    ``GIT_*`` overrides above is not sufficient on its own: with none set,
+    git falls back to its default global-config resolution and reads the
+    caller's actual ``~/.gitconfig``. A contractor's legitimate personal
+    config (``[tag] gpgsign = true``) forces any bare ``git tag <name>``
+    (no ``-a``/``-m``) in these tests to upgrade to an annotated tag -- GPG
+    can only sign annotated tag objects -- which then has no message and
+    opens ``$GIT_EDITOR``/``$VISUAL``/``$EDITOR``/``core.editor`` (default
+    ``vi``) for ``TAG_EDITMSG``. Under a non-interactive test runner that
+    either hangs waiting on stdin or fails fast with "fatal: no tag
+    message?" depending on environment. ``GIT_CONFIG_GLOBAL=/dev/null`` +
+    ``GIT_CONFIG_NOSYSTEM=1`` make git ignore the real global/system config
+    files entirely (not merely override one key); ``GIT_EDITOR=true`` is a
+    second line of defense against any OTHER config path that still tries
+    to launch an interactive editor.
+    """
     for key in tuple(os.environ):
         if key.startswith("GIT_"):
             monkeypatch.delenv(key, raising=False)
+    monkeypatch.setenv("GIT_CONFIG_GLOBAL", os.devnull)
+    monkeypatch.setenv("GIT_CONFIG_NOSYSTEM", "1")
+    monkeypatch.setenv("GIT_EDITOR", "true")
 
 
 # Load environment variables from .env file at test session start
