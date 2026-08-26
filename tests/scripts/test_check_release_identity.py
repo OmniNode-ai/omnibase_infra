@@ -120,6 +120,8 @@ def _build_repo(
     _git(root, "commit", "-q", "-m", "base")
     base_sha = _git(root, "rev-parse", "HEAD")
 
+    # Intentionally use the same bare tag form the release gate sees in
+    # fixtures; conftest shields this from user-level tag.gpgsign/editor config.
     for tag in tags:
         _git(root, "tag", tag, base_sha)
 
@@ -321,3 +323,47 @@ def test_real_shim_subprocess_fail_emits_two_guidance_lines(tmp_path: Path) -> N
     assert "1.0.0" in lines[0]
     assert lines[1].startswith("Merging code onto an already-published version")
     assert "e.g. 1.0.1" in lines[1]
+
+
+def test_build_repo_tag_creation_hermetic_against_poisoned_global_gpgsign(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """OMN-16584 regression: a global ``[tag] gpgsign = true`` must not hang or
+    fail ``_build_repo``'s tag creation.
+
+    A contractor reported this suite HANGS on his machine: his real
+    ``~/.gitconfig`` sets ``tag.gpgsign=true``, which forces the bare
+    ``git tag <name> <sha>`` calls in ``_build_repo`` (no ``-a``/``-m``) to
+    upgrade to an annotated tag and open ``$GIT_EDITOR`` for ``TAG_EDITMSG``
+    -- blocking forever under a non-interactive pytest run.
+
+    The conftest-level ``_strip_test_local_git_environment`` autouse fixture
+    is what is supposed to prevent this (``GIT_CONFIG_GLOBAL=/dev/null`` +
+    ``GIT_CONFIG_NOSYSTEM=1`` blind every git subprocess in this suite to the
+    real user-level config). Prove it actually works by simulating the
+    contractor's exact machine state -- point ``HOME`` at a directory whose
+    ``.gitconfig`` carries ``tag.gpgsign=true`` -- and confirm tag creation
+    still succeeds AND stays a lightweight tag (an annotated tag object would
+    mean gpgsign silently won and hermeticity broke).
+    """
+    poisoned_home = tmp_path / "poisoned_home"
+    poisoned_home.mkdir()
+    (poisoned_home / ".gitconfig").write_text("[tag]\n\tgpgsign = true\n")
+    monkeypatch.setenv("HOME", str(poisoned_home))
+    monkeypatch.delenv("XDG_CONFIG_HOME", raising=False)
+
+    repo_dir = tmp_path / "repo"
+    repo_dir.mkdir()
+    root, _base_sha = _build_repo(
+        repo_dir, version="1.0.0", tags=["v1.0.0"], changed=["src/foo.py"]
+    )
+
+    tags = _git(root, "tag", "--list").splitlines()
+    assert "v1.0.0" in tags
+
+    obj_type = _git(root, "cat-file", "-t", "v1.0.0")
+    assert obj_type == "commit", (
+        f"expected a lightweight tag (points straight at the commit object), "
+        f"got {obj_type!r} -- tag.gpgsign=true forced annotation, meaning the "
+        "hermetic git-config isolation did not hold"
+    )
