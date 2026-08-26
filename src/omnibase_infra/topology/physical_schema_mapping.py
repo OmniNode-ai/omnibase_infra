@@ -29,6 +29,12 @@ TENANT_TABLES_PHYSICALLY_IN_PUBLIC_UNTIL_OMN15359: frozenset[str] = frozenset(
         "llm_cost_aggregates",
         "pattern_learning_artifacts",
         "projection_delegation_inference_response_text",
+        # OMN-15533: these node_projection_savings read views were physically
+        # created bare in public by migrations 076/078/079, and the dashboard
+        # projection_api exposures already declare schema: public. Migration
+        # 083 replaces those existing public views without moving authority.
+        "projection_delegation_savings",
+        "projection_delegation_savings_series",
         "savings_estimates",
         "skill_execution_snapshots",
         # OMN-16316: node_projection_tenant_credentials' BYOK inference-
