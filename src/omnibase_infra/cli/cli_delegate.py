@@ -472,7 +472,8 @@ def _hard_timeout(seconds: int) -> Iterator[None]:
     default=None,
     help=(
         "Kafka bootstrap servers (host:port) for --bus kafka. Omit to resolve "
-        "from KAFKA_BOOTSTRAP_SERVERS, for example from ~/.omnibase/.env. "
+        "from KAFKA_BOOTSTRAP_SERVERS. Delegation model bindings come only "
+        "from the typed contract overlay. "
         "Only valid with --bus kafka."
     ),
 )

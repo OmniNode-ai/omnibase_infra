@@ -123,7 +123,6 @@ src/omnibase_infra/nodes/node_llm_inference_effect/handlers/bifrost/__init__.py 
 src/omnibase_infra/nodes/node_llm_inference_effect/handlers/bifrost/config/__init__.py  # approved existing infra handler path; new business-domain handlers belong in omnimarket.
 src/omnibase_infra/nodes/node_llm_inference_effect/handlers/bifrost/config/bifrost_shadow.py  # approved existing infra handler path; new business-domain handlers belong in omnimarket.
 src/omnibase_infra/nodes/node_llm_inference_effect/handlers/bifrost/config/model_shadow_decision_log.py  # approved existing infra handler path; new business-domain handlers belong in omnimarket.
-src/omnibase_infra/nodes/node_llm_inference_effect/handlers/bifrost/config_loader_bifrost.py  # approved existing infra handler path; new business-domain handlers belong in omnimarket.
 src/omnibase_infra/nodes/node_llm_inference_effect/handlers/bifrost/handler_bifrost_gateway.py  # approved existing infra handler path; new business-domain handlers belong in omnimarket.
 src/omnibase_infra/nodes/node_llm_inference_effect/handlers/bifrost/model_bifrost_config.py  # approved existing infra handler path; new business-domain handlers belong in omnimarket.
 src/omnibase_infra/nodes/node_llm_inference_effect/handlers/bifrost/model_bifrost_request.py  # approved existing infra handler path; new business-domain handlers belong in omnimarket.

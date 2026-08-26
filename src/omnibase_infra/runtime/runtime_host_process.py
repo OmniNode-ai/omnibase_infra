@@ -287,31 +287,6 @@ def _normalize_prefetch_policy(value: str) -> PrefetchPolicy:
     return cast("PrefetchPolicy", policy)
 
 
-def _load_omnibase_env_file() -> None:
-    """Load OMNIBASE_ENV_FILE or ~/.omnibase/.env into os.environ if present."""
-    env_override = os.environ.get("OMNIBASE_ENV_FILE", "")
-    env_file = (
-        Path(env_override).expanduser()
-        if env_override
-        else Path.home() / ".omnibase" / ".env"
-    )
-    if not env_file.exists():
-        return
-
-    for raw_line in env_file.read_text(encoding="utf-8").splitlines():
-        line = raw_line.strip()
-        if not line or line.startswith("#") or "=" not in line:
-            continue
-        key, raw_value = line.split("=", 1)
-        key = key.strip()
-        if not key or key.startswith("export "):
-            key = key.removeprefix("export ").strip()
-        if not key or key in os.environ:
-            continue
-        value = raw_value.strip().strip("'\"")
-        os.environ[key] = value
-
-
 def _requires_raw_event_projection_wiring(event_bus_section: object) -> bool:
     """Return True when generic event-bus wiring must not consume this contract."""
     if not isinstance(event_bus_section, dict):
@@ -3925,7 +3900,6 @@ class RuntimeHostProcess:
             self._config_prefetch_status = "skipped"
             return
 
-        _load_omnibase_env_file()
         infisical_addr = os.environ.get("INFISICAL_ADDR", "")
         if not infisical_addr:
             logger.debug("INFISICAL_ADDR not set, skipping config prefetch")

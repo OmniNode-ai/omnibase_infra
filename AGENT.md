@@ -24,6 +24,6 @@
 
 ## Rules
 
-- Source `~/.omnibase/.env` before any DB, Kafka, or Infisical operation
+- Source `~/.omnibase/.env` only for DB, Kafka, or Infisical operations. Delegation model and endpoint bindings are contract-overlay-only.
 - Never hardcode broker addresses -- use env vars
 - Contract-driven handler registration (no wire_default_handlers for new code)

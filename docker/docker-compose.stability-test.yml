@@ -161,6 +161,7 @@ services:
     volumes: !override
       - runtime_logs:/app/logs
       - runtime_data:/app/data
+      - ./lane-overlays/dev.bifrost.yaml:/app/config/delegation/dev.bifrost.yaml:ro
       - ${OMNICLAUDE_SKILLS_DIR:-./skills}:/app/skills:ro
       - "${OMNI_HOME:?OMNI_HOME required for stability session health probes}:${OMNI_HOME:?OMNI_HOME required for stability session health probes}:ro"
     # OMN-15217: strict semantic healthcheck — this lane's green is cited as
@@ -241,6 +242,7 @@ services:
     volumes: !override
       - effects_logs:/app/logs
       - effects_data:/app/data
+      - ./lane-overlays/dev.bifrost.yaml:/app/config/delegation/dev.bifrost.yaml:ro
       - ${OMNICLAUDE_SKILLS_DIR:-./skills}:/app/skills:ro
       - "${OMNI_HOME:?OMNI_HOME required for stability session health probes}:${OMNI_HOME:?OMNI_HOME required for stability session health probes}:ro"
     # OMN-15217: strict semantic healthcheck — this lane's green is cited as
@@ -332,6 +334,7 @@ services:
     volumes: !override
       - worker_logs:/app/logs
       - stability_test_worker_data:/app/data
+      - ./lane-overlays/dev.bifrost.yaml:/app/config/delegation/dev.bifrost.yaml:ro
       - ${OMNICLAUDE_SKILLS_DIR:-./skills}:/app/skills:ro
       - "${OMNI_HOME:?OMNI_HOME required for stability session health probes}:${OMNI_HOME:?OMNI_HOME required for stability session health probes}:ro"
     # OMN-15217: strict semantic healthcheck — see omninode-runtime above for the
