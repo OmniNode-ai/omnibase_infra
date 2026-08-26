@@ -321,31 +321,34 @@ uv run python scripts/validate.py architecture
 
 ## Docker Deployment (Optional)
 
-For running with full infrastructure:
+For running with full infrastructure, **do not run `docker compose up` directly from `docker/`** —
+multiple repo copies share the same Docker Compose project name, and running from the wrong copy
+causes "invisible deployments" where your code changes have no effect. Use the canonical entry
+points instead:
 
 ```bash
 # Copy and edit environment file
-cp .env.example .env
-# Edit .env with your settings
+cp docker/.env.example docker/.env
+# Edit docker/.env: replace __REPLACE_WITH_*__ placeholders, incl.
+# INFISICAL_ENCRYPTION_KEY / INFISICAL_AUTH_SECRET (Infisical is always-on
+# since OMN-5831 — not a separate profile, required on every startup)
 
-# Start infrastructure services (Kafka, PostgreSQL, Consul)
-docker compose --env-file .env -f docker/docker-compose.infra.yml up -d
+# Simplest: the Makefile wrapper (delegates to the bundle CLI)
+make up            # core bundle: postgres, redpanda, valkey, infisical
+make up-auth        # auth bundle: keycloak
+make up-runtime      # full runtime bundle
+make status
 
-# Start with Consul only
-docker compose --env-file .env -f docker/docker-compose.infra.yml --profile consul up -d
-
-# Start with secrets (Infisical)
-docker compose --env-file .env -f docker/docker-compose.infra.yml --profile secrets up -d
-
-# Start runtime services
-docker compose --env-file .env -f docker/docker-compose.infra.yml --profile runtime up -d
-
-# Start everything
-docker compose --env-file .env -f docker/docker-compose.infra.yml --profile full up -d
-
-# Check service status
-docker compose --env-file .env -f docker/docker-compose.infra.yml ps
+# Or the canonical deployment script (fixed project name, collision-safe):
+./scripts/deploy-runtime.sh --execute --restart
 ```
+
+There is no `--profile consul` — Consul was fully removed from this repo (OMN-3540, OMN-3995) and
+its reintroduction is mechanically blocked (`tests/unit/test_no_consul_imports.py`, the
+`no-consul-references` pre-commit hook). There is no `--profile secrets` either — Infisical runs
+unconditionally as part of the default profile. See `docker/README.md` for the full profile
+reference (`runtime`, `omnimemory`, `full`) and the raw `docker compose --profile ...` forms the
+wrappers above run under the hood.
 
 ### Infisical Bootstrap (First-Time Setup)
 
@@ -355,14 +358,14 @@ Infisical replaces the long `.env` file with centralized secret management. See
 The bootstrap sequence for a fresh deployment:
 
 ```bash
-# 1. Start PostgreSQL (required by Infisical)
-docker compose --env-file .env -f docker/docker-compose.infra.yml up -d
+# 1. Start core infrastructure (Infisical is part of the default/core bundle)
+make up
 
 # 2. Bootstrap Infisical (first-time only: creates machine identities and seeds secrets)
 bash scripts/bootstrap-infisical.sh
 
 # 3. Start runtime services (they will prefetch secrets from Infisical at startup)
-docker compose --env-file .env -f docker/docker-compose.infra.yml --profile runtime up -d
+make up-runtime
 ```
 
 **Opt-in behavior**: Secret prefetch from Infisical only runs when `INFISICAL_ADDR` is set
@@ -376,7 +379,7 @@ src/omnibase_infra/
 ├── nodes/              # ONEX nodes (Effect, Compute, Reducer, Orchestrator)
 │   ├── node_*/         # Each node has contract.yaml + node.py
 │   └── reducers/       # Reducer implementations
-├── handlers/           # Infrastructure handlers (Consul, DB, Infisical, HTTP)
+├── handlers/           # Infrastructure handlers (DB, Infisical, HTTP, Filesystem)
 ├── models/             # Pydantic models
 ├── enums/              # Centralized enums
 ├── adapters/           # External service adapters

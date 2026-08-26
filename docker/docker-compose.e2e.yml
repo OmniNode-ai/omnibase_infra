@@ -2,8 +2,10 @@
 # ONEX Infrastructure E2E Testing Stack
 #
 # This compose file provides infrastructure services for E2E integration testing.
-# It includes PostgreSQL, Redpanda (Kafka), Consul, Infisical, and Valkey - the core
+# It includes PostgreSQL, Redpanda (Kafka), Infisical, and Valkey - the core
 # infrastructure needed to run the ONEX runtime in a realistic environment.
+# (Consul was fully removed from this repo -- OMN-3540, OMN-3995 -- and is not
+# part of this stack; do not reintroduce it here.)
 #
 # Usage:
 #   # Start infrastructure services only
@@ -26,7 +28,6 @@
 #   - PostgreSQL: 5433 (avoids conflict with any local postgres on 5432)
 #   - Redpanda Kafka: 29092 (external listener)
 #   - Redpanda Admin: 9644
-#   - Consul: 8500
 #   - Infisical: 8880
 #   - Valkey: 6379
 #   - Runtime Health: 8085 (when runtime profile enabled)

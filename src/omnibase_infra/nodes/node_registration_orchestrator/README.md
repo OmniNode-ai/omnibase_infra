@@ -449,17 +449,23 @@ This orchestrator is **NOT coroutine-safe** for concurrent workflow invocations.
 
 ## Limitations & Implementation Status
 
-This node is part of the MVP registration implementation. The following limitations apply:
+> Re-verified against live code 2026-08-26 (OMN-16543). The "MVP, reducer not implemented,
+> ProtocolProjectionReader does not exist" framing below this note previously described an earlier
+> state of this node and is now stale — both are implemented and wired. See the corrected status
+> below.
 
-### Current Limitations
+### Current Architecture
 
-| Limitation | Ticket | Description |
-|------------|--------|-------------|
-| Effect Node Integration | — | `NodeRegistryEffect` is implemented in `nodes/effects/registry_effect.py`. The `node_registry_effect` module re-exports from this location. Integration with orchestrator workflow pending reducer implementation. |
-| Reducer Not Implemented | — | `ProtocolReducer` is defined but no concrete implementation exists. Intent computation is pending. |
-| Projection Reader Not Wired | — | `ProtocolProjectionReader` protocol does not exist in `omnibase_spi.protocols`. The `read_projection` workflow step cannot execute. |
-| Time Injection Not Wired | — | Contract declares time injection but orchestrator does not parse or use it. Timeout evaluation uses implicit dispatch context. |
-| Intent Models in Infra | — | Intent models are currently in `omnibase_infra`. Should be moved to `omnibase_core` for broader reuse. |
+The orchestrator is wired into `MessageDispatchEngine` via domain-specific wiring
+(`wiring.py`), with dispatchers registered per event type:
+
+| Component | Location | Notes |
+|-----------|----------|-------|
+| Dispatchers | `dispatchers/` (6 files) | `dispatcher_catalog_request.py`, `dispatcher_node_heartbeat.py`, `dispatcher_node_introspected.py`, `dispatcher_node_registration_acked.py`, `dispatcher_runtime_tick.py`, `dispatcher_topic_catalog_query.py` |
+| Handlers | `handlers/` (6 files) | One handler per dispatched event; each delegates its decision to `RegistrationReducerService` |
+| Reducer service | `services/registration_reducer_service.py` | Pure-function reducer: `decide_introspection`, `decide_ack`, `decide_heartbeat`, `decide_timeout`. Zero I/O. |
+| Domain wiring | `wiring.py` | Registers dispatchers with `MessageDispatchEngine`; constructs `ProjectionReaderRegistration` and injects it into handlers |
+| Timeout coordination | `timeout_coordinator.py` | Coordinates `RuntimeTick` → `ServiceTimeoutScanner` → `ServiceTimeoutEmitter`, using the injected tick time (never system clock) |
 
 ### Implementation Status
 
@@ -471,26 +477,16 @@ This node is part of the MVP registration implementation. The following limitati
 | Models | **Complete** | `models/` | Input, output, intent, state models |
 | README | **Complete** | `README.md` | This file |
 | Effect Node | **Complete** | `nodes/effects/registry_effect.py` | Alias at `nodes/node_registry_effect/` |
-| Reducer Impl | **Pending** | N/A | No implementation yet |
-| Projection Reader | **Pending** | N/A | SPI protocol needed |
+| Reducer Impl | **Complete** | `services/registration_reducer_service.py` | Wired into all 4 handlers (introspected, ack, heartbeat, runtime-tick) |
+| Projection Reader | **Complete** | `omnibase_spi.protocols` (OMN-930, `omnibase_spi#44`) | `ProtocolProjectionReader` resolved as a contract dependency; `ProjectionReaderRegistration` implementation wired in `wiring.py` |
+| Dispatch wiring | **Complete** | `wiring.py` | Registers all 6 dispatchers with `MessageDispatchEngine` |
+| Timeout coordination | **Complete** | `timeout_coordinator.py` | Contract-driven time injection via `RuntimeTick`; not implicit dispatch context |
 
-### What Works Today
+### Residual Gaps
 
-1. **Contract Parsing**: The contract.yaml is valid and fully defines the workflow
-2. **Model Validation**: All input/output models work with Pydantic validation
-3. **Protocol Definitions**: Type contracts for reducer and effect are complete
-4. **Workflow Structure**: Execution graph with dependencies is defined
-
-### What Does NOT Work Today
-
-1. **End-to-End Registration**: Cannot register nodes (reducer → effect integration pending)
-2. **Intent Computation**: Cannot generate intents (reducer not implemented)
-3. **Projection Reading**: Cannot read current state (protocol not in SPI)
-4. **Timeout Evaluation**: Uses implicit time, not contract-driven injection
-
-Note: The effect node (`NodeRegistryEffect`) is fully implemented and tested. The
-blocker for end-to-end registration is the reducer implementation, which must
-generate intents that the effect node will execute.
+| Gap | Ticket | Description |
+|-----|--------|-------------|
+| Intent Models in Infra | — | Intent models are currently in `omnibase_infra`. Should be moved to `omnibase_core` for broader reuse. |
 
 ## Related Documentation
 

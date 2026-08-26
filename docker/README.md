@@ -88,6 +88,23 @@ docker compose -p omnibase-infra-runtime logs -f
 curl http://localhost:8085/health
 ```
 
+**Even simpler: `make up`.** The repo-root `Makefile` wraps the bundle CLI
+(`uv run python -m omnibase_infra.docker.catalog.cli up <bundle>`) so you don't need to know the
+compose/profile mechanics documented below at all:
+
+```bash
+# From the repository root:
+make up            # core bundle: postgres, redpanda, valkey, infisical
+make up-auth        # auth bundle: keycloak (core must be up first)
+make up-runtime      # full runtime bundle (extends core)
+make status          # show running omnibase-infra containers
+make down-all        # full teardown
+make help            # list all targets
+```
+
+`make up*` targets are equivalent to `deploy-runtime.sh` / the raw `docker compose --profile ...`
+invocations below — same catalog CLI underneath, different entry point.
+
 ## Architecture
 
 The deployment follows a multi-profile architecture designed for flexible scaling and separation of concerns:
@@ -96,13 +113,17 @@ The deployment follows a multi-profile architecture designed for flexible scalin
                               Docker Compose Profiles
 +------------------------------------------------------------------------+
 |                                                                        |
-|   Default Profile (Infrastructure)                                     |
-|   +---------------+  +---------------+  +---------------+              |
-|   |   postgres    |  |   redpanda    |  |    valkey     |              |
-|   |   (storage)   |  |   (events)    |  |   (cache)     |              |
-|   +-------+-------+  +-------+-------+  +-------+-------+              |
-|           |                  |                  |                      |
-|           +------------------+------------------+                      |
+|   Default Profile (always-on, no --profile flag needed)                |
+|   +-----------+  +-----------+  +-----------+  +-----------+           |
+|   | postgres  |  | redpanda  |  |  valkey   |  | keycloak  |           |
+|   | (storage) |  | (events)  |  |  (cache)  |  |  (auth)   |           |
+|   +-----+-----+  +-----+-----+  +-----+-----+  +-----+-----+           |
+|         |              |              |              |                 |
+|         |        +-----+-----+        |              |                 |
+|         |        | infisical |        |              |                 |
+|         |        |  (secrets, always-on since OMN-5831) |               |
+|         |        +-----+-----+        |              |                 |
+|         +--------------+--------------+--------------+                 |
 |                              |                                         |
 |   +--------------------------------------------------------------+     |
 |   |              omnibase-infra-network (bridge)                 |     |
@@ -114,17 +135,24 @@ The deployment follows a multi-profile architecture designed for flexible scalin
 |   | runtime       |  |  effects      |  |  worker x N   |              |
 |   | (kernel)      |  |  (ext. I/O)   |  |  (parallel)   |              |
 |   +---------------+  +---------------+  +---------------+              |
+|   (also gated on runtime/full: forward-migration, migration-gate,      |
+|    projection-api, agent-actions-consumer, skill-lifecycle-consumer,   |
+|    context-audit-consumer, intelligence-*, contract-resolver,          |
+|    phoenix, autoheal)                                                  |
 |                                                                        |
-|   Optional Profiles:                                                   |
-|   +---------------+  +---------------+                                 |
-|   |    consul     |  |  infisical    |                                 |
-|   |  (discovery)  |  |  (secrets)    |                                 |
-|   | --profile     |  | --profile     |                                 |
-|   |   consul      |  |   secrets     |                                 |
-|   +---------------+  +---------------+                                 |
+|   omnimemory Profile (--profile omnimemory)                            |
+|   +---------------+                                                    |
+|   |   memgraph    |                                                    |
+|   +---------------+                                                    |
+|                                                                        |
+|   full Profile = runtime + omnimemory combined                         |
 |                                                                        |
 +------------------------------------------------------------------------+
 ```
+
+**No Consul.** Consul was fully removed from this repo (OMN-3540, OMN-3995) and reintroduction is
+mechanically blocked (`tests/unit/test_no_consul_imports.py`, the `no-consul-references`
+pre-commit hook). Any prior revision of this document describing a `--profile consul` is stale.
 
 ### Service Communication Flow
 
@@ -147,32 +175,51 @@ External Request
 +------+-----------+     +-------+--------+
 | External Services|     | Parallel Jobs  |
 | - PostgreSQL     |     | - Compute      |
-| - Consul         |     | - Transform    |
-| - Infisical      |     | - Aggregate    |
-| - Kafka          |     +----------------+
-+------------------+
+| - Infisical      |     | - Transform    |
+| - Kafka          |     | - Aggregate    |
++------------------+     +----------------+
 ```
 
 ## Profiles
 
-| Profile    | Services                                      | Use Case                                   | Command                                                          |
-|------------|-----------------------------------------------|--------------------------------------------|------------------------------------------------------------------|
-| (default)  | postgres, redpanda, valkey, topic-manager     | Core infrastructure only                   | `docker compose -f docker-compose.infra.yml up -d`               |
-| `runtime`  | (default) + runtime, effects, workers, consumer | Full ONEX runtime with observability     | `docker compose -f docker-compose.infra.yml --profile runtime up -d` |
-| `consul`   | (default) + consul                            | Infrastructure + service discovery         | `docker compose -f docker-compose.infra.yml --profile consul up -d` |
-| `secrets`  | (default) + infisical                         | Infrastructure + secrets management        | `docker compose -f docker-compose.infra.yml --profile secrets up -d` |
-| `full`     | All services                                  | Complete stack with all features           | `docker compose -f docker-compose.infra.yml --profile full up -d` |
+> **Prefer the wrappers below over raw `docker compose --profile ...` invocations.**
+> `make up` / `make up-runtime` (backed by `uv run python -m omnibase_infra.docker.catalog.cli up <bundle>`,
+> see the repo root `Makefile`) and `scripts/deploy-runtime.sh` resolve the fixed-project-name,
+> collision-safe deployment described in [Quick Start](#quick-start) above. The raw `docker compose
+> -f docker-compose.infra.yml --profile ...` forms below are what those wrappers run under the hood —
+> useful for understanding what's happening, but do not invoke `docker compose up` directly from this
+> directory (see the Quick Start warning).
+
+| Profile      | Services                                       | Use Case                                   | Command                                                          |
+|--------------|-------------------------------------------------|--------------------------------------------|------------------------------------------------------------------|
+| (default)    | postgres, redpanda, valkey, keycloak, infisical | Core infrastructure — always on, no flag needed | `docker compose -f docker-compose.infra.yml up -d`          |
+| `runtime`    | (default) + omninode-runtime, runtime-effects, runtime-worker, migrations, agent-actions-consumer, skill-lifecycle-consumer, context-audit-consumer, intelligence-*, contract-resolver, phoenix, autoheal | Full ONEX runtime with observability | `docker compose -f docker-compose.infra.yml --profile runtime up -d` |
+| `omnimemory` | (default) + omnibase-infra-memgraph            | Infrastructure + Memgraph (OMN-4310)       | `docker compose -f docker-compose.infra.yml --profile omnimemory up -d` |
+| `full`       | Union of `runtime` and `omnimemory`            | Complete stack with all features           | `docker compose -f docker-compose.infra.yml --profile full up -d` |
+
+There is no `consul` or `secrets` profile. Consul was fully removed from this repo (OMN-3540,
+OMN-3995) and its reintroduction is mechanically blocked — see
+`tests/unit/test_no_consul_imports.py` and the `no-consul-references` pre-commit hook. Infisical is
+not profile-gated; it has been an always-on default-profile service since OMN-5831, so
+`INFISICAL_ENCRYPTION_KEY` / `INFISICAL_AUTH_SECRET` must be set in `.env` (see
+[Security](#security)) before **any** `docker compose up`, default profile included — the compose
+file fails fast (`:?` required-var syntax) if they're missing.
 
 ### Profile Details
 
 #### Default Profile (Core Infrastructure)
 
-Core infrastructure services required by all deployments:
+Core infrastructure services required by all deployments — these run on every `docker compose up`,
+with no `--profile` flag:
 
 - **PostgreSQL** (port 5436): Primary data store for projections and state
 - **Redpanda** (port 19092): Kafka-compatible event streaming
 - **Valkey** (port 16379): Redis-compatible cache and pub/sub
-- **Topic Manager**: Automatic Kafka topic creation on startup
+- **Keycloak** (port 28080): Auth stack (moved into the default profile in OMN-10089 so a vanilla
+  `docker compose up -d` brings up local auth with no extra flags)
+- **Infisical** (port 8881): Secrets management — always-on since OMN-5831, not a separate profile.
+  Requires `INFISICAL_ENCRYPTION_KEY` and `INFISICAL_AUTH_SECRET` in `.env` (see
+  [Security](#security)); without them the compose file fails fast on startup.
 
 ```bash
 docker compose -f docker-compose.infra.yml up -d
@@ -202,30 +249,19 @@ source runtime-policy.env  # supplies DEV_WORKER_REPLICAS=1
 DEV_WORKER_REPLICAS=8 docker compose -f docker-compose.infra.yml --profile runtime up -d
 ```
 
-#### Consul Profile (Service Discovery)
+#### omnimemory Profile (Memgraph)
 
-Adds HashiCorp Consul for service registration and discovery:
+Adds Memgraph for the omnimemory graph store (OMN-4310):
 
-- **Consul** (port 28500): Service discovery UI and API
-
-```bash
-docker compose -f docker-compose.infra.yml --profile consul up -d
-```
-
-#### Secrets Profile (Secrets Management)
-
-Adds Infisical for centralized secrets management:
-
-- **Infisical** (port 8880): Secrets management UI and API
-- Requires `INFISICAL_ENCRYPTION_KEY` and `INFISICAL_AUTH_SECRET` in `.env`
+- **omnibase-infra-memgraph**: Graph database backing omnimemory
 
 ```bash
-docker compose -f docker-compose.infra.yml --profile secrets up -d
+docker compose -f docker-compose.infra.yml --profile omnimemory up -d
 ```
 
 #### Full Profile (All Services)
 
-Complete stack with infrastructure, runtime, consul, and secrets:
+Complete stack — default + runtime + omnimemory:
 
 ```bash
 docker compose -f docker-compose.infra.yml --profile full up -d --build
@@ -250,8 +286,8 @@ for i in {1..3}; do echo "Password $i: $(openssl rand -hex 32)"; done
 | Credential              | Environment Variable       | Profile  | Notes                                                    |
 |-------------------------|----------------------------|----------|----------------------------------------------------------|
 | PostgreSQL              | `POSTGRES_PASSWORD`        | (default)| Database access password                                 |
-| Infisical Encryption    | `INFISICAL_ENCRYPTION_KEY` | secrets  | Hex-encoded key: 16-byte (`openssl rand -hex 16`) or 32-byte (`openssl rand -hex 32`) |
-| Infisical Auth          | `INFISICAL_AUTH_SECRET`    | secrets  | JWT signing secret (`openssl rand -hex 32`)              |
+| Infisical Encryption    | `INFISICAL_ENCRYPTION_KEY` | (default)| Infisical is always-on (OMN-5831), not profile-gated. Hex-encoded key: 16-byte (`openssl rand -hex 16`) or 32-byte (`openssl rand -hex 32`) |
+| Infisical Auth          | `INFISICAL_AUTH_SECRET`    | (default)| Infisical is always-on (OMN-5831), not profile-gated. JWT signing secret (`openssl rand -hex 32`) |
 | Valkey (optional)       | `VALKEY_PASSWORD`          | (default)| Cache password (defaults to `valkey-dev-password` in dev) |
 
 ### Security Features
@@ -519,8 +555,8 @@ These variables must be set explicitly. The runtime will fail to start if they a
 |---------------------------|-----------------------------------------------------|----------------|------------|
 | `POSTGRES_PASSWORD`       | PostgreSQL database password                        | Secret         | (default)  |
 | `OMNIBASE_INFRA_DB_URL`  | Full PostgreSQL DSN for omnibase_infra. Required for CLI/scripts. For Docker-only usage, `POSTGRES_PASSWORD` alone suffices (the fallback constructs the DSN automatically). Set this explicitly if your password contains special characters (`@`, `:`, `/`, `%`, `#`) since the Docker fallback cannot URL-encode. | Secret | (default) |
-| `INFISICAL_ENCRYPTION_KEY`| Hex-encoded AES key (32 or 64 hex chars)            | Secret         | secrets    |
-| `INFISICAL_AUTH_SECRET`   | JWT signing secret for authentication               | Secret         | secrets    |
+| `INFISICAL_ENCRYPTION_KEY`| Hex-encoded AES key (32 or 64 hex chars)            | Secret         | (default) — Infisical is always-on (OMN-5831) |
+| `INFISICAL_AUTH_SECRET`   | JWT signing secret for authentication               | Secret         | (default) — Infisical is always-on (OMN-5831) |
 | `DEV_REDPANDA_ADVERTISE_HOST` | Dev lane external Redpanda advertise host (OMN-15173: no silent default — `docker compose config` fails fast when unset). Use `localhost` for pure single-host dev; use the reachable host/IP for off-host clients. | Non-secret | (default) |
 
 ### Optional Variables (With Defaults)
@@ -535,10 +571,6 @@ These variables must be set explicitly. The runtime will fail to start if they a
 | `POSTGRES_HOST`              | `localhost`                        | PostgreSQL hostname (legacy fallback)  |
 | `POSTGRES_PORT`              | `5432`                             | PostgreSQL port (legacy fallback)      |
 | `POSTGRES_USER`              | `postgres`                         | Database user (legacy fallback)        |
-| **Consul**                   |                                    |                                        |
-| `CONSUL_HOST`                | `localhost`                        | Consul agent hostname                  |
-| `CONSUL_PORT`                | `8500`                             | Consul HTTP port                       |
-| `CONSUL_SCHEME`              | `http`                             | Consul connection scheme               |
 | **Infisical**                |                                    |                                        |
 | `INFISICAL_ADDR`             | `http://infisical:8080`            | Infisical service address              |
 | `INFISICAL_SITE_URL`         | `http://localhost:8880`            | Infisical web UI URL                   |
@@ -571,7 +603,7 @@ These variables must be set explicitly. The runtime will fail to start if they a
 | `omnibase-infra-postgres-data`  | PostgreSQL data                      | postgres               |
 | `omnibase-infra-redpanda-data`  | Redpanda event streaming data        | redpanda               |
 | `omnibase-infra-valkey-data`    | Valkey cache data                    | valkey                 |
-| `omnibase-infra-consul-data`    | Consul service discovery data        | consul                 |
+| `omnibase-infra-keycloak-data`  | Keycloak auth data                   | keycloak               |
 | `omninode-runtime-logs`         | Main runtime logs                    | omninode-runtime       |
 | `omninode-runtime-data`         | Main runtime persistent state        | omninode-runtime       |
 | `omninode-effects-logs`         | Effects runtime logs                 | runtime-effects        |
@@ -876,7 +908,7 @@ docker exec omninode-runtime free -h
 
 ## E2E Testing with Infrastructure
 
-For true end-to-end testing, use `docker-compose.e2e.yml` which includes full infrastructure services (PostgreSQL, Redpanda, Consul) alongside the runtime.
+For true end-to-end testing, use `docker-compose.e2e.yml` which includes full infrastructure services (PostgreSQL, Redpanda, Valkey, Infisical) alongside the runtime.
 
 ### Quick Start for E2E Testing
 
@@ -884,8 +916,8 @@ For true end-to-end testing, use `docker-compose.e2e.yml` which includes full in
 # 1. Navigate to docker directory
 cd docker
 
-# 2. Copy E2E environment file
-cp .env.e2e .env
+# 2. Copy the environment file (there is no separate .env.e2e template)
+cp .env.example .env
 
 # 3. Start infrastructure services only (for running tests from host)
 docker compose -f docker-compose.e2e.yml up -d
@@ -937,9 +969,9 @@ The `test_runtime_e2e.py` tests will skip automatically if the runtime container
 │                    omnibase-infra-network                          │
 │                                                                    │
 │  ┌──────────────┐  ┌──────────────┐  ┌──────────────┐             │
-│  │   postgres   │  │   redpanda   │  │    consul    │             │
-│  │    :5432     │  │    :9092     │  │    :8500     │             │
-│  │  (test DB)   │  │   (Kafka)    │  │  (discovery) │             │
+│  │   postgres   │  │   redpanda   │  │   infisical  │             │
+│  │    :5432     │  │    :9092     │  │    :8080     │             │
+│  │  (test DB)   │  │   (Kafka)    │  │   (secrets)  │             │
 │  └──────────────┘  └──────────────┘  └──────────────┘             │
 │         │                 │                 │                      │
 │         └─────────────────┴─────────────────┘                      │
@@ -951,9 +983,9 @@ The `test_runtime_e2e.py` tests will skip automatically if the runtime container
 │                  └─────────────────┘                               │
 │                                                                    │
 └────────────────────────────────────────────────────────────────────┘
-        │                   │                   │
-   Host:5433           Host:19092          Host:8500
-   (postgres)          (kafka)             (consul)
+        │                   │
+   Host:5433           Host:19092
+   (postgres)          (kafka)
 ```
 
 ### E2E Environment Variables
@@ -963,7 +995,6 @@ The `test_runtime_e2e.py` tests will skip automatically if the runtime container
 | `POSTGRES_PASSWORD`   | `test-password`   | PostgreSQL password            |
 | `POSTGRES_PORT`       | `5433`            | Host port for PostgreSQL       |
 | `KAFKA_PORT`          | `19092`           | Host port for Kafka external   |
-| `CONSUL_PORT`         | `8500`            | Host port for Consul           |
 | `RUNTIME_PORT`        | `8085`            | Host port for runtime health   |
 | `ONEX_LOG_LEVEL`      | `DEBUG`           | Runtime log level              |
 
@@ -978,10 +1009,6 @@ POSTGRES_PORT = 5433  # Maps to container 5432
 
 # Kafka (external listener)
 KAFKA_BOOTSTRAP_SERVERS = "localhost:19092"
-
-# Consul
-CONSUL_HOST = "localhost"
-CONSUL_PORT = 8500
 ```
 
 ### Connecting from Runtime Container
@@ -995,10 +1022,6 @@ POSTGRES_PORT = 5432
 
 # Kafka (internal listener)
 KAFKA_BOOTSTRAP_SERVERS = "redpanda:9092"
-
-# Consul (internal DNS)
-CONSUL_HOST = "consul"
-CONSUL_PORT = 8500
 ```
 
 ## File Reference
@@ -1008,8 +1031,7 @@ CONSUL_PORT = 8500
 | `Dockerfile.runtime`        | Multi-stage Dockerfile for runtime image           |
 | `docker-compose.infra.yml`  | Infrastructure + runtime orchestration with profiles |
 | `docker-compose.e2e.yml`    | E2E testing with infrastructure services           |
-| `.env.example`              | Environment variable template (copy to `.env`)     |
-| `.env.e2e`                  | E2E testing environment template                   |
+| `.env.example`              | Environment variable template (copy to `.env`); also used for E2E — there is no separate `.env.e2e` |
 | `migrations/forward/`       | Forward migrations (auto-applied on first start)   |
 | `migrations/rollback/`      | Rollback scripts (manual execution only)           |
 | `README.md`                 | This documentation                                 |

@@ -7,22 +7,26 @@
 # Broker addresses are hardcoded as literals (not interpolated from host env).
 #
 #
-# Usage:
-#   # Core infrastructure (postgres, valkey, redpanda, keycloak)
+# Usage (prefer `make up` / `make up-runtime` from the repo root, or
+# scripts/deploy-runtime.sh -- see docker/README.md Quick Start):
+#   # Core infrastructure -- postgres, valkey, redpanda, keycloak, infisical.
+#   # Infisical is always-on (OMN-5831), not a separate profile: INFISICAL_ENCRYPTION_KEY
+#   # and INFISICAL_AUTH_SECRET must be set in .env before this succeeds.
 #   docker compose -f docker/docker-compose.infra.yml up -d
 #
 #   # With runtime services
 #   docker compose -f docker/docker-compose.infra.yml --profile runtime up -d
 #
-#   # With secrets management (Infisical)
-#   docker compose -f docker/docker-compose.infra.yml --profile secrets up -d
+#   # With omnimemory (Memgraph, OMN-4310)
+#   docker compose -f docker/docker-compose.infra.yml --profile omnimemory up -d
 #
-#   # Full stack (all services)
+#   # Full stack (runtime + omnimemory, on top of the always-on default set)
 #   docker compose -f docker/docker-compose.infra.yml --profile full up -d
 #
-#   # Bootstrap mode (ordered startup with Infisical seed)
-#   # Prefer using scripts/bootstrap-infisical.sh instead for the full sequence.
-#   docker compose -f docker/docker-compose.infra.yml --profile bootstrap up -d
+#   # Infisical bootstrap (first-time only: creates machine identities and seeds
+#   # secrets). There is no separate "bootstrap" profile -- this runs against the
+#   # default (already-up) infrastructure.
+#   bash scripts/bootstrap-infisical.sh
 #
 #   # Build runtime and start
 #   docker compose -f docker/docker-compose.infra.yml --profile runtime up -d --build
@@ -35,11 +39,10 @@
 #   docker compose -f docker/docker-compose.infra.yml down -v --remove-orphans
 #
 # Profiles:
-#   - (default): Core infrastructure (postgres, valkey, redpanda, keycloak)
+#   - (default): Core infrastructure (postgres, valkey, redpanda, keycloak, infisical) -- always on
 #   - runtime: ONEX runtime services (omninode-runtime, effects, workers, observability)
-#   - secrets: Infisical for secrets management
-#   - full: All services (infrastructure + runtime + secrets)
-#   - bootstrap: Infrastructure + secrets (for bootstrap-infisical.sh sequence)
+#   - omnimemory: Memgraph (OMN-4310)
+#   - full: (default) + runtime + omnimemory
 # Note (OMN-10089): keycloak moved into the default profile so a vanilla
 # `docker compose up -d` brings up the full local auth stack with no extra
 # flags. Operators who want to skip keycloak can `docker compose stop keycloak`
