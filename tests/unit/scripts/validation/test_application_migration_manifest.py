@@ -165,7 +165,11 @@ def test_checked_in_manifest_is_exact_and_all_blockers_are_explicit() -> None:
     # seen a register for) can persist without violating NOT NULL; landed in
     # omnibase_infra first per the node-migration-vendor-parity-gate
     # ordering, ahead of omnimarket#2144.
-    assert len(result.declarations) == 110
+    # +1 for OMN-15533's
+    # node_projection_savings/084_validate_savings_estimates_token_constraints.sql
+    # -- validates the token-count CHECK constraints in a separate migration
+    # transaction after 082 adds them as NOT VALID.
+    assert len(result.declarations) == 111
     assert result.blocked == ()
     assert len(result.legacy_node_declarations) == 2
     assert len(result.cloud_aliases) == 30
