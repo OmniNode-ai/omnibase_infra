@@ -120,6 +120,8 @@ def _build_repo(
     _git(root, "commit", "-q", "-m", "base")
     base_sha = _git(root, "rev-parse", "HEAD")
 
+    # Intentionally use the same bare tag form the release gate sees in
+    # fixtures; conftest shields this from user-level tag.gpgsign/editor config.
     for tag in tags:
         _git(root, "tag", tag, base_sha)
 
