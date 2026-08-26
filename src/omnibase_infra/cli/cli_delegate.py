@@ -17,17 +17,23 @@ the CLI entrypoint:
 4. dispatch through the OMN-13094 receipt-mode path
    (:func:`omnibase_infra.cli.receipt_mode.run_receipt_mode`).
 
-Bus target (OMN-13532, default flipped under OMN-14376). ``--bus`` is
-OPTIONAL, never required for a delegation to reach the shared platform
-substrate. When omitted, :func:`resolve_default_bus` mirrors the SAME
-probe-then-select precedence the runtime kernel's ``select_event_bus``
-already applies (``service_kernel.py`` / ``backends/auto_configure.py``):
+Bus target (OMN-13532, default flipped under OMN-14376, made deterministic
+under OMN-16678). ``--bus`` is OPTIONAL, never required for a delegation to
+reach the shared platform substrate. When omitted, :func:`resolve_default_bus`
+calls the ONE shared authority
+(``backends/auto_configure.py::resolve_bus_type``, also used by
+``select_event_bus``), which applies a single resolution order —
+**explicit ``--bus`` > ``ONEX_EVENT_BUS_TYPE`` > broker probe**:
 ``KAFKA_BOOTSTRAP_SERVERS`` unset -> ``inmemory``; set and the broker probes
 HEALTHY/AUTHORITATIVE (``backends/backend_probe.py::probe_kafka``, a bounded
-TCP + topic-list check) -> ``kafka``; set but unreachable/unhealthy (e.g. the
-OMN-14380 advertised-listener gap for an off-box caller) -> graceful fallback
-to ``inmemory`` with a WARNING logged (stderr / capture, never stdout) so the
-silent-local-SQLite failure mode is never repeated. This makes delegation use
+TCP + topic-list check) -> ``kafka``; set but the TCP connect is refused ->
+``inmemory`` with a WARNING logged (stderr / capture, never stdout) so the
+silent-local-SQLite failure mode is never repeated. Set, TCP-connectable, but
+the broker's serving state INDETERMINATE (metadata timeout / auth failure —
+the state a transient ``list_topics`` timeout against a healthy broker lands
+in) -> hard refusal naming the ambiguity, because silently resolving it made
+the transport a coin flip (14 kafka / 6 inmemory over 20 unchanged-env calls,
+``OmniNode-ai/knowledge-base#59``). This makes delegation use
 "the same event bus the rest of the system is configured with" BY DEFAULT — no
 ``--bus kafka`` flag required. When resolved (or explicitly passed) to
 ``kafka``, the typed ``ModelDelegateSkillRequest`` command is published to the
@@ -83,8 +89,12 @@ from pathlib import Path
 
 import click
 
-from omnibase_infra.backends.backend_probe import probe_kafka
-from omnibase_infra.backends.enum_probe_state import EnumProbeState
+from omnibase_infra.backends.auto_configure import (
+    BUS_INMEMORY,
+    SUPPORTED_BUS_TYPES,
+    EventBusResolutionAmbiguousError,
+    resolve_bus_type,
+)
 from omnibase_infra.cli.cli_node import _resolve_packaged_contract
 from omnibase_infra.cli.omnimarket_drift_guard import (
     DRIFT_OVERRIDE_ENV,
@@ -170,7 +180,7 @@ TASK_TYPE_CHOICES = (
 # command to the live broker so a deployed runtime consumer dispatches it.
 # These mirror ``RuntimeLocal.SUPPORTED_EVENT_BUS_VALUES`` — the runtime is the
 # source of truth and rejects anything outside that set.
-BUS_CHOICES = ("inmemory", "kafka")
+BUS_CHOICES = SUPPORTED_BUS_TYPES
 
 # Fallback bus when auto-resolution cannot select ``kafka`` (no broker
 # configured, or a configured broker that fails the health probe): in-process,
@@ -178,7 +188,7 @@ BUS_CHOICES = ("inmemory", "kafka")
 # for both of those cases — it is not merely a historical default anymore, but
 # the fail-safe floor auto-resolution always lands on when the shared bus is
 # not provably reachable.
-DEFAULT_BUS = "inmemory"
+DEFAULT_BUS = BUS_INMEMORY
 
 
 def resolve_default_bus(*, kafka_bootstrap: str | None = None) -> tuple[str, str]:
@@ -190,28 +200,29 @@ def resolve_default_bus(*, kafka_bootstrap: str | None = None) -> tuple[str, str
     "the event bus the rest of the system is configured with" instead of a
     source-hardcoded ``inmemory`` — the OMN-14376 root cause.
 
-    Delegates entirely to :func:`omnibase_infra.backends.backend_probe.probe_kafka`
-    for both the ``KAFKA_BOOTSTRAP_SERVERS`` resolution AND the health check —
-    this module never reads the environment variable itself (the
-    ``check-env-reads`` CI gate blocks raw environment reads outside the
-    approved overlay-resolved config surfaces; ``probe_kafka`` is the existing,
-    already-approved boundary for this exact lookup).
+    OMN-16678: this is now a thin call into
+    :func:`omnibase_infra.backends.auto_configure.resolve_bus_type` — the ONE
+    authority both this path and ``select_event_bus`` share. Two prior defects
+    are closed by that unification:
 
-    Precedence:
-      1. No ``kafka_bootstrap`` override and ``KAFKA_BOOTSTRAP_SERVERS`` unset
-         -> ``probe_kafka`` short-circuits to ``DISCOVERED`` with no network
-         call -> ``("inmemory", <reason>)``. The steady state for a truly
-         bus-less local dev box.
-      2. A bootstrap IS configured (override or env) and ``probe_kafka``
-         reports ``HEALTHY``/``AUTHORITATIVE`` -> ``("kafka", <reason>)``.
-      3. A bootstrap IS configured but the probe reports anything weaker
-         (``DISCOVERED``/``REACHABLE`` — e.g. TCP connects but the broker's
-         advertised listener does not route back to this caller, the
-         OMN-14380 off-box gap) -> graceful fallback to
-         ``("inmemory", <reason>)``. The caller is expected to log this at
-         WARNING so a stale/unhealthy configured broker degrades loudly to
-         the safe local default rather than hanging ``onex delegate`` on an
-         unreachable broker.
+      * ``ONEX_EVENT_BUS_TYPE`` was honoured by ``select_event_bus`` and
+        SILENTLY IGNORED here, so setting it to pin ``onex delegate`` to the
+        in-process bus did nothing. It is now tier 2 of one shared order:
+        explicit ``--bus`` > ``ONEX_EVENT_BUS_TYPE`` > probe.
+      * The probe's ``REACHABLE`` state mapped to ``inmemory`` here and to
+        ``kafka`` there, and ``probe_kafka`` degrades ANY Stage-2 metadata
+        failure — including a plain 2s ``list_topics`` timeout against a
+        healthy broker — into ``REACHABLE``. Measured: 20 consecutive calls,
+        unchanged env, healthy broker -> kafka 14x / inmemory 6x
+        (``OmniNode-ai/knowledge-base#59``). ``REACHABLE`` now raises
+        :class:`~omnibase_infra.backends.auto_configure.EventBusResolutionAmbiguousError`
+        rather than resolving to a transport that varies run to run.
+
+    This module still never reads ``KAFKA_BOOTSTRAP_SERVERS`` itself (the
+    ``check-env-reads`` CI gate blocks raw environment reads outside the
+    approved config surfaces): ``probe_kafka`` resolves it, and the
+    ``ONEX_EVENT_BUS_TYPE`` read stays in ``auto_configure.py``, the file that
+    already owned it.
 
     Only called when ``--bus`` is NOT explicitly supplied — an explicit
     ``--bus`` (kafka or inmemory) is never second-guessed by this probe.
@@ -228,13 +239,15 @@ def resolve_default_bus(*, kafka_bootstrap: str | None = None) -> tuple[str, str
     on-box behavior; off-box it upgrades a correct-but-mislabelled HEALTHY
     determination to the AUTHORITATIVE state that actually reflects "a live
     consumer is bound and ready to serve this request right now."
+
+    Raises:
+        EventBusResolutionAmbiguousError: the probe is indeterminate and
+            neither ``--bus`` nor ``ONEX_EVENT_BUS_TYPE`` decided the transport.
     """
-    probe = probe_kafka(
-        bootstrap_servers=kafka_bootstrap, authority_topic=SUFFIX_DELEGATION_REQUEST
+    return resolve_bus_type(
+        kafka_bootstrap=kafka_bootstrap,
+        authority_topic=SUFFIX_DELEGATION_REQUEST,
     )
-    if probe.state in (EnumProbeState.HEALTHY, EnumProbeState.AUTHORITATIVE):
-        return "kafka", probe.reason
-    return DEFAULT_BUS, f"{probe.state.name}: {probe.reason}"
 
 
 def build_backend_overrides(*, bus: str, kafka_bootstrap: str | None) -> dict[str, str]:
@@ -658,7 +671,14 @@ def run_delegate(
                 "(got --bus unset; the auto-resolved default never accepts "
                 "an explicit bootstrap override — pass --bus kafka too)."
             )
-        bus, reason = resolve_default_bus()
+        try:
+            bus, reason = resolve_default_bus()
+        except EventBusResolutionAmbiguousError as exc:
+            # OMN-16678: an indeterminate probe is a REFUSAL, not a fallback.
+            # Surfaced as a ClickException so the caller gets the ambiguity and
+            # both remedies on stderr with a non-zero exit, instead of a
+            # traceback or a silently coin-flipped transport.
+            raise click.ClickException(str(exc)) from exc
         if bus == "kafka":
             logger.info("onex delegate: auto-resolved event bus -> kafka (%s)", reason)
         else:

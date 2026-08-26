@@ -40,6 +40,11 @@ import pytest
 from click.testing import CliRunner
 
 from omnibase_core.models.dispatch.model_skill_result import ModelSkillResult
+from omnibase_infra.backends import auto_configure
+from omnibase_infra.backends.auto_configure import (
+    BUS_TYPE_OVERRIDE_ENV,
+    EventBusResolutionAmbiguousError,
+)
 from omnibase_infra.backends.enum_probe_state import EnumProbeState
 from omnibase_infra.backends.model_probe_result import ModelProbeResult
 from omnibase_infra.cli import cli_delegate
@@ -81,6 +86,18 @@ def _clear_kafka_bootstrap_by_default(monkeypatch: pytest.MonkeyPatch) -> None:
     that DO want to exercise the configured-broker path set it explicitly.
     """
     monkeypatch.delenv("KAFKA_BOOTSTRAP_SERVERS", raising=False)
+
+
+@pytest.fixture(autouse=True)
+def _clear_bus_type_override_by_default(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Unit tests must not depend on ambient ``ONEX_EVENT_BUS_TYPE`` (OMN-16678).
+
+    ``ONEX_EVENT_BUS_TYPE`` is now tier 2 of the shared resolution order, so an
+    ambient value in the developer's shell would pin the bus and silently make
+    the probe-tier tests vacuous. Tests that exercise the override set it
+    explicitly.
+    """
+    monkeypatch.delenv(BUS_TYPE_OVERRIDE_ENV, raising=False)
 
 
 @pytest.fixture(autouse=True)
@@ -699,7 +716,7 @@ class TestBusSelection:
         # default, no flag required.
         monkeypatch.setenv("KAFKA_BOOTSTRAP_SERVERS", "broker.example:9092")
         monkeypatch.setattr(
-            cli_delegate,
+            auto_configure,
             "probe_kafka",
             lambda *, bootstrap_servers, authority_topic=None: ModelProbeResult(
                 state=EnumProbeState.AUTHORITATIVE,
@@ -744,7 +761,7 @@ class TestBusSelection:
         # default.
         monkeypatch.setenv("KAFKA_BOOTSTRAP_SERVERS", "unreachable.example:9092")
         monkeypatch.setattr(
-            cli_delegate,
+            auto_configure,
             "probe_kafka",
             lambda *, bootstrap_servers, authority_topic=None: ModelProbeResult(
                 state=EnumProbeState.DISCOVERED,
@@ -1031,6 +1048,15 @@ class TestResolveDefaultBus:
     made from the unit suite; the "nothing configured" test calls the REAL
     ``probe_kafka`` because its own short-circuit (no env, no override) never
     touches the network either.
+
+    OMN-16678: the stub target moved from ``cli_delegate.probe_kafka`` to
+    ``auto_configure.probe_kafka``. ``resolve_default_bus`` is now a thin call
+    into the shared ``resolve_bus_type`` authority, so ``cli_delegate`` no
+    longer imports the probe at all and patching the old name would be a
+    silent no-op. The generic resolution-order and indeterminate-probe pins
+    live in ``tests/unit/backends/test_bus_resolution_order.py``; what this
+    class pins is that the DELEGATE path is wired to that authority and passes
+    the delegation topic through.
     """
 
     def test_no_bootstrap_short_circuits_to_inmemory(
@@ -1051,7 +1077,7 @@ class TestResolveDefaultBus:
     ) -> None:
         monkeypatch.setenv("KAFKA_BOOTSTRAP_SERVERS", "broker.example:9092")
         monkeypatch.setattr(
-            cli_delegate,
+            auto_configure,
             "probe_kafka",
             lambda *, bootstrap_servers, authority_topic=None: ModelProbeResult(
                 state=EnumProbeState.HEALTHY,
@@ -1070,7 +1096,7 @@ class TestResolveDefaultBus:
     ) -> None:
         monkeypatch.setenv("KAFKA_BOOTSTRAP_SERVERS", "broker.example:9092")
         monkeypatch.setattr(
-            cli_delegate,
+            auto_configure,
             "probe_kafka",
             lambda *, bootstrap_servers, authority_topic=None: ModelProbeResult(
                 state=EnumProbeState.AUTHORITATIVE,
@@ -1125,7 +1151,7 @@ class TestResolveDefaultBus:
                 backend_label="event_bus_kafka",
             )
 
-        monkeypatch.setattr(cli_delegate, "probe_kafka", _probe)
+        monkeypatch.setattr(auto_configure, "probe_kafka", _probe)
 
         bus, reason = resolve_default_bus()
 
@@ -1133,24 +1159,21 @@ class TestResolveDefaultBus:
         assert seen["authority_topic"] == SUFFIX_DELEGATION_REQUEST
         assert "broker mismatch" in reason
 
-    @pytest.mark.parametrize(
-        "state", [EnumProbeState.DISCOVERED, EnumProbeState.REACHABLE]
-    )
-    def test_unhealthy_broker_falls_back_to_inmemory(
-        self, state: EnumProbeState, monkeypatch: pytest.MonkeyPatch
+    def test_unreachable_broker_falls_back_to_inmemory(
+        self, monkeypatch: pytest.MonkeyPatch
     ) -> None:
-        # DISCOVERED (TCP failed) and REACHABLE (TCP ok, but e.g. topic list
-        # failed — the OMN-14380 advertised-listener symptom) both must
-        # gracefully degrade rather than select a bus that cannot actually
-        # carry traffic. Bootstrap passed explicitly (not via env) so the
-        # stub receives it directly — resolve_default_bus forwards whatever
-        # it's given straight to probe_kafka without touching the env itself.
+        # DISCOVERED is the determinate negative (TCP connect refused / no
+        # broker configured / unparseable address): a conclusive "no usable
+        # broker", so degrading to the in-process bus is repeatable. Bootstrap
+        # passed explicitly (not via env) so the stub receives it directly —
+        # resolve_default_bus forwards whatever it's given straight through
+        # without touching the env itself.
         monkeypatch.setattr(
-            cli_delegate,
+            auto_configure,
             "probe_kafka",
             lambda *, bootstrap_servers, authority_topic=None: ModelProbeResult(
-                state=state,
-                reason=f"TCP reachable but topic list failed for {bootstrap_servers}",
+                state=EnumProbeState.DISCOVERED,
+                reason=f"TCP connect failed for {bootstrap_servers}",
                 backend_label="event_bus_kafka",
             ),
         )
@@ -1158,8 +1181,72 @@ class TestResolveDefaultBus:
         bus, reason = resolve_default_bus(kafka_bootstrap="broker.example:9092")
 
         assert bus == "inmemory"
-        assert state.name in reason
+        assert EnumProbeState.DISCOVERED.name in reason
         assert "broker.example:9092" in reason
+
+    def test_indeterminate_broker_refuses_instead_of_coin_flipping(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """OMN-16678 regression: REACHABLE must not resolve a transport.
+
+        Pre-fix this returned ``("inmemory", ...)`` while ``select_event_bus``
+        returned a Kafka bus for the identical state — and because a plain
+        ``AdminClient.list_topics`` timeout against a HEALTHY broker degrades
+        to REACHABLE, the same unchanged environment produced kafka on 14 of
+        20 calls and inmemory on the other 6 (``knowledge-base#59``). A
+        delegation that silently lands on inmemory never reaches the deployed
+        orchestrator consumer, so the failure is data loss, not a slow path.
+        """
+        monkeypatch.setattr(
+            auto_configure,
+            "probe_kafka",
+            lambda *, bootstrap_servers, authority_topic=None: ModelProbeResult(
+                state=EnumProbeState.REACHABLE,
+                reason="TCP reachable but topic list failed: Broker: Request timed out",
+                backend_label="event_bus_kafka",
+            ),
+        )
+
+        with pytest.raises(EventBusResolutionAmbiguousError) as excinfo:
+            resolve_default_bus(kafka_bootstrap="broker.example:9092")
+
+        assert "REACHABLE" in str(excinfo.value)
+        assert BUS_TYPE_OVERRIDE_ENV in str(excinfo.value)
+
+    @pytest.mark.parametrize(
+        ("override", "expected"), [("inmemory", "inmemory"), ("kafka", "kafka")]
+    )
+    def test_env_override_pins_the_delegate_bus(
+        self, override: str, expected: str, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """OMN-16678 regression for defect 1: the override reaches THIS path.
+
+        ``ONEX_EVENT_BUS_TYPE`` was read by ``select_event_bus`` and ignored
+        here, so setting it to pin ``onex delegate`` did nothing at all. It is
+        now tier 2 of the one shared order and outranks the probe — which is
+        stubbed to the OPPOSITE answer here so a regression that reinstates
+        probe-first cannot pass by coincidence.
+        """
+        monkeypatch.setenv(BUS_TYPE_OVERRIDE_ENV, override)
+        probe_state = (
+            EnumProbeState.AUTHORITATIVE
+            if expected == "inmemory"
+            else EnumProbeState.DISCOVERED
+        )
+        monkeypatch.setattr(
+            auto_configure,
+            "probe_kafka",
+            lambda *, bootstrap_servers, authority_topic=None: ModelProbeResult(
+                state=probe_state,
+                reason="probe result that the override must outrank",
+                backend_label="event_bus_kafka",
+            ),
+        )
+
+        bus, reason = resolve_default_bus(kafka_bootstrap="broker.example:9092")
+
+        assert bus == expected
+        assert BUS_TYPE_OVERRIDE_ENV in reason
 
     def test_explicit_kafka_bootstrap_override_takes_precedence_over_env(
         self, monkeypatch: pytest.MonkeyPatch
@@ -1177,7 +1264,7 @@ class TestResolveDefaultBus:
                 backend_label="event_bus_kafka",
             )
 
-        monkeypatch.setattr(cli_delegate, "probe_kafka", _probe)
+        monkeypatch.setattr(auto_configure, "probe_kafka", _probe)
 
         bus, _reason = resolve_default_bus(kafka_bootstrap="override.example:9092")
 
