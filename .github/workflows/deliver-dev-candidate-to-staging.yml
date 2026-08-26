@@ -1,0 +1,230 @@
+# SPDX-FileCopyrightText: 2025 OmniNode.ai Inc.
+# SPDX-License-Identifier: MIT
+#
+# deliver-dev-candidate-to-staging.yml — OMN-15796
+#
+# Makes a merge to this repo's `dev` deliver itself to onex-dev.
+#
+# Before this workflow, "merged" and "running" were separated by four manual
+# steps: dispatch the candidate runtime build, dispatch the migrate image build
+# from the same commit, hand-edit both digest pins in omninode_infra's k8s
+# manifests, and PR/merge that so the deploy's path filter fires. The steps
+# were routinely skipped, and skipping them was invisible: dispatching a deploy
+# after an omnibase_infra merge re-applied the unchanged static pins and
+# reported green while onex-dev kept running a candidate built days earlier
+# (run 31328815070 -- all six migration jobs applied=0; pods still on
+# candidate-a853500-20260805212844 four days after the fix merged). Nothing was
+# red, so nothing was investigated; the staging proofs that beta testers depend
+# on were being run against code that was not there.
+#
+# Shape:
+#
+#   dev merge
+#     ├─ build-runtime-candidate  (build-workspace-candidate-runtime.yml)
+#     ├─ build-migrate-bundle     (build-and-push-migrate-image.yml)
+#     └─ dispatch-to-staging      repository_dispatch -> omninode_infra
+#                                 (deploy-onex-staging.yml pins both digests
+#                                  into its ephemeral checkout and rolls)
+#
+# SINGLE_SOURCE_REV_BUNDLE: both images are built from `github.sha`, this
+# merge's own commit -- not "dev HEAD at build time", which drifts the moment a
+# second PR lands mid-build. The two jobs reach that commit by different
+# routes, which is worth stating because the difference is easy to get
+# backwards:
+#
+#   * the runtime build checks out THIS repo at the caller's commit by default
+#     (a called workflow's `github.sha` is the caller's), so it needs no ref
+#     input. Its `sibling_ref` input is a different axis entirely -- it names
+#     the ref the SIBLING repos (omnibase_core / omnibase_compat / omnimarket)
+#     are staged at, and must stay a branch name. Passing this repo's commit
+#     SHA there would try to clone omnibase_core at a SHA that does not exist
+#     in omnibase_core and fail the build outright.
+#   * the migrate build takes `git-ref` explicitly, because it is a plain
+#     single-repo build with nothing to infer it from.
+#
+# The dispatch fires only when BOTH succeed: a runtime rolled forward onto a
+# schema that was never migrated is worse than not deploying at all, so a
+# half-built bundle is never announced.
+#
+# NON-PROD by construction, unchanged from OMN-13656: the runtime image is
+# stamped promotion_class=stability-candidate / non_main_lineage=true, and the
+# omnimarket prod-promotion gate refuses such an image for prod. This workflow
+# adds a delivery path to the dev/staging lane and no capability at all toward
+# prod -- it names no prod cluster, credential, or manifest.
+
+name: Deliver dev candidate to onex-staging (OMN-15796)
+
+on:
+  push:
+    branches:
+      - dev
+    # Union of what the two images are built from. `docker/**` carries
+    # `docker/migrations/**` and `docker/Dockerfile.migrate`, so narrowing this
+    # to runtime sources alone would silently drop the migration half.
+    paths:
+      - 'src/**'
+      - 'docker/**'
+      - 'pyproject.toml'
+      - 'uv.lock'
+      - '.github/workflows/deliver-dev-candidate-to-staging.yml'
+      - '.github/workflows/build-workspace-candidate-runtime.yml'
+      - '.github/workflows/build-and-push-migrate-image.yml'
+  # The documented low-friction manual path (OMN-15796 AC (a)): one dispatch,
+  # no YAML hand-editing anywhere. Needed for the case a push cannot cover --
+  # a sibling repo (omnibase_core / omnimarket / omnibase_compat) moved and the
+  # candidate must be restaged against their new dev HEADs without this repo
+  # having changed at all.
+  workflow_dispatch:
+    inputs:
+      sibling_ref:
+        description: "Git ref to stage sibling repos at (default: dev)."
+        required: false
+        default: "dev"
+        type: string
+
+concurrency:
+  # A candidate build runs up to 75 minutes. Under ordinary merge traffic,
+  # queueing one per merge would fall arbitrarily far behind, and every
+  # superseded run would be delivering code that is already stale. Collapsing
+  # the burst makes the delivered candidate dev HEAD by construction; the
+  # cancelled runs' commits are contained in the surviving one.
+  group: deliver-dev-candidate-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+jobs:
+  build-runtime-candidate:
+    name: Build runtime stability-candidate
+    uses: ./.github/workflows/build-workspace-candidate-runtime.yml
+    permissions:
+      id-token: write
+      contents: read
+    secrets: inherit  # pragma: allowlist secret
+    with:
+      # SIBLING repos only (see the SINGLE_SOURCE_REV_BUNDLE note in the header):
+      # a branch name, never this repo's commit SHA. This repo's own revision
+      # comes from the called workflow's default checkout of `github.sha`.
+      sibling_ref: ${{ inputs.sibling_ref || 'dev' }}
+
+  build-migrate-bundle:
+    name: Build migration bundle
+    uses: ./.github/workflows/build-and-push-migrate-image.yml
+    permissions:
+      id-token: write
+      contents: read
+    secrets: inherit  # pragma: allowlist secret
+    with:
+      # The same commit the runtime build checks out by default -- stated
+      # explicitly here because this workflow has no other way to infer it.
+      git-ref: ${{ github.sha }}
+
+  dispatch-to-staging:
+    name: Announce the bundle to omninode_infra
+    needs: [build-runtime-candidate, build-migrate-bundle]
+    # No `if:` override. GitHub's default `success()` is exactly the wanted
+    # semantics -- either build failing, or being cancelled by the concurrency
+    # group above, must leave the dispatch unfired. An `always()` here would
+    # announce a bundle that does not exist.
+    runs-on: >-
+      ${{ fromJSON(vars.OMNI_TRUSTED_CI_RUNS_ON_JSON || '["self-hosted","omnibase-ci"]') }}
+    timeout-minutes: 10
+    steps:
+      # OMN-16373 retired CROSS_REPO_PAT in favour of the onexbot-occ-writer
+      # App. repository_dispatch is gated on Contents:write on the TARGET repo
+      # (not actions:write), which this App already grants org-wide.
+      #
+      # Absent credentials fail this job rather than warning and passing. The
+      # release workflow's soft-skip is right for its case (a missing dispatch
+      # must not fail an otherwise-good release); here the dispatch IS the
+      # deliverable, and a green run that delivered nothing is the precise
+      # failure mode this ticket exists to eliminate.
+      - name: Check onexbot-occ-writer App credentials are configured
+        env:
+          APP_ID: ${{ secrets.ONEXBOT_OCC_APP_ID }}
+          APP_PRIVATE_KEY: ${{ secrets.ONEXBOT_OCC_PRIVATE_KEY }}
+        run: |
+          set -euo pipefail
+          if [ -z "$APP_ID" ] || [ -z "$APP_PRIVATE_KEY" ]; then
+            echo "::error::ONEXBOT_OCC_APP_ID / ONEXBOT_OCC_PRIVATE_KEY are not configured." \
+              "Both images were built and pushed, but nothing can announce them to" \
+              "omninode_infra -- failing rather than reporting a delivery that did not happen."
+            exit 1
+          fi
+
+      - name: Mint onexbot-occ-writer app token
+        id: app-token
+        uses: actions/create-github-app-token@d72941d797fd3113feb6b93fd0dec494b13a2547 # v1
+        with:
+          app-id: ${{ secrets.ONEXBOT_OCC_APP_ID }}
+          private-key: ${{ secrets.ONEXBOT_OCC_PRIVATE_KEY }}
+          owner: OmniNode-ai
+          repositories: omninode_infra
+          permission-contents: write
+
+      - name: Dispatch dev-candidate bundle to omninode_infra
+        env:
+          GH_TOKEN: ${{ steps.app-token.outputs.token }}
+          RUNTIME_IMAGE_REF: ${{ needs.build-runtime-candidate.outputs.image-ref }}
+          MIGRATE_IMAGE_REF: ${{ needs.build-migrate-bundle.outputs.image-ref }}
+          # The omnibase_infra revision BOTH images were built from -- the
+          # thing the staging deploy stamps onto the live Deployments so the
+          # readback can answer "which commit is running", not merely "did the
+          # digest change".
+          SOURCE_SHA: ${{ github.sha }}
+        run: |
+          set -euo pipefail
+
+          # Both halves must be present and digest-pinned. The receiving
+          # workflow validates this again -- deliberately, since it also
+          # accepts dispatches this workflow did not send -- but refusing here
+          # keeps a malformed announcement off the wire entirely and names the
+          # broken build on the side that can see it.
+          for var in RUNTIME_IMAGE_REF MIGRATE_IMAGE_REF; do
+            value="${!var:-}"
+            if [ -z "$value" ]; then
+              echo "::error::${var} is empty -- the upstream build reported success without" \
+                "publishing an image reference. Refusing to announce a partial bundle."
+              exit 1
+            fi
+            case "$value" in
+              *@sha256:*) ;;
+              *)
+                echo "::error::${var}='${value}' is not digest-pinned. A mutable tag is not a" \
+                  "deployable identity; the staging deploy would reject it downstream."
+                exit 1
+                ;;
+            esac
+          done
+
+          # jq builds the payload: hand-concatenated JSON breaks on the first
+          # value carrying a quote, and these values cross a repository
+          # boundary.
+          jq -n \
+            --arg runtime "${RUNTIME_IMAGE_REF}" \
+            --arg migrate "${MIGRATE_IMAGE_REF}" \
+            --arg repo "${GITHUB_REPOSITORY}" \
+            --arg sha "${SOURCE_SHA}" \
+            '{
+              event_type: "omnibase-infra-dev-candidate",
+              client_payload: {
+                runtime_image_ref: $runtime,
+                migrate_image_ref: $migrate,
+                source_repo: $repo,
+                source_sha: $sha
+              }
+            }' \
+            | gh api --method POST repos/OmniNode-ai/omninode_infra/dispatches --input -
+
+          {
+            echo "### Dev candidate delivered (OMN-15796)"
+            echo ""
+            echo "| field | value |"
+            echo "| --- | --- |"
+            echo "| source commit | \`${SOURCE_SHA}\` |"
+            echo "| runtime image | \`${RUNTIME_IMAGE_REF}\` |"
+            echo "| migrate image | \`${MIGRATE_IMAGE_REF}\` |"
+            echo ""
+            echo "omninode_infra's deploy-onex-staging.yml rolls onex-dev to these digests."
+          } >> "$GITHUB_STEP_SUMMARY"

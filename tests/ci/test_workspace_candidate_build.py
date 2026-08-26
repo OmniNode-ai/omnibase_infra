@@ -74,15 +74,36 @@ class TestDockerfileCandidateStamping:
 
 @pytest.mark.unit
 class TestWorkspaceCandidateWorkflow:
-    def test_workflow_is_dispatch_only(self, workflow: dict[object, object]) -> None:
-        # Never auto on push — a candidate must be deliberately requested so it
-        # cannot masquerade as a clean-main build. PyYAML parses the bare `on:`
-        # key as the boolean True.
+    def test_workflow_never_auto_triggers_on_a_push(
+        self, workflow: dict[object, object]
+    ) -> None:
+        # Never a bare `push:` trigger on THIS file — a candidate is built only
+        # when something explicitly asks for one, so it cannot masquerade as a
+        # clean-main build. PyYAML parses the bare `on:` key as the boolean True.
+        #
+        # OMN-15796 widened this from "workflow_dispatch and nothing else" to
+        # "workflow_dispatch and workflow_call", because dispatch-only meant a
+        # candidate existed only when a human remembered to ask, and onex-dev
+        # routinely ran days-old code behind a green deploy as a result.
+        # deliver-dev-candidate-to-staging.yml now CALLS this workflow on a dev
+        # merge. That is still a deliberate request — made by a workflow rather
+        # than a person — and it changes nothing about the stamping asserted
+        # throughout this class: workspace mode, stability-candidate promotion
+        # class, non_main_lineage=true, and the prod-promotion gate's refusal
+        # all hold identically on the called path. The invariant that actually
+        # protects the lineage guard is the absence of `push:`, which is what
+        # this asserts.
         on = workflow.get(True)
         if on is None:
             on = workflow.get("on")
         assert isinstance(on, dict)
-        assert set(on.keys()) == {"workflow_dispatch"}
+        assert "push" not in on, (
+            "a push-triggered candidate build would produce images on this "
+            "repo's own branch pushes with no explicit request; the delivery "
+            "chain calls this workflow instead (OMN-15796)"
+        )
+        assert set(on.keys()) <= {"workflow_dispatch", "workflow_call"}, on.keys()
+        assert "workflow_dispatch" in on, "the manual escape hatch must survive"
 
     def test_workflow_uses_clean_cloud_egress_for_ecr_push(
         self, workflow: dict[object, object]

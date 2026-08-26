@@ -20,8 +20,20 @@
 #   for prod unless an explicit candidate-authorizing grant exists. The digest is
 #   pinnable to the dev / stability-test lane kustomization ONLY — never prod.
 #
-# Trigger: workflow_dispatch only (never auto on push). The image NEVER masquerades
-# as a clean-main build under the lineage guard.
+# Trigger: workflow_dispatch, plus workflow_call (OMN-15796). Still never a bare
+# `push:` trigger on this file -- the image NEVER masquerades as a clean-main build
+# under the lineage guard, and the stamping above is what keeps that true regardless
+# of who starts the build.
+#
+# OMN-15796/OMN-14044 (workflow_call): dispatch-only meant a candidate existed only
+# when a human remembered to ask for one, so onex-dev routinely ran days-old code
+# behind a green deploy. deliver-dev-candidate-to-staging.yml now calls this workflow
+# on a dev merge and forwards the resulting digest to omninode_infra. Being *called*
+# changes nothing about what is built or how it is stamped: same workspace mode, same
+# unweakened Trivy scan, same stability-candidate labels, same prod refusal. The
+# outputs below exist so the caller can name the image it just built -- the digest is
+# the thing that gets pinned, and a build whose digest the caller cannot read is not
+# a link in a chain.
 
 name: Build workspace stability-candidate runtime (OMN-13656)
 
@@ -38,6 +50,28 @@ on:
         required: false
         default: "false"
         type: boolean
+  workflow_call:
+    inputs:
+      sibling_ref:
+        description: "Git ref to stage sibling repos at."
+        required: false
+        default: "dev"
+        type: string
+      no-cache:
+        description: "Build with --no-cache to force a fresh foundation install."
+        required: false
+        default: "false"
+        type: boolean
+    outputs:
+      digest:
+        description: "sha256 digest of the pushed candidate image (ECR-verified post-push)."
+        value: ${{ jobs.build-workspace-candidate.outputs.image_digest }}
+      image-ref:
+        description: "Digest-pinned 'registry/repo@sha256:digest' reference of the candidate."
+        value: ${{ jobs.build-workspace-candidate.outputs.image_ref }}
+      candidate-tag:
+        description: "The candidate-<sha7>-<ts> tag the image was pushed under."
+        value: ${{ jobs.build-workspace-candidate.outputs.candidate_tag }}
 
 concurrency:
   group: build-workspace-candidate-${{ github.ref }}
