@@ -99,6 +99,11 @@ class FakeGatewayTransport:
         self.attach_count = 0
         self.revoked = False
         self.token_endpoint_status = 200
+        self.detach_status = 200
+        # OMN-15952 makes the renewal directive REQUIRED on attach; this flag
+        # exists so a client can be tested against a pre-OMN-15952 gateway.
+        self.omit_renewal = False
+        self.detach_count = 0
         self.session_serial = 0
         # The ceiling is stamped ONCE, at attach, and no later call moves it --
         # a fake that recomputed it per heartbeat would silently satisfy a
@@ -175,6 +180,8 @@ class FakeGatewayTransport:
             return self._attach()
         if url == f"{self._gateway_base_url}/v1/gateway/heartbeat":
             return self._heartbeat()
+        if url == f"{self._gateway_base_url}/v1/gateway/detach":
+            return self._detach(body)
         return FakeHttpResponse(404, '{"detail":"not found"}')
 
     def _new_session_payload(self) -> dict[str, object]:
@@ -201,7 +208,7 @@ class FakeGatewayTransport:
         expires = datetime.fromisoformat(str(session["expires_at"]))
         renew_at = expires - timedelta(seconds=self._renewal_margin_seconds)
         renew_not_before = renew_at - timedelta(seconds=self._renewal_jitter_seconds)
-        payload = {
+        payload: dict[str, object] = {
             "session": session,
             "heartbeat_interval_seconds": self._heartbeat_interval_seconds,
             "renewal": {
@@ -222,6 +229,8 @@ class FakeGatewayTransport:
                 "emitted_at": self.now.isoformat(),
             },
         }
+        if self.omit_renewal:
+            del payload["renewal"]
         return FakeHttpResponse(200, json.dumps(payload))
 
     def _heartbeat(self) -> FakeHttpResponse:
@@ -236,6 +245,44 @@ class FakeGatewayTransport:
                 "event_type": "HEARTBEAT",
                 "session_id": session["session_id"],
                 "tenant_id": session["tenant_id"],
+                "tenant_slug": self._tenant_slug,
+                "principal_id": self._client_id,
+                "edge_instance_id": "test-edge",
+                "emitted_at": self.now.isoformat(),
+            },
+        }
+        return FakeHttpResponse(200, json.dumps(payload))
+
+    def _detach(self, body: str) -> FakeHttpResponse:
+        """Fake ``/v1/gateway/detach`` (OMN-16036).
+
+        Mirrors the edge route in ``omninode_infra/docker/onex-api/routers/
+        gateway.py``: the request body carries ``session_id`` + ``reason`` and
+        the access token is taken from the Authorization header, never the
+        body. The session is REMOVED, so a test can assert the attach proof
+        left nothing behind rather than merely assert a 200 came back.
+        """
+        self.detach_count += 1
+        if self.detach_status != 200:
+            return FakeHttpResponse(self.detach_status, '{"detail":"detach refused"}')
+        document = json.loads(body)
+        if "access_token" in document:
+            return FakeHttpResponse(
+                400, '{"detail":"access_token must not be sent in the body"}'
+            )
+        if self.current_session is None:
+            return FakeHttpResponse(404, '{"detail":"no session"}')
+        if str(document.get("session_id")) != str(self.current_session["session_id"]):
+            return FakeHttpResponse(404, '{"detail":"unknown session"}')
+        session_id = self.current_session["session_id"]
+        self.current_session = None
+        payload = {
+            "session_id": session_id,
+            "detached": True,
+            "session_event": {
+                "event_type": "DETACHED",
+                "session_id": session_id,
+                "tenant_id": "22222222-2222-4222-8222-222222222222",
                 "tenant_slug": self._tenant_slug,
                 "principal_id": self._client_id,
                 "edge_instance_id": "test-edge",

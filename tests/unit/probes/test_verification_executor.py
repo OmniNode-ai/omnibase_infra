@@ -16,6 +16,7 @@ import pytest
 from omnibase_infra.probes.model_verification_result import ModelVerificationResult
 from omnibase_infra.probes.model_verification_spec import ModelVerificationSpec
 from omnibase_infra.probes.verification_executor import (
+    _HANDLERS,
     _interpolate_env,
     execute_verification,
 )
@@ -263,3 +264,52 @@ class TestInterpolateEnv:
             result = await execute_verification(spec)
         assert result.passed is True
         mock_socket.assert_called_once_with("192.168.86.201", 5436, timeout=10.0)
+
+
+class TestGatewayAttach:
+    """Tests for the gateway_attach check type (OMN-16036).
+
+    The dispatch half only. What the check actually proves -- a
+    ``client_credentials`` grant, an attach, and the detach that keeps it
+    non-destructive -- is driven end to end against the fake Keycloak + fake
+    gateway in ``tests/unit/probes/test_probe_gateway_attach.py``.
+    """
+
+    def test_registered_in_handlers(self) -> None:
+        assert "gateway_attach" in _HANDLERS
+
+    @pytest.mark.asyncio
+    async def test_dispatches_and_reports_a_failure_without_a_credential(
+        self, tmp_path: Path
+    ) -> None:
+        """A missing credential is a failed check, never an unknown check_type.
+
+        Runs the real handler with no network available to it: the store
+        refuses before anything is dialled, so this asserts the dispatch and
+        the fail-closed surfacing at once.
+        """
+        spec = ModelVerificationSpec(
+            check_type="gateway_attach",
+            target=str(tmp_path / ".onex"),
+            timeout_seconds=5,
+        )
+        result = await execute_verification(spec)
+
+        assert result.passed is False
+        assert result.check_type == "gateway_attach"
+        assert "onex auth login" in result.message
+
+    @pytest.mark.asyncio
+    async def test_target_is_env_interpolated_like_every_other_check(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        monkeypatch.setenv("ONEX_TEST_HOME", str(tmp_path))
+        spec = ModelVerificationSpec(
+            check_type="gateway_attach",
+            target="${ONEX_TEST_HOME}/.onex",
+            timeout_seconds=5,
+        )
+        result = await execute_verification(spec)
+
+        assert result.passed is False
+        assert str(tmp_path) in result.message

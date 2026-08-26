@@ -15,10 +15,12 @@ import os
 import re
 import subprocess
 import time
+from collections.abc import Awaitable, Callable
 from pathlib import Path
 
 from omnibase_infra.probes.capability_probe import http_health_check, socket_check
 from omnibase_infra.probes.model_verification_result import ModelVerificationResult
+from omnibase_infra.probes.probe_gateway_attach import check_gateway_attach
 from omnibase_infra.probes.protocol_verification_spec import VerificationSpec
 
 _ENV_VAR_RE = re.compile(r"\$\{([^}]+)\}")
@@ -103,12 +105,24 @@ async def _check_python_import(target: str, _timeout: int) -> tuple[bool, str]:
         return False, f"Module not importable: {target}"
 
 
-_HANDLERS = {
+# Every check is (interpolated target, timeout seconds) -> (passed, message).
+# Named so the table below is checkable: without it mypy infers the values as
+# an unknown join and cannot verify the dispatch call at all.
+_VerificationHandler = Callable[[str, int], Awaitable[tuple[bool, str]]]
+
+_HANDLERS: dict[str, _VerificationHandler] = {
     "command_exit_0": _check_command_exit_0,
     "file_exists": _check_file_exists,
     "tcp_probe": _check_tcp_probe,
     "http_health": _check_http_health,
     "python_import": _check_python_import,
+    # OMN-16036. The only check here that proves a CREDENTIAL rather than a
+    # reachable endpoint: it mints a token from the credential the onboarding
+    # flow just wrote, attaches with it, and detaches again. ``http_health``
+    # against the gateway proves the service is up and nothing about whether
+    # the operator can actually use it. Target is the ONEX home holding the
+    # credential; see ``probe_gateway_attach`` for the timeout note.
+    "gateway_attach": check_gateway_attach,
 }
 
 

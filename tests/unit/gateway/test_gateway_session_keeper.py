@@ -18,6 +18,7 @@ ones the OMN-15952 contract makes and the client must obey:
 
 from __future__ import annotations
 
+import json
 import random
 from datetime import timedelta
 
@@ -285,3 +286,75 @@ async def test_a_gateway_rejection_names_the_status_without_leaking_material(
         await _client(fake_transport).attach(now=fake_transport.now)
 
     assert CLIENT_SECRET not in str(caught.value)
+
+
+# -- detach (OMN-16036) ----------------------------------------------------
+#
+# Detach is what makes an attach PROOF non-destructive: the onboarding
+# verification check attaches with the credential just written and must leave
+# no session behind. It lives on the keeper rather than in the probe so the
+# unattended runtime client gets the same teardown on shutdown.
+
+
+async def test_detach_tears_the_session_down_and_clears_local_state(
+    fake_transport: FakeGatewayTransport,
+) -> None:
+    client = _client(fake_transport)
+    attachment = await client.attach(now=fake_transport.now)
+
+    await client.detach(now=fake_transport.now, reason="verification probe complete")
+
+    url, body, headers = fake_transport.json_requests[-1]
+    assert url == f"{GATEWAY_BASE_URL}/v1/gateway/detach"
+    assert headers["Authorization"].startswith("Bearer ")
+    sent = json.loads(body)
+    assert sent["session_id"] == str(attachment.session.session_id)
+    assert sent["reason"] == "verification probe complete"
+    # The bearer goes in the header and NOWHERE else.
+    assert "access_token" not in sent
+    # Proof it was a teardown, not merely a 200: the fake dropped the session.
+    assert fake_transport.current_session is None
+    assert client.attachment is None
+
+
+async def test_detach_without_an_attachment_raises(
+    fake_transport: FakeGatewayTransport,
+) -> None:
+    with pytest.raises(ModelOnexError):
+        await _client(fake_transport).detach(now=fake_transport.now, reason="nothing")
+
+
+async def test_a_refused_detach_raises_and_keeps_the_session_it_could_not_close(
+    fake_transport: FakeGatewayTransport,
+) -> None:
+    client = _client(fake_transport)
+    await client.attach(now=fake_transport.now)
+    fake_transport.detach_status = 500
+
+    with pytest.raises(ModelOnexError) as caught:
+        await client.detach(
+            now=fake_transport.now, reason="verification probe complete"
+        )
+
+    # Local state is NOT cleared: the session may still be open server-side,
+    # and a client that forgot it would report a clean teardown that did not
+    # happen.
+    assert client.attachment is not None
+    assert CLIENT_SECRET not in str(caught.value)
+
+
+async def test_detach_reuses_the_attach_token_rather_than_re_granting(
+    fake_transport: FakeGatewayTransport,
+) -> None:
+    """The gateway binds detach to the STORED session's identity.
+
+    The cached token from the attach carries that identity, so a second grant
+    buys nothing and costs a Keycloak round trip on every teardown.
+    """
+    client = _client(fake_transport)
+    await client.attach(now=fake_transport.now)
+    grants_after_attach = len(fake_transport.form_requests)
+
+    await client.detach(now=fake_transport.now, reason="verification probe complete")
+
+    assert len(fake_transport.form_requests) == grants_after_attach
