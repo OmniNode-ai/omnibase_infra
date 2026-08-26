@@ -8,7 +8,8 @@ Two execution paths:
   verification for each step -> render output.
 - **Interactive path**: load interactive policy by name -> drive
   ``InteractiveExecutor`` with an injected adapter -> optionally
-  write env config via ``ConfigWriter``.
+  write env config via ``ConfigWriter`` and the 0600 JSON credentials
+  artifact via ``CredentialsWriter`` (OMN-16035).
 
 The ``input_adapter`` is a function parameter injected by the caller,
 NOT part of the Pydantic model (DI outside models — OMN-10784 GPT #1).
@@ -20,6 +21,7 @@ from pathlib import Path
 
 from pydantic import ValidationError
 
+from omnibase_core.types import StrictJsonType
 from omnibase_infra.nodes.node_onboarding_orchestrator.models.enum_onboarding_status import (
     EnumOnboardingStatus,
 )
@@ -33,6 +35,10 @@ from omnibase_infra.nodes.node_onboarding_orchestrator.models.model_step_result 
     ModelStepResult,
 )
 from omnibase_infra.onboarding.config_writer import ConfigWriter
+from omnibase_infra.onboarding.credentials_writer import (
+    CredentialsWriter,
+    select_credential_entries,
+)
 from omnibase_infra.onboarding.interactive_executor import InteractiveExecutor
 from omnibase_infra.onboarding.loader import load_canonical_graph
 from omnibase_infra.onboarding.model_interactive_policy import ModelInteractivePolicy
@@ -111,9 +117,10 @@ async def _handle_interactive(
         for sr in result.step_results
     ]
 
-    # Optionally write overlay and env config
+    # Optionally write overlay, env config, and the credentials artifact
     env_output_path_written: str | None = None
     overlay_output_path_written: str | None = None
+    credentials_output_path_written: str | None = None
     if not input_model.dry_run:
         if input_model.env_output_path is None:
             msg = "env_output_path is required when dry_run=False"
@@ -138,6 +145,20 @@ async def _handle_interactive(
             writer.write(result.env_dict, target_path)
             env_output_path_written = str(target_path)
 
+        # Credentials artifact (OMN-16035): explicit invocation only — it fires
+        # only when the caller named a path, and only for credential-shaped
+        # entries, so an onboarding run without secrets writes no 0600 file.
+        if input_model.credentials_output_path is not None:
+            credential_entries = select_credential_entries(result.env_dict)
+            if credential_entries:
+                credentials_path = Path(input_model.credentials_output_path)
+                entries: dict[str, StrictJsonType] = dict(credential_entries)
+                credentials_payload: dict[str, StrictJsonType] = {
+                    "credentials": {input_model.policy_name: entries}
+                }
+                CredentialsWriter().write(credentials_payload, credentials_path)
+                credentials_output_path_written = str(credentials_path)
+
     # Render env output as markdown for display
     env_lines = [f"  {k}={v}" for k, v in sorted(result.env_dict.items())]
     rendered = (
@@ -153,6 +174,11 @@ async def _handle_interactive(
             rendered += f"\n*Overlay written to: {overlay_output_path_written}*\n"
         if env_output_path_written:
             rendered += f"\n*Env written to: {env_output_path_written}*\n"
+        if credentials_output_path_written:
+            rendered += (
+                f"\n*Credentials written to: {credentials_output_path_written} "
+                f"(mode 0600)*\n"
+            )
 
     visited_steps = [sr.step_key for sr in result.step_results]
 
@@ -170,6 +196,7 @@ async def _handle_interactive(
         dry_run=input_model.dry_run,
         env_output_path_written=env_output_path_written,
         overlay_output_path_written=overlay_output_path_written,
+        credentials_output_path_written=credentials_output_path_written,
     )
 
 

@@ -12,10 +12,14 @@ Verifies:
 - Missing adapter raises OnboardingHandlerError
 - Unknown policy name raises OnboardingHandlerError
 - env_output_path required when dry_run=False
+- credentials artifact wiring, permissions, and merge behavior (OMN-16035)
 """
 
 from __future__ import annotations
 
+import json
+import stat
+from pathlib import Path
 from unittest.mock import AsyncMock, patch
 
 import pytest
@@ -28,6 +32,7 @@ from omnibase_infra.nodes.node_onboarding_orchestrator.models.model_onboarding_i
     ModelOnboardingInput,
 )
 from omnibase_infra.onboarding.adapter_fake_input import AdapterFakeInput
+from omnibase_infra.onboarding.model_interactive_result import ModelInteractiveResult
 from omnibase_infra.probes.model_verification_result import ModelVerificationResult
 
 pytestmark = pytest.mark.unit
@@ -410,3 +415,193 @@ class TestHandlerDAGPathRegression:
         assert "Onboarding Progress" in output.rendered_output
         assert "[x]" in output.rendered_output
         assert "steps passed" in output.rendered_output
+
+
+# --- Credentials artifact wiring (OMN-16035) ---
+
+
+def _credential_bearing_result() -> ModelInteractiveResult:
+    """Interactive result whose env output carries credential-shaped entries.
+
+    The shipped ``interactive_onboarding`` policy emits no secrets today, so the
+    executor is stubbed to exercise the credentials call site directly.
+    """
+    return ModelInteractiveResult(
+        env_dict={
+            "ONEX_DEPLOYMENT_MODE": "local",
+            "KAFKA_BOOTSTRAP_SERVERS": "localhost:19092",
+            "POSTGRES_PASSWORD": "pg-secret",
+            "ONEX_API_TOKEN": "tok-123",
+        },
+        step_results=[],
+        policy_name="interactive_onboarding",
+        completed=True,
+        terminal_step="write_config_local",
+    )
+
+
+def _patch_executor() -> object:
+    """Patch InteractiveExecutor so execute() returns the credential-bearing result."""
+    patcher = patch(
+        "omnibase_infra.nodes.node_onboarding_orchestrator.handlers.handler_onboarding.InteractiveExecutor"
+    )
+    mock_cls = patcher.start()
+    mock_cls.return_value.execute = AsyncMock(return_value=_credential_bearing_result())
+    return patcher
+
+
+class TestHandlerCredentialsArtifact:
+    """The credentials writer is wired next to ConfigWriter, explicit-invocation only."""
+
+    @pytest.mark.asyncio
+    async def test_credentials_written_at_mode_0600_with_only_secret_keys(
+        self,
+        local_no_llm_adapter: AdapterFakeInput,
+        tmp_path: Path,
+    ) -> None:
+        credentials_path = tmp_path / "credentials.json"
+        input_model = ModelOnboardingInput(
+            policy_name="interactive_onboarding",
+            dry_run=False,
+            env_output_path=str(tmp_path / "test.env"),
+            credentials_output_path=str(credentials_path),
+        )
+
+        patcher = _patch_executor()
+        try:
+            output = await handle_onboarding(
+                input_model, input_adapter=local_no_llm_adapter
+            )
+        finally:
+            patcher.stop()  # type: ignore[attr-defined]
+
+        assert output.credentials_output_path_written == str(credentials_path)
+        assert stat.S_IMODE(credentials_path.stat().st_mode) == 0o600
+
+        payload = json.loads(credentials_path.read_text(encoding="utf-8"))
+        entries = payload["credentials"]["interactive_onboarding"]
+        assert entries == {
+            "POSTGRES_PASSWORD": "pg-secret",
+            "ONEX_API_TOKEN": "tok-123",
+        }
+        assert "ONEX_DEPLOYMENT_MODE" not in entries
+        assert "KAFKA_BOOTSTRAP_SERVERS" not in entries
+        assert "mode 0600" in output.rendered_output
+
+    @pytest.mark.asyncio
+    async def test_credentials_merge_preserves_other_policy_entries(
+        self,
+        local_no_llm_adapter: AdapterFakeInput,
+        tmp_path: Path,
+    ) -> None:
+        credentials_path = tmp_path / "credentials.json"
+        credentials_path.write_text(
+            json.dumps({"credentials": {"other_policy": {"OTHER_TOKEN": "keep"}}}),
+            encoding="utf-8",
+        )
+        input_model = ModelOnboardingInput(
+            policy_name="interactive_onboarding",
+            dry_run=False,
+            env_output_path=str(tmp_path / "test.env"),
+            credentials_output_path=str(credentials_path),
+        )
+
+        patcher = _patch_executor()
+        try:
+            await handle_onboarding(input_model, input_adapter=local_no_llm_adapter)
+        finally:
+            patcher.stop()  # type: ignore[attr-defined]
+
+        payload = json.loads(credentials_path.read_text(encoding="utf-8"))
+        assert payload["credentials"]["other_policy"] == {"OTHER_TOKEN": "keep"}
+        assert "ONEX_API_TOKEN" in payload["credentials"]["interactive_onboarding"]
+
+    @pytest.mark.asyncio
+    async def test_no_credentials_path_writes_no_credentials_file(
+        self,
+        local_no_llm_adapter: AdapterFakeInput,
+        tmp_path: Path,
+    ) -> None:
+        """Explicit-invocation only: no path means the writer never runs."""
+        input_model = ModelOnboardingInput(
+            policy_name="interactive_onboarding",
+            dry_run=False,
+            env_output_path=str(tmp_path / "test.env"),
+        )
+
+        patcher = _patch_executor()
+        try:
+            with patch(
+                "omnibase_infra.nodes.node_onboarding_orchestrator.handlers.handler_onboarding.CredentialsWriter"
+            ) as mock_writer_cls:
+                output = await handle_onboarding(
+                    input_model, input_adapter=local_no_llm_adapter
+                )
+        finally:
+            patcher.stop()  # type: ignore[attr-defined]
+
+        mock_writer_cls.assert_not_called()
+        assert output.credentials_output_path_written is None
+
+    @pytest.mark.asyncio
+    async def test_dry_run_never_writes_credentials(
+        self,
+        local_no_llm_adapter: AdapterFakeInput,
+        tmp_path: Path,
+    ) -> None:
+        credentials_path = tmp_path / "credentials.json"
+        input_model = ModelOnboardingInput(
+            policy_name="interactive_onboarding",
+            dry_run=True,
+            credentials_output_path=str(credentials_path),
+        )
+
+        patcher = _patch_executor()
+        try:
+            with patch(
+                "omnibase_infra.nodes.node_onboarding_orchestrator.handlers.handler_onboarding.CredentialsWriter"
+            ) as mock_writer_cls:
+                output = await handle_onboarding(
+                    input_model, input_adapter=local_no_llm_adapter
+                )
+        finally:
+            patcher.stop()  # type: ignore[attr-defined]
+
+        mock_writer_cls.assert_not_called()
+        assert output.credentials_output_path_written is None
+        assert not credentials_path.exists()
+
+    @pytest.mark.asyncio
+    async def test_run_without_credential_shaped_keys_writes_nothing(
+        self,
+        local_no_llm_adapter: AdapterFakeInput,
+        tmp_path: Path,
+    ) -> None:
+        """The shipped policy emits no secrets, so no 0600 file is created."""
+        credentials_path = tmp_path / "credentials.json"
+        input_model = ModelOnboardingInput(
+            policy_name="interactive_onboarding",
+            dry_run=False,
+            env_output_path=str(tmp_path / "test.env"),
+            credentials_output_path=str(credentials_path),
+        )
+
+        output = await handle_onboarding(
+            input_model, input_adapter=local_no_llm_adapter
+        )
+
+        assert output.credentials_output_path_written is None
+        assert not credentials_path.exists()
+
+    def test_blank_credentials_output_path_rejected(self) -> None:
+        from pydantic import ValidationError
+
+        with pytest.raises(
+            ValidationError, match="credentials_output_path cannot be blank"
+        ):
+            ModelOnboardingInput(
+                policy_name="interactive_onboarding",
+                dry_run=False,
+                env_output_path="out.env",
+                credentials_output_path="   ",
+            )
