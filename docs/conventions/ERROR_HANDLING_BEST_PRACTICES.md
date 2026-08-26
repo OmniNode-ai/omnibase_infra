@@ -196,7 +196,6 @@ Use functions from `omnibase_infra.utils.util_error_sanitization`:
 from omnibase_infra.utils.util_error_sanitization import (
     sanitize_error_message,   # Strip credentials from arbitrary error messages
     sanitize_secret_path,     # Strip Vault/Infisical path values
-    sanitize_consul_key,      # Strip Consul key values
 )
 
 # Before sending to DLQ or logs
