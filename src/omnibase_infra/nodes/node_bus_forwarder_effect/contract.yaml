@@ -76,7 +76,22 @@ config:
       # 2026-08-04 failure: ready-file present, forwarding 0% for 4 days).
       topic: "onex.evt.omnibase-infra.gateway-canary.v1"
       cadence_seconds: 30
-      produce_deadline_seconds: 8
+      # OMN-16557: was 8s. check_canary_leg() spends this deadline TWICE in
+      # sequence (connect via transport.start(), then produce via
+      # transport.send()) before the separate readback wait below -- so the
+      # real worst-case single-leg budget is 2x this value + readback, not
+      # this value + readback (see ModelGatewayCanaryConfig.total_deadline_seconds).
+      # A live manual run on .201 (2026-08-25T20:42Z) measured the cloud
+      # leg's normal (non-wedged) cold-start OAUTHBEARER handshake landing
+      # almost exactly on the old 8s connect deadline -- the wait_for lost
+      # that race and raised an (empty-message) TimeoutError even though the
+      # handshake was about to succeed a fraction of a second later. 15s
+      # gives real margin over that measured ~8.1s. The Docker healthcheck
+      # `timeout` in docker-compose.gateway.yml must stay >= this model's
+      # total_deadline_seconds (2*15 + 12 = 42s); kept in manual sync there
+      # since the compose YAML cannot reference this contract at build time
+      # (see OMN-15762 for the broader numeric-config-triplication gap).
+      produce_deadline_seconds: 15
       readback_deadline_seconds: 12
     liveness:
       heartbeat_interval_seconds: 15
