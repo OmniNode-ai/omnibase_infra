@@ -1174,6 +1174,54 @@ pattern_exemptions:
       - CLAUDE.md (Registry Naming Conventions)
     ticket: OMN-16106
   # ==========================================================================
+  # Sync Revert Watchdog Exemptions (OMN-16536)
+  # ==========================================================================
+  - file_pattern: 'node_sync_revert_watchdog_effect/handlers/handler_sync_revert_watchdog\.py'
+    class_pattern: "Class name '_LinearClient'"
+    violation_pattern: "should use PascalCase"
+    reason: >
+      _LinearClient IS valid PascalCase for a private class (same class of exemption as node_evidence_autoclose_sweep_effect's own _LinearClient above). The underscore prefix indicates private visibility, and "LinearClient" follows PascalCase. The validator regex doesn't account for underscore-prefixed private classes.
+
+    documentation:
+      - PEP 8 - Naming Conventions (https://peps.python.org/pep-0008/#naming-conventions)
+      - CLAUDE.md (File & Class Naming Conventions)
+    ticket: OMN-16536
+  # ticket_id is a Linear human-readable identifier ("OMN-16536"), never a
+  # UUID -- same class of exemption as node_evidence_autoclose_sweep_effect's
+  # own ticket_id exemption above.
+  - file_pattern: 'node_sync_revert_watchdog_effect/models/model_sync_revert_watchdog_outcome\.py'
+    violation_pattern: "Field 'ticket_id' should use UUID type instead of str"
+    reason: >
+      ticket_id holds a Linear human-readable ticket identifier (e.g. "OMN-16536"), never a UUID. Consistent with the plugin_id/policy_id/dispatcher_id and node_evidence_autoclose_sweep_effect ticket_id semantic-identifier exemption pattern above.
+
+    documentation:
+      - CLAUDE.md (Registry Naming Conventions)
+    ticket: OMN-16536
+  # from_state_name / to_state_name are audit-trail display text (e.g.
+  # "Done" / "In Progress"), the same class of exemption as context_name
+  # elsewhere in this file: descriptive metadata for a diagnostic outcome
+  # record, not a foreign key requiring a paired ID field. The actual
+  # Linear workflow-state id is resolved, validated live against the
+  # team's current states, and used for the mutation entirely inside the
+  # handler — it is never read back out of this outcome record, so there
+  # is no foreign-key relationship for an ID field to express here.
+  - file_pattern: 'node_sync_revert_watchdog_effect/models/model_sync_revert_watchdog_outcome\.py'
+    violation_pattern: "Field 'from_state_name' might reference an entity"
+    reason: >
+      from_state_name is descriptive audit-trail text showing which workflow state the ticket reverted FROM, not an entity reference requiring ID + display_name. The real state id is resolved and validated live inside the handler at the point of mutation and is never round-tripped through this record.
+
+    documentation:
+      - CLAUDE.md (Registry Naming Conventions)
+    ticket: OMN-16536
+  - file_pattern: 'node_sync_revert_watchdog_effect/models/model_sync_revert_watchdog_outcome\.py'
+    violation_pattern: "Field 'to_state_name' might reference an entity"
+    reason: >
+      to_state_name is descriptive audit-trail text showing which workflow state the ticket reverted TO, not an entity reference requiring ID + display_name. Same reasoning as from_state_name above.
+
+    documentation:
+      - CLAUDE.md (Registry Naming Conventions)
+    ticket: OMN-16536
+  # ==========================================================================
   # Plugin Models Exemptions (OMN-811)
   # ==========================================================================
   # ModelPluginContext uses str for correlation_id for flexibility - plugins may

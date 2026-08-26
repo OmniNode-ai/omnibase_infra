@@ -1,0 +1,122 @@
+# SPDX-FileCopyrightText: 2025 OmniNode.ai Inc.
+# SPDX-License-Identifier: MIT
+
+# sync-revert-watchdog.yml — OMN-16536
+#
+# Scheduled detect+correct sweep for Linear's silent GitHub-sync
+# Done-revert pattern: a verified-Done ticket gets demoted by Linear's
+# own GitHub-integration automation (a bare `Refs:` mention in an
+# unrelated PR, or a `ready_for_review` transition — both firing
+# surfaces are documented in OMN-16536's body), with no human involved.
+#
+# Detection uses Linear's own documented automation signature
+# (IssueHistory.actorId null + botActor set) plus a no-human-comment-
+# nearby guard and a no-later-human-state-change guard — see
+# node_sync_revert_watchdog_effect's handler docstring for the full
+# rationale.
+#
+# DRY-RUN ONLY. `apply` is intentionally NEVER passed here — the sweep
+# logs every re-flip it would make but calls zero Linear mutation.
+# Flipping this workflow to `--apply` is a later, deliberate change (a
+# separate PR), matching the node_evidence_autoclose_sweep_effect
+# (OMN-16106) precedent this workflow is modeled on. The kill switch
+# (ONEX_SYNC_REVERT_WATCHDOG_DISABLED) is honored by the node itself
+# unconditionally, independent of this workflow's config, so it is not
+# (and must not be) surfaced as an input here — set it as a repo/
+# environment secret-free variable to halt every run without touching
+# this file.
+#
+# This is a complementary safety net (OMN-16536 fix option 3), not a
+# substitute for fixing the triggering GitAutomationState config
+# directly (fix options 1/2, still open, separate work).
+#
+# No new scripts/** file: scripts/** is DEFAULT-DENY for new files
+# (OMN-14475 canonical-form guard). Every step below is a direct
+# `uv run onex ...` invocation of code that already lives under src/.
+
+name: Sync Revert Watchdog
+
+on:
+  schedule:
+    # Every 2 hours — conservative cadence for a scheduled sweep that
+    # queries every recently-updated ticket on the team; lookback-hours
+    # below intentionally exceeds the interval so a missed/failed run
+    # never drops a revert.
+    - cron: '0 */2 * * *'
+  workflow_dispatch:
+    inputs:
+      lookback_hours:
+        description: 'Scan tickets updated within this many hours of now.'
+        required: false
+        default: '6'
+      team_key:
+        description: 'Linear team key to scan.'
+        required: false
+        default: 'OMN'
+
+env:
+  UV_VERSION: "0.8.3"
+  PYTHON_VERSION: "3.12"
+
+jobs:
+  sync-revert-watchdog:
+    name: Sync Revert Watchdog (DRY-RUN)
+    # Trusted runner required: needs LINEAR_API_KEY.
+    # OMNI_RUNNER_SELECTOR_V1 — trusted CI defaults to self-hosted omnibase-ci; public forks default to ubuntu-latest
+    runs-on: >-
+      ${{
+        (github.event_name == 'pull_request' &&
+         github.event.pull_request.head.repo.full_name != github.repository)
+        && fromJSON(vars.OMNI_PUBLIC_PR_RUNS_ON_JSON || '["ubuntu-latest"]')
+        || fromJSON(vars.OMNI_TRUSTED_CI_RUNS_ON_JSON || '["self-hosted","omnibase-ci"]')
+      }}
+    timeout-minutes: 20
+    permissions:
+      contents: read
+
+    steps:
+      - name: Checkout omnibase_infra
+        uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+        with:
+          fetch-depth: 1
+
+      - name: Set up Python
+        uses: actions/setup-python@v7
+        with:
+          python-version: ${{ env.PYTHON_VERSION }}
+
+      - name: Install uv
+        uses: astral-sh/setup-uv@v7
+        with:
+          version: ${{ env.UV_VERSION }}
+          enable-cache: true
+          cache-dependency-glob: "uv.lock"
+
+      - name: Install dependencies
+        run: uv sync
+
+      - name: Run sync revert watchdog (DRY-RUN — apply is never passed here)
+        env:
+          LINEAR_API_KEY: ${{ secrets.LINEAR_API_KEY }}
+        run: |
+          set -euo pipefail
+          # Fail fast on a missing secret rather than letting every ticket in
+          # the run degrade to a per-ticket ERROR_LINEAR_API outcome, which
+          # would silently mask a configuration problem as N unrelated
+          # per-ticket failures.
+          if [ -z "${LINEAR_API_KEY:-}" ]; then
+            echo "::error::LINEAR_API_KEY is not set — refusing to run the watchdog with a missing secret."
+            exit 1
+          fi
+          uv run onex skill sync_revert_watchdog \
+            --team-key "${{ github.event.inputs.team_key || 'OMN' }}" \
+            --lookback-hours "${{ github.event.inputs.lookback_hours || '6' }}"
+
+      - name: Post summary
+        if: always()
+        run: |
+          echo "## Sync Revert Watchdog (OMN-16536, DRY-RUN)" >> "$GITHUB_STEP_SUMMARY"
+          echo "" >> "$GITHUB_STEP_SUMMARY"
+          echo "Enumerated recently-updated tickets, detected silent GitHub-sync" >> "$GITHUB_STEP_SUMMARY"
+          echo "Done-reverts, and logged every re-flip it WOULD make. No Linear" >> "$GITHUB_STEP_SUMMARY"
+          echo "mutation was performed — this workflow never passes --apply." >> "$GITHUB_STEP_SUMMARY"

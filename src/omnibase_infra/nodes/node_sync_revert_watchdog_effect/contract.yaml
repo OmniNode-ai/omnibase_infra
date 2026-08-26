@@ -1,0 +1,143 @@
+# SPDX-FileCopyrightText: 2025 OmniNode.ai Inc.
+# SPDX-License-Identifier: MIT
+# ONEX Node Contract - Sync Revert Watchdog Effect
+#
+# OMN-16536: detect + re-flip Linear's silent GitHub-sync Done-revert
+# pattern. Enumerates a team's recently-updated tickets, finds the latest
+# completed->non-completed history transition per ticket, and — when
+# that transition's own actorId is null with a botActor set (Linear's
+# documented integration/automation signature), no human comment falls
+# inside the detection window, and no later human-driven state change
+# has occurred since — re-flips the ticket back to its prior completed
+# state and posts a diagnosis comment. DRY-RUN by default (apply=false);
+# ANY ambiguity (human actor, human comment nearby, later human state
+# change, unresolvable target state, Linear API error) fails closed.
+#
+# Related Tickets:
+#   - OMN-16536: this ticket
+#   - OMN-15373: original `merge -> Done` automation defect (fixed);
+#     flagged the `start`-triggered demotion as an unresolved residual
+#   - OMN-16106: node_evidence_autoclose_sweep_effect, the sibling sweep
+#     this node's structure/conventions are modeled on
+#   - OMN-14849: WS1 Done-revert enforcement receiver design
+#
+name: "node_sync_revert_watchdog_effect"
+node_type: "EFFECT_GENERIC"
+contract_version:
+  major: 1
+  minor: 0
+  patch: 0
+node_version: "1.0.0"
+description: >
+  Scheduled sweep detecting and correcting Linear's silent GitHub-sync Done-revert pattern (OMN-16536). Enumerates a team's recently-updated tickets, finds the latest completed->non-completed history transition, classifies it via Linear's own actorId/botActor automation signature plus a no-human-comment-nearby and no-later-human-state-change guard, and re-flips + comments when confirmed silent. DRY-RUN by default; ONEX_SYNC_REVERT_WATCHDOG_DISABLED kill switch checked first.
+
+input_model:
+  name: "ModelSyncRevertWatchdogRequest"
+  module: "omnibase_infra.nodes.node_sync_revert_watchdog_effect.models.model_sync_revert_watchdog_request"
+  description: "Sweep configuration: team, lookback window, apply flag, safety caps, detection window."
+output_model:
+  name: "ModelSyncRevertWatchdogResult"
+  module: "omnibase_infra.nodes.node_sync_revert_watchdog_effect.models.model_sync_revert_watchdog_result"
+  description: "Per-ticket outcomes (reflipped/skipped/errored) and run-level counts."
+# Top-level handler block: RuntimeLocal's single-shot "compute execution path"
+# (no terminal_event / no event bus, mirrors node_evidence_autoclose_sweep_effect's
+# own contract shape) resolves the handler + its input model from THIS block, not
+# from handler_routing below. Without it `onex node`/`onex skill` dispatch fails
+# closed with "Workflow contract missing 'terminal_event' topic and no handler
+# spec found" (RuntimeLocal._resolve_handler_spec /_run_compute).
+handler:
+  module: "omnibase_infra.nodes.node_sync_revert_watchdog_effect.handlers.handler_sync_revert_watchdog"
+  class: "HandlerSyncRevertWatchdog"
+  input_model: "omnibase_infra.nodes.node_sync_revert_watchdog_effect.models.model_sync_revert_watchdog_request.ModelSyncRevertWatchdogRequest"
+handler_routing:
+  routing_strategy: "operation_match"
+  handlers:
+    - operation: "sweep_sync_revert_watchdog"
+      handler:
+        name: "HandlerSyncRevertWatchdog"
+        module: "omnibase_infra.nodes.node_sync_revert_watchdog_effect.handlers.handler_sync_revert_watchdog"
+      description: "enumerate recently-updated tickets -> detect silent revert -> Linear re-flip + diagnosis comment"
+      output_fields:
+        - issues_scanned
+        - reverts_detected
+        - tickets_reflipped
+        - tickets_skipped
+        - tickets_errored
+        - outcomes
+error_handling:
+  retry_policy:
+    max_retries: 0
+    initial_delay_ms: 0
+    max_delay_ms: 0
+    exponential_base: 1
+    retry_on: []
+  error_types:
+    - name: "ISSUE_ENUMERATION_FAILED"
+      description: "Linear issues() enumeration failed — sweep-level failure, no tickets processed."
+      recoverable: true
+      retry_strategy: "none"
+    - name: "LINEAR_NOT_CONFIGURED"
+      description: "LINEAR_API_KEY not set — every ticket fails closed as ERROR_LINEAR_API."
+      recoverable: false
+      retry_strategy: "none"
+    - name: "STATE_NOT_RESOLVABLE"
+      description: "The prior completed-type state no longer resolves live on the team (renamed/deleted) — fail closed, never guess a replacement."
+      recoverable: true
+      retry_strategy: "none"
+io_operations:
+  - operation: "sweep_sync_revert_watchdog"
+    description: "Enumerate recently-updated tickets, detect silent automation reverts, re-flip + comment."
+    input_fields:
+      - team_key
+      - lookback_hours
+      - apply
+      - max_issues
+      - history_page_size
+      - human_comment_window_seconds
+      - linear_timeout_seconds
+      - watchdog_comment_marker
+    output_fields:
+      - issues_scanned
+      - reverts_detected
+      - tickets_reflipped
+      - tickets_skipped
+      - tickets_errored
+      - outcomes
+      - correlation_id
+dependencies:
+  - name: "linear_api_key"
+    type: "environment"
+    env_var: "LINEAR_API_KEY"
+    description: "Linear API key for issue/history/comment reads + issueUpdate/commentCreate mutations."
+    required: true
+  - name: "sync_revert_watchdog_kill_switch"
+    type: "environment"
+    env_var: "ONEX_SYNC_REVERT_WATCHDOG_DISABLED"
+    description: "Checked first, unconditionally. When set (any non-empty value), the sweep performs zero I/O."
+    required: false
+  - name: "httpx"
+    type: "library"
+    library: "httpx"
+    description: "Async HTTP client for the Linear GraphQL API."
+# Health check
+health_check:
+  enabled: true
+  endpoint: "/health"
+  interval_seconds: 300
+  checks:
+    - name: "linear_configured"
+      check_type: "environment"
+      env_var: "LINEAR_API_KEY"
+      description: "Verify LINEAR_API_KEY is set."
+metadata:
+  description: "Sync-revert watchdog: detect + re-flip Linear's silent GitHub-sync Done-revert pattern (OMN-16536)"
+  author: "OmniNode Team"
+  transport_type: "http"
+  created: "2026-08-26"
+  updated: "2026-08-26"
+  tags:
+    - "effect"
+    - "linear"
+    - "sync-revert"
+    - "watchdog"
+    - "scheduled-sweep"

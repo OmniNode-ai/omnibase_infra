@@ -65,6 +65,13 @@ APPROVED_INFIX_PATTERNS=(
     # /cli/receipt_mode.py entry above. Declares required_secrets per the
     # OMN-14951 gap-2 check below.
     "/nodes/node_evidence_autoclose_sweep_effect/handlers/handler_evidence_autoclose_sweep.py"
+    # OMN-16536: the sync-revert watchdog is the same dispatch shape as the
+    # OMN-16106 entry immediately above (RuntimeLocal's single-shot compute
+    # path, no config-prefetch/overlay seam reachable from a node's own
+    # handler) — reads its own secret (LINEAR_API_KEY) and kill switch
+    # (ONEX_SYNC_REVERT_WATCHDOG_DISABLED) directly for the same reason.
+    # Declares required_secrets per the OMN-14951 gap-2 check below.
+    "/nodes/node_sync_revert_watchdog_effect/handlers/handler_sync_revert_watchdog.py"
 )
 
 ENV_READ_PATTERNS='os\.environ\[|os\.environ\.get|os\.getenv|from os import environ|from os import getenv'
