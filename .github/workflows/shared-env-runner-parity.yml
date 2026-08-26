@@ -133,15 +133,21 @@ jobs:
     # a duplicate of the hosted one rather than the fleet half of the parity
     # proof. Skip it there instead of asserting a class it cannot have.
     if: github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository
-    # OMNI_RUNNER_SELECTOR_V1 — trusted jobs default to self-hosted omnibase-ci;
-    # public forks default to ubuntu-latest (unreachable here, see `if:` above).
-    runs-on: >-
-      ${{
-        (github.event_name == 'pull_request' &&
-         github.event.pull_request.head.repo.full_name != github.repository)
-        && fromJSON(vars.OMNI_PUBLIC_PR_RUNS_ON_JSON || '["ubuntu-latest"]')
-        || fromJSON(vars.OMNI_TRUSTED_CI_RUNS_ON_JSON || '["self-hosted","omnibase-ci"]')
-      }}
+    # Literal fleet labels, NOT the OMNI_RUNNER_SELECTOR_V1 expression — the
+    # mirror image of the hosted job's literal `ubuntu-latest`, and for the same
+    # reason. This job's whole purpose is to be the FLEET half of a two-class
+    # proof, so its runner class must be a property of the workflow, not of a
+    # repo variable that can be retargeted underneath it.
+    #
+    # That is not hypothetical: OMN-16682 set OMNI_TRUSTED_CI_RUNS_ON_JSON to
+    # ["ubuntu-latest"] at 2026-08-26T22:46:41Z, mid-PR. Both halves of this gate
+    # then resolved to hosted and the "parity" claim would have silently become
+    # "hosted twice" — except the job's own RUNNER_ENVIRONMENT assertion caught
+    # it and went red instead of reporting a green that proved nothing.
+    #
+    # Fork PRs never reach this job (see `if:` above), so pinning self-hosted
+    # labels here cannot route untrusted code onto the fleet.
+    runs-on: [self-hosted, omnibase-ci]
     timeout-minutes: 45
     steps:
       - name: Checkout code

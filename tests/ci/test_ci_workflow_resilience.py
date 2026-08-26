@@ -1416,15 +1416,18 @@ def test_shared_env_parity_gate_covers_both_runner_classes() -> None:
     workflow = _load_yaml(SHARED_ENV_PARITY_WORKFLOW)
     jobs = workflow["jobs"]
 
-    hosted = jobs["hosted"]
-    # Literal, not the selector: a var-driven selector could silently move this
-    # job back onto the fleet and the "hosted proof" would be vacuous.
-    assert hosted["runs-on"] == "ubuntu-latest"
+    # BOTH halves pin literal runner labels rather than the var-driven
+    # OMNI_RUNNER_SELECTOR_V1 expression. A parity gate whose runner classes are
+    # decided by repo variables is not a parity gate: OMN-16682 retargeted
+    # OMNI_TRUSTED_CI_RUNS_ON_JSON to ["ubuntu-latest"] on 2026-08-26, which
+    # would have collapsed both halves onto hosted while still reading green.
+    assert jobs["hosted"]["runs-on"] == "ubuntu-latest"
+    assert jobs["self-hosted-fleet"]["runs-on"] == ["self-hosted", "omnibase-ci"]
 
-    fleet = jobs["self-hosted-fleet"]
-    fleet_runs_on = _runs_on_expression(fleet)
-    assert "OMNI_TRUSTED_CI_RUNS_ON_JSON" in fleet_runs_on
-    assert "OMNI_PUBLIC_PR_RUNS_ON_JSON" in fleet_runs_on
+    # Pinning fleet labels is only safe because fork PRs never reach that job;
+    # untrusted code must never be routed onto a self-hosted runner.
+    fleet_if = jobs["self-hosted-fleet"]["if"]
+    assert "head.repo.full_name == github.repository" in fleet_if
 
     # Both jobs must assert their own runner class before trusting the result:
     # a green conclusion is not evidence of where the job ran.
