@@ -193,7 +193,7 @@ External Request
 | Profile      | Services                                       | Use Case                                   | Command                                                          |
 |--------------|-------------------------------------------------|--------------------------------------------|------------------------------------------------------------------|
 | (default)    | postgres, redpanda, valkey, keycloak, infisical | Core infrastructure — always on, no flag needed | `docker compose -f docker-compose.infra.yml up -d`          |
-| `runtime`    | (default) + omninode-runtime, runtime-effects, runtime-worker, migrations, agent-actions-consumer, skill-lifecycle-consumer, context-audit-consumer, intelligence-*, contract-resolver, phoenix, autoheal | Full ONEX runtime with observability | `docker compose -f docker-compose.infra.yml --profile runtime up -d` |
+| `runtime`    | (default) + omninode-runtime, runtime-effects, runtime-worker, migrations, projection-api, agent-actions-consumer, skill-lifecycle-consumer, context-audit-consumer, intelligence-*, contract-resolver, phoenix, autoheal | Full ONEX runtime with observability | `docker compose -f docker-compose.infra.yml --profile runtime up -d` |
 | `omnimemory` | (default) + omnibase-infra-memgraph            | Infrastructure + Memgraph (OMN-4310)       | `docker compose -f docker-compose.infra.yml --profile omnimemory up -d` |
 | `full`       | Union of `runtime` and `omnimemory`            | Complete stack with all features           | `docker compose -f docker-compose.infra.yml --profile full up -d` |
 
