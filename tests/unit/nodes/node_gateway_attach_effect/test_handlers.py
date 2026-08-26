@@ -5,10 +5,16 @@
 This is the end-to-end slice proof at the unit level (OMN-15753's local
 component): attach -> authenticated ACTIVE session -> heartbeat (active) ->
 heartbeat (introspection reports revoked) -> session torn down. The
-introspection HTTP call and the JWKS fetch live inline in the handlers
-(moved out of a freestanding services/ module to satisfy the
-imperative-contract-guard's handlers/-only I/O boundary) and are faked via
-monkeypatch here.
+introspection HTTP call and the JWKS fetch live under handlers/ (the JWKS
+fetch inline in each handler, introspection in the shared
+``_keycloak_introspection`` seam, both moved out of a freestanding services/
+module to satisfy the imperative-contract-guard's handlers/-only I/O
+boundary) and are faked via monkeypatch here.
+
+OMN-16032 coverage (RED-first, see the "Attach -- introspection at the attach
+boundary" section): a disabled Keycloak client is now refused AT ATTACH
+rather than surviving until the first heartbeat, and an unreachable Keycloak
+is still classified as an outage on that path, never as revocation.
 
 OMN-15918 hardening coverage added in this revision (RED-before/GREEN-after
 for each CodeRabbit-flagged gap):
@@ -43,6 +49,9 @@ import pytest
 from pydantic import SecretStr
 
 from omnibase_infra.errors import InfraUnavailableError
+from omnibase_infra.nodes.node_gateway_attach_effect.handlers._keycloak_introspection import (
+    introspect_token,
+)
 from omnibase_infra.nodes.node_gateway_attach_effect.handlers.handler_gateway_attach import (
     HandlerGatewayAttach,
 )
@@ -149,9 +158,9 @@ class _ScriptedAsyncClient:
     """Routes ``get``/``post`` to pre-scripted results (response or exception).
 
     Both ``HandlerGatewayAttach``/``HandlerGatewayHeartbeat``/
-    ``HandlerGatewayDetach._fetch_jwks`` (GET) and
-    ``HandlerGatewayHeartbeat._introspect`` (POST) open their own
-    ``httpx.AsyncClient()`` context -- this fake stands in for all of them
+    ``HandlerGatewayDetach._fetch_jwks`` (GET) and the shared
+    ``_keycloak_introspection.introspect_token`` (POST, reached from both
+    attach and heartbeat) open their own ``httpx.AsyncClient()`` context -- this fake stands in for all of them
     within one monkeypatched test, so each test scripts exactly the
     GET/POST outcomes it needs and nothing else.
     """
@@ -234,6 +243,11 @@ def secret_resolver(config: ModelGatewayAttachConfig) -> _FakeSecretResolver:
     )
 
 
+def _introspection_active(client_id: str = "gw-tenant-acme") -> _FakeResponse:
+    """The introspection body Keycloak returns for a live, enabled client."""
+    return _FakeResponse(200, {"active": True, "client_id": client_id})
+
+
 async def _attach(
     config: ModelGatewayAttachConfig,
     secret_resolver: _FakeSecretResolver,
@@ -241,9 +255,18 @@ async def _attach(
     monkeypatch: pytest.MonkeyPatch,
     tenant_key,
     jwks_ok: _FakeResponse,
+    post_result: _FakeResponse | Exception | None = None,
     **claim_overrides: object,
 ):
-    _patch_client(monkeypatch, get_result=jwks_ok)
+    # OMN-16032: attach now performs RFC 7662 introspection, so every attach
+    # scripts a POST outcome too. The default is the "client still enabled"
+    # answer -- a test that wants the disabled-client or outage case passes
+    # its own post_result.
+    _patch_client(
+        monkeypatch,
+        get_result=jwks_ok,
+        post_result=post_result if post_result is not None else _introspection_active(),
+    )
     handler = HandlerGatewayAttach(
         config=config,
         session_store=store,
@@ -384,6 +407,192 @@ async def test_attach_jwks_outage_raises_unavailable(
         await handler.handle(
             ModelGatewayAttachRequest(access_token=token, edge_instance_id="edge-201")
         )
+    assert store._sessions == {}
+
+
+# --------------------------------------------------------------------------- #
+# Attach -- introspection at the attach boundary (OMN-16032)
+#
+# Before this change attach verified the token locally only (signature,
+# issuer, audience, exp) and never asked Keycloak whether the credential was
+# still live. A client the operator had DISABLED -- the platform's designated
+# revocation mechanism -- could therefore still open a session for as long as
+# one of its already-minted tokens stayed within exp, and was only caught on
+# the first heartbeat (<= heartbeat_interval_seconds later). These tests fail
+# on the WRONG OUTCOME against the pre-fix handler (attach succeeds, nothing
+# raises), not on a missing symbol.
+# --------------------------------------------------------------------------- #
+
+
+async def test_attach_refuses_disabled_client(
+    config: ModelGatewayAttachConfig,
+    secret_resolver: _FakeSecretResolver,
+    monkeypatch: pytest.MonkeyPatch,
+    tenant_key,
+    jwks_ok: _FakeResponse,
+) -> None:
+    """OMN-16032 (a)/(b): a disabled client is refused AT ATTACH, not at the
+    first heartbeat. The token here is structurally perfect and unexpired --
+    exactly the shape local verification accepts -- and Keycloak's answer is
+    the only thing that distinguishes it from a live credential."""
+    store = StoreGatewaySessionMemory()
+    with pytest.raises(TokenValidationError, match=r"introspect|not active|revoked"):
+        await _attach(
+            config,
+            secret_resolver,
+            store,
+            monkeypatch,
+            tenant_key,
+            jwks_ok,
+            post_result=_FakeResponse(200, {"active": False}),
+        )
+    assert store._sessions == {}
+
+
+async def test_attach_refuses_introspection_client_id_mismatch(
+    config: ModelGatewayAttachConfig,
+    secret_resolver: _FakeSecretResolver,
+    monkeypatch: pytest.MonkeyPatch,
+    tenant_key,
+    jwks_ok: _FakeResponse,
+) -> None:
+    """Defense in depth, same rule the heartbeat path already enforces: the
+    introspection response must name the SAME client the token's azp claims.
+    An active token belonging to a different client does not attach this one."""
+    store = StoreGatewaySessionMemory()
+    with pytest.raises(TokenValidationError, match=r"introspect|not active|revoked"):
+        await _attach(
+            config,
+            secret_resolver,
+            store,
+            monkeypatch,
+            tenant_key,
+            jwks_ok,
+            post_result=_introspection_active(client_id="gw-tenant-other"),
+        )
+    assert store._sessions == {}
+
+
+async def test_attach_introspection_outage_raises_unavailable_not_rejection(
+    config: ModelGatewayAttachConfig,
+    secret_resolver: _FakeSecretResolver,
+    monkeypatch: pytest.MonkeyPatch,
+    tenant_key,
+    jwks_ok: _FakeResponse,
+) -> None:
+    """OMN-16032 (b): an unreachable Keycloak is an OUTAGE, never revocation.
+
+    ``InfraUnavailableError`` (retry-able) and not ``TokenValidationError``:
+    conflating the two would let a network partition present as a fleet-wide
+    credential rejection, which is the same failure class OMN-15918 R4 closed
+    on the heartbeat path.
+    """
+    store = StoreGatewaySessionMemory()
+    with pytest.raises(InfraUnavailableError):
+        await _attach(
+            config,
+            secret_resolver,
+            store,
+            monkeypatch,
+            tenant_key,
+            jwks_ok,
+            post_result=httpx.ConnectError("unreachable"),
+        )
+    assert store._sessions == {}
+
+
+async def test_attach_introspection_non200_raises_unavailable(
+    config: ModelGatewayAttachConfig,
+    secret_resolver: _FakeSecretResolver,
+    monkeypatch: pytest.MonkeyPatch,
+    tenant_key,
+    jwks_ok: _FakeResponse,
+) -> None:
+    """A 503 from the introspection endpoint is an outage, not an inactive
+    token -- the same split the heartbeat path makes."""
+    store = StoreGatewaySessionMemory()
+    with pytest.raises(InfraUnavailableError):
+        await _attach(
+            config,
+            secret_resolver,
+            store,
+            monkeypatch,
+            tenant_key,
+            jwks_ok,
+            post_result=_FakeResponse(503, {}),
+        )
+    assert store._sessions == {}
+
+
+async def test_attach_introspection_malformed_body_raises_unavailable(
+    config: ModelGatewayAttachConfig,
+    secret_resolver: _FakeSecretResolver,
+    monkeypatch: pytest.MonkeyPatch,
+    tenant_key,
+    jwks_ok: _FakeResponse,
+) -> None:
+    """A 200 whose body is not JSON cannot be read as ``active: false``.
+
+    Fail-closed on the attach outcome (no session) but classified as an
+    outage, so a broken proxy in front of Keycloak never masquerades as a
+    revoked credential.
+    """
+    store = StoreGatewaySessionMemory()
+    with pytest.raises(InfraUnavailableError):
+        await _attach(
+            config,
+            secret_resolver,
+            store,
+            monkeypatch,
+            tenant_key,
+            jwks_ok,
+            post_result=_FakeResponse(200, ValueError("not json")),
+        )
+    assert store._sessions == {}
+
+
+async def test_attach_introspection_circuit_is_independent_of_jwks_circuit(
+    config: ModelGatewayAttachConfig,
+    secret_resolver: _FakeSecretResolver,
+    monkeypatch: pytest.MonkeyPatch,
+    tenant_key,
+    jwks_ok: _FakeResponse,
+) -> None:
+    """Two independently-failing Keycloak surfaces get two breakers.
+
+    Sharing one failure count would let introspection outages trip the JWKS
+    breaker (and vice versa), so a single degraded endpoint would take the
+    whole attach path down. Mirrors the heartbeat handler's two-guard shape.
+    """
+    store = StoreGatewaySessionMemory()
+    handler = HandlerGatewayAttach(
+        config=config,
+        session_store=store,
+        secret_resolver=secret_resolver,  # type: ignore[arg-type]
+    )
+    token = sign_claims(tenant_key, _claims())
+
+    # Drive the introspection breaker to its threshold; the JWKS fetch
+    # succeeds on every one of those attempts.
+    _patch_client(
+        monkeypatch,
+        get_result=jwks_ok,
+        post_result=httpx.ConnectError("unreachable"),
+    )
+    for _ in range(config.circuit_breaker_threshold):
+        with pytest.raises(InfraUnavailableError):
+            await handler.handle(
+                ModelGatewayAttachRequest(
+                    access_token=token, edge_instance_id="edge-201"
+                )
+            )
+
+    assert handler._introspection_circuit._circuit_breaker_failures >= (
+        config.circuit_breaker_threshold
+    )
+    assert handler._introspection_circuit._circuit_breaker_open is True
+    assert handler._jwks_circuit._circuit_breaker_failures == 0
+    assert handler._jwks_circuit._circuit_breaker_open is False
     assert store._sessions == {}
 
 
@@ -753,12 +962,18 @@ async def test_detach_rejects_identity_mismatch(
 
 
 class TestHeartbeatIntrospection:
-    """Transport-level coverage for ``HandlerGatewayHeartbeat._introspect``.
+    """Transport-level coverage for the shared ``introspect_token`` seam.
 
-    OMN-15918 R4: a transport error or non-200 now raises
+    OMN-15918 R4: a transport error or non-200 raises
     ``InfraUnavailableError`` instead of the pre-hardening fail-closed
     ``False`` return -- that old behavior is exactly the bug (an outage
     silently reading as "revoked").
+
+    OMN-16032 moved this call off ``HandlerGatewayHeartbeat`` and into
+    ``_keycloak_introspection.introspect_token`` so attach can make it too.
+    These tests still drive it through the heartbeat handler's OWN
+    introspection breaker, which is what proves the move did not quietly
+    detach the handler from its circuit breaker.
     """
 
     async def test_client_id_mismatch_returns_false(
@@ -780,8 +995,12 @@ class TestHeartbeatIntrospection:
             session_store=StoreGatewaySessionMemory(),
             secret_resolver=secret_resolver,  # type: ignore[arg-type]
         )
-        result = await heartbeat._introspect(
-            access_token="tok", client_id="gw-tenant-acme"
+        result = await introspect_token(
+            config=config,
+            secret_resolver=secret_resolver,  # type: ignore[arg-type]
+            circuit=heartbeat._introspection_circuit,
+            access_token="tok",
+            client_id="gw-tenant-acme",
         )
         assert result is False
 
@@ -798,7 +1017,13 @@ class TestHeartbeatIntrospection:
             secret_resolver=secret_resolver,  # type: ignore[arg-type]
         )
         with pytest.raises(InfraUnavailableError):
-            await heartbeat._introspect(access_token="tok", client_id="gw-tenant-acme")
+            await introspect_token(
+                config=config,
+                secret_resolver=secret_resolver,  # type: ignore[arg-type]
+                circuit=heartbeat._introspection_circuit,
+                access_token="tok",
+                client_id="gw-tenant-acme",
+            )
 
     async def test_non_200_raises_unavailable(
         self,
@@ -813,7 +1038,13 @@ class TestHeartbeatIntrospection:
             secret_resolver=secret_resolver,  # type: ignore[arg-type]
         )
         with pytest.raises(InfraUnavailableError):
-            await heartbeat._introspect(access_token="tok", client_id="gw-tenant-acme")
+            await introspect_token(
+                config=config,
+                secret_resolver=secret_resolver,  # type: ignore[arg-type]
+                circuit=heartbeat._introspection_circuit,
+                access_token="tok",
+                client_id="gw-tenant-acme",
+            )
 
     async def test_repeated_transport_failures_open_circuit(
         self,
@@ -833,8 +1064,12 @@ class TestHeartbeatIntrospection:
         )
         for _ in range(config.circuit_breaker_threshold):
             with pytest.raises(InfraUnavailableError):
-                await heartbeat._introspect(
-                    access_token="tok", client_id="gw-tenant-acme"
+                await introspect_token(
+                    config=config,
+                    secret_resolver=secret_resolver,  # type: ignore[arg-type]
+                    circuit=heartbeat._introspection_circuit,
+                    access_token="tok",
+                    client_id="gw-tenant-acme",
                 )
         assert heartbeat._introspection_circuit._circuit_breaker_open is True
         # One more call: circuit is open, must fail fast without even
@@ -843,7 +1078,13 @@ class TestHeartbeatIntrospection:
         # the breaker's own open state above, which _check_circuit_breaker
         # reads before any transport call is attempted).
         with pytest.raises(InfraUnavailableError):
-            await heartbeat._introspect(access_token="tok", client_id="gw-tenant-acme")
+            await introspect_token(
+                config=config,
+                secret_resolver=secret_resolver,  # type: ignore[arg-type]
+                circuit=heartbeat._introspection_circuit,
+                access_token="tok",
+                client_id="gw-tenant-acme",
+            )
 
 
 # --------------------------------------------------------------------------- #

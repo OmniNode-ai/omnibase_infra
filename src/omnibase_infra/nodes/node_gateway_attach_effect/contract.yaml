@@ -47,6 +47,22 @@
 #     extending a live ceiling on the strength of a heartbeat would let a
 #     credential the IdP has stopped authorizing hold a session open one
 #     heartbeat at a time.
+#   - OMN-16032: RFC 7662 introspection at the ATTACH boundary, not only at
+#     heartbeat. Local verification proves a token was minted by this realm
+#     and has not expired; it cannot prove the credential is still live,
+#     because disabling a Keycloak client (the platform's revocation
+#     mechanism) does not invalidate tokens already minted. Attach therefore
+#     accepted a disabled client's unexpired token and tore the session down
+#     only on the first heartbeat -- a revocation window bounded by
+#     heartbeat_interval_seconds (15s), not zero. Introspection now lives in
+#     handlers/_keycloak_introspection.py (under handlers/ because that is
+#     where the imperative-contract guard requires raw transport; leading
+#     underscore because the handler-compliance scanner treats every other
+#     *.py there as a routed handler) and both attach and heartbeat call it.
+#     No model changes -- patch bump. Attach gains a second circuit breaker
+#     so a degraded introspection endpoint cannot trip the JWKS breaker, and
+#     an unreachable Keycloak still raises InfraUnavailableError on the
+#     attach path rather than presenting as a rejected credential.
 #   - OMN-16023: validator-side assertion strictness. aud is checked as
 #     exact set equality (not membership/denylist) and exp - iat is bounded
 #     by the new max_attach_token_lifetime_seconds. Bumps minor:
@@ -59,16 +75,16 @@ node_type: "EFFECT_GENERIC"
 contract_version:
   major: 0
   minor: 5
-  patch: 0
+  patch: 1
 node_version:
   major: 0
   minor: 4
-  patch: 0
+  patch: 1
 runtime_profiles:
   - effects
   - canary
 description: >
-  Control-plane effect node for tenant edge attach/session lifecycle. Validates a per-tenant Keycloak client-credentials access token at attach, registers a tenant-bound session, re-validates via RFC 7662 introspection on each heartbeat (the revocation path -- disabling the tenant's Keycloak client is observable within one heartbeat interval), and tears down on explicit detach. Handlers never publish directly; the runtime publishes each handler's typed response onto the contract-declared session-event topic (node_owned_publish, thin-publisher pattern).
+  Control-plane effect node for tenant edge attach/session lifecycle. Validates a per-tenant Keycloak client-credentials access token at attach -- signature against the realm JWKS, then RFC 7662 introspection, so a client the operator has disabled cannot open a session at all -- registers a tenant-bound session, re-validates via the same introspection call on each heartbeat (which is what revokes an ALREADY-OPEN session within one heartbeat interval), and tears down on explicit detach. Handlers never publish directly; the runtime publishes each handler's typed response onto the contract-declared session-event topic (node_owned_publish, thin-publisher pattern).
 
 input_model:
   name: "ModelGatewayAttachRequest"
@@ -118,7 +134,7 @@ handler_routing:
         module: "omnibase_infra.nodes.node_gateway_attach_effect.handlers.handler_gateway_attach"
         handler_type: "INFRA"
       description: >
-        Verify a client-credentials access token's signature against Keycloak's JWKS keyset, then validate its claims (issuer, audience, tenant_id/tenant_slug/principal_id), register a new tenant-bound session, return the session plus the ATTACHED session_event and the renewal directive. The directive carries the contract-declared renewal cycle for this session -- mode RE_ATTACH, the jitter window [renew_not_before, renew_at], and the immutable session_expires_at those race -- so an unattended runtime is told how to survive its own ceiling instead of inferring a policy it was never given. Audience is asserted as exact set equality against required_audience -- a dual-audience token is rejected even when it carries the expected audience -- and exp - iat is rejected above max_attach_token_lifetime_seconds, so an IdP-side mapper or token-lifespan change fails closed here instead of silently widening every token minted thereafter (OMN-16023).
+        Verify a client-credentials access token's signature against Keycloak's JWKS keyset, validate its claims (issuer, audience, tenant_id/tenant_slug/principal_id), confirm with Keycloak via RFC 7662 introspection that the credential is still live (OMN-16032 -- a disabled client is refused here, before any session exists, rather than surviving until the first heartbeat; an unreachable Keycloak raises InfraUnavailableError and is never treated as revocation), register a new tenant-bound session, return the session plus the ATTACHED session_event and the renewal directive. The directive carries the contract-declared renewal cycle for this session -- mode RE_ATTACH, the jitter window [renew_not_before, renew_at], and the immutable session_expires_at those race -- so an unattended runtime is told how to survive its own ceiling instead of inferring a policy it was never given. Audience is asserted as exact set equality against required_audience -- a dual-audience token is rejected even when it carries the expected audience -- and exp - iat is rejected above max_attach_token_lifetime_seconds, so an IdP-side mapper or token-lifespan change fails closed here instead of silently widening every token minted thereafter (OMN-16023).
 
     - operation: "gateway.heartbeat"
       topic: "onex.cmd.omnibase-infra.gateway-heartbeat-request.v1"
@@ -144,7 +160,7 @@ capabilities:
   - name: "validator_asserted_token_shape"
     description: "The audience set and the token lifetime are asserted by the relying party on every presented token (exact aud set equality; exp - iat <= max_attach_token_lifetime_seconds), not merely configured at mint -- so an IdP-side audience-mapper or accessTokenLifespan change cannot silently widen what this node accepts."
   - name: "introspection_revocation"
-    description: "Heartbeat re-validation via RFC 7662 introspection makes Keycloak-side client revocation observable within one heartbeat interval, independent of the token's own exp."
+    description: "RFC 7662 introspection runs on BOTH session-opening paths. At attach it is a precondition: a Keycloak client the operator has disabled cannot open a new session even while one of its already-minted tokens is unexpired, so the revocation window at the attach boundary is zero rather than heartbeat_interval_seconds (OMN-16032). At heartbeat it makes revocation of an already-open session observable within one heartbeat interval, independent of the token's own exp. Both callers share one seam (handlers/_keycloak_introspection.py) with one outage/revocation split, so the two paths cannot drift apart."
   - name: "tenant_bound_session"
     description: "Every session carries the immutable tenant_id/principal_id derived from the signature-verified token; handlers never trust caller-declared tenant identity, and heartbeat/detach bind the presented token back to the stored session's identity before acting."
   - name: "bounded_session_lifetime"
@@ -160,7 +176,7 @@ metadata:
   transport_type: "HTTP"
   author: "OmniNode Team"
   created: "2026-08-08"
-  updated: "2026-08-14"
+  updated: "2026-08-26"
   tags:
     - gateway
     - ingress
@@ -172,6 +188,5 @@ metadata:
     - "Session store is in-process (StoreGatewaySessionMemory) for the first slice — a multi-pod deployment needs a shared backend (Valkey) behind the same ProtocolGatewaySessionStore seam. Tracked as follow-on, not built in OMN-15750."
     - "Runtime wiring materializes one shared StoreGatewaySessionMemory, SecretResolver, and ModelGatewayAttachConfig for all three handlers. A future container-owned registration can replace this explicit dependency map when the store moves to a shared Valkey backend."
     - "JWKS keys are fetched fresh on every attach/heartbeat/detach call (no in-process cache/TTL). Acceptable for the first slice's call volume; a cache would reduce Keycloak load under sustained heartbeat traffic. Tracked as follow-on, not built here."
-    - "Attach performs no RFC 7662 introspection -- it verifies signature, issuer, audience and exp only. A Keycloak client disabled while one of its tokens is still within exp can therefore still attach, and is caught on the first heartbeat rather than at attach. Revocation latency at the attach boundary is bounded by heartbeat_interval_seconds, not zero."
     - "The renewal contract (OMN-15952) is declared and served here, but the client half is not in this repo: the persistent runtime's own re-grant loop (credential store, issuer pinning, backoff, the failure ladder separating a Keycloak outage from a real revocation) is the consumer's to implement against this directive. This node states the cycle and proves it is served; it cannot prove a given runtime obeys it."
     - "Credential delivery for the unattended case -- provisioning the per-tenant ga-* client and revealing its secret at tenant bootstrap -- lives in the onex-api control plane, not here. Until that lands, the renewal cycle this node declares can be exercised with a manually-provisioned client but not obtained end-to-end by a new tenant (OMN-15952 design section 4.1/4.2)."

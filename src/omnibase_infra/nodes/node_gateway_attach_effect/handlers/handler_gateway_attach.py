@@ -10,11 +10,30 @@ never in the node's dispatch wiring.
 JWKS fetch (OMN-15918 R1): the token's signature is verified against
 Keycloak's real signing keys before any claim is trusted. The fetch itself
 is network I/O and stays inline here (imperative-contract-guard's
-handlers/-only I/O boundary) wrapped in ``MixinAsyncCircuitBreaker`` so a
+handlers/-only I/O boundary) wrapped in a circuit-breaker guard so a
 Keycloak/JWKS outage fails a single attach attempt (``InfraUnavailableError``,
 retry-able) instead of masquerading as a token-validation rejection.
 Verification itself (CPU-only, no I/O) lives in
 ``service_keycloak_token_validator.verify_and_decode_claims``.
+
+Introspection at the attach boundary (OMN-16032): local verification proves
+a token was *minted* by this realm and has not yet expired. It cannot prove
+the credential is still *live*, because disabling a Keycloak client -- this
+platform's designated revocation mechanism -- does not invalidate tokens the
+client already holds. Attach previously trusted the local proof alone, so a
+client an operator had just disabled in response to a suspected compromise
+could still open a tenant-bound session for the remainder of its token's
+lifetime (up to ``max_attach_token_lifetime_seconds``, 900s), and was caught
+only on the first heartbeat. Attach now makes the same RFC 7662 call the
+heartbeat path makes, via the shared ``_keycloak_introspection`` seam, and
+refuses before any session is registered.
+
+The two Keycloak surfaces get two independent circuit breakers for the same
+reason the heartbeat handler holds two: the public JWKS endpoint and the
+admin-credentialed introspection endpoint fail independently, and merging
+their failure counts would let one degraded endpoint trip the other. An
+outage on either raises ``InfraUnavailableError`` and is never reported as a
+rejected credential.
 """
 
 from __future__ import annotations
@@ -30,7 +49,10 @@ from omnibase_infra.enums import (
     EnumInfraTransportType,
 )
 from omnibase_infra.errors import InfraUnavailableError, ModelInfraErrorContext
-from omnibase_infra.mixins import MixinAsyncCircuitBreaker
+from omnibase_infra.nodes.node_gateway_attach_effect.handlers._keycloak_introspection import (
+    GatewayCircuitBreakerGuard,
+    introspect_token,
+)
 from omnibase_infra.nodes.node_gateway_attach_effect.models.enum_gateway_session_event_type import (
     EnumGatewaySessionEventType,
 )
@@ -66,7 +88,7 @@ from omnibase_infra.runtime.secret_resolver import SecretResolver
 __all__ = ["HandlerGatewayAttach"]
 
 
-class HandlerGatewayAttach(MixinAsyncCircuitBreaker):
+class HandlerGatewayAttach:
     """Validate a client-credentials token and register a tenant-bound session."""
 
     def __init__(
@@ -78,11 +100,15 @@ class HandlerGatewayAttach(MixinAsyncCircuitBreaker):
         self._config = config
         self._session_store = session_store
         self._secret_resolver = secret_resolver
-        self._init_circuit_breaker(
+        self._jwks_circuit = GatewayCircuitBreakerGuard(
             threshold=config.circuit_breaker_threshold,
             reset_timeout=config.circuit_breaker_reset_timeout_seconds,
             service_name="gateway-attach.keycloak-jwks",
-            transport_type=EnumInfraTransportType.HTTP,
+        )
+        self._introspection_circuit = GatewayCircuitBreakerGuard(
+            threshold=config.circuit_breaker_threshold,
+            reset_timeout=config.circuit_breaker_reset_timeout_seconds,
+            service_name="gateway-attach.keycloak-introspection",
         )
 
     @property
@@ -118,6 +144,26 @@ class HandlerGatewayAttach(MixinAsyncCircuitBreaker):
         token_ttl_seconds = claims.expires_at_epoch - int(now.timestamp())
         if token_ttl_seconds <= 0:
             raise token_validator.TokenValidationError("access_token has expired")
+
+        # OMN-16032: ask Keycloak whether this credential is still live,
+        # before any session exists. Ordered after local verification (a
+        # forged or malformed token is rejected without spending a network
+        # round-trip on it) and before the store write (a refusal must leave
+        # nothing behind). The client_id compared here is the token's own
+        # verified ``azp``, so introspection has to agree with the claim the
+        # session would otherwise be bound to.
+        is_active = await introspect_token(
+            config=self._config,
+            secret_resolver=self._secret_resolver,
+            circuit=self._introspection_circuit,
+            access_token=request.access_token,
+            client_id=claims.client_id,
+        )
+        if not is_active:
+            raise token_validator.TokenValidationError(
+                "access_token is not active per Keycloak introspection "
+                "(client disabled or token revoked)"
+            )
         session_ttl_seconds = min(
             token_ttl_seconds, self._config.max_session_ttl_seconds
         )
@@ -178,15 +224,15 @@ class HandlerGatewayAttach(MixinAsyncCircuitBreaker):
             )
         jwks_url = jwks_url_secret.get_secret_value()
 
-        async with self._circuit_breaker_lock:
-            await self._check_circuit_breaker(operation="fetch_jwks")
+        async with self._jwks_circuit._circuit_breaker_lock:
+            await self._jwks_circuit._check_circuit_breaker(operation="fetch_jwks")
 
         try:
             async with httpx.AsyncClient(timeout=5.0) as client:
                 response = await client.get(jwks_url)
         except httpx.HTTPError as exc:
-            async with self._circuit_breaker_lock:
-                await self._record_circuit_failure(operation="fetch_jwks")
+            async with self._jwks_circuit._circuit_breaker_lock:
+                await self._jwks_circuit._record_circuit_failure(operation="fetch_jwks")
             raise InfraUnavailableError(
                 "Keycloak JWKS endpoint unreachable",
                 context=ModelInfraErrorContext.with_correlation(
@@ -196,8 +242,8 @@ class HandlerGatewayAttach(MixinAsyncCircuitBreaker):
             ) from exc
 
         if response.status_code != 200:
-            async with self._circuit_breaker_lock:
-                await self._record_circuit_failure(operation="fetch_jwks")
+            async with self._jwks_circuit._circuit_breaker_lock:
+                await self._jwks_circuit._record_circuit_failure(operation="fetch_jwks")
             raise InfraUnavailableError(
                 f"Keycloak JWKS endpoint returned HTTP {response.status_code}",
                 context=ModelInfraErrorContext.with_correlation(
@@ -209,8 +255,8 @@ class HandlerGatewayAttach(MixinAsyncCircuitBreaker):
         try:
             body = response.json()
         except ValueError as exc:
-            async with self._circuit_breaker_lock:
-                await self._record_circuit_failure(operation="fetch_jwks")
+            async with self._jwks_circuit._circuit_breaker_lock:
+                await self._jwks_circuit._record_circuit_failure(operation="fetch_jwks")
             raise InfraUnavailableError(
                 "Keycloak JWKS response was not valid JSON",
                 context=ModelInfraErrorContext.with_correlation(
@@ -219,8 +265,8 @@ class HandlerGatewayAttach(MixinAsyncCircuitBreaker):
                 ),
             ) from exc
 
-        async with self._circuit_breaker_lock:
-            await self._reset_circuit_breaker()
+        async with self._jwks_circuit._circuit_breaker_lock:
+            await self._jwks_circuit._reset_circuit_breaker()
 
         keys = body.get("keys") if isinstance(body, dict) else None
         if not isinstance(keys, list) or not keys:

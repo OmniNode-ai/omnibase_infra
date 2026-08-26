@@ -237,7 +237,16 @@ async def _attach(
     expires_in_seconds: int,
 ):
     """One full attach against a freshly granted client_credentials token."""
-    _patch_client(monkeypatch, get_result=jwks_ok)
+    # OMN-16032: attach now introspects the presented token before it will
+    # register a session, so every attach here scripts the "client still
+    # enabled" answer alongside the JWKS keyset. The renewal contract is
+    # about lifetimes, not revocation -- these attaches are all meant to
+    # succeed.
+    _patch_client(
+        monkeypatch,
+        get_result=jwks_ok,
+        post_result=_FakeResponse(200, {"active": True, "client_id": "ga-tenant-acme"}),
+    )
     handler = HandlerGatewayAttach(
         config=config,
         session_store=store,
@@ -514,7 +523,12 @@ async def test_two_runtimes_on_one_tenant_get_two_sessions(
     born, because a projection cannot fix an identity the node collapsed.
     """
     store = StoreGatewaySessionMemory()
-    _patch_client(monkeypatch, get_result=jwks_ok)
+    # OMN-16032: both attaches introspect; the client is enabled for both.
+    _patch_client(
+        monkeypatch,
+        get_result=jwks_ok,
+        post_result=_FakeResponse(200, {"active": True, "client_id": "ga-tenant-acme"}),
+    )
     handler = HandlerGatewayAttach(
         config=config,
         session_store=store,
