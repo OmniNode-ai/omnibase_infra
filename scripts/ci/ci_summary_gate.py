@@ -201,6 +201,74 @@ SKIPPABLE_GATE_JOBS: tuple[str, ...] = (
     "Contract Sync Gate (Wave C) [OMN-8915]",  # contract-sync-gate (skips on push)
 )
 
+# --------------------------------------------------------------------------- #
+# OMN-16661: the docs-only skip tier.
+# --------------------------------------------------------------------------- #
+#
+# Operator ruling: a Markdown / badge / README PR must not pay for the heavy
+# code-verification suite, while the doc gates keep running. Measured on the
+# real merged docs-only PR #2906 (head ``0c86fd00``, files = ``docker/README.md``
+# + ``docs/**``): 172 check-runs, 157 non-skipped, **350 runner-minutes** — the
+# heaviest docs-only PR cost in the registry.
+#
+# The heavy TEST matrix was already quiet: ``test-parallel`` / ``detect-changes``
+# / ``CI Tests Gate`` have gated on ``needs.zone-filter.outputs.docs_only`` for a
+# while (observed 0m on #2906). The gap this closes is the *validator* jobs,
+# which all ran at full cost on that PR.
+#
+# WHY A MARKER JOB, not ``needs.zone-filter.outputs.docs_only``
+# ------------------------------------------------------------
+# omnibase_core's OMN-16625 pilot could gate its ``quality-gate`` aggregator by
+# adding ``needs: [zone-filter]`` and reading the output directly. That is not
+# available here: ``ci-summary`` is a NO-``needs`` poller *on purpose*
+# (OMN-14127 — a ``needs``-gated job gets no check-run until its needs
+# terminalize, which is exactly how the old gate went ABSENT under self-hosted
+# fleet saturation and wedged PRs BLOCKED with 0 failing / 0 pending), and job
+# OUTPUTS do not appear in the ``actions/runs/{run_id}/jobs`` payload this
+# module reads. A JOB does appear — hence ``docs-only-marker``, whose own
+# ``if:`` is ``always() && needs.zone-filter.outputs.docs_only == 'true'``.
+#
+# FAIL-CLOSED BY CONSTRUCTION, not by an added guard: the ONLY state that
+# relaxes anything is a marker that actually RAN and concluded ``success``.
+# Absent, ``in_progress``, ``skipped``, ``cancelled``, ``failure`` — every one
+# of them means "not docs-only". On an ordinary code PR the marker's ``if:`` is
+# false, so full strictness is the default, not an opt-in. The marker is not a
+# caller-supplied flag and cannot be set by hand; its sole authority is the
+# reusable zone-filter classifier, which requires EVERY changed path to
+# classify ``EnumFileZone.DOCS``.
+#
+# The relaxation is PER-NAME, never a blanket ``|| skipped`` — the same policy
+# ``tests-gate`` already applies per-upstream (OMN-15315). Every gate outside
+# this tier must still be exactly ``success`` on a docs-only diff, which is what
+# keeps ``Lint``, ``ONEX Validators``, the contract gates, the supply-chain
+# gates and ``OCC Companion Merged Gate`` running — the half of the operator
+# ruling that is not about saving minutes.
+#
+# TIER MEMBERSHIP RATIONALE: each entry is a Pydantic-round-trip, DB-schema, or
+# effect-shape proof over ``src/`` + Docker. None can change verdict when only
+# ``docs/**`` and ``*.md`` moved. Deliberately EXCLUDED despite being expensive:
+# ``OCC Companion Merged Gate (OMN-15214)`` (10m) is an evidence-ordering gate,
+# orthogonal to code content — a docs PR still cites OCC evidence that must be
+# merged first.
+DOCS_ONLY_MARKER_JOB = "Docs-Only Marker (OMN-16661)"
+
+#
+# NOTE ON MEMBERSHIP vs ci.yml GATING — these are two different sets, on
+# purpose. This tuple only ever RELAXES a ``STRICT_GATE_JOBS`` member, so it
+# lists exactly the strict gates that are docs_only-gated in ci.yml.
+# ``Kafka Boundary Compat (OMN-3256)`` is ALSO docs_only-gated in ci.yml (~5
+# min saved) but is deliberately absent here: it is not a ``STRICT_GATE_JOBS``
+# entry, so there is nothing to relax — its ``skipped`` conclusion is already
+# tolerated by the L3 default-deny sweep (``skipped`` ∈ GOOD_CONCLUSIONS).
+# Adding it would be a no-op that misleads the reader into thinking the poller
+# enforces it.
+DOCS_ONLY_SKIPPABLE_GATE_JOBS: tuple[str, ...] = (
+    "Application Database Domain Enforcement (OMN-15361)",  # ~7 min
+    "Kafka Schema Handshake (OMN-3411)",  # ~4 min
+    "Effect-Assertion Gate (RT-5)",  # ~2 min
+    "Demo Loop Gate",  # ~2 min
+)
+
 # Every job the completeness anchor must observe present+good for SUCCESS.
 GATE_JOBS: tuple[str, ...] = STRICT_GATE_JOBS + SKIPPABLE_GATE_JOBS
 
@@ -566,6 +634,8 @@ def evaluate(
     check_runs: list[dict[str, object]] | None = None,
     external_contexts: tuple[str, ...] = (),
     pr_author: str | None = None,
+    docs_only_marker: str = DOCS_ONLY_MARKER_JOB,
+    docs_only_gates: tuple[str, ...] = DOCS_ONLY_SKIPPABLE_GATE_JOBS,
 ) -> tuple[int, str]:
     """Return ``(exit_code, human_report)`` for the current job snapshot.
 
@@ -583,14 +653,40 @@ def evaluate(
     latest = dedup_latest(jobs, run_attempt=run_attempt)
     gate_names = frozenset(strict_gates) | frozenset(skippable_gates)
 
+    # OMN-16661: derive docs_only from the in-run marker job, never from a
+    # caller-supplied argument. ONLY a marker that ran and concluded success
+    # relaxes anything — absent / in_progress / skipped / cancelled / failure
+    # all leave every gate strict. See the DOCS_ONLY_MARKER_JOB block above for
+    # why the bit travels as a job rather than as `needs.<job>.outputs`.
+    marker_state = latest.get(docs_only_marker)
+    docs_only = (
+        marker_state is not None
+        and marker_state.status == "completed"
+        and marker_state.conclusion == "success"
+    )
+    # Relaxed ⊆ strict_gates: a name that is not strict cannot be "relaxed" into
+    # existence, so a tier entry dropped from STRICT_GATE_JOBS degrades to a
+    # no-op here instead of silently becoming permanently skippable.
+    relaxed = (
+        frozenset(docs_only_gates) & frozenset(strict_gates)
+        if docs_only
+        else frozenset()
+    )
+
     # (1) Strict aggregate gates: present + completed + conclusion == success.
+    #     Members of `relaxed` widen to success/skipped for THIS run only; a
+    #     `failure`/`cancelled` conclusion is never admitted, docs-only or not.
     strict_failures = sorted(
         g
         for g in strict_gates
         if (
             (st := latest.get(g)) is not None
             and st.status == "completed"
-            and st.conclusion != "success"
+            and (
+                st.conclusion not in GOOD_CONCLUSIONS
+                if g in relaxed
+                else st.conclusion != "success"
+            )
         )
     )
 
@@ -646,6 +742,8 @@ def evaluate(
             external_contexts,
             external_failures,
             external_unresolved,
+            docs_only=docs_only,
+            relaxed=relaxed,
         )
 
     if all_failures:
@@ -667,15 +765,38 @@ def _report(
     external_contexts: tuple[str, ...] = (),
     external_failures: list[str] | None = None,
     external_unresolved: list[str] | None = None,
+    *,
+    docs_only: bool = False,
+    relaxed: frozenset[str] = frozenset(),
 ) -> str:
     lines = [f"CI Summary verdict: {verdict}", f"  jobs observed: {len(latest)}"]
+    # OMN-16661: make the relaxation visible in the job summary. A reviewer must
+    # be able to read off WHY a strict gate was allowed to skip, and see the
+    # marker state that authorised it — silent relaxation is how a skip tier
+    # turns into an unnoticed bypass.
+    marker_state = latest.get(DOCS_ONLY_MARKER_JOB)
+    lines.append(
+        "  docs-only marker: "
+        + (
+            "<absent>"
+            if marker_state is None
+            else f"{marker_state.status}/{marker_state.conclusion}"
+        )
+        + f" -> docs_only={str(docs_only).lower()}"
+    )
+    if relaxed:
+        lines.append(
+            "  docs-only skip tier ACTIVE (success|skipped accepted for): "
+            + ", ".join(sorted(relaxed))
+        )
     lines.append("  strict gates:")
     for g in strict_gates:
         st = latest.get(g)
+        tier = "  [docs-only tier]" if g in relaxed else ""
         lines.append(
-            f"    - {g}: <absent>"
+            f"    - {g}: <absent>{tier}"
             if st is None
-            else f"    - {g}: {st.status}/{st.conclusion}"
+            else f"    - {g}: {st.status}/{st.conclusion}{tier}"
         )
     lines.append("  skippable gates:")
     for g in skippable_gates:
