@@ -5,6 +5,8 @@
 from __future__ import annotations
 
 import re
+import shutil
+import subprocess
 from pathlib import Path
 from typing import Any
 
@@ -1164,3 +1166,347 @@ def test_no_precommit_or_script_surface_uses_thread_timeout_method() -> None:
         "committed script builds a pytest command with the banned "
         f"--timeout-method=thread (OMN-15977/OMN-16348): {violations}"
     )
+
+
+# ---------------------------------------------------------------------------
+# OMN-16555: shared-env mode must survive an ephemeral (GitHub-hosted) runner
+# ---------------------------------------------------------------------------
+#
+# In shared-env mode the action skips `actions/setup-python` and
+# `astral-sh/setup-uv` entirely and calls `scripts/ci/ensure_ci_env.sh`, which
+# assumes a pre-provisioned persistent runner filesystem: a warm host-local
+# cache root and `uv` already on PATH. Both hold on the long-lived self-hosted
+# `omnibase-ci` fleet; neither holds on a fresh GitHub-hosted VM, where
+# `ensure_ci_env.sh:40` (`real_uv="$(command -v uv)"`) aborts under `set -e`
+# with no diagnostic. That killed 2/10 rows of the OMN-16511 Stage-0a canary
+# and blocks the OMN-16682 hosted-runner migration.
+
+EPHEMERAL_TOOLCHAIN_STEP_NAME = "Provision ephemeral runner toolchain"
+EPHEMERAL_TOOLCHAIN_STEP_ID = "ephemeral_toolchain"
+
+
+def _setup_python_uv_steps() -> list[dict[str, Any]]:
+    action = _load_yaml(SETUP_PYTHON_UV_ACTION)
+    steps = action["runs"]["steps"]
+    assert isinstance(steps, list)
+    return [step for step in steps if isinstance(step, dict)]
+
+
+def _step_index(name: str) -> int:
+    return next(
+        index
+        for index, step in enumerate(_setup_python_uv_steps())
+        if step.get("name") == name
+    )
+
+
+def _sandbox_bin(tmp_path: Path, *, with_uv: bool) -> Path:
+    """Return a PATH directory holding only what the step legitimately needs.
+
+    The step must work on a bare VM, so the sandbox deliberately excludes
+    everything except `mkdir` (plus an optional `uv` stub). Restricting PATH is
+    what makes "uv is absent" a real condition rather than a mocked one.
+    """
+    bin_dir = tmp_path / "sandbox-bin"
+    bin_dir.mkdir()
+    mkdir_bin = shutil.which("mkdir")
+    assert mkdir_bin is not None, "mkdir must exist to build the PATH sandbox"
+    (bin_dir / "mkdir").symlink_to(mkdir_bin)
+    if with_uv:
+        uv_stub = bin_dir / "uv"
+        uv_stub.write_text(
+            "#!/bin/sh\nexit 0\n",
+            encoding="utf-8",
+        )
+        uv_stub.chmod(0o755)
+    return bin_dir
+
+
+def _run_ephemeral_toolchain_step(
+    tmp_path: Path,
+    *,
+    with_uv: bool,
+    runner_environment: str | None,
+    shared_env_root: Path | str,
+) -> tuple[int, str, dict[str, str]]:
+    """Execute the step's real `run:` body and return (rc, output, step outputs)."""
+    step = next(
+        candidate
+        for candidate in _setup_python_uv_steps()
+        if candidate.get("name") == EPHEMERAL_TOOLCHAIN_STEP_NAME
+    )
+    run_text = step["run"]
+    assert "${{" not in run_text, (
+        "the step body must be free of GitHub expression interpolation so it is "
+        "directly executable and testable; pass inputs through `env:` instead"
+    )
+
+    bin_dir = _sandbox_bin(tmp_path, with_uv=with_uv)
+    github_output = tmp_path / "github_output"
+    github_output.touch()
+
+    env = {
+        "PATH": str(bin_dir),
+        "GITHUB_OUTPUT": str(github_output),
+        "SHARED_ENV_ROOT": str(shared_env_root),
+    }
+    if runner_environment is not None:
+        env["RUNNER_ENVIRONMENT"] = runner_environment
+
+    bash_bin = shutil.which("bash")
+    assert bash_bin is not None
+    completed = subprocess.run(
+        [bash_bin, "-c", run_text],
+        env=env,
+        capture_output=True,
+        text=True,
+        check=False,
+    )
+    outputs: dict[str, str] = {}
+    for line in github_output.read_text(encoding="utf-8").splitlines():
+        if "=" in line:
+            key, _, value = line.partition("=")
+            outputs[key] = value
+    return completed.returncode, completed.stdout + completed.stderr, outputs
+
+
+def test_shared_env_mode_provisions_python_and_uv_on_ephemeral_runners() -> None:
+    """OMN-16555: the shared-env branch must provision its own toolchain."""
+    steps = _setup_python_uv_steps()
+
+    detect_step = next(
+        step for step in steps if step.get("name") == EPHEMERAL_TOOLCHAIN_STEP_NAME
+    )
+    assert detect_step["id"] == EPHEMERAL_TOOLCHAIN_STEP_ID
+    assert detect_step["if"] == "steps.shared_env_mode.outputs.enabled == 'true'"
+    assert detect_step["env"]["SHARED_ENV_ROOT"] == "${{ inputs.shared-env-root }}"
+
+    provision_guard = f"steps.{EPHEMERAL_TOOLCHAIN_STEP_ID}.outputs.provision == 'true'"
+
+    python_step = next(
+        step
+        for step in steps
+        if step.get("uses") == "actions/setup-python@v6"
+        and step.get("if") == provision_guard
+    )
+    assert python_step["with"]["python-version"] == "${{ inputs.python-version }}"
+
+    uv_step = next(
+        step
+        for step in steps
+        if step.get("uses") == "astral-sh/setup-uv@v7"
+        and step.get("if") == provision_guard
+    )
+    # The ephemeral install must use the SAME pins as the non-shared branch, so
+    # a hosted runner cannot silently resolve a different uv than the fleet.
+    assert uv_step["with"]["version"] == "${{ inputs.uv-version }}"
+
+    # Ordering: detect -> provision python -> provision uv -> run ensure_ci_env.sh.
+    detect_index = _step_index(EPHEMERAL_TOOLCHAIN_STEP_NAME)
+    prepare_index = _step_index("Prepare shared CI env")
+    python_index = steps.index(python_step)
+    uv_index = steps.index(uv_step)
+    assert detect_index < python_index < prepare_index
+    assert detect_index < uv_index < prepare_index
+
+
+def test_ephemeral_toolchain_step_keeps_the_fleet_warm_path(tmp_path: Path) -> None:
+    """uv already on PATH => no provisioning, on either runner class.
+
+    This is the no-regression assertion for DoD item 3: a self-hosted job must
+    keep hitting the warm shared env, never a cold re-provision.
+    """
+    root = tmp_path / "ci-envs"
+    root.mkdir()
+    rc, output, outputs = _run_ephemeral_toolchain_step(
+        tmp_path,
+        with_uv=True,
+        runner_environment="self-hosted",
+        shared_env_root=root,
+    )
+    assert rc == 0, output
+    assert outputs["provision"] == "false"
+    assert "::error::" not in output
+
+
+def test_ephemeral_toolchain_step_provisions_on_fresh_hosted_vm(
+    tmp_path: Path,
+) -> None:
+    """Fresh GitHub-hosted VM: no uv, no cache root => provision both."""
+    root = tmp_path / "fresh" / "ci-envs"
+    assert not root.exists()
+    rc, output, outputs = _run_ephemeral_toolchain_step(
+        tmp_path,
+        with_uv=False,
+        runner_environment="github-hosted",
+        shared_env_root=root,
+    )
+    assert rc == 0, output
+    assert outputs["provision"] == "true"
+    assert root.is_dir(), "the absent shared-env cache root must be created"
+    assert "::error::" not in output
+
+
+def test_ephemeral_toolchain_step_aborts_on_corrupt_self_hosted_runner(
+    tmp_path: Path,
+) -> None:
+    """Missing uv on a self-hosted runner is corrupt state, not a fresh VM.
+
+    Fail-fast is preserved: the fleet image bakes uv in, so self-healing here
+    would mask a real runner misprovisioning instead of surfacing it.
+    """
+    root = tmp_path / "ci-envs"
+    root.mkdir()
+    rc, output, outputs = _run_ephemeral_toolchain_step(
+        tmp_path,
+        with_uv=False,
+        runner_environment="self-hosted",
+        shared_env_root=root,
+    )
+    assert rc != 0
+    assert "::error::" in output
+    assert "provision" not in outputs
+
+
+def test_ephemeral_toolchain_step_fails_closed_on_unknown_runner_class(
+    tmp_path: Path,
+) -> None:
+    """An unset RUNNER_ENVIRONMENT is indeterminate and must not provision."""
+    root = tmp_path / "ci-envs"
+    root.mkdir()
+    rc, output, outputs = _run_ephemeral_toolchain_step(
+        tmp_path,
+        with_uv=False,
+        runner_environment=None,
+        shared_env_root=root,
+    )
+    assert rc != 0
+    assert "::error::" in output
+    assert "provision" not in outputs
+
+
+def test_ephemeral_toolchain_step_aborts_when_cache_root_is_uncreatable(
+    tmp_path: Path,
+) -> None:
+    """A cache root that cannot be created is a config error, not a fresh VM."""
+    rc, output, outputs = _run_ephemeral_toolchain_step(
+        tmp_path,
+        with_uv=False,
+        runner_environment="github-hosted",
+        shared_env_root="/dev/null/omni-ci-envs",
+    )
+    assert rc != 0
+    assert "::error::" in output
+    assert outputs.get("provision") != "true"
+
+
+SHARED_ENV_PARITY_WORKFLOW = (
+    REPO_ROOT / ".github" / "workflows" / "shared-env-runner-parity.yml"
+)
+RUNNER_ROUTING_POLICY = REPO_ROOT / "config" / "runner_routing_policy.yaml"
+
+
+def test_shared_env_parity_gate_covers_both_runner_classes() -> None:
+    """OMN-16555: the shared-env branch must be exercised on hosted AND fleet.
+
+    The defect was invisible for as long as it was because shared-env mode was
+    only ever run on the self-hosted fleet. A gate that runs on one class only
+    would leave that hole open.
+    """
+    workflow = _load_yaml(SHARED_ENV_PARITY_WORKFLOW)
+    jobs = workflow["jobs"]
+
+    hosted = jobs["hosted"]
+    # Literal, not the selector: a var-driven selector could silently move this
+    # job back onto the fleet and the "hosted proof" would be vacuous.
+    assert hosted["runs-on"] == "ubuntu-latest"
+
+    fleet = jobs["self-hosted-fleet"]
+    fleet_runs_on = _runs_on_expression(fleet)
+    assert "OMNI_TRUSTED_CI_RUNS_ON_JSON" in fleet_runs_on
+    assert "OMNI_PUBLIC_PR_RUNS_ON_JSON" in fleet_runs_on
+
+    # Both jobs must assert their own runner class before trusting the result:
+    # a green conclusion is not evidence of where the job ran.
+    for job_name, expected_class in (
+        ("hosted", "github-hosted"),
+        ("self-hosted-fleet", "self-hosted"),
+    ):
+        assertion_steps = [
+            step
+            for step in jobs[job_name]["steps"]
+            if "RUNNER_ENVIRONMENT" in step.get("run", "")
+            and f'!= "{expected_class}"' in step.get("run", "")
+        ]
+        assert assertion_steps, (
+            f"{job_name} must fail closed when RUNNER_ENVIRONMENT is not "
+            f"{expected_class!r} (OMN-16555 evidence rule)"
+        )
+
+    # Both jobs must actually enter the shared-env branch, and both must prove
+    # the resulting environment is usable rather than merely exiting zero.
+    for job_name in ("hosted", "self-hosted-fleet"):
+        setup_step = next(
+            step
+            for step in jobs[job_name]["steps"]
+            if step.get("uses") == "./.github/actions/setup-python-uv"
+        )
+        assert setup_step["with"]["shared-env-enabled"] == "true"
+        verify_steps = [
+            step
+            for step in jobs[job_name]["steps"]
+            if "OMNI_CI_ENV_DIR" in step.get("run", "")
+        ]
+        assert verify_steps, (
+            f"{job_name} must verify the shared env, not just install it"
+        )
+        verify_source = "\n".join(step["run"] for step in verify_steps)
+        # Importing a real synced dependency is what separates "the setup step
+        # exited 0" from "the environment is actually installed and usable".
+        assert "import sys, pydantic" in verify_source
+        assert "manifest.json" in verify_source
+        assert "-L .venv" in verify_source
+
+    # The gate has to fire on every input that can reintroduce the defect.
+    # PyYAML resolves the bare `on:` key to the boolean True (YAML 1.1).
+    triggers = workflow.get("on", workflow.get(True))
+    assert isinstance(triggers, dict)
+    paths = triggers["pull_request"]["paths"]
+    for required in (
+        ".github/actions/setup-python-uv/action.yml",
+        "scripts/ci/ensure_ci_env.sh",
+        ".github/workflows/shared-env-runner-parity.yml",
+    ):
+        assert required in paths
+
+
+def test_shared_env_parity_hosted_job_is_routing_allowlisted() -> None:
+    """A literal hosted runner is only legal with a recorded justification."""
+    policy = _load_yaml(RUNNER_ROUTING_POLICY)
+    entry = next(
+        item
+        for item in policy["hosted_runner_allowlist"]
+        if item["path"] == ".github/workflows/shared-env-runner-parity.yml"
+    )
+    assert "OMN-16555" in entry["reason"]
+
+
+def test_shared_env_parity_jobs_carry_positive_controls() -> None:
+    """Each job must prove its runner class really has the shape it claims.
+
+    Without these, the hosted job could silently stop exercising the ephemeral
+    bootstrap (if hosted images ever ship uv) and keep reporting green while
+    proving nothing — the exact vacuous-proof failure OMN-16511 warned about.
+    """
+    jobs = _load_yaml(SHARED_ENV_PARITY_WORKFLOW)["jobs"]
+
+    hosted_controls = "\n".join(step.get("run", "") for step in jobs["hosted"]["steps"])
+    assert "uv is unexpectedly pre-installed" in hosted_controls
+    assert "already exists on a fresh hosted VM" in hosted_controls
+
+    fleet_controls = "\n".join(
+        step.get("run", "") for step in jobs["self-hosted-fleet"]["steps"]
+    )
+    # The fleet's warm path depends on uv coming from the runner image; if it
+    # ever does not, that is corrupt runner state and must surface as such.
+    assert "uv is missing from a self-hosted runner" in fleet_controls

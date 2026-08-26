@@ -105,6 +105,77 @@ runs:
       with:
         version: ${{ inputs.uv-version }}
         enable-cache: ${{ inputs.cache-enabled != 'false' }}
+    - name: Provision ephemeral runner toolchain
+      # OMN-16555. Shared-env mode deliberately skips the two steps above and
+      # calls scripts/ci/ensure_ci_env.sh instead, which was written for a
+      # persistent, pre-provisioned runner filesystem: a host-local cache root
+      # that survives between jobs, and `uv` already on PATH from the runner
+      # image. Both hold on the long-lived self-hosted `omnibase-ci` fleet.
+      # Neither holds on a GitHub-hosted runner, where every job gets a fresh
+      # VM — so ensure_ci_env.sh:40 (`real_uv="$(command -v uv)"`) aborted
+      # under `set -e` with no diagnostic. That failed 2/10 rows of the
+      # OMN-16511 Stage-0a canary and blocks the OMN-16682 hosted migration.
+      #
+      # This step classifies the runner and, on a fresh VM only, re-enables the
+      # pinned setup-python + setup-uv steps below. It is a provisioning
+      # decision, not a fallback:
+      #   uv on PATH            -> provision=false. Warm path, unchanged on the
+      #                            fleet: no extra steps, no cache churn, the
+      #                            same shared env digest is reused.
+      #   uv absent, hosted     -> provision=true. Fresh ephemeral filesystem;
+      #                            install the toolchain and create the cache
+      #                            root the shared env will be built under.
+      #   uv absent, self-hosted-> hard error. The fleet image bakes uv in, so a
+      #                            missing uv there is corrupt runner state, not
+      #                            a fresh VM. Self-healing it would mask real
+      #                            misprovisioning, so it fails closed — as does
+      #                            an unset/unknown RUNNER_ENVIRONMENT.
+      id: ephemeral_toolchain
+      if: steps.shared_env_mode.outputs.enabled == 'true'
+      shell: bash
+      env:
+        SHARED_ENV_ROOT: ${{ inputs.shared-env-root }}
+      run: |
+        set -euo pipefail
+
+        if command -v uv >/dev/null 2>&1; then
+          echo "provision=false" >> "$GITHUB_OUTPUT"
+          echo "shared CI env toolchain: uv already present; warm runner path"
+          exit 0
+        fi
+
+        runner_environment="${RUNNER_ENVIRONMENT:-}"
+        if [ "${runner_environment}" != "github-hosted" ]; then
+          echo "::error::uv is not on PATH and RUNNER_ENVIRONMENT is '${runner_environment:-<unset>}' (expected 'github-hosted'). Self-hosted runner images bake uv in, so a missing uv is corrupt runner state, not a fresh VM. Refusing to self-provision; rebuild or redeploy the runner image (OMN-16555)."
+          exit 2
+        fi
+
+        if [ -z "${SHARED_ENV_ROOT}" ]; then
+          echo "::error::shared-env-root is empty; cannot provision the shared CI env root (OMN-16555)"
+          exit 2
+        fi
+
+        if ! mkdir -p "${SHARED_ENV_ROOT}"; then
+          echo "::error::cannot create shared CI env root '${SHARED_ENV_ROOT}'; this is a configuration error, not a fresh runner filesystem (OMN-16555)"
+          exit 2
+        fi
+
+        echo "provision=true" >> "$GITHUB_OUTPUT"
+        echo "shared CI env toolchain: ephemeral github-hosted runner; installing pinned Python + uv and provisioning ${SHARED_ENV_ROOT}"
+    - name: Set up Python (ephemeral runner)
+      if: steps.ephemeral_toolchain.outputs.provision == 'true'
+      uses: actions/setup-python@v6
+      with:
+        python-version: ${{ inputs.python-version }}
+    - name: Install uv (ephemeral runner)
+      # Same pins as the non-shared branch above: a hosted runner must never
+      # resolve a different uv than the fleet, because uv-version participates
+      # in the shared env digest (scripts/ci/ci_env_digest.py).
+      if: steps.ephemeral_toolchain.outputs.provision == 'true'
+      uses: astral-sh/setup-uv@v7
+      with:
+        version: ${{ inputs.uv-version }}
+        enable-cache: ${{ inputs.cache-enabled != 'false' }}
     - name: Prepare shared CI env
       if: steps.shared_env_mode.outputs.enabled == 'true' && inputs.skip-install != 'true'
       shell: bash
