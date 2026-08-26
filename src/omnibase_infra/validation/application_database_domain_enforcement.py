@@ -1820,6 +1820,38 @@ def load_application_database_ownership_identities(
         identity = (schema, name, kind, function_signature)
         declarations.setdefault(identity, []).append((owner, str(source_path)))
 
+    def record_with_physical_bridge(
+        *,
+        schema: str,
+        name: str,
+        kind: EnumApplicationInventoryObjectKind,
+        function_signature: str | None,
+        owner: str,
+        source_path: Path,
+    ) -> None:
+        record(
+            schema=schema,
+            name=name,
+            kind=kind,
+            function_signature=function_signature,
+            owner=owner,
+            source_path=source_path,
+        )
+        if (
+            schema == "tenant"
+            and function_signature is None
+            and kind in _RELATION_OBJECT_KINDS
+            and name in _PHYSICALLY_PUBLIC_APPLICATION_TABLES
+        ):
+            record(
+                schema="public",
+                name=name,
+                kind=kind,
+                function_signature=None,
+                owner=owner,
+                source_path=source_path,
+            )
+
     routine_kinds = {
         EnumApplicationInventoryObjectKind.FUNCTION,
         EnumApplicationInventoryObjectKind.AGGREGATE,
@@ -1834,7 +1866,7 @@ def load_application_database_ownership_identities(
             for table in manifest.db_io.db_tables
         }
         for table in manifest.db_io.db_tables:
-            record(
+            record_with_physical_bridge(
                 schema=table.schema,
                 name=table.name,
                 kind=EnumApplicationInventoryObjectKind.TABLE,
@@ -1869,7 +1901,7 @@ def load_application_database_ownership_identities(
                     f"{path}: routine relation {relation.name!r} requires an exact "
                     "function_signature"
                 )
-            record(
+            record_with_physical_bridge(
                 schema=relation.schema,
                 name=relation.name,
                 kind=kind,
