@@ -5,7 +5,7 @@
 ## Context
 
 - **Architecture**: `docs/architecture/`
-- **Node inventory**: `docs/NODE_INVENTORY.md`
+- **Node inventory**: `docs/architecture/CURRENT_NODE_ARCHITECTURE.md` (pointer to the knowledge-base canonical copy)
 - **Migration guides**: `docs/migration/`
 - **Conventions**: `CLAUDE.md`
 

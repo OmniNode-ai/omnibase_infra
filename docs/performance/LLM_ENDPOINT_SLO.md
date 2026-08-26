@@ -19,12 +19,12 @@ performance baselines (see [ADR-004](../decisions/adr-004-performance-baseline-t
 | `LLM_CODER_FAST_URL` | `<onex-host>` (GPU server) | 8001 | Qwen3-14B-AWQ | Running |
 | `LLM_EMBEDDING_URL` | `<onex-host>` (GPU server) | 8100 | Alibaba-NLP/gte-Qwen2-1.5B-instruct | Running |
 | `LLM_DEEPSEEK_R1_URL` | `<onex-host>` (reasoning host) | 8101 | DeepSeek-R1-Distill-Qwen-32B-bf16 | Running |
-| `LLM_SMALL_URL` | `<onex-host>` (lightweight host) | TBD | Qwen2.5-Coder-7B-Instruct MLX-4bit | Port TBD |
+| `LLM_SMALL_URL` | `<onex-host>` (lightweight host) | — | Qwen2.5-Coder-7B-Instruct MLX-4bit | Not provisioned |
 
 Hardware:
 - GPU server (`$LLM_CODER_URL`, `$LLM_CODER_FAST_URL`, `$LLM_EMBEDDING_URL`): Linux GPU server — coder (ports 8000, 8001) + embeddings (port 8100)
 - Reasoning host (`$LLM_DEEPSEEK_R1_URL`): Mac Studio M2 Ultra — reasoning (port 8101)
-- Lightweight host (`$LLM_SMALL_URL`): MacBook Air M4 — lightweight/portable (port TBD)
+- Lightweight host (`$LLM_SMALL_URL`): MacBook Air M4 — lightweight/portable; no live endpoint has been provisioned as of this refresh
 
 ---
 
@@ -41,7 +41,7 @@ response stream. Measured at P95 under single-request load from the development 
 | `LLM_CODER_FAST_URL` (port 8001) | 40K tokens | 800ms | 1500ms | Mid-tier routing and classification |
 | `LLM_EMBEDDING_URL` (port 8100) | N/A | 200ms | 400ms | Batch of 32 texts |
 | `LLM_DEEPSEEK_R1_URL` (port 8101) | 32K tokens | 3000ms | 6000ms | Reasoning model; async-preferred |
-| `LLM_SMALL_URL` (port TBD) | — | TBD | TBD | Port not yet assigned |
+| `LLM_SMALL_URL` (not provisioned) | — | — | — | No live endpoint; SLOs cannot be set until one is stood up |
 
 ### Throughput (tokens/second, generation phase)
 
@@ -51,7 +51,7 @@ response stream. Measured at P95 under single-request load from the development 
 | `LLM_CODER_FAST_URL` | 60 | 120 | RTX 4090 |
 | `LLM_EMBEDDING_URL` | 5000 embeddings/s | — | Measured at dim=4096 |
 | `LLM_DEEPSEEK_R1_URL` | 40 | 80 | Metal acceleration, M2 Ultra |
-| `LLM_SMALL_URL` | TBD | TBD | MLX-4bit, M4 |
+| `LLM_SMALL_URL` | — | — | Not provisioned; MLX-4bit, M4 |
 
 ### Availability
 
@@ -170,5 +170,5 @@ appropriate endpoint from the table above.
 ## Related Documentation
 
 - [ADR-004: Performance Baseline Thresholds](../decisions/adr-004-performance-baseline-thresholds.md) - Calibration methodology for E2E registration tests
-- [CLAUDE.md — Multi-Server LLM Architecture](../../CLAUDE.md) - Authoritative endpoint list and selection guide
+- `~/.claude/CLAUDE.md` — "LLM Inference" section (operator machine config, not tracked in this repo) - Authoritative endpoint list and selection guide
 - [docs/performance/README.md](README.md) - Performance documentation index

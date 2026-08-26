@@ -1438,34 +1438,9 @@ The codebase has migrated from "handler" to "dispatcher" terminology for message
 
 ---
 
-## Architecture
-
-```
-omnibase_infra (YOU ARE HERE)
-    ├── handlers/          # Protocol handler implementations
-    │   ├── http_handler   # HTTP REST handler (MVP)
-    │   └── db_handler     # PostgreSQL handler (MVP)
-    ├── event_bus/         # Event bus implementations
-    │   ├── inmemory       # InMemory bus (MVP)
-    │   └── kafka          # Kafka bus (Beta)
-    ├── runtime/           # Runtime host components
-    │   ├── handler_registry
-    │   └── runtime_host_process
-    └── errors/            # Infrastructure errors
-        └── infra_errors
-
-DEPENDENCY RULE: infra -> spi -> core (never reverse)
-```
-
 ## Contributing
 
 See [CONTRIBUTING.md](CONTRIBUTING.md) for guidelines.
-
-### ONEX Standards
-- Zero tolerance for `Any` types
-- Contract-driven development
-- Protocol-based dependency injection
-- Comprehensive test coverage (>80% target)
 
 ## License
 

@@ -215,7 +215,7 @@ raise InfraConnectionError("Failed to connect", context=context) from e
 ### Error Sanitization
 
 **NEVER include**: passwords, API keys, PII, connection strings with credentials.
-Use `sanitize_error_message()` / `sanitize_secret_path()` / `sanitize_consul_key()` from
+Use `sanitize_error_message()` / `sanitize_secret_path()` from
 `omnibase_infra.utils.util_error_sanitization`.
 
 ---
