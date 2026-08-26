@@ -4,10 +4,12 @@
 
 Reproduces the OMN-12945 defect mechanically: the deployed Bifrost delegation
 contract lives on a Docker named volume that survives image rebuilds, so the
-volume copy can silently diverge from the packaged source. This test wires the
-real runtime modules together against a temp dir that stands in for the volume:
+volume copy can silently diverge from its canonical base contract. This test
+wires the real runtime modules together against a temp dir that stands in for
+the volume:
 
-1. render the contract from packaged source into the "volume" target,
+1. render the base contract with the canonical typed lane overlay into the
+   "volume" target,
 2. mutate the volume copy so it drifts from source,
 3. compute provenance and assert drift is detected + logged + sidecared,
 4. assert the health check degrades on drift (operator-visible signal),
@@ -38,23 +40,32 @@ from omnibase_infra.runtime.render_bifrost_delegation_contract import (
     render_bifrost_delegation_contract,
 )
 
+REPO_ROOT = Path(__file__).resolve().parents[2]
+_CANONICAL_LANE_OVERLAY = REPO_ROOT / "docker" / "lane-overlays" / "dev.bifrost.yaml"
+
 _SOURCE_CONTRACT: dict[str, object] = {
     "backends": [
         {
-            "backend_id": "local-primary",
-            "model_name": "qwen3-coder",
+            "backend_id": "local-coder",
+            "model_name": "qwen3.8",
             "endpoint_url": "",
-            "endpoint_url_env": "OMN_INT_DRIFT_PRIMARY_URL",
             "required": True,
-        }
+        },
+        {
+            "backend_id": "local-heavy-reasoning",
+            "model_name": "qwen3.8",
+            "endpoint_url": "",
+            "required": True,
+        },
     ],
     "routing_rules": [
-        {"rule_id": "default", "backend_ids": ["local-primary"]},
+        {
+            "rule_id": "default",
+            "backend_ids": ["local-coder", "local-heavy-reasoning"],
+        },
     ],
-    "default_backends": ["local-primary"],
+    "default_backends": ["local-coder", "local-heavy-reasoning"],
 }
-
-_PRIMARY_URL = "http://192.0.2.10:8000/v1/chat/completions"
 
 
 def _write_source(tmp_path: Path) -> Path:
@@ -67,13 +78,12 @@ def _write_source(tmp_path: Path) -> Path:
 async def test_volume_config_drift_detected_and_reseeded(tmp_path: Path) -> None:
     source = _write_source(tmp_path)
     volume_target = tmp_path / "volume" / "delegation" / "bifrost_delegation.yaml"
-    env = {"OMN_INT_DRIFT_PRIMARY_URL": _PRIMARY_URL}
 
-    # 1. Initial render seeds the volume copy from packaged source.
+    # 1. Initial render seeds the volume copy from the base + canonical overlay.
     rendered = render_bifrost_delegation_contract(
         source_path=source,
+        overlay_path=_CANONICAL_LANE_OVERLAY,
         target_path=volume_target,
-        environ=env,
         verify_endpoints=False,
     )
     assert rendered == volume_target
@@ -84,8 +94,9 @@ async def test_volume_config_drift_detected_and_reseeded(tmp_path: Path) -> None
         deployed_path=volume_target,
         source_path=source,
     )
-    # Rendered output is derived from (not byte-identical to) source — both must
-    # be present and the health check must not be unhealthy on a fresh seed.
+    # Rendered output is derived from (not byte-identical to) the base source +
+    # typed overlay. The base source must be present and a fresh seed cannot be
+    # unhealthy.
     assert provenance.deployed_present is True
     assert provenance.source_present is True
     seed_health = check_config_provenance_health(provenance)
@@ -124,8 +135,8 @@ async def test_volume_config_drift_detected_and_reseeded(tmp_path: Path) -> None
     #    and drift is cleared with zero manual volume mutation.
     reseeded = render_bifrost_delegation_contract(
         source_path=source,
+        overlay_path=_CANONICAL_LANE_OVERLAY,
         target_path=volume_target,
-        environ=env,
         verify_endpoints=False,
     )
     assert reseeded == volume_target
@@ -135,7 +146,7 @@ async def test_volume_config_drift_detected_and_reseeded(tmp_path: Path) -> None
         source_path=source,
     )
     post_data = yaml.safe_load(volume_target.read_text("utf-8"))
-    assert post_data["backends"][0]["model_name"] == "qwen3-coder"
+    assert post_data["backends"][0]["model_name"] == "qwen3.8"
     assert check_config_provenance_health(post_reseed).status != "unhealthy"
 
 
@@ -162,13 +173,14 @@ def test_empty_bifrost_contract_path_disables_render_no_provenance(
     """Empty BIFROST_CONTRACT_PATH disables rendering — the documented kill switch.
 
     Guards the second competing authority OMN-12958 calls out: an empty
-    BIFROST_CONTRACT_PATH silently disables the packaged-source render entirely.
+    BIFROST_CONTRACT_PATH silently disables the base-contract render entirely.
     The renderer must return None (no volume copy materialized) rather than
     writing to the default volume path.
     """
     source = _write_source(tmp_path)
     rendered = render_bifrost_delegation_contract(
         source_path=source,
+        overlay_path=_CANONICAL_LANE_OVERLAY,
         target_path=None,
         environ={"BIFROST_CONTRACT_PATH": "  "},
         verify_endpoints=False,

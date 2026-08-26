@@ -30,6 +30,9 @@ REQUIRED_RUNTIME_SERVICES = {
     "runtime-effects",
     "runtime-worker",
 }
+_BIFROST_CONTRACT_PATH = "/app/data/delegation/bifrost_delegation.yaml"
+_BIFROST_OVERLAY_TARGET = "/app/config/delegation/dev.bifrost.yaml"
+_BIFROST_OVERLAY_SOURCE = REPO_ROOT / "docker" / "lane-overlays" / "dev.bifrost.yaml"
 EXPECTED_RENDERED_SERVICES = {
     "postgres",
     "redpanda",
@@ -378,18 +381,20 @@ def test_stability_lane_render_contains_isolated_runtime_identity() -> None:
         )
         assert environment["ONEX_RUNTIME_ID"].startswith("stability-test-")
         assert environment["ONEX_STATE_DIR"] == environment["ONEX_STATE_ROOT"]
-        assert environment["BIFROST_LOCAL_CODER_ENDPOINT_URL"] == _chat_url(
-            "llm-coder.invalid"
-        )
-        assert environment["BIFROST_LOCAL_REASONER_ENDPOINT_URL"] == _chat_url(
-            "llm-coder-fast.invalid"
-        )
-        assert environment["BIFROST_LOCAL_EMBEDDING_ENDPOINT_URL"] == _chat_url(
-            "llm-embedding.invalid"
-        )
-        assert environment["BIFROST_LOCAL_DS_V4_FLASH_ENDPOINT_URL"] == _chat_url(
-            "llm-deepseek.invalid"
-        )
+        assert environment["BIFROST_CONTRACT_PATH"] == _BIFROST_CONTRACT_PATH
+        assert "BIFROST_LOCAL_CODER_ENDPOINT_URL" not in environment
+        assert "BIFROST_LOCAL_REASONER_ENDPOINT_URL" not in environment
+        assert "BIFROST_LOCAL_EMBEDDING_ENDPOINT_URL" not in environment
+        assert "BIFROST_LOCAL_DS_V4_FLASH_ENDPOINT_URL" not in environment
+        volumes = services[service_name]["volumes"]
+        overlay_binds = [
+            volume for volume in volumes if volume["target"] == _BIFROST_OVERLAY_TARGET
+        ]
+        assert len(overlay_binds) == 1
+        overlay_bind = overlay_binds[0]
+        assert overlay_bind["type"] == "bind"
+        assert overlay_bind["source"] == str(_BIFROST_OVERLAY_SOURCE.resolve())
+        assert overlay_bind["read_only"] is True
         assert (
             _label_value(
                 services[service_name],
