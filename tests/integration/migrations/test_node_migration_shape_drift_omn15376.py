@@ -341,6 +341,42 @@ def test_is_loopback_host_rejects_remote_forms(host: str) -> None:
     assert _is_loopback_host(host) is False
 
 
+# OMN-16692: guard tests for the psql-output reader. Pure CompletedProcess
+# handling -- no Postgres, no ``server`` fixture -- but kept in this module for
+# the same reason as the OMN-16412 guards above.
+def test_psql_stdout_fails_loudly_when_the_command_did_not_run() -> None:
+    """A psql that exited non-zero is a prerequisite failure, never content.
+
+    The live OMN-16692 shape: the binary was unavailable, stdout was empty, and
+    the bare ``assert constraints.stdout.strip() == "<expected>"`` reported
+    ``assert '' == 'delegation_routing_tenant_overlay_pkey:p,...'`` -- a
+    schema-drift-shaped failure for a missing-psql cause.
+    """
+    failed = subprocess.CompletedProcess(
+        args=["psql"],
+        returncode=127,
+        stdout="",
+        stderr="psql: command not found",
+    )
+
+    with pytest.raises(AssertionError) as excinfo:
+        _psql_stdout(failed, "constraint probe")
+
+    message = str(excinfo.value)
+    assert "psql did not run successfully (constraint probe)" in message
+    assert "NOT schema drift" in message
+    assert "psql: command not found" in message
+
+
+def test_psql_stdout_returns_stripped_stdout_on_success() -> None:
+    """The success path is unchanged: stripped stdout, ready to compare."""
+    ok = subprocess.CompletedProcess(
+        args=["psql"], returncode=0, stdout=" 2 \n", stderr=""
+    )
+
+    assert _psql_stdout(ok, "row count") == "2"
+
+
 @pytest.fixture(scope="module")
 def server() -> Iterator[Server]:
     """A Postgres to talk to: the CI service if present, else a temp cluster."""
@@ -434,6 +470,28 @@ def _psql(srv: Server, database: str, *args: str) -> subprocess.CompletedProcess
     )
 
 
+def _psql_stdout(result: subprocess.CompletedProcess[str], what: str) -> str:
+    """Stripped stdout of a psql invocation that MUST have succeeded (OMN-16692).
+
+    A psql that did not RUN -- binary missing or broken, server unreachable,
+    role/permission error, SQL error under ``ON_ERROR_STOP=1`` -- exits
+    non-zero with EMPTY stdout. Asserting straight on ``.stdout`` therefore
+    converts a missing prerequisite into a content mismatch that reads as real
+    schema drift: the live case was
+    ``assert '' == 'delegation_routing_tenant_overlay_pkey:p,...'`` on a runner
+    whose CI log had already said ``psql client unavailable``.
+
+    Every read of psql output goes through here so the failure names the
+    invocation and carries psql's own diagnostics instead of an empty string.
+    """
+    assert result.returncode == 0, (
+        f"psql did not run successfully ({what}): exit {result.returncode}. "
+        f"This is a missing/failed prerequisite, NOT schema drift.\n"
+        f"stdout={result.stdout!r}\nstderr={result.stderr!r}"
+    )
+    return result.stdout.strip()
+
+
 def _psql_script(
     srv: Server, database: str, sql: str, **variables: str
 ) -> subprocess.CompletedProcess[str]:
@@ -491,7 +549,7 @@ def _new_database(srv: Server) -> str:
             "SELECT 1 FROM pg_roles WHERE rolname = :'role'",
             role=role,
         )
-        if "1" not in exists.stdout:
+        if "1" not in _psql_stdout(exists, f"pg_roles probe for {role}"):
             _psql_script(
                 srv,
                 "postgres",
@@ -625,8 +683,8 @@ def _schema_snapshot(srv: Server, database: str) -> list[str]:
     result = _psql(
         srv, database, "-t", "-A", "-v", "ON_ERROR_STOP=1", "-c", _SCHEMA_SNAPSHOT_SQL
     )
-    assert result.returncode == 0, result.stderr
-    return sorted(line for line in result.stdout.splitlines() if line.strip())
+    snapshot = _psql_stdout(result, f"schema snapshot of {database}")
+    return sorted(line for line in snapshot.splitlines() if line.strip())
 
 
 _CREATE_TYPE_RE = re.compile(r"CREATE\s+TYPE\s+([A-Za-z0-9_]+)\s+AS\s+", re.I)
@@ -738,7 +796,9 @@ def test_fixed_migration_is_green_on_the_same_drifted_shape(
             tbl=table,
             col=column,
         )
-        assert present.stdout.strip() == "1", present.stdout
+        assert _psql_stdout(present, f"{table}.{column} presence probe") == "1", (
+            present.stdout
+        )
     finally:
         _drop_database(server, database)
 
@@ -790,7 +850,7 @@ def test_reconciliation_preserves_pre_existing_rows(server: Server) -> None:
             "-c",
             "SELECT count(*) FROM llm_cost_aggregates",
         )
-        assert rows.stdout.strip() == "2", rows.stdout
+        assert _psql_stdout(rows, "llm_cost_aggregates row count") == "2", rows.stdout
     finally:
         _drop_database(server, database)
 
@@ -852,7 +912,10 @@ def test_delegation_routing_overlay_reconciliation_enforces_declared_shape(
             FROM delegation_routing_tenant_overlay;
             """,
         )
-        assert shape.stdout.strip() == "0|0|0|0|0|0|0|0|0", shape.stdout
+        assert (
+            _psql_stdout(shape, "delegation_routing_tenant_overlay shape probe")
+            == "0|0|0|0|0|0|0|0|0"
+        ), shape.stdout
 
         constraints = _psql(
             server,
@@ -872,10 +935,12 @@ def test_delegation_routing_overlay_reconciliation_enforces_declared_shape(
               );
             """,
         )
-        assert constraints.stdout.strip() == (
+        assert _psql_stdout(
+            constraints, "delegation_routing_tenant_overlay constraint probe"
+        ) == (
             "delegation_routing_tenant_overlay_pkey:p,"
             "delegation_routing_tenant_overlay_tenant_task_uq:u"
-        )
+        ), constraints.stdout
     finally:
         _drop_database(server, database)
 
