@@ -721,6 +721,59 @@ async def _skip_dispatcher(
     return None
 
 
+def _resolve_effective_handle_method(
+    handler_instance: object,
+) -> Callable[[object], object] | None:
+    """Resolve the dispatch entrypoint the runtime will actually invoke.
+
+    Prefers ``handle_async`` when the handler CLASS explicitly declares it (the
+    MRO is inspected rather than the instance so a MagicMock's dynamic attribute
+    creation does not fabricate one), otherwise ``handle``. Returns ``None`` when
+    the handler exposes neither — the caller decides whether that is fatal.
+
+    Shared by ``_make_dispatch_callback`` (which needs the callable) and
+    ``_typed_def_b_input_model`` (which needs its annotation at wiring time), so
+    the "which method is the entrypoint" rule cannot drift between the wiring
+    ARM SELECTION and the dispatch that arm performs — the OMN-16767 defect
+    class.
+    """
+    handle_async_method = next(
+        (
+            cls.__dict__["handle_async"]
+            for cls in type(handler_instance).__mro__
+            if "handle_async" in cls.__dict__
+        ),
+        None,
+    )
+    candidate_handle_async = getattr(handler_instance, "handle_async", None)
+    candidate_handle = getattr(handler_instance, "handle", None)
+    if (
+        handle_async_method is not None
+        and callable(handle_async_method)
+        and callable(candidate_handle_async)
+    ):
+        return cast("Callable[[object], object]", candidate_handle_async)
+    if callable(candidate_handle):
+        return cast("Callable[[object], object]", candidate_handle)
+    return None
+
+
+def _typed_def_b_input_model(handler_instance: object) -> type[BaseModel] | None:
+    """Return the concrete input model a def-B handler declares, else ``None``.
+
+    A canonical def-B handler is ``handle(self, request: ModelX) -> ModelY``: the
+    runtime owes it a validated ``ModelX``. This resolves ``ModelX`` from the
+    handler instance the resolver constructed, at wiring time, so the arm
+    selection in :func:`_prepare_handler_wiring` can tell a typed handler apart
+    from a projection handler (``handle(input_data: dict[str, object])``) without
+    guessing from the contract alone.
+    """
+    handle_method = _resolve_effective_handle_method(handler_instance)
+    if handle_method is None:
+        return None
+    return _resolve_def_b_input_model_type(handle_method)
+
+
 def _make_dispatch_callback(
     handler_instance: ProtocolHandleable,
     event_model: ModelHandlerRef | None = None,
@@ -758,26 +811,9 @@ def _make_dispatch_callback(
     """
     # Prefer handle_async when the handler class explicitly declares it.
     # Performed once at wiring time so the per-message hot path has no overhead.
-    # We inspect the MRO (not the instance) to exclude auto-generated attributes
-    # such as MagicMock's dynamic attribute creation.
-    _handle_async_method = next(
-        (
-            cls.__dict__["handle_async"]
-            for cls in type(handler_instance).__mro__
-            if "handle_async" in cls.__dict__
-        ),
-        None,
-    )
-    _candidate_handle_async = getattr(handler_instance, "handle_async", None)
-    _candidate_handle = getattr(handler_instance, "handle", None)
-    if (
-        _handle_async_method is not None
-        and callable(_handle_async_method)
-        and callable(_candidate_handle_async)
-    ):
-        _effective_handle = cast("Callable[[object], object]", _candidate_handle_async)
-    elif callable(_candidate_handle):
-        _effective_handle = cast("Callable[[object], object]", _candidate_handle)
+    _resolved_handle = _resolve_effective_handle_method(handler_instance)
+    if _resolved_handle is not None:
+        _effective_handle = _resolved_handle
     else:
 
         def _missing_handle(_payload: object) -> object:
@@ -8097,6 +8133,41 @@ def _prepare_handler_wiring(
             "db_io and state_io — these are disjoint wiring arms "
             "(OMN-14208); a contract must declare exactly one."
         )
+    # OMN-16767: ``db_io.db_tables`` declares GOVERNED DB ACCESS (which tables a
+    # node touches, under which role) — it does NOT declare the handler's
+    # dispatch SHAPE. The projection arm's contract is
+    # ``handle(input_data: dict[str, object])`` carrying ``_db``/``_event_type``/
+    # ``_topic``; selecting it purely on ``db_tables`` handed a typed def-B
+    # handler the raw ``input_data`` dict, and the handler crashed on its first
+    # attribute access. Live on the .201 dev lane:
+    #
+    #   Projection handler error: handler=HandlerRoutingIntent
+    #   topic=onex.cmd.omnibase-infra.delegation-routing-request.v1
+    #   error_type=AttributeError error='dict' object has no attribute 'payload'
+    #
+    # -> quarantine sink, no ModelRoutingDecision, and every delegation on the
+    # lane timed out. The trigger was a CONTRACT change, not a runtime one:
+    # node_delegation_routing_reducer gained a db_io block (its tenant-overlay
+    # table, which the handler reads through its own resolver) and silently
+    # switched wiring arms.
+    #
+    # A handler that declares a concrete BaseModel input is a typed def-B handler
+    # and is never a projection handler — it cannot read ``input_data`` at all.
+    # The runtime owes it a validated model, so it takes the typed dispatch arm
+    # and its db_io stays what it is: a declaration, not a dispatch shape.
+    typed_input_model = _typed_def_b_input_model(handler_instance)
+    if db_tables and typed_input_model is not None:
+        logger.info(
+            "Contract %r declares db_io.db_tables but handler %s is a typed "
+            "def-B handler (handle(%s)) — wiring the TYPED dispatch arm, not "
+            "the projection arm (OMN-16767). db_io here declares governed DB "
+            "access the handler performs itself; the projection arm's "
+            "handle(input_data: dict) contract does not apply.",
+            contract.name,
+            handler_ref.name,
+            typed_input_model.__name__,
+        )
+        db_tables = ()
     if db_tables:
         if topology is None:
             raise ModelOnexError(
