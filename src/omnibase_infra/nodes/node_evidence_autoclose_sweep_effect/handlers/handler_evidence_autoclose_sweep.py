@@ -38,7 +38,17 @@ Pipeline
    criteria. Conservative in exactly one direction on purpose — a false
    hold costs a comment and a human glance, a false flip writes an unearned
    Done onto the board.
-7. ``apply=False`` (the default) performs every read above but never calls
+7. PROOF-CLASS GUARD (OMN-15911). A green tally does not say what the green
+   legs PROVED. Before OMN-15911 a `gh pr view --json state` read and an
+   executed test suite both terminated in the same `verified`, so
+   ``verified_count == total_checks`` was satisfiable entirely by "the PR
+   merged". dod_verify now classifies every check verdict and reports
+   ``behavior_proving_count`` (VERIFIED and BEHAVIOR); a flip requires it to
+   be >= 1, and a zero on an otherwise-clean run records
+   GAP_NO_BEHAVIOR_PROOF. A verdict carrying no such field at all (an
+   omnimarket predating the change — i.e. every historical receipt) is an
+   ERROR, not an inference.
+8. ``apply=False`` (the default) performs every read above but never calls
    a Linear mutation — every decision is logged as "would-do". ``apply=True``
    performs the real ``issueUpdate``/``commentCreate`` mutation.
 
@@ -109,6 +119,13 @@ _DOD_VERIFY_VERDICT_KEY = "terminal_payload"
 # dod_verify's own terminal status for "every verdict-bearing check passed".
 # `EnumDodVerifyStatus.VERIFIED` in omnimarket.
 _DOD_VERIFY_STATUS_VERIFIED = "verified"
+# How many passing checks executed the claimed behavior, as opposed to reading
+# PR/merge state or standing in as a surrogate. `ModelDodVerifyState
+# .behavior_proving_count` in omnimarket, added by OMN-15911. Absent on any
+# verdict produced by an omnimarket predating that change — which is every
+# receipt in the existing corpus, so its absence is an ERROR (nothing to
+# decide on), never an inference in either direction.
+_DOD_VERIFY_BEHAVIOR_KEY = "behavior_proving_count"
 
 # Evidence-Ticket binding patterns.
 _CONTRACT_FILE_RE = re.compile(r"^contracts/(OMN-\d+)\.yaml$")
@@ -794,6 +811,10 @@ class HandlerEvidenceAutocloseSweep:
             in (
                 EnumEvidenceAutocloseDecision.GAP_POSTED,
                 EnumEvidenceAutocloseDecision.GAP_AC_COVERAGE,
+                # OMN-15911: green, and no green leg proved behavior. Same
+                # bucket for the same reason -- the mechanism worked, the
+                # evidence was not strong enough to close on.
+                EnumEvidenceAutocloseDecision.GAP_NO_BEHAVIOR_PROOF,
             )
         )
         skipped = sum(
@@ -831,6 +852,83 @@ class HandlerEvidenceAutocloseSweep:
             outcomes=tuple(outcomes),
         )
 
+    async def _behavior_proof_outcome(
+        self,
+        *,
+        ticket_id: str,
+        companion_pr_number: int,
+        companion_pr_url: str,
+        apply: bool,
+        issue_id: str,
+        total_checks: int,
+        verified_count: int,
+        failed_count: int,
+    ) -> ModelEvidenceAutocloseOutcome:
+        """Withhold the flip: green, but nothing green proved behavior (OMN-15911).
+
+        Mirrors :meth:`_ac_coverage_outcome` exactly — never mutates ticket
+        state on any path, and the only write it can make is a comment, under
+        ``apply``. The two guards answer different questions and both must
+        pass: this one asks what the checks that RAN proved; the AC-coverage
+        one asks what the ticket claimed that no check covers.
+        """
+        reason = (
+            f"dod_verify: {verified_count}/{total_checks} checks verified, 0 failed "
+            "— and not one of them executed the claimed behavior. Every passing "
+            "check binds merge state (a PR is merged) or is a surrogate (a file "
+            "exists, a generic suite ran). That is evidence the code landed, not "
+            "evidence the system does the thing, so the Done flip is withheld."
+        )
+        base = ModelEvidenceAutocloseOutcome(
+            ticket_id=ticket_id,
+            companion_pr_number=companion_pr_number,
+            companion_pr_url=companion_pr_url,
+            decision=EnumEvidenceAutocloseDecision.GAP_NO_BEHAVIOR_PROOF,
+            reason=reason,
+            dod_verify_total_checks=total_checks,
+            dod_verify_verified_count=verified_count,
+            dod_verify_failed_count=failed_count,
+            dod_verify_behavior_proving_count=0,
+        )
+        if not apply:
+            logger.info(
+                "[DRY-RUN] Would withhold the Done flip on %s (%s)", ticket_id, reason
+            )
+            return base.model_copy(update={"reason": f"[DRY-RUN] {reason}"})
+
+        if not issue_id:
+            return ModelEvidenceAutocloseOutcome(
+                ticket_id=ticket_id,
+                companion_pr_number=companion_pr_number,
+                companion_pr_url=companion_pr_url,
+                decision=EnumEvidenceAutocloseDecision.ERROR_LINEAR_API,
+                reason=(
+                    "Linear issue payload missing id — refusing to comment. "
+                    f"Flip withheld regardless: {reason}"
+                ),
+                dod_verify_total_checks=total_checks,
+                dod_verify_verified_count=verified_count,
+                dod_verify_failed_count=failed_count,
+            )
+
+        commented = await self._linear.create_comment(
+            issue_id,
+            (
+                "Proof-class gap (OMN-16106 evidence autoclose sweep) — NOT "
+                "flipped.\n\n"
+                f"Merged evidence companion: {companion_pr_url}\n"
+                f"{reason}\n\n"
+                "To make this ticket auto-closable, add at least one check to its "
+                "OCC contract that executes the behavior this ticket claims — a "
+                "test run, or a run of the product CLI over the changed path. A "
+                "`gh pr view --json state` check proves the merge, and the merge "
+                "is already established by the companion."
+            ),
+        )
+        return base.model_copy(
+            update={"linear_comment_posted": commented, "applied": True}
+        )
+
     async def _ac_coverage_outcome(
         self,
         *,
@@ -844,6 +942,7 @@ class HandlerEvidenceAutocloseSweep:
         total_checks: int,
         verified_count: int,
         failed_count: int,
+        behavior_proving_count: int,
     ) -> ModelEvidenceAutocloseOutcome:
         """Withhold the flip and record/post the AC-coverage gap (OMN-16736).
 
@@ -859,6 +958,7 @@ class HandlerEvidenceAutocloseSweep:
             dod_verify_total_checks=total_checks,
             dod_verify_verified_count=verified_count,
             dod_verify_failed_count=failed_count,
+            dod_verify_behavior_proving_count=behavior_proving_count,
             uncovered_acceptance_criteria=uncovered,
         )
         if not apply:
@@ -1024,6 +1124,40 @@ class HandlerEvidenceAutocloseSweep:
         team_id = str(team.get("id") or "") if isinstance(team, dict) else ""
 
         if all_verified:
+            # OMN-15911: green is necessary, not sufficient — and the FIRST
+            # question is what the green legs proved, not what the ticket body
+            # says. `verified_count == total_checks` is satisfiable entirely by
+            # `gh pr view --json state` reads, which bind merge state and say
+            # nothing about whether the merged code works.
+            if _DOD_VERIFY_BEHAVIOR_KEY not in verdict:
+                return ModelEvidenceAutocloseOutcome(
+                    ticket_id=ticket_id,
+                    companion_pr_number=companion_pr_number,
+                    companion_pr_url=companion_pr_url,
+                    decision=EnumEvidenceAutocloseDecision.ERROR_VERIFY_UNPARSEABLE,
+                    reason=(
+                        f"dod_verify reported no `result.{_DOD_VERIFY_VERDICT_KEY}"
+                        f".{_DOD_VERIFY_BEHAVIOR_KEY}` — the verifier predates "
+                        "OMN-15911 and cannot say whether any green check proved "
+                        "behavior. Refusing to infer it in either direction."
+                    ),
+                    dod_verify_total_checks=total_checks,
+                    dod_verify_verified_count=verified_count,
+                    dod_verify_failed_count=failed_count,
+                )
+            behavior_proving_count = _as_int(verdict.get(_DOD_VERIFY_BEHAVIOR_KEY))
+            if behavior_proving_count <= 0:
+                return await self._behavior_proof_outcome(
+                    ticket_id=ticket_id,
+                    companion_pr_number=companion_pr_number,
+                    companion_pr_url=companion_pr_url,
+                    apply=request.apply,
+                    issue_id=issue_id,
+                    total_checks=total_checks,
+                    verified_count=verified_count,
+                    failed_count=failed_count,
+                )
+
             # OMN-16736: dod_verify being green is necessary, not sufficient.
             # Re-read the ticket body for criteria its checks never covered
             # BEFORE any flip path (dry-run included, so a DRY-RUN report is
@@ -1043,11 +1177,13 @@ class HandlerEvidenceAutocloseSweep:
                     total_checks=total_checks,
                     verified_count=verified_count,
                     failed_count=failed_count,
+                    behavior_proving_count=behavior_proving_count,
                 )
 
             reason = (
                 f"dod_verify: {verified_count}/{total_checks} ACs verified, "
-                f"0 failed. Companion: {companion_pr_url}"
+                f"0 failed, {behavior_proving_count} behavior-proving. "
+                f"Companion: {companion_pr_url}"
             )
             if not request.apply:
                 logger.info("[DRY-RUN] Would flip %s to Done (%s)", ticket_id, reason)
@@ -1060,6 +1196,7 @@ class HandlerEvidenceAutocloseSweep:
                     dod_verify_total_checks=total_checks,
                     dod_verify_verified_count=verified_count,
                     dod_verify_failed_count=failed_count,
+                    dod_verify_behavior_proving_count=behavior_proving_count,
                     applied=False,
                 )
             if not issue_id or not team_id:
@@ -1072,6 +1209,7 @@ class HandlerEvidenceAutocloseSweep:
                     dod_verify_total_checks=total_checks,
                     dod_verify_verified_count=verified_count,
                     dod_verify_failed_count=failed_count,
+                    dod_verify_behavior_proving_count=behavior_proving_count,
                 )
             done_state_id = await self._linear.fetch_done_state_id(team_id)
             if not done_state_id:
@@ -1084,6 +1222,7 @@ class HandlerEvidenceAutocloseSweep:
                     dod_verify_total_checks=total_checks,
                     dod_verify_verified_count=verified_count,
                     dod_verify_failed_count=failed_count,
+                    dod_verify_behavior_proving_count=behavior_proving_count,
                 )
             flipped = await self._linear.update_issue_state(issue_id, done_state_id)
             if not flipped:
@@ -1096,12 +1235,16 @@ class HandlerEvidenceAutocloseSweep:
                     dod_verify_total_checks=total_checks,
                     dod_verify_verified_count=verified_count,
                     dod_verify_failed_count=failed_count,
+                    dod_verify_behavior_proving_count=behavior_proving_count,
                 )
             commented = await self._linear.create_comment(
                 issue_id,
                 (
                     "Automatic Done flip (OMN-16106 evidence autoclose sweep).\n\n"
                     f"Merged evidence companion: {companion_pr_url}\n"
+                    f"Behavior-proving checks: {behavior_proving_count} "
+                    "(OMN-15911 — at least one check executed the claimed "
+                    "behavior, not only a merge-state read).\n"
                     f"dod_verify: {verified_count}/{total_checks} ACs verified, "
                     f"{failed_count} failed."
                 ),
@@ -1115,6 +1258,7 @@ class HandlerEvidenceAutocloseSweep:
                 dod_verify_total_checks=total_checks,
                 dod_verify_verified_count=verified_count,
                 dod_verify_failed_count=failed_count,
+                dod_verify_behavior_proving_count=behavior_proving_count,
                 linear_comment_posted=commented,
                 applied=True,
             )

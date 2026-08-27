@@ -52,7 +52,12 @@ def _merged_pr(number: int, title: str, ticket: str) -> dict[str, object]:
 
 
 def _dod_verify_ok(
-    *, total: int, verified: int, failed: int, skipped: int = 0
+    *,
+    total: int,
+    verified: int,
+    failed: int,
+    skipped: int = 0,
+    behavior_proving: int = 1,
 ) -> dict[str, object]:
     """A ModelSkillResult shaped like the one `onex skill dod_verify` prints.
 
@@ -63,6 +68,14 @@ def _dod_verify_ok(
     so double and reader agreed with each other and disagreed with the real
     CLI, and every live run computed 0/0. Shape verified against the committed
     capture in tests/fixtures/omn16736/.
+
+    OMN-15911 added ``behavior_proving_count`` to the same payload. It defaults
+    to 1 here so the pre-existing cases keep exercising the path they were
+    written for (a flip on green counts); the cases that exercise the
+    proof-class guard itself pass it explicitly. It is NOT optional in the
+    payload — a verdict that omits the key entirely models a pre-OMN-15911
+    verifier and is deliberately an ERROR, covered in
+    test_omn_15911_behavior_proof_gate.py.
     """
     verdict = "verified" if failed == 0 else "failed"
     return {
@@ -88,6 +101,7 @@ def _dod_verify_ok(
                 "failed_count": failed,
                 "skipped_count": skipped,
                 "superseded_count": 0,
+                "behavior_proving_count": behavior_proving,
                 "error_message": None,
             },
         },

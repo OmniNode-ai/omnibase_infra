@@ -32,6 +32,12 @@ class ModelEvidenceAutocloseOutcome(BaseModel):
     dod_verify_total_checks: int = Field(default=0, ge=0)
     dod_verify_verified_count: int = Field(default=0, ge=0)
     dod_verify_failed_count: int = Field(default=0, ge=0)
+    # OMN-15911: how many of the passing checks actually executed the claimed
+    # behavior, as reported by dod_verify's own verdict. Recorded on every
+    # outcome that reached a verdict — including the flip — so the sweep
+    # result says on what STRENGTH of evidence a ticket was closed, not merely
+    # that a count matched.
+    dod_verify_behavior_proving_count: int = Field(default=0, ge=0)
     uncovered_acceptance_criteria: tuple[str, ...] = Field(
         default=(),
         description=(
