@@ -62,7 +62,6 @@ from pathlib import Path
 from urllib.parse import unquote, urlparse
 
 import pytest
-from dotenv import load_dotenv
 
 from tests.helpers.util_migration_shape import (
     fenced_migration_ids,
@@ -165,6 +164,15 @@ class Server:
 # container" apart from "someone's persistent dev-shell var pointing at a
 # shared live lane" by host shape alone. CI sets the opt-in explicitly, once,
 # in the one job/step that owns a Postgres it just spun up itself.
+#
+# Corollary, and the reason this comment says it out loud: this suite must NOT
+# source an operator dotenv (``~/.omnibase/.env`` or any other) into
+# ``os.environ`` before resolving its server. Doing so is the OMN-16412 vector
+# with an extra step -- it manufactures exactly the ambient
+# ``OMNIBASE_INFRA_DB_URL``/``POSTGRES_HOST`` (and possibly
+# ``OMN15376_ALLOW_REMOTE_PG=1``) the guard below exists to refuse. The server
+# comes from what the caller deliberately handed this process, or from a
+# hermetic local cluster. Nothing else.
 #
 # Read fresh on every call (unlike ``_REQUIRE_PG`` below, which is frozen at
 # import time) so tests can toggle it via monkeypatch.
@@ -382,7 +390,6 @@ def test_psql_stdout_returns_stripped_stdout_on_success() -> None:
 @pytest.fixture(scope="module")
 def server() -> Iterator[Server]:
     """A Postgres to talk to: the CI service if present, else a temp cluster."""
-    _load_operator_env()
     external = _server_from_env()
     if external is not None:
         probe = subprocess.run(
@@ -494,11 +501,6 @@ def _psql_stdout(result: subprocess.CompletedProcess[str], what: str) -> str:
         f"stdout={result.stdout!r}\nstderr={result.stderr!r}"
     )
     return result.stdout.strip()
-
-
-def _load_operator_env() -> None:
-    """Load operator-managed integration env without overriding explicit test env."""
-    load_dotenv(Path.home() / ".omnibase" / ".env", override=False)
 
 
 def _psql_script(
