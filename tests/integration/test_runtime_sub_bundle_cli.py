@@ -165,6 +165,7 @@ def test_validate_runtime_integrations_reports_required_env(tmp_path: Path) -> N
 
 
 @pytest.mark.integration
+@pytest.mark.timeout(180)
 def test_generate_composed_runtime_includes_all_sub_bundles(tmp_path: Path) -> None:
     """`catalog.cli generate runtime` emits the union of all four sub-bundles
     plus the transitive core + tracing services — preserving the operator

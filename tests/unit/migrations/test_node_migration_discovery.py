@@ -599,6 +599,96 @@ class TestLegacyDeclaredExemption:
         assert "legacy-declared (OMN-15717), not stale" in result.stdout
         assert "DRIFT" not in result.stderr
 
+    def test_declared_vendored_file_with_divergent_upstream_is_not_rewritten(
+        self, tmp_path: Path
+    ) -> None:
+        dest_root = tmp_path / "nodes"
+        dest = dest_root / "node_example" / "0001_applied.sql"
+        dest.parent.mkdir(parents=True)
+        dest.write_text("-- applied bytes\n")
+        omk = tmp_path / "omnimarket-src"
+        source = (
+            omk
+            / "src"
+            / "omnimarket"
+            / "nodes"
+            / "node_example"
+            / "migrations"
+            / "0001_applied.sql"
+        )
+        source.parent.mkdir(parents=True)
+        source.write_text("-- divergent upstream bytes\n")
+        manifest = tmp_path / "application-migrations.tsv"
+        manifest.write_text(
+            "nodes/node_example/0001_applied.sql\t"
+            "node:node_example\tnode:node_example\ttenant\t"
+            "node:node_example:0001_applied.sql\t" + ("a" * 64) + "\n"
+        )
+
+        result = subprocess.run(
+            ["bash", str(SYNC_SCRIPT), "--check"],
+            cwd=str(REPO_ROOT),
+            env={
+                **os.environ,
+                "OMNIMARKET_SRC": str(omk),
+                "SYNC_NODE_MIGRATIONS_DEST_ROOT": str(dest_root),
+                "APPLICATION_MIGRATION_MANIFEST": str(manifest),
+            },
+            capture_output=True,
+            text=True,
+            timeout=60,
+            check=False,
+        )
+
+        assert result.returncode == 0, result.stdout + result.stderr
+        assert "legacy-declared (OMN-16705), not rewritten" in result.stdout
+        assert "DRIFT" not in result.stderr
+
+    def test_write_mode_keeps_declared_vendored_file_with_divergent_upstream(
+        self, tmp_path: Path
+    ) -> None:
+        dest_root = tmp_path / "nodes"
+        dest = dest_root / "node_example" / "0001_applied.sql"
+        dest.parent.mkdir(parents=True)
+        dest.write_text("-- applied bytes\n")
+        omk = tmp_path / "omnimarket-src"
+        source = (
+            omk
+            / "src"
+            / "omnimarket"
+            / "nodes"
+            / "node_example"
+            / "migrations"
+            / "0001_applied.sql"
+        )
+        source.parent.mkdir(parents=True)
+        source.write_text("-- divergent upstream bytes\n")
+        manifest = tmp_path / "application-migrations.tsv"
+        manifest.write_text(
+            "nodes/node_example/0001_applied.sql\t"
+            "node:node_example\tnode:node_example\ttenant\t"
+            "node:node_example:0001_applied.sql\t" + ("a" * 64) + "\n"
+        )
+
+        result = subprocess.run(
+            ["bash", str(SYNC_SCRIPT)],
+            cwd=str(REPO_ROOT),
+            env={
+                **os.environ,
+                "OMNIMARKET_SRC": str(omk),
+                "SYNC_NODE_MIGRATIONS_DEST_ROOT": str(dest_root),
+                "APPLICATION_MIGRATION_MANIFEST": str(manifest),
+            },
+            capture_output=True,
+            text=True,
+            timeout=60,
+            check=False,
+        )
+
+        assert result.returncode == 0, result.stdout + result.stderr
+        assert "kept legacy-declared (OMN-16705)" in result.stdout
+        assert dest.read_text() == "-- applied bytes\n"
+
     def test_undeclared_vendored_file_with_no_upstream_source_is_still_stale(
         self, tmp_path: Path
     ) -> None:
