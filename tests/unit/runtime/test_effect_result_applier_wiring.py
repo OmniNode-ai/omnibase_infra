@@ -41,7 +41,6 @@ from omnibase_infra.event_bus.models.model_event_message import ModelEventMessag
 from omnibase_infra.models.dispatch.model_dispatch_result import ModelDispatchResult
 from omnibase_infra.protocols import ProtocolEventBusLike
 from omnibase_infra.runtime.auto_wiring.handler_wiring import (
-    _contract_declares_db_io,
     wire_from_manifest,
 )
 from omnibase_infra.runtime.auto_wiring.models import (
@@ -295,8 +294,6 @@ def test_manifest_scan_builds_applier_for_effect_contract(tmp_path: Path) -> Non
             continue
         if _contract.event_bus is None or not _contract.event_bus.publish_topics:
             continue
-        if _contract_declares_db_io(_contract):
-            continue
         pe_map = load_published_events_map(Path(_contract.contract_path))
         if not pe_map:
             continue
@@ -357,8 +354,6 @@ def test_manifest_scan_skips_already_registered_contracts(tmp_path: Path) -> Non
         if _contract.name in auto_wiring_result_appliers:
             continue  # skip already-registered
         if _contract.event_bus is None or not _contract.event_bus.publish_topics:
-            continue
-        if _contract_declares_db_io(_contract):
             continue
         pe_map = load_published_events_map(Path(_contract.contract_path))
         if not pe_map:

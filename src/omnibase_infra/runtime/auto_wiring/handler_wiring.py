@@ -289,6 +289,26 @@ class HandlerDispatchFailureError(Exception):
     """
 
 
+class UndeliverableDispatchOutputError(Exception):
+    """A dispatch SUCCEEDED and produced bus-bound output with nowhere to send it.
+
+    OMN-16798. The auto-wired consume boundary publishes a dispatcher's
+    ``output_events`` only through a ``result_applier``. When no applier is wired
+    for the subscription, the boundary previously fell straight through to
+    ``return`` — the record was consumed, the offset committed, the handler ran,
+    and the event it computed was discarded with no log, no DLQ entry and no
+    metric. That is the forbidden outcome this ticket exists to end: a committed
+    offset with no observable effect.
+
+    Raised by ``_route_undeliverable_dispatch_output`` so the record takes the
+    UNCONDITIONAL DLQ route (``_route_apply_publish_failure``), exactly like the
+    sibling case where an applier IS wired and its ``apply()`` publish fails
+    (OMN-14498). Both are "the dispatch is known-good, its output did not land",
+    so neither belongs behind the staged ``ONEX_BOUNDARY_DLQ_ENABLED`` flag that
+    exists to hold back doubtful/unvalidated payloads.
+    """
+
+
 from omnibase_spi.protocols.runtime.protocol_handler_ownership_query import (
     ProtocolHandlerOwnershipQuery,
 )
@@ -2455,10 +2475,6 @@ def _read_dlq_topics(contract_path: Path) -> list[str]:
     return [str(t) for t in (event_bus.get("dlq_topics") or [])]
 
 
-def _contract_declares_db_io(contract: ModelDiscoveredContract) -> bool:
-    return bool(contract.db_io is not None and contract.db_io.db_tables)
-
-
 def _read_state_io(contract_path: Path) -> dict[str, object]:
     """Read the top-level ``state_io`` block from a contract YAML.
 
@@ -4230,10 +4246,12 @@ def _raise_if_silent_dispatch_failure(
 
     A partial-success ``HANDLER_ERROR`` (one sibling handler failed but another
     produced output the applier publishes) is intentionally NOT surfaced here —
-    it is not a silent drop. Non-error statuses (SUCCESS/NO_DISPATCHER/... — the
-    latter has its own engine-side DLQ routing) are left untouched. Guarded on a
-    real ``ModelDispatchResult`` instance so a ``MagicMock`` result in a test
-    never trips it.
+    it is not a silent drop. Non-error statuses are left untouched here and are
+    covered by their own guards: ``_raise_if_no_dispatcher_drop`` for
+    ``NO_DISPATCHER`` and ``_route_undeliverable_dispatch_output`` for a result
+    whose output has no applier to deliver it (both OMN-16798). Guarded on a real
+    ``ModelDispatchResult`` instance so a ``MagicMock`` result in a test never
+    trips it.
     """
     from omnibase_infra.enums import EnumDispatchStatus
     from omnibase_infra.models.dispatch.model_dispatch_result import (
@@ -4256,6 +4274,81 @@ def _raise_if_silent_dispatch_failure(
         f"dispatch to topic={topic} returned status={result.status.value} with no "
         f"terminal output (dispatcher_id={result.dispatcher_id}): "
         f"{result.error_message or 'handler/coercion failure'}"
+    )
+
+
+def _undeliverable_dispatch_output(result: object) -> str | None:
+    """Describe bus-bound output on a dispatch result that has no applier (OMN-16798).
+
+    Returns ``None`` when there is nothing undeliverable — the caller only
+    consults this when ``result_applier is None``, so a result carrying no
+    ``output_events`` (the overwhelmingly common projection/void-return case) is
+    not a drop and must stay silent.
+
+    Scope is deliberately ``output_events`` ONLY. A declared event is the one
+    output whose destination the CONTRACT states (``published_events`` →
+    ``publish_topics``), so "computed but never published" is provably a loss
+    against a written promise. ``output_intents`` / ``projection_intents``
+    delivered without an applier are the same class of silent drop but a
+    materially different blast radius (audit/projection consumers whose appliers
+    the kernel registers on a separate, intent-executor-bearing path), and no
+    live measurement was taken for them tonight — carried as an OMN-16798
+    residual rather than folded in on speculation.
+    """
+    from omnibase_infra.models.dispatch.model_dispatch_result import (
+        ModelDispatchResult,
+    )
+
+    if not isinstance(result, ModelDispatchResult):
+        return None
+    if not result.output_events:
+        return None
+    return (
+        f"dispatch to topic={result.topic} produced "
+        f"{len(result.output_events)} output event(s) "
+        f"({', '.join(sorted({type(e).__name__ for e in result.output_events}))}) "
+        f"but no result applier is wired for this subscription "
+        f"(dispatcher_id={result.dispatcher_id}, status="
+        f"{result.status.value if result.status else 'unknown'}) — the event "
+        "would be dropped and the offset committed"
+    )
+
+
+def _raise_if_no_dispatcher_drop(result: object, topic: str) -> None:
+    """Raise for a ``NO_DISPATCHER`` result the auto-wired boundary would ACK (OMN-16798).
+
+    ``MessageDispatchEngine.dispatch()`` DERIVES a ``dlq_topic`` for an unroutable
+    message and logs "routing to DLQ topic '<t>'" — but it never publishes there.
+    The sibling boundary (``EventBusSubcontractWiring._create_dispatch_callback``)
+    honors that field explicitly, and withholds the offset when the DLQ write is
+    not durable (OMN-14936). The auto-wired boundary did neither: it consumed the
+    record, committed the offset, and left no DLQ entry — the "consumes+commits
+    but never dispatches" signature first filed as OMN-14755 and re-measured live
+    on OMN-16798 (``delegation-routing-request.v1`` advancing against a Stable,
+    lag-0 group with no handler invocation and nothing in any DLQ).
+
+    Raising ``HandlerDispatchFailureError`` routes it through the same
+    ``_route_swallowed_exception`` path a raised handler exception takes: a loud
+    structured metric line always, plus a best-effort DLQ write under
+    ``ONEX_BOUNDARY_DLQ_ENABLED``. The record is by definition one this contract's
+    handlers could not validate, so it belongs behind that staged flag rather
+    than on the unconditional route reserved for known-good results.
+    """
+    from omnibase_infra.enums import EnumDispatchStatus
+    from omnibase_infra.models.dispatch.model_dispatch_result import (
+        ModelDispatchResult,
+    )
+
+    if not isinstance(result, ModelDispatchResult):
+        return
+    if result.status is not EnumDispatchStatus.NO_DISPATCHER:
+        return
+    failure_class = result.error_details.get("failure_class")
+    raise HandlerDispatchFailureError(
+        f"dispatch to topic={topic} matched no dispatcher in this contract's "
+        f"scope (failure_class={failure_class or 'unknown'}, "
+        f"derived_dlq_topic={result.dlq_topic or 'none'}): "
+        f"{result.error_message or 'no dispatcher registered'}"
     )
 
 
@@ -4598,6 +4691,12 @@ async def _route_apply_publish_failure(
     ``result_applier.apply()`` publish failure (OMN-14498, adversarial
     verify comment 3c6da9a0).
 
+    OMN-16798 gives this the second member of the same class: a dispatch that
+    SUCCEEDED and produced ``output_events`` on a subscription with NO applier
+    wired at all (``UndeliverableDispatchOutputError``). "The publish failed" and
+    "there was never anything to publish with" are the same loss with the same
+    known-good result behind them, so they take the same unconditional route.
+
     Unlike ``_route_swallowed_exception``, this is NOT gated behind
     ``_boundary_dlq_enabled()``: the dispatch already SUCCEEDED here --
     only the downstream publish of its (already-computed) result failed --
@@ -4843,6 +4942,35 @@ def _make_event_bus_callback(
                             correlation_id=envelope.correlation_id or uuid4(),
                         )
                         return
+                elif result is not None:
+                    # OMN-16798: no applier is wired for this subscription. If the
+                    # dispatch produced bus-bound output, this `return` would be a
+                    # committed offset with no observable effect — the exact shape
+                    # that left `routing-decision.v1` at a flat high-watermark
+                    # while every delegation timed out. Route the record through
+                    # the same UNCONDITIONAL DLQ leg an apply()-publish failure
+                    # takes; a result with nothing to deliver is untouched.
+                    undeliverable = _undeliverable_dispatch_output(result)
+                    if undeliverable is not None:
+                        logger.error(
+                            "Auto-wiring boundary has no result applier for output-"
+                            "producing dispatch: topic=%s correlation_id=%s detail=%s",
+                            topic,
+                            envelope.correlation_id,
+                            undeliverable,
+                        )
+                        await _route_apply_publish_failure(
+                            UndeliverableDispatchOutputError(undeliverable),
+                            event_bus=event_bus,
+                            topic=topic,
+                            message=message,
+                            correlation_id=envelope.correlation_id or uuid4(),
+                        )
+                        return
+                # OMN-16798: a NO_DISPATCHER result names a DLQ topic nobody
+                # publishes to on this boundary. Surface it so the record is
+                # DLQ'd/logged instead of consumed with no observable effect.
+                _raise_if_no_dispatcher_drop(result, topic)
                 # OMN-14716: the engine catch-all converts a dispatcher crash (a
                 # def-B handler AttributeError, a boundary coercion failure) into a
                 # FAILED result instead of re-raising, and the applier silently
@@ -7721,11 +7849,23 @@ async def _subscribe_contract_topics(
     )
     effective_result_applier = result_applier
     output_topic = _select_dispatch_result_output_topic(contract)
+    # OMN-16798: ``db_io`` used to suppress this applier entirely. That is the
+    # same conflation OMN-16767 removed from arm selection, one hop later:
+    # ``db_io`` declares GOVERNED DB ACCESS (which tables, under which role) and
+    # says nothing about whether a dispatch RESULT must be delivered. Since
+    # OMN-16767 a typed def-B handler on a db_io contract takes the TYPED arm and
+    # returns its declared event model — with the applier suppressed, that model
+    # reached no topic at all and the delegation FSM waited out its budget on an
+    # event that was computed and then dropped. The suppression is also
+    # unnecessary for genuine projection handlers: ``_make_projection_dispatch_
+    # callback`` returns ``None`` on every path, so an applier it is handed is
+    # provably inert (the projection arm still owns its own persistence and
+    # terminal-event emission). Gate on what actually decides deliverability —
+    # a declared publish topic — not on the storage subcontract.
     if (
         effective_result_applier is None
         and contract.event_bus is not None
         and output_topic is not None
-        and not _contract_declares_db_io(contract)
     ):
         # ProtocolEventBusLike is @runtime_checkable; isinstance both narrows
         # the type for mypy and provides a runtime use of the import (avoiding
