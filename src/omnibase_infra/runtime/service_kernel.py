@@ -2827,10 +2827,20 @@ async def bootstrap() -> int:
                 # that has not been explicitly registered, build a DispatchResultApplier
                 # from the contract's own discovered contract_path — this resolves the
                 # actual package-installed YAML, not a guessed path.
+                # OMN-16798: this scan used to skip any contract declaring
+                # ``db_io.db_tables``. That skip is the same conflation OMN-16767
+                # removed from dispatch-arm selection — ``db_io`` declares governed
+                # DB access, not whether a returned model must be published — and
+                # it silently defeated the very drop this scan exists to prevent
+                # (see the comment directly above). ``node_delegation_routing_
+                # reducer`` gained a db_io block in OMN-15631, lost its applier
+                # here, and its ``ModelRoutingDecision`` then reached no topic:
+                # ``onex.evt.omnibase-infra.routing-decision.v1`` stayed at a flat
+                # high-watermark while every delegation timed out waiting for it.
+                # The remaining gates are the honest ones: a declared publish topic
+                # and a non-empty ``published_events`` map — i.e. the contract
+                # itself stating that a returned model belongs on the bus.
                 if event_bus is not None:
-                    from omnibase_infra.runtime.auto_wiring.handler_wiring import (
-                        _contract_declares_db_io,
-                    )
                     from omnibase_infra.runtime.event_bus_subcontract_wiring import (
                         load_published_events_map,
                     )
@@ -2846,8 +2856,6 @@ async def bootstrap() -> int:
                             _contract.event_bus is None
                             or not _contract.event_bus.publish_topics
                         ):
-                            continue
-                        if _contract_declares_db_io(_contract):
                             continue
                         _pe_map = load_published_events_map(
                             Path(_contract.contract_path),

@@ -177,9 +177,17 @@ async def test_kafka_boundary_coerces_wire_dict_to_declared_def_b_model(
     handler = _HandlerSeamProbe()
     engine = _frozen_engine_for(handler)
     event_bus = _dlq_capable_event_bus()
+    # OMN-16798: this handler RETURNS ``_ModelSeamOutput``, so a subscription with
+    # no result applier is a delivery gap, not a happy path — the boundary now
+    # DLQs an output-producing dispatch it cannot deliver rather than committing
+    # the offset over it. A real contract-wired subscription always has an
+    # applier, so supply one here; the OMN-14716 assertions below (the handler
+    # receives its declared model, and nothing is DLQ'd) are unchanged.
+    result_applier = AsyncMock()
     callback = _make_event_bus_callback(
         _TOPIC,
         engine,
+        result_applier=result_applier,
         event_bus=event_bus,
         allowed_dispatcher_ids={"seam-dispatcher"},
     )
