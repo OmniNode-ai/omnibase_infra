@@ -62,6 +62,7 @@ from pathlib import Path
 from urllib.parse import unquote, urlparse
 
 import pytest
+from dotenv import load_dotenv
 
 from tests.helpers.util_migration_shape import (
     fenced_migration_ids,
@@ -364,6 +365,7 @@ def test_psql_stdout_fails_loudly_when_the_command_did_not_run() -> None:
 
     message = str(excinfo.value)
     assert "psql did not run successfully (constraint probe)" in message
+    assert "command=['psql']" in message
     assert "NOT schema drift" in message
     assert "psql: command not found" in message
 
@@ -380,6 +382,7 @@ def test_psql_stdout_returns_stripped_stdout_on_success() -> None:
 @pytest.fixture(scope="module")
 def server() -> Iterator[Server]:
     """A Postgres to talk to: the CI service if present, else a temp cluster."""
+    _load_operator_env()
     external = _server_from_env()
     if external is not None:
         probe = subprocess.run(
@@ -485,11 +488,17 @@ def _psql_stdout(result: subprocess.CompletedProcess[str], what: str) -> str:
     invocation and carries psql's own diagnostics instead of an empty string.
     """
     assert result.returncode == 0, (
-        f"psql did not run successfully ({what}): exit {result.returncode}. "
+        f"psql did not run successfully ({what}): command={result.args!r}; "
+        f"exit {result.returncode}. "
         f"This is a missing/failed prerequisite, NOT schema drift.\n"
         f"stdout={result.stdout!r}\nstderr={result.stderr!r}"
     )
     return result.stdout.strip()
+
+
+def _load_operator_env() -> None:
+    """Load operator-managed integration env without overriding explicit test env."""
+    load_dotenv(Path.home() / ".omnibase" / ".env", override=False)
 
 
 def _psql_script(
