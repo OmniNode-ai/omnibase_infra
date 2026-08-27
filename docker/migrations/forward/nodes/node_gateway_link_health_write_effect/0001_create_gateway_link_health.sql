@@ -168,7 +168,7 @@ ALTER TABLE omninode_internal.gateway_link_health ALTER COLUMN updated_at SET DE
 -- on the managed lane), so there is no drifted row set to reconcile against.
 -- The CREATE TABLE above declares the NOT NULLs and the PRIMARY KEY directly,
 -- which is sufficient on a genuine fresh-create path.
--- ---- END OMN-15376 shape reconciliation ----
+-- ---- END OMN-15376 shape reconciliation: omninode_internal.gateway_link_health ----
 
 CREATE INDEX IF NOT EXISTS idx_gateway_link_health_last_seen_at
     ON omninode_internal.gateway_link_health (last_seen_at);
