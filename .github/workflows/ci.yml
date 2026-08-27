@@ -2253,13 +2253,64 @@ jobs:
       # ($GITHUB_WORKSPACE), not the OCC clone. Pointing it at OCC is the original
       # defect: a check_value's cwd became the receipt store, so the only file an author
       # could reach was their own receipt -- which is why ~32% of the corpus greps itself.
+      #
+      # OMN-16508: the empty-PR_NUMBER branch below used to `exit 0` -- a VACUOUS
+      # PASS. This job's `if:` admits push and merge_group, neither of which
+      # populates `github.event.pull_request.number`, so on those events the step
+      # reported success having evaluated zero check_values. That was not
+      # cosmetic: "Contract Compliance Check" is a GATE_JOBS entry in
+      # scripts/ci/ci_summary_gate.py, and CI Summary is this repo's sole required
+      # branch-protection context, so the umbrella poller counted the vacuous run
+      # as a PROVABLE pass. A green gate that checked nothing never prompts
+      # investigation the way a red one does.
+      #
+      # Live surface: `on.push.branches` here is [main], so this never fired on a
+      # dev commit -- the two real events are push-to-main (release-synced
+      # fast-forwards) and merge_group. merge_group is unexercised today (no repo
+      # in the registry has a queue on dev as of 2026-08-24) but is the more
+      # dangerous half: it would vacate this gate on the merge path itself the
+      # instant a queue is re-enabled, with zero further code change.
+      #
+      # The fix is RESOLUTION, not narrowing. Excluding push/merge_group with a
+      # job-level `if:` would publish a `skipped` check run, which branch
+      # protection counts as passing -- the same skip-vector class the
+      # `reject-required-check-skip-vector` hook (OMN-14863) rejects, and which
+      # ci_summary_gate's external-context assertion treats as a hard failure.
+      # So the job keeps running on all three events and resolves WHICH PR's
+      # check_values apply: the event's own number on pull_request (no API call,
+      # behaviourally identical to pre-fix), the `pr-<n>-` segment of the
+      # gh-readonly-queue ref on merge_group (no API call), or the merged source
+      # PR of the pushed commit via `gh api repos/{repo}/commits/{sha}/pulls`.
+      # Unresolved -- including a transient gh failure -- exits 1. Pinned by
+      # tests/ci/test_resolve_contract_compliance_pr.py.
+      - name: Resolve the PR whose DoD check_values govern this run (OMN-16508)
+        id: dod-pr
+        run: |
+          set -euo pipefail
+          RESOLVED_PR="$(python3 scripts/ci/resolve_contract_compliance_pr.py \
+            --repo "${{ github.repository }}" \
+            --pr-number "${PR_NUMBER:-}" \
+            --merge-group-ref "${MERGE_GROUP_REF:-}" \
+            --sha "${{ github.sha }}" \
+            --event-name "${{ github.event_name }}")"
+          echo "pr_number=${RESOLVED_PR}" >> "$GITHUB_OUTPUT"
+          echo "Contract-compliance DoD scope resolved to PR #${RESOLVED_PR}." >> "$GITHUB_STEP_SUMMARY"
+        env:
+          GH_TOKEN: ${{ github.token }}
+          PR_NUMBER: ${{ github.event.pull_request.number }}
+          MERGE_GROUP_REF: ${{ github.event.merge_group.head_ref }}
+
       - name: Run DoD contract compliance against the product tree (OMN-14436)
         working-directory: onex_change_control
         run: |
           set -euo pipefail
           if [ -z "${PR_NUMBER:-}" ]; then
-            echo "::notice::No PR number (event=${{ github.event_name }}); DoD check_values are PR-scoped. Skipping."
-            exit 0
+            # Unreachable via the resolver step above, which already exits 1 on an
+            # unresolvable scope. Kept as a defence-in-depth fail-closed floor:
+            # never run this gate to a green conclusion without a PR whose
+            # check_values were actually evaluated (OMN-16508).
+            echo "::error::No PR number resolved (event=${{ github.event_name }}); DoD check_values are PR-scoped. Failing closed."
+            exit 1
           fi
           uv run python scripts/ci/run_contract_compliance_check.py \
             --pr "$PR_NUMBER" \
@@ -2269,7 +2320,7 @@ jobs:
             --legacy-allowlist "$GITHUB_WORKSPACE/onex_change_control/scripts/ci/dod_runner_legacy_allowlist.txt"
         env:
           GH_TOKEN: ${{ github.token }}
-          PR_NUMBER: ${{ github.event.pull_request.number }}
+          PR_NUMBER: ${{ steps.dod-pr.outputs.pr_number }}
 
   # ============================================================================
   # Test-Failure Ratchet Gate (OMN-13027, retro A-8)
