@@ -33,7 +33,7 @@ dependencies = [
     # below pulls the merged core #1439 (terminal delegation classes) AND the
     # merged core #1440 (runtime_fanout_resolver, OMN-14403) pre-release --
     # #1440 is a strict descendant of #1439 on core dev.
-    "omnibase-core==0.46.11",
+    "omnibase-core==0.46.13",
     "omnibase-spi==0.23.2",
     # OMN-14190: canonical OCC stamp schema lives in omnibase_compat (OMN-14223).
     "omnibase-compat==0.5.6",
@@ -227,7 +227,7 @@ dev = [
 
 [tool.uv]
 override-dependencies = [
-    "omnibase-core==0.46.11",
+    "omnibase-core==0.46.13",
     "omnibase-spi==0.23.2",
     "omnibase-compat==0.5.6",
 ]
