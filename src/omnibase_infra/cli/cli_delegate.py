@@ -194,11 +194,15 @@ DEFAULT_BUS = BUS_INMEMORY
 def resolve_default_bus(*, kafka_bootstrap: str | None = None) -> tuple[str, str]:
     """Resolve the bus ``--bus`` defaults to when the flag is omitted (OMN-14376).
 
-    Mirrors the SAME probe-then-select precedence the runtime kernel already
-    applies (``service_kernel.py`` lines ~1013-1120,
-    ``backends/auto_configure.py::select_event_bus``) so delegation defaults to
+    Shares the SAME authority the runtime kernel calls
+    (``service_kernel.py::_resolve_event_bus_transport`` ->
+    ``backends/auto_configure.py::resolve_bus_type``) so delegation defaults to
     "the event bus the rest of the system is configured with" instead of a
     source-hardcoded ``inmemory`` — the OMN-14376 root cause.
+
+    OMN-16693 added a ``config.event_bus.type`` tier between the env override
+    and the probe. This path passes none: the CLI has no runtime contract to
+    speak for, so it falls through that tier to the probe exactly as before.
 
     OMN-16678: this is now a thin call into
     :func:`omnibase_infra.backends.auto_configure.resolve_bus_type` — the ONE

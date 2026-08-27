@@ -13,6 +13,21 @@
 # Only ONEX_ENVIRONMENT and ONEX_EVENT_BUS_TYPE override contract values
 # at runtime (applied by bootstrap after config loading).
 #
+# event_bus.type specifically is resolved by ONE authority shared with the
+# `onex delegate` CLI path (omnibase_infra/backends/auto_configure.py ::
+# resolve_bus_type, OMN-16678/OMN-16693). Its order, highest first:
+#
+#   1. explicit argument   -- `--bus <x>` at the CLI, bus_type= in-process
+#   2. ONEX_EVENT_BUS_TYPE -- this file's documented operator override
+#   3. event_bus.type      -- the value declared below
+#   4. live broker probe   -- only when none of the above declares an intent
+#
+# A declared event_bus.type is honoured WITHOUT probing the broker: an
+# unreachable broker no longer silently downgrades a `kafka` contract to the
+# in-memory transport, and a transient broker-metadata timeout no longer fails
+# boot on an otherwise unambiguous contract. An unrecognised value on ANY tier
+# raises at boot rather than falling through to the probe.
+#
 # When this file does NOT exist, the kernel falls back to ONEX_GROUP_ID and
 # model defaults. Topics are ALWAYS derived from contract event_bus
 # declarations (OMN-8784); there is no env-var override for topics.

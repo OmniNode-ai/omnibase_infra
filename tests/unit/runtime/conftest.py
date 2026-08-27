@@ -215,7 +215,10 @@ def mock_inmemory_runtime_config(
     mechanism (documented in runtime_config.yaml) to force inmemory event bus.
     This is more robust than patching load_runtime_config because:
     1. It uses the documented environment variable override mechanism
-    2. The kernel explicitly checks ONEX_EVENT_BUS_TYPE before config.event_bus.type
+    2. The resolution authority ranks ONEX_EVENT_BUS_TYPE above
+       config.event_bus.type (backends/auto_configure.py::resolve_bus_type;
+       order: explicit argument > env var > config > probe). Since OMN-16693 the
+       kernel reads no bus env var itself — it delegates to that authority.
     3. It doesn't rely on patch timing
 
     The default runtime_config.yaml has event_bus.type='kafka', which requires

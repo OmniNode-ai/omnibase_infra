@@ -38,16 +38,46 @@ SUPPORTED_BUS_TYPES: tuple[str, ...] = (BUS_INMEMORY, BUS_KAFKA)
 # call site instead of only for ``select_event_bus``.
 BUS_TYPE_OVERRIDE_ENV = "ONEX_EVENT_BUS_TYPE"
 
-# Accepted override spellings. ``cloud`` is broker-backed and resolves to the
-# Kafka transport — ``service_kernel.py`` already classifies it that way
-# (``_broker_required_types = {"kafka", "cloud"}``), so accepting it here keeps
-# one vocabulary rather than making a valid kernel value a hard error one layer
-# down.
-_OVERRIDE_ALIASES: dict[str, str] = {
+# The ONE accepted vocabulary, shared by EVERY tier (OMN-16693). ``cloud`` is
+# broker-backed and resolves to the Kafka transport; ``EnumEventBusType.CLOUD``
+# is a production-safe value a runtime contract may legally declare, so a tier
+# that rejected it would turn a valid config into a hard boot error.
+#
+# Before OMN-16693 this table was consulted only by the env-override tier, so
+# ``cloud`` resolved through ``ONEX_EVENT_BUS_TYPE`` and raised through
+# ``explicit_bus`` — the same "two tiers disagree about the same word" defect
+# OMN-16678 was opened to remove, one layer down.
+_BUS_ALIASES: dict[str, str] = {
     "inmemory": BUS_INMEMORY,
     "kafka": BUS_KAFKA,
     "cloud": BUS_KAFKA,
 }
+
+
+def _normalize_bus_value(raw: str, *, source: str, remedy: str) -> str:
+    """Map one tier's raw value onto :data:`SUPPORTED_BUS_TYPES`, or raise.
+
+    Args:
+        raw: The value as the tier received it (case/whitespace insensitive).
+        source: Human-readable origin, named in the error so the operator knows
+            WHICH surface to correct (an env var, a flag, a contract field).
+        remedy: The concrete next action for this tier.
+
+    Returns:
+        The canonical bus name.
+
+    Raises:
+        ValueError: ``raw`` names no known transport. Never degrades to "probe
+            and hope" — a typo must not read as "no selection"
+            (``feedback_no_defensive_no_defaults``).
+    """
+    resolved = _BUS_ALIASES.get(raw.strip().lower())
+    if resolved is None:
+        raise ValueError(
+            f"{source} {raw!r} is not a recognised event bus. "
+            f"Valid values: {', '.join(sorted(_BUS_ALIASES))}. {remedy}"
+        )
+    return resolved
 
 
 class EventBusResolutionAmbiguousError(RuntimeError):
@@ -116,6 +146,7 @@ def discover_backends() -> list[ModelProbeResult]:
 def resolve_bus_type(
     *,
     explicit_bus: str | None = None,
+    config_bus: str | None = None,
     kafka_bootstrap: str | None = None,
     authority_topic: str | None = None,
 ) -> tuple[str, str]:
@@ -134,7 +165,23 @@ def resolve_bus_type(
        (case- and whitespace-insensitive); empty or unset falls through. An
        unrecognised value raises rather than degrading to "probe and hope" — a
        typo in an override must not read as "no override".
-    3. **Live broker probe** (:func:`~omnibase_infra.backends.backend_probe.probe_kafka`),
+    3. **Declared config** (``config.event_bus.type``, OMN-16693). The runtime
+       contract's own statement of intent. It ranks BELOW the env var, not
+       above: ``contracts/runtime/runtime_config.yaml`` ships
+       ``event_bus.type: kafka`` explicitly and documents ``ONEX_EVENT_BUS_TYPE``
+       as its override, and eight CI workflows set that var to ``inmemory``
+       against those same contracts. A checked-in YAML baseline is a different
+       kind of "explicit" from a flag typed at invocation, which is why tier 1
+       stays reserved for the latter.
+
+       This tier exists because before OMN-16693 the runtime kernel supplied no
+       tier at all — it read ``config.event_bus.type`` only to decide whether to
+       forward ``KAFKA_BOOTSTRAP_SERVERS``, then let the probe pick the
+       transport. A contract declaring ``kafka`` could therefore boot in-memory
+       whenever the broker happened to be down (the OMN-14376 failure class),
+       and a transient metadata timeout could fail boot outright even though
+       the contract was unambiguous.
+    4. **Live broker probe** (:func:`~omnibase_infra.backends.backend_probe.probe_kafka`),
        mapped totally:
 
        * ``AUTHORITATIVE`` / ``HEALTHY`` -> ``kafka``. Determinate positive.
@@ -151,6 +198,8 @@ def resolve_bus_type(
 
     Args:
         explicit_bus: Caller-supplied transport, or ``None`` to auto-resolve.
+        config_bus: The transport declared by ``config.event_bus.type``, or
+            ``None`` when the caller has no contract to speak for (the CLI).
         kafka_bootstrap: Broker override. ``None`` lets ``probe_kafka`` resolve
             ``KAFKA_BOOTSTRAP_SERVERS`` itself — the already-approved boundary
             for that lookup.
@@ -164,19 +213,18 @@ def resolve_bus_type(
         naming which tier decided, for logging and receipts.
 
     Raises:
-        ValueError: ``explicit_bus`` or ``ONEX_EVENT_BUS_TYPE`` names a
-            transport that does not exist.
+        ValueError: ``explicit_bus``, ``ONEX_EVENT_BUS_TYPE``, or ``config_bus``
+            names a transport that does not exist.
         EventBusResolutionAmbiguousError: the probe result is indeterminate and
-            no explicit selection was supplied to disambiguate it.
+            nothing above it declared an intent to disambiguate it.
     """
     # Tier 1 — explicit caller selection.
     if explicit_bus is not None:
-        normalized = explicit_bus.strip().lower()
-        if normalized not in SUPPORTED_BUS_TYPES:
-            raise ValueError(
-                f"Unsupported event bus {explicit_bus!r}. "
-                f"Choose one of: {', '.join(SUPPORTED_BUS_TYPES)}."
-            )
+        normalized = _normalize_bus_value(
+            explicit_bus,
+            source="Explicit event bus selection",
+            remedy="Pass one of those values instead.",
+        )
         return normalized, f"explicit bus selection: {normalized}"
 
     # Tier 2 — the operator override, honoured identically by every call site.
@@ -191,17 +239,25 @@ def resolve_bus_type(
     # and assert the override actually fires.
     raw_override = os.getenv("ONEX_EVENT_BUS_TYPE", "").strip().lower()
     if raw_override:
-        resolved_override = _OVERRIDE_ALIASES.get(raw_override)
-        if resolved_override is None:
-            raise ValueError(
-                f"{BUS_TYPE_OVERRIDE_ENV}={raw_override!r} is not a recognised "
-                f"event bus. Valid values: "
-                f"{', '.join(sorted(_OVERRIDE_ALIASES))}. "
-                f"Unset it to resolve the transport by probing the broker."
-            )
+        resolved_override = _normalize_bus_value(
+            raw_override,
+            source=f"{BUS_TYPE_OVERRIDE_ENV} value",
+            remedy="Unset it to fall through to the declared config or the broker probe.",
+        )
         return resolved_override, f"{BUS_TYPE_OVERRIDE_ENV}={raw_override}"
 
-    # Tier 3 — probe. Total over EnumProbeState; no implicit default branch.
+    # Tier 3 — the transport the runtime contract declares (OMN-16693). Honoured
+    # without probing: the contract already stated the answer, and probing it
+    # only reintroduces the chance to contradict it.
+    if config_bus is not None:
+        resolved_config = _normalize_bus_value(
+            config_bus,
+            source="config.event_bus.type",
+            remedy="Correct the runtime contract's event_bus.type field.",
+        )
+        return resolved_config, f"config.event_bus.type={config_bus}"
+
+    # Tier 4 — probe. Total over EnumProbeState; no implicit default branch.
     probe = probe_kafka(
         bootstrap_servers=kafka_bootstrap, authority_topic=authority_topic
     )
@@ -214,8 +270,9 @@ def resolve_bus_type(
         f"accepted a TCP connection but its serving state could not be "
         f"established, so the transport cannot be resolved repeatably. "
         f"Select one explicitly: pass the bus argument (e.g. "
-        f"'--bus {BUS_KAFKA}' / '--bus {BUS_INMEMORY}') or set "
-        f"{BUS_TYPE_OVERRIDE_ENV}={BUS_KAFKA}|{BUS_INMEMORY}."
+        f"'--bus {BUS_KAFKA}' / '--bus {BUS_INMEMORY}'), set "
+        f"{BUS_TYPE_OVERRIDE_ENV}={BUS_KAFKA}|{BUS_INMEMORY}, or declare "
+        f"event_bus.type in the runtime contract."
     )
 
 
@@ -232,7 +289,12 @@ def select_event_bus(
     This function owns CONSTRUCTION only. The decision of which transport to
     build belongs to :func:`resolve_bus_type` (OMN-16678), which is shared with
     ``cli/cli_delegate.py::resolve_default_bus`` so both paths apply one
-    resolution order: explicit argument > ``ONEX_EVENT_BUS_TYPE`` > probe.
+    resolution order: explicit argument > ``ONEX_EVENT_BUS_TYPE`` >
+    ``config.event_bus.type`` > probe.
+
+    The runtime kernel resolves first and passes the answer back in as
+    ``bus_type`` (OMN-16693), so the config tier is applied there and tier 1
+    short-circuits here — one decision per boot, never two.
 
     Behavior change (OMN-16678): the old ``REACHABLE`` branch here built a Kafka
     bus "despite the probe result" while the delegate path mapped the identical
