@@ -17,12 +17,17 @@ The kernel is responsible for:
 Event Bus Selection:
     The kernel supports two event bus implementations:
     - EventBusKafka: For production use with Kafka/Redpanda (default)
-    - EventBusInmemory: For testing only (via ONEX_EVENT_BUS_TYPE env override)
+    - EventBusInmemory: For testing only
 
-    Selection is determined by:
-    - ONEX_EVENT_BUS_TYPE environment variable (highest priority, testing only)
-    - KAFKA_BOOTSTRAP_SERVERS environment variable (if set, uses Kafka)
-    - config.event_bus.type field in runtime_config.yaml (defaults to kafka)
+    The kernel does NOT decide which one (OMN-16693). It delegates to the single
+    resolution authority, backends/auto_configure.py::resolve_bus_type, which is
+    shared with the `onex delegate` CLI path and applies one order:
+
+        explicit argument > ONEX_EVENT_BUS_TYPE > config.event_bus.type > probe
+
+    KAFKA_BOOTSTRAP_SERVERS no longer participates in the CHOICE — it is
+    validated after the fact: resolving Kafka without a broker address fails
+    fast rather than falling back to an implicit localhost:9092.
 
 Usage:
     # Run with default contracts directory (./contracts)
@@ -878,6 +883,74 @@ def _topic_matches_pattern(topic: str, pattern: str) -> bool:
     )
 
 
+def _resolve_event_bus_transport(
+    *,
+    config_bus_type: str | None,
+    kafka_bootstrap_servers: str | None,
+    correlation_id: UUID,
+) -> tuple[str, str]:
+    """Resolve WHICH event-bus transport this boot uses, and prove it can connect.
+
+    The kernel owns exactly one thing here: the fail-fast check that a
+    broker-backed transport actually has a broker address. It owns NO part of
+    the choice itself — that belongs to
+    :func:`omnibase_infra.backends.auto_configure.resolve_bus_type`, the single
+    authority shared with ``cli/cli_delegate.py::resolve_default_bus``
+    (OMN-16678), applying one order: explicit argument > ``ONEX_EVENT_BUS_TYPE``
+    > ``config.event_bus.type`` > broker probe.
+
+    Before OMN-16693 this file carried a SECOND ``ONEX_EVENT_BUS_TYPE`` read
+    with its own ladder, including a branch that warned the override value was
+    unrecognised, announced it had reverted to the declared config value, and
+    continued — into a call that raises on that same value. The revert was
+    therefore unreachable and the warning was false: a typo hard-failed boot
+    while the log told the operator the runtime had recovered. Delegating
+    removes the branch and the chance of the two ladders drifting apart again.
+
+    Args:
+        config_bus_type: The transport the runtime contract declares
+            (``config.event_bus.type``), or ``None`` when nothing declares one.
+        kafka_bootstrap_servers: ``KAFKA_BOOTSTRAP_SERVERS`` as read at boot.
+        correlation_id: Correlation ID for the boot sequence.
+
+    Returns:
+        ``(bus_type, reason)`` — the resolved transport and the provenance
+        naming which tier decided it, for the boot log.
+
+    Raises:
+        ProtocolConfigurationError: a broker-backed transport was resolved but
+            no bootstrap servers are configured. Fails here rather than letting
+            a client fall back to an implicit ``localhost:9092``.
+        ValueError: a bus value on any tier names a transport that does not exist.
+        EventBusResolutionAmbiguousError: nothing declared an intent and the
+            broker probe came back indeterminate.
+    """
+    from omnibase_infra.backends.auto_configure import BUS_KAFKA, resolve_bus_type
+
+    resolved_bus_type, reason = resolve_bus_type(
+        config_bus=config_bus_type,
+        kafka_bootstrap=kafka_bootstrap_servers or None,
+    )
+
+    if resolved_bus_type == BUS_KAFKA and not kafka_bootstrap_servers:
+        context = ModelInfraErrorContext(
+            transport_type=EnumInfraTransportType.KAFKA,
+            operation="configure_event_bus",
+            correlation_id=correlation_id,
+        )
+        raise ProtocolConfigurationError(
+            f"Kafka event bus resolved ({reason}) but KAFKA_BOOTSTRAP_SERVERS "
+            f"environment variable is not set. Set KAFKA_BOOTSTRAP_SERVERS to the "
+            f"broker address (e.g., 'kafka:9092'), or select the in-memory "
+            f"transport for local development. Resolution order is: explicit "
+            f"argument > ONEX_EVENT_BUS_TYPE > config.event_bus.type > broker probe.",
+            context=context,
+            parameter="KAFKA_BOOTSTRAP_SERVERS",
+        )
+
+    return resolved_bus_type, reason
+
+
 # ai-slop-ok: pre-existing === separators in example startup log in docstring
 async def bootstrap() -> int:
     """Bootstrap the ONEX runtime from contracts.
@@ -1114,8 +1187,9 @@ async def bootstrap() -> int:
         # The ModelEventBusConfig validator already rejects non-production-safe types
         # at model construction time. This runtime assertion is a defense-in-depth
         # guard that catches any bypass (e.g., mock configs in tests that skip
-        # Pydantic validation). The ONEX_EVENT_BUS_TYPE env var override below
-        # can still select inmemory for testing — that path is separate.
+        # Pydantic validation). The env-var override tier below can still select
+        # inmemory for testing — that path is separate, and it outranks this
+        # declared value (see _resolve_event_bus_transport).
         if hasattr(config.event_bus.type, "is_production_safe"):
             if not config.event_bus.type.is_production_safe:
                 context = ModelInfraErrorContext(
@@ -1131,11 +1205,11 @@ async def bootstrap() -> int:
                 )
 
         # 3. Create event bus
-        # Dispatch based on configuration or environment variable:
-        # - ONEX_EVENT_BUS_TYPE env var overrides config.event_bus.type
-        # - If KAFKA_BOOTSTRAP_SERVERS env var is set, use EventBusKafka
-        # - If config.event_bus.type == "kafka", use EventBusKafka
-        # - Otherwise, use EventBusInmemory for testing (via ONEX_EVENT_BUS_TYPE override)
+        # WHICH transport to build is decided by the single resolution authority
+        # (backends/auto_configure.py::resolve_bus_type) via
+        # _resolve_event_bus_transport below — this function holds no bus-type
+        # precedence logic of its own (OMN-16693).
+        #
         # Environment override takes precedence over config for environment field.
         # KAFKA_ENVIRONMENT is the authoritative source for the Kafka topic prefix.
         # ONEX_ENVIRONMENT is a general environment name (not always a valid Kafka env value)
@@ -1149,84 +1223,29 @@ async def bootstrap() -> int:
         if not kafka_bootstrap_servers:
             logger.warning(
                 "KAFKA_BOOTSTRAP_SERVERS is not set. "
-                "Kafka event bus will not be available unless ONEX_EVENT_BUS_TYPE=kafka "
-                "is also requested, in which case startup will fail. "
+                "Kafka event bus will not be available unless the resolved "
+                "transport is kafka, in which case startup will fail. "
                 "Set KAFKA_BOOTSTRAP_SERVERS to the broker address "
                 "(e.g., 'redpanda:9092' for local Docker, or a remote broker address) to enable Kafka. "
                 "(correlation_id=%s)",
                 correlation_id,
             )
 
-        # Check for ONEX_EVENT_BUS_TYPE environment variable override
-        # This allows CI/testing environments to force inmemory event bus
-        # even when the config file defaults to kafka.
-        event_bus_type_override = os.getenv("ONEX_EVENT_BUS_TYPE", "").lower()
-        if event_bus_type_override:
-            logger.debug(
-                "Event bus type override from ONEX_EVENT_BUS_TYPE=%s (correlation_id=%s)",
-                event_bus_type_override,
-                correlation_id,
-            )
-
-        # Determine effective event bus type with override precedence:
-        # 1. ONEX_EVENT_BUS_TYPE env var (highest priority)
-        # 2. KAFKA_BOOTSTRAP_SERVERS env var (if set, implies kafka)
-        # 3. config.event_bus.type (from runtime_config.yaml)
-        # Both "kafka" and "cloud" types require a broker connection.
-        _broker_required_types = {"kafka", "cloud"}
-        if event_bus_type_override == "inmemory":
-            # Explicit inmemory override - use inmemory regardless of other config
-            use_kafka = False
-            logger.info(
-                "Using inmemory event bus (ONEX_EVENT_BUS_TYPE override) (correlation_id=%s)",
-                correlation_id,
-            )
-        elif event_bus_type_override in _broker_required_types:
-            # Explicit kafka/cloud override - validate that bootstrap_servers is available
-            use_kafka = True
-        elif event_bus_type_override and event_bus_type_override not in (
-            "inmemory",
-            *_broker_required_types,
-        ):
-            # Invalid override value - warn and fall back to config
-            logger.warning(
-                "Invalid ONEX_EVENT_BUS_TYPE value '%s', expected 'inmemory', 'kafka', or 'cloud'. "
-                "Falling back to config.event_bus.type='%s' (correlation_id=%s)",
-                event_bus_type_override,
-                config.event_bus.type,
-                correlation_id,
-            )
-            use_kafka = (
-                bool(kafka_bootstrap_servers)
-                or config.event_bus.type in _broker_required_types
-            )
-        else:
-            # No override - use original logic
-            # Explicit bool evaluation (not truthy string) for kafka usage.
-            # KAFKA_BOOTSTRAP_SERVERS env var takes precedence over config.event_bus.type.
-            # This prevents implicit "kafka but localhost" fallback scenarios.
-            # Both "kafka" and "cloud" types require a broker connection.
-            use_kafka = (
-                bool(kafka_bootstrap_servers)
-                or config.event_bus.type in _broker_required_types
-            )
-
-        # Validate bootstrap_servers is provided when kafka is requested via config
-        # This prevents confusing implicit localhost:9092 fallback
-        if use_kafka and not kafka_bootstrap_servers:
-            context = ModelInfraErrorContext(
-                transport_type=EnumInfraTransportType.KAFKA,
-                operation="configure_event_bus",
-                correlation_id=correlation_id,
-            )
-            raise ProtocolConfigurationError(
-                "Kafka event bus requested (config.event_bus.type='kafka') but "
-                "KAFKA_BOOTSTRAP_SERVERS environment variable is not set. "
-                "Set KAFKA_BOOTSTRAP_SERVERS to the broker address (e.g., 'kafka:9092') "
-                "or use event_bus.type='inmemory' for local development.",
-                context=context,
-                parameter="KAFKA_BOOTSTRAP_SERVERS",
-            )
+        # Resolve the transport through the single authority. This kernel reads
+        # no bus-type environment variable and applies no precedence of its own
+        # (OMN-16693) — it consumes the answer and the provenance behind it.
+        resolved_bus_type, bus_resolution_reason = _resolve_event_bus_transport(
+            config_bus_type=str(config.event_bus.type),
+            kafka_bootstrap_servers=kafka_bootstrap_servers,
+            correlation_id=correlation_id,
+        )
+        use_kafka = resolved_bus_type == "kafka"
+        logger.info(
+            "Event bus transport resolved to %s (%s) (correlation_id=%s)",
+            resolved_bus_type,
+            bus_resolution_reason,
+            correlation_id,
+        )
 
         # Validate that the broker address is not a local/container broker.
         # This guard runs whenever Kafka is selected AND a bootstrap_servers
@@ -1248,15 +1267,17 @@ async def bootstrap() -> int:
         event_bus: object
         event_bus_type: str
 
-        # OMN-7076: Use registry auto-configuration for bus selection.
-        # select_event_bus() probes onex.backends entry points and selects
-        # the best available backend, replacing the previous inline if/else.
+        # OMN-7076: Use registry auto-configuration for bus CONSTRUCTION.
+        # The transport was already decided above; passing it back in as
+        # bus_type keeps select_event_bus from resolving a second time
+        # (OMN-16693) — one decision per boot, never two.
         from omnibase_infra.backends.auto_configure import select_event_bus
 
         # Why: Cast documents the narrowed runtime protocol for downstream readers.
         event_bus = cast(  # type: ignore[redundant-cast]
             "EventBusInmemory | EventBusKafka",
             select_event_bus(
+                bus_type=resolved_bus_type,
                 kafka_bootstrap_servers=kafka_bootstrap_servers if use_kafka else None,
                 environment=environment,
                 consumer_group=config.consumer_group,

@@ -188,6 +188,109 @@ class TestResolutionOrder:
         ]
 
 
+class TestDeclaredConfigTier:
+    """The config tier (OMN-16693) sits between the env override and the probe.
+
+    OMN-16678 shipped three tiers, but the runtime kernel supplied none of them
+    — it never passed ``explicit_bus``, so ``config.event_bus.type`` reached no
+    decision and the live probe chose the transport for every deployed runtime.
+
+    Order is ``explicit argument > ONEX_EVENT_BUS_TYPE > config > probe``, NOT
+    config-first. ``contracts/runtime/runtime_config.yaml`` ships
+    ``event_bus.type: kafka`` explicitly and documents ``ONEX_EVENT_BUS_TYPE``
+    as its override, and eight CI workflows set that var to ``inmemory``
+    against those same contracts. A checked-in YAML baseline is not the same
+    kind of explicit as a ``--bus`` flag typed at invocation.
+    """
+
+    def test_config_beats_the_probe(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        monkeypatch.delenv(BUS_TYPE_OVERRIDE_ENV, raising=False)
+        calls = _stub_probe(monkeypatch, EnumProbeState.DISCOVERED)
+
+        bus, reason = resolve_bus_type(config_bus=BUS_KAFKA, kafka_bootstrap=_BROKER)
+
+        assert bus == BUS_KAFKA
+        assert "config.event_bus.type" in reason
+        assert calls == [], "a declared transport must not be probed against"
+
+    def test_env_override_beats_config(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        monkeypatch.setenv(BUS_TYPE_OVERRIDE_ENV, "inmemory")
+        _stub_probe(monkeypatch, EnumProbeState.AUTHORITATIVE)
+
+        bus, reason = resolve_bus_type(config_bus=BUS_KAFKA, kafka_bootstrap=_BROKER)
+
+        assert bus == BUS_INMEMORY
+        assert BUS_TYPE_OVERRIDE_ENV in reason
+
+    def test_explicit_argument_beats_config(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        _stub_probe(monkeypatch, EnumProbeState.AUTHORITATIVE)
+
+        bus, reason = resolve_bus_type(explicit_bus=BUS_INMEMORY, config_bus=BUS_KAFKA)
+
+        assert bus == BUS_INMEMORY
+        assert "explicit" in reason
+
+    def test_absent_config_falls_through_to_the_probe(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        monkeypatch.delenv(BUS_TYPE_OVERRIDE_ENV, raising=False)
+        calls = _stub_probe(monkeypatch, EnumProbeState.AUTHORITATIVE)
+
+        bus, _reason = resolve_bus_type(config_bus=None, kafka_bootstrap=_BROKER)
+
+        assert bus == BUS_KAFKA
+        assert len(calls) == 1
+
+    def test_unrecognised_config_value_fails_loud_naming_its_source(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        monkeypatch.delenv(BUS_TYPE_OVERRIDE_ENV, raising=False)
+        _stub_probe(monkeypatch, EnumProbeState.AUTHORITATIVE)
+
+        with pytest.raises(ValueError) as excinfo:
+            resolve_bus_type(config_bus="redpanda", kafka_bootstrap=_BROKER)
+
+        message = str(excinfo.value)
+        assert "config.event_bus.type" in message
+        assert "redpanda" in message
+
+
+class TestOneVocabularyAcrossTiers:
+    """Every tier accepts the same spellings. A word valid in one is valid in all.
+
+    Pre-OMN-16693, ``cloud`` resolved fine through ``ONEX_EVENT_BUS_TYPE`` and
+    raised through ``explicit_bus`` — the same class of divergence OMN-16678
+    was opened to remove. ``config.event_bus.type`` can legally hold
+    ``EnumEventBusType.CLOUD``, which made the asymmetry reachable.
+    """
+
+    @pytest.mark.parametrize("raw", ["cloud", "CLOUD", " Cloud "])
+    def test_cloud_is_accepted_by_every_tier(
+        self, raw: str, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        _stub_probe(monkeypatch, EnumProbeState.DISCOVERED)
+
+        monkeypatch.delenv(BUS_TYPE_OVERRIDE_ENV, raising=False)
+        assert resolve_bus_type(explicit_bus=raw)[0] == BUS_KAFKA
+        assert resolve_bus_type(config_bus=raw)[0] == BUS_KAFKA
+
+        monkeypatch.setenv(BUS_TYPE_OVERRIDE_ENV, raw)
+        assert resolve_bus_type()[0] == BUS_KAFKA
+
+    @pytest.mark.parametrize("raw", [" KAFKA ", "InMemory"])
+    def test_config_tier_is_case_and_whitespace_insensitive(
+        self, raw: str, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        monkeypatch.delenv(BUS_TYPE_OVERRIDE_ENV, raising=False)
+        _stub_probe(monkeypatch, EnumProbeState.DISCOVERED)
+
+        bus, _reason = resolve_bus_type(config_bus=raw, kafka_bootstrap=_BROKER)
+
+        assert bus == (BUS_INMEMORY if raw.strip().lower() == "inmemory" else BUS_KAFKA)
+
+
 class TestProbeTierIsTotalAndDeterministic:
     """Every probe state maps to exactly one outcome, and it never varies."""
 
