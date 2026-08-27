@@ -168,7 +168,6 @@ delegate = "omnibase_infra.cli.cli_delegate:delegate_command"
 kafka = "omnibase_infra.cli.cli_kafka:kafka"
 node = "omnibase_infra.cli.cli_node:run_node_by_name"
 occ = "omnibase_infra.cli.cli_occ:occ"
-run = "omnibase_infra.cli.cli_node:run_node_by_name"
 skill = "omnibase_infra.cli.cli_skill:run_skill_by_name"
 
 [project.entry-points."onex.backends"]

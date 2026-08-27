@@ -1,7 +1,7 @@
 # SPDX-FileCopyrightText: 2025 OmniNode.ai Inc.
 # SPDX-License-Identifier: MIT
 
-"""Receipt-mode execution for ``onex node`` / ``onex run`` (OMN-13094).
+"""Receipt-mode execution for ``onex node`` (OMN-13094).
 
 Layer A of the skill-output-suppression slice
 (``docs/plans/2026-06-12-skill-output-suppression-plan.md``, Phase 2 item 1):

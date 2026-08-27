@@ -41,7 +41,7 @@ Before this, ``installed_omnimarket_commit() is None`` unconditionally
 short-circuited to a silent no-op, so the exact regression this module
 exists to catch -- ``omnimarket`` silently reverting from a git co-install to
 completely absent -- fell through the guard undetected. The only symptom was
-a generic, unhelpful ``onex skill``/``onex run`` "Unknown node" error with no
+a generic, unhelpful ``onex skill``/``onex node`` "Unknown node" error with no
 pointer back to this module or the repair command (the OMN-13829 ->
 OMN-14060 -> OMN-14531 recurrence: each time, the venv drifted from
 "installed" to "absent", not merely "stale", and the pre-flight guard's
@@ -189,7 +189,7 @@ def check_omnimarket_drift(
             "omnimarket is NOT INSTALLED from git in this interpreter "
             "(absent, or installed from PyPI/a non-VCS source), but a "
             f"canonical clone exists at $OMNI_HOME/omnimarket (HEAD "
-            f"{canonical[:12]}). 'onex skill'/'onex run'/'onex delegate' "
+            f"{canonical[:12]}). 'onex skill'/'onex node'/'onex delegate' "
             "dispatch for market-provided nodes (e.g. node_aislop_sweep) "
             "will fail with 'Unknown node'. Repair with: "
             "scripts/install-node-skill-package.sh --execute (or "
