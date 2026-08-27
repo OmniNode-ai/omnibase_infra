@@ -605,3 +605,179 @@ class TestHandlerCredentialsArtifact:
                 env_output_path="out.env",
                 credentials_output_path="   ",
             )
+
+
+# --- connect_cloud policy end-to-end through the handler (OMN-16038) ---
+
+_CONNECT_CLOUD_SECRET = "s3cr3t-not-a-real-client-secret-0f9a"
+
+
+@pytest.fixture
+def connect_cloud_adapter() -> AdapterFakeInput:
+    """Adapter driving the full connect_cloud prompt flow."""
+    return AdapterFakeInput(
+        responses={
+            "gateway_base_url": "https://api.omninode.ai",
+            "tenant_slug": "acme",
+            "gateway_client_id": "ga-acme-edge",
+            "gateway_token_endpoint": (
+                "https://keycloak.omninode.ai/realms/onex/protocol/openid-connect/token"
+            ),
+            "gateway_client_secret": _CONNECT_CLOUD_SECRET,
+        }
+    )
+
+
+class TestConnectCloudPolicy:
+    """The connect_cloud policy's two operator-visible modes: dry-run and live."""
+
+    @pytest.mark.asyncio
+    async def test_dry_run_renders_the_flow_and_writes_nothing(
+        self,
+        connect_cloud_adapter: AdapterFakeInput,
+        tmp_path: Path,
+    ) -> None:
+        credentials_path = tmp_path / "credentials.json"
+        input_model = ModelOnboardingInput(
+            policy_name="connect_cloud",
+            dry_run=True,
+            credentials_output_path=str(credentials_path),
+        )
+
+        output = await handle_onboarding(
+            input_model, input_adapter=connect_cloud_adapter
+        )
+
+        assert output.success is True
+        assert output.visited_steps == [
+            "gateway_base_url",
+            "tenant_slug",
+            "gateway_client_id",
+            "gateway_token_endpoint",
+            "gateway_client_secret",
+        ]
+        assert not credentials_path.exists()
+        assert output.credentials_output_path_written is None
+        assert "Dry run" in output.rendered_output
+
+    @pytest.mark.asyncio
+    async def test_live_run_writes_the_credential_in_the_store_shape(
+        self,
+        connect_cloud_adapter: AdapterFakeInput,
+        tmp_path: Path,
+    ) -> None:
+        """The artifact must be the flat {ref: secret} document ``onex auth`` reads."""
+        credentials_path = tmp_path / "credentials.json"
+        input_model = ModelOnboardingInput(
+            policy_name="connect_cloud",
+            dry_run=False,
+            legacy_env_output=False,
+            overlay_output_path=str(tmp_path / "overlay.yaml"),
+            credentials_output_path=str(credentials_path),
+        )
+
+        output = await handle_onboarding(
+            input_model, input_adapter=connect_cloud_adapter
+        )
+
+        assert output.credentials_output_path_written == str(credentials_path)
+        assert stat.S_IMODE(credentials_path.stat().st_mode) == 0o600
+
+        payload = json.loads(credentials_path.read_text(encoding="utf-8"))
+        assert payload == {"acme-gateway": _CONNECT_CLOUD_SECRET}
+
+    @pytest.mark.asyncio
+    async def test_live_run_credential_resolves_through_the_gateway_store(
+        self,
+        connect_cloud_adapter: AdapterFakeInput,
+        tmp_path: Path,
+    ) -> None:
+        """Proof the shape is right: StoreGatewayCredential reads it back."""
+        from omnibase_infra.gateway.client.store_gateway_credential import (
+            StoreGatewayCredential,
+        )
+
+        onex_home = tmp_path / ".onex"
+        input_model = ModelOnboardingInput(
+            policy_name="connect_cloud",
+            dry_run=False,
+            legacy_env_output=False,
+            overlay_output_path=str(tmp_path / "overlay.yaml"),
+            credentials_output_path=str(onex_home / "credentials.json"),
+        )
+
+        output = await handle_onboarding(
+            input_model, input_adapter=connect_cloud_adapter
+        )
+        assert output.credentials_output_path_written is not None
+
+        # The policy owns the secret file; config.yaml is written by
+        # ``onex auth login``. Compose the two and the credential resolves.
+        store = StoreGatewayCredential(onex_home=onex_home)
+        env = output.provenance.env_dict if output.provenance is not None else {}
+        store.config_path.write_text(
+            "gateway:\n"
+            f"  tenant_slug: {env['ONEX_GATEWAY_TENANT_SLUG']}\n"
+            f"  client_id: {env['ONEX_GATEWAY_CLIENT_ID']}\n"
+            f"  client_secret_ref: {env['ONEX_GATEWAY_CLIENT_SECRET_REF']}\n"
+            f"  token_endpoint: {env['ONEX_GATEWAY_TOKEN_ENDPOINT']}\n"
+            f"  base_url: {env['ONEX_GATEWAY_BASE_URL']}\n"
+            "  edge_instance_id: test-host\n"
+        )
+
+        credential = store.load()
+        assert credential.client_id == "ga-acme-edge"
+        assert credential.client_secret.get_secret_value() == _CONNECT_CLOUD_SECRET
+
+    @pytest.mark.asyncio
+    async def test_secret_is_absent_from_every_returned_surface(
+        self,
+        connect_cloud_adapter: AdapterFakeInput,
+        tmp_path: Path,
+    ) -> None:
+        """AC3 — no secret in the render, the step receipts, or any dump."""
+        input_model = ModelOnboardingInput(
+            policy_name="connect_cloud",
+            dry_run=False,
+            legacy_env_output=False,
+            overlay_output_path=str(tmp_path / "overlay.yaml"),
+            credentials_output_path=str(tmp_path / "credentials.json"),
+        )
+
+        output = await handle_onboarding(
+            input_model, input_adapter=connect_cloud_adapter
+        )
+
+        assert _CONNECT_CLOUD_SECRET not in output.rendered_output
+        assert _CONNECT_CLOUD_SECRET not in output.model_dump_json()
+        assert _CONNECT_CLOUD_SECRET not in (tmp_path / "overlay.yaml").read_text()
+
+    @pytest.mark.asyncio
+    async def test_secret_is_absent_from_the_dry_run_render(
+        self,
+        connect_cloud_adapter: AdapterFakeInput,
+    ) -> None:
+        output = await handle_onboarding(
+            ModelOnboardingInput(policy_name="connect_cloud", dry_run=True),
+            input_adapter=connect_cloud_adapter,
+        )
+
+        assert _CONNECT_CLOUD_SECRET not in output.rendered_output
+        assert _CONNECT_CLOUD_SECRET not in output.model_dump_json()
+
+    @pytest.mark.asyncio
+    async def test_live_run_without_a_credentials_path_refuses(
+        self,
+        connect_cloud_adapter: AdapterFakeInput,
+        tmp_path: Path,
+    ) -> None:
+        """A policy that emits credentials must not silently discard them."""
+        input_model = ModelOnboardingInput(
+            policy_name="connect_cloud",
+            dry_run=False,
+            legacy_env_output=False,
+            overlay_output_path=str(tmp_path / "overlay.yaml"),
+        )
+
+        with pytest.raises(OnboardingHandlerError, match="credentials_output_path"):
+            await handle_onboarding(input_model, input_adapter=connect_cloud_adapter)

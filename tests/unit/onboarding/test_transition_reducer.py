@@ -10,6 +10,7 @@ from typing import Any  # onex-any-ok: state dicts in test assertions
 
 import pytest
 import yaml
+from pydantic import ValidationError
 
 from omnibase_infra.onboarding.model_interactive_policy import ModelInteractivePolicy
 from omnibase_infra.onboarding.transition_reducer import (
@@ -425,3 +426,103 @@ class TestRealPolicyTraversal:
         assert env["CLOUD_PROVIDER"] == "gcp"
         assert env["GCP_PROJECT"] == "my-project"
         assert env["LLM_CODER_URL"] == ""  # not set, optional
+
+
+# ------------------------------------------------------------------
+# Credentials output (OMN-16038)
+# ------------------------------------------------------------------
+
+
+def _credentials_policy(
+    credentials_output: dict[str, dict[str, str]],
+) -> ModelInteractivePolicy:
+    """Minimal two-step policy used to exercise credentials emission alone.
+
+    Kept synthetic rather than loading ``connect_cloud.yaml`` so these tests
+    fail on a reducer regression, not on an unrelated edit to that policy.
+    """
+    return ModelInteractivePolicy.model_validate(
+        {
+            "policy_name": "credentials_probe",
+            "description": "Reducer-only probe for credentials emission",
+            "version": {"major": 1, "minor": 0, "patch": 0},
+            "policy_type": "interactive",
+            "target_capabilities": ["probe"],
+            "max_estimated_minutes": 1,
+            "steps": [
+                {
+                    "id": "ask_secret",
+                    "prompt": "Secret?",
+                    "type": "text",
+                    "secret": True,
+                },
+                {"id": "done", "prompt": "Writing", "type": "action"},
+            ],
+            "transitions": [
+                {
+                    "from": "ask_secret",
+                    "on_submit": [
+                        {"next": "done", "set_state": {"client_secret": "{response}"}}
+                    ],
+                },
+                {"from": "done", "terminal": True},
+            ],
+            "env_output": {"done": {"TENANT": "{state.tenant|acme}"}},
+            "credentials_output": credentials_output,
+        }
+    )
+
+
+class TestCredentialsOutput:
+    """``get_credentials_output`` — the credentials sibling of ``get_env_output``."""
+
+    def test_emits_credentials_alongside_env_output(self) -> None:
+        policy = _credentials_policy(
+            {"done": {"{state.tenant}-gateway": "{state.client_secret}"}}
+        )
+        reducer = TransitionReducer(policy)
+        state: dict[str, Any] = {"tenant": "acme", "client_secret": "hunter2"}
+
+        env = reducer.get_env_output("done", state)
+        credentials = reducer.get_credentials_output("done", state)
+
+        assert env == {"TENANT": "acme"}
+        assert set(credentials) == {"acme-gateway"}
+        assert credentials["acme-gateway"].get_secret_value() == "hunter2"
+
+    def test_secret_values_are_wrapped_so_they_do_not_render(self) -> None:
+        policy = _credentials_policy({"done": {"ref": "{state.client_secret}"}})
+        reducer = TransitionReducer(policy)
+
+        credentials = reducer.get_credentials_output(
+            "done", {"client_secret": "hunter2"}
+        )
+
+        assert "hunter2" not in repr(credentials)
+        assert "hunter2" not in str(credentials["ref"])
+
+    def test_policy_without_credentials_output_emits_empty_dict(self) -> None:
+        reducer = TransitionReducer(_credentials_policy({}))
+
+        assert reducer.get_credentials_output("done", {"client_secret": "x"}) == {}
+
+    def test_unknown_terminal_step_raises(self) -> None:
+        reducer = TransitionReducer(
+            _credentials_policy({"done": {"ref": "{state.client_secret}"}})
+        )
+
+        with pytest.raises(TransitionError, match="not a terminal step"):
+            reducer.get_credentials_output("ask_secret", {"client_secret": "x"})
+
+    def test_missing_required_state_key_raises(self) -> None:
+        reducer = TransitionReducer(
+            _credentials_policy({"done": {"ref": "{state.client_secret}"}})
+        )
+
+        with pytest.raises(InterpolationError, match="client_secret"):
+            reducer.get_credentials_output("done", {})
+
+    def test_credentials_output_for_a_non_terminal_step_is_rejected(self) -> None:
+        """A credentials block on a step that never terminates would never fire."""
+        with pytest.raises(ValidationError, match="credentials_output"):
+            _credentials_policy({"ask_secret": {"ref": "{state.client_secret}"}})

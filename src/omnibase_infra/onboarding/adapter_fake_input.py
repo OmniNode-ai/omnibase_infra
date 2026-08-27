@@ -15,6 +15,11 @@ from omnibase_infra.onboarding.model_interactive_step import ModelInteractiveSte
 class AdapterFakeInput:
     def __init__(self, responses: dict[str, str | list[str]]) -> None:
         self._responses = responses
+        #: Step ids collected through the masked path, in order. Tests assert
+        #: on this to prove a secret step took ``collect_secret`` and not the
+        #: echoing ``collect_text`` — a routing bug that is otherwise invisible
+        #: because both return the same string.
+        self.secret_steps_collected: list[str] = []
 
     async def collect_choice(self, step: ModelInteractiveStep) -> str:
         value = self._responses[step.id]
@@ -35,6 +40,15 @@ class AdapterFakeInput:
         if not isinstance(value, str):
             raise TypeError(
                 f"Expected str response for step {step.id!r}, got {type(value)}"
+            )
+        return value.strip()
+
+    async def collect_secret(self, step: ModelInteractiveStep) -> str:
+        self.secret_steps_collected.append(step.id)
+        value = self._responses[step.id]
+        if not isinstance(value, str):
+            raise TypeError(
+                f"Expected str response for secret step {step.id!r}, got {type(value)}"
             )
         return value.strip()
 

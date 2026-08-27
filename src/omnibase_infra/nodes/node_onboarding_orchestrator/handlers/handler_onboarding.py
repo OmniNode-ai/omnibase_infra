@@ -9,7 +9,7 @@ Two execution paths:
 - **Interactive path**: load interactive policy by name -> drive
   ``InteractiveExecutor`` with an injected adapter -> optionally
   write env config via ``ConfigWriter`` and the 0600 JSON credentials
-  artifact via ``CredentialsWriter`` (OMN-16035).
+  artifact via ``CredentialsWriter`` (OMN-16035, OMN-16038).
 
 The ``input_adapter`` is a function parameter injected by the caller,
 NOT part of the Pydantic model (DI outside models — OMN-10784 GPT #1).
@@ -17,9 +17,10 @@ NOT part of the Pydantic model (DI outside models — OMN-10784 GPT #1).
 
 from __future__ import annotations
 
+from collections.abc import Mapping
 from pathlib import Path
 
-from pydantic import ValidationError
+from pydantic import SecretStr, ValidationError
 
 from omnibase_core.types import StrictJsonType
 from omnibase_infra.nodes.node_onboarding_orchestrator.models.enum_onboarding_status import (
@@ -88,6 +89,36 @@ def _load_interactive_policy(policy_name: str) -> ModelInteractivePolicy:
         raise OnboardingHandlerError(msg) from exc
 
 
+def _write_declared_credentials(
+    credentials: Mapping[str, SecretStr],
+    credentials_output_path: str | None,
+) -> str:
+    """Write a policy's declared secrets as the flat ``{ref: secret}`` document.
+
+    Refuses rather than silently dropping the secrets when the caller gave no
+    path: the policy declared credentials, so a live run that quietly wrote
+    none of them would leave the operator believing the machine is attached
+    when the very next gateway call cannot find a credential.
+
+    Raises:
+        OnboardingHandlerError: If no credentials output path was supplied.
+    """
+    if credentials_output_path is None:
+        msg = (
+            "credentials_output_path is required when the policy declares "
+            "credentials_output and dry_run=False — refusing to discard "
+            "collected secret material"
+        )
+        raise OnboardingHandlerError(msg)
+
+    credentials_path = Path(credentials_output_path)
+    payload: dict[str, StrictJsonType] = {
+        ref: secret.get_secret_value() for ref, secret in credentials.items()
+    }
+    CredentialsWriter().write(payload, credentials_path)
+    return str(credentials_path)
+
+
 async def _handle_interactive(
     input_model: ModelOnboardingInput,
     input_adapter: ProtocolInputAdapter,
@@ -122,33 +153,65 @@ async def _handle_interactive(
     overlay_output_path_written: str | None = None
     credentials_output_path_written: str | None = None
     if not input_model.dry_run:
-        if input_model.env_output_path is None:
-            msg = "env_output_path is required when dry_run=False"
-            raise OnboardingHandlerError(msg)
-        target_path = Path(input_model.env_output_path)
+        # ``env_output_path`` is required only where it is actually consumed:
+        # for the legacy .env write, and as the directory the overlay path is
+        # derived from when no explicit overlay path was given. Requiring it
+        # unconditionally contradicted this model's own validator, which
+        # accepts ``legacy_env_output=False`` + an explicit overlay path with
+        # no env path at all — the combination a credentials-only policy such
+        # as ``connect_cloud`` uses.
+        target_path = (
+            Path(input_model.env_output_path)
+            if input_model.env_output_path is not None
+            else None
+        )
 
         # Generate and write overlay YAML as primary output
         overlay = overlay_from_env_dict(
             result.env_dict, environment="dev", return_warnings=False
         )
-        overlay_path = (
-            Path(input_model.overlay_output_path)
-            if input_model.overlay_output_path is not None
-            else target_path.parent / "overlay.yaml"
-        )
+        if input_model.overlay_output_path is not None:
+            overlay_path = Path(input_model.overlay_output_path)
+        elif target_path is not None:
+            overlay_path = target_path.parent / "overlay.yaml"
+        else:  # pragma: no cover - the input validator rejects this pairing
+            msg = (
+                "env_output_path or overlay_output_path is required when dry_run=False"
+            )
+            raise OnboardingHandlerError(msg)
         OverlayWriter().write(overlay, overlay_path)
         overlay_output_path_written = str(overlay_path)
 
         # Legacy .env output behind flag
         if input_model.legacy_env_output:
+            if target_path is None:  # pragma: no cover - rejected by the validator
+                msg = "env_output_path is required when legacy_env_output=True"
+                raise OnboardingHandlerError(msg)
             writer = ConfigWriter()
             writer.write(result.env_dict, target_path)
             env_output_path_written = str(target_path)
 
-        # Credentials artifact (OMN-16035): explicit invocation only — it fires
-        # only when the caller named a path, and only for credential-shaped
-        # entries, so an onboarding run without secrets writes no 0600 file.
-        if input_model.credentials_output_path is not None:
+        # Credentials artifact: explicit invocation only — it fires only when
+        # the caller named a path, so an onboarding run without secrets writes
+        # no 0600 file. Two sources, and the declared one wins:
+        #
+        #   result.credentials_dict (OMN-16038) — the policy said, in its
+        #     credentials_output block, exactly which refs carry secrets. The
+        #     document is written FLAT ({ref: secret}), because that is the
+        #     shape StoreGatewayCredential reads; nesting it under the policy
+        #     name would produce a file `onex auth` cannot resolve.
+        #
+        #   select_credential_entries(env_dict) (OMN-16035) — the fallback for
+        #     policies that predate credentials_output: infer secrets from env
+        #     key names and nest them under the policy name.
+        #
+        # A policy that declares credentials_output has stated its secrets
+        # exactly, so the name-shaped guess is not also applied to it.
+        if result.credentials_dict:
+            credentials_output_path_written = _write_declared_credentials(
+                result.credentials_dict, input_model.credentials_output_path
+            )
+        elif input_model.credentials_output_path is not None:
             credential_entries = select_credential_entries(result.env_dict)
             if credential_entries:
                 credentials_path = Path(input_model.credentials_output_path)

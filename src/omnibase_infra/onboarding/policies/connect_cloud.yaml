@@ -1,0 +1,105 @@
+# SPDX-FileCopyrightText: 2025 OmniNode.ai Inc.
+# SPDX-License-Identifier: MIT
+#
+# connect_cloud — attach this machine to the ONEX cloud gateway (OMN-16038).
+#
+# The first step of the beta onboarding path: it collects the four gateway
+# coordinates plus the client secret and produces the on-disk credential that
+# `onex auth` / `StoreGatewayCredential` (OMN-15922) resolve at call time.
+#
+# TWO FILES, SPLIT ON WHETHER THE CONTENT IS A SECRET
+#   env_output          -> non-secret coordinates. Rendered to the operator,
+#                          written to the overlay, echoed in receipts. Includes
+#                          the secret *ref* (a name), never the secret value.
+#   credentials_output  -> the secret itself, keyed by that same ref, written
+#                          only to the 0600 credentials artifact.
+#
+# THE REF IS NOT ARBITRARY
+#   `<tenant_slug>-gateway` is the exact ref `StoreGatewayCredential.save`
+#   writes, so the file this policy produces is the file `onex auth status`
+#   and `onex auth token` read back. Changing this template silently orphans
+#   the credential: the write succeeds, and the first gateway call fails with
+#   "no entry for secret ref".
+#
+# WHY token_endpoint IS PROMPTED
+#   `StoreGatewayCredential` requires it and has no default (the realm host is
+#   not derivable from the gateway origin). A flow that skipped it would write
+#   a credential that cannot mint a token.
+policy_name: "connect_cloud"
+description: "Connect this machine to the ONEX cloud gateway and store the credential (~5 min)"
+version: {major: 1, minor: 0, patch: 0}
+policy_type: "interactive"
+target_capabilities:
+  - "gateway_credential_written"
+max_estimated_minutes: 5
+steps:
+  - id: gateway_base_url
+    prompt: "ONEX cloud gateway base URL (e.g. https://api.omninode.ai)"
+    type: text
+    required: true
+  - id: tenant_slug
+    prompt: "Tenant slug (e.g. acme) — the tenant this edge attaches to"
+    type: text
+    required: true
+  - id: gateway_client_id
+    prompt: "Gateway client id — the ga-* principal issued for this tenant"
+    type: text
+    required: true
+  - id: gateway_token_endpoint
+    prompt: "Realm token endpoint (https://<keycloak>/realms/<realm>/protocol/openid-connect/token)"
+    type: text
+    required: true
+  - id: gateway_client_secret
+    prompt: "Client secret for that principal"
+    type: text
+    # Routes to the adapter's masked path: getpass on a terminal, and a
+    # `<redacted>` placeholder in the step-result receipt.
+    secret: true
+    required: true
+  - id: write_credentials
+    prompt: "Writing the gateway credential to ~/.onex/credentials.json (mode 0600)"
+    type: action
+    action: "write_credentials"
+    produces_capabilities: ["gateway_credential_written"]
+# Straight line — every prompt is required, so there is nothing to branch on.
+transitions:
+  - from: gateway_base_url
+    on_submit:
+      - next: tenant_slug
+        set_state:
+          gateway_base_url: "{response}"
+  - from: tenant_slug
+    on_submit:
+      - next: gateway_client_id
+        set_state:
+          tenant_slug: "{response}"
+  - from: gateway_client_id
+    on_submit:
+      - next: gateway_token_endpoint
+        set_state:
+          gateway_client_id: "{response}"
+  - from: gateway_token_endpoint
+    on_submit:
+      - next: gateway_client_secret
+        set_state:
+          gateway_token_endpoint: "{response}"
+  - from: gateway_client_secret
+    on_submit:
+      - next: write_credentials
+        set_state:
+          gateway_client_secret: "{response}"
+  - from: write_credentials
+    terminal: true
+# Non-secret coordinates. ONEX_GATEWAY_CLIENT_SECRET_REF is a name, not a
+# value — it is what config.yaml points at, and it is safe to render.
+env_output:
+  write_credentials:
+    ONEX_GATEWAY_BASE_URL: "{state.gateway_base_url}"
+    ONEX_GATEWAY_TENANT_SLUG: "{state.tenant_slug}"
+    ONEX_GATEWAY_CLIENT_ID: "{state.gateway_client_id}"
+    ONEX_GATEWAY_TOKEN_ENDPOINT: "{state.gateway_token_endpoint}"
+    ONEX_GATEWAY_CLIENT_SECRET_REF: "{state.tenant_slug}-gateway"
+# The only secret in the flow. Written to the 0600 artifact and nowhere else.
+credentials_output:
+  write_credentials:
+    "{state.tenant_slug}-gateway": "{state.gateway_client_secret}"

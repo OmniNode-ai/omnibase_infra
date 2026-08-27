@@ -14,6 +14,8 @@ from __future__ import annotations
 
 import re
 
+from pydantic import SecretStr
+
 from omnibase_infra.onboarding.condition_evaluator import (
     ConditionEvaluationError,
     evaluate_condition,
@@ -314,6 +316,43 @@ class TransitionReducer:
             result[env_key] = self._interpolate(env_template, state)
 
         return result
+
+    def get_credentials_output(
+        self, terminal_step_id: str, state: StateDict
+    ) -> dict[str, SecretStr]:
+        """Collect secret material for a terminal step, alongside ``get_env_output``.
+
+        Same interpolation grammar as ``get_env_output``, applied to keys as
+        well as values: the key is the secret *ref* the credential is filed
+        under, and refs are tenant-scoped (``{state.tenant_slug}-gateway``), so
+        a literal-only key would force one policy per tenant.
+
+        Values come back as ``SecretStr`` so that a caller who logs, reprs, or
+        model-dumps the result gets ``**********`` rather than the credential.
+        Only the writer calls ``get_secret_value()``.
+
+        Returns:
+            Dict mapping secret ref to secret value. Empty when the policy
+            declares no ``credentials_output`` for this step.
+
+        Raises:
+            TransitionError: If ``terminal_step_id`` is not a terminal step.
+            InterpolationError: If a required state key is missing.
+        """
+        if terminal_step_id not in self._terminal_steps:
+            msg = f"Step '{terminal_step_id}' is not a terminal step"
+            raise TransitionError(msg)
+
+        template = self._policy.credentials_output.get(terminal_step_id)
+        if template is None:
+            return {}
+
+        return {
+            self._interpolate(ref_template, state): SecretStr(
+                self._interpolate(value_template, state)
+            )
+            for ref_template, value_template in template.items()
+        }
 
     @staticmethod
     def _interpolate(template: str, state: StateDict) -> str:
