@@ -2,7 +2,22 @@
 # SPDX-License-Identifier: MIT
 trusted_runner_variable:
   name: OMNI_TRUSTED_CI_RUNS_ON_JSON
-  expected_json: '["self-hosted","omnibase-ci"]'
+  # OMN-16682: the trusted-CI seam was deliberately re-flipped to GitHub-hosted
+  # runners at org scope and at all five repo shadows on 2026-08-27T04:36:53-56Z.
+  # This value is the ASSERTED intended state, so it must track that flip --
+  # while it read '["self-hosted","omnibase-ci"]' the hourly audit reported six
+  # drift findings (org + each repo) on every run. That is not a benign red: the
+  # audit exits non-zero on the first finding set, so its OTHER surfaces --
+  # notably the local-workflow hosted-runner allowlist that carries the
+  # OMN-16683 fork-isolation entries -- were reported against a job that was
+  # already failing, and real new drift there would not have changed the signal.
+  #
+  # Jobs that must NOT follow this seam onto hosted runners do not read this
+  # variable at all: the OCC autobind/companion-effect publishers read the
+  # dedicated OMNI_OCC_AUTOBIND_RUNS_ON_JSON knob with a literal
+  # '["self-hosted","omnibase-ci"]' fallback (OMN-16691), because they publish to
+  # the tailnet-only dev-lane broker that only the self-hosted fleet can reach.
+  expected_json: '["ubuntu-latest"]'
 public_pr_runner_variable:
   name: OMNI_PUBLIC_PR_RUNS_ON_JSON
   expected_json: '["ubuntu-latest"]'

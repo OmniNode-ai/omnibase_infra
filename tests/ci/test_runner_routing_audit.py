@@ -183,9 +183,11 @@ def test_policy_tracks_repos_that_drifted_to_hosted_minutes() -> None:
     policy = yaml.safe_load(POLICY.read_text(encoding="utf-8"))
 
     assert policy["trusted_runner_variable"]["name"] == "OMNI_TRUSTED_CI_RUNS_ON_JSON"
-    assert policy["trusted_runner_variable"]["expected_json"] == (
-        '["self-hosted","omnibase-ci"]'
-    )
+    # OMN-16682: the trusted-CI seam was re-flipped to GitHub-hosted runners at
+    # org scope and all five repo shadows on 2026-08-27. The policy states the
+    # INTENDED value, so it tracks the flip; pinning this assertion to the old
+    # self-hosted literal is what kept the hourly audit red on six scopes.
+    assert policy["trusted_runner_variable"]["expected_json"] == '["ubuntu-latest"]'
     assert {
         "omnibase_core",
         "omnibase_infra",
