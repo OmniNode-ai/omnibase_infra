@@ -55,6 +55,17 @@ handler_routing:
       handler:
         name: "HandlerChainCanary"
         module: "omnibase_infra.nodes.node_chain_canary_effect.handlers.handler_chain_canary"
+        # The handler speaks TWO transports and both must be declared, or the
+        # handler-contract-compliance scanner reports the undeclared one.
+        # metadata.transport_type below carries HTTP (the /skill ingress POST);
+        # this carries KAFKA (the correlation-scoped quarantine tail scan).
+        # Declaring KAFKA via event_bus.subscribe_topics would ALSO satisfy the
+        # scanner and is deliberately NOT done: a declared subscribe topic is
+        # how the runtime auto-wires a live consumer, and a canary must never
+        # become a subscriber on the quarantine sink it only samples on demand.
+        # node_kafka_replay_compute sets the same precedent — KAFKA declared,
+        # event_bus topic lists left empty.
+        handler_type: "KAFKA"
       description: "POST /skill delegation probe -> terminal assertion -> correlation-scoped quarantine check"
       output_fields:
         - verdict
