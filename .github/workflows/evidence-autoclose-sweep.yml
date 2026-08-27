@@ -19,17 +19,30 @@
 # here — set it as a repo/environment secret-free variable to halt every run
 # without touching this file.
 #
-# omnimarket co-install is DELIBERATELY NOT wired here yet. `onex skill
-# dod_verify` dispatches to a node that ships in omnimarket, composed into
-# the omnibase_infra venv at runtime via the install-node-skill-package
-# installer under scripts/ (never a build dependency). Without that
-# co-install, every dod_verify
-# subprocess call in this workflow fails closed with a non-zero exit, which
-# the sweep records as ERROR_VERIFY_NONZERO_EXIT per ticket — safe, honest,
-# and proves the mechanism (enumerate -> bind -> attempt-verify -> fail
-# closed) without a green dod_verify. Wiring the co-install (and its own
-# incident-replay-covered enforcement story, OMN-15547) is a later,
-# deliberate change, same as flipping --apply.
+# omnimarket co-install IS wired here (OMN-16736). `onex skill dod_verify`
+# dispatches to `node_dod_verify`, which ships in omnimarket and is layered
+# into this job's venv at run time — never a build/lock dependency, because
+# omnimarket sits ABOVE infra in the layer graph (compat -> core -> spi ->
+# infra -> market) and declaring it as an infra dependency would invert that
+# graph. The composition rule is OMN-13829's; the steps below apply it to an
+# ephemeral job venv rather than shelling out to the operator installer under
+# scripts/ (see the step comment for why, and for why that path is written
+# without its file extension here).
+#
+# Before this was wired, EVERY bound ticket in every run of this workflow
+# died at `Error: Unknown node 'node_dod_verify'` and was recorded as
+# ERROR_VERIFY_NONZERO_EXIT. That was safe and honest, but it meant no flip
+# or gap decision was ever REACHED: the sweep proved enumerate -> bind ->
+# attempt-verify -> fail-closed and nothing past it. Run 33078686320
+# (2026-08-27, lookback 10h) is the last such run: 27 bindings extracted,
+# 11 ERROR_VERIFY_NONZERO_EXIT, 0 flipped, 0 gap_posted.
+#
+# The co-install is verified, not assumed: the step after it asserts
+# `node_dod_verify` is a resolvable `onex.nodes` entry point THROUGH the
+# same `uv run` path the sweep's per-ticket subprocess uses. A silently
+# reverted or partial install fails the job there, loudly, instead of
+# degrading back into N per-ticket ERROR_VERIFY_NONZERO_EXIT outcomes that
+# read like ticket problems rather than a runner-configuration problem.
 #
 # No new scripts/** file: scripts/** is DEFAULT-DENY for new files (OMN-14475
 # canonical-form guard). Every step below is a direct `uv run onex ...`
@@ -65,7 +78,13 @@ jobs:
         && fromJSON(vars.OMNI_PUBLIC_PR_RUNS_ON_JSON || '["ubuntu-latest"]')
         || fromJSON(vars.OMNI_TRUSTED_CI_RUNS_ON_JSON || '["self-hosted","omnibase-ci"]')
       }}
-    timeout-minutes: 20
+    # Raised from 20 (OMN-16736): with the co-install wired, `onex skill
+    # dod_verify` now actually RUNS per bound ticket instead of aborting in
+    # milliseconds on "Unknown node". A window with a dozen bound companions
+    # is real verifier work, and the co-install itself adds a git-source
+    # install. 20 minutes was budgeted for a sweep that never reached the
+    # verifier.
+    timeout-minutes: 45
     permissions:
       contents: read
 
@@ -90,10 +109,167 @@ jobs:
       - name: Install dependencies
         run: uv sync
 
+      # OMN-16736 step 1 of 3 (co-install -> AC-coverage guard -> --apply).
+      #
+      # Resolve the exact omnimarket commit BEFORE checking it out, so the run
+      # log records precisely what was composed into this environment and the
+      # same environment can be reconstructed later from the log alone. A bare
+      # `ref: dev` checkout would leave the installed rev inferable only from
+      # actions/checkout's own output.
+      #
+      # omnimarket is a PUBLIC repo, so github.token suffices (same reasoning
+      # as ci.yml's "Live-resolve omnimarket dev HEAD" step). Fails loudly on
+      # a non-sha rather than falling back to a stale pin.
+      - name: Resolve omnimarket dev HEAD
+        id: omnimarket-ref
+        env:
+          GH_TOKEN: ${{ secrets.OMNI_GITHUB_TOKEN || github.token }}
+        run: |
+          set -euo pipefail
+          sha="$(gh api repos/OmniNode-ai/omnimarket/commits/dev --jq .sha)"
+          if [[ ! "$sha" =~ ^[0-9a-f]{40}$ ]]; then
+            echo "::error::omnimarket dev HEAD resolution returned an invalid sha: '${sha}'" >&2
+            exit 1
+          fi
+          echo "sha=${sha}" >> "$GITHUB_OUTPUT"
+          echo "omnimarket dev HEAD: ${sha}"
+
+      - name: Checkout omnimarket (sibling provider source)
+        uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+        with:
+          repository: OmniNode-ai/omnimarket
+          ref: ${{ steps.omnimarket-ref.outputs.sha }}
+          path: .omnimarket-src
+          token: ${{ secrets.OMNI_GITHUB_TOKEN || github.token }}
+          persist-credentials: false
+          fetch-depth: 1
+
+      # The composition rule is OMN-13829's, applied to an EPHEMERAL job venv:
+      # omnimarket is a runtime PROVIDER, never a build/lock dependency, because
+      # it sits ABOVE infra in the layer graph. So it is layered on top of the
+      # already-synced venv rather than resolved into it.
+      #
+      # Deliberately NOT a shell-out to the operator co-install script under
+      # scripts/ — install-node-skill-package. That name is deliberately not
+      # joined to its directory prefix and .sh extension anywhere in this file:
+      # the OMN-15547 incident-replay inventory greps whole workflow files for
+      # scripts/**.{py,sh} literals and would classify a prose mention as newly
+      # wired enforcement, which a comment is not. This file's header already
+      # used the same convention.
+      #
+      # Two reasons not to call it: it is operator tooling whose blast radius
+      # is a long-lived machine venv, not a throwaway job env; and its sibling
+      # pins are hand-maintained literals that have already drifted from what
+      # omnimarket@dev actually requires (it pins omnibase-compat==0.5.5 /
+      # omninode-memory==0.15.0; omnimarket@dev requires 0.5.6 / 0.17.1 as of
+      # this commit). Reading the split out of omnimarket's OWN pyproject makes
+      # this job correct by construction and immune to that drift class.
+      #
+      # Three-way split, by layer position:
+      #   omnibase-*  SKIP     — the layer BENEATH infra. omnibase_infra's own
+      #                          lock is authoritative for core/spi/compat;
+      #                          letting market metadata re-pin them is the
+      #                          exact inversion the layer graph forbids.
+      #   omninode-*  NO-DEPS  — sibling packages beside/above infra. Install
+      #                          the version omnimarket asks for, but never let
+      #                          their transitive metadata re-resolve the layer
+      #                          beneath.
+      #   everything  RESOLVE  — pure-PyPI leaves (anthropic, radon, docker,
+      #     else                 python-dateutil, ...). No omni-internal
+      #                          metadata, safe to resolve normally.
+      - name: Co-install omnimarket (provides node_dod_verify)
+        shell: bash
+        run: |
+          set -euo pipefail
+          PYTHON_BIN=".venv/bin/python"
+          test -x "$PYTHON_BIN"
+
+          python3 - "${RUNNER_TEMP}" <<'PYEOF'
+          import re
+          import sys
+          import tomllib
+          from pathlib import Path
+
+          out_dir = Path(sys.argv[1])
+          with open(".omnimarket-src/pyproject.toml", "rb") as fh:
+              data = tomllib.load(fh)
+
+          no_deps = []
+          leaves = []
+          for dep in data["project"]["dependencies"]:
+              name = re.split(r"[<>=!~\[;\s]", dep, maxsplit=1)[0].strip().lower()
+              if name.startswith("omnibase-"):
+                  continue          # layer BENEATH infra — infra's lock is authoritative
+              if name.startswith("omninode-"):
+                  no_deps.append(dep)
+              else:
+                  leaves.append(dep)
+
+          if not no_deps and not leaves:
+              print(
+                  "FAIL: omnimarket declares no installable dependencies — its "
+                  "pyproject was read but produced an empty split, which means "
+                  "the checkout or the parse is wrong, not that omnimarket is "
+                  "dependency-free.",
+                  file=sys.stderr,
+              )
+              raise SystemExit(1)
+
+          (out_dir / "omnimarket-no-deps.txt").write_text("\n".join(no_deps) + "\n")
+          (out_dir / "omnimarket-leaves.txt").write_text("\n".join(leaves) + "\n")
+          print(f"no-deps siblings : {no_deps}")
+          print(f"resolved leaves  : {leaves}")
+          PYEOF
+
+          mapfile -t NO_DEPS < <(grep -v '^$' "${RUNNER_TEMP}/omnimarket-no-deps.txt" || true)
+          mapfile -t LEAVES < <(grep -v '^$' "${RUNNER_TEMP}/omnimarket-leaves.txt" || true)
+
+          if [ "${#LEAVES[@]}" -gt 0 ]; then
+            uv pip install --python "$PYTHON_BIN" "${LEAVES[@]}"
+          fi
+          uv pip install --python "$PYTHON_BIN" --no-deps ${NO_DEPS[@]+"${NO_DEPS[@]}"} ./.omnimarket-src
+
+      # Assert the thing the sweep actually depends on, through the exact
+      # invocation path it uses. `uv run` is deliberate here: the sweep shells
+      # out to `uv run onex skill dod_verify <ticket>` per ticket, and a
+      # project sync on that call is the one thing that could evict a
+      # `uv pip install`-ed provider from under it. UV_NO_SYNC (set on this
+      # step and on the sweep step below) keeps `uv run` on the environment
+      # this job just composed; this step proves that combination resolves
+      # node_dod_verify rather than trusting it.
+      - name: Verify node_dod_verify resolves through `uv run`
+        env:
+          UV_NO_SYNC: "1"
+        run: |
+          set -euo pipefail
+          uv run python - <<'PYEOF'
+          import sys
+          from importlib.metadata import entry_points
+
+          eps = {e.name for e in entry_points(group="onex.nodes")}
+          if "node_dod_verify" not in eps:
+              print(
+                  "FAIL: node_dod_verify is not a resolvable onex.nodes entry point "
+                  f"after the co-install ({len(eps)} entry points found). Every "
+                  "`onex skill dod_verify <ticket>` the sweep spawns would fail "
+                  "closed with 'Unknown node', and no flip or gap decision could "
+                  "be reached for any ticket.",
+                  file=sys.stderr,
+              )
+              sys.exit(1)
+          print(f"OK: node_dod_verify resolved among {len(eps)} onex.nodes entry points")
+          PYEOF
+
       - name: Run evidence autoclose sweep (DRY-RUN — apply is never passed here)
         env:
           LINEAR_API_KEY: ${{ secrets.LINEAR_API_KEY }}
           GH_TOKEN: ${{ secrets.OMNI_GITHUB_TOKEN || github.token }}
+          # Keep `uv run` — this one and the per-ticket `uv run onex skill
+          # dod_verify` the sweep spawns — on the environment the co-install
+          # step composed, instead of re-syncing it back to the lockfile
+          # (which does not, and by the layer graph must not, contain
+          # omnimarket).
+          UV_NO_SYNC: "1"
         run: |
           set -euo pipefail
           # Fail fast on a missing secret rather than letting every ticket in
