@@ -68,6 +68,15 @@ on:
         description: 'Scan companions merged within this many hours of now.'
         required: false
         default: '2'
+      diagnose_tickets:
+        description: >-
+          OMN-16788 diagnostic. Comma-separated ticket ids (e.g.
+          "OMN-16682,OMN-16626"). For each one, dump the FULL dod_verify JSON —
+          every check id, status and message — into this job log, and probe what
+          the run's GitHub credential can actually read. Empty (the default, and
+          the value every scheduled run uses) skips the whole step at zero cost.
+        required: false
+        default: ''
 
 env:
   UV_VERSION: "0.8.3"
@@ -328,6 +337,109 @@ jobs:
             echo "::error::only ${count} entries under contracts/ at origin/dev — refusing to run the sweep against an OCC checkout this thin." >&2
             exit 1
           fi
+
+      # OMN-16788. The sweep records only COUNTS per ticket
+      # (`dod_verify_total_checks` / `verified` / `failed`); the per-check
+      # detail dod_verify produces goes to capture files this job does not
+      # publish. So when CI and a local run disagree on the same ticket and the
+      # same contract — 2026-08-27: OMN-16682 50/50 local vs 23/52 here,
+      # OMN-16626 8/8 vs 3/10, OMN-16690 12/14 vs 5/14, OMN-16761 6/6 vs 3/6 —
+      # the run log cannot say WHY, and "which verifier is authoritative" stays
+      # undecided. That question gates `--apply`.
+      #
+      # This step exists to answer it from a single dispatch. It runs ONLY when
+      # `diagnose_tickets` is non-empty, so every scheduled run pays nothing,
+      # and it runs BEFORE the sweep so a sweep timeout cannot swallow it.
+      #
+      # It reports two things:
+      #   1. What this run's GitHub credential can actually READ — per repo the
+      #      bound contracts cite. Contract evidence checks are overwhelmingly
+      #      `gh pr view` / `gh pr checks` / `gh api repos/.../pulls/...`, and
+      #      `_live_pr_checks_for_item` is fail-closed: unresolvable live PR
+      #      state is FAILED, not SKIPPED. A wrongly-scoped token therefore
+      #      produces a confident wrong verdict rather than an error.
+      #   2. The full per-check table for each named ticket.
+      #
+      # The ticket list is passed through env, never interpolated into the
+      # shell (OMN-16323), and is format-validated before use.
+      - name: Diagnose verdict divergence (OMN-16788; opt-in, default off)
+        if: ${{ github.event.inputs.diagnose_tickets != '' }}
+        env:
+          GH_TOKEN: ${{ secrets.OMNI_GITHUB_TOKEN || github.token }}
+          UV_NO_SYNC: "1"
+          ONEX_CC_REPO_PATH: ${{ github.workspace }}/.occ-src
+          DIAGNOSE_TICKETS: ${{ github.event.inputs.diagnose_tickets }}
+        run: |
+          set -uo pipefail
+
+          if ! printf '%s' "${DIAGNOSE_TICKETS}" | grep -qE '^OMN-[0-9]+(,OMN-[0-9]+)*$'; then
+            echo "::error::diagnose_tickets must be a comma-separated list of OMN-<digits> ids." >&2
+            exit 1
+          fi
+
+          # Probes capability, never the credential itself — no token value is
+          # printed, derived, or written anywhere in this step.
+          echo "== credential capability =="
+          for repo in \
+            OmniNode-ai/omnibase_infra \
+            OmniNode-ai/onex_change_control \
+            OmniNode-ai/omninode_infra \
+            OmniNode-ai/omnimarket \
+            OmniNode-ai/omnibase_core
+          do
+            if out="$(gh api "repos/${repo}/pulls?per_page=1" --jq 'length' 2>&1)"; then
+              echo "  READ_PULLS ${repo}: OK (${out} returned)"
+            else
+              echo "  READ_PULLS ${repo}: DENIED — ${out}"
+            fi
+          done
+
+          echo "== per-ticket dod_verify detail =="
+          IFS=',' read -ra TICKETS <<< "${DIAGNOSE_TICKETS}"
+          for ticket in "${TICKETS[@]}"; do
+            echo "---- ${ticket} ----"
+            uv run onex skill dod_verify "${ticket}" > "${RUNNER_TEMP}/${ticket}.json" 2> "${RUNNER_TEMP}/${ticket}.err" || true
+            python3 - "${RUNNER_TEMP}/${ticket}.json" <<'PYEOF'
+          import json
+          import sys
+          from pathlib import Path
+
+          raw = Path(sys.argv[1]).read_text(encoding="utf-8").strip()
+          if not raw:
+              print("  (no stdout — see the .err capture in the step above)")
+              raise SystemExit(0)
+          try:
+              payload = json.loads(raw)
+          except json.JSONDecodeError as exc:
+              print(f"  (unparseable dod_verify stdout: {exc})")
+              print(raw[:2000])
+              raise SystemExit(0)
+
+          result = payload.get("result") or {}
+          print(
+              "  status={} total={} verified={} failed={} skipped={} superseded={}".format(
+                  result.get("status"),
+                  result.get("total_checks"),
+                  result.get("verified_count"),
+                  result.get("failed_count"),
+                  result.get("skipped_count"),
+                  result.get("superseded_count"),
+              )
+          )
+          print(
+              "  occ_governance_ref={} refresh={} resolved_sha={}".format(
+                  result.get("occ_governance_ref"),
+                  result.get("occ_refresh_outcome"),
+                  result.get("occ_resolved_sha"),
+              )
+          )
+          for check in result.get("checks") or []:
+              message = (check.get("message") or "").replace("\n", " ⏎ ")
+              print(f"  [{check.get('status')}] {check.get('evidence_id')}: {message[:600]}")
+          PYEOF
+            echo "  -- stderr tail --"
+            tail -n 15 "${RUNNER_TEMP}/${ticket}.err" || true
+          done
 
       - name: Run evidence autoclose sweep (DRY-RUN — apply is never passed here)
         env:
