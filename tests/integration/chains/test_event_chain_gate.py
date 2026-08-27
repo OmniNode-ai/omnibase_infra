@@ -318,14 +318,6 @@ CHAIN_CASES: tuple[ChainCase, ...] = (
         },
         terminal_type_name="ModelMirrorRoutingDecision",
         db_tables=(_tenant_overlay_table(),),
-        # Dead on dev right now. The fix is omnibase_infra#2937
-        # (jonah/omn-16767-typed-dispatch-db-io), which teaches
-        # _prepare_handler_wiring that a handler declaring a concrete
-        # BaseModel input is a typed def-B handler and can never be a
-        # projection handler regardless of db_io. Verified locally: with that
-        # branch's handler_wiring.py in place this row PASSES; on dev it
-        # fails with the verbatim production signature.
-        broken_by="OMN-16767",
     ),
     # ---------------------------------------------------------------------
     # Control row: the SAME chain with no db_io. Pre-fix this row passed while
@@ -421,6 +413,21 @@ async def _run_chain(case: ChainCase, tmp_path: Path) -> ChainRun:
     contract = _contract(case, contract_path)
     assert contract.handler_routing is not None
     entry = contract.handler_routing.handlers[0]
+
+    # Precondition, not decoration. A row declaring db_tables exists to exercise
+    # the OMN-16767 shape (governed DB access on a node whose handler is typed
+    # def-B). If the resolved omnibase_core parses that block away, the row would
+    # still pass — vacuously, gating nothing. Measured divergence: on the CI
+    # shared venv this row passes, while locally the same source selects
+    # `_make_projection_dispatch_callback` and the chain dies. Fail loudly on the
+    # missing precondition rather than bank a free green.
+    if case.db_tables:
+        assert contract.db_io is not None and contract.db_io.db_tables, (
+            f"[{case.chain_id}] gate precondition not met: the row declares "
+            f"db_tables but the parsed contract carries no db_io.db_tables, so "
+            f"this row is NOT exercising the OMN-16767 arm-selection shape. "
+            f"Fix the fixture or the core pin — do not delete the row."
+        )
 
     bus = EventBusInmemory(environment="chain-gate", group="chain-gate")
     await bus.start()
