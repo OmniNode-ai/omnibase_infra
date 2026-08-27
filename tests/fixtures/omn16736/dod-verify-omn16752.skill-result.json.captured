@@ -1,0 +1,261 @@
+{
+  "skill_name": "node_dod_verify",
+  "node_name": "node_dod_verify",
+  "status": "failed",
+  "correlation_id": "1515f932-96cf-452e-a4e2-41ca97d66ca8",
+  "run_id": "cd7d204d-db7e-469e-abd0-5b62564de5be",
+  "exit_code": 1,
+  "duration_ms": 99094,
+  "result": {
+    "workflow_result": "failed",
+    "exit_code": 1,
+    "workflow": "<OMNI_HOME>/omnibase_infra/.venv/lib/python3.12/site-packages/omnimarket/nodes/node_dod_verify/contract.yaml",
+    "terminal_payload": {
+      "correlation_id": "1515f932-96cf-452e-a4e2-41ca97d66ca8",
+      "ticket_id": "OMN-16752",
+      "status": "failed",
+      "dry_run": false,
+      "checks": [
+        {
+          "evidence_id": "dod-OmniNode-ai-omnimarket-pr-2166",
+          "description": "PR #2166 on OmniNode-ai/omnimarket \u2014 Evidence-Source autobind.",
+          "status": "verified",
+          "message": "OK (287ms): 1"
+        },
+        {
+          "evidence_id": "dod-OmniNode-ai-omnimarket-pr-2166::pr-live-state",
+          "description": "Live GitHub state for OmniNode-ai/omnimarket#2166 (dod-OmniNode-ai-omnimarket-pr-2166)",
+          "status": "verified",
+          "message": "OmniNode-ai/omnimarket#2166: MERGED (state=MERGED); all 33 required context(s) green for jonah/omn-16752-gate-runner-env-aware-tests@b478c0772006"
+        },
+        {
+          "evidence_id": "dod-OmniNode-ai-omnimarket-pr-2166-ci",
+          "description": "PR #2166 on OmniNode-ai/omnimarket \u2014 product diff scope check (OMN-14425).",
+          "status": "verified",
+          "message": "OK (309ms): {\"files\":[{\"path\":\"src/omnimarket/nodes/node_dod_verify/services/evidence_collector.py\",\"additions\":31,\"deletions\":0},{\"path\":\"tests/scripts/test_prepush_hook_host_identity_guard.py\",\"additions\":35,\"d"
+        },
+        {
+          "evidence_id": "dod-OmniNode-ai-omnimarket-pr-2166-ci::pr-live-state",
+          "description": "Live GitHub state for OmniNode-ai/omnimarket#2166 (dod-OmniNode-ai-omnimarket-pr-2166-ci)",
+          "status": "verified",
+          "message": "OmniNode-ai/omnimarket#2166: MERGED (state=MERGED); all 33 required context(s) green for jonah/omn-16752-gate-runner-env-aware-tests@b478c0772006"
+        },
+        {
+          "evidence_id": "dod-occ-evidence-admissibility-validator",
+          "description": "Hosted OCC evidence admissibility validator (OMN-15247).",
+          "status": "verified",
+          "message": "OK (16333ms): ........................................................................ [ 94%]\n....                                                                     [100%]\n76 passed in 0.13s"
+        },
+        {
+          "evidence_id": "dod-occ-evidence-admissibility-validator::pr-live-state",
+          "description": "Live PR state for Hosted OCC evidence admissibility validator (OMN-15247).",
+          "status": "skipped",
+          "message": "NO_CONSISTENT_PR_BINDING: item 'dod-occ-evidence-admissibility-validator' has a PASS receipt recording pr_number, but no receipt field consistently pairs that number with a repo (the receipt's pr_number tracks the carrier PR, which may differ from the PR any check_value/probe_command actually pins) \u2014 no live-state binding derived. Pin the item's own check_value with a literal 'gh pr view <N> --repo <owner>/<repo>' or repair the receipt so pr_number and the probed repo agree."
+        },
+        {
+          "evidence_id": "occ-self-bind-pr-7293",
+          "description": "OCC companion PR #7293 \u2014 self-bind for OMN-16752 (OMN-14650).",
+          "status": "verified",
+          "message": "OK (377ms): {\"number\":7293,\"state\":\"MERGED\"}"
+        },
+        {
+          "evidence_id": "occ-self-bind-pr-7293::pr-live-state",
+          "description": "Live GitHub state for OmniNode-ai/onex_change_control#7293 (occ-self-bind-pr-7293)",
+          "status": "failed",
+          "message": "OmniNode-ai/onex_change_control#7293: required checks not green (could not enumerate check-runs for 7feed6811ccf: gh: API rate limit exceeded for user ID 1002253. If you reach out to GitHub Support for help, please include the request ID DE57:699AB:2010C44:6B0B971:6A904B0B and timestamp 2026-08-27 14:34:51 UTC. F)"
+        },
+        {
+          "evidence_id": "dod-OmniNode-ai-omnibase_infra-pr-2928",
+          "description": "PR #2928 on OmniNode-ai/omnibase_infra \u2014 Evidence-Source autobind.",
+          "status": "verified",
+          "message": "OK (386ms): {\"number\":2928,\"state\":\"OPEN\"}; OK (388ms): {\"files\":[{\"path\":\"docker/Dockerfile.gate-runner\",\"additions\":60,\"deletions\":2},{\"path\":\"scripts/ci/run_on_gate_runner.sh\",\"additions\":128,\"deletions\":0}]}"
+        },
+        {
+          "evidence_id": "dod-OmniNode-ai-omnibase_infra-pr-2928::pr-live-state",
+          "description": "Live GitHub state for OmniNode-ai/omnibase_infra#2928 (dod-OmniNode-ai-omnibase_infra-pr-2928)",
+          "status": "failed",
+          "message": "OmniNode-ai/omnibase_infra#2928: PR not merged (state=OPEN); required checks not green (could not resolve required status checks for OmniNode-ai/omnibase_infra@dev: classic=gh: API rate limit exceeded for user ID 1002253. If you reach out to GitHub Support for help, please include the request ID DE5E:3B85B9:1F1C587:682E86D:6A904B0D and timestamp 2026-08-27 14:34:53 UTC. ; rules=gh: API rate limit exceeded for user ID 1002253. If you reach out to GitHub Support for help, please includ)"
+        },
+        {
+          "evidence_id": "dod-deploy-assessment",
+          "description": "Deploy-scope DoD so PR #2928 clears the deploy-gate (F-05).",
+          "status": "failed",
+          "message": "FAILED (184ms): could not find pull request diff: HTTP 403: API rate limit exceeded for user ID 1002253. If you reach out to GitHub Support for help, please include the request ID DE61:134B58:1FF1B58:6AC8150:6A904B0D and timestamp 2026-08-27 14:34:54 UTC. For more on scraping GitHub and how it may affect your rights, please review our Terms of Service (https://docs.github.com/en/site-policy/github-terms/github-terms-of-service) (https://api.github.com/repos/OmniNode-ai/omnibase_infra/pulls/2928)"
+        },
+        {
+          "evidence_id": "dod-deploy-assessment::pr-live-state",
+          "description": "Live GitHub state for OmniNode-ai/omnibase_infra#2928 (dod-deploy-assessment)",
+          "status": "failed",
+          "message": "OmniNode-ai/omnibase_infra#2928: PR not merged (state=OPEN); required checks not green (could not resolve required status checks for OmniNode-ai/omnibase_infra@dev: classic=gh: API rate limit exceeded for user ID 1002253. If you reach out to GitHub Support for help, please include the request ID DE64:F0233:2199428:70762B3:6A904B0E and timestamp 2026-08-27 14:34:54 UTC. F; rules=gh: API rate limit exceeded for user ID 1002253. If you reach out to GitHub Support for help, please includ)"
+        },
+        {
+          "evidence_id": "dod-occ-evidence-admissibility-validator-pr-2928",
+          "description": "Hosted OCC evidence admissibility validator for PR #2928 (OMN-15247).",
+          "status": "verified",
+          "message": "OK (3695ms): ........................................................................ [ 94%]\n....                                                                     [100%]\n76 passed in 0.10s"
+        },
+        {
+          "evidence_id": "dod-occ-evidence-admissibility-validator-pr-2928::pr-live-state",
+          "description": "Live GitHub state for OmniNode-ai/omnibase_infra#2928 (dod-occ-evidence-admissibility-validator-pr-2928)",
+          "status": "failed",
+          "message": "OmniNode-ai/omnibase_infra#2928: PR not merged (state=OPEN); required checks not green (could not resolve required status checks for OmniNode-ai/omnibase_infra@dev: classic=gh: API rate limit exceeded for user ID 1002253. If you reach out to GitHub Support for help, please include the request ID DE6D:699AB:20152EE:6B1A1F9:6A904B13 and timestamp 2026-08-27 14:34:59 UTC. F; rules=gh: API rate limit exceeded for user ID 1002253. If you reach out to GitHub Support for help, please includ)"
+        },
+        {
+          "evidence_id": "occ-self-bind-pr-7294",
+          "description": "Binds OMN-16752 to OCC companion PR #7294 (self-bind).",
+          "status": "verified",
+          "message": "OK (441ms): {\"number\":7294,\"state\":\"MERGED\"}"
+        },
+        {
+          "evidence_id": "occ-self-bind-pr-7294::pr-live-state",
+          "description": "Live GitHub state for OmniNode-ai/onex_change_control#7294 (occ-self-bind-pr-7294)",
+          "status": "failed",
+          "message": "OmniNode-ai/onex_change_control#7294: required checks not green (could not enumerate check-runs for 5ee3fb977e4c: gh: API rate limit exceeded for user ID 1002253. If you reach out to GitHub Support for help, please include the request ID DE7B:27E804:2115CD1:6E50194:6A904B16 and timestamp 2026-08-27 14:35:02 UTC. )"
+        }
+      ],
+      "total_checks": 16,
+      "verified_count": 9,
+      "failed_count": 6,
+      "skipped_count": 1,
+      "superseded_count": 0,
+      "error_message": null,
+      "occ_governance_ref": "origin/dev",
+      "occ_refresh_outcome": "fetched",
+      "occ_resolved_sha": "5e1d764ee41eb241f68739d7d140238346be7701"
+    },
+    "handler_result": {
+      "correlation_id": "1515f932-96cf-452e-a4e2-41ca97d66ca8",
+      "ticket_id": "OMN-16752",
+      "status": "failed",
+      "dry_run": false,
+      "checks": [
+        {
+          "evidence_id": "dod-OmniNode-ai-omnimarket-pr-2166",
+          "description": "PR #2166 on OmniNode-ai/omnimarket \u2014 Evidence-Source autobind.",
+          "status": "verified",
+          "message": "OK (287ms): 1"
+        },
+        {
+          "evidence_id": "dod-OmniNode-ai-omnimarket-pr-2166::pr-live-state",
+          "description": "Live GitHub state for OmniNode-ai/omnimarket#2166 (dod-OmniNode-ai-omnimarket-pr-2166)",
+          "status": "verified",
+          "message": "OmniNode-ai/omnimarket#2166: MERGED (state=MERGED); all 33 required context(s) green for jonah/omn-16752-gate-runner-env-aware-tests@b478c0772006"
+        },
+        {
+          "evidence_id": "dod-OmniNode-ai-omnimarket-pr-2166-ci",
+          "description": "PR #2166 on OmniNode-ai/omnimarket \u2014 product diff scope check (OMN-14425).",
+          "status": "verified",
+          "message": "OK (309ms): {\"files\":[{\"path\":\"src/omnimarket/nodes/node_dod_verify/services/evidence_collector.py\",\"additions\":31,\"deletions\":0},{\"path\":\"tests/scripts/test_prepush_hook_host_identity_guard.py\",\"additions\":35,\"d"
+        },
+        {
+          "evidence_id": "dod-OmniNode-ai-omnimarket-pr-2166-ci::pr-live-state",
+          "description": "Live GitHub state for OmniNode-ai/omnimarket#2166 (dod-OmniNode-ai-omnimarket-pr-2166-ci)",
+          "status": "verified",
+          "message": "OmniNode-ai/omnimarket#2166: MERGED (state=MERGED); all 33 required context(s) green for jonah/omn-16752-gate-runner-env-aware-tests@b478c0772006"
+        },
+        {
+          "evidence_id": "dod-occ-evidence-admissibility-validator",
+          "description": "Hosted OCC evidence admissibility validator (OMN-15247).",
+          "status": "verified",
+          "message": "OK (16333ms): ........................................................................ [ 94%]\n....                                                                     [100%]\n76 passed in 0.13s"
+        },
+        {
+          "evidence_id": "dod-occ-evidence-admissibility-validator::pr-live-state",
+          "description": "Live PR state for Hosted OCC evidence admissibility validator (OMN-15247).",
+          "status": "skipped",
+          "message": "NO_CONSISTENT_PR_BINDING: item 'dod-occ-evidence-admissibility-validator' has a PASS receipt recording pr_number, but no receipt field consistently pairs that number with a repo (the receipt's pr_number tracks the carrier PR, which may differ from the PR any check_value/probe_command actually pins) \u2014 no live-state binding derived. Pin the item's own check_value with a literal 'gh pr view <N> --repo <owner>/<repo>' or repair the receipt so pr_number and the probed repo agree."
+        },
+        {
+          "evidence_id": "occ-self-bind-pr-7293",
+          "description": "OCC companion PR #7293 \u2014 self-bind for OMN-16752 (OMN-14650).",
+          "status": "verified",
+          "message": "OK (377ms): {\"number\":7293,\"state\":\"MERGED\"}"
+        },
+        {
+          "evidence_id": "occ-self-bind-pr-7293::pr-live-state",
+          "description": "Live GitHub state for OmniNode-ai/onex_change_control#7293 (occ-self-bind-pr-7293)",
+          "status": "failed",
+          "message": "OmniNode-ai/onex_change_control#7293: required checks not green (could not enumerate check-runs for 7feed6811ccf: gh: API rate limit exceeded for user ID 1002253. If you reach out to GitHub Support for help, please include the request ID DE57:699AB:2010C44:6B0B971:6A904B0B and timestamp 2026-08-27 14:34:51 UTC. F)"
+        },
+        {
+          "evidence_id": "dod-OmniNode-ai-omnibase_infra-pr-2928",
+          "description": "PR #2928 on OmniNode-ai/omnibase_infra \u2014 Evidence-Source autobind.",
+          "status": "verified",
+          "message": "OK (386ms): {\"number\":2928,\"state\":\"OPEN\"}; OK (388ms): {\"files\":[{\"path\":\"docker/Dockerfile.gate-runner\",\"additions\":60,\"deletions\":2},{\"path\":\"scripts/ci/run_on_gate_runner.sh\",\"additions\":128,\"deletions\":0}]}"
+        },
+        {
+          "evidence_id": "dod-OmniNode-ai-omnibase_infra-pr-2928::pr-live-state",
+          "description": "Live GitHub state for OmniNode-ai/omnibase_infra#2928 (dod-OmniNode-ai-omnibase_infra-pr-2928)",
+          "status": "failed",
+          "message": "OmniNode-ai/omnibase_infra#2928: PR not merged (state=OPEN); required checks not green (could not resolve required status checks for OmniNode-ai/omnibase_infra@dev: classic=gh: API rate limit exceeded for user ID 1002253. If you reach out to GitHub Support for help, please include the request ID DE5E:3B85B9:1F1C587:682E86D:6A904B0D and timestamp 2026-08-27 14:34:53 UTC. ; rules=gh: API rate limit exceeded for user ID 1002253. If you reach out to GitHub Support for help, please includ)"
+        },
+        {
+          "evidence_id": "dod-deploy-assessment",
+          "description": "Deploy-scope DoD so PR #2928 clears the deploy-gate (F-05).",
+          "status": "failed",
+          "message": "FAILED (184ms): could not find pull request diff: HTTP 403: API rate limit exceeded for user ID 1002253. If you reach out to GitHub Support for help, please include the request ID DE61:134B58:1FF1B58:6AC8150:6A904B0D and timestamp 2026-08-27 14:34:54 UTC. For more on scraping GitHub and how it may affect your rights, please review our Terms of Service (https://docs.github.com/en/site-policy/github-terms/github-terms-of-service) (https://api.github.com/repos/OmniNode-ai/omnibase_infra/pulls/2928)"
+        },
+        {
+          "evidence_id": "dod-deploy-assessment::pr-live-state",
+          "description": "Live GitHub state for OmniNode-ai/omnibase_infra#2928 (dod-deploy-assessment)",
+          "status": "failed",
+          "message": "OmniNode-ai/omnibase_infra#2928: PR not merged (state=OPEN); required checks not green (could not resolve required status checks for OmniNode-ai/omnibase_infra@dev: classic=gh: API rate limit exceeded for user ID 1002253. If you reach out to GitHub Support for help, please include the request ID DE64:F0233:2199428:70762B3:6A904B0E and timestamp 2026-08-27 14:34:54 UTC. F; rules=gh: API rate limit exceeded for user ID 1002253. If you reach out to GitHub Support for help, please includ)"
+        },
+        {
+          "evidence_id": "dod-occ-evidence-admissibility-validator-pr-2928",
+          "description": "Hosted OCC evidence admissibility validator for PR #2928 (OMN-15247).",
+          "status": "verified",
+          "message": "OK (3695ms): ........................................................................ [ 94%]\n....                                                                     [100%]\n76 passed in 0.10s"
+        },
+        {
+          "evidence_id": "dod-occ-evidence-admissibility-validator-pr-2928::pr-live-state",
+          "description": "Live GitHub state for OmniNode-ai/omnibase_infra#2928 (dod-occ-evidence-admissibility-validator-pr-2928)",
+          "status": "failed",
+          "message": "OmniNode-ai/omnibase_infra#2928: PR not merged (state=OPEN); required checks not green (could not resolve required status checks for OmniNode-ai/omnibase_infra@dev: classic=gh: API rate limit exceeded for user ID 1002253. If you reach out to GitHub Support for help, please include the request ID DE6D:699AB:20152EE:6B1A1F9:6A904B13 and timestamp 2026-08-27 14:34:59 UTC. F; rules=gh: API rate limit exceeded for user ID 1002253. If you reach out to GitHub Support for help, please includ)"
+        },
+        {
+          "evidence_id": "occ-self-bind-pr-7294",
+          "description": "Binds OMN-16752 to OCC companion PR #7294 (self-bind).",
+          "status": "verified",
+          "message": "OK (441ms): {\"number\":7294,\"state\":\"MERGED\"}"
+        },
+        {
+          "evidence_id": "occ-self-bind-pr-7294::pr-live-state",
+          "description": "Live GitHub state for OmniNode-ai/onex_change_control#7294 (occ-self-bind-pr-7294)",
+          "status": "failed",
+          "message": "OmniNode-ai/onex_change_control#7294: required checks not green (could not enumerate check-runs for 5ee3fb977e4c: gh: API rate limit exceeded for user ID 1002253. If you reach out to GitHub Support for help, please include the request ID DE7B:27E804:2115CD1:6E50194:6A904B16 and timestamp 2026-08-27 14:35:02 UTC. )"
+        }
+      ],
+      "total_checks": 16,
+      "verified_count": 9,
+      "failed_count": 6,
+      "skipped_count": 1,
+      "superseded_count": 0,
+      "error_message": null,
+      "occ_governance_ref": "origin/dev",
+      "occ_refresh_outcome": "fetched",
+      "occ_resolved_sha": "5e1d764ee41eb241f68739d7d140238346be7701"
+    },
+    "error": "",
+    "capture_log": "<redacted: runtime capture log, 7075 bytes>"
+  },
+  "result_model": "omnibase_infra.cli.model_receipt_runtime_summary.ModelReceiptRuntimeSummary",
+  "metrics": {
+    "capture_log_bytes": 7149.0
+  },
+  "artifact_refs": [
+    {
+      "ref": "sha256:95805470ccf6383111517d18a589af7664c8169a7cf0ace3f75be7b46998071f"
+    },
+    {
+      "ref": "sha256:66e772b20d8e00c0c6b43a823cf33dceb0997148c3cfd85d52b360feb81fecdb"
+    }
+  ],
+  "schema_version": {
+    "major": 1,
+    "minor": 0,
+    "patch": 0,
+    "prerelease": null,
+    "build": null
+  }
+}

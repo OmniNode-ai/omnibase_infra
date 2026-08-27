@@ -32,6 +32,15 @@ class ModelEvidenceAutocloseOutcome(BaseModel):
     dod_verify_total_checks: int = Field(default=0, ge=0)
     dod_verify_verified_count: int = Field(default=0, ge=0)
     dod_verify_failed_count: int = Field(default=0, ge=0)
+    uncovered_acceptance_criteria: tuple[str, ...] = Field(
+        default=(),
+        description=(
+            "Acceptance criteria found in the ticket's Linear description that "
+            "dod_verify's checks do not cover (GAP_AC_COVERAGE only). Recorded "
+            "on the outcome as well as in the comment so a DRY-RUN, which posts "
+            "no comment, still names exactly what blocked the flip."
+        ),
+    )
     linear_comment_posted: bool = Field(
         default=False, description="Whether an audit/gap comment was posted."
     )
