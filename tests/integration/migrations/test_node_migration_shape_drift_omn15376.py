@@ -937,7 +937,7 @@ def test_delegation_routing_overlay_reconciliation_enforces_declared_shape(
             "ON_ERROR_STOP=1",
             "-c",
             """
-            SELECT string_agg(conname || ':' || contype, ',' ORDER BY conname)
+            SELECT string_agg(conname || ':' || contype::text, ',' ORDER BY conname)
             FROM pg_constraint
             WHERE conrelid = 'delegation_routing_tenant_overlay'::regclass
               AND conname IN (
