@@ -189,7 +189,13 @@ def test_checked_in_manifest_is_exact_and_all_blockers_are_explicit() -> None:
     # omnibase_infra" and blocked every staging deploy. The node loop connects
     # to the application database, where that schema exists and where the
     # runtime's own DSN points.
-    assert len(result.declarations) == 114
+    # +1 for OMN-16777's
+    # node_projection_consumer_flow/0000_create_consumer_flow_windows.sql --
+    # the per-(consumer_group, topic) throughput read model plus its
+    # upstream-production tally (Phase 1 of the platform-observability epic
+    # OMN-16776). Vendored here first per the node-migration-vendor-parity-gate
+    # ordering, ahead of the omnimarket PR that owns the source file.
+    assert len(result.declarations) == 115
     assert result.blocked == ()
     assert len(result.legacy_node_declarations) == 2
     assert len(result.cloud_aliases) == 30
