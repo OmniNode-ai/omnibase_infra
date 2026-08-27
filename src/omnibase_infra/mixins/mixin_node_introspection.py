@@ -1844,12 +1844,27 @@ class MixinNodeIntrospection:
 
             # Create heartbeat event
             now = datetime.now(UTC)
+
+            # OMN-16777: close the throughput window and ride it on THIS
+            # envelope. The carrier must be the heartbeat, not a sidecar: a
+            # separate poller keeps reporting on a runtime that has already
+            # died, whereas a heartbeat that stops arriving is itself the
+            # signal. `now` is injected — the accumulator owns no clock, and
+            # returns None on the priming tick or when another node in this
+            # process already carries the window.
+            from omnibase_infra.runtime.observability import (
+                get_consumer_flow_counters,
+            )
+
+            flow_window = get_consumer_flow_counters().drain(node_id=node_id, now=now)
+
             heartbeat = ModelNodeHeartbeatEvent(
                 node_id=node_id,
                 node_type=node_type,
                 uptime_seconds=uptime_seconds,
                 active_operations_count=active_ops_count,
                 correlation_id=heartbeat_correlation_id,
+                flow_window=flow_window,
                 timestamp=now,  # Required: time injection pattern
             )
 

@@ -15,6 +15,9 @@ from pydantic import BaseModel, ConfigDict, Field, field_validator
 
 from omnibase_core.enums import EnumNodeKind
 from omnibase_core.models.primitives.model_semver import ModelSemVer
+from omnibase_infra.models.observability.model_node_flow_window import (
+    ModelNodeFlowWindow,
+)
 from omnibase_infra.utils import validate_timezone_aware_datetime
 
 
@@ -104,6 +107,28 @@ class ModelNodeHeartbeatEvent(BaseModel):
     )
     cpu_usage_percent: float | None = Field(
         default=None, ge=0, le=100, description="CPU usage percentage (0-100)"
+    )
+
+    # Throughput window (OMN-16777, epic OMN-16776)
+    # ------------------------------------------------------------------
+    # Every other field on this event measures CONNECTEDNESS — the node is up,
+    # it has N operations in flight, it is using M MB.  None of them measures
+    # whether anything actually moved.  `node_gateway_link_health_projection
+    # _compute` was Stable at LAG 0 with 15,750 messages in and 0 out, and every
+    # signal the platform had reported it green (OMN-16755).
+    #
+    # This field carries the raw per-(consumer_group, topic) counters for the
+    # window that just closed.  It carries NO verdict: FLOWING / STALLED /
+    # STARVED / IDLE is derived in `node_projection_consumer_flow`, because a
+    # producer that grades its own health is a producer that can lie about it.
+    #
+    # `None` means this node reported no window (the priming tick, or another
+    # node in the same process carries the window).  It does NOT mean zero
+    # traffic — a window that is absent is unknown, and the projection
+    # materializes a sequence gap as UNKNOWN, never as zero.
+    flow_window: ModelNodeFlowWindow | None = Field(
+        default=None,
+        description="Per-consumer throughput counters for the closed window",
     )
 
     # Metadata
