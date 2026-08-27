@@ -30,8 +30,8 @@
 --   Rows are repaired before any constraint is tightened, never dropped and
 --   never truncated. Every statement is idempotent: the UPDATEs match nothing
 --   once they have run, SET NOT NULL is a no-op on an already-NOT NULL column,
---   and the primary key is rebuilt to its declared shape (see the note above
---   that statement for why the rebuild is unconditional).
+--   and the primary key is rebuilt only when it is missing or drifted from its
+--   declared api_key_ref shape.
 --
 -- name AND provider ARE DELIBERATELY EXCLUDED, and this is load-bearing.
 --   The 7de798a4a rewrite set NOT NULL on five columns including name and
@@ -84,29 +84,28 @@ ALTER TABLE tenant_inference_credentials
     ALTER COLUMN created_at SET DEFAULT NOW(),
     ALTER COLUMN created_at SET NOT NULL;
 
--- Static DROP-then-ADD, NOT a conditional rebuild, and the reason is a gate
--- rather than a preference. Making the rebuild conditional requires inspecting
--- pg_constraint from inside a procedural block, and
--- scripts/ci/check_application_database_sql.py rejects EVERY `DO $$ ... $$`
--- whose relation targets it cannot prove statically -- including a block that
--- uses no dynamic SQL at all. Verified by running that gate against both
--- shapes: the conditional variant fails with "procedural block contains
--- dynamic SQL whose relation targets cannot be proven statically"; this pair
--- passes. The only way to keep the conditional is an exact-path entry in that
--- gate's exemption list, i.e. weakening a required gate to soften an
--- unconditional DDL statement -- which is not a trade this repair will make.
---
--- Cost, stated rather than waved away: ADD CONSTRAINT ... PRIMARY KEY takes an
--- ACCESS EXCLUSIVE lock and rebuilds the backing index, so on a large busy
--- table this pair would block reads and writes. tenant_inference_credentials is
--- a BYOK credential-REF catalog (one short row per registered key, no payloads)
--- and exists on exactly one lane today; the sibling reconciliations in this
--- corpus that are already applied to that same lane -- delegation_routing_
--- tenant_overlay 0001, capability_scores 0001 -- use this identical pair for
--- the same reason. DROP ... IF EXISTS is a no-op when the constraint is absent,
--- and the ADD is safe because the reconciliation above has already made
--- api_key_ref non-null and unique.
-ALTER TABLE tenant_inference_credentials
-    DROP CONSTRAINT IF EXISTS tenant_inference_credentials_pkey;
-ALTER TABLE tenant_inference_credentials
-    ADD CONSTRAINT tenant_inference_credentials_pkey PRIMARY KEY (api_key_ref);
+-- Avoid rebuilding a valid key. ADD CONSTRAINT ... PRIMARY KEY takes an
+-- ACCESS EXCLUSIVE lock while PostgreSQL builds the backing index, so the
+-- repaired/drifted path below is intentionally conditional.
+DO $$
+DECLARE
+    existing_primary_key_columns TEXT[];
+BEGIN
+    SELECT array_agg(attribute.attname ORDER BY key_position.ordinality)
+    INTO existing_primary_key_columns
+    FROM pg_constraint AS constraint_info
+    JOIN LATERAL unnest(constraint_info.conkey) WITH ORDINALITY AS key_position(attribute_number, ordinality)
+        ON TRUE
+    JOIN pg_attribute AS attribute
+        ON attribute.attrelid = constraint_info.conrelid
+       AND attribute.attnum = key_position.attribute_number
+    WHERE constraint_info.conrelid = 'tenant_inference_credentials'::regclass
+      AND constraint_info.contype = 'p';
+
+    IF existing_primary_key_columns IS DISTINCT FROM ARRAY['api_key_ref']::TEXT[] THEN
+        ALTER TABLE tenant_inference_credentials
+            DROP CONSTRAINT IF EXISTS tenant_inference_credentials_pkey;
+        ALTER TABLE tenant_inference_credentials
+            ADD CONSTRAINT tenant_inference_credentials_pkey PRIMARY KEY (api_key_ref);
+    END IF;
+END $$;
