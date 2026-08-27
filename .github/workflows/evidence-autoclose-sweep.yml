@@ -415,7 +415,22 @@ jobs:
               print(raw[:2000])
               raise SystemExit(0)
 
-          result = payload.get("result") or {}
+          # `onex skill dod_verify` emits a ModelSkillResult envelope whose
+          # `result` is the WORKFLOW result; the ModelDodVerifyState the
+          # verdict actually lives in is nested one level deeper under
+          # `terminal_payload`. Reading `result` directly yields a dict with
+          # none of the verdict keys, which renders as an all-None row that
+          # looks like dod_verify produced nothing — the first run of this
+          # diagnostic did exactly that. Fall back to `result` itself so a
+          # future envelope change degrades to a visible mismatch rather than
+          # a silent one.
+          envelope = payload.get("result") or {}
+          result = envelope.get("terminal_payload") or envelope
+          if "status" not in result:
+              print(
+                  "  (unrecognised dod_verify envelope — top-level keys: "
+                  f"{sorted(payload)}; result keys: {sorted(envelope)})"
+              )
           print(
               "  status={} total={} verified={} failed={} skipped={} superseded={}".format(
                   result.get("status"),
