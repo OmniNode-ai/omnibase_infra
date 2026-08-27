@@ -37,6 +37,13 @@
 # (2026-08-27, lookback 10h) is the last such run: 27 bindings extracted,
 # 11 ERROR_VERIFY_NONZERO_EXIT, 0 flipped, 0 gap_posted.
 #
+# The runner also needs the OCC CONTRACTS, not just the verifier binary —
+# dod_verify verifies a ticket against `contracts/<ticket>.yaml` in
+# onex_change_control, and with no such checkout it reported a single skipped
+# check for EVERY ticket (`0/1 ACs verified, 0 failed`). That is recorded as a
+# GAP, i.e. the sweep would state an evidence verdict it never reached. Both
+# the checkout and an explicit readability assertion are below.
+#
 # The co-install is verified, not assumed: the step after it asserts
 # `node_dod_verify` is a resolvable `onex.nodes` entry point THROUGH the
 # same `uv run` path the sweep's per-ticket subprocess uses. A silently
@@ -260,6 +267,68 @@ jobs:
           print(f"OK: node_dod_verify resolved among {len(eps)} onex.nodes entry points")
           PYEOF
 
+      # OMN-16736. node_dod_verify resolving is necessary but not sufficient:
+      # it verifies the checks declared in the ticket's OCC CONTRACT, and it
+      # finds that contract by searching `${ONEX_CC_REPO_PATH}/contracts` then
+      # `${OMNI_HOME}/onex_change_control/contracts`
+      # (EvidenceCollector._DEFAULT_CONTRACT_ROOTS). Neither existed in this
+      # job, so every ticket resolved to no contract at all and came back as a
+      # single skipped check — `0/1 ACs verified, 0 failed`.
+      #
+      # That reads as "this ticket is not proven" and is recorded as a GAP,
+      # which is WRONG in a specific and dangerous way: the sweep would have
+      # posted six Linear comments (run 33091828068) stating an evidence
+      # verdict it never actually reached. The uniform 0/1 signature across six
+      # unrelated tickets is the tell — it is one environment fault, not six
+      # ticket verdicts.
+      #
+      # Ground truth for the same ticket WITH the contracts present:
+      #   OMN-16757 in that CI run     -> total_checks=1  verified=0 failed=0
+      #   OMN-16757 against a real OCC -> total_checks=14 verified=12 failed=2
+      #                                   (superseded=1, occ_refresh=fetched)
+      #
+      # depth-1 is correct here: the collector reads `contracts/<ticket>.yaml`
+      # AT a resolved ref, it does not walk ancestry. (The main-vs-dev ancestry
+      # caveat about shallow OCC clones does not apply to this read path.)
+      - name: Checkout onex_change_control (the contracts dod_verify verifies against)
+        uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+        with:
+          repository: OmniNode-ai/onex_change_control
+          ref: dev
+          path: .occ-src
+          token: ${{ secrets.OMNI_GITHUB_TOKEN || github.token }}
+          persist-credentials: false
+          fetch-depth: 1
+
+      # Assert the exact read the collector performs, before the sweep runs.
+      # Without this the failure mode is silent and mis-labelled: it does not
+      # look like "the runner has no contracts", it looks like "these tickets
+      # are unproven", which is the one thing this whole mechanism must never
+      # say when it has not actually checked.
+      #
+      # `origin/dev` is checked because that is the collector's default
+      # governance ref (OCC contracts land on dev first and are batched to main
+      # later, so a working-tree search alone would miss them).
+      - name: Verify the OCC contracts are readable at the governance ref
+        shell: bash
+        run: |
+          set -euo pipefail
+          if ! git -C .occ-src rev-parse --verify --quiet origin/dev >/dev/null; then
+            echo "::error::.occ-src has no origin/dev remote-tracking ref — dod_verify resolves contracts at origin/dev and would find none, reporting every ticket as 0/1 unproven." >&2
+            exit 1
+          fi
+          sha="$(git -C .occ-src rev-parse origin/dev)"
+          count="$(git -C .occ-src ls-tree --name-only "origin/dev" contracts/ | wc -l | tr -d ' ')"
+          echo "OCC governance ref origin/dev = ${sha}"
+          echo "contracts/ entries at that ref: ${count}"
+          # A real OCC dev carries thousands of contracts. A handful means the
+          # checkout is wrong (empty, sparse, or the wrong repo) — fail here
+          # rather than let the sweep publish verdicts it did not reach.
+          if [ "${count}" -lt 100 ]; then
+            echo "::error::only ${count} entries under contracts/ at origin/dev — refusing to run the sweep against an OCC checkout this thin." >&2
+            exit 1
+          fi
+
       - name: Run evidence autoclose sweep (DRY-RUN — apply is never passed here)
         env:
           LINEAR_API_KEY: ${{ secrets.LINEAR_API_KEY }}
@@ -270,6 +339,10 @@ jobs:
           # (which does not, and by the layer graph must not, contain
           # omnimarket).
           UV_NO_SYNC: "1"
+          # First entry in EvidenceCollector's contract search path. Without it
+          # dod_verify finds no contract for any ticket and every verdict
+          # degrades to a single skipped check (OMN-16736).
+          ONEX_CC_REPO_PATH: ${{ github.workspace }}/.occ-src
         run: |
           set -euo pipefail
           # Fail fast on a missing secret rather than letting every ticket in
