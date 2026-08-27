@@ -35,8 +35,10 @@ Exit codes:
 from __future__ import annotations
 
 import argparse
+import re
 import sys
 from collections import defaultdict
+from datetime import UTC, date, datetime
 from pathlib import Path
 
 # Allow running as a standalone script
@@ -55,23 +57,11 @@ from omnibase_infra.topics.contract_topic_extractor import ContractTopicExtracto
 
 _EXTERNAL_PUBLISHER_ALLOWLIST: dict[str, str] = {
     # omniclaude publishes these via hook scripts, not contract.yaml
-    "onex.evt.omniclaude.session-started.v1": "Published by omniclaude hooks, not contract-declared | owner: jonah | expiry: 2026-12-01",
-    "onex.evt.omniclaude.session-ended.v1": "Published by omniclaude SessionEnd hook, not contract-declared | owner: jonah | expiry: 2026-12-01",
-    "onex.evt.omniclaude.session-outcome.v1": "Published by omniclaude SessionEnd hook outcome processing, not contract-declared | owner: jonah | expiry: 2026-12-01",
-    "onex.evt.omniclaude.prompt-submitted.v1": "Published by omniclaude hooks, not contract-declared | owner: jonah | expiry: 2026-12-01",
-    "onex.evt.omniclaude.tool-executed.v1": "Published by omniclaude hooks, not contract-declared | owner: jonah | expiry: 2026-12-01",
-    "onex.evt.omniclaude.context-injected.v1": "Published by omniclaude hook context injection (renamed from the never-published hook-context-injected.v1, OMN-14986), not contract-declared | owner: jonah | expiry: 2026-12-01",
-    "onex.evt.omniclaude.validator-catch.v1": "Published by omniclaude validator hooks, not contract-declared | owner: jonah | expiry: 2026-12-01",
-    "onex.evt.omniclaude.pattern-enforcement.v1": "Published by omniclaude pattern enforcement hooks, not contract-declared | owner: jonah | expiry: 2026-12-01",
     "onex.evt.omniclaude.phase-metrics.v1": "Published by omniclaude emit-daemon hooks, not contract-declared | owner: jonah | expiry: 2026-12-01",
     "onex.evt.omniclaude.notification-blocked.v1": "Published by omniclaude emit-daemon hooks, not contract-declared | owner: jonah | expiry: 2026-12-01",
     "onex.evt.omniclaude.notification-completed.v1": "Published by omniclaude emit-daemon hooks, not contract-declared | owner: jonah | expiry: 2026-12-01",
-    "onex.cmd.omniintelligence.claude-hook-event.v1": "Published by omniclaude hooks | owner: jonah | expiry: 2026-12-01",
-    "onex.cmd.omniintelligence.tool-content.v1": "Published by omniclaude hooks | owner: jonah | expiry: 2026-12-01",
-    "onex.evt.omniintelligence.dispatch-outcome-evaluated.v1": "Published by omniintelligence dispatch evaluation, not an omnibase_infra node contract | owner: jonah | expiry: 2026-12-01",
     # GitHub webhooks are external triggers
     "onex.evt.github.pr-webhook.v1": "Published by GitHub webhook relay, not a node | owner: jonah | expiry: 2026-12-01",
-    "onex.evt.github.push-webhook.v1": "Published by GitHub webhook relay | owner: jonah | expiry: 2026-12-01",
     # Runner usage events are produced by self-hosted runner telemetry outside
     # contract-declared node publishers.
     "onex.evt.omninode.runner-usage-recorded.v1": "Published by runner telemetry outside node contracts | owner: jonah | expiry: 2026-12-01",
@@ -151,9 +141,8 @@ _BASELINE_DEAD_LETTER_ALLOWLIST: dict[str, str] = {
     # (the coding-agent CLI thin-publisher), not a contract-declared node (OMN-13247).
     "onex.cmd.omnibase-infra.coding-agent-invoke.v1": "Published by coding-agent workflow clients as the external entrypoint | owner: jonah | expiry: 2026-12-01",
     # Build loop cmd topics — triggered by CLI (claude -p), not Kafka publisher
-    "onex.cmd.omnibase-infra.build-loop-start.v1": "Triggered by cron-buildloop.sh via claude -p, not Kafka | owner: jonah | expiry: 2026-12-01",
-    "onex.cmd.omnibase-infra.build-loop-append.v1": "Routed via intent from node_build_loop_projection_compute, not Kafka publish | owner: jonah | expiry: 2026-09-01",
-    "onex.cmd.omnibase-infra.pr-state-upsert.v1": "Routed via intent from node_pr_state_projection_compute, not Kafka publish | owner: jonah | expiry: 2026-09-01",
+    "onex.cmd.omnibase-infra.build-loop-append.v1": "Routed via intent from node_build_loop_projection_compute, not Kafka publish | owner: jonah | expiry: 2026-12-01 [OMN-16795 re-verified 2026-08-27: stated in-repo publisher confirmed by non-enum source reference]",
+    "onex.cmd.omnibase-infra.pr-state-upsert.v1": "Routed via intent from node_pr_state_projection_compute, not Kafka publish | owner: jonah | expiry: 2026-10-01 [OMN-16795 2026-08-27: NOT verified — the topic appears only in its own topic enum, so the stated publisher could not be confirmed in this repo. Short leash: prove the publisher or delete the subscribe declaration]",
     "onex.cmd.omnibase-infra.gateway-link-health-upsert.v1": "Routed via intent from node_gateway_link_health_projection_compute, not Kafka publish (OMN-15570) | owner: jonah | expiry: 2026-12-01",
     # Gateway heartbeat — published imperatively by ServiceGatewayForwarder.publish_heartbeat
     # (node_bus_forwarder_effect/services/service_gateway_forwarder.py), not via a
@@ -164,82 +153,72 @@ _BASELINE_DEAD_LETTER_ALLOWLIST: dict[str, str] = {
     "onex.evt.omnibase-infra.gateway-heartbeat.v1": "Published imperatively by ServiceGatewayForwarder.publish_heartbeat, not via contract publish_topics (OMN-15570 adds the first contract-declared consumer) | owner: jonah | expiry: 2026-12-01",
     "onex.cmd.omnibase-infra.validation-ledger-append.v1": "Routed via intent from node_validation_ledger_projection_compute, not Kafka publish | owner: jonah | expiry: 2026-12-01",
     # Chain learning — publisher nodes not yet implemented
-    "onex.cmd.omnibase-infra.chain-learn.v1": "Chain learning publisher not yet wired | owner: jonah | expiry: 2026-09-01",
+    "onex.cmd.omnibase-infra.chain-learn.v1": "Chain learning publisher not yet wired | owner: jonah | expiry: 2026-10-01 [OMN-16795 2026-08-27: NOT verified — the topic appears only in its own topic enum, so the stated publisher could not be confirmed in this repo. Short leash: prove the publisher or delete the subscribe declaration]",
     # Topic migration — command issued by operator/runtime, not a contract-declared publisher (OMN-12623)
     "onex.cmd.omnibase-infra.topic-migration-execute.v1": "Migration command issued by operator/runtime (node_topic_migration_executor_effect), not Kafka publisher | owner: jonah | expiry: 2026-12-01",
     # Delegation — request comes from omniclaude hooks, not contract-declared
-    "onex.cmd.omnibase-infra.delegation-request.v1": "Delegation request from omniclaude hooks | owner: jonah | expiry: 2026-09-01",
     # LLM infrastructure — requests come from orchestrators via intents, not Kafka publish
-    "onex.cmd.omnibase-infra.llm-completion-request.v1": "LLM request via intent routing, not direct publish | owner: jonah | expiry: 2026-09-01",
-    "onex.cmd.omnibase-infra.llm-embedding-request.v1": "LLM embedding request via intent routing | owner: jonah | expiry: 2026-09-01",
-    "onex.cmd.omnibase-infra.llm-inference-request.v1": "LLM request via intent routing | owner: jonah | expiry: 2026-09-01",
-    "onex.cmd.omnibase-infra.vector-store-request.v1": "Vector store request via intent routing | owner: jonah | expiry: 2026-09-01",
+    "onex.cmd.omnibase-infra.llm-completion-request.v1": "LLM request via intent routing, not direct publish | owner: jonah | expiry: 2026-10-01 [OMN-16795 2026-08-27: NOT verified — the topic appears only in its own topic enum, so the stated publisher could not be confirmed in this repo. Short leash: prove the publisher or delete the subscribe declaration]",
+    "onex.cmd.omnibase-infra.llm-embedding-request.v1": "LLM embedding request via intent routing | owner: jonah | expiry: 2026-10-01 [OMN-16795 2026-08-27: NOT verified — the topic appears only in its own topic enum, so the stated publisher could not be confirmed in this repo. Short leash: prove the publisher or delete the subscribe declaration]",
+    "onex.cmd.omnibase-infra.llm-inference-request.v1": "LLM request via intent routing | owner: jonah | expiry: 2026-10-01 [OMN-16795 2026-08-27: NOT verified — the topic appears only in its own topic enum, so the stated publisher could not be confirmed in this repo. Short leash: prove the publisher or delete the subscribe declaration]",
+    "onex.cmd.omnibase-infra.vector-store-request.v1": "Vector store request via intent routing | owner: jonah | expiry: 2026-10-01 [OMN-16795 2026-08-27: NOT verified — the topic appears only in its own topic enum, so the stated publisher could not be confirmed in this repo. Short leash: prove the publisher or delete the subscribe declaration]",
     # Artifact reconciliation — triggered externally
-    "onex.cmd.artifact.reconcile.v1": "Triggered by CI/webhook, not Kafka publisher | owner: jonah | expiry: 2026-09-01",
+    "onex.cmd.artifact.reconcile.v1": "Triggered by CI/webhook, not Kafka publisher | owner: jonah | expiry: 2026-12-01 [OMN-16795 re-verified 2026-08-27: publisher is outside omnibase_infra, so this claim is NOT falsifiable from this repo; exemption kept on that basis]",
     # Contract resolution — triggered by runtime, not Kafka publisher
-    "onex.cmd.platform.contract-resolve-requested.v1": "Contract resolution triggered by runtime | owner: jonah | expiry: 2026-09-01",
+    "onex.cmd.platform.contract-resolve-requested.v1": "Contract resolution triggered by runtime | owner: jonah | expiry: 2026-10-01 [OMN-16795 2026-08-27: NOT verified — the topic appears only in its own topic enum, so the stated publisher could not be confirmed in this repo. Short leash: prove the publisher or delete the subscribe declaration]",
     # Intent storage queries — internal runtime queries, not event-sourced
-    "onex.cmd.platform.intent-query-distribution.v1": "Internal runtime query pattern | owner: jonah | expiry: 2026-09-01",
-    "onex.cmd.platform.intent-query-session.v1": "Internal runtime query pattern | owner: jonah | expiry: 2026-09-01",
     # Ledger operations — internal runtime
-    "onex.cmd.platform.ledger-append.v1": "Internal runtime ledger operation | owner: jonah | expiry: 2026-09-01",
-    "onex.cmd.platform.ledger-query.v1": "Internal runtime ledger query | owner: jonah | expiry: 2026-09-01",
+    "onex.cmd.platform.ledger-append.v1": "Internal runtime ledger operation | owner: jonah | expiry: 2026-12-01 [OMN-16795 re-verified 2026-08-27: stated in-repo publisher confirmed by non-enum source reference]",
+    "onex.cmd.platform.ledger-query.v1": "Internal runtime ledger query | owner: jonah | expiry: 2026-12-01 [OMN-16795 re-verified 2026-08-27: stated in-repo publisher confirmed by non-enum source reference]",
     # Router — request comes from omniclaude hooks
-    "onex.cmd.router.route-request.v1": "Route request from omniclaude hooks | owner: jonah | expiry: 2026-09-01",
+    "onex.cmd.router.route-request.v1": "Route request from omniclaude hooks | owner: jonah | expiry: 2026-12-01 [OMN-16795 re-verified 2026-08-27: publisher is outside omnibase_infra, so this claim is NOT falsifiable from this repo; exemption kept on that basis]",
     # RSD scoring — triggered externally
-    "onex.cmd.rsd.score.v1": "RSD scoring triggered externally | owner: jonah | expiry: 2026-09-01",
+    "onex.cmd.rsd.score.v1": "RSD scoring triggered externally | owner: jonah | expiry: 2026-12-01 [OMN-16795 re-verified 2026-08-27: publisher is outside omnibase_infra, so this claim is NOT falsifiable from this repo; exemption kept on that basis]",
     # Skill commands — triggered by Claude skill invocations, not Kafka
-    "onex.cmd.skill.merge-sweep.v1": "Triggered by /merge-sweep skill, not Kafka | owner: jonah | expiry: 2026-09-01",
-    "onex.cmd.skill.scope-check.v1": "Triggered by /scope-check skill | owner: jonah | expiry: 2026-09-01",
+    "onex.cmd.skill.merge-sweep.v1": "Triggered by /merge-sweep skill, not Kafka | owner: jonah | expiry: 2026-12-01 [OMN-16795 re-verified 2026-08-27: publisher is outside omnibase_infra, so this claim is NOT falsifiable from this repo; exemption kept on that basis]",
+    "onex.cmd.skill.scope-check.v1": "Triggered by /scope-check skill | owner: jonah | expiry: 2026-12-01 [OMN-16795 re-verified 2026-08-27: publisher is outside omnibase_infra, so this claim is NOT falsifiable from this repo; exemption kept on that basis]",
     # Build loop events — classify and fill phases not yet publishing
-    "onex.evt.omnibase-infra.build-loop-classify-completed.v1": "Classify phase effect node not yet implemented | owner: jonah | expiry: 2026-09-01",
-    "onex.evt.omnibase-infra.build-loop-fill-completed.v1": "Fill phase effect node not yet implemented | owner: jonah | expiry: 2026-09-01",
     # Chain events — replay/verify effect nodes pending
-    "onex.evt.omnibase-infra.chain-replay-result.v1": "Chain replay effect pending | owner: jonah | expiry: 2026-09-01",
-    "onex.evt.omnibase-infra.chain-verified.v1": "Chain verify effect pending | owner: jonah | expiry: 2026-09-01",
+    "onex.evt.omnibase-infra.chain-replay-result.v1": "Chain replay effect pending | owner: jonah | expiry: 2026-10-01 [OMN-16795 2026-08-27: NOT verified — the topic appears only in its own topic enum, so the stated publisher could not be confirmed in this repo. Short leash: prove the publisher or delete the subscribe declaration]",
+    "onex.evt.omnibase-infra.chain-verified.v1": "Chain verify effect pending | owner: jonah | expiry: 2026-10-01 [OMN-16795 2026-08-27: NOT verified — the topic appears only in its own topic enum, so the stated publisher could not be confirmed in this repo. Short leash: prove the publisher or delete the subscribe declaration]",
     # Infrastructure monitoring — published by runtime internals
-    "onex.evt.omnibase-infra.consumer-health.v1": "Published by runtime health monitor, not contract | owner: jonah | expiry: 2026-09-01",
-    "onex.evt.omnibase-infra.db-error.v1": "Published by DB error handler, not contract | owner: jonah | expiry: 2026-09-01",
-    "onex.evt.omnibase-infra.quality-gate-result.v1": "Published by CI pipeline, not contract | owner: jonah | expiry: 2026-09-01",
-    "onex.evt.omnibase-infra.routing-decision.v1": "Published by routing runtime, not contract | owner: jonah | expiry: 2026-09-01",
-    "onex.evt.omnibase-infra.runtime-error.v1": "Published by runtime error handler | owner: jonah | expiry: 2026-09-01",
-    "onex.evt.omnibase-infra.service-lifecycle.v1": "Published by service lifecycle manager | owner: jonah | expiry: 2026-09-01",
-    "onex.evt.omnibase-infra.system-alert.v1": "Published by alert system | owner: jonah | expiry: 2026-09-01",
-    "onex.evt.omnibase-infra.tool-update.v1": "Published by tool updater | owner: jonah | expiry: 2026-09-01",
+    "onex.evt.omnibase-infra.consumer-health.v1": "Published by runtime health monitor, not contract | owner: jonah | expiry: 2026-12-01 [OMN-16795 re-verified 2026-08-27: stated in-repo publisher confirmed by non-enum source reference]",
+    "onex.evt.omnibase-infra.db-error.v1": "Published by DB error handler, not contract | owner: jonah | expiry: 2026-12-01 [OMN-16795 re-verified 2026-08-27: stated in-repo publisher confirmed by non-enum source reference]",
+    "onex.evt.omnibase-infra.runtime-error.v1": "Published by runtime error handler | owner: jonah | expiry: 2026-12-01 [OMN-16795 re-verified 2026-08-27: stated in-repo publisher confirmed by non-enum source reference]",
+    "onex.evt.omnibase-infra.service-lifecycle.v1": "Published by service lifecycle manager | owner: jonah | expiry: 2026-10-01 [OMN-16795 2026-08-27: NOT verified — the topic appears only in its own topic enum, so the stated publisher could not be confirmed in this repo. Short leash: prove the publisher or delete the subscribe declaration]",
+    "onex.evt.omnibase-infra.system-alert.v1": "Published by alert system | owner: jonah | expiry: 2026-10-01 [OMN-16795 2026-08-27: NOT verified — the topic appears only in its own topic enum, so the stated publisher could not be confirmed in this repo. Short leash: prove the publisher or delete the subscribe declaration]",
+    "onex.evt.omnibase-infra.tool-update.v1": "Published by tool updater | owner: jonah | expiry: 2026-10-01 [OMN-16795 2026-08-27: NOT verified — the topic appears only in its own topic enum, so the stated publisher could not be confirmed in this repo. Short leash: prove the publisher or delete the subscribe declaration]",
     # Context audit DLQ — published by omniclaude hooks
-    "onex.evt.omniclaude.context-audit-dlq.v1": "Published by omniclaude context audit | owner: jonah | expiry: 2026-09-01",
+    "onex.evt.omniclaude.context-audit-dlq.v1": "Published by omniclaude context audit | owner: jonah | expiry: 2026-12-01 [OMN-16795 re-verified 2026-08-27: publisher is outside omnibase_infra, so this claim is NOT falsifiable from this repo; exemption kept on that basis]",
     # Contract lifecycle — published by contract management runtime, not contract-declared
-    "onex.evt.platform.contract-deregistered.v1": "Published by contract management runtime | owner: jonah | expiry: 2026-09-01",
-    "onex.evt.platform.contract-registered.v1": "Published by contract management runtime | owner: jonah | expiry: 2026-09-01",
+    "onex.evt.platform.contract-deregistered.v1": "Published by contract management runtime | owner: jonah | expiry: 2026-12-01 [OMN-16795 re-verified 2026-08-27: stated in-repo publisher confirmed by non-enum source reference]",
+    "onex.evt.platform.contract-registered.v1": "Published by contract management runtime | owner: jonah | expiry: 2026-12-01 [OMN-16795 re-verified 2026-08-27: stated in-repo publisher confirmed by non-enum source reference]",
     # Intent classification — published by omniintelligence, not in this scan
-    "onex.evt.platform.intent-classified.v1": "Published by omniintelligence, cross-repo | owner: jonah | expiry: 2026-09-01",
     # Merge gate — decision published by CI integration, not contract
-    "onex.evt.platform.merge-gate-decision.v1": "Published by CI merge gate integration | owner: jonah | expiry: 2026-09-01",
+    "onex.evt.platform.merge-gate-decision.v1": "Published by CI merge gate integration | owner: jonah | expiry: 2026-12-01 [OMN-16795 re-verified 2026-08-27: publisher is outside omnibase_infra, so this claim is NOT falsifiable from this repo; exemption kept on that basis]",
     # Router events — published by routing runtime
-    "onex.evt.router.health-snapshot.v1": "Published by routing runtime | owner: jonah | expiry: 2026-09-01",
-    "onex.evt.router.routing-outcome.v1": "Published by routing runtime | owner: jonah | expiry: 2026-09-01",
-    "onex.evt.router.scoring-decision.v1": "Published by routing runtime | owner: jonah | expiry: 2026-09-01",
+    "onex.evt.router.health-snapshot.v1": "Published by routing runtime | owner: jonah | expiry: 2026-10-01 [OMN-16795 2026-08-27: NOT verified — the topic appears only in its own topic enum, so the stated publisher could not be confirmed in this repo. Short leash: prove the publisher or delete the subscribe declaration]",
+    "onex.evt.router.routing-outcome.v1": "Published by routing runtime | owner: jonah | expiry: 2026-10-01 [OMN-16795 2026-08-27: NOT verified — the topic appears only in its own topic enum, so the stated publisher could not be confirmed in this repo. Short leash: prove the publisher or delete the subscribe declaration]",
+    "onex.evt.router.scoring-decision.v1": "Published by routing runtime | owner: jonah | expiry: 2026-10-01 [OMN-16795 2026-08-27: NOT verified — the topic appears only in its own topic enum, so the stated publisher could not be confirmed in this repo. Short leash: prove the publisher or delete the subscribe declaration]",
     # RSD events — effect nodes pending
-    "onex.evt.rsd.data-fetched.v1": "RSD data fetch effect pending | owner: jonah | expiry: 2026-09-01",
-    "onex.evt.rsd.scores-calculated.v1": "RSD scores compute pending | owner: jonah | expiry: 2026-09-01",
-    "onex.evt.rsd.scores-stored.v1": "RSD scores store effect pending | owner: jonah | expiry: 2026-09-01",
+    "onex.evt.rsd.data-fetched.v1": "RSD data fetch effect pending | owner: jonah | expiry: 2026-10-01 [OMN-16795 2026-08-27: NOT verified — the topic appears only in its own topic enum, so the stated publisher could not be confirmed in this repo. Short leash: prove the publisher or delete the subscribe declaration]",
+    "onex.evt.rsd.scores-calculated.v1": "RSD scores compute pending | owner: jonah | expiry: 2026-10-01 [OMN-16795 2026-08-27: NOT verified — the topic appears only in its own topic enum, so the stated publisher could not be confirmed in this repo. Short leash: prove the publisher or delete the subscribe declaration]",
+    "onex.evt.rsd.scores-stored.v1": "RSD scores store effect pending | owner: jonah | expiry: 2026-10-01 [OMN-16795 2026-08-27: NOT verified — the topic appears only in its own topic enum, so the stated publisher could not be confirmed in this repo. Short leash: prove the publisher or delete the subscribe declaration]",
     # Runtime tick — published by runtime scheduler, not contract
-    "onex.evt.runtime.tick.v1": "Published by runtime scheduler | owner: jonah | expiry: 2026-09-01",
     # Merge sweep workflow events — effect nodes pending
-    "onex.evt.skill.merge-sweep-auto-merged.v1": "Merge sweep effect pending | owner: jonah | expiry: 2026-09-01",
-    "onex.evt.skill.merge-sweep-classified.v1": "Merge sweep classify effect pending | owner: jonah | expiry: 2026-09-01",
-    "onex.evt.skill.merge-sweep-pr-list.v1": "Merge sweep PR list effect pending | owner: jonah | expiry: 2026-09-01",
+    "onex.evt.skill.merge-sweep-auto-merged.v1": "Merge sweep effect pending | owner: jonah | expiry: 2026-10-01 [OMN-16795 2026-08-27: NOT verified — the topic appears only in its own topic enum, so the stated publisher could not be confirmed in this repo. Short leash: prove the publisher or delete the subscribe declaration]",
+    "onex.evt.skill.merge-sweep-classified.v1": "Merge sweep classify effect pending | owner: jonah | expiry: 2026-10-01 [OMN-16795 2026-08-27: NOT verified — the topic appears only in its own topic enum, so the stated publisher could not be confirmed in this repo. Short leash: prove the publisher or delete the subscribe declaration]",
+    "onex.evt.skill.merge-sweep-pr-list.v1": "Merge sweep PR list effect pending | owner: jonah | expiry: 2026-10-01 [OMN-16795 2026-08-27: NOT verified — the topic appears only in its own topic enum, so the stated publisher could not be confirmed in this repo. Short leash: prove the publisher or delete the subscribe declaration]",
     # Scope workflow events — effect nodes pending
-    "onex.evt.skill.scope-extracted.v1": "Scope extract effect pending | owner: jonah | expiry: 2026-09-01",
-    "onex.evt.skill.scope-file-read.v1": "Scope file read effect pending | owner: jonah | expiry: 2026-09-01",
-    "onex.evt.skill.scope-manifest-written.v1": "Scope manifest write effect pending | owner: jonah | expiry: 2026-09-01",
+    "onex.evt.skill.scope-extracted.v1": "Scope extract effect pending | owner: jonah | expiry: 2026-10-01 [OMN-16795 2026-08-27: NOT verified — the topic appears only in its own topic enum, so the stated publisher could not be confirmed in this repo. Short leash: prove the publisher or delete the subscribe declaration]",
+    "onex.evt.skill.scope-file-read.v1": "Scope file read effect pending | owner: jonah | expiry: 2026-10-01 [OMN-16795 2026-08-27: NOT verified — the topic appears only in its own topic enum, so the stated publisher could not be confirmed in this repo. Short leash: prove the publisher or delete the subscribe declaration]",
+    "onex.evt.skill.scope-manifest-written.v1": "Scope manifest write effect pending | owner: jonah | expiry: 2026-10-01 [OMN-16795 2026-08-27: NOT verified — the topic appears only in its own topic enum, so the stated publisher could not be confirmed in this repo. Short leash: prove the publisher or delete the subscribe declaration]",
     # Gmail archive cleanup — runtime tick published by scheduler
-    "onex.int.platform.runtime-tick.v1": "Published by runtime scheduler | owner: jonah | expiry: 2026-09-01",
     # Onboarding — triggered by omniclaude /onboarding skill, not Kafka publisher
     "onex.cmd.omnibase-infra.onboarding-start.v1": "Triggered by /onboarding skill via claude -p, not Kafka | owner: jonah | expiry: 2026-12-01",
     # Remote-agent invoke — emitted by node_delegation_orchestrator (OMN-9620 epic);
     # its contract addition is tracked separately and pending in another wave.
-    "onex.cmd.omnibase-infra.remote-agent-invoke.v1": "Publisher pending in delegation_orchestrator (OMN-9620 epic) | owner: jonah | expiry: 2026-09-01",
+    "onex.cmd.omnibase-infra.remote-agent-invoke.v1": "Publisher pending in delegation_orchestrator (OMN-9620 epic) | owner: jonah | expiry: 2026-10-01 [OMN-16795 2026-08-27: NOT verified — the topic appears only in its own topic enum, so the stated publisher could not be confirmed in this repo. Short leash: prove the publisher or delete the subscribe declaration]",
 }
 # fmt: on
 
@@ -252,11 +231,117 @@ def _is_infrastructure_topic(topic: str) -> bool:
     return any(prefix in topic for prefix in _INFRASTRUCTURE_PREFIXES)
 
 
+# ---------------------------------------------------------------------------
+# Allowlist hygiene (OMN-16795)
+#
+# Until now the ``expiry:`` in every allowlist reason was decoration: nothing
+# read it. That is what let a 45-entry baseline accumulate with dates already
+# lapsing — an exemption list nobody can be forced off is not a baseline, it is
+# a permanent amnesty with a date-shaped comment attached.
+#
+# Three failure modes, all previously silent:
+#   EXPIRED   the owner's own stated deadline has passed (inclusive: on the
+#             stated day the exemption is over).
+#   MALFORMED no parseable ``expiry:``, so the entry could never expire.
+#   STALE     no contract subscribes to the topic any more, so the entry is
+#             dead weight inflating the list and hiding its real size.
+#
+# STALE matters as much as EXPIRED: an allowlist that keeps entries for topics
+# nobody consumes reports a debt number that is mostly fiction, and the fiction
+# is what makes the real entries easy to ignore.
+# ---------------------------------------------------------------------------
+
+_EXPIRY_RE = re.compile(r"expiry:\s*(\d{4})-(\d{2})-(\d{2})")
+_OWNER_RE = re.compile(r"owner:\s*([^|]+)")
+
+
+def _parse_allowlist_expiry(reason: str) -> date | None:
+    """Extract the ``expiry: YYYY-MM-DD`` date from an allowlist reason.
+
+    Returns ``None`` when the field is absent or not a real calendar date —
+    both of which the hygiene check treats as MALFORMED rather than as
+    "no expiry, therefore fine".
+    """
+    match = _EXPIRY_RE.search(reason)
+    if match is None:
+        return None
+    try:
+        return date(int(match.group(1)), int(match.group(2)), int(match.group(3)))
+    except ValueError:
+        return None
+
+
+def _parse_allowlist_owner(reason: str) -> str:
+    match = _OWNER_RE.search(reason)
+    return match.group(1).strip() if match else "unowned"
+
+
+def collect_subscribed_topics(contracts_dirs: list[Path]) -> set[str]:
+    """Every non-infrastructure topic some contract in these dirs subscribes to."""
+    extractor = ContractTopicExtractor()
+    subscribed: set[str] = set()
+    for contracts_dir in contracts_dirs:
+        if not contracts_dir.exists():
+            continue
+        manifest = extractor.scan(contracts_dir)
+        for node_topics in manifest.nodes.values():
+            for topic in node_topics.subscribe_topics:
+                if not _is_infrastructure_topic(topic):
+                    subscribed.add(topic)
+    return subscribed
+
+
+def check_allowlist_hygiene(
+    allowlists: dict[str, str],
+    subscribed_topics: set[str],
+    today: date,
+) -> list[str]:
+    """Return one error per expired, malformed, or stale allowlist entry.
+
+    Args:
+        allowlists: merged ``topic -> "reason | owner: X | expiry: YYYY-MM-DD"``.
+        subscribed_topics: topics some contract actually subscribes to.
+        today: the clock, injected so the enforcement itself is testable.
+    """
+    errors: list[str] = []
+    for topic, reason in sorted(allowlists.items()):
+        owner = _parse_allowlist_owner(reason)
+        expiry = _parse_allowlist_expiry(reason)
+
+        if topic not in subscribed_topics:
+            errors.append(
+                f"STALE: {topic} is allowlisted but NO contract subscribes to it "
+                f"(owner: {owner}). The exemption is dead weight — delete the entry."
+            )
+            continue
+
+        if expiry is None:
+            errors.append(
+                f"MALFORMED: {topic} has no parseable 'expiry: YYYY-MM-DD' "
+                f"(owner: {owner}). An entry that cannot expire is a permanent "
+                f"amnesty; give it a real date."
+            )
+            continue
+
+        if expiry <= today:
+            errors.append(
+                f"EXPIRED: {topic} exemption lapsed on {expiry.isoformat()} "
+                f"(owner: {owner}). Either fix the gap (add a contract publisher) "
+                f"or renew with a FRESH reason and expiry that says what changed."
+            )
+    return errors
+
+
 def check_wiring_health(
     contracts_dirs: list[Path],
     verbose: bool = False,
 ) -> tuple[list[str], list[str]]:
     """Check subscribe/publish topic wiring across all contracts.
+
+    Allowlist hygiene (OMN-16795) is deliberately NOT checked here — see
+    :func:`check_allowlist_hygiene`, which ``main()`` runs against the real
+    contract tree. Folding it in here would make every caller that scans a
+    partial or synthetic directory report the entire allowlist as stale.
 
     Args:
         contracts_dirs: Directories to scan for contract.yaml files.
@@ -367,6 +452,20 @@ def main() -> int:
     dirs = [args.contracts_dir] + args.extra_contracts_dir
     errors, warnings = check_wiring_health(dirs, verbose=args.verbose)
 
+    # OMN-16795: the allowlists themselves must stay honest. Run this only here,
+    # against the REAL contract tree — a caller scanning a partial/synthetic
+    # directory has no business being told the whole allowlist is stale.
+    errors.extend(
+        check_allowlist_hygiene(
+            allowlists={
+                **_EXTERNAL_PUBLISHER_ALLOWLIST,
+                **_BASELINE_DEAD_LETTER_ALLOWLIST,
+            },
+            subscribed_topics=collect_subscribed_topics(dirs),
+            today=datetime.now(UTC).date(),
+        )
+    )
+
     if warnings:
         print(f"\nWARNINGS ({len(warnings)} orphan publish topics):")
         for w in warnings:
@@ -374,17 +473,21 @@ def main() -> int:
 
     if errors:
         print(f"\n{'=' * 60}")
-        print(f"WIRING HEALTH: FAIL ({len(errors)} dead-letter subscriptions)")
+        print(f"WIRING HEALTH: FAIL ({len(errors)} problems)")
         print(f"{'=' * 60}")
         for e in errors:
             print(f"  - {e}")
-        print("\nEach dead-letter topic means a contract declares a subscription")
-        print("but no contract in the system publishes to that topic.")
-        print("Fix: add the topic to a publisher's publish_topics, or add to allowlist")
-        print("if the publisher is external (webhook, CLI, cross-repo).")
+        print("\nDEAD_LETTER: a contract declares a subscription but no contract in")
+        print("the system publishes to that topic. Fix: add the topic to a")
+        print("publisher's publish_topics, or allowlist it if the publisher is")
+        print("external (webhook, CLI, cross-repo).")
+        print("\nEXPIRED / MALFORMED / STALE: an allowlist entry is no longer honest")
+        print("(OMN-16795). Fix the underlying gap, renew with a FRESH reason and")
+        print("expiry saying what changed, or delete the entry. Do NOT bulk-extend:")
+        print("a date nobody re-verified is what made this list unbounded.")
         return 1
 
-    print("WIRING HEALTH: PASS (no dead-letter subscriptions found)")
+    print("WIRING HEALTH: PASS (no dead-letter subscriptions, allowlists clean)")
     return 0
 
 
