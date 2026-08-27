@@ -2976,7 +2976,15 @@ async def _route_projection_error_to_dlq(
     the wiring previously logged at ERROR and dropped the message — no DLQ row,
     no durable trace. This routes the offending raw envelope to the
     contract-declared DLQ topic (``event_bus.dlq_topics[0]``) so the dropped
-    event is recoverable on the bus. The DLQ envelope carries the offending
+    event is recoverable on the bus.
+
+    OMN-16777: this arm swallows the handler exception and returns to the
+    boundary as if the message succeeded, so ``_route_swallowed_exception``
+    never sees it — the OMN-16690 handlers DLQ'd every single event while the
+    boundary reported success. The flow counters are therefore incremented HERE,
+    against the task-local subscription key the boundary bound before dispatch.
+
+    The DLQ envelope carries the offending
     payload, the failure reason, the handler name, and the correlation_id
     (hoisted to the top level so the failure is recoverable by correlation even
     when the payload itself is unparseable).
@@ -3001,6 +3009,16 @@ async def _route_projection_error_to_dlq(
 
     from omnibase_infra.enums import EnumDlqFailureClass
     from omnibase_infra.event_bus.topic_constants import build_dlq_topic
+    from omnibase_infra.runtime.observability import (
+        record_active_dlq,
+        record_active_error,
+    )
+
+    # OMN-16777: the handler DID raise and the message IS being dropped from the
+    # main path, whether or not the DLQ publish below succeeds. Count both facts
+    # here, at the top, so a subsequent publish failure cannot also erase the
+    # record that something failed.
+    record_active_error()
 
     used_quarantine_fallback = not dlq_topics
     if used_quarantine_fallback:
@@ -3069,6 +3087,7 @@ async def _route_projection_error_to_dlq(
             _sanitize_exc(exc),
         )
         return False
+    record_active_dlq()
     logger.warning(
         "Projection handler %s routed malformed/erroring event to DLQ %s "
         "(correlation_id=%s): %s",
@@ -4673,6 +4692,7 @@ def _make_event_bus_callback(
     event_bus: object | None = None,
     propagate_publish_failures: bool = False,
     allowed_dispatcher_ids: Collection[str] | None = None,
+    consumer_group: str | None = None,
 ) -> Callable[..., Awaitable[None]]:
     """Create a Kafka on_message callback that deserializes and dispatches to engine.
 
@@ -4698,10 +4718,30 @@ def _make_event_bus_callback(
     the bounded retry is routed there instead of vanishing. ``None`` (the
     default) preserves the historical no-DLQ callback shape for any
     caller/test that does not pass one.
+
+    ``consumer_group`` (OMN-16777): the group id this subscription joined. This
+    boundary is the ONLY place that knows both the group and the topic while a
+    message is in flight, so it is where throughput is counted. Counting has to
+    happen here rather than inside ``MessageDispatchEngine.dispatch()`` because
+    the engine is handed a topic and never learns which group is consuming it.
+    ``None`` (the default) disables counting for callers/tests that do not wire
+    a group -- it never fabricates one, because a fabricated group id would
+    produce flow rows attributed to a consumer that does not exist.
     """
     import json
 
     from omnibase_core.models.events.model_event_envelope import ModelEventEnvelope
+    from omnibase_infra.runtime.observability import (
+        active_flow_key,
+        get_consumer_flow_counters,
+    )
+
+    flow_counters = get_consumer_flow_counters() if consumer_group is not None else None
+    if flow_counters is not None and consumer_group is not None:
+        # Register before any traffic so a subscription that takes NOTHING still
+        # emits a zero row every window. Absent rows and zero rows mean
+        # different things (unknown vs observed-idle) and must not be conflated.
+        flow_counters.register(consumer_group, topic)
 
     dispatcher_scope = _require_contract_dispatcher_scope(
         allowed_dispatcher_ids,
@@ -4894,6 +4934,12 @@ def _make_event_bus_callback(
         )
 
         sanitized = sanitize_error_message(exc)
+        # OMN-16777: this is the seam a handler exception actually reaches. It
+        # is read from the closure rather than the task-local flow key because
+        # the caller's `with active_flow_key(...)` block has already exited by
+        # the time an exception propagates out of it.
+        if flow_counters is not None and consumer_group is not None:
+            flow_counters.record_error(consumer_group, topic)
         logger.error(
             "Auto-wiring callback error: topic=%s error_type=%s error=%s "
             "correlation_id=%s",
@@ -4963,6 +5009,8 @@ def _make_event_bus_callback(
                 dlq_topic=get_dlq_topic_for_original(topic),
             )
             if dlq_persisted:
+                if flow_counters is not None and consumer_group is not None:
+                    flow_counters.record_dlq(consumer_group, topic)
                 logger.error(
                     "metric_name=boundary_swallow_prevented dlq_routed=true "
                     "dlq_enabled=%s topic=%s error_type=%s correlation_id=%s",
@@ -5088,7 +5136,17 @@ def _make_event_bus_callback(
                 envelope = message
             if envelope.correlation_id is not None:
                 correlation_id = envelope.correlation_id
-            await _dispatch_with_bounded_retry(envelope, message)
+            if flow_counters is None or consumer_group is None:
+                await _dispatch_with_bounded_retry(envelope, message)
+            else:
+                # OMN-16777: an envelope reaching this line HAS been handed to
+                # dispatch. Counted before the call, not after, so a handler
+                # that hangs or dies still shows the message as taken in --
+                # counting only successful dispatches would reproduce exactly
+                # the "green because nothing was measured" defect.
+                flow_counters.record_in(consumer_group, topic)
+                with active_flow_key(consumer_group, topic):
+                    await _dispatch_with_bounded_retry(envelope, message)
         except BoundaryApplyPublishError as exc:
             # OMN-14498 (adversarial verify, comment 3c6da9a0): this marks an
             # already-exhausted UNCONDITIONAL DLQ attempt for a non-outbox
@@ -7765,6 +7823,10 @@ async def _subscribe_contract_topics(
                 # contracts keep the historical swallow behavior unchanged.
                 propagate_publish_failures=_contract_declares_state_io(contract),
                 allowed_dispatcher_ids=dispatcher_scope,
+                # OMN-16777: this is the only layer that holds BOTH the group id
+                # and the topic while a message is in flight, so it is where
+                # per-(consumer_group, topic) throughput is counted.
+                consumer_group=consumer_group,
             )
         topic_callbacks.append((topic, callback))
 

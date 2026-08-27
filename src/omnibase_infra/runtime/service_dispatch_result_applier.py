@@ -80,6 +80,23 @@ if TYPE_CHECKING:
 
 logger = logging.getLogger(__name__)
 
+
+def _record_flow_output(resolved_topic: str) -> None:
+    """Record one successfully published output envelope (OMN-16777).
+
+    Imported lazily so this module keeps no import-time dependency on the
+    observability package, and so the counters cannot become a startup-ordering
+    hazard on a path whose only job is publishing.
+    """
+    from omnibase_infra.runtime.observability import (
+        record_active_out,
+        record_produced_topic,
+    )
+
+    record_active_out()
+    record_produced_topic(resolved_topic)
+
+
 # Delegation intent topics are resolved from the contract-sourced topic registry
 # (ServiceTopicRegistry, OMN-5839) rather than importing the legacy TOPIC_*
 # string constants from event_bus/topic_constants.py. Each resolved string equals
@@ -767,6 +784,16 @@ class DispatchResultApplier:
                         topic=resolved_topic,
                         key=partition_key,
                     )
+
+                    # OMN-16777: an output envelope is only "out" once the
+                    # broker has taken it, so this is counted AFTER the publish
+                    # returns and never before. Two facts are recorded from one
+                    # event: this consumer produced something (messages_out,
+                    # against the task-local subscription key the auto-wiring
+                    # boundary bound), and `resolved_topic` received something
+                    # (the upstream-production evidence that lets the projection
+                    # tell STARVED from IDLE without ever polling the broker).
+                    _record_flow_output(resolved_topic)
 
                     logger.info(
                         "Published output event to %s (correlation_id=%s)",
