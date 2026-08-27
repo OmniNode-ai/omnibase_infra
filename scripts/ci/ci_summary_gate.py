@@ -114,6 +114,17 @@ STRICT_GATE_JOBS: tuple[str, ...] = (
     "no-noncanonical-lifecycle-classes",  # OMN-14350 non-canonical lifecycle-class ratchet
     "Effect-Assertion Gate (RT-5)",  # OMN-14467 deploy-trigger fails closed on zero output
     "OCC Companion Merged Gate (OMN-15214)",  # occ-companion-merged — cited OCC evidence must be MERGED before product merge
+    # OMN-16774: whole event chains driven through the REAL dispatch seam on the
+    # in-memory bus (tests/integration/chains/). THIS LINE IS HALF THE
+    # MECHANISM. The default-deny sweep below already fails CI Summary when the
+    # job FAILS, but an unregistered job that is `skipped` or absent yields
+    # SUCCESS — so without this entry, deleting the job (or letting it be
+    # skipped) would silently retire the only per-PR proof that a chain still
+    # terminalizes. The job is unconditional in ci.yml (no needs/if), so a skip
+    # is anomalous and never a legitimate opt-out. Registered because OMN-16767
+    # proved the failure mode is SILENT: the delegation chain was 100% dead for
+    # weeks behind green CI, with every request going to the quarantine sink.
+    "Event Chain Gate",  # event-chain-gate
     # OMN-15378 AC3: scripts/deploy-agent's standalone pytest root. ci.yml's
     # `deploy-agent-tests` job CALLS .github/workflows/deploy-agent-tests.yml,
     # so the inner job surfaces as "<caller display name> / <inner job name>"

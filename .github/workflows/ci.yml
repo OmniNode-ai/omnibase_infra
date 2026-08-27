@@ -3452,6 +3452,67 @@ jobs:
           uv run pytest tests/integration/event_bus/test_kafka_boundary_compat.py \
             -v --tb=short || { code=$?; [ $code -eq 5 ] && echo "All tests skipped (omnimemory not installed) — OK for release chain" && exit 0 || exit $code; }
 
+  # ===========================================================================
+  # Event Chain Gate (OMN-16774)
+  # ---------------------------------------------------------------------------
+  # OMN-16767 killed the whole delegation chain on the .201 dev lane and every
+  # repo's CI stayed green, because NOTHING drives the real dispatch path per
+  # PR. Handler-isolation tests call handle() directly; the closest existing
+  # "real dispatch" suite imports _make_dispatch_callback and so bypasses
+  # _prepare_handler_wiring, which is the exact arm-selection seam the defect
+  # lived in; omnimarket's delegation regression is nightly and needs a live
+  # Redpanda + Postgres lane.
+  #
+  # This job runs whole chains end to end through the REAL seam — raw wire bytes
+  # -> EventBusInmemory -> the real consumer callback and deserializer -> the
+  # real _prepare_handler_wiring arm selection -> MessageDispatchEngine ->
+  # handler -> DispatchResultApplier -> terminal on the bus — and asserts both
+  # that the terminal lands AND that nothing reaches the quarantine sink.
+  #
+  # ZERO INFRASTRUCTURE by construction: the in-memory bus is the default local
+  # transport, so there is no broker, no database, and no service container in
+  # this job. Do not add one; a chain that needs a live lane belongs in the
+  # nightly regression, not in a per-PR gate.
+  #
+  # Unconditional (no `needs:`/`if:`) so it is always present in the run. That
+  # matters twice over: ci_summary_gate.py's default-deny sweep fails
+  # "CI Summary" on ANY non-allowlisted job failure, and the job name is
+  # registered in STRICT_GATE_JOBS so a `skipped`/absent conclusion also fails
+  # closed. "CI Summary" is dev's ONLY required status check, so this gate
+  # blocks merge the day it lands with no branch-protection edit.
+  event-chain-gate:
+    name: Event Chain Gate
+    # OMNI_RUNNER_SELECTOR_V1 — trusted CI defaults to self-hosted omnibase-ci; public forks default to ubuntu-latest
+    runs-on: >-
+      ${{
+        (github.event_name == 'pull_request' &&
+         github.event.pull_request.head.repo.full_name != github.repository)
+        && fromJSON(vars.OMNI_PUBLIC_PR_RUNS_ON_JSON || '["ubuntu-latest"]')
+        || fromJSON((github.event_name == 'merge_group' && vars.OMNI_REQUIRED_CI_RUNS_ON_JSON) || vars.OMNI_TRUSTED_CI_RUNS_ON_JSON || '["self-hosted","omnibase-ci"]')
+      }}
+    timeout-minutes: 20
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+
+      - name: Setup Python and uv
+        uses: ./.github/actions/setup-python-uv
+        with:
+          python-version: ${{ env.PYTHON_VERSION }}
+          uv-version: ${{ env.UV_VERSION }}
+          cache-version: ${{ env.CACHE_VERSION }}
+          cache-enabled: "false"
+
+      - name: Run event chain gate
+        run: |
+          echo "================================================================"
+          echo "Event Chain Gate (OMN-16774)"
+          echo "Whole chains through the REAL dispatch seam, in-memory bus only."
+          echo "A chain that dies into the quarantine sink FAILS here."
+          echo "================================================================"
+          uv run pytest tests/integration/chains/ -v --tb=short
+
   # Writer-migration coupling check -- ensures any PR touching writer_postgres.py
   # or handler_*_postgres.py includes a migration file or explicit bypass comment (OMN-3530)
   migration-required-check:
