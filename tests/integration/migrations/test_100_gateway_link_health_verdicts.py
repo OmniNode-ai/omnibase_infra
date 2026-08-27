@@ -36,19 +36,25 @@ from tests.integration.migrations.conftest import EphemeralPostgres
 pytestmark = [pytest.mark.integration, pytest.mark.postgres]
 
 REPO_ROOT = Path(__file__).resolve().parents[3]
+# OMN-16759: the relation moved from the flat loop (omnibase_infra, no
+# omninode_internal schema, migration role holds no CREATE on the database) to
+# the node loop, which connects to the application database where that schema
+# exists. These paths follow it.
 FORWARD = (
     REPO_ROOT
     / "docker"
     / "migrations"
     / "forward"
-    / "100_create_gateway_link_health.sql"
+    / "nodes"
+    / "node_gateway_link_health_write_effect"
+    / "0001_create_gateway_link_health.sql"
 )
 ROLLBACK = (
     REPO_ROOT
     / "docker"
     / "migrations"
     / "rollback"
-    / "rollback_100_create_gateway_link_health.sql"
+    / "rollback_node_gateway_link_health_0001.sql"
 )
 
 # Matches the migration's hardcoded silence window. Anything older than this
@@ -61,7 +67,23 @@ SILENCE_WINDOW = timedelta(seconds=60)
 def applied(
     ephemeral_postgres: EphemeralPostgres,
 ) -> Iterator[psycopg2.extensions.connection]:
-    """Apply the real forward migration, yield an open connection."""
+    """Apply the real forward migration, yield an open connection.
+
+    The schema is provisioned first, as a separate step run by the superuser.
+    That is not test scaffolding papering over a gap -- it mirrors the deployed
+    lane exactly: the migration ASSERTS omninode_internal and never creates it,
+    because CREATE SCHEMA needs CREATE on the DATABASE and neither migration
+    role holds that on the managed instance (read live: both
+    has_database_privilege() probes return false). Schema provisioning is a
+    prerequisite of this migration, not part of it.
+    """
+    provisioned = ephemeral_postgres.psql(
+        "-v",
+        "ON_ERROR_STOP=1",
+        "-c",
+        "CREATE SCHEMA IF NOT EXISTS omninode_internal;",
+    )
+    assert provisioned.returncode == 0, provisioned.stderr
     result = ephemeral_postgres.psql("-v", "ON_ERROR_STOP=1", "-f", str(FORWARD))
     assert result.returncode == 0, result.stderr
     conn = ephemeral_postgres.connect()
@@ -339,3 +361,49 @@ def test_rollback_removes_both_objects(
             "SELECT to_regclass('omninode_internal.gateway_link_health_status')"
         )
         assert cur.fetchone()[0] is None
+
+
+def test_migration_refuses_to_run_when_the_schema_is_absent_omn_16759(
+    ephemeral_postgres: EphemeralPostgres,
+) -> None:
+    """The precondition probe must be load-bearing, not decorative.
+
+    Applied to a database WITHOUT omninode_internal, this migration has to fail
+    loudly and leave nothing behind. If the probe were cosmetic the migration
+    would instead fail deeper, mid-DDL, on the first qualified CREATE -- or, as
+    the pre-OMN-16759 flat file did, try to CREATE the schema and take the whole
+    migrate Job (and with it every staging deploy) down on a permission error.
+    """
+    absent = ephemeral_postgres.psql(
+        "-v",
+        "ON_ERROR_STOP=1",
+        "-t",
+        "-A",
+        "-c",
+        "SELECT count(*) FROM pg_catalog.pg_namespace "
+        "WHERE nspname = 'omninode_internal';",
+    )
+    assert absent.returncode == 0, absent.stderr
+    assert absent.stdout.strip() == "0", (
+        "fixture precondition: this test needs a database with no "
+        "omninode_internal schema"
+    )
+
+    result = ephemeral_postgres.psql("-v", "ON_ERROR_STOP=1", "-f", str(FORWARD))
+
+    assert result.returncode != 0, (
+        "the migration applied against a database with no omninode_internal "
+        "schema -- the precondition probe is not doing anything"
+    )
+    assert "division by zero" in (result.stderr + result.stdout).lower()
+
+    created = ephemeral_postgres.psql(
+        "-v",
+        "ON_ERROR_STOP=1",
+        "-t",
+        "-A",
+        "-c",
+        "SELECT coalesce(to_regclass('omninode_internal.gateway_link_health')"
+        "::text, 'ABSENT');",
+    )
+    assert created.stdout.strip() == "ABSENT"
