@@ -3471,6 +3471,21 @@ jobs:
       - name: Check node migration declarations
         run: uv run python scripts/validation/validate_application_migration_manifest.py
 
+      # OMN-16705: append-only immutability for ALREADY-DECLARED node
+      # migrations. The declaration check above proves the manifest checksum
+      # matches the CURRENT file, which an in-place rewrite satisfies trivially
+      # by restamping both together -- that is exactly what 7de798a4a (#2866)
+      # did, and it left every database that had already applied the old bytes
+      # unable to run forward-migration again ("conflicting migration checksum
+      # in canonical node history", .201 dev lane, exit 3). This step is the
+      # missing half: an artifact already declared at the base ref may not be
+      # modified, deleted, or renamed except via an explicit new-ordinal
+      # supersession that lands its successor in the same change.
+      - name: Check node migration append-only immutability
+        env:
+          APPEND_ONLY_BASE: ${{ github.event.pull_request.base.sha || github.event.merge_group.base_sha || 'origin/dev' }}
+        run: uv run python scripts/validation/check_migration_append_only.py --base "${APPEND_ONLY_BASE}"
+
   # Migration integration test -- spins up real Postgres, applies all migrations,
   # and asserts every manifest table exists (OMN-3529)
   migration-integration:

@@ -169,7 +169,17 @@ def test_checked_in_manifest_is_exact_and_all_blockers_are_explicit() -> None:
     # node_projection_savings/084_validate_savings_estimates_token_constraints.sql
     # -- validates the token-count CHECK constraints in a separate migration
     # transaction after 082 adds them as NOT VALID.
-    assert len(result.declarations) == 111
+    # +2 for OMN-16705's additive repair of the append-only violation in
+    # OMN-16450 (#2866): node_delegation_routing_reducer/0002_overlay_positive_
+    # bound_constraints.sql and node_projection_tenant_credentials/0002_
+    # credential_identity_not_null.sql. Their two parents (routing 0001,
+    # credentials 0000) were rewritten in place AFTER the .201 dev lane had
+    # applied them, so bootstrap.sql raised "conflicting migration checksum in
+    # canonical node history" and exited every forward-migration run; both are
+    # restored to their applied bytes here and the deltas re-expressed as new
+    # ordinals. Vendored into omnibase_infra first per the
+    # node-migration-vendor-parity-gate ordering, ahead of the omnimarket PR.
+    assert len(result.declarations) == 113
     assert result.blocked == ()
     assert len(result.legacy_node_declarations) == 2
     assert len(result.cloud_aliases) == 30
