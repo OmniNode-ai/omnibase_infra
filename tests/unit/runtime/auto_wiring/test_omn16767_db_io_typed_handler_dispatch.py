@@ -67,6 +67,8 @@ from omnibase_core.services.service_local_handler_ownership_query import (
 )
 from omnibase_infra.runtime.auto_wiring.handler_wiring import (
     PreparedWiring,
+    _extract_dispatch_payload,
+    _make_payload_type_matcher,
     _prepare_handler_wiring,
     _typed_def_b_input_model,
 )
@@ -128,6 +130,21 @@ class ModelMirrorRoutingIntent(BaseModel):
     payload: ModelMirrorDelegationRequest
     min_tier_name: str | None = None
     excluded_backend_refs: tuple[str, ...] = Field(default_factory=tuple)
+
+
+class ModelLenientEnvelopeShaped(BaseModel):
+    """Envelope-shaped model that tolerates extras — the unconditional-unwrap trap.
+
+    It VALIDATES a payload carrying an undeclared key, while
+    ``_is_registered_input_payload``'s stricter key-containment check refuses to
+    claim that same payload — so an unconditional unwrap walks straight past it.
+    Module-level because the matcher imports its ``event_model`` by name.
+    """
+
+    model_config = ConfigDict(extra="ignore")
+
+    event_type: str
+    payload: dict[str, object] = Field(default_factory=dict)
 
 
 class ModelMirrorRoutingDecision(BaseModel):
@@ -439,6 +456,111 @@ class TestDbIoDoesNotStealTypedHandlers:
 
         assert len(_RECEIVED) == 1
         assert isinstance(_RECEIVED[0], ModelMirrorRoutingIntent)
+
+
+# ---------------------------------------------------------------------------
+# The type-scoping predicate must agree with the dispatch it scopes
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.unit
+class TestPayloadTypeMatcherAgreesWithDispatch:
+    """The second defect, found live only after the first fix was deployed.
+
+    Moving the handler onto the typed arm also gives it a
+    ``payload_type_matcher`` (the projection arm has none). The engine consults
+    that predicate with what it has in hand — on the Kafka path, the TRANSPORT
+    ENVELOPE — while the dispatch callback unwraps to the domain payload first.
+    Matching on the un-unwrapped envelope makes the two disagree, and the
+    disagreement is silent in the worst direction: the engine reads a rejecting
+    matcher as "not my message", which is not an error, so the record is
+    consumed and COMMITTED with no handler invoked and nothing in any DLQ.
+
+    Measured on the dev lane after deploying the arm fix:
+    ``onex.cmd.omnibase-infra.delegation-routing-request.v1`` advanced 22
+    records, its consumer group sat Stable at lag 0, and
+    ``onex.evt.omnibase-infra.routing-decision.v1`` never moved off 59 — every
+    record silently dropped, while each one validated cleanly as
+    ``ModelRoutingIntent`` once unwrapped.
+    """
+
+    def test_matcher_accepts_the_envelope_wrapped_domain_payload(self) -> None:
+        """RED before the fix: the matcher was asked about the envelope and said no."""
+        matcher = _make_payload_type_matcher(
+            ModelHandlerRef(name="ModelMirrorRoutingIntent", module=_THIS_MODULE)
+        )
+        envelope = _materialized_dispatch(_routing_intent_wire())
+
+        # Precondition: the domain payload inside genuinely IS the model, so a
+        # rejection here can only be an unwrap disagreement, never bad data.
+        assert ModelMirrorRoutingIntent.model_validate(_routing_intent_wire())
+
+        assert matcher(envelope) is True
+
+    def test_matcher_still_accepts_the_bare_domain_payload(self) -> None:
+        matcher = _make_payload_type_matcher(
+            ModelHandlerRef(name="ModelMirrorRoutingIntent", module=_THIS_MODULE)
+        )
+
+        assert matcher(_routing_intent_wire()) is True
+
+    def test_matcher_rejects_a_foreign_payload_in_the_same_envelope(self) -> None:
+        """Fail-closed: unwrapping must not turn the predicate into a rubber stamp."""
+        matcher = _make_payload_type_matcher(
+            ModelHandlerRef(name="ModelMirrorRoutingIntent", module=_THIS_MODULE)
+        )
+        foreign = _materialized_dispatch({"totally": "different", "shape": 1})
+
+        assert matcher(foreign) is False
+        assert matcher.last_validation_detail  # type: ignore[attr-defined]
+
+    def test_payload_as_given_is_tried_before_the_unwrapped_candidate(self) -> None:
+        """Order matters: this predicate may only ADD acceptances, never remove one.
+
+        Unwrapping unconditionally is not safe. ``_is_registered_input_payload``
+        applies a key-containment check that is deliberately stricter than
+        validation, so a model tolerating extra keys can VALIDATE a candidate the
+        stop condition refuses to claim — the unwrap then walks past a payload
+        that already was the model and lands on its inner payload, which does not
+        validate. Unconditional unwrapping inverted a live selection from
+        ``success`` to ``no_dispatcher`` for ``HandlerA2ATask`` on
+        ``onex.cmd.omnibase-infra.remote-agent-invoke.v1``, caught by the
+        committed dispatch-selection oracle.
+        """
+
+        matcher = _make_payload_type_matcher(
+            ModelHandlerRef(name="ModelLenientEnvelopeShaped", module=_THIS_MODULE)
+        )
+        # Envelope-shaped AND carrying a key the model does not declare, so the
+        # stop condition will not claim it even though it validates.
+        as_given = {
+            "event_type": "omnibase-infra.remote-agent-invoke",
+            "payload": {"task": "probe"},
+            "source_tool": "parity-probe",
+        }
+        assert ModelLenientEnvelopeShaped.model_validate(as_given) is not None
+        assert (
+            _extract_dispatch_payload(as_given, ModelLenientEnvelopeShaped) != as_given
+        ), "precondition: the unwrap does walk past this payload"
+
+        assert matcher(as_given) is True
+
+    def test_prepared_wiring_matcher_accepts_what_its_dispatcher_will_receive(
+        self, contract_path: Path
+    ) -> None:
+        """The whole point: the scoping predicate and the dispatch must agree.
+
+        Both come out of the same ``_prepare_handler_wiring`` call, so this
+        asserts the property at the seam rather than on a hand-built matcher.
+        """
+        prepared = _prepare(
+            HandlerMirrorRoutingIntent, with_db_io=True, contract_path=contract_path
+        )
+        envelope = _materialized_dispatch(_routing_intent_wire())
+
+        matcher = prepared.payload_type_matcher
+        assert matcher is not None, "typed arm must type-scope its dispatcher"
+        assert matcher(envelope) is True
 
 
 # ---------------------------------------------------------------------------

@@ -1068,18 +1068,67 @@ class PayloadTypeMatcher:
                     return True
                 raise
         model_cls = self._cached_model_cls
-        if isinstance(payload, model_cls):
-            return True
-        try:
-            model_cls.model_validate(payload)
-        except ValidationError as exc:
-            if _is_delegation_inference_intent_ref(
-                self._event_model
-            ) and _payload_claims_delegation_inference_intent(payload):
+        # OMN-16767: decide on the SAME domain payload the dispatch callback
+        # will construct the model from. The engine hands this predicate
+        # whatever it has in hand, which on the Kafka path is the transport
+        # envelope (``{"payload": {domain}, "event_type": ..., "envelope_id":
+        # ..., ...}``), while ``_make_dispatch_callback`` unwraps to the domain
+        # first. Matching on the un-unwrapped envelope makes the two disagree,
+        # and the disagreement is SILENT in the worst direction: the matcher
+        # rejects, the engine treats it as "not my message" (not an error), and
+        # the record is consumed + committed with no handler ever invoked and
+        # no DLQ entry — the phantom-wiring-death signature.
+        #
+        # Live on the .201 dev lane: every record on
+        # onex.cmd.omnibase-infra.delegation-routing-request.v1 validated
+        # cleanly as ModelRoutingIntent once unwrapped, yet the consumer group
+        # sat at lag 0 having dispatched nothing, because the matcher was
+        # asked about the envelope. Unwrapping here uses the same registered-
+        # input-model stop condition as the dispatch path (OMN-16050), so a
+        # genuine non-match still rejects.
+        #
+        # The payload AS GIVEN is tried FIRST and the unwrapped candidate only
+        # as a fallback — this predicate may only ever ADD acceptances, never
+        # remove one. Unwrapping unconditionally is not safe: a model that
+        # tolerates extra keys can validate a candidate that
+        # ``_is_registered_input_payload`` refuses to claim (its key-containment
+        # check is deliberately stricter than validation), so the unwrap walks
+        # PAST a payload that already was the model and lands on its inner
+        # payload, which then does not validate. That inverted a live selection
+        # from ``success`` to ``no_dispatcher`` for
+        # ``HandlerA2ATask``/``onex.cmd.omnibase-infra.remote-agent-invoke.v1``,
+        # caught by the committed dispatch-selection oracle
+        # (``tests/integration/runtime/test_dispatch_selection_parity.py``).
+        # Order matters, not just the candidate set.
+        candidates: list[object] = [payload]
+        unwrapped = _extract_dispatch_payload(payload, model_cls)
+        if unwrapped is not payload:
+            candidates.append(unwrapped)
+
+        first_failure: ValidationError | None = None
+        for candidate in candidates:
+            if isinstance(candidate, model_cls):
                 return True
-            self.last_validation_detail = _format_validation_error_detail(exc)
-            return False
-        return True
+            try:
+                model_cls.model_validate(candidate)
+            except ValidationError as exc:
+                if first_failure is None:
+                    first_failure = exc
+                continue
+            return True
+
+        if _is_delegation_inference_intent_ref(self._event_model) and any(
+            _payload_claims_delegation_inference_intent(candidate)
+            for candidate in candidates
+        ):
+            return True
+        if first_failure is not None:
+            # Report the failure against the payload AS GIVEN — that is the
+            # object the publisher actually put on the wire, so it is the
+            # actionable detail for the OMN-14492 publisher_malformed
+            # classification.
+            self.last_validation_detail = _format_validation_error_detail(first_failure)
+        return False
 
 
 def _make_payload_type_matcher(
