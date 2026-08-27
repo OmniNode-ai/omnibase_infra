@@ -23,16 +23,74 @@
 FROM python:3.13-slim-bookworm
 
 # Minimal toolchain: git (worktree ops), curl (uv installer), build-essential
-# (a handful of transitive deps still build from sdist), ca-certificates.
+# (a handful of transitive deps still build from sdist), ca-certificates,
+# xz-utils (the shellcheck release tarball below is .tar.xz), procps.
+#
+# `procps` (OMN-16752): the image shipped no `ps`. The pre-push hook's own
+# load / "orphaned pytest" diagnostics and several test helpers shell out to it,
+# so its absence turned a diagnosable run into a silent one.
 RUN apt-get update \
     && apt-get install -y --no-install-recommends \
-       git curl ca-certificates build-essential \
+       git curl ca-certificates build-essential xz-utils procps \
     && rm -rf /var/lib/apt/lists/*
 
 # Pin uv via the official static installer (matches the pattern already used
 # for Dockerfile.runtime's UV_VERSION build-arg convention).
 ARG UV_VERSION=0.11.5
 RUN curl -LsSf "https://astral.sh/uv/${UV_VERSION}/install.sh" | UV_INSTALL_DIR=/usr/local/bin sh
+
+# ---------------------------------------------------------------------------
+# OMN-16752 — TEST-VISIBLE TOOLCHAIN PARITY WITH `.200`
+# ---------------------------------------------------------------------------
+# This image is the pre-push full-suite ESCALATION TARGET, so anything the
+# suite resolves off PATH is part of its contract, not an optional extra. The
+# original image shipped none of the three below, and the result was 19 of the
+# 21 failures measured on 2026-08-27 — reproduced identically against a
+# DETACHED worktree at clean `origin/dev` (996d621f9), which proves they are
+# environmental and not a regression in any branch under test:
+#
+#   * `gh`         -> 12 failures. omnimarket's DoD evidence guard
+#                     (node_dod_verify/services/evidence_collector.py) judges a
+#                     check_value by resolving its first token with
+#                     `shutil.which()`. With `gh` absent, every `gh api ...`
+#                     check_value is classed "not a resolvable executable ...
+#                     this looks like prose", so the guard's own acceptance
+#                     tests invert, and two callers that really exec `gh` raise
+#                     FileNotFoundError. NOTE the earlier triage attributed
+#                     10 of these to "Linux-vs-macOS bash grammar" — that was
+#                     wrong; the shell parses them fine, the binary was missing.
+#   * `shellcheck` -> 6 failures in tests/scripts/test_shell_hygiene_gate.py,
+#                     which drives the real scripts/ci/check_shell_hygiene.sh.
+#   * `pre-commit` -> not a test dependency, but the documented pre-push flow
+#                     runs it; without it the container could not complete a
+#                     governed push even with a green suite.
+#
+# VERSIONS ARE PINNED TO WHAT `.200` RUNS, deliberately. These two binaries are
+# ORACLES for assertions (shellcheck severity/code classification; `gh`'s mere
+# resolvability), so a floating version silently changes gate verdicts between
+# the two designated hosts and re-opens the "green here, red there" class this
+# ticket exists to close. Re-pin both when `.200` moves, not independently.
+ARG SHELLCHECK_VERSION=0.11.0
+ARG GH_VERSION=2.68.1
+ARG PRE_COMMIT_VERSION=4.6.1
+RUN set -eux; \
+    deb_arch="$(dpkg --print-architecture)"; \
+    case "$deb_arch" in \
+      amd64) sc_arch="x86_64";  gh_arch="amd64" ;; \
+      arm64) sc_arch="aarch64"; gh_arch="arm64" ;; \
+      *) echo "unsupported architecture: ${deb_arch}" >&2; exit 1 ;; \
+    esac; \
+    curl -fsSL -o /tmp/shellcheck.tar.xz \
+      "https://github.com/koalaman/shellcheck/releases/download/v${SHELLCHECK_VERSION}/shellcheck-v${SHELLCHECK_VERSION}.linux.${sc_arch}.tar.xz"; \
+    tar -xJf /tmp/shellcheck.tar.xz -C /tmp; \
+    install -m 0755 "/tmp/shellcheck-v${SHELLCHECK_VERSION}/shellcheck" /usr/local/bin/shellcheck; \
+    curl -fsSL -o /tmp/gh.tar.gz \
+      "https://github.com/cli/cli/releases/download/v${GH_VERSION}/gh_${GH_VERSION}_linux_${gh_arch}.tar.gz"; \
+    tar -xzf /tmp/gh.tar.gz -C /tmp; \
+    install -m 0755 "/tmp/gh_${GH_VERSION}_linux_${gh_arch}/bin/gh" /usr/local/bin/gh; \
+    rm -rf /tmp/shellcheck* /tmp/gh*; \
+    pip install --no-cache-dir "pre-commit==${PRE_COMMIT_VERSION}"; \
+    shellcheck --version; gh --version; pre-commit --version
 
 # Non-root execution — same posture as Dockerfile.runtime. uid/gid 1000
 # matches the host `jonah` account on omninode-pc so bind-mounted worktree
