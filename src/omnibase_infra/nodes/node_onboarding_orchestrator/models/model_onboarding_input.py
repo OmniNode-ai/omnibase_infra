@@ -54,6 +54,14 @@ class ModelOnboardingInput(BaseModel):
         default=True,
         description="When True, also write legacy .env file alongside overlay output",
     )
+    credentials_output_path: str | None = Field(
+        default=None,
+        description=(
+            "Explicit path for the 0600 JSON credentials artifact (OMN-16035). "
+            "None means no credentials file is written — the writer is "
+            "explicit-invocation-only and never fires as a side effect."
+        ),
+    )
 
     @model_validator(mode="after")
     def _enforce_env_output_path_when_writing(self) -> ModelOnboardingInput:
@@ -72,6 +80,11 @@ class ModelOnboardingInput(BaseModel):
             raise ValueError(msg)
         if self.overlay_output_path is not None and not has_overlay_path:
             msg = "overlay_output_path cannot be blank"
+            raise ValueError(msg)
+        if self.credentials_output_path is not None and not (
+            self.credentials_output_path.strip()
+        ):
+            msg = "credentials_output_path cannot be blank"
             raise ValueError(msg)
         if self.legacy_env_output and not has_env_path:
             msg = "env_output_path is required when legacy_env_output=True"

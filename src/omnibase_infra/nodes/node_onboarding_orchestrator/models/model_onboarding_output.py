@@ -75,6 +75,14 @@ class ModelOnboardingOutput(BaseModel):
         default=None,
         description="Path where overlay YAML was written, if generated",
     )
+    credentials_output_path_written: str | None = Field(
+        default=None,
+        description=(
+            "Path where the 0600 JSON credentials artifact was written "
+            "(OMN-16035); None when no credentials path was requested or the "
+            "run produced no credential-shaped entries"
+        ),
+    )
 
 
 __all__ = ["ModelOnboardingOutput"]
