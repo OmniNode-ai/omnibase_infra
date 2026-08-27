@@ -1,0 +1,202 @@
+# SPDX-FileCopyrightText: 2026 OmniNode.ai Inc.
+# SPDX-License-Identifier: MIT
+#
+# OMN-16555 / OMN-16682: two-runner-class parity gate for shared-env mode.
+#
+# Why this exists: `.github/actions/setup-python-uv` has two mutually exclusive
+# branches. The non-shared branch installs its own toolchain (actions/setup-python
+# + astral-sh/setup-uv); the shared-env branch skips both and calls
+# scripts/ci/ensure_ci_env.sh, which assumed a persistent, pre-provisioned runner
+# filesystem (a warm host-local cache root, uv already on PATH). That assumption
+# was only ever exercised on the self-hosted `omnibase-ci` fleet, so nothing in CI
+# noticed it was false on a GitHub-hosted VM: ensure_ci_env.sh aborted under
+# `set -e` at `command -v uv`, killing 2/10 rows of the OMN-16511 Stage-0a canary.
+#
+# "Enforcement, not detection": this workflow exercises the shared-env branch on
+# BOTH runner classes whenever its inputs change, so a fleet-only assumption can
+# never re-enter the shared-env path unnoticed and block the hosted-runner
+# migration a second time.
+#
+# Evidentiary design (carried from OMN-16511): each job asserts its OWN runner
+# class from RUNNER_ENVIRONMENT before doing anything else. A hosted job that
+# lands on the self-hosted fleet FAILS rather than reporting a misleading green —
+# the runner selector falls through to ["self-hosted","omnibase-ci"] on unset or
+# malformed vars, so "the job passed" is not by itself proof it ran where
+# intended.
+#
+# The two jobs deliberately repeat their assertion block rather than sharing a
+# helper script: the claim under test is that the SAME contract holds on two
+# different runner classes, and a shared helper would be one more thing that
+# could be fleet-shaped without anyone noticing. The duplication is the control.
+#
+# Bounded: dependency install + import proof only. No test suite, no build, no
+# push, no fleet mutation.
+
+name: Shared Env Runner Parity
+
+on:
+  pull_request:
+    branches: [main, dev, develop]
+    paths:
+      - '.github/actions/setup-python-uv/action.yml'
+      - '.github/workflows/shared-env-runner-parity.yml'
+      - 'scripts/ci/ensure_ci_env.sh'
+      - 'scripts/ci/ci_env_digest.py'
+  workflow_dispatch:
+
+concurrency:
+  group: shared-env-runner-parity-${{ github.ref }}
+  cancel-in-progress: ${{ github.ref != 'refs/heads/main' }}
+
+permissions:
+  contents: read
+
+env:
+  PYTHON_VERSION: "3.12"
+  UV_VERSION: "0.6.14"
+  OMNI_CI_ENV_ROOT: "/home/runner/.cache/omni/ci-envs"
+
+jobs:
+  hosted:
+    name: shared-env-parity-hosted
+    # Deliberately a literal hosted label, NOT the OMNI_RUNNER_SELECTOR_V1
+    # expression: the entire point of this job is to prove the shared-env branch
+    # on an ephemeral GitHub-hosted VM. Routing it through the selector would let
+    # a var change silently move it back onto the fleet and void the proof.
+    # Allowlisted in config/runner_routing_policy.yaml.
+    runs-on: ubuntu-latest
+    # Cold, uncached `uv sync --frozen --all-extras --all-groups` on a fresh VM.
+    timeout-minutes: 45
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+
+      - name: Assert this job is running on a GitHub-hosted runner
+        shell: bash
+        run: |
+          set -euo pipefail
+          echo "RUNNER_ENVIRONMENT=${RUNNER_ENVIRONMENT:-<unset>}"
+          echo "RUNNER_NAME=${RUNNER_NAME:-<unset>}"
+          echo "RUNNER_OS=${RUNNER_OS:-<unset>}"
+          if [ "${RUNNER_ENVIRONMENT:-}" != "github-hosted" ]; then
+            echo "::error::shared-env-parity-hosted must run on a GitHub-hosted runner, got RUNNER_ENVIRONMENT='${RUNNER_ENVIRONMENT:-<unset>}'. A green result from the wrong runner class is not proof (OMN-16555)."
+            exit 1
+          fi
+
+      - name: Prove no toolchain is pre-provisioned on this VM
+        shell: bash
+        run: |
+          set -euo pipefail
+          # Positive control for the defect: on a hosted VM neither precondition
+          # ensure_ci_env.sh relied on holds. If either one starts holding here,
+          # this job stops proving anything and must be re-thought.
+          if command -v uv >/dev/null 2>&1; then
+            echo "::error::uv is unexpectedly pre-installed on this hosted runner; this job no longer exercises the ephemeral bootstrap path (OMN-16555)."
+            exit 1
+          fi
+          if [ -d "${OMNI_CI_ENV_ROOT}" ]; then
+            echo "::error::shared CI env root ${OMNI_CI_ENV_ROOT} already exists on a fresh hosted VM; this job no longer exercises the cold-cache path (OMN-16555)."
+            exit 1
+          fi
+          echo "confirmed fresh VM: no uv on PATH, no ${OMNI_CI_ENV_ROOT}"
+
+      - name: Set up Python and uv (shared-env mode)
+        uses: ./.github/actions/setup-python-uv
+        with:
+          python-version: ${{ env.PYTHON_VERSION }}
+          uv-version: ${{ env.UV_VERSION }}
+          cache-enabled: 'false'
+          shared-env-enabled: 'true'
+
+      - name: Assert the shared CI env is real and usable
+        shell: bash
+        run: |
+          set -euo pipefail
+          [ -n "${OMNI_CI_ENV_DIR:-}" ] || { echo "::error::OMNI_CI_ENV_DIR unset; the shared-env branch did not run"; exit 1; }
+          [ -f "${OMNI_CI_ENV_DIR}/manifest.json" ] || { echo "::error::shared env manifest missing at ${OMNI_CI_ENV_DIR}/manifest.json"; exit 1; }
+          case "${OMNI_CI_ENV_DIR}" in
+            "${OMNI_CI_ENV_ROOT}"/*) ;;
+            *) echo "::error::OMNI_CI_ENV_DIR '${OMNI_CI_ENV_DIR}' is not under '${OMNI_CI_ENV_ROOT}'"; exit 1 ;;
+          esac
+          # The workspace venv must be the symlink into the digest-keyed env, not
+          # a private per-job venv that quietly bypassed the shared cache.
+          [ -L .venv ] || { echo "::error::workspace .venv is not a symlink into the shared env"; exit 1; }
+          echo "uv: $(command -v uv) ($(uv --version))"
+          # Importing a real synced dependency is what separates "the setup step
+          # exited 0" from "the environment is actually installed and usable".
+          uv run python -c 'import sys, pydantic; print(f"python {sys.version_info.major}.{sys.version_info.minor}, pydantic {pydantic.VERSION}")'
+          echo "shared CI env verified: ${OMNI_CI_ENV_DIR}"
+
+  self-hosted-fleet:
+    name: shared-env-parity-self-hosted
+    # Fork PRs are routed to hosted runners by policy, which would make this job
+    # a duplicate of the hosted one rather than the fleet half of the parity
+    # proof. Skip it there instead of asserting a class it cannot have.
+    if: github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository
+    # Literal fleet labels, NOT the OMNI_RUNNER_SELECTOR_V1 expression — the
+    # mirror image of the hosted job's literal `ubuntu-latest`, and for the same
+    # reason. This job's whole purpose is to be the FLEET half of a two-class
+    # proof, so its runner class must be a property of the workflow, not of a
+    # repo variable that can be retargeted underneath it.
+    #
+    # That is not hypothetical: OMN-16682 set OMNI_TRUSTED_CI_RUNS_ON_JSON to
+    # ["ubuntu-latest"] at 2026-08-26T22:46:41Z, mid-PR. Both halves of this gate
+    # then resolved to hosted and the "parity" claim would have silently become
+    # "hosted twice" — except the job's own RUNNER_ENVIRONMENT assertion caught
+    # it and went red instead of reporting a green that proved nothing.
+    #
+    # Fork PRs never reach this job (see `if:` above), so pinning self-hosted
+    # labels here cannot route untrusted code onto the fleet.
+    runs-on: [self-hosted, omnibase-ci]
+    timeout-minutes: 45
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+
+      - name: Assert this job is running on the self-hosted fleet
+        shell: bash
+        run: |
+          set -euo pipefail
+          echo "RUNNER_ENVIRONMENT=${RUNNER_ENVIRONMENT:-<unset>}"
+          echo "RUNNER_NAME=${RUNNER_NAME:-<unset>}"
+          if [ "${RUNNER_ENVIRONMENT:-}" != "self-hosted" ]; then
+            echo "::error::shared-env-parity-self-hosted must run on the omnibase-ci fleet, got RUNNER_ENVIRONMENT='${RUNNER_ENVIRONMENT:-<unset>}'. The runner selector silently falls back, so the class must be asserted, not assumed (OMN-16555)."
+            exit 1
+          fi
+
+      - name: Prove the fleet still supplies its own pre-provisioned toolchain
+        shell: bash
+        run: |
+          set -euo pipefail
+          # No-regression control for the warm path: uv comes from the runner
+          # image, so the OMN-16555 provisioning branch must never engage here.
+          # If uv were missing, the action now fails closed (corrupt runner
+          # state) rather than self-healing.
+          if ! command -v uv >/dev/null 2>&1; then
+            echo "::error::uv is missing from a self-hosted runner; the runner image is misprovisioned (OMN-16555)."
+            exit 1
+          fi
+          echo "fleet uv: $(command -v uv) ($(uv --version))"
+
+      - name: Set up Python and uv (shared-env mode)
+        uses: ./.github/actions/setup-python-uv
+        with:
+          python-version: ${{ env.PYTHON_VERSION }}
+          uv-version: ${{ env.UV_VERSION }}
+          cache-enabled: 'false'
+          shared-env-enabled: 'true'
+
+      - name: Assert the shared CI env is real and usable
+        shell: bash
+        run: |
+          set -euo pipefail
+          [ -n "${OMNI_CI_ENV_DIR:-}" ] || { echo "::error::OMNI_CI_ENV_DIR unset; the shared-env branch did not run"; exit 1; }
+          [ -f "${OMNI_CI_ENV_DIR}/manifest.json" ] || { echo "::error::shared env manifest missing at ${OMNI_CI_ENV_DIR}/manifest.json"; exit 1; }
+          case "${OMNI_CI_ENV_DIR}" in
+            "${OMNI_CI_ENV_ROOT}"/*) ;;
+            *) echo "::error::OMNI_CI_ENV_DIR '${OMNI_CI_ENV_DIR}' is not under '${OMNI_CI_ENV_ROOT}'"; exit 1 ;;
+          esac
+          [ -L .venv ] || { echo "::error::workspace .venv is not a symlink into the shared env"; exit 1; }
+          echo "uv: $(command -v uv) ($(uv --version))"
+          uv run python -c 'import sys, pydantic; print(f"python {sys.version_info.major}.{sys.version_info.minor}, pydantic {pydantic.VERSION}")'
+          echo "shared CI env verified: ${OMNI_CI_ENV_DIR}"

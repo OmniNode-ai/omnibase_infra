@@ -27,3 +27,5 @@ hosted_runner_allowlist:
     reason: "OMN-15776: scheduled broker-dispatch-wedge rerun must not share fate with the self-hosted runner fleet it remediates -- same isolation rationale as runner-fleet-canary.yml above."
   - path: .github/workflows/pr-ci-zombie-detector.yml
     reason: "OMN-16494: scheduled PR-CI concurrency-group zombie detector -- one of its two target mechanisms is a self-hosted-runner job surviving a cancel signal, so it must not share fate with the self-hosted fleet it partly exists to unstick. Same isolation rationale as runner-fleet-canary.yml and runner-broker-dispatch-wedge-rerun.yml above."
+  - path: .github/workflows/shared-env-runner-parity.yml
+    reason: "OMN-16555: the hosted half of the shared-env two-runner-class parity gate must be pinned to a literal ubuntu-latest -- routing it through OMNI_RUNNER_SELECTOR_V1 would let a var change move it back onto the fleet and void the ephemeral-runner proof. Its self-hosted half does use the standard selector."
