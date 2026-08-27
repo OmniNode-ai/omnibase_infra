@@ -35,6 +35,7 @@ import os
 import re
 import shutil
 import subprocess
+import time
 from pathlib import Path
 from typing import Any
 
@@ -1081,6 +1082,99 @@ def _run_alert(
     return log_text, post_texts
 
 
+def _alert_state(tmp_path: Path) -> str:
+    """Per-key alert state, or '' when the reporter wrote none (OMN-16789)."""
+    state = tmp_path / "sandbox" / "state" / "omninode-system-alert-keys.tsv"
+    return state.read_text() if state.exists() else ""
+
+
+def _set_http(tmp_path: Path, port: str, entry: tuple[int, str] | None) -> None:
+    """Repoint one port in the live stub spec between ticks.
+
+    ``entry=None`` removes the port, which the stub curl treats as a refused
+    connection (empty body, non-zero exit) -- the same ``000`` the real reporter
+    scores when a probe times out. That is what the measured 18085 flap was.
+    """
+    spec_path = tmp_path / "spec.json"
+    spec = json.loads(spec_path.read_text())
+    if entry is None:
+        spec["http"].pop(str(port), None)
+    else:
+        spec["http"][str(port)] = list(entry)
+    spec_path.write_text(json.dumps(spec))
+
+
+class _AlertTicker:
+    """Drive ``--mode alert`` repeatedly against one persistent state dir.
+
+    The cadence logic under test is inherently multi-tick: confirmation,
+    absence-hysteresis and re-notification cannot be observed in a single run.
+    ``_run_alert`` renames the stub curl on every call, so it cannot simply be
+    called twice; this installs the Slack-aware curl once and then re-runs the
+    staged script, returning only the posts produced by THAT tick.
+    """
+
+    def __init__(
+        self,
+        script: Path,
+        tmp_path: Path,
+        bin_dir: Path,
+        *,
+        extra_env: dict[str, str] | None = None,
+    ) -> None:
+        self.tmp_path = tmp_path
+        self.posts_dir = tmp_path / "slack-posts"
+        self.extra_env = dict(extra_env or {})
+        self._seen: set[Path] = set()
+
+        real_curl = bin_dir / "curl-http"
+        (bin_dir / "curl").rename(real_curl)
+        _write(
+            bin_dir / "curl",
+            _SLACK_CURL.replace("__POSTS__", str(self.posts_dir)).replace(
+                "__REALCURL__", str(real_curl)
+            ),
+            executable=True,
+        )
+        self.staged = _stage(script, tmp_path, bin_dir)
+
+    def tick(self) -> tuple[str, list[str]]:
+        env = dict(os.environ)
+        env.update(
+            {
+                "OMNINODE_ALERT_ENV_FILE": str(self.tmp_path / "absent.env"),
+                "OMNINODE_INFRA_REPO_ROOT": str(REPO_ROOT),
+                "OMNINODE_RUNTIME_POLICY_ENV": str(RUNTIME_POLICY_ENV),
+                "SLACK_BOT_TOKEN": "test-token",
+                "SLACK_CHANNEL_ID": "C-TEST",
+                "OMNINODE_CI_PROBE_ENABLED": "0",
+            }
+        )
+        env.update(self.extra_env)
+        proc = subprocess.run(
+            ["bash", str(self.staged), "--mode", "alert"],
+            capture_output=True,
+            text=True,
+            env=env,
+            timeout=120,
+            check=False,
+        )
+        assert proc.returncode == 0, (
+            f"alert run failed rc={proc.returncode} stderr={proc.stderr[-2000:]}"
+        )
+        logs = sorted((self.tmp_path / "sandbox" / "logs").glob("*.log"))
+        log_text = logs[-1].read_text() if logs else proc.stdout
+
+        fresh: list[str] = []
+        if self.posts_dir.is_dir():
+            for payload in sorted(self.posts_dir.glob("*.json")):
+                if payload in self._seen:
+                    continue
+                self._seen.add(payload)
+                fresh.append(json.loads(payload.read_text()).get("text", ""))
+        return log_text, fresh
+
+
 def test_alert_mode_pages_when_a_runtime_lane_is_down(
     tmp_path: Path, lane_ports: dict[str, str]
 ) -> None:
@@ -1091,17 +1185,31 @@ def test_alert_mode_pages_when_a_runtime_lane_is_down(
     empty, the alert branch wrote "clean" to the state file, and nothing was
     ever posted -- while the digest text simultaneously listed the lane as
     CRITICAL. The reporter could see the dead runtime and still not page.
+
+    OMN-16789 changed the cadence, not the outcome: a key must hold the same
+    status for ``OMNINODE_ALERT_CONFIRM_TICKS`` before it may page, so the alert
+    lands on the confirming tick rather than the first sighting. The assertion
+    that matters -- a 503 dev lane produces a Slack post naming that lane -- is
+    unchanged, and the first-tick silence is itself asserted below so this
+    cannot pass against a script that has simply gone mute.
     """
     bin_dir = _make_stub_bin(
         tmp_path,
         http=_outage_http(lane_ports),
         docker_state={"containers": [], "dangling": []},
     )
-    log_text, posts = _run_alert(FIXED_SCRIPT, tmp_path, bin_dir)
+    ticker = _AlertTicker(FIXED_SCRIPT, tmp_path, bin_dir)
 
+    log_text, posts = ticker.tick()
+    assert not posts, (
+        "alert paged on the first sighting -- CONFIRM_TICKS was not honoured, so "
+        f"a single-tick blip can page.\nlog:\n{log_text}"
+    )
+
+    log_text, posts = ticker.tick()
     assert posts, (
-        "no Slack post was attempted while the dev runtime lane was 503 -- the "
-        f"alert branch took the 'clean' path (OMN-15525).\nlog:\n{log_text}"
+        "no Slack post was attempted on the confirming tick while the dev runtime "
+        f"lane was 503 (OMN-15525/OMN-16789).\nlog:\n{log_text}"
     )
     joined = "\n".join(posts)
     assert f"runtime-dev-{lane_ports['dev']}" in joined, (
@@ -1109,9 +1217,9 @@ def test_alert_mode_pages_when_a_runtime_lane_is_down(
     )
     assert re.search(r"Issues: \*[1-9]\d* critical\*", joined), joined
 
-    state = (tmp_path / "sandbox" / "state" / "omninode-system-alert.hash").read_text()
-    assert state.strip() != "clean", (
-        "alert run recorded the fleet as clean while a lane was 503"
+    state = _alert_state(tmp_path)
+    assert f"runtime-dev-{lane_ports['dev']}" in state, (
+        f"alert run did not record the failing lane in per-key state:\n{state}"
     )
 
 
@@ -1121,20 +1229,189 @@ def test_alert_mode_stays_quiet_on_a_healthy_fleet(
     """Control for the test above: an all-green fleet must post nothing.
 
     Without this, `test_alert_mode_pages_when_a_runtime_lane_is_down` could pass
-    against a script that posts unconditionally.
+    against a script that posts unconditionally. Driven for more ticks than
+    CONFIRM_TICKS so "quiet" means quiet, not merely un-confirmed yet.
     """
     bin_dir = _make_stub_bin(
         tmp_path,
         http=_all_green_http(lane_ports),
         docker_state={"containers": [], "dangling": []},
     )
-    log_text, posts = _run_alert(FIXED_SCRIPT, tmp_path, bin_dir)
+    ticker = _AlertTicker(FIXED_SCRIPT, tmp_path, bin_dir)
+    for _ in range(3):
+        log_text, posts = ticker.tick()
+        assert not posts, (
+            f"alert posted against a fully healthy fleet:\n{posts}\n{log_text}"
+        )
 
-    assert not posts, (
-        f"alert posted against a fully healthy fleet:\n{posts}\n{log_text}"
+    assert _alert_state(tmp_path).strip() == "", (
+        f"healthy fleet left keys in alert state: {_alert_state(tmp_path)!r}"
     )
-    state = (tmp_path / "sandbox" / "state" / "omninode-system-alert.hash").read_text()
-    assert state.strip() == "clean", f"healthy fleet not recorded clean: {state!r}"
+
+
+# --------------------------------------------------------------------------
+# OMN-16789 -- the operator's actual complaint: the same alert, over and over.
+#
+# The de-duplication was not absent, it was DEFEATED. It hashed the whole issue
+# SET, which is sound only against a stable input, and the input was not stable:
+# `runtime-stability-test-18085` bounced CRITICAL(000)/OK(200) on nearly every
+# tick, so the set alternated and the hash changed every time. Measured on .201
+# from /data/maintenance/logs/ across 39 ticks (2026-08-27 09:30Z-18:30Z):
+# 22 posted, 17 suppressed, every post traceable to that one key bouncing.
+#
+# `_MEASURED_18085_FLAP` below is that observed sequence, transcribed from the
+# tick logs. It is the RED-before: against the set-hash revision it produces a
+# post on nearly every element.
+# --------------------------------------------------------------------------
+
+# CRITICAL(True) / OK(False) for runtime-stability-test-18085, 2026-08-27,
+# 13:00Z-18:30Z, read off the per-tick logs on .201.
+_MEASURED_18085_FLAP = [
+    True, False, False, True, False, True, False, True, False, False,
+    False, False, False, False, False, True, False, False, False, False,
+    True, False, True,
+]  # fmt: skip
+
+
+def test_flapping_key_does_not_repost_the_alert(
+    tmp_path: Path, lane_ports: dict[str, str]
+) -> None:
+    """The regression test for the reported spam.
+
+    Replays the measured 18085 flap. The key is genuinely bad some ticks and
+    genuinely fine others; what must NOT happen is a fresh alert on each bounce.
+
+    RED-before (set-hash revision): every transition changes the set hash, so
+    this posts on the order of a dozen times across the sequence -- and the
+    shrink direction posts the FULL alert digest again rather than reading as a
+    recovery, which is exactly what the operator screenshotted.
+    """
+    http = dict(_all_green_http(lane_ports))
+    stab_port = lane_ports["stability-test"]
+    bin_dir = _make_stub_bin(
+        tmp_path, http=http, docker_state={"containers": [], "dangling": []}
+    )
+    ticker = _AlertTicker(FIXED_SCRIPT, tmp_path, bin_dir)
+
+    total_posts: list[str] = []
+    for critical in _MEASURED_18085_FLAP:
+        if critical:
+            _set_http(tmp_path, stab_port, None)  # unreachable -> code 000
+        else:
+            _set_http(tmp_path, stab_port, _all_green_http(lane_ports)[stab_port])
+        _, posts = ticker.tick()
+        total_posts.extend(posts)
+
+    assert len(total_posts) <= 2, (
+        f"{len(total_posts)} Slack posts across {len(_MEASURED_18085_FLAP)} ticks "
+        "of a single flapping key -- the flap is re-arming the alert. Posts:\n"
+        + "\n---\n".join(total_posts)
+    )
+    # And it must not have gone mute: the key really was critical, so the one
+    # alert it is allowed must name it.
+    assert total_posts, "flapping critical key produced no alert at all"
+    assert f"runtime-stability-test-{stab_port}" in "\n".join(total_posts)
+
+
+def test_standing_critical_is_renotified_on_the_long_interval(
+    tmp_path: Path, lane_ports: dict[str, str]
+) -> None:
+    """A permanent critical must not go permanently silent.
+
+    `deploy-agent-8099` was CRITICAL on all 39 measured ticks. Suppressing
+    repeats is only correct if the standing condition is still re-surfaced on
+    some cadence -- otherwise the fix for noise is a new false-green.
+    """
+    bin_dir = _make_stub_bin(
+        tmp_path,
+        http=_outage_http(lane_ports),
+        docker_state={"containers": [], "dangling": []},
+    )
+    # Re-notify immediately so the test does not sleep 6 hours; the point under
+    # test is that the interval is honoured and env-driven, not its default.
+    ticker = _AlertTicker(
+        FIXED_SCRIPT,
+        tmp_path,
+        bin_dir,
+        extra_env={"OMNINODE_ALERT_RENOTIFY_SECONDS": "0"},
+    )
+    ticker.tick()  # sighting
+    _, first = ticker.tick()  # confirmed -> NEW
+    assert first, "standing critical never produced its first alert"
+
+    ticker.extra_env = {"OMNINODE_ALERT_RENOTIFY_SECONDS": "1"}
+    time.sleep(1.1)
+    _, second = ticker.tick()
+    assert second, (
+        "a still-standing critical was never re-notified -- suppression became "
+        "permanent silence"
+    )
+
+
+def test_recovery_names_the_key_and_does_not_repost_the_digest(
+    tmp_path: Path, lane_ports: dict[str, str]
+) -> None:
+    """A key clearing must read as a recovery, not as the same alert again.
+
+    RED-before: with any other issue still standing, `$issues` was non-empty, so
+    the clearing tick took the ALERT branch and re-posted the whole digest minus
+    one line. That is the message the operator saw repeatedly.
+    """
+    dev_port = lane_ports["dev"]
+    bin_dir = _make_stub_bin(
+        tmp_path,
+        http=_outage_http(lane_ports),
+        docker_state={"containers": [], "dangling": []},
+    )
+    ticker = _AlertTicker(
+        FIXED_SCRIPT, tmp_path, bin_dir, extra_env={"OMNINODE_ALERT_CLEAR_TICKS": "2"}
+    )
+    ticker.tick()
+    _, alert = ticker.tick()
+    assert alert, "no initial alert to recover from"
+
+    _set_http(tmp_path, dev_port, _all_green_http(lane_ports)[dev_port])
+    _, none_yet = ticker.tick()
+    assert not none_yet, "recovery fired before CLEAR_TICKS absences elapsed"
+    _, recovery = ticker.tick()
+
+    assert recovery, "key cleared but no recovery was ever posted"
+    text = "\n".join(recovery)
+    assert "alert resolved" in text.lower(), f"not a recovery message:\n{text}"
+    assert f"runtime-dev-{dev_port}" in text, (
+        f"recovery did not name the key that recovered:\n{text}"
+    )
+    assert "*Runtime endpoints*" not in text, (
+        "the recovery re-posted the full alert digest -- this is the exact "
+        f"OMN-16789 behaviour under test:\n{text}"
+    )
+
+
+def test_alert_cadence_and_probe_timeout_carry_no_hardcoded_literals() -> None:
+    """AC3/AC4: the decision path must be env-driven, not literal.
+
+    The 4-second probe ceiling was the root of the flap (a warm .201 lane
+    answers in ~3.2s under load), and it was unreachable from config. A tunable
+    that only exists as a literal cannot be tuned when the host gets slower.
+    """
+    body = FIXED_SCRIPT.read_text()
+    for var, env in (
+        ("PROBE_TIMEOUT_SECONDS", "OMNINODE_ALERT_PROBE_TIMEOUT_SECONDS"),
+        ("CONFIRM_TICKS", "OMNINODE_ALERT_CONFIRM_TICKS"),
+        ("CLEAR_TICKS", "OMNINODE_ALERT_CLEAR_TICKS"),
+        ("RENOTIFY_SECONDS", "OMNINODE_ALERT_RENOTIFY_SECONDS"),
+    ):
+        assert re.search(rf"^{var}=\$\{{{env}:-", body, re.MULTILINE), (
+            f"{var} is not overridable via {env}"
+        )
+    # Comment lines are exempt: the header documents the old `--max-time 4` as
+    # the root cause, and that prose is why the next reader understands the
+    # knob. Only executable lines are asserted on.
+    code = [ln for ln in body.splitlines() if not ln.lstrip().startswith("#")]
+    offenders = [ln for ln in code if re.search(r"--max-time\s+4\b", ln)]
+    assert not offenders, (
+        f"a hardcoded 4s probe timeout survives in executable code: {offenders}"
+    )
 
 
 def test_endpoint_failures_are_counted_in_the_header(

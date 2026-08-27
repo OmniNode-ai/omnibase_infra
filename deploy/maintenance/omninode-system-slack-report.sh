@@ -56,6 +56,36 @@
 #   refused, DNS failure, timeout -> code 000) is CRITICAL, never skipped; a
 #   docker query that fails is CRITICAL, never treated as "nothing wrong".
 #
+# WHAT OMN-16789 FIXES ON TOP (found by the operator, in Slack, as noise)
+#   OMN-15509 taught this reporter to SEE a dead lane and OMN-15525 taught it to
+#   SAY so. Neither addressed how often it says it. On 2026-08-27 the operator
+#   reported #omninode-notifications receiving the same three criticals over and
+#   over. Measured from /data/maintenance/logs/ across 39 consecutive ticks
+#   (09:30Z-18:30Z): 22 posted, 17 suppressed.
+#
+#   The de-duplication was not missing — it was defeated. It hashed the WHOLE
+#   issue set and compared to the previous hash, which is sound only against a
+#   stable input. `runtime-stability-test-18085` bounced CRITICAL(000)/OK(200)
+#   on nearly every tick, so the set alternated {c,s,d}/{c,d}, the hash changed
+#   every tick, and the comparison never once suppressed anything. And because
+#   `$issues` stayed non-empty on the shrink, the "one critical cleared" tick
+#   re-posted the entire alert digest instead of reading as a recovery.
+#
+#   The bounce itself was self-inflicted: a hardcoded `curl --max-time 4`
+#   against a lane whose first response after idle measures ~3.2s under host
+#   load average ~9-10. See PROBE_TIMEOUT_SECONDS.
+#
+#   Three changes, all env-tunable, no literals in the decision path:
+#     1. Per-key state (see the state machine below) instead of one set hash, so
+#        one key changing cannot re-page every other standing key.
+#     2. Hysteresis. CONFIRM_TICKS before a key may page; CLEAR_TICKS of
+#        continuous absence before it is called recovered, with the notified
+#        flag RETAINED across a short absence so a bounce cannot re-arm it.
+#     3. RENOTIFY_SECONDS, so a standing critical is re-surfaced on a long
+#        cadence rather than going silent forever after its first alert.
+#   The daily 08:05 digest remains the only unconditional post — a clean fleet
+#   still produces nothing on the */15 cadence.
+#
 # WHAT OMN-15525 FIXES ON TOP (found by actually deploying the above)
 #   The OMN-15509 revision was installed on .201 on 2026-07-30T18:12Z and
 #   immediately reported CRITICAL for all three lanes against a demonstrably
@@ -118,6 +148,37 @@ STARTING_GRACE_SECONDS=${OMNINODE_ALERT_STARTING_GRACE_SECONDS:-180}
 # bounds DISPLAY ONLY. It must never be applied before a body is parsed or
 # pattern-matched (OMN-15525) — see check_runtime_lane.
 BODY_EXCERPT_BYTES=${OMNINODE_ALERT_BODY_EXCERPT_BYTES:-180}
+# How long an endpoint probe may take before it is scored unreachable (000).
+#
+# OMN-16789. This was a hardcoded `--max-time 4` at both probe call sites, and 4
+# seconds is BELOW the measured legitimate response time of a warm-but-loaded
+# lane on .201. Six probes of :18085/health at 2026-08-27T18:34Z, 3s apart:
+# 000/000/000/000 then 200 at t=3.196s then 200 at t=0.013s — the lane was up
+# the entire time; the first response after idle simply takes ~3.2s while the
+# host sits at load average ~9-10. At a 4s ceiling that is a coin flip, so the
+# monitor manufactured its own flapping input and then faithfully alerted on it.
+# Fail-closed on 000 is correct and unchanged; feeding it a timeout that a
+# healthy lane cannot reliably beat is what was wrong.
+PROBE_TIMEOUT_SECONDS=${OMNINODE_ALERT_PROBE_TIMEOUT_SECONDS:-15}
+# --- alert cadence (OMN-16789) -------------------------------------------
+# All three are env-overridable and carry no literal anywhere else in the file.
+#
+# CONFIRM_TICKS  consecutive ticks a key must hold the SAME status before it is
+#                allowed to page. Trades time-to-alert (2 ticks = 30 min on the
+#                */15 cron) for immunity to single-tick blips. This is a host
+#                digest, not a customer-facing pager; the operator's complaint
+#                was noise, and a one-tick transient is not news.
+# CLEAR_TICKS    consecutive ticks a key must be ABSENT before it is reported
+#                recovered and dropped from state. This is the half that kills
+#                flap spam: while a key is briefly absent its notified flag is
+#                RETAINED, so a key that comes back does not re-page. Without
+#                it, every OK->CRITICAL bounce re-arms the alert.
+# RENOTIFY_SECONDS  how often a still-standing, already-notified key is
+#                re-surfaced, so a permanent critical cannot go permanently
+#                silent. Set to 0 to disable re-notification entirely.
+CONFIRM_TICKS=${OMNINODE_ALERT_CONFIRM_TICKS:-2}
+CLEAR_TICKS=${OMNINODE_ALERT_CLEAR_TICKS:-8}
+RENOTIFY_SECONDS=${OMNINODE_ALERT_RENOTIFY_SECONDS:-21600}
 MODE=digest
 
 if [[ "${1:-}" == "--mode" ]]; then
@@ -269,7 +330,7 @@ check_http() {
   local label="$1" url="$2" expect_regex="${3:-}"
   local tmp code status body body_excerpt
   tmp=$(mktemp)
-  code=$(curl -sS --max-time 4 -o "$tmp" -w '%{http_code}' "$url" 2>/dev/null || true)
+  code=$(curl -sS --max-time "$PROBE_TIMEOUT_SECONDS" -o "$tmp" -w '%{http_code}' "$url" 2>/dev/null || true)
   # Match against the WHOLE body; truncate only the excerpt that gets reported.
   # See BODY_EXCERPT_BYTES — matching an excerpt makes the verdict depend on
   # where the payload happens to be cut.
@@ -319,7 +380,7 @@ check_runtime_lane() {
   local label="runtime-${lane}-${port}"
   local tmp code body body_excerpt status detail verdict
   tmp=$(mktemp)
-  code=$(curl -sS -X GET --max-time 4 -o "$tmp" -w '%{http_code}' "http://${PROBE_HOST}:${port}/health" 2>/dev/null || true)
+  code=$(curl -sS -X GET --max-time "$PROBE_TIMEOUT_SECONDS" -o "$tmp" -w '%{http_code}' "http://${PROBE_HOST}:${port}/health" 2>/dev/null || true)
   # The verdict is computed from the FULL body; only the reported excerpt is
   # truncated. Truncating BEFORE the verdict was OMN-15525: a real .201 runtime
   # /health body is ~2.6 KB, so the 180-byte excerpt handed to jq was always
@@ -571,9 +632,118 @@ issues=$(awk -F'|' "$row_status"'{ s=row_status() } s=="WARNING" || s=="CRITICAL
 issue_keys=$(awk -F'|' "$row_status$row_key"'{ s=row_status() } s=="WARNING" || s=="CRITICAL" {print row_key() "|" s}' <<<"$snapshot" || true)
 critical_count=$(awk -F'|' "$row_status"'{ s=row_status() } s=="CRITICAL" {c++} END {print c+0}' <<<"$snapshot")
 warning_count=$(awk -F'|' "$row_status"'{ s=row_status() } s=="WARNING" {c++} END {print c+0}' <<<"$snapshot")
-issue_hash=$(printf '%s\n' "$issue_keys" | sha256sum | awk '{print $1}')
-state_file="$STATE_DIR/omninode-system-alert.hash"
-prev_hash=$(cat "$state_file" 2>/dev/null || true)
+# --- per-key alert state machine (OMN-16789) -------------------------------
+#
+# WHAT WAS WRONG WITH THE SINGLE HASH
+#   The previous revision reduced the whole issue set to one sha256 and posted
+#   whenever that hash changed. That is correct only if the input is stable.
+#   It was not: `runtime-stability-test-18085` alternated CRITICAL(000) /
+#   OK(200) on almost every tick (a 4s probe timeout against a ~3.2s response —
+#   see PROBE_TIMEOUT_SECONDS), so the set flipped between {c,s,d} and {c,d},
+#   the hash changed every tick, and the de-duplication never engaged once.
+#   Measured 2026-08-27 09:30Z-18:30Z: 39 ticks, 22 posted, 17 suppressed, and
+#   every post traced to that one key bouncing.
+#
+#   Worse, the shrink direction did not read as a recovery: with `$issues` still
+#   non-empty the alert branch simply re-posted the entire digest minus one
+#   line. The operator saw "the same alert again", because it was.
+#
+# WHAT REPLACES IT
+#   State is per key, not per set:
+#       key <TAB> status <TAB> present_streak <TAB> absent_streak <TAB> notified <TAB> last_notified_epoch
+#
+#   A key pages once when it has held the same status for CONFIRM_TICKS. While
+#   it is briefly absent (fewer than CLEAR_TICKS ticks) its row and its notified
+#   flag are RETAINED, so a key that bounces back does not re-arm — this is what
+#   actually absorbs the flap. Only after CLEAR_TICKS consecutive absences is it
+#   reported recovered and dropped. A key that is still standing is re-surfaced
+#   every RENOTIFY_SECONDS so a permanent critical cannot go permanently quiet.
+#
+#   A status CHANGE on a present key (WARNING <-> CRITICAL) resets the streak
+#   and re-arms notification: an escalation is a real state change, not noise.
+#
+# FAIL-CLOSED: an unreadable or malformed state file is treated as empty, which
+# re-pages standing issues rather than silencing them. Losing state must never
+# be the quiet outcome.
+state_file="$STATE_DIR/omninode-system-alert-keys.tsv"
+now_epoch=$(date -u +%s)
+current_keys_file=$(mktemp)
+prev_state_file=$(mktemp)
+printf '%s\n' "$issue_keys" | awk -F'|' 'NF>1 { st=$NF; sub(/\|[^|]*$/, "", $0); print $0 "\t" st }' >"$current_keys_file"
+# A row with the wrong field count is dropped rather than trusted (fail-closed
+# to "unknown key" -> re-page), and a missing file is simply empty.
+awk -F'\t' 'NF==6' "$state_file" 2>/dev/null >"$prev_state_file" || true
+
+# The two-file pass keys off FILENAME, NOT the usual `NR==FNR` idiom. On the
+# very first run the previous-state file is EMPTY, and `NR==FNR` is then true
+# for the first record of the SECOND file too — so every current issue would be
+# swallowed by the prior-state branch, no key would ever reach the decision
+# loop, and the reporter would go permanently silent. That is a worse failure
+# than the spam this replaces, and it is invisible until state happens to be
+# empty. Matching on FILENAME has no such edge.
+decisions=$(awk -F'\t' -v OFS='\t' \
+  -v prevfile="$prev_state_file" \
+  -v now="$now_epoch" \
+  -v confirm="$CONFIRM_TICKS" \
+  -v clear="$CLEAR_TICKS" \
+  -v renotify="$RENOTIFY_SECONDS" '
+  FILENAME==prevfile {
+    k=$1
+    p_status[k]=$2; p_present[k]=$3; p_absent[k]=$4; p_notified[k]=$5; p_last[k]=$6
+    if (!(k in seen)) { seen[k]=1; p_order[++pn]=k }
+    next
+  }
+  { k=$1; if (!(k in cur)) { cur[k]=$2; c_order[++cn]=k } }
+  END {
+    for (i=1; i<=cn; i++) {
+      k=c_order[i]; s=cur[k]
+      if ((k in seen) && p_status[k]==s) {
+        present=p_present[k]+1; notified=p_notified[k]; last=p_last[k]
+      } else {
+        # New key, or a real status change: re-arm.
+        present=1; notified=0; last=0
+      }
+      if (present>=confirm) {
+        if (notified==0)                                   { print "NEW", k, s; notified=1; last=now }
+        else if (renotify>0 && (now-last)>=renotify)       { print "RENOTIFY", k, s; last=now }
+      }
+      print "STATE", k, s, present, 0, notified, last
+      handled[k]=1
+    }
+    for (i=1; i<=pn; i++) {
+      k=p_order[i]
+      if (k in handled) continue
+      absent=p_absent[k]+1
+      if (absent>=clear) {
+        if (p_notified[k]==1) print "RECOVERED", k, p_status[k]
+        continue  # dropped from state
+      }
+      # Below the clear threshold: keep the row, the notified flag AND the
+      # present streak.
+      #
+      # Preserving the streak matters. Zeroing it looked tidier but meant a key
+      # only ever needed one clean tick between failures to keep its streak at
+      # 1 forever — so an endpoint failing every OTHER probe (a 50%-broken
+      # service, the single most likely real degradation) could never reach
+      # CONFIRM_TICKS and would never alert at all. Caught by the measured-flap
+      # replay test, which contains no two consecutive failures anywhere in it.
+      # The streak is still bounded: CLEAR_TICKS of continuous absence drops the
+      # row entirely, so this accumulates evidence within a window rather than
+      # forever.
+      print "STATE", k, p_status[k], p_present[k], absent, p_notified[k], p_last[k]
+    }
+  }
+' "$prev_state_file" "$current_keys_file")
+rm -f "$current_keys_file" "$prev_state_file"
+
+# Atomic swap: a crash mid-write must not leave a truncated state file that
+# reads as "no issues known" and re-pages everything.
+printf '%s\n' "$decisions" | awk -F'\t' -v OFS='\t' '$1=="STATE" { $1=""; sub(/^\t/, ""); print }' >"${state_file}.tmp"
+mv -f "${state_file}.tmp" "$state_file"
+
+new_keys=$(awk -F'\t' '$1=="NEW"       { print $2 " (" $3 ")" }' <<<"$decisions")
+renotify_keys=$(awk -F'\t' '$1=="RENOTIFY"  { print $2 " (" $3 ")" }' <<<"$decisions")
+recovered_keys=$(awk -F'\t' '$1=="RECOVERED" { print $2 }' <<<"$decisions")
 
 format_digest() {
   local title="$1"
@@ -612,18 +782,27 @@ case "$MODE" in
     post_slack "$(format_digest '*OmniNode morning system digest*')" '#439FE0'
     ;;
   alert)
-    if [[ -z "$issues" ]]; then
-      if [[ -n "$prev_hash" && "$prev_hash" != "clean" ]]; then
-        post_slack "*[OmniNode alert resolved]* .201 system checks are clean again." 'good'
-      fi
-      echo clean >"$state_file"
-    elif [[ "$issue_hash" != "$prev_hash" ]]; then
+    # Order matters: a tick that both escalates and recovers is an alert, and
+    # the recovered keys ride along in the digest's own *Active issues* delta
+    # rather than as a second message.
+    if [[ -n "$new_keys" || -n "$renotify_keys" ]]; then
       color='warning'
       [[ "$critical_count" != 0 ]] && color='danger'
       post_slack "$(format_digest '*OmniNode system alert*')" "$color"
-      echo "$issue_hash" >"$state_file"
+      echo "$(date -u +%Y-%m-%dT%H:%M:%SZ) alert posted; new=[${new_keys//$'\n'/, }] renotify=[${renotify_keys//$'\n'/, }]"
+    elif [[ -n "$recovered_keys" ]]; then
+      # Per-key recovery. The old code could not express this: with any issue
+      # still standing it re-posted the whole alert digest, so "one thing got
+      # better" was indistinguishable from "here is the same alert again".
+      recovered_list="${recovered_keys//$'\n'/, }"
+      if [[ -z "$issues" ]]; then
+        post_slack "*[OmniNode alert resolved]* .201 system checks are clean again. Recovered: ${recovered_list}." 'good'
+      else
+        post_slack "*[OmniNode alert resolved]* Recovered: ${recovered_list}. Still open: *${critical_count} critical*, *${warning_count} warning*." 'good'
+      fi
+      echo "$(date -u +%Y-%m-%dT%H:%M:%SZ) recovery posted; recovered=[${recovered_list}]"
     else
-      echo "$(date -u +%Y-%m-%dT%H:%M:%SZ) issues unchanged; Slack suppressed"
+      echo "$(date -u +%Y-%m-%dT%H:%M:%SZ) no alert state change; Slack suppressed"
     fi
     ;;
   dry-run)
