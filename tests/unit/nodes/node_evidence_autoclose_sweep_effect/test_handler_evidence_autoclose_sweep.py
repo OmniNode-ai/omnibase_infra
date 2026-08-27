@@ -11,13 +11,17 @@ paths (flip, gap) in both DRY-RUN and apply modes, plus the kill switch.
 
 from __future__ import annotations
 
+import json
 from datetime import UTC, datetime, timedelta
+from pathlib import Path
 from uuid import uuid4
 
 import pytest
 
 from omnibase_infra.nodes.node_evidence_autoclose_sweep_effect.handlers.handler_evidence_autoclose_sweep import (
     HandlerEvidenceAutocloseSweep,
+    _ac_coverage_gap,
+    _acceptance_criteria_items,
     _extract_ticket_binding,
 )
 from omnibase_infra.nodes.node_evidence_autoclose_sweep_effect.models.enum_evidence_autoclose_decision import (
@@ -50,20 +54,42 @@ def _merged_pr(number: int, title: str, ticket: str) -> dict[str, object]:
 def _dod_verify_ok(
     *, total: int, verified: int, failed: int, skipped: int = 0
 ) -> dict[str, object]:
+    """A ModelSkillResult shaped like the one `onex skill dod_verify` prints.
+
+    OMN-16736: the verification counts live under ``result.terminal_payload``,
+    NOT flat on ``result``. ``result`` carries the DISPATCH outcome; the node's
+    own terminal state is nested one level below it. A prior revision of this
+    double put the counts flat on ``result`` — the same key the reader used —
+    so double and reader agreed with each other and disagreed with the real
+    CLI, and every live run computed 0/0. Shape verified against the committed
+    capture in tests/fixtures/omn16736/.
+    """
+    verdict = "verified" if failed == 0 else "failed"
     return {
         "skill_name": "dod_verify",
         "node_name": "node_dod_verify",
-        "status": "success",
+        "status": "success" if failed == 0 else "failed",
         "correlation_id": str(uuid4()),
         "run_id": str(uuid4()),
-        "exit_code": 0,
+        "exit_code": 0 if failed == 0 else 1,
         "duration_ms": 1,
         "result": {
-            "status": "verified" if failed == 0 else "failed",
-            "total_checks": total,
-            "verified_count": verified,
-            "failed_count": failed,
-            "skipped_count": skipped,
+            "workflow_result": "completed" if failed == 0 else "failed",
+            "exit_code": 0 if failed == 0 else 1,
+            "workflow": "<OMNI_HOME>/omnimarket/nodes/node_dod_verify/contract.yaml",
+            "terminal_payload": {
+                "correlation_id": str(uuid4()),
+                "ticket_id": "OMN-9999",
+                "status": verdict,
+                "dry_run": False,
+                "checks": [],
+                "total_checks": total,
+                "verified_count": verified,
+                "failed_count": failed,
+                "skipped_count": skipped,
+                "superseded_count": 0,
+                "error_message": None,
+            },
         },
         "result_model": "omnimarket.nodes.node_dod_verify.models.model_dod_verify_state.ModelDodVerifyState",
     }
@@ -104,6 +130,7 @@ def _issue(
     issue_id: str = "issue-uuid-1",
     state_type: str = "started",
     labels: tuple[str, ...] = (),
+    description: str | None = None,
 ) -> dict[str, object]:
     return {
         "id": issue_id,
@@ -111,6 +138,8 @@ def _issue(
         "state": {"id": "state-1", "name": "In Progress", "type": state_type},
         "labels": {"nodes": [{"name": label} for label in labels]},
         "team": {"id": "team-1"},
+        # Linear returns JSON null, not "", for an empty description.
+        "description": description,
     }
 
 
@@ -574,7 +603,7 @@ class TestGapPath:
         )
         linear = FakeLinearClient(issues={"OMN-9999": _issue()})
         dod_fake = _make_dod_verify_fake(
-            {"OMN-9999": (_dod_verify_ok(total=3, verified=2, failed=1), 0, "")}
+            {"OMN-9999": (_dod_verify_ok(total=3, verified=2, failed=1), 1, "")}
         )
         handler = HandlerEvidenceAutocloseSweep(
             linear_client=linear,
@@ -593,7 +622,7 @@ class TestGapPath:
         )
         linear = FakeLinearClient(issues={"OMN-9999": _issue(issue_id="issue-gap")})
         dod_fake = _make_dod_verify_fake(
-            {"OMN-9999": (_dod_verify_ok(total=3, verified=2, failed=1), 0, "")}
+            {"OMN-9999": (_dod_verify_ok(total=3, verified=2, failed=1), 1, "")}
         )
         handler = HandlerEvidenceAutocloseSweep(
             linear_client=linear,
@@ -623,6 +652,365 @@ class TestGapPath:
         )
         result = await handler.handle(_request(apply=False))
         assert result.outcomes[0].decision == EnumEvidenceAutocloseDecision.GAP_POSTED
+
+
+@pytest.mark.unit
+class TestRealDodVerifyPayloadShape:
+    """The reader must speak the shape `onex skill dod_verify` really prints.
+
+    OMN-16736, second occurrence of the OMN-16736/#2925 defect class. The
+    handler read ``result.total_checks``; the live CLI nests every count under
+    ``result.terminal_payload``. ``result`` itself carries only the DISPATCH
+    outcome. With no ``total_checks`` at that level the reader saw 0/0 on every
+    run, so a fully-verified ticket could never satisfy ``all_verified`` and no
+    flip was reachable even once ``node_dod_verify`` resolved.
+
+    These tests bypass the shared double and drive a COMMITTED LIVE CAPTURE, so
+    they stay honest if that helper is edited again.
+    """
+
+    @staticmethod
+    def _captured() -> dict[str, object]:
+        fixture = (
+            Path(__file__).resolve().parents[3]
+            / "fixtures"
+            / "omn16736"
+            / "dod-verify-omn16752.skill-result.json.captured"
+        )
+        payload = json.loads(fixture.read_text(encoding="utf-8"))
+        assert isinstance(payload, dict)
+        return payload
+
+    def test_the_live_payload_has_no_top_level_total_checks(self):
+        """Pin the key that is NOT there — the whole defect in one assertion."""
+        captured = self._captured()
+        dispatch = captured["result"]
+        assert isinstance(dispatch, dict)
+        assert "total_checks" not in dispatch
+        assert "terminal_payload" in dispatch
+        assert dispatch["terminal_payload"]["total_checks"] == 16
+
+    async def test_a_real_failed_verdict_at_exit_1_is_a_gap_not_an_error(self):
+        """`onex skill dod_verify` exits 1 on every genuine evidence gap.
+
+        Live capture: OMN-16752, exit 1, 9/16 verified, 6 failed, 1 skipped,
+        with a complete ModelSkillResult on stdout. That is a GAP the ticket's
+        owner can act on, not a verifier crash.
+        """
+        captured = self._captured()
+        gh_fake = _make_gh_fake(
+            companions=[_merged_pr(7294, "evidence(OMN-9999): x", "OMN-9999")],
+            files_by_pr={7294: ["contracts/OMN-9999.yaml"]},
+        )
+        linear = FakeLinearClient(issues={"OMN-9999": _issue(issue_id="issue-real")})
+        dod_fake = _make_dod_verify_fake({"OMN-9999": (captured, 1, "")})
+        handler = HandlerEvidenceAutocloseSweep(
+            linear_client=linear,
+            run_gh_command=gh_fake,
+            run_dod_verify_command=dod_fake,
+        )
+        result = await handler.handle(_request(apply=True))
+        outcome = result.outcomes[0]
+
+        assert outcome.decision == EnumEvidenceAutocloseDecision.GAP_POSTED
+        assert outcome.dod_verify_total_checks == 16
+        assert outcome.dod_verify_verified_count == 9
+        assert outcome.dod_verify_failed_count == 6
+        assert linear.state_updates == []
+        assert result.tickets_errored == 0
+
+    async def test_json_without_a_terminal_payload_fails_closed(self):
+        """A dispatch that emitted JSON but reached no verdict is an ERROR.
+
+        Never a 0/0 'gap' — that would read as a ticket problem when it is a
+        verifier problem.
+        """
+        gh_fake = _make_gh_fake(
+            companions=[_merged_pr(1, "evidence(OMN-9999): x", "OMN-9999")],
+            files_by_pr={1: ["contracts/OMN-9999.yaml"]},
+        )
+        linear = FakeLinearClient(issues={"OMN-9999": _issue()})
+        no_verdict = {
+            "skill_name": "dod_verify",
+            "node_name": "node_dod_verify",
+            "status": "failed",
+            "exit_code": 1,
+            "result": {"workflow_result": "failed", "exit_code": 1, "error": "boom"},
+        }
+        dod_fake = _make_dod_verify_fake({"OMN-9999": (no_verdict, 1, "")})
+        handler = HandlerEvidenceAutocloseSweep(
+            linear_client=linear,
+            run_gh_command=gh_fake,
+            run_dod_verify_command=dod_fake,
+        )
+        result = await handler.handle(_request(apply=True))
+
+        assert (
+            result.outcomes[0].decision
+            == EnumEvidenceAutocloseDecision.ERROR_VERIFY_NONZERO_EXIT
+        )
+        assert linear.state_updates == []
+        assert linear.comments == []
+
+    async def test_a_verified_terminal_status_is_required_for_a_flip(self):
+        """Counts alone do not authorize a flip; dod_verify's verdict must agree."""
+        payload = _dod_verify_ok(total=3, verified=3, failed=0)
+        # Same clean arithmetic, but the verifier itself declined to say VERIFIED.
+        payload["result"]["terminal_payload"]["status"] = "skipped"
+        gh_fake = _make_gh_fake(
+            companions=[_merged_pr(1, "evidence(OMN-9999): x", "OMN-9999")],
+            files_by_pr={1: ["contracts/OMN-9999.yaml"]},
+        )
+        linear = FakeLinearClient(issues={"OMN-9999": _issue()})
+        dod_fake = _make_dod_verify_fake({"OMN-9999": (payload, 0, "")})
+        handler = HandlerEvidenceAutocloseSweep(
+            linear_client=linear,
+            run_gh_command=gh_fake,
+            run_dod_verify_command=dod_fake,
+        )
+        result = await handler.handle(_request(apply=True))
+
+        assert result.outcomes[0].decision == EnumEvidenceAutocloseDecision.GAP_POSTED
+        assert linear.state_updates == []
+
+
+@pytest.mark.unit
+class TestAcceptanceCriteriaExtraction:
+    """Pure-function coverage for the description parser (OMN-16736)."""
+
+    def test_items_under_a_markdown_heading(self):
+        description = (
+            "Some context.\n\n"
+            "## Acceptance Criteria\n"
+            "- AC1: the thing is wired\n"
+            "- AC2: the thing is proven\n\n"
+            "## Notes\n"
+            "- not an AC\n"
+        )
+        assert _acceptance_criteria_items(description) == [
+            "AC1: the thing is wired",
+            "AC2: the thing is proven",
+        ]
+
+    def test_bold_heading_and_numbered_items(self):
+        description = "**Acceptance criteria:**\n1. first\n2) second\n"
+        assert _acceptance_criteria_items(description) == ["first", "second"]
+
+    def test_bare_ac_prefixed_lines_without_bullets(self):
+        description = "### AC\nAC1: alpha\nAC2 beta\n"
+        assert _acceptance_criteria_items(description) == ["AC1: alpha", "AC2 beta"]
+
+    def test_no_acceptance_criteria_section_yields_nothing(self):
+        assert _acceptance_criteria_items("Just a paragraph.\n- a bullet\n") == []
+
+    def test_task_markers_are_stripped_from_item_text(self):
+        description = "## Acceptance Criteria\n- [x] done thing\n"
+        assert _acceptance_criteria_items(description) == ["done thing"]
+
+
+@pytest.mark.unit
+class TestAcCoverageGapFunction:
+    """The guard predicate itself: conservative, and silent when it should be."""
+
+    def test_empty_description_is_never_a_gap(self):
+        assert _ac_coverage_gap("", 3) == ("", ())
+        assert _ac_coverage_gap("   \n\n  ", 3) == ("", ())
+
+    def test_unchecked_checkbox_is_a_gap_and_is_named(self):
+        reason, uncovered = _ac_coverage_gap(
+            "## Acceptance Criteria\n- [x] wired\n- [ ] proven on the live lane\n", 2
+        )
+        assert reason
+        assert uncovered == ("proven on the live lane",)
+
+    def test_unchecked_checkbox_outside_an_ac_section_still_holds(self):
+        """A criterion does not have to live under a heading to be a criterion."""
+        reason, uncovered = _ac_coverage_gap("Notes\n\n- [ ] follow-up gate\n", 5)
+        assert reason
+        assert uncovered == ("follow-up gate",)
+
+    def test_ac_section_longer_than_total_checks_is_a_gap(self):
+        reason, uncovered = _ac_coverage_gap(
+            "## Acceptance Criteria\n- alpha\n- beta\n- gamma\n", 2
+        )
+        assert reason
+        assert "3" in reason and "2" in reason
+        assert uncovered == ("alpha", "beta", "gamma")
+
+    def test_fully_covered_ac_section_is_not_a_gap(self):
+        assert _ac_coverage_gap("## Acceptance Criteria\n- alpha\n- beta\n", 2) == (
+            "",
+            (),
+        )
+
+    def test_more_checks_than_listed_acs_is_not_a_gap(self):
+        """dod_verify covering MORE than the description lists is fine."""
+        assert _ac_coverage_gap("## Acceptance Criteria\n- alpha\n", 4) == ("", ())
+
+
+@pytest.mark.unit
+class TestAcCoverageGuard:
+    """OMN-14362: an AC that lives only in the Linear description is invisible
+    to dod_verify, so a clean 0-failed run is not evidence about it. The flip
+    must be withheld and the uncovered criteria named."""
+
+    def _handler(self, linear, *, total=3, verified=3, failed=0):
+        gh_fake = _make_gh_fake(
+            companions=[_merged_pr(77, "evidence(OMN-9999): x", "OMN-9999")],
+            files_by_pr={77: ["contracts/OMN-9999.yaml"]},
+        )
+        dod_fake = _make_dod_verify_fake(
+            {
+                "OMN-9999": (
+                    _dod_verify_ok(total=total, verified=verified, failed=failed),
+                    0,
+                    "",
+                )
+            }
+        )
+        return HandlerEvidenceAutocloseSweep(
+            linear_client=linear,
+            run_gh_command=gh_fake,
+            run_dod_verify_command=dod_fake,
+        )
+
+    async def test_unchecked_linear_only_ac_blocks_an_otherwise_clean_flip(self):
+        linear = FakeLinearClient(
+            issues={
+                "OMN-9999": _issue(
+                    issue_id="issue-ac",
+                    description=(
+                        "## Acceptance Criteria\n"
+                        "- [x] AC1: guard wired as a CI gate\n"
+                        "- [ ] AC2: replayed against the real incident\n"
+                    ),
+                )
+            }
+        )
+        handler = self._handler(linear)
+        result = await handler.handle(_request(apply=True))
+        outcome = result.outcomes[0]
+
+        assert outcome.decision == EnumEvidenceAutocloseDecision.GAP_AC_COVERAGE
+        assert result.tickets_flipped == 0
+        assert linear.state_updates == []
+        assert outcome.uncovered_acceptance_criteria == (
+            "AC2: replayed against the real incident",
+        )
+        assert len(linear.comments) == 1
+        _, body = linear.comments[0]
+        assert "AC2: replayed against the real incident" in body
+        assert "3/3 ACs verified" in body
+
+    async def test_ac_section_longer_than_dod_verify_checks_blocks_the_flip(self):
+        linear = FakeLinearClient(
+            issues={
+                "OMN-9999": _issue(
+                    issue_id="issue-ac2",
+                    description=(
+                        "## Acceptance Criteria\n"
+                        "- AC1: alpha\n"
+                        "- AC2: beta\n"
+                        "- AC3: gamma\n"
+                        "- AC4: delta\n"
+                    ),
+                )
+            }
+        )
+        handler = self._handler(linear, total=2, verified=2, failed=0)
+        result = await handler.handle(_request(apply=True))
+        outcome = result.outcomes[0]
+
+        assert outcome.decision == EnumEvidenceAutocloseDecision.GAP_AC_COVERAGE
+        assert linear.state_updates == []
+        assert len(outcome.uncovered_acceptance_criteria) == 4
+
+    async def test_fully_covered_ticket_still_flips(self):
+        """The guard must not be a blanket hold: a description whose ACs are
+        all checked and match the check count flips exactly as before."""
+        linear = FakeLinearClient(
+            issues={
+                "OMN-9999": _issue(
+                    issue_id="issue-ok",
+                    description=(
+                        "## Acceptance Criteria\n"
+                        "- [x] AC1: alpha\n"
+                        "- [x] AC2: beta\n"
+                        "- [x] AC3: gamma\n"
+                    ),
+                )
+            }
+        )
+        handler = self._handler(linear)
+        result = await handler.handle(_request(apply=True))
+
+        assert result.outcomes[0].decision == EnumEvidenceAutocloseDecision.FLIPPED
+        assert result.tickets_flipped == 1
+        assert linear.state_updates == [("issue-ok", "state-done-id")]
+
+    async def test_null_description_still_flips(self):
+        """Linear returns null for an empty description; that is genuinely no
+        criteria, not an unreadable one, so it must not become a blanket hold."""
+        linear = FakeLinearClient(
+            issues={"OMN-9999": _issue(issue_id="issue-null", description=None)}
+        )
+        handler = self._handler(linear)
+        result = await handler.handle(_request(apply=True))
+
+        assert result.outcomes[0].decision == EnumEvidenceAutocloseDecision.FLIPPED
+        assert linear.state_updates == [("issue-null", "state-done-id")]
+
+    async def test_dry_run_ac_gap_never_comments(self):
+        linear = FakeLinearClient(
+            issues={
+                "OMN-9999": _issue(
+                    issue_id="issue-dry",
+                    description="## Acceptance Criteria\n- [ ] AC1: unproven\n",
+                )
+            }
+        )
+        handler = self._handler(linear)
+        result = await handler.handle(_request(apply=False))
+        outcome = result.outcomes[0]
+
+        assert outcome.decision == EnumEvidenceAutocloseDecision.GAP_AC_COVERAGE
+        assert outcome.applied is False
+        assert linear.state_updates == []
+        assert linear.comments == []
+        assert result.tickets_gap_posted == 1
+
+    async def test_ac_gap_is_counted_as_a_gap_not_an_error(self):
+        linear = FakeLinearClient(
+            issues={
+                "OMN-9999": _issue(
+                    issue_id="issue-count",
+                    description="## Acceptance Criteria\n- [ ] AC1: unproven\n",
+                )
+            }
+        )
+        handler = self._handler(linear)
+        result = await handler.handle(_request(apply=True))
+
+        assert result.tickets_gap_posted == 1
+        assert result.tickets_errored == 0
+        assert result.tickets_skipped == 0
+
+    async def test_dod_verify_gap_short_circuits_before_the_ac_guard(self):
+        """A failed check is already a gap; the AC guard only gates the flip
+        path, so a real dod_verify failure keeps its own honest decision."""
+        linear = FakeLinearClient(
+            issues={
+                "OMN-9999": _issue(
+                    issue_id="issue-both",
+                    description="## Acceptance Criteria\n- [ ] AC1: unproven\n",
+                )
+            }
+        )
+        handler = self._handler(linear, total=3, verified=2, failed=1)
+        result = await handler.handle(_request(apply=True))
+
+        assert result.outcomes[0].decision == EnumEvidenceAutocloseDecision.GAP_POSTED
+        assert linear.state_updates == []
 
 
 @pytest.mark.unit

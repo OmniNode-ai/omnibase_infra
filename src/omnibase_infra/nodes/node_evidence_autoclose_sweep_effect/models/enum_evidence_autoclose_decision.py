@@ -21,6 +21,15 @@ class EnumEvidenceAutocloseDecision(StrEnum):
     # dod_verify ran cleanly (exit 0) but reported >=1 failed/unverified check
     # -> honest gap posted as a comment, never flipped.
     GAP_POSTED = "gap_posted"
+    # dod_verify was fully green, but the ticket's Linear DESCRIPTION carries
+    # acceptance criteria dod_verify structurally cannot see -- unchecked
+    # markdown checkboxes, or an acceptance-criteria section listing more items
+    # than dod_verify had checks. The flip is withheld and the uncovered
+    # criteria are named in the comment (OMN-16736; the OMN-14362 lesson: an AC
+    # that lives only in the ticket body is invisible to a contract verifier, so
+    # a clean 0-failed run is not evidence about it). Counted as a gap, not an
+    # error: the mechanism worked, the evidence base was incomplete.
+    GAP_AC_COVERAGE = "gap_ac_coverage"
     # Ticket carries the close-if-done label -> decision-only path stays manual.
     SKIPPED_LABEL = "skipped_label"
     # Ticket is already in a completed/canceled state -> nothing to do.

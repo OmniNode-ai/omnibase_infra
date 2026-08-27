@@ -21,14 +21,36 @@
 #     scanned and the contracts/<ticket>.yaml binding signal below was dead
 #     code — every binding came from the PR title alone. An unreadable files
 #     payload now fails closed as an error rather than as an empty list.
+#   - OMN-16736 (contract 1.1.0): two further corrections to the verdict path,
+#     both found by the first live run in which `node_dod_verify` actually
+#     resolved.
+#       (a) The dod_verify counts were read from `result.total_checks`. The
+#           live CLI nests every count under `result.terminal_payload`;
+#           `result` carries only the DISPATCH outcome. The reader therefore
+#           saw 0/0 on every run and no flip was reachable at all. The
+#           verdict must now also agree with dod_verify's own terminal
+#           `status: verified` — counts alone do not authorize a flip.
+#       (b) `onex skill dod_verify` exits 1 on every genuine evidence GAP
+#           while still printing a complete ModelSkillResult. stdout is now
+#           parsed regardless of exit code, so a gap is recorded as a gap
+#           instead of ERROR_VERIFY_NONZERO_EXIT ("the verifier crashed").
+#           JSON with no verdict in it still fails closed as an error.
+#   - OMN-16736 / OMN-14362 (contract 1.1.0): AC-COVERAGE GUARD. dod_verify
+#     verifies the checks declared in the OCC contract, so an acceptance
+#     criterion that lives only in the ticket's Linear description is
+#     structurally invisible to it — "3/3 verified, 0 failed" says nothing
+#     about a fourth criterion nobody encoded. Before any flip the description
+#     is re-read; an unchecked markdown checkbox, or an acceptance-criteria
+#     section listing more items than dod_verify had checks, WITHHOLDS the
+#     flip and posts GAP_AC_COVERAGE naming them.
 #
 name: "node_evidence_autoclose_sweep_effect"
 node_type: "EFFECT_GENERIC"
 contract_version:
   major: 1
-  minor: 0
-  patch: 1
-node_version: "1.0.1"
+  minor: 1
+  patch: 0
+node_version: "1.1.0"
 description: >
   Scheduled sweep wiring companion-merge -> dod_verify -> governed Done flip. Enumerates merged onex_change_control evidence companions, extracts their Evidence-Ticket binding, re-runs dod_verify, and flips Done or posts a gap comment via the Linear API. DRY-RUN by default; ONEX_AUTOCLOSE_DISABLED kill switch checked first.
 
@@ -83,8 +105,16 @@ error_handling:
       recoverable: false
       retry_strategy: "none"
     - name: "DOD_VERIFY_NONZERO_EXIT"
-      description: "`onex skill dod_verify <ticket>` exited non-zero — fail closed, never flip."
+      description: >
+        `onex skill dod_verify <ticket>` exited non-zero AND printed no usable verdict (no result.terminal_payload.total_checks) — fail closed, never flip. A non-zero exit ALONE is not this failure: the CLI exits 1 on every genuine evidence gap while still printing a complete ModelSkillResult, and that case is a gap, not an error (OMN-16736).
+
       recoverable: true
+      retry_strategy: "none"
+    - name: "AC_COVERAGE_GAP"
+      description: >
+        dod_verify was fully green, but the bound ticket's Linear description carries acceptance criteria its checks structurally cannot see — an unchecked markdown checkbox, or an acceptance-criteria section listing more items than dod_verify had checks. The flip is WITHHELD and the uncovered criteria are named in the comment (OMN-16736; the OMN-14362 lesson). Recorded as GAP_AC_COVERAGE and counted under tickets_gap_posted: nothing failed, the evidence base was incomplete. Conservative in exactly one direction — a false hold costs a comment, a false flip writes an unearned Done.
+
+      recoverable: false
       retry_strategy: "none"
     - name: "GITHUB_FILES_PAYLOAD_UNREADABLE"
       # OMN-16736. The changed-file listing is a binding input, not a
