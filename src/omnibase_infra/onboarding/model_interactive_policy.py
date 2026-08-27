@@ -25,6 +25,19 @@ class ModelInteractivePolicy(BaseModel):
     steps: list[ModelInteractiveStep]
     transitions: list[ModelTransition]
     env_output: dict[str, dict[str, str]]
+    credentials_output: dict[str, dict[str, str]] = Field(
+        default_factory=dict,
+        description=(
+            "Per-terminal-step secret material, as {terminal_step: "
+            "{secret_ref_template: value_template}}. Kept separate from "
+            "env_output rather than filtered out of it by key name "
+            "(OMN-16038): env_output is rendered to the operator, written to "
+            "the overlay, and echoed in receipts, so anything placed there is "
+            "public by construction. A declared block is also the only reason "
+            "the 0600 credentials artifact is ever written — an absent block "
+            "means the policy handles no secrets at all."
+        ),
+    )
     start_step: str | None = Field(default=None)
 
     @model_validator(mode="after")
@@ -64,6 +77,16 @@ class ModelInteractivePolicy(BaseModel):
         for tid in terminal_steps:
             if tid not in self.env_output:
                 raise ValueError(f"Terminal step '{tid}' missing from env_output")
+
+        # A credentials_output block keyed on a non-terminal step would never
+        # fire — the reducer only emits credentials at a terminal step — and
+        # the failure mode is a silently unwritten secret, so reject it here.
+        for cid in self.credentials_output:
+            if cid not in terminal_steps:
+                raise ValueError(
+                    f"credentials_output references '{cid}', which is not a "
+                    f"terminal step; credentials are only emitted at terminal steps"
+                )
 
         return self
 

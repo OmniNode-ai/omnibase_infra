@@ -23,6 +23,9 @@ from omnibase_infra.onboarding.transition_reducer import (
     TransitionReducer,
 )
 
+#: Placeholder recorded in the step-result receipt for a secret-marked step.
+REDACTED_RESPONSE = "<redacted>"
+
 
 class InteractiveExecutorError(Exception):
     """Raised when the executor encounters an unrecoverable error."""
@@ -90,8 +93,12 @@ class InteractiveExecutor:
                 if step.type == "action":
                     await self._adapter.notify_action(step)
                 env_dict = self._reducer.get_env_output(current_step_id, state)
+                credentials_dict = self._reducer.get_credentials_output(
+                    current_step_id, state
+                )
                 return ModelInteractiveResult(
                     env_dict=env_dict,
+                    credentials_dict=credentials_dict,
                     step_results=step_results,
                     policy_name=self._policy.policy_name,
                     completed=True,
@@ -102,11 +109,15 @@ class InteractiveExecutor:
             response = await self._collect_response(step)
 
             # Record step result (action steps have no user response).
+            # A secret-marked step records a placeholder: step_results is the
+            # execution receipt, and it is rendered, logged, and serialized
+            # into the onboarding output. The real value stays in ``state``,
+            # which never leaves this loop except through credentials_output.
             step_results.append(
                 ModelStepResult(
                     step_key=step.id,
                     step_title=step.prompt,
-                    response=response,
+                    response=REDACTED_RESPONSE if step.secret else response,
                 )
             )
 
@@ -130,6 +141,8 @@ class InteractiveExecutor:
         if step.type == "multi_choice":
             return await self._adapter.collect_multi_choice(step)
         if step.type == "text":
+            if step.secret:
+                return await self._adapter.collect_secret(step)
             return await self._adapter.collect_text(step)
         if step.type == "action":
             await self._adapter.notify_action(step)
@@ -141,4 +154,4 @@ class InteractiveExecutor:
         raise InteractiveExecutorError(msg)
 
 
-__all__ = ["InteractiveExecutor", "InteractiveExecutorError"]
+__all__ = ["REDACTED_RESPONSE", "InteractiveExecutor", "InteractiveExecutorError"]

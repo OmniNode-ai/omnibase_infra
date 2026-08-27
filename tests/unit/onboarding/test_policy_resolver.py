@@ -103,7 +103,8 @@ class TestLoadBuiltinPolicies:
 
     def test_loads_builtin_policies(self) -> None:
         policies = load_builtin_policies()
-        assert len(policies) == 9
+        assert len(policies) == 10
+        assert "connect_cloud" in policies
         assert "standalone_quickstart" in policies
         assert "contributor_local" in policies
         assert "contributor_cloud" in policies

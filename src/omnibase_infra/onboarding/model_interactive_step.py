@@ -19,6 +19,14 @@ class ModelInteractiveStep(BaseModel):
     options: list[str] = Field(default_factory=list)
     condition: str | None = Field(default=None)
     required: bool = Field(default=True)
+    secret: bool = Field(
+        default=False,
+        description=(
+            "Collect this step through the masked adapter path. The value is "
+            "never echoed, never stored in the step-result receipt, and may "
+            "only reach disk through the policy's credentials_output block."
+        ),
+    )
     action: str | None = Field(default=None)
     produces_capabilities: list[str] = Field(default_factory=list)
 
