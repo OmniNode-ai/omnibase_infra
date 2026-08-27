@@ -30,6 +30,12 @@ class EnumEvidenceAutocloseDecision(StrEnum):
     # a clean 0-failed run is not evidence about it). Counted as a gap, not an
     # error: the mechanism worked, the evidence base was incomplete.
     GAP_AC_COVERAGE = "gap_ac_coverage"
+    # dod_verify was clean AND its checks covered the ticket's criteria, but
+    # not one passing check executed the claimed behavior -- every green leg
+    # was a merge-state read or a surrogate. The tally says the code landed;
+    # nothing says the system does the thing, so the flip is withheld
+    # (OMN-15911).
+    GAP_NO_BEHAVIOR_PROOF = "gap_no_behavior_proof"
     # Ticket carries the close-if-done label -> decision-only path stays manual.
     SKIPPED_LABEL = "skipped_label"
     # Ticket is already in a completed/canceled state -> nothing to do.

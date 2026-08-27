@@ -43,14 +43,27 @@
 #     is re-read; an unchecked markdown checkbox, or an acceptance-criteria
 #     section listing more items than dod_verify had checks, WITHHOLDS the
 #     flip and posts GAP_AC_COVERAGE naming them.
+#   - OMN-15911 (contract 1.2.0): PROOF-CLASS GUARD. A green tally does not
+#     say what the green legs PROVED. Before OMN-15911 a `gh pr view --json
+#     state` read and an executed test suite both terminated in the same
+#     `verified`, so `verified_count == total_checks` was satisfiable
+#     entirely by "the PR merged" — and this node then wrote into Linear that
+#     the ticket's acceptance criteria were receipt-proven. dod_verify now
+#     classifies every check verdict and reports
+#     `result.terminal_payload.behavior_proving_count` (checks that both
+#     PASSED and executed the claimed behavior). A flip requires it to be
+#     >= 1; zero on an otherwise-clean run WITHHOLDS the flip and posts
+#     GAP_NO_BEHAVIOR_PROOF. A verdict carrying no such field at all (an
+#     omnimarket predating OMN-15911 — i.e. every historical receipt) is
+#     ERROR_VERIFY_UNPARSEABLE, never an inference in either direction.
 #
 name: "node_evidence_autoclose_sweep_effect"
 node_type: "EFFECT_GENERIC"
 contract_version:
   major: 1
-  minor: 1
+  minor: 2
   patch: 0
-node_version: "1.1.0"
+node_version: "1.2.0"
 description: >
   Scheduled sweep wiring companion-merge -> dod_verify -> governed Done flip. Enumerates merged onex_change_control evidence companions, extracts their Evidence-Ticket binding, re-runs dod_verify, and flips Done or posts a gap comment via the Linear API. DRY-RUN by default; ONEX_AUTOCLOSE_DISABLED kill switch checked first.
 
@@ -115,6 +128,18 @@ error_handling:
         dod_verify was fully green, but the bound ticket's Linear description carries acceptance criteria its checks structurally cannot see — an unchecked markdown checkbox, or an acceptance-criteria section listing more items than dod_verify had checks. The flip is WITHHELD and the uncovered criteria are named in the comment (OMN-16736; the OMN-14362 lesson). Recorded as GAP_AC_COVERAGE and counted under tickets_gap_posted: nothing failed, the evidence base was incomplete. Conservative in exactly one direction — a false hold costs a comment, a false flip writes an unearned Done.
 
       recoverable: false
+      retry_strategy: "none"
+    - name: "NO_BEHAVIOR_PROOF"
+      description: >
+        dod_verify was fully green AND its checks covered the ticket's criteria, but not one passing check executed the claimed behavior — every green leg bound merge state (a PR is merged) or was a surrogate (a file exists, a generic ticket-independent suite ran). That is evidence the code landed, not evidence the system does the thing, so the flip is WITHHELD (OMN-15911). Recorded as GAP_NO_BEHAVIOR_PROOF and counted under tickets_gap_posted for the same reason AC_COVERAGE_GAP is: the mechanism worked, the evidence was not strong enough to close on.
+
+      recoverable: false
+      retry_strategy: "none"
+    - name: "DOD_VERIFY_PROOF_CLASS_UNREPORTED"
+      description: >
+        The verdict carried no `result.terminal_payload.behavior_proving_count` — the verifier predates OMN-15911 and cannot say whether any green check proved behavior. Fails closed as ERROR_VERIFY_UNPARSEABLE rather than inferring a value: reading the absence as "zero behavior proof" would post a Linear comment stating a finding the run never made, and reading it as satisfied would flip on exactly the arithmetic the guard exists to stop.
+
+      recoverable: true
       retry_strategy: "none"
     - name: "GITHUB_FILES_PAYLOAD_UNREADABLE"
       # OMN-16736. The changed-file listing is a binding input, not a
