@@ -253,7 +253,7 @@ def test_input_file_not_found_surfaces_cli_error(tmp_path: Path) -> None:
 def test_drift_guard_fires_before_unknown_node_lookup(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    """OMN-14560: ``onex node``/``onex run`` now call the same drift guard
+    """OMN-14560: ``onex node`` now calls the same drift guard
     ``onex skill`` was fixed to call under OMN-14531.
 
     Before this fix, ``run_node_by_name`` had ZERO drift-guard wiring: a

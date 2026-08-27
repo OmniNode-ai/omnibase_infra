@@ -3,7 +3,7 @@
 
 """Typed receipt ``result`` payload for runs without a handler result (OMN-13094).
 
-When ``onex node``/``onex run`` executes in ``--output receipt`` mode, the
+When ``onex node`` executes in ``--output receipt`` mode, the
 receipt's ``result`` field carries the node's full handler result whenever one
 exists. Runs that produce no handler result (event-only orchestrations) or
 that fail carry this summary model instead, so the receipt's ``result`` is

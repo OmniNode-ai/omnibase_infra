@@ -6,14 +6,13 @@
 Restores the complete process environment after every CLI test because CLI tests
 exercise process-wide runtime configuration in-process (OMN-15572).
 
-Neutralizes the ``onex node``/``onex run`` omnimarket pre-flight drift guard
+Neutralizes the ``onex node`` omnimarket pre-flight drift guard
 (OMN-14560, mirroring OMN-14531's ``onex skill`` fix) so CLI-wiring tests
 across this directory stay hermetic regardless of the ambient developer
 shell's ``$OMNI_HOME`` and whether this test venv happens to have omnimarket
-co-installed. Three files invoke ``run_node_by_name`` (directly or via the
-``onex run`` alias): ``test_cli_node.py``, ``test_cli_node_receipt.py``, and
-``test_onex_run.py`` -- a per-file fixture would have to be duplicated three
-times, so it lives here instead.
+co-installed. Two files invoke ``run_node_by_name``: ``test_cli_node.py`` and
+``test_cli_node_receipt.py`` -- a per-file fixture would have to be duplicated
+twice, so it lives here instead.
 
 The guard's own behavior (fail-open vs. raise) is tested directly in
 ``test_omnimarket_drift_guard.py``, which imports ``check_omnimarket_drift``
