@@ -1068,14 +1068,33 @@ class PayloadTypeMatcher:
                     return True
                 raise
         model_cls = self._cached_model_cls
-        if isinstance(payload, model_cls):
+        # OMN-16767: decide on the SAME domain payload the dispatch callback
+        # will construct the model from. The engine hands this predicate
+        # whatever it has in hand, which on the Kafka path is the transport
+        # envelope (``{"payload": {domain}, "event_type": ..., "envelope_id":
+        # ..., ...}``), while ``_make_dispatch_callback`` unwraps to the domain
+        # first. Matching on the un-unwrapped envelope makes the two disagree,
+        # and the disagreement is SILENT in the worst direction: the matcher
+        # rejects, the engine treats it as "not my message" (not an error), and
+        # the record is consumed + committed with no handler ever invoked and
+        # no DLQ entry — the phantom-wiring-death signature.
+        #
+        # Live on the .201 dev lane: every record on
+        # onex.cmd.omnibase-infra.delegation-routing-request.v1 validated
+        # cleanly as ModelRoutingIntent once unwrapped, yet the consumer group
+        # sat at lag 0 having dispatched nothing, because the matcher was
+        # asked about the envelope. Unwrapping here uses the same registered-
+        # input-model stop condition as the dispatch path (OMN-16050), so a
+        # genuine non-match still rejects.
+        candidate = _extract_dispatch_payload(payload, model_cls)
+        if isinstance(candidate, model_cls):
             return True
         try:
-            model_cls.model_validate(payload)
+            model_cls.model_validate(candidate)
         except ValidationError as exc:
             if _is_delegation_inference_intent_ref(
                 self._event_model
-            ) and _payload_claims_delegation_inference_intent(payload):
+            ) and _payload_claims_delegation_inference_intent(candidate):
                 return True
             self.last_validation_detail = _format_validation_error_detail(exc)
             return False
