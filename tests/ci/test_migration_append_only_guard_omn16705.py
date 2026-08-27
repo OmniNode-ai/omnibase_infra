@@ -270,6 +270,49 @@ def test_staged_mode_still_allows_amending_a_migration_added_on_this_branch(
     assert check(repo, base="base-marker", staged=True) == []
 
 
+def test_staged_mode_reads_manifest_and_supersessions_from_the_index(
+    repo: Path,
+) -> None:
+    """Unstaged manifest edits cannot authorize the staged migration diff."""
+    _write(repo, f"{FORWARD}/{_APPLIED}", "-- restored\n" + _APPLIED_BODY)
+    _write(repo, f"{FORWARD}/{_SUCCESSOR}", _SUCCESSOR_BODY)
+    _write(
+        repo,
+        f"{FORWARD}/_ledger/application-migrations.tsv",
+        _manifest_row(_APPLIED, "-- restored\n" + _APPLIED_BODY)
+        + "\n"
+        + _manifest_row(_SUCCESSOR, _SUCCESSOR_BODY)
+        + "\n",
+    )
+    _write(
+        repo,
+        f"{FORWARD}/_ledger/migration-supersessions.tsv",
+        "\t".join([_APPLIED, _SUCCESSOR, "OMN-16705", "restore applied bytes"]) + "\n",
+    )
+    _run(
+        repo,
+        "add",
+        f"{FORWARD}/{_APPLIED}",
+        f"{FORWARD}/{_SUCCESSOR}",
+        f"{FORWARD}/_ledger/migration-supersessions.tsv",
+    )
+
+    violations = check(repo, base="base-marker", staged=True)
+
+    assert len(violations) == 1, violations
+    assert f"{_SUCCESSOR} is not declared" in violations[0]
+
+
+def test_staged_mode_fails_when_the_integration_ref_is_unavailable(
+    repo: Path,
+) -> None:
+    _edit_applied_migration(repo, "-- staged rewrite\n")
+    _run(repo, "add", "-A")
+
+    with pytest.raises(AppendOnlyViolationError, match="fetch the integration"):
+        check(repo, base="missing-integration-ref", staged=True)
+
+
 def test_an_empty_base_manifest_fails_closed(tmp_path: Path) -> None:
     """Anti-vacuity: no declarations at the base must not mean 'everything passes'."""
     repo = tmp_path / "empty"

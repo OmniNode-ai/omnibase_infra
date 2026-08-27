@@ -130,6 +130,28 @@ def _git_show(repo_root: Path, ref: str, repo_path: str) -> str | None:
     return result.stdout if result.returncode == 0 else None
 
 
+def _git_show_index(repo_root: Path, repo_path: str) -> str | None:
+    result = subprocess.run(
+        ["git", "-C", str(repo_root), "show", f":{repo_path}"],
+        capture_output=True,
+        text=True,
+        check=False,
+    )
+    return result.stdout if result.returncode == 0 else None
+
+
+def _repo_path_exists(repo_root: Path, repo_path: str, *, staged: bool) -> bool:
+    if not staged:
+        return (repo_root / repo_path).is_file()
+    result = subprocess.run(
+        ["git", "-C", str(repo_root), "cat-file", "-e", f":{repo_path}"],
+        capture_output=True,
+        text=True,
+        check=False,
+    )
+    return result.returncode == 0
+
+
 def declared_artifacts(manifest_text: str | None) -> frozenset[str]:
     """The ``artifact_path`` column of a manifest revision."""
     if not manifest_text:
@@ -202,10 +224,9 @@ DEFAULT_INTEGRATION_REF = "origin/dev"
 def _resolve_staged_base(repo_root: Path, base: str | None) -> str:
     """Merge-base of the index's branch with the integration branch.
 
-    Falls back to ``HEAD`` only when the integration ref does not resolve at
-    all (a fresh clone with no remote, or a throwaway test repository). The
-    fallback is reported by the caller rather than applied silently, because
-    under it the guard is stricter than intended, not weaker.
+    Fails loudly when the integration ref is unavailable. Falling back to
+    ``HEAD`` changes the predicate from branch-append-only to commit-only and
+    can freeze a migration added by an earlier branch commit.
     """
     candidate = base or DEFAULT_INTEGRATION_REF
     result = subprocess.run(
@@ -216,7 +237,10 @@ def _resolve_staged_base(repo_root: Path, base: str | None) -> str:
     )
     if result.returncode == 0 and result.stdout.strip():
         return result.stdout.strip()
-    return "HEAD"
+    raise AppendOnlyViolationError(
+        f"could not resolve integration base {candidate!r}; fetch the integration "
+        "reference or pass --base explicitly before running the append-only guard"
+    )
 
 
 def _authorised(
@@ -224,7 +248,9 @@ def _authorised(
     supersessions: tuple[Supersession, ...],
     added_artifacts: frozenset[str],
     current_manifest: frozenset[str],
-    migrations_dir: Path,
+    repo_root: Path,
+    *,
+    staged: bool,
 ) -> str | None:
     """Return the failure reason, or ``None`` when the change is authorised."""
     rows = [row for row in supersessions if row.artifact_path == artifact_path]
@@ -256,7 +282,8 @@ def _authorised(
                 "standing waiver"
             )
             continue
-        if not (migrations_dir / row.superseded_by).is_file():
+        successor_repo_path = f"{FORWARD_PREFIX}{row.superseded_by}"
+        if not _repo_path_exists(repo_root, successor_repo_path, staged=staged):
             problems.append(f"{row.superseded_by} does not exist on disk")
             continue
         if row.superseded_by not in current_manifest:
@@ -298,17 +325,21 @@ def check(repo_root: Path, *, base: str | None, staged: bool) -> list[str]:
             "the guard would pass everything"
         )
 
-    migrations_dir = repo_root / FORWARD_PREFIX
-    current_manifest = declared_artifacts(
-        (migrations_dir / "_ledger" / "application-migrations.tsv").read_text(
-            encoding="utf-8"
+    manifest_text = (
+        _git_show_index(repo_root, MANIFEST_REPO_PATH)
+        if staged
+        else (repo_root / MANIFEST_REPO_PATH).read_text(encoding="utf-8")
+    )
+    current_manifest = declared_artifacts(manifest_text)
+    supersessions_text = _git_show_index(repo_root, SUPERSESSIONS_REPO_PATH)
+    if not staged:
+        supersessions_path = repo_root / SUPERSESSIONS_REPO_PATH
+        supersessions_text = (
+            supersessions_path.read_text(encoding="utf-8")
+            if supersessions_path.is_file()
+            else None
         )
-    )
-    supersessions = parse_supersessions(
-        (repo_root / SUPERSESSIONS_REPO_PATH).read_text(encoding="utf-8")
-        if (repo_root / SUPERSESSIONS_REPO_PATH).is_file()
-        else None
-    )
+    supersessions = parse_supersessions(supersessions_text)
 
     added_artifacts = frozenset(
         path[len(FORWARD_PREFIX) :]
@@ -328,7 +359,8 @@ def check(repo_root: Path, *, base: str | None, staged: bool) -> list[str]:
             supersessions,
             added_artifacts,
             current_manifest,
-            migrations_dir,
+            repo_root,
+            staged=staged,
         )
         if reason is not None:
             violations.append(f"{path} ({status}): {reason}")
