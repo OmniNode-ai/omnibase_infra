@@ -590,7 +590,26 @@ collect() {
       check_runtime_lane "$lane" "$port"
     done
     check_http projection-api-13002 "http://${PROBE_HOST}:13002/health" 'ok|healthy'
-    check_http deploy-agent-8099 "http://${PROBE_HOST}:8099/health" 'idle|running|state|ok'
+    # OMN-16789 follow-up: `deploy-agent-8099` is REMOVED, not disabled.
+    #
+    # It probed a service that does not exist on this host. Verified on `.201`
+    # 2026-08-27: no listener on 8099 (`ss -lntp`), no container publishing it
+    # (`docker ps -a`), `curl :8099/health` -> 000. The real deploy runner
+    # (`omninode-deploy-runner`, healthy) publishes NO ports --
+    # `NetworkSettings.Ports` is `{}` -- because it is HMAC-command driven
+    # (DEPLOY_AGENT_HMAC_SECRET), not an HTTP service. Port 8099 is allocated by
+    # the service catalog to an unrelated profile-gated fixture:
+    # `docker/catalog/services/fault-inject-fixture.yaml` -> ports.external 8099.
+    #
+    # So this probe could only ever return 000. Fail-closed on 000 is correct
+    # for a real endpoint and is unchanged everywhere else; the defect was that
+    # this endpoint was never real. It was CRITICAL on all 39 ticks measured in
+    # OMN-16789 and one of only two standing criticals on the host -- permanent
+    # false-RED, the "crying wolf" direction this file's header calls fatal to a
+    # monitor. A monitor nobody believes is a monitor that is not running.
+    #
+    # If a deploy agent ever does expose HTTP health, add it back with its real
+    # port from the service catalog rather than restoring this literal.
     check_http web-3003 "http://${PROBE_HOST}:3003/" ''
     check_ci_required_contexts
   }

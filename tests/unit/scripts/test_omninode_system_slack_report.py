@@ -414,6 +414,15 @@ def _outage_http(lane_ports: dict[str, str]) -> dict[str, tuple[int, str]]:
     http.update(
         {
             "13002": (200, json.dumps({"status": "ok"})),
+            # 8099 is kept green HERE ONLY, and only for the frozen as-deployed
+            # fixture, which does still probe `deploy-agent-8099`. The RED-before
+            # proof is "the 2026-07-30 artifact reported every endpoint it listed
+            # as green while dev was down"; drop this entry and that script gets a
+            # connection-refused 000 the outage being replayed never contained,
+            # which would falsify the proof by fabrication rather than by fixing
+            # anything. The current script no longer probes 8099 at all
+            # (see test_phantom_deploy_agent_endpoint_is_not_probed), so this
+            # entry is inert for every test that drives FIXED_SCRIPT.
             "8099": (200, json.dumps({"state": "idle"})),
             "3003": (200, "<html>ok</html>"),
         }
@@ -527,7 +536,6 @@ def test_every_lane_main_runtime_port_is_in_the_probe_set(
     http.update(
         {
             "13002": (200, '{"status":"ok"}'),
-            "8099": (200, '{"state":"idle"}'),
             "3003": (200, "ok"),
         }
     )
@@ -616,6 +624,56 @@ def test_cron_unit_points_at_the_versioned_script_name() -> None:
 
 
 # --------------------------------------------------------------------------
+# OMN-16789 follow-up -- the phantom `deploy-agent-8099` probe is gone.
+# --------------------------------------------------------------------------
+
+
+def test_phantom_deploy_agent_endpoint_is_not_probed(
+    tmp_path: Path, lane_ports: dict[str, str]
+) -> None:
+    """`deploy-agent-8099` named a service that does not exist on `.201`.
+
+    Verified on the host 2026-08-27 after the OMN-16789 install: no listener on
+    8099 (`ss -lntp`), no container publishing it (`docker ps -a`), and
+    `curl :8099/health` -> 000. The real deploy runner
+    (`omninode-deploy-runner`, healthy, image `omninode-runner:latest`)
+    publishes NO ports at all -- `NetworkSettings.Ports` is `{}` -- because it
+    is HMAC-command driven (`DEPLOY_AGENT_HMAC_SECRET`), not an HTTP service.
+    Port 8099 is in fact allocated by the service catalog to a different,
+    profile-gated fixture: `docker/catalog/services/fault-inject-fixture.yaml`
+    declares `ports.external: 8099`.
+
+    So the probe could never be anything but `000`. Fail-closed on 000 is
+    correct for a real endpoint and stays; the defect is that this endpoint was
+    never real. It was one of only two standing criticals on the host and,
+    per OMN-16789's own measurement, `CRITICAL` on all 39 ticks -- a permanent
+    false-RED, which is the "crying wolf" failure direction this script's
+    header calls fatal to a monitor.
+
+    The stub below deliberately omits an "8099" entry, so it answers
+    connection-refused there. Restore the probe and this test fails RED.
+    """
+    http = dict.fromkeys(lane_ports.values(), (200, HEALTHY_BODY))
+    http.update(
+        {
+            "13002": (200, '{"status":"ok"}'),
+            "3003": (200, "ok"),
+        }
+    )
+    bin_dir = _make_stub_bin(
+        tmp_path, http=http, docker_state={"containers": [], "dangling": []}
+    )
+    report = _run(FIXED_SCRIPT, tmp_path, bin_dir)
+    assert "deploy-agent" not in report, (
+        "the phantom deploy-agent endpoint is still probed:\n" + report
+    )
+    assert "8099" not in report, "8099 is still referenced in the report:\n" + report
+    # And removing it must not have silenced the rest: a fully green fleet
+    # still reports zero criticals rather than nothing at all.
+    assert "*0 critical*" in report, report
+
+
+# --------------------------------------------------------------------------
 # AC 3 -- 200 with a non-healthy body is RED.
 # --------------------------------------------------------------------------
 
@@ -632,7 +690,6 @@ def test_http_200_with_unhealthy_body_is_critical(
     http.update(
         {
             "13002": (200, '{"status":"ok"}'),
-            "8099": (200, '{"state":"idle"}'),
             "3003": (200, "ok"),
         }
     )
@@ -651,7 +708,6 @@ def test_http_200_with_unresolvable_body_fails_closed(
     http.update(
         {
             "13002": (200, '{"status":"ok"}'),
-            "8099": (200, '{"state":"idle"}'),
             "3003": (200, "ok"),
         }
     )
@@ -675,7 +731,6 @@ def test_unreachable_runtime_endpoint_is_critical_not_skipped(
     http.update(
         {
             "13002": (200, '{"status":"ok"}'),
-            "8099": (200, '{"state":"idle"}'),
             "3003": (200, "ok"),
         }
     )
@@ -696,7 +751,6 @@ def _all_green_http(lane_ports: dict[str, str]) -> dict[str, tuple[int, str]]:
     http.update(
         {
             "13002": (200, '{"status":"ok"}'),
-            "8099": (200, '{"state":"idle"}'),
             "3003": (200, "ok"),
         }
     )
@@ -1318,9 +1372,16 @@ def test_standing_critical_is_renotified_on_the_long_interval(
 ) -> None:
     """A permanent critical must not go permanently silent.
 
-    `deploy-agent-8099` was CRITICAL on all 39 measured ticks. Suppressing
-    repeats is only correct if the standing condition is still re-surfaced on
-    some cadence -- otherwise the fix for noise is a new false-green.
+    Suppressing repeats is only correct if the standing condition is still
+    re-surfaced on some cadence -- otherwise the fix for noise is a new
+    false-green.
+
+    The standing critical replayed here is the dev lane's 503 from
+    `_outage_http`, not the `deploy-agent-8099` row this docstring used to
+    cite: that probe was a phantom and was removed in the OMN-16789 follow-up
+    (see `test_phantom_deploy_agent_endpoint_is_not_probed`). The test never
+    actually depended on it -- worth stating, because "a standing critical
+    exists" is this test's premise and it must come from a real one.
     """
     bin_dir = _make_stub_bin(
         tmp_path,
