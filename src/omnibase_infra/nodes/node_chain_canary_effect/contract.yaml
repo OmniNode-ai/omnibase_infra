@@ -1,0 +1,148 @@
+# SPDX-FileCopyrightText: 2025 OmniNode.ai Inc.
+# SPDX-License-Identifier: MIT
+# ONEX Node Contract - Event Chain Canary Effect
+#
+# OMN-16773: fire ONE live delegation through the deployed runtime ingress
+# on a schedule and assert the chain carried it to a terminal. The 13-class
+# delegation matrix existed only as a manual recipe; nothing ran it, and the
+# chain was dead for four days before a human fired the recipe by hand
+# (OMN-16767).
+#
+# Scope note: the dev lane is the pre-authorized mutable lane and the only
+# lane this node is scheduled against. It asserts nothing about
+# stability-test, judge, or prod.
+#
+# Related Tickets:
+#   - OMN-16773: this ticket
+#   - OMN-16767: the dead delegation chain this canary catches
+#   - OMN-16769: aggregate quarantine-sink observability (separate concern)
+#   - OMN-15190: dev-lane-liveness, the sibling scheduled lane probe
+#   - OMN-14771: delegation-seam-gate, the PR-time in-memory seam gate that
+#     stayed green while the live chain was dead
+#
+name: "node_chain_canary_effect"
+node_type: "EFFECT_GENERIC"
+contract_version:
+  major: 1
+  minor: 0
+  patch: 0
+node_version: "1.0.0"
+description: >
+  Scheduled live event-chain canary (OMN-16773). Fires one delegation through POST {probe_url}/skill with a freshly minted per-run correlation id, asserts a terminal event lands inside a declared budget, and checks the platform quarantine sink for that same correlation id. Reports a distinct verdict for quarantined vs terminal-missing vs ingress-unreachable, and reports SKIPPED rather than CLEAN when the quarantine leg is not configured.
+
+input_model:
+  name: "ModelChainCanaryRequest"
+  module: "omnibase_infra.nodes.node_chain_canary_effect.models.model_chain_canary_request"
+  description: "Probe configuration: ingress URL, delegation class, budget, quarantine-check settings."
+output_model:
+  name: "ModelChainCanaryResult"
+  module: "omnibase_infra.nodes.node_chain_canary_effect.models.model_chain_canary_result"
+  description: "Run receipt: verdict, probe correlation id, timing, terminal event, quarantine status."
+# Top-level handler block: RuntimeLocal's single-shot compute execution path
+# resolves the handler + its input model from THIS block, not from
+# handler_routing below. Without it `onex skill` dispatch fails closed with
+# "Workflow contract missing 'terminal_event' topic and no handler spec
+# found" (RuntimeLocal._resolve_handler_spec / _run_compute) — the same
+# trap node_sync_revert_watchdog_effect documents in its own contract.
+handler:
+  module: "omnibase_infra.nodes.node_chain_canary_effect.handlers.handler_chain_canary"
+  class: "HandlerChainCanary"
+  input_model: "omnibase_infra.nodes.node_chain_canary_effect.models.model_chain_canary_request.ModelChainCanaryRequest"
+handler_routing:
+  routing_strategy: "operation_match"
+  handlers:
+    - operation: "probe_event_chain"
+      handler:
+        name: "HandlerChainCanary"
+        module: "omnibase_infra.nodes.node_chain_canary_effect.handlers.handler_chain_canary"
+      description: "POST /skill delegation probe -> terminal assertion -> correlation-scoped quarantine check"
+      output_fields:
+        - verdict
+        - success
+        - detail
+        - probe_correlation_id
+        - elapsed_ms
+        - terminal_event
+        - quarantine_status
+error_handling:
+  retry_policy:
+    # Zero retries on purpose. A retry would let an intermittently dead
+    # chain report green, which is the exact failure this node exists to
+    # end. Cadence is the retry: the next scheduled run is 2h away.
+    max_retries: 0
+    initial_delay_ms: 0
+    max_delay_ms: 0
+    exponential_base: 1
+    retry_on: []
+  error_types:
+    - name: "INGRESS_UNREACHABLE"
+      description: "The runtime ingress could not be reached at all — lane-level failure, not a chain-level one."
+      recoverable: true
+      retry_strategy: "none"
+    - name: "TERMINAL_MISSING"
+      description: "No terminal event inside the budget (explicit dispatch_timeout, or ok=true carrying no terminal)."
+      recoverable: true
+      retry_strategy: "none"
+    - name: "QUARANTINED"
+      description: "The probe's own correlation id was found in the platform quarantine sink — a handler refused or errored on the event."
+      recoverable: true
+      retry_strategy: "none"
+    - name: "QUARANTINE_PROBE_FAILED"
+      description: "The quarantine check was configured but could not run. Fails closed — an unrunnable check is never reported as a passing one."
+      recoverable: true
+      retry_strategy: "none"
+io_operations:
+  - operation: "probe_event_chain"
+    description: "Fire one live delegation and assert the chain carried it to a terminal."
+    input_fields:
+      - probe_url
+      - runtime_command
+      - task_type
+      - prompt
+      - max_tokens
+      - budget_ms
+      - quarantine_bootstrap_servers
+      - quarantine_topic
+      - quarantine_scan_records
+      - quarantine_timeout_seconds
+      - settle_seconds
+    output_fields:
+      - correlation_id
+      - probe_correlation_id
+      - verdict
+      - success
+      - detail
+      - elapsed_ms
+      - ingress_ok
+      - ingress_error_code
+      - terminal_event
+      - quarantine_status
+      - quarantine_records_scanned
+dependencies:
+  - name: "chain_canary_kill_switch"
+    type: "environment"
+    env_var: "ONEX_CHAIN_CANARY_DISABLED"
+    description: "Checked first, unconditionally. When set (any non-empty value), the canary performs zero I/O and makes no claim about the chain."
+    required: false
+  - name: "httpx"
+    type: "library"
+    library: "httpx"
+    description: "Async HTTP client for the runtime /skill ingress."
+  - name: "aiokafka"
+    type: "library"
+    library: "aiokafka"
+    description: "Kafka client for the correlation-scoped quarantine tail scan. Imported lazily so an unconfigured quarantine leg costs nothing."
+health_check:
+  enabled: false
+metadata:
+  description: "Event-chain canary: scheduled live delegation probe against a named runtime ingress (OMN-16773)"
+  author: "OmniNode Team"
+  transport_type: "http"
+  created: "2026-08-27"
+  updated: "2026-08-27"
+  tags:
+    - "effect"
+    - "canary"
+    - "delegation"
+    - "observability"
+    - "scheduled-probe"

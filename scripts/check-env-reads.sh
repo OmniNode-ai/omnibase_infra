@@ -81,6 +81,16 @@ APPROVED_INFIX_PATTERNS=(
     # rather than silently probing the wrong lane, which would report a false
     # clean bill of health.
     "/nodes/node_dlq_depth_monitor_effect/handlers/handler_dlq_depth_monitor.py"
+    # OMN-16773: the event-chain canary is the THIRD node with this exact
+    # shape (RuntimeLocal single-shot compute path, no config-prefetch or
+    # overlay seam reachable from a node's own handler), reading only its
+    # kill switch ONEX_CHAIN_CANARY_DISABLED — no secret, so the OMN-14951
+    # gap-2 declaration check does not apply to it. Three instances of one
+    # rationale means the matcher should recognize the SHAPE (a scheduled
+    # sweep/canary node's own *_DISABLED kill switch on the single-shot
+    # path) instead of enumerating a fourth path here; filed as a follow-up
+    # rather than widened again silently.
+    "/nodes/node_chain_canary_effect/handlers/handler_chain_canary.py"
 )
 
 ENV_READ_PATTERNS='os\.environ\[|os\.environ\.get|os\.getenv|from os import environ|from os import getenv'

@@ -234,6 +234,27 @@ skills:
       - {name: default-max-arrivals-per-window, payload_field: default_max_arrivals_per_window, arg_type: integer}
       - {name: max-retained-depth, payload_field: max_retained_depth, arg_type: integer}
       - {name: suppress-alert-exit, payload_field: suppress_alert_exit, arg_type: boolean, default: false}
+  # OMN-16773: scheduled live event-chain canary. Node-backed in
+  # omnibase_infra (same locality precedent as the two sweeps above --
+  # it talks HTTP to a runtime ingress and Kafka to a broker, no
+  # subprocess dependency). probe-url is REQUIRED with no default: a
+  # canary that guesses its own target can report green about a lane
+  # nobody meant to probe (CLAUDE.md Rule 8).
+  - skill_name: chain_canary
+    node_name: node_chain_canary_effect
+    result_model: omnibase_infra.nodes.node_chain_canary_effect.models.model_chain_canary_result.ModelChainCanaryResult
+    args:
+      - {name: probe-url, payload_field: probe_url, arg_type: string}
+      - {name: command-name, payload_field: runtime_command, arg_type: string}
+      - {name: task-type, payload_field: task_type, arg_type: string}
+      - {name: prompt, payload_field: prompt, arg_type: string}
+      - {name: max-tokens, payload_field: max_tokens, arg_type: integer}
+      - {name: budget-ms, payload_field: budget_ms, arg_type: integer}
+      - {name: quarantine-bootstrap-servers, payload_field: quarantine_bootstrap_servers, arg_type: string}
+      - {name: quarantine-topic, payload_field: quarantine_topic, arg_type: string}
+      - {name: quarantine-scan-records, payload_field: quarantine_scan_records, arg_type: integer}
+      - {name: quarantine-timeout-seconds, payload_field: quarantine_timeout_seconds, arg_type: integer}
+      - {name: settle-seconds, payload_field: settle_seconds, arg_type: integer}
   - skill_name: duplication_sweep
     node_name: node_duplication_sweep
     result_model: omnimarket.nodes.node_duplication_sweep.handlers.handler_duplication_sweep.DuplicationSweepResult
