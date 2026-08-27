@@ -41,17 +41,43 @@ class ModelSyncRevertWatchdogRequest(BaseModel):
         description="Safety cap on the number of tickets scanned per run.",
     )
     history_page_size: int = Field(
-        default=50,
+        default=250,
         ge=1,
         le=250,
         description=(
-            "Per-ticket history entries fetched via backward pagination "
-            "(GraphQL `last`), which returns the N MOST RECENT entries "
-            "regardless of total history length — correct for this "
-            "watchdog's 'act on the latest revert' semantics without "
-            "needing to paginate a ticket's full history. The handler "
-            "never trusts the API's return order regardless: every entry "
-            "is re-sorted by createdAt client-side before use."
+            "Page size for the per-ticket history walk. The handler "
+            "paginates FORWARD (GraphQL `first`/`after`) from the newest "
+            "entry toward the oldest, following pageInfo.hasNextPage "
+            "until the history is exhausted or history_max_pages is hit. "
+            "250 is Linear's per-page ceiling, so the default costs the "
+            "fewest round trips. "
+            "OMN-16762 — this field previously fed GraphQL `last`, "
+            "documented here as 'the N MOST RECENT entries'. That was "
+            "the exact opposite of the API's behavior: Linear's "
+            "`orderBy: createdAt` sorts DESCENDING, so `last: N` returns "
+            "the tail of that list — the N OLDEST entries. Measured live "
+            "on OMN-14888 (553 entries) 2026-08-27, `last: 50` returned "
+            "2026-07-21..2026-07-26 and nothing newer, which left both "
+            "safety guards scanning a stale window (0 fires across 126 "
+            "detected reverts). The handler still never trusts the API's "
+            "return order: every entry is re-sorted by createdAt "
+            "client-side before use."
+        ),
+    )
+    history_max_pages: int = Field(
+        default=20,
+        ge=1,
+        le=100,
+        description=(
+            "Safety cap on history pages walked per ticket. At the "
+            "default page size this bounds a ticket at 5000 entries — "
+            "roughly 9x the largest history observed in the OMN-16536 "
+            "audit (OMN-14888, 553). Because the walk runs newest-first, "
+            "hitting the cap truncates the OLDEST end only: revert "
+            "detection and the later-human-state-change guard stay "
+            "sound, and a pre-revert Done that falls outside the cap "
+            "resolves to EnumPriorDoneActorKind.UNKNOWN, which fails "
+            "closed."
         ),
     )
     human_comment_window_seconds: int = Field(
