@@ -179,7 +179,17 @@ def test_checked_in_manifest_is_exact_and_all_blockers_are_explicit() -> None:
     # restored to their applied bytes here and the deltas re-expressed as new
     # ordinals. Vendored into omnibase_infra first per the
     # node-migration-vendor-parity-gate ordering, ahead of the omnimarket PR.
-    assert len(result.declarations) == 113
+    # +1 for OMN-16759's
+    # node_gateway_link_health_write_effect/0001_create_gateway_link_health.sql
+    # -- the gateway_link_health projection, re-homed from flat migration 100
+    # onto the node loop. The flat loop reaches only omnibase_infra, which has
+    # no omninode_internal schema and whose migration role holds no CREATE on
+    # the database (both read live from the managed instance), so 100's
+    # CREATE SCHEMA failed with "permission denied for database
+    # omnibase_infra" and blocked every staging deploy. The node loop connects
+    # to the application database, where that schema exists and where the
+    # runtime's own DSN points.
+    assert len(result.declarations) == 114
     assert result.blocked == ()
     assert len(result.legacy_node_declarations) == 2
     assert len(result.cloud_aliases) == 30

@@ -22,25 +22,43 @@ updating the migration finds out here instead of via a silent, wrong
 ``HEALTHY``/``UNHEALTHY`` verdict in production.
 """
 
+import hashlib
 import re
 from pathlib import Path
 
 import yaml
 
 REPO_ROOT = Path(__file__).resolve().parents[3]
+
+# OMN-16759: the relation moved off the flat loop. The flat loop connects only to
+# omnibase_infra, which has no omninode_internal schema and whose migration role
+# cannot create one -- so the flat file's CREATE SCHEMA failed with "permission
+# denied for database omnibase_infra" and blocked every staging deploy. The DDL
+# now lives on the node loop, which connects to the application database
+# (omnidash_analytics) where that schema exists. These constants follow it; the
+# superseded flat file is asserted separately below.
 FORWARD = (
     REPO_ROOT
     / "docker"
     / "migrations"
     / "forward"
-    / "100_create_gateway_link_health.sql"
+    / "nodes"
+    / "node_gateway_link_health_write_effect"
+    / "0001_create_gateway_link_health.sql"
 )
 ROLLBACK = (
     REPO_ROOT
     / "docker"
     / "migrations"
     / "rollback"
-    / "rollback_100_create_gateway_link_health.sql"
+    / "rollback_node_gateway_link_health_0001.sql"
+)
+SUPERSEDED_FLAT = (
+    REPO_ROOT
+    / "docker"
+    / "migrations"
+    / "forward"
+    / "100_create_gateway_link_health.sql"
 )
 CONTRACT = (
     REPO_ROOT
@@ -95,15 +113,16 @@ def test_100_view_liveness_thresholds_match_contract_omn_15762() -> None:
     )
     assert silence_match is not None, (
         "expected an `INTERVAL '<n> seconds'` silence-window comparison in "
-        "100_create_gateway_link_health.sql -- update this regex if the "
+        "the gateway_link_health migration -- update this regex if the "
         "view's SQL shape changed"
     )
     assert int(silence_match.group(1)) == contract["max_silence_window_seconds"], (
-        "100_create_gateway_link_health.sql's silence-window literal has "
+        "the gateway_link_health migration's silence-window literal has "
         "drifted from node_bus_forwarder_effect/contract.yaml's "
         "gateway_forwarder.liveness.max_silence_window_seconds (OMN-15762 "
         "4th-copy class) -- update the migration's hardcoded literal (a new "
-        "migration, since this one is already applied) to match the "
+        "migration, since this one is declared in the canonical node ledger) "
+        "to match the "
         "contract, or update the contract to match an intentional migration "
         "change"
     )
@@ -114,7 +133,7 @@ def test_100_view_liveness_thresholds_match_contract_omn_15762() -> None:
     )
     assert lag_messages_match is not None
     assert int(lag_messages_match.group(1)) == contract["lag_threshold_messages"], (
-        "100_create_gateway_link_health.sql's lag_threshold_messages "
+        "the gateway_link_health migration's lag_threshold_messages "
         "literal has drifted from the contract (OMN-15762 4th-copy class)"
     )
 
@@ -124,7 +143,7 @@ def test_100_view_liveness_thresholds_match_contract_omn_15762() -> None:
     )
     assert lag_seconds_match is not None
     assert int(lag_seconds_match.group(1)) == contract["lag_threshold_seconds"], (
-        "100_create_gateway_link_health.sql's lag_threshold_seconds literal "
+        "the gateway_link_health migration's lag_threshold_seconds literal "
         "has drifted from the contract (OMN-15762 4th-copy class)"
     )
 
@@ -161,3 +180,103 @@ def test_100_table_and_view_carry_the_self_reported_status_columns() -> None:
     # Anything that is not 'active' is degraded -- an equality test against a
     # closed set would score an unrecognised future status HEALTHY by omission.
     assert "reported_status <> 'active'" in sql
+
+
+# ---------------------------------------------------------------------------
+# OMN-16759: the flat file is superseded, and the node-owned file asserts
+# ---------------------------------------------------------------------------
+def test_node_migration_asserts_the_schema_instead_of_creating_it() -> None:
+    """RED against the bytes that blocked every staging deploy.
+
+    ``CREATE SCHEMA IF NOT EXISTS omninode_internal`` needs CREATE on the
+    DATABASE. Read live from the managed instance before this fix was written:
+    ``has_database_privilege(role_omnibase_infra, omnibase_infra, CREATE)`` is
+    false, and so is ``has_database_privilege(role_omnidash,
+    omnidash_analytics, CREATE)`` -- NEITHER migration role can create a schema
+    on that lane. `IF NOT EXISTS` does not help, because Postgres checks the
+    privilege before it checks existence.
+
+    The class-level gate over the whole corpus lives in
+    ``tests/unit/db/test_migration_no_database_level_privilege_omn16759.py``.
+    This pins the positive half for the file that carries the relation: it must
+    ASSERT its schema through the OMN-16249 ``pg_catalog.pg_namespace`` probe.
+    """
+    sql = FORWARD.read_text(encoding="utf-8")
+    statements = [
+        line.strip()
+        for line in sql.splitlines()
+        if not line.strip().startswith("--") and "CREATE SCHEMA" in line.upper()
+    ]
+
+    assert not statements, (
+        f"the gateway_link_health migration issues {statements} -- the exact "
+        "statement OMN-16249 removed from 0005 and OMN-16759 removed from the "
+        "flat 100. Assert the schema; never create it."
+    )
+    assert "pg_catalog.pg_namespace" in sql
+    assert "nspname = 'omninode_internal'" in sql, (
+        "the precondition must assert the schema this file's objects target, "
+        "otherwise it proves nothing about them"
+    )
+
+
+def test_the_flat_100_creates_nothing_and_names_its_replacement() -> None:
+    """The flat loop reaches only omnibase_infra, which has no
+    omninode_internal schema (read live: schema count 0) and whose role cannot
+    make one. 100 must therefore create nothing at all -- and must say where the
+    relation went, so the next reader is not left hunting.
+    """
+    sql = SUPERSEDED_FLAT.read_text(encoding="utf-8")
+    executable = [
+        line.strip()
+        for line in sql.splitlines()
+        if line.strip() and not line.strip().startswith("--")
+    ]
+
+    assert not any(
+        line.upper().startswith(("CREATE ", "ALTER ", "DROP ", "INSERT ", "GRANT "))
+        for line in executable
+    ), f"the superseded flat 100 still carries DDL/DML: {executable}"
+    assert "nodes/node_gateway_link_health_write_effect/" in sql.replace(
+        "\n--     ", ""
+    ).replace("\n--   ", ""), "the superseded file must name its replacement path"
+
+
+def test_the_superseded_flat_100_is_still_present() -> None:
+    """Applied migration history is preserved, never deleted (OMN-15695).
+
+    The compose lanes applied 100's original bytes -- their runner connects as
+    the postgres superuser, so the CREATE SCHEMA succeeded there. Their ledger
+    rows key on this filename, so the file stays.
+    """
+    assert SUPERSEDED_FLAT.is_file()
+
+
+def test_the_node_migration_is_declared_in_the_canonical_ledger() -> None:
+    """An undeclared node migration is one bootstrap.sql cannot resolve."""
+    manifest = (
+        REPO_ROOT
+        / "docker"
+        / "migrations"
+        / "forward"
+        / "_ledger"
+        / "application-migrations.tsv"
+    ).read_text(encoding="utf-8")
+    artifact = (
+        "nodes/node_gateway_link_health_write_effect/"
+        "0001_create_gateway_link_health.sql"
+    )
+
+    rows = [line for line in manifest.splitlines() if line.startswith(f"{artifact}\t")]
+
+    assert len(rows) == 1, f"expected exactly one declaration for {artifact}"
+    fields = rows[0].split("\t")
+    assert fields[3] == "omninode_internal", (
+        "the declared domain must match the schema the SQL actually targets"
+    )
+    declared_checksum = fields[5]
+    actual = hashlib.sha256(FORWARD.read_bytes()).hexdigest()
+    assert declared_checksum == actual, (
+        "declared checksum does not match the file on disk -- the forward "
+        "runner FATALs with 'conflicting migration checksum' on this"
+    )
