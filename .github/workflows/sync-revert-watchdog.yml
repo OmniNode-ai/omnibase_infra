@@ -26,6 +26,30 @@
 # environment secret-free variable to halt every run without touching
 # this file.
 #
+# Window sizing — lookback_hours=24 / max_issues=1000, and the two MUST
+# move together (OMN-15534 reproducer):
+#
+#   OMN-15534 was silently reverted Done -> In Review at
+#   2026-08-25T19:35:25Z. This workflow's first run was 2026-08-26T04:13Z
+#   (run 32929379758). At the previous default of 6h that run's window
+#   opened at ~2026-08-25T22:13Z — 2h38m AFTER the revert, so the ticket
+#   was never enumerated. Enumeration filters on `updatedAt >= since`, and
+#   a SILENTLY reverted ticket by definition gets no further updates, so
+#   it never re-enters a tail window: the miss is permanent, not deferred.
+#   24h would have covered it (window opens 2026-08-25T04:13Z). The
+#   sweep has no backfill mode, so the window is the only reach it has.
+#
+#   Raising the window alone would have been WORSE than not raising it.
+#   max_issues was left at the model default of 200 while a measured 24h
+#   of live traffic contains ~396 distinct tickets (union of the ticket
+#   sets from the seven runs spanning 2026-08-26T18:35Z..2026-08-27T11:18Z;
+#   a single 6h run scans 86-161). Pagination stops at
+#   `len(issues) >= max_issues` against an `orderBy: updatedAt` query, so
+#   the cap truncates the OLDEST-updated end — precisely where a stale
+#   silent revert lives. 1000 is ~2.5x the measured volume, under the
+#   model's own ceiling of 2000, and costs ~150s at the measured
+#   ~0.15s/ticket, well inside timeout-minutes: 20.
+#
 # This is a complementary safety net (OMN-16536 fix option 3), not a
 # substitute for fixing the triggering GitAutomationState config
 # directly (fix options 1/2, still open, separate work).
@@ -48,11 +72,15 @@ on:
       lookback_hours:
         description: 'Scan tickets updated within this many hours of now.'
         required: false
-        default: '6'
+        default: '24'
       team_key:
         description: 'Linear team key to scan.'
         required: false
         default: 'OMN'
+      max_issues:
+        description: 'Safety cap on tickets scanned per run. Must exceed the ticket volume in lookback_hours or the oldest-updated tickets are silently dropped.'
+        required: false
+        default: '1000'
 
 env:
   UV_VERSION: "0.8.3"
@@ -110,7 +138,8 @@ jobs:
           fi
           uv run onex skill sync_revert_watchdog \
             --team-key "${{ github.event.inputs.team_key || 'OMN' }}" \
-            --lookback-hours "${{ github.event.inputs.lookback_hours || '6' }}"
+            --lookback-hours "${{ github.event.inputs.lookback_hours || '24' }}" \
+            --max-issues "${{ github.event.inputs.max_issues || '1000' }}"
 
       - name: Post summary
         if: always()
