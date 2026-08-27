@@ -13,6 +13,21 @@
 
 name: Build and push migration image to ECR
 
+#
+# OMN-15796/OMN-15054 (workflow_call): the push trigger below covers `main`
+# only, while migrations land on `dev` -- so a merged `docker/migrations/`
+# change had no automatic path to an image at all, and the pin in
+# omninode_infra's k8s/migrations/omnibase-infra-migrate.yaml could only move
+# by hand. It routinely did not, and the resulting Job replayed an older
+# bundle and reported applied=0 under a green deploy.
+#
+# The dev half is deliberately NOT a second `push: branches: [dev]` trigger
+# here. deliver-dev-candidate-to-staging.yml already fires on the dev merge and
+# CALLS this workflow, so a push trigger would double-build every merge and,
+# worse, produce a migration image with no matching runtime candidate --
+# breaking the SINGLE_SOURCE_REV_BUNDLE pairing the delivery workflow exists to
+# guarantee. One trigger, one bundle.
+
 on:
   push:
     branches:
@@ -23,6 +38,19 @@ on:
       - 'src/omnibase_infra/migrations/**'
       - '.github/workflows/build-and-push-migrate-image.yml'
   workflow_dispatch:
+  workflow_call:
+    inputs:
+      git-ref:
+        description: 'Git ref/SHA to build the migration bundle from.'
+        required: true
+        type: string
+    outputs:
+      digest:
+        description: 'sha256 digest of the pushed image (ECR-verified post-push).'
+        value: ${{ jobs.build-and-push.outputs.digest }}
+      image-ref:
+        description: "Digest-pinned 'registry/repo:tag@sha256:digest' reference."
+        value: ${{ jobs.build-and-push.outputs.image-ref }}
 
 concurrency:
   group: build-migrate-${{ github.ref }}
@@ -49,9 +77,32 @@ jobs:
       }}
     timeout-minutes: 15
 
+    outputs:
+      digest: ${{ steps.resolve-digest.outputs.digest }}
+      image-ref: ${{ steps.resolve-digest.outputs.image-ref }}
+
+    env:
+      # inputs.git-ref exists only on the workflow_call path; a push or a
+      # workflow_dispatch falls through to its own triggering commit. Same
+      # null-safe idiom omninode_infra's build-and-push-cloud-migrate-image.yml
+      # uses for the identical job.
+      TARGET_SHA: ${{ inputs.git-ref || github.sha }}
+
     steps:
       - name: Checkout repository
         uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+        with:
+          # OMN-15796: a called run must build the CALLER's revision. Without
+          # this the reusable workflow checks out the default branch head,
+          # which drifts from the runtime candidate built alongside it and
+          # breaks SINGLE_SOURCE_REV_BUNDLE silently -- the two images would
+          # simply be from different commits, with nothing red anywhere.
+          # Spelled out rather than reusing the job-level TARGET_SHA: the
+          # `env` context's availability inside a step's `with:` is a corner
+          # of the expression-context table, and a ref that silently resolved
+          # to empty would check out the default branch -- the exact drift
+          # this line exists to prevent.
+          ref: ${{ inputs.git-ref || github.sha }}
 
       - name: Set up Python for AWS CLI
         uses: actions/setup-python@v7
@@ -88,7 +139,11 @@ jobs:
         id: build-push
         env:
           IMAGE_URI: ${{ env.ECR_REGISTRY }}/${{ env.ECR_REPOSITORY }}
-          COMMIT_SHA: ${{ github.sha }}
+          # OMN-15796: tag by the commit actually checked out, not by
+          # github.sha. On the workflow_call path those differ, and a tag that
+          # names a commit the image does not contain is a lie the migration
+          # Job's own IMAGE_TAG provenance field then repeats.
+          COMMIT_SHA: ${{ inputs.git-ref || github.sha }}
         run: |
           docker build \
             -f docker/Dockerfile.migrate \
@@ -99,9 +154,37 @@ jobs:
           docker push "${IMAGE_URI}:latest"
           IMAGE_TAG="${IMAGE_URI}:${COMMIT_SHA}"
           echo "image=${IMAGE_TAG}" >> "$GITHUB_OUTPUT"
+          echo "tag=${COMMIT_SHA}" >> "$GITHUB_OUTPUT"
 
-      - name: Output image reference
+      # OMN-15796: read the digest back FROM ECR rather than from the local
+      # daemon. A tag is a mutable pointer; the consumer of this output
+      # (omninode_infra's run-migrations.sh) refuses any reference without an
+      # `@sha256:` and pins the Job to the immutable one, so what the registry
+      # actually holds is the only answer worth publishing. Retried because
+      # describe-images can lag a push by a second or two, and fail-closed:
+      # an unresolvable digest fails the build instead of emitting an empty
+      # output that would surface downstream as a confusing pin error.
+      - name: Resolve pushed image digest
+        id: resolve-digest
+        shell: bash
+        env:
+          IMAGE_URI: ${{ env.ECR_REGISTRY }}/${{ env.ECR_REPOSITORY }}
+          IMAGE_TAG: ${{ steps.build-push.outputs.tag }}
         run: |
-          echo "Migration image pushed: ${{ steps.build-push.outputs.image }}"
-          echo "Pin this SHA tag in k8s/migrations/omnibase-infra-migrate.yaml"
-          echo "before running migrations in production."
+          set -euo pipefail
+          for attempt in 1 2 3 4 5; do
+            DIGEST="$(aws ecr describe-images \
+              --repository-name "${ECR_REPOSITORY}" \
+              --image-ids imageTag="${IMAGE_TAG}" \
+              --query 'imageDetails[0].imageDigest' --output text 2>/dev/null || true)"
+            if [[ "$DIGEST" =~ ^sha256:[a-f0-9]{64}$ ]]; then
+              echo "digest=${DIGEST}" >> "$GITHUB_OUTPUT"
+              echo "image-ref=${IMAGE_URI}:${IMAGE_TAG}@${DIGEST}" >> "$GITHUB_OUTPUT"
+              echo "Migration image pushed: ${IMAGE_URI}:${IMAGE_TAG}@${DIGEST}"
+              exit 0
+            fi
+            echo "attempt ${attempt}: digest not resolvable yet, retrying..."
+            sleep 5
+          done
+          echo "::error::could not resolve a sha256 digest for ${ECR_REPOSITORY}:${IMAGE_TAG} after 5 attempts"
+          exit 1
