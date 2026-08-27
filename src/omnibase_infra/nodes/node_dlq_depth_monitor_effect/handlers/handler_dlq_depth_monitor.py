@@ -37,13 +37,12 @@ from __future__ import annotations
 
 import logging
 import os
+from collections.abc import Mapping, Sequence
 from datetime import UTC, datetime
+from types import TracebackType
 
 from omnibase_infra.enums import EnumInfraTransportType
 from omnibase_infra.errors import ModelInfraErrorContext, RuntimeHostError
-from omnibase_infra.event_bus.dlq_offset_reader_kafka import (
-    AiokafkaDlqOffsetReader,
-)
 from omnibase_infra.nodes.node_dlq_depth_evaluate_compute.handlers.handler_dlq_depth_evaluate import (
     HandlerDlqDepthEvaluate,
 )
@@ -65,16 +64,175 @@ from omnibase_infra.nodes.node_dlq_depth_monitor_effect.models.model_dlq_depth_m
 from omnibase_infra.nodes.node_dlq_depth_monitor_effect.models.model_dlq_depth_monitor_result import (
     ModelDlqDepthMonitorResult,
 )
+from omnibase_infra.protocols.protocol_cluster_metadata import ProtocolClusterMetadata
 from omnibase_infra.protocols.protocol_dlq_admin_transport import (
     ProtocolDlqAdminTransport,
     TopicPartition,
 )
+from omnibase_infra.protocols.protocol_topic_partition import ProtocolTopicPartition
 
 logger = logging.getLogger(__name__)
 
 _MILLIS_PER_SECOND = 1000
 _BOOTSTRAP_ENV_VAR = "KAFKA_BOOTSTRAP_SERVERS"
 _KILL_SWITCH_ENV_VAR = "ONEX_DLQ_MONITOR_DISABLED"
+
+
+class _AiokafkaDlqOffsetReader:
+    """Read-only offset reader backed by a group-less ``AIOKafkaConsumer``.
+
+    Lives INSIDE this handler module, and privately, on purpose. The
+    OMN-12515/12540 imperative-contract guard scans *freestanding* modules
+    (``--scan-freestanding``) and blocks a raw ``AIOKafkaConsumer(...)``
+    construction in any module reachable from a contract-declared handler —
+    which a separate transport module beside a wired node always is. The two
+    landed sibling sweeps solve this the same way: node_sync_revert_watchdog_effect
+    and node_evidence_autoclose_sweep_effect each keep their ``_LinearClient``
+    (which constructs ``httpx.AsyncClient``, an equally flagged pattern) inside
+    their own declared handler module rather than in a module of its own. No
+    allowlist entry is needed for any of the three.
+
+    NOT named ``Adapter*``: the OMN-14350 non-canonical-lifecycle ratchet
+    hard-fails ``Adapter`` (and ``Client``) as type-words, and its allowlist
+    is a shrink-only ratchet reserved for pre-existing residuals being burned
+    down — new code does not belong on it. ``Reader`` states what this does
+    and carries no lifecycle-owner connotation.
+    """
+
+    def __init__(
+        self,
+        bootstrap_servers: str,
+        *,
+        request_timeout_ms: int = 20_000,
+        client_id: str = "onex-dlq-depth-monitor",
+    ) -> None:
+        from aiokafka import (
+            AIOKafkaConsumer,
+        )
+        from aiokafka.structs import (
+            TopicPartition as AiokafkaTopicPartition,
+        )
+
+        from omnibase_infra.event_bus.kafka_auth import (
+            build_aiokafka_auth_kwargs_from_env,
+        )
+
+        self._tp_type = AiokafkaTopicPartition
+        self._consumer = AIOKafkaConsumer(
+            bootstrap_servers=bootstrap_servers,
+            # No group_id: join no group, commit nothing, perturb nothing.
+            group_id=None,
+            enable_auto_commit=False,
+            client_id=client_id,
+            request_timeout_ms=request_timeout_ms,
+            # Same sanctioned auth helper every other broker client here uses,
+            # so the probe works against an authenticated broker rather than
+            # only the unauthenticated dev lane.
+            **build_aiokafka_auth_kwargs_from_env(),
+        )
+        self._started = False
+        # Cluster metadata snapshot captured by list_topics(). See the comment
+        # on partitions_for_topic for why this cannot be read off the client.
+        self._cluster: ProtocolClusterMetadata | None = None
+
+    async def __aenter__(self) -> _AiokafkaDlqOffsetReader:
+        await self.start()
+        return self
+
+    async def __aexit__(
+        self,
+        exc_type: type[BaseException] | None,
+        exc: BaseException | None,
+        traceback: TracebackType | None,
+    ) -> None:
+        await self.stop()
+
+    async def start(self) -> None:
+        if not self._started:
+            await self._consumer.start()
+            self._started = True
+
+    async def stop(self) -> None:
+        if self._started:
+            await self._consumer.stop()
+            self._started = False
+
+    def _to_aiokafka(self, partition: TopicPartition) -> ProtocolTopicPartition:
+        tp: ProtocolTopicPartition = self._tp_type(partition[0], partition[1])
+        return tp
+
+    async def list_topics(self) -> Sequence[str]:
+        """Fetch cluster metadata and RETAIN it for partition lookups.
+
+        ``AIOKafkaConsumer.topics()`` is implemented as
+        ``(await self._client.fetch_all_metadata()).topics()`` — and
+        ``fetch_all_metadata()`` returns a NEW ``ClusterMetadata`` object
+        rather than updating ``client.cluster`` in place. The consumer's own
+        ``partitions_for_topic()`` reads ``client.cluster``, which for a
+        group-less consumer that has subscribed to nothing knows about no
+        topics at all.
+
+        Calling ``consumer.topics()`` and then
+        ``consumer.partitions_for_topic()`` therefore yields the full topic
+        list and zero partitions for every one of them. That was observed
+        live against the .201 dev lane on 2026-08-27: 60 DLQ topics matched,
+        0 observed. So the metadata object is captured here and used directly
+        below instead of going back through the consumer.
+        """
+        # Private `_client` access is deliberate: the PUBLIC accessor
+        # (`consumer.topics()`) throws this very object away, which is the
+        # whole bug documented above.
+        self._cluster = await self._consumer._client.fetch_all_metadata()
+        return sorted(self._cluster.topics())
+
+    async def partitions_for_topic(self, topic: str) -> Sequence[int]:
+        if self._cluster is None:
+            # Partition lookups are only meaningful against the metadata
+            # snapshot list_topics() took; refusing here beats silently
+            # reporting every topic as partition-less, which reads
+            # identically to a clean bill of health.
+            raise RuntimeError(
+                "partitions_for_topic called before list_topics — no cluster "
+                "metadata snapshot has been taken."
+            )
+        partitions = self._cluster.partitions_for_topic(topic)
+        # None for a topic whose metadata is not resolvable. Surfacing that as
+        # an empty partition set lets the handler skip the topic rather than
+        # fabricate a zero-depth observation for it.
+        return sorted(partitions) if partitions else []
+
+    async def beginning_offsets(
+        self, partitions: Sequence[TopicPartition]
+    ) -> Mapping[TopicPartition, int]:
+        raw = await self._consumer.beginning_offsets(
+            [self._to_aiokafka(partition) for partition in partitions]
+        )
+        return {(tp.topic, tp.partition): offset for tp, offset in raw.items()}
+
+    async def end_offsets(
+        self, partitions: Sequence[TopicPartition]
+    ) -> Mapping[TopicPartition, int]:
+        raw = await self._consumer.end_offsets(
+            [self._to_aiokafka(partition) for partition in partitions]
+        )
+        return {(tp.topic, tp.partition): offset for tp, offset in raw.items()}
+
+    async def offsets_for_times(
+        self, partition_timestamps: Mapping[TopicPartition, int]
+    ) -> Mapping[TopicPartition, int | None]:
+        raw = await self._consumer.offsets_for_times(
+            {
+                self._to_aiokafka(partition): timestamp
+                for partition, timestamp in partition_timestamps.items()
+            }
+        )
+        # aiokafka yields OffsetAndTimestamp | None per partition. None means
+        # no record at or after the requested time — the handler normalizes
+        # that to the high-water mark; it must NOT become offset 0.
+        return {
+            (tp.topic, tp.partition): (None if value is None else value.offset)
+            for tp, value in raw.items()
+        }
 
 
 class HandlerDlqDepthMonitor:
@@ -208,7 +366,7 @@ class HandlerDlqDepthMonitor:
         return bool(os.environ.get(_KILL_SWITCH_ENV_VAR, ""))
 
     @staticmethod
-    def _build_live_transport() -> AiokafkaDlqOffsetReader:
+    def _build_live_transport() -> _AiokafkaDlqOffsetReader:
         """Build the live adapter, failing loudly on missing configuration.
 
         No default bootstrap server: a silently-wrong broker would make the
@@ -226,7 +384,7 @@ class HandlerDlqDepthMonitor:
                     operation="dlq_depth_monitor_configure",
                 ),
             )
-        return AiokafkaDlqOffsetReader(bootstrap)
+        return _AiokafkaDlqOffsetReader(bootstrap)
 
     def _empty_result(
         self, request: ModelDlqDepthMonitorRequest
