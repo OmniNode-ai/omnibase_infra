@@ -67,6 +67,7 @@ from omnibase_core.services.service_local_handler_ownership_query import (
 )
 from omnibase_infra.runtime.auto_wiring.handler_wiring import (
     PreparedWiring,
+    _extract_dispatch_payload,
     _make_payload_type_matcher,
     _prepare_handler_wiring,
     _typed_def_b_input_model,
@@ -129,6 +130,21 @@ class ModelMirrorRoutingIntent(BaseModel):
     payload: ModelMirrorDelegationRequest
     min_tier_name: str | None = None
     excluded_backend_refs: tuple[str, ...] = Field(default_factory=tuple)
+
+
+class ModelLenientEnvelopeShaped(BaseModel):
+    """Envelope-shaped model that tolerates extras — the unconditional-unwrap trap.
+
+    It VALIDATES a payload carrying an undeclared key, while
+    ``_is_registered_input_payload``'s stricter key-containment check refuses to
+    claim that same payload — so an unconditional unwrap walks straight past it.
+    Module-level because the matcher imports its ``event_model`` by name.
+    """
+
+    model_config = ConfigDict(extra="ignore")
+
+    event_type: str
+    payload: dict[str, object] = Field(default_factory=dict)
 
 
 class ModelMirrorRoutingDecision(BaseModel):
@@ -497,6 +513,37 @@ class TestPayloadTypeMatcherAgreesWithDispatch:
 
         assert matcher(foreign) is False
         assert matcher.last_validation_detail  # type: ignore[attr-defined]
+
+    def test_payload_as_given_is_tried_before_the_unwrapped_candidate(self) -> None:
+        """Order matters: this predicate may only ADD acceptances, never remove one.
+
+        Unwrapping unconditionally is not safe. ``_is_registered_input_payload``
+        applies a key-containment check that is deliberately stricter than
+        validation, so a model tolerating extra keys can VALIDATE a candidate the
+        stop condition refuses to claim — the unwrap then walks past a payload
+        that already was the model and lands on its inner payload, which does not
+        validate. Unconditional unwrapping inverted a live selection from
+        ``success`` to ``no_dispatcher`` for ``HandlerA2ATask`` on
+        ``onex.cmd.omnibase-infra.remote-agent-invoke.v1``, caught by the
+        committed dispatch-selection oracle.
+        """
+
+        matcher = _make_payload_type_matcher(
+            ModelHandlerRef(name="ModelLenientEnvelopeShaped", module=_THIS_MODULE)
+        )
+        # Envelope-shaped AND carrying a key the model does not declare, so the
+        # stop condition will not claim it even though it validates.
+        as_given = {
+            "event_type": "omnibase-infra.remote-agent-invoke",
+            "payload": {"task": "probe"},
+            "source_tool": "parity-probe",
+        }
+        assert ModelLenientEnvelopeShaped.model_validate(as_given) is not None
+        assert (
+            _extract_dispatch_payload(as_given, ModelLenientEnvelopeShaped) != as_given
+        ), "precondition: the unwrap does walk past this payload"
+
+        assert matcher(as_given) is True
 
     def test_prepared_wiring_matcher_accepts_what_its_dispatcher_will_receive(
         self, contract_path: Path

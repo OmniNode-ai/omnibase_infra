@@ -1086,19 +1086,49 @@ class PayloadTypeMatcher:
         # asked about the envelope. Unwrapping here uses the same registered-
         # input-model stop condition as the dispatch path (OMN-16050), so a
         # genuine non-match still rejects.
-        candidate = _extract_dispatch_payload(payload, model_cls)
-        if isinstance(candidate, model_cls):
-            return True
-        try:
-            model_cls.model_validate(candidate)
-        except ValidationError as exc:
-            if _is_delegation_inference_intent_ref(
-                self._event_model
-            ) and _payload_claims_delegation_inference_intent(candidate):
+        #
+        # The payload AS GIVEN is tried FIRST and the unwrapped candidate only
+        # as a fallback — this predicate may only ever ADD acceptances, never
+        # remove one. Unwrapping unconditionally is not safe: a model that
+        # tolerates extra keys can validate a candidate that
+        # ``_is_registered_input_payload`` refuses to claim (its key-containment
+        # check is deliberately stricter than validation), so the unwrap walks
+        # PAST a payload that already was the model and lands on its inner
+        # payload, which then does not validate. That inverted a live selection
+        # from ``success`` to ``no_dispatcher`` for
+        # ``HandlerA2ATask``/``onex.cmd.omnibase-infra.remote-agent-invoke.v1``,
+        # caught by the committed dispatch-selection oracle
+        # (``tests/integration/runtime/test_dispatch_selection_parity.py``).
+        # Order matters, not just the candidate set.
+        candidates: list[object] = [payload]
+        unwrapped = _extract_dispatch_payload(payload, model_cls)
+        if unwrapped is not payload:
+            candidates.append(unwrapped)
+
+        first_failure: ValidationError | None = None
+        for candidate in candidates:
+            if isinstance(candidate, model_cls):
                 return True
-            self.last_validation_detail = _format_validation_error_detail(exc)
-            return False
-        return True
+            try:
+                model_cls.model_validate(candidate)
+            except ValidationError as exc:
+                if first_failure is None:
+                    first_failure = exc
+                continue
+            return True
+
+        if _is_delegation_inference_intent_ref(self._event_model) and any(
+            _payload_claims_delegation_inference_intent(candidate)
+            for candidate in candidates
+        ):
+            return True
+        if first_failure is not None:
+            # Report the failure against the payload AS GIVEN — that is the
+            # object the publisher actually put on the wire, so it is the
+            # actionable detail for the OMN-14492 publisher_malformed
+            # classification.
+            self.last_validation_detail = _format_validation_error_detail(first_failure)
+        return False
 
 
 def _make_payload_type_matcher(
