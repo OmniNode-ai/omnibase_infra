@@ -3513,6 +3513,75 @@ jobs:
           echo "================================================================"
           uv run pytest tests/integration/chains/ -v --tb=short
 
+  # ===========================================================================
+  # Subscribe Wiring Health (OMN-16795)
+  # ---------------------------------------------------------------------------
+  # scripts/check_subscribe_wiring_health.py has existed since OMN-7385 and was
+  # referenced by NOTHING — not a CI job, not a pre-commit hook. Per doctrine
+  # rule 5 that made it advisory, and advisory checks get ignored: its baseline
+  # allowlist grew to 45 entries with expiry dates already lapsing and nothing
+  # ever went red. This job is the enforcement half.
+  #
+  # What it catches: a contract declaring subscribe_topics for a topic NO
+  # contract publishes. That is not cosmetic — runtime_host_process.py gates on
+  # subcontract.subscribe_topics, provisions the topic, and mints one Kafka
+  # consumer group per topic, so a dead declaration manufactures a permanently
+  # Stable-and-empty consumer group that reads as a live-but-idle consumer.
+  # That is exactly the false signal that produced the OMN-16755 dead-chain
+  # false alarm.
+  #
+  # It now ALSO enforces allowlist hygiene: an entry past its own expiry, an
+  # entry with no parseable expiry, or an entry no contract subscribes to any
+  # more all FAIL. Without that the allowlist is an unbounded amnesty list.
+  #
+  # ZERO INFRASTRUCTURE: pure static analysis over contract.yaml files.
+  #
+  # Unconditional (no `needs:`/`if:`) so it is always present in the run, and
+  # the job name is registered in ci_summary_gate.py::STRICT_GATE_JOBS so a
+  # `skipped`/absent conclusion ALSO fails closed. "CI Summary" is dev's ONLY
+  # required status check, so this gate blocks merge the day it lands with no
+  # branch-protection edit.
+  #
+  # NOTE: OMN-16783's flow-expectation ratchet is a strictly stronger check and
+  # supersedes this one when it lands. Do not build both from scratch.
+  subscribe-wiring-health:
+    name: Subscribe Wiring Health
+    # OMNI_RUNNER_SELECTOR_V1 — trusted CI defaults to self-hosted omnibase-ci; public forks default to ubuntu-latest
+    runs-on: >-
+      ${{
+        (github.event_name == 'pull_request' &&
+         github.event.pull_request.head.repo.full_name != github.repository)
+        && fromJSON(vars.OMNI_PUBLIC_PR_RUNS_ON_JSON || '["ubuntu-latest"]')
+        || fromJSON((github.event_name == 'merge_group' && vars.OMNI_REQUIRED_CI_RUNS_ON_JSON) || vars.OMNI_TRUSTED_CI_RUNS_ON_JSON || '["self-hosted","omnibase-ci"]')
+      }}
+    timeout-minutes: 10
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+
+      - name: Setup Python and uv
+        uses: ./.github/actions/setup-python-uv
+        with:
+          python-version: ${{ env.PYTHON_VERSION }}
+          uv-version: ${{ env.UV_VERSION }}
+          cache-version: ${{ env.CACHE_VERSION }}
+          cache-enabled: "false"
+
+      - name: Check subscribe-topic wiring health
+        run: |
+          echo "================================================================"
+          echo "Subscribe Wiring Health (OMN-7385 checker, OMN-16795 gate)"
+          echo "A subscribe_topic no contract publishes to mints a permanently"
+          echo "empty Kafka consumer group that reads as a dead chain."
+          echo "Allowlist entries that expired, lack an expiry, or are no longer"
+          echo "subscribed FAIL here — the list must stay bounded and honest."
+          echo "================================================================"
+          uv run python scripts/check_subscribe_wiring_health.py --verbose
+
+      - name: Allowlist hygiene unit tests
+        run: uv run pytest tests/unit/scripts/test_check_subscribe_wiring_health.py -v --tb=short
+
   # Writer-migration coupling check -- ensures any PR touching writer_postgres.py
   # or handler_*_postgres.py includes a migration file or explicit bypass comment (OMN-3530)
   migration-required-check:

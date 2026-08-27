@@ -125,6 +125,18 @@ STRICT_GATE_JOBS: tuple[str, ...] = (
     # proved the failure mode is SILENT: the delegation chain was 100% dead for
     # weeks behind green CI, with every request going to the quarantine sink.
     "Event Chain Gate",  # event-chain-gate
+    # OMN-16795: static cross-contract check that every declared subscribe_topic
+    # has a contract publisher, PLUS allowlist hygiene (expired / malformed /
+    # stale entries fail). THIS LINE IS HALF THE MECHANISM, same as the entry
+    # above: the default-deny sweep already fails CI Summary when the job FAILS,
+    # but an unregistered job that is `skipped` or absent yields SUCCESS — so
+    # without this entry, deleting or skipping the job silently restores the
+    # advisory-only state that let a 45-entry allowlist drift with lapsed
+    # expiries for months (the checker shipped in OMN-7385 and was referenced by
+    # NOTHING until this ticket). The job is unconditional in ci.yml (no
+    # needs/if), so a skip is anomalous and never a legitimate opt-out.
+    # Superseded by OMN-16783's flow-expectation ratchet when that lands.
+    "Subscribe Wiring Health",  # subscribe-wiring-health
     # OMN-15378 AC3: scripts/deploy-agent's standalone pytest root. ci.yml's
     # `deploy-agent-tests` job CALLS .github/workflows/deploy-agent-tests.yml,
     # so the inner job surfaces as "<caller display name> / <inner job name>"
