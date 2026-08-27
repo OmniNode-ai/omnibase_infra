@@ -39,6 +39,12 @@ For every file changed by the diff under test: if its manifest path was already
 declared in ``_ledger/application-migrations.tsv`` AT THE BASE REF, it may not be
 modified, deleted, or renamed.
 
+The base ref is the INTEGRATION BRANCH in both modes -- ``--base`` in CI, and
+the merge-base with ``origin/dev`` in ``--staged`` (pre-commit) mode. It is
+deliberately NOT ``HEAD``: a migration introduced by the first commit of a
+branch must still be amendable by its second, or the rule would be commit-only
+rather than append-only.
+
 The only escape is an explicit new-ordinal supersession, declared in
 ``_ledger/migration-supersessions.tsv`` (TSV, 4 columns:
 ``artifact_path``, ``superseded_by``, ``ticket``, ``reason``). A row permits the
@@ -190,6 +196,29 @@ def _changed_paths(diff_output: str) -> dict[str, str]:
     return changed
 
 
+DEFAULT_INTEGRATION_REF = "origin/dev"
+
+
+def _resolve_staged_base(repo_root: Path, base: str | None) -> str:
+    """Merge-base of the index's branch with the integration branch.
+
+    Falls back to ``HEAD`` only when the integration ref does not resolve at
+    all (a fresh clone with no remote, or a throwaway test repository). The
+    fallback is reported by the caller rather than applied silently, because
+    under it the guard is stricter than intended, not weaker.
+    """
+    candidate = base or DEFAULT_INTEGRATION_REF
+    result = subprocess.run(
+        ["git", "-C", str(repo_root), "merge-base", candidate, "HEAD"],
+        capture_output=True,
+        text=True,
+        check=False,
+    )
+    if result.returncode == 0 and result.stdout.strip():
+        return result.stdout.strip()
+    return "HEAD"
+
+
 def _authorised(
     artifact_path: str,
     supersessions: tuple[Supersession, ...],
@@ -242,8 +271,14 @@ def _authorised(
 def check(repo_root: Path, *, base: str | None, staged: bool) -> list[str]:
     """Return a list of human-readable violations (empty means pass)."""
     if staged:
-        diff_output = _git(repo_root, "diff", "--cached", "--name-status", "HEAD")
-        base_ref = "HEAD"
+        # The base is the INTEGRATION BRANCH, never HEAD. Diffing the index
+        # against HEAD would freeze a migration the moment its own first commit
+        # landed on the branch, so the second commit of the very PR that
+        # introduces it could not amend it -- which is not append-only, it is
+        # commit-only. Learned by execution: that is exactly what this guard did
+        # to its own repair PR's follow-up commit.
+        base_ref = _resolve_staged_base(repo_root, base)
+        diff_output = _git(repo_root, "diff", "--cached", "--name-status", base_ref)
     else:
         if base is None:
             raise AppendOnlyViolationError(

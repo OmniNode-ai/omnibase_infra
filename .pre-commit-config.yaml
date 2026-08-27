@@ -418,7 +418,7 @@ repos:
       # the predicate is a git diff, not a per-file lint.
       - id: onex-check-migration-append-only
         name: ONEX Migration Append-Only Check
-        entry: python3 scripts/validation/check_migration_append_only.py --staged
+        entry: python3 scripts/validation/check_migration_append_only.py --staged --base origin/dev
         language: system
         pass_filenames: false
         always_run: true

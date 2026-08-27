@@ -937,7 +937,14 @@ def test_delegation_routing_overlay_reconciliation_enforces_declared_shape(
             "ON_ERROR_STOP=1",
             "-c",
             """
-            SELECT string_agg(conname || ':' || contype, ',' ORDER BY conname)
+            -- contype is "char", and `text || "char"` is AMBIGUOUS in
+            -- PostgreSQL (both `text || anynonarray` and `anynonarray || text`
+            -- match), so this probe errored on every run that actually reached
+            -- it. It stayed invisible because the step above skips the whole
+            -- proof with a ::warning:: on any runner without a psql client,
+            -- and the pre-OMN-16692 assertion then compared an empty stdout.
+            -- The cast is what _SCHEMA_SNAPSHOT_SQL already does at line ~665.
+            SELECT string_agg(conname || ':' || contype::text, ',' ORDER BY conname)
             FROM pg_constraint
             WHERE conrelid = 'delegation_routing_tenant_overlay'::regclass
               AND conname IN (

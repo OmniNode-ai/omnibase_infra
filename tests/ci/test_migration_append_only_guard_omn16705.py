@@ -227,10 +227,47 @@ def test_staged_mode_sees_the_change_before_it_is_committed(repo: Path) -> None:
     _edit_applied_migration(repo, "-- staged rewrite\n")
     _run(repo, "add", "-A")
 
-    violations = check(repo, base=None, staged=True)
+    violations = check(repo, base="base-marker", staged=True)
 
     assert len(violations) == 1, violations
     assert _APPLIED in violations[0]
+
+
+def test_staged_mode_still_allows_amending_a_migration_added_on_this_branch(
+    repo: Path,
+) -> None:
+    """The staged base is the integration branch, never HEAD.
+
+    Regression: with ``HEAD`` as the staged base, a migration froze the instant
+    its own first commit landed on the branch, so the second commit of the very
+    PR that introduced it was rejected. That is commit-only, not append-only --
+    and it is what this guard did to its own repair PR.
+    """
+    _write(repo, f"{FORWARD}/{_SUCCESSOR}", _SUCCESSOR_BODY)
+    _write(
+        repo,
+        f"{FORWARD}/_ledger/application-migrations.tsv",
+        _manifest_row(_APPLIED, _APPLIED_BODY)
+        + "\n"
+        + _manifest_row(_SUCCESSOR, _SUCCESSOR_BODY)
+        + "\n",
+    )
+    _run(repo, "add", "-A")
+    _run(repo, "commit", "-qm", "first commit of the branch adds the successor")
+
+    amended = _SUCCESSOR_BODY + "-- second commit of the same branch\n"
+    _write(repo, f"{FORWARD}/{_SUCCESSOR}", amended)
+    _write(
+        repo,
+        f"{FORWARD}/_ledger/application-migrations.tsv",
+        _manifest_row(_APPLIED, _APPLIED_BODY)
+        + "\n"
+        + _manifest_row(_SUCCESSOR, amended)
+        + "\n",
+    )
+    _run(repo, "add", "-A")
+
+    assert check(repo, base="base-marker", staged=True) == []
 
 
 def test_an_empty_base_manifest_fails_closed(tmp_path: Path) -> None:
