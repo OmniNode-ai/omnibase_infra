@@ -1,0 +1,143 @@
+# SPDX-FileCopyrightText: 2025 OmniNode.ai Inc.
+# SPDX-License-Identifier: MIT
+# ONEX Node Contract - DLQ Depth Monitor Effect
+#
+# OMN-16769: the probing half of the DLQ monitor. Enumerates every DLQ topic
+# on the target broker, reads three offsets per partition (log-start,
+# high-water mark, and the offset as of the window start), folds them into one
+# observation per topic, and hands them to node_dlq_depth_evaluate_compute.
+#
+# READ-ONLY BY CONSTRUCTION. The only broker surface reachable from this node
+# is ProtocolDlqAdminTransport, whose five methods are all reads
+# (list_topics / partitions_for_topic / beginning_offsets / end_offsets /
+# offsets_for_times). There is no produce, no commit, no topic create/alter/
+# delete and no consumer-group mutation on that protocol, and the live adapter
+# backs it with a GROUP-LESS AIOKafkaConsumer — it joins no consumer group and
+# commits nothing, so the probe cannot perturb the lag or delivery state of the
+# topics it observes. The scheduled workflow is dry-run-safe because the type
+# system says so, not because a flag was remembered.
+#
+# Related Tickets:
+#   - OMN-16769: this ticket
+#   - OMN-16767: the delegation-chain defect this sink hid
+#   - OMN-16422: node_dlq_replay_effect self-amplifying replay loop, measured
+#     2026-08-27 as the producer of the entire sampled 8.88M quarantine backlog
+#   - OMN-12632: AdapterKafkaAdminLag, the prior art for keeping aiokafka
+#     behind a narrow structural protocol with a test fake
+#
+name: "node_dlq_depth_monitor_effect"
+node_type: "EFFECT_GENERIC"
+contract_version:
+  major: 1
+  minor: 0
+  patch: 0
+node_version: "1.0.0"
+description: >
+  Read-only dead-letter-queue depth and arrival-rate probe (OMN-16769). Enumerates every onex.dlq.* topic on the configured broker, measures retained depth and arrivals-in-window from broker offsets, evaluates them against contract-declared bounds, and raises when a sink exceeds its bound so the scheduled workflow goes RED. Performs no writes of any kind.
+
+input_model:
+  name: "ModelDlqDepthMonitorRequest"
+  module: "omnibase_infra.nodes.node_dlq_depth_monitor_effect.models.model_dlq_depth_monitor_request"
+  description: "Prefix, window, bounds, and whether an alert gates the run."
+output_model:
+  name: "ModelDlqDepthMonitorResult"
+  module: "omnibase_infra.nodes.node_dlq_depth_monitor_effect.models.model_dlq_depth_monitor_result"
+  description: "Topics matched plus the full per-topic evaluation histogram."
+# Top-level handler block: RuntimeLocal's single-shot compute execution path
+# resolves the handler + its input model from THIS block (same shape as
+# node_sync_revert_watchdog_effect / node_evidence_autoclose_sweep_effect).
+handler:
+  module: "omnibase_infra.nodes.node_dlq_depth_monitor_effect.handlers.handler_dlq_depth_monitor"
+  class: "HandlerDlqDepthMonitor"
+  input_model: "omnibase_infra.nodes.node_dlq_depth_monitor_effect.models.model_dlq_depth_monitor_request.ModelDlqDepthMonitorRequest"
+handler_routing:
+  routing_strategy: "operation_match"
+  handlers:
+    - operation: "probe_dlq_depth"
+      handler:
+        name: "HandlerDlqDepthMonitor"
+        module: "omnibase_infra.nodes.node_dlq_depth_monitor_effect.handlers.handler_dlq_depth_monitor"
+      description: "enumerate DLQ topics -> read offsets -> evaluate -> raise on alert"
+      output_fields:
+        - topics_matched
+        - evaluation
+        - evaluated_at
+        - window_seconds
+error_handling:
+  retry_policy:
+    max_retries: 0
+    initial_delay_ms: 0
+    max_delay_ms: 0
+    exponential_base: 1
+    retry_on: []
+  error_types:
+    - name: "DLQ_ARRIVAL_ALERT"
+      description: >
+        One or more DLQ topics took more arrivals in the window than their declared bound allows. This is the ALERT SURFACE, not a malfunction — the raise is what turns the scheduled run RED, and red is what an operator sees. Suppressed by suppress_alert_exit=true for characterization runs that want the histogram without gating.
+
+      recoverable: true
+      retry_strategy: "none"
+    - name: "BOOTSTRAP_NOT_CONFIGURED"
+      description: >
+        KAFKA_BOOTSTRAP_SERVERS is unset and no transport was injected. Fails closed rather than defaulting to a broker address: a monitor that silently probes the wrong lane reports a false clean bill of health, which is strictly worse than not running.
+
+      recoverable: false
+      retry_strategy: "none"
+io_operations:
+  - operation: "probe_dlq_depth"
+    description: "Read-only enumeration and offset probe of the broker's DLQ topics."
+    input_fields:
+      - topic_prefix
+      - window_seconds
+      - default_max_arrivals_per_window
+      - max_retained_depth
+      - suppress_alert_exit
+      - correlation_id
+    output_fields:
+      - topics_matched
+      - evaluation
+      - evaluated_at
+      - window_seconds
+      - correlation_id
+dependencies:
+  - name: "kafka_bootstrap_servers"
+    type: "environment"
+    env_var: "KAFKA_BOOTSTRAP_SERVERS"
+    description: >
+      Broker to probe. On the .201 trusted runner the dev lane is localhost:19092 (compose project omnibase-infra), the same address the baselines-scheduler workflow uses. No default is applied in code.
+
+    required: true
+  - name: "dlq_monitor_kill_switch"
+    type: "environment"
+    env_var: "ONEX_DLQ_MONITOR_DISABLED"
+    description: >
+      Checked first, unconditionally. When set to any non-empty value the monitor performs zero I/O and returns an empty, non-alerting result. Honored by the node itself, independent of workflow config, so a run can be halted without editing the workflow file.
+
+    required: false
+  - name: "aiokafka"
+    type: "library"
+    library: "aiokafka"
+    description: "Async Kafka client backing the read-only offset adapter."
+health_check:
+  enabled: true
+  endpoint: "/health"
+  interval_seconds: 300
+  checks:
+    - name: "broker_configured"
+      check_type: "environment"
+      env_var: "KAFKA_BOOTSTRAP_SERVERS"
+      description: "Verify KAFKA_BOOTSTRAP_SERVERS is set."
+metadata:
+  description: "Read-only DLQ depth/arrival-rate probe with red-run alerting (OMN-16769)"
+  author: "OmniNode Team"
+  transport_type: "kafka"
+  created: "2026-08-27"
+  updated: "2026-08-27"
+  tags:
+    - "effect"
+    - "dlq"
+    - "quarantine"
+    - "observability"
+    - "alerting"
+    - "scheduled-sweep"
+    - "read-only"

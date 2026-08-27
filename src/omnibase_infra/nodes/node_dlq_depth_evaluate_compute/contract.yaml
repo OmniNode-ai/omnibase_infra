@@ -1,0 +1,150 @@
+# SPDX-FileCopyrightText: 2025 OmniNode.ai Inc.
+# SPDX-License-Identifier: MIT
+# ONEX Node Contract - DLQ Depth Evaluate Compute
+#
+# OMN-16769: the read side of the platform quarantine sink. This node is the
+# PURE half of the DLQ monitor: it turns read-only broker offset observations
+# into per-topic verdicts against contract-declared bounds. It performs zero
+# I/O and reads no clock — `evaluated_at` is injected by the caller — so the
+# whole judgement is replayable and unit-testable without a broker.
+#
+# The probing half is node_dlq_depth_monitor_effect.
+#
+# Related Tickets:
+#   - OMN-16769: this ticket (quarantine sink unobserved)
+#   - OMN-16767: the delegation-chain defect the sink hid
+#   - OMN-14492: introduced the quarantine fallback (the right call); this is
+#     the missing read side of it, not a reversal
+#   - OMN-13548: per-contract projection DLQ routing (AC5 scope)
+#   - OMN-16422: node_dlq_replay_effect self-amplifying replay loop — measured
+#     (2026-08-27) to be the producer of the ENTIRE sampled 8.88M backlog
+#
+name: "node_dlq_depth_evaluate_compute"
+node_type: "COMPUTE_GENERIC"
+contract_version:
+  major: 1
+  minor: 0
+  patch: 0
+node_version: "1.0.0"
+description: >
+  Pure evaluator for dead-letter-queue depth and arrival rate (OMN-16769). Takes read-only broker offset observations plus contract-declared bounds and an injected evaluation timestamp, and returns one verdict row per DLQ topic (retained depth, arrivals in window, arrivals/min, bound, verdict) ordered worst-first, plus the run-level alert decision. Zero I/O, no clock read.
+
+input_model:
+  name: "ModelDlqDepthEvaluateRequest"
+  module: "omnibase_infra.nodes.node_dlq_depth_evaluate_compute.models.model_dlq_depth_evaluate_request"
+  description: "Broker observations, threshold policy, and the injected evaluated_at."
+output_model:
+  name: "ModelDlqDepthEvaluateResult"
+  module: "omnibase_infra.nodes.node_dlq_depth_evaluate_compute.models.model_dlq_depth_evaluate_result"
+  description: "Per-topic verdict rows (the projection shape) plus run-level counts and the alert decision."
+# Top-level handler block: RuntimeLocal's single-shot compute execution path
+# resolves the handler + its input model from THIS block (same shape as
+# node_sync_revert_watchdog_effect / node_evidence_autoclose_sweep_effect).
+handler:
+  module: "omnibase_infra.nodes.node_dlq_depth_evaluate_compute.handlers.handler_dlq_depth_evaluate"
+  class: "HandlerDlqDepthEvaluate"
+  input_model: "omnibase_infra.nodes.node_dlq_depth_evaluate_compute.models.model_dlq_depth_evaluate_request.ModelDlqDepthEvaluateRequest"
+handler_routing:
+  routing_strategy: "operation_match"
+  handlers:
+    - operation: "evaluate_dlq_depth"
+      handler:
+        name: "HandlerDlqDepthEvaluate"
+        module: "omnibase_infra.nodes.node_dlq_depth_evaluate_compute.handlers.handler_dlq_depth_evaluate"
+      description: "observations + bounds -> per-topic verdicts + alert decision"
+      output_fields:
+        - verdicts
+        - topics_observed
+        - topics_alerting
+        - total_arrivals_in_window
+        - total_retained_depth
+        - alert_triggered
+# ==============================================================================
+# CONTRACT-PINNED ALERT BOUNDS (OMN-16769 AC3)
+# ==============================================================================
+# These are EXPERIMENT DEFAULTS, stated here rather than buried in a script,
+# and expected to be re-ratified against measured traffic. They are enforced as
+# the field defaults on ModelDlqThresholdPolicy; this block is the declaration
+# of record for what those numbers mean and WHY they were chosen.
+alert_policy:
+  window_seconds: 1800
+  # Matches the 30-minute scheduled cadence exactly so consecutive runs tile
+  # the timeline with neither gaps nor double-counting.
+
+  default_max_arrivals_per_window: 0
+  # 0 = ANY arrival into a dead-letter sink is alertable. Deliberately the
+  # strictest possible bound: a DLQ is where messages go when the system could
+  # not handle them, so a steady trickle is an unfixed defect, not a baseline
+  # to tune around. Sized to satisfy AC3's own falsification case — the
+  # OMN-16767 reproduction put 16 quarantined commands in ~1 minute, which
+  # over a 30-minute window is only 0.53/min, so an absolute count bound is
+  # used rather than a per-minute rate (a per-minute bound low enough to catch
+  # 16-in-a-window would be indistinguishable from this anyway).
+
+  max_retained_depth: null
+  # SECONDARY, DISABLED BY DEFAULT, and this is a correctness requirement, not
+  # a convenience. onex.dlq.omnibase-infra.quarantine.v1 held 8,878,926
+  # retained records when this node was written, so ANY finite depth bound is
+  # either already breached (alerting on every run forever — which AC4
+  # rejects verbatim: "a depth alert that trips permanently on a pre-existing
+  # backlog is not an alert") or set above 8.88M and therefore unable to fire.
+  # Depth is REPORTED on every row as context; it does not gate the run unless
+  # an operator explicitly opts in.
+
+  overrides: []
+  # Per-topic allowances, each REQUIRED to carry its own `reason` and a
+  # state-based `ratify_by`. Empty by default: there are no silent allowances,
+  # and none were justified by measurement at authoring time.
+error_handling:
+  retry_policy:
+    max_retries: 0
+    initial_delay_ms: 0
+    max_delay_ms: 0
+    exponential_base: 1
+    retry_on: []
+  error_types:
+    - name: "IMPOSSIBLE_OFFSET_TRIPLE"
+      description: >
+        An observation carried a high-water mark behind its log-start, a window start ahead of its high-water mark, or a window start behind its log-start. Rejected at parse time rather than derived into a negative depth or arrival count — a garbage reading must never be materialized as a confident-looking zero.
+
+      recoverable: false
+      retry_strategy: "none"
+    - name: "DUPLICATE_TOPIC_OBSERVATION"
+      description: "The probe enumerated the same topic twice; refusing to double-count."
+      recoverable: false
+      retry_strategy: "none"
+    - name: "NAIVE_EVALUATED_AT"
+      description: "evaluated_at was timezone-naive; refusing to materialize an ambiguous timestamp."
+      recoverable: false
+      retry_strategy: "none"
+io_operations:
+  - operation: "evaluate_dlq_depth"
+    description: "Evaluate DLQ observations against declared bounds. Pure."
+    input_fields:
+      - observations
+      - policy
+      - evaluated_at
+      - correlation_id
+    output_fields:
+      - verdicts
+      - topics_observed
+      - topics_alerting
+      - total_arrivals_in_window
+      - total_retained_depth
+      - alert_triggered
+      - evaluated_at
+      - window_seconds
+      - correlation_id
+dependencies: []
+metadata:
+  description: "Pure DLQ depth/arrival-rate evaluator with contract-pinned alert bounds (OMN-16769)"
+  author: "OmniNode Team"
+  transport_type: "none"
+  created: "2026-08-27"
+  updated: "2026-08-27"
+  tags:
+    - "compute"
+    - "dlq"
+    - "quarantine"
+    - "observability"
+    - "alerting"
