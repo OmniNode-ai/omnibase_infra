@@ -84,6 +84,28 @@ def _automation_revert_entry(
     return _history_entry(**defaults)  # type: ignore[arg-type]
 
 
+def _human_set_done_entry(created_at: datetime) -> dict[str, object]:
+    """A human moving the ticket INTO Done.
+
+    OMN-16762 added a restore precondition: the watchdog only re-flips to
+    a completed state a HUMAN set. Every fixture below whose expected
+    decision is downstream of that gate therefore needs an explicit
+    human-set Done in its history — previously these fixtures carried a
+    bare revert entry with no transition into Done at all, which now
+    resolves to EnumPriorDoneActorKind.UNKNOWN and fails closed.
+    """
+    return _history_entry(
+        created_at=created_at,
+        from_type="started",
+        to_type="completed",
+        from_name="In Progress",
+        to_name="Done",
+        from_id=_STARTED_STATE_ID,
+        to_id=_DONE_STATE_ID,
+        actor_id="real-user-id",
+    )
+
+
 def _issue_stub(
     *,
     issue_id: str = "issue-1",
@@ -153,7 +175,7 @@ class FakeLinearClient:
             return [], self._enum_error
         return self._issues[:max_issues], ""
 
-    async def fetch_issue_history(self, issue_id, last, timeout):
+    async def fetch_issue_history(self, issue_id, page_size, max_pages, timeout):
         self.history_calls.append(issue_id)
         if issue_id in self._history_error_by_issue:
             return None, self._history_error_by_issue[issue_id]
@@ -247,7 +269,10 @@ class TestNoRevertOrAlreadyResolved:
     async def test_already_resolved_current_state_completed(self):
         now = _now()
         issue = _issue_stub(state_type="completed")
-        history = [_automation_revert_entry(now - timedelta(seconds=5))]
+        history = [
+            _human_set_done_entry(now - timedelta(days=1)),
+            _automation_revert_entry(now - timedelta(seconds=5)),
+        ]
         linear = FakeLinearClient(issues=[issue], history_by_issue={"issue-1": history})
         handler = HandlerSyncRevertWatchdog(linear_client=linear)
         result = await handler.handle(_request())
@@ -305,6 +330,7 @@ class TestHumanActorSkips:
         now = _now()
         issue = _issue_stub(state_type="started")
         history = [
+            _human_set_done_entry(now - timedelta(days=1)),
             _automation_revert_entry(now - timedelta(hours=2)),
             {
                 "id": str(uuid4()),
@@ -333,7 +359,10 @@ class TestHumanCommentWindow:
         now = _now()
         revert_at = now - timedelta(minutes=10)
         issue = _issue_stub(state_type="started")
-        history = [_automation_revert_entry(revert_at)]
+        history = [
+            _human_set_done_entry(revert_at - timedelta(days=1)),
+            _automation_revert_entry(revert_at),
+        ]
         comments = [
             _comment(created_at=revert_at + timedelta(minutes=2), is_human=True)
         ]
@@ -352,7 +381,10 @@ class TestHumanCommentWindow:
         now = _now()
         revert_at = now - timedelta(hours=5)
         issue = _issue_stub(state_type="started")
-        history = [_automation_revert_entry(revert_at)]
+        history = [
+            _human_set_done_entry(revert_at - timedelta(days=1)),
+            _automation_revert_entry(revert_at),
+        ]
         comments = [_comment(created_at=revert_at + timedelta(hours=3), is_human=True)]
         linear = FakeLinearClient(
             issues=[issue],
@@ -370,7 +402,10 @@ class TestHumanCommentWindow:
         now = _now()
         revert_at = now - timedelta(seconds=30)
         issue = _issue_stub(state_type="started")
-        history = [_automation_revert_entry(revert_at)]
+        history = [
+            _human_set_done_entry(revert_at - timedelta(days=1)),
+            _automation_revert_entry(revert_at),
+        ]
         comments = [_comment(created_at=revert_at, is_human=False, body="bot note")]
         linear = FakeLinearClient(
             issues=[issue],
@@ -386,7 +421,10 @@ class TestHumanCommentWindow:
         now = _now()
         revert_at = now - timedelta(minutes=5)
         issue = _issue_stub(state_type="started")
-        history = [_automation_revert_entry(revert_at)]
+        history = [
+            _human_set_done_entry(revert_at - timedelta(days=1)),
+            _automation_revert_entry(revert_at),
+        ]
         marker = "sync-revert-watchdog (OMN-16536)"
         comments = [
             _comment(
@@ -412,7 +450,10 @@ class TestStateResolution:
     async def test_target_state_no_longer_resolvable_fails_closed(self):
         now = _now()
         issue = _issue_stub(state_type="started")
-        history = [_automation_revert_entry(now - timedelta(seconds=5))]
+        history = [
+            _human_set_done_entry(now - timedelta(days=1)),
+            _automation_revert_entry(now - timedelta(seconds=5)),
+        ]
         linear = FakeLinearClient(
             issues=[issue],
             history_by_issue={"issue-1": history},
@@ -431,7 +472,10 @@ class TestStateResolution:
     async def test_dry_run_never_checks_team_states_or_mutates(self):
         now = _now()
         issue = _issue_stub(state_type="started")
-        history = [_automation_revert_entry(now - timedelta(seconds=5))]
+        history = [
+            _human_set_done_entry(now - timedelta(days=1)),
+            _automation_revert_entry(now - timedelta(seconds=5)),
+        ]
         linear = FakeLinearClient(
             issues=[issue],
             history_by_issue={"issue-1": history},
@@ -473,7 +517,10 @@ class TestLinearApiFailures:
     async def test_comments_fetch_failure_is_per_ticket_error(self):
         now = _now()
         issue = _issue_stub(state_type="started")
-        history = [_automation_revert_entry(now - timedelta(seconds=5))]
+        history = [
+            _human_set_done_entry(now - timedelta(days=1)),
+            _automation_revert_entry(now - timedelta(seconds=5)),
+        ]
         linear = FakeLinearClient(
             issues=[issue],
             history_by_issue={"issue-1": history},
@@ -489,7 +536,10 @@ class TestLinearApiFailures:
     async def test_mutation_failure_is_per_ticket_error(self):
         now = _now()
         issue = _issue_stub(state_type="started")
-        history = [_automation_revert_entry(now - timedelta(seconds=5))]
+        history = [
+            _human_set_done_entry(now - timedelta(days=1)),
+            _automation_revert_entry(now - timedelta(seconds=5)),
+        ]
         linear = FakeLinearClient(
             issues=[issue],
             history_by_issue={"issue-1": history},
@@ -599,7 +649,10 @@ class TestSummaryCounts:
             _issue_stub(issue_id="i3", identifier="OMN-3", state_type="unstarted"),
         ]
         history_by_issue = {
-            "i1": [_automation_revert_entry(now - timedelta(seconds=10))],
+            "i1": [
+                _human_set_done_entry(now - timedelta(days=1)),
+                _automation_revert_entry(now - timedelta(seconds=10)),
+            ],
             "i2": [
                 _history_entry(
                     created_at=now - timedelta(seconds=10),

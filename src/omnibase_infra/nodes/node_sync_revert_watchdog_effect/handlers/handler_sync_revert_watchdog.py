@@ -37,6 +37,23 @@ watchdog never overrides a genuine human decision:
    over their decision. (Scoped to state-change entries specifically — a
    human editing an unrelated field such as a label or assignee after the
    automation revert must not suppress the correction.)
+3. The completed state the re-flip would RESTORE must itself have been
+   set by a human (OMN-16762). Restoring a Done that automation set
+   reinstates an automation artifact rather than a human decision —
+   exactly the outcome this watchdog exists to prevent. Automation-set
+   and indeterminate provenance both fail closed as
+   ``SKIPPED_PRIOR_DONE_NOT_HUMAN_SET``; see ``EnumPriorDoneActorKind``.
+
+History window (OMN-16762)
+--------------------------
+Per-ticket history is walked FORWARD (``first``/``after``) to the true
+end of the connection, never with ``last``. Linear's
+``orderBy: createdAt`` sorts DESCENDING, so ``last: N`` returns the N
+OLDEST entries — the opposite of what this node's request model used to
+claim. That defect made the sweep classify a stale revert on any ticket
+with more history than one page, and left guards 1 and 2 above scanning
+a window that could not contain the evidence they look for: across 126
+detected reverts in the OMN-16536 adjudication they fired zero times.
 
 Pipeline
 --------
@@ -45,9 +62,9 @@ Pipeline
 2. Enumerate the team's tickets updated within ``lookback_hours`` (a
    state revert bumps ``updatedAt``, so this is a correct, cheap filter —
    no need to walk every ticket on the team every run).
-3. For each ticket, fetch its most recent history entries and find the
+3. For each ticket, walk its full history newest-first and find the
    latest completed->non-completed transition, if any.
-4. Classify per the signal above. ``ERROR_STATE_NOT_RESOLVABLE`` fires
+4. Classify per the signals above. ``ERROR_STATE_NOT_RESOLVABLE`` fires
    when the prior completed state no longer resolves live on the team
    (renamed/deleted workflow state) — never guessed, never substituted.
 5. ``apply=False`` (the default) performs every read above but never
@@ -76,6 +93,9 @@ from uuid import uuid4
 import httpx
 
 from omnibase_infra.enums import EnumHandlerType, EnumHandlerTypeCategory
+from omnibase_infra.nodes.node_sync_revert_watchdog_effect.models.enum_prior_done_actor_kind import (
+    EnumPriorDoneActorKind,
+)
 from omnibase_infra.nodes.node_sync_revert_watchdog_effect.models.enum_sync_revert_watchdog_decision import (
     EnumSyncRevertWatchdogDecision,
 )
@@ -127,10 +147,25 @@ query RecentIssues($teamKey: String!, $since: DateTimeOrDuration!, $first: Int!,
 }
 """
 
+# OMN-16762: FORWARD pagination (`first`/`after`), never `last`.
+#
+# Linear's `orderBy: createdAt` sorts the connection DESCENDING, so
+# `first: N` yields the N NEWEST entries and `last: N` yields the N
+# OLDEST. This query previously used `last`, which meant the sweep read
+# the oldest page of every ticket's history and could not see anything
+# newer. Measured live against OMN-14888 (553 entries) on 2026-08-27:
+#
+#   history(last: 50,  orderBy: createdAt) -> 2026-07-21 .. 2026-07-26
+#   history(first: 50, orderBy: createdAt) -> 2026-08-27 .. 2026-08-25
+#
+# Walking `first`/`after` to pageInfo exhaustion is the robust option the
+# probe confirmed: 553 entries came back over 3 pages of 250, in
+# newest-first order. Full history is what the classifier needs anyway —
+# the pre-revert-Done provenance check reads BACKWARD from the revert.
 _ISSUE_HISTORY_QUERY = """
-query IssueHistory($issueId: String!, $last: Int!) {
+query IssueHistory($issueId: String!, $first: Int!, $after: String) {
   issue(id: $issueId) {
-    history(last: $last, orderBy: createdAt) {
+    history(first: $first, after: $after, orderBy: createdAt) {
       nodes {
         id
         createdAt
@@ -139,6 +174,7 @@ query IssueHistory($issueId: String!, $last: Int!) {
         fromState { id name type }
         toState { id name type }
       }
+      pageInfo { hasNextPage endCursor }
     }
   }
 }
@@ -281,20 +317,53 @@ class _LinearClient:
         return issues, ""
 
     async def fetch_issue_history(
-        self, issue_id: str, last: int, timeout: float
+        self, issue_id: str, page_size: int, max_pages: int, timeout: float
     ) -> tuple[list[dict[str, object]] | None, str]:
-        """Most-recent ``last`` history entries for one ticket. None on failure."""
-        data = await self._query(
-            _ISSUE_HISTORY_QUERY, {"issueId": issue_id, "last": last}, timeout
-        )
-        if data is None:
-            return None, "Failed to fetch issue history from Linear."
-        issue = data.get("issue")
-        history = issue.get("history") if isinstance(issue, dict) else None
-        nodes = history.get("nodes") if isinstance(history, dict) else None
-        if not isinstance(nodes, list):
-            return None, "Malformed history connection in Linear response."
-        return [n for n in nodes if isinstance(n, dict)], ""
+        """One ticket's history, walked newest-first to the true end.
+
+        Paginates forward via ``first``/``after`` until Linear reports no
+        further page or ``max_pages`` is reached. Because the walk runs
+        newest-first, hitting the cap truncates the OLDEST end only — the
+        entries every guard depends on (the latest revert, any later
+        human state change) are always present. A pre-revert Done that
+        falls outside a capped walk resolves to
+        ``EnumPriorDoneActorKind.UNKNOWN``, which fails closed.
+
+        Returns ``(None, error)`` on any failed page — a partial history
+        must never be classified as if it were complete.
+        """
+        collected: list[dict[str, object]] = []
+        cursor: str | None = None
+        for _ in range(max_pages):
+            variables: dict[str, object] = {
+                "issueId": issue_id,
+                "first": page_size,
+                "after": cursor,
+            }
+            data = await self._query(_ISSUE_HISTORY_QUERY, variables, timeout)
+            if data is None:
+                return None, "Failed to fetch issue history from Linear."
+            issue = data.get("issue")
+            history = issue.get("history") if isinstance(issue, dict) else None
+            nodes = history.get("nodes") if isinstance(history, dict) else None
+            if not isinstance(nodes, list):
+                return None, "Malformed history connection in Linear response."
+            collected.extend(n for n in nodes if isinstance(n, dict))
+            page_info = history.get("pageInfo") if isinstance(history, dict) else None
+            if not (isinstance(page_info, dict) and page_info.get("hasNextPage")):
+                break
+            next_cursor = page_info.get("endCursor")
+            if not next_cursor:
+                break
+            cursor = str(next_cursor)
+        else:
+            logger.warning(
+                "Issue %s history walk hit the %d-page cap — oldest entries "
+                "truncated; pre-revert Done provenance may fail closed as UNKNOWN.",
+                issue_id,
+                max_pages,
+            )
+        return collected, ""
 
     async def fetch_issue_comments(
         self, issue_id: str, timeout: float
@@ -442,6 +511,7 @@ class HandlerSyncRevertWatchdog:
                 EnumSyncRevertWatchdogDecision.SKIPPED_HUMAN_COMMENT_NEARBY,
                 EnumSyncRevertWatchdogDecision.SKIPPED_STATE_CHANGED_SINCE,
                 EnumSyncRevertWatchdogDecision.SKIPPED_ALREADY_RESOLVED,
+                EnumSyncRevertWatchdogDecision.SKIPPED_PRIOR_DONE_NOT_HUMAN_SET,
             )
         )
         errored = sum(
@@ -478,7 +548,10 @@ class HandlerSyncRevertWatchdog:
         )
 
         history, history_error = await self._linear.fetch_issue_history(
-            issue_id, request.history_page_size, request.linear_timeout_seconds
+            issue_id,
+            request.history_page_size,
+            request.history_max_pages,
+            request.linear_timeout_seconds,
         )
         if history is None:
             return ModelSyncRevertWatchdogOutcome(
@@ -526,12 +599,45 @@ class HandlerSyncRevertWatchdog:
             str(bot_actor.get("type", "")) if isinstance(bot_actor, dict) else ""
         )
 
+        # OMN-16762: establish WHO set the completed state this revert
+        # would restore. Read backward from the revert for the most recent
+        # transition INTO a completed state; its actorId decides. Recorded
+        # on every revert-bearing outcome so an armed run's candidate set
+        # can be audited mechanically, not just the ones it gates.
+        def _sets_completed_state(entry: dict[str, object]) -> bool:
+            to_state_candidate = entry.get("toState")
+            return (
+                isinstance(to_state_candidate, dict)
+                and to_state_candidate.get("type") == _COMPLETED_TYPE
+            )
+
+        prior_done_entry = next(
+            (
+                entry
+                for created_at, entry in reversed(dated_history)
+                if created_at < revert_at and _sets_completed_state(entry)
+            ),
+            None,
+        )
+        if prior_done_entry is None:
+            prior_done_kind = EnumPriorDoneActorKind.UNKNOWN
+        elif prior_done_entry.get("actorId"):
+            prior_done_kind = EnumPriorDoneActorKind.HUMAN
+        else:
+            prior_done_kind = EnumPriorDoneActorKind.BOT
+
         common_fields: dict[str, object] = {
             "ticket_id": ticket_id,
             "reverted_at": revert_entry.get("createdAt") or "",
             "from_state_name": str(from_state.get("name", "")),
             "to_state_name": str(to_state.get("name", "")),
             "bot_actor_type": bot_actor_type,
+            "prior_done_actor_kind": prior_done_kind,
+            "prior_done_at": (
+                str(prior_done_entry.get("createdAt") or "")
+                if prior_done_entry is not None
+                else ""
+            ),
         }
 
         if current_state_type == _COMPLETED_TYPE:
@@ -564,6 +670,27 @@ class HandlerSyncRevertWatchdog:
             return ModelSyncRevertWatchdogOutcome(
                 decision=EnumSyncRevertWatchdogDecision.SKIPPED_STATE_CHANGED_SINCE,
                 reason="A human made a further state change after the detected revert — deferring to that decision.",
+                **common_fields,
+            )
+
+        # OMN-16762 restore precondition. Checked BEFORE the comments
+        # round trip because it is pure history — no extra Linear call.
+        # Only a human-set prior Done may be restored; automation-set and
+        # indeterminate both fail closed. Deliberately ordered AFTER the
+        # later-human-state-change guard so a ticket a person has since
+        # ruled on is still attributed to that human decision rather than
+        # to this precondition.
+        if prior_done_kind is not EnumPriorDoneActorKind.HUMAN:
+            return ModelSyncRevertWatchdogOutcome(
+                decision=EnumSyncRevertWatchdogDecision.SKIPPED_PRIOR_DONE_NOT_HUMAN_SET,
+                reason=(
+                    "The completed state this revert would restore was "
+                    f"{'set by automation' if prior_done_kind is EnumPriorDoneActorKind.BOT else 'of indeterminate provenance'}"
+                    f" (prior_done_actor_kind={prior_done_kind.value}) — "
+                    "restoring it would reinstate an automation artifact, "
+                    "not a human decision. Only a human-set or formally "
+                    "adjudicated Done is restorable."
+                ),
                 **common_fields,
             )
 

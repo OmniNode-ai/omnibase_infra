@@ -208,6 +208,7 @@ skills:
       - {name: apply, payload_field: apply, arg_type: boolean, default: false}
       - {name: max-issues, payload_field: max_issues, arg_type: integer}
       - {name: history-page-size, payload_field: history_page_size, arg_type: integer}
+      - {name: history-max-pages, payload_field: history_max_pages, arg_type: integer}
       - {name: human-comment-window-seconds, payload_field: human_comment_window_seconds, arg_type: integer}
       - {name: linear-timeout-seconds, payload_field: linear_timeout_seconds, arg_type: integer}
       - {name: watchdog-comment-marker, payload_field: watchdog_comment_marker, arg_type: string}

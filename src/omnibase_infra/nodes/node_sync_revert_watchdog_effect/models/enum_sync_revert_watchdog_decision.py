@@ -42,6 +42,16 @@ class EnumSyncRevertWatchdogDecision(StrEnum):
     # The ticket's CURRENT state is already completed-type -> already
     # resolved (manually or by an earlier watchdog run); nothing to do.
     SKIPPED_ALREADY_RESOLVED = "skipped_already_resolved"
+    # OMN-16762: the completed state this revert would restore was NOT
+    # set by a human -- either automation set it (actorId null +
+    # botActor, i.e. the very signature this watchdog detects) or its
+    # provenance could not be established in the history read. The
+    # operator's restore rule requires the pre-revert Done to be
+    # human-set or formally adjudicated, so re-flipping here would
+    # reinstate an automation artifact rather than a human decision.
+    # Fails closed on BOT and UNKNOWN alike; see
+    # EnumPriorDoneActorKind.
+    SKIPPED_PRIOR_DONE_NOT_HUMAN_SET = "skipped_prior_done_not_human_set"
     # Linear read (issues/history/comments) or write (issueUpdate/
     # commentCreate) call failed or returned GraphQL errors.
     ERROR_LINEAR_API = "error_linear_api"

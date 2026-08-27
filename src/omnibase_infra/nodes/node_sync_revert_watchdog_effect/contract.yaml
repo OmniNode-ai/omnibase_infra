@@ -20,16 +20,28 @@
 #   - OMN-16106: node_evidence_autoclose_sweep_effect, the sibling sweep
 #     this node's structure/conventions are modeled on
 #   - OMN-14849: WS1 Done-revert enforcement receiver design
+#   - OMN-16762 (v1.1.0): per-ticket history is now walked FORWARD
+#     (`first`/`after`) to the true end of the connection. It previously
+#     used `history(last: N, orderBy: createdAt)`, documented as "the N
+#     MOST RECENT entries"; Linear orders that connection DESCENDING, so
+#     `last: N` returned the N OLDEST. The sweep therefore classified a
+#     stale revert on any ticket with more than one page of history, and
+#     both the no-human-comment-nearby and no-later-human-state-change
+#     guards scanned a window that could not hold the evidence they look
+#     for (0 fires across 126 detected reverts). Same version adds the
+#     restore precondition: only a HUMAN-set prior completed state is
+#     restorable -- automation-set or indeterminate provenance fails
+#     closed as SKIPPED_PRIOR_DONE_NOT_HUMAN_SET.
 #
 name: "node_sync_revert_watchdog_effect"
 node_type: "EFFECT_GENERIC"
 contract_version:
   major: 1
-  minor: 0
+  minor: 1
   patch: 0
-node_version: "1.0.0"
+node_version: "1.1.0"
 description: >
-  Scheduled sweep detecting and correcting Linear's silent GitHub-sync Done-revert pattern (OMN-16536). Enumerates a team's recently-updated tickets, finds the latest completed->non-completed history transition, classifies it via Linear's own actorId/botActor automation signature plus a no-human-comment-nearby and no-later-human-state-change guard, and re-flips + comments when confirmed silent. DRY-RUN by default; ONEX_SYNC_REVERT_WATCHDOG_DISABLED kill switch checked first.
+  Scheduled sweep detecting and correcting Linear's silent GitHub-sync Done-revert pattern (OMN-16536). Enumerates a team's recently-updated tickets, walks each ticket's FULL history newest-first (forward `first`/`after` pagination -- OMN-16762), finds the latest completed->non-completed transition, and classifies it via Linear's own actorId/botActor automation signature plus three fail-closed guards: no human comment nearby, no later human state change, and the restored completed state must itself have been human-set. Re-flips + comments only when all three clear. DRY-RUN by default; ONEX_SYNC_REVERT_WATCHDOG_DISABLED kill switch checked first.
 
 input_model:
   name: "ModelSyncRevertWatchdogRequest"
@@ -84,6 +96,10 @@ error_handling:
       description: "The prior completed-type state no longer resolves live on the team (renamed/deleted) — fail closed, never guess a replacement."
       recoverable: true
       retry_strategy: "none"
+    - name: "PRIOR_DONE_NOT_HUMAN_SET"
+      description: "OMN-16762 restore precondition: the completed state the re-flip would restore was set by automation (actorId null + botActor) or its provenance could not be established in the history read. Fail closed — restoring it would reinstate an automation artifact rather than a human decision."
+      recoverable: false
+      retry_strategy: "none"
 io_operations:
   - operation: "sweep_sync_revert_watchdog"
     description: "Enumerate recently-updated tickets, detect silent automation reverts, re-flip + comment."
@@ -93,6 +109,7 @@ io_operations:
       - apply
       - max_issues
       - history_page_size
+      - history_max_pages
       - human_comment_window_seconds
       - linear_timeout_seconds
       - watchdog_comment_marker
@@ -134,7 +151,7 @@ metadata:
   author: "OmniNode Team"
   transport_type: "http"
   created: "2026-08-26"
-  updated: "2026-08-26"
+  updated: "2026-08-27"
   tags:
     - "effect"
     - "linear"
