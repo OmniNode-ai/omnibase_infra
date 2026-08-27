@@ -17,8 +17,19 @@ cannot perturb the lag or delivery state of the very topics it is
 observing. It reads metadata and offsets only.
 
 ``aiokafka`` is imported inside the constructor rather than at module
-scope so that importing this node — which the contract loader does at
-startup — never hard-requires the Kafka client.
+scope so that importing this module never hard-requires the Kafka client.
+
+WHY THIS LIVES IN ``event_bus/`` AND NOT BESIDE ITS NODE
+--------------------------------------------------------
+Constructing a raw broker client is transport-layer work. The OMN-12515 /
+OMN-12540 imperative-contract guard blocks ``AIOKafkaConsumer(...)`` as a
+LIVE violation ("bypasses injected event bus") anywhere it is reachable
+from a wired node, and the fix for that guard is to move the work to the
+proper surface rather than to allowlist it. ``event_bus/`` is that
+surface: ``event_bus/confirmation/readback_source_kafka.py`` builds a
+group-less consumer exactly this way for exactly this reason. The node
+depends only on ``ProtocolDlqAdminTransport`` and never names a broker
+client.
 """
 
 from __future__ import annotations
@@ -27,15 +38,15 @@ from collections.abc import Mapping, Sequence
 from types import TracebackType
 from typing import TYPE_CHECKING
 
-from omnibase_infra.nodes.node_dlq_depth_monitor_effect.protocols.protocol_cluster_metadata import (
+from omnibase_infra.protocols.protocol_cluster_metadata import (
     ProtocolClusterMetadata,
 )
-from omnibase_infra.nodes.node_dlq_depth_monitor_effect.protocols.protocol_topic_partition import (
+from omnibase_infra.protocols.protocol_topic_partition import (
     ProtocolTopicPartition,
 )
 
 if TYPE_CHECKING:
-    from omnibase_infra.nodes.node_dlq_depth_monitor_effect.protocols.protocol_dlq_admin_transport import (
+    from omnibase_infra.protocols.protocol_dlq_admin_transport import (
         TopicPartition,
     )
 
@@ -64,6 +75,10 @@ class AiokafkaDlqOffsetReader:
             TopicPartition as AiokafkaTopicPartition,
         )
 
+        from omnibase_infra.event_bus.kafka_auth import (
+            build_aiokafka_auth_kwargs_from_env,
+        )
+
         self._tp_type = AiokafkaTopicPartition
         self._consumer = AIOKafkaConsumer(
             bootstrap_servers=bootstrap_servers,
@@ -72,6 +87,10 @@ class AiokafkaDlqOffsetReader:
             enable_auto_commit=False,
             client_id=client_id,
             request_timeout_ms=request_timeout_ms,
+            # Same sanctioned auth helper every other broker client here uses,
+            # so the probe works against an authenticated broker rather than
+            # only the unauthenticated dev lane.
+            **build_aiokafka_auth_kwargs_from_env(),
         )
         self._started = False
         # Cluster metadata snapshot captured by list_topics(). See the comment

@@ -41,6 +41,9 @@ from datetime import UTC, datetime
 
 from omnibase_infra.enums import EnumInfraTransportType
 from omnibase_infra.errors import ModelInfraErrorContext, RuntimeHostError
+from omnibase_infra.event_bus.dlq_offset_reader_kafka import (
+    AiokafkaDlqOffsetReader,
+)
 from omnibase_infra.nodes.node_dlq_depth_evaluate_compute.handlers.handler_dlq_depth_evaluate import (
     HandlerDlqDepthEvaluate,
 )
@@ -56,16 +59,13 @@ from omnibase_infra.nodes.node_dlq_depth_evaluate_compute.models.model_dlq_thres
 from omnibase_infra.nodes.node_dlq_depth_evaluate_compute.models.model_dlq_topic_observation import (
     ModelDlqTopicObservation,
 )
-from omnibase_infra.nodes.node_dlq_depth_monitor_effect.adapters.aiokafka_dlq_offset_reader import (
-    AiokafkaDlqOffsetReader,
-)
 from omnibase_infra.nodes.node_dlq_depth_monitor_effect.models.model_dlq_depth_monitor_request import (
     ModelDlqDepthMonitorRequest,
 )
 from omnibase_infra.nodes.node_dlq_depth_monitor_effect.models.model_dlq_depth_monitor_result import (
     ModelDlqDepthMonitorResult,
 )
-from omnibase_infra.nodes.node_dlq_depth_monitor_effect.protocols.protocol_dlq_admin_transport import (
+from omnibase_infra.protocols.protocol_dlq_admin_transport import (
     ProtocolDlqAdminTransport,
     TopicPartition,
 )

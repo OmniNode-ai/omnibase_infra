@@ -30,7 +30,7 @@ from omnibase_infra.nodes.node_dlq_depth_monitor_effect.handlers.handler_dlq_dep
 from omnibase_infra.nodes.node_dlq_depth_monitor_effect.models.model_dlq_depth_monitor_request import (
     ModelDlqDepthMonitorRequest,
 )
-from omnibase_infra.nodes.node_dlq_depth_monitor_effect.protocols.protocol_dlq_admin_transport import (
+from omnibase_infra.protocols.protocol_dlq_admin_transport import (
     TopicPartition,
 )
 
