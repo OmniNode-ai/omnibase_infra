@@ -1,8 +1,16 @@
+<p align="center">
+  <picture>
+    <source media="(prefers-color-scheme: dark)" srcset="docs/assets/brand/omninode-inline-white.png">
+    <source media="(prefers-color-scheme: light)" srcset="docs/assets/brand/omninode-inline-full-color.svg">
+    <img alt="omninode" src="docs/assets/brand/omninode-inline-full-color.svg" width="420">
+  </picture>
+</p>
+
 # omnibase_infra
 
 Production infrastructure runtime for ONEX (OmniNode eXecution).
 
-[![CI](https://github.com/OmniNode-ai/omnibase_infra/actions/workflows/test.yml/badge.svg)](https://github.com/OmniNode-ai/omnibase_infra/actions/workflows/test.yml)
+[![CI](https://github.com/OmniNode-ai/omnibase_infra/actions/workflows/ci.yml/badge.svg)](https://github.com/OmniNode-ai/omnibase_infra/actions/workflows/ci.yml)
 [![Python 3.12+](https://img.shields.io/badge/python-3.12+-blue.svg)](https://www.python.org/downloads/)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
 
