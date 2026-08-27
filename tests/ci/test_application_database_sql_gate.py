@@ -419,6 +419,34 @@ def test_omn15361_replay_of_node_service_registry_migration_is_now_allowlisted(
     assert any("dynamic SQL" in violation for violation in violations)
 
 
+def test_omn16705_credentials_successor_is_path_exempted_for_pk_reconciliation(
+    tmp_path: Path,
+) -> None:
+    """The additive credentials successor may use a guarded static DDL block."""
+    repository = tmp_path / "repository"
+    repository.mkdir()
+    _git(repository, "init", "--initial-branch=main")
+    (repository / "baseline.txt").write_text("baseline\n", encoding="utf-8")
+    base_revision = _commit(repository, "baseline")
+    relative_path = Path(
+        "docker/migrations/forward/nodes/node_projection_tenant_credentials/"
+        "0002_credential_identity_not_null.sql"
+    )
+    target = repository / relative_path
+    target.parent.mkdir(parents=True)
+    target.write_text((_ROOT / relative_path).read_text(encoding="utf-8"))
+    head_revision = _commit(repository, "add credentials successor")
+
+    violations = validate_changed_sql(
+        repository,
+        base_revision,
+        head_revision,
+        ownership_manifest_paths=(),
+    ).violations
+
+    assert violations == ()
+
+
 def test_unqualified_non_allowlisted_internal_table_migration_still_fails(
     tmp_path: Path,
 ) -> None:

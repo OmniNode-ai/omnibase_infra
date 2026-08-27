@@ -272,6 +272,17 @@ _LEGACY_DEFAULT_SCHEMA_SQL_EXACT_PATHS = frozenset(
             "docker/migrations/forward/nodes/node_projection_intent_classification/"
             "0001_intent_classification_agent_source.sql"
         ),
+        # OMN-16705: additive successor for node_projection_tenant_credentials'
+        # legacy-default-schema table. The file reconciles applied public-table
+        # shape after restoring the already-applied 0000 bytes, and its primary
+        # key repair must be conditional to avoid rebuilding a valid key. That
+        # condition requires a catalog-inspecting DO block; no dynamic relation
+        # target is used, and created-object ownership validation remains active
+        # for this exempted path.
+        Path(
+            "docker/migrations/forward/nodes/node_projection_tenant_credentials/"
+            "0002_credential_identity_not_null.sql"
+        ),
     }
 )
 

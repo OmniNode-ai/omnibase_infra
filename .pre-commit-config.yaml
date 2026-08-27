@@ -405,6 +405,24 @@ repos:
         pass_filenames: false
         always_run: true
         stages: [pre-commit]
+      # OMN-16705: applied migration history is immutable. bootstrap.sql records
+      # a content_sha256 for every node migration it applies and refuses every
+      # later run when the file no longer hashes to it, so one in-place edit
+      # bricks forward-migration on every database that already applied the old
+      # bytes — discovered at the NEXT deploy, by whoever deploys next.
+      # 88f4ac346 and 7de798a4a each did exactly that and the .201 dev lane
+      # exited 3 on every subsequent run. The sync hook above and the manifest
+      # validator both stay green through such an edit (the vendored copy and
+      # the declared checksum are simply restamped together), which is why this
+      # is a separate hook rather than a widened one. always_run + index-mode:
+      # the predicate is a git diff, not a per-file lint.
+      - id: onex-check-migration-append-only
+        name: ONEX Migration Append-Only Check
+        entry: python3 scripts/validation/check_migration_append_only.py --staged --base origin/dev
+        language: system
+        pass_filenames: false
+        always_run: true
+        stages: [pre-commit]
       # OMN-14086: wire run_duplication_sweep.py (D1 Drizzle table dupes /
       # D2 omniclaude-vs-occ topic-producer conflicts) as an ENFORCED gate —
       # it had a full pytest fixture suite but zero CI/pre-commit caller,

@@ -89,10 +89,13 @@ REPO_ROOT="$(cd "${SCRIPT_DIR}/.." && pwd)"
 DEST_ROOT="${SYNC_NODE_MIGRATIONS_DEST_ROOT:-${REPO_ROOT}/docker/migrations/forward/nodes}"
 APPLICATION_MIGRATION_MANIFEST="${APPLICATION_MIGRATION_MANIFEST:-${REPO_ROOT}/docker/migrations/forward/_ledger/application-migrations.tsv}"
 
-# OMN-15717: a vendored file with a checked-in application-migrations.tsv row
-# is preserved applied history, not drift — see the LEGACY-DECLARED EXEMPTION
-# note above. Match on the manifest's artifact_path column (relative to the
-# forward-migration root, i.e. "nodes/<node>/<file>.sql").
+# OMN-15717 / OMN-16705: a vendored file with a checked-in
+# application-migrations.tsv row is preserved applied history, not drift — see
+# the LEGACY-DECLARED EXEMPTION note above. This applies both when the upstream
+# source disappeared and when a still-present upstream source later diverged:
+# the declared vendored bytes are frozen, and upstream deltas must land as a new
+# ordinal successor. Match on the manifest's artifact_path column (relative to
+# the forward-migration root, i.e. "nodes/<node>/<file>.sql").
 is_legacy_declared() {
   node_and_filename="$1" # "<node>/<file>.sql"
   [ -f "${APPLICATION_MIGRATION_MANIFEST}" ] || return 1
@@ -180,15 +183,23 @@ while IFS= read -r src_file; do
 
   if [ "${CHECK_MODE}" -eq 1 ]; then
     if [ ! -f "${dest_file}" ] || ! cmp -s "${src_file}" "${dest_file}"; then
-      echo "[sync-node-migrations] DRIFT: ${node_name}/${filename}" >&2
-      DRIFT=1
+      if [ -f "${dest_file}" ] && is_legacy_declared "${node_name}/${filename}"; then
+        echo "[sync-node-migrations] legacy-declared (OMN-16705), not rewritten: ${node_name}/${filename}"
+      else
+        echo "[sync-node-migrations] DRIFT: ${node_name}/${filename}" >&2
+        DRIFT=1
+      fi
     fi
   else
     mkdir -p "${dest_dir}"
     if [ ! -f "${dest_file}" ] || ! cmp -s "${src_file}" "${dest_file}"; then
-      cp "${src_file}" "${dest_file}"
-      echo "[sync-node-migrations]   vendored ${node_name}/${filename}"
-      COPIED=$((COPIED + 1))
+      if [ -f "${dest_file}" ] && is_legacy_declared "${node_name}/${filename}"; then
+        echo "[sync-node-migrations]   kept legacy-declared (OMN-16705) ${node_name}/${filename}"
+      else
+        cp "${src_file}" "${dest_file}"
+        echo "[sync-node-migrations]   vendored ${node_name}/${filename}"
+        COPIED=$((COPIED + 1))
+      fi
     fi
   fi
 done < <(find "${NODES_DIR}" -type f -path "*/migrations/*.sql" | sort)
