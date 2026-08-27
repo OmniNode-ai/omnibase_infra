@@ -74,6 +74,11 @@ TypeRunDodVerifyCommand = Callable[
 # Kill switch env var (checked first, unconditionally — OMN-16106).
 _KILL_SWITCH_ENV_VAR = "ONEX_AUTOCLOSE_DISABLED"
 
+# The key GitHub's `GET /repos/{owner}/{repo}/pulls/{number}/files` response
+# uses for a changed file's repo-relative path. It is "filename" — NOT "path",
+# which belongs to the Contents/trees APIs and never appears here (OMN-16736).
+_GH_PR_FILE_PATH_KEY = "filename"
+
 # Evidence-Ticket binding patterns.
 _CONTRACT_FILE_RE = re.compile(r"^contracts/(OMN-\d+)\.yaml$")
 _TITLE_EVIDENCE_RE = re.compile(r"evidence\((OMN-\d+)\)", re.IGNORECASE)
@@ -423,6 +428,26 @@ class HandlerEvidenceAutocloseSweep:
         ERROR_GITHUB_API, never as "this companion touched zero files" (which
         would fall through to a title-only binding match a real file listing
         might have disambiguated or contradicted).
+
+        OMN-16736: this read used ``item["path"]``. ``GET /repos/{owner}/{repo}
+        /pulls/{number}/files`` keys every entry on ``filename``; ``path`` is
+        the Contents/trees key and is absent from this endpoint's response, so
+        the guarded filter dropped every entry and the function returned
+        ``([], "")`` — empty list, EMPTY ERROR — for every PR the sweep ever
+        scanned. That is exactly the silent degrade-to-empty the paragraph
+        above forbids, and it made the ``contracts/<ticket>.yaml`` binding
+        signal dead code: every binding came from the PR title alone, and
+        ``SKIPPED_AMBIGUOUS_BINDING`` could never fire from a file listing.
+        Observed live in run 33050039689 — onex_change_control#7267 bound to
+        ``OMN-16682`` on its title while also touching ``contracts/
+        OMN-16691.yaml``, i.e. a mis-targeted flip under ``--apply`` rather
+        than the conservative skip the guard was written to produce.
+
+        A payload that is a non-empty list but yields zero usable filenames is
+        now an ERROR, not an empty success: the only honest reading of "the
+        API returned entries this code cannot interpret" is that the listing
+        could not be fetched, and the caller must fail closed rather than
+        proceed on a binding a real file listing might have contradicted.
         """
         path = f"repos/{repo}/pulls/{number}/files?per_page=100"
         data, error = await self._run_gh_command(
@@ -432,11 +457,18 @@ class HandlerEvidenceAutocloseSweep:
             return [], error or f"gh api returned no data for {repo}#{number} files"
         if not isinstance(data, list):
             return [], f"gh api returned non-list files payload for {repo}#{number}"
-        return [
-            str(item["path"])
+        files = [
+            str(item[_GH_PR_FILE_PATH_KEY])
             for item in data
-            if isinstance(item, dict) and item.get("path")
-        ], ""
+            if isinstance(item, dict) and item.get(_GH_PR_FILE_PATH_KEY)
+        ]
+        if data and not files:
+            return [], (
+                f"gh api returned {len(data)} file entries for {repo}#{number} but "
+                f"none carried a {_GH_PR_FILE_PATH_KEY!r} key — refusing to treat an "
+                "uninterpretable payload as an empty changed-file list"
+            )
+        return files, ""
 
     # -- main entrypoint ---------------------------------------------------
 

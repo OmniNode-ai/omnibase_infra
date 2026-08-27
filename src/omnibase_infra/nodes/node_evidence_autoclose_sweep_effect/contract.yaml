@@ -16,14 +16,19 @@
 # Related Tickets:
 #   - OMN-16106: this ticket (first slice)
 #   - OMN-13856: dod_verify / DurableEvidenceGate mechanical no-fake-Done guard
+#   - OMN-16736: the changed-file listing was read with the wrong GitHub key
+#     (`path` instead of `filename`), so it was empty for every PR ever
+#     scanned and the contracts/<ticket>.yaml binding signal below was dead
+#     code — every binding came from the PR title alone. An unreadable files
+#     payload now fails closed as an error rather than as an empty list.
 #
 name: "node_evidence_autoclose_sweep_effect"
 node_type: "EFFECT_GENERIC"
 contract_version:
   major: 1
   minor: 0
-  patch: 0
-node_version: "1.0.0"
+  patch: 1
+node_version: "1.0.1"
 description: >
   Scheduled sweep wiring companion-merge -> dod_verify -> governed Done flip. Enumerates merged onex_change_control evidence companions, extracts their Evidence-Ticket binding, re-runs dod_verify, and flips Done or posts a gap comment via the Linear API. DRY-RUN by default; ONEX_AUTOCLOSE_DISABLED kill switch checked first.
 
@@ -79,6 +84,17 @@ error_handling:
       retry_strategy: "none"
     - name: "DOD_VERIFY_NONZERO_EXIT"
       description: "`onex skill dod_verify <ticket>` exited non-zero — fail closed, never flip."
+      recoverable: true
+      retry_strategy: "none"
+    - name: "GITHUB_FILES_PAYLOAD_UNREADABLE"
+      # OMN-16736. The changed-file listing is a binding input, not a
+      # decoration: `contracts/<ticket>.yaml` entries are what disambiguate a
+      # companion whose title names a different (or an additional) ticket. A
+      # payload this node cannot interpret is therefore a FETCH FAILURE, and
+      # must never be read as "this companion touched zero files" — that
+      # reading silently demotes the file signal and lets a title-only match
+      # bind a ticket the real listing would have refused as ambiguous.
+      description: "`pulls/{n}/files` returned entries carrying no usable `filename` key — treated as ERROR_GITHUB_API, never as an empty changed-file list."
       recoverable: true
       retry_strategy: "none"
 io_operations:
@@ -140,7 +156,7 @@ metadata:
   author: "OmniNode Team"
   transport_type: "http"
   created: "2026-08-17"
-  updated: "2026-08-17"
+  updated: "2026-08-27"
   tags:
     - "effect"
     - "linear"
