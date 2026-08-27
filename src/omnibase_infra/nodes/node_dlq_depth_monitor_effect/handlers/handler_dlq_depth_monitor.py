@@ -41,7 +41,11 @@ from collections.abc import Mapping, Sequence
 from datetime import UTC, datetime
 from types import TracebackType
 
-from omnibase_infra.enums import EnumInfraTransportType
+from omnibase_infra.enums import (
+    EnumHandlerType,
+    EnumHandlerTypeCategory,
+    EnumInfraTransportType,
+)
 from omnibase_infra.errors import ModelInfraErrorContext, RuntimeHostError
 from omnibase_infra.nodes.node_dlq_depth_evaluate_compute.handlers.handler_dlq_depth_evaluate import (
     HandlerDlqDepthEvaluate,
@@ -238,6 +242,16 @@ class _AiokafkaDlqOffsetReader:
 class HandlerDlqDepthMonitor:
     """Probe DLQ topic offsets read-only and evaluate them."""
 
+    @property
+    def handler_type(self) -> EnumHandlerType:
+        """Classification: infra handler — it talks to a broker."""
+        return EnumHandlerType.INFRA_HANDLER
+
+    @property
+    def handler_category(self) -> EnumHandlerTypeCategory:
+        """EFFECT: reads external state. Read-only, but still an effect."""
+        return EnumHandlerTypeCategory.EFFECT
+
     def __init__(
         self,
         transport: ProtocolDlqAdminTransport | None = None,
@@ -363,7 +377,12 @@ class HandlerDlqDepthMonitor:
     def _kill_switch_engaged(self) -> bool:
         if self._kill_switch_ctor is not None:
             return self._kill_switch_ctor
-        return bool(os.environ.get(_KILL_SWITCH_ENV_VAR, ""))
+        # ONEX_EXCLUDE: kill switch must be readable with zero DI, so a run can
+        # be halted by setting a variable without editing or redeploying
+        # anything. Same rationale and shape as the kill switches on
+        # node_sync_revert_watchdog_effect and node_evidence_autoclose_sweep_effect.
+        raw = os.environ.get(_KILL_SWITCH_ENV_VAR, "")  # ONEX_EXCLUDE: see above
+        return bool(raw)
 
     @staticmethod
     def _build_live_transport() -> _AiokafkaDlqOffsetReader:
@@ -373,7 +392,14 @@ class HandlerDlqDepthMonitor:
         monitor report a clean bill of health for a lane it never contacted,
         which is a worse failure than not running at all.
         """
-        bootstrap = os.environ.get(_BOOTSTRAP_ENV_VAR, "").strip()
+        # ONEX_EXCLUDE: this handler is dispatched single-shot by `onex skill`
+        # from a scheduled workflow, with no container and therefore no
+        # constructor-injection path for the broker address. Declared in the
+        # contract as a required environment dependency, and read with NO
+        # default so a missing value fails the run closed rather than
+        # silently probing the wrong lane.
+        raw = os.environ.get(_BOOTSTRAP_ENV_VAR, "")  # ONEX_EXCLUDE: see above
+        bootstrap = raw.strip()
         if not bootstrap:
             raise RuntimeHostError(
                 f"{_BOOTSTRAP_ENV_VAR} is not set — refusing to probe an "

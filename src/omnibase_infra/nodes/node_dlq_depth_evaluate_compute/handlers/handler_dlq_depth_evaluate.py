@@ -38,6 +38,7 @@ that same sink correctly is one.
 
 from __future__ import annotations
 
+from omnibase_infra.enums import EnumHandlerType, EnumHandlerTypeCategory
 from omnibase_infra.nodes.node_dlq_depth_evaluate_compute.models.enum_dlq_depth_verdict import (
     EnumDlqDepthVerdict,
 )
@@ -62,6 +63,16 @@ _SECONDS_PER_MINUTE = 60.0
 
 class HandlerDlqDepthEvaluate:
     """Evaluate DLQ observations against contract-declared bounds. Pure."""
+
+    @property
+    def handler_type(self) -> EnumHandlerType:
+        """Classification: a pure compute handler, not an infra/IO one."""
+        return EnumHandlerType.COMPUTE_HANDLER
+
+    @property
+    def handler_category(self) -> EnumHandlerTypeCategory:
+        """COMPUTE, and deterministically so — no clock, no I/O, no randomness."""
+        return EnumHandlerTypeCategory.COMPUTE
 
     @staticmethod
     def _override_reason_for(policy: ModelDlqThresholdPolicy, topic: str) -> str:

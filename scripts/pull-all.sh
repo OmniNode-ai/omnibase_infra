@@ -149,13 +149,34 @@ _run_bounded() {
   local bound="$1"
   shift
 
-  local marker cmd_pid watchdog_pid rc waited
+  local marker pgid_marker cmd_pid cmd_pgid watchdog_pid rc waited
   marker=$(mktemp)
+  pgid_marker=""
 
-  set -m
-  "$@" &
-  cmd_pid=$!
-  set +m
+  if command -v setsid >/dev/null 2>&1; then
+    if declare -F "$1" >/dev/null 2>&1; then
+      export -f "$1"
+    fi
+    pgid_marker=$(mktemp)
+    setsid bash -c '
+      pgid_file="$1"
+      shift
+      printf "%s\n" "$$" > "$pgid_file"
+      "$@"
+    ' pull-all-bounded "$pgid_marker" "$@" &
+    cmd_pid=$!
+    for _ in {1..50}; do
+      [[ -s "$pgid_marker" ]] && break
+      sleep 0.1
+    done
+    cmd_pgid=$(cat "$pgid_marker" 2>/dev/null || printf "%s" "$cmd_pid")
+  else
+    set -m
+    "$@" &
+    cmd_pid=$!
+    cmd_pgid="$cmd_pid"
+    set +m
+  fi
 
   (
     waited=0
@@ -165,9 +186,11 @@ _run_bounded() {
       kill -0 "$cmd_pid" 2>/dev/null || exit 0
     done
     echo "timeout" > "$marker"
-    kill -TERM -"$cmd_pid" 2>/dev/null || kill -TERM "$cmd_pid" 2>/dev/null || true
+    _kill_descendants_leaf_first TERM "$cmd_pid"
+    kill -TERM -"$cmd_pgid" 2>/dev/null || kill -TERM "$cmd_pid" 2>/dev/null || true
     sleep 5
-    kill -KILL -"$cmd_pid" 2>/dev/null || kill -KILL "$cmd_pid" 2>/dev/null || true
+    _kill_descendants_leaf_first KILL "$cmd_pid"
+    kill -KILL -"$cmd_pgid" 2>/dev/null || kill -KILL "$cmd_pid" 2>/dev/null || true
   ) &
   watchdog_pid=$!
 
@@ -179,13 +202,28 @@ _run_bounded() {
 
   # Sweep the group unconditionally: a command can exit while leaving a
   # backgrounded descendant behind, which is the same orphan class.
-  kill -KILL -"$cmd_pid" 2>/dev/null || true
+  _kill_descendants_leaf_first KILL "$cmd_pid"
+  kill -KILL -"$cmd_pgid" 2>/dev/null || true
 
   if [[ -s "$marker" ]]; then
     rc=124
   fi
   rm -f "$marker"
+  [[ -n "$pgid_marker" ]] && rm -f "$pgid_marker"
   return "$rc"
+}
+
+_kill_descendants_leaf_first() {
+  local signal="$1"
+  local parent="$2"
+  local child
+
+  command -v pgrep >/dev/null 2>&1 || return 0
+  while IFS= read -r child; do
+    [[ -n "$child" ]] || continue
+    _kill_descendants_leaf_first "$signal" "$child"
+    kill "-$signal" "$child" 2>/dev/null || true
+  done < <(pgrep -P "$parent" 2>/dev/null || true)
 }
 # === End stage tracking ===
 
@@ -577,7 +615,7 @@ fi
 # is stable regardless of which directory it is computed against.
 #
 # The hash is computed against RELATIVE paths so a repo-side and cache-side
-# computation of the same plugin tree yield the same hash (shasum emits
+# computation of the same plugin tree yield the same hash (the hasher emits
 # `hash  path` — absolute paths would otherwise break comparability).
 #
 # `-exec ... +` NOT `-exec ... \;` (OMN-15590). The per-file form spawned ONE
@@ -590,12 +628,21 @@ fi
 # the same tree in 7.9s.
 _plugin_content_hash() {
   local root="$1"
+  local hasher=""
+  if command -v shasum >/dev/null 2>&1; then
+    hasher="shasum"
+  elif command -v sha1sum >/dev/null 2>&1; then
+    hasher="sha1sum"
+  else
+    echo "ERROR: neither shasum nor sha1sum is available for plugin content hashing" >&2
+    return 127
+  fi
   ( cd "${root}" && find . -type f \
       ! -name "*.pyc" \
       ! -path "*/__pycache__/*" \
       ! -name ".deployed-commit" \
       ! -name ".content-hash" \
-      -exec shasum {} + 2>/dev/null | sort | shasum | cut -d' ' -f1 )
+      -exec "$hasher" {} + 2>/dev/null | sort | "$hasher" | cut -d' ' -f1 )
 }
 
 STAGE_PLUGIN_CACHE="SKIPPED"  # no cache and/or no omniclaude clone -- nothing to refresh
