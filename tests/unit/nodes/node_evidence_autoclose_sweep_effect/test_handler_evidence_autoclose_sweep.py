@@ -128,7 +128,14 @@ def _make_gh_fake(
             if number in files_error_by_pr:
                 return None, files_error_by_pr[number]
             files = files_by_pr.get(number, [])
-            return [{"path": f} for f in files], ""
+            # OMN-16736: the real GitHub REST payload for
+            # `GET /repos/{owner}/{repo}/pulls/{number}/files` keys each entry
+            # on "filename". This double previously emitted {"path": ...},
+            # which is the Contents/trees key and appears nowhere in this
+            # endpoint's response — so the whole suite stayed green while the
+            # production reader matched nothing and returned ([], "") for
+            # every PR ever scanned. The double must speak the real API.
+            return [{"filename": f} for f in files], ""
         # PR-list page.
         page = int(path.rsplit("page=", 1)[1])
         if page == 1:
@@ -254,6 +261,113 @@ class TestBindingSkips:
             result.outcomes[0].decision
             == EnumEvidenceAutocloseDecision.SKIPPED_AMBIGUOUS_BINDING
         )
+
+    async def test_real_github_files_payload_shape_yields_contract_paths(self):
+        """Pin the live GitHub response shape: entries are keyed on ``filename``.
+
+        OMN-16736. This is the test the suite did not have. ``_fetch_pr_files``
+        read ``item["path"]`` while ``GET /repos/{owner}/{repo}/pulls/{number}
+        /files`` keys every entry on ``filename`` — verified live 2026-08-27,
+        the response object's keys are exactly the set asserted below and
+        ``path`` is not among them. The reader therefore returned ``([], "")``
+        for every PR ever scanned, and the old test double emitted the same
+        wrong key, so the defect was invisible: the double and the reader
+        agreed with each other and disagreed with GitHub.
+
+        This exercises the real reader against a verbatim-shaped payload
+        rather than the shared ``_make_gh_fake`` helper, so it stays honest
+        even if that helper is edited again.
+        """
+        live_shape_keys = {
+            "sha",
+            "filename",
+            "status",
+            "additions",
+            "deletions",
+            "changes",
+            "blob_url",
+            "raw_url",
+            "contents_url",
+            "patch",
+        }
+        assert "path" not in live_shape_keys
+
+        payload = [
+            {key: f"<{key}>" for key in live_shape_keys} | {"filename": name}
+            for name in (
+                "contracts/OMN-16682.yaml",
+                "drift/dod_receipts/OMN-16682/occ-self-bind-pr-7267/command.yaml",
+            )
+        ]
+
+        async def fake_run_gh_command(args: list[str], timeout: float):
+            return payload, ""
+
+        handler = HandlerEvidenceAutocloseSweep(
+            linear_client=FakeLinearClient(), run_gh_command=fake_run_gh_command
+        )
+        files, error = await handler._fetch_pr_files(_OCC_REPO, 7267, 30)
+        assert error == ""
+        assert files == [
+            "contracts/OMN-16682.yaml",
+            "drift/dod_receipts/OMN-16682/occ-self-bind-pr-7267/command.yaml",
+        ]
+
+    async def test_uninterpretable_files_payload_is_an_error_not_empty(self):
+        """Entries present but no usable path key must fail closed (OMN-16736).
+
+        The failure this guards is the one that actually shipped: a non-empty
+        payload whose entries this reader cannot interpret silently became an
+        empty changed-file list, which then fell through to a title-only
+        binding. "The API returned rows I cannot read" is a fetch failure, not
+        "this companion touched zero files".
+        """
+
+        async def fake_run_gh_command(args: list[str], timeout: float):
+            return [{"path": "contracts/OMN-1234.yaml"}], ""
+
+        handler = HandlerEvidenceAutocloseSweep(
+            linear_client=FakeLinearClient(), run_gh_command=fake_run_gh_command
+        )
+        files, error = await handler._fetch_pr_files(_OCC_REPO, 1234, 30)
+        assert files == []
+        assert "filename" in error
+
+    async def test_two_contract_files_beat_a_single_id_title(self):
+        """The live #7267 signature: title names one ticket, files name two.
+
+        OMN-16736. onex_change_control#7267 is titled ``evidence(OMN-16682):
+        ...`` but touches ``contracts/OMN-16682.yaml`` AND ``contracts/
+        OMN-16691.yaml``. With the file listing dead it bound to OMN-16682 and
+        reported no ambiguity — a mis-targeted Done flip under ``--apply``.
+        The file listing must win and the sweep must refuse to guess.
+        """
+        gh_fake = _make_gh_fake(
+            companions=[
+                _merged_pr(
+                    7267,
+                    "evidence(OMN-16682): OCC Evidence-Source autobind for X#327",
+                    "",
+                )
+            ],
+            files_by_pr={
+                7267: [
+                    "contracts/OMN-16682.yaml",
+                    "contracts/OMN-16691.yaml",
+                    "drift/dod_receipts/OMN-16682/occ-self-bind-pr-7267/command.yaml",
+                ]
+            },
+        )
+        handler = HandlerEvidenceAutocloseSweep(
+            linear_client=FakeLinearClient(), run_gh_command=gh_fake
+        )
+        result = await handler.handle(_request())
+        assert (
+            result.outcomes[0].decision
+            == EnumEvidenceAutocloseDecision.SKIPPED_AMBIGUOUS_BINDING
+        )
+        assert result.outcomes[0].ticket_id == ""
+        assert result.bindings_extracted == 0
 
     async def test_file_fetch_failure_fails_closed_never_falls_back_to_title(self):
         """A GitHub file-fetch failure must never be treated as 'zero files'.
