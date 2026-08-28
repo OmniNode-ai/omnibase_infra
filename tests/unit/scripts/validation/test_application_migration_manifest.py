@@ -198,7 +198,15 @@ def test_checked_in_manifest_is_exact_and_all_blockers_are_explicit() -> None:
     # +1 for OMN-16773's additive 0001 reconciliation migration for
     # node_projection_consumer_flow after the guarded-create-table invariant
     # started requiring explicit ADD COLUMN IF NOT EXISTS guards beside 0000.
-    assert len(result.declarations) == 116
+    # +1 for OMN-16777's
+    # node_projection_consumer_flow/0002_reconcile_consumer_flow_window_shapes.sql
+    # -- the OMN-16705 new-ordinal successor that authorises correcting 0000 and
+    # 0001, both of which spelled their guarded adds `... NOT NULL` and so could
+    # not reconcile a drifted table holding rows (Postgres: "contains null
+    # values", ON_ERROR_STOP=1, exit 3). The static gate was green while the
+    # failure class stayed open; 0002 re-expresses the corrected, nullable
+    # reconciliation additively.
+    assert len(result.declarations) == 117
     assert result.blocked == ()
     assert len(result.legacy_node_declarations) == 2
     assert len(result.cloud_aliases) == 30
