@@ -345,6 +345,56 @@ def _prove_real_rls_with_check() -> None:
         conn.close()
 
 
+def _prove_no_authority_records_the_claim(
+    tenant_target: ProjectionDatabaseTarget,
+) -> None:
+    """Prove the no-authority path stopped destroying the tenant dimension.
+
+    OMN-16831 (operator ruling 2026-08-28, option D). Before the ruling this
+    seam raised :class:`ProjectionTenantContextError` whenever no verified
+    capability was bound -- which is every real dispatch on every lane, because
+    ``bind_projection_tenant_authority`` has zero non-test call sites. Every
+    event on all 15 TENANT-classified relations was therefore quarantined
+    before a single statement was issued, and the immutable log kept a DLQ
+    record instead of a tenant-attributed fact.
+
+    Two things are proven here, and they are the whole ruling:
+
+    1. **The runtime no longer refuses.** The absence of an authorization
+       artifact is not an attribution failure, so the write is not stopped at
+       the runtime precondition -- the statement is actually issued. Falsified
+       by any ``ProjectionTenantContextError`` escaping this call.
+    2. **Isolation did not weaken -- it moved to its real enforcement point.**
+       The write is still refused, by the DATABASE's own RLS policy
+       (``InsufficientPrivilege``), exactly as :func:`_prove_real_rls_with_check`
+       proves for a raw unattributed ``INSERT``. Nothing is invented, defaulted
+       or substituted on the way there (OMN-16804 AC3).
+
+    The discriminator between the pre- and post-ruling worlds is therefore the
+    *class of the error*: the runtime's ``ProjectionTenantContextError`` before,
+    the database's ``InsufficientPrivilege`` after. Asserting the database error
+    is what makes this control falsifiable in both directions -- it fails if the
+    refusal moves back into the runtime, and it fails if isolation is dropped.
+    """
+    missing = _adapter(tenant_target)
+    try:
+        error = _raises(
+            psycopg2.errors.InsufficientPrivilege,
+            lambda: missing.upsert(
+                TENANT_TABLE,
+                "correlation_id",
+                {
+                    "correlation_id": uuid4(),
+                    "task_type": "no-authority-claim",
+                    "tenant_id": TENANT_A,
+                },
+            ),
+        )
+        assert not isinstance(error, ProjectionTenantContextError)
+    finally:
+        missing.close()
+
+
 def _prove_rollback_clears_reused_connection(
     tenant_target: ProjectionDatabaseTarget,
 ) -> None:
@@ -457,16 +507,12 @@ def main() -> None:
     finally:
         tenant_b.close()
 
+    # OMN-16831 (operator ruling 2026-08-28, option D): a MISMATCHED authority is
+    # still refused before a single connection is opened -- that half is unchanged
+    # and stays at full strength, which `connect.assert_not_called()` below proves.
+    # The no-authority case is no longer a refusal and is proven separately,
+    # against the real database, by _prove_no_authority_records_the_claim().
     with patch("psycopg2.connect") as connect:
-        missing = _adapter(tenant_target)
-        _raises(
-            ProjectionTenantContextError,
-            lambda: missing.upsert(
-                TENANT_TABLE,
-                "correlation_id",
-                {"correlation_id": uuid4(), "task_type": "missing"},
-            ),
-        )
         mismatch = _adapter(tenant_target, authority_a, event_a)
         _raises(
             ProjectionTenantContextError,
@@ -481,6 +527,8 @@ def main() -> None:
             ),
         )
     connect.assert_not_called()
+
+    _prove_no_authority_records_the_claim(tenant_target)
 
     _prove_rollback_clears_reused_connection(tenant_target)
 

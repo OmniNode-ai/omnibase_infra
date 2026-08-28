@@ -190,7 +190,7 @@ def test_red_control_mismatched_signer_binding() -> None:
         )
 
 
-def test_red_control_untrusted_tenant_never_becomes_isolation_context() -> None:
+def test_red_control_untrusted_tenant_selection() -> None:
     """A self-asserted envelope tenant is never promoted to an authority.
 
     OMN-16831 (ruling 2026-08-28, option D) changed what this control asserts,
