@@ -32,9 +32,12 @@
 #     `--base-ref` to the selector -- doing so would make the selector argparse
 #     hard-error on every push. DRY parity is with infra's OWN CI invocation.
 #   * The full-suite escalation runs the full UNIT suite (tests/unit/), not all of
-#     tests/. Infra's tests/integration, tests/chaos, tests/replay and
-#     tests/performance need a live runtime (Docker/Postgres/Kafka) and stay a
-#     CI-only concern; the pre-push subset is unit-scoped by design.
+#     tests/. Infra's tests/chaos, tests/replay, tests/performance and MOST of
+#     tests/integration need a live runtime (Docker/Postgres/Kafka) and stay a
+#     CI-only concern. The one enumerated exception (OMN-16825) is
+#     tests/integration/chains/, which runs on EventBusInmemory and needs no
+#     live service; see filter_prepush_runnable_paths below for the allowlist
+#     and its fail-closed default.
 #
 # FAIL-LOUD (CLAUDE.md Rule #8): if the diff base, the selector, or its adjacency
 # config cannot resolve, this hook HARD-ERRORS with a remediation message and a
@@ -592,18 +595,53 @@ REASON="$(read_sel full_suite_reason 2> /dev/null || true)"
 
 # OMN-15245 SEAM: the selector now emits changed tests/integration/ paths -- a
 # changed test module is never dropped by narrowing (fail-closed invariant).
-# This hook is unit-scoped by design and passes --ignore=tests/integration to
-# pytest below: handing pytest a path it also ignores collects nothing from it,
-# and when it is the ONLY path pytest exits 5 ("no tests ran") and blocks the
-# push. Filter those out here, visibly -- they are deferred to CI, which runs
-# them. Keep this function self-contained (no globals): it is extracted and
-# EXECUTED by tests/unit/scripts/test_prepush_smart_tests_seam.py.
+# Most of that tree needs a live service (Postgres, a broker, a running lane)
+# that a developer's machine does not have, so those paths are deferred to CI,
+# which runs them. Filter them out here, visibly, rather than handing pytest a
+# selection it cannot execute. Keep this function self-contained (no globals):
+# it is extracted and EXECUTED by
+# tests/unit/scripts/test_prepush_smart_tests_seam.py.
+#
+# OMN-16825 NARROWING -- the classifier, not an override. "Lives under
+# tests/integration/" was doing duty for "needs a live service", and those are
+# different sets. tests/integration/chains/ runs the chain gates entirely on
+# EventBusInmemory: no Postgres, no Kafka, no lane endpoint, nothing this hook
+# cannot provide. Worse, that subtree is collected wholesale by the REQUIRED
+# `Event Chain Gate` job (ci_summary_gate.py::STRICT_GATE_JOBS fail-closes on
+# it), so the blanket path heuristic made the local selector structurally blind
+# to a load-bearing merge gate: a chain regression was discoverable only after
+# the push. Recognising it here is the fix; forcing a full suite with
+# PREPUSH_FULL_SUITE / ENABLE_SMART_TESTS=off is NOT (CLAUDE.md Rule #4 forbids
+# both, and neither would have run tests/integration/chains/ anyway -- the
+# escalation target is tests/unit/).
+#
+# The allowlist is a POSITIVE, enumerated exception. Everything else under
+# tests/integration/ keeps the old default and is deferred, so an unrecognised
+# or brand-new subtree fails closed (deferred, never silently included). The
+# entries are matched on a path SEGMENT boundary -- `chains_experimental/` and
+# `chain/` do NOT match. The allowlist's premise (these suites declare no
+# live-service marker) is itself asserted by the seam test, so a Postgres-backed
+# test dropped into chains/ reddens CI instead of every developer's pre-push.
 filter_prepush_runnable_paths() {
-  local p
+  local p prefix keep
+  # Integration subtrees proven service-free and therefore locally runnable.
+  local -a locally_runnable_integration_prefixes=(
+    "tests/integration/chains/"
+  )
   while IFS= read -r p; do
     [ -n "$p" ] || continue
     case "$p" in
-      tests/integration/*) continue ;;
+      tests/integration/*)
+        keep=0
+        for prefix in "${locally_runnable_integration_prefixes[@]}"; do
+          # Append '/' to $p so a bare directory selection ("…/chains") matches
+          # the prefix on a segment boundary exactly as "…/chains/" does.
+          case "${p}/" in
+            "$prefix"*) keep=1 ;;
+          esac
+        done
+        [ "$keep" -eq 1 ] || continue
+        ;;
     esac
     printf '%s\n' "$p"
   done
@@ -619,6 +657,14 @@ done < <(read_sel selected_paths)
 PATHS=()
 PATHS_STR=""
 DEFERRED_STR=""
+# OMN-16825: the subset of PATHS that lives under tests/integration/ -- i.e. the
+# allowlisted, service-free integration suites. Tracked separately because the
+# fail-closed FULL-suite escalation runs a fixed target (tests/unit/) that does
+# NOT contain them; without appending these, escalating would run FEWER of the
+# impacted tests than the narrow selection did. An escalation must never be a
+# coverage downgrade.
+RUNNABLE_INTEGRATION_PATHS=()
+RUNNABLE_INTEGRATION_STR=""
 # Guard the array expansions: bash 3.2 (macOS system bash) errors on
 # "${arr[@]}" for an empty array under `set -u`.
 if [ "${#ALL_PATHS[@]}" -gt 0 ]; then
@@ -626,6 +672,12 @@ if [ "${#ALL_PATHS[@]}" -gt 0 ]; then
     if [ -n "$p" ]; then
       PATHS+=("$p")
       PATHS_STR="${PATHS_STR}${p} "
+      case "$p" in
+        tests/integration/*)
+          RUNNABLE_INTEGRATION_PATHS+=("$p")
+          RUNNABLE_INTEGRATION_STR="${RUNNABLE_INTEGRATION_STR}${p} "
+          ;;
+      esac
     fi
   done < <(printf '%s\n' "${ALL_PATHS[@]}" | filter_prepush_runnable_paths)
   for p in "${ALL_PATHS[@]}"; do
@@ -638,7 +690,10 @@ fi
 
 log "selection: is_full_suite=${IS_FULL} reason=${REASON:-none} paths=[ ${PATHS_STR}] (feature-flag=${FLAG})"
 if [ -n "$DEFERRED_STR" ]; then
-  log "deferred to CI (integration needs live services; this hook is unit-scoped): [ ${DEFERRED_STR}]"
+  log "deferred to CI (needs live services this hook cannot provide): [ ${DEFERRED_STR}]"
+fi
+if [ "${#RUNNABLE_INTEGRATION_PATHS[@]}" -gt 0 ]; then
+  log "running locally (service-free integration suite, OMN-16825): [ ${RUNNABLE_INTEGRATION_STR}]"
 fi
 
 # Assemble the pytest target set. tests/integration is always ignored -- it needs
@@ -702,12 +757,21 @@ if [ "$IS_FULL" = "True" ] || [ "$IS_FULL" = "true" ]; then
     # the local invocation is elided rather than merely deferred.
     log "FULL unit suite satisfied by the remote GitHub-hosted full-suite pass; not re-running it locally."
   else
-    log "running FULL unit suite (fail-closed escalation): uv run pytest ${FULL_SUITE_TARGET} --ignore=tests/integration ${PREPUSH_PYTEST_ARGS:-}"
+    # OMN-16825: $FULL_SUITE_TARGET is tests/unit/, which does NOT contain the
+    # allowlisted service-free integration suites. Append them so the
+    # fail-closed escalation stays a strict SUPERSET of the narrow selection it
+    # replaces -- an escalation that ran FEWER of the impacted tests than the
+    # narrowing would be a coverage downgrade wearing the word "full". The
+    # escalation still runs $FULL_SUITE_TARGET itself (single-sourced with
+    # selection_is_whole_suite above); this only ADDS to it. bash 3.2 under
+    # `set -u` errors on "${arr[@]}" for an empty array, hence the ${arr[@]+...}
+    # guard rather than a bare expansion.
+    log "running FULL unit suite (fail-closed escalation): uv run pytest ${FULL_SUITE_TARGET} ${RUNNABLE_INTEGRATION_STR}--ignore=tests/integration ${PREPUSH_PYTEST_ARGS:-}"
     (
       _pytest_extra_args="${PREPUSH_PYTEST_ARGS:-}"
       scrub_prepush_override_env
       # shellcheck disable=SC2086
-      exec uv run pytest "${FULL_SUITE_TARGET}" --ignore=tests/integration --tb=short ${_pytest_extra_args}
+      exec uv run pytest "${FULL_SUITE_TARGET}" ${RUNNABLE_INTEGRATION_PATHS[@]+"${RUNNABLE_INTEGRATION_PATHS[@]}"} --ignore=tests/integration --tb=short ${_pytest_extra_args}
     ) || RC=$?
   fi
 elif [ "${#PATHS[@]}" -gt 0 ]; then
