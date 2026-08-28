@@ -89,7 +89,11 @@ def test_terminal_event_emitted_after_successful_projection() -> None:
     assert parsed["correlation_id"] == str(correlation_id), (
         "correlation_id must propagate from source envelope to terminal event"
     )
-    assert parsed["payload"] == {"projected": True}
+    # OMN-16875: the applied event now carries the handler's own result, not a
+    # hardcoded literal. The ``projected`` ack is preserved for existing
+    # Pattern-B consumers; ``rows_upserted`` is the fact the handler produced,
+    # which previously never reached the bus at all.
+    assert parsed["payload"] == {"rows_upserted": 1, "projected": True}
 
 
 @pytest.mark.integration

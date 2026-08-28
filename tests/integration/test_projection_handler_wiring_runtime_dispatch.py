@@ -31,12 +31,26 @@ _PATCH_ENVIRON_GET = "omnibase_infra.runtime.auto_wiring.handler_wiring.os.envir
 def test_runtime_projection_dispatch_skips_standalone_runner_classes() -> None:
     """Kafka projection runners must not be invoked by DB-injection auto-wiring."""
 
+    class _SelfServedAdapter:
+        """The runner's own async pool adapter, opened in its constructor."""
+
+        async def connect(self) -> None: ...
+
+        async def close(self) -> None: ...
+
     class DelegationProjectionRunner:
         topics = ["onex.evt.omniclaude.task-delegated.v1"]
 
         def __init__(self) -> None:
-            self.db = object()
+            # OMN-16874: the skip is decided by SHAPE + declared capability, not
+            # by the class name. A standalone runner owns its consume loop
+            # (`run`), its projection entrypoint, its topics and its own DB
+            # adapter, and declares no in-process dispatch capability.
+            self.db = _SelfServedAdapter()
             self.called = False
+
+        async def run(self) -> None:
+            raise AssertionError("the runtime must not drive run()")
 
         async def project_event(self) -> None:
             self.called = True
