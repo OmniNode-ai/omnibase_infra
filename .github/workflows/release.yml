@@ -196,6 +196,160 @@ jobs:
           echo "main fast-forwarded to $TAG_SHA ($TAG)"
 
   # ---------------------------------------------------------------------------
+  # Post-release: disarm the release-identity gate the publish just armed
+  # (OMN-13912 / OMN-13412)
+  # ---------------------------------------------------------------------------
+  # Publishing X.Y.Z from dev HEAD leaves dev's [project].version EQUAL to the
+  # highest published tag. check_release_identity.py then fails every dev PR
+  # that touches src/** until somebody unrelated notices and bumps. Measured
+  # twice in this series: v0.38.10 (tagged 2026-08-26T01:38:23Z, disarmed
+  # 2026-08-26T03:44:31Z by OMN-16536) and v0.38.11 (tagged
+  # 2026-08-28T00:49:31Z, disarmed 2026-08-28T02:27:16Z by OMN-16769) — ~2h06m
+  # and ~1h38m of armed dev. The event that arms a gate must perform its own
+  # disarm in the same flow, so the train opens the bump PR itself.
+  #
+  # Gated on `needs.release.outputs.version` rather than
+  # `needs.release.result == 'success'` ON PURPOSE. That output is set by the
+  # release job's "Set release tag" step, i.e. only AFTER PyPI publish
+  # succeeded, but BEFORE the "Sync main to release tag" step that is currently
+  # failing GH006 (OMN-16343). Coupling the disarm to overall job success would
+  # mean an unrelated main-sync failure leaves dev wedged — which is exactly
+  # what happened for v0.38.10 and v0.38.11.
+  post-release-dev-bump:
+    timeout-minutes: 30
+    name: Post-Release Dev Version Bump
+    needs: release
+    if: >-
+      always() &&
+      needs.release.outputs.version != '' &&
+      !contains(needs.release.outputs.version, 'rc')
+    runs-on: >-
+      ${{ fromJSON(vars.OMNI_TRUSTED_CI_RUNS_ON_JSON || '["self-hosted","omnibase-ci"]') }}
+    steps:
+      - name: Check onexbot-occ-writer App credentials are configured
+        id: token_check
+        env:
+          APP_ID: ${{ secrets.ONEXBOT_OCC_APP_ID }}
+          APP_PRIVATE_KEY: ${{ secrets.ONEXBOT_OCC_PRIVATE_KEY }}
+        run: |
+          if [ -z "$APP_ID" ] || [ -z "$APP_PRIVATE_KEY" ]; then
+            echo "::error::ONEXBOT_OCC_APP_ID / ONEXBOT_OCC_PRIVATE_KEY are not configured -- the post-release dev bump cannot open its PR, so dev is left with the release-identity gate ARMED. Provision the App org secrets."
+            exit 1
+          fi
+
+      - name: Mint onexbot-occ-writer app token (dev bump PR identity)
+        id: app-token
+        uses: actions/create-github-app-token@d72941d797fd3113feb6b93fd0dec494b13a2547 # v1
+        with:
+          app-id: ${{ secrets.ONEXBOT_OCC_APP_ID }}
+          private-key: ${{ secrets.ONEXBOT_OCC_PRIVATE_KEY }}
+          owner: OmniNode-ai
+          repositories: omnibase_infra
+          permission-contents: write
+          permission-pull-requests: write
+
+      - name: Checkout dev
+        uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+        with:
+          ref: dev
+          fetch-depth: 0
+          token: ${{ steps.app-token.outputs.token }}
+
+      - uses: astral-sh/setup-uv@v7
+        with:
+          python-version: '3.12'
+
+      - name: Decide and apply the dev version bump
+        id: bump
+        env:
+          RELEASED_VERSION: ${{ needs.release.outputs.version }}
+        run: |
+          set -euo pipefail
+          # Decide first WITHOUT writing, so the decision is recorded even when
+          # it is a no-op (dev already ahead => the gate is already disarmed).
+          DECISION="$(python3 scripts/ci/post_release_dev_bump.py --released "$RELEASED_VERSION")"
+          echo "$DECISION"
+          ACTION="$(printf '%s' "$DECISION" | python3 -c 'import json,sys; print(json.load(sys.stdin)["action"])')"
+          TARGET="$(printf '%s' "$DECISION" | python3 -c 'import json,sys; print(json.load(sys.stdin)["target_version"])')"
+          echo "action=$ACTION" >> "$GITHUB_OUTPUT"
+          echo "target=$TARGET" >> "$GITHUB_OUTPUT"
+          echo "branch=automation/post-release-dev-bump-${TARGET}" >> "$GITHUB_OUTPUT"
+          {
+            echo "### Post-release dev version bump"
+            echo ""
+            echo '```json'
+            echo "$DECISION"
+            echo '```'
+          } >> "$GITHUB_STEP_SUMMARY"
+
+          if [ "$ACTION" = "bump" ]; then
+            python3 scripts/ci/post_release_dev_bump.py --released "$RELEASED_VERSION" --apply
+            # uv.lock carries this package's own version, so it must move with
+            # pyproject.toml or the lockfile-drift gate fails the bump PR.
+            uv lock
+          fi
+
+      - name: Open the bump PR and arm auto-merge
+        if: steps.bump.outputs.action == 'bump'
+        env:
+          GH_TOKEN: ${{ steps.app-token.outputs.token }}
+          RELEASED_VERSION: ${{ needs.release.outputs.version }}
+          TARGET: ${{ steps.bump.outputs.target }}
+          BRANCH: ${{ steps.bump.outputs.branch }}
+          RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
+        run: |
+          set -euo pipefail
+          # Idempotent: a re-dispatched tag must not open a second PR.
+          EXISTING=$(gh pr list --repo "${{ github.repository }}" \
+            --head "$BRANCH" --state open --json number --jq 'length')
+          if [ "${EXISTING:-0}" -gt 0 ]; then
+            echo "A bump PR for $BRANCH is already open -- not opening another."
+            exit 0
+          fi
+
+          git config user.name "onexbot-occ-writer[bot]"
+          git config user.email "onexbot-occ-writer[bot]@users.noreply.github.com"
+          git checkout -b "$BRANCH"
+          git add pyproject.toml uv.lock
+          git commit -m "chore(OMN-13912): post-release dev version bump to ${TARGET}
+
+          Disarms the OMN-13412 release-identity gate that publishing
+          ${RELEASED_VERSION} armed against dev.
+
+          Triggered-by: ${RUN_URL}"
+          git push origin "$BRANCH"
+
+          gh pr create --repo "${{ github.repository }}" \
+            --base dev --head "$BRANCH" \
+            --title "chore(OMN-13912): post-release dev version bump to ${TARGET}" \
+            --body "$(printf '%s\n' \
+              "## Summary" \
+              "" \
+              "Automated post-release disarm step (OMN-13912). Publishing \`${RELEASED_VERSION}\` left dev's \`[project].version\` equal to the highest published tag, which ARMS the OMN-13412 release-identity gate (\`scripts/check_release_identity.py\`) against every subsequent dev PR that touches \`src/**\`." \
+              "" \
+              "This PR bumps \`[project].version\` to \`${TARGET}\` and re-locks \`uv.lock\`, so the gate is disarmed by the same flow that armed it rather than by whichever unrelated PR trips it first." \
+              "" \
+              "## Ticket" \
+              "" \
+              "OMN-13912 — release train must auto-bump project.version post-publish." \
+              "" \
+              "## Triggered by" \
+              "" \
+              "Release workflow: ${RUN_URL}" \
+              "" \
+              "## Test plan" \
+              "" \
+              "- [ ] \`release-identity\` is green on this PR (that IS the behaviour under test)" \
+              "- [ ] CI passes (lockfile resolves, version matrix in sync)")"
+
+          gh pr merge --repo "${{ github.repository }}" --squash --auto "$BRANCH"
+
+      - name: Report no-op
+        if: steps.bump.outputs.action == 'noop'
+        run: |
+          echo "dev is already ahead of ${{ needs.release.outputs.version }} -- release-identity is disarmed, no PR needed."
+
+  # ---------------------------------------------------------------------------
   # Post-release: advisory checks that must NOT block publish (OMN-3833)
   # ---------------------------------------------------------------------------
   post-release-checks:
