@@ -44,16 +44,23 @@ def _sweep_step() -> dict[str, Any]:
     Located by the command it runs rather than by name or index, so renaming
     the step or inserting one ahead of it cannot silently retarget this test at
     a step that never runs the sweep.
+
+    Matched on ``skill evidence_autoclose_sweep`` alone: OMN-16846 moved the
+    invocation off ``uv run onex`` and onto the dispatch venv's own binary
+    (``"${DISPATCH_VENV}/bin/onex" skill evidence_autoclose_sweep``), so
+    requiring ``onex skill ...`` as one contiguous substring matched nothing
+    and this module's assertions collapsed rather than failing on their
+    subject.
     """
     workflow = yaml.safe_load(_WORKFLOW.read_text(encoding="utf-8"))
     steps = workflow["jobs"]["evidence-autoclose-sweep"]["steps"]
     matches = [
         step
         for step in steps
-        if "onex skill evidence_autoclose_sweep" in str(step.get("run", ""))
+        if "skill evidence_autoclose_sweep" in str(step.get("run", ""))
     ]
     assert len(matches) == 1, (
-        "expected exactly one step invoking `onex skill evidence_autoclose_sweep`, "
+        "expected exactly one step invoking `skill evidence_autoclose_sweep`, "
         f"found {len(matches)}"
     )
     return matches[0]

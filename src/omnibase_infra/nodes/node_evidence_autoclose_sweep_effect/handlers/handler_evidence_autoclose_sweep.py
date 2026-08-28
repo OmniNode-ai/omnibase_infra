@@ -16,8 +16,10 @@ Pipeline
 4. For each uniquely-bound ticket: fetch its Linear state + labels. The
    ``close_if_done_label`` label or an already-completed/canceled state
    short-circuits to a skip (decision-only path stays manual).
-5. Otherwise run the EXISTING verifier exactly as the controller does:
-   ``uv run onex skill dod_verify <ticket-id>``. Its stdout is parsed
+5. Otherwise run the EXISTING verifier, ``onex skill dod_verify <ticket-id>``,
+   dispatched from this process's own interpreter rather than re-resolved by
+   ``uv run`` from a cwd (OMN-16846 — see ``_dod_verify_argv``, which carries
+   the reason). Its stdout is parsed
    REGARDLESS of exit code — the CLI exits 1 on every genuine evidence gap
    while still printing a complete ``ModelSkillResult`` — and the verdict is
    read from ``result.terminal_payload`` (``result`` itself carries only the
@@ -111,8 +113,10 @@ import json
 import logging
 import os
 import re
+import sys
 from collections.abc import Awaitable, Callable
 from datetime import UTC, datetime, timedelta
+from pathlib import Path
 from typing import Literal
 from uuid import uuid4
 
@@ -137,8 +141,44 @@ logger = logging.getLogger(__name__)
 
 __all__ = ["HandlerEvidenceAutocloseSweep"]
 
-# Injectable subprocess-runner signatures (real impls call `gh`/`uv run onex`;
-# tests inject fakes with the same shape).
+
+def _dod_verify_argv(ticket_id: str) -> list[str]:
+    """Argv that dispatches the verifier from THIS process's own environment.
+
+    OMN-16846. This used to be ``["uv", "run", "onex", "skill", "dod_verify",
+    ticket_id]``, which does not name an environment at all — ``uv run``
+    re-resolves the project at the subprocess's cwd and uses that project's
+    venv. The sweep's cwd is the omnibase_infra product clone, so the verifier
+    landed in the PRODUCT venv, and the only way to make the verifier
+    resolvable was to co-install its provider (omnimarket, which ships
+    ``node_dod_verify``) into that same venv.
+
+    That is the collision. dod_verify's behaviour checks are ``uv run pytest``
+    with ``cwd: "${OMNI_HOME}/omnibase_infra"``, so they resolve the very same
+    venv, where ``tests/conftest.py`` calls ``assert_venv_purity()``
+    (OMN-15620) and correctly refuses an undeclared ``onex.nodes`` provider.
+    Both halves are right; only their collapse onto one venv is wrong. Run
+    33194402437 is the receipt: all three OMN-16759 behaviour checks recorded
+    ``FAILED ... Canonical venv is IMPURE``, ``behavior_proving=0``, without
+    a single test having executed.
+
+    Dispatching through ``sys.executable``'s sibling ``onex`` makes the
+    verifier's environment a property of how the SWEEP was composed rather
+    than of where it happens to be standing. The dispatch venv can then carry
+    the co-installed omnimarket while the product clone's venv stays pure and
+    the behaviour checks actually run. It is also strictly more determinate
+    for the existing local path, where both resolved to the same venv anyway.
+
+    A missing sibling ``onex`` raises ``FileNotFoundError`` at exec time,
+    which the caller already converts into a named per-ticket error; the
+    sweep job additionally asserts the binary resolves before any ticket is
+    scanned, so the loud failure comes first.
+    """
+    return [str(Path(sys.executable).parent / "onex"), "skill", "dod_verify", ticket_id]
+
+
+# Injectable subprocess-runner signatures (real impls call `gh`/the dispatch
+# venv's `onex`; tests inject fakes with the same shape).
 TypeRunGhCommand = Callable[[list[str], float], Awaitable[tuple[object | None, str]]]
 TypeRunDodVerifyCommand = Callable[
     [str, str, float], Awaitable[tuple[dict[str, object] | None, int, str]]
@@ -767,7 +807,9 @@ class HandlerEvidenceAutocloseSweep:
     async def _run_dod_verify_command_real(
         self, ticket_id: str, cwd: str, timeout: float
     ) -> tuple[dict[str, object] | None, int, str]:
-        args = ["uv", "run", "onex", "skill", "dod_verify", ticket_id]
+        # OMN-16846: resolved from THIS process's interpreter, not re-resolved
+        # by `uv run` from the cwd. See `_dod_verify_argv`.
+        args = _dod_verify_argv(ticket_id)
         try:
             proc = await asyncio.create_subprocess_exec(
                 *args,

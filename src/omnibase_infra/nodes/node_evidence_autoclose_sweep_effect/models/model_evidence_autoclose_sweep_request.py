@@ -42,12 +42,15 @@ class ModelEvidenceAutocloseSweepRequest(BaseModel):
     dispatch_cwd: str = Field(
         default="",
         description=(
-            "Working directory to run `uv run onex skill dod_verify <ticket>` "
-            "from. Empty string means: inherit the sweep process's own cwd "
-            "(the caller is expected to invoke the sweep from the "
-            "omnibase_infra clone, the same locality the controller uses for "
-            "governed flips -- dod_verify dispatches through omnimarket "
-            "co-installed into THAT venv, see omnimarket_drift_guard)."
+            "Working directory to run `onex skill dod_verify <ticket>` from. "
+            "Empty string means: inherit the sweep process's own cwd. "
+            "OMN-16846: this no longer selects the verifier's ENVIRONMENT. "
+            "The verifier is dispatched from the sweep interpreter's own "
+            "`onex` (see `_dod_verify_argv`), so the venv carrying "
+            "node_dod_verify is decided by how the sweep was composed rather "
+            "than by where it stands -- which is what lets the product clone "
+            "the behaviour checks run pytest in stay lock-exact. This field "
+            "now only sets the cwd the verifier process inherits."
         ),
     )
     dod_verify_timeout_seconds: int = Field(
