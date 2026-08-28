@@ -15,9 +15,24 @@
 # workflow to `--apply` is a later, deliberate change (a separate PR), not a
 # flag flip buried in this file. The kill switch (ONEX_AUTOCLOSE_DISABLED)
 # is honored by the node itself unconditionally, independent of this
-# workflow's config, so it is not (and must not be) surfaced as an input
+# workflow's config, so it is not (and must not be) surfaced as an INPUT
 # here — set it as a repo/environment secret-free variable to halt every run
 # without touching this file.
+#
+# OMN-16792 AC3. That paragraph was true about the NODE and false about the
+# JOB, and the gap made the kill switch inert. The node reads the switch from
+# its process environment; a GitHub repository variable is NOT exported into a
+# step's environment — it is only reachable through the `vars.*` expression
+# context. So `gh variable set ONEX_AUTOCLOSE_DISABLED` set a value that the
+# sweep process could never see, and the documented way to halt a live sweep
+# would have done nothing at all. The one place it can be halted is the sweep
+# step's own `env:`, which is why the plumb-through below exists and why it is
+# deliberately NOT a workflow input: an input is a per-dispatch choice, and a
+# kill switch has to bind every run including the scheduled ones.
+#
+# Unset renders as the empty string, which the node reads as falsy
+# (`bool(os.environ.get(...))`), so the absent-variable case is a normal run —
+# the same behaviour as before this line existed.
 #
 # omnimarket co-install IS wired here (OMN-16736). `onex skill dod_verify`
 # dispatches to `node_dod_verify`, which ships in omnimarket and is layered
@@ -512,6 +527,25 @@ jobs:
           # dod_verify finds no contract for any ticket and every verdict
           # degrades to a single skipped check (OMN-16736).
           ONEX_CC_REPO_PATH: ${{ github.workspace }}/.occ-src
+          # OMN-16792 AC3 — the kill switch, made reachable.
+          #
+          # `node_evidence_autoclose_sweep_effect` honours
+          # ONEX_AUTOCLOSE_DISABLED unconditionally and does ZERO I/O when it
+          # is set: no GitHub enumeration, no dod_verify subprocess, no Linear
+          # call. But it reads it from the PROCESS environment, and a GitHub
+          # repository variable never reaches a step's environment on its own —
+          # it lives in the `vars.*` expression context and nowhere else. This
+          # line is the whole wiring; without it `gh variable set
+          # ONEX_AUTOCLOSE_DISABLED --body 1` was a no-op and the documented
+          # halt procedure would have silently failed at the moment an operator
+          # needed it.
+          #
+          # Unset renders as "" and the node treats that as falsy, so a repo
+          # with no such variable behaves exactly as before.
+          #
+          # To halt:    gh variable set ONEX_AUTOCLOSE_DISABLED --repo OmniNode-ai/omnibase_infra --body 1
+          # To release: gh variable delete ONEX_AUTOCLOSE_DISABLED --repo OmniNode-ai/omnibase_infra
+          ONEX_AUTOCLOSE_DISABLED: ${{ vars.ONEX_AUTOCLOSE_DISABLED }}
         run: |
           set -euo pipefail
           # Fail fast on a missing secret rather than letting every ticket in
