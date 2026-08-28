@@ -96,6 +96,35 @@ CREATE TABLE IF NOT EXISTS omninode_internal.consumer_flow_windows (
     PRIMARY KEY (consumer_group, topic, window_start)
 );
 
+ALTER TABLE omninode_internal.consumer_flow_windows
+    ADD COLUMN IF NOT EXISTS consumer_group TEXT NOT NULL;
+ALTER TABLE omninode_internal.consumer_flow_windows
+    ADD COLUMN IF NOT EXISTS topic TEXT NOT NULL;
+ALTER TABLE omninode_internal.consumer_flow_windows
+    ADD COLUMN IF NOT EXISTS window_start TIMESTAMPTZ NOT NULL;
+ALTER TABLE omninode_internal.consumer_flow_windows
+    ADD COLUMN IF NOT EXISTS window_end TIMESTAMPTZ NOT NULL;
+ALTER TABLE omninode_internal.consumer_flow_windows
+    ADD COLUMN IF NOT EXISTS node_id UUID NOT NULL;
+ALTER TABLE omninode_internal.consumer_flow_windows
+    ADD COLUMN IF NOT EXISTS ingest_sequence BIGINT NOT NULL;
+ALTER TABLE omninode_internal.consumer_flow_windows
+    ADD COLUMN IF NOT EXISTS messages_in BIGINT;
+ALTER TABLE omninode_internal.consumer_flow_windows
+    ADD COLUMN IF NOT EXISTS messages_out BIGINT;
+ALTER TABLE omninode_internal.consumer_flow_windows
+    ADD COLUMN IF NOT EXISTS messages_dlq BIGINT;
+ALTER TABLE omninode_internal.consumer_flow_windows
+    ADD COLUMN IF NOT EXISTS handler_errors BIGINT;
+ALTER TABLE omninode_internal.consumer_flow_windows
+    ADD COLUMN IF NOT EXISTS upstream_produced BIGINT;
+ALTER TABLE omninode_internal.consumer_flow_windows
+    ADD COLUMN IF NOT EXISTS upstream_evidence TEXT NOT NULL;
+ALTER TABLE omninode_internal.consumer_flow_windows
+    ADD COLUMN IF NOT EXISTS flow_state TEXT NOT NULL;
+ALTER TABLE omninode_internal.consumer_flow_windows
+    ADD COLUMN IF NOT EXISTS evaluated_at TIMESTAMPTZ NOT NULL;
+
 -- The two queries this table exists to answer: "what is not flowing right now"
 -- and "what did consumer X do in the last hour".
 CREATE INDEX IF NOT EXISTS idx_consumer_flow_windows_state_time
@@ -115,6 +144,21 @@ CREATE TABLE IF NOT EXISTS omninode_internal.topic_produce_windows (
 
     PRIMARY KEY (topic, window_start)
 );
+
+ALTER TABLE omninode_internal.topic_produce_windows
+    ADD COLUMN IF NOT EXISTS topic TEXT NOT NULL;
+ALTER TABLE omninode_internal.topic_produce_windows
+    ADD COLUMN IF NOT EXISTS window_start TIMESTAMPTZ NOT NULL;
+ALTER TABLE omninode_internal.topic_produce_windows
+    ADD COLUMN IF NOT EXISTS window_end TIMESTAMPTZ NOT NULL;
+ALTER TABLE omninode_internal.topic_produce_windows
+    ADD COLUMN IF NOT EXISTS node_id UUID NOT NULL;
+ALTER TABLE omninode_internal.topic_produce_windows
+    ADD COLUMN IF NOT EXISTS ingest_sequence BIGINT NOT NULL;
+ALTER TABLE omninode_internal.topic_produce_windows
+    ADD COLUMN IF NOT EXISTS messages_produced BIGINT NOT NULL DEFAULT 0;
+ALTER TABLE omninode_internal.topic_produce_windows
+    ADD COLUMN IF NOT EXISTS evaluated_at TIMESTAMPTZ NOT NULL;
 
 CREATE INDEX IF NOT EXISTS idx_topic_produce_windows_topic_time
     ON omninode_internal.topic_produce_windows (topic, window_end DESC);
