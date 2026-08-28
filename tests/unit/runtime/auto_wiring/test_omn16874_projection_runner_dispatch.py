@@ -76,6 +76,9 @@ class _SelfServedAdapter:
 
     def __init__(self) -> None:
         self._pool: _LoopBoundPool | None = None
+        # OMN-16911: the real adapter carries the DSN it will dial. The runtime
+        # rebinds it to the topology-resolved workload identity before dispatch.
+        self.dsn = "postgresql://unbound@host/db"
 
     async def connect(self) -> None:
         self._pool = _LoopBoundPool()
@@ -104,6 +107,11 @@ class _InProcessProjectionWriter:
     def __init__(self) -> None:
         self.db = _SelfServedAdapter()
         self.writes = 0
+
+    def bind_projection_database_url(self, dsn: str) -> None:
+        # OMN-16911: declaring in-process dispatch obliges a handler that owns
+        # a pool to accept the DSN the runtime resolved and privilege-proved.
+        self.db.dsn = dsn
 
     @property
     def topics(self) -> list[str]:
