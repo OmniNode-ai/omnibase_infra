@@ -393,6 +393,48 @@ EXPECTED_EXTERNAL_CONTEXTS: tuple[str, ...] = (
     # tests/ci/fixtures/omn15979_merge_time_external_check_runs.json.
     "Integration Test Removal Gate",
     "Dep Provenance Gate",  # OMN-15737: 16/16 present, 16/16 green (#2546-#2567 AND #2646-#2669)
+    # OMN-16878 (OMN-16876 census items 1-2). Both ran on every infra PR and
+    # could not block a merge. That is a sharper failure here than elsewhere:
+    # `dev` requires exactly ONE context ("CI Summary", the OMN-4497
+    # single-umbrella design), so this tuple IS the whole external enforcement
+    # surface — a context missing from it has no second surface to fall back
+    # on and no branch-protection signal that it is missing.
+    #
+    # Both entries close a Done ticket that was not true on live state:
+    #   receipt-honesty     — OMN-13328's OCC contract asserted omnibase_infra,
+    #                         omniclaude and omnimarket "were already flipped";
+    #                         live readback on 2026-08-28 showed none of the
+    #                         three was enforced on any surface.
+    #   contract-validation — OMN-13326 claimed "REQUIRED across all 6 repos";
+    #                         it is genuinely required on omnibase_core,
+    #                         omnibase_compat, omnibase_spi, omniintelligence
+    #                         and omnidash, and was wired on neither
+    #                         omnibase_infra nor omniclaude.
+    #
+    # Admission: measured over the 16 most recent merged `dev` PR heads,
+    # #2955..#2970 (2026-08-28T07:11:14Z -> 2026-08-28T17:18:06Z). Both are
+    # 16/16 present and 16/16 green, zero reds — so neither is admitted on a
+    # red-rate that would turn a flaky producer into a merge outage, and no
+    # freeze-baseline ratchet is indicated.
+    #
+    # 16/16 green is also the vacuous-pass shape (OMN-16876 finding 5), so each
+    # was separately proven able to FAIL on real input before admission
+    # (OCC#7433, dod-nonvacuity-negative-tests):
+    #   receipt-honesty     — a gamed receipt (verifier == runner, echo probe)
+    #                         exits 1; a real committed receipt exits 0.
+    #   contract-validation — a schema-invalid contract exits 1;
+    #                         contracts/OMN-10041.yaml exits 0.
+    #
+    # Both producers declare `pull_request` AND `merge_group`, so requiring them
+    # cannot wedge a queue SHA, and BOTH jobs carry no `needs:` and no job-level
+    # `if:` at all — there is no upstream whose failure could skip them, so the
+    # OMN-15057 vector-5 skip-as-pass hazard that forced an `if: always()` fix on
+    # omniclaude's three producers does not arise here. Belt and braces anyway:
+    # that hazard is a BRANCH-PROTECTION property (a skipped check satisfies it),
+    # while this layer's EXTERNAL_GOOD_CONCLUSIONS admits only "success", so a
+    # skipped producer fails CI Summary closed rather than satisfying it.
+    "receipt-honesty",  # receipt-honesty.yml
+    "contract-validation",  # contract-validation.yml
 )
 
 # Contexts that were MEASURED and deliberately NOT enforced. Recorded as data —
