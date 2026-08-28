@@ -44,6 +44,17 @@ class EnumEvidenceAutocloseDecision(StrEnum):
     SKIPPED_NO_BINDING = "skipped_no_binding"
     # More than one distinct ticket id bound to the same merged companion.
     SKIPPED_AMBIGUOUS_BINDING = "skipped_ambiguous_binding"
+    # The sweep reached the same gap verdict it has ALREADY posted on this
+    # ticket, and did not repeat itself (OMN-16808). Enumeration is a bare
+    # `now - lookback_hours` window with no cursor, so one merged companion sits
+    # inside several consecutive scheduled windows; without a read-before-write
+    # check every one of them posts an identical comment. Counted as a skip, not
+    # a gap: the gap is real and still open, but this run added no information.
+    #
+    # Keyed on (ticket, gap class, verdict fingerprint) and NOT on the companion
+    # PR — the same verdict re-derived from a later companion is the same
+    # statement. A CHANGED verdict has a different fingerprint and does comment.
+    SKIPPED_DUPLICATE_COMMENT = "skipped_duplicate_comment"
     # `uv run onex skill dod_verify <ticket>` exited non-zero (dispatch/runtime
     # failure, not a normal verified/failed verdict) -> fail closed, never flip.
     ERROR_VERIFY_NONZERO_EXIT = "error_verify_nonzero_exit"
