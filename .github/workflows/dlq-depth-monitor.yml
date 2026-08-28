@@ -118,6 +118,9 @@ jobs:
 
       - name: Probe DLQ depth (read-only; non-zero exit == alert)
         env:
+          TOPIC_PREFIX: ${{ github.event.inputs.topic_prefix || 'onex.dlq.' }}
+          WINDOW_SECONDS: ${{ github.event.inputs.window_seconds || '1800' }}
+          SUPPRESS_ALERT_EXIT: ${{ github.event.inputs.suppress_alert_exit || 'false' }}
           # Trusted runner: KAFKA_BOOTSTRAP_SERVERS comes from ~/.omnibase/.env,
           # same sourcing pattern as baselines-scheduler.yml. The node applies
           # NO default broker address — an unset value fails the run closed
@@ -132,10 +135,14 @@ jobs:
             echo "::error::KAFKA_BOOTSTRAP_SERVERS is not set — refusing to probe an unspecified broker."
             exit 1
           fi
+          suppress_flag=()
+          if [ "$SUPPRESS_ALERT_EXIT" = "true" ]; then
+            suppress_flag=(--suppress-alert-exit)
+          fi
           uv run onex skill dlq_depth_monitor \
-            --topic-prefix "${{ github.event.inputs.topic_prefix || 'onex.dlq.' }}" \
-            --window-seconds "${{ github.event.inputs.window_seconds || '1800' }}" \
-            ${{ (github.event.inputs.suppress_alert_exit == 'true') && '--suppress-alert-exit' || '' }} \
+            --topic-prefix "$TOPIC_PREFIX" \
+            --window-seconds "$WINDOW_SECONDS" \
+            "${suppress_flag[@]}" \
             | tee dlq-monitor-result.json
 
       - name: Post summary

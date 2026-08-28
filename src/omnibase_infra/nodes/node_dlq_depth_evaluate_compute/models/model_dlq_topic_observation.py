@@ -34,11 +34,10 @@ class ModelDlqTopicObservation(BaseModel):
         ge=0,
         description=(
             "Sum of per-partition log-start offsets. This MOVES as retention "
-            "trims the log — it is not always 0. Proven live on the .201 dev "
-            "lane 2026-08-27: onex.dlq.omnibase-infra.events.v1 reported a "
-            "log-start of 8,157,557 against a high-water mark of 8,170,442. "
-            "Treating the high-water mark as 'depth' would have overstated "
-            "that topic's retained backlog by ~634x."
+            "trims the log, so it is not always 0. A retained DLQ can have a "
+            "large lifetime high-water mark while only a much smaller retained "
+            "backlog remains. Treating the high-water mark as 'depth' would "
+            "materially overstate retained backlog."
         ),
     )
     high_watermark: int = Field(

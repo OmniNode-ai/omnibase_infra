@@ -310,9 +310,19 @@ class HandlerDlqDepthMonitor:
             topic_log_start = 0
             topic_high_watermark = 0
             topic_window_start = 0
+            topic_complete = True
             for partition in topic_partitions:
-                log_start = log_starts[partition]
-                high_watermark = high_watermarks[partition]
+                log_start = log_starts.get(partition)
+                high_watermark = high_watermarks.get(partition)
+                if log_start is None or high_watermark is None:
+                    logger.warning(
+                        "DLQ partition %s reported no offsets — skipping topic %s "
+                        "rather than materializing a partial observation.",
+                        partition,
+                        topic,
+                    )
+                    topic_complete = False
+                    break
 
                 # SHARP EDGE 1 — `None` means "no record at or after the window
                 # start", i.e. nothing arrived. Normalize to the high-water mark
@@ -332,6 +342,9 @@ class HandlerDlqDepthMonitor:
                 topic_log_start += log_start
                 topic_high_watermark += high_watermark
                 topic_window_start += window_start
+
+            if not topic_complete:
+                continue
 
             observations.append(
                 ModelDlqTopicObservation(
@@ -382,7 +395,7 @@ class HandlerDlqDepthMonitor:
         # anything. Same rationale and shape as the kill switches on
         # node_sync_revert_watchdog_effect and node_evidence_autoclose_sweep_effect.
         raw = os.environ.get(_KILL_SWITCH_ENV_VAR, "")  # ONEX_EXCLUDE: see above
-        return bool(raw)
+        return raw.strip().lower() in {"1", "true", "yes", "on"}
 
     @staticmethod
     def _build_live_transport() -> _AiokafkaDlqOffsetReader:

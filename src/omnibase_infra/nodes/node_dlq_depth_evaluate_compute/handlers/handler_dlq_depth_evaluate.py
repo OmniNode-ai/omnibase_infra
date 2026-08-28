@@ -14,17 +14,16 @@ must alert), which would otherwise require reproducing a live outage.
 
 Why arrivals, not depth, is the primary signal
 ----------------------------------------------
-Measured on the .201 dev lane 2026-08-27:
-
-    onex.dlq.omnibase-infra.quarantine.v1   log-start 6          HWM 8,878,932
-    onex.dlq.omnibase-infra.events.v1       log-start 8,157,557  HWM 8,170,442
+Measured on the .201 dev lane 2026-08-27, one DLQ topic had a very small
+log-start against a multimillion-record lifetime high-water mark, while another
+had a retained backlog that was only a fraction of its lifetime high-water mark.
 
 Two things follow, and both are load-bearing:
 
 1. ``log_start_offset`` MOVES under retention. The high-water mark is a
-   LIFETIME counter, not a depth. Reading ``events.v1`` as 8.17M deep
-   would overstate its actual retained backlog (12,885) by ~634x.
-2. ``quarantine.v1`` holds ~8.88M retained records right now. Any finite
+   LIFETIME counter, not a depth; reading it as depth can materially overstate
+   retained backlog.
+2. One sampled DLQ held ~8.88M retained records at authoring time. Any finite
    depth bound is therefore either already breached — alerting on every
    run forever, which AC4 rejects in as many words ("a depth alert that
    trips permanently on a pre-existing backlog is not an alert") — or set

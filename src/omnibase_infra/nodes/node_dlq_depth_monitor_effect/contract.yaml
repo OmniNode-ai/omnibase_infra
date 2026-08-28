@@ -63,6 +63,28 @@ handler_routing:
         - evaluation
         - evaluated_at
         - window_seconds
+alert_policy:
+  window_seconds: 1800
+  # Matches the 30-minute scheduled cadence exactly so consecutive runs tile
+  # the timeline with neither gaps nor double-counting.
+
+  default_max_arrivals_per_window: 0
+  # 0 = ANY arrival into a dead-letter sink is alertable. Deliberately the
+  # strictest possible bound: a DLQ is where messages go when the system could
+  # not handle them, so a steady trickle is an unfixed defect, not a baseline
+  # to tune around. Sized to satisfy AC3's own falsification case: sixteen
+  # quarantined commands in one window must alert.
+
+  max_retained_depth: null
+  # SECONDARY, DISABLED BY DEFAULT, and this is a correctness requirement.
+  # A standing backlog depth bound cannot be the primary signal: any finite
+  # bound is either already breached forever or set so high it cannot fire.
+  # Depth is reported on every row as context; it does not gate the run unless
+  # an operator explicitly opts in.
+
+  overrides: []
+  # Per-topic allowances, each REQUIRED to carry its own `reason` and a
+  # state-based `ratify_by`. Empty by default: there are no silent allowances.
 error_handling:
   retry_policy:
     max_retries: 0
@@ -111,7 +133,7 @@ dependencies:
     type: "environment"
     env_var: "ONEX_DLQ_MONITOR_DISABLED"
     description: >
-      Checked first, unconditionally. When set to any non-empty value the monitor performs zero I/O and returns an empty, non-alerting result. Honored by the node itself, independent of workflow config, so a run can be halted without editing the workflow file.
+      Checked first, unconditionally. When set to an explicit truthy value (1, true, yes, or on) the monitor performs zero I/O and returns an empty, non-alerting result. Honored by the node itself, independent of workflow config, so a run can be halted without editing the workflow file.
 
     required: false
   - name: "aiokafka"

@@ -82,6 +82,17 @@ class FakeDlqAdminTransport:
         return {tp: self._topics[tp[0]][tp[1]][2] for tp in partition_timestamps}
 
 
+class MissingOffsetTransport(FakeDlqAdminTransport):
+    async def beginning_offsets(
+        self, partitions: Sequence[TopicPartition]
+    ) -> Mapping[TopicPartition, int]:
+        return {
+            tp: self._topics[tp[0]][tp[1]][0]
+            for tp in partitions
+            if tp != (_QUARANTINE, 1)
+        }
+
+
 def _request(**overrides: object) -> ModelDlqDepthMonitorRequest:
     payload: dict[str, object] = {
         "correlation_id": uuid4(),
@@ -170,6 +181,18 @@ class TestTopicEnumeration:
         observed = [v.topic for v in result.evaluation.verdicts]
         assert _QUARANTINE not in observed
         assert observed == [_EVENTS]
+
+    async def test_topic_with_missing_partition_offset_is_skipped_not_partial(
+        self,
+    ) -> None:
+        transport = MissingOffsetTransport(
+            topics={_QUARANTINE: {0: (0, 10, 9), 1: (0, 100, 90)}}
+        )
+
+        result = await HandlerDlqDepthMonitor(transport).handle(_request())
+
+        assert result.evaluation.verdicts == ()
+        assert result.evaluation.topics_observed == 0
 
     async def test_empty_broker_yields_empty_non_alerting_result(self) -> None:
         result = await HandlerDlqDepthMonitor(FakeDlqAdminTransport(topics={})).handle(
@@ -261,6 +284,30 @@ class TestAlertGating:
             await HandlerDlqDepthMonitor(transport).handle(
                 _request(suppress_alert_exit=False, max_retained_depth=1_000_000)
             )
+
+
+class TestKillSwitch:
+    async def test_false_string_does_not_disable_monitor(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        monkeypatch.setenv("ONEX_DLQ_MONITOR_DISABLED", "false")
+        transport = FakeDlqAdminTransport(topics={_QUARANTINE: {0: (0, 10, 10)}})
+
+        result = await HandlerDlqDepthMonitor(transport).handle(_request())
+
+        assert transport.list_topics_calls == 1
+        assert result.topics_matched == 1
+
+    async def test_truthy_string_disables_monitor(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        monkeypatch.setenv("ONEX_DLQ_MONITOR_DISABLED", "true")
+        transport = FakeDlqAdminTransport(topics={_QUARANTINE: {0: (0, 10, 10)}})
+
+        result = await HandlerDlqDepthMonitor(transport).handle(_request())
+
+        assert transport.list_topics_calls == 0
+        assert result.topics_matched == 0
 
 
 class TestWindowPlumbing:
