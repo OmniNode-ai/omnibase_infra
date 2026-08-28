@@ -55,10 +55,18 @@ def _container(
 
 
 def _healthy_prod_containers() -> list[dict[str, str]]:
-    """All declared prod services running, migrations exited 0."""
+    """All declared prod services running, migrations exited 0.
+
+    OMN-16803: `kind: profile_gated` services are deliberately omitted. The lane's
+    compose file disables them via a profile override, so ABSENT is their healthy
+    state — modelling them as Running would make the "healthy lane" fixture assert
+    the exact condition the census now flags as drift.
+    """
     services = list(MANIFEST["lanes"]["prod"]["services"])
     rows: list[dict[str, str]] = []
     for svc in services:
+        if svc.get("kind") == "profile_gated":
+            continue
         if svc.get("kind") == "oneshot":
             rows.append(
                 _container(
@@ -348,3 +356,85 @@ def test_tag_parsing_handles_registry_host_port() -> None:
     assert PLAN._tag_of("registry.local:5000/omninode-runtime:0.37.0") == "0.37.0"
     assert PLAN._tag_of("omninode-runtime") == "latest"
     assert PLAN._tag_of("omninode-runtime@sha256:abc") == "latest"
+
+
+def test_profile_gated_absent_is_not_drift() -> None:
+    """OMN-16803 root cause — the four false criticals that hid a real outage.
+
+    agent-actions-consumer / skill-lifecycle-consumer / intelligence-api /
+    omninode-contract-resolver carry `profiles: !override ["<lane>-disabled"]`
+    in the lane overlay, so they are not members of the lane's `runtime` profile
+    and no sanctioned `up` can start them. Declared `kind: service` they produced
+    four permanent container_absent criticals per lane, which is why a genuinely
+    degraded stability lane read as standing noise for a month. Absent MUST be
+    clean.
+    """
+    gated = [
+        s["name"]
+        for s in MANIFEST["lanes"]["prod"]["services"]
+        if s.get("kind") == "profile_gated"
+    ]
+    assert gated, "prod manifest must declare the profile-disabled services"
+
+    envelope = {
+        "lane": "prod",
+        "containers": _healthy_prod_containers(),
+        "networks": ["omnibase-infra-prod-network"],
+        "runtime_tag": None,
+    }
+    plan = PLAN.build_plan(envelope, MANIFEST)
+    assert plan["has_drift"] is False, plan["findings"]
+    absent = [f for f in plan["findings"] if f["container"] in gated]
+    assert not absent, f"profile_gated services flagged while absent: {absent}"
+
+
+def test_profile_gated_running_is_warning_drift() -> None:
+    """The assertion runs the other way for `profile_gated`: PRESENT is the drift.
+
+    A running container here means something started it outside the lane's active
+    profile (e.g. a warm restart naming it explicitly on the CLI, which bypasses
+    profile filtering) — the surprise worth surfacing.
+    """
+    gated = next(
+        s["name"]
+        for s in MANIFEST["lanes"]["prod"]["services"]
+        if s.get("kind") == "profile_gated"
+    )
+    containers = _healthy_prod_containers()
+    containers.append(_container(gated, lane="prod"))
+    envelope = {
+        "lane": "prod",
+        "containers": containers,
+        "networks": ["omnibase-infra-prod-network"],
+        "runtime_tag": None,
+    }
+    plan = PLAN.build_plan(envelope, MANIFEST)
+    present = [f for f in plan["findings"] if f["kind"] == "profile_gated_present"]
+    assert present, f"running profile_gated container not flagged: {plan['findings']}"
+    assert present[0]["container"] == gated
+    assert present[0]["severity"] == "warning"
+
+
+def test_profile_gated_running_is_not_reported_unexpected() -> None:
+    """A declared profile_gated container is still DECLARED.
+
+    It must surface as profile_gated_present (which says what is actually wrong),
+    never as unexpected_container (which would say the manifest does not know
+    about it at all).
+    """
+    gated = next(
+        s["name"]
+        for s in MANIFEST["lanes"]["prod"]["services"]
+        if s.get("kind") == "profile_gated"
+    )
+    containers = _healthy_prod_containers()
+    containers.append(_container(gated, lane="prod"))
+    envelope = {
+        "lane": "prod",
+        "containers": containers,
+        "networks": ["omnibase-infra-prod-network"],
+        "runtime_tag": None,
+    }
+    plan = PLAN.build_plan(envelope, MANIFEST)
+    unexpected = [f for f in plan["findings"] if f["kind"] == "unexpected_container"]
+    assert not unexpected, f"declared profile_gated flagged unexpected: {unexpected}"

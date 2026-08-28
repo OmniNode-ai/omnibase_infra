@@ -33,6 +33,11 @@ Drift kinds (named exactly so the auto-ticket says precisely what is wrong):
   image_tag_mismatch   — a running container's image tag fails the lane pattern
   unexpected_container — a container labeled for the lane that the manifest does
                          not declare
+  profile_gated_present — a container the lane's compose file deliberately
+                         disables (`profiles: !override [...-disabled]`, kind
+                         `profile_gated`) is nevertheless running. The inverse
+                         of container_absent: for this kind ABSENT is correct
+                         and PRESENT is the drift (OMN-16803)
 
 Fail-fast policy: any drift on a non-optional lane is a hard signal. There is no
 warn-only mode (gates-block policy). The driver exits non-zero on drift.
@@ -188,6 +193,33 @@ def reconcile_lane(
         name = svc["name"]
         kind = svc.get("kind", "service")
         actual = actual_by_name.get(name)
+
+        if kind == "profile_gated":
+            # OMN-16803: the lane's compose overlay disables this service via a
+            # profile override, so it is NOT a member of the lane's active
+            # profile and no sanctioned `up` can start it. Absent is the correct
+            # steady state — the assertion runs the other way. A running
+            # container here means something started it outside the profile
+            # (e.g. a warm restart that named it explicitly on the CLI, which
+            # bypasses profile filtering), which is exactly the surprise worth
+            # surfacing.
+            if actual is None or not _running(
+                actual.get("State", ""), actual.get("Status", "")
+            ):
+                continue
+            findings.append(
+                _finding(
+                    lane_name,
+                    "profile_gated_present",
+                    name,
+                    f"container {name!r} is running, but lane {lane_name!r} "
+                    f"disables it via a compose profile override "
+                    f"(kind=profile_gated, expected absent) — something started "
+                    f"it outside the lane's active profile",
+                    _SEVERITY_WARNING,
+                )
+            )
+            continue
 
         if kind in ("oneshot", "keepalive"):
             # Run-to-completion container. Absence (compose removed it) is fine.

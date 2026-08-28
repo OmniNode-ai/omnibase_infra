@@ -220,6 +220,7 @@ check_git_dirty() { :; }
 validate_build_source_config() { :; }
 guard_prod_promotion_lineage() { :; }
 resolve_compose_project() { printf '%s\\n' "${FAKE_COMPOSE_PROJECT}"; }
+guard_cold_bringup_lane_scope() { :; }
 guard_lane_deploy_attribution() { :; }
 guard_hotpatch_ledger() { :; }
 check_compose_project_collision() { :; }

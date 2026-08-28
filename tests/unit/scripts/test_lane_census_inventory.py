@@ -190,7 +190,14 @@ def test_empty_inventory_is_the_total_outage_signal(planner: Any) -> None:
         manifest,
     )
     assert plan["has_drift"] is True
-    assert len(plan["findings"]) >= 30
+    # OMN-16803 moved this floor from 30 to 20. Eight declared `kind: service`
+    # entries (four on stability-test, four on prod) were reclassified
+    # `profile_gated` because the lane compose files disable them via profile
+    # overrides — they can never run there, so their eight "absent" findings were
+    # permanent FALSE criticals padding this count. The signal being pinned here
+    # is unchanged: an empty envelope must still produce a large, uniformly
+    # critical, multi-lane finding set, never a quiet zero.
+    assert len(plan["findings"]) >= 20
     assert {f["severity"] for f in plan["findings"]} == {"critical"}
 
 

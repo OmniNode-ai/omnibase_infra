@@ -149,6 +149,12 @@ def test_clean_lane_exits_zero(tmp_path: Path) -> None:
     rows = []
     for svc in manifest["lanes"]["prod"]["services"]:
         name = svc["name"]
+        if svc.get("kind") == "profile_gated":
+            # OMN-16803: the lane's compose file disables these via a profile
+            # override, so ABSENT is their healthy state. Modelling them as
+            # Running would make the "clean lane" fixture assert the exact
+            # condition the census now reports as profile_gated_present drift.
+            continue
         if svc.get("kind") == "oneshot":
             rows.append(
                 f"{name}\texited\tExited (0) 1 hour ago\tx:1\tcom.omninode.lane=prod"

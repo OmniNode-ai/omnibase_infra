@@ -342,9 +342,15 @@ OPTIONS
                         WARM path: recreates only the RUNTIME_SERVICES subset
                         with 'up -d --no-deps'. Use on a lane whose deps + broker
                         are already up.
-    --cold              COLD-lane FULL bring-up (OMN-13414). For an ephemeral lane
-                        that was GC/idle-reclaimed and torn down to zero
-                        containers. Forces a workspace-mode build from the local
+    --cold              COLD-lane FULL bring-up (OMN-13414). For a lane that was
+                        GC/idle-reclaimed and torn down to zero containers, and
+                        (OMN-16803) for a PARTIALLY cold lane where some services
+                        are missing while its deps stay up — the warm --restart
+                        path cannot repair that case, because it resolves a
+                        running image id per service and an absent container has
+                        none. Allowed for dev and stability-test; REFUSED for
+                        prod (workspace images are non-main-lineage) and judge
+                        (read-only lane). Forces a workspace-mode build from the local
                         merged-dev siblings (BUILD_SOURCE=workspace + OMNI_HOME +
                         sibling REF build-args via stage_workspace.sh), brings up
                         deps + the migration one-shots, then brings the WHOLE
@@ -1204,6 +1210,85 @@ guard_lane_deploy_attribution() {
     fi
 
     log_info "Lane-deploy attribution recorded; grant interlock clear."
+}
+
+guard_cold_bringup_lane_scope() {
+    # Lane-scope guard for the --cold FULL bring-up (OMN-16803).
+    #
+    # WHY THIS EXISTS. Before OMN-16803 the only --cold lane restriction lived in
+    # parse_args, keyed on PROD_LANE — which is set by `--prod` or
+    # ONEX_DEPLOY_LANE=prod, NOT by the compose project. parse_args runs before
+    # resolve_compose_project, so `--cold` with
+    # OMNIBASE_INFRA_COMPOSE_PROJECT=omnibase-infra-prod and no --prod flag
+    # sailed straight past it. This guard runs AFTER the lane is resolved, so it
+    # sees the real target regardless of how it was selected.
+    #
+    # LANE POLICY:
+    #   prod          REFUSED. A --cold build is workspace-mode (non-main-lineage)
+    #                 and the prod-promotion gate refuses those images (OMN-13669).
+    #                 Promote a clean-main release via the gated node path.
+    #   judge         REFUSED. The lane map declares judge "NOT authorized for
+    #                 mutation — read-only" (CLAUDE.md lane table).
+    #   stability-test ALLOWED, and this is the OMN-16803 correction. The
+    #                 cold-lane runbook previously scoped --cold to dev only,
+    #                 lumping stability in with prod under a prod-specific
+    #                 rationale ("a workspace image the prod gate refuses"). That
+    #                 rationale does not transfer: stability-test is built in
+    #                 workspace mode BY DESIGN — its own sanctioned refresh
+    #                 (scripts/runtime_build/refresh_stability_lane.sh) sets
+    #                 BUILD_SOURCE=workspace DEPLOY_REF=origin/dev. A
+    #                 workspace/non-main-lineage image is precisely what the
+    #                 candidate-proving lane is supposed to run.
+    #
+    #                 The gap that scoping left open: a PARTIALLY cold governed
+    #                 lane had no recovery path at all. The warm --restart path
+    #                 refuses (refresh_stability_lane.sh:418 exit 64 cannot
+    #                 resolve a running image id for an absent container), --cold
+    #                 was runbook-forbidden, and the only remaining mechanisms
+    #                 were the OMN-15243 forbidden raw-compose signatures or a
+    #                 preflight bypass. The stability lane sat 6/13 for a month
+    #                 behind exactly that dead end (OMN-16803).
+    #
+    # This guard does NOT weaken anything: the attribution + live-grant interlock
+    # (OMN-15218) and the hot-patch ledger preflight (OMN-13014) both still run on
+    # this path, unchanged. The --cold-start hot-patch carve-out (OMN-16111) is
+    # per-container skip-not-fail, so containers that DO exist on a partially cold
+    # lane are still fully tripwire-probed.
+    local compose_project="$1"
+
+    if [[ "${COLD_FULL_BRINGUP}" != true ]]; then
+        return 0
+    fi
+
+    local lane
+    lane="$(resolve_lane_name "${compose_project}")"
+
+    case "${lane}" in
+        prod)
+            log_error "--cold cannot target the prod lane (resolved lane='${lane}', project='${compose_project}')."
+            log_error "  A cold bring-up builds a workspace-mode, non-main-lineage image and the"
+            log_error "  prod-promotion gate refuses those (OMN-13669)."
+            log_error "  Promote a clean-main release to prod via the gated node path instead."
+            exit 1
+            ;;
+        judge)
+            log_error "--cold cannot target the judge lane (resolved lane='${lane}', project='${compose_project}')."
+            log_error "  The lane map declares judge NOT authorized for mutation — read-only."
+            exit 1
+            ;;
+        stability-test)
+            log_info "Cold/partial-cold bring-up targeting the stability-test lane (OMN-16803)."
+            log_info "  Sanctioned: this lane is workspace-mode by design (refresh_stability_lane.sh"
+            log_info "  sets BUILD_SOURCE=workspace). Attribution + grant interlock and the hot-patch"
+            log_info "  ledger preflight both still gate this run."
+            log_info "  NOTE: set RUNTIME_BUILD_SERVICES_OVERRIDE to the 4 core services"
+            log_info "  (omninode-runtime runtime-effects runtime-worker projection-api) — a"
+            log_info "  workspace build of the other 4 is still broken by OMN-14262."
+            ;;
+        *)
+            log_info "Cold bring-up targeting lane '${lane}' (project '${compose_project}')."
+            ;;
+    esac
 }
 
 guard_hotpatch_ledger() {
@@ -3306,6 +3391,12 @@ main() {
     # OMN-15352: mirror into the global cleanup_on_exit() (a no-argument EXIT
     # trap handler) reads to resolve :latest image names on a failed deploy.
     DEPLOY_COMPOSE_PROJECT="${compose_project}"
+
+    # --cold lane-scope guard (OMN-16803). Runs here, not in parse_args, because
+    # the target lane is only known once the compose project is resolved — the
+    # parse_args PROD_LANE check cannot see a prod lane selected purely via
+    # OMNIBASE_INFRA_COMPOSE_PROJECT.
+    guard_cold_bringup_lane_scope "${compose_project}"
 
     # Lane-deploy attribution + live-grant interlock (OMN-15218). FIRST gate that
     # runs once the target lane is known and BEFORE anything is built, recreated,
