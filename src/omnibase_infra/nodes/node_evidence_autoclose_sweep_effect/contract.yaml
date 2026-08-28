@@ -141,6 +141,18 @@ error_handling:
 
       recoverable: true
       retry_strategy: "none"
+    - name: "DUPLICATE_SWEEP_COMMENT"
+      description: >
+        The sweep reached a gap verdict it has ALREADY posted on this ticket and did not repeat it (OMN-16808). Enumeration is a bare `now - lookback_hours` window with no cursor, so one merged companion sits inside several consecutive scheduled windows; before this guard every one of them posted an identical comment. Every sweep comment now carries a stable marker keyed on (gap class, verdict fingerprint) — NOT on the companion PR, because the same verdict re-derived from a later companion is the same statement — and the ticket's existing comments are read before any write. Recorded as SKIPPED_DUPLICATE_COMMENT and counted under tickets_skipped: the gap is real and still open, but this run added no information, and counting it under tickets_gap_posted would report comments that were never written. A CHANGED verdict has a different fingerprint and IS posted.
+
+      recoverable: false
+      retry_strategy: "none"
+    - name: "COMMENT_HISTORY_UNREADABLE"
+      description: >
+        The ticket's existing comments could not be read (Linear API failure, an uninterpretable payload, or a history longer than the paginated read cap), so the sweep cannot establish whether it has already made this statement. Fails closed as ERROR_LINEAR_API and writes nothing (OMN-16808): "I could not check" must never resolve to "so I will post". The flip is withheld on this path regardless — it is only ever reached from a gap classification.
+
+      recoverable: true
+      retry_strategy: "none"
     - name: "GITHUB_FILES_PAYLOAD_UNREADABLE"
       # OMN-16736. The changed-file listing is a binding input, not a
       # decoration: `contracts/<ticket>.yaml` entries are what disambiguate a

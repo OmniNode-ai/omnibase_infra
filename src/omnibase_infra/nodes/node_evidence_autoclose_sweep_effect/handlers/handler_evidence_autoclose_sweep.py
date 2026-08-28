@@ -48,9 +48,23 @@ Pipeline
    GAP_NO_BEHAVIOR_PROOF. A verdict carrying no such field at all (an
    omnimarket predating the change — i.e. every historical receipt) is an
    ERROR, not an inference.
-8. ``apply=False`` (the default) performs every read above but never calls
+8. COMMENT IDEMPOTENCY (OMN-16808). Enumeration is a bare
+   ``now - lookback_hours`` window with no cursor or watermark, and
+   ``seen_tickets`` is a per-run local, so one merged companion sits inside
+   several consecutive scheduled windows (``*/30`` cron against a multi-hour
+   lookback). Before ANY gap comment the ticket's existing comments are read
+   and matched against a stable marker embedded in every comment the sweep
+   writes; an equivalent statement already on the ticket is recorded as
+   SKIPPED_DUPLICATE_COMMENT and not repeated. Fail-closed: a comment history
+   that cannot be read is ERROR_LINEAR_API and writes nothing, because "I
+   could not check" must never resolve to "so I will post". The FLIPPED path
+   needs no such guard — it terminates in a completed state that
+   SKIPPED_ALREADY_DONE short-circuits on the next run.
+9. ``apply=False`` (the default) performs every read above but never calls
    a Linear mutation — every decision is logged as "would-do". ``apply=True``
-   performs the real ``issueUpdate``/``commentCreate`` mutation.
+   performs the real ``issueUpdate``/``commentCreate`` mutation. The dedup
+   read runs in BOTH modes: it is a read, so DRY-RUN stays zero-write, and a
+   DRY-RUN report is then an honest preview of what ``--apply`` would post.
 
 Non-blocking Design
 --------------------
@@ -62,12 +76,14 @@ the outcome list and do not abort the sweep — only a sweep-level failure
 from __future__ import annotations
 
 import asyncio
+import hashlib
 import json
 import logging
 import os
 import re
 from collections.abc import Awaitable, Callable
 from datetime import UTC, datetime, timedelta
+from typing import Literal
 from uuid import uuid4
 
 import httpx
@@ -173,6 +189,28 @@ mutation CreateComment($issueId: String!, $body: String!) {
   }
 }
 """
+
+# OMN-16808. The read half of read-before-write: what has this sweep already
+# said on this ticket? Paginated, because a partial history is indistinguishable
+# from "no marker present" and would resolve straight into a duplicate post.
+_ISSUE_COMMENTS_QUERY = """
+query IssueComments($id: String!, $after: String) {
+  issue(id: $id) {
+    id
+    comments(first: 100, after: $after) {
+      pageInfo { hasNextPage endCursor }
+      nodes { id body }
+    }
+  }
+}
+"""
+
+# Page cap for the comment-history read. Exhausting it WITHOUT reaching the end
+# of the connection is an unreadable history, not an empty one — the caller
+# fails closed. 5 x 100 comfortably exceeds any real ticket's comment count;
+# a ticket that somehow exceeds it stops receiving sweep comments rather than
+# receiving duplicates, which is the correct direction to be wrong in.
+_MAX_COMMENT_PAGES = 5
 
 
 async def _reap_timed_out_process(proc: asyncio.subprocess.Process) -> None:
@@ -384,6 +422,41 @@ def _ac_coverage_gap(
     return "", ()
 
 
+# -- comment idempotency marker (OMN-16808) --------------------------------
+#
+# Every comment the sweep writes ends with an HTML-comment marker. Linear
+# renders markdown, so the marker is invisible in the UI and exact-matchable in
+# the raw body — the sweep's own durable record that it has already made this
+# statement on this ticket, carried by the projection (the ticket) rather than
+# by the job. That is the same shape as every other piece of truth here: state
+# is read back from the surface it was written to, not held in the runner.
+#
+# The key is (gap class, verdict fingerprint) — NOT the companion PR. Two
+# facts drive that choice:
+#   * the same verdict re-derived from a later companion is the SAME statement,
+#     and keying on the companion would let every new OCC merge re-open the
+#     same gap comment;
+#   * a CHANGED verdict (3/6 -> 5/6, or GAP_POSTED -> GAP_NO_BEHAVIOR_PROOF) is
+#     new information, gets a different fingerprint, and is posted.
+# So each (ticket, gap class) carries at most one live statement, refreshed
+# when the underlying verdict moves and silent when it does not.
+_SWEEP_COMMENT_MARKER_PREFIX = "onex-autoclose-sweep"
+_SWEEP_COMMENT_MARKER_VERSION = "v1"
+
+
+def _sweep_comment_marker(
+    decision: EnumEvidenceAutocloseDecision, fingerprint_parts: tuple[str, ...]
+) -> str:
+    """Build the stable per-(ticket, gap class, verdict) comment marker."""
+    digest = hashlib.sha256("\x1f".join(fingerprint_parts).encode("utf-8")).hexdigest()[
+        :16
+    ]
+    return (
+        f"<!-- {_SWEEP_COMMENT_MARKER_PREFIX} {_SWEEP_COMMENT_MARKER_VERSION} "
+        f"class={decision.value} fingerprint={digest} -->"
+    )
+
+
 def _format_uncovered(uncovered: tuple[str, ...]) -> str:
     """Render the uncovered criteria as a bounded markdown list."""
     shown = uncovered[:_MAX_UNCOVERED_LISTED]
@@ -477,6 +550,51 @@ class _LinearClient:
             return False
         update = data.get("issueUpdate")
         return bool(isinstance(update, dict) and update.get("success"))
+
+    async def fetch_comment_bodies(self, issue_id: str) -> tuple[str, ...] | None:
+        """Every existing comment body on an issue, or None if unreadable.
+
+        None means "could not determine", NEVER "there are none" (OMN-16808).
+        The caller uses this to decide whether it has already said something on
+        this ticket, so an empty tuple and a failed read must not collapse into
+        the same value — one releases a write, the other must block it.
+
+        Fails closed on: an API/GraphQL failure, a payload shape this code
+        cannot interpret, a cursor the connection did not supply, and a history
+        longer than ``_MAX_COMMENT_PAGES`` pages (an unread tail could hold the
+        marker).
+        """
+        bodies: list[str] = []
+        cursor: str | None = None
+        for _ in range(_MAX_COMMENT_PAGES):
+            data = await self._query(
+                _ISSUE_COMMENTS_QUERY, {"id": issue_id, "after": cursor}
+            )
+            if data is None:
+                return None
+            issue = data.get("issue")
+            if not isinstance(issue, dict):
+                return None
+            connection = issue.get("comments")
+            if not isinstance(connection, dict):
+                return None
+            nodes = connection.get("nodes")
+            if not isinstance(nodes, list):
+                return None
+            for node in nodes:
+                if isinstance(node, dict):
+                    body = node.get("body")
+                    if isinstance(body, str):
+                        bodies.append(body)
+            page_info = connection.get("pageInfo")
+            page_info = page_info if isinstance(page_info, dict) else {}
+            if not page_info.get("hasNextPage"):
+                return tuple(bodies)
+            end_cursor = page_info.get("endCursor")
+            if not isinstance(end_cursor, str) or not end_cursor:
+                return None
+            cursor = end_cursor
+        return None
 
     async def create_comment(self, issue_id: str, body: str) -> bool:
         """Post a comment on an issue. False on any failure."""
@@ -826,6 +944,10 @@ class HandlerEvidenceAutocloseSweep:
                 EnumEvidenceAutocloseDecision.SKIPPED_ALREADY_DONE,
                 EnumEvidenceAutocloseDecision.SKIPPED_NO_BINDING,
                 EnumEvidenceAutocloseDecision.SKIPPED_AMBIGUOUS_BINDING,
+                # OMN-16808: the gap is real and still open, but this run said
+                # nothing new. A skip, not a gap post — counting it under
+                # `gap_posted` would report comments that were never written.
+                EnumEvidenceAutocloseDecision.SKIPPED_DUPLICATE_COMMENT,
             )
         )
         errored = sum(
@@ -851,6 +973,98 @@ class HandlerEvidenceAutocloseSweep:
             tickets_errored=errored,
             outcomes=tuple(outcomes),
         )
+
+    # -- comment idempotency funnel (OMN-16808) --------------------------
+
+    async def _dedup_gate(
+        self, *, issue_id: str, marker: str
+    ) -> tuple[Literal["post", "duplicate", "unreadable"], str]:
+        """Decide whether this exact statement may be written to this ticket.
+
+        Returns ``(gate, detail)``. ``unreadable`` is the fail-closed verdict:
+        the sweep could not establish whether it has already commented, so it
+        must not comment. Never returns ``post`` on a read it could not make.
+        """
+        if not issue_id:
+            return "unreadable", "Linear issue payload carried no issue id"
+        bodies = await self._linear.fetch_comment_bodies(issue_id)
+        if bodies is None:
+            return (
+                "unreadable",
+                "the ticket's existing comments could not be read from Linear",
+            )
+        if any(marker in body for body in bodies):
+            return "duplicate", marker
+        return "post", ""
+
+    async def _emit_gap_comment(
+        self,
+        *,
+        base: ModelEvidenceAutocloseOutcome,
+        apply: bool,
+        issue_id: str,
+        marker: str,
+        comment_body: str,
+    ) -> ModelEvidenceAutocloseOutcome:
+        """Single write path for every gap comment (OMN-16808).
+
+        All three gap classes funnel through here so the read-before-write rule
+        cannot be satisfied on two paths and forgotten on the third — which is
+        exactly how the defect existed: three call sites, three unconditional
+        ``create_comment`` calls, no shared gate.
+
+        The dedup read runs in DRY-RUN too. It is a read, so DRY-RUN stays
+        zero-write, and the report then previews what ``--apply`` would
+        actually do rather than promising a comment the write path would
+        suppress.
+        """
+        gate, detail = await self._dedup_gate(issue_id=issue_id, marker=marker)
+        if gate == "unreadable":
+            return base.model_copy(
+                update={
+                    "decision": EnumEvidenceAutocloseDecision.ERROR_LINEAR_API,
+                    "reason": (
+                        f"Refusing to comment — {detail}, so the sweep cannot "
+                        "establish that it has not already said this here "
+                        "(OMN-16808). Fails closed rather than risk a duplicate. "
+                        f"Flip withheld regardless: {base.reason}"
+                    ),
+                }
+            )
+        if gate == "duplicate":
+            return base.model_copy(
+                update={
+                    "decision": EnumEvidenceAutocloseDecision.SKIPPED_DUPLICATE_COMMENT,
+                    "reason": (
+                        "This exact verdict is already posted on the ticket "
+                        f"({marker}) — not repeating it. The gap itself is "
+                        f"unchanged and still open: {base.reason}"
+                    ),
+                }
+            )
+        if not apply:
+            logger.info(
+                "[DRY-RUN] Would post %s comment on %s (%s)",
+                base.decision.value,
+                base.ticket_id,
+                base.reason,
+            )
+            return base.model_copy(update={"reason": f"[DRY-RUN] {base.reason}"})
+
+        commented = await self._linear.create_comment(
+            issue_id, f"{comment_body}\n\n{marker}"
+        )
+        if not commented:
+            return base.model_copy(
+                update={
+                    "decision": EnumEvidenceAutocloseDecision.ERROR_LINEAR_API,
+                    "reason": (
+                        "commentCreate mutation failed while posting the gap: "
+                        f"{base.reason}"
+                    ),
+                }
+            )
+        return base.model_copy(update={"linear_comment_posted": True, "applied": True})
 
     async def _behavior_proof_outcome(
         self,
@@ -890,30 +1104,21 @@ class HandlerEvidenceAutocloseSweep:
             dod_verify_failed_count=failed_count,
             dod_verify_behavior_proving_count=0,
         )
-        if not apply:
-            logger.info(
-                "[DRY-RUN] Would withhold the Done flip on %s (%s)", ticket_id, reason
-            )
-            return base.model_copy(update={"reason": f"[DRY-RUN] {reason}"})
-
-        if not issue_id:
-            return ModelEvidenceAutocloseOutcome(
-                ticket_id=ticket_id,
-                companion_pr_number=companion_pr_number,
-                companion_pr_url=companion_pr_url,
-                decision=EnumEvidenceAutocloseDecision.ERROR_LINEAR_API,
-                reason=(
-                    "Linear issue payload missing id — refusing to comment. "
-                    f"Flip withheld regardless: {reason}"
-                ),
-                dod_verify_total_checks=total_checks,
-                dod_verify_verified_count=verified_count,
-                dod_verify_failed_count=failed_count,
-            )
-
-        commented = await self._linear.create_comment(
-            issue_id,
+        marker = _sweep_comment_marker(
+            EnumEvidenceAutocloseDecision.GAP_NO_BEHAVIOR_PROOF,
             (
+                str(total_checks),
+                str(verified_count),
+                str(failed_count),
+                "behavior=0",
+            ),
+        )
+        return await self._emit_gap_comment(
+            base=base,
+            apply=apply,
+            issue_id=issue_id,
+            marker=marker,
+            comment_body=(
                 "Proof-class gap (OMN-16106 evidence autoclose sweep) — NOT "
                 "flipped.\n\n"
                 f"Merged evidence companion: {companion_pr_url}\n"
@@ -924,9 +1129,6 @@ class HandlerEvidenceAutocloseSweep:
                 "`gh pr view --json state` check proves the merge, and the merge "
                 "is already established by the companion."
             ),
-        )
-        return base.model_copy(
-            update={"linear_comment_posted": commented, "applied": True}
         )
 
     async def _ac_coverage_outcome(
@@ -961,36 +1163,25 @@ class HandlerEvidenceAutocloseSweep:
             dod_verify_behavior_proving_count=behavior_proving_count,
             uncovered_acceptance_criteria=uncovered,
         )
-        if not apply:
-            logger.info(
-                "[DRY-RUN] Would withhold the Done flip on %s (%s)",
-                ticket_id,
-                ac_gap_reason,
-            )
-            return base.model_copy(update={"reason": f"[DRY-RUN] {ac_gap_reason}"})
-
-        if not issue_id:
-            # A missing issue id cannot be commented on -- but the flip is
-            # already withheld, so this stays a Linear-API error rather than
-            # silently degrading into "no gap found".
-            return ModelEvidenceAutocloseOutcome(
-                ticket_id=ticket_id,
-                companion_pr_number=companion_pr_number,
-                companion_pr_url=companion_pr_url,
-                decision=EnumEvidenceAutocloseDecision.ERROR_LINEAR_API,
-                reason=(
-                    "Linear issue payload missing id — refusing to comment. "
-                    f"Flip withheld regardless: {ac_gap_reason}"
-                ),
-                dod_verify_total_checks=total_checks,
-                dod_verify_verified_count=verified_count,
-                dod_verify_failed_count=failed_count,
-                uncovered_acceptance_criteria=uncovered,
-            )
-
-        commented = await self._linear.create_comment(
-            issue_id,
+        # The uncovered criteria are part of the statement, so they are part of
+        # the fingerprint: a description whose unchecked boxes changed is a
+        # different gap and does get a fresh comment.
+        marker = _sweep_comment_marker(
+            EnumEvidenceAutocloseDecision.GAP_AC_COVERAGE,
             (
+                str(total_checks),
+                str(verified_count),
+                str(failed_count),
+                f"behavior={behavior_proving_count}",
+                *uncovered,
+            ),
+        )
+        return await self._emit_gap_comment(
+            base=base,
+            apply=apply,
+            issue_id=issue_id,
+            marker=marker,
+            comment_body=(
                 "AC-coverage gap (OMN-16106 evidence autoclose sweep) — NOT flipped.\n\n"
                 f"Merged evidence companion: {companion_pr_url}\n"
                 f"dod_verify: {verified_count}/{total_checks} ACs verified, "
@@ -1003,9 +1194,6 @@ class HandlerEvidenceAutocloseSweep:
                 "its OCC contract (or check the boxes off if they are genuinely "
                 "done) — the sweep will flip it on the next run."
             ),
-        )
-        return base.model_copy(
-            update={"linear_comment_posted": commented, "applied": True}
         )
 
     async def _process_ticket(
@@ -1237,6 +1425,13 @@ class HandlerEvidenceAutocloseSweep:
                     dod_verify_failed_count=failed_count,
                     dod_verify_behavior_proving_count=behavior_proving_count,
                 )
+            # No dedup gate on the flip audit comment (OMN-16808), and that is
+            # deliberate: this line is reached only after `issueUpdate` has
+            # already moved the ticket into a completed state, which the next
+            # run short-circuits at SKIPPED_ALREADY_DONE before any verdict is
+            # reached. The flip path is self-limiting by its own terminal
+            # state; the gap paths have no such terminal state, which is why
+            # they need the read-before-write gate and this does not.
             commented = await self._linear.create_comment(
                 issue_id,
                 (
@@ -1268,53 +1463,7 @@ class HandlerEvidenceAutocloseSweep:
             f"dod_verify: {verified_count}/{total_checks} ACs verified, "
             f"{failed_count} failed — not all ACs are receipt-proven."
         )
-        if not request.apply:
-            logger.info(
-                "[DRY-RUN] Would post gap comment on %s (%s)", ticket_id, gap_reason
-            )
-            return ModelEvidenceAutocloseOutcome(
-                ticket_id=ticket_id,
-                companion_pr_number=companion_pr_number,
-                companion_pr_url=companion_pr_url,
-                decision=EnumEvidenceAutocloseDecision.GAP_POSTED,
-                reason=f"[DRY-RUN] {gap_reason}",
-                dod_verify_total_checks=total_checks,
-                dod_verify_verified_count=verified_count,
-                dod_verify_failed_count=failed_count,
-                applied=False,
-            )
-        if not issue_id:
-            return ModelEvidenceAutocloseOutcome(
-                ticket_id=ticket_id,
-                companion_pr_number=companion_pr_number,
-                companion_pr_url=companion_pr_url,
-                decision=EnumEvidenceAutocloseDecision.ERROR_LINEAR_API,
-                reason="Linear issue payload missing id — refusing to comment.",
-                dod_verify_total_checks=total_checks,
-                dod_verify_verified_count=verified_count,
-                dod_verify_failed_count=failed_count,
-            )
-        commented = await self._linear.create_comment(
-            issue_id,
-            (
-                "Evidence gap (OMN-16106 evidence autoclose sweep) — NOT flipped.\n\n"
-                f"Merged evidence companion: {companion_pr_url}\n"
-                f"dod_verify: {verified_count}/{total_checks} ACs verified, "
-                f"{failed_count} failed."
-            ),
-        )
-        if not commented:
-            return ModelEvidenceAutocloseOutcome(
-                ticket_id=ticket_id,
-                companion_pr_number=companion_pr_number,
-                companion_pr_url=companion_pr_url,
-                decision=EnumEvidenceAutocloseDecision.ERROR_LINEAR_API,
-                reason="commentCreate mutation failed while posting the gap.",
-                dod_verify_total_checks=total_checks,
-                dod_verify_verified_count=verified_count,
-                dod_verify_failed_count=failed_count,
-            )
-        return ModelEvidenceAutocloseOutcome(
+        gap_base = ModelEvidenceAutocloseOutcome(
             ticket_id=ticket_id,
             companion_pr_number=companion_pr_number,
             companion_pr_url=companion_pr_url,
@@ -1323,6 +1472,20 @@ class HandlerEvidenceAutocloseSweep:
             dod_verify_total_checks=total_checks,
             dod_verify_verified_count=verified_count,
             dod_verify_failed_count=failed_count,
-            linear_comment_posted=True,
-            applied=True,
+        )
+        marker = _sweep_comment_marker(
+            EnumEvidenceAutocloseDecision.GAP_POSTED,
+            (str(total_checks), str(verified_count), str(failed_count)),
+        )
+        return await self._emit_gap_comment(
+            base=gap_base,
+            apply=request.apply,
+            issue_id=issue_id,
+            marker=marker,
+            comment_body=(
+                "Evidence gap (OMN-16106 evidence autoclose sweep) — NOT flipped.\n\n"
+                f"Merged evidence companion: {companion_pr_url}\n"
+                f"dod_verify: {verified_count}/{total_checks} ACs verified, "
+                f"{failed_count} failed."
+            ),
         )

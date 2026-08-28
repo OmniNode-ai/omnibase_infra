@@ -67,7 +67,40 @@ on:
       lookback_hours:
         description: 'Scan companions merged within this many hours of now.'
         required: false
-        default: '2'
+        # 6h, raised from 2h (OMN-16792, landed with OMN-16808).
+        #
+        # `schedule` is best-effort: GitHub drops ticks under load rather than
+        # queueing them. Measured over 2026-08-22T20:03Z -> 2026-08-27T19:05Z,
+        # 194 scheduled runs fired against 238 expected at `*/30` (81%), and
+        # the discriminating measurement is createdAt->startedAt = 0s median
+        # AND 0s max across all 194: nothing was slow, the missing runs were
+        # never created. Observed inter-run gaps: median 30 min, p90 43 min,
+        # p100 236 min (3h56m).
+        #
+        # A 2h lookback is smaller than that p100 gap, so a companion merged
+        # inside the uncovered window was scanned by NO run, ever — the sweep
+        # only looks backwards a fixed window and never revisits. 6h clears the
+        # observed p100 by ~1.5x, so a dropped tick is absorbed rather than
+        # lost.
+        #
+        # The reason this is a safe one-line change NOW and was not before:
+        # widening the window widens the OVERLAP between consecutive runs, and
+        # before OMN-16808 every overlapping run re-posted an identical gap
+        # comment on every gapped ticket it re-saw. The read-before-write dedup
+        # in the handler makes re-scanning a companion cost nothing observable,
+        # so the lookback can be sized for the worst measured gap instead of
+        # for comment noise. That is OMN-16792 option 1, chosen because it
+        # removes the data-loss risk without deciding anything architectural;
+        # options 2 (event trigger) and 3 (runtime scheduler) stay open on that
+        # ticket.
+        #
+        # Residual, recorded not fixed here: `max_companions` is capped at 50
+        # per run. A 10h window hit that cap on 2026-08-28 (run 33128661860,
+        # companions_scanned=50), so a window wide enough to truncate would
+        # reintroduce the same loss by a different door. At the observed OCC
+        # merge rate (~50 per 10h) a 6h window lands around 30 companions,
+        # under the cap. Sizing the cap belongs to OMN-16792.
+        default: '6'
       diagnose_tickets:
         description: >-
           OMN-16788 diagnostic. Comma-separated ticket ids (e.g.
@@ -481,7 +514,7 @@ jobs:
             exit 1
           fi
           uv run onex skill evidence_autoclose_sweep \
-            --lookback-hours "${{ github.event.inputs.lookback_hours || '2' }}"
+            --lookback-hours "${{ github.event.inputs.lookback_hours || '6' }}"
 
       - name: Post summary
         if: always()

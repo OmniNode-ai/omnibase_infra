@@ -135,6 +135,14 @@ class _FakeLinear:
         self.comments.append((issue_id, body))
         return True
 
+    async def fetch_comment_bodies(self, issue_id: str) -> tuple[str, ...] | None:
+        # OMN-16808: the sweep reads what it has already said on a ticket
+        # before it says anything else. This double serves its own write log
+        # back, so a second run over the same window is distinguishable from a
+        # first — a fake that always returned () would let the duplicate-post
+        # defect pass unnoticed here.
+        return tuple(body for target, body in self.comments if target == issue_id)
+
 
 def _handler(
     skill_result: dict[str, object], linear: _FakeLinear
