@@ -359,6 +359,27 @@ def test_full_suite_target_is_single_sourced() -> None:
     )
 
 
+def test_escalation_is_a_superset_of_the_runnable_selection() -> None:
+    """OMN-16825: escalating must never run FEWER impacted tests.
+
+    ``FULL_SUITE_TARGET`` is ``tests/unit/``. Since the classifier now lets the
+    service-free integration suites (``tests/integration/chains/``) into the
+    narrow selection, an escalation that ran only ``tests/unit/`` would drop
+    tests the narrowing had just added -- a coverage downgrade wearing the word
+    "full". The escalation must therefore carry the runnable integration paths
+    alongside the single-sourced target, not instead of it.
+    """
+    script_text = HOOK_SCRIPT.read_text(encoding="utf-8")
+    assert (
+        'uv run pytest "${FULL_SUITE_TARGET}" '
+        '${RUNNABLE_INTEGRATION_PATHS[@]+"${RUNNABLE_INTEGRATION_PATHS[@]}"}'
+    ) in script_text, (
+        "expected the fail-closed escalation to append the runnable "
+        "(service-free) integration paths to ${FULL_SUITE_TARGET}, so it "
+        "remains a strict superset of the impacted-subset selection"
+    )
+
+
 def test_guard_is_called_when_the_selection_is_whole_suite_equivalent() -> None:
     """Static wiring: the impacted-subset branch must consult the guard.
 
