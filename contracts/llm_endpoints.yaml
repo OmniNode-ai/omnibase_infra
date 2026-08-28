@@ -41,78 +41,145 @@ endpoints:
     endpoint_url: http://192.168.86.201:8000
     url_env_var: LLM_CODER_URL
     role_env_alias: LLM_CODER_SLOW_URL
-    model_hf_id: cyankiwi/Qwen3-Coder-30B-A3B-Instruct-AWQ-4bit
+    model_hf_id: Qwen/Qwen3.8-27B
     role: coder_slow
     status: running
     hardware: RTX 5090 (.201)
-    context_window_budgeted: 114688
-    launchd_unit_or_none: null
-    notes: Primary code generation, 112K context via TurboQuant aither-kvcache.
-  - slot_id: coder-fast-4090
-    host: 192.168.86.201
-    port: 8001
-    endpoint_url: http://192.168.86.201:8001
-    url_env_var: LLM_CODER_FAST_URL
-    role_env_alias: null
-    model_hf_id: Corianas/DeepSeek-R1-Distill-Qwen-14B-AWQ
-    role: coder_fast
-    status: running
-    hardware: RTX 4090 (.201)
-    context_window_budgeted: 24576
+    context_window_budgeted: 122880
     launchd_unit_or_none: null
     notes: |
-      Model is historically misaligned (reasoning model under coder-fast env var).
-      Also serves the reasoning_lightweight role via LLM_REASONING_LIGHTWEIGHT_URL
-      alias (same URL, different role). Rename deferred — see Task 29.
+      OMN-16442 reconcile (2026-08-28) against the canonical inventory
+      omni_home/docs/reference/AI_LAB_HARDWARE.md ("Last verified: 2026-08-28").
+      The .201 reboot of 2026-08-23 replaced the vLLM Qwen3-Coder-30B stack with
+      SGLang + a DSpark drafter. Live readback, GET http://192.168.86.201:8000
+      /v1/models: id "qwen3.8", owned_by "sglang", max_model_len 122880.
+      model_hf_id records the BASE model (Qwen/Qwen3.8-27B, per the served
+      artifact's own card); the artifact actually loaded is a locally-produced
+      NVFP4 quantization at /data/inference/hf-cache/Qwen3.8-27B-NVFP4-RTX5090
+      with no upstream HF repo of its own. context_window_budgeted raised
+      114688 -> 122880 to match the live max_model_len (the old value described
+      the retired TurboQuant aither-kvcache setup).
+      CONCURRENCY: the server currently admits ONE running generation request,
+      so concurrency must be queued ABOVE the model server. Treat this slot as
+      single-slot when sizing callers.
+  - slot_id: coder-fast-4090
+    host: null
+    port: null
+    endpoint_url: null
+    url_env_var: null
+    role_env_alias: null
+    model_hf_id: null
+    role: coder_fast
+    status: disabled
+    hardware: RTX 4090 (.201) — PHYSICALLY REMOVED
+    context_window_budgeted: null
+    launchd_unit_or_none: null
+    notes: |
+      RETIRED (OMN-16442, 2026-08-28). The RTX 4090 that backed this slot was
+      physically REMOVED from .201 for RMA at the 2026-08-23 reboot (OMN-16407,
+      after three recurrences of the same GPU1 driver fault). This is not a
+      degraded or stopped service — the hardware is absent. Live re-probe
+      2026-08-28: `curl http://192.168.86.201:8001/v1/models` -> exit 7
+      "Couldn't connect to server". The canonical inventory
+      (omni_home/docs/reference/AI_LAB_HARDWARE.md, verified 2026-08-28) marks
+      .201:8001 DEAD / RETIRED.
+      LLM_CODER_FAST_URL was RELEASED here rather than left pointing at nothing:
+      a disabled slot must not own a runtime env var, and a runtime-required env
+      var must resolve to a live listener. Its former consumer (the
+      docker/catalog/model_registry.yaml `deepseek-r1-14b` entry) was removed in
+      the same change. Re-provisioning a fast coder slot means registering the
+      REPLACEMENT hardware, not re-enabling this one.
   - slot_id: embeddings-201
     host: 192.168.86.201
     port: 8002
     endpoint_url: http://192.168.86.201:8002
     url_env_var: LLM_EMBEDDING_URL
     role_env_alias: null
-    model_hf_id: Alibaba-NLP/gte-Qwen2-1.5B-instruct
+    model_hf_id: Qwen/Qwen3-Embedding-0.6B
     role: embedding
     status: running
-    hardware: RTX 4090 (.201)
+    hardware: RTX 5090 (.201)
     context_window_budgeted: 8192
     launchd_unit_or_none: null
     notes: |
       Canonical runtime embedding endpoint for LLM_EMBEDDING_URL. Moved
       :8100 -> :8002 (vllm-embeddings) per OMN-13664/OMN-13807; the legacy
       :8100 process is down.
+      OMN-16442 reconcile (2026-08-28): model_hf_id corrected from
+      Alibaba-NLP/gte-Qwen2-1.5B-instruct, which is NOT what this endpoint
+      serves. Live readback, GET http://192.168.86.201:8002/v1/models: id
+      "text-embedding-qwen3", owned_by "vllm", root
+      /data/inference/hf-cache/qwen3-embedding-0.6b, max_model_len 8192. The
+      artifact is Qwen/Qwen3-Embedding-0.6B (BF16) — confirmed by the HF hub
+      cache entry models--Qwen--Qwen3-Embedding-0.6B on .201.
+      VECTOR DIMENSION: 1024 (config.json hidden_size, read live on .201). This
+      is a HARD placement constraint — a consumer collection sized for any other
+      width CANNOT be served by this endpoint. gte-Qwen2-1.5B-instruct emitted a
+      different width, so the stale id here was an actively misleading claim.
+      `hardware` also corrected: the 4090 was removed for RMA (OMN-16407); this
+      service runs on the surviving RTX 5090.
   - slot_id: reasoning-deepseek-32b
     host: 192.168.86.200
     port: 8101
     endpoint_url: http://192.168.86.200:8101
     url_env_var: LLM_DEEPSEEK_R1_URL
     role_env_alias: LLM_REASONING_URL
-    model_hf_id: mlx-community/DeepSeek-R1-Distill-Qwen-32B-bf16
+    model_hf_id: antirez/deepseek-v4-gguf
     role: reasoning
     status: running
     hardware: M2 Ultra (.200)
-    context_window_budgeted: 8192
-    launchd_unit_or_none: com.mlx.deepseek-reasoning
+    context_window_budgeted: 65536
+    launchd_unit_or_none: null
     notes: |
       Architecturally-different second opinion for math/algorithmic code.
-      KNOWN DRIFT: .env and Infisical LLM_DEEPSEEK_R1_URL both point at
-      .201:8001 (14B) instead of this slot. Out of plan scope; see
-      "Discovered Drifts Beyond Plan Scope".
+      OMN-16442 reconcile (2026-08-28): the SLOT is still live at .200:8101, but
+      it no longer serves the MLX DeepSeek-R1-Distill-Qwen-32B it was recorded
+      with. Live readback, GET http://192.168.86.200:8101/v1/models: ids
+      {"deepseek-v4-flash", "deepseek-v4-pro"} (two aliases for one model,
+      display name "DeepSeek V4 Flash"), owned_by "ds4.c", context_length
+      131072. Served by the `ds4-server` binary (antirez/ds4) under a keepalive
+      LaunchAgent, NOT by the retired com.mlx.deepseek-reasoning MLX job — that
+      launchd label is cleared here because it no longer owns this port.
+      model_hf_id names the GGUF artifact repo actually loaded
+      (antirez/deepseek-v4-gguf, from $HOME/Code/ds4/gguf/); the upstream base is
+      deepseek-ai/DeepSeek-V4-Flash.
+      context_window_budgeted 8192 -> 65536: a deliberate conservative budget
+      matching omnimarket routing_tiers.yaml's max_context_tokens for this
+      backend, still well inside the server's 131072 ceiling. It is a BUDGET,
+      not the server limit.
+      RESOLVED DRIFT: the old "KNOWN DRIFT" note said LLM_DEEPSEEK_R1_URL pointed
+      at .201:8001 (14B) instead of this slot. That target no longer exists at
+      all (GPU removed for RMA, OMN-16407), so the only correct value for
+      LLM_DEEPSEEK_R1_URL is this slot.
   - slot_id: reasoning-moe-35b
-    host: 192.168.86.200
-    port: 8102
-    endpoint_url: http://192.168.86.200:8102
-    url_env_var: LLM_QWEN3_NEXT_URL
-    role_env_alias: LLM_REASONING_FAST_URL
-    model_hf_id: mlx-community/Qwen3.6-35B-A3B-8bit
+    host: null
+    port: null
+    endpoint_url: null
+    url_env_var: null
+    role_env_alias: null
+    model_hf_id: null
     role: reasoning_fast
-    status: running
+    status: disabled
     hardware: M2 Ultra (.200)
-    context_window_budgeted: 8192
-    launchd_unit_or_none: com.mlx.qwen36-reasoning
+    context_window_budgeted: null
+    launchd_unit_or_none: null
     notes: |
       Replaced Qwen3-Next-80B-A3B 2026-04-18 after PR-review benchmark win
-      (3.6x faster, unique blocking bugs caught). Env-var name retained for
-      backward compat; role alias LLM_REASONING_FAST_URL seeded but unread.
+      (3.6x faster, unique blocking bugs caught).
+      DISABLED (OMN-16442, 2026-08-28): .200:8102 has no listener. Live probe:
+      `curl http://192.168.86.200:8102/v1/models` -> exit 7 "Couldn't connect to
+      server". The canonical inventory
+      (omni_home/docs/reference/AI_LAB_HARDWARE.md, verified 2026-08-28) states
+      that Mac Studio ports 8100, 8102 and 8103 all had no model listener when
+      re-probed, and that old references to an M2 Ultra embedding service,
+      DeepSeek-R1-Distill, Qwen2.5-72B or Qwen2-VL on those ports are STALE.
+      LLM_QWEN3_NEXT_URL and the LLM_REASONING_FAST_URL alias are released here:
+      a disabled slot must not own runtime env vars. The Studio's live MLX
+      service is now Qwen3.8-27B-8bit on 127.0.0.1:8099 — bound LOCALHOST-ONLY,
+      so it is NOT a LAN-routable replacement for this slot and is deliberately
+      not registered. Registering it needs explicit availability semantics + a
+      health check first (the same gate the inventory places on the
+      mini/laptop/Gemma-canary endpoints).
   - slot_id: embeddings-200
     host: 192.168.86.200
     port: 8100
@@ -129,21 +196,41 @@ endpoints:
       Stopped 2026-04-18 to free RAM. Restart:
       `launchctl bootstrap gui/$(id -u) ~/Library/LaunchAgents/com.mlx.embeddings.plist`.
       Historical LLM_EMBEDDING_URL owner; disabled slots must not own runtime env vars.
+      OMN-16442 (2026-08-28): re-probed and still down — `curl
+      http://192.168.86.200:8100/v1/models` -> exit 7. Status unchanged; this is
+      a confirmation, not a state change. NOTE the dimension trap: this slot's
+      artifact (Qwen3-Embedding-8B-4bit-DWQ) does NOT emit the same vector width
+      as the live embeddings-201 slot (Qwen/Qwen3-Embedding-0.6B, 1024-dim), so
+      it is not a drop-in restore for LLM_EMBEDDING_URL consumers.
   - slot_id: second-opinion-gemma
-    host: 192.168.86.200
-    port: 8103
-    endpoint_url: http://192.168.86.200:8103
+    host: null
+    port: null
+    endpoint_url: null
     url_env_var: null
     role_env_alias: LLM_REASONING_TRANSIENT_URL
-    model_hf_id: mlx-community/gemma-4-31b-it-8bit
+    model_hf_id: null
     role: reasoning_transient
     status: on_demand
     hardware: M2 Ultra (.200)
     context_window_budgeted: null
     launchd_unit_or_none: null
     notes: |
-      Weights cached; booted via mlx_lm.server for high-stakes second opinions.
+      Weights cached; booted on demand for high-stakes second opinions.
       LLM_REASONING_TRANSIENT_URL seeded empty; set when process boots.
+      OMN-16442 (2026-08-28): the recorded MLX endpoint .200:8103 is GONE —
+      `curl http://192.168.86.200:8103/v1/models` -> exit 7 "Couldn't connect to
+      server". host/port/endpoint_url/model_hf_id are nulled rather than left
+      describing a listener that does not exist.
+      A Gemma second-opinion service DOES run on the Studio today, but it is a
+      different one and is NOT registered here on purpose: gemma-4-31b-q4
+      (llama.cpp, Gemma 4 31B IT QAT Q4_0) on 127.0.0.1:8104, which the canonical
+      inventory (omni_home/docs/reference/AI_LAB_HARDWARE.md, verified
+      2026-08-28) classifies LIVE CANARY — "localhost only and non-persistent".
+      A localhost-only, non-persistent process cannot back a LAN-routable
+      contract slot, and the inventory's own follow-ups require explicit
+      availability semantics + health checks before such endpoints enter typed
+      routing catalogs. Promoting this slot is that scoped follow-on, not this
+      reconcile.
   - slot_id: vision-planned
     host: null
     port: null

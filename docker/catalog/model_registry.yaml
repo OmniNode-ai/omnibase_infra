@@ -6,61 +6,83 @@
 # Cost and speed data come from the eval harness (OMN-7840) via live metrics.
 # Models without >=20 eval samples receive lowest routing priority.
 #
-# Tickets: OMN-7270, OMN-7841
+# Tickets: OMN-7270, OMN-7841, OMN-16442
+#
+# OMN-16442 (2026-08-28): reconciled against the canonical lab inventory
+# omni_home/docs/reference/AI_LAB_HARDWARE.md ("Last verified: 2026-08-28") and
+# against contracts/llm_endpoints.yaml, which this file must stay consistent
+# with (tests/unit/contracts/test_topology_registry_consistency.py). Entries
+# whose base_url_env was released by a now-disabled topology slot were REMOVED
+# rather than left pointing at a dead endpoint.
 models:
   - model_key: "qwen3-coder-30b"
     provider: local
     transport: http
     base_url_env: LLM_CODER_URL
     health_path: "/health"
-    # cyankiwi/Qwen3-Coder-30B-A3B-Instruct-AWQ-4bit on 192.168.86.201:8000
-    # Context extended to 114688 via TurboQuant aither-kvcache K4/V3 compression
+    # OMN-16442 (2026-08-28): routing key retained for contract stability. The
+    # 2026-08-23 .201 reboot replaced the vLLM Qwen3-Coder-30B-AWQ stack with
+    # SGLang + a DSpark drafter. Live readback, GET
+    # http://192.168.86.201:8000/v1/models: id "qwen3.8", owned_by "sglang",
+    # max_model_len 122880 (base model Qwen/Qwen3.8-27B, served as a local NVFP4
+    # quantization). context_window raised 114688 -> 122880 to match the live
+    # max_model_len; the old value described the retired TurboQuant
+    # aither-kvcache K4/V3 setup.
+    # CONCURRENCY: this endpoint admits ONE running generation at a time —
+    # callers must queue above the model server rather than fan out to it.
     capabilities:
       - code_generation
       - refactoring
       - documentation
-    context_window: 114688
+    context_window: 122880
     hardware: "RTX 5090"
     tier: local
-  - model_key: "deepseek-r1-14b"
-    provider: local
-    transport: http
-    base_url_env: LLM_CODER_FAST_URL
-    health_path: "/health"
-    # Corianas/DeepSeek-R1-Distill-Qwen-14B-AWQ on 192.168.86.201:8001
-    capabilities:
-      - deep_reasoning
-      - code_review
-      - classification
-    context_window: 24576
-    hardware: "RTX 4090"
-    tier: local
+  # OMN-16442: the "deepseek-r1-14b" entry (base_url_env LLM_CODER_FAST_URL,
+  # Corianas/DeepSeek-R1-Distill-Qwen-14B-AWQ on 192.168.86.201:8001) was
+  # REMOVED. The RTX 4090 behind that endpoint was physically pulled from .201
+  # for RMA at the 2026-08-23 reboot (OMN-16407); live re-probe 2026-08-28,
+  # `curl http://192.168.86.201:8001/v1/models` -> exit 7 "Couldn't connect to
+  # server". contracts/llm_endpoints.yaml's coder-fast-4090 slot is now
+  # `disabled` and no longer owns LLM_CODER_FAST_URL, so keeping this row would
+  # break the cross-file consistency rule (every local model's base_url_env must
+  # be owned by a RUNNING topology slot). Its deep_reasoning/code_review work is
+  # served by qwen3-coder-30b (.201:8000) and deepseek-r1-32b (.200:8101).
   - model_key: "deepseek-r1-32b"
     provider: local
     transport: http
     base_url_env: LLM_DEEPSEEK_R1_URL
     health_path: "/health"
+    # OMN-16442 (2026-08-28): routing key retained for contract stability, but
+    # the served model changed. Live readback, GET
+    # http://192.168.86.200:8101/v1/models: ids {"deepseek-v4-flash",
+    # "deepseek-v4-pro"}, owned_by "ds4.c", context_length 131072 — DeepSeek V4
+    # Flash under antirez/ds4, not the MLX DeepSeek-R1-Distill-Qwen-32B this key
+    # is named for. context_window stays a conservative 65536 budget (matches
+    # the topology contract's context_window_budgeted for this slot), not the
+    # server's 131072 ceiling.
     capabilities:
       - deep_reasoning
       - code_review
       - math
-    context_window: 8192
+    context_window: 65536
     hardware: "M2 Ultra"
     tier: local
-  - model_key: "qwen3-next-80b"
-    provider: local
-    transport: http
-    base_url_env: LLM_QWEN3_NEXT_URL
-    health_path: "/health"
-    # mlx-community/Qwen3.6-35B-A3B-8bit on .200:8102 (replaced Qwen3-Next-80B 2026-04-18)
-    # model_key retained for routing key stability
-    capabilities:
-      - code_review
-      - reasoning
-      - documentation
-    context_window: 8192
-    hardware: "M2 Ultra"
-    tier: local
+  # OMN-16442: the "qwen3-next-80b" entry (base_url_env LLM_QWEN3_NEXT_URL,
+  # mlx-community/Qwen3.6-35B-A3B-8bit on .200:8102) was REMOVED. Live probe
+  # 2026-08-28: `curl http://192.168.86.200:8102/v1/models` -> exit 7 "Couldn't
+  # connect to server"; the canonical inventory records Mac Studio ports 8100,
+  # 8102 and 8103 as having no model listener. contracts/llm_endpoints.yaml's
+  # reasoning-moe-35b slot is now `disabled` and has released
+  # LLM_QWEN3_NEXT_URL, so this row would violate the cross-file consistency
+  # rule. The Studio's live MLX service (Qwen3.8-27B-8bit on 127.0.0.1:8099) is
+  # LOCALHOST-ONLY and is deliberately not registered as a replacement.
+  # OMN-16442 (2026-08-28): model_key retained for contract stability; the
+  # served model is NOT Qwen3-Embedding-8B. Live readback, GET
+  # http://192.168.86.201:8002/v1/models: id "text-embedding-qwen3", owned_by
+  # "vllm", artifact Qwen/Qwen3-Embedding-0.6B, max_model_len 8192.
+  # VECTOR DIMENSION 1024 (config.json hidden_size, read live on .201) — a hard
+  # placement constraint for any consumer collection. `hardware` corrected: the
+  # 4090 was removed for RMA (OMN-16407); this runs on the surviving RTX 5090.
   - model_key: "qwen3-embedding-8b"
     provider: local
     transport: http
@@ -68,7 +90,7 @@ models:
     capabilities:
       - embeddings
     context_window: 8192
-    hardware: "RTX 4090"
+    hardware: "RTX 5090"
     tier: local
   - model_key: "claude-sonnet"
     provider: anthropic
