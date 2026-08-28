@@ -96,34 +96,48 @@ CREATE TABLE IF NOT EXISTS omninode_internal.consumer_flow_windows (
     PRIMARY KEY (consumer_group, topic, window_start)
 );
 
-ALTER TABLE omninode_internal.consumer_flow_windows
-    ADD COLUMN IF NOT EXISTS consumer_group TEXT NOT NULL;
-ALTER TABLE omninode_internal.consumer_flow_windows
-    ADD COLUMN IF NOT EXISTS topic TEXT NOT NULL;
-ALTER TABLE omninode_internal.consumer_flow_windows
-    ADD COLUMN IF NOT EXISTS window_start TIMESTAMPTZ NOT NULL;
-ALTER TABLE omninode_internal.consumer_flow_windows
-    ADD COLUMN IF NOT EXISTS window_end TIMESTAMPTZ NOT NULL;
-ALTER TABLE omninode_internal.consumer_flow_windows
-    ADD COLUMN IF NOT EXISTS node_id UUID NOT NULL;
-ALTER TABLE omninode_internal.consumer_flow_windows
-    ADD COLUMN IF NOT EXISTS ingest_sequence BIGINT NOT NULL;
-ALTER TABLE omninode_internal.consumer_flow_windows
-    ADD COLUMN IF NOT EXISTS messages_in BIGINT;
-ALTER TABLE omninode_internal.consumer_flow_windows
-    ADD COLUMN IF NOT EXISTS messages_out BIGINT;
-ALTER TABLE omninode_internal.consumer_flow_windows
-    ADD COLUMN IF NOT EXISTS messages_dlq BIGINT;
-ALTER TABLE omninode_internal.consumer_flow_windows
-    ADD COLUMN IF NOT EXISTS handler_errors BIGINT;
-ALTER TABLE omninode_internal.consumer_flow_windows
-    ADD COLUMN IF NOT EXISTS upstream_produced BIGINT;
-ALTER TABLE omninode_internal.consumer_flow_windows
-    ADD COLUMN IF NOT EXISTS upstream_evidence TEXT NOT NULL;
-ALTER TABLE omninode_internal.consumer_flow_windows
-    ADD COLUMN IF NOT EXISTS flow_state TEXT NOT NULL;
-ALTER TABLE omninode_internal.consumer_flow_windows
-    ADD COLUMN IF NOT EXISTS evaluated_at TIMESTAMPTZ NOT NULL;
+-- ---- BEGIN OMN-15376 shape reconciliation: omninode_internal.consumer_flow_windows ----
+-- CREATE TABLE IF NOT EXISTS silently no-ops against a drifted pre-existing
+-- table. The CREATE INDEX below is not so forgiving: it guards the index NAME,
+-- not the COLUMN, so it raises `column "<col>" does not exist` and
+-- ON_ERROR_STOP=1 kills the whole migration Job there (the OMN-15376 /
+-- OMN-15302 class, one deploy cycle each). The guarded adds below converge a
+-- drifted table onto the shape declared above and are no-ops on the
+-- fresh-create path. No DROP, no recreate, no TRUNCATE.
+--
+-- Columns are added NULLABLE. This is the whole correctness point and is not a
+-- style choice: PostgreSQL rejects ADD COLUMN ... NOT NULL on a table that
+-- already holds rows unless a DEFAULT is supplied, with
+--   ERROR:  column "<col>" of relation "<t>" contains null values
+-- and ON_ERROR_STOP=1 kills the migration Job there -- the SAME deploy-stopping
+-- failure, at the SAME point in the cycle, that the reconciliation exists to
+-- prevent. Proven by execution on the .201 dev lane 2026-08-28 against a seeded
+-- drifted table (consumer_flow_windows carrying only consumer_group, one row):
+-- the NOT NULL spelling exits 3 on `topic`; this nullable spelling exits 0 and
+-- converges all 14 columns. The declared NOT NULLs still hold on the
+-- fresh-create path, where the CREATE TABLE above establishes them directly.
+--
+-- No NOT NULL / PRIMARY KEY convergence block: these relations have never
+-- physically existed. Read live 2026-08-28 --
+-- to_regclass('omninode_internal.consumer_flow_windows') and
+-- to_regclass('omninode_internal.topic_produce_windows') are both ABSENT on the
+-- .201 dev lane, and onex_application_migration_manifest exists on no lane at
+-- all -- so there is no drifted row set to reconcile against.
+ALTER TABLE omninode_internal.consumer_flow_windows ADD COLUMN IF NOT EXISTS consumer_group TEXT;
+ALTER TABLE omninode_internal.consumer_flow_windows ADD COLUMN IF NOT EXISTS topic TEXT;
+ALTER TABLE omninode_internal.consumer_flow_windows ADD COLUMN IF NOT EXISTS window_start TIMESTAMPTZ;
+ALTER TABLE omninode_internal.consumer_flow_windows ADD COLUMN IF NOT EXISTS window_end TIMESTAMPTZ;
+ALTER TABLE omninode_internal.consumer_flow_windows ADD COLUMN IF NOT EXISTS node_id UUID;
+ALTER TABLE omninode_internal.consumer_flow_windows ADD COLUMN IF NOT EXISTS ingest_sequence BIGINT;
+ALTER TABLE omninode_internal.consumer_flow_windows ADD COLUMN IF NOT EXISTS messages_in BIGINT;
+ALTER TABLE omninode_internal.consumer_flow_windows ADD COLUMN IF NOT EXISTS messages_out BIGINT;
+ALTER TABLE omninode_internal.consumer_flow_windows ADD COLUMN IF NOT EXISTS messages_dlq BIGINT;
+ALTER TABLE omninode_internal.consumer_flow_windows ADD COLUMN IF NOT EXISTS handler_errors BIGINT;
+ALTER TABLE omninode_internal.consumer_flow_windows ADD COLUMN IF NOT EXISTS upstream_produced BIGINT;
+ALTER TABLE omninode_internal.consumer_flow_windows ADD COLUMN IF NOT EXISTS upstream_evidence TEXT;
+ALTER TABLE omninode_internal.consumer_flow_windows ADD COLUMN IF NOT EXISTS flow_state TEXT;
+ALTER TABLE omninode_internal.consumer_flow_windows ADD COLUMN IF NOT EXISTS evaluated_at TIMESTAMPTZ;
+-- ---- END OMN-15376 shape reconciliation: omninode_internal.consumer_flow_windows ----
 
 -- The two queries this table exists to answer: "what is not flowing right now"
 -- and "what did consumer X do in the last hour".
@@ -145,20 +159,23 @@ CREATE TABLE IF NOT EXISTS omninode_internal.topic_produce_windows (
     PRIMARY KEY (topic, window_start)
 );
 
-ALTER TABLE omninode_internal.topic_produce_windows
-    ADD COLUMN IF NOT EXISTS topic TEXT NOT NULL;
-ALTER TABLE omninode_internal.topic_produce_windows
-    ADD COLUMN IF NOT EXISTS window_start TIMESTAMPTZ NOT NULL;
-ALTER TABLE omninode_internal.topic_produce_windows
-    ADD COLUMN IF NOT EXISTS window_end TIMESTAMPTZ NOT NULL;
-ALTER TABLE omninode_internal.topic_produce_windows
-    ADD COLUMN IF NOT EXISTS node_id UUID NOT NULL;
-ALTER TABLE omninode_internal.topic_produce_windows
-    ADD COLUMN IF NOT EXISTS ingest_sequence BIGINT NOT NULL;
-ALTER TABLE omninode_internal.topic_produce_windows
-    ADD COLUMN IF NOT EXISTS messages_produced BIGINT NOT NULL DEFAULT 0;
-ALTER TABLE omninode_internal.topic_produce_windows
-    ADD COLUMN IF NOT EXISTS evaluated_at TIMESTAMPTZ NOT NULL;
+-- ---- BEGIN OMN-15376 shape reconciliation: omninode_internal.topic_produce_windows ----
+-- Same class, same reasoning, same nullable rule as consumer_flow_windows above.
+ALTER TABLE omninode_internal.topic_produce_windows ADD COLUMN IF NOT EXISTS topic TEXT;
+ALTER TABLE omninode_internal.topic_produce_windows ADD COLUMN IF NOT EXISTS window_start TIMESTAMPTZ;
+ALTER TABLE omninode_internal.topic_produce_windows ADD COLUMN IF NOT EXISTS window_end TIMESTAMPTZ;
+ALTER TABLE omninode_internal.topic_produce_windows ADD COLUMN IF NOT EXISTS node_id UUID;
+ALTER TABLE omninode_internal.topic_produce_windows ADD COLUMN IF NOT EXISTS ingest_sequence BIGINT;
+ALTER TABLE omninode_internal.topic_produce_windows ADD COLUMN IF NOT EXISTS messages_produced BIGINT DEFAULT 0;
+ALTER TABLE omninode_internal.topic_produce_windows ADD COLUMN IF NOT EXISTS evaluated_at TIMESTAMPTZ;
+
+-- ADD COLUMN IF NOT EXISTS ... DEFAULT is a no-op on a column that already
+-- existed without one -- restore the declared default explicitly so a drifted
+-- pre-existing column converges too, not only a brand-new one. Only
+-- messages_produced declares a DEFAULT; the counters on consumer_flow_windows
+-- deliberately have none (NULL means "never observed", which is not 0).
+ALTER TABLE omninode_internal.topic_produce_windows ALTER COLUMN messages_produced SET DEFAULT 0;
+-- ---- END OMN-15376 shape reconciliation: omninode_internal.topic_produce_windows ----
 
 CREATE INDEX IF NOT EXISTS idx_topic_produce_windows_topic_time
     ON omninode_internal.topic_produce_windows (topic, window_end DESC);

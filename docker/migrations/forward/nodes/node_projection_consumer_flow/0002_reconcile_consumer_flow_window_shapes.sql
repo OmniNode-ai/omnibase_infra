@@ -1,35 +1,35 @@
 -- =============================================================================
--- MIGRATION: reconcile consumer-flow window columns on drifted deployments
+-- MIGRATION: additive shape reconciliation for the consumer-flow window tables
 -- =============================================================================
--- Ticket:  OMN-16773 (original), OMN-16777 (idiom correction)
+-- Ticket:  OMN-16777
 -- Owner:   omnimarket.nodes.node_projection_consumer_flow
--- Version: 1.0.2
+-- Version: 1.0.0
 --
--- 0000 created the two consumer-flow tables with CREATE TABLE IF NOT EXISTS. A
--- drifted deployment may already hold either table with a partial shape; in
--- that case CREATE TABLE is a no-op and later column-dependent statements fail.
--- These guarded adds converge such a table and are no-ops on the fresh path.
+-- WHY THIS FILE EXISTS
+--   0000 and 0001 both shipped their guarded adds as
+--   `ADD COLUMN IF NOT EXISTS <col> <type> NOT NULL`, which cannot reconcile a
+--   drifted table that holds rows -- PostgreSQL raises
+--     ERROR:  column "<col>" of relation "<t>" contains null values
+--   and ON_ERROR_STOP=1 kills the Job. Correcting that means editing two
+--   already-DECLARED migrations, and the OMN-16705 append-only guard's only
+--   sanctioned escape is a new-ordinal supersession that lands its successor in
+--   the same change. This is that successor, and it is not a placeholder: it
+--   re-expresses the corrected reconciliation additively, so a database that
+--   already holds these relations converges from its own ordinal rather than
+--   depending on the rewritten bytes of either earlier file.
 --
--- CORRECTION (OMN-16777). Both this file and 0000 originally spelled every
--- declared-NOT-NULL column as `ADD COLUMN IF NOT EXISTS <col> <type> NOT NULL`.
--- That does not reconcile a drifted table -- PostgreSQL refuses to add a NOT
--- NULL column to a table that already holds rows unless a DEFAULT is supplied:
---   ERROR:  column "<col>" of relation "<t>" contains null values
--- and ON_ERROR_STOP=1 kills the migration Job there. It is the same
--- deploy-stopping failure at the same point in the cycle that the
--- reconciliation exists to prevent, so the static gate went green while the
--- failure class stayed open. Proven by execution on the .201 dev lane
--- 2026-08-28 against a seeded drifted consumer_flow_windows (only
--- consumer_group, one row): the NOT NULL spelling exits 3 on `topic`; the
--- nullable spelling below exits 0 and converges all 14 columns.
+-- WHY REWRITING 0000 AND 0001 IS SAFE
+--   bootstrap.sql raises 'conflicting migration checksum in canonical node
+--   history' only when a RECORDED per-migration content_sha256 stops matching,
+--   which requires the file to have been APPLIED. Read live 2026-08-28:
+--   to_regclass() for both relations is ABSENT on the .201 dev lane, and
+--   onex_application_migration_manifest -- the relation bootstrap.sql joins to
+--   raise that exception -- exists on NO .201 lane (dev, stability-test, prod,
+--   judge), so the node-migration ledger loop has never run and no checksum is
+--   recorded anywhere. The supersession rows carry this evidence.
 --
--- The header line this file used to carry -- "Keep the applied 0000 bytes
--- frozen" -- was also inaccurate: the same change edited 0000 in place. 0000 is
--- corrected here too, under the OMN-16705 supersession rows that name 0002.
---
--- The declared NOT NULLs are not lost: the CREATE TABLE in 0000 establishes
--- them on the fresh-create path, which is the only path where they can be
--- established without inventing data.
+-- Every statement below is idempotent and nullable-by-design; see 0001's header
+-- for the full reasoning and the RED/GREEN execution evidence.
 -- =============================================================================
 
 -- ---- BEGIN OMN-15376 shape reconciliation: omninode_internal.consumer_flow_windows ----
