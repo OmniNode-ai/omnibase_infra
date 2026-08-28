@@ -56,6 +56,42 @@ release-identity exit=0 (pyproject 0.38.4 ahead of latest published v0.38.3)
 sibling-lock-pins exit=0 (clone-ahead descendant note, non-fatal)
 ```
 
+## The release train disarms gate 7 itself (OMN-13912)
+
+Gate 7 (`release-identity`) is **armed by the release train**: publishing
+`X.Y.Z` from dev HEAD leaves dev's `[project].version` exactly equal to the
+highest published tag, so the next dev PR touching `src/**` goes red — and
+stays red for every PR after it — until someone unrelated bumps.
+
+Measured twice in the v0.38 series:
+
+| Tag | Tagged at dev HEAD | Dev bumped by | Armed window |
+|-----|--------------------|---------------|--------------|
+| `v0.38.10` (`5d3f77792`) | 2026-08-26T01:38:23Z | `a07fefde4` (OMN-16536, unrelated) 2026-08-26T03:44:31Z | ~2h06m |
+| `v0.38.11` (`4529c3486`) | 2026-08-28T00:49:31Z | `93c42ada4` (OMN-16769, unrelated) 2026-08-28T02:27:16Z | ~1h38m |
+
+The disarm is now part of the same flow that arms it: `release.yml` job
+`post-release-dev-bump` runs `scripts/ci/post_release_dev_bump.py`, which bumps
+`[project].version` to `published + 1 patch` (and re-locks `uv.lock`), then
+opens an auto-merging PR against `dev`. It is a no-op when dev is already
+ahead, so a re-dispatched tag or a hand-bump does not produce a second PR.
+
+Two deliberate design points, both proven in
+`tests/ci/test_post_release_dev_bump_workflow.py`:
+
+- The job is gated on `needs.release.outputs.version != ''` (publish
+  succeeded), **not** on `needs.release.result == 'success'`. Both windows
+  above published cleanly and then went red on the unrelated `Sync main to
+  release tag` GH006 (OMN-16343); a success-gated disarm would have been
+  skipped in exactly the two cases that needed it.
+- The bump lands via a PR against `dev`, never a direct push — a direct push
+  would bypass every required check on the branch.
+
+`release-identity` being *advisory* on the PR path (not aggregated by
+`CI Summary`, not a required context) is a separate defect tracked as
+OMN-16819; this change removes the recurring arming event, it does not make the
+gate blocking.
+
 ## Local gate results (in worktree)
 
 - `ruff format` + `ruff check --fix`: clean
