@@ -83,6 +83,7 @@ __all__ = [
     "envelope_terminal_payload",
     "extract_terminal_event_topics",
     "load_terminal_event_topics",
+    "resolve_terminal_retryable",
     "resolve_terminal_verdict",
     "terminal_event_topics_from_declaration",
 ]
@@ -272,6 +273,40 @@ def resolve_terminal_verdict(event: object) -> bool | None:
         if isinstance(value, bool):
             return value
 
+    return None
+
+
+def resolve_terminal_retryable(event: object) -> bool | None:
+    """Read a terminal's OWN stated retryability. ``None`` means unstated.
+
+    OMN-16812. The local ingress derived the caller-facing ``retryable`` flag
+    from the broker's status alone (``retryable = status == "timeout"``), so
+    every non-timeout failure was reported ``retryable: false`` and every
+    timeout ``retryable: true`` — including the 120 s timeout this ticket was
+    opened on, whose real cause (``ONEX_CORE_041_INVALID_CONFIGURATION``) is
+    about as non-retryable as a failure gets.
+
+    A terminal that STATES its retryability is authoritative about it; a
+    terminal that does not is left entirely alone, so the historical derivation
+    still governs every producer that has not been taught to say. That is the
+    same fail-closed posture :func:`resolve_terminal_verdict` takes toward a
+    payload with no verdict, and it is read through the same
+    model-or-mapping reader so the pre-publish and post-wire sides cannot
+    disagree.
+
+    Reads ``payload.retryable`` (the nested body of a ``ModelEventEnvelope``)
+    before the top-level key, because a terminal reaches the broker wrapped and
+    the outer envelope has no such field — checking the outer level first would
+    only ever find one on an un-enveloped record.
+    """
+    nested = _read_field(event, "payload")
+    if nested is not None:
+        stated = _read_field(nested, "retryable")
+        if isinstance(stated, bool):
+            return stated
+    stated = _read_field(event, "retryable")
+    if isinstance(stated, bool):
+        return stated
     return None
 
 
