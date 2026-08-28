@@ -558,3 +558,57 @@ class TestNoDispatcherIsNeverSilent:
         assert len(dlq_bus.calls) == 1, (
             "a NO_DISPATCHER record was consumed and committed with no DLQ entry"
         )
+
+    @pytest.mark.asyncio
+    async def test_a_record_already_on_a_dlq_topic_is_not_re_dlqd(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """RED for the amplification the first deployed cut of this fix caused.
+
+        Measured live 2026-08-27T23:49-23:51Z: ``node_dlq_replay_effect`` and
+        ``node_ledger_projection_compute`` both consume
+        ``onex.dlq.omnibase-infra.commands.v1``; a record neither could route was
+        re-DLQ'd onto that SAME topic (``get_dlq_topic_for_original`` resolves a
+        dlq topic to itself), and 24 of the last 38 records on it carried
+        ``original_topic: onex.dlq.omnibase-infra.commands.v1`` — records the
+        guard had authored. A record already on a dead-letter sink is durably
+        captured; the loud log is the evidence and the loop must stop there.
+        """
+        monkeypatch.setenv("ONEX_BOUNDARY_DLQ_ENABLED", "true")
+
+        dlq_topic = "onex.dlq.omnibase-infra.commands.v1"  # onex-topic-allow: verbatim from the live amplification trace
+        dlq_bus = _RecordingDlqBus()
+        engine = AsyncMock()
+        engine.dispatch_scoped.return_value = _dispatch_result(
+            status=EnumDispatchStatus.NO_DISPATCHER,
+            dlq_topic=dlq_topic,
+        )
+
+        callback = _make_event_bus_callback(
+            dlq_topic,
+            cast("object", engine),  # type: ignore[arg-type]
+            result_applier=None,
+            event_bus=dlq_bus,
+            allowed_dispatcher_ids=("dispatcher.auto.mirror",),
+        )
+        await callback(_boundary_message())
+
+        assert dlq_bus.calls == [], (
+            "an unroutable record consumed FROM a dead-letter topic was "
+            "republished onto that same topic — the guard amplifying its own "
+            "output instead of recording it"
+        )
+
+    def test_dead_letter_source_topics_are_recognized(self) -> None:
+        from omnibase_infra.runtime.auto_wiring.handler_wiring import (
+            _is_dead_letter_source_topic,
+        )
+
+        assert _is_dead_letter_source_topic(
+            "onex.dlq.omnibase-infra.commands.v1"  # onex-topic-allow: verbatim from the live amplification trace
+        )
+        assert _is_dead_letter_source_topic(
+            "onex.dlq.omnibase-infra.quarantine.v1"  # onex-topic-allow: the platform quarantine sink named in OMN-16769
+        )
+        assert not _is_dead_letter_source_topic(_SUBSCRIBE_TOPIC)
+        assert not _is_dead_letter_source_topic(_PUBLISH_TOPIC)

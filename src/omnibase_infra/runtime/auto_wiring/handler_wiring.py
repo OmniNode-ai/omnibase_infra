@@ -4314,6 +4314,33 @@ def _undeliverable_dispatch_output(result: object) -> str | None:
     )
 
 
+def _is_dead_letter_source_topic(topic: str) -> bool:
+    """True when a consumed topic is itself a dead-letter sink (OMN-16798).
+
+    Both OMN-16798 totality guards answer an undeliverable record by routing it
+    to the topic's DLQ. On a record CONSUMED FROM a DLQ topic that answer is
+    circular: ``get_dlq_topic_for_original`` resolves a ``onex.dlq.*`` topic back
+    to itself, so the guard republishes the record onto the very topic it just
+    read it from, and the subscriber reads it again.
+
+    Measured live on the .201 dev lane 2026-08-27T23:49-23:51Z during the first
+    matrix run after this ticket's fix deployed: ``node_dlq_replay_effect`` and
+    ``node_ledger_projection_compute`` both consume
+    ``onex.dlq.omnibase-infra.commands.v1``; a record neither could route was
+    re-DLQ'd onto that same topic, and 24 of the last 38 records on it carried
+    ``original_topic: onex.dlq.omnibase-infra.commands.v1`` — records the guard
+    itself had authored. It converged that run (HWM stable at 188, both groups
+    Stable at lag 0), but convergence there was luck, not mechanism.
+
+    A record already sitting on a dead-letter topic is ALREADY durably captured,
+    which is the whole point of the guards. AC4's requirement — dispatch, DLQ, or
+    refuse with evidence — is satisfied by the durable record plus a loud
+    structured log. Republishing adds no evidence and risks amplification, so the
+    guards log and stop here instead.
+    """
+    return ".dlq." in topic
+
+
 def _raise_if_no_dispatcher_drop(result: object, topic: str) -> None:
     """Raise for a ``NO_DISPATCHER`` result the auto-wired boundary would ACK (OMN-16798).
 
@@ -4344,12 +4371,24 @@ def _raise_if_no_dispatcher_drop(result: object, topic: str) -> None:
     if result.status is not EnumDispatchStatus.NO_DISPATCHER:
         return
     failure_class = result.error_details.get("failure_class")
-    raise HandlerDispatchFailureError(
+    detail = (
         f"dispatch to topic={topic} matched no dispatcher in this contract's "
         f"scope (failure_class={failure_class or 'unknown'}, "
         f"derived_dlq_topic={result.dlq_topic or 'none'}): "
         f"{result.error_message or 'no dispatcher registered'}"
     )
+    if _is_dead_letter_source_topic(topic):
+        # The record is already on a dead-letter sink — durably captured. Re-DLQ
+        # would republish it onto the same topic (see the helper's docstring for
+        # the live amplification this caused). Evidence, then stop.
+        logger.error(
+            "metric_name=boundary_dead_letter_unroutable dlq_routed=false "
+            "reason=already_on_dead_letter_topic topic=%s detail=%s",
+            topic,
+            detail,
+        )
+        return
+    raise HandlerDispatchFailureError(detail)
 
 
 def _normalize_contract_dispatcher_scope(
@@ -4959,6 +4998,15 @@ def _make_event_bus_callback(
                             envelope.correlation_id,
                             undeliverable,
                         )
+                        if _is_dead_letter_source_topic(topic):
+                            # Same circular-route hazard as the NO_DISPATCHER leg
+                            # (see _is_dead_letter_source_topic): the record is
+                            # already on a dead-letter sink, so the DLQ answer
+                            # would republish it onto its own topic. The log line
+                            # above is the evidence; stop here. Guarded by
+                            # symmetry — the amplification was MEASURED on the
+                            # NO_DISPATCHER leg only, not this one.
+                            return
                         await _route_apply_publish_failure(
                             UndeliverableDispatchOutputError(undeliverable),
                             event_bus=event_bus,
