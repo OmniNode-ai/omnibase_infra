@@ -42,17 +42,22 @@ def _steps() -> list[dict[str, Any]]:
 
 
 def _dod_verify_invoking_indices(steps: list[dict[str, Any]]) -> list[int]:
-    """Steps that spawn ``uv run onex skill dod_verify`` (directly or via the
-    sweep, which shells out to it per ticket) — found by content, not name,
-    so an insertion or rename cannot silently retarget this test.
+    """Steps that spawn ``onex skill dod_verify`` (directly or via the sweep,
+    which shells out to it per ticket) — found by content, not name, so an
+    insertion or rename cannot silently retarget this test.
+
+    Matched on the skill name alone. OMN-16846 moved these dispatches off
+    ``uv run onex`` and onto the dispatch venv's own binary
+    (``"${DISPATCH_VENV}/bin/onex" skill dod_verify``), so a matcher anchored
+    on ``onex skill ...`` as one contiguous substring stopped matching
+    anything — which would have left this whole module asserting an ordering
+    over an empty set. Matching ``skill <name>`` survives any spelling of the
+    binary.
     """
     indices = []
     for i, step in enumerate(steps):
         run = str(step.get("run", ""))
-        if (
-            "onex skill dod_verify" in run
-            or "onex skill evidence_autoclose_sweep" in run
-        ):
+        if "skill dod_verify" in run or "skill evidence_autoclose_sweep" in run:
             indices.append(i)
     return indices
 

@@ -218,9 +218,14 @@ io_operations:
 # has no "external CLI tool" member, so the two runtime tool requirements are
 # documented here in prose rather than as invalid schema entries:
 #   - `gh` (GitHub CLI), authenticated — paginated PR/file enumeration.
-#   - `uv run onex skill dod_verify <ticket>` — the EXISTING verifier,
-#     invoked verbatim, from a locality where that dispatch already resolves
-#     (see omnimarket_drift_guard / scripts/install-node-skill-package.sh).
+#   - `onex skill dod_verify <ticket>` — the EXISTING verifier, invoked from
+#     the sweep interpreter's OWN `onex` binary (OMN-16846: not `uv run`,
+#     which would re-resolve the project venv at the cwd and so tie the
+#     verifier's environment to the product clone the behaviour checks must
+#     run pytest in). The sweep must therefore be launched from an
+#     environment where node_dod_verify resolves — the co-installed
+#     omnimarket (see omnimarket_drift_guard /
+#     scripts/install-node-skill-package.sh).
 dependencies:
   - name: "linear_api_key"
     type: "environment"

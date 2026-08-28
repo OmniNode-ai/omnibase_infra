@@ -36,13 +36,24 @@
 #
 # omnimarket co-install IS wired here (OMN-16736). `onex skill dod_verify`
 # dispatches to `node_dod_verify`, which ships in omnimarket and is layered
-# into this job's venv at run time — never a build/lock dependency, because
+# into this job at run time — never a build/lock dependency, because
 # omnimarket sits ABOVE infra in the layer graph (compat -> core -> spi ->
 # infra -> market) and declaring it as an infra dependency would invert that
 # graph. The composition rule is OMN-13829's; the steps below apply it to an
 # ephemeral job venv rather than shelling out to the operator installer under
 # scripts/ (see the step comment for why, and for why that path is written
 # without its file extension here).
+#
+# TWO venvs, not one (OMN-16846). The co-install goes into a DISPATCH venv at
+# `$DISPATCH_VENV`; the project's own `.venv` is the GATE venv and stays
+# lock-exact. dod_verify's behaviour checks are `uv run pytest` with
+# `cwd: "${OMNI_HOME}/omnibase_infra"` — i.e. they run in the gate venv, where
+# `tests/conftest.py` calls `assert_venv_purity()` (OMN-15620) and correctly
+# refuses any undeclared `onex.nodes` provider. On one venv those two
+# requirements contradict each other and the gate wins: run 33194402437
+# recorded all three OMN-16759 behaviour checks as `FAILED ... Canonical venv
+# is IMPURE`, behavior_proving=0, with no test ever executing. Separating them
+# is the fix; the purity of `.venv` is asserted below rather than assumed.
 #
 # Before this was wired, EVERY bound ticket in every run of this workflow
 # died at `Error: Unknown node 'node_dod_verify'` and was recorded as
@@ -59,16 +70,17 @@
 # GAP, i.e. the sweep would state an evidence verdict it never reached. Both
 # the checkout and an explicit readability assertion are below.
 #
-# The co-install is verified, not assumed: the step after it asserts
-# `node_dod_verify` is a resolvable `onex.nodes` entry point THROUGH the
-# same `uv run` path the sweep's per-ticket subprocess uses. A silently
-# reverted or partial install fails the job there, loudly, instead of
-# degrading back into N per-ticket ERROR_VERIFY_NONZERO_EXIT outcomes that
-# read like ticket problems rather than a runner-configuration problem.
+# The co-install is verified, not assumed: a step after it asserts
+# `node_dod_verify` is a resolvable `onex.nodes` entry point THROUGH the exact
+# interpreter the sweep's per-ticket subprocess uses (the dispatch venv's own
+# python — see `_dod_verify_argv`). A silently reverted or partial install
+# fails the job there, loudly, instead of degrading back into N per-ticket
+# ERROR_VERIFY_NONZERO_EXIT outcomes that read like ticket problems rather
+# than a runner-configuration problem.
 #
 # No new scripts/** file: scripts/** is DEFAULT-DENY for new files (OMN-14475
-# canonical-form guard). Every step below is a direct `uv run onex ...`
-# invocation of code that already lives under src/.
+# canonical-form guard). Every step below is a direct invocation of code that
+# already lives under src/.
 
 name: Evidence Autoclose Sweep
 
@@ -220,8 +232,62 @@ jobs:
           enable-cache: true
           cache-dependency-glob: "uv.lock"
 
-      - name: Install dependencies
+      # The GATE venv. `uv sync` is exact-mode, so `.venv` contains exactly
+      # what uv.lock declares and nothing else. This is the venv every
+      # behaviour check resolves: the OCC contracts under adjudication declare
+      # `check_type: test_passes` with `check_value: "uv run pytest ..."` and
+      # `cwd: "${OMNI_HOME}/omnibase_infra"`, and OMN-16845 wired OMNI_HOME so
+      # that path IS this checkout. Nothing may be installed into it after
+      # this step (OMN-16846) — see the purity assertion below.
+      - name: Install dependencies (GATE venv — stays lock-exact)
         run: uv sync
+
+      # OMN-16846. The DISPATCH venv: a second, separate environment for the
+      # verifier itself.
+      #
+      # Why two. `onex skill dod_verify` is provided by `node_dod_verify`,
+      # which ships in omnimarket — a runtime provider that sits ABOVE infra in
+      # the layer graph and can never be a lock dependency, so the job has to
+      # co-install it (OMN-16736). But dod_verify's behaviour checks are
+      # `uv run pytest` inside this very checkout, and `tests/conftest.py`
+      # calls `assert_venv_purity()` (OMN-15620), which correctly refuses any
+      # venv carrying an `onex.nodes` provider uv.lock does not declare.
+      #
+      # With one venv those two requirements are directly contradictory, and
+      # the gate wins: run 33194402437 recorded all three OMN-16759 behaviour
+      # checks as `FAILED ... Canonical venv is IMPURE`, behavior_proving=0,
+      # without a single test having executed. That is a false FAILED — it
+      # names a venv, not a defect, and it is indistinguishable in the sweep's
+      # counts from a ticket that genuinely is not proven.
+      #
+      # Neither half is wrong. Their collapse onto one venv is. So the
+      # provider goes here and `.venv` stays lock-exact.
+      #
+      # Proven by execution 2026-08-28, same ticket, same contract, only the
+      # environment shape differing:
+      #   collapsed  -> status=failed   verified=1 failed=3 behavior_proving=0
+      #   separated  -> status=verified verified=5 failed=0 behavior_proving=3
+      # with no ONEX_ALLOW_VENV_IMPURITY set anywhere. The opt-out is
+      # deliberately NOT used: it would suppress a correct signal instead of
+      # removing the cause, and the conftest override warns in its own words
+      # that results from an overridden run "are NOT gate evidence".
+      #
+      # `UV_PROJECT_ENVIRONMENT` is uv's own supported way to place a project
+      # environment outside the project, so the dispatch venv is still built
+      # from this repo's lockfile — same resolution, different location — and
+      # then layered with omnimarket by the step below.
+      - name: Compose the dispatch venv (separate from the gate venv)
+        shell: bash
+        run: |
+          set -euo pipefail
+          dispatch_venv="${RUNNER_TEMP}/dispatch-venv"
+          UV_PROJECT_ENVIRONMENT="${dispatch_venv}" uv sync
+          if [ ! -x "${dispatch_venv}/bin/onex" ]; then
+            echo "::error::${dispatch_venv}/bin/onex is missing after the dispatch-venv sync — every per-ticket verifier dispatch would fail closed at exec time, so refusing to continue." >&2
+            exit 1
+          fi
+          echo "DISPATCH_VENV=${dispatch_venv}" >> "$GITHUB_ENV"
+          echo "dispatch venv composed at ${dispatch_venv}"
 
       # OMN-16736 step 1 of 3 (co-install -> AC-coverage guard -> --apply).
       #
@@ -291,11 +357,15 @@ jobs:
       #   everything  RESOLVE  — pure-PyPI leaves (anthropic, radon, docker,
       #     else                 python-dateutil, ...). No omni-internal
       #                          metadata, safe to resolve normally.
-      - name: Co-install omnimarket (provides node_dod_verify)
+      - name: Co-install omnimarket into the dispatch venv (provides node_dod_verify)
         shell: bash
         run: |
           set -euo pipefail
-          PYTHON_BIN=".venv/bin/python"
+          # OMN-16846: the DISPATCH venv, never `.venv`. Installing an
+          # undeclared `onex.nodes` provider into the gate venv is exactly what
+          # the OMN-15620 purity gate refuses, and every behaviour check runs
+          # `uv run pytest` in the gate venv.
+          PYTHON_BIN="${DISPATCH_VENV}/bin/python"
           test -x "$PYTHON_BIN"
 
           python3 - "${RUNNER_TEMP}" <<'PYEOF'
@@ -343,20 +413,62 @@ jobs:
           fi
           uv pip install --python "$PYTHON_BIN" --no-deps ${NO_DEPS[@]+"${NO_DEPS[@]}"} ./.omnimarket-src
 
-      # Assert the thing the sweep actually depends on, through the exact
-      # invocation path it uses. `uv run` is deliberate here: the sweep shells
-      # out to `uv run onex skill dod_verify <ticket>` per ticket, and a
-      # project sync on that call is the one thing that could evict a
-      # `uv pip install`-ed provider from under it. UV_NO_SYNC (set on this
-      # step and on the sweep step below) keeps `uv run` on the environment
-      # this job just composed; this step proves that combination resolves
-      # node_dod_verify rather than trusting it.
-      - name: Verify node_dod_verify resolves through `uv run`
-        env:
-          UV_NO_SYNC: "1"
+      # OMN-16846, the other half of the split — and the enforcement half
+      # (CLAUDE.md rule 5). The co-install above must have left the GATE venv
+      # untouched, because that venv is what every behaviour check's
+      # `uv run pytest` resolves and what `assert_venv_purity()` inspects.
+      #
+      # Without this assertion the separation is an intention, not a
+      # mechanism: any later step that pip-installs a sibling into `.venv`
+      # silently restores the collision, and the symptom is N per-ticket
+      # FAILED checks that read like N unproven tickets rather than one
+      # environment fault. That mis-reading is the whole defect this PR
+      # closes, so it gets a named refusal here instead.
+      #
+      # `find_undeclared_onex_providers` is the same function the pytest
+      # session-start gate calls, run through the same interpreter pytest will
+      # run under, so this is the real predicate and not a restatement of it.
+      - name: Assert the gate venv is pure (nothing may install into `.venv`)
+        shell: bash
         run: |
           set -euo pipefail
-          uv run python - <<'PYEOF'
+          if ! ./.venv/bin/python - <<'PYEOF'
+          import sys
+
+          from omnibase_infra.runtime.venv_purity import find_undeclared_onex_providers
+
+          undeclared = find_undeclared_onex_providers()
+          if undeclared:
+              print(
+                  "gate venv `.venv` carries undeclared onex.nodes provider(s): "
+                  + "; ".join(f"{p.name}=={p.version}" for p in undeclared),
+                  file=sys.stderr,
+              )
+              sys.exit(1)
+          print("OK: gate venv `.venv` declares every installed onex.nodes provider")
+          PYEOF
+          then
+            # Single-quoted on purpose: this message names shell metacharacters
+            # ($DISPATCH_VENV) and a command string, and a double-quoted echo
+            # would expand them. It did, in the first draft of this step, and
+            # backticks around the pytest invocation caused bash to RUN it.
+            echo '::error::the gate venv is IMPURE -- every "uv run pytest" behaviour check dod_verify runs in it would be refused by the OMN-15620 purity gate and recorded FAILED without executing (run 33194402437). The omnimarket co-install belongs in $DISPATCH_VENV, never in .venv (OMN-16846).' >&2
+            exit 1
+          fi
+
+      # Assert the thing the sweep actually depends on, through the exact
+      # interpreter it uses. OMN-16846 replaced `uv run python` here: `uv run`
+      # resolves whichever project the cwd names — the GATE venv — which after
+      # the split deliberately does NOT carry omnimarket, so asserting through
+      # it would now assert the wrong environment and fail on a correct job.
+      # The sweep dispatches the verifier from its own `sys.executable`
+      # (`_dod_verify_argv`), so the dispatch venv's interpreter is the only
+      # honest thing to probe.
+      - name: Verify node_dod_verify resolves in the dispatch venv
+        shell: bash
+        run: |
+          set -euo pipefail
+          "${DISPATCH_VENV}/bin/python" - <<'PYEOF'
           import sys
           from importlib.metadata import entry_points
 
@@ -496,7 +608,11 @@ jobs:
           IFS=',' read -ra TICKETS <<< "${DIAGNOSE_TICKETS}"
           for ticket in "${TICKETS[@]}"; do
             echo "---- ${ticket} ----"
-            uv run onex skill dod_verify "${ticket}" > "${RUNNER_TEMP}/${ticket}.json" 2> "${RUNNER_TEMP}/${ticket}.err" || true
+            # OMN-16846: the DISPATCH venv's own binary, matching exactly what
+            # the sweep spawns (`_dod_verify_argv`). Going through `uv run`
+            # would resolve the gate venv, which by design carries no
+            # node_dod_verify.
+            "${DISPATCH_VENV}/bin/onex" skill dod_verify "${ticket}" > "${RUNNER_TEMP}/${ticket}.json" 2> "${RUNNER_TEMP}/${ticket}.err" || true
             python3 - "${RUNNER_TEMP}/${ticket}.json" <<'PYEOF'
           import json
           import sys
@@ -567,11 +683,15 @@ jobs:
         env:
           LINEAR_API_KEY: ${{ secrets.LINEAR_API_KEY }}
           GH_TOKEN: ${{ secrets.OMNI_GITHUB_TOKEN || github.token }}
-          # Keep `uv run` — this one and the per-ticket `uv run onex skill
-          # dod_verify` the sweep spawns — on the environment the co-install
-          # step composed, instead of re-syncing it back to the lockfile
-          # (which does not, and by the layer graph must not, contain
-          # omnimarket).
+          # OMN-16846 changed what this is for. The sweep and its per-ticket
+          # verifier no longer go through `uv run` at all (they run the
+          # dispatch venv's own binaries), so nothing here needs protecting
+          # from a re-sync. What DOES still go through `uv run` is the
+          # innermost layer: each behaviour check is `uv run pytest ...` with
+          # `cwd: "${OMNI_HOME}/omnibase_infra"`, inherited from this step's
+          # environment. UV_NO_SYNC keeps those on the already-synced,
+          # lock-exact gate venv instead of re-resolving the project once per
+          # check.
           UV_NO_SYNC: "1"
           # First entry in EvidenceCollector's contract search path. Without it
           # dod_verify finds no contract for any ticket and every verdict
@@ -606,7 +726,13 @@ jobs:
             echo "::error::LINEAR_API_KEY is not set — refusing to run the sweep with a missing secret."
             exit 1
           fi
-          uv run onex skill evidence_autoclose_sweep \
+          # OMN-16846: run from the DISPATCH venv. The sweep dispatches
+          # dod_verify from its own `sys.executable` (`_dod_verify_argv`), so
+          # launching it here is what decides which environment every
+          # per-ticket verifier runs in — and it must be the one carrying the
+          # co-installed omnimarket, not the lock-exact gate venv the
+          # behaviour checks then run pytest in.
+          "${DISPATCH_VENV}/bin/onex" skill evidence_autoclose_sweep \
             --lookback-hours "${{ github.event.inputs.lookback_hours || '6' }}"
 
       - name: Post summary
