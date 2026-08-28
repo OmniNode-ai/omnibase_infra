@@ -23,6 +23,13 @@ ALLOWED_EMPTY_DEFAULTS = {
     "ROLE_OMNIINTELLIGENCE_PASSWORD",
     "ROLE_OMNIMEMORY_PASSWORD",
     "ROLE_OMNINODE_PASSWORD",
+    # OMN-16843: same empty-means-skip contract as the ROLE_* passwords above.
+    # This is the postgres FIRST-STARTUP provisioning seam
+    # (000_create_multiple_databases.sh LOGIN_ONLY_ROLE_MAP); an unprovisioned
+    # volume must skip the role, not wedge the whole lane at compose render.
+    # The fail-closed `:?` form lives on the CONSUMER of the credential,
+    # OMNINODE_INTERNAL_DB_URL in x-runtime-env.
+    "OMNINODE_RUNTIME_PASSWORD",
     # OMN-4316: OMNIMEMORY_* vars are intentionally opt-in (empty = disabled)
     "OMNIMEMORY_ENABLED",
     "OMNIMEMORY_MEMGRAPH_HOST",

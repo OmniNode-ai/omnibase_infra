@@ -154,6 +154,10 @@ COMPOSE_RENDER_ENV = {
     "LLM_ENDPOINT_CIDR_ALLOWLIST": _cidr("192.168.86", "0/24"),
     "LLM_CLOUD_ENDPOINT_HOST_ALLOWLIST": "generativelanguage.googleapis.com,api.z.ai",
     "LOCAL_LLM_SHARED_SECRET": "render-only-local-llm-secret",
+    # OMN-16843: x-runtime-env builds OMNINODE_INTERNAL_DB_URL from this with
+    # the fail-closed ${VAR:?} form, so `docker compose config` aborts without
+    # it. Render-only, never a real credential.
+    "OMNINODE_RUNTIME_PASSWORD": "render-only-omninode-runtime-password",
     "OMNI_HOME": "/data/omninode/omni_home",
     "ONEX_REGISTRATION_AUTO_ACK": "false",
     "ONEX_INFRA_HOST": "192.168.86.201",

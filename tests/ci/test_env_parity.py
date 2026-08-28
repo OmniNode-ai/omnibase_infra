@@ -170,6 +170,14 @@ SECRET_KEYS: frozenset[str] = frozenset(
         "OMNIBASE_INFRA_DB_URL",  # k8s uses OMNIBASE_INFRA_DB_HOST + OMNIBASE_INFRA_DB_PORT + Secret
         "OMNIINTELLIGENCE_DB_URL",  # cross-service DSN with embedded credentials
         "OMNIDASH_ANALYTICS_DB_URL",  # analytics DSN with embedded credentials, sourced from Infisical
+        # OMN-16843 (compose half) / OMN-15426 (epic). Internal-projection DSN,
+        # principal omninode_runtime. SECRET_KEYS is a literal claim about the
+        # cluster, and it holds: omninode_infra#803 binds this key on ALL THREE
+        # onex-dev runtime Deployments (omninode-runtime, -effects, -worker) via
+        # secretKeyRef -> onex-runtime-credentials with `optional: false`, and
+        # registers it in k8s/onex-dev/secret-ownership-manifest.yaml. Same
+        # shape as OMNIDASH_ANALYTICS_DB_URL above.
+        "OMNINODE_INTERNAL_DB_URL",
         "OMNIBASE_INFRA_AGENT_ACTIONS_POSTGRES_DSN",
         "OMNIBASE_INFRA_SKILL_LIFECYCLE_POSTGRES_DSN",
         # Valkey auth

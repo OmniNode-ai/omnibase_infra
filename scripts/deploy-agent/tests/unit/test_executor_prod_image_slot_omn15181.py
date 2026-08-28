@@ -108,6 +108,14 @@ _DUMMY_BOOTSTRAP_ENV: dict[str, str] = dict.fromkeys(
         "GATEWAY_ATTACH_KEYCLOAK_INTROSPECTION_URL",
         "GATEWAY_ATTACH_KEYCLOAK_JWKS_URL",
         "PROD_REDPANDA_ADVERTISE_HOST",
+        # OMN-16843: x-runtime-env in docker-compose.infra.yml builds
+        # OMNINODE_INTERNAL_DB_URL from this with the fail-closed ${VAR:?} form,
+        # so the merged prod render aborts without it. This harness is the fifth
+        # compose-render fixture in the repo and the only one outside tests/ --
+        # the other four are under tests/integration/, so neither the governed
+        # pre-push selector nor `pre-commit run --all-files` reached it, and CI
+        # was the first thing to execute it. Render-only, never a real credential.
+        "OMNINODE_RUNTIME_PASSWORD",
         # OMN-15378: docker-compose.infra.yml (merged as the base file for
         # EVERY lane, including prod) hard-requires DEV_REDPANDA_ADVERTISE_HOST
         # with no default (OMN-15173's deliberate no-silent-default design).
