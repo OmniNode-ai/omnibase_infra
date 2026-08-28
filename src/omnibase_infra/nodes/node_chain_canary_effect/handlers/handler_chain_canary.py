@@ -284,10 +284,15 @@ class HandlerChainCanary:
         )
         # Read at construction, overridable for tests, re-read in handle()
         # so a zero-arg contract-driven construction cannot miss it.
+        # ONEX_EXCLUDE below: a scheduled canary's own *_DISABLED kill switch,
+        # the same shape and rationale already accepted for
+        # node_dlq_depth_monitor_effect, node_sync_revert_watchdog_effect and
+        # node_evidence_autoclose_sweep_effect. The switch must be able to stop a
+        # runtime that is ALREADY wired, so it cannot arrive through container
+        # config resolved once at startup.
+        env_disabled = bool(os.environ.get(_KILL_SWITCH_ENV_VAR, ""))  # ONEX_EXCLUDE
         self._kill_switch_ctor = (
-            kill_switch_disabled
-            if kill_switch_disabled is not None
-            else bool(os.environ.get(_KILL_SWITCH_ENV_VAR, ""))
+            kill_switch_disabled if kill_switch_disabled is not None else env_disabled
         )
 
     @property
@@ -299,7 +304,12 @@ class HandlerChainCanary:
         return EnumHandlerTypeCategory.EFFECT
 
     async def handle(self, request: ModelChainCanaryRequest) -> ModelChainCanaryResult:
-        if self._kill_switch_ctor or os.environ.get(_KILL_SWITCH_ENV_VAR, ""):
+        # Re-read per run (ONEX_EXCLUDE, same rationale as the constructor): the
+        # runtime builds handlers once and the canary then fires on a schedule for
+        # the life of that process, so a value frozen at construction would make
+        # the switch inert until a redeploy.
+        env_disabled = os.environ.get(_KILL_SWITCH_ENV_VAR, "")  # ONEX_EXCLUDE
+        if self._kill_switch_ctor or env_disabled:
             logger.warning(
                 "%s is set — chain canary disabled, zero I/O performed.",
                 _KILL_SWITCH_ENV_VAR,
