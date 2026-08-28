@@ -38,6 +38,13 @@ class ModelEvidenceAutocloseOutcome(BaseModel):
     # result says on what STRENGTH of evidence a ticket was closed, not merely
     # that a count matched.
     dod_verify_behavior_proving_count: int = Field(default=0, ge=0)
+    # OMN-16821: how many checks executed, exited 0, and could not have exited
+    # otherwise for a product reason (OMN-15391). Recorded because the flip
+    # equality is `verified + non_probative == total`, so without this field a
+    # flip reads as an unexplained "6/12 verified" in the structured record and
+    # is auditable only from the free-text reason — the counts-without-detail
+    # problem OMN-16788 already hit once.
+    dod_verify_non_probative_count: int = Field(default=0, ge=0)
     uncovered_acceptance_criteria: tuple[str, ...] = Field(
         default=(),
         description=(

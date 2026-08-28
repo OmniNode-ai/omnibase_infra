@@ -22,9 +22,10 @@ Pipeline
    while still printing a complete ``ModelSkillResult`` — and the verdict is
    read from ``result.terminal_payload`` (``result`` itself carries only the
    dispatch outcome). FLIP requires all of: the verifier's own
-   ``status == "verified"``, ``total_checks > 0``, zero failed, and
-   ``verified_count == total_checks``. Anything else that still reached a
-   verdict is a GAP. Output with no parseable verdict in it fails closed as
+   ``status == "verified"``, ``total_checks > 0``, zero failed, at least one
+   verified check, and ``verified_count + non_probative_count ==
+   total_checks`` (OMN-16821 — see step 9). Anything else that still reached
+   a verdict is a GAP. Output with no parseable verdict in it fails closed as
    an error (recorded, never flips).
 6. AC-COVERAGE GUARD (OMN-16736). A green dod_verify is necessary, not
    sufficient. dod_verify verifies the checks declared in the ticket's OCC
@@ -60,7 +61,36 @@ Pipeline
    could not check" must never resolve to "so I will post". The FLIPPED path
    needs no such guard — it terminates in a completed state that
    SKIPPED_ALREADY_DONE short-circuits on the next run.
-9. ``apply=False`` (the default) performs every read above but never calls
+9. VERDICT-BEARING DENOMINATOR (OMN-16821). The flip equality used to be
+   ``verified_count == total_checks``, and it was unsatisfiable for most of
+   the corpus. ``total_checks`` counts every check that carries a verdict,
+   and ``non_probative`` (OMN-15391 — executed, exited 0, and its exit status
+   cannot depend on the product change) IS one of those verdicts. So a
+   ``non_probative`` entry counted in the denominator and never in the
+   numerator, and one of them was enough to hold a ticket forever no matter
+   how strong the rest of the evidence was. ``gh pr view --json state``
+   surrogates are the most common check shape in the autobound OCC corpus,
+   so this was the reason the flip path had never fired once: OMN-16260
+   measured ``verified`` / 12 total / 6 verified / 0 failed / 1
+   behavior-proving and still could not flip, purely on the arithmetic —
+   while being classified GAP_POSTED, i.e. told under ``--apply`` that "not
+   all ACs are receipt-proven" by a verifier that had just said the opposite.
+   The honest equality is ``verified_count + non_probative_count ==
+   total_checks``, which is the OMN-15390 precedent applied one axis over
+   (``total_checks`` already excludes ``superseded`` upstream, on exactly the
+   reasoning that an entry carrying no product-dependent verdict does not
+   belong in a verdict-bearing denominator). Strictness is unchanged in every
+   other direction and each is pinned by a test: a real ``failed`` still
+   gaps; a ``skipped`` check still gaps (it is neither verified nor
+   non-probative, so it breaks the equality); an ALL-non-probative contract
+   still gaps twice over — dod_verify's own status is ``skipped``, and
+   ``verified_count > 0`` is required so the equality can never be satisfied
+   by a denominator made entirely of provenance. The OMN-15911 behavior
+   conjunct and the OMN-16736 AC-coverage guard both run AFTER this and are
+   untouched by it. A verdict omitting ``non_probative_count`` entirely
+   contributes 0 and collapses back to the old, stricter rule — a fallback
+   that can only withhold a flip, never grant one.
+10. ``apply=False`` (the default) performs every read above but never calls
    a Linear mutation — every decision is logged as "would-do". ``apply=True``
    performs the real ``issueUpdate``/``commentCreate`` mutation. The dedup
    read runs in BOTH modes: it is a read, so DRY-RUN stays zero-write, and a
@@ -142,6 +172,16 @@ _DOD_VERIFY_STATUS_VERIFIED = "verified"
 # receipt in the existing corpus, so its absence is an ERROR (nothing to
 # decide on), never an inference in either direction.
 _DOD_VERIFY_BEHAVIOR_KEY = "behavior_proving_count"
+# How many checks executed, exited 0, and could not have exited otherwise for
+# a product reason — a bare `gh pr view` (green for every PR on GitHub) or a
+# ticket-independent foreign suite. `ModelDodVerifyState.non_probative_count`
+# in omnimarket, added by OMN-15391. It is a VERDICT, so it counts in
+# `total_checks`; it is not a PROOF, so it never counts in `verified_count`.
+# Both facts are correct, and reconciling them is what OMN-16821 is about (see
+# step 9 of the module docstring). Absent on a verifier predating OMN-15391,
+# where it contributes 0 and the predicate degrades to the older, stricter
+# equality — a fallback that can only withhold a flip, never grant one.
+_DOD_VERIFY_NON_PROBATIVE_KEY = "non_probative_count"
 
 # Evidence-Ticket binding patterns.
 _CONTRACT_FILE_RE = re.compile(r"^contracts/(OMN-\d+)\.yaml$")
@@ -442,6 +482,53 @@ def _ac_coverage_gap(
 # when the underlying verdict moves and silent when it does not.
 _SWEEP_COMMENT_MARKER_PREFIX = "onex-autoclose-sweep"
 _SWEEP_COMMENT_MARKER_VERSION = "v1"
+
+
+def _gap_shortfall(
+    *,
+    verify_status: str,
+    total_checks: int,
+    verified_count: int,
+    failed_count: int,
+    non_probative_count: int,
+) -> str:
+    """Name the shortfall this gap ACTUALLY found (OMN-16821 AC4).
+
+    Every gap used to be reported as "not all ACs are receipt-proven". For a
+    run that FAILED a check that is true. For a run dod_verify itself called
+    ``verified`` with zero failures it is a false statement about the ticket,
+    written into Linear by the mechanism — the same class of wrong statement
+    OMN-16736 (AC coverage) and OMN-15911 (proof class) were each opened to
+    stop. The branches below are ordered most-specific-first and each states
+    the fact that actually withheld the flip.
+    """
+    if failed_count > 0:
+        return "not all ACs are receipt-proven."
+    if verified_count == 0 and non_probative_count > 0:
+        # OMN-15391's refusal. Nothing went wrong; nothing was proven either.
+        return (
+            f"no check carried a probative verdict — {non_probative_count} "
+            f"non-probative of {total_checks}, and dod_verify's own terminal "
+            f"status is {verify_status!r}."
+        )
+    if verify_status != _DOD_VERIFY_STATUS_VERIFIED:
+        return (
+            f"dod_verify's own terminal status is {verify_status!r}, not "
+            f"{_DOD_VERIFY_STATUS_VERIFIED!r}."
+        )
+    if total_checks == 0:
+        return "the contract declared no verdict-bearing check at all."
+    unaccounted = total_checks - verified_count - non_probative_count
+    if unaccounted > 0:
+        return (
+            f"{unaccounted} check(s) reached no verdict (neither verified nor "
+            "non-probative) — a check that never ran proves nothing."
+        )
+    # Unreachable while `all_verified` is the exact negation of this function's
+    # inputs; kept as an honest catch-all rather than an assertion, because a
+    # future conjunct added to the predicate and not to this branch table would
+    # otherwise silently reuse whichever clause happened to be last.
+    return "not all ACs are receipt-proven."
 
 
 def _sweep_comment_marker(
@@ -1077,6 +1164,7 @@ class HandlerEvidenceAutocloseSweep:
         total_checks: int,
         verified_count: int,
         failed_count: int,
+        non_probative_count: int,
     ) -> ModelEvidenceAutocloseOutcome:
         """Withhold the flip: green, but nothing green proved behavior (OMN-15911).
 
@@ -1102,6 +1190,7 @@ class HandlerEvidenceAutocloseSweep:
             dod_verify_total_checks=total_checks,
             dod_verify_verified_count=verified_count,
             dod_verify_failed_count=failed_count,
+            dod_verify_non_probative_count=non_probative_count,
             dod_verify_behavior_proving_count=0,
         )
         marker = _sweep_comment_marker(
@@ -1144,6 +1233,7 @@ class HandlerEvidenceAutocloseSweep:
         total_checks: int,
         verified_count: int,
         failed_count: int,
+        non_probative_count: int,
         behavior_proving_count: int,
     ) -> ModelEvidenceAutocloseOutcome:
         """Withhold the flip and record/post the AC-coverage gap (OMN-16736).
@@ -1160,6 +1250,7 @@ class HandlerEvidenceAutocloseSweep:
             dod_verify_total_checks=total_checks,
             dod_verify_verified_count=verified_count,
             dod_verify_failed_count=failed_count,
+            dod_verify_non_probative_count=non_probative_count,
             dod_verify_behavior_proving_count=behavior_proving_count,
             uncovered_acceptance_criteria=uncovered,
         )
@@ -1291,20 +1382,39 @@ class HandlerEvidenceAutocloseSweep:
         total_checks = _as_int(verdict.get("total_checks"))
         verified_count = _as_int(verdict.get("verified_count"))
         failed_count = _as_int(verdict.get("failed_count"))
+        non_probative_count = _as_int(verdict.get(_DOD_VERIFY_NON_PROBATIVE_KEY))
         verify_status = str(verdict.get("status") or "").strip().lower()
 
         # Both dod_verify's OWN terminal status and the arithmetic must agree.
         # The arithmetic is the stricter of the two: dod_verify reports VERIFIED
         # when *some* checks were skipped (as long as not all of them were), and
-        # a skipped check is not proof of anything. `total_checks` is already the
-        # verdict-bearing denominator — superseded entries are excluded from it
-        # upstream (OMN-15390) — so `verified_count == total_checks` is the
-        # honest "every check that could carry a verdict, did".
+        # a skipped check is not proof of anything.
+        #
+        # OMN-16821: the denominator has to be the set of checks that could
+        # have carried a PRODUCT-DEPENDENT verdict. `total_checks` already
+        # excludes `superseded` upstream on that reasoning (OMN-15390);
+        # `non_probative` is the same class of entry one axis over — it did
+        # execute and it did exit 0, but its exit status could not have gone
+        # the other way for a product reason, so requiring it to appear in
+        # `verified_count` demanded a proof it is definitionally incapable of
+        # supplying. Adding it back on the left is what makes the equality
+        # satisfiable at all; every other conjunct is the strictness that
+        # keeps it honest:
+        #   * `failed_count == 0`     — a real red is still a gap.
+        #   * `verified_count > 0`    — an ALL-non-probative contract cannot
+        #     satisfy the equality by arithmetic alone, independent of
+        #     dod_verify's own `skipped` status for that shape. Two guards,
+        #     because the merge-state-only corpus is the exact population this
+        #     mechanism must never flip.
+        #   * the equality itself     — a `skipped` check is neither verified
+        #     nor non-probative, so it still breaks it. A check that never ran
+        #     proves nothing.
         all_verified = (
             verify_status == _DOD_VERIFY_STATUS_VERIFIED
             and total_checks > 0
             and failed_count == 0
-            and verified_count == total_checks
+            and verified_count > 0
+            and verified_count + non_probative_count == total_checks
         )
 
         issue_id = str(issue.get("id") or "")
@@ -1332,6 +1442,7 @@ class HandlerEvidenceAutocloseSweep:
                     dod_verify_total_checks=total_checks,
                     dod_verify_verified_count=verified_count,
                     dod_verify_failed_count=failed_count,
+                    dod_verify_non_probative_count=non_probative_count,
                 )
             behavior_proving_count = _as_int(verdict.get(_DOD_VERIFY_BEHAVIOR_KEY))
             if behavior_proving_count <= 0:
@@ -1344,6 +1455,7 @@ class HandlerEvidenceAutocloseSweep:
                     total_checks=total_checks,
                     verified_count=verified_count,
                     failed_count=failed_count,
+                    non_probative_count=non_probative_count,
                 )
 
             # OMN-16736: dod_verify being green is necessary, not sufficient.
@@ -1365,11 +1477,20 @@ class HandlerEvidenceAutocloseSweep:
                     total_checks=total_checks,
                     verified_count=verified_count,
                     failed_count=failed_count,
+                    non_probative_count=non_probative_count,
                     behavior_proving_count=behavior_proving_count,
                 )
 
+            # OMN-16821: `non_probative_count` is stated because without it a
+            # legitimate flip reads as an unexplained shortfall — "6/12 ACs
+            # verified" alone looks like half the contract went unproven, when
+            # the other six were provenance entries incapable of carrying a
+            # product-dependent verdict. The equality that released the flip is
+            # `verified + non_probative == total`, so the reason has to show
+            # both terms or it cannot be checked by whoever reads it.
             reason = (
-                f"dod_verify: {verified_count}/{total_checks} ACs verified, "
+                f"dod_verify: {verified_count}/{total_checks} ACs verified "
+                f"({non_probative_count} non-probative), "
                 f"0 failed, {behavior_proving_count} behavior-proving. "
                 f"Companion: {companion_pr_url}"
             )
@@ -1384,6 +1505,7 @@ class HandlerEvidenceAutocloseSweep:
                     dod_verify_total_checks=total_checks,
                     dod_verify_verified_count=verified_count,
                     dod_verify_failed_count=failed_count,
+                    dod_verify_non_probative_count=non_probative_count,
                     dod_verify_behavior_proving_count=behavior_proving_count,
                     applied=False,
                 )
@@ -1397,6 +1519,7 @@ class HandlerEvidenceAutocloseSweep:
                     dod_verify_total_checks=total_checks,
                     dod_verify_verified_count=verified_count,
                     dod_verify_failed_count=failed_count,
+                    dod_verify_non_probative_count=non_probative_count,
                     dod_verify_behavior_proving_count=behavior_proving_count,
                 )
             done_state_id = await self._linear.fetch_done_state_id(team_id)
@@ -1410,6 +1533,7 @@ class HandlerEvidenceAutocloseSweep:
                     dod_verify_total_checks=total_checks,
                     dod_verify_verified_count=verified_count,
                     dod_verify_failed_count=failed_count,
+                    dod_verify_non_probative_count=non_probative_count,
                     dod_verify_behavior_proving_count=behavior_proving_count,
                 )
             flipped = await self._linear.update_issue_state(issue_id, done_state_id)
@@ -1423,6 +1547,7 @@ class HandlerEvidenceAutocloseSweep:
                     dod_verify_total_checks=total_checks,
                     dod_verify_verified_count=verified_count,
                     dod_verify_failed_count=failed_count,
+                    dod_verify_non_probative_count=non_probative_count,
                     dod_verify_behavior_proving_count=behavior_proving_count,
                 )
             # No dedup gate on the flip audit comment (OMN-16808), and that is
@@ -1440,8 +1565,8 @@ class HandlerEvidenceAutocloseSweep:
                     f"Behavior-proving checks: {behavior_proving_count} "
                     "(OMN-15911 — at least one check executed the claimed "
                     "behavior, not only a merge-state read).\n"
-                    f"dod_verify: {verified_count}/{total_checks} ACs verified, "
-                    f"{failed_count} failed."
+                    f"dod_verify: {verified_count}/{total_checks} ACs verified "
+                    f"({non_probative_count} non-probative), {failed_count} failed."
                 ),
             )
             return ModelEvidenceAutocloseOutcome(
@@ -1453,15 +1578,23 @@ class HandlerEvidenceAutocloseSweep:
                 dod_verify_total_checks=total_checks,
                 dod_verify_verified_count=verified_count,
                 dod_verify_failed_count=failed_count,
+                dod_verify_non_probative_count=non_probative_count,
                 dod_verify_behavior_proving_count=behavior_proving_count,
                 linear_comment_posted=commented,
                 applied=True,
             )
 
         # Gap path.
+        shortfall = _gap_shortfall(
+            verify_status=verify_status,
+            total_checks=total_checks,
+            verified_count=verified_count,
+            failed_count=failed_count,
+            non_probative_count=non_probative_count,
+        )
         gap_reason = (
             f"dod_verify: {verified_count}/{total_checks} ACs verified, "
-            f"{failed_count} failed — not all ACs are receipt-proven."
+            f"{failed_count} failed — {shortfall}"
         )
         gap_base = ModelEvidenceAutocloseOutcome(
             ticket_id=ticket_id,
@@ -1472,10 +1605,22 @@ class HandlerEvidenceAutocloseSweep:
             dod_verify_total_checks=total_checks,
             dod_verify_verified_count=verified_count,
             dod_verify_failed_count=failed_count,
+            dod_verify_non_probative_count=non_probative_count,
         )
+        # OMN-16821: `non_probative_count` joins the OMN-16808 dedup
+        # fingerprint because the STATEMENT now varies with it. Two verdicts
+        # sharing (total, verified, failed) and differing in non-probative
+        # count produce different `shortfall` wording, so keying without it
+        # would let a stale comment suppress the corrected one — the dedup
+        # gate must track what was said, not merely which counts were seen.
         marker = _sweep_comment_marker(
             EnumEvidenceAutocloseDecision.GAP_POSTED,
-            (str(total_checks), str(verified_count), str(failed_count)),
+            (
+                str(total_checks),
+                str(verified_count),
+                str(failed_count),
+                str(non_probative_count),
+            ),
         )
         return await self._emit_gap_comment(
             base=gap_base,
@@ -1486,6 +1631,6 @@ class HandlerEvidenceAutocloseSweep:
                 "Evidence gap (OMN-16106 evidence autoclose sweep) — NOT flipped.\n\n"
                 f"Merged evidence companion: {companion_pr_url}\n"
                 f"dod_verify: {verified_count}/{total_checks} ACs verified, "
-                f"{failed_count} failed."
+                f"{failed_count} failed — {shortfall}"
             ),
         )

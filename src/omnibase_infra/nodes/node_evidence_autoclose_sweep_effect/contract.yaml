@@ -56,14 +56,42 @@
 #     GAP_NO_BEHAVIOR_PROOF. A verdict carrying no such field at all (an
 #     omnimarket predating OMN-15911 — i.e. every historical receipt) is
 #     ERROR_VERIFY_UNPARSEABLE, never an inference in either direction.
+#   - OMN-16821 (contract 1.3.0): VERDICT-BEARING DENOMINATOR. The flip
+#     equality was `verified_count == total_checks` and it was unsatisfiable
+#     for most of the corpus, which is why the flip path had never fired
+#     once. `total_checks` counts every check carrying a verdict, and
+#     `non_probative` (OMN-15391 — executed, exited 0, and its exit status
+#     cannot depend on the product change) IS one of those verdicts, so a
+#     non-probative entry counted in the denominator and never in the
+#     numerator. One of them held a ticket forever regardless of the rest of
+#     the evidence, and the ticket was then classified GAP_POSTED and told
+#     under --apply that "not all ACs are receipt-proven" by a verifier that
+#     had just returned `verified` with zero failures. Measured: OMN-16260
+#     reads verified / 12 total / 6 verified / 0 failed / 1 behavior-proving
+#     and could not flip. The equality is now
+#     `verified_count + non_probative_count == total_checks` — the OMN-15390
+#     precedent applied one axis over, since `total_checks` already excludes
+#     superseded entries upstream on exactly that reasoning. Strictness is
+#     unchanged elsewhere: a real `failed` still gaps, a `skipped` check
+#     still gaps (neither verified nor non-probative), and an
+#     ALL-non-probative contract still gaps twice over — dod_verify's own
+#     status is `skipped` for that shape, and `verified_count > 0` is a
+#     conjunct so the merge-state-only corpus can never satisfy the equality
+#     by arithmetic. The OMN-15911 behavior conjunct and the OMN-16736
+#     AC-coverage guard run after this and are untouched. A verdict omitting
+#     `non_probative_count` contributes 0 and collapses back to the older,
+#     stricter rule — a fallback that can only withhold a flip. Gap comment
+#     wording now names the shortfall actually found instead of asserting the
+#     ACs are unproven, and `non_probative_count` joins the OMN-16808 dedup
+#     fingerprint because the statement varies with it.
 #
 name: "node_evidence_autoclose_sweep_effect"
 node_type: "EFFECT_GENERIC"
 contract_version:
   major: 1
-  minor: 2
+  minor: 3
   patch: 0
-node_version: "1.2.0"
+node_version: "1.3.0"
 description: >
   Scheduled sweep wiring companion-merge -> dod_verify -> governed Done flip. Enumerates merged onex_change_control evidence companions, extracts their Evidence-Ticket binding, re-runs dod_verify, and flips Done or posts a gap comment via the Linear API. DRY-RUN by default; ONEX_AUTOCLOSE_DISABLED kill switch checked first.
 

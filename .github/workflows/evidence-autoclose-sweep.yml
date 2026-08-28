@@ -464,14 +464,23 @@ jobs:
                   "  (unrecognised dod_verify envelope — top-level keys: "
                   f"{sorted(payload)}; result keys: {sorted(envelope)})"
               )
+          # OMN-16821: non_probative and behavior_proving are printed because
+          # the flip predicate now READS both, and a divergence investigation
+          # that cannot see them cannot say why a ticket did or did not flip.
+          # The flip equality is `verified + non_probative == total` with
+          # `failed == 0`, `verified > 0` and `behavior_proving >= 1`; the line
+          # below carries every term of it.
           print(
-              "  status={} total={} verified={} failed={} skipped={} superseded={}".format(
+              "  status={} total={} verified={} failed={} skipped={} superseded={}"
+              " non_probative={} behavior_proving={}".format(
                   result.get("status"),
                   result.get("total_checks"),
                   result.get("verified_count"),
                   result.get("failed_count"),
                   result.get("skipped_count"),
                   result.get("superseded_count"),
+                  result.get("non_probative_count"),
+                  result.get("behavior_proving_count"),
               )
           )
           print(
