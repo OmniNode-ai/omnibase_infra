@@ -391,8 +391,34 @@ jobs:
       #   everything  RESOLVE  — pure-PyPI leaves (anthropic, radon, docker,
       #     else                 python-dateutil, ...). No omni-internal
       #                          metadata, safe to resolve normally.
+      #
+      # omnimarket itself is installed from `git+...@<resolved sha>`, NOT from
+      # the local `.omnimarket-src` directory (OMN-16902, second pass). The two
+      # are byte-identical — same commit — but they are not interchangeable to
+      # the OMN-14060 drift guard, which reads
+      # `direct_url.json`'s `vcs_info.commit_id` and treats a directory install
+      # as "not installed from git".
+      #
+      # That guard was inert here until OMN-16902's first pass materialised
+      # `${OMNI_HOME}/omnimarket`: `canonical_local_omnimarket_commit` returns
+      # None when no canonical clone exists, and the guard deliberately fails
+      # OPEN on None so it stays silent on CI runners. Materialising the clone
+      # made it determinable, and it correctly refused every dispatch in run
+      # 33217990549:
+      #
+      #   Error: omnimarket is NOT INSTALLED from git in this interpreter
+      #   (absent, or installed from PyPI/a non-VCS source), but a canonical
+      #   clone exists at $OMNI_HOME/omnimarket (HEAD 00aa538fe247).
+      #
+      # The guard is right and the install shape was wrong. The override
+      # (ONEX_ALLOW_OMNIMARKET_DRIFT) is deliberately NOT used: it says in its
+      # own words that results are "NOT evidence", and this job's whole output
+      # is evidence. Installing from the pinned git sha makes
+      # `installed == canonical` exactly, so the guard passes on the merits.
       - name: Co-install omnimarket into the dispatch venv (provides node_dod_verify)
         shell: bash
+        env:
+          OMNIMARKET_SHA: ${{ steps.omnimarket-ref.outputs.sha }}
         run: |
           set -euo pipefail
           # OMN-16846: the DISPATCH venv, never `.venv`. Installing an
@@ -445,7 +471,14 @@ jobs:
           if [ "${#LEAVES[@]}" -gt 0 ]; then
             uv pip install --python "$PYTHON_BIN" "${LEAVES[@]}"
           fi
-          uv pip install --python "$PYTHON_BIN" --no-deps ${NO_DEPS[@]+"${NO_DEPS[@]}"} ./.omnimarket-src
+          # The git+ form is load-bearing, not cosmetic — see the step comment.
+          # `.omnimarket-src` is still the source of truth for the dependency
+          # split above and for the ${OMNI_HOME}/omnimarket materialisation
+          # below; only the omnimarket distribution ITSELF moves to the pinned
+          # VCS URL, so `direct_url.json` carries vcs_info.commit_id and the
+          # OMN-14060 drift guard resolves installed == canonical.
+          uv pip install --python "$PYTHON_BIN" --no-deps ${NO_DEPS[@]+"${NO_DEPS[@]}"} \
+            "omnimarket @ git+https://github.com/OmniNode-ai/omnimarket@${OMNIMARKET_SHA}"
 
       # OMN-16846, the other half of the split — and the enforcement half
       # (CLAUDE.md rule 5). The co-install above must have left the GATE venv
@@ -817,6 +850,54 @@ jobs:
               echo "| \`${dest}\` | ${repo} | ${status} |"
             done < "${RUNNER_TEMP}/cwd-materialisation.tsv"
           } >> "$GITHUB_STEP_SUMMARY"
+
+      # OMN-16902, second pass. Materialising ${OMNI_HOME}/omnimarket ARMS the
+      # OMN-14060 drift guard, which until then failed open on this runner
+      # because no canonical clone existed. Run 33217990549 proved the
+      # consequence: every one of the four diagnosed tickets produced NO
+      # stdout at all and died on `omnimarket is NOT INSTALLED from git in
+      # this interpreter` — a strictly worse outcome than the false FAILEDs
+      # this ticket set out to remove, because it removed the verdict entirely.
+      #
+      # So the guard is now asserted HERE, right after the clone appears and
+      # before anything dispatches, through the dispatch venv's own
+      # interpreter — the one the verifier actually runs in. It is the real
+      # predicate (`check_omnimarket_drift`), not a restatement, and
+      # `allow_drift` is left at its refusing default.
+      - name: Assert the omnimarket drift guard resolves in the dispatch venv (OMN-16902)
+        shell: bash
+        run: |
+          set -euo pipefail
+          "${DISPATCH_VENV}/bin/python" - "${OMNI_HOME}" <<'PYEOF'
+          import sys
+
+          from omnibase_infra.cli.omnimarket_drift_guard import (
+              OmnimarketDriftError,
+              canonical_local_omnimarket_commit,
+              check_omnimarket_drift,
+              installed_omnimarket_commit,
+          )
+
+          omni_home = sys.argv[1]
+          canonical = canonical_local_omnimarket_commit(omni_home=omni_home)
+          installed = installed_omnimarket_commit()
+          print(f"canonical OMNI_HOME/omnimarket HEAD : {canonical}")
+          print(f"dispatch-venv installed commit      : {installed}")
+          if canonical is None:
+              print(
+                  "FAIL: ${OMNI_HOME}/omnimarket was not materialised, so the "
+                  "OMN-14060 guard fails open and OMN-16790's omnimarket-homed "
+                  "behaviour checks still cannot resolve their cwd.",
+                  file=sys.stderr,
+              )
+              raise SystemExit(1)
+          try:
+              check_omnimarket_drift(omni_home)
+          except OmnimarketDriftError as exc:
+              print(f"FAIL: {exc}", file=sys.stderr)
+              raise SystemExit(1) from exc
+          print("OK: installed omnimarket == canonical clone HEAD; dispatch will not be refused")
+          PYEOF
 
       # OMN-16902 D2, as an executable precondition rather than a comment.
       #

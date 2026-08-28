@@ -337,3 +337,69 @@ def test_every_pip_install_targets_the_dispatch_venv(
                 "Installing an undeclared onex.nodes provider into the gate venv "
                 "is exactly what OMN-16846 removed."
             )
+
+
+def test_omnimarket_is_co_installed_from_the_pinned_git_sha(
+    steps: list[dict[str, object]],
+) -> None:
+    """OMN-16902 second-pass regression guard.
+
+    Materialising `${OMNI_HOME}/omnimarket` ARMS the OMN-14060 drift guard,
+    which until then failed open on this runner because
+    `canonical_local_omnimarket_commit` found no clone. The guard reads
+    `direct_url.json`'s `vcs_info.commit_id`, and a directory install
+    (`./.omnimarket-src`) writes `dir_info` instead — so on run 33217990549
+    every one of the four diagnosed tickets produced NO verdict at all:
+    `omnimarket is NOT INSTALLED from git in this interpreter`.
+
+    The two shapes install byte-identical code from the same commit. Only the
+    recorded provenance differs, and only the git form satisfies the guard on
+    the merits. The override is not an acceptable substitute — it declares its
+    own results "NOT evidence", and this job's entire output is evidence.
+    """
+    run = str(
+        _step_by_name(steps, "Co-install omnimarket into the dispatch venv")["run"]
+    )
+    assert "git+https://github.com/OmniNode-ai/omnimarket@${OMNIMARKET_SHA}" in run, (
+        "omnimarket must be co-installed from the pinned git sha so "
+        "direct_url.json carries vcs_info.commit_id."
+    )
+    assert "./.omnimarket-src\n" not in run, (
+        "the directory install is what run 33217990549 refused; it must not "
+        "come back as the omnimarket distribution source."
+    )
+    for step in steps:
+        env = step.get("env") or {}
+        if isinstance(env, dict) and "OMNIMARKET_SHA" in env:
+            assert env["OMNIMARKET_SHA"] == "${{ steps.omnimarket-ref.outputs.sha }}", (
+                "the installed sha must be the SAME resolved commit the "
+                "`${OMNI_HOME}/omnimarket` materialisation copies, or the "
+                "guard's installed==canonical equality cannot hold."
+            )
+            break
+    else:
+        pytest.fail("no step binds OMNIMARKET_SHA to the resolved omnimarket ref")
+
+
+def test_drift_guard_is_asserted_before_any_dispatch(
+    steps: list[dict[str, object]],
+) -> None:
+    """The refusal must surface as a named job failure, not as N empty verdicts.
+
+    Without this step the symptom is per-ticket `(no stdout)` — which reads
+    like the verifier produced nothing, i.e. exactly the mis-attribution shape
+    this whole chain exists to end.
+    """
+    step = _step_by_name(steps, "Assert the omnimarket drift guard resolves")
+    run = str(step["run"])
+    assert "check_omnimarket_drift" in run, (
+        "it must call the real guard, not re-derive its predicate"
+    )
+    assert "ONEX_ALLOW_OMNIMARKET_DRIFT" not in run and "allow_drift" not in run, (
+        "the override must not appear here: it downgrades a real refusal to a "
+        "warning and declares its own results non-evidence."
+    )
+    names = [str(s.get("name", "")) for s in steps]
+    assert names.index(str(step["name"])) < names.index(
+        next(n for n in names if "Run evidence autoclose sweep" in n)
+    ), "the guard assertion must run before the sweep dispatches anything"
