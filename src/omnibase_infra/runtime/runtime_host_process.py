@@ -118,6 +118,7 @@ from omnibase_infra.runtime.contract_registration_event_router import (
     TOPIC_SUFFIX_CONTRACT_DEREGISTERED,
     TOPIC_SUFFIX_CONTRACT_REGISTERED,
 )
+from omnibase_infra.runtime.contract_terminal_events import resolve_terminal_retryable
 from omnibase_infra.runtime.dependency_materializer import DependencyMaterializer
 from omnibase_infra.runtime.envelope_validator import (
     normalize_correlation_id,
@@ -2628,6 +2629,14 @@ class RuntimeHostProcess:
             elif resolved_route is None:
                 error_code = "unknown_command"
 
+            # OMN-16812: a terminal that STATES its retryability is
+            # authoritative about it. The derivation below it (retryable iff the
+            # broker timed out) is a proxy for "we do not know", and it is wrong
+            # in both directions the moment a producer does know: a boundary
+            # failure terminal carrying ONEX_CORE_041_INVALID_CONFIGURATION is
+            # not retryable however fast it arrived. Falls back to the historical
+            # derivation for every terminal that says nothing.
+            stated_retryable = resolve_terminal_retryable(result.payload)
             return ModelLocalRuntimeIngressResponse(
                 ok=False,
                 command_name=route.contract_name
@@ -2649,7 +2658,11 @@ class RuntimeHostProcess:
                             or f"Pattern B broker failed for command {route.contract_name}"
                         )
                     ),
-                    retryable=result.status == "timeout",
+                    retryable=(
+                        stated_retryable
+                        if stated_retryable is not None
+                        else result.status == "timeout"
+                    ),
                 ),
             )
         except TimeoutError:

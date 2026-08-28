@@ -286,7 +286,19 @@ class HandlerDispatchFailureError(Exception):
     ``ONEX_BOUNDARY_DLQ_ENABLED``). It is classified non-retryable at that
     boundary: the FAILED result is deterministic, so retrying only burns the
     backoff budget.
+
+    OMN-16812: carries the FAILED result's TYPED ``error_code`` forward as the
+    boundary's fallback attribution. The engine sets it to the generic
+    ``HANDLER_EXECUTION_ERROR`` for every dispatcher crash alike, so it names
+    the SHAPE of the failure, not the failure — ``classify_boundary_failure``
+    prefers the specific code recovered from the flattened message and falls
+    back to this only when the crash carried no ONEX code at all (a bare
+    ``AttributeError``, say). ``None`` when the result carried no code.
     """
+
+    def __init__(self, message: str, *, failure_code: str | None = None) -> None:
+        super().__init__(message)
+        self.failure_code = failure_code
 
 
 class UndeliverableDispatchOutputError(Exception):
@@ -4270,10 +4282,16 @@ def _raise_if_silent_dispatch_failure(
     )
     if has_applicable_output:
         return
+    # OMN-16812: forward the typed error code the engine already resolved. It is
+    # the ONE authoritative attribution available at this seam — the handler's
+    # real exception object was consumed by the engine's catch-all and only its
+    # message survives into ``error_message``.
+    error_code = result.error_code
     raise HandlerDispatchFailureError(
         f"dispatch to topic={topic} returned status={result.status.value} with no "
         f"terminal output (dispatcher_id={result.dispatcher_id}): "
-        f"{result.error_message or 'handler/coercion failure'}"
+        f"{result.error_message or 'handler/coercion failure'}",
+        failure_code=error_code.value if error_code is not None else None,
     )
 
 
@@ -4831,6 +4849,7 @@ def _make_event_bus_callback(
     propagate_publish_failures: bool = False,
     allowed_dispatcher_ids: Collection[str] | None = None,
     consumer_group: str | None = None,
+    failure_terminal_topics: Sequence[str] = (),
 ) -> Callable[..., Awaitable[None]]:
     """Create a Kafka on_message callback that deserializes and dispatches to engine.
 
@@ -4865,6 +4884,20 @@ def _make_event_bus_callback(
     ``None`` (the default) disables counting for callers/tests that do not wire
     a group -- it never fabricates one, because a fabricated group id would
     produce flow rows attributed to a consumer that does not exist.
+
+    ``failure_terminal_topics`` (OMN-16812): the FAILURE terminal topics this
+    contract declares, read through ``_declared_failure_terminal_topics`` -- the
+    same single reader the applier's OMN-15468 failure-routing guard and the
+    Pattern B broker's subscription set are built from. When exactly one is
+    declared, a handler failure that this boundary is about to COMMIT AN OFFSET
+    OVER is terminalized there: a correlation-exact
+    ``ModelBoundaryFailureTerminal`` naming the failure class, its ONEX code and
+    its retryability. Without it, OMN-16798 left the record safe and the CALLER
+    stranded -- the .201 delegation matrix DLQ'd a routing-reducer failure in
+    milliseconds and the caller still burned 120 s to a ``dispatch_timeout``
+    with ``retryable: true``. Empty (the default) is the unchanged pre-OMN-16812
+    behavior; two or more is ambiguous and left alone for the same reason
+    ``apply_failure_terminal_guard`` refuses to guess.
     """
     import json
 
@@ -5067,6 +5100,111 @@ def _make_event_bus_callback(
         assert last_exc is not None
         raise last_exc
 
+    async def _emit_boundary_failure_terminal(
+        exc: Exception,
+        correlation_id: UUID,
+        failure_reason: str,
+    ) -> None:
+        """Terminalize a handler failure this boundary is about to ACK (OMN-16812).
+
+        Called at each point where ``_route_swallowed_exception`` is about to
+        return normally -- which, at this boundary, means the offset advances
+        and nothing will ever re-attempt the record. From that instant anything
+        waiting on this contract's terminals is waiting on a message that will
+        never come. OMN-16798 made that outcome safe for the RECORD (DLQ'd, or
+        loudly counted as lost); this makes it OBSERVABLE to the caller.
+
+        Deliberately NOT called on the paths that raise
+        (``BoundaryDlqNotPersistedError``): those withhold the offset so the
+        record is redelivered, and a terminal published for a correlation that
+        is about to be retried would be a lie about a still-live request.
+
+        Best-effort by construction, and last: a bus that cannot take the
+        terminal must not convert a DLQ'd (safe) record into a raised (withheld,
+        redelivered) one. The DLQ decision is already made and logged by the time
+        this runs; the failure of an observability emission may not overturn it.
+        """
+        from omnibase_infra.runtime.boundary_failure_terminal import (
+            classify_boundary_failure,
+        )
+
+        if len(failure_terminal_topics) != 1:
+            # Zero: the contract declares no failure terminal, so there is no
+            # address to answer at and inventing one would publish outside the
+            # contract's own allowlist. Two or more: no basis to choose --
+            # the same refusal-to-guess ``apply_failure_terminal_guard`` makes.
+            return
+        terminal_topic = failure_terminal_topics[0]
+        if terminal_topic == topic:
+            # A contract that both consumes and declares this topic would have
+            # its own failure republished onto its own subscription. Same
+            # circular-route hazard ``_is_dead_letter_source_topic`` guards on
+            # the DLQ leg, and the same answer: log-only, never amplify.
+            logger.error(
+                "Boundary failure terminal suppressed: declared failure terminal "
+                "%s is the consumed topic itself (OMN-16812) correlation_id=%s",
+                terminal_topic,
+                correlation_id,
+            )
+            return
+        publish_fn = getattr(event_bus, "publish", None) if event_bus else None
+        if publish_fn is None or not callable(publish_fn):
+            logger.error(
+                "Boundary failure terminal NOT emitted: no publishable event bus "
+                "on this subscription (OMN-16812) topic=%s terminal_topic=%s "
+                "correlation_id=%s",
+                topic,
+                terminal_topic,
+                correlation_id,
+            )
+            return
+
+        terminal = classify_boundary_failure(
+            exc,
+            topic=topic,
+            correlation_id=correlation_id,
+            failure_reason=failure_reason,
+            failure_code=getattr(exc, "failure_code", None),
+        )
+        envelope = ModelEventEnvelope[object](
+            payload=terminal,
+            correlation_id=correlation_id,
+            envelope_timestamp=datetime.now(UTC),
+            event_type=_derive_event_type_from_topic(terminal_topic),
+            source_tool="auto-wiring-boundary",
+            target_tool=terminal_topic,
+            payload_type=type(terminal).__name__,
+        )
+        try:
+            await publish_fn(
+                terminal_topic,
+                None,
+                envelope.model_dump_json().encode("utf-8"),
+                None,
+            )
+        except Exception as publish_exc:  # noqa: BLE001 — see docstring: must not overturn the DLQ outcome
+            logger.error(
+                "Boundary failure terminal publish FAILED (OMN-16812): topic=%s "
+                "terminal_topic=%s error_type=%s error=%s correlation_id=%s",
+                topic,
+                terminal_topic,
+                type(publish_exc).__name__,
+                _sanitize_exc(publish_exc),
+                correlation_id,
+            )
+            return
+        logger.error(
+            "metric_name=boundary_failure_terminalized terminal_topic=%s "
+            "topic=%s failure_class=%s failure_code=%s retryable=%s "
+            "correlation_id=%s",
+            terminal_topic,
+            topic,
+            terminal.failure_class,
+            terminal.failure_code,
+            terminal.retryable,
+            correlation_id,
+        )
+
     async def _route_swallowed_exception(
         exc: Exception,
         message: object,
@@ -5142,6 +5280,10 @@ def _make_event_bus_callback(
                 type(exc).__name__,
                 correlation_id,
             )
+            # OMN-16812: the offset advances from here, so this is an ACK over a
+            # failure. Terminalize regardless of the DLQ flag -- whether the
+            # record was preserved is orthogonal to whether the caller is told.
+            await _emit_boundary_failure_terminal(exc, correlation_id, sanitized)
             return
 
         def _increment_message_lost_counter() -> None:
@@ -5195,6 +5337,11 @@ def _make_event_bus_callback(
                     type(exc).__name__,
                     correlation_id,
                 )
+                # OMN-16812: the record is durably parked and the offset is
+                # about to advance -- exactly the .201 shape where the DLQ
+                # write and the 120 s caller timeout coexisted. Answer the
+                # caller now, with the class the runtime already knows.
+                await _emit_boundary_failure_terminal(exc, correlation_id, sanitized)
             else:
                 # OMN-14936: a False return means the publish did NOT
                 # durably persist (rejected input, producer unavailable, or
@@ -8015,6 +8162,15 @@ async def _subscribe_contract_topics(
                 # and the topic while a message is in flight, so it is where
                 # per-(consumer_group, topic) throughput is counted.
                 consumer_group=consumer_group,
+                # OMN-16812: the SAME declared failure terminals the applier's
+                # OMN-15468 guard re-routes a failure-verdict RETURN value to.
+                # A handler that RAISES produces no return value to re-route,
+                # so the applier guard can never fire for it -- the boundary is
+                # the only surface that can answer, and this is the address it
+                # answers at.
+                failure_terminal_topics=_declared_failure_terminal_topics(
+                    contract, success_topic=output_topic or ""
+                ),
             )
         topic_callbacks.append((topic, callback))
 
