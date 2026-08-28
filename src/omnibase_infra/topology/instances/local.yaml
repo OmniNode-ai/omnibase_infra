@@ -64,9 +64,11 @@ databases:
             schema: public
           - object_type: TABLE
             objects:
+              - consumer_flow_windows
               - live_events
               - log_entries
               - projection_watermarks
+              - topic_produce_windows
             privileges: [INSERT, SELECT, UPDATE]
             schema: omninode_internal
           - object_type: TABLE
