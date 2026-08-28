@@ -38,6 +38,9 @@ import httpx
 import pytest
 from pydantic import ValidationError
 
+from omnibase_infra.models.health.enum_llm_endpoint_probe_state import (
+    EnumLlmEndpointProbeState,
+)
 from omnibase_infra.protocols import ProtocolEventBusLike
 from omnibase_infra.services.service_llm_endpoint_health import (
     EndpointCircuitBreaker,
@@ -499,6 +502,7 @@ class TestModelLlmEndpointStatus:
             available=True,
             last_check=now,
             latency_ms=10.0,
+            probe_state=EnumLlmEndpointProbeState.HEALTHY,
         )
         assert status.url == valid_url
 
@@ -551,8 +555,10 @@ class TestModelLlmEndpointStatus:
             available=True,
             last_check=now,
             latency_ms=42.5,
+            probe_state=EnumLlmEndpointProbeState.HEALTHY,
         )
         assert status.available is True
+        assert status.probe_state is EnumLlmEndpointProbeState.HEALTHY
         assert status.latency_ms == 42.5
         assert status.error == ""
         assert status.circuit_state == "closed"
@@ -568,6 +574,7 @@ class TestModelLlmEndpointStatus:
             latency_ms=-1.0,
             error="Connection refused",
             circuit_state="open",
+            probe_state=EnumLlmEndpointProbeState.UNAVAILABLE,
         )
         assert status.available is False
         assert status.latency_ms == -1.0
@@ -583,6 +590,7 @@ class TestModelLlmEndpointStatus:
             available=True,
             last_check=now,
             latency_ms=10.0,
+            probe_state=EnumLlmEndpointProbeState.HEALTHY,
         )
         with pytest.raises(ValidationError):
             status.available = False  # type: ignore[misc]
@@ -732,7 +740,15 @@ class TestServiceLlmEndpointHealthProbe:
         self,
         mock_event_bus: AsyncMock,
     ) -> None:
-        """401/403 model discovery proves cloud reachability without poisoning route health."""
+        """401/403 model discovery must not poison route health via the breaker.
+
+        OMN-16900 changed the verdict this test asserts. A 401 does prove the
+        route is reachable, so the circuit breaker still must not open — but
+        the endpoint is no longer reported ``available``. A credential the
+        provider rejects makes the endpoint unusable, and reporting it healthy
+        hid three auth-dead GLM endpoints on .201 for 5+ days while they were
+        re-probed every 30s.
+        """
         cfg = ModelLlmEndpointHealthConfig(
             endpoints={
                 "cloud-glm": ("https://api.z.ai/api/coding/paas/v4/chat/completions")
@@ -740,6 +756,7 @@ class TestServiceLlmEndpointHealthProbe:
             probe_interval_seconds=5.0,
             probe_timeout_seconds=2.0,
             circuit_breaker_threshold=1,
+            auth_failure_threshold=1,
         )
         service = ServiceLlmEndpointHealth(config=cfg, event_bus=mock_event_bus)
 
@@ -751,9 +768,10 @@ class TestServiceLlmEndpointHealthProbe:
             status_map = await service.probe_all()
 
         status = status_map["cloud-glm"]
-        assert status.available is True
-        assert status.error == ""
         assert status.circuit_state == "closed"
+        assert status.probe_state is EnumLlmEndpointProbeState.AUTH_FAILED
+        assert status.available is False
+        assert "401" in status.error
 
     @pytest.mark.asyncio
     async def test_probe_both_fail(
@@ -1252,6 +1270,7 @@ class TestModelLlmEndpointHealthEvent:
                 available=True,
                 last_check=now,
                 latency_ms=10.0,
+                probe_state=EnumLlmEndpointProbeState.HEALTHY,
             ),
             ModelLlmEndpointStatus(
                 url="http://localhost:8100",
@@ -1260,6 +1279,7 @@ class TestModelLlmEndpointHealthEvent:
                 last_check=now,
                 latency_ms=-1.0,
                 error="Down",
+                probe_state=EnumLlmEndpointProbeState.UNAVAILABLE,
             ),
         )
         event = ModelLlmEndpointHealthEvent(
