@@ -19,6 +19,13 @@ separate times and worked around privately each time with an ad-hoc
 ``gh api --method PATCH``. This is the one committed copy of that workaround,
 with the two assertions the ad-hoc form never had.
 
+Note the exit code is not evidence in *either* direction: for ``--body`` the
+write does not land (the three observations behind this ticket), while the
+2026-05-25 main-cutover report recorded ``gh pr edit --base`` exiting 1 on the
+same deprecation with the mutation **applied**. So "it exited 1" does not mean
+nothing happened, and "it exited 0" would not mean the write landed. Only a
+read-back settles it, which is why this helper performs one.
+
 THE TWO ASSERTIONS
 ------------------
 1. **Identity, before writing.** The caller names ``--repo OWNER/NAME --pr N``.
