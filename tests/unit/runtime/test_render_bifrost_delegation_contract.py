@@ -18,6 +18,8 @@ from omnibase_infra.runtime.render_bifrost_delegation_contract import (
 _ROOT = Path(__file__).resolve().parents[3]
 _OVERLAY = _ROOT / "docker" / "lane-overlays" / "dev.bifrost.yaml"
 _ENDPOINT = "http://192.168.86.201:8000/v1/chat/completions"
+# OMN-16833: the second live local rung — DS-V4-Flash on .200:8101.
+_DS_V4_ENDPOINT = "http://192.168.86.200:8101/v1/chat/completions"
 
 
 @pytest.mark.unit
@@ -50,6 +52,12 @@ def _write_base_contract(path: Path, *, coder_model: str | None = "qwen3.8") -> 
                         "required": True,
                     },
                     {
+                        "backend_id": "local-ds-v4-flash",
+                        "model_name": "deepseek-v4-flash",
+                        "endpoint_url_env": "BIFROST_LOCAL_DS_V4_FLASH_ENDPOINT_URL",
+                        "required": True,
+                    },
+                    {
                         "backend_id": "local-reasoner",
                         "model_name": "retired",
                         "endpoint_url_env": "BIFROST_LOCAL_REASONER_ENDPOINT_URL",
@@ -79,6 +87,7 @@ def test_typed_overlay_wins_over_poisoned_model_and_endpoint_environment(
             "LLM_CODER_MODEL_NAME": "poisoned",
             "BIFROST_LOCAL_CODER_ENDPOINT_URL": "http://192.168.86.201:8001/v1/chat/completions",
             "BIFROST_LOCAL_REASONER_ENDPOINT_URL": "http://cloud.invalid/v1/chat/completions",
+            "BIFROST_LOCAL_DS_V4_FLASH_ENDPOINT_URL": "http://cloud.invalid/v1/chat/completions",
         },
     )
 
@@ -90,6 +99,16 @@ def test_typed_overlay_wins_over_poisoned_model_and_endpoint_environment(
         assert by_id[backend_id]["model_name"] == "qwen3.8"
         assert by_id[backend_id]["max_tokens"] == 65_536
         assert by_id[backend_id]["timeout_ms"] == 300_000
+    # OMN-16833: escalation's large-window local rung must render a COMPLETE
+    # endpoint_url. Before this ticket it rendered null and was dropped at load.
+    assert by_id["local-ds-v4-flash"]["endpoint_url"] == _DS_V4_ENDPOINT
+    assert by_id["local-ds-v4-flash"]["model_name"] == "deepseek-v4-flash"
+    assert by_id["local-ds-v4-flash"]["max_tokens"] == 65_536
+    assert by_id["local-ds-v4-flash"]["timeout_ms"] == 300_000
+    # local-reasoner (.201:8001, GPU1 removed for RMA) stays unbound by design —
+    # the renderer strips its stale env hint so it fails closed rather than
+    # resolving a dead endpoint.
+    assert by_id["local-reasoner"].get("endpoint_url") is None
     assert all("endpoint_url_env" not in backend for backend in by_id.values())
     assert all("required" not in backend for backend in by_id.values())
 
@@ -163,10 +182,12 @@ def test_endpoint_probe_requires_advertised_served_id(tmp_path: Path) -> None:
     def rejected_probe(
         endpoint_url: str, model_name: str, timeout: float
     ) -> str | None:
-        assert endpoint_url == _ENDPOINT
-        assert model_name == "qwen3.8"
+        assert (endpoint_url, model_name) in {
+            (_ENDPOINT, "qwen3.8"),
+            (_DS_V4_ENDPOINT, "deepseek-v4-flash"),
+        }
         assert timeout > 0
-        return "model endpoint did not advertise qwen3.8"
+        return f"model endpoint did not advertise {model_name}"
 
     with pytest.raises(ProtocolConfigurationError, match="failed verification"):
         render_bifrost_delegation_contract(
