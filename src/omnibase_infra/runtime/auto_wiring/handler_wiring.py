@@ -2587,10 +2587,35 @@ class ProjectionTableOperation:
 
 
 class TenantProjectionTableOperation(ProjectionTableOperation):
-    """Tenant operation whose only authority is a verified capability."""
+    """Tenant operation that VERIFIES attribution rather than sourcing it.
 
-    def _context(self) -> VerifiedProjectionTenantAuthority:
-        return self._adapter._bound_tenant_context()
+    OMN-16831 (operator ruling 2026-08-28, option D): the verified capability
+    is an AUTHORIZATION artifact and must never be the SOURCE of ``tenant_id``.
+    Attribution is recorded by the producer at write time; the authority, when
+    present, only verifies the recorded claim.
+
+    Before that ruling this class resolved the authority unconditionally and
+    then overwrote ``row["tenant_id"]`` with it. Because
+    ``bind_projection_tenant_authority`` has zero non-test call sites, no real
+    dispatch on any lane ever had one bound -- so all 15 TENANT-classified
+    relations were structurally unwritable and 100% of their events were
+    quarantined before a single statement was issued. Worse than a refusal:
+    the immutable log kept a DLQ record instead of a tenant-attributed fact,
+    destroying the dimension rather than deferring the mechanism.
+
+    The isolation MECHANISM is unchanged and fully deferred (RLS vs
+    schema-per-tenant vs separate databases, OMN-15359's physical cutover, the
+    signed-envelope authority chain). Only the coupling is severed.
+    """
+
+    def _context(self) -> VerifiedProjectionTenantAuthority | None:
+        """The bound authority, or ``None`` when trusted ingress bound none.
+
+        Routes through the adapter's optional accessor so the lifecycle guard
+        (a closed adapter still refuses) survives independently of whether an
+        authority happens to be present.
+        """
+        return self._adapter._optional_tenant_context()
 
     def _assert_supplied_tenant(
         self,
@@ -2621,9 +2646,23 @@ class TenantProjectionTableOperation(ProjectionTableOperation):
         self._assert_write_declared()
         context = self._context()
         attributed_row = dict(row)
+        if context is None:
+            # No authority bound: record exactly what the producer recorded.
+            # Nothing is invented, defaulted, or overwritten here -- whether a
+            # row is permitted to arrive tenant-less is the producer's
+            # obligation, enforced at the write sites (ruling item 4).
+            return self._adapter._execute_upsert(
+                self._target,
+                conflict_key,
+                attributed_row,
+                tenant_context=None,
+            )
         supplied_tenant = attributed_row.get("tenant_id")
         if supplied_tenant is not None:
             self._assert_supplied_tenant(supplied_tenant, context, operation="row")
+        # Reached only when the supplied tenant is absent or already verified
+        # equal, so this now normalizes representation -- it no longer
+        # substitutes an identity the event did not claim.
         attributed_row["tenant_id"] = context.tenant_id
         return self._adapter._execute_upsert(
             self._target,
@@ -2638,6 +2677,16 @@ class TenantProjectionTableOperation(ProjectionTableOperation):
         self._assert_read_declared()
         context = self._context()
         attributed_filters = dict(filters or {})
+        if context is None:
+            # Symmetric to upsert: the read is not narrowed to an authority
+            # that does not exist. Refusing here alone was enough to DLQ every
+            # delegation event, because the writer probes for existing
+            # evidence before it upserts.
+            return self._adapter._execute_query(
+                self._target,
+                attributed_filters,
+                tenant_context=None,
+            )
         supplied_tenant = attributed_filters.get("tenant_id")
         if supplied_tenant is not None:
             self._assert_supplied_tenant(supplied_tenant, context, operation="query")
@@ -2815,13 +2864,20 @@ class ProjectionDatabaseOperations:
             for table_target in target.table_targets
         }
 
-    def _bound_tenant_context(self) -> VerifiedProjectionTenantAuthority:
-        """Return the already-verified authority or fail before connecting."""
+    def _optional_tenant_context(self) -> VerifiedProjectionTenantAuthority | None:
+        """Return the verified authority when one is bound, else ``None``.
+
+        OMN-16831: attribution must not depend on the isolation mechanism, so
+        the absence of an authority is a normal state rather than a refusal.
+        What is NOT relaxed: the adapter lifecycle guard still runs first, and
+        a bound authority is still checked against the dispatch event before it
+        is honoured -- an authority that does not match its event raises here
+        exactly as it did before, so a forged or replayed capability cannot
+        become the quiet path.
+        """
         self._binding_connections.ensure_open()
         if self._tenant_authority is None:
-            raise _projection_tenant_context_error(
-                "Tenant projection has no cryptographically verified authority"
-            )
+            return None
         assert_projection_tenant_authority_matches_event(
             self._tenant_authority,
             self._tenant_event,
