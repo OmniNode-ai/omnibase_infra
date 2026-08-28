@@ -238,17 +238,23 @@ def test_root_defaults_to_the_env_scratchpad_when_set(tmp_path: Path) -> None:
     assert Path(result.stdout.strip()).parent == tmp_path
 
 
-def test_never_returns_a_path_under_slash_tmp_by_default(tmp_path: Path) -> None:
-    """`feedback_no_tmp_use_workspace`: /tmp is not the scratch root."""
-    env = {k: v for k, v in os.environ.items() if k != "CLAUDE_SCRATCHPAD_DIR"}
-    env["OMNI_HOME"] = str(tmp_path)
-    result = subprocess.run(
-        [sys.executable, str(_SCRIPT), "--label", "lane"],
-        capture_output=True,
-        text=True,
-        timeout=60,
-        env=env,
-        check=False,
-    )
-    assert result.returncode == 0, result.stderr
-    assert not result.stdout.strip().startswith("/tmp/")  # noqa: S108
+def test_default_root_is_the_workspace_never_slash_tmp(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """`feedback_no_tmp_use_workspace`: /tmp is not the scratch root.
+
+    Asserted against ``default_root()`` directly rather than by inspecting a
+    minted path under ``tmp_path``: pytest's ``tmp_path`` root is itself under
+    ``/tmp`` on Linux (and under ``/private/var/folders`` on macOS), so a
+    "does the output start with /tmp" check on a ``tmp_path`` root tests the
+    platform, not the helper -- it passed locally and failed on the CI runner.
+    """
+    monkeypatch.delenv("CLAUDE_SCRATCHPAD_DIR", raising=False)
+    monkeypatch.delenv("OMNI_HOME", raising=False)
+    assert not str(MOD.default_root()).startswith("/tmp")  # noqa: S108
+
+    monkeypatch.setenv("OMNI_HOME", "/some/workspace")
+    assert MOD.default_root() == Path("/some/workspace/.onex_state/lane_scratch")
+
+    monkeypatch.setenv("CLAUDE_SCRATCHPAD_DIR", "/scratch/here")
+    assert MOD.default_root() == Path("/scratch/here")
