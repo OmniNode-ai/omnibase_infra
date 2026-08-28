@@ -304,16 +304,38 @@ def test_equal_tenant_string_is_replaced_with_uuid(domain_dsns: dict[str, str]) 
         adapter.close()
 
 
-def test_missing_authority_fails_before_connect(domain_dsns: dict[str, str]) -> None:
+def test_missing_authority_is_adjudicated_by_rls_not_by_the_runtime(
+    domain_dsns: dict[str, str],
+) -> None:
+    """With no authority bound, the DATABASE refuses -- the runtime does not.
+
+    OMN-16831 (ruling 2026-08-28, option D). This test previously proved the
+    runtime refused before connecting. That refusal was the defect: because
+    ``bind_projection_tenant_authority`` has zero non-test call sites, EVERY
+    real dispatch took this path, so every tenant-classified event was
+    quarantined and its tenant attribution destroyed rather than recorded.
+
+    Decoupling attribution from authorization does not weaken isolation, and
+    this is the proof: with no verified capability there is no
+    ``app.tenant_id`` GUC, so the FORCE-RLS ``WITH CHECK`` on
+    ``tenant.delegation_events`` compares against NULL and Postgres rejects
+    the row itself. The guarantee moved from a runtime precondition to the
+    database policy that was always its real enforcement point.
+    """
     adapter = _tenant_adapter(domain_dsns["tenant"], None)
-    with patch("psycopg2.connect") as connect:
-        with pytest.raises(ProjectionTenantContextError, match="verified authority"):
+    try:
+        with pytest.raises(psycopg2.errors.InsufficientPrivilege):
             adapter.upsert(
                 TENANT_TABLE,
                 "correlation_id",
-                {"correlation_id": uuid4(), "task_type": "proof"},
+                {
+                    "correlation_id": uuid4(),
+                    "task_type": "proof",
+                    "tenant_id": TENANT_A,
+                },
             )
-    connect.assert_not_called()
+    finally:
+        adapter.close()
 
 
 def test_tenant_b_cannot_read_tenant_a(domain_dsns: dict[str, str]) -> None:
@@ -522,12 +544,26 @@ def test_miswired_dsn_fails_identity_attestation(domain_dsns: dict[str, str]) ->
 def test_environment_tenant_is_not_authority(
     domain_dsns: dict[str, str], monkeypatch: pytest.MonkeyPatch
 ) -> None:
+    """``ONEX_TENANT_ID`` never becomes the isolation context (OMN-16831).
+
+    A process-wide deployment env var is not a request-scoped entitlement, and
+    the decoupling must not accidentally promote it into one. Even with it set
+    to a real tenant, no GUC is issued on its word and the row is still
+    adjudicated by RLS against a NULL context.
+    """
     monkeypatch.setenv("ONEX_TENANT_ID", str(TENANT_A))
     monkeypatch.setenv("ENFORCE_TENANT_ISOLATION", "false")
     adapter = _tenant_adapter(domain_dsns["tenant"], None)
-    with pytest.raises(ProjectionTenantContextError):
-        adapter.upsert(
-            TENANT_TABLE,
-            "correlation_id",
-            {"correlation_id": uuid4(), "task_type": "proof"},
-        )
+    try:
+        with pytest.raises(psycopg2.errors.InsufficientPrivilege):
+            adapter.upsert(
+                TENANT_TABLE,
+                "correlation_id",
+                {
+                    "correlation_id": uuid4(),
+                    "task_type": "proof",
+                    "tenant_id": TENANT_A,
+                },
+            )
+    finally:
+        adapter.close()

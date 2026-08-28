@@ -190,7 +190,22 @@ def test_red_control_mismatched_signer_binding() -> None:
         )
 
 
-def test_red_control_untrusted_tenant_selection() -> None:
+def test_red_control_untrusted_tenant_never_becomes_isolation_context() -> None:
+    """A self-asserted envelope tenant is never promoted to an authority.
+
+    OMN-16831 (ruling 2026-08-28, option D) changed what this control asserts,
+    and deliberately so. It previously proved the write was REFUSED outright,
+    which conflated two different things: recording who an event belongs to
+    (attribution) and being entitled to act as them (authorization). Refusing
+    the write did not make the platform safer -- it destroyed the dimension on
+    every event, on every lane, because no authority is ever bound.
+
+    The invariant that actually matters survives at full strength and is what
+    is asserted here: an unsigned envelope's payload/security-context tenant
+    can NEVER mint a capability, and therefore never reaches
+    ``set_config('app.tenant_id', ...)``. It is data the producer claimed, not
+    proof of entitlement, and no RLS session is ever opened on its word.
+    """
     tenant_id = uuid4()
     envelope = ModelEventEnvelope[dict[str, object]](
         payload={"tenant_id": str(tenant_id)},
@@ -202,17 +217,23 @@ def test_red_control_untrusted_tenant_selection() -> None:
         ),
     )
     target = projection_database_target("delegation_events", schema="tenant")
-    conn, _ = _connection("tenant_projection_writer")
+    conn, cursor = _connection("tenant_projection_writer")
 
     with patch("psycopg2.connect", return_value=conn):
         adapter = _adapter(target, authority=None)
-        with pytest.raises(ProjectionTenantContextError, match="verified authority"):
-            adapter.upsert("delegation_events", "event_id", {"event_id": uuid4()})
+        adapter.upsert(
+            "delegation_events",
+            "event_id",
+            {"event_id": uuid4(), "tenant_id": str(tenant_id)},
+        )
 
-    conn.cursor.assert_not_called()
+    issued = [call.args[0] for call in cursor.execute.call_args_list]
+    assert not any("set_config" in statement for statement in issued)
+    # No RLS transaction was opened on an unverified claim.
+    assert conn.commit.call_count == 0
     assert (
         envelope.security_context is not None
-    )  # proves the rejected shape was present
+    )  # proves the untrusted shape was present
 
 
 def test_capability_constructor_is_sealed() -> None:
@@ -586,3 +607,127 @@ def test_connection_is_closed_when_identity_attestation_raises() -> None:
             adapter.query("generation_events")
 
     conn.close.assert_called_once_with()
+
+
+# ---------------------------------------------------------------------------
+# OMN-16831 item 3 (operator ruling 2026-08-28, option D): the verified tenant
+# authority is an AUTHORIZATION artifact and must never be the SOURCE of
+# tenant_id. Attribution is recorded by the producer at write time; the
+# authority, when present, only VERIFIES it.
+#
+# Before this change `TenantProjectionTableOperation` called `self._context()`
+# unconditionally, so with no authority bound -- which is every real dispatch
+# on every lane, because `bind_projection_tenant_authority` has zero non-test
+# call sites -- all 15 TENANT-classified relations were structurally
+# unwritable and 100% of their events DLQ'd before any SQL was issued.
+# ---------------------------------------------------------------------------
+
+
+def test_unbound_authority_writes_the_events_own_tenant_unmodified() -> None:
+    """No authority bound -> the row's own tenant is stored verbatim.
+
+    The event carries a real verified slug. Nothing invents, defaults, or
+    overwrites it: what the producer recorded is what lands.
+    """
+    target = projection_database_target("delegation_events", schema="tenant")
+    conn, cursor = _connection("tenant_projection_writer")
+
+    with patch("psycopg2.connect", return_value=conn):
+        adapter = _adapter(target, authority=None)
+        adapter.upsert(
+            "delegation_events",
+            "event_id",
+            {"event_id": uuid4(), "tenant_id": "beta-business-proof"},
+        )
+
+    insert = cursor.execute.call_args_list[-1]
+    assert insert.args[1]["tenant_id"] == "beta-business-proof"
+
+
+def test_unbound_authority_never_invents_a_tenant() -> None:
+    """No authority and no supplied tenant -> the key is not fabricated.
+
+    The operation refuses to source an identity it was never given. Whether a
+    row is allowed to reach here tenant-less is the PRODUCER's obligation
+    (ruling item 4); this seam's obligation is only that it invents nothing.
+    """
+    target = projection_database_target("delegation_events", schema="tenant")
+    conn, cursor = _connection("tenant_projection_writer")
+
+    with patch("psycopg2.connect", return_value=conn):
+        adapter = _adapter(target, authority=None)
+        adapter.upsert("delegation_events", "event_id", {"event_id": uuid4()})
+
+    insert = cursor.execute.call_args_list[-1]
+    assert "tenant_id" not in insert.args[1]
+
+
+def test_unbound_authority_query_is_not_refused_and_is_not_narrowed() -> None:
+    """The READ seam that produced the observed OMN-16831 stack must open too.
+
+    `_preserve_existing_evidence` issues a READ before every delegation
+    upsert, so a refusal here alone was enough to DLQ the whole event.
+    """
+    target = projection_database_target(
+        "delegation_events", schema="tenant", access="read_write"
+    )
+    conn, cursor = _connection("tenant_projection_writer")
+
+    with patch("psycopg2.connect", return_value=conn):
+        adapter = _adapter(target, authority=None)
+        rows = adapter.query("delegation_events", {"correlation_id": "cid-1"})
+
+    assert rows == []
+    select = cursor.execute.call_args_list[-1]
+    assert "tenant_id" not in select.args[0]
+
+
+def test_bound_authority_still_overrides_nothing_but_verifies_everything() -> None:
+    """Authority bound -> a matching supplied tenant is ACCEPTED, not replaced.
+
+    Full strength is preserved: the stored value still equals the authority's
+    tenant, but it gets there by verification rather than by substitution.
+    """
+    tenant_id = uuid4()
+    target = projection_database_target("delegation_events", schema="tenant")
+    conn, cursor = _connection("tenant_projection_writer")
+
+    with patch("psycopg2.connect", return_value=conn):
+        adapter = _verified_adapter(target, tenant_id)
+        adapter.upsert(
+            "delegation_events",
+            "event_id",
+            {"event_id": uuid4(), "tenant_id": str(tenant_id)},
+        )
+
+    insert = cursor.execute.call_args_list[2]
+    assert insert.args[1]["tenant_id"] == tenant_id
+
+
+def test_bound_authority_still_fails_closed_on_a_mismatched_tenant() -> None:
+    """Regression guard: decoupling must not weaken the bound-authority path."""
+    target = projection_database_target("delegation_events", schema="tenant")
+
+    with patch("psycopg2.connect") as connect:
+        adapter = _verified_adapter(target, uuid4())
+        with pytest.raises(ProjectionTenantContextError):
+            adapter.upsert(
+                "delegation_events",
+                "event_id",
+                {"event_id": uuid4(), "tenant_id": str(uuid4())},
+            )
+
+    connect.assert_not_called()
+
+
+def test_unbound_tenant_operation_still_honours_the_closed_adapter_guard() -> None:
+    """Dropping the authority precondition must not drop the lifecycle one."""
+    target = projection_database_target("delegation_events", schema="tenant")
+    conn, _ = _connection("tenant_projection_writer")
+
+    with patch("psycopg2.connect", return_value=conn):
+        adapter = _adapter(target, authority=None)
+        adapter.upsert("delegation_events", "event_id", {"event_id": uuid4()})
+        adapter.close()
+        with pytest.raises(RuntimeError, match="closed"):
+            adapter.upsert("delegation_events", "event_id", {"event_id": uuid4()})
