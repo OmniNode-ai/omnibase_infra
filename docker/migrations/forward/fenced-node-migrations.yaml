@@ -64,12 +64,14 @@
 # (e.g. widening ruling 21's scope, or adding a new ruling-15-style lane
 # carve-out) is a separate, explicit edit to that runner's release block.
 #
-# WHY THESE TEN IDS (verbatim rationale, unchanged from the pre-OMN-15349
+# WHY THESE ELEVEN IDS (verbatim rationale, unchanged from the pre-OMN-15349
 # hand-maintained lists for the first seven; the eighth (node_pr_review_bot
 # 001) was added under OMN-15717/OMN-15376, the ninth
 # (delegation_inference_response 0003) under OMN-15336 item 4 / OMN-15656 —
 # two independent PRs landing concurrently, both additive, not conflicting —
-# and the tenth (hook_event_capture 0002) under OMN-16090):
+# the tenth (hook_event_capture 0002) under OMN-16090, and the ELEVENTH
+# (delegation 0031) under OMN-16493 / the 2026-08-28 "Fence 0031, HOLD the
+# repin" operator ruling):
 #   delegation 0023-0026 — OMN-14974 / OMN-15313. Tenant-isolation RLS on
 #     live, actively-written delegation tables; un-gate only in a change that
 #     also proves the writer sets app.tenant_id per connection. No lane may
@@ -142,6 +144,76 @@
 #     sibling stays fenced would make this the only RLS-enforcing relation on
 #     the surface, an inconsistency worth deciding deliberately rather than
 #     inheriting from whichever change happened to land last.
+#
+#   delegation 0031 — OMN-16493, added under the 2026-08-28 operator ruling
+#     "Fence 0031, HOLD the repin" (answer to the OMN-15954 comment 85b7ccab
+#     decision brief, §6 option A). This is the ELEVENTH id and the first one
+#     fenced for a reason that is neither an RLS posture nor a shape gate: it
+#     is fenced because the migration ABORTS, and its abort takes an unrelated
+#     team's migrations down with it.
+#
+#     WHAT ACTUALLY FAILS. 0031 converts delegation_events.tenant_id from the
+#     legacy TEXT slug to the canonical UUID via
+#     `ALTER COLUMN ... TYPE UUID USING (CASE tenant_id WHEN ... END)` with no
+#     ELSE branch. The column has been NOT NULL since 0022 (applied
+#     2026-07-28), so any slug outside 0031's closed 3-value map evaluates to
+#     NULL and trips that pre-existing constraint:
+#       ERROR: column "tenant_id" of relation "delegation_events"
+#              contains null values
+#     Re-measured live 2026-08-28: 165 rows, 9 of them under 5 slugs the map
+#     does not know — and one of those, `t-1lostguy1`, is a REAL, ACTIVE,
+#     externally-owned customer provisioned 8 days after 0031 was authored.
+#     The data is not null; the mapping is incomplete, and it is incomplete
+#     BY CONSTRUCTION because the writer keeps minting new slugs (OMN-16804).
+#     That is 0031's second fail-closed guard firing exactly as designed. It
+#     is NOT a defect in 0031 and this entry is NOT a workaround for one.
+#
+#     WHY 0031's OWN DIAGNOSTICS NEVER SAID SO. delegation_events carries
+#     ENABLE+FORCE RLS with `tenant_isolation USING (tenant_id =
+#     current_setting('app.tenant_id', true))`, and the migrate Job's identity
+#     (role_omnidash) has rolbypassrls=f. With app.tenant_id unset the policy
+#     matches nothing, so 0031's opening `DELETE ... WHERE correlation_id IN
+#     (...)` is a silent zero-row no-op and its `IF EXISTS` pre-guard — the
+#     one that would RAISE the useful "no canonical UUID mapping for tenant
+#     value %" — sees nothing. Only the ALTER ... TYPE rewrite, which is not
+#     RLS-filtered, sees the real rows. Every actionable diagnostic this
+#     migration built for exactly this case is blinded; the uninformative
+#     NOT-NULL error is all that survives, which is why this read as a
+#     NULL-data problem for a week.
+#
+#     WHY THAT MAKES IT A FENCE AND NOT A FIX. 0031 cannot be edited in place:
+#     it is already applied on the .201 dev compose lane, and
+#     `_ledger/bootstrap.sql` raises `conflicting migration checksum` on any
+#     byte change (the OMN-16705 class). The real fix is a new `0030a_`
+#     pre-step (fully specified on OMN-16493) over a slug set that is finally
+#     CLOSED, which needs OMN-16804 first (gateway stamps the verified UUID
+#     rather than the slug, removing the map from the write path). Landing a
+#     hardcoded `0030a_` map today ships something permanently immutable and
+#     already known incomplete — and worth less every day the beta adds
+#     tenants.
+#
+#     WHO WAS PAYING FOR IT. The node loop iterates node directories
+#     LC_ALL=C-sorted; `node_projection_delegation` sorts before
+#     `node_projection_tenant_credentials`; both runners are set -e with
+#     `psql -v ON_ERROR_STOP=1`. So 0031's abort killed the WHOLE Job before
+#     node_projection_tenant_credentials/0001_relax_name_provider_not_null and
+#     0002_credential_identity_not_null were ever attempted — blocking a
+#     beta-critical BYOK integration on a tenancy ruling it has nothing to do
+#     with, purely by lexical sort order. The fenced-id skip runs AHEAD of the
+#     ledger probe (run-forward-migrations.sh:1272-1289; the k8s Job's
+#     equivalent block), so fencing lets the loop continue and those two
+#     migrations apply on the next green deploy.
+#
+#     WHAT THIS FENCE KNOWINGLY COSTS, recorded so a future reader does not
+#     re-derive it: 0031 stays unapplied, so OMN-15683's UUID-key defect stays
+#     live — UUID-keyed dashboard reads of delegation_events keep returning
+#     ZERO ROWS with no error for every real provisioned tenant — and
+#     OMN-16493 stays open. That was ruled acceptable in exchange for
+#     unblocking the BYOK lane; it is a deferral, not a resolution.
+#
+#     UN-GATE ONLY when OMN-16804 has removed the slug map from the write path
+#     and a `0030a_` pre-step exists that defeats the RLS blindness described
+#     above inside a single DO block. Do NOT un-gate by editing 0031's bytes.
 fenced_node_migrations:
   - id: "node:node_projection_delegation:0023_delegation_rls_tenant_isolation.sql"
     ticket: "OMN-14974"
@@ -163,3 +235,5 @@ fenced_node_migrations:
     ticket: "OMN-15336"
   - id: "node:node_hook_event_capture:0002_hook_events_tenant_rls.sql"
     ticket: "OMN-16090"
+  - id: "node:node_projection_delegation:0031_delegation_events_tenant_id_to_uuid.sql"
+    ticket: "OMN-16493"

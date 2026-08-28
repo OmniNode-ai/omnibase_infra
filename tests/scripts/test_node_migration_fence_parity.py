@@ -313,6 +313,20 @@ FENCED_INFERENCE_RESPONSE_IDS = (
 FENCED_HOOK_EVENT_CAPTURE_IDS = (
     "node:node_hook_event_capture:0002_hook_events_tenant_rls.sql",
 )
+# OMN-16493, under the 2026-08-28 operator ruling "Fence 0031, HOLD the repin".
+# The first id here fenced for neither an RLS posture nor a shape gate: 0031's
+# `ALTER COLUMN tenant_id TYPE UUID USING (CASE ... END)` has no ELSE, so the 9
+# live rows under 5 slugs outside its closed map convert to NULL and trip the
+# pre-existing NOT NULL from 0022 -- the migration ABORTS, and because both
+# runners are set -e / ON_ERROR_STOP=1 and iterate node dirs LC_ALL=C-sorted,
+# that abort killed the whole Job before node_projection_tenant_credentials'
+# 0001/0002 were ever attempted. Fencing is what decouples the BYOK lane from
+# the tenancy ruling; the real fix is a `0030a_` pre-step after OMN-16804
+# closes the slug set, never an edit to 0031's bytes (already applied on the
+# .201 dev lane -- `conflicting migration checksum`, the OMN-16705 class).
+FENCED_DELEGATION_UUID_CONVERSION_IDS = (
+    "node:node_projection_delegation:0031_delegation_events_tenant_id_to_uuid.sql",
+)
 # Pinned expectation for the manifest content (OMN-15349): the baseline fence,
 # exact and in order. A manifest edit that moves this must update the pin in
 # the same PR — same change-control friction the pre-OMN-15349 shell-literal
@@ -323,6 +337,7 @@ EXPECTED_FENCE = (
     + FENCED_PR_REVIEW_BOT_IDS
     + FENCED_INFERENCE_RESPONSE_IDS
     + FENCED_HOOK_EVENT_CAPTURE_IDS
+    + FENCED_DELEGATION_UUID_CONVERSION_IDS
 )
 
 # --- OMN-15336 item 4 repair (D1, 2026-08-05): FORCE-RLS grandfather snapshot
@@ -615,8 +630,13 @@ def test_manifest_pins_the_known_baseline_fence() -> None:
     assert (
         found[pr_review_bot_end:inference_response_end] == FENCED_INFERENCE_RESPONSE_IDS
     ), "the OMN-15336 item-4 inference-response hold is not the expected id"
-    assert found[inference_response_end:] == FENCED_HOOK_EVENT_CAPTURE_IDS, (
-        "the OMN-16090 hook_event_capture hold is not the expected id"
+    hook_event_capture_end = inference_response_end + len(FENCED_HOOK_EVENT_CAPTURE_IDS)
+    assert (
+        found[inference_response_end:hook_event_capture_end]
+        == FENCED_HOOK_EVENT_CAPTURE_IDS
+    ), "the OMN-16090 hook_event_capture hold is not the expected id"
+    assert found[hook_event_capture_end:] == FENCED_DELEGATION_UUID_CONVERSION_IDS, (
+        "the OMN-16493 delegation-0031 hold is not the expected id"
     )
 
 
