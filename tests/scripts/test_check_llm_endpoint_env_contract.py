@@ -12,6 +12,14 @@ import pytest
 _REPO_ROOT = Path(__file__).resolve().parent.parent.parent
 _SCRIPT = _REPO_ROOT / "scripts" / "check_llm_endpoint_env_contract.py"
 
+# OMN-16442 retired the fast-coder slot and RELEASED `LLM_CODER_FAST_URL` from it
+# (`url_env_var: null` in contracts/llm_endpoints.yaml) on the premise that a disabled
+# slot must not own a runtime env var. These fixtures still declared it, so the guard
+# correctly reported "LLM_CODER_FAST_URL is not assigned to a canonical endpoint slot"
+# and `test_accepts_running_embedding_endpoint` went red on dev the moment #2975 landed.
+# The fixtures name only env vars the contract still assigns; adding a released var back
+# would re-assert a slot the inventory says does not exist.
+
 
 def _run_check(env_file: Path) -> subprocess.CompletedProcess[str]:
     return subprocess.run(
@@ -30,7 +38,6 @@ def test_rejects_disabled_embedding_endpoint(tmp_path: Path) -> None:
         "\n".join(
             [
                 "LLM_CODER_URL=http://192.168.86.201:8000",
-                "LLM_CODER_FAST_URL=http://192.168.86.201:8001",
                 "LLM_EMBEDDING_URL=http://192.168.86.200:8100",
                 "LLM_DEEPSEEK_R1_URL=http://192.168.86.200:8101",
             ]
@@ -51,7 +58,6 @@ def test_accepts_running_embedding_endpoint(tmp_path: Path) -> None:
         "\n".join(
             [
                 "LLM_CODER_URL=http://192.168.86.201:8000",
-                "LLM_CODER_FAST_URL=http://192.168.86.201:8001",
                 "LLM_EMBEDDING_URL=http://192.168.86.201:8002",
                 "LLM_DEEPSEEK_R1_URL=http://192.168.86.200:8101",
             ]
