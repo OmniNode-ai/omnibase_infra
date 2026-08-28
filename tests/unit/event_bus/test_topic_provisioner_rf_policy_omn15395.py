@@ -2295,6 +2295,126 @@ class TestReadinessSpecPassThrough:
         assert recorder.created_spec(TOPIC).num_partitions == 1
         assert readiness.is_ready
 
+    async def test_batch_creation_records_the_clamped_creation_spec(
+        self,
+        tmp_path: Path,
+        monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
+        """OMN-16844 AC3: the BATCH path must record what it created.
+
+        RED-before: ``ensure_provisioned_topics_exist`` built its ``NewTopic``
+        from ``_creation_partitions(spec)`` (clamped to 1) but handed
+        ``_note_topic_created`` the UNCLAMPED resolved spec (6), so
+        ``_created_specs`` disagreed with the broker the instant the topic was
+        created. The single-topic path already routes through
+        ``_creation_spec``; this one did not.
+        """
+        monkeypatch.setenv("ONEX_TOPIC_PROVISIONER_MAX_PARTITIONS", "1")
+        _use_self_hosted(monkeypatch)
+        _write_contract(tmp_path, replication_factor=1, partitions=6)
+        provisioner = _provisioner(tmp_path)
+        recorder = _AdminRecorder(reported_partitions=1, reported_replicas=1)
+
+        with _patched_admin(recorder):
+            await provisioner.ensure_provisioned_topics_exist()
+
+        created_partitions = recorder.created_spec(TOPIC).num_partitions
+        assert created_partitions == 1
+        recorded = provisioner._created_specs[TOPIC]
+        assert recorded.partitions == created_partitions, (
+            "the batch creation site recorded a partition count it did not "
+            f"create with: recorded={recorded.partitions} "
+            f"created={created_partitions}"
+        )
+
+    async def test_batch_created_contract_reaches_ready_on_a_capped_lane(
+        self,
+        tmp_path: Path,
+        monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
+        """OMN-16844 AC2: the never-converging readiness loop, reproduced.
+
+        A contract whose topics are created for the FIRST time in this boot on a
+        lane with ``ONEX_TOPIC_PROVISIONER_MAX_PARTITIONS=1`` must reach READY in
+        that same boot. RED-before this yields
+        ``partition_mismatch: expected 6 partitions, broker reports 1`` on every
+        poll, forever — the consumer never attaches and the node only "recovers"
+        on an unrelated restart that forgets the poisoned record.
+        """
+        monkeypatch.setenv("ONEX_TOPIC_PROVISIONER_MAX_PARTITIONS", "1")
+        _use_self_hosted(monkeypatch)
+        _write_contract(tmp_path, replication_factor=1, partitions=6)
+        provisioner = _provisioner(tmp_path)
+        recorder = _AdminRecorder(reported_partitions=1, reported_replicas=1)
+
+        with _patched_admin(recorder):
+            await provisioner.ensure_provisioned_topics_exist()
+            readiness = await provisioner.confirm_topics_ready([TOPIC])
+
+        assert readiness.is_ready, (
+            "a first-boot contract on a partition-capped lane never converges: "
+            f"{[f.detail for f in readiness.failures]}"
+        )
+
+    async def test_both_creation_paths_record_identical_specs(
+        self,
+        tmp_path: Path,
+        monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
+        """OMN-16844 AC4: batch and single-topic creation must agree.
+
+        ``_created_specs`` is the record every readiness and drift consumer
+        reads. Two creation sites that populate it differently means the
+        invariant depends on which path happened to run — this pins them to the
+        one ``_creation_spec`` resolver.
+        """
+        monkeypatch.setenv("ONEX_TOPIC_PROVISIONER_MAX_PARTITIONS", "1")
+        _use_self_hosted(monkeypatch)
+        _write_contract(tmp_path, replication_factor=1, partitions=6)
+
+        batch_provisioner = _provisioner(tmp_path)
+        with _patched_admin(_AdminRecorder(reported_replicas=1)):
+            await batch_provisioner.ensure_provisioned_topics_exist()
+
+        single_provisioner = _provisioner(tmp_path)
+        with _patched_admin(_AdminRecorder(reported_replicas=1)):
+            await single_provisioner.ensure_topic_exists(topic_name=TOPIC)
+
+        assert (
+            batch_provisioner._created_specs[TOPIC]
+            == single_provisioner._created_specs[TOPIC]
+        ), "the two creation paths record different specs for the same topic"
+
+    async def test_first_boot_and_second_boot_readiness_agree(
+        self,
+        tmp_path: Path,
+        monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
+        """OMN-16844 AC5: the "self-heals on restart" asymmetry is gone.
+
+        Second boot reads READY only because the topic is pre-existing and no
+        spec is recorded, so the partition comparison is skipped entirely. First
+        boot must reach the same verdict rather than being the odd one out.
+        """
+        monkeypatch.setenv("ONEX_TOPIC_PROVISIONER_MAX_PARTITIONS", "1")
+        _use_self_hosted(monkeypatch)
+        _write_contract(tmp_path, replication_factor=1, partitions=6)
+        recorder = _AdminRecorder(reported_partitions=1, reported_replicas=1)
+
+        first_boot = _provisioner(tmp_path)
+        with _patched_admin(recorder):
+            await first_boot.ensure_provisioned_topics_exist()
+            first_readiness = await first_boot.confirm_topics_ready([TOPIC])
+
+        # Same broker, fresh process: the topic now pre-exists.
+        second_boot = _provisioner(tmp_path)
+        with _patched_admin(recorder):
+            await second_boot.ensure_provisioned_topics_exist()
+            second_readiness = await second_boot.confirm_topics_ready([TOPIC])
+
+        assert second_readiness.is_ready
+        assert first_readiness.is_ready == second_readiness.is_ready
+
     async def test_created_topic_readiness_asserts_created_spec(
         self,
         tmp_path: Path,

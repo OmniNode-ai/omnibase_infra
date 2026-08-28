@@ -311,7 +311,14 @@ class TopicProvisioner:
 
         Replication resolved through the policy, partitions clamped by the
         lane's env cap. This is the single "effective spec" every site must
-        compare against — the creation site, and (OMN-15395 D3) the drift site.
+        compare against — BOTH creation sites (the per-topic
+        :meth:`ensure_topic_exists` and the batch
+        :meth:`ensure_provisioned_topics_exist` loop), the (OMN-15395 D3) drift
+        site, and — through what those creation sites hand
+        :meth:`_note_topic_created` — the readiness site, which reads
+        ``_created_specs``. "There is one resolver" only holds if every
+        consumer of that record is fed by it: recording anything else here
+        poisons readiness for the whole life of the process (OMN-16844).
 
         Raises:
             TopicReplicationPolicyError: The spec violates the policy.
@@ -738,24 +745,35 @@ class TopicProvisioner:
 
             for spec in resolved_specs:
                 try:
-                    partitions = self._creation_partitions(spec)
+                    # One spec object drives BOTH the NewTopic and the record,
+                    # exactly as the single-topic path does. Building the
+                    # NewTopic from the clamped partition count while recording
+                    # the uncapped `spec` made `_created_specs` describe a topic
+                    # that was never created: the readiness gate then compared
+                    # broker-actual (1) against the contract-declared count (6)
+                    # and NEVER converged, so on any lane with
+                    # ONEX_TOPIC_PROVISIONER_MAX_PARTITIONS set, every node whose
+                    # topics were created in this boot stayed NOT-READY for the
+                    # life of the process and only attached after an unrelated
+                    # restart made its topics pre-existing (OMN-16844).
+                    creation_spec = self._creation_spec(spec)
                     new_topic = NewTopic(
-                        name=spec.suffix,
-                        num_partitions=partitions,
-                        replication_factor=spec.replication_factor,
-                        topic_configs=dict(spec.kafka_config)
-                        if spec.kafka_config
+                        name=creation_spec.suffix,
+                        num_partitions=creation_spec.partitions,
+                        replication_factor=creation_spec.replication_factor,
+                        topic_configs=dict(creation_spec.kafka_config)
+                        if creation_spec.kafka_config
                         else {},
                     )
 
                     await admin.create_topics([new_topic])
-                    created.append(spec.suffix)
-                    self._note_topic_created(spec.suffix, spec)
+                    created.append(creation_spec.suffix)
+                    self._note_topic_created(creation_spec.suffix, creation_spec)
                     logger.info(
                         "Created topic: %s (partitions=%d, replication_factor=%s)",
-                        spec.suffix,
-                        partitions,
-                        spec.replication_factor,
+                        creation_spec.suffix,
+                        creation_spec.partitions,
+                        creation_spec.replication_factor,
                         extra={"correlation_id": str(correlation_id)},
                     )
 
