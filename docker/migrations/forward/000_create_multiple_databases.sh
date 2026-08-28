@@ -48,6 +48,44 @@ SERVICE_DB_MAP=(
 INFRA_DATABASES=("infisical_db" "omniweb")
 
 # =============================================================================
+# Configuration: login-only roles (OMN-16843, epic OMN-15426)
+# =============================================================================
+# Format: "role:password_env_var"  — NOTE: no database field, deliberately.
+#
+# These roles get a LOGIN credential and NOTHING ELSE. They are NOT run through
+# grant_role_to_database() or revoke_cross_db_access(), because their
+# AUTHORIZATION is owned elsewhere: the topology instance
+# (src/omnibase_infra/topology/instances/local.yaml) declares each principal's
+# grants, and the topology-derived migrations issue them.
+#
+# WHY NOT JUST ADD THEM TO SERVICE_DB_MAP
+# ---------------------------------------
+# That path calls grant_role_to_database(), which issues
+#   GRANT USAGE, CREATE ON SCHEMA public
+#   ALTER DEFAULT PRIVILEGES ... GRANT SELECT, INSERT, UPDATE, DELETE ON TABLES
+# CREATE on the schema lets the role OWN tables, and Postgres exempts a table's
+# owner from row-level security UNCONDITIONALLY — FORCE included. For
+# omninode_runtime that would silently undo the isolation the whole
+# omninode_internal cutover exists to establish, and hand it DELETE and DDL it
+# is never supposed to have. The topology declares a narrow per-table
+# INSERT/SELECT/UPDATE set; this seam must not widen it.
+#
+# WHY THE CREDENTIAL IS MINTED HERE AND NOT IN A MIGRATION
+# --------------------------------------------------------
+# 094's invariant, restated by 099: no credential material ever lives in a
+# migration, and the LOGIN + password attach is a deployment-owned step
+# (AWS Secrets Manager on managed instances; this init script on compose
+# lanes). 099 therefore creates omninode_runtime NOLOGIN on purpose. Without
+# this seam a fresh compose volume has the role but no way to authenticate as
+# it, so OMNINODE_INTERNAL_DB_URL would resolve and then fail at connect.
+#
+# Empty password = skip, exactly like SERVICE_DB_MAP: a lane that has not
+# provisioned the credential must not get a half-configured role.
+LOGIN_ONLY_ROLE_MAP=(
+    "omninode_runtime:OMNINODE_RUNTIME_PASSWORD"
+)
+
+# =============================================================================
 # Helper functions
 # =============================================================================
 
@@ -121,6 +159,48 @@ create_role() {
                 -- Update password on re-run to ensure it stays in sync with env
                 ALTER ROLE "$role_name" WITH LOGIN PASSWORD '$escaped_password';
                 RAISE NOTICE 'Role $role_name already exists, password updated';
+            END IF;
+        END
+        \$\$;
+EOSQL
+}
+
+create_login_only_role() {
+    # Mint a LOGIN credential for a role whose grants are owned by the topology
+    # (OMN-16843). Issues NO grants and NO revokes — see LOGIN_ONLY_ROLE_MAP.
+    local role_name="$1"
+    local role_password="$2"
+    validate_identifier "$role_name" "Role name" || return 1
+    validate_password "$role_password" "$role_name" || return 1
+    # Escape single quotes for safe SQL interpolation (' → ''). validate_password
+    # enforces hex-only, so quotes cannot appear; retained for defense-in-depth.
+    local escaped_password="${role_password//\'/\'\'}"
+    echo "  Provisioning login credential: $role_name"
+    # Safety: $role_name is used as a double-quoted identifier and a
+    # single-quoted string literal; validate_identifier restricts it to
+    # [a-zA-Z_][a-zA-Z0-9_-]*. Same rationale as create_database().
+    #
+    # On CREATE the RLS-relevant attributes are pinned explicitly rather than
+    # left to cluster defaults. On a PRE-EXISTING role only LOGIN + PASSWORD are
+    # touched: the role's other attributes are asserted by the topology-derived
+    # migrations, and re-asserting them here would make this script demand
+    # role-administration privileges it does not need (094's reasoning).
+    psql -v ON_ERROR_STOP=1 --username "$POSTGRES_USER" --dbname "$POSTGRES_DB" <<-EOSQL
+        DO \$\$
+        BEGIN
+            IF NOT EXISTS (SELECT FROM pg_catalog.pg_roles WHERE rolname = '$role_name') THEN
+                CREATE ROLE "$role_name" WITH
+                    LOGIN
+                    NOSUPERUSER
+                    NOBYPASSRLS
+                    NOCREATEDB
+                    NOCREATEROLE
+                    NOREPLICATION
+                    PASSWORD '$escaped_password';
+                RAISE NOTICE 'Created login-only role: $role_name';
+            ELSE
+                ALTER ROLE "$role_name" WITH LOGIN PASSWORD '$escaped_password';
+                RAISE NOTICE 'Role $role_name already exists, login credential updated';
             END IF;
         END
         \$\$;
@@ -242,6 +322,49 @@ done
 
 echo ""
 echo "  Roles created/updated: $ROLES_CREATED, skipped: $ROLES_SKIPPED"
+echo ""
+
+# =============================================================================
+# Phase 2b: Mint login credentials for topology-governed roles (OMN-16843)
+# =============================================================================
+# Deliberately its own phase, run BEFORE the grant/revoke phases and never
+# joined into them. See LOGIN_ONLY_ROLE_MAP for why these roles must not pass
+# through grant_role_to_database().
+echo "============================================="
+echo "Phase 2b: Provisioning login-only role credentials"
+echo "============================================="
+
+LOGIN_ROLES_CREATED=0
+LOGIN_ROLES_SKIPPED=0
+
+for entry in "${LOGIN_ONLY_ROLE_MAP[@]}"; do
+    IFS=':' read -r role_name password_var <<< "$entry"
+    role_password="${!password_var:-}"
+
+    if [ -z "$role_password" ]; then
+        echo "  SKIP: $role_name — $password_var not set"
+        LOGIN_ROLES_SKIPPED=$((LOGIN_ROLES_SKIPPED + 1))
+        continue
+    fi
+
+    # Pre-check for a user-facing SKIP message; create_login_only_role()
+    # validates again as its own guard.
+    validate_password "$role_password" "$role_name" || {
+        echo "  SKIP: $role_name — invalid password"
+        LOGIN_ROLES_SKIPPED=$((LOGIN_ROLES_SKIPPED + 1))
+        continue
+    }
+
+    create_login_only_role "$role_name" "$role_password" || {
+        echo "  FAIL: $role_name — create_login_only_role failed" >&2
+        LOGIN_ROLES_SKIPPED=$((LOGIN_ROLES_SKIPPED + 1))
+        continue
+    }
+    LOGIN_ROLES_CREATED=$((LOGIN_ROLES_CREATED + 1))
+done
+
+echo ""
+echo "  Login-only roles provisioned: $LOGIN_ROLES_CREATED, skipped: $LOGIN_ROLES_SKIPPED"
 echo ""
 
 # =============================================================================

@@ -89,6 +89,10 @@ BASE_REQUIRED_ENV: dict[str, str] = {
     "ARCH_GRAPH_BOLT_URI": "bolt://omnibase-infra-memgraph:7687",
     "ONEX_REGISTRATION_AUTO_ACK": "true",
     "ONEX_SERVICE_CLIENT_SECRET": "test-service-secret",
+    # OMN-16843: x-runtime-env builds OMNINODE_INTERNAL_DB_URL from this with
+    # the fail-closed ${VAR:?} form, so the layered render aborts without it.
+    # Render-only, never a real credential.
+    "OMNINODE_RUNTIME_PASSWORD": "render-only-omninode-runtime-password",
     "LINEAR_API_KEY": "test-linear-api-key",
     "GITHUB_TOKEN": "test-github-token",
     "DEPLOY_AGENT_HMAC_SECRET": "render-only-deploy-agent-hmac-secret",

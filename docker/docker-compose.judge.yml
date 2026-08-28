@@ -73,6 +73,13 @@ x-judge-runtime-env: &judge-runtime-env
   OMNIBASE_INFRA_DB_URL: "postgresql://${POSTGRES_USER:-postgres}:${POSTGRES_PASSWORD:?POSTGRES_PASSWORD required}@postgres:5432/omnibase_infra"
   OMNIINTELLIGENCE_DB_URL: "postgresql://${POSTGRES_USER:-postgres}:${POSTGRES_PASSWORD:?POSTGRES_PASSWORD required}@postgres:5432/omniintelligence"
   OMNIDASH_ANALYTICS_DB_URL: "postgresql://${POSTGRES_USER:-postgres}:${POSTGRES_PASSWORD:?POSTGRES_PASSWORD required}@postgres:5432/omnidash_analytics"
+  # OMN-16843: the judge lane redefines the whole runtime env block rather than
+  # merging docker-compose.infra.yml's x-runtime-env anchor, so it inherits
+  # NOTHING from the base and must carry this key itself. Same reasoning and
+  # same fail-closed form as the base file's block — see the long rationale
+  # there. Without it the judge lane's three runtime services fail to prepare
+  # all 19 `database_ref: application` contracts and report healthy anyway.
+  OMNINODE_INTERNAL_DB_URL: "postgresql://omninode_runtime:${OMNINODE_RUNTIME_PASSWORD:?OMNINODE_RUNTIME_PASSWORD must be set — the internal projections connect to omnidash_analytics as the non-BYPASSRLS omninode_runtime principal (OMN-16843), never as the postgres superuser}@postgres:5432/omnidash_analytics"
   KAFKA_BOOTSTRAP_SERVERS: "redpanda:9092"
   KAFKA_BROKER_ALLOWLIST: "redpanda:"
   BUS_ID: "judge"

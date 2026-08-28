@@ -23,6 +23,10 @@ JUDGE_NETWORK = "omnibase-infra-judge-network"
 # surfaces its `:?`-required vars even for services excluded from the judge
 # profile. These values are never used to run containers — `config` only.
 LAYERED_RENDER_DUMMY_ENV = {
+    # OMN-16843: x-runtime-env builds OMNINODE_INTERNAL_DB_URL from this with
+    # the fail-closed ${VAR:?} form, so the layered render aborts without it.
+    # Render-only, never a real credential.
+    "OMNINODE_RUNTIME_PASSWORD": "render-only-omninode-runtime-password",
     # OMN-15263: `:?`-required in the base infra file since OMN-15173. The judge
     # profile excludes the dev redpanda service, but compose still interpolates
     # its `command:` block during the layered render.

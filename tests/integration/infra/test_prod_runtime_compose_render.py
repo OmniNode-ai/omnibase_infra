@@ -28,6 +28,10 @@ def _cidr(prefix: str, suffix: str) -> str:
 
 
 COMPOSE_RENDER_ENV = {
+    # OMN-16843: x-runtime-env builds OMNINODE_INTERNAL_DB_URL from this with
+    # the fail-closed ${VAR:?} form, so the layered render aborts without it.
+    # Render-only, never a real credential.
+    "OMNINODE_RUNTIME_PASSWORD": "render-only-omninode-runtime-password",
     "INFISICAL_AUTH_SECRET": "render-only-infisical-auth-secret",
     "INFISICAL_DB_CONNECTION_URI": "postgresql://postgres:postgres@postgres:5432/infisical",
     "INFISICAL_ENCRYPTION_KEY": "render-only-infisical-encryption-key-32",

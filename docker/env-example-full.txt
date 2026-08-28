@@ -92,6 +92,16 @@ POSTGRES_PASSWORD=__REPLACE_WITH_SECURE_PASSWORD__
 # ROLE_OMNIMEMORY_PASSWORD=
 # ROLE_OMNINODE_PASSWORD=
 
+# REQUIRED (OMN-16843) — login credential for the omninode_runtime principal,
+# which every compose lane's runtime services use to reach the omninode_internal
+# schema in omnidash_analytics. Unlike the optional ROLE_* passwords above this
+# one is NOT optional: docker-compose.infra.yml builds
+# OMNINODE_INTERNAL_DB_URL from it with the fail-closed ${VAR:?} form, because
+# an empty value there renders a non-empty DSN that passes the runtime's wiring
+# check and then fails at first connect. Set it, or the lane refuses to render.
+# Generate with: openssl rand -hex 32
+# OMNINODE_RUNTIME_PASSWORD=
+
 # Per-service DSN templates (for reference — used by each repo's own .env)
 # Note: "postgres:5432" is the Docker Compose internal service name + port.
 # From the host, use ${POSTGRES_HOST}:${POSTGRES_EXTERNAL_PORT} instead.
@@ -105,6 +115,11 @@ POSTGRES_PASSWORD=__REPLACE_WITH_SECURE_PASSWORD__
 # OMNIMEMORY_DB_URL=postgresql://role_omnimemory:${ROLE_OMNIMEMORY_PASSWORD}@postgres:5432/omnimemory
 # OMNINODE_CLOUD_DB_URL=postgresql://role_omninode:${ROLE_OMNINODE_PASSWORD}@postgres:5432/omninode_cloud
 # OMNIDASH_ANALYTICS_DB_URL=postgresql://role_omnidash:${ROLE_OMNIDASH_PASSWORD}@postgres:5432/omnidash_analytics
+# OMNINODE_INTERNAL_DB_URL is NOT set here — docker-compose.infra.yml builds it
+# from OMNINODE_RUNTIME_PASSWORD above. It shares the omnidash_analytics
+# database with the line above but connects as a DIFFERENT principal
+# (omninode_runtime, for the omninode_internal schema), which is why it is a
+# separate binding in the topology instance rather than a reuse of that DSN.
 
 # =============================================================================
 # Infisical Secret Management Configuration (Optional)

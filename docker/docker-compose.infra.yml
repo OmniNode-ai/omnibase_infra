@@ -246,6 +246,55 @@ x-runtime-env: &runtime-env
   # OmniIntelligence domain plugin — Docker-internal hostname (same pattern as OMNIBASE_INFRA_DB_URL)
   OMNIINTELLIGENCE_DB_URL: "postgresql://${POSTGRES_USER:-postgres}:${POSTGRES_PASSWORD:?POSTGRES_PASSWORD required}@postgres:5432/omniintelligence"
   OMNIDASH_ANALYTICS_DB_URL: "postgresql://${POSTGRES_USER:-postgres}:${POSTGRES_PASSWORD:?POSTGRES_PASSWORD required}@postgres:5432/omnidash_analytics"
+  # ==========================================================================
+  # INTERNAL PROJECTION CONNECTION IDENTITY (OMN-16843, epic OMN-15426)
+  # ==========================================================================
+  # The `local` topology instance binds `omninode_runtime_service` to THREE DSN
+  # envs, one per database — OMNIBASE_INFRA_DB_URL, OMNIINTELLIGENCE_DB_URL and
+  # this one, which carries the `application` database under the
+  # `omninode_runtime` principal. `handler_wiring` resolves every binding a
+  # contract targets with `os.environ.get(binding.dsn_env, "")` and RAISES when
+  # any is empty.
+  #
+  # This key was set by ZERO compose files while both siblings were set by all
+  # five runtime services, so 19 `database_ref: application` contracts —
+  # projection_consumer_flow, projection_baselines, node_projection_traces and
+  # the rest — failed to prepare at every boot on every compose lane. Because
+  # auto-wiring is NON-STRICT the runtime then reported `status=healthy` with
+  # those projections silently unattached: a green lane consuming nothing.
+  # OMN-15426's landed slice (omninode_infra#803) wired the onex-dev Kubernetes
+  # workloads via secretKeyRef; this is the compose half of the same cutover.
+  #
+  # WHY THE BASE FILE AND NOT A LANE OVERLAY
+  # ----------------------------------------
+  # The inverse of the OMN-15363 analytics block below it. That identity is
+  # deliberately lab-lane-only because it is a PROVING-GROUND choice that must
+  # not leak to other lanes. This one is not a choice: `principal:
+  # omninode_runtime` is declared identically by every topology instance
+  # (local, onex-dev, onex-prod), so every lane needs the same identity and
+  # putting it here is what makes a future lane correct by default instead of
+  # rediscovering the defect by hand (OMN-16843 AC5).
+  #
+  # WHY NOT ${POSTGRES_USER}
+  # ------------------------
+  # `postgres` is the table OWNER and carries SUPERUSER + BYPASSRLS. Postgres
+  # exempts owners and BYPASSRLS roles from row-level security unconditionally,
+  # FORCE included. Resolving this pool as the superuser would satisfy the
+  # wiring check while re-creating, for a second connection pool, the exact
+  # RLS-exempt identity OMN-15363 removed from the analytics pool.
+  # `omninode_runtime` is NOSUPERUSER / NOBYPASSRLS / non-owner, and its
+  # authorization is the narrow per-table INSERT/SELECT/UPDATE set the topology
+  # instance declares — no DDL, no ownership, no tenant schema.
+  #
+  # `:?` and not `:-`: an empty password renders a NON-EMPTY DSN, which would
+  # pass the wiring check and move the failure from boot — where a log line
+  # names it — to first connect, surfacing as an auth error on whichever
+  # projection happens to flush first. That is strictly worse than the defect
+  # being fixed here. The credential VALUE is deployment-owned and lives in the
+  # host env / secret store (never this file); the LOGIN attach is minted by
+  # docker/migrations/forward/000_create_multiple_databases.sh, per 094's
+  # invariant that no credential material lives in a migration.
+  OMNINODE_INTERNAL_DB_URL: "postgresql://omninode_runtime:${OMNINODE_RUNTIME_PASSWORD:?OMNINODE_RUNTIME_PASSWORD must be set — the internal projections connect to omnidash_analytics as the non-BYPASSRLS omninode_runtime principal (OMN-16843), never as the postgres superuser}@postgres:5432/omnidash_analytics"
   # --- OmniMemory domain plugin ---
   # PluginMemory activation policy is contract-owned. Compose only consumes the
   # rendered runtime-policy env values.
@@ -375,6 +424,17 @@ services:
       ROLE_OMNIINTELLIGENCE_PASSWORD: ${ROLE_OMNIINTELLIGENCE_PASSWORD:-}
       ROLE_OMNIMEMORY_PASSWORD: ${ROLE_OMNIMEMORY_PASSWORD:-}
       ROLE_OMNINODE_PASSWORD: ${ROLE_OMNINODE_PASSWORD:-}
+      # OMN-16843: login credential for the topology-governed omninode_runtime
+      # principal, consumed by 000_create_multiple_databases.sh's
+      # LOGIN_ONLY_ROLE_MAP. Distinct from ROLE_OMNINODE_PASSWORD above, which
+      # belongs to role_omninode / omninode_cloud — different role, different
+      # database. Empty-means-skip here for the same reason as the ROLE_* vars:
+      # this is the FIRST-STARTUP provisioning seam and a lane that has not
+      # minted the credential must not get a half-configured role. The
+      # fail-closed `:?` lives on the CONSUMER (OMNINODE_INTERNAL_DB_URL in
+      # x-runtime-env), where an unset value is an actual defect rather than an
+      # unprovisioned volume.
+      OMNINODE_RUNTIME_PASSWORD: ${OMNINODE_RUNTIME_PASSWORD:-}
     ports:
       - "${POSTGRES_EXTERNAL_PORT:-5436}:5432"
     volumes:
