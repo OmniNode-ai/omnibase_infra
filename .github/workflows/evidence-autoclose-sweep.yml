@@ -158,6 +158,56 @@ jobs:
         with:
           fetch-depth: 1
 
+      # OMN-16845. `EvidenceCollector._resolve_cwd` (omnimarket) renders
+      # `${OMNI_HOME}` from the process environment and requires the result to
+      # exist; this job never exported it, so every check pinned
+      # `cwd: "${OMNI_HOME}/omnibase_infra"` rendered to `/omnibase_infra`,
+      # which never exists, and was recorded FAILED rather than skipped or
+      # unresolved. Proven by execution: `env -u OMNI_HOME` against this
+      # job's env shape reproduces `failed: 3, behavior_proving_count: 0`;
+      # the identical run with OMNI_HOME set reproduces
+      # `verified, failed: 0, behavior_proving_count: 3` — the only variable
+      # is the env var.
+      #
+      # GitHub Actions checks a repo out to
+      # `<runner-work-dir>/<repo>/<repo>` (the documented `github.workspace`
+      # convention — GitHub's own docs give `/home/runner/work/my-repo-name/
+      # my-repo-name` as the canonical example), so `github.workspace`'s OWN
+      # PARENT directory already satisfies
+      # `${OMNI_HOME}/omnibase_infra == github.workspace` exactly, using the
+      # real checkout with no symlink and no second checkout.
+      #
+      # A symlink farm was considered and rejected: `_resolve_cwd`'s
+      # containment check (`candidate.is_relative_to(OMNI_HOME)`, evaluated
+      # AFTER `Path.resolve()`) follows a symlink to its real target and
+      # rejects it if that target sits outside OMNI_HOME. A fabricated
+      # OMNI_HOME containing a symlink pointing at the real checkout (which
+      # would live outside it) would fail that check. Pointing OMNI_HOME at
+      # the checkout's real parent is the only shape that is both correct and
+      # symlink-free.
+      #
+      # Fail-fast, not a silent default (CLAUDE.md rule 8): assert the
+      # derived path actually places omnibase_infra at github.workspace
+      # before exporting it, so a runner whose workspace layout ever stops
+      # matching that convention breaks the job loudly here instead of
+      # silently reintroducing this defect.
+      - name: Export OMNI_HOME for cwd-anchored dod_verify checks
+        shell: bash
+        run: |
+          set -euo pipefail
+          omni_home="$(dirname "${GITHUB_WORKSPACE}")"
+          expected="${omni_home}/omnibase_infra"
+          if [ "${expected}" != "${GITHUB_WORKSPACE}" ]; then
+            echo "::error::derived OMNI_HOME (${omni_home}) does not place omnibase_infra at github.workspace (${GITHUB_WORKSPACE}) -- the runner's workspace layout does not match the documented <work>/<repo>/<repo> convention this fix depends on." >&2
+            exit 1
+          fi
+          if [ ! -d "${expected}" ]; then
+            echo "::error::${expected} does not exist -- refusing to export an OMNI_HOME that dod_verify's cwd-anchored checks would immediately fail resolution against." >&2
+            exit 1
+          fi
+          echo "OMNI_HOME=${omni_home}" >> "$GITHUB_ENV"
+          echo "OMNI_HOME resolved to ${omni_home} (omnibase_infra -> ${expected})"
+
       - name: Set up Python
         uses: actions/setup-python@v7
         with:
