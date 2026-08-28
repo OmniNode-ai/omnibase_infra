@@ -331,3 +331,254 @@ def test_cli_requires_exactly_one_action(tmp_path: Path) -> None:
 
     both_actions = _run_cli([str(ledger), "--append", "x", "--", "true"])
     assert both_actions.returncode != 0
+
+
+# --------------------------------------------------------------------------
+# OMN-16400: claim-row idempotency across a shifted self-stamp
+#
+# The rows every lane actually writes into ROLLING_WORK_LEDGER.md are
+# five-column pipe rows whose FIRST CELL is the caller's self-stamped UTC
+# timestamp (see e.g. ledger L19735/L20080). The OMN-15787 normalizer only
+# strips a timestamp that leads the line after an optional `- `/`* ` bullet,
+# so it never fires on that shape: an exit-75 retry whose `$(date -u ...)`
+# advanced a few seconds lands a SECOND claim row for the same claim. That
+# is the duplicate/ghost-claim class this ticket exists to close.
+# --------------------------------------------------------------------------
+
+_PIPE_CLAIM = (
+    "| {ts} | build-OMN-16400 | OMN-16400 | CLAIM | "
+    "Claiming the ledger hardening work. |"
+)
+
+
+def test_dedup_detects_pipe_row_claim_retry_with_shifted_self_stamp() -> None:
+    tail = _PIPE_CLAIM.format(ts="2026-08-28T18:10:00Z") + "\n"
+    payload = _PIPE_CLAIM.format(ts="2026-08-28T18:12:31Z") + "\n"
+    assert MOD.is_duplicate_of_recent_tail(payload, tail) is True
+
+
+def test_dedup_still_rejects_two_distinct_pipe_rows() -> None:
+    """The leading-cell strip must not collapse genuinely different rows."""
+    tail = (
+        "| 2026-08-28T18:10:00Z | build-OMN-16400 | OMN-16400 | CLAIM | "
+        "Claiming the ledger hardening work. |\n"
+    )
+    payload = (
+        "| 2026-08-28T18:12:31Z | build-OMN-16401 | OMN-16401 | CLAIM | "
+        "Claiming a different piece of work. |\n"
+    )
+    assert MOD.is_duplicate_of_recent_tail(payload, tail) is False
+
+
+def test_dedup_detects_bold_wrapped_leading_timestamp_retry() -> None:
+    tail = "- **2026-08-28T18:10:00Z** build-x OMN-16400 CLAIM body\n"
+    payload = "- **2026-08-28T18:12:31Z** build-x OMN-16400 CLAIM body\n"
+    assert MOD.is_duplicate_of_recent_tail(payload, tail) is True
+
+
+def test_dedup_does_not_strip_a_mid_body_timestamp() -> None:
+    """Only a LEADING self-stamp is normalized away.
+
+    A timestamp quoted inside the body is evidence, not a self-stamp: two
+    rows citing different mutation instants are different rows.
+    """
+    tail = "- [h] OMN-1 TERMINAL merged at 2026-08-28T18:10:00Z\n"
+    payload = "- [h] OMN-1 TERMINAL merged at 2026-08-28T18:12:31Z\n"
+    assert MOD.is_duplicate_of_recent_tail(payload, tail) is False
+
+
+# --------------------------------------------------------------------------
+# OMN-16400: claim tokens
+# --------------------------------------------------------------------------
+
+
+def test_is_claim_row_recognizes_the_live_row_shapes() -> None:
+    assert MOD.is_claim_row(_PIPE_CLAIM.format(ts="2026-08-28T18:10:00Z"))
+    assert MOD.is_claim_row("- 2026-08-28T18:10:00Z [handle] OMN-1 — CLAIM: doing x")
+    assert MOD.is_claim_row("- **Status:** CLAIM+TERMINAL")
+
+
+def test_is_claim_row_rejects_a_non_claim_row() -> None:
+    assert not MOD.is_claim_row(
+        "| 2026-08-28T18:05:00Z | build-x | OMN-1 | TERMINAL | done |"
+    )
+    assert not MOD.is_claim_row("- just some prose about a claim of victory")
+
+
+def test_cli_append_of_a_claim_row_returns_a_claim_token(tmp_path: Path) -> None:
+    ledger = tmp_path / "ledger.md"
+    ledger.write_text("existing header line\n", encoding="utf-8")
+    row = _PIPE_CLAIM.format(ts="2026-08-28T18:10:00Z")
+
+    result = _run_cli([str(ledger), "--append", row])
+
+    assert result.returncode == 0
+    token = MOD.parse_claim_token_line(result.stdout)
+    assert token is not None
+    # The offset is the lock-protected byte position the row landed at --
+    # i.e. the authoritative append-order signal, not a self-declared clock.
+    assert token.offset == len("existing header line\n")
+
+
+def test_cli_append_of_a_non_claim_row_emits_no_token(tmp_path: Path) -> None:
+    ledger = tmp_path / "ledger.md"
+    result = _run_cli(
+        [str(ledger), "--append", "| 2026-08-28T18:05:00Z | h | OMN-1 | TERMINAL | x |"]
+    )
+    assert result.returncode == 0
+    assert MOD.parse_claim_token_line(result.stdout) is None
+
+
+def test_cli_claim_retry_is_deduped_and_returns_the_same_token(
+    tmp_path: Path,
+) -> None:
+    """An exit-75 retry must be a no-op that hands back the FIRST token.
+
+    Token stability is what makes the retry safe: the caller cites one token
+    in its mutation regardless of how many times it retried the append.
+    """
+    ledger = tmp_path / "ledger.md"
+    first = _run_cli(
+        [str(ledger), "--append", _PIPE_CLAIM.format(ts="2026-08-28T18:10:00Z")]
+    )
+    retry = _run_cli(
+        [str(ledger), "--append", _PIPE_CLAIM.format(ts="2026-08-28T18:12:31Z")]
+    )
+
+    assert first.returncode == 0
+    assert retry.returncode == 0
+    assert "DEDUP" in retry.stderr
+    assert ledger.read_text(encoding="utf-8").count("| CLAIM |") == 1
+
+    first_token = MOD.parse_claim_token_line(first.stdout)
+    retry_token = MOD.parse_claim_token_line(retry.stdout)
+    assert first_token is not None and retry_token is not None
+    assert retry_token.offset == first_token.offset
+    assert retry_token.digest == first_token.digest
+
+
+# --------------------------------------------------------------------------
+# OMN-16400: verifying a claim token predates a cited mutation
+# --------------------------------------------------------------------------
+
+
+def _token_of(result: subprocess.CompletedProcess[str]) -> str:
+    token = MOD.parse_claim_token_line(result.stdout)
+    assert token is not None
+    return token.render()
+
+
+def test_cli_verify_claim_token_accepts_a_claim_that_predates_the_mutation(
+    tmp_path: Path,
+) -> None:
+    ledger = tmp_path / "ledger.md"
+    appended = _run_cli(
+        [str(ledger), "--append", _PIPE_CLAIM.format(ts="2026-08-28T18:10:00Z")]
+    )
+    token = _token_of(appended)
+
+    verdict = _run_cli(
+        [
+            str(ledger),
+            "--verify-claim-token",
+            token,
+            "--mutation-at",
+            "2099-01-01T00:00:00Z",
+        ]
+    )
+    assert verdict.returncode == 0
+    assert "CLAIM-BEFORE-MUTATION OK" in verdict.stdout
+
+
+def test_cli_verify_claim_token_rejects_a_post_hoc_claim(tmp_path: Path) -> None:
+    """The L17421/L17467/L17574 defect class, mechanically caught."""
+    ledger = tmp_path / "ledger.md"
+    appended = _run_cli(
+        [str(ledger), "--append", _PIPE_CLAIM.format(ts="2026-08-28T18:10:00Z")]
+    )
+    token = _token_of(appended)
+
+    verdict = _run_cli(
+        [
+            str(ledger),
+            "--verify-claim-token",
+            token,
+            "--mutation-at",
+            "2000-01-01T00:00:00Z",
+        ]
+    )
+    assert verdict.returncode == 1
+    assert "POST-HOC CLAIM" in verdict.stderr
+
+
+def test_cli_verify_claim_token_rejects_a_token_whose_row_is_not_on_disk(
+    tmp_path: Path,
+) -> None:
+    """A token is only worth as much as the row it points at.
+
+    Verification re-reads the ledger at the recorded offset and re-hashes:
+    a token citing a row that was never appended (or was rewritten) fails,
+    so a caller cannot mint a claim token for a claim it never made.
+    """
+    ledger = tmp_path / "ledger.md"
+    appended = _run_cli(
+        [str(ledger), "--append", _PIPE_CLAIM.format(ts="2026-08-28T18:10:00Z")]
+    )
+    token = _token_of(appended)
+    ledger.write_text("something else entirely\n", encoding="utf-8")
+
+    verdict = _run_cli(
+        [
+            str(ledger),
+            "--verify-claim-token",
+            token,
+            "--mutation-at",
+            "2099-01-01T00:00:00Z",
+        ]
+    )
+    assert verdict.returncode == 1
+    assert "TOKEN DOES NOT MATCH" in verdict.stderr
+
+
+def test_cli_verify_claim_token_rejects_a_malformed_token(tmp_path: Path) -> None:
+    ledger = tmp_path / "ledger.md"
+    ledger.write_text("x\n", encoding="utf-8")
+    verdict = _run_cli(
+        [
+            str(ledger),
+            "--verify-claim-token",
+            "not-a-token",
+            "--mutation-at",
+            "2099-01-01T00:00:00Z",
+        ]
+    )
+    assert verdict.returncode == 2
+
+
+def test_claim_tokens_order_by_lock_protected_offset(tmp_path: Path) -> None:
+    """Two claims on one ledger order by file position, not by self-stamp.
+
+    This is the ghost-collision fix: the earlier-appended row has the smaller
+    offset even when its self-stamped wall clock reads LATER, which is
+    exactly the inversion that produced the L17511 VOID ruling and its
+    L17523 retraction.
+    """
+    ledger = tmp_path / "ledger.md"
+    earlier_append_later_clock = _run_cli(
+        [
+            str(ledger),
+            "--append",
+            "| 2026-08-22T14:45:00Z | lane-a | OMN-16385 | CLAIM | first appended |",
+        ]
+    )
+    later_append_earlier_clock = _run_cli(
+        [
+            str(ledger),
+            "--append",
+            "| 2026-08-22T14:20:00Z | lane-b | OMN-16386 | CLAIM | second appended |",
+        ]
+    )
+    first = MOD.parse_claim_token_line(earlier_append_later_clock.stdout)
+    second = MOD.parse_claim_token_line(later_append_earlier_clock.stdout)
+    assert first is not None and second is not None
+    assert first.offset < second.offset
