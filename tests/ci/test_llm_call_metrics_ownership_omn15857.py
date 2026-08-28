@@ -34,17 +34,37 @@ failing at deploy time on a lane.
 
 Ticket: OMN-15857 (ownership ruling). Related: OMN-12970 (why the node
 migration was added), OMN-15561 (the service ledger records a constant literal
-checksum and compares nothing).
+checksum and compares nothing), OMN-15857 CodeRabbit thread on the
+NODE_POSTGRES_DB fallback (the distinct-database condition is now asserted, not
+assumed) and migration 087, which cleans up the decoy tables produced the last
+time the two variables resolved to one database.
 """
 
 from __future__ import annotations
 
 import re
 from pathlib import Path
+from typing import Any
 
 import pytest
+import yaml
 
 pytestmark = [pytest.mark.unit]
+
+
+def _load_compose_services(path: Path) -> dict[str, Any]:
+    """Parse a compose file's ``services`` block, tolerating ``!override``.
+
+    ``yaml.safe_load`` has no constructor for compose's ``!override`` tag (the
+    judge overlay uses it), so it is stripped first -- the same approach
+    ``tests/unit/infra/test_compose_lane_internal_dsn_omn16843.py`` takes.
+    """
+    text = path.read_text(encoding="utf-8").replace("!override", "")
+    doc = yaml.safe_load(text) or {}
+    services = doc.get("services") or {}
+    assert isinstance(services, dict), path
+    return services
+
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
 FORWARD = REPO_ROOT / "docker" / "migrations" / "forward"
@@ -84,6 +104,43 @@ def test_the_two_declarations_target_different_databases() -> None:
     # only ever pointed at the node database.
     assert re.search(r'^\s*prepare_canonical_ledger "\$NODE_PGDB"', runner, re.M)
     assert 'prepare_canonical_ledger "$PGDB"' not in runner
+
+    # The routing above collapses when NODE_POSTGRES_DB is unset, because
+    # NODE_PGDB then FALLS BACK to PGDB and node migrations land in the service
+    # database after all. That is not hypothetical: migration
+    # 087_drop_stale_delegation_events_decoy.sql exists solely to clean up the
+    # decoy tables a real deployment created while the two variables resolved to
+    # the same database. So the separation is only real while every compose lane
+    # that runs this migrator pins them apart -- assert that, not just the
+    # runner's default expression.
+    #
+    # Asserted per SERVICE, not per file. A file-wide set of the two variables
+    # cannot distinguish "every migrator pins NODE_POSTGRES_DB" from "one of
+    # several migrators pins it and the rest silently fall back" -- and it is
+    # the un-pinned one that recreates the 087 decoy.
+    checked: list[tuple[str, str]] = []
+    for compose_name in ("docker-compose.infra.yml", "docker-compose.judge.yml"):
+        services = _load_compose_services(REPO_ROOT / "docker" / compose_name)
+        migrators = {
+            name: cfg
+            for name, cfg in services.items()
+            if RUNNER.name in f"{cfg.get('command', '')}{cfg.get('entrypoint', '')}"
+        }
+        assert migrators, f"{compose_name} declares no {RUNNER.name} service"
+        for name, cfg in migrators.items():
+            env = cfg.get("environment") or {}
+            assert isinstance(env, dict), (compose_name, name, "list-form environment")
+            node_db = env.get("NODE_POSTGRES_DB")
+            service_db = env.get("POSTGRES_DB")
+            assert node_db == "omnidash_analytics", (compose_name, name, node_db)
+            assert service_db and service_db != node_db, (
+                compose_name,
+                name,
+                service_db,
+                node_db,
+            )
+            checked.append((compose_name, name))
+    assert checked
 
 
 def test_the_application_manifest_cannot_name_a_flat_migration() -> None:
