@@ -1,0 +1,171 @@
+# SPDX-FileCopyrightText: 2025 OmniNode.ai Inc.
+# SPDX-License-Identifier: MIT
+#
+# dlq-depth-monitor.yml — OMN-16769
+#
+# Scheduled read-only sweep of every onex.dlq.* topic on the dev lane broker.
+# Measures retained depth and arrivals-in-window per topic, evaluates them
+# against the contract-pinned bounds in node_dlq_depth_evaluate_compute, and
+# EXITS NON-ZERO when a sink takes more than its declared bound allows. A red
+# run is the alert surface — there is no separate notification channel, and
+# none was added (OMN-16769 scopes the alert to "a failing scheduled-workflow
+# run (red is visible)").
+#
+# WHY THIS EXISTS: onex.dlq.omnibase-infra.quarantine.v1 reached ~8.88M records
+# with zero projection and zero alerting, and a total delegation outage
+# (OMN-16767) hid inside it silently until someone went looking by hand.
+#
+# READ-ONLY BY CONSTRUCTION, not by convention. The backing node's only broker
+# surface is ProtocolDlqAdminTransport — five methods, all reads — and the live
+# adapter backs it with a GROUP-LESS AIOKafkaConsumer that joins no consumer
+# group and commits nothing. There is no --apply flag here because there is
+# nothing this workflow could apply. That is a stronger guarantee than the
+# DRY-RUN defaults on the sibling sweeps (sync-revert-watchdog.yml,
+# evidence-autoclose-sweep.yml) this workflow is modeled on, which DO have a
+# live mutation path deliberately left unarmed.
+#
+# The kill switch (ONEX_DLQ_MONITOR_DISABLED) is honored by the node itself
+# unconditionally, independent of this workflow's config, so it is not (and
+# must not be) surfaced as an input here — set it as a repo/environment
+# variable to halt every run without touching this file.
+#
+# WINDOW SIZING — window_seconds=1800 deliberately EQUALS the 30-minute cron
+# interval. Unlike the lookback windows on the sibling sweeps (which
+# intentionally exceed their interval so a missed run never drops an event),
+# this measurement is a RATE, not a backlog scan: overlapping windows would
+# double-count arrivals across consecutive runs and inflate the apparent rate.
+# A missed run therefore leaves a genuine gap rather than being re-covered —
+# an acceptable trade for a monitor whose signal is "is this sink taking
+# traffic right now", and the standing depth column still reflects anything
+# that landed during a gap.
+#
+# No new scripts/** file: scripts/** is DEFAULT-DENY for new files (OMN-14475
+# canonical-form guard). The step below is a direct `uv run onex ...`
+# invocation of code that already lives under src/.
+
+name: DLQ Depth Monitor
+
+on:
+  schedule:
+    # Every 30 minutes; window_seconds below matches exactly (see WINDOW SIZING).
+    - cron: '*/30 * * * *'
+  workflow_dispatch:
+    inputs:
+      window_seconds:
+        description: 'Arrival-measurement window in seconds. Keep equal to the cron interval for scheduled runs.'
+        required: false
+        default: '1800'
+      topic_prefix:
+        description: 'Only topics with this prefix are probed.'
+        required: false
+        default: 'onex.dlq.'
+      suppress_alert_exit:
+        description: 'Set true for a characterization run: collect the histogram WITHOUT failing the run on a breach. Leave false so a breach goes red.'
+        required: false
+        default: 'false'
+        type: choice
+        options:
+          - 'false'
+          - 'true'
+
+env:
+  UV_VERSION: "0.8.3"
+  PYTHON_VERSION: "3.12"
+
+# Never let two probes overlap: a delayed run plus the next scheduled tick
+# would measure overlapping windows and report inflated arrival counts.
+concurrency:
+  group: dlq-depth-monitor
+  cancel-in-progress: false
+
+jobs:
+  dlq-depth-monitor:
+    name: DLQ Depth Monitor (read-only)
+    # Trusted runner required: needs LAN access to the dev lane broker
+    # (localhost:19092 on .201, same address baselines-scheduler.yml uses).
+    # OMNI_RUNNER_SELECTOR_V1 — trusted CI defaults to self-hosted omnibase-ci; public forks default to ubuntu-latest
+    runs-on: >-
+      ${{
+        (github.event_name == 'pull_request' &&
+         github.event.pull_request.head.repo.full_name != github.repository)
+        && fromJSON(vars.OMNI_PUBLIC_PR_RUNS_ON_JSON || '["ubuntu-latest"]')
+        || fromJSON(vars.OMNI_TRUSTED_CI_RUNS_ON_JSON || '["self-hosted","omnibase-ci"]')
+      }}
+    timeout-minutes: 15
+    permissions:
+      contents: read
+
+    steps:
+      - name: Checkout omnibase_infra
+        uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+        with:
+          fetch-depth: 1
+
+      - name: Set up Python
+        uses: actions/setup-python@v7
+        with:
+          python-version: ${{ env.PYTHON_VERSION }}
+
+      - name: Install uv
+        uses: astral-sh/setup-uv@v7
+        with:
+          version: ${{ env.UV_VERSION }}
+          enable-cache: true
+          cache-dependency-glob: "uv.lock"
+
+      - name: Install dependencies
+        run: uv sync
+
+      - name: Probe DLQ depth (read-only; non-zero exit == alert)
+        env:
+          TOPIC_PREFIX: ${{ github.event.inputs.topic_prefix || 'onex.dlq.' }}
+          WINDOW_SECONDS: ${{ github.event.inputs.window_seconds || '1800' }}
+          SUPPRESS_ALERT_EXIT: ${{ github.event.inputs.suppress_alert_exit || 'false' }}
+          # Trusted runner: KAFKA_BOOTSTRAP_SERVERS comes from ~/.omnibase/.env,
+          # same sourcing pattern as baselines-scheduler.yml. The node applies
+          # NO default broker address — an unset value fails the run closed
+          # rather than silently probing the wrong lane and reporting a false
+          # clean bill of health.
+          KAFKA_BOOTSTRAP_SERVERS: ${{ secrets.KAFKA_BOOTSTRAP_SERVERS || 'localhost:19092' }}
+        run: |
+          set -euo pipefail
+          # On the self-hosted runner the shell env from ~/.omnibase/.env wins.
+          source ~/.omnibase/.env 2>/dev/null || true
+          if [ -z "${KAFKA_BOOTSTRAP_SERVERS:-}" ]; then
+            echo "::error::KAFKA_BOOTSTRAP_SERVERS is not set — refusing to probe an unspecified broker."
+            exit 1
+          fi
+          suppress_flag=()
+          if [ "$SUPPRESS_ALERT_EXIT" = "true" ]; then
+            suppress_flag=(--suppress-alert-exit)
+          fi
+          uv run onex skill dlq_depth_monitor \
+            --topic-prefix "$TOPIC_PREFIX" \
+            --window-seconds "$WINDOW_SECONDS" \
+            "${suppress_flag[@]}" \
+            | tee dlq-monitor-result.json
+
+      - name: Post summary
+        if: always()
+        run: |
+          {
+            echo "## DLQ Depth Monitor (OMN-16769, read-only)"
+            echo ""
+            echo "Probed every \`onex.dlq.*\` topic on the dev lane broker for retained"
+            echo "depth and arrivals-in-window. No writes of any kind were performed:"
+            echo "the node's only broker surface is read-only and its consumer is"
+            echo "group-less, so it commits nothing."
+            echo ""
+            if [ "${{ job.status }}" = "failure" ]; then
+              echo "**RED = at least one DLQ sink exceeded its declared arrival bound.**"
+              echo "The failing step's log names each offending topic with its arrival"
+              echo "count, its bound, and its retained depth."
+            else
+              echo "No DLQ sink exceeded its arrival bound this window."
+            fi
+            echo ""
+            echo "Standing depth is REPORTED but does not gate the run — see the"
+            echo "\`alert_policy\` block in node_dlq_depth_evaluate_compute/contract.yaml"
+            echo "for why a depth bound cannot be the primary signal on a topic"
+            echo "already holding ~8.88M records (OMN-16769 AC4)."
+          } >> "$GITHUB_STEP_SUMMARY"

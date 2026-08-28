@@ -72,6 +72,15 @@ APPROVED_INFIX_PATTERNS=(
     # (ONEX_SYNC_REVERT_WATCHDOG_DISABLED) directly for the same reason.
     # Declares required_secrets per the OMN-14951 gap-2 check below.
     "/nodes/node_sync_revert_watchdog_effect/handlers/handler_sync_revert_watchdog.py"
+    # OMN-16769: the DLQ depth monitor is the same dispatch shape as the two
+    # entries above (RuntimeLocal's single-shot compute path, no
+    # config-prefetch/overlay seam reachable from a node's own handler) — it
+    # reads its broker address (KAFKA_BOOTSTRAP_SERVERS) and kill switch
+    # (ONEX_DLQ_MONITOR_DISABLED) directly for the same reason. It applies NO
+    # default for the broker address: an unset value fails the run closed
+    # rather than silently probing the wrong lane, which would report a false
+    # clean bill of health.
+    "/nodes/node_dlq_depth_monitor_effect/handlers/handler_dlq_depth_monitor.py"
 )
 
 ENV_READ_PATTERNS='os\.environ\[|os\.environ\.get|os\.getenv|from os import environ|from os import getenv'

@@ -1174,6 +1174,19 @@ pattern_exemptions:
       - CLAUDE.md (Registry Naming Conventions)
     ticket: OMN-16106
   # ==========================================================================
+  # DLQ Depth Monitor Exemptions (OMN-16769)
+  # ==========================================================================
+  - file_pattern: 'node_dlq_depth_monitor_effect/handlers/handler_dlq_depth_monitor\.py'
+    class_pattern: "Class name '_AiokafkaDlqOffsetReader'"
+    violation_pattern: "should use PascalCase"
+    reason: >
+      _AiokafkaDlqOffsetReader IS valid PascalCase for a private class — exactly the same class of exemption as the _LinearClient entries for node_sync_revert_watchdog_effect and node_evidence_autoclose_sweep_effect below/above. The underscore prefix indicates private visibility and "AiokafkaDlqOffsetReader" follows PascalCase; the validator regex does not account for underscore-prefixed private classes. It is private, and inside the handler module, for the same reason those two are: the OMN-12515/12540 imperative-contract guard blocks a raw broker/HTTP client construction in any FREESTANDING module reachable from a contract-declared handler, so the client must live inside the declared handler module itself. Not named Adapter*/Client* because the OMN-14350 lifecycle ratchet hard-fails both as type-words and its allowlist may only shrink.
+
+    documentation:
+      - PEP 8 - Naming Conventions (https://peps.python.org/pep-0008/#naming-conventions)
+      - CLAUDE.md (File & Class Naming Conventions)
+    ticket: OMN-16769
+  # ==========================================================================
   # Sync Revert Watchdog Exemptions (OMN-16536)
   # ==========================================================================
   - file_pattern: 'node_sync_revert_watchdog_effect/handlers/handler_sync_revert_watchdog\.py'

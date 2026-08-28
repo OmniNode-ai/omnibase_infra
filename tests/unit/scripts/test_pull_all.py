@@ -1349,11 +1349,11 @@ class TestDriftRepairBounding:
         a multi-minute-to-unbounded stage, so it is asserted mechanically.
         """
         source = PULL_ALL.read_text()
-        assert "-exec shasum {} +" in source, (
-            "plugin content hash must batch (`-exec shasum {} +`)"
+        assert '-exec "$hasher" {} +' in source, (
+            "plugin content hash must batch (`-exec ... {} +`)"
         )
-        assert r"-exec shasum {} \;" not in source, (
-            r"the per-file `-exec shasum {} \;` form spawns one process per "
+        assert r'-exec "$hasher" {} \;' not in source, (
+            r"the per-file `-exec ... {} \;` form spawns one process per "
             "file (53k on the gate host) and stalls the plugin-cache stage"
         )
 

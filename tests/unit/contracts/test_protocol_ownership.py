@@ -72,6 +72,9 @@ KNOWN_INFRA_PROTOCOLS: dict[str, str] = {
     "ProtocolAutoWiringManifestLike": "protocols/protocol_auto_wiring_manifest_like.py",  # [RUNTIME] OMN-8623 manifest shape for health monitor DI
     "ProtocolDispatchResultApplier": "protocols/protocol_dispatch_result_applier.py",  # [RUNTIME] OMN-9550 auto-wired handler output application boundary
     "ProtocolKafkaAdminLike": "protocols/protocol_kafka_admin_like.py",  # [RUNTIME] OMN-8623 Kafka admin client boundary for health monitor DI
+    "ProtocolDlqAdminTransport": "protocols/protocol_dlq_admin_transport.py",  # [NODE] OMN-16769 read-only DLQ offset surface for the quarantine-sink monitor. Five methods, ALL reads (list_topics/partitions_for_topic/beginning_offsets/end_offsets/offsets_for_times) — the narrowness IS the safety property: no produce/commit/topic-mutation path exists on it, so the scheduled probe is read-only by construction rather than by discipline. Infra-local, not spi: it is a node-internal test seam bound to this monitor, not a cross-repo contract. Same prior art as ProtocolSeekableConsumer above — narrow the client so the logic is testable without a broker
+    "ProtocolClusterMetadata": "protocols/protocol_cluster_metadata.py",  # [NODE] OMN-16769 the two ClusterMetadata methods (topics/partitions_for_topic) the DLQ offset reader calls. Declared structurally so the metadata snapshot is not typed as Any (the repo's Any-type gate) — aiokafka ships no stubs for this class
+    "ProtocolTopicPartition": "protocols/protocol_topic_partition.py",  # [NODE] OMN-16769 canonical infra-local topic/partition shape used by read-only Kafka surfaces that avoid importing concrete aiokafka classes at module import time.
     "ProtocolTopicRegistry": "protocols/protocol_topic_registry.py",  # [DI] OMN-5839
     "ProtocolValidationLedgerRepository": "protocols/protocol_validation_ledger_repository.py",
     "ProtocolPatternBBrokerTransport": "protocols/protocol_pattern_b_broker_transport.py",  # [RUNTIME] OMN-10204 Pattern B broker transport boundary
@@ -183,7 +186,6 @@ KNOWN_INFRA_PROTOCOLS: dict[str, str] = {
     "ProtocolKafkaMessage": "nodes/node_kafka_replay_compute/protocols/protocol_kafka_message.py",
     "ProtocolKafkaReplayConsumer": "nodes/node_kafka_replay_compute/protocols/protocol_kafka_replay_consumer.py",
     "ProtocolOffsetAndTimestamp": "nodes/node_kafka_replay_compute/protocols/protocol_offset_and_timestamp.py",
-    "ProtocolTopicPartition": "nodes/node_kafka_replay_compute/protocols/protocol_topic_partition.py",
     # [NODE] OMN-14819 narrow correlation_id envelope view; keeps the def-B replay
     # handler core free of ModelEventEnvelope (canonical handler-shape C-core).
     "ProtocolReplayEnvelope": "nodes/node_kafka_replay_compute/protocols/protocol_replay_envelope.py",
@@ -221,6 +223,9 @@ KNOWN_DUPLICATE_LOCATIONS: dict[str, list[str]] = {
     # [NODE] OMN-7484: node_baseline_capture has its own publisher protocol (legitimate internal copy)
     "ProtocolPublisher": [
         "nodes/node_baseline_capture/handlers/handler_baseline_capture.py",
+    ],
+    "ProtocolTopicPartition": [
+        "nodes/node_kafka_replay_compute/protocols/protocol_topic_partition.py",
     ],
 }
 
@@ -347,6 +352,23 @@ class TestProtocolOwnership:
             "Allowlist file path mismatches:\n"
             + "\n".join(wrong_path)
             + "\n\nUpdate the file paths in KNOWN_INFRA_PROTOCOLS."
+        )
+
+    def test_known_duplicate_protocols_in_correct_files(self) -> None:
+        """Duplicate Protocol names must also stay bound to their declared paths."""
+        declarations = _find_protocol_declarations()
+        declared_locations = {(name, rel_path) for name, rel_path, _ in declarations}
+
+        missing: list[str] = []
+        for name, expected_paths in KNOWN_DUPLICATE_LOCATIONS.items():
+            for expected_path in expected_paths:
+                if (name, expected_path) not in declared_locations:
+                    missing.append(f"  {name}: expected duplicate in {expected_path}")
+
+        assert not missing, (
+            "Known duplicate Protocol location mismatches:\n"
+            + "\n".join(missing)
+            + "\n\nUpdate KNOWN_DUPLICATE_LOCATIONS."
         )
 
     def test_protocol_count_within_bounds(self) -> None:
