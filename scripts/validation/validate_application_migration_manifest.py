@@ -26,6 +26,7 @@ _TICKET = re.compile(r"^OMN-[0-9]+$")
 _NODE_NAME = re.compile(r"^[A-Za-z0-9_][A-Za-z0-9_.-]*$")
 _CLOUD_NAME = re.compile(r"^[A-Za-z0-9_.-]+$")
 _LEGACY_SOURCE_CHECKSUM = re.compile(r"^[A-Za-z0-9_.:-]+$")
+_VERIFIED_AT = re.compile(r"^[0-9]{4}-[0-9]{2}-[0-9]{2}$")
 _ALLOWED_DOMAINS = frozenset({"tenant", "omninode_internal"})
 
 
@@ -63,6 +64,24 @@ class LegacyNodeMigrationDeclaration:
 
 
 @dataclass(frozen=True, slots=True)
+class VerifiedChecksumAdoption:
+    """OMN-15857: one hand-written sentinel checksum, proven safe to adopt.
+
+    ``manifest_checksum`` pins the content SHA-256 the equivalence proof ran
+    against.  It is re-checked against the live manifest on every validation, so
+    rewriting the migration file after the proof invalidates the adoption at PR
+    time instead of at deploy time.
+    """
+
+    version: str
+    source_checksum: str
+    manifest_checksum: str
+    ticket: str
+    receipt_sha256: str
+    verified_at: str
+
+
+@dataclass(frozen=True, slots=True)
 class CloudAlias:
     migration_name: str
     runner_version: str
@@ -73,6 +92,7 @@ class ValidationResult:
     declarations: tuple[MigrationDeclaration, ...]
     blocked: tuple[BlockedMigration, ...]
     legacy_node_declarations: tuple[LegacyNodeMigrationDeclaration, ...]
+    verified_adoptions: tuple[VerifiedChecksumAdoption, ...]
     cloud_aliases: tuple[CloudAlias, ...]
 
 
@@ -131,6 +151,7 @@ def validate_manifests(
     declaration_path: Path,
     blocked_path: Path,
     legacy_node_declaration_path: Path,
+    verified_adoption_path: Path,
     cloud_alias_path: Path,
     *,
     require_complete: bool = False,
@@ -140,6 +161,7 @@ def validate_manifests(
     declarations: list[MigrationDeclaration] = []
     blocked: list[BlockedMigration] = []
     legacy_node_declarations: list[LegacyNodeMigrationDeclaration] = []
+    verified_adoptions: list[VerifiedChecksumAdoption] = []
     aliases: list[CloudAlias] = []
 
     for line_number, fields in _read_tsv(declaration_path, 6):
@@ -246,6 +268,71 @@ def validate_manifests(
             )
         legacy_node_declarations.append(legacy_item)
 
+    # OMN-15857: verified-adoption declarations.  Validated after the active
+    # declaration set is parsed so the pinned manifest checksum can be compared
+    # against the live one.
+    declared_by_version = {item.version: item for item in declarations}
+    for line_number, fields in _read_tsv(verified_adoption_path, 6, allow_empty=True):
+        adoption = VerifiedChecksumAdoption(*fields)
+        declared = declared_by_version.get(adoption.version)
+        if declared is None:
+            raise ManifestError(
+                f"{verified_adoption_path}:{line_number}: verified adoption for "
+                f"{adoption.version!r} has no active migration declaration; an "
+                "adoption can only ever restate a checksum the manifest already "
+                "owns"
+            )
+        if adoption.manifest_checksum != declared.checksum:
+            raise ManifestError(
+                f"{verified_adoption_path}:{line_number}: verified adoption for "
+                f"{adoption.version!r} was proven against content "
+                f"{adoption.manifest_checksum!r} but the manifest now declares "
+                f"{declared.checksum!r}. The migration file changed after the "
+                "proof, so the proof no longer covers it -- re-run "
+                "scripts/migrations/verify_migration_checksum_adoption.py and "
+                "commit the new receipt."
+            )
+        if _SHA256.fullmatch(adoption.manifest_checksum) is None:
+            raise ManifestError(
+                f"{verified_adoption_path}:{line_number}: malformed manifest "
+                f"checksum {adoption.manifest_checksum!r}"
+            )
+        if _SHA256.fullmatch(adoption.receipt_sha256) is None:
+            raise ManifestError(
+                f"{verified_adoption_path}:{line_number}: malformed receipt "
+                f"sha256 {adoption.receipt_sha256!r}"
+            )
+        if _LEGACY_SOURCE_CHECKSUM.fullmatch(adoption.source_checksum) is None:
+            raise ManifestError(
+                f"{verified_adoption_path}:{line_number}: malformed adopted "
+                f"source checksum {adoption.source_checksum!r}"
+            )
+        if _SHA256.fullmatch(adoption.source_checksum) is not None:
+            raise ManifestError(
+                f"{verified_adoption_path}:{line_number}: {adoption.version!r} "
+                "carries a 64-hex source checksum, which bootstrap.sql already "
+                "compares directly; a verified adoption exists only for a "
+                "non-canonical sentinel"
+            )
+        if adoption.source_checksum == "applied-by-runner":
+            raise ManifestError(
+                f"{verified_adoption_path}:{line_number}: {adoption.version!r} "
+                "carries the runner literal, which bootstrap.sql already "
+                "adopts; a verified adoption exists only for a sentinel that "
+                "would otherwise abort the run"
+            )
+        if _TICKET.fullmatch(adoption.ticket) is None:
+            raise ManifestError(
+                f"{verified_adoption_path}:{line_number}: invalid adoption "
+                f"ticket {adoption.ticket!r}"
+            )
+        if _VERIFIED_AT.fullmatch(adoption.verified_at) is None:
+            raise ManifestError(
+                f"{verified_adoption_path}:{line_number}: malformed "
+                f"verified_at {adoption.verified_at!r}; expected YYYY-MM-DD"
+            )
+        verified_adoptions.append(adoption)
+
     for line_number, fields in _read_tsv(cloud_alias_path, 2):
         alias = CloudAlias(*fields)
         if (
@@ -267,6 +354,10 @@ def validate_manifests(
     _reject_duplicates(declared_paths, "double migration declaration")
     _reject_duplicates(blocked_paths, "duplicate blocked migration")
     _reject_duplicates(legacy_versions, "duplicate historical node migration")
+    _reject_duplicates(
+        [item.version for item in verified_adoptions],
+        "duplicate verified checksum adoption",
+    )
     _reject_duplicates(declared_identities, "duplicate migration version")
     _reject_duplicates(
         [item.migration_name for item in aliases], "duplicate cloud migration alias"
@@ -313,6 +404,7 @@ def validate_manifests(
         tuple(declarations),
         tuple(blocked),
         tuple(legacy_node_declarations),
+        tuple(verified_adoptions),
         tuple(aliases),
     )
 
@@ -350,6 +442,11 @@ def main(argv: list[str] | None = None) -> int:
         default=default_ledger / "legacy-node-migrations.tsv",
     )
     parser.add_argument(
+        "--verified-adoptions",
+        type=Path,
+        default=default_ledger / "verified-checksum-adoptions.tsv",
+    )
+    parser.add_argument(
         "--cloud-aliases",
         type=Path,
         default=default_ledger / "cloud-migration-aliases.tsv",
@@ -367,6 +464,7 @@ def main(argv: list[str] | None = None) -> int:
             args.declarations,
             args.blocked,
             args.legacy_node_declarations,
+            args.verified_adoptions,
             args.cloud_aliases,
             require_complete=args.require_complete,
         )
@@ -378,6 +476,7 @@ def main(argv: list[str] | None = None) -> int:
         "PASS: deterministic application migration declarations validated "
         f"({len(result.declarations)} active, {len(result.blocked)} blocked, "
         f"{len(result.legacy_node_declarations)} historical, "
+        f"{len(result.verified_adoptions)} verified adoptions, "
         f"{len(result.cloud_aliases)} cloud aliases)."
     )
     return 0

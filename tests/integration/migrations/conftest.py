@@ -163,3 +163,16 @@ def ephemeral_postgres() -> Iterator[EphemeralPostgres]:
             check=False,
         )
         shutil.rmtree(scratch, ignore_errors=True)
+
+
+# ---------------------------------------------------------------------------
+# OMN-15857: shared PostgreSQL 16 cluster for the migration-ledger proofs
+# ---------------------------------------------------------------------------
+#
+# ``test_application_migration_ledger_omn15413.py`` owns that harness. The
+# OMN-15857 files reuse it, and re-exporting the fixture here rather than
+# importing it into each module keeps the name out of those modules' namespaces,
+# where it would shadow every ``pg16`` test parameter.
+from tests.integration.migrations.test_application_migration_ledger_omn15413 import (
+    pg16,
+)

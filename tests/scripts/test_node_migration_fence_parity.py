@@ -1344,6 +1344,7 @@ def _write_application_ledger_contract(forward: Path) -> None:
     # per-record validators never fire on zero input lines, so an empty file
     # passes every format/duplicate/overlap check untouched).
     (ledger_dir / "legacy-node-migrations.tsv").write_text("", encoding="utf-8")
+    (ledger_dir / "verified-checksum-adoptions.tsv").write_text("", encoding="utf-8")
 
 
 @pytest.fixture
