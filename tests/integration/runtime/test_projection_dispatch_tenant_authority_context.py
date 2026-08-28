@@ -164,9 +164,11 @@ async def test_dispatch_engine_keeps_verified_authority_out_of_band(
     assert connection.close_calls == 1
 
 
-async def test_dispatch_without_verified_capability_fails_before_connect(
+async def test_dispatch_without_verified_capability_fails_at_db_role_validation(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
+    calls: list[tuple[str, object]] = []
+    connection = _Connection(calls, principal="unverified_projection_writer")
     monkeypatch.setenv("OMNIDASH_ANALYTICS_DB_URL", "postgresql://fixture")
     callback = _make_projection_dispatch_callback(
         _TenantProjectionHandler(),
@@ -178,10 +180,12 @@ async def test_dispatch_without_verified_capability_fails_before_connect(
         event_type=TOPIC,
     )
 
-    with patch("psycopg2.connect") as connect:
+    with patch("psycopg2.connect", return_value=connection) as connect:
         await callback(envelope)
 
-    connect.assert_not_called()
+    connect.assert_called_once_with("postgresql://fixture")
+    assert calls == [("SELECT current_user, current_database()", None)]
+    assert connection.close_calls == 1
 
 
 async def test_mixed_target_internal_operation_does_not_resolve_tenant_authority(
