@@ -70,6 +70,36 @@
 # GAP, i.e. the sweep would state an evidence verdict it never reached. Both
 # the checkout and an explicit readability assertion are below.
 #
+# The runner ALSO needs the repos the contracts' behaviour checks name
+# (OMN-16902). With OMNI_HOME exported (OMN-16845) and the venvs separated
+# (OMN-16846), the remaining false-FAILED door was the checkout SET: only
+# `omnibase_infra` existed under OMNI_HOME, so a check pinned
+# `cwd: "${OMNI_HOME}/omnimarket"` or `.../omninode_infra` resolved to a path
+# that does not exist and was recorded FAILED. Run 33210339910 is the natural
+# experiment — same commit, same minute, four seeds:
+#
+#   OMN-16759 (checks homed in omnibase_infra) -> verified=4  behavior_proving=3
+#   OMN-16790 (checks homed in omnimarket)     -> failed=3    behavior_proving=0
+#   OMN-16784 (checks homed in omninode_infra) -> failed=9    behavior_proving=0
+#   OMN-16785 (checks homed in omninode_infra) -> failed=11   behavior_proving=0
+#
+# The discriminator is which repo the check's `cwd` names, nothing else. The
+# fix DERIVES the set from the scanned contracts rather than hardcoding it: a
+# literal repo list reproduces this bug the first time a new repo appears, and
+# OMN-16434 now auto-mints `cwd: ${OMNI_HOME}/<repo>` on every new companion
+# for whatever repo the work was in, so the population only grows.
+#
+# And the OCC-homed `test_passes` checks needed an INTERPRETER (OMN-16902 D2).
+# `_infer_occ_cwd` does not run those checks in `.occ-src`: it returns
+# `_occ_dev_root`, an ephemeral `git worktree` of the governance ref that the
+# collector materialises mid-run. `UV_NO_SYNC=1` on the sweep step was
+# inherited by that subprocess, so `uv run pytest` there created an EMPTY
+# `.venv` and died on `error: Failed to spawn: pytest` — on all four seeds,
+# a shared evidence item taxing every ticket that carries it. UV_NO_SYNC is
+# therefore gone from the check-bearing steps and the dests are pre-synced
+# instead, so the common case is a cache-hot no-op and the one path no step
+# can pre-provision can provision itself.
+#
 # The co-install is verified, not assumed: a step after it asserts
 # `node_dod_verify` is a resolvable `onex.nodes` entry point THROUGH the exact
 # interpreter the sweep's per-ticket subprocess uses (the dispatch venv's own
@@ -160,7 +190,11 @@ jobs:
     # is real verifier work, and the co-install itself adds a git-source
     # install. 20 minutes was budgeted for a sweep that never reached the
     # verifier.
-    timeout-minutes: 45
+    # Raised from 45 (OMN-16902): the job now materialises and pre-syncs one
+    # environment per repo the scanned contracts' cwd values name, so that a
+    # behaviour check homed outside omnibase_infra can execute at all. Bounded
+    # by the derived set (7 dests as of this commit), each repo cloned once.
+    timeout-minutes: 60
     permissions:
       contents: read
 
@@ -548,6 +582,276 @@ jobs:
             exit 1
           fi
 
+      # OMN-16902 D1. The checkout set must be DERIVED from the contracts that
+      # are about to be adjudicated, not declared here.
+      #
+      # A hardcoded repo list would be correct for exactly as long as the
+      # registry stands still, and it does not: OMN-16434 (omnimarket#2180)
+      # auto-mints `cwd: ${OMNI_HOME}/<repo>` on every new companion for
+      # whatever repo the work was in, so a list rots the first time a
+      # ticket lands in a repo nobody added here. That is this bug, arriving
+      # by a fourth door after OMN-16845 and OMN-16846 closed the first three.
+      # `tests/ci/test_evidence_autoclose_sweep_cwd_repos.py` extracts the
+      # classifier below out of this file and runs it against a repo name that
+      # exists nowhere in the registry, so a list cannot pass that gate.
+      #
+      # Two cwd shapes exist in the live corpus and both are handled:
+      #   ${OMNI_HOME}/<repo>[/<subdir>...]        -> materialise <repo>
+      #   ${OMNI_HOME}/omni_worktrees/<T>/<repo>   -> materialise <repo> AT
+      #                                               that worktree path
+      # The second is an operator-machine path that can never exist on a
+      # runner as written; materialising the named repo there is what makes
+      # the cwd resolvable at all. It is pinned to dev, the same ref every
+      # other dest uses — the check then proves behaviour against dev rather
+      # than against a branch that no longer exists, which is the only honest
+      # thing a post-merge sweep can do.
+      #
+      # Anything the classifier cannot place (a traversal, a bare
+      # `omni_worktrees` root, a non-OMNI_HOME absolute path) is PRINTED, not
+      # dropped. A silently discarded cwd is indistinguishable from a
+      # satisfied one, and that indistinguishability is the whole defect class.
+      #
+      # Cost note, recorded rather than hidden: this adds N shallow clones and
+      # N `uv sync`es to every scheduled run. It is bounded by the derived set
+      # (7 dests across ~4600 contracts as of this commit), each repo is cloned
+      # once and copied to its dests, and worktree-shaped dests are deliberately
+      # NOT pre-synced — they are historical, rarely adjudicated, and `uv run`
+      # provisions them on demand now that UV_NO_SYNC is gone.
+      - name: Derive and materialise the cwd repo set the OCC contracts name (OMN-16902)
+        shell: bash
+        env:
+          GH_TOKEN: ${{ secrets.OMNI_GITHUB_TOKEN || github.token }}
+        run: |
+          set -euo pipefail
+
+          contracts_dir="${GITHUB_WORKSPACE}/.occ-src/contracts"
+          if [ ! -d "${contracts_dir}" ]; then
+            echo "::error::${contracts_dir} is absent, so the cwd repo set cannot be derived and every non-infra behaviour check would render to a nonexistent path (OMN-16902)." >&2
+            exit 1
+          fi
+
+          python3 - "${contracts_dir}" \
+            > "${RUNNER_TEMP}/cwd-dests.tsv" \
+            2> "${RUNNER_TEMP}/cwd-unclassified.tsv" <<'PYEOF'
+          # ---8<--- OMN-16902 BEGIN cwd-repo-derivation
+          """Classify every ``cwd:`` an OCC contract declares into a
+          (destination path under OMNI_HOME, repository to materialise) pair.
+
+          stdout: one ``<dest>\t<repo>`` row per unique destination, sorted.
+          stderr: one ``UNCLASSIFIED_CWD\t<raw>`` row per cwd that cannot be
+          placed — reported so an unsatisfiable path is never mistaken for a
+          satisfied one.
+
+          Line-oriented on purpose. The corpus is thousands of files and a
+          malformed one must not abort the derivation for all the others, which
+          a whole-document YAML parse would do.
+          """
+          import re
+          import sys
+          from pathlib import Path
+
+          _CWD_LINE = re.compile(
+              r"""^\s*(?:-\s*)?cwd:\s*(?P<q>["']?)(?P<val>[^"'#\n]+)(?P=q)\s*(?:#.*)?$"""
+          )
+          _NAME = re.compile(r"^[A-Za-z0-9][A-Za-z0-9_.-]*$")
+          _PREFIX = "${OMNI_HOME}/"
+
+          contracts_dir = Path(sys.argv[1])
+          dests: dict[str, str] = {}
+          unclassified: set[str] = set()
+
+          for path in sorted(contracts_dir.rglob("*.yaml")):
+              try:
+                  text = path.read_text(encoding="utf-8")
+              except OSError as exc:
+                  print(f"UNREADABLE\t{path}\t{exc}", file=sys.stderr)
+                  continue
+              for line in text.splitlines():
+                  match = _CWD_LINE.match(line)
+                  if match is None:
+                      continue
+                  raw = match.group("val").strip()
+                  if not raw.startswith(_PREFIX):
+                      unclassified.add(raw)
+                      continue
+                  segments = [s for s in raw[len(_PREFIX) :].split("/") if s]
+                  if not segments or ".." in segments:
+                      unclassified.add(raw)
+                      continue
+                  if segments[0] == "omni_worktrees":
+                      if len(segments) < 3:
+                          unclassified.add(raw)
+                          continue
+                      dest, repo = "/".join(segments[:3]), segments[2]
+                  else:
+                      dest = repo = segments[0]
+                  if not all(_NAME.match(s) for s in dest.split("/")):
+                      unclassified.add(raw)
+                      continue
+                  dests[dest] = repo
+
+          for dest in sorted(dests):
+              print(f"{dest}\t{dests[dest]}")
+          for raw in sorted(unclassified):
+              print(f"UNCLASSIFIED_CWD\t{raw}", file=sys.stderr)
+          # ---8<--- OMN-16902 END cwd-repo-derivation
+          PYEOF
+
+          echo "== cwd destinations derived from ${contracts_dir} =="
+          cat "${RUNNER_TEMP}/cwd-dests.tsv"
+          if [ -s "${RUNNER_TEMP}/cwd-unclassified.tsv" ]; then
+            echo "== cwd values this run could not place (reported, never dropped) =="
+            cat "${RUNNER_TEMP}/cwd-unclassified.tsv"
+          fi
+
+          # Credentials reach git through GIT_ASKPASS only: never written into
+          # a clone's config, never on a command line, never in the log.
+          cat > "${RUNNER_TEMP}/git-askpass.sh" <<'EOS'
+          #!/usr/bin/env bash
+          case "$1" in
+            Username*|username*) printf '%s\n' "x-access-token" ;;
+            *) printf '%s\n' "${GH_TOKEN}" ;;
+          esac
+          EOS
+          chmod +x "${RUNNER_TEMP}/git-askpass.sh"
+          export GIT_ASKPASS="${RUNNER_TEMP}/git-askpass.sh"
+          export GIT_TERMINAL_PROMPT=0
+
+          cache="${RUNNER_TEMP}/cwd-repo-cache"
+          mkdir -p "${cache}"
+          : > "${RUNNER_TEMP}/cwd-materialisation.tsv"
+
+          while IFS=$'\t' read -r dest repo; do
+            [ -n "${dest:-}" ] || continue
+            target="${OMNI_HOME}/${dest}"
+
+            # The gate checkout is already at ${OMNI_HOME}/omnibase_infra by
+            # construction (OMN-16845). Never re-materialise it: its `.venv` is
+            # the lock-exact gate venv every behaviour check runs pytest in.
+            if [ "${target}" = "${GITHUB_WORKSPACE}" ]; then
+              echo "  ${dest}: ALREADY_PRESENT_GATE_CHECKOUT"
+              printf '%s\t%s\t%s\n' "${dest}" "${repo}" "ALREADY_PRESENT_GATE_CHECKOUT" \
+                >> "${RUNNER_TEMP}/cwd-materialisation.tsv"
+              continue
+            fi
+            # Containment, asserted before anything destructive runs.
+            case "${target}" in
+              "${OMNI_HOME}"/?*) : ;;
+              *)
+                echo "::error::refusing to materialise ${dest}: ${target} is not strictly under OMNI_HOME (${OMNI_HOME})." >&2
+                exit 1
+                ;;
+            esac
+
+            src="${cache}/${repo}"
+            if [ -d "${src}" ]; then
+              status="CACHED"
+            elif [ "${repo}" = "onex_change_control" ] && [ -d "${GITHUB_WORKSPACE}/.occ-src" ]; then
+              cp -a "${GITHUB_WORKSPACE}/.occ-src" "${src}"
+              status="REUSED_OCC_CHECKOUT"
+            elif [ "${repo}" = "omnimarket" ] && [ -d "${GITHUB_WORKSPACE}/.omnimarket-src" ]; then
+              cp -a "${GITHUB_WORKSPACE}/.omnimarket-src" "${src}"
+              status="REUSED_OMNIMARKET_CHECKOUT"
+            elif git clone --quiet --depth 1 --branch dev \
+                 "https://github.com/OmniNode-ai/${repo}.git" "${src}" \
+                 2> "${RUNNER_TEMP}/clone-${repo}.err"; then
+              status="CLONED_DEV"
+            else
+              rm -rf "${src}"
+              status="UNAVAILABLE_REPO_NOT_READABLE_BY_TOKEN"
+            fi
+
+            if [ ! -d "${src}" ]; then
+              # Named, not silent. This run's credential cannot see the repo, so
+              # any check pinned there still cannot execute — that is the
+              # App-token scope residual tracked on OMN-16832 (an operator-only
+              # grant), NOT a product defect and NOT something this job can fix.
+              echo "::warning::OMN-16902 ${dest}: ${status} for OmniNode-ai/${repo}. Behaviour checks pinned at this cwd remain unexecutable until the sweep's App token can read it (OMN-16832)."
+              printf '%s\t%s\t%s\n' "${dest}" "${repo}" "${status}" \
+                >> "${RUNNER_TEMP}/cwd-materialisation.tsv"
+              continue
+            fi
+
+            # Destructive refresh: a self-hosted runner keeps siblings of
+            # GITHUB_WORKSPACE across jobs, and a stale tree would ground a
+            # behaviour verdict in code nobody chose.
+            rm -rf "${target}"
+            mkdir -p "$(dirname "${target}")"
+            cp -a "${src}" "${target}"
+            echo "  ${dest}: ${status} -> ${target}"
+            printf '%s\t%s\t%s\n' "${dest}" "${repo}" "${status}" \
+              >> "${RUNNER_TEMP}/cwd-materialisation.tsv"
+          done < "${RUNNER_TEMP}/cwd-dests.tsv"
+
+          # One environment per repo, in that repo, built by that repo's own
+          # lockfile. Nothing is cross-installed into any other venv — the
+          # OMN-16846 separation is a property this step must preserve, not a
+          # one-off it may spend.
+          echo "== per-dest environments =="
+          while IFS=$'\t' read -r dest repo status; do
+            case "${status}" in
+              CLONED_DEV|CACHED|REUSED_OCC_CHECKOUT|REUSED_OMNIMARKET_CHECKOUT) : ;;
+              *) continue ;;
+            esac
+            case "${dest}" in
+              */*) echo "  ${dest}: worktree-shaped dest, provisioned on demand"; continue ;;
+            esac
+            target="${OMNI_HOME}/${dest}"
+            if [ ! -f "${target}/pyproject.toml" ]; then
+              echo "  ${dest}: no pyproject.toml, nothing to sync"
+              continue
+            fi
+            if ( cd "${target}" && uv sync --quiet ); then
+              echo "  ${dest}: environment ready at ${target}/.venv"
+            else
+              echo "::warning::OMN-16902 ${dest}: uv sync failed; a check landing here will retry the sync on demand and report a real result either way."
+            fi
+          done < "${RUNNER_TEMP}/cwd-materialisation.tsv"
+
+          {
+            echo "### OMN-16902 cwd destinations"
+            echo ""
+            echo "| dest | repo | status |"
+            echo "| --- | --- | --- |"
+            while IFS=$'\t' read -r dest repo status; do
+              echo "| \`${dest}\` | ${repo} | ${status} |"
+            done < "${RUNNER_TEMP}/cwd-materialisation.tsv"
+          } >> "$GITHUB_STEP_SUMMARY"
+
+      # OMN-16902 D2, as an executable precondition rather than a comment.
+      #
+      # The OCC-homed `test_passes` checks do NOT run in `.occ-src`.
+      # `_infer_occ_cwd` returns `_occ_dev_root` — an ephemeral `git worktree`
+      # of the governance ref that the collector materialises mid-run. No step
+      # can pre-provision that path, so the only honest proof is: build a
+      # worktree the same way and show pytest spawns in it.
+      #
+      # What failed on run 33210339910, on all four seeds:
+      #   [failed] dod-occ-evidence-admissibility-validator: FAILED (12ms):
+      #     Creating virtual environment at: .venv
+      #     error: Failed to spawn: `pytest`
+      #
+      # 12ms and a freshly created empty `.venv` is the signature of
+      # UV_NO_SYNC=1 inherited into a project that had never been synced: uv
+      # made the environment and was forbidden from populating it. This step
+      # also warms the uv cache, so the worktree the sweep builds a few minutes
+      # later resolves from cache instead of the network.
+      - name: Prove an OCC governance worktree can spawn pytest (OMN-16902 D2)
+        shell: bash
+        run: |
+          set -euo pipefail
+          probe="${RUNNER_TEMP}/occ-governance-probe"
+          rm -rf "${probe}"
+          git -C "${GITHUB_WORKSPACE}/.occ-src" worktree add --detach "${probe}" origin/dev
+          rc=0
+          ( cd "${probe}" && uv run pytest --version ) || rc=$?
+          git -C "${GITHUB_WORKSPACE}/.occ-src" worktree remove --force "${probe}" || true
+          if [ "${rc}" -ne 0 ]; then
+            echo '::error::a fresh onex_change_control worktree at origin/dev cannot spawn pytest. Every OCC-homed test_passes check would be recorded FAILED on "error: Failed to spawn: pytest" with no test having executed (run 33210339910, all four seeds) -- a false FAILED that names the runner, not the product (OMN-16902 D2).' >&2
+            exit 1
+          fi
+          echo "OK: a fresh OCC governance worktree provisions its own interpreter and spawns pytest"
+
       # OMN-16788. The sweep records only COUNTS per ticket
       # (`dod_verify_total_checks` / `verified` / `failed`); the per-check
       # detail dod_verify produces goes to capture files this job does not
@@ -576,7 +880,12 @@ jobs:
         if: ${{ github.event.inputs.diagnose_tickets != '' }}
         env:
           GH_TOKEN: ${{ secrets.OMNI_GITHUB_TOKEN || github.token }}
-          UV_NO_SYNC: "1"
+          # OMN-16902 D2: no UV_NO_SYNC here. This step spawns the same
+          # behaviour checks the sweep does, so it must reproduce the sweep's
+          # environment exactly — including the OCC governance worktree's
+          # ability to provision its own interpreter. See the sweep step below
+          # for the full reasoning; a divergence between these two steps would
+          # make the diagnostic lie about the thing it exists to diagnose.
           ONEX_CC_REPO_PATH: ${{ github.workspace }}/.occ-src
           DIAGNOSE_TICKETS: ${{ github.event.inputs.diagnose_tickets }}
         run: |
@@ -683,16 +992,31 @@ jobs:
         env:
           LINEAR_API_KEY: ${{ secrets.LINEAR_API_KEY }}
           GH_TOKEN: ${{ secrets.OMNI_GITHUB_TOKEN || github.token }}
-          # OMN-16846 changed what this is for. The sweep and its per-ticket
-          # verifier no longer go through `uv run` at all (they run the
-          # dispatch venv's own binaries), so nothing here needs protecting
-          # from a re-sync. What DOES still go through `uv run` is the
-          # innermost layer: each behaviour check is `uv run pytest ...` with
-          # `cwd: "${OMNI_HOME}/omnibase_infra"`, inherited from this step's
-          # environment. UV_NO_SYNC keeps those on the already-synced,
-          # lock-exact gate venv instead of re-resolving the project once per
-          # check.
-          UV_NO_SYNC: "1"
+          # OMN-16846 changed what UV_NO_SYNC was for; OMN-16902 removed it.
+          #
+          # The sweep and its per-ticket verifier no longer go through `uv run`
+          # at all (they run the dispatch venv's own binaries), so nothing at
+          # THIS level needed protecting from a re-sync. What does go through
+          # `uv run` is the innermost layer: each behaviour check is
+          # `uv run pytest ...` in whatever `cwd` its contract pins, inheriting
+          # this step's environment. UV_NO_SYNC was set to keep those on the
+          # already-synced gate venv rather than re-resolving per check.
+          #
+          # That reasoning held for exactly one cwd. `_infer_occ_cwd` runs
+          # OCC-homed checks in `_occ_dev_root` — an ephemeral `git worktree`
+          # of the governance ref the collector materialises DURING the run, at
+          # a path no step can pre-provision. UV_NO_SYNC there meant uv created
+          # an empty `.venv` and was then forbidden from populating it:
+          # `error: Failed to spawn: pytest` in 12ms, recorded as a substantive
+          # FAILED, on all four seeds of run 33210339910.
+          #
+          # So it is gone, and the cost it was avoiding is paid up-front
+          # instead: every repo-root dest is pre-synced by the materialise step
+          # above and the gate venv is already lock-exact, which makes each
+          # `uv run` a cache-hot no-op rather than a resolve. The safety it was
+          # incidentally providing is now asserted directly — `uv sync` is
+          # exact-mode, so it cannot make `.venv` impure, and the step after
+          # the sweep measures that instead of assuming it.
           # First entry in EvidenceCollector's contract search path. Without it
           # dod_verify finds no contract for any ticket and every verdict
           # degrades to a single skipped check (OMN-16736).
@@ -734,6 +1058,42 @@ jobs:
           # behaviour checks then run pytest in.
           "${DISPATCH_VENV}/bin/onex" skill evidence_autoclose_sweep \
             --lookback-hours "${{ github.event.inputs.lookback_hours || '6' }}"
+
+      # OMN-16902, the enforcement half (CLAUDE.md rule 5). Dropping UV_NO_SYNC
+      # lets `uv run` sync projects mid-sweep, including the gate checkout.
+      # Exact-mode `uv sync` cannot install anything uv.lock does not declare,
+      # so `.venv` cannot become impure that way — but "cannot" is a claim, and
+      # OMN-16846 exists because a claim about this exact venv was wrong once.
+      # This is the measurement.
+      #
+      # `if: always()` is load-bearing: a sweep that fails for an unrelated
+      # reason must not be able to hide a corrupted gate venv, because the next
+      # scheduled run would then record N false FAILEDs and read them as N
+      # unproven tickets.
+      - name: Assert the gate venv is still pure after the sweep (OMN-16902)
+        if: always()
+        shell: bash
+        run: |
+          set -euo pipefail
+          if ! ./.venv/bin/python - <<'PYEOF'
+          import sys
+
+          from omnibase_infra.runtime.venv_purity import find_undeclared_onex_providers
+
+          undeclared = find_undeclared_onex_providers()
+          if undeclared:
+              print(
+                  "gate venv `.venv` carries undeclared onex.nodes provider(s) AFTER "
+                  "the sweep: " + "; ".join(f"{p.name}=={p.version}" for p in undeclared),
+                  file=sys.stderr,
+              )
+              sys.exit(1)
+          print("OK: gate venv `.venv` is still lock-exact after the sweep")
+          PYEOF
+          then
+            echo '::error::the gate venv became IMPURE during the sweep. Something installed an undeclared onex.nodes provider into .venv while the behaviour checks were running, and every subsequent "uv run pytest" check would be refused by the OMN-15620 purity gate and recorded FAILED without executing (OMN-16846, OMN-16902).' >&2
+            exit 1
+          fi
 
       - name: Post summary
         if: always()
