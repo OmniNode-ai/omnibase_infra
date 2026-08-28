@@ -350,6 +350,27 @@ async def test_kill_switch_read_from_env_at_handle_time(
     assert ingress.calls == []
 
 
+@pytest.mark.unit
+@pytest.mark.asyncio
+@pytest.mark.parametrize("disabled_value", ["0", "false", "off", "no", ""])
+async def test_kill_switch_env_falsey_values_do_not_disable_canary(
+    monkeypatch: pytest.MonkeyPatch,
+    disabled_value: str,
+) -> None:
+    ingress = _RecordingIngress(response=_terminal_response())
+    quarantine = _RecordingQuarantine(found=False)
+    monkeypatch.setenv("ONEX_CHAIN_CANARY_DISABLED", disabled_value)
+    handler = HandlerChainCanary(
+        ingress=ingress,
+        quarantine_scan=quarantine,
+    )
+
+    result = await handler.handle(_request(quarantine_bootstrap_servers=_BOOTSTRAP))
+
+    assert result.verdict is EnumChainCanaryVerdict.GREEN
+    assert len(ingress.calls) == 1
+
+
 # -- request validation ----------------------------------------------------
 
 

@@ -78,6 +78,7 @@ __all__ = ["HandlerChainCanary"]
 # every other sweep's switch on purpose: silencing one canary must never
 # silently silence another.
 _KILL_SWITCH_ENV_VAR = "ONEX_CHAIN_CANARY_DISABLED"
+_KILL_SWITCH_TRUTHY_VALUES = frozenset({"1", "true", "yes", "on"})
 
 # Extra client-side slack over the runtime's own budget. Without it the HTTP
 # client can abort first and every slow-but-working chain reads as
@@ -269,6 +270,10 @@ def _extract_terminal(response: dict[str, object]) -> str:
     return ""
 
 
+def _kill_switch_engaged(raw: str) -> bool:
+    return raw.strip().lower() in _KILL_SWITCH_TRUTHY_VALUES
+
+
 class HandlerChainCanary:
     """Fire one live delegation and report whether the chain carried it."""
 
@@ -290,7 +295,9 @@ class HandlerChainCanary:
         # node_evidence_autoclose_sweep_effect. The switch must be able to stop a
         # runtime that is ALREADY wired, so it cannot arrive through container
         # config resolved once at startup.
-        env_disabled = bool(os.environ.get(_KILL_SWITCH_ENV_VAR, ""))  # ONEX_EXCLUDE
+        env_disabled = _kill_switch_engaged(
+            os.environ.get(_KILL_SWITCH_ENV_VAR, "")  # ONEX_EXCLUDE
+        )
         self._kill_switch_ctor = (
             kill_switch_disabled if kill_switch_disabled is not None else env_disabled
         )
@@ -308,7 +315,9 @@ class HandlerChainCanary:
         # runtime builds handlers once and the canary then fires on a schedule for
         # the life of that process, so a value frozen at construction would make
         # the switch inert until a redeploy.
-        env_disabled = os.environ.get(_KILL_SWITCH_ENV_VAR, "")  # ONEX_EXCLUDE
+        env_disabled = _kill_switch_engaged(
+            os.environ.get(_KILL_SWITCH_ENV_VAR, "")  # ONEX_EXCLUDE
+        )
         if self._kill_switch_ctor or env_disabled:
             logger.warning(
                 "%s is set — chain canary disabled, zero I/O performed.",
