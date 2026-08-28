@@ -255,6 +255,35 @@ skills:
       - {name: quarantine-scan-records, payload_field: quarantine_scan_records, arg_type: integer}
       - {name: quarantine-timeout-seconds, payload_field: quarantine_timeout_seconds, arg_type: integer}
       - {name: settle-seconds, payload_field: settle_seconds, arg_type: integer}
+  # OMN-16897: headless Infisical seeding. The operator asked for one command
+  # with no UI and no interactive login; this row is what makes it one
+  # command. Note what is NOT here: any arg that carries a secret VALUE.
+  # `onex skill` builds the node payload from these args, and that payload is
+  # serialised onto the bus and into the event log — so a --value flag would
+  # durably persist the key. --source-path names a local file (or '-' for
+  # stdin) and the handler reads it at execution time.
+  #
+  # Writing is a positive opt-in: --execute. There is deliberately NO
+  # --dry-run flag. `onex skill` boolean args are PRESENCE flags (cli_skill
+  # sets True on sight and never False), so a --dry-run defaulting to true
+  # could not be turned off from the command line at all. The request model
+  # therefore takes `execute` and derives `dry_run = not execute`, which
+  # makes plan-only the mode you get by forgetting the flag.
+  #
+  # Every addressing arg is required:true. This estate runs three separate
+  # Infisical instances and a defaulted host/project/env/path would seed a
+  # real key into one nobody meant to touch (CLAUDE.md Rule 8).
+  - skill_name: seed_secrets
+    node_name: node_secret_seed_effect
+    result_model: omnibase_infra.nodes.node_secret_seed_effect.models.model_secret_seed_result.ModelSecretSeedResult
+    args:
+      - {name: source-path, payload_field: source_path, arg_type: string, required: true}
+      - {name: infisical-host, payload_field: infisical_host, arg_type: string, required: true}
+      - {name: project-id, payload_field: project_id, arg_type: string, required: true}
+      - {name: environment-slug, payload_field: environment_slug, arg_type: string, required: true}
+      - {name: secret-path, payload_field: secret_path, arg_type: string, required: true}
+      - {name: keys, payload_field: keys, arg_type: string_list}
+      - {name: execute, payload_field: execute, arg_type: boolean, default: false}
   - skill_name: duplication_sweep
     node_name: node_duplication_sweep
     result_model: omnimarket.nodes.node_duplication_sweep.handlers.handler_duplication_sweep.DuplicationSweepResult
