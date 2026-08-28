@@ -96,23 +96,45 @@ lanes:
       - name: omninode-stability-test-runtime-worker
         kind: service
         replicas: 1
-      # OMN-13815: deploy-runtime.sh's RUNTIME_SERVICES warm-restart starts these
-      # four consumers/APIs explicitly by name (bypassing the compose disabled
-      # profile), so they run in this lane and must carry lane-scoped names +
-      # be tracked here. Live .201 evidence (2026-07-02, OMN-13815) confirmed all
-      # four running under the omnibase-infra-stability-test project.
+      # OMN-16803: these four are `profile_gated` — EXPECTED ABSENT on this lane.
+      #
+      # docker-compose.stability-test.yml sets `profiles: !override
+      # ["stability-test-disabled"]` on each of them, so they are NOT members of
+      # this lane's `runtime` profile. Verified live on .201 (2026-08-28):
+      #   docker compose -p omnibase-infra-stability-test \
+      #     -f docker-compose.infra.yml -f docker-compose.stability-test.yml \
+      #     --profile runtime config --services
+      # returns 12 services and none of these four. A `--profile runtime up -d`
+      # therefore cannot start them, by construction.
+      #
+      # They were declared `kind: service, replicas: 1` by OMN-13815 on
+      # 2026-07-02 evidence, when deploy-runtime.sh's warm `--restart` named the
+      # full RUNTIME_SERVICES set explicitly (naming a service on the CLI
+      # bypasses profile filtering, so they did run). OMN-14873 then scoped the
+      # stability refresh down to the 4 core services via
+      # RUNTIME_BUILD_SERVICES_OVERRIDE, deliberately, because a workspace-mode
+      # build of these four is still broken by the open OMN-14262 BUILD_SOURCE
+      # selector mismatch. From that point on nothing starts them here.
+      #
+      # Leaving them as `kind: service` made the census report four permanent
+      # false `container_absent` criticals and understated the lane's real
+      # health, which is how a genuinely degraded lane (OMN-16803: runtime-effects
+      # + runtime-worker + migration-gate actually missing) read as
+      # indistinguishable noise for a month. `profile_gated` states the truth:
+      # absent is correct; PRESENT is the drift.
+      #
+      # Re-declare these `kind: service` only when OMN-14262 is closed AND the
+      # compose profile override is removed in the same PR — the parity ratchet
+      # in tests/unit/scripts/test_lane_census_manifest_parity.py enforces that
+      # pairing mechanically.
       - name: omninode-stability-test-agent-actions-consumer
-        kind: service
-        replicas: 1
+        kind: profile_gated
       - name: omninode-stability-test-skill-lifecycle-consumer
-        kind: service
-        replicas: 1
+        kind: profile_gated
       - name: omnibase-stability-test-intelligence-api
-        kind: service
-        replicas: 1
+        kind: profile_gated
       - name: omninode-stability-test-contract-resolver
-        kind: service
-        replicas: 1
+        kind: profile_gated
   prod:
     compose_file: docker/docker-compose.prod.yml
     compose_project: omnibase-infra-prod
@@ -149,21 +171,24 @@ lanes:
       - name: omninode-prod-runtime-worker
         kind: service
         replicas: 1
-      # OMN-13815: same RUNTIME_SERVICES warm-restart set as stability-test —
-      # deploy-runtime.sh starts these four explicitly by name, so they run in the
-      # prod lane and require lane-scoped names + census tracking here.
+      # OMN-16803: `profile_gated` — EXPECTED ABSENT, same defect and same fix as
+      # the stability-test block above. docker-compose.prod.yml sets
+      # `profiles: !override ["prod-disabled"]` on all four, so they are not
+      # members of the prod `runtime` profile and no sanctioned `up` starts them.
+      # Live .201 evidence (2026-08-28): the prod lane runs 6 containers and none
+      # of these four exists. The OMN-13815 `kind: service` declaration was true
+      # only while deploy-runtime.sh's warm `--restart` named the full
+      # RUNTIME_SERVICES set explicitly (a CLI service name bypasses profile
+      # filtering); it has been producing four permanent false container_absent
+      # criticals on the prod census ever since that stopped.
       - name: omninode-prod-agent-actions-consumer
-        kind: service
-        replicas: 1
+        kind: profile_gated
       - name: omninode-prod-skill-lifecycle-consumer
-        kind: service
-        replicas: 1
+        kind: profile_gated
       - name: omnibase-prod-intelligence-api
-        kind: service
-        replicas: 1
+        kind: profile_gated
       - name: omninode-prod-contract-resolver
-        kind: service
-        replicas: 1
+        kind: profile_gated
   judge:
     compose_file: docker/docker-compose.judge.yml
     compose_project: omnibase-infra-judge
