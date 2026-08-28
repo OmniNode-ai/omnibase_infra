@@ -71,13 +71,49 @@ shared:
   "/shared/llm/":
     # IP of the remote GPU/inference server (used to construct LLM endpoint URLs).
     - REMOTE_SERVER_IP
-    # Canonical LLM endpoint keys (defined in CLAUDE.md LLM topology):
-    #   LLM_CODER_URL        — Qwen3-Coder-30B-A3B AWQ-4bit (RTX 5090, 64K ctx, port 8000)
-    #   LLM_CODER_FAST_URL   — Qwen3-14B-AWQ (RTX 4090, 40K ctx, port 8001)
-    #   LLM_EMBEDDING_URL    — text-embedding-qwen3 / qwen3-embedding-0.6b (M2 Ultra, port 8002, OMN-13664)
-    #   LLM_DEEPSEEK_R1_URL  — DeepSeek-R1-14B AWQ (RTX 4090, .201, port 8001) — .200:8101 down
+    # Canonical LLM endpoint keys. OMN-16442 (2026-08-28) reconciled these
+    # descriptions against contracts/llm_endpoints.yaml and the canonical lab
+    # inventory omni_home/docs/reference/AI_LAB_HARDWARE.md (verified
+    # 2026-08-28). Every identity below was live-probed via GET /v1/models.
+    #   LLM_CODER_URL        — "qwen3.8" (Qwen3.8-27B NVFP4, SGLang + DSpark) on
+    #                          .201:8000, RTX 5090, max_model_len 122880.
+    #                          SINGLE-SLOT: one running generation at a time.
+    #   LLM_EMBEDDING_URL    — "text-embedding-qwen3" (Qwen/Qwen3-Embedding-0.6B,
+    #                          vLLM) on .201:8002, ctx 8192, 1024-DIMENSIONAL
+    #                          output (hard placement constraint), OMN-13664.
+    #   LLM_DEEPSEEK_R1_URL  — "deepseek-v4-flash" / "deepseek-v4-pro" (DeepSeek
+    #                          V4 Flash, antirez/ds4) on .200:8101, M2 Ultra,
+    #                          server ctx 131072, budgeted 65536.
     #   LLM_GLM_URL          — Z.AI/GLM cloud-tier OpenAI-compatible endpoint
     #   LLM_GLM_MODEL_NAME   — default GLM served model for escalation
+    #
+    #   LLM_CODER_FAST_URL   — NO LONGER HAS DEDICATED HARDWARE. It described
+    #                          .201:8001 (RTX 4090, 40K ctx); that GPU was
+    #                          physically removed for RMA at the 2026-08-23
+    #                          reboot (OMN-16407) and the endpoint is gone
+    #                          (re-probed 2026-08-28, curl exit 7 "Couldn't
+    #                          connect to server"). contracts/llm_endpoints.yaml
+    #                          models hardware SLOTS, so its coder-fast-4090 slot
+    #                          is now `disabled` and owns no env var.
+    #                          The KEY stays seeded here because it is still a
+    #                          hard requirement of the runtime
+    #                          (docker/docker-compose.infra.yml uses
+    #                          ${LLM_CODER_FAST_URL:?...}, and PluginLlm /
+    #                          adapter_code_review_analysis /
+    #                          adapter_test_boilerplate_generation read it) —
+    #                          dropping it would fail lane bring-up. Until
+    #                          replacement hardware is registered, set it as an
+    #                          ALIAS onto the surviving coder slot
+    #                          (LLM_CODER_URL, .201:8000). Note that this makes
+    #                          "fast" and "slow" the SAME single-slot endpoint:
+    #                          they do not add parallel capacity, and callers
+    #                          must still queue above the model server.
+    #                          Retiring the variable itself spans compose, the
+    #                          adapters, transport_config_map and service_kernel
+    #                          — tracked as a scoped follow-on on OMN-16442.
+    #   LLM_QWEN3_NEXT_URL   — not seeded here; noted because it shares the fate:
+    #                          .200:8102 has no listener, so the
+    #                          reasoning-moe-35b slot is now `disabled`.
     - LLM_CODER_URL
     - LLM_CODER_FAST_URL
     - LLM_EMBEDDING_URL

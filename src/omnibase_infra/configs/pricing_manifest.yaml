@@ -295,7 +295,7 @@ models:
     input_cost_per_1k: 0.0
     output_cost_per_1k: 0.0
     effective_date: '2026-05-25'
-    note: Local model on RTX 5090 .201:8000 (vLLM, GPTQ-Int4, 131072 ctx, ~180 t/s) - zero API cost
+    note: 'OMN-16442 2026-08-28: Local model on RTX 5090 .201:8000. Stack changed at the 2026-08-23 reboot - now SGLang + DSpark serving id "qwen3.8" (Qwen3.8-27B NVFP4), max_model_len 122880, ~150-164 t/s decode; was vLLM GPTQ-Int4 131072 ctx ~180 t/s. Single running generation at a time. Zero API cost either way - this note is descriptive, the 0.0 rates are the contract.'
     confidence: LOW_CONFIDENCE
     source: LOCAL_ZERO_API_COST_POLICY
     sample_count: 0
@@ -310,7 +310,7 @@ models:
     input_cost_per_1k: 0.0
     output_cost_per_1k: 0.0
     effective_date: '2026-05-25'
-    note: Local model on .201:8001 (llamacpp, Qwen3.6-27B-MTP-IQ4_XS.gguf, 98304 ctx) - zero API cost
+    note: 'OMN-16442 2026-08-28: DEAD ENDPOINT - .201:8001 was the RTX 4090 slot physically removed for RMA (OMN-16407); live re-probe returns curl exit 7 "Couldn''t connect to server". No model is served here. The key is kept so historical llm_call_metrics rows still resolve a pricing entry (all-zero, so it cannot mis-bill); do NOT read it as a routable endpoint. The delegation contracts no longer reference this backend.'
     confidence: LOW_CONFIDENCE
     source: LOCAL_ZERO_API_COST_POLICY
     sample_count: 0
@@ -325,7 +325,7 @@ models:
     input_cost_per_1k: 0.0
     output_cost_per_1k: 0.0
     effective_date: '2026-05-25'
-    note: Local embedding model on .201:8002 (vLLM, gte-Qwen2-1.5B, 8192 ctx) - zero API cost
+    note: 'OMN-16442 2026-08-28: Local embedding model on .201:8002. Live readback GET /v1/models -> id "text-embedding-qwen3" (vLLM, Qwen/Qwen3-Embedding-0.6B, 8192 ctx, 1024-dim output), NOT the gte-Qwen2-1.5B this key is named for. Vector dimension 1024 is a hard placement constraint. Zero API cost.'
     confidence: LOW_CONFIDENCE
     source: LOCAL_ZERO_API_COST_POLICY
     sample_count: 0

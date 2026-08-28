@@ -68,13 +68,31 @@ _ROLE_TAXONOMY: frozenset[str] = frozenset(
 _PLANNED_NULLABLE_FIELDS: frozenset[str] = frozenset(
     ["host", "port", "endpoint_url", "model_hf_id"]
 )
+# OMN-16442 (2026-08-28): LLM_CODER_FAST_URL REMOVED from this set. The rule
+# this frozenset encodes is "this env var must be owned by a RUNNING topology
+# slot". LLM_CODER_FAST_URL's slot (coder-fast-4090, .201:8001) is the RTX 4090
+# physically removed from the host for RMA (OMN-16407) — live re-probe returns
+# curl exit 7 "Couldn't connect to server" — so the slot is now `disabled` and,
+# per the contract's own rule, owns no url_env_var. Keeping the var in this set
+# would force the dead slot to keep claiming `running` to make a test pass.
+#
+# The ENV VAR itself still exists and is still required by the runtime
+# (docker-compose.infra.yml uses ${LLM_CODER_FAST_URL:?...}); operators alias it
+# onto the surviving .201:8000 coder endpoint until replacement hardware is
+# registered. See config/shared_key_registry.yaml for that guidance. The
+# topology contract models HARDWARE SLOTS, not consumer-facing aliases.
 _RUNTIME_REQUIRED_URL_ENV_VARS: frozenset[str] = frozenset(
     [
         "LLM_CODER_URL",
-        "LLM_CODER_FAST_URL",
         "LLM_EMBEDDING_URL",
         "LLM_DEEPSEEK_R1_URL",
     ]
+)
+
+# OMN-16442: slots whose backing hardware/listener is gone. Asserted `disabled`
+# so a future edit cannot flip one back to `running` without re-probing.
+_DECOMMISSIONED_SLOT_IDS: frozenset[str] = frozenset(
+    {"coder-fast-4090", "reasoning-moe-35b", "embeddings-200"}
 )
 _SUPPORTED_TOPOLOGY_FIELDS: frozenset[str] = frozenset(
     [
@@ -194,15 +212,80 @@ class TestLlmEndpointsContract:
                 f"Entry {ep['slot_id']!r} role {ep['role']!r} outside taxonomy"
             )
 
-    def test_reasoning_moe_35b_fields(self) -> None:
+    def test_reasoning_moe_35b_is_disabled_after_endpoint_loss(self) -> None:
+        """OMN-16442 (supersedes the OMN-9292 running-slot field pins).
+
+        This test used to assert reasoning-moe-35b was a RUNNING slot at
+        ``http://192.168.86.200:8102`` serving
+        ``mlx-community/Qwen3.6-35B-A3B-8bit`` and owning ``LLM_QWEN3_NEXT_URL``.
+        That port has no listener: live probe 2026-08-28, `curl
+        http://192.168.86.200:8102/v1/models` -> exit 7 "Couldn't connect to
+        server". The canonical inventory
+        (omni_home/docs/reference/AI_LAB_HARDWARE.md, verified 2026-08-28)
+        records Mac Studio ports 8100/8102/8103 as having no model listener and
+        calls references to DeepSeek-R1-Distill / Qwen2.5-72B / Qwen2-VL on
+        those ports STALE.
+
+        The slot is kept (it is in ``_REQUIRED_SLOT_IDS``) but disabled, and the
+        assertions are inverted to the contract rule that actually matters: a
+        disabled slot owns no runtime env var.
+        """
         by_slot = {ep["slot_id"]: ep for ep in _load_endpoints()}
         ep = by_slot.get("reasoning-moe-35b")
         assert ep is not None, "Missing required slot 'reasoning-moe-35b'"
-        assert ep["model_hf_id"] == "mlx-community/Qwen3.6-35B-A3B-8bit"
-        assert ep["endpoint_url"] == "http://192.168.86.200:8102"
-        assert ep["url_env_var"] == "LLM_QWEN3_NEXT_URL"
-        assert ep["role_env_alias"] == "LLM_REASONING_FAST_URL"
+        assert ep["status"] == "disabled"
+        assert ep["url_env_var"] is None
+        assert ep["role_env_alias"] is None
+        assert ep["endpoint_url"] is None
         assert ep["role"] == "reasoning_fast"
+
+    def test_decommissioned_slots_are_disabled_and_own_no_env_vars(self) -> None:
+        """OMN-16442: a slot whose listener is gone must not look routable.
+
+        Re-probed 2026-08-28, all three return curl exit 7:
+        coder-fast-4090 (.201:8001, RTX 4090 removed for RMA — OMN-16407),
+        reasoning-moe-35b (.200:8102), embeddings-200 (.200:8100).
+        """
+        by_slot = {ep["slot_id"]: ep for ep in _load_endpoints()}
+        for slot_id in sorted(_DECOMMISSIONED_SLOT_IDS):
+            ep = by_slot.get(slot_id)
+            assert ep is not None, f"Missing slot {slot_id!r}"
+            assert ep["status"] == "disabled", (
+                f"slot {slot_id!r} has no live listener and must not claim "
+                f"status {ep['status']!r}"
+            )
+            assert ep["url_env_var"] is None, (
+                f"disabled slot {slot_id!r} must not own a runtime env var"
+            )
+
+    def test_live_slots_record_their_probed_served_identity(self) -> None:
+        """OMN-16442: the running slots carry the identities probed 2026-08-28.
+
+        Pinned so a silent hardware/model swap (the exact failure mode behind
+        OMN-16419 and OMN-16407) shows up as a red test rather than as silent
+        mis-attribution to a model that is not running.
+        """
+        by_slot = {ep["slot_id"]: ep for ep in _load_endpoints()}
+
+        # GET .201:8000/v1/models -> id "qwen3.8", max_model_len 122880.
+        coder = by_slot["coder-5090"]
+        assert coder["status"] == "running"
+        assert coder["endpoint_url"] == "http://192.168.86.201:8000"
+        assert coder["model_hf_id"] == "Qwen/Qwen3.8-27B"
+        assert coder["context_window_budgeted"] == 122880
+
+        # GET .201:8002/v1/models -> id "text-embedding-qwen3",
+        # artifact Qwen/Qwen3-Embedding-0.6B, 1024-dim output.
+        emb = by_slot["embeddings-201"]
+        assert emb["status"] == "running"
+        assert emb["endpoint_url"] == "http://192.168.86.201:8002"
+        assert emb["model_hf_id"] == "Qwen/Qwen3-Embedding-0.6B"
+
+        # GET .200:8101/v1/models -> {"deepseek-v4-flash", "deepseek-v4-pro"}.
+        ds = by_slot["reasoning-deepseek-32b"]
+        assert ds["status"] == "running"
+        assert ds["endpoint_url"] == "http://192.168.86.200:8101"
+        assert ds["model_hf_id"] == "antirez/deepseek-v4-gguf"
 
     def test_embeddings_201_endpoint_reconciled_to_8002(self) -> None:
         """LLM_EMBEDDING_URL slot resolves to :8002, not the dead :8100.
