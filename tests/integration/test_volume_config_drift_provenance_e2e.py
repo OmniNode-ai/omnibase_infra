@@ -57,14 +57,31 @@ _SOURCE_CONTRACT: dict[str, object] = {
             "endpoint_url": "",
             "required": True,
         },
+        # OMN-16833: the canonical dev lane overlay now also binds the
+        # DS-V4-Flash rung, and `_merge_lane_overlay` refuses an overlay that
+        # names a backend the base contract does not declare.
+        {
+            "backend_id": "local-ds-v4-flash",
+            "model_name": "deepseek-v4-flash",
+            "endpoint_url": "",
+            "required": True,
+        },
     ],
     "routing_rules": [
         {
             "rule_id": "default",
-            "backend_ids": ["local-coder", "local-heavy-reasoning"],
+            "backend_ids": [
+                "local-coder",
+                "local-heavy-reasoning",
+                "local-ds-v4-flash",
+            ],
         },
     ],
-    "default_backends": ["local-coder", "local-heavy-reasoning"],
+    "default_backends": [
+        "local-coder",
+        "local-heavy-reasoning",
+        "local-ds-v4-flash",
+    ],
 }
 
 

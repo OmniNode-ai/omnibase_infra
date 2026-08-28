@@ -18,3 +18,12 @@ backends:
     context_window: 122880
     max_tokens: 65536
     timeout_ms: 300000
+  # OMN-16833: DS-V4-Flash on .200:8101 — the second live local rung.
+  # onex-allow-internal-ip OMN-16833 reason="shared lane-overlay parser parity fixture"
+  - backend_id: local-ds-v4-flash
+    endpoint_url: "http://192.168.86.200:8101/v1/chat/completions"
+    served_model_id: "deepseek-v4-flash"
+    parameter_count: "284B"
+    context_window: 131072
+    max_tokens: 65536
+    timeout_ms: 300000

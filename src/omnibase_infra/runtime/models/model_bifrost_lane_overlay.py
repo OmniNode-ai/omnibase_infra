@@ -9,11 +9,11 @@ from typing import Self
 from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
 
 from omnibase_infra.runtime.models.model_bifrost_lane_backend_binding import (
+    ACTIVE_BACKEND_KEYS,
     ModelBifrostLaneBackendBinding,
 )
 
 _SCHEMA_VERSION = "bifrost_lane_overlay.v2"
-_ACTIVE_BACKEND_KEYS = frozenset({"local-coder", "local-heavy-reasoning"})
 
 
 class ModelBifrostLaneOverlay(BaseModel):
@@ -39,10 +39,10 @@ class ModelBifrostLaneOverlay(BaseModel):
         backend_keys = [binding.backend_key for binding in self.backends]
         if len(backend_keys) != len(set(backend_keys)):
             raise ValueError("backends must not contain duplicate backend_id values")
-        if set(backend_keys) != _ACTIVE_BACKEND_KEYS:
+        if set(backend_keys) != ACTIVE_BACKEND_KEYS:
             raise ValueError(
                 "backends must declare exactly the active local backend IDs "
-                f"{sorted(_ACTIVE_BACKEND_KEYS)}, got {sorted(backend_keys)}"
+                f"{sorted(ACTIVE_BACKEND_KEYS)}, got {sorted(backend_keys)}"
             )
         return self
 

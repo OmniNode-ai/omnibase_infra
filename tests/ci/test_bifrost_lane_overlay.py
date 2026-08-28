@@ -56,12 +56,26 @@ def test_dev_overlay_matches_cross_repo_v2_parity_fixture() -> None:
     fixture = _load(PARITY_FIXTURE)
 
     assert overlay.model_dump(mode="json") == fixture.model_dump(mode="json")
-    assert {binding.endpoint_url for binding in overlay.backends} == {
-        "http://192.168.86.201:8000/v1/chat/completions"
-    }
-    assert {binding.advertised_model for binding in overlay.backends} == {"qwen3.8"}
-    assert {binding.parameter_count for binding in overlay.backends} == {"27B"}
-    assert {binding.context_window for binding in overlay.backends} == {122_880}
+
+    # OMN-16833: the lane serves more than one local rung, so these are pinned
+    # per-backend rather than as single-valued sets.  Live readback 2026-08-28:
+    # .201:8000 -> "qwen3.8" (max_model_len 122880); .200:8101 -> "deepseek-v4-flash"
+    # (context_length 131072).
+    by_id = {binding.backend_key: binding for binding in overlay.backends}
+    assert set(by_id) == {"local-coder", "local-heavy-reasoning", "local-ds-v4-flash"}
+
+    for backend_key in ("local-coder", "local-heavy-reasoning"):
+        binding = by_id[backend_key]
+        assert binding.endpoint_url == "http://192.168.86.201:8000/v1/chat/completions"
+        assert binding.advertised_model == "qwen3.8"
+        assert binding.parameter_count == "27B"
+        assert binding.context_window == 122_880
+
+    ds_v4 = by_id["local-ds-v4-flash"]
+    assert ds_v4.endpoint_url == "http://192.168.86.200:8101/v1/chat/completions"
+    assert ds_v4.advertised_model == "deepseek-v4-flash"
+    assert ds_v4.parameter_count == "284B"
+    assert ds_v4.context_window == 131_072
 
 
 def test_bifrost_lane_has_no_dotenv_sidecar_or_renderer() -> None:

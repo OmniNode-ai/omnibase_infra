@@ -21,3 +21,18 @@ backends:
     context_window: 122880
     max_tokens: 65536
     timeout_ms: 300000
+  # OMN-16833: DS-V4-Flash on .200:8101 — previously absent from this overlay, so
+  # the rendered contract carried endpoint_url: null, `_load_bifrost_endpoints`
+  # dropped the backend, and `escalation`'s LARGE-window (65536) local rung was
+  # unbindable on the dev lane; escalation fell through to the metered cheap_cloud
+  # Gemini ceiling. Live readback 2026-08-28: GET .200:8101/v1/models -> id
+  # "deepseek-v4-flash", context_length 131072; POST /v1/chat/completions -> HTTP
+  # 200; reachable from inside `omninode-runtime` on .201.
+  # onex-allow-internal-ip OMN-16833 reason="typed dev-lane delegation contract"
+  - backend_id: local-ds-v4-flash
+    endpoint_url: "http://192.168.86.200:8101/v1/chat/completions"
+    served_model_id: "deepseek-v4-flash"
+    parameter_count: "284B"
+    context_window: 131072
+    max_tokens: 65536
+    timeout_ms: 300000
