@@ -574,6 +574,7 @@ node_broker_disk_watermark_compute = "omnibase_infra.nodes.node_broker_disk_wate
 node_build_loop_projection_compute = "omnibase_infra.nodes.node_build_loop_projection_compute"
 node_build_loop_write_effect = "omnibase_infra.nodes.node_build_loop_write_effect"
 node_bus_forwarder_effect = "omnibase_infra.nodes.node_bus_forwarder_effect"
+node_chain_canary_effect = "omnibase_infra.nodes.node_chain_canary_effect"
 node_chain_orchestrator = "omnibase_infra.nodes.node_chain_orchestrator"
 node_chain_replay_compute = "omnibase_infra.nodes.node_chain_replay_compute"
 node_chain_retrieval_effect = "omnibase_infra.nodes.node_chain_retrieval_effect"

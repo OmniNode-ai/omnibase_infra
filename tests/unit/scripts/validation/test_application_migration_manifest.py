@@ -195,7 +195,10 @@ def test_checked_in_manifest_is_exact_and_all_blockers_are_explicit() -> None:
     # upstream-production tally (Phase 1 of the platform-observability epic
     # OMN-16776). Vendored here first per the node-migration-vendor-parity-gate
     # ordering, ahead of the omnimarket PR that owns the source file.
-    assert len(result.declarations) == 115
+    # +1 for OMN-16773's additive 0001 reconciliation migration for
+    # node_projection_consumer_flow after the guarded-create-table invariant
+    # started requiring explicit ADD COLUMN IF NOT EXISTS guards beside 0000.
+    assert len(result.declarations) == 116
     assert result.blocked == ()
     assert len(result.legacy_node_declarations) == 2
     assert len(result.cloud_aliases) == 30

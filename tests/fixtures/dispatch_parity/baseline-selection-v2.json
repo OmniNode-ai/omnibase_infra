@@ -3233,10 +3233,10 @@
     "corpus": {
       "contracts_by_package": {
         "omnibase_core": 15,
-        "omnibase_infra": 120,
+        "omnibase_infra": 121,
         "onex-change-control": 4
       },
-      "contracts_discovered": 139,
+      "contracts_discovered": 140,
       "discovery_errors": 0,
       "distinct_subscribe_topics": 106,
       "probe_count": 1042,
@@ -3282,10 +3282,10 @@
       "omnimemory"
     ],
     "fixture_version": "v2",
-    "generated_at_utc": "2026-08-27T21:10:14.068693+00:00",
+    "generated_at_utc": "2026-08-28T03:50:02.779923+00:00",
     "installed_package_versions": {
       "omnibase-core": "0.46.13",
-      "omnibase-infra": "0.38.11",
+      "omnibase-infra": "0.38.13",
       "omniclaude": null,
       "omniintelligence": null,
       "omnimarket": null,

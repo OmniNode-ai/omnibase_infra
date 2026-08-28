@@ -1,0 +1,241 @@
+# SPDX-FileCopyrightText: 2025 OmniNode.ai Inc.
+# SPDX-License-Identifier: MIT
+
+# chain-canary.yml — OMN-16773
+#
+# WHY THIS EXISTS
+#   The 13-class delegation matrix existed as a RECORDED MANUAL RECIPE and
+#   nothing ran it. On 2026-08-23 an omnimarket contract change (OMN-15631)
+#   gave node_delegation_routing_reducer a db_io block; the runtime's
+#   _prepare_handler_wiring selects the projection dispatch arm on
+#   db_io.db_tables alone, so a typed def-B handler started receiving a raw
+#   dict, raised AttributeError, and every delegation went to the platform
+#   quarantine sink. The chain was dead for FOUR DAYS. It was discovered on
+#   2026-08-27 only because a human happened to fire the recipe by hand
+#   while closing out an unrelated ticket (OMN-16767).
+#
+#   The quarantine sink was at ~8,878,924 records at that moment. Nothing
+#   watched it, and nothing watched the chain.
+#
+# WHY THE EXISTING GATES DID NOT CATCH IT
+#   delegation-seam-gate.yml (OMN-14771) drives the delegation seam
+#   end-to-end on every PR — and it was GREEN throughout, correctly. It runs
+#   over InMemoryTransport, where the wiring is constructed by the test. No
+#   in-memory seam test can observe a DEPLOYED wiring arm choosing the wrong
+#   dispatch path. That gate proves the seam is wired right in the tree;
+#   this one proves the chain is alive in the lane. Both are needed and
+#   neither substitutes for the other.
+#
+# WHY SELF-HOSTED omnibase-deploy
+#   Same reasoning as dev-lane-liveness.yml (OMN-15190), and the same fate
+#   boundary: the watched thing is compose project `omnibase-infra`; the
+#   watcher is a runner in a different project on the same host. The lane's
+#   ingress (8085) and broker (19092) are host-published ports on the
+#   tailnet, unreachable from GitHub-hosted compute, so an ubuntu-latest job
+#   could only ever assert "I cannot see it."
+#
+#   `omnibase-deploy` is the ONE runner carrying the host-gateway alias
+#   (docker/docker-compose.runners.yml `extra_hosts`), which is what makes
+#   `host.docker.internal` resolve to the lane's published ports. Inside any
+#   runner container `localhost` is the container itself.
+#
+#   Residual, stated rather than hidden: if the whole .201 host dies this
+#   job is never scheduled and reports nothing. runner-fleet-canary.yml runs
+#   on GitHub-hosted compute and covers that case.
+#
+# EXPECTED RED AT LANDING TIME
+#   OMN-16767's fix (omnibase_infra#2937) had NOT landed and the dev lane
+#   had NOT been refreshed when this workflow was written — the lane serves
+#   0.38.11, the rev the incident was reproduced on. The first runs of this
+#   canary are EXPECTED to be RED with verdict `quarantined`. That red is
+#   the proof the canary works, not a defect in it. It flips green when the
+#   fix lands and the lane is refreshed.
+#
+# LANE SCOPE
+#   Dev lane ONLY (`omnibase-infra`, the pre-authorized fully-mutable test
+#   platform). This workflow makes NO claim about stability-test, judge, or
+#   prod and must not be pointed at them without its own ticket: the probe
+#   PUBLISHES a real delegation command, which is a lane mutation.
+#
+# NO NEW scripts/** FILE
+#   scripts/** is DEFAULT-DENY for new files (OMN-14475 canonical-form
+#   guard). Every step below is a direct `uv run onex ...` invocation of
+#   code that already lives under src/.
+
+name: Chain Canary
+
+on:
+  schedule:
+    # Every 2 hours at :41 — deliberately offset from sync-revert-watchdog
+    # (:00 even hours) and dev-lane-liveness (:07/:22/:37/:52) so three
+    # scheduled probes never contend for the same runner minute.
+    - cron: '41 1,3,5,7,9,11,13,15,17,19,21,23 * * *'
+  workflow_dispatch:
+    inputs:
+      probe_url:
+        description: 'Runtime ingress base URL to probe. host.docker.internal resolves to the lane host from the deploy runner.'
+        required: false
+        default: 'http://host.docker.internal:8085'
+      task_type:
+        description: 'Delegation class to fire (see omnidash shared/contracts/delegation-task-types.json).'
+        required: false
+        default: 'test'
+      budget_ms:
+        description: 'Ingress budget in ms. No terminal inside this window is RED.'
+        required: false
+        default: '120000'
+      quarantine_bootstrap_servers:
+        description: 'Broker for the correlation-scoped quarantine check. Empty disables the leg and the receipt says SKIPPED (never CLEAN).'
+        required: false
+        default: 'host.docker.internal:19092'
+
+concurrency:
+  # A canary must never race itself: two overlapping probes make the
+  # quarantine tail scan ambiguous about which run a record belongs to.
+  group: chain-canary
+  cancel-in-progress: false
+
+permissions:
+  contents: read
+
+env:
+  UV_VERSION: "0.8.3"
+  PYTHON_VERSION: "3.12"
+
+jobs:
+  chain-canary:
+    name: Chain Canary (dev lane)
+    # See "WHY SELF-HOSTED omnibase-deploy" above before changing this.
+    runs-on: [self-hosted, omnibase-deploy]
+    timeout-minutes: 25
+
+    steps:
+      - name: Checkout omnibase_infra
+        uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+        with:
+          fetch-depth: 1
+          # No git operations after checkout — do not leave the Actions
+          # token in local git config (zizmor artipacked).
+          persist-credentials: false
+
+      - name: Set up Python
+        uses: actions/setup-python@v7
+        with:
+          python-version: ${{ env.PYTHON_VERSION }}
+
+      - name: Install uv
+        uses: astral-sh/setup-uv@v7
+        with:
+          version: ${{ env.UV_VERSION }}
+          enable-cache: true
+          cache-dependency-glob: "uv.lock"
+
+      - name: Install dependencies
+        run: uv sync
+
+      - name: Fire one live delegation through the dev-lane ingress
+        env:
+          # Inside the deploy-runner container `localhost` is the container
+          # itself, so a localhost probe would hit the wrong network
+          # namespace and manufacture a false RED. Set explicitly here
+          # rather than inheriting the live container's compose env, which
+          # is only refreshed on recreate (OMN-14958 / OMN-14900) — same
+          # precedent as dev-lane-liveness.yml.
+          PROBE_URL: ${{ github.event.inputs.probe_url || 'http://host.docker.internal:8085' }}
+          TASK_TYPE: ${{ github.event.inputs.task_type || 'test' }}
+          BUDGET_MS: ${{ github.event.inputs.budget_ms || '120000' }}
+          QUARANTINE_BOOTSTRAP: ${{ github.event.inputs.quarantine_bootstrap_servers || 'host.docker.internal:19092' }}
+          # The omnimarket drift guard (OMN-14060) refuses `onex skill`
+          # whenever $OMNI_HOME/omnimarket exists and the venv's omnimarket
+          # is not a git co-install. The deploy runner sets OMNI_HOME to its
+          # private deploy clone tree, which DOES contain omnimarket, so the
+          # guard fires here on a dispatch it has no bearing on:
+          # node_chain_canary_effect is provided by omnibase_infra itself
+          # and invokes no omnimarket node in-process — it speaks HTTP to
+          # the deployed runtime, which carries its own omnimarket inside
+          # its own image. The guard's own docstring names this variable as
+          # the sanctioned way past a refusal and calls unsetting OMNI_HOME
+          # "strictly worse ... silently". The override downgrades to a
+          # logged WARNING, so real drift stays visible in this run's log.
+          ONEX_ALLOW_OMNIMARKET_DRIFT: "1"
+        run: |
+          set -uo pipefail
+          # NOT `set -e`: a non-zero dispatch is itself a finding and must
+          # still produce a receipt. The verdict step below is what decides
+          # the job's exit status.
+          uv run onex skill chain_canary \
+            --probe-url "${PROBE_URL}" \
+            --task-type "${TASK_TYPE}" \
+            --budget-ms "${BUDGET_MS}" \
+            --quarantine-bootstrap-servers "${QUARANTINE_BOOTSTRAP}" \
+            > chain-canary-receipt.json
+
+      - name: Publish receipt and set the verdict
+        if: always()
+        run: |
+          set -uo pipefail
+          python3 - <<'PY'
+          import json
+          import os
+          import pathlib
+          import sys
+
+          summary = pathlib.Path(os.environ["GITHUB_STEP_SUMMARY"])
+          raw = pathlib.Path("chain-canary-receipt.json")
+
+          lines = ["## Event-chain canary (OMN-16773)", ""]
+
+          if not raw.exists() or not raw.read_text().strip():
+              lines += [
+                  "**RED — the canary produced no receipt at all.**",
+                  "",
+                  "The dispatch itself failed before the node could report. That is a",
+                  "finding about the canary's own execution path, not about the chain:",
+                  "check the dispatch step's log above.",
+              ]
+              summary.write_text("\n".join(lines) + "\n", encoding="utf-8")
+              sys.exit(1)
+
+          text = raw.read_text()
+          try:
+              envelope = json.loads(text)
+          except json.JSONDecodeError as exc:
+              lines += [
+                  f"**RED — receipt was not valid JSON: {exc}**",
+                  "",
+                  "```",
+                  text[:4000],
+                  "```",
+              ]
+              summary.write_text("\n".join(lines) + "\n", encoding="utf-8")
+              sys.exit(1)
+
+          result = envelope.get("result") or {}
+          verdict = result.get("verdict", "unknown")
+          success = bool(result.get("success", False))
+          detail = result.get("detail", "")
+
+          lines += [
+              f"**Verdict: `{verdict}`** — {'GREEN' if success else 'RED'}",
+              "",
+              detail or "_(no detail reported)_",
+              "",
+              "### Receipt",
+              "",
+              "```json",
+              json.dumps(result, indent=2, sort_keys=True),
+              "```",
+              "",
+              "A RED verdict here means a delegation submitted through the real",
+              "deployed ingress did not reach a terminal. `quarantined` names a",
+              "handler that received the event and refused it; `terminal_missing`",
+              "means nothing came back at all; `ingress_unreachable` points at the",
+              "lane rather than the chain (see dev-lane-liveness).",
+          ]
+          summary.write_text("\n".join(lines) + "\n", encoding="utf-8")
+
+          if not success:
+              print(f"::error::chain canary RED — verdict={verdict}: {detail}")
+              sys.exit(1)
+          print(f"chain canary GREEN — {detail}")
+          PY
