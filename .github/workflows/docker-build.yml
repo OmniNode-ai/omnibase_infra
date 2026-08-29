@@ -28,7 +28,7 @@ on:
       run_full_tests:
         description: 'Run full Docker integration test suite'
         required: false
-        default: 'true'
+        default: true
         type: boolean
 
 concurrency:

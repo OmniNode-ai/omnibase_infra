@@ -27,7 +27,7 @@ on:
       no-cache:
         description: 'Build with --no-cache to bust Docker layer cache (forces fresh foundation package install)'
         required: false
-        default: 'false'
+        default: false
         type: boolean
 
 concurrency:

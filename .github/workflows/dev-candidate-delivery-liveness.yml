@@ -1,0 +1,103 @@
+# SPDX-FileCopyrightText: 2025 OmniNode.ai Inc.
+# SPDX-License-Identifier: MIT
+#
+# dev-candidate-delivery-liveness.yml — OMN-16906
+#
+# WHY THIS EXISTS
+#   deliver-dev-candidate-to-staging.yml (OMN-15796) spent 2026-08-27 through
+#   2026-08-28 in GitHub's `startup_failure` state on every invocation. That
+#   state creates NO job, NO step, and NO annotation, so nothing anywhere went
+#   red: the Actions tab showed a grey X on a workflow nobody was watching, and
+#   the staging deploy downstream kept reporting green because from its side
+#   nothing was wrong — it faithfully re-applied the digests it had been given.
+#   The gap surfaced a day later only because a migration fence that had
+#   already merged failed to apply on onex-dev (deploy run 33207733444).
+#
+#   The one-scalar fix that ended the outage is in
+#   build-workspace-candidate-runtime.yml, and is ratcheted at PR time by
+#   tests/ci/test_workflow_input_default_type_parity.py. Neither of those makes
+#   the NEXT delivery failure loud, and "loud" is the part that was missing.
+#   This workflow is that part.
+#
+# WHAT IT WATCHES (two silent shapes, both observed)
+#   * STARTUP_FAILURE — the newest delivery run never compiled. The incident.
+#   * NOT_FIRED       — a dev commit matching the delivery trigger's own
+#                       `on.push.paths` produced no run at all. Measured
+#                       2026-08-28: commit 7090f386f (PR #2974) landed at
+#                       20:13Z and produced zero runs of any conclusion, so a
+#                       guard that only inspected run CONCLUSIONS would have
+#                       reported clean straight through it.
+#   plus NOT_DELIVERED / DELIVERY_STALLED for the ordinary visible cases, which
+#   carry the same consequence: merged, not running.
+#
+# WHY GITHUB-HOSTED
+#   The probe is pure GitHub REST — it reads run and commit metadata and
+#   touches no lane, no broker, and no tailnet host. It must also not share
+#   fate with the self-hosted fleet: a delivery outage caused by fleet
+#   saturation is precisely a case where a self-hosted watcher would be queued
+#   behind the thing it is supposed to report. Registered in
+#   config/runner_routing_policy.yaml's hosted_runner_allowlist for that reason.
+#
+# HOW IT PAGES
+#   A failing SCHEDULED workflow is the org's existing notification path
+#   (GitHub emails the workflow file's author on scheduled-run failure), the
+#   same mechanism dev-lane-liveness.yml and runner-fleet-canary.yml rely on.
+#   No new alerting surface is introduced by this ticket.
+#
+# PR-TIME GUARD
+#   Deliberately no `pull_request` trigger — a PR-time run would report on dev's
+#   delivery state, which a PR cannot change. The hermetic PR-time proof is
+#   tests/ci/test_dev_candidate_delivery_liveness.py, which drives the real
+#   verdict function over fixtures of both observed incident shapes and asserts
+#   this file's wiring.
+
+name: dev-candidate-delivery-liveness (OMN-16906)
+
+on:
+  schedule:
+    # Every 30 minutes, offset 11/41 past the hour to stay clear of the
+    # */15 and 7,22,37,52 cron slots already in this repo.
+    - cron: "11,41 * * * *"
+  workflow_dispatch: {}
+
+permissions:
+  contents: read
+
+concurrency:
+  group: dev-candidate-delivery-liveness
+  cancel-in-progress: true
+
+jobs:
+  delivery-liveness:
+    name: dev-candidate delivery liveness
+    # See "WHY GITHUB-HOSTED" above before changing this.
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    permissions:
+      contents: read
+      actions: read # reads deliver-dev-candidate-to-staging.yml run history
+    steps:
+      - name: Checkout (guard script + the delivery workflow it reads its trigger from)
+        uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+        with:
+          # No git operations after checkout — do not leave the Actions token
+          # in local git config (zizmor artipacked).
+          persist-credentials: false
+
+      - name: Set up Python
+        uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
+        with:
+          python-version: "3.12"
+
+      - name: Install PyYAML
+        run: python -m pip install --disable-pip-version-check "PyYAML>=6,<7"
+
+      - name: Probe dev-candidate delivery liveness
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          GITHUB_REPOSITORY: ${{ github.repository }}
+        run: |
+          set -euo pipefail
+          python scripts/ci/check_dev_candidate_delivery_liveness.py \
+            --repo "${GITHUB_REPOSITORY}" \
+            --branch dev
