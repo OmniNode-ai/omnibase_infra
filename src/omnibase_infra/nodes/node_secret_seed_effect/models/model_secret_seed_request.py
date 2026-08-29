@@ -79,11 +79,13 @@ class ModelSecretSeedRequest(BaseModel):
     infisical_host: str = Field(
         ...,
         description=(
-            "Absolute base URL of the target Infisical instance, e.g. "
-            "'http://192.168.86.201:8881'. REQUIRED with no default: this "
-            "estate runs three separate instances (dev lane, stability lane, "
-            "in-cluster) and a guessed host would write a real key into an "
-            "instance nobody meant to touch."
+            "Absolute base URL of the target Infisical instance. REQUIRED "
+            "with no default: this estate runs three separate instances (dev "
+            "lane, stability lane, in-cluster) and a guessed host would write "
+            "a real key into an instance nobody meant to touch. The concrete "
+            "hosts and ports are in docs/runbooks/headless-secret-seeding.md "
+            "-- deliberately not inlined here, because an address literal in "
+            "source is the thing that turns into a default."
         ),
     )
     project_id: UUID = Field(
