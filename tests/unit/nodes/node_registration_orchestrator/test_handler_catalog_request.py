@@ -70,7 +70,7 @@ def _make_request_envelope(
         payload=payload,
         envelope_timestamp=TEST_NOW,
         correlation_id=correlation_id,
-        source="test",
+        source_tool="test",
     )
     return envelope, store
 

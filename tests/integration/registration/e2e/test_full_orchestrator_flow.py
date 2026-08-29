@@ -411,7 +411,7 @@ class OrchestratorPipeline:
                     payload=event,
                     envelope_timestamp=now,
                     correlation_id=correlation_id,
-                    source="e2e-test-pipeline",
+                    source_tool="e2e-test-pipeline",
                 )
 
                 handler_output = await self._handler.handle(envelope)
@@ -1459,7 +1459,7 @@ class TestFullPipelineWithRealInfrastructure:
             payload=event,
             envelope_timestamp=now,
             correlation_id=unique_correlation_id,
-            source="e2e-test",
+            source_tool="e2e-test",
         )
 
         handler_output = await handler.handle(envelope)

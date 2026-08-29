@@ -147,7 +147,7 @@ class TestSnapshotStateTransitions:
             payload=event,
             envelope_timestamp=TEST_NOW,
             correlation_id=correlation_id,
-            source="test",
+            source_tool="test",
         )
 
         # Act
@@ -234,7 +234,7 @@ class TestSnapshotStateTransitions:
             payload=ack_command,
             envelope_timestamp=TEST_NOW,
             correlation_id=correlation_id,
-            source="test",
+            source_tool="test",
         )
 
         # Act
@@ -335,7 +335,7 @@ class TestSnapshotStateTransitions:
             payload=tick,
             envelope_timestamp=tick_time,
             correlation_id=uuid4(),
-            source="test",
+            source_tool="test",
         )
 
         # Act

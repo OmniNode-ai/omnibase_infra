@@ -1696,7 +1696,7 @@ async def bootstrap() -> int:
                             # Why: Runtime wiring validates and narrows this payload shape before use.
                             correlation_id=correlation_id,  # type: ignore[arg-type]
                             event_type=event_type,
-                            source="baselines_batch_compute",
+                            source_tool="baselines_batch_compute",
                         )
                         await event_bus.publish_envelope(
                             # Why: Runtime wiring validates and narrows this payload shape before use.
@@ -1820,7 +1820,7 @@ async def bootstrap() -> int:
                             # Why: Runtime wiring validates and narrows this payload shape before use.
                             correlation_id=correlation_id,  # type: ignore[arg-type]
                             event_type=event_type,
-                            source="savings_correlation",
+                            source_tool="savings_correlation",
                         )
                         await event_bus.publish_envelope(
                             # Why: Runtime wiring validates and narrows this payload shape before use.

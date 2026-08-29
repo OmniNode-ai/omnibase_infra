@@ -200,7 +200,7 @@ def create_event_envelope(event: Any) -> ModelEventEnvelope[dict]:
         payload=event.model_dump(),
         envelope_timestamp=TEST_NOW,
         correlation_id=event.correlation_id or uuid4(),
-        source="test",
+        source_tool="test",
     )
 
 
@@ -375,7 +375,7 @@ class TestInvalidMessageGracefulSkip:
             payload={"random": "data", "not": "a contract event"},
             envelope_timestamp=TEST_NOW,
             correlation_id=uuid4(),
-            source="test",
+            source_tool="test",
         )
         message = create_event_message(invalid_envelope)
 
@@ -928,7 +928,7 @@ class TestCorrelationIdExtraction:
             payload=event.model_dump(),
             envelope_timestamp=TEST_NOW,
             correlation_id=uuid4(),  # Envelope has one
-            source="test",
+            source_tool="test",
         )
         message = create_event_message(envelope)
 

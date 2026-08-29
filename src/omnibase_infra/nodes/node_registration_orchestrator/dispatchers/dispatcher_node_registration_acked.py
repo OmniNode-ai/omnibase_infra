@@ -265,7 +265,7 @@ class DispatcherNodeRegistrationAcked(MixinAsyncCircuitBreaker):
                     payload=payload,
                     envelope_timestamp=now,
                     correlation_id=correlation_id,
-                    source=self.dispatcher_id,
+                    source_tool=self.dispatcher_id,
                 )
             )
 

@@ -303,7 +303,7 @@ class DispatcherNodeIntrospected(MixinAsyncCircuitBreaker):
                     payload=payload,
                     envelope_timestamp=now,
                     correlation_id=correlation_id,
-                    source=self.dispatcher_id,
+                    source_tool=self.dispatcher_id,
                 )
             )
 
@@ -336,7 +336,7 @@ class DispatcherNodeIntrospected(MixinAsyncCircuitBreaker):
                     payload=auto_ack_payload,
                     envelope_timestamp=now,
                     correlation_id=correlation_id,
-                    source=self.dispatcher_id,
+                    source_tool=self.dispatcher_id,
                 )
                 # ModelEventEnvelope is structurally compatible with ProtocolEventEnvelope
                 # but lacks the async get_payload() method; mixin_node_introspection uses
