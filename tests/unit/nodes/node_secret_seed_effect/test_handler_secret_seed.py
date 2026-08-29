@@ -514,7 +514,7 @@ def test_every_addressing_field_is_required_with_no_default(field_name: str) -> 
     "infisical_host",
     [
         "infisical.invalid:8881",
-        "http://infisical.invalid:8881",
+        "ftp://infisical.invalid:8881",
         "https://user:pass@infisical.invalid:8881",
         "https://infisical.invalid:8881?token=redacted",
         "https://infisical.invalid:8881/#frag",
@@ -549,3 +549,24 @@ def test_parse_source_handles_export_prefix_quotes_and_comments() -> None:
 def test_parse_source_rejects_a_duplicate_name() -> None:
     with pytest.raises(ValueError, match="duplicate"):
         parse_source("A=1\nA=2\n")
+
+
+def test_plain_http_host_is_accepted() -> None:
+    """``http://`` is deliberately NOT rejected, and that is pinned here.
+
+    All three Infisical instances this node exists to seed are plain http:
+    the two ``.201`` lanes and the in-cluster service address, all three
+    named in ``docs/runbooks/headless-secret-seeding.md``. An https-only
+    rule would reject every address the node actually targets — including
+    every invocation the runbook documents — which is a validator that
+    reads as security while delivering none and that the operator must
+    route around. Transport confidentiality on a LAN or in-cluster hop is a
+    deployment property, not something this validator can assert.
+
+    If TLS is ever terminated in front of those instances, tighten the rule
+    and the runbook together, in that order, and delete this test then.
+    """
+    assert (
+        _request(infisical_host="http://infisical.invalid:8881").infisical_host
+        == "http://infisical.invalid:8881"
+    )
