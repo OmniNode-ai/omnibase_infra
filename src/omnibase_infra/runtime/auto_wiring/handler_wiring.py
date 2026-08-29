@@ -8430,6 +8430,23 @@ async def _subscribe_contract_topics(
             node_identity=node_identity,
             on_message=cb,
         )
+        # OMN-16940: claim single-delivery ownership only AFTER the subscription
+        # actually attached. This contract now has its own consumer group for
+        # this topic, so a foreign boundary's process-global dispatch
+        # (``EventBusSubcontractWiring._create_dispatch_callback``, which passes
+        # no dispatcher scope) must defer to it instead of running this
+        # contract's handlers a second time. Live proof of what that cost:
+        # ``onex.evt.omnibase-infra.inference-response.v1`` was read end-to-end
+        # by BOTH this contract's group and
+        # ``local.runtime_config.delegation-orchestrator.consume``, so every
+        # failure dead-lettered twice (286 = 2 x 143 on the .201 dev lane).
+        # Recording the claim before a failed subscribe would silence the
+        # dispatcher on both paths, which is why it is not done at plan time.
+        claim_owned = getattr(
+            dispatch_engine, "register_contract_owned_subscription", None
+        )
+        if callable(claim_owned):
+            claim_owned(contract.name, topic)
         logger.info(
             "Auto-wired subscription: topic=%s consumer_group=%s node=%s",
             topic,

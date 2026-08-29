@@ -475,7 +475,11 @@ class PayloadScopingOutcomeInternal:
     dispatch()-local; not part of the public API.
     """
 
-    __slots__ = ("type_scoped_candidate_rejected", "validation_detail")
+    __slots__ = (
+        "deferred_owner_contracts",
+        "type_scoped_candidate_rejected",
+        "validation_detail",
+    )
 
     def __init__(
         self,
@@ -484,6 +488,11 @@ class PayloadScopingOutcomeInternal:
     ) -> None:
         self.type_scoped_candidate_rejected = type_scoped_candidate_rejected
         self.validation_detail = validation_detail
+        # OMN-16940: contracts whose dispatchers this UNSCOPED pass declined to
+        # execute because they hold their own subscription for this topic. An
+        # empty candidate set for this reason is not a wiring gap and must not be
+        # dead-lettered — the record is being delivered on the owner's own group.
+        self.deferred_owner_contracts: set[str] = set()
 
 
 class MessageDispatchEngine:
@@ -614,6 +623,12 @@ class MessageDispatchEngine:
             EnumMessageCategory.COMMAND: [],
             EnumMessageCategory.INTENT: [],
         }
+
+        # OMN-16940: (owner_contract_name -> topics) for which that contract holds
+        # its OWN scoped Kafka subscription. A dispatcher listed here is delivered
+        # by its owner's subscription and by nothing else; an UNSCOPED dispatch on
+        # one of those topics defers to it. See _find_matching_dispatchers.
+        self._contract_owned_subscriptions: dict[str, set[str]] = {}
 
         # Freeze state
         self._frozen: bool = False
@@ -1392,6 +1407,40 @@ class MessageDispatchEngine:
             ),
         )
 
+        if not matching_dispatchers and scoping_outcome.deferred_owner_contracts:
+            # OMN-16940: every candidate on this UNSCOPED pass belongs to a
+            # contract that consumes this topic on its own group. The record is
+            # not undeliverable — it is being delivered elsewhere, once. SKIPPED
+            # (not NO_DISPATCHER) so the calling boundary commits its offset and
+            # writes NO dead-letter record: routing it here is what produced the
+            # 2x DLQ depth this fix removes, and answering with NO_DISPATCHER
+            # would just move the duplicate from the handler's DLQ to the
+            # boundary's.
+            duration_ms = (time.perf_counter() - start_time) * 1000
+            deferred = sorted(scoping_outcome.deferred_owner_contracts)
+            self._logger.debug(
+                "Unscoped dispatch on topic '%s' deferred entirely to owning "
+                "contract subscription(s) %s (OMN-16940)",
+                topic,
+                deferred,
+            )
+            return ModelDispatchResult(
+                dispatch_id=dispatch_id,
+                status=EnumDispatchStatus.SKIPPED,
+                topic=topic,
+                message_category=topic_category,
+                message_type=message_type,
+                started_at=started_at,
+                completed_at=datetime.now(UTC),
+                duration_ms=duration_ms,
+                error_message=(
+                    f"Deferred to the owning contract subscription(s) {deferred} "
+                    f"for topic '{topic}'."
+                ),
+                correlation_id=correlation_id,
+                output_events=[],
+            )
+
         if not matching_dispatchers:
             # Capture duration and completed_at together for consistency
             duration_ms = (time.perf_counter() - start_time) * 1000
@@ -2056,6 +2105,29 @@ class MessageDispatchEngine:
                     "Route '%s' references missing dispatcher '%s'",
                     route.route_id,
                     dispatcher_id,
+                )
+                continue
+
+            # OMN-16940: an UNSCOPED dispatch defers to the subscription that owns
+            # this dispatcher. A contract that holds its own scoped subscription
+            # for this topic has already been (or will be) delivered the record on
+            # its own consumer group; executing it again from a foreign boundary's
+            # process-global fan-out runs the handler twice, writes the projection
+            # twice, and dead-letters every failure twice. Deferral is decided
+            # here, at the ownership boundary, rather than filtered downstream —
+            # a dedupe on the DLQ would leave all three duplications in place.
+            if allowed_dispatcher_ids is None and self._owner_subscription_claims_topic(
+                entry.owner_contract_name, topic
+            ):
+                scoping_outcome.deferred_owner_contracts.add(
+                    str(entry.owner_contract_name)
+                )
+                self._logger.debug(
+                    "Unscoped dispatch on topic '%s' defers dispatcher '%s' to its "
+                    "owning contract subscription '%s' (OMN-16940)",
+                    topic,
+                    dispatcher_id,
+                    entry.owner_contract_name,
                 )
                 continue
 
@@ -3104,6 +3176,67 @@ class MessageDispatchEngine:
                     ),
                     error_code=EnumCoreErrorCode.INVALID_CONFIGURATION,
                 )
+
+    def register_contract_owned_subscription(
+        self,
+        contract_name: str,
+        topic: str,
+    ) -> None:
+        """Record that ``contract_name`` holds its own subscription for ``topic``.
+
+        This is the ownership half of OMN-15474, applied to the boundary that
+        rule never reached. ``EventBusSubcontractWiring._create_dispatch_callback``
+        dispatches with no dispatcher scope, so on a topic two contracts both
+        consume it re-executes the OTHER contract's dispatchers — which their own
+        subscription has already executed. Measured on the .201 dev lane
+        2026-08-29: ``onex.evt.omnibase-infra.inference-response.v1`` carried 143
+        records and both
+        ``local.omnimarket.node_projection_delegation_inference_response.consume``
+        and ``local.runtime_config.delegation-orchestrator.consume`` read all 143
+        in the same process, so every failure wrote two dead-letter records
+        (286 = 2 x 143, ``retry_count: 0`` on both, 12-40ms apart).
+
+        Registering here makes the OWNER the single delivery path for its own
+        dispatchers on that topic. A dispatcher with NO self-owned subscription is
+        untouched: that is the core-runtime-owned case (OMN-14758 / OMN-14771,
+        where ``handler_wiring`` deliberately skips the contract's subscription so
+        the core RuntimeDispatch is the sole owner) and the manual/global
+        registration case, both of which have only the unscoped route.
+
+        Called after the subscription is actually established, never from a plan:
+        an ownership claim recorded for a subscription that failed to attach would
+        silence the dispatcher on both paths.
+
+        Raises:
+            ModelOnexError: If contract name or topic is blank or non-canonical.
+        """
+        if (
+            not contract_name
+            or contract_name != contract_name.strip()
+            or not topic
+            or topic != topic.strip()
+        ):
+            raise ModelOnexError(
+                message=(
+                    "A contract-owned subscription requires a canonical contract "
+                    f"name and topic; got {contract_name!r} / {topic!r}."
+                ),
+                error_code=EnumCoreErrorCode.INVALID_CONFIGURATION,
+            )
+        with self._registration_lock:
+            self._contract_owned_subscriptions.setdefault(contract_name, set()).add(
+                topic
+            )
+
+    def _owner_subscription_claims_topic(
+        self,
+        owner_contract_name: str | None,
+        topic: str,
+    ) -> bool:
+        """True when this dispatcher's owner consumes ``topic`` on its own group."""
+        if owner_contract_name is None:
+            return False
+        return topic in self._contract_owned_subscriptions.get(owner_contract_name, ())
 
     def validate_contract_dispatcher_scope(
         self,
