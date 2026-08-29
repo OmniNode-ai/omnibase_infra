@@ -158,6 +158,19 @@ def _make_mock_bin(
             echo "start $*" >> "${{MOCK_DOCKER_CALLLOG:-/dev/null}}"
             ;;
           compose)
+            # OMN-16947: model the read-only drift preflight (`config -q` and
+            # `config --services`) so it neither pollutes the mutation call log
+            # nor makes the expected_count-vs-compose drift detector fire on a
+            # phantom 0-vs-{TEST_FLEET_COUNT} gap.
+            if [[ "$*" == *" config"* ]]; then
+              if [[ "$*" == *"--services"* ]]; then
+                echo "omninode-deploy-runner"
+                for i in $(seq 1 {TEST_FLEET_COUNT}); do
+                  echo "{PREFIX}-${{i}}"
+                done
+              fi
+              exit 0
+            fi
             echo "compose $*" >> "${{MOCK_DOCKER_CALLLOG:-/dev/null}}"
             ;;
           restart)
