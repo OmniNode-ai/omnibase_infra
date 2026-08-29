@@ -1,0 +1,166 @@
+{
+  "counts": {
+    "divergent": 0,
+    "divergent_verified": 6,
+    "equivalent": 1,
+    "legacy_attested": 2,
+    "unreachable": 0
+  },
+  "databases": [
+    "omnidash_analytics"
+  ],
+  "generated_at": "2026-08-29T03:28:42.804682+00:00",
+  "lane": "stability-test",
+  "psql_exec": [
+    "ssh",
+    "jonah@192.168.86.201",
+    "docker",
+    "exec",
+    "-i",
+    "omnibase-infra-stability-test-postgres",
+    "psql",
+    "-U",
+    "postgres"
+  ],
+  "scratch_server_version": "16.14 (Homebrew)",
+  "ticket": "OMN-15857",
+  "tool": "verify_migration_checksum_adoption.py",
+  "tool_version": "2",
+  "verdicts": [
+    {
+      "artifact_path": "",
+      "artifact_sha256": "",
+      "database": "omnidash_analytics",
+      "declared_objects": [],
+      "divergences": [],
+      "manifest_checksum": "",
+      "reason": "no checked-in migration file; already declared in _ledger/legacy-node-migrations.tsv under OMN-15717, which bootstrap.sql imports as checksum_kind='legacy_attestation' (a source record, deliberately not a bytes claim)",
+      "source_checksum": "hotfix-applied-by-codex",
+      "source_set": "node",
+      "verdict": "legacy_attested",
+      "version": "node:node_projection_delegation:0014_create_live_event_projection_view.sql"
+    },
+    {
+      "artifact_path": "",
+      "artifact_sha256": "",
+      "database": "omnidash_analytics",
+      "declared_objects": [],
+      "divergences": [],
+      "manifest_checksum": "",
+      "reason": "no checked-in migration file; already declared in _ledger/legacy-node-migrations.tsv under OMN-15717, which bootstrap.sql imports as checksum_kind='legacy_attestation' (a source record, deliberately not a bytes claim)",
+      "source_checksum": "hotfix-applied-by-codex",
+      "source_set": "node",
+      "verdict": "legacy_attested",
+      "version": "node:node_projection_delegation:0015_create_generation_dashboard_views.sql"
+    },
+    {
+      "artifact_path": "nodes/node_projection_llm_cost/0001_create_llm_call_metrics.sql",
+      "artifact_sha256": "43e896b82c4060f65c3ff98776ece5b567dd452b8842d20c6cf49574bcc4dc7b",
+      "database": "omnidash_analytics",
+      "declared_objects": [
+        "enum:usage_source_type",
+        "table:llm_call_metrics"
+      ],
+      "divergences": [],
+      "manifest_checksum": "43e896b82c4060f65c3ff98776ece5b567dd452b8842d20c6cf49574bcc4dc7b",
+      "reason": "all 2 object(s) declared by 0001_create_llm_call_metrics.sql exist in omnidash_analytics with identical columns, constraints, indexes and definitions",
+      "source_checksum": "hotfix-applied-by-codex",
+      "source_set": "node",
+      "verdict": "equivalent",
+      "version": "node:node_projection_llm_cost:0001_create_llm_call_metrics.sql"
+    },
+    {
+      "artifact_path": "nodes/node_contract_registry/0000_create_contract_registry.sql",
+      "artifact_sha256": "bff49882c3c724de24f75b97c847ab78581064a72b77429a2251a02448fad668",
+      "database": "omnidash_analytics",
+      "declared_objects": [
+        "table:contract_registry"
+      ],
+      "divergences": [],
+      "manifest_checksum": "bff49882c3c724de24f75b97c847ab78581064a72b77429a2251a02448fad668",
+      "reason": "all 1 object(s) declared by 0000_create_contract_registry.sql exist in omnidash_analytics with identical columns, constraints, indexes and definitions; the ledger's content hash 686b13595065... names an earlier revision of this file, but that revision's schema is indistinguishable from the one the checked-in bytes produce",
+      "source_checksum": "686b135950659fa6ab11161a439fac60ae273ff3cf410fe6b209f505bb8983e7",
+      "source_set": "omnimarket",
+      "verdict": "divergent_verified",
+      "version": "node:node_contract_registry:0000_create_contract_registry.sql"
+    },
+    {
+      "artifact_path": "nodes/node_evidence_dashboard_reducer/0001_create_evidence_dashboard_projection_tables.sql",
+      "artifact_sha256": "b3c4be68802a73d5f865b6730b191a15fa9d2729d3b8a5e75ed82ce3c94b70e8",
+      "database": "omnidash_analytics",
+      "declared_objects": [
+        "table:evidence_correlation_trace_projection",
+        "table:evidence_dashboard_projection",
+        "table:evidence_readiness_aggregate_projection"
+      ],
+      "divergences": [],
+      "manifest_checksum": "b3c4be68802a73d5f865b6730b191a15fa9d2729d3b8a5e75ed82ce3c94b70e8",
+      "reason": "all 3 object(s) declared by 0001_create_evidence_dashboard_projection_tables.sql exist in omnidash_analytics with identical columns, constraints, indexes and definitions; the ledger's content hash a83717d2077f... names an earlier revision of this file, but that revision's schema is indistinguishable from the one the checked-in bytes produce",
+      "source_checksum": "a83717d2077fe6a4ca737adda2f7d3ab37544f14826284ec3839b810925bf051",
+      "source_set": "omnimarket",
+      "verdict": "divergent_verified",
+      "version": "node:node_evidence_dashboard_reducer:0001_create_evidence_dashboard_projection_tables.sql"
+    },
+    {
+      "artifact_path": "nodes/node_nightly_loop_controller/001_create_nightly_loop_tables.sql",
+      "artifact_sha256": "dbe147357ae6e34ce35dcd97e7652f521346e6cb915775ed3d2f9a548af68ead",
+      "database": "omnidash_analytics",
+      "declared_objects": [
+        "table:nightly_loop_decisions",
+        "table:nightly_loop_iterations"
+      ],
+      "divergences": [],
+      "manifest_checksum": "dbe147357ae6e34ce35dcd97e7652f521346e6cb915775ed3d2f9a548af68ead",
+      "reason": "all 2 object(s) declared by 001_create_nightly_loop_tables.sql exist in omnidash_analytics with identical columns, constraints, indexes and definitions; the ledger's content hash 55fd0b90a3dd... names an earlier revision of this file, but that revision's schema is indistinguishable from the one the checked-in bytes produce",
+      "source_checksum": "55fd0b90a3dd033df7c57351d0739e9218fe58ba290c732c78e78d7df49eaa60",
+      "source_set": "omnimarket",
+      "verdict": "divergent_verified",
+      "version": "node:node_nightly_loop_controller:001_create_nightly_loop_tables.sql"
+    },
+    {
+      "artifact_path": "nodes/node_projection_delegation/0008_generation_events.sql",
+      "artifact_sha256": "d4563a744d4e925a5afd6e176b9284ff08c07b770ee6d49d25b4816b5a785101",
+      "database": "omnidash_analytics",
+      "declared_objects": [
+        "table:generation_events"
+      ],
+      "divergences": [],
+      "manifest_checksum": "d4563a744d4e925a5afd6e176b9284ff08c07b770ee6d49d25b4816b5a785101",
+      "reason": "all 1 object(s) declared by 0008_generation_events.sql exist in omnidash_analytics with identical columns, constraints, indexes and definitions; the ledger's content hash e12015762c7b... names an earlier revision of this file, but that revision's schema is indistinguishable from the one the checked-in bytes produce",
+      "source_checksum": "e12015762c7b2c598ed03f38a4e6d2b3cf7cbd6d6f8c30e05d21758a420580b6",
+      "source_set": "omnimarket",
+      "verdict": "divergent_verified",
+      "version": "node:node_projection_delegation:0008_generation_events.sql"
+    },
+    {
+      "artifact_path": "nodes/node_projection_dep_health/001_create_dep_health_findings.sql",
+      "artifact_sha256": "81e097ced9e5c386183ca2563f786a297263576637703c57ca5ab913b58e08bc",
+      "database": "omnidash_analytics",
+      "declared_objects": [
+        "table:dep_health_findings"
+      ],
+      "divergences": [],
+      "manifest_checksum": "81e097ced9e5c386183ca2563f786a297263576637703c57ca5ab913b58e08bc",
+      "reason": "all 1 object(s) declared by 001_create_dep_health_findings.sql exist in omnidash_analytics with identical columns, constraints, indexes and definitions; the ledger's content hash 5bfcf6862b23... names an earlier revision of this file, but that revision's schema is indistinguishable from the one the checked-in bytes produce",
+      "source_checksum": "5bfcf6862b235ea79bab65dd8681db9217f851511c2dfa8283191e2c7094217d",
+      "source_set": "omnimarket",
+      "verdict": "divergent_verified",
+      "version": "node:node_projection_dep_health:001_create_dep_health_findings.sql"
+    },
+    {
+      "artifact_path": "nodes/node_projection_session_outcome/0021_session_outcomes.sql",
+      "artifact_sha256": "de421b3a1ef9bd31f29fe6bce7d1efc469a1ead9a08a1f59e9bd8fb53a1a77f0",
+      "database": "omnidash_analytics",
+      "declared_objects": [
+        "table:session_outcomes"
+      ],
+      "divergences": [],
+      "manifest_checksum": "de421b3a1ef9bd31f29fe6bce7d1efc469a1ead9a08a1f59e9bd8fb53a1a77f0",
+      "reason": "all 1 object(s) declared by 0021_session_outcomes.sql exist in omnidash_analytics with identical columns, constraints, indexes and definitions; the ledger's content hash 68adbc4faff9... names an earlier revision of this file, but that revision's schema is indistinguishable from the one the checked-in bytes produce",
+      "source_checksum": "68adbc4faff969f8f1be689899ccae591331bd858a14bef30c62e4d73600b66b",
+      "source_set": "omnimarket",
+      "verdict": "divergent_verified",
+      "version": "node:node_projection_session_outcome:0021_session_outcomes.sql"
+    }
+  ]
+}

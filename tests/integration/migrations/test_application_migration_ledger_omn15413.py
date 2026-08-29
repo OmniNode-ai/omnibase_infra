@@ -33,6 +33,7 @@ MANIFEST = LEDGER_DIR / "application-migrations.tsv"
 LEGACY_NODE_DECLARATIONS = LEDGER_DIR / "legacy-node-migrations.tsv"
 VERIFIED_ADOPTIONS = LEDGER_DIR / "verified-checksum-adoptions.tsv"
 VERIFIED_DIVERGENT_ADOPTIONS = LEDGER_DIR / "verified-divergent-adoptions.tsv"
+VERIFIED_CROSS_SOURCE_ADOPTIONS = LEDGER_DIR / "verified-cross-source-adoptions.tsv"
 BOOTSTRAP = LEDGER_DIR / "bootstrap.sql"
 RUNNER = REPO_ROOT / "scripts" / "run-forward-migrations.sh"
 
@@ -199,6 +200,7 @@ def _run_bootstrap(
     *,
     adoptions: Path | None = None,
     divergent_adoptions: Path | None = None,
+    cross_source_adoptions: Path | None = None,
 ) -> subprocess.CompletedProcess[str]:
     create_manifest = """
 CREATE TEMP TABLE onex_application_migration_manifest (
@@ -250,6 +252,21 @@ CREATE TEMP TABLE onex_verified_divergent_adoptions (
 )
 """,
         "-c",
+        """
+CREATE TEMP TABLE onex_verified_cross_source_adoptions (
+  version TEXT NOT NULL PRIMARY KEY,
+  node_source_checksum TEXT NOT NULL,
+  omnimarket_source_checksum TEXT NOT NULL,
+  manifest_checksum TEXT NOT NULL,
+  node_applied_at TEXT NOT NULL,
+  omnimarket_applied_at TEXT NOT NULL,
+  reconciled_applied_at TEXT NOT NULL,
+  ticket TEXT NOT NULL,
+  receipt_sha256 TEXT NOT NULL,
+  verified_at TEXT NOT NULL
+)
+""",
+        "-c",
         (
             "\\copy onex_application_migration_manifest "
             f"FROM '{MANIFEST}' WITH (FORMAT text, DELIMITER E'\\t')"
@@ -268,6 +285,12 @@ CREATE TEMP TABLE onex_verified_divergent_adoptions (
         (
             "\\copy onex_verified_divergent_adoptions "
             f"FROM '{divergent_adoptions or VERIFIED_DIVERGENT_ADOPTIONS}' "
+            "WITH (FORMAT text, DELIMITER E'\\t')"
+        ),
+        "-c",
+        (
+            "\\copy onex_verified_cross_source_adoptions "
+            f"FROM '{cross_source_adoptions or VERIFIED_CROSS_SOURCE_ADOPTIONS}' "
             "WITH (FORMAT text, DELIMITER E'\\t')"
         ),
         "-f",
@@ -537,6 +560,9 @@ INSERT INTO public.db_metadata (id) VALUES (TRUE) ON CONFLICT (id) DO NOTHING;
     (ledger_dir / "legacy-node-migrations.tsv").write_text("", encoding="utf-8")
     (ledger_dir / "verified-checksum-adoptions.tsv").write_text("", encoding="utf-8")
     (ledger_dir / "verified-divergent-adoptions.tsv").write_text("", encoding="utf-8")
+    (ledger_dir / "verified-cross-source-adoptions.tsv").write_text(
+        "", encoding="utf-8"
+    )
     (ledger_dir / "cloud-migration-aliases.tsv").write_text(
         "20260101_cloud\t20260101_cloud.sql\n", encoding="utf-8"
     )

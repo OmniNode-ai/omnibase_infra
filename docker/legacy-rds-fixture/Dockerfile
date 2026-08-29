@@ -20,6 +20,7 @@ COPY docker/migrations/forward/grandfathered-force-rls-migrations.yaml /opt/omn1
 COPY docker/migrations/forward/_ledger/bootstrap.sql /opt/omn15422/ledger-control/forward/_ledger/bootstrap.sql
 COPY docker/migrations/forward/_ledger/verified-checksum-adoptions.tsv /opt/omn15422/ledger-control/forward/_ledger/verified-checksum-adoptions.tsv
 COPY docker/migrations/forward/_ledger/verified-divergent-adoptions.tsv /opt/omn15422/ledger-control/forward/_ledger/verified-divergent-adoptions.tsv
+COPY docker/migrations/forward/_ledger/verified-cross-source-adoptions.tsv /opt/omn15422/ledger-control/forward/_ledger/verified-cross-source-adoptions.tsv
 COPY docker/legacy-rds-fixture/fixture-manifest.json /opt/omn15422/fixture-manifest.json
 COPY docker/legacy-rds-fixture/prove.sh /opt/omn15422/prove.sh
 COPY docker/legacy-rds-fixture/cutover-proof/prove.sh /opt/omn15422/cutover-proof/prove.sh
