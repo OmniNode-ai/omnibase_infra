@@ -66,6 +66,10 @@ CREATE INDEX IF NOT EXISTS ix_session_phase_state_recoverable_batches
     ON session_phase_state (updated_at)
     WHERE in_flight AND pending_emissions IS NOT NULL;
 
+-- updated_at refresh trigger, byte-identical in shape to migration 090's for
+-- delegation_workflow_state: StateStoreAdapter's seed/cas_update SQL never
+-- writes updated_at itself, so without this the column would record row-creation
+-- time forever and the adapter's staleness predicates would read a frozen clock.
 CREATE OR REPLACE FUNCTION refresh_session_phase_state_updated_at()
 RETURNS TRIGGER AS $$
 BEGIN
