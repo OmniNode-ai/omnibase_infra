@@ -92,6 +92,16 @@ into ``_ledger/verified-divergent-adoptions.tsv`` (``--emit-adoptions``). Every
 run writes a receipt (``--receipt-out``) whose sha256 is recorded in the TSV, so
 an adoption in either file is always traceable to the run that proved it.
 
+An adoption row's ``ticket`` column defaults to this tool's own ticket, which is
+correct only while the run that PROVES a row is also the change that BUILT the
+mechanism. ``--declaration-ticket <version>=OMN-NNNN`` (repeatable, and scoped
+to that one version rather than to the whole run) overrides it for the case
+where it is not -- OMN-16923 is the first: that row was earned by a forward migration
+(``docker/migrations/forward/101_converge_savings_estimates_to_node_declared_shape.sql``)
+converging the live service schema, not by OMN-16915's stale-revision argument,
+and a reader following the default would land on a ticket that never made that
+claim. The receipt's own ``ticket`` field is unaffected; it names the tool.
+
 This tool never writes to the audited database. The live connection is
 read-only introspection; every mutation happens in the scratch server.
 
@@ -132,6 +142,9 @@ from typing import Any
 TOOL_VERSION = "2"
 TICKET = "OMN-15857"
 DIVERGENT_TICKET = "OMN-16915"
+# A declaration's `ticket` column is an evidence pointer, so it is validated
+# rather than accepted as free text -- an unparseable value is a dead link.
+DECLARATION_TICKET_RE = re.compile(r"^OMN-[0-9]+$")
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
 FORWARD_DIR = REPO_ROOT / "docker" / "migrations" / "forward"
@@ -935,6 +948,37 @@ def _parse_psql_exec(raw: str | None) -> tuple[str, ...]:
     return tuple(parsed)
 
 
+def parse_declaration_tickets(raw: Sequence[str] | None) -> dict[str, str]:
+    """Parse ``--declaration-ticket VERSION=OMN-NNNN`` into a per-version map.
+
+    Version-scoped rather than run-scoped on purpose. Both emission loops start
+    from the rows already on disk and overwrite by version, so a run-wide
+    override would re-stamp the ticket of every OTHER declaration the same run
+    happened to re-prove -- silently rewriting provenance that was earned
+    elsewhere. A row this run does not name keeps the default.
+    """
+    tickets: dict[str, str] = {}
+    for item in raw or ():
+        version, separator, ticket = item.partition("=")
+        if separator != "=" or not version:
+            raise VerificationError(
+                "--declaration-ticket must be VERSION=OMN-NNNN, got "
+                f"{item!r} (it is scoped to one version, never to the whole run)"
+            )
+        if not DECLARATION_TICKET_RE.match(ticket):
+            raise VerificationError(
+                f"--declaration-ticket for {version!r} must name an OMN-NNNN "
+                f"reference, got {ticket!r}"
+            )
+        if version in tickets and tickets[version] != ticket:
+            raise VerificationError(
+                f"--declaration-ticket names {version!r} twice with different "
+                f"tickets ({tickets[version]} and {ticket})"
+            )
+        tickets[version] = ticket
+    return tickets
+
+
 def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(description=__doc__.splitlines()[0])
     parser.add_argument(
@@ -971,11 +1015,37 @@ def build_parser() -> argparse.ArgumentParser:
         default=os.environ.get("ONEX_LANE", "unspecified"),
         help="Lane attribution recorded in the receipt.",
     )
+    parser.add_argument(
+        "--declaration-ticket",
+        action="append",
+        default=None,
+        metavar="VERSION=OMN-NNNN",
+        help=(
+            "Override the `ticket` column for ONE version's adoption row, "
+            "repeatable. Defaults to this tool's own ticket, which is right only "
+            "while the run that PROVES a row is also the ticket that BUILT the "
+            "mechanism. OMN-16923 is the first case where it is not: that row "
+            "was earned by a forward migration converging the live schema, not "
+            "by OMN-16915's stale-revision argument, and a reader following the "
+            "default would land on a ticket that never made that claim. "
+            "Deliberately keyed BY VERSION rather than applied run-wide: a run "
+            "verifies every adoptable row it finds, and a run-scoped override "
+            "would silently re-stamp the ticket of every OTHER declaration the "
+            "same run re-proved -- the OMN-16919 census alone covers seven. The "
+            "receipt's own `ticket` field is unaffected; it names the tool."
+        ),
+    )
     return parser
 
 
 def main(argv: Sequence[str] | None = None) -> int:
     args = build_parser().parse_args(argv)
+
+    try:
+        declaration_tickets = parse_declaration_tickets(args.declaration_ticket)
+    except VerificationError as exc:
+        print(f"[verify-adoption] FATAL: {exc}", file=sys.stderr)
+        return 2
 
     try:
         psql_argv = _parse_psql_exec(args.psql_exec)
@@ -1096,7 +1166,15 @@ def main(argv: Sequence[str] | None = None) -> int:
                 "version": verdict.version,
                 "source_checksum": verdict.source_checksum,
                 "manifest_checksum": verdict.manifest_checksum,
-                "ticket": TICKET,
+                # An existing row's ticket is provenance earned elsewhere. A
+                # later ordinary run re-proves that row and must not silently
+                # reset it to this tool's default -- that is the same ledger
+                # corruption the version-scoped override exists to prevent,
+                # arriving one run later instead of in the same run.
+                "ticket": declaration_tickets.get(
+                    verdict.version,
+                    adoptions.get(verdict.version, {}).get("ticket", TICKET),
+                ),
                 "receipt_sha256": receipt_sha,
                 "verified_at": verified_at,
             }
@@ -1128,7 +1206,13 @@ def main(argv: Sequence[str] | None = None) -> int:
                 "version": verdict.version,
                 "source_checksum": verdict.source_checksum,
                 "manifest_checksum": verdict.manifest_checksum,
-                "ticket": DIVERGENT_TICKET,
+                # Same reason as the standard loop above.
+                "ticket": declaration_tickets.get(
+                    verdict.version,
+                    divergent_adoptions.get(verdict.version, {}).get(
+                        "ticket", DIVERGENT_TICKET
+                    ),
+                ),
                 "receipt_sha256": receipt_sha,
                 "verified_at": verified_at,
             }
