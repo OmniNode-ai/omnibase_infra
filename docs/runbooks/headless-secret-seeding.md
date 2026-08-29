@@ -196,7 +196,7 @@ A machine identity cannot bootstrap itself: you need an authenticated
 administrator to create the identity, grant it access to the project, and
 issue Universal Auth credentials. That first act is a human one.
 
-You may already have this. Check before doing anything manual:
+You may already have this. Start by checking that the variables are even set:
 
 ```bash
 env | cut -d= -f1 | grep -E '^INFISICAL_(CLIENT_ID|CLIENT_SECRET|ADDR|PROJECT_ID)$'
@@ -206,8 +206,45 @@ grep -o 'INFISICAL_[A-Z_]*' ~/.omnibase/.env 2>/dev/null | sort -u
 Both commands print **names only** — never pipe these files anywhere that
 prints values.
 
-If the credentials already exist, you are done; skip to the use case above. If
-they do not, either:
+### A name that is present is NOT a working identity
+
+Those greps prove a variable exists. They prove nothing about whether the
+instance you are about to seed will *accept* it. An identity can be set locally
+and still be rejected — it may have been minted against a different instance,
+revoked, rotated, or never granted the project. Each of the three instances
+below keeps its own identity list; a credential that works against one is
+simply unknown to the other two.
+
+Measured on the local dev host on 2026-08-29: all four `INFISICAL_*` names were
+present in `~/.omnibase/.env`, and **both** `.201` instances answered that
+client id with `No identity with specified client ID was found (Status: 404)`.
+Reading the names would have said "you are done"; the seed run would then have
+stopped at `auth_unavailable`.
+
+So confirm with a real dry run against the instance you intend to seed, which
+writes nothing:
+
+```bash
+printf 'PROBE_ONLY=placeholder\n' > /tmp/probe.env
+uv run onex skill seed_secrets \
+  --source-path /tmp/probe.env \
+  --infisical-host <the instance you are about to seed> \
+  --project-id "$ONEX_PLATFORM_PROJECT_ID" \
+  --environment-slug prod \
+  --secret-path /shared/llm/ \
+  --keys PROBE_ONLY
+rm -f /tmp/probe.env
+```
+
+`verdict: "dry_run"` is the only verdict that proves the identity
+authenticated — it is returned after the name listing succeeded.
+`verdict: "auth_unavailable"` means you need the step below, whatever the greps
+said. Treat every other verdict as "not yet proven": `no_keys` and
+`source_unreadable` are both decided *before* the handler ever contacts the
+instance, so neither says anything about your credentials — which is why the
+probe above passes a source file whose one name it also passes to `--keys`.
+
+If the dry run authenticated, you are done. If it did not, either:
 
 - run `scripts/bootstrap-infisical.sh`, which orchestrates identity
   provisioning against an instance you can already authenticate to; or
