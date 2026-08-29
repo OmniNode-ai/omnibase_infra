@@ -43,7 +43,7 @@
 -- -- creates this table in `omnibase_infra` with VARCHAR(255)/VARCHAR(64) and
 -- NUMERIC(14,6), under the constraint names `non_negative_local`,
 -- `non_negative_cloud` and `savings_consistency`. A run that also pointed the
--- NODE loop at `omnibase_infra` then applied the node file on top, whose
+-- NODE loop at `omnibase_infra` then applied the node file, whose
 -- `CREATE TABLE IF NOT EXISTS` SILENTLY NO-OPPED against the already-existing
 -- flat table. The node row was recorded as applied; the node SHAPE never
 -- materialised. That is exactly the class the OMN-15376 block in the node file
@@ -53,8 +53,9 @@
 -- leave 8 of these 11 differences standing.
 --
 -- Hence: a forward migration, not a ledger declaration. A
--- `verified-divergent-adoptions.tsv` entry here would assert that the applied
--- SQL produced the schema the checked-in file produces. It did not.
+-- `verified-divergent-adoptions.tsv` entry on its own would assert that the
+-- applied SQL produced the schema the checked-in file produces. It did not --
+-- until this file runs.
 --
 -- ============================================================================
 -- WHY THE FLAT SET, NOT THE NODE SET
@@ -69,36 +70,76 @@
 -- convergence belongs here.
 --
 -- ============================================================================
--- LOSSLESSNESS
+-- LOSSLESSNESS, AND WHY THE GUARDS ARE PER-ROW
 -- ============================================================================
--- Every conversion below is a WIDENING, and each one is re-proved against the
--- live catalog at apply time rather than assumed from this comment:
+-- Every conversion below is a WIDENING:
 --
 --   VARCHAR(n) -> TEXT           unbounded target; no value can fail to fit.
 --   NUMERIC(14,6) -> (18,6)      +4 integer digits, identical scale.
 --
+-- The two ways a NUMERIC widening could stop being a widening -- a stored value
+-- with more than 6 fractional digits (rounded away) or one needing more than 12
+-- integer digits (overflow) -- are checked in the USING clause, per row, at the
+-- exact point the conversion happens. A row that would lose data aborts the
+-- whole ALTER with a message naming this ticket and the reason; nothing is
+-- applied, because a single ALTER TABLE is one transaction. That is deliberately
+-- stricter than a table-level precondition: it cannot be true when the check
+-- runs and false when the cast runs.
+--
+-- The guards are expressed as a CAST of an explanatory string to numeric rather
+-- than as a PL/pgSQL RAISE because this file may not contain a procedural block
+-- at all: `scripts/ci/check_application_database_sql.py` rejects every `DO`
+-- block in changed SQL outright (its relation targets cannot be proven
+-- statically), and adding this file to that gate's exemption list to keep a
+-- nicer error string would be trading a real static guarantee for cosmetics.
+-- The cast fails with the message inline, which is the same information.
+--
+-- Each message is anchored to the column (`|| left(<col>::text, 0)`, which
+-- appends nothing) ON PURPOSE. A bare `'...'::NUMERIC` is a constant, and
+-- PostgreSQL resolves constant casts at PARSE time -- so the untaken branch
+-- would abort the migration on EVERY database, including the ones with no
+-- offending row. Verified both ways on a scratch cluster before shipping.
+--
+-- The table is named unqualified, matching 074 and 076 in this same corpus:
+-- `savings_estimates` is one of the relations whose physical table
+-- intentionally remains in `public` until the governed OMN-15359 schema
+-- cutover, and the changed-SQL gate's own allowlist
+-- (TENANT_TABLES_PHYSICALLY_IN_PUBLIC_UNTIL_OMN15359) is what admits it.
+--
+-- The TEXT conversions carry a type guard for a reason that is easy to get
+-- wrong: `ALTER COLUMN ... TYPE TEXT` does NOT refuse an unrelated source type.
+-- Postgres will happily I/O-convert one -- a `bytea` column would become the
+-- string `\x6d61632d3031` and the migration would report success. Verified, not
+-- assumed. So the character conversions check `pg_typeof` and refuse anything
+-- outside the character family instead of relying on a refusal that does not
+-- happen.
+--
+-- One unsafe shape genuinely needs no hand-written guard, because Postgres does
+-- refuse it by name and this file does not suppress it: a declared column that
+-- is absent -> `column "x" does not exist`.
+--
+-- The whole file runs inside one explicit transaction (as 051 and 077 in this
+-- same corpus do), so "Nothing was applied" is true of the FILE and not merely
+-- of the failing statement -- the runner invokes psql without
+-- `--single-transaction`, so without this a later statement's refusal would
+-- leave an earlier one's widening committed.
+--
 -- The three CHECK constraints are added under the names the node file declares.
 -- They are not new SEMANTICS in this database: `non_negative_local`,
 -- `non_negative_cloud` and `savings_consistency` already enforce the identical
--- predicates, so no row can violate the new names. The migration still counts
--- violations first and RAISEs with the count rather than trusting that claim.
---
--- Anything that would NOT be provably lossless RAISEs and applies nothing:
--- a column that is not varchar/text, a numeric with scale > 6 (fractional
--- truncation), a numeric needing more than 12 integer digits (overflow), or an
--- unconstrained NUMERIC (whose contents cannot be bounded a priori). The
--- migration refuses to guess -- same posture as the OMN-15376 NOT NULL loop.
+-- predicates, so no row can violate the new names. DROP IF EXISTS + ADD in one
+-- statement makes each idempotent without a procedural guard, and re-adding
+-- revalidates every row -- so a future lane whose data HAS drifted fails here,
+-- loudly, instead of acquiring a constraint that does not hold.
 --
 -- ============================================================================
 -- IDEMPOTENCE AND THE FRESH PATH
 -- ============================================================================
--- Every step is guarded on the LIVE catalog state, so:
---   * re-running is a no-op;
---   * a database where the table is absent is a no-op (NOTICE, not an error);
---   * on a fresh service database, flat 074 creates the narrow shape and this
---     file widens it, so the fresh path and the drifted path end at ONE schema
---     -- the same both-paths-converge property the OMN-15376 block guarantees
---     inside the node corpus.
+-- Re-running is a no-op: each ALTER COLUMN names the type it converges TO, and
+-- each constraint is dropped-if-present before being added. On a fresh service
+-- database, flat 074 creates the narrow shape and this file widens it, so the
+-- fresh path and the drifted path end at ONE schema -- the same both-paths-
+-- converge property the OMN-15376 block guarantees inside the node corpus.
 --
 -- This does NOT edit 074. Editing an applied migration in place is the
 -- OMN-16705 class that check_migration_append_only.py exists to reject; 074
@@ -113,174 +154,145 @@
 -- OMN-15384 (the flat-vs-node parity ledger), OMN-15376 (in-corpus shape
 -- reconciliation), OMN-15857 (the flat/node ownership ruling).
 
-DO $omn16923$
-DECLARE
-    v_rel        regclass := to_regclass('public.savings_estimates');
-    v_col        TEXT;
-    v_type       TEXT;
-    v_typmod     INT;
-    v_precision  INT;
-    v_scale      INT;
-    v_violations BIGINT;
-    -- Declared TEXT by nodes/node_projection_savings/074_create_savings_estimates.sql.
-    v_text_columns CONSTANT TEXT[] := ARRAY[
-        'session_id', 'model_local', 'model_cloud_baseline', 'repo_name', 'machine_id'
-    ];
-    -- Declared NUMERIC(18, 6) by the same file.
-    v_numeric_columns CONSTANT TEXT[] := ARRAY[
-        'local_cost_usd', 'cloud_cost_usd', 'savings_usd'
-    ];
-BEGIN
-    IF v_rel IS NULL THEN
-        RAISE NOTICE
-            'OMN-16923: public.savings_estimates does not exist here -- nothing to converge.';
-        RETURN;
-    END IF;
+BEGIN;
 
-    -- ---- 1. VARCHAR(n) -> TEXT -------------------------------------------
-    FOREACH v_col IN ARRAY v_text_columns
-    LOOP
-        SELECT format_type(a.atttypid, a.atttypmod)
-          INTO v_type
-          FROM pg_attribute a
-         WHERE a.attrelid = v_rel
-           AND a.attname = v_col
-           AND a.attnum > 0
-           AND NOT a.attisdropped;
+-- ---- 1. VARCHAR(n) -> TEXT ------------------------------------------------
+-- Unbounded target, so no stored character value can fail to fit. The guard is
+-- on the SOURCE TYPE, not on the value: see the header for why TEXT does not
+-- refuse an unrelated source on its own.
 
-        IF v_type IS NULL THEN
-            RAISE EXCEPTION
-                'OMN-16923: public.savings_estimates.% is absent, so the declared TEXT '
-                'shape cannot be reached by widening. This is a different divergence '
-                'class than the one this migration was written for; it needs its own '
-                'ruling. Nothing was applied.', v_col;
-        ELSIF v_type = 'text' THEN
-            CONTINUE;  -- already converged
-        ELSIF v_type LIKE 'character varying%' THEN
-            EXECUTE format(
-                'ALTER TABLE public.savings_estimates ALTER COLUMN %I TYPE TEXT', v_col
-            );
-            RAISE NOTICE 'OMN-16923: widened public.savings_estimates.% from % to text',
-                v_col, v_type;
-        ELSE
-            RAISE EXCEPTION
-                'OMN-16923: refusing to convert public.savings_estimates.% from % to TEXT '
-                '-- only character varying and text are provably lossless sources. '
-                'Nothing was applied.', v_col, v_type;
-        END IF;
-    END LOOP;
-
-    -- ---- 2. NUMERIC(p,s) -> NUMERIC(18,6) --------------------------------
-    FOREACH v_col IN ARRAY v_numeric_columns
-    LOOP
-        SELECT a.atttypid::regtype::TEXT, a.atttypmod
-          INTO v_type, v_typmod
-          FROM pg_attribute a
-         WHERE a.attrelid = v_rel
-           AND a.attname = v_col
-           AND a.attnum > 0
-           AND NOT a.attisdropped;
-
-        IF v_type IS NULL THEN
-            RAISE EXCEPTION
-                'OMN-16923: public.savings_estimates.% is absent, so the declared '
-                'NUMERIC(18,6) shape cannot be reached by widening. Nothing was applied.',
-                v_col;
-        ELSIF v_type <> 'numeric' THEN
-            RAISE EXCEPTION
-                'OMN-16923: refusing to convert public.savings_estimates.% from % to '
-                'NUMERIC(18,6) -- a non-numeric source is not a widening and this '
-                'migration will not guess at a cast. Nothing was applied.', v_col, v_type;
-        ELSIF v_typmod = -1 THEN
-            RAISE EXCEPTION
-                'OMN-16923: public.savings_estimates.% is an UNCONSTRAINED numeric. '
-                'Constraining it to NUMERIC(18,6) is a NARROWING -- any stored value '
-                'with more than 12 integer digits or more than 6 fractional digits '
-                'would be rejected or rounded. This needs a data ruling, not a '
-                'migration that guesses. Nothing was applied.', v_col;
-        ELSE
-            v_precision := ((v_typmod - 4) >> 16) & 65535;
-            v_scale     := (v_typmod - 4) & 65535;
-
-            IF v_precision = 18 AND v_scale = 6 THEN
-                CONTINUE;  -- already converged
-            ELSIF v_scale > 6 THEN
-                RAISE EXCEPTION
-                    'OMN-16923: refusing to convert public.savings_estimates.% from '
-                    'NUMERIC(%,%) to NUMERIC(18,6) -- scale % exceeds 6, so the '
-                    'conversion would ROUND stored fractional digits away. That is a '
-                    'data loss, not a convergence. Nothing was applied.',
-                    v_col, v_precision, v_scale, v_scale;
-            ELSIF (v_precision - v_scale) > 12 THEN
-                RAISE EXCEPTION
-                    'OMN-16923: refusing to convert public.savings_estimates.% from '
-                    'NUMERIC(%,%) to NUMERIC(18,6) -- it admits % integer digits and '
-                    'the target admits only 12, so a stored value could OVERFLOW. '
-                    'Nothing was applied.',
-                    v_col, v_precision, v_scale, v_precision - v_scale;
+ALTER TABLE savings_estimates
+    ALTER COLUMN session_id TYPE TEXT
+        USING CASE
+            WHEN pg_typeof(session_id)::TEXT IN ('character varying', 'text', 'character') THEN
+                session_id::TEXT
             ELSE
-                EXECUTE format(
-                    'ALTER TABLE public.savings_estimates ALTER COLUMN %I TYPE NUMERIC(18, 6)',
-                    v_col
-                );
-                RAISE NOTICE
-                    'OMN-16923: widened public.savings_estimates.% from numeric(%,%) to numeric(18,6)',
-                    v_col, v_precision, v_scale;
-            END IF;
-        END IF;
-    END LOOP;
+                ('OMN-16923: refusing to convert savings_estimates.session_id to TEXT '
+                 '-- its live type is outside the character family, so this would '
+                 'not be a widening: Postgres would I/O-convert the stored value '
+                 'into its text rendering. That needs a ruling, not a guess. '
+                 'Nothing was applied.'
+                 || left(session_id::TEXT, 0))::NUMERIC::TEXT
+        END,
+    ALTER COLUMN model_local TYPE TEXT
+        USING CASE
+            WHEN pg_typeof(model_local)::TEXT IN ('character varying', 'text', 'character') THEN
+                model_local::TEXT
+            ELSE
+                ('OMN-16923: refusing to convert savings_estimates.model_local to TEXT '
+                 '-- its live type is outside the character family, so this would '
+                 'not be a widening: Postgres would I/O-convert the stored value '
+                 'into its text rendering. That needs a ruling, not a guess. '
+                 'Nothing was applied.'
+                 || left(model_local::TEXT, 0))::NUMERIC::TEXT
+        END,
+    ALTER COLUMN model_cloud_baseline TYPE TEXT
+        USING CASE
+            WHEN pg_typeof(model_cloud_baseline)::TEXT IN ('character varying', 'text', 'character') THEN
+                model_cloud_baseline::TEXT
+            ELSE
+                ('OMN-16923: refusing to convert savings_estimates.model_cloud_baseline to TEXT '
+                 '-- its live type is outside the character family, so this would '
+                 'not be a widening: Postgres would I/O-convert the stored value '
+                 'into its text rendering. That needs a ruling, not a guess. '
+                 'Nothing was applied.'
+                 || left(model_cloud_baseline::TEXT, 0))::NUMERIC::TEXT
+        END,
+    ALTER COLUMN repo_name TYPE TEXT
+        USING CASE
+            WHEN pg_typeof(repo_name)::TEXT IN ('character varying', 'text', 'character') THEN
+                repo_name::TEXT
+            ELSE
+                ('OMN-16923: refusing to convert savings_estimates.repo_name to TEXT '
+                 '-- its live type is outside the character family, so this would '
+                 'not be a widening: Postgres would I/O-convert the stored value '
+                 'into its text rendering. That needs a ruling, not a guess. '
+                 'Nothing was applied.'
+                 || left(repo_name::TEXT, 0))::NUMERIC::TEXT
+        END,
+    ALTER COLUMN machine_id TYPE TEXT
+        USING CASE
+            WHEN pg_typeof(machine_id)::TEXT IN ('character varying', 'text', 'character') THEN
+                machine_id::TEXT
+            ELSE
+                ('OMN-16923: refusing to convert savings_estimates.machine_id to TEXT '
+                 '-- its live type is outside the character family, so this would '
+                 'not be a widening: Postgres would I/O-convert the stored value '
+                 'into its text rendering. That needs a ruling, not a guess. '
+                 'Nothing was applied.'
+                 || left(machine_id::TEXT, 0))::NUMERIC::TEXT
+        END;
 
-    -- ---- 3. the three CHECK constraints, under the DECLARED names ---------
-    -- The predicates are already enforced here under the flat file's own names
-    -- (non_negative_local / non_negative_cloud / savings_consistency), which is
-    -- why no row can violate these. Counted anyway: a claim that costs nothing
-    -- to check is not a claim worth trusting.
-    IF NOT EXISTS (
-        SELECT 1 FROM pg_constraint
-         WHERE conrelid = v_rel AND conname = 'savings_estimates_local_cost_usd_check'
-    ) THEN
-        SELECT count(*) INTO v_violations
-          FROM public.savings_estimates WHERE local_cost_usd < 0;
-        IF v_violations > 0 THEN
-            RAISE EXCEPTION
-                'OMN-16923: cannot add savings_estimates_local_cost_usd_check -- % row(s) '
-                'hold a negative local_cost_usd. Nothing was applied.', v_violations;
-        END IF;
-        ALTER TABLE public.savings_estimates
-            ADD CONSTRAINT savings_estimates_local_cost_usd_check CHECK (local_cost_usd >= 0);
-    END IF;
+-- ---- 2. NUMERIC(p,s) -> NUMERIC(18,6) -------------------------------------
+-- scale(x) > 6      the conversion would ROUND stored digits away.
+-- abs(x) >= 10^12   the target admits only 12 integer digits.
 
-    IF NOT EXISTS (
-        SELECT 1 FROM pg_constraint
-         WHERE conrelid = v_rel AND conname = 'savings_estimates_cloud_cost_usd_check'
-    ) THEN
-        SELECT count(*) INTO v_violations
-          FROM public.savings_estimates WHERE cloud_cost_usd < 0;
-        IF v_violations > 0 THEN
-            RAISE EXCEPTION
-                'OMN-16923: cannot add savings_estimates_cloud_cost_usd_check -- % row(s) '
-                'hold a negative cloud_cost_usd. Nothing was applied.', v_violations;
-        END IF;
-        ALTER TABLE public.savings_estimates
-            ADD CONSTRAINT savings_estimates_cloud_cost_usd_check CHECK (cloud_cost_usd >= 0);
-    END IF;
+ALTER TABLE savings_estimates
+    ALTER COLUMN local_cost_usd TYPE NUMERIC(18, 6)
+        USING CASE
+            WHEN scale(local_cost_usd) > 6 THEN
+                ('OMN-16923: refusing to convert savings_estimates.local_cost_usd to '
+                 'NUMERIC(18,6) -- a stored value carries more than 6 fractional '
+                 'digits and would be ROUNDED. That is data loss, not a '
+                 'convergence. Nothing was applied.'
+                 || left(local_cost_usd::TEXT, 0))::NUMERIC
+            WHEN abs(local_cost_usd) >= 1000000000000 THEN
+                ('OMN-16923: refusing to convert savings_estimates.local_cost_usd to '
+                 'NUMERIC(18,6) -- a stored value needs more than the 12 integer '
+                 'digits the target admits and would OVERFLOW. Nothing was applied.'
+                 || left(local_cost_usd::TEXT, 0))::NUMERIC
+            ELSE local_cost_usd
+        END,
+    ALTER COLUMN cloud_cost_usd TYPE NUMERIC(18, 6)
+        USING CASE
+            WHEN scale(cloud_cost_usd) > 6 THEN
+                ('OMN-16923: refusing to convert savings_estimates.cloud_cost_usd to '
+                 'NUMERIC(18,6) -- a stored value carries more than 6 fractional '
+                 'digits and would be ROUNDED. That is data loss, not a '
+                 'convergence. Nothing was applied.'
+                 || left(cloud_cost_usd::TEXT, 0))::NUMERIC
+            WHEN abs(cloud_cost_usd) >= 1000000000000 THEN
+                ('OMN-16923: refusing to convert savings_estimates.cloud_cost_usd to '
+                 'NUMERIC(18,6) -- a stored value needs more than the 12 integer '
+                 'digits the target admits and would OVERFLOW. Nothing was applied.'
+                 || left(cloud_cost_usd::TEXT, 0))::NUMERIC
+            ELSE cloud_cost_usd
+        END,
+    ALTER COLUMN savings_usd TYPE NUMERIC(18, 6)
+        USING CASE
+            WHEN scale(savings_usd) > 6 THEN
+                ('OMN-16923: refusing to convert savings_estimates.savings_usd to '
+                 'NUMERIC(18,6) -- a stored value carries more than 6 fractional '
+                 'digits and would be ROUNDED. That is data loss, not a '
+                 'convergence. Nothing was applied.'
+                 || left(savings_usd::TEXT, 0))::NUMERIC
+            WHEN abs(savings_usd) >= 1000000000000 THEN
+                ('OMN-16923: refusing to convert savings_estimates.savings_usd to '
+                 'NUMERIC(18,6) -- a stored value needs more than the 12 integer '
+                 'digits the target admits and would OVERFLOW. Nothing was applied.'
+                 || left(savings_usd::TEXT, 0))::NUMERIC
+            ELSE savings_usd
+        END;
 
-    IF NOT EXISTS (
-        SELECT 1 FROM pg_constraint
-         WHERE conrelid = v_rel AND conname = 'savings_estimates_amounts_match'
-    ) THEN
-        SELECT count(*) INTO v_violations
-          FROM public.savings_estimates
-         WHERE savings_usd <> cloud_cost_usd - local_cost_usd;
-        IF v_violations > 0 THEN
-            RAISE EXCEPTION
-                'OMN-16923: cannot add savings_estimates_amounts_match -- % row(s) do not '
-                'satisfy savings_usd = cloud_cost_usd - local_cost_usd. Nothing was '
-                'applied.', v_violations;
-        END IF;
-        ALTER TABLE public.savings_estimates
-            ADD CONSTRAINT savings_estimates_amounts_match
-            CHECK (savings_usd = cloud_cost_usd - local_cost_usd);
-    END IF;
-END
-$omn16923$;
+-- ---- 3. the three CHECK constraints, under the DECLARED names --------------
+-- DROP IF EXISTS + ADD in ONE statement: idempotent without a procedural guard,
+-- never leaving a window where the predicate is unenforced, and revalidating
+-- every row on the way in. The predicates are already enforced here under 074's
+-- own names (non_negative_local / non_negative_cloud / savings_consistency), so
+-- no row can violate them -- and a future lane whose data HAS drifted fails
+-- here, loudly, instead of acquiring a constraint that does not hold.
+
+ALTER TABLE savings_estimates
+    DROP CONSTRAINT IF EXISTS savings_estimates_local_cost_usd_check,
+    ADD CONSTRAINT savings_estimates_local_cost_usd_check CHECK (local_cost_usd >= 0);
+
+ALTER TABLE savings_estimates
+    DROP CONSTRAINT IF EXISTS savings_estimates_cloud_cost_usd_check,
+    ADD CONSTRAINT savings_estimates_cloud_cost_usd_check CHECK (cloud_cost_usd >= 0);
+
+ALTER TABLE savings_estimates
+    DROP CONSTRAINT IF EXISTS savings_estimates_amounts_match,
+    ADD CONSTRAINT savings_estimates_amounts_match
+        CHECK (savings_usd = cloud_cost_usd - local_cost_usd);
+
+COMMIT;

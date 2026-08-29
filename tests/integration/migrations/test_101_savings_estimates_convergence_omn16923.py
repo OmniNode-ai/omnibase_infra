@@ -52,6 +52,11 @@ What this file proves, by execution rather than by restatement:
 Ticket: OMN-16923. Family: OMN-15857 / OMN-16915 / OMN-16919.
 """
 
+# ruff: noqa: S608 -- the SQL below is assembled from literals defined in this
+# file and from checked-in migration paths; there is no untrusted input here,
+# and the same suppression is carried by the OMN-16915 sibling for the same
+# reason.
+
 
 # literal defined in this file; there is no untrusted input here.
 
@@ -475,22 +480,31 @@ def test_the_fresh_service_path_and_the_drifted_path_end_at_one_schema(
     assert set(DECLARED_CONSTRAINTS) <= _constraint_names(pg16, pg16_fresh_database)
 
 
-def test_migration_101_is_a_no_op_where_the_table_does_not_exist(
+def test_101_requires_the_table_074_creates_and_074_is_not_skip_manifested(
     pg16: Pg16Cluster, pg16_fresh_database: str
 ) -> None:
-    """The runner applies the flat corpus to whatever database it is pointed at.
-    A database with no savings_estimates must get a NOTICE, not a failure."""
-    output = _apply(
-        pg16, pg16_fresh_database, MIGRATION_101.read_text(encoding="utf-8")
+    """101 has no procedural guard for an absent table -- it cannot, because the
+    changed-SQL gate rejects every DO block. That is safe for exactly one
+    reason, and it is a fact about the runner rather than about this file: the
+    flat loop applies in sorted filename order, 074 sorts before 101, and 074 is
+    not in the skip manifest. If either of those stopped being true, 101 would
+    fail on a fresh service database -- so both are asserted here.
+    """
+    skip_manifest = (
+        REPO_ROOT / "docker" / "migrations" / "skip-manifest.yaml"
+    ).read_text(encoding="utf-8")
+    assert "074_create_savings_estimates.sql" not in skip_manifest
+    assert FLAT_074.name < MIGRATION_101.name
+
+    completed = pg16.command(
+        pg16_fresh_database,
+        "-f",
+        "-",
+        input_text=MIGRATION_101.read_text(encoding="utf-8"),
+        check=False,
     )
-    assert "does not exist here -- nothing to converge" in output
-    assert (
-        pg16.sql(
-            pg16_fresh_database,
-            "SELECT to_regclass('public.savings_estimates') IS NULL",
-        )
-        == "t"
-    )
+    assert completed.returncode != 0
+    assert 'relation "savings_estimates" does not exist' in completed.stderr
 
 
 # ---------------------------------------------------------------------------
@@ -504,35 +518,52 @@ def _drifted_with(pg16: Pg16Cluster, database: str, *statements: str) -> None:
         _apply(pg16, database, statement)
 
 
+# Every value-mutating case below drops 074's own CHECKs first: they are what
+# keep the fixture honest in the other tests, and they would reject the drifted
+# value before 101 ever saw it.
+_UNGUARD = (
+    "ALTER TABLE savings_estimates DROP CONSTRAINT savings_consistency; "
+    "ALTER TABLE savings_estimates DROP CONSTRAINT non_negative_local; "
+    "ALTER TABLE savings_estimates DROP CONSTRAINT non_negative_cloud; "
+)
+
+
 @pytest.mark.parametrize(
     ("mutation", "expected"),
     [
         pytest.param(
-            "ALTER TABLE savings_estimates ALTER COLUMN local_cost_usd "
-            "TYPE NUMERIC(20, 8)",
-            "would ROUND stored fractional digits away",
-            id="scale-8-would-round",
+            _UNGUARD + "ALTER TABLE savings_estimates ALTER COLUMN local_cost_usd "
+            "TYPE NUMERIC(20, 8); "
+            "UPDATE savings_estimates SET local_cost_usd = 1.12345678 "
+            "WHERE session_id = 'sess-a';",
+            "would be ROUNDED",
+            id="a-stored-value-with-8-fractional-digits",
         ),
         pytest.param(
-            "ALTER TABLE savings_estimates ALTER COLUMN cloud_cost_usd "
-            "TYPE NUMERIC(24, 6)",
-            "could OVERFLOW",
-            id="19-integer-digits-would-overflow",
+            _UNGUARD + "ALTER TABLE savings_estimates ALTER COLUMN cloud_cost_usd "
+            "TYPE NUMERIC(24, 6); "
+            "UPDATE savings_estimates SET cloud_cost_usd = 1234567890123.5 "
+            "WHERE session_id = 'sess-a';",
+            "would OVERFLOW",
+            id="a-stored-value-with-13-integer-digits",
         ),
         pytest.param(
-            "ALTER TABLE savings_estimates ALTER COLUMN savings_usd TYPE NUMERIC",
-            "UNCONSTRAINED numeric",
-            id="unconstrained-numeric-is-a-narrowing",
+            _UNGUARD
+            + "ALTER TABLE savings_estimates ALTER COLUMN savings_usd TYPE NUMERIC; "
+            "UPDATE savings_estimates SET savings_usd = 8.500000001 "
+            "WHERE session_id = 'sess-a';",
+            "would be ROUNDED",
+            id="unconstrained-numeric-holding-an-over-scale-value",
         ),
         pytest.param(
             "ALTER TABLE savings_estimates ALTER COLUMN machine_id "
             "TYPE BYTEA USING machine_id::bytea",
-            "only character varying and text are provably lossless sources",
-            id="non-character-source",
+            "outside the character family",
+            id="source-type-outside-the-character-family",
         ),
         pytest.param(
             "ALTER TABLE savings_estimates DROP COLUMN repo_name",
-            "cannot be reached by widening",
+            'column "repo_name" does not exist',
             id="declared-column-absent",
         ),
     ],
@@ -543,12 +574,20 @@ def test_a_conversion_that_would_lose_data_is_refused(
     mutation: str,
     expected: str,
 ) -> None:
-    """Each of these is a shape 101 must REFUSE rather than silently truncate.
+    """Each of these is a shape 101 must REFUSE rather than silently mangle.
 
-    Without these the migration is a liability: it would look like a widening in
+    Without them the migration is a liability: it would look like a widening in
     review and behave like a narrowing on a lane whose table drifted a second
     time. The assertion is on the message, not just the failure, so a refusal
     for an unrelated reason cannot masquerade as this one.
+
+    `source-type-outside-the-character-family` is the case that would have
+    shipped as a silent mangle: `ALTER COLUMN ... TYPE TEXT` does NOT refuse a
+    bytea source -- it I/O-converts it to the string `\\x...` and reports
+    success. The guard exists because that was checked rather than assumed.
+
+    The whole file is one transaction, so the assertion below is that NOTHING
+    changed -- not merely that the failing statement rolled itself back.
     """
     database, _client = service_db
     _drifted_with(pg16, database, mutation)
@@ -563,8 +602,29 @@ def test_a_conversion_that_would_lose_data_is_refused(
     )
     assert completed.returncode != 0, "the migration must not apply this conversion"
     assert expected in completed.stderr, completed.stderr
-    # The DO block is one statement, so its failure rolls the whole thing back.
     assert _column_types(pg16, database) == before
+
+
+def test_an_untaken_guard_branch_does_not_abort_the_migration(
+    pg16: Pg16Cluster, service_db: tuple[str, object]
+) -> None:
+    """The guard messages are anchored to their column on purpose.
+
+    PostgreSQL resolves a constant cast at PARSE time, so a bare
+    `'OMN-16923: ...'::NUMERIC` sitting in a branch no row takes would abort the
+    migration on EVERY database -- including every database with nothing wrong
+    with it. Concatenating `left(<col>, 0)` makes the expression non-constant
+    and defers it to execution. This is the test that would catch a future
+    "simplification" that drops the concatenation.
+    """
+    database, _client = service_db
+    _build_drifted_service_schema(pg16, database)
+    guarded = MIGRATION_101.read_text(encoding="utf-8")
+    assert "left(local_cost_usd::TEXT, 0)" in guarded, (
+        "the guard must stay column-anchored or it folds at parse time"
+    )
+    _apply(pg16, database, guarded)
+    assert _column_types(pg16, database)["local_cost_usd"] == "numeric(18,6)"
 
 
 def test_rows_violating_a_declared_check_are_refused_not_forced(
@@ -593,9 +653,10 @@ def test_rows_violating_a_declared_check_are_refused_not_forced(
         check=False,
     )
     assert completed.returncode != 0
-    assert "1 row(s) hold a negative local_cost_usd" in completed.stderr, (
+    assert "savings_estimates_local_cost_usd_check" in completed.stderr, (
         completed.stderr
     )
+    assert "violated by some row" in completed.stderr, completed.stderr
     assert "savings_estimates_local_cost_usd_check" not in _constraint_names(
         pg16, database
     )
@@ -629,7 +690,7 @@ def test_the_rollback_refuses_to_truncate_a_value_that_no_longer_fits(
         check=False,
     )
     assert completed.returncode != 0
-    assert "would be truncated" in completed.stderr, completed.stderr
+    assert "would be TRUNCATED" in completed.stderr, completed.stderr
     assert _column_types(pg16, database)["machine_id"] == "text"
     assert (
         pg16.sql(
