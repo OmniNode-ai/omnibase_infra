@@ -4,8 +4,12 @@ title: 'Report runtime NOT-READY when a contract-declared projection is unattach
 summary: >-
   Pick up OMN-16843's deferred AC6. Add two projection-liveness dimensions to the ServiceRuntimeHealthMonitor verdict that already folds into /health's top-level status (OMN-15217), so a contract-declared projection that never attached, or one that routes 100% of what it consumes to a DLQ/quarantine sink, stops reading healthy.
 is_seam_ticket: false
-interface_change: false
+# Additive only: three new fields on the published runtime-health-check.v1
+# event and the same three counts on the /health details block. No field is
+# renamed, retyped or removed, and every new field carries a default.
+interface_change: true
 interfaces_touched:
+  - events
   - public_api
 evidence_requirements:
   - kind: tests
