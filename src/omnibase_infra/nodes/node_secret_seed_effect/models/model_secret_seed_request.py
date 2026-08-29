@@ -183,13 +183,37 @@ class ModelSecretSeedRequest(BaseModel):
     @field_validator("infisical_host")
     @classmethod
     def _validate_infisical_host(cls, value: str) -> str:
+        """Accept a bare, credential-free ``http(s)`` origin and nothing else.
+
+        The userinfo/query/fragment/path rejections are not tidiness. This
+        field DOES ride the bus and DOES reach the event log — that is the
+        whole reason values are kept off this model — so a URL like
+        ``https://client:secret@host`` or ``...?token=...`` would smuggle a
+        credential into exactly the durable storage the rest of this model
+        exists to keep it out of. The one field that legitimately travels is
+        therefore the one that must refuse to carry a secret.
+
+        ``http://`` is deliberately ACCEPTED. All three instances this node
+        exists to seed are plain http — the two `.201` lanes and the
+        in-cluster service address in
+        ``docs/runbooks/headless-secret-seeding.md`` — so an https-only rule
+        would reject every address the node actually targets, including
+        every invocation the runbook documents. A rule the operator must
+        route around is worse than no rule. Transport confidentiality on a
+        LAN or in-cluster hop is a deployment property this validator cannot
+        assert, and asserting it here would read as security while
+        delivering none. Pinned by ``test_plain_http_host_is_accepted`` so
+        this is a decision on the record rather than an oversight; if the
+        estate ever terminates TLS in front of those instances, tighten the
+        rule and the runbook together, in that order.
+        """
         stripped = value.strip().rstrip("/")
         if not stripped:
             raise ValueError("infisical_host must not be empty")
         parsed = urlsplit(stripped)
-        if parsed.scheme != "https" or not parsed.netloc:
+        if parsed.scheme not in ("http", "https") or not parsed.netloc:
             raise ValueError(
-                f"infisical_host must be an absolute HTTPS URL, got: {value!r}"
+                f"infisical_host must be an absolute http(s) URL, got: {value!r}"
             )
         if parsed.username or parsed.password:
             raise ValueError("infisical_host must not include credentials")
