@@ -769,6 +769,11 @@ DECLARE
   source_row RECORD;
   manifest_row RECORD;
   existing_row RECORD;
+  -- OMN-16915.  Same hazard as OMN-15857's adoption_row: a plpgsql RECORD keeps
+  -- whatever the last SELECT INTO put in it, so this is reset at the top of
+  -- every iteration.  A verified divergent adoption for one version must never
+  -- leak its ticket/receipt into the provenance of the next.
+  divergent_row RECORD;
   canonical_version TEXT;
   imported_checksum TEXT;
   imported_kind TEXT;
@@ -811,6 +816,11 @@ BEGIN
     FROM public.omnimarket_schema_migrations
     ORDER BY node_name, version
   LOOP
+    -- OMN-16915: clear the carried-over RECORD before each row.
+    SELECT * INTO divergent_row
+    FROM onex_verified_divergent_adoptions
+    WHERE false;
+
     IF source_row.node_name !~ '^[A-Za-z0-9_][A-Za-z0-9_.-]*$'
        OR source_row.filename !~ '^[A-Za-z0-9_][A-Za-z0-9_.-]*[.]sql$' THEN
       RAISE EXCEPTION 'unknown migration stream identity in omnimarket source';
@@ -832,18 +842,81 @@ BEGIN
       RAISE EXCEPTION
         'unknown migration stream/domain for omnimarket version %', canonical_version;
     END IF;
+    -- A malformed checksum is never adoptable.  Only a well-formed content hash
+    -- can be argued about at all; anything else is not a bytes claim and there
+    -- is no proof shape that could rescue it.
     IF source_row.checksum IS NULL
-       OR source_row.checksum !~ '^[0-9a-f]{64}$'
-       OR source_row.checksum <> manifest_row.checksum THEN
+       OR source_row.checksum !~ '^[0-9a-f]{64}$' THEN
       RAISE EXCEPTION 'conflicting migration checksum for version %', canonical_version;
     END IF;
+
     imported_kind := 'content_sha256';
-    imported_checksum := source_row.checksum;
-    imported_provenance := format(
-      'legacy:%s:public.omnimarket_schema_migrations:%s:%s:%s:raw-checksum=%s',
-      current_database(), source_row.node_name, source_row.version,
-      source_row.filename, coalesce(source_row.checksum, '<NULL>')
-    );
+
+    IF source_row.checksum = manifest_row.checksum THEN
+      imported_checksum := source_row.checksum;
+      imported_provenance := format(
+        'legacy:%s:public.omnimarket_schema_migrations:%s:%s:%s:raw-checksum=%s',
+        current_database(), source_row.node_name, source_row.version,
+        source_row.filename, coalesce(source_row.checksum, '<NULL>')
+      );
+    ELSE
+      -- OMN-16915: DIVERGENT BYTES.  The row carries a real, well-formed sha256
+      -- that simply is not the manifest's.  This is not OMN-15857's sentinel
+      -- case (a hand-written non-hash marking an unproven hand-apply) -- it is a
+      -- lane that applied a genuine, earlier revision of the checked-in file and
+      -- was never re-converged.  On the .201 stability lane all six such rows
+      -- carry the artifact bytes as of 5b904d881 (2026-07-21), the last state
+      -- before OMN-15376 (#2537) rewrote those six migrations in place on
+      -- 2026-07-29.
+      --
+      -- Adopting on that story alone would be a guess.  "The bytes are an old
+      -- revision" does not by itself mean the schema the old revision produced
+      -- equals the schema the current file produces -- that is exactly the
+      -- question, and history is evidence for it, not proof of it.
+      --
+      -- So the same rule as OMN-15857 applies, with the same machinery:
+      -- scripts/migrations/verify_migration_checksum_adoption.py replays the
+      -- CURRENT checked-in migration into a scratch database, derives the object
+      -- surface that file owns by executing it, and diffs that surface against
+      -- the live database (columns, types, nullability, defaults, constraints,
+      -- indexes, view definitions, enum labels).  Only a proven-equal surface
+      -- earns the distinct `divergent_verified` verdict, and only that verdict
+      -- may be written into _ledger/verified-divergent-adoptions.tsv.
+      --
+      -- That file is deliberately SEPARATE from OMN-15857's
+      -- verified-checksum-adoptions.tsv.  The two admission paths answer
+      -- different questions about different source tables, and keeping them in
+      -- distinct relations means neither can ever be read for the other.
+      --
+      -- Three things must agree before the adoption is honoured, so a stale
+      -- declaration cannot outlive the fact it attested to:
+      --   1. the version is declared,
+      --   2. the declared source_checksum equals the divergent checksum actually
+      --      on the row (a declaration covers one revision, not any revision),
+      --   3. the declared manifest_checksum equals the manifest checksum the
+      --      proof ran against (rewriting the migration file after verification
+      --      re-opens the question and fails closed).
+      SELECT * INTO divergent_row
+      FROM onex_verified_divergent_adoptions
+      WHERE version = canonical_version;
+      IF NOT FOUND
+         OR divergent_row.source_checksum <> source_row.checksum
+         OR divergent_row.manifest_checksum <> manifest_row.checksum THEN
+        RAISE EXCEPTION 'conflicting migration checksum for version %', canonical_version;
+      END IF;
+      -- The canonical ledger records the MANIFEST hash: the proof says the live
+      -- schema is what the current checked-in bytes produce, so that is the
+      -- honest content claim.  The divergent hash survives verbatim in the
+      -- provenance next to the ticket and the receipt that proved it -- adoption
+      -- records the question and its answer, it does not erase the question.
+      imported_checksum := manifest_row.checksum;
+      imported_provenance := format(
+        'verified-divergent-adoption:%s:public.omnimarket_schema_migrations:%s:%s:%s:raw-checksum=%s:ticket=%s:receipt=%s',
+        current_database(), source_row.node_name, source_row.version,
+        source_row.filename, source_row.checksum,
+        divergent_row.ticket, divergent_row.receipt_sha256
+      );
+    END IF;
 
     SELECT * INTO existing_row
     FROM platform_catalog.schema_migrations
