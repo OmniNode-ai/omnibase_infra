@@ -207,8 +207,12 @@ def test_extraction_covers_job_and_step_level_pins(tmp_path: Path) -> None:
 
 @pytest.mark.unit
 def test_extraction_ignores_commented_out_uses_lines(tmp_path: Path) -> None:
-    """cr-thread-gate.yml carries a commented-out @main usage example — a line
-    regex would extract it and fail the gate on documentation."""
+    """A commented-out `uses:` line is documentation, not a pin.
+
+    The original instance was cr-thread-gate.yml's commented-out @main usage
+    example (deleted in OMN-16933); a line regex would extract it and fail the
+    gate on a comment. The fixture below keeps the shape covered.
+    """
     (tmp_path / "fixture.yml").write_text(_FIXTURE_WORKFLOW, encoding="utf-8")
     refs = _extract_cross_repo_uses(tmp_path)
     assert not any(r.path.endswith("commented-out.yml") for r in refs)
