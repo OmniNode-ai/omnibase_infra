@@ -62,9 +62,24 @@ from omnibase_infra.topology.table_grant_derivation import (
 
 pytestmark = pytest.mark.unit
 
-# The one declared state_io relation this manifest carries today.
-(_STATE_IO_DECLARATION,) = STATE_IO_TABLE_DECLARATIONS
-_DELEGATION_WORKFLOW_STATE_RELATION = _STATE_IO_DECLARATION.table
+# Every state_io-owned relation the checked-in manifest carries. OMN-16924
+# added the second (``session_phase_state``, the session phase reducer's
+# durable state of record); this file used to unpack exactly one, which made
+# adding a state_io table a collection-time crash rather than a covered case.
+_STATE_IO_RELATIONS = tuple(
+    declaration.table for declaration in STATE_IO_TABLE_DECLARATIONS
+)
+_STATE_IO_RELATION_NAMES = tuple(relation.name for relation in _STATE_IO_RELATIONS)
+_DELEGATION_WORKFLOW_STATE_RELATION = next(
+    relation
+    for relation in _STATE_IO_RELATIONS
+    if relation.name == "delegation_workflow_state"
+)
+_SESSION_PHASE_STATE_RELATION = next(
+    relation
+    for relation in _STATE_IO_RELATIONS
+    if relation.name == "session_phase_state"
+)
 
 
 @pytest.mark.parametrize("profile", sorted(SUPPORTED_TOPOLOGY_PROFILES))
@@ -207,7 +222,8 @@ def test_state_io_manifest_derives_the_shipped_grant() -> None:
     assert derived.unmappable == ()
     (grant,) = derived.grants["role_omnibase_infra"]
     assert grant.schema == "public"
-    assert grant.objects == ("delegation_workflow_state",)
+    assert set(grant.objects) == set(_STATE_IO_RELATION_NAMES)
+    assert "session_phase_state" in grant.objects
     assert set(grant.privileges) == {
         EnumDatabasePrivilege.SELECT,
         EnumDatabasePrivilege.INSERT,
@@ -260,3 +276,43 @@ def test_no_rls_or_policy_exists_for_delegation_workflow_state() -> None:
     assert "ROW LEVEL SECURITY" not in sql
     assert "CREATE POLICY" not in sql
     assert "tenant_id" in sql  # provenance column retained per R-q, not RLS'd
+
+
+def test_session_phase_state_resolves_on_every_shipped_profile() -> None:
+    """OMN-16924: the second state_io relation is bound everywhere too.
+
+    The session phase reducer's state of record moved off a cwd-relative
+    ``.onex_state`` file (unwritable in every runtime container) onto this
+    table. A relation the topology cannot resolve would reproduce the same
+    100%-dispatch-failure shape from the other side, so it is proven against
+    every shipped profile exactly like ``delegation_workflow_state``.
+    """
+    for profile in sorted(SUPPORTED_TOPOLOGY_PROFILES):
+        target = _resolve_projection_database_target(
+            (_SESSION_PHASE_STATE_RELATION,), load_topology_profile(profile)
+        )
+        assert target.bindings, profile
+
+
+def test_session_phase_state_migration_carries_the_session_id_key_column() -> None:
+    """The PK column is ``session_id`` — the key the contract declares.
+
+    ``state_io.key`` names BOTH the wire payload field and the primary-key
+    column, so a table whose PK is not the declared key would make every
+    ``load``/``seed`` fail on an unknown column at runtime rather than at
+    wiring time.
+    """
+    from pathlib import Path
+
+    migration_path = (
+        Path(__file__).parents[3]
+        / "docker"
+        / "migrations"
+        / "forward"
+        / "102_create_session_phase_state.sql"
+    )
+    sql = migration_path.read_text(encoding="utf-8")
+    assert "session_id        TEXT PRIMARY KEY" in sql
+    assert "correlation_id" not in sql.split("CREATE TABLE", 1)[1]
+    assert "pending_emissions JSONB" in sql
+    assert "publish_attempts  INTEGER NOT NULL DEFAULT 0" in sql
