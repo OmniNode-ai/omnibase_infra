@@ -69,7 +69,7 @@ verifier = _load_verifier()
 
 
 @pytest.fixture
-def audited(pg16: Pg16Cluster) -> Iterator[tuple[str, verifier.PsqlClient]]:
+def audited(pg16: Pg16Cluster) -> tuple[str, verifier.PsqlClient]:
     """A database standing in for a live lane, plus a client pointed at it."""
     database = f"omn15857_audited_{next(_COUNTER)}"
     pg16.create_database(database)
