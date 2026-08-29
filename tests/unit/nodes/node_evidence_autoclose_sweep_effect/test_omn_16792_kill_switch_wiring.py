@@ -103,11 +103,31 @@ def test_the_kill_switch_is_not_a_workflow_input() -> None:
     assert _KILL_SWITCH.lower() not in {name.lower() for name in inputs}
 
 
-def test_apply_is_still_never_passed() -> None:
+def test_apply_never_rides_in_on_the_invocation_line() -> None:
     """Guarded here because this file is where the sweep step is parsed.
 
-    OMN-16106 is DRY-RUN until arming is a deliberate, separate change. A
-    kill-switch PR touching this step is exactly the kind of edit that could
-    carry `--apply` in by accident.
+    This assertion used to be ``"--apply" not in run`` — "OMN-16106 is DRY-RUN
+    until arming is a deliberate, separate change". OMN-16106 IS that change,
+    so the absolute form is retired: it would now fail on the very edit it was
+    written to wait for, which is not the same thing as guarding against an
+    accident.
+
+    What it guards instead is the property that survives arming, and it is the
+    stricter half of the original: the flag must never appear on the
+    ``onex skill`` invocation line, because a guarded flag and an unconditional
+    one read identically in a diff. ``--apply`` may only enter through the
+    array the ``SWEEP_APPLY`` branch populates. The full apply contract — the
+    input's ``default: false``, the two-conjunct guard, the schedule path's
+    inability to reach it, and the mode labelling — is pinned in
+    ``tests/ci/test_evidence_autoclose_sweep_apply_input.py``.
     """
-    assert "--apply" not in str(_sweep_step().get("run", ""))
+    run = str(_sweep_step().get("run", ""))
+    invocation_lines = [
+        line for line in run.splitlines() if "skill evidence_autoclose_sweep" in line
+    ]
+    assert invocation_lines, "could not find the sweep invocation line"
+    for line in invocation_lines:
+        assert "--apply" not in line, (
+            "--apply must never be literal on the invocation line; it may only "
+            f"be appended by the guarded branch. Offending line: {line!r}"
+        )
