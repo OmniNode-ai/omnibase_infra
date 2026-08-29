@@ -82,6 +82,31 @@ class VerifiedChecksumAdoption:
 
 
 @dataclass(frozen=True, slots=True)
+class VerifiedDivergentAdoption:
+    """OMN-16915: one DIVERGENT but well-formed content hash, proven safe.
+
+    The mirror image of ``VerifiedChecksumAdoption``. That one covers a
+    *sentinel* -- a hand-written non-hash standing in for an unproven hand-apply.
+    This one covers a row whose checksum is a perfectly good sha256 that names an
+    *earlier revision* of the checked-in file: the lane applied that revision and
+    was never re-converged.
+
+    The validity rules are therefore inverted. A sentinel adoption is rejected if
+    its source checksum IS 64-hex; a divergent adoption is rejected if it is NOT,
+    and again if it happens to EQUAL the manifest checksum (that row needs no
+    adoption -- bootstrap.sql accepts it directly, and declaring it would claim a
+    proof for a question nobody asked).
+    """
+
+    version: str
+    source_checksum: str
+    manifest_checksum: str
+    ticket: str
+    receipt_sha256: str
+    verified_at: str
+
+
+@dataclass(frozen=True, slots=True)
 class CloudAlias:
     migration_name: str
     runner_version: str
@@ -93,6 +118,7 @@ class ValidationResult:
     blocked: tuple[BlockedMigration, ...]
     legacy_node_declarations: tuple[LegacyNodeMigrationDeclaration, ...]
     verified_adoptions: tuple[VerifiedChecksumAdoption, ...]
+    verified_divergent_adoptions: tuple[VerifiedDivergentAdoption, ...]
     cloud_aliases: tuple[CloudAlias, ...]
 
 
@@ -152,6 +178,7 @@ def validate_manifests(
     blocked_path: Path,
     legacy_node_declaration_path: Path,
     verified_adoption_path: Path,
+    verified_divergent_adoption_path: Path,
     cloud_alias_path: Path,
     *,
     require_complete: bool = False,
@@ -162,6 +189,7 @@ def validate_manifests(
     blocked: list[BlockedMigration] = []
     legacy_node_declarations: list[LegacyNodeMigrationDeclaration] = []
     verified_adoptions: list[VerifiedChecksumAdoption] = []
+    verified_divergent_adoptions: list[VerifiedDivergentAdoption] = []
     aliases: list[CloudAlias] = []
 
     for line_number, fields in _read_tsv(declaration_path, 6):
@@ -333,6 +361,81 @@ def validate_manifests(
             )
         verified_adoptions.append(adoption)
 
+    # OMN-16915: verified DIVERGENT-bytes adoptions.  Same shape, inverted rules.
+    for line_number, fields in _read_tsv(
+        verified_divergent_adoption_path, 6, allow_empty=True
+    ):
+        divergent = VerifiedDivergentAdoption(*fields)
+        declared = declared_by_version.get(divergent.version)
+        if declared is None:
+            raise ManifestError(
+                f"{verified_divergent_adoption_path}:{line_number}: verified "
+                f"divergent adoption for {divergent.version!r} has no active "
+                "migration declaration; an adoption can only ever restate a "
+                "checksum the manifest already owns"
+            )
+        if divergent.manifest_checksum != declared.checksum:
+            raise ManifestError(
+                f"{verified_divergent_adoption_path}:{line_number}: verified "
+                f"divergent adoption for {divergent.version!r} was proven against "
+                f"content {divergent.manifest_checksum!r} but the manifest now "
+                f"declares {declared.checksum!r}. The migration file changed "
+                "after the proof, so the proof no longer covers it -- re-run "
+                "scripts/migrations/verify_migration_checksum_adoption.py and "
+                "commit the new receipt."
+            )
+        if _SHA256.fullmatch(divergent.manifest_checksum) is None:
+            raise ManifestError(
+                f"{verified_divergent_adoption_path}:{line_number}: malformed "
+                f"manifest checksum {divergent.manifest_checksum!r}"
+            )
+        if _SHA256.fullmatch(divergent.receipt_sha256) is None:
+            raise ManifestError(
+                f"{verified_divergent_adoption_path}:{line_number}: malformed "
+                f"receipt sha256 {divergent.receipt_sha256!r}"
+            )
+        # Inverted rule 1: this file exists only for real content hashes.
+        if _SHA256.fullmatch(divergent.source_checksum) is None:
+            raise ManifestError(
+                f"{verified_divergent_adoption_path}:{line_number}: "
+                f"{divergent.version!r} carries source checksum "
+                f"{divergent.source_checksum!r}, which is not a 64-hex content "
+                "hash. A sentinel is not a divergent-bytes case and must not be "
+                "laundered into one -- it belongs in "
+                "_ledger/verified-checksum-adoptions.tsv under OMN-15857."
+            )
+        # Inverted rule 2: a row that already agrees needs no adoption at all.
+        if divergent.source_checksum == divergent.manifest_checksum:
+            raise ManifestError(
+                f"{verified_divergent_adoption_path}:{line_number}: "
+                f"{divergent.version!r} declares a source checksum identical to "
+                "the manifest checksum, so nothing diverges; bootstrap.sql "
+                "accepts that row directly and this declaration would assert a "
+                "proof for a question nobody asked"
+            )
+        if _TICKET.fullmatch(divergent.ticket) is None:
+            raise ManifestError(
+                f"{verified_divergent_adoption_path}:{line_number}: invalid "
+                f"adoption ticket {divergent.ticket!r}"
+            )
+        if _VERIFIED_AT.fullmatch(divergent.verified_at) is None:
+            raise ManifestError(
+                f"{verified_divergent_adoption_path}:{line_number}: malformed "
+                f"verified_at {divergent.verified_at!r}; expected YYYY-MM-DD"
+            )
+        # A version must never be declared in both files: the two answer
+        # different questions about different source tables, and a row that
+        # somehow qualified for both would mean one of the two proofs is wrong.
+        if divergent.version in {item.version for item in verified_adoptions}:
+            raise ManifestError(
+                f"{verified_divergent_adoption_path}:{line_number}: "
+                f"{divergent.version!r} is declared in BOTH the sentinel and the "
+                "divergent adoption ledgers. A version has one applied checksum; "
+                "it cannot simultaneously be an unproven hand-apply and a stale "
+                "revision."
+            )
+        verified_divergent_adoptions.append(divergent)
+
     for line_number, fields in _read_tsv(cloud_alias_path, 2):
         alias = CloudAlias(*fields)
         if (
@@ -405,6 +508,7 @@ def validate_manifests(
         tuple(blocked),
         tuple(legacy_node_declarations),
         tuple(verified_adoptions),
+        tuple(verified_divergent_adoptions),
         tuple(aliases),
     )
 
@@ -447,6 +551,11 @@ def main(argv: list[str] | None = None) -> int:
         default=default_ledger / "verified-checksum-adoptions.tsv",
     )
     parser.add_argument(
+        "--verified-divergent-adoptions",
+        type=Path,
+        default=default_ledger / "verified-divergent-adoptions.tsv",
+    )
+    parser.add_argument(
         "--cloud-aliases",
         type=Path,
         default=default_ledger / "cloud-migration-aliases.tsv",
@@ -465,6 +574,7 @@ def main(argv: list[str] | None = None) -> int:
             args.blocked,
             args.legacy_node_declarations,
             args.verified_adoptions,
+            args.verified_divergent_adoptions,
             args.cloud_aliases,
             require_complete=args.require_complete,
         )
@@ -477,6 +587,7 @@ def main(argv: list[str] | None = None) -> int:
         f"({len(result.declarations)} active, {len(result.blocked)} blocked, "
         f"{len(result.legacy_node_declarations)} historical, "
         f"{len(result.verified_adoptions)} verified adoptions, "
+        f"{len(result.verified_divergent_adoptions)} verified divergent adoptions, "
         f"{len(result.cloud_aliases)} cloud aliases)."
     )
     return 0

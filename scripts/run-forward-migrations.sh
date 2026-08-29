@@ -103,6 +103,12 @@ LEGACY_NODE_MIGRATION_DECLARATIONS="${MIGRATIONS_DIR}/_ledger/legacy-node-migrat
 # sha256 the row carries.  Written only by
 # scripts/migrations/verify_migration_checksum_adoption.py --emit-adoptions.
 VERIFIED_CHECKSUM_ADOPTIONS="${MIGRATIONS_DIR}/_ledger/verified-checksum-adoptions.tsv"
+# OMN-16915: per-version adoptions of a DIVERGENT but well-formed content hash in
+# public.omnimarket_schema_migrations -- a lane that applied a genuine earlier
+# revision of the checked-in file.  Kept in a relation of its own so it can never
+# be read for the sentinel declarations above; same proof, same tool, distinct
+# `divergent_verified` verdict.
+VERIFIED_DIVERGENT_ADOPTIONS="${MIGRATIONS_DIR}/_ledger/verified-divergent-adoptions.tsv"
 CLOUD_MIGRATION_ALIASES="${MIGRATIONS_DIR}/_ledger/cloud-migration-aliases.tsv"
 
 export PGPASSWORD="${POSTGRES_PASSWORD}"
@@ -733,6 +739,7 @@ prepare_canonical_ledger() {
   validate_client_file_path "$APPLICATION_MIGRATION_MANIFEST"
   validate_client_file_path "$LEGACY_NODE_MIGRATION_DECLARATIONS"
   validate_client_file_path "$VERIFIED_CHECKSUM_ADOPTIONS"
+  validate_client_file_path "$VERIFIED_DIVERGENT_ADOPTIONS"
   echo "[forward-migration] Converging canonical ledger in ${ledger_database}..."
   psql -X -q -h "$PGHOST" -p "$PGPORT" -U "$PGUSER" -d "$ledger_database" \
     -v ON_ERROR_STOP=1 \
@@ -759,10 +766,18 @@ prepare_canonical_ledger() {
           ticket TEXT NOT NULL,
           receipt_sha256 TEXT NOT NULL,
           verified_at TEXT NOT NULL
+        ); CREATE TEMP TABLE onex_verified_divergent_adoptions (
+          version TEXT NOT NULL PRIMARY KEY,
+          source_checksum TEXT NOT NULL,
+          manifest_checksum TEXT NOT NULL,
+          ticket TEXT NOT NULL,
+          receipt_sha256 TEXT NOT NULL,
+          verified_at TEXT NOT NULL
         )" \
     -c "\copy onex_application_migration_manifest FROM '${APPLICATION_MIGRATION_MANIFEST}' WITH (FORMAT text, DELIMITER E'\t')" \
     -c "\copy onex_legacy_node_migration_declarations FROM '${LEGACY_NODE_MIGRATION_DECLARATIONS}' WITH (FORMAT text, DELIMITER E'\t')" \
     -c "\copy onex_verified_checksum_adoptions FROM '${VERIFIED_CHECKSUM_ADOPTIONS}' WITH (FORMAT text, DELIMITER E'\t')" \
+    -c "\copy onex_verified_divergent_adoptions FROM '${VERIFIED_DIVERGENT_ADOPTIONS}' WITH (FORMAT text, DELIMITER E'\t')" \
     -f "$LEDGER_BOOTSTRAP"
 }
 

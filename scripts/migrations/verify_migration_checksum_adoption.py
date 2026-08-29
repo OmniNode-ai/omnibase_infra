@@ -59,11 +59,38 @@ Verdicts, one per row:
     ``_ledger/legacy-node-migrations.tsv``. bootstrap.sql already accepts it via
     the ``legacy_attestation`` path, which deliberately proves a *source record*
     and not file bytes. Nothing to verify and nothing to adopt.
+``divergent_verified``
+    OMN-16915. Same proof as ``equivalent``, different question -- see below.
+
+The divergent-bytes variant (OMN-16915)
+---------------------------------------
+The sentinel case above is one way a lane row can block the import. There is a
+second, and the machinery above is structurally blind to it on two independent
+axes: ``NON_CANONICAL_ROWS_SQL`` reads ``public.schema_migrations`` only, and
+selects only checksums that are *not* 64-hex.
+
+A row in ``public.omnimarket_schema_migrations`` can carry a perfectly
+well-formed sha256 that simply is not the manifest's. Nothing was hand-applied
+and nothing was hand-edited: the lane applied a genuine *earlier revision* of the
+checked-in file and was never re-converged. bootstrap.sql's ``$omnimarket_import$``
+block raised on it unconditionally, with no adoption path to consult, so the
+stability lane died there on 2026-08-28 (bootstrap.sql:876, forward-migration
+exit 3) immediately after the OMN-15857 rows were cleared.
+
+History explains such a row but cannot clear it. "These bytes are an old revision
+of the file" is evidence, not proof -- the question is whether that revision
+produced the same *schema* the current file produces, and only execution answers
+that. So the divergent case runs the identical replay-and-introspect engine and
+earns a verdict of its own, ``divergent_verified``, written into a relation of
+its own: ``_ledger/verified-divergent-adoptions.tsv``. Keeping the two
+declaration files separate means neither admission path can ever consult a
+declaration written for the other.
 
 Only ``equivalent`` rows may be written into
-``_ledger/verified-checksum-adoptions.tsv`` (``--emit-adoptions``). Every run
-writes a receipt (``--receipt-out``) whose sha256 is recorded in the TSV, so an
-adoption in the manifest is always traceable to the run that proved it.
+``_ledger/verified-checksum-adoptions.tsv``, and only ``divergent_verified`` rows
+into ``_ledger/verified-divergent-adoptions.tsv`` (``--emit-adoptions``). Every
+run writes a receipt (``--receipt-out``) whose sha256 is recorded in the TSV, so
+an adoption in either file is always traceable to the run that proved it.
 
 This tool never writes to the audited database. The live connection is
 read-only introspection; every mutation happens in the scratch server.
@@ -102,8 +129,9 @@ from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
 
-TOOL_VERSION = "1"
+TOOL_VERSION = "2"
 TICKET = "OMN-15857"
+DIVERGENT_TICKET = "OMN-16915"
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
 FORWARD_DIR = REPO_ROOT / "docker" / "migrations" / "forward"
@@ -111,6 +139,7 @@ LEDGER_DIR = FORWARD_DIR / "_ledger"
 APPLICATION_MANIFEST = LEDGER_DIR / "application-migrations.tsv"
 LEGACY_DECLARATIONS = LEDGER_DIR / "legacy-node-migrations.tsv"
 VERIFIED_ADOPTIONS = LEDGER_DIR / "verified-checksum-adoptions.tsv"
+VERIFIED_DIVERGENT_ADOPTIONS = LEDGER_DIR / "verified-divergent-adoptions.tsv"
 SKIP_MANIFEST = FORWARD_DIR.parent / "skip-manifest.yaml"
 
 CANONICAL_CHECKSUM_RE = re.compile(r"^[0-9a-f]{64}$")
@@ -125,8 +154,26 @@ VERDICT_EQUIVALENT = "equivalent"
 VERDICT_DIVERGENT = "divergent"
 VERDICT_UNREACHABLE = "unreachable"
 VERDICT_LEGACY_ATTESTED = "legacy_attested"
+# OMN-16915.  Same proof, different question, so a verdict of its own.
+# ``equivalent`` answers "the hand-applied SQL behind this SENTINEL produced the
+# checked-in schema".  ``divergent_verified`` answers "this row's real-but-stale
+# content hash names an EARLIER revision of the checked-in file, and that
+# revision produced the same schema the current file produces".  Collapsing the
+# two would let a divergent-bytes row be adopted through the sentinel path (and
+# vice versa) on a declaration that never covered it.
+VERDICT_DIVERGENT_VERIFIED = "divergent_verified"
+
+ALL_VERDICTS = (
+    VERDICT_EQUIVALENT,
+    VERDICT_DIVERGENT_VERIFIED,
+    VERDICT_DIVERGENT,
+    VERDICT_UNREACHABLE,
+    VERDICT_LEGACY_ATTESTED,
+)
 
 ADOPTABLE_VERDICTS = frozenset({VERDICT_EQUIVALENT})
+DIVERGENT_ADOPTABLE_VERDICTS = frozenset({VERDICT_DIVERGENT_VERIFIED})
+REFUSED_VERDICTS = frozenset({VERDICT_DIVERGENT, VERDICT_UNREACHABLE})
 
 
 class VerificationError(RuntimeError):
@@ -675,12 +722,58 @@ def discover_non_canonical_rows(
     ]
 
 
+OMNIMARKET_ROWS_SQL = """
+SELECT node_name, filename, checksum
+FROM public.omnimarket_schema_migrations
+WHERE checksum ~ '^[0-9a-f]{64}$'
+ORDER BY node_name, filename;
+"""
+
+
+def discover_divergent_omnimarket_rows(
+    client: PsqlClient, database: str, manifest: dict[str, dict[str, str]]
+) -> list[tuple[str, str, str]]:
+    """Rows in omnimarket's ledger whose real content hash is not the manifest's.
+
+    OMN-16915.  ``discover_non_canonical_rows`` above cannot see these on two
+    independent axes: it reads ``public.schema_migrations`` only, and it selects
+    only checksums that are *not* 64-hex.  A divergent-bytes row is well-formed
+    and lives in a different table, so it is excluded by construction -- which is
+    why bootstrap.sql's ``$omnimarket_import$`` block hard-raised on it with no
+    adoption path to consult.
+
+    A row is returned only when it is well-formed, resolves to a manifest row
+    under omnimarket's ``(node_name, filename)`` -> ``node:<node>:<file>``
+    normalisation, and disagrees with that manifest row's checksum. Rows that
+    agree are already accepted by bootstrap.sql and are not this tool's business.
+    """
+    present = client.scalar(
+        database, "SELECT to_regclass('public.omnimarket_schema_migrations');"
+    )
+    if present == "":
+        return []
+
+    divergent: list[tuple[str, str, str]] = []
+    for node_name, filename, checksum in client.rows(database, OMNIMARKET_ROWS_SQL):
+        version = f"node:{node_name}:{filename}"
+        declared = manifest.get(version)
+        if declared is None:
+            # bootstrap.sql raises 'unknown migration stream/domain' here, which
+            # is a manifest gap, not a checksum question. Not adoptable, and not
+            # something an equivalence proof could answer.
+            continue
+        if checksum != declared["checksum"]:
+            divergent.append((version, checksum, "omnimarket"))
+    return divergent
+
+
 def verify_row(
     *,
     version: str,
     source_checksum: str,
     source_set: str,
     database: str,
+    success_verdict: str = VERDICT_EQUIVALENT,
     live: PsqlClient,
     scratch: ScratchServer,
     manifest: dict[str, dict[str, str]],
@@ -766,11 +859,17 @@ def verify_row(
         )
         return verdict
 
-    verdict.verdict = VERDICT_EQUIVALENT
+    verdict.verdict = success_verdict
     verdict.reason = (
         f"all {len(surface)} object(s) declared by {target.name} exist in {database} "
         "with identical columns, constraints, indexes and definitions"
     )
+    if success_verdict == VERDICT_DIVERGENT_VERIFIED:
+        verdict.reason += (
+            f"; the ledger's content hash {source_checksum[:12]}... names an earlier "
+            f"revision of this file, but that revision's schema is indistinguishable "
+            "from the one the checked-in bytes produce"
+        )
     return verdict
 
 
@@ -796,13 +895,26 @@ def load_adoptions() -> dict[str, dict[str, str]]:
 
 
 def write_adoptions(adoptions: dict[str, dict[str, str]]) -> None:
+    _write_adoption_tsv(VERIFIED_ADOPTIONS, adoptions)
+
+
+def load_divergent_adoptions() -> dict[str, dict[str, str]]:
+    adoptions: dict[str, dict[str, str]] = {}
+    for row in _read_tsv(VERIFIED_DIVERGENT_ADOPTIONS):
+        adoptions[row[0]] = dict(zip(ADOPTION_COLUMNS, row, strict=True))
+    return adoptions
+
+
+def write_divergent_adoptions(adoptions: dict[str, dict[str, str]]) -> None:
+    _write_adoption_tsv(VERIFIED_DIVERGENT_ADOPTIONS, adoptions)
+
+
+def _write_adoption_tsv(path: Path, adoptions: dict[str, dict[str, str]]) -> None:
     lines = [
         "\t".join(adoptions[version][column] for column in ADOPTION_COLUMNS)
         for version in sorted(adoptions)
     ]
-    VERIFIED_ADOPTIONS.write_text(
-        "\n".join(lines) + "\n" if lines else "", encoding="utf-8"
-    )
+    path.write_text("\n".join(lines) + "\n" if lines else "", encoding="utf-8")
 
 
 # ---------------------------------------------------------------------------
@@ -894,21 +1006,33 @@ def main(argv: Sequence[str] | None = None) -> int:
             for database in args.database:
                 try:
                     rows = discover_non_canonical_rows(live, database)
+                    divergent_rows = discover_divergent_omnimarket_rows(
+                        live, database, manifest
+                    )
                     live_version = live.scalar(database, "SHOW server_version")
                 except VerificationError as exc:
                     print(f"[verify-adoption] FATAL: {exc}", file=sys.stderr)
                     return 2
                 print(
-                    f"[verify-adoption] {database}: {len(rows)} non-canonical row(s); "
+                    f"[verify-adoption] {database}: {len(rows)} non-canonical row(s), "
+                    f"{len(divergent_rows)} divergent omnimarket row(s); "
                     f"live server_version={live_version} scratch={scratch_version}",
                     file=sys.stderr,
                 )
-                for version, checksum, source_set in rows:
+                targets = [
+                    (version, checksum, source_set, VERDICT_EQUIVALENT)
+                    for version, checksum, source_set in rows
+                ] + [
+                    (version, checksum, source_set, VERDICT_DIVERGENT_VERIFIED)
+                    for version, checksum, source_set in divergent_rows
+                ]
+                for version, checksum, source_set, success_verdict in targets:
                     verdict = verify_row(
                         version=version,
                         source_checksum=checksum,
                         source_set=source_set,
                         database=database,
+                        success_verdict=success_verdict,
                         live=live,
                         scratch=scratch,
                         manifest=manifest,
@@ -934,12 +1058,7 @@ def main(argv: Sequence[str] | None = None) -> int:
         "verdicts": [verdict.as_dict() for verdict in verdicts],
         "counts": {
             name: sum(1 for verdict in verdicts if verdict.verdict == name)
-            for name in (
-                VERDICT_EQUIVALENT,
-                VERDICT_DIVERGENT,
-                VERDICT_UNREACHABLE,
-                VERDICT_LEGACY_ATTESTED,
-            )
+            for name in ALL_VERDICTS
         },
     }
     payload = json.dumps(receipt, indent=2, sort_keys=True) + "\n"
@@ -989,11 +1108,40 @@ def main(argv: Sequence[str] | None = None) -> int:
             file=sys.stderr,
         )
 
-    refused = [
-        verdict
-        for verdict in verdicts
-        if verdict.verdict in {VERDICT_DIVERGENT, VERDICT_UNREACHABLE}
-    ]
+        # OMN-16915: divergent-bytes adoptions land in their own relation.  A
+        # proven-equivalent divergent row must never be written into the sentinel
+        # file, where bootstrap.sql's $migration_id_import$ block would consult
+        # it for a question it never answered.
+        divergent_adoptions = load_divergent_adoptions()
+        divergent_emitted = 0
+        for verdict in verdicts:
+            if verdict.verdict not in DIVERGENT_ADOPTABLE_VERDICTS:
+                continue
+            if not CANONICAL_CHECKSUM_RE.match(verdict.manifest_checksum):
+                print(
+                    f"[verify-adoption] {verdict.version}: verified but not "
+                    "adoptable -- no application-manifest row to gate on",
+                    file=sys.stderr,
+                )
+                continue
+            divergent_adoptions[verdict.version] = {
+                "version": verdict.version,
+                "source_checksum": verdict.source_checksum,
+                "manifest_checksum": verdict.manifest_checksum,
+                "ticket": DIVERGENT_TICKET,
+                "receipt_sha256": receipt_sha,
+                "verified_at": verified_at,
+            }
+            divergent_emitted += 1
+        write_divergent_adoptions(divergent_adoptions)
+        print(
+            f"[verify-adoption] wrote {divergent_emitted} divergent adoption "
+            f"declaration(s) to "
+            f"{VERIFIED_DIVERGENT_ADOPTIONS.relative_to(REPO_ROOT)}",
+            file=sys.stderr,
+        )
+
+    refused = [verdict for verdict in verdicts if verdict.verdict in REFUSED_VERDICTS]
     if refused:
         print(
             f"[verify-adoption] {len(refused)} row(s) refused adoption "

@@ -32,6 +32,7 @@ LEDGER_DIR = REPO_ROOT / "docker" / "migrations" / "forward" / "_ledger"
 MANIFEST = LEDGER_DIR / "application-migrations.tsv"
 LEGACY_NODE_DECLARATIONS = LEDGER_DIR / "legacy-node-migrations.tsv"
 VERIFIED_ADOPTIONS = LEDGER_DIR / "verified-checksum-adoptions.tsv"
+VERIFIED_DIVERGENT_ADOPTIONS = LEDGER_DIR / "verified-divergent-adoptions.tsv"
 BOOTSTRAP = LEDGER_DIR / "bootstrap.sql"
 RUNNER = REPO_ROOT / "scripts" / "run-forward-migrations.sh"
 
@@ -193,7 +194,11 @@ def _declarations() -> list[list[str]]:
 
 
 def _run_bootstrap(
-    pg16: Pg16Cluster, database: str, *, adoptions: Path | None = None
+    pg16: Pg16Cluster,
+    database: str,
+    *,
+    adoptions: Path | None = None,
+    divergent_adoptions: Path | None = None,
 ) -> subprocess.CompletedProcess[str]:
     create_manifest = """
 CREATE TEMP TABLE onex_application_migration_manifest (
@@ -234,6 +239,17 @@ CREATE TEMP TABLE onex_verified_checksum_adoptions (
 )
 """,
         "-c",
+        """
+CREATE TEMP TABLE onex_verified_divergent_adoptions (
+  version TEXT NOT NULL PRIMARY KEY,
+  source_checksum TEXT NOT NULL,
+  manifest_checksum TEXT NOT NULL,
+  ticket TEXT NOT NULL,
+  receipt_sha256 TEXT NOT NULL,
+  verified_at TEXT NOT NULL
+)
+""",
+        "-c",
         (
             "\\copy onex_application_migration_manifest "
             f"FROM '{MANIFEST}' WITH (FORMAT text, DELIMITER E'\\t')"
@@ -247,6 +263,12 @@ CREATE TEMP TABLE onex_verified_checksum_adoptions (
         (
             "\\copy onex_verified_checksum_adoptions "
             f"FROM '{adoptions or VERIFIED_ADOPTIONS}' WITH (FORMAT text, DELIMITER E'\\t')"
+        ),
+        "-c",
+        (
+            "\\copy onex_verified_divergent_adoptions "
+            f"FROM '{divergent_adoptions or VERIFIED_DIVERGENT_ADOPTIONS}' "
+            "WITH (FORMAT text, DELIMITER E'\\t')"
         ),
         "-f",
         str(BOOTSTRAP),
@@ -514,6 +536,7 @@ INSERT INTO public.db_metadata (id) VALUES (TRUE) ON CONFLICT (id) DO NOTHING;
     (ledger_dir / "application-migration-blocks.tsv").write_text("", encoding="utf-8")
     (ledger_dir / "legacy-node-migrations.tsv").write_text("", encoding="utf-8")
     (ledger_dir / "verified-checksum-adoptions.tsv").write_text("", encoding="utf-8")
+    (ledger_dir / "verified-divergent-adoptions.tsv").write_text("", encoding="utf-8")
     (ledger_dir / "cloud-migration-aliases.tsv").write_text(
         "20260101_cloud\t20260101_cloud.sql\n", encoding="utf-8"
     )
