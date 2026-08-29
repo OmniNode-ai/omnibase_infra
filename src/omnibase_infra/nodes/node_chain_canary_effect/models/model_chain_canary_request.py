@@ -5,9 +5,37 @@
 
 from __future__ import annotations
 
+from collections.abc import Sequence
 from uuid import UUID
 
 from pydantic import BaseModel, ConfigDict, Field, field_validator
+
+from omnibase_infra.enums.generated.enum_omnimarket_topic import EnumOmnimarketTopic
+
+# Read off the generated topic enum, which is itself generated from the
+# contract.yaml files — never typed as raw literals here (CLAUDE.md
+# "contract-first topic definitions"; the arch-invariants raw-topic-literal
+# gate, OMN-3343, fails CI on a hand-typed `onex.evt.*` string in src/).
+_DEFAULT_TERMINAL_SUCCESS_TOPICS: tuple[str, ...] = (
+    EnumOmnimarketTopic.EVT_DELEGATE_SKILL_COMPLETED_V1.value,
+)
+_DEFAULT_TERMINAL_FAILURE_TOPICS: tuple[str, ...] = (
+    EnumOmnimarketTopic.EVT_DELEGATE_SKILL_FAILED_V1.value,
+)
+
+
+def _coerce_topics(value: object) -> object:
+    """Accept a comma-separated string as well as a sequence of topics.
+
+    The CLI passes one string per flag (``skill_mapping.yaml`` arg types are
+    scalar), so the wire form has to be splittable; the model form stays a
+    tuple.
+    """
+    if isinstance(value, str):
+        return tuple(part.strip() for part in value.split(",") if part.strip())
+    if isinstance(value, Sequence):
+        return tuple(str(part).strip() for part in value if str(part).strip())
+    return value
 
 
 class ModelChainCanaryRequest(BaseModel):
@@ -79,6 +107,64 @@ class ModelChainCanaryRequest(BaseModel):
             "slow still reads as failing rather than as intermittently fine."
         ),
     )
+    terminal_bootstrap_servers: str = Field(
+        default="",
+        description=(
+            "Kafka/Redpanda bootstrap servers for the correlation-scoped "
+            "TERMINAL readback — the leg that discharges OMN-16025 link 4 "
+            "('emission OUTBOX-CONFIRMED via broker readback, not "
+            "publish-return'). EMPTY means the run has no evidence about "
+            "the terminal and reports TERMINAL_READBACK_NOT_CONFIGURED. It "
+            "deliberately does NOT fall back to the ingress response: that "
+            "fallback is the OMN-16931 defect this field exists to remove."
+        ),
+    )
+    terminal_success_topics: tuple[str, ...] = Field(
+        default=_DEFAULT_TERMINAL_SUCCESS_TOPICS,
+        description=(
+            "Terminal topics that mean the delegation COMPLETED. Defaults to "
+            "node_delegate_skill_orchestrator's contract-declared "
+            "runtime_dispatch.terminal_events.success, read off the "
+            "generated topic enum. A terminal here discharges link 4 and "
+            "supports link 3."
+        ),
+    )
+    terminal_failure_topics: tuple[str, ...] = Field(
+        default=_DEFAULT_TERMINAL_FAILURE_TOPICS,
+        description=(
+            "Terminal topics that mean the delegation FAILED. Read back on "
+            "the same pass as the success topics: a failure terminal still "
+            "discharges link 4 (the emission landed on the bus) while "
+            "failing link 3 (execution did not complete). Distinguishing "
+            "those two is the diagnostic OMN-16931 adds."
+        ),
+    )
+    terminal_scan_records: int = Field(
+        default=500,
+        ge=1,
+        le=20_000,
+        description=(
+            "Backlog depth to seek back per terminal topic before waiting "
+            "for new records. The terminal may already be on the bus by the "
+            "time the ingress answers — run 33251822642 published it 3s "
+            "before the ingress replied — so the readback must look "
+            "backwards as well as forwards."
+        ),
+    )
+    terminal_readback_timeout_seconds: int = Field(
+        default=30,
+        ge=1,
+        le=600,
+        description=(
+            "FLOOR on the terminal readback window, in seconds. The actual "
+            "window is the larger of this and the remainder of budget_ms "
+            "after the ingress answered — OMN-16025 link 4 says 'inside the "
+            "budget', and giving up at 4,369 ms of a 120,000 ms budget "
+            "because the ingress returned early is precisely the OMN-16931 "
+            "bug. The floor covers the case where the ingress itself burned "
+            "the whole budget."
+        ),
+    )
     quarantine_bootstrap_servers: str = Field(
         default="",
         description=(
@@ -125,6 +211,25 @@ class ModelChainCanaryRequest(BaseModel):
             "QUARANTINED run into a vaguer TERMINAL_MISSING one."
         ),
     )
+
+    @field_validator(
+        "terminal_success_topics", "terminal_failure_topics", mode="before"
+    )
+    @classmethod
+    def _split_topics(cls, value: object) -> object:
+        return _coerce_topics(value)
+
+    @field_validator("terminal_success_topics")
+    @classmethod
+    def _require_a_success_topic(cls, value: tuple[str, ...]) -> tuple[str, ...]:
+        """A readback with nothing to read is a check that cannot fail."""
+        if not value:
+            raise ValueError(
+                "terminal_success_topics must name at least one topic — a "
+                "readback with no topics would report NOT_FOUND for every "
+                "run and teach people to ignore this canary"
+            )
+        return value
 
     @field_validator("probe_url")
     @classmethod

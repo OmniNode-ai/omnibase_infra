@@ -250,6 +250,11 @@ skills:
       - {name: prompt, payload_field: prompt, arg_type: string}
       - {name: max-tokens, payload_field: max_tokens, arg_type: integer}
       - {name: budget-ms, payload_field: budget_ms, arg_type: integer}
+      - {name: terminal-bootstrap-servers, payload_field: terminal_bootstrap_servers, arg_type: string}
+      - {name: terminal-success-topics, payload_field: terminal_success_topics, arg_type: string}
+      - {name: terminal-failure-topics, payload_field: terminal_failure_topics, arg_type: string}
+      - {name: terminal-scan-records, payload_field: terminal_scan_records, arg_type: integer}
+      - {name: terminal-readback-timeout-seconds, payload_field: terminal_readback_timeout_seconds, arg_type: integer}
       - {name: quarantine-bootstrap-servers, payload_field: quarantine_bootstrap_servers, arg_type: string}
       - {name: quarantine-topic, payload_field: quarantine_topic, arg_type: string}
       - {name: quarantine-scan-records, payload_field: quarantine_scan_records, arg_type: integer}

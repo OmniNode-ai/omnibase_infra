@@ -57,6 +57,30 @@
 #   prod and must not be pointed at them without its own ticket: the probe
 #   PUBLISHES a real delegation command, which is a lane mutation.
 #
+# WHAT OMN-16931 CHANGED
+#   The first cut of this job took the terminal verdict from the /skill HTTP
+#   response. That is a claim by the request path, not evidence from the
+#   chain, and it failed in both directions on this very lane:
+#
+#     * run 33251822642 (2026-08-29T12:10:26Z) reported `terminal_missing`
+#       at 4,369 ms of a 120,000 ms budget because the ingress carried
+#       ok=false (a provider 429 on an escalation rung the local model had
+#       already answered — OMN-16932), while the runtime published the
+#       terminal for that run's own correlation id to
+#       delegate-skill-completed.v1 at 12:10:23. A live chain reported dead.
+#     * OMN-15468 is the standing proof of the inverse: ok=true on this lane
+#       can accompany nothing durable at all.
+#
+#   So the job now passes a broker for a correlation-scoped readback of the
+#   contract-declared terminal topics, and that readback — not the HTTP
+#   response — decides link 4 of OMN-16025.
+#
+#   It also renders a status PER OMN-16025 LINK. This probe has legs for
+#   three of the five; link 2 (projection readback) is owed by OMN-16963 and
+#   link 5 (ledger chain + replay) by OMN-16964, and both report `no_leg`.
+#   Run 33215999994's GREEN was read as "the five-link gate is met"; the
+#   summary now makes that reading impossible.
+#
 # NO NEW scripts/** FILE
 #   scripts/** is DEFAULT-DENY for new files (OMN-14475 canonical-form
 #   guard). Every step below is a direct `uv run onex ...` invocation of
@@ -86,6 +110,10 @@ on:
         default: '120000'
       quarantine_bootstrap_servers:
         description: 'Broker for the correlation-scoped quarantine check. Empty disables the leg and the receipt says SKIPPED (never CLEAN).'
+        required: false
+        default: 'host.docker.internal:19092'
+      terminal_bootstrap_servers:
+        description: 'Broker for the correlation-scoped TERMINAL readback (OMN-16025 link 4). Empty makes the run RED — it does NOT fall back to the ingress response.'
         required: false
         default: 'host.docker.internal:19092'
 
@@ -145,6 +173,15 @@ jobs:
           TASK_TYPE: ${{ github.event.inputs.task_type || 'test' }}
           BUDGET_MS: ${{ github.event.inputs.budget_ms || '120000' }}
           QUARANTINE_BOOTSTRAP: ${{ github.event.inputs.quarantine_bootstrap_servers || 'host.docker.internal:19092' }}
+          # OMN-16931: the terminal verdict is read off the BROKER, not off
+          # the /skill HTTP response. Run 33251822642 reported
+          # `terminal_missing` at 4,369 ms of a 120,000 ms budget while the
+          # terminal for its own correlation id was published to
+          # delegate-skill-completed.v1 at 12:10:23. Leaving this empty does
+          # not restore the old behaviour — it reports
+          # TERMINAL_READBACK_NOT_CONFIGURED, because a run with no broker
+          # has no evidence about the terminal.
+          TERMINAL_BOOTSTRAP: ${{ github.event.inputs.terminal_bootstrap_servers || 'host.docker.internal:19092' }}
           # The omnimarket drift guard (OMN-14060) refuses `onex skill`
           # whenever $OMNI_HOME/omnimarket exists and the venv's omnimarket
           # is not a git co-install. The deploy runner sets OMNI_HOME to its
@@ -167,6 +204,7 @@ jobs:
             --probe-url "${PROBE_URL}" \
             --task-type "${TASK_TYPE}" \
             --budget-ms "${BUDGET_MS}" \
+            --terminal-bootstrap-servers "${TERMINAL_BOOTSTRAP}" \
             --quarantine-bootstrap-servers "${QUARANTINE_BOOTSTRAP}" \
             > chain-canary-receipt.json
 
@@ -215,11 +253,51 @@ jobs:
           success = bool(result.get("success", False))
           detail = result.get("detail", "")
 
+          # OMN-16931: the probe verdict and the CHAIN PROOF are two
+          # different claims, and rendering only the first is how run
+          # 33215999994's GREEN got read as "the five-link gate is met".
+          # The headline states both, and the link table shows which links
+          # this probe has no instrument for at all.
+          links = result.get("link_verdicts") or []
+          proven = result.get("links_proven", 0)
+          total = result.get("links_total", 0)
+          chain_proved = bool(result.get("chain_proof_complete", False))
+
+          probe_colour = "PROBE GREEN" if success else "PROBE RED"
           lines += [
-              f"**Verdict: `{verdict}`** — {'GREEN' if success else 'RED'}",
+              f"**Verdict: `{verdict}`** — {probe_colour}",
               "",
               detail or "_(no detail reported)_",
               "",
+              f"**Chain proof (OMN-16025): {proven} of {total} links proven — "
+              f"{'COMPLETE' if chain_proved else 'INCOMPLETE'}.**",
+              "",
+          ]
+          if not chain_proved:
+              lines += [
+                  "A green probe verdict is NOT a five-link chain proof. Read the",
+                  "link table before quoting a colour at anybody.",
+                  "",
+              ]
+          if links:
+              lines += [
+                  "### Chain links",
+                  "",
+                  "| Link | Status | Owed by | Evidence |",
+                  "| --- | --- | --- | --- |",
+              ]
+              for link in links:
+                  lines.append(
+                      "| {} | `{}` | {} | {} |".format(
+                          link.get("link", "?"),
+                          link.get("status", "?"),
+                          link.get("owning_ticket") or "—",
+                          (link.get("detail") or "").replace("|", "\\|"),
+                      )
+                  )
+              lines.append("")
+
+          lines += [
               "### Receipt",
               "",
               "```json",
@@ -227,15 +305,25 @@ jobs:
               "```",
               "",
               "A RED verdict here means a delegation submitted through the real",
-              "deployed ingress did not reach a terminal. `quarantined` names a",
-              "handler that received the event and refused it; `terminal_missing`",
-              "means nothing came back at all; `ingress_unreachable` points at the",
-              "lane rather than the chain (see dev-lane-liveness).",
+              "deployed ingress did not reach a terminal ON THE BUS. `quarantined`",
+              "names a handler that received the event and refused it;",
+              "`terminal_missing` means the declared terminal topics carried",
+              "nothing for this run's correlation id;",
+              "`ingress_error_terminal_present` means the chain DID terminalize and",
+              "the request path reported an error anyway (look at the request path,",
+              "not at the chain); `terminal_readback_failed` /",
+              "`terminal_readback_not_configured` mean the bus could not be read, so",
+              "no claim is made either way; `ingress_unreachable` points at the lane",
+              "rather than the chain (see dev-lane-liveness).",
           ]
           summary.write_text("\n".join(lines) + "\n", encoding="utf-8")
 
+          scope = f"{proven}/{total} links proven"
           if not success:
-              print(f"::error::chain canary RED — verdict={verdict}: {detail}")
+              print(f"::error::chain canary RED — verdict={verdict} ({scope}): {detail}")
               sys.exit(1)
-          print(f"chain canary GREEN — {detail}")
+          print(
+              f"chain canary PROBE-GREEN — {scope}, chain proof "
+              f"{'complete' if chain_proved else 'INCOMPLETE'}: {detail}"
+          )
           PY

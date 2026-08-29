@@ -13,6 +13,13 @@ than the vaguer ``TERMINAL_MISSING`` — those are different pages, and the
 quarantine one names the actual defect.
 
 Every test drives the real handler with injected transport. No network.
+
+Updated by OMN-16931: the terminal is now read back off the broker, so every
+handler here injects a terminal readback as well as a quarantine scan, and
+the fixtures that used to assert an ingress-derived terminal now assert the
+bus-derived one. The behaviour under test did not soften — it moved to the
+layer that can actually carry evidence. See
+``test_handler_chain_canary_readback.py`` for the link-4 cases themselves.
 """
 
 from __future__ import annotations
@@ -21,6 +28,7 @@ from uuid import UUID, uuid4
 
 import pytest
 
+from omnibase_infra.enums.generated.enum_omnimarket_topic import EnumOmnimarketTopic
 from omnibase_infra.nodes.node_chain_canary_effect.handlers.handler_chain_canary import (
     HandlerChainCanary,
 )
@@ -36,6 +44,7 @@ from omnibase_infra.nodes.node_chain_canary_effect.models.model_chain_canary_req
 
 _PROBE_URL = "http://runtime.invalid:8085"
 _BOOTSTRAP = "broker.invalid:19092"
+_SUCCESS_TOPIC = EnumOmnimarketTopic.EVT_DELEGATE_SKILL_COMPLETED_V1.value
 
 
 def _request(**overrides: object) -> ModelChainCanaryRequest:
@@ -43,6 +52,10 @@ def _request(**overrides: object) -> ModelChainCanaryRequest:
         "correlation_id": uuid4(),
         "probe_url": _PROBE_URL,
         "budget_ms": 5_000,
+        # OMN-16931: link 4 is the claim, so a run with no broker for it makes
+        # no claim and cannot be green. These fixtures are about the OTHER
+        # legs, so the readback is configured throughout.
+        "terminal_bootstrap_servers": _BOOTSTRAP,
     }
     fields.update(overrides)
     return ModelChainCanaryRequest(**fields)  # type: ignore[arg-type]
@@ -90,6 +103,31 @@ class _RecordingQuarantine:
         return self.found, self.scanned, self.error
 
 
+class _RecordingTerminalReadback:
+    """Injected link-4 broker readback (OMN-16931).
+
+    ``found`` is the topic the correlation id was read back from; ``""``
+    means "read the bus, it was not there"; ``None`` means the readback
+    could not run.
+    """
+
+    def __init__(self, found: str | None = _SUCCESS_TOPIC, error: str = ""):
+        self.found = found
+        self.error = error
+        self.calls: list[tuple[str, tuple[str, ...], str, int, float]] = []
+
+    async def __call__(
+        self,
+        bootstrap: str,
+        topics: tuple[str, ...],
+        correlation_id: str,
+        max_records: int,
+        timeout_s: float,
+    ) -> tuple[str | None, int, str]:
+        self.calls.append((bootstrap, topics, correlation_id, max_records, timeout_s))
+        return self.found, 120, self.error
+
+
 def _terminal_response(correlation_id_echo: str = "") -> dict[str, object]:
     """A successful ingress response carrying a terminal event."""
     return {
@@ -112,6 +150,7 @@ async def test_mints_a_fresh_correlation_id_per_run() -> None:
     handler = HandlerChainCanary(
         ingress=ingress,
         quarantine_scan=_RecordingQuarantine(),
+        terminal_readback=_RecordingTerminalReadback(),
         kill_switch_disabled=False,
     )
 
@@ -137,6 +176,7 @@ async def test_posts_the_recorded_delegation_recipe() -> None:
     handler = HandlerChainCanary(
         ingress=ingress,
         quarantine_scan=_RecordingQuarantine(),
+        terminal_readback=_RecordingTerminalReadback(),
         kill_switch_disabled=False,
     )
 
@@ -167,6 +207,7 @@ async def test_green_when_terminal_lands_and_quarantine_is_clean() -> None:
     handler = HandlerChainCanary(
         ingress=_RecordingIngress(response=_terminal_response()),
         quarantine_scan=quarantine,
+        terminal_readback=_RecordingTerminalReadback(),
         kill_switch_disabled=False,
     )
 
@@ -175,7 +216,11 @@ async def test_green_when_terminal_lands_and_quarantine_is_clean() -> None:
     assert result.verdict is EnumChainCanaryVerdict.GREEN
     assert result.success is True
     assert result.quarantine_status is EnumQuarantineCheckStatus.CLEAN
-    assert result.terminal_event == "omnimarket.delegate-skill-completed"
+    # OMN-16931: `terminal_event` is the topic the terminal was READ BACK
+    # from, not the name the ingress printed. The ingress's claim is kept
+    # separately so a receipt can show the two disagreeing.
+    assert result.terminal_event == _SUCCESS_TOPIC
+    assert result.ingress_terminal_event == "omnimarket.delegate-skill-completed"
     # The quarantine scan was asked about THIS run's correlation id.
     assert quarantine.calls[0][2] == str(result.probe_correlation_id)
 
@@ -217,7 +262,14 @@ async def test_reproduces_omn_16767_signature() -> None:
 
 @pytest.mark.unit
 @pytest.mark.asyncio
-async def test_terminal_missing_when_ingress_times_out_without_quarantine() -> None:
+async def test_terminal_missing_when_ingress_times_out_and_the_bus_is_empty() -> None:
+    """A dispatch_timeout with nothing on the bus is still TERMINAL_MISSING.
+
+    OMN-16931 narrowed this verdict rather than removing it: the timeout is
+    no longer what produces it — the empty readback is. An identical timeout
+    WITH a terminal on the bus is INGRESS_ERROR_TERMINAL_PRESENT, covered in
+    ``test_handler_chain_canary_readback.py``.
+    """
     handler = HandlerChainCanary(
         ingress=_RecordingIngress(
             response={
@@ -226,6 +278,7 @@ async def test_terminal_missing_when_ingress_times_out_without_quarantine() -> N
             }
         ),
         quarantine_scan=_RecordingQuarantine(found=False),
+        terminal_readback=_RecordingTerminalReadback(found=""),
         kill_switch_disabled=False,
     )
 
@@ -237,15 +290,17 @@ async def test_terminal_missing_when_ingress_times_out_without_quarantine() -> N
 
 @pytest.mark.unit
 @pytest.mark.asyncio
-async def test_terminal_missing_when_ok_true_but_no_terminal_event() -> None:
-    """ok=true is not proof. A 202-shaped success with no terminal is RED.
+async def test_terminal_missing_when_ok_true_but_the_bus_carried_nothing() -> None:
+    """ok=true is not proof — and after OMN-16931 it is not even the question.
 
-    This is the OMN-16027 fail-open lesson: the accepting side answering
-    cheerfully proves nothing about the chain behind it.
+    The OMN-16027 fail-open lesson survives, relocated: what makes this RED
+    is that the declared terminal topics carried nothing for this run's
+    correlation id. The ingress could have said anything.
     """
     handler = HandlerChainCanary(
         ingress=_RecordingIngress(response={"ok": True, "terminal_event": ""}),
         quarantine_scan=_RecordingQuarantine(found=False),
+        terminal_readback=_RecordingTerminalReadback(found=""),
         kill_switch_disabled=False,
     )
 
@@ -261,6 +316,7 @@ async def test_ingress_unreachable_is_its_own_verdict() -> None:
     handler = HandlerChainCanary(
         ingress=_RecordingIngress(response=None, error="connection refused"),
         quarantine_scan=_RecordingQuarantine(found=False),
+        terminal_readback=_RecordingTerminalReadback(),
         kill_switch_disabled=False,
     )
 
@@ -280,6 +336,7 @@ async def test_unconfigured_quarantine_reports_skipped_not_clean() -> None:
     handler = HandlerChainCanary(
         ingress=_RecordingIngress(response=_terminal_response()),
         quarantine_scan=quarantine,
+        terminal_readback=_RecordingTerminalReadback(),
         kill_switch_disabled=False,
     )
 
@@ -300,6 +357,7 @@ async def test_quarantine_probe_failure_fails_closed() -> None:
     handler = HandlerChainCanary(
         ingress=_RecordingIngress(response=_terminal_response()),
         quarantine_scan=_RecordingQuarantine(found=None, error="broker unreachable"),
+        terminal_readback=_RecordingTerminalReadback(),
         kill_switch_disabled=False,
     )
 
@@ -319,7 +377,10 @@ async def test_kill_switch_performs_zero_io() -> None:
     ingress = _RecordingIngress(response=_terminal_response())
     quarantine = _RecordingQuarantine()
     handler = HandlerChainCanary(
-        ingress=ingress, quarantine_scan=quarantine, kill_switch_disabled=True
+        ingress=ingress,
+        quarantine_scan=quarantine,
+        terminal_readback=_RecordingTerminalReadback(),
+        kill_switch_disabled=True,
     )
 
     result = await handler.handle(_request())
@@ -340,6 +401,7 @@ async def test_kill_switch_read_from_env_at_handle_time(
     handler = HandlerChainCanary(
         ingress=ingress,
         quarantine_scan=_RecordingQuarantine(),
+        terminal_readback=_RecordingTerminalReadback(),
         kill_switch_disabled=False,
     )
     monkeypatch.setenv("ONEX_CHAIN_CANARY_DISABLED", "1")
@@ -363,6 +425,7 @@ async def test_kill_switch_env_falsey_values_do_not_disable_canary(
     handler = HandlerChainCanary(
         ingress=ingress,
         quarantine_scan=quarantine,
+        terminal_readback=_RecordingTerminalReadback(),
     )
 
     result = await handler.handle(_request(quarantine_bootstrap_servers=_BOOTSTRAP))
