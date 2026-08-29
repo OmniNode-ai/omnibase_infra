@@ -1,13 +1,17 @@
 # SPDX-FileCopyrightText: 2025 OmniNode.ai Inc.
 # SPDX-License-Identifier: MIT
+import tomllib
 from pathlib import Path
 
 import pytest
 from pydantic import ValidationError
 
 from scripts.ci.detect_test_paths import (
+    CI_CONTRACT_TEST_ROOT,
     COLLOCATED_TEST_ROOTS,
+    TEST_FILE_PATTERNS,
     compute_selection,
+    is_collectable_test_file_name,
     resolve_test_paths,
 )
 from scripts.ci.test_selection_models import EnumFullSuiteReason, ModelTestSelection
@@ -500,13 +504,14 @@ def test_changed_docker_integration_test_is_not_selected() -> None:
     assert selection.selected_paths == ["tests/unit/"]
 
 
-def test_test_file_at_tests_root_escalates_to_full_suite() -> None:
-    # A changed test path directly under tests/ cannot be narrowed below
-    # "tests/" itself. Emitting "tests/" as a 1-split smart selection would run
-    # the whole suite on one shard with the smart step's timeouts; escalate to
-    # the real 15-split full suite instead.
+def test_root_level_module_pytest_cannot_collect_escalates_to_full_suite() -> None:
+    # OMN-15245 escalation, narrowed by OMN-16745. A root-level module that
+    # pytest would NOT collect (it matches neither `python_files` pattern) is
+    # genuinely unnarrowable: handing it to pytest collects nothing (exit 5),
+    # and as a shared helper importable by any suite its blast radius is the
+    # whole tree. That is still a full-suite escalation.
     selection = compute_selection(
-        changed_files=["tests/test_compose_profile_teardown_policy.py"],
+        changed_files=["tests/infrastructure_config.py"],
         adjacency_path=ADJ,
         ref_name="pr-branch",
     )
@@ -736,6 +741,206 @@ def test_pure_src_diff_with_reverse_deps_still_narrows() -> None:
     # The whole tests/ tree is NOT selected -- narrowing is still real.
     assert "tests/" not in selection.selected_paths
     assert not any(p.startswith("tests/integration/") for p in selection.selected_paths)
+
+
+# ---------------------------------------------------------------------------
+# OMN-16745: the CI-contract class for .github/workflows diffs
+#
+# Ruling (see the block comment above CI_CONTRACT_TEST_ROOT in
+# scripts/ci/detect_test_paths.py): the necessary and sufficient proof for a
+# `.github/workflows`-only diff is the CI-contract class -- the workflow-shape
+# and required-context tests under tests/ci/ -- plus, when the diff also
+# touches a test module, that module itself. The Python unit suite is neither:
+# no test under tests/unit/ has an outcome a workflow YAML edit can change.
+#
+# These tests assert the selected CLASS by name, not a smaller test count.
+# ---------------------------------------------------------------------------
+
+
+def test_omn16745_workflow_only_diff_selects_the_ci_contract_class() -> None:
+    """AC2: a `.github/workflows`-only diff deterministically selects the class."""
+    selection = compute_selection(
+        changed_files=[
+            ".github/workflows/no-raw-prod-bypass.yml",
+            ".github/workflows/ci.yml",
+        ],
+        adjacency_path=ADJ,
+        ref_name="pr-branch",
+    )
+    assert selection.is_full_suite is False
+    assert selection.full_suite_reason is None
+    assert selection.selected_paths == [CI_CONTRACT_TEST_ROOT]
+
+
+def test_omn16745_ci_contract_class_is_a_populated_runnable_suite() -> None:
+    """AC4: the substitute proof is a real suite, not a name with nothing in it.
+
+    Operating Rule #5 -- a class that is defined but never runs anything is a
+    regression, not a fix. Asserted positively: the root exists, and at least
+    one module in it reads the workflow tree the class stands in for.
+    """
+    root = REPO_ROOT / CI_CONTRACT_TEST_ROOT
+    assert root.is_dir(), f"{CI_CONTRACT_TEST_ROOT} is not a directory"
+    workflow_aware = [
+        path
+        for path in sorted(root.rglob("test_*.py"))
+        if ".github/workflows" in path.read_text(encoding="utf-8")
+    ]
+    assert workflow_aware, (
+        f"{CI_CONTRACT_TEST_ROOT} contains no module that asserts anything about "
+        ".github/workflows; the CI-contract class would be a no-op substitute"
+    )
+
+
+def test_omn16745_workflow_plus_its_own_test_narrows_to_that_test() -> None:
+    """The stranded shape: a workflow edit plus the test module that proves it.
+
+    Before OMN-16745 the root-level test module escalated the WHOLE diff to the
+    15-split full suite (`changed_test_unnarrowable`) -- a suite that contains
+    neither the workflow nor, on the smart step, that module's own directory.
+    A root-level module IS narrowable: to itself, at file grain.
+    """
+    root_test = "tests/test_compose_profile_teardown_policy.py"
+    selection = compute_selection(
+        changed_files=[".github/workflows/ci.yml", root_test],
+        adjacency_path=ADJ,
+        ref_name="pr-branch",
+    )
+    assert selection.is_full_suite is False
+    assert selection.full_suite_reason is None
+    assert selection.selected_paths == sorted([CI_CONTRACT_TEST_ROOT, root_test])
+
+
+def test_omn16745_root_level_test_module_alone_selects_itself() -> None:
+    root_test = "tests/test_compose_profile_teardown_policy.py"
+    selection = compute_selection(
+        changed_files=[root_test],
+        adjacency_path=ADJ,
+        ref_name="pr-branch",
+    )
+    assert selection.is_full_suite is False
+    assert selection.selected_paths == [root_test]
+    assert _is_collected_by(selection.selected_paths, root_test)
+
+
+def test_omn16745_vanished_root_level_test_is_not_handed_to_pytest() -> None:
+    """A deleted/renamed root-level test module must not reach pytest.
+
+    Same rule `_resolve` already applies to directories: a path that is not on
+    disk would abort collection with exit 5. It contributes nothing, and the
+    rest of the diff keeps its own rules -- here, the CI-contract class.
+    """
+    selection = compute_selection(
+        changed_files=[
+            ".github/workflows/ci.yml",
+            "tests/test_deleted_by_this_diff.py",
+        ],
+        adjacency_path=ADJ,
+        ref_name="pr-branch",
+    )
+    assert selection.is_full_suite is False
+    assert selection.selected_paths == [CI_CONTRACT_TEST_ROOT]
+
+
+def test_omn16745_test_file_patterns_mirror_pyproject_python_files() -> None:
+    """The collectability test must equal pytest's own collection rule.
+
+    If `python_files` widens and this constant does not, the selector would
+    classify a newly-collectable module as unnarrowable (over-escalating) or,
+    worse, emit a module pytest will not collect.
+    """
+    with (REPO_ROOT / "pyproject.toml").open("rb") as handle:
+        pyproject = tomllib.load(handle)
+    declared = pyproject["tool"]["pytest"]["ini_options"]["python_files"]
+    assert sorted(TEST_FILE_PATTERNS) == sorted(declared)
+
+
+@pytest.mark.parametrize(
+    ("name", "collectable"),
+    [
+        ("test_compose_profile_teardown_policy.py", True),
+        ("something_test.py", True),
+        ("infrastructure_config.py", False),
+        ("conftest.py", False),
+        ("__init__.py", False),
+    ],
+)
+def test_omn16745_collectability_classifier(name: str, collectable: bool) -> None:
+    assert is_collectable_test_file_name(name) is collectable
+
+
+# --- AC3: fail-closed preserved on mixed diffs -----------------------------
+
+
+def test_omn16745_workflow_plus_shared_module_still_escalates() -> None:
+    selection = compute_selection(
+        changed_files=[".github/workflows/ci.yml", "src/omnibase_infra/models/foo.py"],
+        adjacency_path=ADJ,
+        ref_name="pr-branch",
+    )
+    assert selection.is_full_suite is True
+    assert selection.full_suite_reason == EnumFullSuiteReason.SHARED_MODULE
+
+
+def test_omn16745_workflow_plus_test_infrastructure_still_escalates() -> None:
+    selection = compute_selection(
+        changed_files=[".github/workflows/ci.yml", "tests/conftest.py"],
+        adjacency_path=ADJ,
+        ref_name="pr-branch",
+    )
+    assert selection.is_full_suite is True
+    assert selection.full_suite_reason == EnumFullSuiteReason.TEST_INFRASTRUCTURE
+
+
+def test_omn16745_workflow_plus_root_helper_module_still_escalates() -> None:
+    # The root-level non-collectable module carries the escalation even when
+    # the rest of the diff is provably CI-contract-class.
+    selection = compute_selection(
+        changed_files=[".github/workflows/ci.yml", "tests/infrastructure_config.py"],
+        adjacency_path=ADJ,
+        ref_name="pr-branch",
+    )
+    assert selection.is_full_suite is True
+    assert selection.full_suite_reason == EnumFullSuiteReason.CHANGED_TEST_UNNARROWABLE
+
+
+def test_omn16745_workflow_plus_narrowable_source_keeps_both_classes() -> None:
+    # "Escalates under the Python path's rules" -- and this Python path's rule
+    # is a narrowing, so the CI-contract class rides alongside it, additively.
+    selection = compute_selection(
+        changed_files=[".github/workflows/ci.yml", "src/omnibase_infra/cli/foo.py"],
+        adjacency_path=ADJ,
+        ref_name="pr-branch",
+    )
+    assert selection.is_full_suite is False
+    assert CI_CONTRACT_TEST_ROOT in selection.selected_paths
+    assert "tests/unit/cli/" in selection.selected_paths
+
+
+def test_omn16745_root_level_test_file_is_a_valid_selection_target() -> None:
+    """The output contract widened exactly as far as the ruling needs.
+
+    A root-level module pytest collects is emittable; a root-level helper it
+    does not collect, and any source file, still are not.
+    """
+    ModelTestSelection(
+        selected_paths=["tests/test_compose_profile_teardown_policy.py"],
+        split_count=1,
+        is_full_suite=False,
+        matrix=[1],
+    )
+    for rejected in (
+        "tests/infrastructure_config.py",  # pytest would not collect it
+        "tests/unit/cli/test_foo.py",  # nested files narrow to their directory
+        "src/omnibase_infra/cli/foo.py",  # never a source file
+    ):
+        with pytest.raises(ValidationError):
+            ModelTestSelection(
+                selected_paths=[rejected],
+                split_count=1,
+                is_full_suite=False,
+                matrix=[1],
+            )
 
 
 def test_shared_module_escalation_unchanged_by_coverage_invariant() -> None:

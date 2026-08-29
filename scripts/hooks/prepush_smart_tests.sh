@@ -39,6 +39,33 @@
 #     live service; see filter_prepush_runnable_paths below for the allowlist
 #     and its fail-closed default.
 #
+# WORKFLOW-DIFF RULING (OMN-16745) -- what the selector proves for a
+# `.github/workflows`-only diff, and why that is not the unit suite:
+#
+#   The necessary and sufficient proof is the CI-CONTRACT CLASS -- tests/ci/,
+#   the workflow-shape / required-context / gate-wiring tests that read
+#   .github/workflows/** off disk and assert its contents -- plus, when the
+#   diff also touches a test module, that module itself. No test under
+#   tests/unit/ has an outcome a workflow YAML edit can change, so escalating
+#   this class to the full unit suite is cost without proof: OMN-16346 sat
+#   through ~20 refused pushes (zero bypasses) waiting for a host with headroom
+#   for a suite that could not have falsified the diff.
+#
+#   Selecting NOTHING is equally wrong and is NOT what this does. Workflow
+#   files break the ENFORCEMENT of tests rather than the tests themselves --
+#   OMN-15541 is the live counterexample, where ci.yml hardcoded
+#   `pytest src/omnibase_compat/tests/` while the selector and pyproject named
+#   different roots, so full-suite escalation collected ZERO of the top-level
+#   tests/ tree: a fail-OPEN safety net produced by a workflow edit. The class
+#   is therefore positively named, always non-empty, and asserted to be
+#   populated and workflow-aware by a test.
+#
+#   Fail-closed is untouched: a workflow file alongside a shared module still
+#   escalates, alongside test infrastructure still escalates, and alongside an
+#   ordinary source file rides additively with that file's own narrowing.
+#   There is no new env knob -- see the "Env overrides" list above, which is
+#   unchanged by OMN-16745.
+#
 # FAIL-LOUD (CLAUDE.md Rule #8): if the diff base, the selector, or its adjacency
 # config cannot resolve, this hook HARD-ERRORS with a remediation message and a
 # non-zero exit. It never degrades to a green skip -- a gate that cannot run must

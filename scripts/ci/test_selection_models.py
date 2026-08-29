@@ -18,15 +18,33 @@ class EnumFullSuiteReason(StrEnum):
     MERGE_GROUP = "merge_group"
     SCHEDULED = "scheduled"
     FEATURE_FLAG_OFF = "feature_flag_off"
-    # OMN-15245: a changed test path that cannot be narrowed below `tests/`
-    # itself (a test module living directly in the tests/ root). Emitting
-    # "tests/" as a smart selection would run the whole suite on the smart
-    # step's split count; escalate to the real full suite instead.
+    # OMN-15245, narrowed by OMN-16745: a changed path directly in the tests/
+    # root that pytest would NOT collect (it matches neither `python_files`
+    # pattern) -- a shared helper module such as tests/infrastructure_config.py.
+    # It has no containing directory below `tests/`, handing it to pytest
+    # collects nothing (exit 5), and any suite in the tree may import it, so
+    # the honest answer is the real full suite.
+    #
+    # A root-level module pytest DOES collect is no longer covered by this
+    # reason: it is narrowable to itself, at file grain. See the ruling above
+    # `CI_CONTRACT_TEST_ROOT` in detect_test_paths.py.
     CHANGED_TEST_UNNARROWABLE = "changed_test_unnarrowable"
 
 
 # A selectable pytest target: a directory under the root-collected `tests/`
-# tree, OR a collocated `tests/` directory anywhere in the repo.
+# tree, a collocated `tests/` directory anywhere in the repo, OR a single test
+# MODULE sitting directly in the `tests/` root.
+#
+# OMN-16745 added the third alternative, and only that one. A root-level module
+# is the one changed-test shape with no containing directory below `tests/`
+# itself, so before this the selector could not name it and escalated the whole
+# diff to the full suite (`changed_test_unnarrowable`). File grain is strictly
+# narrower than the `tests/` directory it could not emit and strictly covers the
+# changed module, so this widens what the selector can PROVE, not what it may
+# skip. It stays deliberately tight: the file must live directly in `tests/`
+# (nested modules narrow to their own directory, which the selector already
+# emits) and its name must match pytest's `python_files` patterns, so the
+# selector can never hand pytest a module it would not collect.
 #
 # OMN-15410 added the second alternative. The original `tests/`-only pattern
 # encoded an assumption that stopped being true when pyproject `testpaths`
@@ -39,7 +57,11 @@ class EnumFullSuiteReason(StrEnum):
 TestPath = Annotated[
     str,
     StringConstraints(
-        pattern=r"^tests(/[A-Za-z0-9_./-]+)?/$|^[A-Za-z0-9_-]+(/[A-Za-z0-9_-]+)*/tests/$"
+        pattern=(
+            r"^tests(/[A-Za-z0-9_./-]+)?/$"
+            r"|^[A-Za-z0-9_-]+(/[A-Za-z0-9_-]+)*/tests/$"
+            r"|^tests/(test_[A-Za-z0-9_-]*|[A-Za-z0-9_-]*_test)\.py$"
+        )
     ),
 ]
 ModuleName = Annotated[
