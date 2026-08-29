@@ -176,8 +176,11 @@ def auth_token() -> None:
 
     The escape hatch any harness can shell out to. Emits the raw token on
     stdout and nothing else, so it composes; every diagnostic goes to stderr.
-    Exits non-zero if the credential is missing, the grant is refused, or the
-    token's audience is not exactly the gateway-attach set.
+    The token printed is the ATTACH token from POST /v1/auth/gateway-token,
+    not the machine token the stored credential grants directly (OMN-16687).
+    Exits non-zero if the credential is missing, the grant is refused, the
+    exchange refuses the credential, or the exchanged token's audience is not
+    exactly the gateway-attach set.
     """
     credential = _load_credential()
     minter = GatewayTokenMinter(
