@@ -164,6 +164,58 @@ async def test_dispatch_engine_keeps_verified_authority_out_of_band(
     assert connection.close_calls == 1
 
 
+async def test_dispatch_without_verified_capability_records_but_never_selects(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """No bound authority: the write proceeds, the isolation context does not.
+
+    OMN-16831 (operator ruling 2026-08-28, option D) inverts what this pins,
+    deliberately. It previously asserted the dispatch failed BEFORE connecting
+    whenever no verified capability was bound -- which is every real dispatch on
+    every lane, because ``bind_projection_tenant_authority`` has zero non-test
+    call sites. That refusal did not make the platform safer: it destroyed the
+    tenant dimension on every event of all 15 TENANT-classified relations, and
+    the event log is immutable, so nothing recovers it afterwards.
+
+    The two halves the ruling separates are both asserted here:
+
+    * **Attribution proceeds.** The absence of an *authorization* artifact is
+      not an attribution failure, so the statement is actually issued and the
+      producer's own tenant reaches the row unmodified. Falsified by
+      ``connect`` not being called.
+    * **Authorization does not.** The envelope's self-asserted tenant is a
+      claim, not proof of entitlement, so it must NEVER be promoted into an
+      isolation context -- no ``set_config('app.tenant_id', ...)`` is issued on
+      its word. Falsified by any ``set_config`` in the captured statements.
+
+    That second assertion is the security invariant that used to be implied by
+    "we never connect at all", now stated directly instead of as a side effect
+    of refusing the write.
+    """
+    monkeypatch.setenv("OMNIDASH_ANALYTICS_DB_URL", "postgresql://fixture")
+    callback = _make_projection_dispatch_callback(
+        _TenantProjectionHandler(),
+        projection_database_target("delegation_events", schema="tenant"),
+        (TOPIC,),
+    )
+    claimed_tenant = uuid4()
+    envelope = ModelEventEnvelope[dict[str, object]](
+        payload={"tenant_id": str(claimed_tenant)},
+        event_type=TOPIC,
+    )
+    calls: list[tuple[str, object]] = []
+    connection = _Connection(calls, principal="tenant_projection_writer")
+
+    with patch("psycopg2.connect", return_value=connection) as connect:
+        await callback(envelope)
+
+    connect.assert_called_once_with("postgresql://fixture")
+    assert all("set_config" not in sql for sql, _params in calls), (
+        "an unverified, self-asserted envelope tenant must never become an RLS "
+        "isolation context -- it is attribution, not authorization"
+    )
+
+
 async def test_dispatch_without_verified_capability_fails_at_db_role_validation(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
@@ -175,8 +227,9 @@ async def test_dispatch_without_verified_capability_fails_at_db_role_validation(
         projection_database_target("delegation_events", schema="tenant"),
         (TOPIC,),
     )
+    claimed_tenant = uuid4()
     envelope = ModelEventEnvelope[dict[str, object]](
-        payload={"tenant_id": str(uuid4())},
+        payload={"tenant_id": str(claimed_tenant)},
         event_type=TOPIC,
     )
 
