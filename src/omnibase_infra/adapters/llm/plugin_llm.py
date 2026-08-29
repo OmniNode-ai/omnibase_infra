@@ -23,6 +23,7 @@ Related:
     - OMN-6600: Create LLM domain plugin for service_kernel
     - OMN-2319: SPI LLM protocol adapters
     - OMN-8023: Wire routing-decided callback so routing decisions table populates
+    - OMN-16900: partition auth-dead endpoints out of the health probe set
 """
 
 from __future__ import annotations
@@ -31,6 +32,7 @@ import asyncio
 import logging
 import os
 from collections.abc import Awaitable, Callable
+from pathlib import Path
 from typing import TYPE_CHECKING
 
 from omnibase_core.models.events.model_event_envelope import ModelEventEnvelope
@@ -93,6 +95,97 @@ _LLM_URL_ENV_VARS: tuple[str, ...] = (
     "LLM_GLM_URL",
     "LLM_OPENROUTER_URL",
 )
+
+# Same repo-relative resolution the routing API uses for this contract.
+_MODEL_REGISTRY_PATH = (
+    Path(__file__).parents[4] / "docker" / "catalog" / "model_registry.yaml"
+)
+
+
+def _auth_env_by_url_env(registry_path: Path) -> dict[str, str]:
+    """Map ``base_url_env`` -> ``api_key_env`` from the model registry.
+
+    Read-only: the registry is the declaration of which endpoints are
+    auth-gated, so the plugin derives that fact rather than hardcoding a
+    second copy of it. Entries without an ``api_key_env`` are omitted.
+
+    Args:
+        registry_path: Path to the model registry contract YAML.
+
+    Returns:
+        Mapping of URL env-var name to the auth env-var name it requires.
+        Empty when the registry is not present (pip-installed layouts ship
+        the library without the operational ``docker/`` tree), which reduces
+        to the pre-OMN-16900 behaviour of probing everything.
+    """
+    if not registry_path.exists():
+        logger.warning(
+            "Model registry not found at %s; LLM health probes cannot "
+            "classify auth-gated endpoints (OMN-16900)",
+            registry_path,
+        )
+        return {}
+
+    import yaml  # guarded: pyyaml is a declared dep; import here avoids cost
+
+    raw = yaml.safe_load(registry_path.read_text(encoding="utf-8"))
+    if not isinstance(raw, dict) or not isinstance(raw.get("models"), list):
+        logger.warning(
+            "Model registry at %s has no 'models' list; LLM health probes "
+            "cannot classify auth-gated endpoints (OMN-16900)",
+            registry_path,
+        )
+        return {}
+
+    auth_env: dict[str, str] = {}
+    for entry in raw["models"]:
+        if not isinstance(entry, dict) or entry.get("transport") != "http":
+            continue
+        url_env = entry.get("base_url_env", "")
+        api_key_env = entry.get("api_key_env", "")
+        if url_env and api_key_env:
+            auth_env[str(url_env)] = str(api_key_env)
+    return auth_env
+
+
+def _partition_endpoints_by_auth(
+    endpoints: dict[str, str],
+    auth_env_by_url_env: dict[str, str],
+    resolved_config: dict[str, str] | None,
+) -> tuple[dict[str, str], dict[str, str]]:
+    """Split ``LLM_*_URL`` endpoints into probeable and auth-dead (OMN-16900).
+
+    Auth secrets are read from the kernel's **resolved overlay config**, the
+    same seam ``PluginDlq`` uses — this plugin does not read the process
+    environment for secrets.  When no overlay is loaded (legacy env-var boot)
+    there is no authoritative view of which secrets resolve, so nothing is
+    classified here and every endpoint stays probeable; a rejected credential
+    is then caught one layer down by the service's terminal-``AUTH_FAILED``
+    backoff instead of before the first probe.
+
+    Args:
+        endpoints: Mapping of URL env-var name (e.g. ``LLM_GLM_URL``) to URL.
+        auth_env_by_url_env: Registry-derived URL-env -> auth-env mapping.
+        resolved_config: The kernel's resolved overlay config, or ``None`` in
+            legacy env-var mode.
+
+    Returns:
+        ``(probeable, unauthenticated)``, both keyed by the friendly endpoint
+        name (``LLM_GLM_URL`` -> ``glm``).
+    """
+    probeable: dict[str, str] = {}
+    unauthenticated: dict[str, str] = {}
+    for var_name, url in endpoints.items():
+        friendly = var_name.removeprefix("LLM_").removesuffix("_URL").lower()
+        api_key_env = auth_env_by_url_env.get(var_name, "")
+        if resolved_config is not None and api_key_env:
+            if resolved_config.get(api_key_env):
+                probeable[friendly] = url
+            else:
+                unauthenticated[friendly] = url
+            continue
+        probeable[friendly] = url
+    return probeable, unauthenticated
 
 
 class PluginLlm:
@@ -216,14 +309,19 @@ class PluginLlm:
         """Start health probe loop and LLM inference command consumer."""
         from omnibase_infra.runtime.models import ModelDomainPluginResult
 
-        # --- Health probe loop (existing) ---
-        friendly_endpoints: dict[str, str] = {}
-        for var_name, url in self._endpoints.items():
-            friendly = var_name.removeprefix("LLM_").removesuffix("_URL").lower()
-            friendly_endpoints[friendly] = url
+        # --- Health probe loop ---
+        # OMN-16900: an endpoint whose registry-declared auth secret is absent
+        # can never answer a probe, so it is classified once and never probed
+        # rather than 401-ing every 30s in every container, forever.
+        friendly_endpoints, unauthenticated_endpoints = _partition_endpoints_by_auth(
+            endpoints=self._endpoints,
+            auth_env_by_url_env=_auth_env_by_url_env(_MODEL_REGISTRY_PATH),
+            resolved_config=config.overlay_config,
+        )
 
         health_config = ModelLlmEndpointHealthConfig(
             endpoints=friendly_endpoints,
+            unauthenticated_endpoints=unauthenticated_endpoints,
         )
         event_bus = getattr(config, "event_bus", None)
         self._health_service = ServiceLlmEndpointHealth(
@@ -233,14 +331,19 @@ class PluginLlm:
         await self._health_service.start()
 
         logger.info(
-            "PluginLlm: started health probe loop for %d endpoints (correlation_id=%s)",
+            "PluginLlm: started health probe loop for %d endpoints "
+            "(%d skipped, no resolvable auth secret) (correlation_id=%s)",
             len(friendly_endpoints),
+            len(unauthenticated_endpoints),
             config.correlation_id,
         )
 
         return ModelDomainPluginResult.succeeded(
             plugin_id=self.plugin_id,
-            message=f"Health probes started for {len(friendly_endpoints)} endpoints",
+            message=(
+                f"Health probes started for {len(friendly_endpoints)} endpoints "
+                f"({len(unauthenticated_endpoints)} skipped, no auth)"
+            ),
         )
 
     async def shutdown(

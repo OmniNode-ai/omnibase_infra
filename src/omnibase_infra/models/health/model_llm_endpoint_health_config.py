@@ -14,6 +14,14 @@ circuit breaker thresholds consumed by ``ServiceLlmEndpointHealth``.
     ``env_resolver`` callable rather than reading ``os.getenv`` directly.
     The ``_validate_endpoint_urls`` validator now also rejects explicitly-set
     empty strings with a diagnostic message that names the violating endpoint.
+
+.. versionchanged:: OMN-16900
+    ``from_model_registry`` now also resolves each entry's ``api_key_env``.  An
+    endpoint that declares an auth secret which is absent or unresolvable is
+    routed to ``unauthenticated_endpoints`` instead of ``endpoints`` — it is
+    classified once and never probed, rather than 401-ing forever at the probe
+    interval.  Adds ``auth_failure_threshold`` and
+    ``auth_failure_backoff_max_seconds`` for the terminal-auth-failure backoff.
 """
 
 from __future__ import annotations
@@ -22,9 +30,50 @@ from collections.abc import Callable
 from pathlib import Path
 from urllib.parse import urlparse
 
-from pydantic import BaseModel, ConfigDict, Field, field_validator
+from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
 
 from omnibase_infra.utils.util_error_sanitization import sanitize_url
+
+
+def _validate_url_map(v: dict[str, str], field_label: str) -> dict[str, str]:
+    """Validate that every URL in a name -> URL map is a usable HTTP(S) URL.
+
+    Args:
+        v: Mapping of logical endpoint name to base URL.
+        field_label: Field name used in diagnostic messages.
+
+    Returns:
+        The same mapping, unchanged, once every entry validates.
+
+    Raises:
+        ValueError: If any URL is empty, does not start with ``http://`` or
+            ``https://``, or has no hostname.
+    """
+    for name, url in v.items():
+        if not url:
+            msg = (
+                f"Endpoint '{name}' in '{field_label}' has an empty URL. "
+                "URLs must be sourced from the routing contract via "
+                "ModelLlmEndpointHealthConfig.from_model_registry(); "
+                "an empty-string default is never a valid endpoint URL."
+            )
+            raise ValueError(msg)
+        if not url.startswith(("http://", "https://")):
+            safe_url = sanitize_url(url)
+            msg = (
+                f"Endpoint '{name}' in '{field_label}' has invalid URL "
+                f"'{safe_url}': must start with 'http://' or 'https://'"
+            )
+            raise ValueError(msg)
+        parsed = urlparse(url)
+        if not parsed.hostname:
+            safe_url = sanitize_url(url)
+            msg = (
+                f"Endpoint '{name}' in '{field_label}' has invalid URL "
+                f"'{safe_url}': URL must have a hostname"
+            )
+            raise ValueError(msg)
+    return v
 
 
 class ModelLlmEndpointHealthConfig(BaseModel):
@@ -35,6 +84,10 @@ class ModelLlmEndpointHealthConfig(BaseModel):
             be ``model_key`` values from the routing contract YAML (e.g.
             ``"qwen3-coder-30b"``), not hardcoded legacy aliases.  Use
             ``from_model_registry`` to build this map from a contract file.
+        unauthenticated_endpoints: Endpoints whose declared auth secret is
+            absent or unresolvable.  Same key/URL shape as ``endpoints``, but
+            these are classified ``SKIPPED_NO_AUTH`` once and never probed.
+            Must be disjoint from ``endpoints``.
         probe_interval_seconds: Seconds between probe cycles. Default: 30.
         probe_timeout_seconds: HTTP timeout for individual probe requests.
             Default: 5.0.
@@ -42,6 +95,10 @@ class ModelLlmEndpointHealthConfig(BaseModel):
             the circuit for an endpoint. Default: 3.
         circuit_breaker_reset_timeout: Seconds before a tripped circuit
             transitions to half-open. Default: 60.0.
+        auth_failure_threshold: Consecutive 401/403 probe results before an
+            endpoint is treated as terminally auth-failed. Default: 2.
+        auth_failure_backoff_max_seconds: Ceiling on the exponential backoff
+            applied to a terminally auth-failed endpoint. Default: 3600.0.
     """
 
     model_config = ConfigDict(frozen=True, extra="forbid", from_attributes=True)
@@ -71,31 +128,50 @@ class ModelLlmEndpointHealthConfig(BaseModel):
             ValueError: If any URL is empty, does not start with ``http://``
                 or ``https://``, or has no hostname.
         """
-        for name, url in v.items():
-            if not url:
-                msg = (
-                    f"Endpoint '{name}' has an empty URL. "
-                    "URLs must be sourced from the routing contract via "
-                    "ModelLlmEndpointHealthConfig.from_model_registry(); "
-                    "do not use os.getenv with an empty-string default."
-                )
-                raise ValueError(msg)
-            if not url.startswith(("http://", "https://")):
-                safe_url = sanitize_url(url)
-                msg = (
-                    f"Endpoint '{name}' has invalid URL '{safe_url}': "
-                    "must start with 'http://' or 'https://'"
-                )
-                raise ValueError(msg)
-            parsed = urlparse(url)
-            if not parsed.hostname:
-                safe_url = sanitize_url(url)
-                msg = (
-                    f"Endpoint '{name}' has invalid URL '{safe_url}': "
-                    "URL must have a hostname"
-                )
-                raise ValueError(msg)
-        return v
+        return _validate_url_map(v, "endpoints")
+
+    unauthenticated_endpoints: dict[str, str] = Field(
+        default_factory=dict,
+        description=(
+            "Endpoints whose declared auth secret is absent or unresolvable. "
+            "Classified SKIPPED_NO_AUTH once and never probed (OMN-16900)."
+        ),
+    )
+
+    @field_validator("unauthenticated_endpoints")
+    @classmethod
+    def _validate_unauthenticated_endpoint_urls(
+        cls, v: dict[str, str]
+    ) -> dict[str, str]:
+        """Apply the same URL rules to the auth-dead endpoint map.
+
+        These endpoints are never probed, but their URLs still surface in
+        status snapshots and health events, so they must be well-formed.
+
+        Raises:
+            ValueError: On the same conditions as ``_validate_endpoint_urls``.
+        """
+        return _validate_url_map(v, "unauthenticated_endpoints")
+
+    @model_validator(mode="after")
+    def _validate_endpoint_sets_disjoint(self) -> ModelLlmEndpointHealthConfig:
+        """Reject a name that is both probeable and classified auth-dead.
+
+        An endpoint in both maps would be probed *and* reported as skipped,
+        which is a wiring bug rather than a representable state.
+
+        Raises:
+            ValueError: If the two maps share any key.
+        """
+        overlap = sorted(set(self.endpoints) & set(self.unauthenticated_endpoints))
+        if overlap:
+            msg = (
+                f"Endpoint(s) {overlap} appear in both 'endpoints' and "
+                "'unauthenticated_endpoints'; an endpoint is either probeable "
+                "or classified SKIPPED_NO_AUTH, never both."
+            )
+            raise ValueError(msg)
+        return self
 
     probe_interval_seconds: float = Field(
         default=30.0,
@@ -119,6 +195,22 @@ class ModelLlmEndpointHealthConfig(BaseModel):
         description=(
             "Minimum open-state cooling period in seconds before the circuit "
             "transitions from OPEN to HALF_OPEN"
+        ),
+    )
+    auth_failure_threshold: int = Field(
+        default=2,
+        ge=1,
+        description=(
+            "Consecutive 401/403 probe results before the endpoint is treated "
+            "as terminally auth-failed and moved to backoff (OMN-16900)"
+        ),
+    )
+    auth_failure_backoff_max_seconds: float = Field(
+        default=3600.0,
+        ge=1.0,
+        description=(
+            "Ceiling for the exponential backoff applied to a terminally "
+            "auth-failed endpoint (OMN-16900)"
         ),
     )
 
@@ -147,6 +239,16 @@ class ModelLlmEndpointHealthConfig(BaseModel):
           with a diagnostic message naming the var — **never silently ignored**.
         - Returns a non-empty string → validated and included in the config.
 
+        **Auth partitioning (OMN-16900).**  When an entry also declares
+        ``api_key_env``, that variable is resolved through the same
+        ``env_resolver``.  If it is absent or empty the endpoint is placed in
+        ``unauthenticated_endpoints`` rather than ``endpoints``: the service
+        classifies it ``SKIPPED_NO_AUTH`` once and never probes it.  A missing
+        credential is a permanent condition, not a transient outage, so
+        retrying it at the probe interval is pure waste — on .201 exactly this
+        gap produced 5+ days of 401s against the GLM endpoints at up to 4525
+        probes per container.
+
         Probe settings (``probe_interval_seconds``, ``probe_timeout_seconds``,
         ``circuit_breaker_threshold``, ``circuit_breaker_reset_timeout``) use
         field defaults.  To override them, use the resolved ``endpoints`` map
@@ -169,8 +271,10 @@ class ModelLlmEndpointHealthConfig(BaseModel):
 
         Returns:
             A ``ModelLlmEndpointHealthConfig`` whose ``endpoints`` map contains
-            only the models whose env vars are set and non-empty, with all
-            probe settings at their field defaults.
+            only the models whose URL env vars are set and non-empty **and**
+            whose declared auth secret resolves, with the auth-dead remainder
+            in ``unauthenticated_endpoints`` and all probe settings at their
+            field defaults.
 
         Raises:
             ValueError: If ``registry_path`` does not exist.
@@ -216,6 +320,7 @@ class ModelLlmEndpointHealthConfig(BaseModel):
             raise ValueError(msg)
 
         endpoints: dict[str, str] = {}
+        unauthenticated: dict[str, str] = {}
         for entry in models:
             if not isinstance(entry, dict):
                 continue
@@ -240,9 +345,18 @@ class ModelLlmEndpointHealthConfig(BaseModel):
                     "Do not use os.getenv with an empty-string default."
                 )
                 raise ValueError(msg)
+
+            # OMN-16900: an entry that declares an auth secret is only
+            # probeable while that secret resolves.  Absent or empty means the
+            # endpoint can never answer — classify it once, never probe it.
+            api_key_env = entry.get("api_key_env", "")
+            if api_key_env and not env_resolver(str(api_key_env)):
+                unauthenticated[str(model_key)] = url
+                continue
+
             endpoints[str(model_key)] = url
 
-        return cls(endpoints=endpoints)
+        return cls(endpoints=endpoints, unauthenticated_endpoints=unauthenticated)
 
 
 __all__: list[str] = ["ModelLlmEndpointHealthConfig"]

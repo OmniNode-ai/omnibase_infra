@@ -244,8 +244,22 @@ def test_projection_callback_runs_sync_handler_outside_active_loop() -> None:
 
 
 @pytest.mark.unit
-def test_projection_callback_connects_runner_db_before_handle() -> None:
-    """BaseProjectionRunner-style handlers need their async DB pool initialized."""
+def test_projection_callback_does_not_preconnect_a_handler_owned_pool() -> None:
+    """The runtime must not open a handler's DB pool on a loop it then closes.
+
+    OMN-16874 INVERTS this test. It previously asserted the opposite — that the
+    runtime called ``db.connect()`` before ``handle()`` — and that assertion is
+    what let the defect ship: the runtime performed that connect with
+    ``asyncio.run()``, which closes the loop it opened, so the pool was bound to
+    a dead loop before the first message was handled. Every use afterwards
+    raised ``RuntimeError: Event loop is closed``. The test passed the whole
+    time because a mock pool has no loop affinity, and a single-message test
+    cannot see a loop-scoped lifetime defect anyway.
+
+    A pool belongs to the loop that uses it. The handler opens that loop, so the
+    handler opens and closes the pool inside it; the runtime owns only the
+    adapter it builds itself and injects as ``_db``.
+    """
 
     class FakeRunnerDb:
         def __init__(self) -> None:
@@ -257,13 +271,26 @@ def test_projection_callback_connects_runner_db_before_handle() -> None:
             self._pool = object()
             self.connected = True
 
+        async def close(self) -> None:
+            self._pool = None
+            self.connected = False
+
     class DelegationProjectionRunner:
         def __init__(self) -> None:
             self.db = FakeRunnerDb()
             self.handled = False
+            self.bound_dsn: str | None = None
+
+        def bind_projection_database_url(self, dsn: str) -> None:
+            # OMN-16911: a handler that owns a pool takes the runtime's
+            # topology-resolved DSN. BaseProjectionRunner supplies this seam to
+            # every real projection handler; the double mirrors it.
+            self.bound_dsn = dsn
 
         def handle(self, input_data: dict) -> dict:
-            assert self.db.connected is True
+            assert self.db.connected is False, (
+                "the runtime must hand over an unconnected handler-owned adapter"
+            )
             self.handled = True
             return {"projected": True}
 
@@ -288,19 +315,30 @@ def test_projection_callback_connects_runner_db_before_handle() -> None:
 
     assert result is None
     assert handler.handled is True
-    assert handler.db.connected is True
+    assert handler.db.connected is False
 
 
 @pytest.mark.unit
 def test_projection_callback_skips_standalone_projection_runner() -> None:
     """Standalone Kafka runners are not safe as direct DB-injection callbacks."""
 
+    class _SelfServedAdapter:
+        async def connect(self) -> None: ...
+
+        async def close(self) -> None: ...
+
     class DelegationProjectionRunner:
         topics = ["onex.evt.omniclaude.task-delegated.v1"]
 
         def __init__(self) -> None:
-            self.db = object()
+            # OMN-16874: runner SHAPE (own consume loop, own projection
+            # entrypoint, own topics, own DB adapter) with no declared
+            # in-process dispatch capability. The class name is incidental.
+            self.db = _SelfServedAdapter()
             self.called = False
+
+        async def run(self) -> None:
+            raise AssertionError("the runtime must not drive run()")
 
         async def project_event(self) -> None:
             self.called = True

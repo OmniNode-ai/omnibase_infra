@@ -31,6 +31,7 @@ REPO_ROOT = Path(__file__).resolve().parents[3]
 LEDGER_DIR = REPO_ROOT / "docker" / "migrations" / "forward" / "_ledger"
 MANIFEST = LEDGER_DIR / "application-migrations.tsv"
 LEGACY_NODE_DECLARATIONS = LEDGER_DIR / "legacy-node-migrations.tsv"
+VERIFIED_ADOPTIONS = LEDGER_DIR / "verified-checksum-adoptions.tsv"
 BOOTSTRAP = LEDGER_DIR / "bootstrap.sql"
 RUNNER = REPO_ROOT / "scripts" / "run-forward-migrations.sh"
 
@@ -192,7 +193,7 @@ def _declarations() -> list[list[str]]:
 
 
 def _run_bootstrap(
-    pg16: Pg16Cluster, database: str
+    pg16: Pg16Cluster, database: str, *, adoptions: Path | None = None
 ) -> subprocess.CompletedProcess[str]:
     create_manifest = """
 CREATE TEMP TABLE onex_application_migration_manifest (
@@ -222,6 +223,17 @@ CREATE TEMP TABLE onex_legacy_node_migration_declarations (
 )
 """,
         "-c",
+        """
+CREATE TEMP TABLE onex_verified_checksum_adoptions (
+  version TEXT NOT NULL PRIMARY KEY,
+  source_checksum TEXT NOT NULL,
+  manifest_checksum TEXT NOT NULL,
+  ticket TEXT NOT NULL,
+  receipt_sha256 TEXT NOT NULL,
+  verified_at TEXT NOT NULL
+)
+""",
+        "-c",
         (
             "\\copy onex_application_migration_manifest "
             f"FROM '{MANIFEST}' WITH (FORMAT text, DELIMITER E'\\t')"
@@ -230,6 +242,11 @@ CREATE TEMP TABLE onex_legacy_node_migration_declarations (
         (
             "\\copy onex_legacy_node_migration_declarations "
             f"FROM '{LEGACY_NODE_DECLARATIONS}' WITH (FORMAT text, DELIMITER E'\\t')"
+        ),
+        "-c",
+        (
+            "\\copy onex_verified_checksum_adoptions "
+            f"FROM '{adoptions or VERIFIED_ADOPTIONS}' WITH (FORMAT text, DELIMITER E'\\t')"
         ),
         "-f",
         str(BOOTSTRAP),
@@ -496,6 +513,7 @@ INSERT INTO public.db_metadata (id) VALUES (TRUE) ON CONFLICT (id) DO NOTHING;
     )
     (ledger_dir / "application-migration-blocks.tsv").write_text("", encoding="utf-8")
     (ledger_dir / "legacy-node-migrations.tsv").write_text("", encoding="utf-8")
+    (ledger_dir / "verified-checksum-adoptions.tsv").write_text("", encoding="utf-8")
     (ledger_dir / "cloud-migration-aliases.tsv").write_text(
         "20260101_cloud\t20260101_cloud.sql\n", encoding="utf-8"
     )
@@ -504,6 +522,15 @@ INSERT INTO public.db_metadata (id) VALUES (TRUE) ON CONFLICT (id) DO NOTHING;
     # tree's ids need to be fenced, so an empty-baseline manifest suffices.
     (migrations_dir / "fenced-node-migrations.yaml").write_text(
         "fenced_node_migrations: []\n", encoding="utf-8"
+    )
+    # OMN-15336 item 4 added a second unconditionally-required manifest
+    # alongside the fence, and this synthetic tree was never updated to stage
+    # it -- so the runner exits 1 at "FATAL: FORCE-RLS grandfather manifest not
+    # found" before reaching anything these tests assert about. Same reasoning
+    # as the fence above: none of the synthetic ids are grandfathered, so an
+    # empty baseline is the correct content, not a workaround.
+    (migrations_dir / "grandfathered-force-rls-migrations.yaml").write_text(
+        "grandfathered_force_rls_migrations: []\n", encoding="utf-8"
     )
     return migrations_dir, version, checksum
 

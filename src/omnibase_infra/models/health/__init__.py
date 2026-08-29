@@ -11,6 +11,9 @@ from omnibase_infra.models.health.enum_consumer_health_severity import (
 from omnibase_infra.models.health.enum_consumer_incident_state import (
     EnumConsumerIncidentState,
 )
+from omnibase_infra.models.health.enum_llm_endpoint_probe_state import (
+    EnumLlmEndpointProbeState,
+)
 from omnibase_infra.models.health.enum_runtime_error_category import (
     EnumRuntimeErrorCategory,
 )
@@ -52,6 +55,7 @@ __all__ = [
     "EnumConsumerHealthEventType",
     "EnumConsumerHealthSeverity",
     "EnumConsumerIncidentState",
+    "EnumLlmEndpointProbeState",
     "EnumRuntimeErrorCategory",
     "EnumRuntimeErrorSeverity",
     "ModelConsumerHealthEvent",

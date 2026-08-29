@@ -48,6 +48,7 @@ def _validate(
         ledger_dir / "application-migrations.tsv",
         ledger_dir / "application-migration-blocks.tsv",
         ledger_dir / "legacy-node-migrations.tsv",
+        ledger_dir / "verified-checksum-adoptions.tsv",
         ledger_dir / "cloud-migration-aliases.tsv",
         require_complete=require_complete,
     )
@@ -95,6 +96,7 @@ def _minimal_fixture(tmp_path: Path) -> tuple[Path, Path]:
         "20260101_example\t20260101_example.sql\n", encoding="utf-8"
     )
     (ledger_dir / "legacy-node-migrations.tsv").write_text("", encoding="utf-8")
+    (ledger_dir / "verified-checksum-adoptions.tsv").write_text("", encoding="utf-8")
     return migrations_dir, ledger_dir
 
 
@@ -385,3 +387,149 @@ class TestOmn15717IncidentReplay:
         assert "nodes/node_pr_review_bot/001_create_review_bot_bypass_log.sql" in str(
             excinfo.value
         )
+
+
+# ---------------------------------------------------------------------------
+# OMN-15857: verified checksum adoptions
+# ---------------------------------------------------------------------------
+#
+# An adoption row tells bootstrap.sql to accept a hand-written sentinel checksum
+# for one version, on the strength of a mechanical schema-equivalence proof. The
+# row is only trustworthy while every fact it pins is still true, so the
+# validator re-checks all of them at PR time rather than at deploy time.
+
+_ADOPTION_RECEIPT = "b" * 64
+
+
+def _write_adoption(ledger_dir: Path, *fields: str) -> None:
+    (ledger_dir / "verified-checksum-adoptions.tsv").write_text(
+        "\t".join(fields) + "\n", encoding="utf-8"
+    )
+
+
+def _adoption_fields(ledger_dir: Path, **overrides: str) -> tuple[str, ...]:
+    declared = next(
+        line.split("\t")
+        for line in (ledger_dir / "application-migrations.tsv")
+        .read_text(encoding="utf-8")
+        .splitlines()
+    )
+    row = {
+        "version": declared[4],
+        "source_checksum": "hotfix-applied-by-codex",
+        "manifest_checksum": declared[5],
+        "ticket": "OMN-15857",
+        "receipt_sha256": _ADOPTION_RECEIPT,
+        "verified_at": "2026-08-28",
+    }
+    row.update(overrides)
+    return tuple(row.values())
+
+
+def test_checked_in_verified_adoptions_are_valid() -> None:
+    result = _validate()
+
+    assert len(result.verified_adoptions) >= 1
+    for adoption in result.verified_adoptions:
+        assert adoption.ticket.startswith("OMN-")
+        assert len(adoption.receipt_sha256) == 64
+
+
+def test_a_valid_verified_adoption_passes(tmp_path: Path) -> None:
+    migrations_dir, ledger_dir = _minimal_fixture(tmp_path)
+    _write_adoption(ledger_dir, *_adoption_fields(ledger_dir))
+
+    result = _validate(migrations_dir, ledger_dir)
+
+    assert len(result.verified_adoptions) == 1
+
+
+def test_verified_adoption_for_an_undeclared_version_is_rejected(
+    tmp_path: Path,
+) -> None:
+    """An adoption can only restate a checksum the manifest already owns."""
+    migrations_dir, ledger_dir = _minimal_fixture(tmp_path)
+    _write_adoption(
+        ledger_dir,
+        *_adoption_fields(ledger_dir, version="node:node_ghost:0001_missing.sql"),
+    )
+
+    with pytest.raises(
+        validator.ManifestError, match="has no active migration declaration"
+    ):
+        _validate(migrations_dir, ledger_dir)
+
+
+def test_verified_adoption_pinned_to_stale_content_is_rejected(tmp_path: Path) -> None:
+    """The load-bearing check: rewriting the file invalidates the proof.
+
+    Without this, an adoption written against one version of a migration would
+    silently keep vouching for whatever bytes replaced it -- reintroducing the
+    OMN-16705 class of failure through a new door.
+    """
+    migrations_dir, ledger_dir = _minimal_fixture(tmp_path)
+    _write_adoption(
+        ledger_dir, *_adoption_fields(ledger_dir, manifest_checksum="a" * 64)
+    )
+
+    with pytest.raises(validator.ManifestError, match="was proven against content"):
+        _validate(migrations_dir, ledger_dir)
+
+
+def test_verified_adoption_of_a_canonical_checksum_is_rejected(tmp_path: Path) -> None:
+    """A 64-hex source checksum needs no adoption; bootstrap compares it."""
+    migrations_dir, ledger_dir = _minimal_fixture(tmp_path)
+    fields = _adoption_fields(ledger_dir)
+    _write_adoption(
+        ledger_dir, *_adoption_fields(ledger_dir, source_checksum=fields[2])
+    )
+
+    with pytest.raises(validator.ManifestError, match="carries a 64-hex source"):
+        _validate(migrations_dir, ledger_dir)
+
+
+def test_verified_adoption_of_the_runner_literal_is_rejected(tmp_path: Path) -> None:
+    """``applied-by-runner`` is already adopted; declaring it adds only noise."""
+    migrations_dir, ledger_dir = _minimal_fixture(tmp_path)
+    _write_adoption(
+        ledger_dir, *_adoption_fields(ledger_dir, source_checksum="applied-by-runner")
+    )
+
+    with pytest.raises(validator.ManifestError, match="carries the runner literal"):
+        _validate(migrations_dir, ledger_dir)
+
+
+def test_verified_adoption_requires_a_receipt_hash(tmp_path: Path) -> None:
+    """The receipt hash is what makes the claim chaseable, so it must be a hash."""
+    migrations_dir, ledger_dir = _minimal_fixture(tmp_path)
+    _write_adoption(
+        ledger_dir, *_adoption_fields(ledger_dir, receipt_sha256="see-the-ticket")
+    )
+
+    with pytest.raises(validator.ManifestError, match="malformed receipt sha256"):
+        _validate(migrations_dir, ledger_dir)
+
+
+def test_verified_adoption_requires_a_ticket_and_a_date(tmp_path: Path) -> None:
+    migrations_dir, ledger_dir = _minimal_fixture(tmp_path)
+
+    _write_adoption(ledger_dir, *_adoption_fields(ledger_dir, ticket="hotfix"))
+    with pytest.raises(validator.ManifestError, match="invalid adoption ticket"):
+        _validate(migrations_dir, ledger_dir)
+
+    _write_adoption(ledger_dir, *_adoption_fields(ledger_dir, verified_at="yesterday"))
+    with pytest.raises(validator.ManifestError, match="malformed verified_at"):
+        _validate(migrations_dir, ledger_dir)
+
+
+def test_duplicate_verified_adoptions_are_rejected(tmp_path: Path) -> None:
+    migrations_dir, ledger_dir = _minimal_fixture(tmp_path)
+    row = "\t".join(_adoption_fields(ledger_dir))
+    (ledger_dir / "verified-checksum-adoptions.tsv").write_text(
+        row + "\n" + row + "\n", encoding="utf-8"
+    )
+
+    with pytest.raises(
+        validator.ManifestError, match="duplicate verified checksum adoption"
+    ):
+        _validate(migrations_dir, ledger_dir)

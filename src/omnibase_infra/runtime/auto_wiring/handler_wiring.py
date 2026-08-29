@@ -38,6 +38,7 @@ from collections import defaultdict
 from collections.abc import Awaitable, Callable, Collection, Iterator, Mapping, Sequence
 from dataclasses import dataclass, field
 from datetime import UTC, datetime
+from enum import Enum
 from functools import lru_cache
 from pathlib import Path
 from typing import (
@@ -2998,27 +2999,131 @@ class ProjectionDatabaseOperations:
         return self._operation(table).query(filters)
 
 
-def _connect_projection_runner_db_if_needed(handler_instance: object) -> None:
-    """Connect BaseProjectionRunner-style DB adapters before direct dispatch."""
+# OMN-16874: the capability a runner-shaped handler declares to opt IN to
+# in-process runtime dispatch. Absent (the default) means the handler owns its
+# own consume loop and is deployed standalone, so the runtime must not dispatch
+# it a second time.
+PROJECTION_INPROCESS_DISPATCH_ATTR = "onex_runtime_inprocess_dispatch"
+
+# OMN-16911: the seam through which a handler that opened its own DB adapter
+# accepts the workload DSN the runtime resolved from the topology. Declaring
+# in-process dispatch (above) obliges a handler that owns an adapter to expose
+# this; the runtime refuses to wire one that does not.
+PROJECTION_OWNED_DATABASE_BIND_ATTR = "bind_projection_database_url"
+
+
+def _serves_its_own_database(handler_instance: object) -> bool:
+    """Whether the handler carries a DB adapter it opened itself.
+
+    A handler on the DB-injection arm receives its adapter from the runtime as
+    ``input_data["_db"]`` and holds none of its own. A runner-shaped handler
+    constructs an async pool adapter in ``__init__`` and reaches it through
+    ``self.db`` — the runtime never sees that adapter's construction and cannot
+    scope its lifetime.
+    """
     db = getattr(handler_instance, "db", None)
-    if db is None or getattr(db, "_pool", None) is not None:
-        return
-    connect = getattr(db, "connect", None)
-    if not callable(connect):
-        return
-    result = connect()
-    if asyncio.iscoroutine(result):
-        asyncio.run(result)
-
-
-def _is_projection_runner_handler(handler_instance: object) -> bool:
-    """Detect standalone Kafka projection runners exposed in handler_routing."""
-    return (
-        type(handler_instance).__name__.endswith("ProjectionRunner")
-        and hasattr(handler_instance, "project_event")
-        and hasattr(handler_instance, "topics")
-        and hasattr(handler_instance, "db")
+    if db is None:
+        return False
+    return callable(getattr(db, "connect", None)) and callable(
+        getattr(db, "close", None)
     )
+
+
+def _is_standalone_projection_runner(handler_instance: object) -> bool:
+    """Whether this handler_routing entry is a standalone runner, not a target.
+
+    OMN-16874. The predicate this replaced tested ``type(h).__name__`` against
+    the suffix ``"ProjectionRunner"``. That made a *spelling* decide which of
+    two dispatch branches a handler took, and the two constraints collided:
+    ``ConsumerFlowProjectionWriter`` is named ``...Writer`` precisely because
+    the OMN-14350 type-word ratchet hard-fails ``Runner`` (and its allowlist may
+    only shrink), so satisfying one gate silently moved the node onto the other
+    branch — where the runtime pre-connected its pool on a throwaway loop and
+    every message died with ``Event loop is closed``.
+
+    Dispatch shape is now a declared capability. A handler with the runner
+    shape — its own consume loop (``run``), its own projection entrypoint
+    (``project_event``), its own topic set and its own DB adapter — is treated
+    as standalone unless it declares
+    :data:`PROJECTION_INPROCESS_DISPATCH_ATTR`. Declaring it is a statement
+    that the class also scopes its pool to the loop that uses it, which is the
+    only lifetime the runtime can honour for an adapter it did not create.
+    """
+    runner_shaped = (
+        callable(getattr(handler_instance, "project_event", None))
+        and callable(getattr(handler_instance, "run", None))
+        and hasattr(handler_instance, "topics")
+        and _serves_its_own_database(handler_instance)
+    )
+    if not runner_shaped:
+        return False
+    return not bool(
+        getattr(handler_instance, PROJECTION_INPROCESS_DISPATCH_ATTR, False)
+    )
+
+
+def _bind_handler_owned_projection_database(
+    handler_instance: object,
+    target: ProjectionDatabaseTarget,
+    db_urls: Mapping[str, str],
+) -> None:
+    """Bind a handler's own DB adapter to the topology-resolved workload DSN.
+
+    OMN-16911. ``_resolve_projection_database_target`` already selects one
+    workload identity per declared table and PROVES, via
+    ``_require_projection_binding_privileges``, that its principal holds USAGE
+    on the physical schema plus the privileges the declared access needs. That
+    proof only ever reached connections the runtime opened itself
+    (``ProjectionBindingConnections``, which additionally attests
+    ``current_user``/``current_database`` against the binding). A handler that
+    opens its own pool bypassed all of it and picked a DSN by its own means:
+    ``ConsumerFlowProjectionWriter`` inherited an omnimarket settings fallback
+    that prefers ``OMNIDASH_ANALYTICS_DB_URL`` — the dashboard-facing
+    ``tenant_projection_writer`` role — for tables it declares in
+    ``omninode_internal``, where that role has no USAGE at all. The result on
+    the .201 dev lane was ``InsufficientPrivilegeError: permission denied for
+    schema omninode_internal`` on every heartbeat, 0 rows in
+    ``consumer_flow_windows`` and a DLQ climbing ~6/min.
+
+    So the runtime hands over the DSN it resolved rather than leaving the
+    handler to guess. Two refusals keep that honest, and both are wiring-time
+    (``ValueError`` at callback construction, i.e. a boot failure), never
+    per-message:
+
+    * A handler that owns an adapter but exposes no
+      :data:`PROJECTION_OWNED_DATABASE_BIND_ATTR` is refused. Silently leaving
+      its DSN alone is what shipped this defect.
+    * A target resolving to more than one binding is refused. One pool is one
+      login role; there is no honest way to serve two workload identities
+      through it, and picking one would re-create the mismatch by choice.
+
+    Standalone runners never reach here — the runtime does not dispatch them,
+    so it does not own their configuration either.
+    """
+    if not _serves_its_own_database(handler_instance):
+        return
+    handler_name = type(handler_instance).__name__
+    binding_refs = sorted({binding.binding_ref for binding in target.bindings})
+    if len(binding_refs) != 1:
+        raise ValueError(
+            f"Projection handler {handler_name} opens its own database pool, "
+            "which can hold a single workload identity, but its declared tables "
+            f"resolve to {len(binding_refs)} topology bindings "
+            f"({', '.join(binding_refs)}); split the handler or let the runtime "
+            "inject a per-binding adapter instead"
+        )
+    bind = getattr(handler_instance, PROJECTION_OWNED_DATABASE_BIND_ATTR, None)
+    if not callable(bind):
+        binding = target.bindings[0]
+        raise ValueError(
+            f"Projection handler {handler_name} opens its own database pool and "
+            f"is dispatched in-process, so it must expose "
+            f"{PROJECTION_OWNED_DATABASE_BIND_ATTR}(dsn) to accept the "
+            f"topology-resolved DSN for binding {binding.binding_ref!r} "
+            f"(principal {binding.principal!r}, {binding.dsn_env}); without it "
+            "the pool's login role is unproven against the schemas its SQL names"
+        )
+    bind(db_urls[binding_refs[0]])
 
 
 def _extract_rows_upserted(result: object) -> int:
@@ -3236,7 +3341,7 @@ def _make_projection_dispatch_callback(
     terminal_event = sinks.terminal_event
     dlq_topics = list(sinks.dlq_topics)
     handler_name = type(handler_instance).__name__
-    is_projection_runner = _is_projection_runner_handler(handler_instance)
+    is_projection_runner = _is_standalone_projection_runner(handler_instance)
     db_urls = (
         {}
         if is_projection_runner
@@ -3258,6 +3363,11 @@ def _make_projection_dispatch_callback(
                 for binding in missing_bindings
             )
         )
+    if not is_projection_runner:
+        # OMN-16911: an in-process handler that opened its own pool takes the
+        # DSN resolved and privilege-proved above, instead of resolving one of
+        # its own that the topology never vouched for.
+        _bind_handler_owned_projection_database(handler_instance, target, db_urls)
 
     async def _callback(
         envelope: ModelEventEnvelope[object],
@@ -3271,6 +3381,7 @@ def _make_projection_dispatch_callback(
             return None
         projected = False
         adapter: object | None = None
+        result: object = None
         try:
             # MessageDispatchEngine hands callbacks a JSON-safe materialization.
             # The original typed envelope is retained only for stable transport
@@ -3309,7 +3420,17 @@ def _make_projection_dispatch_callback(
                 input_data["_envelope_id"] = envelope_id
 
             def _invoke_projection_handler() -> object:
-                _connect_projection_runner_db_if_needed(handler_instance)
+                # OMN-16874: the runtime does NOT pre-connect a handler-owned DB
+                # adapter here. It used to (`asyncio.run(db.connect())`), and that
+                # was broken by construction: `asyncio.run` closes the loop it
+                # opened, so an asyncpg pool created there was bound to a dead
+                # loop before the first message was handled and every subsequent
+                # use raised `RuntimeError: Event loop is closed` (34 occurrences
+                # on the .201 dev lane, 0 rows written, DLQ climbing ~6/min).
+                # A pool's lifetime belongs to the loop that uses it, and that
+                # loop is opened inside the handler — so the handler opens and
+                # closes the pool there too. The runtime owns only the adapter it
+                # builds itself and injects as `_db`.
                 # Why: Control flow narrows this union at runtime before the attribute access.
                 return handler_instance.handle(input_data)  # type: ignore[union-attr, attr-defined]
 
@@ -3390,7 +3511,9 @@ def _make_projection_dispatch_callback(
                     close()
 
         if projected and event_bus is not None and terminal_event is not None:
-            await _emit_projection_terminal_event(event_bus, terminal_event, envelope)
+            await _emit_projection_terminal_event(
+                event_bus, terminal_event, envelope, result
+            )
 
         return None
 
@@ -3432,19 +3555,84 @@ def _build_projection_db_adapter(
     )
 
 
+PROJECTION_TERMINAL_ACK_KEY = "projected"
+
+
+def _json_safe_terminal_value(value: object) -> object:
+    """Render one handler-result value in a form the wire can carry."""
+    if isinstance(value, datetime):
+        return value.isoformat()
+    if isinstance(value, UUID):
+        return str(value)
+    if isinstance(value, Enum):
+        return _json_safe_terminal_value(value.value)
+    if hasattr(value, "model_dump"):
+        # Why: Control flow narrows this union at runtime before the attribute access.
+        return value.model_dump(mode="json")  # type: ignore[union-attr]
+    return str(value)
+
+
+def _build_projection_terminal_payload(handler_result: object) -> dict[str, object]:
+    """The applied-event payload: the facts the handler produced, plus the ack.
+
+    OMN-16875. This used to be the literal ``{"projected": True}``, so every
+    bus-backed projection on the platform published a contentless acknowledgement
+    and the handler's own return value never reached the bus at all — it was read
+    only by :func:`_extract_rows_upserted`, which decides *whether* to emit, never
+    *what*. A consumer written against the projected record therefore could not
+    be satisfied by any producer: the record was discarded here, one layer above
+    the node that produced it. Live on the ``.201`` dev lane, that surfaced as
+    ``6 validation errors for ModelConsumerFlowStallAlertRequest`` on every
+    trigger message, with the alert evaluation topic pinned at offset 0.
+
+    Two properties are deliberate:
+
+    * ``projected`` is still set, and still ``True``. Existing Pattern-B
+      consumers and golden-chain assertions read that key; the fix adds facts,
+      it does not swap the contract out from under them.
+    * Only the handler's own keys travel. Runtime-private injections
+      (``_db``, ``_topic``, ``_event_type``, ``_envelope_id``) are filtered by
+      the leading underscore — a handler that echoes its input must not publish
+      a live database adapter onto a Kafka topic.
+
+    A value the wire cannot carry is rendered readable rather than allowed to
+    kill the terminal event; losing the whole applied event to a stray type
+    would take the downstream node's only trigger with it.
+    """
+    facts: dict[str, object] = {}
+    raw: object = handler_result
+    if not isinstance(raw, Mapping) and hasattr(raw, "model_dump"):
+        # Why: Control flow narrows this union at runtime before the attribute access.
+        raw = raw.model_dump(mode="json")  # type: ignore[union-attr]
+    if isinstance(raw, Mapping):
+        for key, value in raw.items():
+            name = str(key)
+            if name.startswith("_"):
+                continue
+            try:
+                json.dumps(value)
+            except (TypeError, ValueError):
+                facts[name] = _json_safe_terminal_value(value)
+            else:
+                facts[name] = value
+    facts[PROJECTION_TERMINAL_ACK_KEY] = True
+    return facts
+
+
 async def _emit_projection_terminal_event(
     event_bus: object,
     terminal_event: str,
     source_envelope: object,
+    handler_result: object = None,
 ) -> None:
     """Publish a terminal event after a successful DB projection.
 
     Propagates the source envelope's correlation_id so Pattern-B consumers
-    and golden-chain tests can correlate the terminal event to the command.
+    and golden-chain tests can correlate the terminal event to the command,
+    and carries the projection handler's own result as the payload (OMN-16875 —
+    see :func:`_build_projection_terminal_payload`).
     Best-effort: publish failures are logged but never propagate.
     """
-    from datetime import UTC, datetime
-
     from omnibase_core.models.events.model_event_envelope import ModelEventEnvelope
 
     try:
@@ -3453,7 +3641,7 @@ async def _emit_projection_terminal_event(
             _extract_dispatch_correlation_id(source_envelope, source_payload)
         )
         terminal_envelope = ModelEventEnvelope[object](
-            payload={"projected": True},
+            payload=_build_projection_terminal_payload(handler_result),
             correlation_id=correlation_id,
             envelope_timestamp=datetime.now(UTC),
             event_type=terminal_event,
