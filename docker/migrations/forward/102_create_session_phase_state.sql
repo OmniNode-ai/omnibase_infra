@@ -41,7 +41,7 @@
 --
 -- Idempotent CREATE so warm dev/stability volumes reconcile cleanly.
 
-CREATE TABLE IF NOT EXISTS session_phase_state (
+CREATE TABLE IF NOT EXISTS public.session_phase_state (
     session_id        TEXT PRIMARY KEY,
     tenant_id         TEXT NOT NULL,
     state             TEXT NOT NULL,
@@ -58,19 +58,19 @@ CREATE TABLE IF NOT EXISTS session_phase_state (
 -- A reducer fold never sets in_flight, so this index stays empty in steady
 -- state; it exists so the adapter's shared sweep is cheap here too.
 CREATE INDEX IF NOT EXISTS ix_session_phase_state_stale_sweep
-    ON session_phase_state (updated_at)
+    ON public.session_phase_state (updated_at)
     WHERE state NOT IN ('COMPLETED', 'FAILED') AND in_flight;
 
 -- Recovery-select predicate (StateStoreAdapter.select_recoverable_batches).
 CREATE INDEX IF NOT EXISTS ix_session_phase_state_recoverable_batches
-    ON session_phase_state (updated_at)
+    ON public.session_phase_state (updated_at)
     WHERE in_flight AND pending_emissions IS NOT NULL;
 
 -- updated_at refresh trigger, byte-identical in shape to migration 090's for
 -- delegation_workflow_state: StateStoreAdapter's seed/cas_update SQL never
 -- writes updated_at itself, so without this the column would record row-creation
 -- time forever and the adapter's staleness predicates would read a frozen clock.
-CREATE OR REPLACE FUNCTION refresh_session_phase_state_updated_at()
+CREATE OR REPLACE FUNCTION public.refresh_session_phase_state_updated_at()
 RETURNS TRIGGER AS $$
 BEGIN
     NEW.updated_at = NOW();
@@ -79,8 +79,8 @@ END;
 $$ LANGUAGE plpgsql;
 
 DROP TRIGGER IF EXISTS trg_session_phase_state_updated_at
-    ON session_phase_state;
+    ON public.session_phase_state;
 CREATE TRIGGER trg_session_phase_state_updated_at
-    BEFORE UPDATE ON session_phase_state
+    BEFORE UPDATE ON public.session_phase_state
     FOR EACH ROW
-    EXECUTE FUNCTION refresh_session_phase_state_updated_at();
+    EXECUTE FUNCTION public.refresh_session_phase_state_updated_at();
