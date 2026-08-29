@@ -19,6 +19,9 @@ from urllib.parse import urlparse
 
 from pydantic import BaseModel, ConfigDict, Field, field_validator
 
+from omnibase_infra.models.health.enum_llm_endpoint_probe_state import (
+    EnumLlmEndpointProbeState,
+)
 from omnibase_infra.utils.util_error_sanitization import sanitize_url
 
 
@@ -36,6 +39,10 @@ class ModelLlmEndpointStatus(BaseModel):
             or empty string if healthy.
         circuit_state: Current circuit breaker state for this endpoint
             (``closed``, ``open``, or ``half_open``).
+        probe_state: Classified probe outcome (OMN-16900).  ``available`` is
+            a bool and cannot distinguish a transient outage from a terminal
+            auth failure or an endpoint that was never probed at all; this
+            field carries that distinction.
     """
 
     model_config = ConfigDict(frozen=True, extra="forbid", from_attributes=True)
@@ -75,6 +82,9 @@ class ModelLlmEndpointStatus(BaseModel):
     error: str = Field(default="", description="Error message if probe failed")
     circuit_state: Literal["closed", "open", "half_open"] = Field(
         default="closed", description="Circuit breaker state"
+    )
+    probe_state: EnumLlmEndpointProbeState = Field(
+        ..., description="Classified probe outcome (OMN-16900)"
     )
 
 
