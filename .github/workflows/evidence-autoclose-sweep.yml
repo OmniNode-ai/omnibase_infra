@@ -199,6 +199,66 @@ jobs:
       contents: read
 
     steps:
+      # OMN-16832. THE credential this job runs under. Everything below that
+      # touches GitHub uses this token and nothing else.
+      #
+      # What was here before: `${{ secrets.OMNI_GITHUB_TOKEN || github.token }}`
+      # at six sites. Proven by live readback (2026-08-29) that no secret named
+      # OMNI_GITHUB_TOKEN exists at org, repo, OR environment scope — the three
+      # places `secrets.*` can resolve from in this job — so every one of those
+      # six sites had ALWAYS evaluated to `github.token`. The `||` read as "a
+      # stronger token, if configured"; it was a dead branch over a weaker one,
+      # and the fall-through was silent. That is the defect class being fixed
+      # here, so there is deliberately no fallback below: if the App token
+      # cannot be minted the job fails loudly rather than quietly degrading to
+      # a credential that cannot do the work.
+      #
+      # `github.token` is structurally incapable of two things the sweep needs,
+      # regardless of any App-installation setting:
+      #   1. `administration: read` (branch protection) is not a grantable
+      #      scope for the automatic token at all. Every `::pr-live-state`
+      #      sub-check 403'd with exactly that scope named, on every ticket, in
+      #      every run — the SKIPs this ticket is about.
+      #   2. It is scoped to the triggering repo only, so the private
+      #      `OmniNode-ai/omninode_infra` reads 404 and any behaviour check
+      #      pinned at that cwd is unexecutable (OMN-16902's
+      #      UNAVAILABLE_REPO_NOT_READABLE_BY_TOKEN warning).
+      # The `onexbot` installation (app_id 3342522, installation 123040063)
+      # carries `administration:read` with `repository_selection: all`, so a
+      # token minted from it clears both.
+      #
+      # Least privilege is applied on the PERMISSION axis, not the repository
+      # axis, and that asymmetry is deliberate:
+      #   - permissions: narrowed to read-only. The installation grants
+      #     checks:write, issues:write and pull_requests:write; this job's
+      #     GitHub access is entirely `gh api` GETs (the handler's only writes
+      #     go to Linear over LINEAR_API_KEY), so none of those are requested.
+      #   - repositories: NOT pinned to a list. The repo set this job reads is
+      #     derived at runtime from the `cwd` values the scanned OCC contracts
+      #     name (see the materialise step below) — it is data, not a constant,
+      #     and a static list would fail-closed the first time a contract named
+      #     a repo not on it. `owner:` scopes the token to the installation's
+      #     repositories, which is the smallest set that stays correct.
+      #
+      # TTL note, recorded rather than discovered later: this token expires 1h
+      # after minting and this job's timeout-minutes is 60. A sweep that runs
+      # to the very top of its budget can outlive its own credential. Today's
+      # runs finish in ~8 min so the margin is large, but if the timeout is
+      # ever raised, re-mint before the long-running sweep step rather than
+      # widening this window.
+      - name: Mint onexbot App token (OMN-16832)
+        id: app-token
+        uses: actions/create-github-app-token@d72941d797fd3113feb6b93fd0dec494b13a2547 # v1
+        with:
+          app-id: ${{ secrets.ONEXBOT_APP_ID }}
+          private-key: ${{ secrets.ONEXBOT_APP_PRIVATE_KEY }}
+          owner: OmniNode-ai
+          permission-administration: read
+          permission-contents: read
+          permission-metadata: read
+          permission-pull-requests: read
+          permission-checks: read
+
       - name: Checkout omnibase_infra
         uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
         with:
@@ -331,13 +391,16 @@ jobs:
       # `ref: dev` checkout would leave the installed rev inferable only from
       # actions/checkout's own output.
       #
-      # omnimarket is a PUBLIC repo, so github.token suffices (same reasoning
-      # as ci.yml's "Live-resolve omnimarket dev HEAD" step). Fails loudly on
-      # a non-sha rather than falling back to a stale pin.
+      # omnimarket is a PUBLIC repo, so this leg was never the broken one — it
+      # worked on the `github.token` the old `||` silently fell through to. It
+      # uses the App token anyway (OMN-16832) so this job has exactly ONE
+      # GitHub credential: a step that reads fine under a weaker token is how
+      # a mixed-credential job hides which token is actually in force.
+      # Fails loudly on a non-sha rather than falling back to a stale pin.
       - name: Resolve omnimarket dev HEAD
         id: omnimarket-ref
         env:
-          GH_TOKEN: ${{ secrets.OMNI_GITHUB_TOKEN || github.token }}
+          GH_TOKEN: ${{ steps.app-token.outputs.token }}
         run: |
           set -euo pipefail
           sha="$(gh api repos/OmniNode-ai/omnimarket/commits/dev --jq .sha)"
@@ -354,7 +417,7 @@ jobs:
           repository: OmniNode-ai/omnimarket
           ref: ${{ steps.omnimarket-ref.outputs.sha }}
           path: .omnimarket-src
-          token: ${{ secrets.OMNI_GITHUB_TOKEN || github.token }}
+          token: ${{ steps.app-token.outputs.token }}
           persist-credentials: false
           fetch-depth: 1
 
@@ -582,7 +645,7 @@ jobs:
           repository: OmniNode-ai/onex_change_control
           ref: dev
           path: .occ-src
-          token: ${{ secrets.OMNI_GITHUB_TOKEN || github.token }}
+          token: ${{ steps.app-token.outputs.token }}
           persist-credentials: false
           fetch-depth: 1
 
@@ -653,7 +716,7 @@ jobs:
       - name: Derive and materialise the cwd repo set the OCC contracts name (OMN-16902)
         shell: bash
         env:
-          GH_TOKEN: ${{ secrets.OMNI_GITHUB_TOKEN || github.token }}
+          GH_TOKEN: ${{ steps.app-token.outputs.token }}
         run: |
           set -euo pipefail
 
@@ -960,7 +1023,7 @@ jobs:
       - name: Diagnose verdict divergence (OMN-16788; opt-in, default off)
         if: ${{ github.event.inputs.diagnose_tickets != '' }}
         env:
-          GH_TOKEN: ${{ secrets.OMNI_GITHUB_TOKEN || github.token }}
+          GH_TOKEN: ${{ steps.app-token.outputs.token }}
           # OMN-16902 D2: no UV_NO_SYNC here. This step spawns the same
           # behaviour checks the sweep does, so it must reproduce the sweep's
           # environment exactly — including the OCC governance worktree's
@@ -1072,7 +1135,7 @@ jobs:
       - name: Run evidence autoclose sweep (DRY-RUN — apply is never passed here)
         env:
           LINEAR_API_KEY: ${{ secrets.LINEAR_API_KEY }}
-          GH_TOKEN: ${{ secrets.OMNI_GITHUB_TOKEN || github.token }}
+          GH_TOKEN: ${{ steps.app-token.outputs.token }}
           # OMN-16846 changed what UV_NO_SYNC was for; OMN-16902 removed it.
           #
           # The sweep and its per-ticket verifier no longer go through `uv run`
