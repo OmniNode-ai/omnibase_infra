@@ -270,6 +270,10 @@ services:
       POSTGRES_DB: omnibase_infra
       NODE_POSTGRES_DB: omnidash_analytics
       MIGRATIONS_DIR: /migrations/forward
+      # OMN-16993: warm-volume re-assert of the omninode_runtime LOGIN
+      # credential. This service redeclares the base definition wholesale, so
+      # the base file's copy of this line does not reach the judge lane.
+      OMNINODE_RUNTIME_PASSWORD: ${OMNINODE_RUNTIME_PASSWORD:-}
     volumes:
       - ../scripts/run-forward-migrations.sh:/run-forward-migrations.sh:ro
       - ../docker/migrations/forward:/migrations/forward:ro

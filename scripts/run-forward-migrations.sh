@@ -76,6 +76,11 @@
 #   PG_WAIT_RETRIES   (default: 30 — number of 2s waits for postgres ready)
 #   FORWARD_MIGRATION_LOCK_ID      (default: 100010 — advisory lock id, OMN-15291)
 #   MIGRATION_LOCK_WAIT_SECONDS    (default: 300 — bounded wait for that lock)
+#   OMNINODE_RUNTIME_PASSWORD (default: unset = skip, OMN-16993). Credential for
+#     the topology-governed omninode_runtime principal, re-asserted on warm
+#     volumes by section 0 below. Same empty-means-skip contract as the postgres
+#     service's ROLE_* vars: an unprovisioned lane must get no role rather than a
+#     half-configured one. Must be hex (openssl rand -hex 32) when set.
 #   ONEX_MIGRATION_LANE (default: unset = FULL operator fence, OMN-15379).
 #     Lane indicator for the lane-scoped fence release. The ONLY recognised
 #     value is `dev` (the lab compose lane); unset or unknown means every fenced
@@ -1193,6 +1198,133 @@ EOSQL
 if [ -d "$NODE_MIGRATIONS_DIR" ]; then
   validate_application_migration_manifest
 fi
+
+# ---------------------------------------------------------------------------
+# 0. Re-assert deployment-owned LOGIN credentials on warm volumes (OMN-16993)
+# ---------------------------------------------------------------------------
+# docker/migrations/forward/000_create_multiple_databases.sh mints the LOGIN +
+# password for the topology-governed principals in its LOGIN_ONLY_ROLE_MAP
+# (Phase 2b, OMN-16843). That script is a `.sh` under
+# /docker-entrypoint-initdb.d, so Postgres runs it ONLY on a fresh volume —
+# and the loop below at section 2 only ever applies `*.sql`. Consequence: on
+# every warm volume the role exists (099 creates it NOLOGIN on purpose, since
+# 094's invariant keeps credential material out of migrations) with
+# rolcanlogin=false and rolpassword NULL, while OMNINODE_INTERNAL_DB_URL
+# resolves fine and then fails at connect.
+#
+# That is exactly what shipped on the stability lane: its postgres container
+# was recreated 2026-08-28T20:14Z on a pre-existing volume, so `omninode_runtime`
+# stayed NOLOGIN and node_projection_session_replay DLQ'd 100% of its topic on
+# `password authentication failed` — ~26 failures/second — while offsets kept
+# committing and the runtime kept reporting healthy.
+#
+# This phase closes that seam: the warm-volume runner is the one sanctioned
+# path that runs on EVERY compose up, so it re-asserts the same credential
+# from the same authority (the compose environment that also renders
+# OMNINODE_INTERNAL_DB_URL) that the fresh-volume seam uses. No credential
+# material is committed; an unset variable is skipped exactly as the bootstrap
+# skips it, so an unprovisioned lane gets no half-configured role.
+#
+# Deliberately NOT reused here: grant_role_to_database() / revoke_cross_db_access().
+# These principals' AUTHORIZATION is owned by the topology instance and issued
+# by the topology-derived migrations; widening it here would hand the role
+# CREATE on schema public, which exempts it from FORCE row-level security.
+# LOGIN + PASSWORD and nothing else.
+#
+# The entry format mirrors the bootstrap's LOGIN_ONLY_ROLE_MAP bash array, one
+# "role:PASSWORD_ENV_VAR" per element. The two lists are pinned in agreement by
+# tests/unit/infra/test_warm_volume_login_credential_omn16993.py, so this copy
+# cannot silently drift from the fresh-volume one.
+reassert_login_only_role_credential() {
+  role_name="$1"
+  password_var="$2"
+  role_password=""
+
+  # Committed constants, but validate before the eval indirection and before
+  # either name reaches a SQL identifier / string literal regardless.
+  case "$password_var" in
+    ""|*[!A-Z0-9_]*)
+      echo "[forward-migration]   FAIL: malformed password var '${password_var}'" >&2
+      return 1
+      ;;
+  esac
+  case "$role_name" in
+    ""|*[!a-z0-9_]*)
+      echo "[forward-migration]   FAIL: malformed role name '${role_name}'" >&2
+      return 1
+      ;;
+  esac
+
+  # POSIX sh has no ${!var}; eval is the portable indirection. The value is
+  # never echoed, never passed in argv, and reaches psql only on stdin.
+  eval "role_password=\${${password_var}:-}"
+
+  if [ -z "$role_password" ]; then
+    echo "[forward-migration]   skip  ${role_name} (${password_var} not set)"
+    return 0
+  fi
+
+  # Same hex-only contract the bootstrap's validate_password() enforces
+  # (openssl rand -hex 32). A placeholder or a quoted value is a provisioning
+  # defect, not something to paper over.
+  #
+  # Deliberately STRICTER than the bootstrap, which counts an invalid password
+  # as a SKIP and carries on. A skip is right for an ABSENT credential (the lane
+  # has not been provisioned) and wrong for a MALFORMED one: skipping there is
+  # how a lane ends up looking provisioned while its projections cannot connect,
+  # which is the defect this section exists to close. Returning non-zero under
+  # `set -e` leaves migrations_complete FALSE and migration-gate UNHEALTHY, so
+  # the lane refuses to start the runtime rather than starting it blind.
+  case "$role_password" in
+    *[!0-9a-fA-F]*)
+      echo "[forward-migration]   FAIL: ${password_var} is not hex — refusing to set ${role_name}'s credential" >&2
+      return 1
+      ;;
+  esac
+
+  # Defence in depth: hex-only means a quote cannot appear, but double any
+  # single quote anyway before interpolating into the SQL literal.
+  escaped_password=$(printf '%s' "$role_password" | sed "s/'/''/g")
+
+  psql -h "$PGHOST" -p "$PGPORT" -U "$PGUSER" -d "$PGDB" -v ON_ERROR_STOP=1 -q <<EOSQL
+DO \$reassert_login\$
+BEGIN
+  IF NOT EXISTS (SELECT FROM pg_catalog.pg_roles WHERE rolname = '${role_name}') THEN
+    CREATE ROLE "${role_name}" WITH
+      LOGIN
+      NOSUPERUSER
+      NOBYPASSRLS
+      NOCREATEDB
+      NOCREATEROLE
+      NOREPLICATION
+      PASSWORD '${escaped_password}';
+  ELSE
+    -- Pre-existing role: touch LOGIN + PASSWORD only. Every other attribute is
+    -- asserted by the topology-derived migrations; re-asserting them here would
+    -- demand role-administration privileges this seam does not need (094).
+    ALTER ROLE "${role_name}" WITH LOGIN PASSWORD '${escaped_password}';
+  END IF;
+END
+\$reassert_login\$;
+EOSQL
+
+  echo "[forward-migration]   ok    ${role_name} LOGIN credential asserted"
+
+  # POSIX sh has no function-scoped variables; drop the credential from the
+  # shell rather than leave it live for the remaining ~200 lines of migrations.
+  unset role_password escaped_password
+}
+
+echo "[forward-migration] Re-asserting deployment-owned login credentials..."
+# LOGIN_ONLY_ROLE_MAP — entries are quoted individually rather than split out of
+# one string so the loop needs no word splitting to stay correct.
+for login_role_entry in \
+  "omninode_runtime:OMNINODE_RUNTIME_PASSWORD" \
+; do
+  entry_role_name=${login_role_entry%%:*}
+  entry_password_var=${login_role_entry#*:}
+  reassert_login_only_role_credential "$entry_role_name" "$entry_password_var"
+done
 
 # ---------------------------------------------------------------------------
 # 1. Ensure service-owned schema_migrations tracking table exists (idempotent)
