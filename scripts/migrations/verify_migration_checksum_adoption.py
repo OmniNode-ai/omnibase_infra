@@ -92,6 +92,15 @@ into ``_ledger/verified-divergent-adoptions.tsv`` (``--emit-adoptions``). Every
 run writes a receipt (``--receipt-out``) whose sha256 is recorded in the TSV, so
 an adoption in either file is always traceable to the run that proved it.
 
+An adoption row's ``ticket`` column defaults to this tool's own ticket, which is
+correct only while the run that PROVES a row is also the change that BUILT the
+mechanism. ``--declaration-ticket OMN-NNNN`` overrides it for the case where it
+is not -- OMN-16923 is the first: that row was earned by a forward migration
+(``docker/migrations/forward/101_converge_savings_estimates_to_node_declared_shape.sql``)
+converging the live service schema, not by OMN-16915's stale-revision argument,
+and a reader following the default would land on a ticket that never made that
+claim. The receipt's own ``ticket`` field is unaffected; it names the tool.
+
 This tool never writes to the audited database. The live connection is
 read-only introspection; every mutation happens in the scratch server.
 
@@ -132,6 +141,9 @@ from typing import Any
 TOOL_VERSION = "2"
 TICKET = "OMN-15857"
 DIVERGENT_TICKET = "OMN-16915"
+# A declaration's `ticket` column is an evidence pointer, so it is validated
+# rather than accepted as free text -- an unparseable value is a dead link.
+DECLARATION_TICKET_RE = re.compile(r"^OMN-[0-9]+$")
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
 FORWARD_DIR = REPO_ROOT / "docker" / "migrations" / "forward"
@@ -971,11 +983,36 @@ def build_parser() -> argparse.ArgumentParser:
         default=os.environ.get("ONEX_LANE", "unspecified"),
         help="Lane attribution recorded in the receipt.",
     )
+    parser.add_argument(
+        "--declaration-ticket",
+        default=None,
+        help=(
+            "OMN-NNNN recorded in the `ticket` column of any adoption row this "
+            "run emits. Defaults to this tool's own ticket, which is right only "
+            "while the run that PROVES a row is also the ticket that BUILT the "
+            "mechanism. OMN-16923 is the first case where it is not: that row "
+            "was earned by a forward migration converging the live schema, not "
+            "by OMN-16915's stale-revision argument, and a reader following the "
+            "default would land on a ticket that never made that claim. The "
+            "receipt's own `ticket` field is unaffected -- it names the tool."
+        ),
+    )
     return parser
 
 
 def main(argv: Sequence[str] | None = None) -> int:
     args = build_parser().parse_args(argv)
+
+    declaration_ticket: str | None = args.declaration_ticket
+    if declaration_ticket is not None and not DECLARATION_TICKET_RE.match(
+        declaration_ticket
+    ):
+        print(
+            "[verify-adoption] FATAL: --declaration-ticket must be an "
+            f"OMN-NNNN reference, got {declaration_ticket!r}",
+            file=sys.stderr,
+        )
+        return 2
 
     try:
         psql_argv = _parse_psql_exec(args.psql_exec)
@@ -1096,7 +1133,7 @@ def main(argv: Sequence[str] | None = None) -> int:
                 "version": verdict.version,
                 "source_checksum": verdict.source_checksum,
                 "manifest_checksum": verdict.manifest_checksum,
-                "ticket": TICKET,
+                "ticket": declaration_ticket or TICKET,
                 "receipt_sha256": receipt_sha,
                 "verified_at": verified_at,
             }
@@ -1128,7 +1165,7 @@ def main(argv: Sequence[str] | None = None) -> int:
                 "version": verdict.version,
                 "source_checksum": verdict.source_checksum,
                 "manifest_checksum": verdict.manifest_checksum,
-                "ticket": DIVERGENT_TICKET,
+                "ticket": declaration_ticket or DIVERGENT_TICKET,
                 "receipt_sha256": receipt_sha,
                 "verified_at": verified_at,
             }
