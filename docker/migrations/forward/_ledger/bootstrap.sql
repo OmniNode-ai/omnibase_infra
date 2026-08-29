@@ -591,6 +591,10 @@ DECLARE
   manifest_row RECORD;
   legacy_row RECORD;
   existing_row RECORD;
+  -- OMN-15857.  A plpgsql RECORD keeps whatever the last SELECT INTO put in it,
+  -- so this is reset at the top of every iteration: a verified adoption for one
+  -- version must never leak its ticket/receipt into the provenance of the next.
+  adoption_row RECORD;
   resolved_stream TEXT;
   resolved_owner TEXT;
   resolved_domain TEXT;
@@ -623,6 +627,11 @@ BEGIN
         '^node:[A-Za-z0-9_][A-Za-z0-9_.-]*:[A-Za-z0-9_][A-Za-z0-9_.-]*[.]sql$'
     ORDER BY migration_id
   LOOP
+    -- OMN-15857: clear the carried-over RECORD before each row.
+    SELECT * INTO adoption_row
+    FROM onex_verified_checksum_adoptions
+    WHERE false;
+
     SELECT * INTO manifest_row
     FROM onex_application_migration_manifest
     WHERE version = source_row.migration_id;
@@ -666,14 +675,57 @@ BEGIN
       ELSIF source_row.checksum = 'applied-by-runner' THEN
         imported_checksum := manifest_row.checksum;
       ELSE
-        RAISE EXCEPTION
-          'conflicting migration checksum for version %', source_row.migration_id;
+        -- OMN-15857: a hand-written sentinel checksum
+        -- ('hotfix-applied-by-codex', 'applied-manually-omn-11760', ...) is
+        -- neither a content hash nor the runner literal, so it lands here and
+        -- aborts every migration on the lane.  Widening the accepted spelling
+        -- would be the wrong fix: the sentinel exists precisely to record that
+        -- nobody proved the hand-applied SQL matches the checked-in file, and a
+        -- blanket tolerance would launder that open question into a clean row.
+        --
+        -- The only accepted resolution is a committed, per-version declaration
+        -- backed by a mechanical proof.  scripts/migrations/
+        -- verify_migration_checksum_adoption.py replays the checked-in
+        -- migration into a scratch database, derives the object surface that
+        -- file is responsible for by executing it, and diffs that surface
+        -- (columns, types, nullability, defaults, constraints, indexes, view
+        -- definitions, enum labels) against the live database.  Only a proven
+        -- `equivalent` verdict may be written into
+        -- _ledger/verified-checksum-adoptions.tsv, and the row carries the
+        -- sha256 of the receipt that proved it.
+        --
+        -- Three things must agree before the adoption is honoured here, so a
+        -- stale declaration cannot outlive the fact it attested to:
+        --   1. the version is declared,
+        --   2. the declared source_checksum equals the sentinel actually on the
+        --      row (a declaration cannot cover a different hand-edit), and
+        --   3. the declared manifest_checksum equals the manifest checksum the
+        --      proof ran against (rewriting the migration file after
+        --      verification re-opens the question and fails closed).
+        SELECT * INTO adoption_row
+        FROM onex_verified_checksum_adoptions
+        WHERE version = source_row.migration_id;
+        IF NOT FOUND
+           OR adoption_row.source_checksum <> source_row.checksum
+           OR adoption_row.manifest_checksum <> manifest_row.checksum THEN
+          RAISE EXCEPTION
+            'conflicting migration checksum for version %', source_row.migration_id;
+        END IF;
+        imported_checksum := manifest_row.checksum;
       END IF;
       imported_checksum_kind := 'content_sha256';
-      imported_provenance := format(
-        'adopted:%s:public.schema_migrations:migration_id:%s:raw-checksum=%s',
-        current_database(), source_row.migration_id, source_row.checksum
-      );
+      IF adoption_row.version IS NOT NULL THEN
+        imported_provenance := format(
+          'verified-adoption:%s:public.schema_migrations:migration_id:%s:raw-checksum=%s:ticket=%s:receipt=%s',
+          current_database(), source_row.migration_id, source_row.checksum,
+          adoption_row.ticket, adoption_row.receipt_sha256
+        );
+      ELSE
+        imported_provenance := format(
+          'adopted:%s:public.schema_migrations:migration_id:%s:raw-checksum=%s',
+          current_database(), source_row.migration_id, source_row.checksum
+        );
+      END IF;
     END IF;
 
     SELECT * INTO existing_row
