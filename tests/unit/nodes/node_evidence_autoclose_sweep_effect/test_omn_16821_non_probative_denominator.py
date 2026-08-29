@@ -61,6 +61,14 @@ _OCC_REPO = "OmniNode-ai/onex_change_control"
 _TICKET = "OMN-9999"
 
 
+_RECEIPT_SUMMARY_MODEL = (
+    "omnibase_infra.cli.model_receipt_runtime_summary.ModelReceiptRuntimeSummary"
+)
+_DOD_VERIFY_STATE_MODEL = (
+    "omnimarket.nodes.node_dod_verify.models.model_dod_verify_state.ModelDodVerifyState"
+)
+
+
 def _merged_pr(number: int) -> dict[str, object]:
     recent = (datetime.now(tz=UTC) - timedelta(hours=1)).strftime("%Y-%m-%dT%H:%M:%SZ")
     return {
@@ -141,17 +149,45 @@ def _skill_result(
     }
     if include_non_probative_count:
         terminal["non_probative_count"] = non_probative
+
+    # OMN-16961: which arm `receipt_mode` prints is decided by the run's own
+    # outcome, and a verified verdict is the success-like one — `result` IS
+    # the handler model, flat, with no `terminal_payload` key at all. Emitting
+    # the nested arm for every verdict (as this double used to) models a
+    # receipt the CLI never produces.
+    success_like = status == "verified"
+    if success_like:
+        return {
+            "skill_name": "dod_verify",
+            "node_name": "node_dod_verify",
+            "status": "success",
+            "exit_code": 0,
+            "result": terminal,
+            "result_model": _DOD_VERIFY_STATE_MODEL,
+        }
     return {
         "skill_name": "dod_verify",
         "node_name": "node_dod_verify",
-        "status": "success" if failed == 0 else "failed",
-        "exit_code": 0 if failed == 0 else 1,
+        "status": "failed",
+        "exit_code": 1,
         "result": {
-            "workflow_result": "completed" if failed == 0 else "failed",
-            "exit_code": 0 if failed == 0 else 1,
+            "workflow_result": "failed",
+            "exit_code": 1,
             "terminal_payload": terminal,
         },
+        "result_model": _RECEIPT_SUMMARY_MODEL,
     }
+
+
+def _verdict_of(receipt: dict[str, object]) -> dict[str, object]:
+    """The verdict body of a ``_skill_result`` receipt, whichever arm it is in."""
+    result = receipt["result"]
+    assert isinstance(result, dict)
+    if receipt["result_model"] == _RECEIPT_SUMMARY_MODEL:
+        nested = result["terminal_payload"]
+        assert isinstance(nested, dict)
+        return nested
+    return result
 
 
 class _FakeLinear:
@@ -247,7 +283,7 @@ async def test_omn_16260_shape_reaches_a_flip() -> None:
     """verified / 0 failed / behavior-proven, with non-probative siblings."""
     linear = _FakeLinear()
     payload = _skill_result(checks=_omn_16260_shape())
-    terminal = payload["result"]["terminal_payload"]  # type: ignore[index]
+    terminal = _verdict_of(payload)
 
     # Pin the double against the measured numbers before trusting the verdict.
     assert terminal["status"] == "verified"
@@ -324,7 +360,7 @@ async def test_an_all_non_probative_contract_still_gaps() -> None:
             for i in range(1, 5)
         ]
     )
-    terminal = payload["result"]["terminal_payload"]  # type: ignore[index]
+    terminal = _verdict_of(payload)
     assert terminal["status"] == "skipped"
     assert terminal["verified_count"] == 0
     assert terminal["non_probative_count"] == terminal["total_checks"] == 4
@@ -350,7 +386,7 @@ async def test_a_forged_verified_status_over_all_non_probative_still_gaps() -> N
             for i in range(1, 5)
         ]
     )
-    payload["result"]["terminal_payload"]["status"] = "verified"  # type: ignore[index]
+    _verdict_of(payload)["status"] = "verified"
 
     result = await _handler(payload, linear).handle(_request())
     assert result.outcomes[0].decision is EnumEvidenceAutocloseDecision.GAP_POSTED
@@ -372,7 +408,7 @@ async def test_a_skipped_check_still_gaps() -> None:
             _check("dod-ac3-live", "skipped", "unknown"),
         ]
     )
-    terminal = payload["result"]["terminal_payload"]  # type: ignore[index]
+    terminal = _verdict_of(payload)
     assert terminal["status"] == "verified"
     assert terminal["failed_count"] == 0
     assert terminal["verified_count"] + terminal["non_probative_count"] == 2
@@ -392,7 +428,7 @@ async def test_the_omn_15911_behavior_conjunct_is_untouched() -> None:
             _check("dod-pr-2-state", "non_probative", "merge-state"),
         ]
     )
-    terminal = payload["result"]["terminal_payload"]  # type: ignore[index]
+    terminal = _verdict_of(payload)
     assert (
         terminal["verified_count"] + terminal["non_probative_count"]
         == (terminal["total_checks"])
@@ -432,7 +468,7 @@ async def test_a_verifier_without_the_non_probative_key_degrades_to_the_old_rule
     payload = _skill_result(
         checks=_omn_16260_shape(), include_non_probative_count=False
     )
-    assert "non_probative_count" not in payload["result"]["terminal_payload"]  # type: ignore[operator,index]
+    assert "non_probative_count" not in _verdict_of(payload)
 
     result = await _handler(payload, linear).handle(_request())
     assert result.outcomes[0].decision is EnumEvidenceAutocloseDecision.GAP_POSTED
@@ -526,8 +562,8 @@ async def test_gap_fingerprint_tracks_the_non_probative_count() -> None:
             _check("dod-pr-state", "non_probative", "merge-state"),
         ]
     )
-    second_terminal = second["result"]["terminal_payload"]  # type: ignore[index]
-    first_terminal = first["result"]["terminal_payload"]  # type: ignore[index]
+    second_terminal = _verdict_of(second)
+    first_terminal = _verdict_of(first)
     assert (
         second_terminal["total_checks"],
         second_terminal["verified_count"],

@@ -62,6 +62,14 @@ def _merged_pr(number: int) -> dict[str, object]:
     }
 
 
+_RECEIPT_SUMMARY_MODEL = (
+    "omnibase_infra.cli.model_receipt_runtime_summary.ModelReceiptRuntimeSummary"
+)
+_DOD_VERIFY_STATE_MODEL = (
+    "omnimarket.nodes.node_dod_verify.models.model_dod_verify_state.ModelDodVerifyState"
+)
+
+
 def _skill_result(
     *,
     total: int,
@@ -69,30 +77,48 @@ def _skill_result(
     failed: int,
     behavior_proving: int = 1,
 ) -> dict[str, object]:
-    """A ModelSkillResult shaped like ``onex skill dod_verify`` prints."""
+    """A ModelSkillResult shaped like ``onex skill dod_verify`` prints.
+
+    OMN-16961: the CLI prints two arms and picks between them on the run's own
+    outcome — a verified verdict lands FLAT on ``result`` with
+    ``result_model: ModelDodVerifyState``; anything else is nested at
+    ``result.terminal_payload`` under ``ModelReceiptRuntimeSummary``. Both are
+    derived here from the verdict, exactly as ``receipt_mode`` derives them.
+    """
+    verdict: dict[str, object] = {
+        "correlation_id": str(uuid4()),
+        "ticket_id": _TICKET,
+        "status": "verified" if failed == 0 else "failed",
+        "dry_run": False,
+        "checks": [],
+        "total_checks": total,
+        "verified_count": verified,
+        "failed_count": failed,
+        "skipped_count": 0,
+        "superseded_count": 0,
+        "behavior_proving_count": behavior_proving,
+        "error_message": None,
+    }
+    if failed == 0:
+        return {
+            "skill_name": "dod_verify",
+            "node_name": "node_dod_verify",
+            "status": "success",
+            "exit_code": 0,
+            "result": verdict,
+            "result_model": _DOD_VERIFY_STATE_MODEL,
+        }
     return {
         "skill_name": "dod_verify",
         "node_name": "node_dod_verify",
-        "status": "success" if failed == 0 else "failed",
-        "exit_code": 0 if failed == 0 else 1,
+        "status": "failed",
+        "exit_code": 1,
         "result": {
-            "workflow_result": "completed",
-            "exit_code": 0 if failed == 0 else 1,
-            "terminal_payload": {
-                "correlation_id": str(uuid4()),
-                "ticket_id": _TICKET,
-                "status": "verified" if failed == 0 else "failed",
-                "dry_run": False,
-                "checks": [],
-                "total_checks": total,
-                "verified_count": verified,
-                "failed_count": failed,
-                "skipped_count": 0,
-                "superseded_count": 0,
-                "behavior_proving_count": behavior_proving,
-                "error_message": None,
-            },
+            "workflow_result": "failed",
+            "exit_code": 1,
+            "terminal_payload": verdict,
         },
+        "result_model": _RECEIPT_SUMMARY_MODEL,
     }
 
 

@@ -51,6 +51,14 @@ def _merged_pr(number: int, title: str, ticket: str) -> dict[str, object]:
     }
 
 
+_RECEIPT_SUMMARY_MODEL = (
+    "omnibase_infra.cli.model_receipt_runtime_summary.ModelReceiptRuntimeSummary"
+)
+_DOD_VERIFY_STATE_MODEL = (
+    "omnimarket.nodes.node_dod_verify.models.model_dod_verify_state.ModelDodVerifyState"
+)
+
+
 def _dod_verify_ok(
     *,
     total: int,
@@ -58,18 +66,30 @@ def _dod_verify_ok(
     failed: int,
     skipped: int = 0,
     behavior_proving: int = 1,
+    verdict_status: str | None = None,
 ) -> dict[str, object]:
     """A ModelSkillResult shaped like the one `onex skill dod_verify` prints.
 
-    OMN-16736: the verification counts live under ``result.terminal_payload``,
-    NOT flat on ``result``. ``result`` carries the DISPATCH outcome; the node's
-    own terminal state is nested one level below it. A prior revision of this
-    double put the counts flat on ``result`` — the same key the reader used —
-    so double and reader agreed with each other and disagreed with the real
-    CLI, and every live run computed 0/0. Shape verified against the committed
-    capture in tests/fixtures/omn16736/.
+    OMN-16736: on a NON-success run the verification counts live under
+    ``result.terminal_payload``, not flat on ``result``. ``result`` there
+    carries the dispatch outcome and the node's own terminal state is nested
+    one level below it.
 
-    OMN-15911 added ``behavior_proving_count`` to the same payload. It defaults
+    OMN-16961: that is only ONE of the two arms the CLI prints, and this
+    double used to emit it unconditionally — including for a verified verdict,
+    where it also stamped ``status: "success"`` and
+    ``result_model: ModelDodVerifyState`` on a body that carried neither. That
+    receipt cannot exist. ``receipt_mode`` puts the handler's own model FLAT on
+    ``result`` whenever the run is success-like, and a verified dod_verify run
+    is exactly that. So the double emitting an impossible hybrid is why the
+    live 10-of-19 ``error_verify_unparseable`` split had no failing test: the
+    only arm production could ever flip on was the one no test constructed.
+
+    The arm is therefore derived from the verdict here, exactly as the CLI
+    derives it — verified -> flat success arm, anything else -> nested summary
+    arm. Both are pinned against verbatim captures in tests/fixtures/omn16961/.
+
+    OMN-15911 added ``behavior_proving_count`` to the verdict. It defaults
     to 1 here so the pre-existing cases keep exercising the path they were
     written for (a flip on green counts); the cases that exercise the
     proof-class guard itself pass it explicitly. It is NOT optional in the
@@ -77,36 +97,54 @@ def _dod_verify_ok(
     verifier and is deliberately an ERROR, covered in
     test_omn_15911_behavior_proof_gate.py.
     """
-    verdict = "verified" if failed == 0 else "failed"
-    return {
+    status = verdict_status or ("verified" if failed == 0 else "failed")
+    verdict: dict[str, object] = {
+        "correlation_id": str(uuid4()),
+        "ticket_id": "OMN-9999",
+        "status": status,
+        "dry_run": False,
+        "checks": [],
+        "total_checks": total,
+        "verified_count": verified,
+        "failed_count": failed,
+        "skipped_count": skipped,
+        "superseded_count": 0,
+        "behavior_proving_count": behavior_proving,
+        "error_message": None,
+    }
+    success_like = status == "verified"
+    envelope: dict[str, object] = {
         "skill_name": "dod_verify",
         "node_name": "node_dod_verify",
-        "status": "success" if failed == 0 else "failed",
+        "status": "success" if success_like else "failed",
         "correlation_id": str(uuid4()),
         "run_id": str(uuid4()),
-        "exit_code": 0 if failed == 0 else 1,
+        "exit_code": 0 if success_like else 1,
         "duration_ms": 1,
-        "result": {
-            "workflow_result": "completed" if failed == 0 else "failed",
-            "exit_code": 0 if failed == 0 else 1,
-            "workflow": "<OMNI_HOME>/omnimarket/nodes/node_dod_verify/contract.yaml",
-            "terminal_payload": {
-                "correlation_id": str(uuid4()),
-                "ticket_id": "OMN-9999",
-                "status": verdict,
-                "dry_run": False,
-                "checks": [],
-                "total_checks": total,
-                "verified_count": verified,
-                "failed_count": failed,
-                "skipped_count": skipped,
-                "superseded_count": 0,
-                "behavior_proving_count": behavior_proving,
-                "error_message": None,
-            },
-        },
-        "result_model": "omnimarket.nodes.node_dod_verify.models.model_dod_verify_state.ModelDodVerifyState",
     }
+    if success_like:
+        envelope["result"] = verdict
+        envelope["result_model"] = _DOD_VERIFY_STATE_MODEL
+    else:
+        envelope["result"] = {
+            "workflow_result": "failed",
+            "exit_code": 1,
+            "workflow": "<OMNI_HOME>/omnimarket/nodes/node_dod_verify/contract.yaml",
+            "terminal_payload": verdict,
+        }
+        envelope["result_model"] = _RECEIPT_SUMMARY_MODEL
+    return envelope
+
+
+def _verdict_of(receipt: dict[str, object]) -> dict[str, object]:
+    """The verdict body of a ``_dod_verify_ok`` receipt, whichever arm it is in."""
+    result = receipt["result"]
+    assert isinstance(result, dict)
+    if receipt["result_model"] == _RECEIPT_SUMMARY_MODEL:
+        nested = result["terminal_payload"]
+        assert isinstance(nested, dict)
+        return nested
+    return result
 
 
 class FakeLinearClient:
@@ -776,9 +814,12 @@ class TestRealDodVerifyPayloadShape:
 
     async def test_a_verified_terminal_status_is_required_for_a_flip(self):
         """Counts alone do not authorize a flip; dod_verify's verdict must agree."""
-        payload = _dod_verify_ok(total=3, verified=3, failed=0)
-        # Same clean arithmetic, but the verifier itself declined to say VERIFIED.
-        payload["result"]["terminal_payload"]["status"] = "skipped"
+        # Same clean arithmetic, but the verifier itself declined to say
+        # VERIFIED — which is also what puts the receipt in the nested
+        # runtime-summary arm rather than the flat success arm (OMN-16961).
+        payload = _dod_verify_ok(
+            total=3, verified=3, failed=0, verdict_status="skipped"
+        )
         gh_fake = _make_gh_fake(
             companions=[_merged_pr(1, "evidence(OMN-9999): x", "OMN-9999")],
             files_by_pr={1: ["contracts/OMN-9999.yaml"]},
@@ -1266,9 +1307,14 @@ class TestOmn16905OutcomeRowReportsBehaviorProving:
         `all_verified` is False and the ticket takes the gap path -- the precise
         combination that produced the reported 1-vs-0 divergence.
         """
-        verdict = _dod_verify_ok(total=6, verified=2, failed=0, behavior_proving=1)
-        payload = verdict["result"]["terminal_payload"]
-        payload["status"] = "skipped"
+        verdict = _dod_verify_ok(
+            total=6,
+            verified=2,
+            failed=0,
+            behavior_proving=1,
+            verdict_status="skipped",
+        )
+        payload = _verdict_of(verdict)
         payload["skipped_count"] = 3
         payload["non_probative_count"] = 1
 
@@ -1323,10 +1369,12 @@ class TestOmn16905OutcomeRowReportsBehaviorProving:
         silently will not flip.
         """
         verdict = _dod_verify_ok(
-            total=total, verified=verified, failed=failed, behavior_proving=behavior
+            total=total,
+            verified=verified,
+            failed=failed,
+            behavior_proving=behavior,
+            verdict_status=status,
         )
-        payload = verdict["result"]["terminal_payload"]
-        payload["status"] = status
 
         gh_fake = _make_gh_fake(
             companions=[_merged_pr(1, "evidence(OMN-9999): x", "OMN-9999")],
