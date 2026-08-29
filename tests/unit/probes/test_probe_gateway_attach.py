@@ -138,9 +138,13 @@ async def test_the_proof_grants_attaches_and_detaches(
 
     called = [url for url, _, _ in fake_transport.json_requests]
     assert called == [
+        # OMN-16687: the attach audience is obtainable only from the exchange,
+        # so the proof's first POST is the exchange, not the attach.
+        f"{GATEWAY_BASE_URL}/v1/auth/gateway-token",
         f"{GATEWAY_BASE_URL}/v1/gateway/attach",
         f"{GATEWAY_BASE_URL}/v1/gateway/detach",
     ]
+    assert fake_transport.exchange_count == 1
     # Non-destructive: the session the proof opened is gone again.
     assert fake_transport.attach_count == 1
     assert fake_transport.detach_count == 1
@@ -233,12 +237,14 @@ async def test_check_reports_a_failure_when_the_credential_is_rejected(
     assert CLIENT_SECRET not in message
 
 
-async def test_check_reports_a_failure_when_the_gateway_rejects_the_attach(
+async def test_check_reports_a_failure_when_the_minted_token_cannot_attach(
     tmp_path: Path, fake_transport: FakeGatewayTransport
 ) -> None:
     _write_credential(tmp_path / ".onex")
-    # A token the gateway will not accept: the grant succeeds, the attach 401s.
-    fake_transport.audiences = ["redpanda-events"]
+    # A token the gateway will not accept: the grant and the exchange both
+    # succeed, but what the exchange minted does not carry the attach audience
+    # (OMN-16687 -- a server-side mapper drift, not a bad credential).
+    fake_transport.exchange_audiences = ["redpanda-events"]
 
     passed, message = await check_gateway_attach(
         str(tmp_path / ".onex"), 10, transport=fake_transport
@@ -372,7 +378,15 @@ async def test_the_proof_grants_a_fresh_token_for_the_attach(
 
     assert len(fake_transport.form_requests) == 1
     assert len(fake_transport.issued_tokens) == 1
-    presented = {
-        headers["Authorization"] for _, _, headers in fake_transport.json_requests
+    assert len(fake_transport.exchanged_tokens) == 1
+
+    exchange_headers = fake_transport.json_requests[0][2]
+    assert exchange_headers["Authorization"] == (
+        f"Bearer {fake_transport.issued_tokens[0]}"
+    )
+    # Both gateway calls present the EXCHANGED token; the machine token never
+    # reaches the gateway, and the exchange is not re-run for the detach.
+    gateway_presented = {
+        headers["Authorization"] for _, _, headers in fake_transport.json_requests[1:]
     }
-    assert presented == {f"Bearer {fake_transport.issued_tokens[0]}"}
+    assert gateway_presented == {f"Bearer {fake_transport.exchanged_tokens[0]}"}

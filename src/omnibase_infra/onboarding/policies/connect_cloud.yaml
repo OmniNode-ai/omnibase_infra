@@ -25,6 +25,14 @@
 #   `StoreGatewayCredential` requires it and has no default (the realm host is
 #   not derivable from the gateway origin). A flow that skipped it would write
 #   a credential that cannot mint a token.
+#
+# WHICH CLIENT THE OPERATOR IS BEING ASKED FOR (OMN-16687)
+#   The tenant's MACHINE client -- `clientId == principal_id`, `aud=redpanda-
+#   events` -- whose secret is returned on tenant create and re-obtainable via
+#   `POST /v1/tenants/{id}/credentials/rotate`. NOT the `ga-*` attach client:
+#   its secret is never returned by onex-api, so prompting for it asked the
+#   operator for something no operator can hold. The attach audience is
+#   obtained from `POST /v1/auth/gateway-token`, server-side, at mint time.
 policy_name: "connect_cloud"
 description: "Connect this machine to the ONEX cloud gateway and store the credential (~5 min)"
 version: {major: 1, minor: 0, patch: 0}
@@ -42,7 +50,7 @@ steps:
     type: text
     required: true
   - id: gateway_client_id
-    prompt: "Gateway client id — the ga-* principal issued for this tenant"
+    prompt: "Gateway client id — this tenant's principal_id (machine client)"
     type: text
     required: true
   - id: gateway_token_endpoint
@@ -50,7 +58,7 @@ steps:
     type: text
     required: true
   - id: gateway_client_secret
-    prompt: "Client secret for that principal"
+    prompt: "Client secret for that principal (from POST /v1/tenants/{id}/credentials/rotate)"
     type: text
     # Routes to the adapter's masked path: getpass on a terminal, and a
     # `<redacted>` placeholder in the step-result receipt.

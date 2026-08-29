@@ -239,10 +239,11 @@ def test_context_satisfied_only_by_a_commit_status_is_not_absent() -> None:
     """Required contexts can be satisfied on either of two GitHub surfaces.
 
     A check-runs-only probe reports every commit-status context permanently
-    absent. This is not hypothetical: on these repos ``CodeRabbit`` posts a
-    legacy commit status and appears in the check-runs list zero times, and
-    ``gate / CodeRabbit Thread Check`` is a live required context on
-    omnibase_core / omnimarket / omniclaude dev.
+    absent. This is not hypothetical: the captured payload below is a real
+    ``CodeRabbit`` commit status that appears in the check-runs list zero
+    times. CodeRabbit itself was removed in OMN-16933, but the fixture is kept
+    because the two-surface property it proves belongs to GitHub, not to that
+    app — any GitHub App can report on the legacy status surface.
 
     The status payload here is a real capture; the required-context list is set
     to that status's name so the union is what the assertion turns on.

@@ -361,7 +361,6 @@ EXPECTED_EXTERNAL_CONTEXTS: tuple[str, ...] = (
     "pr-title / check-title",
     "URL Authority Gate",
     "imperative-contract-guard / Imperative Contract Guard",
-    "gate / CodeRabbit Thread Check",
     "Canonical Inference Gate",
     "Type Safety Validation",
     "Omni Standards Gate",
@@ -474,33 +473,24 @@ MEASURED_NOT_ENFORCED_CONTEXTS: dict[str, str] = {
 # the live readback that shows it absent. "It was red and I wanted it green" is
 # never a reason. Keys must be members of EXPECTED_EXTERNAL_CONTEXTS and actors
 # must be concrete logins (no wildcards) — both pinned by tests.
-ACTOR_CONDITIONAL_CONTEXTS: dict[str, tuple[str, ...]] = {
-    # .github/workflows/cr-thread-gate-caller.yml gates the `gate` job on
-    # `(github.event_name == 'pull_request' && github.actor != 'dependabot[bot]')`.
-    # The context name is the `caller-job / reusable-job` form, so when the
-    # caller job is skipped the reusable's inner job never materialises and NO
-    # check-run is created — the context is absent, not `skipped`.
-    #
-    # Live readback 2026-07-30, infra dev Dependabot batch:
-    #   #2522 2cdf352d actor=dependabot[bot] CR-gate run conclusion=skipped -> ABSENT
-    #   #2521 841c292f actor=dependabot[bot] CR-gate run conclusion=skipped -> ABSENT
-    #   #2520 feb6627b actor=jonahgabriel    -> present, success
-    #   #2519 08e356cc actor=jonahgabriel    -> present, success
-    #   #2518 e2d38605 actor=jonahgabriel    -> present, success
-    # All five are `pull_request`, run_attempt=1: the actor is the discriminator.
-    #
-    # The OMN-15496 seed measured this context 16/16 present over #2546…#2567 —
-    # a window containing NO Dependabot PR, which is exactly how a 16/16 context
-    # can still be absent in production.
-    #
-    # Fixed consumer-side, not producer-side: OMN-10276 removed this actor skip
-    # on omnimemory, but omnimemory calls a LOCAL reusable and passes no secrets,
-    # whereas this caller invokes omniclaude's reusable with `secrets:
-    # CROSS_REPO_PAT`. Dependabot `pull_request` runs do not receive regular repo
-    # secrets, so dropping the skip here risks trading an absent-wedge for a
-    # red-wedge. See OMN-15532.
-    "gate / CodeRabbit Thread Check": ("dependabot[bot]",),
-}
+ACTOR_CONDITIONAL_CONTEXTS: dict[str, tuple[str, ...]] = {}
+# EMPTY BY CONSTRUCTION as of OMN-16933, not by omission.
+#
+# The registry's only entry was `gate / CodeRabbit Thread Check`
+# (OMN-15532): cr-thread-gate-caller.yml gated its `gate` job on
+# `github.actor != 'dependabot[bot]'`, and because the context name is the
+# `caller-job / reusable-job` form, a skipped caller job produced NO
+# check-run at all — absent, not `skipped` — which burned the 90 min
+# deadline and then failed closed against the SOLE required context on infra
+# dev. CodeRabbit was removed entirely (operator ruling 2026-08-29) and both
+# cr-thread-gate*.yml files are deleted, so no live producer is actor-scoped.
+#
+# The MECHANISM is retained deliberately. The next cross-repo reusable whose
+# caller carries an actor `if:` will need it, and re-deriving it costs a
+# wedged Dependabot lane. Its tests were re-anchored onto a synthetic
+# registry entry over the same real #2522 payload (see
+# tests/ci/test_ci_summary_gate.py::TestActorConditionalExternalContexts) so
+# the falsification control survives the removal.
 
 # Conclusions that count as "provably passed".
 GOOD_CONCLUSIONS: frozenset[str] = frozenset({"success", "skipped"})

@@ -677,3 +677,220 @@ class TestBuildRefParsing:
             ]
         )
         assert rc == 2
+
+
+@pytest.mark.unit
+class TestReconciledRowStatus:
+    """OMN-16803 AC5: a superseded row is retired by ``status: reconciled``,
+    not by deletion — the ledger keeps the forensic record and the preflight
+    skips the row with a printed notice."""
+
+    def _reconciled(self, row: dict[str, object]) -> dict[str, object]:
+        row["status"] = "reconciled"
+        row["reconciled_utc"] = "2026-08-29T12:00:00Z"
+        row["reconciliation_note"] = (
+            "rebuild-from-merged-source discharged; .prepatch gone"
+        )
+        return row
+
+    def test_reconciled_row_is_skipped_with_notice(
+        self, tmp_path: Path, capsys: pytest.CaptureFixture[str]
+    ) -> None:
+        """A reconciled row is not gated even when its merge commit is NOT an
+        ancestor of the build ref — and the skip is announced, never silent."""
+        repo = _make_repo(tmp_path, "omnimarket")
+        base = _git(repo, "rev-parse", "HEAD")
+        unmerged = _commit(repo, "two")
+        ledger = _write_ledger(
+            tmp_path / "ledger.yaml",
+            [self._reconciled(_row("c1", "omnimarket", unmerged))],
+        )
+        rc = MODULE.main(
+            [
+                "--container",
+                "c1",
+                "--clones-root",
+                str(tmp_path),
+                "--ledger",
+                str(ledger),
+                "--build-ref",
+                f"omnimarket={base}",
+                "--skip-tripwire",
+            ]
+        )
+        assert rc == 0
+        out = capsys.readouterr().out
+        assert "SKIP (reconciled" in out
+        assert "2026-08-29T12:00:00Z" in out
+        assert "1 reconciled" in out
+
+    def test_active_row_alongside_reconciled_still_gated(self, tmp_path: Path) -> None:
+        """Retiring one row must not disarm the gate for the rest."""
+        repo = _make_repo(tmp_path, "omnimarket")
+        base = _git(repo, "rev-parse", "HEAD")
+        unmerged = _commit(repo, "two")
+        ledger = _write_ledger(
+            tmp_path / "ledger.yaml",
+            [
+                self._reconciled(
+                    _row(
+                        "c1",
+                        "omnimarket",
+                        unmerged,
+                        file="/app/retired.py",
+                        prepatch="/app/retired.py.prepatch",
+                    )
+                ),
+                _row("c1", "omnimarket", unmerged),
+            ],
+        )
+        rc = MODULE.main(
+            [
+                "--container",
+                "c1",
+                "--clones-root",
+                str(tmp_path),
+                "--ledger",
+                str(ledger),
+                "--build-ref",
+                f"omnimarket={base}",
+                "--skip-tripwire",
+            ]
+        )
+        assert rc == 1
+
+    def test_explicit_active_status_is_gated(self, tmp_path: Path) -> None:
+        """``status: active`` is the explicit spelling of the default and must
+        behave identically to an absent status field."""
+        repo = _make_repo(tmp_path, "omnimarket")
+        base = _git(repo, "rev-parse", "HEAD")
+        unmerged = _commit(repo, "two")
+        row = _row("c1", "omnimarket", unmerged)
+        row["status"] = "active"
+        ledger = _write_ledger(tmp_path / "ledger.yaml", [row])
+        rc = MODULE.main(
+            [
+                "--container",
+                "c1",
+                "--clones-root",
+                str(tmp_path),
+                "--ledger",
+                str(ledger),
+                "--build-ref",
+                f"omnimarket={base}",
+                "--skip-tripwire",
+            ]
+        )
+        assert rc == 1
+
+    def test_unknown_status_is_config_error(self, tmp_path: Path) -> None:
+        """A typo'd status must fail loudly, never silently drop a live row
+        out of the gate's scope."""
+        repo = _make_repo(tmp_path, "omnimarket")
+        sha = _commit(repo, "two")
+        row = _row("c1", "omnimarket", sha)
+        row["status"] = "retired"
+        ledger = _write_ledger(tmp_path / "ledger.yaml", [row])
+        rc = MODULE.main(
+            [
+                "--container",
+                "c1",
+                "--clones-root",
+                str(tmp_path),
+                "--ledger",
+                str(ledger),
+                "--build-ref",
+                f"omnimarket={sha}",
+                "--skip-tripwire",
+            ]
+        )
+        assert rc == 2
+
+    @pytest.mark.parametrize("missing_field", ["reconciled_utc", "reconciliation_note"])
+    def test_reconciled_row_requires_audit_fields(
+        self, tmp_path: Path, missing_field: str
+    ) -> None:
+        """Retirement is a recorded decision: a reconciled row without a
+        timestamp and a note is a config error, not an accepted retirement."""
+        repo = _make_repo(tmp_path, "omnimarket")
+        sha = _commit(repo, "two")
+        row = self._reconciled(_row("c1", "omnimarket", sha))
+        del row[missing_field]
+        ledger = _write_ledger(tmp_path / "ledger.yaml", [row])
+        rc = MODULE.main(
+            [
+                "--container",
+                "c1",
+                "--clones-root",
+                str(tmp_path),
+                "--ledger",
+                str(ledger),
+                "--build-ref",
+                f"omnimarket={sha}",
+                "--skip-tripwire",
+            ]
+        )
+        assert rc == 2
+
+    def test_reconciled_row_absent_prepatch_emits_no_warn(
+        self, tmp_path: Path, capsys: pytest.CaptureFixture[str]
+    ) -> None:
+        """The whole point of retiring these rows: their ``.prepatch`` files
+        are gone, so they must stop emitting the 'ledgered .prepatch missing'
+        WARN on every future preflight."""
+        repo = _make_repo(tmp_path, "omnimarket")
+        sha = _commit(repo, "two")
+        ledger = _write_ledger(
+            tmp_path / "ledger.yaml",
+            [self._reconciled(_row("c1", "omnimarket", sha))],
+        )
+        docker = _fake_docker(tmp_path, [])
+        rc = MODULE.main(
+            [
+                "--container",
+                "c1",
+                "--clones-root",
+                str(tmp_path),
+                "--ledger",
+                str(ledger),
+                "--docker-cmd",
+                docker,
+            ]
+        )
+        assert rc == 0
+        assert "ledgered .prepatch missing" not in capsys.readouterr().out
+
+    def test_reconciled_row_prepatch_back_on_disk_is_unledgered(
+        self, tmp_path: Path
+    ) -> None:
+        """A retired row is no longer a live patch record. If its ``.prepatch``
+        reappears, that is a NEW unledgered patch and must fail — retirement
+        must not become a permanent allowlist entry."""
+        repo = _make_repo(tmp_path, "omnimarket")
+        sha = _commit(repo, "two")
+        ledger = _write_ledger(
+            tmp_path / "ledger.yaml",
+            [self._reconciled(_row("c1", "omnimarket", sha))],
+        )
+        docker = _fake_docker(tmp_path, ["/app/x.py.prepatch"])
+        rc = MODULE.main(
+            [
+                "--container",
+                "c1",
+                "--clones-root",
+                str(tmp_path),
+                "--ledger",
+                str(ledger),
+                "--docker-cmd",
+                docker,
+            ]
+        )
+        assert rc == 1
+
+    def test_partition_by_status_splits_rows(self, tmp_path: Path) -> None:
+        """Unit-level contract of the split used by run_preflight."""
+        active = _row("c1", "omnimarket", "0" * 40)
+        reconciled = self._reconciled(_row("c2", "omnimarket", "0" * 40))
+        got_active, got_reconciled = MODULE.partition_by_status([active, reconciled])
+        assert got_active == [active]
+        assert got_reconciled == [reconciled]

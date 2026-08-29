@@ -54,10 +54,12 @@ TWO TRAPS THIS PROBE MUST NOT FALL INTO (both cost real time to find)
        would train the alert to be ignored. Every list endpoint here follows
        ``Link: rel="next"`` to exhaustion.
     2. TWO SURFACES. A required context can be satisfied by a check-run OR by a
-       legacy commit status. On these repos ``CodeRabbit`` reports as a commit
-       status while everything else reports as a check-run, so a check-runs-only
-       probe reports ``CodeRabbit`` permanently absent. The present-set is the
-       UNION of both endpoints.
+       legacy commit status, so a check-runs-only probe reports every
+       commit-status context permanently absent. The present-set is the UNION
+       of both endpoints. The worked example was ``CodeRabbit``, which posted a
+       legacy commit status while everything else posted check-runs; it was
+       removed in OMN-16933, but any GitHub App can report on that surface, so
+       the union is not optional.
 
 FAIL-CLOSED, BUT NOT PAGE-ON-EVERY-BLIP
     A GitHub API error is reported as a visible WARNING row -- never silently

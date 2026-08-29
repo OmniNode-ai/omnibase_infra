@@ -46,7 +46,7 @@ mode: standalone
 
 gateway:
   tenant_slug: acme
-  client_id: ga-acme
+  client_id: t-acme-principal
   client_secret_ref: acme-gateway
   token_endpoint: https://keycloak.invalid/realms/acme/protocol/openid-connect/token
   base_url: https://api.invalid
@@ -66,7 +66,7 @@ def test_a_complete_credential_loads_and_keeps_the_secret_out_of_repr(
 
     credential = _store(tmp_path).load()
 
-    assert credential.client_id == "ga-acme"
+    assert credential.client_id == "t-acme-principal"
     assert credential.tenant_slug == "acme"
     assert credential.base_url == "https://api.invalid"
     assert credential.client_secret.get_secret_value() == _SECRET
@@ -117,7 +117,9 @@ def test_every_required_field_is_individually_load_bearing(
 def test_a_blank_required_field_refuses_rather_than_being_treated_as_absent(
     tmp_path: Path,
 ) -> None:
-    _write_config(tmp_path, _GOOD_CONFIG.replace("client_id: ga-acme", 'client_id: ""'))
+    _write_config(
+        tmp_path, _GOOD_CONFIG.replace("client_id: t-acme-principal", 'client_id: ""')
+    )
     _write_credentials(tmp_path, {"acme-gateway": _SECRET})
 
     with pytest.raises(ModelOnexError):
@@ -190,7 +192,7 @@ def test_save_writes_a_0600_credentials_file_and_a_reference_only_config(
 
     store.save(
         tenant_slug="acme",
-        client_id="ga-acme",
+        client_id="t-acme-principal",
         client_secret=_SECRET,
         token_endpoint="https://keycloak.invalid/realms/acme/protocol/openid-connect/token",
         base_url="https://api.invalid",
@@ -217,7 +219,7 @@ def test_save_preserves_unrelated_config_keys(tmp_path: Path) -> None:
 
     _store(tmp_path).save(
         tenant_slug="acme",
-        client_id="ga-acme",
+        client_id="t-acme-principal",
         client_secret=_SECRET,
         token_endpoint="https://keycloak.invalid/realms/acme/protocol/openid-connect/token",
         base_url="https://api.invalid",
