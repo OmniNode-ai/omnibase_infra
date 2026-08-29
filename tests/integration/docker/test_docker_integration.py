@@ -1077,7 +1077,7 @@ _LOCAL_LAN_CIDR = ".".join(("192", "168", "86", "0")) + "/24"
 _SECRET_RESOLVER_CONFIG_JSON = (
     '{"enable_convention_fallback":false,"mappings":['
     '{"logical_name":"llm.openrouter.api_key",'
-    '"source":{"source_path":"OPEN_ROUTER_API_KEY","source_type":"env"}},'
+    '"source":{"source_path":"OPENROUTER_API_KEY","source_type":"env"}},'
     '{"logical_name":"llm.glm.api_key",'
     '"source":{"source_path":"LLM_GLM_API_KEY","source_type":"env"}},'
     '{"logical_name":"llm.gemini.api_key",'

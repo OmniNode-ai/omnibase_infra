@@ -827,6 +827,19 @@ def _raw_create_topics_offenders(roots: Sequence[Path]) -> list[str]:
     offenders: list[str] = []
     for root in roots:
         for path in sorted(root.rglob("*.py")):
+            # OMN-16891: skip vendored third-party trees. `scripts/` contains
+            # sub-projects with their own virtualenvs (e.g.
+            # scripts/deploy-agent), and running one of those suites in place
+            # materialises a .venv the rglob then walks. That turned
+            # kafka-python's own `kafka/cli/admin/topics/create.py` into a
+            # reported policy-bypass offender — a FIRST-PARTY guard failing on
+            # a dependency's source, reproducible simply by having run the
+            # deploy-agent tests. This guard governs code we write.
+            if any(
+                part in {".venv", "venv", "site-packages", "node_modules"}
+                for part in path.parts
+            ):
+                continue
             text = path.read_text(encoding="utf-8")
             if _NEW_TOPIC not in text:
                 continue

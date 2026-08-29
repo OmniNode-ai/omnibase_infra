@@ -181,8 +181,14 @@ def test_judge_runtime_identity_and_secret_refs_are_contract_owned() -> None:
         "llm.gemini.api_key"
         in policy_env["JUDGE_RUNTIME_MAIN_SECRET_RESOLVER_CONFIG_JSON"]
     )
+    # OMN-16891: INVERTED, not deleted. This guard forbade the no-underscore
+    # spelling on OMN-13943's premise that OPEN_ROUTER_API_KEY was canonical.
+    # Live probe 2026-08-28 falsified that: the .201 host exports
+    # OPENROUTER_API_KEY (len 73) and defines the underscored form nowhere, so
+    # the judge lane's mapping resolved to empty. The underscored name is now
+    # the one that must never appear.
     assert (
-        "OPENROUTER_API_KEY"
+        "OPEN_ROUTER_API_KEY"
         not in policy_env["JUDGE_RUNTIME_MAIN_SECRET_RESOLVER_CONFIG_JSON"]
     )
 

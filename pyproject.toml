@@ -414,7 +414,7 @@ force-single-line = false
 split-on-trailing-comma = true
 
 [tool.pytest.ini_options]
-pythonpath = ["src", "."]
+pythonpath = ["src", ".", "scripts/deploy-agent"]
 # OMN-15410: `testpaths` is the SINGLE SOURCE OF TRUTH for what CI collects.
 # The full-suite job in .github/workflows/ci.yml deliberately passes NO
 # positional path to pytest so it inherits this list verbatim; previously it
@@ -474,6 +474,7 @@ markers = [
 addopts = [
     "--strict-markers",
     "--strict-config",
+    "--import-mode=importlib",
     "-ra",
     "--tb=short",
 ]

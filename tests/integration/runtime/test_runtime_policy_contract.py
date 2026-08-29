@@ -109,6 +109,10 @@ def test_runtime_policy_contract_controls_logical_secret_resolver_refs() -> None
     )
     assert (
         "OPENROUTER_API_KEY"
+        in rendered_env["STABILITY_TEST_RUNTIME_MAIN_SECRET_RESOLVER_CONFIG_JSON"]
+    )
+    assert (
+        "OPEN_ROUTER_API_KEY"
         not in rendered_env["STABILITY_TEST_RUNTIME_MAIN_SECRET_RESOLVER_CONFIG_JSON"]
     )
     assert (
@@ -117,5 +121,9 @@ def test_runtime_policy_contract_controls_logical_secret_resolver_refs() -> None
     )
     assert (
         "OPENROUTER_API_KEY"
+        in rendered_env["JUDGE_RUNTIME_MAIN_SECRET_RESOLVER_CONFIG_JSON"]
+    )
+    assert (
+        "OPEN_ROUTER_API_KEY"
         not in rendered_env["JUDGE_RUNTIME_MAIN_SECRET_RESOLVER_CONFIG_JSON"]
     )

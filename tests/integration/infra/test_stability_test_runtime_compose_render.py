@@ -150,7 +150,7 @@ COMPOSE_RENDER_ENV = {
     "LLM_GLM_URL": _http_url("glm.invalid/v1"),
     "GEMINI_API_KEY": "render-only-gemini-api-key",
     "GOOGLE_API_KEY": "render-only-google-api-key",
-    "OPEN_ROUTER_API_KEY": "render-only-openrouter-api-key",
+    "OPENROUTER_API_KEY": "render-only-openrouter-api-key",
     "LLM_ENDPOINT_CIDR_ALLOWLIST": _cidr("192.168.86", "0/24"),
     "LLM_CLOUD_ENDPOINT_HOST_ALLOWLIST": "generativelanguage.googleapis.com,api.z.ai",
     "LOCAL_LLM_SHARED_SECRET": "render-only-local-llm-secret",
@@ -702,7 +702,12 @@ def test_stability_secret_refs_are_contract_overlay_owned() -> None:
     assert "llm.openrouter.api_key" in policy_text
     assert "llm.glm.api_key" in policy_text
     assert "llm.gemini.api_key" in policy_text
-    assert "OPENROUTER_API_KEY" not in policy_text
+    # OMN-16891: this guard used to forbid the NO-underscore spelling, on
+    # OMN-13943's premise that ``OPEN_ROUTER_API_KEY`` was canonical. Live
+    # probe 2026-08-28 inverted that: the .201 host exports
+    # ``OPENROUTER_API_KEY`` (len 73) and defines the underscored form
+    # nowhere, so the underscored name is the one that must never appear.
+    assert "OPEN_ROUTER_API_KEY" not in policy_text
 
     for service_name in REQUIRED_RUNTIME_SERVICES:
         environment = services[service_name]["environment"]
@@ -715,7 +720,7 @@ def test_stability_secret_refs_are_contract_overlay_owned() -> None:
         assert resolver_config["enable_convention_fallback"] is False
         assert mappings["llm.openrouter.api_key"] == {
             "source_type": "env",
-            "source_path": "OPEN_ROUTER_API_KEY",
+            "source_path": "OPENROUTER_API_KEY",
         }
         assert mappings["llm.glm.api_key"] == {
             "source_type": "env",
@@ -725,7 +730,8 @@ def test_stability_secret_refs_are_contract_overlay_owned() -> None:
             "source_type": "env",
             "source_path": "GEMINI_API_KEY",
         }
-        assert "OPENROUTER_API_KEY" not in json.dumps(resolver_config)
+        # OMN-16891: inverted alongside the policy_text guard above.
+        assert "OPEN_ROUTER_API_KEY" not in json.dumps(resolver_config)
 
 
 @pytest.mark.integration
