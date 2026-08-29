@@ -1837,11 +1837,46 @@ def load_application_database_ownership_identities(
             owner=owner,
             source_path=source_path,
         )
+        # OMN-16993: the bridge is symmetric across BOTH physically-public
+        # families, not just `tenant`.
+        #
+        # A relation in `TENANT_TABLES_PHYSICALLY_IN_PUBLIC_UNTIL_OMN15359` or
+        # `INTERNAL_TABLES_PHYSICALLY_IN_PUBLIC_UNTIL_OMN15359` is declared by
+        # its logical schema in every manifest and node contract, while its
+        # physical table still lives bare in `public` until the governed
+        # OMN-15359 cutover moves it. Deployable SQL must therefore target
+        # `public.<name>` -- there is no `omninode_internal.<name>` relation to
+        # grant on -- so the ownership resolver has to answer for the physical
+        # identity the SQL actually names.
+        #
+        # This bridge previously covered `tenant` only. The `omninode_internal`
+        # half was never added, so any NEW deployable SQL touching one of the 41
+        # internal physically-public relations resolved to ZERO ownership
+        # declarations and failed `requires exactly one ownership declaration`
+        # with no admissible way to satisfy it: declaring `schema: public` in
+        # the owning repo's manifest is rejected upstream by
+        # `omnimarket/scripts/generate_application_relation_inventory.py` as a
+        # conflicting-schema declaration against the node contract's
+        # `schema: omninode_internal`. The gap stayed invisible because every
+        # pre-existing file touching those relations predates the gate and sits
+        # in its frozen shrink-only baseline; OMN-16993's
+        # `node_projection_session_replay/0002` is the first new one.
+        #
+        # The two sets are disjoint (verified: `TENANT & INTERNAL == set()`),
+        # so a name bridges from exactly one logical schema and the
+        # "exactly one declaration" invariant is preserved rather than
+        # doubled. `session_phase_state`, which IS declared directly as
+        # `schema: public` in omninode_infra's k8s manifest, is in neither
+        # set and so is untouched by this bridge.
+        bridged_schema_for_family = {
+            "tenant": TENANT_TABLES_PHYSICALLY_IN_PUBLIC_UNTIL_OMN15359,
+            "omninode_internal": INTERNAL_TABLES_PHYSICALLY_IN_PUBLIC_UNTIL_OMN15359,
+        }.get(schema)
         if (
-            schema == "tenant"
+            bridged_schema_for_family is not None
             and function_signature is None
             and kind in _RELATION_OBJECT_KINDS
-            and name in _PHYSICALLY_PUBLIC_APPLICATION_TABLES
+            and name in bridged_schema_for_family
         ):
             record(
                 schema="public",
