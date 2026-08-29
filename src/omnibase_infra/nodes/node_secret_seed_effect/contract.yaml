@@ -1,0 +1,181 @@
+# SPDX-FileCopyrightText: 2025 OmniNode.ai Inc.
+# SPDX-License-Identifier: MIT
+# ONEX Node Contract - Headless Secret Seed Effect
+#
+# OMN-16897: the operator asked for a headless way to put a secret into
+# Infisical -- one command, no UI, no interactive login -- and asked for it
+# as a node ("it should be a node based workflow", "we probably already have
+# the handler written somewhere").
+#
+# The second remark was correct. The write path already existed and was
+# already in production use; what was missing was a canonical def-B node in
+# front of it. This contract is that front door. It adds no new write path.
+#
+# Value-flow constraint (the load-bearing one):
+#   The input model carries a local source FILE PATH, never secret values.
+#   Node inputs are serialised onto the bus and into the event log, so a
+#   value here would be durably persisted. The handler reads the file at
+#   execution time; values never enter an event, a receipt, or a log line.
+#   Post-write verification is a NAME listing only.
+#
+# Invocation is LOCAL by design (in-memory bus, RuntimeLocal single-shot via
+# `onex skill seed_secrets`). This node has NO subscribe/publish topics: a
+# seed run is an operator-invoked action against one named instance, not a
+# bus-triggered reaction, and giving it a subscribed topic would make a
+# secret-writing node remotely triggerable.
+#
+# Related Tickets:
+#   - OMN-16897: this ticket
+#   - OMN-10557: InfisicalSecretStore -- the reused set_secret upsert
+#   - OMN-2286: AdapterInfisical _internal/ policy + bootstrap write carve-out
+#   - OMN-16451: config control-plane; read side keeps refs, this is the
+#     write-side complement
+#   - OMN-16316: customer-BYOK credential publisher (value-crosses-once)
+#
+name: "node_secret_seed_effect"
+node_type: "EFFECT_GENERIC"
+contract_version:
+  major: 1
+  minor: 0
+  patch: 0
+node_version: "1.0.0"
+description: >
+  Headless Infisical secret seeding (OMN-16897). Reads a local dotenv-style source file (or stdin), upserts the named secrets into a caller-named Infisical instance/project/environment/path via the existing InfisicalSecretStore write path, and verifies by NAME readback only. Idempotent. Defaults to dry-run. Secret values never enter the request, the result, the bus, the event log, or any log line.
+
+input_model:
+  name: "ModelSecretSeedRequest"
+  module: "omnibase_infra.nodes.node_secret_seed_effect.models.model_secret_seed_request"
+  description: "Source path + target addressing + mode. Carries NO secret values."
+output_model:
+  name: "ModelSecretSeedResult"
+  module: "omnibase_infra.nodes.node_secret_seed_effect.models.model_secret_seed_result"
+  description: "Run receipt: verdict, per-name create/update/fail/verify lists. Names only."
+# Top-level handler block: RuntimeLocal's single-shot execution path resolves
+# the handler + its input model from THIS block, not from handler_routing
+# below. Without it `onex skill` dispatch fails closed with "Workflow
+# contract missing 'terminal_event' topic and no handler spec found"
+# (RuntimeLocal._resolve_handler_spec) -- the same trap
+# node_chain_canary_effect and node_sync_revert_watchdog_effect document.
+handler:
+  module: "omnibase_infra.nodes.node_secret_seed_effect.handlers.handler_secret_seed"
+  class: "HandlerSecretSeed"
+  input_model: "omnibase_infra.nodes.node_secret_seed_effect.models.model_secret_seed_request.ModelSecretSeedRequest"
+handler_routing:
+  routing_strategy: "operation_match"
+  handlers:
+    - operation: "seed_secrets"
+      handler:
+        name: "HandlerSecretSeed"
+        module: "omnibase_infra.nodes.node_secret_seed_effect.handlers.handler_secret_seed"
+        # INFRA, not HTTP: the handler itself makes no direct HTTP call. It
+        # speaks to Infisical exclusively through InfisicalSecretStore ->
+        # AdapterInfisical, which owns the SDK/transport. Declaring HTTP here
+        # would claim a call site this module does not have.
+        handler_type: "INFRA"
+      description: "Upsert named secrets from a local source into Infisical; verify by name."
+      output_fields:
+        - verdict
+        - success
+        - detail
+        - dry_run
+        - created_names
+        - updated_names
+        - failed_names
+        - verified_names
+        - unverified_names
+error_handling:
+  retry_policy:
+    # Zero retries. set_secret is an upsert and therefore idempotent, so a
+    # retry would be SAFE -- but it would also convert a flapping instance
+    # into a run that eventually reports green, and an operator seeding a
+    # production credential needs to know the instance is flapping. The
+    # operator re-runs; that is the retry.
+    max_retries: 0
+    initial_delay_ms: 0
+    max_delay_ms: 0
+    exponential_base: 1
+    retry_on: []
+  error_types:
+    - name: "AUTH_UNAVAILABLE"
+      description: "Machine-identity Universal Auth material absent or rejected. Fail-fast, no fallback identity, nothing written."
+      recoverable: true
+      retry_strategy: "none"
+    - name: "SOURCE_UNREADABLE"
+      description: "The source file could not be read or parsed. Reports a line NUMBER, never line content."
+      recoverable: true
+      retry_strategy: "none"
+    - name: "NO_KEYS"
+      description: "Nothing to seed. Reported as FAILING -- a seed run that seeded nothing must not read green."
+      recoverable: true
+      retry_strategy: "none"
+    - name: "STORE_UNREACHABLE"
+      description: "The named instance could not be reached or its name listing failed. Distinct from AUTH_UNAVAILABLE: identity vs address."
+      recoverable: true
+      retry_strategy: "none"
+    - name: "WRITE_FAILED"
+      description: "At least one upsert failed. The run completes and reports every name, so a partial seed is fully visible."
+      recoverable: true
+      retry_strategy: "none"
+    - name: "VERIFY_FAILED"
+      description: "A write was accepted but the name was absent on readback. Fails closed -- an unconfirmed write is not a confirmed one."
+      recoverable: true
+      retry_strategy: "none"
+io_operations:
+  - operation: "seed_secrets"
+    description: "Read a local source file and upsert its named secrets into the target Infisical instance."
+    input_fields:
+      - source_path
+      - infisical_host
+      - project_id
+      - environment_slug
+      - secret_path
+      - keys
+      - execute
+      - verify_readback
+    output_fields:
+      - correlation_id
+      - verdict
+      - success
+      - detail
+      - dry_run
+      - infisical_host
+      - project_id
+      - environment_slug
+      - secret_path
+      - source_path
+      - created_names
+      - updated_names
+      - failed_names
+      - verified_names
+      - unverified_names
+      - missing_from_source_names
+      - errors
+dependencies:
+  - name: "infisical_machine_identity_client_id"
+    type: "environment"
+    env_var: "INFISICAL_CLIENT_ID"
+    description: "Universal Auth machine-identity client id. Bootstrap-edge by necessity: the tool that populates the secret store cannot resolve its own identity from the store it is populating (the same carve-out AdapterInfisical's module docstring makes for bootstrap admin scripts). Absent => AUTH_UNAVAILABLE, never a fallback identity."
+    required: true
+  - name: "infisical_machine_identity_client_secret"
+    type: "environment"
+    env_var: "INFISICAL_CLIENT_SECRET"
+    description: "Universal Auth machine-identity client secret. Same bootstrap-edge rationale as the client id."
+    required: true
+  - name: "infisicalsdk"
+    type: "library"
+    library: "infisicalsdk"
+    description: "Reached only through AdapterInfisical; imported lazily inside the store factory so a unit test or an injected store costs nothing."
+health_check:
+  enabled: false
+metadata:
+  description: "Headless secret seeding into a named Infisical instance (OMN-16897)"
+  author: "OmniNode Team"
+  transport_type: "infisical"
+  created: "2026-08-28"
+  updated: "2026-08-28"
+  tags:
+    - "effect"
+    - "secrets"
+    - "infisical"
+    - "bootstrap"
+    - "headless"

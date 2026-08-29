@@ -91,6 +91,19 @@ APPROVED_INFIX_PATTERNS=(
     # path) instead of enumerating a fourth path here; filed as a follow-up
     # rather than widened again silently.
     "/nodes/node_chain_canary_effect/handlers/handler_chain_canary.py"
+    # OMN-16897: the headless secret-seeding node. Same dispatch shape as the
+    # four entries above (RuntimeLocal single-shot path, no config-prefetch or
+    # overlay seam reachable from a node's own handler), but a DIFFERENT
+    # rationale from the kill-switch group and worth stating on its own: this
+    # node's job is to POPULATE Infisical, so it cannot resolve its own
+    # machine identity from Infisical. That is the exact circularity this
+    # script's own BOOTSTRAP_ALLOWLIST already names ("a keyring cannot unlock
+    # itself"), and the two variables it reads --- INFISICAL_CLIENT_ID and
+    # INFISICAL_CLIENT_SECRET --- are members of that allowlist. Both reads are
+    # literal, both are declared in the file's `required_secrets` tuple per the
+    # OMN-14951 gap-2 check, and an absent value fails the run closed with
+    # AUTH_UNAVAILABLE rather than falling back to an ambient identity.
+    "/nodes/node_secret_seed_effect/handlers/handler_secret_seed.py"
 )
 
 ENV_READ_PATTERNS='os\.environ\[|os\.environ\.get|os\.getenv|from os import environ|from os import getenv'
