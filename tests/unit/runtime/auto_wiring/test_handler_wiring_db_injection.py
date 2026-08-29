@@ -279,6 +279,13 @@ def test_projection_callback_does_not_preconnect_a_handler_owned_pool() -> None:
         def __init__(self) -> None:
             self.db = FakeRunnerDb()
             self.handled = False
+            self.bound_dsn: str | None = None
+
+        def bind_projection_database_url(self, dsn: str) -> None:
+            # OMN-16911: a handler that owns a pool takes the runtime's
+            # topology-resolved DSN. BaseProjectionRunner supplies this seam to
+            # every real projection handler; the double mirrors it.
+            self.bound_dsn = dsn
 
         def handle(self, input_data: dict) -> dict:
             assert self.db.connected is False, (

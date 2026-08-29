@@ -3005,6 +3005,12 @@ class ProjectionDatabaseOperations:
 # it a second time.
 PROJECTION_INPROCESS_DISPATCH_ATTR = "onex_runtime_inprocess_dispatch"
 
+# OMN-16911: the seam through which a handler that opened its own DB adapter
+# accepts the workload DSN the runtime resolved from the topology. Declaring
+# in-process dispatch (above) obliges a handler that owns an adapter to expose
+# this; the runtime refuses to wire one that does not.
+PROJECTION_OWNED_DATABASE_BIND_ATTR = "bind_projection_database_url"
+
 
 def _serves_its_own_database(handler_instance: object) -> bool:
     """Whether the handler carries a DB adapter it opened itself.
@@ -3054,6 +3060,70 @@ def _is_standalone_projection_runner(handler_instance: object) -> bool:
     return not bool(
         getattr(handler_instance, PROJECTION_INPROCESS_DISPATCH_ATTR, False)
     )
+
+
+def _bind_handler_owned_projection_database(
+    handler_instance: object,
+    target: ProjectionDatabaseTarget,
+    db_urls: Mapping[str, str],
+) -> None:
+    """Bind a handler's own DB adapter to the topology-resolved workload DSN.
+
+    OMN-16911. ``_resolve_projection_database_target`` already selects one
+    workload identity per declared table and PROVES, via
+    ``_require_projection_binding_privileges``, that its principal holds USAGE
+    on the physical schema plus the privileges the declared access needs. That
+    proof only ever reached connections the runtime opened itself
+    (``ProjectionBindingConnections``, which additionally attests
+    ``current_user``/``current_database`` against the binding). A handler that
+    opens its own pool bypassed all of it and picked a DSN by its own means:
+    ``ConsumerFlowProjectionWriter`` inherited an omnimarket settings fallback
+    that prefers ``OMNIDASH_ANALYTICS_DB_URL`` — the dashboard-facing
+    ``tenant_projection_writer`` role — for tables it declares in
+    ``omninode_internal``, where that role has no USAGE at all. The result on
+    the .201 dev lane was ``InsufficientPrivilegeError: permission denied for
+    schema omninode_internal`` on every heartbeat, 0 rows in
+    ``consumer_flow_windows`` and a DLQ climbing ~6/min.
+
+    So the runtime hands over the DSN it resolved rather than leaving the
+    handler to guess. Two refusals keep that honest, and both are wiring-time
+    (``ValueError`` at callback construction, i.e. a boot failure), never
+    per-message:
+
+    * A handler that owns an adapter but exposes no
+      :data:`PROJECTION_OWNED_DATABASE_BIND_ATTR` is refused. Silently leaving
+      its DSN alone is what shipped this defect.
+    * A target resolving to more than one binding is refused. One pool is one
+      login role; there is no honest way to serve two workload identities
+      through it, and picking one would re-create the mismatch by choice.
+
+    Standalone runners never reach here — the runtime does not dispatch them,
+    so it does not own their configuration either.
+    """
+    if not _serves_its_own_database(handler_instance):
+        return
+    handler_name = type(handler_instance).__name__
+    binding_refs = sorted({binding.binding_ref for binding in target.bindings})
+    if len(binding_refs) != 1:
+        raise ValueError(
+            f"Projection handler {handler_name} opens its own database pool, "
+            "which can hold a single workload identity, but its declared tables "
+            f"resolve to {len(binding_refs)} topology bindings "
+            f"({', '.join(binding_refs)}); split the handler or let the runtime "
+            "inject a per-binding adapter instead"
+        )
+    bind = getattr(handler_instance, PROJECTION_OWNED_DATABASE_BIND_ATTR, None)
+    if not callable(bind):
+        binding = target.bindings[0]
+        raise ValueError(
+            f"Projection handler {handler_name} opens its own database pool and "
+            f"is dispatched in-process, so it must expose "
+            f"{PROJECTION_OWNED_DATABASE_BIND_ATTR}(dsn) to accept the "
+            f"topology-resolved DSN for binding {binding.binding_ref!r} "
+            f"(principal {binding.principal!r}, {binding.dsn_env}); without it "
+            "the pool's login role is unproven against the schemas its SQL names"
+        )
+    bind(db_urls[binding_refs[0]])
 
 
 def _extract_rows_upserted(result: object) -> int:
@@ -3293,6 +3363,11 @@ def _make_projection_dispatch_callback(
                 for binding in missing_bindings
             )
         )
+    if not is_projection_runner:
+        # OMN-16911: an in-process handler that opened its own pool takes the
+        # DSN resolved and privilege-proved above, instead of resolving one of
+        # its own that the topology never vouched for.
+        _bind_handler_owned_projection_database(handler_instance, target, db_urls)
 
     async def _callback(
         envelope: ModelEventEnvelope[object],
