@@ -135,11 +135,27 @@
 -- ============================================================================
 -- IDEMPOTENCE AND THE FRESH PATH
 -- ============================================================================
--- Re-running is a no-op: each ALTER COLUMN names the type it converges TO, and
--- each constraint is dropped-if-present before being added. On a fresh service
--- database, flat 074 creates the narrow shape and this file widens it, so the
--- fresh path and the drifted path end at ONE schema -- the same both-paths-
--- converge property the OMN-15376 block guarantees inside the node corpus.
+-- Re-running is a no-op: each ALTER COLUMN names the type it converges TO, each
+-- ADD is guarded IF NOT EXISTS, and each constraint is dropped-if-present before
+-- being added.
+--
+-- The fresh path is the reason step 4 exists at all. On the LIVE lane the
+-- divergence is only the 11 differences above, because node 074 and node 075
+-- had already run there and left `updated_at` and `ux_savings_estimates_identity`
+-- behind. On a FRESH service database nothing from the node corpus ever runs --
+-- flat 074 and flat 076 declare neither object -- so widening the eight columns
+-- alone would leave the fresh path and the drifted path at two DIFFERENT
+-- schemas, and this file's own claim to converge them would be false. Both are
+-- in the surface node 074 declares, so both are added here, guarded. On the live
+-- lane every statement in step 4 is a no-op. (Found in review, not by the live
+-- proof: the live-lane replica could not have surfaced it.)
+--
+-- What step 4 deliberately does NOT reproduce is node 074's
+-- `refresh_savings_estimates_updated_at()` function and its trigger. Those are
+-- behaviour, not shape; they sit outside the surface the OMN-16915 verifier
+-- measures (relations, columns, constraints, indexes, enums), and installing a
+-- write-path trigger into the service database is a change this ticket did not
+-- adjudicate and must not smuggle in.
 --
 -- This does NOT edit 074. Editing an applied migration in place is the
 -- OMN-16705 class that check_migration_append_only.py exists to reject; 074
@@ -294,5 +310,22 @@ ALTER TABLE savings_estimates
     DROP CONSTRAINT IF EXISTS savings_estimates_amounts_match,
     ADD CONSTRAINT savings_estimates_amounts_match
         CHECK (savings_usd = cloud_cost_usd - local_cost_usd);
+
+-- ---- 4. the two objects only the NODE corpus ever declared -----------------
+-- No-ops on the live lane (node 074/075 already left both). Load-bearing on a
+-- fresh service database, where nothing from the node corpus runs and flat
+-- 074/076 declare neither -- without these the fresh path and the drifted path
+-- would end at two different schemas. See the header.
+
+ALTER TABLE savings_estimates
+    ADD COLUMN IF NOT EXISTS updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW();
+
+CREATE UNIQUE INDEX IF NOT EXISTS ux_savings_estimates_identity
+    ON savings_estimates (
+        session_id,
+        event_timestamp,
+        model_local,
+        model_cloud_baseline
+    );
 
 COMMIT;

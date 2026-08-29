@@ -465,19 +465,76 @@ def test_migration_101_preserves_every_row_value(
 
 
 def test_the_fresh_service_path_and_the_drifted_path_end_at_one_schema(
+    pg16: Pg16Cluster, service_db: tuple[str, object]
+) -> None:
+    """A fresh service bring-up runs flat 074, flat 076 and 101 -- and NOTHING
+    from the node corpus. It must still land on the schema the node file
+    declares, or this migration's central claim is false.
+
+    Asserted through the verifier's own surface diff rather than against a
+    hand-picked column list. An earlier revision of this test checked only the
+    eight widened columns and the three constraints, and passed while
+    `updated_at` and `ux_savings_estimates_identity` -- both in the declared
+    surface, both left behind by node 074/075 on the live lane and by nothing at
+    all on a fresh one -- were absent. The live-lane replica could not have
+    surfaced that gap; only the fresh path can.
+    """
+    database, client = service_db
+    _apply(pg16, database, FLAT_074.read_text(encoding="utf-8"))
+    _apply(pg16, database, FLAT_076.read_text(encoding="utf-8"))
+    _apply(pg16, database, MIGRATION_101.read_text(encoding="utf-8"))
+
+    verdict = _verify(database, client)
+    assert verdict.verdict == verifier.VERDICT_DIVERGENT_VERIFIED, verdict.divergences
+    assert verdict.divergences == []
+
+
+def test_101_supplies_the_two_objects_only_the_node_corpus_declares(
     pg16: Pg16Cluster, pg16_fresh_database: str
 ) -> None:
-    """A fresh service bring-up runs flat 074 then 101, with no node file in
-    between. It must land on the same schema the drifted path converges to, or
-    the corpus has two answers for one table again."""
+    """Names the two objects explicitly, so a future edit that drops step 4
+    fails here with the reason attached rather than only inside a surface diff."""
+    flat_only = (
+        FLAT_074.read_text(encoding="utf-8")
+        + "\n"
+        + FLAT_076.read_text(encoding="utf-8")
+    )
+    _apply(pg16, pg16_fresh_database, flat_only)
+    assert "updated_at" not in _column_types(pg16, pg16_fresh_database), (
+        "premise: the flat corpus alone does not declare updated_at"
+    )
+
+    _apply(pg16, pg16_fresh_database, MIGRATION_101.read_text(encoding="utf-8"))
+
+    assert _column_types(pg16, pg16_fresh_database)["updated_at"] == (
+        "timestamp with time zone"
+    )
+    indexes = pg16.sql(
+        pg16_fresh_database,
+        "SELECT indexname FROM pg_indexes WHERE schemaname = 'public' "
+        "AND tablename = 'savings_estimates'",
+    )
+    assert "ux_savings_estimates_identity" in indexes
+
+
+def test_101_does_not_install_the_node_write_path_trigger(
+    pg16: Pg16Cluster, pg16_fresh_database: str
+) -> None:
+    """Step 4 converges SHAPE. node 074 also creates
+    refresh_savings_estimates_updated_at() and a BEFORE UPDATE trigger; those are
+    behaviour, sit outside the surface the verifier measures, and changing the
+    service database's write path is not something this ticket adjudicated."""
     _apply(pg16, pg16_fresh_database, FLAT_074.read_text(encoding="utf-8"))
     _apply(pg16, pg16_fresh_database, FLAT_076.read_text(encoding="utf-8"))
     _apply(pg16, pg16_fresh_database, MIGRATION_101.read_text(encoding="utf-8"))
 
-    types = _column_types(pg16, pg16_fresh_database)
-    for column, (_live, declared) in DRIFTED_COLUMN_TYPES.items():
-        assert types[column] == declared, column
-    assert set(DECLARED_CONSTRAINTS) <= _constraint_names(pg16, pg16_fresh_database)
+    triggers = pg16.sql(
+        pg16_fresh_database,
+        "SELECT t.tgname FROM pg_trigger t "
+        "JOIN pg_class c ON c.oid = t.tgrelid "
+        "WHERE c.relname = 'savings_estimates' AND NOT t.tgisinternal",
+    )
+    assert triggers.strip() == ""
 
 
 def test_101_requires_the_table_074_creates_and_074_is_not_skip_manifested(
@@ -738,8 +795,40 @@ def test_the_committed_divergent_adoption_is_attributed_to_this_ticket() -> None
     assert declared["manifest_checksum"] == MANIFEST_CHECKSUM
 
 
-def test_the_declaration_ticket_override_is_validated() -> None:
-    """A free-text ticket column is a dead link waiting to happen."""
-    assert verifier.DECLARATION_TICKET_RE.match("OMN-16923")
-    assert not verifier.DECLARATION_TICKET_RE.match("see the PR")
-    assert not verifier.DECLARATION_TICKET_RE.match("OMN-")
+def test_the_declaration_ticket_override_is_validated_and_version_scoped() -> None:
+    """The override must not be able to re-stamp a row it did not earn.
+
+    Both emission loops start from the rows already on disk and overwrite by
+    version, so a RUN-scoped override would silently re-attribute every other
+    declaration the same run re-proved -- the OMN-16919 census alone covers
+    seven. Keyed by version, a run that names one version cannot touch another.
+    """
+    parsed = verifier.parse_declaration_tickets([f"{VERSION}=OMN-16923"])
+    assert parsed == {VERSION: "OMN-16923"}
+    assert (
+        parsed.get("node:node_projection_dep_health:001_create_dep_health_findings.sql")
+        is None
+    )
+
+    for bad in ("OMN-16923", f"{VERSION}=see the PR", f"{VERSION}=OMN-", "=OMN-1"):
+        with pytest.raises(verifier.VerificationError):
+            verifier.parse_declaration_tickets([bad])
+
+    with pytest.raises(verifier.VerificationError):
+        verifier.parse_declaration_tickets(
+            [f"{VERSION}=OMN-16923", f"{VERSION}=OMN-16915"]
+        )
+
+    assert verifier.parse_declaration_tickets(None) == {}
+
+
+def test_the_other_committed_declarations_keep_their_own_ticket() -> None:
+    """The six OMN-16915 rows must still say OMN-16915 after this run."""
+    declared = verifier.load_divergent_adoptions()
+    others = {
+        version: row["ticket"]
+        for version, row in declared.items()
+        if version != VERSION
+    }
+    assert others, "the sibling declarations must still be present"
+    assert set(others.values()) == {"OMN-16915"}, others

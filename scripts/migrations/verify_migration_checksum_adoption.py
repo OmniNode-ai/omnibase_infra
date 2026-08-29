@@ -94,8 +94,9 @@ an adoption in either file is always traceable to the run that proved it.
 
 An adoption row's ``ticket`` column defaults to this tool's own ticket, which is
 correct only while the run that PROVES a row is also the change that BUILT the
-mechanism. ``--declaration-ticket OMN-NNNN`` overrides it for the case where it
-is not -- OMN-16923 is the first: that row was earned by a forward migration
+mechanism. ``--declaration-ticket <version>=OMN-NNNN`` (repeatable, and scoped
+to that one version rather than to the whole run) overrides it for the case
+where it is not -- OMN-16923 is the first: that row was earned by a forward migration
 (``docker/migrations/forward/101_converge_savings_estimates_to_node_declared_shape.sql``)
 converging the live service schema, not by OMN-16915's stale-revision argument,
 and a reader following the default would land on a ticket that never made that
@@ -947,6 +948,37 @@ def _parse_psql_exec(raw: str | None) -> tuple[str, ...]:
     return tuple(parsed)
 
 
+def parse_declaration_tickets(raw: Sequence[str] | None) -> dict[str, str]:
+    """Parse ``--declaration-ticket VERSION=OMN-NNNN`` into a per-version map.
+
+    Version-scoped rather than run-scoped on purpose. Both emission loops start
+    from the rows already on disk and overwrite by version, so a run-wide
+    override would re-stamp the ticket of every OTHER declaration the same run
+    happened to re-prove -- silently rewriting provenance that was earned
+    elsewhere. A row this run does not name keeps the default.
+    """
+    tickets: dict[str, str] = {}
+    for item in raw or ():
+        version, separator, ticket = item.partition("=")
+        if separator != "=" or not version:
+            raise VerificationError(
+                "--declaration-ticket must be VERSION=OMN-NNNN, got "
+                f"{item!r} (it is scoped to one version, never to the whole run)"
+            )
+        if not DECLARATION_TICKET_RE.match(ticket):
+            raise VerificationError(
+                f"--declaration-ticket for {version!r} must name an OMN-NNNN "
+                f"reference, got {ticket!r}"
+            )
+        if version in tickets and tickets[version] != ticket:
+            raise VerificationError(
+                f"--declaration-ticket names {version!r} twice with different "
+                f"tickets ({tickets[version]} and {ticket})"
+            )
+        tickets[version] = ticket
+    return tickets
+
+
 def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(description=__doc__.splitlines()[0])
     parser.add_argument(
@@ -985,16 +1017,22 @@ def build_parser() -> argparse.ArgumentParser:
     )
     parser.add_argument(
         "--declaration-ticket",
+        action="append",
         default=None,
+        metavar="VERSION=OMN-NNNN",
         help=(
-            "OMN-NNNN recorded in the `ticket` column of any adoption row this "
-            "run emits. Defaults to this tool's own ticket, which is right only "
+            "Override the `ticket` column for ONE version's adoption row, "
+            "repeatable. Defaults to this tool's own ticket, which is right only "
             "while the run that PROVES a row is also the ticket that BUILT the "
             "mechanism. OMN-16923 is the first case where it is not: that row "
             "was earned by a forward migration converging the live schema, not "
             "by OMN-16915's stale-revision argument, and a reader following the "
-            "default would land on a ticket that never made that claim. The "
-            "receipt's own `ticket` field is unaffected -- it names the tool."
+            "default would land on a ticket that never made that claim. "
+            "Deliberately keyed BY VERSION rather than applied run-wide: a run "
+            "verifies every adoptable row it finds, and a run-scoped override "
+            "would silently re-stamp the ticket of every OTHER declaration the "
+            "same run re-proved -- the OMN-16919 census alone covers seven. The "
+            "receipt's own `ticket` field is unaffected; it names the tool."
         ),
     )
     return parser
@@ -1003,15 +1041,10 @@ def build_parser() -> argparse.ArgumentParser:
 def main(argv: Sequence[str] | None = None) -> int:
     args = build_parser().parse_args(argv)
 
-    declaration_ticket: str | None = args.declaration_ticket
-    if declaration_ticket is not None and not DECLARATION_TICKET_RE.match(
-        declaration_ticket
-    ):
-        print(
-            "[verify-adoption] FATAL: --declaration-ticket must be an "
-            f"OMN-NNNN reference, got {declaration_ticket!r}",
-            file=sys.stderr,
-        )
+    try:
+        declaration_tickets = parse_declaration_tickets(args.declaration_ticket)
+    except VerificationError as exc:
+        print(f"[verify-adoption] FATAL: {exc}", file=sys.stderr)
         return 2
 
     try:
@@ -1133,7 +1166,7 @@ def main(argv: Sequence[str] | None = None) -> int:
                 "version": verdict.version,
                 "source_checksum": verdict.source_checksum,
                 "manifest_checksum": verdict.manifest_checksum,
-                "ticket": declaration_ticket or TICKET,
+                "ticket": declaration_tickets.get(verdict.version, TICKET),
                 "receipt_sha256": receipt_sha,
                 "verified_at": verified_at,
             }
@@ -1165,7 +1198,7 @@ def main(argv: Sequence[str] | None = None) -> int:
                 "version": verdict.version,
                 "source_checksum": verdict.source_checksum,
                 "manifest_checksum": verdict.manifest_checksum,
-                "ticket": declaration_ticket or DIVERGENT_TICKET,
+                "ticket": declaration_tickets.get(verdict.version, DIVERGENT_TICKET),
                 "receipt_sha256": receipt_sha,
                 "verified_at": verified_at,
             }
