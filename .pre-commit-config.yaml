@@ -1194,6 +1194,23 @@ repos:
         pass_filenames: false
         files: '^\.github/(workflows/.*\.ya?ml|required-checks\.yaml)$'
         stages: [pre-commit]
+  # OMN-16906: workflow input default/type parity. A `type: boolean` input with
+  # a quoted `default: "false"` fails the CALLER's graph compile with GitHub's
+  # `startup_failure` -- no job, no log, no red check anywhere -- while the
+  # callee's own dispatch runs stay green. That is how
+  # deliver-dev-candidate-to-staging.yml sat dead for a day with every dev merge
+  # merged-but-undelivered. The same checker backs
+  # tests/ci/test_workflow_input_default_type_parity.py, so the local and CI
+  # verdicts cannot diverge.
+  - repo: local
+    hooks:
+      - id: workflow-input-default-type-parity
+        name: Workflow input defaults must match declared type (OMN-16906)
+        entry: python scripts/ci/check_workflow_input_default_types.py
+        language: system
+        pass_filenames: false
+        files: '^\.github/workflows/.*\.ya?ml$'
+        stages: [pre-commit]
   # OMN-16795: the OMN-7385 subscribe-wiring checker as a LOCAL gate. It was
   # referenced by nothing for months, which per doctrine rule 5 made it
   # advisory — and advisory checks get ignored, which is how its allowlist grew

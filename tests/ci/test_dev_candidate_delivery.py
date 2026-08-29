@@ -99,6 +99,32 @@ class TestBuildWorkflowsAreCallable:
         assert "git-ref" in triggers["workflow_call"]["inputs"]
         assert "image-ref" in triggers["workflow_call"]["outputs"]
 
+    def test_callee_input_defaults_do_not_break_the_callers_graph(self) -> None:
+        """OMN-16906 — "callable" is not the same as "callable without killing
+        the caller".
+
+        This suite asserted the ``workflow_call`` blocks existed and that their
+        input/output NAMES lined up, and stayed green for the entire two-day
+        outage, because the defect was one level down: ``no-cache`` was declared
+        ``type: boolean`` with ``default: "false"``, a YAML string. GitHub
+        type-checks a callee's input defaults while compiling the CALLER's
+        graph, so the delivery workflow returned ``startup_failure`` — no job,
+        no log — on every run while both callees kept passing their own
+        dispatch runs.
+
+        Bisect evidence: control run 33224162317 ``startup_failure``; the same
+        file with that one scalar unquoted, run 33224392268, compiled.
+
+        The repo-wide ratchet is
+        ``tests/ci/test_workflow_input_default_type_parity.py``; this assertion
+        keeps the delivery chain's own suite from passing through a recurrence.
+        """
+        from scripts.ci.check_workflow_input_default_types import scan_document
+
+        for path in (RUNTIME_BUILD, MIGRATE_BUILD, DELIVER):
+            violations = scan_document(path.name, _load(path))
+            assert not violations, "\n".join(v.render() for v in violations)
+
     def test_migrate_build_resolves_a_real_digest_after_push(self) -> None:
         """A ``repo:tag`` reference is not an identity. The consumer
         (``run-migrations.sh``) refuses anything without ``@sha256:``, so an

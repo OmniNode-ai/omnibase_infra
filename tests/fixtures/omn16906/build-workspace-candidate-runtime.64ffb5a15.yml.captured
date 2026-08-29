@@ -46,13 +46,9 @@ on:
         default: "dev"
         type: string
       no-cache:
-        # Same bare-boolean rule as the workflow_call block below. GitHub
-        # tolerates a quoted default on a dispatch-only input, which is exactly
-        # why this one survived here long enough for OMN-15796 to copy it into
-        # the workflow_call block, where it is fatal (OMN-16906).
         description: "Build with --no-cache to force a fresh foundation install."
         required: false
-        default: false
+        default: "false"
         type: boolean
   workflow_call:
     inputs:
@@ -62,16 +58,9 @@ on:
         default: "dev"
         type: string
       no-cache:
-        # OMN-16906: BARE `false`, never `"false"`. GitHub type-checks this
-        # default while compiling the CALLER's graph, so a quoted default here
-        # fails deliver-dev-candidate-to-staging.yml with `startup_failure` --
-        # no job, no log, and a silently undelivered dev merge. This workflow's
-        # own dispatch runs stay green throughout, which is what made the
-        # outage invisible for a day. Ratcheted by
-        # scripts/ci/check_workflow_input_default_types.py.
         description: "Build with --no-cache to force a fresh foundation install."
         required: false
-        default: false
+        default: "false"
         type: boolean
     outputs:
       digest:
