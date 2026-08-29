@@ -48,6 +48,13 @@ def _configured_projection_dsns(monkeypatch: pytest.MonkeyPatch) -> None:
         "OMNINODE_INTERNAL_DB_URL",
         "postgresql://user:pass@host:5432/omnidash_analytics",
     )
+    # OMN-15425: the `tenant_projection` binding resolves its OWN DSN env, not
+    # the analytics one — the two share the physical database but connect as
+    # different principals, and OMN-16911 attests `current_user` per binding.
+    monkeypatch.setenv(
+        "ONEX_TENANT_DB_URL",
+        "postgresql://user:pass@host:5432/omnidash_analytics",
+    )
 
 
 def _internal_db_adapter(table: str) -> object:
@@ -449,7 +456,10 @@ def test_projection_callback_rejects_missing_db_url_at_wiring(
 
     db_tables = projection_database_target("delegation_events", schema="tenant")
     handler = FakeHandler()
-    monkeypatch.delenv("OMNIDASH_ANALYTICS_DB_URL")
+    # OMN-15425: unsetting the DSN the `tenant_projection` binding actually
+    # resolves. Before that cut this was OMNIDASH_ANALYTICS_DB_URL; deleting
+    # that one now leaves the tenant binding configured and proves nothing.
+    monkeypatch.delenv("ONEX_TENANT_DB_URL")
 
     with pytest.raises(ValueError, match="tenant_projection"):
         _make_projection_dispatch_callback(handler, db_tables, ())

@@ -36,6 +36,11 @@ from tests.helpers.application_db_topology import projection_database_target
 
 _INTERNAL_DSN = "postgresql://omninode_runtime:pw@host:5432/omnidash_analytics"
 _ANALYTICS_DSN = "postgresql://role_omnidash:pw@host:5432/omnidash_analytics"
+# OMN-15425: the `tenant_projection` binding is a THIRD login role on the same
+# physical database, resolved from its own DSN env. It used to share
+# OMNIDASH_ANALYTICS_DB_URL with `app_dashboard`, which is unsatisfiable under
+# this ticket's own per-binding `current_user` attestation.
+_TENANT_DSN = "postgresql://tenant_projection_writer:pw@host:5432/omnidash_analytics"
 
 
 @pytest.fixture(autouse=True)
@@ -48,6 +53,7 @@ def _distinct_binding_dsns(monkeypatch: pytest.MonkeyPatch) -> None:
     """
     monkeypatch.setenv("OMNINODE_INTERNAL_DB_URL", _INTERNAL_DSN)
     monkeypatch.setenv("OMNIDASH_ANALYTICS_DB_URL", _ANALYTICS_DSN)
+    monkeypatch.setenv("ONEX_TENANT_DB_URL", _TENANT_DSN)
 
 
 class _OwnedAdapter:

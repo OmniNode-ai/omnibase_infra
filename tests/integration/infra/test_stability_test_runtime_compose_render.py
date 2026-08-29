@@ -171,6 +171,18 @@ COMPOSE_RENDER_ENV = {
     "OMNIDASH_ANALYTICS_DB_URL": (
         "postgresql://postgres:postgres@postgres:5432/omnidash_analytics"
     ),
+    # OMN-15425: the catalog-generated lane compose injects this as a
+    # `${VAR:?}` required env on the four omnimarket-projection-* services,
+    # because database-consumers.yaml declares them consumers of the
+    # `tenant_projection` binding and the topology-parity gate
+    # (validate_docker_catalog_parity) requires each consumer to name its
+    # binding's dsn_env. Distinct from the base file's x-runtime-env value,
+    # which is rendered from TENANT_PROJECTION_WRITER_PASSWORD for the anchor
+    # services. Render-only, never a real credential.
+    "ONEX_TENANT_DB_URL": (
+        "postgresql://tenant_projection_writer:render-only"
+        "@postgres:5432/omnidash_analytics"
+    ),
     "POSTGRES_PASSWORD": "postgres",
     # OMN-15263: `:?`-required in the base infra file (OMN-15173) and
     # interpolated by this layered render even though the stability overlay

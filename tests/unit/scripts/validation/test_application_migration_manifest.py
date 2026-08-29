@@ -214,7 +214,15 @@ def test_checked_in_manifest_is_exact_and_all_blockers_are_explicit() -> None:
     # values", ON_ERROR_STOP=1, exit 3). The static gate was green while the
     # failure class stayed open; 0002 re-expresses the corrected, nullable
     # reconciliation additively.
-    assert len(result.declarations) == 117
+    # +1 for OMN-15425's
+    # node_projection_delegation_inference_response/0004_grant_tenant_projection_writer.sql
+    # -- the tenant-schema/table authorization half of the
+    # `tenant_projection_writer` identity cut. It rides the node-owned loop
+    # rather than the flat corpus because the flat corpus is one-database and
+    # carries no `\connect`, while these grants are per-database inside
+    # omnidash_analytics (the role itself is created cluster-wide by the flat
+    # migration 102).
+    assert len(result.declarations) == 118
     assert result.blocked == ()
     assert len(result.legacy_node_declarations) == 2
     assert len(result.cloud_aliases) == 30
