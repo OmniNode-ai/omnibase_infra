@@ -153,6 +153,10 @@ def test_runtime_policy_env_has_expected_lane_values() -> None:
     )
     assert (
         "OPENROUTER_API_KEY"
+        in env["STABILITY_TEST_RUNTIME_MAIN_SECRET_RESOLVER_CONFIG_JSON"]
+    )
+    assert (
+        "OPEN_ROUTER_API_KEY"
         not in env["STABILITY_TEST_RUNTIME_MAIN_SECRET_RESOLVER_CONFIG_JSON"]
     )
 
