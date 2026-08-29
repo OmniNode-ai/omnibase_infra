@@ -26,6 +26,7 @@ from __future__ import annotations
 
 import fcntl
 import importlib.util
+import json
 import os
 import subprocess
 import sys
@@ -407,3 +408,476 @@ def test_waiting_is_announced_on_stderr(tmp_path: Path) -> None:
         fcntl.flock(fd, fcntl.LOCK_UN)
         os.close(fd)
     assert "waiting" in result.stderr.lower()
+
+
+# ==========================================================================
+# OMN-16869 -- a holder cannot starve the host indefinitely, and a waiter can
+# tell a progressing holder from a wedged one.
+#
+# Motivating incident (2026-08-28): a lane held /tmp/omninode-heavy-suite.lock
+# for ~2h wrapping a single `git push` that had been wedged on the network for
+# 1h33m. It consumed no CPU -- the contention the lock exists to prevent was
+# not even occurring -- yet it blocked five other lanes, one of which waited
+# 2200s+ across two attempts and saw a byte-identical holder line the entire
+# time. Two properties were missing and are proven here:
+#
+#   AC1 -- a max-hold ceiling enforced by the HOLDER on its own wrapped
+#          command. Never a waiter stealing or breaking the lock: acquisition
+#          stays fcntl.flock-only, and no peer is ever signalled.
+#   AC2 -- waiter-visible PROGRESS in the advisory sidecar (a heartbeat plus
+#          the wrapped command's tree CPU), so "peer is 20 minutes into a
+#          suite" and "peer is wedged on a socket" no longer read identically.
+#          Informational only -- never an input to an acquisition decision.
+#
+# Compatibility: heavy_lock.py is in live use by concurrent lanes, so an old
+# and a new invocation must interoperate on the same lock path and the same
+# sidecar file. The sidecar contract is additive-only, proven below.
+# ==========================================================================
+
+
+def _read_sidecar(lock: Path) -> dict[str, Any]:
+    return MOD.read_holder(lock)
+
+
+def _wait_for(predicate: Any, timeout: float = 20.0, poll: float = 0.05) -> bool:
+    deadline = time.monotonic() + timeout
+    while time.monotonic() < deadline:
+        if predicate():
+            return True
+        time.sleep(poll)
+    return False
+
+
+# --------------------------------------------------------------------------
+# AC1 -- holder-side max-hold cap
+# --------------------------------------------------------------------------
+
+
+def test_max_hold_cap_aborts_a_wedged_holder(tmp_path: Path) -> None:
+    """The 2026-08-28 shape: a wrapped command that never finishes.
+
+    Past the cap the HOLDER aborts its own wrapped command and exits with a
+    distinct, marker-carrying code. It does not silently keep holding, and it
+    does not report success.
+    """
+    lock = tmp_path / "hl.lock"
+    started = time.monotonic()
+    result = _run_cli(
+        ["--lock", str(lock), "--max-hold", "3s", "--", "sleep", "120"], timeout=90
+    )
+    elapsed = time.monotonic() - started
+
+    assert result.returncode == MOD.EXIT_MAX_HOLD_EXCEEDED
+    assert MOD.EXIT_MAX_HOLD_EXCEEDED not in (0, 69, 75, 127)
+    assert "heavy_lock:" in result.stderr
+    assert "max-hold" in result.stderr.lower()
+    assert elapsed < 60, f"cap did not fire promptly: {elapsed:.0f}s"
+
+
+def test_max_hold_abort_releases_the_lock_for_a_waiter(tmp_path: Path) -> None:
+    """AC1's operative claim: a capped holder CANNOT indefinitely block peers.
+
+    A waiter whose whole budget is far shorter than the wedged command still
+    gets the lock, because the holder let go at its cap.
+    """
+    lock = tmp_path / "hl.lock"
+    holder = subprocess.Popen(
+        [
+            sys.executable,
+            str(_SCRIPT),
+            "--lock",
+            str(lock),
+            "--max-hold",
+            "3s",
+            "--label",
+            "wedged peer",
+            "--",
+            "sleep",
+            "300",
+        ],
+        stdout=subprocess.PIPE,
+        stderr=subprocess.PIPE,
+        text=True,
+    )
+    try:
+        assert _wait_for(lambda: bool(_read_sidecar(lock)), timeout=20)
+        waiter = _run_cli(
+            [
+                "--lock",
+                str(lock),
+                "--timeout",
+                "60s",
+                "--notice-every",
+                "1s",
+                "--",
+                "true",
+            ],
+            timeout=90,
+        )
+        assert waiter.returncode == 0, waiter.stderr
+    finally:
+        holder.kill()
+        holder.wait(timeout=30)
+
+
+def test_max_hold_kills_a_command_that_ignores_sigterm(tmp_path: Path) -> None:
+    """A wedged command does not get to outlast the cap by ignoring TERM."""
+    lock = tmp_path / "hl.lock"
+    result = _run_cli(
+        [
+            "--lock",
+            str(lock),
+            "--max-hold",
+            "2s",
+            "--",
+            "sh",
+            "-c",
+            'trap "" TERM; sleep 300',
+        ],
+        timeout=120,
+    )
+    assert result.returncode == MOD.EXIT_MAX_HOLD_EXCEEDED
+    assert "heavy_lock:" in result.stderr
+
+
+def test_a_command_finishing_inside_the_cap_is_untouched(tmp_path: Path) -> None:
+    """The cap must not perturb the overwhelmingly common case."""
+    lock = tmp_path / "hl.lock"
+    result = _run_cli(
+        ["--lock", str(lock), "--max-hold", "60s", "--", "sh", "-c", "exit 3"]
+    )
+    assert result.returncode == 3
+    assert "max-hold" not in result.stderr.lower()
+
+
+def test_max_hold_zero_disables_the_cap(tmp_path: Path) -> None:
+    """An explicit opt-out stays available for a genuinely long release run."""
+    lock = tmp_path / "hl.lock"
+    result = _run_cli(
+        ["--lock", str(lock), "--max-hold", "0", "--", "sh", "-c", "sleep 2; exit 5"],
+        timeout=60,
+    )
+    assert result.returncode == 5
+
+
+def test_max_hold_has_a_bounded_default(tmp_path: Path) -> None:
+    """The cap is ON by default -- an opt-in cap is the defect, not the fix.
+
+    The ticket's own struck premise was that a control existed but was opt-in
+    per caller. A default of "no cap" would reproduce exactly that.
+    """
+    assert MOD.DEFAULT_MAX_HOLD_SECONDS > 0
+    args = MOD.build_parser().parse_args([])
+    assert args.max_hold == MOD.DEFAULT_MAX_HOLD_SECONDS
+
+
+def test_a_waiter_never_signals_the_peer_holding_the_lock(tmp_path: Path) -> None:
+    """The file's design philosophy, held: waiters wait, they never reclaim.
+
+    The cap is enforced by the holder ON ITSELF. A waiter that times out must
+    leave the peer's process completely untouched.
+    """
+    lock = tmp_path / "hl.lock"
+    holder = subprocess.Popen(
+        [
+            sys.executable,
+            str(_SCRIPT),
+            "--lock",
+            str(lock),
+            "--max-hold",
+            "0",
+            "--",
+            "sleep",
+            "30",
+        ],
+        stdout=subprocess.PIPE,
+        stderr=subprocess.PIPE,
+        text=True,
+    )
+    try:
+        assert _wait_for(lambda: bool(_read_sidecar(lock)), timeout=20)
+        waiter = _run_cli(
+            ["--lock", str(lock), "--timeout", "2s", "--", "true"], timeout=60
+        )
+        assert waiter.returncode == MOD.EXIT_LOCK_TIMEOUT
+        assert holder.poll() is None, "the waiter killed the peer holding the lock"
+    finally:
+        holder.kill()
+        holder.wait(timeout=30)
+
+
+# --------------------------------------------------------------------------
+# AC2 -- waiter-visible progress, informational only
+# --------------------------------------------------------------------------
+
+
+def test_sidecar_heartbeat_advances_while_the_holder_runs(tmp_path: Path) -> None:
+    """The sidecar is refreshed, not written once and left to go stale."""
+    lock = tmp_path / "hl.lock"
+    holder = subprocess.Popen(
+        [
+            sys.executable,
+            str(_SCRIPT),
+            "--lock",
+            str(lock),
+            "--heartbeat-every",
+            "1s",
+            "--max-hold",
+            "0",
+            "--",
+            "sleep",
+            "30",
+        ],
+        stdout=subprocess.PIPE,
+        stderr=subprocess.PIPE,
+        text=True,
+    )
+    try:
+        assert _wait_for(lambda: "heartbeat_at" in _read_sidecar(lock), timeout=25), (
+            f"no heartbeat ever appeared: {_read_sidecar(lock)}"
+        )
+        first = _read_sidecar(lock)
+        assert _wait_for(
+            lambda: _read_sidecar(lock).get("held_seconds", -1)
+            > first.get("held_seconds", 0),
+            timeout=25,
+        ), "held_seconds never advanced"
+    finally:
+        holder.kill()
+        holder.wait(timeout=30)
+
+
+def test_a_wedged_holder_is_distinguishable_from_a_working_one(tmp_path: Path) -> None:
+    """AC2's whole point, and the exact 2026-08-28 confusion.
+
+    Both holders are alive, both hold the lock, both have a growing
+    held_seconds. Only the working one burns CPU. From the sidecar ALONE --
+    no `pgrep -P` on the peer's process tree by hand -- the two must read
+    differently.
+    """
+    wedged_lock = tmp_path / "wedged.lock"
+    busy_lock = tmp_path / "busy.lock"
+
+    def _spawn(lock: Path, script: str) -> subprocess.Popen[str]:
+        return subprocess.Popen(
+            [
+                sys.executable,
+                str(_SCRIPT),
+                "--lock",
+                str(lock),
+                "--heartbeat-every",
+                "1s",
+                "--max-hold",
+                "0",
+                "--",
+                "sh",
+                "-c",
+                script,
+            ],
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
+            text=True,
+        )
+
+    wedged = _spawn(wedged_lock, "sleep 60")  # network-wedged shape: no CPU
+    busy = _spawn(busy_lock, "while :; do :; done")  # real work: burns CPU
+    try:
+        for lock in (wedged_lock, busy_lock):
+            assert _wait_for(
+                lambda lock=lock: "child_cpu_seconds" in _read_sidecar(lock), timeout=25
+            ), f"no progress field for {lock}"
+        time.sleep(4)
+        wedged_first = _read_sidecar(wedged_lock)
+        busy_first = _read_sidecar(busy_lock)
+        time.sleep(4)
+        wedged_second = _read_sidecar(wedged_lock)
+        busy_second = _read_sidecar(busy_lock)
+
+        # Both holders are demonstrably still holding.
+        assert wedged_second["held_seconds"] > wedged_first["held_seconds"]
+        assert busy_second["held_seconds"] > busy_first["held_seconds"]
+
+        # Only the working one shows CPU progress.
+        busy_delta = busy_second["child_cpu_seconds"] - busy_first["child_cpu_seconds"]
+        wedged_delta = (
+            wedged_second["child_cpu_seconds"] - wedged_first["child_cpu_seconds"]
+        )
+        assert busy_delta > 0.5, (
+            f"a CPU-burning holder showed no progress: {busy_delta}"
+        )
+        assert wedged_delta < 0.5, f"a sleeping holder showed progress: {wedged_delta}"
+    finally:
+        for proc in (wedged, busy):
+            proc.kill()
+            proc.wait(timeout=30)
+
+
+def test_waiter_notice_names_the_holder_and_how_long_it_has_held(
+    tmp_path: Path,
+) -> None:
+    """A waiter learns identity AND held-duration without touching the peer."""
+    lock = tmp_path / "hl.lock"
+    holder = subprocess.Popen(
+        [
+            sys.executable,
+            str(_SCRIPT),
+            "--lock",
+            str(lock),
+            "--heartbeat-every",
+            "1s",
+            "--max-hold",
+            "0",
+            "--label",
+            "OMN-16680 scaffold-validate push",
+            "--",
+            "sleep",
+            "60",
+        ],
+        stdout=subprocess.PIPE,
+        stderr=subprocess.PIPE,
+        text=True,
+    )
+    try:
+        assert _wait_for(lambda: "heartbeat_at" in _read_sidecar(lock), timeout=25)
+        time.sleep(2)
+        waiter = _run_cli(
+            [
+                "--lock",
+                str(lock),
+                "--timeout",
+                "3s",
+                "--notice-every",
+                "1s",
+                "--",
+                "true",
+            ],
+            timeout=60,
+        )
+        assert waiter.returncode == MOD.EXIT_LOCK_TIMEOUT
+        assert "OMN-16680 scaffold-validate push" in waiter.stderr
+        assert "held" in waiter.stderr.lower()
+        assert "cpu" in waiter.stderr.lower()
+    finally:
+        holder.kill()
+        holder.wait(timeout=30)
+
+
+def test_the_sidecar_never_decides_acquisition(tmp_path: Path) -> None:
+    """Progress data is advisory. A sidecar claiming a live, busy holder must
+    not stop acquisition when no process actually holds the kernel lock."""
+    lock = tmp_path / "hl.lock"
+    MOD.sidecar_path_for(lock).parent.mkdir(parents=True, exist_ok=True)
+    MOD.sidecar_path_for(lock).write_text(
+        json.dumps(
+            {
+                "pid": 1,
+                "host": "somewhere-else",
+                "acquired_at": "2026-08-28T14:49:15Z",
+                "heartbeat_at": "2999-01-01T00:00:00Z",
+                "held_seconds": 999999.0,
+                "child_cpu_seconds": 999999.0,
+                "label": "a lie",
+                "command": ["sleep", "inf"],
+            }
+        ),
+        encoding="utf-8",
+    )
+    assert (
+        _run_cli(["--lock", str(lock), "--timeout", "5s", "--", "true"]).returncode == 0
+    )
+
+
+# --------------------------------------------------------------------------
+# Backward compatibility with concurrently-running pre-OMN-16869 invocations
+# --------------------------------------------------------------------------
+
+
+def test_sidecar_schema_is_additive_only(tmp_path: Path) -> None:
+    """An old invocation must still parse a new holder's sidecar.
+
+    The pre-OMN-16869 reader consumes exactly these keys. They must keep
+    their names and types; everything new is additional.
+    """
+    lock = tmp_path / "hl.lock"
+    holder = subprocess.Popen(
+        [
+            sys.executable,
+            str(_SCRIPT),
+            "--lock",
+            str(lock),
+            "--heartbeat-every",
+            "1s",
+            "--max-hold",
+            "0",
+            "--label",
+            "compat",
+            "--",
+            "sleep",
+            "30",
+        ],
+        stdout=subprocess.PIPE,
+        stderr=subprocess.PIPE,
+        text=True,
+    )
+    try:
+        assert _wait_for(lambda: "heartbeat_at" in _read_sidecar(lock), timeout=25)
+        holder_json = _read_sidecar(lock)
+        for key in ("pid", "host", "cwd", "command", "label", "acquired_at"):
+            assert key in holder_json, f"pre-OMN-16869 sidecar key {key} was dropped"
+        assert isinstance(holder_json["pid"], int)
+        assert isinstance(holder_json["host"], str)
+        assert isinstance(holder_json["cwd"], str)
+        assert isinstance(holder_json["command"], list)
+        assert holder_json["label"] == "compat"
+        assert isinstance(holder_json["acquired_at"], str)
+    finally:
+        holder.kill()
+        holder.wait(timeout=30)
+
+
+def test_describe_holder_tolerates_a_pre_omn16869_sidecar(tmp_path: Path) -> None:
+    """A NEW waiter blocked by an OLD holder must not crash, and should still
+    surface a held-duration derived from the one timestamp an old holder wrote."""
+    lock = tmp_path / "hl.lock"
+    MOD.sidecar_path_for(lock).write_text(
+        json.dumps(
+            {
+                "pid": 55890,
+                "host": "old-host",
+                "cwd": "/somewhere",
+                "command": ["git", "push"],
+                "label": "OMN-16680 scaffold-validate push",
+                "acquired_at": "2026-08-28T14:49:15Z",
+            }
+        ),
+        encoding="utf-8",
+    )
+    described = MOD.describe_holder(lock)
+    assert "55890" in described
+    assert "OMN-16680 scaffold-validate push" in described
+    assert "held" in described.lower()
+
+
+def test_describe_holder_tolerates_a_missing_or_corrupt_sidecar(tmp_path: Path) -> None:
+    lock = tmp_path / "hl.lock"
+    assert "unidentified" in MOD.describe_holder(lock)
+    MOD.sidecar_path_for(lock).write_text("{not json", encoding="utf-8")
+    assert "unidentified" in MOD.describe_holder(lock)
+
+
+def test_existing_call_sites_need_no_new_flags() -> None:
+    """The DISPATCH_LANE_BRIEF item 10 recipe must keep working verbatim."""
+    args = MOD.build_parser().parse_args(["--timeout", "20m", "--label", "OMN-1 push"])
+    assert args.timeout == 1200.0
+    assert args.max_hold == MOD.DEFAULT_MAX_HOLD_SECONDS
+    assert args.heartbeat_every == MOD.DEFAULT_HEARTBEAT_SECONDS
+
+
+def test_cpu_time_parser_handles_both_ps_renderings() -> None:
+    """macOS renders `MMM:SS.ss`; Linux renders `HH:MM:SS` and `DD-HH:MM:SS`."""
+    assert MOD.parse_ps_cpu_time("0:00.07") == pytest.approx(0.07)
+    assert MOD.parse_ps_cpu_time("109:46.51") == pytest.approx(109 * 60 + 46.51)
+    assert MOD.parse_ps_cpu_time("01:33:46") == pytest.approx(3600 + 33 * 60 + 46)
+    assert MOD.parse_ps_cpu_time("2-01:00:00") == pytest.approx(2 * 86400 + 3600)
+    assert MOD.parse_ps_cpu_time("garbage") is None
+    assert MOD.parse_ps_cpu_time("") is None
