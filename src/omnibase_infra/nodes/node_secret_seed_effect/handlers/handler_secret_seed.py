@@ -543,8 +543,12 @@ class HandlerSecretSeed:
             EnumSecretSeedVerdict.SEEDED,
             (
                 f"seeded {len(created)} new and {len(updated)} updated name(s) "
-                f"at {request.secret_path} on {request.infisical_host}, "
-                "each confirmed present by name readback."
+                f"at {request.secret_path} on {request.infisical_host}; "
+                + (
+                    "name readback was skipped by request."
+                    if not request.verify_readback
+                    else "each confirmed present by name readback."
+                )
             ),
         )
 

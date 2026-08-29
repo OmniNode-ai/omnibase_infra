@@ -52,7 +52,7 @@ pytestmark = pytest.mark.unit
 # pass without the explicit value-redaction layer existing at all.
 _FAKE_VALUE = "sk-test-ZZZZ-0001112223334445556667778"
 _OTHER_VALUE = "sk-test-YYYY-3334445556667778889990001"
-_HOST = "http://infisical.invalid:8881"
+_HOST = "https://infisical.invalid:8881"
 _PROJECT = UUID("11111111-2222-3333-4444-555555555555")
 _PATH = "/shared/llm/"
 
@@ -359,6 +359,23 @@ async def test_execute_upserts_and_verifies_by_name() -> None:
 
 
 @pytest.mark.asyncio
+async def test_execute_with_readback_disabled_does_not_claim_verification() -> None:
+    store = _RecordingStore()
+    handler = _handler(store, f"LLM_GLM_API_KEY={_FAKE_VALUE}\n")
+
+    result = await handler.handle(_request(execute=True, verify_readback=False))
+
+    assert result.verdict is EnumSecretSeedVerdict.SEEDED
+    assert result.success is True
+    assert result.created_names == ["LLM_GLM_API_KEY"]
+    assert result.verified_names == []
+    assert result.unverified_names == []
+    assert store.list_calls == 1
+    assert "name readback was skipped by request" in result.detail
+    assert "confirmed present by name readback" not in result.detail
+
+
+@pytest.mark.asyncio
 async def test_reseeding_the_same_name_is_an_update_not_a_duplicate() -> None:
     """Idempotency: the second run of the same command is a clean update."""
     store = _RecordingStore()
@@ -493,9 +510,26 @@ def test_every_addressing_field_is_required_with_no_default(field_name: str) -> 
         ModelSecretSeedRequest(**fields)  # type: ignore[arg-type]
 
 
-def test_relative_or_schemeless_host_is_rejected() -> None:
+@pytest.mark.parametrize(
+    "infisical_host",
+    [
+        "infisical.invalid:8881",
+        "http://infisical.invalid:8881",
+        "https://user:pass@infisical.invalid:8881",
+        "https://infisical.invalid:8881?token=redacted",
+        "https://infisical.invalid:8881/#frag",
+        "https://infisical.invalid:8881/api",
+    ],
+)
+def test_unsafe_or_non_base_host_is_rejected(infisical_host: str) -> None:
     with pytest.raises(ValidationError):
-        _request(infisical_host="infisical.invalid:8881")
+        _request(infisical_host=infisical_host)
+
+
+def test_https_host_is_normalised_by_trimming_trailing_slash() -> None:
+    request = _request(infisical_host="https://infisical.invalid:8881/")
+
+    assert request.infisical_host == "https://infisical.invalid:8881"
 
 
 def test_relative_secret_path_is_rejected() -> None:

@@ -39,12 +39,15 @@ under `/shared/llm/`, so that is where it goes.
 
 ```bash
 umask 077
-cat > /tmp/glm-seed.env <<'EOF'
-LLM_GLM_API_KEY=<the new key>
-EOF
+printf 'LLM_GLM_API_KEY=' > /tmp/glm-seed.env
+printf 'Paste LLM_GLM_API_KEY: ' >&2
+IFS= read -rs NEW_GLM_KEY
+printf '\n' >&2
+printf '%s\n' "$NEW_GLM_KEY" >> /tmp/glm-seed.env
+unset NEW_GLM_KEY
 ```
 
-Writing it with a heredoc rather than `echo` keeps it out of your shell
+Reading it with `read -rs` keeps it off the command line and out of shell
 history. Delete the file when you are done (step 5).
 
 Prefer no file at all? Pipe it and use the stdin sentinel:

@@ -23,6 +23,7 @@ no log line, and no field of the result model.
 
 from __future__ import annotations
 
+from urllib.parse import urlsplit
 from uuid import UUID
 
 from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
@@ -185,9 +186,18 @@ class ModelSecretSeedRequest(BaseModel):
         stripped = value.strip().rstrip("/")
         if not stripped:
             raise ValueError("infisical_host must not be empty")
-        if not stripped.startswith(("http://", "https://")):
+        parsed = urlsplit(stripped)
+        if parsed.scheme != "https" or not parsed.netloc:
             raise ValueError(
-                f"infisical_host must be an absolute http(s) URL, got: {value!r}"
+                f"infisical_host must be an absolute HTTPS URL, got: {value!r}"
+            )
+        if parsed.username or parsed.password:
+            raise ValueError("infisical_host must not include credentials")
+        if parsed.query or parsed.fragment:
+            raise ValueError("infisical_host must not include query or fragment data")
+        if parsed.path not in ("", "/"):
+            raise ValueError(
+                f"infisical_host must be a base URL without a path, got: {value!r}"
             )
         return stripped
 
