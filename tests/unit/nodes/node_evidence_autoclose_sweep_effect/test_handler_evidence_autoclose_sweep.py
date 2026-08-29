@@ -1200,3 +1200,226 @@ class TestRealSubprocessCreationFailure:
         assert result is None
         assert exit_code == -1
         assert "OS error" in error
+
+
+@pytest.mark.unit
+class TestOmn16905OutcomeRowReportsBehaviorProving:
+    """The OUTCOME row must report the verdict's real `behavior_proving_count`.
+
+    OMN-16905. In evidence-autoclose-sweep run 33210163405 the DIAGNOSE step
+    and the sweep's own OUTCOME row disagreed on exactly one counter for one
+    ticket (OMN-16803) in one job: `behavior_proving=1` versus
+    `dod_verify_behavior_proving_count=0`, with total/verified/failed/
+    non_probative identical. That was read as a classifier regression between
+    two omnimarket builds (the gate venv vs the OMN-16846 dispatch venv).
+
+    It is not. The handler reads `behavior_proving_count` off the verdict ONLY
+    inside the `all_verified` branch. Every other exit -- and OMN-16803's
+    verdict was `status=skipped`, so it took the gap path -- builds its outcome
+    without the field, and `ModelEvidenceAutocloseOutcome` defaults it to 0. The
+    OUTCOME row therefore reported a structural 0 that had nothing to do with
+    what the classifier said, and the discrepancy was an artifact of which
+    branch the ticket fell down, not of which interpreter ran it.
+
+    This matters because the OUTCOME row is the machine-readable record the
+    fleet is triaged from: a counter that reads 0 whenever the ticket is not
+    already flippable cannot distinguish "no behavior proof was declared" from
+    "behavior proof ran, passed, and something else held the flip". That
+    ambiguity is what sent OMN-16905 hunting a classifier bug that does not
+    exist.
+
+    The flip predicate itself is unaffected -- it reads the verdict directly --
+    so this is a reporting-fidelity fix, not a behavior change to any gate.
+    """
+
+    async def test_gap_path_outcome_row_carries_the_verdicts_behavior_count(self):
+        """A gap-path ticket must still report the behavior count it measured."""
+        gh_fake = _make_gh_fake(
+            companions=[_merged_pr(1, "evidence(OMN-9999): x", "OMN-9999")],
+            files_by_pr={1: ["contracts/OMN-9999.yaml"]},
+        )
+        linear = FakeLinearClient(issues={"OMN-9999": _issue()})
+        dod_fake = _make_dod_verify_fake(
+            {
+                "OMN-9999": (
+                    _dod_verify_ok(total=3, verified=2, failed=1, behavior_proving=2),
+                    1,
+                    "",
+                )
+            }
+        )
+        handler = HandlerEvidenceAutocloseSweep(
+            linear_client=linear,
+            run_gh_command=gh_fake,
+            run_dod_verify_command=dod_fake,
+        )
+        result = await handler.handle(_request(apply=False))
+        outcome = result.outcomes[0]
+        assert outcome.decision == EnumEvidenceAutocloseDecision.GAP_POSTED
+        # The defect: this read 0 while the verdict said 2.
+        assert outcome.dod_verify_behavior_proving_count == 2
+
+    async def test_omn_16803_shape_skipped_status_still_reports_behavior_one(self):
+        """The exact run-33210163405 shape: status=skipped, behavior_proving=1.
+
+        `failed == 0` but dod_verify's own terminal status is `skipped`, so
+        `all_verified` is False and the ticket takes the gap path -- the precise
+        combination that produced the reported 1-vs-0 divergence.
+        """
+        verdict = _dod_verify_ok(total=6, verified=2, failed=0, behavior_proving=1)
+        payload = verdict["result"]["terminal_payload"]
+        payload["status"] = "skipped"
+        payload["skipped_count"] = 3
+        payload["non_probative_count"] = 1
+
+        gh_fake = _make_gh_fake(
+            companions=[_merged_pr(1, "evidence(OMN-9999): x", "OMN-9999")],
+            files_by_pr={1: ["contracts/OMN-9999.yaml"]},
+        )
+        linear = FakeLinearClient(issues={"OMN-9999": _issue()})
+        dod_fake = _make_dod_verify_fake({"OMN-9999": (verdict, 0, "")})
+        handler = HandlerEvidenceAutocloseSweep(
+            linear_client=linear,
+            run_gh_command=gh_fake,
+            run_dod_verify_command=dod_fake,
+        )
+        result = await handler.handle(_request(apply=False))
+        outcome = result.outcomes[0]
+        assert outcome.decision == EnumEvidenceAutocloseDecision.GAP_POSTED
+        # Every other counter already matched the diagnose leg; only this one
+        # did not, and the mismatch is what this ticket exists to close.
+        assert outcome.dod_verify_total_checks == 6
+        assert outcome.dod_verify_verified_count == 2
+        assert outcome.dod_verify_failed_count == 0
+        assert outcome.dod_verify_non_probative_count == 1
+        assert outcome.dod_verify_behavior_proving_count == 1
+
+    @pytest.mark.parametrize(
+        ("status", "total", "verified", "failed", "behavior"),
+        [
+            # Gap by a real red.
+            ("failed", 3, 2, 1, 2),
+            # Gap by dod_verify's own non-verified terminal status, behaviour
+            # proof present -- the OMN-16803 shape.
+            ("skipped", 6, 2, 0, 1),
+            # Same shape, richer behaviour count.
+            ("skipped", 11, 4, 0, 3),
+            # A genuine zero must still be reported as zero, not confused with
+            # the structural default this ticket removed.
+            ("skipped", 4, 1, 0, 0),
+        ],
+    )
+    async def test_outcome_row_never_diverges_from_the_verdict_it_read(
+        self, status, total, verified, failed, behavior
+    ):
+        """AC5: the sweep's row and dod_verify's own dump stay comparable.
+
+        The regression this locks is not "the number is wrong once" but "the
+        two legs can disagree at all". OMN-16905 cost a full investigation into
+        a nonexistent omnimarket classifier regression precisely because the
+        OUTCOME row and the diagnose leg's dump were not comparable artifacts:
+        one reported what dod_verify measured, the other reported a default. A
+        future divergence must fail here rather than surface as a fleet that
+        silently will not flip.
+        """
+        verdict = _dod_verify_ok(
+            total=total, verified=verified, failed=failed, behavior_proving=behavior
+        )
+        payload = verdict["result"]["terminal_payload"]
+        payload["status"] = status
+
+        gh_fake = _make_gh_fake(
+            companions=[_merged_pr(1, "evidence(OMN-9999): x", "OMN-9999")],
+            files_by_pr={1: ["contracts/OMN-9999.yaml"]},
+        )
+        linear = FakeLinearClient(issues={"OMN-9999": _issue()})
+        dod_fake = _make_dod_verify_fake(
+            {"OMN-9999": (verdict, 1 if failed else 0, "")}
+        )
+        handler = HandlerEvidenceAutocloseSweep(
+            linear_client=linear,
+            run_gh_command=gh_fake,
+            run_dod_verify_command=dod_fake,
+        )
+        result = await handler.handle(_request(apply=False))
+        outcome = result.outcomes[0]
+
+        # Every counter the row publishes must equal the verdict it read.
+        assert outcome.dod_verify_total_checks == total
+        assert outcome.dod_verify_verified_count == verified
+        assert outcome.dod_verify_failed_count == failed
+        assert outcome.dod_verify_behavior_proving_count == behavior
+
+
+@pytest.mark.unit
+class TestOmn16905EveryVerdictBearingOutcomeReportsBehavior:
+    """AC5 structural gate: report every counter you read, or none of them.
+
+    The OMN-16905 defect was not a wrong value, it was a SILENT one. The gap
+    path built its outcome with four of dod_verify's five counters and let
+    ``dod_verify_behavior_proving_count`` fall through to the model's
+    ``default=0``. A default is indistinguishable, in the emitted JSON, from a
+    measured zero -- so the row asserted "no behavior was proven" about a
+    verdict it had never asked. That is what made the diagnose leg and the
+    OUTCOME row disagree 1-vs-0 on OMN-16803 in run 33210163405 with the other
+    four counters identical, and it is what sent the investigation after an
+    omnimarket classifier regression that does not exist.
+
+    The per-branch unit tests above pin today's branches. This one pins the
+    INVARIANT, so a branch added tomorrow cannot reintroduce the hole by
+    copying the old shape: any construction that reports
+    ``dod_verify_total_checks`` has a verdict in hand, and must therefore also
+    state what that verdict said about behavior -- explicitly, including the
+    honest ``=0`` on the unparseable branch where the key is genuinely absent.
+
+    Construction sites that report NO dod_verify counters at all (the
+    pre-verdict paths: kill switch, unresolvable binding, already-Done) are out
+    of scope by design -- they never read a verdict, so they have nothing to
+    under-report.
+    """
+
+    def test_no_construction_reports_counters_while_omitting_behavior(self):
+        import ast
+        import inspect
+
+        from omnibase_infra.nodes.node_evidence_autoclose_sweep_effect.handlers import (
+            handler_evidence_autoclose_sweep as _mod,
+        )
+
+        source = Path(inspect.getfile(_mod)).read_text(encoding="utf-8")
+        tree = ast.parse(source)
+
+        offenders: list[int] = []
+        verdict_bearing = 0
+        for node in ast.walk(tree):
+            if not isinstance(node, ast.Call):
+                continue
+            func = node.func
+            if (
+                not isinstance(func, ast.Name)
+                or func.id != "ModelEvidenceAutocloseOutcome"
+            ):
+                continue
+            kwargs = {kw.arg for kw in node.keywords if kw.arg is not None}
+            if "dod_verify_total_checks" not in kwargs:
+                continue
+            verdict_bearing += 1
+            if "dod_verify_behavior_proving_count" not in kwargs:
+                offenders.append(node.lineno)
+
+        # Guard the guard: if the construction shape is ever refactored away
+        # (a builder, a dict splat), this test would silently pass on zero
+        # sites and stop protecting anything.
+        assert verdict_bearing >= 5, (
+            "expected the handler to build several verdict-bearing outcomes; "
+            f"found {verdict_bearing}. If the construction shape changed, this "
+            "gate must be rewritten, not deleted -- OMN-16905."
+        )
+        assert offenders == [], (
+            "ModelEvidenceAutocloseOutcome built with dod_verify counters but "
+            "WITHOUT dod_verify_behavior_proving_count at line(s) "
+            f"{offenders}. That lets the model default manufacture a 0 the "
+            "verifier never reported, which is the exact OMN-16905 defect: an "
+            "OUTCOME row that disagrees with dod_verify's own dump. Pass the "
+            "measured value, or an explicit 0 with a comment saying why."
+        )
