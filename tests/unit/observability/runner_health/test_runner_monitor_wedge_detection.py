@@ -172,8 +172,25 @@ LOGS
             echo "27.0.0"
             ;;
           compose)
-            # Record any compose invocation so the test can assert no unsafe
-            # bounce ever ran (auto-bounce is OFF by default).
+            # OMN-16947 added a read-only drift preflight to every tick:
+            # `compose config -q` (interpolation) and `compose config
+            # --services` (expected_count vs declared-service drift). Model both
+            # truthfully -- a mock that emitted no service list would make the
+            # real drift detector fire on a phantom 0-vs-{TEST_FLEET_COUNT} gap.
+            #
+            # Only MUTATING subcommands are recorded, so the "no unsafe bounce
+            # ever ran" assertions below keep their original strictness: they
+            # still fail on any `up`/`down`, they just no longer trip over a
+            # read-only config probe.
+            if [[ "$*" == *" config"* ]]; then
+              if [[ "$*" == *"--services"* ]]; then
+                echo "omninode-deploy-runner"
+                for i in $(seq 1 {TEST_FLEET_COUNT}); do
+                  echo "{PREFIX}-${{i}}"
+                done
+              fi
+              exit 0
+            fi
             echo "compose $*" >> "${{MOCK_DOCKER_CALLLOG:-/dev/null}}"
             ;;
           restart)
