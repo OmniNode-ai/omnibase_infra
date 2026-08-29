@@ -1,0 +1,122 @@
+{
+  "counts": {
+    "divergent": 1,
+    "divergent_verified": 0,
+    "equivalent": 4,
+    "legacy_attested": 0,
+    "unreachable": 0
+  },
+  "databases": [
+    "omnibase_infra"
+  ],
+  "generated_at": "2026-08-29T03:26:17.338213+00:00",
+  "lane": "stability-test",
+  "psql_exec": [
+    "ssh",
+    "jonah@192.168.86.201",
+    "docker",
+    "exec",
+    "-i",
+    "omnibase-infra-stability-test-postgres",
+    "psql",
+    "-U",
+    "postgres"
+  ],
+  "scratch_server_version": "16.14 (Homebrew)",
+  "ticket": "OMN-15857",
+  "tool": "verify_migration_checksum_adoption.py",
+  "tool_version": "2",
+  "verdicts": [
+    {
+      "artifact_path": "078_add_data_provenance_to_projection_tables.sql",
+      "artifact_sha256": "3746e19e69a387b69847550d8257ac4ea06d6ab0bc665dfa3e0c249bb8b650a2",
+      "database": "omnibase_infra",
+      "declared_objects": [
+        "table:contracts",
+        "table:registration_projections",
+        "table:topics"
+      ],
+      "divergences": [],
+      "manifest_checksum": "",
+      "reason": "all 3 object(s) declared by 078_add_data_provenance_to_projection_tables.sql exist in omnibase_infra with identical columns, constraints, indexes and definitions",
+      "source_checksum": "applied-manually-omn-11760",
+      "source_set": "docker",
+      "verdict": "equivalent",
+      "version": "docker/078_add_data_provenance_to_projection_tables.sql"
+    },
+    {
+      "artifact_path": "079_create_runtime_manifests.sql",
+      "artifact_sha256": "419009a5762b1eec9b28824f3f8344ae58fc9c9b23e75b0eacfcc2ba2a882e4b",
+      "database": "omnibase_infra",
+      "declared_objects": [
+        "table:runtime_manifests"
+      ],
+      "divergences": [],
+      "manifest_checksum": "",
+      "reason": "all 1 object(s) declared by 079_create_runtime_manifests.sql exist in omnibase_infra with identical columns, constraints, indexes and definitions",
+      "source_checksum": "applied-manually-omn-11760",
+      "source_set": "docker",
+      "verdict": "equivalent",
+      "version": "docker/079_create_runtime_manifests.sql"
+    },
+    {
+      "artifact_path": "080_create_infra_routing_decisions.sql",
+      "artifact_sha256": "a083fa528a9ede913d77d33f813906faf4436828f86c1f7597d4597e96d96d4b",
+      "database": "omnibase_infra",
+      "declared_objects": [
+        "table:infra_routing_decisions"
+      ],
+      "divergences": [],
+      "manifest_checksum": "",
+      "reason": "all 1 object(s) declared by 080_create_infra_routing_decisions.sql exist in omnibase_infra with identical columns, constraints, indexes and definitions",
+      "source_checksum": "applied-manually-omn-11760",
+      "source_set": "docker",
+      "verdict": "equivalent",
+      "version": "docker/080_create_infra_routing_decisions.sql"
+    },
+    {
+      "artifact_path": "081_create_evidence_dashboard_projection_tables.sql",
+      "artifact_sha256": "3c8d19e6572bfcf4815d1ac5603d7da22d51bafcacf4ac67c5da70abe3917686",
+      "database": "omnibase_infra",
+      "declared_objects": [
+        "table:evidence_correlation_trace_projection",
+        "table:evidence_dashboard_projection",
+        "table:evidence_readiness_aggregate_projection"
+      ],
+      "divergences": [],
+      "manifest_checksum": "",
+      "reason": "all 3 object(s) declared by 081_create_evidence_dashboard_projection_tables.sql exist in omnibase_infra with identical columns, constraints, indexes and definitions",
+      "source_checksum": "applied-manually-omn-11760",
+      "source_set": "docker",
+      "verdict": "equivalent",
+      "version": "docker/081_create_evidence_dashboard_projection_tables.sql"
+    },
+    {
+      "artifact_path": "nodes/node_projection_savings/074_create_savings_estimates.sql",
+      "artifact_sha256": "b78acc5ba3144f9a7c7d85fd0fd5803b02b60503765fc58f8650a6a2bde27f4e",
+      "database": "omnibase_infra",
+      "declared_objects": [
+        "table:savings_estimates"
+      ],
+      "divergences": [
+        "table public.savings_estimates: column 'session_id' declared={'type': 'text', 'nullability': 'NOT NULL', 'default': ''} live={'type': 'character varying(255)', 'nullability': 'NOT NULL', 'default': ''}",
+        "table public.savings_estimates: column 'model_local' declared={'type': 'text', 'nullability': 'NOT NULL', 'default': ''} live={'type': 'character varying(255)', 'nullability': 'NOT NULL', 'default': ''}",
+        "table public.savings_estimates: column 'model_cloud_baseline' declared={'type': 'text', 'nullability': 'NOT NULL', 'default': ''} live={'type': 'character varying(255)', 'nullability': 'NOT NULL', 'default': ''}",
+        "table public.savings_estimates: column 'local_cost_usd' declared={'type': 'numeric(18,6)', 'nullability': 'NOT NULL', 'default': ''} live={'type': 'numeric(14,6)', 'nullability': 'NOT NULL', 'default': ''}",
+        "table public.savings_estimates: column 'cloud_cost_usd' declared={'type': 'numeric(18,6)', 'nullability': 'NOT NULL', 'default': ''} live={'type': 'numeric(14,6)', 'nullability': 'NOT NULL', 'default': ''}",
+        "table public.savings_estimates: column 'savings_usd' declared={'type': 'numeric(18,6)', 'nullability': 'NOT NULL', 'default': ''} live={'type': 'numeric(14,6)', 'nullability': 'NOT NULL', 'default': ''}",
+        "table public.savings_estimates: column 'repo_name' declared={'type': 'text', 'nullability': 'NULL', 'default': ''} live={'type': 'character varying(255)', 'nullability': 'NULL', 'default': ''}",
+        "table public.savings_estimates: column 'machine_id' declared={'type': 'text', 'nullability': 'NULL', 'default': ''} live={'type': 'character varying(64)', 'nullability': 'NULL', 'default': ''}",
+        "table public.savings_estimates: constraint 'savings_estimates_local_cost_usd_check' missing live",
+        "table public.savings_estimates: constraint 'savings_estimates_cloud_cost_usd_check' missing live",
+        "table public.savings_estimates: constraint 'savings_estimates_amounts_match' missing live"
+      ],
+      "manifest_checksum": "b78acc5ba3144f9a7c7d85fd0fd5803b02b60503765fc58f8650a6a2bde27f4e",
+      "reason": "11 structural difference(s) between the schema 074_create_savings_estimates.sql produces and the schema omnibase_infra actually carries",
+      "source_checksum": "d5eedd28f26c32f2e9d2a8554a999209c68216dc6a1ee255a973bd034164ce55",
+      "source_set": "omnimarket",
+      "verdict": "divergent",
+      "version": "node:node_projection_savings:074_create_savings_estimates.sql"
+    }
+  ]
+}

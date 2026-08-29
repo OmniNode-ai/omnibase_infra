@@ -1346,6 +1346,9 @@ def _write_application_ledger_contract(forward: Path) -> None:
     (ledger_dir / "legacy-node-migrations.tsv").write_text("", encoding="utf-8")
     (ledger_dir / "verified-checksum-adoptions.tsv").write_text("", encoding="utf-8")
     (ledger_dir / "verified-divergent-adoptions.tsv").write_text("", encoding="utf-8")
+    (ledger_dir / "verified-cross-source-adoptions.tsv").write_text(
+        "", encoding="utf-8"
+    )
 
 
 @pytest.fixture

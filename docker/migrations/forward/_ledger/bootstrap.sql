@@ -595,12 +595,17 @@ DECLARE
   -- so this is reset at the top of every iteration: a verified adoption for one
   -- version must never leak its ticket/receipt into the provenance of the next.
   adoption_row RECORD;
+  -- OMN-16919: same reset discipline, for the cross-source reconciliation
+  -- declaration consulted at the bottom of this loop.
+  cross_row RECORD;
+  cross_omnimarket_ok BOOLEAN;
   resolved_stream TEXT;
   resolved_owner TEXT;
   resolved_domain TEXT;
   imported_checksum TEXT;
   imported_checksum_kind TEXT;
   imported_provenance TEXT;
+  imported_applied_at TIMESTAMPTZ;
   source_column_count INTEGER;
 BEGIN
   IF to_regclass('public.schema_migrations') IS NULL THEN
@@ -631,6 +636,12 @@ BEGIN
     SELECT * INTO adoption_row
     FROM onex_verified_checksum_adoptions
     WHERE false;
+    -- OMN-16919: same, for the cross-source declaration.
+    SELECT * INTO cross_row
+    FROM onex_verified_cross_source_adoptions
+    WHERE false;
+    cross_omnimarket_ok := false;
+    imported_applied_at := source_row.applied_at;
 
     SELECT * INTO manifest_row
     FROM onex_application_migration_manifest
@@ -726,6 +737,80 @@ BEGIN
           current_database(), source_row.migration_id, source_row.checksum
         );
       END IF;
+
+      -- OMN-16919: CROSS-SOURCE RECONCILIATION.
+      --
+      -- A version can be declared by BOTH source ledgers at once.  On the .201
+      -- stability lane, ten versions carry an `applied-by-runner` row here in
+      -- public.schema_migrations AND a row in
+      -- public.omnimarket_schema_migrations: the omnimarket-era runner recorded
+      -- the application in May, the ONEX-era runner re-registered it in June.
+      -- Both resolve to the SAME manifest checksum, so the content claim is not
+      -- in dispute -- but the two rows carry different applied_at values and
+      -- different provenance, and $omnimarket_import$ below raises
+      -- 'double migration declaration' on exactly that difference.
+      --
+      -- The reconciliation is consulted HERE as well as there, and that is the
+      -- whole point.  If only the second block consulted, this block would keep
+      -- computing 'adopted:...' and, on the NEXT run, find the reconciled
+      -- provenance already in the canonical ledger and raise at the
+      -- 'double migration declaration' check below.  A one-sided consultation
+      -- would fix the first run and break every run after it.  Both blocks
+      -- therefore derive the identical reconciled applied_at and provenance
+      -- from the declaration alone, so the result is idempotent by construction.
+      --
+      -- Four things must agree before the reconciliation is honoured, so a
+      -- declaration cannot outlive any fact it attested to:
+      --   1. the version is declared,
+      --   2. the declared node_source_checksum equals the checksum actually on
+      --      this row (a declaration covers one recorded state, not any state),
+      --   3. the declared manifest_checksum equals the manifest's (rewriting the
+      --      migration after the proof re-opens the question), and
+      --   4. the declared node_applied_at equals this row's applied_at.
+      --
+      -- And the omnimarket side is checked too, dynamically because that
+      -- relation may not exist in this database: the declared
+      -- omnimarket_source_checksum and omnimarket_applied_at must both still be
+      -- present on the counterpart row.  Without this, a stale declaration would
+      -- write a provenance asserting a second source that is not there.
+      SELECT * INTO cross_row
+      FROM onex_verified_cross_source_adoptions
+      WHERE version = source_row.migration_id;
+      IF cross_row.version IS NOT NULL
+         AND cross_row.node_source_checksum = source_row.checksum
+         AND cross_row.manifest_checksum = manifest_row.checksum
+         AND cross_row.node_applied_at::timestamptz = source_row.applied_at
+         AND to_regclass('public.omnimarket_schema_migrations') IS NOT NULL THEN
+        EXECUTE
+          'SELECT EXISTS (SELECT 1 FROM public.omnimarket_schema_migrations o'
+          ' WHERE format(''node:%s:%s'', o.node_name, o.filename) = $1'
+          '   AND o.checksum = $2'
+          '   AND o.applied_at = $3::timestamptz)'
+          INTO cross_omnimarket_ok
+          USING source_row.migration_id,
+                cross_row.omnimarket_source_checksum,
+                cross_row.omnimarket_applied_at;
+        IF cross_omnimarket_ok THEN
+          -- The declaration states the reconciled applied_at explicitly rather
+          -- than the bootstrap picking one at runtime, and the manifest
+          -- validator pins it to be exactly one of the two observed values.
+          -- Nothing is invented here; the choice was reviewed.  Both raw
+          -- checksums and both applied_at values survive verbatim in the
+          -- provenance beside the ticket and the receipt sha256 -- the
+          -- reconciliation records both sources, it does not erase one.
+          imported_applied_at := cross_row.reconciled_applied_at::timestamptz;
+          imported_provenance := format(
+            'cross-source-reconciled:%s:%s'
+            ':node=public.schema_migrations:raw-checksum=%s:applied-at=%s'
+            ':omnimarket=public.omnimarket_schema_migrations:raw-checksum=%s:applied-at=%s'
+            ':ticket=%s:receipt=%s',
+            current_database(), source_row.migration_id,
+            cross_row.node_source_checksum, cross_row.node_applied_at,
+            cross_row.omnimarket_source_checksum, cross_row.omnimarket_applied_at,
+            cross_row.ticket, cross_row.receipt_sha256
+          );
+        END IF;
+      END IF;
     END IF;
 
     SELECT * INTO existing_row
@@ -740,7 +825,7 @@ BEGIN
       ELSIF existing_row.owner <> resolved_owner
          OR existing_row.domain <> resolved_domain
          OR existing_row.checksum_kind <> imported_checksum_kind
-         OR existing_row.applied_at IS DISTINCT FROM source_row.applied_at
+         OR existing_row.applied_at IS DISTINCT FROM imported_applied_at
          OR existing_row.provenance <> imported_provenance THEN
         RAISE EXCEPTION
           'double migration declaration for version %', source_row.migration_id;
@@ -752,7 +837,7 @@ BEGIN
       ) VALUES (
         resolved_stream, resolved_owner,
         resolved_domain, source_row.migration_id,
-        imported_checksum, imported_checksum_kind, source_row.applied_at,
+        imported_checksum, imported_checksum_kind, imported_applied_at,
         imported_provenance
       );
     END IF;
@@ -778,6 +863,10 @@ DECLARE
   imported_checksum TEXT;
   imported_kind TEXT;
   imported_provenance TEXT;
+  imported_applied_at TIMESTAMPTZ;
+  -- OMN-16919: the cross-source reconciliation declaration, reset per row.
+  cross_row RECORD;
+  cross_node_ok BOOLEAN;
   source_column_count INTEGER;
 BEGIN
   IF to_regclass('public.omnimarket_schema_migrations') IS NULL THEN
@@ -820,6 +909,12 @@ BEGIN
     SELECT * INTO divergent_row
     FROM onex_verified_divergent_adoptions
     WHERE false;
+    -- OMN-16919: same, for the cross-source declaration.
+    SELECT * INTO cross_row
+    FROM onex_verified_cross_source_adoptions
+    WHERE false;
+    cross_node_ok := false;
+    imported_applied_at := source_row.applied_at;
 
     IF source_row.node_name !~ '^[A-Za-z0-9_][A-Za-z0-9_.-]*$'
        OR source_row.filename !~ '^[A-Za-z0-9_][A-Za-z0-9_.-]*[.]sql$' THEN
@@ -918,6 +1013,65 @@ BEGIN
       );
     END IF;
 
+    -- OMN-16919: CROSS-SOURCE RECONCILIATION -- the omnimarket half.
+    --
+    -- Everything above resolved what THIS row's bytes claim.  What follows
+    -- resolves the separate question of a version that BOTH source ledgers
+    -- declare.  On the .201 stability lane ten versions are in that state, and
+    -- the check below at 'double migration declaration' is the line that has
+    -- been failing every heal run: the checksums agree (both sides resolve to
+    -- the manifest hash), but the applied_at values and the provenance strings
+    -- do not, because the omnimarket-era runner recorded the application months
+    -- before the ONEX-era runner re-registered it.
+    --
+    -- Note what is NOT relaxed.  'conflicting migration checksum' immediately
+    -- below still raises unconditionally on a checksum disagreement.  A
+    -- reconciliation may only ever settle metadata for two rows that already
+    -- agree about content; two rows making DIFFERENT content claims is a real
+    -- conflict and stays fail-closed.
+    --
+    -- The declaration is honoured only when the omnimarket side still matches
+    -- what was declared (checksum and applied_at), the manifest still matches,
+    -- and the counterpart row is still actually present in
+    -- public.schema_migrations carrying the declared node-side checksum and
+    -- applied_at.  That last check is dynamic because public.schema_migrations
+    -- is absent in some databases and moved to platform_catalog in others; a
+    -- static reference would fail to plan rather than fail closed.
+    SELECT * INTO cross_row
+    FROM onex_verified_cross_source_adoptions
+    WHERE version = canonical_version;
+    IF cross_row.version IS NOT NULL
+       AND cross_row.omnimarket_source_checksum = source_row.checksum
+       AND cross_row.manifest_checksum = manifest_row.checksum
+       AND cross_row.omnimarket_applied_at::timestamptz = source_row.applied_at
+       AND to_regclass('public.schema_migrations') IS NOT NULL THEN
+      EXECUTE
+        'SELECT EXISTS (SELECT 1 FROM public.schema_migrations s'
+        ' WHERE s.migration_id = $1'
+        '   AND s.checksum = $2'
+        '   AND s.applied_at = $3::timestamptz)'
+        INTO cross_node_ok
+        USING canonical_version,
+              cross_row.node_source_checksum,
+              cross_row.node_applied_at;
+      IF cross_node_ok THEN
+        -- Derived from the declaration alone, exactly as $migration_id_import$
+        -- derives it, so both blocks agree byte-for-byte and re-running
+        -- bootstrap.sql is a no-op rather than a new conflict.
+        imported_applied_at := cross_row.reconciled_applied_at::timestamptz;
+        imported_provenance := format(
+          'cross-source-reconciled:%s:%s'
+          ':node=public.schema_migrations:raw-checksum=%s:applied-at=%s'
+          ':omnimarket=public.omnimarket_schema_migrations:raw-checksum=%s:applied-at=%s'
+          ':ticket=%s:receipt=%s',
+          current_database(), canonical_version,
+          cross_row.node_source_checksum, cross_row.node_applied_at,
+          cross_row.omnimarket_source_checksum, cross_row.omnimarket_applied_at,
+          cross_row.ticket, cross_row.receipt_sha256
+        );
+      END IF;
+    END IF;
+
     SELECT * INTO existing_row
     FROM platform_catalog.schema_migrations
     WHERE migration_stream = manifest_row.migration_stream
@@ -929,7 +1083,7 @@ BEGIN
       ELSIF existing_row.owner <> manifest_row.owner
          OR existing_row.domain <> manifest_row.domain
          OR existing_row.checksum_kind <> imported_kind
-         OR existing_row.applied_at IS DISTINCT FROM source_row.applied_at
+         OR existing_row.applied_at IS DISTINCT FROM imported_applied_at
          OR existing_row.provenance <> imported_provenance THEN
         RAISE EXCEPTION 'double migration declaration for version %', canonical_version;
       END IF;
@@ -940,7 +1094,7 @@ BEGIN
       ) VALUES (
         manifest_row.migration_stream, manifest_row.owner,
         manifest_row.domain, canonical_version,
-        imported_checksum, imported_kind, source_row.applied_at,
+        imported_checksum, imported_kind, imported_applied_at,
         imported_provenance
       );
     END IF;

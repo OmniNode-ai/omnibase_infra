@@ -50,6 +50,7 @@ def _validate(
         ledger_dir / "legacy-node-migrations.tsv",
         ledger_dir / "verified-checksum-adoptions.tsv",
         ledger_dir / "verified-divergent-adoptions.tsv",
+        ledger_dir / "verified-cross-source-adoptions.tsv",
         ledger_dir / "cloud-migration-aliases.tsv",
         require_complete=require_complete,
     )
@@ -99,6 +100,9 @@ def _minimal_fixture(tmp_path: Path) -> tuple[Path, Path]:
     (ledger_dir / "legacy-node-migrations.tsv").write_text("", encoding="utf-8")
     (ledger_dir / "verified-checksum-adoptions.tsv").write_text("", encoding="utf-8")
     (ledger_dir / "verified-divergent-adoptions.tsv").write_text("", encoding="utf-8")
+    (ledger_dir / "verified-cross-source-adoptions.tsv").write_text(
+        "", encoding="utf-8"
+    )
     return migrations_dir, ledger_dir
 
 

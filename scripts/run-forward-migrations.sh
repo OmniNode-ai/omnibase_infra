@@ -109,6 +109,15 @@ VERIFIED_CHECKSUM_ADOPTIONS="${MIGRATIONS_DIR}/_ledger/verified-checksum-adoptio
 # be read for the sentinel declarations above; same proof, same tool, distinct
 # `divergent_verified` verdict.
 VERIFIED_DIVERGENT_ADOPTIONS="${MIGRATIONS_DIR}/_ledger/verified-divergent-adoptions.tsv"
+# OMN-16919: per-version reconciliations for a version declared by BOTH source
+# ledgers at once -- public.schema_migrations and
+# public.omnimarket_schema_migrations each recording the same application, with
+# different applied_at and different provenance.  A third relation of its own for
+# the same reason the second one exists: the three admission paths answer
+# different questions, and separate files make it structurally impossible to read
+# one declaration for another.  Admissible only when both sides already resolve to
+# the SAME manifest checksum; a content disagreement is never reconciled here.
+VERIFIED_CROSS_SOURCE_ADOPTIONS="${MIGRATIONS_DIR}/_ledger/verified-cross-source-adoptions.tsv"
 CLOUD_MIGRATION_ALIASES="${MIGRATIONS_DIR}/_ledger/cloud-migration-aliases.tsv"
 
 export PGPASSWORD="${POSTGRES_PASSWORD}"
@@ -740,6 +749,7 @@ prepare_canonical_ledger() {
   validate_client_file_path "$LEGACY_NODE_MIGRATION_DECLARATIONS"
   validate_client_file_path "$VERIFIED_CHECKSUM_ADOPTIONS"
   validate_client_file_path "$VERIFIED_DIVERGENT_ADOPTIONS"
+  validate_client_file_path "$VERIFIED_CROSS_SOURCE_ADOPTIONS"
   echo "[forward-migration] Converging canonical ledger in ${ledger_database}..."
   psql -X -q -h "$PGHOST" -p "$PGPORT" -U "$PGUSER" -d "$ledger_database" \
     -v ON_ERROR_STOP=1 \
@@ -773,11 +783,23 @@ prepare_canonical_ledger() {
           ticket TEXT NOT NULL,
           receipt_sha256 TEXT NOT NULL,
           verified_at TEXT NOT NULL
+        ); CREATE TEMP TABLE onex_verified_cross_source_adoptions (
+          version TEXT NOT NULL PRIMARY KEY,
+          node_source_checksum TEXT NOT NULL,
+          omnimarket_source_checksum TEXT NOT NULL,
+          manifest_checksum TEXT NOT NULL,
+          node_applied_at TEXT NOT NULL,
+          omnimarket_applied_at TEXT NOT NULL,
+          reconciled_applied_at TEXT NOT NULL,
+          ticket TEXT NOT NULL,
+          receipt_sha256 TEXT NOT NULL,
+          verified_at TEXT NOT NULL
         )" \
     -c "\copy onex_application_migration_manifest FROM '${APPLICATION_MIGRATION_MANIFEST}' WITH (FORMAT text, DELIMITER E'\t')" \
     -c "\copy onex_legacy_node_migration_declarations FROM '${LEGACY_NODE_MIGRATION_DECLARATIONS}' WITH (FORMAT text, DELIMITER E'\t')" \
     -c "\copy onex_verified_checksum_adoptions FROM '${VERIFIED_CHECKSUM_ADOPTIONS}' WITH (FORMAT text, DELIMITER E'\t')" \
     -c "\copy onex_verified_divergent_adoptions FROM '${VERIFIED_DIVERGENT_ADOPTIONS}' WITH (FORMAT text, DELIMITER E'\t')" \
+    -c "\copy onex_verified_cross_source_adoptions FROM '${VERIFIED_CROSS_SOURCE_ADOPTIONS}' WITH (FORMAT text, DELIMITER E'\t')" \
     -f "$LEDGER_BOOTSTRAP"
 }
 
