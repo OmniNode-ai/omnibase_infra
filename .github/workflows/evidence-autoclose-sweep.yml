@@ -10,14 +10,47 @@
 # and would flip the bound Linear ticket Done (or post the honest gap) via
 # `onex skill evidence_autoclose_sweep`.
 #
-# DRY-RUN ONLY. `apply` is intentionally NEVER passed here — the sweep logs
-# every decision it would make but calls zero Linear mutation. Flipping this
-# workflow to `--apply` is a later, deliberate change (a separate PR), not a
-# flag flip buried in this file. The kill switch (ONEX_AUTOCLOSE_DISABLED)
-# is honored by the node itself unconditionally, independent of this
-# workflow's config, so it is not (and must not be) surfaced as an INPUT
-# here — set it as a repo/environment secret-free variable to halt every run
-# without touching this file.
+# DRY-RUN BY DEFAULT, apply BY EXPLICIT DISPATCH ONLY. The previous revision
+# of this paragraph said `apply` "is intentionally NEVER passed here" and
+# named the flip to `--apply` as "a later, deliberate change (a separate PR),
+# not a flag flip buried in this file". This is that PR, and `deliberate` is
+# now a mechanical property rather than a comment:
+#
+#   * `apply` is a `workflow_dispatch` boolean input, `default: false`. A
+#     dispatch that leaves the box alone is a dry run, so the cheap "just
+#     re-run it" reflex cannot mutate anything.
+#   * The `schedule` path CANNOT reach it. A cron tick carries no
+#     `github.event.inputs` at all, and the guard additionally requires
+#     `github.event_name == 'workflow_dispatch'` — two independent refusals,
+#     because this is the one property whose failure is unattended.
+#   * `--apply` never appears on the invocation line. It enters only through
+#     the shell array the guard populates, so a guard plus a stray literal
+#     flag (which reads identically in a diff) cannot coexist.
+#   * The job NAME and the step summary render their mode from the SAME guard
+#     expression that gates the flag, so a run cannot label itself DRY-RUN
+#     while flipping tickets. Both previously stated "DRY-RUN" as a constant.
+#
+# All four are pinned by `tests/ci/test_evidence_autoclose_sweep_apply_input.py`
+# (CLAUDE.md rule 5 — the check ships wired, not advisory).
+#
+# The flip PREDICATE is not relaxed by any of this and is not this file's to
+# set. It lives in `handler_evidence_autoclose_sweep.py` and a flip requires
+# ALL of: dod_verify's own terminal status is `verified`; `total_checks > 0`;
+# `failed_count == 0`; `verified_count > 0`; `verified_count +
+# non_probative_count == total_checks` (so any `skipped` check still refuses);
+# the `behavior_proving_count` key is PRESENT and `> 0` (OMN-15911 — at least
+# one check executed the claimed behavior rather than reading merge state);
+# and the OMN-16736 AC-coverage re-read of the ticket body finds no criterion
+# the checks never covered. `--apply` decides only whether the decision that
+# predicate already reached is written to Linear.
+#
+# The kill switch (ONEX_AUTOCLOSE_DISABLED) is honored by the node itself
+# unconditionally, independent of this workflow's config, so it is not (and
+# must not be) surfaced as an INPUT here — set it as a repo/environment
+# secret-free variable to halt every run without touching this file. That it
+# is a variable and not an input matters MORE now: an input is a per-dispatch
+# choice, and the operator making the apply choice is the last person who
+# should be able to opt out of the halt.
 #
 # OMN-16792 AC3. That paragraph was true about the NODE and false about the
 # JOB, and the gap made the kill switch inert. The node reads the switch from
@@ -167,6 +200,19 @@ on:
           the value every scheduled run uses) skips the whole step at zero cost.
         required: false
         default: ''
+      apply:
+        description: >-
+          OMN-16106. WRITE MODE. Tick this and the sweep stops previewing and
+          actually flips every ticket whose evidence clears the predicate —
+          Linear state to Done plus the audit comment carrying the dod_verify
+          counters that justified it. Leave it alone (the default, and the
+          only value a scheduled run can have) and the run is read-only: it
+          reaches exactly the same decisions and writes none of them. This
+          does not loosen what counts as proven; it only decides whether the
+          verdict is recorded. ONEX_AUTOCLOSE_DISABLED still halts the run.
+        required: false
+        type: boolean
+        default: false
 
 env:
   UV_VERSION: "0.8.3"
@@ -174,7 +220,9 @@ env:
 
 jobs:
   evidence-autoclose-sweep:
-    name: Evidence Autoclose Sweep (DRY-RUN)
+    # The mode is rendered from the same guard that gates the flag (see
+    # SWEEP_APPLY below), so the label cannot drift from the behaviour.
+    name: Evidence Autoclose Sweep (${{ (github.event_name == 'workflow_dispatch' && github.event.inputs.apply == 'true') && 'APPLY' || 'DRY-RUN' }})
     # Trusted runner required: needs LINEAR_API_KEY and an authenticated gh.
     # OMNI_RUNNER_SELECTOR_V1 — trusted CI defaults to self-hosted omnibase-ci; public forks default to ubuntu-latest
     runs-on: >-
@@ -197,6 +245,26 @@ jobs:
     timeout-minutes: 60
     permissions:
       contents: read
+
+    env:
+      # OMN-16106. THE decision that separates a preview from a mutation,
+      # evaluated exactly once, in the expression context, and handed to the
+      # shell as data rather than as substituted script text.
+      #
+      # Both conjuncts are load-bearing and neither is redundant defence:
+      #   * `github.event_name == 'workflow_dispatch'` states the intent that
+      #     an unattended trigger can never apply, in a form a reader can check
+      #     without knowing how `github.event.inputs` renders on other events.
+      #   * `github.event.inputs.apply == 'true'` is the operator's actual
+      #     choice. A boolean workflow_dispatch input arrives in the `github`
+      #     context as the STRING "true"/"false" (the `inputs` context types it
+      #     as a real boolean, but `inputs` is not available in a job `name:`,
+      #     and the guard has to be one expression usable at every site or the
+      #     label can drift from the behaviour).
+      #
+      # On `schedule`, `github.event.inputs` is null, so the second conjunct is
+      # already false on its own — the two refusals are independent.
+      SWEEP_APPLY: ${{ (github.event_name == 'workflow_dispatch' && github.event.inputs.apply == 'true') && 'true' || 'false' }}
 
     steps:
       # OMN-16832. THE credential this job runs under. Everything below that
@@ -1132,9 +1200,18 @@ jobs:
             tail -n 15 "${RUNNER_TEMP}/${ticket}.err" || true
           done
 
-      - name: Run evidence autoclose sweep (DRY-RUN — apply is never passed here)
+      - name: Run evidence autoclose sweep
         env:
           LINEAR_API_KEY: ${{ secrets.LINEAR_API_KEY }}
+          # OMN-16106. Passed as env, not interpolated into the run body.
+          # `${{ github.event.inputs.lookback_hours }}` pasted into a `run:`
+          # is substituted BEFORE bash parses the line, so the input's own
+          # characters become shell syntax — a workflow_dispatch string input
+          # is attacker-influenced in exactly the way that matters. As an env
+          # var referenced `"${LOOKBACK_HOURS}"` it is a value. The apply
+          # input reaches the shell the same way, via SWEEP_APPLY at job
+          # level.
+          LOOKBACK_HOURS: ${{ github.event.inputs.lookback_hours || '6' }}
           GH_TOKEN: ${{ steps.app-token.outputs.token }}
           # OMN-16846 changed what UV_NO_SYNC was for; OMN-16902 removed it.
           #
@@ -1200,8 +1277,26 @@ jobs:
           # per-ticket verifier runs in — and it must be the one carrying the
           # co-installed omnimarket, not the lock-exact gate venv the
           # behaviour checks then run pytest in.
+          # OMN-16106. `--apply` enters ONLY here, and only through the array
+          # the guard populates. It is deliberately absent from the invocation
+          # line itself: a guarded flag and an unconditional one read the same
+          # in a diff, so the invocation is asserted (by
+          # tests/ci/test_evidence_autoclose_sweep_apply_input.py) to contain
+          # no literal `--apply` at all.
+          apply_args=()
+          if [ "${SWEEP_APPLY}" = "true" ]; then
+            apply_args+=(--apply)
+            echo "::warning title=APPLY MODE::This dispatch WILL write to Linear. Every ticket whose dod_verify verdict clears the flip predicate is moved to Done and receives the audit comment carrying the counters that justified it. Tickets that do not clear it are commented, never flipped."
+            echo "mode: APPLY (operator-dispatched, github.event.inputs.apply=true)"
+          else
+            echo "mode: DRY-RUN (no Linear mutation; every decision is logged as a preview)"
+          fi
+          # `${arr[@]+"${arr[@]}"}` rather than a bare `"${arr[@]}"`: under
+          # `set -u` an empty array expansion is an unbound-variable error on
+          # bash < 4.4, and this must not become the reason a dry run fails.
           "${DISPATCH_VENV}/bin/onex" skill evidence_autoclose_sweep \
-            --lookback-hours "${{ github.event.inputs.lookback_hours || '6' }}"
+            --lookback-hours "${LOOKBACK_HOURS}" \
+            ${apply_args[@]+"${apply_args[@]}"}
 
       # OMN-16902, the enforcement half (CLAUDE.md rule 5). Dropping UV_NO_SYNC
       # lets `uv run` sync projects mid-sweep, including the gate checkout.
@@ -1241,9 +1336,29 @@ jobs:
 
       - name: Post summary
         if: always()
+        # OMN-16106. The mode comes from the same guard as the flag. This step
+        # previously asserted "this workflow never passes --apply" as a
+        # constant; left alone it would have kept asserting it while the run
+        # flipped tickets.
+        env:
+          SWEEP_MODE: ${{ (github.event_name == 'workflow_dispatch' && github.event.inputs.apply == 'true') && 'APPLY' || 'DRY-RUN' }}
         run: |
-          echo "## Evidence Autoclose Sweep (OMN-16106, DRY-RUN)" >> "$GITHUB_STEP_SUMMARY"
-          echo "" >> "$GITHUB_STEP_SUMMARY"
-          echo "Enumerated merged onex_change_control companions, re-ran dod_verify," >> "$GITHUB_STEP_SUMMARY"
-          echo "and logged every flip/gap decision it WOULD make. No Linear mutation" >> "$GITHUB_STEP_SUMMARY"
-          echo "was performed — this workflow never passes --apply." >> "$GITHUB_STEP_SUMMARY"
+          {
+            echo "## Evidence Autoclose Sweep (OMN-16106, ${SWEEP_MODE})"
+            echo ""
+            echo "Enumerated merged onex_change_control companions, re-ran dod_verify,"
+            echo "and reached a flip/gap decision per bound ticket."
+            echo ""
+            if [ "${SWEEP_MODE}" = "APPLY" ]; then
+              echo "**Linear was written.** Every ticket recorded \`flipped\` below was moved"
+              echo "to Done and received an audit comment naming its merged evidence"
+              echo "companion and the dod_verify counters that justified the flip"
+              echo "(verified / non-probative / failed / behavior-proving). Tickets that"
+              echo "did not clear the predicate were commented with the honest gap, never"
+              echo "flipped. The per-ticket receipt in the sweep step's log is the record."
+            else
+              echo "No Linear mutation was performed — this dispatch did not pass --apply."
+              echo "Every decision in the sweep step's receipt is a preview of what an"
+              echo "\`apply=true\` dispatch would have written."
+            fi
+          } >> "$GITHUB_STEP_SUMMARY"
