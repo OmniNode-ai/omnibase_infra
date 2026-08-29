@@ -73,7 +73,8 @@ class FakeGatewayTransport:
         gateway_base_url: str,
         client_id: str,
         client_secret: str,
-        audiences: Sequence[str] = ("gateway-attach",),
+        audiences: Sequence[str] = ("redpanda-events",),
+        exchange_audiences: Sequence[str] = ("gateway-attach",),
         token_ttl_seconds: int = 900,
         session_ttl_seconds: int = 900,
         heartbeat_interval_seconds: int = 15,
@@ -85,7 +86,13 @@ class FakeGatewayTransport:
         self._gateway_base_url = gateway_base_url.rstrip("/")
         self._client_id = client_id
         self._client_secret = client_secret
+        # What the fake REALM stamps on a client_credentials grant. Defaults to
+        # the broker audience because that is what the P0B machine client -- the
+        # only credential a tenant can hold -- actually carries (OMN-16687).
         self.audiences = list(audiences)
+        # What the fake EXCHANGE stamps on the token it mints. Separate knob
+        # because the whole point of the exchange is that these two differ.
+        self.exchange_audiences = list(exchange_audiences)
         self._token_ttl_seconds = token_ttl_seconds
         self._session_ttl_seconds = session_ttl_seconds
         self._heartbeat_interval_seconds = heartbeat_interval_seconds
@@ -99,7 +106,12 @@ class FakeGatewayTransport:
         self.attach_count = 0
         self.revoked = False
         self.token_endpoint_status = 200
+        self.exchange_status = 200
         self.detach_status = 200
+        # Tokens the fake exchange minted, kept apart from ``issued_tokens``
+        # so a test can assert WHICH of the two the gateway was shown.
+        self.exchanged_tokens: list[str] = []
+        self.exchange_count = 0
         # OMN-15952 makes the renewal directive REQUIRED on attach; this flag
         # exists so a client can be tested against a pre-OMN-15952 gateway.
         self.omit_renewal = False
@@ -109,6 +121,30 @@ class FakeGatewayTransport:
         # a fake that recomputed it per heartbeat would silently satisfy a
         # client that believed heartbeats extend sessions.
         self.current_session: dict[str, object] | None = None
+
+    # -- token minting -----------------------------------------------------
+    def _mint_jwt(self, audiences: Sequence[str]) -> str:
+        """Structurally real JWT with ``audiences`` on the ``aud`` claim.
+
+        Single-element sets are emitted as a bare string and larger ones as a
+        list, exactly as Keycloak does -- RFC 7519 §4.1.3 permits both and the
+        client must not be able to tell them apart.
+        """
+        exp = self.now + timedelta(seconds=self._token_ttl_seconds)
+        aud: object = audiences[0] if len(audiences) == 1 else list(audiences)
+        return encode_jwt(
+            {
+                "aud": aud,
+                "exp": int(exp.timestamp()),
+                "iat": int(self.now.timestamp()),
+                "iss": "https://keycloak.invalid/realms/acme",
+                "sub": self._client_id,
+                "azp": self._client_id,
+                "tenant_id": "22222222-2222-4222-8222-222222222222",
+                "tenant_slug": self._tenant_slug,
+                "principal_id": self._client_id,
+            }
+        )
 
     # -- fake Keycloak -----------------------------------------------------
     async def post_form(
@@ -134,21 +170,7 @@ class FakeGatewayTransport:
             return FakeHttpResponse(401, '{"error":"invalid_client"}')
         if self.revoked:
             return FakeHttpResponse(401, '{"error":"invalid_client"}')
-        exp = self.now + timedelta(seconds=self._token_ttl_seconds)
-        aud: object = (
-            self.audiences[0] if len(self.audiences) == 1 else list(self.audiences)
-        )
-        token = encode_jwt(
-            {
-                "aud": aud,
-                "exp": int(exp.timestamp()),
-                "iat": int(self.now.timestamp()),
-                "iss": "https://keycloak.invalid/realms/acme",
-                "sub": self._client_id,
-                "azp": self._client_id,
-                "tenant_slug": self._tenant_slug,
-            }
-        )
+        token = self._mint_jwt(self.audiences)
         self.issued_tokens.append(token)
         body = json.dumps(
             {
@@ -174,7 +196,13 @@ class FakeGatewayTransport:
         if not authorization.startswith("Bearer "):
             return FakeHttpResponse(401, '{"detail":"missing bearer"}')
         presented = authorization.removeprefix("Bearer ")
-        if self.revoked or presented not in self.issued_tokens:
+        if url == f"{self._gateway_base_url}/v1/auth/gateway-token":
+            return self._exchange(presented)
+        if self.revoked or presented not in self.exchanged_tokens:
+            # The gateway routes accept ONLY what the exchange minted. A fake
+            # that also accepted the machine token would let the pre-OMN-16687
+            # single-hop client pass here and fail on the wire -- the exact
+            # failure this fake exists to make impossible to miss.
             return FakeHttpResponse(401, '{"detail":"token rejected"}')
         if url == f"{self._gateway_base_url}/v1/gateway/attach":
             return self._attach()
@@ -183,6 +211,38 @@ class FakeGatewayTransport:
         if url == f"{self._gateway_base_url}/v1/gateway/detach":
             return self._detach(body)
         return FakeHttpResponse(404, '{"detail":"not found"}')
+
+    def _exchange(self, presented: str) -> FakeHttpResponse:
+        """Fake ``POST /v1/auth/gateway-token`` (OMN-16687).
+
+        Mirrors ``onex-api``'s input contract rather than merely accepting a
+        Bearer: the presented token must be one the fake realm issued, must
+        not already carry ``gateway-attach`` (the exchange does not consume
+        its own output), and must carry exactly the broker audience once the
+        role-resolved ones are discounted.
+        """
+        self.exchange_count += 1
+        if self.exchange_status != 200:
+            return FakeHttpResponse(
+                self.exchange_status, '{"detail":"exchange refused"}'
+            )
+        if self.revoked or presented not in self.issued_tokens:
+            return FakeHttpResponse(401, '{"detail":"Authentication failed"}')
+        presented_audiences = set(self.audiences)
+        if "gateway-attach" in presented_audiences:
+            return FakeHttpResponse(401, '{"detail":"Authentication failed"}')
+        if presented_audiences - {"account"} != {"redpanda-events"}:
+            return FakeHttpResponse(401, '{"detail":"Authentication failed"}')
+        token = self._mint_jwt(self.exchange_audiences)
+        self.exchanged_tokens.append(token)
+        body = json.dumps(
+            {
+                "access_token": token,
+                "token_type": "Bearer",
+                "expires_in": self._token_ttl_seconds,
+            }
+        )
+        return FakeHttpResponse(200, body)
 
     def _new_session_payload(self) -> dict[str, object]:
         attached = self.now
@@ -294,7 +354,10 @@ class FakeGatewayTransport:
 
 TOKEN_ENDPOINT = "https://keycloak.invalid/realms/acme/protocol/openid-connect/token"
 GATEWAY_BASE_URL = "https://api.invalid"
-CLIENT_ID = "ga-acme"
+# The tenant's MACHINE client (clientId == principal_id), not the ga-* attach
+# client: the ga-* secret is never returned by onex-api, so a credential
+# naming it is one no operator could have obtained (OMN-16687).
+CLIENT_ID = "t-acme-principal"
 CLIENT_SECRET = "s3cr3t-not-a-real-value"  # pragma: allowlist secret
 
 

@@ -5,13 +5,14 @@
 WHAT IT PROVES, AND WHY THE EXISTING CHECK IS NOT ENOUGH
     ``http_health`` against the gateway's ``/health`` proves the service is
     reachable and says nothing at all about the credential the onboarding flow
-    just wrote. This check closes exactly that gap: it performs the same
-    ``client_credentials`` grant the runtime will perform, presents the
-    resulting Bearer to ``/v1/gateway/attach``, and only reports a pass once
-    the gateway has opened a real, tenant-bound session. A credential that is
-    mistyped, revoked, pointed at the wrong realm, or missing the
-    ``gateway-attach`` audience mapper fails HERE, at onboarding, rather than
-    at first delegation.
+    just wrote. This check closes exactly that gap: it performs the same mint
+    the runtime will perform -- a ``client_credentials`` grant for the tenant's
+    machine token, then ``POST /v1/auth/gateway-token`` to exchange it for an
+    attach-audience token (OMN-16687) -- presents the resulting Bearer to
+    ``/v1/gateway/attach``, and only reports a pass once the gateway has opened
+    a real, tenant-bound session. A credential that is mistyped, revoked,
+    pointed at the wrong realm, or is not the tenant's provisioned machine
+    client fails HERE, at onboarding, rather than at first delegation.
 
 WHY IT DETACHES
     Attaching is a mutation of live control-plane state, and a verification
@@ -93,10 +94,12 @@ async def prove_gateway_attach(
         gateway declared. Never carries the client secret or the access token.
 
     Raises:
-        ModelOnexError: If the grant is refused, the token's audience is not
-            the gateway-attach set, the gateway rejects the attach, the attach
-            response omits the required renewal directive, or the detach
-            fails. A failed detach names the session left open.
+        ModelOnexError: If the grant is refused, the credential is not the
+            tenant's machine client, the attach-token exchange refuses it, the
+            exchanged token's audience is not the gateway-attach set, the
+            gateway rejects the attach, the attach response omits the required
+            renewal directive, or the detach fails. A failed detach names the
+            session left open.
     """
     keeper = GatewaySessionKeeper(
         transport=transport,
@@ -124,7 +127,8 @@ async def prove_gateway_attach(
     return (
         f"gateway attach proof passed for tenant '{credential.tenant_slug}' "
         f"(principal '{credential.client_id}') against "
-        f"{credential.base_url.rstrip('/')}: client_credentials grant accepted, "
+        f"{credential.base_url.rstrip('/')}: client_credentials grant and "
+        f"attach-token exchange accepted, "
         f"session {session.session_id} opened with ceiling "
         f"{session.expires_at.isoformat()} and renewal "
         f"{attachment.renewal.mode.value} at "
@@ -146,16 +150,17 @@ async def check_gateway_attach(
             (``config.yaml`` + the 0600 ``credentials.json``). Blank means
             ``~/.onex``, the path the CLI writes. ``${VAR}`` references are
             already expanded by the executor.
-        timeout: Budget in seconds for the WHOLE sequence -- grant, attach and
-            detach -- not per request. A policy should allow more than the
-            executor's 10s default here: three round trips against a cold
-            Keycloak realm do not reliably fit in it.
+        timeout: Budget in seconds for the WHOLE sequence -- grant, exchange,
+            attach and detach -- not per request. A policy should allow more
+            than the executor's 10s default here: four round trips against a
+            cold Keycloak realm do not reliably fit in it.
         transport: Injected POST seam; the real httpx adapter when omitted.
 
     Returns:
         ``(passed, message)``. Every failure -- missing or mis-permissioned
-        credential, refused grant, wrong audience, rejected attach, failed
-        detach, unreachable gateway, exhausted budget -- comes back as
+        credential, refused grant, wrong audience at either hop, refused
+        exchange, rejected attach, failed detach, unreachable gateway,
+        exhausted budget -- comes back as
         ``(False, <what went wrong and what to do>)``. There is no branch that
         reports a pass without a session having been opened and closed.
     """
@@ -182,8 +187,9 @@ async def check_gateway_attach(
     except TimeoutError:
         return (
             False,
-            f"gateway attach proof timed out after {timeout}s (grant + attach + "
-            f"detach against the credential in {onex_home}). Raise the check's "
+            f"gateway attach proof timed out after {timeout}s (grant + "
+            f"exchange + attach + detach against the credential in "
+            f"{onex_home}). Raise the check's "
             "timeout_seconds if the control plane is simply slow, or check "
             "whether it is reachable at all.",
         )
