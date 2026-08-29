@@ -287,8 +287,9 @@ class DispatcherNodeIntrospected(MixinAsyncCircuitBreaker):
             # succeeded, or we returned early).
             assert isinstance(payload, ModelNodeIntrospectionEvent)
 
-            # TODO(OMN-5738): Use injected time from ModelDispatchContext instead
-            # of datetime.now(UTC). Currently, the ProtocolMessageDispatcher.handle()
+            # Use injected time from ModelDispatchContext instead of datetime.now(UTC)
+            # once the dispatcher protocol carries that context. Currently,
+            # the ProtocolMessageDispatcher.handle()
             # signature accepts only the envelope, so there is no way to receive the
             # dispatch engine's ModelDispatchContext.now timestamp. When the protocol
             # is updated to pass ModelDispatchContext (or the envelope carries a
@@ -303,7 +304,7 @@ class DispatcherNodeIntrospected(MixinAsyncCircuitBreaker):
                     payload=payload,
                     envelope_timestamp=now,
                     correlation_id=correlation_id,
-                    source=self.dispatcher_id,
+                    source_tool=self.dispatcher_id,
                 )
             )
 
@@ -336,7 +337,7 @@ class DispatcherNodeIntrospected(MixinAsyncCircuitBreaker):
                     payload=auto_ack_payload,
                     envelope_timestamp=now,
                     correlation_id=correlation_id,
-                    source=self.dispatcher_id,
+                    source_tool=self.dispatcher_id,
                 )
                 # ModelEventEnvelope is structurally compatible with ProtocolEventEnvelope
                 # but lacks the async get_payload() method; mixin_node_introspection uses

@@ -113,7 +113,7 @@ def create_envelope(
         payload=event,
         envelope_timestamp=now or TEST_NOW,
         correlation_id=correlation_id or uuid4(),
-        source="test",
+        source_tool="test",
     )
 
 

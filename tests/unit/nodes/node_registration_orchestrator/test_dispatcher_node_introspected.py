@@ -64,7 +64,7 @@ def _make_envelope(node_id: None = None) -> ModelEventEnvelope[object]:
         payload=event,
         envelope_timestamp=TEST_NOW,
         correlation_id=uuid4(),
-        source="test",
+        source_tool="test",
     )
 
 

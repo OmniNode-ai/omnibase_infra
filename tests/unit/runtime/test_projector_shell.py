@@ -762,8 +762,8 @@ class TestProjectorShellValueExtraction:
         )
         envelope = ModelEventEnvelope(
             envelope_id=uuid4(),
-            source="test",
-            source_version=ModelSemVer(major=1, minor=0, patch=0),
+            source_tool="test",
+            onex_version=ModelSemVer(major=1, minor=0, patch=0),
             payload=payload,
             metadata=ModelEnvelopeMetadata(tags={"event_type": "order.created.v1"}),
         )
@@ -852,8 +852,8 @@ class TestProjectorShellValueExtraction:
         )
         envelope = ModelEventEnvelope(
             envelope_id=uuid4(),
-            source="test",
-            source_version=ModelSemVer(major=1, minor=0, patch=0),
+            source_tool="test",
+            onex_version=ModelSemVer(major=1, minor=0, patch=0),
             payload=payload,
             metadata=ModelEnvelopeMetadata(tags={"event_type": "order.created.v1"}),
         )

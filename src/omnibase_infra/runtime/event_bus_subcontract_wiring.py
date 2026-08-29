@@ -1171,23 +1171,15 @@ class EventBusSubcontractWiring(MixinConsumptionCounter):
         # Parse JSON to dict
         data = json.loads(json_str)
 
+        if "timestamp" in data and "envelope_timestamp" not in data:
+            data["envelope_timestamp"] = data.pop("timestamp")
+        if "source" in data and "source_tool" not in data:
+            data["source_tool"] = data.pop("source")
+
         # Validate and construct envelope
         envelope = ModelEventEnvelope[object].model_validate(data)
 
-        # FRAGILE: event_type is extracted from the raw dict because
-        # ModelEventEnvelope does not expose it as a model field.
-        # model_validate() strips unknown keys, so we recover it here.
-        # If ModelEventEnvelope ever adds event_type as a first-class field,
-        # this raw-dict lookup must be replaced with direct attribute access
-        # to avoid silently overriding the model's validated value.
-        assert not hasattr(ModelEventEnvelope, "event_type"), (
-            "ModelEventEnvelope now has an event_type field. "
-            "Remove the raw-dict lookup below and use envelope.event_type instead."
-        )
-        explicit_event_type = data.get("event_type")
-        if explicit_event_type:
-            envelope = envelope.model_copy(update={"event_type": explicit_event_type})
-        else:
+        if envelope.event_type is None:
             derived_event_type = self._derive_event_type_from_topic(topic)
             if derived_event_type is not None:
                 envelope = envelope.model_copy(

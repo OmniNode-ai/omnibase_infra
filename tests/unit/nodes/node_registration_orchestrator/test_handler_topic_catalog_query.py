@@ -94,7 +94,7 @@ def _make_query_envelope(
         payload=payload,
         envelope_timestamp=TEST_NOW,
         correlation_id=corr_id,
-        source="test",
+        source_tool="test",
     )
 
 
@@ -202,7 +202,7 @@ async def test_handler_malformed_payload_returns_warning() -> None:
         payload=wrong_payload,
         envelope_timestamp=TEST_NOW,
         correlation_id=uuid4(),
-        source="test",
+        source_tool="test",
     )
 
     # Cast to expected type to satisfy mypy; the wrong payload type is intentional
@@ -296,7 +296,7 @@ async def test_handler_generates_correlation_id_when_absent() -> None:
         payload=payload,
         envelope_timestamp=TEST_NOW,
         correlation_id=None,
-        source="test",
+        source_tool="test",
     )
 
     output = await handler.handle(envelope)

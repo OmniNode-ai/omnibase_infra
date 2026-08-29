@@ -7,7 +7,8 @@
 # Node: NodeRuntimeErrorTriageEffect
 #
 # Consumes onex.evt.omnibase-infra.runtime-error.v1 events and applies
-# first-match-wins triage with cross-layer correlation to consumer health.
+# first-match-wins triage with cross-layer correlation to consumer health,
+# then publishes error-triaged projection events.
 #
 # Related Tickets:
 #   - OMN-5522: Create NodeRuntimeErrorTriageEffect
@@ -38,7 +39,8 @@ event_bus:
     patch: 0
   subscribe_topics:
     - "onex.evt.omnibase-infra.runtime-error.v1"
-  publish_topics: []
+  publish_topics:
+    - "onex.evt.omnibase-infra.error-triaged.v1"
 # I/O models
 input_model:
   name: "ModelRuntimeErrorEvent"
@@ -124,7 +126,7 @@ metadata:
   author: "OmniNode Team"
   license: "MIT"
   created: "2026-03-19"
-  updated: "2026-05-22"
+  updated: "2026-08-29"
   tags:
     - effect
     - health

@@ -271,7 +271,7 @@ class HandlerRuntimeErrorTriage:
             payload=payload,
             envelope_timestamp=now,
             correlation_id=source_event.correlation_id,
-            source="runtime_error_triage",
+            source_tool="runtime_error_triage",
         )
 
         try:

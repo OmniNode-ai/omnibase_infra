@@ -103,7 +103,7 @@ def _make_envelope(
         payload=payload,
         envelope_timestamp=TEST_NOW,
         correlation_id=corr_id,
-        source="test",
+        source_tool="test",
     )
 
 
@@ -211,7 +211,7 @@ async def test_dispatcher_wrong_payload_type_returns_invalid_message() -> None:
         payload=42,
         envelope_timestamp=TEST_NOW,
         correlation_id=uuid4(),
-        source="test",
+        source_tool="test",
     )
 
     result = await dispatcher.handle(envelope)

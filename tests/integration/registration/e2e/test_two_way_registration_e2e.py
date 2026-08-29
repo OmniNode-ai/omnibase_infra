@@ -447,7 +447,7 @@ class TestSuite2RegistryDualRegistration:
             payload=event,
             envelope_timestamp=now,
             correlation_id=unique_correlation_id,
-            source="e2e-test",
+            source_tool="e2e-test",
         )
         handler_output = await handler.handle(envelope)
         result_events = handler_output.events
@@ -616,7 +616,7 @@ class TestSuite2RegistryDualRegistration:
             payload=event,
             envelope_timestamp=now,
             correlation_id=unique_correlation_id,
-            source="e2e-test",
+            source_tool="e2e-test",
         )
         handler_output = await handler.handle(envelope)
         result_events = handler_output.events
@@ -707,7 +707,7 @@ class TestSuite2RegistryDualRegistration:
             payload=event,
             envelope_timestamp=now,
             correlation_id=unique_correlation_id,
-            source="e2e-test",
+            source_tool="e2e-test",
         )
         handler_output = await handler.handle(envelope)
         result_events = handler_output.events
@@ -1324,7 +1324,7 @@ class TestSuite4HeartbeatPublishing:
             payload=heartbeat_event,
             envelope_timestamp=heartbeat_timestamp,
             correlation_id=correlation_id,
-            source="e2e-test",
+            source_tool="e2e-test",
         )
         handler_output = await heartbeat_handler.handle(heartbeat_envelope)
 
@@ -1644,7 +1644,7 @@ class TestSuite5RegistryRecovery:
             payload=event,
             envelope_timestamp=now,
             correlation_id=unique_correlation_id,
-            source="e2e-test",
+            source_tool="e2e-test",
         )
         handler_output = await handler.handle(envelope)
         result_events = handler_output.events

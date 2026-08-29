@@ -83,7 +83,7 @@ def _make_message(
         payload=event.model_dump(),
         envelope_timestamp=TEST_NOW,
         correlation_id=event.correlation_id,
-        source="test",
+        source_tool="test",
         metadata={"tags": tags},  # type: ignore[arg-type]
     )
     payload_bytes = json.dumps(envelope.model_dump(mode="json")).encode("utf-8")

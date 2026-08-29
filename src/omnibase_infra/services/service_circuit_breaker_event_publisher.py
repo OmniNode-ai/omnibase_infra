@@ -100,7 +100,7 @@ class CircuitBreakerEventPublisher:
             payload=json.loads(event.model_dump_json()),
             envelope_timestamp=now,
             correlation_id=correlation_id if correlation_id else uuid4(),
-            source="circuit_breaker_event_publisher",
+            source_tool="circuit_breaker_event_publisher",
         )
 
         try:

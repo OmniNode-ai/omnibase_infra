@@ -87,7 +87,7 @@ def create_envelope(
         payload=tick,
         envelope_timestamp=now or datetime.now(UTC),
         correlation_id=correlation_id or uuid4(),
-        source="test",
+        source_tool="test",
     )
 
 
