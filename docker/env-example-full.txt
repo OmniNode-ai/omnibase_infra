@@ -102,6 +102,16 @@ POSTGRES_PASSWORD=__REPLACE_WITH_SECURE_PASSWORD__
 # Generate with: openssl rand -hex 32
 # OMNINODE_RUNTIME_PASSWORD=
 
+# REQUIRED (OMN-15425) — login credential for the tenant_projection_writer
+# principal, the TENANT-domain counterpart of OMNINODE_RUNTIME_PASSWORD above.
+# Every compose lane's runtime services use it to reach the tenant-classified
+# relations in omnidash_analytics. Not optional, for the same reason: compose
+# builds ONEX_TENANT_DB_URL from it with the fail-closed ${VAR:?} form, because
+# an empty value renders a non-empty DSN that passes the runtime's wiring check
+# and then fails at first connect. Set it, or the lane refuses to render.
+# Generate with: openssl rand -hex 32
+# TENANT_PROJECTION_WRITER_PASSWORD=
+
 # Per-service DSN templates (for reference — used by each repo's own .env)
 # Note: "postgres:5432" is the Docker Compose internal service name + port.
 # From the host, use ${POSTGRES_HOST}:${POSTGRES_EXTERNAL_PORT} instead.
@@ -120,6 +130,12 @@ POSTGRES_PASSWORD=__REPLACE_WITH_SECURE_PASSWORD__
 # database with the line above but connects as a DIFFERENT principal
 # (omninode_runtime, for the omninode_internal schema), which is why it is a
 # separate binding in the topology instance rather than a reuse of that DSN.
+# ONEX_TENANT_DB_URL is NOT set here either — docker-compose.infra.yml builds it
+# from TENANT_PROJECTION_WRITER_PASSWORD above, on exactly the same reasoning:
+# it is the THIRD principal on the same omnidash_analytics database
+# (tenant_projection_writer, for the tenant-classified relations). Three
+# bindings, three login roles, three DSN envs — OMN-16911 attests current_user
+# per binding, so a shared DSN is not merely untidy, it is unsatisfiable.
 
 # =============================================================================
 # Infisical Secret Management Configuration (Optional)

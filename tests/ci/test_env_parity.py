@@ -299,6 +299,17 @@ CONFIGMAP_DEBT_KEYS: frozenset[str] = frozenset(
         "BIFROST_CONTRACT_PATH",
         "BIFROST_SOURCE_CONTRACT_PATH",
         "BIFROST_VERIFY_ENDPOINTS",
+        # OMN-15425 (compose half) / OMN-16953 (k8s half). Tenant-projection
+        # DSN, principal tenant_projection_writer. Deliberately NOT in
+        # SECRET_KEYS: that set is a literal claim that the key is bound on the
+        # cluster, and unlike its sibling OMNINODE_INTERNAL_DB_URL (bound by
+        # omninode_infra#803 on all three onex-dev runtime Deployments) nothing
+        # binds this one yet. Its eventual home is a `secretKeyRef` — it carries
+        # an embedded credential and must never land in a ConfigMap — so
+        # OMN-16953 moves it to SECRET_KEYS in the same change that makes the
+        # claim true. Parking it here records the gap honestly instead of
+        # asserting a binding that does not exist.
+        "ONEX_TENANT_DB_URL",
         # OpenTelemetry — opt-in observability (empty = disabled)
         "OTEL_EXPORTER_OTLP_ENDPOINT",
         "OTEL_SERVICE_NAME",

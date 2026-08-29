@@ -81,8 +81,18 @@ INFRA_DATABASES=("infisical_db" "omniweb")
 #
 # Empty password = skip, exactly like SERVICE_DB_MAP: a lane that has not
 # provisioned the credential must not get a half-configured role.
+# tenant_projection_writer (OMN-15425) is the TENANT-domain half of the same
+# split: 102 creates it NOLOGIN with NOSUPERUSER/NOBYPASSRLS pinned, the
+# topology declares its narrow per-table INSERT/SELECT/UPDATE grant set, and
+# docker-compose.infra.yml renders ONEX_TENANT_DB_URL from the variable named
+# here with the fail-closed ${VAR:?} form. It goes in this map and NOT in
+# SERVICE_DB_MAP for exactly the reason above, only more sharply: this is the
+# role the OMN-14894 tenant_isolation policies are enforced against, so CREATE
+# on schema public — and the table ownership it enables — would exempt every
+# tenant projection write from the isolation P5 exists to establish.
 LOGIN_ONLY_ROLE_MAP=(
     "omninode_runtime:OMNINODE_RUNTIME_PASSWORD"
+    "tenant_projection_writer:TENANT_PROJECTION_WRITER_PASSWORD"
 )
 
 # =============================================================================

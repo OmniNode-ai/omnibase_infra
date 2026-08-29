@@ -148,22 +148,32 @@ _EXPECTED_BINDING_PRINCIPALS = {
     "app_dashboard": "app_dashboard",
     "omninode_runtime_service": "omninode_runtime",
 }
+# OMN-15425: `tenant_projection` binds ONEX_TENANT_DB_URL, not
+# OMNIDASH_ANALYTICS_DB_URL. The two bindings share the physical database
+# (omnidash_analytics) but connect as DIFFERENT principals, and OMN-16911's
+# `ProjectionBindingConnections.get()` attests `current_user` against
+# `binding.principal` on every connection — so one DSN env cannot serve both
+# `app_dashboard` and `tenant_projection_writer`. While it did, the dev lane's
+# tenant projections resolved the analytics DSN (role_omnidash on that lane)
+# and DLQ'd 100% of their input at the identity attestation. Same separation,
+# same reason, as OMNINODE_INTERNAL_DB_URL for `omninode_runtime_service`
+# (OMN-16843).
 _EXPECTED_BINDING_DSN_ENVS = {
     "local": {
         "onex_api": "OMNINODE_CLOUD_DB_URL",
-        "tenant_projection": "OMNIDASH_ANALYTICS_DB_URL",
+        "tenant_projection": "ONEX_TENANT_DB_URL",
         "app_dashboard": "OMNIDASH_ANALYTICS_DB_URL",
         "omninode_runtime_service": "OMNINODE_INTERNAL_DB_URL",
     },
     "onex-dev": {
         "onex_api": "OMNINODE_CLOUD_DB_URL",
-        "tenant_projection": "OMNIDASH_ANALYTICS_DB_URL",
+        "tenant_projection": "ONEX_TENANT_DB_URL",
         "app_dashboard": "DATABASE_URL",
         "omninode_runtime_service": "OMNINODE_INTERNAL_DB_URL",
     },
     "onex-prod": {
         "onex_api": "OMNINODE_CLOUD_DB_URL",
-        "tenant_projection": "OMNIDASH_ANALYTICS_DB_URL",
+        "tenant_projection": "ONEX_TENANT_DB_URL",
         "app_dashboard": "DATABASE_URL",
         "omninode_runtime_service": "OMNINODE_INTERNAL_DB_URL",
     },

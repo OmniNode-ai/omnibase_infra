@@ -32,6 +32,8 @@ COMPOSE_RENDER_ENV = {
     # the fail-closed ${VAR:?} form, so the layered render aborts without it.
     # Render-only, never a real credential.
     "OMNINODE_RUNTIME_PASSWORD": "render-only-omninode-runtime-password",
+    # OMN-15425: TENANT-domain counterpart, same `:?` seam in x-runtime-env.
+    "TENANT_PROJECTION_WRITER_PASSWORD": "render-only-tenant-projection-writer-password",
     "INFISICAL_AUTH_SECRET": "render-only-infisical-auth-secret",
     "INFISICAL_DB_CONNECTION_URI": "postgresql://postgres:postgres@postgres:5432/infisical",
     "INFISICAL_ENCRYPTION_KEY": "render-only-infisical-encryption-key-32",
