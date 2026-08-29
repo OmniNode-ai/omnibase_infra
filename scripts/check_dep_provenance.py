@@ -147,6 +147,23 @@ explicit, actionable failure instead of a silent no-op: it fails when
 regardless of a ``raw-override-ok`` token (the token was never designed to
 exempt a cascade's ability to move the pin either).
 
+**Range-cap detection (OMN-16926, opt-in via ``--target-version``).** The
+git-override channel above was the ONLY immovability channel this check
+detected — it did not detect a range cap in ``[project.dependencies]`` (e.g.
+``omnibase-core>=0.46.13,<0.47.0``). ``uv lock --upgrade-package`` cannot
+cross that cap either: it re-resolves within the declared constraint and
+silently produces the same "no lockfile changes — already on latest"
+false-positive SKIP. Live blast radius: on the omnibase_core v0.47.0
+cascade, 5 of 6 downstream legs were capped below the release and all
+misreported as already-on-latest. When ``target_version`` is supplied,
+``find_unmovable_cascade_targets`` additionally resolves ``PACKAGE``'s
+declared requirement in ``[project.dependencies]`` (any shape — an exact
+pin, a range, or a PEP 440 exclusion) via ``packaging.specifiers.SpecifierSet``
+and fails, naming the cap and the target version, when the constraint does
+not admit it. A caller that omits ``target_version`` gets the pre-OMN-16926
+behavior unchanged — git-override detection only, since the range-cap
+comparison has nothing to compare against without a target.
+
 Usage::
 
     uv run python scripts/check_dep_provenance.py
@@ -154,6 +171,7 @@ Usage::
     uv run python scripts/check_dep_provenance.py --check-lineage
     uv run python scripts/check_dep_provenance.py --check-token-expiry
     uv run python scripts/check_dep_provenance.py --check-movable omnibase-core
+    uv run python scripts/check_dep_provenance.py --check-movable omnibase-core --target-version 0.47.0
 """
 
 from __future__ import annotations
@@ -172,6 +190,9 @@ import urllib.request
 from collections.abc import Callable
 from datetime import UTC, date, datetime
 from pathlib import Path
+
+from packaging.specifiers import InvalidSpecifier, SpecifierSet
+from packaging.version import InvalidVersion, Version
 
 _ResolveFn = Callable[[str, str], "tuple[str | None, str]"]
 _TicketResolveFn = Callable[[str], "tuple[str | None, str]"]
@@ -921,26 +942,83 @@ def find_escape_token_violations(
 # ---------------------------------------------------------------------------
 
 
-def find_unmovable_cascade_targets(text: str, package: str) -> list[str]:
+def _range_cap_violation(pkg: str, spec_str: str, target_version: str) -> str | None:
+    """Return a violation message if the declared requirement `spec_str`
+    (e.g. `>=0.46.13,<0.47.0`, `==0.46.8`, or `` for an unversioned/absent
+    requirement) does NOT admit `target_version` (OMN-16926).
+
+    Uses `packaging.specifiers.SpecifierSet`, so every PEP 440 operator is
+    covered generically (`<`, `<=`, `==`, `~=`, `!=`, and combinations) rather
+    than a hand-rolled per-operator parser -- an empty/unversioned spec
+    admits every version (nothing to cap), matching uv's own resolution
+    semantics.
+
+    Returns `None` (no violation / fail-open on this specific comparison)
+    when either side fails to parse — an unparseable spec or target is a
+    caller/input error, not evidence of a cap; `find_unmovable_cascade_targets`
+    still fails closed overall on a hard TOML parse error via its own
+    try/except.
+    """
+    if not spec_str:
+        return None
+    try:
+        target = Version(target_version)
+    except InvalidVersion:
+        return None
+    try:
+        specifier = SpecifierSet(spec_str)
+    except InvalidSpecifier:
+        return None
+    if target in specifier:
+        return None
+    return (
+        f"{pkg}: pinned via a range constraint ({spec_str!r}) in "
+        "[project.dependencies] that does not admit target version "
+        f"{target_version!r}. 'uv lock --upgrade-package' cannot select a "
+        "version outside its own pyproject.toml constraint -- it will "
+        "silently re-resolve within the SAME capped range and report no "
+        "lockfile change, masking a no-op cascade (this repo is NOT already "
+        f"on the latest version; it is capped below {target_version!r} and "
+        "cannot reach it). Widen the pyproject.toml constraint for "
+        f"{pkg} to admit {target_version!r}, then re-run this dependency "
+        "cascade."
+    )
+
+
+def find_unmovable_cascade_targets(
+    text: str, package: str, target_version: str | None = None
+) -> list[str]:
     """Return a violation message if `package` cannot be moved by a
-    dependency cascade (OMN-15604 AC4).
+    dependency cascade (OMN-15604 AC4, extended OMN-16926).
 
-    `uv lock --upgrade-package <pkg>==<version>` re-resolves the dependency
-    graph, but a `[tool.uv.sources]` entry for that package takes precedence
-    over registry resolution regardless — uv re-resolves against the SAME
-    pinned git ref and typically produces a byte-identical `uv.lock`, which
-    `.github/workflows/dependency-cascade.yml` currently reads as "no
-    lockfile changes — already on latest" (a false-positive SKIP: the repo is
-    not on latest, it is still stuck on the git pin).
+    Two independent immovability channels, checked in this order:
 
-    Returns a non-empty list (one message) when `package` has an active
-    `[tool.uv.sources]` git override — regardless of a `raw-override-ok`
-    escape token, since the token only ever exempted the forbid-git-source
-    rule, never a cascade's ability to move the pin. Returns `[]` when
-    `package` has no such override (movable), including when `package` isn't
-    tracked at all (`onex-change-control`-style git pins are legitimate and
-    out of scope for this check, same as `find_violations`/
-    `find_lineage_violations`).
+    1. **Git-source override** (OMN-15604 AC4): `uv lock --upgrade-package
+       <pkg>==<version>` re-resolves the dependency graph, but a
+       `[tool.uv.sources]` entry for that package takes precedence over
+       registry resolution regardless — uv re-resolves against the SAME
+       pinned git ref and typically produces a byte-identical `uv.lock`.
+       Checked unconditionally (does not require `target_version`),
+       regardless of a `raw-override-ok` escape token, since the token only
+       ever exempted the forbid-git-source rule (`find_violations`), never a
+       cascade's ability to move the pin.
+    2. **Range cap** (OMN-16926): when `target_version` is supplied and no
+       git override fired, the package's declared requirement in
+       `[project.dependencies]` (any PEP 440 shape) is checked against
+       `target_version` via `_range_cap_violation`. A constraint that
+       excludes the target is a violation with the SAME "cannot be moved"
+       consequence as a git override — `uv lock --upgrade-package` cannot
+       cross a `pyproject.toml` constraint any more than it can cross a git
+       source pin, and the pre-OMN-16926 checker silently missed this
+       channel entirely (5 of 6 downstream legs on the v0.47.0 cascade were
+       misreported as "already on latest" through exactly this gap).
+
+    Returns `[]` when `package` has neither channel active (genuinely
+    movable), including when `package` isn't tracked at all
+    (`onex-change-control`-style git pins are legitimate and out of scope
+    for this check, same as `find_violations`/`find_lineage_violations`),
+    and when `target_version` is omitted (pre-OMN-16926 behavior: range caps
+    are not evaluated without a target to compare against).
     """
     pkg = _normalize(package)
     try:
@@ -949,21 +1027,34 @@ def find_unmovable_cascade_targets(text: str, package: str) -> list[str]:
         return [str(exc)]
 
     attrs = sources.get(pkg)
-    if attrs is None:
-        return []
-    git_keys = sorted(_GIT_SOURCE_KEYS & set(attrs))
-    if not git_keys:
+    if attrs is not None:
+        git_keys = sorted(_GIT_SOURCE_KEYS & set(attrs))
+        if git_keys:
+            keys_desc = ", ".join(f"{k}={attrs[k]!r}" for k in git_keys)
+            return [
+                f"{pkg}: pinned via [tool.uv.sources] git override "
+                f"({keys_desc}). 'uv lock --upgrade-package' cannot move a "
+                "[tool.uv.sources] git pin -- it re-resolves against the "
+                "SAME override and will silently report no lockfile "
+                "change, masking a no-op cascade. Remove the "
+                "[tool.uv.sources] override for this package before "
+                "running a dependency cascade against it."
+            ]
+
+    if target_version is None:
         return []
 
-    keys_desc = ", ".join(f"{k}={attrs[k]!r}" for k in git_keys)
-    return [
-        f"{pkg}: pinned via [tool.uv.sources] git override ({keys_desc}). "
-        "'uv lock --upgrade-package' cannot move a [tool.uv.sources] git "
-        "pin -- it re-resolves against the SAME override and will silently "
-        "report no lockfile change, masking a no-op cascade. Remove the "
-        "[tool.uv.sources] override for this package before running a "
-        "dependency cascade against it."
-    ]
+    try:
+        parsed = tomllib.loads(text)
+    except tomllib.TOMLDecodeError as exc:
+        return [str(exc)]
+    declared_specs = _declared_version_specs(parsed)
+    spec_str = declared_specs.get(pkg)
+    if spec_str is None:
+        return []
+
+    violation = _range_cap_violation(pkg, spec_str, target_version)
+    return [violation] if violation else []
 
 
 # ---------------------------------------------------------------------------
@@ -1023,12 +1114,27 @@ def main(argv: list[str] | None = None) -> int:
         metavar="PACKAGE",
         default=None,
         help=(
-            "Standalone check (OMN-15604 AC4): fail if PACKAGE has an active "
-            "[tool.uv.sources] git override, which a `uv lock "
-            "--upgrade-package` dependency cascade cannot move and will "
-            "silently no-op against. Runs instead of the default "
+            "Standalone check (OMN-15604 AC4, extended OMN-16926): fail if "
+            "PACKAGE has an active [tool.uv.sources] git override, OR (when "
+            "--target-version is also given) a [project.dependencies] range "
+            "constraint that excludes --target-version -- either of which a "
+            "`uv lock --upgrade-package` dependency cascade cannot move and "
+            "will silently no-op against. Runs instead of the default "
             "find_violations check; does not combine with --check-lineage "
             "or --check-token-expiry."
+        ),
+    )
+    parser.add_argument(
+        "--target-version",
+        metavar="VERSION",
+        default=None,
+        help=(
+            "OMN-16926: the version a dependency cascade is trying to move "
+            "--check-movable's PACKAGE to. Enables the range-cap channel of "
+            "--check-movable (a pyproject.toml constraint that excludes "
+            "this version fails the check); omitted, only the "
+            "[tool.uv.sources] git-override channel is checked (pre-"
+            "OMN-16926 behavior). Has no effect without --check-movable."
         ),
     )
     args = parser.parse_args(argv)
@@ -1052,7 +1158,9 @@ def main(argv: list[str] | None = None) -> int:
 
     if args.check_movable:
         text = pyproject_path.read_text()
-        movable_violations = find_unmovable_cascade_targets(text, args.check_movable)
+        movable_violations = find_unmovable_cascade_targets(
+            text, args.check_movable, target_version=args.target_version
+        )
         if movable_violations:
             print(
                 f"FAIL: {args.check_movable} cannot be moved by a dependency cascade:",
@@ -1061,9 +1169,15 @@ def main(argv: list[str] | None = None) -> int:
             for msg in movable_violations:
                 print(f"  - {msg}", file=sys.stderr)
             return 1
+        target_desc = (
+            f" -- admits target version {args.target_version}"
+            if args.target_version
+            else ""
+        )
         print(
             f"OK: {args.check_movable} has no [tool.uv.sources] git override "
-            "-- movable by a dependency cascade."
+            f"and no excluding pyproject.toml range cap{target_desc} -- "
+            "movable by a dependency cascade."
         )
         return 0
 

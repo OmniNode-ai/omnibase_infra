@@ -1,37 +1,71 @@
 # SPDX-FileCopyrightText: 2025 OmniNode.ai Inc.
 # SPDX-License-Identifier: MIT
-"""GatewayTokenMinter — credential -> gateway JWT (OMN-15922).
+"""GatewayTokenMinter — credential -> gateway JWT (OMN-15922, OMN-16687).
 
-One ``client_credentials`` grant against the tenant realm's token endpoint,
-one audience assertion, one in-memory cache. Deliberately no ``refresh_token``
-path: RFC 6749 §4.4.3 says the client-credentials grant SHOULD NOT issue one,
-and Keycloak does not -- so "refresh" here means re-grant, which is also
-exactly what the gateway's RE_ATTACH renewal mode assumes its clients do.
+Two hops, not one: a ``client_credentials`` grant against the tenant realm's
+token endpoint, then a server-side exchange of the resulting machine token for
+an attach-audience token. One audience assertion per hop, one in-memory cache.
+Deliberately no ``refresh_token`` path: RFC 6749 §4.4.3 says the
+client-credentials grant SHOULD NOT issue one, and Keycloak does not -- so
+"refresh" here means re-mint, which is also exactly what the gateway's
+RE_ATTACH renewal mode assumes its clients do.
 
-WHAT THE AUDIENCE CHECK IS, AND IS NOT
-    It is NOT a security control. This client verifies no signature and holds
-    no JWKS; the gateway does that (``service_keycloak_token_validator`` on the
-    node, ``gateway_auth.py`` at the edge). A forged token would sail past this
-    check and die at the gateway, which is the correct place for it to die.
+WHY TWO HOPS (OMN-16687 -- the single-hop shape could never go green)
+    The P0B provisioner mints TWO clients per tenant, and the split is
+    deliberate, not a missing mapper (``keycloak_client_manager.py``):
 
-    It IS a fail-fast against a live, specific, already-observed defect: the
-    P0B per-tenant provisioner stamps only ``aud=redpanda-events``
-    (``keycloak_client_manager.py`` BROKER_TOKEN_AUDIENCE), while attach
-    requires exact set equality with ``{"gateway-attach"}``. Without this
-    check, a correctly-configured operator with a genuinely broken credential
-    sees an opaque 401 from a remote service several calls downstream. With
-    it, they see which audience they got and which was needed, at the mint.
+    * the machine/broker client, ``clientId == principal_id``, carrying
+      ``aud=redpanda-events`` only. This is the one a tenant can hold: its
+      secret is returned on create and re-obtainable via
+      ``POST /v1/tenants/{id}/credentials/rotate``. It is what
+      ``onex auth login`` stores.
+    * the attach client, ``ga-*``, carrying ``aud=gateway-attach`` only. Its
+      secret is never returned, logged, cached, or persisted by onex-api --
+      ``_reconcile_protocol_mappers`` fail-closed asserts the broker client
+      does NOT also carry ``gateway-attach``.
 
-    The comparison is SET EQUALITY, mirroring the gateway rather than being
-    merely compatible with it. A superset (a dual-audience broker+attach token)
-    is rejected there and so is rejected here -- a client that accepted more
-    than the gateway does would report success and then fail on the wire.
+    So no credential a client can hold grants an attach-audience token
+    directly. A minter that granted once against Keycloak and asserted
+    ``{"gateway-attach"}`` was asserting something no real tenant credential
+    could ever satisfy -- a fail-fast that can only ever fail. The attach
+    audience is obtained the only way it is obtainable: by presenting the
+    machine token to ``POST /v1/auth/gateway-token``, which mints the attach
+    token server-side, bound to the tenant the presented token verifiably
+    belongs to. The ``ga-*`` secret stays on the server, which is the boundary
+    the two-client split exists to draw.
+
+WHAT THE AUDIENCE CHECKS ARE, AND ARE NOT
+    They are NOT security controls. This client verifies no signature and
+    holds no JWKS; the gateway does that (``service_keycloak_token_validator``
+    on the node, ``gateway_auth.py`` at the edge). A forged token would sail
+    past these checks and die at the gateway, which is the correct place for
+    it to die.
+
+    They ARE fail-fasts that name the wrong-credential case at the hop that
+    can still explain it. Presenting a ``ga-*`` credential (or a user-session
+    token) to the exchange earns a bare 401 from a remote service; asserting
+    the input audience here says which audience was held and which was needed.
+
+    Both comparisons MIRROR their server-side counterpart rather than being
+    merely compatible with it:
+
+    * the exchange INPUT rule is ``gateway_auth.validate_exchange_input_
+      claims`` -- ``aud`` minus the role-resolved audiences must EQUAL
+      ``{"redpanda-events"}``, and an ``aud`` already carrying
+      ``gateway-attach`` is refused outright (the exchange does not consume
+      its own output).
+    * the attach rule is exact SET equality with ``{"gateway-attach"}``. A
+      superset is rejected at the gateway, so it is rejected here -- a client
+      that accepted more than the gateway does would report success and then
+      fail on the wire.
 
 CACHING
-    In memory, per instance, re-granted once ``now`` reaches ``exp - skew``.
+    In memory, per instance, re-minted once ``now`` reaches ``exp - skew``.
+    The cached value is the ATTACH token; the machine token is never cached,
+    since it exists only to be spent on the exchange within the same call.
     Not written to disk: a cached bearer on disk is a credential at rest with
     none of the protections the actual credential file gets, in exchange for
-    saving one sub-second grant per process.
+    saving one sub-second mint per process.
 """
 
 from __future__ import annotations
@@ -56,13 +90,38 @@ from omnibase_infra.protocols.protocol_gateway_transport import (
     ProtocolGatewayTransport,
 )
 
-__all__ = ["GATEWAY_ATTACH_AUDIENCES", "GatewayTokenMinter"]
+__all__ = [
+    "GATEWAY_ATTACH_AUDIENCES",
+    "GATEWAY_TOKEN_EXCHANGE_PATH",
+    "MACHINE_CREDENTIAL_AUDIENCES",
+    "ROLE_RESOLVED_AUDIENCES",
+    "GatewayTokenMinter",
+]
 
 # Exact audience set the gateway requires, mirrored from
 # node_gateway_attach_effect/contract.yaml (required_audience: gateway-attach)
 # and onex-api gateway_auth.GATEWAY_EXPECTED_AUDIENCES. A contract term, not a
 # deployment knob -- which is why it is a constant here rather than config.
 GATEWAY_ATTACH_AUDIENCES: Final[frozenset[str]] = frozenset({"gateway-attach"})
+
+# Exact audience set the EXCHANGE requires of its input, mirrored from
+# gateway_auth.EXCHANGE_INPUT_EXPECTED_AUDIENCES (== {BROKER_TOKEN_AUDIENCE})
+# and stamped by keycloak_client_manager on the per-tenant machine client.
+# Same contract-term reasoning as above: it is what the server compares
+# against, so it is a constant, not configuration a caller could widen.
+MACHINE_CREDENTIAL_AUDIENCES: Final[frozenset[str]] = frozenset({"redpanda-events"})
+
+# Audiences Keycloak adds on its own from realm role resolution rather than
+# from any audience mapper we declare. Discounted before the input comparison
+# because the server discounts them (gateway_auth.KEYCLOAK_ROLE_RESOLVED_
+# AUDIENCES); not discounting them would reject every real token.
+ROLE_RESOLVED_AUDIENCES: Final[frozenset[str]] = frozenset({"account"})
+
+# onex-api's attach-token exchange, mirrored from main.GATEWAY_TOKEN_EXCHANGE_
+# PATH. A path on the gateway origin the credential already names -- the same
+# way GatewaySessionKeeper holds _ATTACH_PATH / _DETACH_PATH -- so there is no
+# second endpoint for an operator to configure, or to get wrong.
+GATEWAY_TOKEN_EXCHANGE_PATH: Final[str] = "/v1/auth/gateway-token"
 
 # Re-grant this far ahead of exp. Sized to cover clock skew between this
 # machine and Keycloak plus one in-flight request: a token that is valid when
@@ -121,6 +180,19 @@ class GatewayTokenMinter:
         return minted
 
     async def _grant(self, *, now: datetime) -> ModelGatewayAccessToken:
+        """Grant a machine token, then exchange it for an attach token."""
+        machine_token = await self._grant_machine_token()
+        return await self._exchange_for_attach_token(machine_token, now=now)
+
+    async def _grant_machine_token(self) -> str:
+        """``client_credentials`` against the realm; returns the raw JWT.
+
+        The token is returned as a bare string rather than a
+        ``ModelGatewayAccessToken`` on purpose: it is not a gateway access
+        token, it cannot attach, and it is spent on the exchange inside the
+        same call. Giving it the same type as the thing it is exchanged for
+        is how one ends up presented to the gateway by mistake.
+        """
         response = await self._transport.post_form(
             self._credential.token_endpoint,
             form={
@@ -146,17 +218,54 @@ class GatewayTokenMinter:
         payload = self._decode_json_object(
             await response.text(), source=self._credential.token_endpoint
         )
+        machine_token = self._require_string(payload, "access_token")
+        self._assert_exchange_input_audience(self._audiences_of(machine_token))
+        return machine_token
+
+    async def _exchange_for_attach_token(
+        self, machine_token: str, *, now: datetime
+    ) -> ModelGatewayAccessToken:
+        """Trade the machine token for the tenant's attach token.
+
+        The exchange binds the minted token to the tenant the PRESENTED token
+        verifiably belongs to (``azp == derive_principal_id(tenant_id)``), so
+        nothing in this request names a tenant -- there is no body at all. A
+        tenant selector here would be a selector the server would have to
+        refuse anyway.
+        """
+        url = self._credential.base_url.rstrip("/") + GATEWAY_TOKEN_EXCHANGE_PATH
+        response = await self._transport.post_json(
+            url,
+            body="{}",
+            headers={
+                "Authorization": f"Bearer {machine_token}",
+                "Accept": "application/json",
+            },
+        )
+        if response.status != 200:
+            raise ModelOnexError(
+                f"gateway attach-token exchange rejected by {url} (HTTP "
+                f"{response.status}) for principal "
+                f"'{self._credential.client_id}'. A 401 means the machine "
+                "credential was refused or is not bound to its own tenant; a "
+                "503 means the exchange is not enabled on this deployment. "
+                "Check the credential with 'onex auth status'.",
+                error_code=EnumCoreErrorCode.AUTHENTICATION_ERROR,
+            )
+
+        payload = self._decode_json_object(await response.text(), source=url)
         access_token = self._require_string(payload, "access_token")
         expires_in = self._require_int(payload, "expires_in")
         audiences = self._audiences_of(access_token)
 
         if audiences != GATEWAY_ATTACH_AUDIENCES:
             raise ModelOnexError(
-                "minted token carries audience "
+                "the attach-token exchange returned a token carrying audience "
                 f"{sorted(audiences)} but the gateway requires exactly "
                 f"{sorted(GATEWAY_ATTACH_AUDIENCES)} (set equality, not "
-                f"membership). The Keycloak client '{self._credential.client_id}' "
-                "needs an audience mapper stamping 'gateway-attach'.",
+                f"membership). The exchange at {url} is minting against the "
+                "wrong Keycloak client, or that client's audience mapper has "
+                "drifted -- this is a server-side defect, not a bad credential.",
                 error_code=EnumCoreErrorCode.AUTHENTICATION_ERROR,
             )
 
@@ -165,6 +274,36 @@ class GatewayTokenMinter:
             expires_at=now + timedelta(seconds=expires_in),
             audiences=audiences,
         )
+
+    def _assert_exchange_input_audience(self, audiences: frozenset[str]) -> None:
+        """Mirror ``gateway_auth.validate_exchange_input_claims``'s aud rule.
+
+        Both branches name the fix, because the two wrong credentials fail for
+        opposite reasons: an attach-audience token is the ``ga-*`` secret that
+        was never meant to leave the server, and anything else is simply not
+        the tenant's machine credential.
+        """
+        if GATEWAY_ATTACH_AUDIENCES & audiences:
+            raise ModelOnexError(
+                f"the credential for '{self._credential.client_id}' grants a "
+                f"token carrying {sorted(GATEWAY_ATTACH_AUDIENCES)}, which the "
+                "attach-token exchange refuses as input -- it does not consume "
+                "its own output. Store the tenant's machine credential (the "
+                "principal_id client, from 'POST /v1/tenants/{id}/credentials/"
+                "rotate') instead.",
+                error_code=EnumCoreErrorCode.AUTHENTICATION_ERROR,
+            )
+        effective = audiences - ROLE_RESOLVED_AUDIENCES
+        if effective != MACHINE_CREDENTIAL_AUDIENCES:
+            raise ModelOnexError(
+                "the granted machine token carries audience "
+                f"{sorted(effective)} but the attach-token exchange requires "
+                f"exactly {sorted(MACHINE_CREDENTIAL_AUDIENCES)} (set equality "
+                f"after discounting {sorted(ROLE_RESOLVED_AUDIENCES)}). The "
+                f"Keycloak client '{self._credential.client_id}' is not the "
+                "tenant's provisioned machine client.",
+                error_code=EnumCoreErrorCode.AUTHENTICATION_ERROR,
+            )
 
     # -- parsing -----------------------------------------------------------
 
@@ -208,9 +347,9 @@ class GatewayTokenMinter:
                 )
             return frozenset(str(entry) for entry in raw)
         raise ModelOnexError(
-            "the access_token carries no usable 'aud' claim; the gateway "
-            "requires exactly "
-            f"{sorted(GATEWAY_ATTACH_AUDIENCES)}.",
+            "the access_token carries no usable 'aud' claim; every hop of the "
+            "mint asserts one, so an audience-less token cannot be classified "
+            "as either a machine credential or an attach token.",
             error_code=EnumCoreErrorCode.AUTHENTICATION_ERROR,
         )
 

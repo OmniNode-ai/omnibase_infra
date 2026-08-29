@@ -40,20 +40,39 @@
 # SAFE remediation recipe (documented; NOT auto-executed unless explicitly
 # enabled — see MONITOR_AUTO_BOUNCE below):
 #
-#   Bounce ONLY the specific wedged/crash-looping service via:
-#     docker compose -f <compose> up -d --force-recreate <service-1> <service-N>
+#   Bounce ONLY the specific crash-looping/missing/stuck service via:
+#     docker compose -f <compose> up -d --force-recreate <service>
 #   with a FRESHLY minted registration token, run DETACHED.
 #   NEVER `docker restart`           → crash-loops (cached creds + baked token expired)
 #   NEVER an empty service filter    → would recreate all 48 at once
 #   NEVER block on the bounce        → run in background, mutex-guarded, timeout
 #                                       scales with batch size (OMN-13947)
+#
+# AUTO-BOUNCE SAFETY INVARIANTS (OMN-16947 — the 2026-08-29 fleet outage, where
+# a single false-positive wedge finding force-recreated all 88 healthy runners
+# in one compose call and needed two dockerd restarts to recover):
+#
+#   A. A runner that is present, registered, and listening is NEVER a bounce
+#      target. Only hard per-runner failure evidence earns a recreate.
+#   B. A SILENT-WEDGE is ALERT-ONLY. It contributes exactly one actionable
+#      finding and ZERO recreate targets; the operator gets the rendered
+#      fleet-wide recipe and makes that call themselves.
+#   C. A queued job older than WEDGE_QUEUE_AGE_MAX_SECONDS is a zombie
+#      (abandoned run GitHub never reaped), not wedge evidence.
+#   D. At most AUTO_BOUNCE_MAX_TARGETS_PER_TICK containers may be recreated per
+#      tick, enforced inside auto_bounce() below every collection path.
+#   E. The bounce is SEQUENTIAL and VERIFIED: one compose call per target, each
+#      confirmed `running` before the next is touched; a target that does not
+#      recover HALTS the batch instead of cascading.
+#   F. `docker compose config` must interpolate before any bounce is dispatched
+#      — or claimed. A broken monitor env is a loud alert, never a silent no-op.
 
 set -euo pipefail
 
 # ---------------------------------------------------------------------------
 # Config
 # ---------------------------------------------------------------------------
-STATE_FILE="/tmp/runner-monitor-state.json"
+STATE_FILE="${RUNNER_MONITOR_STATE_FILE:-/tmp/runner-monitor-state.json}"
 COMPOSE_DIR="$HOME/.omnibase/runners/docker"
 COMPOSE_FILE="${COMPOSE_DIR}/docker-compose.runners.yml"
 RUNNER_FLEET_CONFIG_PATH="${RUNNER_FLEET_CONFIG_PATH:-$HOME/.omnibase/runners/config/runner_fleet.yaml}"
@@ -100,6 +119,16 @@ fi
 # 10 minutes — long enough to ignore normal scheduling latency, short enough to
 # catch the all-night wedge that starved the merge queue.
 WEDGE_QUEUE_AGE_SECONDS="${WEDGE_QUEUE_AGE_SECONDS:-600}"
+# OMN-16947: an UPPER bound on what counts as wedge evidence. GitHub never
+# reaps abandoned queued workflow runs, so `oldest_queued_job_age_seconds()`
+# without a ceiling latches on to one forever. Live proof: OmniNode-ai/
+# omnibase_infra run 32215978710 has sat `queued` since 2026-08-19 and
+# omniclaude run 29019863632 since 2026-07-09 — the unbounded check therefore
+# reported queued-job-age=895303s (10.4 days) on EVERY tick, so the SILENT-WEDGE
+# predicate was permanently true against a demonstrably healthy 88/88 fleet.
+# A job queued longer than this is a zombie, not a fleet fault: it is reported
+# in its own finding class instead of pinning the wedge signal on.
+WEDGE_QUEUE_AGE_MAX_SECONDS="${WEDGE_QUEUE_AGE_MAX_SECONDS:-86400}"
 # Repos whose Actions queues are serviced by this self-hosted fleet. Queued-job
 # age is sampled across these. Override via WEDGE_WATCH_REPOS (space-separated
 # "owner/name" entries).
@@ -145,6 +174,16 @@ AUTO_BOUNCE_VERIFY_RETRY_SLEEP_SECONDS="${AUTO_BOUNCE_VERIFY_RETRY_SLEEP_SECONDS
 # is still in flight — the race produced literal daemon errors ("removal of
 # container ... is already in progress") during the incident.
 AUTO_BOUNCE_LOCKFILE="${AUTO_BOUNCE_LOCKFILE:-/tmp/runner-monitor-bounce.lock}"
+AUTO_BOUNCE_BOUNCE_LOG="${AUTO_BOUNCE_BOUNCE_LOG:-/tmp/runner-monitor-bounce.log}"
+
+# OMN-16947: HARD ceiling on how many containers a single tick may recreate.
+# On 2026-08-29 a single false-positive wedge finding expanded to all 88
+# runners (see collect_remediation_targets) and one compose call force-recreated
+# the entire fleet, requiring two `systemctl restart docker` cycles to recover.
+# This cap is enforced INSIDE auto_bounce(), below every collection path, so no
+# future logic error in target selection can mass-recreate the fleet again. A
+# genuine multi-runner outage still converges — it just takes several ticks.
+AUTO_BOUNCE_MAX_TARGETS_PER_TICK="${AUTO_BOUNCE_MAX_TARGETS_PER_TICK:-4}"
 
 config_field() {
     local field="${1}"
@@ -247,8 +286,15 @@ gh_api_runners() {
 # This is the discriminator the legacy monitor lacked: a runner being "online"
 # tells you the listener long-poll is connected, NOT that work is flowing.
 # Queued work that ages out while the fleet is idle is the wedge signal.
+# OMN-16947: results are returned via these globals rather than stdout, because
+# a queued job now sorts into one of two classes and the caller needs both.
+QUEUED_OLDEST_AGE=0
+QUEUED_ZOMBIE_COUNT=0
+QUEUED_ZOMBIE_OLDEST_AGE=0
+
 oldest_queued_job_age_seconds() {
     local now_epoch oldest_epoch="" repo runs_json run_ids jobs_json job_created
+    local zombie_count=0 zombie_oldest_age=0
     now_epoch=$(date -u +%s)
 
     for repo in ${WEDGE_WATCH_REPOS}; do
@@ -272,6 +318,18 @@ oldest_queued_job_age_seconds() {
                 # GNU date (Linux .201 host) parses the ISO-8601 created_at.
                 job_epoch=$(date -u -d "${job_created}" +%s 2>/dev/null || echo "")
                 [[ -z "${job_epoch}" ]] && continue
+                local job_age
+                job_age=$(( now_epoch - job_epoch ))
+                # OMN-16947: a job queued past the ceiling is an abandoned run
+                # GitHub never reaped, NOT evidence that the fleet stopped
+                # pulling work. Counting it as wedge evidence latched the wedge
+                # signal on permanently and, via the old fleet-wide expansion in
+                # collect_remediation_targets(), force-recreated all 88 runners.
+                if [[ "${job_age}" -gt "${WEDGE_QUEUE_AGE_MAX_SECONDS}" ]]; then
+                    zombie_count=$(( zombie_count + 1 ))
+                    [[ "${job_age}" -gt "${zombie_oldest_age}" ]] && zombie_oldest_age="${job_age}"
+                    continue
+                fi
                 if [[ -z "${oldest_epoch}" ]] || [[ "${job_epoch}" -lt "${oldest_epoch}" ]]; then
                     oldest_epoch="${job_epoch}"
                 fi
@@ -284,11 +342,14 @@ oldest_queued_job_age_seconds() {
         done <<< "${run_ids}"
     done
 
+    QUEUED_ZOMBIE_COUNT="${zombie_count}"
+    QUEUED_ZOMBIE_OLDEST_AGE="${zombie_oldest_age}"
     if [[ -z "${oldest_epoch}" ]]; then
-        echo 0
+        QUEUED_OLDEST_AGE=0
         return 0
     fi
-    echo $(( now_epoch - oldest_epoch ))
+    QUEUED_OLDEST_AGE=$(( now_epoch - oldest_epoch ))
+    return 0
 }
 
 # container_is_crashlooping — given a container name, return 0 (true) when it is
@@ -352,8 +413,63 @@ runner_has_local_listener_evidence() {
 # ---------------------------------------------------------------------------
 declare -A current_status
 declare -A docker_oom_killed
+# ---------------------------------------------------------------------------
+# Drift preflight (OMN-16947)
+# ---------------------------------------------------------------------------
+# Two silent-failure classes preceded the 2026-08-29 outage. Neither was
+# detectable from this monitor's own output, so both ran for days:
+#
+#   (a) COMPOSE INTERPOLATION. The "layer2" change added an
+#       `omninode-deploy-runner` service with a fail-fast
+#       `${DEPLOY_RUNNER_OMNI_HOME:?...}` reference. `docker compose`
+#       interpolates the WHOLE file before acting on any named subset, so every
+#       cron-driven `up -d --force-recreate <targets>` aborted instantly once
+#       `.monitor-env` lacked that variable — while this script kept logging
+#       "AUTO-BOUNCE dispatched" every 10 minutes. 864 error lines, ZERO
+#       successful recreates, ZERO alerts, for six days.
+#
+#   (b) FLEET COUNT DRIFT. The host `runner_fleet.yaml` said
+#       `expected_count: 72` after the fleet scaled to 88. Detection iterates
+#       `seq 1 $EXPECTED_RUNNERS`, so runners 73-88 were outside monitor,
+#       alert, and auto-bounce scope entirely — 6 of the 22 dead runners were
+#       invisible rather than merely unrecovered.
+#
+# Both are now loud, actionable findings evaluated every tick.
+COMPOSE_INTERPOLATION_OK=true
+COMPOSE_INTERPOLATION_ERROR=""
+COMPOSE_RUNNER_SERVICE_COUNT=-1
+FLEET_COUNT_DRIFT=false
+
+compose_preflight() {
+    local config_stderr
+    if config_stderr=$(docker compose "${COMPOSE_FILE_ARGS[@]}" config -q 2>&1); then
+        COMPOSE_INTERPOLATION_OK=true
+    else
+        COMPOSE_INTERPOLATION_OK=false
+        # Keep the operator-actionable part: the missing-variable name is the
+        # whole diagnosis, and it is what six days of silence withheld.
+        COMPOSE_INTERPOLATION_ERROR="$(tr '\n' ' ' <<< "${config_stderr}" | head -c 500)"
+        log "PREFLIGHT FAILED: compose INTERPOLATION error — auto-bounce cannot succeed and is BLOCKED this tick: ${COMPOSE_INTERPOLATION_ERROR}"
+        return 0
+    fi
+
+    local svc_count
+    svc_count=$(docker compose "${COMPOSE_FILE_ARGS[@]}" config --services 2>/dev/null \
+        | grep -cE "^${RUNNER_NAME_PREFIX}-[0-9]+$" || true)
+    [[ "${svc_count}" =~ ^[0-9]+$ ]] || svc_count=-1
+    COMPOSE_RUNNER_SERVICE_COUNT="${svc_count}"
+
+    if [[ "${svc_count}" -ge 0 ]] && [[ "${svc_count}" -ne "${EXPECTED_RUNNERS}" ]]; then
+        FLEET_COUNT_DRIFT=true
+        log "FLEET COUNT DRIFT: compose declares ${svc_count} ${RUNNER_NAME_PREFIX}-* service(s) but ${RUNNER_FLEET_CONFIG_PATH} says expected_count=${EXPECTED_RUNNERS}. Runners outside 1..${EXPECTED_RUNNERS} are invisible to detection, alerting, and auto-bounce."
+    fi
+}
+
+compose_preflight
+
 declare -A github_status
 declare -A github_busy
+declare -A healthy_names
 
 total_found=0
 healthy=0
@@ -441,6 +557,7 @@ for i in $(seq 1 "$EXPECTED_RUNNERS"); do
     if [[ "${docker_state}" == Up* ]] && [[ "${docker_state}" != *"(healthy)"* ]] && runner_has_local_listener_evidence "${name}"; then
         github_degraded_list+=("${name}: Docker health ${docker_state} ignored; local listener evidence present")
         healthy=$((healthy + 1))
+        healthy_names["${name}"]=1
         continue
     fi
 
@@ -461,6 +578,7 @@ for i in $(seq 1 "$EXPECTED_RUNNERS"); do
 
     if [[ "${github_api_failed}" == true ]]; then
         healthy=$((healthy + 1))
+        healthy_names["${name}"]=1
         continue
     fi
 
@@ -469,6 +587,7 @@ for i in $(seq 1 "$EXPECTED_RUNNERS"); do
         if runner_has_local_listener_evidence "${name}"; then
             github_degraded_list+=("${name}: GitHub ${gh_state} ignored; Docker ${docker_state} and local listener evidence present")
             healthy=$((healthy + 1))
+            healthy_names["${name}"]=1
             continue
         fi
         if [[ "${github_busy[$name]:-false}" != "true" ]]; then
@@ -496,6 +615,7 @@ for i in $(seq 1 "$EXPECTED_RUNNERS"); do
         busy_count=$((busy_count + 1))
     fi
     healthy=$((healthy + 1))
+    healthy_names["${name}"]=1
 done
 
 # ---------------------------------------------------------------------------
@@ -506,8 +626,17 @@ done
 # busy. Only evaluate when the GitHub API succeeded (we need the busy field) and
 # at least one runner is online (otherwise the offline path already alerted).
 queued_age=0
+zombie_queued_count=0
 if [[ "${github_api_failed}" != true ]] && [[ "${online_count}" -gt 0 ]]; then
-    queued_age=$(oldest_queued_job_age_seconds)
+    oldest_queued_job_age_seconds
+    queued_age="${QUEUED_OLDEST_AGE}"
+    zombie_queued_count="${QUEUED_ZOMBIE_COUNT}"
+    if [[ "${zombie_queued_count}" -gt 0 ]]; then
+        # Loud but NOT actionable-for-the-fleet: an abandoned queued run is a
+        # GitHub-side artifact. Reporting it separately is what stops it from
+        # masquerading as a wedge forever (OMN-16947).
+        log "ZOMBIE QUEUED JOBS: ${zombie_queued_count} self-hosted job(s) queued longer than WEDGE_QUEUE_AGE_MAX_SECONDS=${WEDGE_QUEUE_AGE_MAX_SECONDS}s (oldest ${QUEUED_ZOMBIE_OLDEST_AGE}s). Excluded from wedge evidence — these are abandoned runs GitHub never reaped, not proof the fleet stopped pulling work."
+    fi
     if [[ "${queued_age}" -ge "${WEDGE_QUEUE_AGE_SECONDS}" ]] && [[ "${busy_count}" -eq 0 ]]; then
         wedge_list+=("SILENT-WEDGE: ${online_count} runners online + ${busy_count} busy, but a self-hosted job has been queued ${queued_age}s (>= ${WEDGE_QUEUE_AGE_SECONDS}s). Fleet is registered but not pulling jobs.")
         unhealthy_list+=("SILENT-WEDGE: online=${online_count} busy=0, queued-job-age=${queued_age}s")
@@ -563,44 +692,56 @@ fi
 # remediation_targets: space-separated service names extracted from the
 # wedge/crash-loop findings. Empty when the issue is something else (offline,
 # OOM, socket) where automatic bounce is unsafe.
+#
+# OMN-16947 — TWO RULES GOVERN THIS FUNCTION:
+#
+#   1. A runner that is present, registered, and listening is NEVER a
+#      remediation target. Only hard per-runner failure evidence (no container,
+#      stuck at Created, crash-looping, offline past the grace period) earns a
+#      recreate. `healthy_names` is consulted as defence-in-depth so that even a
+#      mis-collecting category cannot nominate a runner this tick counted
+#      healthy.
+#
+#   2. A SILENT-WEDGE contributes ZERO recreate targets. It used to expand to
+#      `seq 1 $EXPECTED_RUNNERS` — every runner in the fleet — on the theory
+#      that a wedge is fleet-wide. But every runner in a wedge is by definition
+#      Up, online, and listening, so rule 1 forbids recreating them
+#      automatically. On 2026-08-29 one false-positive wedge (a 10-day-old
+#      zombie queued job) therefore rendered as "88 actionable" and
+#      force-recreated all 88 healthy runners in a single compose call, taking
+#      the fleet down and needing two dockerd restarts to recover. A wedge is
+#      now an ALERT: the operator gets the rendered safe-bounce recipe and makes
+#      the fleet-wide call themselves.
 collect_remediation_targets() {
     local targets=()
     local entry svc
+    local -a evidence_lists=()
     if [[ "${#missing_container_list[@]}" -gt 0 ]]; then
-        for entry in "${missing_container_list[@]}"; do
-            svc="${entry%%:*}"
-            [[ "${svc}" =~ ^${RUNNER_NAME_PREFIX}-[0-9]+$ ]] && targets+=("${svc}")
-        done
+        evidence_lists+=("${missing_container_list[@]}")
     fi
     if [[ "${#offline_idle_recreate_list[@]}" -gt 0 ]]; then
-        for entry in "${offline_idle_recreate_list[@]}"; do
-            svc="${entry%%:*}"
-            [[ "${svc}" =~ ^${RUNNER_NAME_PREFIX}-[0-9]+$ ]] && targets+=("${svc}")
-        done
+        evidence_lists+=("${offline_idle_recreate_list[@]}")
     fi
     if [[ "${#crashloop_list[@]}" -gt 0 ]]; then
-        for entry in "${crashloop_list[@]}"; do
-            svc="${entry%%:*}"
-            [[ "${svc}" =~ ^${RUNNER_NAME_PREFIX}-[0-9]+$ ]] && targets+=("${svc}")
-        done
+        evidence_lists+=("${crashloop_list[@]}")
     fi
     # OMN-13947: re-target stragglers left at Status=created by a prior bounce
     # that never completed. Without this, a container that survives one
     # auto_bounce verify-retry cycle is permanently invisible to remediation.
     if [[ "${#stuck_created_list[@]}" -gt 0 ]]; then
-        for entry in "${stuck_created_list[@]}"; do
+        evidence_lists+=("${stuck_created_list[@]}")
+    fi
+
+    if [[ "${#evidence_lists[@]}" -gt 0 ]]; then
+        for entry in "${evidence_lists[@]}"; do
             svc="${entry%%:*}"
-            [[ "${svc}" =~ ^${RUNNER_NAME_PREFIX}-[0-9]+$ ]] && targets+=("${svc}")
+            [[ "${svc}" =~ ^${RUNNER_NAME_PREFIX}-[0-9]+$ ]] || continue
+            # Rule 1, enforced here rather than trusted upstream.
+            [[ -n "${healthy_names[${svc}]:-}" ]] && continue
+            targets+=("${svc}")
         done
     fi
-    # A silent wedge is fleet-wide: the safe recipe bounces the whole configured
-    # fleet, but STILL one explicit service list (never an empty filter).
-    if [[ "${#wedge_list[@]}" -gt 0 ]]; then
-        local j
-        for j in $(seq 1 "${EXPECTED_RUNNERS}"); do
-            targets+=("${RUNNER_NAME_PREFIX}-${j}")
-        done
-    fi
+
     # De-dupe while preserving order. Guard against empty array under set -u.
     if [[ "${#targets[@]}" -gt 0 ]]; then
         printf '%s\n' "${targets[@]}" | awk '!seen[$0]++' | tr '\n' ' '
@@ -653,10 +794,40 @@ RECIPE
 #      `docker create`d some targets without starting them (killed mid-batch).
 #      Assert Status=running for every target after the call returns; explicit
 #      `docker start` + retry for any straggler instead of leaving it orphaned.
+#
+# OMN-16947 hardening (the 2026-08-29 self-inflicted fleet outage):
+#   4. Compose interpolation preflight gate — refuse to dispatch (and refuse to
+#      CLAIM a dispatch) when `docker compose config` cannot interpolate. This
+#      is the six-day silent no-op: every recreate aborted on a missing
+#      DEPLOY_RUNNER_OMNI_HOME while the log said "AUTO-BOUNCE dispatched".
+#   5. Hard per-tick cap, applied HERE — below every collection path — so a
+#      target-selection bug can never again mass-recreate the fleet.
+#   6. Sequential, verified bounce — one compose call per target, each verified
+#      `running` before the next is touched. A canary that does not come back
+#      halts the batch instead of cascading the failure across the fleet.
 auto_bounce() {
     local target_list="$1"
     [[ "${MONITOR_AUTO_BOUNCE}" != "1" ]] && return 0
     [[ -z "${target_list// /}" ]] && return 0
+
+    if [[ "${COMPOSE_INTERPOLATION_OK}" != true ]]; then
+        log "AUTO-BOUNCE BLOCKED: compose interpolation preflight failed, so every recreate would abort before touching a container. Fix the monitor env, then the next tick converges. Targets left pending: ${target_list}"
+        slack_post "*[RUNNER AUTO-BOUNCE BLOCKED]* compose interpolation preflight failed — auto-repair is INERT until the monitor env is fixed.
+Error: ${COMPOSE_INTERPOLATION_ERROR}
+Pending targets: ${target_list}" "danger"
+        return 0
+    fi
+
+    # OMN-16947 rule 5: truncate to the per-tick ceiling. Log loudly — a capped
+    # tick means the fleet is converging over several ticks, and silence here
+    # would look identical to "nothing was wrong".
+    local requested_count
+    requested_count=$(wc -w <<< "${target_list}")
+    if [[ "${requested_count}" -gt "${AUTO_BOUNCE_MAX_TARGETS_PER_TICK}" ]]; then
+        log "AUTO-BOUNCE CAP: ${requested_count} target(s) requested, capping this tick at AUTO_BOUNCE_MAX_TARGETS_PER_TICK=${AUTO_BOUNCE_MAX_TARGETS_PER_TICK}. Remaining targets are re-detected and bounced on subsequent ticks. Full requested set: ${target_list}"
+        slack_post "*[RUNNER AUTO-BOUNCE CAPPED]* ${requested_count} runner(s) need recreation; bouncing ${AUTO_BOUNCE_MAX_TARGETS_PER_TICK} this tick and the rest on following ticks." "warning"
+        target_list="$(tr ' ' '\n' <<< "${target_list}" | grep -v '^$' | head -n "${AUTO_BOUNCE_MAX_TARGETS_PER_TICK}" | tr '\n' ' ')"
+    fi
 
     # Non-blocking lock probe. If a prior bounce still holds the lock, skip
     # this cycle rather than dispatching a second concurrent recreate. The
@@ -692,8 +863,12 @@ auto_bounce() {
         return 0
     fi
 
-    local timeout_seconds
+    # OMN-16947: the bounce is now one compose call per target, so the timeout
+    # is per-target rather than batch-scaled. bounce_timeout_seconds() still
+    # sizes the operator-facing recipe, which remains a single batched command.
+    local timeout_seconds per_target_timeout
     timeout_seconds=$(bounce_timeout_seconds "${target_list}")
+    per_target_timeout=$(bounce_timeout_seconds "one-target")
 
     # The subshell inherits fd 9 (and therefore the flock) from this process.
     # We close our own copy right after forking so the lock is held for
@@ -704,26 +879,45 @@ auto_bounce() {
         if [[ "${lock_kind}" == "mkdir" ]]; then
             trap 'rmdir "${AUTO_BOUNCE_LOCKFILE}.d" 2>/dev/null || true' EXIT
         fi
-        RUNNER_TOKEN="${token}" timeout "${timeout_seconds}" \
-            docker compose "${COMPOSE_FILE_ARGS[@]}" up -d --force-recreate --no-deps ${target_list} \
-            >> /tmp/runner-monitor-bounce.log 2>&1
 
+        # OMN-16947 rule 6: ONE service per compose call, each verified before
+        # the next is touched. The previous implementation recreated the whole
+        # batch in a single call and only verified afterwards, so a bad target
+        # list took every container down simultaneously and a mid-batch failure
+        # left the rest orphaned. Sequential means the blast radius of any
+        # single tick is one container at a time.
         svc=""
+        bounced=0
         for svc in ${target_list}; do
+            echo "[runner-monitor] $(date '+%H:%M:%S') AUTO-BOUNCE canary ${svc} (${bounced} of $(wc -w <<< "${target_list}") complete) — force-recreate." \
+                >> "${AUTO_BOUNCE_BOUNCE_LOG}"
+            RUNNER_TOKEN="${token}" timeout "${per_target_timeout}" \
+                docker compose "${COMPOSE_FILE_ARGS[@]}" up -d --force-recreate --no-deps "${svc}" \
+                >> "${AUTO_BOUNCE_BOUNCE_LOG}" 2>&1 || true
+
             attempt=1
             status="$(docker inspect --format '{{.State.Status}}' "${svc}" 2>/dev/null || echo missing)"
             while [[ "${status}" != "running" ]] && [[ "${attempt}" -le "${AUTO_BOUNCE_VERIFY_RETRY_COUNT}" ]]; do
                 echo "[runner-monitor] $(date '+%H:%M:%S') AUTO-BOUNCE straggler: ${svc} Status=${status} (attempt ${attempt}/${AUTO_BOUNCE_VERIFY_RETRY_COUNT}) — explicit docker start." \
-                    >> /tmp/runner-monitor-bounce.log
-                docker start "${svc}" >> /tmp/runner-monitor-bounce.log 2>&1 || true
+                    >> "${AUTO_BOUNCE_BOUNCE_LOG}"
+                docker start "${svc}" >> "${AUTO_BOUNCE_BOUNCE_LOG}" 2>&1 || true
                 sleep "${AUTO_BOUNCE_VERIFY_RETRY_SLEEP_SECONDS}"
                 status="$(docker inspect --format '{{.State.Status}}' "${svc}" 2>/dev/null || echo missing)"
                 attempt=$(( attempt + 1 ))
             done
+
             if [[ "${status}" != "running" ]]; then
-                echo "[runner-monitor] $(date '+%H:%M:%S') AUTO-BOUNCE FAILED to bring ${svc} to running (final Status=${status}) after ${AUTO_BOUNCE_VERIFY_RETRY_COUNT} retries — left for next cycle (stuck_created detection will re-target it)." \
-                    >> /tmp/runner-monitor-bounce.log
+                # HALT rather than continue. If one recreate cannot succeed the
+                # cause is very likely systemic (daemon lock, bad image, broken
+                # compose), and marching through the remaining targets is how a
+                # single fault becomes a fleet outage.
+                echo "[runner-monitor] $(date '+%H:%M:%S') AUTO-BOUNCE HALT: ${svc} did not reach running (final Status=${status}) after ${AUTO_BOUNCE_VERIFY_RETRY_COUNT} retries. Aborting the rest of this tick's batch rather than cascading; remaining targets are re-detected next cycle." \
+                    >> "${AUTO_BOUNCE_BOUNCE_LOG}"
+                break
             fi
+            bounced=$(( bounced + 1 ))
+            echo "[runner-monitor] $(date '+%H:%M:%S') AUTO-BOUNCE verified ${svc} running." \
+                >> "${AUTO_BOUNCE_BOUNCE_LOG}"
         done
     ) &
     if [[ "${lock_kind}" == "flock" ]]; then
@@ -767,7 +961,20 @@ remediation_target_count=0
 if [[ -n "${remediation_targets// /}" ]]; then
     remediation_target_count=$(wc -w <<< "${remediation_targets}")
 fi
+# OMN-16947: the actionable count is a sum of DISTINCT FINDINGS, not a proxy
+# for the recreate-target list. Conflating the two is what turned one wedge
+# finding into "88 actionable" against a fleet that was 88/88 healthy. A wedge
+# is one finding; so is a broken monitor env; so is fleet-count drift.
 current_alert_count="${remediation_target_count}"
+if [[ "${wedge_count}" -gt 0 ]]; then
+    current_alert_count=$((current_alert_count + wedge_count))
+fi
+if [[ "${COMPOSE_INTERPOLATION_OK}" != true ]]; then
+    current_alert_count=$((current_alert_count + 1))
+fi
+if [[ "${FLEET_COUNT_DRIFT}" == true ]]; then
+    current_alert_count=$((current_alert_count + 1))
+fi
 if [[ "${github_api_failed}" == true ]]; then
     current_alert_count=$((current_alert_count + 1))
 fi
@@ -789,6 +996,12 @@ jq -n \
     --argjson online "$online_count" \
     --argjson busy "$busy_count" \
     --argjson queued_age "$queued_age" \
+    --argjson zombie_queued_count "$zombie_queued_count" \
+    --argjson compose_interpolation_ok "$COMPOSE_INTERPOLATION_OK" \
+    --argjson fleet_count_drift "$FLEET_COUNT_DRIFT" \
+    --argjson compose_runner_service_count "$COMPOSE_RUNNER_SERVICE_COUNT" \
+    --argjson expected_runner_count "$EXPECTED_RUNNERS" \
+    --arg compose_interpolation_error "$COMPOSE_INTERPOLATION_ERROR" \
     --argjson total "$total_found" \
     --argjson docker_ok "$docker_ok" \
     --arg timestamp "$(date -Iseconds)" \
@@ -810,6 +1023,12 @@ jq -n \
         online: $online,
         busy: $busy,
         oldest_queued_job_age_seconds: $queued_age,
+        zombie_queued_count: $zombie_queued_count,
+        compose_interpolation_ok: $compose_interpolation_ok,
+        compose_interpolation_error: $compose_interpolation_error,
+        fleet_count_drift: $fleet_count_drift,
+        compose_runner_service_count: $compose_runner_service_count,
+        expected_runner_count: $expected_runner_count,
         total: $total,
         docker_ok: $docker_ok,
         timestamp: $timestamp,
@@ -827,12 +1046,34 @@ jq -n \
 safe_bounce_block=""
 if [[ -n "${remediation_targets// /}" ]]; then
     safe_bounce_block="$(render_safe_bounce_cmd "${remediation_targets}")"
+elif [[ "${wedge_count}" -gt 0 ]]; then
+    # OMN-16947: a wedge produces no auto-bounce targets, but the operator still
+    # needs the fleet-wide recipe to act on deliberately. Rendering it here (and
+    # ONLY here, into the alert) is the whole difference between "the operator
+    # may choose to recreate the fleet" and "the cron recreated the fleet".
+    wedge_recipe_targets=""
+    for _j in $(seq 1 "${EXPECTED_RUNNERS}"); do
+        wedge_recipe_targets+="${RUNNER_NAME_PREFIX}-${_j} "
+    done
+    safe_bounce_block="$(render_safe_bounce_cmd "${wedge_recipe_targets}")"
 fi
 
 # Build the special-finding banner (wedge / crash-loop) appended to alerts.
 special_findings=""
+if [[ "${COMPOSE_INTERPOLATION_OK}" != true ]]; then
+    special_findings+="COMPOSE-INTERPOLATION-FAILED: auto-repair is INERT — every recreate aborts before touching a container. ${COMPOSE_INTERPOLATION_ERROR}"$'\n'
+fi
+if [[ "${FLEET_COUNT_DRIFT}" == true ]]; then
+    special_findings+="FLEET-COUNT-DRIFT: compose declares ${COMPOSE_RUNNER_SERVICE_COUNT} runner service(s), config expected_count=${EXPECTED_RUNNERS}. Runners outside 1..${EXPECTED_RUNNERS} are invisible to this monitor."$'\n'
+fi
+if [[ "${zombie_queued_count}" -gt 0 ]]; then
+    special_findings+="ZOMBIE-QUEUED-JOBS: ${zombie_queued_count} abandoned queued job(s) older than ${WEDGE_QUEUE_AGE_MAX_SECONDS}s excluded from wedge evidence (oldest ${QUEUED_ZOMBIE_OLDEST_AGE}s)."$'\n'
+fi
 if [[ "${wedge_count}" -gt 0 ]]; then
     special_findings+="$(printf '%s\n' "${wedge_list[@]}")"$'\n'
+    # OMN-16947: a wedge is alert-only. The operator decides whether a
+    # fleet-wide bounce is warranted; the monitor never dispatches one.
+    special_findings+="WEDGE IS ALERT-ONLY: no runner is auto-recreated for a wedge finding (every runner in a wedge is Up + online + listening). Operator recipe below."$'\n'
 fi
 if [[ "${#offline_idle_bounce_list[@]}" -gt 0 ]]; then
     special_findings+="$(printf '%s\n' "${offline_idle_bounce_list[@]}")"$'\n'
