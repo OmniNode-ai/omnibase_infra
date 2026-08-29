@@ -1,8 +1,31 @@
 -- SPDX-FileCopyrightText: 2025 OmniNode.ai Inc.
 -- SPDX-License-Identifier: MIT
 --
--- Rollback for 101 (OMN-16923): re-narrow savings_estimates to the flat 074
--- shape in the SERVICE database.
+-- Rollback for 101 (OMN-16923): reverse the CONVERSIONS forward 101 performed
+-- on savings_estimates in the SERVICE database.
+--
+-- ============================================================================
+-- SCOPE -- READ THIS BEFORE ASSUMING IT RESTORES "THE FLAT 074 SHAPE"
+-- ============================================================================
+-- It does not, and deliberately so. This file reverses exactly what 101
+-- CONVERTED: the eight widened columns and the three CHECK constraints 101
+-- added under the node-declared names. It does NOT remove the two objects 101's
+-- step 4 supplies -- `updated_at` and `ux_savings_estimates_identity`.
+--
+-- The reason is ownership, not oversight. On the LIVE lane those two objects
+-- were created by node 074/075 long before 101 existed; 101 finds them already
+-- present and its step 4 is a no-op there. Only on a fresh service database
+-- does 101 create them. Nothing in the ledger distinguishes the two cases at
+-- rollback time, so an unconditional DROP would delete objects this migration
+-- never owned -- and dropping a NOT NULL column takes its data with it.
+--
+-- The residual is stated rather than hidden: after this file runs on a database
+-- where 101 DID create them, `updated_at` and `ux_savings_estimates_identity`
+-- remain. On such a database the identity index is not additionally
+-- restrictive -- flat 074's own `unique_savings_estimate_event` already
+-- constrains the identical four-column tuple -- so it rejects nothing that 074
+-- would have accepted. Removing them is a separate, provenance-aware change,
+-- and it needs the provenance record this repo does not yet keep.
 --
 -- ============================================================================
 -- THIS DIRECTION IS NOT SYMMETRIC WITH THE FORWARD

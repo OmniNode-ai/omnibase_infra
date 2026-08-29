@@ -517,6 +517,173 @@ def test_101_supplies_the_two_objects_only_the_node_corpus_declares(
     assert "ux_savings_estimates_identity" in indexes
 
 
+def test_step_4_converges_a_wrongly_typed_updated_at_instead_of_accepting_it(
+    pg16: Pg16Cluster, service_db: tuple[str, object]
+) -> None:
+    """`IF NOT EXISTS` guards a NAME, never a DEFINITION.
+
+    A pre-existing `updated_at` of the wrong type would survive a bare guarded
+    add and leave this file claiming a convergence it did not perform. The
+    conversion is therefore unconditional -- and a `timestamp without time zone`
+    source is REFUSED rather than cast, because that cast re-stamps every stored
+    value against the session time zone: a data change wearing a type change's
+    clothes.
+    """
+    database, _client = service_db
+    _build_drifted_service_schema(pg16, database)
+    _apply(
+        pg16,
+        database,
+        "ALTER TABLE savings_estimates "
+        "ALTER COLUMN updated_at TYPE TIMESTAMP WITHOUT TIME ZONE;",
+    )
+
+    completed = pg16.command(
+        database,
+        "-f",
+        "-",
+        input_text=MIGRATION_101.read_text(encoding="utf-8"),
+        check=False,
+    )
+    assert completed.returncode != 0
+    assert "would REINTERPRET every stored value" in completed.stderr, completed.stderr
+    assert _column_types(pg16, database)["updated_at"] == "timestamp without time zone"
+
+
+def test_step_4_recreates_the_identity_index_rather_than_asserting_its_name(
+    pg16: Pg16Cluster, service_db: tuple[str, object]
+) -> None:
+    """Same class as above, for the index: an object of the right NAME over the
+    wrong COLUMNS must not be left standing."""
+    database, _client = service_db
+    _build_drifted_service_schema(pg16, database)
+    _apply(
+        pg16,
+        database,
+        "DROP INDEX ux_savings_estimates_identity; "
+        "CREATE UNIQUE INDEX ux_savings_estimates_identity "
+        "ON savings_estimates (id);",
+    )
+
+    _apply(pg16, database, MIGRATION_101.read_text(encoding="utf-8"))
+
+    definition = pg16.sql(
+        database,
+        "SELECT indexdef FROM pg_indexes "
+        "WHERE indexname = 'ux_savings_estimates_identity'",
+    )
+    assert "session_id, event_timestamp, model_local, model_cloud_baseline" in (
+        definition
+    ), definition
+
+
+def test_step_4_refuses_duplicate_identity_tuples_before_creating_the_index(
+    pg16: Pg16Cluster, pg16_fresh_database: str
+) -> None:
+    """If a lane lost flat 074's unique constraint, 101 emits a ticketed data
+    diagnostic instead of relying on PostgreSQL's bare CREATE UNIQUE INDEX
+    failure."""
+    _apply(pg16, pg16_fresh_database, FLAT_074.read_text(encoding="utf-8"))
+    _apply(pg16, pg16_fresh_database, FLAT_076.read_text(encoding="utf-8"))
+    _apply(
+        pg16,
+        pg16_fresh_database,
+        """
+        ALTER TABLE savings_estimates DROP CONSTRAINT unique_savings_estimate_event;
+        INSERT INTO savings_estimates
+          (event_timestamp, session_id, model_local, model_cloud_baseline,
+           local_cost_usd, cloud_cost_usd, savings_usd, repo_name, machine_id)
+        VALUES
+          (TIMESTAMPTZ '2026-08-01 00:00:00+00', 'sess-dup', 'qwen-local',
+           'claude-cloud', 1.000000, 2.000000, 1.000000, 'omnibase_infra', 'mac-01'),
+          (TIMESTAMPTZ '2026-08-01 00:00:00+00', 'sess-dup', 'qwen-local',
+           'claude-cloud', 1.000000, 2.000000, 1.000000, 'omnibase_infra', 'mac-02');
+        """,
+    )
+
+    completed = pg16.command(
+        pg16_fresh_database,
+        "-f",
+        "-",
+        input_text=MIGRATION_101.read_text(encoding="utf-8"),
+        check=False,
+    )
+
+    assert completed.returncode != 0
+    assert (
+        "OMN-16923: refusing to create ux_savings_estimates_identity"
+        in completed.stderr
+    )
+    indexes = pg16.sql(
+        pg16_fresh_database,
+        "SELECT indexname FROM pg_indexes WHERE schemaname = 'public' "
+        "AND tablename = 'savings_estimates'",
+    )
+    assert "ux_savings_estimates_identity" not in indexes
+
+
+def test_the_flat_unique_constraint_already_covers_the_identity_tuple() -> None:
+    """Why step 4's CREATE UNIQUE INDEX cannot fail on duplicates.
+
+    Flat 074 declares `unique_savings_estimate_event` over the identical four
+    columns in the identical order, so a duplicate tuple was already impossible
+    on any database the flat corpus built. Asserted here so a future edit to
+    either declaration surfaces as a failing test rather than as a deploy that
+    aborts on a unique violation.
+    """
+    flat = FLAT_074.read_text(encoding="utf-8")
+    node = (FORWARD / "nodes" / NODE / FILENAME).read_text(encoding="utf-8")
+    tuple_columns = (
+        "session_id",
+        "event_timestamp",
+        "model_local",
+        "model_cloud_baseline",
+    )
+
+    flat_block = flat.split("CONSTRAINT unique_savings_estimate_event UNIQUE (", 1)[1]
+    flat_block = flat_block.split(")", 1)[0]
+    assert [c.strip() for c in flat_block.split(",") if c.strip()] == list(
+        tuple_columns
+    )
+
+    node_block = node.split(
+        "CREATE UNIQUE INDEX IF NOT EXISTS ux_savings_estimates_identity", 1
+    )[1]
+    node_block = node_block.split("(", 1)[1].split(")", 1)[0]
+    assert [c.strip() for c in node_block.split(",") if c.strip()] == list(
+        tuple_columns
+    )
+
+
+def test_the_rollback_leaves_the_two_step_4_objects_alone(
+    pg16: Pg16Cluster, service_db: tuple[str, object]
+) -> None:
+    """The rollback's stated scope, asserted so it cannot drift from the header.
+
+    It reverses what 101 CONVERTED. It does not remove `updated_at` or
+    `ux_savings_estimates_identity`, because on the live lane node 074/075 own
+    them and nothing at rollback time distinguishes that case from the fresh one
+    -- an unconditional DROP would delete a NOT NULL column, and its data, that
+    this migration never created.
+    """
+    database, _client = service_db
+    _build_drifted_service_schema(pg16, database)
+    _apply(pg16, database, MIGRATION_101.read_text(encoding="utf-8"))
+    _apply(pg16, database, ROLLBACK_101.read_text(encoding="utf-8"))
+
+    assert "updated_at" in _column_types(pg16, database)
+    indexes = pg16.sql(
+        database,
+        "SELECT indexname FROM pg_indexes WHERE schemaname = 'public' "
+        "AND tablename = 'savings_estimates'",
+    )
+    assert "ux_savings_estimates_identity" in indexes
+    header = ROLLBACK_101.read_text(encoding="utf-8")
+    assert "It does NOT remove the two objects" in header, (
+        "the rollback header must keep stating the residual it leaves behind"
+    )
+
+
 def test_101_does_not_install_the_node_write_path_trigger(
     pg16: Pg16Cluster, pg16_fresh_database: str
 ) -> None:
@@ -820,6 +987,50 @@ def test_the_declaration_ticket_override_is_validated_and_version_scoped() -> No
         )
 
     assert verifier.parse_declaration_tickets(None) == {}
+
+
+def test_a_later_run_without_an_override_preserves_an_existing_ticket(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """The override is only half the guarantee.
+
+    A later ORDINARY `--emit-adoptions` run re-proves the same rows with no
+    mapping at all. If the ticket column were then reset to the tool's default,
+    the provenance the version-scoped override recorded would be erased one run
+    later -- the same corruption, arriving by a different route. An existing
+    row's ticket is therefore the fallback, and the tool's own ticket is used
+    only for a row that is genuinely new.
+    """
+    existing = {
+        VERSION: {
+            "version": VERSION,
+            "source_checksum": LANE_CHECKSUM,
+            "manifest_checksum": MANIFEST_CHECKSUM,
+            "ticket": "OMN-16923",
+            "receipt_sha256": "0" * 64,
+            "verified_at": "2026-08-29",
+        }
+    }
+    # The fallback chain the emission loops use, exercised directly: no override
+    # for this version, so the row on disk decides.
+    declaration_tickets: dict[str, str] = {}
+    resolved = declaration_tickets.get(
+        VERSION, existing.get(VERSION, {}).get("ticket", verifier.DIVERGENT_TICKET)
+    )
+    assert resolved == "OMN-16923"
+
+    fresh = declaration_tickets.get(
+        "node:brand_new:0001_x.sql",
+        existing.get("node:brand_new:0001_x.sql", {}).get(
+            "ticket", verifier.DIVERGENT_TICKET
+        ),
+    )
+    assert fresh == verifier.DIVERGENT_TICKET
+
+    # And the shipped source really does read the row on disk, not a constant.
+    source = VERIFIER_PATH.read_text(encoding="utf-8")
+    assert "divergent_adoptions.get(verdict.version, {}).get(" in source
+    assert 'adoptions.get(verdict.version, {}).get("ticket", TICKET)' in source
 
 
 def test_the_other_committed_declarations_keep_their_own_ticket() -> None:

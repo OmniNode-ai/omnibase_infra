@@ -1166,7 +1166,15 @@ def main(argv: Sequence[str] | None = None) -> int:
                 "version": verdict.version,
                 "source_checksum": verdict.source_checksum,
                 "manifest_checksum": verdict.manifest_checksum,
-                "ticket": declaration_tickets.get(verdict.version, TICKET),
+                # An existing row's ticket is provenance earned elsewhere. A
+                # later ordinary run re-proves that row and must not silently
+                # reset it to this tool's default -- that is the same ledger
+                # corruption the version-scoped override exists to prevent,
+                # arriving one run later instead of in the same run.
+                "ticket": declaration_tickets.get(
+                    verdict.version,
+                    adoptions.get(verdict.version, {}).get("ticket", TICKET),
+                ),
                 "receipt_sha256": receipt_sha,
                 "verified_at": verified_at,
             }
@@ -1198,7 +1206,13 @@ def main(argv: Sequence[str] | None = None) -> int:
                 "version": verdict.version,
                 "source_checksum": verdict.source_checksum,
                 "manifest_checksum": verdict.manifest_checksum,
-                "ticket": declaration_tickets.get(verdict.version, DIVERGENT_TICKET),
+                # Same reason as the standard loop above.
+                "ticket": declaration_tickets.get(
+                    verdict.version,
+                    divergent_adoptions.get(verdict.version, {}).get(
+                        "ticket", DIVERGENT_TICKET
+                    ),
+                ),
                 "receipt_sha256": receipt_sha,
                 "verified_at": verified_at,
             }

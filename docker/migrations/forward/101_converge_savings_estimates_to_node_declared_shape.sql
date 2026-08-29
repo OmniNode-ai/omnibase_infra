@@ -312,15 +312,76 @@ ALTER TABLE savings_estimates
         CHECK (savings_usd = cloud_cost_usd - local_cost_usd);
 
 -- ---- 4. the two objects only the NODE corpus ever declared -----------------
--- No-ops on the live lane (node 074/075 already left both). Load-bearing on a
--- fresh service database, where nothing from the node corpus runs and flat
--- 074/076 declare neither -- without these the fresh path and the drifted path
--- would end at two different schemas. See the header.
+-- No-ops in effect on the live lane (node 074/075 already left both). Load-
+-- bearing on a fresh service database, where nothing from the node corpus runs
+-- and flat 074/076 declare neither -- without these the fresh path and the
+-- drifted path would end at two different schemas. See the header.
+--
+-- `IF NOT EXISTS` guards a NAME, never a DEFINITION. A pre-existing
+-- `updated_at` of the wrong type, or an `ux_savings_estimates_identity` over
+-- different columns, would survive a bare guarded add and leave this file
+-- claiming a convergence it did not perform. So the column is added when
+-- missing and then converged UNCONDITIONALLY (type, default, nullability), and
+-- the index is dropped and recreated from the declaration rather than merely
+-- asserted to exist. Both are inside this file's single transaction.
 
 ALTER TABLE savings_estimates
     ADD COLUMN IF NOT EXISTS updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW();
 
-CREATE UNIQUE INDEX IF NOT EXISTS ux_savings_estimates_identity
+-- Converge whatever is there now onto the declared shape. A source outside the
+-- timestamptz family is refused rather than reinterpreted: casting
+-- `timestamp without time zone` would silently re-stamp every row with the
+-- session's time zone, which is a data change wearing a type change's clothes.
+ALTER TABLE savings_estimates
+    ALTER COLUMN updated_at TYPE TIMESTAMPTZ
+        USING CASE
+            WHEN pg_typeof(updated_at)::TEXT = 'timestamp with time zone' THEN
+                updated_at
+            ELSE
+                ('OMN-16923: refusing to convert savings_estimates.updated_at to '
+                 'TIMESTAMPTZ -- its live type is not already timestamptz, so the '
+                 'conversion would REINTERPRET every stored value against the '
+                 'session time zone rather than widen it. Nothing was applied.'
+                 || left(updated_at::TEXT, 0))::TIMESTAMPTZ
+        END,
+    ALTER COLUMN updated_at SET DEFAULT NOW();
+
+-- Fails loud (and rolls the file back) if a pre-existing row holds NULL, rather
+-- than inventing a timestamp -- the same posture as OMN-15376's NOT NULL loop.
+ALTER TABLE savings_estimates
+    ALTER COLUMN updated_at SET NOT NULL;
+
+-- Recreated from the declaration, not merely asserted by name.
+--
+-- On duplicates: they cannot arise on any database the flat corpus built. 074
+-- declares `CONSTRAINT unique_savings_estimate_event UNIQUE (session_id,
+-- event_timestamp, model_local, model_cloud_baseline)` -- the SAME four columns
+-- in the same order this index covers -- so a duplicate tuple was already
+-- impossible before this file ran. (Asserted, not assumed:
+-- test_the_flat_unique_constraint_already_covers_the_identity_tuple.) Should a
+-- later lane have dropped that constraint and admitted duplicates, this file
+-- refuses with an OMN-16923 diagnostic before it reaches CREATE UNIQUE INDEX.
+SELECT CASE
+    WHEN EXISTS (
+        SELECT 1
+        FROM savings_estimates
+        GROUP BY
+            session_id,
+            event_timestamp,
+            model_local,
+            model_cloud_baseline
+        HAVING COUNT(*) > 1
+    ) THEN
+        ('OMN-16923: refusing to create ux_savings_estimates_identity -- '
+         'duplicate savings_estimates identity tuples already exist. Resolve '
+         'the duplicate data before applying this convergence.'
+         || left((SELECT COUNT(*)::TEXT FROM savings_estimates), 0))::INTEGER
+    ELSE 0
+END;
+
+DROP INDEX IF EXISTS ux_savings_estimates_identity;
+
+CREATE UNIQUE INDEX ux_savings_estimates_identity
     ON savings_estimates (
         session_id,
         event_timestamp,
