@@ -4,6 +4,7 @@
 
 from __future__ import annotations
 
+from pathlib import Path
 from uuid import UUID
 
 import pytest
@@ -11,11 +12,16 @@ from pydantic import ValidationError
 
 from omnibase_core.enums.enum_database_schema_domain import EnumDatabaseSchemaDomain
 from omnibase_infra.topology.application_database import load_topology_profile
+from omnibase_infra.topology.physical_schema_mapping import (
+    INTERNAL_TABLES_PHYSICALLY_IN_PUBLIC_UNTIL_OMN15359,
+    TENANT_TABLES_PHYSICALLY_IN_PUBLIC_UNTIL_OMN15359,
+)
 from omnibase_infra.validation.application_database_domain_enforcement import (
     CANONICAL_TENANT_PREDICATE,
     application_database_created_catalog_identities,
     application_database_function_definition_sha256,
     lint_application_database_sql,
+    load_application_database_ownership_identities,
     validate_application_database_catalog_census,
     validate_application_database_pool_identities,
     validate_application_database_relation_states,
@@ -1340,3 +1346,109 @@ def test_function_definition_fingerprint_covers_security_relevant_catalog_state(
             application_database_function_definition_sha256(**changed)  # type: ignore[arg-type]
             != expected
         ), field
+
+
+def _physically_public_bridge_manifest(
+    tmp_path: Path, *, schema: str, name: str
+) -> Path:
+    """Write a minimal service manifest declaring one relation at ``schema``."""
+    manifest = tmp_path / f"{schema}-{name}-ownership.yaml"
+    manifest.write_text(
+        "schema_version: '1.0'\n"
+        "service: omn16993_bridge_fixture\n"
+        "target_database_ref: application\n"
+        "db_io:\n"
+        "  db_tables:\n"
+        f"    - name: {name}\n"
+        "      database_ref: application\n"
+        f"      schema: {schema}\n"
+        "      migration: fixture.sql\n"
+        "      access: read_write\n"
+        "      role: omn16993_bridge_fixture_table\n",
+        encoding="utf-8",
+    )
+    return manifest
+
+
+def test_physically_public_bridge_covers_internal_family_not_only_tenant(
+    tmp_path: Path,
+) -> None:
+    """OMN-16993: a relation declared at its LOGICAL schema resolves at `public`.
+
+    Deployable SQL must target the PHYSICAL relation, which for both
+    ``TENANT_TABLES_PHYSICALLY_IN_PUBLIC_UNTIL_OMN15359`` and
+    ``INTERNAL_TABLES_PHYSICALLY_IN_PUBLIC_UNTIL_OMN15359`` still lives bare in
+    ``public`` until the governed OMN-15359 cutover. Before OMN-16993 the
+    resolver bridged the tenant family only, so any NEW deployable SQL touching
+    one of the 41 internal physically-public relations resolved to ZERO
+    ownership declarations and could not be made to pass: declaring
+    ``schema: public`` in the owning repo's manifest is rejected upstream as a
+    conflicting-schema declaration against the node contract.
+    """
+    tenant_name = sorted(TENANT_TABLES_PHYSICALLY_IN_PUBLIC_UNTIL_OMN15359)[0]
+    internal_name = sorted(INTERNAL_TABLES_PHYSICALLY_IN_PUBLIC_UNTIL_OMN15359)[0]
+
+    for schema, name in (
+        ("tenant", tenant_name),
+        ("omninode_internal", internal_name),
+    ):
+        manifest = _physically_public_bridge_manifest(
+            tmp_path, schema=schema, name=name
+        )
+        identities = load_application_database_ownership_identities((manifest,))
+        located = {
+            (identity.schema, identity.name)
+            for identity in identities
+            if identity.name == name
+        }
+        assert (schema, name) in located, (schema, name, located)
+        assert ("public", name) in located, (
+            f"{schema}.{name} did not bridge to its physical public identity; "
+            "deployable SQL targeting public."
+            f"{name} would resolve to zero ownership declarations"
+        )
+
+
+def test_physically_public_families_are_disjoint_so_the_bridge_cannot_double_count(
+    tmp_path: Path,
+) -> None:
+    """OMN-16993: the bridge preserves `exactly one ownership declaration`.
+
+    The bridge records a ``public`` twin per declaration. If a name appeared in
+    BOTH physically-public families it could be declared once at ``tenant`` and
+    once at ``omninode_internal`` and produce two ``public`` twins, turning the
+    gate's "exactly one declaration" requirement into a duplicate-declaration
+    failure. Disjointness is what makes that impossible, so it is asserted
+    rather than assumed.
+    """
+    overlap = (
+        TENANT_TABLES_PHYSICALLY_IN_PUBLIC_UNTIL_OMN15359
+        & INTERNAL_TABLES_PHYSICALLY_IN_PUBLIC_UNTIL_OMN15359
+    )
+    assert not overlap, sorted(overlap)
+
+
+def test_relation_outside_both_families_does_not_bridge_to_public(
+    tmp_path: Path,
+) -> None:
+    """OMN-16993: the bridge is scoped, not a blanket public twin for everything.
+
+    A relation whose physical home really is its logical schema must NOT gain a
+    spurious ``public`` declaration -- that would let SQL targeting
+    ``public.<name>`` resolve an owner for a relation that does not exist there.
+    """
+    name = "omn16993_not_physically_public_fixture"
+    assert name not in TENANT_TABLES_PHYSICALLY_IN_PUBLIC_UNTIL_OMN15359
+    assert name not in INTERNAL_TABLES_PHYSICALLY_IN_PUBLIC_UNTIL_OMN15359
+
+    manifest = _physically_public_bridge_manifest(
+        tmp_path, schema="omninode_internal", name=name
+    )
+    identities = load_application_database_ownership_identities((manifest,))
+    located = {
+        (identity.schema, identity.name)
+        for identity in identities
+        if identity.name == name
+    }
+    assert ("omninode_internal", name) in located
+    assert ("public", name) not in located
