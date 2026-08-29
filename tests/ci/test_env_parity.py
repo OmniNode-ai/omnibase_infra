@@ -248,6 +248,18 @@ LOCAL_ONLY_KEYS: frozenset[str] = frozenset(
         "ONEXBOT_OCC_APP_ID",
         "ONEXBOT_OCC_PRIVATE_KEY",
         "OMNI_OCC_GITHUB_AUTH_MODE",
+        # OMN-16778: Slack alert delivery credentials, classified exactly as the
+        # OnexBot App identity above and for the same reason. The bot token and
+        # channel id are minted into the operator's host .env on the bus runtime
+        # hosts (.201: /data/omninode/omnibase_infra/.env, mode 0600); the
+        # onex-dev cluster carries NO Slack key at all -- `grep -rl SLACK
+        # omninode_infra/k8s` returns nothing, verified 2026-08-29 -- and does
+        # not run the Slack alerting path. LOCAL_ONLY_KEYS rather than
+        # SECRET_KEYS on purpose: SECRET_KEYS asserts "k8s injects this via
+        # Secret/Infisical", which would be a false claim today. If the cluster
+        # ever runs node_slack_publish_effect, these move to SECRET_KEYS.
+        "SLACK_BOT_TOKEN",
+        "SLACK_CHANNEL_ID",
     }
 )
 
