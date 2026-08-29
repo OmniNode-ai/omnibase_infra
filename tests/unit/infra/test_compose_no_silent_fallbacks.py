@@ -62,6 +62,19 @@ ALLOWED_EMPTY_DEFAULTS = {
     "ONEXBOT_OCC_APP_ID",
     "ONEXBOT_OCC_PRIVATE_KEY",
     "OMNI_OCC_GITHUB_AUTH_MODE",
+    # OMN-16778: Slack alert delivery credentials, on the identical contract to
+    # the OnexBot App identity above and for the identical reason. The bot token
+    # and channel id live in the operator's host `.env` on the lanes that alert
+    # (.201: /data/omninode/omnibase_infra/.env, mode 0600) and are absent
+    # everywhere else, so a `:?` form would wedge compose render on every lane
+    # that does not alert. Empty here is NOT "silently disabled": the consumer
+    # is `node_slack_publish_effect`, whose handler resolves SLACK_BOT_TOKEN
+    # through `resolve_api_key_async(required=True)` and RAISES on an empty
+    # value, and `node_consumer_flow_stall_alert_effect`, which records a
+    # decided-but-unpublished alert by name on its terminal event. Both fail
+    # loudly at the effect boundary; neither substitutes a default.
+    "SLACK_BOT_TOKEN",
+    "SLACK_CHANNEL_ID",
 }
 
 

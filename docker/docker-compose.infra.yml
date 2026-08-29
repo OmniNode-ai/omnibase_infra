@@ -388,6 +388,24 @@ x-runtime-env: &runtime-env
   BIFROST_VERTEX_GEMINI_ENDPOINT_URL: ${BIFROST_VERTEX_GEMINI_ENDPOINT_URL:?BIFROST_VERTEX_GEMINI_ENDPOINT_URL is required for Vertex Gemini routing}
   GOOGLE_CLOUD_PROJECT: ${GOOGLE_CLOUD_PROJECT:?GOOGLE_CLOUD_PROJECT is required for Vertex Gemini routing}
   GOOGLE_CLOUD_LOCATION: ${GOOGLE_CLOUD_LOCATION:?GOOGLE_CLOUD_LOCATION is required for Vertex Gemini routing}
+  # --- Slack alert delivery (OMN-16778 / OMN-13733) ---
+  # node_slack_publish_effect resolves api_key_ref SLACK_BOT_TOKEN through the
+  # canonical secret resolver and posts to https://slack.com/api/chat.postMessage;
+  # node_consumer_flow_stall_alert_effect resolves SLACK_CHANNEL_ID the same way
+  # for its destination. Both were reachable and wired on the .201 dev lane while
+  # NEITHER variable existed in the container, so a decided stall alert had no
+  # token and no channel — an alerting path that cannot alert, which is the exact
+  # failure class epic OMN-16776 exists to end.
+  #
+  # Empty-permitting on purpose (allowlisted in
+  # tests/unit/infra/test_compose_no_silent_fallbacks.py with the same rationale
+  # as ONEXBOT_OCC_*): these live in the operator's host `.env` only on the lanes
+  # that alert, so a `:?` form would wedge compose render everywhere else. An
+  # empty value is not a silent disable — the resolver is required=True and
+  # raises at the effect boundary, and the stall alert records the undelivered
+  # decision by name on its terminal event.
+  SLACK_BOT_TOKEN: ${SLACK_BOT_TOKEN:-}
+  SLACK_CHANNEL_ID: ${SLACK_CHANNEL_ID:-}
   LLM_ENDPOINT_CIDR_ALLOWLIST: ${LLM_ENDPOINT_CIDR_ALLOWLIST:?LLM_ENDPOINT_CIDR_ALLOWLIST required for local LLM HTTP egress}
   LLM_CLOUD_ENDPOINT_HOST_ALLOWLIST: ${LLM_CLOUD_ENDPOINT_HOST_ALLOWLIST:?runtime policy contract must set LLM_CLOUD_ENDPOINT_HOST_ALLOWLIST}
   LOCAL_LLM_SHARED_SECRET: ${LOCAL_LLM_SHARED_SECRET:?LOCAL_LLM_SHARED_SECRET required for local LLM HTTP request signing}
