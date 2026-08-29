@@ -24,6 +24,19 @@ ANY candidate commit is known in the clone AND is an ancestor of the build ref.
 The canonical ledger lives at ``/data/omninode/hotpatch-ledger/ledger.yaml``
 on the runtime host (override with ``--ledger`` or ``HOTPATCH_LEDGER_PATH``).
 
+Row lifecycle (OMN-16803 AC5): a row carries an optional ``status`` of
+``active`` (the default when the field is absent) or ``reconciled``. A patch
+whose content has been durably superseded — rebuilt from merged source, its
+``.prepatch`` sibling gone — is retired by setting ``status: reconciled``
+together with ``reconciled_utc`` and ``reconciliation_note``; the preflight
+then skips the row with a printed notice instead of gating on it. Retiring a
+row by DELETING it is wrong: the ledger is the forensic record of what was
+ever patched, and deletion destroys exactly the history it exists to hold.
+Retirement is not an allowlist — a reconciled row's ``.prepatch`` path leaves
+the ledgered set, so if that file ever reappears the tripwire reports it as a
+new UNLEDGERED patch. Any other ``status`` value is a hard configuration
+failure, so a typo can never silently drop a live row out of scope.
+
 Sole bypass: export ``HOTPATCH_PREFLIGHT_BYPASS`` containing a line of the
 exact Rule-10 form ``# skip-token-allowed: <user-approval-receipt-id>`` where
 the receipt id is a real user-issued approval handle. Any other value of the
@@ -56,6 +69,17 @@ SUPPORTED_SCHEMA = 1
 # expected on a --cold-start bring-up) from every other exec failure
 # (permission error, daemon hiccup, ...), which must stay a hard failure.
 _NO_SUCH_CONTAINER_RE = re.compile(r"no such container", re.IGNORECASE)
+
+# Row lifecycle statuses (OMN-16803 AC5). ``active`` is the default for any row
+# with no ``status`` field, so every pre-OMN-16803 ledger keeps its exact
+# behavior. ``reconciled`` retires a row from gating WITHOUT deleting it.
+ROW_STATUS_ACTIVE = "active"
+ROW_STATUS_RECONCILED = "reconciled"
+VALID_ROW_STATUSES = (ROW_STATUS_ACTIVE, ROW_STATUS_RECONCILED)
+# A retirement is a recorded decision, not a quiet edit: both fields are
+# mandatory on a reconciled row so the ledger always answers "when, and on
+# what evidence" for every row that stopped being gated.
+RECONCILED_REQUIRED_FIELDS = ("reconciled_utc", "reconciliation_note")
 
 
 class ContainerAbsentError(ValueError):
@@ -110,6 +134,49 @@ def select_rows(
             continue
         selected.append(row)
     return selected
+
+
+def partition_by_status(
+    rows: list[dict[str, Any]],
+) -> tuple[list[dict[str, Any]], list[dict[str, Any]]]:
+    """Split *rows* into ``(active, reconciled)`` (OMN-16803 AC5).
+
+    A row with no ``status`` field is ``active`` — pre-OMN-16803 ledgers are
+    gated byte-for-byte as before. A ``reconciled`` row is retired from gating
+    but stays in the ledger as forensic history.
+
+    Raises:
+        ValueError: the row carries an unrecognized ``status``, or a
+            ``reconciled`` row is missing ``reconciled_utc`` /
+            ``reconciliation_note``. Both are hard configuration failures: an
+            unvalidated status would let a typo silently remove a live row
+            from the gate's scope, and an unannotated retirement would record
+            no decision at all.
+    """
+    active: list[dict[str, Any]] = []
+    reconciled: list[dict[str, Any]] = []
+    for row in rows:
+        status = row.get("status", ROW_STATUS_ACTIVE)
+        if status not in VALID_ROW_STATUSES:
+            raise ValueError(
+                f"ledger row for {row.get('file')!r} in "
+                f"{row.get('container')!r} has unknown status {status!r}; "
+                f"expected one of {', '.join(VALID_ROW_STATUSES)}"
+            )
+        if status == ROW_STATUS_ACTIVE:
+            active.append(row)
+            continue
+        missing = [field for field in RECONCILED_REQUIRED_FIELDS if not row.get(field)]
+        if missing:
+            raise ValueError(
+                f"ledger row for {row.get('file')!r} in "
+                f"{row.get('container')!r} is status "
+                f"{ROW_STATUS_RECONCILED!r} but is missing "
+                f"{', '.join(missing)}; a retired row must record when it was "
+                "reconciled and on what evidence"
+            )
+        reconciled.append(row)
+    return active, reconciled
 
 
 def resolve_build_ref(
@@ -270,12 +337,25 @@ def run_preflight(args: argparse.Namespace) -> int:
     except (FileNotFoundError, ValueError) as exc:
         return fail(str(exc), code=2)
 
-    rows = select_rows(ledger["rows"] or [], args.container, args.lane)
+    selected = select_rows(ledger["rows"] or [], args.container, args.lane)
+    try:
+        rows, reconciled_rows = partition_by_status(selected)
+    except ValueError as exc:
+        return fail(str(exc), code=2)
     scope = args.container or args.lane
     print(
         f"HOTPATCH-PREFLIGHT: ledger {ledger_path} — {len(rows)} row(s) "
-        f"in scope {scope!r}"
+        f"in scope {scope!r} ({len(reconciled_rows)} reconciled, skipped)"
     )
+    for row in reconciled_rows:
+        # Skip-with-notice, never silent: a retired row still shows up in
+        # every preflight log, so the decision stays auditable from the run
+        # that relies on it.
+        print(
+            f"HOTPATCH-PREFLIGHT SKIP (reconciled {row['reconciled_utc']}): "
+            f"{row['container']} {row['file']} — "
+            f"{' '.join(str(row['reconciliation_note']).split())}"
+        )
 
     failures: list[str] = []
     clones_root = Path(args.clones_root)
