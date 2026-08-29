@@ -42,7 +42,7 @@ profiles:
       - logical_name: llm.openrouter.api_key
         source:
           source_type: env
-          source_path: OPEN_ROUTER_API_KEY
+          source_path: OPENROUTER_API_KEY
       - logical_name: llm.glm.api_key
         source:
           source_type: env
@@ -165,7 +165,7 @@ profiles:
       - logical_name: llm.openrouter.api_key
         source:
           source_type: env
-          source_path: OPEN_ROUTER_API_KEY
+          source_path: OPENROUTER_API_KEY
       - logical_name: llm.glm.api_key
         source:
           source_type: env
@@ -263,7 +263,7 @@ profiles:
       - logical_name: llm.openrouter.api_key
         source:
           source_type: env
-          source_path: OPEN_ROUTER_API_KEY
+          source_path: OPENROUTER_API_KEY
       - logical_name: llm.glm.api_key
         source:
           source_type: env

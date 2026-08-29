@@ -415,7 +415,7 @@ def test_judge_secret_refs_are_rendered_from_runtime_policy() -> None:
         }
         assert mappings["llm.openrouter.api_key"] == {
             "source_type": "env",
-            "source_path": "OPEN_ROUTER_API_KEY",
+            "source_path": "OPENROUTER_API_KEY",
         }
         assert mappings["llm.glm.api_key"] == {
             "source_type": "env",
