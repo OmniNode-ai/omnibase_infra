@@ -64,14 +64,15 @@
 # (e.g. widening ruling 21's scope, or adding a new ruling-15-style lane
 # carve-out) is a separate, explicit edit to that runner's release block.
 #
-# WHY THESE ELEVEN IDS (verbatim rationale, unchanged from the pre-OMN-15349
+# WHY THESE TWELVE IDS (verbatim rationale, unchanged from the pre-OMN-15349
 # hand-maintained lists for the first seven; the eighth (node_pr_review_bot
 # 001) was added under OMN-15717/OMN-15376, the ninth
 # (delegation_inference_response 0003) under OMN-15336 item 4 / OMN-15656 —
 # two independent PRs landing concurrently, both additive, not conflicting —
-# the tenth (hook_event_capture 0002) under OMN-16090, and the ELEVENTH
+# the tenth (hook_event_capture 0002) under OMN-16090, the ELEVENTH
 # (delegation 0031) under OMN-16493 / the 2026-08-28 "Fence 0031, HOLD the
-# repin" operator ruling):
+# repin" operator ruling, and the TWELFTH (delegation 0032) under OMN-16930 /
+# the 2026-08-29 "Hold + fix mechanism" ruling that replaced 0031's remedy):
 #   delegation 0023-0026 — OMN-14974 / OMN-15313. Tenant-isolation RLS on
 #     live, actively-written delegation tables; un-gate only in a change that
 #     also proves the writer sets app.tenant_id per connection. No lane may
@@ -214,6 +215,74 @@
 #     UN-GATE ONLY when OMN-16804 has removed the slug map from the write path
 #     and a `0030a_` pre-step exists that defeats the RLS blindness described
 #     above inside a single DO block. Do NOT un-gate by editing 0031's bytes.
+#
+#     SUPERSEDED 2026-08-29 (OMN-16930) — the `0030a_` pre-step named in the
+#     paragraph above is CANCELLED and replaced. Operator ruling, verbatim:
+#     "Hold + fix mechanism" — the 0031 fence STAYS until write-time stamping
+#     deploys, and the permanent fix is green-lit as new scope: a
+#     RUNTIME-POPULATED slug->UUID tenant relation in omnidash_analytics so
+#     migration-time conversions resolve at apply time instead of hardcoded
+#     maps. The pre-step's premise was that the slug set becomes closed and
+#     enumerable once the writer stops emitting slugs; the ruling rejects
+#     waiting for that, because a pre-step over an enumerated set is still a
+#     hardcoded map with a timestamp on it. Everything ABOVE about 0031 itself
+#     remains accurate — only the named remedy changed. See the TWELFTH id.
+#
+#   delegation 0032 — OMN-16930. The replacement conversion, and the TWELFTH
+#     id. It is fenced for the same reason 0031 is: it can ABORT, and an abort
+#     in this node directory takes an unrelated team's migrations down with it
+#     by lexical sort order (see "WHO WAS PAYING FOR IT" above — that hazard
+#     is a property of the position in the corpus, not of 0031's contents, so
+#     it applies unchanged to its successor).
+#
+#     WHAT CHANGED. 0032 resolves each slug by JOINing `tenant_registry_mirror`
+#     — a relation node_projection_tenant_registry (omnimarket) materializes
+#     from `onex.tenant.events`, the durable outbox onex-api already writes in
+#     the same transaction that creates the tenant row (OMN-16027). No literal
+#     slug appears in its transform expression. Adding a tenant never requires
+#     a code change again. It also defeats the RLS blindness described above
+#     inside a single DO block before it inspects anything, so its guards see
+#     the real rows; and its abort message names every unresolved slug and
+#     states that THE PROJECTION HAS NOT CAUGHT UP, rather than surfacing the
+#     symptom (`contains null values`) that cost a week of diagnosis.
+#
+#     0031's BYTES ARE UNTOUCHED. Re-proved against the live .201 dev lane
+#     2026-08-29: platform_catalog.schema_migrations carries it with checksum
+#     79ee3b021d0a04088b2f733fa0558ea110b2a6f75b4fb338abe9c5c123f74442, kind
+#     content_sha256, byte-identical to both committed copies and to this
+#     tree's own _ledger/application-migrations.tsv row. Recorded in
+#     _ledger/migration-supersessions.tsv (0031 -> 0032). 0031 STAYS in this
+#     list permanently: it is retired, not released.
+#
+#     WHY IT IS FENCED RATHER THAN SHIPPED HOT. The mirror must be POPULATED
+#     before the conversion can resolve anything, and a projection that is
+#     deployed is not the same as a projection that has caught up. Releasing
+#     0032 before that holds would abort every deploy — correctly, and
+#     uselessly. The fence is the interlock.
+#
+#     UN-GATE ORDERING — all three, in this order, and step 3 is an OPERATOR
+#     action, never an agent's inference that the mirror "looks caught up":
+#       1. node_projection_tenant_registry is DEPLOYED and CAUGHT UP —
+#          tenant_registry_mirror holds a row for every distinct tenant_id in
+#          delegation_events. Verify by running 0032's own pre-guard query,
+#          not by inspecting pod status.
+#       2. Write-time UUID stamping (OMN-16804) is LIVE, so no new slug is
+#          ever written to the column after the conversion.
+#       3. The operator releases BOTH ids from this baseline — 0032 because it
+#          is the conversion, 0031 because leaving a retired id fenced is what
+#          keeps it retired. Steps 1 and 2 are independent and may proceed in
+#          parallel; step 3 requires both.
+#     Recorded identically on OMN-16930, OMN-16804 and OMN-16493.
+#
+#   tenant_registry 0000 — deliberately NOT fenced, and this absence is a
+#     decision rather than an oversight. It creates tenant_registry_mirror and
+#     nothing else: no conversion, no RLS posture to rule on, no abort path. It
+#     is also the PRECONDITION for 0032, so fencing it would guarantee the
+#     ordering violation 0032 is written to detect. Note that node directories
+#     apply in sort order and node_projection_delegation sorts BEFORE
+#     node_projection_tenant_registry — on a first-ever bootstrap 0032 runs
+#     first, which 0032 handles explicitly (empty table: convert; rows present:
+#     abort naming the violation).
 fenced_node_migrations:
   - id: "node:node_projection_delegation:0023_delegation_rls_tenant_isolation.sql"
     ticket: "OMN-14974"
@@ -237,3 +306,5 @@ fenced_node_migrations:
     ticket: "OMN-16090"
   - id: "node:node_projection_delegation:0031_delegation_events_tenant_id_to_uuid.sql"
     ticket: "OMN-16493"
+  - id: "node:node_projection_delegation:0032_delegation_events_tenant_id_uuid_via_registry.sql"
+    ticket: "OMN-16930"
