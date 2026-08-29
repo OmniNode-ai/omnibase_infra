@@ -5,6 +5,7 @@
 from __future__ import annotations
 
 import argparse
+import fnmatch
 import sys
 from pathlib import Path
 
@@ -34,6 +35,58 @@ CI_PROCESS_TEST_PATHS = (
     "scripts/ci/",
     "config/runner_routing_policy.yaml",
 )
+
+# --- The CI-contract class (OMN-16745) -------------------------------------
+#
+# RULING -- what proof a `.github/workflows`-only diff actually requires.
+#
+# Necessary and sufficient: the CI-contract class, `tests/ci/` -- the
+# workflow-shape, required-context and gate-wiring tests that read
+# `.github/workflows/**` off disk and assert its contents (e.g.
+# test_ci_workflow_resilience.py, test_merge_hold_gate_omn15484.py,
+# test_omn_16878_enforcement_wiring.py) -- plus, when the diff also touches a
+# test module, that module itself.
+#
+# NOT sufficient, and not even relevant: the Python unit suite. No test under
+# `tests/unit/` has an outcome a workflow YAML edit can change; escalating a
+# workflow diff to it is cost without proof, which is exactly what trains
+# operators and agents to reach for a bypass (OMN-16346 recorded ~20 refused
+# pushes and zero bypasses over a diff of this class, stranded for want of a
+# host with headroom for a suite that could not have falsified the change).
+#
+# NOT permissible either: selecting nothing. "Workflow YAML cannot break Python
+# tests, therefore skip" is the wrong inference -- workflow files break the
+# ENFORCEMENT of tests, which is worse and invisible. OMN-15541 is the live
+# counterexample: `ci.yml` hardcoded `pytest src/omnibase_compat/tests/` while
+# the selector and pyproject named different roots, so full-suite escalation
+# collected ZERO of the top-level `tests/` tree -- a fail-OPEN safety net
+# produced by a workflow edit. A renamed job id silently drops a required
+# status check; a changed `on:` trigger disables a gate. So this class is
+# positively named and always NON-EMPTY, and its suite is asserted to be
+# populated and workflow-aware by
+# tests/unit/scripts/ci/test_detect_test_paths.py (Operating Rule #5: a class
+# that is defined but never runs anything is a regression, not a fix).
+#
+# This is a CLASSIFICATION, not a weakening. Nothing here narrows a diff that
+# touches any other path class: a workflow file alongside a shared module still
+# escalates SHARED_MODULE, alongside test infrastructure still escalates
+# TEST_INFRASTRUCTURE, and alongside an ordinary source file rides additively
+# with that file's own narrowing. There is no env override, no allowlist
+# mapping workflow paths to zero tests, and no bypass token anywhere in this
+# change (CLAUDE.md Operating Rules #4 and #10).
+CI_CONTRACT_TEST_ROOT = "tests/ci/"
+
+# Mirrors `[tool.pytest.ini_options] python_files` in pyproject.toml, held equal
+# by tests/unit/scripts/ci/test_detect_test_paths.py. Widening pytest's
+# collection patterns without widening this must fail a test rather than
+# silently misclassify a newly-collectable module as unnarrowable.
+TEST_FILE_PATTERNS = ("test_*.py", "*_test.py")
+
+
+def is_collectable_test_file_name(name: str) -> bool:
+    """True when pytest would collect a file with this name (``python_files``)."""
+    return any(fnmatch.fnmatch(name, pattern) for pattern in TEST_FILE_PATTERNS)
+
 
 # OMN-15336 item 4 repair follow-up: the vendored node-migration tree lives
 # under neither src/, scripts/, nor tests/, so a change there (a new
@@ -147,17 +200,38 @@ def _changed_test_paths(changed_files: list[str]) -> list[str]:
     ]
 
 
-def _requires_unnarrowable_full_suite(changed_files: list[str]) -> bool:
-    """True when a changed test path cannot be narrowed below `tests/` itself.
+def _root_level_changed_test_paths(changed_files: list[str]) -> list[str]:
+    """Changed `.py` paths sitting directly in the `tests/` root."""
+    return [
+        path
+        for path in _changed_test_paths(changed_files)
+        if path.count("/") == 1 and path.endswith(".py")
+    ]
 
-    A test module sitting directly in the tests/ root (no subdirectory) has no
-    containing directory other than `tests/`. Emitting `tests/` as a *smart*
-    selection would run the whole suite under the smart step's split count and
-    timeouts; the honest answer is the real full-suite escalation.
+
+def _requires_unnarrowable_full_suite(changed_files: list[str]) -> bool:
+    """True when a root-level `tests/` module genuinely cannot be narrowed.
+
+    A path sitting directly in the tests/ root has no containing directory
+    other than `tests/`, and emitting `tests/` as a *smart* selection would run
+    the whole suite under the smart step's split count and timeouts (OMN-15245).
+
+    OMN-16745 splits that population in two on POSITIVE evidence, because the
+    original rule conflated "has no containing directory" with "cannot be
+    narrowed", and those are different claims:
+
+      * A module pytest COLLECTS (``python_files``) is narrowable -- to itself.
+        `_resolve` emits it at file grain, which is strictly narrower than the
+        `tests/` directory this escalation existed to avoid emitting, and
+        strictly covers the changed module. No escalation.
+      * A module pytest does NOT collect (``tests/infrastructure_config.py``, a
+        shared helper) is genuinely unnarrowable: handing it to pytest collects
+        nothing (exit 5), and any suite in the tree may import it, so its blast
+        radius really is the whole tree. Still escalates -- fail-closed.
     """
     return any(
-        path.count("/") == 1 and path.endswith(".py")
-        for path in _changed_test_paths(changed_files)
+        not is_collectable_test_file_name(path.rsplit("/", 1)[1])
+        for path in _root_level_changed_test_paths(changed_files)
     )
 
 
@@ -168,9 +242,10 @@ def _uncovered_changed_test_dirs(
     """Directories that must be added so every changed test path is collected.
 
     Additive only: a changed test path already covered by an existing selection
-    contributes nothing. Root-level test modules are handled by the
-    `_requires_unnarrowable_full_suite` escalation in `compute_selection`, so
-    they are skipped here rather than emitting `tests/` as a smart selection.
+    contributes nothing. Root-level test modules are never emitted as `tests/`
+    here: `_resolve` already selected the collectable ones at file grain, and
+    `compute_selection` already escalated on the non-collectable ones
+    (OMN-16745), so both halves are covered before this runs.
     """
     extra: set[str] = set()
     for path in _changed_test_paths(changed_files):
@@ -200,9 +275,14 @@ def resolve_test_paths(
         tests/unit/<module>/.
       - Changes under scripts/: include tests/scripts/ + tests/unit/scripts/
         (scripts/ci/ additionally keeps its tests/ci/ CI-process mapping).
+      - Changes under .github/workflows/ (and the other CI-process paths):
+        include CI_CONTRACT_TEST_ROOT, the CI-contract class -- see the ruling
+        on that constant.
       - ANY changed path under tests/ is covered by the returned selection --
-        its own directory at minimum (OMN-15245). Narrowing may add tests; it
-        may never drop a test file the diff itself touched.
+        its own directory at minimum (OMN-15245), or, for a collectable module
+        sitting directly in the tests/ root, the module itself (OMN-16745).
+        Narrowing may add tests; it may never drop a test file the diff itself
+        touched.
       - Files outside src/, scripts/ and tests/: no contribution; caller decides
         whether to escalate to full suite.
 
@@ -211,6 +291,12 @@ def resolve_test_paths(
     """
     config = load_adjacency_map(adjacency_path)
     return _resolve(changed_files, config)
+
+
+def _selection_target_exists(repo_root: Path, selected_path: str) -> bool:
+    """True when `selected_path` is on disk in the shape the selector emitted."""
+    target = repo_root / selected_path
+    return target.is_dir() if selected_path.endswith("/") else target.is_file()
 
 
 def _resolve(
@@ -234,7 +320,7 @@ def _resolve(
             path == prefix.rstrip("/") or path.startswith(prefix)
             for prefix in CI_PROCESS_TEST_PATHS
         ):
-            selected.add("tests/ci/")
+            selected.add(CI_CONTRACT_TEST_ROOT)
 
         if path.startswith(SCRIPTS_PREFIX):
             # OMN-15245: scripts/ holds deploy-path and governance-guard code
@@ -282,18 +368,29 @@ def _resolve(
     for module in expanded:
         selected.add(f"{TEST_UNIT_PREFIX}{module}/")
 
+    # OMN-16745: a root-level test module is narrowable to ITSELF. This is the
+    # file-grain half of the classification documented on
+    # `_requires_unnarrowable_full_suite`; the non-collectable half never
+    # reaches here, because `compute_selection` escalates on it first.
+    for path in _root_level_changed_test_paths(changed_files):
+        if is_collectable_test_file_name(path.rsplit("/", 1)[1]):
+            selected.add(path)
+
     # OMN-15245 fail-closed invariant, applied LAST so it sees everything the
     # mappings above already cover: every CHANGED path under tests/ must be
     # collected by the emitted selection.
     selected.update(_uncovered_changed_test_dirs(changed_files, selected))
 
-    # Drop selected directories that do not exist on disk. A module in the
+    # Drop selected targets that do not exist on disk. A module in the
     # adjacency map (e.g. `dlq`) may have source under src/ but no
-    # corresponding tests/unit/<module>/ directory; passing a missing path to
-    # pytest aborts collection with exit code 5 ("no tests ran"). Filtering to
-    # existing directories keeps the gate honest for any zone whose reverse
-    # dependents include a test-less module.
-    return sorted(p for p in selected if (repo_root / p).is_dir())
+    # corresponding tests/unit/<module>/ directory, and a root-level test
+    # module the diff DELETED no longer exists at HEAD; passing a missing path
+    # to pytest aborts collection with exit code 5 ("no tests ran"). Filtering
+    # to existing targets keeps the gate honest for any zone whose reverse
+    # dependents include a test-less module. Directories are required to be
+    # directories and file-grain entries to be files, so neither shape can
+    # satisfy the check by accident.
+    return sorted(p for p in selected if _selection_target_exists(repo_root, p))
 
 
 def compute_selection(
@@ -325,8 +422,12 @@ def compute_selection(
         ):
             return _full_suite(EnumFullSuiteReason.TEST_INFRASTRUCTURE)
 
-    # 2b. Unnarrowable changed test (OMN-15245): a changed test module directly
-    # under tests/ has no containing directory below `tests/` itself.
+    # 2b. Unnarrowable changed test (OMN-15245, narrowed by OMN-16745): a
+    # changed module directly under tests/ that pytest would NOT collect. It
+    # has no containing directory below `tests/`, pytest cannot run it, and any
+    # suite may import it. A root-level module pytest DOES collect is narrowed
+    # to itself at file grain in `_resolve` instead -- see the ruling above
+    # CI_CONTRACT_TEST_ROOT and `_requires_unnarrowable_full_suite`.
     if _requires_unnarrowable_full_suite(changed_files):
         return _full_suite(EnumFullSuiteReason.CHANGED_TEST_UNNARROWABLE)
 
@@ -366,10 +467,11 @@ def compute_selection(
     if not selected:
         # Conservative one-shard fallback over the full tests/unit/ tree. This
         # is NOT a no-op — it runs ~3-5 min of unit tests. It fires for changes
-        # that have no unit-test mapping (workflow-only, integration-only, or
-        # an otherwise-unclassified path) and are NOT provably docs-only (step
-        # 5 above already exempted the pure-docs case). Per Selector Truth
-        # Boundary: safer to run something than nothing.
+        # that have no test mapping at all (an unrecognised config file, a new
+        # top-level directory) and are NOT provably docs-only (step 5 above
+        # already exempted the pure-docs case). Per Selector Truth Boundary:
+        # safer to run something than nothing. `.github/workflows/**` is NOT in
+        # this population — it maps positively to CI_CONTRACT_TEST_ROOT.
         selected = ["tests/unit/"]
     split_count = _split_count_for(selected)
 

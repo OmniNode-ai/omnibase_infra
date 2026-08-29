@@ -43,11 +43,14 @@ from pathlib import Path
 
 import pytest
 
+from scripts.ci.detect_test_paths import CI_CONTRACT_TEST_ROOT, compute_selection
+
 pytestmark = pytest.mark.unit
 
 REPO_ROOT = Path(__file__).resolve().parents[3]
 HOOK = REPO_ROOT / "scripts/hooks/prepush_smart_tests.sh"
 FUNCTION_NAME = "filter_prepush_runnable_paths"
+WHOLE_SUITE_PREDICATE = "selection_is_whole_suite"
 
 # The one integration subtree the hook is allowed to run locally (OMN-16825).
 # Kept here as a literal so a directory-wide reversion in the hook turns this
@@ -106,6 +109,31 @@ def _run_filter(paths: list[str], tmp_path: Path) -> list[str]:
     )
     assert result.returncode == 0, result.stderr
     return [line for line in result.stdout.splitlines() if line]
+
+
+def _run_selection_is_whole_suite(target: str, paths: list[str]) -> bool:
+    """Execute the hook's real heavy-selection predicate (OMN-16745).
+
+    Same executed-seam pattern as `_run_filter`: the bash function is extracted
+    from the hook and run, never grepped or reimplemented here.
+    """
+    bash = shutil.which("bash")
+    assert bash is not None, "bash not available"
+    fragment = _extract_function(HOOK.read_text(), WHOLE_SUITE_PREDICATE)
+    quoted = " ".join(f'"{p}"' for p in paths)
+    result = subprocess.run(
+        [
+            bash,
+            "-c",
+            f"set -euo pipefail\n{fragment}\n"
+            f'{WHOLE_SUITE_PREDICATE} "{target}" {quoted}',
+        ],
+        capture_output=True,
+        text=True,
+        check=False,
+    )
+    assert result.returncode in (0, 1), result.stderr
+    return result.returncode == 0
 
 
 def test_hook_exists_and_defines_the_filter() -> None:
@@ -322,3 +350,69 @@ def test_blanket_integration_ignore_does_not_suppress_an_explicit_chain_target(
     assert f"{LOCALLY_RUNNABLE_INTEGRATION_PREFIX}test_event_chain_gate.py" in (
         result.stdout
     ), result.stdout[-4000:]
+
+
+# ---------------------------------------------------------------------------
+# OMN-16745: the CI-contract class actually runs through this hook
+# ---------------------------------------------------------------------------
+#
+# Operating Rule #5 -- a substitute proof that is classified but never invoked
+# is a regression, not a fix. The selector's ruling for a
+# `.github/workflows`-only diff selects CI_CONTRACT_TEST_ROOT; these tests pin
+# that the hook actually hands it to pytest rather than deferring it, and that
+# a file-grain root-level test module survives the same path.
+
+
+def test_omn16745_ci_contract_class_survives_the_runnable_filter(
+    tmp_path: Path,
+) -> None:
+    assert _run_filter([CI_CONTRACT_TEST_ROOT], tmp_path) == [CI_CONTRACT_TEST_ROOT]
+
+
+def test_omn16745_root_level_test_module_survives_the_runnable_filter(
+    tmp_path: Path,
+) -> None:
+    module = "tests/test_compose_profile_teardown_policy.py"
+    assert _run_filter([CI_CONTRACT_TEST_ROOT, module], tmp_path) == [
+        CI_CONTRACT_TEST_ROOT,
+        module,
+    ]
+
+
+def test_omn16745_ci_contract_class_is_not_the_whole_suite_target() -> None:
+    """The class must not trip the heavy-selection guard.
+
+    `selection_is_whole_suite` routes a selection that covers the entire
+    escalation target to the load-guarded heavy path. If CI_CONTRACT_TEST_ROOT
+    tripped it, the ruling would be decorative -- a workflow diff would still
+    be refused on a loaded host, which is exactly the OMN-16346 stranding.
+    """
+    assert (
+        _run_selection_is_whole_suite("tests/unit/", [CI_CONTRACT_TEST_ROOT]) is False
+    )
+    assert (
+        _run_selection_is_whole_suite(
+            "tests/unit/",
+            [CI_CONTRACT_TEST_ROOT, "tests/test_compose_profile_teardown_policy.py"],
+        )
+        is False
+    )
+    # Negative control: the predicate still fires on a genuine whole-suite
+    # selection, so the assertions above are not vacuous.
+    assert _run_selection_is_whole_suite("tests/unit/", ["tests/"]) is True
+
+
+def test_omn16745_workflow_diff_selects_a_class_the_hook_will_run(
+    tmp_path: Path,
+) -> None:
+    """End-to-end across the seam: selector output -> the hook's pytest argv."""
+    selection = compute_selection(
+        changed_files=[".github/workflows/ci.yml"],
+        adjacency_path=REPO_ROOT / "scripts/ci/test_selection_adjacency.yaml",
+        ref_name="pr-branch",
+    )
+    assert selection.is_full_suite is False
+    assert selection.selected_paths == [CI_CONTRACT_TEST_ROOT]
+    assert _run_filter(list(selection.selected_paths), tmp_path) == [
+        CI_CONTRACT_TEST_ROOT
+    ]
