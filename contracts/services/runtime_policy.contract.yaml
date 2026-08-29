@@ -71,6 +71,20 @@ profiles:
         source:
           source_type: env
           source_path: SLACK_BOT_TOKEN
+      # OMN-16921: node_slack_publish_effect._resolve_transport() resolves via
+      # contract_secret_ref(_CONTRACT_PATH, "SLACK_BOT_TOKEN"), which returns
+      # the LITERAL string "SLACK_BOT_TOKEN" -- the node's own contract.yaml
+      # secrets-block dict key, not the dotted "slack.bot_token" convention
+      # name above. That literal string was never a mapped logical_name, so
+      # under this lane's enable_convention_fallback: false posture the
+      # lookup missed and logged a "no_mapping" warning on every delivery
+      # (rescued only because the call site also threads
+      # env_var_fallback=ref, per omnimarket#2197). Additive: the dotted
+      # mapping above is unchanged and may still be in use elsewhere.
+      - logical_name: SLACK_BOT_TOKEN
+        source:
+          source_type: env
+          source_path: SLACK_BOT_TOKEN
       # OMN-15918: gateway_attach dependency wiring (node_gateway_attach_effect /
       # ModelGatewayAttachConfig, omnibase_infra#2731's ONEX_CORE_041 fail-closed
       # check in service_kernel.py). This is completion of #2731's landed
@@ -192,6 +206,20 @@ profiles:
         source:
           source_type: env
           source_path: SLACK_BOT_TOKEN
+      # OMN-16921: node_slack_publish_effect._resolve_transport() resolves via
+      # contract_secret_ref(_CONTRACT_PATH, "SLACK_BOT_TOKEN"), which returns
+      # the LITERAL string "SLACK_BOT_TOKEN" -- the node's own contract.yaml
+      # secrets-block dict key, not the dotted "slack.bot_token" convention
+      # name above. That literal string was never a mapped logical_name, so
+      # under this lane's enable_convention_fallback: false posture the
+      # lookup missed and logged a "no_mapping" warning on every delivery
+      # (rescued only because the call site also threads
+      # env_var_fallback=ref, per omnimarket#2197). Additive: the dotted
+      # mapping above is unchanged and may still be in use elsewhere.
+      - logical_name: SLACK_BOT_TOKEN
+        source:
+          source_type: env
+          source_path: SLACK_BOT_TOKEN
       # OMN-16110: see the dev profile's identical block above for the full
       # rationale on these 5 gateway.attach.keycloak.* mappings.
       - logical_name: gateway.attach.keycloak.issuer
@@ -287,6 +315,20 @@ profiles:
           source_path: /run/secrets/vertex_access_token
       # OMN-13726: Slack bot token for outbound Slack integrations.
       - logical_name: slack.bot_token
+        source:
+          source_type: env
+          source_path: SLACK_BOT_TOKEN
+      # OMN-16921: node_slack_publish_effect._resolve_transport() resolves via
+      # contract_secret_ref(_CONTRACT_PATH, "SLACK_BOT_TOKEN"), which returns
+      # the LITERAL string "SLACK_BOT_TOKEN" -- the node's own contract.yaml
+      # secrets-block dict key, not the dotted "slack.bot_token" convention
+      # name above. That literal string was never a mapped logical_name, so
+      # under this lane's enable_convention_fallback: false posture the
+      # lookup missed and logged a "no_mapping" warning on every delivery
+      # (rescued only because the call site also threads
+      # env_var_fallback=ref, per omnimarket#2197). Additive: the dotted
+      # mapping above is unchanged and may still be in use elsewhere.
+      - logical_name: SLACK_BOT_TOKEN
         source:
           source_type: env
           source_path: SLACK_BOT_TOKEN
