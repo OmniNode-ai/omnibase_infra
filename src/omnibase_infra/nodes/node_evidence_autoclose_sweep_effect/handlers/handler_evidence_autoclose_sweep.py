@@ -1426,6 +1426,27 @@ class HandlerEvidenceAutocloseSweep:
         failed_count = _as_int(verdict.get("failed_count"))
         non_probative_count = _as_int(verdict.get(_DOD_VERIFY_NON_PROBATIVE_KEY))
         verify_status = str(verdict.get("status") or "").strip().lower()
+        # OMN-16905: read the behaviour count HERE, with every other counter,
+        # not inside the `all_verified` branch below. It is only the flip
+        # predicate that needs it conditionally; the OUTCOME row needs it
+        # always, because that row is the machine-readable record the fleet is
+        # triaged from.
+        #
+        # Reading it only under `all_verified` left `dod_verify_behavior_proving
+        # _count` at its model default of 0 on every gap/skip path, so the row
+        # could not distinguish "no behaviour proof was declared" from
+        # "behaviour proof ran, passed, and something else held the flip". In
+        # run 33210163405 that produced a 1-vs-0 split against the diagnose
+        # leg's own dump for OMN-16803 with all four other counters identical,
+        # and the split was read as a classifier regression between the gate
+        # venv and the OMN-16846 dispatch venv. There was no such regression:
+        # OMN-16803's verdict was `status=skipped`, it took the gap path, and
+        # the 0 was structural. Reporting the measured value on every path is
+        # what stops that misreading recurring.
+        #
+        # Absent key stays 0 and is handled as ERROR_VERIFY_UNPARSEABLE below
+        # (OMN-15911) — this line never infers a value the verifier did not give.
+        behavior_proving_count = _as_int(verdict.get(_DOD_VERIFY_BEHAVIOR_KEY))
 
         # Both dod_verify's OWN terminal status and the arithmetic must agree.
         # The arithmetic is the stricter of the two: dod_verify reports VERIFIED
@@ -1485,8 +1506,15 @@ class HandlerEvidenceAutocloseSweep:
                     dod_verify_verified_count=verified_count,
                     dod_verify_failed_count=failed_count,
                     dod_verify_non_probative_count=non_probative_count,
+                    # OMN-16905: explicit, not the model default. This is the
+                    # one branch where 0 does NOT mean "measured zero" — the
+                    # key is absent, which is exactly why this branch refuses
+                    # to decide. Writing it out keeps the "report every counter
+                    # you read" invariant mechanically checkable (the AST gate
+                    # in test_handler_evidence_autoclose_sweep.py) instead of
+                    # leaving one silent hole in it.
+                    dod_verify_behavior_proving_count=0,
                 )
-            behavior_proving_count = _as_int(verdict.get(_DOD_VERIFY_BEHAVIOR_KEY))
             if behavior_proving_count <= 0:
                 return await self._behavior_proof_outcome(
                     ticket_id=ticket_id,
@@ -1648,6 +1676,10 @@ class HandlerEvidenceAutocloseSweep:
             dod_verify_verified_count=verified_count,
             dod_verify_failed_count=failed_count,
             dod_verify_non_probative_count=non_probative_count,
+            # OMN-16905: the measured value, not the model default. This is the
+            # path OMN-16803 took, and the default is what made its row read 0
+            # while its own verdict said 1.
+            dod_verify_behavior_proving_count=behavior_proving_count,
         )
         # OMN-16821: `non_probative_count` joins the OMN-16808 dedup
         # fingerprint because the STATEMENT now varies with it. Two verdicts

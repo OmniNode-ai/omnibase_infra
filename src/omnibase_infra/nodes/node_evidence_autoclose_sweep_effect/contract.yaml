@@ -84,14 +84,35 @@
 #     wording now names the shortfall actually found instead of asserting the
 #     ACs are unproven, and `non_probative_count` joins the OMN-16808 dedup
 #     fingerprint because the statement varies with it.
+#   - OMN-16905 (contract 1.3.1): REPORT WHAT YOU MEASURED. The outcome row
+#     read `behavior_proving_count` off the verdict only inside the
+#     `all_verified` branch; every other exit built its outcome without the
+#     field and took the model's `default=0`. A gap-path row therefore
+#     published a structural 0 that had never been read from the verdict,
+#     indistinguishable in the emitted JSON from a measured zero. That is
+#     what made this node's own OUTCOME row disagree 1-vs-0 with dod_verify's
+#     dump for OMN-16803 in run 33210163405 while the other four counters
+#     matched exactly — the other four are read unconditionally, above the
+#     branch — and the split was misread as an omnimarket classifier
+#     regression between the gate venv and the OMN-16846 dispatch venv. There
+#     was no such regression. The read now sits with the other counters and
+#     every verdict-bearing exit publishes it; the one branch where 0 does
+#     NOT mean "measured zero" (ERROR_VERIFY_UNPARSEABLE, key genuinely
+#     absent) states its 0 explicitly. NO DECISION CHANGES: the flip
+#     predicate reads the verdict directly and always did, so no ticket's
+#     flippability moves. This is reporting fidelity — the row is the
+#     machine-readable record the fleet is triaged from, and a counter that
+#     reads 0 whenever a ticket is not already flippable cannot distinguish
+#     "no behavior proof was declared" from "behavior proof ran, passed, and
+#     something else held the flip".
 #
 name: "node_evidence_autoclose_sweep_effect"
 node_type: "EFFECT_GENERIC"
 contract_version:
   major: 1
   minor: 3
-  patch: 0
-node_version: "1.3.0"
+  patch: 1
+node_version: "1.3.1"
 description: >
   Scheduled sweep wiring companion-merge -> dod_verify -> governed Done flip. Enumerates merged onex_change_control evidence companions, extracts their Evidence-Ticket binding, re-runs dod_verify, and flips Done or posts a gap comment via the Linear API. DRY-RUN by default; ONEX_AUTOCLOSE_DISABLED kill switch checked first.
 
