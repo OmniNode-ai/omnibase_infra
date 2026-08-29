@@ -48,6 +48,13 @@ from omnibase_infra.protocols import ProtocolTopicRegistry
 from omnibase_infra.protocols.protocol_auto_wiring_manifest_like import (
     ProtocolAutoWiringManifestLike,
 )
+from omnibase_infra.runtime.health.projection_liveness import (
+    describe_dlq_saturation,
+    describe_projection_attachment,
+    evaluate_projection_liveness,
+    select_projection_contracts,
+)
+from omnibase_infra.runtime.observability import get_consumer_flow_counters
 from omnibase_infra.topics import topic_keys
 from omnibase_infra.utils import (
     apply_instance_discriminator,
@@ -56,6 +63,9 @@ from omnibase_infra.utils import (
 from omnibase_infra.utils.correlation import generate_correlation_id
 
 if TYPE_CHECKING:
+    from omnibase_infra.models.health.model_projection_contract_ref import (
+        ModelProjectionContractRef,
+    )
     from omnibase_infra.protocols.protocol_event_bus_like import ProtocolEventBusLike
 
 logger = logging.getLogger(__name__)
@@ -483,6 +493,12 @@ class ServiceRuntimeHealthMonitor:
         discovery_error_count = 0
         subscribe_topics: set[str] = set()
         expected_groups: list[ExpectedConsumerGroup] = []
+        # OMN-16994: the contract-declared projection set and the topics that
+        # actually have a live subscription. Held outside the try so a discovery
+        # failure leaves them at "unobservable" (empty) rather than at a
+        # fabricated all-clear.
+        projections: tuple[ModelProjectionContractRef, ...] = ()
+        attached_topics: frozenset[str] = frozenset()
         try:
             manifest = _filter_manifest_for_runtime_profile(_discover_contracts())
             contract_count = manifest.total_discovered
@@ -491,8 +507,18 @@ class ServiceRuntimeHealthMonitor:
             expected_groups = _expected_consumer_groups_from_manifest(
                 manifest, os.environ.get("KAFKA_INSTANCE_ID")
             )
+            projections = select_projection_contracts(manifest)
             live_expected_groups = _expected_consumer_groups_from_event_bus(
                 self._event_bus
+            )
+            # OMN-16994: capture the live registry BEFORE it overwrites
+            # ``expected_groups`` below. That override is what hid nineteen
+            # unattached projections for months — a contract that never
+            # subscribed is absent from the registry, so replacing the
+            # manifest-derived expectation set with it makes the missing
+            # consumer stop being expected instead of being reported.
+            attached_topics = frozenset(
+                expected.topic for expected in live_expected_groups
             )
             if live_expected_groups:
                 expected_groups = live_expected_groups
@@ -670,6 +696,32 @@ class ServiceRuntimeHealthMonitor:
                 )
             )
 
+        # --- Dimension 4 & 5: Projection liveness (OMN-16994) ----------------
+        # OMN-16843's deferred AC6. Every dimension above measures
+        # CONNECTEDNESS; none of them measures whether a projection persists
+        # anything. A projection that never attached, and a projection that
+        # attaches and quarantines 100% of what it takes, both read green on
+        # consumer-group state, on lag, and on process health.
+        liveness = evaluate_projection_liveness(
+            projections=projections,
+            attached_topics=attached_topics,
+            flow_windows=get_consumer_flow_counters().retained_windows.snapshot(),
+        )
+        dimensions.append(
+            ModelRuntimeHealthDimension(
+                name="projection_attachment",
+                status="DEGRADED" if liveness.unattached_projections else "HEALTHY",
+                detail=describe_projection_attachment(liveness),
+            )
+        )
+        dimensions.append(
+            ModelRuntimeHealthDimension(
+                name="projection_dlq_saturation",
+                status="DEGRADED" if liveness.dlq_saturated_projections else "HEALTHY",
+                detail=describe_dlq_saturation(liveness),
+            )
+        )
+
         aggregate_status: _HealthStatus = _worst([d.status for d in dimensions])
 
         event = ModelRuntimeHealthCheckEvent(
@@ -683,17 +735,24 @@ class ServiceRuntimeHealthMonitor:
             empty_consumer_group_count=empty_consumer_group_count,
             subscribe_topic_count=len(subscribe_topics),
             uncovered_topic_count=uncovered_topic_count,
+            projection_count=liveness.projection_count,
+            unattached_projection_count=len(liveness.unattached_projections),
+            dlq_saturated_projection_count=len(liveness.dlq_saturated_projections),
         )
 
         logger.info(
             "Runtime health check: status=%s contracts=%d errors=%d "
-            "consumer_groups=%d empty=%d uncovered_topics=%d",
+            "consumer_groups=%d empty=%d uncovered_topics=%d "
+            "projections=%d unattached_projections=%d dlq_saturated_projections=%d",
             aggregate_status,
             contract_count,
             discovery_error_count,
             consumer_group_count,
             empty_consumer_group_count,
             uncovered_topic_count,
+            liveness.projection_count,
+            len(liveness.unattached_projections),
+            len(liveness.dlq_saturated_projections),
         )
 
         if aggregate_status != "HEALTHY":

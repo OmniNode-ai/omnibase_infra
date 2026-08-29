@@ -8,7 +8,9 @@ no poller, no scraper, no metrics endpoint.
 """
 
 from omnibase_infra.runtime.observability.consumer_flow_counters import (
+    RETAINED_FLOW_WINDOW_COUNT,
     ConsumerFlowCounters,
+    RetainedFlowWindows,
     active_flow_key,
     get_consumer_flow_counters,
     record_active_dlq,
@@ -19,7 +21,9 @@ from omnibase_infra.runtime.observability.consumer_flow_counters import (
 )
 
 __all__ = [
+    "RETAINED_FLOW_WINDOW_COUNT",
     "ConsumerFlowCounters",
+    "RetainedFlowWindows",
     "active_flow_key",
     "get_consumer_flow_counters",
     "record_active_dlq",

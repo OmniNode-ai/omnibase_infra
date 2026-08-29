@@ -46,6 +46,7 @@ from __future__ import annotations
 
 import logging
 import threading
+from collections import deque
 from collections.abc import Iterator
 from contextlib import contextmanager
 from contextvars import ContextVar
@@ -73,6 +74,52 @@ _ACTIVE_FLOW_KEY: ContextVar[tuple[str, str] | None] = ContextVar(
     default=None,
 )
 
+# How many CLOSED windows are kept after ``drain()`` so an off-cycle reader can
+# take a ratio over them (OMN-16994).
+#
+# Derivation, not a magic number: the heartbeat closes a window every 30 s
+# (``mixin_node_introspection.initialize_introspection``'s
+# ``heartbeat_interval_seconds`` default) and ``ServiceRuntimeHealthMonitor``
+# evaluates every 300 s (``_DEFAULT_CHECK_INTERVAL``), so ten closed windows is
+# exactly one health-check interval of history. A live read of the OPEN window
+# would instead race the heartbeat and usually see whatever fraction of a window
+# happened to be accumulated, which for a projection consuming in bursts is a
+# ratio taken over a sample too small to mean anything.
+RETAINED_FLOW_WINDOW_COUNT: int = 10
+
+
+class RetainedFlowWindows:
+    """Bounded ring of the most recently CLOSED flow windows (OMN-16994).
+
+    Its own object, with its own lock, because it answers a different question
+    from the accumulator that fills it: the accumulator owns the OPEN window and
+    is reset every drain, while this owns the CLOSED history that survives one.
+    A reader on a slower cycle than the heartbeat has nothing else to read.
+
+    Windows are immutable ``ModelNodeFlowWindow`` values, fully built before
+    they arrive here, so a reader either sees a whole window or does not see it
+    — there is no torn state to guard against beyond the deque mutation itself.
+    """
+
+    def __init__(self, maxlen: int = RETAINED_FLOW_WINDOW_COUNT) -> None:
+        self._lock = threading.Lock()
+        self._windows: deque[ModelNodeFlowWindow] = deque(maxlen=maxlen)
+
+    def append(self, window: ModelNodeFlowWindow) -> None:
+        """Retain one closed window, evicting the oldest past the bound."""
+        with self._lock:
+            self._windows.append(window)
+
+    def snapshot(self) -> tuple[ModelNodeFlowWindow, ...]:
+        """Return the retained closed windows, oldest first.
+
+        Empty is a distinct state from "nothing flowed": it means no window has
+        closed yet on this process (or this node does not carry the window), so
+        a reader must treat it as UNKNOWN and never as proven-idle.
+        """
+        with self._lock:
+            return tuple(self._windows)
+
 
 class ConsumerFlowCounters:
     """Per-(consumer_group, topic) throughput counters for one process.
@@ -92,6 +139,11 @@ class ConsumerFlowCounters:
         self._window_start: datetime | None = None
         self._window_sequence: int = 0
         self._carrier_node_id: UUID | None = None
+        # OMN-16994: the last N CLOSED windows, retained so the runtime health
+        # monitor can read a DLQ ratio on its own 300 s cycle without racing the
+        # 30 s heartbeat that resets the accumulator. Public: it is the read
+        # surface for that monitor, not accumulator-internal state.
+        self.retained_windows = RetainedFlowWindows(RETAINED_FLOW_WINDOW_COUNT)
 
     # ---------------------------------------------------------------- register
 
@@ -217,14 +269,20 @@ class ConsumerFlowCounters:
             self._window_start = now
             self._reset_unlocked()
 
-        return ModelNodeFlowWindow(
-            node_id=node_id,
-            window_start=window_start,
-            window_end=now,
-            window_sequence=sequence,
-            consumer_deltas=consumer_deltas,
-            produce_deltas=produce_deltas,
-        )
+            window = ModelNodeFlowWindow(
+                node_id=node_id,
+                window_start=window_start,
+                window_end=now,
+                window_sequence=sequence,
+                consumer_deltas=consumer_deltas,
+                produce_deltas=produce_deltas,
+            )
+        # Retained OUTSIDE this lock, on the ring's own lock: the window is a
+        # fully-built immutable value by this point, and taking the ring's lock
+        # while holding the accumulator's would nest two locks for no gain
+        # (OMN-16994).
+        self.retained_windows.append(window)
+        return window
 
     def _reset_unlocked(self) -> None:
         """Zero the per-window counters. Registrations survive; counts do not."""
@@ -308,7 +366,9 @@ def record_produced_topic(topic: str, count: int = 1) -> None:
 
 
 __all__ = [
+    "RETAINED_FLOW_WINDOW_COUNT",
     "ConsumerFlowCounters",
+    "RetainedFlowWindows",
     "active_flow_key",
     "get_consumer_flow_counters",
     "record_active_dlq",
