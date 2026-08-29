@@ -3207,11 +3207,13 @@ jobs:
           # so those checks previously blocked nothing.
           EVENT_NAME: ${{ github.event_name }}
           # OMN-15532 — PR author login. Drops ONLY the contexts that this
-          # author's PRs structurally cannot produce (ACTOR_CONDITIONAL_CONTEXTS:
-          # cr-thread-gate-caller.yml skips dependabot[bot], so
-          # "gate / CodeRabbit Thread Check" is never created on its PRs and
-          # would otherwise burn the full deadline then fail closed). Empty on
-          # non-PR events, which drops nothing.
+          # author's PRs structurally cannot produce
+          # (ACTOR_CONDITIONAL_CONTEXTS). That registry is EMPTY as of
+          # OMN-16933 — its sole entry was the removed CodeRabbit thread gate
+          # — so this currently drops nothing, but the wiring stays: the next
+          # actor-scoped producer needs it, and re-deriving it costs a wedged
+          # Dependabot lane. Empty on non-PR events, which also drops
+          # nothing.
           PR_AUTHOR: ${{ github.event.pull_request.user.login }}
           HEAD_SHA: >-
             ${{ github.event.pull_request.head.sha

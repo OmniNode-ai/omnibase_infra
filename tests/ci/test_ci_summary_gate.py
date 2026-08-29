@@ -695,13 +695,26 @@ class TestExternalAssertionIsWiredIntoCiYml:
 # --------------------------------------------------------------------------
 # OMN-15532 — actor-conditional external contexts.
 #
-# OMN-15496 admitted `gate / CodeRabbit Thread Check` as a fail-closed external
-# context after measuring it 16/16 present over #2546…#2567. That window held no
-# Dependabot PR. cr-thread-gate-caller.yml skips the caller job when
-# `github.actor == 'dependabot[bot]'`, and because the context is the
-# `caller-job / reusable-job` form the inner job never materialises — the
-# check-run is ABSENT, not `skipped`. Absent burns the 90 min deadline and then
-# fails closed against the SOLE required context on infra dev.
+# ACTOR_CONDITIONAL_CONTEXTS is EMPTY as of OMN-16933. Its only entry was
+# `gate / CodeRabbit Thread Check`: cr-thread-gate-caller.yml skipped the
+# caller job for dependabot[bot], and because the context is the
+# `caller-job / reusable-job` form the inner job never materialised — the
+# check-run was ABSENT, not `skipped`. Absent burned the 90 min deadline and
+# then failed closed against the SOLE required context on infra dev.
+# CodeRabbit was removed entirely (operator ruling 2026-08-29) and both
+# cr-thread-gate*.yml files are deleted.
+#
+# The MECHANISM is retained, so these tests are too — re-anchored off a
+# SYNTHETIC registry entry (monkeypatched) rather than deleted with the
+# CodeRabbit context. They still run against the real, unedited Dependabot
+# payload from PR #2522 (head 2cdf352d), with one genuinely-asserted context
+# removed from that payload to stand in for the absent case. AC1/AC2/AC3 keep
+# their original meaning: the exempt actor resolves, a non-exempt author on
+# the identical payload still blocks, and removing the registry entry puts the
+# block back.
+#
+# A test that only asserted "the registry is empty" would let the mechanism
+# rot silently until the next actor-scoped producer wedged a lane.
 # --------------------------------------------------------------------------
 
 DEPENDABOT_FIXTURE = (
@@ -711,7 +724,16 @@ DEPENDABOT_FIXTURE = (
     / "fixtures"
     / "omn15532_dependabot_pr2522_check_runs.json"
 )
-CR_THREAD_CONTEXT = "gate / CodeRabbit Thread Check"
+
+# The context deleted from the payload to synthesise the absent case. Any
+# member of EXPECTED_EXTERNAL_CONTEXTS present in the fixture works; pinning
+# index 0 keeps the choice mechanical rather than a hand-picked name that
+# could drift out of the tuple.
+STAND_IN_CONTEXT = EXPECTED_EXTERNAL_CONTEXTS[0]
+
+SYNTHETIC_REGISTRY: dict[str, tuple[str, ...]] = {
+    STAND_IN_CONTEXT: ("dependabot[bot]",)
+}
 
 
 def _dependabot_check_runs() -> list[dict[str, Any]]:
@@ -719,96 +741,140 @@ def _dependabot_check_runs() -> list[dict[str, Any]]:
     return list(json.loads(DEPENDABOT_FIXTURE.read_text())["check_runs"])
 
 
-class TestActorConditionalExternalContexts:
-    def test_fixture_is_the_real_absent_case(self) -> None:
-        """Guard the premise: the fixture must genuinely lack ONLY this context."""
-        rows = _dependabot_check_runs()
-        names = {str(r["name"]) for r in rows}
-        absent = [c for c in EXPECTED_EXTERNAL_CONTEXTS if c not in names]
-        # If this ever changes, the exemption below is no longer justified.
-        assert absent == [CR_THREAD_CONTEXT], (
-            "fixture no longer isolates the CR-thread-gate absence; re-measure "
-            "before trusting the exemption"
-        )
+def _payload_missing_stand_in() -> list[dict[str, Any]]:
+    """The same real payload with STAND_IN_CONTEXT deleted — the absent case."""
+    return [r for r in _dependabot_check_runs() if r["name"] != STAND_IN_CONTEXT]
 
-    def test_dependabot_pr_is_not_wedged(self) -> None:
-        """AC1 — the real absent-context payload resolves for dependabot[bot]."""
+
+class TestActorConditionalExternalContexts:
+    def test_live_registry_is_empty(self) -> None:
+        """The shipped registry claims no exemption for anyone."""
+        assert ACTOR_CONDITIONAL_CONTEXTS == {}
+
+    def test_real_payload_is_complete_without_any_exemption(self) -> None:
+        """Guard the premise: with CodeRabbit gone the real Dependabot payload
+        satisfies every asserted external context on its own, so nothing in
+        this file is silently leaning on an exemption that no longer exists."""
+        names = {str(r["name"]) for r in _dependabot_check_runs()}
+        assert [c for c in EXPECTED_EXTERNAL_CONTEXTS if c not in names] == []
+
+    def test_stand_in_payload_isolates_one_absence(self) -> None:
+        """Guard the synthetic premise: exactly one asserted context is absent."""
+        names = {str(r["name"]) for r in _payload_missing_stand_in()}
+        absent = [c for c in EXPECTED_EXTERNAL_CONTEXTS if c not in names]
+        assert absent == [STAND_IN_CONTEXT]
+
+    def test_exempt_actor_is_not_wedged(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        """AC1 — an absent-context payload resolves for the exempted actor."""
+        import scripts.ci.ci_summary_gate as gate_mod
+
+        monkeypatch.setattr(gate_mod, "ACTOR_CONDITIONAL_CONTEXTS", SYNTHETIC_REGISTRY)
         code, report = evaluate(
             _all_gates("success"),
-            check_runs=_dependabot_check_runs(),
+            check_runs=_payload_missing_stand_in(),
             external_contexts=EXPECTED_EXTERNAL_CONTEXTS,
             pr_author="dependabot[bot]",
         )
         assert code == EXIT_SUCCESS, report
 
-    def test_same_payload_still_blocks_a_human_author(self) -> None:
+    def test_same_payload_still_blocks_a_non_exempt_author(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
         """AC2 — the control that matters: the exemption must not leak."""
+        import scripts.ci.ci_summary_gate as gate_mod
+
+        monkeypatch.setattr(gate_mod, "ACTOR_CONDITIONAL_CONTEXTS", SYNTHETIC_REGISTRY)
         code, report = evaluate(
             _all_gates("success"),
-            check_runs=_dependabot_check_runs(),
+            check_runs=_payload_missing_stand_in(),
             external_contexts=EXPECTED_EXTERNAL_CONTEXTS,
             pr_author="jonahgabriel",
         )
         assert code == EXIT_PENDING, report
-        assert CR_THREAD_CONTEXT in report
+        assert STAND_IN_CONTEXT in report
 
-    def test_absent_pr_author_enforces_everything(self) -> None:
+    def test_absent_pr_author_enforces_everything(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
         """A forgotten --pr-author must enforce, never exempt."""
+        import scripts.ci.ci_summary_gate as gate_mod
+
+        monkeypatch.setattr(gate_mod, "ACTOR_CONDITIONAL_CONTEXTS", SYNTHETIC_REGISTRY)
         code, _ = evaluate(
             _all_gates("success"),
-            check_runs=_dependabot_check_runs(),
+            check_runs=_payload_missing_stand_in(),
             external_contexts=EXPECTED_EXTERNAL_CONTEXTS,
             pr_author=None,
         )
         assert code == EXIT_PENDING
 
-    def test_exemption_entry_is_load_bearing(
-        self, monkeypatch: pytest.MonkeyPatch
-    ) -> None:
+    def test_exemption_entry_is_load_bearing(self) -> None:
         """AC3 — falsification control.
 
-        Genuinely REMOVE the registry entry and confirm the very same fixture
-        and author go back to blocking. Without this, the AC1 green could come
-        from the fixture rather than from the exemption.
+        The SHIPPED registry is empty, so the same payload and the same actor
+        must block. Without this, AC1's green could come from the fixture
+        rather than from the exemption.
         """
-        import scripts.ci.ci_summary_gate as gate_mod
-
-        monkeypatch.setattr(gate_mod, "ACTOR_CONDITIONAL_CONTEXTS", {})
         code, report = evaluate(
             _all_gates("success"),
-            check_runs=_dependabot_check_runs(),
+            check_runs=_payload_missing_stand_in(),
             external_contexts=EXPECTED_EXTERNAL_CONTEXTS,
             pr_author="dependabot[bot]",
         )
         assert code == EXIT_PENDING, report
-        assert CR_THREAD_CONTEXT in report
+        assert STAND_IN_CONTEXT in report
 
-    def test_exemption_drops_only_that_one_context(self) -> None:
-        """The dependabot exemption must not quietly widen."""
+    def test_exemption_drops_only_that_one_context(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """The exemption must not quietly widen."""
+        import scripts.ci.ci_summary_gate as gate_mod
+
+        monkeypatch.setattr(gate_mod, "ACTOR_CONDITIONAL_CONTEXTS", SYNTHETIC_REGISTRY)
         pruned = applicable_external_contexts(
             EXPECTED_EXTERNAL_CONTEXTS, "dependabot[bot]"
         )
-        assert set(EXPECTED_EXTERNAL_CONTEXTS) - set(pruned) == {CR_THREAD_CONTEXT}
+        assert set(EXPECTED_EXTERNAL_CONTEXTS) - set(pruned) == {STAND_IN_CONTEXT}
+
+    def test_live_registry_prunes_nothing(self) -> None:
+        """With the shipped (empty) registry, no actor gets anything dropped."""
+        for actor in ("dependabot[bot]", "jonahgabriel"):
+            pruned = applicable_external_contexts(EXPECTED_EXTERNAL_CONTEXTS, actor)
+            assert set(pruned) == set(EXPECTED_EXTERNAL_CONTEXTS)
 
     def test_registry_keys_are_asserted_contexts(self) -> None:
         """AC4 — cannot exempt a context that was never asserted."""
         for context in ACTOR_CONDITIONAL_CONTEXTS:
             assert context in EXPECTED_EXTERNAL_CONTEXTS, context
+        for context in SYNTHETIC_REGISTRY:
+            assert context in EXPECTED_EXTERNAL_CONTEXTS, context
 
     def test_registry_actors_are_concrete_logins(self) -> None:
         """AC4 — no wildcard/empty actor may blanket-disable a context."""
-        for context, actors in ACTOR_CONDITIONAL_CONTEXTS.items():
+        for context, actors in {
+            **ACTOR_CONDITIONAL_CONTEXTS,
+            **SYNTHETIC_REGISTRY,
+        }.items():
             assert actors, f"{context} declares an empty actor tuple"
             for actor in actors:
                 assert actor.strip(), f"{context} declares a blank actor"
                 assert actor not in {"*", "all"}, f"{context} declares wildcard {actor}"
 
-    def test_a_failing_context_still_fails_for_dependabot(self) -> None:
+    def test_a_failing_context_still_fails_for_an_exempt_actor(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
         """The exemption is applicability, not a bypass: reds still block."""
-        rows = _dependabot_check_runs()
+        import scripts.ci.ci_summary_gate as gate_mod
+
+        monkeypatch.setattr(gate_mod, "ACTOR_CONDITIONAL_CONTEXTS", SYNTHETIC_REGISTRY)
+        rows = _payload_missing_stand_in()
+        target = next(c for c in EXPECTED_EXTERNAL_CONTEXTS if c != STAND_IN_CONTEXT)
+        hit = False
         for row in rows:
-            if row["name"] == "deploy-gate / deploy-gate":
+            if row["name"] == target:
                 row["conclusion"] = "failure"
+                hit = True
+        assert hit, f"{target} absent from the fixture; pick another control"
         code, report = evaluate(
             _all_gates("success"),
             check_runs=rows,
