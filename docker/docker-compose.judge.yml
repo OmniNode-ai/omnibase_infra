@@ -280,6 +280,10 @@ services:
       # credential. This service redeclares the base definition wholesale, so
       # the base file's copy of this line does not reach the judge lane.
       OMNINODE_RUNTIME_PASSWORD: ${OMNINODE_RUNTIME_PASSWORD:-}
+      # OMN-15425: warm-volume re-assert of the tenant_projection_writer LOGIN
+      # credential, matching docker-compose.infra.yml and the fresh-volume
+      # bootstrap map.
+      TENANT_PROJECTION_WRITER_PASSWORD: ${TENANT_PROJECTION_WRITER_PASSWORD:-}
     volumes:
       - ../scripts/run-forward-migrations.sh:/run-forward-migrations.sh:ro
       - ../docker/migrations/forward:/migrations/forward:ro
