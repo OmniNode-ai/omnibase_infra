@@ -43,6 +43,8 @@ import re
 import subprocess
 from pathlib import Path
 
+from tests.ci._prepush_lab_isolation import network_free_lab_env
+
 REPO_ROOT = Path(__file__).resolve().parents[2]
 HOOK_SCRIPT = REPO_ROOT / "scripts" / "hooks" / "prepush_smart_tests.sh"
 
@@ -190,6 +192,10 @@ def test_guard_refuses_full_suite_escalation_on_non_200_host() -> None:
     # OMN-16991: de-designate every OTHER authorizing row too, so this proof is
     # host-independent for the first time (see de_designating_env).
     env.update(de_designating_env())
+    # ...and keep the lab-dispatch leg off the network. De-designating a row
+    # changes its IDENTITY, not its ssh target, so without this the hook ships a
+    # real bundle to a real lab host from inside this test.
+    env.update(network_free_lab_env())
     result = subprocess.run(
         ["bash", str(HOOK_SCRIPT)],
         cwd=REPO_ROOT,
@@ -344,6 +350,8 @@ def _run_hook_with_stubbed_selection(
     env["PREPUSH_TEST_SELECTION_JSON"] = str(selection_file)
     env["PREPUSH_BASE_REF"] = "HEAD"
     env["PREPUSH_200_HOSTNAME"] = _GUARANTEED_NON_MATCHING_HOSTNAME
+    env.update(de_designating_env())
+    env.update(network_free_lab_env())
     for leaky in (
         "PREPUSH_FULL_SUITE",
         "PREPUSH_ALLOW_LOCAL_FULL_SUITE",
@@ -514,3 +522,92 @@ def test_guard_allows_a_genuinely_narrow_selection_on_a_local_host(
         "expected the narrow selection's own path to be handed to pytest; "
         f"stdout: {result.stdout!r}"
     )
+
+
+# =============================================================================
+# The test harness itself must not spend a lab host (OMN-16991)
+# =============================================================================
+
+
+def test_the_heavy_harness_never_dispatches_a_real_lab_run(tmp_path: Path) -> None:
+    """A unit test must not take a lab host's exclusive slot for an hour.
+
+    Until OMN-16991 the hook's host scan was truncated after its first ssh
+    probe, so the harnesses above could only ever see `.200` and had no remote
+    host to dispatch to. Fixing the scan removed that accidental containment,
+    and the very next `pytest tests/ci/` shipped a real git bundle to
+    `omnibook`, took its LOCK, and started the full `tests/unit/` suite there --
+    the remote wrapper's ORIGIN named this test process. That is the
+    OMN-16425/OMN-16489 F-01 recursion in distributed form, reached from a test
+    rather than a push.
+
+    Proven by shadowing `ssh`/`scp` on PATH and asserting that nothing in the
+    heavy path ever addresses a lab target. `git fetch` may legitimately use
+    ssh for `origin`, so the witness records lab targets only.
+    """
+    stub_bin = tmp_path / "stub-bin"
+    stub_bin.mkdir()
+    witness = tmp_path / "lab-calls"
+    for name in ("ssh", "scp"):
+        stub = stub_bin / name
+        stub.write_text(
+            "#!/usr/bin/env bash\n"
+            f'case " $* " in *jonah@*) echo "{name} $*" >> "{witness}" ;; esac\n'
+            "exit 1\n",
+            encoding="utf-8",
+        )
+        stub.chmod(0o755)
+
+    env = dict(os.environ)
+    for leaky in (
+        "PREPUSH_FULL_SUITE",
+        "PREPUSH_ALLOW_LOCAL_FULL_SUITE",
+        "ENABLE_SMART_TESTS",
+        "PREPUSH_ADJACENCY",
+        "PREPUSH_PYTEST_ARGS",
+        "ONEX_PREPUSH_HOOK_ACTIVE",
+    ):
+        env.pop(leaky, None)
+    env["PATH"] = f"{stub_bin}{os.pathsep}{env['PATH']}"
+    env["PREPUSH_FULL_SUITE"] = "1"
+    env["PREPUSH_200_HOSTNAME"] = _GUARANTEED_NON_MATCHING_HOSTNAME
+    env.update(de_designating_env())
+    env.update(network_free_lab_env())
+
+    result = subprocess.run(
+        ["bash", str(HOOK_SCRIPT)],
+        cwd=REPO_ROOT,
+        env=env,
+        capture_output=True,
+        text=True,
+        timeout=180,
+        check=False,
+    )
+    assert result.returncode != 0, (
+        "the de-designated heavy path must still refuse; got exit "
+        f"{result.returncode}. stderr={result.stderr!r}"
+    )
+    assert not witness.exists(), (
+        "the hook addressed a lab host from inside the test harness: "
+        f"{witness.read_text()!r}"
+    )
+
+
+def test_both_hook_harnesses_apply_the_lab_isolation() -> None:
+    """Static pin so a new harness cannot quietly reintroduce live dispatch.
+
+    The behavioral test above only covers the harness it drives; this covers
+    every subprocess call site in the two files that run the real hook.
+    """
+    for path in (
+        Path(__file__),
+        REPO_ROOT / "tests" / "ci" / "test_prepush_hook_recursion_and_env_guard.py",
+    ):
+        text = path.read_text(encoding="utf-8")
+        hook_runs = text.count('["bash", str(HOOK_SCRIPT)]')
+        assert hook_runs > 0, f"{path.name}: expected at least one hook subprocess"
+        assert text.count("network_free_lab_env()") >= hook_runs, (
+            f"{path.name}: {hook_runs} hook subprocess call site(s) but only "
+            f"{text.count('network_free_lab_env()')} applications of the lab "
+            "isolation -- a harness that omits it dispatches a real remote run"
+        )
