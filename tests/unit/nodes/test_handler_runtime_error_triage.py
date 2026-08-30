@@ -342,7 +342,10 @@ class TestNoOrphanedErrorTriagedEmission:
         import inspect
 
         params = inspect.signature(HandlerRuntimeErrorTriage.__init__).parameters
-        assert "event_bus" not in params
+        assert "event_bus" not in params, (
+            "HandlerRuntimeErrorTriage must not take an event_bus dependency: it "
+            "existed only to publish the orphaned error-triaged.v1 event"
+        )
 
     async def test_triage_runs_without_an_event_bus(self) -> None:
         """Triage returns its result with no bus wired at all."""
@@ -361,7 +364,12 @@ class TestNoOrphanedErrorTriagedEmission:
         )
         rules = [ModelTriageRule(name="alert_all", priority=1, action="alert")]
 
-        handler = HandlerRuntimeErrorTriage(db_pool=db_pool, rules=rules)
+        try:
+            handler = HandlerRuntimeErrorTriage(db_pool=db_pool, rules=rules)
+        except TypeError as exc:
+            pytest.fail(
+                f"triage handler still demands a bus dependency to construct: {exc}"
+            )
         result = await handler.handle(_make_error_event())
 
         assert result.action == "alert"
