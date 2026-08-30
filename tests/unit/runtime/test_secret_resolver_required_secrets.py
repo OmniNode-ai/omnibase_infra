@@ -89,7 +89,18 @@ class TestValidateRequiredSecretsRedProofAbsence:
         config = _config("present.secret", "absent.secret")
         mock_handler = MagicMock()
 
-        def _get_secret_sync(secret_name: str) -> SecretStr | None:
+        # OMN-16984: the resolver now addresses reads by (secret_name,
+        # secret_path), so this double must accept the same keyword-only
+        # signature HandlerInfisical.get_secret_sync exposes. A double that
+        # pins a narrower signature turns a real call into a TypeError, which
+        # the validator would report as an ERROR rather than an absence.
+        def _get_secret_sync(
+            *,
+            secret_name: str,
+            project_id: str | None = None,
+            environment_slug: str | None = None,
+            secret_path: str | None = None,
+        ) -> SecretStr | None:
             if secret_name == "PRESENT_SECRET":
                 return SecretStr("value")
             return None
