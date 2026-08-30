@@ -203,3 +203,51 @@ class TestPostFixtureWindowContexts:
         )
         assert code == EXIT_FAILURE, report
         assert context in report
+
+
+class TestTheJobCanActuallyImportTheValidator:
+    """A gate that is structurally red forever is a gate people learn to ignore.
+
+    The validator is a module under ``src/omnibase_infra/validators/`` rather than a
+    ``scripts/**`` file (OMN-14475 default-deny), so importing it executes
+    ``omnibase_infra/__init__.py``, which imports ``omnibase_core.enums``. The first
+    cut of this workflow installed only ``pyyaml`` and died on every run with
+    ``ModuleNotFoundError: No module named 'omnibase_core'`` (PR #3048, run
+    33335363199) — failing closed, which is correct, but for an infrastructure reason
+    rather than a real violation. A permanently-red required gate is the OMN-14440
+    shape from the other direction: output nobody can act on.
+    """
+
+    WORKFLOW = "exposure-reader-coverage.yml"
+
+    def _steps(self) -> list[dict[str, Any]]:
+        workflow = _workflow(self.WORKFLOW)
+        return list(workflow["jobs"]["exposure-reader-coverage"]["steps"])
+
+    def test_the_job_installs_the_repo_dependency_environment(self) -> None:
+        uses = [str(step.get("uses", "")) for step in self._steps()]
+        assert any("setup-python-uv" in entry for entry in uses), (
+            "the job must set up the repo's own uv environment; the validator's "
+            "import chain reaches omnibase_core and a bare `pip install pyyaml` "
+            "makes this gate red on every run"
+        )
+
+    def test_the_gate_runs_the_validator_through_that_environment(self) -> None:
+        runs = "\n".join(str(step.get("run", "")) for step in self._steps())
+        assert (
+            "uv run python -m omnibase_infra.validators.bus_backed_exposure_readers"
+            in runs
+        ), "the validator must be invoked through the resolved uv environment"
+
+    def test_the_dependency_pins_are_not_restated_in_the_workflow(self) -> None:
+        """No second source of truth for the core/spi/compat pins.
+
+        Re-pinning them inline here is the exact drift shape this gate exists to
+        catch: two declarations of one fact, free to diverge silently.
+        """
+        text = (WORKFLOWS / self.WORKFLOW).read_text(encoding="utf-8")
+        for package in ("omnibase-core==", "omnibase-spi==", "omnibase-compat=="):
+            assert package not in text, (
+                f"{package} is pinned in pyproject.toml/uv.lock; restating it in "
+                "the workflow creates a second source of truth"
+            )

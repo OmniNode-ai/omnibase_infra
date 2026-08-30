@@ -127,12 +127,18 @@ jobs:
             src/templates
           sparse-checkout-cone-mode: false
 
-      - name: Install pyyaml (only dep for the validator)
-        shell: bash
-        run: |
-          # The validator uses stdlib + pyyaml only; skip the full uv sync to
-          # keep this job fast (no Kafka, no DB, no handler imports).
-          python3 -m pip install --quiet pyyaml
+      # The validator is a module under `src/omnibase_infra/validators/`, not a
+      # `scripts/**` file (OMN-14475 default-deny), so importing it runs
+      # `omnibase_infra/__init__.py`, which imports `omnibase_core.enums`. A bare
+      # `pip install pyyaml` therefore dies with `ModuleNotFoundError:
+      # omnibase_core` (first observed on PR #3048). Re-pinning core/spi/compat
+      # inline here would be a SECOND source of truth for the dependency pins --
+      # the exact drift shape this gate exists to catch -- so the repo's own
+      # setup action resolves them from pyproject.toml + uv.lock instead.
+      - name: Setup Python and uv
+        uses: ./.github/actions/setup-python-uv
+        with:
+          cache-enabled: "false"
 
       - name: Assert the sibling reader surface is present (fail closed)
         shell: bash
@@ -154,7 +160,7 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          PYTHONPATH=src python3 -m omnibase_infra.validators.bus_backed_exposure_readers \
+          uv run python -m omnibase_infra.validators.bus_backed_exposure_readers \
             src/omnibase_infra/nodes \
             --extra-contracts-dir omnimarket/src/omnimarket/nodes \
             --registry omnidash/src/registry/component-registry.json \
