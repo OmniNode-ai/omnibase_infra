@@ -1,0 +1,96 @@
+#!/usr/bin/env bash
+# SPDX-FileCopyrightText: 2025 OmniNode.ai Inc.
+# SPDX-License-Identifier: MIT
+#
+# onex -- the sanctioned entry point for the workspace ONEX CLI (OMN-17190)
+# ============================================================================
+#
+# WHY THIS EXISTS
+# ---------------
+# `onex` was documented as a shell alias:
+#
+#     alias onex='uv run --project $OMNI_HOME/omnibase_infra onex'
+#
+# An alias is not an invocation contract. It exists only in an INTERACTIVE
+# shell, so every script, hook, Makefile, `bash -c`, CI step, and agent tool
+# call that types `onex` silently resolves through PATH instead -- and on a
+# developer machine PATH is not empty. Measured on this Mac, 2026-08-30:
+#
+#     $ which -a onex
+#     /opt/homebrew/bin/onex          <- brew python3.13 global site-packages
+#     /Users/jonah/.local/bin/onex    <- `uv tool` shim (omnibase-core env)
+#
+#   * `bash -lc 'onex skill ...'` resolved `~/.local/bin/onex`, whose env holds
+#     omnibase_infra 0.38.11 (pre-OMN-17190, no self-heal) and omnimarket 0.4.10
+#     from PyPI (no vcs_info -> permanently reads as "NOT INSTALLED from git").
+#     It emitted the verbatim pre-OMN-17190 hard refusal WITH THE WORKSPACE VENV
+#     CONFIRMED `IN_SYNC` -- a refusal no reconcile could ever clear because no
+#     reconcile was ever attempted.
+#   * `/opt/homebrew/bin/onex` carries current code but a different interpreter;
+#     its self-heal ran the reconciler, repaired $OMNI_HOME/omnibase_infra/.venv,
+#     re-probed ITSELF, and refused again -- structurally non-convergent.
+#
+# That -- not `uv run` -- is the mechanism behind the OMN-17190 verification
+# lane's "10 of 15 invocations hit the pre-fix refusal". The hypothesis that
+# `uv run`'s implicit sync was stripping the omnimarket co-install is
+# FALSIFIED: on uv 0.11.32 that sync is INEXACT (`uv run -v` logs
+# `Unnecessary package: omnimarket==...` and keeps it, while still repairing
+# lock-layer pins in the same pass).
+#
+# WHAT THIS DOES
+# --------------
+# Resolves ONE interpreter, deterministically, and execs it:
+#
+#     $OMNI_HOME/omnibase_infra/.venv/bin/onex
+#
+# No alias, no PATH lookup, no `uv run` (hence no implicit sync at all, which
+# also removes ~200ms of resolution from every dispatch). Safe from any shell,
+# interactive or not.
+#
+# Put it on PATH ahead of any sibling install, or point the alias at it:
+#     alias onex='$OMNI_HOME/omnibase_infra/scripts/onex'
+#
+# BOOTSTRAP, NOT FALLBACK
+# -----------------------
+# If the workspace venv's entry point is missing, this runs the reconciler ONCE
+# to build it and then execs. It never falls back to some other `onex` on PATH:
+# a silent fallback is exactly the failure this script exists to end. If the
+# venv cannot be produced, it refuses and names the command to run by hand.
+# ----------------------------------------------------------------------------
+set -uo pipefail
+
+if [[ -z "${OMNI_HOME:-}" ]]; then
+  # No default is guessed (CLAUDE.md rule 8): a guessed root would dispatch
+  # from some other checkout's venv and report results as if they were this
+  # workspace's.
+  echo "onex: OMNI_HOME is not set." >&2
+  echo "  export OMNI_HOME=/path/to/omni_home   # the canonical repo registry root" >&2
+  exit 78  # EX_CONFIG
+fi
+
+readonly ONEX_VENV="$OMNI_HOME/omnibase_infra/.venv"
+readonly ONEX_BIN="$ONEX_VENV/bin/onex"
+readonly RECONCILER="$OMNI_HOME/omnibase_infra/scripts/reconcile-workspace-venvs.sh"
+
+if [[ ! -x "$ONEX_BIN" ]]; then
+  if [[ ! -x "$RECONCILER" ]]; then
+    echo "onex: the workspace CLI is not installed and the reconciler is missing." >&2
+    echo "  expected entry point : $ONEX_BIN" >&2
+    echo "  expected reconciler  : $RECONCILER" >&2
+    exit 69  # EX_UNAVAILABLE
+  fi
+  echo "onex: workspace CLI absent at $ONEX_BIN -- building it once..." >&2
+  if ! bash "$RECONCILER" --omni-home "$OMNI_HOME" >&2; then
+    echo "onex: the workspace venv could not be built. Run by hand and read the error:" >&2
+    echo "  bash $RECONCILER --omni-home $OMNI_HOME" >&2
+    exit 69
+  fi
+fi
+
+if [[ ! -x "$ONEX_BIN" ]]; then
+  echo "onex: reconcile completed but $ONEX_BIN still does not exist." >&2
+  echo "  bash $RECONCILER --omni-home $OMNI_HOME" >&2
+  exit 69
+fi
+
+exec "$ONEX_BIN" "$@"

@@ -70,6 +70,23 @@
 # or the periodic tick that calls this script after a successful ff-only pull).
 #
 # ============================================================================
+# THIS RECONCILES ONE CLI VENV -- SO THERE MUST BE ONE CLI ENTRY POINT
+# ============================================================================
+# Everything below repairs `$OMNI_HOME/omnibase_infra/.venv` and nothing else on
+# the CLI surface. That is only useful if the `onex` an operator (or a script,
+# or a hook) actually runs IS that venv's entry point. It routinely was not:
+# `onex` was documented as an interactive shell alias, aliases do not exist in
+# non-interactive shells, and PATH there resolved sibling installs with their
+# own omnimarket state (measured 2026-08-30: a `uv tool` shim on pre-self-heal
+# omnibase_infra 0.38.11, and a brew-python global install). A reconcile driven
+# from one of those repairs this venv and then re-probes a different one, so it
+# can never converge.
+#
+# `scripts/onex` is the fix and the documented entry point; the drift guard now
+# refuses deterministically from any other interpreter rather than reconciling
+# blind. See docs/runbooks/onex-cli-entrypoint.md.
+#
+# ============================================================================
 # INTERIM BY DESIGN -- the node-based successor
 # ============================================================================
 # This is a script-level stopgap, authorized for beta. The successor is a

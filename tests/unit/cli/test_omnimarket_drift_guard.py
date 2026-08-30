@@ -15,6 +15,7 @@ from __future__ import annotations
 import json
 import logging
 import subprocess
+import sys
 from importlib.metadata import PackageNotFoundError
 from pathlib import Path
 from unittest.mock import MagicMock, patch
@@ -576,3 +577,211 @@ def test_missing_reconcile_script_is_a_failed_outcome_not_a_raise(
     assert outcome.ok is False
     assert "reconcile-workspace-venvs.sh" in outcome.command
     assert "not found" in outcome.detail
+
+
+# --------------------------------------------------------------------------- #
+# The interpreter the guard is running in is not the venv it repairs
+# (OMN-17190 follow-up -- the defect that made the self-heal read as flaky)
+# --------------------------------------------------------------------------- #
+#
+# Reproduced live on this Mac 2026-08-30, with the workspace venv confirmed
+# `IN_SYNC` by `reconcile-workspace-venvs.sh --check`:
+#
+#   $ bash -lc 'onex skill __nope__'      # no zsh alias in a non-interactive shell
+#   -> resolved /Users/<user>/.local/bin/onex  (a `uv tool` shim, NOT the venv)
+#   -> Error: omnimarket is NOT INSTALLED from git in this interpreter ...
+#
+# and, from the other sibling install on the same PATH:
+#
+#   $ /opt/homebrew/bin/onex skill __nope__
+#   -> the self-heal RAN, the reconciler repaired $OMNI_HOME/omnibase_infra/.venv,
+#      the re-probe re-read THIS interpreter, and it refused again:
+#      "A reconcile ran, reported SUCCESS, and the venv is STILL drifted".
+#
+# The second one is the sharp bug: the repair is structurally incapable of
+# converging, and every attempt rewrites a venv nobody named. These tests pin
+# both halves of the fix.
+
+
+def _dist_with_direct_url(payload: object) -> MagicMock:
+    fake = MagicMock()
+    fake.read_text.return_value = json.dumps(payload)
+    return fake
+
+
+def test_editable_install_of_the_canonical_clone_is_not_drift(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    """An editable omnimarket IS the clone; there is nothing to reconcile.
+
+    ``installed_omnimarket_commit()`` reports ``None`` for an editable install
+    (it records ``dir_info``, never ``vcs_info``) -- the same answer it gives
+    for "absent" and for "a PyPI wheel". Conflating the three produced a
+    refusal that no repair could clear, because the interpreter imports the
+    clone's working tree directly and is therefore at its HEAD by
+    construction.
+    """
+    clone = tmp_path / "omnimarket"
+    clone.mkdir()
+    monkeypatch.setattr(
+        guard, "canonical_local_omnimarket_commit", lambda **_: "a" * 40
+    )
+    monkeypatch.setattr(guard, "installed_omnimarket_commit", lambda: None)
+    monkeypatch.setattr(
+        guard,
+        "distribution",
+        lambda _name: _dist_with_direct_url(
+            {"url": clone.as_uri(), "dir_info": {"editable": True}}
+        ),
+    )
+    reconciler = _Reconciler(ok=True)
+
+    # Must NOT raise, and must not reconcile anything.
+    guard.check_omnimarket_drift(omni_home=str(tmp_path), reconcile=reconciler)
+
+    assert reconciler.calls == 0
+
+
+def test_editable_install_of_some_other_tree_is_still_drift(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    """The exemption is scoped to THE canonical clone, not to editables at large.
+
+    An editable install of an unrelated checkout says nothing about the clone
+    the guard compares against, so it stays a refusal.
+    """
+    monkeypatch.setattr(
+        guard, "canonical_local_omnimarket_commit", lambda **_: "a" * 40
+    )
+    monkeypatch.setattr(guard, "installed_omnimarket_commit", lambda: None)
+    monkeypatch.setattr(
+        guard,
+        "distribution",
+        lambda _name: _dist_with_direct_url(
+            {
+                "url": (tmp_path / "somewhere_else").as_uri(),
+                "dir_info": {"editable": True},
+            }
+        ),
+    )
+
+    with pytest.raises(guard.OmnimarketDriftError):
+        guard.check_omnimarket_drift(omni_home=str(tmp_path))
+
+
+def test_editable_root_is_none_for_a_vcs_install() -> None:
+    """A git co-install is not editable; the two probes must not overlap."""
+    with patch(
+        "omnibase_infra.cli.omnimarket_drift_guard.distribution",
+        return_value=_dist_with_direct_url(
+            {"url": "https://x/omnimarket.git", "vcs_info": {"commit_id": _FAKE_SHA_A}}
+        ),
+    ):
+        assert guard.installed_omnimarket_editable_root() is None
+
+
+def test_foreign_interpreter_refuses_without_running_the_reconcile(
+    monkeypatch: pytest.MonkeyPatch, canonical_head: str
+) -> None:
+    """The load-bearing assertion: a sibling `onex` must NOT reconcile.
+
+    The reconciler repairs ``$OMNI_HOME/omnibase_infra/.venv`` and only that.
+    From any other interpreter the re-check re-probes the interpreter the
+    reconciler did not touch, so the repair cannot converge -- it just rewrites
+    a venv the operator never named and refuses anyway. Refusing up front is
+    both honest and cheaper.
+    """
+    monkeypatch.setattr(guard, "installed_omnimarket_commit", lambda: None)
+    monkeypatch.setattr(guard, "installed_omnimarket_editable_root", lambda: None)
+    reconciler = _Reconciler(ok=True)
+
+    with pytest.raises(guard.OmnimarketDriftError) as excinfo:
+        guard.check_omnimarket_drift(
+            omni_home="/w",
+            reconcile=reconciler,
+            running_prefix="/opt/homebrew",
+        )
+
+    message = str(excinfo.value)
+    assert reconciler.calls == 0, "a foreign interpreter must not mutate any venv"
+    # Names what is running, what would have been repaired, and the way out.
+    assert "/opt/homebrew" in message
+    assert str(Path("/w") / "omnibase_infra" / ".venv") in message
+    assert str(Path("/w") / "omnibase_infra" / "scripts" / "onex") in message
+    # The original diagnosis and the documented override both survive.
+    assert "NOT INSTALLED" in message
+    assert guard.DRIFT_OVERRIDE_ENV in message
+
+
+def test_workspace_interpreter_still_self_heals(
+    monkeypatch: pytest.MonkeyPatch, canonical_head: str
+) -> None:
+    """The identity gate must not cost the workspace CLI its self-heal."""
+    state = {"installed": "b" * 40}
+    monkeypatch.setattr(
+        guard, "installed_omnimarket_commit", lambda: state["installed"]
+    )
+
+    def _repair() -> None:
+        state["installed"] = canonical_head
+
+    reconciler = _Reconciler(ok=True, on_success=_repair)
+    guard.check_omnimarket_drift(
+        omni_home="/w",
+        reconcile=reconciler,
+        running_prefix=str(guard.workspace_cli_prefix("/w")),
+    )
+
+    assert reconciler.calls == 1
+
+
+def test_unclaimed_interpreter_preserves_the_pure_self_heal(
+    monkeypatch: pytest.MonkeyPatch, canonical_head: str
+) -> None:
+    """``running_prefix=None`` means "no claim made", not "foreign".
+
+    Every non-CLI caller (and every test above) omits it; the identity check
+    must stay opt-in at the CLI boundary the same way ``reconcile`` is.
+    """
+    state = {"installed": "b" * 40}
+    monkeypatch.setattr(
+        guard, "installed_omnimarket_commit", lambda: state["installed"]
+    )
+
+    def _repair() -> None:
+        state["installed"] = canonical_head
+
+    reconciler = _Reconciler(ok=True, on_success=_repair)
+    guard.check_omnimarket_drift(omni_home="/w", reconcile=reconciler)
+
+    assert reconciler.calls == 1
+
+
+def test_allow_drift_still_wins_over_the_identity_refusal(
+    monkeypatch: pytest.MonkeyPatch, canonical_head: str
+) -> None:
+    """The documented override is evaluated first, so it genuinely works here."""
+    monkeypatch.setattr(guard, "installed_omnimarket_commit", lambda: None)
+    monkeypatch.setattr(guard, "installed_omnimarket_editable_root", lambda: None)
+
+    guard.check_omnimarket_drift(
+        omni_home="/w",
+        allow_drift=True,
+        reconcile=_Reconciler(ok=True),
+        running_prefix="/opt/homebrew",
+    )
+
+
+def test_running_interpreter_prefix_reports_this_process() -> None:
+    """The binding the CLI uses must describe the live interpreter, not a guess."""
+    assert guard.running_interpreter_prefix() == sys.prefix
+
+
+def test_workspace_cli_prefix_is_the_venv_the_reconciler_repairs() -> None:
+    """Pins the one path the identity check and the reconciler must agree on.
+
+    ``scripts/reconcile-workspace-venvs.sh`` computes this as
+    ``$OMNI_HOME/omnibase_infra/.venv``; if the two ever disagree, the guard
+    would refuse the very interpreter the reconciler is fixing.
+    """
+    assert guard.workspace_cli_prefix("/w") == Path("/w/omnibase_infra/.venv")

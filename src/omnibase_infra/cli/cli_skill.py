@@ -43,6 +43,7 @@ from omnibase_infra.cli.omnimarket_drift_guard import (
     DRIFT_OVERRIDE_ENV,
     OmnimarketDriftError,
     check_omnimarket_drift,
+    running_interpreter_prefix,
 )
 from omnibase_infra.cli.prod_dispatch_locality_guard import (
     enforce_prod_dispatch_locality,
@@ -307,6 +308,10 @@ def run_skill_by_name(
             # type. Bound here rather than defaulted inside the guard so the
             # guard stays a pure function for every non-CLI caller.
             reconcile=make_workspace_reconciler(str(omni_home) if omni_home else None),
+            # OMN-17190 follow-up: declare WHICH interpreter is dispatching, so
+            # a resolved-by-PATH sibling `onex` refuses deterministically
+            # instead of reconciling a venv it is not running in.
+            running_prefix=running_interpreter_prefix(),
         )
     except OmnimarketDriftError as exc:
         raise click.ClickException(str(exc)) from exc

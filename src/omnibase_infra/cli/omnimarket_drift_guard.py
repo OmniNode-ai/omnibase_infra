@@ -35,6 +35,26 @@ the trigger moved from a human to the guard itself. Callers that want the old
 pure detect-and-refuse behaviour simply omit ``reconcile``, which remains the
 default.
 
+## Which interpreter is this, anyway (OMN-17190 follow-up)
+
+The guard probes THE CURRENT INTERPRETER; the reconciler repairs exactly one
+venv (``$OMNI_HOME/omnibase_infra/.venv``). Those coincide only when ``onex``
+was resolved to that venv's entry point. On a developer machine it frequently
+is not: ``onex`` is documented as an interactive shell alias, aliases do not
+exist in non-interactive shells, and PATH there resolves whatever sibling
+install came first. Measured on this Mac 2026-08-30, ``bash -lc 'onex ...'``
+resolved a ``uv tool`` shim carrying omnibase_infra 0.38.11 and a PyPI
+omnimarket, and refused with the pre-self-heal message while the workspace
+venv was confirmed ``IN_SYNC``.
+
+Two consequences are handled here. An EDITABLE omnimarket installed from the
+canonical clone is not drift and never was -- it is the clone (see
+:func:`installed_omnimarket_editable_root`). And when a reconciler is bound but
+the running interpreter is not the workspace CLI venv, the guard refuses
+DETERMINISTICALLY and names the sanctioned entry point
+(``omnibase_infra/scripts/onex``) instead of running a repair that provably
+cannot converge.
+
 The check fails OPEN (no-op, never raises) **only** when the canonical local
 clone itself cannot be determined -- e.g. ``OMNI_HOME`` unset, or no
 ``$OMNI_HOME/omnimarket`` clone present. That keeps the guard silent on CI
@@ -63,8 +83,10 @@ import importlib
 import json
 import logging
 import subprocess
+import sys
 from importlib.metadata import PackageNotFoundError, distribution
 from pathlib import Path
+from urllib.parse import unquote, urlparse
 
 from omnibase_infra.cli.workspace_reconcile import ReconcileFn
 
@@ -74,6 +96,9 @@ __all__ = [
     "canonical_local_omnimarket_commit",
     "check_omnimarket_drift",
     "installed_omnimarket_commit",
+    "installed_omnimarket_editable_root",
+    "running_interpreter_prefix",
+    "workspace_cli_prefix",
 ]
 
 logger = logging.getLogger(__name__)
@@ -123,6 +148,65 @@ def installed_omnimarket_commit() -> str | None:
     return commit_id if isinstance(commit_id, str) and len(commit_id) == 40 else None
 
 
+def installed_omnimarket_editable_root() -> Path | None:
+    """Return the local source directory an EDITABLE omnimarket was installed
+    from, or ``None`` when the install is not editable (or absent).
+
+    An editable install records ``dir_info.editable`` and a ``file://`` URL in
+    ``direct_url.json`` and carries NO ``vcs_info``, so
+    :func:`installed_omnimarket_commit` reports ``None`` for it -- the same
+    answer it gives for "absent" and for "a PyPI wheel". Those three states are
+    not the same thing, and conflating them is a live defect (OMN-17190
+    follow-up): an interpreter with omnimarket installed EDITABLE from
+    ``$OMNI_HOME/omnimarket`` imports that clone's working tree directly, so it
+    is at the clone's HEAD by construction and can never drift from it. The
+    guard used to call that "NOT INSTALLED from git" and refuse, then hand the
+    refusal to a reconciler that repairs a *different* venv -- a refusal no
+    amount of reconciling could ever clear.
+    """
+    try:
+        dist = distribution("omnimarket")
+    except PackageNotFoundError:
+        return None
+    direct_url_text = dist.read_text("direct_url.json")
+    if not direct_url_text:
+        return None
+    try:
+        data = json.loads(direct_url_text)
+    except json.JSONDecodeError:
+        return None
+    if not data.get("dir_info", {}).get("editable"):
+        return None
+    url = data.get("url")
+    if not isinstance(url, str) or not url.startswith("file://"):
+        return None
+    return Path(unquote(urlparse(url).path))
+
+
+def running_interpreter_prefix() -> str:
+    """Return the prefix of the interpreter this process is actually running in.
+
+    A named function rather than an inline ``sys.prefix`` so a test can state
+    which interpreter it is modelling. Reading ``sys.prefix`` is not
+    configuration -- it is the same kind of live interpreter fact this module
+    already reads via ``importlib.metadata``, and the whole guard is a
+    statement about "this interpreter".
+    """
+    return sys.prefix
+
+
+def workspace_cli_prefix(omni_home: str) -> Path:
+    """Return the ONE venv the workspace reconciler repairs.
+
+    ``scripts/reconcile-workspace-venvs.sh`` reconciles
+    ``$OMNI_HOME/omnibase_infra/.venv`` and nothing else on the CLI surface. A
+    guard running in some OTHER interpreter can therefore detect drift it has
+    no way to repair, which is the whole reason the identity check below
+    exists.
+    """
+    return Path(omni_home) / "omnibase_infra" / ".venv"
+
+
 def canonical_local_omnimarket_commit(omni_home: str | None = None) -> str | None:
     """Return the checked-out HEAD commit of the canonical local omnimarket
     clone at ``$OMNI_HOME/omnimarket``, or ``None`` when it cannot be
@@ -157,6 +241,7 @@ def check_omnimarket_drift(
     *,
     allow_drift: bool = False,
     reconcile: ReconcileFn | None = None,
+    running_prefix: str | None = None,
 ) -> None:
     """Fail fast if the current venv's omnimarket is missing or has drifted
     from the canonical local clone.
@@ -193,6 +278,15 @@ def check_omnimarket_drift(
             detect-and-refuse behaviour, which is what every non-CLI caller
             and every unit test wants -- a guard that silently shells out
             would be an astonishing default.
+        running_prefix: The prefix of the interpreter this dispatch is running
+            in, bound at the CLI boundary as :func:`running_interpreter_prefix`
+            exactly the way ``allow_drift`` and ``reconcile`` are bound there.
+            When supplied together with ``reconcile``, a mismatch against
+            :func:`workspace_cli_prefix` is a hard, deterministic refusal
+            BEFORE any repair runs -- see the "Foreign interpreter" section
+            below. ``None`` (the default) means the caller made no claim about
+            its interpreter, so no identity check is performed and the pure
+            behaviour every library/test caller relies on is unchanged.
 
     Raises:
         OmnimarketDriftError: a canonical clone IS present locally, no
@@ -210,6 +304,29 @@ def check_omnimarket_drift(
     installed = installed_omnimarket_commit()
     if installed == canonical:
         return
+
+    # An EDITABLE install of the canonical clone is not drift -- it IS the
+    # clone. `import omnimarket` in this interpreter loads files straight out of
+    # $OMNI_HOME/omnimarket, so its code is whatever that working tree currently
+    # holds, at whatever HEAD it currently sits on. There is no commit to
+    # compare and nothing a reinstall could move it closer to. Treating it as
+    # "NOT INSTALLED from git" (which is what the commit probe alone reports,
+    # because an editable install records dir_info and no vcs_info) produced a
+    # refusal that was both wrong and unclearable -- reproduced live on this
+    # Mac 2026-08-30 via /opt/homebrew/bin/onex, whose interpreter carries
+    # omnimarket installed editable from the canonical clone.
+    if installed is None and omni_home:
+        editable_root = installed_omnimarket_editable_root()
+        if (
+            editable_root is not None
+            and editable_root.resolve() == (Path(omni_home) / "omnimarket").resolve()
+        ):
+            logger.debug(
+                "omnimarket is installed EDITABLE from the canonical clone at %s; "
+                "it is at clone HEAD by construction.",
+                editable_root,
+            )
+            return
 
     # Name the exact repair command with its FULL path (not a cwd-relative
     # one) so the message is copy-pasteable from any working directory --
@@ -274,6 +391,45 @@ def check_omnimarket_drift(
     # drifted is reporting something the next identical attempt will not fix,
     # and a retry loop on the CLI hot path would turn a clear refusal into a
     # hang.
+    # ------------------------------------------------------------------ #
+    # Foreign interpreter: refuse deterministically, never reconcile
+    # (OMN-17190 follow-up)
+    # ------------------------------------------------------------------ #
+    # The reconciler repairs exactly ONE venv --
+    # $OMNI_HOME/omnibase_infra/.venv. This guard, by contrast, probes
+    # whichever interpreter happens to be executing. Those are the same thing
+    # only when `onex` was resolved to that venv's entry point, and on a
+    # developer machine that is routinely NOT what happens: `onex` is
+    # documented as a zsh alias, aliases do not exist in non-interactive
+    # shells, and PATH there resolves to whatever sibling install came first
+    # (measured on this Mac 2026-08-30: `/opt/homebrew/bin/onex` and a
+    # `uv tool` shim at `~/.local/bin/onex`, both of them different
+    # interpreters with their own omnimarket state).
+    #
+    # Reconciling from a foreign interpreter is worse than refusing twice
+    # over: the repair CANNOT converge, because the re-check below re-probes
+    # this interpreter while the reconciler mutated a different one -- so the
+    # dispatch fails anyway, having silently rewritten a venv the operator
+    # never named. Refuse first, name the interpreter, and say which entry
+    # point is the workspace CLI.
+    if reconcile is not None and running_prefix is not None and omni_home:
+        workspace_prefix = workspace_cli_prefix(omni_home)
+        if Path(running_prefix).resolve() != workspace_prefix.resolve():
+            raise OmnimarketDriftError(
+                f"{detail} REFUSING to reconcile: this is NOT the workspace "
+                f"onex. It is running in {running_prefix} (interpreter "
+                f"{sys.executable}), while the reconciler repairs only "
+                f"{workspace_prefix}. A repair from here would rewrite a venv "
+                f"this process is not running in and STILL leave this dispatch "
+                f"drifted. Run the workspace CLI instead:\n"
+                f"  {Path(omni_home) / 'omnibase_infra' / 'scripts' / 'onex'} "
+                f"<args>\n"
+                f"(that wrapper always execs {workspace_prefix / 'bin' / 'onex'} "
+                f"and is safe from any shell, aliased or not). If you meant to "
+                f"dispatch from THIS interpreter anyway (results are NOT "
+                f"evidence), set {DRIFT_OVERRIDE_ENV}=1."
+            )
+
     if reconcile is not None:
         outcome = reconcile()
         if not outcome.ok:
