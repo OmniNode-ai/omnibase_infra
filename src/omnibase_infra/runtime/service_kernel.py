@@ -1796,8 +1796,43 @@ async def bootstrap() -> int:
                     SUFFIX_SAVINGS_ESTIMATED,
                 )
 
+                # OMN-16770: this pool MUST bind the `application` database
+                # (physical omnidash_analytics), NOT `omnibase_infra`. It read
+                # OMNIBASE_INFRA_DB_URL from OMN-16293 until this fix, so every
+                # correlation tick raised, once per minute since 2026-08-23:
+                #   asyncpg.exceptions.UndefinedTableError: relation
+                #   "omninode_internal.savings_injection_signals" does not exist
+                #
+                # `application` is the answer on four checked-in authorities,
+                # not on judgement (OMN-16770 AC5 asks for the reason on the
+                # record because the two directions are different ownership
+                # answers, not two implementations of one):
+                #   1. omnimarket's application-relation-ownership.yaml — the
+                #      manifest scripts/ci/check_application_database_sql.py
+                #      reads — declares BOTH signal relations
+                #      `database_ref: application`, `schema: omninode_internal`.
+                #   2. 0001_create_savings_signal_tables.sql's own trailing
+                #      GRANT names `omninode_runtime`, the principal of the
+                #      `omninode_runtime_service` binding, whose dsn_env is
+                #      OMNINODE_INTERNAL_DB_URL (topology/instances/local.yaml).
+                #   3. _ledger/application-migrations.tsv declares the artifact
+                #      domain `omninode_internal`, and the node-migration runner
+                #      applies that tree to the application database.
+                #   4. Three of the five relations HandlerSavingsCorrelation
+                #      joins — llm_call_metrics, session_outcomes,
+                #      savings_estimates — are written ONLY into
+                #      omnidash_analytics by omnimarket's projection nodes, so
+                #      moving the signal tables to omnibase_infra would strand
+                #      the join. That direction was never available.
+                #
+                # The 0001 header comment still claims "omnibase_infra primary
+                # Postgres". It is deliberately NOT corrected in place: 0001 is
+                # applied on every lane and its content SHA-256 is pinned in the
+                # manifest, so rewriting it is the OMN-17139 defect (an
+                # in-place-rewritten applied migration), not a fix. The
+                # correction lives here and on the ticket.
                 _savings_dsn = os.environ.get(  # url-authority-ok: Postgres DSN is an operator-supplied secret (required_env), not a service routing URL — same established pattern as node_baselines_batch_compute's identical DSN read above.
-                    "OMNIBASE_INFRA_DB_URL", ""
+                    "OMNINODE_INTERNAL_DB_URL", ""
                 ).strip()
                 if _savings_dsn:
                     _savings_interval = float(
@@ -1920,14 +1955,14 @@ async def bootstrap() -> int:
                     )
                 else:
                     logger.debug(
-                        "OMNIBASE_INFRA_DB_URL not set, skipping savings correlation "
+                        "OMNINODE_INTERNAL_DB_URL not set, skipping savings correlation "
                         "(correlation_id=%s)",
                         correlation_id,
                     )
             except Exception:
                 logger.exception(
                     "Failed to start savings correlation — pipeline will write zero rows "
-                    "(correlation_id=%s). Check OMNIBASE_INFRA_DB_URL.",
+                    "(correlation_id=%s). Check OMNINODE_INTERNAL_DB_URL.",
                     correlation_id,
                 )
                 savings_correlation_task = None

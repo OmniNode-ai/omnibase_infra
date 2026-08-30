@@ -17,6 +17,16 @@
 #     capture/correlation + Kafka publish via HandlerSavingsCorrelation).
 #     The original pure savings.estimate capability (HandlerSavingsEstimation)
 #     is unchanged and is invoked in-process by the correlator.
+#   - OMN-16770: HandlerSavingsCorrelation's asyncpg pool binds the
+#     `application` database (physical omnidash_analytics) via the
+#     `omninode_runtime_service` binding's OMNINODE_INTERNAL_DB_URL, NOT
+#     OMNIBASE_INFRA_DB_URL. That is the database
+#     docker/migrations/forward/nodes/node_savings_estimation_compute/
+#     0001_create_savings_signal_tables.sql actually creates its two signal
+#     relations in, and the database omnimarket's projection nodes write
+#     llm_call_metrics / session_outcomes / savings_estimates into. Reading
+#     the wrong one raised UndefinedTableError on every 60s tick from
+#     2026-08-23 until this fix.
 name: "node_savings_estimation_compute"
 contract_name: "node_savings_estimation_compute"
 node_name: "node_savings_estimation_compute"
@@ -27,7 +37,7 @@ contract_version:
 node_version:
   major: 0
   minor: 4
-  patch: 0
+  patch: 1
 node_type: "EFFECT_GENERIC"
 description: >
   EFFECT node for token savings estimation. HandlerSavingsCorrelation ingests raw injection-effectiveness / validator-catch signals into Postgres (no in-memory buffering), periodically correlates them per session by joining against llm_call_metrics and session_outcomes (owned by omnimarket's projection nodes), and calls the pure HandlerSavingsEstimation (tiered model pricing: Opus $15/M input, Sonnet $3/M input) to produce a ModelSavingsEstimate for Kafka emission to onex.evt.omnibase-infra.savings-estimated.v1.
