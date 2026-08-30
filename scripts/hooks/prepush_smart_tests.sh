@@ -477,11 +477,19 @@ guard_full_suite_host() {
       # on one host with one of them taking 97+ minutes. It is the busiest
       # path in the hook and was the only unserialized one. Take the same
       # exclusive slot a remote host would have to take.
-      local lw
+      local lw lock_rc=0
       lw="$(prepush_local_workroot "$lc_host" || true)"
       [ -n "$lw" ] || lw="${REPO_ROOT}/.onex_state/prepush_distribution"
-      if prepush_lock_acquire "$lw"; then
+      prepush_lock_acquire "$lw" || lock_rc=$?
+      if [ "$lock_rc" -eq 0 ]; then
         trap prepush_lock_release EXIT
+        return 0
+      fi
+      if [ "$lock_rc" -eq 2 ]; then
+        # The workroot is unusable, which says nothing about this host's
+        # capacity. Proceed exactly as the hook did before this lock existed
+        # rather than inventing a refusal out of an infrastructural failure.
+        log "WARNING: could not create the heavy-suite slot lock under '${lw}' -- running unserialized on this host (pre-OMN-16991 behavior). Fix the workroot to restore serialization (OMN-16174)."
         return 0
       fi
       log "this host is fit but its heavy-suite slot is already held; looking for another lab host before refusing"

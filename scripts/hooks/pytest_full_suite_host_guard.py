@@ -157,7 +157,14 @@ def designated_hostnames(
                 hostname = override
             names.append(hostname)
         return tuple(names) if names else fallback
-    except (OSError, subprocess.SubprocessError, ValueError):
+    except Exception:  # noqa: BLE001 - deliberately total; see below
+        # Deliberately broad. This runs in `pytest_configure`, where ANY escaping
+        # exception becomes an INTERNALERROR that kills the whole session before a
+        # single test is collected -- a far worse failure than falling back. The
+        # fallback is the exact pre-OMN-16991 behavior (the two code-embedded
+        # defaults), so degrading here is neither more nor less permissive than
+        # before. `resolve_repo_root()` raising outside a git checkout is the
+        # concrete case: it raises GrantError, not OSError.
         return fallback
 
 

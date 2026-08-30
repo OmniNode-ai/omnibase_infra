@@ -417,11 +417,16 @@ EOF
 # outside) would wedge a host permanently.
 PREPUSH_HELD_LOCK=""
 
+# Returns 0 acquired, 1 CONTENDED (someone holds it), 2 INFRASTRUCTURAL (the
+# workroot itself is unusable). Callers must not conflate them: contention is a
+# real "this host is busy" signal that should send the work elsewhere, while an
+# unusable workroot says nothing about capacity and must not start refusing
+# pushes that passed before this lock existed.
 prepush_lock_acquire() {
   local workroot lockdir holder
   workroot="$1"
   lockdir="${workroot}/LOCK"
-  mkdir -p "$workroot" 2> /dev/null || return 1
+  mkdir -p "$workroot" 2> /dev/null || return 2
   if mkdir "$lockdir" 2> /dev/null; then
     printf '%s %s %s\n' "$$" "$(hostname -s 2> /dev/null || echo unknown)" "$(date -u '+%Y-%m-%dT%H:%M:%SZ')" \
       > "${lockdir}/holder" 2> /dev/null || true

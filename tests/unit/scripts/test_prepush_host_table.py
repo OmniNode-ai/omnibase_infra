@@ -613,3 +613,30 @@ def test_the_dangling_runbook_pointer_is_gone() -> None:
             encoding="utf-8"
         ), f"{path} still cites a runbook that does not exist"
     assert (REPO_ROOT / "docs" / "runbooks" / "lab-prepush-host-table.md").is_file()
+
+
+def test_an_unusable_workroot_is_reported_as_infrastructural_not_contention(
+    table_repo: Path, tmp_path: Path
+) -> None:
+    """rc 2 (workroot unusable) must stay distinguishable from rc 1
+    (contended). Conflating them would make a permissions problem look like a
+    busy host and start refusing heavy pushes that passed before this lock
+    existed -- inventing a refusal out of an infrastructural failure."""
+    blocker = tmp_path / "not-a-dir"
+    blocker.write_text("i am a file")
+    out = _driver(
+        table_repo,
+        f'rc=0; prepush_lock_acquire {blocker}/wr || rc=$?; echo "RC=$rc"',
+    )
+    assert "RC=2" in out
+
+
+def test_the_local_fit_path_proceeds_when_the_workroot_is_unusable() -> None:
+    """An unusable workroot says nothing about capacity, so the hook must fall
+    back to its pre-OMN-16991 behavior rather than refuse."""
+    text = HOOK.read_text(encoding="utf-8")
+    start = text.index("guard_full_suite_host() {")
+    fit = text[start:]
+    fit = fit[fit.index('if host_is_fit ""; then') :][:1600]
+    assert '[ "$lock_rc" -eq 2 ]' in fit
+    assert "running unserialized on this host" in fit
