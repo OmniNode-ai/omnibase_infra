@@ -139,23 +139,42 @@ def archive_files(entry: dict[str, Any]) -> list[Path]:
 
 def find_in_archive(
     files: list[Path], anchor_heading: str, anchor_digest: str | None
-) -> str | None:
-    """Path of the archive file holding the anchor row, or None.
+) -> tuple[str, list[Any]] | None:
+    """Where the anchor row was archived, and the rows archived AFTER it.
 
-    Matching is by the same (heading, digest) identity the live search uses;
-    a heading found in an archive whose digest disagrees is NOT a match,
-    because that is a different row that happens to share a title.
+    Returns `(archive path, rows still unread in the archives)` or None.
+
+    The second half is the part that is easy to get wrong and expensive to get
+    wrong. A roll moves the OLDEST rows out and does not ask the reader whether
+    it had read them yet -- so a reader whose anchor lands in an archive can
+    have unread rows on BOTH sides of the split. Reporting only the live file's
+    rows would silently drop the archived ones: the same class of silent skip
+    the line-number watermark produced, reached by a different route. Rows are
+    ordered by roll order within a file and by filename (the roll stamps the
+    date) across files.
+
+    Matching is by the same (heading, digest) identity the live search uses; a
+    heading found in an archive whose digest disagrees is NOT a match, because
+    that is a different row that happens to share a title.
     """
     target = anchor_heading.strip()
-    for path in files:
+    for position, path in enumerate(files):
         text = path.read_text(encoding="utf-8")
         if target not in text:
             continue
-        if anchor_digest is None:
-            return str(path)
-        for entry in _archive_entries(text):
-            if entry.heading.strip() == target and entry.digest() == anchor_digest:
-                return str(path)
+        archived = _archive_entries(text)
+        index = None
+        for offset, candidate in enumerate(archived):
+            if candidate.heading.strip() != target:
+                continue
+            if anchor_digest is None or candidate.digest() == anchor_digest:
+                index = offset
+        if index is None:
+            continue
+        unread: list[Any] = list(archived[index + 1 :])
+        for later in files[position + 1 :]:
+            unread.extend(_archive_entries(later.read_text(encoding="utf-8")))
+        return str(path), unread
     return None
 
 
@@ -207,25 +226,36 @@ def resolve(ledger: Path, entry: dict[str, Any], source: str) -> dict[str, Any]:
             index = rows.index(chosen)
             unread = rows[index + 1 :]
         else:
-            archive_path = find_in_archive(
+            located = find_in_archive(
                 archive_files(entry), anchor_heading, anchor_digest
             )
-            if archive_path is None:
+            if located is None:
                 raise UnresolvedAnchorError(
                     f"anchor row {anchor_heading!r} is in neither {ledger} nor any archive under "
                     f"{entry.get('archive_dir')!r}. The reader cannot prove where it stopped."
                 )
+            archive_path, archived_unread = located
             found_in = f"archive:{archive_path}"
-            unread = rows
+            unread = archived_unread + rows
 
-    if unread:
-        resume_line = unread[0].start_line
+    live_unread = [row for row in unread if any(row is candidate for candidate in rows)]
+    archived_unread_rows = [
+        row for row in unread if not any(row is candidate for candidate in rows)
+    ]
+    if live_unread:
+        # resume_line addresses the LIVE file only. Rows that were archived
+        # before the reader got to them cannot be addressed by a line number
+        # into this file at all, so they are named separately rather than
+        # folded into one and lost.
+        resume_line = live_unread[0].start_line
     else:
         resume_line = len(ledger.read_text(encoding="utf-8").splitlines()) + 1
 
     skipped = None
     if isinstance(line_mark, int):
-        skipped = sum(1 for row in unread if row.start_line <= line_mark)
+        skipped = len(archived_unread_rows) + sum(
+            1 for row in live_unread if row.start_line <= line_mark
+        )
 
     tail = rows[-1] if rows else None
     return {
@@ -239,6 +269,8 @@ def resolve(ledger: Path, entry: dict[str, Any], source: str) -> dict[str, Any]:
         "unread_entries": len(unread),
         "unread_lines": sum(len(row.text.splitlines()) for row in unread),
         "unread_headings": [row.heading for row in unread],
+        "unread_archived_entries": len(archived_unread_rows),
+        "unread_archived_headings": [row.heading for row in archived_unread_rows],
         "skipped_by_line_watermark": skipped,
         "tail_heading": tail.heading if tail else None,
         "tail_digest": tail.digest() if tail else None,

@@ -158,6 +158,12 @@ scripts/ledger_watermark.py LEDGER --state STATE.json --source NAME --advance   
 scripts/ledger_watermark.py LEDGER --state STATE.json --source NAME --migrate   # convert a line-number mark, once
 ```
 
+A roll moves the OLDEST rows out and does not ask whether the reader had read them,
+so an anchor that lands in an archive can have unread rows on BOTH sides of the split.
+The resolver reports those as `unread_archived_entries` / `unread_archived_headings`
+alongside the live `resume_line`; dropping them would be the same silent skip the line
+number produced, reached by a different route.
+
 The state file declares `watermark_schema_version` (currently `2`); a state file
 without one is the pre-OMN-17023 line-number schema and is **refused** (exit 4) rather
 than reinterpreted. Exit 3 is `UNRESOLVED` — the anchor row is gone, or its digest

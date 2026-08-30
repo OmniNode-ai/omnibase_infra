@@ -314,3 +314,69 @@ def test_duplicate_headings_are_disambiguated_by_digest(tmp_path: Path) -> None:
         _run([str(ledger), "--state", str(state), "--source", SOURCE, "--resolve"])
     )
     assert out["unread_entries"] == 1
+
+
+def test_rows_archived_before_they_were_read_are_still_reported_unread(
+    tmp_path: Path,
+) -> None:
+    """A roll archives the OLDEST rows; it does not ask whether they were read.
+
+    So a reader whose anchor lands in an archive can have unread rows on BOTH
+    sides of the split. Dropping the archived ones would be the same silent
+    skip the line-number watermark produced, reached by a different route.
+    """
+    ledger = _ledger(tmp_path, 6)
+    archive_dir = tmp_path / "archive"
+    state = _v2_state(tmp_path, ledger, {"anchor_heading": None, "anchor_digest": None})
+
+    # read only as far as entry 2 ...
+    _out(_run([str(ledger), "--state", str(state), "--source", SOURCE, "--advance"]))
+    body = json.loads(state.read_text(encoding="utf-8"))
+    body["watermarks"][SOURCE]["anchor_heading"] = "## 2026-08-02 — entry 2"
+    body["watermarks"][SOURCE]["anchor_digest"] = None
+    state.write_text(json.dumps(body), encoding="utf-8")
+    assert (
+        _out(
+            _run([str(ledger), "--state", str(state), "--source", SOURCE, "--resolve"])
+        )["unread_entries"]
+        == 4
+    )
+
+    # ... then a roll archives entries 1-4, two of which were never read
+    roll = subprocess.run(
+        [
+            sys.executable,
+            str(_LOCK),
+            str(ledger),
+            "--roll-section",
+            "--force-roll",
+            "--section-heading",
+            SECTION,
+            "--max-section-rows",
+            "100000",
+            "--on-cap",
+            "roll",
+            "--archive-dir",
+            str(archive_dir),
+            "--roll-keep-entries",
+            "2",
+        ],
+        capture_output=True,
+        text=True,
+        timeout=60,
+        check=False,
+    )
+    assert roll.returncode == 0, roll.stderr
+
+    out = _out(
+        _run([str(ledger), "--state", str(state), "--source", SOURCE, "--resolve"])
+    )
+    assert out["anchor_found_in"].startswith("archive:")
+    assert out["unread_archived_entries"] == 2
+    assert out["unread_archived_headings"] == [
+        "## 2026-08-03 — entry 3",
+        "## 2026-08-04 — entry 4",
+    ]
+    # still four unread rows in total -- the roll moved two of them, it did not
+    # make them read
+    assert out["unread_entries"] == 4
