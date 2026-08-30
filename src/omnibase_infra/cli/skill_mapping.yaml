@@ -569,6 +569,26 @@ skills:
       - {name: query, payload_field: query, arg_type: string, positional: true, required: true}
       - {name: scope, payload_field: scope, arg_type: string}
       - {name: max-results, payload_field: max_results, arg_type: integer}
+  # OMN-17018: node_dispatch_queue_drainer had ZERO occurrences in this file,
+  # so `onex skill dispatch_queue_drainer` did not resolve at all and the node's
+  # only reach was `python -m ...` plus one `uv run onex run-node` line in its
+  # SKILL.md. It is also absent from contract_topic_graph_orphan_classification
+  # and the baseline, so a reachability census sourced from the topic-graph
+  # classifier alone omits it silently. Registering it here is the CLI-dispatch
+  # path the skill shim already documents.
+  - skill_name: dispatch_queue_drainer
+    node_name: node_dispatch_queue_drainer
+    result_model: omnimarket.nodes.node_dispatch_queue_drainer.models.model_dispatch_queue_drainer_result.ModelDispatchQueueDrainerResult
+    args:
+      - {name: queue-item-path, payload_field: queue_item_path, arg_type: string}
+      - {name: queue-dir, payload_field: queue_dir, arg_type: string}
+      - {name: state-dir, payload_field: state_dir, arg_type: string}
+      - {name: tasks-dir, payload_field: tasks_dir, arg_type: string}
+      - {name: omni-home, payload_field: omni_home, arg_type: string}
+      - {name: claim-lease-seconds, payload_field: claim_lease_seconds, arg_type: integer}
+      - {name: dispatch-ack-timeout-seconds, payload_field: dispatch_ack_timeout_seconds, arg_type: integer}
+      - {name: actor, payload_field: actor, arg_type: string}
+      - {name: dry-run, payload_field: dry_run, arg_type: boolean, default: false}
   - skill_name: dispatch_watchdog
     node_name: node_dispatch_watchdog_orchestrator
     result_model: omnimarket.nodes.node_dispatch_watchdog_orchestrator.models.model_watchdog.ModelWatchdogResult

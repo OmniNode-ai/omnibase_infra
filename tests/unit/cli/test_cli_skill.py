@@ -1645,3 +1645,66 @@ def test_drift_override_env_falsey_values_still_refuse(
 
     assert result.exit_code != 0
     assert "NOT INSTALLED" in result.output + str(result.exception or "")
+
+
+# --------------------------------------------------------------------------- #
+# OMN-17018: node_dispatch_queue_drainer had ZERO occurrences in
+# skill_mapping.yaml, so `onex skill dispatch_queue_drainer` returned "Unknown
+# skill" while the skill shim in omniclaude documented that exact invocation.
+# The node is also absent from contract_topic_graph_orphan_classification.yaml
+# and the baseline, so a reachability census built from the topic-graph
+# classifier alone omits it silently — this test is the mapping-side gate.
+# --------------------------------------------------------------------------- #
+_OMN_17018_DRAINER_SKILL = "dispatch_queue_drainer"
+_OMN_17018_DRAINER_NODE = "node_dispatch_queue_drainer"
+
+#: Every CLI arg the mapping surfaces must be a field the drainer's request
+#: model accepts — its ``model_config`` is ``extra="forbid"``, so an arg naming
+#: a field that does not exist fails only at dispatch time.
+_OMN_17018_DRAINER_PAYLOAD_FIELDS = frozenset(
+    {
+        "queue_item_path",
+        "queue_dir",
+        "state_dir",
+        "tasks_dir",
+        "omni_home",
+        "claim_lease_seconds",
+        "dispatch_ack_timeout_seconds",
+        "actor",
+        "dry_run",
+    }
+)
+
+
+def test_omn_17018_dispatch_queue_drainer_is_registered() -> None:
+    """`onex skill dispatch_queue_drainer` resolves to the omnimarket node."""
+    registry = load_skill_registry()
+    by_name = {s.skill_name: s for s in registry.skills}
+
+    mapping = by_name.get(_OMN_17018_DRAINER_SKILL)
+    assert mapping is not None, (
+        "dispatch_queue_drainer is absent from skill_mapping.yaml — "
+        "`onex skill dispatch_queue_drainer` returns 'Unknown skill'"
+    )
+    assert mapping.node_name == _OMN_17018_DRAINER_NODE
+    assert mapping.result_model.endswith("ModelDispatchQueueDrainerResult")
+
+    declared_args = {arg.payload_field for arg in mapping.args}
+    assert declared_args == _OMN_17018_DRAINER_PAYLOAD_FIELDS, (
+        "the drainer mapping surfaces CLI args that do not match the request "
+        f"model's fields: {sorted(declared_args ^ _OMN_17018_DRAINER_PAYLOAD_FIELDS)}"
+    )
+    # DoD 3: --dry-run is a real mode on the node now, not a phantom flag.
+    dry_run = next(arg for arg in mapping.args if arg.payload_field == "dry_run")
+    assert dry_run.arg_type == "boolean"
+
+
+def test_omn_17018_drainer_node_resolves_in_catalog() -> None:
+    """The drainer's node_name exists in the canonical omnimarket catalog."""
+    omnimarket_root = _resolve_omnimarket_src()
+    if omnimarket_root is None:
+        pytest.skip(
+            "omnimarket source tree not resolvable "
+            "(set OMNIMARKET_SRC or OMNI_HOME); CI wires the sibling checkout"
+        )
+    assert _OMN_17018_DRAINER_NODE in _omnimarket_declared_nodes(omnimarket_root)
