@@ -123,6 +123,27 @@ INTERNAL_TABLES_PHYSICALLY_IN_PUBLIC_UNTIL_OMN15359: frozenset[str] = frozenset(
         "session_outcomes",
         "session_replay_snapshots",
         "swarm_runs",
+        # OMN-16930: node_projection_tenant_registry's runtime-populated
+        # slug->UUID mirror. Same bridge as node_service_registry and
+        # validation_event_ledger above -- logically OMNINODE_INTERNAL-domain
+        # per the node contract (a registry index, no tenant_id column, no
+        # RLS), physically created bare in `public` by
+        # docker/migrations/forward/nodes/node_projection_tenant_registry/
+        # 0000_create_tenant_registry_mirror.sql. Physically-public is not a
+        # convenience here, it is load-bearing: the migrate identity
+        # (NODE_DB_USER=role_omnidash) holds neither USAGE nor CREATE on
+        # `omninode_internal` (live-confirmed 2026-08-10 and recorded in
+        # node_projection_live_events/0002's header, where the repair is still
+        # a queued OPERATOR action), and node_projection_delegation/0032
+        # resolves the mirror through an unqualified `to_regclass` at apply
+        # time. Creating this relation in `omninode_internal` would make the
+        # apply-time conversion unreachable on exactly the lanes it exists to
+        # convert. Enumerated here so physical_grant_schema_for_table(
+        # 'omninode_internal', 'tenant_registry_mirror') resolves to 'public'
+        # and the application_database_sql_gate accepts the migration's bare
+        # CREATE TABLE, matching its real physical location. Promotable once
+        # OMN-15359 moves the family.
+        "tenant_registry_mirror",
         "traces",
         "voice_sessions",
         # OMN-16385: validation_event_ledger (docker/migrations/forward/
