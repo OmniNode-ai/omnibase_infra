@@ -87,13 +87,19 @@ class HandlerReleaseIdentity:
     ) -> ModelReleaseIdentityDecision:
         """Evaluate the release-identity invariant for pre-collected gate inputs.
 
-        Decision order (first match wins), mirroring the legacy gate exactly:
+        Decision order (first match wins):
             1. pyproject version absent/empty  -> exit 2 (config error)
             2. pyproject version malformed     -> exit 2 (config error)
-            3. no published tag yet            -> exit 0 (bump not required)
-            4. no packaged src/** change       -> exit 0 (bump not required)
-            5. version ahead of latest tag     -> exit 0 (pass)
-            6. otherwise                       -> exit 1 (not ahead; must bump)
+            3. no published version AND the
+               empty tag set is not credible   -> exit 2 (tag state unavailable)
+            4. no published tag yet            -> exit 0 (bump not required)
+            5. no packaged src/** change       -> exit 0 (bump not required)
+            6. version ahead of latest tag     -> exit 0 (pass)
+            7. otherwise                       -> exit 1 (not ahead; must bump)
+
+        Step 3 is the only departure from the legacy gate (OMN-17240) and it only
+        ever splits the branch the legacy gate reached with an empty tag set; no
+        other branch changed.
 
         Args:
             request: Pre-collected gate inputs (see ModelReleaseIdentityRequest).
@@ -120,8 +126,28 @@ class HandlerReleaseIdentity:
                 reason_code="malformed_pyproject_version",
             )
 
-        # Step 3: no published tag -> the bump invariant does not apply yet.
+        # Step 3: an empty tag set is a PASS only when it is credible (OMN-17240).
         latest = self._latest_published_version(request.published_tags)
+        if latest is None:
+            doubts = self._tag_state_doubts(request, pyproject_version)
+            if doubts:
+                return ModelReleaseIdentityDecision(
+                    exit_code=2,
+                    stream="stderr",
+                    message=(
+                        "ERROR: this tree reports NO published version tag, and that "
+                        "empty tag set is not credible (OMN-17240 fail-closed): "
+                        f"{'; '.join(doubts)}.\n"
+                        "A tag-less tree makes this gate answer 'no published tag yet' "
+                        "and pass silently, so it refuses instead. Restore the tag "
+                        "state (git fetch --tags; git fetch --unshallow on a shallow "
+                        "clone; rebuild a bundle with `git bundle create <f> HEAD "
+                        "--tags`) and re-run."
+                    ),
+                    reason_code="tag_state_unavailable",
+                )
+
+        # Step 4: no published tag -> the bump invariant does not apply yet.
         if latest is None:
             return ModelReleaseIdentityDecision(
                 exit_code=0,
@@ -130,7 +156,7 @@ class HandlerReleaseIdentity:
                 reason_code="no_published_tag",
             )
 
-        # Step 4: no packaged src/** change -> the published image is unaffected.
+        # Step 5: no packaged src/** change -> the published image is unaffected.
         if not self._packaged_source_changed(request.changed_files):
             return ModelReleaseIdentityDecision(
                 exit_code=0,
@@ -142,7 +168,7 @@ class HandlerReleaseIdentity:
                 reason_code="no_packaged_change",
             )
 
-        # Step 5: version strictly ahead of the latest published tag -> pass.
+        # Step 6: version strictly ahead of the latest published tag -> pass.
         if pyproject_version > latest:
             return ModelReleaseIdentityDecision(
                 exit_code=0,
@@ -153,7 +179,7 @@ class HandlerReleaseIdentity:
                 reason_code="version_ahead",
             )
 
-        # Step 6: packaged source changed but the version is not ahead -> FAIL.
+        # Step 7: packaged source changed but the version is not ahead -> FAIL.
         suggested_bump = Version(f"{latest.major}.{latest.minor}.{latest.micro + 1}")
         fail_line = (
             "FAIL: packaged source changed but pyproject version "
@@ -171,6 +197,54 @@ class HandlerReleaseIdentity:
             message=f"{fail_line}\n{guidance_line}",
             reason_code="version_not_ahead",
         )
+
+    @staticmethod
+    def _tag_state_doubts(
+        request: ModelReleaseIdentityRequest, pyproject_version: Version
+    ) -> tuple[str, ...]:
+        """Reasons an EMPTY published-tag set must not be believed (OMN-17240).
+
+        The gate reads the published version from ``git tag --list``. Any transport
+        or checkout that loses the tag refs therefore hands it an empty list, which
+        the legacy gate read as "nothing has been published yet" and passed on. The
+        pre-push remote leg did exactly that on every host and every push: it
+        transplanted the tree as a ``git bundle create ... HEAD`` bundle, which
+        carries no ``refs/tags/`` ref at all.
+
+        Each marker below is a *repository fact*, derived by the collector from git
+        itself, that contradicts "this project has never published a version":
+
+        * the tree was cloned from a git bundle (bundles carry only the refs they
+          were asked for; the pre-OMN-17240 transport asked for ``HEAD`` alone),
+        * the tree is a shallow clone (tag refs and their ancestry may simply be
+          absent),
+        * the declared version carries a non-zero patch component -- ``0.38.15``
+          cannot be the first version a project ever shipped, because ``0.38.14``
+          and its predecessors must have preceded it.
+
+        Args:
+            request: The pre-collected gate inputs.
+            pyproject_version: The parsed declared version.
+
+        Returns:
+            A tuple of human-readable doubts; EMPTY when the tag set is credibly
+            empty (a genuine pre-first-release repository in a complete checkout).
+        """
+        doubts: list[str] = []
+        if request.repo_origin_is_bundle:
+            doubts.append(
+                "this tree was cloned from a git bundle, which carries only the refs "
+                "it was built with"
+            )
+        if request.repo_is_shallow:
+            doubts.append("this tree is a shallow clone, which can omit tag refs")
+        if pyproject_version.micro > 0:
+            doubts.append(
+                f"the declared version {pyproject_version} has a non-zero patch "
+                "component, so earlier versions in its release line must have been "
+                "published"
+            )
+        return tuple(doubts)
 
     @staticmethod
     def _latest_published_version(published_tags: tuple[str, ...]) -> Version | None:

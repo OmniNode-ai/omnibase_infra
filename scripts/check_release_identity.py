@@ -45,7 +45,9 @@ Usage::
 Exit codes:
     0 — version is correctly ahead of the latest published tag (or exempt diff)
     1 — packaged source changed without bumping past the latest published version
-    2 — configuration error (no pyproject version, malformed version/tag)
+    2 — configuration error (no pyproject version, malformed version/tag), or the
+        repository reports NO published tag and that empty tag set is not credible
+        (OMN-17240 — see ``_repo_is_shallow`` / ``_repo_origin_is_bundle``)
 """
 
 from __future__ import annotations
@@ -136,6 +138,27 @@ def _collect_changed_files(
     return None
 
 
+def _repo_is_shallow() -> bool:
+    """Whether the tree the tags were listed from is a shallow clone (OMN-17240).
+
+    A shallow checkout can be missing the tag refs this gate reads, so an empty tag
+    set on one is not evidence that nothing has been published.
+    """
+    return _git(["rev-parse", "--is-shallow-repository"]) == "true"
+
+
+def _repo_origin_is_bundle() -> bool:
+    """Whether this tree was transplanted by ``git clone <file>.bundle`` (OMN-17240).
+
+    The pre-push remote leg used to build its transplant with
+    ``git bundle create <f> HEAD``, which packs no ``refs/tags/`` ref at all, so the
+    landed tree reported zero tags on every lab host and the gate passed silently.
+    A bundle-cloned tree records the bundle path as ``remote.origin.url``, which is
+    a git fact the landed tree carries itself — not something the caller asserts.
+    """
+    return _git(["config", "--get", "remote.origin.url"]).endswith(".bundle")
+
+
 def collect_request(
     base: str | None, explicit: list[str]
 ) -> ModelReleaseIdentityRequest:
@@ -147,6 +170,8 @@ def collect_request(
         pyproject_path=str(_PYPROJECT),
         published_tags=published_tags,
         changed_files=_collect_changed_files(base, explicit),
+        repo_is_shallow=_repo_is_shallow(),
+        repo_origin_is_bundle=_repo_origin_is_bundle(),
     )
 
 

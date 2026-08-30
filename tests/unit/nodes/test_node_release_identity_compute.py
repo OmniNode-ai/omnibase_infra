@@ -32,12 +32,16 @@ def _handle(
     version: str | None,
     tags: tuple[str, ...] = (),
     changed: tuple[str, ...] | None = (),
+    shallow: bool = False,
+    from_bundle: bool = False,
 ) -> ModelReleaseIdentityDecision:
     request = ModelReleaseIdentityRequest(
         pyproject_version_raw=version,
         pyproject_path=_PYPROJECT_PATH,
         published_tags=tags,
         changed_files=changed,
+        repo_is_shallow=shallow,
+        repo_origin_is_bundle=from_bundle,
     )
     return HandlerReleaseIdentity().handle(request)
 
@@ -166,6 +170,74 @@ class TestTagSelection:
         )
         assert decision.exit_code == 0
         assert decision.reason_code == "no_published_tag"
+
+
+class TestTagStateFailsClosed:
+    """An EMPTY tag set is only a pass when it is CREDIBLE (OMN-17240).
+
+    The gate derives "the latest published version" from ``git tag --list``. Before
+    OMN-17240 an empty list unconditionally meant "no published tag yet -> nothing
+    to enforce", so ANY transport that lost the tags made the gate silently pass.
+    That is exactly what happened: the pre-push remote leg shipped the tree as a
+    ``git bundle create ... HEAD`` bundle, which carries no ``refs/tags/`` at all,
+    so every lab host evaluated release identity against zero tags.
+
+    The markers are read from the repository's own git state by the collector --
+    never from a caller-written file or environment variable, which is the kind of
+    self-asserted truth this gate exists to refuse.
+    """
+
+    def test_bundle_origin_with_no_tags_fails_closed(self) -> None:
+        decision = _handle(version="1.0.0", tags=(), from_bundle=True)
+        assert decision.exit_code == 2
+        assert decision.stream == "stderr"
+        assert decision.reason_code == "tag_state_unavailable"
+        assert "OMN-17240" in decision.message
+        assert "bundle" in decision.message
+
+    def test_shallow_repo_with_no_tags_fails_closed(self) -> None:
+        decision = _handle(version="1.0.0", tags=(), shallow=True)
+        assert decision.exit_code == 2
+        assert decision.reason_code == "tag_state_unavailable"
+        assert "OMN-17240" in decision.message
+        assert "shallow" in decision.message
+
+    def test_patch_version_with_no_tags_fails_closed(self) -> None:
+        """0.38.15 cannot credibly be the first thing this project ever shipped."""
+        decision = _handle(version="0.38.15", tags=())
+        assert decision.exit_code == 2
+        assert decision.reason_code == "tag_state_unavailable"
+        assert "OMN-17240" in decision.message
+        assert "0.38.15" in decision.message
+
+    def test_unparseable_tags_plus_bundle_origin_fails_closed(self) -> None:
+        """No PARSEABLE published version is the same blind spot as no tags."""
+        decision = _handle(version="1.0.0", tags=("garbage",), from_bundle=True)
+        assert decision.exit_code == 2
+        assert decision.reason_code == "tag_state_unavailable"
+
+    def test_credible_empty_tag_set_still_passes(self) -> None:
+        """A pre-first-release repo with a complete, non-bundle checkout is fine."""
+        decision = _handle(version="1.0.0", tags=(), changed=("src/foo.py",))
+        assert decision.exit_code == 0
+        assert decision.reason_code == "no_published_tag"
+
+    def test_markers_are_ignored_once_the_tag_state_is_present(self) -> None:
+        """The markers only ever qualify an EMPTY tag set; they never veto a real one."""
+        decision = _handle(
+            version="2.0.0",
+            tags=("v1.0.0",),
+            changed=("src/foo.py",),
+            shallow=True,
+            from_bundle=True,
+        )
+        assert decision.exit_code == 0
+        assert decision.reason_code == "version_ahead"
+
+    def test_config_error_still_precedes_the_tag_state_check(self) -> None:
+        decision = _handle(version=None, tags=(), from_bundle=True)
+        assert decision.exit_code == 2
+        assert decision.reason_code == "no_pyproject_version"
 
 
 class TestHandlerClassification:
