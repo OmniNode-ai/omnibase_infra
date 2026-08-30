@@ -17,11 +17,14 @@
 --   the transition; nothing here retires ledger_lock.py (that is OMN-16183/C7).
 --
 --   The four omniclaude hook topics this node subscribes carry real session
---   traffic today -- live-verified on the stability lane broker
---   (192.168.86.201:39092) 2026-08-29, and materialized by the sibling
---   node_projection_session_replay into public.session_replay_snapshots once
---   OMN-16993 issued that table's omninode_runtime grant. This migration
---   creates the second, work-shaped projection of that same live stream.
+--   traffic today -- live-verified 2026-08-29 on the stability-lane broker
+--   (compose service omnibase-infra-stability-test-redpanda, the lane of record
+--   for hook events; the address is deliberately not written here -- it belongs
+--   in the contract overlay, not in a migration comment), and materialized by
+--   the sibling node_projection_session_replay into
+--   public.session_replay_snapshots once OMN-16993 issued that table's
+--   omninode_runtime grant. This migration creates the second, work-shaped
+--   projection of that same live stream.
 --
 -- WHY omninode_internal AND NOT public
 --   A net-new relation has no reason to land in the legacy default schema. The
