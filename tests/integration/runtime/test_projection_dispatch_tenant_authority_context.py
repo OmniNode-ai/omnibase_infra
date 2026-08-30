@@ -114,6 +114,12 @@ async def test_dispatch_engine_keeps_verified_authority_out_of_band(
     calls: list[tuple[str, object]] = []
     connection = _Connection(calls)
     monkeypatch.setenv("OMNIDASH_ANALYTICS_DB_URL", "postgresql://fixture")
+    # OMN-17144: omnibase_infra#3014 (OMN-15425) moved the tenant_projection
+    # binding off the shared OMNIDASH_ANALYTICS_DB_URL onto its own
+    # ONEX_TENANT_DB_URL, and _make_projection_dispatch_callback fails
+    # closed on an unset binding DSN. Same fixture line every sibling
+    # test already carries.
+    monkeypatch.setenv("ONEX_TENANT_DB_URL", "postgresql://fixture")
     callback = _make_projection_dispatch_callback(
         _TenantProjectionHandler(),
         projection_database_target("delegation_events", schema="tenant"),
@@ -193,6 +199,12 @@ async def test_dispatch_without_verified_capability_records_but_never_selects(
     of refusing the write.
     """
     monkeypatch.setenv("OMNIDASH_ANALYTICS_DB_URL", "postgresql://fixture")
+    # OMN-17144: omnibase_infra#3014 (OMN-15425) moved the tenant_projection
+    # binding off the shared OMNIDASH_ANALYTICS_DB_URL onto its own
+    # ONEX_TENANT_DB_URL, and _make_projection_dispatch_callback fails
+    # closed on an unset binding DSN. Same fixture line every sibling
+    # test already carries.
+    monkeypatch.setenv("ONEX_TENANT_DB_URL", "postgresql://fixture")
     callback = _make_projection_dispatch_callback(
         _TenantProjectionHandler(),
         projection_database_target("delegation_events", schema="tenant"),
@@ -222,6 +234,12 @@ async def test_dispatch_without_verified_capability_fails_at_db_role_validation(
     calls: list[tuple[str, object]] = []
     connection = _Connection(calls, principal="unverified_projection_writer")
     monkeypatch.setenv("OMNIDASH_ANALYTICS_DB_URL", "postgresql://fixture")
+    # OMN-17144: omnibase_infra#3014 (OMN-15425) moved the tenant_projection
+    # binding off the shared OMNIDASH_ANALYTICS_DB_URL onto its own
+    # ONEX_TENANT_DB_URL, and _make_projection_dispatch_callback fails
+    # closed on an unset binding DSN. Same fixture line every sibling
+    # test already carries.
+    monkeypatch.setenv("ONEX_TENANT_DB_URL", "postgresql://fixture")
     callback = _make_projection_dispatch_callback(
         _TenantProjectionHandler(),
         projection_database_target("delegation_events", schema="tenant"),
@@ -264,6 +282,10 @@ async def test_mixed_target_internal_operation_does_not_resolve_tenant_authority
     )
     target = _resolve_projection_database_target(tables, application_topology())
     monkeypatch.setenv("OMNIDASH_ANALYTICS_DB_URL", "postgresql://tenant")
+    # OMN-17144: the tenant binding's own DSN env (OMN-15425 / #3014).
+    # Deliberately a DISTINCT value from the internal one below -- this
+    # test exists to prove the two bindings do not collapse into one.
+    monkeypatch.setenv("ONEX_TENANT_DB_URL", "postgresql://tenant")
     monkeypatch.setenv("OMNINODE_INTERNAL_DB_URL", "postgresql://internal")
     callback = _make_projection_dispatch_callback(
         _InternalProjectionHandler(), target, (TOPIC,)

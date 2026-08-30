@@ -19,6 +19,9 @@ from tests.helpers.application_db_topology import projection_database_target
 @pytest.fixture(autouse=True)
 def _configured_projection_dsn(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setenv("OMNIDASH_ANALYTICS_DB_URL", "postgresql://fixture")
+    # OMN-17144: the tenant_projection binding got its own DSN env in
+    # omnibase_infra#3014 (OMN-15425); the callback fails closed without it.
+    monkeypatch.setenv("ONEX_TENANT_DB_URL", "postgresql://fixture")
 
 
 _PATCH_BUILD_ADAPTER = (
