@@ -60,6 +60,12 @@ _LANE_PORT_MAP: dict[str, dict[str, str]] = {
     "stability-test": {"main": "18085", "effects": "18086"},
     "prod": {"main": "28085", "effects": "28086"},
     "judge": {"main": "—", "effects": "—"},
+    # OMN-17143 — collaborator lane RESERVED for Lakshman Patel. Verified free
+    # on .201 by read-only `ss -ltn` on 2026-08-30. Note the near-miss: the
+    # adjacent 48085/48086 pair is the JUDGE lane's runtime main/effects
+    # (docker/runtime-policy.env), and 49092 is the prod broker's external Kafka
+    # port — the reserved block deliberately avoids both.
+    "lakshman": {"main": "58085", "effects": "58086"},
 }
 
 _LANE_BOUNDARY: dict[str, str] = {
@@ -67,6 +73,10 @@ _LANE_BOUNDARY: dict[str, str] = {
     "stability-test": "preferred proof lane for synthetic integration evidence",
     "prod": "read-only unless the user explicitly approves production mutation",
     "judge": "NOT authorized for mutation — read-only",
+    "lakshman": (
+        "collaborator lane — owned by Lakshman; mutable by him; NOT a proof "
+        "lane; never sourced for stability/prod grants"
+    ),
 }
 
 _BEGIN_MARKER = "<!-- GENERATED_LANE_TABLE BEGIN"
@@ -92,6 +102,15 @@ def _service_count(
     lane_name: str, lane_spec: dict[str, Any], snapshot: dict[str, Any] | None
 ) -> str:
     """Return a human-readable container count for the table."""
+    # OMN-17143: a lane declared with an EMPTY service list is a RESERVATION —
+    # the port block, compose project and network name are claimed in the
+    # desired-state authority before anything is stood up. Falling through to
+    # the branches below would render it as "0 desired (not in last census)",
+    # which reads like a broken lane rather than an unbuilt one. Say what is
+    # actually true: nothing is declared, so nothing is expected to run.
+    if not lane_spec.get("services"):
+        return "0 — reserved, not built"
+
     if snapshot is None:
         # No live census — report desired from manifest
         required = sum(
