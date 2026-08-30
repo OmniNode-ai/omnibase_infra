@@ -80,6 +80,7 @@ databases:
               - log_entries
               - projection_watermarks
               - topic_produce_windows
+              - work_events
             privileges:
               - INSERT
               - SELECT
@@ -315,5 +316,5 @@ source:
   profile_catalog_path: src/omnibase_infra/topology/application_database_profiles.yaml
   profile_catalog_sha256: 759f32da77ad41b874fbb05d2824c44f9de4c64e9d269d99da21445225a90ca1
   repository: OmniNode-ai/omnibase_infra
-  sha256: 5957af6192a5f2b5fb6cda596ddcd113c91bf3237d1c32312b7ddf0f301be893
+  sha256: fdc319ed222249e522002fa6e5f12035449b59effbd67dc5e1e9bd1a6f2cd0a7
 topology_instance: onex-prod
