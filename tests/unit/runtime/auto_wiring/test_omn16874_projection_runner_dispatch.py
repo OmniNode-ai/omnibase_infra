@@ -39,7 +39,10 @@ from omnibase_infra.runtime.auto_wiring.handler_wiring import (
     ProjectionDispatchSinks,
     _make_projection_dispatch_callback,
 )
-from tests.helpers.application_db_topology import projection_database_target
+from tests.helpers.application_db_topology import (
+    configure_projection_dsns,
+    projection_database_target,
+)
 
 _PATCH_BUILD_ADAPTER = (
     "omnibase_infra.runtime.auto_wiring.handler_wiring._build_projection_db_adapter"
@@ -184,10 +187,7 @@ def _drive(callback: Any, times: int) -> None:
 
 @pytest.fixture(autouse=True)
 def _configured_projection_dsn(monkeypatch: pytest.MonkeyPatch) -> None:
-    monkeypatch.setenv("OMNIDASH_ANALYTICS_DB_URL", "postgresql://fixture")
-    # OMN-15425: `tenant_projection` resolves its OWN DSN env — same physical
-    # database, different principal, attested per binding by OMN-16911.
-    monkeypatch.setenv("ONEX_TENANT_DB_URL", "postgresql://fixture")
+    configure_projection_dsns(monkeypatch)
 
 
 @pytest.mark.unit

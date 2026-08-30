@@ -42,7 +42,10 @@ from omnibase_infra.runtime.auto_wiring.models import (
 )
 from omnibase_infra.runtime.message_dispatch_engine import MessageDispatchEngine
 from omnibase_infra.runtime.state_io.state_store_adapter import StateIoUnconfiguredError
-from tests.helpers.application_db_topology import application_topology
+from tests.helpers.application_db_topology import (
+    application_topology,
+    configure_projection_dsns,
+)
 
 _THIS_MODULE = "tests.unit.runtime.test_handler_wiring_state_io"
 _PATCH_IMPORT_HANDLER_CLASS = (
@@ -52,10 +55,7 @@ _PATCH_IMPORT_HANDLER_CLASS = (
 
 @pytest.fixture(autouse=True)
 def _configured_projection_dsn(monkeypatch: pytest.MonkeyPatch) -> None:
-    monkeypatch.setenv("OMNIDASH_ANALYTICS_DB_URL", "postgresql://fixture")
-    # OMN-15425: `tenant_projection` resolves its OWN DSN env — same physical
-    # database, different principal, attested per binding by OMN-16911.
-    monkeypatch.setenv("ONEX_TENANT_DB_URL", "postgresql://fixture")
+    configure_projection_dsns(monkeypatch)
 
 
 class ModelStateIoPayload(BaseModel):

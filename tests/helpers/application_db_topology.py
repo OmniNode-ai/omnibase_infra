@@ -7,6 +7,8 @@ from __future__ import annotations
 from functools import lru_cache
 from typing import Literal
 
+import pytest
+
 from omnibase_core.enums.enum_database_grant_object_type import (
     EnumDatabaseGrantObjectType,
 )
@@ -177,6 +179,43 @@ def projection_database_target(
     )
 
 
+def projection_binding_dsn_envs() -> tuple[str, ...]:
+    """Return every ``dsn_env`` the shipped topology's bindings declare.
+
+    Derived from the topology rather than hand-listed. OMN-15425 added the
+    ``tenant_projection`` binding (``ONEX_TENANT_DB_URL``) to every profile and
+    had to hand-edit the literal env list in nine separate test modules; two
+    were missed, and the resulting ``ValueError: Projection handler requires
+    topology bindings with configured DSNs`` reddened every omnibase_infra PR
+    once the test split re-partitioned (OMN-17142). Reading the names off the
+    topology means the next binding is covered without touching any caller.
+    """
+    return tuple(
+        sorted(
+            {
+                binding.dsn_env
+                for database in application_topology().databases.values()
+                for binding in database.bindings.values()
+            }
+        )
+    )
+
+
+def configure_projection_dsns(
+    monkeypatch: pytest.MonkeyPatch, url: str = "postgresql://fixture"
+) -> None:
+    """Point every topology-declared binding DSN at ``url`` for the test.
+
+    Use this where a test needs the projection dispatch callback to build at
+    all. Where a test is instead proving *which* binding was resolved, set that
+    one binding's ``dsn_env`` directly and leave the others unset, so a
+    regression to the wrong binding fails closed instead of silently
+    connecting on a DSN the target never vouched for.
+    """
+    for dsn_env in projection_binding_dsn_envs():
+        monkeypatch.setenv(dsn_env, url)
+
+
 def projection_database_urls(
     target: ProjectionDatabaseTarget,
     default_url: str,
@@ -191,6 +230,8 @@ def projection_database_urls(
 
 __all__ = [
     "application_topology",
+    "configure_projection_dsns",
+    "projection_binding_dsn_envs",
     "projection_database_target",
     "projection_database_urls",
 ]

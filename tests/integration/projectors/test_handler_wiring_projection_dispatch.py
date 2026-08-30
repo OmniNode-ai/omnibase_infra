@@ -17,14 +17,15 @@ import pytest
 from omnibase_infra.runtime.auto_wiring.handler_wiring import (
     _make_projection_dispatch_callback,
 )
-from tests.helpers.application_db_topology import projection_database_target
+from tests.helpers.application_db_topology import (
+    configure_projection_dsns,
+    projection_database_target,
+)
 
 
 @pytest.fixture(autouse=True)
 def _configured_projection_dsn(monkeypatch: pytest.MonkeyPatch) -> None:
-    monkeypatch.setenv("OMNIDASH_ANALYTICS_DB_URL", "postgresql://fixture")
-    monkeypatch.setenv("OMNINODE_INTERNAL_DB_URL", "postgresql://fixture")
-    monkeypatch.setenv("ONEX_TENANT_DB_URL", "postgresql://fixture")
+    configure_projection_dsns(monkeypatch)
 
 
 _PATCH_BUILD_ADAPTER = (

@@ -80,7 +80,10 @@ from omnibase_infra.runtime.auto_wiring.models import (
     ModelHandlerRouting,
     ModelHandlerRoutingEntry,
 )
-from tests.helpers.application_db_topology import application_topology
+from tests.helpers.application_db_topology import (
+    application_topology,
+    configure_projection_dsns,
+)
 
 _THIS_MODULE = (
     "tests.unit.runtime.auto_wiring.test_omn16767_db_io_typed_handler_dispatch"
@@ -343,12 +346,9 @@ def _prepare(
 def _clean_capture(monkeypatch: pytest.MonkeyPatch) -> None:
     _RECEIVED.clear()
     # The projection arm refuses to build without a DSN for every topology
-    # binding, so set it — pre-fix this is what let the wrong arm construct at
-    # all on the dev lane.
-    monkeypatch.setenv("OMNIDASH_ANALYTICS_DB_URL", "postgresql://fixture/omn16767")
-    # OMN-15425: `tenant_projection` resolves its OWN DSN env — same physical
-    # database, different principal, attested per binding by OMN-16911.
-    monkeypatch.setenv("ONEX_TENANT_DB_URL", "postgresql://fixture/omn16767")
+    # binding, so set them all — pre-fix this is what let the wrong arm
+    # construct at all on the dev lane.
+    configure_projection_dsns(monkeypatch, url="postgresql://fixture/omn16767")
 
 
 # ---------------------------------------------------------------------------
