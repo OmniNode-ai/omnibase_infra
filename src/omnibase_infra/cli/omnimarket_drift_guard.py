@@ -184,6 +184,22 @@ def check_omnimarket_drift(
     if installed == canonical:
         return
 
+    # Name the exact repair command with its FULL path (not a cwd-relative
+    # one) so the message is copy-pasteable from any working directory --
+    # the refusal is what an operator sees mid-dispatch, not necessarily
+    # from inside $OMNI_HOME/omnibase_infra. Falls back to the relative form
+    # only when omni_home itself could not be resolved (should not happen on
+    # this branch in production -- canonical is non-None here only when a
+    # real omni_home resolved it -- but keeps the message sane if a caller
+    # ever reaches this branch without one, e.g. a direct unit test).
+    if omni_home:
+        infra_scripts = Path(omni_home) / "omnibase_infra" / "scripts"
+        repair_cmd = str(infra_scripts / "check-omnimarket-venv-drift.sh")
+        install_cmd = str(infra_scripts / "install-node-skill-package.sh")
+    else:
+        repair_cmd = "scripts/check-omnimarket-venv-drift.sh"
+        install_cmd = "scripts/install-node-skill-package.sh"
+
     if installed is None:
         detail = (
             "omnimarket is NOT INSTALLED from git in this interpreter "
@@ -191,16 +207,14 @@ def check_omnimarket_drift(
             f"canonical clone exists at $OMNI_HOME/omnimarket (HEAD "
             f"{canonical[:12]}). 'onex skill'/'onex node'/'onex delegate' "
             "dispatch for market-provided nodes (e.g. node_aislop_sweep) "
-            "will fail with 'Unknown node'. Repair with: "
-            "scripts/install-node-skill-package.sh --execute (or "
-            "scripts/check-omnimarket-venv-drift.sh --repair)."
+            f"will fail with 'Unknown node'. Repair with: {install_cmd} "
+            f"--execute (or {repair_cmd} --repair)."
         )
     else:
         detail = (
             f"omnimarket venv is STALE: installed commit {installed[:12]} != "
             f"canonical $OMNI_HOME/omnimarket HEAD {canonical[:12]}. Repair with: "
-            "scripts/check-omnimarket-venv-drift.sh --repair (or re-run "
-            "scripts/install-node-skill-package.sh --execute directly)."
+            f"{repair_cmd} --repair (or re-run {install_cmd} --execute directly)."
         )
 
     if allow_drift:
