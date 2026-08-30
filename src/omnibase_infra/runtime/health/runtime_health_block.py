@@ -97,6 +97,14 @@ def build_runtime_health_block(
         "empty_consumer_group_count": event.empty_consumer_group_count,
         "subscribe_topic_count": event.subscribe_topic_count,
         "uncovered_topic_count": event.uncovered_topic_count,
+        # OMN-16994: the two facts no connectedness signal carries — a declared
+        # projection that never attached, and an attached projection that
+        # quarantines everything it takes. Rendered as top-level counts (not
+        # only inside a dimension detail string) so a probe can assert on them
+        # without parsing prose.
+        "projection_count": event.projection_count,
+        "unattached_projection_count": event.unattached_projection_count,
+        "dlq_saturated_projection_count": event.dlq_saturated_projection_count,
         "dimensions": cast(
             "JsonType",
             [

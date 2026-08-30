@@ -172,6 +172,30 @@ _LEGACY_DEFAULT_SCHEMA_SQL_EXACT_PATHS = frozenset(
             "docker/migrations/forward/nodes/node_pr_review_bot/"
             "001_create_review_bot_bypass_log.sql"
         ),
+        # OMN-16924: session_phase_state is a NEW relation in the omnibase_infra
+        # SERVICE database, and this gate has no accepting qualification form for
+        # one. Same posture as the node_hook_event_capture entry above (a new
+        # relation whose physical table intentionally stays in `public` until the
+        # governed OMN-15359 cutover, creating an unqualified table + trigger
+        # function), with one sharper reason: this scanner models the APPLICATION
+        # database, where `public` is prohibited and `tenant` / `omninode_internal`
+        # are the real homes. The omnibase_infra SERVICE database declares exactly
+        # ONE schema -- `public`, domain OMNINODE_INTERNAL
+        # (src/omnibase_infra/topology/instances/*.yaml) -- so there is no other
+        # schema to qualify into: an unqualified target is rejected as
+        # un-schema-qualified, a `public.`-qualified one as prohibited-in-public,
+        # and an `omninode_internal.`-qualified one would name a schema that does
+        # not exist in this database (proven by
+        # tests/unit/topology/test_application_database_table_grants.py, which
+        # fails with "Unknown schema 'omninode_internal' for database_ref
+        # 'omnibase_infra'" the moment the table is mapped there). The file is the
+        # exact sibling of 090_create_delegation_workflow_state.sql -- the same
+        # StateStoreAdapter reads both with an UNQUALIFIED name resolved against
+        # the connection search_path -- and 090 is unlinted only because no PR has
+        # touched it since this gate landed. This exemption covers the
+        # qualification scanner only; the created-object ownership check still
+        # applies unconditionally.
+        Path("docker/migrations/forward/102_create_session_phase_state.sql"),
         # OMN-15359: 099 performs the governed physical-schema cutover itself --
         # it creates NEW omninode_internal-domain authority
         # (omninode_internal.live_events, ownership declared in omnimarket's
@@ -282,6 +306,17 @@ _LEGACY_DEFAULT_SCHEMA_SQL_EXACT_PATHS = frozenset(
         Path(
             "docker/migrations/forward/nodes/node_projection_tenant_credentials/"
             "0002_credential_identity_not_null.sql"
+        ),
+        # OMN-16993: session_replay_snapshots is an existing legacy-public
+        # projection table. This migration creates no new relation authority;
+        # it only grants the topology-declared omninode_runtime writer on the
+        # physical table that remains in public until the governed OMN-15359
+        # schema cutover. The target is therefore the same legacy physical
+        # table class as the sibling exemptions above, while GRANT itself will
+        # still fail loudly if the role or relation is absent.
+        Path(
+            "docker/migrations/forward/nodes/node_projection_session_replay/"
+            "0002_grant_omninode_runtime_session_replay_snapshots.sql"
         ),
     }
 )

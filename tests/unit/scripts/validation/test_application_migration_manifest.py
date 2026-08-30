@@ -214,7 +214,30 @@ def test_checked_in_manifest_is_exact_and_all_blockers_are_explicit() -> None:
     # values", ON_ERROR_STOP=1, exit 3). The static gate was green while the
     # failure class stayed open; 0002 re-expresses the corrected, nullable
     # reconciliation additively.
-    assert len(result.declarations) == 117
+    # +1 for OMN-16993's
+    # node_projection_session_replay/0002_grant_omninode_runtime_session_replay_snapshots.sql
+    # -- the topology-derived grant the three topology instances already
+    # declare for `omninode_runtime` on `public.session_replay_snapshots` but
+    # which no migration in either repo ever issued, so the projection failed
+    # `InsufficientPrivilege` on every write once OMN-16993's LOGIN half let it
+    # authenticate at all. Vendored here first per the
+    # node-migration-vendor-parity-gate ordering, ahead of the omnimarket PR
+    # (#2214) that owns the source file.
+    # +1 for OMN-16180's
+    # node_projection_work_events/0001_create_work_events.sql -- the CREATE
+    # TABLE for omninode_internal.work_events, the L1 work-ledger surface of
+    # the OMN-16176 ladder. Vendored here first for the same
+    # node-migration-vendor-parity-gate reason as the two entries above: an
+    # omnimarket PR touching src/omnimarket/nodes/*/migrations/*.sql cannot
+    # land until omnibase_infra@dev already carries a byte-identical copy. The
+    # tsv row is what makes that infra-ahead-by-one state legal rather than
+    # drift -- sync-node-migrations.sh --check reads it as preserved history
+    # via the OMN-15717 legacy-declared exemption. Unlike every prior node
+    # relation created in the legacy default schema, this one is created
+    # directly in omninode_internal and issues its own omninode_runtime grant,
+    # so it needs no OMN-15359 cutover entry and cannot repeat the
+    # OMN-16993 grant-missing failure by construction.
+    assert len(result.declarations) == 119
     assert result.blocked == ()
     assert len(result.legacy_node_declarations) == 2
     assert len(result.cloud_aliases) == 30
