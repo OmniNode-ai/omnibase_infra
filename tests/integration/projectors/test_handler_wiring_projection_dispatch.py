@@ -143,7 +143,7 @@ def test_projection_dispatch_bridge_rejects_missing_db_url_at_wiring(
 
     db_tables = projection_database_target("delegation_events", schema="tenant")
     handler = FakeProjectionHandler()
-    monkeypatch.delenv("OMNIDASH_ANALYTICS_DB_URL")
+    monkeypatch.delenv("ONEX_TENANT_DB_URL")
 
     with pytest.raises(ValueError, match="tenant_projection"):
         _make_projection_dispatch_callback(handler, db_tables, ())
