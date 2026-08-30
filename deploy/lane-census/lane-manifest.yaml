@@ -294,3 +294,54 @@ lanes:
     image_tag_pattern: '.+'
     optional: true
     services: []
+# ---------------------------------------------------------------------------
+# hook_edge — which lane the Claude Code hook edge publishes to (OMN-17204)
+# ---------------------------------------------------------------------------
+# NOT read by lane_census_plan.py (which consumes `lanes:` and
+# `default_image_tag_pattern:` only). This block exists so an audit reads the
+# hook edge's lane FROM THE LANE MAP instead of re-deriving it from the
+# sourcing order of ~/.omnibase/.env against ~/.claude/settings.json — which is
+# how it was previously "known", and which produced three separate wrong
+# conclusions from one undeclared fact: OMN-16162 was flipped Done -> Backlog
+# on a probe against the wrong lane, OMN-16996 was filed ("hooks report publish
+# SUCCESS while zero events reach the broker") and later falsified for the same
+# reason, and beta/GOAL.md row 0's hook clause named a lane that could never
+# have produced a row.
+#
+# Authority is the omniclaude contract named below, not this block: duplicating
+# the endpoint here would recreate the two-sources-one-fact problem this closes.
+# This is a pointer plus the one thing the lane map is uniquely able to state —
+# which lane network the relay must be attached to for the pairing to close.
+#
+# verified: 2026-08-30 via read-only ssh jonah@192.168.86.201
+#   `docker inspect omninode-gateway-forwarder --format '{{range $k,$v := .NetworkSettings.Networks}}{{$k}} {{end}}'`
+#   -> `omnibase-infra-network` (dev lane) only, and
+#   `docker network ls --format '{{.Name}}' | grep omnibase-infra`
+#   -> confirms `omnibase-infra-stability-test-network` exists and is distinct.
+#   Publisher side proven the same session, 2026-08-30T15:50:34Z: the shipped
+#   session_start_bus_mirror.sh was invoked with KAFKA_BOOTSTRAP_SERVERS
+#   deliberately preset to the DEV lane (192.168.86.201:19092) and still landed
+#   its record on the STABILITY lane -- marker `OMN17204LaneProof-1788105033`
+#   read back via `rpk topic consume onex.evt.omniclaude.session-started.v1
+#   -o -20 -n 100` inside each lane's redpanda container: 8 hits on
+#   omnibase-infra-stability-test-redpanda, 0 on omnibase-infra-redpanda.
+#   That is the contract beating the env var, measured rather than asserted.
+hook_edge:
+  # The single authority for this fact. Read it, do not re-derive it.
+  contract: omniclaude/plugins/onex/hooks/contracts/hook_edge_lane.yaml
+  publish_lane: stability-test
+  # The relay that bridges a local .201 broker to the cloud MSK relay must be
+  # attached to the publish lane's network, or nothing the hook edge writes can
+  # ever reach the cloud gateway.
+  relay_container: omninode-gateway-forwarder
+  relay_required_network: omnibase-infra-stability-test-network
+  # OPEN, and deliberately not closed here: the live forwarder is attached to
+  # `omnibase-infra-network` (dev). That is the INSTANCE defect, owned by
+  # OMN-17034 — either the forwarder gains a stability-lane leg with its own
+  # tenant identity, or the publish lane is repointed. OMN-17204 is the RULE:
+  # it makes the mismatch a check failure with a named cause instead of a zero
+  # row count someone has to interpret. Repointing the publisher silently would
+  # also move hook rows off the lane the .201 projection (OMN-16994/16993)
+  # reads, which is a behaviour ruling OMN-17034 has to make explicitly.
+  live_state: mismatch
+  live_state_owner: OMN-17034
