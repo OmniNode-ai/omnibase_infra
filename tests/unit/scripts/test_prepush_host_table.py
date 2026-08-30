@@ -83,7 +83,7 @@ def test_table_contents_are_pinned() -> None:
         "h200": ("capacity", "stickybeatz-studio", "authorizing"),
         "h201": ("capacity", "omninode-pc", "authorizing"),
         "h201c": ("identity", "gate-runner-201", "authorizing"),
-        "h101": ("capacity", "stickybeatz", "disabled"),
+        "h101": ("capacity", "stickybeatz", "authorizing"),
         "h105": ("capacity", "omnibook", "authorizing"),
     }
 
@@ -118,10 +118,17 @@ def test_h105_is_authorizing_because_shadow_could_never_add_capacity() -> None:
     edit here -- exactly the two-step this file exists to force."""
     modes = {r[0]: r[10] for r in _rows()}
     assert modes["h105"] == "authorizing"
-    assert modes["h101"] == "disabled", (
-        "h101 stays disabled: re-probed 2026-08-30 and uv is still 0.8.3, "
-        "below the 0.11.0 floor"
-    )
+
+
+def test_h101_is_authorizing_because_shadow_could_never_add_capacity() -> None:
+    """h101 (stickybeatz) was the last row stuck `disabled` (uv 0.8.3, below
+    the 0.11.0 floor). OMN-17161 upgraded uv to 0.12.7 and re-probed
+    non-interactively; the same shadow-can-never-authorize reasoning as h105
+    applies, so promotion is proven by a real full-suite dispatch to h101
+    rather than a preceding shadow day (see OMN-16991's own SUPERSEDED DoD
+    item)."""
+    modes = {r[0]: r[10] for r in _rows()}
+    assert modes["h101"] == "authorizing"
 
 
 def test_h101_hostname_is_what_hostname_s_actually_prints() -> None:
@@ -219,6 +226,15 @@ _SYNTHETIC_TABLE = (
     "ha\tcapacity\thosta\tjonah@hosta\t24\t/bin/uv\t0.1.0\t/tmp/wa\tlockdir\t-\tauthorizing\tbusier\n"
     "hb\tcapacity\thostb\tjonah@hostb\t24\t/bin/uv\t0.1.0\t/tmp/wb\tlockdir\t-\tauthorizing\tidler\n"
     "hs\tcapacity\thosts\tjonah@hosts\t24\t/bin/uv\t0.1.0\t/tmp/ws\tlockdir\t-\tshadow\tidlest of all\n"
+)
+
+#: A single disabled row, so the shipped table's promotion of h101 (its last
+#: disabled row, OMN-17161) does not strand the "a disabled host is never
+#: probed" rule without a fixture to exercise it.
+_SYNTHETIC_TABLE_DISABLED_ONLY = (
+    "#label\trole\thostname\tssh_target\tcores\tuv_abs_path\tuv_min_version"
+    "\tworkroot\tslot_mode\trepos_denied\tmode\tnote\n"
+    "hd\tcapacity\thostd\tjonah@hostd\t24\t/bin/uv\t0.1.0\t/tmp/wd\tlockdir\t-\tdisabled\tstill unfit\n"
 )
 
 
@@ -432,9 +448,15 @@ def test_a_repo_denied_host_is_never_chosen(table_repo: Path) -> None:
     assert "PICK=h105" in out
 
 
-def test_a_disabled_host_is_never_probed(table_repo: Path) -> None:
-    out = _pick(table_repo, load="h101=0.01", slot=_ALL_FREE, uv="h101=9.9.9")
-    assert "h101=disabled" in out
+def test_a_disabled_host_is_never_probed(tmp_path: Path) -> None:
+    """Driven off a synthetic table because the shipped one no longer carries
+    a disabled row (h101 was promoted, OMN-17161); the RULE still has to hold
+    for the next row that starts disabled. The only row is disabled, so a fit
+    pick is impossible if -- and only if -- it was actually skipped rather
+    than probed."""
+    repo = _repo_with_table(tmp_path, _SYNTHETIC_TABLE_DISABLED_ONLY)
+    out = _pick(repo, load="hd=0.01", slot="hd=free", uv="hd=9.9.9")
+    assert "hd=disabled" in out
     assert "PICK=none" in out
 
 
@@ -1252,6 +1274,7 @@ def test_the_conftest_guard_reads_the_same_committed_table_as_the_bash_guard(
         "stickybeatz-studio",
         "omninode-pc",
         "gate-runner-201",
+        "stickybeatz",
         "omnibook",
     )
 

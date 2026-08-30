@@ -52,13 +52,17 @@ forgeable-on-disk-artifact surface OMN-16688 deliberately avoided.
 | `h200` | `stickybeatz-studio` (.200) | 24 | varies, often >1.0x | 0.11.32 | authorizing | rule-11a default gate host |
 | `h201` | `omninode-pc` (.201) | 32 | 14.08 → 0.44x | 0.11.5 | authorizing | **denied for `omnibase_infra`** until OMN-16989 closes |
 | `h201c` | `gate-runner-201` (container) | 32 | — | — | authorizing | identity only; the container has no sshd (OMN-16446) |
-| `h101` | `stickybeatz` (.101) | 12 | 4.79 → 0.40x | **0.8.3** | disabled | uv below floor; `~/Code` TCC-denied to sshd |
+| `h101` | `stickybeatz` (.101) | 12 | 2.78 → 0.23x | 0.12.7 | **authorizing** | promoted OMN-17161 — see below |
 | `h105` | `omnibook` (.105) | 10 | 1.76 → 0.18x | 0.11.8 | **authorizing** | net-new capacity; promoted out of shadow — see below |
 
-> `h101`'s `hostname -s` prints **`Stickybeatz`**, not `stickybeatz.local`. The
-> earlier value could never have matched an identity check, so the row would
-> have failed silently the moment it was promoted. Re-probed 2026-08-30: uv is
-> still 0.8.3, below the 0.11.0 floor, so it stays `disabled`.
+> `h101`'s `hostname -s` prints **`Stickybeatz`**, not `stickybeatz.local`; the
+> table's `hostname` column carries the correct lowercase `stickybeatz`
+> (identity is matched case-insensitively). Re-probed 2026-08-30 after
+> `uv self update`: uv moved 0.8.3 → 0.12.7, above the 0.11.0 floor, load1
+> 2.78/12 = 0.23x, ~89GB free on `/System/Volumes/Data`. Promoted OMN-17161,
+> same reasoning as `h105` below — a shadow row can never authorize, so the
+> promotion is proven by a real full-suite dispatch to `h101` rather than a
+> preceding shadow day.
 
 ### Why `h105` was promoted rather than run as a shadow
 
