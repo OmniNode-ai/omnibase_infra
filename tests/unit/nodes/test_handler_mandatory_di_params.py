@@ -56,13 +56,3 @@ def test_handler_runtime_lifecycle_still_accepts_steps() -> None:
     # container required, steps still optional
     handler = HandlerRuntimeLifecycle(container=container)
     assert handler is not None
-
-
-def test_handler_runtime_error_triage_requires_event_bus() -> None:
-    """HandlerRuntimeErrorTriage must require event_bus, not default to None."""
-    from omnibase_infra.nodes.node_runtime_error_triage_effect.handlers.handler_runtime_error_triage import (
-        HandlerRuntimeErrorTriage,
-    )
-
-    with pytest.raises(TypeError):
-        HandlerRuntimeErrorTriage()  # type: ignore[call-arg]

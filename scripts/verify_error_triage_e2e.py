@@ -190,10 +190,9 @@ def _check_infra_prerequisites(report: VerificationReport) -> bool:
 
 
 def verify_kafka_topics(report: VerificationReport) -> None:
-    """Verify runtime-error and error-triaged topics exist and have correct config."""
+    """Verify the runtime-error topic exists and has correct config."""
     topics = [
         "onex.evt.omnibase-infra.runtime-error.v1",
-        "onex.evt.omnibase-infra.error-triaged.v1",
     ]
     for topic in topics:
         result = _docker_exec(
@@ -232,7 +231,6 @@ def verify_kafka_watermarks(report: VerificationReport) -> dict[str, int]:
 
     for topic in [
         "onex.evt.omnibase-infra.runtime-error.v1",
-        "onex.evt.omnibase-infra.error-triaged.v1",
     ]:
         result = _docker_exec(
             "omnibase-infra-redpanda",
@@ -813,56 +811,6 @@ def verify_contract(report: VerificationReport) -> None:
 
 
 # ---------------------------------------------------------------------------
-# Omnidash projection wiring verification
-# ---------------------------------------------------------------------------
-
-
-def verify_omnidash_projection_wiring(report: VerificationReport) -> None:
-    """Verify omnidash projections are wired for runtime error topics."""
-    import pathlib
-
-    proj_file = (
-        _OMNI_HOME
-        / "omnidash"
-        / "server"
-        / "consumers"
-        / "read-model"
-        / "omnibase-infra-projections.ts"
-    )
-    if not proj_file.exists():
-        report.add(
-            VerificationResult(
-                name="omnidash_projection_wiring",
-                passed=False,
-                details="omnibase-infra-projections.ts not found",
-            )
-        )
-        return
-
-    content = proj_file.read_text()
-    has_runtime_error = "projectRuntimeErrorEvent" in content
-    has_error_triaged = "projectErrorTriaged" in content
-    has_runtime_error_topic = "runtime-error" in content
-    has_triaged_topic = "error-triaged" in content
-
-    report.add(
-        VerificationResult(
-            name="omnidash_projection_wiring",
-            passed=has_runtime_error
-            and has_error_triaged
-            and has_runtime_error_topic
-            and has_triaged_topic,
-            details=(
-                f"runtime-error projection={'yes' if has_runtime_error else 'NO'}, "
-                f"error-triaged projection={'yes' if has_error_triaged else 'NO'}, "
-                f"runtime-error topic={'yes' if has_runtime_error_topic else 'NO'}, "
-                f"error-triaged topic={'yes' if has_triaged_topic else 'NO'}"
-            ),
-        )
-    )
-
-
-# ---------------------------------------------------------------------------
 # Migration verification
 # ---------------------------------------------------------------------------
 
@@ -978,7 +926,6 @@ def main() -> None:
     print("\n--- Phase 1: Code & Contract Verification ---")
     verify_contract(report)
     verify_service_kernel_wiring(report)
-    verify_omnidash_projection_wiring(report)
     verify_migrations(report)
 
     # Phase 2: Unit test verification (no infra needed)

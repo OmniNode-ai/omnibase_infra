@@ -14,8 +14,6 @@ from unittest.mock import MagicMock
 
 import pytest
 
-from omnibase_infra.protocols import ProtocolEventBusLike
-
 pytestmark = [pytest.mark.integration]
 
 
@@ -58,17 +56,6 @@ def test_handler_runtime_lifecycle_constructable_with_container() -> None:
     assert handler is not None
 
 
-def test_handler_runtime_error_triage_constructable_with_event_bus() -> None:
-    """HandlerRuntimeErrorTriage accepts event_bus without error."""
-    from omnibase_infra.nodes.node_runtime_error_triage_effect.handlers.handler_runtime_error_triage import (
-        HandlerRuntimeErrorTriage,
-    )
-
-    event_bus = MagicMock(spec=ProtocolEventBusLike)
-    handler = HandlerRuntimeErrorTriage(event_bus=event_bus)
-    assert handler is not None
-
-
 def test_handlers_reject_construction_without_required_params() -> None:
     """All migrated handlers must raise TypeError when called with no args."""
     from omnibase_infra.nodes.node_build_loop_projection_compute.handlers.handler_build_loop_projection import (
@@ -76,9 +63,6 @@ def test_handlers_reject_construction_without_required_params() -> None:
     )
     from omnibase_infra.nodes.node_ledger_projection_compute.handlers.handler_ledger_projection import (
         HandlerLedgerProjection,
-    )
-    from omnibase_infra.nodes.node_runtime_error_triage_effect.handlers.handler_runtime_error_triage import (
-        HandlerRuntimeErrorTriage,
     )
     from omnibase_infra.nodes.node_runtime_orchestrator.handlers.handler_runtime_lifecycle import (
         HandlerRuntimeLifecycle,
@@ -88,7 +72,6 @@ def test_handlers_reject_construction_without_required_params() -> None:
         HandlerLedgerProjection,
         HandlerBuildLoopProjection,
         HandlerRuntimeLifecycle,
-        HandlerRuntimeErrorTriage,
     ]:
         with pytest.raises(TypeError):
             cls()  # type: ignore[call-arg]

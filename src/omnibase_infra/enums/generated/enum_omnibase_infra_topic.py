@@ -71,7 +71,6 @@ class EnumOmnibaseInfraTopic(str, Enum):
     EVT_CODING_AGENT_WORKSPACE_VALIDATED_V1 = "onex.evt.omnibase-infra.coding-agent-workspace-validated.v1"  # onex.evt.omnibase-infra.coding-agent-workspace-validated.v1
     EVT_CONSUMER_HEALTH_V1 = "onex.evt.omnibase-infra.consumer-health.v1"  # onex.evt.omnibase-infra.consumer-health.v1
     EVT_DB_ERROR_V1 = "onex.evt.omnibase-infra.db-error.v1"  # onex.evt.omnibase-infra.db-error.v1
-    EVT_ERROR_TRIAGED_V1 = "onex.evt.omnibase-infra.error-triaged.v1"  # onex.evt.omnibase-infra.error-triaged.v1
     EVT_EVENT_FORWARDED_V1 = "onex.evt.omnibase-infra.event-forwarded.v1"  # onex.evt.omnibase-infra.event-forwarded.v1
     EVT_FAULT_INJECT_FIXTURE_COMPLETED_V1 = "onex.evt.omnibase-infra.fault-inject-fixture-completed.v1"  # onex.evt.omnibase-infra.fault-inject-fixture-completed.v1
     EVT_GATEWAY_HEARTBEAT_V1 = "onex.evt.omnibase-infra.gateway-heartbeat.v1"  # onex.evt.omnibase-infra.gateway-heartbeat.v1
