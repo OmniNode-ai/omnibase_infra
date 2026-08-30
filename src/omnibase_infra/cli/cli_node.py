@@ -35,6 +35,7 @@ from omnibase_infra.cli.receipt_mode import (
     default_emit_socket_path,
     run_receipt_mode,
 )
+from omnibase_infra.cli.workspace_reconcile import make_workspace_reconciler
 from omnibase_infra.utils.util_error_sanitization import sanitize_error_message
 
 
@@ -247,6 +248,10 @@ def run_node_by_name(
         check_omnimarket_drift(
             omni_home=str(omni_home) if omni_home else None,
             allow_drift=allow_omnimarket_drift,
+            # OMN-17190: heal in-flight instead of handing a human a command to
+            # type. Bound here rather than defaulted inside the guard so the
+            # guard stays a pure function for every non-CLI caller.
+            reconcile=make_workspace_reconciler(str(omni_home) if omni_home else None),
         )
     except OmnimarketDriftError as exc:
         raise click.ClickException(str(exc)) from exc

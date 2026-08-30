@@ -110,7 +110,7 @@ _emit_summary() {
   echo ""
   echo "== pull-all.sh stage summary =="
   echo "  repos                  : $STAGE_REPOS"
-  echo "  omnimarket-drift-repair: $STAGE_DRIFT_REPAIR"
+  echo "  workspace-venv-reconcile: $STAGE_DRIFT_REPAIR"
   echo "  plugin-cache-refresh   : $STAGE_PLUGIN_CACHE"
   echo "  pre-commit-hooks       : $STAGE_PRECOMMIT_HOOKS"
   if [[ ${#STAGE_FAILURES[@]} -gt 0 ]]; then
@@ -473,7 +473,7 @@ else
   STAGE_REPOS="OK"
 fi
 
-# === Omnimarket venv drift auto-repair (OMN-15242) ===
+# === Workspace venv reconcile (OMN-15242, generalized by OMN-17190) ===
 # The OMN-14060 pre-flight guard (src/omnibase_infra/cli/omnimarket_drift_guard.py)
 # detects when the canonical omnibase_infra venv's installed omnimarket has
 # fallen behind the just-advanced $OMNI_HOME/omnimarket clone -- but it only
@@ -519,71 +519,79 @@ fi
 #   for the peer's entire duration, unbounded. Resolve/network was excluded by
 #   measurement on the same host: step-1 git+HTTPS resolve 1.93s, step-2 leaf
 #   resolve 43ms, `git ls-remote` 0.19s.
-_omnimarket_result_file="$RESULTS_DIR/omnimarket"
-if [[ ! -f "$_omnimarket_result_file" || "$(cat "$_omnimarket_result_file")" != "OK" ]]; then
-  STAGE_DRIFT_REPAIR="SKIPPED"  # omnimarket not in this run, or its pull did not succeed
+# OMN-17190: the trigger is ANY successful repo movement, not omnimarket's
+# alone. The previous gate only fired when omnimarket itself pulled OK, which
+# missed the other half of the drift surface entirely: an omnibase_infra pull
+# advances uv.lock, and an omniclaude pull advances the hook venv's lock, and
+# neither of those involves omnimarket. Those runs finished "green" with two
+# venvs left behind their own dependency files.
+_any_repo_ok=0
+for repo in "${REPOS[@]}"; do
+  _rf="$RESULTS_DIR/$repo"
+  if [[ -f "$_rf" && "$(cat "$_rf")" == "OK" ]]; then
+    _any_repo_ok=1
+    break
+  fi
+done
+
+_reconciler="$OMNI_HOME/omnibase_infra/scripts/reconcile-workspace-venvs.sh"
+
+if [[ "$_any_repo_ok" -eq 0 ]]; then
+  STAGE_DRIFT_REPAIR="SKIPPED"  # nothing moved, so nothing can have drifted
+elif [[ ! -f "$_reconciler" ]]; then
+  STAGE_DRIFT_REPAIR="SKIPPED"  # no local omnibase_infra clone (or reconciler)
 else
-  _infra_dir="$OMNI_HOME/omnibase_infra"
-  _drift_script="$_infra_dir/scripts/check-omnimarket-venv-drift.sh"
-  _infra_venv_python="$_infra_dir/.venv/bin/python"
+  echo ""
+  echo "== reconciling workspace venvs against the commits just pulled =="
+  echo "   (bounded at ${DRIFT_REPAIR_TIMEOUT_SECONDS}s -- OMN-15590; override with PULL_ALL_DRIFT_REPAIR_TIMEOUT_SECONDS)"
+  _drift_rc=0
+  _run_bounded "$DRIFT_REPAIR_TIMEOUT_SECONDS" \
+    env OMNI_HOME="$OMNI_HOME" bash "$_reconciler" \
+    || _drift_rc=$?
 
-  if [[ ! -d "$_infra_dir" || ! -x "$_drift_script" ]]; then
-    STAGE_DRIFT_REPAIR="SKIPPED"  # no local omnibase_infra clone (or drift script)
-  elif [[ ! -x "$_infra_venv_python" ]]; then
-    STAGE_DRIFT_REPAIR="SKIPPED"  # no canonical omnibase_infra venv to repair
+  if [[ "$_drift_rc" -eq 0 ]]; then
+    STAGE_DRIFT_REPAIR="OK"
+    echo "  RECONCILE workspace venvs OK"
   else
-    echo ""
-    echo "== checking omnimarket venv drift against canonical omnibase_infra venv =="
-    echo "   (bounded at ${DRIFT_REPAIR_TIMEOUT_SECONDS}s -- OMN-15590; override with PULL_ALL_DRIFT_REPAIR_TIMEOUT_SECONDS)"
-    _drift_rc=0
-    _run_bounded "$DRIFT_REPAIR_TIMEOUT_SECONDS" \
-      env OMNI_HOME="$OMNI_HOME" bash "$_drift_script" --repair "$_infra_venv_python" \
-      || _drift_rc=$?
-
-    if [[ "$_drift_rc" -eq 0 ]]; then
-      STAGE_DRIFT_REPAIR="OK"
-      echo "  DRIFT-REPAIR omnimarket venv OK (canonical omnibase_infra venv)"
+    if [[ "$_drift_rc" -eq 124 ]]; then
+      STAGE_DRIFT_REPAIR="TIMEOUT"
+      STAGE_FAILURES+=("workspace-venv-reconcile timed out after ${DRIFT_REPAIR_TIMEOUT_SECONDS}s")
     else
-      if [[ "$_drift_rc" -eq 124 ]]; then
-        STAGE_DRIFT_REPAIR="TIMEOUT"
-        STAGE_FAILURES+=("omnimarket-drift-repair timed out after ${DRIFT_REPAIR_TIMEOUT_SECONDS}s")
-      else
-        STAGE_DRIFT_REPAIR="FAILED"
-        STAGE_FAILURES+=("omnimarket-drift-repair exited ${_drift_rc}")
-      fi
-      echo ""
-      echo "############################################################"
-      if [[ "$STAGE_DRIFT_REPAIR" == "TIMEOUT" ]]; then
-        echo "# OMN-15590: omnimarket venv drift-repair TIMED OUT after ${DRIFT_REPAIR_TIMEOUT_SECONDS}s"
-        echo "#"
-        echo "# The stage was killed (whole process group) and this run is a"
-        echo "# FAILURE. Most likely cause: another process holds the exclusive"
-        echo "# uv lock on the canonical venv"
-        echo "#   $_infra_dir/.venv/.lock"
-        echo "# uv waits on that lock forever and prints nothing while waiting."
-        echo "# Check for a concurrent uv/pull-all/session on this host, then"
-        echo "# re-run. Raise PULL_ALL_DRIFT_REPAIR_TIMEOUT_SECONDS only if the"
-        echo "# repair is genuinely slow rather than blocked."
-      else
-        echo "# OMN-15242: omnimarket venv drift-repair FAILED (exit ${_drift_rc})"
-      fi
-      echo "#"
-      echo "# pull-all.sh just advanced the canonical omnimarket clone, but"
-      echo "# could not repair the canonical omnibase_infra venv against it."
-      echo "# Every onex CLI / skill dispatch command is now at risk of the"
-      echo "# OMN-14060 OmnimarketDriftError until this is fixed BY HAND:"
-      echo "#"
-      echo "#   OMNI_HOME=$OMNI_HOME bash $_drift_script --repair $_infra_venv_python"
-      echo "#"
-      echo "# See OMN-15590 / OMN-15242 / OMN-14060 for context."
-      echo "############################################################"
-      echo ""
-      echo "  (continuing to the remaining stages -- their disposition is"
-      echo "   reported in the terminal summary; nothing is silently skipped)"
+      STAGE_DRIFT_REPAIR="FAILED"
+      STAGE_FAILURES+=("workspace-venv-reconcile exited ${_drift_rc}")
     fi
+    echo ""
+    echo "############################################################"
+    if [[ "$STAGE_DRIFT_REPAIR" == "TIMEOUT" ]]; then
+      echo "# OMN-15590: workspace venv reconcile TIMED OUT after ${DRIFT_REPAIR_TIMEOUT_SECONDS}s"
+      echo "#"
+      echo "# The stage was killed (whole process group) and this run is a"
+      echo "# FAILURE. Most likely cause: another process holds the exclusive"
+      echo "# uv lock on a target venv (uv waits on that lock forever and"
+      echo "# prints nothing while waiting). Check for a concurrent"
+      echo "# uv/pull-all/session on this host, then re-run. Raise"
+      echo "# PULL_ALL_DRIFT_REPAIR_TIMEOUT_SECONDS only if the reconcile is"
+      echo "# genuinely slow rather than blocked."
+    else
+      echo "# OMN-17190: workspace venv reconcile FAILED (exit ${_drift_rc})"
+    fi
+    echo "#"
+    echo "# pull-all.sh just advanced the canonical clones, but could not"
+    echo "# bring the locally-installed venvs back into agreement with them."
+    echo "# Every onex CLI / skill dispatch is now at risk of the OMN-14060"
+    echo "# OmnimarketDriftError until this is fixed. Run it directly and"
+    echo "# read the error (the reconciler names the exact failing command):"
+    echo "#"
+    echo "#   OMNI_HOME=$OMNI_HOME bash $_reconciler"
+    echo "#"
+    echo "# See OMN-17190 / OMN-15590 / OMN-15242 / OMN-14060 for context."
+    echo "############################################################"
+    echo ""
+    echo "  (continuing to the remaining stages -- their disposition is"
+    echo "   reported in the terminal summary; nothing is silently skipped)"
   fi
 fi
-# === End omnimarket venv drift auto-repair ===
+# === End workspace venv reconcile ===
 
 # === Plugin cache refresh (Layer 2, OMN-7369) ===
 # When omniclaude was updated, refresh the Claude Code plugin cache.

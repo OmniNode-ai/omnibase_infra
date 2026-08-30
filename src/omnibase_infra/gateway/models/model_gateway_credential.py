@@ -21,17 +21,18 @@ absence is resolved (and refused) at the store boundary, never represented.
 
 from __future__ import annotations
 
-from pydantic import BaseModel, ConfigDict, Field, SecretStr
+from pydantic import Field, SecretStr
+
+from omnibase_infra.gateway.models.model_gateway_credential_base import (
+    ModelGatewayCredentialBase,
+)
 
 __all__ = ["ModelGatewayCredential"]
 
 
-class ModelGatewayCredential(BaseModel):
+class ModelGatewayCredential(ModelGatewayCredentialBase):
     """A tenant's client-credentials identity plus its resolved endpoints."""
 
-    model_config = ConfigDict(frozen=True, extra="forbid", from_attributes=True)
-
-    tenant_slug: str = Field(min_length=1)
     # Keycloak clientId of the per-tenant confidential client. This IS the
     # principal_id the gateway resolves authority from -- it is not a label.
     client_id: str = Field(min_length=1)
@@ -39,8 +40,6 @@ class ModelGatewayCredential(BaseModel):
     # Realm token endpoint, supplied by configuration rather than assembled
     # from a hardcoded issuer -- the realm differs per tenant.
     token_endpoint: str = Field(min_length=1)
-    # Gateway origin the attach/heartbeat paths are appended to.
-    base_url: str = Field(min_length=1)
     # Caller-declared host label, used by the gateway for session bookkeeping
     # only -- never for authorization, which comes from the token claims.
     edge_instance_id: str = Field(min_length=1, max_length=255)

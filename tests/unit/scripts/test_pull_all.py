@@ -230,10 +230,10 @@ def _make_fake_infra_with_drift_stub(
     with_venv: bool = True,
     hang_seconds: int = 300,
 ) -> tuple[Path, Path]:
-    """Create `$OMNI_HOME/omnibase_infra/scripts/check-omnimarket-venv-drift.sh`
-    as a recording stub (never the real script -- the real script's own
-    detect/repair logic is covered by tests/scripts/test_check_omnimarket_venv_drift.py;
-    this only proves pull-all.sh's WIRING: does it invoke the drift script at
+    """Create `$OMNI_HOME/omnibase_infra/scripts/reconcile-workspace-venvs.sh`
+    as a recording stub (never the real script -- the real reconciler's own
+    two-layer logic is covered by tests/scripts/test_reconcile_workspace_venvs.py;
+    this only proves pull-all.sh's WIRING: does it invoke the reconciler at
     the right time, with the right args, and handle failure without aborting).
 
     `behavior`:
@@ -276,7 +276,7 @@ def _make_fake_infra_with_drift_stub(
     else:
         body = "exit 0\n"
 
-    stub = scripts_dir / "check-omnimarket-venv-drift.sh"
+    stub = scripts_dir / "reconcile-workspace-venvs.sh"
     stub.write_text("#!/usr/bin/env bash\n" + record + body)
     stub.chmod(0o755)
 
@@ -889,8 +889,8 @@ class TestPreCommitHookInstall:
 
 @pytest.mark.unit
 class TestOmnimarketDriftRepair:
-    """pull-all.sh wires check-omnimarket-venv-drift.sh --repair after an
-    omnimarket pull (OMN-15242).
+    """pull-all.sh ends by reconciling the workspace venvs (OMN-15242, widened
+    by OMN-17190).
 
     Root cause this closes: the OMN-14060 pre-flight guard detects venv drift
     against the canonical omnibase_infra venv but never repairs it, and the
@@ -901,20 +901,27 @@ class TestOmnimarketDriftRepair:
     (OMN-15265) and must never be auto-repaired mid-run; this hook lives only
     in pull-all.sh, never in a battery driver.
 
-    Every fixture here stubs check-omnimarket-venv-drift.sh (see
+    OMN-17190 widened the trigger from "omnimarket pulled OK" to "any repo
+    pulled OK", and widened the action from the omnimarket co-install alone to
+    a full reconcile of both governed venvs. The old gate missed half the drift
+    surface: an omnibase_infra pull advances that repo's `uv.lock`, and an
+    omniclaude pull advances the hook venv's lock, and NEITHER involves
+    omnimarket -- so those runs finished green with a venv left behind its own
+    dependency file. The operator statement that drove it: "Why is anything
+    hand built?"
+
+    Every fixture here stubs reconcile-workspace-venvs.sh (see
     `_make_fake_infra_with_drift_stub`) rather than using the real script --
-    the real script's detect/repair correctness is covered by
-    tests/scripts/test_check_omnimarket_venv_drift.py. These tests only prove
+    the real reconciler's correctness is covered by
+    tests/scripts/test_reconcile_workspace_venvs.py. These tests only prove
     pull-all.sh's wiring: invoked at the right time, with the right args, and
-    fail-loud-but-not-fatal on repair failure.
+    fatal on reconcile failure.
     """
 
     def test_repairs_omnimarket_venv_drift_after_successful_pull(
         self, tmp_path: Path
     ) -> None:
-        """A successful omnimarket pull triggers --repair against the
-        canonical omnibase_infra venv, and the invocation is logged/attributable.
-        """
+        """A successful pull triggers the reconciler, logged and attributable."""
         omni_home = tmp_path / "omni_home"
         omni_home.mkdir()
         fake_home = tmp_path / "home"
@@ -929,15 +936,17 @@ class TestOmnimarketDriftRepair:
             f"stdout={result.stdout!r} stderr={result.stderr!r}"
         )
         assert calls_log.exists(), (
-            "check-omnimarket-venv-drift.sh was never invoked after the "
+            "reconcile-workspace-venvs.sh was never invoked after the "
             f"omnimarket pull; stdout={result.stdout!r}"
         )
         call = calls_log.read_text()
-        assert "--repair" in call
-        assert str(infra_dir / ".venv" / "bin" / "python") in call
+        # No per-venv arguments: which venvs exist and how each is repaired is
+        # the reconciler's business, not pull-all's. pull-all hands it the
+        # workspace root and nothing else -- that is the whole interface.
         assert f"OMNI_HOME={omni_home}" in call
+        assert str(infra_dir) not in call.replace(f"OMNI_HOME={omni_home}", "")
         # Attributable: pull-all.sh's own stdout names the action.
-        assert "omnimarket venv drift" in result.stdout.lower()
+        assert "reconciling workspace venvs" in result.stdout.lower()
 
     def test_repair_failure_prints_loud_banner_and_is_fatal(
         self, tmp_path: Path
@@ -970,8 +979,8 @@ class TestOmnimarketDriftRepair:
             "a drift-repair failure must surface as a non-zero exit (AC2b); "
             f"stdout={result.stdout!r} stderr={result.stderr!r}"
         )
-        assert "OMN-15242" in result.stdout
-        assert "check-omnimarket-venv-drift.sh --repair" in result.stdout
+        assert "OMN-17190" in result.stdout
+        assert "reconcile-workspace-venvs.sh" in result.stdout
         # The repo pull itself succeeded -- only the drift STAGE failed.
         assert "OK       omnimarket" in result.stdout
 
@@ -1009,13 +1018,26 @@ class TestOmnimarketDriftRepair:
         assert result.returncode == 0, (
             f"stdout={result.stdout!r} stderr={result.stderr!r}"
         )
-        assert not calls_log.exists(), (
-            "drift script must not be invoked when the canonical venv is absent"
+        assert calls_log.exists(), (
+            "CONTRACT CHANGE (OMN-17190): an absent canonical venv used to skip "
+            "the stage, which is backwards -- a missing venv is the most "
+            "drifted a venv can be, and skipping left the machine with no onex "
+            "CLI and a green pull-all. Building it is the reconciler's job; "
+            "pull-all's job is to call the reconciler."
         )
 
-    def test_no_repair_when_omnimarket_not_in_this_run(self, tmp_path: Path) -> None:
-        """omnimarket absent from the requested repo list -- never triggers,
-        even though a fully-wired omnibase_infra + venv is present."""
+    def test_reconciles_even_when_omnimarket_was_not_in_this_run(
+        self, tmp_path: Path
+    ) -> None:
+        """CONTRACT CHANGE (OMN-17190): any successful pull triggers the reconcile.
+
+        The old gate fired only on an omnimarket pull. But an omniclaude pull
+        advances the hook venv's lock and an omnibase_infra pull advances the
+        CLI venv's lock, and neither touches omnimarket -- so under the old
+        gate those runs reported a clean sync while leaving a venv behind its
+        own dependency file. That is the same class of silent drift the stage
+        was added to end, just on the surface nobody was watching.
+        """
         omni_home = tmp_path / "omni_home"
         omni_home.mkdir()
         fake_home = tmp_path / "home"
@@ -1029,11 +1051,18 @@ class TestOmnimarketDriftRepair:
         assert result.returncode == 0, (
             f"stdout={result.stdout!r} stderr={result.stderr!r}"
         )
-        assert not calls_log.exists()
+        assert calls_log.exists(), (
+            "an omniclaude pull moved the hook venv's lock and the reconcile "
+            f"never ran; stdout={result.stdout!r}"
+        )
 
     def test_no_repair_when_omnimarket_pull_fails(self, tmp_path: Path) -> None:
-        """A dirty (FAILED) omnimarket pull must not trigger a repair -- there
-        is no fresh canonical SHA to repair against."""
+        """A run in which NOTHING pulled successfully must not reconcile.
+
+        Unchanged by OMN-17190: the trigger widened from "omnimarket is OK" to
+        "some repo is OK", but zero-OK still means nothing moved, so there is
+        no fresh canonical SHA to reconcile against.
+        """
         omni_home = tmp_path / "omni_home"
         omni_home.mkdir()
         fake_home = tmp_path / "home"
