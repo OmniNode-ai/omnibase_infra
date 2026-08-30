@@ -108,7 +108,7 @@ def ledger_read(correlation_id: str, limit: int, include_payload: bool) -> None:
     """
     store = StoreGatewayCredential(onex_home=Path.home() / ".onex")
     try:
-        credential = store.load()
+        credential = store.load_read_credential()
     except ModelOnexError as exc:
         # Fail-closed and NAMED: the remediation is the command that fixes it,
         # not a stack trace. An unreadable credential must never degrade into

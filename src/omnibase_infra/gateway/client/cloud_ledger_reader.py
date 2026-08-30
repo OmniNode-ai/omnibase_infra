@@ -62,8 +62,14 @@ from omnibase_infra.errors import InfraUnavailableError
 from omnibase_infra.gateway.models.model_cloud_ledger_read import (
     ModelCloudLedgerRead,
 )
+from omnibase_infra.gateway.models.model_gateway_api_key import (
+    ModelGatewayApiKeyCredential,
+)
 from omnibase_infra.gateway.models.model_gateway_credential import (
     ModelGatewayCredential,
+)
+from omnibase_infra.gateway.models.model_gateway_credential_base import (
+    ModelGatewayCredentialBase,
 )
 
 __all__ = [
@@ -118,7 +124,7 @@ class CloudLedgerReader:
         self,
         *,
         transport: ProtocolCloudLedgerTransport,
-        credential: ModelGatewayCredential,
+        credential: ModelGatewayCredentialBase,
     ) -> None:
         self._transport = transport
         self._credential = credential
@@ -160,7 +166,7 @@ class CloudLedgerReader:
         )
 
         try:
-            token = await self._grant_control_plane_token()
+            headers = await self._authorization_headers()
         except TokenRefusedError as exc:
             return ModelCloudLedgerRead(
                 verdict=EnumCloudLedgerVerdict.UNAUTHENTICATED,
@@ -174,19 +180,12 @@ class CloudLedgerReader:
                 correlation_id=correlation_id,
                 url=url,
                 detail=(
-                    "could not reach the token endpoint "
-                    f"{self._credential.token_endpoint}"
+                    f"could not reach the token endpoint {self._token_endpoint_label()}"
                 ),
             )
 
         try:
-            response = await self._transport.get(
-                url,
-                headers={
-                    "Authorization": f"Bearer {token}",
-                    "Accept": "application/json",
-                },
-            )
+            response = await self._transport.get(url, headers=headers)
         except InfraUnavailableError:
             return ModelCloudLedgerRead(
                 verdict=EnumCloudLedgerVerdict.UNAVAILABLE,
@@ -211,36 +210,80 @@ class CloudLedgerReader:
         base = self._credential.base_url.rstrip("/")
         return f"{base}{CLOUD_LEDGER_CORRELATION_PATH}?{urlencode(query)}"
 
-    async def _grant_control_plane_token(self) -> str:
-        """RFC 6749 s4.4 ``client_credentials`` against the stored realm."""
+    async def _authorization_headers(self) -> dict[str, str]:
+        """Build the credential headers for whichever kind is stored.
+
+        The API-key arm performs NO network call. That is the property worth
+        stating: minting a token on this path would make an API-key read fail
+        for a token-endpoint reason that has nothing to do with reading, which
+        is the class of confusion this whole command exists to remove.
+        """
+        if isinstance(self._credential, ModelGatewayApiKeyCredential):
+            return {
+                # The one line that reads the key, and it goes straight out.
+                "x-api-key": self._credential.api_key.get_secret_value(),
+                "Accept": "application/json",
+            }
+        if not isinstance(self._credential, ModelGatewayCredential):
+            raise TokenRefusedError(
+                "the stored credential carries no authenticator this read "
+                "knows how to present. Re-run 'onex auth login'."
+            )
+        token = await self._grant_control_plane_token(self._credential)
+        return {
+            "Authorization": f"Bearer {token}",
+            "Accept": "application/json",
+        }
+
+    def _token_endpoint_label(self) -> str:
+        """Name the endpoint an unreachable-token message is about.
+
+        A message that named the wrong endpoint would be worse than one that
+        admits the stored credential kind has none, so this reports what the
+        credential actually carries rather than assuming a realm.
+        """
+        if isinstance(self._credential, ModelGatewayCredential):
+            return self._credential.token_endpoint
+        return "(none: this credential presents no token grant)"
+
+    async def _grant_control_plane_token(
+        self, credential: ModelGatewayCredential
+    ) -> str:
+        """RFC 6749 s4.4 ``client_credentials`` against the stored realm.
+
+        Takes the credential as an argument rather than reading
+        ``self._credential``: that field is a union, and passing the narrowed
+        value makes the type checker prove the api-key arm can never reach
+        here, instead of leaving it to reviewer attention.
+        """
         response = await self._transport.post_form(
-            self._credential.token_endpoint,
+            credential.token_endpoint,
             form={
                 "grant_type": "client_credentials",
-                "client_id": self._credential.client_id,
+                "client_id": credential.client_id,
                 # The one line that reads the secret, and it goes straight out.
-                "client_secret": self._credential.client_secret.get_secret_value(),
+                "client_secret": credential.client_secret.get_secret_value(),
             },
             headers={"Accept": "application/json"},
         )
         if response.status != 200:
             raise TokenRefusedError(
-                f"token endpoint {self._credential.token_endpoint} refused the "
+                f"token endpoint {credential.token_endpoint} refused the "
                 f"stored credential for client_id "
-                f"'{self._credential.client_id}' (HTTP {response.status}). "
+                f"'{credential.client_id}' (HTTP {response.status}). "
                 "Check it with 'onex auth status', or re-run 'onex auth login' "
                 "with a freshly rotated secret."
             )
         payload = self._decode(await response.text())
         if payload is None:
             raise TokenRefusedError(
-                f"token endpoint {self._credential.token_endpoint} returned a "
+                f"token endpoint {credential.token_endpoint} returned a "
                 "200 that was not a JSON object"
             )
         token = payload.get("access_token")
         if not isinstance(token, str) or not token:
             raise TokenRefusedError(
-                f"token endpoint {self._credential.token_endpoint} returned a "
+                f"token endpoint {credential.token_endpoint} returned a "
                 "200 carrying no access_token"
             )
         return token

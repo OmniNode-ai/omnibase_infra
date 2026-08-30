@@ -73,7 +73,7 @@ def _patch(monkeypatch: pytest.MonkeyPatch, result: ModelCloudLedgerRead) -> lis
         def __init__(self, *, onex_home: Path) -> None:
             calls.append(("store", onex_home))
 
-        def load(self) -> ModelGatewayCredential:
+        def load_read_credential(self) -> ModelGatewayCredential:
             return _credential()
 
     class _Reader:
@@ -175,7 +175,7 @@ def test_missing_credential_is_a_named_remediation_not_a_traceback(
         def __init__(self, *, onex_home: Path) -> None:
             pass
 
-        def load(self) -> ModelGatewayCredential:
+        def load_read_credential(self) -> ModelGatewayCredential:
             raise ModelOnexError(
                 "no gateway credential; run 'onex auth login --tenant-slug ...'"
             )

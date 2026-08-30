@@ -43,17 +43,28 @@ from pydantic import SecretStr
 
 from omnibase_core.enums.enum_core_error_code import EnumCoreErrorCode
 from omnibase_core.errors.model_onex_error import ModelOnexError
+from omnibase_infra.gateway.models.model_gateway_api_key import (
+    ModelGatewayApiKeyCredential,
+)
 from omnibase_infra.gateway.models.model_gateway_credential import (
     ModelGatewayCredential,
+)
+from omnibase_infra.gateway.models.model_gateway_credential_base import (
+    ModelGatewayCredentialBase,
 )
 
 __all__ = ["StoreGatewayCredential"]
 
 _GATEWAY_BLOCK: Final[str] = "gateway"
 _SECRET_REF_KEY: Final[str] = "client_secret_ref"
+_API_KEY_REF_KEY: Final[str] = "api_key_ref"  # pragma: allowlist secret
 _REMEDIATION: Final[str] = (
     "run 'onex auth login --tenant-slug <slug> --client-id <principal_id> "
     "--client-secret-stdin'"
+)
+_API_KEY_REMEDIATION: Final[str] = (
+    "run 'onex auth login --tenant-slug <slug> --base-url <gateway-origin> "
+    "--api-key-stdin'"
 )
 # Field name -> config key. tenant_slug/client_id/token_endpoint/base_url are
 # the four the mint and the attach both need; edge_instance_id is bookkeeping
@@ -125,6 +136,62 @@ class StoreGatewayCredential:
             token_endpoint=values["token_endpoint"],
             base_url=values["base_url"],
             edge_instance_id=edge_instance_id,
+        )
+
+    def load_read_credential(self) -> ModelGatewayCredentialBase:
+        """Resolve whichever credential kind this machine actually holds.
+
+        onex-api accepts a tenant API key and an OIDC bearer on equal footing,
+        so the store resolves both -- but it never GUESSES. Exactly one of
+        ``api_key_ref`` / ``client_secret_ref`` decides, an empty block names
+        both remediations, and a block carrying both is refused rather than
+        silently resolved by precedence: two credentials on one machine is a
+        configuration the operator did not mean, and picking one for them is
+        how a read authenticates as an identity nobody chose.
+
+        Raises:
+            ModelOnexError: On absence, ambiguity, or an inline secret value.
+        """
+        block = self._load_gateway_block()
+
+        if "api_key" in block:
+            raise ModelOnexError(
+                f"{self.config_path} carries an inline 'api_key'. The key "
+                f"value must live only in {self.credentials_path} (mode 0600), "
+                f"referenced from config by '{_API_KEY_REF_KEY}'. Remove it and "
+                f"{_API_KEY_REMEDIATION}.",
+                error_code=EnumCoreErrorCode.INVALID_CONFIGURATION,
+            )
+
+        has_api_key = _API_KEY_REF_KEY in block
+        has_client_secret = _SECRET_REF_KEY in block
+        if has_api_key and has_client_secret:
+            raise ModelOnexError(
+                f"{self.config_path}: '{_GATEWAY_BLOCK}' names BOTH "
+                f"'{_API_KEY_REF_KEY}' and '{_SECRET_REF_KEY}'. Exactly one "
+                "credential kind may be stored; refusing to choose one for "
+                "you. Delete the block you did not mean.",
+                error_code=EnumCoreErrorCode.INVALID_CONFIGURATION,
+            )
+        if not has_api_key and not has_client_secret:
+            raise ModelOnexError(
+                f"{self.config_path}: '{_GATEWAY_BLOCK}' names neither "
+                f"'{_API_KEY_REF_KEY}' nor '{_SECRET_REF_KEY}' -- this machine "
+                "holds no readable credential. To store an API key, "
+                f"{_API_KEY_REMEDIATION}. To store a client secret, "
+                f"{_REMEDIATION}.",
+                error_code=EnumCoreErrorCode.CONFIGURATION_NOT_FOUND,
+            )
+
+        if has_client_secret:
+            return self.load()
+
+        api_key_ref = self._require_text(block, _API_KEY_REF_KEY)
+        return ModelGatewayApiKeyCredential(
+            tenant_slug=self._require_text(block, "tenant_slug"),
+            api_key=SecretStr(self._read_secret(api_key_ref)),
+            api_key_ref=api_key_ref,
+            base_url=self._require_text(block, "base_url"),
         )
 
     def _load_gateway_block(self) -> dict[str, object]:
@@ -271,6 +338,36 @@ class StoreGatewayCredential:
         secrets[secret_ref] = client_secret
         self._write_secret_document(secrets)
 
+    def save_api_key(
+        self,
+        *,
+        tenant_slug: str,
+        api_key: str,
+        base_url: str,
+    ) -> None:
+        """Write the reference-only api-key block and the 0600 secret file.
+
+        Writes the WHOLE ``gateway`` block, which is what replaces any
+        client-secret block that was there: one machine holds one gateway
+        credential, and leaving the other kind behind is precisely the
+        ambiguity ``load_read_credential`` refuses. Every other top-level key
+        in config.yaml survives the round trip (OMN-16037).
+        """
+        secret_ref = f"{tenant_slug}-api-key"
+        self._onex_home.mkdir(parents=True, exist_ok=True)
+
+        document = self._load_config_document(must_exist=False)
+        document[_GATEWAY_BLOCK] = {
+            "tenant_slug": tenant_slug,
+            _API_KEY_REF_KEY: secret_ref,
+            "base_url": base_url,
+        }
+        self.config_path.write_text(yaml.safe_dump(document, sort_keys=False))
+
+        secrets = self._load_secret_document()
+        secrets[secret_ref] = api_key
+        self._write_secret_document(secrets)
+
     def clear(self) -> None:
         """Remove both the config block and the referenced secret.
 
@@ -283,9 +380,14 @@ class StoreGatewayCredential:
         block = document.get(_GATEWAY_BLOCK)
         secret_ref = ""
         if isinstance(block, dict):
-            candidate = block.get(_SECRET_REF_KEY)
-            if isinstance(candidate, str):
-                secret_ref = candidate
+            # Either credential kind may be the one stored; logout must not
+            # leave an orphaned api key behind just because the older
+            # client-secret shape is the one this code was written for.
+            for key in (_SECRET_REF_KEY, _API_KEY_REF_KEY):
+                candidate = block.get(key)
+                if isinstance(candidate, str) and candidate:
+                    secret_ref = candidate
+                    break
 
         if secret_ref:
             secrets = self._load_secret_document()
