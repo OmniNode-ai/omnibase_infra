@@ -6674,6 +6674,61 @@ def _literal_event_type_aliases_from_topics(
     return {topic.strip() for topic in subscribe_topics if topic.strip()}
 
 
+def derive_entry_message_category(
+    contract: ModelDiscoveredContract,
+    entry: ModelHandlerRoutingEntry,
+) -> str:
+    """Return the ONE message category ``_prepare_handler_wiring`` stamps on this entry.
+
+    An explicit ``entry.message_category`` wins; otherwise the category falls back to
+    ``contract.event_bus.subscribe_topics[0]`` — the contract's FIRST declared subscribe
+    topic — and is then stamped on EVERY route the entry registers, regardless of each
+    topic's own real category. That single-category derivation is the OMN-14605 defect
+    mechanism, so the OMN-16939 subscriber-dispatcher-resolution ratchet MUST observe it
+    through this exact function rather than re-deriving it (a re-implementation is free to
+    drift from the runtime, which is how the class survived three prior gates).
+    """
+    if entry.message_category:
+        return entry.message_category.strip().lower()
+    if contract.event_bus and contract.event_bus.subscribe_topics:
+        return _derive_message_category(contract.event_bus.subscribe_topics[0])
+    return "event"
+
+
+def derive_entry_message_types(
+    contract: ModelDiscoveredContract,
+    entry: ModelHandlerRoutingEntry,
+) -> set[str] | None:
+    """Return the message-type keys this entry's dispatcher is indexed under.
+
+    Mirrors ``_prepare_handler_wiring`` exactly: the ``event_model`` class name (when
+    type-scoped), every literal subscribe-topic string, and either the explicit
+    ``entry.event_type`` alias or the topic-derived ``<producer>.<event-name>`` aliases.
+    ``None`` means "un-scoped" (no keys registered).
+    """
+    message_types: set[str] | None = None
+    if entry.event_model is not None:
+        message_types = {entry.event_model.name}
+
+    subscribe_topics = contract.event_bus.subscribe_topics if contract.event_bus else ()
+    literal_topic_aliases = _literal_event_type_aliases_from_topics(subscribe_topics)
+    if literal_topic_aliases:
+        message_types = (message_types or set()).union(literal_topic_aliases)
+
+    event_type_alias = entry.event_type.strip() if entry.event_type else ""
+    if event_type_alias:
+        message_types = (message_types or set()) | {event_type_alias}
+    elif contract.event_bus:
+        topic_aliases = {
+            alias
+            for topic in subscribe_topics
+            if (alias := _derive_event_type_alias_from_topic(topic)) is not None
+        }
+        if topic_aliases:
+            message_types = (message_types or set()).union(topic_aliases)
+    return message_types
+
+
 def _strict_dispatcher_coverage_enabled() -> bool:
     """Return True when strict orchestrator dispatcher coverage is enabled."""
     return os.environ.get(_STRICT_DISPATCHER_COVERAGE_ENV, "").lower() in (
@@ -8677,40 +8732,20 @@ def _prepare_handler_wiring(
     # handler. Some domain-owned contracts use auto-wiring for subscriptions
     # only; those entries must report accurate metadata while avoiding generic
     # direct-handler dispatcher registration.
-    _category_str_early = "event"
-    if entry.message_category:
-        _category_str_early = entry.message_category.strip().lower()
-    elif contract.event_bus and contract.event_bus.subscribe_topics:
-        _category_str_early = _derive_message_category(
-            contract.event_bus.subscribe_topics[0]
-        )
-    _early_category = EnumMessageCategory(_category_str_early)
-
-    message_types: set[str] | None = None
-    if entry.event_model is not None:
-        message_types = {entry.event_model.name}
-    # OMN-9215: index the dispatcher under the contract-declared event_type alias
-    # in addition to the Pydantic class name. Publishers set
-    # ModelEventEnvelope.event_type to the dot-path string; without this alias,
-    # the dispatcher lookup falls back to type(payload).__name__ which resolves
-    # to "dict" on object-erased envelopes and never matches the class-name key.
-    # Strip surrounding whitespace so registration matches the dispatch-engine
-    # normalization (message_dispatch_engine.py normalizes via .strip()).
-    event_type_alias = entry.event_type.strip() if entry.event_type else ""
-    subscribe_topics = contract.event_bus.subscribe_topics if contract.event_bus else ()
-    literal_topic_aliases = _literal_event_type_aliases_from_topics(subscribe_topics)
-    if literal_topic_aliases:
-        message_types = (message_types or set()).union(literal_topic_aliases)
-    if event_type_alias:
-        message_types = (message_types or set()) | {event_type_alias}
-    elif contract.event_bus:
-        topic_aliases = {
-            alias
-            for topic in subscribe_topics
-            if (alias := _derive_event_type_alias_from_topic(topic)) is not None
-        }
-        if topic_aliases:
-            message_types = (message_types or set()).union(topic_aliases)
+    # OMN-16939: category + message-type derivation moved to module-level helpers so the
+    # subscriber-dispatcher-resolution ratchet observes the SAME derivation the runtime
+    # performs. A gate that re-implements this is free to drift; three prior gates passed
+    # on contracts this one must fail.
+    #
+    # OMN-9215 (preserved in derive_entry_message_types): index the dispatcher under the
+    # contract-declared event_type alias in addition to the Pydantic class name.
+    # Publishers set ModelEventEnvelope.event_type to the dot-path string; without this
+    # alias the dispatcher lookup falls back to type(payload).__name__, which resolves to
+    # "dict" on object-erased envelopes and never matches the class-name key.
+    _early_category = EnumMessageCategory(
+        derive_entry_message_category(contract, entry)
+    )
+    message_types: set[str] | None = derive_entry_message_types(contract, entry)
 
     handler_cls = _import_handler_class(handler_ref.module, handler_ref.name)
     handler_constructor_params = inspect.signature(handler_cls).parameters

@@ -1,0 +1,135 @@
+# SPDX-FileCopyrightText: 2025 OmniNode.ai Inc.
+# SPDX-License-Identifier: MIT
+# OMN-16939 — frozen burn-down baseline for the subscriber-dispatcher-resolution ratchet.
+#
+# INVARIANT (omnibase_infra.validators.subscriber_dispatcher_resolution):
+#   every declared event_bus.subscribe_topic MUST resolve to a REGISTERED DISPATCHER for
+#   that topic's own real (category, message type). A topic that does not resolve is
+#   consumed, DLQ'd and COMMITTED on every message — the consumer group reads Stable /
+#   MEMBERS 1 / LAG 0 forever while 100% of the traffic is lost, because the offset
+#   advances after DLQ-routing so lag can never rise.
+#
+#   Live-proven 2026-08-29 on the .201 dev lane: node_pr_lifecycle_state_reducer took
+#   174 messages in and DLQ'd 174 over six hours on pr-lifecycle-fix-completed, and
+#   delegation-escalation-triggered was DLQ'ing at 128 per 40 minutes.
+#
+# REASON CODES
+#   no_route                 no handler_routing entry is assigned the topic by
+#                            _topics_for_handler_entry, so zero routes exist for it.
+#   category_mismatch        a route exists but was stamped with a category that differs
+#                            from the topic's real one (the OMN-14605 mechanism: the
+#                            category is derived ONCE per entry, falling back to
+#                            subscribe_topics[0], then stamped on every route).
+#   message_type_unindexed   category agrees but the dispatcher is not indexed under the
+#                            topic's message type.
+#
+# THIS IS A RATCHET, NOT AN EXEMPTION. It is SHRINK-ONLY:
+#   * a (contract, topic) NOT listed here that fails to resolve   -> FAIL (no new
+#     instances, ever);
+#   * a (contract, topic) listed here that now resolves           -> FAIL until removed
+#     (a fixed entry still listed is STALE = FAIL, so the list cannot rot).
+#
+# FIX SHAPE: give the topic a per-topic `topic_match` entry carrying an explicit
+# `message_category:` (plus an `event_model:` where several topics share one handler).
+# Setting `topic:` ALONE IS NOT ENOUGH — the category still falls back to
+# subscribe_topics[0]. node_swarm_subtask_state_reducer had the full per-topic split with
+# per-topic event_models and was still 100% NO_DISPATCHER on all four of its event topics
+# until the category was declared. `topic:` picks WHICH topic an entry owns;
+# `message_category:` picks which category it registers under. They are independent.
+#
+# SCOPE: omnibase_infra (src/omnibase_infra). omnimarket carries its own baseline at the
+# same path in that repo — the OMN-14605 mixed-category gate was omnibase_infra-scoped and
+# its "Lane B" fan-out to the other repos never landed, which is exactly why both of the
+# OMN-16939 live victims (omnimarket) went unseen. This ratchet ships in BOTH repos in the
+# same change so that gap cannot reopen.
+#
+# Burn-down under OMN-16939. End state is an empty list.
+known_unresolved_subscriptions:
+  - contract: node_artifact_change_detector_effect
+    topic: onex.cmd.artifact.reconcile.v1
+    category: command
+    reason: category_mismatch
+  - contract: node_coding_agent_orchestrator
+    topic: onex.evt.omnibase-infra.coding-agent-invoke-completed.v1
+    category: event
+    reason: category_mismatch
+  - contract: node_coding_agent_orchestrator
+    topic: onex.evt.omnibase-infra.coding-agent-invoke-failed.v1
+    category: event
+    reason: category_mismatch
+  - contract: node_coding_agent_orchestrator
+    topic: onex.evt.omnibase-infra.coding-agent-workspace-validated.v1
+    category: event
+    reason: category_mismatch
+  - contract: node_chain_orchestrator
+    topic: onex.evt.omnibase-infra.chain-verified.v1
+    category: event
+    reason: no_route
+  - contract: node_context_audit_dlq_effect
+    topic: onex.evt.omniclaude.context-audit-dlq.v1
+    category: event
+    reason: no_route
+  - contract: node_contract_registry_reducer
+    topic: onex.evt.platform.contract-deregistered.v1
+    category: event
+    reason: no_route
+  - contract: node_contract_registry_reducer
+    topic: onex.evt.platform.contract-registered.v1
+    category: event
+    reason: no_route
+  - contract: node_contract_registry_reducer
+    topic: onex.evt.platform.node-heartbeat.v1
+    category: event
+    reason: no_route
+  - contract: node_contract_registry_reducer
+    topic: onex.intent.platform.runtime-tick.v1
+    category: intent
+    reason: no_route
+  - contract: node_contract_resolver_bridge
+    topic: onex.cmd.platform.contract-resolve-requested.v1
+    category: command
+    reason: no_route
+  - contract: node_emit_daemon_runtime
+    topic: onex.evt.omniclaude.notification-blocked.v1
+    category: event
+    reason: no_route
+  - contract: node_emit_daemon_runtime
+    topic: onex.evt.omniclaude.notification-completed.v1
+    category: event
+    reason: no_route
+  - contract: node_emit_daemon_runtime
+    topic: onex.evt.omniclaude.phase-metrics.v1
+    category: event
+    reason: no_route
+  - contract: node_registration_orchestrator
+    topic: onex.evt.platform.registry-request-introspection.v1
+    category: event
+    reason: no_route
+  - contract: node_routing_orchestrator
+    topic: onex.evt.router.routing-outcome.v1
+    category: event
+    reason: no_route
+  - contract: node_rsd_orchestrator
+    topic: onex.evt.rsd.scores-stored.v1
+    category: event
+    reason: no_route
+  - contract: node_runner_fleet_maintain_orchestrator
+    topic: onex.cmd.omnibase-infra.runner-fleet-maintain-start.v1
+    category: command
+    reason: no_route
+  - contract: node_runner_fleet_maintain_orchestrator
+    topic: onex.evt.omnibase-infra.runner-fleet-health-verdict.v1
+    category: event
+    reason: no_route
+  - contract: node_runner_fleet_maintain_orchestrator
+    topic: onex.evt.omnibase-infra.runner-health-snapshot.v1
+    category: event
+    reason: no_route
+  - contract: node_runtime_orchestrator
+    topic: onex.cmd.omnibase-infra.pattern-b-dispatch.v1
+    category: command
+    reason: no_route
+  - contract: node_validation_adjudicator
+    topic: onex.evt.platform.validation-candidate-submitted.v1
+    category: event
+    reason: no_route
