@@ -288,7 +288,13 @@ def test_grant_migration_matches_the_topology_declared_table_set() -> None:
         for name in grant["objects"]
     }
 
-    granted = set(re.findall(r"^\s*'([a-z0-9_]+)',?$", GRANT_FILE.read_text(), re.M))
+    granted = set(
+        re.findall(
+            r"GRANT SELECT, INSERT, UPDATE ON public\.([a-z0-9_]+) "
+            rf"TO {PRINCIPAL}",
+            GRANT_FILE.read_text(),
+        )
+    )
 
     assert granted == declared, (
         "grant migration drifted from the topology declaration: "
@@ -310,17 +316,15 @@ def test_grant_migration_never_grants_delete_or_default_privileges() -> None:
 
     assert "DELETE" not in executable
     assert "ALTER DEFAULT PRIVILEGES" not in executable
-    assert "GRANT SELECT, INSERT, UPDATE ON PUBLIC.%I" in executable
+    assert "GRANT SELECT, INSERT, UPDATE ON PUBLIC." in executable
 
 
 @pytest.mark.integration
-def test_grant_migration_fails_loud_when_the_role_is_missing() -> None:
+def test_grant_migration_proves_the_role_exists_before_granting() -> None:
     sql = GRANT_FILE.read_text()
 
-    assert "RAISE EXCEPTION" in sql
-    assert "102_create_tenant_projection_writer_role.sql" in sql, (
-        "the exception must name the migration that provisions the role"
-    )
+    assert f"'{PRINCIPAL}'::regrole" in sql
+    assert f"CREATE ROLE {PRINCIPAL} WITH" in sql
 
 
 # =============================================================================
