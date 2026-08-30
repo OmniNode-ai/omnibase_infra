@@ -382,10 +382,9 @@ def test_omn15361_replay_of_node_service_registry_migration_is_now_allowlisted(
     whose premise -- that this exact migration must fail as unqualified --
     no longer holds now the gate consults the allowlist.
 
-    The fixture's leading DO block (a guarded role-existence check) is
-    unrelated dynamic SQL and is still, correctly, rejected on its own
-    grounds -- proving this fix narrowly targets schema-qualification only,
-    not a blanket pass for the whole file.
+    The fixture's leading DO block is a static role-existence check, not
+    dynamic SQL. It must not hide relation-target drift, but it also must not
+    fail the dynamic-SQL guard by shape alone.
     """
     repository = tmp_path / "repository"
     repository.mkdir()
@@ -416,7 +415,7 @@ def test_omn15361_replay_of_node_service_registry_migration_is_now_allowlisted(
         "schema-qualified" in violation or "prohibited in public" in violation
         for violation in violations
     )
-    assert any("dynamic SQL" in violation for violation in violations)
+    assert not any("dynamic SQL" in violation for violation in violations)
 
 
 def test_omn16705_credentials_successor_is_path_exempted_for_pk_reconciliation(

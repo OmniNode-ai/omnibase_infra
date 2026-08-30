@@ -86,15 +86,13 @@
 --     them, and tenant_projection_writer being non-owner + NOBYPASSRLS is what
 --     makes them apply to it.
 
-SELECT CASE
-  WHEN NOT EXISTS (SELECT 1 FROM pg_catalog.pg_roles WHERE rolname = 'tenant_projection_writer')
-    THEN 'true'
-  ELSE 'false'
-END AS create_tenant_projection_writer \gset
-
-\if :create_tenant_projection_writer
-CREATE ROLE tenant_projection_writer WITH NOLOGIN NOSUPERUSER NOBYPASSRLS NOCREATEDB NOCREATEROLE NOREPLICATION;
-\endif
+DO $$
+BEGIN
+  IF NOT EXISTS (SELECT 1 FROM pg_catalog.pg_roles WHERE rolname = 'tenant_projection_writer') THEN
+    CREATE ROLE tenant_projection_writer WITH NOLOGIN NOSUPERUSER NOBYPASSRLS NOCREATEDB NOCREATEROLE NOREPLICATION;
+  END IF;
+END
+$$;
 
 SELECT 'tenant_projection_writer'::regrole;
 
@@ -103,60 +101,70 @@ SELECT 'tenant_projection_writer'::regrole;
 -- granted opportunistically so this file needs no revision the day it appears.
 GRANT USAGE ON SCHEMA public TO tenant_projection_writer;
 
-SELECT 'GRANT USAGE ON SCHEMA tenant TO tenant_projection_writer'
-WHERE EXISTS (SELECT 1 FROM pg_catalog.pg_namespace WHERE nspname = 'tenant') \gexec
+DO $$
+BEGIN
+  IF EXISTS (SELECT 1 FROM pg_catalog.pg_namespace WHERE nspname = 'tenant') THEN
+    GRANT USAGE ON SCHEMA tenant TO tenant_projection_writer;
+  END IF;
+END
+$$;
 
 -- Per-table SELECT, INSERT, UPDATE. PostgreSQL requires SELECT alongside
 -- INSERT/UPDATE for the adapter's `INSERT ... ON CONFLICT DO UPDATE`, which is
 -- why the write set is three privileges and not two — the same requirement
 -- omnibase_infra's `_require_projection_binding_privileges` encodes.
-SELECT 'GRANT SELECT, INSERT, UPDATE ON public.agent_routing_decisions TO tenant_projection_writer'
-WHERE to_regclass('public.agent_routing_decisions') IS NOT NULL \gexec
-
-SELECT 'GRANT SELECT, INSERT, UPDATE ON public.capability_scores TO tenant_projection_writer'
-WHERE to_regclass('public.capability_scores') IS NOT NULL \gexec
-
-SELECT 'GRANT SELECT, INSERT, UPDATE ON public.context_roi_scores TO tenant_projection_writer'
-WHERE to_regclass('public.context_roi_scores') IS NOT NULL \gexec
-
-SELECT 'GRANT SELECT, INSERT, UPDATE ON public.delegation_budget_state TO tenant_projection_writer'
-WHERE to_regclass('public.delegation_budget_state') IS NOT NULL \gexec
-
-SELECT 'GRANT SELECT, INSERT, UPDATE ON public.delegation_events TO tenant_projection_writer'
-WHERE to_regclass('public.delegation_events') IS NOT NULL \gexec
-
-SELECT 'GRANT SELECT, INSERT, UPDATE ON public.delegation_judge_verdict_events TO tenant_projection_writer'
-WHERE to_regclass('public.delegation_judge_verdict_events') IS NOT NULL \gexec
-
-SELECT 'GRANT SELECT, INSERT, UPDATE ON public.delegation_routing_tenant_overlay TO tenant_projection_writer'
-WHERE to_regclass('public.delegation_routing_tenant_overlay') IS NOT NULL \gexec
-
-SELECT 'GRANT SELECT, INSERT, UPDATE ON public.delegation_shadow_comparisons TO tenant_projection_writer'
-WHERE to_regclass('public.delegation_shadow_comparisons') IS NOT NULL \gexec
-
-SELECT 'GRANT SELECT, INSERT, UPDATE ON public.dep_health_findings TO tenant_projection_writer'
-WHERE to_regclass('public.dep_health_findings') IS NOT NULL \gexec
-
-SELECT 'GRANT SELECT, INSERT, UPDATE ON public.hook_events TO tenant_projection_writer'
-WHERE to_regclass('public.hook_events') IS NOT NULL \gexec
-
-SELECT 'GRANT SELECT, INSERT, UPDATE ON public.instruction_eval_aggregate_snapshots TO tenant_projection_writer'
-WHERE to_regclass('public.instruction_eval_aggregate_snapshots') IS NOT NULL \gexec
-
-SELECT 'GRANT SELECT, INSERT, UPDATE ON public.llm_cost_aggregates TO tenant_projection_writer'
-WHERE to_regclass('public.llm_cost_aggregates') IS NOT NULL \gexec
-
-SELECT 'GRANT SELECT, INSERT, UPDATE ON public.pattern_learning_artifacts TO tenant_projection_writer'
-WHERE to_regclass('public.pattern_learning_artifacts') IS NOT NULL \gexec
-
-SELECT 'GRANT SELECT, INSERT, UPDATE ON public.projection_delegation_inference_response_text TO tenant_projection_writer'
-WHERE to_regclass('public.projection_delegation_inference_response_text') IS NOT NULL \gexec
-
-SELECT 'GRANT SELECT, INSERT, UPDATE ON public.savings_estimates TO tenant_projection_writer'
-WHERE to_regclass('public.savings_estimates') IS NOT NULL \gexec
-
-SELECT 'GRANT SELECT, INSERT, UPDATE ON public.skill_execution_snapshots TO tenant_projection_writer'
-WHERE to_regclass('public.skill_execution_snapshots') IS NOT NULL \gexec
-
-SELECT 'GRANT SELECT, INSERT, UPDATE ON public.tenant_inference_credentials TO tenant_projection_writer'
-WHERE to_regclass('public.tenant_inference_credentials') IS NOT NULL \gexec
+DO $$
+BEGIN
+  IF to_regclass('public.agent_routing_decisions') IS NOT NULL THEN
+    GRANT SELECT, INSERT, UPDATE ON public.agent_routing_decisions TO tenant_projection_writer;
+  END IF;
+  IF to_regclass('public.capability_scores') IS NOT NULL THEN
+    GRANT SELECT, INSERT, UPDATE ON public.capability_scores TO tenant_projection_writer;
+  END IF;
+  IF to_regclass('public.context_roi_scores') IS NOT NULL THEN
+    GRANT SELECT, INSERT, UPDATE ON public.context_roi_scores TO tenant_projection_writer;
+  END IF;
+  IF to_regclass('public.delegation_budget_state') IS NOT NULL THEN
+    GRANT SELECT, INSERT, UPDATE ON public.delegation_budget_state TO tenant_projection_writer;
+  END IF;
+  IF to_regclass('public.delegation_events') IS NOT NULL THEN
+    GRANT SELECT, INSERT, UPDATE ON public.delegation_events TO tenant_projection_writer;
+  END IF;
+  IF to_regclass('public.delegation_judge_verdict_events') IS NOT NULL THEN
+    GRANT SELECT, INSERT, UPDATE ON public.delegation_judge_verdict_events TO tenant_projection_writer;
+  END IF;
+  IF to_regclass('public.delegation_routing_tenant_overlay') IS NOT NULL THEN
+    GRANT SELECT, INSERT, UPDATE ON public.delegation_routing_tenant_overlay TO tenant_projection_writer;
+  END IF;
+  IF to_regclass('public.delegation_shadow_comparisons') IS NOT NULL THEN
+    GRANT SELECT, INSERT, UPDATE ON public.delegation_shadow_comparisons TO tenant_projection_writer;
+  END IF;
+  IF to_regclass('public.dep_health_findings') IS NOT NULL THEN
+    GRANT SELECT, INSERT, UPDATE ON public.dep_health_findings TO tenant_projection_writer;
+  END IF;
+  IF to_regclass('public.hook_events') IS NOT NULL THEN
+    GRANT SELECT, INSERT, UPDATE ON public.hook_events TO tenant_projection_writer;
+  END IF;
+  IF to_regclass('public.instruction_eval_aggregate_snapshots') IS NOT NULL THEN
+    GRANT SELECT, INSERT, UPDATE ON public.instruction_eval_aggregate_snapshots TO tenant_projection_writer;
+  END IF;
+  IF to_regclass('public.llm_cost_aggregates') IS NOT NULL THEN
+    GRANT SELECT, INSERT, UPDATE ON public.llm_cost_aggregates TO tenant_projection_writer;
+  END IF;
+  IF to_regclass('public.pattern_learning_artifacts') IS NOT NULL THEN
+    GRANT SELECT, INSERT, UPDATE ON public.pattern_learning_artifacts TO tenant_projection_writer;
+  END IF;
+  IF to_regclass('public.projection_delegation_inference_response_text') IS NOT NULL THEN
+    GRANT SELECT, INSERT, UPDATE ON public.projection_delegation_inference_response_text TO tenant_projection_writer;
+  END IF;
+  IF to_regclass('public.savings_estimates') IS NOT NULL THEN
+    GRANT SELECT, INSERT, UPDATE ON public.savings_estimates TO tenant_projection_writer;
+  END IF;
+  IF to_regclass('public.skill_execution_snapshots') IS NOT NULL THEN
+    GRANT SELECT, INSERT, UPDATE ON public.skill_execution_snapshots TO tenant_projection_writer;
+  END IF;
+  IF to_regclass('public.tenant_inference_credentials') IS NOT NULL THEN
+    GRANT SELECT, INSERT, UPDATE ON public.tenant_inference_credentials TO tenant_projection_writer;
+  END IF;
+END
+$$;

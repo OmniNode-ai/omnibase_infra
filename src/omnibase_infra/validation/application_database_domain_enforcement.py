@@ -1040,11 +1040,52 @@ def _requires_dynamic_sql_rejection(statement: str) -> bool:
     """Reject procedural execution whose relation targets are runtime strings."""
     masked = _mask_sql_string_bodies(statement)
     if re.match(r"^\s*do\b", masked, re.IGNORECASE) is not None:
-        return True
+        return _contains_unquoted_keyword(statement, "execute")
     return any(
         language == "plpgsql" and _contains_unquoted_keyword(body, "execute")
         for language, body in _routine_sql_bodies(statement)
     )
+
+
+def _do_block_body(statement: str) -> str | None:
+    """Extract a statically inspectable anonymous PL/pgSQL block body."""
+    masked = _mask_sql_string_bodies(statement)
+    match = re.match(r"^\s*do\b", masked, re.IGNORECASE)
+    if match is None:
+        return None
+    literal = _sql_literal_at(statement, _skip_whitespace(statement, match.end()))
+    if literal is None:
+        return None
+    body, _ = literal
+    return body
+
+
+def _static_plpgsql_sql_statements(body: str) -> tuple[str, ...]:
+    """Extract direct SQL statements from a non-dynamic PL/pgSQL block body."""
+    statements: list[str] = []
+    current: list[str] = []
+    recording = False
+    for line in body.splitlines():
+        stripped = line.strip()
+        if not stripped:
+            continue
+        if not recording and re.match(
+            r"^(?:alter|analyze|cluster|comment|copy|create|delete|drop|grant|"
+            r"insert|lock|merge|reindex|revoke|select|table|truncate|update|"
+            r"vacuum)\b",
+            stripped,
+            re.IGNORECASE,
+        ):
+            recording = True
+        if recording:
+            current.append(stripped)
+            if stripped.endswith(";"):
+                statements.append(" ".join(current))
+                current = []
+                recording = False
+    if current:
+        statements.append(" ".join(current))
+    return tuple(statements)
 
 
 def _record_sql_target(
@@ -2012,6 +2053,17 @@ def _analyze_sql_fragment(
             "procedural block contains dynamic SQL whose relation targets cannot "
             "be proven statically"
         )
+        return
+    do_body = _do_block_body(fragment)
+    if do_body is not None:
+        for statement in _static_plpgsql_sql_statements(do_body):
+            _analyze_sql_fragment(
+                statement,
+                visible_ctes=set(visible_ctes),
+                application_schemas=application_schemas,
+                violations=violations,
+                target_locations=target_locations,
+            )
         return
     if _routine_body_is_uninspectable(fragment):
         violations.append(

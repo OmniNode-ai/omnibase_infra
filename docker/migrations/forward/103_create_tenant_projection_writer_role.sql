@@ -115,35 +115,35 @@
 -- =============================================================================
 
 -- -----------------------------------------------------------------------------
--- 1. Role existence and attributes. These use psql \gexec instead of a DO block
---    so the application SQL gate can statically inspect the file. Each command
---    is emitted only when catalog state proves it is needed.
+-- 1. Role existence and attributes. The migration runner executes files through
+--    asyncpg, so this must be regular SQL rather than psql meta-commands.
+--    Every privileged command stays gated on a catalog read.
 -- -----------------------------------------------------------------------------
-SELECT CASE
-  WHEN NOT EXISTS (SELECT 1 FROM pg_catalog.pg_roles WHERE rolname = 'tenant_projection_writer')
-    THEN 'true'
-  ELSE 'false'
-END AS create_tenant_projection_writer \gset
+DO $$
+BEGIN
+  IF NOT EXISTS (SELECT 1 FROM pg_catalog.pg_roles WHERE rolname = 'tenant_projection_writer') THEN
+    CREATE ROLE tenant_projection_writer WITH NOLOGIN NOSUPERUSER NOBYPASSRLS NOCREATEDB NOCREATEROLE NOREPLICATION;
+  END IF;
 
-\if :create_tenant_projection_writer
-CREATE ROLE tenant_projection_writer WITH NOLOGIN NOSUPERUSER NOBYPASSRLS NOCREATEDB NOCREATEROLE NOREPLICATION;
-\endif
+  IF EXISTS (
+    SELECT 1
+      FROM pg_catalog.pg_roles
+     WHERE rolname = 'tenant_projection_writer'
+       AND (rolcreatedb OR rolcreaterole)
+  ) THEN
+    ALTER ROLE tenant_projection_writer NOCREATEDB NOCREATEROLE;
+  END IF;
 
-SELECT 'ALTER ROLE tenant_projection_writer NOCREATEDB NOCREATEROLE'
-WHERE EXISTS (
-  SELECT 1
-    FROM pg_catalog.pg_roles
-   WHERE rolname = 'tenant_projection_writer'
-     AND (rolcreatedb OR rolcreaterole)
-) \gexec
-
-SELECT 'ALTER ROLE tenant_projection_writer NOSUPERUSER NOBYPASSRLS NOREPLICATION'
-WHERE EXISTS (
-  SELECT 1
-    FROM pg_catalog.pg_roles
-   WHERE rolname = 'tenant_projection_writer'
-     AND (rolsuper OR rolbypassrls OR rolreplication)
-) \gexec
+  IF EXISTS (
+    SELECT 1
+      FROM pg_catalog.pg_roles
+     WHERE rolname = 'tenant_projection_writer'
+       AND (rolsuper OR rolbypassrls OR rolreplication)
+  ) THEN
+    ALTER ROLE tenant_projection_writer NOSUPERUSER NOBYPASSRLS NOREPLICATION;
+  END IF;
+END
+$$;
 
 -- Fail if the role still does not exist.
 SELECT 'tenant_projection_writer'::regrole;
@@ -152,8 +152,13 @@ SELECT 'tenant_projection_writer'::regrole;
 -- 2. CONNECT on the target database. Guarded on the database existing so the
 --    file stays valid on a cluster that has not been through 000.
 -- -----------------------------------------------------------------------------
-SELECT 'GRANT CONNECT ON DATABASE omnidash_analytics TO tenant_projection_writer'
-WHERE EXISTS (SELECT 1 FROM pg_catalog.pg_database WHERE datname = 'omnidash_analytics') \gexec
+DO $$
+BEGIN
+  IF EXISTS (SELECT 1 FROM pg_catalog.pg_database WHERE datname = 'omnidash_analytics') THEN
+    GRANT CONNECT ON DATABASE omnidash_analytics TO tenant_projection_writer;
+  END IF;
+END
+$$;
 
 SELECT CASE
   WHEN NOT EXISTS (SELECT 1 FROM pg_catalog.pg_database WHERE datname = 'omnidash_analytics')

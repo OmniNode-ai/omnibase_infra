@@ -150,10 +150,17 @@ def test_102_gates_every_privileged_statement_on_an_observed_divergence() -> Non
     non-CREATEROLE service role the managed lane's migration Job runs as
     (OMN-15343). Every ALTER must sit inside a DO block that read pg_roles first.
     """
+    in_do_block = False
     for line in _executable_lines(MIGRATION_FILE):
-        assert not line.strip().startswith("ALTER ROLE"), (
+        stripped = line.strip()
+        if stripped.upper().startswith("DO $$"):
+            in_do_block = True
+        if stripped == "$$;":
+            in_do_block = False
+            continue
+        assert in_do_block or not stripped.startswith("ALTER ROLE"), (
             "top-level (ungated) ALTER ROLE found; it must be inside a DO block "
-            f"gated on a pg_roles read: {line.strip()!r}"
+            f"gated on a pg_roles read: {stripped!r}"
         )
 
 
