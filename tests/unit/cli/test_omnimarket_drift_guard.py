@@ -238,6 +238,35 @@ def test_drift_check_raises_on_mismatch_with_actionable_message() -> None:
     assert "check-omnimarket-venv-drift.sh --repair" in message
 
 
+def test_drift_check_names_full_path_repair_command_when_omni_home_known(
+    tmp_path: Path,
+) -> None:
+    # The refusal fires mid-dispatch, not necessarily from inside
+    # $OMNI_HOME/omnibase_infra -- the named repair command must be a full,
+    # copy-pasteable path, not a cwd-relative one that only resolves by luck.
+    with (
+        patch(
+            "omnibase_infra.cli.omnimarket_drift_guard.installed_omnimarket_commit",
+            return_value=_FAKE_SHA_A,
+        ),
+        patch(
+            "omnibase_infra.cli.omnimarket_drift_guard.canonical_local_omnimarket_commit",
+            return_value=_FAKE_SHA_B,
+        ),
+    ):
+        with pytest.raises(OmnimarketDriftError) as exc_info:
+            check_omnimarket_drift(omni_home=str(tmp_path))
+    message = str(exc_info.value)
+    expected_repair = str(
+        tmp_path / "omnibase_infra" / "scripts" / "check-omnimarket-venv-drift.sh"
+    )
+    expected_install = str(
+        tmp_path / "omnibase_infra" / "scripts" / "install-node-skill-package.sh"
+    )
+    assert expected_repair in message
+    assert expected_install in message
+
+
 # ---------------------------------------------------------------------------
 # Default-ON refusal + the named override escape hatch (OMN-13930)
 # ---------------------------------------------------------------------------

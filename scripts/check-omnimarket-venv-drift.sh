@@ -13,8 +13,17 @@
 #
 # This script does the work the pre-flight intentionally skips: it refreshes
 # the canonical clone from origin/dev (network), compares the resolved SHA
-# against the target venv's installed commit, and — with --repair — re-runs
-# the canonical co-install (install-node-skill-package.sh) to fix drift.
+# against the target venv's installed commit, and — with --repair —
+# fast-forwards the canonical clone itself to that same SHA before re-running
+# the canonical co-install (install-node-skill-package.sh) to fix drift. The
+# fast-forward step (OMN-16366) is what keeps both sides of the comparison in
+# agreement afterward: the pre-flight guard compares the installed venv
+# against the canonical clone's own checked-out HEAD, never origin/dev
+# directly, so installing origin/dev into the venv without also advancing the
+# clone would leave the guard immediately re-failing on the next dispatch,
+# just with drift reversed. When the clone has diverged (e.g. an unpushed
+# local commit) a clean fast-forward is impossible and --repair refuses
+# rather than force it — see the printed message for the manual fix.
 #
 # Run this periodically (a session/cron tick), or by hand after the pre-flight
 # guard raises "omnimarket venv is STALE". It never runs automatically on
@@ -111,6 +120,34 @@ if [[ "$REPAIR" -ne 1 ]]; then
   echo
   echo "Re-run with --repair to fix, or by hand:"
   echo "  OMNIMARKET_REF=$CANONICAL_SHA $SCRIPT_DIR/install-node-skill-package.sh --execute $PYTHON_BIN"
+  exit 1
+fi
+
+# OMN-16366: --repair installs $CANONICAL_SHA (origin/dev) into the target
+# venv, but the in-process guard (omnimarket_drift_guard.py) compares against
+# the canonical clone's own checked-out HEAD, never origin/dev directly. If
+# the clone itself is left behind, --repair "succeeds" but the guard
+# immediately re-fails on the very next dispatch -- now with drift REVERSED
+# (installed == origin/dev, canonical clone == stale). Fast-forward the clone
+# to the same commit being installed FIRST, so both sides land in agreement.
+# A clean fast-forward is refused (never forced) when the clone has diverged
+# -- e.g. an unpushed local commit (OMN-14638 shape) -- because forcing it
+# would silently discard that commit; the operator must resolve it by hand.
+echo
+echo "== fast-forwarding canonical clone to origin/dev before repair (OMN-16366) =="
+if ! git -C "$OMNIMARKET_CLONE" merge --ff-only origin/dev; then
+  echo
+  echo "ERROR: canonical clone at $OMNIMARKET_CLONE cannot fast-forward to" >&2
+  echo "  origin/dev ($CANONICAL_SHA) -- it has local commits origin/dev does" >&2
+  echo "  not have, or a dirty working tree. Refusing to repair: installing" >&2
+  echo "  $CANONICAL_SHA into $PYTHON_BIN while the clone stays behind would" >&2
+  echo "  leave the guard immediately re-failing with drift REVERSED." >&2
+  echo "  Resolve the canonical clone by hand, then re-run --repair:" >&2
+  echo "    cd $OMNIMARKET_CLONE" >&2
+  echo "    git status                      # inspect what's local-only" >&2
+  echo "    git push origin HEAD:dev        # keep it: publish, then re-run" >&2
+  echo "    # -- or, to discard it instead --" >&2
+  echo "    git reset --hard origin/dev" >&2
   exit 1
 fi
 
