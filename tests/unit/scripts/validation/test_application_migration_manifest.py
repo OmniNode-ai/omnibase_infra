@@ -222,7 +222,16 @@ def test_checked_in_manifest_is_exact_and_all_blockers_are_explicit() -> None:
     # carries no `\connect`, while these grants are per-database inside
     # omnidash_analytics (the role itself is created cluster-wide by the flat
     # migration 102).
-    assert len(result.declarations) == 118
+    # +1 for OMN-16993's
+    # node_projection_session_replay/0002_grant_omninode_runtime_session_replay_snapshots.sql
+    # -- the topology-derived grant the three topology instances already
+    # declare for `omninode_runtime` on `public.session_replay_snapshots` but
+    # which no migration in either repo ever issued, so the projection failed
+    # `InsufficientPrivilege` on every write once OMN-16993's LOGIN half let it
+    # authenticate at all. Vendored here first per the
+    # node-migration-vendor-parity-gate ordering, ahead of the omnimarket PR
+    # (#2214) that owns the source file.
+    assert len(result.declarations) == 119
     assert result.blocked == ()
     assert len(result.legacy_node_declarations) == 2
     assert len(result.cloud_aliases) == 30

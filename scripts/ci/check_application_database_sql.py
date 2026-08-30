@@ -283,6 +283,17 @@ _LEGACY_DEFAULT_SCHEMA_SQL_EXACT_PATHS = frozenset(
             "docker/migrations/forward/nodes/node_projection_tenant_credentials/"
             "0002_credential_identity_not_null.sql"
         ),
+        # OMN-16993: session_replay_snapshots is an existing legacy-public
+        # projection table. This migration creates no new relation authority;
+        # it only grants the topology-declared omninode_runtime writer on the
+        # physical table that remains in public until the governed OMN-15359
+        # schema cutover. The target is therefore the same legacy physical
+        # table class as the sibling exemptions above, while GRANT itself will
+        # still fail loudly if the role or relation is absent.
+        Path(
+            "docker/migrations/forward/nodes/node_projection_session_replay/"
+            "0002_grant_omninode_runtime_session_replay_snapshots.sql"
+        ),
     }
 )
 

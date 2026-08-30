@@ -64,6 +64,27 @@ class ModelRuntimeHealthCheckEvent(BaseModel):
         default=0,
         description="Subscribe topics with no matching non-empty consumer group",
     )
+    projection_count: int = Field(
+        default=0,
+        description=(
+            "Contract-declared projections in scope for the liveness dimensions "
+            "(OMN-16994)"
+        ),
+    )
+    unattached_projection_count: int = Field(
+        default=0,
+        description=(
+            "Declared projections with no attached consumer — they persist "
+            "nothing while every lag-based check reads green (OMN-16994)"
+        ),
+    )
+    dlq_saturated_projection_count: int = Field(
+        default=0,
+        description=(
+            "Attached projections routing 100% of consumed events to a DLQ or "
+            "quarantine sink over the observation window (OMN-16994)"
+        ),
+    )
 
 
 __all__: list[str] = ["ModelRuntimeHealthCheckEvent"]
