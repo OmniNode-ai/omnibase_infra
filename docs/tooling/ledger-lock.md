@@ -86,6 +86,90 @@ By default, lock directories are created next to the ledger file itself (a
 up-front. Set `LEDGER_LOCK_ROOT` to point every writer at one shared directory instead
 (only necessary if the ledger's own parent directory isn't writable by every writer).
 
+## Section caps and the archive roll (OMN-17023)
+
+An append-only section grows forever unless something bounds it. The rolling work
+ledger this script serves reached **21,752 lines** before a human noticed and split it
+by hand — and that hand-split then invalidated every line-number watermark pointing
+into the file. Both flags below exist so that stopgap is never needed again.
+
+The **capped section is the tail of the file**: from `--section-heading` to EOF. That
+is the shape an append-only section has, and the only shape where "move the oldest
+rows out" is well defined. The heading must occur exactly once; zero or two
+occurrences fails closed (exit 2) rather than capping the wrong bytes. A **row** is a
+markdown heading (`##` … `######`) and everything under it up to the next one. Rows are
+the unit a roll moves; lines and bytes are the units a cap counts.
+
+| Flag | Meaning |
+| -- | -- |
+| `--section-heading HEADING` | the exact heading line opening the capped section |
+| `--max-section-rows N` | refuse or roll when the section would exceed N lines |
+| `--max-section-bytes N` | refuse or roll when the section would exceed N bytes |
+| `--max-append-bytes N` | refuse a single append larger than N bytes |
+| `--on-cap {roll,block}` | required with any cap: archive the oldest rows first, or refuse |
+| `--archive-dir DIR` | where rolled rows are written (required with `--on-cap roll`) |
+| `--roll-keep-entries N` | how many newest rows stay live after a roll |
+| `--roll-section` | action: roll now instead of appending (add `--force-roll` to roll while under the caps) |
+
+```bash
+# Append under a cap, rolling the oldest rows out when it would be crossed.
+scripts/ledger_lock.py LEDGER --append-file - \
+  --section-heading '## §5 Action Log (append-only)' \
+  --max-section-rows 4000 --max-section-bytes 2000000 \
+  --on-cap roll --archive-dir docs/tracking/archive --roll-keep-entries 40
+
+# Roll on its own (what a scheduled or merge-triggered job calls).
+scripts/ledger_lock.py LEDGER --roll-section \
+  --section-heading '## §5 Action Log (append-only)' \
+  --max-section-rows 4000 --on-cap roll \
+  --archive-dir docs/tracking/archive --roll-keep-entries 40
+```
+
+**A refusal writes nothing at all** — not the row, and not a roll. Exit code
+`74` means the cap held. That includes the case where a roll *would* fire but keeping
+`--roll-keep-entries` rows still crosses the cap: planning and writing are separate
+steps precisely so the tool can decline without leaving a split file and a lost row.
+`--max-append-bytes` is refused outright rather than rolled for, because rolling
+cannot make a single row smaller.
+
+A roll prints a machine-readable receipt on stdout:
+
+```
+ledger_lock: ROLL {"archive": "...", "entries_rolled": 5, "entries_kept": 3,
+                   "first_kept_heading": "## ...", "last_rolled_heading": "## ...", ...}
+```
+
+`first_kept_heading` is the boundary a reader re-anchors against. The live section
+keeps exactly one pointer block (`<!-- ledger-roll: … -->`), replaced on each roll
+rather than stacked, naming the archive file the older rows moved to.
+
+## Reading a rolled ledger — `ledger_watermark.py`
+
+A reader that stores its position as a **line number** cannot survive a roll: after a
+split the same line number addresses different content, and there is nothing for the
+reader to compare against, so it skips rows silently. `scripts/ledger_watermark.py`
+stores the identity of the last row read instead — its heading plus a 12-hex digest
+over its normalized body — and resolves that against the live file *and* the archive
+directory.
+
+```bash
+scripts/ledger_watermark.py LEDGER --state STATE.json --source NAME --resolve   # report unread rows
+scripts/ledger_watermark.py LEDGER --state STATE.json --source NAME --advance   # then move the anchor
+scripts/ledger_watermark.py LEDGER --state STATE.json --source NAME --migrate   # convert a line-number mark, once
+```
+
+A roll moves the OLDEST rows out and does not ask whether the reader had read them,
+so an anchor that lands in an archive can have unread rows on BOTH sides of the split.
+The resolver reports those as `unread_archived_entries` / `unread_archived_headings`
+alongside the live `resume_line`; dropping them would be the same silent skip the line
+number produced, reached by a different route.
+
+The state file declares `watermark_schema_version` (currently `2`); a state file
+without one is the pre-OMN-17023 line-number schema and is **refused** (exit 4) rather
+than reinterpreted. Exit 3 is `UNRESOLVED` — the anchor row is gone, or its digest
+changed because the row was edited after being read — and nothing is advanced. Both
+are fail-closed on purpose: a reader that cannot prove where it stopped must not guess.
+
 ## Scope — what this script deliberately does *not* do
 
 This is the generic mutex/append/dedup/retry mechanism only. It does not validate row
