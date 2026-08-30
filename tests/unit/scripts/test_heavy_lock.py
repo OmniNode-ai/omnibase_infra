@@ -20,17 +20,39 @@ The regression contract proven here:
   and elapsed named) and the wrapped command is never run unlocked;
 * the lock is ``fcntl.flock(2)`` on the lock path, i.e. the same kernel lock
   ``flock(1)`` takes, so a util-linux holder blocks the helper and vice versa.
+
+OMN-16995 -- every spawn in this module is a PROCESS GROUP, not a process.
+Each ``Popen`` here runs ``heavy_lock.py -- sh -c <script>``, so the object the
+test holds is a WRAPPER and the shell doing the work is its child. The module
+used to clean up with a bare ``proc.kill()``, which signals the wrapper only:
+the ``while :; do :; done`` holder was reparented to PID 1 and burned a full
+core forever. Nineteen such orphans accumulated on the ``.200`` gate host and
+drove it to 1.64x-core load, at which the governed pre-push selector refuses
+every heavy escalation -- a leak in a unit test that took down a shared
+capacity gate. Three independent defenses are pinned below and must all stay:
+
+1. ``_spawn_group`` starts every child with ``start_new_session=True`` and
+   ``_reap`` signals the whole group with ``os.killpg``;
+2. a process-group safety net reaps on SIGTERM/SIGINT/SIGHUP and at
+   interpreter exit, because ``finally`` does NOT run for SIGTERM;
+3. the CPU-burning script carries its OWN wall-clock deadline, so even a
+   ``SIGKILL`` of the whole pytest process -- which runs no cleanup anywhere --
+   cannot leave a runaway behind.
 """
 
 from __future__ import annotations
 
+import atexit
 import fcntl
 import importlib.util
 import json
 import os
+import re
+import signal
 import subprocess
 import sys
 import time
+import uuid
 from pathlib import Path
 from typing import Any
 
@@ -53,13 +75,167 @@ def _load_module() -> Any:
 MOD = _load_module()
 
 
-def _run_cli(args: list[str], timeout: float = 60) -> subprocess.CompletedProcess[str]:
-    return subprocess.run(
-        [sys.executable, str(_SCRIPT), *args],
+# --------------------------------------------------------------------------
+# Process-group spawning and reaping (OMN-16995)
+# --------------------------------------------------------------------------
+#: Wall-clock ceiling a CPU-burning wrapped command imposes on ITSELF. This is
+#: defense 3: it is the only one that survives ``SIGKILL`` of the test process,
+#: because no cleanup code of ours runs in that case. It must comfortably
+#: exceed the ~8s of observation the progress test needs.
+BUSY_MAX_SECONDS = 90
+
+#: A POSIX-sh CPU burner that kills itself after ``BUSY_MAX_SECONDS``. ``$$``
+#: is the invoking shell's pid inside a subshell (POSIX XCU 2.5.2), so the
+#: backgrounded watchdog signals its own parent -- the shell running the loop.
+#: The `sleep` it leaves behind exits on its own and consumes no CPU.
+BUSY_SPIN_SCRIPT = f"(sleep {BUSY_MAX_SECONDS}; kill -9 $$) & while :; do :; done"
+
+#: pids of live process-group leaders spawned by this module, for the
+#: signal/atexit safety net. ``start_new_session=True`` makes pid == pgid.
+_LIVE_GROUPS: set[int] = set()
+
+
+def _spawn_group(argv: list[str], **kwargs: Any) -> subprocess.Popen[str]:
+    """``Popen`` ARGV as the leader of its own session and process group.
+
+    Never call ``subprocess.Popen`` directly in this module -- a wrapper killed
+    on its own leaves its wrapped shell running (OMN-16995). The pid of a
+    ``start_new_session=True`` child IS its process-group id, so ``_reap`` can
+    signal the whole tree without a ``getpgid`` lookup that would race the
+    wrapper's own exit.
+    """
+    proc: subprocess.Popen[str] = subprocess.Popen(
+        argv, start_new_session=True, **kwargs
+    )
+    _LIVE_GROUPS.add(proc.pid)
+    return proc
+
+
+def _kill_group(pgid: int) -> None:
+    """SIGKILL a whole process group, tolerating an already-dead group."""
+    try:
+        os.killpg(pgid, signal.SIGKILL)
+    except (ProcessLookupError, PermissionError):
+        pass
+    _LIVE_GROUPS.discard(pgid)
+
+
+def _reap(*procs: subprocess.Popen[str]) -> None:
+    """Kill each proc's ENTIRE process group, then wait for the leader.
+
+    This is the fix for the leak: the group contains the wrapped ``sh -c``
+    grandchild, which ``proc.kill()`` never touched.
+    """
+    for proc in procs:
+        _kill_group(proc.pid)
+    for proc in procs:
+        try:
+            proc.wait(timeout=30)
+        except subprocess.TimeoutExpired:  # pragma: no cover - defense in depth
+            proc.kill()
+            proc.wait(timeout=10)
+
+
+def _reap_all_live_groups() -> None:
+    for pgid in list(_LIVE_GROUPS):
+        _kill_group(pgid)
+
+
+atexit.register(_reap_all_live_groups)
+
+
+@pytest.fixture(scope="module", autouse=True)
+def _spin_orphan_safety_net() -> Any:
+    """Reap every live group on SIGTERM/SIGINT/SIGHUP as well as on exit.
+
+    ``finally`` blocks run for ``KeyboardInterrupt`` but NOT for a default
+    ``SIGTERM``, and the hook host aborts a wedged pre-push run with
+    ``SIGTERM``. Without this, an aborted suite leaks exactly the orphans this
+    module's own cleanup was fixed to prevent.
+    """
+    previous: dict[int, Any] = {}
+
+    def _handler(signum: int, frame: Any) -> None:  # pragma: no cover - signal
+        _reap_all_live_groups()
+        signal.signal(signum, previous.get(signum, signal.SIG_DFL))
+        os.kill(os.getpid(), signum)
+
+    for sig in (signal.SIGTERM, signal.SIGINT, signal.SIGHUP):
+        try:
+            previous[sig] = signal.signal(sig, _handler)
+        except (ValueError, OSError):  # pragma: no cover - non-main thread
+            pass
+    try:
+        yield
+    finally:
+        for sig, prev in previous.items():
+            try:
+                signal.signal(sig, prev)
+            except (ValueError, OSError):  # pragma: no cover
+                pass
+        _reap_all_live_groups()
+
+
+def _group_is_gone(pgid: int, timeout: float = 10.0) -> bool:
+    """True once no process remains in PGID. SIGKILL delivery is async."""
+    deadline = time.monotonic() + timeout
+    while time.monotonic() < deadline:
+        try:
+            os.killpg(pgid, 0)
+        except ProcessLookupError:
+            return True
+        except PermissionError:  # pragma: no cover - foreign group, not ours
+            return False
+        time.sleep(0.05)
+    return False
+
+
+def _pids_matching(marker: str) -> list[str]:
+    """Every process-table row whose argv carries MARKER, this pid excluded."""
+    rows = subprocess.run(
+        ["ps", "-Ao", "pid=,args="],
         capture_output=True,
         text=True,
-        timeout=timeout,
+        timeout=30,
         check=False,
+    ).stdout
+    return [line.strip() for line in rows.splitlines() if marker in line]
+
+
+def _marked(script: str) -> tuple[str, str]:
+    """A unique per-spawn marker plus SCRIPT carrying it as a sh comment.
+
+    The marker is what makes a process-table assertion exact: it identifies
+    THIS spawn's descendants and cannot collide with an unrelated spin loop
+    left over on the host by an older run.
+    """
+    marker = f"OMN16995-{uuid.uuid4().hex}"
+    # `:` is the POSIX no-op builtin, so the marker is inert argv text. It stays
+    # on ONE line on purpose: an embedded newline would split the `ps` row the
+    # process-table assertions parse.
+    return marker, f": {marker}; {script}"
+
+
+def _run_cli(args: list[str], timeout: float = 60) -> subprocess.CompletedProcess[str]:
+    """``subprocess.run``-shaped, but group-spawned and group-reaped.
+
+    ``subprocess.run(timeout=...)`` kills only the direct child on expiry, so
+    the plain form has the same leak shape as a bare ``proc.kill()``.
+    """
+    proc = _spawn_group(
+        [sys.executable, str(_SCRIPT), *args],
+        stdout=subprocess.PIPE,
+        stderr=subprocess.PIPE,
+        text=True,
+    )
+    try:
+        stdout, stderr = proc.communicate(timeout=timeout)
+    except subprocess.TimeoutExpired:
+        _reap(proc)
+        raise
+    _LIVE_GROUPS.discard(proc.pid)
+    return subprocess.CompletedProcess(
+        proc.args, proc.returncode, stdout=stdout, stderr=stderr
     )
 
 
@@ -143,7 +319,7 @@ def test_two_near_simultaneous_invocations_serialize(tmp_path: Path) -> None:
     script = f"echo ENTER >> {trace}; sleep 1.5; echo EXIT >> {trace}"
 
     procs = [
-        subprocess.Popen(
+        _spawn_group(
             [
                 sys.executable,
                 str(_SCRIPT),
@@ -182,7 +358,7 @@ def test_timeout_fails_closed_without_running_the_command(tmp_path: Path) -> Non
     sentinel = tmp_path / "ran.txt"
     started = tmp_path / "started.txt"
 
-    holder = subprocess.Popen(
+    holder = _spawn_group(
         [
             sys.executable,
             str(_SCRIPT),
@@ -218,8 +394,7 @@ def test_timeout_fails_closed_without_running_the_command(tmp_path: Path) -> Non
             ]
         )
     finally:
-        holder.kill()
-        holder.wait(timeout=30)
+        _reap(holder)
 
     assert result.returncode == MOD.EXIT_LOCK_TIMEOUT == 75
     assert not sentinel.exists(), "FELL THROUGH: command ran without the lock"
@@ -263,7 +438,7 @@ def test_helper_never_kills_the_peer_holding_the_lock(tmp_path: Path) -> None:
     than the unserialized run this ticket exists to prevent.
     """
     lock = tmp_path / "hl.lock"
-    holder = subprocess.Popen(
+    holder = _spawn_group(
         [
             sys.executable,
             "-c",
@@ -286,8 +461,7 @@ def test_helper_never_kills_the_peer_holding_the_lock(tmp_path: Path) -> None:
         # The peer is still alive and unsignalled after the helper gave up.
         assert holder.poll() is None
     finally:
-        holder.kill()
-        holder.wait(timeout=10)
+        _reap(holder)
 
 
 # --------------------------------------------------------------------------
@@ -302,7 +476,7 @@ def test_helper_takes_fcntl_flock_on_the_lock_path(tmp_path: Path) -> None:
     """
     lock = tmp_path / "hl.lock"
     started = tmp_path / "started.txt"
-    proc = subprocess.Popen(
+    proc = _spawn_group(
         [
             sys.executable,
             str(_SCRIPT),
@@ -350,7 +524,7 @@ def test_lock_is_released_when_the_holder_dies(tmp_path: Path) -> None:
     """
     lock = tmp_path / "hl.lock"
     started = tmp_path / "started.txt"
-    proc = subprocess.Popen(
+    proc = _spawn_group(
         [
             sys.executable,
             str(_SCRIPT),
@@ -369,8 +543,7 @@ def test_lock_is_released_when_the_holder_dies(tmp_path: Path) -> None:
     while not started.exists() and time.monotonic() < deadline:
         time.sleep(0.05)
     assert started.exists()
-    proc.kill()
-    proc.wait(timeout=30)
+    _reap(proc)
 
     result = _run_cli(["--lock", str(lock), "--timeout", "20s", "--", "true"])
     assert result.returncode == 0
@@ -481,7 +654,7 @@ def test_max_hold_abort_releases_the_lock_for_a_waiter(tmp_path: Path) -> None:
     gets the lock, because the holder let go at its cap.
     """
     lock = tmp_path / "hl.lock"
-    holder = subprocess.Popen(
+    holder = _spawn_group(
         [
             sys.executable,
             str(_SCRIPT),
@@ -516,8 +689,7 @@ def test_max_hold_abort_releases_the_lock_for_a_waiter(tmp_path: Path) -> None:
         )
         assert waiter.returncode == 0, waiter.stderr
     finally:
-        holder.kill()
-        holder.wait(timeout=30)
+        _reap(holder)
 
 
 def test_max_hold_kills_a_command_that_ignores_sigterm(tmp_path: Path) -> None:
@@ -578,7 +750,7 @@ def test_a_waiter_never_signals_the_peer_holding_the_lock(tmp_path: Path) -> Non
     leave the peer's process completely untouched.
     """
     lock = tmp_path / "hl.lock"
-    holder = subprocess.Popen(
+    holder = _spawn_group(
         [
             sys.executable,
             str(_SCRIPT),
@@ -602,8 +774,7 @@ def test_a_waiter_never_signals_the_peer_holding_the_lock(tmp_path: Path) -> Non
         assert waiter.returncode == MOD.EXIT_LOCK_TIMEOUT
         assert holder.poll() is None, "the waiter killed the peer holding the lock"
     finally:
-        holder.kill()
-        holder.wait(timeout=30)
+        _reap(holder)
 
 
 # --------------------------------------------------------------------------
@@ -614,7 +785,7 @@ def test_a_waiter_never_signals_the_peer_holding_the_lock(tmp_path: Path) -> Non
 def test_sidecar_heartbeat_advances_while_the_holder_runs(tmp_path: Path) -> None:
     """The sidecar is refreshed, not written once and left to go stale."""
     lock = tmp_path / "hl.lock"
-    holder = subprocess.Popen(
+    holder = _spawn_group(
         [
             sys.executable,
             str(_SCRIPT),
@@ -643,8 +814,7 @@ def test_sidecar_heartbeat_advances_while_the_holder_runs(tmp_path: Path) -> Non
             timeout=25,
         ), "held_seconds never advanced"
     finally:
-        holder.kill()
-        holder.wait(timeout=30)
+        _reap(holder)
 
 
 def test_a_wedged_holder_is_distinguishable_from_a_working_one(tmp_path: Path) -> None:
@@ -659,7 +829,7 @@ def test_a_wedged_holder_is_distinguishable_from_a_working_one(tmp_path: Path) -
     busy_lock = tmp_path / "busy.lock"
 
     def _spawn(lock: Path, script: str) -> subprocess.Popen[str]:
-        return subprocess.Popen(
+        return _spawn_group(
             [
                 sys.executable,
                 str(_SCRIPT),
@@ -679,8 +849,14 @@ def test_a_wedged_holder_is_distinguishable_from_a_working_one(tmp_path: Path) -
             text=True,
         )
 
-    wedged = _spawn(wedged_lock, "sleep 60")  # network-wedged shape: no CPU
-    busy = _spawn(busy_lock, "while :; do :; done")  # real work: burns CPU
+    # OMN-16995: the CPU burner carries its own deadline and a unique marker.
+    # The deadline bounds a runaway that outlives even a SIGKILLed test run;
+    # the marker makes the post-condition below an exact process-table fact
+    # rather than a grep for a signature other runs also produce.
+    busy_marker, busy_script = _marked(BUSY_SPIN_SCRIPT)
+    wedged_marker, wedged_script = _marked("sleep 60")
+    wedged = _spawn(wedged_lock, wedged_script)  # network-wedged shape: no CPU
+    busy = _spawn(busy_lock, busy_script)  # real work: burns CPU
     try:
         for lock in (wedged_lock, busy_lock):
             assert _wait_for(
@@ -707,9 +883,141 @@ def test_a_wedged_holder_is_distinguishable_from_a_working_one(tmp_path: Path) -
         )
         assert wedged_delta < 0.5, f"a sleeping holder showed progress: {wedged_delta}"
     finally:
-        for proc in (wedged, busy):
-            proc.kill()
-            proc.wait(timeout=30)
+        _reap(wedged, busy)
+
+    # OMN-16995 DoD 1 -- zero surviving descendants, proven against the live
+    # process table and not merely against the wrapper's exit status. Before
+    # the fix the `busy` grandchild was still running here, reparented to
+    # PID 1, at 100% of a core.
+    for proc, marker in ((wedged, wedged_marker), (busy, busy_marker)):
+        assert _group_is_gone(proc.pid), (
+            f"process group {proc.pid} still has live members after cleanup"
+        )
+        assert not _pids_matching(marker), (
+            "LEAKED: a wrapped command outlived the test that spawned it: "
+            f"{_pids_matching(marker)}"
+        )
+
+
+def test_an_aborted_test_body_leaves_no_cpu_burning_descendant(
+    tmp_path: Path,
+) -> None:
+    """OMN-16995 DoD 1/3 -- the EXCEPTION path leaves nothing behind.
+
+    The leak was never visible on the happy path: the test passed either way.
+    It only mattered that the wrapped `while :; do :; done` outlived the run.
+    Here the body raises while the burner is demonstrably running, and the
+    process table -- snapshotted before and after -- must show the descendant
+    gone. Reverting `_spawn_group`/`_reap` to `Popen`/`proc.kill()` fails this.
+    """
+    lock = tmp_path / "hl.lock"
+    marker, script = _marked(BUSY_SPIN_SCRIPT)
+
+    before = _pids_matching(marker)
+    assert before == [], f"marker collided with a pre-existing process: {before}"
+
+    proc = _spawn_group(
+        [
+            sys.executable,
+            str(_SCRIPT),
+            "--lock",
+            str(lock),
+            "--heartbeat-every",
+            "1s",
+            "--max-hold",
+            "0",
+            "--",
+            "sh",
+            "-c",
+            script,
+        ],
+        stdout=subprocess.PIPE,
+        stderr=subprocess.PIPE,
+        text=True,
+    )
+    pgid = proc.pid
+    try:
+        with pytest.raises(RuntimeError, match="simulated"):
+            try:
+                assert _wait_for(lambda: bool(_pids_matching(marker)), timeout=25), (
+                    "the CPU-burning descendant never started"
+                )
+                raise RuntimeError("simulated mid-test failure")
+            finally:
+                _reap(proc)
+    finally:
+        _kill_group(pgid)
+
+    assert _group_is_gone(pgid), f"process group {pgid} survived the aborted test"
+    survivors = _pids_matching(marker)
+    assert survivors == [], f"LEAKED across an exception: {survivors}"
+
+
+def test_the_cpu_burner_carries_its_own_deadline(tmp_path: Path) -> None:
+    """OMN-16995 defense 3 -- a runaway is bounded even with NO cleanup at all.
+
+    Nothing this module does runs after `SIGKILL`, so the last line of defense
+    has to live inside the spawned shell. This pins that the burner script is
+    self-terminating and bounded, which is what makes an un-reaped orphan
+    finite instead of forever.
+    """
+    assert "while :; do :; done" in BUSY_SPIN_SCRIPT, (
+        "the burner must still burn CPU, or the progress test proves nothing"
+    )
+    assert re.search(r"sleep \d+; kill -9 \$\$", BUSY_SPIN_SCRIPT), (
+        "the burner lost its self-kill watchdog"
+    )
+    assert 0 < BUSY_MAX_SECONDS <= 300, BUSY_MAX_SECONDS
+
+    # Prove it, do not just read it: a burner nobody ever cleans up exits.
+    short = "(sleep 2; kill -9 $$) & while :; do :; done"
+    proc = _spawn_group(
+        ["sh", "-c", short],
+        stdout=subprocess.DEVNULL,
+        stderr=subprocess.DEVNULL,
+        text=True,
+    )
+    try:
+        assert proc.wait(timeout=30) != 0, (
+            "the self-kill watchdog did not terminate the burner"
+        )
+    finally:
+        _reap(proc)
+
+
+def test_this_module_never_spawns_outside_a_process_group() -> None:
+    """OMN-16995 -- a ratchet, not a comment.
+
+    A `subprocess.Popen(` or a `proc.kill()` cleanup added to this file later
+    would silently reintroduce the leak: the new test would still pass and the
+    orphan would still peg a core on the shared gate host. Every spawn must go
+    through `_spawn_group` and every cleanup through `_reap`; the only
+    sanctioned raw call sites are the two inside those helpers.
+    """
+    lines = Path(__file__).read_text(encoding="utf-8").splitlines()
+    spawns = [
+        line.strip()
+        for line in lines
+        # Anchored: matches a real call site, never a mention of one in prose.
+        if re.match(
+            r"^\s*(?:[\w.]+(?:\s*:\s*[^=]+)?\s*=\s*)?subprocess\.Popen\($", line
+        )
+    ]
+    assert spawns == ["proc: subprocess.Popen[str] = subprocess.Popen("], (
+        "spawn outside _spawn_group -- a wrapper killed on its own leaves its "
+        f"wrapped command running (OMN-16995): {spawns}"
+    )
+
+    kills = [line.strip() for line in lines if re.search(r"\.kill\(\)\s*$", line)]
+    assert kills == ["proc.kill()"], (
+        "cleanup outside _reap -- a bare kill() signals the wrapper only and "
+        f"leaves the wrapped command burning a core: {kills}"
+    )
+
+    assert "start_new_session=True" in "\n".join(lines), (
+        "_spawn_group stopped creating a new session, so os.killpg can no "
+        "longer reach the wrapped command"
+    )
 
 
 def test_waiter_notice_names_the_holder_and_how_long_it_has_held(
@@ -717,7 +1025,7 @@ def test_waiter_notice_names_the_holder_and_how_long_it_has_held(
 ) -> None:
     """A waiter learns identity AND held-duration without touching the peer."""
     lock = tmp_path / "hl.lock"
-    holder = subprocess.Popen(
+    holder = _spawn_group(
         [
             sys.executable,
             str(_SCRIPT),
@@ -758,8 +1066,7 @@ def test_waiter_notice_names_the_holder_and_how_long_it_has_held(
         assert "held" in waiter.stderr.lower()
         assert "cpu" in waiter.stderr.lower()
     finally:
-        holder.kill()
-        holder.wait(timeout=30)
+        _reap(holder)
 
 
 def test_the_sidecar_never_decides_acquisition(tmp_path: Path) -> None:
@@ -799,7 +1106,7 @@ def test_sidecar_schema_is_additive_only(tmp_path: Path) -> None:
     their names and types; everything new is additional.
     """
     lock = tmp_path / "hl.lock"
-    holder = subprocess.Popen(
+    holder = _spawn_group(
         [
             sys.executable,
             str(_SCRIPT),
@@ -831,8 +1138,7 @@ def test_sidecar_schema_is_additive_only(tmp_path: Path) -> None:
         assert holder_json["label"] == "compat"
         assert isinstance(holder_json["acquired_at"], str)
     finally:
-        holder.kill()
-        holder.wait(timeout=30)
+        _reap(holder)
 
 
 def test_describe_holder_tolerates_a_pre_omn16869_sidecar(tmp_path: Path) -> None:

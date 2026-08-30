@@ -290,6 +290,12 @@ _prepush_timeout_cmd() {
 #   PREPUSH_LOAD_OVERRIDE_REMOTE  overrides every ssh-target read
 host_load_ratio() {
   local target="$1" raw load1 ncpu timeout_cmd
+  # OMN-16995: REAP FIRST, MEASURE SECOND. A leaked `sh -c while :; do :; done`
+  # orphan is indistinguishable from real work in load1, and 19 of them once
+  # put `.200` at 1.64x-core and refused every heavy escalation in the lab. The
+  # reaper is defined in prepush_dispatch.sh, which is sourced below this
+  # definition and therefore resolved by the time any caller runs.
+  reap_spin_loop_orphans "$target" || true
   if [ -z "$target" ]; then
     if [ -n "${PREPUSH_LOAD_OVERRIDE_LOCAL:-}" ]; then
       raw="$PREPUSH_LOAD_OVERRIDE_LOCAL"
