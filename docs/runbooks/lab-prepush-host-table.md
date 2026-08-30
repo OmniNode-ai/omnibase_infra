@@ -52,8 +52,30 @@ forgeable-on-disk-artifact surface OMN-16688 deliberately avoided.
 | `h200` | `stickybeatz-studio` (.200) | 24 | varies, often >1.0x | 0.11.32 | authorizing | rule-11a default gate host |
 | `h201` | `omninode-pc` (.201) | 32 | 14.08 → 0.44x | 0.11.5 | authorizing | **denied for `omnibase_infra`** until OMN-16989 closes |
 | `h201c` | `gate-runner-201` (container) | 32 | — | — | authorizing | identity only; the container has no sshd (OMN-16446) |
-| `h101` | `stickybeatz.local` (.101) | 12 | 3.05 → 0.25x | **0.8.3** | disabled | uv below floor; `~/Code` TCC-denied to sshd |
-| `h105` | `omnibook` (.105) | 10 | 2.10 → 0.21x | 0.11.8 | **shadow** | net-new; must record zero verdict mismatches first |
+| `h101` | `stickybeatz` (.101) | 12 | 4.79 → 0.40x | **0.8.3** | disabled | uv below floor; `~/Code` TCC-denied to sshd |
+| `h105` | `omnibook` (.105) | 10 | 1.76 → 0.18x | 0.11.8 | **authorizing** | net-new capacity; promoted out of shadow — see below |
+
+> `h101`'s `hostname -s` prints **`Stickybeatz`**, not `stickybeatz.local`. The
+> earlier value could never have matched an identity check, so the row would
+> have failed silently the moment it was promoted. Re-probed 2026-08-30: uv is
+> still 0.8.3, below the 0.11.0 floor, so it stays `disabled`.
+
+### Why `h105` was promoted rather than run as a shadow
+
+A shadow host **cannot** complete a shadow day: the transplanted tree carries
+this repo's own `conftest.py` → `scripts/hooks/pytest_full_suite_host_guard.py`,
+which refuses a full-suite target on any host outside the **authorizing** set.
+Every heavy dispatch to a shadow host therefore exits nonzero at
+`pytest_configure` and writes a receipt whose `pytest_exit != 0` is
+indistinguishable from a genuine red. "Run in shadow until it records zero
+verdict mismatches" was unreachable by construction — the shadow host could
+never record a green.
+
+`h105` is the only net-new host, so leaving it in shadow meant this whole
+mechanism added **zero** pre-push capacity. It was probed fit (uv 0.11.8, load
+0.18x, 153 GB free) and promoted under the operator's lab-wide-distribution
+directive. Both guards read the same committed table, so the promotion takes
+effect on the bash side and the pytest side at once.
 
 `.101`'s workroot is `/Users/Shared/onex-prepush`, **outside** the TCC-protected
 tree — verified writable over ssh while `ls ~/Code` still returns `Operation not
@@ -108,8 +130,20 @@ A **remote RED refuses the push immediately** and never falls through to (3). A
 red suite satisfied by minting a grant would be a bypass wearing the word
 "fallback".
 
-A **shadow** host runs, streams, and writes a receipt, but its verdict never
-authorizes — the run falls through to this same precedence.
+A **shadow** row is never a placement candidate for a verdict-bearing run at
+all. Placement filters on `mode` **before** it probes: ranking on load alone let
+the idlest host win regardless of mode, and a shadow verdict cannot satisfy the
+escalation, so the run cost a bundle + `scp` + `uv sync` + a full suite and was
+then discarded — while the authorizing host that could have answered went
+unprobed. `pick_capacity_host` takes the eligible mode as a parameter
+(`authorizing` at the verdict-bearing call site), and `prepush_remote_run` keeps
+its shadow refusal as a second line of defence.
+
+Placement returns a **ranked list**, not a single winner. A candidate that fails
+to produce a verdict — unreachable on arrival, no completion marker, or its slot
+taken between the probe and the run (wrapper exit 94) — advances to the
+next-best host. Only a verdict, green or red, ends the walk; a remote RED still
+refuses immediately and never shops for a greener host.
 
 ## Verdict readback: a marker, not the ssh exit code
 
@@ -167,6 +201,32 @@ load-bearing: an override that merely *appended* a hostname could no longer
 `test_guard_refuses_full_suite_escalation_on_non_200_host` proves by forcing a
 nonsense hostname.
 
+## The exclusive heavy-suite slot, on BOTH sides
+
+`mkdir(2)` at `<workroot>/LOCK` is the lock primitive on every host — `flock(1)`
+is absent on both Macs and its fd idiom needs `exec {fd}<>`, which bash 3.2
+cannot parse. What `mkdir` lacks is auto-release on death, so the holder's pid
+and machine name are recorded and a lock whose holder is provably gone **on that
+same machine** is reclaimed; a holder record from anywhere else is never reaped.
+
+Both legs take it:
+
+* the **local** heavy path, which took no lock of any kind before OMN-16991
+  (OMN-16174: five concurrent full suites on one host, one of them 97+ minutes);
+* the **remote** wrapper, on the target host, acquired before the clone and
+  `uv sync` and released by an `EXIT` trap. Acquiring it on the target is what
+  closes the local/remote overlap — a local push on `.200`/`.201` could
+  otherwise start while a transplanted suite was mid-run there. If the slot is
+  already held the wrapper exits **94** without running anything, and the
+  dispatcher treats that as a placement miss and tries the next ranked host.
+
+The remote leg also reclaims its transplanted tree (`runs/<id>/tree`, roughly
+0.5 GB per run once `uv sync --all-extras` has run) and prunes run directories
+older than three days. The small artifacts — `MARKER`, `suite.log`, `sync.log` —
+are kept as the audit trail behind the receipt. On a remote RED the last 200
+lines of that host's `suite.log` are fetched and streamed back prefixed
+`[<label>]`, because the refusal tells the developer to read exactly that.
+
 ## Receipts
 
 One JSONL line per remote run to `.onex_state/prepush_distribution/receipts.jsonl`:
@@ -175,20 +235,26 @@ all_probed_ratios, selection_paths, pytest_exit, collected, duration_s,
 suite_log_sha256}`. `all_probed_ratios` puts **every** probed host on the record,
 so a refusal can be audited instead of believed.
 
-## Promoting a host
+## Adding or promoting a host
 
 1. Fix whatever the table's `note` names (e.g. `.101`: `uv self update` past the
-   floor).
-2. Flip `mode` to `shadow`, commit. It now runs and receipts but authorizes
-   nothing.
-3. Watch `receipts.jsonl` until it records **zero verdict mismatches** against
-   the local/GitHub path. Expect first-run triage: a suite that has only ever
-   run on 24- and 32-core hosts will meet timing and `nproc`-sensitive xdist
-   failures on a 10-core Air (cf. OMN-16297, OMN-15609).
-4. Only then flip `mode` to `authorizing`, commit, and update
+   floor), then re-probe **non-interactively** (`ssh <host> '<cmd>'`, never a
+   login shell) and record the numbers in the row's `note`.
+2. Confirm `hostname -s` on that host matches the `hostname` column exactly,
+   lowercased. A dotted or stale value fails identity silently.
+3. Run the full suite there once over the real leg and read the receipt. Expect
+   first-run triage: a suite that has only ever run on 24- and 32-core hosts can
+   meet timing and `nproc`-sensitive failures on a 10-core Air (cf. OMN-16297,
+   OMN-15609). If a repo produces host-coupled failures there, add it to that
+   row's `repos_denied` rather than accepting a false red.
+4. Set `mode` to `authorizing`, commit, and update
    `tests/unit/scripts/test_prepush_host_table.py` — the table contents are
    asserted, so promotion requires a reviewed commit **and** a deliberate test
    change.
+
+`shadow` remains a supported mode for a row you want probed and receipted by an
+explicit operator dispatch (`pick_capacity_host <host> <repo> shadow`), but it
+is not a step on the promotion path: see "Why `h105` was promoted" above.
 
 ## Scope note
 

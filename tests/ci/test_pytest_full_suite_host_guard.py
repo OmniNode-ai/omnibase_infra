@@ -526,3 +526,90 @@ def test_direct_invocation_allowed_with_a_minted_grant(tmp_path: Path) -> None:
         "every override use must leave a receipt -- an invisible override is "
         "the F-04 defect regardless of how it is spelled"
     )
+
+
+# =============================================================================
+# 3. The committed host table is the identity authority (OMN-16991)
+# =============================================================================
+#
+# A dispatched pre-push run executes inside a TRANSPLANTED copy of this repo,
+# which carries this very guard. Until the guard read the same committed table
+# the bash hook reads, a lab host could be a legitimate placement target and
+# still have every full-suite run there die at `pytest_configure` -- writing a
+# receipt whose nonzero pytest exit is indistinguishable from a genuine red.
+
+_HOST_TABLE_HEADER = (
+    "#label\trole\thostname\tssh_target\tcores\tuv_abs_path\tuv_min_version"
+    "\tworkroot\tslot_mode\trepos_denied\tmode\tnote\n"
+)
+
+
+def _write_host_table(project: Path, hostname: str, mode: str) -> None:
+    (project / "scripts" / "hooks" / "prepush_hosts.tsv").write_text(
+        _HOST_TABLE_HEADER
+        + f"hx\tcapacity\t{hostname}\t-\t8\t/bin/uv\t0.1.0\t/tmp/w\tlockdir\t-\t{mode}\tsynthetic\n",
+        encoding="utf-8",
+    )
+
+
+def test_full_suite_allowed_when_the_committed_table_authorizes_this_host(
+    tmp_path: Path,
+) -> None:
+    """The proof that a transplanted full suite can now go green on a promoted
+    lab host: identity comes from the committed table, and a nonsense
+    PREPUSH_200_HOSTNAME (which alone used to decide this) cannot veto it."""
+    project = _write_synthetic_project(tmp_path)
+    real_host = guard.resolve_local_hostname()
+    assert real_host, "this test requires a resolvable local hostname"
+    _write_host_table(project, real_host.lower(), "authorizing")
+    _git_init(project)
+    result = _run_pytest(
+        project,
+        env_overrides={"PREPUSH_200_HOSTNAME": _GUARANTEED_NON_MATCHING_HOSTNAME},
+    )
+    assert result.returncode == 0, (
+        "an authorizing row for this host must let the full suite run; got "
+        f"exit {result.returncode}. stdout={result.stdout!r} "
+        f"stderr={result.stderr!r}"
+    )
+    assert "1 passed" in result.stdout, f"stdout={result.stdout!r}"
+
+
+def test_full_suite_refused_when_the_committed_table_only_shadows_this_host(
+    tmp_path: Path,
+) -> None:
+    """`shadow` is a placement mode, never an identity. This is the exact
+    reason a shadow host could never record the green run its own promotion
+    criteria demanded."""
+    project = _write_synthetic_project(tmp_path)
+    real_host = guard.resolve_local_hostname()
+    _write_host_table(project, real_host.lower(), "shadow")
+    _git_init(project)
+    result = _run_pytest(
+        project,
+        env_overrides={"PREPUSH_200_HOSTNAME": _GUARANTEED_NON_MATCHING_HOSTNAME},
+    )
+    assert result.returncode != 0, (
+        f"a shadow row must not authorize; got exit {result.returncode}"
+    )
+    assert "not the designated .200 build host" in result.stderr
+
+
+def test_an_uncommitted_table_row_cannot_self_designate_this_host(
+    tmp_path: Path,
+) -> None:
+    """The forgeable-artifact surface OMN-16688 deliberately avoided: a
+    one-line uncommitted edit naming this machine must not authorize it, so the
+    working copy has to agree with HEAD."""
+    project = _write_synthetic_project(tmp_path)
+    real_host = guard.resolve_local_hostname()
+    _write_host_table(project, "some-other-machine", "authorizing")
+    _git_init(project)
+    _write_host_table(project, real_host.lower(), "authorizing")
+    result = _run_pytest(
+        project,
+        env_overrides={"PREPUSH_200_HOSTNAME": _GUARANTEED_NON_MATCHING_HOSTNAME},
+    )
+    assert result.returncode != 0, (
+        f"an uncommitted row must be ignored, not honored; got exit {result.returncode}"
+    )

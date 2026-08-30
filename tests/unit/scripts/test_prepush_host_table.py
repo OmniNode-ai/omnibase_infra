@@ -30,6 +30,7 @@ broken.
 from __future__ import annotations
 
 import os
+import re
 import subprocess
 from pathlib import Path
 
@@ -82,8 +83,8 @@ def test_table_contents_are_pinned() -> None:
         "h200": ("capacity", "stickybeatz-studio", "authorizing"),
         "h201": ("capacity", "omninode-pc", "authorizing"),
         "h201c": ("identity", "gate-runner-201", "authorizing"),
-        "h101": ("capacity", "stickybeatz.local", "disabled"),
-        "h105": ("capacity", "omnibook", "shadow"),
+        "h101": ("capacity", "stickybeatz", "disabled"),
+        "h105": ("capacity", "omnibook", "authorizing"),
     }
 
 
@@ -104,10 +105,34 @@ def test_201_is_denied_for_omnibase_infra_until_omn16989_closes() -> None:
     assert "omnibase_infra" in denied["h201"].split(",")
 
 
-def test_net_new_hosts_start_in_shadow_and_never_authorize() -> None:
+def test_h105_is_authorizing_because_shadow_could_never_add_capacity() -> None:
+    """h105 (omnibook) is the only net-new host, and while it was `shadow` it
+    could not add a single unit of pre-push capacity -- by construction, not by
+    accident. A shadow row never authorizes, and the transplanted tree carries
+    this repo's own conftest guard, which refuses a full-suite target on any
+    host outside the authorizing set. So every heavy dispatch to a shadow h105
+    exited nonzero at `pytest_configure` and wrote a receipt whose
+    `pytest_exit != 0` is indistinguishable from a genuine red.
+
+    Promotion is the fix, and it is a reviewed table edit plus a deliberate
+    edit here -- exactly the two-step this file exists to force."""
     modes = {r[0]: r[10] for r in _rows()}
-    assert modes["h105"] == "shadow"
-    assert modes["h101"] == "disabled"
+    assert modes["h105"] == "authorizing"
+    assert modes["h101"] == "disabled", (
+        "h101 stays disabled: re-probed 2026-08-30 and uv is still 0.8.3, "
+        "below the 0.11.0 floor"
+    )
+
+
+def test_h101_hostname_is_what_hostname_s_actually_prints() -> None:
+    """`ssh jonah@192.168.86.101 'hostname -s'` prints `Stickybeatz`, not
+    `stickybeatz.local`. The old value could never have matched an identity
+    check, so the row would have failed silently the moment it was promoted."""
+    hosts = {r[0]: r[2] for r in _rows()}
+    assert hosts["h101"] == "stickybeatz"
+    assert "." not in hosts["h101"], (
+        "the column holds `hostname -s` output, which is never dotted"
+    )
 
 
 def test_every_capacity_row_carries_an_absolute_uv_path_and_a_floor() -> None:
@@ -140,9 +165,15 @@ def test_101_workroot_avoids_the_tcc_protected_tree() -> None:
 # =============================================================================
 
 
-def _driver(repo_root: Path, body: str) -> str:
+def _run_driver(repo_root: Path, body: str) -> subprocess.CompletedProcess[str]:
     """Run BODY with the real library sourced and the hook's own dependencies
-    stubbed, against a throwaway git repo whose HEAD carries the real table."""
+    stubbed, against a throwaway git repo whose HEAD carries the real table.
+
+    ``stdin`` is /dev/null on purpose. The row-scan defect these tests pin is
+    "a probe ate the loop's stdin", and the tests that reproduce it stub a probe
+    that DRAINS stdin; inheriting this pytest process's stdin would make such a
+    stub block forever instead of returning at EOF.
+    """
     script = f"""
 set -uo pipefail
 REPO_ROOT={repo_root}
@@ -154,19 +185,58 @@ host_load_ratio() {{ return 1; }}
 . {LIB}
 {body}
 """
-    completed = subprocess.run(
+    return subprocess.run(
         ["bash", "-c", script],
         capture_output=True,
         text=True,
         timeout=120,
         check=False,
+        stdin=subprocess.DEVNULL,
         env={
             **os.environ,
             "PREPUSH_LOAD_OVERRIDE_MAP": "",
             "PREPUSH_SLOT_OVERRIDE_MAP": "",
         },
     )
-    return completed.stdout
+
+
+def _driver(repo_root: Path, body: str) -> str:
+    return _run_driver(repo_root, body).stdout
+
+
+def _driver_both(repo_root: Path, body: str) -> str:
+    completed = _run_driver(repo_root, body)
+    return completed.stdout + completed.stderr
+
+
+#: A table whose rows exist only to exercise the RULES, independent of whichever
+#: machines the lab happens to hold today. Two authorizing rows plus a shadow
+#: row is the exact shape the placement bug needed: the shadow host is the
+#: idlest, so a load-only picker chooses it and then throws its verdict away.
+_SYNTHETIC_TABLE = (
+    "#label\trole\thostname\tssh_target\tcores\tuv_abs_path\tuv_min_version"
+    "\tworkroot\tslot_mode\trepos_denied\tmode\tnote\n"
+    "ha\tcapacity\thosta\tjonah@hosta\t24\t/bin/uv\t0.1.0\t/tmp/wa\tlockdir\t-\tauthorizing\tbusier\n"
+    "hb\tcapacity\thostb\tjonah@hostb\t24\t/bin/uv\t0.1.0\t/tmp/wb\tlockdir\t-\tauthorizing\tidler\n"
+    "hs\tcapacity\thosts\tjonah@hosts\t24\t/bin/uv\t0.1.0\t/tmp/ws\tlockdir\t-\tshadow\tidlest of all\n"
+)
+
+
+def _repo_with_table(tmp_path: Path, table_text: str, name: str = "synth") -> Path:
+    """A throwaway git repo whose HEAD carries TABLE_TEXT as the host table."""
+    repo = tmp_path / name
+    (repo / "scripts" / "hooks").mkdir(parents=True)
+    (repo / "scripts" / "hooks" / "prepush_hosts.tsv").write_text(
+        table_text, encoding="utf-8"
+    )
+    subprocess.run(["git", "init", "-q", "."], cwd=repo, check=True)
+    subprocess.run(["git", "add", "-A"], cwd=repo, check=True)
+    subprocess.run(
+        ["git", "-c", "user.email=t@t", "-c", "user.name=t", "commit", "-qm", "table"],
+        cwd=repo,
+        check=True,
+    )
+    return repo
 
 
 @pytest.fixture
@@ -203,11 +273,16 @@ def test_identity_accepts_the_201_container_hostname(table_repo: Path) -> None:
     assert out.strip() == "h201c"
 
 
-def test_a_shadow_host_is_not_a_designated_identity(table_repo: Path) -> None:
+def test_a_shadow_host_is_not_a_designated_identity(tmp_path: Path) -> None:
     """A shadow host is a placement target whose verdict may not satisfy the
     escalation, so it must not confer identity either -- otherwise the identity
-    guard would start PASSING on a host still in shadow, inverting the guard."""
-    out = _driver(table_repo, "prepush_identity_label omnibook || echo NONE")
+    guard would start PASSING on a host still in shadow, inverting the guard.
+
+    Driven off a synthetic table because the shipped one no longer carries a
+    shadow row (h105 was promoted); the RULE still has to hold for the next row
+    that starts in shadow."""
+    repo = _repo_with_table(tmp_path, _SYNTHETIC_TABLE)
+    out = _driver(repo, "prepush_identity_label hosts || echo NONE")
     assert out.strip() == "NONE"
 
 
@@ -550,10 +625,17 @@ def test_the_verdict_is_read_from_a_marker_not_the_ssh_exit_code() -> None:
     a fail-OPEN shape. The marker binds the verdict to this tree and this argv;
     absence or mismatch is NO evidence."""
     lib = LIB.read_text(encoding="utf-8")
-    assert 'marker="$(ssh' in lib
+    assert 'readback="$(ssh' in lib, (
+        "the verdict must be READ BACK from the target host, not inferred here"
+    )
+    assert 'marker="$(printf \'%s\\n\' "$readback"' in lib
     assert '"$m_head" != "$head_sha"' in lib
     assert '"$m_argv" != "$argv_sha"' in lib
     assert "NO EVIDENCE" in lib
+    # The streaming pipeline's status belongs to sed(1), and `|| true` follows
+    # it, so nothing about the verdict can come from that command's exit code.
+    stream = lib[lib.index("./prepush_smart_tests.sh '${rundir}'") :][:400]
+    assert "|| true" in stream
 
 
 def test_a_shadow_host_verdict_never_authorizes() -> None:
@@ -640,3 +722,584 @@ def test_the_local_fit_path_proceeds_when_the_workroot_is_unusable() -> None:
     fit = fit[fit.index('if host_is_fit ""; then') :][:1600]
     assert '[ "$lock_rc" -eq 2 ]' in fit
     assert "running unserialized on this host" in fit
+
+
+# =============================================================================
+# The row scan must reach every host (OMN-16991 verify finding 1)
+# =============================================================================
+
+
+def test_the_picker_scans_every_row_even_when_a_probe_consumes_stdin(
+    table_repo: Path,
+) -> None:
+    """The whole lab must be evaluated, not just whichever row sorts first.
+
+    The picker's loop body invokes ssh(1) three times per row, and ssh reads
+    its parent's stdin unless given ``-n``. While the row list WAS the loop's
+    stdin, the first probe swallowed every remaining row: the real picker on
+    the real network emitted ``PROBE=[h200=fit(0.9,authorizing)]`` and never
+    evaluated h201/h101/h105, so a lab with three idle hosts refused the push
+    and the feature added exactly zero capacity.
+
+    Reproduced here without a network by stubbing the three probes to DRAIN
+    stdin, which is precisely what ssh does. Under the old here-doc-fed loop
+    this test sees one label; under the array scan it sees all four.
+    """
+    body = (
+        'host_load_ratio() { while IFS= read -r _junk; do :; done; printf "1.0 10 0.10\\n"; }\n'
+        "prepush_slot_state() { while IFS= read -r _junk; do :; done; PREPUSH_SLOT_DETAIL=stub; return 0; }\n"
+        "prepush_uv_version_ok() { while IFS= read -r _junk; do :; done; PREPUSH_UV_VERSION_SEEN=9.9.9; return 0; }\n"
+        "pick_capacity_host stickybeatz-studio omnibase_core > /dev/null 2>&1 || true\n"
+        'echo "PROBE=$PREPUSH_PROBE_LOG"\n'
+    )
+    out = _driver(table_repo, body)
+    for label in ("h200", "h201", "h101", "h105"):
+        assert label in out, (
+            f"{label} was never evaluated -- the row scan was truncated: {out!r}"
+        )
+
+
+def test_every_ssh_invocation_carries_dash_n(table_repo: Path) -> None:
+    """Belt and braces for the same defect, from the other side.
+
+    The array scan alone would fix it, but a stdin-eating probe inside ANY
+    future loop reintroduces it silently -- a truncated scan looks exactly like
+    a small lab. ``-n`` makes ssh structurally incapable of it.
+    """
+    invocation = re.compile(r"(?<![\w./-])ssh\s+(-\S+)")
+    for path in (LIB, HOOK):
+        for lineno, line in enumerate(
+            path.read_text(encoding="utf-8").splitlines(), start=1
+        ):
+            if line.lstrip().startswith("#"):
+                continue
+            for match in invocation.finditer(line):
+                assert match.group(1) == "-n", (
+                    f"{path.name}:{lineno} invokes ssh without -n; inside a row "
+                    f"loop that eats the remaining rows: {line.strip()!r}"
+                )
+
+
+# =============================================================================
+# A shadow host must never win placement (OMN-16991 verify finding 3)
+# =============================================================================
+
+
+def test_a_shadow_row_never_wins_placement_over_an_authorizing_host(
+    tmp_path: Path,
+) -> None:
+    """Ranking on load alone let the idlest host win regardless of its mode.
+
+    Live dry-run against the shipped picker before this fix:
+    ``h200=fit(0.90,authorizing) h201=fit(0.30,authorizing)
+    h105=fit(0.20,shadow) -> PICK=h105``. A shadow verdict cannot satisfy the
+    escalation, so the run was dispatched, a bundle + scp + `uv sync` + a full
+    suite were paid for, and the answer was then discarded -- while the
+    authorizing host that could have answered was passed over. Mode is now an
+    eligibility filter applied BEFORE the probe, not a post-hoc veto.
+    """
+    repo = _repo_with_table(tmp_path, _SYNTHETIC_TABLE)
+    out = _driver(
+        repo,
+        'export PREPUSH_LOAD_OVERRIDE_MAP="ha=0.90,hb=0.30,hs=0.05"\n'
+        'export PREPUSH_SLOT_OVERRIDE_MAP="ha=free,hb=free,hs=free"\n'
+        'export PREPUSH_UV_OVERRIDE_MAP="ha=1.0.0,hb=1.0.0,hs=1.0.0"\n'
+        "if pick_capacity_host somewhere-else omnibase_core; then\n"
+        '  echo "PICK=$PREPUSH_PICK_LABEL"\n'
+        "else\n"
+        '  echo "PICK=none"\n'
+        "fi\n"
+        'echo "PROBE=$PREPUSH_PROBE_LOG"\n',
+    )
+    assert "PICK=hb" in out, out
+    assert "hs=mode-shadow-not-eligible" in out, out
+    assert "hs=fit" not in out, "a shadow row must not even be probed for placement"
+
+
+def test_the_eligible_mode_is_a_parameter_not_a_hardcoded_authorizing(
+    tmp_path: Path,
+) -> None:
+    """Shadow is still a supported mode -- it is just not a candidate for a
+    verdict-bearing run. Pinning the parameter keeps a future shadow-day tool
+    from having to re-implement the picker to get at those rows."""
+    repo = _repo_with_table(tmp_path, _SYNTHETIC_TABLE)
+    out = _driver(
+        repo,
+        'export PREPUSH_LOAD_OVERRIDE_MAP="ha=0.90,hb=0.30,hs=0.05"\n'
+        'export PREPUSH_SLOT_OVERRIDE_MAP="ha=free,hb=free,hs=free"\n'
+        'export PREPUSH_UV_OVERRIDE_MAP="ha=1.0.0,hb=1.0.0,hs=1.0.0"\n'
+        "pick_capacity_host somewhere-else omnibase_core shadow > /dev/null 2>&1\n"
+        'echo "PICK=$PREPUSH_PICK_LABEL"\n',
+    )
+    assert "PICK=hs" in out, out
+
+
+def test_the_picker_ranks_every_fit_host_not_just_the_winner(
+    tmp_path: Path,
+) -> None:
+    """Placement is a ranked list so a candidate that fails to answer costs the
+    next-best host, not the whole escalation."""
+    repo = _repo_with_table(tmp_path, _SYNTHETIC_TABLE)
+    out = _driver(
+        repo,
+        'export PREPUSH_LOAD_OVERRIDE_MAP="ha=0.90,hb=0.30,hs=0.05"\n'
+        'export PREPUSH_SLOT_OVERRIDE_MAP="ha=free,hb=free,hs=free"\n'
+        'export PREPUSH_UV_OVERRIDE_MAP="ha=1.0.0,hb=1.0.0,hs=1.0.0"\n'
+        "pick_capacity_host somewhere-else omnibase_core > /dev/null 2>&1\n"
+        'echo "COUNT=$(prepush_candidate_count)"\n'
+        'prepush_select_candidate 1 && echo "FIRST=$PREPUSH_PICK_LABEL"\n'
+        'prepush_select_candidate 2 && echo "SECOND=$PREPUSH_PICK_LABEL"\n'
+        'prepush_select_candidate 3 || echo "THIRD=none"\n',
+    )
+    assert "COUNT=2" in out, out
+    assert "FIRST=hb" in out, out
+    assert "SECOND=ha" in out, out
+    assert "THIRD=none" in out, out
+
+
+# =============================================================================
+# A failed pick must try the next fit host (OMN-16991 verify finding 3)
+# =============================================================================
+
+
+def _extract_shell_function(path: Path, name: str) -> str:
+    """The SHIPPED text of one shell function, so these assertions drive the
+    code that runs on a push rather than a Python restatement of it."""
+    text = path.read_text(encoding="utf-8")
+    start = text.index(f"{name}() {{")
+    end = text.index("\n}\n", start) + len("\n}\n")
+    return text[start:end]
+
+
+def _dispatch_driver(repo: Path, remote_run_stub: str) -> str:
+    body = (
+        'export PREPUSH_LOAD_OVERRIDE_MAP="ha=0.90,hb=0.30,hs=0.05"\n'
+        'export PREPUSH_SLOT_OVERRIDE_MAP="ha=free,hb=free,hs=free"\n'
+        'export PREPUSH_UV_OVERRIDE_MAP="ha=1.0.0,hb=1.0.0,hs=1.0.0"\n'
+        "PREPUSH_LC_HOST=somewhere-else\n"
+        "REMOTE_LAB_RUN_VERDICT=0\n"
+        + _extract_shell_function(HOOK, "dispatch_to_lab_host")
+        + remote_run_stub
+        + 'if dispatch_to_lab_host "heavy thing"; then\n'
+        '  echo "RESULT=satisfied verdict=$REMOTE_LAB_RUN_VERDICT host=$PREPUSH_PICK_LABEL"\n'
+        "else\n"
+        '  echo "RESULT=no-evidence"\n'
+        "fi\n"
+    )
+    return _driver_both(repo, body)
+
+
+def test_dispatch_tries_the_next_ranked_host_when_the_first_yields_no_evidence(
+    tmp_path: Path,
+) -> None:
+    """ "No completion marker" says nothing about the tree -- it is a placement
+    miss. Before this fix the whole escalation was staked on one host: a single
+    unreachable-on-arrival candidate refused a push that the second-ranked
+    host, idle and reachable, would have cleared."""
+    repo = _repo_with_table(tmp_path, _SYNTHETIC_TABLE)
+    out = _dispatch_driver(
+        repo,
+        'prepush_remote_run() { echo "TRIED=$PREPUSH_PICK_LABEL";'
+        ' [ "$PREPUSH_PICK_LABEL" = "hb" ] && return 1; return 0; }\n',
+    )
+    assert "TRIED=hb" in out, out
+    assert "TRIED=ha" in out, out
+    assert "RESULT=satisfied verdict=1 host=ha" in out, out
+
+
+def test_dispatch_tries_the_next_ranked_host_when_the_slot_is_taken_on_arrival(
+    tmp_path: Path,
+) -> None:
+    """rc 4 = the target's heavy-suite slot was held when the wrapper landed,
+    so NO suite ran there. That is a placement miss too, and refusing on it
+    would turn a race with another dispatcher into a failed push."""
+    repo = _repo_with_table(tmp_path, _SYNTHETIC_TABLE)
+    out = _dispatch_driver(
+        repo,
+        'prepush_remote_run() { echo "TRIED=$PREPUSH_PICK_LABEL";'
+        ' [ "$PREPUSH_PICK_LABEL" = "hb" ] && return 4; return 0; }\n',
+    )
+    assert "TRIED=hb" in out
+    assert "TRIED=ha" in out
+    assert "RESULT=satisfied verdict=1 host=ha" in out, out
+
+
+def test_dispatch_refuses_on_a_remote_red_without_shopping_for_a_greener_host(
+    tmp_path: Path,
+) -> None:
+    """The retry loop must not become verdict shopping. A RED is a verdict --
+    the suite genuinely failed on a host we designated -- so it refuses right
+    there and never asks a second host for a nicer answer."""
+    repo = _repo_with_table(tmp_path, _SYNTHETIC_TABLE)
+    out = _dispatch_driver(
+        repo,
+        'prepush_remote_run() { echo "TRIED=$PREPUSH_PICK_LABEL";'
+        ' [ "$PREPUSH_PICK_LABEL" = "hb" ] && return 3; return 0; }\n',
+    )
+    assert "TRIED=hb" in out
+    assert "TRIED=ha" not in out, "a remote RED must not fall through to another host"
+    assert "DIE:" in out, out
+    assert "RESULT=" not in out
+
+
+def test_dispatch_reports_no_evidence_when_no_ranked_host_answers(
+    tmp_path: Path,
+) -> None:
+    repo = _repo_with_table(tmp_path, _SYNTHETIC_TABLE)
+    out = _dispatch_driver(repo, "prepush_remote_run() { return 1; }\n")
+    assert "RESULT=no-evidence" in out, out
+
+
+def test_dispatch_asks_the_picker_for_authorizing_rows_explicitly() -> None:
+    """The verdict-bearing path names the mode it needs at the call site, so a
+    later default change cannot quietly make shadow hosts placeable again."""
+    body = _extract_shell_function(HOOK, "dispatch_to_lab_host")
+    assert 'pick_capacity_host "$PREPUSH_LC_HOST" "$repo" authorizing' in body
+
+
+# =============================================================================
+# The remote leg must take the TARGET host's slot (OMN-16991 verify finding 2)
+# =============================================================================
+
+
+def _remote_wrapper_text() -> str:
+    """The wrapper exactly as it is shipped to the target host."""
+    lib = LIB.read_text(encoding="utf-8")
+    opener = "cat > \"$runner\" <<'REMOTE'\n"
+    start = lib.index(opener) + len(opener)
+    return lib[start : lib.index("\nREMOTE\n", start)] + "\n"
+
+
+def _self_hostname() -> str:
+    return subprocess.run(
+        ["hostname", "-s"], capture_output=True, text=True, check=False
+    ).stdout.strip()
+
+
+@pytest.fixture
+def remote_run_env(tmp_path: Path) -> dict[str, Path]:
+    """A materialized remote-side run: workroot, rundir, a real git bundle, an
+    argv file, the shipped wrapper, and a fake `uv` that records whether the
+    host lock was held WHILE the suite ran."""
+    src = tmp_path / "src"
+    (src / "tests").mkdir(parents=True)
+    (src / "tests" / "test_a.py").write_text("def test_a():\n    assert True\n")
+    subprocess.run(["git", "init", "-q", "."], cwd=src, check=True)
+    subprocess.run(["git", "add", "-A"], cwd=src, check=True)
+    subprocess.run(
+        ["git", "-c", "user.email=t@t", "-c", "user.name=t", "commit", "-qm", "t"],
+        cwd=src,
+        check=True,
+    )
+    head = subprocess.run(
+        ["git", "rev-parse", "HEAD"],
+        cwd=src,
+        capture_output=True,
+        text=True,
+        check=True,
+    ).stdout.strip()
+
+    workroot = tmp_path / "workroot"
+    rundir = workroot / "runs" / "r1"
+    rundir.mkdir(parents=True)
+    subprocess.run(
+        ["git", "bundle", "create", str(rundir / "tree.bundle"), "HEAD"],
+        cwd=src,
+        check=True,
+        capture_output=True,
+    )
+    (rundir / "argv.txt").write_text("tests\n")
+
+    wrapper = rundir / "prepush_smart_tests.sh"
+    wrapper.write_text(_remote_wrapper_text())
+    wrapper.chmod(0o755)
+
+    witness = tmp_path / "lock_witness"
+    fake_uv = tmp_path / "uv"
+    fake_uv.write_text(
+        "#!/bin/sh\n"
+        'if [ "$1" = "sync" ]; then exit 0; fi\n'
+        # Proof that the target-host slot is held for the DURATION of the run,
+        # not merely acquired and dropped before the expensive part.
+        'if [ -d "$LOCK_PROBE" ]; then echo held > "$LOCK_WITNESS"; '
+        'else echo free > "$LOCK_WITNESS"; fi\n'
+        'echo "collected 3 items"\n'
+        'exit "${FAKE_UV_EXIT:-0}"\n'
+    )
+    fake_uv.chmod(0o755)
+
+    return {
+        "workroot": workroot,
+        "rundir": rundir,
+        "uv": fake_uv,
+        "witness": witness,
+        "head": head,  # type: ignore[dict-item]
+    }
+
+
+def _run_wrapper(
+    env_info: dict[str, Path], *, extra_env: dict[str, str] | None = None
+) -> subprocess.CompletedProcess[str]:
+    env = {
+        **os.environ,
+        "LOCK_PROBE": str(env_info["workroot"] / "LOCK"),
+        "LOCK_WITNESS": str(env_info["witness"]),
+    }
+    env.update(extra_env or {})
+    return subprocess.run(
+        [
+            "bash",
+            str(env_info["rundir"] / "prepush_smart_tests.sh"),
+            str(env_info["rundir"]),
+            str(env_info["uv"]),
+            str(env_info["head"]),
+            "argvsha",
+            "origin-host:1",
+            str(env_info["workroot"]),
+        ],
+        capture_output=True,
+        text=True,
+        timeout=180,
+        check=False,
+        stdin=subprocess.DEVNULL,
+        env=env,
+    )
+
+
+def test_the_remote_leg_holds_the_target_hosts_lock_for_the_whole_run(
+    remote_run_env: dict[str, Path],
+) -> None:
+    """The remote leg took NO lock on the target before this fix.
+
+    Polled live during a real 25s dispatch to omnibook: ``LOCK=no`` throughout,
+    and afterwards the workroot held only ``runs/`` -- after two real
+    dispatches. So the local heavy path (which DOES take the lock) and a
+    transplanted suite could run on the same host at the same time: OMN-16174's
+    overlap, reopened across the local/remote boundary. Remote exclusion rested
+    entirely on ``ps ax | grep prepush_smart_tests.sh``, which has a
+    probe -> scp -> exec race window.
+    """
+    result = _run_wrapper(remote_run_env)
+    assert result.returncode == 0, result.stderr
+    assert remote_run_env["witness"].read_text().strip() == "held", (
+        "the target host's LOCK was not held while the suite was executing"
+    )
+    marker = (remote_run_env["rundir"] / "MARKER").read_text()
+    assert "exit=0" in marker
+    assert "collected=3" in marker
+    assert not (remote_run_env["workroot"] / "LOCK").exists(), (
+        "the lock must be released when the wrapper exits"
+    )
+
+
+def test_the_remote_leg_releases_the_lock_even_when_the_suite_fails(
+    remote_run_env: dict[str, Path],
+) -> None:
+    """A red suite must not wedge the host. Release is an EXIT trap, not a
+    line after the happy path."""
+    result = _run_wrapper(remote_run_env, extra_env={"FAKE_UV_EXIT": "1"})
+    assert result.returncode == 1
+    assert "exit=1" in (remote_run_env["rundir"] / "MARKER").read_text()
+    assert not (remote_run_env["workroot"] / "LOCK").exists()
+
+
+def test_the_remote_leg_refuses_when_the_target_slot_is_already_held(
+    remote_run_env: dict[str, Path],
+) -> None:
+    """Exit 94 is "no suite ran here", which the caller turns into "try the
+    next ranked host" -- never into a verdict about the tree."""
+    lockdir = remote_run_env["workroot"] / "LOCK"
+    lockdir.mkdir(parents=True)
+    (lockdir / "holder").write_text(
+        f"{os.getpid()} {_self_hostname()} 2026-01-01T00:00:00Z\n"
+    )
+    result = _run_wrapper(remote_run_env)
+    assert result.returncode == 94, result.stderr
+    assert "REMOTE_LOCK_CONTENDED" in result.stderr
+    assert not (remote_run_env["rundir"] / "MARKER").exists(), (
+        "a contended slot must produce no marker -- a marker is a verdict"
+    )
+    assert lockdir.exists(), "the live holder's lock must survive the refusal"
+
+
+def test_the_remote_leg_reclaims_a_lock_whose_holder_died_on_that_host(
+    remote_run_env: dict[str, Path],
+) -> None:
+    """mkdir(2) does not auto-release on death, so one externally-SIGTERMed run
+    (OMN-16713) would wedge the host forever without this."""
+    lockdir = remote_run_env["workroot"] / "LOCK"
+    lockdir.mkdir(parents=True)
+    (lockdir / "holder").write_text(
+        f"4194303 {_self_hostname()} 2026-01-01T00:00:00Z\n"
+    )
+    result = _run_wrapper(remote_run_env)
+    assert result.returncode == 0, result.stderr
+    assert remote_run_env["witness"].read_text().strip() == "held"
+
+
+def test_the_remote_leg_never_reclaims_a_lock_held_from_another_machine(
+    remote_run_env: dict[str, Path],
+) -> None:
+    """A pid from another host says nothing about whether a process HERE is
+    alive, so a foreign holder is never reaped on a liveness check."""
+    lockdir = remote_run_env["workroot"] / "LOCK"
+    lockdir.mkdir(parents=True)
+    (lockdir / "holder").write_text("4194303 some-other-host 2026-01-01T00:00:00Z\n")
+    result = _run_wrapper(remote_run_env)
+    assert result.returncode == 94, result.stderr
+
+
+def test_the_remote_command_carries_no_set_e_that_would_eat_the_wrapper_exit() -> None:
+    """Under ``set -e`` a failing (or slot-contended, exit 94) wrapper aborts
+    the remote shell BEFORE ``rc=$?`` runs, so the one fact this leg needs --
+    why the wrapper stopped -- is the fact that never gets written."""
+    lib = LIB.read_text(encoding="utf-8")
+    cmd = lib[lib.index("./prepush_smart_tests.sh '${rundir}'") - 400 :][:900]
+    assert "set -e;" not in cmd, cmd
+    assert "WRAPPER_EXIT" in cmd
+    assert 'wrapper_exit:-}" = "94"' in lib, (
+        "the contended-slot code must be routed to a try-the-next-host result"
+    )
+
+
+# =============================================================================
+# Housekeeping invariants
+# =============================================================================
+
+
+def test_the_lock_release_and_the_tempfile_cleanup_share_one_exit_trap() -> None:
+    """bash keeps exactly ONE EXIT trap per shell. The guard used to install
+    ``trap prepush_lock_release EXIT`` after the hook had already installed the
+    mktemp cleanup, silently replacing it and leaking three temp files on every
+    heavy run that took the host slot."""
+    text = HOOK.read_text(encoding="utf-8")
+    traps = re.findall(r"^\s*trap\s+\S+\s+EXIT", text, flags=re.MULTILINE)
+    assert len(traps) == 1, f"expected exactly one EXIT trap, found {traps}"
+    cleanup = _extract_shell_function(HOOK, "prepush_hook_cleanup")
+    assert "CHANGED_FILE" in cleanup
+    assert "prepush_lock_release" in cleanup
+
+
+def test_the_remote_leg_reclaims_the_transplanted_tree() -> None:
+    """A clone plus ``uv sync --all-extras`` is ~0.5 GB per run and nothing
+    pruned it: two dispatches left 1.0 GB on omnibook, the host the picker
+    prefers, which fills a laptop disk in a few hundred pushes and then fails
+    runs for a reason that looks nothing like its cause."""
+    lib = LIB.read_text(encoding="utf-8")
+    gc = _extract_shell_function(LIB, "prepush_remote_gc")
+    assert "rm -rf '${2}/tree'" in gc
+    assert "-mtime +3" in gc
+    run = lib[lib.index("prepush_remote_run() {") :]
+    assert run.count("prepush_remote_gc ") >= 4, (
+        "every terminal path of the remote leg must reclaim the tree"
+    )
+
+
+def test_a_remote_red_fetches_the_suite_log_it_tells_you_to_read() -> None:
+    """The refusal instructs the developer to read the streamed output, but the
+    wrapper redirects pytest into ``$RUNDIR/suite.log`` on the REMOTE host --
+    so before this there was nothing above to read and a remote RED, which
+    hard-blocks the push, was undiagnosable without a manual ssh."""
+    lib = LIB.read_text(encoding="utf-8")
+    assert "tail -n 200 '${rundir}/suite.log'" in lib
+    red = lib[lib.index('if [ "$m_exit" -ne 0 ]; then') :][:900]
+    assert "suite.log" in red
+
+
+# =============================================================================
+# The pytest-side guard reads the SAME table (OMN-16991 verify finding 4)
+# =============================================================================
+#
+# This is the coupling that made the shadow mode useless. A dispatched run is
+# executed by a TRANSPLANTED copy of this repo, and that copy carries this
+# repo's own conftest.py -> scripts/hooks/pytest_full_suite_host_guard.enforce,
+# which refuses a full-suite target on any host outside the authorizing set.
+# So while omnibook was `shadow`, every heavy dispatch to it exited nonzero at
+# pytest_configure and wrote a receipt whose pytest_exit != 0 is
+# indistinguishable from a genuine red. The "shadow day, then promote" plan was
+# unreachable by construction: the shadow host could never record a green.
+
+_GIT_SCOPING_ENV_VARS = (
+    "GIT_DIR",
+    "GIT_WORK_TREE",
+    "GIT_INDEX_FILE",
+    "GIT_OBJECT_DIRECTORY",
+    "GIT_COMMON_DIR",
+    "GIT_PREFIX",
+)
+
+
+def _designated_from(repo: Path, monkeypatch: pytest.MonkeyPatch) -> tuple[str, ...]:
+    """`designated_hostnames()` resolved against REPO's committed table.
+
+    A live `git push` exports GIT_DIR/GIT_WORK_TREE into hook children and they
+    override both `-C` and cwd for every descendant git call, so they are
+    cleared here -- otherwise this would silently read THIS worktree.
+    """
+    from scripts.hooks.pytest_full_suite_host_guard import designated_hostnames
+
+    for var in _GIT_SCOPING_ENV_VARS:
+        monkeypatch.delenv(var, raising=False)
+    monkeypatch.chdir(repo)
+    return designated_hostnames(env={})
+
+
+def test_the_conftest_guard_reads_the_same_committed_table_as_the_bash_guard(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    repo = _repo_with_table(tmp_path, TABLE.read_text(encoding="utf-8"), name="shipped")
+    assert _designated_from(repo, monkeypatch) == (
+        "stickybeatz-studio",
+        "omninode-pc",
+        "gate-runner-201",
+        "omnibook",
+    )
+
+
+def test_omnibook_can_now_produce_a_green_full_suite_verdict(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """The end of finding 4, asserted on the exact decision function that
+    refused: with h105 authorizing, a full-suite target transplanted to
+    omnibook is no longer rejected at pytest_configure, so a dispatch there can
+    return a verdict that means something."""
+    from scripts.hooks.pytest_full_suite_host_guard import (
+        full_suite_host_violation_message,
+    )
+
+    repo = _repo_with_table(
+        tmp_path, TABLE.read_text(encoding="utf-8"), name="shipped2"
+    )
+    names = _designated_from(repo, monkeypatch)
+    assert (
+        full_suite_host_violation_message(
+            host="omnibook",
+            target_hostname=names[0],
+            additional_target_hostnames=names[1:],
+            override_authorized=False,
+        )
+        is None
+    )
+
+
+def test_a_shadow_row_is_still_refused_by_the_conftest_guard(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Promotion is what changed for h105 -- not the rule. A row in `shadow`
+    confers no identity on either guard, which is exactly why a shadow host can
+    never self-certify its way to `authorizing`."""
+    from scripts.hooks.pytest_full_suite_host_guard import (
+        full_suite_host_violation_message,
+    )
+
+    repo = _repo_with_table(tmp_path, _SYNTHETIC_TABLE, name="synthguard")
+    names = _designated_from(repo, monkeypatch)
+    assert names == ("hosta", "hostb")
+    message = full_suite_host_violation_message(
+        host="hosts",
+        target_hostname=names[0],
+        additional_target_hostnames=names[1:],
+        override_authorized=False,
+    )
+    assert message is not None
+    assert "hosts" in message

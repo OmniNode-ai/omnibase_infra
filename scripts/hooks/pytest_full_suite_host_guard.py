@@ -248,8 +248,8 @@ def full_suite_host_violation_message(
         return None
     return (
         f"direct full-suite pytest invocation refused on host '{host}', not the "
-        f"designated .200 build host ('{target_hostname}') or approved .201 "
-        f"gate-runner host(s) "
+        f"designated .200 build host ('{target_hostname}') nor any other host "
+        f"carrying mode=authorizing in {HOST_TABLE_REL} "
         f"({', '.join(repr(allowed) for allowed in additional_target_hostnames)}). "
         "This closes OMN-15977 "
         "Hole 1: agent-launched direct `pytest tests/` runs bypass the git-push "
