@@ -1,0 +1,30 @@
+{
+  "receipt_schema": "handflip_proof.v1",
+  "node_id": "omnibase_infra.nodes.node_runtime_error_triage_effect",
+  "canonical_handler_module": "omnibase_infra.nodes.node_runtime_error_triage_effect.handlers.handler_runtime_error_triage",
+  "legacy_handler_module": "omnibase_infra.nodes.node_runtime_error_triage_effect.handlers.handler_runtime_error_triage",
+  "base_ref": "5367b288250dd58f54a71b0e351ba1b449cdc98e",
+  "preserved_symbols": [
+    "HandlerRuntimeErrorTriage._correlate_with_layer1",
+    "HandlerRuntimeErrorTriage._create_linear_ticket",
+    "HandlerRuntimeErrorTriage._find_matching_rule",
+    "HandlerRuntimeErrorTriage._send_slack_notification",
+    "HandlerRuntimeErrorTriage._update_incident_state",
+    "HandlerRuntimeErrorTriage._upsert_incident",
+    "HandlerRuntimeErrorTriage.handler_category",
+    "HandlerRuntimeErrorTriage.handler_type"
+  ],
+  "parity": {
+    "status": "pass",
+    "test_ids": [
+      "tests/unit/nodes/test_handler_runtime_error_triage.py::TestNoOrphanedErrorTriagedEmission::test_contract_declares_no_publish_topics",
+      "tests/unit/nodes/test_handler_runtime_error_triage.py::TestNoOrphanedErrorTriagedEmission::test_handler_takes_no_event_bus_dependency",
+      "tests/unit/nodes/test_handler_runtime_error_triage.py::TestNoOrphanedErrorTriagedEmission::test_triage_runs_without_an_event_bus",
+      "tests/unit/nodes/test_handler_runtime_error_triage.py::TestNoOrphanedErrorTriagedEmission::test_topic_registry_no_longer_declares_the_orphan"
+    ],
+    "selected_input_hashes": [
+      "sha256:a1189c3961703bf7fc5610166be811afccb71c50982150d34ed3b862b40db405",
+      "sha256:0a7bf8ef3455c2fdf856c0b729a13aa7837b901d4df8eddab2994a510c25546a"
+    ]
+  }
+}

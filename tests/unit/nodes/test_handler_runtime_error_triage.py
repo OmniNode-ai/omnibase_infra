@@ -32,7 +32,6 @@ from omnibase_infra.nodes.node_runtime_error_triage_effect.models.model_triage_r
     DEFAULT_TRIAGE_RULES,
     ModelTriageRule,
 )
-from omnibase_infra.protocols import ProtocolEventBusLike
 
 
 def _make_error_event(
@@ -158,7 +157,6 @@ class TestHandlerRuntimeErrorTriage:
             db_pool=db_pool,
             rules=rules,
             slack_handler=slack_handler,
-            event_bus=AsyncMock(spec=ProtocolEventBusLike),
         )
         event = _make_error_event()
 
@@ -188,7 +186,6 @@ class TestHandlerRuntimeErrorTriage:
             db_pool=db_pool,
             rules=rules,
             slack_handler=slack_handler,
-            event_bus=AsyncMock(spec=ProtocolEventBusLike),
         )
         event = _make_error_event()
 
@@ -217,7 +214,6 @@ class TestHandlerRuntimeErrorTriage:
             db_pool=db_pool,
             rules=rules,
             linear_handler=linear_handler,
-            event_bus=AsyncMock(spec=ProtocolEventBusLike),
         )
         event = _make_error_event()
 
@@ -245,9 +241,7 @@ class TestHandlerRuntimeErrorTriage:
         )
 
         rules = [ModelTriageRule(name="alert_all", priority=1, action="alert")]
-        handler = HandlerRuntimeErrorTriage(
-            db_pool=db_pool, rules=rules, event_bus=AsyncMock(spec=ProtocolEventBusLike)
-        )
+        handler = HandlerRuntimeErrorTriage(db_pool=db_pool, rules=rules)
 
         event = _make_error_event(
             error_category=EnumRuntimeErrorCategory.KAFKA_CONSUMER,
@@ -270,9 +264,7 @@ class TestHandlerRuntimeErrorTriage:
         )
 
         rules = [ModelTriageRule(name="alert_all", priority=1, action="alert")]
-        handler = HandlerRuntimeErrorTriage(
-            db_pool=db_pool, rules=rules, event_bus=AsyncMock(spec=ProtocolEventBusLike)
-        )
+        handler = HandlerRuntimeErrorTriage(db_pool=db_pool, rules=rules)
 
         event = _make_error_event(
             logger_family="asyncpg",
@@ -302,9 +294,7 @@ class TestHandlerRuntimeErrorTriage:
             ModelTriageRule(name="high_priority", priority=1, action="ticket"),
             ModelTriageRule(name="low_priority", priority=100, action="alert"),
         ]
-        handler = HandlerRuntimeErrorTriage(
-            db_pool=db_pool, rules=rules, event_bus=AsyncMock(spec=ProtocolEventBusLike)
-        )
+        handler = HandlerRuntimeErrorTriage(db_pool=db_pool, rules=rules)
         event = _make_error_event(
             logger_family="asyncpg",
             error_category=EnumRuntimeErrorCategory.DATABASE,
@@ -316,8 +306,49 @@ class TestHandlerRuntimeErrorTriage:
         assert result.matched_rule == "high_priority"
         assert result.action == "ticket"
 
-    async def test_emit_triage_event_on_alert(self) -> None:
-        """Alert action emits error-triaged event to Kafka."""
+
+@pytest.mark.unit
+class TestNoOrphanedErrorTriagedEmission:
+    """OMN-17187: the node must not publish ``error-triaged.v1``.
+
+    No contract in any OmniNode repo subscribes to
+    ``onex.evt.omnibase-infra.error-triaged.v1`` and no external consumer
+    exists (the ``projectErrorTriaged`` omnidash projection the handler
+    docstring claimed to feed was never built), so publishing it is an
+    unwired path — omnimarket's ``contract-topic-graph`` gate reports it as
+    ``ORPHANED_PRODUCER``.
+    """
+
+    def test_contract_declares_no_publish_topics(self) -> None:
+        """contract.yaml must not declare the orphaned publish topic."""
+        from pathlib import Path
+
+        import yaml
+
+        import omnibase_infra
+
+        contract_path = (
+            Path(omnibase_infra.__file__).parent
+            / "nodes"
+            / "node_runtime_error_triage_effect"
+            / "contract.yaml"
+        )
+        contract = yaml.safe_load(contract_path.read_text())
+
+        assert contract["event_bus"]["publish_topics"] == []
+
+    def test_handler_takes_no_event_bus_dependency(self) -> None:
+        """The bus dependency existed only to emit the orphaned event."""
+        import inspect
+
+        params = inspect.signature(HandlerRuntimeErrorTriage.__init__).parameters
+        assert "event_bus" not in params, (
+            "HandlerRuntimeErrorTriage must not take an event_bus dependency: it "
+            "existed only to publish the orphaned error-triaged.v1 event"
+        )
+
+    async def test_triage_runs_without_an_event_bus(self) -> None:
+        """Triage returns its result with no bus wired at all."""
         db_pool = MagicMock()
         conn = AsyncMock()
         conn.fetchrow = AsyncMock(
@@ -331,116 +362,26 @@ class TestHandlerRuntimeErrorTriage:
                 __aenter__=AsyncMock(return_value=conn), __aexit__=AsyncMock()
             )
         )
-
-        event_bus = AsyncMock(spec=ProtocolEventBusLike)
-        event_bus.publish_envelope = AsyncMock()
         rules = [ModelTriageRule(name="alert_all", priority=1, action="alert")]
-        handler = HandlerRuntimeErrorTriage(
-            db_pool=db_pool, rules=rules, event_bus=event_bus
-        )
-        event = _make_error_event()
 
-        result = await handler.handle(event)
-
-        assert result.action == "alert"
-        event_bus.publish_envelope.assert_awaited_once()
-        call_kwargs = event_bus.publish_envelope.call_args
-        assert "error-triaged" in call_kwargs.kwargs.get("topic", "")
-
-    def test_event_bus_is_required(self) -> None:
-        """event_bus is a required injectable param — no default None."""
-        with pytest.raises(TypeError):
-            HandlerRuntimeErrorTriage(db_pool=MagicMock())  # type: ignore[call-arg]
-
-    async def test_emit_failure_does_not_block_triage(self) -> None:
-        """Emit failure does not prevent triage result from being returned."""
-        db_pool = MagicMock()
-        conn = AsyncMock()
-        conn.fetchrow = AsyncMock(
-            side_effect=[
-                None,  # correlation query
-                {"occurrence_count": 1, "incident_state": "open"},  # upsert
-            ]
-        )
-        db_pool.acquire = MagicMock(
-            return_value=AsyncMock(
-                __aenter__=AsyncMock(return_value=conn), __aexit__=AsyncMock()
+        try:
+            handler = HandlerRuntimeErrorTriage(db_pool=db_pool, rules=rules)
+        except TypeError as exc:
+            pytest.fail(
+                f"triage handler still demands a bus dependency to construct: {exc}"
             )
-        )
+        result = await handler.handle(_make_error_event())
 
-        event_bus = AsyncMock(spec=ProtocolEventBusLike)
-        event_bus.publish_envelope = AsyncMock(
-            side_effect=RuntimeError("Kafka unavailable")
-        )
-        rules = [ModelTriageRule(name="alert_all", priority=1, action="alert")]
-        handler = HandlerRuntimeErrorTriage(
-            db_pool=db_pool, rules=rules, event_bus=event_bus
-        )
-        event = _make_error_event()
-
-        # Should still return result despite emit failure
-        result = await handler.handle(event)
         assert result.action == "alert"
         assert result.matched_rule == "alert_all"
 
-    async def test_emit_triage_event_on_ticket(self) -> None:
-        """Ticket action also emits error-triaged event."""
-        db_pool = MagicMock()
-        conn = AsyncMock()
-        conn.fetchrow = AsyncMock(
-            return_value={"occurrence_count": 5, "incident_state": "open"}
-        )
-        conn.execute = AsyncMock()
-        db_pool.acquire = MagicMock(
-            return_value=AsyncMock(
-                __aenter__=AsyncMock(return_value=conn), __aexit__=AsyncMock()
-            )
-        )
+    def test_topic_registry_no_longer_declares_the_orphan(self) -> None:
+        """The topic key and its provisioning spec are removed with the emission."""
+        from omnibase_infra.topics import platform_topic_suffixes, topic_keys
 
-        event_bus = AsyncMock(spec=ProtocolEventBusLike)
-        event_bus.publish_envelope = AsyncMock()
-        rules = [ModelTriageRule(name="ticket_all", priority=1, action="ticket")]
-        handler = HandlerRuntimeErrorTriage(
-            db_pool=db_pool, rules=rules, event_bus=event_bus
+        assert "ERROR_TRIAGED" not in topic_keys.__all__
+        assert not hasattr(topic_keys, "ERROR_TRIAGED")
+        assert (
+            "onex.evt.omnibase-infra.error-triaged.v1"
+            not in platform_topic_suffixes.ALL_PROVISIONED_SUFFIXES
         )
-        event = _make_error_event(
-            logger_family="asyncpg",
-            error_category=EnumRuntimeErrorCategory.DATABASE,
-            raw_message="connection refused",
-        )
-
-        result = await handler.handle(event)
-
-        assert result.action == "ticket"
-        event_bus.publish_envelope.assert_awaited_once()
-
-    async def test_emit_triage_event_on_suppress(self) -> None:
-        """Suppress action also emits error-triaged event."""
-        db_pool = MagicMock()
-        conn = AsyncMock()
-        conn.fetchrow = AsyncMock(
-            return_value={"occurrence_count": 1, "incident_state": "open"}
-        )
-        conn.execute = AsyncMock()
-        db_pool.acquire = MagicMock(
-            return_value=AsyncMock(
-                __aenter__=AsyncMock(return_value=conn), __aexit__=AsyncMock()
-            )
-        )
-
-        event_bus = AsyncMock(spec=ProtocolEventBusLike)
-        event_bus.publish_envelope = AsyncMock()
-        rules = [ModelTriageRule(name="suppress_all", priority=1, action="suppress")]
-        handler = HandlerRuntimeErrorTriage(
-            db_pool=db_pool, rules=rules, event_bus=event_bus
-        )
-        event = _make_error_event(
-            logger_family="asyncpg",
-            error_category=EnumRuntimeErrorCategory.DATABASE,
-            raw_message="some error",
-        )
-
-        result = await handler.handle(event)
-
-        assert result.action == "suppress"
-        event_bus.publish_envelope.assert_awaited_once()

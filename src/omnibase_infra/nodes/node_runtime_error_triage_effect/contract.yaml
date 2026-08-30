@@ -8,11 +8,17 @@
 #
 # Consumes onex.evt.omnibase-infra.runtime-error.v1 events and applies
 # first-match-wins triage with cross-layer correlation to consumer health,
-# then publishes error-triaged projection events.
+# persisting the outcome to the runtime_error_triage table.
+#
+# This node publishes nothing. OMN-17187 removed the
+# onex.evt.omnibase-infra.error-triaged.v1 emission: no contract in any repo
+# subscribed to it and the omnidash projection its handler claimed to feed was
+# never built, so it was an unwired path (contract-topic-graph ORPHANED_PRODUCER).
 #
 # Related Tickets:
 #   - OMN-5522: Create NodeRuntimeErrorTriageEffect
 #   - OMN-5529: Runtime Health Event Pipeline (epic)
+#   - OMN-17187: Remove the orphaned error-triaged.v1 emission
 # Contract identifiers
 name: "node_runtime_error_triage_effect"
 contract_name: "node_runtime_error_triage_effect"
@@ -39,8 +45,7 @@ event_bus:
     patch: 0
   subscribe_topics:
     - "onex.evt.omnibase-infra.runtime-error.v1"
-  publish_topics:
-    - "onex.evt.omnibase-infra.error-triaged.v1"
+  publish_topics: []
 # I/O models
 input_model:
   name: "ModelRuntimeErrorEvent"
@@ -126,7 +131,7 @@ metadata:
   author: "OmniNode Team"
   license: "MIT"
   created: "2026-03-19"
-  updated: "2026-08-29"
+  updated: "2026-08-30"
   tags:
     - effect
     - health

@@ -116,13 +116,6 @@ class TestServiceTopicRegistryResolve:
             == "onex.evt.omnibase-infra.runtime-error.v1"
         )
 
-    def test_resolve_error_triaged(self) -> None:
-        registry = ServiceTopicRegistry.from_defaults()
-        assert (
-            registry.resolve(topic_keys.ERROR_TRIAGED)
-            == "onex.evt.omnibase-infra.error-triaged.v1"
-        )
-
     def test_resolve_baselines_computed(self) -> None:
         registry = ServiceTopicRegistry.from_defaults()
         assert (

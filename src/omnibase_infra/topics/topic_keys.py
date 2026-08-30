@@ -178,9 +178,6 @@ PROJECTION_FRESHNESS_RECOVERED: Final[str] = "PROJECTION_FRESHNESS_RECOVERED"
 RUNTIME_ERROR: Final[str] = "RUNTIME_ERROR"
 """Runtime error events from RuntimeLogEventBridge."""
 
-ERROR_TRIAGED: Final[str] = "ERROR_TRIAGED"
-"""Runtime error triage result events from NodeRuntimeErrorTriageEffect."""
-
 # ==============================================================================
 # Routing Topics
 # ==============================================================================
@@ -331,7 +328,6 @@ __all__: list[str] = [
     "PROJECTION_FRESHNESS_DEGRADED",
     "PROJECTION_FRESHNESS_RECOVERED",
     "EFFECTIVENESS_INVALIDATION",
-    "ERROR_TRIAGED",
     "EVAL_COMPLETED",
     "HOOK_CONTEXT_INJECTED",
     "INJECTION_AGENT_MATCH",

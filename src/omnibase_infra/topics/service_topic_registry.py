@@ -162,7 +162,6 @@ class ServiceTopicRegistry:
             ),
             # Runtime error
             topic_keys.RUNTIME_ERROR: topic_suffixes.SUFFIX_RUNTIME_ERROR,
-            topic_keys.ERROR_TRIAGED: topic_suffixes.TOPIC_ERROR_TRIAGED_V1,
             # Routing
             topic_keys.ROUTING_DECIDED: topic_suffixes.SUFFIX_ROUTING_DECIDED,
             # Baselines

@@ -1,0 +1,19 @@
+{
+  "receipt_schema": "adequacy_receipt.v1",
+  "node_id": "omnibase_infra.nodes.node_runtime_error_triage_effect",
+  "handler_module": "omnibase_infra.nodes.node_runtime_error_triage_effect.handlers.handler_runtime_error_triage",
+  "handler_module_sha256": "sha256:0c68900957654b9f34a1071f1d4d6a0f8e0e5a8368cb5bf6b63df01e29045bf4",
+  "recorded_at": "2026-08-30T18:59:00+00:00",
+  "recorder_schema": "adequacy_receipt.v1",
+  "candidate_count": 2,
+  "selected_count": 2,
+  "selected_input_hashes": [
+    "sha256:a1189c3961703bf7fc5610166be811afccb71c50982150d34ed3b862b40db405",
+    "sha256:0a7bf8ef3455c2fdf856c0b729a13aa7837b901d4df8eddab2994a510c25546a"
+  ],
+  "branch_coverage_pct": 80.15,
+  "coverage_target": 80.0,
+  "meets_target": true,
+  "uncovered_waiver": null,
+  "volatile_mask": []
+}
