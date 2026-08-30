@@ -434,6 +434,62 @@ EXPECTED_EXTERNAL_CONTEXTS: tuple[str, ...] = (
     # skipped producer fails CI Summary closed rather than satisfying it.
     "receipt-honesty",  # receipt-honesty.yml
     "contract-validation",  # contract-validation.yml
+    # OMN-17199 — the reader end of a bus_backed exposure.
+    # exposure-reader-coverage.yml, added in the SAME PR as the validator it
+    # runs (CLAUDE.md Operating Rule 5: a check that is not a merge condition is
+    # advisory and gets ignored). It asserts that every `projection_api`
+    # exposure declaring `bus_backed: true` has a declared reader — an omnidash
+    # component, a shipped layout entry, or a reasoned `consumers: none`.
+    #
+    # ADMISSION IS BY CONSTRUCTION, NOT BY MEASUREMENT, and that difference is
+    # stated rather than glossed. Every other entry above was admitted on an
+    # N-of-16 present/green record over merged `dev` heads. A gate that does not
+    # exist yet has no such record and cannot acquire one before it is wired —
+    # requiring 16 green merges first would mean the gate is unenforced during
+    # exactly the window it was filed to close, which is the OMN-15864-sibling
+    # failure this ticket exists to avoid repeating. What replaces the measured
+    # record here:
+    #   * The producer declares `pull_request` AND `merge_group`, carries no
+    #     `needs:` and no job-level `if:`, and has no path filter — so it cannot
+    #     be skipped-as-passed and cannot wedge a queue SHA.
+    #   * It is proven able to FAIL on real input before admission, which is the
+    #     OMN-16876 finding-5 vacuous-pass check: run against the tree at
+    #     omnibase_infra 033890c6d / omnimarket 4025105c / omnidash 88c05bd it
+    #     exits 1 naming `onex.snapshot.projection.consumer-flow.v1` and
+    #     `onex.snapshot.projection.tenant-credentials.v1`.
+    #   * It is proven able to PASS: the same run greens once each of those two
+    #     exposures has a reader or a reasoned `consumers: none`.
+    # Because it has no fixture history, the historical-window regression tests
+    # in tests/ci/test_ci_summary_gate.py exclude it by name through
+    # POST_FIXTURE_WINDOW_CONTEXTS rather than by having synthetic rows invented
+    # for merged PRs that never ran it.
+    "exposure-reader-coverage",  # exposure-reader-coverage.yml
+)
+
+# OMN-17199 — contexts admitted AFTER the last historical measurement window
+# closed, and therefore absent from the merge-time check-run fixtures replayed
+# in tests/ci/test_ci_summary_gate.py.
+#
+# This is NOT a bypass and must never become one. Membership changes nothing at
+# runtime: `evaluate()` never consults this set, so a context listed here is
+# asserted present-completed-success on every live PR exactly like every other
+# member of EXPECTED_EXTERNAL_CONTEXTS. It exists so the historical replays keep
+# asserting what they were written to assert — that admitting a context does not
+# wedge dev, measured over PRs that actually merged — without inventing
+# synthetic check-run rows for merged PRs that could not have run a workflow
+# which did not exist at the time. Fabricating that history would destroy the
+# only evidence those tests carry.
+#
+# ADMISSION RULE: an entry belongs here only while no measurement window
+# covering it exists. It comes OUT the moment a fixture window is captured that
+# postdates the gate's first run. An entry that has outlived a re-measure is a
+# finding, not a fixture convenience.
+POST_FIXTURE_WINDOW_CONTEXTS: frozenset[str] = frozenset(
+    {
+        # Landed with its validator in the same PR (Rule 5) on 2026-08-30; both
+        # fixture windows (#2546…#2567, #2705…#2720) close well before that.
+        "exposure-reader-coverage",
+    }
 )
 
 # Contexts that were MEASURED and deliberately NOT enforced. Recorded as data —

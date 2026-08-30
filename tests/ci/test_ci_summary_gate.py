@@ -27,6 +27,7 @@ from scripts.ci.ci_summary_gate import (
     EXIT_SUCCESS,
     EXPECTED_EXTERNAL_CONTEXTS,
     MEASURED_NOT_ENFORCED_CONTEXTS,
+    POST_FIXTURE_WINDOW_CONTEXTS,
     SKIPPABLE_GATE_JOBS,
     STRICT_GATE_JOBS,
     applicable_external_contexts,
@@ -36,6 +37,18 @@ from scripts.ci.ci_summary_gate import (
 )
 
 pytestmark = pytest.mark.unit
+
+# OMN-17199: the subset of EXPECTED_EXTERNAL_CONTEXTS that the merge-time
+# check-run fixtures below can speak to at all. A context admitted after the
+# last fixture window closed cannot appear in a payload captured before it
+# existed, so replaying the historical windows against the FULL tuple would
+# report a wedge that never happened and would tempt someone into fabricating
+# rows for merged PRs that never ran the job. The runtime assertion is
+# unaffected — see TestPostFixtureWindowContexts below, which proves each
+# excluded context still blocks when absent from a live payload.
+HISTORICAL_EXTERNAL_CONTEXTS: tuple[str, ...] = tuple(
+    c for c in EXPECTED_EXTERNAL_CONTEXTS if c not in POST_FIXTURE_WINDOW_CONTEXTS
+)
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
 CI_WORKFLOW = REPO_ROOT / ".github" / "workflows" / "ci.yml"
@@ -499,9 +512,9 @@ class TestExternalContextAssertion:
         Without this the RED above could be passing for an unrelated reason.
         """
         remaining = tuple(
-            c for c in EXPECTED_EXTERNAL_CONTEXTS if c != "deploy-gate / deploy-gate"
+            c for c in HISTORICAL_EXTERNAL_CONTEXTS if c != "deploy-gate / deploy-gate"
         )
-        assert len(remaining) == len(EXPECTED_EXTERNAL_CONTEXTS) - 1
+        assert len(remaining) == len(HISTORICAL_EXTERNAL_CONTEXTS) - 1
         code, _ = evaluate(
             _all_gates("success"),
             check_runs=_external_fixture("2555"),
@@ -637,7 +650,7 @@ class TestExternalContextAssertion:
         blocked: dict[str, list[str]] = {}
         for pr, entry in fixture["pull_requests"].items():
             failures, unresolved = evaluate_external_contexts(
-                entry["check_runs"], EXPECTED_EXTERNAL_CONTEXTS
+                entry["check_runs"], HISTORICAL_EXTERNAL_CONTEXTS
             )
             if failures or unresolved:
                 blocked[pr] = failures + unresolved
@@ -655,7 +668,7 @@ class TestExternalContextAssertion:
         missing: dict[str, list[str]] = {}
         for pr, entry in fixture["pull_requests"].items():
             observed = latest_check_run_by_name(entry["check_runs"])
-            absent = [c for c in EXPECTED_EXTERNAL_CONTEXTS if c not in observed]
+            absent = [c for c in HISTORICAL_EXTERNAL_CONTEXTS if c not in observed]
             if absent:
                 missing[pr] = absent
         assert missing == {}, (
@@ -756,12 +769,12 @@ class TestActorConditionalExternalContexts:
         satisfies every asserted external context on its own, so nothing in
         this file is silently leaning on an exemption that no longer exists."""
         names = {str(r["name"]) for r in _dependabot_check_runs()}
-        assert [c for c in EXPECTED_EXTERNAL_CONTEXTS if c not in names] == []
+        assert [c for c in HISTORICAL_EXTERNAL_CONTEXTS if c not in names] == []
 
     def test_stand_in_payload_isolates_one_absence(self) -> None:
         """Guard the synthetic premise: exactly one asserted context is absent."""
         names = {str(r["name"]) for r in _payload_missing_stand_in()}
-        absent = [c for c in EXPECTED_EXTERNAL_CONTEXTS if c not in names]
+        absent = [c for c in HISTORICAL_EXTERNAL_CONTEXTS if c not in names]
         assert absent == [STAND_IN_CONTEXT]
 
     def test_exempt_actor_is_not_wedged(self, monkeypatch: pytest.MonkeyPatch) -> None:
@@ -772,7 +785,7 @@ class TestActorConditionalExternalContexts:
         code, report = evaluate(
             _all_gates("success"),
             check_runs=_payload_missing_stand_in(),
-            external_contexts=EXPECTED_EXTERNAL_CONTEXTS,
+            external_contexts=HISTORICAL_EXTERNAL_CONTEXTS,
             pr_author="dependabot[bot]",
         )
         assert code == EXIT_SUCCESS, report
@@ -948,7 +961,7 @@ class TestIntegrationTestRemovalGateExternalContext:
         missing: dict[str, list[str]] = {}
         for pr, entry in fixture["pull_requests"].items():
             observed = latest_check_run_by_name(entry["check_runs"])
-            absent = [c for c in EXPECTED_EXTERNAL_CONTEXTS if c not in observed]
+            absent = [c for c in HISTORICAL_EXTERNAL_CONTEXTS if c not in observed]
             if absent:
                 missing[pr] = absent
         assert missing == {}, (
@@ -969,7 +982,7 @@ class TestIntegrationTestRemovalGateExternalContext:
         blocked: dict[str, list[str]] = {}
         for pr, entry in fixture["pull_requests"].items():
             failures, unresolved = evaluate_external_contexts(
-                entry["check_runs"], EXPECTED_EXTERNAL_CONTEXTS
+                entry["check_runs"], HISTORICAL_EXTERNAL_CONTEXTS
             )
             if failures or unresolved:
                 blocked[pr] = failures + unresolved
@@ -1012,8 +1025,8 @@ class TestIntegrationTestRemovalGateExternalContext:
         Without this, the FAILURE above could come from an unrelated context
         (e.g. ``verify / verify``'s early reruns) rather than from ITRG itself.
         """
-        remaining = tuple(c for c in EXPECTED_EXTERNAL_CONTEXTS if c != ITRG_CONTEXT)
-        assert len(remaining) == len(EXPECTED_EXTERNAL_CONTEXTS) - 1
+        remaining = tuple(c for c in HISTORICAL_EXTERNAL_CONTEXTS if c != ITRG_CONTEXT)
+        assert len(remaining) == len(HISTORICAL_EXTERNAL_CONTEXTS) - 1
         code, report = evaluate(
             _all_gates("success"),
             check_runs=_omn15979_check_runs("2720"),
@@ -1035,7 +1048,7 @@ class TestIntegrationTestRemovalGateExternalContext:
         code, _ = evaluate(
             _all_gates("success"),
             check_runs=clean_payload,
-            external_contexts=EXPECTED_EXTERNAL_CONTEXTS,
+            external_contexts=HISTORICAL_EXTERNAL_CONTEXTS,
         )
         assert code == EXIT_SUCCESS
 
@@ -1050,7 +1063,7 @@ class TestIntegrationTestRemovalGateExternalContext:
         code, report = evaluate(
             _all_gates("success"),
             check_runs=reddened,
-            external_contexts=EXPECTED_EXTERNAL_CONTEXTS,
+            external_contexts=HISTORICAL_EXTERNAL_CONTEXTS,
         )
         assert code == EXIT_FAILURE
         assert ITRG_CONTEXT in report
