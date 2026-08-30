@@ -674,6 +674,320 @@ def read_ledger_tail(path: Path, n: int) -> str:
     return "\n".join(lines[-n:])
 
 
+# --------------------------------------------------------------------------
+# Section caps and the archive roll (OMN-17023)
+# --------------------------------------------------------------------------
+#
+# An append-only ledger section grows forever unless something bounds it. The
+# rolling work ledger reached 21,752 lines before a human noticed and split it
+# by hand; the split then invalidated every line-number watermark pointing
+# into it. Both halves of that failure are addressed here: a cap that refuses
+# or rolls at append time, and a roll that emits a receipt naming the boundary
+# row so a reader can re-anchor without guessing.
+#
+# The capped section is the TAIL of the file: from `--section-heading` to EOF.
+# That is the shape an append-only section has, and it is the only shape where
+# "the oldest N rows can be moved out" is well defined. The heading must occur
+# exactly once -- zero or two occurrences means the caller is pointing at
+# something other than the section it thinks it is, and that fails closed
+# rather than capping the wrong bytes.
+
+EXIT_SECTION_CAP = 74
+ROLL_RECEIPT_SCHEMA = "ledger-roll/1"
+ROLL_RECEIPT_PREFIX = "ledger_lock: ROLL "
+ROLL_POINTER_MARKER = "<!-- ledger-roll:"
+ROLL_POINTER_PROSE_PREFIX = "> Older rows live in"
+
+# A row inside the section starts at a markdown heading. `##` and deeper are
+# both in live use in the rolling work ledger, so both open a row.
+ENTRY_HEADING_PATTERN = re.compile(r"^#{2,6} \S")
+
+
+class SectionError(ValueError):
+    """The named section cannot be resolved unambiguously."""
+
+
+class SectionEntry:
+    """One row of a capped section: its heading line and its full text.
+
+    `text` is the verbatim bytes of the row including its trailing blank
+    lines, so a roll can move it without reformatting it. Rows are the unit a
+    roll moves; lines are the unit a cap counts.
+    """
+
+    __slots__ = ("end_line", "heading", "start_line", "text")
+
+    def __init__(self, heading: str, text: str, start_line: int, end_line: int) -> None:
+        self.heading = heading
+        self.text = text
+        self.start_line = start_line
+        self.end_line = end_line
+
+    def digest(self) -> str:
+        """Stable identity for this row -- heading AND body.
+
+        Body is included on purpose: two rows can share a heading, and a row
+        that was edited after being read is not the row that was read. A
+        reader keyed on this digest detects both cases instead of silently
+        resuming from the wrong place.
+        """
+        normalized = "\n".join(line.rstrip() for line in self.text.strip().splitlines())
+        return hashlib.sha256(normalized.encode("utf-8")).hexdigest()[:12]
+
+
+class ParsedSection:
+    """A ledger split into everything-before-the-section and the section."""
+
+    __slots__ = ("entries", "head", "heading_index", "heading_line", "preamble")
+
+    def __init__(
+        self,
+        head: str,
+        heading_line: str,
+        preamble: str,
+        entries: list[SectionEntry],
+        heading_index: int,
+    ) -> None:
+        self.head = head
+        self.heading_line = heading_line
+        self.preamble = preamble
+        self.entries = entries
+        self.heading_index = heading_index
+
+    def section_text(self) -> str:
+        return self.heading_line + self.preamble + "".join(e.text for e in self.entries)
+
+    def line_count(self) -> int:
+        return len(self.section_text().splitlines())
+
+    def byte_count(self) -> int:
+        return len(self.section_text().encode("utf-8"))
+
+
+def parse_section(text: str, heading: str) -> ParsedSection:
+    target = heading.strip()
+    lines = text.splitlines(keepends=True)
+    hits = [i for i, line in enumerate(lines) if line.strip() == target]
+    if not hits:
+        raise SectionError(f"section heading not found in ledger: {target!r}")
+    if len(hits) > 1:
+        raise SectionError(
+            f"section heading appears {len(hits)} times in ledger "
+            f"(lines {[i + 1 for i in hits]}): {target!r} -- refusing to guess which one bounds the section"
+        )
+    index = hits[0]
+    body = lines[index + 1 :]
+    starts = [i for i, line in enumerate(body) if ENTRY_HEADING_PATTERN.match(line)]
+    preamble = "".join(body[: starts[0]]) if starts else "".join(body)
+    entries: list[SectionEntry] = []
+    for position, start in enumerate(starts):
+        end = starts[position + 1] if position + 1 < len(starts) else len(body)
+        entries.append(
+            SectionEntry(
+                heading=body[start].rstrip("\n"),
+                text="".join(body[start:end]),
+                start_line=index + 1 + start + 1,
+                end_line=index + 1 + end,
+            )
+        )
+    return ParsedSection(
+        head="".join(lines[:index]),
+        heading_line=lines[index],
+        preamble=preamble,
+        entries=entries,
+        heading_index=index,
+    )
+
+
+def parse_section_file(path: Path, heading: str) -> ParsedSection:
+    return parse_section(path.read_text(encoding="utf-8"), heading)
+
+
+def section_entries(path: Path, heading: str) -> list[SectionEntry]:
+    return parse_section_file(path, heading).entries
+
+
+def section_line_count(path: Path, heading: str) -> int:
+    return parse_section_file(path, heading).line_count()
+
+
+def section_byte_count(path: Path, heading: str) -> int:
+    return parse_section_file(path, heading).byte_count()
+
+
+def _strip_pointer_block(preamble: str) -> str:
+    kept = [
+        line
+        for line in preamble.splitlines(keepends=True)
+        if ROLL_POINTER_MARKER not in line
+        and not line.lstrip().startswith(ROLL_POINTER_PROSE_PREFIX)
+    ]
+    return "".join(kept)
+
+
+def _pointer_block(archive: Path, rolled: int, rolled_at: str, first_kept: str) -> str:
+    marker = json.dumps(
+        {
+            "rolled_at": rolled_at,
+            "archive": str(archive),
+            "entries_rolled": rolled,
+            "first_kept_heading": first_kept,
+        },
+        sort_keys=True,
+    )
+    return (
+        f"{ROLL_POINTER_MARKER} {marker} -->\n"
+        f"{ROLL_POINTER_PROSE_PREFIX} `{archive}` -- {rolled} rows rolled at {rolled_at}. "
+        f"Rows older than {first_kept!r} are not in this file.\n\n"
+    )
+
+
+class RollPlan:
+    """A computed-but-not-yet-written roll.
+
+    Planning and writing are separate so a caller can ask "would a roll make
+    room for this append?" and refuse WITHOUT having moved anything. A roll
+    that fires and then still refuses the append would leave the operator with
+    a split file and no row, which is worse than either outcome alone.
+    """
+
+    __slots__ = ("archive_path", "archive_text", "live_text", "receipt", "rolled")
+
+    def __init__(
+        self,
+        live_text: str,
+        archive_text: str,
+        archive_path: Path,
+        receipt: dict[str, Any],
+        rolled: int,
+    ) -> None:
+        self.live_text = live_text
+        self.archive_text = archive_text
+        self.archive_path = archive_path
+        self.receipt = receipt
+        self.rolled = rolled
+
+
+def plan_roll(
+    ledger: Path,
+    heading: str,
+    archive_dir: Path,
+    keep_entries: int,
+    rolled_at: str,
+) -> RollPlan:
+    if keep_entries < 1:
+        raise SectionError("--roll-keep-entries must be at least 1")
+    text = ledger.read_text(encoding="utf-8")
+    parsed = parse_section(text, heading)
+    lines_before = parsed.line_count()
+    bytes_before = parsed.byte_count()
+    archive_path = archive_dir / f"{ledger.stem}_{rolled_at[:10]}-split.md"
+
+    if len(parsed.entries) <= keep_entries:
+        receipt = {
+            "schema": ROLL_RECEIPT_SCHEMA,
+            "ledger": str(ledger),
+            "section_heading": heading.strip(),
+            "archive": str(archive_path),
+            "rolled_at": rolled_at,
+            "entries_rolled": 0,
+            "entries_kept": len(parsed.entries),
+            "first_kept_heading": parsed.entries[0].heading if parsed.entries else None,
+            "last_rolled_heading": None,
+            "section_lines_before": lines_before,
+            "section_lines_after": lines_before,
+            "section_bytes_before": bytes_before,
+            "section_bytes_after": bytes_before,
+        }
+        return RollPlan(text, "", archive_path, receipt, 0)
+
+    rolled = parsed.entries[:-keep_entries]
+    kept = parsed.entries[-keep_entries:]
+    first_kept = kept[0].heading
+
+    preamble = _strip_pointer_block(parsed.preamble)
+    if preamble and not preamble.endswith("\n"):
+        preamble += "\n"
+    live_text = (
+        parsed.head
+        + parsed.heading_line
+        + preamble
+        + _pointer_block(archive_path, len(rolled), rolled_at, first_kept)
+        + "".join(entry.text for entry in kept)
+    )
+
+    archive_header = (
+        "<!-- ledger-roll-archive "
+        + json.dumps(
+            {
+                "source": str(ledger),
+                "section_heading": heading.strip(),
+                "rolled_at": rolled_at,
+                "entries": len(rolled),
+                "first_rolled_heading": rolled[0].heading,
+                "last_rolled_heading": rolled[-1].heading,
+            },
+            sort_keys=True,
+        )
+        + " -->\n"
+        f"## Rolled from {ledger.name} at {rolled_at} -- {len(rolled)} rows\n\n"
+    )
+    archive_text = archive_header + "".join(entry.text for entry in rolled)
+
+    after = parse_section(live_text, heading)
+    receipt = {
+        "schema": ROLL_RECEIPT_SCHEMA,
+        "ledger": str(ledger),
+        "section_heading": heading.strip(),
+        "archive": str(archive_path),
+        "rolled_at": rolled_at,
+        "entries_rolled": len(rolled),
+        "entries_kept": len(kept),
+        "first_kept_heading": first_kept,
+        "last_rolled_heading": rolled[-1].heading,
+        "section_lines_before": lines_before,
+        "section_lines_after": after.line_count(),
+        "section_bytes_before": bytes_before,
+        "section_bytes_after": after.byte_count(),
+    }
+    return RollPlan(live_text, archive_text, archive_path, receipt, len(rolled))
+
+
+def apply_roll(ledger: Path, plan: RollPlan) -> None:
+    if plan.rolled == 0:
+        return
+    plan.archive_path.parent.mkdir(parents=True, exist_ok=True)
+    existing = ""
+    if plan.archive_path.exists():
+        existing = plan.archive_path.read_text(encoding="utf-8")
+        if existing and not existing.endswith("\n"):
+            existing += "\n"
+        existing += "\n"
+    _write_text_durably(plan.archive_path, existing + plan.archive_text)
+    _write_text_durably(ledger, plan.live_text)
+
+
+def _write_text_durably(path: Path, text: str) -> None:
+    """Replace `path` atomically, fsync'ing both the file and its directory.
+
+    A roll rewrites the whole ledger. A partial write here loses rows, so the
+    new bytes land in a sibling temp file that is fsync'd before the rename,
+    and the rename itself is made durable by fsync'ing the directory.
+    """
+    path.parent.mkdir(parents=True, exist_ok=True)
+    tmp = path.with_name(f".{path.name}.ledger_lock.tmp")
+    with tmp.open("w", encoding="utf-8") as handle:
+        handle.write(text)
+        handle.flush()
+        os.fsync(handle.fileno())
+    tmp.replace(path)
+    directory = os.open(path.parent, os.O_RDONLY)
+    try:
+        os.fsync(directory)
+    finally:
+        os.close(directory)
+
+
 def read_append_payload(args: argparse.Namespace) -> str | None:
     if args.append is not None:
         return str(args.append)
@@ -743,7 +1057,138 @@ def build_parser() -> argparse.ArgumentParser:
             "ISO-8601 UTC timestamp; required with --verify-claim-token"
         ),
     )
+    parser.add_argument(
+        "--roll-section",
+        action="store_true",
+        help=(
+            "action: roll the capped section instead of appending -- move its oldest rows "
+            "into --archive-dir, leaving --roll-keep-entries behind, and print a roll receipt. "
+            "Rolls only when a cap is exceeded unless --force-roll is given"
+        ),
+    )
+    parser.add_argument(
+        "--force-roll",
+        action="store_true",
+        help="with --roll-section: roll even when the section is under its caps",
+    )
+    parser.add_argument(
+        "--section-heading",
+        metavar="HEADING",
+        help=(
+            "the exact heading line opening the append-only section that the caps below "
+            "govern; the section runs from that line to EOF and the heading must occur "
+            "exactly once"
+        ),
+    )
+    parser.add_argument(
+        "--max-section-rows",
+        type=int,
+        metavar="N",
+        help="refuse or roll when the section would exceed N lines (requires --section-heading)",
+    )
+    parser.add_argument(
+        "--max-section-bytes",
+        type=int,
+        metavar="N",
+        help="refuse or roll when the section would exceed N bytes (requires --section-heading)",
+    )
+    parser.add_argument(
+        "--max-append-bytes",
+        type=int,
+        metavar="N",
+        help=(
+            "refuse a single append larger than N bytes; a row bigger than the section cap "
+            "cannot be made to fit by rolling, so it is refused outright"
+        ),
+    )
+    parser.add_argument(
+        "--on-cap",
+        choices=("roll", "block"),
+        help=(
+            "what to do when a cap would be crossed: 'roll' archives the oldest rows first "
+            "and then appends; 'block' refuses the append (exit "
+            f"{EXIT_SECTION_CAP}) pending a --roll-section. Required whenever a cap is set"
+        ),
+    )
+    parser.add_argument(
+        "--archive-dir",
+        type=Path,
+        metavar="DIR",
+        help="where rolled rows are written (required with --on-cap roll)",
+    )
+    parser.add_argument(
+        "--roll-keep-entries",
+        type=int,
+        metavar="N",
+        help="how many of the newest rows stay in the live section after a roll",
+    )
     return parser
+
+
+def validate_section_cap_args(
+    parser: argparse.ArgumentParser, args: argparse.Namespace
+) -> None:
+    """Reject a half-configured cap rather than silently not capping.
+
+    Every combination below is a caller who believes a cap is in force. A
+    silently inert cap is the failure this whole feature exists to prevent,
+    so each one is a usage error at parse time.
+    """
+    cap_flags = (args.max_section_rows, args.max_section_bytes)
+    any_cap = any(cap is not None for cap in cap_flags)
+    section_only_flags = (
+        args.on_cap,
+        args.archive_dir,
+        args.roll_keep_entries,
+        args.max_append_bytes,
+    )
+    if args.section_heading is None:
+        if (
+            any_cap
+            or any(flag is not None for flag in section_only_flags)
+            or args.roll_section
+        ):
+            parser.error(
+                "--max-section-rows/--max-section-bytes/--max-append-bytes/--on-cap/"
+                "--archive-dir/--roll-keep-entries/--roll-section all require --section-heading"
+            )
+        return
+    if not any_cap:
+        parser.error(
+            "--section-heading requires at least one of --max-section-rows or --max-section-bytes "
+            "-- a section heading with no cap does nothing"
+        )
+    if args.on_cap is None:
+        parser.error(
+            "--max-section-rows/--max-section-bytes require --on-cap {roll,block}"
+        )
+    for cap in cap_flags:
+        if cap is not None and cap < 1:
+            parser.error("--max-section-rows/--max-section-bytes must be at least 1")
+    if args.max_append_bytes is not None and args.max_append_bytes < 1:
+        parser.error("--max-append-bytes must be at least 1")
+    if args.on_cap == "roll":
+        if args.archive_dir is None:
+            parser.error("--on-cap roll requires --archive-dir")
+        if args.roll_keep_entries is None:
+            parser.error("--on-cap roll requires --roll-keep-entries")
+        if args.roll_keep_entries < 1:
+            parser.error("--roll-keep-entries must be at least 1")
+    if args.roll_section and args.on_cap != "roll":
+        parser.error("--roll-section requires --on-cap roll")
+    if args.force_roll and not args.roll_section:
+        parser.error("--force-roll requires --roll-section")
+
+
+def section_cap_exceeded(
+    parsed_lines: int, parsed_bytes: int, args: argparse.Namespace
+) -> str | None:
+    """The name of the cap that `parsed_lines`/`parsed_bytes` crosses, if any."""
+    if args.max_section_rows is not None and parsed_lines > args.max_section_rows:
+        return f"--max-section-rows ({parsed_lines} > {args.max_section_rows})"
+    if args.max_section_bytes is not None and parsed_bytes > args.max_section_bytes:
+        return f"--max-section-bytes ({parsed_bytes} > {args.max_section_bytes})"
+    return None
 
 
 def split_command(argv: list[str]) -> tuple[list[str], list[str]]:
@@ -753,11 +1198,110 @@ def split_command(argv: list[str]) -> tuple[list[str], list[str]]:
     return argv[:delimiter], argv[delimiter + 1 :]
 
 
+def _payload_growth(payload: str) -> tuple[int, int]:
+    """Lines and bytes `payload` adds to a section, as append_text will write it."""
+    normalized = payload if payload.endswith("\n") else payload + "\n"
+    return normalized.count("\n"), len(normalized.encode("utf-8"))
+
+
+def run_roll_section(args: argparse.Namespace) -> int:
+    """--roll-section, under the ledger lock."""
+    parsed = parse_section_file(args.ledger, args.section_heading)
+    over = section_cap_exceeded(parsed.line_count(), parsed.byte_count(), args)
+    if over is None and not args.force_roll:
+        plan = plan_roll(
+            args.ledger,
+            args.section_heading,
+            args.archive_dir,
+            args.roll_keep_entries,
+            utc_now(),
+        )
+        receipt = dict(plan.receipt)
+        receipt["entries_rolled"] = 0
+        receipt["entries_kept"] = len(parsed.entries)
+        receipt["last_rolled_heading"] = None
+        receipt["section_lines_after"] = parsed.line_count()
+        receipt["section_bytes_after"] = parsed.byte_count()
+        print(f"{ROLL_RECEIPT_PREFIX}{json.dumps(receipt, sort_keys=True)}")
+        return 0
+    plan = plan_roll(
+        args.ledger,
+        args.section_heading,
+        args.archive_dir,
+        args.roll_keep_entries,
+        utc_now(),
+    )
+    apply_roll(args.ledger, plan)
+    print(f"{ROLL_RECEIPT_PREFIX}{json.dumps(plan.receipt, sort_keys=True)}")
+    return 0
+
+
+def enforce_section_caps(args: argparse.Namespace, payload: str) -> int | None:
+    """Apply the section caps to a pending append.
+
+    Returns None when the append may proceed (having rolled first if that is
+    the configured policy and it makes room), or EXIT_SECTION_CAP when the
+    append is refused. A refusal writes nothing at all -- not the row, and not
+    a roll -- because a roll that fires and still cannot fit the row leaves a
+    split file with the row lost.
+    """
+    if args.section_heading is None:
+        return None
+    added_lines, added_bytes = _payload_growth(payload)
+    if args.max_append_bytes is not None and added_bytes > args.max_append_bytes:
+        print(
+            f"ledger_lock: SECTION CAP -- this row is {added_bytes} bytes, over "
+            f"--max-append-bytes ({args.max_append_bytes}). Rolling cannot make a single "
+            "row smaller; split the row or raise the cap. Nothing was written.",
+            file=sys.stderr,
+        )
+        return EXIT_SECTION_CAP
+    parsed = parse_section_file(args.ledger, args.section_heading)
+    over = section_cap_exceeded(
+        parsed.line_count() + added_lines, parsed.byte_count() + added_bytes, args
+    )
+    if over is None:
+        return None
+    if args.on_cap == "block":
+        print(
+            f"ledger_lock: SECTION CAP -- appending would cross {over} in section "
+            f"{args.section_heading.strip()!r}. Nothing was written. Roll the section first: "
+            f"--roll-section --section-heading ... --on-cap roll --archive-dir ... "
+            "--roll-keep-entries N",
+            file=sys.stderr,
+        )
+        return EXIT_SECTION_CAP
+    plan = plan_roll(
+        args.ledger,
+        args.section_heading,
+        args.archive_dir,
+        args.roll_keep_entries,
+        utc_now(),
+    )
+    still_over = section_cap_exceeded(
+        plan.receipt["section_lines_after"] + added_lines,
+        plan.receipt["section_bytes_after"] + added_bytes,
+        args,
+    )
+    if still_over is not None:
+        print(
+            f"ledger_lock: SECTION CAP -- a roll keeping {args.roll_keep_entries} rows still "
+            f"crosses {still_over}. Nothing was written and nothing was rolled; lower "
+            "--roll-keep-entries or raise the cap.",
+            file=sys.stderr,
+        )
+        return EXIT_SECTION_CAP
+    apply_roll(args.ledger, plan)
+    print(f"{ROLL_RECEIPT_PREFIX}{json.dumps(plan.receipt, sort_keys=True)}")
+    return None
+
+
 def main(argv: list[str] | None = None) -> int:
     raw_argv = list(sys.argv[1:] if argv is None else argv)
     parser_argv, command = split_command(raw_argv)
     parser = build_parser()
     args = parser.parse_args(parser_argv)
+    validate_section_cap_args(parser, args)
     payload = read_append_payload(args)
 
     # Verification is a read-only query about a token, not one of the three
@@ -779,15 +1323,22 @@ def main(argv: list[str] | None = None) -> int:
         print(f"ledger_lock: {message}", file=stream)
         return code
 
-    requested_actions = sum(1 for item in (payload, command) if item)
+    requested_actions = sum(
+        1 for item in (payload, command, args.roll_section or None) if item
+    )
     if requested_actions != 1:
         parser.error(
-            "provide exactly one action: --append, --append-file, or -- COMMAND"
+            "provide exactly one action: --append, --append-file, --roll-section, or -- COMMAND"
         )
 
     try:
         with LedgerLock(args.ledger, args.timeout, args.stale_after, command or None):
+            if args.roll_section:
+                return run_roll_section(args)
             if payload is not None:
+                cap_rc = enforce_section_caps(args, payload)
+                if cap_rc is not None:
+                    return cap_rc
                 claim_shaped = is_claim_row(payload)
                 # Dedup check runs inside the held lock, against whatever is
                 # actually on disk right now -- race-free against other
@@ -825,6 +1376,9 @@ def main(argv: list[str] | None = None) -> int:
                 return 0
             rc = subprocess.call(command)
             return rc
+    except SectionError as exc:
+        print(f"ledger_lock: {exc}", file=sys.stderr)
+        return 2
     except TimeoutError as exc:
         print(f"ledger_lock: {exc}", file=sys.stderr)
         return 75
