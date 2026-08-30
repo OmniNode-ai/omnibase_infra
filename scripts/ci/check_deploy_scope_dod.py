@@ -158,8 +158,36 @@ def resolve_omni_home(repo_root: Path) -> Path:
     )
 
 
+#: The canonical-validator surface this hook actually calls. Checked after the
+#: import so a STALE sibling clone fails with its own name instead of an
+#: ``AttributeError`` raised several frames deep in ``classify_deploy_scope``.
+#:
+#: OMN-16989: the resolver's fallback walks EVERY parent of the repo root, so
+#: whichever directory named ``omniclaude`` sits nearest above the checkout wins
+#: -- with no assertion that it is the sibling of THIS repo's canonical clone or
+#: that it is anywhere near current. Measured on `.201` over the OMN-16991
+#: remote leg: the transplanted tree lives at
+#: ``/data/omninode/onex-prepush/runs/<id>/tree``, the walk reached
+#: ``/data/omninode`` and imported an omniclaude clone pinned at omniclaude#1600
+#: (the host's up-to-date clone, #1963, is at ``/data/omninode/omni_home`` and is
+#: NOT an ancestor). Four tests then failed on
+#: ``module '_deploy_gate_canonical_validator' has no attribute
+#: 'parse_evidence_metadata'`` -- a red about another repo's clone freshness on
+#: whichever host ran the suite, with nothing in the message saying so.
+_REQUIRED_VALIDATOR_ATTRS = (
+    "find_runtime_paths",
+    "parse_evidence_metadata",
+    "TICKET_PATTERN",
+)
+
+
 def load_canonical_validator(omni_home: Path) -> ModuleType:
-    """Import the canonical deploy-gate validator module by file path (DRY)."""
+    """Import the canonical deploy-gate validator module by file path (DRY).
+
+    Raises ``DeployScopeHookError`` when the resolved clone does not expose the
+    surface this hook calls -- a named, actionable failure instead of a silent
+    dependence on another repo's clone freshness.
+    """
     validator_path = omni_home / _CANONICAL_VALIDATOR_RELPATH
     spec = importlib.util.spec_from_file_location(
         "_deploy_gate_canonical_validator", validator_path
@@ -179,6 +207,18 @@ def load_canonical_validator(omni_home: Path) -> ModuleType:
         raise DeployScopeHookError(
             f"failed to import canonical validator {validator_path}: {exc}"
         ) from exc
+    missing = [a for a in _REQUIRED_VALIDATOR_ATTRS if not hasattr(module, a)]
+    if missing:
+        sys.modules.pop(spec.name, None)
+        raise DeployScopeHookError(
+            f"the canonical deploy-gate validator at {validator_path} is STALE: "
+            f"it does not expose {', '.join(missing)}. This hook mirrors the "
+            "hosted gate by importing that exact file, so an out-of-date clone "
+            "silently changes the verdict. "
+            'REMEDIATION: git -C "$(dirname "$(dirname "$(dirname "$(dirname '
+            f'"$(dirname {validator_path})")")")")" pull --ff-only, or set '
+            "OMNI_HOME to the clone you intend this hook to read."
+        )
     return module
 
 
