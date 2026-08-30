@@ -163,11 +163,12 @@ async def test_never_idle_topic_still_returns_a_bounded_batch() -> None:
     result = await asyncio.wait_for(handler.run(), timeout=5.0)
 
     assert result.total_processed == 10
-    # The async-for loop prefetches one extra item from the generator before
-    # its body re-checks the bound and breaks (ordinary async-iterator
-    # prefetch behavior, harmless since the extra item is never processed or
-    # committed) -- so yielded is bound+1, not exactly bound.
-    assert consumer.yielded == 11
+    # OMN-17137: exactly the bound, with no discarded prefetch. The original
+    # ``async for`` shape pulled one extra record from the generator before
+    # the body re-checked the bound and broke (yielded == 11). Bounding the
+    # WAIT means both bounds are now checked BEFORE the next record is
+    # requested, so the eleventh record is never pulled and re-delivered.
+    assert consumer.yielded == 10
 
 
 async def test_never_idle_topic_commits_incrementally_not_only_at_the_end() -> None:
@@ -205,17 +206,23 @@ async def test_bounded_run_is_re_entrant_without_compounding() -> None:
         assert result.total_processed == 8
 
     # Five independently-bounded invocations processed exactly 5*8 = 40
-    # records (each run's one harmless prefetch, see above, adds 1 -> 45),
-    # not an ever-growing/unbounded cumulative drain.
-    assert consumer.yielded == 45
+    # records -- not an ever-growing/unbounded cumulative drain. Exactly 40
+    # (not 45) since OMN-17137 removed the per-run discarded prefetch.
+    assert consumer.yielded == 40
 
 
 async def test_wall_clock_bound_trips_before_record_count_bound() -> None:
     """A topic that yields messages slowly (but never idles) must be cut off
     by the wall-clock bound even when the record-count bound is far from
     reached -- proving run() cannot be starved indefinitely by a topic that
-    trickles just fast enough to never hit consumer_timeout_ms idle, but
-    slow enough that draining to max_records_per_run would take too long.
+    trickles just fast enough to keep yielding, but slow enough that draining
+    to max_records_per_run would take too long.
+
+    (The pre-OMN-17137 wording here said "never hit consumer_timeout_ms
+    idle". That premise was false: in aiokafka ``consumer_timeout_ms`` is the
+    background fetcher's max wait, not an idle-iteration timeout, so there is
+    no idle cutoff for this fake to stay ahead of. See
+    test_handler_dlq_replay_idle_wait_omn17137.py.)
     """
     config = _config(
         max_records_per_run=1000,
