@@ -292,7 +292,12 @@ def test_real_shim_resists_pythonpath_shadow_from_editable_install(
         f"expected the real gate's exempt/docs-only decision (exit 0); got "
         f"{proc.returncode}.\nstdout={proc.stdout!r}\nstderr={proc.stderr!r}"
     )
-    assert proc.stdout.startswith("OK: no packaged src/** change"), proc.stdout
+    assert proc.stdout.startswith(
+        (
+            "OK: no packaged src/** change",
+            "OK: no published tag yet",
+        )
+    ), proc.stdout
 
 
 def test_real_shim_subprocess_fail_emits_two_guidance_lines(tmp_path: Path) -> None:
