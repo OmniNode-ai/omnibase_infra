@@ -27,7 +27,7 @@ def test_release_backmerge_preserves_proven_runtime_core_pin() -> None:
 
     # The proven runtime now pins the published PyPI releases (exact versions).
     assert "omnibase-core==0.46.8" in pyproject
-    assert "omnibase-spi==0.23.2" in pyproject
+    assert "omnibase-spi==0.23.3" in pyproject
 
     # The retired git-rev overrides must be gone from both manifest and lock:
     # the OMN-13762 core rev and the OMN-12549 seam core/spi revs.
