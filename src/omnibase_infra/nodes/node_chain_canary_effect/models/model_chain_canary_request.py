@@ -132,6 +132,28 @@ class ModelChainCanaryRequest(BaseModel):
             "moment, so a green terminal is not evidence about this layer."
         ),
     )
+    ledger_source: str = Field(
+        default="",
+        description=(
+            "Source for the LEDGER CHAIN assembly and replay — the leg that "
+            "discharges OMN-16025 link 5 ('complete ledger chain + replay "
+            "green through an HONEST tier-2 verifier, SKIP != PASS'). EMPTY "
+            "means the run has no evidence about the chain and reports "
+            "NOT_CONFIGURED. It deliberately does NOT fall back to the bus "
+            "terminal or the projection: a link with no instrument pointed at "
+            "it makes no claim."
+        ),
+    )
+    expected_ledger_hops: tuple[str, ...] = Field(
+        default=(),
+        description=(
+            "The hops a COMPLETE chain must carry, end to end. Any assembled "
+            "chain missing one of these is CHAIN_INCOMPLETE — the scope's own "
+            "wording is 'no gaps tolerated silently', so completeness is "
+            "checked against a declared set rather than inferred from "
+            "whatever the ledger happened to return."
+        ),
+    )
     terminal_success_topics: tuple[str, ...] = Field(
         default=_DEFAULT_TERMINAL_SUCCESS_TOPICS,
         description=(
