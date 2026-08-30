@@ -275,6 +275,11 @@ _prepush_timeout_cmd() {
   fi
 }
 
+# `ssh -n` IS LOAD-BEARING, not hygiene (OMN-16991 verify finding 1). This probe
+# is called from inside the host-table row loop in pick_capacity_host, whose
+# stdin is the row list. Without -n, ssh(1) reads and discards that stdin, so
+# the FIRST probe swallowed every remaining row and the picker evaluated
+# exactly one host -- live, it probed h200 and never saw h201/h101/h105.
 # host_load_ratio TARGET -- prints "<load1> <nproc> <ratio>" and returns 0, or
 # prints nothing and returns 1 on any read/parse/timeout failure. TARGET is
 # empty for "read this host directly" or an ssh(1) target string for a
@@ -297,10 +302,10 @@ host_load_ratio() {
     else
       timeout_cmd="$(_prepush_timeout_cmd)"
       if [ -n "$timeout_cmd" ]; then
-        raw="$("$timeout_cmd" 6 ssh -o ConnectTimeout=3 -o BatchMode=yes -o StrictHostKeyChecking=accept-new \
+        raw="$("$timeout_cmd" 6 ssh -n -o ConnectTimeout=3 -o BatchMode=yes -o StrictHostKeyChecking=accept-new \
           "$target" "$_PREPUSH_LOAD_PROBE_SH" 2> /dev/null)" || return 1
       else
-        raw="$(ssh -o ConnectTimeout=3 -o BatchMode=yes -o StrictHostKeyChecking=accept-new \
+        raw="$(ssh -n -o ConnectTimeout=3 -o BatchMode=yes -o StrictHostKeyChecking=accept-new \
           "$target" "$_PREPUSH_LOAD_PROBE_SH" 2> /dev/null)" || return 1
       fi
     fi
@@ -402,33 +407,63 @@ remote_full_suite_verified() {
 REMOTE_LAB_RUN_VERDICT=0
 
 # dispatch_to_lab_host HEAVY_WHAT -- try to satisfy HEAVY_WHAT by running it on
-# the least-loaded designated lab host that has a free slot.
+# a designated lab host, cheapest-loaded first.
 # 0 = satisfied (green), 1 = no evidence (caller falls through), and it does
 # NOT return on a remote RED: a suite that genuinely failed on a designated
 # host is a failing gate, so it refuses here rather than letting the caller
 # fall through to the degraded-evidence override grant.
+#
+# It walks the RANKED candidate list rather than betting the whole escalation on
+# one host (OMN-16991 verify finding 3). Only a verdict -- green or red -- ends
+# the walk. "No evidence" (unreachable on arrival, no completion marker) and
+# "slot taken between the probe and the run" (rc 4) are placement misses, not
+# statements about the tree, so they advance to the next fit host instead of
+# refusing a push that another idle lab host could have cleared.
+#
+# `authorizing` is passed EXPLICITLY: this is the verdict-bearing path, and a
+# shadow row's verdict cannot satisfy the escalation by definition. Ranking one
+# in would spend a bundle, an scp, a `uv sync` and a full suite to produce an
+# answer that is then thrown away, while the authorizing host that could have
+# answered goes unprobed.
 dispatch_to_lab_host() {
-  local heavy_what repo rc=0
+  local heavy_what repo rc=0 idx=1 total
   heavy_what="$1"
   repo="$(basename "$REPO_ROOT")"
-  if ! pick_capacity_host "$PREPUSH_LC_HOST" "$repo"; then
+  if ! pick_capacity_host "$PREPUSH_LC_HOST" "$repo" authorizing; then
     log "no lab host is fit for ${heavy_what}: ${PREPUSH_PROBE_LOG:-no hosts probed}"
     return 1
   fi
-  # The picked host IS this host: nothing to distribute. The local branch
-  # already measured it unfit, so this is no evidence.
-  [ -n "$PREPUSH_PICK_SSH" ] || return 1
-  prepush_remote_run "$heavy_what" || rc=$?
-  case "$rc" in
-    0)
-      REMOTE_LAB_RUN_VERDICT=1
-      return 0
-      ;;
-    3)
-      die "${heavy_what} FAILED on the designated lab host '${PREPUSH_PICK_HOSTNAME}' (${PREPUSH_PICK_LABEL})" \
-          "the suite genuinely failed on a host we designated -- this is a red gate, not a capacity problem. Read the streamed [${PREPUSH_PICK_LABEL}] output above, fix the failing tests, then re-push. A remote red is never satisfied by minting an override grant"
-      ;;
-  esac
+  total="$(prepush_candidate_count)"
+  while [ "$idx" -le "$total" ]; do
+    prepush_select_candidate "$idx" || break
+    if [ -z "$PREPUSH_PICK_SSH" ]; then
+      # This candidate IS this host: nothing to distribute. The local branch
+      # already measured it unfit or its slot held, so this is no evidence --
+      # but the ranked hosts after it still are.
+      idx=$((idx + 1))
+      continue
+    fi
+    rc=0
+    prepush_remote_run "$heavy_what" || rc=$?
+    case "$rc" in
+      0)
+        REMOTE_LAB_RUN_VERDICT=1
+        return 0
+        ;;
+      3)
+        die "${heavy_what} FAILED on the designated lab host '${PREPUSH_PICK_HOSTNAME}' (${PREPUSH_PICK_LABEL})" \
+            "the suite genuinely failed on a host we designated -- this is a red gate, not a capacity problem. Read the streamed [${PREPUSH_PICK_LABEL}] output above (the tail of that host's suite.log is printed there), fix the failing tests, then re-push. A remote red is never satisfied by minting an override grant"
+        ;;
+      4)
+        log "lab placement: ${PREPUSH_PICK_LABEL}'s heavy-suite slot was taken on arrival; trying the next fit host"
+        ;;
+      *)
+        log "lab placement: ${PREPUSH_PICK_LABEL} returned no usable evidence; trying the next fit host"
+        ;;
+    esac
+    idx=$((idx + 1))
+  done
+  log "no fit lab host produced a verdict for ${heavy_what}: ${PREPUSH_PROBE_LOG:-no hosts probed}"
   return 1
 }
 
@@ -482,7 +517,9 @@ guard_full_suite_host() {
       [ -n "$lw" ] || lw="${REPO_ROOT}/.onex_state/prepush_distribution"
       prepush_lock_acquire "$lw" || lock_rc=$?
       if [ "$lock_rc" -eq 0 ]; then
-        trap prepush_lock_release EXIT
+        # No `trap ... EXIT` here: prepush_hook_cleanup (installed once, below)
+        # already releases the lock. Installing a second EXIT trap would drop
+        # the temp-file cleanup this hook installed first.
         return 0
       fi
       if [ "$lock_rc" -eq 2 ]; then
@@ -641,7 +678,17 @@ BRANCH="$(git rev-parse --abbrev-ref HEAD 2>/dev/null || echo HEAD)"
 CHANGED_FILE="$(mktemp)"
 SELECTION_FILE="$(mktemp)"
 SELECTION_ERR="$(mktemp)"
-trap 'rm -f "$CHANGED_FILE" "$SELECTION_FILE" "$SELECTION_ERR"' EXIT
+
+# ONE exit trap for the whole hook. bash keeps exactly one EXIT trap per shell,
+# so the later `trap prepush_lock_release EXIT` that guard_full_suite_host used
+# to install silently REPLACED the temp-file cleanup and leaked three mktemp
+# files on every heavy run that took the host slot. Both jobs live in one
+# handler instead, so neither can displace the other.
+prepush_hook_cleanup() {
+  rm -f "${CHANGED_FILE:-}" "${SELECTION_FILE:-}" "${SELECTION_ERR:-}" 2> /dev/null || true
+  prepush_lock_release
+}
+trap prepush_hook_cleanup EXIT
 
 git diff --name-only "${BASE_SHA}" HEAD > "$CHANGED_FILE"
 
