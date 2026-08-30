@@ -9,9 +9,19 @@ four: the auth logic lives here, and a marketplace skill stays a thin shim over
 it (zero auth logic in skill markdown).
 
     onex auth login   --tenant-slug S --client-id C --client-secret-stdin
+    onex auth login   --tenant-slug S --base-url U --api-key-stdin
     onex auth status
     onex auth token
     onex auth logout
+
+TWO CREDENTIAL KINDS, ONE COMMAND (OMN-17205)
+    onex-api resolves a caller's tenant from either an OIDC bearer or a tenant
+    API key, on equal footing. ``--client-secret-stdin`` stores the first;
+    ``--api-key-stdin`` stores the second. They are mutually exclusive: one
+    machine holds one gateway credential, and a machine holding both would let
+    a read authenticate as an identity nobody chose. The api-key form needs no
+    ``--client-id`` and no ``--token-endpoint`` -- an API key is presented
+    directly and grants nothing.
 
 SECRET HANDLING
     The secret is read from stdin, never from an argv flag. A ``--client-secret
@@ -80,6 +90,30 @@ def _load_credential() -> ModelGatewayCredential:
         _fail(str(exc))
 
 
+def _read_stdin_secret(what: str, example: str) -> str:
+    """Read one secret from stdin, or fail naming how to pipe it."""
+    value = sys.stdin.read().strip()
+    if not value:
+        _fail(f"no {what} on stdin. Pipe it, e.g.: {example}")
+    return value
+
+
+def _login_with_api_key(*, tenant_slug: str, base_url: str) -> None:
+    """Store a tenant API key by reference and report without echoing it."""
+    api_key = _read_stdin_secret(
+        "API key",
+        "pbpaste | onex auth login --tenant-slug <slug> --base-url <origin> --api-key-stdin",
+    )
+    try:
+        _store().save_api_key(
+            tenant_slug=tenant_slug, api_key=api_key, base_url=base_url
+        )
+    except ModelOnexError as exc:
+        _fail(str(exc))
+    click.echo(f"Stored gateway API key for tenant '{tenant_slug}'.")
+    click.echo("Key written by reference to ~/.onex/credentials.json (mode 0600).")
+
+
 @click.group("auth")
 def auth_group() -> None:  # stub-ok
     """Manage the gateway credential and the tokens minted from it."""
@@ -91,13 +125,13 @@ def auth_group() -> None:  # stub-ok
 )
 @click.option(
     "--client-id",
-    required=True,
-    help="Keycloak clientId of the per-tenant confidential client (this IS the principal_id).",
+    default="",
+    help="Keycloak clientId of the per-tenant confidential client (this IS the principal_id). Required for --client-secret-stdin.",
 )
 @click.option(
     "--token-endpoint",
-    required=True,
-    help="Realm token endpoint, e.g. https://<keycloak>/realms/<realm>/protocol/openid-connect/token",
+    default="",
+    help="Realm token endpoint, e.g. https://<keycloak>/realms/<realm>/protocol/openid-connect/token. Required for --client-secret-stdin.",
 )
 @click.option(
     "--base-url", required=True, help="Gateway origin, e.g. https://api.omninode.ai"
@@ -105,8 +139,14 @@ def auth_group() -> None:  # stub-ok
 @click.option(
     "--client-secret-stdin",
     is_flag=True,
-    required=True,
+    default=False,
     help="Read the client secret from stdin. The only accepted form -- a flag value would leak into the process table and shell history.",
+)
+@click.option(
+    "--api-key-stdin",
+    is_flag=True,
+    default=False,
+    help="Read a tenant API key from stdin instead of a client secret. Same stdin-only rule, same 0600 by-reference storage.",
 )
 @click.option(
     "--edge-instance-id",
@@ -119,6 +159,7 @@ def auth_login(
     token_endpoint: str,
     base_url: str,
     client_secret_stdin: bool,
+    api_key_stdin: bool,
     edge_instance_id: str,
 ) -> None:
     """Store a gateway credential by reference under ~/.onex.
@@ -127,8 +168,31 @@ def auth_login(
     reference-only block to ~/.onex/config.yaml. Nothing else in config.yaml
     is disturbed.
     """
-    if not client_secret_stdin:  # pragma: no cover - click marks the flag required
-        _fail("--client-secret-stdin is required; the secret is never taken from argv.")
+    if client_secret_stdin and api_key_stdin:
+        _fail(
+            "--client-secret-stdin and --api-key-stdin are mutually exclusive; "
+            "one machine holds one gateway credential."
+        )
+    if not client_secret_stdin and not api_key_stdin:
+        _fail(
+            "one of --client-secret-stdin or --api-key-stdin is required; a "
+            "secret is never taken from argv."
+        )
+
+    if api_key_stdin:
+        _login_with_api_key(tenant_slug=tenant_slug, base_url=base_url)
+        return
+
+    missing = [
+        name
+        for name, value in (
+            ("--client-id", client_id),
+            ("--token-endpoint", token_endpoint),
+        )
+        if not value
+    ]
+    if missing:
+        _fail(f"{' and '.join(missing)} required with --client-secret-stdin.")
 
     secret = sys.stdin.read().strip()
     if not secret:

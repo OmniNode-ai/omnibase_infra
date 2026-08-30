@@ -117,6 +117,39 @@ class GatewayTransportHttpx:
             headers=dict(headers),
         )
 
+    async def get(
+        self,
+        url: str,
+        timeout: float | None = None,
+        headers: dict[str, str] | None = None,
+    ) -> GatewayHttpResponse:
+        """GET ``url``. Satisfies ``ProtocolHttpClient`` (OMN-17205).
+
+        Added as a method on the ADAPTER, never to ``ProtocolGatewayTransport``:
+        that protocol is ``runtime_checkable`` and is satisfied structurally by
+        every existing in-memory fake, so widening it would silently
+        un-satisfy all of them. Widening a concrete implementation cannot.
+
+        Carries a Bearer in ``headers`` -- like every other method here, the
+        headers are never logged and never interpolated into an error.
+        """
+        try:
+            client = httpx.AsyncClient(  # no-contract-check: the seam
+                timeout=timeout if timeout is not None else self._timeout
+            )
+            async with client:
+                response = await client.get(url, headers=dict(headers or {}))
+        except httpx.HTTPError as exc:
+            raise InfraUnavailableError(
+                f"gateway transport could not reach {url}",
+                context=ModelInfraErrorContext.with_correlation(
+                    transport_type=EnumInfraTransportType.HTTP,
+                    operation="cloud_ledger_read",
+                ),
+            ) from exc
+
+        return GatewayHttpResponse(response.status_code, response.text)
+
     async def _post(
         self,
         url: str,
