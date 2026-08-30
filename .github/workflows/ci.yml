@@ -322,6 +322,21 @@ jobs:
       - name: Check mixed-category routing gate (OMN-14605)
         run: PYTHONPATH=src uv run python -m omnibase_infra.validators.mixed_category_routing src/omnibase_infra
 
+      # OMN-16939: the dispatcher-side sibling of the subscribe-wiring ratchet. A
+      # declared subscribe_topic that resolves to NO registered dispatcher for its own
+      # (category, message type) is consumed, DLQ'd and COMMITTED on every message —
+      # the group reads Stable / MEMBERS 1 / LAG 0 forever while 100% of traffic is
+      # lost. Live-proven on the .201 dev lane: 174 in / 174 DLQ over 6h on
+      # node_pr_lifecycle_state_reducer. The three existing ratchets all pass on that
+      # shape: subscribe-wiring-health checks for a PUBLISHER, dispatcher-route-coverage
+      # only looks at onex.cmd.* topics, and mixed-category-routing is scanned over
+      # src/omnibase_infra only (its "Lane B" fan-out never landed, which is why the
+      # omnimarket victims went unseen). Ratchet frozen in
+      # config/validation/subscriber_dispatcher_resolution_baseline.yaml (shrink-only).
+      # SYNC with pre-commit hook 'subscriber-dispatcher-resolution'.
+      - name: Check subscriber dispatcher resolution gate (OMN-16939)
+        run: PYTHONPATH=src uv run python -m omnibase_infra.validators.subscriber_dispatcher_resolution src/omnibase_infra
+
       # OMN-16088 (split from OMN-15978 AC4): an operation_match handler_routing entry
       # (carries `operation:`) with no `topic:`/`event_type:` scoping falls through to
       # _topics_for_handler_entry's unscoped branch and is assigned EVERY subscribe

@@ -678,6 +678,21 @@ repos:
         files: ^src/omnibase_infra/.*\.(py|yaml)$
         pass_filenames: false
         stages: [pre-commit]
+      # OMN-16939: a declared subscribe_topic that resolves to NO registered dispatcher
+      # for its own (category, message type) is consumed, DLQ'd and COMMITTED on every
+      # message — the consumer group reads Stable / LAG 0 forever while 100% of the
+      # traffic is lost, because the offset advances after DLQ-routing so lag can never
+      # rise. Triggers on contract.yaml too (a routing change needs no .py edit). Ratchet
+      # frozen in config/validation/subscriber_dispatcher_resolution_baseline.yaml
+      # (shrink-only). SYNC with the ci.yml step
+      # 'Check subscriber dispatcher resolution gate (OMN-16939)'.
+      - id: subscriber-dispatcher-resolution
+        name: Every subscribe_topic resolves to a registered dispatcher (OMN-16939)
+        entry: env PYTHONPATH=src uv run --frozen python -m omnibase_infra.validators.subscriber_dispatcher_resolution src/omnibase_infra
+        language: system
+        files: ^src/omnibase_infra/.*\.(py|yaml)$
+        pass_filenames: false
+        stages: [pre-commit]
       # OMN-16088 (split from OMN-15978 AC4): an operation_match handler_routing entry
       # (carries `operation:`) with no `topic:`/`event_type:` scoping falls through to
       # _topics_for_handler_entry's unscoped branch and is assigned EVERY subscribe
