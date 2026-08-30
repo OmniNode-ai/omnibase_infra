@@ -55,6 +55,7 @@ from __future__ import annotations
 
 import os
 import socket
+import subprocess
 
 from scripts.hooks.prepush_override_grant import (
     consume,
@@ -67,6 +68,97 @@ from scripts.hooks.prepush_override_grant import (
 
 DEFAULT_PREPUSH_200_HOSTNAME = "stickybeatz-studio"
 DEFAULT_PREPUSH_201_GATE_RUNNER_HOSTNAME = "gate-runner-201"
+
+HOST_TABLE_REL = "scripts/hooks/prepush_hosts.tsv"
+
+# Legacy env override -> host-table row label. An override REPLACES the row it
+# names; it never ADDS a hostname to the designated set. That distinction is
+# load-bearing: under a table listing several hosts, an override that merely
+# appended a name could no longer DE-designate the local machine, silently
+# inverting the OMN-15059 guard that
+# `test_guard_refuses_full_suite_escalation_on_non_200_host` proves by forcing
+# a nonsense hostname.
+_LEGACY_OVERRIDE_BY_LABEL = {
+    "h200": "PREPUSH_200_HOSTNAME",
+    "h201c": "PREPUSH_201_GATE_RUNNER_HOSTNAME",
+}
+
+
+def _override_var(label: str) -> str:
+    """Per-row override env var name, matching prepush_dispatch.sh."""
+    sanitized = "".join(c if c.isalnum() else "_" for c in label.upper())
+    return f"PREPUSH_HOST_OVERRIDE_{sanitized}"
+
+
+def designated_hostnames(
+    env: dict[str, str] | None = None,
+) -> tuple[str, ...]:
+    """Every hostname that may run a full suite, from the COMMITTED host table.
+
+    OMN-16991. This guard used to read `.201`'s identity straight off
+    ``PREPUSH_201_GATE_RUNNER_HOSTNAME`` -- and the bash hook's
+    ``scrub_prepush_override_env`` deliberately unsets every ``PREPUSH_*`` name
+    before ``exec uv run pytest``, so on the `.201` host (whose real
+    ``hostname -s`` is ``omninode-pc``, not the container's
+    ``gate-runner-201``) the sanctioned override never reached THIS guard. The
+    push passed the bash guard and was then refused by its own pytest child.
+    That is why `omnibase_infra` full-suite escalations could not run on `.201`
+    at all.
+
+    The scrub is NOT the bug and is not weakened here -- an inheritable
+    ``PREPUSH_*`` override crossing into the pytest tree is exactly what turned
+    one sanctioned grant into a recursive 44,064-test launcher (OMN-16425 F-01,
+    ~9h03m). The bug was sourcing host IDENTITY from an environment variable
+    that must not cross a process boundary. Identity now comes from a committed
+    file that needs no inheritance at all.
+
+    Read from ``git show HEAD:`` rather than the working tree, and ignored
+    outright if the working copy diverges, so an uncommitted row cannot
+    self-designate this machine. An unreadable table falls back to the two
+    code-embedded defaults -- the pre-OMN-16991 behavior exactly, so a checkout
+    without the table is neither more nor less permissive than before.
+    """
+    active_env: dict[str, str] | os._Environ[str] = os.environ if env is None else env
+    fallback = (
+        active_env.get("PREPUSH_200_HOSTNAME", DEFAULT_PREPUSH_200_HOSTNAME),
+        active_env.get(
+            "PREPUSH_201_GATE_RUNNER_HOSTNAME",
+            DEFAULT_PREPUSH_201_GATE_RUNNER_HOSTNAME,
+        ),
+    )
+    try:
+        repo_root = resolve_repo_root()
+        committed = subprocess.run(
+            ["git", "-C", str(repo_root), "show", f"HEAD:{HOST_TABLE_REL}"],
+            capture_output=True,
+            text=True,
+            timeout=15,
+            check=False,
+        )
+        if committed.returncode != 0 or not committed.stdout.strip():
+            return fallback
+        working = repo_root / HOST_TABLE_REL
+        if working.is_file() and working.read_text() != committed.stdout:
+            return fallback
+        names: list[str] = []
+        for line in committed.stdout.splitlines():
+            line = line.split("#", 1)[0]
+            if not line.strip():
+                continue
+            fields = line.split("\t")
+            if len(fields) < 11 or fields[10] != "authorizing":
+                continue
+            label, hostname = fields[0], fields[2]
+            legacy = _LEGACY_OVERRIDE_BY_LABEL.get(label)
+            if legacy and active_env.get(legacy):
+                hostname = active_env[legacy]
+            override = active_env.get(_override_var(label))
+            if override:
+                hostname = override
+            names.append(hostname)
+        return tuple(names) if names else fallback
+    except (OSError, subprocess.SubprocessError, ValueError):
+        return fallback
 
 
 def is_ci_environment(env: dict[str, str] | None = None) -> bool:
@@ -157,7 +249,7 @@ def full_suite_host_violation_message(
         "guard (scripts/hooks/prepush_smart_tests.sh) entirely, so the .200-default "
         "host-check was never consulted. Run from .200 instead "
         "(ssh jonah@stickybeatz-studio.tail75df5e.ts.net; see "
-        "docs/runbooks/200-build-lane-execution-pattern.md), OR mint a single-use "
+        "docs/runbooks/lab-prepush-host-table.md), OR mint a single-use "
         "override grant to run the full suite on this host anyway (visible, "
         "receipted, degraded-evidence -- do not use as a routine bypass): "
         "`uv run python scripts/hooks/prepush_override_grant.py mint "
@@ -238,18 +330,17 @@ def enforce(config: object, full_suite_target: str) -> None:
         pytest.exit(env_rejection_message(leaked), returncode=1)
 
     host = resolve_local_hostname()
-    target_hostname = os.environ.get(
-        "PREPUSH_200_HOSTNAME", DEFAULT_PREPUSH_200_HOSTNAME
-    )
-    gate_runner_hostname = os.environ.get(
-        "PREPUSH_201_GATE_RUNNER_HOSTNAME",
-        DEFAULT_PREPUSH_201_GATE_RUNNER_HOSTNAME,
-    )
+    # OMN-16991: identity comes from the committed host table, not from
+    # PREPUSH_* env vars the bash hook's scrub deliberately strips before it
+    # spawns this pytest. See designated_hostnames().
+    all_designated = designated_hostnames()
+    target_hostname = all_designated[0]
+    additional_hostnames = tuple(all_designated[1:])
     if (
         full_suite_host_violation_message(
             host=host,
             target_hostname=target_hostname,
-            additional_target_hostnames=(gate_runner_hostname,),
+            additional_target_hostnames=additional_hostnames,
             override_authorized=False,
         )
         is None
@@ -265,7 +356,7 @@ def enforce(config: object, full_suite_target: str) -> None:
     message = full_suite_host_violation_message(
         host=host,
         target_hostname=target_hostname,
-        additional_target_hostnames=(gate_runner_hostname,),
+        additional_target_hostnames=additional_hostnames,
         override_authorized=False,
     )
     assert message is not None

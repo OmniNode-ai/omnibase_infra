@@ -1,0 +1,42 @@
+# Lab capacity/identity table for the pre-push heavy-suite guard (OMN-16991).
+#
+# THIS FILE IS AUTHORITY FOR HOST IDENTITY. It is read from the COMMITTED tree
+# (`git show HEAD:scripts/hooks/prepush_hosts.tsv`), never from the working
+# tree, and the hook refuses if the two differ -- an uncommitted row whose
+# `hostname` matches the local machine would otherwise self-designate a laptop
+# as an authorizing gate host with no review, no receipt and no guard tripped.
+# That is precisely the forgeable-on-disk-artifact surface OMN-16688
+# deliberately avoided ("no file on disk to forge"). Adding or enabling a row
+# therefore requires a reviewed commit, and tests/unit/scripts/
+# test_prepush_host_table.py asserts the full contents so a row addition also
+# requires a deliberate test update.
+#
+# Columns (TAB separated; no tabs inside any field):
+#   label          stable row id; also names the per-row override env var
+#                  PREPUSH_HOST_OVERRIDE_<LABEL uppercased>
+#   role           capacity = placement candidate AND identity
+#                  identity = identity only, never an execution target
+#   hostname       `hostname -s` of that host, lowercased
+#   ssh_target     ssh(1) target for probes/execution, or - for role=identity
+#   cores          nominal core count (documentation; the live probe re-reads it)
+#   uv_abs_path    ABSOLUTE uv path. uv is on NO host's non-interactive PATH
+#                  (measured 2026-08-29/30), so every remote leg invokes this
+#                  path literally rather than relying on a login profile.
+#   uv_min_version floor. A host below it is SKIPPED, never assumed fit -- the
+#                  fleet spread is 0.8.3 -> 0.11.32 against uv.lock revision 3.
+#   workroot       remote scratch root (bundles/, trees/, runs/, LOCK)
+#   slot_mode      queue   = enqueue into ~/push-lanes/QUEUE (.201, OMN-16968)
+#                  lockdir = exclusive mkdir(2) lockdir at <workroot>/LOCK
+#                  none    = not an execution target
+#   repos_denied   comma-separated repos this host must NOT run, or -
+#   mode           authorizing = its verdict may satisfy the escalation
+#                  shadow      = runs and receipts, but NEVER authorizes
+#                  disabled    = not probed, not run, not an identity
+#   note           free text
+#
+#label	role	hostname	ssh_target	cores	uv_abs_path	uv_min_version	workroot	slot_mode	repos_denied	mode	note
+h200	capacity	stickybeatz-studio	jonah@stickybeatz-studio.tail75df5e.ts.net	24	/Users/jonah/.local/bin/uv	0.11.0	/Users/Shared/onex-prepush	lockdir	-	authorizing	.200 Mac Studio; rule-11a default gate host
+h201	capacity	omninode-pc	jonah@192.168.86.201	32	/home/jonah/.local/bin/uv	0.11.0	/data/omninode/onex-prepush	queue	omnibase_infra	authorizing	.201 Linux host. Denied for omnibase_infra until OMN-16989 closes (15 host-coupled failures = false red)
+h201c	identity	gate-runner-201	-	32	-	-	-	none	-	authorizing	.201 gate-runner CONTAINER hostname; no sshd (OMN-16446) so identity-only
+h101	capacity	stickybeatz.local	jonah@192.168.86.101	12	/Users/jonah/.local/bin/uv	0.11.0	/Users/Shared/onex-prepush	lockdir	-	disabled	uv 0.8.3 is below the floor; ~/Code is TCC-denied to sshd. workroot avoids ~/Code and is writable; upgrade uv then move to shadow
+h105	capacity	omnibook	jonah@192.168.86.105	10	/Users/jonah/.local/bin/uv	0.11.0	/Users/Shared/onex-prepush	lockdir	-	shadow	MacBook Air M4, net-new. SHADOW until it records zero verdict mismatches
