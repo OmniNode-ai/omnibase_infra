@@ -57,6 +57,21 @@ def _make_local_omnimarket_clone(root: Path, bare_remote: Path) -> Path:
     subprocess.run(
         ["git", "checkout", "--quiet", "dev"], cwd=omnimarket_root, check=True
     )
+    # A committer identity is required for any test that later commits
+    # directly into this clone (e.g. the diverged-clone case below). Setting
+    # it locally here -- rather than relying on an inherited global
+    # user.name/user.email -- keeps the fixture hermetic: a CI runner with no
+    # global git identity configured otherwise fails those commits with exit
+    # 128 ("Please tell me who you are"), which is exactly what happened on
+    # the runner that surfaced this (OMN-16366 PR #3036).
+    subprocess.run(
+        ["git", "config", "user.email", "test@example.com"],
+        cwd=omnimarket_root,
+        check=True,
+    )
+    subprocess.run(
+        ["git", "config", "user.name", "Test"], cwd=omnimarket_root, check=True
+    )
     return omnimarket_root
 
 
