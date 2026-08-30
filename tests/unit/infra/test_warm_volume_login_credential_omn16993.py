@@ -204,6 +204,77 @@ def test_runner_never_echoes_the_credential() -> None:
 # ---------------------------------------------------------------------------
 
 
+def _login_only_password_vars() -> list[str]:
+    """Every password variable the runner's warm-volume seam consumes.
+
+    Driven off the runner's own map rather than a hand-kept list here: the
+    point of OMN-17138 is that a principal can be added to the map and to a
+    fail-closed DSN consumer while the compose wiring that actually delivers
+    its value is forgotten, and a literal list in this file would have to be
+    updated by the same person who forgot.
+    """
+    return [entry.split(":", 1)[1] for entry in _runner_login_only_entries()]
+
+
+@pytest.mark.unit
+@pytest.mark.parametrize("compose_file", LANE_COMPOSE_FILES, ids=lambda p: p.name)
+def test_migration_service_receives_every_login_credential(
+    compose_file: Path,
+) -> None:
+    """OMN-17138: EVERY principal in the map, not just omninode_runtime.
+
+    OMN-15425 added ``tenant_projection_writer`` to ``LOGIN_ONLY_ROLE_MAP`` and
+    gave it a fail-closed ``ONEX_TENANT_DB_URL`` consumer, but never added the
+    matching line to this service in ``docker-compose.infra.yml``. The runner's
+    empty-means-skip contract then skipped it silently on every warm volume —
+    which is every lane — so the role sat ``rolcanlogin = f`` with a NULL
+    password while compose rendered clean and the runtime reported healthy.
+    Observed on the dev lane 2026-08-30: ``skip tenant_projection_writer
+    (TENANT_PROJECTION_WRITER_PASSWORD not set)`` in the forward-migration log,
+    and ``FATAL: role "tenant_projection_writer" is not permitted to log in``
+    from a live connect probe, against a positive control on the same lane that
+    succeeded as ``omninode_runtime``.
+
+    The judge file carried its copy from the start, so the single-principal
+    assertion this replaces was green on both files while the base file — the
+    one dev, stability-test and prod all merge — was broken.
+    """
+    env = _migration_service_env(compose_file)
+    password_vars = _login_only_password_vars()
+
+    assert password_vars, "runner LOGIN_ONLY_ROLE_MAP parsed empty"
+
+    missing = [var for var in password_vars if var not in env]
+    assert not missing, (
+        f"{compose_file.name}: the {MIGRATION_SERVICE} service is missing "
+        f"{missing} — the runner skips a role whose variable is unset, so each "
+        "of these lands NOLOGIN with a NULL password on every warm volume "
+        "while its DSN resolves and then fails at connect"
+    )
+
+
+@pytest.mark.unit
+@pytest.mark.parametrize("compose_file", LANE_COMPOSE_FILES, ids=lambda p: p.name)
+def test_every_login_credential_is_a_reference_not_a_literal(
+    compose_file: Path,
+) -> None:
+    """Ruling 1, applied to the whole map: the store holds values, compose refs.
+
+    ``:-`` rather than ``:?`` is deliberate and mirrors the postgres service: an
+    unprovisioned volume must skip the role, not wedge compose render for the
+    entire lane. Interpolation is file-wide and precedes service selection, so a
+    ``:?`` here would make one missing credential fail every service's render.
+    The fail-closed form belongs on the CONSUMER DSN, where unset is a defect.
+    """
+    env = _migration_service_env(compose_file)
+
+    for var in _login_only_password_vars():
+        assert env[var] == "${" + var + ":-}", (
+            f"{compose_file.name}: {var} must use the empty-means-skip "
+            f"reference form, got {env[var]!r}"
+        )
+
+
 @pytest.mark.unit
 @pytest.mark.parametrize("compose_file", LANE_COMPOSE_FILES, ids=lambda p: p.name)
 def test_migration_service_receives_the_runtime_credential(
