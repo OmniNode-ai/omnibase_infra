@@ -17,6 +17,7 @@ Truthfulness invariants:
 
 from __future__ import annotations
 
+import asyncio
 import logging
 import time
 from collections.abc import Mapping
@@ -147,27 +148,33 @@ class HandlerDlqReplay:
 
         This handler is auto-wired as a PER-MESSAGE trigger on the DLQ topic
         (``event_bus.subscribe_topics`` in ``contract.yaml``), but drains via
-        a persistent, whole-topic-shaped consumer group. Before this fix, a
-        single invocation looped until the topic went quiet for
-        ``consumer_timeout_ms`` (5s) before committing anything at all. On a
-        self-feeding DLQ -- messages that get replayed, fail again downstream,
-        and land right back on the same DLQ topic -- the topic never went
-        quiet: the loop never returned, never committed, and starved the
-        OUTER trigger consumer's heartbeat (observed live as repeated
-        ``OffsetCommit`` ``UnknownMemberIdError``), while every new DLQ
-        arrival independently piled another effectively-unbounded drain
-        attempt on top (OMN-16422 / OMN-16418).
+        a persistent, whole-topic-shaped consumer group. Every invocation is
+        bounded two ways -- record count (``max_records_per_run``,
+        additionally clamped by an explicit ``limit`` when one is set) and
+        wall-clock (``max_run_duration_seconds``) -- and commits incrementally
+        every ``commit_every_n_records`` processed records. A bounded
+        invocation always returns quickly (keeping the OUTER trigger
+        consumer's poll loop alive) and always makes committed progress, so
+        the persistent group's committed offset advances even while the topic
+        is continuously self-feeding (OMN-16422 / OMN-16418).
 
-        The fix bounds every invocation two ways -- record count
-        (``max_records_per_run``, additionally clamped by an explicit
-        ``limit`` when one is set) and wall-clock
-        (``max_run_duration_seconds``) -- and commits incrementally every
-        ``commit_every_n_records`` processed records instead of only after
-        the loop goes idle. A bounded invocation always returns quickly
-        (restoring the outer consumer's heartbeat) and always makes committed
-        progress: the persistent group's committed offset now advances even
-        while the topic is continuously self-feeding, instead of staying
-        perpetually uncommitted.
+        OMN-17137: the wall-clock bound MUST be enforced on the WAIT for the
+        next record, not only between records. ``DLQConsumer.consume_messages()``
+        iterates an ``AIOKafkaConsumer`` whose ``__anext__`` is
+        ``while True: return await self.getone()`` -- it blocks indefinitely
+        until a record arrives. The ``consumer_timeout_ms=5000`` passed at
+        construction does NOT end that iteration: in aiokafka that parameter
+        is the *background fetching routine's* max wait (default 200ms), not
+        kafka-python's idle-iteration timeout. So a deadline checked only
+        inside the loop body is never re-evaluated once the topic goes idle
+        mid-drain -- ``run()`` parked in ``getone()`` forever, holding the
+        outer trigger consumer's serial ``_consume_loop`` until aiokafka
+        evicted it at ``max_poll_interval_ms`` (live: 30 min on the stability
+        lane, ``OffsetCommit ... UnknownMemberIdError``, group left at zero
+        members = ``Empty``, generation 338 by the time it was measured). The
+        acquisition below is therefore driven through ``asyncio.wait_for``
+        with the run's REMAINING budget, and both bounds are checked BEFORE
+        the next record is requested.
         """
         started_dependencies = await self._ensure_runtime_dependencies_started()
         try:
@@ -180,26 +187,57 @@ class HandlerDlqReplay:
             commit_every = self._config.commit_every_n_records
             deadline = time.monotonic() + self._config.max_run_duration_seconds
 
-            async for message in self._consumer.consume_messages():
-                if count >= effective_limit:
-                    break
-                if time.monotonic() >= deadline:
-                    logger.warning(
-                        "DLQ replay run hit its wall-clock bound (%.1fs) after "
-                        "%d records -- returning this bounded batch instead of "
-                        "continuing to drain (OMN-16422).",
-                        self._config.max_run_duration_seconds,
-                        count,
-                    )
-                    break
+            messages = self._consumer.consume_messages()
+            try:
+                while count < effective_limit:
+                    remaining = deadline - time.monotonic()
+                    if remaining <= 0.0:
+                        logger.warning(
+                            "DLQ replay run hit its wall-clock bound (%.1fs) after "
+                            "%d records -- returning this bounded batch instead of "
+                            "continuing to drain (OMN-16422).",
+                            self._config.max_run_duration_seconds,
+                            count,
+                        )
+                        break
 
-                results.append(await self._process_message(message))
-                count += 1
-                uncommitted += 1
+                    # OMN-17137: bound the WAIT, not just the gap between
+                    # records. Without this timeout an idle topic parks the
+                    # run in aiokafka's unbounded ``getone()`` and the
+                    # deadline above is never reached again.
+                    try:
+                        message = await asyncio.wait_for(
+                            anext(messages), timeout=remaining
+                        )
+                    except StopAsyncIteration:
+                        break
+                    except TimeoutError:
+                        logger.warning(
+                            "DLQ replay run hit its wall-clock bound (%.1fs) after "
+                            "%d records while WAITING for the next record -- the "
+                            "topic went idle mid-drain. Returning this bounded "
+                            "batch rather than parking the outer trigger consumer "
+                            "(OMN-17137).",
+                            self._config.max_run_duration_seconds,
+                            count,
+                        )
+                        break
 
-                if not self._config.dry_run and uncommitted >= commit_every:
-                    await self._consumer.commit()
-                    uncommitted = 0
+                    results.append(await self._process_message(message))
+                    count += 1
+                    uncommitted += 1
+
+                    if not self._config.dry_run and uncommitted >= commit_every:
+                        await self._consumer.commit()
+                        uncommitted = 0
+            finally:
+                # Release the iterator deterministically. After a timeout the
+                # cancelled ``__anext__`` has already finalized an async
+                # generator, so this is a no-op there; it matters for the
+                # count-bound and StopAsyncIteration exits.
+                aclose = getattr(messages, "aclose", None)
+                if aclose is not None:
+                    await aclose()
 
             if uncommitted and not self._config.dry_run:
                 await self._consumer.commit()

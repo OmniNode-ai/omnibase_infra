@@ -228,6 +228,11 @@ class DLQConsumer:
                 auto_offset_reset="earliest",
                 enable_auto_commit=False,
                 group_id=self.config.consumer_group,
+                # OMN-17137: this is NOT an idle-iteration timeout. In aiokafka
+                # ``consumer_timeout_ms`` is the background fetching routine's
+                # max wait (default 200ms) -- ``__anext__`` still blocks forever
+                # on a quiet topic. Nothing below ``HandlerDlqReplay.run()``
+                # bounds the wait for the next record; run() owns that bound.
                 consumer_timeout_ms=5000,
                 **build_aiokafka_auth_kwargs_from_env(),
             )
