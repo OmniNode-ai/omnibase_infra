@@ -18,7 +18,7 @@ connection — but nothing ever created the role. On the .201 dev lane
 
 Two halves close it and both are pinned here:
 
-* ``102_create_tenant_projection_writer_role.sql`` — the cluster-wide role, with
+* ``103_create_tenant_projection_writer_role.sql`` — the cluster-wide role, with
   the RLS-relevant attributes off, no credential material, and no ``\\connect``
   (a new cross-database flat migration is a hard reject, OMN-15819).
 * ``nodes/node_projection_delegation_inference_response/0004_grant_tenant_projection_writer.sql``
@@ -48,14 +48,14 @@ MIGRATION_FILE = (
     / "docker"
     / "migrations"
     / "forward"
-    / "102_create_tenant_projection_writer_role.sql"
+    / "103_create_tenant_projection_writer_role.sql"
 )
 ROLLBACK_FILE = (
     REPO_ROOT
     / "docker"
     / "migrations"
     / "rollback"
-    / "rollback_102_create_tenant_projection_writer_role.sql"
+    / "rollback_103_create_tenant_projection_writer_role.sql"
 )
 GRANT_FILE = (
     REPO_ROOT

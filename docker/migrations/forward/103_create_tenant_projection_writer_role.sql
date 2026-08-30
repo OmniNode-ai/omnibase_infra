@@ -1,7 +1,7 @@
 -- SPDX-FileCopyrightText: 2025 OmniNode.ai Inc.
 -- SPDX-License-Identifier: MIT
 -- =============================================================================
--- MIGRATION 102: Create the tenant_projection_writer role (OMN-15425)
+-- MIGRATION 103: Create the tenant_projection_writer role (OMN-15425)
 -- =============================================================================
 -- Ticket: OMN-15425 (P5 — cut tenant projections to the tenant_projection_writer
 --         identity). Sibling that already landed: OMN-15426 / OMN-16843
@@ -111,7 +111,7 @@
 --   them. The CONNECT grant is idempotent in Postgres by construction.
 --
 -- ROLLBACK:
---   See rollback/rollback_102_create_tenant_projection_writer_role.sql
+--   See rollback/rollback_103_create_tenant_projection_writer_role.sql
 -- =============================================================================
 
 -- -----------------------------------------------------------------------------

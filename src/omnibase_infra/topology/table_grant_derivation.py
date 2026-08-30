@@ -127,6 +127,26 @@ STATE_IO_TABLE_DECLARATIONS: tuple[ContractTableDeclaration, ...] = (
             role="state",
         ),
     ),
+    # OMN-16924. Same seam, same classification: durable REDUCER state for
+    # node_session_phase_reducer, keyed on ``session_id`` rather than
+    # ``correlation_id``. Its ``tenant_id`` column is likewise denormalized
+    # provenance extracted from the opaque payload, never an authorization key,
+    # so operator ruling R-q's OMNINODE_INTERNAL classification carries over
+    # unchanged.
+    ContractTableDeclaration(
+        node="state_io:session_phase_state",
+        contract_path=Path(
+            "docker/migrations/forward/102_create_session_phase_state.sql"
+        ),
+        table=ModelDbTableDeclaration(
+            name="session_phase_state",
+            database_ref="omnibase_infra",
+            schema="public",
+            migration="docker/migrations/forward/102_create_session_phase_state.sql",
+            access="read_write",
+            role="state",
+        ),
+    ),
 )
 
 # Some migration-owned projection relations landed before their producing node's

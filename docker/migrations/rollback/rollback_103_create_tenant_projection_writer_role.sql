@@ -1,7 +1,7 @@
 -- SPDX-FileCopyrightText: 2026 OmniNode.ai Inc.
 -- SPDX-License-Identifier: MIT
 --
--- Rollback: 102_create_tenant_projection_writer_role (OMN-15425)
+-- Rollback: 103_create_tenant_projection_writer_role (OMN-15425)
 --
 -- Revokes tenant_projection_writer's grants in omnidash_analytics (issued by
 -- the node-owned companion

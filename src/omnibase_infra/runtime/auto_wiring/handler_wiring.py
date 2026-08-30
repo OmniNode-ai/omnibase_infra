@@ -142,6 +142,7 @@ from omnibase_infra.runtime.dispatch_envelope_context import (
 from omnibase_infra.runtime.models.model_postgres_pool_config import (
     ModelPostgresPoolConfig,
 )
+from omnibase_infra.runtime.overlay.contract_env_ref import expand_contract_env_refs
 from omnibase_infra.runtime.projection_tenant_authority import (
     VerifiedProjectionTenantAuthority,
     assert_projection_tenant_authority_matches_event,
@@ -416,6 +417,10 @@ _STATE_IO_RECOVERY_SWEEP_INTERVAL_SECONDS = 30.0
 # a fresh non-terminal row committed with neither is structurally unrecoverable
 # by ``select_recoverable_batches`` and silently strands the workflow.
 _STATE_IO_TERMINAL_STATE_NAMES = frozenset({"COMPLETED", "FAILED"})
+# OMN-16924: ``state_io.key`` names both a wire payload field and a SQL
+# identifier (the row's primary-key column), so it is validated the same way
+# StateStoreAdapter validates its table name before interpolating it into SQL.
+_STATE_IO_KEY_PATTERN = re.compile(r"^[a-zA-Z_][a-zA-Z0-9_]*$")
 _TOPIC_MIGRATION_EXECUTOR_DEPS = frozenset({"provisioner", "drain_proof_gate"})
 _DELEGATION_INFERENCE_INTENT_MODULE = "omnibase_core.models.delegation.wire"
 _DELEGATION_INFERENCE_INTENT_NAME = "ModelInferenceIntent"
@@ -1750,6 +1755,28 @@ def _extract_dispatch_correlation_id(
     return getattr(envelope, "correlation_id", None)
 
 
+def _extract_state_io_key(
+    envelope: object, payload: object, key_name: str
+) -> object | None:
+    """Read the contract-declared ``state_io.key`` field off a dispatch message.
+
+    OMN-16924. ``correlation_id`` keeps its dedicated reader
+    (:func:`_extract_dispatch_correlation_id`), which also falls back to the
+    envelope and to ``__debug_trace``. Any other declared key is a DOMAIN field
+    and is read from the validated payload only — the transport envelope has no
+    business fields, and silently borrowing one from ``__debug_trace`` would
+    key a durable row on transport metadata.
+    """
+    if key_name == "correlation_id":
+        return _extract_dispatch_correlation_id(envelope, payload)
+    candidate = getattr(payload, key_name, None)
+    if candidate is not None:
+        return candidate
+    if isinstance(payload, Mapping):
+        return payload.get(key_name)
+    return None
+
+
 def _normalize_handler_result(
     result: object,
     envelope: object,
@@ -2501,11 +2528,17 @@ def _read_state_io(contract_path: Path) -> dict[str, object]:
         state_io:
           database: omnibase_infra   # _DB_URL_ENV_MAP key
           table: delegation_workflow_state
-          key: correlation_id        # documented; correlation_id is the
-                                      # only supported read key today
+          key: correlation_id        # wire field AND row key column
           codec:
             module: <dotted module path resolved via importlib>
             name: <class name>
+
+    ``database`` and ``table`` accept the standard ``${env.VAR}`` /
+    ``${env.VAR:default}`` overlay convention (OMN-16924), so an operator
+    rebinds a node's durable state to a different database or table through the
+    normal config overlay without a code change. ``key`` names BOTH the wire
+    payload field the row is keyed on and the primary-key column it is stored
+    in; it defaults to ``correlation_id`` (the pre-OMN-16924 hardcoded key).
     """
     try:
         # Why: Optional integration dependency is validated at runtime but ships incomplete typing.
@@ -3780,13 +3813,36 @@ def _make_stateful_dispatch_callback(
     """
     inner_callback = _make_dispatch_callback(handler_instance, event_model)
 
-    database = str(state_io.get("database") or "omnibase_infra")
-    table = str(state_io.get("table") or "")
+    # OMN-16924: the durable binding is overlay-configurable. ``database`` and
+    # ``table`` go through the sanctioned ``${env.VAR:default}`` contract-overlay
+    # expansion, so an operator rebinds a node's state of record to a different
+    # database or table through the normal overlay without touching code. An
+    # unset var with no inline default expands to "" and fails closed below.
+    database = expand_contract_env_refs(str(state_io.get("database") or "")) or (
+        "omnibase_infra"
+    )
+    table = expand_contract_env_refs(str(state_io.get("table") or ""))
+    # ``key`` names BOTH the wire payload field the row is keyed on AND the
+    # primary-key column it is stored in — one declaration, so a contract can
+    # never read a key from a column that holds something else. Defaults to
+    # ``correlation_id``: the pre-OMN-16924 hardcoded key, and the only key
+    # every leg of a multi-leg orchestrator carries. A REDUCER folds per DOMAIN
+    # entity rather than per request, so it declares that entity's id instead
+    # (node_session_phase_reducer: ``session_id``).
+    state_key = expand_contract_env_refs(str(state_io.get("key") or "")) or (
+        "correlation_id"
+    )
     codec_ref = state_io.get("codec")
     if not table:
         raise ModelOnexError(
             "handler_wiring: state_io.table is required when a contract "
             "declares state_io."
+        )
+    if not _STATE_IO_KEY_PATTERN.match(state_key):
+        raise ModelOnexError(
+            f"handler_wiring: state_io.key {state_key!r} is not a valid "
+            r"identifier — must match ^[a-zA-Z_][a-zA-Z0-9_]*$ (it names both "
+            "the wire payload field and the primary-key column)."
         )
     if (
         not isinstance(codec_ref, dict)
@@ -3826,6 +3882,7 @@ def _make_stateful_dispatch_callback(
     adapter = StateStoreAdapter(
         db_url,
         table=table,
+        key_column=state_key,
         pool_factory=pool_provider.create,
     )
     from uuid import UUID, uuid5
@@ -4359,9 +4416,20 @@ def _make_stateful_dispatch_callback(
         # pending=∅). Convert that silent permanent drop into a LOUD dispatch
         # failure so it is surfaced + DLQ'd (via the OMN-14716 silent-dispatch-
         # failure guard) and can never recur unobserved.
+        # OMN-16924: the guard's whole premise is the in-row outbox — it exists
+        # because ``select_recoverable_batches`` is the only re-publish path for
+        # a committed-but-unpublished emission. A contract with no
+        # ``published_events`` map has no outbox at all (``_outbox_topic_for``
+        # returns None for every class, so ``_publish_outbox_batch`` would
+        # raise): its durable output IS the row, and there is no emission to
+        # strand. Firing the guard there converts a correct, complete REDUCER
+        # fold into a hard dispatch failure. Gate on the map the wrapper was
+        # actually given — delegation (which declares published_events) is
+        # unchanged.
         if (
             loaded is None
             and outbox_supported
+            and bool(publish_topic_map)
             and not commit_in_flight
             and metadata.state not in _STATE_IO_TERMINAL_STATE_NAMES
         ):
@@ -4458,24 +4526,41 @@ def _make_stateful_dispatch_callback(
         envelope: ModelEventEnvelope[object],
     ) -> ModelDispatchResult | None:
         payload = _extract_dispatch_payload(envelope)
-        correlation_id = _coerce_uuid_or_none(
-            _extract_dispatch_correlation_id(envelope, payload)
-        )
-        if correlation_id is None:
-            raise ModelOnexError(
-                "handler_wiring: state_io dispatch requires a correlation_id "
-                "on every leg — got none. Legs 2-5 of a multi-leg "
-                "orchestrator carry no tenant_id on the wire but MUST carry "
-                "correlation_id (the state_io read key)."
-            )
-        cid = str(correlation_id)
+        raw_key = _extract_state_io_key(envelope, payload, state_key)
+        # ``correlation_id`` stays UUID-shaped (it is a UUID everywhere on the
+        # wire, and the retry helper logs it as one). A contract-declared domain
+        # key (OMN-16924) is an opaque string — ``session_id`` is not a UUID —
+        # so it is used verbatim as the row key and no UUID is handed to the
+        # retry helper's logging parameter.
+        if state_key == "correlation_id":
+            correlation_id = _coerce_uuid_or_none(raw_key)
+            if correlation_id is None:
+                raise ModelOnexError(
+                    "handler_wiring: state_io dispatch requires a correlation_id "
+                    "on every leg — got none. Legs 2-5 of a multi-leg "
+                    "orchestrator carry no tenant_id on the wire but MUST carry "
+                    "correlation_id (the state_io read key)."
+                )
+            cid = str(correlation_id)
+            retry_correlation_id = cast("UUID | None", correlation_id)
+        else:
+            cid = "" if raw_key is None else str(raw_key).strip()
+            if not cid:
+                raise ModelOnexError(
+                    f"handler_wiring: state_io dispatch requires the "
+                    f"contract-declared key {state_key!r} on every message — "
+                    f"got none. It is the read key for this node's durable "
+                    f"state row; without it the fold has no prior state to "
+                    f"fold onto and no row to persist into."
+                )
+            retry_correlation_id = None
 
         await _ensure_stale_rows_recovered(skip_cid=cid)
 
         _row_count, result = await retry_on_optimistic_conflict(
             lambda: _load_handle_persist(envelope, cid),
             check_conflict=lambda outcome: outcome[0] == 0,
-            correlation_id=cast("UUID", correlation_id),
+            correlation_id=retry_correlation_id,
         )
         return result
 
@@ -8949,10 +9034,11 @@ def _prepare_handler_wiring(
         )
         logger.info(
             "Auto-wired stateful handler with state_io in-row outbox "
-            "(publish-from-row + CAS-finalize): handler=%s table=%s "
+            "(publish-from-row + CAS-finalize): handler=%s table=%s key=%s "
             "outbox_topics=%d",
             handler_ref.name,
             state_io.get("table"),
+            state_io.get("key") or "correlation_id",
             len(_outbox_topic_map or {}),
         )
         # state_io wraps the standard dispatch callback, so the same

@@ -72,9 +72,11 @@ class StateStoreAdapter:
     """Async load/seed/CAS-update adapter over one state_io-declared table.
 
     Table shape (see
-    ``docker/migrations/forward/090_create_delegation_workflow_state.sql``)::
+    ``docker/migrations/forward/090_create_delegation_workflow_state.sql``, and
+    ``102_create_session_phase_state.sql`` for a ``session_id``-keyed reducer
+    table). The key column name is ``key_column`` (default ``correlation_id``)::
 
-        correlation_id TEXT PRIMARY KEY
+        <key_column>   TEXT PRIMARY KEY
         tenant_id      TEXT NOT NULL
         state          TEXT NOT NULL
         in_flight      BOOLEAN NOT NULL DEFAULT FALSE
@@ -95,6 +97,7 @@ class StateStoreAdapter:
         dsn: str,
         *,
         table: str,
+        key_column: str = "correlation_id",
         pool_factory: PoolFactory | None = None,
     ) -> None:
         """Initialize the adapter.
@@ -105,12 +108,23 @@ class StateStoreAdapter:
                 here; a missing DSN is a wiring-time fail-closed error, not
                 an adapter-level concern).
             table: Table name (contract-declared ``state_io.table``).
+            key_column: Primary-key column holding the row key (contract-declared
+                ``state_io.key``). Defaults to ``correlation_id`` — the only key
+                a multi-leg orchestrator's every leg carries, and the shape of
+                migration 090's ``delegation_workflow_state``. OMN-16924: a
+                REDUCER folds per DOMAIN entity, not per request, so its durable
+                row is keyed on the entity id its wire payload carries (e.g.
+                ``session_id``) and its table names that column accordingly. The
+                declared key names BOTH the wire field and this column, so a
+                contract cannot declare a key it then reads from a different
+                column.
             pool_factory: Injected coroutine factory that constructs the
                 asyncpg pool. This keeps connection construction owned by the
                 runtime provider layer instead of the adapter.
 
         Raises:
-            RepositoryContractError: If ``table`` is not a valid identifier.
+            RepositoryContractError: If ``table`` or ``key_column`` is not a
+                valid identifier.
         """
         if not _TABLE_NAME_PATTERN.match(table):
             raise RepositoryContractError(
@@ -119,8 +133,16 @@ class StateStoreAdapter:
                 op_name="__init__",
                 table=table,
             )
+        if not _TABLE_NAME_PATTERN.match(key_column):
+            raise RepositoryContractError(
+                f"Invalid state_io key column: {key_column!r} — must match "
+                r"^[a-zA-Z_][a-zA-Z0-9_]*$",
+                op_name="__init__",
+                table=table,
+            )
         self._dsn = dsn
         self._table = table
+        self._key_column = key_column
         self._pool_factory = pool_factory
         self._pool: asyncpg.Pool | None = None
         self._pool_lock = asyncio.Lock()
@@ -178,8 +200,8 @@ class StateStoreAdapter:
             pool = await self._get_pool()
             async with pool.acquire() as conn:
                 row = await conn.fetchrow(
-                    f"SELECT payload::text AS payload_json, version "  # noqa: S608 — table validated in __init__
-                    f"FROM {self._table} WHERE correlation_id = $1",
+                    f"SELECT payload::text AS payload_json, version "  # noqa: S608 — table + key column validated in __init__
+                    f"FROM {self._table} WHERE {self._key_column} = $1",
                     correlation_id,
                 )
         except asyncpg.PostgresError as exc:
@@ -227,12 +249,12 @@ class StateStoreAdapter:
             pool = await self._get_pool()
             async with pool.acquire() as conn:
                 row = await conn.fetchrow(
-                    f"INSERT INTO {self._table} "  # noqa: S608 — table validated in __init__
-                    f"(correlation_id, tenant_id, state, in_flight, payload, "
+                    f"INSERT INTO {self._table} "  # noqa: S608 — table + key column validated in __init__
+                    f"({self._key_column}, tenant_id, state, in_flight, payload, "
                     f"pending_emissions, publish_attempts) "
                     f"VALUES ($1, $2, $3, $4, $5::jsonb, $6::jsonb, $7) "
-                    f"ON CONFLICT (correlation_id) DO NOTHING "
-                    f"RETURNING correlation_id",
+                    f"ON CONFLICT ({self._key_column}) DO NOTHING "
+                    f"RETURNING {self._key_column}",
                     correlation_id,
                     tenant_id,
                     state,
@@ -280,12 +302,12 @@ class StateStoreAdapter:
             pool = await self._get_pool()
             async with pool.acquire() as conn:
                 result = await conn.execute(
-                    f"UPDATE {self._table} "  # noqa: S608 — table validated in __init__
+                    f"UPDATE {self._table} "  # noqa: S608 — table + key column validated in __init__
                     f"SET payload = $1::jsonb, state = $2, in_flight = $3, "
                     f"tenant_id = $4, pending_emissions = $5::jsonb, "
                     f"publish_attempts = COALESCE($6, publish_attempts), "
                     f"version = version + 1 "
-                    f"WHERE correlation_id = $7 AND version = $8",
+                    f"WHERE {self._key_column} = $7 AND version = $8",
                     payload_json,
                     state,
                     in_flight,
@@ -322,7 +344,8 @@ class StateStoreAdapter:
             pool = await self._get_pool()
             async with pool.acquire() as conn:
                 rows = await conn.fetch(
-                    f"SELECT correlation_id, tenant_id, state, in_flight, "  # noqa: S608 — table validated in __init__
+                    f"SELECT {self._key_column} AS correlation_id, "  # noqa: S608 — table + key column validated in __init__
+                    f"tenant_id, state, in_flight, "
                     f"payload::text AS payload_json, version, "
                     f"pending_emissions::text AS pending_emissions_json, "
                     f"publish_attempts "
@@ -385,7 +408,7 @@ class StateStoreAdapter:
             pool = await self._get_pool()
             async with pool.acquire() as conn:
                 result = await conn.execute(
-                    f"UPDATE {self._table} "  # noqa: S608 — table validated in __init__
+                    f"UPDATE {self._table} "  # noqa: S608 — table + key column validated in __init__
                     f"SET state = 'FAILED', "
                     f"    in_flight = FALSE, "
                     f"    payload = jsonb_set("
