@@ -41,9 +41,14 @@ def validator():
     repo_root = Path(__file__).resolve().parents[2]
     try:
         omni_home = resolve_omni_home(repo_root)
-    except DeployScopeHookError:
-        pytest.skip("omniclaude sibling clone not present under OMNI_HOME")
-    return load_canonical_validator(omni_home)
+        return load_canonical_validator(omni_home)
+    except DeployScopeHookError as exc:
+        # Absent OR stale. OMN-16989: the resolver walks every parent of the
+        # repo root, so on a transplanted tree (the OMN-16991 remote leg) it can
+        # reach an unrelated, months-old omniclaude clone and import it. That
+        # produced four reds about another repo's clone freshness with nothing
+        # in the message saying so; a named skip is the honest outcome.
+        pytest.skip(f"canonical omniclaude validator unusable here: {exc}")
 
 
 @pytest.fixture(autouse=True)
@@ -144,3 +149,55 @@ def test_runtime_detection_is_dry_with_canonical_validator(validator) -> None:
     # not a local re-implementation (OMN-14655 DRIFT-3 guard).
     assert validator.find_runtime_paths([_RUNTIME_FILE]) == [_RUNTIME_FILE]
     assert validator.find_runtime_paths([_NON_RUNTIME_FILE]) == []
+
+
+# =============================================================================
+# OMN-16989: a stale sibling clone must fail with its own name
+# =============================================================================
+
+
+def _fake_clone(root: Path, body: str) -> Path:
+    """A directory shaped like an OMNI_HOME whose omniclaude clone carries
+    BODY as the canonical deploy-gate validator."""
+    target = root / "omniclaude" / ".github" / "actions" / "deploy-gate"
+    target.mkdir(parents=True)
+    (target / "validate_pr_deploy_required.py").write_text(body, encoding="utf-8")
+    return root
+
+
+def test_a_stale_canonical_validator_fails_with_staleness_as_the_named_reason(
+    tmp_path: Path,
+) -> None:
+    """The resolver walks EVERY parent of the repo root, so whichever directory
+    named ``omniclaude`` sits nearest above the checkout wins -- with no
+    assertion that it is this repo's sibling or anywhere near current.
+
+    Measured on `.201` over the OMN-16991 remote leg: the transplanted tree at
+    ``/data/omninode/onex-prepush/runs/<id>/tree`` reached ``/data/omninode``
+    and imported an omniclaude clone pinned at omniclaude#1600, four versions of
+    the validator behind. Four tests then failed on ``has no attribute
+    'parse_evidence_metadata'`` -- a red about another repo's clone freshness,
+    on whichever host happened to run the suite, with nothing in the message
+    saying so. Silent dependence on a cross-repo hidden input is the defect;
+    naming it is the fix."""
+    home = _fake_clone(tmp_path, "def find_runtime_paths(files):\n    return []\n")
+    with pytest.raises(DeployScopeHookError) as excinfo:
+        load_canonical_validator(home)
+    message = str(excinfo.value)
+    assert "STALE" in message
+    assert "parse_evidence_metadata" in message
+    assert str(home) in message
+
+
+def test_a_current_canonical_validator_still_imports(tmp_path: Path) -> None:
+    """The staleness assertion must not reject a clone that does expose the
+    surface -- it may only add a named failure, never a new way to refuse."""
+    home = _fake_clone(
+        tmp_path,
+        "import re\n"
+        "TICKET_PATTERN = re.compile(r'OMN-([0-9]+)')\n"
+        "def find_runtime_paths(files):\n    return []\n"
+        "def parse_evidence_metadata(body):\n    return None\n",
+    )
+    module = load_canonical_validator(home)
+    assert hasattr(module, "parse_evidence_metadata")

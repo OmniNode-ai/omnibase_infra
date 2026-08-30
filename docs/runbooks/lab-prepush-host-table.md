@@ -50,7 +50,7 @@ forgeable-on-disk-artifact surface OMN-16688 deliberately avoided.
 | label | host | cores | load1 | uv | mode | why |
 |---|---|---:|---:|---|---|---|
 | `h200` | `stickybeatz-studio` (.200) | 24 | varies, often >1.0x | 0.11.32 | authorizing | rule-11a default gate host |
-| `h201` | `omninode-pc` (.201) | 32 | 14.08 → 0.44x | 0.11.5 | authorizing | **denied for `omnibase_infra`** until OMN-16989 closes |
+| `h201` | `omninode-pc` (.201) | 32 | 4.62 → 0.14x | 0.11.5 | authorizing | denies nothing since OMN-16989 — full `tests/unit/` green there over the real leg |
 | `h201c` | `gate-runner-201` (container) | 32 | — | — | authorizing | identity only; the container has no sshd (OMN-16446) |
 | `h101` | `stickybeatz` (.101) | 12 | 2.78 → 0.23x | 0.12.7 | **authorizing** | promoted OMN-17161 — see below |
 | `h105` | `omnibook` (.105) | 10 | 1.76 → 0.18x | 0.11.8 | **authorizing** | net-new capacity; promoted out of shadow — see below |
@@ -86,7 +86,30 @@ tree — verified writable over ssh while `ls ~/Code` still returns `Operation n
 permitted`. The bundle design never needs `~/Code` on a remote host, so no
 System-Settings Full-Disk-Access step is required. Only the uv upgrade gates it.
 
-## Why `.201` reports 0.44x and is still skipped
+## Why `.201` denied `omnibase_infra`, and why it no longer does
+
+OMN-16989 recorded **15 host-coupled `omnibase_infra` failures on `.201`** and
+`repos_denied=omnibase_infra` was set on `h201` because of them. Every one of
+those 15 was measured inside the **`.201` gate-runner container**, driven by
+`scripts/ci/run_on_gate_runner.sh` — a different execution environment from the
+one this table addresses, which is the `.201` **host** over the remote leg
+(bundle transplant into a scratch workroot, `uv sync` in a fresh tree, the
+wrapper's developer-shell PATH, and the committed table as the identity source
+rather than an env override the pytest child then scrubs).
+
+Re-measured on the host over the real leg (2026-08-30, receipts in
+`.onex_state/prepush_distribution/receipts.jsonl`):
+
+| dispatch | result |
+|---|---|
+| `tests/unit/` (the heavy escalation target) | **24,925 collected, 0 host-coupled failures**, 649 s |
+| `tests/ci/` (the tree the 15 came from) | **1,892 collected, 0 failures**, 122 s |
+
+The denial was pinning a verdict from an environment the table never routes work
+to. Three real defects surfaced on the way and are fixed rather than denied
+around — see "Host prerequisites" below.
+
+## Why `.201` reports a low ratio and can still be skipped
 
 Measured 2026-08-30: `.201` had the **fittest load ratio in the lab** (14.08/32)
 while running **three concurrent pre-push suites** behind a **10-deep queue**.
@@ -247,10 +270,57 @@ wrapper therefore prepends the uv directory, `/opt/homebrew/bin`,
 `/usr/local/bin` and `~/.local/bin` before it runs anything. A false red here
 hard-blocks a push, so PATH parity is part of the verdict meaning something.
 
+The prefix was **macOS-only by construction** until OMN-16989:
+`/opt/homebrew/bin` has no meaning on a Linux row, and `h201` is the fleet's only
+Linux capacity row. Measured there non-interactively 2026-08-30,
+`ssh jonah@192.168.86.201 'echo $PATH'` prints
+`/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin:/usr/games:/usr/local/games:/snap/bin`
+— `~/.local/bin` is absent, and **both** `uv` and `shellcheck` live there, so the
+`$(dirname "$UV")` and `~/.local/bin` entries already covered that host (its full
+`tests/unit/` dispatch returned zero tool-missing reds). The Linux analogues
+(`/home/linuxbrew/.linuxbrew/bin`, `/snap/bin`, `~/.cargo/bin`) are appended
+**after** every measured entry, so they can only add resolution and never shadow
+a tool that already resolves.
+
 Before promoting a host, confirm over a **non-interactive** ssh that
 `shellcheck`, `git` and the row's `uv_abs_path` all resolve once that prefix is
 applied. A tool that is missing outright (not merely off PATH) will produce a
 false red; deny the affected repo on that row rather than accept it.
+
+## Two more things a transplanted tree is not (OMN-16989)
+
+PATH was the first-discovered member of a class: **the transplant is not a
+developer checkout**, and a red that is really a statement about that difference
+hard-blocks a push while saying nothing true about the code.
+
+**1. It has no remote-tracking refs.** `git bundle create <b> HEAD` carries
+HEAD's objects and exactly one ref, so the clone has no `origin/dev` — and this
+suite *subprocesses this hook*, which resolves
+`${PREPUSH_BASE_REF:-origin/dev}` before it does anything else. Measured on
+`h201`: the whole `tests/ci/test_prepush_hook_host_identity_guard.py` behavioral
+proof reduced to `ERROR: base ref 'origin/dev' could not be resolved`. The
+dispatcher now hands the wrapper the base ref **and** the base sha, and the
+wrapper `update-ref`s it into the transplanted tree after checkout. `BASE_SHA` is
+a merge-base on the origin side, so it is always an ancestor of HEAD and its
+objects are already in the bundle — only the ref was missing, and creating it is
+local and network-free. Absent or unresolvable, it is skipped silently: it may
+only add resolution, never refuse a run.
+
+**2. It has no sibling clones — but it does have whatever sits above the
+workroot.** `scripts/ci/check_deploy_scope_dod.py` imports the canonical
+deploy-gate validator from `$OMNI_HOME/omniclaude`, falling back to a walk over
+**every** parent of the repo root. On `h201` the tree lives at
+`/data/omninode/onex-prepush/runs/<id>/tree`, the walk reached `/data/omninode`,
+and it imported an omniclaude clone pinned at **omniclaude#1600** — the host's
+current clone (#1963) is at `/data/omninode/omni_home` and is *not* an ancestor.
+Four tests then failed on `module '_deploy_gate_canonical_validator' has no
+attribute 'parse_evidence_metadata'`: a red about **another repo's clone
+freshness on whichever host ran the suite**, with nothing in the message saying
+so. This is the same cross-repo-hidden-input shape OMN-16989 named on the
+env-parity tests. `load_canonical_validator` now asserts the surface it calls and
+raises a named staleness error; the test fixture skips on it with that reason
+attached. The hook itself still hard-errors — but with a remediation instead of
+an `AttributeError` five frames down.
 
 ## Receipts
 

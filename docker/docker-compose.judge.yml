@@ -125,7 +125,15 @@ x-judge-runtime-env: &judge-runtime-env
   BIFROST_LOCAL_REASONER_ENDPOINT_URL: ${BIFROST_LOCAL_REASONER_ENDPOINT_URL:-https://generativelanguage.googleapis.com/v1beta/openai/chat/completions}
   BIFROST_LOCAL_EMBEDDING_ENDPOINT_URL: ${BIFROST_LOCAL_EMBEDDING_ENDPOINT_URL:-https://generativelanguage.googleapis.com/v1beta/openai/chat/completions}
   BIFROST_LOCAL_DS_V4_FLASH_ENDPOINT_URL: ${BIFROST_LOCAL_DS_V4_FLASH_ENDPOINT_URL:-https://generativelanguage.googleapis.com/v1beta/openai/chat/completions}
-  LLM_GLM_URL: ${LLM_GLM_URL:-https://api.z.ai/api/paas/v4}
+  # OMN-6790: the z.ai GLM CODING PLAN surface. We hold a Coding Plan, not a
+  # pay-as-you-go balance. The bare /api/paas/v4 surface answers a Coding-Plan
+  # key with HTTP 429 code 1113 "Insufficient balance or no resource package",
+  # which is a WRONG-ENDPOINT signal, never a billing fact. Authority for this
+  # URL is omnimarket's routing contract (configs/bifrost_delegation.yaml,
+  # backend cloud-glm); this default only keeps the judge lane from falling
+  # back onto the wrong product. Guarded by
+  # tests/test_glm_endpoint_surface_omn6790.py.
+  LLM_GLM_URL: ${LLM_GLM_URL:-https://api.z.ai/api/coding/paas/v4}
   LLM_GLM_MODEL_NAME: ${LLM_GLM_MODEL_NAME:-glm-4.5}
   LLM_GLM_API_KEY: ${LLM_GLM_API_KEY:-}
   GEMINI_API_KEY: ${GEMINI_API_KEY:?GEMINI_API_KEY required for judge Gemini route}
