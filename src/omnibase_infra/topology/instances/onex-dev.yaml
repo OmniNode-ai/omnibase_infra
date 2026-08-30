@@ -69,6 +69,7 @@ databases:
               - log_entries
               - projection_watermarks
               - topic_produce_windows
+              - work_events
             privileges: [INSERT, SELECT, UPDATE]
             schema: omninode_internal
           - object_type: TABLE
