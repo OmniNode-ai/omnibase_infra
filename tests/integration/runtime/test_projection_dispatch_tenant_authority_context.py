@@ -33,6 +33,17 @@ pytestmark = pytest.mark.integration
 
 TOPIC = "onex.evt.platform.tenant-proof.v1"
 
+# OMN-17142: each test below configures ONLY the binding DSN its target is
+# supposed to resolve, and deliberately leaves the others unset. OMN-15425 moved
+# tenant-schema targets from the dashboard binding onto `tenant_projection`
+# (`ONEX_TENANT_DB_URL`, principal `tenant_projection_writer`); these modules
+# still exported `OMNIDASH_ANALYTICS_DB_URL`, which the targets no longer read,
+# so the callback failed closed on every construction. Setting the whole
+# topology-declared set here (`configure_projection_dsns`) would make the file
+# green again while destroying what it proves: with only the tenant DSN present,
+# a regression that resolved the dashboard binding raises instead of quietly
+# connecting as the wrong principal.
+
 
 class _Cursor:
     def __init__(
@@ -113,7 +124,7 @@ async def test_dispatch_engine_keeps_verified_authority_out_of_band(
     correlation_id = uuid4()
     calls: list[tuple[str, object]] = []
     connection = _Connection(calls)
-    monkeypatch.setenv("OMNIDASH_ANALYTICS_DB_URL", "postgresql://fixture")
+    monkeypatch.setenv("ONEX_TENANT_DB_URL", "postgresql://fixture")
     callback = _make_projection_dispatch_callback(
         _TenantProjectionHandler(),
         projection_database_target("delegation_events", schema="tenant"),
@@ -192,7 +203,7 @@ async def test_dispatch_without_verified_capability_records_but_never_selects(
     "we never connect at all", now stated directly instead of as a side effect
     of refusing the write.
     """
-    monkeypatch.setenv("OMNIDASH_ANALYTICS_DB_URL", "postgresql://fixture")
+    monkeypatch.setenv("ONEX_TENANT_DB_URL", "postgresql://fixture")
     callback = _make_projection_dispatch_callback(
         _TenantProjectionHandler(),
         projection_database_target("delegation_events", schema="tenant"),
@@ -221,7 +232,7 @@ async def test_dispatch_without_verified_capability_fails_at_db_role_validation(
 ) -> None:
     calls: list[tuple[str, object]] = []
     connection = _Connection(calls, principal="unverified_projection_writer")
-    monkeypatch.setenv("OMNIDASH_ANALYTICS_DB_URL", "postgresql://fixture")
+    monkeypatch.setenv("ONEX_TENANT_DB_URL", "postgresql://fixture")
     callback = _make_projection_dispatch_callback(
         _TenantProjectionHandler(),
         projection_database_target("delegation_events", schema="tenant"),
@@ -263,7 +274,7 @@ async def test_mixed_target_internal_operation_does_not_resolve_tenant_authority
         ),
     )
     target = _resolve_projection_database_target(tables, application_topology())
-    monkeypatch.setenv("OMNIDASH_ANALYTICS_DB_URL", "postgresql://tenant")
+    monkeypatch.setenv("ONEX_TENANT_DB_URL", "postgresql://tenant")
     monkeypatch.setenv("OMNINODE_INTERNAL_DB_URL", "postgresql://internal")
     callback = _make_projection_dispatch_callback(
         _InternalProjectionHandler(), target, (TOPIC,)
