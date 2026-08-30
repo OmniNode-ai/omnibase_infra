@@ -126,6 +126,24 @@ if TYPE_CHECKING:
 logger = logging.getLogger(__name__)
 
 
+def _split_infisical_path(path: str) -> tuple[str, str | None]:
+    """Split an Infisical ``source_path`` into (secret name, folder).
+
+    OMN-16984. ``ModelSecretSourceSpec.source_path`` may be either a flat key
+    (``LLM_GLM_API_KEY``) or a folder-qualified one
+    (``/dev/onex-runtime/LLM_GLM_API_KEY``). The adapter addresses a secret by
+    flat key plus a folder, so both halves are needed. A flat key declares no
+    folder and returns ``None`` -- the handler's configured ``secret_path``
+    stays authoritative rather than being re-rooted to ``""`` or ``"/"``.
+
+    Any ``#field`` fragment has already been removed by the caller.
+    """
+    if "/" not in path:
+        return path, None
+    folder, _, secret_name = path.rpartition("/")
+    return secret_name, folder or "/"
+
+
 @runtime_checkable
 class ProtocolSecretResolverMetrics(Protocol):
     """Protocol for SecretResolver metrics collection.
@@ -1723,19 +1741,23 @@ class SecretResolver:
             secret_path = path
             field = None
 
-        # Extract the last path segment as the secret key name.
-        # Infisical paths may contain slashes (e.g., "projects/env/DB_PASSWORD")
-        # but the adapter's get_secret_by_name() expects a flat key like "DB_PASSWORD".
-        if "/" in secret_path:
-            secret_name = secret_path.rsplit("/", 1)[1]
-        else:
-            secret_name = secret_path
+        # Split the mapping into the FOLDER and the flat secret key name. The
+        # adapter's get_secret_by_name() expects a flat key ("DB_PASSWORD"), so
+        # a path-qualified mapping ("/dev/onex-runtime/DB_PASSWORD") must be
+        # split -- but the folder is then passed THROUGH as secret_path
+        # (OMN-16984). It used to be computed and discarded, which silently
+        # re-rooted every read at whatever folder the handler happened to be
+        # configured with and made two mappings in different folders
+        # indistinguishable. An unqualified mapping declares no folder, so
+        # ``None`` is passed and the handler's configured default stays
+        # authoritative.
+        secret_name, folder = _split_infisical_path(secret_path)
 
         # For sync access, use the handler's public get_secret_sync() method
         # (handler.execute is async, so we use the sync API instead)
         try:
             secret_value = self._infisical_handler.get_secret_sync(
-                secret_name=secret_name
+                secret_name=secret_name, secret_path=folder
             )
             if secret_value is None:
                 return None
@@ -1792,19 +1814,17 @@ class SecretResolver:
             raw_path = path
             field = None
 
-        # Extract the last path segment as the secret key name.
-        # Infisical paths may contain slashes (e.g., "projects/env/DB_PASSWORD")
-        # but the adapter's get_secret_by_name() expects a flat key like "DB_PASSWORD".
-        if "/" in raw_path:
-            secret_name = raw_path.rsplit("/", 1)[1]
-        else:
-            secret_name = raw_path
+        # See _read_infisical_secret_sync: the folder is carried through as
+        # secret_path rather than discarded (OMN-16984). ``None`` for an
+        # unqualified mapping leaves the handler's configured default in place.
+        secret_name, folder = _split_infisical_path(raw_path)
 
+        payload: dict[str, object] = {"secret_name": secret_name}
+        if folder is not None:
+            payload["secret_path"] = folder
         envelope: dict[str, object] = {
             "operation": "infisical.get_secret",
-            "payload": {
-                "secret_name": secret_name,
-            },
+            "payload": payload,
             "correlation_id": str(effective_correlation_id),
         }
 
