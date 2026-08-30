@@ -858,6 +858,15 @@ services:
       # while OMNINODE_INTERNAL_DB_URL resolved and then failed at connect.
       # Empty-means-skip, exactly as on the postgres service.
       OMNINODE_RUNTIME_PASSWORD: ${OMNINODE_RUNTIME_PASSWORD:-}
+      # OMN-17138: the TENANT-domain counterpart, and the second entry in the
+      # runner's LOGIN_ONLY_ROLE_MAP. OMN-15425 added the map entry and the
+      # fail-closed ONEX_TENANT_DB_URL consumer but not this line, so on every
+      # warm volume -- which is every lane -- the runner logged
+      # `skip tenant_projection_writer (TENANT_PROJECTION_WRITER_PASSWORD not
+      # set)` and the role stayed NOLOGIN with a NULL password while the DSN
+      # resolved and then failed at connect. Empty-means-skip, exactly as on
+      # the key above; the judge lane already carried its own copy.
+      TENANT_PROJECTION_WRITER_PASSWORD: ${TENANT_PROJECTION_WRITER_PASSWORD:-}
     volumes:
       - ../scripts/run-forward-migrations.sh:/run-forward-migrations.sh:ro
       - ../docker/migrations/forward:/migrations/forward:ro
