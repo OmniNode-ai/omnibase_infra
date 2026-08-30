@@ -6,6 +6,8 @@
 # verified: 2026-06-17T13:00:00Z via bash scripts/lane-census-check.sh --json on 192.168.86.201
 # verified: 2026-07-03 via docker compose -f docker/docker-compose.infra.yml -f docker/docker-compose.<lane>.yml config (OMN-13815 compose-derived container_name parity); running-state basis: live .201 `docker inspect` evidence in OMN-13815 (2026-07-02) confirming these consumers run under the omnibase-infra-stability-test project.
 # verified: 2026-07-03 via LANE_MANIFEST=deploy/lane-census/lane-manifest.yaml python3 scripts/lane_census_plan.py fed the live .201 docker inventory (docker ps -a / docker network ls over ssh, read-only) — migration-gate keepalive reclassification clears the oneshot_stuck false-positive on the healthy stability-test and judge lanes (OMN-13772).
+# verified: 2026-08-30 via read-only ssh jonah@192.168.86.201 `ss -ltn` + `docker ps --format '{{.Names}}\t{{.Label "com.docker.compose.project"}}\t{{.Ports}}'` (OMN-17143): confirms the four governed lanes' live port bindings AND that the newly reserved collaborator block 58085/58086/45436/46379/55092/55644/53002/58080 has no listener. The reserved
+#   `lakshman` lane below is declared-but-not-built: zero containers, no compose file, optional: true.
 # (OMN-13034 attestation: any edit to this file must carry a fresh verified: line in the same PR)
 #
 # THE CLASS FIX. We kept regressing the same way — nothing reconciled desired vs
@@ -241,3 +243,54 @@ lanes:
       - name: omninode-runtime-effects
         kind: service
         replicas: 1
+  # OMN-17143: COLLABORATOR lane reserved for Lakshman Patel (operator decision
+  # 2026-08-30). This entry is a RESERVATION, not a running lane — there is no
+  # docker/docker-compose.lakshman.yml yet and no containers exist. It is
+  # declared here first, deliberately, so the port block and the compose project
+  # name are claimed in the desired-state authority BEFORE anything is stood up.
+  # The failure mode this prevents is a collaborator picking ports ad hoc and
+  # displacing a governed lane (the OMN-13581 cross-lane displacement class) or
+  # standing up an undocumented-but-running project (the OMN-13034 judge-lane
+  # class, where undocumented-but-running is the dangerous direction).
+  #
+  # optional: true — same semantics as dev: an optional lane that is entirely
+  # down is NOT drift (scripts/lane_census_plan.py). A reserved-but-unbuilt lane
+  # must not emit a census ticket every tick. Once ANY declared service is
+  # running the lane is reconciled normally.
+  #
+  # RESERVED PORT BLOCK — every port below was verified FREE on 192.168.86.201
+  # by read-only `ss -ltn` on 2026-08-30 (see the verified: line at the top of
+  # this file). The obvious-looking 48085/48086 block is NOT free: it is the
+  # judge lane's runtime main/effects (docker/runtime-policy.env
+  # JUDGE_RUNTIME_MAIN_PORT / JUDGE_RUNTIME_EFFECTS_PORT), and 49092 is the prod
+  # broker's external Kafka port. Do not reuse either.
+  #
+  #   runtime main       58085
+  #   runtime effects    58086
+  #   postgres           45436
+  #   valkey             46379
+  #   redpanda kafka     55092   (external; container-internal stays 19092)
+  #   redpanda admin     55644
+  #   projection-api     53002
+  #   keycloak           58080   (only if the lane ever runs one)
+  #
+  # BOUNDARY. This is a collaborator lane owned by Lakshman and mutable by him.
+  # It is NOT a proof lane: no synthetic integration evidence, no golden-chain
+  # receipt, and no `stability-proven` digest may be sourced from it, and it is
+  # never a premise for a prod-promotion grant (OMN-13418 / OMN-12/13 gate
+  # family). It is deliberately NOT in the OMN-15243 stability-class lane set
+  # for the no-raw-prod-bypass gate, because it is not stability-class — adding
+  # it there would wrongly imply grants can resolve against it.
+  #
+  # WHEN THE COMPOSE FILE LANDS: docker/docker-compose.lakshman.yml must add
+  # concrete `services:` entries here AND add "lakshman" to _COMPOSE_LANES in
+  # tests/unit/scripts/test_lane_census_manifest_parity.py in the SAME PR, so
+  # the parity ratchet starts policing it. Until then the empty service list is
+  # the honest statement: nothing is declared to be running.
+  lakshman:
+    compose_file: docker/docker-compose.lakshman.yml
+    compose_project: omnibase-infra-lakshman
+    network: omnibase-infra-lakshman-network
+    image_tag_pattern: '.+'
+    optional: true
+    services: []
