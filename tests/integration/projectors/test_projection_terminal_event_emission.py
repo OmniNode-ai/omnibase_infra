@@ -27,6 +27,7 @@ from tests.helpers.application_db_topology import projection_database_target
 @pytest.fixture(autouse=True)
 def _configured_projection_dsn(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setenv("OMNIDASH_ANALYTICS_DB_URL", "postgresql://fixture")
+    monkeypatch.setenv("ONEX_TENANT_DB_URL", "postgresql://fixture")
 
 
 _PATCH_BUILD_ADAPTER = (

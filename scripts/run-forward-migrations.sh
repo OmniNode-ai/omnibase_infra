@@ -81,6 +81,9 @@
 #     volumes by section 0 below. Same empty-means-skip contract as the postgres
 #     service's ROLE_* vars: an unprovisioned lane must get no role rather than a
 #     half-configured one. Must be hex (openssl rand -hex 32) when set.
+#   TENANT_PROJECTION_WRITER_PASSWORD (default: unset = skip, OMN-15425).
+#     Credential for the topology-governed tenant_projection_writer principal,
+#     re-asserted on warm volumes by section 0 below under the same contract.
 #   ONEX_MIGRATION_LANE (default: unset = FULL operator fence, OMN-15379).
 #     Lane indicator for the lane-scoped fence release. The ONLY recognised
 #     value is `dev` (the lab compose lane); unset or unknown means every fenced
@@ -1320,6 +1323,7 @@ echo "[forward-migration] Re-asserting deployment-owned login credentials..."
 # one string so the loop needs no word splitting to stay correct.
 for login_role_entry in \
   "omninode_runtime:OMNINODE_RUNTIME_PASSWORD" \
+  "tenant_projection_writer:TENANT_PROJECTION_WRITER_PASSWORD" \
 ; do
   entry_role_name=${login_role_entry%%:*}
   entry_password_var=${login_role_entry#*:}

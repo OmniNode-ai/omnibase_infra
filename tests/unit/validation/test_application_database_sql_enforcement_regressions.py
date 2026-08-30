@@ -85,6 +85,15 @@ def test_valid_postgresql_target_forms_cannot_bypass_lint(
             "CREATE FUNCTION tenant.safe_report() RETURNS bigint "
             "LANGUAGE sql AS $$ SELECT count(*) FROM tenant.events $$;"
         ),
+        """
+        DO $$
+        BEGIN
+          IF to_regclass('tenant.events') IS NOT NULL THEN
+            GRANT SELECT ON tenant.events TO tenant_reader;
+          END IF;
+        END
+        $$;
+        """,
         "LOCK TABLE tenant.events IN ACCESS EXCLUSIVE MODE;",
         "LOCK tenant.events IN ACCESS EXCLUSIVE MODE;",
         "REINDEX TABLE tenant.events;",

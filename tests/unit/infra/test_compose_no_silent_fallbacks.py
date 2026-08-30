@@ -30,6 +30,14 @@ ALLOWED_EMPTY_DEFAULTS = {
     # The fail-closed `:?` form lives on the CONSUMER of the credential,
     # OMNINODE_INTERNAL_DB_URL in x-runtime-env.
     "OMNINODE_RUNTIME_PASSWORD",
+    # OMN-15425: the TENANT-domain half of the identical split, on the identical
+    # contract as OMNINODE_RUNTIME_PASSWORD directly above — same postgres
+    # first-startup seam (000_create_multiple_databases.sh LOGIN_ONLY_ROLE_MAP),
+    # same empty-means-skip semantics on an unprovisioned volume. The
+    # fail-closed `:?` form lives on the CONSUMER, ONEX_TENANT_DB_URL in
+    # x-runtime-env, so an unset credential still wedges compose render for any
+    # lane that actually runs the tenant projections.
+    "TENANT_PROJECTION_WRITER_PASSWORD",
     # OMN-4316: OMNIMEMORY_* vars are intentionally opt-in (empty = disabled)
     "OMNIMEMORY_ENABLED",
     "OMNIMEMORY_MEMGRAPH_HOST",

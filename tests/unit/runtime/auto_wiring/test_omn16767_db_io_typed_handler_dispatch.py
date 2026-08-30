@@ -346,6 +346,9 @@ def _clean_capture(monkeypatch: pytest.MonkeyPatch) -> None:
     # binding, so set it — pre-fix this is what let the wrong arm construct at
     # all on the dev lane.
     monkeypatch.setenv("OMNIDASH_ANALYTICS_DB_URL", "postgresql://fixture/omn16767")
+    # OMN-15425: `tenant_projection` resolves its OWN DSN env — same physical
+    # database, different principal, attested per binding by OMN-16911.
+    monkeypatch.setenv("ONEX_TENANT_DB_URL", "postgresql://fixture/omn16767")
 
 
 # ---------------------------------------------------------------------------

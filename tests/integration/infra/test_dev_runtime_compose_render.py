@@ -93,6 +93,8 @@ BASE_REQUIRED_ENV: dict[str, str] = {
     # the fail-closed ${VAR:?} form, so the layered render aborts without it.
     # Render-only, never a real credential.
     "OMNINODE_RUNTIME_PASSWORD": "render-only-omninode-runtime-password",
+    # OMN-15425: TENANT-domain counterpart, same `:?` seam in x-runtime-env.
+    "TENANT_PROJECTION_WRITER_PASSWORD": "render-only-tenant-projection-writer-password",
     "LINEAR_API_KEY": "test-linear-api-key",
     "GITHUB_TOKEN": "test-github-token",
     "DEPLOY_AGENT_HMAC_SECRET": "render-only-deploy-agent-hmac-secret",

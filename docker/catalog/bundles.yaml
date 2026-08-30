@@ -157,6 +157,10 @@ omnimarket-projections:
     - core
   inject_required_env:
     - OMNIDASH_ANALYTICS_DB_URL
+    # OMN-15425: the tenant-domain projection identity. Separate from the line
+    # above because it resolves a DIFFERENT principal (tenant_projection_writer)
+    # on the same database — see docker-compose.infra.yml's ONEX_TENANT_DB_URL.
+    - ONEX_TENANT_DB_URL
 omnidash:
   description: "OmniDash Next.js analytics dashboard (OMN-8738)"
   services:

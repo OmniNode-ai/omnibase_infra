@@ -80,6 +80,12 @@ x-judge-runtime-env: &judge-runtime-env
   # there. Without it the judge lane's three runtime services fail to prepare
   # all 19 `database_ref: application` contracts and report healthy anyway.
   OMNINODE_INTERNAL_DB_URL: "postgresql://omninode_runtime:${OMNINODE_RUNTIME_PASSWORD:?OMNINODE_RUNTIME_PASSWORD must be set — the internal projections connect to omnidash_analytics as the non-BYPASSRLS omninode_runtime principal (OMN-16843), never as the postgres superuser}@postgres:5432/omnidash_analytics"
+  # OMN-15425: the TENANT-domain counterpart, carried here for the same reason
+  # as the key above — this lane redefines the runtime env block outright and
+  # inherits nothing from the base file. Rationale for the separate DSN, the
+  # non-superuser principal and the fail-closed `:?` is in
+  # docker-compose.infra.yml's block; not repeated.
+  ONEX_TENANT_DB_URL: "postgresql://tenant_projection_writer:${TENANT_PROJECTION_WRITER_PASSWORD:?TENANT_PROJECTION_WRITER_PASSWORD must be set — the tenant projections connect to omnidash_analytics as the non-BYPASSRLS tenant_projection_writer principal (OMN-15425), never as the postgres superuser and never as the dashboard-facing analytics role}@postgres:5432/omnidash_analytics"
   KAFKA_BOOTSTRAP_SERVERS: "redpanda:9092"
   KAFKA_BROKER_ALLOWLIST: "redpanda:"
   BUS_ID: "judge"
@@ -274,6 +280,10 @@ services:
       # credential. This service redeclares the base definition wholesale, so
       # the base file's copy of this line does not reach the judge lane.
       OMNINODE_RUNTIME_PASSWORD: ${OMNINODE_RUNTIME_PASSWORD:-}
+      # OMN-15425: warm-volume re-assert of the tenant_projection_writer LOGIN
+      # credential, matching docker-compose.infra.yml and the fresh-volume
+      # bootstrap map.
+      TENANT_PROJECTION_WRITER_PASSWORD: ${TENANT_PROJECTION_WRITER_PASSWORD:-}
     volumes:
       - ../scripts/run-forward-migrations.sh:/run-forward-migrations.sh:ro
       - ../docker/migrations/forward:/migrations/forward:ro

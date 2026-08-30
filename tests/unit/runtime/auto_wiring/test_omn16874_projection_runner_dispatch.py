@@ -185,6 +185,9 @@ def _drive(callback: Any, times: int) -> None:
 @pytest.fixture(autouse=True)
 def _configured_projection_dsn(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setenv("OMNIDASH_ANALYTICS_DB_URL", "postgresql://fixture")
+    # OMN-15425: `tenant_projection` resolves its OWN DSN env — same physical
+    # database, different principal, attested per binding by OMN-16911.
+    monkeypatch.setenv("ONEX_TENANT_DB_URL", "postgresql://fixture")
 
 
 @pytest.mark.unit

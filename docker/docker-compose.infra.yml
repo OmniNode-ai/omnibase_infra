@@ -295,6 +295,55 @@ x-runtime-env: &runtime-env
   # docker/migrations/forward/000_create_multiple_databases.sh, per 094's
   # invariant that no credential material lives in a migration.
   OMNINODE_INTERNAL_DB_URL: "postgresql://omninode_runtime:${OMNINODE_RUNTIME_PASSWORD:?OMNINODE_RUNTIME_PASSWORD must be set — the internal projections connect to omnidash_analytics as the non-BYPASSRLS omninode_runtime principal (OMN-16843), never as the postgres superuser}@postgres:5432/omnidash_analytics"
+  # ==========================================================================
+  # TENANT PROJECTION CONNECTION IDENTITY (OMN-15425 — the other half)
+  # ==========================================================================
+  # Everything the block above says about `omninode_runtime` and the
+  # OMNINODE_INTERNAL domain applies here, unchanged, to
+  # `tenant_projection_writer` and the TENANT domain. The two are deliberately
+  # symmetric: one database (omnidash_analytics), one login role per binding.
+  #
+  # WHY THIS IS A SEPARATE DSN ENV AND NOT A REUSE OF OMNIDASH_ANALYTICS_DB_URL
+  # --------------------------------------------------------------------------
+  # It is the same reason env-example-full.txt already records for
+  # OMNINODE_INTERNAL_DB_URL: the `tenant_projection` binding shares the
+  # database with OMNIDASH_ANALYTICS_DB_URL but connects as a DIFFERENT
+  # principal, which is why it is a separate binding in the topology instance
+  # rather than a reuse of that DSN. Sharing the env var is not merely untidy,
+  # it is unsatisfiable: OMN-16911's `ProjectionBindingConnections.get()`
+  # attests `current_user` against `binding.principal` on every connection, and
+  # one DSN cannot read back as both `app_dashboard` and
+  # `tenant_projection_writer`.
+  #
+  # THE DEFECT THIS CLOSES
+  # ----------------------
+  # Before this key existed the binding resolved OMNIDASH_ANALYTICS_DB_URL,
+  # which the dev-lane overlay below points at `role_omnidash`. On the .201 dev
+  # lane, 2026-08-29, that produced 143/143 DLQ'd messages on
+  # node_projection_delegation_inference_response with
+  #   PermissionError: Projection binding 'tenant_projection' connected as
+  #     ('role_omnidash', 'omnidash_analytics'),
+  #     expected ('tenant_projection_writer', 'omnidash_analytics')
+  # — the database matched, the login role did not. 100% loss (OMN-15425).
+  #
+  # WHY THE BASE FILE AND NOT A LANE OVERLAY
+  # ----------------------------------------
+  # `principal: tenant_projection_writer` is declared identically by every
+  # topology instance (local, onex-dev, onex-prod), so this is not a lane
+  # proving-ground choice the way the OMN-15363 analytics override below is.
+  # Every lane needs the same identity.
+  #
+  # WHY NOT ${POSTGRES_USER}, AND WHY `:?`
+  # --------------------------------------
+  # Both exactly as reasoned in the OMN-16843 block above, and more sharply
+  # here: `tenant_projection_writer` is the identity the OMN-14894
+  # tenant_isolation policies are enforced against, so resolving this pool as
+  # the SUPERUSER/BYPASSRLS owner would not just re-create an RLS-exempt pool,
+  # it would make the tenant isolation proof a false clean. The credential
+  # VALUE is deployment-owned (host env / secret store, never this file); the
+  # LOGIN attach is minted by 000_create_multiple_databases.sh's
+  # LOGIN_ONLY_ROLE_MAP, and 102 creates the role itself NOLOGIN.
+  ONEX_TENANT_DB_URL: "postgresql://tenant_projection_writer:${TENANT_PROJECTION_WRITER_PASSWORD:?TENANT_PROJECTION_WRITER_PASSWORD must be set — the tenant projections connect to omnidash_analytics as the non-BYPASSRLS tenant_projection_writer principal (OMN-15425), never as the postgres superuser and never as the dashboard-facing analytics role}@postgres:5432/omnidash_analytics"
   # --- OmniMemory domain plugin ---
   # PluginMemory activation policy is contract-owned. Compose only consumes the
   # rendered runtime-policy env values.
@@ -453,6 +502,11 @@ services:
       # x-runtime-env), where an unset value is an actual defect rather than an
       # unprovisioned volume.
       OMNINODE_RUNTIME_PASSWORD: ${OMNINODE_RUNTIME_PASSWORD:-}
+      # OMN-15425: the TENANT-domain counterpart of the variable above, same
+      # LOGIN_ONLY_ROLE_MAP seam, same empty-means-skip first-startup
+      # semantics. The fail-closed `:?` lives on the CONSUMER
+      # (ONEX_TENANT_DB_URL in x-runtime-env).
+      TENANT_PROJECTION_WRITER_PASSWORD: ${TENANT_PROJECTION_WRITER_PASSWORD:-}
     ports:
       - "${POSTGRES_EXTERNAL_PORT:-5436}:5432"
     volumes:

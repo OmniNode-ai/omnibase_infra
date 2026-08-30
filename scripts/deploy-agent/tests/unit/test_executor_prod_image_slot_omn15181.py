@@ -116,6 +116,7 @@ _DUMMY_BOOTSTRAP_ENV: dict[str, str] = dict.fromkeys(
         # pre-push selector nor `pre-commit run --all-files` reached it, and CI
         # was the first thing to execute it. Render-only, never a real credential.
         "OMNINODE_RUNTIME_PASSWORD",
+        "TENANT_PROJECTION_WRITER_PASSWORD",
         # OMN-15378: docker-compose.infra.yml (merged as the base file for
         # EVERY lane, including prod) hard-requires DEV_REDPANDA_ADVERTISE_HOST
         # with no default (OMN-15173's deliberate no-silent-default design).

@@ -25,6 +25,11 @@ TENANT_TABLES_PHYSICALLY_IN_PUBLIC_UNTIL_OMN15359: frozenset[str] = frozenset(
         "delegation_routing_tenant_overlay",
         "delegation_shadow_comparisons",
         "dep_health_findings",
+        # OMN-16090: hook_events is tenant-domain by contract and RLS policy,
+        # but its node migration physically created the relation bare in
+        # public before the tenant schema cutover. Keep ACL checks aligned with
+        # the live relation until OMN-15359 moves the family.
+        "hook_events",
         "instruction_eval_aggregate_snapshots",
         "llm_cost_aggregates",
         "pattern_learning_artifacts",
