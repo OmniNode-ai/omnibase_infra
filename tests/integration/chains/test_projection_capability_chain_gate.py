@@ -122,7 +122,10 @@ from omnibase_infra.runtime.event_bus_subcontract_wiring import (
 from omnibase_infra.runtime.message_dispatch_engine import MessageDispatchEngine
 from omnibase_infra.runtime.service_dispatch_result_applier import DispatchResultApplier
 from omnibase_spi.protocols.runtime import ProtocolDispatchEngine
-from tests.helpers.application_db_topology import application_topology
+from tests.helpers.application_db_topology import (
+    application_topology,
+    configure_projection_dsns,
+)
 
 pytestmark = [pytest.mark.integration, pytest.mark.asyncio]
 
@@ -570,8 +573,7 @@ def _projection_dsns(monkeypatch: pytest.MonkeyPatch) -> None:
     OMN-16796 environment-dependence class. A row that passes locally and fails
     on the runner for this reason is a fixture bug, not a finding.
     """
-    monkeypatch.setenv("OMNIDASH_ANALYTICS_DB_URL", "postgresql://fixture/omn16814")
-    monkeypatch.setenv("OMNINODE_INTERNAL_DB_URL", "postgresql://fixture/omn16814")
+    configure_projection_dsns(monkeypatch, url="postgresql://fixture/omn16814")
 
 
 # ---------------------------------------------------------------------------

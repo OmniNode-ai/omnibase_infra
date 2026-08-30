@@ -27,6 +27,7 @@ from omnibase_infra.runtime.auto_wiring.handler_wiring import (
 )
 from tests.helpers.application_db_topology import (
     application_topology,
+    configure_projection_dsns,
     projection_database_target,
     projection_database_urls,
 )
@@ -40,20 +41,8 @@ _PATCH_ENVIRON_GET = "omnibase_infra.runtime.auto_wiring.handler_wiring.os.envir
 @pytest.fixture(autouse=True)
 def _configured_projection_dsns(monkeypatch: pytest.MonkeyPatch) -> None:
     """Projection callback construction models startup with configured DSNs."""
-    monkeypatch.setenv(
-        "OMNIDASH_ANALYTICS_DB_URL",
-        "postgresql://user:pass@host:5432/omnidash_analytics",
-    )
-    monkeypatch.setenv(
-        "OMNINODE_INTERNAL_DB_URL",
-        "postgresql://user:pass@host:5432/omnidash_analytics",
-    )
-    # OMN-15425: the `tenant_projection` binding resolves its OWN DSN env, not
-    # the analytics one — the two share the physical database but connect as
-    # different principals, and OMN-16911 attests `current_user` per binding.
-    monkeypatch.setenv(
-        "ONEX_TENANT_DB_URL",
-        "postgresql://user:pass@host:5432/omnidash_analytics",
+    configure_projection_dsns(
+        monkeypatch, url="postgresql://user:pass@host:5432/omnidash_analytics"
     )
 
 

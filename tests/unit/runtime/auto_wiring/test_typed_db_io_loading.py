@@ -24,6 +24,7 @@ from omnibase_infra.runtime.auto_wiring.handler_wiring import (
     _resolve_projection_database_target,
 )
 from omnibase_infra.runtime.auto_wiring.models import ModelDiscoveredContract
+from tests.helpers.application_db_topology import configure_projection_dsns
 
 pytestmark = pytest.mark.unit
 
@@ -34,8 +35,7 @@ _FIXTURE_ROOT = (
 
 @pytest.fixture(autouse=True)
 def _configured_projection_dsn(monkeypatch: pytest.MonkeyPatch) -> None:
-    monkeypatch.setenv("OMNIDASH_ANALYTICS_DB_URL", "postgresql://fixture")
-    monkeypatch.setenv("OMNINODE_INTERNAL_DB_URL", "postgresql://fixture")
+    configure_projection_dsns(monkeypatch)
 
 
 def _parse(path: Path) -> ModelDiscoveredContract:

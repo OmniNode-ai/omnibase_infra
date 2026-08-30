@@ -13,12 +13,24 @@ import pytest
 from omnibase_infra.runtime.auto_wiring.handler_wiring import (
     _make_projection_dispatch_callback,
 )
-from tests.helpers.application_db_topology import projection_database_target
+from tests.helpers.application_db_topology import (
+    configure_projection_dsns,
+    projection_database_target,
+)
 
 
 @pytest.fixture(autouse=True)
 def _configured_projection_dsn(monkeypatch: pytest.MonkeyPatch) -> None:
-    monkeypatch.setenv("ONEX_TENANT_DB_URL", "postgresql://fixture")
+    """Configure every binding DSN the shipped topology declares.
+
+    OMN-17142/OMN-17152: this used to set ``ONEX_TENANT_DB_URL`` alone, then
+    OMN-15425 moved tenant-schema targets onto the ``tenant_projection``
+    binding and this file only followed the one binding it happened to use.
+    These tests are proving dispatch mechanics, not binding selection, so they
+    take the whole topology-declared set — the next binding addition is
+    covered without editing this fixture again.
+    """
+    configure_projection_dsns(monkeypatch)
 
 
 _PATCH_BUILD_ADAPTER = (

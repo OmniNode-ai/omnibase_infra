@@ -114,7 +114,10 @@ from omnibase_infra.runtime.event_bus_subcontract_wiring import (
 from omnibase_infra.runtime.message_dispatch_engine import MessageDispatchEngine
 from omnibase_infra.runtime.service_dispatch_result_applier import DispatchResultApplier
 from omnibase_spi.protocols.runtime import ProtocolDispatchEngine
-from tests.helpers.application_db_topology import application_topology
+from tests.helpers.application_db_topology import (
+    application_topology,
+    configure_projection_dsns,
+)
 
 pytestmark = [pytest.mark.integration, pytest.mark.asyncio]
 
@@ -550,7 +553,7 @@ def _projection_arm_dsn(monkeypatch: pytest.MonkeyPatch) -> None:
     it here means a pass is a real pass and not an artifact of the projection arm
     failing to construct for an unrelated reason.
     """
-    monkeypatch.setenv("OMNIDASH_ANALYTICS_DB_URL", "postgresql://fixture/omn16774")
+    configure_projection_dsns(monkeypatch, url="postgresql://fixture/omn16774")
 
 
 # ---------------------------------------------------------------------------
