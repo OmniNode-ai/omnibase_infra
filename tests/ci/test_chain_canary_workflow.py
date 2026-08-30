@@ -129,9 +129,52 @@ def test_invokes_the_skill_with_flags_the_mapping_declares(
         "--task-type",
         "--budget-ms",
         "--quarantine-bootstrap-servers",
+        # OMN-16931: without this flag the run reports
+        # TERMINAL_READBACK_NOT_CONFIGURED and the canary asserts nothing
+        # about the terminal. Dropping it does not quietly restore the old
+        # ingress-derived behaviour, but it does silently retire link 4.
+        "--terminal-bootstrap-servers",
     ):
         assert flag in workflow_text, f"workflow no longer passes {flag}"
         assert flag in declared, f"skill mapping no longer declares {flag}"
+
+
+@pytest.mark.unit
+def test_terminal_readback_broker_is_wired_to_the_lane(workflow_text: str) -> None:
+    """OMN-16931 — link 4 needs a reachable broker, from this runner.
+
+    The readback consumes the lane's published broker port through the
+    host-gateway alias, exactly like the quarantine leg. A localhost value
+    here would resolve to the runner container and fail closed on every run,
+    and a permanently-red check is a disabled check.
+    """
+    assert "TERMINAL_BOOTSTRAP:" in workflow_text
+    assert "--terminal-bootstrap-servers" in workflow_text
+    assert "terminal_bootstrap_servers:" in workflow_text, (
+        "the workflow_dispatch input is how an operator retargets the "
+        "readback; without it the broker is only settable by editing the file"
+    )
+
+
+@pytest.mark.unit
+def test_summary_reports_per_link_verdicts_not_just_a_colour(
+    workflow_text: str,
+) -> None:
+    """OMN-16931 — a 3-of-5 probe must never render as a 5-link proof.
+
+    Run 33215999994 reported GREEN and was read as "the OMN-16025 gate is
+    met". The receipt now carries a status per link and the summary prints
+    the proven/total count; this test is what stops that rendering from
+    being quietly simplified back to one word.
+    """
+    assert "link_verdicts" in workflow_text
+    assert "links_proven" in workflow_text
+    assert "chain_proof_complete" in workflow_text
+    assert "links proven" in workflow_text
+    # The green path must not print a bare "GREEN" that reads as a chain
+    # proof — it says PROBE-GREEN and carries the link count with it.
+    assert "chain canary PROBE-GREEN" in workflow_text
+    assert 'print(f"chain canary GREEN' not in workflow_text
 
 
 @pytest.mark.unit

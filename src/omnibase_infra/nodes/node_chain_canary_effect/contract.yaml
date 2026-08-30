@@ -19,6 +19,12 @@
 #   - OMN-15190: dev-lane-liveness, the sibling scheduled lane probe
 #   - OMN-14771: delegation-seam-gate, the PR-time in-memory seam gate that
 #     stayed green while the live chain was dead
+#   - OMN-16931: the terminal is read back off the BROKER, not off the
+#     ingress HTTP response, and the receipt carries a status per
+#     OMN-16025 chain link
+#   - OMN-16025: the five-link delegation gate this canary reports against
+#   - OMN-16963 / OMN-16964: the links (2 and 5) this canary still has NO
+#     leg for; they report `no_leg` and name their owning ticket
 #
 name: "node_chain_canary_effect"
 node_type: "EFFECT_GENERIC"
@@ -28,7 +34,7 @@ contract_version:
   patch: 0
 node_version: "1.0.0"
 description: >
-  Scheduled live event-chain canary (OMN-16773). Fires one delegation through POST {probe_url}/skill with a freshly minted per-run correlation id, asserts a terminal event lands inside a declared budget, and checks the platform quarantine sink for that same correlation id. Reports a distinct verdict for quarantined vs terminal-missing vs ingress-unreachable, and reports SKIPPED rather than CLEAN when the quarantine leg is not configured.
+  Scheduled live event-chain canary (OMN-16773, OMN-16931). Fires one delegation through POST {probe_url}/skill with a freshly minted per-run correlation id, then reads that correlation id back off the contract-declared terminal topics on the broker to decide whether a terminal actually landed inside the budget, and checks the platform quarantine sink for the same id. The terminal verdict never comes from the ingress HTTP response: that response is a claim by the request path, and it was wrong in both directions on the live dev lane (OMN-16931 false RED, OMN-15468 false GREEN). Reports a distinct verdict for quarantined vs terminal-missing vs ingress-error-with-terminal-present vs readback-failed vs ingress-unreachable, reports SKIPPED rather than CLEAN for legs that were not configured, and emits a per-link verdict against the five OMN-16025 chain links so a three-link probe can never render as a five-link proof.
 
 input_model:
   name: "ModelChainCanaryRequest"
@@ -66,7 +72,7 @@ handler_routing:
         # node_kafka_replay_compute sets the same precedent — KAFKA declared,
         # event_bus topic lists left empty.
         handler_type: "KAFKA"
-      description: "POST /skill delegation probe -> terminal assertion -> correlation-scoped quarantine check"
+      description: "POST /skill delegation probe -> correlation-scoped terminal readback off the declared terminal topics -> correlation-scoped quarantine check -> per-link verdicts"
       output_fields:
         - verdict
         - success
@@ -74,7 +80,11 @@ handler_routing:
         - probe_correlation_id
         - elapsed_ms
         - terminal_event
+        - terminal_readback_status
         - quarantine_status
+        - link_verdicts
+        - links_proven
+        - chain_proof_complete
 error_handling:
   retry_policy:
     # Zero retries on purpose. A retry would let an intermittently dead
@@ -102,6 +112,18 @@ error_handling:
       description: "The quarantine check was configured but could not run. Fails closed — an unrunnable check is never reported as a passing one."
       recoverable: true
       retry_strategy: "none"
+    - name: "INGRESS_ERROR_TERMINAL_PRESENT"
+      description: "The ingress reported an error AND the terminal is on the bus for this correlation id. The chain carried the request; the failure is in the request path. A different page from TERMINAL_MISSING, which would send an operator hunting a chain that is alive (OMN-16931, run 33251822642)."
+      recoverable: true
+      retry_strategy: "none"
+    - name: "TERMINAL_READBACK_FAILED"
+      description: "The correlation-scoped terminal readback was configured but could not run. Fails closed on the same terms as QUARANTINE_PROBE_FAILED."
+      recoverable: true
+      retry_strategy: "none"
+    - name: "TERMINAL_READBACK_NOT_CONFIGURED"
+      description: "No broker was configured for the terminal readback, so the run has no evidence about the terminal. Deliberately NOT a fallback to the ingress response — that fallback is the OMN-16931 defect."
+      recoverable: true
+      retry_strategy: "none"
 io_operations:
   - operation: "probe_event_chain"
     description: "Fire one live delegation and assert the chain carried it to a terminal."
@@ -112,6 +134,11 @@ io_operations:
       - prompt
       - max_tokens
       - budget_ms
+      - terminal_bootstrap_servers
+      - terminal_success_topics
+      - terminal_failure_topics
+      - terminal_scan_records
+      - terminal_readback_timeout_seconds
       - quarantine_bootstrap_servers
       - quarantine_topic
       - quarantine_scan_records
@@ -126,9 +153,18 @@ io_operations:
       - elapsed_ms
       - ingress_ok
       - ingress_error_code
+      - ingress_terminal_event
       - terminal_event
+      - terminal_readback_status
+      - terminal_topic
+      - terminal_readback_records_scanned
+      - terminal_readback_window_seconds
       - quarantine_status
       - quarantine_records_scanned
+      - link_verdicts
+      - links_proven
+      - links_total
+      - chain_proof_complete
 dependencies:
   - name: "chain_canary_kill_switch"
     type: "environment"
@@ -142,7 +178,7 @@ dependencies:
   - name: "aiokafka"
     type: "library"
     library: "aiokafka"
-    description: "Kafka client for the correlation-scoped quarantine tail scan. Imported lazily so an unconfigured quarantine leg costs nothing."
+    description: "Kafka client for BOTH correlation-scoped broker legs — the terminal readback (link 4) and the quarantine tail scan. Imported lazily so an unconfigured leg costs nothing. The two legs run concurrently: the readback holds its consumer open for the remainder of the budget, and serializing the quarantine tail scan behind it would push that scan minutes past the window it samples."
 health_check:
   enabled: false
 metadata:
@@ -150,7 +186,7 @@ metadata:
   author: "OmniNode Team"
   transport_type: "http"
   created: "2026-08-27"
-  updated: "2026-08-27"
+  updated: "2026-08-29"
   tags:
     - "effect"
     - "canary"

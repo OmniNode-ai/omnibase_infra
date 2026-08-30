@@ -15,6 +15,12 @@ from omnibase_infra.nodes.node_chain_canary_effect.models.enum_chain_canary_verd
 from omnibase_infra.nodes.node_chain_canary_effect.models.enum_quarantine_check_status import (
     EnumQuarantineCheckStatus,
 )
+from omnibase_infra.nodes.node_chain_canary_effect.models.enum_terminal_readback_status import (
+    EnumTerminalReadbackStatus,
+)
+from omnibase_infra.nodes.node_chain_canary_effect.models.model_chain_link_verdict import (
+    ModelChainLinkVerdict,
+)
 
 
 class ModelChainCanaryResult(BaseModel):
@@ -70,12 +76,52 @@ class ModelChainCanaryResult(BaseModel):
     ingress_error_message: str = Field(
         default="", description="Sanitized error text from the ingress or transport."
     )
+    ingress_terminal_event: str = Field(
+        default="",
+        description=(
+            "Terminal event type the ingress CLAIMED, verbatim. Recorded, "
+            "never trusted: OMN-15468 is the live proof that this lane can "
+            "answer ok=true with a terminal name while nothing durable "
+            "landed. It is here so a receipt can show the discrepancy "
+            "between the claim and terminal_event below."
+        ),
+    )
     terminal_event: str = Field(
         default="",
         description=(
-            "Terminal event type reported by the ingress. Empty means no "
-            "terminal — which is RED even when ok=true (OMN-16027)."
+            "The terminal actually READ BACK off the bus for this run's "
+            "correlation id, named by the topic it was found on. Empty means "
+            "the readback did not find one. This — not the ingress response "
+            "— is what discharges OMN-16025 link 4 (OMN-16931)."
         ),
+    )
+
+    terminal_readback_status: EnumTerminalReadbackStatus = Field(
+        default=EnumTerminalReadbackStatus.SKIPPED_NOT_CONFIGURED,
+        description="Whether the correlation-scoped terminal readback ran, and what it saw.",
+    )
+    terminal_topic: str = Field(
+        default="",
+        description="Topic the terminal was read back from; empty when none was found.",
+    )
+    terminal_topics_scanned: tuple[str, ...] = Field(
+        default=(),
+        description="Declared terminal topics the readback consumed from.",
+    )
+    terminal_readback_records_scanned: int = Field(
+        default=0, ge=0, description="Records read during the terminal readback."
+    )
+    terminal_readback_window_seconds: float = Field(
+        default=0.0,
+        ge=0.0,
+        description=(
+            "Wall-clock window the readback was allowed — the remainder of "
+            "budget_ms after the ingress answered, floored at "
+            "terminal_readback_timeout_seconds."
+        ),
+    )
+    terminal_readback_error: str = Field(
+        default="", description="Sanitized error from the terminal readback, if any."
     )
 
     quarantine_status: EnumQuarantineCheckStatus = Field(
@@ -88,6 +134,34 @@ class ModelChainCanaryResult(BaseModel):
     )
     quarantine_error: str = Field(
         default="", description="Sanitized error from the quarantine scan, if any."
+    )
+
+    link_verdicts: tuple[ModelChainLinkVerdict, ...] = Field(
+        default=(),
+        description=(
+            "One verdict per OMN-16025 chain link. The scalar `verdict` "
+            "above answers 'did this probe's own checks pass'; THIS answers "
+            "'which links of the five-link gate are proven'. They are not "
+            "the same question, and conflating them let a three-link probe "
+            "report a five-link gate as green (OMN-16931)."
+        ),
+    )
+    links_proven: int = Field(
+        default=0,
+        ge=0,
+        description="Count of links with status PASS. Nothing else counts.",
+    )
+    links_total: int = Field(
+        default=0, ge=0, description="Total links in the OMN-16025 gate (five)."
+    )
+    chain_proof_complete: bool = Field(
+        default=False,
+        description=(
+            "True only when EVERY link is PASS. This is the field that "
+            "answers 'is the delegation chain proven'. A GREEN verdict with "
+            "chain_proof_complete=False means the probe's own checks passed "
+            "and the gate is still open."
+        ),
     )
 
     kill_switch_engaged: bool = Field(
