@@ -64,10 +64,10 @@ def test_table_exists_and_every_row_has_the_full_column_set() -> None:
     rows = _rows()
     assert rows, "expected at least one data row"
     for row in rows:
-        assert len(row) == 12, (
-            f"row {row[0] if row else row!r} has {len(row)} columns, expected 12 "
+        assert len(row) == 13, (
+            f"row {row[0] if row else row!r} has {len(row)} columns, expected 13 "
             "(label role hostname ssh_target cores uv_abs_path uv_min_version "
-            "workroot slot_mode repos_denied mode note)"
+            "workroot slot_mode slots repos_denied mode note)"
         )
 
 
@@ -78,7 +78,7 @@ def test_table_contents_are_pinned() -> None:
     authorize a heavy gate run, so a row addition or a `mode` promotion must be
     a reviewed, deliberate change and not a quiet edit.
     """
-    got = {r[0]: (r[1], r[2], r[10]) for r in _rows()}
+    got = {r[0]: (r[1], r[2], r[11]) for r in _rows()}
     assert got == {
         "h200": ("capacity", "stickybeatz-studio", "authorizing"),
         "h201": ("capacity", "omninode-pc", "authorizing"),
@@ -110,7 +110,7 @@ def test_201_denies_no_repo_since_omn16989_closed() -> None:
 
     Denial is per-repo capacity policy, so lifting it is a reviewed table edit
     plus a deliberate edit here -- the same two-step that guards a promotion."""
-    denied = {r[0]: r[9] for r in _rows()}
+    denied = {r[0]: r[10] for r in _rows()}
     assert denied["h201"] == "-", (
         "h201 must deny no repo: the OMN-16989 denial was lifted after a green "
         "full tests/unit/ run on the host over the real remote leg"
@@ -131,7 +131,7 @@ def test_h105_is_authorizing_because_shadow_could_never_add_capacity() -> None:
 
     Promotion is the fix, and it is a reviewed table edit plus a deliberate
     edit here -- exactly the two-step this file exists to force."""
-    modes = {r[0]: r[10] for r in _rows()}
+    modes = {r[0]: r[11] for r in _rows()}
     assert modes["h105"] == "authorizing"
 
 
@@ -142,7 +142,7 @@ def test_h101_is_authorizing_because_shadow_could_never_add_capacity() -> None:
     applies, so promotion is proven by a real full-suite dispatch to h101
     rather than a preceding shadow day (see OMN-16991's own SUPERSEDED DoD
     item)."""
-    modes = {r[0]: r[10] for r in _rows()}
+    modes = {r[0]: r[11] for r in _rows()}
     assert modes["h101"] == "authorizing"
 
 
@@ -237,10 +237,10 @@ def _driver_both(repo_root: Path, body: str) -> str:
 #: idlest, so a load-only picker chooses it and then throws its verdict away.
 _SYNTHETIC_TABLE = (
     "#label\trole\thostname\tssh_target\tcores\tuv_abs_path\tuv_min_version"
-    "\tworkroot\tslot_mode\trepos_denied\tmode\tnote\n"
-    "ha\tcapacity\thosta\tjonah@hosta\t24\t/bin/uv\t0.1.0\t/tmp/wa\tlockdir\t-\tauthorizing\tbusier\n"
-    "hb\tcapacity\thostb\tjonah@hostb\t24\t/bin/uv\t0.1.0\t/tmp/wb\tlockdir\t-\tauthorizing\tidler\n"
-    "hs\tcapacity\thosts\tjonah@hosts\t24\t/bin/uv\t0.1.0\t/tmp/ws\tlockdir\t-\tshadow\tidlest of all\n"
+    "\tworkroot\tslot_mode\tslots\trepos_denied\tmode\tnote\n"
+    "ha\tcapacity\thosta\tjonah@hosta\t24\t/bin/uv\t0.1.0\t/tmp/wa\tlockdir\t1\t-\tauthorizing\tbusier\n"
+    "hb\tcapacity\thostb\tjonah@hostb\t24\t/bin/uv\t0.1.0\t/tmp/wb\tlockdir\t1\t-\tauthorizing\tidler\n"
+    "hs\tcapacity\thosts\tjonah@hosts\t24\t/bin/uv\t0.1.0\t/tmp/ws\tlockdir\t1\t-\tshadow\tidlest of all\n"
 )
 
 #: A single disabled row, so the shipped table's promotion of h101 (its last
@@ -248,8 +248,8 @@ _SYNTHETIC_TABLE = (
 #: probed" rule without a fixture to exercise it.
 _SYNTHETIC_TABLE_DISABLED_ONLY = (
     "#label\trole\thostname\tssh_target\tcores\tuv_abs_path\tuv_min_version"
-    "\tworkroot\tslot_mode\trepos_denied\tmode\tnote\n"
-    "hd\tcapacity\thostd\tjonah@hostd\t24\t/bin/uv\t0.1.0\t/tmp/wd\tlockdir\t-\tdisabled\tstill unfit\n"
+    "\tworkroot\tslot_mode\tslots\trepos_denied\tmode\tnote\n"
+    "hd\tcapacity\thostd\tjonah@hostd\t24\t/bin/uv\t0.1.0\t/tmp/wd\tlockdir\t1\t-\tdisabled\tstill unfit\n"
 )
 
 
@@ -352,7 +352,7 @@ def test_an_uncommitted_table_edit_cannot_designate_a_host(table_repo: Path) -> 
     tsv = table_repo / "scripts" / "hooks" / "prepush_hosts.tsv"
     tsv.write_text(
         tsv.read_text(encoding="utf-8")
-        + "hevil\tcapacity\tmy-laptop\t-\t8\t/bin/uv\t0.1.0\t/tmp/w\tlockdir\t-\tauthorizing\tforged\n",
+        + "hevil\tcapacity\tmy-laptop\t-\t8\t/bin/uv\t0.1.0\t/tmp/w\tlockdir\t1\t-\tauthorizing\tforged\n",
         encoding="utf-8",
     )
     out = _driver(table_repo, "prepush_identity_label my-laptop || echo NONE")
@@ -460,8 +460,8 @@ def test_a_repo_denied_host_is_never_chosen(tmp_path: Path) -> None:
     it to whichever repo the lab happens to deny today made a capacity-policy
     edit look like a mechanism regression -- exactly the failure this run hit."""
     denied_table = _SYNTHETIC_TABLE.replace(
-        "ha\tcapacity\thosta\tjonah@hosta\t24\t/bin/uv\t0.1.0\t/tmp/wa\tlockdir\t-\t",
-        "ha\tcapacity\thosta\tjonah@hosta\t24\t/bin/uv\t0.1.0\t/tmp/wa\tlockdir\tsomerepo\t",
+        "ha\tcapacity\thosta\tjonah@hosta\t24\t/bin/uv\t0.1.0\t/tmp/wa\tlockdir\t1\t-\t",
+        "ha\tcapacity\thosta\tjonah@hosta\t24\t/bin/uv\t0.1.0\t/tmp/wa\tlockdir\t1\tsomerepo\t",
     )
     assert "\tsomerepo\t" in denied_table, "fixture edit did not take"
     repo = _repo_with_table(tmp_path, denied_table, name="denied")
@@ -479,7 +479,7 @@ def test_a_repo_denied_host_is_never_chosen(tmp_path: Path) -> None:
 def test_no_row_denies_a_repo_today_so_the_rule_needs_a_synthetic_fixture() -> None:
     """Guards the fixture choice above: the moment a real row denies a repo
     again, this fails and tells the next author they may pin the live table."""
-    denied = {r[0]: r[9] for r in _rows()}
+    denied = {r[0]: r[10] for r in _rows()}
     assert all(v == "-" for v in denied.values()), (
         f"a row denies a repo again ({denied}) -- "
         "test_a_repo_denied_host_is_never_chosen may pin the live table again"
@@ -522,6 +522,138 @@ def test_every_probed_host_is_recorded_for_the_receipt(table_repo: Path) -> None
     )
     for label in ("h200", "h201", "h101", "h105"):
         assert label in out
+
+
+# =============================================================================
+# Per-host slot CAPACITY (OMN-17269): a row may declare slots > 1
+# =============================================================================
+#
+# OMN-16991 gave every capacity row exactly one exclusive slot. Operator
+# direction 2026-08-30 ("it looks like .105 can take more load") plus the same
+# day's live evidence (h105: load1 2.74/10 = 0.27x, slot FREE) showed the
+# binding constraint was the one-slot-per-host model, not host fitness. A row
+# with `slots=N` is N independently placeable candidates -- slot 1 keeps the
+# bare LABEL (byte-identical to every pre-OMN-17269 row), slot k>=2 is
+# `LABEL.k`, its own override-map key -- each re-qualified on LIVE state at
+# pick time, never assumed fit because a sibling slot on the same row is free.
+
+_SYNTHETIC_TABLE_MULTISLOT = (
+    "#label\trole\thostname\tssh_target\tcores\tuv_abs_path\tuv_min_version"
+    "\tworkroot\tslot_mode\tslots\trepos_denied\tmode\tnote\n"
+    "hm\tcapacity\thostm\tjonah@hostm\t10\t/bin/uv\t0.1.0\t/tmp/wm\tlockdir\t2\t-\tauthorizing\ttwo-slot test host\n"
+)
+
+
+def test_the_shipped_slots_column_is_pinned(table_repo: Path) -> None:
+    """h105 alone declares a second slot; every other row stays slots=1.
+
+    Widening a row's capacity is exactly the kind of change this file exists
+    to force through a reviewed, deliberate test edit (same reasoning as the
+    mode-promotion pins above)."""
+    slots = {r[0]: r[9] for r in _rows()}
+    assert slots == {
+        "h200": "1",
+        "h201": "1",
+        "h201c": "1",
+        "h101": "1",
+        "h105": "2",
+    }
+
+
+def test_slot_one_keeps_the_bare_label_not_a_dot_one_suffix(
+    table_repo: Path,
+) -> None:
+    """Slot 1 of every row -- including h105's slots=2 -- must place under the
+    pre-existing bare LABEL, so every slots=1 row on the shipped table is
+    byte-identical in placement to before this change."""
+    out = _pick(
+        table_repo,
+        load="h200=0.90,h201=0.44,h105=0.21",
+        slot=_ALL_FREE,
+        uv=_GOOD_UV,
+    )
+    assert "PICK=h105" in out, out
+    assert "PICK=h105.1" not in out, out
+
+
+def test_both_slots_busy_is_a_placement_miss(tmp_path: Path) -> None:
+    """A two-slot row with both slots held offers no placement at all."""
+    repo = _repo_with_table(tmp_path, _SYNTHETIC_TABLE_MULTISLOT, name="multislot-a")
+    out = _pick(
+        repo,
+        load="hm=0.10",
+        slot="hm=busy,hm.2=busy",
+        uv="hm=9.9.9",
+        repo_name="omnibase_core",
+    )
+    assert "PICK=none" in out, out
+    assert "hm=busy" in out, out
+    assert "hm.2=busy" in out, out
+
+
+def test_a_second_slot_is_accepted_when_it_re_qualifies_on_measured_load(
+    tmp_path: Path,
+) -> None:
+    """Slot 1 held does not disqualify slot 2 -- slot 2 is probed on ITS OWN
+    live state and, measured under threshold, is placeable."""
+    repo = _repo_with_table(tmp_path, _SYNTHETIC_TABLE_MULTISLOT, name="multislot-b")
+    out = _pick(
+        repo,
+        load="hm.2=0.30",
+        slot="hm=busy,hm.2=free",
+        uv="hm.2=9.9.9",
+        repo_name="omnibase_core",
+    )
+    assert "PICK=hm.2" in out, out
+    assert "hm=busy" in out, out
+
+
+def test_a_second_slot_is_refused_when_measured_load_is_high(
+    tmp_path: Path,
+) -> None:
+    """Free slot is necessary but not sufficient -- a free second slot on a
+    host whose LIVE load is already over threshold must still refuse. Fitness
+    is re-measured at pick time, never assumed from slot availability alone."""
+    repo = _repo_with_table(tmp_path, _SYNTHETIC_TABLE_MULTISLOT, name="multislot-c")
+    out = _pick(
+        repo,
+        load="hm.2=2.50",
+        slot="hm=busy,hm.2=free",
+        uv="hm.2=9.9.9",
+        repo_name="omnibase_core",
+    )
+    assert "PICK=none" in out, out
+    assert "hm.2=over(2.50)" in out, out
+
+
+def test_prepush_select_candidate_exposes_the_slot_index(tmp_path: Path) -> None:
+    """The slot a candidate was ranked into must be readable by the caller so
+    the remote leg can lock the right LOCK.<k> and the receipt can record it
+    (OMN-17269 DoD: receipts record which slot a run held)."""
+    repo = _repo_with_table(tmp_path, _SYNTHETIC_TABLE_MULTISLOT, name="multislot-d")
+    out = _driver(
+        repo,
+        'export PREPUSH_LOAD_OVERRIDE_MAP="hm.2=0.10"\n'
+        'export PREPUSH_SLOT_OVERRIDE_MAP="hm=busy,hm.2=free"\n'
+        'export PREPUSH_UV_OVERRIDE_MAP="hm.2=9.9.9"\n'
+        "pick_capacity_host somewhere-else omnibase_core > /dev/null 2>&1\n"
+        'echo "LABEL=$PREPUSH_PICK_LABEL SLOT=$PREPUSH_PICK_SLOT"\n',
+    )
+    assert "LABEL=hm.2 SLOT=2" in out, out
+
+
+def test_prepush_select_candidate_defaults_slot_to_one(table_repo: Path) -> None:
+    """A slot-1 candidate (every pre-OMN-17269 row) reports SLOT=1 explicitly,
+    not an empty/unset value that a caller might mishandle."""
+    out = _driver(
+        table_repo,
+        'export PREPUSH_LOAD_OVERRIDE_MAP="h105=0.21"\n'
+        f'export PREPUSH_SLOT_OVERRIDE_MAP="{_ALL_FREE}"\n'
+        f'export PREPUSH_UV_OVERRIDE_MAP="{_GOOD_UV}"\n'
+        "pick_capacity_host somewhere-else omnibase_core > /dev/null 2>&1\n"
+        'echo "LABEL=$PREPUSH_PICK_LABEL SLOT=$PREPUSH_PICK_SLOT"\n',
+    )
+    assert "LABEL=h105 SLOT=1" in out, out
 
 
 # =============================================================================
@@ -1165,6 +1297,54 @@ def test_the_remote_leg_releases_the_lock_even_when_the_suite_fails(
     assert result.returncode == 1
     assert "exit=1" in (remote_run_env["rundir"] / "MARKER").read_text()
     assert not (remote_run_env["workroot"] / "LOCK").exists()
+
+
+def test_the_remote_wrapper_locks_a_numbered_lockdir_for_slot_two(
+    remote_run_env: dict[str, Path],
+) -> None:
+    """OMN-17269: SLOT_INDEX (positional arg 9) selects WHICH lockdir this
+    dispatch holds. Slot 1 (the default, exercised by every other test in this
+    file) keeps the bare `LOCK` path; slot 2 must hold `LOCK.2` instead -- a
+    DIFFERENT directory, not merely a different witness of the same one, so a
+    second concurrent lane can hold its own exclusive lock on the same host
+    without contending slot 1's."""
+    workroot = remote_run_env["workroot"]
+    slot2_probe = workroot / "LOCK.2"
+    env = {
+        **os.environ,
+        "LOCK_PROBE": str(slot2_probe),
+        "LOCK_WITNESS": str(remote_run_env["witness"]),
+    }
+    result = subprocess.run(
+        [
+            "bash",
+            str(remote_run_env["rundir"] / "prepush_smart_tests.sh"),
+            str(remote_run_env["rundir"]),
+            str(remote_run_env["uv"]),
+            str(remote_run_env["head"]),
+            "argvsha",
+            "origin-host:1",
+            str(workroot),
+            "",
+            "",
+            "2",
+        ],
+        capture_output=True,
+        text=True,
+        timeout=180,
+        check=False,
+        stdin=subprocess.DEVNULL,
+        env=env,
+    )
+    assert result.returncode == 0, result.stderr
+    assert remote_run_env["witness"].read_text().strip() == "held", (
+        "slot 2 must hold LOCK.2 while the suite runs, not the bare LOCK dir "
+        "slot 1 uses"
+    )
+    assert not slot2_probe.exists(), "LOCK.2 must be released when the wrapper exits"
+    assert not (workroot / "LOCK").exists(), (
+        "a slot-2 dispatch must never touch slot 1's bare LOCK dir"
+    )
 
 
 def test_the_remote_leg_refuses_when_the_target_slot_is_already_held(

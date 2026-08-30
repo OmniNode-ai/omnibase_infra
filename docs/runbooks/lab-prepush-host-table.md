@@ -42,6 +42,7 @@ forgeable-on-disk-artifact surface OMN-16688 deliberately avoided.
 | `uv_min_version` | floor; below it the host is skipped, never assumed fit |
 | `workroot` | remote scratch root; also where that host's `LOCK` lives |
 | `slot_mode` | `queue` (.201) · `lockdir` · `none` |
+| `slots` | (OMN-17269) concurrent heavy-suite lanes this row may hold. Default `1` — identical to the pre-OMN-17269 shape. `slots=N` gives the row N independently placeable candidates (`<label>` for slot 1, `<label>.<k>` for slot k>=2), each locked at `<workroot>/LOCK` (slot 1, unchanged path) or `<workroot>/LOCK.<k>` (slot k>=2), and each re-qualified on LIVE load at pick time — never assumed fit because a sibling slot is free |
 | `repos_denied` | repos this host must not run |
 | `mode` | `authorizing` · `shadow` (runs + receipts, never authorizes) · `disabled` |
 
