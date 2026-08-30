@@ -709,8 +709,12 @@ prepush_remote_run() {
   local heavy_what repo head_sha runid workroot ssh_t uv label rundir
   local bundle argvfile runner localdir marker rc=0 argv_sha log_sha
   local m_exit m_head m_argv m_log m_collected started ended dur
-  local readback wrapper_exit
+  local readback wrapper_exit base_ref base_sha
   heavy_what="$1"
+  # Resolved by the hook before it ever reaches here; empty in a driver that
+  # exercises the library alone, which the wrapper handles as "skip".
+  base_ref="${BASE_REF:-}"
+  base_sha="${BASE_SHA:-}"
   repo="$(basename "$REPO_ROOT")"
   head_sha="$(git -C "$REPO_ROOT" rev-parse HEAD 2> /dev/null || true)"
   [ -n "$head_sha" ] || return 1
@@ -751,6 +755,7 @@ prepush_remote_run() {
 #!/usr/bin/env bash
 set -uo pipefail
 RUNDIR="$1"; UV="$2"; HEAD_SHA="$3"; ARGV_SHA="$4"; ORIGIN="$5"; WORKROOT="$6"
+BASE_REF="${7:-}"; BASE_SHA="${8:-}"
 cd "$RUNDIR" || exit 90
 # Re-arm BOTH guards explicitly. ssh forwards neither, so without this the
 # remote repo's own suite -- which subprocesses this very hook from
@@ -772,7 +777,18 @@ export ONEX_PREPUSH_HOOK_ACTIVE="remote-leg:${ORIGIN}"
 # omnibook returned 8 reds, every one a FileNotFoundError for a tool that WAS
 # installed on that host, just not on the ssh PATH. A false red here HARD-BLOCKS
 # a push, so this is part of the verdict meaning anything -- not a convenience.
-PATH="$(dirname "$UV"):/opt/homebrew/bin:/usr/local/bin:${HOME:-}/.local/bin:${PATH}"
+#
+# The list below was macOS-only by construction (OMN-16989): `/opt/homebrew/bin`
+# has no meaning on a Linux row, and the fleet's only Linux capacity row is
+# h201. Measured there non-interactively 2026-08-30, `ssh jonah@192.168.86.201
+# 'echo $PATH'` prints
+# `/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin:/usr/games:/usr/local/games:/snap/bin`
+# -- `~/.local/bin` is absent, and BOTH `uv` and `shellcheck` live there, so the
+# `$(dirname "$UV")` and `~/.local/bin` entries already covered that host (a
+# full tests/unit/ dispatch to it returned zero tool-missing reds). The Linux
+# analogues of the Homebrew prefix are appended AFTER every measured entry, so
+# they can only add resolution and never shadow a tool that already resolves.
+PATH="$(dirname "$UV"):/opt/homebrew/bin:/usr/local/bin:${HOME:-}/.local/bin:/home/linuxbrew/.linuxbrew/bin:/snap/bin:${HOME:-}/.cargo/bin:${PATH}"
 export PATH
 
 ARGV=()
@@ -824,6 +840,26 @@ rm -rf "$RUNDIR/tree" 2> /dev/null || true
 git clone -q "$RUNDIR/tree.bundle" "$RUNDIR/tree" > /dev/null 2>&1 || exit 95
 cd "$RUNDIR/tree" || exit 92
 git checkout -q "$HEAD_SHA" 2> /dev/null || true
+
+# THE TRANSPLANTED TREE MUST RESOLVE THE SAME BASE REF THE SOURCE TREE DID
+# (OMN-16989). `git bundle create <b> HEAD` carries HEAD's objects and exactly
+# one ref, so the clone has no `origin/dev` -- and this suite contains tests
+# that SUBPROCESS this very hook, which resolves `${PREPUSH_BASE_REF:-origin/dev}`
+# before it does anything else. Measured on h201: the whole
+# tests/ci/test_prepush_hook_host_identity_guard.py behavioral proof reduced to
+# `ERROR: base ref 'origin/dev' could not be resolved`, a red that says nothing
+# about the tree under test and everything about the transplant. That is the
+# same false-red class as the PATH gap above: the verdict has to mean the code
+# failed, not that the host is not a developer checkout.
+#
+# BASE_SHA is `git merge-base ${BASE_REF} HEAD` on the origin side, so it is an
+# ancestor of HEAD and its objects are already in the bundle -- only the REF is
+# missing, and creating it is a local, network-free `update-ref`. Absent or
+# unresolvable, this is skipped silently: it may only add resolution, never
+# refuse a run.
+if [ -n "$BASE_REF" ] && [ -n "$BASE_SHA" ] && git rev-parse --verify --quiet "${BASE_SHA}^{commit}" > /dev/null 2>&1; then
+  git update-ref "refs/remotes/origin/${BASE_REF#origin/}" "$BASE_SHA" 2> /dev/null || true
+fi
 "$UV" sync --all-extras > "$RUNDIR/sync.log" 2>&1 || { echo "UV_SYNC_FAILED" >&2; exit 93; }
 "$UV" run pytest "${ARGV[@]}" --ignore=tests/integration --tb=short > "$RUNDIR/suite.log" 2>&1
 rc=$?
@@ -872,7 +908,7 @@ REMOTE
   # runs, so the one fact this leg needs -- WHY the wrapper stopped -- would be
   # the fact that never gets written. Each step is checked explicitly instead.
   ssh -n -o ConnectTimeout=6 -o BatchMode=yes -o StrictHostKeyChecking=accept-new "$ssh_t" \
-    "cd '${rundir}' || exit 96; chmod +x prepush_smart_tests.sh || exit 97; ./prepush_smart_tests.sh '${rundir}' '${uv}' '${head_sha}' '${argv_sha}' '$(hostname -s 2> /dev/null || echo unknown):$$' '${workroot}'; rc=\$?; echo REMOTE_WRAPPER_EXIT=\$rc; echo \$rc > '${rundir}/WRAPPER_EXIT'; exit 0" 2>&1 |
+    "cd '${rundir}' || exit 96; chmod +x prepush_smart_tests.sh || exit 97; ./prepush_smart_tests.sh '${rundir}' '${uv}' '${head_sha}' '${argv_sha}' '$(hostname -s 2> /dev/null || echo unknown):$$' '${workroot}' '${base_ref}' '${base_sha}'; rc=\$?; echo REMOTE_WRAPPER_EXIT=\$rc; echo \$rc > '${rundir}/WRAPPER_EXIT'; exit 0" 2>&1 |
     sed "s/^/[${label}] /" >&2 || true
 
   readback="$(ssh -n -o ConnectTimeout=6 -o BatchMode=yes "$ssh_t" \

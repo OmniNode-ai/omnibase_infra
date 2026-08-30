@@ -98,11 +98,26 @@ def test_201_host_is_designated_by_its_real_hostname() -> None:
     assert hosts["h201c"] == "gate-runner-201"
 
 
-def test_201_is_denied_for_omnibase_infra_until_omn16989_closes() -> None:
-    """The gate-runner fails 15 host-coupled `omnibase_infra` tests, so routing
-    an infra push there produces a red that is not the diff's fault."""
+def test_201_denies_no_repo_since_omn16989_closed() -> None:
+    """OMN-16989 recorded 15 "host-coupled" `omnibase_infra` failures and denied
+    the repo on `h201` because of them. Every one of those 15 was measured in
+    the `.201` **gate-runner container** -- a different execution environment
+    from the one this table addresses, which is the `.201` HOST over the
+    OMN-16991 remote leg (bundle transplant, `uv sync` in a fresh tree, the
+    wrapper's developer-shell PATH). Re-measured on the host over that real leg
+    the full `tests/unit/` selection is green, so the denial was pinning a
+    verdict from an environment the table never routes work to.
+
+    Denial is per-repo capacity policy, so lifting it is a reviewed table edit
+    plus a deliberate edit here -- the same two-step that guards a promotion."""
     denied = {r[0]: r[9] for r in _rows()}
-    assert "omnibase_infra" in denied["h201"].split(",")
+    assert denied["h201"] == "-", (
+        "h201 must deny no repo: the OMN-16989 denial was lifted after a green "
+        "full tests/unit/ run on the host over the real remote leg"
+    )
+    assert all(v == "-" for v in denied.values()), (
+        f"no row should deny a repo today; got {denied}"
+    )
 
 
 def test_h105_is_authorizing_because_shadow_could_never_add_capacity() -> None:
@@ -436,16 +451,39 @@ def test_a_host_below_the_uv_floor_is_skipped(table_repo: Path) -> None:
     assert "h105=uv-unfit(0.8.3<0.11.0)" in out
 
 
-def test_a_repo_denied_host_is_never_chosen(table_repo: Path) -> None:
-    out = _pick(
-        table_repo,
-        load="h200=2.09,h201=0.10,h105=0.21",
-        slot=_ALL_FREE,
-        uv=_GOOD_UV,
-        repo_name="omnibase_infra",
+def test_a_repo_denied_host_is_never_chosen(tmp_path: Path) -> None:
+    """Driven off a synthetic table because the shipped one no longer denies any
+    repo on any row (OMN-16989 lifted h201's `omnibase_infra` denial after the
+    full `tests/unit/` suite ran green on that host over the real remote leg).
+
+    The RULE still has to hold for the next row that needs a denial, and pinning
+    it to whichever repo the lab happens to deny today made a capacity-policy
+    edit look like a mechanism regression -- exactly the failure this run hit."""
+    denied_table = _SYNTHETIC_TABLE.replace(
+        "ha\tcapacity\thosta\tjonah@hosta\t24\t/bin/uv\t0.1.0\t/tmp/wa\tlockdir\t-\t",
+        "ha\tcapacity\thosta\tjonah@hosta\t24\t/bin/uv\t0.1.0\t/tmp/wa\tlockdir\tsomerepo\t",
     )
-    assert "h201=repo-denied" in out
-    assert "PICK=h105" in out
+    assert "\tsomerepo\t" in denied_table, "fixture edit did not take"
+    repo = _repo_with_table(tmp_path, denied_table, name="denied")
+    out = _pick(
+        repo,
+        load="ha=0.10,hb=0.21",
+        slot="ha=free,hb=free,hs=free",
+        uv="ha=9.9.9,hb=9.9.9,hs=9.9.9",
+        repo_name="somerepo",
+    )
+    assert "ha=repo-denied" in out, out
+    assert "PICK=hb" in out, out
+
+
+def test_no_row_denies_a_repo_today_so_the_rule_needs_a_synthetic_fixture() -> None:
+    """Guards the fixture choice above: the moment a real row denies a repo
+    again, this fails and tells the next author they may pin the live table."""
+    denied = {r[0]: r[9] for r in _rows()}
+    assert all(v == "-" for v in denied.values()), (
+        f"a row denies a repo again ({denied}) -- "
+        "test_a_repo_denied_host_is_never_chosen may pin the live table again"
+    )
 
 
 def test_a_disabled_host_is_never_probed(tmp_path: Path) -> None:
@@ -1060,7 +1098,10 @@ def remote_run_env(tmp_path: Path) -> dict[str, Path]:
 
 
 def _run_wrapper(
-    env_info: dict[str, Path], *, extra_env: dict[str, str] | None = None
+    env_info: dict[str, Path],
+    *,
+    extra_env: dict[str, str] | None = None,
+    extra_argv: list[str] | None = None,
 ) -> subprocess.CompletedProcess[str]:
     env = {
         **os.environ,
@@ -1078,6 +1119,7 @@ def _run_wrapper(
             "argvsha",
             "origin-host:1",
             str(env_info["workroot"]),
+            *(extra_argv or []),
         ],
         capture_output=True,
         text=True,
@@ -1345,3 +1387,75 @@ def test_the_remote_wrapper_restores_a_developer_shell_path() -> None:
     assert remote.index("export PATH") < argv_line, (
         "PATH must be set before the suite runs, not after"
     )
+
+
+def test_the_remote_wrapper_path_covers_linux_hosts_too() -> None:
+    """The shipped prefix was macOS-only by construction (OMN-16989):
+    ``/opt/homebrew/bin`` has no meaning on a Linux row, and h201 is the fleet's
+    only Linux capacity row. Its measured non-interactive PATH omits
+    ``~/.local/bin``, where BOTH ``uv`` and ``shellcheck`` live there.
+
+    The Linux analogues are appended AFTER every measured entry, so they can
+    only add resolution -- a tool that already resolves keeps resolving to the
+    same binary."""
+    remote = _remote_wrapper_text()
+    line = next(
+        ln for ln in remote.splitlines() if ln.startswith('PATH="$(dirname "$UV")')
+    )
+    for entry in ("/home/linuxbrew/.linuxbrew/bin", "/snap/bin"):
+        assert entry in line, f"expected {entry} on the remote PATH"
+    assert line.index("${HOME:-}/.local/bin") < line.index(
+        "/home/linuxbrew/.linuxbrew/bin"
+    ), "the measured entries must keep precedence over the added ones"
+
+
+def test_the_remote_leg_ships_the_base_ref_so_the_transplant_can_resolve_it() -> None:
+    """``git bundle create <b> HEAD`` carries one ref, so the transplanted clone
+    has no ``origin/dev`` -- and this suite SUBPROCESSES the hook, which
+    resolves ``${PREPUSH_BASE_REF:-origin/dev}`` before anything else. Measured
+    on h201 (OMN-16989): the whole
+    ``tests/ci/test_prepush_hook_host_identity_guard.py`` behavioral proof
+    reduced to ``base ref 'origin/dev' could not be resolved`` -- a red about the
+    transplant, not about the tree under test."""
+    lib = LIB.read_text(encoding="utf-8")
+    cmd = lib[lib.index("./prepush_smart_tests.sh '${rundir}'") :][:400]
+    assert "'${base_ref}' '${base_sha}'" in cmd, (
+        "the remote command must hand the wrapper the base ref and its sha"
+    )
+    assert 'base_ref="${BASE_REF:-}"' in lib
+    assert 'base_sha="${BASE_SHA:-}"' in lib
+
+
+def test_the_wrapper_materializes_the_base_ref_in_the_transplanted_tree(
+    remote_run_env: dict[str, Path],
+) -> None:
+    """Behavioral: run the shipped wrapper with a base ref and assert the clone
+    resolves it afterwards. BASE_SHA is a merge-base on the origin side, so it
+    is always an ancestor of HEAD and its objects are already in the bundle --
+    only the ref is missing, and creating it is a local ``update-ref``."""
+    head = str(remote_run_env["head"])
+    result = _run_wrapper(remote_run_env, extra_argv=["origin/dev", head])
+    assert result.returncode == 0, result.stderr
+    tree = remote_run_env["rundir"] / "tree"
+    resolved = subprocess.run(
+        ["git", "rev-parse", "origin/dev"],
+        cwd=tree,
+        capture_output=True,
+        text=True,
+        check=False,
+    )
+    assert resolved.returncode == 0, (
+        f"the transplanted tree must resolve origin/dev; got {resolved.stderr!r}"
+    )
+    assert resolved.stdout.strip() == head
+
+
+def test_the_wrapper_runs_normally_when_no_base_ref_is_supplied(
+    remote_run_env: dict[str, Path],
+) -> None:
+    """Absent or unresolvable, the base ref is skipped SILENTLY. It may only add
+    resolution -- it must never be able to refuse a run, which would turn a
+    convenience into a new way to hard-block a push."""
+    result = _run_wrapper(remote_run_env, extra_argv=["origin/dev", "0" * 40])
+    assert result.returncode == 0, result.stderr
+    assert (remote_run_env["rundir"] / "MARKER").is_file()

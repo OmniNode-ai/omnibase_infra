@@ -16,9 +16,11 @@ from __future__ import annotations
 
 import subprocess
 import sys
+import tomllib
 from pathlib import Path
 
 import pytest
+from packaging.version import InvalidVersion, Version
 
 _REPO_ROOT = Path(__file__).resolve().parents[2]
 _SCRIPTS = _REPO_ROOT / "scripts"
@@ -137,10 +139,61 @@ def test_context_field_passes_no_claim(tmp_path: Path) -> None:
 # --------------------------------------------------------------------------- #
 
 
+def _repo_is_version_ahead() -> tuple[bool, str]:
+    """Is this checkout's ``project.version`` strictly ahead of its newest tag?
+
+    Both facts are AMBIENT: the version is whatever the branch carries, and the
+    tag set is whatever the local clone has fetched. The test below cannot create
+    either, so it reports the precondition instead of failing on it.
+    """
+    root = Path(__file__).resolve().parents[2]
+    with (root / "pyproject.toml").open("rb") as fh:
+        version = tomllib.load(fh)["project"]["version"]
+    tags = subprocess.run(
+        ["git", "tag", "--list"],
+        cwd=root,
+        capture_output=True,
+        text=True,
+        check=False,
+    ).stdout.split()
+    parsed = []
+    for tag in tags:
+        try:
+            parsed.append(Version(tag.lstrip("v")))
+        except InvalidVersion:
+            continue
+    if not parsed:
+        return True, "no published tags in this clone -- the gate is exempt"
+    newest = max(parsed)
+    if Version(version) > newest:
+        return True, f"{version} > {newest}"
+    return False, f"pyproject {version} is not ahead of newest tag {newest}"
+
+
 @pytest.mark.unit
 def test_release_identity_passes_when_version_ahead() -> None:
-    # The repo's pyproject version is bumped ahead of the latest tag in this PR,
-    # so the strict (no --base) run must pass.
+    """The strict (no ``--base``) run must pass when the version IS ahead.
+
+    OMN-16989: this used to assert the precondition rather than state it, so
+    between a release tag landing and the post-release bump landing (OMN-13912)
+    it went red on EVERY developer clone -- and only on a developer clone.
+    ``actions/checkout`` does not fetch tags by default, so in CI
+    ``git tag --list`` is empty, the gate is exempt, and the test passes; locally
+    the tags exist and it fails. A red visible only on the machine running the
+    governed pre-push hook, saying nothing about the diff, blocked every local
+    push in the repo. Measured 2026-08-30: dev at 0.38.14 with `v0.38.14` cut.
+
+    The gate itself is NOT relaxed -- `check-release-identity` (pre-commit) and
+    the CI gate both still run the real script against the real diff. What
+    changes is that this test now names the ambient precondition it needs
+    instead of reporting its absence as a failure of the script."""
+    ahead, why = _repo_is_version_ahead()
+    if not ahead:
+        pytest.skip(
+            f"repo-state precondition absent: {why}. This asserts the "
+            "version-ahead branch of the gate and cannot create that state; "
+            "the post-release bump (OMN-13912) restores it."
+        )
     result = _run("check_release_identity.py")
     assert result.returncode == 0, result.stderr
     assert "ahead of latest published" in result.stdout
