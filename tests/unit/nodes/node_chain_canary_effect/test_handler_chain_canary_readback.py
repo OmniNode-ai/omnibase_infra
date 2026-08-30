@@ -427,7 +427,16 @@ async def test_best_possible_run_is_still_not_a_five_link_proof() -> None:
 @pytest.mark.unit
 @pytest.mark.asyncio
 async def test_links_without_a_leg_name_the_ticket_that_owes_them() -> None:
-    """``no_leg`` is not ``pass`` and not ``fail`` — it is an unpaid debt."""
+    """``no_leg`` is not ``pass`` and not ``fail`` — it is an unpaid debt.
+
+    OMN-16963 paid link 2's debt, so only link 5 is still owed. Link 2 now
+    reports a real status; with no projection configured on this fixture that
+    status is ``NOT_CONFIGURED``, which is a different fact from ``NO_LEG``:
+    the instrument exists and was not pointed at anything, rather than not
+    existing at all. Both are non-passing, and keeping them distinct is the
+    point — see ``test_handler_chain_canary_projection.py`` for link 2's own
+    coverage.
+    """
     handler = _handler(
         _Ingress(response={"ok": True, "terminal_event": "delegate-skill-completed"}),
         terminal_readback=_TerminalReadback(found=_SUCCESS_TOPIC),
@@ -438,8 +447,8 @@ async def test_links_without_a_leg_name_the_ticket_that_owes_them() -> None:
     by_link = {v.link: v for v in result.link_verdicts}
     routing = by_link[EnumChainLink.ROUTING_PROJECTED]
     ledger = by_link[EnumChainLink.LEDGER_REPLAY]
-    assert routing.status is EnumChainLinkStatus.NO_LEG
-    assert routing.owning_ticket == "OMN-16963"
+    assert routing.status is EnumChainLinkStatus.NOT_CONFIGURED
+    assert routing.owning_ticket == ""
     assert ledger.status is EnumChainLinkStatus.NO_LEG
     assert ledger.owning_ticket == "OMN-16964"
 
