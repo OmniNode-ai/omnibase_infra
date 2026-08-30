@@ -57,6 +57,7 @@ KNOWN_INFRA_PROTOCOLS: dict[str, str] = {
     "ProtocolInmemoryHistorySource": "event_bus/confirmation/readback_source_inmemory.py",  # [RUNTIME] OMN-15861 one-method narrowing of the in-memory bus so the zero-infra readback source does not depend on the whole bus surface
     "ProtocolSeekableConsumer": "event_bus/confirmation/readback_source_kafka.py",  # [RUNTIME] OMN-15861 five-call narrowing of AIOKafkaConsumer (assign/seek/end_offsets/getone) so the coordinate readback loop is testable without a broker
     "ProtocolEventProjector": "protocols/protocol_event_projector.py",
+    "ProtocolCloudLedgerTransport": "gateway/client/cloud_ledger_reader.py",  # [DI] OMN-17205 two-method seam (OAuth2 client_credentials POST + one GET) for the operator cloud-ledger read. Declared beside its only consumer rather than added to ProtocolGatewayTransport: that protocol is runtime_checkable and is satisfied structurally by every existing in-memory fake, so widening it would silently un-satisfy all of them. Infra-local, not cross-repo: it is bound to this repo's ~/.onex credential store and httpx adapter. Same precedent as the ProtocolInmemoryHistorySource / ProtocolSeekableConsumer entries below, which also live beside their consumer
     "ProtocolIdempotencyStore": "protocols/protocol_idempotency_store.py",
     "ProtocolLedgerSink": "protocols/protocol_ledger_sink.py",
     "ProtocolMessageDispatcher": "protocols/protocol_message_dispatcher.py",
