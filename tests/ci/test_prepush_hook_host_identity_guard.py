@@ -48,6 +48,40 @@ HOOK_SCRIPT = REPO_ROOT / "scripts" / "hooks" / "prepush_smart_tests.sh"
 
 _GUARANTEED_NON_MATCHING_HOSTNAME = "definitely-not-the-200-host-omn15059"
 
+_HOST_TABLE = REPO_ROOT / "scripts" / "hooks" / "prepush_hosts.tsv"
+
+
+def de_designating_env() -> dict[str, str]:
+    """Env that de-designates EVERY authorizing host in the table (OMN-16991).
+
+    Before the host table, `.200` identity was the sole definition of "a
+    designated host", so overriding `PREPUSH_200_HOSTNAME` alone was enough to
+    make the refusal below host-independent. It never actually was: on the
+    `.201` gate-runner (hostname `gate-runner-201`) the guard matched its second
+    hard-coded name and this test's premise inverted from a refusal to a pass.
+    Adding `omninode-pc` as a row would have widened that hole to the `.201`
+    host itself -- which is exactly why the override contract is that an
+    override REPLACES the row it names rather than adding a name to the set.
+
+    Every authorizing row is therefore pointed at a guaranteed-non-matching
+    name, so the assertion holds on every host in the lab, including the ones
+    this change adds.
+    """
+    env: dict[str, str] = {}
+    for line in _HOST_TABLE.read_text(encoding="utf-8").splitlines():
+        line = line.split("#", 1)[0]
+        if not line.strip():
+            continue
+        fields = line.split("\t")
+        if len(fields) < 11 or fields[10] != "authorizing":
+            continue
+        label = "".join(c if c.isalnum() else "_" for c in fields[0].upper())
+        env[f"PREPUSH_HOST_OVERRIDE_{label}"] = (
+            f"{_GUARANTEED_NON_MATCHING_HOSTNAME}-{fields[0]}"
+        )
+    return env
+
+
 _FULL_SUITE_BRANCH_RE = re.compile(
     r'if \[ "\$IS_FULL" = "True" \].*?\n(.*?\n)(?=elif|else|fi)',
     re.DOTALL,
@@ -153,6 +187,9 @@ def test_guard_refuses_full_suite_escalation_on_non_200_host() -> None:
         env.pop(leaky, None)
     env["PREPUSH_FULL_SUITE"] = "1"
     env["PREPUSH_200_HOSTNAME"] = _GUARANTEED_NON_MATCHING_HOSTNAME
+    # OMN-16991: de-designate every OTHER authorizing row too, so this proof is
+    # host-independent for the first time (see de_designating_env).
+    env.update(de_designating_env())
     result = subprocess.run(
         ["bash", str(HOOK_SCRIPT)],
         cwd=REPO_ROOT,

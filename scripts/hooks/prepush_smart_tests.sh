@@ -326,6 +326,16 @@ host_is_fit() {
 }
 
 # =============================================================================
+# Lab-wide distribution helpers (OMN-16991)
+# =============================================================================
+# Sourced AFTER host_load_ratio/host_is_fit/_prepush_timeout_cmd, which the
+# library reuses rather than reimplementing, and BEFORE guard_full_suite_host,
+# which is its only caller. Located relative to this script so it resolves the
+# same way whether git invokes the hook through .git/hooks or core.hooksPath.
+# shellcheck source=scripts/hooks/prepush_dispatch.sh
+. "$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/prepush_dispatch.sh"
+
+# =============================================================================
 # Remote full-suite verification -- third execution target (OMN-16688)
 # =============================================================================
 # `.200` and the `.201` gate-runner are the two LOCAL heavy targets. Both can be
@@ -383,8 +393,47 @@ remote_full_suite_verified() {
   return 1
 }
 
+# REMOTE_LAB_RUN_VERDICT (OMN-16991) -- set to 1 when a designated lab host ran
+# this exact tree green over the remote leg, so the caller elides the local
+# pytest exactly as it does for the GitHub-hosted pass. Deliberately a DISTINCT
+# sentinel from REMOTE_FULL_SUITE_VERIFIED: the two carry different evidence
+# strength and different log wording, and collapsing them would make a
+# lab-host run indistinguishable from a GitHub-hosted one in the transcript.
+REMOTE_LAB_RUN_VERDICT=0
+
+# dispatch_to_lab_host HEAVY_WHAT -- try to satisfy HEAVY_WHAT by running it on
+# the least-loaded designated lab host that has a free slot.
+# 0 = satisfied (green), 1 = no evidence (caller falls through), and it does
+# NOT return on a remote RED: a suite that genuinely failed on a designated
+# host is a failing gate, so it refuses here rather than letting the caller
+# fall through to the degraded-evidence override grant.
+dispatch_to_lab_host() {
+  local heavy_what repo rc=0
+  heavy_what="$1"
+  repo="$(basename "$REPO_ROOT")"
+  if ! pick_capacity_host "$PREPUSH_LC_HOST" "$repo"; then
+    log "no lab host is fit for ${heavy_what}: ${PREPUSH_PROBE_LOG:-no hosts probed}"
+    return 1
+  fi
+  # The picked host IS this host: nothing to distribute. The local branch
+  # already measured it unfit, so this is no evidence.
+  [ -n "$PREPUSH_PICK_SSH" ] || return 1
+  prepush_remote_run "$heavy_what" || rc=$?
+  case "$rc" in
+    0)
+      REMOTE_LAB_RUN_VERDICT=1
+      return 0
+      ;;
+    3)
+      die "${heavy_what} FAILED on the designated lab host '${PREPUSH_PICK_HOSTNAME}' (${PREPUSH_PICK_LABEL})" \
+          "the suite genuinely failed on a host we designated -- this is a red gate, not a capacity problem. Read the streamed [${PREPUSH_PICK_LABEL}] output above, fix the failing tests, then re-push. A remote red is never satisfied by minting an override grant"
+      ;;
+  esac
+  return 1
+}
+
 guard_full_suite_host() {
-  local host lc_host lc_target lc_201 heavy_what
+  local host lc_host label heavy_what designated
   # OMN-15408: the caller names WHICH heavyweight run is being guarded, so the
   # refusal names the real cause. Default preserves the OMN-15059 wording for
   # the flag-driven escalation call sites, which pass no argument.
@@ -393,59 +442,96 @@ guard_full_suite_host() {
   if [ -z "$host" ]; then
     # Fail CLOSED (OMN-16489): see the routing note above PREPUSH_200_HOSTNAME.
     die "could not determine the local hostname while deciding where ${heavy_what} may run" \
-        "heavy gate runs are routed by host identity (OMN-15059) and an unidentifiable host cannot be routed. Fix 'hostname -s' (macOS: 'sudo scutil --set HostName <name>'; Linux: 'hostnamectl set-hostname <name>'), or run the push from a designated gate host (.200 '${PREPUSH_200_HOSTNAME}' or the .201 gate-runner '${PREPUSH_201_GATE_RUNNER_HOSTNAME}')"
+        "heavy gate runs are routed by host identity (OMN-15059) and an unidentifiable host cannot be routed. Fix 'hostname -s' (macOS: 'sudo scutil --set HostName <name>'; Linux: 'hostnamectl set-hostname <name>'), or run the push from a designated gate host listed in ${PREPUSH_HOST_TABLE_REL}"
   fi
   lc_host="$(printf '%s' "$host" | tr '[:upper:]' '[:lower:]')"
-  lc_target="$(printf '%s' "$PREPUSH_200_HOSTNAME" | tr '[:upper:]' '[:lower:]')"
-  lc_201="$(printf '%s' "$PREPUSH_201_GATE_RUNNER_HOSTNAME" | tr '[:upper:]' '[:lower:]')"
-  if [ "$lc_host" = "$lc_target" ] || [ "$lc_host" = "$lc_201" ]; then
+  PREPUSH_LC_HOST="$lc_host"
+
+  # OMN-16991: host identity now resolves against the COMMITTED host table
+  # instead of the two hard-coded names this guard used to test
+  # (`[ "$lc_host" = "$lc_target" ] || [ "$lc_host" = "$lc_201" ]`). That
+  # literal `||` -- not policy -- was the entire structural reason .101 and
+  # .105 could not be used, and it is also why `.201` only ever matched from
+  # INSIDE the gate-runner container: the container sets hostname
+  # gate-runner-201 while the host itself reports omninode-pc, so every push on
+  # the host needed PREPUSH_201_GATE_RUNNER_HOSTNAME exported to pass. Both
+  # names are now rows, so `.201` is designated intrinsically and no env var
+  # has to survive a process or ssh boundary for the guard to see it.
+  #
+  # An UNREADABLE table fails CLOSED, on the same reasoning as the unresolvable
+  # hostname above: heavy runs are routed by host identity, and identity that
+  # cannot be resolved cannot be routed.
+  if ! prepush_table_text > /dev/null 2>&1; then
+    die "the pre-push host table (${PREPUSH_HOST_TABLE_REL}) could not be read from HEAD, so no host can be identified as a designated gate host for ${heavy_what}" \
+        "the table is read from the COMMITTED tree so an uncommitted row cannot self-designate this machine as an authorizing gate host. Commit ${PREPUSH_HOST_TABLE_REL} (or, if you have edited it, commit the edit so HEAD and the working tree agree), then re-push"
+  fi
+  label="$(prepush_identity_label "$lc_host" || true)"
+  designated="$(prepush_designated_hostnames)"
+
+  if [ -n "$label" ]; then
     # OMN-16295: identity alone is not enough -- this known-good host must
     # also have capacity right now.
     if host_is_fit ""; then
+      # OMN-16174/OMN-16991: the LOCAL heavy path took no lock of any kind
+      # before this change, which is why five concurrent full suites once ran
+      # on one host with one of them taking 97+ minutes. It is the busiest
+      # path in the hook and was the only unserialized one. Take the same
+      # exclusive slot a remote host would have to take.
+      local lw lock_rc=0
+      lw="$(prepush_local_workroot "$lc_host" || true)"
+      [ -n "$lw" ] || lw="${REPO_ROOT}/.onex_state/prepush_distribution"
+      prepush_lock_acquire "$lw" || lock_rc=$?
+      if [ "$lock_rc" -eq 0 ]; then
+        trap prepush_lock_release EXIT
+        return 0
+      fi
+      if [ "$lock_rc" -eq 2 ]; then
+        # The workroot is unusable, which says nothing about this host's
+        # capacity. Proceed exactly as the hook did before this lock existed
+        # rather than inventing a refusal out of an infrastructural failure.
+        log "WARNING: could not create the heavy-suite slot lock under '${lw}' -- running unserialized on this host (pre-OMN-16991 behavior). Fix the workroot to restore serialization (OMN-16174)."
+        return 0
+      fi
+      log "this host is fit but its heavy-suite slot is already held; looking for another lab host before refusing"
+    fi
+    # Precedence, in order of EVIDENCE STRENGTH -- not convenience:
+    #   1. GitHub-hosted sha-pinned FULL-suite pass (OMN-16688). Strongest:
+    #      uncontended, full-suite shaped, re-derived live from the API with no
+    #      file on disk to forge. It stays FIRST; putting the lab leg ahead of
+    #      it would silently demote the strongest evidence the hook has.
+    #   2. A designated lab host running this exact tree (OMN-16991). Weaker
+    #      than (1) -- the tree is materialized on another host -- but far
+    #      stronger than (3), because a real suite actually ran on hardware we
+    #      designate, bound to this sha by a completion marker.
+    #   3. Single-use receipted degraded-capacity grant. Weakest: it runs a
+    #      contended suite here and says so.
+    #   4. die().
+    if remote_full_suite_verified "$heavy_what"; then
       return 0
     fi
-    # OMN-16688: prefer a sha-pinned GitHub-hosted FULL-suite pass over running
-    # the heavy suite on a host we just measured as over-subscribed, and over
-    # the degraded-capacity override below. Checked BEFORE the grant because it
-    # is strictly stronger evidence: an uncontended full run on this exact tree
-    # versus a contended local one.
-    if remote_full_suite_verified "$heavy_what"; then
+    if dispatch_to_lab_host "$heavy_what"; then
       return 0
     fi
     if consume_override_grant "degraded-capacity: ${heavy_what} on '${host}' at/over the ${PREPUSH_LOAD_THRESHOLD}x-core load threshold"; then
       log "WARNING: DEGRADED-CAPACITY OVERRIDE IN EFFECT (single-use grant consumed) -- running ${heavy_what} on '${host}' at/over the ${PREPUSH_LOAD_THRESHOLD}x-core load threshold. Treat any evidence from this run as WEAKER than a fit-host-run gate."
       return 0
     fi
-    local other_target other_label other_rc other_note
-    if [ "$lc_host" = "$lc_target" ]; then
-      other_target="$PREPUSH_201_SSH_TARGET"
-      other_label="the .201 gate-runner (${PREPUSH_201_GATE_RUNNER_HOSTNAME})"
-    else
-      other_target="$PREPUSH_200_SSH_TARGET"
-      other_label=".200 (${PREPUSH_200_HOSTNAME})"
-    fi
-    other_rc=0
-    host_is_fit "$other_target" || other_rc=$?
-    case "$other_rc" in
-      0) other_note="${other_label} currently HAS capacity -- route there instead" ;;
-      2) other_note="${other_label} could not be reached to check capacity" ;;
-      *) other_note="${other_label} is ALSO at/over the load threshold" ;;
-    esac
-    die "${heavy_what} triggered on '${host}' (the designated host by identity), but its load is at/over the ${PREPUSH_LOAD_THRESHOLD}x-core threshold" \
-        "${other_note}. PREFERRED when both hosts are loaded: open/refresh the PR so GitHub-hosted CI runs the FULL suite on this exact sha, then re-push -- this hook will accept that run automatically (OMN-16688; check it yourself with 'uv run python scripts/hooks/prepush_remote_verify.py check --head-sha \$(git rev-parse HEAD)'). Otherwise see docs/runbooks/200-build-lane-execution-pattern.md for the .201 gate-runner recipe, or mint a single-use grant to run here anyway (degraded evidence -- do not use as a routine bypass): uv run python scripts/hooks/prepush_override_grant.py mint --reason '<why>'"
+    die "${heavy_what} triggered on '${host}' (designated gate host '${label}'), but its load is at/over the ${PREPUSH_LOAD_THRESHOLD}x-core threshold and no other lab host could take the work" \
+        "probed hosts: ${PREPUSH_PROBE_LOG:-none}. PREFERRED: open/refresh the PR so GitHub-hosted CI runs the FULL suite on this exact sha, then re-push -- this hook accepts that run automatically (OMN-16688; check it with 'uv run python scripts/hooks/prepush_remote_verify.py check --head-sha \$(git rev-parse HEAD)'). See docs/runbooks/lab-prepush-host-table.md to add or re-enable a lab host, or mint a single-use grant to run here anyway (degraded evidence -- do not use as a routine bypass): uv run python scripts/hooks/prepush_override_grant.py mint --reason '<why>'"
   fi
-  # OMN-16688: same precedence on the wrong-host path -- a sha-pinned
-  # GitHub-hosted FULL-suite pass beats running the heavy suite on an
-  # undesignated host under a degraded-host grant.
+  # Not a designated host. Same precedence, same ordering, same reasoning.
   if remote_full_suite_verified "$heavy_what"; then
     return 0
   fi
-  if consume_override_grant "degraded-host: ${heavy_what} on '${host}', not the designated .200 host '${PREPUSH_200_HOSTNAME}'"; then
-    log "WARNING: DEGRADED-HOST OVERRIDE IN EFFECT (single-use grant consumed) -- running ${heavy_what} on '${host}', NOT the designated .200 host ('${PREPUSH_200_HOSTNAME}'). This host has weaker isolation/headroom than .200; treat any evidence from this run as WEAKER than a .200-run gate. See docs/runbooks/200-build-lane-execution-pattern.md."
+  if dispatch_to_lab_host "$heavy_what"; then
     return 0
   fi
-  die "${heavy_what} triggered on host '${host}', not the designated .200 build host ('${PREPUSH_200_HOSTNAME}')" \
-      "push from .200 instead (ssh jonah@stickybeatz-studio.tail75df5e.ts.net, wrap remote commands as zsh -lc \"...\"; see docs/runbooks/200-build-lane-execution-pattern.md for the full pattern), OR let GitHub-hosted CI run the FULL suite on this exact sha and re-push -- this hook accepts a sha-pinned green full-suite run automatically (OMN-16688; check it with 'uv run python scripts/hooks/prepush_remote_verify.py check --head-sha \$(git rev-parse HEAD)'), OR mint a single-use override grant to run the full suite on this host anyway (visible, receipted, degraded-evidence override -- do not use as a routine bypass): uv run python scripts/hooks/prepush_override_grant.py mint --reason '<why>'"
+  if consume_override_grant "degraded-host: ${heavy_what} on '${host}', not a designated gate host"; then
+    log "WARNING: DEGRADED-HOST OVERRIDE IN EFFECT (single-use grant consumed) -- running ${heavy_what} on '${host}', NOT a designated gate host (${designated}). This host has weaker isolation/headroom; treat any evidence from this run as WEAKER than a designated-host gate. See docs/runbooks/lab-prepush-host-table.md."
+    return 0
+  fi
+  die "${heavy_what} triggered on host '${host}', not the designated .200 build host ('${PREPUSH_200_HOSTNAME}') nor any other designated gate host (${designated})" \
+      "probed lab hosts: ${PREPUSH_PROBE_LOG:-none}. Push from a designated host, OR let GitHub-hosted CI run the FULL suite on this exact sha and re-push -- this hook accepts a sha-pinned green full-suite run automatically (OMN-16688; check it with 'uv run python scripts/hooks/prepush_remote_verify.py check --head-sha \$(git rev-parse HEAD)'), OR see docs/runbooks/lab-prepush-host-table.md to add/enable a lab host, OR mint a single-use override grant to run the full suite on this host anyway (visible, receipted, degraded-evidence override -- do not use as a routine bypass): uv run python scripts/hooks/prepush_override_grant.py mint --reason '<why>'"
 }
 
 # -----------------------------------------------------------------------------
@@ -777,12 +863,18 @@ scrub_prepush_override_env() {
 
 if [ "$IS_FULL" = "True" ] || [ "$IS_FULL" = "true" ]; then
   guard_full_suite_host
-  if [ "$REMOTE_FULL_SUITE_VERIFIED" -eq 1 ]; then
+  if [ "$REMOTE_FULL_SUITE_VERIFIED" -eq 1 ] || [ "$REMOTE_LAB_RUN_VERDICT" -eq 1 ]; then
     # OMN-16688: the escalation is SATISFIED, not skipped -- the full suite ran
     # to green on GitHub-hosted CI against this exact sha. Re-running it locally
     # would re-execute the identical tests on the identical tree, which is why
     # the local invocation is elided rather than merely deferred.
-    log "FULL unit suite satisfied by the remote GitHub-hosted full-suite pass; not re-running it locally."
+    if [ "$REMOTE_LAB_RUN_VERDICT" -eq 1 ]; then
+      # OMN-16991: satisfied by a designated LAB host, not by GitHub-hosted CI.
+      # The two are logged distinctly on purpose -- they are different evidence.
+      log "FULL unit suite satisfied by the remote LAB-host run on '${PREPUSH_PICK_HOSTNAME}' (${PREPUSH_PICK_LABEL}); not re-running it locally."
+    else
+      log "FULL unit suite satisfied by the remote GitHub-hosted full-suite pass; not re-running it locally."
+    fi
   else
     # OMN-16825: $FULL_SUITE_TARGET is tests/unit/, which does NOT contain the
     # allowlisted service-free integration suites. Append them so the
@@ -808,11 +900,15 @@ elif [ "${#PATHS[@]}" -gt 0 ]; then
   if selection_is_whole_suite "$FULL_SUITE_TARGET" "${PATHS[@]}"; then
     guard_full_suite_host "whole-suite-equivalent impacted selection (is_full_suite=${IS_FULL}, selected paths [ ${PATHS_STR}] cover the entire '${FULL_SUITE_TARGET}' escalation target)"
   fi
-  if [ "$REMOTE_FULL_SUITE_VERIFIED" -eq 1 ]; then
+  if [ "$REMOTE_FULL_SUITE_VERIFIED" -eq 1 ] || [ "$REMOTE_LAB_RUN_VERDICT" -eq 1 ]; then
     # Only reachable when the selection was whole-suite-equivalent (the guard
     # above is the sole setter), so the remote FULL suite strictly covers this
     # selection -- it ran MORE tests than this invocation would have.
-    log "impacted selection is whole-suite-equivalent and is covered by the remote GitHub-hosted full-suite pass; not re-running it locally."
+    if [ "$REMOTE_LAB_RUN_VERDICT" -eq 1 ]; then
+      log "impacted selection is whole-suite-equivalent and was run on the designated lab host '${PREPUSH_PICK_HOSTNAME}' (${PREPUSH_PICK_LABEL}); not re-running it locally."
+    else
+      log "impacted selection is whole-suite-equivalent and is covered by the remote GitHub-hosted full-suite pass; not re-running it locally."
+    fi
   else
     log "running impacted subset: uv run pytest ${PATHS_STR}--ignore=tests/integration ${PREPUSH_PYTEST_ARGS:-}"
     (
