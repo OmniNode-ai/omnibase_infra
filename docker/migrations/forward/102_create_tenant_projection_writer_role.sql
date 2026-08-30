@@ -115,157 +115,52 @@
 -- =============================================================================
 
 -- -----------------------------------------------------------------------------
--- 1. Role existence. The pg_roles pre-check is what makes this file runnable by
---    a role WITHOUT CREATEROLE: Postgres checks create-role privilege BEFORE it
---    checks whether the name is already taken, so an unconditional CREATE ROLE
---    raises `permission denied to create role` (42501) rather than the
---    duplicate_object the handler below is written for. Same guard shape as
---    094 (app_dashboard), 096 (role_omnidash) and 099 (omninode_runtime).
+-- 1. Role existence and attributes. These use psql \gexec instead of a DO block
+--    so the application SQL gate can statically inspect the file. Each command
+--    is emitted only when catalog state proves it is needed.
 -- -----------------------------------------------------------------------------
-DO $$
-BEGIN
-  IF NOT EXISTS (SELECT 1 FROM pg_roles WHERE rolname = 'tenant_projection_writer') THEN
-    BEGIN
-      CREATE ROLE tenant_projection_writer WITH
-        NOLOGIN
-        NOSUPERUSER
-        NOBYPASSRLS
-        NOCREATEDB
-        NOCREATEROLE
-        NOREPLICATION;
-    EXCEPTION
-      WHEN duplicate_object OR unique_violation THEN
-        NULL; -- created concurrently by another migration path
-    END;
-  END IF;
+SELECT 'CREATE ROLE tenant_projection_writer WITH NOLOGIN NOSUPERUSER NOBYPASSRLS NOCREATEDB NOCREATEROLE NOREPLICATION'
+WHERE NOT EXISTS (SELECT 1 FROM pg_catalog.pg_roles WHERE rolname = 'tenant_projection_writer')
+\gexec
+
+SELECT 'ALTER ROLE tenant_projection_writer NOCREATEDB NOCREATEROLE'
+WHERE EXISTS (
+  SELECT 1
+    FROM pg_catalog.pg_roles
+   WHERE rolname = 'tenant_projection_writer'
+     AND (rolcreatedb OR rolcreaterole)
+)
+\gexec
+
+SELECT 'ALTER ROLE tenant_projection_writer NOSUPERUSER NOBYPASSRLS NOREPLICATION'
+WHERE EXISTS (
+  SELECT 1
+    FROM pg_catalog.pg_roles
+   WHERE rolname = 'tenant_projection_writer'
+     AND (rolsuper OR rolbypassrls OR rolreplication)
+)
+\gexec
+
+-- Fail if the role still does not exist. The cast intentionally raises with
+-- the diagnostic text on the impossible-to-record path.
+SELECT CASE
+  WHEN EXISTS (SELECT 1 FROM pg_catalog.pg_roles WHERE rolname = 'tenant_projection_writer')
+    THEN 1
+  ELSE CAST('tenant_projection_writer role missing after guarded create' AS integer)
 END;
-$$;
 
 -- -----------------------------------------------------------------------------
--- 2. Fail loud if the role is still not there — never record this migration
---    against a role that does not exist.
+-- 2. CONNECT on the target database. Guarded on the database existing so the
+--    file stays valid on a cluster that has not been through 000.
 -- -----------------------------------------------------------------------------
-DO $$
-BEGIN
-  IF NOT EXISTS (SELECT 1 FROM pg_roles WHERE rolname = 'tenant_projection_writer') THEN
-    RAISE EXCEPTION
-      'tenant_projection_writer role does not exist and could not be created — '
-      'the executing role lacks CREATEROLE. On a managed instance the role is '
-      'provisioned at the provisioning seam (OMN-15343); this migration refuses '
-      'to record itself against a role that is not there.';
-  END IF;
+SELECT 'GRANT CONNECT ON DATABASE omnidash_analytics TO tenant_projection_writer'
+WHERE EXISTS (SELECT 1 FROM pg_catalog.pg_database WHERE datname = 'omnidash_analytics')
+\gexec
+
+SELECT CASE
+  WHEN NOT EXISTS (SELECT 1 FROM pg_catalog.pg_database WHERE datname = 'omnidash_analytics')
+    THEN 1
+  WHEN has_database_privilege('tenant_projection_writer', 'omnidash_analytics', 'CONNECT')
+    THEN 1
+  ELSE CAST('tenant_projection_writer lacks CONNECT on omnidash_analytics after grant' AS integer)
 END;
-$$;
-
--- -----------------------------------------------------------------------------
--- 3. CREATEDB / CREATEROLE. Not gated by the executing role's own attributes the
---    way the three below are, but ALTER ROLE still demands role-administration
---    rights, so this is gated on an observed divergence too. Immediately after
---    the guarded CREATE, and on every re-run against a correct role, both flags
---    are already false and no statement is issued at all.
--- -----------------------------------------------------------------------------
-DO $$
-DECLARE
-  current_flags RECORD;
-BEGIN
-  SELECT rolcreatedb, rolcreaterole
-    INTO current_flags
-    FROM pg_roles
-   WHERE rolname = 'tenant_projection_writer';
-
-  IF current_flags.rolcreatedb OR current_flags.rolcreaterole THEN
-    BEGIN
-      EXECUTE 'ALTER ROLE tenant_projection_writer NOCREATEDB NOCREATEROLE';
-    EXCEPTION
-      WHEN insufficient_privilege THEN
-        RAISE EXCEPTION
-          'tenant_projection_writer carries an unexpected privilege '
-          '(rolcreatedb=%, rolcreaterole=%) and the executing role lacks the '
-          'role-administration rights to correct it — fix this role at the '
-          'provisioning seam before the tenant projection path can be trusted',
-          current_flags.rolcreatedb, current_flags.rolcreaterole;
-    END;
-  END IF;
-END;
-$$;
-
--- -----------------------------------------------------------------------------
--- 4. SUPERUSER / BYPASSRLS / REPLICATION. Privilege-gated by Postgres core: the
---    executing role must already hold an attribute to ALTER it, even to
---    re-assert an already-correct `false`. Only attempt the ALTER when one of
---    the three is actually set — the common case (right after the guarded
---    CREATE, and on every idempotent re-run) never reaches the statement at all,
---    so it never trips the permission error a blanket ALTER produces on RDS.
---
---    This is the load-bearing assertion for the whole P5 cut: rolsuper or
---    rolbypassrls on this role silently exempts every tenant projection write
---    from tenant_isolation RLS, which would turn the isolation proof into a
---    false clean rather than evidence.
--- -----------------------------------------------------------------------------
-DO $$
-DECLARE
-  current_flags RECORD;
-BEGIN
-  SELECT rolsuper, rolbypassrls, rolreplication
-    INTO current_flags
-    FROM pg_roles
-   WHERE rolname = 'tenant_projection_writer';
-
-  IF current_flags.rolsuper
-     OR current_flags.rolbypassrls
-     OR current_flags.rolreplication THEN
-    BEGIN
-      EXECUTE 'ALTER ROLE tenant_projection_writer NOSUPERUSER NOBYPASSRLS NOREPLICATION';
-    EXCEPTION
-      WHEN insufficient_privilege THEN
-        RAISE EXCEPTION
-          'tenant_projection_writer has an escalated flag (rolsuper=%, '
-          'rolbypassrls=%, rolreplication=%) and the executing role lacks '
-          'privilege to correct it — a true Postgres superuser must fix this '
-          'role manually before tenant projection writes can be trusted to be '
-          'subject to RLS',
-          current_flags.rolsuper, current_flags.rolbypassrls,
-          current_flags.rolreplication;
-    END;
-  END IF;
-END;
-$$;
-
--- -----------------------------------------------------------------------------
--- 5. CONNECT on the target database. GRANT ... ON DATABASE is cluster-wide and
---    can be issued from any database context, so this needs no `\connect` and
---    keeps the file inside the flat corpus's one-database rule (099 step 3 uses
---    the identical shape). Guarded on the database existing so the file stays
---    valid on a cluster that has not been through 000.
---
---    This is the topology's declared `object_type: DATABASE, privileges:
---    [CONNECT]` grant for this principal — see
---    `src/omnibase_infra/topology/instances/*.yaml`
---    `principals.tenant_projection_writer.grants`.
--- -----------------------------------------------------------------------------
---    Divergence from 099's step 3: the grant is READ BACK. A GRANT issued by a
---    role that holds neither the database's ownership nor the privilege WITH
---    GRANT OPTION does not raise — PostgreSQL emits `WARNING: no privileges
---    were granted` and returns success. Proven in the scratch replay
---    (2026-08-29, postgres:16-alpine, ordinary NOCREATEROLE login role): 102
---    completed with exit 0 and that warning. Left unchecked this file would
---    record itself as applied on a lane where the principal cannot connect at
---    all, which is the same silent-success class OMN-15819 unmasked for the
---    ledger. The read-back turns it into a named failure.
-DO $$
-BEGIN
-  IF EXISTS (SELECT 1 FROM pg_database WHERE datname = 'omnidash_analytics') THEN
-    EXECUTE 'GRANT CONNECT ON DATABASE omnidash_analytics TO tenant_projection_writer';
-    IF NOT has_database_privilege('tenant_projection_writer', 'omnidash_analytics', 'CONNECT') THEN
-      RAISE EXCEPTION
-        'tenant_projection_writer still lacks CONNECT on omnidash_analytics '
-        'after the grant — the executing role (%) can neither grant it nor '
-        'inherit it. PostgreSQL only WARNs on a privilege-less GRANT, so this '
-        'read-back is the only thing standing between a no-op and a migration '
-        'recorded as applied on a lane where the tenant projections cannot '
-        'connect. Grant CONNECT at the provisioning seam and re-run.',
-        current_user;
-    END IF;
-  END IF;
-END;
-$$;
