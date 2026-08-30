@@ -1040,7 +1040,8 @@ def _requires_dynamic_sql_rejection(statement: str) -> bool:
     """Reject procedural execution whose relation targets are runtime strings."""
     masked = _mask_sql_string_bodies(statement)
     if re.match(r"^\s*do\b", masked, re.IGNORECASE) is not None:
-        return _contains_unquoted_keyword(statement, "execute")
+        body = _do_block_body(statement)
+        return body is None or _contains_unquoted_keyword(body, "execute")
     return any(
         language == "plpgsql" and _contains_unquoted_keyword(body, "execute")
         for language, body in _routine_sql_bodies(statement)
