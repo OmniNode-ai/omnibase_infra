@@ -33,6 +33,7 @@ MANIFEST = LEDGER_DIR / "application-migrations.tsv"
 LEGACY_NODE_DECLARATIONS = LEDGER_DIR / "legacy-node-migrations.tsv"
 VERIFIED_ADOPTIONS = LEDGER_DIR / "verified-checksum-adoptions.tsv"
 VERIFIED_DIVERGENT_ADOPTIONS = LEDGER_DIR / "verified-divergent-adoptions.tsv"
+VERIFIED_CANONICAL_ADOPTIONS = LEDGER_DIR / "verified-canonical-adoptions.tsv"
 VERIFIED_CROSS_SOURCE_ADOPTIONS = LEDGER_DIR / "verified-cross-source-adoptions.tsv"
 BOOTSTRAP = LEDGER_DIR / "bootstrap.sql"
 RUNNER = REPO_ROOT / "scripts" / "run-forward-migrations.sh"
@@ -201,6 +202,7 @@ def _run_bootstrap(
     adoptions: Path | None = None,
     divergent_adoptions: Path | None = None,
     cross_source_adoptions: Path | None = None,
+    canonical_adoptions: Path | None = None,
 ) -> subprocess.CompletedProcess[str]:
     create_manifest = """
 CREATE TEMP TABLE onex_application_migration_manifest (
@@ -267,6 +269,17 @@ CREATE TEMP TABLE onex_verified_cross_source_adoptions (
 )
 """,
         "-c",
+        """
+CREATE TEMP TABLE onex_verified_canonical_adoptions (
+  version TEXT NOT NULL PRIMARY KEY,
+  source_checksum TEXT NOT NULL,
+  manifest_checksum TEXT NOT NULL,
+  ticket TEXT NOT NULL,
+  receipt_sha256 TEXT NOT NULL,
+  verified_at TEXT NOT NULL
+)
+""",
+        "-c",
         (
             "\\copy onex_application_migration_manifest "
             f"FROM '{MANIFEST}' WITH (FORMAT text, DELIMITER E'\\t')"
@@ -291,6 +304,12 @@ CREATE TEMP TABLE onex_verified_cross_source_adoptions (
         (
             "\\copy onex_verified_cross_source_adoptions "
             f"FROM '{cross_source_adoptions or VERIFIED_CROSS_SOURCE_ADOPTIONS}' "
+            "WITH (FORMAT text, DELIMITER E'\\t')"
+        ),
+        "-c",
+        (
+            "\\copy onex_verified_canonical_adoptions "
+            f"FROM '{canonical_adoptions or VERIFIED_CANONICAL_ADOPTIONS}' "
             "WITH (FORMAT text, DELIMITER E'\\t')"
         ),
         "-f",
@@ -563,6 +582,11 @@ INSERT INTO public.db_metadata (id) VALUES (TRUE) ON CONFLICT (id) DO NOTHING;
     (ledger_dir / "verified-cross-source-adoptions.tsv").write_text(
         "", encoding="utf-8"
     )
+    # OMN-17139: the fourth adoption relation, consulted by bootstrap.sql's
+    # canonical-ledger adoption. Empty here -- this fixture declares none -- but
+    # the runner requires the file to exist so a missing declaration file fails
+    # closed rather than silently admitting nothing.
+    (ledger_dir / "verified-canonical-adoptions.tsv").write_text("", encoding="utf-8")
     (ledger_dir / "cloud-migration-aliases.tsv").write_text(
         "20260101_cloud\t20260101_cloud.sql\n", encoding="utf-8"
     )

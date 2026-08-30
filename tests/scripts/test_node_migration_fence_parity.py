@@ -1364,6 +1364,11 @@ def _write_application_ledger_contract(forward: Path) -> None:
     (ledger_dir / "verified-cross-source-adoptions.tsv").write_text(
         "", encoding="utf-8"
     )
+    # OMN-17139: the fourth adoption relation, consulted by bootstrap.sql's
+    # canonical-ledger adoption. Empty here -- this fixture declares none -- but
+    # the runner requires the file to exist so a missing declaration file fails
+    # closed rather than silently admitting nothing.
+    (ledger_dir / "verified-canonical-adoptions.tsv").write_text("", encoding="utf-8")
 
 
 @pytest.fixture

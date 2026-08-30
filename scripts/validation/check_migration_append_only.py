@@ -63,12 +63,37 @@ change only when all of the following hold:
 
 This guards the paths the canonical ledger actually checksums: the node
 migrations declared in ``application-migrations.tsv``. The flat migrations in
-``docker/migrations/forward/*.sql`` are NOT covered, because
-``onex_application_migration_manifest`` -- the relation bootstrap.sql joins to
-raise the conflict above -- is node-only, so editing a flat migration cannot
-produce this failure. That is a deliberate scope boundary, not an oversight.
+``docker/migrations/forward/*.sql`` are NOT covered, because the checksum
+comparison is node-only, so editing a flat migration cannot produce this
+failure. That is a deliberate scope boundary, not an oversight.
 
-Ticket: OMN-16705
+## Which table decides, and which one does not (OMN-17139)
+
+An earlier revision of this docstring named ``onex_application_migration_manifest``
+as "the relation bootstrap.sql joins to raise the conflict above". That is wrong,
+and the error was not academic -- it is the table an author probed on
+2026-08-30 before rewriting an applied migration in place, and it answered
+"clean" because it answers "clean" everywhere.
+``onex_application_migration_manifest`` is a TEMP table
+``run-forward-migrations.sh`` builds from the checked-in TSV for the life of one
+bootstrap session. It is absent on every lane, by construction, at every moment
+an author could probe it.
+
+Two relations actually carry recorded checksums, and both are persistent:
+
+* ``platform_catalog.schema_migrations`` -- written by
+  ``run-forward-migrations.sh`` as it applies each file, and read back by its
+  ``migration_is_applied()``. This is the gate that fires on an in-place edit.
+* ``public.schema_migrations`` / ``public.omnimarket_schema_migrations`` -- the
+  import sources bootstrap.sql adopts from.
+
+This guard cannot consult any of them: it runs at pre-commit and in CI, with no
+lane to ask. That is precisely why the question must be asked explicitly, of the
+lane, with ``scripts/migrations/check_migration_applied_on_lane.py``, before a
+supersession row is written -- and why a supersession `reason` asserting that a
+migration was "never applied" is worth nothing unless it cites that probe.
+
+Ticket: OMN-16705 (guard), OMN-17139 (which table answers)
 """
 
 from __future__ import annotations
@@ -259,7 +284,13 @@ def _authorised(
             "no supersession row in "
             f"{SUPERSESSIONS_REPO_PATH}. An already-declared migration is applied "
             "history and its bytes are frozen: add a NEW file with the next "
-            "ordinal in the same node directory instead of editing this one."
+            "ordinal in the same node directory instead of editing this one. "
+            "Before writing a supersession row, ASK THE LANE whether this "
+            "migration is already applied -- "
+            "scripts/migrations/check_migration_applied_on_lane.py reads "
+            "platform_catalog.schema_migrations, the table the runner gates on; "
+            "onex_application_migration_manifest is a per-session TEMP table and "
+            "reads clean on every lane (OMN-17139)."
         )
     problems: list[str] = []
     for row in rows:
@@ -396,8 +427,9 @@ def main(argv: list[str] | None = None) -> int:
     if violations:
         print(
             "FAIL: applied migration history was rewritten (OMN-16705). "
-            "bootstrap.sql records a content_sha256 per applied migration and "
-            "refuses every later run when the file no longer matches:",
+            "The forward-migration runner records a content_sha256 per applied "
+            "migration in platform_catalog.schema_migrations and refuses every "
+            "later run when the file no longer matches:",
             file=sys.stderr,
         )
         for violation in violations:

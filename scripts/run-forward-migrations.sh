@@ -126,6 +126,20 @@ VERIFIED_DIVERGENT_ADOPTIONS="${MIGRATIONS_DIR}/_ledger/verified-divergent-adopt
 # one declaration for another.  Admissible only when both sides already resolve to
 # the SAME manifest checksum; a content disagreement is never reconciled here.
 VERIFIED_CROSS_SOURCE_ADOPTIONS="${MIGRATIONS_DIR}/_ledger/verified-cross-source-adoptions.tsv"
+# OMN-17139: per-version adoptions for a row THIS RUNNER recorded itself.  The
+# three relations above all answer questions about an IMPORT source
+# (public.schema_migrations, public.omnimarket_schema_migrations) and are read
+# only by bootstrap.sql.  None of them can be consulted by migration_is_applied
+# below, which compares the file on disk against the canonical ledger the runner
+# writes -- platform_catalog.schema_migrations.  When an already-applied
+# migration is edited in place, that comparison is the gate that fires, and
+# before this relation existed there was no admission path at all: the lane was
+# permanently un-deployable until the file was reverted to the applied bytes.
+# A fourth relation of its own, for the same reason the second and third exist:
+# it answers a question about a different table and must never be readable for
+# one of the others.  Written only by
+# scripts/migrations/verify_migration_checksum_adoption.py --emit-adoptions.
+VERIFIED_CANONICAL_ADOPTIONS="${MIGRATIONS_DIR}/_ledger/verified-canonical-adoptions.tsv"
 CLOUD_MIGRATION_ALIASES="${MIGRATIONS_DIR}/_ledger/cloud-migration-aliases.tsv"
 
 export PGPASSWORD="${POSTGRES_PASSWORD}"
@@ -758,6 +772,7 @@ prepare_canonical_ledger() {
   validate_client_file_path "$VERIFIED_CHECKSUM_ADOPTIONS"
   validate_client_file_path "$VERIFIED_DIVERGENT_ADOPTIONS"
   validate_client_file_path "$VERIFIED_CROSS_SOURCE_ADOPTIONS"
+  validate_client_file_path "$VERIFIED_CANONICAL_ADOPTIONS"
   echo "[forward-migration] Converging canonical ledger in ${ledger_database}..."
   psql -X -q -h "$PGHOST" -p "$PGPORT" -U "$PGUSER" -d "$ledger_database" \
     -v ON_ERROR_STOP=1 \
@@ -802,12 +817,20 @@ prepare_canonical_ledger() {
           ticket TEXT NOT NULL,
           receipt_sha256 TEXT NOT NULL,
           verified_at TEXT NOT NULL
+        ); CREATE TEMP TABLE onex_verified_canonical_adoptions (
+          version TEXT NOT NULL PRIMARY KEY,
+          source_checksum TEXT NOT NULL,
+          manifest_checksum TEXT NOT NULL,
+          ticket TEXT NOT NULL,
+          receipt_sha256 TEXT NOT NULL,
+          verified_at TEXT NOT NULL
         )" \
     -c "\copy onex_application_migration_manifest FROM '${APPLICATION_MIGRATION_MANIFEST}' WITH (FORMAT text, DELIMITER E'\t')" \
     -c "\copy onex_legacy_node_migration_declarations FROM '${LEGACY_NODE_MIGRATION_DECLARATIONS}' WITH (FORMAT text, DELIMITER E'\t')" \
     -c "\copy onex_verified_checksum_adoptions FROM '${VERIFIED_CHECKSUM_ADOPTIONS}' WITH (FORMAT text, DELIMITER E'\t')" \
     -c "\copy onex_verified_divergent_adoptions FROM '${VERIFIED_DIVERGENT_ADOPTIONS}' WITH (FORMAT text, DELIMITER E'\t')" \
     -c "\copy onex_verified_cross_source_adoptions FROM '${VERIFIED_CROSS_SOURCE_ADOPTIONS}' WITH (FORMAT text, DELIMITER E'\t')" \
+    -c "\copy onex_verified_canonical_adoptions FROM '${VERIFIED_CANONICAL_ADOPTIONS}' WITH (FORMAT text, DELIMITER E'\t')" \
     -f "$LEDGER_BOOTSTRAP"
 }
 
@@ -854,6 +877,12 @@ EOSQL
     content_sha256)
       if [ "$recorded_checksum" != "$expected_checksum" ]; then
         echo "[forward-migration] FATAL: conflicting migration checksum for ${ledger_stream}:${ledger_domain}:${ledger_version}" >&2
+        echo "[forward-migration]   recorded ${recorded_checksum} (applied on THIS lane), file on disk ${expected_checksum}" >&2
+        echo "[forward-migration]   An already-applied migration was edited in place." >&2
+        echo "[forward-migration]   Ask the lane -- not the manifest -- whether a migration is applied:" >&2
+        echo "[forward-migration]     python scripts/migrations/check_migration_applied_on_lane.py --version ${ledger_version} ..." >&2
+        echo "[forward-migration]   Admit a proven schema-equivalent revision with:" >&2
+        echo "[forward-migration]     python scripts/migrations/verify_migration_checksum_adoption.py --emit-adoptions ... (OMN-17139)" >&2
         exit 1
       fi
       ;;
