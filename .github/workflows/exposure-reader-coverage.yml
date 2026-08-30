@@ -1,0 +1,161 @@
+# SPDX-FileCopyrightText: 2025 OmniNode.ai Inc.
+# SPDX-License-Identifier: MIT
+#
+# exposure-reader-coverage.yml — OMN-17199
+#
+# CI gate: every `projection_api` exposure declaring `bus_backed: true` must
+# have a DECLARED READER — an omnidash component whose `dataSources[].topic` is
+# the exposure topic, that component placed in a shipped omnidash dashboard
+# layout (`src/templates/*.ts`), or an explicit `consumers: none` carrying a
+# non-empty `consumers_reason`.
+#
+# WHY THIS EXISTS
+#
+#   Every other ratchet in this platform guards the WRITE end of a projection:
+#   OMN-15864 (the exposure has a scheduled producer), OMN-16795 /
+#   omnibase_infra#2948 (a subscribe topic has a publisher), OMN-16783 (a
+#   contract declaring subscribe+publish declares a flow expectation). NOTHING
+#   asserted that anybody ever reads the result, and that single asymmetry
+#   produced three incidents:
+#
+#     1. OMN-14440 — a job fired every 30 minutes for three months, failed every
+#        time, wrote 348KB of errors. No reader ever opened it.
+#     2. Phoenix — a healthy pinned UI with working env, health checks and a
+#        contract overlay, attached to a pipe nothing writes to. Re-probed
+#        2026-08-30: spans 0, traces 0, 79 days.
+#     3. onex.snapshot.projection.consumer-flow.v1 — declared bus_backed: true
+#        with a live writer at ~2.55M rows and 43s freshness, and zero widgets on
+#        zero surfaces. That one happened INSIDE the Phase 1 deliverable of the
+#        epic (OMN-16776) written to stop it, three days after the plan named the
+#        precedent.
+#
+#   Detection was never the missing piece. CLAUDE.md Operating Rule 5 — a check
+#   that is not a merge condition is advisory and gets ignored — is why the gate
+#   and the validator land in the same PR.
+#
+# CROSS-REPO SCOPE
+#
+#   Every bus_backed exposure in the platform lives in omnimarket contracts
+#   today; the reader surface lives in omnidash. Both are checked out sparsely
+#   here, the same pattern dispatcher-route-coverage.yml (OMN-12858/12879/12880)
+#   already uses for the omnimarket contract tree and duplication-sweep.yml uses
+#   for omnidash. omnibase_infra owns the validator because it owns the
+#   contract-scanning validator family and the exposure topic extractor.
+#
+# NO ALLOWLIST
+#
+#   This gate ships no baseline, no skip list and no expiring-grandfather file,
+#   and a test asserts it never grows one. OMN-17068 records what happened to the
+#   sibling subscribe-has-publisher ratchet that did: a 682-entry grandfathered
+#   list. A large violation count is the finding, not a reason for a bypass file.
+#
+# ENFORCEMENT SURFACE
+#
+#   omnibase_infra `dev` requires exactly one context, `CI Summary` (OMN-4497 /
+#   OMN-14127). External contexts are asserted present-and-green through
+#   EXPECTED_EXTERNAL_CONTEXTS in scripts/ci/ci_summary_gate.py, which is this
+#   repo's real enforcement surface — see CLAUDE.md "PR CI Requirements" §4.
+#   `exposure-reader-coverage` is registered there in this same PR. A workflow
+#   that runs but is not registered there cannot block a merge.
+
+name: Exposure Reader Coverage
+
+on:
+  pull_request:
+    branches: [main, dev]
+  push:
+    branches: [main]
+  merge_group:
+
+concurrency:
+  # OMN-13949: cancel superseded PR runs to free saturated runners. merge_group
+  # entries carry a unique github.ref, so queue entries never cross-cancel.
+  group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+jobs:
+  exposure-reader-coverage:
+    name: exposure-reader-coverage
+    runs-on: >-
+      ${{
+        (github.event_name == 'pull_request' &&
+         github.event.pull_request.head.repo.full_name != github.repository)
+        && fromJSON(vars.OMNI_PUBLIC_PR_RUNS_ON_JSON || '["ubuntu-latest"]')
+        || fromJSON(vars.OMNI_TRUSTED_CI_RUNS_ON_JSON || '["self-hosted","omnibase-ci"]')
+      }}
+    # Matches dispatcher-route-coverage: sparse sibling checkouts can spend most
+    # of a tighter budget retrying partial-clone fetches under fleet egress
+    # saturation (OMN-14017).
+    timeout-minutes: 30
+
+    steps:
+      - name: Checkout omnibase_infra
+        uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+        with:
+          persist-credentials: false
+
+      - name: Checkout omnimarket (sibling — where bus_backed exposures live)
+        uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+        with:
+          repository: OmniNode-ai/omnimarket
+          ref: dev
+          path: omnimarket
+          token: ${{ secrets.OMNI_GITHUB_TOKEN || github.token }}
+          persist-credentials: false
+          sparse-checkout: |
+            src/omnimarket/nodes
+          sparse-checkout-cone-mode: false
+
+      - name: Checkout omnidash (sibling — the reader surface)
+        uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+        with:
+          repository: OmniNode-ai/omnidash
+          ref: dev
+          path: omnidash
+          token: ${{ secrets.OMNI_GITHUB_TOKEN || github.token }}
+          persist-credentials: false
+          # The shipped layouts are src/templates/*.ts (DASHBOARD_TEMPLATES).
+          # NOT dashboard-layouts/ — that path is in omnidash's .gitignore (line 27)
+          # and holds a user's locally-saved dashboards, so it reaches no checkout.
+          # Sparse-checking it out would have yielded an empty directory and a gate
+          # that resolved zero layout readers on every run while looking healthy.
+          sparse-checkout: |
+            src/registry/component-registry.json
+            src/templates
+          sparse-checkout-cone-mode: false
+
+      - name: Install pyyaml (only dep for the validator)
+        shell: bash
+        run: |
+          # The validator uses stdlib + pyyaml only; skip the full uv sync to
+          # keep this job fast (no Kafka, no DB, no handler imports).
+          python3 -m pip install --quiet pyyaml
+
+      - name: Assert the sibling reader surface is present (fail closed)
+        shell: bash
+        run: |
+          set -euo pipefail
+          # The validator already refuses an unreadable registry, but assert the
+          # checkout here too so a sparse-checkout regression reads as an
+          # infrastructure failure with a named cause rather than as a validator
+          # error. A gate whose evidence silently disappears is the OMN-15606
+          # fail-open shape this whole epic exists to close.
+          test -f omnidash/src/registry/component-registry.json \
+            || { echo "::error::omnidash component registry missing from the sibling checkout"; exit 1; }
+          test -d omnidash/src/templates \
+            || { echo "::error::omnidash src/templates missing from the sibling checkout"; exit 1; }
+          test -d omnimarket/src/omnimarket/nodes \
+            || { echo "::error::omnimarket contract tree missing from the sibling checkout"; exit 1; }
+
+      - name: Run exposure reader-coverage gate
+        shell: bash
+        run: |
+          set -euo pipefail
+          PYTHONPATH=src python3 -m omnibase_infra.validators.bus_backed_exposure_readers \
+            src/omnibase_infra/nodes \
+            --extra-contracts-dir omnimarket/src/omnimarket/nodes \
+            --registry omnidash/src/registry/component-registry.json \
+            --layouts-dir omnidash/src/templates
