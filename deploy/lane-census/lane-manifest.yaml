@@ -320,7 +320,7 @@ lanes:
 #   -> confirms `omnibase-infra-stability-test-network` exists and is distinct.
 #   Publisher side proven the same session, 2026-08-30T15:50:34Z: the shipped
 #   session_start_bus_mirror.sh was invoked with KAFKA_BOOTSTRAP_SERVERS
-#   deliberately preset to the DEV lane (192.168.86.201:19092) and still landed
+#   deliberately preset to the DEV lane (192.168.86.201:19092) and still landed  # onex-allow-internal-ip
 #   its record on the STABILITY lane -- marker `OMN17204LaneProof-1788105033`
 #   read back via `rpk topic consume onex.evt.omniclaude.session-started.v1
 #   -o -20 -n 100` inside each lane's redpanda container: 8 hits on
