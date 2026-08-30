@@ -165,10 +165,10 @@ prepush_slot_state() {
   else
     tcmd="$(_prepush_timeout_cmd)"
     if [ -n "$tcmd" ]; then
-      raw="$("$tcmd" 12 ssh -o ConnectTimeout=4 -o BatchMode=yes -o StrictHostKeyChecking=accept-new \
+      raw="$("$tcmd" 12 ssh -n -o ConnectTimeout=4 -o BatchMode=yes -o StrictHostKeyChecking=accept-new \
         "$target" "PREPUSH_WORKROOT='${workroot}'; $_PREPUSH_SLOT_PROBE_SH" 2> /dev/null)" || return 2
     else
-      raw="$(ssh -o ConnectTimeout=4 -o BatchMode=yes -o StrictHostKeyChecking=accept-new \
+      raw="$(ssh -n -o ConnectTimeout=4 -o BatchMode=yes -o StrictHostKeyChecking=accept-new \
         "$target" "PREPUSH_WORKROOT='${workroot}'; $_PREPUSH_SLOT_PROBE_SH" 2> /dev/null)" || return 2
     fi
   fi
@@ -201,10 +201,10 @@ prepush_uv_version_ok() {
   else
     tcmd="$(_prepush_timeout_cmd)"
     if [ -n "$tcmd" ]; then
-      out="$("$tcmd" 12 ssh -o ConnectTimeout=4 -o BatchMode=yes -o StrictHostKeyChecking=accept-new \
+      out="$("$tcmd" 12 ssh -n -o ConnectTimeout=4 -o BatchMode=yes -o StrictHostKeyChecking=accept-new \
         "$target" "'${uv}' --version" 2> /dev/null)" || return 2
     else
-      out="$(ssh -o ConnectTimeout=4 -o BatchMode=yes -o StrictHostKeyChecking=accept-new \
+      out="$(ssh -n -o ConnectTimeout=4 -o BatchMode=yes -o StrictHostKeyChecking=accept-new \
         "$target" "'${uv}' --version" 2> /dev/null)" || return 2
     fi
   fi
@@ -283,25 +283,97 @@ prepush_probe_uv() {
 # -----------------------------------------------------------------------------
 # Placement
 # -----------------------------------------------------------------------------
-# pick_capacity_host LC_HOST REPO -- chooses the least-loaded host that has
-# PROVEN a free slot, or returns 1. Sets, on success:
-#   PREPUSH_PICK_LABEL / _HOSTNAME / _SSH / _UV / _WORKROOT / _SLOTMODE
-#   PREPUSH_PICK_RATIO / _MODE
-# and always sets PREPUSH_PROBE_LOG (a "label=verdict" trail for the receipt
-# and the refusal message -- every probed host is on the record, so a refusal
-# can be audited rather than believed).
+# prepush_load_rows -- materialize every data row into PREPUSH_TABLE_ROWS.
 #
-# Order of elimination is deliberate: cheap local facts first (disabled, repo
-# denial), then the slot (the scarce resource), then load, then the toolchain.
-# load1 ranks only among hosts already proven to hold a free slot -- it is a
-# tiebreaker, not the placement key.
+# WHY AN ARRAY AND NOT `while IFS= read -r row; ... done <<EOF` (OMN-16991
+# verify finding 1, reproduced live): the picker's loop body invokes ssh(1)
+# three times per row, and ssh reads its parent's stdin unless told not to.
+# With the row list fed in as the loop's stdin, the FIRST probe consumed every
+# remaining row and the loop ended after one host -- the real picker on the
+# real network emitted `PROBE=[h200=fit(0.9,authorizing)] PICK=[h200]` and never
+# evaluated h201/h101/h105, so a lab with three idle hosts refused the push.
+# Rows are now read BEFORE any probe runs, and every ssh in this file also
+# carries `-n`; either fix alone would close it, and both are kept because the
+# defect is silent (a truncated scan looks exactly like a small lab).
+#
+# The identity helpers above keep their here-doc loops on purpose: their bodies
+# execute no subprocess that reads stdin, so they cannot be truncated.
+prepush_load_rows() {
+  local row
+  PREPUSH_TABLE_ROWS=()
+  while IFS= read -r row; do
+    [ -n "$row" ] || continue
+    PREPUSH_TABLE_ROWS[${#PREPUSH_TABLE_ROWS[@]}]="$row"
+  done <<EOF
+$(prepush_table_rows)
+EOF
+  [ "${#PREPUSH_TABLE_ROWS[@]}" -gt 0 ]
+}
+
+# prepush_candidate_count -- how many fit hosts the last pick ranked.
+prepush_candidate_count() {
+  if [ -z "${PREPUSH_FIT_RECORDS:-}" ]; then
+    printf '0'
+    return 0
+  fi
+  printf '%s\n' "$PREPUSH_FIT_RECORDS" | grep -c . || true
+}
+
+# prepush_select_candidate N -- 1-based; loads the Nth ranked fit host into the
+# PREPUSH_PICK_* variables. Placement is a RANKED LIST rather than a single
+# winner (OMN-16991 verify finding 3) so a candidate that fails to produce a
+# verdict -- unreachable on arrival, slot taken between the probe and the run,
+# transfer failure -- costs the next-best host, not the whole escalation. The
+# previous shape returned one host and refused outright when it did not answer,
+# after paying bundle + scp + `uv sync` for nothing.
+prepush_select_candidate() {
+  local rec
+  rec="$(printf '%s\n' "${PREPUSH_FIT_RECORDS:-}" | sed -n "${1}p")"
+  [ -n "$rec" ] || return 1
+  PREPUSH_PICK_RATIO="$(printf '%s' "$rec" | cut -d'|' -f1)"
+  PREPUSH_PICK_LABEL="$(printf '%s' "$rec" | cut -d'|' -f2)"
+  PREPUSH_PICK_HOSTNAME="$(printf '%s' "$rec" | cut -d'|' -f3)"
+  PREPUSH_PICK_SSH="$(printf '%s' "$rec" | cut -d'|' -f4)"
+  PREPUSH_PICK_UV="$(printf '%s' "$rec" | cut -d'|' -f5)"
+  PREPUSH_PICK_WORKROOT="$(printf '%s' "$rec" | cut -d'|' -f6)"
+  PREPUSH_PICK_SLOTMODE="$(printf '%s' "$rec" | cut -d'|' -f7)"
+  PREPUSH_PICK_MODE="$(printf '%s' "$rec" | cut -d'|' -f8)"
+  return 0
+}
+
+# pick_capacity_host LC_HOST REPO [REQUIRE_MODE] -- ranks every host that has
+# PROVEN a free slot, cheapest load first, into PREPUSH_FIT_RECORDS, and loads
+# the best one into PREPUSH_PICK_*. Returns 1 when nothing is fit. Always sets
+# PREPUSH_PROBE_LOG (a "label=verdict" trail for the receipt and the refusal
+# message -- every considered host is on the record, so a refusal can be
+# audited rather than believed).
+#
+# REQUIRE_MODE defaults to `authorizing` and is the mode a row must carry to be
+# a placement candidate AT ALL. That default is the fix for OMN-16991 verify
+# finding 3: ranking on load alone let a `shadow` row outrank both authorizing
+# hosts (h200=0.90 h201=0.30 h105=0.20(shadow) -> PICK=h105), and a shadow host
+# by definition cannot satisfy the escalation, so the run was dispatched,
+# executed, and then discarded -- an escalation that .200 or .201 could have
+# answered got refused instead, minutes later. A non-eligible row is now
+# skipped BEFORE it is probed: it can never win, so probing it only spends ssh
+# round trips on the pre-push critical path.
+#
+# Order of elimination is deliberate: cheap local facts first (disabled, mode,
+# repo denial), then the slot (the scarce resource), then load, then the
+# toolchain. load1 ranks only among hosts already proven to hold a free slot --
+# it is a tiebreaker, not the placement key.
 pick_capacity_host() {
-  local lc_host repo row label role name ssh_t uv floor workroot slotmode denied mode
-  local self ratio rc best_ratio=""
-  lc_host="$1"; repo="$2"
+  local lc_host repo want_mode row label role name ssh_t uv floor workroot slotmode denied mode
+  local self ratio rc recs=""
+  lc_host="$1"; repo="$2"; want_mode="${3:-authorizing}"
   PREPUSH_PROBE_LOG=""
   PREPUSH_PICK_LABEL=""
-  while IFS= read -r row; do
+  PREPUSH_FIT_RECORDS=""
+  if ! prepush_load_rows; then
+    PREPUSH_PROBE_LOG="host-table-unreadable"
+    return 1
+  fi
+  for row in ${PREPUSH_TABLE_ROWS[@]+"${PREPUSH_TABLE_ROWS[@]}"}; do
     [ -n "$row" ] || continue
     label="$(prepush_field "$row" 1)"
     role="$(prepush_field "$row" 2)"
@@ -309,6 +381,10 @@ pick_capacity_host() {
     [ "$role" = "capacity" ] || continue
     if [ "$mode" = "disabled" ]; then
       PREPUSH_PROBE_LOG="${PREPUSH_PROBE_LOG}${label}=disabled "
+      continue
+    fi
+    if [ "$mode" != "$want_mode" ]; then
+      PREPUSH_PROBE_LOG="${PREPUSH_PROBE_LOG}${label}=mode-${mode}-not-eligible "
       continue
     fi
     denied="$(prepush_field "$row" 10)"
@@ -362,22 +438,15 @@ pick_capacity_host() {
     fi
 
     PREPUSH_PROBE_LOG="${PREPUSH_PROBE_LOG}${label}=fit(${ratio},${mode}) "
-    if [ -z "$best_ratio" ] || awk -v a="$ratio" -v b="$best_ratio" 'BEGIN { exit !(a < b) }'; then
-      best_ratio="$ratio"
-      PREPUSH_PICK_LABEL="$label"
-      PREPUSH_PICK_HOSTNAME="$name"
-      PREPUSH_PICK_SSH="$ssh_t"
-      PREPUSH_PICK_UV="$uv"
-      PREPUSH_PICK_WORKROOT="$workroot"
-      PREPUSH_PICK_SLOTMODE="$slotmode"
-      PREPUSH_PICK_RATIO="$ratio"
-      PREPUSH_PICK_MODE="$mode"
-    fi
-  done <<EOF
-$(prepush_table_rows)
-EOF
+    recs="${recs}${ratio}|${label}|${name}|${ssh_t}|${uv}|${workroot}|${slotmode}|${mode}
+"
+  done
   PREPUSH_PROBE_LOG="${PREPUSH_PROBE_LOG% }"
-  [ -n "$PREPUSH_PICK_LABEL" ]
+  [ -n "$recs" ] || return 1
+  # Ascending by load ratio: the cheapest host is tried first and the rest stay
+  # available as fallbacks.
+  PREPUSH_FIT_RECORDS="$(printf '%s' "$recs" | sed '/^[[:space:]]*$/d' | sort -t'|' -k1,1g)"
+  prepush_select_candidate 1
 }
 
 # prepush_local_workroot LC_HOST -- the workroot of the capacity row that IS
@@ -494,6 +563,19 @@ prepush_sha256_file() {
   sh -c "$_prepush_sha256_sh" _ "$1" 2> /dev/null
 }
 
+# prepush_remote_gc TARGET RUNDIR WORKROOT -- reclaim the transplanted tree and
+# prune stale run directories. A clone plus `uv sync --all-extras` is ~0.5 GB
+# per run and nothing pruned it: two dispatches left 1.0 GB on omnibook, the
+# host the picker prefers, which fills a laptop disk in a few hundred pushes and
+# then starts failing runs for a reason that looks nothing like its cause. The
+# small artifacts (MARKER, suite.log, sync.log) are deliberately KEPT -- they
+# are the audit trail behind the receipt -- and aged out after 3 days.
+prepush_remote_gc() {
+  ssh -n -o ConnectTimeout=6 -o BatchMode=yes "$1" \
+    "rm -rf '${2}/tree' 2>/dev/null; find '${3}/runs' -mindepth 1 -maxdepth 1 -type d -mtime +3 -exec rm -rf {} + 2>/dev/null" \
+    > /dev/null 2>&1 || true
+}
+
 # prepush_remote_argv -- the EXACT pytest argv this call site would have run
 # locally, one item per line. The two local call sites carry DIFFERENT argv and
 # conflating them would be a silent coverage downgrade: the heavy site runs
@@ -520,11 +602,14 @@ prepush_remote_argv() {
 # Returns 0 = GREEN (verdict may be used), 1 = NO EVIDENCE (fall through),
 # 3 = RED (the suite genuinely failed on a designated host; the caller MUST
 # refuse the push rather than fall through to an override grant -- a remote red
-# falling through to a grant would be a bypass wearing the word "fallback").
+# falling through to a grant would be a bypass wearing the word "fallback"),
+# 4 = the target's heavy-suite SLOT was taken on arrival (no suite ran; the
+# caller should try the next ranked host rather than refuse).
 prepush_remote_run() {
   local heavy_what repo head_sha runid workroot ssh_t uv label rundir
   local bundle argvfile runner localdir marker rc=0 argv_sha log_sha
   local m_exit m_head m_argv m_log m_collected started ended dur
+  local readback wrapper_exit
   heavy_what="$1"
   repo="$(basename "$REPO_ROOT")"
   head_sha="$(git -C "$REPO_ROOT" rev-parse HEAD 2> /dev/null || true)"
@@ -565,7 +650,7 @@ prepush_remote_run() {
   cat > "$runner" <<'REMOTE'
 #!/usr/bin/env bash
 set -uo pipefail
-RUNDIR="$1"; UV="$2"; HEAD_SHA="$3"; ARGV_SHA="$4"; ORIGIN="$5"
+RUNDIR="$1"; UV="$2"; HEAD_SHA="$3"; ARGV_SHA="$4"; ORIGIN="$5"; WORKROOT="$6"
 cd "$RUNDIR" || exit 90
 # Re-arm BOTH guards explicitly. ssh forwards neither, so without this the
 # remote repo's own suite -- which subprocesses this very hook from
@@ -577,10 +662,68 @@ cd "$RUNDIR" || exit 90
 for v in $(env | sed -n 's/^\(PREPUSH_[A-Za-z0-9_]*\)=.*/\1/p'); do unset "$v" || true; done
 unset ENABLE_SMART_TESTS || true
 export ONEX_PREPUSH_HOOK_ACTIVE="remote-leg:${ORIGIN}"
+
+# PATH PARITY WITH A DEVELOPER SHELL. A non-interactive ssh session gets a
+# minimal PATH -- on omnibook literally `/usr/bin:/bin:/usr/sbin:/sbin`, with
+# neither the Homebrew prefix nor ~/.local/bin on it. The suite shells out to
+# tools by BARE NAME (`uv` in tests/unit/infra/test_catalog_cli.py, `shellcheck`
+# in the shell-hygiene gate tests), so without this a transplanted run fails in
+# ways the same tree never fails locally: the first full-suite dispatch to
+# omnibook returned 8 reds, every one a FileNotFoundError for a tool that WAS
+# installed on that host, just not on the ssh PATH. A false red here HARD-BLOCKS
+# a push, so this is part of the verdict meaning anything -- not a convenience.
+PATH="$(dirname "$UV"):/opt/homebrew/bin:/usr/local/bin:${HOME:-}/.local/bin:${PATH}"
+export PATH
+
 ARGV=()
 while IFS= read -r line; do [ -n "$line" ] && ARGV+=("$line"); done < "$RUNDIR/argv.txt"
 [ "${#ARGV[@]}" -gt 0 ] || exit 91
+
+# THE TARGET HOST'S EXCLUSIVE HEAVY-SUITE SLOT (OMN-16991 verify finding 2).
+# The dispatcher's pre-flight probe can only observe the slot; between that
+# observation and this point another dispatcher -- or a local push on this very
+# machine -- can take it. The lock is therefore acquired HERE, on the target, by
+# the process that is about to burn the host's cores, and released when that
+# process exits. Before this the remote leg took no lock at all: a local heavy
+# push on .200/.201 could start while a transplanted suite was mid-run there,
+# which is the OMN-16174 overlap reopened across the local/remote boundary.
+#
+# Same primitive and same reclaim rule as prepush_lock_acquire in
+# prepush_dispatch.sh: mkdir(2) (flock(1) is absent on both Macs and its fd
+# idiom needs `exec {fd}<>`, unparseable by bash 3.2), plus dead-holder reclaim
+# so one externally-SIGTERMed run cannot wedge the host forever. The holder pid
+# is written by THIS process on THIS host, so `kill -0` is a meaningful
+# liveness check here -- the machine name is still recorded and compared, so a
+# holder record from anywhere else is never reaped.
+LOCKDIR="$WORKROOT/LOCK"
+SELF_HOST="$(hostname -s 2> /dev/null || echo unknown)"
+mkdir -p "$WORKROOT" 2> /dev/null || true
+_lock_acquire() {
+  if mkdir "$LOCKDIR" 2> /dev/null; then return 0; fi
+  local hpid hhost
+  hpid="$(cut -d' ' -f1 "$LOCKDIR/holder" 2> /dev/null || true)"
+  hhost="$(cut -d' ' -f2 "$LOCKDIR/holder" 2> /dev/null || true)"
+  if [ -n "$hpid" ] && [ "$hhost" = "$SELF_HOST" ] && ! kill -0 "$hpid" 2> /dev/null; then
+    rm -rf "$LOCKDIR" 2> /dev/null || true
+    if mkdir "$LOCKDIR" 2> /dev/null; then return 0; fi
+  fi
+  return 1
+}
+if ! _lock_acquire; then
+  echo "REMOTE_LOCK_CONTENDED holder=$(cat "$LOCKDIR/holder" 2> /dev/null || echo unknown)" >&2
+  exit 94
+fi
+printf '%s %s %s\n' "$$" "$SELF_HOST" "$(date -u '+%Y-%m-%dT%H:%M:%SZ')" \
+  > "$LOCKDIR/holder" 2> /dev/null || true
+trap 'rm -rf "$LOCKDIR" 2> /dev/null || true' EXIT
+
+# Materialize the transplanted tree INSIDE the lock: the clone and `uv sync`
+# are themselves heavy (~0.5 GB and minutes of I/O), so doing them outside it
+# would leave the very contention this lock exists to prevent.
+rm -rf "$RUNDIR/tree" 2> /dev/null || true
+git clone -q "$RUNDIR/tree.bundle" "$RUNDIR/tree" > /dev/null 2>&1 || exit 95
 cd "$RUNDIR/tree" || exit 92
+git checkout -q "$HEAD_SHA" 2> /dev/null || true
 "$UV" sync --all-extras > "$RUNDIR/sync.log" 2>&1 || { echo "UV_SYNC_FAILED" >&2; exit 93; }
 "$UV" run pytest "${ARGV[@]}" --ignore=tests/integration --tb=short > "$RUNDIR/suite.log" 2>&1
 rc=$?
@@ -606,7 +749,7 @@ REMOTE
   log "remote leg: probed -> ${PREPUSH_PROBE_LOG}"
   started="$(date -u '+%s')"
 
-  if ! ssh -o ConnectTimeout=6 -o BatchMode=yes -o StrictHostKeyChecking=accept-new "$ssh_t" \
+  if ! ssh -n -o ConnectTimeout=6 -o BatchMode=yes -o StrictHostKeyChecking=accept-new "$ssh_t" \
     "mkdir -p '${rundir}'" > /dev/null 2>&1; then
     log "remote leg: could not create ${rundir} on ${label}"
     rm -rf "$localdir"
@@ -619,18 +762,41 @@ REMOTE
   fi
 
   # Stream the remote suite back as it runs, prefixed, so a distributed run is
-  # no less observable than a local one.
-  ssh -o ConnectTimeout=6 -o BatchMode=yes -o StrictHostKeyChecking=accept-new "$ssh_t" \
-    "set -e; cd '${rundir}'; rm -rf tree; git clone -q tree.bundle tree > /dev/null 2>&1; cd tree; git checkout -q '${head_sha}' 2>/dev/null || true; cd '${rundir}'; chmod +x prepush_smart_tests.sh; ./prepush_smart_tests.sh '${rundir}' '${uv}' '${head_sha}' '${argv_sha}' '$(hostname -s 2> /dev/null || echo unknown):$$'; echo REMOTE_WRAPPER_EXIT=\$?" 2>&1 |
+  # no less observable than a local one. The wrapper's own exit code is written
+  # to a file rather than inferred from this pipeline: the pipeline's status is
+  # sed's, and the pipe is what makes the run observable, so the two cannot be
+  # the same value.
+  #
+  # NO `set -e` in the remote command, deliberately: under it a failing (or
+  # slot-contended, exit 94) wrapper aborts the remote shell BEFORE `rc=$?`
+  # runs, so the one fact this leg needs -- WHY the wrapper stopped -- would be
+  # the fact that never gets written. Each step is checked explicitly instead.
+  ssh -n -o ConnectTimeout=6 -o BatchMode=yes -o StrictHostKeyChecking=accept-new "$ssh_t" \
+    "cd '${rundir}' || exit 96; chmod +x prepush_smart_tests.sh || exit 97; ./prepush_smart_tests.sh '${rundir}' '${uv}' '${head_sha}' '${argv_sha}' '$(hostname -s 2> /dev/null || echo unknown):$$' '${workroot}'; rc=\$?; echo REMOTE_WRAPPER_EXIT=\$rc; echo \$rc > '${rundir}/WRAPPER_EXIT'; exit 0" 2>&1 |
     sed "s/^/[${label}] /" >&2 || true
 
-  marker="$(ssh -o ConnectTimeout=6 -o BatchMode=yes "$ssh_t" "cat '${rundir}/MARKER' 2>/dev/null" 2> /dev/null || true)"
+  readback="$(ssh -n -o ConnectTimeout=6 -o BatchMode=yes "$ssh_t" \
+    "echo \"wrapper_exit=\$(cat '${rundir}/WRAPPER_EXIT' 2>/dev/null)\"; cat '${rundir}/MARKER' 2>/dev/null" 2> /dev/null || true)"
   ended="$(date -u '+%s')"
   dur=$((ended - started))
   rm -rf "$localdir"
 
+  wrapper_exit="$(printf '%s\n' "$readback" | sed -n 's/^wrapper_exit=//p' | head -1)"
+  marker="$(printf '%s\n' "$readback" | sed -e '/^wrapper_exit=/d')"
+
+  # Exit 94 is the wrapper reporting that the target's heavy-suite slot was
+  # already held when it arrived. NO suite ran, so this is not evidence of
+  # anything about the tree -- it is a placement miss, and the caller should
+  # try the next ranked host instead of refusing the push.
+  if [ "${wrapper_exit:-}" = "94" ]; then
+    log "remote leg: ${label}'s heavy-suite slot was taken on arrival -- no suite ran there"
+    prepush_remote_gc "$ssh_t" "$rundir" "$workroot"
+    return 4
+  fi
+
   if [ -z "$marker" ]; then
-    log "remote leg: NO completion marker from ${label} -- treating as NO EVIDENCE (not a pass, not a failure)"
+    log "remote leg: NO completion marker from ${label} (wrapper exit ${wrapper_exit:-unknown}) -- treating as NO EVIDENCE (not a pass, not a failure)"
+    prepush_remote_gc "$ssh_t" "$rundir" "$workroot"
     return 1
   fi
   m_head="$(printf '%s\n' "$marker" | sed -n 's/^head_sha=//p')"
@@ -640,11 +806,24 @@ REMOTE
   m_log="$(printf '%s\n' "$marker" | sed -n 's/^log_sha256=//p')"
   if [ "$m_head" != "$head_sha" ] || [ "$m_argv" != "$argv_sha" ] || [ -z "$m_exit" ] || [ -z "$m_log" ]; then
     log "remote leg: marker from ${label} does not bind to this tree/argv -- NO EVIDENCE"
+    prepush_remote_gc "$ssh_t" "$rundir" "$workroot"
     return 1
   fi
   log_sha="$m_log"
 
   prepush_emit_receipt "{\"ts\":\"$(date -u '+%Y-%m-%dT%H:%M:%SZ')\",\"repo\":\"$(prepush_json_escape "$repo")\",\"head_sha\":\"${head_sha}\",\"chosen_host\":\"$(prepush_json_escape "$PREPUSH_PICK_HOSTNAME")\",\"chosen_label\":\"${label}\",\"host_mode\":\"${PREPUSH_PICK_MODE}\",\"host_load_ratio\":\"${PREPUSH_PICK_RATIO}\",\"all_probed_ratios\":\"$(prepush_json_escape "$PREPUSH_PROBE_LOG")\",\"selection_paths\":\"$(prepush_json_escape "$(prepush_remote_argv | tr '\n' ' ')")\",\"pytest_exit\":${m_exit},\"collected\":${m_collected:-0},\"duration_s\":${dur},\"suite_log_sha256\":\"${log_sha}\"}"
+
+  if [ "$m_exit" -ne 0 ]; then
+    # The refusal below tells the developer to read the failing output. The
+    # wrapper redirects pytest into $RUNDIR/suite.log on the REMOTE host, so
+    # without fetching it there is nothing to read and a remote RED -- which
+    # hard-blocks the push -- is undiagnosable without a manual ssh.
+    log "remote leg: last 200 lines of ${label}:${rundir}/suite.log follow"
+    ssh -n -o ConnectTimeout=6 -o BatchMode=yes "$ssh_t" \
+      "tail -n 200 '${rundir}/suite.log' 2>/dev/null" 2> /dev/null |
+      sed "s/^/[${label}] /" >&2 || true
+  fi
+  prepush_remote_gc "$ssh_t" "$rundir" "$workroot"
 
   if [ "$PREPUSH_PICK_MODE" = "shadow" ]; then
     log "remote leg: ${label} is in SHADOW -- ran ${m_collected} tests, exit ${m_exit}, but a shadow host NEVER authorizes. Receipt written; falling through to the normal precedence."

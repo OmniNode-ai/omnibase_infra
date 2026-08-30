@@ -113,7 +113,7 @@ async def test_dispatch_engine_keeps_verified_authority_out_of_band(
     correlation_id = uuid4()
     calls: list[tuple[str, object]] = []
     connection = _Connection(calls)
-    monkeypatch.setenv("OMNIDASH_ANALYTICS_DB_URL", "postgresql://fixture")
+    monkeypatch.setenv("ONEX_TENANT_DB_URL", "postgresql://fixture")
     callback = _make_projection_dispatch_callback(
         _TenantProjectionHandler(),
         projection_database_target("delegation_events", schema="tenant"),
@@ -192,7 +192,7 @@ async def test_dispatch_without_verified_capability_records_but_never_selects(
     "we never connect at all", now stated directly instead of as a side effect
     of refusing the write.
     """
-    monkeypatch.setenv("OMNIDASH_ANALYTICS_DB_URL", "postgresql://fixture")
+    monkeypatch.setenv("ONEX_TENANT_DB_URL", "postgresql://fixture")
     callback = _make_projection_dispatch_callback(
         _TenantProjectionHandler(),
         projection_database_target("delegation_events", schema="tenant"),
@@ -221,7 +221,7 @@ async def test_dispatch_without_verified_capability_fails_at_db_role_validation(
 ) -> None:
     calls: list[tuple[str, object]] = []
     connection = _Connection(calls, principal="unverified_projection_writer")
-    monkeypatch.setenv("OMNIDASH_ANALYTICS_DB_URL", "postgresql://fixture")
+    monkeypatch.setenv("ONEX_TENANT_DB_URL", "postgresql://fixture")
     callback = _make_projection_dispatch_callback(
         _TenantProjectionHandler(),
         projection_database_target("delegation_events", schema="tenant"),
@@ -263,7 +263,7 @@ async def test_mixed_target_internal_operation_does_not_resolve_tenant_authority
         ),
     )
     target = _resolve_projection_database_target(tables, application_topology())
-    monkeypatch.setenv("OMNIDASH_ANALYTICS_DB_URL", "postgresql://tenant")
+    monkeypatch.setenv("ONEX_TENANT_DB_URL", "postgresql://tenant")
     monkeypatch.setenv("OMNINODE_INTERNAL_DB_URL", "postgresql://internal")
     callback = _make_projection_dispatch_callback(
         _InternalProjectionHandler(), target, (TOPIC,)
