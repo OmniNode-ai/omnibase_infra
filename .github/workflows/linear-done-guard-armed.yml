@@ -1,29 +1,30 @@
 # SPDX-FileCopyrightText: 2026 OmniNode.ai Inc.
 # SPDX-License-Identifier: MIT
 #
-# linear-done-guard-armed.yml — OMN-15373 durable assertion (armed runner),
-# restored by OMN-17182.
+# linear-done-guard-armed.yml — the armed runner for omnimarket's Linear Done
+# guard. Filed and justified in OMN-17182.
 #
 # WHAT THIS IS
 #   The ARMED scheduled runner for the git-automation Done-minting guard. The
 #   assertion itself lives in omnimarket (node_linear_triage, alongside the
-#   OMN-16536 demotion mirror it must stay coherent with, per the reusable-
-#   enforcement-rehomes-to-omnimarket doctrine). This workflow only supplies the
-#   credential and a schedule.
+#   demotion mirror it must stay coherent with, per the reusable-enforcement-
+#   rehomes-to-omnimarket doctrine). This workflow only supplies the credential
+#   and a schedule.
 #
 # WHY THIS EXISTS (OMN-17182)
-#   omnimarket ships `linear-done-guard.yml` (landed 2026-07-30, OMN-15373), but
-#   it was never armed: `LINEAR_API_KEY` is not an omnimarket repo secret and not
+#   omnimarket ships `linear-done-guard.yml` (landed 2026-07-30), but it was
+#   never armed: `LINEAR_API_KEY` is not an omnimarket repo secret and not
 #   an OmniNode-ai org secret, so every scheduled tick exited 2 at its "unarmed"
 #   step and the assertion step was SKIPPED. Measured 2026-08-30: 100 of the last
 #   100 runs failed, and the guard had never once run green in the month since it
 #   landed.
 #
-#   Its mirror got this treatment and this one did not. OMN-16536 AC#2 shipped
-#   `linear-demotion-guard-armed.yml` beside this file for the demotion polarity;
-#   the Done-minting polarity — the one that produced the original 16 false-Dones
-#   in a 4.5h window — was left asserted NOWHERE. This workflow closes that gap
-#   on the same pattern, so the two polarities are armed the same way.
+#   Its mirror got this treatment and this one did not:
+#   `linear-demotion-guard-armed.yml` sits beside this file and arms the demotion
+#   polarity, while the Done-minting polarity — the one that produced the original
+#   16 false-Dones in a 4.5h window — was left asserted NOWHERE. This workflow
+#   closes that gap on the same pattern, so the two polarities are armed alike.
+#   Full measurement, prior-art and dedupe analysis: OMN-17182.
 #
 # WHY THE RUNNER LIVES HERE AND NOT IN omnimarket
 #   `LINEAR_API_KEY` is an omnibase_infra repo secret (provisioned 2026-08-19).
@@ -162,7 +163,7 @@ jobs:
         if: always()
         run: |
           {
-            echo "## Linear Done Guard (OMN-15373, armed via OMN-17182)"
+            echo "## Linear Done Guard (armed — OMN-17182)"
             echo ""
             echo "Asserts that no Linear GitAutomationState on any team resolves to"
             echo "a completed-type workflow state — i.e. that no PR merge can mint a"
@@ -171,7 +172,7 @@ jobs:
             echo "result is only believed when the probe proves it enumerated the"
             echo "workspace."
             echo ""
-            echo "Mirror of linear-demotion-guard-armed.yml (OMN-16536 AC#2), which"
+            echo "Mirror of linear-demotion-guard-armed.yml, which"
             echo "asserts the opposite polarity. Assertion source: omnimarket@dev,"
             echo "src/omnimarket/nodes/node_linear_triage/. Read-only; no Linear"
             echo "setting is mutated."
