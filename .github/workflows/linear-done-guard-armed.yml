@@ -1,0 +1,179 @@
+# SPDX-FileCopyrightText: 2026 OmniNode.ai Inc.
+# SPDX-License-Identifier: MIT
+#
+# linear-done-guard-armed.yml — the armed runner for omnimarket's Linear Done
+# guard. Filed and justified in OMN-17182.
+#
+# WHAT THIS IS
+#   The ARMED scheduled runner for the git-automation Done-minting guard. The
+#   assertion itself lives in omnimarket (node_linear_triage, alongside the
+#   demotion mirror it must stay coherent with, per the reusable-enforcement-
+#   rehomes-to-omnimarket doctrine). This workflow only supplies the credential
+#   and a schedule.
+#
+# WHY THIS EXISTS (OMN-17182)
+#   omnimarket ships `linear-done-guard.yml` (landed 2026-07-30), but it was
+#   never armed: `LINEAR_API_KEY` is not an omnimarket repo secret and not
+#   an OmniNode-ai org secret, so every scheduled tick exited 2 at its "unarmed"
+#   step and the assertion step was SKIPPED. Measured 2026-08-30: 100 of the last
+#   100 runs failed, and the guard had never once run green in the month since it
+#   landed.
+#
+#   Its mirror got this treatment and this one did not:
+#   `linear-demotion-guard-armed.yml` sits beside this file and arms the demotion
+#   polarity, while the Done-minting polarity — the one that produced the original
+#   16 false-Dones in a 4.5h window — was left asserted NOWHERE. This workflow
+#   closes that gap on the same pattern, so the two polarities are armed alike.
+#   Full measurement, prior-art and dedupe analysis: OMN-17182.
+#
+# WHY THE RUNNER LIVES HERE AND NOT IN omnimarket
+#   `LINEAR_API_KEY` is an omnibase_infra repo secret (provisioned 2026-08-19).
+#   Rather than copy a Linear credential into a second repo (widening its blast
+#   radius with no operator sign-off) or mint a new one, the guard is run from the
+#   repo that already legitimately holds the key — the same repo that runs
+#   `linear-demotion-guard-armed.yml` and `sync-revert-watchdog.yml` on it.
+#
+#   Consequence to keep in mind when editing: the assertion's source of truth is
+#   omnimarket@dev. This workflow deliberately checks out `ref: dev` rather than
+#   pinning a SHA, so a fix to the guard takes effect on the next tick without a
+#   companion PR here. The trade is that an omnimarket regression reaches this
+#   schedule immediately — acceptable because the guard fails closed in every
+#   uncertain direction, so a broken guard goes RED, never silently green.
+#
+# WHAT IT ASSERTS
+#   No Linear GitAutomationState, on any team, resolves to a `completed`-type
+#   workflow state. Such an automation writes `Done` on PR merge with no closing
+#   keyword required (branch-name linkage or a bare body mention is enough), no
+#   dod_verify receipt, and no evidence gate of any kind.
+#
+#   This is the exact mirror of `linear-demotion-guard-armed.yml`, which asserts
+#   the opposite polarity (no automation may resolve a completed ticket to a
+#   NON-completed state). The conjunction of the two is
+#   `len(gitAutomationStates) == 0`. They are kept separate because they are owned
+#   by different tickets and a future decision to accept one polarity must not
+#   silently relax the other.
+#
+#   Exit codes: 0 = probe proven AND no completed-type target; 1 = drift, an
+#   unreadable target state, or a probe that read nothing; 2 = unarmed, or an
+#   unreadable exceptions registry.
+#
+# THE EMPTY RESULT IS NOT TRUSTED ON ITS OWN
+#   A passing run here is an empty finding set, and a revoked token, a renamed
+#   GraphQL field or a truncated page produce an identical empty set. The handler
+#   therefore requires a positive control before believing emptiness: teams must
+#   be enumerated (> 0), the `teams.nodes` shape must be intact, and no page may
+#   be possibly-truncated. Verified against the live handler on 2026-08-30 with an
+#   injected probe (OMN-17182): zero teams -> passed=False; a missing `teams.nodes`
+#   key -> passed=False; three teams with zero automations -> passed=True; one
+#   `merge -> Done` automation -> passed=False.
+#
+# READ-ONLY
+#   This job never mutates a Linear setting. Correcting a re-added automation is
+#   an operator action — teams CON and JON are owned elsewhere.
+
+name: Linear Done Guard (armed)
+
+on:
+  schedule:
+    # Every 6h at :17, matching the cadence declared by the omnimarket workflow
+    # this arms and offset from linear-demotion-guard-armed's :43 so the two
+    # mirror assertions do not hit the Linear API in the same minute.
+    - cron: '17 */6 * * *'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: linear-done-guard-armed
+  cancel-in-progress: false
+
+jobs:
+  assert-no-completed-target:
+    name: No git automation may mint Done
+    # Trusted runner required: needs LINEAR_API_KEY.
+    # OMNI_RUNNER_SELECTOR_V1 — trusted CI defaults to self-hosted omnibase-ci
+    runs-on: >-
+      ${{ fromJSON(vars.OMNI_TRUSTED_CI_RUNS_ON_JSON || '["self-hosted","omnibase-ci"]') }}
+    timeout-minutes: 20
+
+    steps:
+      - name: Checkout omnimarket (the assertion lives there)
+        uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+        with:
+          repository: OmniNode-ai/omnimarket
+          ref: dev
+          fetch-depth: 1
+          token: ${{ secrets.OMNI_GITHUB_TOKEN || github.token }}
+          persist-credentials: false
+
+      - name: Install uv
+        uses: astral-sh/setup-uv@v7
+        with:
+          version: "0.8.3"
+          enable-cache: true
+          cache-dependency-glob: "uv.lock"
+
+      - name: Set up Python
+        run: uv python install 3.12
+
+      - name: Sync dependencies
+        run: uv sync --all-extras
+
+      - name: Fail loudly when the guard is unarmed
+        env:
+          LINEAR_API_KEY: ${{ secrets.LINEAR_API_KEY }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          # Fail fast on a missing secret rather than letting the CLI's own exit 2
+          # read as an ambiguous job failure. An unarmed guard is not a passing
+          # guard, and the whole point of this repo hosting the runner is that the
+          # credential is present here.
+          if [ -z "${LINEAR_API_KEY:-}" ]; then
+            echo "::error title=Linear Done Guard is unarmed::LINEAR_API_KEY is not set on omnibase_infra."
+            echo ""
+            echo "This workflow exists specifically because omnibase_infra holds the"
+            echo "Linear credential. If it is gone, the guard asserts nothing about"
+            echo "whether a PR merge can currently mint a Linear Done with no"
+            echo "evidence gate."
+            exit 2
+          fi
+
+      # ONE probe: the readable summary goes to the log and the machine-readable
+      # report to an artifact from the same read. Probing twice would produce a
+      # log and an artifact describing two different moments.
+      - name: Assert no completed-type git automation target
+        env:
+          LINEAR_API_KEY: ${{ secrets.LINEAR_API_KEY }}
+        run: |
+          uv run python -m omnimarket.nodes.node_linear_triage.guard_cli \
+            --exceptions config/linear_git_automation_exceptions.yaml \
+            --report-json linear-done-guard-report.json
+
+      - name: Upload report
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: linear-done-guard-report
+          path: linear-done-guard-report.json
+          if-no-files-found: ignore
+
+      - name: Post summary
+        if: always()
+        run: |
+          {
+            echo "## Linear Done Guard (armed — OMN-17182)"
+            echo ""
+            echo "Asserts that no Linear GitAutomationState on any team resolves to"
+            echo "a completed-type workflow state — i.e. that no PR merge can mint a"
+            echo "Done with no dod_verify receipt and no evidence gate. Fails closed"
+            echo "on drift AND on any failure of the positive control: an empty"
+            echo "result is only believed when the probe proves it enumerated the"
+            echo "workspace."
+            echo ""
+            echo "Mirror of linear-demotion-guard-armed.yml, which"
+            echo "asserts the opposite polarity. Assertion source: omnimarket@dev,"
+            echo "src/omnimarket/nodes/node_linear_triage/. Read-only; no Linear"
+            echo "setting is mutated."
+          } >> "$GITHUB_STEP_SUMMARY"
