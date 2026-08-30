@@ -241,6 +241,106 @@ prepush_map_lookup() {
   printf '%s' "$1" | tr ',' '\n' | sed -n "s/^${2}=//p" | head -1
 }
 
+# -----------------------------------------------------------------------------
+# Orphaned spin-loop reaper (OMN-16995) -- runs BEFORE load is measured
+# -----------------------------------------------------------------------------
+# omnibase_infra's own suite leaked one `sh -c while :; do :; done` per run:
+# `tests/unit/scripts/test_heavy_lock.py` killed the heavy_lock WRAPPER and not
+# the shell it wrapped, so the shell was reparented to PID 1 and burned a full
+# core forever. Measured on `.200` 2026-08-30: 19 such orphans, every one
+# PPID 1, aged 2h47m-12h17m, ~18.6 of 24 cores -- load1 39.31/24 = 1.64x
+# against this gate's 1.0x threshold, so EVERY heavy escalation refused. After
+# reaping them load1 fell to 17.06 (0.71x) in under 90s and the same escalation
+# ran green. `.201` showed the same shape (11 orphans, 14.87 -> 5.95).
+#
+# The root cause is fixed in the test. This is the STOPGAP that keeps gate
+# hosts usable while that fix propagates to every clone and every host, and
+# the standing defense against the next process that leaks the same shape:
+# load1 is read as a host-fitness FACT by lanes several tickets away from
+# whatever produced the load, and no lane can diagnose it from where it stands.
+#
+# It is deliberately the narrowest possible matcher. All three conditions must
+# hold, and a process that fails any one of them is untouched:
+#   1. argv is EXACTLY `sh -c while :; do :; done` -- the no-op spin signature.
+#      Not a prefix, not a substring, not `bash -c`, not a loop with a body.
+#   2. PPID is exactly 1 -- already orphaned, so it has no supervisor that
+#      could be waiting on it. (A container-reparented orphan, the `.201`
+#      shape, has a non-1 PPID and is deliberately OUT of scope: reaping under
+#      a live init we did not start is a bigger claim than this stopgap makes.)
+#   3. Age >= PREPUSH_SPIN_ORPHAN_MIN_AGE seconds (default 600) -- long past
+#      any plausible in-flight run of the test that spawns it.
+# Every kill is logged with pid and age. A reap that cannot run for any reason
+# is silent and non-fatal: this must never be able to refuse a push.
+PREPUSH_SPIN_ORPHAN_MIN_AGE="${PREPUSH_SPIN_ORPHAN_MIN_AGE:-600}"
+
+# Interpreter-free on purpose, exactly like _PREPUSH_LOAD_PROBE_SH above: the
+# OMN-14953 pinned-interpreter gate requires every python invocation under
+# scripts/hooks/ to route through `uv run`, and `.201` has no `uv` at all. Also
+# POSIX and single-quote-free, because it is handed to ssh(1) and executed by
+# whatever login shell the remote user has. Prints "<pid> <age_seconds>" per
+# reaped process on stdout; nothing else may go to stdout.
+# shellcheck disable=SC2016  # intentionally unexpanded: evaluated by the local
+# `sh -c` / the remote login shell, not by this script.
+_PREPUSH_SPIN_ORPHAN_REAPER_SH='min=${PREPUSH_SPIN_ORPHAN_MIN_AGE:-600}
+ps -ww -Ao pid=,ppid=,etime=,args= 2>/dev/null | while read -r pid ppid etime rest; do
+  [ "$ppid" = "1" ] || continue
+  [ "$rest" = "sh -c while :; do :; done" ] || continue
+  d=0
+  case "$etime" in *-*) d=${etime%%-*}; etime=${etime#*-};; esac
+  h=0
+  case "$etime" in *:*:*) h=${etime%%:*}; etime=${etime#*:};; esac
+  m=${etime%%:*}
+  s=${etime##*:}
+  d=${d#0}; h=${h#0}; m=${m#0}; s=${s#0}
+  age=$(( (${d:-0} * 24 + ${h:-0}) * 3600 + ${m:-0} * 60 + ${s:-0} ))
+  [ "$age" -ge "$min" ] || continue
+  kill -9 "$pid" 2>/dev/null || continue
+  printf "%s %s\n" "$pid" "$age"
+done'
+
+# reap_spin_loop_orphans TARGET -- TARGET empty for this host, or an ssh(1)
+# target. At most one reap per target per hook run. Always returns 0.
+reap_spin_loop_orphans() {
+  local target="${1:-}" out line pid age timeout_cmd key
+  case "${PREPUSH_REAP_SPIN_ORPHANS:-on}" in
+    0 | off | no) return 0 ;;
+  esac
+  key="|${target:-@local}|"
+  case "${_PREPUSH_SPIN_REAPED:-}" in
+    *"$key"*) return 0 ;;
+  esac
+  _PREPUSH_SPIN_REAPED="${_PREPUSH_SPIN_REAPED:-}${key}"
+
+  if [ -z "$target" ]; then
+    # A deterministic load override means a test harness, not a real host.
+    [ -z "${PREPUSH_LOAD_OVERRIDE_LOCAL:-}" ] || return 0
+    out="$(PREPUSH_SPIN_ORPHAN_MIN_AGE="$PREPUSH_SPIN_ORPHAN_MIN_AGE" \
+      sh -c "$_PREPUSH_SPIN_ORPHAN_REAPER_SH" 2> /dev/null || true)"
+  else
+    [ -z "${PREPUSH_LOAD_OVERRIDE_REMOTE:-}" ] || return 0
+    timeout_cmd="$(_prepush_timeout_cmd)"
+    # `ssh -n` is load-bearing here for the same reason it is on the load
+    # probe: this runs inside the picker's row loop, whose stdin is the row
+    # list, and an ssh that reads it swallows every remaining host.
+    if [ -n "$timeout_cmd" ]; then
+      out="$("$timeout_cmd" 10 ssh -n -o ConnectTimeout=3 -o BatchMode=yes -o StrictHostKeyChecking=accept-new \
+        "$target" "PREPUSH_SPIN_ORPHAN_MIN_AGE=${PREPUSH_SPIN_ORPHAN_MIN_AGE}; $_PREPUSH_SPIN_ORPHAN_REAPER_SH" 2> /dev/null || true)"
+    else
+      out="$(ssh -n -o ConnectTimeout=3 -o BatchMode=yes -o StrictHostKeyChecking=accept-new \
+        "$target" "PREPUSH_SPIN_ORPHAN_MIN_AGE=${PREPUSH_SPIN_ORPHAN_MIN_AGE}; $_PREPUSH_SPIN_ORPHAN_REAPER_SH" 2> /dev/null || true)"
+    fi
+  fi
+
+  [ -n "$out" ] || return 0
+  while IFS=" " read -r pid age; do
+    [ -n "$pid" ] || continue
+    log "REAPED orphaned no-op spin loop (OMN-16995) on '${target:-this host}': pid=${pid} age=${age}s argv='sh -c while :; do :; done' ppid=1 -- it was consuming a full core and no process was waiting on it"
+  done <<EOF
+$out
+EOF
+  return 0
+}
+
 # prepush_probe_ratio LABEL TARGET -- prints the load ratio or returns 1.
 prepush_probe_ratio() {
   local v
