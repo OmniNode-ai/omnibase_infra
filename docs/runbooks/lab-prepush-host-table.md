@@ -227,6 +227,27 @@ are kept as the audit trail behind the receipt. On a remote RED the last 200
 lines of that host's `suite.log` are fetched and streamed back prefixed
 `[<label>]`, because the refusal tells the developer to read exactly that.
 
+## Host prerequisites, and why PATH is one of them
+
+A non-interactive `ssh <host> '<cmd>'` session gets a **minimal** PATH — measured
+on `omnibook` it is literally `/usr/bin:/bin:/usr/sbin:/sbin`, with neither the
+Homebrew prefix nor `~/.local/bin` on it. This suite shells out to tools by
+**bare name** (`uv` in `tests/unit/infra/test_catalog_cli.py`, `shellcheck` in
+the shell-hygiene gate tests), so a transplanted run fails in ways the same tree
+never fails locally.
+
+Measured: the first full-suite dispatch to `omnibook` collected **24,872** tests
+and returned **8 failures**, every one a `FileNotFoundError` for a tool that
+*was* installed on that host and simply absent from the ssh PATH. The remote
+wrapper therefore prepends the uv directory, `/opt/homebrew/bin`,
+`/usr/local/bin` and `~/.local/bin` before it runs anything. A false red here
+hard-blocks a push, so PATH parity is part of the verdict meaning something.
+
+Before promoting a host, confirm over a **non-interactive** ssh that
+`shellcheck`, `git` and the row's `uv_abs_path` all resolve once that prefix is
+applied. A tool that is missing outright (not merely off PATH) will produce a
+false red; deny the affected repo on that row rather than accept it.
+
 ## Receipts
 
 One JSONL line per remote run to `.onex_state/prepush_distribution/receipts.jsonl`:

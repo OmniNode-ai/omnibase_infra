@@ -1303,3 +1303,22 @@ def test_a_shadow_row_is_still_refused_by_the_conftest_guard(
     )
     assert message is not None
     assert "hosts" in message
+
+
+def test_the_remote_wrapper_restores_a_developer_shell_path() -> None:
+    """A non-interactive ssh session gets a minimal PATH -- measured on omnibook
+    it is literally ``/usr/bin:/bin:/usr/sbin:/sbin``, with neither the Homebrew
+    prefix nor ``~/.local/bin`` on it. The suite shells out to tools by BARE
+    NAME (``uv``, ``shellcheck``), so the first full-suite dispatch there
+    returned 8 reds, every one a FileNotFoundError for a tool that WAS installed
+    on the host. A remote red hard-blocks the push, so PATH parity is what makes
+    the verdict mean anything."""
+    remote = _remote_wrapper_text()
+    assert 'PATH="$(dirname "$UV")' in remote
+    assert "/opt/homebrew/bin" in remote
+    assert "/usr/local/bin" in remote
+    assert "export PATH" in remote
+    argv_line = remote.index('"$UV" run pytest')
+    assert remote.index("export PATH") < argv_line, (
+        "PATH must be set before the suite runs, not after"
+    )

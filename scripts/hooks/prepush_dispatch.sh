@@ -662,6 +662,19 @@ cd "$RUNDIR" || exit 90
 for v in $(env | sed -n 's/^\(PREPUSH_[A-Za-z0-9_]*\)=.*/\1/p'); do unset "$v" || true; done
 unset ENABLE_SMART_TESTS || true
 export ONEX_PREPUSH_HOOK_ACTIVE="remote-leg:${ORIGIN}"
+
+# PATH PARITY WITH A DEVELOPER SHELL. A non-interactive ssh session gets a
+# minimal PATH -- on omnibook literally `/usr/bin:/bin:/usr/sbin:/sbin`, with
+# neither the Homebrew prefix nor ~/.local/bin on it. The suite shells out to
+# tools by BARE NAME (`uv` in tests/unit/infra/test_catalog_cli.py, `shellcheck`
+# in the shell-hygiene gate tests), so without this a transplanted run fails in
+# ways the same tree never fails locally: the first full-suite dispatch to
+# omnibook returned 8 reds, every one a FileNotFoundError for a tool that WAS
+# installed on that host, just not on the ssh PATH. A false red here HARD-BLOCKS
+# a push, so this is part of the verdict meaning anything -- not a convenience.
+PATH="$(dirname "$UV"):/opt/homebrew/bin:/usr/local/bin:${HOME:-}/.local/bin:${PATH}"
+export PATH
+
 ARGV=()
 while IFS= read -r line; do [ -n "$line" ] && ARGV+=("$line"); done < "$RUNDIR/argv.txt"
 [ "${#ARGV[@]}" -gt 0 ] || exit 91
