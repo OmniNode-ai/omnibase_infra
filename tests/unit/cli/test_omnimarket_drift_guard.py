@@ -15,6 +15,7 @@ from __future__ import annotations
 import json
 import logging
 import subprocess
+import sys
 from importlib.metadata import PackageNotFoundError
 from pathlib import Path
 from unittest.mock import MagicMock, patch
@@ -195,6 +196,38 @@ def test_drift_check_raises_when_not_installed_but_canonical_clone_present() -> 
     assert "NOT INSTALLED" in message
     assert _FAKE_SHA_A[:12] in message
     assert "install-node-skill-package.sh --execute" in message
+
+
+def test_not_installed_refusal_names_the_running_interpreter() -> None:
+    """OMN-17190: "omnimarket is not installed" is ambiguous between two very
+    different faults -- the CLI venv lost its provider layer, or this is not
+    the CLI venv at all.
+
+    The second is what actually happened during OMN-17190 verification:
+    ``uv run --project X onex`` silently resolves ``onex`` from the inherited
+    PATH whenever the project entrypoint is not resolvable, and that other
+    interpreter (a uv-tool env with a PyPI omnimarket and a pre-OMN-17190
+    guard) refuses identically whether the real venv is drifted or IN_SYNC.
+    Ten of fifteen verification dispatches died that way and the refusal text
+    gave no way to tell. Naming ``sys.executable`` makes the next occurrence a
+    one-line diagnosis, and pointing at the wrapper names the fix.
+    """
+    with (
+        patch(
+            "omnibase_infra.cli.omnimarket_drift_guard.installed_omnimarket_commit",
+            return_value=None,
+        ),
+        patch(
+            "omnibase_infra.cli.omnimarket_drift_guard.canonical_local_omnimarket_commit",
+            return_value=_FAKE_SHA_A,
+        ),
+    ):
+        with pytest.raises(OmnimarketDriftError) as exc_info:
+            check_omnimarket_drift()
+    message = str(exc_info.value)
+    assert sys.executable in message
+    assert "scripts/onex" in message
+    assert "docs/runbooks/onex-cli-invocation.md" in message
 
 
 def test_drift_check_fails_open_when_no_canonical_clone() -> None:

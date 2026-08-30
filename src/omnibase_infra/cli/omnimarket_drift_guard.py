@@ -63,6 +63,7 @@ import importlib
 import json
 import logging
 import subprocess
+import sys
 from importlib.metadata import PackageNotFoundError, distribution
 from pathlib import Path
 
@@ -228,14 +229,27 @@ def check_omnimarket_drift(
         install_cmd = "scripts/install-node-skill-package.sh"
 
     if installed is None:
+        # Name the interpreter (OMN-17190). "omnimarket is not installed" is
+        # ambiguous between two very different faults: the CLI venv genuinely
+        # lost its provider layer, or this is not the CLI venv at all. The
+        # second is what actually happened -- `uv run --project X onex` falls
+        # back to the first `onex` on PATH whenever the project entrypoint is
+        # not resolvable, and that other interpreter refuses identically
+        # regardless of the real venv's state. Printing sys.executable turns
+        # the next occurrence into a one-line diagnosis instead of a session.
         detail = (
             "omnimarket is NOT INSTALLED from git in this interpreter "
-            "(absent, or installed from PyPI/a non-VCS source), but a "
+            f"({sys.executable}) (absent, or installed from PyPI/a non-VCS "
+            "source), but a "
             f"canonical clone exists at $OMNI_HOME/omnimarket (HEAD "
             f"{canonical[:12]}). 'onex skill'/'onex node'/'onex delegate' "
             "dispatch for market-provided nodes (e.g. node_aislop_sweep) "
-            f"will fail with 'Unknown node'. Repair with: {install_cmd} "
-            f"--execute (or {repair_cmd} --repair)."
+            f"will fail with 'Unknown node'. If that interpreter is not "
+            f"$OMNI_HOME/omnibase_infra/.venv/bin/python, the CLI was invoked "
+            f"through something that resolved 'onex' from PATH -- use "
+            f"$OMNI_HOME/omnibase_infra/scripts/onex (see "
+            f"docs/runbooks/onex-cli-invocation.md). Otherwise repair with: "
+            f"{install_cmd} --execute (or {repair_cmd} --repair)."
         )
     else:
         detail = (
