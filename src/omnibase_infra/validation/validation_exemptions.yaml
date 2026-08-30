@@ -3979,6 +3979,23 @@ pattern_exemptions:
       Same seam as model_gateway_heartbeat.py: this result echoes back the tenant_id key persisted into gateway_link_health, keyed on the DNS-safe tenant slug, not the underlying UUID.
 
     ticket: OMN-15570
+  # ==========================================================================
+  # ModelCloudLedgerRead correlation_id Exemption (OMN-17205)
+  # ==========================================================================
+  # The hook ledger's correlation_id is NOT a UUID and must not be typed as
+  # one. The projection column it echoes is `correlation_id VARCHAR(64)` and
+  # NULLABLE (omnimarket node_hook_event_capture/migrations/
+  # 0001_create_hook_events.sql), because two of the four producer families in
+  # the real corpus emit no id at all and the rest emit their own opaque
+  # tokens. Typing this UUID would make the operator's read reject the exact
+  # ids the chain actually carries, and would replace an honest "this producer
+  # emits no correlation id" with a validation error.
+  - file_pattern: 'model_cloud_ledger_read\.py'
+    violation_pattern: "Field 'correlation_id' should use UUID type instead of str"
+    reason: >
+      correlation_id echoes hook_events.correlation_id, a nullable VARCHAR(64) holding an opaque producer-supplied token, never a UUID. Same class as the metric_collector.py correlation_id exemption above.
+
+    ticket: OMN-17205
 # These handle one-model-per-file violations for domain-grouped protocols
 architecture_exemptions:
   # ==========================================================================
