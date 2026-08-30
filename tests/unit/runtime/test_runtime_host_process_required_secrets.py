@@ -130,7 +130,15 @@ class TestRequiredSecretsFailLoudOnAbsence:
 
         mock_handler = MagicMock()
 
-        def _get_secret_sync(secret_name: str) -> SecretStr | None:
+        # OMN-16984: keyword-only, matching HandlerInfisical.get_secret_sync --
+        # the resolver now passes secret_path alongside secret_name.
+        def _get_secret_sync(
+            *,
+            secret_name: str,
+            project_id: str | None = None,
+            environment_slug: str | None = None,
+            secret_path: str | None = None,
+        ) -> SecretStr | None:
             # Only c.secret (mapped to C_SECRET) is present.
             if secret_name == "C_SECRET":
                 return SecretStr("present-value")
