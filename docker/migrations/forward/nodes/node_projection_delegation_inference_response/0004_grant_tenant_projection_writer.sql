@@ -86,6 +86,9 @@
 --     them, and tenant_projection_writer being non-owner + NOBYPASSRLS is what
 --     makes them apply to it.
 
+SELECT 'CREATE ROLE tenant_projection_writer WITH NOLOGIN NOSUPERUSER NOBYPASSRLS NOCREATEDB NOCREATEROLE NOREPLICATION'
+WHERE NOT EXISTS (SELECT 1 FROM pg_catalog.pg_roles WHERE rolname = 'tenant_projection_writer')\gexec
+
 SELECT CASE
   WHEN EXISTS (SELECT 1 FROM pg_catalog.pg_roles WHERE rolname = 'tenant_projection_writer')
     THEN 1
