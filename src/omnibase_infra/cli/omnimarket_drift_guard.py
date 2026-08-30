@@ -16,15 +16,24 @@ recurrence exposed by weeks and the newest PyPI release is flat-out
 uninstallable (pins a sibling version that was never published), so there is
 no PyPI version that would ever be "correct" here.
 
-## Detect vs. repair split
+## Detect, then heal (OMN-17190)
 
-This module only DETECTS drift, cheaply and entirely LOCALLY (no network):
-it compares the commit the current interpreter's omnimarket was installed
-from against the HEAD of the already-checked-out canonical clone at
-``$OMNI_HOME/omnimarket``. It never re-installs anything -- that is
-``scripts/install-node-skill-package.sh`` (via
-``scripts/check-omnimarket-venv-drift.sh --repair``, meant to run on a
-session/cron tick, NOT inline on every dispatch).
+DETECTION is cheap and entirely LOCAL (no network): compare the commit the
+current interpreter's omnimarket was installed from against the HEAD of the
+already-checked-out canonical clone at ``$OMNI_HOME/omnimarket``.
+
+REPAIR is not this module's policy and never has been -- it belongs to
+``scripts/reconcile-workspace-venvs.sh``. What changed in OMN-17190 is *when*
+that repair runs. It used to run only when a human read a refusal and typed the
+command; now the CLI boundary passes a bound reconciler as ``reconcile=`` and
+this module invokes it ONCE on detected drift, re-checks, and continues if the
+re-check passes. Operator direction, 2026-08-30: "Why is anything hand built?"
+
+The split is therefore unchanged in substance -- this module still owns no
+install logic and still knows nothing about layers, locks, or uv -- and only
+the trigger moved from a human to the guard itself. Callers that want the old
+pure detect-and-refuse behaviour simply omit ``reconcile``, which remains the
+default.
 
 The check fails OPEN (no-op, never raises) **only** when the canonical local
 clone itself cannot be determined -- e.g. ``OMNI_HOME`` unset, or no
@@ -50,11 +59,14 @@ fail-open-on-None path let it pass silently).
 
 from __future__ import annotations
 
+import importlib
 import json
 import logging
 import subprocess
 from importlib.metadata import PackageNotFoundError, distribution
 from pathlib import Path
+
+from omnibase_infra.cli.workspace_reconcile import ReconcileFn
 
 __all__ = [
     "DRIFT_OVERRIDE_ENV",
@@ -141,7 +153,10 @@ def canonical_local_omnimarket_commit(omni_home: str | None = None) -> str | Non
 
 
 def check_omnimarket_drift(
-    omni_home: str | None = None, *, allow_drift: bool = False
+    omni_home: str | None = None,
+    *,
+    allow_drift: bool = False,
+    reconcile: ReconcileFn | None = None,
 ) -> None:
     """Fail fast if the current venv's omnimarket is missing or has drifted
     from the canonical local clone.
@@ -160,7 +175,9 @@ def check_omnimarket_drift(
       ``$OMNI_HOME``, which disables the guard globally and SILENTLY --
       strictly worse than a named, logged override.
 
-    Never performs network I/O.
+    Performs no network I/O of its own. A supplied ``reconcile`` may (it
+    installs packages); that is the caller's explicit choice, made by binding
+    one, and it happens only after drift has already been detected locally.
 
     Args:
         omni_home: Canonical workspace root to resolve the reference clone
@@ -169,13 +186,23 @@ def check_omnimarket_drift(
         allow_drift: Explicit operator opt-out. Keyword-only and defaulting
             to False so refusal stays the default at EVERY call site,
             including ones added later -- a forgotten argument fails closed.
+        reconcile: Optional zero-argument repair. When supplied and drift is
+            found, it is invoked exactly once and the check is re-run against
+            the same canonical clone; the dispatch proceeds only if that
+            re-check passes. ``None`` (the default) preserves the pure
+            detect-and-refuse behaviour, which is what every non-CLI caller
+            and every unit test wants -- a guard that silently shells out
+            would be an astonishing default.
 
     Raises:
-        OmnimarketDriftError: a canonical clone IS present locally,
-            ``allow_drift`` is False, and either (a) omnimarket is not
-            installed from git in the current interpreter at all (absent, or
-            a non-VCS/PyPI install), or (b) its installed commit does not
-            match the canonical local clone's HEAD commit.
+        OmnimarketDriftError: a canonical clone IS present locally, no
+            ``reconcile`` repaired the drift, ``allow_drift`` is False, and
+            either (a) omnimarket is not installed from git in the current
+            interpreter at all (absent, or a non-VCS/PyPI install), or (b) its
+            installed commit does not match the canonical local clone's HEAD
+            commit. Also raised when a supplied ``reconcile`` FAILED, or ran
+            successfully and left the venv still drifted -- in both cases the
+            message names the exact command to reproduce.
     """
     canonical = canonical_local_omnimarket_commit(omni_home=omni_home)
     if canonical is None:
@@ -228,6 +255,72 @@ def check_omnimarket_drift(
             DRIFT_OVERRIDE_ENV,
         )
         return
+
+    # ------------------------------------------------------------------ #
+    # Self-heal (OMN-17190)
+    # ------------------------------------------------------------------ #
+    # Drift used to end here, in a refusal that told a human to run a repair
+    # command by hand. The refusal was right; the hand-run repair was the
+    # defect ("Why is anything hand built?", operator, 2026-08-30). So when a
+    # reconciler is bound, run it ONCE and re-check. This is not a bypass: the
+    # re-check below is the same comparison, against the same canonical clone,
+    # and it still has to pass.
+    #
+    # This sits AFTER the ``allow_drift`` branch above on purpose: an operator
+    # who explicitly accepted this build asked to run against it, not to have
+    # it silently replaced underneath them mid-command.
+    #
+    # Exactly once, deliberately. A reconcile that ran and left the venv still
+    # drifted is reporting something the next identical attempt will not fix,
+    # and a retry loop on the CLI hot path would turn a clear refusal into a
+    # hang.
+    if reconcile is not None:
+        outcome = reconcile()
+        if not outcome.ok:
+            # The original diagnosis is carried through, not replaced. A
+            # refusal that says only "the reconcile failed" has thrown away
+            # the two things a reader needs -- WHAT drifted, and the repair
+            # command for it -- and left them with a second-order failure to
+            # debug instead of the first-order one. The override is named for
+            # the same reason it is named everywhere else in this module: it
+            # is checked BEFORE the reconcile, so it genuinely works here, and
+            # a documented escape hatch withheld from the message does not stop
+            # being used -- it just makes the failure a dead end (the exact
+            # argument in this module's docstring for naming it at all).
+            raise OmnimarketDriftError(
+                f"{detail} A reconcile was attempted and FAILED: "
+                f"{outcome.detail}. That makes this a BROKEN venv, not merely a "
+                f"stale one, so fix the reconcile rather than working around it "
+                f"-- re-run it directly and read the error:\n"
+                f"  {outcome.command}\n"
+                f"To dispatch anyway despite the drift (results are NOT "
+                f"evidence), set {DRIFT_OVERRIDE_ENV}=1."
+            )
+
+        # The reconcile mutated site-packages out of process. importlib caches
+        # directory listings per sys.path entry, so without this the re-probe
+        # would faithfully report the pre-repair state and refuse a venv that
+        # was just fixed.
+        importlib.invalidate_caches()
+        installed = installed_omnimarket_commit()
+        if installed == canonical:
+            logger.info(
+                "omnimarket drift reconciled in-flight to %s; continuing.",
+                canonical[:12],
+            )
+            return
+
+        raise OmnimarketDriftError(
+            f"{detail} A reconcile ran, reported SUCCESS, and the venv is "
+            f"STILL drifted: installed {(installed or 'ABSENT')[:12]} != "
+            f"canonical $OMNI_HOME/omnimarket HEAD {canonical[:12]}. The "
+            f"reconciler and this guard therefore disagree about what "
+            f"'reconciled' means, which no retry will resolve. Reproduce "
+            f"with:\n"
+            f"  {outcome.command}\n"
+            f"To dispatch anyway despite the drift (results are NOT "
+            f"evidence), set {DRIFT_OVERRIDE_ENV}=1."
+        )
 
     raise OmnimarketDriftError(
         f"{detail} To dispatch anyway despite the drift (results are NOT "

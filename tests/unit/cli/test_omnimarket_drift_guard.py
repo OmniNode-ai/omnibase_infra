@@ -21,12 +21,18 @@ from unittest.mock import MagicMock, patch
 
 import pytest
 
+from omnibase_infra.cli import omnimarket_drift_guard as guard
 from omnibase_infra.cli.omnimarket_drift_guard import (
     DRIFT_OVERRIDE_ENV,
     OmnimarketDriftError,
     canonical_local_omnimarket_commit,
     check_omnimarket_drift,
     installed_omnimarket_commit,
+)
+from omnibase_infra.cli.workspace_reconcile import (
+    ModelReconcileOutcome,
+    make_workspace_reconciler,
+    reconcile_workspace_venvs,
 )
 
 pytestmark = pytest.mark.unit
@@ -364,3 +370,209 @@ def test_override_does_not_warn_when_there_is_no_drift(
     with caplog.at_level(logging.WARNING):
         check_omnimarket_drift(allow_drift=True)
     assert not [r for r in caplog.records if DRIFT_OVERRIDE_ENV in r.getMessage()]
+
+
+# --------------------------------------------------------------------------- #
+# Self-healing drift refusal (OMN-17190)
+# --------------------------------------------------------------------------- #
+class _Reconciler:
+    """A recording stand-in for the bound workspace reconciler.
+
+    ``on_success`` lets a test model the real effect the script has: it mutates
+    site-packages, so the guard's re-probe must see a DIFFERENT answer than its
+    first probe. A test double that changes nothing could not distinguish
+    "re-checked" from "assumed".
+    """
+
+    def __init__(
+        self,
+        *,
+        ok: bool,
+        detail: str = "",
+        on_success: object = None,
+    ) -> None:
+        self.outcome = ModelReconcileOutcome(
+            ok=ok, command="bash /w/reconcile-workspace-venvs.sh", detail=detail
+        )
+        self._on_success = on_success
+        self.calls = 0
+
+    def __call__(self) -> ModelReconcileOutcome:
+        self.calls += 1
+        if self.outcome.ok and callable(self._on_success):
+            self._on_success()
+        return self.outcome
+
+
+@pytest.fixture
+def canonical_head(monkeypatch: pytest.MonkeyPatch) -> str:
+    """Pin the canonical clone HEAD so only the installed side varies."""
+    head = "a" * 40
+    monkeypatch.setattr(
+        guard, "canonical_local_omnimarket_commit", lambda omni_home=None: head
+    )
+    return head
+
+
+def test_successful_reconcile_lets_the_dispatch_proceed(
+    monkeypatch: pytest.MonkeyPatch, canonical_head: str
+) -> None:
+    """The whole point: drift is repaired in flight, not handed to a human."""
+    state = {"installed": "b" * 40}
+    monkeypatch.setattr(
+        guard, "installed_omnimarket_commit", lambda: state["installed"]
+    )
+
+    def _repair() -> None:
+        state["installed"] = canonical_head
+
+    reconciler = _Reconciler(ok=True, on_success=_repair)
+    guard.check_omnimarket_drift(omni_home="/w", reconcile=reconciler)
+
+    assert reconciler.calls == 1
+
+
+def test_reconcile_runs_exactly_once(
+    monkeypatch: pytest.MonkeyPatch, canonical_head: str
+) -> None:
+    """No retry loop on the CLI hot path.
+
+    A reconcile that ran and left the venv drifted is reporting something an
+    identical second attempt will not fix; looping would turn a clear refusal
+    into a hang.
+    """
+    monkeypatch.setattr(guard, "installed_omnimarket_commit", lambda: "b" * 40)
+    reconciler = _Reconciler(ok=True)
+
+    with pytest.raises(guard.OmnimarketDriftError):
+        guard.check_omnimarket_drift(omni_home="/w", reconcile=reconciler)
+
+    assert reconciler.calls == 1
+
+
+def test_failed_reconcile_refuses_and_names_the_exact_command(
+    monkeypatch: pytest.MonkeyPatch, canonical_head: str
+) -> None:
+    monkeypatch.setattr(guard, "installed_omnimarket_commit", lambda: None)
+    reconciler = _Reconciler(ok=False, detail="uv sync did not complete")
+
+    with pytest.raises(guard.OmnimarketDriftError) as excinfo:
+        guard.check_omnimarket_drift(omni_home="/w", reconcile=reconciler)
+
+    message = str(excinfo.value)
+    assert reconciler.calls == 1
+    assert "reconcile-workspace-venvs.sh" in message
+    assert "uv sync did not complete" in message
+
+
+def test_failed_reconcile_keeps_the_original_diagnosis_and_the_override(
+    monkeypatch: pytest.MonkeyPatch, canonical_head: str
+) -> None:
+    """A failed reconcile ADDS to the refusal; it must not replace it.
+
+    An earlier revision of this behaviour raised a refusal that named only the
+    reconcile failure. That reads as an improvement and is not one: it discards
+    the two facts a reader actually needs -- WHAT drifted, and the repair
+    command for it -- and hands them a second-order failure to debug in place
+    of the first-order one. Three pre-existing dispatch-surface tests
+    (`test_drift_guard_fires_before_delegate_dispatch`,
+    `test_drift_guard_fires_before_unknown_node_lookup`,
+    `test_drift_override_env_unset_still_refuses`) assert exactly that content,
+    and they are right to.
+
+    The OMN-13930 override is named for the same reason it is named on every
+    other refusal in this module: it is evaluated BEFORE the reconcile, so it
+    genuinely works from this state, and a documented escape hatch withheld
+    from the message does not stop being used -- it just turns the failure into
+    a dead end, which is the argument this module's own docstring makes for
+    naming it at all. The refusal still says plainly that a broken venv is to
+    be FIXED, not worked around.
+    """
+    monkeypatch.setattr(guard, "installed_omnimarket_commit", lambda: None)
+
+    with pytest.raises(guard.OmnimarketDriftError) as excinfo:
+        guard.check_omnimarket_drift(
+            omni_home="/w", reconcile=_Reconciler(ok=False, detail="boom")
+        )
+
+    message = str(excinfo.value)
+    # The original diagnosis survives.
+    assert "NOT INSTALLED" in message
+    assert canonical_head[:12] in message
+    assert "install-node-skill-package.sh --execute" in message
+    # The reconcile failure is added, with the command to reproduce it.
+    assert "boom" in message
+    assert "reconcile-workspace-venvs.sh" in message
+    # And the documented override is still discoverable from the failure alone.
+    assert guard.DRIFT_OVERRIDE_ENV in message
+
+
+def test_reconcile_reporting_success_while_still_drifted_still_refuses(
+    monkeypatch: pytest.MonkeyPatch, canonical_head: str
+) -> None:
+    """Trust the re-check, never the reconciler's own say-so."""
+    monkeypatch.setattr(guard, "installed_omnimarket_commit", lambda: "b" * 40)
+
+    with pytest.raises(guard.OmnimarketDriftError) as excinfo:
+        guard.check_omnimarket_drift(omni_home="/w", reconcile=_Reconciler(ok=True))
+
+    assert "STILL drifted" in str(excinfo.value)
+
+
+def test_no_reconciler_preserves_the_pure_refusal(
+    monkeypatch: pytest.MonkeyPatch, canonical_head: str
+) -> None:
+    """Omitting ``reconcile`` must keep the guard a pure detect-and-refuse.
+
+    Every non-CLI caller depends on this: a guard that silently shelled out by
+    default would be an astonishing thing to import.
+    """
+    monkeypatch.setattr(guard, "installed_omnimarket_commit", lambda: "b" * 40)
+
+    with pytest.raises(guard.OmnimarketDriftError) as excinfo:
+        guard.check_omnimarket_drift(omni_home="/w")
+
+    assert guard.DRIFT_OVERRIDE_ENV in str(excinfo.value)
+
+
+def test_reconciler_is_not_invoked_when_there_is_no_drift(
+    monkeypatch: pytest.MonkeyPatch, canonical_head: str
+) -> None:
+    monkeypatch.setattr(guard, "installed_omnimarket_commit", lambda: canonical_head)
+    reconciler = _Reconciler(ok=True)
+
+    guard.check_omnimarket_drift(omni_home="/w", reconcile=reconciler)
+
+    assert reconciler.calls == 0
+
+
+def test_allow_drift_short_circuits_before_any_reconcile(
+    monkeypatch: pytest.MonkeyPatch, canonical_head: str
+) -> None:
+    """The operator override means 'I accept this build', not 'repair it'.
+
+    Silently reinstalling under an explicit accept-as-is would change the very
+    build the operator chose to run against.
+    """
+    monkeypatch.setattr(guard, "installed_omnimarket_commit", lambda: "b" * 40)
+    reconciler = _Reconciler(ok=True)
+
+    guard.check_omnimarket_drift(omni_home="/w", allow_drift=True, reconcile=reconciler)
+
+    assert reconciler.calls == 0
+
+
+def test_make_workspace_reconciler_returns_none_without_omni_home() -> None:
+    assert make_workspace_reconciler(None) is None
+    assert make_workspace_reconciler("") is None
+
+
+def test_missing_reconcile_script_is_a_failed_outcome_not_a_raise(
+    tmp_path: Path,
+) -> None:
+    """The guard turns outcomes into refusals; the adapter must never raise."""
+    outcome = reconcile_workspace_venvs(str(tmp_path))
+
+    assert outcome.ok is False
+    assert "reconcile-workspace-venvs.sh" in outcome.command
+    assert "not found" in outcome.detail
