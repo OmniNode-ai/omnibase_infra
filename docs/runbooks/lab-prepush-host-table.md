@@ -304,7 +304,9 @@ wrapper `update-ref`s it into the transplanted tree after checkout. `BASE_SHA` i
 a merge-base on the origin side, so it is always an ancestor of HEAD and its
 objects are already in the bundle — only the ref was missing, and creating it is
 local and network-free. Absent or unresolvable, it is skipped silently: it may
-only add resolution, never refuse a run.
+only add resolution, never refuse a run. (OMN-17240 later added `--tags` to the
+same `bundle create`, so the clone now also carries `refs/tags/*`; branch
+remote-tracking refs are still absent and this `update-ref` is still required.)
 
 **2. It has no sibling clones — but it does have whatever sits above the
 workroot.** `scripts/ci/check_deploy_scope_dod.py` imports the canonical
@@ -321,6 +323,75 @@ env-parity tests. `load_canonical_validator` now asserts the surface it calls an
 raises a named staleness error; the test fixture skips on it with that reason
 attached. The hook itself still hard-errors — but with a remediation instead of
 an `AttributeError` five frames down.
+## The transplant carries the TAG STATE, and the source clone must be complete (OMN-17240)
+
+The remote leg ships the tree as a git bundle and clones it on the far side. It
+built that bundle with `git bundle create "$bundle" HEAD`, which packs only the
+commits reachable from `HEAD` and **no ref under `refs/tags/`**. Every remote
+clone, on every host, on every push, therefore had **zero tags**.
+
+That is not cosmetic. `scripts/check_release_identity.py` derives "the latest
+published version" from `git tag --list`. With no tags it took its "no published
+tag yet" branch, so three tests that assert the version-ahead message failed on
+the remote host while passing locally at the identical SHA. Measured at
+OMN-17139's `47d7da183`: `3 failed, 25618 passed` on `h101`, `9 passed in 16.65s`
+locally. Reproduced directly: 0 tags in the bundle clone against 97 in the
+source.
+
+**`--tags` alone is not the fix.** The canonical `omnibase_infra` clone was
+*shallow* (`git rev-parse --is-shallow-repository` → `true`, 576-commit graft).
+Against a shallow source, `git bundle create <f> HEAD --tags` exits **0** and
+writes a bundle whose header lists all 97 tag refs — and then cloning it dies:
+
+```
+error: Could not read 52222775d8563c036b7f9e15737573c95aa2ce18
+fatal: Failed to traverse parents of commit 5b904d881ba51a697e5b3d50b28460abbb2fd5aa
+fatal: remote did not send all necessary objects
+```
+
+The tags' ancestry lies beyond the graft. The one-liner would have replaced a
+false red with a hard transport failure on every push, after paying the transfer.
+
+`prepush_bundle_tree` in `scripts/hooks/prepush_dispatch.sh` therefore proves each
+step instead of assuming it:
+
+1. if the source is shallow, `git fetch --unshallow --tags` **once** — additive,
+   and it deepens the shared object store every worktree of that clone reads;
+2. `git bundle create "$bundle" HEAD --tags`;
+3. read the written bundle back with `git bundle list-heads` and require it to
+   carry at least one `refs/tags/` ref before it is shipped — `git bundle create`
+   reports success for a bundle it could not fully populate, so its exit code is
+   not evidence.
+
+Any step that cannot be proven returns "no evidence" and the caller falls back to
+its existing precedence. Nothing here can make the gate accept less work, and no
+part of the tag state is caller-supplied: it lands as real git refs the remote
+tree re-derives for itself after the clone.
+
+**Wire cost, measured on `omnibase_infra` 2026-08-30:**
+
+| bundle | bytes |
+|---|---|
+| shallow, `HEAD` only (the broken transport) | 18,599,149 |
+| unshallowed, `HEAD` only | 33,657,408 |
+| unshallowed, `HEAD --tags` (shipped) | 33,966,130 |
+
+The tag refs themselves cost **308,722 B (+0.9%)**. The one-time unshallow is the
+rest: +15.1 MB on the wire per dispatch, 65.9 → 101.8 MiB packed on disk, and
+7.7 s of fetch, once per clone.
+
+**On a fresh machine** the canonical clone may still be shallow. The hook
+unshallows it on the first remote dispatch; to do it ahead of time:
+
+```bash
+git -C "$OMNI_HOME/omnibase_infra" fetch --unshallow --tags
+```
+
+The second layer is in `scripts/check_release_identity.py`: an empty tag set is
+now only a PASS when it is *credible*. A tree cloned from a `.bundle`, a shallow
+tree, or a tree whose declared version has a non-zero patch component fails
+closed with exit 2 and a message naming OMN-17240, so a future transport
+regression surfaces as a named refusal rather than a silent pass.
 
 ## Receipts
 

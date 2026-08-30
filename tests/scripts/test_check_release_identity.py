@@ -367,3 +367,94 @@ def test_build_repo_tag_creation_hermetic_against_poisoned_global_gpgsign(
         f"got {obj_type!r} -- tag.gpgsign=true forced annotation, meaning the "
         "hermetic git-config isolation did not hold"
     )
+
+
+# =============================================================================
+# OMN-17240: a bundle-transplanted tree must not evaluate release identity
+# against an empty tag set
+# =============================================================================
+
+
+def _bundle_and_clone(src: Path, dst: Path, *bundle_args: str) -> Path:
+    """Bundle ``src`` with BUNDLE_ARGS and clone the bundle into ``dst``.
+
+    Mirrors the pre-push remote leg exactly: ``git bundle create`` on the pusher,
+    ``git clone <bundle>`` on the lab host.
+    """
+    dst.parent.mkdir(parents=True, exist_ok=True)
+    bundle = dst.parent / f"{dst.name}.bundle"
+    subprocess.run(
+        ["git", "bundle", "create", str(bundle), *bundle_args],
+        cwd=src,
+        capture_output=True,
+        text=True,
+        check=True,
+    )
+    subprocess.run(
+        ["git", "clone", "-q", str(bundle), str(dst)],
+        capture_output=True,
+        text=True,
+        check=True,
+    )
+    subprocess.run(
+        ["git", "config", "user.email", "t@example.com"], cwd=dst, check=True
+    )
+    subprocess.run(["git", "config", "user.name", "equiv-test"], cwd=dst, check=True)
+    return dst
+
+
+def test_head_only_bundle_clone_fails_closed_instead_of_passing(
+    tmp_path: Path,
+) -> None:
+    """The OMN-17240 defect, end to end, through the REAL collector.
+
+    ``git bundle create <f> HEAD`` (the pre-push remote leg's transport before
+    OMN-17240) strands every ``refs/tags/`` ref. The landed tree therefore reports
+    zero tags, and the gate used to answer "OK: no published tag yet" — a silent
+    PASS produced by a broken transport, which is what made three tests red on h101
+    at a SHA that was green locally.
+
+    The gate must now refuse instead, and say so in terms that name the ticket.
+    """
+    src_root = tmp_path / "src"
+    src_root.mkdir()
+    src, _base_sha = _build_repo(
+        src_root, version="0.38.15", tags=["v0.38.14"], changed=["src/foo.py"]
+    )
+    landed = _bundle_and_clone(src, tmp_path / "landed", "HEAD")
+
+    assert _git(landed, "tag", "--list") == "", (
+        "fixture precondition: a HEAD-only bundle must strand the tags"
+    )
+
+    rc, out, err = _run_in_process(_NEW, landed, [])
+    assert rc == 2, f"expected a fail-closed refusal, got {rc}: {out!r} {err!r}"
+    assert out == ""
+    assert "OMN-17240" in err
+    assert "OK: no published tag yet" not in err + out, (
+        "the pre-OMN-17240 silent pass must be gone"
+    )
+
+
+def test_tag_carrying_bundle_clone_evaluates_the_real_tag_state(
+    tmp_path: Path,
+) -> None:
+    """With the fixed transport the landed tree sees the tags and the gate decides.
+
+    Same fixture, same transport shape, ``--tags`` added: the clone carries the
+    published tag, so the gate reaches its real verdict (0.38.15 is ahead of the
+    published 0.38.14) instead of either the old silent pass or the new refusal.
+    """
+    src_root = tmp_path / "src"
+    src_root.mkdir()
+    src, _base_sha = _build_repo(
+        src_root, version="0.38.15", tags=["v0.38.14"], changed=["src/foo.py"]
+    )
+    landed = _bundle_and_clone(src, tmp_path / "landed", "HEAD", "--tags")
+
+    assert _git(landed, "tag", "--list").splitlines() == ["v0.38.14"]
+
+    rc, out, err = _run_in_process(_NEW, landed, [])
+    assert rc == 0, f"expected the version-ahead pass, got {rc}: {out!r} {err!r}"
+    assert out == "OK: version 0.38.15 is ahead of latest published 0.38.14.\n"
+    assert err == ""

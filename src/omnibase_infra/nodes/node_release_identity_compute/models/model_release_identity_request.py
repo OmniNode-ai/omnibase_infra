@@ -38,6 +38,21 @@ class ModelReleaseIdentityRequest(BaseModel):
             no explicit ``--changed-file`` list). ``None`` means "cannot prove the
             diff is exempt" and the handler enforces the version-ahead invariant —
             mirroring the legacy gate's fail-safe branch.
+        repo_is_shallow: ``git rev-parse --is-shallow-repository`` on the tree the
+            tags were listed from. A shallow checkout can be missing the very tag
+            refs this gate reads, so an EMPTY tag set on a shallow tree is not
+            evidence that nothing has been published (OMN-17240).
+        repo_origin_is_bundle: ``remote.origin.url`` names a ``.bundle`` file, i.e.
+            the tree was transplanted by ``git clone <bundle>`` rather than cloned
+            from a real remote. ``git bundle create <f> HEAD`` carries no
+            ``refs/tags/`` ref at all, so a bundle-landed tree reports zero tags no
+            matter what the source repository holds (OMN-17240).
+
+    Note:
+        Both provenance markers are read from the repository's OWN git state by the
+        collector (``git rev-parse`` / ``git config``). Neither is ever supplied by
+        a caller-written file, CLI flag or environment variable — a gate that lets
+        its subject assert its own trustworthiness is not a gate.
     """
 
     model_config = ConfigDict(frozen=True, extra="forbid", from_attributes=True)
@@ -60,6 +75,21 @@ class ModelReleaseIdentityRequest(BaseModel):
         description=(
             "Changed files vs the diff base, or None when undeterminable "
             "(no base + no explicit list) -> enforce the invariant."
+        ),
+    )
+    repo_is_shallow: bool = Field(
+        default=False,
+        description=(
+            "True when the tree the tags were listed from is a shallow clone; an "
+            "empty tag set is then not credible (OMN-17240)."
+        ),
+    )
+    repo_origin_is_bundle: bool = Field(
+        default=False,
+        description=(
+            "True when remote.origin.url names a .bundle file, i.e. the tree was "
+            "transplanted by `git clone <bundle>` and carries no tag refs "
+            "(OMN-17240)."
         ),
     )
 

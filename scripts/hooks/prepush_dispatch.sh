@@ -698,6 +698,84 @@ prepush_remote_argv() {
   fi
 }
 
+# -----------------------------------------------------------------------------
+# Tree transport -- the bundle MUST carry the TAG STATE (OMN-17240)
+# -----------------------------------------------------------------------------
+# This leg used to build its transplant with `git bundle create "$bundle" HEAD`,
+# which packs only the commits reachable from HEAD and NO ref under refs/tags/.
+# Every remote clone, on every host, on every push, therefore had ZERO tags --
+# and scripts/check_release_identity.py derives "the latest published version"
+# from `git tag --list`. With no tags it silently took its "no published tag
+# yet" branch, so three tests that assert the version-ahead message went red on
+# the remote host while passing locally at the identical SHA (first seen on h101
+# at OMN-17139's 47d7da183: 3 failed / 25618 passed remotely, 9 passed in 16.65s
+# locally).
+#
+# Appending `--tags` alone is NOT the fix, and on a SHALLOW source it is worse
+# than the defect. Measured on the canonical omnibase_infra clone before this
+# change (97 tags, 576-commit graft): `git bundle create f HEAD --tags` exits 0
+# and writes a bundle whose header lists all 97 tag refs, but cloning it dies --
+#   error: Could not read 52222775d8563c036b7f9e15737573c95aa2ce18
+#   fatal: remote did not send all necessary objects
+# -- because the tags' ancestry lies beyond the graft. That converts a false red
+# into a hard transport failure on every push, after paying the transfer.
+#
+# So the transport proves each step instead of assuming it: the source must be
+# able to bundle tag ancestry at all (unshallow once when it cannot -- additive,
+# ~8 s, and it is the object store the worktrees share), the bundle is written
+# with HEAD *and* the tags, and the WRITTEN bundle is then read back and proven
+# to carry tag refs before it is shipped. Anything unprovable returns 1 -- "no
+# evidence" -- which sends the caller back to its existing precedence. No path
+# here can make the gate accept less work, and none of the tag state comes from
+# a caller-written file or env var: it is read from git refs the remote leg
+# re-derives for itself after the clone.
+#
+# Wire cost, measured on omnibase_infra 2026-08-30:
+#   shallow HEAD-only  (the broken transport)  18,599,149 B
+#   unshallowed HEAD-only                      33,657,408 B
+#   unshallowed HEAD --tags  (shipped)         33,966,130 B
+# The tag refs themselves cost 308,722 B (+0.9%); the one-time unshallow is the
+# rest (+15.1 MB on the wire, 65.9 -> 101.8 MiB packed on disk).
+prepush_bundle_tree() {
+  local repo_root bundle src_tags bundle_tags
+  repo_root="$1"
+  bundle="$2"
+
+  src_tags="$(git -C "$repo_root" tag --list 2> /dev/null | wc -l | tr -d ' ')"
+  [ -n "$src_tags" ] || src_tags=0
+
+  if [ "$(git -C "$repo_root" rev-parse --is-shallow-repository 2> /dev/null)" = "true" ]; then
+    log "remote leg: source clone is SHALLOW -- unshallowing once so tag ancestry can be bundled (OMN-17240)"
+    if ! git -C "$repo_root" fetch --unshallow --tags > /dev/null 2>&1; then
+      log "remote leg: refusing -- cannot unshallow ${repo_root}, and a shallow source cannot bundle its tags. Shipping a tag-less tree would make the release-identity gate fail OPEN on the remote host (OMN-17240)."
+      rm -f "$bundle" 2> /dev/null || true
+      return 1
+    fi
+    src_tags="$(git -C "$repo_root" tag --list 2> /dev/null | wc -l | tr -d ' ')"
+    [ -n "$src_tags" ] || src_tags=0
+  fi
+
+  if ! git -C "$repo_root" bundle create "$bundle" HEAD --tags > /dev/null 2>&1; then
+    rm -f "$bundle" 2> /dev/null || true
+    return 1
+  fi
+
+  # Read the written bundle back. `git bundle create` reports success for a
+  # bundle it could not fully populate, so "it exited 0" is not evidence that
+  # the tags travelled.
+  if [ "$src_tags" -gt 0 ]; then
+    bundle_tags="$(git -C "$repo_root" bundle list-heads "$bundle" 2> /dev/null | grep -c 'refs/tags/')"
+    [ -n "$bundle_tags" ] || bundle_tags=0
+    if [ "$bundle_tags" -eq 0 ]; then
+      log "remote leg: refusing -- the bundle carries 0 of ${src_tags} tag refs, so the remote tree would evaluate release identity against an empty tag set (OMN-17240)"
+      rm -f "$bundle" 2> /dev/null || true
+      return 1
+    fi
+    log "remote leg: bundle carries ${bundle_tags} of ${src_tags} tag refs"
+  fi
+  return 0
+}
+
 # prepush_remote_run -- executes the suite on the picked host.
 # Returns 0 = GREEN (verdict may be used), 1 = NO EVIDENCE (fall through),
 # 3 = RED (the suite genuinely failed on a designated host; the caller MUST
@@ -731,8 +809,8 @@ prepush_remote_run() {
   argvfile="${localdir}/argv.txt"
   runner="${localdir}/prepush_smart_tests.sh"
 
-  if ! git -C "$REPO_ROOT" bundle create "$bundle" HEAD > /dev/null 2>&1; then
-    log "remote leg: could not create a git bundle for ${head_sha}"
+  if ! prepush_bundle_tree "$REPO_ROOT" "$bundle"; then
+    log "remote leg: could not create a tag-carrying git bundle for ${head_sha}"
     rm -rf "$localdir"
     return 1
   fi
@@ -843,7 +921,9 @@ git checkout -q "$HEAD_SHA" 2> /dev/null || true
 
 # THE TRANSPLANTED TREE MUST RESOLVE THE SAME BASE REF THE SOURCE TREE DID
 # (OMN-16989). `git bundle create <b> HEAD` carries HEAD's objects and exactly
-# one ref, so the clone has no `origin/dev` -- and this suite contains tests
+# one ref, so the clone has no `origin/dev` -- OMN-17240 added `--tags`, so
+# `refs/tags/*` now travels too, but remote-tracking BRANCH refs still do not,
+# and this update-ref is still required. This suite contains tests
 # that SUBPROCESS this very hook, which resolves `${PREPUSH_BASE_REF:-origin/dev}`
 # before it does anything else. Measured on h201: the whole
 # tests/ci/test_prepush_hook_host_identity_guard.py behavioral proof reduced to
