@@ -797,6 +797,13 @@ services:
       POSTGRES_DB: omnibase_infra
       NODE_POSTGRES_DB: omnidash_analytics
       MIGRATIONS_DIR: /migrations/forward
+      # OMN-16993: the same credential the postgres service consumes on FIRST
+      # startup. `docker-entrypoint-initdb.d` runs the bootstrap `.sh` only on a
+      # fresh volume and this runner only applies `*.sql`, so before this line
+      # every warm volume kept omninode_runtime NOLOGIN with a NULL password
+      # while OMNINODE_INTERNAL_DB_URL resolved and then failed at connect.
+      # Empty-means-skip, exactly as on the postgres service.
+      OMNINODE_RUNTIME_PASSWORD: ${OMNINODE_RUNTIME_PASSWORD:-}
     volumes:
       - ../scripts/run-forward-migrations.sh:/run-forward-migrations.sh:ro
       - ../docker/migrations/forward:/migrations/forward:ro

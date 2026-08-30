@@ -1,0 +1,43 @@
+schema_version: '1.0.0'
+ticket_id: OMN-16994
+title: 'Report runtime NOT-READY when a contract-declared projection is unattached or fully DLQing'
+summary: >-
+  Pick up OMN-16843's deferred AC6. Add two projection-liveness dimensions to the ServiceRuntimeHealthMonitor verdict that already folds into /health's top-level status (OMN-15217), so a contract-declared projection that never attached, or one that routes 100% of what it consumes to a DLQ/quarantine sink, stops reading healthy.
+is_seam_ticket: false
+# Additive only: three new fields on the published runtime-health-check.v1
+# event and the same three counts on the /health details block. No field is
+# renamed, retyped or removed, and every new field carries a default.
+interface_change: true
+interfaces_touched:
+  - events
+  - public_api
+evidence_requirements:
+  - kind: tests
+    description: RED-then-GREEN unit proof of both silent-black-hole masks
+    command: uv run pytest tests/unit/runtime/health/test_omn16994_projection_liveness.py -q
+  - kind: ci
+    description: CI pipeline green on PR
+    command: gh pr checks --repo OmniNode-ai/omnibase_infra
+dod_evidence:
+  - id: dod-001
+    description: >-
+      Unattached projection and 100%-DLQ projection each degrade the runtime health verdict and are named on the dimension detail; UNKNOWN inputs stay UNKNOWN rather than fabricating either verdict.
+    source: generated
+    checks:
+      - check_type: command
+        check_value: 'uv run pytest tests/unit/runtime/health/test_omn16994_projection_liveness.py -q'
+  - id: dod-002
+    description: >-
+      The end-to-end negative test induces the real failure through the production seams (_route_projection_error_to_dlq under active_flow_key), drains a real flow window, runs a real monitor cycle, and asserts the real /health payload flips off "healthy" and names the projection.
+    source: generated
+    checks:
+      - check_type: command
+        check_value: 'uv run pytest tests/unit/runtime/health/test_omn16994_projection_liveness.py::TestInducedCredentialFailureFlipsTheEndpoint -q'
+  - id: dod-deploy
+    description: >-
+      Live probe of the deployed runtime health payload on a governed lane. This change is inert until a runtime container carrying it is deployed; the probe is the deploy-time proof that the new counts and dimensions render.
+    source: generated
+    checks:
+      - check_type: command
+        check_value: >-
+          docker exec omninode-stability-test-runtime curl -sS http://localhost:8085/health | jq -r '.status, .details.runtime_health.unattached_projection_count, .details.runtime_health.dlq_saturated_projection_count'
