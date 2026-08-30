@@ -352,6 +352,17 @@ K8S_ONLY_KEYS: frozenset[str] = frozenset(
         # Cluster Infisical bootstrap toggle; the compose lanes gate Infisical on
         # INFISICAL_ADDR being set instead (see config_discovery docs).
         "INFISICAL_REQUIRED",
+        # OMN-16689 k8s BYOK credential writer addressing. These are cluster
+        # Infisical coordinates, not compose-runtime knobs:
+        #   INFISICAL_ENVIRONMENT_SLUG="dev"
+        #   INFISICAL_TENANT_CREDENTIAL_SECRET_PATH="/tenant-inference-credentials"
+        # The compose lanes in this repo do not run the tenant credential writer
+        # Deployment introduced in omninode_infra#1074, and a repo-wide grep in
+        # omnibase_infra has no consumer for either key. Binding them in
+        # docker-compose.infra.yml would invent a compose contract that no
+        # container resolves.
+        "INFISICAL_ENVIRONMENT_SLUG",
+        "INFISICAL_TENANT_CREDENTIAL_SECRET_PATH",
         # OMN-15750 gateway-attach ingress (omninode_infra#886). Same cluster-DNS
         # category as the block above — both values are *.svc.cluster.local:
         #   GATEWAY_ATTACH_KEYCLOAK_INTROSPECTION_URL=
