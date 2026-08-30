@@ -245,7 +245,19 @@ def test_checked_in_manifest_is_exact_and_all_blockers_are_explicit() -> None:
     # directly in omninode_internal and issues its own omninode_runtime grant,
     # so it needs no OMN-15359 cutover entry and cannot repeat the
     # OMN-16993 grant-missing failure by construction.
-    assert len(result.declarations) == 120
+    # +1 for OMN-16180's node_projection_work_events/0002_work_events_summary_
+    # bound.sql = 121, over the 120 already on dev (which includes
+    # node_projection_delegation_inference_response/0004_grant_tenant_projection_
+    # writer.sql, vendored and declared by omnibase_infra#3014 for OMN-15425 --
+    # NOT by this branch, which carried a now-superseded copy of it before the
+    # rebase onto that merge). 0002 exists for two reasons, both recorded in the
+    # file: it adds the CHECK that makes ModelWorkEventRow's 2000-char summary
+    # bound a property of the DATA rather than of the writer, and it is the
+    # successor named by the migration-supersessions.tsv row authorising 0001's
+    # comment-only scrub of an internal LAN address (which omnimarket's
+    # leaked-literals gate blocks, while its vendor-parity gate requires the
+    # source file to be byte-identical to the copy vendored here).
+    assert len(result.declarations) == 121
     assert result.blocked == ()
     assert len(result.legacy_node_declarations) == 2
     assert len(result.cloud_aliases) == 30
