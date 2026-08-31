@@ -71,22 +71,18 @@ GRANT USAGE ON SCHEMA public TO role_omniweb;
 -- (e.g. CI test DB that only runs omnibase_infra migrations).
 DO $$
 BEGIN
-  IF EXISTS (
-    SELECT 1 FROM information_schema.tables
-    WHERE table_schema = 'public' AND table_name = 'waitlist_signups'
-  ) THEN
-    EXECUTE 'GRANT INSERT, SELECT, UPDATE, DELETE ON TABLE public.waitlist_signups TO role_omniweb';
-  END IF;
+  GRANT INSERT, SELECT, UPDATE, DELETE ON TABLE public.waitlist_signups TO role_omniweb;
+EXCEPTION
+  WHEN undefined_table THEN
+    RAISE NOTICE 'public.waitlist_signups is absent; role_omniweb table grant skipped.';
 END;
 $$;
 
 DO $$
 BEGIN
-  IF EXISTS (
-    SELECT 1 FROM information_schema.tables
-    WHERE table_schema = 'public' AND table_name = 'admin_events_log'
-  ) THEN
-    EXECUTE 'GRANT INSERT, SELECT, UPDATE, DELETE ON TABLE public.admin_events_log TO role_omniweb';
-  END IF;
+  GRANT INSERT, SELECT, UPDATE, DELETE ON TABLE public.admin_events_log TO role_omniweb;
+EXCEPTION
+  WHEN undefined_table THEN
+    RAISE NOTICE 'public.admin_events_log is absent; role_omniweb table grant skipped.';
 END;
 $$;
