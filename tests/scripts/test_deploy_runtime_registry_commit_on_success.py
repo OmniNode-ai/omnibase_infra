@@ -372,6 +372,9 @@ def _build_harness(tmp_path: Path) -> tuple[str, dict[str, str]]:
             _extract_function("snapshot_latest_image_tags"),
             _extract_function("restore_latest_image_tags"),
             _extract_function("write_registry"),
+            # OMN-17287: cleanup_on_exit() consults this before removing a
+            # deploy dir, so it must be present in the harness too.
+            _extract_function("containers_bound_to_deploy_dir"),
             _extract_function("cleanup_on_exit"),
             _extract_function("main"),
             "trap 'cleanup_on_exit' EXIT",
