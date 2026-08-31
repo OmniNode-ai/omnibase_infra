@@ -99,6 +99,24 @@ RENDER_FIXTURES: tuple[RenderFixture, ...] = (
         path="tests/integration/infra/test_stability_test_runtime_compose_render.py",
         env_dicts=("COMPOSE_RENDER_ENV",),
     ),
+    # OMN-17150 collaborator lane. `env_dicts=()` is deliberate, not an
+    # omission: this fixture supplies NOTHING from a module-level Python dict.
+    # Its render env comes entirely from the two committed `--env-file` files it
+    # passes to compose (docker/runtime-policy.env + docker/lakshman.env.example),
+    # which `extract_env_file_vars` already reads out of the fixture source. That
+    # is the point of the fixture — it proves a FRESH CLONE renders, so a dummy
+    # dict here would weaken it by supplying values the lane owner will not have.
+    #
+    # It also renders a STANDALONE lane file (docker/docker-compose.lakshman.yml,
+    # never layered on docker-compose.infra.yml), so
+    # test_all_required_compose_vars_in_fixture skips it by design. Registration
+    # is still mandatory: the OMN-15263 fail-closed discovery check exists
+    # precisely so a new render module cannot sit outside this gate's field of
+    # view, standalone or not.
+    RenderFixture(
+        path="tests/integration/infra/test_lakshman_compose_render.py",
+        env_dicts=(),
+    ),
 )
 
 

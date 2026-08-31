@@ -61,6 +61,19 @@ MANIFEST=(
   "deploy/maintenance/cron.d/omninode-system-slack-report|/etc/cron.d/omninode-system-slack-report|0644"
   "deploy/maintenance/omninode-host-maintenance-sync.sh|/data/maintenance/bin/omninode-host-maintenance-sync.sh|0755"
   "deploy/maintenance/cron.d/omninode-host-maintenance-sync|/etc/cron.d/omninode-host-maintenance-sync|0644"
+  # OMN-17311. The workspace reconciler's scheduler adapter and its cron unit.
+  # These are in the manifest for the reason the manifest exists: an artifact
+  # that is merged but never installed, with nothing alarming, is the OMN-15525
+  # condition. It bit twice before this file was written, and a reconciler that
+  # is not actually running is exactly as useless as a monitor that cannot see —
+  # with the extra harm that the workspace looks governed while it drifts.
+  #
+  # The reconciler ITSELF is deliberately not listed: it is executed from the
+  # deploy-source clone (${OMNI_HOME}/omnibase_infra/scripts/reconcile-host.sh)
+  # so its collaborators resolve, and it is kept current by the reconcile it
+  # performs. Only the two host-resident files need this guard.
+  "deploy/maintenance/omninode-workspace-reconcile.sh|/data/maintenance/bin/omninode-workspace-reconcile.sh|0755"
+  "deploy/maintenance/cron.d/omninode-workspace-reconcile|/etc/cron.d/omninode-workspace-reconcile|0644"
 )
 
 # Optional manifest override: a file of `relpath|hostpath|mode` lines, blank and

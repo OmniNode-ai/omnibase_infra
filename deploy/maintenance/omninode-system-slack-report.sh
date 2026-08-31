@@ -264,7 +264,8 @@ policy_env_value() {
 # label|policy-key -- a pure data table, no comments inside the array (the
 # fallback-port guard parses every line in it as lane|key).
 #
-# Must cover EVERY lane declaring a *_RUNTIME_MAIN_PORT in runtime-policy.env.
+# Together with RUNTIME_LANE_UNPROBED below, must cover EVERY lane declaring a
+# *_RUNTIME_MAIN_PORT in runtime-policy.env.
 # Held in two-way parity by
 # tests/unit/scripts/test_omninode_system_slack_report.py, which DERIVES the
 # lane set from the policy instead of restating it: a row dropped here, or a
@@ -279,6 +280,28 @@ RUNTIME_LANE_SPECS=(
   "stability-test|STABILITY_TEST_RUNTIME_MAIN_PORT"
   "prod|PROD_RUNTIME_MAIN_PORT"
   "judge|JUDGE_RUNTIME_MAIN_PORT"
+)
+
+# label|policy-key -- lanes deliberately NOT probed. Same pure-data shape and
+# same no-hardcoded-port guard as the table above; no comments inside the array.
+#
+# This list exists so that "not probed" is a DECLARATION rather than an absence.
+# The parity test requires RUNTIME_LANE_SPECS + RUNTIME_LANE_UNPROBED to cover
+# the policy's lane set exactly, and separately requires dev / stability-test /
+# prod / judge to be in the PROBED table specifically. So a lane can never
+# vanish from this file quietly -- the OMN-15556 judge blind spot -- it can only
+# move, visibly and with a reason, into the list below.
+#
+# lakshman (:58085, OMN-17150) is a collaborator sandbox owned by one external
+# collaborator. It is expected to be down: it is declared `optional: true` in
+# deploy/lane-census/lane-manifest.yaml precisely so its absence is not drift,
+# and as of this writing it has never been built. Paging the on-call digest
+# every tick for a lane nobody promised to keep up is the alert-fatigue failure
+# that gets the REAL rows above ignored -- the same outcome, by a different
+# route, as not probing them at all. Its owner watches it directly.
+# shellcheck disable=SC2034  # declaration-only: read by the parity test, not by this script
+RUNTIME_LANE_UNPROBED=(
+  "lakshman|LAKSHMAN_RUNTIME_MAIN_PORT"
 )
 
 # Resolve a lane's main runtime port, or emit $LANE_PORT_UNRESOLVED. A value that

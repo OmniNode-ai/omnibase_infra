@@ -38,6 +38,11 @@ _PROFILE_ENV_PREFIX: dict[RuntimeProfileName, str] = {
     "stability-test": "STABILITY_TEST",
     "judge": "JUDGE",
     "prod": "PROD",
+    # OMN-17150 collaborator lane. Adding it here is what makes the renderer
+    # emit the LAKSHMAN_* vars docker/docker-compose.lakshman.yml resolves
+    # fail-closed; a lane in the contract with no prefix here is a KeyError at
+    # render time, not a silent omission.
+    "lakshman": "LAKSHMAN",
 }
 _PROCESS_ENV_PREFIX: dict[RuntimeProcessName, str] = {
     "main": "MAIN",

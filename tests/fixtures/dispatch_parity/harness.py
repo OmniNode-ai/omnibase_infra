@@ -56,10 +56,10 @@ from omnibase_core.enums.enum_execution_shape import EnumMessageCategory as _Cor
 from omnibase_core.models.dispatch.model_dispatch_route import ModelDispatchRoute
 from omnibase_core.models.events.model_event_envelope import ModelEventEnvelope
 from omnibase_infra.enums import EnumMessageCategory
+from omnibase_infra.event_bus.topic_constants import derive_event_type_alias_for_topic
 from omnibase_infra.runtime.auto_wiring.discovery import discover_contracts
 from omnibase_infra.runtime.auto_wiring.handler_wiring import (
     _derive_dispatcher_id,
-    _derive_event_type_alias_from_topic,
     _derive_handler_entry_key,
     _derive_message_category,
     _derive_route_id,
@@ -237,7 +237,7 @@ def _derive_message_types(contract: Any, entry: Any) -> set[str] | None:
         topic_aliases = {
             alias
             for topic in subscribe_topics
-            if (alias := _derive_event_type_alias_from_topic(topic)) is not None
+            if (alias := derive_event_type_alias_for_topic(topic)) is not None
         }
         if topic_aliases:
             message_types = (message_types or set()).union(topic_aliases)
@@ -500,7 +500,7 @@ async def _run_probes(
     # Together these cover P1(a)/P1(c)-alias, P2 category parse, P3 filters (the
     # engine applies them), and P6 (unroutable -> DLQ derivation).
     for topic in sorted(subscribe_topics):
-        alias = _derive_event_type_alias_from_topic(topic)
+        alias = derive_event_type_alias_for_topic(topic)
         # (a) alias-driven
         pa = await _selection_tuple(
             engine, topic=topic, event_type=alias, payload=_DictPayload()
@@ -534,7 +534,7 @@ async def _run_probes(
         ("onex.EVT.omnibase-infra.SOME-THING.v1", "P2_case_variant"),
     ]
     for topic, family in synthetic_p2:
-        alias = _derive_event_type_alias_from_topic(topic)
+        alias = derive_event_type_alias_for_topic(topic)
         sel = await _selection_tuple(
             engine, topic=topic, event_type=alias, payload=_DictPayload()
         )
@@ -570,7 +570,7 @@ async def _run_probes(
         # We drive the contract's own subscribe topics (recorded on the route rows);
         # here we recover them from subscribe_topics filtered by the alias route.
         for topic in sorted(_topics_for_dispatcher(did, meta, subscribe_topics)):
-            alias = _derive_event_type_alias_from_topic(topic)
+            alias = derive_event_type_alias_for_topic(topic)
             payload: object = instance if instance is not None else _DictPayload()
             sel = await _selection_tuple(
                 engine, topic=topic, event_type=alias, payload=payload
@@ -606,7 +606,7 @@ def _topics_for_dispatcher(
     msg_types = set(meta.get("message_types") or ())
     out: set[str] = set()
     for topic in subscribe_topics:
-        alias = _derive_event_type_alias_from_topic(topic)
+        alias = derive_event_type_alias_for_topic(topic)
         if alias is not None and (alias in msg_types or topic in msg_types):
             out.add(topic)
     return out

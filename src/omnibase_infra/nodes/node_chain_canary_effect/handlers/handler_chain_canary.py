@@ -98,6 +98,9 @@ from omnibase_infra.nodes.node_chain_canary_effect.models.enum_chain_link import
 from omnibase_infra.nodes.node_chain_canary_effect.models.enum_chain_link_status import (
     EnumChainLinkStatus,
 )
+from omnibase_infra.nodes.node_chain_canary_effect.models.enum_projection_readback_status import (
+    EnumProjectionReadbackStatus,
+)
 from omnibase_infra.nodes.node_chain_canary_effect.models.enum_quarantine_check_status import (
     EnumQuarantineCheckStatus,
 )
@@ -133,7 +136,6 @@ _CLIENT_SLACK_SECONDS = 15.0
 
 # Links with no leg in this probe carry the ticket that owes them, so the
 # receipt routes a reader to the work instead of leaving a silent gap.
-_LINK2_OWNING_TICKET = "OMN-16963"
 _LINK5_OWNING_TICKET = "OMN-16964"
 
 # (response_json, transport_error, elapsed_ms)
@@ -155,6 +157,20 @@ TypeTerminalReadback = Callable[
     [str, tuple[str, ...], str, int, float],
     Awaitable[tuple[str | None, int, str]],
 ]
+# (dsn, correlation_id, timeout_s) -> (fsm_state, error)
+# fsm_state is "" for "read and no row" and None for "could not read" — the
+# same three-state convention as the two broker legs, for the same reason.
+TypeProjectionReadback = Callable[
+    [str, str, float],
+    Awaitable[tuple[str | None, str]],
+]
+
+# The FSM states that count as terminal in delegation_workflow_state. Anything
+# else that exists as a row is stranded mid-flight — OMN-14843 measured
+# INFERENCE_COMPLETED, RECEIVED and ROUTED, but the set is defined by what IS
+# terminal rather than by enumerating what is not, so a new intermediate state
+# is stranded by default instead of silently passing.
+_TERMINAL_FSM_STATES: frozenset[str] = frozenset({"COMPLETED", "FAILED"})
 
 
 def _terminal_topics(request: ModelChainCanaryRequest) -> tuple[str, ...]:
@@ -403,6 +419,48 @@ async def _readback_terminal_via_aiokafka(
     )
 
 
+async def _readback_projection_via_asyncpg(
+    dsn: str,
+    correlation_id: str,
+    timeout_s: float,
+) -> tuple[str | None, str]:
+    """Link-2 leg (OMN-16963): what state does the PROJECTION hold for this run?
+
+    Reads ``delegation_workflow_state`` scoped to the probe's own correlation
+    id. This is the readback OMN-16025 link 2 asks for — from the projection,
+    not from logs and not from the publish return.
+
+    Returns the FSM state, ``""`` when the projection carries no row for this
+    correlation id, and ``None`` when the read could not be completed at all.
+    The last case is deliberately distinct: a read that failed is not a read
+    that found nothing.
+    """
+    try:
+        import asyncpg
+    except ImportError as exc:  # pragma: no cover - asyncpg is a hard dep
+        return None, f"asyncpg unavailable: {exc}"
+
+    connection = None
+    try:
+        connection = await asyncio.wait_for(asyncpg.connect(dsn), timeout=timeout_s)
+        row = await asyncio.wait_for(
+            connection.fetchrow(
+                "SELECT state FROM delegation_workflow_state WHERE correlation_id = $1",
+                correlation_id,
+            ),
+            timeout=timeout_s,
+        )
+    except Exception as exc:  # noqa: BLE001 - fails closed, never to a verdict
+        return None, sanitize_error_message(exc)
+    finally:
+        if connection is not None:
+            await connection.close()
+
+    if row is None:
+        return "", ""
+    return str(row["state"] or ""), ""
+
+
 def _extract_error(response: dict[str, object]) -> tuple[str, str]:
     """Pull (code, message) out of the ingress's typed error block."""
     error = response.get("error")
@@ -446,6 +504,7 @@ class HandlerChainCanary:
         ingress: TypeIngressPost | None = None,
         quarantine_scan: TypeQuarantineScan | None = None,
         terminal_readback: TypeTerminalReadback | None = None,
+        projection_readback: TypeProjectionReadback | None = None,
         kill_switch_disabled: bool | None = None,
     ) -> None:
         self._ingress: TypeIngressPost = ingress or _post_skill_via_httpx
@@ -454,6 +513,9 @@ class HandlerChainCanary:
         )
         self._terminal_readback: TypeTerminalReadback = (
             terminal_readback or _readback_terminal_via_aiokafka
+        )
+        self._projection_readback: TypeProjectionReadback = (
+            projection_readback or _readback_projection_via_asyncpg
         )
         # Read at construction, overridable for tests, re-read in handle()
         # so a zero-arg contract-driven construction cannot miss it.
@@ -549,6 +611,9 @@ class HandlerChainCanary:
                     terminal_readback_status=EnumTerminalReadbackStatus.SKIPPED_NOT_CONFIGURED,
                     terminal_topic="",
                     quarantine_status=EnumQuarantineCheckStatus.SKIPPED_NOT_CONFIGURED,
+                    projection_readback_status=EnumProjectionReadbackStatus.SKIPPED_NOT_CONFIGURED,
+                    projection_state="",
+                    projection_error="",
                 ),
                 links_proven=0,
                 links_total=len(EnumChainLink),
@@ -578,11 +643,19 @@ class HandlerChainCanary:
                 scanned,
                 quarantine_error,
             ),
+            (
+                projection_readback_status,
+                projection_state,
+                projection_error,
+            ),
         ) = await asyncio.gather(
             self._readback_terminal(
                 request, str(probe_correlation_id), readback_window_s
             ),
             self._check_quarantine(request, str(probe_correlation_id)),
+            self._readback_projection(
+                request, str(probe_correlation_id), readback_window_s
+            ),
         )
 
         verdict, detail = self._decide(
@@ -606,6 +679,9 @@ class HandlerChainCanary:
             terminal_readback_status=terminal_readback_status,
             terminal_topic=terminal_topic,
             quarantine_status=quarantine_status,
+            projection_readback_status=projection_readback_status,
+            projection_state=projection_state,
+            projection_error=projection_error,
         )
         links_proven = sum(
             1 for link in link_verdicts if link.status is EnumChainLinkStatus.PASS
@@ -669,6 +745,43 @@ class HandlerChainCanary:
                 },
             },
         }
+
+    async def _readback_projection(
+        self,
+        request: ModelChainCanaryRequest,
+        probe_correlation_id: str,
+        window_s: float,
+    ) -> tuple[EnumProjectionReadbackStatus, str, str]:
+        """Read delegation_workflow_state for this run's correlation id.
+
+        Never consults the bus terminal. That separation is the point of the
+        ticket: the broker says what landed on the topic, the projection says
+        what the FSM did with it, and OMN-14843 is the proof those can
+        disagree — 26 of 38 correlations stranded mid-FSM while the topic
+        layer was healthy at the same moment.
+
+        Scoped to the probe's own correlation id, never table-wide: a
+        table-wide check would go green on somebody else's terminal row.
+        """
+        if not request.projection_dsn.strip():
+            return EnumProjectionReadbackStatus.SKIPPED_NOT_CONFIGURED, "", ""
+
+        state, error = await self._projection_readback(
+            request.projection_dsn,
+            probe_correlation_id,
+            window_s,
+        )
+        if state is None:
+            return (
+                EnumProjectionReadbackStatus.ERROR,
+                "",
+                error or "projection readback failed",
+            )
+        if not state:
+            return EnumProjectionReadbackStatus.ROW_ABSENT, "", ""
+        if state.strip().upper() in _TERMINAL_FSM_STATES:
+            return EnumProjectionReadbackStatus.TERMINAL, state, ""
+        return EnumProjectionReadbackStatus.STRANDED, state, ""
 
     async def _readback_terminal(
         self,
@@ -864,11 +977,7 @@ def _all_links_unevaluated(reason: str) -> tuple[ModelChainLinkVerdict, ...]:
             status=EnumChainLinkStatus.NOT_EVALUATED,
             detail=reason,
             owning_ticket=(
-                _LINK2_OWNING_TICKET
-                if link is EnumChainLink.ROUTING_PROJECTED
-                else _LINK5_OWNING_TICKET
-                if link is EnumChainLink.LEDGER_REPLAY
-                else ""
+                _LINK5_OWNING_TICKET if link is EnumChainLink.LEDGER_REPLAY else ""
             ),
         )
         for link in EnumChainLink
@@ -882,13 +991,19 @@ def _build_link_verdicts(
     terminal_readback_status: EnumTerminalReadbackStatus,
     terminal_topic: str,
     quarantine_status: EnumQuarantineCheckStatus,
+    projection_readback_status: EnumProjectionReadbackStatus,
+    projection_state: str,
+    projection_error: str,
 ) -> tuple[ModelChainLinkVerdict, ...]:
-    """One status per OMN-16025 link, so a 3/5 probe cannot read as 5/5.
+    """One status per OMN-16025 link, so a 4/5 probe cannot read as 5/5.
 
-    The two NO_LEG rows are the honest part. They are not failures and
-    not passes — they are links this probe has no instrument for, and
-    they name the ticket that owes the instrument.
+    The remaining NO_LEG row is the honest part. It is not a failure and
+    not a pass — it is a link this probe has no instrument for, and it
+    names the ticket that owes the instrument.
     """
+    link2, link2_detail = _link_two(
+        projection_readback_status, projection_state, projection_error
+    )
     link4, link4_detail = _link_four(terminal_readback_status, terminal_topic)
     link3, link3_detail = _link_three(
         request=request,
@@ -897,8 +1012,8 @@ def _build_link_verdicts(
         quarantine_status=quarantine_status,
     )
     if not ingress_reachable:
-        link3 = link4 = EnumChainLinkStatus.NOT_EVALUATED
-        link3_detail = link4_detail = (
+        link2 = link3 = link4 = EnumChainLinkStatus.NOT_EVALUATED
+        link2_detail = link3_detail = link4_detail = (
             "not evaluated — the ingress was unreachable, so nothing "
             "downstream of it was observed"
         )
@@ -920,14 +1035,8 @@ def _build_link_verdicts(
         ),
         ModelChainLinkVerdict(
             link=EnumChainLink.ROUTING_PROJECTED,
-            status=EnumChainLinkStatus.NO_LEG,
-            detail=(
-                "this canary has no projection readback. A lane with the "
-                "OMN-14843 signature — 68% of correlations stranded "
-                "mid-FSM while the topic layer stays healthy — would "
-                "still report every link this probe DOES check as green"
-            ),
-            owning_ticket=_LINK2_OWNING_TICKET,
+            status=link2,
+            detail=link2_detail,
         ),
         ModelChainLinkVerdict(
             link=EnumChainLink.DELEGATED_EXECUTION,
@@ -948,6 +1057,50 @@ def _build_link_verdicts(
             ),
             owning_ticket=_LINK5_OWNING_TICKET,
         ),
+    )
+
+
+def _link_two(
+    projection_readback_status: EnumProjectionReadbackStatus,
+    projection_state: str,
+    projection_error: str,
+) -> tuple[EnumChainLinkStatus, str]:
+    """Link 2: routing decision PUBLISHED and PROJECTED.
+
+    Read from ``delegation_workflow_state`` for this run's own correlation id.
+    STRANDED is the OMN-14843 signature and is the reason this leg exists: a
+    lane can terminalize on the bus while the projection leaves the row
+    mid-FSM, and every other leg of this canary watches the layer that stays
+    healthy in that condition.
+    """
+    if projection_readback_status is EnumProjectionReadbackStatus.TERMINAL:
+        return (
+            EnumChainLinkStatus.PASS,
+            f"delegation_workflow_state reached {projection_state} for this "
+            "run's own correlation id — projection evidence, not logs",
+        )
+    if projection_readback_status is EnumProjectionReadbackStatus.STRANDED:
+        return (
+            EnumChainLinkStatus.FAIL,
+            f"the projection row for this correlation id stopped at "
+            f"{projection_state} — the OMN-14843 signature, and invisible to "
+            "every other leg of this probe",
+        )
+    if projection_readback_status is EnumProjectionReadbackStatus.ROW_ABSENT:
+        return (
+            EnumChainLinkStatus.FAIL,
+            "delegation_workflow_state carried no row at all for this "
+            "correlation id, so no routing decision was projected",
+        )
+    if projection_readback_status is EnumProjectionReadbackStatus.ERROR:
+        return (
+            EnumChainLinkStatus.ERROR,
+            "the projection readback could not be completed, so no claim is "
+            f"made about the routing decision: {projection_error}",
+        )
+    return (
+        EnumChainLinkStatus.NOT_CONFIGURED,
+        "no projection store configured for the readback — SKIP is not PASS",
     )
 
 

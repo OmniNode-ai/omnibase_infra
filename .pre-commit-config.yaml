@@ -440,6 +440,25 @@ repos:
         pass_filenames: false
         always_run: true
         stages: [pre-commit]
+      # OMN-17298: a migration that turns ROW LEVEL SECURITY on for a relation
+      # must leave a policy admitting somebody, and must not drop one inside a
+      # DO block while recreating it after the block commits. The forward
+      # runner is `psql -v ON_ERROR_STOP=1 -f <file>` with NO
+      # --single-transaction, so `END$$` COMMITS and that gap is a real window
+      # in which the relation enforces RLS with zero policies -- every row
+      # denied to every non-owner principal, surfacing as SQLSTATE 42501 which
+      # looks like a missing GRANT. Third occurrence of the class; the ratchet
+      # found the live one (node_canary_score_reducer 0003, applied on the .201
+      # dev lane 2026-08-17) that review had missed twice. always_run because
+      # the exemption predicate reads the supersession ledger, not the staged
+      # file list.
+      - id: onex-check-migration-rls-policy-atomicity
+        name: ONEX Migration RLS Policy Atomicity
+        entry: python3 scripts/validation/check_migration_rls_policy_atomicity.py
+        language: system
+        pass_filenames: false
+        always_run: true
+        stages: [pre-commit]
       # OMN-14086: wire run_duplication_sweep.py (D1 Drizzle table dupes /
       # D2 omniclaude-vs-occ topic-producer conflicts) as an ENFORCED gate —
       # it had a full pytest fixture suite but zero CI/pre-commit caller,
@@ -1032,6 +1051,24 @@ repos:
         language: system
         pass_filenames: false
         types_or: [markdown, yaml]
+        stages: [pre-commit]
+      # OMN-17307: Reconciler movement-proof gate.
+      # A workspace reconciler may not report success from the exit status of the
+      # command that was supposed to move the surface -- that makes a repair and a
+      # no-op the same observation, which is how a `.201` clone with core.bare=true
+      # read as "synced" while `git checkout` failed with exit 128 forever, and how
+      # a venv whose provider co-install silently downgraded omnibase-compat read as
+      # reconciled. Structural half: reconcile-host.sh must invoke the verifier, and
+      # verdict() must take no exit status. Ratchet half: any scripts/reconcile*.sh
+      # must invoke the verifier or declare `# movement-proof:` /
+      # `# movement-proof-delegated-to:`. Whole-repo by design (a reconciler can be
+      # made non-compliant by deleting a line elsewhere).
+      - id: check-reconciler-movement-proof
+        name: Reconcilers must prove movement by readback (OMN-17307)
+        entry: python3 scripts/check_reconciler_movement_proof.py
+        language: system
+        pass_filenames: false
+        always_run: true
         stages: [pre-commit]
       # OMN-13030: Evidence provenance-probe gate.
       # Rejects any staged markdown handoff/OCC/evidence doc that asserts a

@@ -119,6 +119,19 @@ class ModelChainCanaryRequest(BaseModel):
             "fallback is the OMN-16931 defect this field exists to remove."
         ),
     )
+    projection_dsn: str = Field(
+        default="",
+        description=(
+            "Postgres DSN for the correlation-scoped PROJECTION readback — "
+            "the leg that discharges OMN-16025 link 2 ('routing decision "
+            "PUBLISHED and PROJECTED, readback from projection, not logs'). "
+            "EMPTY means the run has no evidence about the projection and "
+            "reports NOT_CONFIGURED. It deliberately does NOT fall back to "
+            "the bus terminal: OMN-14843 measured 26 of 38 correlations "
+            "stranded mid-FSM while the topic layer was healthy at that same "
+            "moment, so a green terminal is not evidence about this layer."
+        ),
+    )
     terminal_success_topics: tuple[str, ...] = Field(
         default=_DEFAULT_TERMINAL_SUCCESS_TOPICS,
         description=(

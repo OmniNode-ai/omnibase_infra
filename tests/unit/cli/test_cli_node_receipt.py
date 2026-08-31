@@ -46,7 +46,10 @@ from omnibase_infra.cli.receipt_mode import (
     CAPTURE_DIR_NAME,
     SPOOL_DIR_NAME,
     WORKFLOW_RESULT_FILENAME,
+    _extract_correlation_id,
+    _verify_workflow_data_correlation,
     _verify_workflow_data_identity,
+    run_receipt_mode,
 )
 
 pytestmark = pytest.mark.unit
@@ -688,3 +691,215 @@ class TestWorkflowResultIdentityAnchor:
         result_body = payload["result"]
         assert isinstance(result_body, dict)
         assert "anchor-join refusal" in str(result_body.get("error", ""))
+
+
+class TestReceiptCorrelationJoin:
+    """OMN-17295 / OMN-14872: the receipt must select strictly by THIS run's
+    correlation id, or say "no receipt found" — never render another run's.
+
+    Live observation (2026-08-31, this repo's ``.onex_state``): a
+    ``workflow_result.json`` written at 04:11 local carried
+    ``run_id=2cf21c13-…`` (a fresh run, so the OMN-15449 anchor join passed)
+    with a ``terminal_payload`` whose ``envelope_timestamp`` was
+    ``2026-08-30T23:02:44Z`` — the previous evening — and whose
+    ``payload.prompt_text`` was a DIFFERENT prompt
+    (``"reply with the single word: ok"``). The anchor join only proves the
+    FILE was written by this run; it says nothing about whose terminal
+    envelope the runtime put inside it. ``RuntimeLocal._on_terminal_event``
+    accepts the first terminal that arrives on the subscribed topic with no
+    correlation filter, so a retained terminal from a previous night is
+    adopted as this run's own result.
+
+    The CLI is the last boundary that knows the correlation id it minted, so
+    the join lands here: content is served ONLY when the correlation it
+    declares is the one this invocation asked for.
+    """
+
+    _LAST_NIGHT = "2026-08-30T23:02:44.294729Z"
+
+    @staticmethod
+    def _stored_receipt(
+        *, correlation_id: uuid.UUID, prompt_text: str, envelope_timestamp: str
+    ) -> dict[str, JsonValue]:
+        """One stored terminal receipt, shaped like the live delegate envelope."""
+        return {
+            "correlation_id": str(correlation_id),
+            "envelope_timestamp": envelope_timestamp,
+            "event_type": "omnimarket.delegate-skill-completed",
+            "payload": {
+                "status": "success",
+                "correlation_id": str(correlation_id),
+                "prompt_text": prompt_text,
+                "response": f"response for {prompt_text!r}",
+            },
+        }
+
+    def test_matching_correlation_passes_through_unchanged(self) -> None:
+        expected = uuid.uuid4()
+        data: dict[str, JsonValue] = {
+            "run_id": str(uuid.uuid4()),
+            "terminal_payload": self._stored_receipt(
+                correlation_id=expected,
+                prompt_text="this run's prompt",
+                envelope_timestamp="2026-08-31T11:11:00Z",
+            ),
+        }
+        verified, reason = _verify_workflow_data_correlation(data, expected)
+        assert verified == data
+        assert reason is None
+
+    def test_no_expected_correlation_leaves_content_untouched(self) -> None:
+        """``onex node`` / ``onex skill`` callers mint no correlation id."""
+        data: dict[str, JsonValue] = {"handler_result": {"status": "success"}}
+        verified, reason = _verify_workflow_data_correlation(data, None)
+        assert verified == data
+        assert reason is None
+
+    def test_empty_workflow_data_is_not_a_mismatch(self) -> None:
+        verified, reason = _verify_workflow_data_correlation({}, uuid.uuid4())
+        assert verified == {}
+        assert reason is None
+
+    def test_two_stored_receipts_the_wrong_one_is_refused(self) -> None:
+        """RED: two stored receipts, the stale one on disk — it must not serve.
+
+        ``last_night`` and ``this_run`` are two receipts the delegate CLI
+        could be handed back. ``workflow_result.json`` holds ``last_night``
+        while THIS invocation asked for ``this_run``. Pre-fix the selector had
+        no correlation predicate at all and handed the stale envelope back.
+        """
+        last_night_correlation = uuid.uuid4()
+        this_run_correlation = uuid.uuid4()
+        last_night = self._stored_receipt(
+            correlation_id=last_night_correlation,
+            prompt_text="reply with the single word: ok",
+            envelope_timestamp=self._LAST_NIGHT,
+        )
+        this_run = self._stored_receipt(
+            correlation_id=this_run_correlation,
+            prompt_text="Reply with exactly the word: alive",
+            envelope_timestamp="2026-08-31T11:11:00Z",
+        )
+        assert last_night != this_run
+
+        stored_on_disk: dict[str, JsonValue] = {
+            "run_id": str(uuid.uuid4()),
+            "terminal_payload": last_night,
+        }
+        verified, reason = _verify_workflow_data_correlation(
+            stored_on_disk, this_run_correlation
+        )
+        assert verified == {}, "a foreign correlation's receipt must be discarded"
+        assert reason is not None
+        assert "no receipt found" in reason
+        assert str(this_run_correlation) in reason
+        assert str(last_night_correlation) in reason
+
+    def test_nested_payload_correlation_is_checked_too(self) -> None:
+        """The mismatch can hide one level down, under ``payload``."""
+        expected = uuid.uuid4()
+        foreign = uuid.uuid4()
+        data: dict[str, JsonValue] = {
+            "terminal_payload": {
+                "correlation_id": str(expected),
+                "payload": {"correlation_id": str(foreign), "prompt_text": "other"},
+            }
+        }
+        verified, reason = _verify_workflow_data_correlation(data, expected)
+        assert verified == {}
+        assert reason is not None
+        assert str(foreign) in reason
+
+    def test_absent_correlation_fails_closed(self) -> None:
+        """UNKNOWN provenance reads as untrustworthy, never as ours.
+
+        Same discipline as the OMN-15449 anchor join's absent-``run_id`` arm.
+        """
+        data: dict[str, JsonValue] = {
+            "terminal_payload": {"status": "success", "response": "unattributed"}
+        }
+        verified, reason = _verify_workflow_data_correlation(data, uuid.uuid4())
+        assert verified == {}
+        assert reason is not None
+        assert "no receipt found" in reason
+
+    def test_extract_correlation_id_prefers_this_runs_identity(self) -> None:
+        """The receipt must never report a foreign correlation as its own."""
+        expected = uuid.uuid4()
+        data: dict[str, JsonValue] = {
+            "terminal_payload": {"correlation_id": str(uuid.uuid4())}
+        }
+        assert _extract_correlation_id(data, expected) == expected
+
+    def test_real_dispatch_path_refuses_a_stale_terminal_envelope(
+        self,
+        tmp_path: Path,
+        monkeypatch: pytest.MonkeyPatch,
+        capsys: pytest.CaptureFixture[str],
+    ) -> None:
+        """End-to-end through the REAL ``run_receipt_mode`` + RuntimeLocal.
+
+        Two runs share one ``state_root``. Run 1 stores its receipt. Run 2
+        asks for its own correlation, but the runtime adopts run 1's retained
+        terminal envelope and stamps run 2's ``run_id`` over it — the exact
+        live shape. Run 2's receipt must refuse, not render run 1's prompt.
+        """
+        from omnibase_infra.cli import receipt_mode as receipt_mode_module
+
+        contract_path, input_path = _write_fixture_inputs(
+            tmp_path, _PROOF_NOOP_CONTRACT
+        )
+        state_root = tmp_path / "state"
+        monkeypatch.setenv("ONEX_ARTIFACT_STORE_ROOT", str(tmp_path / "artifacts"))
+
+        run_one_correlation = uuid.uuid4()
+        run_two_correlation = uuid.uuid4()
+        run_one_receipt = self._stored_receipt(
+            correlation_id=run_one_correlation,
+            prompt_text="reply with the single word: ok",
+            envelope_timestamp=self._LAST_NIGHT,
+        )
+
+        real_load = receipt_mode_module._load_workflow_data
+
+        def _adopt_run_one_terminal(root: Path) -> dict[str, JsonValue]:
+            loaded = real_load(root)
+            # RuntimeLocal wrote THIS run's run_id (anchor join passes) but
+            # captured the retained terminal from the earlier run.
+            loaded["terminal_payload"] = run_one_receipt
+            loaded.pop("handler_result", None)
+            return loaded
+
+        monkeypatch.setattr(
+            receipt_mode_module, "_load_workflow_data", _adopt_run_one_terminal
+        )
+
+        exit_code = run_receipt_mode(
+            node_name="proof_noop",
+            contract_path=contract_path,
+            input_path=input_path,
+            state_root=state_root,
+            backend_overrides={"event_bus": "inmemory"},
+            timeout=30,
+            verbose=False,
+            emit_socket=tmp_path / "no-daemon.sock",
+            expected_correlation_id=run_two_correlation,
+        )
+
+        assert exit_code != 0, "a receipt that cannot be attributed must fail loud"
+        stdout = capsys.readouterr().out
+        payload = _parse_single_receipt(stdout)
+        receipt: ModelSkillResult[object] = ModelSkillResult.model_validate(payload)
+        assert not receipt.status.is_success_like
+        # The receipt names THIS run's correlation, never the stale one.
+        assert str(receipt.correlation_id) == str(run_two_correlation)
+        body = payload["result"]
+        assert isinstance(body, dict)
+        assert body.get("terminal_payload") is None, (
+            "the stale envelope must be discarded, not rendered"
+        )
+        error_text = str(body.get("error", ""))
+        assert "no receipt found" in error_text
+        assert str(run_one_correlation) in error_text
+        # The other run's prompt text never reaches stdout.
+        assert "reply with the single word: ok" not in stdout

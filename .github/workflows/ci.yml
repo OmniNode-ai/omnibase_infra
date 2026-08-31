@@ -2639,6 +2639,34 @@ jobs:
   # Migrated from validate-validator-requirements.yml (OMN-15108, OMN-14877
   # pattern). Enforces architecture-handshakes/validator-requirements.yaml
   # (OMN-13291 fleet gate) against this repo's own baseline.
+  # OMN-17307: the reconciler movement-proof gate.
+  #
+  # Required by construction rather than by a branch-protection entry: this repo's
+  # `dev` requires exactly one context (`CI Summary`), whose default-deny sweep
+  # fails on ANY job in this run that completes non-success. A new job in this
+  # file is therefore enforcing the moment it lands -- which is the point of
+  # CLAUDE.md rule 5, and why this ships in the same PR as the rule it enforces.
+  #
+  # No sibling checkout, no `uv sync`: the checker is stdlib-only on purpose,
+  # because the surface it guards is the one that runs when the venv is broken.
+  reconciler-movement-proof:
+    name: Reconcilers prove movement by readback (OMN-17307)
+    # OMNI_RUNNER_SELECTOR_V1 - trusted events default to self-hosted omnibase-ci; pull_request defaults to ubuntu-latest
+    runs-on: >-
+      ${{
+        (github.event_name == 'pull_request' &&
+         github.event.pull_request.head.repo.full_name != github.repository)
+        && fromJSON(vars.OMNI_PUBLIC_PR_RUNS_ON_JSON || '["ubuntu-latest"]')
+        || fromJSON((github.event_name == 'merge_group' && vars.OMNI_REQUIRED_CI_RUNS_ON_JSON) || vars.OMNI_TRUSTED_CI_RUNS_ON_JSON || '["self-hosted","omnibase-ci"]')
+      }}
+    timeout-minutes: 5
+    steps:
+      - name: Checkout repo
+        uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+
+      - name: Every reconciler proves movement by reading the surface back
+        run: python3 scripts/check_reconciler_movement_proof.py
+
   validate-validator-requirements:
     name: Enforce validator-requirements.yaml (OMN-13291)
     # OMNI_RUNNER_SELECTOR_V1 — runners are resolved from centralized selector variables.
@@ -3730,6 +3758,18 @@ jobs:
         env:
           APPEND_ONLY_BASE: ${{ github.event.pull_request.base.sha || github.event.merge_group.base_sha || 'origin/dev' }}
         run: uv run python scripts/validation/check_migration_append_only.py --base "${APPEND_ONLY_BASE}"
+
+      # OMN-17298: RLS enabled with no admitting policy is an outage, not a
+      # stricter boundary -- PostgreSQL denies every row to every non-owner,
+      # non-BYPASSRLS principal, and the resulting SQLSTATE 42501 reads at the
+      # call site exactly like a missing GRANT. The class has now recurred
+      # three times on tenant-classified projection relations (0032 ->
+      # superseded by 0033; node_canary_score_reducer 0003 -> superseded by
+      # 0004, which this gate found on its first run and which HAD been applied
+      # on the .201 dev lane; plus the opening hypothesis of OMN-17298 itself).
+      # Detection that is not a gate does not hold (Operating Rule 5).
+      - name: Check node migration RLS policy atomicity
+        run: uv run python scripts/validation/check_migration_rls_policy_atomicity.py
 
   # Migration integration test -- spins up real Postgres, applies all migrations,
   # and asserts every manifest table exists (OMN-3529)
