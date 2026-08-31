@@ -10,8 +10,11 @@
 # processes). This service is the SECOND target the OMN-15059 host guard
 # (guard_full_suite_host() in scripts/hooks/prepush_smart_tests.sh) routes to
 # when it measures `.200` as loaded — never the default, never a `.200`
-# replacement. See docs/runbooks/200-build-lane-execution-pattern.md for the
-# `.200` recipe this mirrors and OMN-16295 for the ticket.
+# replacement. See docs/runbooks/gate-runner-entrypoint.md for the executable
+# recipe and docs/runbooks/lab-prepush-host-table.md for the fleet-wide
+# placement rules, and OMN-16295 for the ticket. (The pointer here used to name
+# docs/runbooks/200-build-lane-execution-pattern.md, which has never existed in
+# this repo — OMN-16446 gap 1.)
 #
 # WHY IT MUST BE HARD-CAPPED
 # ---------------------------
@@ -44,9 +47,16 @@
 # Usage (OMNI_HOME MUST be the symlink-resolved real path -- see trap below):
 #   OMNI_HOME="$(readlink -f "$OMNI_HOME")" \
 #     docker compose -f docker/docker-compose.gate-runner.yml up -d
-#   docker compose -f docker/docker-compose.gate-runner.yml exec gate-runner \
-#     bash -lc '<command>'
 #   docker compose -f docker/docker-compose.gate-runner.yml down
+#
+# RUNNING WORK IN IT — always through the sanctioned entry point, never a raw
+# `docker exec` / `compose exec` (OMN-17317: an attached exec session's stdout
+# is a 64 KiB kernel pipe, and a governed pre-push whose client detaches wedges
+# on it FOREVER, after the suite has already passed):
+#   scripts/ci/run_on_gate_runner.sh --sync --detached --label <lane> \
+#     "$OMNI_HOME/omni_worktrees/<TICKET>/<repo>" git push
+#   scripts/ci/run_on_gate_runner.sh --status <run-dir>
+# See docs/runbooks/gate-runner-entrypoint.md.
 #
 # SYMLINK TRAP (found live, 2026-08-20, proving this on `.201`): on `.201`,
 # `/home/jonah/Code/omni_home` is itself a symlink to `/data/omninode/omni_home`.

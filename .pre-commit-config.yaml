@@ -363,6 +363,20 @@ repos:
         files: (^|/)contract\.yaml$
         pass_filenames: true
         stages: [pre-commit]
+      # OMN-17317: gate-runner entry-point gate. The 2026-08-31 wedge came from
+      # a governed pre-push whose liveness depended on a live `docker exec`
+      # attach: pre-commit buffers a hook's whole output, the exec stdout is a
+      # 64 KiB kernel pipe nothing drains once the client detaches, and the
+      # write blocks forever AFTER the suite has already passed. The behavioral
+      # + policy proofs live in one file, and it runs BOTH here and in CI (it
+      # is under `testpaths`) so local and merge enforcement cannot drift.
+      - id: gate-runner-entrypoint-gate
+        name: gate-runner detached entry point (OMN-17317)
+        entry: uv run --frozen pytest tests/ci/test_gate_runner_detached_entrypoint.py -q
+        language: system
+        files: ^(scripts/ci/(run_on_gate_runner|gate_runner_supervisor)\.sh|scripts/hooks/prepush_smart_tests\.sh|tests/ci/test_gate_runner_detached_entrypoint\.py)$
+        pass_filenames: false
+        stages: [pre-commit]
       # Migration freeze enforcement - block new migrations during DB-per-repo refactor
       - id: onex-validate-migration-freeze
         name: ONEX Migration Freeze Enforcement
