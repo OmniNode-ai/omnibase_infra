@@ -311,3 +311,7 @@ docker/runners/prebuilt-env-context/
 # instead of at $OMNI_HOME/omni_worktrees/ (per CLAUDE.md worktree convention).
 # Untracked but not gitignored, so they inflated repo-wide sweeps.
 omni_worktrees/
+
+# OMN-17292: CI-only cross-repo proof checkouts (omnimarket contract set, etc).
+# Created by the enforcement job and by local regeneration; never committed.
+.proof-dependencies/

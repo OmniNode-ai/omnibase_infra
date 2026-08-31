@@ -393,46 +393,50 @@ def test_cross_repo_pat_lane_is_dependabot_fail_closed_too() -> None:
     )
 
 
-def test_live_omnimarket_head_resolution_survives_fork_prs_without_org_secrets() -> (
-    None
-):
-    """OMN-15703 forkfix: the live-resolve step must not hard-depend on
-    CROSS_REPO_PAT. Fork-triggered pull_request runs receive no org secrets,
-    so a bare `secrets.CROSS_REPO_PAT` GH_TOKEN resolves empty, `gh api`
-    fails unauthenticated, and `set -euo pipefail` aborts the job before its
-    dedicated fork-lane proof step
-    ("Enforce schema qualification in changed SQL (public fork, fail closed)")
-    ever runs. omnimarket is a public repo, so github.token (always present,
-    including on fork PRs) is sufficient to read its commits API -- the step
-    must fall back to it rather than failing closed on token absence alone.
+def test_omnimarket_ref_resolution_survives_fork_and_dependabot_prs() -> None:
+    """OMN-17292 supersedes the OMN-15703 live-resolve fork guard.
+
+    The invariant this test has always protected is that the omnimarket ref
+    resolution must not hard-depend on an org secret: fork-triggered and
+    dependabot-triggered ``pull_request`` runs receive none (OMN-16152 /
+    OMN-16373), so a token-dependent resolution aborted the whole job under
+    ``set -euo pipefail`` before its dedicated fork-lane proof step ever ran.
+
+    OMN-15703 satisfied that with a ``github.token`` fallback on a live
+    ``gh api .../commits/dev`` call. OMN-17292 removed the network call
+    entirely -- the ref now comes from the committed
+    ``.github/omnimarket-contract-pin.yaml`` -- so the invariant holds by
+    construction: there is no token to withhold. This asserts the stronger
+    property rather than deleting the coverage.
     """
     workflow = _CI_WORKFLOW.read_text(encoding="utf-8")
 
-    live_resolve_step = workflow.split(
-        "- name: Live-resolve omnimarket dev HEAD",
+    resolve_step = workflow.split(
+        "- name: Resolve pinned omnimarket contract SHA",
         maxsplit=1,
     )[1].split("- name:", maxsplit=1)[0]
 
-    # Must not hard-depend on the minted App token alone (OMN-16373:
-    # CROSS_REPO_PAT retired) -- a fork PR run has no org secrets, so a bare
-    # `${{ steps.app-token-proof.outputs.token }}` here means an empty
-    # GH_TOKEN and an unauthenticated `gh api` failure under
-    # `set -euo pipefail`.
-    assert (
-        "GH_TOKEN: ${{ steps.app-token-proof.outputs.token }}" not in live_resolve_step
+    # No credential of any kind participates in resolving the ref.
+    assert "GH_TOKEN" not in resolve_step
+    assert "secrets." not in resolve_step
+    assert "app-token" not in resolve_step
+    # ...because there is no network call left to authenticate.
+    assert "gh api" not in resolve_step
+    assert "commits/dev" not in resolve_step
+
+    # Still gated to the not-yet-pinned ("dev") case only: an explicit
+    # Omnimarket-Source-Ref trailer continues to override the pin for
+    # cross-repo co-development (OMN-15703's escape hatch, preserved).
+    assert "if: steps.resolve-omnimarket-ref.outputs.ref == 'dev'" in resolve_step
+    assert "scripts/resolve_omnimarket_contract_pin.py" in resolve_step
+
+    # Fail-closed is preserved inside the resolver: a non-40-hex ref is
+    # rejected rather than resolved, so no mutable branch/tag can sneak back in
+    # as the derivation input.
+    resolver = (_ROOT / "scripts" / "resolve_omnimarket_contract_pin.py").read_text(
+        encoding="utf-8"
     )
-    # Must fall back to the always-present github.token so the fork lane
-    # keeps resolving (omnimarket is public; no elevated scope is needed).
-    assert (
-        "GH_TOKEN: ${{ steps.app-token-proof.outputs.token || github.token }}"
-        in live_resolve_step
-    )
-    # Fail-closed behavior is preserved: no mutable-tag/latest/dev-ref
-    # fallback, hard exit on invalid resolution, still gated to the
-    # not-yet-pinned ("dev") case only.
-    assert "set -euo pipefail" in live_resolve_step
-    assert "exit 1" in live_resolve_step
-    assert "if: steps.resolve-omnimarket-ref.outputs.ref == 'dev'" in live_resolve_step
+    assert "^[0-9a-f]{40}$" in resolver
 
 
 def test_predecessor_pins_reject_in_place_mutation() -> None:

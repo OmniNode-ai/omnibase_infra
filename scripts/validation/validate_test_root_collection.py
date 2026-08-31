@@ -106,7 +106,19 @@ STANDALONE_PROJECT_ROOTS: dict[str, str] = {
 # same-PR, ticket-bearing record of debt that genuinely cannot be wired yet.
 KNOWN_UNCOLLECTED_DEBT: frozenset[str] = frozenset()
 
-_IGNORED_DIR_PARTS = (".git", "__pycache__", ".venv", "node_modules")
+# OMN-17292: `.proof-dependencies/` holds CI-only cross-repo checkouts (the
+# pinned omnimarket contract set the application-database grants derive from).
+# It is gitignored and belongs to another repository, so its test roots are
+# not this repo's to collect -- walking into it made this hook fail for anyone
+# who materialised the checkout locally to regenerate grants, which is a
+# documented workflow.
+_IGNORED_DIR_PARTS = (
+    ".git",
+    "__pycache__",
+    ".venv",
+    "node_modules",
+    ".proof-dependencies",
+)
 
 # The ci.yml step whose pytest invocation defines the full suite.
 FULL_SUITE_STEP_NAME = "Run pytest (full suite)"
