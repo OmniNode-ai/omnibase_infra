@@ -49,6 +49,7 @@ from omnibase_infra.topology import load_topology_profile
 from omnibase_infra.topology.application_database import (
     SUPPORTED_TOPOLOGY_PROFILES,
     TOPOLOGY_PROFILE_INSTANCE_MAP,
+    write_database_projection,
 )
 from omnibase_infra.topology.table_grant_derivation import (
     LEGACY_MIGRATION_TABLE_DECLARATIONS,
@@ -61,6 +62,7 @@ from omnibase_infra.topology.table_grant_derivation import (
 
 _REPOSITORY_ROOT = Path(__file__).resolve().parents[1]
 _INSTANCE_ROOT = _REPOSITORY_ROOT / "src" / "omnibase_infra" / "topology" / "instances"
+_PROJECTION_ROOT = _REPOSITORY_ROOT / "docker" / "catalog" / "database-topology"
 DEFAULT_CONTRACTS_ROOT = (
     _REPOSITORY_ROOT
     / ".proof-dependencies"
@@ -198,9 +200,29 @@ def _run_write(declarations: Sequence[ContractTableDeclaration]) -> int:
             path.write_text(rendered, encoding="utf-8")
             changed.append(instance_name)
     print(f"instances updated: {', '.join(changed) if changed else '(none)'}")
+
+    # OMN-17292: render the catalogs here rather than printing a reminder.
+    # The rendered projections under docker/catalog/database-topology/ are a
+    # pure function of the instances this function just rewrote, and the
+    # topology unit tests fail closed when the two disagree. Leaving the
+    # render as a separate manual step meant every regeneration was two
+    # commands that had to be remembered together, and forgetting the second
+    # produced its own drift ticket (OMN-16436). A derived artifact that must
+    # move with its source should not depend on a comment being read.
+    rendered_profiles: list[str] = []
+    for profile in sorted(SUPPORTED_TOPOLOGY_PROFILES):
+        projection_path = _PROJECTION_ROOT / f"{profile}.yaml"
+        before = (
+            projection_path.read_text(encoding="utf-8")
+            if projection_path.is_file()
+            else None
+        )
+        write_database_projection(profile, projection_path)
+        if projection_path.read_text(encoding="utf-8") != before:
+            rendered_profiles.append(profile)
     print(
-        "reminder: regenerate the rendered catalogs with "
-        "scripts/render_application_database_topology.py"
+        "catalogs rendered: "
+        f"{', '.join(rendered_profiles) if rendered_profiles else '(none)'}"
     )
     return 0
 

@@ -9,6 +9,14 @@
 #   # kafka-fallback-ok         — intentional test fixture default
 #   # noqa                      — general suppression
 #   # onex-allow-internal-ip    — R2 only: intentional private-IP reference
+#
+# OMN-17292: `.proof-dependencies/` is excluded alongside .venv/node_modules.
+# It holds CI-only checkouts of OTHER repositories (the pinned omnimarket
+# contract set the application-database grants derive from). Those files are
+# not this repo's to police, and the pin file documents materialising the
+# checkout locally to regenerate grants -- without this exclusion, following
+# that documented workflow makes every subsequent commit fail on a foreign
+# repo's test fixture.
 
 set -euo pipefail
 
@@ -17,7 +25,7 @@ FAILED=0
 # R1: os.getenv("KAFKA_*", non-empty) pattern
 MATCHES=$(grep -rn --include="*.py" \
     --exclude-dir=".venv" \
-    --exclude-dir="node_modules" \
+    --exclude-dir="node_modules" --exclude-dir=".proof-dependencies" \
     -E "os\.getenv\([[:space:]]*[\"']KAFKA_[^\"']+[\"'][[:space:]]*,[[:space:]]*[\"'][^\"']+[\"']" \
     . 2>/dev/null | \
     grep -v "# kafka-fallback-ok" | \
@@ -37,7 +45,7 @@ if [ -n "$MATCHES" ]; then
 fi
 
 # R2: Private-IP Kafka broker addresses (Kafka-specific ports only) — Python files
-IP_MATCHES=$(grep -rn --include="*.py" --exclude-dir=".venv" --exclude-dir="node_modules" -E "192\.168\.[0-9]+\.[0-9]+:(9092|19092|29092|29093)" . 2>/dev/null | grep -v "# kafka-fallback-ok" | grep -v "# noqa" | grep -v "# onex-allow-internal-ip" || true)  # cloud-bus-ok OMN-4922
+IP_MATCHES=$(grep -rn --include="*.py" --exclude-dir=".venv" --exclude-dir="node_modules" --exclude-dir=".proof-dependencies" -E "192\.168\.[0-9]+\.[0-9]+:(9092|19092|29092|29093)" . 2>/dev/null | grep -v "# kafka-fallback-ok" | grep -v "# noqa" | grep -v "# onex-allow-internal-ip" || true)  # cloud-bus-ok OMN-4922
 
 if [ -n "$IP_MATCHES" ]; then
     echo "ERROR: Hardcoded private-IP Kafka broker address in Python file:"
@@ -50,7 +58,7 @@ fi
 
 # R3: Private-IP Kafka broker addresses in shell scripts (.sh) and YAML files
 # Kafka should never be referenced by private IP in config/deployment files.
-IP_MATCHES_CONFIG=$(grep -rn --include="*.sh" --include="*.yaml" --include="*.yml" --exclude-dir=".venv" --exclude-dir="node_modules" --exclude-dir=".git" -E "192\.168\.[0-9]+\.[0-9]+:(9092|19092|29092|29093)" . 2>/dev/null | grep -v "check_kafka_no_hardcoded_fallback.sh" | grep -v "# kafka-fallback-ok" | grep -v "# noqa" | grep -v "# onex-allow-internal-ip" || true)  # cloud-bus-ok OMN-4922
+IP_MATCHES_CONFIG=$(grep -rn --include="*.sh" --include="*.yaml" --include="*.yml" --exclude-dir=".venv" --exclude-dir="node_modules" --exclude-dir=".proof-dependencies" --exclude-dir=".git" -E "192\.168\.[0-9]+\.[0-9]+:(9092|19092|29092|29093)" . 2>/dev/null | grep -v "check_kafka_no_hardcoded_fallback.sh" | grep -v "# kafka-fallback-ok" | grep -v "# noqa" | grep -v "# onex-allow-internal-ip" || true)  # cloud-bus-ok OMN-4922
 
 if [ -n "$IP_MATCHES_CONFIG" ]; then
     echo "ERROR: Hardcoded private-IP Kafka broker address in shell/YAML file:"
@@ -65,7 +73,7 @@ fi
 # R4: Decommissioned M2 Ultra endpoint specifically
 # (192.168.86.200 port 29092/9092/19092 — old Redpanda before OMN-3431)  # cloud-bus-ok OMN-4922
 # Catching it prevents stale references from being reintroduced in production docs/config.
-DECOMMISSIONED_MATCHES=$(grep -rn --include="*.py" --include="*.sh" --include="*.yaml" --include="*.yml" --exclude-dir=".venv" --exclude-dir="node_modules" --exclude-dir=".git" -E "192\.168\.86\.200:(29092|9092|19092)" . 2>/dev/null | grep -v "check_kafka_no_hardcoded_fallback.sh" | grep -v "# kafka-fallback-ok" | grep -v "# noqa" | grep -v "# onex-allow-internal-ip" || true)  # cloud-bus-ok OMN-4922
+DECOMMISSIONED_MATCHES=$(grep -rn --include="*.py" --include="*.sh" --include="*.yaml" --include="*.yml" --exclude-dir=".venv" --exclude-dir="node_modules" --exclude-dir=".proof-dependencies" --exclude-dir=".git" -E "192\.168\.86\.200:(29092|9092|19092)" . 2>/dev/null | grep -v "check_kafka_no_hardcoded_fallback.sh" | grep -v "# kafka-fallback-ok" | grep -v "# noqa" | grep -v "# onex-allow-internal-ip" || true)  # cloud-bus-ok OMN-4922
 
 if [ -n "$DECOMMISSIONED_MATCHES" ]; then
     echo "ERROR: Decommissioned M2 Ultra Redpanda endpoint detected:"

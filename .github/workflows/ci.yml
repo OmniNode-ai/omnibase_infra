@@ -2932,46 +2932,95 @@ jobs:
         shell: bash
         run: python3 scripts/resolve_node_migration_source_ref.py
 
-      - name: Live-resolve omnimarket dev HEAD
-        # OMN-15703: no hardcoded fallback SHA. When the trailer is absent
-        # (resolve-omnimarket-ref emits the literal "dev"), resolve
-        # omnimarket's live dev HEAD via the GitHub API at run time instead
-        # of pinning to a snapshot that goes stale the moment omnimarket
-        # dev moves again (the OMN-15701 incident). Fails loudly (non-zero
-        # exit) rather than silently falling back to a stale pin.
+      - name: Resolve pinned omnimarket contract SHA
+        # OMN-17292: the derivation input is committed repository state, not a
+        # foreign repo's moving branch tip.
         #
-        # Token: fork-triggered pull_request runs receive no org secrets, so
-        # the minted onexbot-occ-writer App token is empty there and this
-        # step must not hard-depend on it (OMN-16373: CROSS_REPO_PAT
-        # retired). omnimarket is a PUBLIC repo, so reading its
-        # commits API needs no elevated scope -- github.token (always present,
-        # including on fork PRs) is sufficient. Prefer the App token when
-        # present (same-repo/trusted runs) to stay on the higher, shared
-        # cross-repo rate-limit budget those runs already use elsewhere in
-        # this workflow (see lines ~1508/1665/1696); fall back to
-        # github.token so the fork lane keeps functioning rather than
-        # aborting before its fork-lane proof steps below.
-        id: resolve-omnimarket-live-head
+        # OMN-15703 replaced a hardcoded fallback SHA with a live GitHub API
+        # read of omnimarket's dev HEAD, to kill the OMN-15701 stale-pin
+        # failure mode. It did kill it, and created a worse coupling: this
+        # repo's `dev` enforces through the single required `CI Summary`
+        # umbrella (OMN-4497), so an omnimarket merge that adds a
+        # `db_io.db_tables` declaration turned this required check red on
+        # EVERY open omnibase_infra PR at once -- none of which changed
+        # anything related, and none of which could fix it. Three such
+        # org-wide reds in 21 hours: OMN-17141, OMN-16930, OMN-17290.
+        #
+        # The gate had fused two assertions. Only one is a property of an
+        # infra PR:
+        #   * internal consistency -- the checked-in grants are exactly the
+        #     derivation of the contract set this repo pinned. Deterministic,
+        #     stays a hard per-PR gate (the `--check --prove` step below).
+        #   * freshness -- the pinned contract set is current with omnimarket
+        #     dev. A property of a PAIR of repos, not of any infra PR. Moved to
+        #     .github/workflows/omnimarket-contract-pin-refresh.yml, which
+        #     advances the pin and regenerates grants + rendered catalogs in
+        #     the same commit and opens a PR. Drift is now an actionable PR
+        #     instead of an ambush on unrelated authors.
+        #
+        # AC3 / staleness: the pin cannot sit stale SILENTLY (the bot advances
+        # it on a schedule and fails loudly when it cannot) and cannot move
+        # backwards (the forward-only guard below), which is the specific
+        # direction that produced OMN-15701's silent grant reversion.
+        #
+        # No token and no network here -- which is the point, and also makes
+        # this step immune to the fork/dependabot org-secret withholding
+        # (OMN-16152 / OMN-16373) the live-resolve step had to work around.
+        id: resolve-omnimarket-pin
         if: steps.resolve-omnimarket-ref.outputs.ref == 'dev'
         shell: bash
-        env:
-          GH_TOKEN: ${{ steps.app-token-proof.outputs.token || github.token }}
-        run: |
-          set -euo pipefail
-          sha="$(gh api repos/OmniNode-ai/omnimarket/commits/dev --jq .sha)"
-          if [[ ! "$sha" =~ ^[0-9a-f]{40}$ ]]; then
-            echo "::error::live omnimarket dev HEAD resolution returned an invalid sha: '${sha}'" >&2
-            exit 1
-          fi
-          echo "sha=${sha}" >> "$GITHUB_OUTPUT"
+        run: python3 scripts/resolve_omnimarket_contract_pin.py
 
       - name: Checkout exact typed registry dependency
         uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
         with:
           repository: OmniNode-ai/omnimarket
-          ref: ${{ steps.resolve-omnimarket-ref.outputs.ref == 'dev' && steps.resolve-omnimarket-live-head.outputs.sha || steps.resolve-omnimarket-ref.outputs.ref }}
+          ref: ${{ steps.resolve-omnimarket-ref.outputs.ref == 'dev' && steps.resolve-omnimarket-pin.outputs.sha || steps.resolve-omnimarket-ref.outputs.ref }}
           path: .proof-dependencies/omnimarket
           persist-credentials: false
+
+      - name: Prove the omnimarket contract pin only moves forward
+        # OMN-17292 AC3. Runs ONLY when this PR's own diff touches the pin
+        # file, so it is structurally incapable of reproducing the org-wide-red
+        # failure mode this ticket removes: a PR that does not move the pin
+        # cannot fail this step. In practice the only PRs that move the pin are
+        # the refresh bot's own.
+        #
+        # Everything here is bare `python3` + stdlib on purpose: this step sits
+        # ~50 lines BEFORE the job's `Setup Python and uv`, so neither `uv` nor
+        # PyYAML exists yet (this workflow's contract-compliance job installs
+        # pyyaml explicitly for that same reason). Reading the base revision's
+        # pin goes through the same validated resolver as the head side rather
+        # than an inline parser, so a malformed pin fails identically on both.
+        if: >-
+          github.event_name == 'pull_request' &&
+          steps.resolve-omnimarket-ref.outputs.ref == 'dev'
+        shell: bash
+        env:
+          # omnimarket is public, so the compare read needs no elevated scope;
+          # github.token is present on fork and dependabot runs alike.
+          GH_TOKEN: ${{ steps.app-token-proof.outputs.token || github.token }}
+          PIN_BASE_REVISION: ${{ github.event.pull_request.base.sha }}
+          HEAD_PIN: ${{ steps.resolve-omnimarket-pin.outputs.sha }}
+        run: |
+          set -euo pipefail
+          PIN_FILE=".github/omnimarket-contract-pin.yaml"
+          if git diff --quiet "$PIN_BASE_REVISION" HEAD -- "$PIN_FILE"; then
+            echo "contract pin unchanged in this PR - forward-only guard not applicable"
+            exit 0
+          fi
+          echo "contract pin changed in this PR; proving the advance is forward-only"
+          base_pin_file="$(mktemp)"
+          git show "${PIN_BASE_REVISION}:${PIN_FILE}" > "$base_pin_file"
+          base_pin="$(python3 scripts/resolve_omnimarket_contract_pin.py \
+            --pin-file "$base_pin_file")"
+          compare_json="$(mktemp)"
+          gh api "repos/OmniNode-ai/omnimarket/compare/${base_pin}...${HEAD_PIN}" \
+            > "$compare_json"
+          python3 scripts/ci/check_omnimarket_contract_pin_advance.py \
+            --compare-json "$compare_json" \
+            --base-pin "$base_pin" \
+            --head-pin "$HEAD_PIN"
 
       # OMN-16152: GitHub withholds ALL repo secrets from dependabot-triggered
       # pull_request runs even when the head branch is same-repo, not a fork
@@ -3014,6 +3063,7 @@ jobs:
           tests/unit/topology/test_application_database_table_grants.py
           tests/unit/runtime/auto_wiring/test_projection_domain_adapters.py
           tests/ci/test_application_database_domain_enforcement_contract.py
+          tests/ci/test_omnimarket_contract_pin.py
           tests/ci/test_application_database_sql_authority_isolation.py
           tests/ci/test_application_database_sql_gate.py
 
