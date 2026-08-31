@@ -489,8 +489,32 @@ DEPLOY_EXIT=0
 ) || DEPLOY_EXIT=$?
 
 if [[ "${DEPLOY_EXIT}" -ne 0 ]]; then
-    log "deploy-runtime.sh exited ${DEPLOY_EXIT} -- proceeding to health-gate anyway"
-    log "  (it may have partially succeeded; the health-gate below is the source of truth)"
+    # OMN-17289: this used to log "proceeding to health-gate anyway" and carry
+    # on, on the theory that the health-gate below is the source of truth. It
+    # is not, for this failure: a failed deploy means the lane is running some
+    # OTHER build than the one this refresh was asked to install, and the
+    # health-gate answers "is something healthy?", never "is the thing I just
+    # asked for what is running?". A green health verdict over the PREVIOUS
+    # image reads as a successful refresh, which is how a failed deploy got
+    # recorded as a good one -- and the stability lane is where the
+    # `stability-proven` premise of every live prod grant is resolved from
+    # (OMN-15243), so a falsely-green refresh erodes that basis.
+    #
+    # A failed deploy now fails the refresh. The EXIT trap still runs its
+    # cleanup (guarded by OMN-17287 so it cannot rm -rf a deploy dir live
+    # containers are bind-mounted to), and the operator gets the real exit code
+    # instead of a health verdict about the wrong build.
+    err "deploy-runtime.sh exited ${DEPLOY_EXIT} -- failing the refresh"
+    err "  The lane was NOT refreshed to ${REF} (${NEW_INFRA_SHA_SHORT})."
+    err "  Not proceeding to the health-gate: it reports whether SOMETHING is"
+    err "  healthy, not whether the requested build is the one running, so a"
+    err "  green verdict here would describe the previously-deployed image."
+    if [[ "${DEPLOY_EXIT}" -eq 124 ]]; then
+        err "  Exit 124 is the compose_up_bounded deadline"
+        err "  (RUNTIME_COMPOSE_WAIT_TIMEOUT_SECONDS=${RUNTIME_COMPOSE_WAIT_TIMEOUT_SECONDS}s),"
+        err "  not a compose failure -- the process was still running when it was killed."
+    fi
+    exit "${DEPLOY_EXIT}"
 fi
 
 # =============================================================================

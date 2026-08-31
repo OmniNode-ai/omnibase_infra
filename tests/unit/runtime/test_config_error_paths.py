@@ -119,6 +119,34 @@ class TestMissingConfigFileScenarios:
         assert config.output_topic == "responses"
         assert config.consumer_group == "onex-runtime"
 
+    def test_load_runtime_config_missing_file_leaves_name_unset(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """OMN-17287: the defaults fallback leaves `name` unset.
+
+        This is the upstream cause of the .201 dev-lane crash-loop. When the
+        contracts bind-mount resolves to a directory with no
+        runtime/runtime_config.yaml (an empty or wrongly-targeted
+        ONEX_CONTRACTS_DIR), this branch returns a config whose `name` is None.
+        service_kernel derives BOTH service_name and node_name from `name`, so
+        an unset `name` means RuntimeHostProcess gets neither -- which is why
+        the boot died with "RuntimeHostProcess requires 'service_name'" while
+        nothing in the runtime constructor had actually changed.
+
+        Pinning it here keeps the silent-degradation branch honest: if someone
+        later gives `name` a default, that hides an empty contracts mount
+        behind a fabricated service identity.
+        """
+        monkeypatch.delenv("ONEX_GROUP_ID", raising=False)
+
+        config = load_runtime_config(tmp_path)
+
+        assert config.name is None, (
+            "load_runtime_config() must not invent a `name` when no "
+            "runtime_config.yaml is present -- service_name/node_name are "
+            "derived from it and must never be inferred (OMN-17287)."
+        )
+
 
 class TestInvalidYamlSyntaxScenarios:
     """Tests for invalid YAML syntax handling."""

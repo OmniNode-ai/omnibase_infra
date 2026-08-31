@@ -57,10 +57,40 @@ fi
 __OMNIBASE_COMPOSE_WAIT_TIMEOUT_SH_SOURCED=1
 
 # Parameter-default assignment (safe under `set -u`): honors a caller- or
-# operator-exported value, otherwise defaults to 300s. Deliberately NOT
-# `readonly` -- a caller sourcing this file after setting its own default
+# operator-exported value, otherwise defaults to the value below. Deliberately
+# NOT `readonly` -- a caller sourcing this file after setting its own default
 # would otherwise collide.
-: "${RUNTIME_COMPOSE_WAIT_TIMEOUT_SECONDS:=300}"
+#
+# OMN-17289: this default was 300s, which is BELOW the startup budget the
+# compose file itself declares for the services this deadline wraps. In
+# docker/docker-compose.infra.yml, `omninode-runtime` and `runtime-effects`
+# both carry `start_period: 1800s` (workers 1200s), and that file's own comment
+# computes "Unhealthy detection latency = start_period + (interval * retries)
+# = 1800s + 150s = 1950s" with AUTOHEAL_START_PERIOD at 2400s to clear it.
+# `runtime-effects` needs that window because its startup performs long serial
+# Kafka subscription joins.
+#
+# So a 300s deadline killed deploys whose services were still legitimately
+# inside their declared start_period -- a healthy-but-slow boot was
+# indistinguishable from the OMN-15718 permanent-hang case this deadline exists
+# to bound. Worse, the kill landed in the EXIT trap that OMN-17287 had to guard
+# (`rm -rf` of a deploy dir that live containers are bind-mounted to), so a
+# premature deadline was actively destructive before that fix.
+#
+# 1800s aligns the deadline with the largest `start_period` the compose file
+# declares for a service under this wrapper, rather than a number chosen
+# independently of it. It remains a real, finite backstop: the OMN-15718 hang
+# was unbounded, and every value here is bounded. Raise it only after
+# confirming the dependency itself is not permanently stuck (see the
+# COMPOSE_UP_TIMEOUT guidance in compose_up_bounded below).
+#
+# Kept as ONE knob deliberately: callers pass this same value to compose's own
+# `--wait-timeout` AND to the outer `timeout` in compose_up_bounded, so raising
+# it moves both together. Splitting them into an inner/outer pair with slack is
+# a real improvement but a separate change -- it alters the failure taxonomy
+# (compose's typed wait-timeout error vs. this wrapper's 124), which callers
+# branch on.
+: "${RUNTIME_COMPOSE_WAIT_TIMEOUT_SECONDS:=1800}"
 
 _cwt_log() { printf '[compose-wait-timeout] %s\n' "$*" >&2; }
 _cwt_err() { printf '[compose-wait-timeout] ERROR: %s\n' "$*" >&2; }
