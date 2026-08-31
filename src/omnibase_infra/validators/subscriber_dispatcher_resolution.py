@@ -82,9 +82,9 @@ from pathlib import Path
 
 import yaml
 
+from omnibase_infra.event_bus.topic_constants import derive_event_type_alias_for_topic
 from omnibase_infra.runtime.auto_wiring.discovery import discover_contracts_from_paths
 from omnibase_infra.runtime.auto_wiring.handler_wiring import (
-    _derive_event_type_alias_from_topic,
     _derive_message_category,
     _topics_for_handler_entry,
     derive_entry_message_category,
@@ -128,7 +128,7 @@ def _resolve_topic(
 ) -> UnresolvedSubscription | None:
     """Return a finding when ``topic`` resolves to no live dispatcher, else ``None``."""
     real_category = _derive_message_category(topic)
-    alias = _derive_event_type_alias_from_topic(topic)
+    alias = derive_event_type_alias_for_topic(topic)
 
     routing = contract.handler_routing
     entries = list(getattr(routing, "handlers", None) or []) if routing else []

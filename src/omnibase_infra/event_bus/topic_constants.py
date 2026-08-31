@@ -357,6 +357,56 @@ def get_dlq_topic_for_original(
     return build_dlq_topic(category.topic_suffix)
 
 
+def derive_event_type_alias_for_topic(topic: str) -> str | None:
+    """Derive the canonical envelope ``event_type`` alias for an ONEX topic.
+
+    Convention: ``onex.<kind>.<producer>.<event-name>.v<n>`` -> ``<producer>.<event-name>``
+    (e.g. ``onex.evt.omnibase-infra.runtime-manifest-published.v1`` ->
+    ``omnibase-infra.runtime-manifest-published``). Returns ``None`` for a topic that is
+    not a 5-segment ``onex.*`` topic, so callers can fail closed rather than publish an
+    alias nothing can route.
+
+    THIS IS THE SINGLE SOURCE FOR THAT ALIAS ON BOTH SIDES OF THE WIRE (OMN-17296).
+    The auto-wiring dispatcher index registers a subscriber under exactly this alias
+    (``derive_entry_message_types``), and ``MessageDispatchEngine.dispatch`` matches
+    ``envelope.event_type`` against that index VERBATIM. A publisher that stamps any
+    other spelling is unroutable: the runtime consumes the message, routes it to the DLQ
+    with ``failure_class=no_dispatcher`` and COMMITS the offset, so the consumer group
+    reads Stable / LAG 0 while 100% of the traffic is lost.
+
+    ``publish_runtime_manifest`` hard-coded the bare event name
+    (``"runtime-manifest-published"``, producer segment missing) and was the dev lane's
+    dominant DLQ source at 189 dropped events per runtime start. Publishers derive the
+    alias through this function so the spelling cannot drift from the topic again.
+
+    ``derive_dlq_topic_for_event_type`` also reads the first dot-segment of ``event_type``
+    as the producer domain, so a bare alias additionally mis-derives the DLQ topic.
+
+    Args:
+        topic: A fully-qualified ONEX topic.
+
+    Returns:
+        The ``<producer>.<event-name>`` alias, or ``None`` when ``topic`` is not a
+        5-segment ``onex.*`` topic.
+
+    Example:
+        >>> derive_event_type_alias_for_topic(
+        ...     "onex.evt.omnibase-infra.runtime-manifest-published.v1"
+        ... )
+        'omnibase-infra.runtime-manifest-published'
+        >>> derive_event_type_alias_for_topic("not.a.onex.topic") is None
+        True
+
+    .. versionadded:: 0.38.16
+        OMN-17296: promoted from the private auto-wiring helper so the publish side
+        and the dispatch index derive the alias from ONE function.
+    """
+    parts = topic.split(".")
+    if len(parts) >= 5 and parts[0] == "onex":
+        return f"{parts[2]}.{parts[3]}"
+    return None
+
+
 def derive_dlq_topic_for_event_type(
     event_type: str | None,
     original_topic: str,
