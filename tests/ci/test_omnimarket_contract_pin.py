@@ -241,11 +241,15 @@ COMPARE_BACKWARD = (
 COMPARE_INCIDENT_SHA256 = (
     "d63e211c0d3fc386e34a08a78a3a06ec4de1d2ced12d77da3a64bfb87f8fa041"
 )
+# These two compare captures are live-fetch-sanitized, not raw API bytes. A
+# denylisted tenant slug appeared in commit-message text inside both payloads; it
+# is replaced by an equal-length synthetic stand-in. The guard reads only url,
+# status, ahead_by, and behind_by, so the replay verdict is unchanged.
 COMPARE_FORWARD_SHA256 = (
-    "b800ec9aafdf50d64ff91e7b178d27428cb3615744a2ab560bf8d443ef83786f"
+    "364af3872b14d693296d8aa9946c5837dbf46aad103a8d7c65376bfa920fa211"
 )
 COMPARE_BACKWARD_SHA256 = (
-    "e717c944c38f134500154c5316aa5339b2e884085c5d62b289acfb37b9580423"
+    "942677ddf7531216a9de510f623a4f6b1334a97fa27dda8c5ea72decee3ea431"
 )
 
 STALE_PIN_OMN15701 = "4637e625c99ef17c190aa471a5e51b7f646c6dfd"
@@ -279,7 +283,7 @@ def _advance_guard() -> Any:
 
 
 def test_the_compare_captures_are_unmodified() -> None:
-    """R1: these are GitHub's own answers, byte for byte."""
+    """R1: these are the registered compare captures, byte for byte."""
     for path, expected in (
         (COMPARE_INCIDENT, COMPARE_INCIDENT_SHA256),
         (COMPARE_FORWARD, COMPARE_FORWARD_SHA256),

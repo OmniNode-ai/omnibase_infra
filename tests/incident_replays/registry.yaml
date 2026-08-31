@@ -563,9 +563,11 @@ cases:
     guard_verdict_on_artifact: accept
     artifact:
       fixture: tests/fixtures/omn17292/omnimarket-compare-2f123b4c-fd3e66c7.gh-api.json.captured
-      sha256: b800ec9aafdf50d64ff91e7b178d27428cb3615744a2ab560bf8d443ef83786f
+      sha256: 364af3872b14d693296d8aa9946c5837dbf46aad103a8d7c65376bfa920fa211
     capture:
-      method: live-fetch
+      method: live-fetch-sanitized
+      sanitization: >-
+        A tenant slug denylisted by the OMN-17320 Exposed Identifier Gate (denylist entry omn17288-tenant-slug, from the OMN-17288 live-customer-slug-in-a-public-repo incident) appeared in commit-message text inside this compare payload. It is replaced by the synthetic stand-in `acme-tenant` of identical length, which is the first remedy the gate itself prescribes. The replay is NOT weakened: check_omnimarket_contract_pin_advance.py reads exactly four fields -- url, status, ahead_by, behind_by -- and the slug occurs in none of them, so the verdict this capture proves is identical to GitHub's own answer.
       source: gh-api:repos/OmniNode-ai/omnimarket/compare/2f123b4c01eabd2c51f7d703491e9cdf36f89bcd...fd3e66c71ccfd4f7383904baa19e5bd700993a05
       captured_at: '2026-08-31T10:42:00Z'
       captured_by: lane replay (OMN-17292)
