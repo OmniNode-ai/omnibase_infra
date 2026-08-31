@@ -1,0 +1,18 @@
+SHELL=/bin/bash
+PATH=/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin
+
+# OMN-17311: reconcile the `.201` deploy-source clones and host venvs, and prove
+# by readback that every surface actually moved (OMN-17307).
+#
+# Minute :19 is chosen, not arbitrary. Two other root cron jobs already touch
+# this host on a schedule:
+#   */15  omninode-system-slack-report --mode alert   (:00 :15 :30 :45)
+#   :37   omninode-host-maintenance-sync --check --slack
+# :19 sits clear of both, so three root jobs never contend on the same clones or
+# the same Slack rate limit. `tests/scripts/test_workspace_reconcile_cron_omn17311.py`
+# asserts the separation so a later edit cannot quietly collide.
+#
+# Hourly rather than every 15 minutes: a reconcile does real work (fetch across
+# five clones, and a uv sync when the lock moved), and the invocation-time floor
+# in `scripts/onex` is what covers the gap between ticks.
+19 * * * * root /data/maintenance/bin/omninode-workspace-reconcile.sh >> /data/maintenance/logs/workspace-reconcile.log 2>&1

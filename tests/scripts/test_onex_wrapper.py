@@ -40,6 +40,7 @@ is edited to resolve ``onex`` through ``PATH`` the way ``uv run`` does.
 
 from __future__ import annotations
 
+import json
 import os
 import shutil
 import subprocess
@@ -85,7 +86,47 @@ class _Workspace:
         self.path_onex = self.shim_bin / "onex"
         self.witness = root / "witness.log"
 
+        self.satisfy_floor()
+
     # -- collaborators ----------------------------------------------------- #
+    def satisfy_floor(self) -> None:
+        """Provision a floor this workspace already meets (OMN-17309).
+
+        Every test in THIS file is about interpreter identity: which ``onex``
+        runs. The OMN-17309 floor gate is a second, orthogonal question -- is
+        the workspace one that has been proven -- and it refuses
+        evidence-producing subcommands when the answer is no. Several tests here
+        drive ``onex node ...``, which is evidence-producing, so without a
+        satisfied floor they would measure the floor gate instead of the thing
+        they were written to pin.
+
+        The floor is therefore part of the baseline fixture, not part of any
+        assertion. The floor gate's own behaviour is pinned in
+        ``test_onex_wrapper_floor_omn17309.py``, including the case this
+        deliberately excludes: an absent floor.
+        """
+        site_packages = self.infra / ".venv" / "lib" / "python3.12" / "site-packages"
+        dist_info = site_packages / "omnibase_infra-0.38.16.dist-info"
+        dist_info.mkdir(parents=True, exist_ok=True)
+        (dist_info / "METADATA").write_text(
+            "Name: omnibase-infra\nVersion: 0.38.16\n", encoding="utf-8"
+        )
+        (self.root / ".onex-workspace-floor.json").write_text(
+            json.dumps(
+                {
+                    "schema": "onex.workspace.floor.v1",
+                    "generated_at": "2026-08-31T00:00:00Z",
+                    "host": "test",
+                    "omni_home": str(self.root),
+                    "distributions": {"omnibase_infra": "0.38.16"},
+                    "omnimarket_commit": "",
+                },
+                indent=2,
+            )
+            + "\n",
+            encoding="utf-8",
+        )
+
     def install_entrypoint(self) -> None:
         """The real CLI entrypoint: records its argv and exits with a sentinel."""
         self.entrypoint.write_text(

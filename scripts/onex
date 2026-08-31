@@ -70,10 +70,54 @@
 #               skip the self-heal and refuse immediately on a missing
 #               entrypoint. For tests and for diagnosing the wrapper itself;
 #               it never affects a working install.
+#
+# ============================================================================
+# THE INVOCATION-TIME FLOOR (OMN-17309)
+# ============================================================================
+# The reconciler (OMN-17307) closes drift on a schedule. Between ticks the venv
+# can still be behind -- someone pulls a clone, a `uv sync` runs by hand, a
+# session opens on a machine that has not ticked in a day. OMN-16932 is what
+# that costs: a delegation probe ran against a build nobody chose and PRODUCED
+# A RECEIPT. Invalid evidence is worse than a failure, because it outlives the
+# invocation and nothing downstream can tell it from the real thing.
+#
+# So the floor is checked here, at the moment a command is about to run, and the
+# response is graded by whether that command mints evidence:
+#
+#   below floor / no floor  ->  evidence-producing subcommand: REFUSE (typed)
+#                           ->  ordinary subcommand: run, after ONE loud warning
+#   at or above floor       ->  silent, both
+#
+# A venv AHEAD of the floor is fine and says nothing: dev-tip dogfooding means
+# the installed version legitimately leads the last stamped floor. An omnimarket
+# commit that merely DIFFERS is not "ahead" -- there is no ordering on commits --
+# so it reads as unproven and is treated as below floor.
+#
+# Cost. This must not make every dispatch slower, so the check starts no Python
+# and opens no socket: distribution versions come from `*.dist-info` directory
+# NAMES (which encode name-version by packaging spec) collected with a shell
+# glob, the omnimarket commit from one `direct_url.json` read with the `read`
+# builtin, and the whole comparison happens in a single `awk`. One external
+# process, no network, no interpreter start -- and it still works when the venv's
+# own python is broken, which is exactly when it matters most.
+#
+# There is deliberately NO bypass variable for the refusal. Adding one would
+# hand back the ability to mint a receipt from an unproven build, which is the
+# entire thing being prevented.
 # ----------------------------------------------------------------------------
 set -uo pipefail
 
 readonly EXIT_REFUSED=2
+readonly EXIT_BELOW_FLOOR=3
+
+# Subcommands that mint durable artifacts -- receipts, attestations, gate
+# verdicts, ledger writes, dispatched work whose output is quoted as evidence.
+# A data table rather than a regex so that adding one is a reviewable diff, and
+# so the set can be asserted by a test instead of read out of an expression.
+readonly ONEX_EVIDENCE_SUBCOMMANDS="delegate skill node run-node run gate occ compliance validate doctor health db ledger"
+# Flags that turn any invocation into an evidence-producing one regardless of
+# subcommand: they name a file the result is written to.
+readonly ONEX_EVIDENCE_FLAGS="--output --receipt --report --emit-receipt --evidence"
 
 _say() { printf '[onex] %s\n' "$*" >&2; }
 
@@ -98,6 +142,8 @@ OMNI_HOME="${OMNI_HOME:-$(dirname "$INFRA_DIR")}"
 
 ENTRYPOINT="$OMNI_HOME/omnibase_infra/.venv/bin/onex"
 RECONCILER="$OMNI_HOME/omnibase_infra/scripts/reconcile-workspace-venvs.sh"
+HOST_RECONCILER="$OMNI_HOME/omnibase_infra/scripts/reconcile-host.sh"
+FLOOR_FILE="$OMNI_HOME/.onex-workspace-floor.json"
 
 # --------------------------------------------------------------------------- #
 # Shadow warning
@@ -127,9 +173,184 @@ _warn_on_shadowed_path_onex() {
 _warn_on_shadowed_path_onex
 
 # --------------------------------------------------------------------------- #
+# Invocation-time floor (OMN-17309)
+# --------------------------------------------------------------------------- #
+
+# Does this invocation mint durable evidence? Decided from argv alone: the first
+# token that is not an option is the subcommand, and any evidence flag anywhere
+# in argv counts on its own.
+_is_evidence_invocation() {
+  local arg word
+  for arg in "$@"; do
+    for word in $ONEX_EVIDENCE_FLAGS; do
+      [[ "$arg" == "$word" || "$arg" == "$word="* ]] && return 0
+    done
+  done
+  local subcommand=""
+  for arg in "$@"; do
+    [[ "$arg" == -* ]] && continue
+    subcommand="$arg"
+    break
+  done
+  [[ -n "$subcommand" ]] || return 1
+  for word in $ONEX_EVIDENCE_SUBCOMMANDS; do
+    [[ "$subcommand" == "$word" ]] && return 0
+  done
+  return 1
+}
+
+# Echoes one of: OK | BELOW:<detail> | UNKNOWN:<reason>
+#
+# Every observation below uses shell builtins; the single `awk` at the end is the
+# only process this function starts.
+_floor_verdict() {
+  [[ -f "$FLOOR_FILE" ]] || { printf 'UNKNOWN:no floor marker at %s' "$FLOOR_FILE"; return 0; }
+
+  local site_packages="" candidate
+  for candidate in "$OMNI_HOME/omnibase_infra/.venv"/lib/python*/site-packages; do
+    [[ -d "$candidate" ]] && { site_packages="$candidate"; break; }
+  done
+  [[ -n "$site_packages" ]] || { printf 'UNKNOWN:no site-packages under the CLI venv'; return 0; }
+
+  local -a dist_names=()
+  for candidate in "$site_packages"/*.dist-info; do
+    [[ -d "$candidate" ]] || continue
+    dist_names+=("${candidate##*/}")
+  done
+  [[ "${#dist_names[@]}" -gt 0 ]] || { printf 'UNKNOWN:CLI venv has no installed distributions'; return 0; }
+
+  # The installed omnimarket commit, read with the `read` builtin. Whitespace is
+  # stripped first so the check does not depend on whether the installer wrote
+  # compact or pretty JSON.
+  local installed_commit="" raw=""
+  for candidate in "$site_packages"/omnimarket-*.dist-info/direct_url.json; do
+    [[ -f "$candidate" ]] || continue
+    IFS= read -r -d '' raw < "$candidate" 2>/dev/null || true
+    raw="${raw//[[:space:]]/}"
+    if [[ "$raw" == *'"commit_id":"'* ]]; then
+      installed_commit="${raw#*\"commit_id\":\"}"
+      installed_commit="${installed_commit%%\"*}"
+    fi
+    break
+  done
+
+  printf '%s\n' "${dist_names[@]}" | awk -v installed_commit="$installed_commit" '
+    function trim(s) { gsub(/^[ \t\r]+|[ \t\r]+$/, "", s); return s }
+    function unquote(s) { gsub(/["|,]/, "", s); return trim(s) }
+    # Component-wise version compare. Numeric where both sides are numeric,
+    # lexical otherwise, so a suffixed pre-release still orders sanely.
+    function vercmp(a, b,   x, y, n, m, i, ai, bi) {
+      n = split(a, x, /[.]/); m = split(b, y, /[.]/)
+      for (i = 1; i <= (n > m ? n : m); i++) {
+        ai = (i <= n ? x[i] : "0"); bi = (i <= m ? y[i] : "0")
+        if (ai ~ /^[0-9]+$/ && bi ~ /^[0-9]+$/) {
+          if (ai + 0 < bi + 0) return -1
+          if (ai + 0 > bi + 0) return 1
+        } else {
+          if (ai < bi) return -1
+          if (ai > bi) return 1
+        }
+      }
+      return 0
+    }
+    FNR == NR {
+      # An EMPTY distributions object renders as `"distributions": {},` on a
+      # single line. Entering the block on it would swallow every following key
+      # -- including omnimarket_commit -- as if it were a distribution entry.
+      if ($0 ~ /"distributions"[ \t]*:[ \t]*\{/) { if ($0 !~ /\}/) indist = 1; next }
+      if (indist && $0 ~ /\}/) { indist = 0; next }
+      if (indist) {
+        split($0, kv, ":")
+        k = unquote(kv[1]); v = unquote(kv[2])
+        if (k != "" && v != "") { floor_v[k] = v; nfloor++ }
+        next
+      }
+      if ($0 ~ /"omnimarket_commit"/) {
+        split($0, kv, ":"); want_commit = unquote(kv[2])
+      }
+      next
+    }
+    {
+      n = $0
+      sub(/\.dist-info$/, "", n)
+      i = length(n)
+      while (i > 0 && substr(n, i, 1) != "-") i--
+      if (i > 0) inst[substr(n, 1, i - 1)] = substr(n, i + 1)
+    }
+    END {
+      if (nfloor == 0 && want_commit == "") {
+        printf "UNKNOWN:floor marker records no distributions and no commit"
+        exit 0
+      }
+      for (k in floor_v) {
+        if (!(k in inst)) {
+          printf "BELOW:%s is in the floor at %s but is NOT INSTALLED", k, floor_v[k]
+          exit 0
+        }
+        if (vercmp(inst[k], floor_v[k]) < 0) {
+          printf "BELOW:%s installed %s < floor %s", k, inst[k], floor_v[k]
+          exit 0
+        }
+      }
+      if (want_commit != "") {
+        if (installed_commit == "") {
+          printf "UNKNOWN:omnimarket carries no direct_url commit, so the installed build cannot be identified"
+          exit 0
+        }
+        if (installed_commit != want_commit) {
+          printf "BELOW:omnimarket installed %s is not the proven commit %s", substr(installed_commit, 1, 12), substr(want_commit, 1, 12)
+          exit 0
+        }
+      }
+      printf "OK"
+    }
+  ' "$FLOOR_FILE" -
+}
+
+_enforce_floor() {
+  local result detail
+  result="$(_floor_verdict)"
+  [[ "$result" == "OK" ]] && return 0
+  detail="${result#*:}"
+
+  if _is_evidence_invocation "$@"; then
+    # Self-heal once before refusing -- the same policy this wrapper already
+    # applies to a missing entrypoint, and the same single owner of repair.
+    # It runs ONLY on the evidence path: that is where a refusal would otherwise
+    # brick a fresh checkout (which has no floor until something reconciles it),
+    # and it is the only path where the cost is justified. An ordinary command
+    # below floor stays cheap and just warns.
+    #
+    # This is not a bypass. If the reconcile cannot prove the workspace, the
+    # verdict is still not OK and the refusal below still fires.
+    if [[ "${ONEX_WRAPPER_NO_RECONCILE:-0}" != "1" && -f "$HOST_RECONCILER" ]]; then
+      _say "below the proven floor ($detail) — reconciling once before refusing."
+      bash "$HOST_RECONCILER" --omni-home "$OMNI_HOME" >&2
+      result="$(_floor_verdict)"
+      [[ "$result" == "OK" ]] && return 0
+      detail="${result#*:}"
+    fi
+    _say "REFUSED: this workspace is below the proven floor, and this command mints evidence."
+    _say "  reason   : $detail"
+    _say "  floor    : $FLOOR_FILE"
+    _say "  command  : onex $*"
+    _say "  Running it would produce a receipt from a build nobody chose (OMN-16932)."
+    _say "  Reconcile, then retry:"
+    _say "    bash $HOST_RECONCILER --omni-home $OMNI_HOME"
+    exit "$EXIT_BELOW_FLOOR"
+  fi
+
+  _say "WARNING: this workspace is below the proven floor."
+  _say "  reason   : $detail"
+  _say "  Proceeding because this command does not mint evidence. Reconcile with:"
+  _say "    bash $HOST_RECONCILER --omni-home $OMNI_HOME"
+}
+
+# --------------------------------------------------------------------------- #
 # Exec the CLI venv's entrypoint -- never PATH
 # --------------------------------------------------------------------------- #
 if [[ -x "$ENTRYPOINT" ]]; then
+  _enforce_floor "$@"
   exec "$ENTRYPOINT" "$@"
 fi
 
@@ -139,6 +360,9 @@ if [[ "${ONEX_WRAPPER_NO_RECONCILE:-0}" != "1" && -f "$RECONCILER" ]]; then
   # logic of its own, it only decides WHEN the reconciler runs.
   bash "$RECONCILER" --omni-home "$OMNI_HOME" >&2
   if [[ -x "$ENTRYPOINT" ]]; then
+    # The floor still applies on the self-healed path: a reconcile that rebuilt
+    # a missing entrypoint has not thereby proven the workspace is at target.
+    _enforce_floor "$@"
     exec "$ENTRYPOINT" "$@"
   fi
 fi
