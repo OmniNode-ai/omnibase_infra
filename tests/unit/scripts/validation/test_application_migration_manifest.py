@@ -257,7 +257,16 @@ def test_checked_in_manifest_is_exact_and_all_blockers_are_explicit() -> None:
     # comment-only scrub of an internal LAN address (which omnimarket's
     # leaked-literals gate blocks, while its vendor-parity gate requires the
     # source file to be byte-identical to the copy vendored here).
-    assert len(result.declarations) == 121
+    # +2 for OMN-16930's registry-resolving replacement of the fenced 0031:
+    # node_projection_tenant_registry/0000_create_tenant_registry_mirror.sql
+    # (the runtime-populated slug->uuid relation, classified omninode_internal
+    # and deliberately RLS-free so the migrate identity can read it) and
+    # node_projection_delegation/0032_delegation_events_tenant_id_uuid_via_registry.sql
+    # (the superseding conversion, which JOINs that relation instead of inlining
+    # a literal CASE). 0031's own declaration is untouched -- its bytes are
+    # immutable, the .201 dev lane holds its content_sha256, and supersession is
+    # recorded in _ledger/migration-supersessions.tsv rather than by editing it.
+    assert len(result.declarations) == 123
     assert result.blocked == ()
     assert len(result.legacy_node_declarations) == 2
     assert len(result.cloud_aliases) == 30

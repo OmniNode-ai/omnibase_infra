@@ -324,8 +324,23 @@ FENCED_HOOK_EVENT_CAPTURE_IDS = (
 # the tenancy ruling; the real fix is a `0030a_` pre-step after OMN-16804
 # closes the slug set, never an edit to 0031's bytes (already applied on the
 # .201 dev lane -- `conflicting migration checksum`, the OMN-16705 class).
+# OMN-16930, under the 2026-08-29 operator ruling "Hold + fix mechanism", which
+# CANCELLED the `0030a_` pre-step named in the paragraph above and replaced it.
+# 0032 re-expresses the conversion additively and resolves each slug by JOINing
+# `tenant_registry_mirror` -- a relation node_projection_tenant_registry
+# materializes from onex.tenant.events -- so no literal map appears anywhere in
+# its transform expression, and the set never has to be closed. It is fenced for
+# the SAME reason 0031 is: it can abort, and an abort in this node directory
+# takes an unrelated team's migrations down with it by lexical sort order. It
+# stays fenced until (1) the projection is deployed AND caught up and (2)
+# write-time UUID stamping (OMN-16804) is live; releasing it is an operator
+# action, not an agent's inference that the mirror "looks caught up". 0031 stays
+# in this tuple permanently -- it is RETIRED, not released (supersession
+# recorded in _ledger/migration-supersessions.tsv).
 FENCED_DELEGATION_UUID_CONVERSION_IDS = (
     "node:node_projection_delegation:0031_delegation_events_tenant_id_to_uuid.sql",
+    "node:node_projection_delegation:"
+    "0032_delegation_events_tenant_id_uuid_via_registry.sql",
 )
 # Pinned expectation for the manifest content (OMN-15349): the baseline fence,
 # exact and in order. A manifest edit that moves this must update the pin in
