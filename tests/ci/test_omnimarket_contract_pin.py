@@ -30,6 +30,7 @@ implementation.
 
 from __future__ import annotations
 
+import functools
 import hashlib
 import importlib.util
 import json
@@ -557,4 +558,89 @@ def test_an_upstream_contract_addition_cannot_red_an_unrelated_infra_pr(
             check=True,
             cwd=_ROOT,
         ).stdout.strip()
+    )
+
+
+# ---------------------------------------------------------------------------
+# The bootstrap case: the PR that INTRODUCES the pin has no base pin to
+# compare against.
+# ---------------------------------------------------------------------------
+
+
+def _forward_only_guard_script() -> str:
+    """Return the enforcement job's forward-only guard step, as it will run."""
+    document = yaml.safe_load(_CI_WORKFLOW.read_text(encoding="utf-8"))
+    for step in document["jobs"][_GATE_JOB]["steps"]:
+        if "only moves forward" in (step.get("name") or ""):
+            return str(step["run"])
+    raise AssertionError("the forward-only guard step is missing from the gate job")
+
+
+def test_the_pin_introducing_pr_does_not_trip_its_own_forward_only_guard(
+    tmp_path: Path,
+) -> None:
+    """OMN-17292 RED: a base revision with no pin file is a bootstrap, not a move.
+
+    Found in CI on this change's own first PR (omnibase_infra#3075), which is
+    the third instance of the self-inflicted class the other two review
+    findings on this branch already fixed. The guard reads the base pin with::
+
+        git show "${PIN_BASE_REVISION}:${PIN_FILE}"
+
+    under ``set -euo pipefail``. On the PR that *creates* the pin file that path
+    does not exist at the base revision, so git exits 128::
+
+        fatal: path '.github/omnimarket-contract-pin.yaml' exists on disk,
+               but not in '86421b5012b2bf0252fdf8e3069d6b2650bd6681'
+
+    and the required check fails on the very PR that removes the org-wide red.
+    A creation has no predecessor, so there is no backwards direction to guard:
+    the step must recognise the bootstrap and pass, rather than fail closed on a
+    comparison that cannot be formed.
+
+    Executed against the real step script in a synthetic repository -- a text
+    assertion would not prove the shell actually survives it.
+    """
+    repo = tmp_path / "repo"
+    (repo / ".github").mkdir(parents=True)
+    run = functools.partial(subprocess.run, cwd=repo, check=True, capture_output=True)
+
+    run(["git", "init", "-q", "-b", "main"])
+    run(["git", "config", "user.email", "ci@omninode.ai"])
+    run(["git", "config", "user.name", "ci"])
+
+    # Base revision: no pin file at all -- the state of dev before this change.
+    (repo / "README.md").write_text("base\n", encoding="utf-8")
+    run(["git", "add", "-A"])
+    run(["git", "commit", "-qm", "base without a pin"])
+    base_sha = subprocess.run(
+        ["git", "rev-parse", "HEAD"],
+        cwd=repo,
+        check=True,
+        capture_output=True,
+        text=True,
+    ).stdout.strip()
+
+    # HEAD: the pin file is introduced.
+    head_pin = "fd3e66c71ccfd4f7383904baa19e5bd700993a05"
+    (repo / ".github" / "omnimarket-contract-pin.yaml").write_text(
+        f"repository: OmniNode-ai/omnimarket\nomnimarket_contract_ref: {head_pin}\n",
+        encoding="utf-8",
+    )
+    run(["git", "add", "-A"])
+    run(["git", "commit", "-qm", "introduce the contract pin"])
+
+    completed = subprocess.run(
+        ["bash", "-c", _forward_only_guard_script()],
+        cwd=repo,
+        capture_output=True,
+        text=True,
+        check=False,
+        env={**os.environ, "PIN_BASE_REVISION": base_sha, "HEAD_PIN": head_pin},
+    )
+
+    assert completed.returncode == 0, (
+        "the PR that introduces the contract pin tripped its own forward-only "
+        "guard -- a creation has no predecessor to move backwards from. "
+        f"stdout={completed.stdout!r} stderr={completed.stderr!r}"
     )

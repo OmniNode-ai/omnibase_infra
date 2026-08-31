@@ -3010,6 +3010,18 @@ jobs:
             exit 0
           fi
           echo "contract pin changed in this PR; proving the advance is forward-only"
+          # Bootstrap: on the PR that INTRODUCES the pin there is no base pin,
+          # so there is no direction to guard -- a creation cannot move
+          # backwards. Without this, `git show <base>:<pin>` exits 128 under
+          # `set -euo pipefail` ("exists on disk, but not in <base sha>") and
+          # the required check fails on the very PR that removes the org-wide
+          # red. Asserted by tests/ci/test_omnimarket_contract_pin.py::
+          # test_the_pin_introducing_pr_does_not_trip_its_own_forward_only_guard,
+          # which executes THIS script against a synthetic base commit.
+          if ! git cat-file -e "${PIN_BASE_REVISION}:${PIN_FILE}" 2>/dev/null; then
+            echo "contract pin is introduced by this PR - no predecessor to advance from; forward-only guard not applicable"
+            exit 0
+          fi
           base_pin_file="$(mktemp)"
           git show "${PIN_BASE_REVISION}:${PIN_FILE}" > "$base_pin_file"
           base_pin="$(python3 scripts/resolve_omnimarket_contract_pin.py \
