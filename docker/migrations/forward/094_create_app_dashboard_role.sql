@@ -96,6 +96,24 @@ BEGIN
     EXCEPTION
       WHEN duplicate_object OR unique_violation THEN
         NULL; -- role already exists (created concurrently)
+      WHEN insufficient_privilege THEN
+        RAISE EXCEPTION USING
+          ERRCODE = 'insufficient_privilege',
+          MESSAGE = format(
+            'app_dashboard does not exist on this cluster and the executing role %I '
+            'cannot create it: CREATE ROLE requires the CREATEROLE attribute.',
+            current_user),
+          DETAIL =
+            'Roles are cluster-scoped. Every migration identity on the managed '
+            'lane (role_omnibase_infra for the flat loop, role_omnidash for the '
+            'node loop) is provisioned NOCREATEROLE by contract, and the '
+            'instance has no superuser role this Job can authenticate as '
+            '(OMN-15343). No loop in this corpus can create the role. This file already RAISEd a provisioning-seam message from its NEXT block, but the raw CREATE above aborted the file before that block was ever reached (OMN-17301).',
+          HINT =
+            'Provision it once at the seam that holds the privilege, then '
+            're-run: from omninode_infra, scripts/provision-cluster-roles.sh '
+            '--apply. This migration is an idempotent no-op once the role '
+            'exists. Ticket: OMN-17301.';
     END;
   END IF;
 END;

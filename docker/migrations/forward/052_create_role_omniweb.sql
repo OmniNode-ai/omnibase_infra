@@ -32,7 +32,32 @@
 DO $$
 BEGIN
   IF NOT EXISTS (SELECT 1 FROM pg_roles WHERE rolname = 'role_omniweb') THEN
-    CREATE ROLE role_omniweb WITH LOGIN;
+    -- OMN-17301: the privilege check is what aborts here, not the existence
+    -- check, so the statement needs a handler and not only the IF guard.
+    BEGIN
+      CREATE ROLE role_omniweb WITH LOGIN;
+    EXCEPTION
+      WHEN duplicate_object OR unique_violation THEN
+        NULL; -- role already exists (created concurrently)
+      WHEN insufficient_privilege THEN
+        RAISE EXCEPTION USING
+          ERRCODE = 'insufficient_privilege',
+          MESSAGE = format(
+            'role_omniweb does not exist on this cluster and the executing role %I '
+            'cannot create it: CREATE ROLE requires the CREATEROLE attribute.',
+            current_user),
+          DETAIL =
+            'Roles are cluster-scoped. Every migration identity on the managed '
+            'lane (role_omnibase_infra for the flat loop, role_omnidash for the '
+            'node loop) is provisioned NOCREATEROLE by contract, and the '
+            'instance has no superuser role this Job can authenticate as '
+            '(OMN-15343). No loop in this corpus can create the role.',
+          HINT =
+            'Provision it once at the seam that holds the privilege, then '
+            're-run: from omninode_infra, scripts/provision-cluster-roles.sh '
+            '--apply. This migration is an idempotent no-op once the role '
+            'exists. Ticket: OMN-17301.';
+    END;
   END IF;
 END;
 $$;
