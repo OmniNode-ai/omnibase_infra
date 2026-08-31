@@ -1053,6 +1053,19 @@ repos:
         pass_filenames: false
         always_run: true
         stages: [pre-commit]
+      # OMN-17335: a reconciler resolves its tools explicitly and writes as the
+      # surface owner. Structural half: reconcile-workspace-venvs.sh must have a
+      # resolve_uv() and an ONEX_RECONCILE_UV_BIN candidate, because PATH-only
+      # resolution cannot see a user-local uv from a cron PATH. Second half: every
+      # `uv sync` / provider co-install goes through as_owner, so a root cron never
+      # leaves root-owned files inside a user-owned venv. Whole-repo by design.
+      - id: check-reconciler-privilege
+        name: Reconcilers resolve tools explicitly and write as the owner (OMN-17335)
+        entry: python3 scripts/check_reconciler_privilege.py
+        language: system
+        pass_filenames: false
+        always_run: true
+        stages: [pre-commit]
       # OMN-13030: Evidence provenance-probe gate.
       # Rejects any staged markdown handoff/OCC/evidence doc that asserts a
       # "deployed sha / running digest / promoted revision" claim WITHOUT an

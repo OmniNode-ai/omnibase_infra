@@ -156,6 +156,21 @@ scope:
     - scripts/validation/validate_test_root_collection.py
     - scripts/verify-merge-queue-no-bypass.sh
 cases:
+  - id: omn17335-uv-resolved-from-path-only
+    guard: scripts/check_reconciler_privilege.py
+    incident: OMN-17335
+    regression_class: false_green
+    guard_verdict_on_artifact: reject
+    artifact:
+      fixture: tests/fixtures/omn17335/reconcile-workspace-venvs.path-only-uv.sh.captured
+      sha256: 8d01a361fe794465792239a2bc1857265dada918f73b3a8bd0204354bf716142
+    capture:
+      method: git-object
+      source: git-object:OmniNode-ai/omnibase_infra@1b66d58f920c1b75de23fab085c55252540f0b7f:scripts/reconcile-workspace-venvs.sh
+      captured_at: '2026-08-31T15:40:00Z'
+      captured_by: lane replay (OMN-17335)
+    test: tests/scripts/test_reconcile_uv_privilege_omn17335.py::test_the_shipped_reconciler_that_resolved_uv_from_path_only_is_rejected
+    why: 'The artifact is the verbatim venv reconciler as it shipped on dev at 1b66d58f -- the code the `.201` maintenance cron actually ran. Line 210 is the whole defect: `UV_BIN="$(command -v uv 2>/dev/null || true)"`, then INDETERMINATE on an empty result. The cron.d unit pins PATH to /usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin, which cannot reach a user-local install by construction, so the reconciler refused every hour on a host where uv 0.11.5 was installed the whole time at ~/.local/bin/uv (verified live: `sudo /home/<owner>/.local/bin/uv --version` -> uv 0.11.5, and the venv''s own pyvenv.cfg records `uv = 0.11.5`). The ticket filed against the refusal then re-ran the same PATH-shaped probe over ssh, got the same empty answer, and concluded the tool was not installed on the machine at all -- an empty result promoted to evidence of absence, twice, inside the family of scripts built to stop exactly that. This file was reviewed, merged and scheduled with nothing objecting. The case drives the real gate over these exact bytes and requires it to say no.'
   - id: omn17307-reconciler-judged-by-exit-code
     guard: scripts/check_reconciler_movement_proof.py
     incident: OMN-17307
