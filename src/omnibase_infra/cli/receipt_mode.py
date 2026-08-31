@@ -84,6 +84,9 @@ from omnibase_core.enums.enum_workflow_result import EnumWorkflowResult
 from omnibase_core.models.artifacts.model_artifact_ref import ModelArtifactRef
 from omnibase_core.models.dispatch.model_skill_result import ModelSkillResult
 from omnibase_core.runtime.runtime_local import RuntimeLocal
+from omnibase_infra.cli.model_delegate_locus_decision import (
+    ModelDelegateLocusDecision,
+)
 from omnibase_infra.cli.model_receipt_runtime_summary import ModelReceiptRuntimeSummary
 from omnibase_infra.runtime_identity import (
     collect_runtime_identity,
@@ -326,6 +329,47 @@ def _close_capture_logging() -> None:
         handler.close()
         root.removeHandler(handler)
     root.addHandler(logging.NullHandler())
+
+
+def _json_str(value: JsonValue) -> str:
+    """Render a workflow-result field as a string, or "" when it is absent.
+
+    Absence is reported as empty rather than as a placeholder like "unknown":
+    a receipt written by a runtime that predates the field genuinely does not
+    know, and inventing a value there would be the fabricated-claim shape this
+    whole change exists to remove.
+    """
+    return value if isinstance(value, str) else ""
+
+
+def _json_uuid(value: JsonValue) -> uuid.UUID | None:
+    """Parse a workflow-result field as a UUID, or ``None`` when it is not one.
+
+    A malformed value is reported as absent rather than propagated: this field
+    is a join key, and a receipt that carries an unparseable one invites a
+    downstream query that silently matches nothing.
+    """
+    if not isinstance(value, str) or not value:
+        return None
+    try:
+        return uuid.UUID(value)
+    except ValueError:
+        logger.warning(
+            "receipt_mode: workflow_result.json declares a non-UUID "
+            "wire_correlation_id (%r); reporting it as absent",
+            value,
+        )
+        return None
+
+
+def _format_dispatch_target(decision: ModelDelegateLocusDecision) -> str:
+    """One-line statement of where the command went and who was listening."""
+    if not decision.lane_consumer_groups:
+        return ""
+    return (
+        f"{decision.command_topic} via {decision.broker}; live consumers: "
+        + ", ".join(decision.lane_consumer_groups)
+    )
 
 
 def _fully_qualified_name(obj: object) -> str:
@@ -608,8 +652,19 @@ def run_receipt_mode(
     emit_socket: Path,
     expected_correlation_id: uuid.UUID | None = None,
     receipt_callback: Callable[[object], None] | None = None,
+    host_handlers: bool = True,
+    locus_decision: ModelDelegateLocusDecision | None = None,
 ) -> int:
     """Execute the node and print exactly one ``ModelSkillResult`` JSON.
+
+    ``host_handlers`` (OMN-17304) selects the runtime's role. ``True`` (the
+    default, and every non-delegate caller) hosts the contract's handlers and
+    executes in-process. ``False`` publishes the command and awaits this run's
+    own correlated terminal, hosting nothing, so the work is done by whatever
+    runtime consumes the command topic. ``locus_decision`` carries the
+    evidence behind that choice into the receipt and the capture log — without
+    it a receipt from a dispatched run is byte-indistinguishable from a
+    receipt from a local one, which is the OMN-17295 defect.
 
     ``expected_correlation_id`` (OMN-17295) is the correlation id the CALLER
     minted for this invocation, when it has one. ``onex delegate`` mints it,
@@ -657,6 +712,22 @@ def run_receipt_mode(
         socket_path=emit_socket,
     )
 
+    if locus_decision is not None:
+        # Written into the capture BEFORE the run so it survives even a
+        # crashed or timed-out invocation — a run that produced no receipt
+        # still has to be able to say where it was going to run.
+        logger.info(
+            "receipt_mode: execution locus=%s (%s); orchestrator contract=%s "
+            "from %s; command topic=%s broker=%s live lane consumers=%s",
+            locus_decision.locus.value,
+            locus_decision.resolved_from,
+            locus_decision.orchestrator_contract,
+            locus_decision.orchestrator_distribution,
+            locus_decision.command_topic,
+            locus_decision.broker or "(none — in-process bus)",
+            ", ".join(locus_decision.lane_consumer_groups) or "(none)",
+        )
+
     started = time.monotonic()
     runtime_error = ""
     runtime_error_type: str | None = None
@@ -676,6 +747,10 @@ def run_receipt_mode(
             # skill-lifecycle events, threaded into the writer so the reader
             # below can verify the file it reads back is THIS run's own.
             run_id=run_id,
+            # OMN-17304: locus is a resolved property of the run, decided by
+            # the caller and passed in — never inferred here from whichever
+            # transport happened to be reachable.
+            host_handlers=host_handlers,
         )
         workflow_result = runtime.run()
         exit_code = runtime.exit_code
@@ -900,6 +975,21 @@ def run_receipt_mode(
             ),
             exit_code=exit_code,
             workflow=str(contract_path),
+            # OMN-17295 AC2: read back from the runtime's OWN durable record,
+            # not from the caller's request — a receipt must report what the
+            # run did, not what it was asked to do.
+            handler_locus=_json_str(workflow_data.get("handler_locus")),
+            wire_correlation_id=_json_uuid(workflow_data.get("wire_correlation_id")),
+            orchestrator_distribution=(
+                locus_decision.orchestrator_distribution
+                if locus_decision is not None
+                else ""
+            ),
+            dispatch_target=(
+                _format_dispatch_target(locus_decision)
+                if locus_decision is not None
+                else ""
+            ),
             terminal_payload=workflow_data.get("terminal_payload"),
             handler_result=handler_result_json,
             error=runtime_error,

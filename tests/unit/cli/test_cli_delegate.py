@@ -70,6 +70,7 @@ from omnibase_infra.cli.omnimarket_drift_guard import (
     DRIFT_OVERRIDE_ENV,
     check_omnimarket_drift,
 )
+from omnibase_infra.enums.enum_delegate_locus import EnumDelegateLocus
 from omnibase_infra.runtime_identity import collect_runtime_identity
 from omnibase_infra.topics.platform_topic_suffixes import SUFFIX_DELEGATION_REQUEST
 
@@ -744,6 +745,12 @@ class TestBusSelection:
             task_type="document",
             max_tokens=None,
             bus="kafka",
+            # OMN-17304: this test's subject is TRANSPORT plumbing, so it pins
+            # the locus rather than inheriting the new transport-derived
+            # default (kafka -> deployed-lane), which would make it a lane
+            # dispatch and drag a live-consumer precondition into an
+            # assertion about a dict.
+            locus=EnumDelegateLocus.IN_PROCESS,
             kafka_bootstrap=KAFKA_BOOTSTRAP_ARG,
             state_root=tmp_path / "state",
             timeout=60,
@@ -780,6 +787,10 @@ class TestBusSelection:
             prompt="research the routing architecture",
             task_type=None,
             max_tokens=None,
+            # OMN-17304: the subject is auto-resolution of the TRANSPORT, so
+            # the locus is pinned; otherwise resolving to kafka would also
+            # resolve to a lane dispatch and require a live consumer.
+            locus=EnumDelegateLocus.IN_PROCESS,
             state_root=tmp_path / "state",
             timeout=60,
             verbose=False,
@@ -814,6 +825,10 @@ class TestBusSelection:
             prompt="research the routing architecture",
             task_type=None,
             max_tokens=None,
+            # OMN-17304: the subject is auto-resolution of the TRANSPORT, so
+            # the locus is pinned; otherwise resolving to kafka would also
+            # resolve to a lane dispatch and require a live consumer.
+            locus=EnumDelegateLocus.IN_PROCESS,
             state_root=tmp_path / "state",
             timeout=60,
             verbose=False,
@@ -853,6 +868,10 @@ class TestBusSelection:
             prompt="research the routing architecture",
             task_type=None,
             max_tokens=None,
+            # OMN-17304: the subject is auto-resolution of the TRANSPORT, so
+            # the locus is pinned; otherwise resolving to kafka would also
+            # resolve to a lane dispatch and require a live consumer.
+            locus=EnumDelegateLocus.IN_PROCESS,
             state_root=tmp_path / "state",
             timeout=60,
             verbose=False,
@@ -905,6 +924,10 @@ class TestBusSelection:
                 "document",
                 "--bus",
                 "kafka",
+                # OMN-17304: transport test, so the locus is pinned rather
+                # than inherited (kafka now implies a lane dispatch).
+                "--locus",
+                "in-process",
                 "--kafka-bootstrap",
                 KAFKA_BOOTSTRAP_ARG,
                 "--state-root",
@@ -1450,6 +1473,12 @@ class TestExplicitOverrideProvenance:
             prompt="research the routing architecture",
             task_type=None,
             max_tokens=None,
+            # OMN-17304: this class's subject is TRANSPORT provenance
+            # (did --bus/--kafka-bootstrap announce themselves as overrides).
+            # The locus is pinned so a kafka case does not additionally become
+            # a lane dispatch with a live-consumer precondition; locus
+            # provenance has its own tests in test_delegate_locus.py.
+            locus=EnumDelegateLocus.IN_PROCESS,
             state_root=tmp_path / "state",
             timeout=60,
             verbose=False,
@@ -1459,7 +1488,21 @@ class TestExplicitOverrideProvenance:
 
     @staticmethod
     def _override_records(caplog: pytest.LogCaptureFixture) -> list[str]:
-        return [r.getMessage() for r in caplog.records if "OVERRIDE" in r.getMessage()]
+        """OVERRIDE lines about the TRANSPORT flags only.
+
+        OMN-17304 added a second override axis — ``--locus`` announces itself
+        the same way — and this class's counter-assertion
+        ("an auto-resolved transport is not labelled an override") is only
+        meaningful about the flags it is actually testing. Matching the bare
+        word OVERRIDE would make that assertion fail on an unrelated locus
+        line, i.e. it would stop testing what it claims to test.
+        """
+        return [
+            r.getMessage()
+            for r in caplog.records
+            if "OVERRIDE" in r.getMessage()
+            and ("--bus" in r.getMessage() or "--kafka-bootstrap" in r.getMessage())
+        ]
 
     def test_explicit_bus_logs_itself_as_an_override(
         self,
@@ -1543,15 +1586,17 @@ class TestBusHelpTextTellsTheTruth:
 
     As shipped, ``onex delegate --help`` said ``--bus kafka`` "publishes the
     typed delegate-skill command to the broker so a deployed runtime consumer
-    dispatches it." That is false. :func:`build_backend_overrides` — the ONLY
+    dispatches it." That was false: :func:`build_backend_overrides` — the ONLY
     thing ``--bus`` feeds — returns ``{"event_bus": <bus>}`` (plus an optional
-    ``kafka_bootstrap``) and hands it to ``RuntimeLocal``, which executes the
-    orchestrator IN-PROCESS out of the local venv on both bus values. The flag
-    selects the event TRANSPORT; it never relocates execution.
+    ``kafka_bootstrap``), and nothing in that map names an executor.
 
-    A remote-execution mode is explicitly out of scope (operator-reviewed): a
-    thin client, if it is ever built, is gateway-mediated. So the fix is the
-    help text, not a new mode.
+    That remains true of ``--bus``, and this class still pins it. What changed
+    with OMN-17304 is that the CLI grew a real remote mode under a DIFFERENT
+    flag: ``--locus``. So the truthful help text is no longer "execution is
+    always in-process" — the previous revision of this class asserted exactly
+    that string and would have kept the help text lying in the other
+    direction. It now asserts the pair: ``--bus`` is transport, ``--locus``
+    owns where the work runs.
     """
 
     @staticmethod
@@ -1590,17 +1635,29 @@ class TestBusHelpTextTellsTheTruth:
                 f"--help still claims remote execution: {false_claim!r}"
             )
 
-    def test_help_states_execution_is_in_process_and_bus_is_transport_only(
+    def test_help_separates_transport_from_where_the_work_runs(self) -> None:
+        """OMN-17304: --bus is transport, --locus is locus, and --help says so."""
+        help_text = " ".join(self._help_text().split()).lower()
+        assert "transport" in help_text, (
+            "--help must state that --bus selects the event transport"
+        )
+        assert "--locus" in help_text, (
+            "--help must offer the flag that actually decides where work runs"
+        )
+        assert "where the work runs" in help_text
+        assert "deployed-lane" in help_text and "in-process" in help_text
+
+    def test_help_states_a_lane_dispatch_refuses_rather_than_running_here(
         self,
     ) -> None:
+        """The fail-closed promise is part of the contract with the operator.
+
+        Without it a reader may assume the friendly behaviour — fall back to
+        local — which is precisely the defect: a locally-produced receipt read
+        as a lane result.
+        """
         help_text = " ".join(self._help_text().split()).lower()
-        assert "in-process" in help_text, (
-            "--help must state that the orchestrator always runs in-process"
-        )
-        assert "transport" in help_text, (
-            "--help must state that --bus selects the event transport only"
-        )
-        assert "does not change where the work runs" in help_text
+        assert "refuses" in help_text
 
 
 class TestCorrelationReachesTheReceipt:
@@ -1638,6 +1695,10 @@ class TestCorrelationReachesTheReceipt:
             prompt="research the routing architecture",
             task_type=None,
             max_tokens=None,
+            # OMN-17304: the subject is auto-resolution of the TRANSPORT, so
+            # the locus is pinned; otherwise resolving to kafka would also
+            # resolve to a lane dispatch and require a live consumer.
+            locus=EnumDelegateLocus.IN_PROCESS,
             state_root=tmp_path / "state",
             timeout=60,
             verbose=False,
