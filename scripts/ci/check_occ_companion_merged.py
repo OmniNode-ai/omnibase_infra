@@ -58,6 +58,17 @@ import subprocess  # fixed argv, no shell, trusted gh binary
 import sys
 import time
 from dataclasses import dataclass
+from pathlib import Path
+from typing import Final
+
+_REPO_ROOT: Final = Path(__file__).resolve().parents[2]
+if str(_REPO_ROOT) not in sys.path:
+    sys.path.insert(0, str(_REPO_ROOT))
+
+from scripts.ci.pr_trailers import (
+    TrailerConflictError,
+    parse_trailer,
+)
 
 OCC_REPO_DEFAULT = "OmniNode-ai/onex_change_control"
 
@@ -81,9 +92,9 @@ DEPENDENCY_BOT_AUTHORS: frozenset[str] = frozenset(
 # Events on which the gate enforces (mirrors occ-preflight's event scope).
 ENFORCED_EVENTS: frozenset[str] = frozenset({"pull_request", "merge_group"})
 
-EVIDENCE_SOURCE_RE = re.compile(
-    r"^Evidence-Source:\s+(\S.*)$", re.IGNORECASE | re.MULTILINE
-)
+#: Trailer field carrying the OCC evidence reference. Recognition lives in
+#: scripts/ci/pr_trailers.py -- see parse_evidence_source (OMN-17294).
+EVIDENCE_SOURCE_FIELD = "Evidence-Source"
 OCC_PR_REF_RE = re.compile(r"^OCC#(\d+)$", re.IGNORECASE)
 HEX_SHA_RE = re.compile(r"^[0-9a-f]{7,40}$")
 MERGE_GROUP_PR_RE = re.compile(r"/pr-(\d+)-")
@@ -155,9 +166,22 @@ class GhFetcher:
 
 
 def parse_evidence_source(body: str) -> str | None:
-    """First ``Evidence-Source:`` value in the PR body, or ``None``."""
-    match = EVIDENCE_SOURCE_RE.search(body or "")
-    return match.group(1).strip() if match else None
+    """The declared ``Evidence-Source:`` value, or ``None`` if absent.
+
+    Recognition is fence-aware (OMN-17294): a column-0 declaration outside
+    fenced code blocks and inline code spans. Previously this searched the
+    whole body with a MULTILINE regex and took the first hit, so an
+    ``Evidence-Source:`` line quoted inside a fence -- a runbook excerpt, a
+    pasted log, another PR's body -- supplied the evidence this STRICT gate
+    proves durable, and outranked the line occ-autobind actually PATCHed on.
+
+    Raises:
+        TrailerConflictError: the body declares two different values.
+    """
+    value = parse_trailer(body or "", (EVIDENCE_SOURCE_FIELD,))
+    # An empty value is treated as absent, as before: PENDING (autobind mint
+    # may still be in flight), not FAIL.
+    return value or None
 
 
 def resolve_pr_number(
@@ -217,7 +241,13 @@ def evaluate_once(
                 "exemption mirrored; no OCC evidence applicable",
             )
 
-        evidence_source = parse_evidence_source(str(pr_data.get("body") or ""))
+        try:
+            evidence_source = parse_evidence_source(str(pr_data.get("body") or ""))
+        except TrailerConflictError as exc:
+            return Verdict(
+                EXIT_FAIL,
+                f"{repo}#{pr_number} declares ambiguous OCC evidence: {exc}",
+            )
     else:
         evidence_source = evidence_source_override
 

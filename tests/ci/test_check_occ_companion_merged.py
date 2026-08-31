@@ -21,6 +21,7 @@ These tests pin the fail-closed verdict table:
 * non-PR event                → PASS (gate not applicable)
 * unresolvable PR number      → FAIL (fail closed)
 * API errors                  → PENDING (retryable), never PASS
+* conflicting Evidence-Source → FAIL (OMN-17294; ambiguous evidence)
 """
 
 from __future__ import annotations
@@ -36,6 +37,7 @@ from scripts.ci.check_occ_companion_merged import (
     parse_evidence_source,
     resolve_pr_number,
 )
+from scripts.ci.pr_trailers import TrailerConflictError
 
 pytestmark = pytest.mark.unit
 
@@ -78,17 +80,51 @@ def _evaluate(fetcher: FakeFetcher, **kwargs: object):
 
 
 class TestEvidenceSourceParsing:
-    def test_first_line_wins_and_is_case_insensitive(self) -> None:
-        body = "intro\nevidence-source:  OCC#5032 \nEvidence-Source: OCC#9999\n"
+    def test_field_name_is_case_insensitive(self) -> None:
+        body = "intro\nevidence-source:  OCC#5032 \nEvidence-Source: OCC#5032\n"
         assert parse_evidence_source(body) == "OCC#5032"
 
     def test_absent_returns_none(self) -> None:
         assert parse_evidence_source("no evidence here") is None
         assert parse_evidence_source("") is None
 
+    def test_empty_value_is_treated_as_absent(self) -> None:
+        # PENDING (autobind mint may be in flight), never FAIL.
+        assert parse_evidence_source("Evidence-Source:\n") is None
+
     def test_indented_line_is_not_matched(self) -> None:
         # occ-preflight anchors at line start; mirror it.
         assert parse_evidence_source("  Evidence-Source: OCC#1") is None
+
+    # OMN-17294: this gate proves the cited OCC companion is durable. Before
+    # the fix it searched the whole body with a MULTILINE regex and took the
+    # first hit, so a quoted Evidence-Source -- a runbook excerpt, a pasted
+    # log, another PR's body -- supplied the evidence and outranked the line
+    # occ-autobind actually PATCHed on.
+
+    def test_fenced_evidence_source_is_ignored(self) -> None:
+        body = "How to stamp evidence:\n\n```\nEvidence-Source: OCC#9999\n```\n"
+        assert parse_evidence_source(body) is None
+
+    def test_fenced_decoy_does_not_outrank_the_real_line(self) -> None:
+        body = (
+            "```markdown\nEvidence-Source: OCC#9999\n```\n\nEvidence-Source: OCC#5032\n"
+        )
+        assert parse_evidence_source(body) == "OCC#5032"
+
+    def test_inline_code_span_is_ignored(self) -> None:
+        assert parse_evidence_source("`Evidence-Source: OCC#9999`\n") is None
+
+    def test_conflicting_values_raise(self) -> None:
+        body = "Evidence-Source: OCC#5032\nEvidence-Source: OCC#9999\n"
+        with pytest.raises(TrailerConflictError):
+            parse_evidence_source(body)
+
+    def test_repeated_identical_value_is_not_a_conflict(self) -> None:
+        # scripts/pr_body.py --append is idempotent because re-stamping the
+        # same evidence is expected (OMN-14675).
+        body = "Evidence-Source: OCC#5032\n\nEvidence-Source: OCC#5032\n"
+        assert parse_evidence_source(body) == "OCC#5032"
 
 
 class TestPrNumberResolution:
@@ -194,6 +230,35 @@ class TestBodyAndScopeVerdicts:
             prs={(PRODUCT_REPO, "2500"): _product_pr("Evidence-Source: not-a-ref!")}
         )
         assert _evaluate(fetcher).code == EXIT_FAIL
+
+    def test_conflicting_evidence_sources_is_fail(self) -> None:
+        # OMN-17294: two different declared companions is ambiguous evidence.
+        # Silent first-wins could prove a durable-but-unrelated companion
+        # while the real one is still open.
+        fetcher = FakeFetcher(
+            prs={
+                (PRODUCT_REPO, "2500"): _product_pr(
+                    "Evidence-Source: OCC#5032\nEvidence-Source: OCC#9999"
+                )
+            }
+        )
+        verdict = _evaluate(fetcher)
+        assert verdict.code == EXIT_FAIL
+        assert "ambiguous" in verdict.reason
+
+    def test_fenced_evidence_source_is_pending_not_honoured(self) -> None:
+        # A quoted example is not evidence: the gate must keep waiting for
+        # occ-autobind rather than derive from the fenced text.
+        fetcher = FakeFetcher(
+            prs={
+                (PRODUCT_REPO, "2500"): _product_pr(
+                    "```\nEvidence-Source: OCC#9999\n```"
+                )
+            }
+        )
+        verdict = _evaluate(fetcher)
+        assert verdict.code == EXIT_PENDING
+        assert "Evidence-Source" in verdict.reason
 
     def test_dependency_bot_author_is_exempt(self) -> None:
         fetcher = FakeFetcher(
