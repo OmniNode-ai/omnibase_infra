@@ -30,9 +30,9 @@ name: "node_chain_canary_effect"
 node_type: "EFFECT_GENERIC"
 contract_version:
   major: 1
-  minor: 0
-  patch: 1
-node_version: "1.0.1"
+  minor: 1
+  patch: 0
+node_version: "1.1.0"
 description: >
   Scheduled live event-chain canary (OMN-16773, OMN-16931). Fires one delegation through POST {probe_url}/skill with a freshly minted per-run correlation id, then reads that correlation id back off the contract-declared terminal topics on the broker to decide whether a terminal actually landed inside the budget, and checks the platform quarantine sink for the same id. The terminal verdict never comes from the ingress HTTP response: that response is a claim by the request path, and it was wrong in both directions on the live dev lane (OMN-16931 false RED, OMN-15468 false GREEN). Reports a distinct verdict for quarantined vs terminal-missing vs ingress-error-with-terminal-present vs readback-failed vs ingress-unreachable, reports SKIPPED rather than CLEAN for legs that were not configured, and emits a per-link verdict against the five OMN-16025 chain links so a three-link probe can never render as a five-link proof.
 
@@ -133,6 +133,22 @@ error_handling:
       description: "No broker was configured for the terminal readback, so the run has no evidence about the terminal. Deliberately NOT a fallback to the ingress response — that fallback is the OMN-16931 defect."
       recoverable: true
       retry_strategy: "none"
+    - name: "LEDGER_CHAIN_INCOMPLETE"
+      description: "The ledger chain was assembled but a declared hop is missing, so there is nothing complete to replay (OMN-16964). Distinct from LEDGER_REPLAY_FAILED: the evidence was never there, rather than present and failing to reproduce."
+      recoverable: true
+      retry_strategy: "none"
+    - name: "LEDGER_REPLAY_FAILED"
+      description: "A complete ledger chain was replayed and the replay was not green (OMN-16964)."
+      recoverable: true
+      retry_strategy: "none"
+    - name: "LEDGER_VERIFIER_SKIPPED"
+      description: "The tier-2 verifier ran and returned SKIP. Never counted as a pass — this is the member the word HONEST in the OMN-16025 link-5 gate text exists for, and folding it into PASS would re-create the defect the gate was written to catch."
+      recoverable: true
+      retry_strategy: "none"
+    - name: "LEDGER_REPLAY_NOT_CONFIGURED"
+      description: "No ledger source was configured, so the run has no evidence about the chain and no green is available. Fails closed on the same terms as TERMINAL_READBACK_NOT_CONFIGURED."
+      recoverable: true
+      retry_strategy: "none"
 io_operations:
   - operation: "probe_event_chain"
     description: "Fire one live delegation and assert the chain carried it to a terminal."
@@ -152,6 +168,13 @@ io_operations:
       - quarantine_topic
       - quarantine_scan_records
       - quarantine_timeout_seconds
+      # OMN-16964, link 5. An empty ledger_source makes NO claim about the
+      # chain and reports NOT_CONFIGURED — it never falls back to the bus
+      # terminal or the projection, because a link with no instrument pointed
+      # at it has no evidence. expected_ledger_hops is what "complete" is
+      # measured against, so a gap is never tolerated silently.
+      - ledger_source
+      - expected_ledger_hops
       - settle_seconds
     output_fields:
       - correlation_id
