@@ -86,9 +86,30 @@ its own: ``_ledger/verified-divergent-adoptions.tsv``. Keeping the two
 declaration files separate means neither admission path can ever consult a
 declaration written for the other.
 
+The canonical-ledger variant (OMN-17139)
+---------------------------------------
+Both variants above read an IMPORT source -- ``public.schema_migrations`` and
+``public.omnimarket_schema_migrations`` -- and both are consulted only by
+``bootstrap.sql``, at import time. There is a third table, and it is the one the
+deploy actually dies on: ``platform_catalog.schema_migrations``, the canonical
+ledger ``run-forward-migrations.sh`` writes itself. Its ``migration_is_applied()``
+compares the recorded ``content_sha256`` against the file on disk and exits 1 on
+disagreement, and no adoption relation was reachable from there at all.
+
+That is the OMN-17139 case: ``node:node_projection_work_events:0001`` was applied
+through the runner on the .201 dev lane at 04:59:57Z on 2026-08-30 and rewritten
+in place two hours later. The rewrite was comment-only, but "comment-only" is a
+statement about bytes and the ledger's claim is about schema -- the same
+distinction OMN-16915 draws -- so it earns the same replay-and-introspect proof
+and a verdict of its own, ``canonical_divergent_verified``, written into
+``_ledger/verified-canonical-adoptions.tsv``. A fourth relation, for the fourth
+question, so no admission path can ever read a declaration written for another.
+
 Only ``equivalent`` rows may be written into
-``_ledger/verified-checksum-adoptions.tsv``, and only ``divergent_verified`` rows
-into ``_ledger/verified-divergent-adoptions.tsv`` (``--emit-adoptions``). Every
+``_ledger/verified-checksum-adoptions.tsv``, only ``divergent_verified`` rows
+into ``_ledger/verified-divergent-adoptions.tsv``, and only
+``canonical_divergent_verified`` rows into
+``_ledger/verified-canonical-adoptions.tsv`` (``--emit-adoptions``). Every
 run writes a receipt (``--receipt-out``) whose sha256 is recorded in the TSV, so
 an adoption in either file is always traceable to the run that proved it.
 
@@ -142,6 +163,7 @@ from typing import Any
 TOOL_VERSION = "2"
 TICKET = "OMN-15857"
 DIVERGENT_TICKET = "OMN-16915"
+CANONICAL_TICKET = "OMN-17139"
 # A declaration's `ticket` column is an evidence pointer, so it is validated
 # rather than accepted as free text -- an unparseable value is a dead link.
 DECLARATION_TICKET_RE = re.compile(r"^OMN-[0-9]+$")
@@ -153,6 +175,7 @@ APPLICATION_MANIFEST = LEDGER_DIR / "application-migrations.tsv"
 LEGACY_DECLARATIONS = LEDGER_DIR / "legacy-node-migrations.tsv"
 VERIFIED_ADOPTIONS = LEDGER_DIR / "verified-checksum-adoptions.tsv"
 VERIFIED_DIVERGENT_ADOPTIONS = LEDGER_DIR / "verified-divergent-adoptions.tsv"
+VERIFIED_CANONICAL_ADOPTIONS = LEDGER_DIR / "verified-canonical-adoptions.tsv"
 SKIP_MANIFEST = FORWARD_DIR.parent / "skip-manifest.yaml"
 
 CANONICAL_CHECKSUM_RE = re.compile(r"^[0-9a-f]{64}$")
@@ -175,10 +198,18 @@ VERDICT_LEGACY_ATTESTED = "legacy_attested"
 # two would let a divergent-bytes row be adopted through the sentinel path (and
 # vice versa) on a declaration that never covered it.
 VERDICT_DIVERGENT_VERIFIED = "divergent_verified"
+# OMN-17139.  Same proof again, third question.  ``divergent_verified`` answers
+# it for a row in an IMPORT source that bootstrap.sql adopts; this answers it for
+# a row in platform_catalog.schema_migrations that the RUNNER wrote and that
+# run-forward-migrations.sh gates on directly.  Distinct because the consumers
+# are distinct: a declaration proven for one table must never admit a row in the
+# other, and only this one may converge a canonical-ledger row.
+VERDICT_CANONICAL_DIVERGENT_VERIFIED = "canonical_divergent_verified"
 
 ALL_VERDICTS = (
     VERDICT_EQUIVALENT,
     VERDICT_DIVERGENT_VERIFIED,
+    VERDICT_CANONICAL_DIVERGENT_VERIFIED,
     VERDICT_DIVERGENT,
     VERDICT_UNREACHABLE,
     VERDICT_LEGACY_ATTESTED,
@@ -186,6 +217,7 @@ ALL_VERDICTS = (
 
 ADOPTABLE_VERDICTS = frozenset({VERDICT_EQUIVALENT})
 DIVERGENT_ADOPTABLE_VERDICTS = frozenset({VERDICT_DIVERGENT_VERIFIED})
+CANONICAL_ADOPTABLE_VERDICTS = frozenset({VERDICT_CANONICAL_DIVERGENT_VERIFIED})
 REFUSED_VERDICTS = frozenset({VERDICT_DIVERGENT, VERDICT_UNREACHABLE})
 
 
@@ -780,6 +812,51 @@ def discover_divergent_omnimarket_rows(
     return divergent
 
 
+CANONICAL_ROWS_SQL = """
+SELECT version, checksum
+FROM platform_catalog.schema_migrations
+WHERE checksum_kind = 'content_sha256'
+  AND checksum ~ '^[0-9a-f]{64}$'
+  AND version LIKE 'node:%'
+ORDER BY version;
+"""
+
+
+def discover_divergent_canonical_rows(
+    client: PsqlClient, database: str, manifest: dict[str, dict[str, str]]
+) -> list[tuple[str, str, str]]:
+    """Canonical-ledger rows whose recorded content hash is not the manifest's.
+
+    OMN-17139.  Neither discovery above can see these: both read an import
+    source, and this table is the runner's own ledger.  A row here was written
+    by ``run-forward-migrations.sh`` at the moment it applied the file, so a
+    disagreement means the file was edited in place afterwards -- the failure
+    that makes the lane un-deployable until the bytes are reverted or a proof is
+    declared.
+
+    A row is returned only when it is well-formed, resolves to a manifest row,
+    and disagrees with that row's checksum.  Rows that agree are what the runner
+    already skips and are not this tool's business.
+    """
+    present = client.scalar(
+        database, "SELECT to_regclass('platform_catalog.schema_migrations');"
+    )
+    if present == "":
+        return []
+
+    divergent: list[tuple[str, str, str]] = []
+    for version, checksum in client.rows(database, CANONICAL_ROWS_SQL):
+        declared = manifest.get(version)
+        if declared is None:
+            # bootstrap.sql raises 'unknown migration stream/domain' for these.
+            # A manifest gap is not a checksum question and no equivalence proof
+            # could answer it.
+            continue
+        if checksum != declared["checksum"]:
+            divergent.append((version, checksum, "canonical"))
+    return divergent
+
+
 def verify_row(
     *,
     version: str,
@@ -877,7 +954,10 @@ def verify_row(
         f"all {len(surface)} object(s) declared by {target.name} exist in {database} "
         "with identical columns, constraints, indexes and definitions"
     )
-    if success_verdict == VERDICT_DIVERGENT_VERIFIED:
+    if success_verdict in (
+        VERDICT_DIVERGENT_VERIFIED,
+        VERDICT_CANONICAL_DIVERGENT_VERIFIED,
+    ):
         verdict.reason += (
             f"; the ledger's content hash {source_checksum[:12]}... names an earlier "
             f"revision of this file, but that revision's schema is indistinguishable "
@@ -920,6 +1000,17 @@ def load_divergent_adoptions() -> dict[str, dict[str, str]]:
 
 def write_divergent_adoptions(adoptions: dict[str, dict[str, str]]) -> None:
     _write_adoption_tsv(VERIFIED_DIVERGENT_ADOPTIONS, adoptions)
+
+
+def load_canonical_adoptions() -> dict[str, dict[str, str]]:
+    adoptions: dict[str, dict[str, str]] = {}
+    for row in _read_tsv(VERIFIED_CANONICAL_ADOPTIONS):
+        adoptions[row[0]] = dict(zip(ADOPTION_COLUMNS, row, strict=True))
+    return adoptions
+
+
+def write_canonical_adoptions(adoptions: dict[str, dict[str, str]]) -> None:
+    _write_adoption_tsv(VERIFIED_CANONICAL_ADOPTIONS, adoptions)
 
 
 def _write_adoption_tsv(path: Path, adoptions: dict[str, dict[str, str]]) -> None:
@@ -1079,23 +1170,39 @@ def main(argv: Sequence[str] | None = None) -> int:
                     divergent_rows = discover_divergent_omnimarket_rows(
                         live, database, manifest
                     )
+                    canonical_rows = discover_divergent_canonical_rows(
+                        live, database, manifest
+                    )
                     live_version = live.scalar(database, "SHOW server_version")
                 except VerificationError as exc:
                     print(f"[verify-adoption] FATAL: {exc}", file=sys.stderr)
                     return 2
                 print(
                     f"[verify-adoption] {database}: {len(rows)} non-canonical row(s), "
-                    f"{len(divergent_rows)} divergent omnimarket row(s); "
+                    f"{len(divergent_rows)} divergent omnimarket row(s), "
+                    f"{len(canonical_rows)} divergent canonical-ledger row(s); "
                     f"live server_version={live_version} scratch={scratch_version}",
                     file=sys.stderr,
                 )
-                targets = [
-                    (version, checksum, source_set, VERDICT_EQUIVALENT)
-                    for version, checksum, source_set in rows
-                ] + [
-                    (version, checksum, source_set, VERDICT_DIVERGENT_VERIFIED)
-                    for version, checksum, source_set in divergent_rows
-                ]
+                targets = (
+                    [
+                        (version, checksum, source_set, VERDICT_EQUIVALENT)
+                        for version, checksum, source_set in rows
+                    ]
+                    + [
+                        (version, checksum, source_set, VERDICT_DIVERGENT_VERIFIED)
+                        for version, checksum, source_set in divergent_rows
+                    ]
+                    + [
+                        (
+                            version,
+                            checksum,
+                            source_set,
+                            VERDICT_CANONICAL_DIVERGENT_VERIFIED,
+                        )
+                        for version, checksum, source_set in canonical_rows
+                    ]
+                )
                 for version, checksum, source_set, success_verdict in targets:
                     verdict = verify_row(
                         version=version,
@@ -1222,6 +1329,47 @@ def main(argv: Sequence[str] | None = None) -> int:
             f"[verify-adoption] wrote {divergent_emitted} divergent adoption "
             f"declaration(s) to "
             f"{VERIFIED_DIVERGENT_ADOPTIONS.relative_to(REPO_ROOT)}",
+            file=sys.stderr,
+        )
+
+        # OMN-17139: canonical-ledger adoptions land in the third relation, for
+        # the same reason the second one exists.  This is the only file
+        # run-forward-migrations.sh consults, and it is consulted for exactly
+        # one question -- "may this lane's recorded revision be converged to the
+        # file on disk" -- which neither of the import-side declarations above
+        # ever answered.
+        canonical_adoptions = load_canonical_adoptions()
+        canonical_emitted = 0
+        for verdict in verdicts:
+            if verdict.verdict not in CANONICAL_ADOPTABLE_VERDICTS:
+                continue
+            if not CANONICAL_CHECKSUM_RE.match(verdict.manifest_checksum):
+                print(
+                    f"[verify-adoption] {verdict.version}: verified but not "
+                    "adoptable -- no application-manifest row to gate on",
+                    file=sys.stderr,
+                )
+                continue
+            canonical_adoptions[verdict.version] = {
+                "version": verdict.version,
+                "source_checksum": verdict.source_checksum,
+                "manifest_checksum": verdict.manifest_checksum,
+                # Same reason as both loops above.
+                "ticket": declaration_tickets.get(
+                    verdict.version,
+                    canonical_adoptions.get(verdict.version, {}).get(
+                        "ticket", CANONICAL_TICKET
+                    ),
+                ),
+                "receipt_sha256": receipt_sha,
+                "verified_at": verified_at,
+            }
+            canonical_emitted += 1
+        write_canonical_adoptions(canonical_adoptions)
+        print(
+            f"[verify-adoption] wrote {canonical_emitted} canonical adoption "
+            f"declaration(s) to "
+            f"{VERIFIED_CANONICAL_ADOPTIONS.relative_to(REPO_ROOT)}",
             file=sys.stderr,
         )
 

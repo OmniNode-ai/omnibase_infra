@@ -1,0 +1,19 @@
+{
+  "generated_at": "2026-08-30T13:00:58.739245+00:00",
+  "lane": "dev",
+  "proof": {
+    "artifact_path": "nodes/node_projection_work_events/0001_create_work_events.sql",
+    "current_normalized_sha256": "d1b58de4b8b997f5a910a0cec18d83ef64eab2665399c7a72c99a43eb7a111db",
+    "manifest_checksum": "4fafa8dab6db54fd153db0089e64d030986a26e69fed3a4761363b4336347cee",
+    "reason": "revision 2a637399d and the working tree differ only in SQL comments and whitespace: both normalise to d1b58de4b8b997f5a910a0cec18d83ef64eab2665399c7a72c99a43eb7a111db, so the two revisions are the same program and cannot produce different schemas",
+    "recorded_blob": "2b32d798cfd719f6a105cb2313dad24d27fcd747",
+    "recorded_checksum": "cba8013e54d5b8b663a50858cb88911b39a503f9896a9d5a138fe51eec8b6664",
+    "recorded_commit": "2a637399d9869b7779c86a712dbd674595793088",
+    "recorded_normalized_sha256": "d1b58de4b8b997f5a910a0cec18d83ef64eab2665399c7a72c99a43eb7a111db",
+    "verdict": "comment_only_equivalent",
+    "version": "node:node_projection_work_events:0001_create_work_events.sql"
+  },
+  "ticket": "OMN-17139",
+  "tool": "prove_migration_revision_equivalence.py",
+  "tool_version": "1"
+}

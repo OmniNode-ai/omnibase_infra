@@ -143,6 +143,25 @@ class VerifiedCrossSourceAdoption:
 
 
 @dataclass(frozen=True, slots=True)
+class VerifiedCanonicalAdoption:
+    """OMN-17139: an adoption for a row the RUNNER recorded, not one it imported.
+
+    Same six columns as the two import-side adoption relations, and deliberately
+    a distinct type in a distinct file: this is the only declaration
+    ``run-forward-migrations.sh`` consults, and it answers a question the others
+    never asked -- may the checksum recorded in
+    ``platform_catalog.schema_migrations`` be converged to the file on disk.
+    """
+
+    version: str
+    source_checksum: str
+    manifest_checksum: str
+    ticket: str
+    receipt_sha256: str
+    verified_at: str
+
+
+@dataclass(frozen=True, slots=True)
 class CloudAlias:
     migration_name: str
     runner_version: str
@@ -157,6 +176,7 @@ class ValidationResult:
     verified_divergent_adoptions: tuple[VerifiedDivergentAdoption, ...]
     verified_cross_source_adoptions: tuple[VerifiedCrossSourceAdoption, ...]
     cloud_aliases: tuple[CloudAlias, ...]
+    verified_canonical_adoptions: tuple[VerifiedCanonicalAdoption, ...] = ()
 
 
 def _read_tsv(
@@ -219,6 +239,7 @@ def validate_manifests(
     verified_cross_source_adoption_path: Path,
     cloud_alias_path: Path,
     *,
+    verified_canonical_adoption_path: Path | None = None,
     require_complete: bool = False,
 ) -> ValidationResult:
     """Parse and validate all application migration declarations."""
@@ -229,7 +250,12 @@ def validate_manifests(
     verified_adoptions: list[VerifiedChecksumAdoption] = []
     verified_divergent_adoptions: list[VerifiedDivergentAdoption] = []
     verified_cross_source_adoptions: list[VerifiedCrossSourceAdoption] = []
+    verified_canonical_adoptions: list[VerifiedCanonicalAdoption] = []
     aliases: list[CloudAlias] = []
+    if verified_canonical_adoption_path is None:
+        verified_canonical_adoption_path = (
+            declaration_path.parent / "verified-canonical-adoptions.tsv"
+        )
 
     for line_number, fields in _read_tsv(declaration_path, 6):
         declaration = MigrationDeclaration(*fields)
@@ -581,6 +607,71 @@ def validate_manifests(
                 "the same row."
             )
 
+    # OMN-17139: canonical-ledger adoptions.  The file is optional -- absent
+    # means "no version has ever been admitted here", which is the fail-closed
+    # default the runner already applies -- but every row present is held to the
+    # same three-way agreement as the import-side relations.
+    if verified_canonical_adoption_path.is_file():
+        for line_number, fields in _read_tsv(
+            verified_canonical_adoption_path, 6, allow_empty=True
+        ):
+            canonical = VerifiedCanonicalAdoption(*fields)
+            declared = declared_by_version.get(canonical.version)
+            if declared is None:
+                raise ManifestError(
+                    f"{verified_canonical_adoption_path}:{line_number}: canonical "
+                    f"adoption for {canonical.version!r} has no active migration "
+                    "declaration; an adoption can only restate a checksum the "
+                    "manifest already owns"
+                )
+            if _SHA256.fullmatch(canonical.source_checksum) is None:
+                raise ManifestError(
+                    f"{verified_canonical_adoption_path}:{line_number}: "
+                    f"{canonical.version!r} carries source checksum "
+                    f"{canonical.source_checksum!r}, which is not a 64-hex content "
+                    "hash. The canonical ledger only ever records content hashes; "
+                    "a sentinel there is a different defect and has no admission "
+                    "path here."
+                )
+            if _SHA256.fullmatch(canonical.receipt_sha256) is None:
+                raise ManifestError(
+                    f"{verified_canonical_adoption_path}:{line_number}: malformed "
+                    f"receipt sha256 {canonical.receipt_sha256!r}"
+                )
+            if canonical.manifest_checksum != declared.checksum:
+                raise ManifestError(
+                    f"{verified_canonical_adoption_path}:{line_number}: canonical "
+                    f"adoption for {canonical.version!r} was proven against content "
+                    f"{canonical.manifest_checksum!r} but the manifest now declares "
+                    f"{declared.checksum!r}. The migration file changed after the "
+                    "proof, so the proof no longer covers it -- re-prove it and "
+                    "commit the new receipt."
+                )
+            if canonical.source_checksum == canonical.manifest_checksum:
+                raise ManifestError(
+                    f"{verified_canonical_adoption_path}:{line_number}: "
+                    f"{canonical.version!r} declares a source checksum identical to "
+                    "the manifest checksum, so nothing diverges and the runner "
+                    "never reaches an adoption"
+                )
+            if _TICKET.fullmatch(canonical.ticket) is None:
+                raise ManifestError(
+                    f"{verified_canonical_adoption_path}:{line_number}: invalid "
+                    f"adoption ticket {canonical.ticket!r}"
+                )
+            if _VERIFIED_AT.fullmatch(canonical.verified_at) is None:
+                raise ManifestError(
+                    f"{verified_canonical_adoption_path}:{line_number}: malformed "
+                    f"verified_at {canonical.verified_at!r}; expected YYYY-MM-DD"
+                )
+            verified_canonical_adoptions.append(canonical)
+
+        _reject_duplicates(
+            [item.version for item in verified_canonical_adoptions],
+            f"{verified_canonical_adoption_path}: duplicate canonical adoption "
+            "version(s)",
+        )
+
     for line_number, fields in _read_tsv(cloud_alias_path, 2):
         alias = CloudAlias(*fields)
         if (
@@ -656,6 +747,7 @@ def validate_manifests(
         tuple(verified_divergent_adoptions),
         tuple(verified_cross_source_adoptions),
         tuple(aliases),
+        tuple(verified_canonical_adoptions),
     )
 
 
@@ -707,6 +799,11 @@ def main(argv: list[str] | None = None) -> int:
         default=default_ledger / "verified-cross-source-adoptions.tsv",
     )
     parser.add_argument(
+        "--verified-canonical-adoptions",
+        type=Path,
+        default=default_ledger / "verified-canonical-adoptions.tsv",
+    )
+    parser.add_argument(
         "--cloud-aliases",
         type=Path,
         default=default_ledger / "cloud-migration-aliases.tsv",
@@ -728,6 +825,7 @@ def main(argv: list[str] | None = None) -> int:
             args.verified_divergent_adoptions,
             args.verified_cross_source_adoptions,
             args.cloud_aliases,
+            verified_canonical_adoption_path=args.verified_canonical_adoptions,
             require_complete=args.require_complete,
         )
     except ManifestError as exc:
@@ -742,6 +840,7 @@ def main(argv: list[str] | None = None) -> int:
         f"{len(result.verified_divergent_adoptions)} verified divergent adoptions, "
         f"{len(result.verified_cross_source_adoptions)} cross-source "
         "reconciliations, "
+        f"{len(result.verified_canonical_adoptions)} canonical adoptions, "
         f"{len(result.cloud_aliases)} cloud aliases)."
     )
     return 0

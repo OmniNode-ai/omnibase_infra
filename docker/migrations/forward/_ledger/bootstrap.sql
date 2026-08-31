@@ -336,6 +336,62 @@ BEGIN
     RAISE EXCEPTION 'unknown migration stream/domain declaration';
   END IF;
 
+  -- OMN-17139: CANONICAL-LEDGER ADOPTION.
+  --
+  -- The RAISE below is the gate that makes an in-place rewrite of an applied
+  -- migration permanent: this ledger row was written by run-forward-migrations.sh
+  -- itself as it applied the file, so a disagreement means the bytes changed
+  -- underneath an application that already happened.  Correct, and fail-closed --
+  -- but until now there was no way OUT of it except reverting the file, because
+  -- all three adoption relations above are consulted only by the IMPORT blocks
+  -- further down ($migration_id_import$, $omnimarket_import$) and answer
+  -- questions about public.schema_migrations / public.omnimarket_schema_migrations.
+  -- None of them can be read here.  On 2026-08-30 that left the .201 dev lane
+  -- un-deployable at dev tip with no sanctioned repair (omnibase_infra#3019).
+  --
+  -- So the same rule as OMN-15857 and OMN-16915, in a fourth relation of its own:
+  -- a committed, per-version declaration backed by a mechanical proof that the
+  -- revision this lane recorded and the file on disk produce the same schema.
+  -- The proof is EITHER the replay-and-introspect engine
+  -- (scripts/migrations/verify_migration_checksum_adoption.py) OR, for a rewrite
+  -- that touches no executable SQL, the stronger textual proof in
+  -- scripts/migrations/prove_migration_revision_equivalence.py -- which compares
+  -- both revisions with every comment removed and admits only byte-identical
+  -- programs.  Either way the row carries the sha256 of the receipt that earned it.
+  --
+  -- Three things must agree, exactly as in the two blocks above, so a stale
+  -- declaration cannot outlive the fact it attested to:
+  --   1. the version is declared,
+  --   2. the declared source_checksum equals the checksum ACTUALLY recorded on
+  --      this lane (a declaration covers one revision, not any revision),
+  --   3. the declared manifest_checksum equals the manifest checksum the proof
+  --      ran against (editing the file after the proof re-opens the question).
+  --
+  -- The recorded checksum converges to the MANIFEST hash -- the proof says the
+  -- live schema is what the checked-in bytes produce, so that is the honest
+  -- content claim -- and the raw recorded hash survives verbatim in provenance
+  -- next to the ticket and receipt.  Adoption records the question and its
+  -- answer; it does not erase the question.  Re-running is a no-op: after the
+  -- UPDATE the checksums agree, so neither this block nor the RAISE fires again.
+  UPDATE platform_catalog.schema_migrations ledger
+     SET checksum = manifest.checksum,
+         provenance = 'verified-canonical-adoption:' || current_database()
+                      || ':platform_catalog.schema_migrations:' || ledger.version
+                      || ':raw-checksum=' || ledger.checksum
+                      || ':ticket=' || adoption.ticket
+                      || ':receipt=' || adoption.receipt_sha256
+    FROM onex_application_migration_manifest manifest
+    JOIN onex_verified_canonical_adoptions adoption
+      ON adoption.version = manifest.version
+   WHERE manifest.migration_stream = ledger.migration_stream
+     AND manifest.owner = ledger.owner
+     AND manifest.domain = ledger.domain
+     AND manifest.version = ledger.version
+     AND ledger.checksum_kind = 'content_sha256'
+     AND ledger.checksum <> manifest.checksum
+     AND adoption.source_checksum = ledger.checksum
+     AND adoption.manifest_checksum = manifest.checksum;
+
   IF EXISTS (
     SELECT 1
     FROM platform_catalog.schema_migrations ledger
