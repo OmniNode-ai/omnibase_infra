@@ -867,6 +867,85 @@ def test_no_slot_cannot_be_used_to_run_an_unbounded_suite(tmp_path: Path) -> Non
 
 
 # ---------------------------------------------------------------------------
+# The attached path must not remain a working way to reproduce the defect.
+# ---------------------------------------------------------------------------
+
+
+def _launch_attached(
+    bin_dir: Path, worktree: Path, *payload: str
+) -> subprocess.CompletedProcess[str]:
+    env = {**os.environ, "PATH": f"{bin_dir}:{os.environ['PATH']}"}
+    return subprocess.run(
+        [str(LAUNCHER), str(worktree), *payload],
+        capture_output=True,
+        text=True,
+        env=env,
+        timeout=120,
+        check=False,
+    )
+
+
+@pytest.mark.parametrize(
+    "payload",
+    [
+        pytest.param(["uv", "run", "pytest", "tests/unit", "-q"], id="pytest"),
+        pytest.param(
+            ["bash", "scripts/hooks/prepush_smart_tests.sh"], id="prepush-hook"
+        ),
+        pytest.param(["git", "push", "-u", "origin", "HEAD"], id="git-push"),
+    ],
+)
+def test_attached_mode_refuses_the_heavy_shapes_that_wedge(
+    tmp_path: Path, payload: list[str]
+) -> None:
+    """Attached stdout IS the exec pipe that wedged on 2026-08-31 (OMN-17317).
+
+    The launcher documents "attached is for fast probes only". A comment is not
+    a mechanism (repo rule 5): without this refusal the sanctioned entry point
+    stays a working way to reproduce the exact defect it exists to remove, and
+    the operator who reaches for it gets the wedge rather than a diagnosis.
+    """
+    worktree = tmp_path / "wt"
+    worktree.mkdir()
+    bin_dir = _install_stub_transport(tmp_path, cgroup_line=_IDLE_CGROUP)
+    result = _launch_attached(bin_dir, worktree, *payload)
+    assert result.returncode == 2, (
+        f"attached heavy payload {payload} was not refused: {result.stdout}"
+    )
+    assert "--detached" in result.stderr, (
+        "the refusal must name the flag that makes the run safe, not merely refuse"
+    )
+
+
+def test_attached_mode_still_allows_a_genuine_fast_probe(tmp_path: Path) -> None:
+    """The refusal must be narrow: short interactive probes are why attached exists.
+
+    A guard that also blocked `git rev-parse` would push operators back onto raw
+    `docker exec`, which is the un-governed path this entry point replaces.
+    """
+    worktree = tmp_path / "wt"
+    worktree.mkdir()
+    bin_dir = _install_stub_transport(tmp_path, cgroup_line=_IDLE_CGROUP)
+    result = _launch_attached(bin_dir, worktree, "git", "rev-parse", "HEAD")
+    assert result.returncode == 0, (
+        f"a fast attached probe must still run: {result.stderr}"
+    )
+
+
+def test_the_word_push_alone_does_not_trip_the_git_push_refusal(
+    tmp_path: Path,
+) -> None:
+    """`push` is refused only as `git push` — an over-broad matcher is its own defect."""
+    worktree = tmp_path / "wt"
+    worktree.mkdir()
+    bin_dir = _install_stub_transport(tmp_path, cgroup_line=_IDLE_CGROUP)
+    result = _launch_attached(bin_dir, worktree, "echo", "push")
+    assert result.returncode == 0, (
+        f"'echo push' is not a git push and must not be refused: {result.stderr}"
+    )
+
+
+# ---------------------------------------------------------------------------
 # Policy: the shape that caused the incident must not come back.
 # ---------------------------------------------------------------------------
 

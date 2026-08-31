@@ -301,6 +301,33 @@ if [ "${DETACHED}" -eq 0 ]; then
   [ -z "${TIMEOUT_SECONDS}" ] || die "--timeout only applies to a detached run" \
     "add --detached; an attached run is bounded by the operator's own terminal, which is exactly the coupling OMN-17317 removes"
   [ "${DO_WAIT}" -eq 0 ] || die "--wait only applies to a detached run" "add --detached, or drop --wait"
+
+  # The attached path is the wedge shape itself: its stdout IS the `docker
+  # exec` pipe whose only reader is the containerd shim, so a heavy payload
+  # under a client that detaches reproduces OMN-17317 exactly — through this
+  # script rather than around it. Keeping "attached is for fast probes only"
+  # as a COMMENT would leave the sanctioned entry point as a working way to
+  # reproduce the defect it exists to remove (repo rule 5: enforcement, not
+  # detection). Matched on the payload's own argv, so it cannot be argued
+  # past; the remediation names the exact flags that make the run safe.
+  for _arg in "$@"; do
+    case "${_arg}" in
+      pytest | */pytest | prepush_smart_tests.sh | */prepush_smart_tests.sh)
+        die "refusing to run '${_arg}' in ATTACHED mode — this is the OMN-17317 wedge shape" \
+          "heavy work must be detached so its liveness does not depend on this terminal: re-run with '--detached --timeout <sec>' and poll the receipt with '--status <run-dir>'. For a genuinely short probe use '--detached --no-slot --timeout 600'"
+        ;;
+      push)
+        # Only when it is `git push`, never a stray argument that happens to
+        # be the word "push".
+        case " $* " in
+          *" git push "*)
+            die "refusing to run 'git push' in ATTACHED mode — the pre-push hook's buffered output is what wedges (OMN-17317)" \
+              "re-run with '--detached --timeout <sec>' and poll the receipt with '--status <run-dir>'"
+            ;;
+        esac
+        ;;
+    esac
+  done
 fi
 
 TIMEOUT_SECONDS="${TIMEOUT_SECONDS:-${DEFAULT_TIMEOUT_SECONDS}}"
