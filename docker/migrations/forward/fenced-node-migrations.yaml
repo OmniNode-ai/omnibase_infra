@@ -270,8 +270,9 @@
 #          not by inspecting pod status.
 #       2. Write-time UUID stamping (OMN-16804) is LIVE, so no new slug is
 #          ever written to the column after the conversion.
-#       3. The operator releases 0033 — and ONLY 0033 — from this baseline.
-#          0031 and 0032 stay fenced permanently: both are retired, and
+#       3. The operator releases 0034 — and ONLY 0034 — from this baseline
+#          (OMN-17316 superseded 0033; see the 0034 entry below). 0031, 0032
+#          and 0033 stay fenced permanently: all three are retired, and
 #          leaving a retired id fenced is what keeps it retired. Steps 1 and 2
 #          are independent and may proceed in parallel; step 3 requires both.
 #     Recorded identically on OMN-16930, OMN-16804 and OMN-16493.
@@ -301,6 +302,39 @@
 #     It is fenced on ARRIVAL, on exactly the same interlock as 0032: this file
 #     is the conversion, and the mirror must be caught up before it can resolve
 #     anything. Same three-step un-gate above.
+#
+#   delegation 0034 — OMN-17316. THE OPERATIVE CONVERSION; 0033 is superseded
+#     in turn, for a defect in the very guard that was supposed to make this
+#     chain's failures legible. 0033 tested `pg_has_role(current_user, v_owner,
+#     'USAGE')` and then, two statements later, performed the role switch with
+#     `set_config('role', v_owner::text, true)` — which is SET LOCAL ROLE.
+#     Since PostgreSQL 16, INHERIT and SET are INDEPENDENT membership options
+#     (`GRANT <owner> TO <identity> WITH INHERIT TRUE, SET FALSE`): USAGE tests
+#     INHERITED PRIVILEGE, SET tests whether SET ROLE is PERMITTED. Measured on
+#     postgres:16-alpine, 2026-08-31 — under SET FALSE the predicates read
+#     USAGE=t, SET=f, MEMBER=t, and the switch raises a bare `permission denied
+#     to set role "<owner>"`. So the guard PASSED and the migration aborted
+#     opaquely just past it: the exact failure class the guard exists to
+#     replace, emitted from inside the guard's own blind spot.
+#
+#     0034 tests BOTH predicates before the switch, each naming which one
+#     failed and what it blocks — USAGE carries the RLS-blindness rationale
+#     (OMN-16493), SET is what the role switch itself needs. Neither
+#     substitutes for the other and MEMBER substitutes for neither. Everything
+#     below the guard is 0033's body carried over VERBATIM. RED/GREEN proven by
+#     execution in
+#     tests/integration/migrations/test_omn17316_role_set_membership_guard.py,
+#     against the real vendored bytes through the deploy-time `psql -v
+#     ON_ERROR_STOP=1 -f` invocation.
+#
+#     Severity is LATENT, not live: the PG16 default GRANT confers both
+#     options, so no lane carries a SET FALSE membership today and CI is green.
+#     It is repaired now because 0033 is applied on no lane and repairing it
+#     after the OMN-16804 staging repin would cost a further supersession.
+#
+#     Fenced on ARRIVAL, same interlock, same three-step un-gate above — except
+#     that step 3 now releases 0034, and ONLY 0034. 0031, 0032 and 0033 stay
+#     fenced permanently as retired ids.
 #
 #   tenant_registry 0000 — deliberately NOT fenced, and this absence is a
 #     decision rather than an oversight. It creates tenant_registry_mirror and
@@ -338,3 +372,5 @@ fenced_node_migrations:
     ticket: "OMN-16930"
   - id: "node:node_projection_delegation:0033_delegation_events_uuid_via_registry_single_transaction.sql"
     ticket: "OMN-17288"
+  - id: "node:node_projection_delegation:0034_delegation_events_uuid_via_registry_role_set_guard.sql"
+    ticket: "OMN-17316"

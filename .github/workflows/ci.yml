@@ -3848,6 +3848,35 @@ jobs:
             tests/integration/migrations/test_node_migration_shape_drift_omn15376.py \
             -v --tb=short -p no:randomly
 
+      # OMN-17316: the role-membership guard proof. Migration 0033 guarded a
+      # SET ROLE with pg_has_role(..., 'USAGE'), and since PostgreSQL 16
+      # INHERIT and SET are INDEPENDENT membership options -- so a membership
+      # granted `WITH INHERIT TRUE, SET FALSE` passed the guard and then
+      # aborted two statements later on a bare `permission denied to set
+      # role`, which is the opaque failure the guard exists to replace.
+      # Latent, not live: the PG16 default GRANT confers both options, so no
+      # lane carries such a membership and NOTHING ELSE IN CI CAN SEE THIS --
+      # the defect shipped green. This step is the surface that can, and it
+      # needs a real Postgres because pg_has_role's behaviour under split
+      # INHERIT/SET membership is a property of the server, not of this repo.
+      - name: Migration role-membership guard proof (RED/GREEN)
+        if: steps.ensure_psql.outputs.available == 'true'
+        env:
+          OMNIBASE_INFRA_DB_URL: postgresql://postgres:test_password@${{ steps.postgres_host.outputs.host }}:${{ job.services.postgres.ports['5432'] }}/omnibase_infra
+          # With a Postgres in hand a SKIP is a vacuous green, so every skip
+          # path in the suite becomes a hard failure instead.
+          OMN17316_REQUIRE_PG: "1"
+          # Same OMN-16412 opt-in as the step above, for the same reason: on
+          # this fleet's self-hosted runners the job executes inside a
+          # container, so the resolved service host is the Docker bridge
+          # gateway rather than 127.0.0.1 -- that is this job's OWN
+          # freshly-provisioned services.postgres, not a stray ambient var.
+          OMN17316_ALLOW_REMOTE_PG: "1"
+        run: |
+          uv run pytest \
+            tests/integration/migrations/test_omn17316_role_set_membership_guard.py \
+            -v --tb=short -p no:randomly
+
       - name: Assert manifest tables exist
         env:
           POSTGRES_HOST: ${{ steps.postgres_host.outputs.host }}

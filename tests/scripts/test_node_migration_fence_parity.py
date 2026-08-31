@@ -350,15 +350,28 @@ FENCED_HOOK_EVENT_CAPTURE_IDS = (
 # tests/test_omn17288_migration_policy_atomicity.py. 0033 moves the recreate
 # and the GRANT inside the guarded block and lets the already-uuid branch fall
 # through to them. It is fenced on ARRIVAL for the same reason 0032 was -- it
-# is the conversion, and it can abort. 0031 and 0032 both stay in this tuple
-# permanently: they are RETIRED, not released, and when the operator un-gates
-# it is 0033 and only 0033.
+# is the conversion, and it can abort.
+# OMN-17316 superseded 0033 in turn, making 0034 the FOURTH id here -- and the
+# defect was in the guard that was supposed to make this chain legible. 0033
+# tested `pg_has_role(..., 'USAGE')` and then performed the role switch with
+# `set_config('role', ...)`. Since PostgreSQL 16, INHERIT and SET are
+# INDEPENDENT membership options, so a membership granted
+# `WITH INHERIT TRUE, SET FALSE` passed the guard and aborted just past it on a
+# bare `permission denied to set role` -- the opaque failure the guard exists
+# to replace, from inside the guard's own blind spot. 0034 tests BOTH
+# predicates before the switch and carries 0033's body verbatim otherwise;
+# proven by execution in
+# tests/integration/migrations/test_omn17316_role_set_membership_guard.py.
+# 0031, 0032 and 0033 all stay in this tuple permanently: they are RETIRED, not
+# released, and when the operator un-gates it is 0034 and only 0034.
 FENCED_DELEGATION_UUID_CONVERSION_IDS = (
     "node:node_projection_delegation:0031_delegation_events_tenant_id_to_uuid.sql",
     "node:node_projection_delegation:"
     "0032_delegation_events_tenant_id_uuid_via_registry.sql",
     "node:node_projection_delegation:"
     "0033_delegation_events_uuid_via_registry_single_transaction.sql",
+    "node:node_projection_delegation:"
+    "0034_delegation_events_uuid_via_registry_role_set_guard.sql",
 )
 # Pinned expectation for the manifest content (OMN-15349): the baseline fence,
 # exact and in order. A manifest edit that moves this must update the pin in
