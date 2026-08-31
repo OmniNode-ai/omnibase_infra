@@ -423,6 +423,25 @@ repos:
         pass_filenames: false
         always_run: true
         stages: [pre-commit]
+      # OMN-17298: a migration that turns ROW LEVEL SECURITY on for a relation
+      # must leave a policy admitting somebody, and must not drop one inside a
+      # DO block while recreating it after the block commits. The forward
+      # runner is `psql -v ON_ERROR_STOP=1 -f <file>` with NO
+      # --single-transaction, so `END$$` COMMITS and that gap is a real window
+      # in which the relation enforces RLS with zero policies -- every row
+      # denied to every non-owner principal, surfacing as SQLSTATE 42501 which
+      # looks like a missing GRANT. Third occurrence of the class; the ratchet
+      # found the live one (node_canary_score_reducer 0003, applied on the .201
+      # dev lane 2026-08-17) that review had missed twice. always_run because
+      # the exemption predicate reads the supersession ledger, not the staged
+      # file list.
+      - id: onex-check-migration-rls-policy-atomicity
+        name: ONEX Migration RLS Policy Atomicity
+        entry: python3 scripts/validation/check_migration_rls_policy_atomicity.py
+        language: system
+        pass_filenames: false
+        always_run: true
+        stages: [pre-commit]
       # OMN-14086: wire run_duplication_sweep.py (D1 Drizzle table dupes /
       # D2 omniclaude-vs-occ topic-producer conflicts) as an ENFORCED gate —
       # it had a full pytest fixture suite but zero CI/pre-commit caller,

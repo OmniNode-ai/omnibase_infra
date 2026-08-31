@@ -300,7 +300,20 @@ def test_checked_in_manifest_is_exact_and_all_blockers_are_explicit() -> None:
     # platform_catalog.schema_migrations, 0032 is applied on NO lane -- dev
     # holds 0030+0031, stability-test holds 0030, prod and judge carry no
     # platform_catalog ledger at all.
-    assert len(result.declarations) == 125
+    #
+    # OMN-17298 moves this count 125 -> 126 by ADDING one declaration:
+    # nodes/node_canary_score_reducer/0004_capability_scores_policy_atomic_restatement.sql.
+    # 0003 is the THIRD instance of the 0032 shape -- it drops tenant_isolation
+    # inside its DO block (line 127) and recreates it after `END$$` (163-164),
+    # so `END$$` commits with the relation enforcing row-level security and
+    # zero policies. It is also the FIRST of the three that actually ran:
+    # applied on the .201 dev lane 2026-08-17 02:30:59.157734+00. 0003's bytes
+    # are NOT edited here (it is applied with a recorded content_sha256, so an
+    # in-place edit would raise 'conflicting migration checksum in canonical
+    # node history'); 0004 restates the policy and the OMN-14894 GRANT inside
+    # one block. It was found by scripts/validation/
+    # check_migration_rls_policy_atomicity.py on its first run, not by review.
+    assert len(result.declarations) == 126
     assert result.blocked == ()
     assert len(result.legacy_node_declarations) == 2
     assert len(result.cloud_aliases) == 30
