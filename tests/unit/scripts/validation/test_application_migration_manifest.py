@@ -337,7 +337,31 @@ def test_checked_in_manifest_is_exact_and_all_blockers_are_explicit() -> None:
     # satisfied here by 0034 being an ADD next to an untouched 0033. What the
     # lane probe and the gate jointly settled is that the repair could not be
     # an in-place edit to 0033.
-    assert len(result.declarations) == 127
+    #
+    # OMN-15533 moves this count 127 -> 130 by ADDING three declarations under
+    # nodes/node_projection_savings/, all domain `tenant` to match 080-084 on
+    # the same relation (savings_estimates carries tenant_id + RLS since
+    # 080/081):
+    #   085_savings_estimates_provenance.sql adds savings_method /
+    #     usage_source / pricing_manifest_version -- nullable, no DEFAULT, and
+    #     CHECK-constrained NOT VALID to the consumer contract's vocabulary. A
+    #     DEFAULT would manufacture a provenance claim the source never made,
+    #     so NULL is retained as "the source stated nothing" and the view reads
+    #     it back as a refusal.
+    #   086_validate_savings_estimates_provenance_constraints.sql VALIDATEs
+    #     those constraints outside the definition transaction -- the same
+    #     split 084 already makes for the token-count constraints added in 082.
+    #   087_savings_views_read_persisted_provenance.sql CREATE OR REPLACEs both
+    #     delegation-savings views so they read the persisted columns instead
+    #     of inferring a provenance from token counts.
+    #
+    # 083's declaration does NOT move and its bytes are untouched. This is the
+    # same constraint 0032/0033 hit from the other direction: 083 is applied on
+    # the .201 dev lane with a recorded content_sha256, so correcting it in
+    # place would raise 'conflicting migration checksum in canonical node
+    # history'. 087 is therefore a forward CREATE OR REPLACE rather than an
+    # edit -- which is sound here precisely because both views hold no data.
+    assert len(result.declarations) == 130
     assert result.blocked == ()
     assert len(result.legacy_node_declarations) == 2
     assert len(result.cloud_aliases) == 30
