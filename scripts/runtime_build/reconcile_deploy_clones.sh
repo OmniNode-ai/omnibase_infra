@@ -19,6 +19,17 @@
 # (naming the repo) on a dirty / diverged / bare-with-working-tree clone, and
 # VERIFIES HEAD landed on the fetched tip before reporting any repo as synced.
 #
+# movement-proof-delegated-to: scripts/runtime_build/deploy_source_ref.py
+# This wrapper runs no git command of its own, so it has no surface to read
+# back. Every fetch and fast-forward happens inside deploy_source_ref.py's
+# `reconcile` subcommand, which re-reads HEAD after the operation and compares
+# it against the fetched tip it resolved BEFORE the operation -- exit 5, "a
+# fetch succeeded but HEAD did not land on the fetched tip", is that comparison
+# failing. It is never the exit status of the command that was supposed to move
+# the clone. That distinction is the whole OMN-17307 defect class, and it is why
+# this declaration is `delegated-to` rather than a claim this file verifies
+# anything itself.
+#
 # The repo set is sourced from sibling_clone_manifest.sh -- the same single
 # source of truth ensure_runner_clones.sh and stage_workspace.sh's pin preflight
 # read -- so this can never become a third hand-maintained copy of the list
