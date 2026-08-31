@@ -162,8 +162,10 @@
 #       ERROR: column "tenant_id" of relation "delegation_events"
 #              contains null values
 #     Re-measured live 2026-08-28: 165 rows, 9 of them under 5 slugs the map
-#     does not know — and one of those, `t-1lostguy1`, is a REAL, ACTIVE,
+#     does not know — and one of those belongs to a REAL, ACTIVE,
 #     externally-owned customer provisioned 8 days after 0031 was authored.
+#     That customer's slug was quoted here verbatim until OMN-17288 removed
+#     it: this repository is PUBLIC and the identifier was a live one.
 #     The data is not null; the mapping is incomplete, and it is incomplete
 #     BY CONSTRUCTION because the writer keeps minting new slugs (OMN-16804).
 #     That is 0031's second fail-closed guard firing exactly as designed. It
@@ -268,11 +270,37 @@
 #          not by inspecting pod status.
 #       2. Write-time UUID stamping (OMN-16804) is LIVE, so no new slug is
 #          ever written to the column after the conversion.
-#       3. The operator releases BOTH ids from this baseline — 0032 because it
-#          is the conversion, 0031 because leaving a retired id fenced is what
-#          keeps it retired. Steps 1 and 2 are independent and may proceed in
-#          parallel; step 3 requires both.
+#       3. The operator releases 0033 — and ONLY 0033 — from this baseline.
+#          0031 and 0032 stay fenced permanently: both are retired, and
+#          leaving a retired id fenced is what keeps it retired. Steps 1 and 2
+#          are independent and may proceed in parallel; step 3 requires both.
 #     Recorded identically on OMN-16930, OMN-16804 and OMN-16493.
+#
+#   delegation 0033 — OMN-17288. THE OPERATIVE CONVERSION. 0032 is superseded
+#     (docker/migrations/forward/_ledger/migration-supersessions.tsv), because
+#     it placed DROP POLICY / CREATE POLICY / GRANT after its DO block, and two
+#     defects follow from that single shape:
+#
+#       (a) its documented "nothing to convert" path ABORTED — RETURN exits the
+#           DO block, not the file, so on a lane without delegation_events the
+#           trailing CREATE POLICY and GRANT still ran and raised `relation
+#           "delegation_events" does not exist`;
+#       (b) END$$ COMMITTED with tenant_isolation dropped and the policy only
+#           recreated afterwards. The runner is `psql -v ON_ERROR_STOP=1 -f`
+#           with NO --single-transaction, so that window is real: an
+#           interruption inside it leaves a FORCE-RLS table with ZERO policies,
+#           denying every application read until someone re-runs.
+#
+#     Both are proven against 0032's real bytes on a scratch Postgres in
+#     omnimarket tests/test_omn17288_migration_policy_atomicity.py — measured,
+#     not argued. 0033 moves the policy recreate and the app_dashboard GRANT
+#     inside the guarded DO block and lets the already-uuid branch fall through
+#     to them; nothing follows END$$. The identity mechanism is unchanged, and
+#     the entire OMN-16930 replay passes against it.
+#
+#     It is fenced on ARRIVAL, on exactly the same interlock as 0032: this file
+#     is the conversion, and the mirror must be caught up before it can resolve
+#     anything. Same three-step un-gate above.
 #
 #   tenant_registry 0000 — deliberately NOT fenced, and this absence is a
 #     decision rather than an oversight. It creates tenant_registry_mirror and
@@ -308,3 +336,5 @@ fenced_node_migrations:
     ticket: "OMN-16493"
   - id: "node:node_projection_delegation:0032_delegation_events_tenant_id_uuid_via_registry.sql"
     ticket: "OMN-16930"
+  - id: "node:node_projection_delegation:0033_delegation_events_uuid_via_registry_single_transaction.sql"
+    ticket: "OMN-17288"

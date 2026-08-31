@@ -57,8 +57,22 @@ STARTUP_FAILURE_RUN_SHA256 = (
 # The merge that produced no run at all: the OMN-16493 migration fence,
 # PR #2974, whose non-delivery broke the staging deploy six minutes later.
 UNDELIVERED_COMMIT = FIXTURES / "commit-7090f386f.gh-api.json.captured"
+# OMN-17288: ONE byte-range in this capture was redacted, and the pin moved with
+# it. The captured `files[].patch` quoted a live customer's tenant slug -- this
+# repository is PUBLIC -- so that slug reads `t-REDACTED-OMN17288` here.
+#
+# Stated plainly because a "captured" fixture whose value is fidelity should not
+# be edited quietly: the true bytes remain retrievable from the public commit
+# this capture is OF (GitHub API `repos/OmniNode-ai/omnibase_infra/commits/
+# 7090f386fba00b47b580c182f3fdd934225f6f53`), so nothing is lost, and redacting
+# here does not shrink that exposure -- it only stops this working tree from
+# being a second copy. What this test actually reads is `sha` and
+# `files[].filename`; neither is inside the redacted range, so the replay is
+# unaffected. The pin below still does its job for every byte from now on: it
+# was `bdb0d64575b42940f7e761aa0e5f80f34cc044d68ed7da7b6b9ad23ed926c12d` before
+# the redaction.
 UNDELIVERED_COMMIT_SHA256 = (
-    "bdb0d64575b42940f7e761aa0e5f80f34cc044d68ed7da7b6b9ad23ed926c12d"
+    "2cada0bad2ed4623b32510bb444e255ea74ab5df7f25cb103212fb38e2daeb28"
 )
 
 
