@@ -67,7 +67,6 @@ databases:
               - consumer_flow_windows
               - live_events
               - log_entries
-              - open_obligations
               - projection_watermarks
               - topic_produce_windows
               - work_events
@@ -112,6 +111,7 @@ databases:
               - session_outcomes
               - session_replay_snapshots
               - swarm_runs
+              - tenant_registry_mirror
               - traces
               - voice_sessions
             privileges: [INSERT, SELECT, UPDATE]
