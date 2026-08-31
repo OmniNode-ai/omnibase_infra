@@ -56,10 +56,26 @@ set -uo pipefail
 
 PATH=/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin
 
-OMNI_HOME="${OMNI_HOME:-/data/omninode/omni_home}"
 ALERT_ENV_FILE="${OMNINODE_ALERT_ENV_FILE:-/data/omninode/omnibase_infra/.env}"
-RECONCILER="${OMNI_HOME}/omnibase_infra/scripts/reconcile-host.sh"
 
+# OMN-17365: RECONCILER is deliberately NOT resolved here.
+#
+# The env file sourced below is `set -a`, and on `.201` it assigns OMNI_HOME.
+# Resolving the reconciler path before that assignment took the DEFAULT root
+# while the `--omni-home` argument below took the SOURCED one, so the script
+# that ran and the tree it reconciled were two different checkouts:
+#
+#   executed:    /data/omninode/omni_home/omnibase_infra/scripts/  (nothing advances this)
+#   reconciled:  /data/omninode/omnibase_infra/                    (the clone loop's target)
+#
+# That silently voids the bound this whole design rests on. The header below
+# accepts "a stale clone runs a stale reconciler" because "the reconciler's
+# first act is to advance the clones, so the next tick runs the current code" --
+# which is only true when the tree it runs from is the tree it advances. It was
+# not, so every tick re-ran the same stale code indefinitely, and a fix merged
+# to dev could never reach the host no matter how many ticks passed.
+#
+# Both values now come from the same resolved OMNI_HOME, after the sourcing.
 if [[ -r "$ALERT_ENV_FILE" ]]; then
   # xtrace is suppressed across the source and restored afterwards. Under
   # `bash -x` — which is what anyone debugging a cron job reaches for first —
@@ -77,11 +93,21 @@ if [[ -r "$ALERT_ENV_FILE" ]]; then
   unset _xtrace_was_on
 fi
 
+OMNI_HOME="${OMNI_HOME:-/data/omninode/omni_home}"
+RECONCILER="${OMNI_HOME}/omnibase_infra/scripts/reconcile-host.sh"
+
 if [[ ! -f "$RECONCILER" ]]; then
   echo "[workspace-reconcile] FATAL: no reconciler at $RECONCILER" >&2
   echo "[workspace-reconcile]   OMNI_HOME=$OMNI_HOME — is the deploy-source clone present?" >&2
   exit 3
 fi
+
+# No runtime assertion that these two agree: with the single assignment above
+# they are the same expression, so any such check would be tautological -- dead
+# code that reads like a safety net. The property is enforced statically instead,
+# by tests/scripts/test_workspace_reconcile_wrapper_omn17365.py, which parses
+# this file and fails if RECONCILER is ever assigned before the sourcing block
+# again. That is the check that can actually go red.
 
 exec env OMNI_HOME="$OMNI_HOME" bash "$RECONCILER" \
   --omni-home "$OMNI_HOME" \
