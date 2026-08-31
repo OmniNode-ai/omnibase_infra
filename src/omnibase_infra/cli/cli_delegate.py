@@ -705,6 +705,35 @@ def run_delegate(
                 "NOT the shared delegation_events projection",
                 reason,
             )
+    else:
+        # OMN-17304: an explicit --bus is tier 1 of the shared resolution
+        # authority (``auto_configure.resolve_bus_type``) — it short-circuits
+        # every other tier, so NO resolution happens on this run at all. Say
+        # that out loud. Until now every provenance line lived inside the
+        # ``bus is None`` branch above, so an explicit flag produced no record
+        # whatsoever and nothing downstream (capture file, receipt, an
+        # operator reading stderr) could tell "the configured authority chose
+        # kafka" apart from "a human typed --bus kafka and the authority was
+        # never consulted". Those are different kinds of evidence, and a
+        # lane-probe receipt that conflates them is the same class of
+        # instrument defect as OMN-17295.
+        logger.info(
+            "onex delegate: explicit --bus %s OVERRIDES the configured "
+            "transport authority — tier 1 short-circuits resolution, so no "
+            "config surface, env override, or broker probe was consulted",
+            bus,
+        )
+    if kafka_bootstrap is not None and bus == "kafka":
+        # The second, independent override: --bus names the transport,
+        # --kafka-bootstrap names the endpoint. Gated on the valid
+        # combination so the invalid one still fails loud in
+        # ``build_backend_overrides`` below rather than being announced first.
+        logger.info(
+            "onex delegate: explicit --kafka-bootstrap %s OVERRIDES the "
+            "broker address this run would otherwise resolve from the "
+            "configured authority",
+            kafka_bootstrap,
+        )
     backend_overrides = build_backend_overrides(
         bus=bus, kafka_bootstrap=kafka_bootstrap
     )

@@ -1331,3 +1331,141 @@ def test_drift_guard_fires_before_delegate_dispatch(
     assert "install-node-skill-package.sh --execute" in combined
     # The refusal must carry the escape hatch, not just the diagnosis.
     assert DRIFT_OVERRIDE_ENV in combined
+
+
+class TestExplicitOverrideProvenance:
+    """OMN-17304 AC1 — ``--bus``/``--kafka-bootstrap`` announce themselves as overrides.
+
+    Both flags are tier 1 of the shared resolution authority
+    (``auto_configure.resolve_bus_type``): when either is supplied the CLI
+    performs no resolution at all. Before this class, that decision was
+    *silent* — every provenance line in ``run_delegate`` lived inside the
+    ``if bus is None:`` branch, so an explicit ``--bus kafka`` produced no log
+    record whatsoever and nothing downstream (capture file, receipt, operator
+    reading stderr) could distinguish "the configured authority selected
+    kafka" from "a human typed --bus kafka and the authority was never
+    consulted".
+
+    That distinction is the whole point of the flags being overrides. A probe
+    result and a typed flag are different kinds of evidence, and a lane-probe
+    receipt that cannot tell them apart is the same class of instrument defect
+    as OMN-17295.
+    """
+
+    _CLI_LOGGER = "omnibase_infra.cli.cli_delegate"
+
+    def _dispatch(
+        self,
+        tmp_path: Path,
+        monkeypatch: pytest.MonkeyPatch,
+        **bus_kwargs: object,
+    ) -> int:
+        """Run ``run_delegate`` with the real bus wiring and a stubbed dispatch."""
+        monkeypatch.setattr(
+            cli_delegate,
+            "_resolve_packaged_contract",
+            lambda _name: tmp_path / "contract.yaml",
+        )
+        monkeypatch.setattr(cli_delegate, "run_receipt_mode", lambda **_kwargs: 0)
+        return run_delegate(
+            prompt="research the routing architecture",
+            task_type=None,
+            max_tokens=None,
+            state_root=tmp_path / "state",
+            timeout=60,
+            verbose=False,
+            emit_socket=tmp_path / "no-daemon.sock",
+            **bus_kwargs,  # type: ignore[arg-type]
+        )
+
+    @staticmethod
+    def _override_records(caplog: pytest.LogCaptureFixture) -> list[str]:
+        return [r.getMessage() for r in caplog.records if "OVERRIDE" in r.getMessage()]
+
+    def test_explicit_bus_logs_itself_as_an_override(
+        self,
+        tmp_path: Path,
+        monkeypatch: pytest.MonkeyPatch,
+        caplog: pytest.LogCaptureFixture,
+    ) -> None:
+        # An explicit --bus bypasses resolution entirely (tier 1). Say so.
+        with caplog.at_level(logging.INFO, logger=self._CLI_LOGGER):
+            assert self._dispatch(tmp_path, monkeypatch, bus="inmemory") == 0
+
+        overrides = self._override_records(caplog)
+        assert overrides, (
+            "an explicit --bus produced no OVERRIDE provenance line; the "
+            "receipt cannot distinguish a resolved transport from a typed one"
+        )
+        assert any("--bus" in msg and "inmemory" in msg for msg in overrides)
+
+    def test_explicit_kafka_bootstrap_logs_itself_as_an_override(
+        self,
+        tmp_path: Path,
+        monkeypatch: pytest.MonkeyPatch,
+        caplog: pytest.LogCaptureFixture,
+    ) -> None:
+        # The broker address is a second, independent override: --bus names the
+        # transport, --kafka-bootstrap names the endpoint. Both are typed, so
+        # both must be attributable in the capture.
+        with caplog.at_level(logging.INFO, logger=self._CLI_LOGGER):
+            assert (
+                self._dispatch(
+                    tmp_path,
+                    monkeypatch,
+                    bus="kafka",
+                    kafka_bootstrap=KAFKA_BOOTSTRAP_ARG,
+                )
+                == 0
+            )
+
+        overrides = self._override_records(caplog)
+        assert any(
+            "--kafka-bootstrap" in msg and KAFKA_BOOTSTRAP_ARG in msg
+            for msg in overrides
+        ), (
+            "an explicit --kafka-bootstrap produced no OVERRIDE provenance "
+            f"line; captured override records: {overrides}"
+        )
+
+    def test_auto_resolved_bus_is_not_labelled_an_override(
+        self,
+        tmp_path: Path,
+        monkeypatch: pytest.MonkeyPatch,
+        caplog: pytest.LogCaptureFixture,
+    ) -> None:
+        # The counter-assertion that keeps the label meaningful: when no flag
+        # is typed the transport IS resolved, so nothing may claim to be an
+        # override. Without this, labelling every run "override" would pass
+        # the two tests above while carrying no information.
+        monkeypatch.delenv("KAFKA_BOOTSTRAP_SERVERS", raising=False)
+        monkeypatch.delenv(BUS_TYPE_OVERRIDE_ENV, raising=False)
+
+        with caplog.at_level(logging.INFO, logger=self._CLI_LOGGER):
+            assert self._dispatch(tmp_path, monkeypatch) == 0
+
+        assert not self._override_records(caplog)
+        # ...and the resolution itself is still announced, so the run is not
+        # simply silent about where its transport came from.
+        assert any("inmemory" in r.getMessage() for r in caplog.records), (
+            "an auto-resolved run logged no transport provenance at all"
+        )
+
+    def test_override_provenance_never_reaches_stdout(
+        self,
+        tmp_path: Path,
+        monkeypatch: pytest.MonkeyPatch,
+        capsys: pytest.CaptureFixture[str],
+    ) -> None:
+        # stdout is reserved for exactly one ModelSkillResult JSON. Provenance
+        # is stderr/capture-only, like every other line in run_delegate.
+        assert (
+            self._dispatch(
+                tmp_path,
+                monkeypatch,
+                bus="kafka",
+                kafka_bootstrap=KAFKA_BOOTSTRAP_ARG,
+            )
+            == 0
+        )
+        assert capsys.readouterr().out == ""
