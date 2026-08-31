@@ -358,39 +358,105 @@ def _prove_no_authority_records_the_claim(
     before a single statement was issued, and the immutable log kept a DLQ
     record instead of a tenant-attributed fact.
 
-    Two things are proven here, and they are the whole ruling:
+    OMN-16976 resolves a contradiction this control encoded. Its previous
+    revision asserted the write is "still refused, by the DATABASE's own RLS
+    policy (``InsufficientPrivilege``)" and called that the correct end state.
+    But ``TenantProjectionTableOperation.upsert``'s own docstring, in the same
+    change, says the opposite -- "No authority bound: record exactly what the
+    producer recorded" -- and OMN-16976 AC3 requires an applied row. Both
+    cannot hold. On a FORCE-RLS relation written by a NOBYPASSRLS role, the
+    old assertion means NO tenant projection row is ever writable by any
+    production path, on any lane, until the signed-envelope authority chain is
+    built and ``bind_projection_tenant_authority`` gains its first non-test
+    call site. That is not isolation "at its real enforcement point"; it is the
+    projection layer being dead, which is the defect OMN-16976 was filed for
+    and which the .201 dev lane shows as 40 InsufficientPrivilege in 3h.
 
-    1. **The runtime no longer refuses.** The absence of an authorization
-       artifact is not an attribution failure, so the write is not stopped at
-       the runtime precondition -- the statement is actually issued. Falsified
-       by any ``ProjectionTenantContextError`` escaping this call.
-    2. **Isolation did not weaken -- it moved to its real enforcement point.**
-       The write is still refused, by the DATABASE's own RLS policy
-       (``InsufficientPrivilege``), exactly as :func:`_prove_real_rls_with_check`
-       proves for a raw unattributed ``INSERT``. Nothing is invented, defaulted
-       or substituted on the way there (OMN-16804 AC3).
+    The resolution: the write is SCOPED to the attribution it records, so the
+    row lands, and the database remains the enforcement point for everything
+    the claim does not cover. Three things are proven here:
 
-    The discriminator between the pre- and post-ruling worlds is therefore the
-    *class of the error*: the runtime's ``ProjectionTenantContextError`` before,
-    the database's ``InsufficientPrivilege`` after. Asserting the database error
-    is what makes this control falsifiable in both directions -- it fails if the
-    refusal moves back into the runtime, and it fails if isolation is dropped.
+    1. **The runtime does not refuse.** Falsified by any
+       ``ProjectionTenantContextError`` escaping this call.
+    2. **The row lands, attributed to exactly the recorded claim** -- not to a
+       substituted, defaulted or invented identity (OMN-16804 AC3). The
+       readback is taken as the admin, so it cannot be satisfied by the
+       writer's own scope.
+    3. **Isolation still bites at the database.** A row carrying NO tenant
+       opens no scope, so the relation's own ``WITH CHECK`` refuses it -- the
+       OMN-16831 ruling item 4 boundary (a tenant-less row is the PRODUCER's
+       obligation), enforced by Postgres rather than by a Python precondition.
+       Proven on a fresh connection AND on a reused one, because the SQLSTATE
+       differs between them (see the comment at that assertion) while the
+       refusal does not. :func:`_prove_real_rls_with_check` independently
+       proves the cross-tenant case still refuses on raw SQL.
+
+    Falsifiable in both directions: it fails if the refusal moves back into the
+    runtime, it fails if the row stops landing, it fails if the stored
+    attribution stops matching the claim, and it fails if a tenant-less row
+    becomes writable.
     """
     missing = _adapter(tenant_target)
     try:
-        error = _raises(
-            psycopg2.errors.InsufficientPrivilege,
+        correlation_id = uuid4()
+        assert missing.upsert(
+            TENANT_TABLE,
+            "correlation_id",
+            {
+                "correlation_id": correlation_id,
+                "task_type": "no-authority-claim",
+                "tenant_id": TENANT_A,
+            },
+        )
+        stored = _admin_rows(
+            "SELECT tenant_id FROM tenant.future_tenant_projection "
+            "WHERE correlation_id = %s",
+            (correlation_id,),
+        )
+        assert stored == [(TENANT_A,)], stored
+
+        # A tenant-less row opens no scope, so the database refuses it. On a
+        # connection that has never carried a scope, current_setting returns
+        # NULL and the refusal is the textbook InsufficientPrivilege.
+        fresh = _adapter(tenant_target)
+        try:
+            error = _raises(
+                psycopg2.errors.InsufficientPrivilege,
+                lambda: fresh.upsert(
+                    TENANT_TABLE,
+                    "correlation_id",
+                    {"correlation_id": uuid4(), "task_type": "no-tenant-fresh"},
+                ),
+            )
+            assert not isinstance(error, ProjectionTenantContextError)
+        finally:
+            fresh.close()
+
+        # Same refusal on a REUSED connection -- which is the runtime's normal
+        # case -- but the error class differs, and that is a PostgreSQL fact
+        # worth pinning rather than discovering in production. A custom GUC
+        # that has been set once does not revert to NULL when its transaction
+        # ends; it reverts to the empty string. So the policy's
+        # `current_setting('app.tenant_id', true)::uuid` evaluates ''::uuid and
+        # raises InvalidTextRepresentation (22P02) instead of returning NULL
+        # and failing the WITH CHECK (42501). Fail-closed either way -- the row
+        # is refused, nothing is written under a borrowed identity -- so what
+        # is asserted is the REFUSAL and its source, not one SQLSTATE. The
+        # discriminator that matters is unchanged: the database refused it, not
+        # the runtime.
+        reused = _raises(
+            psycopg2.Error,
             lambda: missing.upsert(
                 TENANT_TABLE,
                 "correlation_id",
-                {
-                    "correlation_id": uuid4(),
-                    "task_type": "no-authority-claim",
-                    "tenant_id": TENANT_A,
-                },
+                {"correlation_id": uuid4(), "task_type": "no-tenant-reused"},
             ),
         )
-        assert not isinstance(error, ProjectionTenantContextError)
+        assert not isinstance(reused, ProjectionTenantContextError)
+        assert _admin_rows(
+            "SELECT count(*) FROM tenant.future_tenant_projection "
+            "WHERE task_type IN ('no-tenant-fresh', 'no-tenant-reused')"
+        ) == [(0,)]
     finally:
         missing.close()
 
