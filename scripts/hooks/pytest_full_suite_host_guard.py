@@ -146,7 +146,7 @@ def designated_hostnames(
             if not line.strip():
                 continue
             fields = line.split("\t")
-            if len(fields) < 11 or fields[10] != "authorizing":
+            if len(fields) < 12 or fields[11] != "authorizing":
                 continue
             label, hostname = fields[0], fields[2]
             legacy = _LEGACY_OVERRIDE_BY_LABEL.get(label)

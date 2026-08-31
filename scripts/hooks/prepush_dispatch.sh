@@ -109,7 +109,7 @@ prepush_identity_label() {
   lc_host="$1"
   while IFS= read -r row; do
     [ -n "$row" ] || continue
-    [ "$(prepush_field "$row" 11)" = "authorizing" ] || continue
+    [ "$(prepush_field "$row" 12)" = "authorizing" ] || continue
     if [ "$(prepush_row_hostname "$row")" = "$lc_host" ]; then
       prepush_field "$row" 1
       return 0
@@ -125,7 +125,7 @@ prepush_designated_hostnames() {
   local row out=""
   while IFS= read -r row; do
     [ -n "$row" ] || continue
-    [ "$(prepush_field "$row" 11)" = "authorizing" ] || continue
+    [ "$(prepush_field "$row" 12)" = "authorizing" ] || continue
     out="${out}'$(prepush_row_hostname "$row")' "
   done <<EOF
 $(prepush_table_rows)
@@ -144,43 +144,66 @@ EOF
 # only signal that sees FOREIGN detached runs -- the ones .201's queue can
 # neither observe nor preempt (OMN-16968). A lock that only counts its own
 # holders reproduces that defect one host wider.
+#
+# SLOT-AWARE (OMN-17269): a row with `slots=N` gets N independently lockable
+# candidates -- slot 1 at the pre-existing bare `<workroot>/LOCK` (unchanged
+# path, so every slots=1 row is byte-identical to before) and slot k>=2 at
+# `<workroot>/LOCK.<k>`. `held` is the COUNT of currently-held lock dirs across
+# EVERY slot on the row, read fresh on each probe. The generalized busy check
+# is `heavy_pids <= self + held`: on a slots=1 row `held` degenerates to `l`
+# itself, reproducing the pre-OMN-17269 `p <= self` check exactly. On a
+# multi-slot row it lets a legitimately-held OTHER slot explain its own
+# process without flagging an untracked foreign process as fit -- if more
+# heavy pids are running than held locks explain, that is an untracked
+# process this table cannot account for, and the probe stays fail-closed.
 _PREPUSH_SLOT_PROBE_SH='q=0
 if [ -r "$HOME/push-lanes/QUEUE" ]; then q=$(grep -c . "$HOME/push-lanes/QUEUE" 2>/dev/null || echo 0); fi
 p=$(ps ax 2>/dev/null | grep prepush_smart_tests.sh | grep -v grep | grep -c . || true)
 [ -n "$p" ] || p=0
+si="${PREPUSH_SLOT_INDEX:-1}"
+lockdir="$PREPUSH_WORKROOT/LOCK"
+[ "$si" = "1" ] || lockdir="$PREPUSH_WORKROOT/LOCK.$si"
 l=0
-if [ -n "$PREPUSH_WORKROOT" ] && [ -d "$PREPUSH_WORKROOT/LOCK" ]; then l=1; fi
-printf "%s %s %s\n" "$q" "$p" "$l"'
+if [ -n "$PREPUSH_WORKROOT" ] && [ -d "$lockdir" ]; then l=1; fi
+held=0
+if [ -n "$PREPUSH_WORKROOT" ]; then
+  held=$(ls -d "$PREPUSH_WORKROOT"/LOCK "$PREPUSH_WORKROOT"/LOCK.* 2>/dev/null | grep -c . || true)
+  [ -n "$held" ] || held=0
+fi
+printf "%s %s %s %s\n" "$q" "$p" "$l" "$held"'
 
-# prepush_slot_state TARGET WORKROOT SELF_PIDS -- SELF_PIDS is how many
-# prepush_smart_tests.sh processes are expected to be OUR OWN on that host
-# (1 when probing the local host -- this very hook -- else 0).
+# prepush_slot_state TARGET WORKROOT SELF_PIDS [SLOT_INDEX] -- SELF_PIDS is how
+# many prepush_smart_tests.sh processes are expected to be OUR OWN on that host
+# (1 when probing the local host -- this very hook -- else 0). SLOT_INDEX
+# defaults to 1 (OMN-17269), which reproduces the pre-OMN-17269 bare-LOCK
+# behavior exactly; a caller probing slot k>=2 of a multi-slot row passes it
+# explicitly.
 prepush_slot_state() {
-  local target workroot self raw q p l tcmd
-  target="$1"; workroot="$2"; self="$3"
+  local target workroot self slot raw q p l held tcmd
+  target="$1"; workroot="$2"; self="$3"; slot="${4:-1}"
   if [ -n "${PREPUSH_SLOT_OVERRIDE:-}" ]; then
     raw="$PREPUSH_SLOT_OVERRIDE"
   elif [ -z "$target" ]; then
-    raw="$(PREPUSH_WORKROOT="$workroot" sh -c "$_PREPUSH_SLOT_PROBE_SH" 2> /dev/null)" || return 2
+    raw="$(PREPUSH_WORKROOT="$workroot" PREPUSH_SLOT_INDEX="$slot" sh -c "$_PREPUSH_SLOT_PROBE_SH" 2> /dev/null)" || return 2
   else
     tcmd="$(_prepush_timeout_cmd)"
     if [ -n "$tcmd" ]; then
       raw="$("$tcmd" 12 ssh -n -o ConnectTimeout=4 -o BatchMode=yes -o StrictHostKeyChecking=accept-new \
-        "$target" "PREPUSH_WORKROOT='${workroot}'; $_PREPUSH_SLOT_PROBE_SH" 2> /dev/null)" || return 2
+        "$target" "PREPUSH_WORKROOT='${workroot}'; PREPUSH_SLOT_INDEX='${slot}'; $_PREPUSH_SLOT_PROBE_SH" 2> /dev/null)" || return 2
     else
       raw="$(ssh -n -o ConnectTimeout=4 -o BatchMode=yes -o StrictHostKeyChecking=accept-new \
-        "$target" "PREPUSH_WORKROOT='${workroot}'; $_PREPUSH_SLOT_PROBE_SH" 2> /dev/null)" || return 2
+        "$target" "PREPUSH_WORKROOT='${workroot}'; PREPUSH_SLOT_INDEX='${slot}'; $_PREPUSH_SLOT_PROBE_SH" 2> /dev/null)" || return 2
     fi
   fi
   [ -n "$raw" ] || return 2
   # shellcheck disable=SC2086
   set -- $raw
-  q="${1:-}"; p="${2:-}"; l="${3:-}"
+  q="${1:-}"; p="${2:-}"; l="${3:-}"; held="${4:-0}"
   [ -n "$q" ] && [ -n "$p" ] && [ -n "$l" ] || return 2
-  PREPUSH_SLOT_DETAIL="queue=${q} heavy_pids=${p} lock=${l}"
+  PREPUSH_SLOT_DETAIL="queue=${q} heavy_pids=${p} lock=${l} held=${held} slot=${slot}"
   [ "$l" -eq 0 ] || return 3
   [ "$q" -eq 0 ] || return 3
-  [ "$p" -le "$self" ] || return 3
+  [ "$p" -le "$((self + held))" ] || return 3
   return 0
 }
 
@@ -353,7 +376,10 @@ prepush_probe_ratio() {
   host_load_ratio "$2" | awk '{print $3}'
 }
 
-# prepush_probe_slot LABEL TARGET WORKROOT SELF -- 0 free / 2 unknown / 3 busy.
+# prepush_probe_slot LABEL TARGET WORKROOT SELF [SLOT_INDEX] -- 0 free /
+# 2 unknown / 3 busy. LABEL is the slot-suffixed candidate label ("h105" for
+# slot 1, "h105.2" for slot 2, ...), which is also the override-map key, so a
+# test can drive each slot of a multi-slot row independently.
 prepush_probe_slot() {
   local v
   if [ -n "${PREPUSH_SLOT_OVERRIDE_MAP:-}" ]; then
@@ -364,7 +390,7 @@ prepush_probe_slot() {
       *) PREPUSH_SLOT_DETAIL="override=unknown"; return 2 ;;
     esac
   fi
-  prepush_slot_state "$2" "$3" "$4"
+  prepush_slot_state "$2" "$3" "$4" "$5"
 }
 
 # prepush_probe_uv LABEL TARGET UV FLOOR -- 0 ok / 1 below floor / 2 unreadable.
@@ -438,6 +464,8 @@ prepush_select_candidate() {
   PREPUSH_PICK_WORKROOT="$(printf '%s' "$rec" | cut -d'|' -f6)"
   PREPUSH_PICK_SLOTMODE="$(printf '%s' "$rec" | cut -d'|' -f7)"
   PREPUSH_PICK_MODE="$(printf '%s' "$rec" | cut -d'|' -f8)"
+  PREPUSH_PICK_SLOT="$(printf '%s' "$rec" | cut -d'|' -f9)"
+  [ -n "$PREPUSH_PICK_SLOT" ] || PREPUSH_PICK_SLOT=1
   return 0
 }
 
@@ -464,7 +492,7 @@ prepush_select_candidate() {
 # it is a tiebreaker, not the placement key.
 pick_capacity_host() {
   local lc_host repo want_mode row label role name ssh_t uv floor workroot slotmode denied mode
-  local self ratio rc recs=""
+  local self ratio rc recs="" slots k slot_label
   lc_host="$1"; repo="$2"; want_mode="${3:-authorizing}"
   PREPUSH_PROBE_LOG=""
   PREPUSH_PICK_LABEL=""
@@ -477,7 +505,7 @@ pick_capacity_host() {
     [ -n "$row" ] || continue
     label="$(prepush_field "$row" 1)"
     role="$(prepush_field "$row" 2)"
-    mode="$(prepush_field "$row" 11)"
+    mode="$(prepush_field "$row" 12)"
     [ "$role" = "capacity" ] || continue
     if [ "$mode" = "disabled" ]; then
       PREPUSH_PROBE_LOG="${PREPUSH_PROBE_LOG}${label}=disabled "
@@ -487,7 +515,7 @@ pick_capacity_host() {
       PREPUSH_PROBE_LOG="${PREPUSH_PROBE_LOG}${label}=mode-${mode}-not-eligible "
       continue
     fi
-    denied="$(prepush_field "$row" 10)"
+    denied="$(prepush_field "$row" 11)"
     case ",${denied}," in
       *",${repo},"*)
         PREPUSH_PROBE_LOG="${PREPUSH_PROBE_LOG}${label}=repo-denied "
@@ -500,6 +528,9 @@ pick_capacity_host() {
     floor="$(prepush_field "$row" 7)"
     workroot="$(prepush_field "$row" 8)"
     slotmode="$(prepush_field "$row" 9)"
+    slots="$(prepush_field "$row" 10)"
+    case "$slots" in '' | *[!0-9]*) slots=1 ;; esac
+    [ "$slots" -ge 1 ] 2> /dev/null || slots=1
     self=0
     if [ "$name" = "$lc_host" ]; then
       # This host: probe it directly, and expect to see OUR OWN hook process.
@@ -507,39 +538,59 @@ pick_capacity_host() {
       self=1
     fi
 
-    rc=0
-    prepush_probe_slot "$label" "$ssh_t" "$workroot" "$self" || rc=$?
-    case "$rc" in
-      3)
-        PREPUSH_PROBE_LOG="${PREPUSH_PROBE_LOG}${label}=busy(${PREPUSH_SLOT_DETAIL:-}) "
+    # SLOT-AWARE (OMN-17269): a row with slots=N is N independently placeable
+    # candidates. Slot 1 keeps the bare LABEL (byte-identical placement to
+    # every pre-OMN-17269 row, all of which have slots=1); slot k>=2 is
+    # LABEL.k, its own override-map key and its own PROBE_LOG entry. Each
+    # slot is probed and load-checked FRESH -- a second slot is never assumed
+    # fit merely because the row has capacity on paper; it must clear the
+    # same live busy/load/uv checks slot 1 does, GIVEN whatever slots on this
+    # row are already held.
+    k=1
+    while [ "$k" -le "$slots" ]; do
+      slot_label="$label"
+      [ "$k" = "1" ] || slot_label="${label}.${k}"
+
+      rc=0
+      prepush_probe_slot "$slot_label" "$ssh_t" "$workroot" "$self" "$k" || rc=$?
+      case "$rc" in
+        3)
+          PREPUSH_PROBE_LOG="${PREPUSH_PROBE_LOG}${slot_label}=busy(${PREPUSH_SLOT_DETAIL:-}) "
+          k=$((k + 1))
+          continue
+          ;;
+        2)
+          PREPUSH_PROBE_LOG="${PREPUSH_PROBE_LOG}${slot_label}=slot-unknown "
+          k=$((k + 1))
+          continue
+          ;;
+      esac
+
+      ratio="$(prepush_probe_ratio "$slot_label" "$ssh_t")" || ratio=""
+      if [ -z "$ratio" ]; then
+        PREPUSH_PROBE_LOG="${PREPUSH_PROBE_LOG}${slot_label}=unreachable "
+        k=$((k + 1))
         continue
-        ;;
-      2)
-        PREPUSH_PROBE_LOG="${PREPUSH_PROBE_LOG}${label}=slot-unknown "
+      fi
+      if ! awk -v r="$ratio" -v thr="$PREPUSH_LOAD_THRESHOLD" 'BEGIN { exit !(r <= thr + 0) }'; then
+        PREPUSH_PROBE_LOG="${PREPUSH_PROBE_LOG}${slot_label}=over(${ratio}) "
+        k=$((k + 1))
         continue
-        ;;
-    esac
+      fi
 
-    ratio="$(prepush_probe_ratio "$label" "$ssh_t")" || ratio=""
-    if [ -z "$ratio" ]; then
-      PREPUSH_PROBE_LOG="${PREPUSH_PROBE_LOG}${label}=unreachable "
-      continue
-    fi
-    if ! awk -v r="$ratio" -v thr="$PREPUSH_LOAD_THRESHOLD" 'BEGIN { exit !(r <= thr + 0) }'; then
-      PREPUSH_PROBE_LOG="${PREPUSH_PROBE_LOG}${label}=over(${ratio}) "
-      continue
-    fi
+      rc=0
+      prepush_probe_uv "$slot_label" "$ssh_t" "$uv" "$floor" || rc=$?
+      if [ "$rc" -ne 0 ]; then
+        PREPUSH_PROBE_LOG="${PREPUSH_PROBE_LOG}${slot_label}=uv-unfit(${PREPUSH_UV_VERSION_SEEN:-unreadable}<${floor}) "
+        k=$((k + 1))
+        continue
+      fi
 
-    rc=0
-    prepush_probe_uv "$label" "$ssh_t" "$uv" "$floor" || rc=$?
-    if [ "$rc" -ne 0 ]; then
-      PREPUSH_PROBE_LOG="${PREPUSH_PROBE_LOG}${label}=uv-unfit(${PREPUSH_UV_VERSION_SEEN:-unreadable}<${floor}) "
-      continue
-    fi
-
-    PREPUSH_PROBE_LOG="${PREPUSH_PROBE_LOG}${label}=fit(${ratio},${mode}) "
-    recs="${recs}${ratio}|${label}|${name}|${ssh_t}|${uv}|${workroot}|${slotmode}|${mode}
+      PREPUSH_PROBE_LOG="${PREPUSH_PROBE_LOG}${slot_label}=fit(${ratio},${mode}) "
+      recs="${recs}${ratio}|${slot_label}|${name}|${ssh_t}|${uv}|${workroot}|${slotmode}|${mode}|${k}
 "
+      k=$((k + 1))
+    done
   done
   PREPUSH_PROBE_LOG="${PREPUSH_PROBE_LOG% }"
   [ -n "$recs" ] || return 1
@@ -787,7 +838,7 @@ prepush_remote_run() {
   local heavy_what repo head_sha runid workroot ssh_t uv label rundir
   local bundle argvfile runner localdir marker rc=0 argv_sha log_sha
   local m_exit m_head m_argv m_log m_collected started ended dur
-  local readback wrapper_exit base_ref base_sha
+  local readback wrapper_exit base_ref base_sha slot_idx
   heavy_what="$1"
   # Resolved by the hook before it ever reaches here; empty in a driver that
   # exercises the library alone, which the wrapper handles as "skip".
@@ -800,6 +851,7 @@ prepush_remote_run() {
   ssh_t="$PREPUSH_PICK_SSH"
   uv="$PREPUSH_PICK_UV"
   workroot="$PREPUSH_PICK_WORKROOT"
+  slot_idx="${PREPUSH_PICK_SLOT:-1}"
   [ -n "$ssh_t" ] || return 1
   runid="${repo}-$(printf '%s' "$head_sha" | cut -c1-12)-$$"
   rundir="${workroot}/runs/${runid}"
@@ -833,7 +885,7 @@ prepush_remote_run() {
 #!/usr/bin/env bash
 set -uo pipefail
 RUNDIR="$1"; UV="$2"; HEAD_SHA="$3"; ARGV_SHA="$4"; ORIGIN="$5"; WORKROOT="$6"
-BASE_REF="${7:-}"; BASE_SHA="${8:-}"
+BASE_REF="${7:-}"; BASE_SHA="${8:-}"; SLOT_INDEX="${9:-1}"
 cd "$RUNDIR" || exit 90
 # Re-arm BOTH guards explicitly. ssh forwards neither, so without this the
 # remote repo's own suite -- which subprocesses this very hook from
@@ -889,7 +941,15 @@ while IFS= read -r line; do [ -n "$line" ] && ARGV+=("$line"); done < "$RUNDIR/a
 # is written by THIS process on THIS host, so `kill -0` is a meaningful
 # liveness check here -- the machine name is still recorded and compared, so a
 # holder record from anywhere else is never reaped.
+#
+# SLOT-AWARE (OMN-17269): SLOT_INDEX names WHICH of the row's declared slots
+# this dispatch was ranked into. Slot 1 keeps the pre-existing bare LOCK path
+# (byte-identical for every host that only ever has slot 1), so this is a
+# no-op for every pre-OMN-17269 dispatch; slot k>=2 gets its own LOCK.<k>,
+# letting a second concurrent lane hold its own exclusive lock on the same
+# host without contending slot 1's.
 LOCKDIR="$WORKROOT/LOCK"
+[ "$SLOT_INDEX" = "1" ] || LOCKDIR="$WORKROOT/LOCK.$SLOT_INDEX"
 SELF_HOST="$(hostname -s 2> /dev/null || echo unknown)"
 mkdir -p "$WORKROOT" 2> /dev/null || true
 _lock_acquire() {
@@ -988,7 +1048,7 @@ REMOTE
   # runs, so the one fact this leg needs -- WHY the wrapper stopped -- would be
   # the fact that never gets written. Each step is checked explicitly instead.
   ssh -n -o ConnectTimeout=6 -o BatchMode=yes -o StrictHostKeyChecking=accept-new "$ssh_t" \
-    "cd '${rundir}' || exit 96; chmod +x prepush_smart_tests.sh || exit 97; ./prepush_smart_tests.sh '${rundir}' '${uv}' '${head_sha}' '${argv_sha}' '$(hostname -s 2> /dev/null || echo unknown):$$' '${workroot}' '${base_ref}' '${base_sha}'; rc=\$?; echo REMOTE_WRAPPER_EXIT=\$rc; echo \$rc > '${rundir}/WRAPPER_EXIT'; exit 0" 2>&1 |
+    "cd '${rundir}' || exit 96; chmod +x prepush_smart_tests.sh || exit 97; ./prepush_smart_tests.sh '${rundir}' '${uv}' '${head_sha}' '${argv_sha}' '$(hostname -s 2> /dev/null || echo unknown):$$' '${workroot}' '${base_ref}' '${base_sha}' '${slot_idx}'; rc=\$?; echo REMOTE_WRAPPER_EXIT=\$rc; echo \$rc > '${rundir}/WRAPPER_EXIT'; exit 0" 2>&1 |
     sed "s/^/[${label}] /" >&2 || true
 
   readback="$(ssh -n -o ConnectTimeout=6 -o BatchMode=yes "$ssh_t" \
@@ -1027,7 +1087,7 @@ REMOTE
   fi
   log_sha="$m_log"
 
-  prepush_emit_receipt "{\"ts\":\"$(date -u '+%Y-%m-%dT%H:%M:%SZ')\",\"repo\":\"$(prepush_json_escape "$repo")\",\"head_sha\":\"${head_sha}\",\"chosen_host\":\"$(prepush_json_escape "$PREPUSH_PICK_HOSTNAME")\",\"chosen_label\":\"${label}\",\"host_mode\":\"${PREPUSH_PICK_MODE}\",\"host_load_ratio\":\"${PREPUSH_PICK_RATIO}\",\"all_probed_ratios\":\"$(prepush_json_escape "$PREPUSH_PROBE_LOG")\",\"selection_paths\":\"$(prepush_json_escape "$(prepush_remote_argv | tr '\n' ' ')")\",\"pytest_exit\":${m_exit},\"collected\":${m_collected:-0},\"duration_s\":${dur},\"suite_log_sha256\":\"${log_sha}\"}"
+  prepush_emit_receipt "{\"ts\":\"$(date -u '+%Y-%m-%dT%H:%M:%SZ')\",\"repo\":\"$(prepush_json_escape "$repo")\",\"head_sha\":\"${head_sha}\",\"chosen_host\":\"$(prepush_json_escape "$PREPUSH_PICK_HOSTNAME")\",\"chosen_label\":\"${label}\",\"chosen_slot\":${slot_idx},\"host_mode\":\"${PREPUSH_PICK_MODE}\",\"host_load_ratio\":\"${PREPUSH_PICK_RATIO}\",\"all_probed_ratios\":\"$(prepush_json_escape "$PREPUSH_PROBE_LOG")\",\"selection_paths\":\"$(prepush_json_escape "$(prepush_remote_argv | tr '\n' ' ')")\",\"pytest_exit\":${m_exit},\"collected\":${m_collected:-0},\"duration_s\":${dur},\"suite_log_sha256\":\"${log_sha}\"}"
 
   if [ "$m_exit" -ne 0 ]; then
     # The refusal below tells the developer to read the failing output. The

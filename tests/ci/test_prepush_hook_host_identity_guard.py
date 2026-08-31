@@ -75,7 +75,7 @@ def de_designating_env() -> dict[str, str]:
         if not line.strip():
             continue
         fields = line.split("\t")
-        if len(fields) < 11 or fields[10] != "authorizing":
+        if len(fields) < 12 or fields[11] != "authorizing":
             continue
         label = "".join(c if c.isalnum() else "_" for c in fields[0].upper())
         env[f"PREPUSH_HOST_OVERRIDE_{label}"] = (

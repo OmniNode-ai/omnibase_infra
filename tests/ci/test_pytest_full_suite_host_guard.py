@@ -540,14 +540,14 @@ def test_direct_invocation_allowed_with_a_minted_grant(tmp_path: Path) -> None:
 
 _HOST_TABLE_HEADER = (
     "#label\trole\thostname\tssh_target\tcores\tuv_abs_path\tuv_min_version"
-    "\tworkroot\tslot_mode\trepos_denied\tmode\tnote\n"
+    "\tworkroot\tslot_mode\tslots\trepos_denied\tmode\tnote\n"
 )
 
 
 def _write_host_table(project: Path, hostname: str, mode: str) -> None:
     (project / "scripts" / "hooks" / "prepush_hosts.tsv").write_text(
         _HOST_TABLE_HEADER
-        + f"hx\tcapacity\t{hostname}\t-\t8\t/bin/uv\t0.1.0\t/tmp/w\tlockdir\t-\t{mode}\tsynthetic\n",
+        + f"hx\tcapacity\t{hostname}\t-\t8\t/bin/uv\t0.1.0\t/tmp/w\tlockdir\t1\t-\t{mode}\tsynthetic\n",
         encoding="utf-8",
     )
 
